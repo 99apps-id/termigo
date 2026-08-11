@@ -36,7 +36,7 @@ export function TerminalPane({ workspacePath, onStatus }: TerminalPaneProps) {
 		terminal.loadAddon(fit);
 		terminal.open(host.current);
 		fit.fit();
-		terminal.writeln('\x1b[1;36mBatikCode Lite terminal\x1b[0m — commands run in the active workspace.');
+		terminal.writeln('\x1b[1;36mTermigo terminal\x1b[0m — commands run in the active workspace.');
 		terminal.writeln('Open a folder, then type a command and press Enter.');
 
 		let input = '';

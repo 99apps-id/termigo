@@ -54,11 +54,11 @@ func TestRunCommandUsesWorkspace(t *testing.T) {
 	app := NewApp()
 	app.workspace = t.TempDir()
 
-	result, err := app.RunCommand("echo batikcode-lite")
+	result, err := app.RunCommand("echo termigo")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.ExitCode != 0 || !strings.Contains(result.Output, "batikcode-lite") {
+	if result.ExitCode != 0 || !strings.Contains(result.Output, "termigo") {
 		t.Fatalf("unexpected command result: %#v", result)
 	}
 }

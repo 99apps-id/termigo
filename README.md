@@ -1,7 +1,7 @@
-# BatikCode Lite
+# Termigo
 
-BatikCode Lite is a small, local-first AI workspace for Windows. It is built
-from scratch with Go and Wails rather than carrying the BatikCode IDE engine.
+Termigo is a small, local-first AI workspace for Windows. It is built from
+scratch with Go and Wails rather than carrying a large editor engine.
 The product goal is an installer below 20 MB while keeping the daily workflow
 in one window: folders, editing, commands, local preview, and coding-agent
 connections.
@@ -55,7 +55,7 @@ Build the compact production executable:
 wails build -clean -trimpath -ldflags '-s -w'
 ```
 
-The executable is written to `build/bin/batikcode-lite.exe`.
+The executable is written to `build/bin/termigo.exe`.
 
 ## Architecture
 

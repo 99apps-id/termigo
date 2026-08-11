@@ -17,7 +17,7 @@ func main() {
 
 	// Create application with options
 	err := wails.Run(&options.App{
-		Title:     "BatikCode Lite",
+		Title:     "Termigo",
 		Width:     1440,
 		Height:    900,
 		MinWidth:  1024,
