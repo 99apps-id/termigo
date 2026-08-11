@@ -4,97 +4,78 @@
   <img src="./termigo.png" alt="Termigo" width="640">
 </p>
 
-**A lightweight, terminal-first workspace for local AI-assisted development on Windows.**
+<p align="center">
+  <strong>A lightweight, terminal-first workspace for AI-assisted development.</strong>
+</p>
 
-Termigo keeps the daily coding loop in one compact native window: open a folder,
-edit files, run commands, preview local apps, and connect the coding tools already
-installed on your machine. It is built from scratch with Go and Wails—no bundled
-browser runtime and no heavyweight editor engine.
-
-> **Status: early foundation.** The workspace is usable today; persistent
-> terminals, AI sessions, accounts, and integrations are being built next.
+Termigo is a focused desktop workspace for developers who want the daily loop in
+one small window: terminals, files, code editing, local preview, coding agents,
+and a practical command-line companion. It is deliberately not a full IDE.
 
 Maintained by [99apps-id](https://github.com/99apps-id).
 
-## Why Termigo?
+> **Status: architecture transition.** This repository currently contains an
+> early Go/Wails prototype. The product is being re-based onto a Rust/Tauri
+> desktop shell, while Go becomes the companion CLI and local automation layer.
+> The new desktop implementation has not been migrated yet.
 
-Most development environments are either a terminal with too little context or a
-large editor with far more machinery than a focused coding session needs. Termigo
-aims for a middle ground: a fast, local-first workspace with just the essential
-surfaces and a clear route to capable coding agents.
+## Product direction
 
-- **Local-first:** folders and commands stay on the machine you selected.
-- **Compact:** the first stripped Windows binary is **11.29 MB**; the project
-  target is an installer below 20 MB.
-- **Bring your own tools:** detects installed coding CLIs without reading their
-  credentials.
-- **Security by design:** workspace path checks prevent reads and writes outside
-  the folder you opened; future agent actions will require explicit approval.
+Termigo is for developers who prefer a terminal-first workflow without giving
+up the few visual tools that genuinely save time.
 
-## Available today
+- **Terminal first** - persistent shell sessions, tabs, splits, and project-aware working directories.
+- **Small by design** - native OS webview and a target installer size below 20 MB.
+- **Local first** - folders, commands, keys, and project context stay on the machine.
+- **Agent ready** - use installed coding CLIs now; add managed providers, BYOK, local models, skills, and MCP progressively.
+- **Not an IDE clone** - no extension marketplace, debugger suite, or broad language-server platform as the core product.
 
-| Surface | What it does |
+## Planned experience
+
+| Surface | Purpose |
 | --- | --- |
-| **Workspace explorer** | Open a local folder and browse a capped, dependency-aware file tree. |
-| **Code editor** | Read, edit, and save supported text files using Monaco. |
-| **Interactive terminal** | Run a persistent, user-operated `cmd.exe` session in the active workspace. |
-| **Web preview** | Open a local development URL inside the application. |
-| **CLI discovery** | Detect Codex, Gemini, Antigravity, Ollama, Git, Go, Node.js, and Python by executable and version only. |
-| **Native Windows build** | Build a stripped executable using the system WebView2 runtime. |
+| **Terminal** | Multiple persistent shells, tabs, splits, search, and background output. |
+| **Workspace** | Open folders, a fast file tree, recent projects, and restored sessions. |
+| **Editor** | A compact code editor for reading, changing, and reviewing files near the terminal. |
+| **Preview** | An in-app browser for local development servers. |
+| **Agent** | A dedicated chat/composer that can invoke approved local tools and present edits for review. |
+| **Provider hub** | OAuth, API-key, local-model, and existing-CLI connections without forcing a single vendor. |
+| **Git** | Focused changed-files, diff, branch, commit, and history workflows. |
+| **Skills and MCP** | Project-scoped skills and explicit, permission-aware MCP integrations. |
 
-## Everyday workflow
+## Architecture
 
-1. Choose **Open Folder** (or `Ctrl+O`) and select the project directory.
-2. Open any text file from **Files** on the left. Save changes with `Ctrl+S`;
-   close the editor tab with its `×` button.
-3. Use **Terminal** (or `Ctrl+\``) for commands in that folder. The **Tools** menu
-   can launch a detected local CLI such as Codex or Gemini directly in this
-   terminal. Authentication and model selection stay with that CLI.
-4. Use **Preview** to load a local URL, such as `http://localhost:5173`.
-
-The explorer refresh button rereads the selected folder after a command creates
-or removes files. Terminal and preview panels can be hidden with `×` and opened
-again from the top bar. The top-right controls minimize, maximize, and close
-Termigo.
-
-## What is next?
-
-| Area | Direction |
-| --- | --- |
-| **Terminal** | Shell selection, tabs, and workspace restoration. |
-| **AI agents** | CLI-backed sessions with approval-gated file and command tools. |
-| **Models** | Provider accounts, OAuth, model selection, and local-model connections. |
-| **Extensibility** | Project skills and MCP integrations. |
-| **Developer workflow** | Git changes, commits, a production installer, and an enforced size budget. |
-
-## Privacy and safety
-
-- This foundation does not require or transmit an OpenAI API key or any cloud
-  provider key.
-- CLI discovery checks executable availability and version output; it does not
-  read tokens, API keys, or account data.
-- File operations reject paths outside the selected workspace.
-- Commands execute only after the user enters them in the command panel. AI
-  command execution will not be introduced without an approval gate.
-
-## Getting started
-
-### Prerequisites
-
-- Windows 10 or later with [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)
-- [Go](https://go.dev/) 1.26 or later
-- [Node.js](https://nodejs.org/) 24 or later
-- [Wails v2](https://wails.io/)
-
-### Run from source
-
-```powershell
-git clone https://github.com/99apps-id/termigo.git
-Set-Location termigo
-wails dev
+```text
+Termigo
+|
+|-- Desktop application
+|   |-- Rust + Tauri 2       native window, PTY, secure OS integrations
+|   `-- React + TypeScript   terminal, editor, explorer, preview, agent UI
+|
+`-- termigo CLI
+    `-- Go                  automation, local agent helpers, project commands
 ```
 
-### Verify
+Rust/Tauri is chosen for the desktop application because it provides a compact
+native shell and mature terminal/desktop primitives. Go remains a first-class
+part of Termigo, but belongs in the CLI and automation layer rather than being
+forced to reproduce the entire desktop surface.
+
+## Roadmap
+
+1. **Re-baseline** - establish the Rust/Tauri desktop shell, branding, updater strategy, size budget, and Windows build pipeline.
+2. **Daily workspace** - add durable workspace sessions, multi-tab/split terminals, explorer, editor, preview, and Git basics.
+3. **Agent workflow** - add a provider hub, model selection, BYOK/OAuth, local models, approvals, diffs, and task history.
+4. **Extensibility** - add project skills, MCP, and the Go `termigo` CLI.
+5. **Polish** - improve startup, accessibility, settings, recovery, installers, and cross-platform support.
+
+## Current prototype
+
+The existing Go/Wails experiment can open a folder, edit text files, run a
+Windows terminal, display a local preview, and detect installed CLIs. It is a
+temporary proof of direction, not the intended long-term desktop architecture.
+
+For maintenance of the current prototype:
 
 ```powershell
 go vet ./...
@@ -103,44 +84,28 @@ Set-Location frontend
 npm run build
 ```
 
-### Build a compact executable
+## Privacy and safety
 
-```powershell
-wails build -clean -trimpath -ldflags '-s -w'
-```
+- Local project files must remain within the selected workspace boundary.
+- Secrets should be stored only in the operating-system keychain or entered by
+  the user; Termigo must never commit or log them.
+- Agent file changes and commands require clear review and approval controls.
+- Telemetry is opt-in. The default product direction is private and local-first.
 
-The result is written to `build/bin/termigo.exe`.
+## Upstream and attribution
 
-## Architecture
-
-```text
-Termigo
-├── Go + Wails       native window, workspace boundary, commands, CLI discovery
-└── React + TypeScript
-    ├── Explorer     local workspace tree
-    ├── Monaco       code editing
-    ├── xterm.js     interactive ConPTY terminal surface
-    └── Preview      local web application view
-```
-
-## Project structure
-
-```text
-app.go          Go services for workspace files, commands, and CLI discovery
-app_test.go     workspace-boundary and command tests
-frontend/       React interface, Monaco editor, terminal, and preview surfaces
-main.go         native desktop entry point
-wails.json      Windows application configuration
-```
+Termigo takes product inspiration from the terminal-first workspace category.
+No TEDI source code is currently included in this repository. If a future
+Termigo component is forked from Apache-2.0 upstream code, its license, notices,
+copyright statements, and required attribution will be preserved in that change.
 
 ## Contributing
 
-Termigo is in its early stage. Bug reports, focused feature proposals, and small
-pull requests are welcome. Before opening a pull request, please run the checks
-in [Verify](#verify) and keep changes aligned with the local-first, small-binary
-goal.
+The Rust/Tauri migration is the priority. Please keep proposals small, focused,
+and aligned with the terminal-first and local-first principles. Do not add broad
+IDE features without a clear user workflow and a size/performance justification.
 
 ## License
 
-License selection is pending. Do not assume this project may be redistributed
-until a license is added.
+License selection is pending. Until a license is added, do not assume this
+repository may be redistributed.
