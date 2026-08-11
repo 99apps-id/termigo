@@ -1,4 +1,4 @@
-import type { CLIStatus, CommandResult, FileDocument, Workspace } from './types';
+import type { CLIStatus, FileDocument, TerminalSessionInfo, Workspace } from './types';
 
 declare global {
 	interface Window {
@@ -9,7 +9,10 @@ declare global {
 					CurrentWorkspace(): Promise<Workspace>;
 					ReadTextFile(path: string): Promise<FileDocument>;
 					SaveTextFile(path: string, contents: string): Promise<void>;
-					RunCommand(command: string): Promise<CommandResult>;
+					StartTerminal(columns: number, rows: number): Promise<TerminalSessionInfo>;
+					WriteTerminal(sessionID: string, data: string): Promise<void>;
+					ResizeTerminal(sessionID: string, columns: number, rows: number): Promise<void>;
+					StopTerminal(sessionID: string): Promise<void>;
 					DetectCLIs(): Promise<CLIStatus[]>;
 				};
 			};

@@ -37,7 +37,7 @@ surfaces and a clear route to capable coding agents.
 | --- | --- |
 | **Workspace explorer** | Open a local folder and browse a capped, dependency-aware file tree. |
 | **Code editor** | Read, edit, and save supported text files using Monaco. |
-| **Command panel** | Run a visible, user-entered `cmd.exe` command in the active workspace. |
+| **Interactive terminal** | Run a persistent, user-operated `cmd.exe` session in the active workspace. |
 | **Web preview** | Open a local development URL inside the application. |
 | **CLI discovery** | Detect Codex, Gemini, Antigravity, Ollama, Git, Go, Node.js, and Python by executable and version only. |
 | **Native Windows build** | Build a stripped executable using the system WebView2 runtime. |
@@ -46,7 +46,7 @@ surfaces and a clear route to capable coding agents.
 
 | Area | Direction |
 | --- | --- |
-| **Terminal** | Persistent interactive ConPTY sessions, shell selection, and workspace restoration. |
+| **Terminal** | Shell selection, tabs, and workspace restoration. |
 | **AI agents** | CLI-backed sessions with approval-gated file and command tools. |
 | **Models** | Provider accounts, OAuth, model selection, and local-model connections. |
 | **Extensibility** | Project skills and MCP integrations. |
@@ -104,7 +104,7 @@ Termigo
 └── React + TypeScript
     ├── Explorer     local workspace tree
     ├── Monaco       code editing
-    ├── xterm.js     command surface (interactive PTY planned)
+    ├── xterm.js     interactive ConPTY terminal surface
     └── Preview      local web application view
 ```
 

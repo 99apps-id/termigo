@@ -16,9 +16,17 @@ export interface FileDocument {
 	language: string;
 }
 
-export interface CommandResult {
-	command: string;
-	output: string;
+export interface TerminalSessionInfo {
+	id: string;
+}
+
+export interface TerminalOutput {
+	sessionId: string;
+	data: string;
+}
+
+export interface TerminalExit {
+	sessionId: string;
 	exitCode: number;
 }
 

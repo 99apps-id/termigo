@@ -25,9 +25,12 @@ var ignoredDirectories = map[string]bool{
 
 // App owns the local-only services exposed to the desktop interface.
 type App struct {
-	ctx       context.Context
-	mu        sync.RWMutex
-	workspace string
+	ctx              context.Context
+	mu               sync.RWMutex
+	workspace        string
+	terminalMu       sync.Mutex
+	terminal         *terminalSession
+	terminalSequence uint64
 }
 
 type FileNode struct {
@@ -48,12 +51,6 @@ type FileDocument struct {
 	Language string `json:"language"`
 }
 
-type CommandResult struct {
-	Command  string `json:"command"`
-	Output   string `json:"output"`
-	ExitCode int    `json:"exitCode"`
-}
-
 type CLIStatus struct {
 	ID        string `json:"id"`
 	Label     string `json:"label"`
@@ -69,6 +66,10 @@ func NewApp() *App {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+}
+
+func (a *App) shutdown(context.Context) {
+	a.stopTerminal("")
 }
 
 // OpenWorkspace asks the operating system for a project directory.
@@ -88,6 +89,7 @@ func (a *App) OpenWorkspace() (Workspace, error) {
 		return Workspace{}, err
 	}
 
+	a.stopTerminal("")
 	a.mu.Lock()
 	a.workspace = path
 	a.mu.Unlock()
@@ -130,38 +132,6 @@ func (a *App) SaveTextFile(path, contents string) error {
 		return err
 	}
 	return os.WriteFile(path, []byte(contents), 0o644)
-}
-
-// RunCommand runs a command in the active workspace. It is intentionally a
-// visible, user-triggered command runner; autonomous command execution will
-// require a separate approval layer.
-func (a *App) RunCommand(command string) (CommandResult, error) {
-	command = strings.TrimSpace(command)
-	if command == "" {
-		return CommandResult{}, errors.New("enter a command to run")
-	}
-
-	workspace := a.workspacePath()
-	if workspace == "" {
-		return CommandResult{}, errors.New("open a workspace before running commands")
-	}
-
-	cmd := exec.Command("cmd.exe", "/C", command)
-	cmd.Dir = workspace
-	var output bytes.Buffer
-	cmd.Stdout = &output
-	cmd.Stderr = &output
-	err := cmd.Run()
-
-	result := CommandResult{Command: command, Output: output.String()}
-	if exitError, ok := err.(*exec.ExitError); ok {
-		result.ExitCode = exitError.ExitCode()
-		return result, nil
-	}
-	if err != nil {
-		return result, err
-	}
-	return result, nil
 }
 
 // DetectCLIs reports locally available AI and development CLIs without reading

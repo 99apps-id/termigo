@@ -130,7 +130,10 @@ function App() {
 							<button className={bottomPanel === 'terminal' ? 'panel-tab active' : 'panel-tab'} onClick={() => setBottomPanel('terminal')}>Terminal</button>
 							<button className={bottomPanel === 'preview' ? 'panel-tab active' : 'panel-tab'} onClick={() => setBottomPanel('preview')}>Preview</button>
 						</div>
-						{bottomPanel === 'terminal' ? <TerminalPane workspacePath={workspace.path} onStatus={setStatus} /> : <Preview value={previewURL} onChange={setPreviewURL} />}
+						<div className="panel-content">
+							<div className={bottomPanel === 'terminal' ? 'panel-view active' : 'panel-view'}><TerminalPane workspacePath={workspace.path} active={bottomPanel === 'terminal'} onStatus={setStatus} /></div>
+							<div className={bottomPanel === 'preview' ? 'panel-view preview-view active' : 'panel-view preview-view'}><Preview value={previewURL} onChange={setPreviewURL} /></div>
+						</div>
 					</section>
 				</main>
 

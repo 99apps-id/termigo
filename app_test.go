@@ -3,7 +3,6 @@ package main
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -50,15 +49,14 @@ func TestLanguageForPath(t *testing.T) {
 	}
 }
 
-func TestRunCommandUsesWorkspace(t *testing.T) {
-	app := NewApp()
-	app.workspace = t.TempDir()
-
-	result, err := app.RunCommand("echo termigo")
-	if err != nil {
-		t.Fatal(err)
+func TestTerminalDimensions(t *testing.T) {
+	if err := validateTerminalDimensions(120, 32); err != nil {
+		t.Fatalf("expected a common terminal size to be accepted: %v", err)
 	}
-	if result.ExitCode != 0 || !strings.Contains(result.Output, "termigo") {
-		t.Fatalf("unexpected command result: %#v", result)
+	if err := validateTerminalDimensions(1, 32); err == nil {
+		t.Fatal("expected an invalid terminal width to be rejected")
+	}
+	if err := validateTerminalDimensions(120, 501); err == nil {
+		t.Fatal("expected an oversized terminal height to be rejected")
 	}
 }
