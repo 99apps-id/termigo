@@ -10,6 +10,8 @@ browser runtime and no heavyweight editor engine.
 > **Status: early foundation.** The workspace is usable today; persistent
 > terminals, AI sessions, accounts, and integrations are being built next.
 
+Maintained by [99apps-id](https://github.com/99apps-id).
+
 ## Why Termigo?
 
 Most development environments are either a terminal with too little context or a
