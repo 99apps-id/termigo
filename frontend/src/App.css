@@ -27,7 +27,7 @@ button { color: inherit; }
 .button:disabled { cursor: default; color: #68738c; background: transparent; }
 kbd { font-size: 10px; opacity: .65; margin-left: 4px; }
 
-.workspace-shell { display: grid; grid-template-columns: 235px minmax(400px, 1fr) 245px; min-height: 0; }
+.workspace-shell { display: grid; grid-template-columns: 235px minmax(400px, 1fr) 245px; height: 100%; min-height: 0; overflow: hidden; }
 .sidebar { min-height: 0; background: #121724; overflow: auto; }
 .explorer { border-right: 1px solid #252b3d; }
 .providers { border-left: 1px solid #252b3d; }
@@ -40,8 +40,8 @@ kbd { font-size: 10px; opacity: .65; margin-left: 4px; }
 .directory { color: #d8e0f5; font-weight: 600; }.file { color: #9faec8; }.file-spacer { width: 9px; }
 .empty-explorer { padding: 18px 14px; color: #7f8ba5; font-size: 12px; }.text-button { padding: 0; background: transparent; color: #8eb4ff; font-size: 12px; }
 
-.main-area { display: grid; grid-template-rows: minmax(260px, 1fr) minmax(190px, .42fr); min-height: 0; background: #0d111b; }
-.editor-panel, .bottom-panel { min-height: 0; display: flex; flex-direction: column; }.editor-panel { border-bottom: 1px solid #252b3d; }
+.main-area { display: grid; grid-template-rows: minmax(0, 1fr) 210px; height: 100%; min-height: 0; overflow: hidden; background: #0d111b; }
+.editor-panel, .bottom-panel { min-height: 0; overflow: hidden; display: flex; flex-direction: column; }.editor-panel { border-bottom: 1px solid #252b3d; }
 .tab-strip, .panel-tabs { min-height: 34px; display: flex; align-items: center; background: #151a27; }
 .editor-tab { align-self: stretch; display: flex; align-items: center; gap: 7px; min-width: 150px; padding: 0 13px; border-right: 1px solid #252b3d; border-top: 2px solid #7195fc; color: #dce5fd; font-size: 12px; }.editor-tab.muted { color: #77839e; border-top-color: transparent; }.file-dot { color: #8eb4ff; font-size: 9px; }
 .editor-surface { min-height: 0; flex: 1; }.loading { display: grid; place-items: center; height: 100%; color: #8f9ab2; }
