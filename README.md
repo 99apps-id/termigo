@@ -1,5 +1,9 @@
 # Termigo
 
+<p align="center">
+  <img src="./termigo.png" alt="Termigo" width="640">
+</p>
+
 **A lightweight, terminal-first workspace for local AI-assisted development on Windows.**
 
 Termigo keeps the daily coding loop in one compact native window: open a folder,

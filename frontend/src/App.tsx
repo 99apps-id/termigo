@@ -1,4 +1,5 @@
 import { KeyboardEvent, Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
+import termigoMark from './assets/images/termigo-mark.png';
 import './App.css';
 import { TerminalPane } from './components/TerminalPane';
 import type { CLIStatus, FileDocument, FileNode, Workspace } from './types';
@@ -88,7 +89,7 @@ function App() {
 	return (
 		<div className="app-shell">
 			<header className="topbar">
-				<div className="brand"><span className="brand-mark">T</span><span><strong>Termigo</strong></span></div>
+				<div className="brand"><img className="brand-mark" src={termigoMark} alt="" /><span><strong>Termigo</strong></span></div>
 				<div className="workspace-name">{workspace.path ? baseName(workspace.path) : 'No workspace open'}</div>
 				<div className="topbar-actions">
 					<button className="button ghost" onClick={() => void refreshProviders()}>Refresh CLIs</button>
@@ -165,7 +166,7 @@ function EmptyExplorer({ onOpen }: { onOpen: () => void }) {
 }
 
 function Welcome({ onOpen }: { onOpen: () => void }) {
-	return <div className="welcome"><div className="welcome-mark">T</div><h1>Build with a lighter workspace.</h1><p>Open a folder, edit locally, run commands, and connect an installed agent CLI.</p><button className="button primary" onClick={onOpen}>Open Folder</button><div className="welcome-grid"><span>Explorer</span><span>Monaco editor</span><span>Terminal</span><span>Local preview</span><span>CLI providers</span><span>Private by default</span></div></div>;
+	return <div className="welcome"><img className="welcome-mark" src={termigoMark} alt="Termigo" /><h1>Build with a lighter workspace.</h1><p>Open a folder, edit locally, run commands, and connect an installed agent CLI.</p><button className="button primary" onClick={onOpen}>Open Folder</button><div className="welcome-grid"><span>Explorer</span><span>Monaco editor</span><span>Terminal</span><span>Local preview</span><span>CLI providers</span><span>Private by default</span></div></div>;
 }
 
 function Preview({ value, onChange }: { value: string; onChange: (value: string) => void }) {
