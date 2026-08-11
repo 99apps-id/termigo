@@ -61,6 +61,24 @@ native shell and mature terminal/desktop primitives. Go remains a first-class
 part of Termigo, but belongs in the CLI and automation layer rather than being
 forced to reproduce the entire desktop surface.
 
+## CLI seed
+
+The first Go component is available now: `termigo doctor`. It is deliberately
+small and only checks executable availability and version output; it never reads
+provider credentials.
+
+```powershell
+Set-Location cli
+go run ./cmd/termigo help
+go run ./cmd/termigo doctor
+go run ./cmd/termigo doctor --json
+go build -trimpath -ldflags '-s -w' -o .\bin\termigo.exe .\cmd\termigo
+```
+
+`doctor` currently checks the desktop prerequisites (Rust, Cargo, Node.js, npm,
+and Git) and locally installed agent tools (Codex, Gemini, Antigravity, and
+Ollama). Future subcommands will handle workspace actions and local automation.
+
 ## Roadmap
 
 1. **Re-baseline** - establish the Rust/Tauri desktop shell, branding, updater strategy, size budget, and Windows build pipeline.
