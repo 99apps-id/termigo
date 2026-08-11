@@ -105,6 +105,13 @@ func (a *App) CurrentWorkspace() (Workspace, error) {
 	return a.workspaceTree()
 }
 
+// RefreshWorkspace rereads the active folder without prompting the user again.
+// It keeps the explorer in sync after files are added, renamed, or removed from
+// the terminal or another application.
+func (a *App) RefreshWorkspace() (Workspace, error) {
+	return a.CurrentWorkspace()
+}
+
 // ReadTextFile reads a UTF-8 source file inside the active workspace.
 func (a *App) ReadTextFile(path string) (FileDocument, error) {
 	if err := a.validateWorkspacePath(path); err != nil {

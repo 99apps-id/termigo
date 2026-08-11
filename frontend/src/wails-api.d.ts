@@ -7,6 +7,7 @@ declare global {
 				App: {
 					OpenWorkspace(): Promise<Workspace>;
 					CurrentWorkspace(): Promise<Workspace>;
+					RefreshWorkspace(): Promise<Workspace>;
 					ReadTextFile(path: string): Promise<FileDocument>;
 					SaveTextFile(path: string, contents: string): Promise<void>;
 					StartTerminal(columns: number, rows: number): Promise<TerminalSessionInfo>;

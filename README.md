@@ -42,6 +42,21 @@ surfaces and a clear route to capable coding agents.
 | **CLI discovery** | Detect Codex, Gemini, Antigravity, Ollama, Git, Go, Node.js, and Python by executable and version only. |
 | **Native Windows build** | Build a stripped executable using the system WebView2 runtime. |
 
+## Everyday workflow
+
+1. Choose **Open Folder** (or `Ctrl+O`) and select the project directory.
+2. Open any text file from **Files** on the left. Save changes with `Ctrl+S`;
+   close the editor tab with its `×` button.
+3. Use **Terminal** (or `Ctrl+\``) for commands in that folder. The **Tools** menu
+   can launch a detected local CLI such as Codex or Gemini directly in this
+   terminal. Authentication and model selection stay with that CLI.
+4. Use **Preview** to load a local URL, such as `http://localhost:5173`.
+
+The explorer refresh button rereads the selected folder after a command creates
+or removes files. Terminal and preview panels can be hidden with `×` and opened
+again from the top bar. The top-right controls minimize, maximize, and close
+Termigo.
+
 ## What is next?
 
 | Area | Direction |

@@ -11,13 +11,16 @@ const terminalExitEvent = 'termigo:terminal-exit';
 interface TerminalPaneProps {
 	workspacePath: string;
 	active: boolean;
+	command: string | null;
+	onCommandSent: () => void;
 	onStatus: (message: string) => void;
 }
 
-export function TerminalPane({ workspacePath, active, onStatus }: TerminalPaneProps) {
+export function TerminalPane({ workspacePath, active, command, onCommandSent, onStatus }: TerminalPaneProps) {
 	const host = useRef<HTMLDivElement>(null);
 	const terminalRef = useRef<Terminal | null>(null);
 	const fitRef = useRef<FitAddon | null>(null);
+	const sendInputRef = useRef<(data: string) => void>(() => undefined);
 	const statusRef = useRef(onStatus);
 
 	useEffect(() => {
@@ -59,6 +62,7 @@ export function TerminalPane({ workspacePath, active, onStatus }: TerminalPanePr
 					statusRef.current('Terminal input could not be sent.');
 				});
 		};
+		sendInputRef.current = sendInput;
 
 		const unsubscribeOutput = EventsOn(terminalOutputEvent, (event: TerminalOutput) => {
 			if (!sessionID || event.sessionId === sessionID) {
@@ -123,9 +127,22 @@ export function TerminalPane({ workspacePath, active, onStatus }: TerminalPanePr
 			}
 			terminalRef.current = null;
 			fitRef.current = null;
+			sendInputRef.current = () => undefined;
 			terminal.dispose();
 		};
 	}, [workspacePath]);
+
+	useEffect(() => {
+		if (!command) {
+			return;
+		}
+		const frame = requestAnimationFrame(() => {
+			sendInputRef.current(command);
+			terminalRef.current?.focus();
+			onCommandSent();
+		});
+		return () => cancelAnimationFrame(frame);
+	}, [command, onCommandSent]);
 
 	useEffect(() => {
 		if (!active || !terminalRef.current || !fitRef.current) {
