@@ -14,10 +14,11 @@ and a practical command-line companion. It is deliberately not a full IDE.
 
 Maintained by [99apps-id](https://github.com/99apps-id).
 
-> **Status: architecture transition.** This repository currently contains an
-> early Go/Wails prototype. The product is being re-based onto a Rust/Tauri
-> desktop shell, while Go becomes the companion CLI and local automation layer.
-> The new desktop implementation has not been migrated yet.
+> **Status: desktop alpha.** A Rust/Tauri desktop foundation is now available
+> under `desktop/`: it opens a workspace with the native folder picker, shows a
+> safe file tree, and reads and saves text files inside that selected workspace.
+> The earlier Go/Wails application remains as a legacy prototype while the new
+> desktop surfaces are migrated progressively.
 
 ## Product direction
 
@@ -78,6 +79,25 @@ go build -trimpath -ldflags '-s -w' -o .\bin\termigo.exe .\cmd\termigo
 `doctor` currently checks the desktop prerequisites (Rust, Cargo, Node.js, npm,
 and Git) and locally installed agent tools (Codex, Gemini, Antigravity, and
 Ollama). Future subcommands will handle workspace actions and local automation.
+
+## Desktop alpha
+
+The new desktop application is intentionally small at this stage: native
+window controls, **Open folder**, an expandable explorer, tabs, and a basic
+text editor with `Ctrl+O` / `Ctrl+S`. File access is checked again by the Rust
+backend, so an open workspace is the boundary for reading and saving files.
+
+```powershell
+Set-Location desktop
+npm install
+npm run tauri dev
+
+# Build the Windows application
+npm run tauri build
+```
+
+Terminal sessions, browser preview, provider connections, and agent chat are
+the next migration steps; they are not represented as working features yet.
 
 ## Roadmap
 

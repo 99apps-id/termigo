@@ -3,3 +3,7 @@ cli/bin
 frontend/dist
 frontend/node_modules
 frontend/wailsjs
+desktop/node_modules
+desktop/dist
+desktop/src-tauri/target
+.toolchain-install*/
