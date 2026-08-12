@@ -88,6 +88,10 @@ code editor with syntax highlighting and `Ctrl+O` / `Ctrl+S`, and a
 workspace-local Command Prompt panel. File access is checked again by the Rust
 backend, so an open workspace is the boundary for reading and saving files.
 
+The **Preview** tab is intentionally local-only: it accepts `localhost` and
+`127.0.0.1` HTTP(S) development servers, not arbitrary web URLs. Start the
+server from the terminal (for example `npm run dev`) and open the reported URL.
+
 ```powershell
 Set-Location desktop
 npm install

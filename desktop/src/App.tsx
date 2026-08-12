@@ -7,6 +7,7 @@ import type { FileDocument, FileNode, Workspace } from './types';
 const emptyWorkspace: Workspace = { path: '', tree: [] };
 const TerminalPane = lazy(() => import('./TerminalPane'));
 const CodeEditor = lazy(() => import('./CodeEditor'));
+const PreviewPane = lazy(() => import('./PreviewPane'));
 
 export default function App() {
   const [workspace, setWorkspace] = useState<Workspace>(emptyWorkspace);
@@ -14,6 +15,7 @@ export default function App() {
   const [contents, setContents] = useState('');
   const [dirty, setDirty] = useState(false);
   const [status, setStatus] = useState('Open a folder to start a workspace.');
+  const [surface, setSurface] = useState<'editor' | 'preview'>('editor');
 
   const openWorkspace = useCallback(async () => {
     if (dirty && !window.confirm('Discard unsaved changes and open another folder?')) return;
@@ -26,6 +28,7 @@ export default function App() {
       setDocument(null);
       setContents('');
       setDirty(false);
+      setSurface('editor');
       setStatus(`Opened ${next.path}`);
     } catch (error) {
       setStatus(`Could not open workspace: ${message(error)}`);
@@ -49,6 +52,7 @@ export default function App() {
       setDocument(next);
       setContents(next.contents);
       setDirty(false);
+      setSurface('editor');
       setStatus(next.path);
     } catch (error) {
       setStatus(`Could not open file: ${message(error)}`);
@@ -76,7 +80,7 @@ export default function App() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || (event.target instanceof Element && event.target.closest('.xterm'))) return;
+      if (event.defaultPrevented || event.target instanceof HTMLInputElement || (event.target instanceof Element && event.target.closest('.xterm'))) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'o') {
         event.preventDefault();
         void openWorkspace();
@@ -108,6 +112,7 @@ export default function App() {
       <div className="workspace-title" title={workspace.path}>{workspace.path ? baseName(workspace.path) : 'No folder open'}</div>
       <div className="topbar-actions">
         <button className="button ghost" onClick={() => void refreshWorkspace()} disabled={!workspace.path}>Refresh</button>
+        <button className="button ghost" onClick={() => setSurface('preview')}>Preview</button>
         <button className="button primary" onClick={() => void openWorkspace()}>Open Folder <kbd>Ctrl+O</kbd></button>
       </div>
     </header>
@@ -121,10 +126,11 @@ export default function App() {
       <section className="workspace-main">
         <main className="editor-panel">
           <div className="tabbar">
-            {document ? <div className="tab"><span>{dirty ? '●' : '○'}</span><span className="tab-name">{baseName(document.path)}</span><button title="Close editor tab" onClick={closeDocument}>×</button></div> : <div className="tab muted">Start here</div>}
-            {document && <button className="button save" disabled={!dirty} onClick={() => void save()}>Save <kbd>Ctrl+S</kbd></button>}
+            {document ? <div className={surface === 'editor' ? 'tab' : 'tab inactive'}><button className="tab-select" onClick={() => setSurface('editor')}><span>{dirty ? '●' : '○'}</span><span className="tab-name">{baseName(document.path)}</span></button><button title="Close editor tab" onClick={closeDocument}>×</button></div> : <button className={surface === 'editor' ? 'tab muted tab-select' : 'tab muted inactive tab-select'} onClick={() => setSurface('editor')}>Start here</button>}
+            <button className={surface === 'preview' ? 'tab preview-tab tab-select' : 'tab preview-tab inactive tab-select'} onClick={() => setSurface('preview')}>Preview</button>
+            {document && surface === 'editor' && <button className="button save" disabled={!dirty} onClick={() => void save()}>Save <kbd>Ctrl+S</kbd></button>}
           </div>
-          {document ? <Suspense fallback={<EditorPlaceholder />}><CodeEditor
+          {surface === 'preview' ? <Suspense fallback={<EditorPlaceholder />}><PreviewPane /></Suspense> : document ? <Suspense fallback={<EditorPlaceholder />}><CodeEditor
             key={document.path}
             path={document.path}
             language={document.language}

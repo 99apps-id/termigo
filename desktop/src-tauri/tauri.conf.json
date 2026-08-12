@@ -21,7 +21,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' asset: data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' http://localhost:1420 ws://localhost:1420"
+      "csp": "default-src 'self'; img-src 'self' asset: data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' http://localhost:1420 ws://localhost:1420; frame-src http://localhost:* http://127.0.0.1:* https://localhost:* https://127.0.0.1:*"
     }
   },
   "bundle": {
