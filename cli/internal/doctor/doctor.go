@@ -36,9 +36,12 @@ var targets = []target{
 	{name: "npm", command: "npm", versionArgument: "--version"},
 	{name: "Git", command: "git", versionArgument: "--version"},
 	{name: "Codex CLI", command: "codex", versionArgument: "--version"},
+	{name: "Claude Code", command: "claude", versionArgument: "--version"},
 	{name: "Gemini CLI", command: "gemini", versionArgument: "--version"},
 	{name: "Antigravity", command: "antigravity", versionArgument: "--version"},
 	{name: "Ollama", command: "ollama", versionArgument: "--version"},
+	{name: "MCP runtime", command: "npx", versionArgument: "--version"},
+	{name: "uv", command: "uv", versionArgument: "--version"},
 }
 
 // Inspect checks executable availability and a version string, if available.

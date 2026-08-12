@@ -7,6 +7,11 @@ export default defineConfig({
   server: {
     port: 1420,
     strictPort: true,
+    watch: {
+      // Never watch Rust build artifacts; cargo writes into target/ while
+      // Vite is running, which caused EBUSY watcher crashes on Windows.
+      ignored: ['**/src-tauri/target/**'],
+    },
   },
   envPrefix: ['VITE_', 'TAURI_'],
   build: {

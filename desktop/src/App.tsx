@@ -8,6 +8,11 @@ const emptyWorkspace: Workspace = { path: '', tree: [] };
 const TerminalPane = lazy(() => import('./TerminalPane'));
 const CodeEditor = lazy(() => import('./CodeEditor'));
 const PreviewPane = lazy(() => import('./PreviewPane'));
+const AgentPane = lazy(() => import('./AgentPane'));
+const GitPane = lazy(() => import('./GitPane'));
+const SkillsPane = lazy(() => import('./SkillsPane'));
+
+type Surface = 'editor' | 'preview' | 'agent' | 'git' | 'skills';
 
 export default function App() {
   const [workspace, setWorkspace] = useState<Workspace>(emptyWorkspace);
@@ -15,7 +20,7 @@ export default function App() {
   const [contents, setContents] = useState('');
   const [dirty, setDirty] = useState(false);
   const [status, setStatus] = useState('Open a folder to start a workspace.');
-  const [surface, setSurface] = useState<'editor' | 'preview'>('editor');
+  const [surface, setSurface] = useState<Surface>('editor');
 
   const openWorkspace = useCallback(async () => {
     if (dirty && !window.confirm('Discard unsaved changes and open another folder?')) return;
@@ -113,6 +118,7 @@ export default function App() {
       <div className="topbar-actions">
         <button className="button ghost" onClick={() => void refreshWorkspace()} disabled={!workspace.path}>Refresh</button>
         <button className="button ghost" onClick={() => setSurface('preview')}>Preview</button>
+        <button className="button ghost" onClick={() => setSurface('agent')}>Agent</button>
         <button className="button primary" onClick={() => void openWorkspace()}>Open Folder <kbd>Ctrl+O</kbd></button>
       </div>
     </header>
@@ -120,7 +126,7 @@ export default function App() {
     <div className="workspace-shell">
       <aside className="explorer">
         <div className="pane-heading"><span>FILES</span><button className="icon-button" title="Open folder" onClick={() => void openWorkspace()}>+</button></div>
-        {workspace.path ? <FileTree nodes={workspace.tree} activePath={document?.path} onOpen={openFile} /> : <div className="empty-explorer">Choose a project folder to browse its files.</div>}
+        {workspace.path ? <Explorer workspacePath={workspace.path} nodes={workspace.tree} activePath={document?.path} onOpen={openFile} onStatus={setStatus} /> : <div className="empty-explorer">Choose a project folder to browse its files.</div>}
       </aside>
 
       <section className="workspace-main">
@@ -128,9 +134,12 @@ export default function App() {
           <div className="tabbar">
             {document ? <div className={surface === 'editor' ? 'tab' : 'tab inactive'}><button className="tab-select" onClick={() => setSurface('editor')}><span>{dirty ? '●' : '○'}</span><span className="tab-name">{baseName(document.path)}</span></button><button title="Close editor tab" onClick={closeDocument}>×</button></div> : <button className={surface === 'editor' ? 'tab muted tab-select' : 'tab muted inactive tab-select'} onClick={() => setSurface('editor')}>Start here</button>}
             <button className={surface === 'preview' ? 'tab preview-tab tab-select' : 'tab preview-tab inactive tab-select'} onClick={() => setSurface('preview')}>Preview</button>
+            <button className={surface === 'agent' ? 'tab agent-tab tab-select' : 'tab agent-tab inactive tab-select'} onClick={() => setSurface('agent')}>Agent</button>
+            <button className={surface === 'git' ? 'tab git-tab tab-select' : 'tab git-tab inactive tab-select'} onClick={() => setSurface('git')}>Git</button>
+            <button className={surface === 'skills' ? 'tab skills-tab tab-select' : 'tab skills-tab inactive tab-select'} onClick={() => setSurface('skills')}>Skills</button>
             {document && surface === 'editor' && <button className="button save" disabled={!dirty} onClick={() => void save()}>Save <kbd>Ctrl+S</kbd></button>}
           </div>
-          {surface === 'preview' ? <Suspense fallback={<EditorPlaceholder />}><PreviewPane /></Suspense> : document ? <Suspense fallback={<EditorPlaceholder />}><CodeEditor
+          {surface === 'agent' ? <Suspense fallback={<EditorPlaceholder />}><AgentPane key={workspace.path} workspacePath={workspace.path} onStatus={setStatus} /></Suspense> : surface === 'preview' ? <Suspense fallback={<EditorPlaceholder />}><PreviewPane /></Suspense> : surface === 'git' ? <Suspense fallback={<EditorPlaceholder />}><GitPane key={workspace.path} workspacePath={workspace.path} onStatus={setStatus} /></Suspense> : surface === 'skills' ? <Suspense fallback={<EditorPlaceholder />}><SkillsPane key={workspace.path} workspacePath={workspace.path} onStatus={setStatus} /></Suspense> : document ? <Suspense fallback={<EditorPlaceholder />}><CodeEditor
             key={document.path}
             path={document.path}
             language={document.language}
@@ -150,6 +159,47 @@ export default function App() {
 
 function FileTree({ nodes, activePath, onOpen }: { nodes: FileNode[]; activePath?: string; onOpen: (path: string) => void }) {
   return <ul className="file-tree">{nodes.map(node => <FileTreeNode key={node.path} node={node} activePath={activePath} onOpen={onOpen} />)}</ul>;
+}
+
+function Explorer({ workspacePath, nodes, activePath, onOpen, onStatus }: { workspacePath: string; nodes: FileNode[]; activePath?: string; onOpen: (path: string) => void; onStatus: (message: string) => void }) {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<string[]>([]);
+  const [searching, setSearching] = useState(false);
+
+  useEffect(() => {
+    const term = query.trim();
+    if (!term) {
+      setResults([]);
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
+    const timer = window.setTimeout(() => {
+      void invoke<string[]>('workspace_search_files', { query: term }).then(matches => {
+        setResults(matches);
+        setSearching(false);
+      }).catch(error => {
+        setSearching(false);
+        onStatus(`Search failed: ${message(error)}`);
+      });
+    }, 180);
+    return () => window.clearTimeout(timer);
+  }, [query, workspacePath, onStatus]);
+
+  return <>
+    <div className="explorer-search">
+      <input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search files…" spellCheck={false} />
+      {query.trim() && <span className="explorer-search-count">{searching ? '…' : results.length}</span>}
+    </div>
+    {query.trim() ? results.length ? <ul className="file-tree search-results">{results.map(path => <li key={path}><button className={activePath === path ? 'tree-item active' : 'tree-item'} onClick={() => onOpen(path)}><span className="file-marker">·</span><span>{baseName(path)}</span><span className="search-path">{shorten(baseName(path), path)}</span></button></li>)}</ul> : <div className="empty-explorer">No files match “{query}”.</div> : <FileTree nodes={nodes} activePath={activePath} onOpen={onOpen} />}
+  </>;
+}
+
+function shorten(name: string, path: string) {
+  const index = path.lastIndexOf(name);
+  const parent = index > 0 ? path.slice(0, index) : '';
+  const trimmed = parent.length > 48 ? '…' + parent.slice(-48) : parent;
+  return trimmed;
 }
 
 function FileTreeNode({ node, activePath, onOpen }: { node: FileNode; activePath?: string; onOpen: (path: string) => void }) {
