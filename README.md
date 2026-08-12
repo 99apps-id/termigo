@@ -1,42 +1,154 @@
 <div align="center">
-  <img src="public/logo.png" width="144" height="144" alt="Termigo" />
+  <img src="termigo.png" width="144" height="144" alt="Termigo" />
   <h1>Termigo</h1>
 
-  <p><strong>Lightweight Terminal-first AI-native dev workspace.</strong></p>
+  <p><strong>Terminal-first, AI-native development workspace.</strong></p>
   <p>
-    <a href="https://termigo.app">Website</a>
+    <a href="https://github.com/99apps-id/termigo">Repository</a>
     ·
-    <a href="https://termigo.app/docs">Docs</a>
+    <a href="#features">Features</a>
     ·
-    <a href="https://github.com/crynta/Termigo-website">Website's source code</a>
+    <a href="#getting-started">Getting started</a>
+    ·
+    <a href="#cli">CLI</a>
+    ·
+    <a href="#credits">Credits</a>
   </p>
 
   <p>
-    <img src="https://img.shields.io/github/v/release/crynta/termigo-ai?label=version&color=blue" alt="version" />
-    <img src="https://img.shields.io/github/downloads/crynta/termigo-ai/total?label=downloads&color=blue" alt="downloads" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey" alt="platform" />
-    <a href="https://discord.gg/tyveTUyEp7"><img src="https://img.shields.io/badge/Discord-5865F2?logo=discord&logoColor=white" alt="Discord" /></a>
-    <a href="https://www.youtube.com/@crynta"><img src="https://img.shields.io/badge/Youtube-FF0000?logo=youtube&logoColor=white" alt="YouTube" /></a>
+    <img src="https://img.shields.io/github/license/99apps-id/termigo?color=blue" alt="license" />
+    <img src="https://img.shields.io/badge/runtime-no%20Electron-brightgreen" alt="no Electron" />
+    <img src="https://img.shields.io/badge/telemetry-none-blue" alt="no telemetry" />
   </p>
 </div>
 
-<p align="center">
-  <a href="docs/readme/README.zh-CN.md">简体中文</a> |
-  <a href="docs/readme/README.es.md">Español</a> |
-  <a href="docs/readme/README.de.md">Deutsch</a> |
-  <a href="docs/readme/README.fr.md">Français</a> |
-  <a href="docs/readme/README.ja.md">日本語</a> |
-  <a href="docs/readme/README.ko.md">한국어</a> |
-  <a href="docs/readme/README.pt-BR.md">Português</a> |
-  <a href="docs/readme/README.pl.md">Polski</a> |
-  <a href="docs/readme/README.ru.md">Русский</a> |
-  <a href="docs/readme/README.id.md">Bahasa Indonesia</a> |
-  <a href="docs/readme/README.hi.md">हिन्दी</a>
-</p>
-
 ---
 
-Termigo is a lightweight open-source terminal-first AI-native development environment (ADE) built on Tauri 2 + Rust and React 19. A native PTY backend with a WebGL renderer, an agentic AI side-panel that runs against your own keys or fully local models, plus a code editor, file explorer, source control with a git graph, and a web preview pane built in. About 7-8 MB on disk. No telemetry. No account.
+**Termigo** is a lightweight open-source, terminal-first AI-native development
+environment (ADE) built on **Tauri 2 + Rust** with a **React 19** frontend. A
+native PTY backend, an agentic AI side-panel that runs against your own keys or
+fully local models, a code editor, file explorer, source control with a git
+graph, and a web preview pane — all in one window. **No telemetry. No account.**
+Your API keys stay in the OS keychain or with the provider's own CLI.
+
+This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
+(by Crynta, Apache-2.0), extended with a **Go command-line companion**
+(`termigo`) for automation: agent runs, MCP, skills, and project scaffolding.
+
+## Features
+
+### Terminal
+
+- Native PTY backend via `portable-pty` (pwsh, powershell, cmd, zsh, bash, fish)
+- xterm.js with WebGL renderer, multi-tab with background streaming
+- Split panels (horizontal and vertical)
+- Inline search, link detection, true-color
+- Drag files from the explorer into a terminal as shell-safe quoted paths
+- Per-tab workspace environments on Windows (Local or WSL distro)
+- Spaces restore tabs, working directories, and split layouts across launches
+
+### AI agent
+
+- **BYOK providers:** OpenAI, Anthropic (Claude), Google (Gemini), Groq,
+  xAI (Grok), Cerebras, OpenRouter, DeepSeek, Mistral, plus any
+  OpenAI-compatible endpoint
+- **Local / offline:** LM Studio, MLX, Ollama
+- Agentic workflow: plans, sub-agents, project memory via `TERMIGO.md`,
+  file read/write/edit/multi-edit/grep/glob, bash with approval gating,
+  background processes
+- Coding-agent orchestration: spawn Claude Code in a terminal, inspect output,
+  send follow-up work through approval-gated tools
+- Composer: prompt snippets via `#handle`, files via `@path`, voice input
+- Custom agents with their own system prompt and tool subset
+- Plan mode for multi-step work, generates and confirms before doing
+
+### Code editor
+
+- CodeMirror 6 with support for TS/JS, Rust, Python, Go, C/C++, Java,
+  HTML/CSS, JSON, Markdown and more
+- Inline AI autocomplete with local model support
+- AI edit diffs — accept or reject hunk by hunk
+- Opt-in language server support (diagnostics, navigation, completion, formatting)
+- Rendered Markdown plus image, video, audio, and PDF viewing
+- Vim mode and built-in editor themes (Kanagawa, Catppuccin, Rosé Pine, Dracula, ...)
+
+### Source control
+
+- Stage / unstage hunks, commit (`Cmd+Enter` / `Ctrl+Enter`), push with
+  upstream awareness
+- Branch display including detached HEAD state
+- Git history pane with a real commit graph (lane rendering for merges/branches)
+- Commit search and filter, click through to the remote commit page
+
+### Explorer & preview
+
+- Catppuccin icon theme, fuzzy search, keyboard navigation, inline rename,
+  live updates when files change on disk
+- Attach files and selections directly to the AI side-panel
+- Web preview auto-detects local dev servers; external URLs open in a child webview
+
+### Themes & customization
+
+- Custom themes built in-app, bundled presets, background images with
+  adjustable opacity and blur
+- Editor theme is independent from the app theme
+
+## Getting started
+
+### Prerequisites
+
+- [Rust](https://rustup.rs) (stable)
+- [Node.js](https://nodejs.org) 22+ and [pnpm](https://pnpm.io)
+- [Tauri platform prerequisites](https://tauri.app/start/prerequisites/)
+  (Windows: MSVC Build Tools; Linux: webkit2gtk; macOS: Xcode CLT)
+
+### Run from source
+
+```bash
+pnpm install
+pnpm tauri:dev       # development
+pnpm tauri build     # production bundle
+```
+
+Checks:
+
+```bash
+pnpm check-types     # tsc --noEmit
+pnpm test            # vitest
+cd src-tauri && cargo clippy --all-targets -- -D warnings && cargo test
+```
+
+### Windows notes
+
+- Default shell detection: `pwsh.exe` (PowerShell 7+) → `powershell.exe` →
+  `cmd.exe`
+- WSL is a first-class workspace environment, not a wrapped subprocess
+
+## CLI
+
+The Go companion `termigo` automates what the desktop surfaces interactively:
+
+```bash
+cd cli
+go run ./cmd/termigo help
+go run ./cmd/termigo doctor --json        # inspect local tools
+go run ./cmd/termigo init <dir>           # scaffold .termigo/ + TERMIGO.md
+go run ./cmd/termigo agent list           # installed agent providers
+go run ./cmd/termigo agent run codex "explain this repo" --access read-only
+go run ./cmd/termigo skill create review "Review diffs before commit"
+go run ./cmd/termigo mcp list             # configured MCP servers
+go run ./cmd/termigo mcp tools fs         # list tools of an MCP server
+```
+
+- **Providers:** Codex, Claude Code, Gemini, Antigravity, Ollama (local)
+- **Skills:** project- and user-scoped `SKILL.md` folders under
+  `.termigo/skills/` and `~/.termigo/skills/`
+- **MCP:** standard `mcpServers` registry in `.termigo/mcp.json`, JSON-RPC 2.0
+  over stdio (initialize, tools/list, tools/call, ping)
+- **Never stores API keys** — credentials stay with each provider's own CLI
+
+See [`docs/`](docs/) for the MCP, skills, agents, and architecture guides.
 
 ## Screenshots
 
@@ -54,125 +166,44 @@ Termigo is a lightweight open-source terminal-first AI-native development enviro
   </tr>
 </table>
 
-## Features
+## Architecture
 
-### Terminal
-
-- xterm.js with WebGL renderer, multi-tab with background streaming
-- GPU-accelerated block-based terminal with editor-like command input
-- Native PTY backend via `portable-pty` (zsh, bash, pwsh, fish, cmd)
-- Split panels (horizontal and vertical)
-- Inline search, link detection, true-color
-- Drag files from the explorer or desktop into a terminal as shell-safe quoted paths
-- Per-tab workspace environments on Windows (Local, or any installed WSL distro)
-- Spaces restore tabs, working directories, and split layouts across launches
-
-### Code editor
-
-- CodeMirror 6 (supports all popular languages - TS/JS, Rust, Python, Go, C/C++, Java, HTML/CSS, JSON, Markdown, etc.)
-- Inline AI autocomplete with local model support
-- AI edit diffs, accept or reject hunk by hunk
-- Opt-in language server support with diagnostics, navigation, completion, formatting, and custom servers
-- Rendered Markdown plus image, video, audio, and PDF viewing
-- Vim mode
-- Built-in editor themes including Kanagawa, Catppuccin, Rosé Pine, Everforest, Dracula, Solarized, Nord, Tokyo Night, GitHub, and Xcode
-
-### Source control
-
-- Stage / unstage hunks, commit (Cmd+Enter / Ctrl+Enter), push with upstream awareness
-- Branch display including detached HEAD state
-- Git history pane with a real commit graph (lane rendering for merges and branches)
-- Commit search and filter, click through to the remote commit page
-
-### File explorer
-
-- Catppuccin icon theme
-- Fuzzy search, keyboard navigation, inline rename, context actions
-- Live updates when files change on disk
-- Attach files and selections directly to the AI side-panel
-
-### Web preview
-
-- Auto-detects local dev servers and opens them in a preview tab
-- External URL preview via a native child webview
-
-### Themes and customization
-
-- Custom themes built in-app, switch between bundled presets and your own
-- Create your own themes, share them or import from the community
-- Background images with adjustable opacity and blur
-- Editor theme is independent from the app theme
-
-### AI
-
-- **BYOK providers:** OpenAI, Anthropic, Google (Gemini), Groq, xAI (Grok), Cerebras, OpenRouter, DeepSeek, Mistral, plus any OpenAI-compatible endpoint
-- **Local / offline:** LM Studio, MLX, Ollama
-- **Agentic workflow:** plans, sub-agents, project memory via `TERMIGO.md`, file read / write / edit / multi-edit / grep / glob, bash with approval gating, background processes
-- **Coding-agent orchestration:** spawn Claude Code in a terminal, inspect its output, and send follow-up work through approval-gated tools
-- **Composer:** prompt snippets via `#handle`, files via `@path`, voice input, attach-to-agent from explorer or selection
-- **Custom agents** with their own system prompt and tool subset
-- **Plan mode** for multi-step work, generates and confirms before doing
-
-## Install
-
-Latest installers are on the [Releases](https://github.com/crynta/termigo-ai/releases/latest) page. Termigo auto-updates from there.
-
-### Windows notes
-
-- Default shell detection: `pwsh.exe` (PowerShell 7+) -> `powershell.exe` (Windows PowerShell 5.1) -> `cmd.exe`.
-- WSL is a first-class workspace environment, not a wrapped subprocess.
-
-### Linux notes
-
-- **Arch / AUR:** `yay -S termigo-bin` (or `paru`, etc.). Tracks the latest release.
-- **NixOS / Nix**: use the official flake - `nix profile install github:crynta/termigo-ai` (non-NixOS), or import the flake and add `inputs.termigo.packages.${pkgs.system}.termigo` to `environment.systemPackages` (NixOS). The `nixosModules.termigo` output is also available for a simpler setup.
-- **AppImage:** needs FUSE. Without it: `./Termigo_*.AppImage --appimage-extract-and-run`. On Wayland with rendering glitches, try `WEBKIT_DISABLE_DMABUF_RENDERER=1`. Otherwise the `.deb` / `.rpm` packages link against the system GTK stack and tend to be smoother.
-
-## Configure AI
-
-1. Open **Settings -> AI**.
-2. Pick a provider and paste your API key. For local inference, point Termigo at your LM Studio / MLX / Ollama endpoint.
-3. Keys are written to the OS keychain via `keyring`. They never touch disk or localStorage.
-
-## Build from source
-
-**Prerequisites**
-- Rust (stable), https://rustup.rs
-- Node 20+ and [pnpm](https://pnpm.io)
-- Tauri prerequisites for your platform, https://tauri.app/start/prerequisites/
-
-**Run**
-```bash
-pnpm install
-pnpm tauri dev          # development
-pnpm tauri build        # production bundle
+```text
+Termigo
+|-- Desktop application        Rust + Tauri 2 + React 19 + TypeScript
+|   |-- src-tauri/             PTY, shell, git, agents, workspace, control
+|   `-- src/                   React UI (terminal, editor, AI, git, explorer)
+`-- termigo CLI                Go
+    `-- cli/                   agent, mcp, skill, config, doctor, init
 ```
 
-**Checks**
-```bash
-pnpm lint
-pnpm check-types
-pnpm test
-cd src-tauri && cargo clippy --all-targets --locked -- -D warnings   # Rust lint (matches CI)
-cd src-tauri && cargo nextest run --locked                           # or: cargo test --locked
-```
+A Tauri 2 app: a React 19 webview talks to a Rust backend via `invoke()` and
+streaming `Channel`s. The Go CLI is the automation layer — anything useful
+headlessly lives in `cli/internal/` first.
 
-## Tech stack
+## Privacy and safety
 
-Tauri 2, Rust, `portable-pty`, React 19, TypeScript, Vite, xterm.js, CodeMirror 6, Vercel AI SDK v6, Tailwind v4, shadcn/ui, Zustand.
+- **Local first.** Folders, commands, keys, and project context stay on the
+  machine. No telemetry, no account.
+- **Keys stay with their owners.** Provider credentials live in the provider's
+  own CLI config or the OS keychain.
+- **Approval gates.** Agent file changes and commands require review/approval;
+  the workspace is the boundary for file operations.
+- **MCP is explicit.** Servers only run when you configure and connect to them.
 
-## Contributing
+## Credits
 
-Issues and PRs are welcome! Feel free to open issues, suggest features, or submit pull requests. See [CONTRIBUTING.md](CONTRIBUTING.md) and the [architecture docs](docs/README.md) for more details.
+Termigo is a **fork of [Terax](https://github.com/crynta/terax-ai)** by
+[Crynta](https://github.com/crynta) (Apache-2.0). The Tauri/Rust backend, the
+xterm.js terminal, the CodeMirror editor, and the AI agent pipeline are the
+work of Crynta and the Terax contributors. If Termigo is useful, please star
+upstream [Terax](https://github.com/crynta/terax-ai).
 
-## Code signing
-
-<a href="https://signpath.org"><img src="https://avatars.githubusercontent.com/u/34448643?s=200&v=4" width="80" alt="SignPath" align="left" /></a>
-
-Windows builds are signed with a free code signing certificate provided by [SignPath.io](https://signpath.io), certificate by the [SignPath Foundation](https://signpath.org).
-
-<br clear="left" />
+The design also draws inspiration from
+[TEDI](https://github.com/IlhamriSKY/TEDI) (a Terax fork by Ilham Riski
+Wibowo) for its "one window, many tools" direction. No TEDI source code is
+included in this repository.
 
 ## License
 
-Termigo is licensed under the Apache-2.0 License. For more information on our dependencies, see [Apache License 2.0](LICENSE).
+[Apache-2.0](LICENSE), the same license as the upstream Terax project.
