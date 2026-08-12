@@ -1,10 +1,11 @@
 import { open } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import type { FileDocument, FileNode, Workspace } from './types';
 
 const emptyWorkspace: Workspace = { path: '', tree: [] };
+const TerminalPane = lazy(() => import('./TerminalPane'));
 
 export default function App() {
   const [workspace, setWorkspace] = useState<Workspace>(emptyWorkspace);
@@ -74,6 +75,7 @@ export default function App() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || (event.target instanceof Element && event.target.closest('.xterm'))) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'o') {
         event.preventDefault();
         void openWorkspace();
@@ -115,13 +117,16 @@ export default function App() {
         {workspace.path ? <FileTree nodes={workspace.tree} activePath={document?.path} onOpen={openFile} /> : <div className="empty-explorer">Choose a project folder to browse its files.</div>}
       </aside>
 
-      <main className="editor-panel">
-        <div className="tabbar">
-          {document ? <div className="tab"><span>{dirty ? '●' : '○'}</span><span className="tab-name">{baseName(document.path)}</span><button title="Close editor tab" onClick={closeDocument}>×</button></div> : <div className="tab muted">Start here</div>}
-          {document && <button className="button save" disabled={!dirty} onClick={() => void save()}>Save <kbd>Ctrl+S</kbd></button>}
-        </div>
-        {document ? <textarea className="editor" value={contents} spellCheck={false} onChange={event => { setContents(event.target.value); setDirty(true); }} /> : <Welcome onOpen={openWorkspace} />}
-      </main>
+      <section className="workspace-main">
+        <main className="editor-panel">
+          <div className="tabbar">
+            {document ? <div className="tab"><span>{dirty ? '●' : '○'}</span><span className="tab-name">{baseName(document.path)}</span><button title="Close editor tab" onClick={closeDocument}>×</button></div> : <div className="tab muted">Start here</div>}
+            {document && <button className="button save" disabled={!dirty} onClick={() => void save()}>Save <kbd>Ctrl+S</kbd></button>}
+          </div>
+          {document ? <textarea className="editor" value={contents} spellCheck={false} onChange={event => { setContents(event.target.value); setDirty(true); }} /> : <Welcome onOpen={openWorkspace} />}
+        </main>
+        {workspace.path ? <Suspense fallback={<TerminalPlaceholder message="Loading workspace terminal..." />}><TerminalPane key={workspace.path} workspacePath={workspace.path} onStatus={setStatus} /></Suspense> : <TerminalPlaceholder message="Open a folder to start a terminal in that workspace." />}
+      </section>
     </div>
 
     <footer className="statusbar"><span>{status}</span><span>{workspace.path ? 'Local workspace' : 'Ready'}</span></footer>
@@ -142,6 +147,13 @@ function FileTreeNode({ node, activePath, onOpen }: { node: FileNode; activePath
 
 function Welcome({ onOpen }: { onOpen: () => void }) {
   return <section className="welcome"><div className="welcome-mark">T</div><h1>One folder. One focused workspace.</h1><p>Open a local project, browse files, edit safely inside that workspace, and save with familiar shortcuts.</p><button className="button primary welcome-button" onClick={onOpen}>Open Folder <kbd>Ctrl+O</kbd></button><ol><li><span>1</span> Select a local project folder</li><li><span>2</span> Open a text file from Files</li><li><span>3</span> Edit and save with Ctrl+S</li></ol></section>;
+}
+
+function TerminalPlaceholder({ message }: { message: string }) {
+  return <section className="terminal-panel" aria-label="Integrated terminal">
+    <div className="terminal-heading"><span>TERMINAL</span><span>waiting for workspace</span></div>
+    <div className="terminal-placeholder">{message}</div>
+  </section>;
 }
 
 function baseName(path: string) {

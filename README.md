@@ -83,9 +83,10 @@ Ollama). Future subcommands will handle workspace actions and local automation.
 ## Desktop alpha
 
 The new desktop application is intentionally small at this stage: native
-window controls, **Open folder**, an expandable explorer, tabs, and a basic
-text editor with `Ctrl+O` / `Ctrl+S`. File access is checked again by the Rust
-backend, so an open workspace is the boundary for reading and saving files.
+window controls, **Open folder**, an expandable explorer, tabs, a basic text
+editor with `Ctrl+O` / `Ctrl+S`, and a workspace-local Command Prompt panel.
+File access is checked again by the Rust backend, so an open workspace is the
+boundary for reading and saving files.
 
 ```powershell
 Set-Location desktop
@@ -96,8 +97,11 @@ npm run tauri dev
 npm run tauri build
 ```
 
-Terminal sessions, browser preview, provider connections, and agent chat are
-the next migration steps; they are not represented as working features yet.
+The terminal is currently a reliable pipe-based shell for everyday command-line
+tools such as Git, npm, Go, Cargo, and coding CLIs. It is not yet a full PTY,
+so terminal UI applications, advanced line editing, and `Ctrl+C` behavior are
+limited. A browser preview, provider connections, and agent chat remain the
+next migration steps.
 
 ## Roadmap
 

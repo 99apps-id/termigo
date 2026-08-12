@@ -15,3 +15,15 @@ export interface FileDocument {
   contents: string;
   language: string;
 }
+
+export interface TerminalInfo {
+  id: number;
+  shell: string;
+  cwd: string;
+}
+
+export interface TerminalRead {
+  contents: string;
+  cursor: number;
+  closed: boolean;
+}
