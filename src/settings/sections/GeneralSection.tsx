@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
@@ -14,6 +15,10 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import {
+  type OsNotificationResult,
+  testAgentOsNotification,
+} from "@/modules/agents/lib/notify";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import type { ThemePref } from "@/modules/settings/store";
 import {
@@ -77,6 +82,13 @@ const SHELL_AUTO = "auto";
 const ZOOM_MIN = 0.5;
 const ZOOM_MAX = 2.0;
 const ZOOM_STEP = 0.05;
+const NOTIFICATION_TEST_DELAY_MS = 2_000;
+
+type NotificationTestState =
+  | OsNotificationResult
+  | "idle"
+  | "waiting"
+  | "sending";
 
 export function GeneralSection() {
   const { mode, setMode } = useTheme();
@@ -105,6 +117,19 @@ export function GeneralSection() {
   const terminalScrollback = usePreferencesStore((s) => s.terminalScrollback);
   const zoomLevel = usePreferencesStore((s) => s.zoomLevel);
   const agentNotifications = usePreferencesStore((s) => s.agentNotifications);
+  const [notificationTest, setNotificationTest] =
+    useState<NotificationTestState>("idle");
+  const notificationTestPending =
+    notificationTest === "waiting" || notificationTest === "sending";
+
+  const testNotification = async () => {
+    setNotificationTest("waiting");
+    await new Promise((resolve) =>
+      setTimeout(resolve, NOTIFICATION_TEST_DELAY_MS),
+    );
+    setNotificationTest("sending");
+    setNotificationTest(await testAgentOsNotification());
+  };
 
   useEffect(() => {
     let alive = true;
@@ -467,10 +492,26 @@ export function GeneralSection() {
           title="Coding agent notifications"
           description="Alert when Claude Code or Codex running in a terminal needs your input or finishes. Desktop notification when Termigo is unfocused, in-app otherwise."
         >
-          <Switch
-            checked={agentNotifications}
-            onCheckedChange={(v) => void setAgentNotifications(v)}
-          />
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              disabled={!agentNotifications || notificationTestPending}
+              title={notificationTestTitle(notificationTest)}
+              onClick={() => void testNotification()}
+            >
+              {notificationTestLabel(notificationTest)}
+            </Button>
+            <Switch
+              checked={agentNotifications}
+              disabled={notificationTestPending}
+              onCheckedChange={(v) => {
+                setNotificationTest("idle");
+                void setAgentNotifications(v);
+              }}
+            />
+          </div>
         </SettingRow>
       </div>
 
@@ -507,6 +548,38 @@ function Label({ children }: { children: React.ReactNode }) {
       {children}
     </span>
   );
+}
+
+function notificationTestLabel(status: NotificationTestState): string {
+  switch (status) {
+    case "waiting":
+      return "Switch apps...";
+    case "sending":
+      return "Sending...";
+    case "requested":
+      return "Requested";
+    case "denied":
+      return "Blocked";
+    case "failed":
+      return "Failed";
+    default:
+      return "Test in 2s";
+  }
+}
+
+function notificationTestTitle(status: NotificationTestState): string {
+  switch (status) {
+    case "waiting":
+      return "Switch to another app to verify native delivery";
+    case "requested":
+      return "The native notification was requested";
+    case "denied":
+      return "Notifications are disabled by the system";
+    case "failed":
+      return "Terax could not request a native notification";
+    default:
+      return "Send a native test notification after two seconds";
+  }
 }
 
 function FontFamilyInput({
