@@ -14,8 +14,8 @@ type State = Preferences & {
 
 let initPromise: Promise<void> | null = null;
 
-const FAST_BG_KIND_KEY = "terax-ui-bg-kind-shadow";
-const FAST_BG_IMAGE_ID_KEY = "terax-ui-bg-image-shadow";
+const FAST_BG_KIND_KEY = "termigo-ui-bg-kind-shadow";
+const FAST_BG_IMAGE_ID_KEY = "termigo-ui-bg-image-shadow";
 
 function mirrorBgFastPath(
   kind: Preferences["backgroundKind"],

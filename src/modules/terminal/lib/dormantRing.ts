@@ -4,7 +4,7 @@ const DEFAULT_BLOCK_SIZE = 16 * 1024;
 // No \x1bc here: a full reset would erase the snapshot restored just before
 // the drain, scrollback included.
 const OVERFLOW_NOTICE = new TextEncoder().encode(
-  "\r\n\x1b[0m\x1b[2m[terax: some output was dropped while this tab was hidden]\x1b[0m\r\n",
+  "\r\n\x1b[0m\x1b[2m[termigo: some output was dropped while this tab was hidden]\x1b[0m\r\n",
 );
 
 const LF = 0x0a;

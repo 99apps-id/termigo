@@ -1,18 +1,18 @@
 [package]
-name = "terax-cli"
+name = "termigo-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
 
 [[bin]]
-name = "terax-cli"
+name = "termigo-cli"
 path = "src/main.rs"
 
 [dependencies]
 dirs = "6"
 serde_json = "1"
-terax-control-protocol = { path = "../terax-control-protocol" }
+termigo-control-protocol = { path = "../termigo-control-protocol" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

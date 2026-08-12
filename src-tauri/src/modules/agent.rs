@@ -60,23 +60,23 @@ const AGENTS: &[AgentSpec] = &[
 ];
 
 const PI_EXTENSION_DIR: &str = ".pi/agent/extensions";
-const PI_EXTENSION_FILE: &str = "terax-notifications.ts";
-const PI_EXTENSION_MARKER: &str = "terax-pi-notifications-v1";
+const PI_EXTENSION_FILE: &str = "termigo-notifications.ts";
+const PI_EXTENSION_MARKER: &str = "termigo-pi-notifications-v1";
 const PI_STATUS_NEEDLES: [&str; 6] = [
     PI_EXTENSION_MARKER,
     "agent_start",
     "agent_settled",
-    "notify;Terax;pi;${event}",
+    "notify;Termigo;pi;${event}",
     "emit(\"working\")",
     "emit(\"finished\")",
 ];
-const PI_EXTENSION: &str = r#"// terax-pi-notifications-v1
+const PI_EXTENSION: &str = r#"// termigo-pi-notifications-v1
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export default function (pi: ExtensionAPI) {
   const emit = (event: "working" | "finished") => {
-    if (process.env.TERAX_TERMINAL) {
-      process.stdout.write(`\u001b]777;notify;Terax;pi;${event}\u0007`);
+    if (process.env.TERMIGO_TERMINAL) {
+      process.stdout.write(`\u001b]777;notify;Termigo;pi;${event}\u0007`);
     }
   };
 
@@ -89,7 +89,7 @@ export default function (pi: ExtensionAPI) {
 // emitted (legacy /dev/tty Claude, current TerminalSequence, Osc, Windows
 // helper). Used to prune our own groups before reinserting so installs are
 // idempotent and migrate older markers.
-const OWNED_MARKERS: [&str; 3] = ["notify;Terax;", "terax;notify", "__terax_notify"];
+const OWNED_MARKERS: [&str; 3] = ["notify;Termigo;", "termigo;notify", "__termigo_notify"];
 
 fn find(agent: &str) -> Result<&'static AgentSpec, String> {
     AGENTS
@@ -101,7 +101,7 @@ fn find(agent: &str) -> Result<&'static AgentSpec, String> {
 fn hook_command(spec: &AgentSpec, event: &str) -> String {
     match spec.delivery {
         Delivery::TerminalSequence => format!(
-            r#"[ -n "$TERAX_TERMINAL" ] && printf '{{"terminalSequence":"\\u001b]777;notify;Terax;{event}\\u0007"}}' || true"#
+            r#"[ -n "$TERMIGO_TERMINAL" ] && printf '{{"terminalSequence":"\\u001b]777;notify;Termigo;{event}\\u0007"}}' || true"#
         ),
         Delivery::Osc => osc_command(spec.agent, event),
     }
@@ -111,7 +111,7 @@ fn hook_command(spec: &AgentSpec, event: &str) -> String {
 #[cfg(unix)]
 fn osc_command(agent: &str, event: &str) -> String {
     format!(
-        r#"[ -n "$TERAX_TERMINAL" ] && printf '\033]777;notify;Terax;{agent};{event}\007' > /dev/tty; printf '{{}}'"#
+        r#"[ -n "$TERMIGO_TERMINAL" ] && printf '\033]777;notify;Termigo;{agent};{event}\007' > /dev/tty; printf '{{}}'"#
     )
 }
 
@@ -119,23 +119,23 @@ fn osc_command(agent: &str, event: &str) -> String {
 fn osc_command(agent: &str, event: &str) -> String {
     let exe = std::env::current_exe()
         .map(|p| p.display().to_string())
-        .unwrap_or_else(|_| "terax.exe".to_string());
-    format!(r#""{exe}" __terax_notify {agent} {event}"#)
+        .unwrap_or_else(|_| "termigo.exe".to_string());
+    format!(r#""{exe}" __termigo_notify {agent} {event}"#)
 }
 
 // The stable substring that proves a given (agent, event) hook is installed.
 // Kept in sync with hook_command so status reflects what enable writes.
 fn status_needle(spec: &AgentSpec, event: &str) -> String {
     match spec.delivery {
-        Delivery::TerminalSequence => format!("notify;Terax;{event}"),
+        Delivery::TerminalSequence => format!("notify;Termigo;{event}"),
         Delivery::Osc => {
             #[cfg(unix)]
             {
-                format!("notify;Terax;{};{event}", spec.agent)
+                format!("notify;Termigo;{};{event}", spec.agent)
             }
             #[cfg(windows)]
             {
-                format!("__terax_notify {} {event}", spec.agent)
+                format!("__termigo_notify {} {event}", spec.agent)
             }
         }
     }
@@ -222,7 +222,7 @@ fn pi_extension_contents(
 ) -> Result<&'static str, String> {
     if existing.is_some_and(|s| !s.trim().is_empty() && !s.contains(PI_EXTENSION_MARKER)) {
         return Err(format!(
-            "{} is not managed by Terax; refusing to overwrite",
+            "{} is not managed by Termigo; refusing to overwrite",
             path.display()
         ));
     }
@@ -230,7 +230,7 @@ fn pi_extension_contents(
 }
 
 fn write_atomic(path: &std::path::Path, contents: &str) -> Result<(), String> {
-    let tmp = path.with_extension("terax-tmp");
+    let tmp = path.with_extension("termigo-tmp");
     std::fs::write(&tmp, contents).map_err(|e| format!("write {}: {e}", tmp.display()))?;
     std::fs::rename(&tmp, path).map_err(|e| {
         let _ = std::fs::remove_file(&tmp);
@@ -291,10 +291,10 @@ pub fn agent_enable_hooks(agent: String) -> Result<(), String> {
 // CONOUT$ path can't drift from what the Unix /dev/tty hook emits.
 #[cfg(any(windows, test))]
 fn conout_marker(agent: &str, event: &str) -> String {
-    format!("\x1b]777;notify;Terax;{agent};{event}\x07")
+    format!("\x1b]777;notify;Termigo;{agent};{event}\x07")
 }
 
-// Windows has no /dev/tty: the hook calls `terax.exe __terax_notify ...` and we
+// Windows has no /dev/tty: the hook calls `termigo.exe __termigo_notify ...` and we
 // write the marker into the ConPTY console. GUI-subsystem release inherits no
 // console, so attach to the hook runner's first.
 #[cfg(windows)]
@@ -302,7 +302,7 @@ pub fn emit_conout_marker(agent: &str, event: &str) {
     use std::io::Write;
     use windows_sys::Win32::System::Console::{AttachConsole, ATTACH_PARENT_PROCESS};
 
-    if std::env::var_os("TERAX_TERMINAL").is_none() {
+    if std::env::var_os("TERMIGO_TERMINAL").is_none() {
         return;
     }
     unsafe {
@@ -368,9 +368,9 @@ mod tests {
         assert_eq!(hook_count(&out, "UserPromptSubmit"), 1);
         assert_eq!(hook_count(&out, "Notification"), 1);
         assert_eq!(hook_count(&out, "Stop"), 1);
-        assert!(command(&out, "Notification", 0).contains("notify;Terax;attention"));
-        assert!(command(&out, "Stop", 0).contains("notify;Terax;finished"));
-        assert!(command(&out, "UserPromptSubmit", 0).contains("notify;Terax;working"));
+        assert!(command(&out, "Notification", 0).contains("notify;Termigo;attention"));
+        assert!(command(&out, "Stop", 0).contains("notify;Termigo;finished"));
+        assert!(command(&out, "UserPromptSubmit", 0).contains("notify;Termigo;working"));
         assert!(command(&out, "Stop", 0).contains("terminalSequence"));
         assert!(!command(&out, "Stop", 0).contains("/dev/tty"));
     }
@@ -390,7 +390,7 @@ mod tests {
         // Exactly the bytes pty/agent_detect parses (ESC ] 777 ; ... BEL).
         assert_eq!(
             conout_marker("gemini", "attention"),
-            "\u{1b}]777;notify;Terax;gemini;attention\u{7}"
+            "\u{1b}]777;notify;Termigo;gemini;attention\u{7}"
         );
     }
 
@@ -402,7 +402,7 @@ mod tests {
         assert_eq!(hook_count(&out, "PermissionRequest"), 1);
         assert_eq!(hook_count(&out, "Stop"), 1);
         let stop = command(&out, "Stop", 0);
-        assert!(stop.contains("notify;Terax;codex;finished"));
+        assert!(stop.contains("notify;Termigo;codex;finished"));
         assert!(stop.contains("> /dev/tty"));
         // Codex Stop rejects empty/non-JSON stdout; the hook must emit a no-op.
         assert!(stop.contains("printf '{}'"));
@@ -414,24 +414,24 @@ mod tests {
     fn gemini_uses_matcher_and_named_marker() {
         let out = merge_hooks(json!({}), spec("gemini"));
         assert_eq!(out["hooks"]["BeforeAgent"][0]["matcher"], "*");
-        assert!(command(&out, "AfterAgent", 0).contains("notify;Terax;gemini;finished"));
-        assert!(command(&out, "Notification", 0).contains("notify;Terax;gemini;attention"));
+        assert!(command(&out, "AfterAgent", 0).contains("notify;Termigo;gemini;finished"));
+        assert!(command(&out, "Notification", 0).contains("notify;Termigo;gemini;attention"));
     }
 
     #[test]
     fn pi_extension_emits_named_working_and_finished_markers() {
-        let path = std::path::Path::new("/x/terax-notifications.ts");
+        let path = std::path::Path::new("/x/termigo-notifications.ts");
         let extension = pi_extension_contents(None, path).unwrap();
         for needle in PI_STATUS_NEEDLES {
             assert!(extension.contains(needle), "missing {needle}");
         }
-        assert!(extension.contains("process.env.TERAX_TERMINAL"));
+        assert!(extension.contains("process.env.TERMIGO_TERMINAL"));
         assert!(extension.contains("process.stdout.write"));
     }
 
     #[test]
-    fn pi_extension_only_replaces_terax_owned_file() {
-        let path = std::path::Path::new("/x/terax-notifications.ts");
+    fn pi_extension_only_replaces_termigo_owned_file() {
+        let path = std::path::Path::new("/x/termigo-notifications.ts");
         assert!(pi_extension_contents(Some("export const mine = true;"), path).is_err());
         assert!(pi_extension_contents(Some(PI_EXTENSION), path).is_ok());
         assert!(pi_extension_contents(Some("  \n"), path).is_ok());
@@ -439,7 +439,7 @@ mod tests {
 
     #[test]
     fn pi_extension_install_is_atomic_idempotent_and_preserves_foreign_files() {
-        let dir = std::env::temp_dir().join(format!("terax-pi-extension-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("termigo-pi-extension-{}", std::process::id()));
         let path = dir.join(PI_EXTENSION_FILE);
         let _ = std::fs::remove_dir_all(&dir);
 
@@ -462,7 +462,7 @@ mod tests {
         use std::os::unix::fs::symlink;
 
         let dir =
-            std::env::temp_dir().join(format!("terax-pi-extension-symlink-{}", std::process::id()));
+            std::env::temp_dir().join(format!("termigo-pi-extension-symlink-{}", std::process::id()));
         let target = dir.join("managed.ts");
         let path = dir.join(PI_EXTENSION_FILE);
         let _ = std::fs::remove_dir_all(&dir);
@@ -487,7 +487,7 @@ mod tests {
                 "Notification": [
                     { "hooks": [ {
                         "type": "command",
-                        "command": "[ -n \"$TERAX_TERMINAL\" ] && printf '\\033]777;terax;notify\\033\\\\' > /dev/tty || true"
+                        "command": "[ -n \"$TERMIGO_TERMINAL\" ] && printf '\\033]777;termigo;notify\\033\\\\' > /dev/tty || true"
                     } ] }
                 ]
             }
@@ -532,7 +532,7 @@ mod tests {
         });
         let out = merge_hooks(input, spec("claude"));
         assert_eq!(hook_count(&out, "Notification"), 1);
-        assert!(command(&out, "Notification", 0).contains("notify;Terax;attention"));
+        assert!(command(&out, "Notification", 0).contains("notify;Termigo;attention"));
     }
 
     #[test]

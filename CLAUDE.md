@@ -1,1 +1,1 @@
-TERAX.md
+TERMIGO.md

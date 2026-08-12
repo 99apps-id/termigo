@@ -41,7 +41,7 @@ fn generate_sentinel() -> String {
     let counter = SENTINEL_COUNTER.fetch_add(1, Ordering::Relaxed);
     let pid = std::process::id() as u64;
     let mix = nanos ^ counter.rotate_left(17) ^ pid.rotate_left(31);
-    format!("__TERAX_CWD_{:016x}_{:016x}__", mix, counter)
+    format!("__TERMIGO_CWD_{:016x}_{:016x}__", mix, counter)
 }
 
 impl ShellSession {
@@ -122,7 +122,7 @@ impl ShellSession {
 
 fn wrap_posix_with_sentinel(command: &str, sentinel: &str) -> String {
     format!(
-        "{command}\n__terax_rc=$?\nprintf '\\n%s%s\\n' '{sentinel}' \"$(pwd)\"\nexit $__terax_rc\n",
+        "{command}\n__termigo_rc=$?\nprintf '\\n%s%s\\n' '{sentinel}' \"$(pwd)\"\nexit $__termigo_rc\n",
     )
 }
 
@@ -137,7 +137,7 @@ fn wrap_with_sentinel(command: &str, workspace: &WorkspaceEnv, sentinel: &str) -
     #[cfg(windows)]
     {
         format!(
-        "{command}\n$__terax_rc = if ($null -ne $LASTEXITCODE) {{ $LASTEXITCODE }} elseif ($?) {{ 0 }} else {{ 1 }}\n\"`n{sentinel}$($PWD.Path)\"\nexit $__terax_rc\n",
+        "{command}\n$__termigo_rc = if ($null -ne $LASTEXITCODE) {{ $LASTEXITCODE }} elseif ($?) {{ 0 }} else {{ 1 }}\n\"`n{sentinel}$($PWD.Path)\"\nexit $__termigo_rc\n",
     )
     }
 }
@@ -162,7 +162,7 @@ mod tests {
         let a = ShellSession::new("/tmp".into(), WorkspaceEnv::Local);
         let b = ShellSession::new("/tmp".into(), WorkspaceEnv::Local);
         assert_ne!(a.sentinel, b.sentinel);
-        assert!(a.sentinel.starts_with("__TERAX_CWD_"));
+        assert!(a.sentinel.starts_with("__TERMIGO_CWD_"));
         assert!(a.sentinel.ends_with("__"));
         assert!(a.sentinel.len() > 20);
     }
@@ -170,7 +170,7 @@ mod tests {
     #[test]
     fn strip_uses_session_sentinel_only() {
         let s = ShellSession::new("/tmp".into(), WorkspaceEnv::Local);
-        let attacker = "__TERAX_CWD_0000000000000000_0000000000000000__/evil";
+        let attacker = "__TERMIGO_CWD_0000000000000000_0000000000000000__/evil";
         let trailer = format!("\n{}/real\n", s.sentinel);
         let stdout = format!("{attacker}{trailer}");
         let (clean, cwd) = strip_cwd_sentinel(&stdout, "/fallback", &s.sentinel);
@@ -181,7 +181,7 @@ mod tests {
     #[test]
     fn strip_returns_none_when_session_sentinel_absent() {
         let s = ShellSession::new("/tmp".into(), WorkspaceEnv::Local);
-        let stdout = "some output\n__TERAX_CWD_aaaa_bbbb__/spoof\nmore\n";
+        let stdout = "some output\n__TERMIGO_CWD_aaaa_bbbb__/spoof\nmore\n";
         let (_, cwd) = strip_cwd_sentinel(stdout, "/fallback", &s.sentinel);
         assert!(cwd.is_none(), "foreign sentinel must not match");
     }

@@ -1,12 +1,12 @@
 <div align="center">
-  <img src="../../public/logo.png" width="144" height="144" alt="Terax" />
-  <h1>Terax</h1>
+  <img src="../../public/logo.png" width="144" height="144" alt="Termigo" />
+  <h1>Termigo</h1>
   <p><strong>가볍고 터미널 중심인 AI 네이티브 개발 워크스페이스.</strong></p>
-  <p><a href="https://terax.app">웹사이트</a> · <a href="https://terax.app/docs">문서</a> · <a href="https://github.com/crynta/Terax-website">웹사이트 소스 코드</a></p>
+  <p><a href="https://termigo.app">웹사이트</a> · <a href="https://termigo.app/docs">문서</a> · <a href="https://github.com/crynta/Termigo-website">웹사이트 소스 코드</a></p>
 
   <p>
-    <img src="https://img.shields.io/github/v/release/crynta/terax-ai?label=version&color=blue" alt="버전" />
-    <img src="https://img.shields.io/github/downloads/crynta/terax-ai/total?label=downloads&color=blue" alt="다운로드" />
+    <img src="https://img.shields.io/github/v/release/crynta/termigo-ai?label=version&color=blue" alt="버전" />
+    <img src="https://img.shields.io/github/downloads/crynta/termigo-ai/total?label=downloads&color=blue" alt="다운로드" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey" alt="플랫폼" />
     <a href="https://discord.gg/tyveTUyEp7"><img src="https://img.shields.io/badge/Discord-5865F2?logo=discord&logoColor=white" alt="Discord" /></a>
     <a href="https://www.youtube.com/@crynta"><img src="https://img.shields.io/badge/Youtube-FF0000?logo=youtube&logoColor=white" alt="YouTube" /></a>
@@ -19,7 +19,7 @@
 
 ---
 
-Terax는 Tauri 2 + Rust와 React 19로 만든 가볍고 오픈 소스이며 터미널 중심인 AI 네이티브 개발 환경(ADE)입니다. WebGL 렌더러를 갖춘 네이티브 PTY 백엔드, 사용자의 키나 완전한 로컬 모델로 실행되는 에이전트형 AI 사이드 패널, 코드 편집기, 파일 탐색기, Git 그래프를 포함한 소스 제어, 웹 미리보기 패널이 내장되어 있습니다. 디스크 사용량은 약 7-8 MB입니다. 원격 측정 없음. 계정 필요 없음.
+Termigo는 Tauri 2 + Rust와 React 19로 만든 가볍고 오픈 소스이며 터미널 중심인 AI 네이티브 개발 환경(ADE)입니다. WebGL 렌더러를 갖춘 네이티브 PTY 백엔드, 사용자의 키나 완전한 로컬 모델로 실행되는 에이전트형 AI 사이드 패널, 코드 편집기, 파일 탐색기, Git 그래프를 포함한 소스 제어, 웹 미리보기 패널이 내장되어 있습니다. 디스크 사용량은 약 7-8 MB입니다. 원격 측정 없음. 계정 필요 없음.
 
 ## 스크린샷
 
@@ -82,7 +82,7 @@ Terax는 Tauri 2 + Rust와 React 19로 만든 가볍고 오픈 소스이며 터�
 
 - **BYOK 제공자:** OpenAI, Anthropic, Google(Gemini), Groq, xAI(Grok), Cerebras, OpenRouter, DeepSeek, Mistral 및 모든 OpenAI 호환 엔드포인트
 - **로컬 / 오프라인:** LM Studio, MLX, Ollama
-- **에이전트형 워크플로:** 계획, 하위 에이전트, `TERAX.md`를 통한 프로젝트 메모리, 파일 읽기 / 쓰기 / 편집 / 다중 편집 / grep / glob, 승인형 bash, 백그라운드 프로세스
+- **에이전트형 워크플로:** 계획, 하위 에이전트, `TERMIGO.md`를 통한 프로젝트 메모리, 파일 읽기 / 쓰기 / 편집 / 다중 편집 / grep / glob, 승인형 bash, 백그라운드 프로세스
 - **코딩 에이전트 오케스트레이션:** 터미널에서 Claude Code를 실행하고 출력을 확인한 뒤 승인형 도구로 후속 작업 전송
 - **작성기:** `#handle` 프롬프트 스니펫, `@path` 파일, 음성 입력, 탐색기나 선택 항목에서 에이전트로 첨부
 - 자체 시스템 프롬프트와 도구 하위 집합을 가진 **사용자 지정 에이전트**
@@ -90,7 +90,7 @@ Terax는 Tauri 2 + Rust와 React 19로 만든 가볍고 오픈 소스이며 터�
 
 ## 설치
 
-최신 설치 프로그램은 [Releases](https://github.com/crynta/terax-ai/releases/latest) 페이지에 있습니다. Terax는 이 페이지에서 자동 업데이트됩니다.
+최신 설치 프로그램은 [Releases](https://github.com/crynta/termigo-ai/releases/latest) 페이지에 있습니다. Termigo는 이 페이지에서 자동 업데이트됩니다.
 
 ### Windows 참고 사항
 
@@ -99,9 +99,9 @@ Terax는 Tauri 2 + Rust와 React 19로 만든 가볍고 오픈 소스이며 터�
 
 ### Linux 참고 사항
 
-- **Arch / AUR:** `yay -S terax-bin` 또는 `paru`. 최신 릴리스를 추적합니다.
-- **NixOS / Nix:** 공식 flake를 사용하세요. NixOS 외부에서는 `nix profile install github:crynta/terax-ai`를 실행합니다. NixOS에서는 flake를 가져오고 `inputs.terax.packages.${pkgs.system}.terax`를 `environment.systemPackages`에 추가합니다. 더 간단한 설정에는 `nixosModules.terax`도 있습니다.
-- **AppImage:** FUSE가 필요합니다. 없다면 `./Terax_*.AppImage --appimage-extract-and-run`을 실행하세요. Wayland 렌더링 문제가 있으면 `WEBKIT_DISABLE_DMABUF_RENDERER=1`을 시도하세요. `.deb` / `.rpm` 패키지는 시스템 GTK 스택을 사용해 보통 더 부드럽습니다.
+- **Arch / AUR:** `yay -S termigo-bin` 또는 `paru`. 최신 릴리스를 추적합니다.
+- **NixOS / Nix:** 공식 flake를 사용하세요. NixOS 외부에서는 `nix profile install github:crynta/termigo-ai`를 실행합니다. NixOS에서는 flake를 가져오고 `inputs.termigo.packages.${pkgs.system}.termigo`를 `environment.systemPackages`에 추가합니다. 더 간단한 설정에는 `nixosModules.termigo`도 있습니다.
+- **AppImage:** FUSE가 필요합니다. 없다면 `./Termigo_*.AppImage --appimage-extract-and-run`을 실행하세요. Wayland 렌더링 문제가 있으면 `WEBKIT_DISABLE_DMABUF_RENDERER=1`을 시도하세요. `.deb` / `.rpm` 패키지는 시스템 GTK 스택을 사용해 보통 더 부드럽습니다.
 
 ## AI 설정
 
@@ -153,4 +153,4 @@ Windows 빌드는 [SignPath.io](https://signpath.io)가 제공하고 [SignPath F
 
 ## 라이선스
 
-Terax는 Apache-2.0 라이선스를 따릅니다. 종속성에 대한 자세한 내용은 [Apache License 2.0](../../LICENSE)을 참조하세요.
+Termigo는 Apache-2.0 라이선스를 따릅니다. 종속성에 대한 자세한 내용은 [Apache License 2.0](../../LICENSE)을 참조하세요.

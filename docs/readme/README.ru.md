@@ -1,12 +1,12 @@
 <div align="center">
-  <img src="../../public/logo.png" width="144" height="144" alt="Terax" />
-  <h1>Terax</h1>
+  <img src="../../public/logo.png" width="144" height="144" alt="Termigo" />
+  <h1>Termigo</h1>
   <p><strong>Легковесная среда разработки с упором на терминал и встроенным ИИ.</strong></p>
-  <p><a href="https://terax.app">Сайт</a> · <a href="https://terax.app/docs">Документация</a> · <a href="https://github.com/crynta/Terax-website">Исходный код сайта</a></p>
+  <p><a href="https://termigo.app">Сайт</a> · <a href="https://termigo.app/docs">Документация</a> · <a href="https://github.com/crynta/Termigo-website">Исходный код сайта</a></p>
 
   <p>
-    <img src="https://img.shields.io/github/v/release/crynta/terax-ai?label=version&color=blue" alt="версия" />
-    <img src="https://img.shields.io/github/downloads/crynta/terax-ai/total?label=downloads&color=blue" alt="загрузки" />
+    <img src="https://img.shields.io/github/v/release/crynta/termigo-ai?label=version&color=blue" alt="версия" />
+    <img src="https://img.shields.io/github/downloads/crynta/termigo-ai/total?label=downloads&color=blue" alt="загрузки" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey" alt="платформа" />
     <a href="https://discord.gg/tyveTUyEp7"><img src="https://img.shields.io/badge/Discord-5865F2?logo=discord&logoColor=white" alt="Discord" /></a>
     <a href="https://www.youtube.com/@crynta"><img src="https://img.shields.io/badge/Youtube-FF0000?logo=youtube&logoColor=white" alt="YouTube" /></a>
@@ -19,7 +19,7 @@
 
 ---
 
-Terax представляет собой легковесную среду разработки (ADE) с открытым исходным кодом, ориентированную на терминал и ИИ. Она построена на Tauri 2 + Rust и React 19. В состав входят нативный PTY-бэкенд с WebGL-рендерером, боковая панель агентного ИИ, работающая с вашими ключами или полностью локальными моделями, редактор кода, файловый проводник, управление исходным кодом с графом Git и панель веб-предпросмотра. Около 7-8 МБ на диске. Без телеметрии. Без учётной записи.
+Termigo представляет собой легковесную среду разработки (ADE) с открытым исходным кодом, ориентированную на терминал и ИИ. Она построена на Tauri 2 + Rust и React 19. В состав входят нативный PTY-бэкенд с WebGL-рендерером, боковая панель агентного ИИ, работающая с вашими ключами или полностью локальными моделями, редактор кода, файловый проводник, управление исходным кодом с графом Git и панель веб-предпросмотра. Около 7-8 МБ на диске. Без телеметрии. Без учётной записи.
 
 ## Снимки экрана
 
@@ -82,7 +82,7 @@ Terax представляет собой легковесную среду ра
 
 - **Провайдеры с собственным ключом:** OpenAI, Anthropic, Google (Gemini), Groq, xAI (Grok), Cerebras, OpenRouter, DeepSeek, Mistral и любой OpenAI-совместимый endpoint
 - **Локально / офлайн:** LM Studio, MLX, Ollama
-- **Агентный процесс:** планы, субагенты, память проекта через `TERAX.md`, чтение / запись / правка / множественная правка / grep / glob, bash с подтверждением и фоновые процессы
+- **Агентный процесс:** планы, субагенты, память проекта через `TERMIGO.md`, чтение / запись / правка / множественная правка / grep / glob, bash с подтверждением и фоновые процессы
 - **Оркестрация агентов программирования:** запуск Claude Code в терминале, просмотр его вывода и отправка последующих задач через инструменты с подтверждением
 - **Поле ввода:** фрагменты промптов через `#handle`, файлы через `@path`, голосовой ввод и вложения из проводника или выделения
 - **Пользовательские агенты** со своим системным промптом и набором инструментов
@@ -90,7 +90,7 @@ Terax представляет собой легковесную среду ра
 
 ## Установка
 
-Последние установщики находятся на странице [Releases](https://github.com/crynta/terax-ai/releases/latest). Terax автоматически обновляется оттуда.
+Последние установщики находятся на странице [Releases](https://github.com/crynta/termigo-ai/releases/latest). Termigo автоматически обновляется оттуда.
 
 ### Примечания для Windows
 
@@ -99,9 +99,9 @@ Terax представляет собой легковесную среду ра
 
 ### Примечания для Linux
 
-- **Arch / AUR:** `yay -S terax-bin` или `paru`. Пакет следует за последним выпуском.
-- **NixOS / Nix:** используйте официальный flake. Вне NixOS выполните `nix profile install github:crynta/terax-ai`. В NixOS импортируйте flake и добавьте `inputs.terax.packages.${pkgs.system}.terax` в `environment.systemPackages`. Для более простой настройки доступен `nixosModules.terax`.
-- **AppImage:** требует FUSE. Без него выполните `./Terax_*.AppImage --appimage-extract-and-run`. При проблемах рендеринга в Wayland попробуйте `WEBKIT_DISABLE_DMABUF_RENDERER=1`. Пакеты `.deb` / `.rpm` используют системный стек GTK и обычно работают плавнее.
+- **Arch / AUR:** `yay -S termigo-bin` или `paru`. Пакет следует за последним выпуском.
+- **NixOS / Nix:** используйте официальный flake. Вне NixOS выполните `nix profile install github:crynta/termigo-ai`. В NixOS импортируйте flake и добавьте `inputs.termigo.packages.${pkgs.system}.termigo` в `environment.systemPackages`. Для более простой настройки доступен `nixosModules.termigo`.
+- **AppImage:** требует FUSE. Без него выполните `./Termigo_*.AppImage --appimage-extract-and-run`. При проблемах рендеринга в Wayland попробуйте `WEBKIT_DISABLE_DMABUF_RENDERER=1`. Пакеты `.deb` / `.rpm` используют системный стек GTK и обычно работают плавнее.
 
 ## Настройка ИИ
 
@@ -153,4 +153,4 @@ Issues и PR приветствуются. Сообщайте о проблем�
 
 ## Лицензия
 
-Terax распространяется по лицензии Apache-2.0. Информацию о зависимостях см. в [Apache License 2.0](../../LICENSE).
+Termigo распространяется по лицензии Apache-2.0. Информацию о зависимостях см. в [Apache License 2.0](../../LICENSE).

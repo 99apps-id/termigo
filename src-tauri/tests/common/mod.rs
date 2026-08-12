@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use tempfile::TempDir;
-use terax_lib::modules::fs::to_canon;
-use terax_lib::modules::workspace::{WorkspaceEnv, WorkspaceRegistry};
+use termigo_lib::modules::fs::to_canon;
+use termigo_lib::modules::workspace::{WorkspaceEnv, WorkspaceRegistry};
 
 pub struct GitRepoFixture {
     pub registry: WorkspaceRegistry,
@@ -23,8 +23,8 @@ impl GitRepoFixture {
 
         run_git_in(&canonical, &["init", "-q"]);
         run_git_in(&canonical, &["symbolic-ref", "HEAD", "refs/heads/main"]);
-        run_git_in(&canonical, &["config", "user.email", "test@terax.local"]);
-        run_git_in(&canonical, &["config", "user.name", "Terax Test"]);
+        run_git_in(&canonical, &["config", "user.email", "test@termigo.local"]);
+        run_git_in(&canonical, &["config", "user.name", "Termigo Test"]);
         run_git_in(&canonical, &["config", "commit.gpgsign", "false"]);
         run_git_in(&canonical, &["config", "core.autocrlf", "false"]);
 

@@ -1,6 +1,6 @@
 # Testing
 
-This guide elaborates on `TERAX.md` and `CONTRIBUTING.md`. If anything conflicts with those files, they win.
+This guide elaborates on `TERMIGO.md` and `CONTRIBUTING.md`. If anything conflicts with those files, they win.
 
 ## Running checks locally
 
@@ -77,6 +77,6 @@ When testing `src/modules/ai/lib/security.ts` or the Rust equivalents, cover:
 
 ## See also
 
-- [`TERAX.md`](../../TERAX.md) - the architecture source of truth
+- [`TERMIGO.md`](../../TERMIGO.md) - the architecture source of truth
 - [`CONTRIBUTING.md`](../../CONTRIBUTING.md) - quality bar, project layout, how to contribute
 - [`docs/README.md`](../README.md) - index of contributor guides

@@ -1,5 +1,5 @@
 [package]
-name = "terax-control-protocol"
+name = "termigo-control-protocol"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

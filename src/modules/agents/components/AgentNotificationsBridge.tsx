@@ -107,7 +107,7 @@ export function AgentNotificationsBridge({
   useEffect(() => {
     let alive = true;
     let unlisten: (() => void) | undefined;
-    listen<AgentSignal>("terax:agent-signal", (e) =>
+    listen<AgentSignal>("termigo:agent-signal", (e) =>
       handleSignal(e.payload, ctxRef.current),
     )
       .then((u) => {

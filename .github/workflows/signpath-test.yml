@@ -9,7 +9,7 @@ concurrency:
 
 jobs:
   test-sign-windows:
-    if: github.repository == 'crynta/terax-ai'
+    if: github.repository == '99apps-id/termigo'
     runs-on: windows-latest
     permissions:
       contents: read
@@ -51,8 +51,8 @@ jobs:
           $msi = Get-ChildItem -Path "$bundleDir/msi"  -Filter "*.msi" -ErrorAction Stop | Select-Object -First 1
           if (-not $exe) { throw "No .exe installer produced by Tauri" }
           if (-not $msi) { throw "No .msi installer produced by Tauri" }
-          Copy-Item $exe.FullName -Destination "$stagingDir/terax-setup.exe"
-          Copy-Item $msi.FullName -Destination "$stagingDir/terax.msi"
+          Copy-Item $exe.FullName -Destination "$stagingDir/termigo-setup.exe"
+          Copy-Item $msi.FullName -Destination "$stagingDir/termigo.msi"
           Write-Host "Staged files:"
           Get-ChildItem $stagingDir
 
@@ -69,7 +69,7 @@ jobs:
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
           organization-id: 'df665bf4-9b76-41ae-9596-1ba3a23010aa'
-          project-slug: 'terax-ai'
+          project-slug: 'termigo-ai'
           signing-policy-slug: 'test-signing'
           artifact-configuration-slug: 'initial'
           github-artifact-id: ${{ steps.upload.outputs.artifact-id }}

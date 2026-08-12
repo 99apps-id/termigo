@@ -1,20 +1,20 @@
 <div align="center">
-  <img src="../../public/logo.png" width="144" height="144" alt="Terax" />
-  <h1>Terax</h1>
+  <img src="../../public/logo.png" width="144" height="144" alt="Termigo" />
+  <h1>Termigo</h1>
 
   <p><strong>轻量、终端优先的 AI 原生开发工作区。</strong></p>
 
   <p>
-    <a href="https://terax.app">网站</a>
+    <a href="https://termigo.app">网站</a>
     ·
-    <a href="https://terax.app/docs">文档</a>
+    <a href="https://termigo.app/docs">文档</a>
     ·
-    <a href="https://github.com/crynta/Terax-website">网站源代码</a>
+    <a href="https://github.com/crynta/Termigo-website">网站源代码</a>
   </p>
 
   <p>
-    <img src="https://img.shields.io/github/v/release/crynta/terax-ai?label=version&color=blue" alt="版本" />
-    <img src="https://img.shields.io/github/downloads/crynta/terax-ai/total?label=downloads&color=blue" alt="下载量" />
+    <img src="https://img.shields.io/github/v/release/crynta/termigo-ai?label=version&color=blue" alt="版本" />
+    <img src="https://img.shields.io/github/downloads/crynta/termigo-ai/total?label=downloads&color=blue" alt="下载量" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey" alt="平台" />
     <a href="https://discord.gg/tyveTUyEp7"><img src="https://img.shields.io/badge/Discord-5865F2?logo=discord&logoColor=white" alt="Discord" /></a>
     <a href="https://www.youtube.com/@crynta"><img src="https://img.shields.io/badge/Youtube-FF0000?logo=youtube&logoColor=white" alt="YouTube" /></a>
@@ -37,7 +37,7 @@
 
 ---
 
-Terax 是一个轻量、开源、终端优先的 AI 原生开发环境（ADE），基于 Tauri 2 + Rust 和 React 19 构建。它内置原生 PTY 后端与 WebGL 渲染器、使用你自己的密钥或完全本地模型运行的智能体 AI 侧边栏，以及代码编辑器、文件浏览器、带 Git 图的源代码管理和网页预览面板。磁盘占用约 7-8 MB。无遥测。无需账户。
+Termigo 是一个轻量、开源、终端优先的 AI 原生开发环境（ADE），基于 Tauri 2 + Rust 和 React 19 构建。它内置原生 PTY 后端与 WebGL 渲染器、使用你自己的密钥或完全本地模型运行的智能体 AI 侧边栏，以及代码编辑器、文件浏览器、带 Git 图的源代码管理和网页预览面板。磁盘占用约 7-8 MB。无遥测。无需账户。
 
 ## 截图
 
@@ -108,7 +108,7 @@ Terax 是一个轻量、开源、终端优先的 AI 原生开发环境（ADE）�
 
 - **自带密钥提供商：** OpenAI、Anthropic、Google（Gemini）、Groq、xAI（Grok）、Cerebras、OpenRouter、DeepSeek、Mistral，以及任意兼容 OpenAI 的端点
 - **本地 / 离线：** LM Studio、MLX、Ollama
-- **智能体工作流：** 计划、子智能体、通过 `TERAX.md` 实现的项目记忆、文件读取 / 写入 / 编辑 / 多处编辑 / grep / glob、需要批准的 bash、后台进程
+- **智能体工作流：** 计划、子智能体、通过 `TERMIGO.md` 实现的项目记忆、文件读取 / 写入 / 编辑 / 多处编辑 / grep / glob、需要批准的 bash、后台进程
 - **编码智能体编排：** 在终端中启动 Claude Code、检查其输出，并通过需要批准的工具发送后续工作
 - **输入区：** 通过 `#handle` 使用提示片段、通过 `@path` 添加文件、语音输入，以及从文件浏览器或选区附加到智能体
 - **自定义智能体**，拥有各自的系统提示和工具子集
@@ -116,7 +116,7 @@ Terax 是一个轻量、开源、终端优先的 AI 原生开发环境（ADE）�
 
 ## 安装
 
-最新安装程序位于 [Releases](https://github.com/crynta/terax-ai/releases/latest) 页面。Terax 会从该页面自动更新。
+最新安装程序位于 [Releases](https://github.com/crynta/termigo-ai/releases/latest) 页面。Termigo 会从该页面自动更新。
 
 ### Windows 说明
 
@@ -125,14 +125,14 @@ Terax 是一个轻量、开源、终端优先的 AI 原生开发环境（ADE）�
 
 ### Linux 说明
 
-- **Arch / AUR：** `yay -S terax-bin`（也可使用 `paru` 等）。它会跟随最新版本。
-- **NixOS / Nix：** 使用官方 flake。非 NixOS 运行 `nix profile install github:crynta/terax-ai`；NixOS 可导入 flake，并将 `inputs.terax.packages.${pkgs.system}.terax` 添加到 `environment.systemPackages`。也可以使用 `nixosModules.terax` 输出进行更简单的配置。
-- **AppImage：** 需要 FUSE。没有 FUSE 时运行 `./Terax_*.AppImage --appimage-extract-and-run`。如果在 Wayland 上出现渲染问题，请尝试 `WEBKIT_DISABLE_DMABUF_RENDERER=1`。否则，`.deb` / `.rpm` 包会链接系统 GTK 栈，通常更流畅。
+- **Arch / AUR：** `yay -S termigo-bin`（也可使用 `paru` 等）。它会跟随最新版本。
+- **NixOS / Nix：** 使用官方 flake。非 NixOS 运行 `nix profile install github:crynta/termigo-ai`；NixOS 可导入 flake，并将 `inputs.termigo.packages.${pkgs.system}.termigo` 添加到 `environment.systemPackages`。也可以使用 `nixosModules.termigo` 输出进行更简单的配置。
+- **AppImage：** 需要 FUSE。没有 FUSE 时运行 `./Termigo_*.AppImage --appimage-extract-and-run`。如果在 Wayland 上出现渲染问题，请尝试 `WEBKIT_DISABLE_DMABUF_RENDERER=1`。否则，`.deb` / `.rpm` 包会链接系统 GTK 栈，通常更流畅。
 
 ## 配置 AI
 
 1. 打开**设置 -> AI**。
-2. 选择提供商并粘贴 API 密钥。对于本地推理，将 Terax 指向你的 LM Studio / MLX / Ollama 端点。
+2. 选择提供商并粘贴 API 密钥。对于本地推理，将 Termigo 指向你的 LM Studio / MLX / Ollama 端点。
 3. 密钥通过 `keyring` 写入操作系统钥匙串。密钥绝不会写入磁盘或 localStorage。
 
 ## 从源代码构建
@@ -179,4 +179,4 @@ Windows 构建使用 [SignPath.io](https://signpath.io) 提供的免费代码签
 
 ## 许可证
 
-Terax 使用 Apache-2.0 许可证。有关依赖项的更多信息，请参阅 [Apache License 2.0](../../LICENSE)。
+Termigo 使用 Apache-2.0 许可证。有关依赖项的更多信息，请参阅 [Apache License 2.0](../../LICENSE)。

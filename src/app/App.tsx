@@ -501,7 +501,7 @@ export default function App() {
       // Dispatch a window event the composer listens for. Same pattern as
       // selections — keeps file-explorer decoupled from the AI module.
       window.dispatchEvent(
-        new CustomEvent<string>("terax:ai-attach-file", { detail: path }),
+        new CustomEvent<string>("termigo:ai-attach-file", { detail: path }),
       );
       openPanel();
       focusInput(null);
@@ -567,7 +567,7 @@ export default function App() {
             agent: request.agent,
           }).catch((error) => {
             console.warn(
-              `[terax] could not enable ${request.agent} notifications:`,
+              `[termigo] could not enable ${request.agent} notifications:`,
               error,
             );
           })
@@ -578,7 +578,7 @@ export default function App() {
           await Promise.all([whenSessionReady(leafId), hooksReady]);
           if (!writeToSession(leafId, `${command.command}\r`)) {
             console.error(
-              `[terax] agent terminal ${leafId} closed before launch`,
+              `[termigo] agent terminal ${leafId} closed before launch`,
             );
           }
         })();
@@ -638,7 +638,7 @@ export default function App() {
     let unlisten: (() => void) | undefined;
     let disposed = false;
     (async () => {
-      const off = await listen<string[]>("terax:open-file", (e) => {
+      const off = await listen<string[]>("termigo:open-file", (e) => {
         openLaunchFiles(e.payload);
       });
       if (disposed) off();
@@ -1381,7 +1381,7 @@ export default function App() {
                 <div className="flex h-full min-h-0 flex-col border-r border-border/60 bg-card">
                   <div
                     key={sidebarView}
-                    className="min-h-0 flex-1 terax-panel-in"
+                    className="min-h-0 flex-1 termigo-panel-in"
                   >
                     {sidebarView === "explorer" ? (
                       <FileExplorer

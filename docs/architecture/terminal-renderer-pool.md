@@ -1,10 +1,10 @@
 # Terminal renderer pool
 
-This guide elaborates on `TERAX.md`. If anything here conflicts with `TERAX.md`, `TERAX.md` wins.
+This guide elaborates on `TERMIGO.md`. If anything here conflicts with `TERMIGO.md`, `TERMIGO.md` wins.
 
 ## Why a pool exists
 
-Terminal tabs are kept mounted and hidden on switch so PTYs and dev servers keep streaming in the background. Creating an unbounded number of live xterm + WebGL renderer instances would blow the memory budget, so Terax pools renderer slots.
+Terminal tabs are kept mounted and hidden on switch so PTYs and dev servers keep streaming in the background. Creating an unbounded number of live xterm + WebGL renderer instances would blow the memory budget, so Termigo pools renderer slots.
 
 The pool lives in `src/modules/terminal/lib/rendererPool.ts`.
 
@@ -60,6 +60,6 @@ WebGL addons are created when a slot becomes visible and reaped after a grace pe
 
 ## See also
 
-- [`TERAX.md`](../../TERAX.md) - the architecture source of truth
+- [`TERMIGO.md`](../../TERMIGO.md) - the architecture source of truth
 - [`docs/README.md`](../README.md) - index of contributor guides
 - [PTY shell integration](pty-shell-integration.md) - sessions, OSC sequences, and ConPTY

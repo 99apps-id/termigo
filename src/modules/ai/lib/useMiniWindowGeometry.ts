@@ -9,7 +9,7 @@ import {
   type Viewport,
 } from "./miniWindowGeometry";
 
-const STORE_KEY = "terax-ui-mini-window-geom";
+const STORE_KEY = "termigo-ui-mini-window-geom";
 
 const viewport = (): Viewport => ({
   vw: window.innerWidth,

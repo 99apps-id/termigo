@@ -1,12 +1,12 @@
 <div align="center">
-  <img src="../../public/logo.png" width="144" height="144" alt="Terax" />
-  <h1>Terax</h1>
+  <img src="../../public/logo.png" width="144" height="144" alt="Termigo" />
+  <h1>Termigo</h1>
   <p><strong>हल्का, टर्मिनल-केंद्रित और AI-नेटिव डेवलपमेंट वर्कस्पेस।</strong></p>
-  <p><a href="https://terax.app">वेबसाइट</a> · <a href="https://terax.app/docs">दस्तावेज़</a> · <a href="https://github.com/crynta/Terax-website">वेबसाइट का सोर्स कोड</a></p>
+  <p><a href="https://termigo.app">वेबसाइट</a> · <a href="https://termigo.app/docs">दस्तावेज़</a> · <a href="https://github.com/crynta/Termigo-website">वेबसाइट का सोर्स कोड</a></p>
 
   <p>
-    <img src="https://img.shields.io/github/v/release/crynta/terax-ai?label=version&color=blue" alt="संस्करण" />
-    <img src="https://img.shields.io/github/downloads/crynta/terax-ai/total?label=downloads&color=blue" alt="डाउनलोड" />
+    <img src="https://img.shields.io/github/v/release/crynta/termigo-ai?label=version&color=blue" alt="संस्करण" />
+    <img src="https://img.shields.io/github/downloads/crynta/termigo-ai/total?label=downloads&color=blue" alt="डाउनलोड" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey" alt="प्लेटफ़ॉर्म" />
     <a href="https://discord.gg/tyveTUyEp7"><img src="https://img.shields.io/badge/Discord-5865F2?logo=discord&logoColor=white" alt="Discord" /></a>
     <a href="https://www.youtube.com/@crynta"><img src="https://img.shields.io/badge/Youtube-FF0000?logo=youtube&logoColor=white" alt="YouTube" /></a>
@@ -19,7 +19,7 @@
 
 ---
 
-Terax एक हल्का, ओपन-सोर्स, टर्मिनल-केंद्रित और AI-नेटिव डेवलपमेंट एनवायरनमेंट (ADE) है, जिसे Tauri 2 + Rust और React 19 पर बनाया गया है। इसमें WebGL रेंडरर वाला नेटिव PTY बैकएंड, आपकी अपनी कुंजियों या पूरी तरह स्थानीय मॉडल पर चलने वाला एजेंटिक AI साइड पैनल, कोड एडिटर, फ़ाइल एक्सप्लोरर, Git ग्राफ़ के साथ सोर्स कंट्रोल और वेब प्रीव्यू पैनल शामिल हैं। डिस्क पर लगभग 7-8 MB। कोई टेलीमेट्री नहीं। कोई खाता नहीं।
+Termigo एक हल्का, ओपन-सोर्स, टर्मिनल-केंद्रित और AI-नेटिव डेवलपमेंट एनवायरनमेंट (ADE) है, जिसे Tauri 2 + Rust और React 19 पर बनाया गया है। इसमें WebGL रेंडरर वाला नेटिव PTY बैकएंड, आपकी अपनी कुंजियों या पूरी तरह स्थानीय मॉडल पर चलने वाला एजेंटिक AI साइड पैनल, कोड एडिटर, फ़ाइल एक्सप्लोरर, Git ग्राफ़ के साथ सोर्स कंट्रोल और वेब प्रीव्यू पैनल शामिल हैं। डिस्क पर लगभग 7-8 MB। कोई टेलीमेट्री नहीं। कोई खाता नहीं।
 
 ## स्क्रीनशॉट
 
@@ -82,7 +82,7 @@ Terax एक हल्का, ओपन-सोर्स, टर्मिनल-�
 
 - **अपनी कुंजी वाले प्रदाता:** OpenAI, Anthropic, Google (Gemini), Groq, xAI (Grok), Cerebras, OpenRouter, DeepSeek, Mistral और कोई भी OpenAI-संगत endpoint
 - **स्थानीय / ऑफ़लाइन:** LM Studio, MLX, Ollama
-- **एजेंटिक वर्कफ़्लो:** योजनाएँ, सब-एजेंट, `TERAX.md` के माध्यम से प्रोजेक्ट मेमोरी, फ़ाइल पढ़ना / लिखना / एडिट / मल्टी-एडिट / grep / glob, अनुमोदन वाला bash और बैकग्राउंड प्रोसेस
+- **एजेंटिक वर्कफ़्लो:** योजनाएँ, सब-एजेंट, `TERMIGO.md` के माध्यम से प्रोजेक्ट मेमोरी, फ़ाइल पढ़ना / लिखना / एडिट / मल्टी-एडिट / grep / glob, अनुमोदन वाला bash और बैकग्राउंड प्रोसेस
 - **कोडिंग एजेंट ऑर्केस्ट्रेशन:** टर्मिनल में Claude Code शुरू करें, उसका आउटपुट देखें और अनुमोदन वाले टूल से अगला काम भेजें
 - **कम्पोज़र:** `#handle` से प्रॉम्प्ट स्निपेट, `@path` से फ़ाइलें, वॉइस इनपुट और एक्सप्लोरर या चयन से अटैचमेंट
 - अपने सिस्टम प्रॉम्प्ट और टूल सबसेट वाले **कस्टम एजेंट**
@@ -90,7 +90,7 @@ Terax एक हल्का, ओपन-सोर्स, टर्मिनल-�
 
 ## इंस्टॉल करें
 
-नवीनतम इंस्टॉलर [Releases](https://github.com/crynta/terax-ai/releases/latest) पेज पर हैं। Terax वहीं से अपने आप अपडेट होता है।
+नवीनतम इंस्टॉलर [Releases](https://github.com/crynta/termigo-ai/releases/latest) पेज पर हैं। Termigo वहीं से अपने आप अपडेट होता है।
 
 ### Windows नोट्स
 
@@ -99,14 +99,14 @@ Terax एक हल्का, ओपन-सोर्स, टर्मिनल-�
 
 ### Linux नोट्स
 
-- **Arch / AUR:** `yay -S terax-bin` या `paru`। यह नवीनतम रिलीज़ का अनुसरण करता है।
-- **NixOS / Nix:** आधिकारिक flake का उपयोग करें। NixOS के बाहर `nix profile install github:crynta/terax-ai` चलाएँ। NixOS में flake आयात करें और `inputs.terax.packages.${pkgs.system}.terax` को `environment.systemPackages` में जोड़ें। आसान सेटअप के लिए `nixosModules.terax` भी उपलब्ध है।
-- **AppImage:** FUSE आवश्यक है। इसके बिना `./Terax_*.AppImage --appimage-extract-and-run` चलाएँ। Wayland पर रेंडरिंग समस्या हो तो `WEBKIT_DISABLE_DMABUF_RENDERER=1` आज़माएँ। `.deb` / `.rpm` पैकेज सिस्टम GTK स्टैक से जुड़ते हैं और आम तौर पर अधिक सुचारु चलते हैं।
+- **Arch / AUR:** `yay -S termigo-bin` या `paru`। यह नवीनतम रिलीज़ का अनुसरण करता है।
+- **NixOS / Nix:** आधिकारिक flake का उपयोग करें। NixOS के बाहर `nix profile install github:crynta/termigo-ai` चलाएँ। NixOS में flake आयात करें और `inputs.termigo.packages.${pkgs.system}.termigo` को `environment.systemPackages` में जोड़ें। आसान सेटअप के लिए `nixosModules.termigo` भी उपलब्ध है।
+- **AppImage:** FUSE आवश्यक है। इसके बिना `./Termigo_*.AppImage --appimage-extract-and-run` चलाएँ। Wayland पर रेंडरिंग समस्या हो तो `WEBKIT_DISABLE_DMABUF_RENDERER=1` आज़माएँ। `.deb` / `.rpm` पैकेज सिस्टम GTK स्टैक से जुड़ते हैं और आम तौर पर अधिक सुचारु चलते हैं।
 
 ## AI कॉन्फ़िगर करें
 
 1. **सेटिंग्स -> AI** खोलें।
-2. प्रदाता चुनें और API कुंजी पेस्ट करें। स्थानीय इन्फ़रेंस के लिए Terax को LM Studio / MLX / Ollama endpoint पर निर्देशित करें।
+2. प्रदाता चुनें और API कुंजी पेस्ट करें। स्थानीय इन्फ़रेंस के लिए Termigo को LM Studio / MLX / Ollama endpoint पर निर्देशित करें।
 3. कुंजियाँ `keyring` के माध्यम से OS कीचेन में लिखी जाती हैं। वे कभी भी डिस्क या localStorage में नहीं लिखी जातीं।
 
 ## सोर्स से बिल्ड करें
@@ -153,4 +153,4 @@ Windows बिल्ड [SignPath.io](https://signpath.io) द्वारा �
 
 ## लाइसेंस
 
-Terax Apache-2.0 लाइसेंस के अंतर्गत है। निर्भरताओं की जानकारी के लिए [Apache License 2.0](../../LICENSE) देखें।
+Termigo Apache-2.0 लाइसेंस के अंतर्गत है। निर्भरताओं की जानकारी के लिए [Apache License 2.0](../../LICENSE) देखें।

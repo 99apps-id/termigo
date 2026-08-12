@@ -77,7 +77,7 @@ jobs:
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TERAX_CLI_TARGET: ${{ matrix.rust-target }}
+          TERMIGO_CLI_TARGET: ${{ matrix.rust-target }}
 
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -90,7 +90,7 @@ jobs:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: "Terax ${{ github.ref_name }}"
+          releaseName: "Termigo ${{ github.ref_name }}"
           releaseBody: "See the assets to download and install. Auto-update is built in."
           releaseDraft: true
           prerelease: false
@@ -151,8 +151,8 @@ jobs:
             test ! -e "squashfs-root/usr/lib/$lib" \
               || { echo "lib still present after repack: $lib"; exit 1; }
           done
-          test -x squashfs-root/usr/bin/terax \
-            || { echo "terax binary missing from repacked AppImage"; exit 1; }
+          test -x squashfs-root/usr/bin/termigo \
+            || { echo "termigo binary missing from repacked AppImage"; exit 1; }
           popd >/dev/null
 
           cp "$WORK/$BASENAME" "$APPIMAGE"
@@ -183,8 +183,8 @@ jobs:
           if (-not $exe) { throw "No NSIS .exe produced by Tauri" }
           if (-not $msi) { throw "No .msi produced by Tauri" }
           New-Item -ItemType Directory -Path signpath-staging -Force | Out-Null
-          Copy-Item $exe.FullName signpath-staging/terax-setup.exe
-          Copy-Item $msi.FullName signpath-staging/terax.msi
+          Copy-Item $exe.FullName signpath-staging/termigo-setup.exe
+          Copy-Item $msi.FullName signpath-staging/termigo.msi
           "EXE_REAL_PATH=$($exe.FullName)" | Out-File $env:GITHUB_ENV -Append
           "MSI_REAL_PATH=$($msi.FullName)" | Out-File $env:GITHUB_ENV -Append
 
@@ -206,7 +206,7 @@ jobs:
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
           organization-id: 'df665bf4-9b76-41ae-9596-1ba3a23010aa'
-          project-slug: 'terax-ai'
+          project-slug: 'termigo-ai'
           signing-policy-slug: 'release-signing'
           artifact-configuration-slug: 'initial'
           github-artifact-id: ${{ steps.upload-windows.outputs.artifact-id }}
@@ -223,8 +223,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           $ErrorActionPreference = "Stop"
-          $signedExe = "signed/terax-setup.exe"
-          $signedMsi = "signed/terax.msi"
+          $signedExe = "signed/termigo-setup.exe"
+          $signedMsi = "signed/termigo.msi"
           foreach ($f in @($signedExe, $signedMsi)) {
             if (-not (Test-Path $f)) { throw "Signed artifact missing: $f" }
             $sig = Get-AuthenticodeSignature $f

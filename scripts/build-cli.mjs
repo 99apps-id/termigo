@@ -47,7 +47,7 @@ function requireArtifact(path, label) {
 }
 
 const target =
-  process.env.TERAX_CLI_TARGET?.trim() ||
+  process.env.TERMIGO_CLI_TARGET?.trim() ||
   process.env.CARGO_BUILD_TARGET?.trim() ||
   hostTriple();
 const cargoArgs = [
@@ -56,9 +56,9 @@ const cargoArgs = [
   "--manifest-path",
   join(tauriDir, "Cargo.toml"),
   "--package",
-  "terax-cli",
+  "termigo-cli",
   "--bin",
-  "terax-cli",
+  "termigo-cli",
   "--target",
   target,
 ];
@@ -73,12 +73,12 @@ const source = join(
   "target",
   target,
   profile,
-  `terax-cli${extension}`,
+  `termigo-cli${extension}`,
 );
 const destination = join(
   tauriDir,
   "binaries",
-  `terax-cli-${target}${extension}`,
+  `termigo-cli-${target}${extension}`,
 );
 requireArtifact(source, "Built CLI artifact");
 mkdirSync(dirname(destination), { recursive: true });

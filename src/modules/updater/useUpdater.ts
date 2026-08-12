@@ -4,10 +4,10 @@ import { check, type Update } from "@tauri-apps/plugin-updater";
 import { useCallback, useEffect, useState } from "react";
 import { IS_LINUX } from "@/lib/platform";
 
-const LAST_CHECK_KEY = "terax:updater:last-check";
+const LAST_CHECK_KEY = "termigo:updater:last-check";
 const CHECK_INTERVAL_MS = 30 * 60 * 1000;
 const GITHUB_LATEST_RELEASE =
-  "https://api.github.com/repos/crynta/terax-ai/releases/latest";
+  "https://api.github.com/repos/99apps-id/termigo/releases/latest";
 
 export interface ManualUpdateInfo {
   version: string;

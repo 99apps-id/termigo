@@ -1,12 +1,12 @@
-# Contributing to Terax
+# Contributing to Termigo
 
-Terax is a solo-maintained project with a strong product direction. Contributions are welcome, but **alignment matters more than volume**.
+Termigo is a solo-maintained project with a strong product direction. Contributions are welcome, but **alignment matters more than volume**.
 
 This document helps you decide *whether* and *how* to contribute in a way that's likely to get merged, so neither of us wastes time.
 
 ## How this project is run
 
-- Terax has one active maintainer ([@crynta](https://github.com/crynta)).
+- Termigo has one active maintainer ([@99apps-id](https://github.com/99apps-id)).
 - Review bandwidth is limited.
 - Not every contribution can be accepted, even if it's technically correct. Alignment with project direction matters as much as code quality.
 - For scope and direction, see [ROADMAP.md](ROADMAP.md). Read it before opening anything non-trivial.
@@ -22,7 +22,7 @@ pnpm tauri dev
 
 Prereqs: Rust (stable), Node 20+, pnpm, plus your platform's [Tauri prerequisites](https://tauri.app/start/prerequisites/).
 
-For the architecture and how to contribute safely, see [TERAX.md](TERAX.md) and the [docs/ index](docs/README.md).
+For the architecture and how to contribute safely, see [TERMIGO.md](TERMIGO.md) and the [docs/ index](docs/README.md).
 
 ## Where to discuss
 
@@ -74,7 +74,7 @@ A 10-minute conversation saves a 500-line PR that doesn't fit the roadmap.
 
 ## Quality bar
 
-Terax positions itself as **lightweight, fast, production-grade**. Every PR is reviewed against:
+Termigo positions itself as **lightweight, fast, production-grade**. Every PR is reviewed against:
 
 - `pnpm lint` clean
 - `pnpm check-types` clean
@@ -91,7 +91,7 @@ If you're not sure how to measure perf or what counts as a hot path, ask in Disc
 
 ## Changes to core subsystems require a test
 
-The most common way a PR breaks Terax is a **local fix with global blast radius**: the diff solves one reported case, reads fine, passes type-check and clippy, and silently breaks the same subsystem in every other case. Review alone does not catch these. A test does.
+The most common way a PR breaks Termigo is a **local fix with global blast radius**: the diff solves one reported case, reads fine, passes type-check and clippy, and silently breaks the same subsystem in every other case. Review alone does not catch these. A test does.
 
 So if your change touches behavior in any of these load-bearing paths, the PR must add or extend a test that locks the invariant you're relying on:
 
@@ -106,11 +106,11 @@ The bar for the test is real coverage of the contract, not a placeholder. Test t
 
 UI rendering, themes, syntax-highlight tables, and anything the type-checker already guarantees do not need tests.
 
-## What Terax is not
+## What Termigo is not
 
 To set expectations:
 
-- Terax is terminal-first, not an IDE clone. Focused capabilities such as LSP, AI autocomplete, formatting, source control, and previews belong when they stay fast, lazy, and resource-bounded.
+- Termigo is terminal-first, not an IDE clone. Focused capabilities such as LSP, AI autocomplete, formatting, source control, and previews belong when they stay fast, lazy, and resource-bounded.
 - Not building: Jupyter-style workspaces, integrated debugger and profiler suites, package manager UIs, a full web browser, unbounded background indexing, or an IDE-scale extension host.
 - This is not a curated "first open-source contribution" project. Beginners are welcome but expect normal review.
 - Mechanical refactors, broad style changes, drive-by rewrites are not helpful.

@@ -155,8 +155,8 @@ export async function buildLanguageModel(
         baseURL: "https://openrouter.ai/api/v1",
         apiKey: key,
         headers: {
-          "HTTP-Referer": "https://terax.ai",
-          "X-Title": "Terax",
+          "HTTP-Referer": "https://termigo.ai",
+          "X-Title": "Termigo",
         },
       })(resolvedModelId);
       break;
@@ -316,7 +316,7 @@ function buildStableSystem(
     : "";
   const memoryBlock =
     projectMemory && projectMemory.trim().length > 0
-      ? `\n\n## PROJECT — TERAX.md\n${projectMemory.trim()}`
+      ? `\n\n## PROJECT — TERMIGO.md\n${projectMemory.trim()}`
       : "";
   return `${base}${memoryBlock}${personaBlock}${customBlock}`;
 }

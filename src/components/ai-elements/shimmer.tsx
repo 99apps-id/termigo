@@ -28,7 +28,7 @@ const ShimmerComponent = ({
     Component,
     {
       className: cn(
-        "terax-shimmer relative inline-block bg-clip-text text-transparent",
+        "termigo-shimmer relative inline-block bg-clip-text text-transparent",
         className
       ),
       style: {

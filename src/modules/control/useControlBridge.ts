@@ -92,7 +92,7 @@ async function respond(
     response,
   });
   if (!delivered) {
-    console.warn(`[terax] control response expired: ${requestId}`);
+    console.warn(`[termigo] control response expired: ${requestId}`);
   }
 }
 
@@ -130,14 +130,14 @@ export function useControlBridge({
               await window.setFocus();
               focused = true;
             } catch (error) {
-              console.warn("[terax] could not focus control target:", error);
+              console.warn("[termigo] could not focus control target:", error);
             }
           }
           const tabId = onOpen({ ...open, spaceId: context.space_id });
           if (tabId === null) {
             throw new RequestError(
               "open_failed",
-              "Terax could not create an editor tab",
+              "Termigo could not create an editor tab",
             );
           }
           await new Promise<void>((resolve) =>
@@ -167,13 +167,13 @@ export function useControlBridge({
             : { code: "frontend_error", message: String(error) };
         await respond(request.id, { ok: false, error: responseError }).catch(
           (responseError) => {
-            console.error("[terax] control response failed:", responseError);
+            console.error("[termigo] control response failed:", responseError);
           },
         );
       }
     };
 
-    void listen<ControlRequest>("terax:control-request", (event) => {
+    void listen<ControlRequest>("termigo:control-request", (event) => {
       void handleRequest(event.payload);
     })
       .then((stop) => {
@@ -185,14 +185,14 @@ export function useControlBridge({
         return setFrontendReady(true);
       })
       .catch((error) => {
-        console.error("[terax] control bridge setup failed:", error);
+        console.error("[termigo] control bridge setup failed:", error);
       });
 
     return () => {
       disposed = true;
       unlisten?.();
       void setFrontendReady(false).catch((error) => {
-        console.error("[terax] control bridge cleanup failed:", error);
+        console.error("[termigo] control bridge cleanup failed:", error);
       });
     };
   }, [ready, tabsRef, activeTabIdRef, activeSpaceIdRef, onOpen]);

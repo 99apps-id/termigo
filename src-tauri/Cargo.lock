@@ -5329,7 +5329,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "terax"
+name = "termigo"
 version = "0.8.6"
 dependencies = [
  "bytes",
@@ -5367,26 +5367,26 @@ dependencies = [
  "tauri-plugin-updater",
  "tauri-plugin-window-state",
  "tempfile",
- "terax-control-protocol",
+ "termigo-control-protocol",
  "tokio",
  "which",
  "windows-sys 0.61.2",
 ]
 
 [[package]]
-name = "terax-cli"
+name = "termigo-cli"
 version = "0.8.6"
 dependencies = [
  "dirs 6.0.0",
  "libc",
  "serde_json",
  "tempfile",
- "terax-control-protocol",
+ "termigo-control-protocol",
  "windows-sys 0.61.2",
 ]
 
 [[package]]
-name = "terax-control-protocol"
+name = "termigo-control-protocol"
 version = "0.8.6"
 dependencies = [
  "serde",

@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Terax",
+  "productName": "Termigo",
   "version": "0.8.6",
-  "identifier": "app.crynta.terax",
+  "identifier": "id.99apps.termigo",
   "build": {
     "beforeDevCommand": "pnpm build:cli:dev && pnpm dev",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
   "app": {
     "windows": [
       {
-        "title": "Terax",
+        "title": "Termigo",
         "width": 800,
         "height": 600,
         "minWidth": 420,
@@ -35,13 +35,13 @@
   "bundle": {
     "active": true,
     "externalBin": [
-      "binaries/terax-cli"
+      "binaries/termigo-cli"
     ],
     "targets": "all",
-    "createUpdaterArtifacts": true,
-    "copyright": "Copyright 2026 Crynta",
+    "createUpdaterArtifacts": false,
+    "copyright": "Copyright 2026 99apps-id (fork of Terax by Crynta)",
     "license": "Apache-2.0",
-    "publisher": "Crynta",
+    "publisher": "99apps-id",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -87,10 +87,10 @@
     },
     "category": "DeveloperTool",
     "shortDescription": "AI-native terminal emulator",
-    "longDescription": "Terax — an open-source AI-native terminal emulator with multi-tab, file explorer, code editor, web preview, voice input, and AI agents.",
+    "longDescription": "Termigo — an open-source AI-native terminal emulator with multi-tab, file explorer, code editor, web preview, voice input, and AI agents.",
     "fileAssociations": [
       {
-        "name": "Terax Document",
+        "name": "Termigo Document",
         "role": "Editor",
         "mimeType": "text/plain",
         "ext": [
@@ -109,9 +109,10 @@
   },
   "plugins": {
     "updater": {
+      "active": false,
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDNCQUJGRDhBQjYwRTM0NjkKUldScE5BNjJpdjJyT3dIN0dqbUpHaDA4QW1GaDVmTTllRXdZVk96dFNTRUZ3Y2hiVGszYjFqRloK",
       "endpoints": [
-        "https://github.com/crynta/terax-ai/releases/latest/download/latest.json"
+        "https://github.com/99apps-id/termigo/releases/latest/download/latest.json"
       ]
     }
   }

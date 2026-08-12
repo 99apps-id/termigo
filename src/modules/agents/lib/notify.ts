@@ -22,7 +22,7 @@ export async function osNotify(title: string, body: string): Promise<boolean> {
     sendNotification({ title, body });
     return true;
   } catch (e) {
-    console.warn("[terax] os notification failed:", e);
+    console.warn("[termigo] os notification failed:", e);
     return false;
   }
 }

@@ -157,7 +157,7 @@ export function pasteIntoLeaf(leafId: number, text: string): boolean {
 function getRecycler(): HTMLDivElement {
   if (recyclerEl?.isConnected) return recyclerEl;
   const el = document.createElement("div");
-  el.setAttribute("data-terax-recycler", "");
+  el.setAttribute("data-termigo-recycler", "");
   el.style.cssText =
     "position:fixed;left:-99999px;top:-99999px;width:1024px;height:768px;overflow:hidden;pointer-events:none;contain:strict;";
   document.body.appendChild(el);
@@ -225,7 +225,7 @@ function createSlot(): Slot {
 
   const host = document.createElement("div");
   host.style.cssText = "width:100%;height:100%;";
-  host.setAttribute("data-terax-slot", String(slots.length));
+  host.setAttribute("data-termigo-slot", String(slots.length));
   getRecycler().appendChild(host);
   term.open(host);
 
@@ -472,7 +472,7 @@ function bindSlot(slot: Slot, p: AcquireParams): void {
       try {
         slot.term.write(p.snapshot);
       } catch (e) {
-        console.warn("[terax] snapshot replay failed:", e);
+        console.warn("[termigo] snapshot replay failed:", e);
       }
     }
     if (p.altScreen) {
@@ -641,7 +641,7 @@ function serializeSlot(slot: Slot): SerializeOutput {
     );
     snapshot = slot.serializeAddon.serialize({ scrollback: cap });
   } catch (e) {
-    console.warn("[terax] serialize failed:", e);
+    console.warn("[termigo] serialize failed:", e);
   }
   return {
     snapshot,
@@ -757,7 +757,7 @@ function disposeSlot(slot: Slot): void {
   try {
     slot.term.dispose();
   } catch (e) {
-    console.warn("[terax] slot dispose failed:", e);
+    console.warn("[termigo] slot dispose failed:", e);
   }
   slot.host.remove();
   const i = slots.indexOf(slot);
@@ -812,7 +812,7 @@ function attachWebgl(slot: Slot): void {
     slot.webglAddon = webgl;
     slot.webglCanvases = added;
   } catch (e) {
-    console.warn("[terax-webgl] unavailable:", e);
+    console.warn("[termigo-webgl] unavailable:", e);
   }
 }
 
@@ -824,7 +824,7 @@ function disposeSlotWebgl(slot: Slot): void {
   try {
     addon.dispose();
   } catch (e) {
-    console.warn("[terax-webgl] dispose failed:", e);
+    console.warn("[termigo-webgl] dispose failed:", e);
   }
   try {
     const r = (

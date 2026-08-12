@@ -82,7 +82,7 @@ export function useExplorerFileDrop({ rootPath, isDir, onCopied }: Options) {
         if (disposed) fn();
         else unlisten = fn;
       })
-      .catch((err) => console.error("[terax] explorer drop listen failed:", err));
+      .catch((err) => console.error("[termigo] explorer drop listen failed:", err));
 
     return () => {
       disposed = true;

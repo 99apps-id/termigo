@@ -465,7 +465,7 @@ export function GeneralSection() {
         <Label>Agents</Label>
         <SettingRow
           title="Coding agent notifications"
-          description="Alert when Claude Code or Codex running in a terminal needs your input or finishes. Desktop notification when Terax is unfocused, in-app otherwise."
+          description="Alert when Claude Code or Codex running in a terminal needs your input or finishes. Desktop notification when Termigo is unfocused, in-app otherwise."
         >
           <Switch
             checked={agentNotifications}
@@ -479,7 +479,7 @@ export function GeneralSection() {
         <div className="flex flex-col gap-2">
           <SettingRow
             title="Launch at login"
-            description="Open Terax automatically when you sign in."
+            description="Open Termigo automatically when you sign in."
           >
             <Switch
               checked={autostart}

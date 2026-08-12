@@ -1,8 +1,8 @@
 # Security model
 
-This guide elaborates on `TERAX.md`. If anything here conflicts with `TERAX.md`, `TERAX.md` wins.
+This guide elaborates on `TERMIGO.md`. If anything here conflicts with `TERMIGO.md`, `TERMIGO.md` wins.
 
-Terax runs shells, reads and writes files, and sends data to AI providers. The security model is defense-in-depth: no single guard is enough, so every boundary validates input before acting on it.
+Termigo runs shells, reads and writes files, and sends data to AI providers. The security model is defense-in-depth: no single guard is enough, so every boundary validates input before acting on it.
 
 ## Boundaries
 
@@ -58,7 +58,7 @@ Auto-send after approval uses `lastAssistantMessageIsCompleteWithApprovalRespons
 3. Block cloud metadata endpoints (`169.254.169.254`, `metadata.google.internal`, AWS IPv6 metadata, etc.).
 4. Pin reqwest to the resolved IPs so a second DNS lookup cannot return a different address (DNS rebinding).
 
-Local LLM endpoints are explicitly allowed because the user opted in by pointing Terax at them, but they are still classified and logged.
+Local LLM endpoints are explicitly allowed because the user opted in by pointing Termigo at them, but they are still classified and logged.
 
 ## Secret storage
 
@@ -68,7 +68,7 @@ API keys are stored via `secrets_*` commands (`src-tauri/src/modules/secrets.rs`
 - Windows: Credential Manager via `keyring`
 - Linux: a JSON file in the app's local data dir with mode `0600` (atomic write to `.tmp` then rename)
 
-Service constant: `terax-ai`. Keys never touch disk outside the keychain/Linux secrets file, never go in `localStorage`, and never appear in logs.
+Service constant: `termigo-ai`. Keys never touch disk outside the keychain/Linux secrets file, never go in `localStorage`, and never appear in logs.
 
 ## OSC trust gating
 
@@ -78,7 +78,7 @@ The terminal parses OSC sequences from the PTY byte stream:
 - **OSC 133 A/B/C/D** marks prompt/command boundaries.
 - **OSC 777** is used by the agent detector to signal coding-agent state transitions.
 
-The agent detector (`src-tauri/src/modules/pty/agent_detect.rs`) is armed by `OSC 133;C;<cmd>` or by a self-armed marker and emits `terax:agent-signal` events. It is driven **only by OSC sequences**, never by raw output, so a repainting TUI never flaps.
+The agent detector (`src-tauri/src/modules/pty/agent_detect.rs`) is armed by `OSC 133;C;<cmd>` or by a self-armed marker and emits `termigo:agent-signal` events. It is driven **only by OSC sequences**, never by raw output, so a repainting TUI never flaps.
 
 ## Invariants
 
@@ -90,7 +90,7 @@ The agent detector (`src-tauri/src/modules/pty/agent_detect.rs`) is armed by `OS
 
 ## See also
 
-- [`TERAX.md`](../../TERAX.md) - the architecture source of truth
+- [`TERMIGO.md`](../../TERMIGO.md) - the architecture source of truth
 - [`docs/README.md`](../README.md) - index of contributor guides
 - [Two-process model](two-process-model.md) - IPC boundary and command catalog
 - [AI subsystem](ai-subsystem.md) - tools, approval flow, and provider handling

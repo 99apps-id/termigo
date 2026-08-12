@@ -123,7 +123,7 @@ reviews:
         artifact production. A broken release affects every user's auto-update.
     - path: "**/*.{md,mdx}"
       instructions: >-
-        Only flag substance, not style. Terax is positioned terminal-first; flag
+        Only flag substance, not style. Termigo is positioned terminal-first; flag
         README or marketing rewrites that reframe it as an IDE or generic developer
         environment.
 
@@ -148,7 +148,7 @@ knowledge_base:
   code_guidelines:
     enabled: true
     filePatterns:
-      - "**/TERAX.md"
+      - "**/TERMIGO.md"
       - "**/CLAUDE.md"
       - "**/AGENTS.md"
   learnings:

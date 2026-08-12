@@ -1,18 +1,18 @@
 <div align="center">
-  <img src="../../public/logo.png" width="144" height="144" alt="Terax" />
-  <h1>Terax</h1>
+  <img src="../../public/logo.png" width="144" height="144" alt="Termigo" />
+  <h1>Termigo</h1>
 
   <p><strong>Leichtgewichtiger, terminalorientierter und KI-nativer Entwicklungsarbeitsbereich.</strong></p>
 
   <p>
-    <a href="https://terax.app">Website</a> ·
-    <a href="https://terax.app/docs">Dokumentation</a> ·
-    <a href="https://github.com/crynta/Terax-website">Quellcode der Website</a>
+    <a href="https://termigo.app">Website</a> ·
+    <a href="https://termigo.app/docs">Dokumentation</a> ·
+    <a href="https://github.com/crynta/Termigo-website">Quellcode der Website</a>
   </p>
 
   <p>
-    <img src="https://img.shields.io/github/v/release/crynta/terax-ai?label=version&color=blue" alt="Version" />
-    <img src="https://img.shields.io/github/downloads/crynta/terax-ai/total?label=downloads&color=blue" alt="Downloads" />
+    <img src="https://img.shields.io/github/v/release/crynta/termigo-ai?label=version&color=blue" alt="Version" />
+    <img src="https://img.shields.io/github/downloads/crynta/termigo-ai/total?label=downloads&color=blue" alt="Downloads" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey" alt="Plattform" />
     <a href="https://discord.gg/tyveTUyEp7"><img src="https://img.shields.io/badge/Discord-5865F2?logo=discord&logoColor=white" alt="Discord" /></a>
     <a href="https://www.youtube.com/@crynta"><img src="https://img.shields.io/badge/Youtube-FF0000?logo=youtube&logoColor=white" alt="YouTube" /></a>
@@ -35,7 +35,7 @@
 
 ---
 
-Terax ist eine leichtgewichtige, quelloffene, terminalorientierte und KI-native Entwicklungsumgebung (ADE), die auf Tauri 2 + Rust und React 19 basiert. Sie bietet ein natives PTY-Backend mit WebGL-Renderer, eine agentische KI-Seitenleiste für eigene Schlüssel oder vollständig lokale Modelle sowie einen Code-Editor, Datei-Explorer, Quellcodeverwaltung mit Git-Graph und eine integrierte Webvorschau. Etwa 7-8 MB auf der Festplatte. Keine Telemetrie. Kein Konto.
+Termigo ist eine leichtgewichtige, quelloffene, terminalorientierte und KI-native Entwicklungsumgebung (ADE), die auf Tauri 2 + Rust und React 19 basiert. Sie bietet ein natives PTY-Backend mit WebGL-Renderer, eine agentische KI-Seitenleiste für eigene Schlüssel oder vollständig lokale Modelle sowie einen Code-Editor, Datei-Explorer, Quellcodeverwaltung mit Git-Graph und eine integrierte Webvorschau. Etwa 7-8 MB auf der Festplatte. Keine Telemetrie. Kein Konto.
 
 ## Screenshots
 
@@ -106,7 +106,7 @@ Terax ist eine leichtgewichtige, quelloffene, terminalorientierte und KI-native 
 
 - **Anbieter mit eigenem Schlüssel:** OpenAI, Anthropic, Google (Gemini), Groq, xAI (Grok), Cerebras, OpenRouter, DeepSeek, Mistral sowie jeder OpenAI-kompatible Endpunkt
 - **Lokal / offline:** LM Studio, MLX, Ollama
-- **Agentischer Workflow:** Pläne, Sub-Agenten, Projektgedächtnis über `TERAX.md`, Lesen / Schreiben / Bearbeiten / Mehrfachbearbeitung / grep / glob, Bash mit Freigabe und Hintergrundprozesse
+- **Agentischer Workflow:** Pläne, Sub-Agenten, Projektgedächtnis über `TERMIGO.md`, Lesen / Schreiben / Bearbeiten / Mehrfachbearbeitung / grep / glob, Bash mit Freigabe und Hintergrundprozesse
 - **Orchestrierung von Coding-Agenten:** Claude Code in einem Terminal starten, Ausgabe prüfen und Folgeaufgaben über freigabepflichtige Tools senden
 - **Composer:** Prompt-Snippets über `#handle`, Dateien über `@path`, Spracheingabe und Anhängen aus Explorer oder Auswahl
 - **Eigene Agenten** mit eigenem System-Prompt und Tool-Teilsatz
@@ -114,7 +114,7 @@ Terax ist eine leichtgewichtige, quelloffene, terminalorientierte und KI-native 
 
 ## Installation
 
-Die neuesten Installationspakete stehen auf der Seite [Releases](https://github.com/crynta/terax-ai/releases/latest). Terax aktualisiert sich von dort automatisch.
+Die neuesten Installationspakete stehen auf der Seite [Releases](https://github.com/crynta/termigo-ai/releases/latest). Termigo aktualisiert sich von dort automatisch.
 
 ### Hinweise für Windows
 
@@ -123,14 +123,14 @@ Die neuesten Installationspakete stehen auf der Seite [Releases](https://github.
 
 ### Hinweise für Linux
 
-- **Arch / AUR:** `yay -S terax-bin` (oder `paru` usw.). Folgt der neuesten Version.
-- **NixOS / Nix:** Nutze den offiziellen Flake: `nix profile install github:crynta/terax-ai` außerhalb von NixOS. Unter NixOS importierst du den Flake und fügst `inputs.terax.packages.${pkgs.system}.terax` zu `environment.systemPackages` hinzu. Für eine einfachere Einrichtung ist auch `nixosModules.terax` verfügbar.
-- **AppImage:** Benötigt FUSE. Ohne FUSE: `./Terax_*.AppImage --appimage-extract-and-run`. Bei Darstellungsfehlern unter Wayland hilft möglicherweise `WEBKIT_DISABLE_DMABUF_RENDERER=1`. Die `.deb`- / `.rpm`-Pakete binden stattdessen den GTK-Stack des Systems ein und laufen meist flüssiger.
+- **Arch / AUR:** `yay -S termigo-bin` (oder `paru` usw.). Folgt der neuesten Version.
+- **NixOS / Nix:** Nutze den offiziellen Flake: `nix profile install github:crynta/termigo-ai` außerhalb von NixOS. Unter NixOS importierst du den Flake und fügst `inputs.termigo.packages.${pkgs.system}.termigo` zu `environment.systemPackages` hinzu. Für eine einfachere Einrichtung ist auch `nixosModules.termigo` verfügbar.
+- **AppImage:** Benötigt FUSE. Ohne FUSE: `./Termigo_*.AppImage --appimage-extract-and-run`. Bei Darstellungsfehlern unter Wayland hilft möglicherweise `WEBKIT_DISABLE_DMABUF_RENDERER=1`. Die `.deb`- / `.rpm`-Pakete binden stattdessen den GTK-Stack des Systems ein und laufen meist flüssiger.
 
 ## KI konfigurieren
 
 1. Öffne **Einstellungen -> KI**.
-2. Wähle einen Anbieter und füge deinen API-Schlüssel ein. Für lokale Inferenz verweist du Terax auf deinen LM Studio- / MLX- / Ollama-Endpunkt.
+2. Wähle einen Anbieter und füge deinen API-Schlüssel ein. Für lokale Inferenz verweist du Termigo auf deinen LM Studio- / MLX- / Ollama-Endpunkt.
 3. Schlüssel werden über `keyring` im Schlüsselbund des Betriebssystems gespeichert. Sie werden niemals auf die Festplatte oder in localStorage geschrieben.
 
 ## Aus dem Quellcode bauen
@@ -177,4 +177,4 @@ Windows-Builds werden mit einem kostenlosen Codesignaturzertifikat von [SignPath
 
 ## Lizenz
 
-Terax steht unter der Apache-2.0-Lizenz. Weitere Informationen zu unseren Abhängigkeiten findest du in der [Apache License 2.0](../../LICENSE).
+Termigo steht unter der Apache-2.0-Lizenz. Weitere Informationen zu unseren Abhängigkeiten findest du in der [Apache License 2.0](../../LICENSE).

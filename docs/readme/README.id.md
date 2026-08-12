@@ -1,12 +1,12 @@
 <div align="center">
-  <img src="../../public/logo.png" width="144" height="144" alt="Terax" />
-  <h1>Terax</h1>
+  <img src="../../public/logo.png" width="144" height="144" alt="Termigo" />
+  <h1>Termigo</h1>
   <p><strong>Ruang kerja pengembangan ringan, berfokus pada terminal, dan berteknologi AI.</strong></p>
-  <p><a href="https://terax.app">Situs web</a> · <a href="https://terax.app/docs">Dokumentasi</a> · <a href="https://github.com/crynta/Terax-website">Kode sumber situs web</a></p>
+  <p><a href="https://termigo.app">Situs web</a> · <a href="https://termigo.app/docs">Dokumentasi</a> · <a href="https://github.com/crynta/Termigo-website">Kode sumber situs web</a></p>
 
   <p>
-    <img src="https://img.shields.io/github/v/release/crynta/terax-ai?label=version&color=blue" alt="versi" />
-    <img src="https://img.shields.io/github/downloads/crynta/terax-ai/total?label=downloads&color=blue" alt="unduhan" />
+    <img src="https://img.shields.io/github/v/release/crynta/termigo-ai?label=version&color=blue" alt="versi" />
+    <img src="https://img.shields.io/github/downloads/crynta/termigo-ai/total?label=downloads&color=blue" alt="unduhan" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey" alt="platform" />
     <a href="https://discord.gg/tyveTUyEp7"><img src="https://img.shields.io/badge/Discord-5865F2?logo=discord&logoColor=white" alt="Discord" /></a>
     <a href="https://www.youtube.com/@crynta"><img src="https://img.shields.io/badge/Youtube-FF0000?logo=youtube&logoColor=white" alt="YouTube" /></a>
@@ -19,7 +19,7 @@
 
 ---
 
-Terax adalah lingkungan pengembangan (ADE) ringan, sumber terbuka, berfokus pada terminal, dan berteknologi AI yang dibangun dengan Tauri 2 + Rust dan React 19. Terax memiliki backend PTY native dengan perender WebGL, panel samping AI berbasis agen yang berjalan dengan kunci Anda sendiri atau model yang sepenuhnya lokal, serta editor kode, penjelajah berkas, kontrol sumber dengan grafik Git, dan panel pratinjau web. Sekitar 7-8 MB di disk. Tanpa telemetri. Tanpa akun.
+Termigo adalah lingkungan pengembangan (ADE) ringan, sumber terbuka, berfokus pada terminal, dan berteknologi AI yang dibangun dengan Tauri 2 + Rust dan React 19. Termigo memiliki backend PTY native dengan perender WebGL, panel samping AI berbasis agen yang berjalan dengan kunci Anda sendiri atau model yang sepenuhnya lokal, serta editor kode, penjelajah berkas, kontrol sumber dengan grafik Git, dan panel pratinjau web. Sekitar 7-8 MB di disk. Tanpa telemetri. Tanpa akun.
 
 ## Tangkapan layar
 
@@ -82,7 +82,7 @@ Terax adalah lingkungan pengembangan (ADE) ringan, sumber terbuka, berfokus pada
 
 - **Penyedia dengan kunci Anda sendiri:** OpenAI, Anthropic, Google (Gemini), Groq, xAI (Grok), Cerebras, OpenRouter, DeepSeek, Mistral, dan endpoint apa pun yang kompatibel dengan OpenAI
 - **Lokal / offline:** LM Studio, MLX, Ollama
-- **Alur kerja berbasis agen:** rencana, subagen, memori proyek melalui `TERAX.md`, baca / tulis / sunting / multisunting / grep / glob, bash dengan persetujuan, dan proses latar belakang
+- **Alur kerja berbasis agen:** rencana, subagen, memori proyek melalui `TERMIGO.md`, baca / tulis / sunting / multisunting / grep / glob, bash dengan persetujuan, dan proses latar belakang
 - **Orkestrasi agen pemrograman:** jalankan Claude Code di terminal, periksa output, dan kirim pekerjaan lanjutan melalui alat yang memerlukan persetujuan
 - **Komposer:** cuplikan prompt melalui `#handle`, berkas melalui `@path`, masukan suara, serta lampiran dari penjelajah atau pilihan
 - **Agen kustom** dengan prompt sistem dan subset alat sendiri
@@ -90,7 +90,7 @@ Terax adalah lingkungan pengembangan (ADE) ringan, sumber terbuka, berfokus pada
 
 ## Instalasi
 
-Penginstal terbaru tersedia di halaman [Releases](https://github.com/crynta/terax-ai/releases/latest). Terax melakukan pembaruan otomatis dari sana.
+Penginstal terbaru tersedia di halaman [Releases](https://github.com/crynta/termigo-ai/releases/latest). Termigo melakukan pembaruan otomatis dari sana.
 
 ### Catatan Windows
 
@@ -99,14 +99,14 @@ Penginstal terbaru tersedia di halaman [Releases](https://github.com/crynta/tera
 
 ### Catatan Linux
 
-- **Arch / AUR:** `yay -S terax-bin` atau `paru`. Paket mengikuti rilis terbaru.
-- **NixOS / Nix:** gunakan flake resmi. Di luar NixOS, jalankan `nix profile install github:crynta/terax-ai`. Di NixOS, impor flake dan tambahkan `inputs.terax.packages.${pkgs.system}.terax` ke `environment.systemPackages`. `nixosModules.terax` juga tersedia untuk pengaturan yang lebih sederhana.
-- **AppImage:** memerlukan FUSE. Tanpanya, jalankan `./Terax_*.AppImage --appimage-extract-and-run`. Jika ada masalah perenderan di Wayland, coba `WEBKIT_DISABLE_DMABUF_RENDERER=1`. Paket `.deb` / `.rpm` menggunakan stack GTK sistem dan biasanya lebih lancar.
+- **Arch / AUR:** `yay -S termigo-bin` atau `paru`. Paket mengikuti rilis terbaru.
+- **NixOS / Nix:** gunakan flake resmi. Di luar NixOS, jalankan `nix profile install github:crynta/termigo-ai`. Di NixOS, impor flake dan tambahkan `inputs.termigo.packages.${pkgs.system}.termigo` ke `environment.systemPackages`. `nixosModules.termigo` juga tersedia untuk pengaturan yang lebih sederhana.
+- **AppImage:** memerlukan FUSE. Tanpanya, jalankan `./Termigo_*.AppImage --appimage-extract-and-run`. Jika ada masalah perenderan di Wayland, coba `WEBKIT_DISABLE_DMABUF_RENDERER=1`. Paket `.deb` / `.rpm` menggunakan stack GTK sistem dan biasanya lebih lancar.
 
 ## Konfigurasi AI
 
 1. Buka **Pengaturan -> AI**.
-2. Pilih penyedia dan tempel kunci API. Untuk inferensi lokal, arahkan Terax ke endpoint LM Studio / MLX / Ollama.
+2. Pilih penyedia dan tempel kunci API. Untuk inferensi lokal, arahkan Termigo ke endpoint LM Studio / MLX / Ollama.
 3. Kunci disimpan di keychain sistem operasi melalui `keyring`. Kunci tidak pernah ditulis ke disk atau localStorage.
 
 ## Build dari sumber
@@ -153,4 +153,4 @@ Build Windows ditandatangani dengan sertifikat gratis dari [SignPath.io](https:/
 
 ## Lisensi
 
-Terax dilisensikan di bawah Apache-2.0. Untuk informasi tentang dependensi, lihat [Apache License 2.0](../../LICENSE).
+Termigo dilisensikan di bawah Apache-2.0. Untuk informasi tentang dependensi, lihat [Apache License 2.0](../../LICENSE).

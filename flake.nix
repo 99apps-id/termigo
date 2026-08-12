@@ -1,5 +1,5 @@
 {
-  description = "Terax - open-source lightweight cross-platform AI-native terminal (ADE)";
+  description = "Termigo - open-source lightweight cross-platform AI-native terminal (ADE)";
 
   inputs.nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
 
@@ -9,16 +9,16 @@
     packages = forAllSystems (system: let
       pkgs = nixpkgs.legacyPackages.${system};
     in {
-      terax = pkgs.callPackage ./nix/package.nix { };
-      default = self.packages.${system}.terax;
+      termigo = pkgs.callPackage ./nix/package.nix { };
+      default = self.packages.${system}.termigo;
     });
 
-    nixosModules.terax = { pkgs, ... }: {
-      environment.systemPackages = [ self.packages.${pkgs.system}.terax ];
+    nixosModules.termigo = { pkgs, ... }: {
+      environment.systemPackages = [ self.packages.${pkgs.system}.termigo ];
     };
 
-    darwinModules.terax = { pkgs, ... }: {
-      environment.systemPackages = [ self.packages.${pkgs.system}.terax ];
+    darwinModules.termigo = { pkgs, ... }: {
+      environment.systemPackages = [ self.packages.${pkgs.system}.termigo ];
     };
   };
 }

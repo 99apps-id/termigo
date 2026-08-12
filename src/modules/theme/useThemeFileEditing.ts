@@ -43,12 +43,12 @@ export function useThemeFileEditing({ tabsRef, openFileTab }: Params) {
                 return;
               const parsed = parseThemeFile(res.content);
               if (!parsed.ok) {
-                console.warn("[terax] theme not applied:", parsed.error);
+                console.warn("[termigo] theme not applied:", parsed.error);
                 return;
               }
               await saveCustomTheme(parsed.theme);
             } catch (e) {
-              console.warn("[terax] theme ingest failed:", e);
+              console.warn("[termigo] theme ingest failed:", e);
             }
           })();
         },

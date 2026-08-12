@@ -1,18 +1,18 @@
 # Roadmap
 
-Terax direction, what's shipped, what's coming, and what's deliberately out of scope.
+Termigo direction, what's shipped, what's coming, and what's deliberately out of scope.
 
-This file is updated as direction evolves. For day-to-day work, see [GitHub Issues](https://github.com/crynta/terax-ai/issues) and the Projects board.
+This file is updated as direction evolves. For day-to-day work, see [GitHub Issues](https://github.com/99apps-id/termigo/issues) and the Projects board.
 
-## What Terax is
+## What Termigo is
 
-Terax is a fast, lightweight, terminal-first AI-native development environment (ADE). It pairs a native PTY backend with a modern UI: multi-tab terminals, an integrated code editor, a file explorer, source control, and a first-class AI agent system that works with your own API keys or fully local models. About 7-8 MB on disk. No telemetry. Keys stored in the OS keychain.
+Termigo is a fast, lightweight, terminal-first AI-native development environment (ADE). It pairs a native PTY backend with a modern UI: multi-tab terminals, an integrated code editor, a file explorer, source control, and a first-class AI agent system that works with your own API keys or fully local models. About 7-8 MB on disk. No telemetry. Keys stored in the OS keychain.
 
 The product is opinionated: terminal-first, AI as a primitive (not a sidebar), lightweight always, cross-platform without compromise.
 
-## What Terax is not
+## What Termigo is not
 
-- Not an IDE clone. Terax selectively integrates high-value editor capabilities such as LSP, AI autocomplete, formatting, source control, and previews without adopting the heavyweight runtime and always-on background services of a traditional IDE.
+- Not an IDE clone. Termigo selectively integrates high-value editor capabilities such as LSP, AI autocomplete, formatting, source control, and previews without adopting the heavyweight runtime and always-on background services of a traditional IDE.
 - Not a browser. Web preview exists for local dev servers and lightweight doc viewing only.
 - Not a general workspace. Tools and formats that pull the product away from the terminal-first surface are out of scope.
 - Not a one-size-fits-all CLI replacement. The goal is the best terminal-first AI-native development environment, not a shell with extras.
@@ -139,19 +139,19 @@ See `good-first-issue` and `help-wanted` labels on GitHub Issues for concrete ta
 
 ## Out of scope
 
-Categories that will not be built into Terax. Individual feature requests in these categories will be closed.
+Categories that will not be built into Termigo. Individual feature requests in these categories will be closed.
 
 - **Heavyweight IDE infrastructure.** Integrated debugger and profiler suites, unbounded background indexing, and always-resident extension hosts are out of scope. Focused LSP, autocomplete, formatting, and editor workflows remain in scope when they are opt-in, lazy, and resource-bounded.
-- **Notebook and document workspaces.** Anything that turns Terax into a document host rather than a terminal.
+- **Notebook and document workspaces.** Anything that turns Termigo into a document host rather than a terminal.
 - **Package manager and toolchain UIs.** Use `npm`, `pip`, `cargo` and friends in the terminal directly.
 - **Full web browser features.** Preview pane stays scoped to local dev servers and lightweight doc viewing. No navigation history, no bookmarks, no dev tools.
-- **Telemetry, analytics, accounts.** Terax stays BYOK and offline-respectful.
+- **Telemetry, analytics, accounts.** Termigo stays BYOK and offline-respectful.
 - **Extension marketplaces at IDE scale.** Narrowly-scoped AI tool / skill bundles may happen eventually. Arbitrary UI or behavior extensions will not.
-- **Third-party subscription session bridges.** Forwarding cloud subscription auth (provider-managed login sessions) through Terax is not technically feasible for third-party clients.
+- **Third-party subscription session bridges.** Forwarding cloud subscription auth (provider-managed login sessions) through Termigo is not technically feasible for third-party clients.
 
 ## Decision authority
 
-Direction and scope decisions are made by [@crynta](https://github.com/crynta). Trusted reviewers (informal, no fixed roles yet) provide input on security, performance, and platform-specific areas.
+Direction and scope decisions are made by [@99apps-id](https://github.com/99apps-id). Trusted reviewers (informal, no fixed roles yet) provide input on security, performance, and platform-specific areas.
 
 If a PR is closed and you disagree, raise it in Discord. Happy to discuss, not happy to be ambushed in a PR comment thread.
 

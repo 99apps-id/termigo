@@ -10,7 +10,7 @@ use std::time::{Duration, SystemTime};
 
 use serde_json::{json, Value};
 use tauri::{Emitter, Manager};
-use terax_control_protocol::{
+use termigo_control_protocol::{
     ControlDescriptor, ControlRequest, ControlResponse, FrontendRequest, FrontendResponse,
     OpenParams, MAX_MESSAGE_BYTES, METHODS, METHOD_CAPABILITIES, METHOD_IDENTIFY, METHOD_OPEN,
     METHOD_PING, PROTOCOL_VERSION, SERVER_RESPONSE_ID,
@@ -18,7 +18,7 @@ use terax_control_protocol::{
 
 use crate::modules::{fs, workspace};
 
-const CONTROL_EVENT: &str = "terax:control-request";
+const CONTROL_EVENT: &str = "termigo:control-request";
 const FRONTEND_TIMEOUT: Duration = Duration::from_secs(5);
 const IO_TIMEOUT: Duration = Duration::from_secs(7);
 const MAX_PENDING_REQUESTS: usize = 32;
@@ -120,7 +120,7 @@ pub fn start(app: tauri::AppHandle, state: ControlState) -> Result<(), String> {
         match prepare_cli_launcher(&descriptor_path, cli_path) {
             Ok(dir) => Some(dir),
             Err(error) => {
-                log::warn!("could not prepare terax CLI launcher: {error}");
+                log::warn!("could not prepare termigo CLI launcher: {error}");
                 None
             }
         }
@@ -155,12 +155,12 @@ pub fn start(app: tauri::AppHandle, state: ControlState) -> Result<(), String> {
     }
 
     if cli_path.is_none() {
-        log::warn!("bundled terax-cli executable not found; shell alias disabled");
+        log::warn!("bundled termigo-cli executable not found; shell alias disabled");
     }
 
     let listener_state = state.clone();
     if let Err(error) = thread::Builder::new()
-        .name("terax-control-listener".into())
+        .name("termigo-control-listener".into())
         .stack_size(LISTENER_STACK_BYTES)
         .spawn(move || accept_loop(listener, app, listener_state))
     {
@@ -200,7 +200,7 @@ fn accept_loop(listener: TcpListener, app: tauri::AppHandle, state: ControlState
         let app = app.clone();
         let request_state = state.clone();
         if let Err(error) = thread::Builder::new()
-            .name("terax-control-request".into())
+            .name("termigo-control-request".into())
             .stack_size(REQUEST_STACK_BYTES)
             .spawn(move || {
                 let _guard = ConnectionGuard(request_state.clone());
@@ -440,7 +440,7 @@ fn forward_to_frontend(
         return ControlResponse::failure(
             request.id,
             "frontend_not_ready",
-            "Terax is still restoring its workspace; try again shortly",
+            "Termigo is still restoring its workspace; try again shortly",
         );
     }
 
@@ -477,7 +477,7 @@ fn forward_to_frontend(
         return ControlResponse::failure(
             id,
             "frontend_unavailable",
-            format!("could not reach Terax UI: {error}"),
+            format!("could not reach Termigo UI: {error}"),
         );
     }
 
@@ -487,7 +487,7 @@ fn forward_to_frontend(
         }
         Ok(response) => {
             let error = response.error.unwrap_or_else(|| {
-                terax_control_protocol::ControlError::new(
+                termigo_control_protocol::ControlError::new(
                     "frontend_error",
                     "frontend request failed",
                 )
@@ -501,12 +501,12 @@ fn forward_to_frontend(
                 .lock()
                 .expect("control pending poisoned")
                 .remove(&id);
-            ControlResponse::failure(id, "frontend_timeout", "Terax UI did not respond in time")
+            ControlResponse::failure(id, "frontend_timeout", "Termigo UI did not respond in time")
         }
         Err(mpsc::RecvTimeoutError::Disconnected) => ControlResponse::failure(
             id,
             "frontend_unavailable",
-            "Terax UI response channel closed",
+            "Termigo UI response channel closed",
         ),
     }
 }
@@ -569,7 +569,7 @@ fn generate_token() -> Result<String, String> {
 fn descriptor_path() -> Result<PathBuf, String> {
     let cache =
         dirs::cache_dir().ok_or_else(|| "could not resolve user cache directory".to_string())?;
-    let dir = cache.join("terax");
+    let dir = cache.join("termigo");
     std::fs::create_dir_all(&dir)
         .map_err(|error| format!("create control directory {}: {error}", dir.display()))?;
     #[cfg(unix)]
@@ -618,9 +618,9 @@ fn remove_own_descriptor(path: &Path, token: &str) {
 
 fn find_bundled_cli() -> Option<PathBuf> {
     let filename = if cfg!(windows) {
-        "terax-cli.exe"
+        "termigo-cli.exe"
     } else {
-        "terax-cli"
+        "termigo-cli"
     };
     if let Some(path) = std::env::current_exe()
         .ok()
@@ -634,7 +634,7 @@ fn find_bundled_cli() -> Option<PathBuf> {
         let binaries = Path::new(env!("CARGO_MANIFEST_DIR")).join("binaries");
         let target = option_env!("TAURI_ENV_TARGET_TRIPLE")?;
         let candidate = binaries.join(format!(
-            "terax-cli-{target}{}",
+            "termigo-cli-{target}{}",
             std::env::consts::EXE_SUFFIX
         ));
         return is_cli_candidate(&candidate).then_some(candidate);
@@ -738,7 +738,7 @@ fn prepare_cli_launcher(descriptor: &Path, cli_path: &Path) -> Result<PathBuf, S
             .map_err(|error| format!("secure CLI bin directory: {error}"))?;
     }
 
-    let launcher = bin_dir.join(if cfg!(windows) { "terax.exe" } else { "terax" });
+    let launcher = bin_dir.join(if cfg!(windows) { "termigo.exe" } else { "termigo" });
     if std::fs::symlink_metadata(&launcher).is_ok() {
         std::fs::remove_file(&launcher)
             .map_err(|error| format!("replace stale CLI launcher: {error}"))?;
@@ -757,7 +757,7 @@ fn prepare_cli_launcher(descriptor: &Path, cli_path: &Path) -> Result<PathBuf, S
 }
 
 fn remove_launcher_dir(bin_dir: &Path) {
-    let launcher = bin_dir.join(if cfg!(windows) { "terax.exe" } else { "terax" });
+    let launcher = bin_dir.join(if cfg!(windows) { "termigo.exe" } else { "termigo" });
     let _ = std::fs::remove_file(launcher);
     let _ = std::fs::remove_dir(bin_dir);
     if let Some(run_dir) = bin_dir.parent() {
@@ -920,15 +920,15 @@ mod tests {
     fn launcher_exposes_the_public_command() {
         let temp = tempfile::tempdir().expect("temp directory");
         let cli = temp.path().join(if cfg!(windows) {
-            "terax-cli.exe"
+            "termigo-cli.exe"
         } else {
-            "terax-cli"
+            "termigo-cli"
         });
         std::fs::write(&cli, b"cli").expect("write fake CLI");
         let descriptor = temp.path().join("control.json");
 
         let bin_dir = prepare_cli_launcher(&descriptor, &cli).expect("prepare launcher");
-        let launcher = bin_dir.join(if cfg!(windows) { "terax.exe" } else { "terax" });
+        let launcher = bin_dir.join(if cfg!(windows) { "termigo.exe" } else { "termigo" });
         assert_eq!(std::fs::read(&launcher).expect("read launcher"), b"cli");
 
         remove_launcher_dir(&bin_dir);

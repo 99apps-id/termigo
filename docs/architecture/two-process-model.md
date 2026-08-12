@@ -1,10 +1,10 @@
 # Two-process model and IPC command reference
 
-This guide elaborates on `TERAX.md`. If anything here conflicts with `TERAX.md`, `TERAX.md` wins.
+This guide elaborates on `TERMIGO.md`. If anything here conflicts with `TERMIGO.md`, `TERMIGO.md` wins.
 
 ## The split
 
-Terax is two processes: the Rust backend (`src-tauri/`) and the webview frontend (`src/`).
+Termigo is two processes: the Rust backend (`src-tauri/`) and the webview frontend (`src/`).
 
 - **Rust owns all OS access**: PTY, file system, git, shell spawn, network, secrets, workspace authorization.
 - **The webview never touches the FS, processes, or shells directly**. Every host operation goes through an `invoke()` call to a command registered in `src-tauri/src/lib.rs`.
@@ -106,7 +106,7 @@ Three distinct surfaces:
 
 ### Secrets (`src-tauri/src/modules/secrets.rs`)
 
-- `secrets_get` / `secrets_set` / `secrets_delete` / `secrets_get_all` - OS keychain access, service `terax-ai`
+- `secrets_get` / `secrets_set` / `secrets_delete` / `secrets_get_all` - OS keychain access, service `termigo-ai`
 
 ### Agent hooks (`src-tauri/src/modules/agent.rs`)
 
@@ -136,7 +136,7 @@ See [CLI control plane](cli-control.md) for the local protocol and packaging mod
 
 ## See also
 
-- [`TERAX.md`](../../TERAX.md) - the architecture source of truth
+- [`TERMIGO.md`](../../TERMIGO.md) - the architecture source of truth
 - [`docs/README.md`](../README.md) - index of contributor guides
 - [PTY shell integration](pty-shell-integration.md) - how sessions and shell integration work
 - [Security model](security-model.md) - the boundaries every command must respect

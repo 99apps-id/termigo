@@ -1,19 +1,19 @@
 <div align="center">
-  <img src="public/logo.png" width="144" height="144" alt="Terax" />
-  <h1>Terax</h1>
+  <img src="public/logo.png" width="144" height="144" alt="Termigo" />
+  <h1>Termigo</h1>
 
   <p><strong>Lightweight Terminal-first AI-native dev workspace.</strong></p>
   <p>
-    <a href="https://terax.app">Website</a>
+    <a href="https://termigo.app">Website</a>
     ·
-    <a href="https://terax.app/docs">Docs</a>
+    <a href="https://termigo.app/docs">Docs</a>
     ·
-    <a href="https://github.com/crynta/Terax-website">Website's source code</a>
+    <a href="https://github.com/crynta/Termigo-website">Website's source code</a>
   </p>
 
   <p>
-    <img src="https://img.shields.io/github/v/release/crynta/terax-ai?label=version&color=blue" alt="version" />
-    <img src="https://img.shields.io/github/downloads/crynta/terax-ai/total?label=downloads&color=blue" alt="downloads" />
+    <img src="https://img.shields.io/github/v/release/crynta/termigo-ai?label=version&color=blue" alt="version" />
+    <img src="https://img.shields.io/github/downloads/crynta/termigo-ai/total?label=downloads&color=blue" alt="downloads" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey" alt="platform" />
     <a href="https://discord.gg/tyveTUyEp7"><img src="https://img.shields.io/badge/Discord-5865F2?logo=discord&logoColor=white" alt="Discord" /></a>
     <a href="https://www.youtube.com/@crynta"><img src="https://img.shields.io/badge/Youtube-FF0000?logo=youtube&logoColor=white" alt="YouTube" /></a>
@@ -36,7 +36,7 @@
 
 ---
 
-Terax is a lightweight open-source terminal-first AI-native development environment (ADE) built on Tauri 2 + Rust and React 19. A native PTY backend with a WebGL renderer, an agentic AI side-panel that runs against your own keys or fully local models, plus a code editor, file explorer, source control with a git graph, and a web preview pane built in. About 7-8 MB on disk. No telemetry. No account.
+Termigo is a lightweight open-source terminal-first AI-native development environment (ADE) built on Tauri 2 + Rust and React 19. A native PTY backend with a WebGL renderer, an agentic AI side-panel that runs against your own keys or fully local models, plus a code editor, file explorer, source control with a git graph, and a web preview pane built in. About 7-8 MB on disk. No telemetry. No account.
 
 ## Screenshots
 
@@ -107,7 +107,7 @@ Terax is a lightweight open-source terminal-first AI-native development environm
 
 - **BYOK providers:** OpenAI, Anthropic, Google (Gemini), Groq, xAI (Grok), Cerebras, OpenRouter, DeepSeek, Mistral, plus any OpenAI-compatible endpoint
 - **Local / offline:** LM Studio, MLX, Ollama
-- **Agentic workflow:** plans, sub-agents, project memory via `TERAX.md`, file read / write / edit / multi-edit / grep / glob, bash with approval gating, background processes
+- **Agentic workflow:** plans, sub-agents, project memory via `TERMIGO.md`, file read / write / edit / multi-edit / grep / glob, bash with approval gating, background processes
 - **Coding-agent orchestration:** spawn Claude Code in a terminal, inspect its output, and send follow-up work through approval-gated tools
 - **Composer:** prompt snippets via `#handle`, files via `@path`, voice input, attach-to-agent from explorer or selection
 - **Custom agents** with their own system prompt and tool subset
@@ -115,7 +115,7 @@ Terax is a lightweight open-source terminal-first AI-native development environm
 
 ## Install
 
-Latest installers are on the [Releases](https://github.com/crynta/terax-ai/releases/latest) page. Terax auto-updates from there.
+Latest installers are on the [Releases](https://github.com/crynta/termigo-ai/releases/latest) page. Termigo auto-updates from there.
 
 ### Windows notes
 
@@ -124,14 +124,14 @@ Latest installers are on the [Releases](https://github.com/crynta/terax-ai/relea
 
 ### Linux notes
 
-- **Arch / AUR:** `yay -S terax-bin` (or `paru`, etc.). Tracks the latest release.
-- **NixOS / Nix**: use the official flake - `nix profile install github:crynta/terax-ai` (non-NixOS), or import the flake and add `inputs.terax.packages.${pkgs.system}.terax` to `environment.systemPackages` (NixOS). The `nixosModules.terax` output is also available for a simpler setup.
-- **AppImage:** needs FUSE. Without it: `./Terax_*.AppImage --appimage-extract-and-run`. On Wayland with rendering glitches, try `WEBKIT_DISABLE_DMABUF_RENDERER=1`. Otherwise the `.deb` / `.rpm` packages link against the system GTK stack and tend to be smoother.
+- **Arch / AUR:** `yay -S termigo-bin` (or `paru`, etc.). Tracks the latest release.
+- **NixOS / Nix**: use the official flake - `nix profile install github:crynta/termigo-ai` (non-NixOS), or import the flake and add `inputs.termigo.packages.${pkgs.system}.termigo` to `environment.systemPackages` (NixOS). The `nixosModules.termigo` output is also available for a simpler setup.
+- **AppImage:** needs FUSE. Without it: `./Termigo_*.AppImage --appimage-extract-and-run`. On Wayland with rendering glitches, try `WEBKIT_DISABLE_DMABUF_RENDERER=1`. Otherwise the `.deb` / `.rpm` packages link against the system GTK stack and tend to be smoother.
 
 ## Configure AI
 
 1. Open **Settings -> AI**.
-2. Pick a provider and paste your API key. For local inference, point Terax at your LM Studio / MLX / Ollama endpoint.
+2. Pick a provider and paste your API key. For local inference, point Termigo at your LM Studio / MLX / Ollama endpoint.
 3. Keys are written to the OS keychain via `keyring`. They never touch disk or localStorage.
 
 ## Build from source
@@ -175,4 +175,4 @@ Windows builds are signed with a free code signing certificate provided by [Sign
 
 ## License
 
-Terax is licensed under the Apache-2.0 License. For more information on our dependencies, see [Apache License 2.0](LICENSE).
+Termigo is licensed under the Apache-2.0 License. For more information on our dependencies, see [Apache License 2.0](LICENSE).
