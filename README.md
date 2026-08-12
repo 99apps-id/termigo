@@ -83,10 +83,10 @@ Ollama). Future subcommands will handle workspace actions and local automation.
 ## Desktop alpha
 
 The new desktop application is intentionally small at this stage: native
-window controls, **Open folder**, an expandable explorer, tabs, a basic text
-editor with `Ctrl+O` / `Ctrl+S`, and a workspace-local Command Prompt panel.
-File access is checked again by the Rust backend, so an open workspace is the
-boundary for reading and saving files.
+window controls, **Open folder**, an expandable explorer, tabs, a Monaco-based
+code editor with syntax highlighting and `Ctrl+O` / `Ctrl+S`, and a
+workspace-local Command Prompt panel. File access is checked again by the Rust
+backend, so an open workspace is the boundary for reading and saving files.
 
 ```powershell
 Set-Location desktop

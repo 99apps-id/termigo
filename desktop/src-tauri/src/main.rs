@@ -13,6 +13,7 @@ use std::{
 use serde::Serialize;
 
 const MAX_WORKSPACE_ENTRIES: usize = 2_500;
+const MAX_TEXT_FILE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_TERMINAL_OUTPUT_BYTES: usize = 256 * 1024;
 const MAX_TERMINAL_INPUT_BYTES: usize = 16 * 1024;
 
@@ -111,6 +112,9 @@ fn workspace_read_text_file(
 ) -> Result<FileDocument, String> {
     let path = workspace_file(&state, &path)?;
     let bytes = fs::read(&path).map_err(|error| format!("Cannot read file: {error}"))?;
+    if bytes.len() > MAX_TEXT_FILE_BYTES {
+        return Err("Files larger than 2 MB cannot be opened in the editor yet.".to_owned());
+    }
     if bytes.contains(&0) {
         return Err("Binary files cannot be opened in the text editor.".to_owned());
     }
@@ -128,6 +132,9 @@ fn workspace_save_text_file(
     contents: String,
     state: tauri::State<'_, WorkspaceState>,
 ) -> Result<(), String> {
+    if contents.len() > MAX_TEXT_FILE_BYTES {
+        return Err("Files larger than 2 MB cannot be saved in the editor yet.".to_owned());
+    }
     let path = workspace_file(&state, &path)?;
     fs::write(&path, contents).map_err(|error| format!("Cannot save file: {error}"))
 }

@@ -6,6 +6,7 @@ import type { FileDocument, FileNode, Workspace } from './types';
 
 const emptyWorkspace: Workspace = { path: '', tree: [] };
 const TerminalPane = lazy(() => import('./TerminalPane'));
+const CodeEditor = lazy(() => import('./CodeEditor'));
 
 export default function App() {
   const [workspace, setWorkspace] = useState<Workspace>(emptyWorkspace);
@@ -123,7 +124,15 @@ export default function App() {
             {document ? <div className="tab"><span>{dirty ? '●' : '○'}</span><span className="tab-name">{baseName(document.path)}</span><button title="Close editor tab" onClick={closeDocument}>×</button></div> : <div className="tab muted">Start here</div>}
             {document && <button className="button save" disabled={!dirty} onClick={() => void save()}>Save <kbd>Ctrl+S</kbd></button>}
           </div>
-          {document ? <textarea className="editor" value={contents} spellCheck={false} onChange={event => { setContents(event.target.value); setDirty(true); }} /> : <Welcome onOpen={openWorkspace} />}
+          {document ? <Suspense fallback={<EditorPlaceholder />}><CodeEditor
+            key={document.path}
+            path={document.path}
+            language={document.language}
+            value={contents}
+            dirty={dirty}
+            onChange={next => { setContents(next); setDirty(true); }}
+            onSave={() => void save()}
+          /></Suspense> : <Welcome onOpen={openWorkspace} />}
         </main>
         {workspace.path ? <Suspense fallback={<TerminalPlaceholder message="Loading workspace terminal..." />}><TerminalPane key={workspace.path} workspacePath={workspace.path} onStatus={setStatus} /></Suspense> : <TerminalPlaceholder message="Open a folder to start a terminal in that workspace." />}
       </section>
@@ -154,6 +163,10 @@ function TerminalPlaceholder({ message }: { message: string }) {
     <div className="terminal-heading"><span>TERMINAL</span><span>waiting for workspace</span></div>
     <div className="terminal-placeholder">{message}</div>
   </section>;
+}
+
+function EditorPlaceholder() {
+  return <div className="editor-placeholder">Loading code editor...</div>;
 }
 
 function baseName(path: string) {
