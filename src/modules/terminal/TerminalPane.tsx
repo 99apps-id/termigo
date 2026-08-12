@@ -13,6 +13,7 @@ import {
   focusLeafInput,
   submitToLeaf,
   useTerminalSession,
+  type SessionOpener,
 } from "./lib/useTerminalSession";
 
 export type TerminalPaneHandle = {
@@ -32,6 +33,8 @@ type Props = {
   initialCwd?: string;
   /** Enable command-block decorations (OSC 133) for this terminal. */
   blocks?: boolean;
+  /** Custom session factory (e.g. SSH); falls back to the local PTY. */
+  openSession?: SessionOpener;
   onSearchReady?: (leafId: number, addon: SearchAddon) => void;
   onExit?: (leafId: number, code: number) => void;
   onCwd?: (leafId: number, cwd: string) => void;
@@ -45,6 +48,7 @@ export const TerminalPane = memo(
       focused = true,
       initialCwd,
       blocks = false,
+      openSession,
       onSearchReady,
       onExit,
       onCwd,
@@ -62,6 +66,7 @@ export const TerminalPane = memo(
       focused,
       initialCwd,
       blocks,
+      openSession,
       onSearchReady: (a) => onSearchReady?.(leafId, a),
       onExit: (c) => onExit?.(leafId, c),
       onCwd: (c) => onCwd?.(leafId, c),

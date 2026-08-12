@@ -736,6 +736,25 @@ export function useTabs(initial?: Partial<TerminalTab>) {
     return tabId;
   }, []);
 
+  const newSshTab = useCallback((connectionId: string, title: string) => {
+    const tabId = nextIdRef.current++;
+    const leafId = nextIdRef.current++;
+    setTabs((t) => [
+      ...t,
+      {
+        id: tabId,
+        kind: "terminal",
+        spaceId: activeSpaceIdRef.current,
+        title,
+        customTitle: title,
+        paneTree: { kind: "leaf", id: leafId, ssh: { connectionId } },
+        activeLeafId: leafId,
+      },
+    ]);
+    setActiveId(tabId);
+    return tabId;
+  }, []);
+
   /**
    * Opens a file in an editor tab.
    *
@@ -1321,6 +1340,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
     newAgentTab,
     newAgentGroupTab,
     newPrivateTab,
+    newSshTab,
     openFileTab,
     pinTab,
     newPreviewTab,

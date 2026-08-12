@@ -18,6 +18,8 @@ import {
   useRef,
   useState,
 } from "react";
+import { SshMenu } from "@/modules/ssh/SshMenu";
+import type { SshConnection } from "@/modules/ssh/connections";
 import {
   SearchInline,
   type SearchInlineHandle,
@@ -48,6 +50,7 @@ type Props = {
   onActivateAgent: (tabId: number, leafId: number) => void;
   onActivateLocalAgent: () => void;
   onOpenSettings: () => void;
+  onConnectSsh: (conn: SshConnection) => void;
   spaceSwitcher: ReactNode;
   searchTarget: SearchTarget;
   searchRef: RefObject<SearchInlineHandle | null>;
@@ -76,6 +79,7 @@ export function Header({
   onActivateAgent,
   onActivateLocalAgent,
   onOpenSettings,
+  onConnectSsh,
   spaceSwitcher,
   searchTarget,
   searchRef,
@@ -142,6 +146,8 @@ export function Header({
           />
         )}
       </div>
+
+      <SshMenu onConnect={onConnectSsh} />
 
       {!IS_MAC && <span className="mx-1 h-full w-px shrink-0 bg-border/70" />}
 

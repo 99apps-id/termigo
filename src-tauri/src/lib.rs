@@ -1,6 +1,6 @@
 pub mod modules;
 
-use modules::{agent, control, fs, git, history, lsp, net, pty, secrets, shell, workspace};
+use modules::{agent, control, fs, git, history, lsp, net, pty, secrets, shell, ssh, workspace};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
@@ -126,7 +126,7 @@ async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Res
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     let builder = builder.decorations(false).transparent(true);
 
-    let window = builder.build().map_err(|e| e.to_string())?;
+    let _window = builder.build().map_err(|e| e.to_string())?;
 
     // Some Linux compositors (GNOME/Mutter with CSD-by-default) ignore the
     // builder-time decorations flag — re-assert it after realize.
@@ -202,6 +202,7 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(move |_app| {
             if let Err(error) = control::start(_app.handle().clone(), control_for_setup.clone()) {
                 log::warn!("could not start Termigo control server: {error}");
@@ -228,6 +229,7 @@ pub fn run() {
         .manage(control_state)
         .manage(shell::ShellState::default())
         .manage(secrets::SecretsState::default())
+        .manage(ssh::SshState::default())
         .manage(fs::watch::FsWatchState::default())
         .manage(history::HistoryState::default())
         .manage(lsp::LspState::default())
@@ -319,6 +321,24 @@ pub fn run() {
             secrets::secrets_set,
             secrets::secrets_delete,
             secrets::secrets_get_all,
+            ssh::ssh_agent_keys,
+            ssh::ssh_open,
+            ssh::ssh_write,
+            ssh::ssh_resize,
+            ssh::ssh_close,
+            ssh::ssh_forward_open,
+            ssh::ssh_confirm_host_key,
+            ssh::ssh_list_sessions,
+            ssh::ssh_attach,
+            ssh::sftp::ssh_sftp_home,
+            ssh::sftp::ssh_sftp_read_dir,
+            ssh::sftp::ssh_sftp_read_file,
+            ssh::sftp::ssh_sftp_write_file,
+            ssh::sftp::ssh_sftp_upload,
+            ssh::sftp::ssh_sftp_create_file,
+            ssh::sftp::ssh_sftp_create_dir,
+            ssh::sftp::ssh_sftp_rename,
+            ssh::sftp::ssh_sftp_delete,
             net::lm_ping,
             net::ai_http_request,
             net::ai_http_stream,

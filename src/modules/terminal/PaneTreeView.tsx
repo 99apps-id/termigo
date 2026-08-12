@@ -8,6 +8,8 @@ import { Fragment } from "react";
 import { useTerminalDropStore } from "./lib/dropStore";
 import { firstLeafSlotId, type PaneNode } from "./lib/panes";
 import { TerminalPane, type TerminalPaneHandle } from "./TerminalPane";
+import { openSshTerminalFromSpec } from "@/modules/ssh/lib/ssh-terminal";
+import type { SessionOpener } from "./lib/useTerminalSession";
 
 type LeafBundle = {
   setRef: (h: TerminalPaneHandle | null) => void;
@@ -24,6 +26,11 @@ type Props = {
   onFocusLeaf: (leafId: number) => void;
   getBundle: (leafId: number) => LeafBundle;
 };
+
+function sshOpenerFor(spec: { connectionId: string } | undefined): SessionOpener | undefined {
+  if (!spec) return undefined;
+  return (cols, rows, handlers) => openSshTerminalFromSpec(spec, cols, rows, handlers);
+}
 
 export function PaneTreeView(props: Props) {
   const { node } = props;
@@ -50,6 +57,7 @@ export function PaneTreeView(props: Props) {
           focused={focused}
           initialCwd={node.cwd}
           blocks={blocks}
+          openSession={sshOpenerFor(node.ssh)}
           ref={b.setRef}
           onSearchReady={b.onSearchReady}
           onCwd={b.onCwd}

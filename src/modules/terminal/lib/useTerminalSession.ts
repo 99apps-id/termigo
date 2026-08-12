@@ -23,7 +23,7 @@ import {
   registerOsc52ClipboardHandler,
   registerPromptTracker,
 } from "./osc-handlers";
-import { openPty, type PtySession } from "./pty-bridge";
+import { openPty, type PtyHandlers, type PtySession } from "./pty-bridge";
 import "../block/block.css";
 import { ensureAgentActivityListener, isAgentActivePty } from "./agentActivity";
 import {
@@ -66,6 +66,8 @@ type Session = {
   pendingExit: number | null;
   shellExited: boolean;
   callbacks: Callbacks;
+  /** Custom session factory (SSH) or null for the local PTY. */
+  opener: SessionOpener | null;
   visibleNow: boolean;
   focusedNow: boolean;
   disposed: boolean;
@@ -450,6 +452,7 @@ function ensureSession(
     pendingExit: null,
     shellExited: false,
     callbacks: {},
+    opener: null,
     visibleNow: false,
     focusedNow: false,
     disposed: false,
@@ -537,28 +540,34 @@ async function openPtyForSession(
 ): Promise<PtySession> {
   const startCols = s.cols > 0 ? s.cols : 80;
   const startRows = s.rows > 0 ? s.rows : 24;
-  const pty = await openPty(
-    startCols,
-    startRows,
-    {
-      onData: (bytes) => deliverPtyBytes(leafId, bytes),
-      onExit: (code) => {
-        s.shellExited = true;
-        s.pty = null;
-        s.pendingInput = "";
-        s.commandRunning = false;
-        const slot = getSlotForLeaf(leafId);
-        if (slot) slot.term.options.disableStdin = true;
-        scheduleHiddenRelease(leafId, s);
-        if (s.callbacks.onExit) s.callbacks.onExit(code);
-        else s.pendingExit = code;
-      },
+  const handlers = {
+    onData: (bytes: Uint8Array) => deliverPtyBytes(leafId, bytes),
+    onExit: (code: number) => {
+      s.shellExited = true;
+      s.pty = null;
+      s.pendingInput = "";
+      s.commandRunning = false;
+      const slot = getSlotForLeaf(leafId);
+      if (slot) slot.term.options.disableStdin = true;
+      scheduleHiddenRelease(leafId, s);
+      if (s.callbacks.onExit) s.callbacks.onExit(code);
+      else s.pendingExit = code;
     },
-    cwd,
-    s.blocks,
-    usePreferencesStore.getState().terminalShell || undefined,
-    leafId,
-  );
+  };
+  // A custom opener (SSH sessions) replaces the local PTY entirely. The
+  // returned object still satisfies PtySession, so the rest of the pipeline
+  // (write/resize/close, renderer slot, block mode) is unchanged.
+  const pty = s.opener
+    ? await s.opener(startCols, startRows, handlers, cwd)
+    : await openPty(
+        startCols,
+        startRows,
+        handlers,
+        cwd,
+        s.blocks,
+        usePreferencesStore.getState().terminalShell || undefined,
+        leafId,
+      );
   // Only resize if the bound dims changed during the spawn: a same-size
   // ResizePseudoConsole during conhost warmup is a known ConPTY trigger for
   // a console that never renders (blank tab).
@@ -829,7 +838,17 @@ type Options = {
   onSearchReady?: (addon: SearchAddon) => void;
   onExit?: (code: number) => void;
   onCwd?: (cwd: string) => void;
+  /** Custom session factory (e.g. SSH); falls back to the local PTY. */
+  openSession?: SessionOpener;
 };
+
+/** Builds a session object (PTY or SSH) for a leaf. */
+export type SessionOpener = (
+  cols: number,
+  rows: number,
+  handlers: PtyHandlers,
+  cwd?: string,
+) => Promise<PtySession>;
 
 export function useTerminalSession({
   leafId,
@@ -841,6 +860,7 @@ export function useTerminalSession({
   onSearchReady,
   onExit,
   onCwd,
+  openSession,
 }: Options) {
   const cbRef = useRef({ onSearchReady, onExit, onCwd });
   cbRef.current = { onSearchReady, onExit, onCwd };
@@ -854,6 +874,7 @@ export function useTerminalSession({
   useEffect(() => {
     let cancelled = false;
     const s = ensureSession(leafId, initialCwdRef.current, blocks);
+    s.opener = openSession ?? null;
     s.ready.then(() => {
       if (cancelled || s.disposed) return;
       const node = container.current;
@@ -875,6 +896,7 @@ export function useTerminalSession({
   useEffect(() => {
     if (!blocks) return;
     const s = ensureSession(leafId, initialCwdRef.current, blocks);
+    s.opener = openSession ?? null;
     setBlockMode(s.blockMode);
     const cb = () => setBlockMode(sessions.get(leafId)?.blockMode ?? "prompt");
     s.blockListeners.add(cb);

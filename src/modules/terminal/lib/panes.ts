@@ -11,7 +11,14 @@ export type PaneBounds = {
 };
 
 export type PaneNode =
-  | { kind: "leaf"; id: PaneId; slotId?: PaneId; cwd?: string }
+  | {
+      kind: "leaf";
+      id: PaneId;
+      slotId?: PaneId;
+      cwd?: string;
+      /** When set, this leaf opens an SSH session instead of a local PTY. */
+      ssh?: import("@/modules/ssh/lib/ssh-terminal").SshLeafSpec;
+    }
   | {
       kind: "split";
       id: PaneId;

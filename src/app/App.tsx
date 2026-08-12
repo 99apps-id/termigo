@@ -5,6 +5,7 @@ import {
 } from "@/components/ui/resizable";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { HostKeyPromptDialog } from "@/modules/ssh/HostKeyPromptDialog";
 import { consumeLaunchFiles, getLaunchDir } from "@/lib/launchDir";
 import { quoteShellArg } from "@/lib/shellQuote";
 import { usePresence } from "@/lib/usePresence";
@@ -166,6 +167,7 @@ export default function App() {
     closeActivePane,
     closePaneByLeaf,
     resetWorkspace,
+    newSshTab,
   } = useTabs(getLaunchDir() ? { cwd: getLaunchDir() } : undefined);
 
   // Mirror `tabs` into a ref so callbacks scheduled with `setTimeout`
@@ -1346,6 +1348,7 @@ export default function App() {
               onActivateAgent={onActivateAgent}
               onActivateLocalAgent={onActivateLocalAgent}
               onOpenSettings={() => void openSettingsWindow()}
+              onConnectSsh={(conn) => newSshTab(conn.id, conn.name)}
               spaceSwitcher={spaceSwitcher}
               searchTarget={searchTarget}
               searchRef={searchInlineRef}
@@ -1552,6 +1555,7 @@ export default function App() {
           />
         </div>
       </TooltipProvider>
+      <HostKeyPromptDialog />
     </ThemeProvider>
   );
 
