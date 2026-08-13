@@ -134,8 +134,12 @@ export async function buildLanguageModel(
       const { createAnthropic } = await import("@ai-sdk/anthropic");
       if (oauthAccess) {
         const preset = OAUTH_PRESETS.claude;
+        // `authToken`, not `apiKey`: the provider only emits
+        // `Authorization: Bearer <token>` for authToken. Passing an OAuth
+        // access token as apiKey sends it as `x-api-key`, which Anthropic's
+        // OAuth endpoints reject.
         built = createAnthropic({
-          apiKey: oauthAccess,
+          authToken: oauthAccess,
           headers: preset.upstreamHeaders,
         })(resolvedModelId);
       } else {
@@ -147,10 +151,15 @@ export async function buildLanguageModel(
       const { createGoogleGenerativeAI } = await import("@ai-sdk/google");
       if (oauthAccess) {
         const preset = OAUTH_PRESETS.antigravity;
+        // Google's SDK has no `authToken` option — the Cloud Code API only
+        // accepts `Authorization: Bearer <token>`, so pass it via headers and
+        // skip `apiKey` (which would add an unwanted `x-goog-api-key`).
         built = createGoogleGenerativeAI({
-          apiKey: oauthAccess,
           baseURL: preset.baseUrl,
-          headers: preset.upstreamHeaders,
+          headers: {
+            ...preset.upstreamHeaders,
+            Authorization: `Bearer ${oauthAccess}`,
+          },
         })(resolvedModelId);
       } else {
         built = createGoogleGenerativeAI({ apiKey: key })(resolvedModelId);

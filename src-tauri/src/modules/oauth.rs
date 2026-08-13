@@ -186,25 +186,32 @@ fn percent_encode(input: &str) -> String {
 
 // ---- Loopback listener ----------------------------------------------------
 
-const CALLBACK_HTML: &str = "\
-HTTP/1.1 200 OK\r\n\
-Content-Type: text/html; charset=utf-8\r\n\
-Content-Length: 210\r\n\
-Connection: close\r\n\
-\r\n\
+const CALLBACK_BODY: &str = "\
 <!doctype html><html><body style='font-family:system-ui;background:#0f1422;color:#e7e9f2;display:grid;place-items:center;height:100vh;margin:0'>
 <div style='text-align:center'><h2>✓ Connected</h2><p>You can close this tab and return to Termigo.</p></div>
 </body></html>";
 
-const CALLBACK_ERROR_HTML: &str = "\
-HTTP/1.1 400 Bad Request\r\n\
-Content-Type: text/html; charset=utf-8\r\n\
-Content-Length: 150\r\n\
-Connection: close\r\n\
-\r\n\
+const CALLBACK_ERROR_BODY: &str = "\
 <!doctype html><html><body style='font-family:system-ui;background:#0f1422;color:#ff8a8a;display:grid;place-items:center;height:100vh;margin:0'>
 <p>Sign-in callback missing code. Close this tab and retry in Termigo.</p>
 </body></html>";
+
+/// Frame an HTTP response, measuring `Content-Length` from the body.
+///
+/// These headers previously carried hand-written lengths that understated the
+/// real bodies (210 vs 271 bytes, and 150 vs 234), so browsers rendered a page
+/// truncated mid-markup. Deriving the length here stops the two from drifting
+/// apart again. `len()` is the BYTE length, which is what HTTP wants - the
+/// success page contains a multi-byte character (`✓`), so `chars().count()`
+/// would reintroduce the same class of bug.
+fn http_response(status_line: &str, body: &str) -> Vec<u8> {
+    format!(
+        "{status_line}\r\nContent-Type: text/html; charset=utf-8\r\n\
+         Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+    .into_bytes()
+}
 
 fn parse_query(query: &str) -> HashMap<String, String> {
     let mut map = HashMap::new();
