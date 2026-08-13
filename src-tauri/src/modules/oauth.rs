@@ -58,6 +58,21 @@ impl OAuthProfile {
             OAuthProfile::Antigravity => &ANTIGRAVITY,
         }
     }
+
+    /// Reject a sign-in for a profile whose credentials were not compiled in,
+    /// rather than sending Google an empty `client_id` and surfacing an opaque
+    /// `invalid_request` in the browser.
+    fn require_configured(self) -> Result<&'static Preset, String> {
+        let preset = self.preset();
+        if preset.client_id.is_empty() {
+            return Err(format!(
+                "{} sign-in is not available in this build: it was compiled without \
+                 TERMIGO_GOOGLE_CLIENT_ID / TERMIGO_GOOGLE_CLIENT_SECRET.",
+                self.as_str()
+            ));
+        }
+        Ok(preset)
+    }
 }
 
 struct Preset {
@@ -107,9 +122,21 @@ static CLAUDE: Preset = Preset {
     extra_authorize_params: &[("code", "true")],
 };
 
+// Antigravity's Google credentials are supplied at build time rather than
+// committed. A checked-in Google client secret is flagged by secret scanners,
+// gets revoked once it is public, and cannot be rotated without a code change.
+//
+// Set both when building if you want Antigravity sign-in enabled:
+//   TERMIGO_GOOGLE_CLIENT_ID=... TERMIGO_GOOGLE_CLIENT_SECRET=... pnpm tauri build
+//
+// Absent, the profile reports itself unconfigured (see `Preset::configured`)
+// and the other two profiles are unaffected.
 static ANTIGRAVITY: Preset = Preset {
-    client_id: "REDACTED_SUPPLIED_AT_BUILD_TIME",
-    client_secret: Some("REDACTED_SUPPLIED_AT_BUILD_TIME"),
+    client_id: match option_env!("TERMIGO_GOOGLE_CLIENT_ID") {
+        Some(id) => id,
+        None => "",
+    },
+    client_secret: option_env!("TERMIGO_GOOGLE_CLIENT_SECRET"),
     authorize_url: "https://accounts.google.com/o/oauth2/v2/auth",
     token_url: "https://oauth2.googleapis.com/token",
     scope: "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/cclog https://www.googleapis.com/auth/experimentsandconfigs",
@@ -537,7 +564,7 @@ pub async fn oauth_start(
     state: State<'_, OAuthState>,
     profile: OAuthProfile,
 ) -> Result<OAuthStartResult, String> {
-    let preset = profile.preset();
+    let preset = profile.require_configured()?;
     // Retire anything left over from abandoned attempts before adding another.
     state.sweep_expired();
     let verifier = pkce_verifier()?;
@@ -684,7 +711,7 @@ pub async fn oauth_exchange(
     state_value: String,
     code: Option<String>,
 ) -> Result<OAuthSession, String> {
-    let preset = profile.preset();
+    let preset = profile.require_configured()?;
     let code = match code {
         Some(c) => c,
         None => state
@@ -741,7 +768,7 @@ async fn refresh_tokens(
     profile: OAuthProfile,
     refresh_token: &str,
 ) -> Result<OAuthTokens, String> {
-    let preset = profile.preset();
+    let preset = profile.require_configured()?;
     if refresh_token.trim().is_empty() {
         return Err("no refresh token stored — sign in again".to_string());
     }
@@ -949,7 +976,6 @@ mod tests {
     fn presets_are_consistent() {
         for p in [OAuthProfile::Codex, OAuthProfile::Claude, OAuthProfile::Antigravity] {
             let preset = p.preset();
-            assert!(!preset.client_id.is_empty());
             assert!(preset.authorize_url.starts_with("https://"));
             assert!(preset.token_url.starts_with("https://"));
             assert!(preset.redirect_uri.starts_with("http"));
@@ -958,6 +984,36 @@ mod tests {
                 assert!(preset.loopback_port.is_none());
             }
         }
+        // Codex and Claude ship their client ids; Antigravity's come from the
+        // build environment, so it is configured only when they were supplied.
+        assert!(!CODEX.client_id.is_empty());
+        assert!(!CLAUDE.client_id.is_empty());
+        assert_eq!(
+            OAuthProfile::Antigravity.require_configured().is_ok(),
+            !ANTIGRAVITY.client_id.is_empty()
+        );
+    }
+
+    /// Guard against a credential being pasted back into the source: secret
+    /// scanning blocks the push, and a committed Google secret gets revoked
+    /// once it is public.
+    #[test]
+    fn antigravity_credentials_are_not_hardcoded() {
+        let source = include_str!("oauth.rs");
+        // Needles are assembled at runtime so this test does not match its own
+        // source and fail itself.
+        let secret_marker = ["GOCSPX", "-"].concat();
+        assert!(
+            !source.contains(&secret_marker),
+            "a Google client secret is hardcoded in oauth.rs; supply it via \
+             TERMIGO_GOOGLE_CLIENT_SECRET at build time instead"
+        );
+        let id_marker = [".apps.googleusercontent", ".com"].concat();
+        assert!(
+            !source.contains(&id_marker),
+            "a Google client id is hardcoded in oauth.rs; supply it via \
+             TERMIGO_GOOGLE_CLIENT_ID at build time instead"
+        );
     }
 
     /// The callback page is served by hand, so a wrong Content-Length truncates

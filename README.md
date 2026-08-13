@@ -128,6 +128,14 @@ pnpm tauri:dev       # development
 pnpm tauri build     # production bundle
 ```
 
+Antigravity sign-in needs Google OAuth credentials, which are not committed.
+Supply them at build time to enable that profile (Codex and Claude work
+without them):
+
+```bash
+TERMIGO_GOOGLE_CLIENT_ID=... TERMIGO_GOOGLE_CLIENT_SECRET=... pnpm tauri build
+```
+
 Checks:
 
 ```bash
