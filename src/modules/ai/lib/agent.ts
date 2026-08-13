@@ -30,6 +30,39 @@ import { createProxyFetch } from "./proxyFetch";
 
 const localProxyFetch = createProxyFetch({ allowPrivateNetwork: true });
 
+/**
+ * Drop tool invocations that never produced a result and never will, before
+ * they reach convertToModelMessages. The AI SDK throws "tool result is
+ * missing for tool call ..." when an assistant message carries a tool call
+ * whose result was never created.
+ *
+ * Only truly dangling parts are removed: `input` and `approval-requested`
+ * (a pending approval that was abandoned — stream ended, tab switched, run
+ * interrupted, or a session restored from disk). Parts that carry a decision
+ * (`approval-responded`, `output-available`, `output-error`, `result`) are
+ * KEPT: `approval-responded` is how the SDK tells the model to execute an
+ * approved tool, so dropping it would break the Approve button.
+ */
+function sanitizeUiMessages(messages: readonly UIMessage[]): UIMessage[] {
+  const out: UIMessage[] = [];
+  for (const message of messages) {
+    if (message.role !== "assistant") {
+      out.push(message);
+      continue;
+    }
+    const parts = message.parts.filter((part) => {
+      if (part.type !== "tool-invocation") return true;
+      const state = (part as { state?: string }).state;
+      return state !== "input" && state !== "approval-requested";
+    });
+    // An assistant turn that only contained a dangling tool call carries no
+    // information; drop it entirely so the model never sees an empty turn.
+    if (parts.length === 0) continue;
+    out.push({ ...message, parts });
+  }
+  return out;
+}
+
 const TOOL_LABELS: Record<string, (input: Record<string, unknown>) => string> =
   {
     read_file: (i) => `Reading ${shortPath(i.path)}`,
@@ -392,7 +425,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
     opts.projectMemory ?? null,
   );
 
-  const history = await convertToModelMessages(opts.uiMessages);
+  const history = await convertToModelMessages(sanitizeUiMessages(opts.uiMessages));
   const keepsReasoning = modelKeepsReasoning(info);
   const prunedHistory = pruneMessages({
     messages: history,
