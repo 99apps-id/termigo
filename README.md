@@ -48,6 +48,16 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
 - Per-tab workspace environments on Windows (Local or WSL distro)
 - Spaces restore tabs, working directories, and split layouts across launches
 
+### SSH & remote files
+
+- Connect to remote hosts with **ssh-agent**, private key, or password auth,
+  directly as a terminal tab (ProxyJump chains supported)
+- First-connect **host-key verification** (trust-on-first-use with fingerprint
+  pinning) — the handshake pauses until you confirm
+- **SFTP file explorer**: browse, create, rename, delete, upload (drag & drop)
+  and download over the active SSH session
+- Port forwarding (`-L`) through the session
+
 ### AI agent
 
 - **BYOK providers:** OpenAI, Anthropic (Claude), Google (Gemini), Groq,
@@ -57,6 +67,8 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
 - Agentic workflow: plans, sub-agents, project memory via `TERMIGO.md`,
   file read/write/edit/multi-edit/grep/glob, bash with approval gating,
   background processes
+- Tool calls are **approval-gated**; approvals resume the run (including
+  OpenAI-compatible providers such as DeepSeek)
 - Coding-agent orchestration: spawn Claude Code in a terminal, inspect output,
   send follow-up work through approval-gated tools
 - Composer: prompt snippets via `#handle`, files via `@path`, voice input
