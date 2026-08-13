@@ -1,6 +1,6 @@
 # SSH & remote files
 
-Termigo connects to remote hosts over SSH directly from the terminal —
+Termigo connects to remote hosts over SSH directly from the terminal:
 no separate app, no config file to hand-edit. The remote shell runs as a
 normal terminal tab, so splits, inline search, and the AI agent's context
 bridge all keep working.
@@ -9,9 +9,9 @@ bridge all keep working.
 
 1. Click the **server icon** in the top toolbar (left of the tab bar).
 2. **Add a connection**: host, port, user, and one of three auth methods:
-   - **ssh-agent** — the local agent signs the handshake; the private key
+   - **ssh-agent**: the local agent signs the handshake; the private key
      never leaves the agent
-   - **Private key** — PEM text (OpenSSH or PKCS8), optional passphrase
+   - **Private key**: PEM text (OpenSSH or PKCS8), optional passphrase
    - **Password**
 3. Optional **ProxyJump**: pick another saved connection as a jump host, so
    the connection dials through it (chains are supported).
@@ -28,7 +28,7 @@ and **pauses the handshake before sending any credentials**. Verify the
 fingerprint out-of-band (ask the admin, or run
 `ssh-keygen -lf <hostkey>` on the server), then accept to pin it on the saved
 connection. A later connect that sees a different key **aborts with a
-"host key mismatch" error** — a silent MITM cannot re-anchor the key.
+"host key mismatch" error**, so a silent MITM cannot re-anchor the key.
 
 ## Remote files (SFTP)
 
@@ -51,7 +51,7 @@ permissions and `permission denied` bubbles up in-tree.
 Open the connection, then in the terminal:
 
 ```text
-(no separate command — forwards are declared per connection)
+(no separate command; forwards are declared per connection)
 ```
 
 Port forwarding (`-L` style: bind `127.0.0.1:local` and tunnel to
@@ -70,6 +70,6 @@ Port forwarding (`-L` style: bind `127.0.0.1:local` and tunnel to
 
 - `russh` drives the handshake; one shared Tokio runtime serves all sessions.
 - Host-key algorithms are pinned to the vetted set (ed25519, ecdsa NIST P-256
-  / P-384 / P-521, rsa-sha2) — bare `ssh-rsa` (SHA-1 signatures) is refused.
+  / P-384 / P-521, rsa-sha2). Bare `ssh-rsa` (SHA-1 signatures) is refused.
 - SSH sessions are independent of the local PTY daemon, so they survive
   workspace switches.

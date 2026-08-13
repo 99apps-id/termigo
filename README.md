@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="termigo.png" width="144" height="144" alt="Termigo" />
+  <img src="public/logo.png" width="144" height="144" alt="Termigo" />
   <h1>Termigo</h1>
 
   <p><strong>Terminal-first, AI-native development workspace.</strong></p>
@@ -29,7 +29,7 @@
 environment (ADE) built on **Tauri 2 + Rust** with a **React 19** frontend. A
 native PTY backend, an agentic AI side-panel that runs against your own keys or
 fully local models, a code editor, file explorer, source control with a git
-graph, and a web preview pane — all in one window. **No telemetry. No account.**
+graph, and a web preview pane, all in one window. **No telemetry. No account.**
 Your API keys stay in the OS keychain or with the provider's own CLI.
 
 This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
@@ -53,7 +53,7 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
 - Connect to remote hosts with **ssh-agent**, private key, or password auth,
   directly as a terminal tab (ProxyJump chains supported)
 - First-connect **host-key verification** (trust-on-first-use with fingerprint
-  pinning) — the handshake pauses until you confirm
+  pinning): the handshake pauses until you confirm
 - **SFTP file explorer**: browse, create, rename, delete, upload (drag & drop)
   and download over the active SSH session
 - Port forwarding (`-L`) through the session
@@ -64,9 +64,10 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   xAI (Grok), Cerebras, OpenRouter, DeepSeek, Mistral, plus any
   OpenAI-compatible endpoint
 - **Sign in with your account (OAuth presets):** Codex (ChatGPT plan),
-  Claude (Anthropic subscription), and Antigravity (Google Cloud Code) —
-  one-click browser sign-in with PKCE, no API key needed; tokens live in
-  your OS keychain and refresh automatically
+  Claude (Anthropic subscription), and Antigravity (Google Cloud Code).
+  One-click browser sign-in with PKCE, no API key needed. Tokens live in
+  your OS keychain and refresh automatically; the refresh token is held and
+  renewed entirely in the Rust backend, so it never reaches the web frontend
 - **Local / offline:** LM Studio, MLX, Ollama
 - Agentic workflow: plans, sub-agents, project memory via `TERMIGO.md`,
   file read/write/edit/multi-edit/grep/glob, bash with approval gating,
@@ -84,7 +85,7 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
 - CodeMirror 6 with support for TS/JS, Rust, Python, Go, C/C++, Java,
   HTML/CSS, JSON, Markdown and more
 - Inline AI autocomplete with local model support
-- AI edit diffs — accept or reject hunk by hunk
+- AI edit diffs, accepted or rejected hunk by hunk
 - Opt-in language server support (diagnostics, navigation, completion, formatting)
 - Rendered Markdown plus image, video, audio, and PDF viewing
 - Vim mode and built-in editor themes (Kanagawa, Catppuccin, Rosé Pine, Dracula, ...)
@@ -162,7 +163,7 @@ go run ./cmd/termigo mcp tools fs         # list tools of an MCP server
   `.termigo/skills/` and `~/.termigo/skills/`
 - **MCP:** standard `mcpServers` registry in `.termigo/mcp.json`, JSON-RPC 2.0
   over stdio (initialize, tools/list, tools/call, ping)
-- **Never stores API keys** — credentials stay with each provider's own CLI
+- **Never stores API keys**: credentials stay with each provider's own CLI
 
 See [`docs/`](docs/) for the MCP, skills, agents, and architecture guides.
 
@@ -194,7 +195,7 @@ Termigo
 ```
 
 A Tauri 2 app: a React 19 webview talks to a Rust backend via `invoke()` and
-streaming `Channel`s. The Go CLI is the automation layer — anything useful
+streaming `Channel`s. The Go CLI is the automation layer: anything useful
 headlessly lives in `cli/internal/` first.
 
 ## Privacy and safety
@@ -202,7 +203,8 @@ headlessly lives in `cli/internal/` first.
 - **Local first.** Folders, commands, keys, and project context stay on the
   machine. No telemetry, no account.
 - **Keys stay with their owners.** Provider credentials live in the provider's
-  own CLI config or the OS keychain.
+  own CLI config or the OS keychain. OAuth refresh tokens never leave the Rust
+  backend: the frontend only ever receives a short-lived access token.
 - **Approval gates.** Agent file changes and commands require review/approval;
   the workspace is the boundary for file operations.
 - **MCP is explicit.** Servers only run when you configure and connect to them.

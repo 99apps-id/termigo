@@ -36,6 +36,10 @@ A change to a core subsystem (terminal/shell spawn, workspace auth, git, fs, IPC
 - **No emojis** anywhere.
 - **Imports**: always `@/...` on the frontend, never relative across modules.
 - **pnpm only**, never npm/npx/yarn.
+- **Branding**: `termigo.png` at the repo root is the master logo and is an
+  input, never generated. After changing it run `node scripts/generate-logo.mjs`
+  to regenerate `public/logo.png` and the whole `src-tauri/icons` set; never
+  hand-edit those. In the UI render the `/logo.png` asset, not a CSS lookalike.
 
 ## Architecture
 
