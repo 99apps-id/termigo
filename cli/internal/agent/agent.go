@@ -97,6 +97,9 @@ func IDs() []string {
 type RunOptions struct {
 	Workspace string
 	Prompt    string
+	// Command overrides the provider executable. It comes from the user
+	// configuration and lets a provider installed outside PATH still be used.
+	Command string
 	// Access maps to the provider sandbox: "read-only" or "workspace-write".
 	Access string
 	// Model overrides the default model where the provider supports it.
@@ -125,8 +128,15 @@ func Run(ctx context.Context, providerID string, options RunOptions, out, errOut
 
 // runCLI drives a print-mode CLI agent (codex, claude, gemini).
 func runCLI(ctx context.Context, provider Provider, options RunOptions, out, errOut io.Writer) error {
-	args := cliArgs(provider.ID, options)
-	command := exec.CommandContext(ctx, provider.Command, args...)
+	args, err := cliArgs(provider.ID, options)
+	if err != nil {
+		return err
+	}
+	executable := options.Command
+	if executable == "" {
+		executable = provider.Command
+	}
+	command := exec.CommandContext(ctx, executable, args...)
 	if options.Workspace != "" {
 		command.Dir = options.Workspace
 	}
@@ -139,8 +149,11 @@ func runCLI(ctx context.Context, provider Provider, options RunOptions, out, err
 	return nil
 }
 
-// cliArgs builds provider-specific arguments for a print-mode run.
-func cliArgs(providerID string, options RunOptions) []string {
+// cliArgs builds provider-specific arguments for a print-mode run. Providers
+// without a known headless invocation are reported rather than launched with no
+// arguments at all, which would drop the caller into an interactive session
+// reading the prompt as if it were keyboard input.
+func cliArgs(providerID string, options RunOptions) ([]string, error) {
 	sandbox := "read-only"
 	if options.Access == "workspace-write" {
 		sandbox = "workspace-write"
@@ -151,7 +164,7 @@ func cliArgs(providerID string, options RunOptions) []string {
 		if options.Workspace != "" {
 			args = append(args, "-C", options.Workspace)
 		}
-		return append(args, "-")
+		return append(args, "-"), nil
 	case "claude":
 		permission := "default"
 		if options.Access == "workspace-write" {
@@ -164,7 +177,7 @@ func cliArgs(providerID string, options RunOptions) []string {
 		if options.Model != "" {
 			args = append(args, "--model", options.Model)
 		}
-		return args
+		return args, nil
 	case "gemini":
 		args := []string{"-p"}
 		if options.Workspace != "" {
@@ -173,9 +186,9 @@ func cliArgs(providerID string, options RunOptions) []string {
 		if options.Model != "" {
 			args = append(args, "--model", options.Model)
 		}
-		return args
+		return args, nil
 	default:
-		return []string{}
+		return nil, fmt.Errorf("provider %q has no headless run mode yet; use 'termigo agent list' to see which providers can be driven from the CLI", providerID)
 	}
 }
 
@@ -229,6 +242,9 @@ func runOllama(ctx context.Context, options RunOptions, out io.Writer) error {
 // ResolveOptions merges user configuration into run options for a provider.
 func ResolveOptions(base RunOptions, providerID string, config config.Config) RunOptions {
 	if options, ok := config.Providers[providerID]; ok {
+		if base.Command == "" {
+			base.Command = options.Command
+		}
 		if base.Model == "" {
 			base.Model = options.Model
 		}

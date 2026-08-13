@@ -2,6 +2,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import termigoMark from './assets/termigo-mark.png';
 import type { FileDocument, FileNode, Workspace } from './types';
 
 const emptyWorkspace: Workspace = { path: '', tree: [] };
@@ -113,7 +114,7 @@ export default function App() {
 
   return <div className="app-shell">
     <header className="topbar">
-      <div className="brand"><span className="brand-glyph">T</span><strong>Termigo</strong><span>desktop alpha</span></div>
+      <div className="brand"><img className="brand-glyph" src={termigoMark} alt="" width={24} height={24} /><strong>Termigo</strong><span>desktop alpha</span></div>
       <div className="workspace-title" title={workspace.path}>{workspace.path ? baseName(workspace.path) : 'No folder open'}</div>
       <div className="topbar-actions">
         <button className="button ghost" onClick={() => void refreshWorkspace()} disabled={!workspace.path}>Refresh</button>
@@ -211,7 +212,7 @@ function FileTreeNode({ node, activePath, onOpen }: { node: FileNode; activePath
 }
 
 function Welcome({ onOpen }: { onOpen: () => void }) {
-  return <section className="welcome"><div className="welcome-mark">T</div><h1>One folder. One focused workspace.</h1><p>Open a local project, browse files, edit safely inside that workspace, and save with familiar shortcuts.</p><button className="button primary welcome-button" onClick={onOpen}>Open Folder <kbd>Ctrl+O</kbd></button><ol><li><span>1</span> Select a local project folder</li><li><span>2</span> Open a text file from Files</li><li><span>3</span> Edit and save with Ctrl+S</li></ol></section>;
+  return <section className="welcome"><img className="welcome-mark" src={termigoMark} alt="Termigo" width={70} height={70} /><h1>One folder. One focused workspace.</h1><p>Open a local project, browse files, edit safely inside that workspace, and save with familiar shortcuts.</p><button className="button primary welcome-button" onClick={onOpen}>Open Folder <kbd>Ctrl+O</kbd></button><ol><li><span>1</span> Select a local project folder</li><li><span>2</span> Open a text file from Files</li><li><span>3</span> Edit and save with Ctrl+S</li></ol></section>;
 }
 
 function TerminalPlaceholder({ message }: { message: string }) {

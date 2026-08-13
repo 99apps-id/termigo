@@ -18,6 +18,16 @@ Project memory for coding agents working in this repository.
 - New desktop features follow the existing command surface pattern: Rust command,
   typed wrapper in `desktop/src/types.ts`, React pane in `desktop/src/`.
 
+## Branding
+
+- `termigo.png` at the repository root is the master logo. Every other icon and
+  brand asset is generated from it - do not edit them by hand.
+- After changing the master, run `python scripts/make-icons.py` to regenerate
+  the desktop UI mark, the Tauri icon set (PNG + `.ico` + `.icns`), and the
+  legacy Wails icons.
+- The generated mark has a transparent background; the master does not, so it
+  must not be referenced directly from the dark UI.
+
 ## Workspace notes
 
 - The legacy Go/Wails prototype (`app.go`, `frontend/`) is kept as a reference;

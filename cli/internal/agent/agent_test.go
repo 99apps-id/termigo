@@ -31,7 +31,10 @@ func TestFindUnknownProvider(t *testing.T) {
 }
 
 func TestCLIArgsForCodex(t *testing.T) {
-	args := cliArgs("codex", RunOptions{Workspace: "C:/work", Access: "read-only"})
+	args, err := cliArgs("codex", RunOptions{Workspace: "C:/work", Access: "read-only"})
+	if err != nil {
+		t.Fatalf("cliArgs(codex) failed: %v", err)
+	}
 	want := []string{"exec", "--json", "--color", "never", "--skip-git-repo-check", "--ephemeral", "-s", "read-only", "-C", "C:/work", "-"}
 	if !reflect.DeepEqual(args, want) {
 		t.Fatalf("codex args = %v, want %v", args, want)
@@ -39,16 +42,23 @@ func TestCLIArgsForCodex(t *testing.T) {
 }
 
 func TestCLIArgsForClaudeWithWriteAccess(t *testing.T) {
-	args := cliArgs("claude", RunOptions{Workspace: "C:/work", Access: "workspace-write"})
-	joined := ""
-	for _, arg := range args {
-		joined += arg + " "
+	args, err := cliArgs("claude", RunOptions{Workspace: "C:/work", Access: "workspace-write"})
+	if err != nil {
+		t.Fatalf("cliArgs(claude) failed: %v", err)
 	}
 	if !contains(args, "--permission-mode") || !contains(args, "acceptEdits") {
 		t.Fatalf("claude args missing permission mode: %v", args)
 	}
 	if !contains(args, "--cwd") || !contains(args, "C:/work") {
 		t.Fatalf("claude args missing cwd: %v", args)
+	}
+}
+
+// A provider with no headless invocation must fail loudly instead of being
+// launched bare, which would silently start an interactive session.
+func TestCLIArgsRejectsProviderWithoutHeadlessMode(t *testing.T) {
+	if _, err := cliArgs("antigravity", RunOptions{Prompt: "hello"}); err == nil {
+		t.Fatal("expected an error for a provider without a headless run mode")
 	}
 }
 
@@ -69,6 +79,20 @@ func TestResolveOptionsMergesConfig(t *testing.T) {
 	resolved = ResolveOptions(options, "ollama", cfg)
 	if resolved.Model != "explicit" {
 		t.Fatalf("explicit model was overridden: %q", resolved.Model)
+	}
+}
+
+// A provider CLI installed outside PATH is configured with "command"; that
+// override has to reach the process that is actually executed.
+func TestResolveOptionsAppliesCommandOverride(t *testing.T) {
+	cfg := config.Config{
+		Providers: map[string]config.ProviderOptions{
+			"codex": {Command: `C:/tools/codex.exe`},
+		},
+	}
+	resolved := ResolveOptions(RunOptions{}, "codex", cfg)
+	if resolved.Command != `C:/tools/codex.exe` {
+		t.Fatalf("command override was dropped: %q", resolved.Command)
 	}
 }
 

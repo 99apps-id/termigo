@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo clippy *)",
+      "Bash(git stash *)",
+      "Bash(tasklist)",
+      "Bash(xargs -I{} echo \" candidate procs: {}\")",
+      "Bash(xargs -I{} echo \"  {} modified files\")"
+    ]
+  }
+}

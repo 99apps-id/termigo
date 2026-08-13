@@ -7,3 +7,8 @@ desktop/node_modules
 desktop/dist
 desktop/src-tauri/target
 .toolchain-install*/
+
+# `go build ./...` in the repository root drops the legacy Wails binary here.
+/termigo
+/termigo.exe
+__pycache__/

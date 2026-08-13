@@ -1,8 +1,9 @@
 use std::{
     collections::{HashMap, VecDeque},
-    env, fs,
+    ffi::OsStr,
+    fs,
     io::{BufRead, BufReader, Read, Write},
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     process::{Child, ChildStdin, Command, Stdio},
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -12,6 +13,25 @@ use std::{
 
 use serde::Serialize;
 use serde_json::Value;
+use tauri::Manager;
+
+// Windows starts a console window for every child process. Termigo pipes all of
+// its children, so that window is never useful - it only flashes a black box
+// over the UI while git, a provider probe, or a shell starts.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+// command builds a child process that stays invisible on Windows.
+fn command(program: impl AsRef<OsStr>) -> Command {
+    #[allow(unused_mut)]
+    let mut command = Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
+}
 
 const MAX_WORKSPACE_ENTRIES: usize = 2_500;
 const MAX_TEXT_FILE_BYTES: usize = 2 * 1024 * 1024;
@@ -217,10 +237,12 @@ fn terminal_start(
         .stderr
         .take()
         .ok_or_else(|| "Cannot open terminal errors.".to_owned())?;
-    writer
-        .write_all(b"chcp 65001 > nul\r\n")
-        .and_then(|_| writer.flush())
-        .map_err(|error| format!("Cannot configure terminal text encoding: {error}"))?;
+    if let Some(line) = terminal_init_line() {
+        writer
+            .write_all(line.as_bytes())
+            .and_then(|_| writer.flush())
+            .map_err(|error| format!("Cannot configure terminal text encoding: {error}"))?;
+    }
     let output = Arc::new(Mutex::new(TerminalOutputBuffer::with_readers(2)));
     let stdout_output = Arc::clone(&output);
     std::thread::spawn(move || read_terminal_output(stdout, stdout_output));
@@ -277,18 +299,29 @@ fn terminal_read(
     cursor: u64,
     terminals: tauri::State<'_, TerminalState>,
 ) -> Result<TerminalRead, String> {
-    let sessions = terminals
+    let mut sessions = terminals
         .sessions
         .lock()
         .map_err(|_| "Terminal lock is unavailable.".to_owned())?;
     let session = sessions
         .get(&id)
         .ok_or_else(|| "Terminal session is no longer available.".to_owned())?;
-    let output = session
-        .output
-        .lock()
-        .map_err(|_| "Terminal output is unavailable.".to_owned())?;
-    Ok(output.read_since(cursor))
+    let result = {
+        let output = session
+            .output
+            .lock()
+            .map_err(|_| "Terminal output is unavailable.".to_owned())?;
+        output.read_since(cursor)
+    };
+    // A shell the user exited (`exit`, Ctrl+D) would otherwise sit in the map
+    // as a zombie for the lifetime of the application. Reap it once the client
+    // has collected the final output.
+    if result.closed {
+        if let Some(mut finished) = sessions.remove(&id) {
+            let _ = finished.child.wait();
+        }
+    }
+    Ok(result)
 }
 
 #[tauri::command]
@@ -307,7 +340,7 @@ fn terminal_close(id: u64, terminals: tauri::State<'_, TerminalState>) -> Result
 #[tauri::command]
 fn agent_status() -> AgentStatus {
     let executable = codex_executable();
-    let version = match Command::new(&executable).arg("--version").output() {
+    let version = match command(&executable).arg("--version").output() {
         Ok(output) if output.status.success() => {
             let version = String::from_utf8_lossy(&output.stdout).trim().to_owned();
             if version.is_empty() {
@@ -327,7 +360,7 @@ fn agent_status() -> AgentStatus {
         }
     };
 
-    let authenticated = Command::new(executable)
+    let authenticated = command(executable)
         .args(["login", "status"])
         .output()
         .map(|output| {
@@ -367,7 +400,7 @@ fn agent_start(
         _ => return Err("Unsupported agent access mode.".to_owned()),
     };
     let cwd = workspace_root(&workspace)?;
-    let mut child = Command::new(codex_executable())
+    let mut child = command(codex_executable())
         .args([
             "exec",
             "--json",
@@ -515,9 +548,14 @@ impl AgentOutputBuffer {
         }
     }
 
+    // finish_reader records that one of the two output streams reached EOF.
+    // It only ever sets `closed`: agent_cancel closes the run up front, and the
+    // reader threads it kills must not reopen it as they drain out.
     fn finish_reader(&mut self) {
         self.remaining_readers = self.remaining_readers.saturating_sub(1);
-        self.closed = self.remaining_readers == 0;
+        if self.remaining_readers == 0 {
+            self.closed = true;
+        }
     }
 }
 
@@ -607,8 +645,10 @@ fn truncate_text(text: String) -> String {
 }
 
 fn codex_executable() -> PathBuf {
+    // Fully qualified: a top-level `env` import would be dead code on the
+    // platforms where this lookup does not apply.
     #[cfg(windows)]
-    if let Some(local_app_data) = env::var_os("LOCALAPPDATA") {
+    if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
         let bundled = PathBuf::from(local_app_data)
             .join("Programs")
             .join("OpenAI")
@@ -669,19 +709,60 @@ impl TerminalOutputBuffer {
         }
     }
 
+    // See AgentOutputBuffer::finish_reader: closing is one-way.
     fn finish_reader(&mut self) {
         self.remaining_readers = self.remaining_readers.saturating_sub(1);
-        self.closed = self.remaining_readers == 0;
+        if self.remaining_readers == 0 {
+            self.closed = true;
+        }
+    }
+}
+
+// decode_terminal_chunk turns the bytes read so far into text, keeping any
+// trailing *incomplete* UTF-8 sequence in `pending` for the next read.
+//
+// Reads land on arbitrary byte boundaries, so decoding each one on its own
+// corrupts every multi-byte character that straddles two reads - which is
+// exactly what the shell emits once it has been switched to UTF-8.
+fn decode_terminal_chunk(pending: &mut Vec<u8>) -> String {
+    match std::str::from_utf8(pending) {
+        Ok(text) => {
+            let text = text.to_owned();
+            pending.clear();
+            text
+        }
+        Err(error) => {
+            let valid = error.valid_up_to();
+            let mut text = String::from_utf8_lossy(&pending[..valid]).into_owned();
+            match error.error_len() {
+                // Genuinely invalid bytes: mark them and move past, otherwise
+                // the stream would stall on them forever.
+                Some(length) => {
+                    text.push('\u{fffd}');
+                    pending.drain(..valid + length);
+                }
+                // Truncated tail: hold it until the next read completes it.
+                None => {
+                    pending.drain(..valid);
+                }
+            }
+            text
+        }
     }
 }
 
 fn read_terminal_output<R: Read>(mut reader: R, output: Arc<Mutex<TerminalOutputBuffer>>) {
     let mut buffer = [0_u8; 4_096];
+    let mut pending: Vec<u8> = Vec::new();
     loop {
         match reader.read(&mut buffer) {
             Ok(0) => break,
             Ok(size) => {
-                let contents = String::from_utf8_lossy(&buffer[..size]).into_owned();
+                pending.extend_from_slice(&buffer[..size]);
+                let contents = decode_terminal_chunk(&mut pending);
+                if contents.is_empty() {
+                    continue;
+                }
                 let Ok(mut output) = output.lock() else {
                     break;
                 };
@@ -691,49 +772,72 @@ fn read_terminal_output<R: Read>(mut reader: R, output: Arc<Mutex<TerminalOutput
         }
     }
     if let Ok(mut output) = output.lock() {
+        // Flush a sequence the shell never finished before exiting.
+        if !pending.is_empty() {
+            output.append(String::from_utf8_lossy(&pending).into_owned());
+        }
         output.finish_reader();
     }
 }
 
 fn terminal_command(cwd: &Path) -> Command {
     #[cfg(windows)]
-    {
-        let shell = windows_shell();
-        let mut command = Command::new(&shell);
-        if shell == "cmd.exe" {
-            command.args(["/D", "/Q", "/K"]);
+    let mut shell = {
+        let name = windows_shell();
+        let mut shell = command(name);
+        if name == "cmd.exe" {
+            shell.args(["/D", "/Q", "/K"]);
         } else {
             // PowerShell family: keep an interactive session running.
-            command.args(["-NoLogo", "-NoExit"]);
+            shell.args(["-NoLogo", "-NoExit"]);
         }
-        command.current_dir(cwd);
-        command.stdin(Stdio::piped());
-        command.stdout(Stdio::piped());
-        command.stderr(Stdio::piped());
-        command
+        shell
+    };
+    #[cfg(not(windows))]
+    let mut shell = command(std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_owned()));
+
+    shell.current_dir(cwd);
+    shell.stdin(Stdio::piped());
+    shell.stdout(Stdio::piped());
+    shell.stderr(Stdio::piped());
+    shell
+}
+
+// terminal_init_line switches a freshly started shell to UTF-8 output.
+//
+// The syntax is shell-specific: `chcp ... > nul` is a cmd.exe idiom, and
+// sending it to PowerShell (which windows_shell prefers) would both fail to set
+// the encoding and leave a stray file named `nul` in the workspace. POSIX
+// shells are already UTF-8 and need no nudge.
+fn terminal_init_line() -> Option<&'static str> {
+    #[cfg(windows)]
+    {
+        Some(if windows_shell() == "cmd.exe" {
+            "chcp 65001 > nul\r\n"
+        } else {
+            "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\r\n"
+        })
     }
     #[cfg(not(windows))]
     {
-        let mut command =
-            Command::new(std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_owned()));
-        command.current_dir(cwd);
-        command.stdin(Stdio::piped());
-        command.stdout(Stdio::piped());
-        command.stderr(Stdio::piped());
-        command
+        None
     }
 }
 
 // windows_shell prefers PowerShell 7, then Windows PowerShell, then cmd.exe,
-// mirroring how terminal users expect a workspace shell to behave.
+// mirroring how terminal users expect a workspace shell to behave. The PATH
+// scan is done once: it runs on every terminal start otherwise.
 #[cfg(windows)]
-fn windows_shell() -> String {
-    for candidate in ["pwsh.exe", "powershell.exe", "cmd.exe"] {
-        if executable_on_path(candidate) {
-            return candidate.to_owned();
+fn windows_shell() -> &'static str {
+    static SHELL: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+    SHELL.get_or_init(|| {
+        for candidate in ["pwsh.exe", "powershell.exe", "cmd.exe"] {
+            if executable_on_path(candidate) {
+                return candidate;
+            }
         }
-    }
-    "cmd.exe".to_owned()
+        "cmd.exe"
+    })
 }
 
 #[cfg(windows)]
@@ -753,7 +857,7 @@ fn executable_on_path(name: &str) -> bool {
 fn default_shell_name() -> &'static str {
     #[cfg(windows)]
     {
-        match windows_shell().as_str() {
+        match windows_shell() {
             "pwsh.exe" => "PowerShell 7",
             "powershell.exe" => "Windows PowerShell",
             _ => "Command Prompt",
@@ -785,8 +889,18 @@ fn workspace_root(state: &WorkspaceState) -> Result<PathBuf, String> {
 
 fn workspace_file(state: &WorkspaceState, requested: &str) -> Result<PathBuf, String> {
     let root = workspace_root(state)?;
+    // Relative paths must resolve against the workspace, not the directory
+    // Termigo itself was launched from: git reports repository-relative paths,
+    // and resolving those against the process working directory would read a
+    // completely unrelated file.
+    let requested = Path::new(requested);
+    let candidate = if requested.is_absolute() {
+        requested.to_path_buf()
+    } else {
+        root.join(requested)
+    };
     let path =
-        fs::canonicalize(requested).map_err(|error| format!("Cannot access file: {error}"))?;
+        fs::canonicalize(&candidate).map_err(|error| format!("Cannot access file: {error}"))?;
     if !path.starts_with(&root) {
         return Err("File operations must stay inside the active workspace.".to_owned());
     }
@@ -794,6 +908,43 @@ fn workspace_file(state: &WorkspaceState, requested: &str) -> Result<PathBuf, St
         return Err("The selected path is not a file.".to_owned());
     }
     Ok(path)
+}
+
+// plain_path drops the Windows `\\?\` verbatim prefix and unifies separators.
+// Canonicalized roots carry that prefix while paths that made a round trip
+// through the UI do not, so they must be levelled before being compared.
+fn plain_path(path: &Path) -> PathBuf {
+    let text = path.to_string_lossy().replace('\\', "/");
+    PathBuf::from(text.strip_prefix("//?/").unwrap_or(&text))
+}
+
+// git_relative_path maps a caller-supplied path onto a path relative to the
+// workspace root, for passing to git.
+//
+// It deliberately does not require the file to exist: staging, unstaging and
+// diffing a *deleted* file are all normal operations, so canonicalization
+// (which fails on missing paths) cannot be used here. Traversal is rejected
+// lexically instead.
+fn git_relative_path(root: &Path, requested: &str) -> Result<String, String> {
+    let requested = plain_path(Path::new(requested));
+    let relative = if requested.is_absolute() {
+        requested
+            .strip_prefix(plain_path(root))
+            .map_err(|_| "Git paths must stay inside the active workspace.".to_owned())?
+    } else {
+        requested.as_path()
+    };
+    if !relative
+        .components()
+        .all(|component| matches!(component, Component::Normal(_)))
+    {
+        return Err("Git paths must stay inside the active workspace.".to_owned());
+    }
+    let relative = relative.to_string_lossy().replace('\\', "/");
+    if relative.is_empty() {
+        return Err("A file path is required.".to_owned());
+    }
+    Ok(relative)
 }
 
 fn read_directory(path: &Path, count: &mut usize) -> Result<Vec<FileNode>, String> {
@@ -902,11 +1053,11 @@ struct GitCommit {
 }
 
 fn git_command(root: &Path) -> Command {
-    let mut command = Command::new("git");
-    command.current_dir(root);
-    command.stdout(Stdio::piped());
-    command.stderr(Stdio::piped());
-    command
+    let mut git = command("git");
+    git.current_dir(root);
+    git.stdout(Stdio::piped());
+    git.stderr(Stdio::piped());
+    git
 }
 
 fn git_output(command: &mut Command) -> Result<String, String> {
@@ -984,8 +1135,7 @@ fn git_diff(
         command.arg("--cached");
     }
     if let Some(path) = path {
-        let path = workspace_file(&state, &path)?;
-        command.arg("--").arg(path);
+        command.arg("--").arg(git_relative_path(&root, &path)?);
     }
     git_output(&mut command)
 }
@@ -1000,7 +1150,7 @@ fn git_stage(state: tauri::State<'_, WorkspaceState>, paths: Vec<String>) -> Res
     } else {
         command.arg("--");
         for path in paths {
-            command.arg(path);
+            command.arg(git_relative_path(&root, &path)?);
         }
     }
     git_output(&mut command).map(|_| ())
@@ -1009,10 +1159,13 @@ fn git_stage(state: tauri::State<'_, WorkspaceState>, paths: Vec<String>) -> Res
 #[tauri::command]
 fn git_unstage(state: tauri::State<'_, WorkspaceState>, paths: Vec<String>) -> Result<(), String> {
     let root = workspace_root(&state)?;
+    if paths.is_empty() {
+        return Err("Select at least one file to unstage.".to_owned());
+    }
     let mut command = git_command(&root);
     command.args(["restore", "--staged", "--"]);
     for path in paths {
-        command.arg(path);
+        command.arg(git_relative_path(&root, &path)?);
     }
     git_output(&mut command).map(|_| ())
 }
@@ -1094,12 +1247,18 @@ fn search_directory(path: &Path, query: &str, results: &mut Vec<String>, count: 
         if ignored_name(&name) {
             continue;
         }
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        // Symlinks and Windows junctions are skipped for the same reason the
+        // explorer skips them: a link pointing at an ancestor would make this
+        // walk recurse until the stack runs out.
+        if file_type.is_symlink() {
+            continue;
+        }
         let entry_path = entry.path();
         let name_lower = name.to_string_lossy().to_lowercase();
-        let is_dir = entry
-            .file_type()
-            .map(|file_type| file_type.is_dir())
-            .unwrap_or(false);
+        let is_dir = file_type.is_dir();
         if !is_dir && name_lower.contains(query) {
             *count += 1;
             results.push(display_path(&entry_path));
@@ -1224,7 +1383,7 @@ fn agent_providers() -> Vec<ProviderStatus> {
                 version: None,
                 detail: format!("{name} was not found on PATH."),
             };
-            if let Ok(output) = Command::new(id).arg("--version").output() {
+            if let Ok(output) = command(id).arg("--version").output() {
                 if output.status.success() {
                     let version = String::from_utf8_lossy(&output.stdout)
                         .trim()
@@ -1237,6 +1396,26 @@ fn agent_providers() -> Vec<ProviderStatus> {
             status
         })
         .collect()
+}
+
+// shutdown_children kills every shell and agent process Termigo started.
+//
+// Child processes are not part of the window, so closing Termigo would
+// otherwise leave orphaned shells (and a running Codex run) behind holding the
+// workspace open.
+fn shutdown_children(app: &tauri::AppHandle) {
+    if let Ok(mut sessions) = app.state::<TerminalState>().sessions.lock() {
+        for (_, mut session) in sessions.drain() {
+            let _ = session.child.kill();
+            let _ = session.child.wait();
+        }
+    }
+    if let Ok(mut runs) = app.state::<AgentState>().runs.lock() {
+        for (_, mut run) in runs.drain() {
+            let _ = run.child.kill();
+            let _ = run.child.wait();
+        }
+    }
 }
 
 fn main() {
@@ -1268,15 +1447,21 @@ fn main() {
             agent_read,
             agent_cancel,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Termigo");
+        .build(tauri::generate_context!())
+        .expect("error while starting Termigo")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                shutdown_children(app);
+            }
+        });
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        ignored_name, language_for_path, parse_codex_event, parse_git_status,
-        parse_skill_frontmatter, AgentOutputBuffer, TerminalOutputBuffer,
+        decode_terminal_chunk, git_relative_path, ignored_name, language_for_path,
+        parse_codex_event, parse_git_status, parse_skill_frontmatter, AgentOutputBuffer,
+        TerminalOutputBuffer,
     };
     use std::path::Path;
 
@@ -1369,6 +1554,62 @@ mod tests {
         let next = output.read_since(first.cursor);
         assert_eq!(next.events.len(), 1);
         assert_eq!(next.events[0].text, "Completed");
+    }
+
+    #[test]
+    fn git_paths_stay_relative_to_the_workspace() {
+        let root = Path::new(r"\\?\C:\project\termigo");
+
+        // git reports repository-relative paths; they pass straight through.
+        assert_eq!(
+            git_relative_path(root, "desktop/src/App.tsx").unwrap(),
+            "desktop/src/App.tsx"
+        );
+        // Explorer paths arrive as forward-slash strings built from the
+        // canonicalized root, verbatim prefix included.
+        assert_eq!(
+            git_relative_path(root, "//?/C:/project/termigo/app.go").unwrap(),
+            "app.go"
+        );
+    }
+
+    #[test]
+    fn git_paths_outside_the_workspace_are_rejected() {
+        let root = Path::new(r"\\?\C:\project\termigo");
+        assert!(git_relative_path(root, "../secrets.txt").is_err());
+        assert!(git_relative_path(root, "docs/../../secrets.txt").is_err());
+        assert!(git_relative_path(root, "//?/C:/other/secrets.txt").is_err());
+        assert!(git_relative_path(root, "").is_err());
+    }
+
+    #[test]
+    fn terminal_decoding_joins_characters_split_across_reads() {
+        // "é" is 0xC3 0xA9; deliver the two halves in separate reads.
+        let mut pending = vec![b'a', 0xC3];
+        assert_eq!(decode_terminal_chunk(&mut pending), "a");
+        pending.push(0xA9);
+        assert_eq!(decode_terminal_chunk(&mut pending), "é");
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn terminal_decoding_does_not_stall_on_invalid_bytes() {
+        let mut pending = vec![b'a', 0xFF, b'b'];
+        assert_eq!(decode_terminal_chunk(&mut pending), "a\u{fffd}");
+        assert_eq!(decode_terminal_chunk(&mut pending), "b");
+    }
+
+    #[test]
+    fn a_cancelled_run_stays_closed_while_readers_drain() {
+        let mut output = AgentOutputBuffer::with_readers(2);
+        output.append("status", "Cancelled.".to_owned());
+        output.closed = true;
+        // The killed reader threads finish one after the other; neither may
+        // reopen the run.
+        output.finish_reader();
+        assert!(output.closed);
+        output.finish_reader();
+        assert!(output.closed);
     }
 
     #[cfg(windows)]
