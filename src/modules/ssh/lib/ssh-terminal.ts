@@ -15,6 +15,7 @@ import {
   type SshConnection,
 } from "../connections";
 import { useHostKeyPrompt } from "../hostKeyPrompt";
+import { useSshActiveSessionStore } from "../sshActiveSession";
 
 /** What a terminal leaf needs to open an SSH session instead of a local PTY. */
 export type SshLeafSpec = { connectionId: string };
@@ -56,17 +57,27 @@ export async function openSshTerminalSession(
   handlers: PtyHandlers,
 ): Promise<PtySession> {
   const input = await resolveSshOpenInput(conn);
+  const hostLabel = `${conn.user}@${conn.host}`;
   const session = await openSsh(
     { ...input, cols, rows },
     {
       onData: (bytes) => handlers.onData(bytes),
-      onExit: (code) => handlers.onExit?.(code),
+      onExit: (code) => {
+        useSshActiveSessionStore.getState().clearSession(session.id);
+        handlers.onExit?.(code);
+      },
+      onConnected: () => {
+        useSshActiveSessionStore.getState().setSession({ sessionId: session.id, hostLabel });
+      },
       onHostKeyPrompt: (prompt) => {
         useHostKeyPrompt.getState().enqueue(prompt, () => {
           void pinFingerprint(conn.id, prompt.fingerprint).catch(() => {});
         });
       },
-      onError: () => handlers.onExit?.(-1),
+      onError: () => {
+        useSshActiveSessionStore.getState().clearSession(session.id);
+        handlers.onExit?.(-1);
+      },
     },
   );
   return {

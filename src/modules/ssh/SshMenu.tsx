@@ -31,6 +31,8 @@ import {
 import type { BackupMode } from "./SshBackupDialog";
 import type { FsReadResult } from "@/lib/ipc";
 import { BACKUP_EXTENSION } from "./backupFile";
+import { useSshRightPanelStore } from "./sshRightPanelStore";
+import { useSshActiveSessionStore } from "./sshActiveSession";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 // `CopyPlus`, not `Copy`: plain Copy already means copy-to-clipboard everywhere
@@ -44,6 +46,7 @@ import {
   Trash2,
   Upload,
   type LucideIcon,
+  FolderOpen,
 } from "lucide-react";
 
 // Heavy module. Lazy-load until the user opens the add/edit modal.
@@ -66,6 +69,7 @@ type Props = {
 
 export function SshMenu({ onConnect }: Props) {
   const [conns, setConns] = useState<SshConnection[] | null>(null);
+  const activeSsh = useSshActiveSessionStore((s) => s.session);
   const [menuOpen, setMenuOpen] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
   // Latches once the editor opens. Keeps the lazy dialog mounted so Radix's
@@ -177,6 +181,19 @@ export function SshMenu({ onConnect }: Props) {
           <DropdownMenuLabel className="text-muted-foreground text-[10px] tracking-wide uppercase">
             SSH connections
           </DropdownMenuLabel>
+          {activeSsh ? (
+            <DropdownMenuItem
+              onSelect={() => {
+                setMenuOpen(false);
+                useSshRightPanelStore.getState().openPanel();
+              }}
+              className="gap-2 text-[12px]"
+            >
+              <FolderOpen size={14} strokeWidth={1.75} />
+              Browse remote files ({activeSsh.hostLabel})
+            </DropdownMenuItem>
+          ) : null}
+          <DropdownMenuSeparator />
           {conns === null ? (
             <div className="text-muted-foreground px-3 py-2 text-[11px]">Loading…</div>
           ) : conns.length === 0 ? (

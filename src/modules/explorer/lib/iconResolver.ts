@@ -96,6 +96,10 @@ export function fileIconUrl(name: string): string {
   return buildDataUrl(DEFAULT_FILE) ?? "";
 }
 
+export function useExplorerIconsReady(): void {
+  // Termigo ships a single icon set; nothing lazy to wait for.
+}
+
 export function folderIconUrl(name: string, expanded: boolean): string {
   const lower = name.toLowerCase();
 

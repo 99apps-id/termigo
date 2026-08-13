@@ -6,6 +6,10 @@ import {
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { HostKeyPromptDialog } from "@/modules/ssh/HostKeyPromptDialog";
+import { useSshRightPanelStore } from "@/modules/ssh/sshRightPanelStore";
+import { SshFileExplorer } from "@/modules/ssh/SshFileExplorer";
+import { useSshActiveSessionStore } from "@/modules/ssh/sshActiveSession";
+import { lazy as _lazySsh } from "react";
 import { consumeLaunchFiles, getLaunchDir } from "@/lib/launchDir";
 import { quoteShellArg } from "@/lib/shellQuote";
 import { usePresence } from "@/lib/usePresence";
@@ -1323,6 +1327,9 @@ export default function App() {
     terminalRefs,
   });
 
+  const sshPanelOpen = useSshRightPanelStore((s) => s.open);
+  const activeSshSession = useSshActiveSessionStore((s) => s.session);
+
   const shell = (
     <ThemeProvider>
       <TooltipProvider>
@@ -1466,6 +1473,22 @@ export default function App() {
                   />
                 </div>
               </ResizablePanel>
+              {sshPanelOpen && activeSshSession ? (
+                <ResizablePanel
+                  id="ssh-remote"
+                  defaultSize="28%"
+                  minSize="16%"
+                  maxSize="45%"
+                >
+                  <div className="flex h-full min-h-0 flex-col border-l border-border/60 bg-card">
+                    <SshFileExplorer
+                      sessionId={activeSshSession.sessionId}
+                      hostLabel={activeSshSession.hostLabel}
+                      onClose={() => useSshRightPanelStore.getState().closePanel()}
+                    />
+                  </div>
+                </ResizablePanel>
+              ) : null}
             </ResizablePanelGroup>
           </main>
 
