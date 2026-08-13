@@ -118,24 +118,28 @@ export function Header({
         IS_MAC ? "pr-2 pl-20" : "pr-0 pl-2"
       }`}
     >
-      {/* Termigo brand mark — the logo's T with the signature teal→violet glow. */}
+      {/* Real logo asset, not a CSS approximation: same source the window and
+          taskbar icons are generated from. */}
       <div
         data-tauri-drag-region
         className="mr-0.5 flex shrink-0 items-center gap-1.5 pl-0.5"
         title="Termigo"
       >
-        <span
+        <img
           data-tauri-drag-region
-          className="flex size-5 items-center justify-center rounded-md bg-gradient-to-br from-[#2dd4bf] via-[#749bff] to-[#a76bff] text-[11px] font-bold text-[#0f1422] shadow-[0_0_10px_rgba(116,155,255,0.45)]"
-        >
-          T
-        </span>
+          src="/logo.png"
+          alt=""
+          width={20}
+          height={20}
+          className="size-5 shrink-0 select-none object-contain"
+          draggable={false}
+        />
         {!compact && (
           <span
             data-tauri-drag-region
             className="text-[12px] font-semibold tracking-tight bg-gradient-to-r from-teal-400 via-sky-400 to-violet-400 bg-clip-text text-transparent"
           >
-            termigo
+            Termigo
           </span>
         )}
       </div>

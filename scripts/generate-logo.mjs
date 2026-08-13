@@ -1,13 +1,18 @@
-// Generate the Termigo "T" logo as PNG/ICO/ICNS with zero dependencies.
+// Derive every Termigo brand asset (PNG/ICO/ICNS) from the master artwork,
+// with zero dependencies.
 //
-// The design: a rounded-square dark tile, a bold geometric "T" filled with a
-// blue->violet gradient, and a cyan terminal cursor block at the lower right —
-// the terminal-first feel of Termigo.
+// `termigo.png` at the repository root is the master, and this script never
+// writes it: it is the input. Everything else (public/logo.png and the whole
+// src-tauri/icons set) is generated from it, so the app, the installer and the
+// README cannot drift apart.
 //
-// Rendering uses signed distance fields with 2x supersampling, so every size
-// stays crisp. PNG encoding uses Node's built-in zlib + a hand-rolled CRC32.
-import { deflateSync } from "node:zlib";
-import { mkdirSync, statSync, writeFileSync } from "node:fs";
+// Run after changing the master:  node scripts/generate-logo.mjs
+//
+// This replaces an earlier procedural renderer that drew a "T" from signed
+// distance fields; it emitted an effectively blank tile at every size, so the
+// shipped app had a blank icon everywhere.
+import { deflateSync, inflateSync } from "node:zlib";
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 
 // ---- PNG encoder ----------------------------------------------------------
 
@@ -55,102 +60,208 @@ function encodePng(width, height, rgba) {
   ]);
 }
 
-// ---- SDF primitives -------------------------------------------------------
+// ---- Master image decode --------------------------------------------------
 
-function sdRoundBox(px, py, cx, cy, hw, hh, r) {
-  const qx = Math.abs(px - cx) - (hw - r);
-  const qy = Math.abs(py - cy) - (hh - r);
-  const ax = Math.max(qx, 0);
-  const ay = Math.max(qy, 0);
-  return Math.hypot(ax, ay) + Math.min(Math.max(qx, qy), 0) - r;
-}
+// Every asset is derived from the master artwork at the repository root rather
+// than drawn procedurally. The previous signed-distance-field renderer emitted
+// an effectively blank tile at every size, so the app shipped an empty icon.
+//
+// Decoding is limited to what the master actually is - 8-bit RGBA, no
+// interlacing - and fails loudly on anything else instead of guessing.
 
-// union: min of two SDFs, with a smooth blend controlled by k
-function smoothUnion(d1, d2, k) {
-  const h = Math.max(k - Math.abs(d1 - d2), 0) / k;
-  return Math.min(d1, d2) - h * h * k * 0.25;
-}
+const MASTER = "termigo.png";
 
-// ---- Logo renderer --------------------------------------------------------
-
-// All coordinates in a 0..1 design space; SDF evaluated per pixel at 2x
-// supersampling, then box-downsampled for anti-aliasing.
-
-function shade(x, y) {
-  // Background rounded square.
-  const bg = sdRoundBox(x, y, 0.5, 0.5, 0.5, 0.5, 0.2);
-
-  // Bold geometric T: horizontal bar + vertical stem.
-  const bar = sdRoundBox(x, y, 0.5, 0.285, 0.34, 0.105, 0.045);
-  const stem = sdRoundBox(x, y, 0.5, 0.59, 0.06, 0.21, 0.035);
-  const letter = smoothUnion(bar, stem, 0.02);
-
-  // Terminal cursor block at the lower right.
-  const cursor = sdRoundBox(x, y, 0.74, 0.68, 0.1, 0.1, 0.045);
-  const glyph = smoothUnion(letter, cursor, 0.01);
-
-  // Distance to the tile edge (inside = positive).
-  const tile = -bg;
-
-  const alphaTile = clamp01(0.5 + tile * 320);
-  if (alphaTile <= 0) return [0, 0, 0, 0];
-
-  // Colors.
-  const baseR = 0x0f, baseG = 0x14, baseB = 0x22; // dark tile
-  const grad = (x + y) / 2; // 0..1 diagonal
-  const r1 = 0x74, g1 = 0x9b, b1 = 0xff; // blue #749bff
-  const r2 = 0xa7, g2 = 0x6b, b2 = 0xff; // violet #a76bff
-  const cR = r1 + (r2 - r1) * grad;
-  const cG = g1 + (g2 - g1) * grad;
-  const cB = b1 + (b2 - b1) * grad;
-
-  const glyphA = clamp01(0.5 - glyph * 320);
-
-  let r = baseR, g = baseG, b = baseB, a = alphaTile;
-  if (glyphA > 0) {
-    r = baseR + (cR - baseR) * glyphA;
-    g = baseG + (cG - baseG) * glyphA;
-    b = baseB + (cB - baseB) * glyphA;
-    a = alphaTile;
+function decodePng(buf) {
+  if (buf.readUInt32BE(0) !== 0x89504e47) throw new Error(`${MASTER}: not a PNG`);
+  let width = 0;
+  let height = 0;
+  const idat = [];
+  for (let i = 8; i < buf.length; ) {
+    const len = buf.readUInt32BE(i);
+    const type = buf.toString("ascii", i + 4, i + 8);
+    const data = buf.subarray(i + 8, i + 8 + len);
+    if (type === "IHDR") {
+      width = data.readUInt32BE(0);
+      height = data.readUInt32BE(4);
+      const [depth, colorType, , , interlace] = [data[8], data[9], data[10], data[11], data[12]];
+      if (depth !== 8 || colorType !== 6 || interlace !== 0) {
+        throw new Error(
+          `${MASTER}: need 8-bit RGBA, non-interlaced (got depth=${depth} colorType=${colorType} interlace=${interlace})`,
+        );
+      }
+    } else if (type === "IDAT") {
+      idat.push(data);
+    } else if (type === "IEND") {
+      break;
+    }
+    i += 12 + len;
   }
-  return [r, g, b, a];
+  if (!width || !height) throw new Error(`${MASTER}: missing IHDR`);
+
+  const raw = inflateSync(Buffer.concat(idat));
+  const stride = width * 4;
+  const out = Buffer.alloc(stride * height);
+  // Undo the per-scanline filters (PNG spec 9.2). `a` is the pixel to the
+  // left, `b` above, `c` above-left.
+  for (let y = 0; y < height; y++) {
+    const filter = raw[y * (stride + 1)];
+    const line = raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1));
+    for (let x = 0; x < stride; x++) {
+      const a = x >= 4 ? out[y * stride + x - 4] : 0;
+      const b = y > 0 ? out[(y - 1) * stride + x] : 0;
+      const c = x >= 4 && y > 0 ? out[(y - 1) * stride + x - 4] : 0;
+      let v = line[x];
+      switch (filter) {
+        case 0: break;
+        case 1: v += a; break;
+        case 2: v += b; break;
+        case 3: v += (a + b) >> 1; break;
+        case 4: {
+          const p = a + b - c;
+          const pa = Math.abs(p - a);
+          const pb = Math.abs(p - b);
+          const pc = Math.abs(p - c);
+          v += pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+          break;
+        }
+        default: throw new Error(`${MASTER}: bad filter ${filter} on row ${y}`);
+      }
+      out[y * stride + x] = v & 0xff;
+    }
+  }
+  return { width, height, data: out };
 }
 
-function clamp01(v) {
-  return v < 0 ? 0 : v > 1 ? 1 : v;
+// ---- Background removal ---------------------------------------------------
+
+const WHITE_CUTOFF = 236;
+
+// The master is a rounded square on an opaque white field. Shipping it as-is
+// puts a white box on the dark titlebar and a white fringe around the taskbar
+// icon, so clear the margin OUTSIDE the mark.
+//
+// A flood fill from the corners is used rather than a global "white is
+// transparent" rule: the terminal prompt glyph inside the mark is also white
+// and must survive.
+function cutBackground(img) {
+  const { width, height, data } = img;
+  const outside = new Uint8Array(width * height);
+  const stack = [];
+  const consider = (x, y) => {
+    if (x < 0 || y < 0 || x >= width || y >= height) return;
+    const i = y * width + x;
+    if (outside[i]) return;
+    const p = i * 4;
+    if (Math.min(data[p], data[p + 1], data[p + 2]) < WHITE_CUTOFF) return;
+    outside[i] = 1;
+    stack.push(x, y);
+  };
+  for (let x = 0; x < width; x++) {
+    consider(x, 0);
+    consider(x, height - 1);
+  }
+  for (let y = 0; y < height; y++) {
+    consider(0, y);
+    consider(width - 1, y);
+  }
+  while (stack.length) {
+    const y = stack.pop();
+    const x = stack.pop();
+    consider(x - 1, y);
+    consider(x + 1, y);
+    consider(x, y - 1);
+    consider(x, y + 1);
+  }
+  // Feather the boundary by alpha so the rounded corners do not stair-step.
+  for (let i = 0; i < width * height; i++) {
+    if (!outside[i]) continue;
+    const p = i * 4;
+    const brightness = Math.min(data[p], data[p + 1], data[p + 2]);
+    data[p + 3] =
+      brightness >= 252
+        ? 0
+        : Math.min(255, Math.round(((252 - brightness) * 255) / (252 - WHITE_CUTOFF)));
+  }
+  return img;
 }
 
-function render(size) {
-  const ss = 2;
-  const S = size * ss;
+// Pad to a square canvas so no generated icon distorts the aspect ratio.
+function squarize(img) {
+  const { width, height, data } = img;
+  if (width === height) return img;
+  const side = Math.max(width, height);
+  const out = Buffer.alloc(side * side * 4); // transparent
+  const ox = (side - width) >> 1;
+  const oy = (side - height) >> 1;
+  for (let y = 0; y < height; y++) {
+    data.copy(out, ((y + oy) * side + ox) * 4, y * width * 4, (y + 1) * width * 4);
+  }
+  return { width: side, height: side, data: out };
+}
+
+// ---- Resampling -----------------------------------------------------------
+
+// Area-average resample, computed on premultiplied alpha so transparent pixels
+// cannot bleed their colour into the edges of the mark.
+function resample(img, size) {
+  const { width, height, data } = img;
   const out = Buffer.alloc(size * size * 4);
-  const tmp = new Float64Array(size * size * 4);
-  for (let y = 0; y < S; y++) {
-    for (let x = 0; x < S; x++) {
-      const px = (x + 0.5) / S;
-      const py = (y + 0.5) / S;
-      const [r, g, b, a] = shade(px, py);
-      const ox = Math.floor(x / ss);
-      const oy = Math.floor(y / ss);
-      const i = (oy * size + ox) * 4;
-      tmp[i] += r * a;
-      tmp[i + 1] += g * a;
-      tmp[i + 2] += b * a;
-      tmp[i + 3] += a;
+  const scaleX = width / size;
+  const scaleY = height / size;
+  for (let y = 0; y < size; y++) {
+    const y0 = y * scaleY;
+    const y1 = Math.min(height, (y + 1) * scaleY);
+    for (let x = 0; x < size; x++) {
+      const x0 = x * scaleX;
+      const x1 = Math.min(width, (x + 1) * scaleX);
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      let a = 0;
+      let weight = 0;
+      for (let sy = Math.floor(y0); sy < Math.max(Math.ceil(y1), Math.floor(y0) + 1); sy++) {
+        if (sy >= height) break;
+        const wy = Math.min(y1, sy + 1) - Math.max(y0, sy);
+        if (wy <= 0) continue;
+        for (let sx = Math.floor(x0); sx < Math.max(Math.ceil(x1), Math.floor(x0) + 1); sx++) {
+          if (sx >= width) break;
+          const wx = Math.min(x1, sx + 1) - Math.max(x0, sx);
+          if (wx <= 0) continue;
+          const w = wx * wy;
+          const p = (sy * width + sx) * 4;
+          const alpha = data[p + 3] / 255;
+          r += data[p] * alpha * w;
+          g += data[p + 1] * alpha * w;
+          b += data[p + 2] * alpha * w;
+          a += alpha * w;
+          weight += w;
+        }
+      }
+      const i = (y * size + x) * 4;
+      if (a <= 0 || weight <= 0) {
+        out[i + 3] = 0;
+        continue;
+      }
+      out[i] = Math.round(r / a);
+      out[i + 1] = Math.round(g / a);
+      out[i + 2] = Math.round(b / a);
+      out[i + 3] = Math.round((a / weight) * 255);
     }
-  }
-  for (let i = 0; i < size * size; i++) {
-    const a = tmp[i * 4 + 3] / (ss * ss);
-    if (a <= 0) {
-      out[i * 4 + 3] = 0;
-      continue;
-    }
-    out[i * 4] = Math.round(tmp[i * 4] / a);
-    out[i * 4 + 1] = Math.round(tmp[i * 4 + 1] / a);
-    out[i * 4 + 2] = Math.round(tmp[i * 4 + 2] / a);
-    out[i * 4 + 3] = Math.round(a);
   }
   return out;
+}
+
+const master = squarize(cutBackground(decodePng(readFileSync(MASTER))));
+
+const renderCache = new Map();
+
+// Same signature the encoders below already expect: RGBA bytes for one size.
+function render(size) {
+  const hit = renderCache.get(size);
+  if (hit) return hit;
+  const rgba = resample(master, size);
+  renderCache.set(size, rgba);
+  return rgba;
 }
 
 // ---- ICO / ICNS -----------------------------------------------------------
@@ -263,8 +374,8 @@ function encodeIcns(sizes) {
 const iconsDir = "src-tauri/icons";
 mkdirSync(iconsDir, { recursive: true });
 
-// App/README logos.
-writeFileSync("termigo.png", encodePng(512, 512, render(512)));
+// In-app logo (AI mini window, terminal block watermark, agent icon).
+// NOTE: `termigo.png` is the master input and is deliberately not written here.
 writeFileSync("public/logo.png", encodePng(256, 256, render(256)));
 
 // Tauri icons.
@@ -292,9 +403,8 @@ for (const [name, size] of storeSizes) {
   writeFileSync(`${iconsDir}/${name}`, encodePng(size, size, render(size)));
 }
 
-console.log("Generated Termigo T logo:");
+console.log(`Generated Termigo brand assets from ${MASTER}:`);
 for (const f of [
-  "termigo.png",
   "public/logo.png",
   `${iconsDir}/32x32.png`,
   `${iconsDir}/64x64.png`,
