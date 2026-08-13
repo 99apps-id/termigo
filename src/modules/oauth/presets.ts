@@ -12,14 +12,18 @@
 
 export type OAuthProfile = "codex" | "claude" | "antigravity";
 
-export type OAuthTokens = {
+/**
+ * The renderer's view of a signed-in account, mirroring Rust's `OAuthSession`.
+ *
+ * There is deliberately no `refresh_token` field: the full token set stays in
+ * the OS keyring on the Rust side, and renewal happens there too
+ * (`oauth_session`), so the long-lived credential never reaches the webview.
+ */
+export type OAuthSession = {
   access_token: string;
-  refresh_token?: string | null;
-  expires_in?: number | null;
-  token_type?: string | null;
-  scope?: string | null;
   /** Absolute unix seconds when the access token expires (computed locally). */
   expires_at?: number | null;
+  scope?: string | null;
   project_id?: string | null;
 };
 

@@ -1,10 +1,11 @@
 // OAuth bridge — thin invoke wrappers over the Rust oauth module plus the
-// high-level sign-in flow (start -> browser/loopback/manual -> exchange ->
-// store). Token persistence happens in the OS keyring on the Rust side.
+// high-level sign-in flow (start -> browser/loopback/manual -> exchange).
+// Token persistence AND renewal happen in Rust; this layer only ever sees the
+// short-lived access token (`OAuthSession`), never the refresh token.
 
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import type { OAuthProfile, OAuthTokens } from "./presets";
+import type { OAuthProfile, OAuthSession } from "./presets";
 
 export type OAuthStartResult = {
   authorizeUrl: string;
@@ -33,39 +34,28 @@ export async function oauthPoll(state: string): Promise<OAuthPollResult> {
   return invoke<OAuthPollResult>("oauth_poll", { stateValue: state });
 }
 
+/**
+ * Exchange an authorization code for a session. The backend persists the full
+ * token set in the OS keyring itself and returns only the renderer-safe view,
+ * so the refresh token never crosses the IPC boundary.
+ */
 export async function oauthExchange(
   profile: OAuthProfile,
   state: string,
   code?: string,
-): Promise<OAuthTokens> {
-  return invoke<OAuthTokens>("oauth_exchange", {
+): Promise<OAuthSession> {
+  return invoke<OAuthSession>("oauth_exchange", {
     profile,
     stateValue: state,
     code: code ?? null,
   });
 }
 
-export async function oauthRefresh(
-  profile: OAuthProfile,
-  refreshToken: string,
-): Promise<OAuthTokens> {
-  return invoke<OAuthTokens>("oauth_refresh", {
-    profile,
-    refreshToken,
-  });
-}
-
-export async function oauthStore(
-  profile: OAuthProfile,
-  tokens: OAuthTokens,
-): Promise<void> {
-  await invoke("oauth_store", { profile, tokens });
-}
-
+/** Read the stored session as-is, without renewing it (used to hydrate the UI). */
 export async function oauthLoad(
   profile: OAuthProfile,
-): Promise<OAuthTokens | null> {
-  return invoke<OAuthTokens | null>("oauth_load", { profile });
+): Promise<OAuthSession | null> {
+  return invoke<OAuthSession | null>("oauth_load", { profile });
 }
 
 export async function oauthClear(profile: OAuthProfile): Promise<void> {
@@ -85,30 +75,26 @@ export async function oauthAntigravityProject(
 }
 
 /** True when the access token is expired or within `leadMs` of expiring. */
-export function isOAuthTokenStale(tokens: OAuthTokens, leadMs = 60_000): boolean {
-  if (!tokens.expires_at) return false;
-  return Date.now() / 1000 >= tokens.expires_at - leadMs / 1000;
+export function isOAuthTokenStale(
+  session: OAuthSession,
+  leadMs = 60_000,
+): boolean {
+  if (!session.expires_at) return false;
+  return Date.now() / 1000 >= session.expires_at - leadMs / 1000;
 }
 
 /**
- * Ensure a fresh access token for a profile. If the stored token is stale and
- * a refresh token exists, refresh it and persist the new tokens.
+ * Get a usable access token for a profile, renewing it first if it is close to
+ * expiring.
+ *
+ * The load / refresh / re-store cycle lives in Rust (`oauth_session`). Doing it
+ * here meant pulling the long-lived refresh token into the webview on every
+ * check; the renderer only ever needs the short-lived access token.
  */
 export async function ensureFreshOAuthToken(
   profile: OAuthProfile,
-): Promise<OAuthTokens | null> {
-  const stored = await oauthLoad(profile);
-  if (!stored) return null;
-  if (!isOAuthTokenStale(stored)) return stored;
-  if (!stored.refresh_token) return stored; // can't refresh; return as-is
-  try {
-    const fresh = await oauthRefresh(profile, stored.refresh_token);
-    const merged: OAuthTokens = { ...stored, ...fresh };
-    await oauthStore(profile, merged);
-    return merged;
-  } catch {
-    return stored;
-  }
+): Promise<OAuthSession | null> {
+  return invoke<OAuthSession | null>("oauth_session", { profile });
 }
 
 /** Open the browser at the authorize URL. */

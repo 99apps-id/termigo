@@ -1,9 +1,12 @@
 // Sign-in flow hook for a single OAuth profile.
 //
 // Loopback profiles (codex, antigravity): start -> open browser -> poll the
-// local callback server until the code arrives -> exchange -> store.
+// local callback server until the code arrives -> exchange.
 // Manual-code profiles (claude): start -> open browser -> the browser shows a
-// code -> user pastes it -> completeManual exchanges it.
+// code -> user pastes it -> exchange.
+//
+// The exchange persists the tokens in the OS keyring on the Rust side, so there
+// is no separate "store" step here and no refresh token in this layer.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { OAUTH_PRESETS, type OAuthProfile } from "./presets";
@@ -12,7 +15,6 @@ import {
   oauthExchange,
   oauthPoll,
   oauthStart,
-  oauthStore,
   openOAuthBrowser,
 } from "./bridge";
 import { useOAuthStore } from "./store";
@@ -84,7 +86,6 @@ export function useOAuthConnect(profile: OAuthProfile) {
             // The code came back from the poll (and was consumed there); pass
             // it straight to the exchange.
             const t = await oauthExchange(profileRef, state, r.code);
-            await oauthStore(profileRef, t);
             setTokens(t);
             setStatus("connected");
             setBusy(false);
@@ -116,7 +117,6 @@ export function useOAuthConnect(profile: OAuthProfile) {
     setError(null);
     try {
       const t = await oauthExchange(profile, state, code);
-      await oauthStore(profile, t);
       setTokens(t);
       setStatus("connected");
       setManualCode("");

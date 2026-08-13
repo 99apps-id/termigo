@@ -15,7 +15,7 @@
 //! Keychain on macOS, or the mode-0600 file on Linux) via the same backends
 //! as the `secrets` module.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
@@ -131,8 +131,64 @@ pub struct OAuthState {
     pending: Mutex<HashMap<String, PendingAuth>>,
     /// state -> authorization code captured by the loopback listener
     loopback_codes: Arc<Mutex<HashMap<String, String>>>,
+    /// Every `state` we have issued and not yet retired. The listener threads
+    /// consult this to reject callbacks they did not originate; it is a
+    /// separate set (rather than locking `pending`) so a listener thread never
+    /// contends with an in-flight token exchange.
+    known_states: Arc<Mutex<HashSet<String>>>,
     /// port -> running loopback listeners (kept alive for the session)
     listeners: Mutex<HashMap<u16, Vec<Arc<TcpListener>>>>,
+}
+
+impl OAuthState {
+    /// Drop sign-in attempts older than `PENDING_TTL`, along with any code and
+    /// state they left behind.
+    ///
+    /// Nothing else removes them: `oauth_poll` only *reads* the timestamp to
+    /// report `Expired`, and an abandoned sign-in (user closes the browser tab)
+    /// never reaches `oauth_exchange`. Called at the start of each sign-in so
+    /// the maps stay proportional to active attempts rather than to the number
+    /// of attempts made this session.
+    fn sweep_expired(&self) {
+        let Ok(mut pending) = self.pending.lock() else {
+            return;
+        };
+        let mut dropped = Vec::new();
+        pending.retain(|state, auth| {
+            let live = auth.created.elapsed() <= PENDING_TTL;
+            if !live {
+                dropped.push(state.clone());
+            }
+            live
+        });
+        if dropped.is_empty() {
+            return;
+        }
+        if let Ok(mut codes) = self.loopback_codes.lock() {
+            for state in &dropped {
+                codes.remove(state);
+            }
+        }
+        if let Ok(mut known) = self.known_states.lock() {
+            for state in &dropped {
+                known.remove(state);
+            }
+        }
+        log::debug!("oauth: swept {} expired sign-in attempt(s)", dropped.len());
+    }
+
+    /// Retire one sign-in attempt once it has succeeded or failed for good.
+    fn forget(&self, state_value: &str) {
+        if let Ok(mut pending) = self.pending.lock() {
+            pending.remove(state_value);
+        }
+        if let Ok(mut codes) = self.loopback_codes.lock() {
+            codes.remove(state_value);
+        }
+        if let Ok(mut known) = self.known_states.lock() {
+            known.remove(state_value);
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -260,6 +316,7 @@ fn percent_decode(s: &str) -> String {
 
 fn spawn_loopback(
     codes: Arc<Mutex<HashMap<String, String>>>,
+    known_states: Arc<Mutex<HashSet<String>>>,
     addr: String,
     path: &'static str,
 ) -> Result<Arc<TcpListener>, String> {
@@ -287,21 +344,37 @@ fn spawn_loopback(
                                 if let (Some(code), Some(state)) =
                                     (params.get("code"), params.get("state"))
                                 {
-                                    codes
+                                    // Only accept a callback whose `state` we
+                                    // actually issued. The port is reachable by
+                                    // any local process and by any page the
+                                    // browser loads, so without this check an
+                                    // unrelated caller could plant unbounded
+                                    // entries in the code map.
+                                    let known = known_states
                                         .lock()
-                                        .map(|mut m| m.insert(state.clone(), code.clone()))
-                                        .ok();
-                                    ok = true;
+                                        .map(|s| s.contains(state))
+                                        .unwrap_or(false);
+                                    if known {
+                                        codes
+                                            .lock()
+                                            .map(|mut m| m.insert(state.clone(), code.clone()))
+                                            .ok();
+                                        ok = true;
+                                    } else {
+                                        log::warn!(
+                                            "oauth: ignoring loopback callback for unknown state"
+                                        );
+                                    }
                                 }
                             }
                         }
                     }
                 }
             }
-            let _ = stream.write_all(if ok {
-                CALLBACK_HTML.as_bytes()
+            let _ = stream.write_all(&if ok {
+                http_response("HTTP/1.1 200 OK", CALLBACK_BODY)
             } else {
-                CALLBACK_ERROR_HTML.as_bytes()
+                http_response("HTTP/1.1 400 Bad Request", CALLBACK_ERROR_BODY)
             });
         }
     });
@@ -316,18 +389,24 @@ fn start_loopback(state: &OAuthState, port: u16, path: &'static str) -> Result<(
         }
     }
     let codes = state.loopback_codes.clone();
+    let known = state.known_states.clone();
     let mut bound = Vec::new();
     // Bind IPv4 loopback first (Antigravity redirects to the explicit
     // `127.0.0.1`); then best-effort bind IPv6 loopback for hosts where
     // `localhost` (Codex) resolves to `::1`. Only loopback interfaces are
     // used — never 0.0.0.0 — so the callback port stays local-only.
     for addr in [format!("127.0.0.1:{port}"), format!("[::1]:{port}")] {
-        if let Ok(l) = spawn_loopback(codes.clone(), addr, path) {
+        if let Ok(l) = spawn_loopback(codes.clone(), known.clone(), addr, path) {
             bound.push(l);
         }
     }
     if bound.is_empty() {
-        bound.push(spawn_loopback(codes, format!("127.0.0.1:{port}"), path)?);
+        bound.push(spawn_loopback(
+            codes,
+            known,
+            format!("127.0.0.1:{port}"),
+            path,
+        )?);
     }
     state
         .listeners
@@ -415,6 +494,33 @@ pub struct OAuthTokens {
     pub project_id: Option<String>,
 }
 
+/// The renderer's view of a signed-in account.
+///
+/// Deliberately omits `refresh_token`: it is the long-lived credential, and
+/// nothing in the frontend needs it now that renewal happens in
+/// `oauth_session`. Keeping it out of the IPC payload keeps it out of the
+/// webview, out of devtools, and out of any state the UI serializes.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct OAuthSession {
+    pub access_token: String,
+    pub expires_at: Option<u64>,
+    pub scope: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+}
+
+impl From<&OAuthTokens> for OAuthSession {
+    fn from(tokens: &OAuthTokens) -> Self {
+        Self {
+            access_token: tokens.access_token.clone(),
+            expires_at: tokens.expires_at,
+            scope: tokens.scope.clone(),
+            project_id: tokens.project_id.clone(),
+        }
+    }
+}
+
 // ---- Commands -------------------------------------------------------------
 
 #[derive(Serialize)]
@@ -432,6 +538,8 @@ pub async fn oauth_start(
     profile: OAuthProfile,
 ) -> Result<OAuthStartResult, String> {
     let preset = profile.preset();
+    // Retire anything left over from abandoned attempts before adding another.
+    state.sweep_expired();
     let verifier = pkce_verifier()?;
     let challenge = pkce_challenge(&verifier);
     let state_value = random_state()?;
@@ -467,6 +575,13 @@ pub async fn oauth_start(
             created: Instant::now(),
         },
     );
+    // Publish the state before the browser can call back, so the listener
+    // recognises the callback as one of ours.
+    state
+        .known_states
+        .lock()
+        .map_err(|e| e.to_string())?
+        .insert(state_value.clone());
 
     Ok(OAuthStartResult {
         authorize_url,
@@ -520,7 +635,15 @@ async fn post_token(
     if let Some(secret) = preset.client_secret {
         body.insert("client_secret".to_string(), secret.to_string());
     }
-    let client = reqwest::Client::new();
+    // No redirects. The body carries the client secret, the authorization code
+    // and the PKCE verifier; reqwest's default policy would replay all three to
+    // whatever host a 307/308 pointed at. Token URLs are fixed vendor
+    // endpoints, so a redirect here is a misconfiguration or an attack, never
+    // something to follow.
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| format!("token client build failed: {e}"))?;
     let resp = if preset.json_body {
         client
             .post(preset.token_url)
@@ -555,11 +678,12 @@ async fn post_token(
 
 #[tauri::command]
 pub async fn oauth_exchange(
+    app: AppHandle,
     state: State<'_, OAuthState>,
     profile: OAuthProfile,
     state_value: String,
     code: Option<String>,
-) -> Result<OAuthTokens, String> {
+) -> Result<OAuthSession, String> {
     let preset = profile.preset();
     let code = match code {
         Some(c) => c,
@@ -591,12 +715,9 @@ pub async fn oauth_exchange(
     body.insert("code_verifier".to_string(), pending.verifier);
     let mut tokens = post_token(preset, body).await?;
 
-    // Consume the pending entry only after a successful exchange.
-    state
-        .pending
-        .lock()
-        .map_err(|e| e.to_string())?
-        .remove(&state_value);
+    // Consume the attempt only after a successful exchange: a failed exchange
+    // must leave the pending entry intact so the user can retry.
+    state.forget(&state_value);
 
     // Antigravity routes requests through a Cloud Code project; resolve and
     // pin the project id onto the tokens best-effort.
@@ -605,13 +726,20 @@ pub async fn oauth_exchange(
             tokens.project_id = Some(pid);
         }
     }
-    Ok(tokens)
+
+    // Persist here rather than handing the full token set back for the frontend
+    // to store: that round trip put the refresh token through the webview on
+    // every sign-in.
+    store_tokens(&app, profile, &tokens)?;
+    Ok(OAuthSession::from(&tokens))
 }
 
-#[tauri::command]
-pub async fn oauth_refresh(
+/// Refresh an access token. Not a `#[tauri::command]`: the refresh token is
+/// long-lived and the renderer never holds one, so this is only reachable from
+/// `oauth_session` below.
+async fn refresh_tokens(
     profile: OAuthProfile,
-    refresh_token: String,
+    refresh_token: &str,
 ) -> Result<OAuthTokens, String> {
     let preset = profile.preset();
     if refresh_token.trim().is_empty() {
@@ -619,29 +747,85 @@ pub async fn oauth_refresh(
     }
     let mut body = HashMap::new();
     body.insert("grant_type".to_string(), "refresh_token".to_string());
-    body.insert("refresh_token".to_string(), refresh_token);
+    body.insert(
+        "refresh_token".to_string(),
+        refresh_token.trim().to_string(),
+    );
     body.insert("client_id".to_string(), preset.client_id.to_string());
     post_token(preset, body).await
 }
 
-#[tauri::command]
-pub async fn oauth_store(
-    app: AppHandle,
-    profile: OAuthProfile,
-    tokens: OAuthTokens,
-) -> Result<(), String> {
-    let json = serde_json::to_string(&tokens).map_err(|e| e.to_string())?;
-    set_secret(&app, profile.as_str(), &json)
+fn store_tokens(app: &AppHandle, profile: OAuthProfile, tokens: &OAuthTokens) -> Result<(), String> {
+    let json = serde_json::to_string(tokens).map_err(|e| e.to_string())?;
+    set_secret(app, profile.as_str(), &json)
 }
 
-#[tauri::command]
-pub async fn oauth_load(app: AppHandle, profile: OAuthProfile) -> Result<Option<OAuthTokens>, String> {
-    match get_secret(&app, profile.as_str())? {
+fn load_tokens(app: &AppHandle, profile: OAuthProfile) -> Result<Option<OAuthTokens>, String> {
+    match get_secret(app, profile.as_str())? {
         Some(json) => serde_json::from_str(&json)
             .map(Some)
             .map_err(|e| format!("stored tokens corrupted: {e}")),
         None => Ok(None),
     }
+}
+
+/// How close to expiry an access token may get before `oauth_session` renews
+/// it, so a request started now does not expire mid-flight.
+const REFRESH_LEAD: u64 = 60;
+
+/// Return the freshest access token for a profile, renewing it first if needed.
+///
+/// This is the only token accessor the renderer gets. Refreshing used to happen
+/// in TypeScript, which meant reading the refresh token out of the keyring and
+/// handing it to the webview on every check - a long-lived credential exposed
+/// to any script running in the renderer, for no benefit: the frontend only
+/// ever needs the short-lived access token to authorize an inference call.
+#[tauri::command]
+pub async fn oauth_session(
+    app: AppHandle,
+    profile: OAuthProfile,
+) -> Result<Option<OAuthSession>, String> {
+    let Some(tokens) = load_tokens(&app, profile)? else {
+        return Ok(None);
+    };
+    let stale = tokens
+        .expires_at
+        .is_some_and(|exp| now_secs() + REFRESH_LEAD >= exp);
+    if !stale {
+        return Ok(Some(OAuthSession::from(&tokens)));
+    }
+    let Some(refresh) = tokens.refresh_token.as_deref() else {
+        // Nothing to renew with; hand back what we have and let the upstream
+        // call surface the 401 rather than forcing a sign-out here.
+        return Ok(Some(OAuthSession::from(&tokens)));
+    };
+    match refresh_tokens(profile, refresh).await {
+        Ok(fresh) => {
+            // Providers may omit the refresh token on renewal; keep the old one
+            // (and the resolved project id) rather than losing them.
+            let merged = OAuthTokens {
+                refresh_token: fresh.refresh_token.or(tokens.refresh_token),
+                project_id: fresh.project_id.or(tokens.project_id),
+                ..fresh
+            };
+            store_tokens(&app, profile, &merged)?;
+            Ok(Some(OAuthSession::from(&merged)))
+        }
+        Err(err) => {
+            log::warn!("oauth: refresh failed for {}: {err}", profile.as_str());
+            Ok(Some(OAuthSession::from(&tokens)))
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn oauth_load(
+    app: AppHandle,
+    profile: OAuthProfile,
+) -> Result<Option<OAuthSession>, String> {
+    Ok(load_tokens(&app, profile)?
+        .as_ref()
+        .map(OAuthSession::from))
 }
 
 #[tauri::command]
@@ -776,6 +960,34 @@ mod tests {
         }
     }
 
+    /// The callback page is served by hand, so a wrong Content-Length truncates
+    /// it in the browser. Assert the framing matches the body it carries -
+    /// including for the success page, whose `✓` makes byte length differ from
+    /// character count.
+    #[test]
+    fn callback_responses_declare_their_real_length() {
+        for (status, body) in [
+            ("HTTP/1.1 200 OK", CALLBACK_BODY),
+            ("HTTP/1.1 400 Bad Request", CALLBACK_ERROR_BODY),
+        ] {
+            let raw = http_response(status, body);
+            let text = String::from_utf8(raw).expect("response is utf-8");
+            let (head, sent_body) = text
+                .split_once("\r\n\r\n")
+                .expect("headers are separated from the body");
+            let declared: usize = head
+                .lines()
+                .find_map(|line| line.strip_prefix("Content-Length: "))
+                .expect("Content-Length present")
+                .parse()
+                .expect("Content-Length is a number");
+            assert_eq!(declared, sent_body.len(), "declared length vs body bytes");
+            assert_eq!(sent_body, body);
+        }
+        // Guard the specific trap: the success page is not pure ASCII.
+        assert_ne!(CALLBACK_BODY.len(), CALLBACK_BODY.chars().count());
+    }
+
     /// Regression guard for the loopback poll contract: the frontend reads the
     /// result as `{kind: "pending" | "ready" | "expired"}`. If the tag shape
     /// ever changes, Codex/Antigravity sign-in silently hangs forever.
@@ -798,7 +1010,7 @@ mod tests {
     /// 0.0.0.0. This asserts the current hardcoded bind addresses.
     #[test]
     fn loopback_binds_are_loopback_only() {
-        for addr in [format!("127.0.0.1:1455"), format!("[::1]:1455")] {
+        for addr in ["127.0.0.1:1455", "[::1]:1455"] {
             assert!(!addr.starts_with("0.0.0.0"));
             assert!(addr.contains("127.0.0.1") || addr.contains("[::1]"));
         }
