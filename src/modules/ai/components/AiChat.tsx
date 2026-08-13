@@ -11,6 +11,7 @@ import {
   type MessageResponseProps,
 } from "@/components/ai-elements/message";
 import { MarkdownCode } from "@/components/ai-elements/markdown-code";
+import { useAutoApproval } from "../hooks/useAutoApproval";
 import {
   MarkdownLink,
   type MarkdownLinkProps,
@@ -209,6 +210,10 @@ export function AiChatView({
     (id: string, approved: boolean) => addToolApprovalResponse({ id, approved }),
     [addToolApprovalResponse],
   );
+
+  // Answer the prompts the current approval mode delegates. Runs after the
+  // parts render, so an auto-approved call still appears in the transcript.
+  useAutoApproval(messages, addToolApprovalResponse);
 
   if (messages.length === 0) {
     return (

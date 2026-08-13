@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import { OAUTH_PROFILE_FOR_PROVIDER } from "@/modules/oauth/presets";
 import { useOAuthStore } from "@/modules/oauth/store";
+import { ApprovalModeControl } from "./ApprovalModeControl";
 import {
   Add01Icon,
   AiBookIcon,
@@ -117,6 +118,8 @@ export function AiStatusBarControls() {
           e.target.value = "";
         }}
       />
+
+      <ApprovalModeControl className="mr-0.5" />
 
       <IconBtn
         title="Attach file or image"

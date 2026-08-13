@@ -74,6 +74,14 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   background processes
 - Tool calls are **approval-gated**; approvals resume the run (including
   OpenAI-compatible providers such as DeepSeek)
+- **Graduated auto-approval.** Choose how much the agent may do without
+  stopping: `Ask every time` (default), `Auto-approve edits` (file changes in
+  the workspace run, commands and agent hand-offs still ask), or
+  `Auto-approve all`. The mode is always visible in the AI status bar, never
+  buried in settings. Crucially it changes only *what stops for a click*: the
+  path and shell-command safety checks run inside every tool regardless, so no
+  mode can authorise something the safety layer refuses. Read-only tools never
+  asked in the first place.
 - Coding-agent orchestration: spawn Claude Code in a terminal, inspect output,
   send follow-up work through approval-gated tools
 - Composer: prompt snippets via `#handle`, files via `@path`, voice input

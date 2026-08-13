@@ -1,4 +1,8 @@
 import {
+  type ApprovalMode,
+  DEFAULT_APPROVAL_MODE,
+} from "@/modules/ai/lib/approvalPolicy";
+import {
   type AutocompleteProviderId,
   type CustomEndpoint,
   DEFAULT_AUTOCOMPLETE_MODEL,
@@ -146,6 +150,8 @@ export type Preferences = {
   openaiCompatibleContextLimit: number;
   customEndpoints: CustomEndpoint[];
   openrouterModelId: string;
+  /** How much the agent may do without stopping for approval. */
+  agentApprovalMode: ApprovalMode;
   sttProvider: SttProvider;
   groqSttModel: string;
   whispercppBaseURL: string;
@@ -238,6 +244,7 @@ const KEY_OPENAI_COMPAT_MODEL_ID = "openaiCompatibleModelId";
 const KEY_OPENAI_COMPAT_CONTEXT_LIMIT = "openaiCompatibleContextLimit";
 const KEY_CUSTOM_ENDPOINTS = "customEndpoints";
 const KEY_OPENROUTER_MODEL_ID = "openrouterModelId";
+const KEY_AGENT_APPROVAL_MODE = "agentApprovalMode";
 const KEY_STT_PROVIDER = "sttProvider";
 const KEY_GROQ_STT_MODEL = "groqSttModel";
 const KEY_WHISPERCPP_BASE_URL = "whispercppBaseURL";
@@ -323,6 +330,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   openaiCompatibleContextLimit: 128_000,
   customEndpoints: [],
   openrouterModelId: "",
+  agentApprovalMode: DEFAULT_APPROVAL_MODE,
   sttProvider: DEFAULT_STT_PROVIDER,
   groqSttModel: "whisper-large-v3-turbo",
   whispercppBaseURL: WHISPERCPP_DEFAULT_BASE_URL,
@@ -458,6 +466,9 @@ export async function loadPreferences(): Promise<Preferences> {
     openrouterModelId:
       get<string>(KEY_OPENROUTER_MODEL_ID) ??
       DEFAULT_PREFERENCES.openrouterModelId,
+    agentApprovalMode:
+      get<ApprovalMode>(KEY_AGENT_APPROVAL_MODE) ??
+      DEFAULT_PREFERENCES.agentApprovalMode,
     sttProvider:
       get<SttProvider>(KEY_STT_PROVIDER) ?? DEFAULT_PREFERENCES.sttProvider,
     groqSttModel:
@@ -715,6 +726,10 @@ export async function setCustomEndpoints(
 
 export async function setOpenrouterModelId(value: string): Promise<void> {
   await writePref(KEY_OPENROUTER_MODEL_ID, value);
+}
+
+export async function setAgentApprovalMode(value: ApprovalMode): Promise<void> {
+  await writePref(KEY_AGENT_APPROVAL_MODE, value);
 }
 
 export async function setSttProvider(value: SttProvider): Promise<void> {
