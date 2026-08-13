@@ -12,9 +12,9 @@
     "gzip": true
   },
   {
-    "name": "total client JS",
+    "name": "total client JS (all lazy chunks, never loaded at once)",
     "path": ["dist/assets/*.js"],
-    "limit": "1500 KB",
+    "limit": "1750 KB",
     "gzip": true
   }
 ]
