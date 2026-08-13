@@ -903,9 +903,19 @@ mod auth_tests {
         let outside = tempdir("symtarget");
         let link = allowed.join("escape");
         #[cfg(unix)]
-        std::os::unix::fs::symlink(&outside, &link).expect("symlink");
+        let made = std::os::unix::fs::symlink(&outside, &link);
         #[cfg(windows)]
-        std::os::windows::fs::symlink_dir(&outside, &link).expect("symlink");
+        let made = std::os::windows::fs::symlink_dir(&outside, &link);
+        // Creating a symlink on Windows requires SeCreateSymbolicLinkPrivilege
+        // (an elevated shell, or Developer Mode). Without it the OS fails with
+        // ERROR_PRIVILEGE_NOT_HELD before the code under test is ever reached,
+        // which turned an environment limitation into a red suite. Skip instead
+        // - where the privilege exists (CI, Developer Mode) the assertion below
+        // still runs.
+        if let Err(err) = made {
+            eprintln!("skipping symlink-escape test: cannot create symlink ({err})");
+            return;
+        }
         let reg = WorkspaceRegistry::default();
         reg.authorize(&allowed).expect("authorize root");
         let s = link.to_string_lossy().into_owned();

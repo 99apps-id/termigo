@@ -34,30 +34,46 @@ describe("resolveDisplayName", () => {
     expect(resolveDisplayName("example.env")).toBe("Dotenv");
   });
 
-  it("loads dotenv files with their language mode", async () => {
-    const result = await resolveLanguage("/project/.env.local");
-    expect(result?.name).toBe("Dotenv");
-    expect(result?.id).toBe("env");
-    expect(result?.ext).toBeTruthy();
-  });
+  // `resolveLanguage` dynamically imports a CodeMirror language package, so the
+  // two cases below pay a cold transform + import cost. Each finishes in well
+  // under a second on its own, but under the full suite's parallel load the
+  // Svelte one exceeded vitest's 5s default and failed the run. Budget them
+  // explicitly rather than raising the global timeout, which would also hide
+  // genuine hangs in tests that ought to be fast.
+  const LANGUAGE_LOAD_TIMEOUT_MS = 30_000;
+
+  it(
+    "loads dotenv files with their language mode",
+    async () => {
+      const result = await resolveLanguage("/project/.env.local");
+      expect(result?.name).toBe("Dotenv");
+      expect(result?.id).toBe("env");
+      expect(result?.ext).toBeTruthy();
+    },
+    LANGUAGE_LOAD_TIMEOUT_MS,
+  );
 
   // `.svelte` used to resolve to HTML, which left blocks and directives as
   // plain text and made the svelte-ls preset unreachable (langId drives both).
-  it("loads Svelte files with their dedicated language mode", async () => {
-    const result = await resolveLanguage("/project/Component.svelte");
-    if (!result) throw new Error("Svelte language failed to load");
+  it(
+    "loads Svelte files with their dedicated language mode",
+    async () => {
+      const result = await resolveLanguage("/project/Component.svelte");
+      if (!result) throw new Error("Svelte language failed to load");
 
-    expect(result.name).toBe("Svelte");
-    expect(result.id).toBe("svelte");
+      expect(result.name).toBe("Svelte");
+      expect(result.id).toBe("svelte");
 
-    const state = EditorState.create({
-      doc: "{#if ready}<button on:click={run}>{label}</button>{/if}",
-      extensions: [result.ext],
-    });
-    const tree = syntaxTree(state).toString();
-    expect(tree).toContain("IfBlock");
-    expect(tree).toContain("DirectiveOn");
-  });
+      const state = EditorState.create({
+        doc: "{#if ready}<button on:click={run}>{label}</button>{/if}",
+        extensions: [result.ext],
+      });
+      const tree = syntaxTree(state).toString();
+      expect(tree).toContain("IfBlock");
+      expect(tree).toContain("DirectiveOn");
+    },
+    LANGUAGE_LOAD_TIMEOUT_MS,
+  );
 
   // The prefix fallback must not let extension languages capture lookalike
   // files: `go.sum` / `go.mod` are not Go, `json.backup` is not JSON.
