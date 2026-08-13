@@ -100,6 +100,21 @@ export const OAUTH_PROFILES: readonly OAuthProfile[] = [
   "antigravity",
 ];
 
+/**
+ * Which OAuth profile can stand in for a provider's API key.
+ *
+ * Signing in supplies the credential that provider would otherwise need, so
+ * anything asking "is this provider usable?" has to consult this as well as the
+ * stored keys, or a connected account still looks unconfigured.
+ */
+export const OAUTH_PROFILE_FOR_PROVIDER: Readonly<
+  Record<string, OAuthProfile>
+> = {
+  openai: "codex",
+  anthropic: "claude",
+  google: "antigravity",
+};
+
 export function oauthProfileLabel(profile: OAuthProfile): string {
   return OAUTH_PRESETS[profile].displayName;
 }

@@ -87,6 +87,11 @@ struct Preset {
     loopback_port: Option<u16>,
     loopback_path: &'static str,
     manual_code: bool,
+    /// Echo `state` back in the token request. Not part of OAuth 2.0, where
+    /// `state` is an authorize-time parameter only, but Anthropic's manual-code
+    /// endpoint rejects the exchange with "Invalid request format" without it.
+    /// That is also why its pasted code arrives as `code#state`.
+    token_includes_state: bool,
     extra_authorize_params: &'static [(&'static str, &'static str)],
 }
 
@@ -101,6 +106,7 @@ static CODEX: Preset = Preset {
     loopback_port: Some(1455),
     loopback_path: "/auth/callback",
     manual_code: false,
+    token_includes_state: false,
     extra_authorize_params: &[
         ("id_token_add_organizations", "true"),
         ("codex_cli_simplified_flow", "true"),
@@ -119,6 +125,7 @@ static CLAUDE: Preset = Preset {
     loopback_port: None,
     loopback_path: "",
     manual_code: true,
+    token_includes_state: true,
     extra_authorize_params: &[("code", "true")],
 };
 
@@ -145,6 +152,7 @@ static ANTIGRAVITY: Preset = Preset {
     loopback_port: Some(51121),
     loopback_path: "/oauth2callback",
     manual_code: false,
+    token_includes_state: false,
     extra_authorize_params: &[("access_type", "offline"), ("prompt", "consent")],
 };
 
@@ -447,16 +455,37 @@ fn start_loopback(state: &OAuthState, port: u16, path: &'static str) -> Result<(
 
 const OAUTH_SERVICE: &str = "termigo-oauth";
 
+/// Windows Credential Manager caps one credential blob at 2560 characters, and
+/// an OpenAI token set (JWT access token plus refresh token) is larger than
+/// that, so storing it whole failed with "Attribute 'password encoded as
+/// UTF-16' is longer than platform limit of 2560 chars".
+///
+/// Values above the chunk size are therefore split across several entries: the
+/// primary account holds `CHUNK_MARKER<count>` and the parts live at
+/// `<account>#<index>`. A stored token is JSON and always starts with `{`, so
+/// the marker can never collide with a real value. macOS and Linux have no such
+/// limit but take the same path, keeping one behaviour to reason about.
 #[cfg(not(target_os = "linux"))]
-fn set_secret(_app: &AppHandle, account: &str, value: &str) -> Result<(), String> {
-    let e = keyring::Entry::new(OAUTH_SERVICE, account).map_err(|e| e.to_string())?;
-    e.set_password(value).map_err(|e| e.to_string())
+const CHUNK_MARKER: &str = "termigo-chunked:";
+
+/// Comfortably below the 2560 limit, leaving room for the UTF-16 expansion the
+/// platform measures.
+#[cfg(not(target_os = "linux"))]
+const CHUNK_CHARS: usize = 1024;
+
+#[cfg(not(target_os = "linux"))]
+fn entry(account: &str) -> Result<keyring::Entry, String> {
+    keyring::Entry::new(OAUTH_SERVICE, account).map_err(|e| e.to_string())
 }
 
 #[cfg(not(target_os = "linux"))]
-fn get_secret(_app: &AppHandle, account: &str) -> Result<Option<String>, String> {
-    let e = keyring::Entry::new(OAUTH_SERVICE, account).map_err(|e| e.to_string())?;
-    match e.get_password() {
+fn write_entry(account: &str, value: &str) -> Result<(), String> {
+    entry(account)?.set_password(value).map_err(|e| e.to_string())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn read_entry(account: &str) -> Result<Option<String>, String> {
+    match entry(account)?.get_password() {
         Ok(v) => Ok(Some(v)),
         Err(keyring::Error::NoEntry) => Ok(None),
         Err(err) => Err(err.to_string()),
@@ -464,12 +493,64 @@ fn get_secret(_app: &AppHandle, account: &str) -> Result<Option<String>, String>
 }
 
 #[cfg(not(target_os = "linux"))]
-fn delete_secret(_app: &AppHandle, account: &str) -> Result<(), String> {
-    let e = keyring::Entry::new(OAUTH_SERVICE, account).map_err(|e| e.to_string())?;
-    match e.delete_credential() {
+fn remove_entry(account: &str) -> Result<(), String> {
+    match entry(account)?.delete_credential() {
         Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
         Err(err) => Err(err.to_string()),
     }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn set_secret(app: &AppHandle, account: &str, value: &str) -> Result<(), String> {
+    // Drop any previous chunks first, so shrinking a value cannot leave a
+    // longer tail behind that a later read would splice back on.
+    delete_secret(app, account)?;
+
+    let chars: Vec<char> = value.chars().collect();
+    if chars.len() <= CHUNK_CHARS {
+        return write_entry(account, value);
+    }
+    let parts: Vec<String> = chars
+        .chunks(CHUNK_CHARS)
+        .map(|c| c.iter().collect::<String>())
+        .collect();
+    for (index, part) in parts.iter().enumerate() {
+        write_entry(&format!("{account}#{index}"), part)?;
+    }
+    write_entry(account, &format!("{CHUNK_MARKER}{}", parts.len()))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn get_secret(_app: &AppHandle, account: &str) -> Result<Option<String>, String> {
+    let Some(head) = read_entry(account)? else {
+        return Ok(None);
+    };
+    let Some(count) = head.strip_prefix(CHUNK_MARKER) else {
+        return Ok(Some(head));
+    };
+    let count: usize = count
+        .parse()
+        .map_err(|_| "stored tokens are corrupted: bad chunk header".to_string())?;
+    let mut value = String::new();
+    for index in 0..count {
+        let part = read_entry(&format!("{account}#{index}"))?
+            .ok_or_else(|| format!("stored tokens are incomplete: chunk {index} is missing"))?;
+        value.push_str(&part);
+    }
+    Ok(Some(value))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn delete_secret(_app: &AppHandle, account: &str) -> Result<(), String> {
+    if let Some(head) = read_entry(account)? {
+        if let Some(count) = head.strip_prefix(CHUNK_MARKER) {
+            let count: usize = count.parse().unwrap_or(0);
+            for index in 0..count {
+                remove_entry(&format!("{account}#{index}"))?;
+            }
+        }
+    }
+    remove_entry(account)
 }
 
 #[cfg(target_os = "linux")]
@@ -740,6 +821,9 @@ pub async fn oauth_exchange(
     body.insert("client_id".to_string(), preset.client_id.to_string());
     body.insert("redirect_uri".to_string(), preset.redirect_uri.to_string());
     body.insert("code_verifier".to_string(), pending.verifier);
+    if preset.token_includes_state {
+        body.insert("state".to_string(), state_value.clone());
+    }
     let mut tokens = post_token(preset, body).await?;
 
     // Consume the attempt only after a successful exchange: a failed exchange
@@ -992,6 +1076,39 @@ mod tests {
             OAuthProfile::Antigravity.require_configured().is_ok(),
             !ANTIGRAVITY.client_id.is_empty()
         );
+    }
+
+    /// Anthropic's manual-code exchange rejects a body without `state`, which
+    /// is why its pasted code carries one after a `#`. The other two presets
+    /// must not send it.
+    #[test]
+    fn only_claude_echoes_state_in_the_token_request() {
+        assert!(CLAUDE.token_includes_state);
+        assert!(!CODEX.token_includes_state);
+        assert!(!ANTIGRAVITY.token_includes_state);
+    }
+
+    /// A token set larger than the Windows credential limit must survive a
+    /// store/load round trip, and shrinking it must not leave a stale tail that
+    /// a later read splices back on.
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn oversized_values_split_and_rejoin() {
+        let long: String = std::iter::repeat_n('x', CHUNK_CHARS * 3 + 7).collect();
+        let parts: Vec<String> = long
+            .chars()
+            .collect::<Vec<_>>()
+            .chunks(CHUNK_CHARS)
+            .map(|c| c.iter().collect())
+            .collect();
+        assert_eq!(parts.len(), 4, "3 full chunks plus a remainder");
+        assert_eq!(parts.concat(), long, "chunks rejoin to the original");
+        assert!(
+            parts.iter().all(|p| p.chars().count() <= CHUNK_CHARS),
+            "no chunk exceeds the platform limit"
+        );
+        // A real token is JSON, so it can never be mistaken for the header.
+        assert!(!"{\"access_token\":\"a\"}".starts_with(CHUNK_MARKER));
     }
 
     /// Guard against a credential being pasted back into the source: secret
