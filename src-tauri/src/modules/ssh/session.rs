@@ -677,10 +677,14 @@ async fn open_agent() -> Result<Agent, String> {
 pub(crate) async fn agent_keys() -> Result<(Agent, Vec<PublicKey>), String> {
     let probe = async {
         let mut agent = open_agent().await?;
-        let identities = agent
-            .request_identities()
-            .await
-            .map_err(|e| format!("no ssh-agent answered ({e}). {NO_AGENT_HINT}"))?;
+        // Lead with the cause and the fix. On Windows this is the usual path
+        // for "no agent at all": the OpenSSH pipe is missing, the Pageant
+        // transport constructs anyway (see `open_agent`), and the request then
+        // fails with a raw transport error like "early eof" that tells the user
+        // nothing. Keep it, but demoted to a detail.
+        let identities = agent.request_identities().await.map_err(|e| {
+            format!("No ssh-agent is running. {NO_AGENT_HINT} (agent transport reported: {e})")
+        })?;
         let keys = identities
             .into_iter()
             .filter_map(|i| match i {
