@@ -1,4 +1,12 @@
 fn main() {
+    // The window/app icon is embedded by tauri-build from the icons folder;
+    // declare them as inputs so changing the logo actually re-links the
+    // binary (cargo otherwise caches the old resource).
+    if let Ok(entries) = std::fs::read_dir("icons") {
+        for entry in entries.flatten() {
+            println!("cargo:rerun-if-changed={}", entry.path().display());
+        }
+    }
     configure_sidecar();
     tauri_build::build()
 }

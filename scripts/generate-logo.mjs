@@ -155,17 +155,68 @@ function render(size) {
 
 // ---- ICO / ICNS -----------------------------------------------------------
 
-// PNG-compressed ICO (supported since Windows Vista).
+// Classic 32-bit DIB entry for an ICO: BITMAPINFOHEADER (40 bytes), BGRA
+// pixel rows bottom-up, then a 1bpp AND mask. RC.EXE on this toolchain
+// rejects PNG-compressed ICO entries with RC2176, so we emit raw DIBs.
+function dibFor(size) {
+  const rgba = render(size);
+  const rowBytes = size * 4;
+  const andRowBytes = Math.ceil(size / 32) * 4;
+
+  const bih = Buffer.alloc(40);
+  bih.writeUInt32LE(40, 0); // biSize
+  bih.writeInt32LE(size, 4); // biWidth
+  bih.writeInt32LE(size * 2, 8); // biHeight = pixels + AND mask
+  bih.writeUInt16LE(1, 12); // biPlanes
+  bih.writeUInt16LE(32, 14); // biBitCount
+  bih.writeUInt32LE(0, 16); // biCompression = BI_RGB
+  bih.writeUInt32LE(0, 20); // biSizeImage (0 is allowed for BI_RGB)
+
+  // Pixel data, bottom-up, BGRA.
+  const pixels = Buffer.alloc(rowBytes * size);
+  for (let y = 0; y < size; y++) {
+    const srcY = size - 1 - y;
+    for (let x = 0; x < size; x++) {
+      const si = (srcY * size + x) * 4;
+      const di = y * rowBytes + x * 4;
+      pixels[di] = rgba[si + 2]; // B
+      pixels[di + 1] = rgba[si + 1]; // G
+      pixels[di + 2] = rgba[si]; // R
+      pixels[di + 3] = rgba[si + 3]; // A
+    }
+  }
+
+  // AND mask: 1 = transparent.
+  const andMask = Buffer.alloc(andRowBytes * size);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      if (rgba[(y * size + x) * 4 + 3] < 128) {
+        andMask[y * andRowBytes + Math.floor(x / 8)] |= 0x80 >> (x % 8);
+      }
+    }
+  }
+
+  return Buffer.concat([bih, pixels, andMask]);
+}
+
 function encodeIco(sizes) {
   const images = sizes.map((s) => {
-    const png = encodePng(s, s, render(s));
-    return { s, png };
+    const dib = dibFor(s);
+    if (dib.readUInt32LE(0) !== 40) {
+      throw new Error(`dibFor(${s}) missing BITMAPINFOHEADER`);
+    }
+    return { s, dib };
   });
+  console.log("encodeIco sizes:", images.map((i) => i.s + ":" + i.dib.length).join(", "));
   const header = Buffer.alloc(6);
   header.writeUInt16LE(0, 0);
   header.writeUInt16LE(1, 2);
   header.writeUInt16LE(images.length, 4);
+  // Standard ICO layout: ICONDIR, then ICONDIRENTRYs (16 bytes each), then
+  // the image data. All entries first, then all DIBs — so dwImageOffset
+  // matches the real byte position of each image.
   const entries = [];
+  const datas = [];
   let offset = 6 + 16 * images.length;
   for (const img of images) {
     const e = Buffer.alloc(16);
@@ -173,12 +224,13 @@ function encodeIco(sizes) {
     e[1] = img.s >= 256 ? 0 : img.s;
     e.writeUInt16LE(1, 4); // planes
     e.writeUInt16LE(32, 6); // bpp
-    e.writeUInt32LE(img.png.length, 8);
+    e.writeUInt32LE(img.dib.length, 8);
     e.writeUInt32LE(offset, 12);
-    offset += img.png.length;
-    entries.push(Buffer.concat([e, img.png]));
+    offset += img.dib.length;
+    entries.push(e);
+    datas.push(img.dib);
   }
-  return Buffer.concat([header, ...entries]);
+  return Buffer.concat([header, ...entries, ...datas]);
 }
 
 // ICNS with PNG-encoded types (ic04..ic10).
@@ -221,7 +273,7 @@ writeFileSync(`${iconsDir}/64x64.png`, encodePng(64, 64, render(64)));
 writeFileSync(`${iconsDir}/128x128.png`, encodePng(128, 128, render(128)));
 writeFileSync(`${iconsDir}/128x128@2x.png`, encodePng(256, 256, render(256)));
 writeFileSync(`${iconsDir}/icon.png`, encodePng(512, 512, render(512)));
-writeFileSync(`${iconsDir}/icon.ico`, encodeIco([16, 32, 48, 64, 128, 256]));
+writeFileSync(`${iconsDir}/icon.ico`, encodeIco([16, 24, 32, 48, 64, 128]));
 writeFileSync(`${iconsDir}/icon.icns`, encodeIcns([16, 32, 128, 256, 512]));
 
 // Windows Store / UWP packaging icons.

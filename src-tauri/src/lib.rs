@@ -1,6 +1,6 @@
 pub mod modules;
 
-use modules::{agent, control, extensions, fs, git, history, lsp, net, pty, secrets, shell, ssh, workspace};
+use modules::{agent, control, extensions, fs, git, history, lsp, net, oauth, pty, secrets, shell, ssh, workspace};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
@@ -245,6 +245,7 @@ pub fn run() {
         })
         .manage(LaunchDir(Mutex::new(cli_dir)))
         .manage(LaunchFiles(Mutex::new(launch.files)))
+        .manage(oauth::OAuthState::default())
         .invoke_handler(tauri::generate_handler![
             pty::pty_open,
             pty::pty_write,
@@ -322,6 +323,14 @@ pub fn run() {
             secrets::secrets_set,
             secrets::secrets_delete,
             secrets::secrets_get_all,
+            oauth::oauth_start,
+            oauth::oauth_poll,
+            oauth::oauth_exchange,
+            oauth::oauth_refresh,
+            oauth::oauth_store,
+            oauth::oauth_load,
+            oauth::oauth_clear,
+            oauth::oauth_antigravity_project,
             extensions::commands::ext_list,
             extensions::commands::ext_read_manifest,
             extensions::commands::ext_read_asset,

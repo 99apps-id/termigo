@@ -7,6 +7,7 @@ import {
   getAllKeys,
   hasAnyKey,
 } from "../lib/keyring";
+import { useOAuthStore } from "@/modules/oauth/store";
 import { useAgentsStore } from "../store/agentsStore";
 import { useChatStore } from "../store/chatStore";
 import { useSnippetsStore } from "../store/snippetsStore";
@@ -75,6 +76,7 @@ export function useAiBootstrap(): {
       });
     };
     reload();
+    void useOAuthStore.getState().hydrate();
     const unlistenP = onKeysChanged(reload);
     return () => {
       alive = false;

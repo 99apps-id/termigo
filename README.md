@@ -63,6 +63,10 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
 - **BYOK providers:** OpenAI, Anthropic (Claude), Google (Gemini), Groq,
   xAI (Grok), Cerebras, OpenRouter, DeepSeek, Mistral, plus any
   OpenAI-compatible endpoint
+- **Sign in with your account (OAuth presets):** Codex (ChatGPT plan),
+  Claude (Anthropic subscription), and Antigravity (Google Cloud Code) —
+  one-click browser sign-in with PKCE, no API key needed; tokens live in
+  your OS keychain and refresh automatically
 - **Local / offline:** LM Studio, MLX, Ollama
 - Agentic workflow: plans, sub-agents, project memory via `TERMIGO.md`,
   file read/write/edit/multi-edit/grep/glob, bash with approval gating,

@@ -215,7 +215,7 @@ export function TabBar({
           >
             <span
               aria-hidden
-              className="pointer-events-none absolute left-0 top-1/2 h-7 rounded-md bg-foreground/[0.07] shadow-sm ring-1 ring-inset ring-foreground/[0.05]"
+              className="pointer-events-none absolute left-0 top-1/2 h-7 rounded-md bg-gradient-to-br from-teal-400/15 via-sky-400/12 to-violet-400/18 shadow-[0_0_12px_rgba(116,155,255,0.18)] ring-1 ring-inset ring-teal-400/25"
               style={
                 pill
                   ? {

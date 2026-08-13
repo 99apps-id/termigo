@@ -6,6 +6,7 @@ pub mod git;
 pub mod history;
 pub mod lsp;
 pub mod net;
+pub mod oauth;
 pub mod proc;
 pub mod pty;
 pub mod secrets;
