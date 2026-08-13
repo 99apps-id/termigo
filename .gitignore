@@ -37,3 +37,6 @@ build-*.log
 
 # Go companion CLI build output (build it at release time, not in tracking)
 cli/bin/
+
+# Claude Code local settings (may contain credentials)
+.claude/
