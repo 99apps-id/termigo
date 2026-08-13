@@ -17,6 +17,7 @@ import {
 export type OAuthStatus =
   | "idle" // not connected
   | "connecting" // sign-in flow in progress
+  | "awaiting-code" // manual-code flow: browser open, waiting for paste
   | "connected"
   | "error";
 

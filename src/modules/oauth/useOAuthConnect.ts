@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { OAUTH_PRESETS, type OAuthProfile } from "./presets";
 import {
+  extractOAuthCode,
   oauthExchange,
   oauthPoll,
   oauthStart,
@@ -63,8 +64,11 @@ export function useOAuthConnect(profile: OAuthProfile) {
       await openOAuthBrowser(res.authorizeUrl);
 
       if (OAUTH_PRESETS[profile].manualCode) {
-        // User pastes the code from the browser.
-        setStatus("connecting");
+        // User pastes the code (or the full callback URL) from the browser.
+        // Move to a dedicated waiting state (no spinner) so the paste+Connect
+        // controls are enabled and the top button stops spinning.
+        setBusy(false);
+        setStatus("awaiting-code");
         return;
       }
 
@@ -77,7 +81,9 @@ export function useOAuthConnect(profile: OAuthProfile) {
           const r = await oauthPoll(state);
           if (r.kind === "ready") {
             stopPolling();
-            const t = await oauthExchange(profileRef, state);
+            // The code came back from the poll (and was consumed there); pass
+            // it straight to the exchange.
+            const t = await oauthExchange(profileRef, state, r.code);
             await oauthStore(profileRef, t);
             setTokens(t);
             setStatus("connected");
@@ -104,15 +110,17 @@ export function useOAuthConnect(profile: OAuthProfile) {
 
   const submitManual = useCallback(async () => {
     const state = pendingState.current;
-    if (!state || !manualCode.trim()) return;
+    const code = extractOAuthCode(manualCode);
+    if (!state || !code) return;
     setBusy(true);
     setError(null);
     try {
-      const t = await oauthExchange(profile, state, manualCode.trim());
+      const t = await oauthExchange(profile, state, code);
       await oauthStore(profile, t);
       setTokens(t);
       setStatus("connected");
       setManualCode("");
+      pendingState.current = null;
     } catch (e) {
       setError(`Sign-in failed: ${String(e)}`);
       setStatus("error");

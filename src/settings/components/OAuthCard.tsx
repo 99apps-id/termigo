@@ -45,6 +45,12 @@ export function OAuthCard({ profile }: { profile: OAuthProfile }) {
 
   const connected = status === "connected" && !!tokens;
   const connecting = status === "connecting" || busy;
+  const awaitingCode = status === "awaiting-code";
+
+  // Loopback (codex/antigravity): once the browser opens we poll; the top
+  // button shows a spinner until we connect or fail. Manual code (claude):
+  // we switch to `awaiting-code` and render the paste form instead — no
+  // spinner blocking the input.
 
   const copyToken = async () => {
     if (!tokens?.access_token) return;
@@ -112,6 +118,15 @@ export function OAuthCard({ profile }: { profile: OAuthProfile }) {
                 />
               </Button>
             </>
+          ) : awaitingCode ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 gap-1 px-2.5 text-[11px] text-muted-foreground"
+              disabled
+            >
+              Awaiting code…
+            </Button>
           ) : (
             <Button
               size="sm"
@@ -137,7 +152,7 @@ export function OAuthCard({ profile }: { profile: OAuthProfile }) {
         <p className="text-[10.5px] text-destructive">{error}</p>
       ) : null}
 
-      {!connected && isManual && (expanded || connecting) ? (
+      {!connected && isManual && (expanded || awaitingCode) ? (
         <div className="flex flex-col gap-1.5">
           <p className="text-[10.5px] leading-relaxed text-muted-foreground">
             A browser opened. After you authorize, Anthropic shows a{" "}

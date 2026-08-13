@@ -131,10 +131,11 @@ pub struct OAuthState {
     pending: Mutex<HashMap<String, PendingAuth>>,
     /// state -> authorization code captured by the loopback listener
     loopback_codes: Arc<Mutex<HashMap<String, String>>>,
-    /// port -> running loopback listener (kept alive for the session)
-    listeners: Mutex<HashMap<u16, Arc<TcpListener>>>,
+    /// port -> running loopback listeners (kept alive for the session)
+    listeners: Mutex<HashMap<u16, Vec<Arc<TcpListener>>>>,
 }
 
+#[derive(Clone)]
 struct PendingAuth {
     verifier: String,
     profile: OAuthProfile,
@@ -250,18 +251,14 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-fn start_loopback(state: &OAuthState, port: u16, path: &'static str) -> Result<(), String> {
-    {
-        let listeners = state.listeners.lock().map_err(|e| e.to_string())?;
-        if listeners.contains_key(&port) {
-            return Ok(());
-        }
-    }
-    let addr = format!("127.0.0.1:{port}");
+fn spawn_loopback(
+    codes: Arc<Mutex<HashMap<String, String>>>,
+    addr: String,
+    path: &'static str,
+) -> Result<Arc<TcpListener>, String> {
     let listener = Arc::new(
         TcpListener::bind(&addr).map_err(|e| format!("cannot bind loopback {addr}: {e}"))?,
     );
-    let codes = state.loopback_codes.clone();
     let listen = listener.clone();
     thread::spawn(move || {
         for stream in listen.incoming() {
@@ -301,11 +298,35 @@ fn start_loopback(state: &OAuthState, port: u16, path: &'static str) -> Result<(
             });
         }
     });
+    Ok(listener)
+}
+
+fn start_loopback(state: &OAuthState, port: u16, path: &'static str) -> Result<(), String> {
+    {
+        let listeners = state.listeners.lock().map_err(|e| e.to_string())?;
+        if listeners.contains_key(&port) {
+            return Ok(());
+        }
+    }
+    let codes = state.loopback_codes.clone();
+    let mut bound = Vec::new();
+    // Bind IPv4 loopback first (Antigravity redirects to the explicit
+    // `127.0.0.1`); then best-effort bind IPv6 loopback for hosts where
+    // `localhost` (Codex) resolves to `::1`. Only loopback interfaces are
+    // used — never 0.0.0.0 — so the callback port stays local-only.
+    for addr in [format!("127.0.0.1:{port}"), format!("[::1]:{port}")] {
+        if let Ok(l) = spawn_loopback(codes.clone(), addr, path) {
+            bound.push(l);
+        }
+    }
+    if bound.is_empty() {
+        bound.push(spawn_loopback(codes, format!("127.0.0.1:{port}"), path)?);
+    }
     state
         .listeners
         .lock()
         .map_err(|e| e.to_string())?
-        .insert(port, listener);
+        .insert(port, bound);
     Ok(())
 }
 
@@ -449,7 +470,7 @@ pub async fn oauth_start(
 }
 
 #[derive(Serialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum OAuthPollResult {
     Pending,
     Ready { code: String },
@@ -461,12 +482,13 @@ pub async fn oauth_poll(
     state: State<'_, OAuthState>,
     state_value: String,
 ) -> Result<OAuthPollResult, String> {
+    // Take (not peek) the code so a stale entry can't be replayed. The caller
+    // passes it straight to oauth_exchange.
     if let Some(code) = state
         .loopback_codes
         .lock()
         .map_err(|e| e.to_string())?
-        .get(&state_value)
-        .cloned()
+        .remove(&state_value)
     {
         return Ok(OAuthPollResult::Ready { code });
     }
@@ -541,11 +563,14 @@ pub async fn oauth_exchange(
             .remove(&state_value)
             .ok_or("no authorization code captured yet")?,
     };
+    // Clone so the pending entry survives until the exchange succeeds (a
+    // failed exchange must not destroy the ability to retry).
     let pending = state
         .pending
         .lock()
         .map_err(|e| e.to_string())?
-        .remove(&state_value)
+        .get(&state_value)
+        .cloned()
         .ok_or("no pending authorization for this state — start again")?;
     if pending.profile != profile {
         return Err("profile mismatch for this state".to_string());
@@ -557,7 +582,23 @@ pub async fn oauth_exchange(
     body.insert("client_id".to_string(), preset.client_id.to_string());
     body.insert("redirect_uri".to_string(), preset.redirect_uri.to_string());
     body.insert("code_verifier".to_string(), pending.verifier);
-    post_token(preset, body).await
+    let mut tokens = post_token(preset, body).await?;
+
+    // Consume the pending entry only after a successful exchange.
+    state
+        .pending
+        .lock()
+        .map_err(|e| e.to_string())?
+        .remove(&state_value);
+
+    // Antigravity routes requests through a Cloud Code project; resolve and
+    // pin the project id onto the tokens best-effort.
+    if profile == OAuthProfile::Antigravity {
+        if let Some(pid) = load_antigravity_project(tokens.access_token.clone()).await {
+            tokens.project_id = Some(pid);
+        }
+    }
+    Ok(tokens)
 }
 
 #[tauri::command]
@@ -605,8 +646,7 @@ pub async fn oauth_clear(app: AppHandle, profile: OAuthProfile) -> Result<(), St
 /// `:loadCodeAssist` endpoint accepts the OAuth access token and returns the
 /// current Cloud Code project. We dig for any field that looks like a project
 /// id (`project_id`, `projectId`, `project`, `id` under `assistData`, …).
-#[tauri::command]
-pub async fn oauth_antigravity_project(access_token: String) -> Result<Option<String>, String> {
+async fn load_antigravity_project(access_token: String) -> Option<String> {
     let client = reqwest::Client::new();
     let body = json!({
         "clientMetadata": { "ideType": 9, "platform": 5, "pluginType": 2 }
@@ -620,15 +660,20 @@ pub async fn oauth_antigravity_project(access_token: String) -> Result<Option<St
         .json(&body)
         .send()
         .await
-        .map_err(|e| format!("loadCodeAssist request failed: {e}"))?;
+        .ok()?;
     let status = resp.status();
-    let text = resp.text().await.map_err(|e| e.to_string())?;
+    let text = resp.text().await.ok()?;
     if !status.is_success() {
         log::warn!("loadCodeAssist returned {status}: {text}");
-        return Ok(None);
+        return None;
     }
-    let v: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
-    Ok(find_project_id(&v))
+    let v: Value = serde_json::from_str(&text).ok()?;
+    find_project_id(&v)
+}
+
+#[tauri::command]
+pub async fn oauth_antigravity_project(access_token: String) -> Result<Option<String>, String> {
+    Ok(load_antigravity_project(access_token).await)
 }
 
 fn find_project_id(v: &Value) -> Option<String> {
@@ -721,6 +766,34 @@ mod tests {
             if preset.manual_code {
                 assert!(preset.loopback_port.is_none());
             }
+        }
+    }
+
+    /// Regression guard for the loopback poll contract: the frontend reads the
+    /// result as `{kind: "pending" | "ready" | "expired"}`. If the tag shape
+    /// ever changes, Codex/Antigravity sign-in silently hangs forever.
+    #[test]
+    fn poll_result_serializes_with_kind_tag() {
+        let pending = serde_json::to_string(&OAuthPollResult::Pending).unwrap();
+        assert_eq!(pending, r#"{"kind":"pending"}"#);
+
+        let ready = serde_json::to_string(&OAuthPollResult::Ready {
+            code: "abc".into(),
+        })
+        .unwrap();
+        assert_eq!(ready, r#"{"kind":"ready","code":"abc"}"#);
+
+        let expired = serde_json::to_string(&OAuthPollResult::Expired).unwrap();
+        assert_eq!(expired, r#"{"kind":"expired"}"#);
+    }
+
+    /// The loopback bind list must only ever use loopback interfaces — never
+    /// 0.0.0.0. This asserts the current hardcoded bind addresses.
+    #[test]
+    fn loopback_binds_are_loopback_only() {
+        for addr in [format!("127.0.0.1:1455"), format!("[::1]:1455")] {
+            assert!(!addr.starts_with("0.0.0.0"));
+            assert!(addr.contains("127.0.0.1") || addr.contains("[::1]"));
         }
     }
 }

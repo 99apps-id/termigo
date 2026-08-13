@@ -24,18 +24,13 @@ export async function oauthStart(
   return invoke<OAuthStartResult>("oauth_start", { profile });
 }
 
+/**
+ * Poll the Rust loopback listener. The Rust side serializes the result with
+ * an internal `kind` tag (`{kind:"pending"}` / `{kind:"ready",code}` /
+ * `{kind:"expired"}`), so the raw invoke value maps 1:1 onto the result.
+ */
 export async function oauthPoll(state: string): Promise<OAuthPollResult> {
-  const raw = await invoke<"pending" | "ready" | "expired">("oauth_poll", {
-    stateValue: state,
-  });
-  if (raw === "ready") {
-    // The Rust side hands the code back via oauth_exchange; for "ready" the
-    // frontend calls oauthExchange with no code and the Rust side reads the
-    // captured loopback code itself.
-    return { kind: "ready", code: "" };
-  }
-  if (raw === "expired") return { kind: "expired" };
-  return { kind: "pending" };
+  return invoke<OAuthPollResult>("oauth_poll", { stateValue: state });
 }
 
 export async function oauthExchange(
@@ -119,4 +114,25 @@ export async function ensureFreshOAuthToken(
 /** Open the browser at the authorize URL. */
 export async function openOAuthBrowser(url: string): Promise<void> {
   await openUrl(url);
+}
+
+/**
+ * Pull an authorization code out of a pasted value. Claude's manual-code flow
+ * can surface the code as a bare string, a full callback URL
+ * (`https://console.anthropic.com/oauth/code/callback?code=…&state=…`), or a
+ * `code#state` form — handle all of them.
+ */
+export function extractOAuthCode(pasted: string): string {
+  const s = pasted.trim();
+  if (!s) return "";
+  const m = s.match(/[?&#]code=([^&#]+)/);
+  if (m) {
+    try {
+      return decodeURIComponent(m[1]);
+    } catch {
+      return m[1];
+    }
+  }
+  const hash = s.match(/^([^#\s]+)#/);
+  return hash ? hash[1] : s;
 }
