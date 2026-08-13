@@ -4,3 +4,11 @@ allowBuilds:
   esbuild: true
   msgpackr-extract: false
   msw: true
+
+# Patched versions of transitive dependencies flagged by `pnpm audit`.
+# All three arrive through streamdown -> mermaid; there is no direct dependency
+# to bump, so they are pinned here until streamdown ships the newer tree.
+overrides:
+  dompurify: '>=3.4.9'
+  mermaid: '>=11.16.1'
+  nanoid: '>=3.3.18'

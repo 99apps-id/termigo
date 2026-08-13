@@ -135,5 +135,10 @@
     "vite": "^8.2.0",
     "vite-plugin-inspect": "^12.0.2",
     "vitest": "^4.1.10"
+  },
+  "overrides": {
+    "dompurify": ">=3.4.9",
+    "mermaid": ">=11.16.1",
+    "nanoid": ">=3.3.18"
   }
 }
