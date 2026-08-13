@@ -187,9 +187,16 @@ See [`docs/`](docs/) for the MCP, skills, agents, and architecture guides.
     <td align="center"><img src="docs/source-control.png" alt="Source control and git graph" style="margin-top: 12px;"/><br/><sub>Source control panel with git graph in history</sub></td>
   </tr>
   <tr>
+    <td colspan="2" align="center"><img src="docs/termigo-windows.png" alt="Termigo on Windows" style="border-radius: 4px; margin-top: 12px;" /><br/><sub>Termigo on Windows: explorer, PowerShell session, and spaces</sub></td>
+  </tr>
+  <tr>
     <td colspan="2" align="center"><img src="docs/terminal.png" alt="Terminal" style="border-radius: 4px; margin-top: 12px;" /><br/><sub>Block-based WebGL terminal with editor-like input panel</sub></td>
   </tr>
 </table>
+
+> The four screenshots above the Windows one are inherited from upstream Terax
+> and still show its branding; they are accurate for the shared features but
+> are queued for replacement with Termigo captures.
 
 ## Architecture
 
