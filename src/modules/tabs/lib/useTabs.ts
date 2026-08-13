@@ -3,6 +3,8 @@ import {
   createAgentPanePlan,
   type AgentInstanceCount,
 } from "@/modules/agents/lib/launcher";
+// Re-exported for the extension host (TEDI parity).
+export type { ExtensionTabState } from "@/modules/extensions/tabStateShim";
 import {
   findLeafCwd,
   hasLeaf,
@@ -127,7 +129,22 @@ export type Tab =
   | AiDiffTab
   | GitDiffTab
   | GitHistoryTab
-  | GitCommitFileDiffTab;
+  | GitCommitFileDiffTab
+  | ExtensionTab;
+
+/** Extension-owned tab (TEDI parity). Content is mounted by the extension
+ *  host's panel renderer; added so extension tabs type-check. */
+export type ExtensionTab = TabBase & {
+  id: number;
+  kind: "ext";
+  title: string;
+  extensionId: string;
+  panelId: string;
+  icon?: string;
+  reuseKey?: string;
+  cwd?: string;
+  customTitle?: string;
+};
 
 export type TabPatch = Partial<{
   title: string;

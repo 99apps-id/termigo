@@ -1,6 +1,6 @@
 pub mod modules;
 
-use modules::{agent, control, fs, git, history, lsp, net, pty, secrets, shell, ssh, workspace};
+use modules::{agent, control, extensions, fs, git, history, lsp, net, pty, secrets, shell, ssh, workspace};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
@@ -230,6 +230,7 @@ pub fn run() {
         .manage(shell::ShellState::default())
         .manage(secrets::SecretsState::default())
         .manage(ssh::SshState::default())
+        .manage(extensions::ExtensionsState::default())
         .manage(fs::watch::FsWatchState::default())
         .manage(history::HistoryState::default())
         .manage(lsp::LspState::default())
@@ -321,6 +322,18 @@ pub fn run() {
             secrets::secrets_set,
             secrets::secrets_delete,
             secrets::secrets_get_all,
+            extensions::commands::ext_list,
+            extensions::commands::ext_read_manifest,
+            extensions::commands::ext_read_asset,
+            extensions::commands::ext_read_asset_bytes,
+            extensions::commands::ext_install_from_zip,
+            extensions::commands::ext_peek_zip,
+            extensions::commands::ext_peek_github,
+            extensions::commands::ext_install_from_github,
+            extensions::commands::ext_check_update,
+            extensions::commands::ext_enable,
+            extensions::commands::ext_disable,
+            extensions::commands::ext_uninstall,
             ssh::ssh_agent_keys,
             ssh::ssh_open,
             ssh::ssh_write,

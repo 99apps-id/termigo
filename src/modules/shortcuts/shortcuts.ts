@@ -462,3 +462,30 @@ export function getBindingTokens(binding?: KeyBinding): string[] {
   tokens.push(keyLabel);
   return tokens;
 }
+
+/**
+ * Parse a keybinding string (e.g. "Ctrl+Shift+K", "Mod+Alt+Enter") into a
+ * KeyBinding. Used by the extension host to render manifest keybinding chips;
+ * "Mod" maps to the platform modifier. Unknown modifiers are ignored.
+ */
+export function parseKeybindingString(value: string): KeyBinding {
+  const parts = value.split("+").map((p) => p.trim()).filter(Boolean);
+  const binding: KeyBinding = { key: "" };
+  for (const part of parts) {
+    const lower = part.toLowerCase();
+    if (lower === "ctrl" || lower === "control") binding.ctrl = true;
+    else if (lower === "alt" || lower === "option") binding.alt = true;
+    else if (lower === "shift") binding.shift = true;
+    else if (lower === "meta" || lower === "cmd" || lower === "command") {
+      binding.meta = true;
+      if (IS_MAC) binding.ctrl = false;
+    } else if (lower === "mod") {
+      if (IS_MAC) binding.meta = true;
+      else binding.ctrl = true;
+    } else if (!binding.key) {
+      binding.key = part;
+    }
+  }
+  if (binding.key === "Space") binding.key = " ";
+  return binding;
+}

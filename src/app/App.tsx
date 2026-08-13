@@ -174,6 +174,14 @@ export default function App() {
     newSshTab,
   } = useTabs(getLaunchDir() ? { cwd: getLaunchDir() } : undefined);
 
+  // Boot the extension host once the tab store exists (activates enabled
+  // extensions; they register their contributions into the registries).
+  useEffect(() => {
+    void import("@/modules/extensions/store").then(({ useExtensionsStore }) =>
+      useExtensionsStore.getState().init(),
+    );
+  }, []);
+
   // Mirror `tabs` into a ref so callbacks scheduled with `setTimeout`
   // (e.g. cdInNewTab) read the latest pane state instead of a stale closure.
   const tabsRef = useRef(tabs);

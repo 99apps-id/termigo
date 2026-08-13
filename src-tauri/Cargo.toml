@@ -66,6 +66,10 @@ which = "8.0.4"
 base64 = "0.22"
 russh = { version = "0.60", default-features = false, features = ["ring", "flate2", "rsa"] }
 russh-sftp = "2.1"
+zip = { version = "4", default-features = false, features = ["deflate"] }
+sha2 = "0.10"
+hex = "0.4"
+uuid = { version = "1", features = ["v4", "serde"] }
 
 [dev-dependencies]
 proptest = "1"

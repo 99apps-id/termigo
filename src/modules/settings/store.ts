@@ -180,6 +180,8 @@ export type Preferences = {
   editorCustomFormatCommand: string;
   lspActivation: Record<string, LspActivation>;
   lspCustomServers: LspCustomServer[];
+  /** Extension-contributed keybindings overrides, keyed by command id. */
+  extensionShortcuts: Record<string, KeyBinding[]>;
 };
 
 export type EditorFormatter =
@@ -269,6 +271,7 @@ const KEY_EDITOR_FORMATTER_BY_LANG = "editorFormatterByLang";
 const KEY_EDITOR_CUSTOM_FORMAT_COMMAND = "editorCustomFormatCommand";
 const KEY_LSP_ACTIVATION = "lspActivation";
 const KEY_LSP_CUSTOM_SERVERS = "lspCustomServers";
+const KEY_EXTENSION_SHORTCUTS = "extensionShortcuts";
 
 export const TERMINAL_FONT_SIZE_DEFAULT = 14;
 export const TERMINAL_FONT_SIZE_MIN = 8;
@@ -352,6 +355,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   editorCustomFormatCommand: "",
   lspActivation: {},
   lspCustomServers: [],
+  extensionShortcuts: {},
 };
 
 const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
@@ -545,6 +549,9 @@ export async function loadPreferences(): Promise<Preferences> {
     lspCustomServers:
       get<LspCustomServer[]>(KEY_LSP_CUSTOM_SERVERS) ??
       DEFAULT_PREFERENCES.lspCustomServers,
+    extensionShortcuts:
+      get<Record<string, KeyBinding[]>>(KEY_EXTENSION_SHORTCUTS) ??
+      DEFAULT_PREFERENCES.extensionShortcuts,
   };
 }
 
@@ -954,6 +961,7 @@ export async function onPreferencesChange(
     [KEY_EDITOR_CUSTOM_FORMAT_COMMAND]: "editorCustomFormatCommand",
     [KEY_LSP_ACTIVATION]: "lspActivation",
     [KEY_LSP_CUSTOM_SERVERS]: "lspCustomServers",
+    [KEY_EXTENSION_SHORTCUTS]: "extensionShortcuts",
   };
   // Same-process writes still fire onChange immediately; cross-window writes
   // arrive via the Tauri event emitted by writePref().
@@ -984,4 +992,41 @@ export async function emitKeysChanged(): Promise<void> {
 
 export function onKeysChanged(cb: () => void): Promise<UnlistenFn> {
   return listen(KEYS_CHANGED_EVENT, () => cb());
+}
+
+// ── Extension-namespaced settings helpers ────────────────────────────────
+// The extension host reads/writes settings under `ext:<id>:<key>` keys.
+// Built-in preferences are off-limits; these helpers guard that boundary.
+// `_onAnyChange` reuses the same cross-window event bus as writePref, with
+// the self-delivered event deduped via PREFS_CHANGED_EVENT.
+
+const EXT_PREFIX = "ext:";
+
+export async function _writeAny(key: string, value: unknown): Promise<void> {
+  if (!key.startsWith(EXT_PREFIX)) {
+    throw new Error(`settings._writeAny can only write namespaced extension keys, got "${key}"`);
+  }
+  await writePref(key, value);
+}
+
+export async function _readAny<T = unknown>(key: string): Promise<T | undefined> {
+  if (!key.startsWith(EXT_PREFIX)) {
+    throw new Error(`settings._readAny can only read namespaced extension keys, got "${key}"`);
+  }
+  const v = await store.get<T>(key);
+  return v ?? undefined;
+}
+
+export function _onAnyChange(
+  cb: (key: string, value: unknown) => void,
+): Promise<UnlistenFn> {
+  return Promise.all([
+    store.onChange<unknown>((key, value) => cb(key, value)),
+    listen<{ key: string; value: unknown }>(PREFS_CHANGED_EVENT, (e) => {
+      cb(e.payload.key, e.payload.value);
+    }),
+  ]).then(([unsubLocal, unsubEvent]) => () => {
+    unsubLocal();
+    unsubEvent();
+  });
 }
