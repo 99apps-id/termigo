@@ -107,13 +107,15 @@ func Create(workspace, name, description string) (Skill, error) {
 		description = "A Termigo skill."
 	}
 
+	// Check for a conflict before creating anything, so a rejected create does
+	// not leave an empty skill folder behind.
 	dir := filepath.Join(workspace, ".termigo", "skills", name)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return Skill{}, fmt.Errorf("create skill folder: %w", err)
-	}
 	document := filepath.Join(dir, "SKILL.md")
 	if _, err := os.Stat(document); err == nil {
 		return Skill{}, fmt.Errorf("skill %q already exists at %s", name, document)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return Skill{}, fmt.Errorf("create skill folder: %w", err)
 	}
 
 	content := fmt.Sprintf(`---
