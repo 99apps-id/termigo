@@ -5,6 +5,7 @@ pub mod fs;
 pub mod git;
 pub mod history;
 pub mod lsp;
+pub mod mcp;
 pub mod net;
 pub mod oauth;
 pub mod proc;

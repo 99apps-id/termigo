@@ -1,6 +1,9 @@
 pub mod modules;
 
-use modules::{agent, control, extensions, fs, git, history, lsp, net, oauth, pty, secrets, shell, ssh, workspace};
+use modules::{
+    agent, control, extensions, fs, git, history, lsp, mcp, net, oauth, pty, secrets, shell,
+    ssh, workspace,
+};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
@@ -329,6 +332,10 @@ pub fn run() {
             secrets::secrets_set,
             secrets::secrets_delete,
             secrets::secrets_get_all,
+            mcp::mcp_list_servers,
+            mcp::mcp_list_tools,
+            mcp::mcp_call_tool,
+            mcp::mcp_ping,
             oauth::oauth_start,
             oauth::oauth_poll,
             oauth::oauth_exchange,
