@@ -34,7 +34,7 @@ Your API keys stay in the OS keychain or with the provider's own CLI.
 
 This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
 (by Crynta, Apache-2.0), extended with a **Go command-line companion**
-(`termigo`) for automation: agent runs, MCP, skills, and project scaffolding.
+(`termi-go`) for automation: agent runs, MCP, skills, and project scaffolding.
 
 ## Features
 
@@ -152,21 +152,60 @@ cd src-tauri && cargo clippy --all-targets -- -D warnings && cargo test
 
 ## CLI
 
-The Go companion `termigo` automates what the desktop surfaces interactively:
+Termigo ships **two** separate command-line programs. They do different jobs,
+and only the first one is installed with the app.
+
+### 1. Control CLI (Rust, bundled with the app)
+
+Installed alongside the desktop app as `termigo`. It talks to a **running**
+Termigo window over the local control socket:
+
+```bash
+termigo README.md              # open a file in the running app
+termigo README.md --line 42    # open at a line
+termigo open README.md         # explicit form of the same thing
+termigo ping                   # is the app reachable?
+termigo capabilities           # what this build supports
+termigo identify               # which window/pane answered
+termigo help
+```
+
+It does **not** know `agent`, `mcp`, `skill`, `doctor` or `init`. Those belong
+to the Go companion below, and asking this binary for them now says so.
+
+### 2. Go companion (automation)
+
+Lives in [`cli/`](cli/) and is **not** installed by the app. It automates what
+the desktop surfaces interactively and runs without the app open.
 
 ```bash
 cd cli
-go run ./cmd/termigo help
-go run ./cmd/termigo doctor --json        # inspect local tools
-go run ./cmd/termigo init <dir>           # scaffold .termigo/ + TERMIGO.md
-go run ./cmd/termigo agent list           # installed agent providers
-go run ./cmd/termigo agent run codex "explain this repo" --access read-only
-go run ./cmd/termigo skill create review "Review diffs before commit"
-go run ./cmd/termigo mcp list             # configured MCP servers
-go run ./cmd/termigo mcp tools fs         # list tools of an MCP server
+go build -o termi-go ./cmd/termigo   # or: go run ./cmd/termigo <args>
 ```
 
-- **Providers:** Codex, Claude Code, Gemini, Antigravity, Ollama (local)
+Name the binary something other than `termigo` (for example `termi-go`), or
+put it on `PATH` ahead of the control CLI. Two binaries with the same name is
+exactly what makes `termigo agent list` fail confusingly.
+
+```bash
+./termi-go help
+./termi-go doctor --json                # inspect local tools
+./termi-go init <dir>                   # scaffold .termigo/ + TERMIGO.md
+./termi-go agent list                   # installed agent providers
+./termi-go agent run codex "explain this repo" --access read-only
+./termi-go skill create review "Review diffs before commit"
+./termi-go mcp list                     # configured MCP servers
+./termi-go mcp tools fs                 # list tools of an MCP server
+./termi-go config                       # show user configuration
+```
+
+- **Providers:** Codex, Claude Code, Gemini, Antigravity, Ollama (local).
+  `agent run` drives Codex, Claude and Gemini in print mode and Ollama over its
+  local HTTP API; a provider with no headless mode is reported rather than
+  launched blind.
+- **Provider overrides:** `providers.<id>.command` in `~/.termigo/config.json`
+  points at a CLI installed outside `PATH`; `model` and `endpoint` are honoured
+  the same way.
 - **Skills:** project- and user-scoped `SKILL.md` folders under
   `.termigo/skills/` and `~/.termigo/skills/`
 - **MCP:** standard `mcpServers` registry in `.termigo/mcp.json`, JSON-RPC 2.0
