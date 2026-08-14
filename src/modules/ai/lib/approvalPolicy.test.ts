@@ -73,3 +73,35 @@ describe("delete is held back from the edit tier", () => {
     expect(isAutoApproved("delete_file", "ask")).toBe(false);
   });
 });
+
+// The safety layer's shape is "inside this workspace", and every file tool
+// refuses paths outside it. A command on a remote host has no equivalent
+// boundary, so this is the one place an approval mode may not speak for the
+// user.
+describe("commands on a remote host always ask", () => {
+  it("asks even under the mode that says nothing waits", () => {
+    expect(isAutoApproved("bash_run", "all", { onRemoteHost: true })).toBe(false);
+    expect(isAutoApproved("bash_background", "all", { onRemoteHost: true })).toBe(
+      false,
+    );
+  });
+
+  it("leaves local commands under the mode the user chose", () => {
+    expect(isAutoApproved("bash_run", "all")).toBe(true);
+    expect(isAutoApproved("bash_run", "all", { onRemoteHost: false })).toBe(true);
+    expect(isAutoApproved("bash_run", "edits")).toBe(false);
+  });
+
+  // Only command execution is held back. File edits on the remote host are
+  // still bounded by the deny-list, so they keep their normal tier.
+  it("does not hold back remote file edits", () => {
+    expect(isAutoApproved("write_file", "edits", { onRemoteHost: true })).toBe(true);
+    expect(isAutoApproved("edit", "all", { onRemoteHost: true })).toBe(true);
+  });
+
+  it("still asks for delete on a remote host, as it does locally", () => {
+    expect(isAutoApproved("delete_file", "edits", { onRemoteHost: true })).toBe(
+      false,
+    );
+  });
+});

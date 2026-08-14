@@ -1,4 +1,6 @@
 import { remoteUnsupported } from "../lib/remoteFs";
+import { shellQuote } from "../lib/remoteSearch";
+import { sshExec } from "@/modules/ssh/bridge";
 import { tool } from "ai";
 import { z } from "zod";
 import { native } from "../lib/native";
@@ -32,26 +34,43 @@ export function buildShellTools(ctx: ToolContext) {
   return {
     bash_run: tool({
       description:
-        "Run a foreground shell command in this session's persistent agent shell. cwd persists across calls (so `cd foo` then `bash_run pwd` works). Use for short-lived commands (lint, test, search, build). For long-running or daemon processes (dev servers, watch tasks), use `bash_background`. NEVER invoke interactive tools (vim, less, top) — they will hang. Asks for user approval.",
+        "Run a foreground shell command. When the active terminal is an SSH session the command runs ON THE REMOTE HOST, from the remote shell's working directory, and always asks for approval regardless of the approval mode. Otherwise it runs in this session's persistent local shell, where cwd persists across calls. Use for short-lived commands (lint, test, build, install, service restarts). For long-running local daemons use `bash_background`. NEVER invoke interactive tools (vim, less, top) — they will hang.",
       inputSchema: z.object({
         command: z.string(),
         timeout_secs: z.number().int().min(1).max(300).optional(),
       }),
       needsApproval: true,
       execute: async ({ command, timeout_secs }) => {
-        // bash_run drives a LOCAL shell session. With an SSH terminal focused
-        // the model means the server, and running `rm -rf build` on this
-        // machine instead is exactly the failure the remote routing exists to
-        // prevent. suggest_command is the honest route: it lands the command
-        // at the remote prompt for the user to run.
-        if (ctx.getRemoteSession()) {
-          return remoteUnsupported(
-            "Running shell commands",
-            "Use suggest_command instead: it puts the command at the remote prompt for the user to run.",
-          );
-        }
         const safety = checkShellCommand(command);
         if (!safety.ok) return { error: safety.reason };
+
+        // With an SSH terminal focused the model means the server, so the
+        // command runs there. This one always asks, in every approval mode:
+        // see REMOTE_ALWAYS_ASK in approvalPolicy. The safety check above ran
+        // first and applies to both machines.
+        const remote = ctx.getRemoteSession();
+        if (remote) {
+          // Run from the shell's own directory. The exec channel starts in the
+          // SSH user's home, so `docker compose up` would otherwise run
+          // somewhere other than the project the user is looking at.
+          const full = remote.cwd
+            ? `cd ${shellQuote(remote.cwd)} && ${command}`
+            : command;
+          try {
+            const out = await sshExec(remote.sessionId, full, timeout_secs);
+            return {
+              command,
+              remote: true,
+              cwd: remote.cwd,
+              stdout: out.stdout,
+              stderr: out.stderr,
+              exit_code: out.exitCode,
+              truncated: out.truncated,
+            };
+          } catch (e) {
+            return { error: String(e), command, remote: true };
+          }
+        }
         const sid = ctx.getSessionId();
         if (!sid) return { error: "no active chat session" };
         try {
@@ -92,10 +111,13 @@ export function buildShellTools(ctx: ToolContext) {
         // machine instead is exactly the failure the remote routing exists to
         // prevent. suggest_command is the honest route: it lands the command
         // at the remote prompt for the user to run.
+        // The exec channel is one-shot: it runs a command and closes. There is
+        // no remote process registry to list, tail or kill, so a "background"
+        // remote job would be one this app could never report on again.
         if (ctx.getRemoteSession()) {
           return remoteUnsupported(
-            "Running shell commands",
-            "Use suggest_command instead: it puts the command at the remote prompt for the user to run.",
+            "Background processes",
+            "Use bash_run with `nohup CMD > /tmp/out.log 2>&1 &` and read the log file afterwards.",
           );
         }
         const safety = checkShellCommand(command);

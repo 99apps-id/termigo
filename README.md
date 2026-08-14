@@ -97,10 +97,15 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   a dedicated exec channel rather than walking the tree over SFTP — one command
   instead of thousands of round trips. Every value interpolated into those
   commands is single-quoted, so a pattern cannot become a second command.
-  `replace_in_files`, `copy_file` and `bash_run` still have no remote form; they
-  refuse while a session is open and point at `suggest_command`, which puts a
-  command at the remote prompt for you to run, rather than quietly acting on
-  your own disk.
+  `bash_run` runs on the server too, from the remote shell's working directory,
+  so the agent can install packages, reload Caddy or bring a compose stack up
+  without you relaying commands. **A command on a remote host always asks for
+  approval, in every approval mode including `Auto-approve all`** — the safety
+  layer's boundary is "inside this workspace", and a command on someone else's
+  machine has no equivalent, so that is the one place a mode is not allowed to
+  speak for you. `replace_in_files`, `copy_file` and `bash_background` still
+  have no remote form and refuse while a session is open, saying what to use
+  instead rather than quietly acting on your own disk.
 - **MCP servers.** Tools from any configured Model Context Protocol server are
   offered to the agent alongside the built-in ones, named `mcp__<server>__<tool>`
   so their origin stays visible in the transcript. Configure them in

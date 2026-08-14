@@ -79,10 +79,29 @@ export const APPROVAL_MODE_HINTS: Record<ApprovalMode, string> = {
  * Unknown tool names are treated as exec-tier: a tool added later should
  * default to asking rather than inherit a blanket allowance.
  */
+/**
+ * Tools that ask every time once they would act on someone else's machine.
+ *
+ * The safety layer's whole shape is "inside this workspace": every file tool
+ * refuses paths outside it, which is what makes delegating them reasonable.
+ * A command on a remote host has no equivalent boundary - `apt`, `systemctl`
+ * and `docker` are all legitimate and all capable of taking down a production
+ * server - so this is the one place a mode is not allowed to speak for the
+ * user.
+ */
+const REMOTE_ALWAYS_ASK = new Set(["bash_run", "bash_background"]);
+
+export type ApprovalContext = {
+  /** The call would run against the host of an open SSH session. */
+  onRemoteHost?: boolean;
+};
+
 export function isAutoApproved(
   toolName: string,
   mode: ApprovalMode,
+  ctx: ApprovalContext = {},
 ): boolean {
+  if (ctx.onRemoteHost && REMOTE_ALWAYS_ASK.has(toolName)) return false;
   if (mode === "all") return true;
   // An MCP tool is third-party code doing something this app cannot inspect,
   // so it never rides along with "auto-approve edits" - which is a statement
