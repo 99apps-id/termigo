@@ -311,7 +311,10 @@ jobs:
   # regenerated over the Authenticode-signed installers.
   patch-updater-manifest:
     needs: publish-tauri
-    if: startsWith(github.ref, 'refs/tags/')
+    # latest.json only exists when the updater artifacts are produced, which
+    # needs the signing key. Without it there is no manifest to patch and the
+    # job failed a release whose platform builds had all succeeded.
+    if: startsWith(github.ref, 'refs/tags/') && secrets.TAURI_SIGNING_PRIVATE_KEY != ''
     runs-on: ubuntu-latest
     permissions:
       contents: write
