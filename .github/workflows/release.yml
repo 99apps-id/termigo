@@ -11,6 +11,12 @@ jobs:
     permissions:
       contents: write
       id-token: write
+    # Signing is optional: a repository without these secrets still produces
+    # unsigned artifacts instead of failing every platform. `secrets` cannot be
+    # read from a step-level `if`, so it is mapped to job env here.
+    env:
+      HAS_UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+      HAS_SIGNPATH: ${{ secrets.SIGNPATH_API_TOKEN != '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -165,10 +171,16 @@ jobs:
           cp "$WORK/$BASENAME" "$APPIMAGE"
 
           rm -f "$APPIMAGE.sig"
-          pnpm tauri signer sign "$APPIMAGE"
+          if [ "$HAS_UPDATER_KEY" = "true" ]; then
+            pnpm tauri signer sign "$APPIMAGE"
+          else
+            echo "no updater signing key configured; AppImage ships unsigned"
+          fi
 
           TAG="${GITHUB_REF_NAME}"
-          gh release upload "$TAG" "$APPIMAGE" "$APPIMAGE.sig" \
+          SIG_ARG=""
+          [ -f "$APPIMAGE.sig" ] && SIG_ARG="$APPIMAGE.sig"
+          gh release upload "$TAG" "$APPIMAGE" $SIG_ARG \
             --clobber --repo "$GITHUB_REPOSITORY"
 
       # SignPath Authenticode-signs the Windows installers. Their bytes change,
@@ -208,7 +220,7 @@ jobs:
       # The default wait timeout is 600s; bumped so the job survives the time
       # it takes to review and approve the request during a release.
       - name: Submit Windows installers to SignPath
-        if: matrix.platform == 'windows-latest' && startsWith(github.ref, 'refs/tags/')
+        if: matrix.platform == 'windows-latest' && startsWith(github.ref, 'refs/tags/') && env.HAS_SIGNPATH == 'true'
         uses: signpath/github-action-submit-signing-request@v2
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
