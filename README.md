@@ -224,26 +224,15 @@ See [`docs/`](docs/) for the MCP, skills, agents, and architecture guides.
 
 ## Screenshots
 
-<table>
-  <tr>
-    <td align="center"><img src="docs/web-preview.png" alt="Web preview" /><br/><sub>Web preview of local dev servers</sub></td>
-    <td align="center"><img src="docs/ai-workflow.png" alt="AI window" /><br/><sub>Agentic AI workflow with edit diffs in the code editor</sub></td>
-  </tr>
-  <tr>
-    <td align="center"><img src="docs/themes.png" alt="Themes and background image" style="margin-top: 12px;"/><br/><sub>Custom themes, presets, and background images</sub></td>
-    <td align="center"><img src="docs/source-control.png" alt="Source control and git graph" style="margin-top: 12px;"/><br/><sub>Source control panel with git graph in history</sub></td>
-  </tr>
-  <tr>
-    <td colspan="2" align="center"><img src="docs/termigo-windows.png" alt="Termigo on Windows" style="border-radius: 4px; margin-top: 12px;" /><br/><sub>Termigo on Windows: explorer, PowerShell session, and spaces</sub></td>
-  </tr>
-  <tr>
-    <td colspan="2" align="center"><img src="docs/terminal.png" alt="Terminal" style="border-radius: 4px; margin-top: 12px;" /><br/><sub>Block-based WebGL terminal with editor-like input panel</sub></td>
-  </tr>
-</table>
+<p align="center">
+  <img src="docs/termigo-windows.png" alt="Termigo on Windows" width="900" />
+  <br/>
+  <sub>Termigo on Windows: explorer, PowerShell session, and spaces</sub>
+</p>
 
-> The four screenshots above the Windows one are inherited from upstream Terax
-> and still show its branding; they are accurate for the shared features but
-> are queued for replacement with Termigo captures.
+> More screenshots are on the way. The earlier gallery here was inherited from
+> upstream Terax and showed that project's branding, so it has been removed
+> rather than left standing in for Termigo.
 
 ## Architecture
 
