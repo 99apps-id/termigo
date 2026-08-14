@@ -1,5 +1,8 @@
 import { buildManagedAgentTools } from "./agent";
 import { buildEditTools } from "./edit";
+import { buildFetchTools } from "./fetch";
+import { buildFileOpsTools } from "./fileops";
+import { buildReplaceTools } from "./replace";
 import { buildFsTools } from "./fs";
 import { buildSearchTools } from "./search";
 import { buildShellTools } from "./shell";
@@ -32,6 +35,9 @@ export { resolvePath, type ToolContext } from "./context";
 export function buildTools(ctx: import("./context").ToolContext) {
   return {
     ...buildFsTools(ctx),
+    ...buildFileOpsTools(ctx),
+    ...buildFetchTools(),
+    ...buildReplaceTools(ctx),
     ...buildEditTools(ctx),
     ...buildSearchTools(ctx),
     ...buildShellTools(ctx),

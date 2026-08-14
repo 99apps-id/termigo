@@ -163,6 +163,20 @@ export const native = {
     invoke<void>("fs_create_file", { path, workspace: currentWorkspaceEnv() }),
   createDir: (path: string) =>
     invoke<void>("fs_create_dir", { path, workspace: currentWorkspaceEnv() }),
+  // Rename doubles as move: the Rust side refuses to overwrite an existing
+  // target, so a move can never silently destroy the destination.
+  rename: (from: string, to: string) =>
+    invoke<void>("fs_rename", { from, to, workspace: currentWorkspaceEnv() }),
+  // Copies INTO a directory, keeping each source's own filename, and refuses
+  // to overwrite. Recursive for directories.
+  copyInto: (sources: string[], destDir: string) =>
+    invoke<void>("fs_copy", {
+      sources,
+      destDir,
+      workspace: currentWorkspaceEnv(),
+    }),
+  deletePath: (path: string) =>
+    invoke<void>("fs_delete", { path, workspace: currentWorkspaceEnv() }),
   // AI tooling never sees dot-prefixed entries regardless of the user's
   // explorer preference — keeps .git / .env / .ssh out of agent context.
   readDir: (path: string) =>
