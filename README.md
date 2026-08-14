@@ -227,12 +227,12 @@ See [`docs/`](docs/) for the MCP, skills, agents, and architecture guides.
 <p align="center">
   <img src="docs/termigo-windows.png" alt="Termigo on Windows" width="900" />
   <br/>
-  <sub>Termigo on Windows: explorer, PowerShell session, and spaces</sub>
+  <sub>
+    Agent run under review: a <code>write_file</code> call held at the approval
+    gate, its diff open in the editor, todos tracking the plan, and spaces
+    across the top
+  </sub>
 </p>
-
-> More screenshots are on the way. The earlier gallery here was inherited from
-> upstream Terax and showed that project's branding, so it has been removed
-> rather than left standing in for Termigo.
 
 ## Architecture
 
