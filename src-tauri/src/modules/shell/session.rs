@@ -6,7 +6,6 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use super::run_blocking_inner;
 use crate::modules::fs::to_canon;
 use crate::modules::workspace::{resolve_path, WorkspaceEnv};
 
@@ -17,6 +16,9 @@ pub struct ShellSession {
     #[allow(dead_code)]
     pub started_at_ms: u64,
     sentinel: String,
+    /// The child of the command running right now, if any. Lets an interrupt
+    /// reach a command already in flight instead of waiting out its timeout.
+    running: super::ChildSlot,
 }
 
 #[derive(Serialize)]
@@ -56,11 +58,30 @@ impl ShellSession {
             pristine: AtomicBool::new(true),
             started_at_ms,
             sentinel: generate_sentinel(),
+            running: Default::default(),
         }
     }
 
     pub fn current_cwd(&self) -> String {
         self.cwd.lock().unwrap().clone()
+    }
+
+    /// Kill the command running right now, if there is one.
+    ///
+    /// Returns whether anything was killed, so a caller can tell "stopped it"
+    /// apart from "nothing was running" rather than reporting success either
+    /// way.
+    pub fn interrupt(&self) -> bool {
+        let Ok(guard) = self.running.lock() else {
+            return false;
+        };
+        match guard.as_ref() {
+            Some(child) => {
+                let _ = child.kill();
+                true
+            }
+            None => false,
+        }
     }
 
     pub fn run(
@@ -89,12 +110,14 @@ impl ShellSession {
 
         let (tx, rx) = mpsc::channel::<Result<super::CommandOutput, String>>();
         let cwd_for_thread = cwd.clone();
+        let slot = std::sync::Arc::clone(&self.running);
         thread::spawn(move || {
-            let _ = tx.send(run_blocking_inner(
+            let _ = tx.send(super::run_blocking_interruptible(
                 wrapped,
                 Some(cwd_for_thread),
                 effective_workspace,
                 timeout,
+                slot,
             ));
         });
         let raw = rx.recv().map_err(|e| e.to_string())??;

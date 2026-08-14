@@ -52,6 +52,9 @@ const EXEC_TOOLS = new Set([
   // at all. That asymmetry is worth a click even from someone who has already
   // delegated ordinary edits.
   "delete_file",
+  // Binding a local port and tunnelling it to another machine is a network
+  // action, not a workspace edit.
+  "forward_remote_port",
   "bash_run",
   "bash_background",
   "spawn_coding_agent",

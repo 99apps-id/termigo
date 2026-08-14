@@ -1,6 +1,7 @@
 import { buildManagedAgentTools } from "./agent";
 import { buildEditTools } from "./edit";
 import { buildFetchTools } from "./fetch";
+import { buildForwardTools } from "./forward";
 import { buildFileOpsTools } from "./fileops";
 import { buildReplaceTools } from "./replace";
 import { buildSkillTools } from "./skills";
@@ -38,6 +39,7 @@ export function buildTools(ctx: import("./context").ToolContext) {
     ...buildFsTools(ctx),
     ...buildFileOpsTools(ctx),
     ...buildFetchTools(),
+    ...buildForwardTools(ctx),
     ...buildReplaceTools(ctx),
     ...buildEditTools(ctx),
     ...buildSearchTools(ctx),

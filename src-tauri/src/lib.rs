@@ -317,6 +317,7 @@ pub fn run() {
             shell::shell_run_command,
             shell::shell_session_open,
             shell::shell_session_run,
+            shell::shell_session_interrupt,
             shell::shell_session_close,
             shell::shell_bg_spawn,
             shell::shell_bg_logs,

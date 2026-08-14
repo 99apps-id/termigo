@@ -40,7 +40,7 @@ export function buildShellTools(ctx: ToolContext) {
         timeout_secs: z.number().int().min(1).max(300).optional(),
       }),
       needsApproval: true,
-      execute: async ({ command, timeout_secs }) => {
+      execute: async ({ command, timeout_secs }, { abortSignal }) => {
         const safety = checkShellCommand(command);
         if (!safety.ok) return { error: safety.reason };
 
@@ -85,12 +85,22 @@ export function buildShellTools(ctx: ToolContext) {
         try {
           const cwd = ctx.getCwd();
           const shellId = await getSessionShell(workspaceSessionKey(sid), cwd);
-          const r = await native.shellSessionRun(
-            shellId,
-            command,
-            cwd,
-            timeout_secs,
-          );
+
+          // Stop has to reach the command, not just the model stream. Without
+          // this the run was marked stopped while the shell kept going, and
+          // anything the user had queued waited for a command nobody was
+          // watching any more.
+          const onAbort = () => {
+            void native.shellSessionInterrupt(shellId).catch(() => {});
+          };
+          abortSignal?.addEventListener("abort", onAbort, { once: true });
+
+          let r: Awaited<ReturnType<typeof native.shellSessionRun>>;
+          try {
+            r = await native.shellSessionRun(shellId, command, cwd, timeout_secs);
+          } finally {
+            abortSignal?.removeEventListener("abort", onAbort);
+          }
           return {
             command,
             stdout: r.stdout,

@@ -244,6 +244,11 @@ export const native = {
       timeoutSecs: timeoutSecs ?? null,
       workspace: currentWorkspaceEnv(),
     }),
+  // Kills whatever is running in the session right now. Returns whether
+  // anything was killed, so a caller can tell "stopped it" from "nothing was
+  // running".
+  shellSessionInterrupt: (id: number) =>
+    invoke<boolean>("shell_session_interrupt", { id }),
   shellSessionClose: (id: number) =>
     invoke<void>("shell_session_close", { id }),
   shellBgSpawn: (command: string, cwd?: string | null) =>
