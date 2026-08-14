@@ -304,15 +304,20 @@ jobs:
   # regenerated over the Authenticode-signed installers.
   patch-updater-manifest:
     needs: publish-tauri
-    # latest.json only exists when the updater artifacts are produced, which
-    # needs the signing key. Without it there is no manifest to patch and the
-    # job failed a release whose platform builds had all succeeded.
-    if: startsWith(github.ref, 'refs/tags/') && secrets.TAURI_SIGNING_PRIVATE_KEY != ''
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    # `secrets` cannot be read from any `if`, job or step, so the flag is
+    # mapped here and the step below tests the env var instead.
+    env:
+      HAS_UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
     steps:
+      # latest.json only exists when updater artifacts are produced, which needs
+      # the signing key. Without it there is nothing to patch, and failing here
+      # marked a release red whose platform builds had all succeeded.
       - name: Patch latest.json with re-signed AppImage and Windows signatures
+        if: env.HAS_UPDATER_KEY == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
