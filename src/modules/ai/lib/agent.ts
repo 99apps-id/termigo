@@ -24,6 +24,7 @@ import {
 } from "../config";
 import { buildTools, type ToolContext } from "../tools/tools";
 import type { McpToolset } from "./mcpTools";
+import type { ExtensionToolset } from "./extensionTools";
 import { skillsBlock, type Skill } from "./skills";
 import { compactModelMessagesDetailed } from "./compact";
 import { memoryBlock as learnedBlock, type MemoryEntry } from "./memory";
@@ -383,6 +384,8 @@ export type RunAgentOptions = {
   mcpTools?: McpToolset;
   /** Skill index (names + descriptions). Bodies load on demand. */
   skills?: readonly Skill[];
+  /** Tools contributed by enabled extensions. */
+  extensionTools?: ExtensionToolset;
   uiMessages: UIMessage[];
   abortSignal?: AbortSignal;
 };
@@ -451,7 +454,14 @@ export async function runAgentStream(opts: RunAgentOptions) {
     // MCP last: a server cannot shadow a built-in tool by naming a tool after
     // it, and the `mcp__` prefix means a collision would take deliberate effort
     // anyway.
-    tools: { ...(opts.mcpTools ?? {}), ...buildTools(opts.toolContext) },
+    // Built-ins last: neither an extension nor an MCP server can shadow a
+    // core tool by naming one after it, and the prefixes make a collision take
+    // deliberate effort anyway.
+    tools: {
+      ...(opts.mcpTools ?? {}),
+      ...(opts.extensionTools ?? {}),
+      ...buildTools(opts.toolContext),
+    },
     stopWhen: stepCountIs(MAX_AGENT_STEPS),
     abortSignal: opts.abortSignal,
     onStepFinish: (step) => {

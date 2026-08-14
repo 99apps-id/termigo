@@ -2,6 +2,7 @@ import type { UIMessage } from "@ai-sdk/react";
 import { readMemory } from "./memory";
 import { getMcpTools } from "./mcpTools";
 import { listSkills } from "./skills";
+import { buildExtensionTools } from "./extensionTools";
 import type { CustomEndpoint } from "../config";
 import { runAgentStream, type AgentUsageDelta } from "./agent";
 import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
@@ -95,6 +96,9 @@ export function createContextAwareTransport(deps: Deps) {
       learnedMemory,
       mcpTools,
       skills,
+      // Read at send time, not cached: extensions are enabled, disabled and
+      // reloaded while the app is open.
+      extensionTools: buildExtensionTools(),
       agentPersona: deps.getAgentPersona(),
       toolContext: deps.toolContext,
       onStep: deps.onStep,

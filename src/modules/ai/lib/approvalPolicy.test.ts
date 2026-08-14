@@ -105,3 +105,21 @@ describe("commands on a remote host always ask", () => {
     );
   });
 });
+
+// An extension declaring `auto` is asking for its tool to run unattended.
+// That is honoured, but it is the tool's preference, not a statement that
+// "auto-approve edits" — a claim about files in this workspace — covers
+// third-party code doing something this app cannot inspect.
+describe("extension tools", () => {
+  it("does not ride along with auto-approve edits", () => {
+    expect(isAutoApproved("ext__my_ext__do_thing", "edits")).toBe(false);
+  });
+
+  it("follows the mode that says nothing waits", () => {
+    expect(isAutoApproved("ext__my_ext__do_thing", "all")).toBe(true);
+  });
+
+  it("asks in the default mode", () => {
+    expect(isAutoApproved("ext__my_ext__do_thing", "ask")).toBe(false);
+  });
+});

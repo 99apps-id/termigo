@@ -1,4 +1,5 @@
 import { isMcpTool } from "./mcpToolNames";
+import { isExtensionTool } from "./extensionToolNames";
 
 // Approval policy for agent tool calls.
 //
@@ -113,6 +114,11 @@ export function isAutoApproved(
   // unknown-name fallback would already land here; saying it outright means a
   // later change to that fallback cannot quietly widen this.
   if (isMcpTool(toolName)) return false;
+  // Same reasoning for extension tools: third-party code doing something this
+  // app cannot inspect. An extension may declare `auto`, which decides whether
+  // the tool asks at all - it does not decide that "auto-approve edits" covers
+  // it, because that mode is a statement about files in this workspace.
+  if (isExtensionTool(toolName) && mode === "edits") return false;
   if (mode === "edits") return EDIT_TOOLS.has(toolName);
   return false;
 }

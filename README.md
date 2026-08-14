@@ -120,6 +120,11 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   speak for you. `replace_in_files`, `copy_file` and `bash_background` still
   have no remote form and refuse while a session is open, saying what to use
   instead rather than quietly acting on your own disk.
+- **Extension tools.** An extension that declares `contributes.aiTools` in its
+  manifest has those tools offered to the agent as `ext__<extension>__<tool>`,
+  with the JSON Schema and approval preference it declared. Like MCP tools they
+  never ride along with `Auto-approve edits`, since that mode is a statement
+  about files in your workspace, not about third-party code.
 - **MCP servers.** Tools from any configured Model Context Protocol server are
   offered to the agent alongside the built-in ones, named `mcp__<server>__<tool>`
   so their origin stays visible in the transcript. Configure them in
