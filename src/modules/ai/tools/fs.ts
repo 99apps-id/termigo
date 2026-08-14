@@ -1,13 +1,20 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { sftpReadDir, sftpReadFile } from "@/modules/ssh/sftp";
+import {
+  sftpCreateDir,
+  sftpReadDir,
+  sftpReadFile,
+  sftpWriteFile,
+} from "@/modules/ssh/sftp";
 import { native } from "../lib/native";
 import {
   checkReadable,
   checkReadableCanonical,
+  checkWritable,
   checkWritableCanonical,
 } from "../lib/security";
 import { newQueuedEditId, usePlanStore } from "../store/planStore";
+import { routePath } from "../lib/remoteFs";
 import {
   resolvePath,
   resolveRemotePath,
@@ -245,7 +252,30 @@ export function buildFsTools(ctx: ToolContext) {
       }),
       needsApproval: true,
       execute: async ({ path, content }) => {
-        const reqPath = resolvePath(path, ctx.getCwd());
+        // Writes follow reads onto the remote host. Leaving them local was the
+        // dangerous half of the original state: the agent could read a remote
+        // file and write the edit to this machine, with nothing saying so.
+        const target = routePath(ctx.getRemoteSession(), path, (p) =>
+          resolvePath(p, ctx.getCwd()),
+        );
+        if (target.kind === "error") return { error: target.reason, path };
+        if (target.kind === "remote") {
+          const safety = checkWritable(target.path);
+          if (!safety.ok) return { error: safety.reason, path: target.path };
+          try {
+            await sftpWriteFile(target.sessionId, target.path, content);
+            return {
+              path: target.path,
+              remote: true,
+              bytesWritten: content.length,
+              ok: true,
+            };
+          } catch (e) {
+            return { error: String(e), path: target.path, remote: true };
+          }
+        }
+
+        const reqPath = target.path;
         const safety = await checkWritableCanonical(reqPath, native.canonicalize);
         if (!safety.ok) return { error: safety.reason, path: reqPath };
         const abs = safety.canonical;
@@ -292,7 +322,22 @@ export function buildFsTools(ctx: ToolContext) {
       }),
       needsApproval: true,
       execute: async ({ path }) => {
-        const reqPath = resolvePath(path, ctx.getCwd());
+        const target = routePath(ctx.getRemoteSession(), path, (p) =>
+          resolvePath(p, ctx.getCwd()),
+        );
+        if (target.kind === "error") return { error: target.reason, path };
+        if (target.kind === "remote") {
+          const safety = checkWritable(target.path);
+          if (!safety.ok) return { error: safety.reason, path: target.path };
+          try {
+            await sftpCreateDir(target.sessionId, target.path);
+            return { path: target.path, remote: true, ok: true };
+          } catch (e) {
+            return { error: String(e), path: target.path, remote: true };
+          }
+        }
+
+        const reqPath = target.path;
         const safety = await checkWritableCanonical(reqPath, native.canonicalize);
         if (!safety.ok) return { error: safety.reason, path: reqPath };
         const abs = safety.canonical;

@@ -1,3 +1,4 @@
+import { remoteUnsupported } from "../lib/remoteFs";
 import { tool } from "ai";
 import { z } from "zod";
 import { native } from "../lib/native";
@@ -75,6 +76,9 @@ export function buildSearchTools(ctx: ToolContext) {
         case_insensitive,
         max_results,
       }) => {
+        if (ctx.getRemoteSession()) {
+          return remoteUnsupported("grep", "Use bash_run in the remote terminal, e.g. `grep -rn PATTERN DIR`.");
+        }
         const r = resolveRoot(root, ctx);
         if (!r.ok) return { error: r.error };
         const safety = await checkReadableCanonical(
@@ -121,6 +125,9 @@ export function buildSearchTools(ctx: ToolContext) {
         max_results: z.number().int().min(1).max(2000).optional(),
       }),
       execute: async ({ pattern, root, max_results }) => {
+        if (ctx.getRemoteSession()) {
+          return remoteUnsupported("glob", "Use bash_run in the remote terminal, e.g. `find DIR -name PATTERN`.");
+        }
         const r = resolveRoot(root, ctx);
         if (!r.ok) return { error: r.error };
         const safety = await checkReadableCanonical(

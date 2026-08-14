@@ -13,7 +13,11 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { native } from "../lib/native";
+
+import { sftpDelete, sftpRename } from "@/modules/ssh/sftp";
+import { routePath, remoteUnsupported } from "../lib/remoteFs";
 import { checkWritableCanonical } from "../lib/security";
+import { checkWritable } from "../lib/security";
 import { resolvePath, type ToolContext } from "./context";
 
 /** Last path segment, for reporting where a copy actually landed. */
@@ -42,8 +46,36 @@ export function buildFileOpsTools(ctx: ToolContext) {
       }),
       needsApproval: true,
       execute: async ({ from, to }) => {
-        const fromPath = resolvePath(from, ctx.getCwd());
-        const toPath = resolvePath(to, ctx.getCwd());
+        const remote = ctx.getRemoteSession();
+        const fromT = routePath(remote, from, (p) => resolvePath(p, ctx.getCwd()));
+        const toT = routePath(remote, to, (p) => resolvePath(p, ctx.getCwd()));
+        if (fromT.kind === "error") return { error: fromT.reason, path: from };
+        if (toT.kind === "error") return { error: toT.reason, path: to };
+        // Both ends must sit on the same machine. A move that crossed hosts
+        // would be a download-then-upload wearing a rename's name.
+        if (fromT.kind !== toT.kind) {
+          return {
+            error:
+              "cannot move between the local machine and the remote host; both paths must be on the same one",
+            from,
+            to,
+          };
+        }
+        if (fromT.kind === "remote" && toT.kind === "remote") {
+          for (const p of [fromT.path, toT.path]) {
+            const check = checkWritable(p);
+            if (!check.ok) return { error: check.reason, path: p };
+          }
+          try {
+            await sftpRename(fromT.sessionId, fromT.path, toT.path);
+            return { moved: true, remote: true, from: fromT.path, to: toT.path };
+          } catch (e) {
+            return { error: String(e), from: fromT.path, to: toT.path, remote: true };
+          }
+        }
+
+        const fromPath = fromT.path;
+        const toPath = toT.path;
         // Both ends are checked: reading the check as "is the source allowed"
         // alone would let a move drop a file somewhere it may not go, and
         // checking only the destination would let one be taken from anywhere.
@@ -74,6 +106,15 @@ export function buildFileOpsTools(ctx: ToolContext) {
       }),
       needsApproval: true,
       execute: async ({ source, dest_dir }) => {
+        // SFTP here has no server-side copy, and doing it by hand would mean
+        // downloading and re-uploading every byte - silently, and wrongly for
+        // directories. Refusing says so instead of pretending.
+        if (ctx.getRemoteSession()) {
+          return remoteUnsupported(
+            "copy_file",
+            "Use bash_run in the remote terminal (`cp -r src dest`), or read_file then write_file for a single small file.",
+          );
+        }
         const sourcePath = resolvePath(source, ctx.getCwd());
         const destPath = resolvePath(dest_dir, ctx.getCwd());
         const src = await checkWritableCanonical(sourcePath, native.canonicalize);
@@ -106,7 +147,22 @@ export function buildFileOpsTools(ctx: ToolContext) {
       }),
       needsApproval: true,
       execute: async ({ path }) => {
-        const reqPath = resolvePath(path, ctx.getCwd());
+        const target = routePath(ctx.getRemoteSession(), path, (p) =>
+          resolvePath(p, ctx.getCwd()),
+        );
+        if (target.kind === "error") return { error: target.reason, path };
+        if (target.kind === "remote") {
+          const check = checkWritable(target.path);
+          if (!check.ok) return { error: check.reason, path: target.path };
+          try {
+            await sftpDelete(target.sessionId, target.path);
+            return { deleted: true, remote: true, path: target.path };
+          } catch (e) {
+            return { error: String(e), path: target.path, remote: true };
+          }
+        }
+
+        const reqPath = target.path;
         const safety = await checkWritableCanonical(reqPath, native.canonicalize);
         if (!safety.ok) return { error: safety.reason, path: reqPath };
         try {

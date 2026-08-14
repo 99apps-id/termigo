@@ -9,6 +9,7 @@ import {
   replaceAllCount,
   uniquePaths,
 } from "../lib/replaceText";
+import { remoteUnsupported } from "../lib/remoteFs";
 import { resolvePath, type ToolContext } from "./context";
 
 export function buildReplaceTools(ctx: ToolContext) {
@@ -35,6 +36,15 @@ export function buildReplaceTools(ctx: ToolContext) {
       }),
       needsApproval: true,
       execute: async ({ search, replace, path, glob, dry_run }) => {
+        // This is grep plus a write, and grep has no remote backend. Sweeping
+        // the local tree while the user is working on a server would rewrite
+        // the wrong machine's files wholesale.
+        if (ctx.getRemoteSession()) {
+          return remoteUnsupported(
+            "replace_in_files",
+            "Use bash_run in the remote terminal, e.g. `grep -rl OLD DIR | xargs sed -i 's/OLD/NEW/g'`.",
+          );
+        }
         const root = resolvePath(path ?? ".", ctx.getCwd());
 
         let hits: Awaited<ReturnType<typeof native.grep>>;

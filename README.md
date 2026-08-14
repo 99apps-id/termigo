@@ -88,6 +88,14 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   path and shell-command safety checks run inside every tool regardless, so no
   mode can authorise something the safety layer refuses. Read-only tools never
   asked in the first place.
+- **Agent works on the remote host.** When the active terminal is an SSH
+  session, the agent's file tools act on the server: `read_file`,
+  `list_directory`, `write_file`, `create_directory`, `edit`, `multi_edit`,
+  `move_file` and `delete_file` all go over SFTP. Windows drive paths (`C:\...`)
+  still mean this machine, since they cannot mean anything on a POSIX host.
+  Tools with no remote equivalent — `grep`, `glob`, `replace_in_files`,
+  `copy_file`, `bash_run` — refuse while a session is open and say what to use
+  instead, rather than quietly acting on your own disk.
 - **MCP servers.** Tools from any configured Model Context Protocol server are
   offered to the agent alongside the built-in ones, named `mcp__<server>__<tool>`
   so their origin stays visible in the transcript. Configure them in

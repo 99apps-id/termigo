@@ -5,6 +5,13 @@ const copyInto = vi.fn();
 const deletePath = vi.fn();
 const canonicalize = vi.fn(async (p: string) => p);
 
+const sftpRename = vi.fn();
+const sftpDelete = vi.fn();
+vi.mock("@/modules/ssh/sftp", () => ({
+  sftpRename: (...a: unknown[]) => sftpRename(...a),
+  sftpDelete: (...a: unknown[]) => sftpDelete(...a),
+}));
+
 vi.mock("../lib/native", () => ({
   native: {
     rename: (...a: unknown[]) => rename(...a),
@@ -113,5 +120,60 @@ describe("approval", () => {
         true,
       );
     }
+  });
+});
+
+// With a session open every tool must either act on the remote host or say it
+// cannot. Quietly acting locally is how an agent ends up moving the wrong
+// machine's files.
+describe("with an SSH session open", () => {
+  const remoteCtx = {
+    getCwd: () => "/workspace",
+    getRemoteSession: () => ({ sessionId: 5, cwd: "/srv/app" }),
+    getWorkspaceRoot: () => "/workspace",
+  } as unknown as ToolContext;
+  const remoteTools = buildFileOpsTools(remoteCtx);
+
+  function runRemote(name: keyof typeof remoteTools, args: unknown) {
+    const t = remoteTools[name] as unknown as {
+      execute: (a: unknown, o: unknown) => Promise<unknown>;
+    };
+    return t.execute(args, {});
+  }
+
+  it("moves on the remote host, not locally", async () => {
+    rename.mockClear();
+    sftpRename.mockResolvedValue(undefined);
+    const out = await runRemote("move_file", { from: "a.txt", to: "b.txt" });
+    expect(out).toMatchObject({ moved: true, remote: true });
+    expect(sftpRename).toHaveBeenCalledWith(5, "/srv/app/a.txt", "/srv/app/b.txt");
+    expect(rename).not.toHaveBeenCalled();
+  });
+
+  it("deletes on the remote host, not locally", async () => {
+    deletePath.mockClear();
+    sftpDelete.mockResolvedValue(undefined);
+    const out = await runRemote("delete_file", { path: "junk.log" });
+    expect(out).toMatchObject({ deleted: true, remote: true });
+    expect(sftpDelete).toHaveBeenCalledWith(5, "/srv/app/junk.log");
+    expect(deletePath).not.toHaveBeenCalled();
+  });
+
+  // A move across machines would be a download-then-upload wearing a rename's
+  // name, with none of a rename's atomicity.
+  it("refuses a move that would cross machines", async () => {
+    sftpRename.mockClear();
+    const out = await runRemote("move_file", { from: "a.txt", to: "C:/temp/b.txt" });
+    expect(String((out as { error: string }).error)).toContain("same one");
+    expect(sftpRename).not.toHaveBeenCalled();
+  });
+
+  // SFTP has no server-side copy; doing it by hand would move every byte
+  // through this machine, and would be wrong for directories.
+  it("refuses to copy rather than pretending", async () => {
+    copyInto.mockClear();
+    const out = await runRemote("copy_file", { source: "a", dest_dir: "b" });
+    expect(String((out as { error: string }).error)).toContain("copy_file");
+    expect(copyInto).not.toHaveBeenCalled();
   });
 });
