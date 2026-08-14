@@ -25,6 +25,7 @@ import {
 import { buildTools, type ToolContext } from "../tools/tools";
 import type { McpToolset } from "./mcpTools";
 import type { ExtensionToolset } from "./extensionTools";
+import type { CustomToolset } from "./customToolsIo";
 import { skillsBlock, type Skill } from "./skills";
 import { compactModelMessagesDetailed } from "./compact";
 import { memoryBlock as learnedBlock, type MemoryEntry } from "./memory";
@@ -386,6 +387,8 @@ export type RunAgentOptions = {
   skills?: readonly Skill[];
   /** Tools contributed by enabled extensions. */
   extensionTools?: ExtensionToolset;
+  /** Command tools defined in this workspace. */
+  customTools?: CustomToolset;
   uiMessages: UIMessage[];
   abortSignal?: AbortSignal;
 };
@@ -460,6 +463,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
     tools: {
       ...(opts.mcpTools ?? {}),
       ...(opts.extensionTools ?? {}),
+      ...(opts.customTools ?? {}),
       ...buildTools(opts.toolContext),
     },
     stopWhen: stepCountIs(MAX_AGENT_STEPS),

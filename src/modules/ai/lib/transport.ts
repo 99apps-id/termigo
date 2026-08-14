@@ -3,6 +3,7 @@ import { readMemory } from "./memory";
 import { getMcpTools } from "./mcpTools";
 import { listSkills } from "./skills";
 import { buildExtensionTools } from "./extensionTools";
+import { buildCustomTools, loadCustomTools } from "./customToolsIo";
 import type { CustomEndpoint } from "../config";
 import { runAgentStream, type AgentUsageDelta } from "./agent";
 import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
@@ -79,11 +80,12 @@ type SendOptions = {
 export function createContextAwareTransport(deps: Deps) {
   const run = async (options: SendOptions) => {
     const live = deps.getLive();
-    const [projectMemory, learnedMemory, mcpTools, skills] = await Promise.all([
+    const [projectMemory, learnedMemory, mcpTools, skills, customDefs] = await Promise.all([
       readTermigoMd(live.workspaceRoot),
       readMemory(live.workspaceRoot),
       getMcpTools(live.workspaceRoot),
       listSkills(live.workspaceRoot),
+      loadCustomTools(live.workspaceRoot),
     ]);
     const envBlock = formatEnvBlock(live);
     const messagesForRun = envBlock
@@ -99,6 +101,12 @@ export function createContextAwareTransport(deps: Deps) {
       // Read at send time, not cached: extensions are enabled, disabled and
       // reloaded while the app is open.
       extensionTools: buildExtensionTools(),
+      customTools: buildCustomTools(customDefs, {
+        getRemoteSession: () => deps.toolContext.getRemoteSession(),
+        getCwd: () => deps.toolContext.getCwd(),
+        runLocal: (command, cwd) =>
+          native.runCommand(command, cwd ?? undefined, 300),
+      }),
       agentPersona: deps.getAgentPersona(),
       toolContext: deps.toolContext,
       onStep: deps.onStep,

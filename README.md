@@ -120,6 +120,15 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   speak for you. `replace_in_files`, `copy_file` and `bash_background` still
   have no remote form and refuse while a session is open, saying what to use
   instead rather than quietly acting on your own disk.
+- **Tools the agent defines for itself.** After running something worth
+  repeating, the agent can save it as a named tool with `create_tool`, and call
+  it by name from then on. A tool is a shell command template with
+  `{{placeholders}}`, stored in `.termigo/tools.json` — not code. Running one
+  goes through the same path `bash_run` takes, so the shell safety check, the
+  approval tiers and the remote/local routing all apply unchanged: a custom
+  tool can do nothing the agent could not already do. Every argument is
+  shell-quoted on substitution, with no raw mode, so a value can never become a
+  second command.
 - **Extension tools.** An extension that declares `contributes.aiTools` in its
   manifest has those tools offered to the agent as `ext__<extension>__<tool>`,
   with the JSON Schema and approval preference it declared. Like MCP tools they

@@ -123,3 +123,21 @@ describe("extension tools", () => {
     expect(isAutoApproved("ext__my_ext__do_thing", "ask")).toBe(false);
   });
 });
+
+// A custom tool runs a shell command, so it belongs with bash_run rather than
+// with the file edits — whoever wrote the template.
+describe("custom command tools", () => {
+  it("does not ride along with auto-approve edits", () => {
+    expect(isAutoApproved("cmd__deploy", "edits")).toBe(false);
+  });
+
+  it("follows the mode that says nothing waits", () => {
+    expect(isAutoApproved("cmd__deploy", "all")).toBe(true);
+  });
+
+  // Defining one only writes a JSON file, so it sits with the other workspace
+  // writes; running it is what carries the risk.
+  it("lets defining one ride along with edits", () => {
+    expect(isAutoApproved("create_tool", "edits")).toBe(true);
+  });
+});

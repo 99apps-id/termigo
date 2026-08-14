@@ -1,5 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
+import { saveCustomTool } from "../lib/customToolsIo";
+import { slugifyToolName } from "../lib/customTools";
 import { readSkillAt, searchSkills } from "../lib/skillSearchIo";
 import {
   MAX_SKILL_BYTES,
@@ -86,6 +88,60 @@ ${skill.body}`,
         } catch (e) {
           return { error: String(e), query };
         }
+      },
+    }),
+
+    create_tool: tool({
+      description:
+        "Define a reusable shell command as a named tool, so a command worth repeating becomes something you can call by name instead of retyping. Use AFTER running a command that will recur with different arguments — a deploy script, a log tail, a migration runner. The command is a template with {{placeholders}}; every argument is shell-quoted when it runs, so a value can never become a second command. Stored in .termigo/tools.json. Re-using a name replaces that tool. Asks for approval.",
+      inputSchema: z.object({
+        name: z
+          .string()
+          .describe("Short snake_case name, e.g. 'deploy_app'. Reuse a name to revise it."),
+        description: z
+          .string()
+          .min(1)
+          .describe("When to use it. This is what you will match against later."),
+        command: z
+          .string()
+          .min(1)
+          .describe(
+            "Shell command with {{placeholders}}, e.g. './deploy.sh {{branch}}'. Do not quote the placeholders; that is done for you.",
+          ),
+        parameters: z
+          .array(
+            z.object({
+              name: z.string().describe("Placeholder name, matching the command."),
+              description: z.string().describe("What this argument is."),
+              required: z.boolean().optional(),
+            }),
+          )
+          .describe("One entry per placeholder. Every placeholder must be declared."),
+      }),
+      needsApproval: true,
+      execute: async ({ name, description, command, parameters }) => {
+        const slug = slugifyToolName(name);
+        if (!slug) {
+          return {
+            saved: false,
+            reason: `"${name}" cannot be turned into a tool name; use lowercase words separated by underscores`,
+          };
+        }
+        const outcome = await saveCustomTool(ctx.getWorkspaceRoot(), {
+          name: slug,
+          description,
+          command,
+          parameters: parameters ?? [],
+        });
+        if (!outcome.saved) return { saved: false, reason: outcome.reason };
+        return {
+          saved: true,
+          name: slug,
+          tool_name: `cmd__${slug}`,
+          replaced: outcome.replaced,
+          total_tools: outcome.total,
+          note: "available from your next message onward",
+        };
       },
     }),
 

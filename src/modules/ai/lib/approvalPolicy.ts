@@ -1,5 +1,6 @@
 import { isMcpTool } from "./mcpToolNames";
 import { isExtensionTool } from "./extensionToolNames";
+import { isCustomTool } from "./customToolNames";
 
 // Approval policy for agent tool calls.
 //
@@ -27,6 +28,9 @@ const EDIT_TOOLS = new Set([
   // how the agent gets better; gating it above edits would make improving
   // itself cost more than editing the code it just learned about.
   "create_skill",
+  // Defining a tool writes a JSON file. Running one is a shell command, and
+  // is gated as such by the cmd__ prefix below.
+  "create_tool",
   // Rewriting, moving and copying change files inside the workspace, which is
   // exactly what this tier is for. Deleting does not belong here; see
   // EXEC_TOOLS. All of them still refuse paths the safety layer denies.
@@ -119,6 +123,9 @@ export function isAutoApproved(
   // the tool asks at all - it does not decide that "auto-approve edits" covers
   // it, because that mode is a statement about files in this workspace.
   if (isExtensionTool(toolName) && mode === "edits") return false;
+  // A custom tool runs a shell command, so it belongs with bash_run rather
+  // than with the file edits, whoever wrote the template.
+  if (isCustomTool(toolName) && mode === "edits") return false;
   if (mode === "edits") return EDIT_TOOLS.has(toolName);
   return false;
 }
