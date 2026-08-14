@@ -82,6 +82,13 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
+          # Antigravity's Google OAuth client, read by option_env! at compile
+          # time (src-tauri/src/modules/oauth.rs). Absent, the build still
+          # succeeds and only that one sign-in profile reports itself
+          # unconfigured; Codex and Claude are unaffected.
+          TERMIGO_GOOGLE_CLIENT_ID: ${{ secrets.TERMIGO_GOOGLE_CLIENT_ID }}
+          TERMIGO_GOOGLE_CLIENT_SECRET: ${{ secrets.TERMIGO_GOOGLE_CLIENT_SECRET }}
+
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
