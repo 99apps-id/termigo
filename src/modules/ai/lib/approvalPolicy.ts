@@ -1,3 +1,5 @@
+import { isMcpTool } from "./mcpToolNames";
+
 // Approval policy for agent tool calls.
 //
 // Read-only tools (read_file, grep, list_directory, bash_logs, ...) never ask:
@@ -66,11 +68,18 @@ export function isAutoApproved(
   mode: ApprovalMode,
 ): boolean {
   if (mode === "all") return true;
+  // An MCP tool is third-party code doing something this app cannot inspect,
+  // so it never rides along with "auto-approve edits" - which is a statement
+  // about files in this workspace, not about arbitrary external actions. The
+  // unknown-name fallback would already land here; saying it outright means a
+  // later change to that fallback cannot quietly widen this.
+  if (isMcpTool(toolName)) return false;
   if (mode === "edits") return EDIT_TOOLS.has(toolName);
   return false;
 }
 
 /** Tool-name tier, for explaining a decision in the UI. */
 export function approvalTier(toolName: string): "edit" | "exec" {
+  if (isMcpTool(toolName)) return "exec";
   return EDIT_TOOLS.has(toolName) ? "edit" : EXEC_TOOLS.has(toolName) ? "exec" : "exec";
 }

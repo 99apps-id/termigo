@@ -88,6 +88,30 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   path and shell-command safety checks run inside every tool regardless, so no
   mode can authorise something the safety layer refuses. Read-only tools never
   asked in the first place.
+- **MCP servers.** Tools from any configured Model Context Protocol server are
+  offered to the agent alongside the built-in ones, named `mcp__<server>__<tool>`
+  so their origin stays visible in the transcript. Configure them in
+  `.termigo/mcp.json` in the workspace, or `~/.termigo/mcp.json` for every
+  project, using the standard `mcpServers` shape:
+
+  ```json
+  {
+    "mcpServers": {
+      "github": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-github"],
+        "env": { "GITHUB_TOKEN": "..." }
+      }
+    }
+  }
+  ```
+
+  A project entry overrides a user entry of the same name, and the same file is
+  read by the Go companion CLI, so a server configured once works in both. MCP
+  tools always ask for approval, including under `Auto-approve edits`: that mode
+  is a statement about files in this workspace, not about arbitrary third-party
+  actions. A server that fails to start costs only its own tools, not everyone
+  else's.
 - Coding-agent orchestration: spawn Claude Code in a terminal, inspect output,
   send follow-up work through approval-gated tools
 - Composer: prompt snippets via `#handle`, files via `@path`, voice input

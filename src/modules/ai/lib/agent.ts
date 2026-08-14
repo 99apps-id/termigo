@@ -23,6 +23,7 @@ import {
   type ProviderId,
 } from "../config";
 import { buildTools, type ToolContext } from "../tools/tools";
+import type { McpToolset } from "./mcpTools";
 import { compactModelMessagesDetailed } from "./compact";
 import { memoryBlock as learnedBlock, type MemoryEntry } from "./memory";
 import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
@@ -370,6 +371,12 @@ export type RunAgentOptions = {
   projectMemory?: string | null;
   /** Facts the agent recorded in earlier sessions (.termigo/memory.md). */
   learnedMemory?: readonly MemoryEntry[];
+  /**
+   * Tools discovered from configured MCP servers. Passed in rather than built
+   * here because discovery has to start each server and await `tools/list`,
+   * while `buildTools` is synchronous.
+   */
+  mcpTools?: McpToolset;
   uiMessages: UIMessage[];
   abortSignal?: AbortSignal;
 };
@@ -434,7 +441,10 @@ export async function runAgentStream(opts: RunAgentOptions) {
     system: prompt.system,
     messages: prompt.messages,
     allowSystemInMessages: false,
-    tools: buildTools(opts.toolContext),
+    // MCP last: a server cannot shadow a built-in tool by naming a tool after
+    // it, and the `mcp__` prefix means a collision would take deliberate effort
+    // anyway.
+    tools: { ...(opts.mcpTools ?? {}), ...buildTools(opts.toolContext) },
     stopWhen: stepCountIs(MAX_AGENT_STEPS),
     abortSignal: opts.abortSignal,
     onStepFinish: (step) => {
