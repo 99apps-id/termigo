@@ -129,6 +129,10 @@ export async function buildLanguageModel(
       break;
     }
     case "deepseek": {
+      // Stays on the OpenAI-compatible adapter. The dedicated @ai-sdk/deepseek
+      // that pairs with this SDK version is two provider-spec majors behind the
+      // rest of the tree; it type-checks by coincidence rather than by being
+      // compatible, and DeepSeek works today through the generic path.
       const { createOpenAICompatible } =
         await import("@ai-sdk/openai-compatible");
       built = createOpenAICompatible({
@@ -140,14 +144,13 @@ export async function buildLanguageModel(
       break;
     }
     case "mistral": {
-      const { createOpenAICompatible } =
-        await import("@ai-sdk/openai-compatible");
-      built = createOpenAICompatible({
-        name: "mistral",
-        baseURL: "https://api.mistral.ai/v1",
-        apiKey: key,
-        fetch: proxyFetch,
-      })(resolvedModelId);
+      // The dedicated provider rather than the OpenAI-compatible adapter.
+      // Mistral's API is close enough that the generic one connects, but its
+      // tool-call wire format differs in ways only this provider handles - the
+      // reported symptom was a model that answered in prose instead of
+      // emitting a tool call anything downstream could parse.
+      const { createMistral } = await import("@ai-sdk/mistral");
+      built = createMistral({ apiKey: key, fetch: proxyFetch })(resolvedModelId);
       break;
     }
     case "groq": {
