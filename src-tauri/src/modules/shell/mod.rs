@@ -410,11 +410,14 @@ mod tests {
     use super::*;
 
     fn run(cmd: &str, timeout_secs: u64) -> CommandOutput {
-        run_blocking_inner(
+        // No child slot: these tests run a command to completion and never
+        // interrupt one.
+        run_blocking_interruptible(
             cmd.into(),
             None,
             WorkspaceEnv::Local,
             Duration::from_secs(timeout_secs),
+            Default::default(),
         )
         .expect("run")
     }
