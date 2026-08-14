@@ -296,9 +296,19 @@ See [`docs/`](docs/) for the MCP, skills, agents, and architecture guides.
   <img src="docs/termigo-windows.png" alt="Termigo on Windows" width="900" />
   <br/>
   <sub>
-    Agent run under review: a <code>write_file</code> call held at the approval
-    gate, its diff open in the editor, todos tracking the plan, and spaces
-    across the top
+    The workspace: file tree, editor with the TypeScript LSP attached, the
+    agent panel floating over it, spaces and tabs across the top, and the
+    approval mode always visible in the status bar
+  </sub>
+</p>
+
+<p align="center">
+  <img src="docs/termigo-remote-vps.png" alt="The agent inspecting a remote server over SSH" width="900" />
+  <br/>
+  <sub>
+    The agent working on a server: an SSH tab, the remote filesystem browsable
+    beside the local project, and a health report it gathered by running
+    inspection commands on the host
   </sub>
 </p>
 
