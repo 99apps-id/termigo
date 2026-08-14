@@ -112,7 +112,7 @@ export function buildFileOpsTools(ctx: ToolContext) {
         if (ctx.getRemoteSession()) {
           return remoteUnsupported(
             "copy_file",
-            "Use bash_run in the remote terminal (`cp -r src dest`), or read_file then write_file for a single small file.",
+            "Use suggest_command to run `cp -r src dest` at the remote prompt, or read_file then write_file for a single small file.",
           );
         }
         const sourcePath = resolvePath(source, ctx.getCwd());

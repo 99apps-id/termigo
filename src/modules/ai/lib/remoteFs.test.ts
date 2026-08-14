@@ -104,3 +104,17 @@ describe("isRemoteTarget", () => {
     expect(isRemoteTarget(routePath(null, "/a", local))).toBe(false);
   });
 });
+
+// The refusal text is load-bearing: it is the only thing telling the model
+// what to do instead. Pointing at a local tool would send it straight back to
+// the wrong machine.
+describe("refusals point somewhere that actually reaches the remote host", () => {
+  it("names suggest_command, not bash_run", () => {
+    const out = remoteUnsupported(
+      "Running shell commands",
+      "Use suggest_command instead: it puts the command at the remote prompt for the user to run.",
+    );
+    expect(out.error).toContain("suggest_command");
+    expect(out.error).not.toContain("bash_run");
+  });
+});

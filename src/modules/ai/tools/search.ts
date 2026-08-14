@@ -77,7 +77,7 @@ export function buildSearchTools(ctx: ToolContext) {
         max_results,
       }) => {
         if (ctx.getRemoteSession()) {
-          return remoteUnsupported("grep", "Use bash_run in the remote terminal, e.g. `grep -rn PATTERN DIR`.");
+          return remoteUnsupported("grep", "Use suggest_command to run `grep -rn PATTERN DIR` at the remote prompt.");
         }
         const r = resolveRoot(root, ctx);
         if (!r.ok) return { error: r.error };
@@ -126,7 +126,7 @@ export function buildSearchTools(ctx: ToolContext) {
       }),
       execute: async ({ pattern, root, max_results }) => {
         if (ctx.getRemoteSession()) {
-          return remoteUnsupported("glob", "Use bash_run in the remote terminal, e.g. `find DIR -name PATTERN`.");
+          return remoteUnsupported("glob", "Use suggest_command to run `find DIR -name PATTERN` at the remote prompt.");
         }
         const r = resolveRoot(root, ctx);
         if (!r.ok) return { error: r.error };

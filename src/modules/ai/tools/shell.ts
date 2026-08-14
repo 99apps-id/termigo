@@ -1,3 +1,4 @@
+import { remoteUnsupported } from "../lib/remoteFs";
 import { tool } from "ai";
 import { z } from "zod";
 import { native } from "../lib/native";
@@ -38,6 +39,17 @@ export function buildShellTools(ctx: ToolContext) {
       }),
       needsApproval: true,
       execute: async ({ command, timeout_secs }) => {
+        // bash_run drives a LOCAL shell session. With an SSH terminal focused
+        // the model means the server, and running `rm -rf build` on this
+        // machine instead is exactly the failure the remote routing exists to
+        // prevent. suggest_command is the honest route: it lands the command
+        // at the remote prompt for the user to run.
+        if (ctx.getRemoteSession()) {
+          return remoteUnsupported(
+            "Running shell commands",
+            "Use suggest_command instead: it puts the command at the remote prompt for the user to run.",
+          );
+        }
         const safety = checkShellCommand(command);
         if (!safety.ok) return { error: safety.reason };
         const sid = ctx.getSessionId();
@@ -75,6 +87,17 @@ export function buildShellTools(ctx: ToolContext) {
       }),
       needsApproval: true,
       execute: async ({ command, cwd }) => {
+        // bash_run drives a LOCAL shell session. With an SSH terminal focused
+        // the model means the server, and running `rm -rf build` on this
+        // machine instead is exactly the failure the remote routing exists to
+        // prevent. suggest_command is the honest route: it lands the command
+        // at the remote prompt for the user to run.
+        if (ctx.getRemoteSession()) {
+          return remoteUnsupported(
+            "Running shell commands",
+            "Use suggest_command instead: it puts the command at the remote prompt for the user to run.",
+          );
+        }
         const safety = checkShellCommand(command);
         if (!safety.ok) return { error: safety.reason };
         const effectiveCwd = cwd ?? ctx.getCwd();

@@ -94,8 +94,10 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   `move_file` and `delete_file` all go over SFTP. Windows drive paths (`C:\...`)
   still mean this machine, since they cannot mean anything on a POSIX host.
   Tools with no remote equivalent — `grep`, `glob`, `replace_in_files`,
-  `copy_file`, `bash_run` — refuse while a session is open and say what to use
-  instead, rather than quietly acting on your own disk.
+  `copy_file`, `bash_run` — refuse while a session is open and point at
+  `suggest_command`, which puts a command at the remote prompt for you to run,
+  rather than quietly acting on your own disk. Searching the remote host is not
+  supported yet, so the agent works from paths you name.
 - **MCP servers.** Tools from any configured Model Context Protocol server are
   offered to the agent alongside the built-in ones, named `mcp__<server>__<tool>`
   so their origin stays visible in the transcript. Configure them in

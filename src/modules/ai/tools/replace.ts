@@ -42,7 +42,7 @@ export function buildReplaceTools(ctx: ToolContext) {
         if (ctx.getRemoteSession()) {
           return remoteUnsupported(
             "replace_in_files",
-            "Use bash_run in the remote terminal, e.g. `grep -rl OLD DIR | xargs sed -i 's/OLD/NEW/g'`.",
+            "Use suggest_command to run `grep -rl OLD DIR | xargs sed -i 's/OLD/NEW/g'` at the remote prompt.",
           );
         }
         const root = resolvePath(path ?? ".", ctx.getCwd());
