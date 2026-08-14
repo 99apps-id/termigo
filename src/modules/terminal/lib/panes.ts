@@ -15,7 +15,10 @@ export type PaneNode =
       kind: "leaf";
       id: PaneId;
       slotId?: PaneId;
+      /** Working directory **on this machine**. Never set for an SSH leaf. */
       cwd?: string;
+      /** Working directory on the remote host, for SSH leaves only. */
+      remoteCwd?: string;
       /** When set, this leaf opens an SSH session instead of a local PTY. */
       ssh?: import("@/modules/ssh/lib/ssh-terminal").SshLeafSpec;
     }
@@ -51,13 +54,46 @@ export function findLeafCwd(n: PaneNode, id: PaneId): string | undefined {
   return undefined;
 }
 
+/** Remote cwd of an SSH leaf, for the remote file browser to follow. */
+export function findLeafRemoteCwd(n: PaneNode, id: PaneId): string | undefined {
+  if (isLeaf(n)) return n.id === id ? n.remoteCwd : undefined;
+  for (const c of n.children) {
+    const found = findLeafRemoteCwd(c, id);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+/** Whether this leaf runs a remote shell rather than a local PTY. */
+export function isSshLeaf(n: PaneNode, id: PaneId): boolean {
+  if (isLeaf(n)) return n.id === id && !!n.ssh;
+  return n.children.some((c) => isSshLeaf(c, id));
+}
+
+/**
+ * Record a cwd the shell reported (via OSC 7) for one leaf.
+ *
+ * An SSH leaf's shell reports paths on the REMOTE host - the backend injects an
+ * OSC 7 hook precisely so the remote file tree can follow `cd`. Those paths must
+ * never reach `cwd`, which every local consumer reads as a path on this machine:
+ * the file explorer root, the agent's shell cwd, and new-tab inheritance. A
+ * remote `/root` landing there made the local explorer try to open `/root` on
+ * Windows, which fails with "the system cannot find the path specified".
+ *
+ * Routing by leaf kind here rather than at the call sites keeps the one place
+ * that knows a leaf is remote in charge of the distinction.
+ */
 export function setLeafCwd(
   n: PaneNode,
   id: PaneId,
   cwd: string,
 ): PaneNode {
   if (isLeaf(n)) {
-    if (n.id !== id || n.cwd === cwd) return n;
+    if (n.id !== id) return n;
+    if (n.ssh) {
+      return n.remoteCwd === cwd ? n : { ...n, remoteCwd: cwd };
+    }
+    if (n.cwd === cwd) return n;
     return { ...n, cwd };
   }
   let changed = false;

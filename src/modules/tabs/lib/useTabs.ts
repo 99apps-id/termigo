@@ -15,6 +15,7 @@ import {
   type PaneNode,
   removeLeaf,
   type SplitDir,
+  isSshLeaf,
   setLeafCwd as setLeafCwdInTree,
   siblingLeafOf,
   splitLeaf,
@@ -1164,7 +1165,10 @@ export function useTabs(initial?: Partial<TerminalTab>) {
         if (t.kind !== "terminal" || !hasLeaf(t.paneTree, leafId)) return t;
         const paneTree = setLeafCwdInTree(t.paneTree, leafId, cwd);
         const isActive = t.activeLeafId === leafId;
-        const cwdChanged = isActive && t.cwd !== cwd;
+        // A remote shell's cwd stays on the leaf. Promoting it to `tab.cwd`
+        // would hand a remote path to every local consumer of the tab.
+        const cwdChanged =
+          isActive && !isSshLeaf(t.paneTree, leafId) && t.cwd !== cwd;
         if (paneTree === t.paneTree && !cwdChanged) return t;
         changed = true;
         return { ...t, paneTree, ...(cwdChanged && { cwd }) };

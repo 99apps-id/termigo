@@ -8,6 +8,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { HostKeyPromptDialog } from "@/modules/ssh/HostKeyPromptDialog";
 import { useSshRightPanelStore } from "@/modules/ssh/sshRightPanelStore";
 import { SshFileExplorer } from "@/modules/ssh/SshFileExplorer";
+import { findLeafRemoteCwd, isSshLeaf } from "@/modules/terminal/lib/panes";
 import { useSshActiveSessionStore } from "@/modules/ssh/sshActiveSession";
 import { lazy as _lazySsh } from "react";
 import { consumeLaunchFiles, getLaunchDir } from "@/lib/launchDir";
@@ -1035,6 +1036,13 @@ export default function App() {
   const handleTerminalCwd = useCallback(
     (leafId: number, cwd: string) => {
       setLeafCwd(leafId, cwd);
+      // An SSH leaf reports remote paths. Authorizing one would canonicalize a
+      // remote path against the local filesystem, which fails, and would put a
+      // meaningless entry in the workspace registry if it ever succeeded.
+      const onSsh = tabsRef.current.some(
+        (t) => t.kind === "terminal" && isSshLeaf(t.paneTree, leafId),
+      );
+      if (onSsh) return;
       if (cwd && !authorizedCwds.current.has(cwd)) {
         authorizedCwds.current.add(cwd);
         native.workspaceAuthorize(cwd).catch(() => {
@@ -1338,6 +1346,30 @@ export default function App() {
   const sshPanelOpen = useSshRightPanelStore((s) => s.open);
   const activeSshSession = useSshActiveSessionStore((s) => s.session);
 
+  // Remote cwd of the focused SSH pane, so the remote tree follows `cd` in the
+  // terminal. Null on a local pane, which leaves the tree on its own root
+  // rather than yanking it somewhere that means nothing on the remote host.
+  const activeRemoteCwd = useMemo(() => {
+    if (!activeTerminalTab) return null;
+    return (
+      findLeafRemoteCwd(
+        activeTerminalTab.paneTree,
+        activeTerminalTab.activeLeafId,
+      ) ?? null
+    );
+  }, [activeTerminalTab]);
+
+  // A connect that the user asked for should show its remote files. Keyed on
+  // the session id so closing the panel keeps it closed for that session, and
+  // only a new connect opens it again.
+  const openedForSession = useRef<number | null>(null);
+  useEffect(() => {
+    const id = activeSshSession?.sessionId ?? null;
+    if (id === null || openedForSession.current === id) return;
+    openedForSession.current = id;
+    useSshRightPanelStore.getState().openPanel();
+  }, [activeSshSession]);
+
   const shell = (
     <ThemeProvider>
       <TooltipProvider>
@@ -1492,6 +1524,7 @@ export default function App() {
                     <SshFileExplorer
                       sessionId={activeSshSession.sessionId}
                       hostLabel={activeSshSession.hostLabel}
+                      currentCwd={activeRemoteCwd}
                       onClose={() => useSshRightPanelStore.getState().closePanel()}
                     />
                   </div>
