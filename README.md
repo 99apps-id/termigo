@@ -302,6 +302,25 @@ See [`docs/`](docs/) for the MCP, skills, agents, and architecture guides.
   </sub>
 </p>
 
+<p align="center">
+  <img src="docs/termigo-running-hermes-vps.png" alt="An SSH session in Termigo running a terminal agent on the remote host" width="900" />
+  <br/>
+  <sub>
+    An SSH tab is an ordinary terminal: a TUI agent running on the remote host,
+    full-colour and interactive, beside the local project tree
+  </sub>
+</p>
+
+<p align="center">
+  <img src="docs/termigo-add-new-ssh-connection.png" alt="The New SSH connection dialog" width="760" />
+  <br/>
+  <sub>
+    Adding a host: password, private key or ssh-agent, an optional ProxyJump
+    chain and port forwards. Credentials go to the OS keychain, never to a file
+    in the repo
+  </sub>
+</p>
+
 ## Architecture
 
 ```text
