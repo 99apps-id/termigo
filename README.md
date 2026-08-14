@@ -73,7 +73,11 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   improves with use. Only names and descriptions reach the system prompt;
   bodies load on demand through `use_skill`, so a shelf of skills costs almost
   nothing until one is needed. Plain Markdown with frontmatter, so you can read,
-  edit or delete any of them by hand.
+  edit or delete any of them by hand. `find_skill` searches every skill library
+  on the machine on demand — your own, and those installed by other agent tools
+  — so a large collection stays reachable without any of it sitting in the
+  prompt. Skills written for another agent still parse, and `use_skill` says so
+  when one calls tools Termigo does not have.
 - **Self-maintaining memory.** The agent records durable project facts in
   `.termigo/memory.md` and reads them back in every later session, so build
   commands, conventions and decisions do not have to be re-explained. Facts are
