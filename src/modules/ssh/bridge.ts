@@ -116,9 +116,14 @@ function decodeBase64(b64: string): Uint8Array {
   return arr;
 }
 
-export async function openSsh(input: SshOpenInput, handlers: SshHandlers): Promise<SshSession> {
-  const channel = new Channel<SshEvent>();
-  channel.onmessage = (event) => {
+/**
+ * Route one backend event to its handler.
+ *
+ * Split out from the channel wiring so the dispatch can be tested without a
+ * Tauri runtime, and so the error boundary below has something to wrap.
+ */
+export function dispatchSshEvent(event: SshEvent, handlers: SshHandlers): void {
+  {
     switch (event.type) {
       case "connected":
         handlers.onConnected?.(event.fingerprint);
@@ -146,6 +151,22 @@ export async function openSsh(input: SshOpenInput, handlers: SshHandlers): Promi
       case "error":
         handlers.onError?.(event.message);
         break;
+    }
+  }
+}
+
+export async function openSsh(input: SshOpenInput, handlers: SshHandlers): Promise<SshSession> {
+  const channel = new Channel<SshEvent>();
+  channel.onmessage = (event) => {
+    // Tauri advances its ordered-delivery cursor only after onmessage
+    // RETURNS. A throw leaves the cursor parked, so every later event is
+    // filed as out-of-order and never delivered - one bad handler silently
+    // takes the entire session's output with it, which reads as a terminal
+    // that connects and then stays blank forever. Nothing gets past here.
+    try {
+      dispatchSshEvent(event, handlers);
+    } catch (e) {
+      console.error("[ssh] event handler threw; session continues", e);
     }
   };
 

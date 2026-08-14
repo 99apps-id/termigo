@@ -58,16 +58,38 @@ export async function openSshTerminalSession(
 ): Promise<PtySession> {
   const input = await resolveSshOpenInput(conn);
   const hostLabel = `${conn.user}@${conn.host}`;
+
+  // The backend emits `connected` (and the first shell bytes) from inside the
+  // connect, so these callbacks run while `openSsh` is still awaiting and the
+  // session id does not exist yet. Closing over the `const` below would put
+  // every one of them in its temporal dead zone: `connected` threw before it
+  // could register the session, which left the file browser with no session
+  // and - because a throw stalls the event channel - a terminal that never
+  // received a single byte. So the id is tracked separately and the connect is
+  // replayed once it is known.
+  let sessionId: number | null = null;
+  let connectedEarly = false;
+
+  const registerSession = () => {
+    if (sessionId === null) return;
+    useSshActiveSessionStore.getState().setSession({ sessionId, hostLabel });
+  };
+  const forgetSession = () => {
+    if (sessionId === null) return; // never registered; nothing to clear
+    useSshActiveSessionStore.getState().clearSession(sessionId);
+  };
+
   const session = await openSsh(
     { ...input, cols, rows },
     {
       onData: (bytes) => handlers.onData(bytes),
       onExit: (code) => {
-        useSshActiveSessionStore.getState().clearSession(session.id);
+        forgetSession();
         handlers.onExit?.(code);
       },
       onConnected: () => {
-        useSshActiveSessionStore.getState().setSession({ sessionId: session.id, hostLabel });
+        connectedEarly = true;
+        registerSession(); // no-op before the id lands; replayed below
       },
       onHostKeyPrompt: (prompt) => {
         useHostKeyPrompt.getState().enqueue(prompt, () => {
@@ -75,11 +97,15 @@ export async function openSshTerminalSession(
         });
       },
       onError: () => {
-        useSshActiveSessionStore.getState().clearSession(session.id);
+        forgetSession();
         handlers.onExit?.(-1);
       },
     },
   );
+
+  sessionId = session.id;
+  if (connectedEarly) registerSession();
+
   return {
     id: session.id,
     write: session.write,
