@@ -204,3 +204,29 @@ export async function openSsh(input: SshOpenInput, handlers: SshHandlers): Promi
     close: () => invoke("ssh_close", { id }),
   };
 }
+
+export type SshExecOutput = {
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  truncated: boolean;
+};
+
+/**
+ * Run one command on the remote host over its own channel.
+ *
+ * Separate from the interactive shell on purpose: reusing that would interleave
+ * output with whatever the user is typing, with no reliable way to tell where
+ * the command's output ends.
+ */
+export async function sshExec(
+  id: number,
+  command: string,
+  timeoutSecs?: number,
+): Promise<SshExecOutput> {
+  return invoke<SshExecOutput>("ssh_exec", {
+    id,
+    command,
+    timeoutSecs: timeoutSecs ?? null,
+  });
+}

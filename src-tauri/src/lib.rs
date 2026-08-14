@@ -361,6 +361,7 @@ pub fn run() {
             ssh::ssh_close,
             ssh::ssh_forward_open,
             ssh::ssh_confirm_host_key,
+            ssh::ssh_exec,
             ssh::ssh_list_sessions,
             ssh::ssh_attach,
             ssh::sftp::ssh_sftp_home,
