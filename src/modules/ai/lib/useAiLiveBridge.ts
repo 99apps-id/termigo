@@ -3,6 +3,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { useManagedAgentsStore } from "@/modules/agents/store/managedAgentsStore";
 import {
   findLeafCwd,
+  findLeafRemoteCwd,
+  isSshLeaf,
+  leafSessionId,
   type TerminalPaneHandle,
   whenSessionReady,
   writeToSession,
@@ -78,6 +81,21 @@ export function useAiLiveBridge(params: Params) {
 
     setLive({
       getCwd: findCwd,
+      getRemoteSession: () => {
+        const { activeId, tabs } = ref.current;
+        const t = tabs.find((x) => x.id === activeId);
+        if (t?.kind !== "terminal") return null;
+        const leafId = t.activeLeafId;
+        // Only the active SSH leaf counts: a remote read against a stale
+        // session (e.g. a second SSH tab that connected earlier) would hit
+        // the wrong host. The leaf carries its own session id, so this is
+        // exact even with several SSH tabs open.
+        if (!isSshLeaf(t.paneTree, leafId)) return null;
+        const sessionId = leafSessionId(leafId);
+        if (sessionId === null) return null;
+        const cwd = findLeafRemoteCwd(t.paneTree, leafId) ?? null;
+        return { sessionId, cwd };
+      },
       getTerminalContext: () => {
         const { activeId, tabs } = ref.current;
         const t = tabs.find((x) => x.id === activeId);

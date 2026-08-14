@@ -1,12 +1,19 @@
 import { tool } from "ai";
 import { z } from "zod";
+import { sftpReadDir, sftpReadFile } from "@/modules/ssh/sftp";
 import { native } from "../lib/native";
 import {
+  checkReadable,
   checkReadableCanonical,
   checkWritableCanonical,
 } from "../lib/security";
 import { newQueuedEditId, usePlanStore } from "../store/planStore";
-import { resolvePath, type ToolContext } from "./context";
+import {
+  resolvePath,
+  resolveRemotePath,
+  type RemoteFsSession,
+  type ToolContext,
+} from "./context";
 
 const READ_BYTE_CAP = 25 * 1024;
 const READ_LINE_CAP = 2000;
@@ -17,11 +24,100 @@ function djb2(s: string): number {
   return h >>> 0;
 }
 
+/** Slice file content to the read tool's line/byte caps. Shared by the local
+ *  and remote read paths so both honour identical limits. */
+function sliceLines(
+  content: string,
+  offset: number | undefined,
+  limit: number | undefined,
+): {
+  content: string;
+  total_lines: number;
+  start_line?: number;
+  end_line?: number;
+  truncated: boolean;
+} {
+  const lines = content.split("\n");
+  const isFullRead = offset === undefined && limit === undefined;
+  if (isFullRead) {
+    const sliceEnd = Math.min(lines.length, READ_LINE_CAP);
+    let c = lines.slice(0, sliceEnd).join("\n");
+    let truncated = sliceEnd < lines.length;
+    if (c.length > READ_BYTE_CAP) {
+      c = c.slice(0, READ_BYTE_CAP);
+      truncated = true;
+    }
+    return { content: c, total_lines: lines.length, truncated };
+  }
+  const start = offset ?? 0;
+  const requested = limit ?? READ_LINE_CAP;
+  const end = Math.min(lines.length, start + requested);
+  let c = lines.slice(start, end).join("\n");
+  let truncated = end < lines.length;
+  if (c.length > READ_BYTE_CAP) {
+    c = c.slice(0, READ_BYTE_CAP);
+    truncated = true;
+  }
+  return {
+    content: c,
+    total_lines: lines.length,
+    start_line: start,
+    end_line: end,
+    truncated,
+  };
+}
+
+/** Read a file on the active SSH session's remote host over SFTP. The
+ *  deny-list still applies to the remote path; only the canonicalize step is
+ *  skipped (it is a local-fs call, and the remote kernel enforces the real
+ *  permissions). */
+async function readRemoteFile(
+  remote: RemoteFsSession,
+  remotePath: string,
+  offset: number | undefined,
+  limit: number | undefined,
+  readCache: Map<string, { size: number; hash: number }>,
+) {
+  const safety = checkReadable(remotePath);
+  if (!safety.ok) return { error: safety.reason, path: remotePath };
+  try {
+    const content = await sftpReadFile(remote.sessionId, remotePath);
+    const size = content.length;
+    const hash = djb2(content);
+    const isFullRead = offset === undefined && limit === undefined;
+    const prior = readCache.get(remotePath);
+    if (isFullRead && prior && prior.size === size && prior.hash === hash) {
+      return { path: remotePath, unchanged: true, size };
+    }
+    readCache.set(remotePath, { size, hash });
+    const sliced = sliceLines(content, offset, limit);
+    return {
+      path: remotePath,
+      content: sliced.content,
+      size,
+      total_lines: sliced.total_lines,
+      ...(sliced.start_line !== undefined
+        ? { start_line: sliced.start_line, end_line: sliced.end_line }
+        : {}),
+      ...(sliced.truncated
+        ? {
+            truncated: true,
+            ...(isFullRead
+              ? { hint: "call read_file with offset to continue" }
+              : {}),
+          }
+        : {}),
+    };
+  } catch (e) {
+    return { error: String(e), path: remotePath };
+  }
+}
+
 export function buildFsTools(ctx: ToolContext) {
   return {
     read_file: tool({
       description:
-        "Read a UTF-8 text file. Defaults to the first 2000 lines (capped at 25KB). Pass `offset`/`limit` for line-based windowing of large files. Refuses binary, oversized, or sensitive files (.env, keys, credentials). If you call this on the same path twice in a session without edits in between, the second call returns `unchanged: true` instead of re-emitting the content — re-read the prior tool result.",
+        "Read a UTF-8 text file. Defaults to the first 2000 lines (capped at 25KB). Pass `offset`/`limit` for line-based windowing of large files. Refuses binary, oversized, or sensitive files (.env, keys, credentials). If you call this on the same path twice in a session without edits in between, the second call returns `unchanged: true` instead of re-emitting the content — re-read the prior tool result. When the active terminal is an SSH session, paths resolve on the remote host (POSIX) and reads go over SFTP; Windows drive paths (C:\...) still read locally.",
       inputSchema: z.object({
         path: z
           .string()
@@ -41,6 +137,16 @@ export function buildFsTools(ctx: ToolContext) {
           .describe("Max lines to return. Default 2000."),
       }),
       execute: async ({ path, offset, limit }) => {
+        // Active SSH terminal: reads go to the remote host over SFTP. Absolute
+        // POSIX + relative paths resolve remotely; Windows drive paths (C:\...)
+        // fall through to the local filesystem below.
+        const remote = ctx.getRemoteSession();
+        if (remote) {
+          const remotePath = resolveRemotePath(path, remote.cwd);
+          if (remotePath !== null) {
+            return readRemoteFile(remote, remotePath, offset, limit, ctx.readCache);
+          }
+        }
         const reqPath = resolvePath(path, ctx.getCwd());
         const safety = await checkReadableCanonical(reqPath, native.canonicalize);
         if (!safety.ok) return { error: safety.reason, path: reqPath };
@@ -63,44 +169,23 @@ export function buildFsTools(ctx: ToolContext) {
           }
           ctx.readCache.set(abs, { size: r.size, hash });
 
-          if (isFullRead) {
-            const lines = r.content.split("\n");
-            const sliceEnd = Math.min(lines.length, READ_LINE_CAP);
-            let content = lines.slice(0, sliceEnd).join("\n");
-            let truncated = sliceEnd < lines.length;
-            if (content.length > READ_BYTE_CAP) {
-              content = content.slice(0, READ_BYTE_CAP);
-              truncated = true;
-            }
-            return {
-              path: abs,
-              content,
-              size: r.size,
-              total_lines: lines.length,
-              ...(truncated
-                ? { truncated: true, hint: "call read_file with offset to continue" }
-                : {}),
-            };
-          }
-
-          const lines = r.content.split("\n");
-          const start = offset ?? 0;
-          const requested = limit ?? READ_LINE_CAP;
-          const end = Math.min(lines.length, start + requested);
-          let content = lines.slice(start, end).join("\n");
-          let truncated = end < lines.length;
-          if (content.length > READ_BYTE_CAP) {
-            content = content.slice(0, READ_BYTE_CAP);
-            truncated = true;
-          }
+          const sliced = sliceLines(r.content, offset, limit);
           return {
             path: abs,
-            content,
+            content: sliced.content,
             size: r.size,
-            total_lines: lines.length,
-            start_line: start,
-            end_line: end,
-            ...(truncated ? { truncated: true } : {}),
+            total_lines: sliced.total_lines,
+            ...(sliced.start_line !== undefined
+              ? { start_line: sliced.start_line, end_line: sliced.end_line }
+              : {}),
+            ...(sliced.truncated
+              ? {
+                  truncated: true,
+                  ...(isFullRead
+                    ? { hint: "call read_file with offset to continue" }
+                    : {}),
+                }
+              : {}),
           };
         } catch (e) {
           return { error: String(e), path: abs };
@@ -110,13 +195,31 @@ export function buildFsTools(ctx: ToolContext) {
 
     list_directory: tool({
       description:
-        "List immediate entries (files + directories) in a directory. Hidden entries are omitted.",
+        "List immediate entries (files + directories) in a directory. Hidden entries are omitted. When the active terminal is an SSH session, the directory is listed on the remote host over SFTP (POSIX paths); Windows drive paths (C:\...) still list locally.",
       inputSchema: z.object({
         path: z
           .string()
           .describe("Absolute path, or relative to the active terminal cwd."),
       }),
       execute: async ({ path }) => {
+        // Active SSH terminal: list the remote host over SFTP (see read_file).
+        const remote = ctx.getRemoteSession();
+        if (remote) {
+          const remotePath = resolveRemotePath(path, remote.cwd);
+          if (remotePath !== null) {
+            const safety = checkReadable(remotePath);
+            if (!safety.ok) return { error: safety.reason, path: remotePath };
+            try {
+              const entries = await sftpReadDir(remote.sessionId, remotePath, false);
+              return {
+                path: remotePath,
+                entries: entries.map((e) => ({ name: e.name, kind: e.kind })),
+              };
+            } catch (e) {
+              return { error: String(e), path: remotePath };
+            }
+          }
+        }
         const reqPath = resolvePath(path, ctx.getCwd());
         const safety = await checkReadableCanonical(reqPath, native.canonicalize);
         if (!safety.ok) return { error: safety.reason, path: reqPath };

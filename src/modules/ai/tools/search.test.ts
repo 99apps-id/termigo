@@ -23,6 +23,8 @@ function makeContext(): ToolContext {
   return {
     getCwd: () => "/workspace",
     getWorkspaceRoot: () => "/workspace",
+    // No SSH session in these fixtures: tools resolve locally.
+    getRemoteSession: () => null,
     getTerminalContext: () => null,
     isActiveTerminalPrivate: () => false,
     injectIntoActivePty: () => false,
