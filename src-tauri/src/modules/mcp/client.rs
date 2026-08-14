@@ -24,8 +24,15 @@ use super::ServerConfig;
 const PROTOCOL_VERSION: &str = "2024-11-05";
 
 /// A server that has not answered `initialize` by now is treated as broken.
-/// Startup includes whatever `npx` has to download, so it is not tight.
-const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
+///
+/// The comment used to say this allowed for whatever `npx` downloads. It did
+/// not: a cold `npx -y wigolo` was still fetching after four minutes here, so
+/// thirty seconds failed the first launch of every npm-distributed server -
+/// which is most of them - and made each one look broken.
+///
+/// Later runs answer in well under a second, so this ceiling is paid once per
+/// package, or by a server that genuinely never speaks MCP.
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// Per-request ceiling once the server is up and talking.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
@@ -132,8 +139,16 @@ impl McpClient {
             Err(error) => {
                 let detail = client.drain_stderr().await;
                 let _ = client.child.kill().await;
+                // A server still downloading on first run and one that will
+                // never speak MCP fail identically, and the difference decides
+                // whether the user waits or fixes the command. Say so when
+                // there is no output to go on.
                 return Err(if detail.is_empty() {
-                    error
+                    format!(
+                        "{error}. It printed nothing, which usually means the command \
+                         does not start an MCP server, or a first run is still \
+                         downloading. Try running it once in a terminal first."
+                    )
                 } else {
                     format!("{error} (server said: {detail})")
                 });

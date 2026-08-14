@@ -52,6 +52,11 @@ import {
 import { useChatStore } from "@/modules/ai/store/chatStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
+  ENDPOINT_PRESETS,
+  presetToEndpoint,
+  type EndpointPreset,
+} from "@/modules/ai/lib/endpointPresets";
+import {
   type AutocompleteTrigger,
   emitKeysChanged,
   setAutocompleteEnabled,
@@ -200,14 +205,19 @@ export function ModelsSection() {
     await emitKeysChanged();
   };
 
-  const addCustomEndpoint = async () => {
-    const ep: CustomEndpoint = {
-      id: crypto.randomUUID().slice(0, 8),
-      name: "",
-      baseURL: "",
-      modelId: "",
-      contextLimit: 128_000,
-    };
+  const addCustomEndpoint = async (preset?: EndpointPreset) => {
+    const id = crypto.randomUUID().slice(0, 8);
+    // A preset only fills the fields in; every one stays editable, so a base
+    // URL or model that ages out costs a correction rather than a release.
+    const ep: CustomEndpoint = preset
+      ? presetToEndpoint(preset, id)
+      : {
+          id,
+          name: "",
+          baseURL: "",
+          modelId: "",
+          contextLimit: 128_000,
+        };
     await setCustomEndpoints([...customEndpoints, ep]);
   };
 
@@ -460,7 +470,7 @@ function AddProviderMenu({
 }: {
   providers: readonly ProviderInfo[];
   onAdd: (id: ProviderId) => void;
-  onAddCompat: () => void;
+  onAddCompat: (preset?: EndpointPreset) => void;
 }) {
   const cloud = providers.filter((p) => !isLocalProvider(p.id));
   const local = providers.filter(
@@ -495,6 +505,18 @@ function AddProviderMenu({
         </DropdownMenuLabel>
         {local.map((p) => (
           <ProviderMenuItem key={p.id} provider={p} onAdd={onAdd} />
+        ))}
+        {/* Presets first: the base URL is the one field a user cannot guess
+            and the one most often mistyped. */}
+        {ENDPOINT_PRESETS.map((preset) => (
+          <DropdownMenuItem
+            key={preset.id}
+            onSelect={() => onAddCompat(preset)}
+            className="flex items-center gap-2 text-[12px]"
+          >
+            <ProviderIcon provider="openai-compatible" size={13} />
+            <span>{preset.name}</span>
+          </DropdownMenuItem>
         ))}
         <DropdownMenuItem
           onSelect={() => onAddCompat()}
