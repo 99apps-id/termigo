@@ -28,7 +28,7 @@ import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
 import { OAUTH_PRESETS } from "@/modules/oauth/presets";
 import { useOAuthStore } from "@/modules/oauth/store";
 import { prepareAgentPrompt } from "./prompt";
-import { createProxyFetch } from "./proxyFetch";
+import { createProxyFetch, proxyFetch } from "./proxyFetch";
 import { sanitizeUiMessages } from "./sanitizeMessages";
 
 const localProxyFetch = createProxyFetch({ allowPrivateNetwork: true });
@@ -121,12 +121,13 @@ export async function buildLanguageModel(
       if (oauthAccess) {
         const preset = OAUTH_PRESETS.codex;
         built = createOpenAI({
+          fetch: proxyFetch,
           apiKey: oauthAccess,
           baseURL: preset.baseUrl,
           headers: preset.upstreamHeaders,
         })(resolvedModelId);
       } else {
-        built = createOpenAI({ apiKey: key })(resolvedModelId);
+        built = createOpenAI({ fetch: proxyFetch, apiKey: key })(resolvedModelId);
       }
       break;
     }
@@ -139,11 +140,12 @@ export async function buildLanguageModel(
         // access token as apiKey sends it as `x-api-key`, which Anthropic's
         // OAuth endpoints reject.
         built = createAnthropic({
+          fetch: proxyFetch,
           authToken: oauthAccess,
           headers: preset.upstreamHeaders,
         })(resolvedModelId);
       } else {
-        built = createAnthropic({ apiKey: key })(resolvedModelId);
+        built = createAnthropic({ fetch: proxyFetch, apiKey: key })(resolvedModelId);
       }
       break;
     }
@@ -158,6 +160,7 @@ export async function buildLanguageModel(
         // as the key to satisfy that loader and override the header it
         // produces: `options.headers` is spread after it, so this wins.
         built = createGoogleGenerativeAI({
+          fetch: proxyFetch,
           apiKey: oauthAccess,
           baseURL: preset.baseUrl,
           headers: {
@@ -167,18 +170,18 @@ export async function buildLanguageModel(
           },
         })(resolvedModelId);
       } else {
-        built = createGoogleGenerativeAI({ apiKey: key })(resolvedModelId);
+        built = createGoogleGenerativeAI({ fetch: proxyFetch, apiKey: key })(resolvedModelId);
       }
       break;
     }
     case "xai": {
       const { createXai } = await import("@ai-sdk/xai");
-      built = createXai({ apiKey: key })(resolvedModelId);
+      built = createXai({ fetch: proxyFetch, apiKey: key })(resolvedModelId);
       break;
     }
     case "cerebras": {
       const { createCerebras } = await import("@ai-sdk/cerebras");
-      built = createCerebras({ apiKey: key })(resolvedModelId);
+      built = createCerebras({ fetch: proxyFetch, apiKey: key })(resolvedModelId);
       break;
     }
     case "deepseek": {
@@ -188,6 +191,7 @@ export async function buildLanguageModel(
         name: "deepseek",
         baseURL: "https://api.deepseek.com",
         apiKey: key,
+        fetch: proxyFetch,
       })(resolvedModelId);
       break;
     }
@@ -198,12 +202,13 @@ export async function buildLanguageModel(
         name: "mistral",
         baseURL: "https://api.mistral.ai/v1",
         apiKey: key,
+        fetch: proxyFetch,
       })(resolvedModelId);
       break;
     }
     case "groq": {
       const { createGroq } = await import("@ai-sdk/groq");
-      built = createGroq({ apiKey: key })(resolvedModelId);
+      built = createGroq({ fetch: proxyFetch, apiKey: key })(resolvedModelId);
       break;
     }
     case "openrouter": {
@@ -217,6 +222,7 @@ export async function buildLanguageModel(
           "HTTP-Referer": "https://termigo.ai",
           "X-Title": "Termigo",
         },
+        fetch: proxyFetch,
       })(resolvedModelId);
       break;
     }
