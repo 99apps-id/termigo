@@ -50,8 +50,6 @@ import {
   setKey,
 } from "@/modules/ai/lib/keyring";
 import { useChatStore } from "@/modules/ai/store/chatStore";
-import { OAUTH_PROFILES } from "@/modules/oauth/presets";
-import { useOAuthStore } from "@/modules/oauth/store";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   type AutocompleteTrigger,
@@ -91,7 +89,6 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useMemo, useState } from "react";
-import { OAuthCard } from "../components/OAuthCard";
 import { ProviderIcon } from "../components/ProviderIcon";
 import { ProviderKeyCard } from "../components/ProviderKeyCard";
 import { SectionHeader } from "../components/SectionHeader";
@@ -173,7 +170,6 @@ export function ModelsSection() {
 
   useEffect(() => {
     void getAllKeys().then(setKeys);
-    void useOAuthStore.getState().hydrate();
   }, []);
 
   useEffect(() => {
@@ -363,15 +359,6 @@ export function ModelsSection() {
         title="Models"
         description="Connect the providers you use. Keys live in your OS keychain and are used only by Termigo."
       />
-
-      <div className="flex flex-col gap-3">
-        <Label>Sign in with your account</Label>
-        <div className="flex flex-col gap-2">
-          {OAUTH_PROFILES.map((p) => (
-            <OAuthCard key={p} profile={p} />
-          ))}
-        </div>
-      </div>
 
       <DefaultsBlock
         defaultModel={defaultModel}

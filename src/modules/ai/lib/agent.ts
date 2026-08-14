@@ -25,9 +25,6 @@ import {
 import { buildTools, type ToolContext } from "../tools/tools";
 import { compactModelMessagesDetailed } from "./compact";
 import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
-import { OAUTH_PRESETS } from "@/modules/oauth/presets";
-import { useOAuthStore } from "@/modules/oauth/store";
-import { createOAuthModelFetch } from "./oauthFetch";
 import { prepareAgentPrompt } from "./prompt";
 import { createProxyFetch, proxyFetch } from "./proxyFetch";
 import { sanitizeUiMessages } from "./sanitizeMessages";
@@ -84,25 +81,9 @@ export async function buildLanguageModel(
   options: BuildModelOptions = {},
   customEndpointKey?: string | null,
 ): Promise<LanguageModel> {
-  // OAuth account tokens (Codex/Claude/Antigravity) take precedence over a
-  // manually-entered API key for the matching cloud provider.
-  const oauthTokens = useOAuthStore.getState().tokens;
-  const oauthAccess =
-    provider === "openai"
-      ? oauthTokens.codex?.access_token ?? ""
-      : provider === "anthropic"
-        ? oauthTokens.claude?.access_token ?? ""
-        : provider === "google"
-          ? oauthTokens.antigravity?.access_token ?? ""
-          : "";
-
-  if (
-    providerNeedsKey(provider) &&
-    !keys[provider] &&
-    !oauthAccess
-  ) {
+  if (providerNeedsKey(provider) && !keys[provider]) {
     throw new Error(
-      `No API key configured for ${provider}. Open Settings → AI to add one, or sign in with an account.`,
+      `No API key configured for ${provider}. Open Settings → AI to add one.`,
     );
   }
   const key = keys[provider] ?? "";
@@ -111,7 +92,7 @@ export async function buildLanguageModel(
   const ollamaURL = options.ollamaBaseURL ?? OLLAMA_DEFAULT_BASE_URL;
   const compatURL = options.openaiCompatibleBaseURL ?? "";
   const epKey = customEndpointKey ?? "";
-  const cacheKey = `${provider} ${key} ${epKey} ${resolvedModelId} ${lmstudioURL} ${mlxURL} ${ollamaURL} ${compatURL} oauth:${oauthAccess.slice(0, 12)}`;
+  const cacheKey = `${provider} ${key} ${epKey} ${resolvedModelId} ${lmstudioURL} ${mlxURL} ${ollamaURL} ${compatURL}`;
   const hit = modelCache.get(cacheKey);
   if (hit) return hit;
 
@@ -119,70 +100,17 @@ export async function buildLanguageModel(
   switch (provider) {
     case "openai": {
       const { createOpenAI } = await import("@ai-sdk/openai");
-      if (oauthAccess) {
-        const preset = OAUTH_PRESETS.codex;
-        built = createOpenAI({
-          fetch: createOAuthModelFetch({
-            profile: "codex",
-            bakedToken: oauthAccess,
-          }),
-          apiKey: oauthAccess,
-          baseURL: preset.baseUrl,
-          headers: preset.upstreamHeaders,
-        })(resolvedModelId);
-      } else {
-        built = createOpenAI({ fetch: proxyFetch, apiKey: key })(resolvedModelId);
-      }
+      built = createOpenAI({ fetch: proxyFetch, apiKey: key })(resolvedModelId);
       break;
     }
     case "anthropic": {
       const { createAnthropic } = await import("@ai-sdk/anthropic");
-      if (oauthAccess) {
-        const preset = OAUTH_PRESETS.claude;
-        // `authToken`, not `apiKey`: the provider only emits
-        // `Authorization: Bearer <token>` for authToken. Passing an OAuth
-        // access token as apiKey sends it as `x-api-key`, which Anthropic's
-        // OAuth endpoints reject.
-        built = createAnthropic({
-          fetch: createOAuthModelFetch({
-            profile: "claude",
-            bakedToken: oauthAccess,
-          }),
-          authToken: oauthAccess,
-          headers: preset.upstreamHeaders,
-        })(resolvedModelId);
-      } else {
-        built = createAnthropic({ fetch: proxyFetch, apiKey: key })(resolvedModelId);
-      }
+      built = createAnthropic({ fetch: proxyFetch, apiKey: key })(resolvedModelId);
       break;
     }
     case "google": {
       const { createGoogleGenerativeAI } = await import("@ai-sdk/google");
-      if (oauthAccess) {
-        const preset = OAUTH_PRESETS.antigravity;
-        // The SDK has no `authToken` option and builds `x-goog-api-key` from
-        // `apiKey` via loadApiKey, which throws "Google Generative AI API key
-        // is missing" at request time when it is absent. Cloud Code
-        // authenticates with `Authorization: Bearer` instead, so pass the token
-        // as the key to satisfy that loader and override the header it
-        // produces: `options.headers` is spread after it, so this wins.
-        built = createGoogleGenerativeAI({
-          fetch: createOAuthModelFetch({
-            profile: "antigravity",
-            bakedToken: oauthAccess,
-            projectId: oauthTokens.antigravity?.project_id ?? null,
-          }),
-          apiKey: oauthAccess,
-          baseURL: preset.baseUrl,
-          headers: {
-            ...preset.upstreamHeaders,
-            Authorization: `Bearer ${oauthAccess}`,
-            "x-goog-api-key": "",
-          },
-        })(resolvedModelId);
-      } else {
-        built = createGoogleGenerativeAI({ fetch: proxyFetch, apiKey: key })(resolvedModelId);
-      }
+      built = createGoogleGenerativeAI({ fetch: proxyFetch, apiKey: key })(resolvedModelId);
       break;
     }
     case "xai": {

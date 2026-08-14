@@ -63,11 +63,6 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
 - **BYOK providers:** OpenAI, Anthropic (Claude), Google (Gemini), Groq,
   xAI (Grok), Cerebras, OpenRouter, DeepSeek, Mistral, plus any
   OpenAI-compatible endpoint
-- **Sign in with your account (OAuth presets):** Codex (ChatGPT plan),
-  Claude (Anthropic subscription), and Antigravity (Google Cloud Code).
-  One-click browser sign-in with PKCE, no API key needed. Tokens live in
-  your OS keychain and refresh automatically; the refresh token is held and
-  renewed entirely in the Rust backend, so it never reaches the web frontend
 - **Local / offline:** LM Studio, MLX, Ollama
 - Agentic workflow: plans, sub-agents, project memory via `TERMIGO.md`,
   file read/write/edit/multi-edit/grep/glob, bash with approval gating,
@@ -134,14 +129,6 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
 pnpm install
 pnpm tauri:dev       # development
 pnpm tauri build     # production bundle
-```
-
-Antigravity sign-in needs Google OAuth credentials, which are not committed.
-Supply them at build time to enable that profile (Codex and Claude work
-without them):
-
-```bash
-TERMIGO_GOOGLE_CLIENT_ID=... TERMIGO_GOOGLE_CLIENT_SECRET=... pnpm tauri build
 ```
 
 Checks:
@@ -234,16 +221,6 @@ See [`docs/`](docs/) for the MCP, skills, agents, and architecture guides.
   </sub>
 </p>
 
-<p align="center">
-  <img src="docs/termigo-model.png" alt="Model and account settings" width="900" />
-  <br/>
-  <sub>
-    Providers in one place: account sign-in for Codex, Claude and Antigravity
-    alongside the chat model, inline autocomplete, and a local Whisper.cpp
-    voice provider
-  </sub>
-</p>
-
 ## Architecture
 
 ```text
@@ -264,8 +241,7 @@ headlessly lives in `cli/internal/` first.
 - **Local first.** Folders, commands, keys, and project context stay on the
   machine. No telemetry, no account.
 - **Keys stay with their owners.** Provider credentials live in the provider's
-  own CLI config or the OS keychain. OAuth refresh tokens never leave the Rust
-  backend: the frontend only ever receives a short-lived access token.
+  own CLI config or the OS keychain.
 - **Approval gates.** Agent file changes and commands require review/approval;
   the workspace is the boundary for file operations.
 - **MCP is explicit.** Servers only run when you configure and connect to them.
