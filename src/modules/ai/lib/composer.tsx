@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { SteerMessage, SteerPart } from "./steer";
 import {
   createContext,
   useContext,
@@ -9,7 +10,7 @@ import {
 import { useWhisperRecording } from "../hooks/useWhisperRecording";
 import { expandSnippetTokens, type Snippet } from "../lib/snippets";
 import { tryRunSlashCommand, type SlashCommandMeta } from "./slashCommands";
-import { getChat, useChatStore } from "../store/chatStore";
+import { useChatStore } from "../store/chatStore";
 import { useSnippetsStore } from "../store/snippetsStore";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 
@@ -55,6 +56,9 @@ type ComposerCtx = {
   stop: () => void;
   voice: Voice;
   canSend: boolean;
+  /** Messages typed during the current run, waiting for it to settle. */
+  queued: readonly SteerMessage[];
+  cancelQueued: (index: number) => void;
 };
 
 const Ctx = createContext<ComposerCtx | null>(null);
@@ -96,11 +100,17 @@ export function AiComposerProvider({ children }: ProviderProps) {
     }
   }, [focusSignal, pendingPrefill, consumePrefill]);
 
-  // Re-focus the textarea whenever the agent finishes a response
+  // Re-focus the textarea whenever the agent finishes a response, and deliver
+  // anything the user typed while it was working. The flush is idempotent, so
+  // a second composer (the mini window) observing the same transition is safe.
   const prevIsBusyRef = useRef(false);
   useEffect(() => {
     if (prevIsBusyRef.current && !isBusy) {
       requestAnimationFrame(() => textareaRef.current?.focus());
+      void (async () => {
+        const { flushSteer } = await import("../store/chatRuntime");
+        await flushSteer();
+      })();
     }
     prevIsBusyRef.current = isBusy;
   }, [isBusy, textareaRef]);
@@ -216,7 +226,8 @@ export function AiComposerProvider({ children }: ProviderProps) {
   };
 
   const submit = () => {
-    if (isBusy) return;
+    // No early return on `isBusy`. Typing during a run used to vanish without a
+    // trace; it is now queued by sendParts and delivered when the run settles.
     const trimmed = value.trim();
     if (
       !trimmed &&
@@ -305,14 +316,15 @@ export function AiComposerProvider({ children }: ProviderProps) {
 
     if (!sessionId) return;
     const store = useChatStore.getState();
-    store.patchAgentMeta({ hitStepCap: false, compactionNotice: null });
+    store.patchAgentMeta({
+      hitStepCap: false,
+      stoppedByUser: false,
+      compactionNotice: null,
+    });
     if (!store.mini.open) store.openMini();
     void (async () => {
-      const { getOrCreateChat } = await import("../store/chatRuntime");
-      const chat = getOrCreateChat(sessionId);
-      void chat.sendMessage({ role: "user", parts } as Parameters<
-        typeof chat.sendMessage
-      >[0]);
+      const { sendParts } = await import("../store/chatRuntime");
+      void sendParts(sessionId, parts as unknown as SteerPart[]);
     })();
     setValue("");
     setFiles([]);
@@ -324,15 +336,22 @@ export function AiComposerProvider({ children }: ProviderProps) {
 
   const stop = () => {
     if (!sessionId) return;
-    void getChat(sessionId)?.stop();
+    void (async () => {
+      const { stopRun } = await import("../store/chatRuntime");
+      await stopRun();
+    })();
   };
 
+  // Enabled while busy too: submitting then means "queue this", not "race the
+  // run". The stop button remains the way to interrupt.
   const canSend =
-    !isBusy &&
     (value.trim().length > 0 ||
       files.length > 0 ||
       pickedSnippets.length > 0 ||
       pickedCommands.length > 0);
+
+  const queued = useChatStore((st) => st.steerQueue.pending);
+  const cancelQueued = useChatStore((st) => st.cancelSteer);
 
   const ctx: ComposerCtx = {
     textareaRef,
@@ -348,6 +367,8 @@ export function AiComposerProvider({ children }: ProviderProps) {
     pickedCommands,
     addCommand,
     removeCommand,
+    queued,
+    cancelQueued,
     isBusy,
     submit,
     stop,

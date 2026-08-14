@@ -1,4 +1,11 @@
 import type { Chat, UIMessage } from "@ai-sdk/react";
+import {
+  EMPTY_QUEUE,
+  enqueue,
+  remove as removeSteer,
+  type SteerMessage,
+  type SteerQueue,
+} from "../lib/steer";
 import { create } from "zustand";
 import {
   DEFAULT_MODEL_ID,
@@ -27,6 +34,7 @@ import { pushRecentModel } from "../lib/modelPrefs";
 
 export type Live = {
   getCwd: () => string | null;
+  getRemoteSession: () => import("../tools/context").RemoteFsSession | null;
   getTerminalContext: () => string | null;
   isActiveTerminalPrivate: () => boolean;
   injectIntoActivePty: (text: string) => boolean;
@@ -56,6 +64,8 @@ export type AgentMeta = {
   lastInputTokens: number;
   lastCachedTokens: number;
   hitStepCap: boolean;
+  /** The user pressed stop, so the transcript can offer to resume. */
+  stoppedByUser: boolean;
   compactionNotice: { droppedCount: number; at: number } | null;
 };
 
@@ -74,6 +84,7 @@ const IDLE_META: AgentMeta = {
   lastInputTokens: 0,
   lastCachedTokens: 0,
   hitStepCap: false,
+  stoppedByUser: false,
   compactionNotice: null,
 };
 
@@ -138,6 +149,12 @@ type StoreState = {
   patchAgentMeta: (patch: Partial<AgentMeta>) => void;
   resetAgentMeta: () => void;
 
+  /** Text typed while a run was in flight, waiting for it to end. */
+  steerQueue: SteerQueue;
+  queueSteer: (message: SteerMessage) => void;
+  cancelSteer: (index: number) => void;
+  clearSteer: () => void;
+
   // Sessions
   sessionsHydrated: boolean;
   sessions: SessionMeta[];
@@ -153,6 +170,7 @@ type StoreState = {
 
 const NOOP_LIVE: Live = {
   getCwd: () => null,
+  getRemoteSession: () => null,
   getTerminalContext: () => null,
   isActiveTerminalPrivate: () => false,
   injectIntoActivePty: () => false,
@@ -279,6 +297,13 @@ export const useChatStore = create<StoreState>((set, get) => ({
   patchAgentMeta: (patch) =>
     set((s) => ({ agentMeta: { ...s.agentMeta, ...patch } })),
   resetAgentMeta: () => set({ agentMeta: IDLE_META }),
+
+  steerQueue: EMPTY_QUEUE,
+  queueSteer: (message) =>
+    set((s) => ({ steerQueue: enqueue(s.steerQueue, message) })),
+  cancelSteer: (index) =>
+    set((s) => ({ steerQueue: removeSteer(s.steerQueue, index) })),
+  clearSteer: () => set({ steerQueue: EMPTY_QUEUE }),
 
   sessionsHydrated: false,
   sessions: [],
