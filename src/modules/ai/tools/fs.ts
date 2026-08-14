@@ -14,7 +14,7 @@ import {
   checkWritableCanonical,
 } from "../lib/security";
 import { newQueuedEditId, usePlanStore } from "../store/planStore";
-import { routePath } from "../lib/remoteFs";
+import { fileCacheKey, routePath } from "../lib/remoteFs";
 import {
   resolvePath,
   resolveRemotePath,
@@ -92,11 +92,12 @@ async function readRemoteFile(
     const size = content.length;
     const hash = djb2(content);
     const isFullRead = offset === undefined && limit === undefined;
-    const prior = readCache.get(remotePath);
+    const key = fileCacheKey(remotePath, remote.sessionId);
+    const prior = readCache.get(key);
     if (isFullRead && prior && prior.size === size && prior.hash === hash) {
       return { path: remotePath, unchanged: true, size };
     }
-    readCache.set(remotePath, { size, hash });
+    readCache.set(key, { size, hash });
     const sliced = sliceLines(content, offset, limit);
     return {
       path: remotePath,

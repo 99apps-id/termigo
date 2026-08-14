@@ -4,7 +4,7 @@ import { native } from "../lib/native";
 import { checkWritableCanonical } from "../lib/security";
 import { newQueuedEditId, usePlanStore } from "../store/planStore";
 import { sftpReadFile, sftpWriteFile } from "@/modules/ssh/sftp";
-import { routePath } from "../lib/remoteFs";
+import { fileCacheKey, routePath } from "../lib/remoteFs";
 import { checkWritable } from "../lib/security";
 import { resolvePath, type ToolContext } from "./context";
 
@@ -27,12 +27,15 @@ type EditIo = {
   read: (path: string) => ReturnType<typeof native.readFile>;
   write: (path: string, content: string) => Promise<void>;
   remote: boolean;
+  /** Cache key for this path, namespaced by the machine it lives on. */
+  cacheKey: (path: string) => string;
 };
 
 const LOCAL_IO: EditIo = {
   read: (p) => native.readFile(p),
   write: (p, c) => native.writeFile(p, c),
   remote: false,
+  cacheKey: (p) => fileCacheKey(p),
 };
 
 async function applyEdits(
@@ -126,7 +129,7 @@ async function applyEdits(
 
   try {
     await io.write(abs, content);
-    readCache.set(abs, { size: content.length, hash: djb2(content) });
+    readCache.set(io.cacheKey(abs), { size: content.length, hash: djb2(content) });
     return {
       ok: true,
       replacements: totalReplacements,
@@ -172,6 +175,7 @@ async function resolveEditTarget(
         },
         write: (p, c) => sftpWriteFile(sessionId, p, c),
         remote: true,
+        cacheKey: (p) => fileCacheKey(p, sessionId),
       },
     };
   }
@@ -200,7 +204,7 @@ export function buildEditTools(ctx: ToolContext) {
         const resolved = await resolveEditTarget(ctx, path);
         if (!resolved.ok) return resolved.error;
         const { abs, io } = resolved;
-        if (!ctx.readCache.has(abs)) {
+        if (!ctx.readCache.has(io.cacheKey(abs))) {
           return {
             error:
               "must call read_file on this path first (read-before-edit invariant).",
@@ -237,7 +241,7 @@ export function buildEditTools(ctx: ToolContext) {
         const resolved = await resolveEditTarget(ctx, path);
         if (!resolved.ok) return resolved.error;
         const { abs, io } = resolved;
-        if (!ctx.readCache.has(abs)) {
+        if (!ctx.readCache.has(io.cacheKey(abs))) {
           return {
             error:
               "must call read_file on this path first (read-before-edit invariant).",

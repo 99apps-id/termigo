@@ -404,14 +404,21 @@ pub async fn ssh_exec(
 
     ssh_runtime()
         .spawn(async move {
-            let handle_guard = session.handle.lock().await;
-            let handle = handle_guard
-                .as_ref()
-                .ok_or_else(|| "ssh session is closed".to_string())?;
-            let mut channel = handle
-                .channel_open_session()
-                .await
-                .map_err(|e| format!("ssh: open exec channel failed: {e}"))?;
+            // Hold the handle only long enough to open the channel. Keeping it
+            // for the command's lifetime would block every other user of the
+            // session - the SFTP file browser, the agent's remote reads, any
+            // second command - for as long as the command runs, so a two-minute
+            // `apt install` would freeze the remote file panel.
+            let mut channel = {
+                let handle_guard = session.handle.lock().await;
+                let handle = handle_guard
+                    .as_ref()
+                    .ok_or_else(|| "ssh session is closed".to_string())?;
+                handle
+                    .channel_open_session()
+                    .await
+                    .map_err(|e| format!("ssh: open exec channel failed: {e}"))?
+            };
             channel
                 .exec(true, command.as_bytes())
                 .await

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  fileCacheKey,
   isRemoteTarget,
   isWindowsPath,
   remoteUnsupported,
@@ -116,5 +117,26 @@ describe("refusals point somewhere that actually reaches the remote host", () =>
     );
     expect(out.error).toContain("suggest_command");
     expect(out.error).not.toContain("bash_run");
+  });
+});
+
+// The read cache powers both the unchanged-file shortcut and the
+// read-before-edit invariant. Keying it on the path alone lets one machine's
+// file answer for the other's — an everyday collision on Linux and macOS,
+// where local paths look exactly like remote ones.
+describe("fileCacheKey", () => {
+  it("keeps the same path on two machines apart", () => {
+    expect(fileCacheKey("/etc/nginx/nginx.conf")).not.toBe(
+      fileCacheKey("/etc/nginx/nginx.conf", 7),
+    );
+  });
+
+  it("keeps two remote sessions apart", () => {
+    expect(fileCacheKey("/app/x", 1)).not.toBe(fileCacheKey("/app/x", 2));
+  });
+
+  it("is stable for the same file on the same machine", () => {
+    expect(fileCacheKey("/app/x", 3)).toBe(fileCacheKey("/app/x", 3));
+    expect(fileCacheKey("/app/x")).toBe(fileCacheKey("/app/x", null));
   });
 });

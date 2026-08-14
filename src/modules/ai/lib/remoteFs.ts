@@ -74,3 +74,17 @@ export function remoteUnsupported(
 export function isRemoteTarget(t: FsTarget): t is Extract<FsTarget, { kind: "remote" }> {
   return t.kind === "remote";
 }
+
+/**
+ * Cache key for a file, namespaced by the machine it lives on.
+ *
+ * The read cache powers two things: skipping a re-read that would return
+ * identical bytes, and the read-before-edit invariant. Keying it on the path
+ * alone lets a remote `/etc/nginx/nginx.conf` answer for a local file at the
+ * same path - which on Linux and macOS is an ordinary occurrence, not a
+ * contrived one. It would report `unchanged` for a file never read, and let an
+ * edit satisfy read-before-edit against the wrong machine's contents.
+ */
+export function fileCacheKey(path: string, sessionId?: number | null): string {
+  return sessionId == null ? path : `ssh:${sessionId}:${path}`;
+}
