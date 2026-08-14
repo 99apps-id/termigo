@@ -213,6 +213,13 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(move |_app| {
+            // Bind the asset protocol to the workspace boundary. The static
+            // config grants nothing, so previews resolve only under roots the
+            // app has already authorized for reading.
+            if let Some(registry) = _app.try_state::<workspace::WorkspaceRegistry>() {
+                registry.attach_asset_scope(_app.asset_protocol_scope().clone());
+            }
+
             if let Err(error) = control::start(_app.handle().clone(), control_for_setup.clone()) {
                 log::warn!("could not start Termigo control server: {error}");
             }
