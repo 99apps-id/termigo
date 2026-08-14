@@ -64,6 +64,17 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   xAI (Grok), Cerebras, OpenRouter, DeepSeek, Mistral, plus any
   OpenAI-compatible endpoint
 - **Local / offline:** LM Studio, MLX, Ollama
+- **Self-maintaining memory.** The agent records durable project facts in
+  `.termigo/memory.md` and reads them back in every later session, so build
+  commands, conventions and decisions do not have to be re-explained. Facts are
+  captured two ways: a `remember` tool the model calls deliberately (visible in
+  the transcript, approval-gated like any workspace write), and a summary sweep
+  when a session is left behind. Your hand-written `TERMIGO.md` is never
+  rewritten, so you can always tell what you wrote from what the agent
+  inferred, and deleting a line makes it forget. The file is bounded in entry
+  length, entry count and total size, because everything in it costs context on
+  every request. The sweep only runs in the auto-approve modes: in
+  `Ask every time`, nothing is written without a click.
 - Agentic workflow: plans, sub-agents, project memory via `TERMIGO.md`,
   file read/write/edit/multi-edit/grep/glob, bash with approval gating,
   background processes

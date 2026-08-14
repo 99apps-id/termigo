@@ -17,6 +17,9 @@ const EDIT_TOOLS = new Set([
   "create_directory",
   "edit",
   "multi_edit",
+  // A memory write is a small file write inside the workspace, so it follows
+  // the same tier rather than getting a gate of its own.
+  "remember",
 ]);
 
 /** Tools that run commands or hand work to another agent. */

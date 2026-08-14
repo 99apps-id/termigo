@@ -1,4 +1,5 @@
 import type { UIMessage } from "@ai-sdk/react";
+import { readMemory } from "./memory";
 import type { CustomEndpoint } from "../config";
 import { runAgentStream, type AgentUsageDelta } from "./agent";
 import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
@@ -75,7 +76,10 @@ type SendOptions = {
 export function createContextAwareTransport(deps: Deps) {
   const run = async (options: SendOptions) => {
     const live = deps.getLive();
-    const projectMemory = await readTermigoMd(live.workspaceRoot);
+    const [projectMemory, learnedMemory] = await Promise.all([
+      readTermigoMd(live.workspaceRoot),
+      readMemory(live.workspaceRoot),
+    ]);
     const envBlock = formatEnvBlock(live);
     const messagesForRun = envBlock
       ? injectEnvIntoLastUser(options.messages, envBlock)
@@ -84,6 +88,7 @@ export function createContextAwareTransport(deps: Deps) {
       keys: deps.getKeys(),
       modelId: deps.getModelId(),
       customInstructions: deps.getCustomInstructions(),
+      learnedMemory,
       agentPersona: deps.getAgentPersona(),
       toolContext: deps.toolContext,
       onStep: deps.onStep,

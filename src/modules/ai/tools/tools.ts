@@ -5,6 +5,7 @@ import { buildSearchTools } from "./search";
 import { buildShellTools } from "./shell";
 import { buildSubagentTools } from "./subagent";
 import { buildTerminalTools } from "./terminal";
+import { buildMemoryTools } from "./memory";
 import { buildTodoTools } from "./todo";
 
 export { resolvePath, type ToolContext } from "./context";
@@ -37,6 +38,7 @@ export function buildTools(ctx: import("./context").ToolContext) {
     ...buildSubagentTools(ctx),
     ...buildTerminalTools(ctx),
     ...buildTodoTools(ctx),
+    ...buildMemoryTools(ctx),
     ...buildManagedAgentTools(ctx),
   } as const;
 }

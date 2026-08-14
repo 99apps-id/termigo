@@ -24,6 +24,7 @@ import {
 } from "../config";
 import { buildTools, type ToolContext } from "../tools/tools";
 import { compactModelMessagesDetailed } from "./compact";
+import { memoryBlock as learnedBlock, type MemoryEntry } from "./memory";
 import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
 import { prepareAgentPrompt } from "./prompt";
 import { createProxyFetch, proxyFetch } from "./proxyFetch";
@@ -310,6 +311,7 @@ function buildStableSystem(
   persona: { name: string; instructions: string } | null,
   customInstructions: string | undefined,
   projectMemory: string | null,
+  learned: readonly MemoryEntry[],
 ): string {
   const base = selectSystemPrompt(modelId);
   const personaBlock = persona?.instructions.trim()
@@ -322,7 +324,7 @@ function buildStableSystem(
     projectMemory && projectMemory.trim().length > 0
       ? `\n\n## PROJECT — TERMIGO.md\n${projectMemory.trim()}`
       : "";
-  return `${base}${memoryBlock}${personaBlock}${customBlock}`;
+  return `${base}${memoryBlock}${learnedBlock(learned)}${personaBlock}${customBlock}`;
 }
 
 export type AgentUsage = {
@@ -366,6 +368,8 @@ export type RunAgentOptions = {
   customEndpointKeys?: CustomEndpointKeys;
   planMode?: boolean;
   projectMemory?: string | null;
+  /** Facts the agent recorded in earlier sessions (.termigo/memory.md). */
+  learnedMemory?: readonly MemoryEntry[];
   uiMessages: UIMessage[];
   abortSignal?: AbortSignal;
 };
@@ -394,6 +398,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
     opts.agentPersona ?? null,
     opts.customInstructions,
     opts.projectMemory ?? null,
+    opts.learnedMemory ?? [],
   );
 
   const history = await convertToModelMessages(sanitizeUiMessages(opts.uiMessages));

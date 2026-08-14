@@ -14,9 +14,12 @@ import {
   chats,
   getActiveProviderKey,
   seedMessages,
+  setSessionLeftHandler,
   touchChat,
   useChatStore,
 } from "./chatStore";
+import { buildLanguageModel } from "../lib/agent";
+import { sweepSessionMemory } from "../lib/memorySweep";
 
 function makeChat(sessionId: string): Chat<UIMessage> {
   const readCache = new Map<string, { size: number; hash: number }>();
@@ -141,3 +144,29 @@ export async function sendMessage(text: string): Promise<boolean> {
   await c.sendMessage({ text });
   return true;
 }
+
+
+// Summarise a session the user has left and append anything durable to
+// .termigo/memory.md. Registered here because this is the one place that can
+// reach the model, the workspace root and the approval mode at once.
+//
+// Fire-and-forget on purpose: the user has already moved on, and a failed
+// sweep must not surface as an error in the session they just opened.
+setSessionLeftHandler((_sessionId, messages) => {
+  void (async () => {
+    const state = useChatStore.getState();
+    const workspaceRoot = state.live.getWorkspaceRoot();
+    if (!workspaceRoot) return;
+    const mode = usePreferencesStore.getState().agentApprovalMode;
+    try {
+      const model = await buildLanguageModel(
+        getModel(state.selectedModelId as ModelId).provider,
+        state.apiKeys,
+        state.selectedModelId,
+      );
+      await sweepSessionMemory({ model, workspaceRoot, messages, mode });
+    } catch {
+      // No model configured, or the call failed. Memory is best-effort.
+    }
+  })();
+});

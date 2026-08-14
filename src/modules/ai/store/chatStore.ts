@@ -318,6 +318,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
   },
 
   newSession: () => {
+    notifySessionLeft(get().activeSessionId);
     const id = newSessionId();
     const meta: SessionMeta = {
       id,
@@ -335,6 +336,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
   switchSession: (id) => {
     if (get().activeSessionId === id) return;
     if (!get().sessions.some((s) => s.id === id)) return;
+    notifySessionLeft(get().activeSessionId);
 
     // Lazily seed the chat with persisted messages the first time we open
     // this session. Subsequent switches reuse the cached Chat instance.
@@ -443,6 +445,27 @@ export function hasKeyForModel(modelId: string): boolean {
   }
   const provider = getModel(modelId as ModelId).provider;
   return providerNeedsKey(provider) ? !!apiKeys[provider] : true;
+}
+
+/**
+ * Called with a session's messages when the user leaves it. Registered by
+ * chatRuntime, which is where the model and workspace root are both reachable;
+ * importing that from here would close an import cycle.
+ */
+let onSessionLeft: ((sessionId: string, messages: UIMessage[]) => void) | null =
+  null;
+
+export function setSessionLeftHandler(
+  fn: ((sessionId: string, messages: UIMessage[]) => void) | null,
+): void {
+  onSessionLeft = fn;
+}
+
+function notifySessionLeft(sessionId: string | null): void {
+  if (!sessionId || !onSessionLeft) return;
+  const messages = chats.get(sessionId)?.messages;
+  if (!messages || messages.length === 0) return;
+  onSessionLeft(sessionId, [...messages]);
 }
 
 export function getChat(sessionId?: string): Chat<UIMessage> | undefined {
