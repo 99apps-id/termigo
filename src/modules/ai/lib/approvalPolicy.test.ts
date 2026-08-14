@@ -78,18 +78,55 @@ describe("delete is held back from the edit tier", () => {
 // refuses paths outside it. A command on a remote host has no equivalent
 // boundary, so this is the one place an approval mode may not speak for the
 // user.
-describe("commands on a remote host always ask", () => {
-  it("asks even under the mode that says nothing waits", () => {
-    expect(isAutoApproved("bash_run", "all", { onRemoteHost: true })).toBe(false);
-    expect(isAutoApproved("bash_background", "all", { onRemoteHost: true })).toBe(
-      false,
-    );
+describe("commands on a remote host", () => {
+  // Gating every remote command meant dozens of prompts to set up one server,
+  // most of them for `ls`. A prompt that always appears is a prompt nobody
+  // reads, so the gate sits on risk rather than on being remote.
+  it("lets inspection through once edits are delegated", () => {
+    for (const command of ["ls -la", "docker ps", "git status", "cat /etc/hosts"]) {
+      expect(isAutoApproved("bash_run", "edits", { onRemoteHost: true, command })).toBe(
+        true,
+      );
+    }
   });
 
+  it("still stops anything that could change the server", () => {
+    for (const command of [
+      "rm -rf /srv",
+      "systemctl restart nginx",
+      "apt install nginx",
+      "ls && rm -rf /tmp/x",
+    ]) {
+      expect(isAutoApproved("bash_run", "edits", { onRemoteHost: true, command })).toBe(
+        false,
+      );
+    }
+  });
+
+  // Fail-closed: an unrecognised command is treated as changing the server.
+  it("stops a command it cannot classify", () => {
+    expect(
+      isAutoApproved("bash_run", "edits", { onRemoteHost: true, command: "./deploy.sh" }),
+    ).toBe(false);
+    expect(isAutoApproved("bash_run", "edits", { onRemoteHost: true })).toBe(false);
+  });
+
+  it("honours the mode that says nothing waits", () => {
+    expect(
+      isAutoApproved("bash_run", "all", { onRemoteHost: true, command: "rm -rf /" }),
+    ).toBe(true);
+  });
+
+  it("asks for everything in the default mode", () => {
+    expect(
+      isAutoApproved("bash_run", "ask", { onRemoteHost: true, command: "ls" }),
+    ).toBe(false);
+  });
+
+  // Local behaviour is untouched: `Auto-approve edits` still says commands ask.
   it("leaves local commands under the mode the user chose", () => {
     expect(isAutoApproved("bash_run", "all")).toBe(true);
-    expect(isAutoApproved("bash_run", "all", { onRemoteHost: false })).toBe(true);
-    expect(isAutoApproved("bash_run", "edits")).toBe(false);
+    expect(isAutoApproved("bash_run", "edits", { command: "ls" })).toBe(false);
   });
 
   // Only command execution is held back. File edits on the remote host are

@@ -1,6 +1,7 @@
 import { isMcpTool } from "./mcpToolNames";
 import { isExtensionTool } from "./extensionToolNames";
 import { isCustomTool } from "./customToolNames";
+import { commandRisk } from "./commandRisk";
 
 // Approval policy for agent tool calls.
 //
@@ -98,11 +99,13 @@ export const APPROVAL_MODE_HINTS: Record<ApprovalMode, string> = {
  * server - so this is the one place a mode is not allowed to speak for the
  * user.
  */
-const REMOTE_ALWAYS_ASK = new Set(["bash_run", "bash_background"]);
+const REMOTE_COMMAND_TOOLS = new Set(["bash_run", "bash_background"]);
 
 export type ApprovalContext = {
   /** The call would run against the host of an open SSH session. */
   onRemoteHost?: boolean;
+  /** The shell command, when the call is one. Decides inspect vs change. */
+  command?: string;
 };
 
 export function isAutoApproved(
@@ -110,7 +113,20 @@ export function isAutoApproved(
   mode: ApprovalMode,
   ctx: ApprovalContext = {},
 ): boolean {
-  if (ctx.onRemoteHost && REMOTE_ALWAYS_ASK.has(toolName)) return false;
+  // Remote commands used to ask in every mode. In practice that meant dozens
+  // of prompts to set up one server, most of them for `ls` and `docker ps`,
+  // and a prompt that always appears is a prompt nobody reads. The gate now
+  // sits on what carries the risk rather than on the fact of being remote.
+  if (ctx.onRemoteHost && REMOTE_COMMAND_TOOLS.has(toolName)) {
+    if (mode === "all") return true;
+    if (mode === "ask") return false;
+    // `Auto-approve edits` delegates changes inside the workspace. A remote
+    // command that only reports changes nothing anywhere, so it belongs with
+    // the read-only tools that never asked. Anything that could change the
+    // server still stops - and the classifier treats whatever it does not
+    // recognise as changing the server.
+    return commandRisk(ctx.command ?? "") === "inspect";
+  }
   if (mode === "all") return true;
   // An MCP tool is third-party code doing something this app cannot inspect,
   // so it never rides along with "auto-approve edits" - which is a statement

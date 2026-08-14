@@ -113,11 +113,11 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   commands is single-quoted, so a pattern cannot become a second command.
   `bash_run` runs on the server too, from the remote shell's working directory,
   so the agent can install packages, reload Caddy or bring a compose stack up
-  without you relaying commands. **A command on a remote host always asks for
-  approval, in every approval mode including `Auto-approve all`** — the safety
-  layer's boundary is "inside this workspace", and a command on someone else's
-  machine has no equivalent, so that is the one place a mode is not allowed to
-  speak for you. `replace_in_files`, `copy_file` and `bash_background` still
+  without you relaying commands. Remote commands are gated by what they do rather than by
+  being remote: under `Auto-approve edits`, one that only inspects (`ls`,
+  `docker ps`, `git status`) runs, and anything that could change the server
+  stops for a click — as does anything the classifier does not recognise. Under
+  `Ask every time` all of them ask; under `Auto-approve all` none do. `replace_in_files`, `copy_file` and `bash_background` still
   have no remote form and refuse while a session is open, saying what to use
   instead rather than quietly acting on your own disk.
 - **Tools the agent defines for itself.** After running something worth

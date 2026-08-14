@@ -47,7 +47,11 @@ export function useAutoApproval(
       // between the request and this effect, and the machine the command would
       // land on is what decides whether a mode may speak for them.
       const onRemoteHost = !!useChatStore.getState().live.getRemoteSession();
-      if (!tool || !isAutoApproved(tool, mode, { onRemoteHost })) continue;
+      // The command decides whether a remote call is inspection or a change,
+      // so it has to reach the policy rather than being inferred from the name.
+      const input = part.input as { command?: unknown } | undefined;
+      const command = typeof input?.command === "string" ? input.command : undefined;
+      if (!tool || !isAutoApproved(tool, mode, { onRemoteHost, command })) continue;
 
       answered.current.add(id);
       void respond({ id, approved: true });
