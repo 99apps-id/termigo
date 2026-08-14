@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { firePendingReviewForSession } from "@/modules/agents/lib/review";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { onKeysChanged } from "@/modules/settings/store";
@@ -78,9 +79,17 @@ export function useAiBootstrap(): {
     reload();
     void useOAuthStore.getState().hydrate();
     const unlistenP = onKeysChanged(reload);
+    // Sign-in happens in the settings window, which has its own copy of this
+    // store. Without re-hydrating on the backend's broadcast, the model picker
+    // here keeps the startup snapshot and a freshly connected provider stays
+    // greyed out until the app restarts.
+    const unlistenOAuthP = listen("termigo:oauth-changed", () => {
+      if (alive) void useOAuthStore.getState().hydrate();
+    });
     return () => {
       alive = false;
       void unlistenP.then((fn) => fn());
+      void unlistenOAuthP.then((fn) => fn());
     };
   }, [setApiKeys, setCustomEndpointKeys, prefsHydrated]);
 

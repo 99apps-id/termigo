@@ -151,14 +151,19 @@ export async function buildLanguageModel(
       const { createGoogleGenerativeAI } = await import("@ai-sdk/google");
       if (oauthAccess) {
         const preset = OAUTH_PRESETS.antigravity;
-        // Google's SDK has no `authToken` option — the Cloud Code API only
-        // accepts `Authorization: Bearer <token>`, so pass it via headers and
-        // skip `apiKey` (which would add an unwanted `x-goog-api-key`).
+        // The SDK has no `authToken` option and builds `x-goog-api-key` from
+        // `apiKey` via loadApiKey, which throws "Google Generative AI API key
+        // is missing" at request time when it is absent. Cloud Code
+        // authenticates with `Authorization: Bearer` instead, so pass the token
+        // as the key to satisfy that loader and override the header it
+        // produces: `options.headers` is spread after it, so this wins.
         built = createGoogleGenerativeAI({
+          apiKey: oauthAccess,
           baseURL: preset.baseUrl,
           headers: {
             ...preset.upstreamHeaders,
             Authorization: `Bearer ${oauthAccess}`,
+            "x-goog-api-key": "",
           },
         })(resolvedModelId);
       } else {

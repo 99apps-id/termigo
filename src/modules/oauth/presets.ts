@@ -56,7 +56,10 @@ export const OAUTH_PRESETS: Record<OAuthProfile, OAuthPreset> = {
     tagline: "ChatGPT plan · OpenAI",
     tile: "from-[#10a37f] to-[#0d9488]",
     manualCode: false,
-    baseUrl: "https://chatgpt.com/backend-api/codex/responses",
+    // Base only: @ai-sdk/openai appends its own "/responses" path. Including it
+    // here produced ".../codex/responses/responses", whose 404 HTML page failed
+    // JSON parsing as `Unexpected token '<', "<!DOCTYPE "...`.
+    baseUrl: "https://chatgpt.com/backend-api/codex",
     defaultModelLabel: "GPT-5.6",
     upstreamHeaders: {
       originator: "codex_cli_rs",
@@ -70,7 +73,10 @@ export const OAUTH_PRESETS: Record<OAuthProfile, OAuthPreset> = {
     tagline: "Anthropic subscription",
     tile: "from-[#d97757] to-[#c26a4d]",
     manualCode: true,
-    baseUrl: "https://api.anthropic.com/v1/messages",
+    // Base only, for the same reason as Codex: @ai-sdk/anthropic appends
+    // "/messages". Currently unused (the Claude path takes the provider
+    // default) but wrong values here become bugs the moment someone wires it up.
+    baseUrl: "https://api.anthropic.com/v1",
     defaultModelLabel: "Claude Sonnet 5",
     upstreamHeaders: {
       "anthropic-version": "2023-06-01",

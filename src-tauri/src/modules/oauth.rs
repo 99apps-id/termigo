@@ -27,7 +27,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 
 #[cfg(target_os = "linux")]
 use super::secrets;
@@ -842,6 +842,7 @@ pub async fn oauth_exchange(
     // to store: that round trip put the refresh token through the webview on
     // every sign-in.
     store_tokens(&app, profile, &tokens)?;
+    notify_accounts_changed(&app, profile);
     Ok(OAuthSession::from(&tokens))
 }
 
@@ -941,7 +942,21 @@ pub async fn oauth_load(
 
 #[tauri::command]
 pub async fn oauth_clear(app: AppHandle, profile: OAuthProfile) -> Result<(), String> {
-    delete_secret(&app, profile.as_str())
+    delete_secret(&app, profile.as_str())?;
+    notify_accounts_changed(&app, profile);
+    Ok(())
+}
+
+/// Tell every window that an account connected or disconnected.
+///
+/// Sign-in happens in the settings window, but the model picker lives in the
+/// main one, and each webview holds its own copy of the account store. Without
+/// this the picker keeps whatever it hydrated at startup, so a freshly
+/// connected provider still looks unconfigured until the app restarts.
+fn notify_accounts_changed(app: &AppHandle, profile: OAuthProfile) {
+    if let Err(error) = app.emit("termigo:oauth-changed", profile.as_str()) {
+        log::warn!("oauth: cannot broadcast account change: {error}");
+    }
 }
 
 /// Best-effort resolver for the Antigravity Cloud Code project id. The
