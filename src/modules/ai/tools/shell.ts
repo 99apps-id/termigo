@@ -66,6 +66,15 @@ export function buildShellTools(ctx: ToolContext) {
               stderr: out.stderr,
               exit_code: out.exitCode,
               truncated: out.truncated,
+              // Say where it ran when that is not what the model would assume.
+              // A shell the OSC 7 hook does not fit (fish, dash) reports no
+              // directory, so the command runs from the SSH user's home and a
+              // relative path silently means something else.
+              ...(remote.cwd
+                ? {}
+                : {
+                    note: "the remote shell has not reported a working directory, so this ran from the SSH user's home; use absolute paths",
+                  }),
             };
           } catch (e) {
             return { error: String(e), command, remote: true };

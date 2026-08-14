@@ -41,7 +41,7 @@ export function buildFetchTools() {
   return {
     fetch: tool({
       description:
-        "Fetch a URL over HTTP(S) and return its text. HTML is reduced to readable text; JSON and plain text come back as-is. Use it to read documentation, changelogs, API responses or issue pages. Private, loopback and link-local addresses are refused. Binary responses are reported but not returned. Asks for approval.",
+        "Fetch a URL over HTTP(S) and return its text. Always fetches from THIS machine, never from a connected SSH host — for a URL only reachable inside the server's network, use bash_run with curl instead. HTML is reduced to readable text; JSON and plain text come back as-is. Private, loopback and link-local addresses are refused. Binary responses are reported but not returned. Asks for approval.",
       inputSchema: z.object({
         url: z.string().describe("Absolute http(s) URL."),
         raw: z
@@ -90,6 +90,10 @@ export function buildFetchTools() {
 
         return {
           url,
+          // Stated rather than assumed: with an SSH session open the model may
+          // well think this reached the server, and a page that differs
+          // between the two networks would mislead it silently.
+          fetchedFrom: "local machine",
           status: resp.status,
           contentType,
           ...(isHtml ? { title: extractTitle(body) } : {}),

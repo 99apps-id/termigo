@@ -1,4 +1,5 @@
 import { tool } from "ai";
+import { remoteUnsupported } from "../lib/remoteFs";
 import { z } from "zod";
 import { useManagedAgentsStore } from "@/modules/agents/store/managedAgentsStore";
 import { writeToSession } from "@/modules/terminal";
@@ -37,6 +38,16 @@ export function buildManagedAgentTools(ctx: ToolContext) {
       }),
       needsApproval: true,
       execute: async ({ prompt }) => {
+        // Claude Code runs in a local terminal tab. With an SSH terminal
+        // focused the model is usually thinking about the server, and would
+        // hand the task to an agent on the wrong machine - which looks like it
+        // worked, because a local agent happily does local work.
+        if (ctx.getRemoteSession()) {
+          return remoteUnsupported(
+            "Spawning a coding agent",
+            "Focus a local terminal tab first if you meant to delegate local work, or do the remote work yourself with bash_run, which runs on the server.",
+          );
+        }
         const sessionId = ctx.getSessionId();
         if (!sessionId) return { error: "no active chat session" };
         const store = useManagedAgentsStore.getState();
