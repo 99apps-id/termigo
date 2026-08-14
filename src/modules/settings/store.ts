@@ -964,6 +964,7 @@ export async function onPreferencesChange(
     [KEY_TERMINAL_SCROLLBACK]: "terminalScrollback",
     [KEY_LAST_WSL_DISTRO]: "lastWslDistro",
     [KEY_ZOOM_LEVEL]: "zoomLevel",
+    [KEY_AGENT_APPROVAL_MODE]: "agentApprovalMode",
     [KEY_AGENT_NOTIFICATIONS]: "agentNotifications",
     [KEY_AGENT_LAUNCH_COMMANDS]: "agentLaunchCommands",
     [KEY_DEFAULT_WORKSPACE_ENV]: "defaultWorkspaceEnv",
