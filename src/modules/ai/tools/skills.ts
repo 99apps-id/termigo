@@ -1,5 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
+import { readSkillAt, searchSkills } from "../lib/skillSearchIo";
 import {
   MAX_SKILL_BYTES,
   readSkill,
@@ -18,10 +19,19 @@ export function buildSkillTools(
       description:
         "Read a skill you wrote in an earlier session. The available skills and what each is for are listed in your system prompt — call this with a name from that list BEFORE working out your own approach, since the skill already contains one that worked. Read-only, so it runs without approval.",
       inputSchema: z.object({
-        name: z.string().describe("Skill name, exactly as listed in the prompt."),
+        name: z
+          .string()
+          .describe(
+            "Skill name as listed in the prompt, or an absolute path to a SKILL.md returned by `find_skill`.",
+          ),
       }),
       execute: async ({ name }) => {
-        const skill = await readSkill(ctx.getWorkspaceRoot(), name);
+        // A path rather than a name means it came from find_skill, which
+        // reaches libraries outside the workspace. Reading by name alone would
+        // make every found skill unreachable.
+        const skill = name.includes("/") || name.includes("\\")
+          ? await readSkillAt(name)
+          : await readSkill(ctx.getWorkspaceRoot(), name);
         if (!skill) {
           // Not an error the model should retry: the name is either wrong or
           // the file is gone, and both are answered by picking another route.
@@ -45,6 +55,37 @@ ${skill.body}`,
           content: skill.body,
           ...(warning ? { warning } : {}),
         };
+      },
+    }),
+
+    find_skill: tool({
+      description:
+        "Search every skill library on this machine — this workspace, your user-level skills, and those installed by other agent tools — for one matching a query. Use it when a task looks like something a skill would cover but nothing in your prompt matches. Returns names and descriptions; call `use_skill` with a returned path to read one. Read-only, so it runs without approval.",
+      inputSchema: z.object({
+        query: z
+          .string()
+          .min(2)
+          .describe("What the skill would be about, e.g. 'airtable' or 'deploy docker'."),
+      }),
+      execute: async ({ query }) => {
+        try {
+          const matches = await searchSkills(ctx.getWorkspaceRoot(), query);
+          if (matches.length === 0) {
+            return { query, count: 0, matches: [], hint: "no skill matched; proceed on your own" };
+          }
+          return {
+            query,
+            count: matches.length,
+            matches: matches.map((m) => ({
+              name: m.name,
+              description: m.description,
+              source: m.source,
+              path: m.path,
+            })),
+          };
+        } catch (e) {
+          return { error: String(e), query };
+        }
       },
     }),
 
