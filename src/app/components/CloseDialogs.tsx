@@ -1,3 +1,5 @@
+import type { CloseManyPending } from "@/app/hooks/tabCloseGuards";
+import type { AppCloseBlocker } from "@/app/hooks/useAppCloseGuard";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -8,7 +10,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import type { AppCloseBlocker } from "@/app/hooks/useAppCloseGuard";
 import type { Tab } from "@/modules/tabs";
 
 type Props = {
@@ -22,6 +23,10 @@ type Props = {
   pendingDeleteTabs: number[] | null;
   onCancelDeleteClose: () => void;
   onConfirmDeleteClose: () => void;
+  pendingCloseMany: CloseManyPending | null;
+  closeManyConfirming: boolean;
+  onCancelCloseMany: () => void;
+  onConfirmCloseMany: () => void;
   pendingAppClose: AppCloseBlocker | null;
   onCancelAppClose: () => void;
   onConfirmAppClose: () => void;
@@ -41,6 +46,36 @@ function appCloseMessage(blocker: AppCloseBlocker): string {
   return "A process is still running in a terminal. Quitting will terminate it.";
 }
 
+function closeManyMessage(pending: CloseManyPending, tabs: Tab[]): string {
+  const { kind, dirtyIds, busyLeafIds } = pending;
+  const dirtyCount = dirtyIds.length;
+  const busyCount = busyLeafIds.length;
+  if (dirtyCount === 1 && busyCount === 0) {
+    const dirty = tabs.find(
+      (tab) => tab.kind === "editor" && dirtyIds.includes(tab.id),
+    );
+    return dirty?.title
+      ? `"${dirty.title}" has unsaved changes. Close it anyway?`
+      : "1 tab has unsaved changes. Close it anyway?";
+  }
+  if (dirtyCount > 0 && busyCount > 0) {
+    const dirty = `${dirtyCount} tab${dirtyCount === 1 ? " has" : "s have"} unsaved changes`;
+    const busy =
+      busyCount === 1
+        ? "a process is running"
+        : `${busyCount} processes are running`;
+    return `${dirty} and ${busy}. Closing will discard the changes and terminate the ${busyCount === 1 ? "process" : "processes"}. Close anyway?`;
+  }
+  if (dirtyCount > 0) {
+    return `${dirtyCount} tabs have unsaved changes. Closing will discard them. Close anyway?`;
+  }
+  const process =
+    busyCount === 1 ? "A process is" : `${busyCount} processes are`;
+  return kind === "right"
+    ? `${process} running in ${busyCount === 1 ? "a tab" : "tabs"} to the right. Closing will terminate ${busyCount === 1 ? "it" : "them"}. Close anyway?`
+    : `${process} running in ${busyCount === 1 ? "another tab" : "other tabs"}. Closing will terminate ${busyCount === 1 ? "it" : "them"}. Close anyway?`;
+}
+
 /** Confirmation dialogs for closing dirty editors and terminals with live processes. */
 export function CloseDialogs({
   tabs,
@@ -53,6 +88,10 @@ export function CloseDialogs({
   pendingDeleteTabs,
   onCancelDeleteClose,
   onConfirmDeleteClose,
+  pendingCloseMany,
+  closeManyConfirming,
+  onCancelCloseMany,
+  onConfirmCloseMany,
   pendingAppClose,
   onCancelAppClose,
   onConfirmAppClose,
@@ -133,6 +172,38 @@ export function CloseDialogs({
             </AlertDialogCancel>
             <AlertDialogAction onClick={onConfirmDeleteClose}>
               Close Anyway
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={pendingCloseMany !== null}
+        onOpenChange={(open) => !open && onCancelCloseMany()}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {pendingCloseMany?.kind === "right"
+                ? "Close Tabs to the Right"
+                : "Close Other Tabs"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingCloseMany ? closeManyMessage(pendingCloseMany, tabs) : ""}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={onCancelCloseMany}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={closeManyConfirming}
+              onClick={(event) => {
+                event.preventDefault();
+                onConfirmCloseMany();
+              }}
+            >
+              {closeManyConfirming ? "Checking..." : "Close Anyway"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
