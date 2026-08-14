@@ -98,7 +98,7 @@ export function buildFileOpsTools(ctx: ToolContext) {
 
     delete_file: tool({
       description:
-        "Delete a file or directory (directories are removed recursively). This is not recoverable unless the path is tracked by git — prefer moving something aside when you are unsure. Must be inside the workspace. Asks for approval.",
+        "Delete a file or directory (directories are removed recursively). This is not recoverable unless the path is tracked by git — prefer move_file to set something aside when you are unsure. Must be inside the workspace. Always asks for approval, including under Auto-approve edits.",
       inputSchema: z.object({
         path: z
           .string()

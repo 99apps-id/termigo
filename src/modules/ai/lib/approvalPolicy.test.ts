@@ -48,3 +48,28 @@ describe("isAutoApproved", () => {
     expect([...APPROVAL_MODES]).toEqual<ApprovalMode[]>(["ask", "edits", "all"]);
   });
 });
+
+// Deleting is the one file operation that does not ride along with
+// "auto-approve edits": an edit changes bytes that can be read back, a delete
+// of something untracked leaves nothing to read.
+describe("delete is held back from the edit tier", () => {
+  it("still asks when ordinary edits are delegated", () => {
+    expect(isAutoApproved("delete_file", "edits")).toBe(false);
+    expect(approvalTier("delete_file")).toBe("exec");
+  });
+
+  it("does not hold back the file operations that are recoverable", () => {
+    for (const t of ["move_file", "copy_file", "replace_in_files"]) {
+      expect(isAutoApproved(t, "edits")).toBe(true);
+    }
+  });
+
+  // "Auto-approve all" says nothing waits, and it has to keep meaning that.
+  it("obeys the mode that says nothing waits", () => {
+    expect(isAutoApproved("delete_file", "all")).toBe(true);
+  });
+
+  it("asks in the default mode, like everything else", () => {
+    expect(isAutoApproved("delete_file", "ask")).toBe(false);
+  });
+});

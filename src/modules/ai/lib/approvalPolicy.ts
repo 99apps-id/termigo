@@ -22,15 +22,12 @@ const EDIT_TOOLS = new Set([
   // A memory write is a small file write inside the workspace, so it follows
   // the same tier rather than getting a gate of its own.
   "remember",
-  // Moving, copying and deleting sit here with write_file rather than one tier
-  // up. The boundary this tier draws is "changes files inside the workspace",
-  // and it already admits destruction: write_file can truncate a file to
-  // nothing. Putting delete_file above it would suggest the tier is safer than
-  // it is. Every one of these still refuses paths the safety layer denies.
+  // Rewriting, moving and copying change files inside the workspace, which is
+  // exactly what this tier is for. Deleting does not belong here; see
+  // EXEC_TOOLS. All of them still refuse paths the safety layer denies.
   "replace_in_files",
   "move_file",
   "copy_file",
-  "delete_file",
 ]);
 
 /** Tools that run commands or hand work to another agent. */
@@ -39,6 +36,12 @@ const EXEC_TOOLS = new Set([
   // with "auto-approve edits" - and a page the agent fetches can carry
   // instructions, which is exactly the case worth a human glance.
   "fetch",
+  // Deleting sits here rather than with the other file operations. Every tool
+  // in the edit tier changes bytes that can be recovered - by reading the file
+  // again, or from git; a delete of something untracked leaves nothing to read
+  // at all. That asymmetry is worth a click even from someone who has already
+  // delegated ordinary edits.
+  "delete_file",
   "bash_run",
   "bash_background",
   "spawn_coding_agent",
