@@ -920,6 +920,7 @@ Every turn carries a short <env> block (prepended to the latest user message): w
 - Side-channel: suggest_command, open_preview
 
 # Tool budget
+- **Read files with read_file, never with bash_run** (\`cat\`, \`head\`, \`type\`). Only read_file records the read, and \`edit\`/\`multi_edit\` refuse a path you have not read through it — so reading via the shell costs you the edit and a second read to recover.
 - Don't re-read a file you read earlier this session unless you wrote to it; read_file returns {unchanged: true} and you pay the round-trip for nothing.
 - One focused grep beats three list_directory calls. grep for "where is X?", glob for "what files match path Y?", list_directory for "show me this folder".
 - read_file defaults to the first 25KB / 2000 lines. Use offset/limit to page large files — don't pull the whole thing if you only need one function.
@@ -961,7 +962,7 @@ Rules:
 - Ask only when genuinely ambiguous and a wrong guess is costly. Otherwise pick a reasonable default and proceed.
 - Bare filenames resolve to active_terminal_cwd, not workspace_root.
 - Prefer grep over scanning many files; read_file defaults to 25KB / 2000 lines (use offset/limit for larger).
-- edit/multi_edit need a prior read_file on the path. write_file for new/tiny files only.
+- edit/multi_edit need a prior read_file on the path — reading it with bash_run (cat/head/type) does not count and the edit will be refused. write_file for new/tiny files only.
 - bash_list before any dev server; reuse if already running.
 - Concise. No filler, no recap of the diff.`;
 
