@@ -8,6 +8,7 @@ import {
   InformationCircleIcon,
   KeyboardIcon,
   PaintBoardIcon,
+  PlugSocketIcon,
   Settings01Icon,
   SourceCodeIcon,
   UserMultiple02Icon,
@@ -19,6 +20,7 @@ import { AboutSection } from "./sections/AboutSection";
 import { AgentsSection } from "./sections/AgentsSection";
 import { EditorSection } from "./sections/EditorSection";
 import { GeneralSection } from "./sections/GeneralSection";
+import { McpSection } from "./sections/McpSection";
 import { ModelsSection } from "./sections/ModelsSection";
 import { ShortcutsSection } from "./sections/ShortcutsSection";
 import { ThemesSection } from "./sections/ThemesSection";
@@ -59,6 +61,12 @@ const TABS: {
     label: "Agents",
     icon: UserMultiple02Icon,
     component: AgentsSection,
+  },
+  {
+    id: "mcp",
+    label: "MCP",
+    icon: PlugSocketIcon,
+    component: McpSection,
   },
   {
     id: "about",
