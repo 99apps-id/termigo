@@ -333,6 +333,7 @@ pub fn run() {
             get_launch_files,
             open_settings_window,
             agent::agent_enable_hooks,
+            agent::agent_locate_command,
             agent::agent_hooks_status,
             secrets::secrets_get,
             secrets::secrets_set,

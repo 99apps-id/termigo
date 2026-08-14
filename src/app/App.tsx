@@ -4,6 +4,7 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
 import { Toaster } from "@/components/ui/sonner";
+import { toast } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { HostKeyPromptDialog } from "@/modules/ssh/HostKeyPromptDialog";
 import { useSshRightPanelStore } from "@/modules/ssh/sshRightPanelStore";
@@ -568,6 +569,32 @@ export default function App() {
       const command = validateAgentLaunchCommand(request.command);
       if (!command.ok) return;
       const launcher = findAgentLauncher(request.agent);
+
+      // The launcher types the command into a shell, so a CLI that is not on
+      // PATH produced a tab, a bare "not recognized", and no hint that PATH was
+      // the problem. Check first and say something useful instead - including
+      // where the binary actually is, which for Claude installed as a VS Code
+      // extension is a real path the user can paste straight back in.
+      void (async () => {
+        const first = command.command.trim().split(/\s+/)[0] ?? "";
+        try {
+          const found = await invoke<{
+            onPath: boolean;
+            foundAt: string | null;
+            foundIn: string | null;
+          }>("agent_locate_command", { command: first });
+          if (found.onPath) return;
+          toast.error(`${launcher.label} is not on your PATH`, {
+            description: found.foundAt
+              ? `Found it in ${found.foundIn}. Set the start command to:
+${found.foundAt}`
+              : `Install its CLI, then restart Termigo so the new PATH is picked up. A running app does not see PATH changes.`,
+            duration: 12_000,
+          });
+        } catch {
+          // The check is a courtesy; never let it stop a launch that might work.
+        }
+      })();
       const title =
         request.instances === 1
           ? launcher.label
