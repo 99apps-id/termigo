@@ -17,6 +17,7 @@ jobs:
     env:
       HAS_UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
       HAS_SIGNPATH: ${{ secrets.SIGNPATH_API_TOKEN != '' }}
+      HAS_APPLE: ${{ secrets.APPLE_CERTIFICATE != '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -70,7 +71,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Write Apple API key to disk
-        if: startsWith(matrix.platform, 'macos')
+        if: startsWith(matrix.platform, 'macos') && env.HAS_APPLE == 'true'
         shell: bash
         env:
           KEY_CONTENT: ${{ secrets.APPLE_API_KEY_PATH }}
@@ -78,6 +79,52 @@ jobs:
           mkdir -p "$HOME/private_keys"
           printf '%s' "$KEY_CONTENT" > "$HOME/private_keys/AuthKey.p8"
           echo "APPLE_API_KEY_PATH=$HOME/private_keys/AuthKey.p8" >> "$GITHUB_ENV"
+
+      # Tauri runs the codesign path whenever APPLE_CERTIFICATE is set, and
+      # GitHub sets it to an empty string when the secret does not exist, so an
+      # unsigned build failed at `security import`. Export these only when a
+      # certificate is actually configured.
+      - name: Configure Apple signing
+        if: startsWith(matrix.platform, 'macos') && env.HAS_APPLE == 'true'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+        run: |
+          {
+            echo "APPLE_CERTIFICATE<<__TERMIGO_EOF__"
+            echo "${APPLE_CERTIFICATE}"
+            echo __TERMIGO_EOF__
+          } >> "$GITHUB_ENV"
+          {
+            echo "APPLE_CERTIFICATE_PASSWORD<<__TERMIGO_EOF__"
+            echo "${APPLE_CERTIFICATE_PASSWORD}"
+            echo __TERMIGO_EOF__
+          } >> "$GITHUB_ENV"
+          {
+            echo "APPLE_SIGNING_IDENTITY<<__TERMIGO_EOF__"
+            echo "${APPLE_SIGNING_IDENTITY}"
+            echo __TERMIGO_EOF__
+          } >> "$GITHUB_ENV"
+          {
+            echo "APPLE_TEAM_ID<<__TERMIGO_EOF__"
+            echo "${APPLE_TEAM_ID}"
+            echo __TERMIGO_EOF__
+          } >> "$GITHUB_ENV"
+          {
+            echo "APPLE_API_ISSUER<<__TERMIGO_EOF__"
+            echo "${APPLE_API_ISSUER}"
+            echo __TERMIGO_EOF__
+          } >> "$GITHUB_ENV"
+          {
+            echo "APPLE_API_KEY<<__TERMIGO_EOF__"
+            echo "${APPLE_API_KEY}"
+            echo __TERMIGO_EOF__
+          } >> "$GITHUB_ENV"
 
       - id: tauri
         uses: tauri-apps/tauri-action@v1
@@ -95,12 +142,6 @@ jobs:
           TERMIGO_GOOGLE_CLIENT_ID: ${{ secrets.TERMIGO_GOOGLE_CLIENT_ID }}
           TERMIGO_GOOGLE_CLIENT_SECRET: ${{ secrets.TERMIGO_GOOGLE_CLIENT_SECRET }}
 
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Termigo ${{ github.ref_name }}"
@@ -234,7 +275,7 @@ jobs:
           output-artifact-directory: 'signed'
 
       - name: Re-sign updater and upload signed Windows installers
-        if: matrix.platform == 'windows-latest' && startsWith(github.ref, 'refs/tags/')
+        if: matrix.platform == 'windows-latest' && startsWith(github.ref, 'refs/tags/') && env.HAS_SIGNPATH == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
