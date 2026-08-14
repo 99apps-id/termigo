@@ -71,3 +71,18 @@ export async function mcpPing(
 ): Promise<boolean> {
   return invoke<boolean>("mcp_ping", { server, workspace: workspace ?? null });
 }
+
+/** Add or replace a user-level server in `~/.termigo/mcp.json`. */
+export async function mcpAddServer(input: {
+  name: string;
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+}): Promise<void> {
+  return invoke("mcp_add_server", input);
+}
+
+/** Remove a user-level server. Project-scope entries are untouched. */
+export async function mcpRemoveServer(name: string): Promise<void> {
+  return invoke("mcp_remove_server", { name });
+}

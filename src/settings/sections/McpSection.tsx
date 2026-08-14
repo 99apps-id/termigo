@@ -1,11 +1,17 @@
 import { Button } from "@/components/ui/button";
 import {
+  mcpAddServer,
   mcpListServers,
   mcpListTools,
   mcpPing,
+  mcpRemoveServer,
   type McpServer,
   type McpTool,
 } from "@/modules/mcp/bridge";
+import { parseCommandLine, parseEnvLines } from "@/modules/ai/lib/mcpArgs";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Add01Icon, Delete02Icon } from "@hugeicons/core-free-icons";
 import { mcpToolName } from "@/modules/ai/lib/mcpToolNames";
 import {
   CheckmarkCircle02Icon,
@@ -39,7 +45,13 @@ type Probe =
  * answers is the thing users actually need to know, and finding out otherwise
  * means waiting for the agent to fail mid-task.
  */
-function ServerRow({ server }: { server: McpServer }) {
+function ServerRow({
+  server,
+  onRemoved,
+}: {
+  server: McpServer;
+  onRemoved: () => void;
+}) {
   const [probe, setProbe] = useState<Probe>({ state: "idle" });
 
   const test = useCallback(async () => {
@@ -75,6 +87,20 @@ function ServerRow({ server }: { server: McpServer }) {
           <HugeiconsIcon icon={RefreshIcon} size={12} strokeWidth={1.75} />
           {probe.state === "running" ? "Testing…" : "Test"}
         </Button>
+        {/* Only user-scope entries: a project entry lives in the workspace
+            file, which this panel does not manage. */}
+        {server.scope === "user" && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => void mcpRemoveServer(server.name).then(onRemoved)}
+            title={`Remove ${server.name}`}
+            aria-label={`Remove ${server.name}`}
+            className="h-7 px-2 text-[11px] text-muted-foreground hover:text-destructive"
+          >
+            <HugeiconsIcon icon={Delete02Icon} size={12} strokeWidth={1.75} />
+          </Button>
+        )}
       </div>
 
       <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground">
@@ -125,6 +151,120 @@ function ServerRow({ server }: { server: McpServer }) {
   );
 }
 
+/**
+ * Add a server without hand-editing JSON.
+ *
+ * The command is one free-text line because that is how every server is
+ * documented - `npx -y @scope/server`. A structured array field would make the
+ * common case harder than the file editing this replaces.
+ */
+function AddServerForm({ onAdded }: { onAdded: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [commandLine, setCommandLine] = useState("");
+  const [envText, setEnvText] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const reset = () => {
+    setName("");
+    setCommandLine("");
+    setEnvText("");
+    setError(null);
+  };
+
+  const save = async () => {
+    setError(null);
+    const { command, args } = parseCommandLine(commandLine);
+    if (!name.trim()) return setError("Give the server a name.");
+    if (!command) return setError("Enter the command that starts the server.");
+    setSaving(true);
+    try {
+      await mcpAddServer({
+        name: name.trim(),
+        command,
+        args,
+        env: parseEnvLines(envText),
+      });
+      reset();
+      setOpen(false);
+      onAdded();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={() => setOpen(true)}
+        className="h-7 w-fit gap-1.5 text-[11px]"
+      >
+        <HugeiconsIcon icon={Add01Icon} size={12} strokeWidth={1.75} />
+        Add a server
+      </Button>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-2 rounded-md border border-border/60 p-3">
+      <label className="text-[11px] font-medium">Name</label>
+      <Input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="github"
+        className="h-8 text-[12px]"
+      />
+
+      <label className="text-[11px] font-medium">Command</label>
+      <Input
+        value={commandLine}
+        onChange={(e) => setCommandLine(e.target.value)}
+        placeholder="npx -y @modelcontextprotocol/server-github"
+        className="h-8 font-mono text-[11px]"
+      />
+
+      <label className="text-[11px] font-medium">
+        Environment <span className="text-muted-foreground">(optional, one KEY=value per line)</span>
+      </label>
+      <Textarea
+        value={envText}
+        onChange={(e) => setEnvText(e.target.value)}
+        placeholder="GITHUB_TOKEN=..."
+        rows={3}
+        className="font-mono text-[11px]"
+      />
+
+      {error && <p className="text-[11px] text-destructive">{error}</p>}
+
+      <div className="flex items-center gap-2">
+        <Button size="sm" onClick={() => void save()} disabled={saving} className="h-7 text-[11px]">
+          {saving ? "Saving…" : "Save"}
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => {
+            reset();
+            setOpen(false);
+          }}
+          className="h-7 text-[11px]"
+        >
+          Cancel
+        </Button>
+      </div>
+      <p className="text-[10px] text-muted-foreground">
+        Saved to ~/.termigo/mcp.json, so it applies to every project. Test it
+        below once saved.
+      </p>
+    </div>
+  );
+}
+
 export function McpSection() {
   const [servers, setServers] = useState<McpServer[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -154,6 +294,7 @@ export function McpSection() {
       />
 
       <div className="flex items-center gap-2">
+        <AddServerForm onAdded={() => void load()} />
         <Button
           size="sm"
           variant="outline"
@@ -161,7 +302,7 @@ export function McpSection() {
           className="h-7 gap-1.5 text-[11px]"
         >
           <HugeiconsIcon icon={RefreshIcon} size={12} strokeWidth={1.75} />
-          Reload registry
+          Reload
         </Button>
       </div>
 
@@ -188,7 +329,7 @@ export function McpSection() {
       ) : (
         <div className="flex flex-col gap-2">
           {servers.map((s) => (
-            <ServerRow key={`${s.scope}:${s.name}`} server={s} />
+            <ServerRow key={`${s.scope}:${s.name}`} server={s} onRemoved={() => void load()} />
           ))}
         </div>
       )}

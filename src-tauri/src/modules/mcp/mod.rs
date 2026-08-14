@@ -80,6 +80,91 @@ fn user_registry_path() -> Option<PathBuf> {
     dirs::home_dir().map(|dir| dir.join(".termigo").join("mcp.json"))
 }
 
+/// Edit the user-level registry in place, preserving entries this app does not
+/// manage.
+///
+/// Read-modify-write on the parsed JSON rather than rewriting from a struct:
+/// the file is shared with the Go companion CLI and hand-edited by users, and
+/// a rewrite would silently drop any key a future version adds.
+fn edit_user_registry<F>(mutate: F) -> Result<(), String>
+where
+    F: FnOnce(&mut serde_json::Map<String, Value>) -> Result<(), String>,
+{
+    let path = user_registry_path().ok_or_else(|| "no home directory".to_string())?;
+    let mut root: Value = match std::fs::read_to_string(&path) {
+        Ok(text) => serde_json::from_str(&text)
+            .map_err(|e| format!("{} is not valid JSON: {e}", path.display()))?,
+        Err(_) => serde_json::json!({}),
+    };
+    if !root.is_object() {
+        root = serde_json::json!({});
+    }
+    let obj = root.as_object_mut().expect("object above");
+    let servers = obj
+        .entry("mcpServers")
+        .or_insert_with(|| Value::Object(serde_json::Map::new()));
+    if !servers.is_object() {
+        *servers = Value::Object(serde_json::Map::new());
+    }
+    mutate(servers.as_object_mut().expect("object above"))?;
+
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let body = serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?;
+    // Written via a temp file and renamed: a half-written registry would be
+    // unparseable, and this file is the only record of the user's servers.
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, format!("{body}
+")).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &path).map_err(|e| e.to_string())
+}
+
+/// Add or replace a user-level server.
+#[tauri::command]
+pub async fn mcp_add_server(
+    name: String,
+    command: String,
+    args: Vec<String>,
+    env: HashMap<String, String>,
+) -> Result<(), String> {
+    let trimmed = name.trim().to_string();
+    if trimmed.is_empty() {
+        return Err("a server needs a name".into());
+    }
+    if command.trim().is_empty() {
+        return Err("a server needs a command".into());
+    }
+    edit_user_registry(move |servers| {
+        let mut entry = serde_json::Map::new();
+        entry.insert("command".into(), Value::String(command.trim().to_string()));
+        if !args.is_empty() {
+            entry.insert(
+                "args".into(),
+                Value::Array(args.into_iter().map(Value::String).collect()),
+            );
+        }
+        if !env.is_empty() {
+            entry.insert(
+                "env".into(),
+                Value::Object(env.into_iter().map(|(k, v)| (k, Value::String(v))).collect()),
+            );
+        }
+        servers.insert(trimmed, Value::Object(entry));
+        Ok(())
+    })
+}
+
+/// Remove a user-level server. A project-scope entry of the same name is left
+/// alone: it lives in the workspace file, which this does not touch.
+#[tauri::command]
+pub async fn mcp_remove_server(name: String) -> Result<(), String> {
+    edit_user_registry(move |servers| {
+        servers.remove(&name);
+        Ok(())
+    })
+}
+
 /// Merged registry for a workspace, sorted by name.
 pub fn load_servers(workspace: Option<&Path>) -> Vec<ServerConfig> {
     let mut by_name: HashMap<String, ServerConfig> = HashMap::new();
