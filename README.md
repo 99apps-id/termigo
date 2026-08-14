@@ -89,9 +89,23 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   length, entry count and total size, because everything in it costs context on
   every request. The sweep only runs in the auto-approve modes: in
   `Ask every time`, nothing is written without a click.
+- **Steer, stop and resume a run.** Typing while the agent works queues the
+  message and delivers it when the current run settles, so a correction reaches
+  it instead of being dropped — attachments included. Queued messages are shown
+  with a way to take them back. Stop reaches the work, not just the reply: it
+  kills the command the agent is running rather than leaving a shell going
+  behind a stopped agent, and the transcript then offers to continue.
+- **The agent can define its own tools.** A command worth repeating is saved as
+  a named tool with `{{placeholders}}` in `.termigo/tools.json` and called by
+  name afterwards. It is a command template, not code — running one goes
+  through the same shell safety check, approval tier and remote routing as
+  `bash_run`, so a custom tool can do nothing the agent could not already do.
+  Arguments are shell-quoted with no raw mode.
 - Agentic workflow: plans, sub-agents, project memory via `TERMIGO.md`,
-  file read/write/edit/multi-edit/grep/glob, bash with approval gating,
-  background processes
+  read, write, edit, multi-edit, grep, glob, move, copy, delete,
+  cross-file literal replace, HTTP fetch, bash with approval gating,
+  background processes, and SSH port forwarding so a service on a remote host
+  becomes reachable locally
 - Tool calls are **approval-gated**; approvals resume the run (including
   OpenAI-compatible providers such as DeepSeek)
 - **Graduated auto-approval.** Choose how much the agent may do without
