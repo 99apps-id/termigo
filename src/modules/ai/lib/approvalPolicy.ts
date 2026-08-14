@@ -22,6 +22,10 @@ const EDIT_TOOLS = new Set([
   // A memory write is a small file write inside the workspace, so it follows
   // the same tier rather than getting a gate of its own.
   "remember",
+  // A skill is a file in the workspace like any other, and writing one is
+  // how the agent gets better; gating it above edits would make improving
+  // itself cost more than editing the code it just learned about.
+  "create_skill",
   // Rewriting, moving and copying change files inside the workspace, which is
   // exactly what this tier is for. Deleting does not belong here; see
   // EXEC_TOOLS. All of them still refuse paths the safety layer denies.

@@ -1,6 +1,7 @@
 import type { UIMessage } from "@ai-sdk/react";
 import { readMemory } from "./memory";
 import { getMcpTools } from "./mcpTools";
+import { listSkills } from "./skills";
 import type { CustomEndpoint } from "../config";
 import { runAgentStream, type AgentUsageDelta } from "./agent";
 import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
@@ -77,10 +78,11 @@ type SendOptions = {
 export function createContextAwareTransport(deps: Deps) {
   const run = async (options: SendOptions) => {
     const live = deps.getLive();
-    const [projectMemory, learnedMemory, mcpTools] = await Promise.all([
+    const [projectMemory, learnedMemory, mcpTools, skills] = await Promise.all([
       readTermigoMd(live.workspaceRoot),
       readMemory(live.workspaceRoot),
       getMcpTools(live.workspaceRoot),
+      listSkills(live.workspaceRoot),
     ]);
     const envBlock = formatEnvBlock(live);
     const messagesForRun = envBlock
@@ -92,6 +94,7 @@ export function createContextAwareTransport(deps: Deps) {
       customInstructions: deps.getCustomInstructions(),
       learnedMemory,
       mcpTools,
+      skills,
       agentPersona: deps.getAgentPersona(),
       toolContext: deps.toolContext,
       onStep: deps.onStep,

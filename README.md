@@ -64,6 +64,16 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   xAI (Grok), Cerebras, OpenRouter, DeepSeek, Mistral, plus any
   OpenAI-compatible endpoint
 - **Local / offline:** LM Studio, MLX, Ollama
+- **Skills.** The agent writes reusable procedures for itself in
+  `.termigo/skills/<name>/SKILL.md` — a deploy sequence, a debugging route that
+  worked, a release checklist — and reads them back in later sessions. This is
+  what makes it better over time rather than merely better informed: memory
+  stops a session starting from zero, a skill means a procedure worked out once
+  never has to be worked out again. Re-saving a name replaces it, so a skill
+  improves with use. Only names and descriptions reach the system prompt;
+  bodies load on demand through `use_skill`, so a shelf of skills costs almost
+  nothing until one is needed. Plain Markdown with frontmatter, so you can read,
+  edit or delete any of them by hand.
 - **Self-maintaining memory.** The agent records durable project facts in
   `.termigo/memory.md` and reads them back in every later session, so build
   commands, conventions and decisions do not have to be re-explained. Facts are

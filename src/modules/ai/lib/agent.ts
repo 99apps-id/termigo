@@ -24,6 +24,7 @@ import {
 } from "../config";
 import { buildTools, type ToolContext } from "../tools/tools";
 import type { McpToolset } from "./mcpTools";
+import { skillsBlock, type Skill } from "./skills";
 import { compactModelMessagesDetailed } from "./compact";
 import { memoryBlock as learnedBlock, type MemoryEntry } from "./memory";
 import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
@@ -313,6 +314,7 @@ function buildStableSystem(
   customInstructions: string | undefined,
   projectMemory: string | null,
   learned: readonly MemoryEntry[],
+  skills: readonly Skill[],
 ): string {
   const base = selectSystemPrompt(modelId);
   const personaBlock = persona?.instructions.trim()
@@ -325,7 +327,9 @@ function buildStableSystem(
     projectMemory && projectMemory.trim().length > 0
       ? `\n\n## PROJECT — TERMIGO.md\n${projectMemory.trim()}`
       : "";
-  return `${base}${memoryBlock}${learnedBlock(learned)}${personaBlock}${customBlock}`;
+  // Skills sit after facts and before persona: the model should know what it
+  // already knows how to do before it is told how to behave.
+  return `${base}${memoryBlock}${learnedBlock(learned)}${skillsBlock(skills)}${personaBlock}${customBlock}`;
 }
 
 export type AgentUsage = {
@@ -377,6 +381,8 @@ export type RunAgentOptions = {
    * while `buildTools` is synchronous.
    */
   mcpTools?: McpToolset;
+  /** Skill index (names + descriptions). Bodies load on demand. */
+  skills?: readonly Skill[];
   uiMessages: UIMessage[];
   abortSignal?: AbortSignal;
 };
@@ -406,6 +412,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
     opts.customInstructions,
     opts.projectMemory ?? null,
     opts.learnedMemory ?? [],
+    opts.skills ?? [],
   );
 
   const history = await convertToModelMessages(sanitizeUiMessages(opts.uiMessages));

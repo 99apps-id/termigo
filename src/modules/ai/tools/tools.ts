@@ -3,6 +3,7 @@ import { buildEditTools } from "./edit";
 import { buildFetchTools } from "./fetch";
 import { buildFileOpsTools } from "./fileops";
 import { buildReplaceTools } from "./replace";
+import { buildSkillTools } from "./skills";
 import { buildFsTools } from "./fs";
 import { buildSearchTools } from "./search";
 import { buildShellTools } from "./shell";
@@ -38,6 +39,7 @@ export function buildTools(ctx: import("./context").ToolContext) {
     ...buildFileOpsTools(ctx),
     ...buildFetchTools(),
     ...buildReplaceTools(ctx),
+    ...buildSkillTools(ctx),
     ...buildEditTools(ctx),
     ...buildSearchTools(ctx),
     ...buildShellTools(ctx),
