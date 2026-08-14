@@ -53,9 +53,31 @@ pub struct McpClient {
 }
 
 impl McpClient {
+    /// Resolve a command name against PATH before spawning it.
+    ///
+    /// On Windows the tools MCP servers ship as - `npx`, `uvx`, `bunx` - are
+    /// `.cmd` shims, and `Command::new("npx")` fails with "program not found":
+    /// the standard library tries the literal name and `.exe`, never the rest
+    /// of PATHEXT. Since virtually every published server is documented as
+    /// `npx -y <package>`, that made MCP unusable on Windows for almost all of
+    /// them. `which` applies the platform's own lookup rules, PATHEXT
+    /// included.
+    ///
+    /// A command that is already a path, or that resolution cannot find, is
+    /// passed through unchanged so the spawn error names what the user wrote
+    /// rather than something this function invented.
+    fn resolve_program(command: &str) -> std::ffi::OsString {
+        if command.contains('/') || command.contains('\\') {
+            return command.into();
+        }
+        which::which(command)
+            .map(std::path::PathBuf::into_os_string)
+            .unwrap_or_else(|_| command.into())
+    }
+
     /// Spawn the server and complete the MCP handshake.
     pub async fn connect(config: &ServerConfig) -> Result<Self, String> {
-        let mut command = Command::new(&config.command);
+        let mut command = Command::new(Self::resolve_program(&config.command));
         command
             .args(&config.args)
             .stdin(Stdio::piped())
