@@ -96,6 +96,11 @@ export const OAUTH_PRESETS: Record<OAuthProfile, OAuthPreset> = {
     upstreamHeaders: {
       "User-Agent": "antigravity/ide/2.1.1",
       "X-Goog-Api-Client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
+      "Client-Metadata": JSON.stringify({
+        ideType: 9,
+        platform: 5,
+        pluginType: 2,
+      }),
     },
   },
 };

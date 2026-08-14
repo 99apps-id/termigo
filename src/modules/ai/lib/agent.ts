@@ -27,6 +27,7 @@ import { compactModelMessagesDetailed } from "./compact";
 import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
 import { OAUTH_PRESETS } from "@/modules/oauth/presets";
 import { useOAuthStore } from "@/modules/oauth/store";
+import { createOAuthModelFetch } from "./oauthFetch";
 import { prepareAgentPrompt } from "./prompt";
 import { createProxyFetch, proxyFetch } from "./proxyFetch";
 import { sanitizeUiMessages } from "./sanitizeMessages";
@@ -121,7 +122,10 @@ export async function buildLanguageModel(
       if (oauthAccess) {
         const preset = OAUTH_PRESETS.codex;
         built = createOpenAI({
-          fetch: proxyFetch,
+          fetch: createOAuthModelFetch({
+            profile: "codex",
+            bakedToken: oauthAccess,
+          }),
           apiKey: oauthAccess,
           baseURL: preset.baseUrl,
           headers: preset.upstreamHeaders,
@@ -140,7 +144,10 @@ export async function buildLanguageModel(
         // access token as apiKey sends it as `x-api-key`, which Anthropic's
         // OAuth endpoints reject.
         built = createAnthropic({
-          fetch: proxyFetch,
+          fetch: createOAuthModelFetch({
+            profile: "claude",
+            bakedToken: oauthAccess,
+          }),
           authToken: oauthAccess,
           headers: preset.upstreamHeaders,
         })(resolvedModelId);
@@ -160,7 +167,11 @@ export async function buildLanguageModel(
         // as the key to satisfy that loader and override the header it
         // produces: `options.headers` is spread after it, so this wins.
         built = createGoogleGenerativeAI({
-          fetch: proxyFetch,
+          fetch: createOAuthModelFetch({
+            profile: "antigravity",
+            bakedToken: oauthAccess,
+            projectId: oauthTokens.antigravity?.project_id ?? null,
+          }),
           apiKey: oauthAccess,
           baseURL: preset.baseUrl,
           headers: {
