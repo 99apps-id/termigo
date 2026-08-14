@@ -234,6 +234,16 @@ See [`docs/`](docs/) for the MCP, skills, agents, and architecture guides.
   </sub>
 </p>
 
+<p align="center">
+  <img src="docs/termigo-model.png" alt="Model and account settings" width="900" />
+  <br/>
+  <sub>
+    Providers in one place: account sign-in for Codex, Claude and Antigravity
+    alongside the chat model, inline autocomplete, and a local Whisper.cpp
+    voice provider
+  </sub>
+</p>
+
 ## Architecture
 
 ```text
