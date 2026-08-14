@@ -44,6 +44,7 @@ import {
   languageCompartment,
   lspCompartment,
   vimCompartment,
+  wordWrapExtension,
   wrapCompartment,
 } from "./lib/extensions";
 import {
@@ -119,7 +120,9 @@ export const EditorPane = memo(
     const cmRef = useRef<ReactCodeMirrorRef>(null);
     const themeExt = useEditorThemeExt();
     const vimMode = usePreferencesStore((s) => s.vimMode);
-    const editorWordWrap = usePreferencesStore((s) => s.editorWordWrap);
+    const wordWrapColumn = usePreferencesStore((s) =>
+      s.editorWordWrap ? s.editorWordWrapColumn : null,
+    );
     const languageRef = useRef<string | null>(null);
     const [langId, setLangId] = useState<string | null>(null);
     const apiKeyRef = useRef<string | null>(null);
@@ -312,9 +315,11 @@ export const EditorPane = memo(
           usePreferencesStore.getState().vimMode ? Prec.highest(vim()) : [],
         ),
         wrapCompartment.of(
-          usePreferencesStore.getState().editorWordWrap
-            ? EditorView.lineWrapping
-            : [],
+          wordWrapExtension(
+            usePreferencesStore.getState().editorWordWrap
+              ? usePreferencesStore.getState().editorWordWrapColumn
+              : null,
+          ),
         ),
         vimHandlersExtension(() => ({
           save: () => {
@@ -396,11 +401,9 @@ export const EditorPane = memo(
       const view = cmRef.current?.view;
       if (!view) return;
       view.dispatch({
-        effects: wrapCompartment.reconfigure(
-          editorWordWrap ? EditorView.lineWrapping : [],
-        ),
+        effects: wrapCompartment.reconfigure(wordWrapExtension(wordWrapColumn)),
       });
-    }, [editorWordWrap]);
+    }, [wordWrapColumn]);
 
     useEffect(() => {
       if (doc.status !== "ready") return;
