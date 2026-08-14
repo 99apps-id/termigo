@@ -6,9 +6,13 @@ import {
   saveSkill,
   slugifySkillName,
 } from "../lib/skills";
+import { checkSkillDependencies, dependencyWarning } from "../lib/skillDeps";
 import type { ToolContext } from "./context";
 
-export function buildSkillTools(ctx: ToolContext) {
+export function buildSkillTools(
+  ctx: ToolContext,
+  availableTools: readonly string[] = [],
+) {
   return {
     use_skill: tool({
       description:
@@ -23,11 +27,23 @@ export function buildSkillTools(ctx: ToolContext) {
           // the file is gone, and both are answered by picking another route.
           return { found: false, name, reason: "no skill by that name" };
         }
+        // Checked against the live registry: a skill written for another agent
+        // parses perfectly and can still be unfollowable here, and finding that
+        // out by calling a tool that does not exist wastes a step and reads as
+        // a Termigo fault.
+        const warning = dependencyWarning(
+          checkSkillDependencies(
+            `${skill.description}
+${skill.body}`,
+            availableTools,
+          ),
+        );
         return {
           found: true,
           name: skill.name,
           description: skill.description,
           content: skill.body,
+          ...(warning ? { warning } : {}),
         };
       },
     }),

@@ -34,12 +34,11 @@ export { resolvePath, type ToolContext } from "./context";
  * outside that.
  */
 export function buildTools(ctx: import("./context").ToolContext) {
-  return {
+  const base = {
     ...buildFsTools(ctx),
     ...buildFileOpsTools(ctx),
     ...buildFetchTools(),
     ...buildReplaceTools(ctx),
-    ...buildSkillTools(ctx),
     ...buildEditTools(ctx),
     ...buildSearchTools(ctx),
     ...buildShellTools(ctx),
@@ -49,6 +48,11 @@ export function buildTools(ctx: import("./context").ToolContext) {
     ...buildMemoryTools(ctx),
     ...buildManagedAgentTools(ctx),
   } as const;
+
+  // Skill tools last, and told what the others are called: the dependency
+  // checker compares a skill against the real registry rather than a list kept
+  // by hand, so adding or renaming a tool later cannot leave the check stale.
+  return { ...base, ...buildSkillTools(ctx, Object.keys(base)) } as const;
 }
 
 export type ChatTools = ReturnType<typeof buildTools>;
