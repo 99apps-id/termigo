@@ -376,7 +376,12 @@ pub enum AiStreamEvent {
         headers: HashMap<String, String>,
     },
     Chunk {
-        bytes: Vec<u8>,
+        /// Base64 rather than a byte array. A `Vec<u8>` serializes as a JSON
+        /// array of decimal numbers - about three bytes of transport per byte
+        /// of payload - and every chunk under 8 KB is injected into the webview
+        /// as JavaScript source, so that inflation is paid as script the engine
+        /// then has to parse. Base64 costs 1.33x and decodes natively.
+        b64: String,
     },
     End,
     Error {
@@ -384,16 +389,48 @@ pub enum AiStreamEvent {
     },
 }
 
+/// How the webview hands over a request body.
+///
+/// Every AI call sends JSON, which is already text and needs no encoding at
+/// all - it used to be walked into a `number[]`, tripling it on the way across
+/// and again on the way back out. Binary bodies are rare here, so they pay
+/// base64 rather than making the common case pay for them.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum RequestBody {
+    Text { text: String },
+    Base64 { data: String },
+}
+
+impl RequestBody {
+    fn into_bytes(self) -> Result<Vec<u8>, String> {
+        use base64::Engine as _;
+        match self {
+            Self::Text { text } => Ok(text.into_bytes()),
+            Self::Base64 { data } => base64::engine::general_purpose::STANDARD
+                .decode(data.as_bytes())
+                .map_err(|e| format!("invalid base64 request body: {e}")),
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn ai_http_stream(
     url: String,
     method: String,
     headers: Option<HashMap<String, String>>,
-    body: Option<Vec<u8>>,
+    body: Option<RequestBody>,
     allow_private_network: Option<bool>,
     on_event: Channel<AiStreamEvent>,
 ) -> Result<(), String> {
     let allow_private = allow_private_network.unwrap_or(false);
+    let body = match body.map(RequestBody::into_bytes).transpose() {
+        Ok(b) => b,
+        Err(e) => {
+            let _ = on_event.send(AiStreamEvent::Error { message: e.clone() });
+            return Err(e);
+        }
+    };
     let parsed = match validate_url(&url, allow_private) {
         Ok(p) => p,
         Err(e) => {
@@ -438,10 +475,11 @@ pub async fn ai_http_stream(
     while let Some(item) = stream.next().await {
         match item {
             Ok(chunk) => {
+                use base64::Engine as _;
                 let bytes: Bytes = chunk;
                 if on_event
                     .send(AiStreamEvent::Chunk {
-                        bytes: bytes.to_vec(),
+                        b64: base64::engine::general_purpose::STANDARD.encode(&bytes),
                     })
                     .is_err()
                 {
@@ -572,5 +610,59 @@ mod tests {
                 "expected {hop} to be rejected"
             );
         }
+    }
+
+    // A body used to arrive as a JSON array of decimal numbers. Text now
+    // crosses as itself, so these guard the decode on the other side.
+    #[test]
+    fn text_body_crosses_without_encoding() {
+        let b: RequestBody = serde_json::from_str(r#"{"kind":"text","text":"{\"a\":1}"}"#)
+            .expect("parses");
+        assert_eq!(b.into_bytes().unwrap(), br#"{"a":1}"#.to_vec());
+    }
+
+    #[test]
+    fn text_body_keeps_multibyte_characters() {
+        let b = RequestBody::Text {
+            text: "halo — 日本語 🎉".to_string(),
+        };
+        assert_eq!(
+            String::from_utf8(b.into_bytes().unwrap()).unwrap(),
+            "halo — 日本語 🎉"
+        );
+    }
+
+    #[test]
+    fn base64_body_round_trips_every_byte() {
+        use base64::Engine as _;
+        let raw: Vec<u8> = (0u16..=255).map(|n| n as u8).collect();
+        let b = RequestBody::Base64 {
+            data: base64::engine::general_purpose::STANDARD.encode(&raw),
+        };
+        assert_eq!(b.into_bytes().unwrap(), raw);
+    }
+
+    #[test]
+    fn malformed_base64_is_reported_not_silently_dropped() {
+        let b = RequestBody::Base64 {
+            data: "not valid base64!!".to_string(),
+        };
+        let err = b.into_bytes().unwrap_err();
+        assert!(
+            err.contains("invalid base64 request body"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn empty_bodies_are_empty_not_errors() {
+        assert!(RequestBody::Text { text: String::new() }
+            .into_bytes()
+            .unwrap()
+            .is_empty());
+        assert!(RequestBody::Base64 { data: String::new() }
+            .into_bytes()
+            .unwrap()
+            .is_empty());
     }
 }

@@ -3,11 +3,49 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 /** Streaming events emitted by the Rust `ai_http_stream` command. */
 type AiStreamEvent =
   | { kind: "headers"; status: number; headers: Record<string, string> }
-  | { kind: "chunk"; bytes: number[] }
+  | { kind: "chunk"; b64: string }
   | { kind: "end" }
   | { kind: "error"; message: string };
 
 type RequestHeaders = Record<string, string>;
+
+/**
+ * How a body crosses to Rust.
+ *
+ * Both sides used to speak `number[]`, which JSON writes as decimal digits and
+ * commas: about three bytes of transport for every byte of payload, built and
+ * parsed twice per request. An agent re-sends the whole conversation on every
+ * step, so that multiplier landed on the largest thing in the app and grew
+ * with the session.
+ *
+ * A JSON request body is already text and now travels as itself. Binary bodies
+ * are rare on this path, so they pay base64's 1.33x instead of making the
+ * common case pay 3x.
+ */
+type RequestBody =
+  | { kind: "text"; text: string }
+  | { kind: "base64"; data: string };
+
+// Spreading a whole array into fromCharCode overflows the argument limit on
+// anything large, so it goes a window at a time.
+const B64_CHUNK = 0x8000;
+
+export function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += B64_CHUNK) {
+    binary += String.fromCharCode(
+      ...(bytes.subarray(i, i + B64_CHUNK) as unknown as number[]),
+    );
+  }
+  return btoa(binary);
+}
+
+export function base64ToBytes(b64: string): Uint8Array {
+  const binary = atob(b64);
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+  return out;
+}
 
 export function headerInitToRecord(
   init: HeadersInit | undefined,
@@ -26,25 +64,34 @@ export function headerInitToRecord(
   return out;
 }
 
-async function bodyToBytes(
+export async function bodyToPayload(
   body: BodyInit | null | undefined,
-): Promise<number[] | undefined> {
+): Promise<RequestBody | undefined> {
   if (body == null) return undefined;
-  if (typeof body === "string") {
-    return Array.from(new TextEncoder().encode(body));
+  // The common case, and the whole point: an AI request body is a JSON string,
+  // so it crosses as text with no encoding step on either side.
+  if (typeof body === "string") return { kind: "text", text: body };
+  if (body instanceof ArrayBuffer) {
+    return { kind: "base64", data: bytesToBase64(new Uint8Array(body)) };
   }
-  if (body instanceof ArrayBuffer) return Array.from(new Uint8Array(body));
   if (ArrayBuffer.isView(body)) {
     const view = body as ArrayBufferView;
-    return Array.from(
-      new Uint8Array(view.buffer, view.byteOffset, view.byteLength),
-    );
+    return {
+      kind: "base64",
+      data: bytesToBase64(
+        new Uint8Array(view.buffer, view.byteOffset, view.byteLength),
+      ),
+    };
   }
-  if (body instanceof Blob)
-    return Array.from(new Uint8Array(await body.arrayBuffer()));
-  // FormData / URLSearchParams / ReadableStream — uncommon for AI SDK calls.
-  const text = await new Response(body as BodyInit).text();
-  return Array.from(new TextEncoder().encode(text));
+  if (body instanceof Blob) {
+    return {
+      kind: "base64",
+      data: bytesToBase64(new Uint8Array(await body.arrayBuffer())),
+    };
+  }
+  // FormData / URLSearchParams / ReadableStream — uncommon for AI SDK calls,
+  // and all of them read back as text.
+  return { kind: "text", text: await new Response(body as BodyInit).text() };
 }
 
 export function createProxyFetch(
@@ -67,7 +114,7 @@ async function proxyFetchImpl(
   const url = input instanceof URL ? input.toString() : String(input);
   const method = (init?.method ?? "GET").toUpperCase();
   const headers = headerInitToRecord(init?.headers);
-  const body = await bodyToBytes(init?.body);
+  const body = await bodyToPayload(init?.body);
 
   const signal = init?.signal;
   if (signal?.aborted) {
@@ -117,7 +164,7 @@ async function proxyFetchImpl(
           break;
         }
         case "chunk": {
-          streamController?.enqueue(Uint8Array.from(event.bytes));
+          streamController?.enqueue(base64ToBytes(event.b64));
           break;
         }
         case "end": {
