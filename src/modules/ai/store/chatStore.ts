@@ -17,7 +17,7 @@ import {
   type ProviderId,
 } from "../config";
 import { useTodosStore } from "./todoStore";
-import type { AgentUsage } from "../lib/agent";
+import type { AgentStopReason, AgentUsage } from "../lib/agent";
 import { EMPTY_PROVIDER_KEYS, type ProviderKeys, type CustomEndpointKeys } from "../lib/keyring";
 import {
   deleteSessionData,
@@ -63,7 +63,12 @@ export type AgentMeta = {
   tokens: AgentUsage;
   lastInputTokens: number;
   lastCachedTokens: number;
-  hitStepCap: boolean;
+  /** Which guard ended the run early, or null when it finished on its own.
+   *  Drives whether the transcript offers to continue, and what it says. */
+  stopReason: AgentStopReason | null;
+  /** Rounds spent on the current task (0-based). Reset by a new user message,
+   *  raised by Continue, and read to pick this round's step budget. */
+  runRound: number;
   /** The user pressed stop, so the transcript can offer to resume. */
   stoppedByUser: boolean;
   compactionNotice: { droppedCount: number; at: number } | null;
@@ -83,7 +88,8 @@ const IDLE_META: AgentMeta = {
   tokens: ZERO_USAGE,
   lastInputTokens: 0,
   lastCachedTokens: 0,
-  hitStepCap: false,
+  stopReason: null,
+  runRound: 0,
   stoppedByUser: false,
   compactionNotice: null,
 };

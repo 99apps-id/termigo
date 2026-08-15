@@ -47,6 +47,8 @@ import type {
   UIMessage,
   UIMessagePart,
 } from "ai";
+import type { AgentStopReason } from "../lib/agent";
+import { stepBudgetForRound } from "../config";
 import { memo, useCallback, useMemo } from "react";
 import { AiToolApproval } from "./AiToolApproval";
 
@@ -200,14 +202,20 @@ export function AiChatView({
       ? lastMessage.id
       : null;
   const step = useChatStore((s) => s.agentMeta.step);
-  const hitStepCap = useChatStore((s) => s.agentMeta.hitStepCap);
+  const stopReason = useChatStore((s) => s.agentMeta.stopReason);
+  const runRound = useChatStore((s) => s.agentMeta.runRound);
   const compactionNotice = useChatStore((s) => s.agentMeta.compactionNotice);
   const patchAgentMeta = useChatStore((s) => s.patchAgentMeta);
   const stoppedByUser = useChatStore((s) => s.agentMeta.stoppedByUser);
   // Offer to resume after a stop as well as after the step cap. A stop used to
   // be a dead end: the only way on was to retype the request.
   const showContinue =
-    !isBusy && (hitStepCap || stoppedByUser) && lastMessage?.role === "assistant";
+    !isBusy &&
+    (stopReason !== null || stoppedByUser) &&
+    lastMessage?.role === "assistant";
+  // A stop the user asked for is described as their own, whatever guard the
+  // loop happened to trip on the way out.
+  const continueKind: StopKind = stoppedByUser ? "stopped" : (stopReason ?? "step-cap");
 
   const onApproval = useCallback(
     (id: string, approved: boolean) => addToolApprovalResponse({ id, approved }),
@@ -256,8 +264,10 @@ export function AiChatView({
         )}
         {showContinue && (
           <ContinueRow
+            kind={continueKind}
+            round={runRound}
             onContinue={() => {
-              patchAgentMeta({ hitStepCap: false, stoppedByUser: false });
+              patchAgentMeta({ stopReason: null, stoppedByUser: false });
               void resumeRun();
             }}
           />
@@ -308,22 +318,71 @@ const CompactionNotice = memo(function CompactionNotice({
   );
 });
 
+type StopKind = AgentStopReason | "stopped";
+
+/**
+ * What each stop means, and whether another round is likely to help.
+ *
+ * The row used to read "Hit the step limit" for every early stop, including
+ * one the user asked for. Naming the cause is the point: running out of budget
+ * invites a click, while a loop or an idle turn means the next round would
+ * most likely repeat the last one.
+ */
+function stopCopy(
+  kind: StopKind,
+  round: number,
+): { text: string; action: string; hint?: string } {
+  const spent = stepBudgetForRound(round);
+  const next = stepBudgetForRound(round + 1);
+  // Only worth saying when the ladder actually climbs; the top tier repeats.
+  const deeper = next > spent ? ` (next round: ${next})` : "";
+  switch (kind) {
+    case "step-cap":
+      return {
+        text: `Paused after ${spent} steps — this round's budget.`,
+        action: `Continue${deeper}`,
+      };
+    case "tool-repetition":
+      return {
+        text: "Stopped: the same tool ran three times with identical input.",
+        hint: "Another round would likely repeat it. Adding a detail usually helps more.",
+        action: "Continue anyway",
+      };
+    case "no-progress":
+      return {
+        text: "Stopped: two turns in a row made no tool call.",
+        hint: "The agent was describing rather than doing. Say what to change.",
+        action: "Continue anyway",
+      };
+    case "stopped":
+      return { text: "You stopped this run.", action: "Resume" };
+  }
+}
+
 const ContinueRow = memo(function ContinueRow({
+  kind,
+  round,
   onContinue,
 }: {
+  kind: StopKind;
+  round: number;
   onContinue: () => void;
 }) {
+  const copy = stopCopy(kind, round);
   return (
-    <div className="flex items-center gap-2 rounded-md border border-border/50 bg-card/60 px-2.5 py-1.5 text-[11px]">
+    <div className="flex items-start gap-2 rounded-md border border-border/50 bg-card/60 px-2.5 py-1.5 text-[11px]">
       <span className="flex-1 text-muted-foreground">
-        Hit the step limit. Continue to keep going.
+        {copy.text}
+        {copy.hint && (
+          <span className="mt-0.5 block opacity-75">{copy.hint}</span>
+        )}
       </span>
       <button
         type="button"
         onClick={onContinue}
-        className="rounded-md border border-border/60 bg-background px-2 py-0.5 text-[11px] font-medium text-foreground transition-colors hover:bg-accent"
+        className="shrink-0 rounded-md border border-border/60 bg-background px-2 py-0.5 text-[11px] font-medium text-foreground transition-colors hover:bg-accent"
       >
-        Continue
+        {copy.action}
       </button>
     </div>
   );

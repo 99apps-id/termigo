@@ -5,7 +5,11 @@ import { listSkills } from "./skills";
 import { buildExtensionTools } from "./extensionTools";
 import { buildCustomTools, loadCustomTools } from "./customToolsIo";
 import type { CustomEndpoint } from "../config";
-import { runAgentStream, type AgentUsageDelta } from "./agent";
+import {
+  runAgentStream,
+  type AgentStopReason,
+  type AgentUsageDelta,
+} from "./agent";
 import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
 import { formatAiError } from "./errors";
 import { error as logError } from "@tauri-apps/plugin-log";
@@ -86,8 +90,12 @@ type Deps = {
   onStep?: (step: string | null) => void;
   onUsage?: (delta: AgentUsageDelta) => void;
   onCompact?: (info: { droppedCount: number }) => void;
-  onFinishMeta?: (info: { hitStepCap: boolean; finishReason: string }) => void;
+  onFinishMeta?: (info: {
+    stopReason: AgentStopReason | null;
+    finishReason: string;
+  }) => void;
   getPlanMode?: () => boolean;
+  getStepBudget?: () => number;
 };
 
 type SendOptions = {
@@ -145,6 +153,7 @@ export function createContextAwareTransport(deps: Deps) {
       customEndpoints: deps.getCustomEndpoints?.(),
       customEndpointKeys: deps.getCustomEndpointKeys?.(),
       planMode: deps.getPlanMode?.(),
+      stepBudget: deps.getStepBudget?.(),
       projectMemory,
       uiMessages: messagesForRun,
       abortSignal: options.abortSignal,

@@ -897,7 +897,30 @@ export const LMSTUDIO_DEFAULT_BASE_URL = "http://localhost:1234/v1";
 export const MLX_DEFAULT_BASE_URL = "http://127.0.0.1:8080/v1";
 export const OLLAMA_DEFAULT_BASE_URL = "http://localhost:11434/v1";
 export const OPENAI_COMPATIBLE_DEFAULT_BASE_URL = "";
-export const MAX_AGENT_STEPS = 24;
+/**
+ * Step budget per round of one task, escalating each time the user presses
+ * Continue.
+ *
+ * A fixed cap has to guess: set it low and a refactor stalls repeatedly, set
+ * it high and a one-line fix can burn a hundred steps on a model that charges
+ * per token. Escalating sidesteps the guess. A light task finishes inside the
+ * first round; a heavy one earns its depth because the user asked for it, and
+ * the weight is read from what actually happened instead of predicted.
+ *
+ * Round one matches VS Code's agent mode default (`chat.agent.maxRequests`,
+ * 25). The last tier repeats for every round after it.
+ */
+export const AGENT_STEP_BUDGETS = [25, 50, 100] as const;
+
+/** Budget for round `round` (0-based), clamped to the last tier. */
+export function stepBudgetForRound(round: number): number {
+  const i = Math.min(Math.max(round, 0), AGENT_STEP_BUDGETS.length - 1);
+  return AGENT_STEP_BUDGETS[i];
+}
+
+/** First-round budget. Hitting it is a pause, not a failure: the transcript is
+ *  intact and Continue resumes on the same history with a larger budget. */
+export const MAX_AGENT_STEPS = AGENT_STEP_BUDGETS[0];
 export const TERMINAL_BUFFER_LINES = 300;
 
 export const SYSTEM_PROMPT = `You are Termigo, an AI agent embedded in a developer terminal emulator. You are a hands-on engineer, not a chat bot — your job is to *do* the work, not narrate it.

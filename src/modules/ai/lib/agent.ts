@@ -4,6 +4,8 @@ import {
   stepCountIs,
   streamText,
   type LanguageModel,
+  type StopCondition,
+  type ToolSet,
   type UIMessage,
 } from "ai";
 import {
@@ -337,6 +339,70 @@ function buildStableSystem(
   return `${base}${memoryBlock}${learnedBlock(learned)}${skillsBlock(skills)}${personaBlock}${customBlock}`;
 }
 
+/** Stable key for a value, so equivalent inputs written in a different key
+ *  order still compare equal. */
+function stableStringify(v: unknown): string {
+  if (v === null || typeof v !== "object") return JSON.stringify(v) ?? "null";
+  if (Array.isArray(v)) return `[${v.map(stableStringify).join(",")}]`;
+  const o = v as Record<string, unknown>;
+  return `{${Object.keys(o)
+    .sort()
+    .map((k) => `${JSON.stringify(k)}:${stableStringify(o[k])}`)
+    .join(",")}}`;
+}
+
+/** Fingerprint for a tool call. Canonicalizes args so equivalent inputs match. */
+function toolCallFingerprint(toolName: string, input: unknown): string {
+  return `${toolName}::${stableStringify(input)}`;
+}
+
+/**
+ * Stops when the last `maxRepeats` steps used the same tool with the same
+ * input. Default 3 because some tools (e.g. reading a log) repeat twice
+ * legitimately.
+ */
+export function noToolRepetition<T extends ToolSet>(
+  maxRepeats = 3,
+): StopCondition<T> {
+  return ({ steps }) => {
+    if (steps.length < maxRepeats) return false;
+    const recent = steps.slice(-maxRepeats);
+    const fingerprints: (string | null)[] = recent.map((s) => {
+      const calls = s.toolCalls;
+      if (!calls || calls.length === 0) return null;
+      // Cover the full ordered set of tool calls so parallel multi-tool
+      // repetition is caught and a step that only matches on its first call
+      // (but differs on the rest) isn't falsely flagged.
+      return calls
+        .map((c) => toolCallFingerprint(c.toolName, c.input))
+        .join("\n");
+    });
+    if (fingerprints.some((x) => x === null)) return false;
+    return fingerprints.every((x) => x === fingerprints[0]);
+  };
+}
+
+/** Stops after `maxIdle` consecutive text-only steps. A real text turn ends
+ *  on its own and never chains another empty step. */
+export function noProgressStop<T extends ToolSet>(
+  maxIdle = 2,
+): StopCondition<T> {
+  return ({ steps }) => {
+    if (steps.length < maxIdle) return false;
+    return steps.slice(-maxIdle).every((s) => (s.toolCalls?.length ?? 0) === 0);
+  };
+}
+
+/**
+ * Why a run ended early, when it did.
+ *
+ * A single cap could only ever say "out of budget", so a model looping on one
+ * tool and a model narrating without acting both looked like ordinary work
+ * until the budget ran out. Naming the guard that tripped lets the UI say
+ * whether continuing is worth a click.
+ */
+export type AgentStopReason = "step-cap" | "tool-repetition" | "no-progress";
+
 export type AgentUsage = {
   inputTokens: number;
   outputTokens: number;
@@ -363,7 +429,13 @@ export type RunAgentOptions = {
   onStep?: (step: string | null) => void;
   onUsage?: (delta: AgentUsageDelta) => void;
   onCompact?: (info: { droppedCount: number }) => void;
-  onFinishMeta?: (info: { hitStepCap: boolean; finishReason: string }) => void;
+  onFinishMeta?: (info: {
+    stopReason: AgentStopReason | null;
+    finishReason: string;
+  }) => void;
+  /** Loop budget for this round. Defaults to the first tier; the caller raises
+   *  it on each Continue so a long task deepens instead of stalling. */
+  stepBudget?: number;
   lmstudioBaseURL?: string;
   lmstudioModelId?: string;
   mlxBaseURL?: string;
@@ -452,6 +524,31 @@ export async function runAgentStream(opts: RunAgentOptions) {
   );
 
   let stepsSeen = 0;
+  // Three guards, any of which ends the loop. Each wrapper records which one
+  // tripped first so the UI can explain the stop instead of offering the same
+  // blank "continue" for every cause.
+  let stopReason: AgentStopReason | null = null;
+  const stepBudget = opts.stepBudget ?? MAX_AGENT_STEPS;
+  const capPred = stepCountIs(stepBudget);
+  const repeatPred = noToolRepetition<ToolSet>(3);
+  const idlePred = noProgressStop<ToolSet>(2);
+  const trackingStopWhen: StopCondition<ToolSet>[] = [
+    (args) => {
+      if (!(capPred(args) as boolean)) return false;
+      stopReason ??= "step-cap";
+      return true;
+    },
+    (args) => {
+      if (!(repeatPred(args) as boolean)) return false;
+      stopReason ??= "tool-repetition";
+      return true;
+    },
+    (args) => {
+      if (!(idlePred(args) as boolean)) return false;
+      stopReason ??= "no-progress";
+      return true;
+    },
+  ];
   return streamText({
     model,
     system: prompt.system,
@@ -469,7 +566,10 @@ export async function runAgentStream(opts: RunAgentOptions) {
       ...(opts.customTools ?? {}),
       ...buildTools(opts.toolContext),
     },
-    stopWhen: stepCountIs(MAX_AGENT_STEPS),
+    // The SDK infers a specific ToolSet from `tools` and refuses our generic
+    // `StopCondition<ToolSet>[]`. The predicates only touch fields common to
+    // every ToolSet, so a structural cast is safe.
+    stopWhen: trackingStopWhen as never,
     abortSignal: opts.abortSignal,
     onStepFinish: (step) => {
       stepsSeen++;
@@ -503,8 +603,12 @@ export async function runAgentStream(opts: RunAgentOptions) {
       opts.onStep?.(null);
       const finishReason =
         (result as { finishReason?: string } | undefined)?.finishReason ?? "";
+      // The predicates fire before the final step is counted in some SDK
+      // paths, so fall back to the step count rather than reporting no reason
+      // for a run that plainly ran out of budget.
       opts.onFinishMeta?.({
-        hitStepCap: stepsSeen >= MAX_AGENT_STEPS,
+        stopReason:
+          stopReason ?? (stepsSeen >= stepBudget ? "step-cap" : null),
         finishReason,
       });
     },

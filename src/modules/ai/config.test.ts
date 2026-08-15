@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  MAX_AGENT_STEPS,
+  stepBudgetForRound,
   compatModelIdForEndpoint,
   endpointIdFromCompatModel,
   getModelContextLimit,
@@ -170,5 +172,34 @@ describe("migrateLegacyCompatEndpoint", () => {
   it("skips migration when base URL or model id is missing", () => {
     expect(migrateLegacyCompatEndpoint("", "m", 1, "x")).toEqual([]);
     expect(migrateLegacyCompatEndpoint("u", "  ", 1, "x")).toEqual([]);
+  });
+});
+
+describe("stepBudgetForRound", () => {
+  it("starts at VS Code's agent-mode default", () => {
+    expect(stepBudgetForRound(0)).toBe(25);
+    expect(MAX_AGENT_STEPS).toBe(25);
+  });
+
+  it("climbs one tier per Continue", () => {
+    expect(stepBudgetForRound(1)).toBe(50);
+    expect(stepBudgetForRound(2)).toBe(100);
+  });
+
+  it("holds at the top tier instead of growing without bound", () => {
+    expect(stepBudgetForRound(3)).toBe(100);
+    expect(stepBudgetForRound(99)).toBe(100);
+  });
+
+  it("clamps a negative round to the first tier", () => {
+    expect(stepBudgetForRound(-1)).toBe(25);
+  });
+
+  it("never lets a later round shrink the budget", () => {
+    for (let r = 1; r < 8; r++) {
+      expect(stepBudgetForRound(r)).toBeGreaterThanOrEqual(
+        stepBudgetForRound(r - 1),
+      );
+    }
   });
 });

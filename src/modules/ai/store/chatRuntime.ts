@@ -3,7 +3,12 @@ import {
   type ChatTransport,
   lastAssistantMessageIsCompleteWithApprovalResponses,
 } from "ai";
-import { getModel, providerNeedsKey, type ModelId } from "../config";
+import {
+  getModel,
+  providerNeedsKey,
+  stepBudgetForRound,
+  type ModelId,
+} from "../config";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { BUILTIN_AGENTS } from "../lib/agents";
 import { useAgentsStore } from "./agentsStore";
@@ -70,6 +75,8 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       };
     },
     getPlanMode: () => usePlanStore.getState().active,
+    getStepBudget: () =>
+      stepBudgetForRound(useChatStore.getState().agentMeta.runRound),
     getLmstudioBaseURL: () => usePreferencesStore.getState().lmstudioBaseURL,
     getLmstudioModelId: () => usePreferencesStore.getState().lmstudioModelId,
     getMlxBaseURL: () => usePreferencesStore.getState().mlxBaseURL,
@@ -95,7 +102,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       });
     },
     onFinishMeta: (info) => {
-      useChatStore.getState().patchAgentMeta({ hitStepCap: info.hitStepCap });
+      useChatStore.getState().patchAgentMeta({ stopReason: info.stopReason });
     },
     onUsage: (delta) => {
       const cur = useChatStore.getState().agentMeta.tokens;
@@ -225,6 +232,11 @@ export async function flushSteer(): Promise<boolean> {
 
 /** Pick the work back up after the user stopped it. */
 export async function resumeRun(): Promise<boolean> {
+  // Continuing is the signal that the task is heavier than one round, so the
+  // next round gets the next budget tier. Raised before the send so the run
+  // reads the new value.
+  const round = useChatStore.getState().agentMeta.runRound;
+  useChatStore.getState().patchAgentMeta({ runRound: round + 1 });
   return sendMessage(RESUME_PROMPT);
 }
 

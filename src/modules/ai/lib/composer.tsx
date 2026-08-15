@@ -316,8 +316,11 @@ export function AiComposerProvider({ children }: ProviderProps) {
 
     if (!sessionId) return;
     const store = useChatStore.getState();
+    // A typed message starts a new task, so the escalation ladder resets to
+    // its first rung. Continue is the only thing that climbs it.
     store.patchAgentMeta({
-      hitStepCap: false,
+      stopReason: null,
+      runRound: 0,
       stoppedByUser: false,
       compactionNotice: null,
     });
