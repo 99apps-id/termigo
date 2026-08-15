@@ -86,6 +86,12 @@ The themes below frame every scope decision.
 - [x] Rendered Markdown preview with raw and rendered views
 - [x] Sandboxed iframe
 
+### Remote
+
+- [x] SSH remote terminals (password / key / ssh-agent auth, host-key confirmation)
+- [x] SFTP file explorer over SSH
+- [x] SSH port forwarding (local tunnels)
+
 ### Platform Integration
 
 - [x] macOS, Linux (.deb / .rpm / AppImage), Windows (NSIS), WSL
@@ -111,7 +117,7 @@ The themes below frame every scope decision.
 
 ### Coming next
 
-- [ ] SSH support (PTY auth and known_hosts first; SFTP and port forwarding later)
+- [ ] SFTP batch transfers and remote-to-remote copy over SSH
 - [ ] Inline terminal auto-suggestions (history-based first; AI-powered opt-in later)
 - [ ] AI agent reliability and workflow improvements (tool execution, context management, recovery, and long-running tasks)
 - [ ] Expand external coding-agent orchestration beyond Claude Code
