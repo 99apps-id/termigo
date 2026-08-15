@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
-use std::time::Duration;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use futures_util::StreamExt;
@@ -270,6 +271,67 @@ fn build_request(
     Ok(req)
 }
 
+/// How long a cached client keeps serving before its host is resolved again.
+const CLIENT_TTL: Duration = Duration::from_secs(300);
+
+struct CachedClient {
+    client: reqwest::Client,
+    made: Instant,
+}
+
+/// Provider clients, kept per host and network policy.
+///
+/// Every AI request used to build its own `reqwest::Client`, and a client owns
+/// its connection pool - so discarding it after one request made keep-alive
+/// impossible. Each request paid a DNS lookup and a fresh TCP + TLS handshake,
+/// measured at roughly half a second of handshake alone, on every step of
+/// every run.
+///
+/// It also gave every request its own chance to fail. A connect that stalls
+/// past the connect timeout ends the request, and with nothing reused, each
+/// one rolled that dice again - which is how a single slow link produced
+/// "client error (connect): deadline has elapsed" rather than one slow first
+/// call and fast ones after.
+///
+/// Entries expire so a provider that moves its endpoint is followed within a
+/// few minutes. Until then the pinned addresses are reused, which keeps the
+/// guarantee `resolve_to_addrs` exists for: a connection may still only use
+/// addresses that passed `ip_kind`.
+static CLIENT_CACHE: OnceLock<Mutex<HashMap<(String, bool), CachedClient>>> = OnceLock::new();
+
+async fn client_for(host: &str, allow_private: bool) -> Result<reqwest::Client, String> {
+    let key = (host.to_string(), allow_private);
+    let cache = CLIENT_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+
+    // Scoped so the guard is dropped before the await below: holding a
+    // std::sync::Mutex across one is both wrong and slow.
+    {
+        if let Ok(map) = cache.lock() {
+            if let Some(entry) = map.get(&key) {
+                if entry.made.elapsed() < CLIENT_TTL {
+                    // Cloning shares the pool rather than copying it.
+                    return Ok(entry.client.clone());
+                }
+            }
+        }
+    }
+
+    let safe_ips = classify_and_collect_safe_ips(host, allow_private).await?;
+    let client = build_safe_client(allow_private, &[(host.to_string(), safe_ips)])?;
+    // Two concurrent misses both resolve and the later one wins. That costs a
+    // duplicate lookup, which is cheaper than holding the lock across DNS.
+    if let Ok(mut map) = cache.lock() {
+        map.insert(
+            key,
+            CachedClient {
+                client: client.clone(),
+                made: Instant::now(),
+            },
+        );
+    }
+    Ok(client)
+}
+
 fn build_safe_client(
     allow_private: bool,
     pinned: &[(String, Vec<IpAddr>)],
@@ -351,9 +413,7 @@ pub async fn ai_http_request(
         .host_str()
         .ok_or_else(|| "missing host".to_string())?
         .to_string();
-    let safe_ips = classify_and_collect_safe_ips(&host, allow_private).await?;
-
-    let client = build_safe_client(allow_private, &[(host, safe_ips)])?;
+    let client = client_for(&host, allow_private).await?;
 
     let req = build_request(&client, &method, parsed, headers, body)?;
     let resp = req.send().await.map_err(|e| describe_error(&e))?;
@@ -473,15 +533,13 @@ pub async fn ai_http_stream(
             return Err(e);
         }
     };
-    let safe_ips = match classify_and_collect_safe_ips(&host, allow_private).await {
-        Ok(v) => v,
+    let client = match client_for(&host, allow_private).await {
+        Ok(c) => c,
         Err(e) => {
             let _ = on_event.send(AiStreamEvent::Error { message: e.clone() });
             return Err(e);
         }
     };
-
-    let client = build_safe_client(allow_private, &[(host, safe_ips)])?;
 
     let req = build_request(&client, &method, parsed, headers, body)?;
     let resp = match req.send().await {
@@ -754,5 +812,47 @@ mod tests {
         }
         impl std::error::Error for Bare {}
         assert_eq!(describe_error(&Bare), "dns error");
+    }
+
+    // The point of the cache is that a second request to the same host does not
+    // connect again. An IP literal skips DNS entirely (see
+    // `resolve_and_classify`), so this exercises the caching without a lookup.
+    #[tokio::test]
+    async fn same_host_reuses_one_client() {
+        let host = "203.0.113.7"; // TEST-NET-3, never routed
+        let first = client_for(host, false).await.expect("builds");
+        let second = client_for(host, false).await.expect("reuses");
+
+        let map = CLIENT_CACHE.get().expect("initialised").lock().unwrap();
+        assert_eq!(
+            map.keys().filter(|(h, _)| h == host).count(),
+            1,
+            "a second request should not add a second client"
+        );
+        drop(map);
+        // Cloned clients share a pool; both being usable is the observable part.
+        drop((first, second));
+    }
+
+    #[tokio::test]
+    async fn network_policy_is_part_of_the_key() {
+        // 127.0.0.1 is refused unless private networks are opted into, so the
+        // two policies must never share an entry.
+        let host = "127.0.0.1";
+        assert!(client_for(host, false).await.is_err());
+        assert!(client_for(host, true).await.is_ok());
+
+        let map = CLIENT_CACHE.get().expect("initialised").lock().unwrap();
+        assert!(map.contains_key(&(host.to_string(), true)));
+        assert!(
+            !map.contains_key(&(host.to_string(), false)),
+            "a refused host must not be cached as usable"
+        );
+    }
+
+    #[test]
+    fn client_ttl_is_short_enough_to_follow_a_moved_endpoint() {
+        assert!(CLIENT_TTL <= Duration::from_secs(600), "{CLIENT_TTL:?}");
+        assert!(CLIENT_TTL >= Duration::from_secs(60), "{CLIENT_TTL:?}");
     }
 }
