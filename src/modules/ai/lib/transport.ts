@@ -8,12 +8,31 @@ import type { CustomEndpoint } from "../config";
 import { runAgentStream, type AgentUsageDelta } from "./agent";
 import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
 import { formatAiError } from "./errors";
+import { error as logError } from "@tauri-apps/plugin-log";
 import { native } from "./native";
 import type { ToolContext } from "../tools/tools";
 
 const TERMIGO_MD_MAX_BYTES = 32 * 1024;
 type MemoryCacheEntry = { content: string | null; mtime: number };
 const projectMemoryCache = new Map<string, MemoryCacheEntry>();
+
+/// Show the failure in the chat and also record it in the app log.
+///
+/// AI requests fail in the webview, so nothing about them ever reached
+/// `logs/Termigo.log` - which records only the Rust side. A user whose run
+/// died mid-stream had to catch the message on screen before it scrolled
+/// away, and if they missed it there was no trace left to report.
+///
+/// Logs the formatted text rather than the raw error on purpose:
+/// `formatAiError` has already stripped bearer tokens and API keys, and the
+/// raw value carries the request headers that hold them.
+function logAndFormatAiError(error: unknown): string {
+  const message = formatAiError(error);
+  // Fire-and-forget: a failing logger must not replace the error the user
+  // is waiting to see.
+  void logError(`ai request failed: ${message}`).catch(() => {});
+  return message;
+}
 
 async function readTermigoMd(workspaceRoot: string | null): Promise<string | null> {
   if (!workspaceRoot) return null;
@@ -132,7 +151,7 @@ export function createContextAwareTransport(deps: Deps) {
     });
     return result.toUIMessageStream({
       originalMessages: options.messages,
-      onError: formatAiError,
+      onError: logAndFormatAiError,
     });
   };
 
