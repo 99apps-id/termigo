@@ -35,6 +35,7 @@ import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
 import { prepareAgentPrompt } from "./prompt";
 import { createProxyFetch, proxyFetch } from "./proxyFetch";
 import { sanitizeUiMessages } from "./sanitizeMessages";
+import { useDebugStore } from "../store/debugStore";
 
 const localProxyFetch = createProxyFetch({ allowPrivateNetwork: true });
 
@@ -436,6 +437,9 @@ export type RunAgentOptions = {
   /** Loop budget for this round. Defaults to the first tier; the caller raises
    *  it on each Continue so a long task deepens instead of stalling. */
   stepBudget?: number;
+  /** Record the assembled request for the inspector. Read from preferences by
+   *  the caller so this module stays free of the settings store. */
+  captureDebug?: boolean;
   lmstudioBaseURL?: string;
   lmstudioModelId?: string;
   mlxBaseURL?: string;
@@ -549,6 +553,35 @@ export async function runAgentStream(opts: RunAgentOptions) {
       return true;
     },
   ];
+
+  const tools = {
+    ...(opts.mcpTools ?? {}),
+    ...(opts.extensionTools ?? {}),
+    ...(opts.customTools ?? {}),
+    ...buildTools(opts.toolContext),
+  };
+
+  // Snapshot what is about to be sent, while it is still assembled and before
+  // the provider SDK attaches credentials. Off by default; the cost of being
+  // on is one object per step, capped at 30 in memory.
+  if (opts.captureDebug) {
+    useDebugStore.getState().add({
+      model: { id: modelId, provider },
+      params: {
+        stepBudget,
+        ...(opts.planMode ? { planMode: true } : {}),
+        contextLimit: getModelContextLimit(modelId, compatCtxOverride),
+        ...(compact.compacted ? { compactedAway: compact.droppedCount } : {}),
+      },
+      system: prompt.system,
+      messages: prompt.messages,
+      tools: Object.entries(tools).map(([name, t]) => ({
+        name,
+        description: (t as { description?: string } | undefined)?.description,
+      })),
+    });
+  }
+
   return streamText({
     model,
     system: prompt.system,
@@ -560,12 +593,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
     // Built-ins last: neither an extension nor an MCP server can shadow a
     // core tool by naming one after it, and the prefixes make a collision take
     // deliberate effort anyway.
-    tools: {
-      ...(opts.mcpTools ?? {}),
-      ...(opts.extensionTools ?? {}),
-      ...(opts.customTools ?? {}),
-      ...buildTools(opts.toolContext),
-    },
+    tools,
     // The SDK infers a specific ToolSet from `tools` and refuses our generic
     // `StopCondition<ToolSet>[]`. The predicates only touch fields common to
     // every ToolSet, so a structural cast is safe.

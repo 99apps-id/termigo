@@ -173,6 +173,8 @@ export type Preferences = {
   lastWslDistro: string | null;
   zoomLevel: number;
   agentNotifications: boolean;
+  /** Capture each assembled provider request in memory for the inspector. */
+  debugCaptureEnabled: boolean;
   agentLaunchCommands: AgentLaunchCommands;
   defaultWorkspaceEnv: string;
   shortcuts: Record<ShortcutId, KeyBinding[]>;
@@ -267,6 +269,7 @@ const KEY_TERMINAL_SCROLLBACK = "terminalScrollback";
 const KEY_LAST_WSL_DISTRO = "lastWslDistro";
 const KEY_ZOOM_LEVEL = "zoomLevel";
 const KEY_AGENT_NOTIFICATIONS = "agentNotifications";
+const KEY_DEBUG_CAPTURE = "debugCaptureEnabled";
 const KEY_AGENT_LAUNCH_COMMANDS = "agentLaunchCommands";
 const KEY_DEFAULT_WORKSPACE_ENV = "defaultWorkspaceEnv";
 const KEY_SHORTCUTS = "shortcuts";
@@ -352,6 +355,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   lastWslDistro: null,
   zoomLevel: 1.0,
   agentNotifications: true,
+  debugCaptureEnabled: false,
   agentLaunchCommands: DEFAULT_AGENT_LAUNCH_COMMANDS,
   defaultWorkspaceEnv: "local",
   shortcuts: {} as Record<ShortcutId, KeyBinding[]>,
@@ -527,6 +531,9 @@ export async function loadPreferences(): Promise<Preferences> {
     agentNotifications:
       get<boolean>(KEY_AGENT_NOTIFICATIONS) ??
       DEFAULT_PREFERENCES.agentNotifications,
+    debugCaptureEnabled:
+      get<boolean>(KEY_DEBUG_CAPTURE) ??
+      DEFAULT_PREFERENCES.debugCaptureEnabled,
     agentLaunchCommands: normalizeAgentLaunchCommands(
       get<unknown>(KEY_AGENT_LAUNCH_COMMANDS),
     ),
@@ -887,6 +894,10 @@ export async function setAgentNotifications(value: boolean): Promise<void> {
   await writePref(KEY_AGENT_NOTIFICATIONS, value);
 }
 
+export async function setDebugCaptureEnabled(value: boolean): Promise<void> {
+  await writePref(KEY_DEBUG_CAPTURE, value);
+}
+
 export async function setAgentLaunchCommands(
   value: AgentLaunchCommands,
 ): Promise<void> {
@@ -966,6 +977,7 @@ export async function onPreferencesChange(
     [KEY_ZOOM_LEVEL]: "zoomLevel",
     [KEY_AGENT_APPROVAL_MODE]: "agentApprovalMode",
     [KEY_AGENT_NOTIFICATIONS]: "agentNotifications",
+    [KEY_DEBUG_CAPTURE]: "debugCaptureEnabled",
     [KEY_AGENT_LAUNCH_COMMANDS]: "agentLaunchCommands",
     [KEY_DEFAULT_WORKSPACE_ENV]: "defaultWorkspaceEnv",
     [KEY_SHORTCUTS]: "shortcuts",

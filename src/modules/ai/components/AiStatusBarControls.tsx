@@ -11,6 +11,7 @@ import { fmtShortcut, MOD_KEY } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import { ApprovalModeControl } from "./ApprovalModeControl";
+import { DebugRequestsDialog } from "./DebugRequestsDialog";
 import {
   Add01Icon,
   AiBookIcon,
@@ -29,6 +30,7 @@ import {
   FlashIcon,
   GlobeIcon,
   GoogleGeminiIcon,
+  InspectCodeIcon,
   Grok02Icon,
   MistralIcon,
   Message01Icon,
@@ -99,6 +101,8 @@ export function AiOpenButton({ onOpen }: { onOpen: () => void }) {
 export function AiStatusBarControls() {
   const c = useComposer();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const debugCaptureEnabled = usePreferencesStore((s) => s.debugCaptureEnabled);
+  const [debugOpen, setDebugOpen] = useState(false);
   const toggleMini = useChatStore((s) => s.toggleMini);
   const miniOpen = useChatStore((s) => s.mini.open);
   const closePanel = useChatStore((s) => s.closePanel);
@@ -118,6 +122,20 @@ export function AiStatusBarControls() {
       />
 
       <ApprovalModeControl className="mr-0.5" />
+
+      {/* Only offered while capturing is on, so an inspector with nothing to
+          inspect never takes up space in the bar. */}
+      {debugCaptureEnabled && (
+        <>
+          <IconBtn
+            title="Inspect requests sent to the provider"
+            onClick={() => setDebugOpen(true)}
+          >
+            <HugeiconsIcon icon={InspectCodeIcon} size={13} strokeWidth={2} />
+          </IconBtn>
+          <DebugRequestsDialog open={debugOpen} onOpenChange={setDebugOpen} />
+        </>
+      )}
 
       <IconBtn
         title="Attach file or image"

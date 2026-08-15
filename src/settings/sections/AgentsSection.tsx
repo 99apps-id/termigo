@@ -8,6 +8,8 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
+import { SettingRow } from "../components/SettingRow";
 import { cn } from "@/lib/utils";
 import { AGENT_ICONS } from "@/modules/ai/components/AgentSwitcher";
 import {
@@ -26,7 +28,10 @@ import {
   useSnippetsStore,
 } from "@/modules/ai/store/snippetsStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
-import { setCustomInstructions } from "@/modules/settings/store";
+import {
+  setCustomInstructions,
+  setDebugCaptureEnabled,
+} from "@/modules/settings/store";
 import {
   Add01Icon,
   CheckmarkCircle02Icon,
@@ -49,6 +54,9 @@ const ICON_OPTIONS: AgentIconId[] = [
 
 export function AgentsSection() {
   const customInstructions = usePreferencesStore((s) => s.customInstructions);
+  const debugCaptureEnabled = usePreferencesStore(
+    (s) => s.debugCaptureEnabled,
+  );
   const customAgents = useAgentsStore((s) => s.customAgents);
   const activeAgentId = useAgentsStore((s) => s.activeId);
   const setActiveAgentId = useAgentsStore((s) => s.setActiveId);
@@ -77,6 +85,19 @@ export function AgentsSection() {
       />
 
       <CustomInstructionsBlock value={customInstructions} />
+
+      <section className="flex flex-col gap-2">
+        <Label>Diagnostics</Label>
+        <SettingRow
+          title="Capture requests"
+          description="Record each request the agent assembles — system prompt, message history, attached tools — so a failure can be read rather than guessed at. Kept in memory only, never written to disk, and cleared when Termigo closes. Open the inspector from the icon in the AI bar."
+        >
+          <Switch
+            checked={debugCaptureEnabled}
+            onCheckedChange={(v) => void setDebugCaptureEnabled(v)}
+          />
+        </SettingRow>
+      </section>
 
       <section className="flex flex-col gap-2">
         <div className="flex items-center justify-between">

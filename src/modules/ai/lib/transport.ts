@@ -96,6 +96,7 @@ type Deps = {
   }) => void;
   getPlanMode?: () => boolean;
   getStepBudget?: () => number;
+  getCaptureDebug?: () => boolean;
 };
 
 type SendOptions = {
@@ -154,6 +155,7 @@ export function createContextAwareTransport(deps: Deps) {
       customEndpointKeys: deps.getCustomEndpointKeys?.(),
       planMode: deps.getPlanMode?.(),
       stepBudget: deps.getStepBudget?.(),
+      captureDebug: deps.getCaptureDebug?.(),
       projectMemory,
       uiMessages: messagesForRun,
       abortSignal: options.abortSignal,
