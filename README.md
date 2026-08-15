@@ -94,7 +94,19 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   it instead of being dropped — attachments included. Queued messages are shown
   with a way to take them back. Stop reaches the work, not just the reply: it
   kills the command the agent is running rather than leaving a shell going
-  behind a stopped agent, and the transcript then offers to continue.
+  behind a stopped agent, and the transcript then offers to continue. An
+  interrupted tool call is closed out as interrupted rather than erased, so the
+  model can see its work was cut short instead of being shown a past in which it
+  never made the call — and repeating it.
+- **The run says why it stopped, and goes deeper when you ask.** One request
+  gets 25 steps, the same default as VS Code's agent mode, and each Continue
+  moves up a ladder to 50 then 100. A light task never pays for a heavy one,
+  and a refactor is not capped by a number picked before anyone knew what the
+  task was. Two guards sit alongside the budget: the same tool called three
+  times with identical input, and two turns in a row that call no tool at all.
+  The transcript names which one fired, because "it repeated itself" and "it ran
+  out of budget" call for different responses — one is worth a click, the other
+  is worth a sentence of extra detail.
 - **The agent can define its own tools.** A command worth repeating is saved as
   a named tool with `{{placeholders}}` in `.termigo/tools.json` and called by
   name afterwards. It is a command template, not code — running one goes
@@ -116,6 +128,16 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   path and shell-command safety checks run inside every tool regardless, so no
   mode can authorise something the safety layer refuses. Read-only tools never
   asked in the first place.
+- **Deleting is never delegated.** No mode speaks for you here, including
+  `Auto-approve all`: `delete_file` always asks, and so does any command that
+  removes files — `rm`, `rmdir`, `git clean`, `find -delete`, PowerShell's
+  `Remove-Item` and its aliases — wherever it sits in the line, so
+  `pnpm build && rm -rf dist` is not read as a build. The gate follows the
+  command rather than the tool name, so a custom tool cannot route around it.
+  Every other change an agent makes can be recovered by reading the file again
+  or from git; a delete of something untracked leaves nothing to read at all,
+  and that asymmetry is worth one click even from someone who has delegated
+  everything else.
 - **Agent works on the remote host.** When the active terminal is an SSH
   session, the agent's file tools act on the server: `read_file`,
   `list_directory`, `write_file`, `create_directory`, `edit`, `multi_edit`,
@@ -131,7 +153,8 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   being remote: under `Auto-approve edits`, one that only inspects (`ls`,
   `docker ps`, `git status`) runs, and anything that could change the server
   stops for a click — as does anything the classifier does not recognise. Under
-  `Ask every time` all of them ask; under `Auto-approve all` none do. `replace_in_files`, `copy_file` and `bash_background` still
+  `Ask every time` all of them ask; under `Auto-approve all` none do, except one
+  that deletes — that asks on any host, in any mode. `replace_in_files`, `copy_file` and `bash_background` still
   have no remote form and refuse while a session is open, saying what to use
   instead rather than quietly acting on your own disk.
 - **Tools the agent defines for itself.** After running something worth

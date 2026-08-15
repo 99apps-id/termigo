@@ -49,12 +49,46 @@ In `src/modules/ai/tools/tools.ts`:
 
 Auto-send after approval uses `lastAssistantMessageIsCompleteWithApprovalResponses`.
 
-Dangling tool calls are filtered before the history reaches the model
-(`src/modules/ai/lib/sanitizeMessages.ts`): tool invocations stuck in
-`input` / `approval-requested` (an abandoned approval) are dropped, while
-`approval-responded` parts — the user's actual decision — are preserved so
-the SDK can resume the run. This also prevents the "tool result is missing"
-error with OpenAI-compatible providers such as DeepSeek.
+### Deleting is never delegated
+
+`isAutoApproved` (`src/modules/ai/lib/approvalPolicy.ts`) checks a floor before
+every other branch, including the `all` shortcut and the remote-command path:
+
+- `delete_file` always asks, in every mode.
+- So does any tool carrying a `command` that `deletesFiles`
+  (`src/modules/ai/lib/commandRisk.ts`) recognises — `rm`, `rmdir`, `unlink`,
+  `shred`, `git clean`, `find -delete` / `-exec`, and the Windows and
+  PowerShell spellings (`del`, `erase`, `rd`, `Remove-Item`, `ri`). The
+  classifier reads each `&&` / `;` / `|` segment, so `pnpm build && rm -rf dist`
+  is not read as a build, and scans whole lines containing a substitution,
+  where a first-word read cannot see the verb.
+
+The gate follows the command rather than the tool name, so a custom tool
+cannot route around it by not being called `bash_run`. The reasoning is the
+asymmetry: every other change is recoverable by re-reading the file or from
+git, while a delete of something untracked leaves nothing to read.
+
+### Unfinished tool calls
+
+Before the history reaches the model, `src/modules/ai/lib/sanitizeMessages.ts`
+resolves every tool call that never produced a result. Without this, an
+OpenAI-compatible provider rejects the whole request — "An assistant message
+with 'tool_calls' must be followed by tool messages responding to each
+'tool_call_id'" — and the session stays broken for every later message, not
+just the one that was interrupted.
+
+Such a call is marked interrupted rather than deleted. Deleting it satisfies
+the provider but rewrites history: the model is shown a past in which it never
+made the call, cannot tell its work was cut short, and tends to repeat it.
+`input-streaming` is the one exception and is still dropped, because its
+arguments were half-transmitted and there is no complete call to resolve.
+
+`approval-responded` is the subtle case. While a run is being continued the
+user has answered and the SDK is about to execute the call, so it must be left
+alone; once the conversation has moved past that turn nothing will ever execute
+it. The two are told apart by position — the part is preserved only when it
+sits in the final message and that message is the assistant turn being
+continued.
 
 ## SSH & SFTP security
 

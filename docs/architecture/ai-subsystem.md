@@ -38,8 +38,18 @@ Keys are never persisted outside the OS keychain / Linux secrets file.
 1. Resolves the model via `buildConfiguredLanguageModel`.
 2. Builds a stable system prompt from `selectSystemPrompt(modelId)` plus optional persona, custom instructions, and `TERMIGO.md` project memory.
 3. Converts UI messages to model messages, prunes reasoning content if the model does not keep it, and compacts old messages if the context limit is exceeded.
-4. Streams via `streamText` with the tool set from `buildTools(ctx)` and `stopWhen: stepCountIs(MAX_AGENT_STEPS)`.
-5. Emits step labels, usage deltas, and finish metadata.
+4. Streams via `streamText` with the tool set from `buildTools(ctx)` and three stop conditions (below).
+5. Emits step labels, usage deltas, and finish metadata including the stop reason.
+
+### Stopping
+
+Three guards end the loop, and each records that it tripped so the transcript can explain the stop rather than offering the same blank Continue for every cause:
+
+- **`step-cap`** - the round's budget, `stepCountIs(stepBudget)`.
+- **`tool-repetition`** - `noToolRepetition(3)`: the same tool with the same input three steps running. Inputs are canonicalised (`stableStringify`) so a reshuffled object is not mistaken for progress, and the whole ordered set of parallel calls is compared rather than just the first.
+- **`no-progress`** - `noProgressStop(2)`: two consecutive steps that called no tool at all.
+
+The budget escalates instead of being fixed. `AGENT_STEP_BUDGETS` (`config.ts`) is `[25, 50, 100]`: round one matches VS Code agent mode's `chat.agent.maxRequests` default, each Continue climbs a rung via `agentMeta.runRound`, and the last tier repeats. A typed message resets the ladder; only Continue climbs it. A fixed cap has to guess between stalling a refactor and letting a one-line fix burn a hundred steps on a per-token model, and escalation reads the weight from what actually happened instead.
 
 The tool set is assembled in `src/modules/ai/tools/tools.ts` from `fs`, `edit`, `search`, `shell`, `subagent`, `terminal`, `todo`, and `managedAgent` builders.
 
@@ -74,6 +84,16 @@ Tool definitions live under `src/modules/ai/tools/`:
 
 Auto-send after approval uses `lastAssistantMessageIsCompleteWithApprovalResponses`.
 
+`isAutoApproved` (`lib/approvalPolicy.ts`) decides what a mode may skip. Ahead of every branch — including the `all` shortcut — sits a floor no mode delegates: `delete_file`, and any tool carrying a `command` that `deletesFiles` recognises. See [security model](security-model.md#deleting-is-never-delegated).
+
+## Transport
+
+`proxyFetch` (`lib/proxyFetch.ts`) routes provider calls through the Rust `ai_http_stream` command rather than the webview's own `fetch`, so keys and SSRF checks stay off the page. Bodies do not cross as `number[]`: JSON writes that as decimal digits and commas, measured at 3.0x the payload, and an agent re-sends the whole conversation on every step. A request body is already a JSON string and now travels as itself (`{ kind: "text" }`); binary bodies pay base64 (`{ kind: "base64" }`). Response chunks use base64 because a chunk boundary can split a UTF-8 sequence — and because every channel message under 8 KB is injected into the webview as JavaScript source, so inflation there is script the engine then has to parse, once per chunk.
+
+### When a request fails
+
+`formatAiError` (`lib/errors.ts`) turns a provider rejection into the text shown in the chat, stripping bearer tokens and API keys on the way. `transport.ts` wraps it so the same text is also written to the app log — `%LOCALAPPDATA%\<identifier>\logs\Termigo.log` on Windows, the platform log directory elsewhere, via `tauri-plugin-log`. AI requests are made from the webview, so before this nothing about them reached that file, which records only the Rust side: a run that died mid-stream left no trace, and diagnosing one meant catching the message on screen before it scrolled away. The formatted text is logged rather than the raw error, because the raw value still carries the request headers.
+
 ## Edit diffs
 
 AI-proposed file edits open in an `ai-diff` tab. The user accepts or rejects per hunk. Only after acceptance does the `write_file` or `edit` tool actually run. This keeps the approval UI decoupled from the tool execution.
@@ -88,6 +108,8 @@ AI-proposed file edits open in an `ai-diff` tab. The user accepts or rejects per
 - Keys only via `secrets_*` commands; never disk, settings store, or `localStorage`.
 - New providers must justify their bundle cost and unique value.
 - Mutating tools require approval; read-only tools still pass the deny-list.
+- Deleting is never delegated: no approval mode may skip `delete_file` or a command that removes files.
+- Nothing unresolved reaches the provider: every tool call without a result is closed out as interrupted, never deleted.
 
 ## See also
 
