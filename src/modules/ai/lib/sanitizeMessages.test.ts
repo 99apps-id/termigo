@@ -23,18 +23,31 @@ function toolPart(state: string, toolCallId: string, toolName = "bash_run") {
   };
 }
 
+type P = { type: string; state?: string; errorText?: string };
+const partsOf = (m: UIMessage) => m.parts as unknown as P[];
+
+/** Every state a provider accepts as answering a tool_call. */
+const RESOLVED = new Set([
+  "output-available",
+  "output-error",
+  "output-denied",
+  "result",
+]);
+
 describe("sanitizeUiMessages", () => {
-  it("drops a call stuck awaiting execution (never produced a result)", () => {
+  it("closes out a call stuck awaiting execution instead of deleting it", () => {
     const messages = [
       userMessage("u1"),
       assistantMessage("a1", [toolPart("input-available", "call_1")]),
     ];
     const out = sanitizeUiMessages(messages);
-    expect(out).toHaveLength(1); // the assistant turn is removed entirely
-    expect(out[0].id).toBe("u1");
+    expect(out).toHaveLength(2);
+    const tool = partsOf(out[1])[0];
+    expect(tool.state).toBe("output-error");
+    expect(tool.errorText).toMatch(/interrupted/i);
   });
 
-  it("drops tool invocations stuck in approval-requested (abandoned approval)", () => {
+  it("closes out a call stuck in approval-requested (abandoned approval)", () => {
     const messages = [
       userMessage("u1"),
       assistantMessage("a1", [
@@ -44,12 +57,13 @@ describe("sanitizeUiMessages", () => {
     ];
     const out = sanitizeUiMessages(messages);
     expect(out).toHaveLength(2);
-    const parts = out[1].parts as Array<{ type: string; state?: string }>;
-    expect(parts).toHaveLength(1);
-    expect(parts[0].type).toBe("text");
+    const parts = partsOf(out[1]);
+    expect(parts).toHaveLength(2);
+    expect(parts[0].state).toBe("output-error");
+    expect(parts[1].type).toBe("text");
   });
 
-  it("keeps approval-responded parts (the user's approve/deny decision)", () => {
+  it("keeps approval-responded while the run is being continued", () => {
     const messages = [
       userMessage("u1"),
       assistantMessage("a1", [
@@ -59,8 +73,7 @@ describe("sanitizeUiMessages", () => {
     ];
     const out = sanitizeUiMessages(messages);
     expect(out).toHaveLength(2);
-    const parts = out[1].parts as Array<{ state?: string }>;
-    const tool = parts.find((p) => p.state === "approval-responded");
+    const tool = partsOf(out[1]).find((p) => p.state === "approval-responded");
     expect(tool).toBeDefined();
   });
 
@@ -91,18 +104,18 @@ describe("sanitizeUiMessages", () => {
     ];
     const out = sanitizeUiMessages(messages);
     expect(out).toHaveLength(2);
-    const second = out[1].parts as Array<{ state?: string }>;
-    expect(second).toHaveLength(1);
-    expect(second[0].state).toBe("output-available");
+    const second = partsOf(out[1]);
+    expect(second).toHaveLength(2);
+    expect(second[0].state).toBe("output-error");
+    expect(second[1].state).toBe("output-available");
   });
 });
 
 describe("sanitizeUiMessages: resumed sessions", () => {
   // Continuing a session that was interrupted mid-call used to fail with
   // "An assistant message with 'tool_calls' must be followed by tool messages
-  // responding to each 'tool_call_id'", because the filter matched a part type
-  // the app never emits and so removed nothing.
-  it("removes a call the app was still executing when it stopped", () => {
+  // responding to each 'tool_call_id'".
+  it("closes out a call the app was still executing when it stopped", () => {
     const out = sanitizeUiMessages([
       userMessage("u1"),
       assistantMessage("a1", [
@@ -111,18 +124,55 @@ describe("sanitizeUiMessages: resumed sessions", () => {
       ]),
       userMessage("u2"),
     ]);
-    const assistant = out[1].parts as Array<{ type: string }>;
-    expect(assistant).toHaveLength(1);
-    expect(assistant[0].type).toBe("text");
+    const parts = partsOf(out[1]);
+    expect(parts).toHaveLength(2);
+    expect(parts[0].type).toBe("text");
+    expect(parts[1].state).toBe("output-error");
   });
 
-  it("removes dynamic (MCP) calls too, which are not named tool-<name>", () => {
+  // The bug this rewrite exists for: an approval the user answered, whose call
+  // never ran because the run stopped. It survived the old filter untouched
+  // and poisoned the session - every later message failed on the same history.
+  it("closes out an approved call once the conversation has moved on", () => {
+    const out = sanitizeUiMessages([
+      userMessage("u1"),
+      assistantMessage("a1", [toolPart("approval-responded", "call_1")]),
+      userMessage("u2"),
+    ]);
+    const tool = partsOf(out[1])[0];
+    expect(tool.state).toBe("output-error");
+    expect(tool.errorText).toMatch(/interrupted/i);
+  });
+
+  it("closes out an approved call left in an earlier turn of a continued run", () => {
+    const out = sanitizeUiMessages([
+      assistantMessage("a1", [toolPart("approval-responded", "stale")]),
+      userMessage("u1"),
+      assistantMessage("a2", [toolPart("approval-responded", "live")]),
+    ]);
+    expect(partsOf(out[0])[0].state).toBe("output-error");
+    expect(partsOf(out[2])[0].state).toBe("approval-responded");
+  });
+
+  it("drops a call whose arguments were still streaming", () => {
+    const out = sanitizeUiMessages([
+      assistantMessage("a1", [
+        { type: "text", text: "thinking" },
+        toolPart("input-streaming", "half"),
+      ]),
+    ]);
+    expect(partsOf(out[0])).toHaveLength(1);
+    expect(partsOf(out[0])[0].type).toBe("text");
+  });
+
+  it("closes out dynamic (MCP) calls too, which are not named tool-<name>", () => {
     const out = sanitizeUiMessages([
       assistantMessage("a1", [
         { type: "dynamic-tool", state: "input-available", toolCallId: "c1" },
       ]),
     ]);
-    expect(out).toHaveLength(0);
+    expect(out).toHaveLength(1);
+    expect(partsOf(out[0])[0].state).toBe("output-error");
   });
 
   it("keeps a completed call so the model still sees its result", () => {
@@ -132,9 +182,7 @@ describe("sanitizeUiMessages: resumed sessions", () => {
       ]),
     ]);
     expect(out).toHaveLength(1);
-    expect((out[0].parts as Array<{ state?: string }>)[0].state).toBe(
-      "output-available",
-    );
+    expect(partsOf(out[0])[0].state).toBe("output-available");
   });
 
   it("keeps a failed call, which is a real result the model can react to", () => {
@@ -142,5 +190,27 @@ describe("sanitizeUiMessages: resumed sessions", () => {
       assistantMessage("a1", [toolPart("output-error", "c1")]),
     ]);
     expect(out).toHaveLength(1);
+  });
+
+  // The invariant the provider actually enforces: nothing unresolved survives,
+  // except the live approval the SDK is about to execute.
+  it("leaves no unresolved tool call in a history that ends on a user turn", () => {
+    const out = sanitizeUiMessages([
+      userMessage("u1"),
+      assistantMessage("a1", [
+        toolPart("input-available", "c1"),
+        toolPart("approval-requested", "c2"),
+        toolPart("approval-responded", "c3"),
+        { ...toolPart("output-available", "c4"), output: { ok: true } },
+      ]),
+      userMessage("u2"),
+    ]);
+    for (const message of out) {
+      for (const part of partsOf(message)) {
+        if (!part.type.startsWith("tool-") && part.type !== "dynamic-tool")
+          continue;
+        expect(RESOLVED.has(part.state ?? "")).toBe(true);
+      }
+    }
   });
 });
