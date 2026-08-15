@@ -8,6 +8,7 @@
 
 import { useEffect, useRef } from "react";
 import type { UIMessage } from "ai";
+import { useChatStore } from "../store/chatStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { isAutoApproved } from "../lib/approvalPolicy";
 
@@ -42,7 +43,15 @@ export function useAutoApproval(
       if (!id || answered.current.has(id)) continue;
 
       const tool = toolNameOf(String(part.type ?? ""));
-      if (!tool || !isAutoApproved(tool, mode)) continue;
+      // Read at answer time, not render time: the user can focus an SSH tab
+      // between the request and this effect, and the machine the command would
+      // land on is what decides whether a mode may speak for them.
+      const onRemoteHost = !!useChatStore.getState().live.getRemoteSession();
+      // The command decides whether a remote call is inspection or a change,
+      // so it has to reach the policy rather than being inferred from the name.
+      const input = part.input as { command?: unknown } | undefined;
+      const command = typeof input?.command === "string" ? input.command : undefined;
+      if (!tool || !isAutoApproved(tool, mode, { onRemoteHost, command })) continue;
 
       answered.current.add(id);
       void respond({ id, approved: true });

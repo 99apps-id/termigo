@@ -4,10 +4,12 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
 import { Toaster } from "@/components/ui/sonner";
+import { toast } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { HostKeyPromptDialog } from "@/modules/ssh/HostKeyPromptDialog";
 import { useSshRightPanelStore } from "@/modules/ssh/sshRightPanelStore";
 import { SshFileExplorer } from "@/modules/ssh/SshFileExplorer";
+import { findLeafRemoteCwd, isSshLeaf } from "@/modules/terminal/lib/panes";
 import { useSshActiveSessionStore } from "@/modules/ssh/sshActiveSession";
 import { lazy as _lazySsh } from "react";
 import { consumeLaunchFiles, getLaunchDir } from "@/lib/launchDir";
@@ -567,6 +569,32 @@ export default function App() {
       const command = validateAgentLaunchCommand(request.command);
       if (!command.ok) return;
       const launcher = findAgentLauncher(request.agent);
+
+      // The launcher types the command into a shell, so a CLI that is not on
+      // PATH produced a tab, a bare "not recognized", and no hint that PATH was
+      // the problem. Check first and say something useful instead - including
+      // where the binary actually is, which for Claude installed as a VS Code
+      // extension is a real path the user can paste straight back in.
+      void (async () => {
+        const first = command.command.trim().split(/\s+/)[0] ?? "";
+        try {
+          const found = await invoke<{
+            onPath: boolean;
+            foundAt: string | null;
+            foundIn: string | null;
+          }>("agent_locate_command", { command: first });
+          if (found.onPath) return;
+          toast.error(`${launcher.label} is not on your PATH`, {
+            description: found.foundAt
+              ? `Found it in ${found.foundIn}. Set the start command to:
+${found.foundAt}`
+              : `Install its CLI, then restart Termigo so the new PATH is picked up. A running app does not see PATH changes.`,
+            duration: 12_000,
+          });
+        } catch {
+          // The check is a courtesy; never let it stop a launch that might work.
+        }
+      })();
       const title =
         request.instances === 1
           ? launcher.label
@@ -1035,6 +1063,13 @@ export default function App() {
   const handleTerminalCwd = useCallback(
     (leafId: number, cwd: string) => {
       setLeafCwd(leafId, cwd);
+      // An SSH leaf reports remote paths. Authorizing one would canonicalize a
+      // remote path against the local filesystem, which fails, and would put a
+      // meaningless entry in the workspace registry if it ever succeeded.
+      const onSsh = tabsRef.current.some(
+        (t) => t.kind === "terminal" && isSshLeaf(t.paneTree, leafId),
+      );
+      if (onSsh) return;
       if (cwd && !authorizedCwds.current.has(cwd)) {
         authorizedCwds.current.add(cwd);
         native.workspaceAuthorize(cwd).catch(() => {
@@ -1338,6 +1373,30 @@ export default function App() {
   const sshPanelOpen = useSshRightPanelStore((s) => s.open);
   const activeSshSession = useSshActiveSessionStore((s) => s.session);
 
+  // Remote cwd of the focused SSH pane, so the remote tree follows `cd` in the
+  // terminal. Null on a local pane, which leaves the tree on its own root
+  // rather than yanking it somewhere that means nothing on the remote host.
+  const activeRemoteCwd = useMemo(() => {
+    if (!activeTerminalTab) return null;
+    return (
+      findLeafRemoteCwd(
+        activeTerminalTab.paneTree,
+        activeTerminalTab.activeLeafId,
+      ) ?? null
+    );
+  }, [activeTerminalTab]);
+
+  // A connect that the user asked for should show its remote files. Keyed on
+  // the session id so closing the panel keeps it closed for that session, and
+  // only a new connect opens it again.
+  const openedForSession = useRef<number | null>(null);
+  useEffect(() => {
+    const id = activeSshSession?.sessionId ?? null;
+    if (id === null || openedForSession.current === id) return;
+    openedForSession.current = id;
+    useSshRightPanelStore.getState().openPanel();
+  }, [activeSshSession]);
+
   const shell = (
     <ThemeProvider>
       <TooltipProvider>
@@ -1492,6 +1551,7 @@ export default function App() {
                     <SshFileExplorer
                       sessionId={activeSshSession.sessionId}
                       hostLabel={activeSshSession.hostLabel}
+                      currentCwd={activeRemoteCwd}
                       onClose={() => useSshRightPanelStore.getState().closePanel()}
                     />
                   </div>

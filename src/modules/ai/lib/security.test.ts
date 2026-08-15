@@ -240,3 +240,38 @@ describe("checkShellCommand — home directory rm guard", () => {
     expect(checkShellCommand("rm -rf /home/me/safe")).toMatchObject({ ok: true });
   });
 });
+
+// The filesystem-root guard already accepted both flag orders; the home guard
+// accepted only `-rf`, so `rm -fr ~` — the same keystrokes rearranged — went
+// straight through. Found while checking an audit finding that reported a
+// narrower version of the same hole.
+describe("recursive delete of the home directory", () => {
+  it("catches every spelling of recursive+force", () => {
+    for (const cmd of [
+      "rm -rf ~",
+      "rm -fr ~",
+      "rm -r -f ~",
+      "rm -f -r ~",
+      "rm --recursive --force ~",
+      "rm --force --recursive ~",
+      "rm -rf ~/notes",
+      "rm -fr $HOME/projects",
+      "rm -rf ${HOME}",
+    ]) {
+      expect(checkShellCommand(cmd).ok, cmd).toBe(false);
+    }
+  });
+
+  it("leaves ordinary deletes alone", () => {
+    for (const cmd of ["rm -rf ./build", "rm -rf node_modules", "rm file.txt"]) {
+      expect(checkShellCommand(cmd).ok, cmd).toBe(true);
+    }
+  });
+
+  // Stated rather than hidden: this is a deny-list, and a deny-list for shell
+  // commands cannot be complete. The approval gate is the real control.
+  it("does not pretend to catch an absolute or relative route to the same files", () => {
+    expect(checkShellCommand("rm -rf /home/me/notes").ok).toBe(true);
+    expect(checkShellCommand("cd ~ && rm -rf .").ok).toBe(true);
+  });
+});

@@ -11,6 +11,13 @@ jobs:
     permissions:
       contents: write
       id-token: write
+    # Signing is optional: a repository without these secrets still produces
+    # unsigned artifacts instead of failing every platform. `secrets` cannot be
+    # read from a step-level `if`, so it is mapped to job env here.
+    env:
+      HAS_UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+      HAS_SIGNPATH: ${{ secrets.SIGNPATH_API_TOKEN != '' }}
+      HAS_APPLE: ${{ secrets.APPLE_CERTIFICATE != '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -64,7 +71,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Write Apple API key to disk
-        if: startsWith(matrix.platform, 'macos')
+        if: startsWith(matrix.platform, 'macos') && env.HAS_APPLE == 'true'
         shell: bash
         env:
           KEY_CONTENT: ${{ secrets.APPLE_API_KEY_PATH }}
@@ -72,6 +79,52 @@ jobs:
           mkdir -p "$HOME/private_keys"
           printf '%s' "$KEY_CONTENT" > "$HOME/private_keys/AuthKey.p8"
           echo "APPLE_API_KEY_PATH=$HOME/private_keys/AuthKey.p8" >> "$GITHUB_ENV"
+
+      # Tauri runs the codesign path whenever APPLE_CERTIFICATE is set, and
+      # GitHub sets it to an empty string when the secret does not exist, so an
+      # unsigned build failed at `security import`. Export these only when a
+      # certificate is actually configured.
+      - name: Configure Apple signing
+        if: startsWith(matrix.platform, 'macos') && env.HAS_APPLE == 'true'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+        run: |
+          {
+            echo "APPLE_CERTIFICATE<<__TERMIGO_EOF__"
+            echo "${APPLE_CERTIFICATE}"
+            echo __TERMIGO_EOF__
+          } >> "$GITHUB_ENV"
+          {
+            echo "APPLE_CERTIFICATE_PASSWORD<<__TERMIGO_EOF__"
+            echo "${APPLE_CERTIFICATE_PASSWORD}"
+            echo __TERMIGO_EOF__
+          } >> "$GITHUB_ENV"
+          {
+            echo "APPLE_SIGNING_IDENTITY<<__TERMIGO_EOF__"
+            echo "${APPLE_SIGNING_IDENTITY}"
+            echo __TERMIGO_EOF__
+          } >> "$GITHUB_ENV"
+          {
+            echo "APPLE_TEAM_ID<<__TERMIGO_EOF__"
+            echo "${APPLE_TEAM_ID}"
+            echo __TERMIGO_EOF__
+          } >> "$GITHUB_ENV"
+          {
+            echo "APPLE_API_ISSUER<<__TERMIGO_EOF__"
+            echo "${APPLE_API_ISSUER}"
+            echo __TERMIGO_EOF__
+          } >> "$GITHUB_ENV"
+          {
+            echo "APPLE_API_KEY<<__TERMIGO_EOF__"
+            echo "${APPLE_API_KEY}"
+            echo __TERMIGO_EOF__
+          } >> "$GITHUB_ENV"
 
       - id: tauri
         uses: tauri-apps/tauri-action@v1
@@ -82,12 +135,6 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Termigo ${{ github.ref_name }}"
@@ -158,10 +205,16 @@ jobs:
           cp "$WORK/$BASENAME" "$APPIMAGE"
 
           rm -f "$APPIMAGE.sig"
-          pnpm tauri signer sign "$APPIMAGE"
+          if [ "$HAS_UPDATER_KEY" = "true" ]; then
+            pnpm tauri signer sign "$APPIMAGE"
+          else
+            echo "no updater signing key configured; AppImage ships unsigned"
+          fi
 
           TAG="${GITHUB_REF_NAME}"
-          gh release upload "$TAG" "$APPIMAGE" "$APPIMAGE.sig" \
+          SIG_ARG=""
+          [ -f "$APPIMAGE.sig" ] && SIG_ARG="$APPIMAGE.sig"
+          gh release upload "$TAG" "$APPIMAGE" $SIG_ARG \
             --clobber --repo "$GITHUB_REPOSITORY"
 
       # SignPath Authenticode-signs the Windows installers. Their bytes change,
@@ -201,7 +254,7 @@ jobs:
       # The default wait timeout is 600s; bumped so the job survives the time
       # it takes to review and approve the request during a release.
       - name: Submit Windows installers to SignPath
-        if: matrix.platform == 'windows-latest' && startsWith(github.ref, 'refs/tags/')
+        if: matrix.platform == 'windows-latest' && startsWith(github.ref, 'refs/tags/') && env.HAS_SIGNPATH == 'true'
         uses: signpath/github-action-submit-signing-request@v2
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -215,7 +268,7 @@ jobs:
           output-artifact-directory: 'signed'
 
       - name: Re-sign updater and upload signed Windows installers
-        if: matrix.platform == 'windows-latest' && startsWith(github.ref, 'refs/tags/')
+        if: matrix.platform == 'windows-latest' && startsWith(github.ref, 'refs/tags/') && env.HAS_SIGNPATH == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -255,8 +308,16 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    # `secrets` cannot be read from any `if`, job or step, so the flag is
+    # mapped here and the step below tests the env var instead.
+    env:
+      HAS_UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
     steps:
+      # latest.json only exists when updater artifacts are produced, which needs
+      # the signing key. Without it there is nothing to patch, and failing here
+      # marked a release red whose platform builds had all succeeded.
       - name: Patch latest.json with re-signed AppImage and Windows signatures
+        if: env.HAS_UPDATER_KEY == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

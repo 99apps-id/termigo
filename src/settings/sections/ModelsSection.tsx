@@ -50,9 +50,12 @@ import {
   setKey,
 } from "@/modules/ai/lib/keyring";
 import { useChatStore } from "@/modules/ai/store/chatStore";
-import { OAUTH_PROFILES } from "@/modules/oauth/presets";
-import { useOAuthStore } from "@/modules/oauth/store";
 import { usePreferencesStore } from "@/modules/settings/preferences";
+import {
+  ENDPOINT_PRESETS,
+  presetToEndpoint,
+  type EndpointPreset,
+} from "@/modules/ai/lib/endpointPresets";
 import {
   type AutocompleteTrigger,
   emitKeysChanged,
@@ -91,7 +94,6 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useMemo, useState } from "react";
-import { OAuthCard } from "../components/OAuthCard";
 import { ProviderIcon } from "../components/ProviderIcon";
 import { ProviderKeyCard } from "../components/ProviderKeyCard";
 import { SectionHeader } from "../components/SectionHeader";
@@ -173,7 +175,6 @@ export function ModelsSection() {
 
   useEffect(() => {
     void getAllKeys().then(setKeys);
-    void useOAuthStore.getState().hydrate();
   }, []);
 
   useEffect(() => {
@@ -204,14 +205,19 @@ export function ModelsSection() {
     await emitKeysChanged();
   };
 
-  const addCustomEndpoint = async () => {
-    const ep: CustomEndpoint = {
-      id: crypto.randomUUID().slice(0, 8),
-      name: "",
-      baseURL: "",
-      modelId: "",
-      contextLimit: 128_000,
-    };
+  const addCustomEndpoint = async (preset?: EndpointPreset) => {
+    const id = crypto.randomUUID().slice(0, 8);
+    // A preset only fills the fields in; every one stays editable, so a base
+    // URL or model that ages out costs a correction rather than a release.
+    const ep: CustomEndpoint = preset
+      ? presetToEndpoint(preset, id)
+      : {
+          id,
+          name: "",
+          baseURL: "",
+          modelId: "",
+          contextLimit: 128_000,
+        };
     await setCustomEndpoints([...customEndpoints, ep]);
   };
 
@@ -364,15 +370,6 @@ export function ModelsSection() {
         description="Connect the providers you use. Keys live in your OS keychain and are used only by Termigo."
       />
 
-      <div className="flex flex-col gap-3">
-        <Label>Sign in with your account</Label>
-        <div className="flex flex-col gap-2">
-          {OAUTH_PROFILES.map((p) => (
-            <OAuthCard key={p} profile={p} />
-          ))}
-        </div>
-      </div>
-
       <DefaultsBlock
         defaultModel={defaultModel}
         configuredIds={configuredIds}
@@ -473,7 +470,7 @@ function AddProviderMenu({
 }: {
   providers: readonly ProviderInfo[];
   onAdd: (id: ProviderId) => void;
-  onAddCompat: () => void;
+  onAddCompat: (preset?: EndpointPreset) => void;
 }) {
   const cloud = providers.filter((p) => !isLocalProvider(p.id));
   const local = providers.filter(
@@ -508,6 +505,18 @@ function AddProviderMenu({
         </DropdownMenuLabel>
         {local.map((p) => (
           <ProviderMenuItem key={p.id} provider={p} onAdd={onAdd} />
+        ))}
+        {/* Presets first: the base URL is the one field a user cannot guess
+            and the one most often mistyped. */}
+        {ENDPOINT_PRESETS.map((preset) => (
+          <DropdownMenuItem
+            key={preset.id}
+            onSelect={() => onAddCompat(preset)}
+            className="flex items-center gap-2 text-[12px]"
+          >
+            <ProviderIcon provider="openai-compatible" size={13} />
+            <span>{preset.name}</span>
+          </DropdownMenuItem>
         ))}
         <DropdownMenuItem
           onSelect={() => onAddCompat()}

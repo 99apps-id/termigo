@@ -1,4 +1,4 @@
-import { syntaxTree } from "@codemirror/language";
+import { ensureSyntaxTree } from "@codemirror/language";
 import { EditorState } from "@codemirror/state";
 import { describe, expect, it } from "vitest";
 import { resolveDisplayName, resolveLanguage } from "./languageResolver";
@@ -68,7 +68,15 @@ describe("resolveDisplayName", () => {
         doc: "{#if ready}<button on:click={run}>{label}</button>{/if}",
         extensions: [result.ext],
       });
-      const tree = syntaxTree(state).toString();
+      // ensureSyntaxTree, not syntaxTree: the latter returns whatever the
+      // parser managed inside its time budget, so under the full suite's
+      // parallel load it stopped after `IfBlock` and never reached the
+      // `on:click` directive - failing in 486ms while passing alone. Asking
+      // for the whole document makes the assertion about the parser rather
+      // than about how busy the machine was.
+      const parsed = ensureSyntaxTree(state, state.doc.length, 10_000);
+      if (!parsed) throw new Error("Svelte parse did not complete");
+      const tree = parsed.toString();
       expect(tree).toContain("IfBlock");
       expect(tree).toContain("DirectiveOn");
     },

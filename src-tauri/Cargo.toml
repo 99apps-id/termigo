@@ -1,6 +1,6 @@
 [package]
 name = "termigo"
-version = "0.8.6"
+version = "0.9.1"
 description = "Termigo — an open-source AI-native terminal emulator"
 authors = ["99apps-id"]
 license = "Apache-2.0"
@@ -13,7 +13,7 @@ default-members = [".", "crates/termigo-cli", "crates/termigo-control-protocol"]
 resolver = "2"
 
 [workspace.package]
-version = "0.8.6"
+version = "0.9.1"
 edition = "2021"
 license = "Apache-2.0"
 
@@ -60,11 +60,11 @@ reqwest = { version = "0.12", default-features = false, features = [
 ] }
 bytes = "1"
 futures-util = "0.3"
-tokio = { version = "1", default-features = false, features = ["rt", "rt-multi-thread", "macros", "sync", "time", "io-util", "net"] }
+tokio = { version = "1", default-features = false, features = ["rt", "rt-multi-thread", "macros", "sync", "time", "io-util", "net", "process"] }
 tempfile = "3"
 notify = "8.2.0"
 which = "8.0.4"
-base64 = "0.22"
+base64 = "0.23"
 russh = { version = "0.60", default-features = false, features = ["ring", "flate2", "rsa"] }
 russh-sftp = "2.1"
 zip = { version = "4", default-features = false, features = ["deflate"] }

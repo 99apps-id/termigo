@@ -187,6 +187,13 @@ export function leafCwd(leafId: number): string | null {
   return sessions.get(leafId)?.lastCwd ?? null;
 }
 
+/** Backend session id of the leaf's live session: the PTY id for local
+ *  leaves, or the russh session id for SSH leaves (the id the `ssh_sftp_*`
+ *  commands accept). Null until the session is open. */
+export function leafSessionId(leafId: number): number | null {
+  return sessions.get(leafId)?.pty?.id ?? null;
+}
+
 export function navigateFocusedBlocks(dir: -1 | 1): boolean {
   for (const [, s] of sessions) {
     if (!s.visibleNow || !s.focusedNow || !s.blockDecorations) continue;

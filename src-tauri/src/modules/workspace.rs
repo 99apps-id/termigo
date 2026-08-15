@@ -20,13 +20,50 @@ struct CanonicalEntry {
 pub struct WorkspaceRegistry {
     roots: Mutex<HashSet<PathBuf>>,
     canonical_cache: Mutex<HashMap<PathBuf, CanonicalEntry>>,
+    /// Asset-protocol scope, attached once during setup.
+    ///
+    /// The static config grants nothing, so image, video, audio and PDF
+    /// previews are served only for roots the app has already authorized for
+    /// reading. A blanket `**` scope meant any XSS in the webview could read
+    /// arbitrary files (`.ssh`, `.env`) through `asset:`; tying the two
+    /// together keeps one boundary instead of two that can disagree.
+    asset_scope: OnceLock<tauri::scope::fs::Scope>,
 }
 
 impl WorkspaceRegistry {
+    /// Called once from setup. Roots authorized before this point are replayed,
+    /// since the launch directory is registered during startup.
+    pub fn attach_asset_scope(&self, scope: tauri::scope::fs::Scope) {
+        if self.asset_scope.set(scope).is_err() {
+            return; // already attached
+        }
+        let roots: Vec<PathBuf> = {
+            let set = self.roots.lock().expect("workspace registry poisoned");
+            set.iter().cloned().collect()
+        };
+        for root in roots {
+            self.grant_asset_access(&root);
+        }
+    }
+
+    fn grant_asset_access(&self, root: &Path) {
+        let Some(scope) = self.asset_scope.get() else {
+            return; // pre-setup; replayed by attach_asset_scope
+        };
+        if let Err(error) = scope.allow_directory(root, true) {
+            log::warn!("asset scope: cannot allow {}: {error}", root.display());
+        }
+    }
+
     pub fn authorize<P: AsRef<Path>>(&self, path: P) -> std::io::Result<PathBuf> {
         let canonical = std::fs::canonicalize(path.as_ref())?;
-        let mut set = self.roots.lock().expect("workspace registry poisoned");
-        set.insert(canonical.clone());
+        {
+            let mut set = self.roots.lock().expect("workspace registry poisoned");
+            set.insert(canonical.clone());
+        }
+        // Every authorization widens the asset scope by the same root, so the
+        // two can never drift apart.
+        self.grant_asset_access(&canonical);
         Ok(canonical)
     }
 

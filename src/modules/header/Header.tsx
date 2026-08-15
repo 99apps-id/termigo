@@ -19,6 +19,7 @@ import {
   useState,
 } from "react";
 import { SshMenu } from "@/modules/ssh/SshMenu";
+import { SshPanelToggle } from "@/modules/ssh/SshPanelToggle";
 import type { SshConnection } from "@/modules/ssh/connections";
 import {
   SearchInline,
@@ -206,6 +207,9 @@ export function Header({
       </div>
 
       <SearchInline ref={searchRef} target={searchTarget} compact={compact} />
+
+      {/* Sits on the right, which is the side the panel it controls opens on. */}
+      <SshPanelToggle />
 
       {IS_MAC && (
         <>

@@ -372,6 +372,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
+name = "base64"
+version = "0.23.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
+
+[[package]]
 name = "base64ct"
 version = "1.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6722,9 +6728,9 @@ dependencies = [
 
 [[package]]
 name = "termigo"
-version = "0.8.6"
+version = "0.9.1"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "bytes",
  "dirs 6.0.0",
  "futures-util",
@@ -6775,7 +6781,7 @@ dependencies = [
 
 [[package]]
 name = "termigo-cli"
-version = "0.8.6"
+version = "0.9.1"
 dependencies = [
  "dirs 6.0.0",
  "libc",
@@ -6787,7 +6793,7 @@ dependencies = [
 
 [[package]]
 name = "termigo-control-protocol"
-version = "0.8.6"
+version = "0.9.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -6915,6 +6921,7 @@ dependencies = [
  "libc",
  "mio",
  "pin-project-lite",
+ "signal-hook-registry",
  "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",

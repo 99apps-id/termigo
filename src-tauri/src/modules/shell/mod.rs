@@ -69,19 +69,26 @@ pub async fn shell_run_command(
     // runtime stays unblocked.
     let (tx, rx) = mpsc::channel::<Result<CommandOutput, String>>();
     thread::spawn(move || {
-        let _ = tx.send(run_blocking(trimmed, cwd_path, workspace, dur));
+        let _ = tx.send(run_blocking(trimmed, cwd_path, workspace, dur, None));
     });
 
     rx.recv().map_err(|e| e.to_string())?
 }
 
-pub(crate) fn run_blocking_inner(
+/// Somewhere the caller can see the child while it runs, so a command can be
+/// stopped from outside instead of only by its own timeout.
+pub(crate) type ChildSlot = Arc<std::sync::Mutex<Option<Arc<SharedChild>>>>;
+
+/// Run a command, publishing the child into `slot` for its lifetime so it can
+/// be stopped from outside.
+pub(crate) fn run_blocking_interruptible(
     command: String,
     cwd: Option<String>,
     workspace: WorkspaceEnv,
     dur: Duration,
+    slot: ChildSlot,
 ) -> Result<CommandOutput, String> {
-    run_blocking(command, cwd, workspace, dur)
+    run_blocking(command, cwd, workspace, dur, Some(slot))
 }
 
 fn run_blocking(
@@ -89,6 +96,7 @@ fn run_blocking(
     cwd: Option<String>,
     workspace: WorkspaceEnv,
     dur: Duration,
+    slot: Option<ChildSlot>,
 ) -> Result<CommandOutput, String> {
     let mut cmd = build_oneshot_command(&command, &workspace, cwd.as_deref())?;
     if let (WorkspaceEnv::Local, Some(dir)) = (&workspace, cwd) {
@@ -103,6 +111,14 @@ fn run_blocking(
         log::warn!("shell_run_command spawn failed: {e}");
         e.to_string()
     })?);
+    // Visible to `shell_session_interrupt` for as long as this runs. Cleared
+    // below so a later interrupt cannot kill an unrelated process that has
+    // since taken the same slot.
+    if let Some(ref slot) = slot {
+        if let Ok(mut guard) = slot.lock() {
+            *guard = Some(Arc::clone(&child));
+        }
+    }
     let mut stdout_pipe = child.take_stdout().ok_or_else(|| {
         let _ = child.kill();
         "no stdout pipe".to_string()
@@ -116,6 +132,20 @@ fn run_blocking(
     let stderr_handle = thread::spawn(move || drain(&mut stderr_pipe));
 
     let (tx, rx) = mpsc::channel();
+    // Cleared however this returns - normal exit, timeout or error - so a
+    // later interrupt cannot kill a process that has since taken this slot.
+    struct ClearOnDrop(Option<ChildSlot>);
+    impl Drop for ClearOnDrop {
+        fn drop(&mut self) {
+            if let Some(slot) = self.0.take() {
+                if let Ok(mut guard) = slot.lock() {
+                    *guard = None;
+                }
+            }
+        }
+    }
+    let _clear = ClearOnDrop(slot.clone());
+
     let waiter = Arc::clone(&child);
     thread::spawn(move || {
         let _ = tx.send(waiter.wait());
@@ -191,6 +221,26 @@ pub fn shell_session_open(
     let id = state.next_session_id.fetch_add(1, Ordering::Relaxed);
     state.sessions.write().unwrap().insert(id, session);
     Ok(id)
+}
+
+/// Kill whatever is running in a session right now.
+///
+/// The agent's stop button aborts the model stream, which does nothing to a
+/// command already executing: the shell kept running and the user watched a
+/// "stopped" agent stay busy. This is what makes stop reach the work.
+#[tauri::command]
+pub fn shell_session_interrupt(
+    state: tauri::State<ShellState>,
+    id: u32,
+) -> Result<bool, String> {
+    let session = state
+        .sessions
+        .read()
+        .unwrap()
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| "no shell session".to_string())?;
+    Ok(session.interrupt())
 }
 
 #[tauri::command]
@@ -360,11 +410,14 @@ mod tests {
     use super::*;
 
     fn run(cmd: &str, timeout_secs: u64) -> CommandOutput {
-        run_blocking_inner(
+        // No child slot: these tests run a command to completion and never
+        // interrupt one.
+        run_blocking_interruptible(
             cmd.into(),
             None,
             WorkspaceEnv::Local,
             Duration::from_secs(timeout_secs),
+            Default::default(),
         )
         .expect("run")
     }

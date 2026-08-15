@@ -3,6 +3,9 @@ import { z } from "zod";
 import { native } from "../lib/native";
 import { checkWritableCanonical } from "../lib/security";
 import { newQueuedEditId, usePlanStore } from "../store/planStore";
+import { sftpReadFile, sftpWriteFile } from "@/modules/ssh/sftp";
+import { fileCacheKey, routePath } from "../lib/remoteFs";
+import { checkWritable } from "../lib/security";
 import { resolvePath, type ToolContext } from "./context";
 
 type EditResult =
@@ -15,13 +18,34 @@ function djb2(s: string): number {
   return h >>> 0;
 }
 
+/**
+ * File access for one edit. Injected so the same matching, counting and
+ * plan-mode logic serves a local file and a remote one - duplicating it per
+ * transport is how the two drift apart.
+ */
+type EditIo = {
+  read: (path: string) => ReturnType<typeof native.readFile>;
+  write: (path: string, content: string) => Promise<void>;
+  remote: boolean;
+  /** Cache key for this path, namespaced by the machine it lives on. */
+  cacheKey: (path: string) => string;
+};
+
+const LOCAL_IO: EditIo = {
+  read: (p) => native.readFile(p),
+  write: (p, c) => native.writeFile(p, c),
+  remote: false,
+  cacheKey: (p) => fileCacheKey(p),
+};
+
 async function applyEdits(
   abs: string,
   edits: { old_string: string; new_string: string; replace_all?: boolean }[],
   kind: "edit" | "multi_edit",
   readCache: Map<string, { size: number; hash: number }>,
+  io: EditIo = LOCAL_IO,
 ): Promise<EditResult> {
-  const r = await native.readFile(abs);
+  const r = await io.read(abs);
   if (r.kind === "binary")
     return { error: "binary file refused", path: abs };
   if (r.kind === "toolarge")
@@ -104,8 +128,8 @@ async function applyEdits(
   }
 
   try {
-    await native.writeFile(abs, content);
-    readCache.set(abs, { size: content.length, hash: djb2(content) });
+    await io.write(abs, content);
+    readCache.set(io.cacheKey(abs), { size: content.length, hash: djb2(content) });
     return {
       ok: true,
       replacements: totalReplacements,
@@ -115,6 +139,51 @@ async function applyEdits(
   } catch (err) {
     return { error: String(err), path: abs };
   }
+}
+
+/**
+ * Resolve an edit target, refusing rather than silently editing the wrong
+ * machine. A remote edit reads and writes over SFTP; the canonicalize step is
+ * skipped because it is a local-filesystem call, and the remote host enforces
+ * its own permissions anyway.
+ */
+async function resolveEditTarget(
+  ctx: ToolContext,
+  path: string,
+): Promise<{ ok: true; abs: string; io: EditIo } | { ok: false; error: EditResult }> {
+  const target = routePath(ctx.getRemoteSession(), path, (p) =>
+    resolvePath(p, ctx.getCwd()),
+  );
+  if (target.kind === "error") {
+    return { ok: false, error: { error: target.reason, path } };
+  }
+  if (target.kind === "remote") {
+    const safety = checkWritable(target.path);
+    if (!safety.ok) {
+      return { ok: false, error: { error: safety.reason, path: target.path } };
+    }
+    const sessionId = target.sessionId;
+    return {
+      ok: true,
+      abs: target.path,
+      io: {
+        read: async (p) => {
+          const content = await sftpReadFile(sessionId, p);
+          return { kind: "text", content, size: content.length } as Awaited<
+            ReturnType<typeof native.readFile>
+          >;
+        },
+        write: (p, c) => sftpWriteFile(sessionId, p, c),
+        remote: true,
+        cacheKey: (p) => fileCacheKey(p, sessionId),
+      },
+    };
+  }
+  const safety = await checkWritableCanonical(target.path, native.canonicalize);
+  if (!safety.ok) {
+    return { ok: false, error: { error: safety.reason, path: target.path } };
+  }
+  return { ok: true, abs: safety.canonical, io: LOCAL_IO };
 }
 
 export function buildEditTools(ctx: ToolContext) {
@@ -132,11 +201,10 @@ export function buildEditTools(ctx: ToolContext) {
       }),
       needsApproval: true,
       execute: async ({ path, old_string, new_string, replace_all }) => {
-        const reqPath = resolvePath(path, ctx.getCwd());
-        const safety = await checkWritableCanonical(reqPath, native.canonicalize);
-        if (!safety.ok) return { error: safety.reason, path: reqPath };
-        const abs = safety.canonical;
-        if (!ctx.readCache.has(abs)) {
+        const resolved = await resolveEditTarget(ctx, path);
+        if (!resolved.ok) return resolved.error;
+        const { abs, io } = resolved;
+        if (!ctx.readCache.has(io.cacheKey(abs))) {
           return {
             error:
               "must call read_file on this path first (read-before-edit invariant).",
@@ -148,6 +216,7 @@ export function buildEditTools(ctx: ToolContext) {
           [{ old_string, new_string, replace_all }],
           "edit",
           ctx.readCache,
+          io,
         );
       },
     }),
@@ -169,18 +238,17 @@ export function buildEditTools(ctx: ToolContext) {
       }),
       needsApproval: true,
       execute: async ({ path, edits }) => {
-        const reqPath = resolvePath(path, ctx.getCwd());
-        const safety = await checkWritableCanonical(reqPath, native.canonicalize);
-        if (!safety.ok) return { error: safety.reason, path: reqPath };
-        const abs = safety.canonical;
-        if (!ctx.readCache.has(abs)) {
+        const resolved = await resolveEditTarget(ctx, path);
+        if (!resolved.ok) return resolved.error;
+        const { abs, io } = resolved;
+        if (!ctx.readCache.has(io.cacheKey(abs))) {
           return {
             error:
               "must call read_file on this path first (read-before-edit invariant).",
             path: abs,
           };
         }
-        return applyEdits(abs, edits, "multi_edit", ctx.readCache);
+        return applyEdits(abs, edits, "multi_edit", ctx.readCache, io);
       },
     }),
   } as const;

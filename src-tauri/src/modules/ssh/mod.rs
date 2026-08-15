@@ -355,6 +355,137 @@ pub async fn ssh_attach(
         })?;
     Ok(session.add_mirror_sink(on_event))
 }
+/// Output of one remote command.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SshExecOutput {
+    pub stdout: String,
+    pub stderr: String,
+    /// None when the server closed the channel without reporting one.
+    pub exit_code: Option<u32>,
+    /// True when output hit the cap and was cut.
+    pub truncated: bool,
+}
+
+/// Enough for a search across a large tree without letting a runaway command
+/// stream megabytes into the agent's context.
+const EXEC_OUTPUT_CAP: usize = 256 * 1024;
+
+/// Run one command on the remote host over its own channel.
+///
+/// A separate channel from the interactive shell on purpose: reusing the shell
+/// would interleave the agent's output with whatever the user is typing, and
+/// there would be no reliable way to tell where the command's output ends. A
+/// dedicated exec channel reports its own exit status and EOF.
+///
+/// The command is passed to the remote shell verbatim. Callers are responsible
+/// for quoting - `shellQuote` on the frontend does that for the search tools.
+#[tauri::command]
+pub async fn ssh_exec(
+    state: tauri::State<'_, SshState>,
+    id: u32,
+    command: String,
+    timeout_secs: Option<u64>,
+) -> Result<SshExecOutput, String> {
+    use russh::ChannelMsg;
+
+    let session = state
+        .sessions
+        .read()
+        .await
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| {
+            log::warn!("ssh_exec: unknown id={id}");
+            "no ssh session".to_string()
+        })?;
+
+    let timeout = std::time::Duration::from_secs(timeout_secs.unwrap_or(30).clamp(1, 300));
+
+    ssh_runtime()
+        .spawn(async move {
+            // Hold the handle only long enough to open the channel. Keeping it
+            // for the command's lifetime would block every other user of the
+            // session - the SFTP file browser, the agent's remote reads, any
+            // second command - for as long as the command runs, so a two-minute
+            // `apt install` would freeze the remote file panel.
+            let mut channel = {
+                let handle_guard = session.handle.lock().await;
+                let handle = handle_guard
+                    .as_ref()
+                    .ok_or_else(|| "ssh session is closed".to_string())?;
+                handle
+                    .channel_open_session()
+                    .await
+                    .map_err(|e| format!("ssh: open exec channel failed: {e}"))?
+            };
+            channel
+                .exec(true, command.as_bytes())
+                .await
+                .map_err(|e| format!("ssh: exec failed: {e}"))?;
+
+            let mut stdout = Vec::new();
+            let mut stderr = Vec::new();
+            let mut exit_code = None;
+            let mut truncated = false;
+
+            let collect = async {
+                while let Some(msg) = channel.wait().await {
+                    match msg {
+                        ChannelMsg::Data { ref data } => {
+                            if stdout.len() < EXEC_OUTPUT_CAP {
+                                stdout.extend_from_slice(data);
+                            } else {
+                                truncated = true;
+                            }
+                        }
+                        ChannelMsg::ExtendedData { ref data, ext: 1 } => {
+                            if stderr.len() < EXEC_OUTPUT_CAP {
+                                stderr.extend_from_slice(data);
+                            } else {
+                                truncated = true;
+                            }
+                        }
+                        ChannelMsg::ExitStatus { exit_status } => {
+                            exit_code = Some(exit_status);
+                        }
+                        ChannelMsg::Eof | ChannelMsg::Close => break,
+                        _ => {}
+                    }
+                }
+            };
+
+            // A command that never exits must not hold the agent forever; the
+            // channel is dropped with the future, which closes it server-side.
+            if tokio::time::timeout(timeout, collect).await.is_err() {
+                return Err(format!(
+                    "ssh: command timed out after {}s",
+                    timeout.as_secs()
+                ));
+            }
+
+            if stdout.len() > EXEC_OUTPUT_CAP {
+                stdout.truncate(EXEC_OUTPUT_CAP);
+                truncated = true;
+            }
+            if stderr.len() > EXEC_OUTPUT_CAP {
+                stderr.truncate(EXEC_OUTPUT_CAP);
+                truncated = true;
+            }
+
+            Ok(SshExecOutput {
+                // Lossy on purpose: a stray non-UTF-8 byte in a matched line
+                // should not fail the whole search.
+                stdout: String::from_utf8_lossy(&stdout).into_owned(),
+                stderr: String::from_utf8_lossy(&stderr).into_owned(),
+                exit_code,
+                truncated,
+            })
+        })
+        .await
+        .map_err(|e| format!("ssh task join failed: {e}"))?
+}
+
 #[cfg(test)]
 mod tests {
     // No module-level tests yet; session.rs and sftp.rs carry the coverage.

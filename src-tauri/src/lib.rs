@@ -1,6 +1,9 @@
 pub mod modules;
 
-use modules::{agent, control, extensions, fs, git, history, lsp, net, oauth, pty, secrets, shell, ssh, workspace};
+use modules::{
+    agent, control, extensions, fs, git, history, lsp, mcp, net, pty, secrets, shell,
+    ssh, workspace,
+};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
@@ -210,6 +213,13 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(move |_app| {
+            // Bind the asset protocol to the workspace boundary. The static
+            // config grants nothing, so previews resolve only under roots the
+            // app has already authorized for reading.
+            if let Some(registry) = _app.try_state::<workspace::WorkspaceRegistry>() {
+                registry.attach_asset_scope(_app.asset_protocol_scope().clone());
+            }
+
             if let Err(error) = control::start(_app.handle().clone(), control_for_setup.clone()) {
                 log::warn!("could not start Termigo control server: {error}");
             }
@@ -251,7 +261,6 @@ pub fn run() {
         })
         .manage(LaunchDir(Mutex::new(cli_dir)))
         .manage(LaunchFiles(Mutex::new(launch.files)))
-        .manage(oauth::OAuthState::default())
         .invoke_handler(tauri::generate_handler![
             pty::pty_open,
             pty::pty_write,
@@ -308,6 +317,7 @@ pub fn run() {
             shell::shell_run_command,
             shell::shell_session_open,
             shell::shell_session_run,
+            shell::shell_session_interrupt,
             shell::shell_session_close,
             shell::shell_bg_spawn,
             shell::shell_bg_logs,
@@ -324,18 +334,18 @@ pub fn run() {
             get_launch_files,
             open_settings_window,
             agent::agent_enable_hooks,
+            agent::agent_locate_command,
             agent::agent_hooks_status,
             secrets::secrets_get,
             secrets::secrets_set,
             secrets::secrets_delete,
             secrets::secrets_get_all,
-            oauth::oauth_start,
-            oauth::oauth_poll,
-            oauth::oauth_exchange,
-            oauth::oauth_session,
-            oauth::oauth_load,
-            oauth::oauth_clear,
-            oauth::oauth_antigravity_project,
+            mcp::mcp_list_servers,
+            mcp::mcp_list_tools,
+            mcp::mcp_call_tool,
+            mcp::mcp_ping,
+            mcp::mcp_add_server,
+            mcp::mcp_remove_server,
             extensions::commands::ext_list,
             extensions::commands::ext_read_manifest,
             extensions::commands::ext_read_asset,
@@ -355,6 +365,7 @@ pub fn run() {
             ssh::ssh_close,
             ssh::ssh_forward_open,
             ssh::ssh_confirm_host_key,
+            ssh::ssh_exec,
             ssh::ssh_list_sessions,
             ssh::ssh_attach,
             ssh::sftp::ssh_sftp_home,

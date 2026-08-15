@@ -10,8 +10,6 @@ import { Spinner } from "@/components/ui/spinner";
 import { fmtShortcut, MOD_KEY } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
-import { OAUTH_PROFILE_FOR_PROVIDER } from "@/modules/oauth/presets";
-import { useOAuthStore } from "@/modules/oauth/store";
 import { ApprovalModeControl } from "./ApprovalModeControl";
 import {
   Add01Icon,
@@ -226,17 +224,8 @@ function ModelDropdown() {
   const [activeProvider, setActiveProvider] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("all");
   const inputRef = useRef<HTMLInputElement>(null);
-  // A provider is usable with either a stored key or a connected OAuth account.
-  // Checking only apiKeys left a signed-in account (Codex, Claude, Antigravity)
-  // filed under "unconfigured", so its models never reached the picker even
-  // though buildLanguageModel would have run them.
-  const oauthTokens = useOAuthStore((s) => s.tokens);
-  const hasCredentialFor = (id: ProviderId) => {
-    if (!providerNeedsKey(id)) return true;
-    if (apiKeys[id]) return true;
-    const profile = OAUTH_PROFILE_FOR_PROVIDER[id];
-    return !!(profile && oauthTokens[profile]?.access_token);
-  };
+  const hasCredentialFor = (id: ProviderId) =>
+    providerNeedsKey(id) ? !!apiKeys[id] : true;
 
   const currentProviderHasKey = isCompatModelId(selected)
     ? true
@@ -259,7 +248,7 @@ function ModelDropdown() {
     }
     return { configured, unconfigured };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apiKeys, oauthTokens]);
+  }, [apiKeys]);
 
   const allModels = useMemo(
     () => [...MODELS, ...epModelInfos],

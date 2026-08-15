@@ -448,10 +448,10 @@ export function SshConnectionDialog({ open, onOpenChange, editing, onSaved }: Pr
           </DialogDescription>
         </DialogHeader>
 
-        {/* DialogContent caps at calc(100dvh-2rem). min-h-0 lets the inner
-            stack shrink so the form scrolls inside the dialog instead of
-            top fields sliding off-screen. -mr-2/pr-2 keeps the scrollbar
-            off the content edge. */}
+        {/* DialogContent caps its own height and scrolls, so this stack no
+            longer has to. min-h-0 is kept so it still shrinks rather than
+            forcing the dialog taller. -mr-2/pr-2 keeps the scrollbar off the
+            content edge. */}
         <div className="-mr-2 flex min-h-0 flex-col gap-3 overflow-y-auto pr-2">
           <Field label="Name">
             <Input

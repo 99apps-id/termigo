@@ -1,3 +1,13 @@
+import { sshExec } from "@/modules/ssh/bridge";
+import {
+  buildFindCommand,
+  buildGrepCommand,
+  isNoMatches,
+  parseFindOutput,
+  parseGrepOutput,
+  REMOTE_SEARCH_MAX_RESULTS,
+  resolveRemoteRoot,
+} from "../lib/remoteSearch";
 import { tool } from "ai";
 import { z } from "zod";
 import { native } from "../lib/native";
@@ -75,6 +85,45 @@ export function buildSearchTools(ctx: ToolContext) {
         case_insensitive,
         max_results,
       }) => {
+        const remote = ctx.getRemoteSession();
+        if (remote) {
+          // The server's own grep, not an SFTP walk: a recursive walk is one
+          // round trip per directory plus a download per candidate, for a
+          // search the remote box does locally in milliseconds.
+          const resolved = resolveRemoteRoot(root, remote.cwd);
+          if (!resolved.ok) return { error: resolved.error, remote: true };
+          const target = resolved.path;
+          try {
+            const out = await sshExec(
+              remote.sessionId,
+              buildGrepCommand({
+                pattern,
+                path: target,
+                glob,
+                caseInsensitive: case_insensitive,
+                maxResults: max_results,
+              }),
+            );
+            if (isNoMatches(out.exitCode, out.stdout)) {
+              return { remote: true, root: target, hits: [], count: 0 };
+            }
+            if (out.exitCode !== null && out.exitCode > 1 && !out.stdout) {
+              return { error: out.stderr.trim() || `grep exited ${out.exitCode}`, remote: true };
+            }
+            const hits = parseGrepOutput(out.stdout);
+            return {
+              remote: true,
+              root: target,
+              count: hits.length,
+              hits,
+              ...(out.truncated || hits.length >= REMOTE_SEARCH_MAX_RESULTS
+                ? { truncated: true }
+                : {}),
+            };
+          } catch (e) {
+            return { error: String(e), remote: true };
+          }
+        }
         const r = resolveRoot(root, ctx);
         if (!r.ok) return { error: r.error };
         const safety = await checkReadableCanonical(
@@ -121,6 +170,30 @@ export function buildSearchTools(ctx: ToolContext) {
         max_results: z.number().int().min(1).max(2000).optional(),
       }),
       execute: async ({ pattern, root, max_results }) => {
+        const remote = ctx.getRemoteSession();
+        if (remote) {
+          const resolved = resolveRemoteRoot(root, remote.cwd);
+          if (!resolved.ok) return { error: resolved.error, remote: true };
+          const target = resolved.path;
+          try {
+            const out = await sshExec(
+              remote.sessionId,
+              buildFindCommand({ pattern, path: target, maxResults: max_results }),
+            );
+            const paths = parseFindOutput(out.stdout);
+            return {
+              remote: true,
+              root: target,
+              count: paths.length,
+              hits: paths.map((p) => ({ path: p })),
+              ...(out.truncated || paths.length >= REMOTE_SEARCH_MAX_RESULTS
+                ? { truncated: true }
+                : {}),
+            };
+          } catch (e) {
+            return { error: String(e), remote: true };
+          }
+        }
         const r = resolveRoot(root, ctx);
         if (!r.ok) return { error: r.error };
         const safety = await checkReadableCanonical(

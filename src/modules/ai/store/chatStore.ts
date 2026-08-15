@@ -1,4 +1,11 @@
 import type { Chat, UIMessage } from "@ai-sdk/react";
+import {
+  EMPTY_QUEUE,
+  enqueue,
+  remove as removeSteer,
+  type SteerMessage,
+  type SteerQueue,
+} from "../lib/steer";
 import { create } from "zustand";
 import {
   DEFAULT_MODEL_ID,
@@ -27,6 +34,7 @@ import { pushRecentModel } from "../lib/modelPrefs";
 
 export type Live = {
   getCwd: () => string | null;
+  getRemoteSession: () => import("../tools/context").RemoteFsSession | null;
   getTerminalContext: () => string | null;
   isActiveTerminalPrivate: () => boolean;
   injectIntoActivePty: (text: string) => boolean;
@@ -56,6 +64,8 @@ export type AgentMeta = {
   lastInputTokens: number;
   lastCachedTokens: number;
   hitStepCap: boolean;
+  /** The user pressed stop, so the transcript can offer to resume. */
+  stoppedByUser: boolean;
   compactionNotice: { droppedCount: number; at: number } | null;
 };
 
@@ -74,6 +84,7 @@ const IDLE_META: AgentMeta = {
   lastInputTokens: 0,
   lastCachedTokens: 0,
   hitStepCap: false,
+  stoppedByUser: false,
   compactionNotice: null,
 };
 
@@ -138,6 +149,12 @@ type StoreState = {
   patchAgentMeta: (patch: Partial<AgentMeta>) => void;
   resetAgentMeta: () => void;
 
+  /** Text typed while a run was in flight, waiting for it to end. */
+  steerQueue: SteerQueue;
+  queueSteer: (message: SteerMessage) => void;
+  cancelSteer: (index: number) => void;
+  clearSteer: () => void;
+
   // Sessions
   sessionsHydrated: boolean;
   sessions: SessionMeta[];
@@ -153,6 +170,7 @@ type StoreState = {
 
 const NOOP_LIVE: Live = {
   getCwd: () => null,
+  getRemoteSession: () => null,
   getTerminalContext: () => null,
   isActiveTerminalPrivate: () => false,
   injectIntoActivePty: () => false,
@@ -280,6 +298,13 @@ export const useChatStore = create<StoreState>((set, get) => ({
     set((s) => ({ agentMeta: { ...s.agentMeta, ...patch } })),
   resetAgentMeta: () => set({ agentMeta: IDLE_META }),
 
+  steerQueue: EMPTY_QUEUE,
+  queueSteer: (message) =>
+    set((s) => ({ steerQueue: enqueue(s.steerQueue, message) })),
+  cancelSteer: (index) =>
+    set((s) => ({ steerQueue: removeSteer(s.steerQueue, index) })),
+  clearSteer: () => set({ steerQueue: EMPTY_QUEUE }),
+
   sessionsHydrated: false,
   sessions: [],
   activeSessionId: null,
@@ -318,6 +343,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
   },
 
   newSession: () => {
+    notifySessionLeft(get().activeSessionId);
     const id = newSessionId();
     const meta: SessionMeta = {
       id,
@@ -335,6 +361,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
   switchSession: (id) => {
     if (get().activeSessionId === id) return;
     if (!get().sessions.some((s) => s.id === id)) return;
+    notifySessionLeft(get().activeSessionId);
 
     // Lazily seed the chat with persisted messages the first time we open
     // this session. Subsequent switches reuse the cached Chat instance.
@@ -443,6 +470,27 @@ export function hasKeyForModel(modelId: string): boolean {
   }
   const provider = getModel(modelId as ModelId).provider;
   return providerNeedsKey(provider) ? !!apiKeys[provider] : true;
+}
+
+/**
+ * Called with a session's messages when the user leaves it. Registered by
+ * chatRuntime, which is where the model and workspace root are both reachable;
+ * importing that from here would close an import cycle.
+ */
+let onSessionLeft: ((sessionId: string, messages: UIMessage[]) => void) | null =
+  null;
+
+export function setSessionLeftHandler(
+  fn: ((sessionId: string, messages: UIMessage[]) => void) | null,
+): void {
+  onSessionLeft = fn;
+}
+
+function notifySessionLeft(sessionId: string | null): void {
+  if (!sessionId || !onSessionLeft) return;
+  const messages = chats.get(sessionId)?.messages;
+  if (!messages || messages.length === 0) return;
+  onSessionLeft(sessionId, [...messages]);
 }
 
 export function getChat(sessionId?: string): Chat<UIMessage> | undefined {

@@ -552,3 +552,127 @@ mod tests {
         );
     }
 }
+
+/// Where an agent CLI was found, so the UI can say something better than
+/// "not found" when a binary exists but is not reachable.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentLocation {
+    /// True when the shell will find it: the launcher types the command into a
+    /// terminal, so PATH is the only thing that actually matters at launch.
+    pub on_path: bool,
+    /// A binary found somewhere else. Usable as a full-path start command.
+    pub found_at: Option<String>,
+    /// Human wording for where that was, e.g. "the VS Code extension".
+    pub found_in: Option<String>,
+}
+
+/// Directories that commonly hold an agent CLI without being on PATH.
+fn candidate_dirs() -> Vec<(std::path::PathBuf, &'static str)> {
+    let mut out = Vec::new();
+    let Some(home) = dirs::home_dir() else {
+        return out;
+    };
+    if cfg!(windows) {
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            out.push((std::path::PathBuf::from(appdata).join("npm"), "the npm global folder"));
+        }
+    }
+    out.push((home.join(".local").join("bin"), "~/.local/bin"));
+    out.push((home.join(".bun").join("bin"), "the bun global folder"));
+    out.push((home.join(".npm-global").join("bin"), "the npm global folder"));
+    out
+}
+
+/// Executable spellings to try for a bare command name.
+fn executable_names(command: &str) -> Vec<String> {
+    if cfg!(windows) {
+        ["", ".cmd", ".exe", ".bat", ".ps1"]
+            .iter()
+            .map(|ext| format!("{command}{ext}"))
+            .collect()
+    } else {
+        vec![command.to_string()]
+    }
+}
+
+/// Search installed VS Code extensions for a bundled binary.
+///
+/// This is the case that prompted the whole command: Claude Code installs as a
+/// VS Code extension that ships its own `claude.exe` and adds it to that
+/// editor's integrated terminal only. Every other terminal, Termigo included,
+/// sees nothing on PATH and the launch fails with a bare "not recognized".
+fn find_in_vscode_extensions(command: &str) -> Option<std::path::PathBuf> {
+    let home = dirs::home_dir()?;
+    let names = executable_names(command);
+    for root in [".vscode", ".vscode-insiders", ".cursor", ".windsurf"] {
+        let dir = home.join(root).join("extensions");
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        // Newest extension version last in sort order, so prefer it: a stale
+        // copy of an older release is still on disk after most updates.
+        let mut ext_dirs: Vec<_> = entries
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| p.is_dir())
+            .collect();
+        ext_dirs.sort();
+        for ext in ext_dirs.iter().rev() {
+            for sub in ["resources/native-binary", "resources", "bin", "dist"] {
+                for name in &names {
+                    let candidate = ext.join(sub).join(name);
+                    if candidate.is_file() {
+                        return Some(candidate);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Locate an agent CLI, so the launcher can explain a failure before causing it.
+#[tauri::command]
+pub async fn agent_locate_command(command: String) -> Result<AgentLocation, String> {
+    let name = command.trim().to_string();
+    if name.is_empty() {
+        return Err("no command given".into());
+    }
+    // A command the user already wrote as a path is their choice; only report
+    // whether it exists.
+    if name.contains('/') || name.contains(std::path::MAIN_SEPARATOR) {
+        let exists = std::path::Path::new(&name).is_file();
+        return Ok(AgentLocation {
+            on_path: exists,
+            found_at: exists.then(|| name.clone()),
+            found_in: exists.then(|| "the path you configured".to_string()),
+        });
+    }
+
+    if which::which(&name).is_ok() {
+        return Ok(AgentLocation { on_path: true, found_at: None, found_in: None });
+    }
+
+    for (dir, label) in candidate_dirs() {
+        for candidate in executable_names(&name) {
+            let path = dir.join(&candidate);
+            if path.is_file() {
+                return Ok(AgentLocation {
+                    on_path: false,
+                    found_at: Some(path.to_string_lossy().into_owned()),
+                    found_in: Some(label.to_string()),
+                });
+            }
+        }
+    }
+
+    if let Some(path) = find_in_vscode_extensions(&name) {
+        return Ok(AgentLocation {
+            on_path: false,
+            found_at: Some(path.to_string_lossy().into_owned()),
+            found_in: Some("a VS Code extension".to_string()),
+        });
+    }
+
+    Ok(AgentLocation { on_path: false, found_at: None, found_in: None })
+}
