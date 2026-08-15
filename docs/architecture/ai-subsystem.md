@@ -90,6 +90,19 @@ Auto-send after approval uses `lastAssistantMessageIsCompleteWithApprovalRespons
 
 `proxyFetch` (`lib/proxyFetch.ts`) routes provider calls through the Rust `ai_http_stream` command rather than the webview's own `fetch`, so keys and SSRF checks stay off the page. Bodies do not cross as `number[]`: JSON writes that as decimal digits and commas, measured at 3.0x the payload, and an agent re-sends the whole conversation on every step. A request body is already a JSON string and now travels as itself (`{ kind: "text" }`); binary bodies pay base64 (`{ kind: "base64" }`). Response chunks use base64 because a chunk boundary can split a UTF-8 sequence — and because every channel message under 8 KB is injected into the webview as JavaScript source, so inflation there is script the engine then has to parse, once per chunk.
 
+### Inspecting a request
+
+`debugCaptureEnabled` (Settings → Agents → Diagnostics) makes `runAgentStream` record each assembled request into `store/debugStore.ts`, read back by `components/DebugRequestsDialog.tsx` from the AI bar. A capture holds the system messages, the message array after pruning and compaction, the resolved tool set, and the step's params (budget, context limit, how much compaction dropped).
+
+Four constraints shape it:
+
+- **Nothing is persisted.** A capture is the whole conversation; it lives in memory while the window is open and nowhere else. The store is capped at 30 so a hundred-step round cannot pin an entire run.
+- **No secrets.** The snapshot is taken where the request is assembled, before the provider SDK attaches credentials.
+- **The viewer is in the main window.** Settings is a separate webview and cannot see the main window's memory. The toggle stays in settings because a preference syncs across both.
+- **`captureDebug` arrives through `Deps` like `stepBudget`**, rather than `agent.ts` reading preferences directly, which keeps the settings store out of a module the tests import.
+
+Captures are shown as JSON rather than reformatted prose: a debug view that reshapes its subject is not much of a debug view, and the tool list in particular is most useful exactly as the model received it.
+
 ### When a request fails
 
 `formatAiError` (`lib/errors.ts`) turns a provider rejection into the text shown in the chat, stripping bearer tokens and API keys on the way. `transport.ts` wraps it so the same text is also written to the app log — `%LOCALAPPDATA%\<identifier>\logs\Termigo.log` on Windows, the platform log directory elsewhere, via `tauri-plugin-log`. AI requests are made from the webview, so before this nothing about them reached that file, which records only the Rust side: a run that died mid-stream left no trace, and diagnosing one meant catching the message on screen before it scrolled away. The formatted text is logged rather than the raw error, because the raw value still carries the request headers.

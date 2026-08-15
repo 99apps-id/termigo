@@ -107,6 +107,16 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   The transcript names which one fired, because "it repeated itself" and "it ran
   out of budget" call for different responses — one is worth a click, the other
   is worth a sentence of extra detail.
+- **You can read the request, not infer it.** Turn on `Capture requests`
+  (Settings → Agents → Diagnostics) and an inspector appears in the AI bar
+  holding each request as assembled: the system prompt, the message history
+  after pruning and compaction, and **the exact tool set attached on that
+  step** — which is usually the answer when the agent ignores a tool you
+  expected it to use, or reaches for one you did not. A rejection names a
+  symptom and the transcript shows the reply; neither shows the three things
+  that decide what actually happens. Captures are kept in memory only, never
+  written to disk, capped at 30, and hold no API keys: the snapshot is taken
+  before the provider SDK attaches credentials.
 - **The agent can define its own tools.** A command worth repeating is saved as
   a named tool with `{{placeholders}}` in `.termigo/tools.json` and called by
   name afterwards. It is a command template, not code — running one goes

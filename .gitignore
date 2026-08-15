@@ -40,3 +40,6 @@ cli/bin/
 
 # Claude Code local settings (may contain credentials)
 .claude/
+
+# Agent session memory and workspace-local agent state
+.termigo/
