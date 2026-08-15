@@ -1,18 +1,64 @@
 import type { ProviderKeys } from "./keyring";
+import { createProxyFetch, proxyFetch } from "./proxyFetch";
 
 const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
 const STT_TIMEOUT_GROQ_MS = 30_000;
 const STT_TIMEOUT_WHISPERCPP_MS = 180_000;
 
+// Transcription goes through the Rust HTTP proxy, like every other AI call.
+// A direct browser fetch to api.openai.com / api.groq.com is cross-origin and
+// those APIs send no CORS headers for a webview origin, so it fails with a bare
+// "Failed to fetch" that names neither the host nor the reason.
+const localProxyFetch = createProxyFetch({ allowPrivateNetwork: true });
+
+/**
+ * Encode one file field plus text fields as multipart/form-data.
+ *
+ * Built by hand rather than with FormData because the proxy forwards a byte
+ * body and a header map: the browser only attaches the `boundary` parameter
+ * when it serializes a FormData itself, so a FormData sent this way would
+ * arrive without a parsable Content-Type.
+ */
+function multipartBody(
+  file: { field: string; filename: string; type: string; bytes: Uint8Array },
+  fields: Record<string, string>,
+): { body: Blob; contentType: string } {
+  const boundary = `----termigo${crypto.randomUUID().replace(/-/g, "")}`;
+  const encoder = new TextEncoder();
+  const parts: Uint8Array[] = [];
+
+  for (const [name, value] of Object.entries(fields)) {
+    parts.push(
+      encoder.encode(
+        `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`,
+      ),
+    );
+  }
+  parts.push(
+    encoder.encode(
+      `--${boundary}\r\nContent-Disposition: form-data; name="${file.field}"; ` +
+        `filename="${file.filename}"\r\nContent-Type: ${file.type}\r\n\r\n`,
+    ),
+  );
+  parts.push(file.bytes);
+  parts.push(encoder.encode(`\r\n--${boundary}--\r\n`));
+
+  return {
+    body: new Blob(parts as BlobPart[]),
+    contentType: `multipart/form-data; boundary=${boundary}`,
+  };
+}
+
 async function fetchWithTimeout(
   input: RequestInfo | URL,
   init: RequestInit = {},
   timeoutMs: number,
+  transport: typeof fetch = proxyFetch,
 ): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(input, { ...init, signal: controller.signal });
+    return await transport(input, { ...init, signal: controller.signal });
   } finally {
     clearTimeout(timer);
   }
@@ -21,7 +67,7 @@ async function fetchWithTimeout(
 async function transcribeOpenAI(blob: Blob, apiKey: string): Promise<string> {
   const [{ createOpenAI }, { experimental_transcribe: transcribe }] =
     await Promise.all([import("@ai-sdk/openai"), import("ai")]);
-  const openai = createOpenAI({ apiKey });
+  const openai = createOpenAI({ apiKey, fetch: proxyFetch });
   const buf = new Uint8Array(await blob.arrayBuffer());
   const { text } = await transcribe({
     model: openai.transcription("whisper-1"),
@@ -36,18 +82,23 @@ async function transcribeViaRest(
   apiKey: string | null,
   model: string,
 ): Promise<string> {
-  const form = new FormData();
-  form.append("file", blob, "audio.webm");
-  form.append("model", model);
-  form.append("response_format", "text");
+  const { body, contentType } = multipartBody(
+    {
+      field: "file",
+      filename: "audio.webm",
+      type: blob.type || "audio/webm",
+      bytes: new Uint8Array(await blob.arrayBuffer()),
+    },
+    { model, response_format: "text" },
+  );
 
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { "Content-Type": contentType };
   if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
 
   const res = await fetchWithTimeout(`${baseURL}/audio/transcriptions`, {
     method: "POST",
     headers,
-    body: form,
+    body,
   }, STT_TIMEOUT_GROQ_MS);
   if (!res.ok) {
     const body = await res.text().catch(() => "");
@@ -105,14 +156,23 @@ async function transcribeWhisperCpp(
   blob: Blob,
 ): Promise<string> {
   const wav = await toWav(blob);
-  const form = new FormData();
-  form.append("file", wav, "audio.wav");
-  form.append("response_format", "text");
+  const { body, contentType } = multipartBody(
+    {
+      field: "file",
+      filename: "audio.wav",
+      type: "audio/wav",
+      bytes: new Uint8Array(await wav.arrayBuffer()),
+    },
+    { response_format: "text" },
+  );
 
+  // whisper.cpp is loopback-only (see assertLoopbackUrl), so this transport is
+  // the one allowed to reach a private address.
   const res = await fetchWithTimeout(`${baseURL}/inference`, {
     method: "POST",
-    body: form,
-  }, STT_TIMEOUT_WHISPERCPP_MS);
+    headers: { "Content-Type": contentType },
+    body,
+  }, STT_TIMEOUT_WHISPERCPP_MS, localProxyFetch);
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     throw new Error(

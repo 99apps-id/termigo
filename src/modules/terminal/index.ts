@@ -5,6 +5,7 @@ export {
   disposeSession,
   leafHasForegroundProcess,
   leafIdForPty,
+  leafSessionId,
   navigateFocusedBlocks,
   ptyIdForLeaf,
   respawnSession,
@@ -22,8 +23,10 @@ export {
 } from "./lib/useTerminalFileDrop";
 export {
   findLeafCwd,
+  findLeafRemoteCwd,
   hasLeaf,
   isLeaf,
+  isSshLeaf,
   leafIds,
   type PaneBounds,
   type PaneId,

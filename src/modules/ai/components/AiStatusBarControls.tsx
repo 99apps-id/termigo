@@ -10,6 +10,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { fmtShortcut, MOD_KEY } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
+import { ApprovalModeControl } from "./ApprovalModeControl";
 import {
   Add01Icon,
   AiBookIcon,
@@ -116,6 +117,8 @@ export function AiStatusBarControls() {
         }}
       />
 
+      <ApprovalModeControl className="mr-0.5" />
+
       <IconBtn
         title="Attach file or image"
         onClick={() => fileInputRef.current?.click()}
@@ -221,14 +224,14 @@ function ModelDropdown() {
   const [activeProvider, setActiveProvider] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("all");
   const inputRef = useRef<HTMLInputElement>(null);
+  const hasCredentialFor = (id: ProviderId) =>
+    providerNeedsKey(id) ? !!apiKeys[id] : true;
+
   const currentProviderHasKey = isCompatModelId(selected)
     ? true
-    : providerNeedsKey(current.provider)
-      ? !!apiKeys[current.provider]
-      : true;
+    : hasCredentialFor(current.provider);
 
-  const hasKeyFor = (id: ProviderId) =>
-    providerNeedsKey(id) ? !!apiKeys[id] : true;
+  const hasKeyFor = hasCredentialFor;
 
   const epModelInfos = useMemo(() => {
     return customEndpoints.map((ep) =>

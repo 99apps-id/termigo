@@ -3,6 +3,8 @@ import {
   createAgentPanePlan,
   type AgentInstanceCount,
 } from "@/modules/agents/lib/launcher";
+// Re-exported for the extension host (TEDI parity).
+export type { ExtensionTabState } from "@/modules/extensions/tabStateShim";
 import {
   findLeafCwd,
   hasLeaf,
@@ -13,6 +15,7 @@ import {
   type PaneNode,
   removeLeaf,
   type SplitDir,
+  isSshLeaf,
   setLeafCwd as setLeafCwdInTree,
   siblingLeafOf,
   splitLeaf,
@@ -127,7 +130,22 @@ export type Tab =
   | AiDiffTab
   | GitDiffTab
   | GitHistoryTab
-  | GitCommitFileDiffTab;
+  | GitCommitFileDiffTab
+  | ExtensionTab;
+
+/** Extension-owned tab (TEDI parity). Content is mounted by the extension
+ *  host's panel renderer; added so extension tabs type-check. */
+export type ExtensionTab = TabBase & {
+  id: number;
+  kind: "ext";
+  title: string;
+  extensionId: string;
+  panelId: string;
+  icon?: string;
+  reuseKey?: string;
+  cwd?: string;
+  customTitle?: string;
+};
 
 export type TabPatch = Partial<{
   title: string;
@@ -1147,7 +1165,10 @@ export function useTabs(initial?: Partial<TerminalTab>) {
         if (t.kind !== "terminal" || !hasLeaf(t.paneTree, leafId)) return t;
         const paneTree = setLeafCwdInTree(t.paneTree, leafId, cwd);
         const isActive = t.activeLeafId === leafId;
-        const cwdChanged = isActive && t.cwd !== cwd;
+        // A remote shell's cwd stays on the leaf. Promoting it to `tab.cwd`
+        // would hand a remote path to every local consumer of the tab.
+        const cwdChanged =
+          isActive && !isSshLeaf(t.paneTree, leafId) && t.cwd !== cwd;
         if (paneTree === t.paneTree && !cwdChanged) return t;
         changed = true;
         return { ...t, paneTree, ...(cwdChanged && { cwd }) };

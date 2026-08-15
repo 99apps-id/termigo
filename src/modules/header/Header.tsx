@@ -19,6 +19,7 @@ import {
   useState,
 } from "react";
 import { SshMenu } from "@/modules/ssh/SshMenu";
+import { SshPanelToggle } from "@/modules/ssh/SshPanelToggle";
 import type { SshConnection } from "@/modules/ssh/connections";
 import {
   SearchInline,
@@ -118,6 +119,32 @@ export function Header({
         IS_MAC ? "pr-2 pl-20" : "pr-0 pl-2"
       }`}
     >
+      {/* Real logo asset, not a CSS approximation: same source the window and
+          taskbar icons are generated from. */}
+      <div
+        data-tauri-drag-region
+        className="mr-0.5 flex shrink-0 items-center gap-1.5 pl-0.5"
+        title="Termigo"
+      >
+        <img
+          data-tauri-drag-region
+          src="/logo.png"
+          alt=""
+          width={20}
+          height={20}
+          className="size-5 shrink-0 select-none object-contain"
+          draggable={false}
+        />
+        {!compact && (
+          <span
+            data-tauri-drag-region
+            className="text-[12px] font-semibold tracking-tight bg-gradient-to-r from-teal-400 via-sky-400 to-violet-400 bg-clip-text text-transparent"
+          >
+            Termigo
+          </span>
+        )}
+      </div>
+
       <div className="flex shrink-0 items-center gap-0.5">
         <Button
           onClick={onToggleSidebar}
@@ -180,6 +207,9 @@ export function Header({
       </div>
 
       <SearchInline ref={searchRef} target={searchTarget} compact={compact} />
+
+      {/* Sits on the right, which is the side the panel it controls opens on. */}
+      <SshPanelToggle />
 
       {IS_MAC && (
         <>

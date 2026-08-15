@@ -2,7 +2,7 @@ use std::env;
 use std::ffi::OsString;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -140,12 +140,63 @@ fn parse_args(mut args: Vec<OsString>) -> Result<Config, CliError> {
         Some(value) if value.starts_with('-') => {
             return Err(usage_error(format!("unknown option '{value}'")));
         }
-        _ => {
+        // `termigo <file>` is shorthand for `termigo open <file>`. Only take
+        // that branch for something that actually looks like a path: otherwise
+        // a mistyped or companion-CLI command (`termigo agent list`) was
+        // reported as "open accepts exactly one file path", which says nothing
+        // about the real mistake.
+        _ if looks_like_path(&command) => {
             args.insert(0, command);
             parse_open(args)?
         }
+        _ => return Err(unknown_command_error(&command)),
     };
     Ok(Config { json, action })
+}
+
+/// Commands that belong to the Go companion CLI, not to this control client.
+/// They are the ones a reader of the README is most likely to try here.
+const COMPANION_COMMANDS: &[&str] = &["agent", "mcp", "skill", "doctor", "init", "config"];
+
+/// Whether an argument is plausibly a file path rather than a subcommand.
+///
+/// Deliberately permissive: an existing file is obviously a path, and so is
+/// anything carrying a separator, a drive letter, a leading dot or an
+/// extension. A bare word like `agent` is not.
+fn looks_like_path(arg: &OsString) -> bool {
+    if Path::new(arg).exists() {
+        return true;
+    }
+    let Some(text) = arg.to_str() else {
+        // A non-UTF-8 argument cannot be one of our ASCII subcommands.
+        return true;
+    };
+    text.contains('/')
+        || text.contains('\\')
+        || text.starts_with('.')
+        || text.starts_with('~')
+        || (text.len() > 1 && text.as_bytes()[1] == b':')
+        || Path::new(text).extension().is_some()
+}
+
+fn unknown_command_error(command: &OsString) -> CliError {
+    let name = command.to_string_lossy();
+    let mut message = format!(
+        "unknown command '{name}'\n\n\
+         This is the Termigo control CLI. It supports: open, ping, capabilities, \
+         identify, version, help.\n\
+         Run 'termigo help' for usage, or pass a file path to open it."
+    );
+    if COMPANION_COMMANDS.contains(&name.as_ref()) {
+        message = format!(
+            "'{name}' belongs to the Termigo Go companion CLI, not to this control CLI.\n\n\
+             Build it with:  cd cli && go build -o termi-go ./cmd/termigo\n\
+             Then run:       termi-go {name} --help\n\n\
+             This binary controls a running Termigo window: open, ping, capabilities, \
+             identify, version, help."
+        );
+    }
+    usage_error(message)
 }
 
 fn extract_json_flag(args: &mut Vec<OsString>) -> bool {
@@ -553,6 +604,42 @@ mod tests {
 
     fn args(values: &[&str]) -> Vec<OsString> {
         values.iter().map(OsString::from).collect()
+    }
+
+    /// A mistyped or companion-CLI command used to fall through to the implicit
+    /// `open` shorthand and be reported as "open accepts exactly one file path",
+    /// which named neither the real mistake nor the right binary.
+    #[test]
+    fn unknown_commands_are_not_treated_as_file_paths() {
+        let error = parse_args(args(&["agen", "list"])).expect_err("agen is not a command");
+        assert!(error.message.contains("unknown command 'agen'"), "{}", error.message);
+
+        for command in ["agent", "mcp", "skill", "doctor", "init", "config"] {
+            let error =
+                parse_args(args(&[command, "list"])).expect_err("companion command rejected here");
+            assert!(
+                error.message.contains("Go companion CLI"),
+                "{command}: {}",
+                error.message
+            );
+        }
+    }
+
+    /// The shorthand that the fix must not break. A path that does not exist
+    /// must still be reported as a missing *path* (open was reached), never as
+    /// an unknown command.
+    #[test]
+    fn path_like_arguments_still_use_the_open_shorthand() {
+        for path in ["notes.txt", "./notes.txt", "docs/SSH.md", ".env", "C:/tmp/a.txt"] {
+            let error = parse_args(args(&[path])).expect_err("these paths do not exist");
+            assert_eq!(error.code, "path_not_found", "{path} routed away from open");
+        }
+
+        // An existing file resolves all the way to a request.
+        let real = std::env::current_exe().expect("test binary path");
+        let config = parse_args(args(&[real.to_str().expect("utf-8 path")]))
+            .expect("an existing file opens");
+        assert!(matches!(config.action, Action::Request { .. }));
     }
 
     #[test]

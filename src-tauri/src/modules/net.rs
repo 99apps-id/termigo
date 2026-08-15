@@ -74,6 +74,34 @@ fn ip_kind(ip: IpAddr) -> IpKind {
     }
 }
 
+/// Redirect policy shared by extension downloads: refuse link-local /
+/// cloud-metadata destinations and cap redirect depth. Reuses the same
+/// host/IP classification as the AI provider proxy so a malicious
+/// extension-host redirect cannot reach the instance metadata service.
+pub(crate) fn ssrf_redirect_policy() -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(|attempt| {
+        if attempt.previous().len() > 10 {
+            return attempt.error("too many redirects");
+        }
+        let next = attempt.url();
+        if next.scheme() != "http" && next.scheme() != "https" {
+            return attempt.stop();
+        }
+        let Some(host) = next.host_str() else {
+            return attempt.stop();
+        };
+        if is_blocked_host_name(host) {
+            return attempt.stop();
+        }
+        if let Ok(ip) = host.parse::<IpAddr>() {
+            if ip_kind(ip) == IpKind::BlockedMetadata {
+                return attempt.stop();
+            }
+        }
+        attempt.follow()
+    })
+}
+
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum IpKind {
     Public,

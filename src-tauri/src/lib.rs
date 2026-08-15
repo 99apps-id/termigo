@@ -1,6 +1,9 @@
 pub mod modules;
 
-use modules::{agent, control, fs, git, history, lsp, net, pty, secrets, shell, ssh, workspace};
+use modules::{
+    agent, control, extensions, fs, git, history, lsp, mcp, net, pty, secrets, shell,
+    ssh, workspace,
+};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
@@ -126,10 +129,16 @@ async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Res
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     let builder = builder.decorations(false).transparent(true);
 
-    let _window = builder.build().map_err(|e| e.to_string())?;
+    // Only the Linux and macOS blocks below touch the handle, so on other
+    // targets it is genuinely unused and would trip `-D warnings`.
+    #[cfg_attr(
+        not(any(target_os = "linux", target_os = "macos")),
+        allow(unused_variables)
+    )]
+    let window = builder.build().map_err(|e| e.to_string())?;
 
     // Some Linux compositors (GNOME/Mutter with CSD-by-default) ignore the
-    // builder-time decorations flag — re-assert it after realize.
+    // builder-time decorations flag, so re-assert it after realize.
     #[cfg(target_os = "linux")]
     {
         let _ = window.set_decorations(false);
@@ -204,6 +213,13 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(move |_app| {
+            // Bind the asset protocol to the workspace boundary. The static
+            // config grants nothing, so previews resolve only under roots the
+            // app has already authorized for reading.
+            if let Some(registry) = _app.try_state::<workspace::WorkspaceRegistry>() {
+                registry.attach_asset_scope(_app.asset_protocol_scope().clone());
+            }
+
             if let Err(error) = control::start(_app.handle().clone(), control_for_setup.clone()) {
                 log::warn!("could not start Termigo control server: {error}");
             }
@@ -230,6 +246,7 @@ pub fn run() {
         .manage(shell::ShellState::default())
         .manage(secrets::SecretsState::default())
         .manage(ssh::SshState::default())
+        .manage(extensions::ExtensionsState::default())
         .manage(fs::watch::FsWatchState::default())
         .manage(history::HistoryState::default())
         .manage(lsp::LspState::default())
@@ -300,6 +317,7 @@ pub fn run() {
             shell::shell_run_command,
             shell::shell_session_open,
             shell::shell_session_run,
+            shell::shell_session_interrupt,
             shell::shell_session_close,
             shell::shell_bg_spawn,
             shell::shell_bg_logs,
@@ -316,11 +334,30 @@ pub fn run() {
             get_launch_files,
             open_settings_window,
             agent::agent_enable_hooks,
+            agent::agent_locate_command,
             agent::agent_hooks_status,
             secrets::secrets_get,
             secrets::secrets_set,
             secrets::secrets_delete,
             secrets::secrets_get_all,
+            mcp::mcp_list_servers,
+            mcp::mcp_list_tools,
+            mcp::mcp_call_tool,
+            mcp::mcp_ping,
+            mcp::mcp_add_server,
+            mcp::mcp_remove_server,
+            extensions::commands::ext_list,
+            extensions::commands::ext_read_manifest,
+            extensions::commands::ext_read_asset,
+            extensions::commands::ext_read_asset_bytes,
+            extensions::commands::ext_install_from_zip,
+            extensions::commands::ext_peek_zip,
+            extensions::commands::ext_peek_github,
+            extensions::commands::ext_install_from_github,
+            extensions::commands::ext_check_update,
+            extensions::commands::ext_enable,
+            extensions::commands::ext_disable,
+            extensions::commands::ext_uninstall,
             ssh::ssh_agent_keys,
             ssh::ssh_open,
             ssh::ssh_write,
@@ -328,6 +365,7 @@ pub fn run() {
             ssh::ssh_close,
             ssh::ssh_forward_open,
             ssh::ssh_confirm_host_key,
+            ssh::ssh_exec,
             ssh::ssh_list_sessions,
             ssh::ssh_attach,
             ssh::sftp::ssh_sftp_home,

@@ -1,10 +1,16 @@
 import { buildManagedAgentTools } from "./agent";
 import { buildEditTools } from "./edit";
+import { buildFetchTools } from "./fetch";
+import { buildForwardTools } from "./forward";
+import { buildFileOpsTools } from "./fileops";
+import { buildReplaceTools } from "./replace";
+import { buildSkillTools } from "./skills";
 import { buildFsTools } from "./fs";
 import { buildSearchTools } from "./search";
 import { buildShellTools } from "./shell";
 import { buildSubagentTools } from "./subagent";
 import { buildTerminalTools } from "./terminal";
+import { buildMemoryTools } from "./memory";
 import { buildTodoTools } from "./todo";
 
 export { resolvePath, type ToolContext } from "./context";
@@ -29,16 +35,26 @@ export { resolvePath, type ToolContext } from "./context";
  * outside that.
  */
 export function buildTools(ctx: import("./context").ToolContext) {
-  return {
+  const base = {
     ...buildFsTools(ctx),
+    ...buildFileOpsTools(ctx),
+    ...buildFetchTools(),
+    ...buildForwardTools(ctx),
+    ...buildReplaceTools(ctx),
     ...buildEditTools(ctx),
     ...buildSearchTools(ctx),
     ...buildShellTools(ctx),
     ...buildSubagentTools(ctx),
     ...buildTerminalTools(ctx),
     ...buildTodoTools(ctx),
+    ...buildMemoryTools(ctx),
     ...buildManagedAgentTools(ctx),
   } as const;
+
+  // Skill tools last, and told what the others are called: the dependency
+  // checker compares a skill against the real registry rather than a list kept
+  // by hand, so adding or renaming a tool later cannot leave the check stale.
+  return { ...base, ...buildSkillTools(ctx, Object.keys(base)) } as const;
 }
 
 export type ChatTools = ReturnType<typeof buildTools>;

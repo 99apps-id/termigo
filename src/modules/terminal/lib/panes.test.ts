@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  findLeafCwd,
+  findLeafRemoteCwd,
   firstLeafSlotId,
+  isSshLeaf,
   leafIds,
+  setLeafCwd,
   swapLeafInDirection,
   type PaneNode,
 } from "@/modules/terminal/lib/panes";
@@ -141,5 +145,56 @@ describe("swapLeafInDirection", () => {
   it("does nothing when the tree contains only one pane", () => {
     const tree: PaneNode = { kind: "leaf", id: 1 };
     expect(swapLeafInDirection(tree, 1, "left")).toBe(tree);
+  });
+});
+
+// An SSH leaf's shell reports paths on the remote host. Letting one reach
+// `cwd` made every local consumer treat it as a path on this machine: the file
+// explorer tried to open `/root` on Windows and failed with "the system cannot
+// find the path specified".
+describe("local vs remote cwd", () => {
+  const localLeaf: PaneNode = { kind: "leaf", id: 1 };
+  const sshLeaf: PaneNode = {
+    kind: "leaf",
+    id: 2,
+    ssh: { connectionId: "vps" },
+  };
+
+  it("records a local shell's cwd as the local cwd", () => {
+    const next = setLeafCwd(localLeaf, 1, "C:/project/termigo");
+    expect(findLeafCwd(next, 1)).toBe("C:/project/termigo");
+    expect(findLeafRemoteCwd(next, 1)).toBeUndefined();
+  });
+
+  it("keeps a remote shell's cwd off the local cwd", () => {
+    const next = setLeafCwd(sshLeaf, 2, "/root/app");
+    expect(findLeafCwd(next, 2)).toBeUndefined();
+    expect(findLeafRemoteCwd(next, 2)).toBe("/root/app");
+  });
+
+  it("updates the remote cwd as the remote shell cds", () => {
+    const first = setLeafCwd(sshLeaf, 2, "/root");
+    const second = setLeafCwd(first, 2, "/var/www");
+    expect(findLeafRemoteCwd(second, 2)).toBe("/var/www");
+  });
+
+  it("returns the same node when nothing changed", () => {
+    const once = setLeafCwd(sshLeaf, 2, "/root");
+    expect(setLeafCwd(once, 2, "/root")).toBe(once);
+  });
+
+  it("tells the two leaf kinds apart inside a split", () => {
+    const tree: PaneNode = {
+      kind: "split",
+      id: 9,
+      dir: "row",
+      children: [localLeaf, sshLeaf],
+    };
+    expect(isSshLeaf(tree, 2)).toBe(true);
+    expect(isSshLeaf(tree, 1)).toBe(false);
+
+    const next = setLeafCwd(tree, 2, "/srv");
+    expect(findLeafRemoteCwd(next, 2)).toBe("/srv");
+    expect(findLeafCwd(next, 2)).toBeUndefined();
   });
 });

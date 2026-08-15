@@ -23,10 +23,15 @@ import {
   type ProviderId,
 } from "../config";
 import { buildTools, type ToolContext } from "../tools/tools";
+import type { McpToolset } from "./mcpTools";
+import type { ExtensionToolset } from "./extensionTools";
+import type { CustomToolset } from "./customToolsIo";
+import { skillsBlock, type Skill } from "./skills";
 import { compactModelMessagesDetailed } from "./compact";
+import { memoryBlock as learnedBlock, type MemoryEntry } from "./memory";
 import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
 import { prepareAgentPrompt } from "./prompt";
-import { createProxyFetch } from "./proxyFetch";
+import { createProxyFetch, proxyFetch } from "./proxyFetch";
 import { sanitizeUiMessages } from "./sanitizeMessages";
 
 const localProxyFetch = createProxyFetch({ allowPrivateNetwork: true });
@@ -100,52 +105,57 @@ export async function buildLanguageModel(
   switch (provider) {
     case "openai": {
       const { createOpenAI } = await import("@ai-sdk/openai");
-      built = createOpenAI({ apiKey: key })(resolvedModelId);
+      built = createOpenAI({ fetch: proxyFetch, apiKey: key })(resolvedModelId);
       break;
     }
     case "anthropic": {
       const { createAnthropic } = await import("@ai-sdk/anthropic");
-      built = createAnthropic({ apiKey: key })(resolvedModelId);
+      built = createAnthropic({ fetch: proxyFetch, apiKey: key })(resolvedModelId);
       break;
     }
     case "google": {
       const { createGoogleGenerativeAI } = await import("@ai-sdk/google");
-      built = createGoogleGenerativeAI({ apiKey: key })(resolvedModelId);
+      built = createGoogleGenerativeAI({ fetch: proxyFetch, apiKey: key })(resolvedModelId);
       break;
     }
     case "xai": {
       const { createXai } = await import("@ai-sdk/xai");
-      built = createXai({ apiKey: key })(resolvedModelId);
+      built = createXai({ fetch: proxyFetch, apiKey: key })(resolvedModelId);
       break;
     }
     case "cerebras": {
       const { createCerebras } = await import("@ai-sdk/cerebras");
-      built = createCerebras({ apiKey: key })(resolvedModelId);
+      built = createCerebras({ fetch: proxyFetch, apiKey: key })(resolvedModelId);
       break;
     }
     case "deepseek": {
+      // Stays on the OpenAI-compatible adapter. The dedicated @ai-sdk/deepseek
+      // that pairs with this SDK version is two provider-spec majors behind the
+      // rest of the tree; it type-checks by coincidence rather than by being
+      // compatible, and DeepSeek works today through the generic path.
       const { createOpenAICompatible } =
         await import("@ai-sdk/openai-compatible");
       built = createOpenAICompatible({
         name: "deepseek",
         baseURL: "https://api.deepseek.com",
         apiKey: key,
+        fetch: proxyFetch,
       })(resolvedModelId);
       break;
     }
     case "mistral": {
-      const { createOpenAICompatible } =
-        await import("@ai-sdk/openai-compatible");
-      built = createOpenAICompatible({
-        name: "mistral",
-        baseURL: "https://api.mistral.ai/v1",
-        apiKey: key,
-      })(resolvedModelId);
+      // The dedicated provider rather than the OpenAI-compatible adapter.
+      // Mistral's API is close enough that the generic one connects, but its
+      // tool-call wire format differs in ways only this provider handles - the
+      // reported symptom was a model that answered in prose instead of
+      // emitting a tool call anything downstream could parse.
+      const { createMistral } = await import("@ai-sdk/mistral");
+      built = createMistral({ apiKey: key, fetch: proxyFetch })(resolvedModelId);
       break;
     }
     case "groq": {
       const { createGroq } = await import("@ai-sdk/groq");
-      built = createGroq({ apiKey: key })(resolvedModelId);
+      built = createGroq({ fetch: proxyFetch, apiKey: key })(resolvedModelId);
       break;
     }
     case "openrouter": {
@@ -159,6 +169,7 @@ export async function buildLanguageModel(
           "HTTP-Referer": "https://termigo.ai",
           "X-Title": "Termigo",
         },
+        fetch: proxyFetch,
       })(resolvedModelId);
       break;
     }
@@ -307,6 +318,8 @@ function buildStableSystem(
   persona: { name: string; instructions: string } | null,
   customInstructions: string | undefined,
   projectMemory: string | null,
+  learned: readonly MemoryEntry[],
+  skills: readonly Skill[],
 ): string {
   const base = selectSystemPrompt(modelId);
   const personaBlock = persona?.instructions.trim()
@@ -319,7 +332,9 @@ function buildStableSystem(
     projectMemory && projectMemory.trim().length > 0
       ? `\n\n## PROJECT — TERMIGO.md\n${projectMemory.trim()}`
       : "";
-  return `${base}${memoryBlock}${personaBlock}${customBlock}`;
+  // Skills sit after facts and before persona: the model should know what it
+  // already knows how to do before it is told how to behave.
+  return `${base}${memoryBlock}${learnedBlock(learned)}${skillsBlock(skills)}${personaBlock}${customBlock}`;
 }
 
 export type AgentUsage = {
@@ -363,6 +378,20 @@ export type RunAgentOptions = {
   customEndpointKeys?: CustomEndpointKeys;
   planMode?: boolean;
   projectMemory?: string | null;
+  /** Facts the agent recorded in earlier sessions (.termigo/memory.md). */
+  learnedMemory?: readonly MemoryEntry[];
+  /**
+   * Tools discovered from configured MCP servers. Passed in rather than built
+   * here because discovery has to start each server and await `tools/list`,
+   * while `buildTools` is synchronous.
+   */
+  mcpTools?: McpToolset;
+  /** Skill index (names + descriptions). Bodies load on demand. */
+  skills?: readonly Skill[];
+  /** Tools contributed by enabled extensions. */
+  extensionTools?: ExtensionToolset;
+  /** Command tools defined in this workspace. */
+  customTools?: CustomToolset;
   uiMessages: UIMessage[];
   abortSignal?: AbortSignal;
 };
@@ -391,6 +420,8 @@ export async function runAgentStream(opts: RunAgentOptions) {
     opts.agentPersona ?? null,
     opts.customInstructions,
     opts.projectMemory ?? null,
+    opts.learnedMemory ?? [],
+    opts.skills ?? [],
   );
 
   const history = await convertToModelMessages(sanitizeUiMessages(opts.uiMessages));
@@ -426,7 +457,18 @@ export async function runAgentStream(opts: RunAgentOptions) {
     system: prompt.system,
     messages: prompt.messages,
     allowSystemInMessages: false,
-    tools: buildTools(opts.toolContext),
+    // MCP last: a server cannot shadow a built-in tool by naming a tool after
+    // it, and the `mcp__` prefix means a collision would take deliberate effort
+    // anyway.
+    // Built-ins last: neither an extension nor an MCP server can shadow a
+    // core tool by naming one after it, and the prefixes make a collision take
+    // deliberate effort anyway.
+    tools: {
+      ...(opts.mcpTools ?? {}),
+      ...(opts.extensionTools ?? {}),
+      ...(opts.customTools ?? {}),
+      ...buildTools(opts.toolContext),
+    },
     stopWhen: stepCountIs(MAX_AGENT_STEPS),
     abortSignal: opts.abortSignal,
     onStepFinish: (step) => {

@@ -49,6 +49,34 @@ In `src/modules/ai/tools/tools.ts`:
 
 Auto-send after approval uses `lastAssistantMessageIsCompleteWithApprovalResponses`.
 
+Dangling tool calls are filtered before the history reaches the model
+(`src/modules/ai/lib/sanitizeMessages.ts`): tool invocations stuck in
+`input` / `approval-requested` (an abandoned approval) are dropped, while
+`approval-responded` parts — the user's actual decision — are preserved so
+the SDK can resume the run. This also prevents the "tool result is missing"
+error with OpenAI-compatible providers such as DeepSeek.
+
+## SSH & SFTP security
+
+The SSH module (`src-tauri/src/modules/ssh/`) follows the same local-first
+rules:
+
+- **Credentials never touch disk in plaintext.** Passwords, private keys and
+  key passphrases go to the OS keychain via `secrets_*`; the connection
+  store keeps only flags marking which secrets exist.
+- **ssh-agent auth** is preferred: the private key stays inside the agent and
+  only signatures cross the wire.
+- **Host-key verification (TOFU).** The first connect to a host pauses the
+  handshake before any credential is sent and shows the `SHA256:` fingerprint;
+  accepting pins it on the saved connection. A later connect that sees a
+  different key aborts with a host-key-mismatch error (MITM protection).
+  Pinning uses the vetted host-key algorithm set (ed25519 / ecdsa / rsa-sha2);
+  bare `ssh-rsa` (SHA-1) is refused.
+- **SFTP operations run as the remote SSH user** — the remote kernel enforces
+  permissions, and `permission denied` bubbles up into the explorer tree.
+- **Upload path safety** mirrors the local drop rules: only absolute local
+  paths the user explicitly dragged are uploaded.
+
 ## SSRF and DNS rebinding defense
 
 `src-tauri/src/modules/net.rs` proxies AI provider requests and local-model pings. Before connecting:

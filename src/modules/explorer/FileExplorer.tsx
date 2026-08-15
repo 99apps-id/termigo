@@ -24,6 +24,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 import { cn } from "@/lib/utils";
 import { ExplorerSearch, type ExplorerSearchHandle } from "./ExplorerSearch";
@@ -64,6 +65,11 @@ type Props = {
   onAttachToAgent?: (path: string) => void;
   pathDropTarget?: TerminalPathDropTarget;
   gitStatus?: GitStatusSnapshot | null;
+  /** Extra content rendered at the head of the explorer header row
+   *  (used by the extension host's folder-tree shell). */
+  headerExtras?: ReactNode;
+  /** Drag handle injected by a sidebar host (extension folder tree). */
+  dragHandle?: ReactNode;
 };
 
 type Row =
@@ -198,6 +204,8 @@ export const FileExplorer = memo(
       onAttachToAgent,
       pathDropTarget,
       gitStatus,
+      headerExtras,
+      dragHandle,
     },
     ref,
   ) {
@@ -512,6 +520,8 @@ export const FileExplorer = memo(
             />
             {basename(rootPath)}
           </span>
+          {headerExtras}
+          {dragHandle}
 
           <Button
             variant="ghost"

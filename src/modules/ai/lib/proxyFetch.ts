@@ -9,7 +9,7 @@ type AiStreamEvent =
 
 type RequestHeaders = Record<string, string>;
 
-function headerInitToRecord(
+export function headerInitToRecord(
   init: HeadersInit | undefined,
 ): RequestHeaders | undefined {
   if (!init) return undefined;

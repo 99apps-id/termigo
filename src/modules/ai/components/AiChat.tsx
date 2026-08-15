@@ -11,6 +11,7 @@ import {
   type MessageResponseProps,
 } from "@/components/ai-elements/message";
 import { MarkdownCode } from "@/components/ai-elements/markdown-code";
+import { useAutoApproval } from "../hooks/useAutoApproval";
 import {
   MarkdownLink,
   type MarkdownLinkProps,
@@ -38,7 +39,7 @@ import {
 import { SLASH_COMMANDS, TERMIGO_CMD_RE } from "../lib/slashCommands";
 import { Spinner } from "@/components/ui/spinner";
 import { useChatStore } from "../store/chatStore";
-import { sendMessage } from "../store/chatRuntime";
+import { resumeRun } from "../store/chatRuntime";
 import type {
   ChatStatus,
   DynamicToolUIPart,
@@ -202,13 +203,20 @@ export function AiChatView({
   const hitStepCap = useChatStore((s) => s.agentMeta.hitStepCap);
   const compactionNotice = useChatStore((s) => s.agentMeta.compactionNotice);
   const patchAgentMeta = useChatStore((s) => s.patchAgentMeta);
+  const stoppedByUser = useChatStore((s) => s.agentMeta.stoppedByUser);
+  // Offer to resume after a stop as well as after the step cap. A stop used to
+  // be a dead end: the only way on was to retype the request.
   const showContinue =
-    !isBusy && hitStepCap && lastMessage?.role === "assistant";
+    !isBusy && (hitStepCap || stoppedByUser) && lastMessage?.role === "assistant";
 
   const onApproval = useCallback(
     (id: string, approved: boolean) => addToolApprovalResponse({ id, approved }),
     [addToolApprovalResponse],
   );
+
+  // Answer the prompts the current approval mode delegates. Runs after the
+  // parts render, so an auto-approved call still appears in the transcript.
+  useAutoApproval(messages, addToolApprovalResponse);
 
   if (messages.length === 0) {
     return (
@@ -249,10 +257,8 @@ export function AiChatView({
         {showContinue && (
           <ContinueRow
             onContinue={() => {
-              patchAgentMeta({ hitStepCap: false });
-              void sendMessage(
-                "Continue from where you stopped. Don't recap — just keep going.",
-              );
+              patchAgentMeta({ hitStepCap: false, stoppedByUser: false });
+              void resumeRun();
             }}
           />
         )}

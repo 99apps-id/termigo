@@ -357,9 +357,20 @@ export function checkShellCommand(cmd: string): SafetyResult {
         "Refused: command attempts to recursively delete the filesystem root.",
     };
   }
-  // rm -rf ~ / $HOME / ${HOME}, with or without a trailing path — wiping the user's home dir
+  // rm -rf ~ / $HOME / ${HOME}, with or without a trailing path — wiping the
+  // user's home dir.
+  //
+  // Recursive+force has several spellings and they are the same command:
+  // `-rf`, `-fr`, `-r -f`, `--recursive --force`. The earlier pattern accepted
+  // only `-rf`, so `rm -fr ~` — the same keystrokes in the other order — went
+  // straight through, while the filesystem-root guard above already handled
+  // both orders. This was a copy that lost half its pattern.
+  //
+  // It stays a deny-list and stays leaky by nature: `cd ~ && rm -rf .` reaches
+  // the same files and no pattern here will catch it. This exists to stop
+  // accidents, not a determined path; the approval gate is the real control.
   if (
-    /\brm\s+-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*\s+(['"]?(~(\/[^\s'"]*)?|\$\{?HOME\}?(\/[^\s'"]*)?)['"]?)(\s|$|;|&|\|)/.test(
+    /\brm\s+(?:-[a-zA-Z]*(?:rf|fr)[a-zA-Z]*|-[a-zA-Z]*r[a-zA-Z]*\s+-[a-zA-Z]*f[a-zA-Z]*|-[a-zA-Z]*f[a-zA-Z]*\s+-[a-zA-Z]*r[a-zA-Z]*|--recursive\s+--force|--force\s+--recursive)\s+(['"]?(~(\/[^\s'"]*)?|\$\{?HOME\}?(\/[^\s'"]*)?)['"]?)(\s|$|;|&|\|)/.test(
       c,
     )
   ) {

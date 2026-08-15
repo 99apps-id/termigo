@@ -40,6 +40,7 @@ import { usePreferencesStore } from "@/modules/settings/preferences";
 import { usePlanStore } from "../store/planStore";
 import { AgentSwitcher } from "./AgentSwitcher";
 import { AiChatView } from "./AiChat";
+import { QueuedSteerRow } from "./QueuedSteerRow";
 import { PlanDiffReview } from "./PlanDiffReview";
 import { TodoStrip } from "./TodoStrip";
 
@@ -205,6 +206,14 @@ function Body({
             />
           </div>
         )}
+      </div>
+
+      {/* Queued messages belong here as much as in the input bar: they are the
+          next turn waiting, and this window is where the user is looking while
+          the agent runs. It also floats freely, so it can cover the input bar
+          and hide the only confirmation that steering was accepted. */}
+      <div className="shrink-0 px-3 pb-1">
+        <QueuedSteerRow />
       </div>
 
       <TodoStrip sessionId={sessionId} />

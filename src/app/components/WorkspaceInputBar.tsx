@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { QueuedSteerRow } from "@/modules/ai/components/QueuedSteerRow";
 import { AiInputBarConnect } from "@/modules/ai";
 import { Chip } from "@/modules/ai/components/Chip";
 import { ChipsRow } from "@/modules/ai/components/ChipsRow";
@@ -129,6 +130,7 @@ export function WorkspaceInputBar({
     ) : (
       <div className="shrink-0 border-t border-border/60 bg-card/40 px-3 py-2">
         <div className="flex flex-col gap-2 rounded-lg px-1 py-1">
+          <QueuedSteerRow />
           <ChipsRow
             leading={terminalChips}
             files={c.files}

@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="termigo.png" width="144" height="144" alt="Termigo" />
+  <img src="public/logo.png" width="144" height="144" alt="Termigo" />
   <h1>Termigo</h1>
 
   <p><strong>Terminal-first, AI-native development workspace.</strong></p>
@@ -29,12 +29,12 @@
 environment (ADE) built on **Tauri 2 + Rust** with a **React 19** frontend. A
 native PTY backend, an agentic AI side-panel that runs against your own keys or
 fully local models, a code editor, file explorer, source control with a git
-graph, and a web preview pane — all in one window. **No telemetry. No account.**
+graph, and a web preview pane, all in one window. **No telemetry. No account.**
 Your API keys stay in the OS keychain or with the provider's own CLI.
 
 This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
 (by Crynta, Apache-2.0), extended with a **Go command-line companion**
-(`termigo`) for automation: agent runs, MCP, skills, and project scaffolding.
+(`termi-go`) for automation: agent runs, MCP, skills, and project scaffolding.
 
 ## Features
 
@@ -48,15 +48,130 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
 - Per-tab workspace environments on Windows (Local or WSL distro)
 - Spaces restore tabs, working directories, and split layouts across launches
 
+### SSH & remote files
+
+- Connect to remote hosts with **ssh-agent**, private key, or password auth,
+  directly as a terminal tab (ProxyJump chains supported)
+- First-connect **host-key verification** (trust-on-first-use with fingerprint
+  pinning): the handshake pauses until you confirm
+- **SFTP file explorer**: browse, create, rename, delete, upload (drag & drop)
+  and download over the active SSH session
+- Port forwarding (`-L`) through the session
+
 ### AI agent
 
 - **BYOK providers:** OpenAI, Anthropic (Claude), Google (Gemini), Groq,
   xAI (Grok), Cerebras, OpenRouter, DeepSeek, Mistral, plus any
   OpenAI-compatible endpoint
 - **Local / offline:** LM Studio, MLX, Ollama
+- **Skills.** The agent writes reusable procedures for itself in
+  `.termigo/skills/<name>/SKILL.md` — a deploy sequence, a debugging route that
+  worked, a release checklist — and reads them back in later sessions. This is
+  what makes it better over time rather than merely better informed: memory
+  stops a session starting from zero, a skill means a procedure worked out once
+  never has to be worked out again. Re-saving a name replaces it, so a skill
+  improves with use. Only names and descriptions reach the system prompt;
+  bodies load on demand through `use_skill`, so a shelf of skills costs almost
+  nothing until one is needed. Plain Markdown with frontmatter, so you can read,
+  edit or delete any of them by hand. `find_skill` searches every skill library
+  on the machine on demand — your own, and those installed by other agent tools
+  — so a large collection stays reachable without any of it sitting in the
+  prompt. Skills written for another agent still parse, and `use_skill` says so
+  when one calls tools Termigo does not have.
+- **Self-maintaining memory.** The agent records durable project facts in
+  `.termigo/memory.md` and reads them back in every later session, so build
+  commands, conventions and decisions do not have to be re-explained. Facts are
+  captured two ways: a `remember` tool the model calls deliberately (visible in
+  the transcript, approval-gated like any workspace write), and a summary sweep
+  when a session is left behind. Your hand-written `TERMIGO.md` is never
+  rewritten, so you can always tell what you wrote from what the agent
+  inferred, and deleting a line makes it forget. The file is bounded in entry
+  length, entry count and total size, because everything in it costs context on
+  every request. The sweep only runs in the auto-approve modes: in
+  `Ask every time`, nothing is written without a click.
+- **Steer, stop and resume a run.** Typing while the agent works queues the
+  message and delivers it when the current run settles, so a correction reaches
+  it instead of being dropped — attachments included. Queued messages are shown
+  with a way to take them back. Stop reaches the work, not just the reply: it
+  kills the command the agent is running rather than leaving a shell going
+  behind a stopped agent, and the transcript then offers to continue.
+- **The agent can define its own tools.** A command worth repeating is saved as
+  a named tool with `{{placeholders}}` in `.termigo/tools.json` and called by
+  name afterwards. It is a command template, not code — running one goes
+  through the same shell safety check, approval tier and remote routing as
+  `bash_run`, so a custom tool can do nothing the agent could not already do.
+  Arguments are shell-quoted with no raw mode.
 - Agentic workflow: plans, sub-agents, project memory via `TERMIGO.md`,
-  file read/write/edit/multi-edit/grep/glob, bash with approval gating,
-  background processes
+  read, write, edit, multi-edit, grep, glob, move, copy, delete,
+  cross-file literal replace, HTTP fetch, bash with approval gating,
+  background processes, and SSH port forwarding so a service on a remote host
+  becomes reachable locally
+- Tool calls are **approval-gated**; approvals resume the run (including
+  OpenAI-compatible providers such as DeepSeek)
+- **Graduated auto-approval.** Choose how much the agent may do without
+  stopping: `Ask every time` (default), `Auto-approve edits` (file changes in
+  the workspace run, commands and agent hand-offs still ask), or
+  `Auto-approve all`. The mode is always visible in the AI status bar, never
+  buried in settings. Crucially it changes only *what stops for a click*: the
+  path and shell-command safety checks run inside every tool regardless, so no
+  mode can authorise something the safety layer refuses. Read-only tools never
+  asked in the first place.
+- **Agent works on the remote host.** When the active terminal is an SSH
+  session, the agent's file tools act on the server: `read_file`,
+  `list_directory`, `write_file`, `create_directory`, `edit`, `multi_edit`,
+  `move_file` and `delete_file` all go over SFTP. Windows drive paths (`C:\...`)
+  still mean this machine, since they cannot mean anything on a POSIX host.
+  `grep` and `glob` search the server too, using its own `grep` and `find` over
+  a dedicated exec channel rather than walking the tree over SFTP — one command
+  instead of thousands of round trips. Every value interpolated into those
+  commands is single-quoted, so a pattern cannot become a second command.
+  `bash_run` runs on the server too, from the remote shell's working directory,
+  so the agent can install packages, reload Caddy or bring a compose stack up
+  without you relaying commands. Remote commands are gated by what they do rather than by
+  being remote: under `Auto-approve edits`, one that only inspects (`ls`,
+  `docker ps`, `git status`) runs, and anything that could change the server
+  stops for a click — as does anything the classifier does not recognise. Under
+  `Ask every time` all of them ask; under `Auto-approve all` none do. `replace_in_files`, `copy_file` and `bash_background` still
+  have no remote form and refuse while a session is open, saying what to use
+  instead rather than quietly acting on your own disk.
+- **Tools the agent defines for itself.** After running something worth
+  repeating, the agent can save it as a named tool with `create_tool`, and call
+  it by name from then on. A tool is a shell command template with
+  `{{placeholders}}`, stored in `.termigo/tools.json` — not code. Running one
+  goes through the same path `bash_run` takes, so the shell safety check, the
+  approval tiers and the remote/local routing all apply unchanged: a custom
+  tool can do nothing the agent could not already do. Every argument is
+  shell-quoted on substitution, with no raw mode, so a value can never become a
+  second command.
+- **Extension tools.** An extension that declares `contributes.aiTools` in its
+  manifest has those tools offered to the agent as `ext__<extension>__<tool>`,
+  with the JSON Schema and approval preference it declared. Like MCP tools they
+  never ride along with `Auto-approve edits`, since that mode is a statement
+  about files in your workspace, not about third-party code.
+- **MCP servers.** Tools from any configured Model Context Protocol server are
+  offered to the agent alongside the built-in ones, named `mcp__<server>__<tool>`
+  so their origin stays visible in the transcript. Configure them in
+  `.termigo/mcp.json` in the workspace, or `~/.termigo/mcp.json` for every
+  project, using the standard `mcpServers` shape:
+
+  ```json
+  {
+    "mcpServers": {
+      "github": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-github"],
+        "env": { "GITHUB_TOKEN": "..." }
+      }
+    }
+  }
+  ```
+
+  A project entry overrides a user entry of the same name, and the same file is
+  read by the Go companion CLI, so a server configured once works in both. MCP
+  tools always ask for approval, including under `Auto-approve edits`: that mode
+  is a statement about files in this workspace, not about arbitrary third-party
+  actions. A server that fails to start costs only its own tools, not everyone
+  else's.
 - Coding-agent orchestration: spawn Claude Code in a terminal, inspect output,
   send follow-up work through approval-gated tools
 - Composer: prompt snippets via `#handle`, files via `@path`, voice input
@@ -68,7 +183,7 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
 - CodeMirror 6 with support for TS/JS, Rust, Python, Go, C/C++, Java,
   HTML/CSS, JSON, Markdown and more
 - Inline AI autocomplete with local model support
-- AI edit diffs — accept or reject hunk by hunk
+- AI edit diffs, accepted or rejected hunk by hunk
 - Opt-in language server support (diagnostics, navigation, completion, formatting)
 - Rendered Markdown plus image, video, audio, and PDF viewing
 - Vim mode and built-in editor themes (Kanagawa, Catppuccin, Rosé Pine, Dracula, ...)
@@ -127,44 +242,108 @@ cd src-tauri && cargo clippy --all-targets -- -D warnings && cargo test
 
 ## CLI
 
-The Go companion `termigo` automates what the desktop surfaces interactively:
+Termigo ships **two** separate command-line programs. They do different jobs,
+and only the first one is installed with the app.
+
+### 1. Control CLI (Rust, bundled with the app)
+
+Installed alongside the desktop app as `termigo`. It talks to a **running**
+Termigo window over the local control socket:
+
+```bash
+termigo README.md              # open a file in the running app
+termigo README.md --line 42    # open at a line
+termigo open README.md         # explicit form of the same thing
+termigo ping                   # is the app reachable?
+termigo capabilities           # what this build supports
+termigo identify               # which window/pane answered
+termigo help
+```
+
+It does **not** know `agent`, `mcp`, `skill`, `doctor` or `init`. Those belong
+to the Go companion below, and asking this binary for them now says so.
+
+### 2. Go companion (automation)
+
+Lives in [`cli/`](cli/) and is **not** installed by the app. It automates what
+the desktop surfaces interactively and runs without the app open.
 
 ```bash
 cd cli
-go run ./cmd/termigo help
-go run ./cmd/termigo doctor --json        # inspect local tools
-go run ./cmd/termigo init <dir>           # scaffold .termigo/ + TERMIGO.md
-go run ./cmd/termigo agent list           # installed agent providers
-go run ./cmd/termigo agent run codex "explain this repo" --access read-only
-go run ./cmd/termigo skill create review "Review diffs before commit"
-go run ./cmd/termigo mcp list             # configured MCP servers
-go run ./cmd/termigo mcp tools fs         # list tools of an MCP server
+go build -o termi-go ./cmd/termigo   # or: go run ./cmd/termigo <args>
 ```
 
-- **Providers:** Codex, Claude Code, Gemini, Antigravity, Ollama (local)
+Name the binary something other than `termigo` (for example `termi-go`), or
+put it on `PATH` ahead of the control CLI. Two binaries with the same name is
+exactly what makes `termigo agent list` fail confusingly.
+
+```bash
+./termi-go help
+./termi-go doctor --json                # inspect local tools
+./termi-go init <dir>                   # scaffold .termigo/ + TERMIGO.md
+./termi-go agent list                   # installed agent providers
+./termi-go agent run codex "explain this repo" --access read-only
+./termi-go skill create review "Review diffs before commit"
+./termi-go mcp list                     # configured MCP servers
+./termi-go mcp tools fs                 # list tools of an MCP server
+./termi-go config                       # show user configuration
+```
+
+- **Providers:** Codex, Claude Code, Gemini, Antigravity, Ollama (local).
+  `agent run` drives Codex, Claude and Gemini in print mode and Ollama over its
+  local HTTP API; a provider with no headless mode is reported rather than
+  launched blind.
+- **Provider overrides:** `providers.<id>.command` in `~/.termigo/config.json`
+  points at a CLI installed outside `PATH`; `model` and `endpoint` are honoured
+  the same way.
 - **Skills:** project- and user-scoped `SKILL.md` folders under
   `.termigo/skills/` and `~/.termigo/skills/`
 - **MCP:** standard `mcpServers` registry in `.termigo/mcp.json`, JSON-RPC 2.0
   over stdio (initialize, tools/list, tools/call, ping)
-- **Never stores API keys** — credentials stay with each provider's own CLI
+- **Never stores API keys**: credentials stay with each provider's own CLI
 
 See [`docs/`](docs/) for the MCP, skills, agents, and architecture guides.
 
 ## Screenshots
 
-<table>
-  <tr>
-    <td align="center"><img src="docs/web-preview.png" alt="Web preview" /><br/><sub>Web preview of local dev servers</sub></td>
-    <td align="center"><img src="docs/ai-workflow.png" alt="AI window" /><br/><sub>Agentic AI workflow with edit diffs in the code editor</sub></td>
-  </tr>
-  <tr>
-    <td align="center"><img src="docs/themes.png" alt="Themes and background image" style="margin-top: 12px;"/><br/><sub>Custom themes, presets, and background images</sub></td>
-    <td align="center"><img src="docs/source-control.png" alt="Source control and git graph" style="margin-top: 12px;"/><br/><sub>Source control panel with git graph in history</sub></td>
-  </tr>
-  <tr>
-    <td colspan="2" align="center"><img src="docs/terminal.png" alt="Terminal" style="border-radius: 4px; margin-top: 12px;" /><br/><sub>Block-based WebGL terminal with editor-like input panel</sub></td>
-  </tr>
-</table>
+<p align="center">
+  <img src="docs/termigo-windows.png" alt="Termigo on Windows" width="900" />
+  <br/>
+  <sub>
+    The workspace: file tree, editor with the TypeScript LSP attached, the
+    agent panel floating over it, spaces and tabs across the top, and the
+    approval mode always visible in the status bar
+  </sub>
+</p>
+
+<p align="center">
+  <img src="docs/termigo-remote-vps.png" alt="The agent inspecting a remote server over SSH" width="900" />
+  <br/>
+  <sub>
+    The agent working on a server: an SSH tab, the remote filesystem browsable
+    beside the local project, and a health report it gathered by running
+    inspection commands on the host
+  </sub>
+</p>
+
+<p align="center">
+  <img src="docs/termigo-running-hermes-vps.png" alt="An SSH session in Termigo running a terminal agent on the remote host" width="900" />
+  <br/>
+  <sub>
+    An SSH tab is an ordinary terminal: a TUI agent running on the remote host,
+    full-colour and interactive, beside the local project tree
+  </sub>
+</p>
+
+<p align="center">
+  <img src="docs/termigo-add-new-ssh-connection.png" alt="The New SSH connection dialog" width="760" />
+  <br/>
+  <sub>
+    Adding a host: password, private key or ssh-agent, an optional ProxyJump
+    chain and port forwards. Credentials go to the OS keychain, never to a file
+    in the repo
+  </sub>
+</p>
 
 ## Architecture
 
@@ -178,7 +357,7 @@ Termigo
 ```
 
 A Tauri 2 app: a React 19 webview talks to a Rust backend via `invoke()` and
-streaming `Channel`s. The Go CLI is the automation layer — anything useful
+streaming `Channel`s. The Go CLI is the automation layer: anything useful
 headlessly lives in `cli/internal/` first.
 
 ## Privacy and safety

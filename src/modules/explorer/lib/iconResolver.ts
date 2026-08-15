@@ -113,3 +113,8 @@ export function folderIconUrl(name: string, expanded: boolean): string {
 
   return buildDataUrl(expanded ? DEFAULT_FOLDER_OPEN : DEFAULT_FOLDER) ?? "";
 }
+
+/** Alias used by the extension host: a file NAME to its explorer icon URL. */
+export function explorerIconUrl(name: string): string {
+  return fileIconUrl(name);
+}

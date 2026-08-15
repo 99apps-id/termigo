@@ -9,6 +9,11 @@ If a guide conflicts with `TERMIGO.md`, `TERMIGO.md` wins.
 - [TERMIGO.md](../TERMIGO.md) - the architecture source of truth; read this first
 - [CONTRIBUTING.md](../CONTRIBUTING.md) - how to contribute, quality bar, project layout
 
+## Feature guides
+
+- [SSH & remote files](SSH.md) - SSH sessions as terminal tabs, host-key
+  verification (TOFU), SFTP file explorer, port forwarding.
+
 ## Architecture guides
 
 - [Two-process model and IPC command reference](architecture/two-process-model.md) - Rust owns all OS access; the webview talks through `invoke()`. Command catalog and how to add a new command.

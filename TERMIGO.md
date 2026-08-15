@@ -36,6 +36,10 @@ A change to a core subsystem (terminal/shell spawn, workspace auth, git, fs, IPC
 - **No emojis** anywhere.
 - **Imports**: always `@/...` on the frontend, never relative across modules.
 - **pnpm only**, never npm/npx/yarn.
+- **Branding**: `termigo.png` at the repo root is the master logo and is an
+  input, never generated. After changing it run `node scripts/generate-logo.mjs`
+  to regenerate `public/logo.png` and the whole `src-tauri/icons` set; never
+  hand-edit those. In the UI render the `/logo.png` asset, not a CSS lookalike.
 
 ## Architecture
 
@@ -101,7 +105,16 @@ Each module is self-contained, exports a thin barrel via `index.ts`, and owns it
 - **agents/** - agent launching, notifications, and management for both the built-in Termigo agent and terminal coding agents (Claude Code, Codex, Gemini CLI, Pi, OpenCode, Grok). The header launcher (`components/AgentLauncherPanel.tsx` + `lib/launcher.ts`) persists per-agent start commands in preferences and atomically builds balanced one-to-four-pane tabs. Shared store (`store/agentStore.ts`: terminal `sessions` + `localAgent` + `notifications`) and a shared router (`lib/route.ts`: suppress when focused-and-visible, OS-notify when unfocused, in-app Sonner toast when focused-but-hidden) feed the header `NotificationBell` (management surface, Termigo agent listed first, per-agent hook enable rows). Toasts use Sonner (`components/ui/sonner.tsx`) themed via the central engine; `lib/agentIcon.tsx` renders the per-agent brand mark. Terminal detection is Rust-side (`pty/agent_detect.rs`) on the PTY reader's byte filter, armed on `OSC 133;C;<cmd>` or self-armed by the marker, emitting `termigo:agent-signal` transitions (`started`/`working`/`attention`/`finished`/`exited`) driven only by OSC sequences (never raw output, so a repainting TUI never flaps) - zero cost when no agent runs. Hook-backed terminal agents converge on the same `OSC 777` marker the detector reads, installed via `agent_enable_hooks(agent)` / `agent_hooks_status(agent)` in `modules/agent.rs` (data-driven `AgentSpec` for JSON-hook agents plus a Termigo-owned Pi extension; atomic writes, foreign configuration preserved, idempotent; gated on `TERMIGO_TERMINAL`). OpenCode and Grok use OSC 133 process-lifecycle detection but do not install attention hooks. Delivery differs because only Claude's hook protocol can return terminal bytes in the hook *response*: **Claude** (`~/.claude/settings.json`, `UserPromptSubmit`/`Notification`/`Stop`) returns the marker via the `terminalSequence` field (legacy 3-field `notify;Termigo;<event>`). **Codex** (`~/.codex/hooks.json`, `UserPromptSubmit`/`PermissionRequest`/`Stop`) and **Gemini** (`~/.gemini/settings.json`, `BeforeAgent`/`Notification`/`AfterAgent`, `matcher:"*"`) can't, so the hook *command* emits the 4-field `notify;Termigo;<agent>;<event>` marker itself (`printf > /dev/tty` on Unix, or `termigo __termigo_notify` writing to `CONOUT$` after `AttachConsole` on Windows) and prints `{}` as a JSON stdout no-op (Codex's `Stop` and Gemini both reject empty/non-JSON stdout). **Pi** (`~/.pi/agent/extensions/termigo-notifications.ts`) uses `agent_start`/`agent_settled` extension events and writes its named marker directly to stdout. The agent-named marker lets a self-arm name the right agent when no preexec fired (bash/tmux/Windows). The Termigo agent path is `ai/components/LocalAgentNotificationsBridge.tsx`, mapping `chatStore.agentMeta` (`awaiting-approval`→attention, busy→idle→finished, `error`) into the same router.
 - **command-palette/** - modal command palette (`CommandPalette.tsx`, `commands.ts`) for actions and navigation.
 - **spaces/** - workspace spaces/projects (name, root, env, color, per-space tab persistence) via `useSpaces` and `SpaceSwitcher`.
+- **ssh/** - SSH client (ported from TEDI): `bridge.ts`/`connections.ts` manage saved hosts (secrets in the OS keychain, metadata in a LazyStore), `SshMenu` in the header opens connections as terminal tabs, `hostKeyPrompt.ts` + `HostKeyPromptDialog` implement trust-on-first-use fingerprint pinning, and `lib/ssh-terminal.ts` adapts an SSH session to the terminal's `SessionOpener` interface (a leaf with `ssh: { connectionId }` opens a remote shell instead of a local PTY). The **SFTP file explorer** (`SshFileExplorer.tsx` + `useSshFileTree.ts`) is mounted as a right ResizablePanel in `App.tsx`, toggled via the SSH menu ("Browse remote files"); it reuses the local tree renderer (`FileTreeNode`) and tracks the active session via `sshActiveSession.ts`. Backend: `src-tauri/src/modules/ssh/` (russh) with `ssh_open/write/resize/close`, host-key confirm, agent keys, forward, sessions, and the `sftp.rs` command set.
 - **ai/** - see below.
+
+### Go CLI (`cli/`)
+
+The Go companion (`cli/cmd/termigo`) is the automation layer: `doctor`, `init`
+(scaffolds `.termigo/mcp.json` + `TERMIGO.md`), `agent run` (Codex, Claude,
+Gemini, Antigravity, Ollama), `skill` (SKILL.md discovery/creation), `mcp`
+(JSON-RPC stdio client + registry) and `config`. Keep it dependency-light
+(stdlib + yaml.v3); provider credentials stay with their own CLIs.
 
 ### AI subsystem (`src/modules/ai/`)
 
