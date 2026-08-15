@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { base64ToBytes, bodyToPayload, bytesToBase64 } from "./proxyFetch";
+import {
+  base64ToBytes,
+  bodyToPayload,
+  bytesToBase64,
+  fetchFailure,
+} from "./proxyFetch";
 
 const bytes = (...n: number[]) => new Uint8Array(n);
 
@@ -102,5 +107,35 @@ describe("transport cost", () => {
     // three bytes per byte.
     expect(wire.length).toBeLessThan(json.length * 1.1);
     expect(asNumberArray.length).toBeGreaterThan(json.length * 2.5);
+  });
+});
+
+// The AI SDK retries a network failure twice, but only after provider-utils
+// rewrites it as a retryable APICallError — and that rewrite fires only for a
+// TypeError named like a fetch failure that carries a cause. Reject any other
+// way and the SDK's own resilience silently does not apply.
+describe("fetchFailure", () => {
+  const FETCH_FAILED_ERROR_MESSAGES = ["fetch failed", "failed to fetch"];
+  // `Error.cause` is ES2022; this project's lib is ES2020.
+  const causeOf = (e: TypeError) => (e as TypeError & { cause?: unknown }).cause;
+
+  it("is a TypeError, which is the first thing the SDK checks", () => {
+    expect(fetchFailure("boom")).toBeInstanceOf(TypeError);
+  });
+
+  it("is named the way the SDK matches on", () => {
+    const err = fetchFailure("boom");
+    expect(FETCH_FAILED_ERROR_MESSAGES).toContain(err.message.toLowerCase());
+  });
+
+  it("carries a cause, without which the SDK gives up on the rewrite", () => {
+    const err = fetchFailure("error sending request for url (https://x/y)");
+    expect(causeOf(err)).toBeInstanceOf(Error);
+    expect((causeOf(err) as Error).message).toContain("error sending request");
+  });
+
+  it("keeps the detail rather than trading it for retryability", () => {
+    const detail = "tcp connect error: connection reset (os error 10054)";
+    expect((causeOf(fetchFailure(detail)) as Error).message).toBe(detail);
   });
 });

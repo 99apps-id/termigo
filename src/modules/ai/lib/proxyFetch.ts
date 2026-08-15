@@ -173,9 +173,9 @@ async function proxyFetchImpl(
         }
         case "error": {
           if (!resolved) {
-            reject(new Error(event.message));
+            reject(fetchFailure(event.message));
           } else {
-            streamController?.error(new Error(event.message));
+            streamController?.error(fetchFailure(event.message));
           }
           break;
         }
@@ -198,4 +198,28 @@ async function proxyFetchImpl(
 
 function makeAbortError(): DOMException {
   return new DOMException("Request aborted", "AbortError");
+}
+
+/**
+ * Fail the way a real `fetch` fails, so the AI SDK can recognise it.
+ *
+ * The SDK retries a network failure twice, but only after
+ * `@ai-sdk/provider-utils` rewrites it as a retryable `APICallError` - and that
+ * rewrite fires only for a `TypeError` whose message is "fetch failed" or
+ * "failed to fetch" and which carries a `cause`. This transport used to reject
+ * with a plain `Error` holding reqwest's text, so it matched none of those and
+ * the SDK's own resilience never applied: a single blip on a flaky link ended
+ * the run outright.
+ *
+ * The detail is not thrown away - it moves to `cause`, which is exactly where
+ * the SDK reads it from to build "Cannot connect to API: …".
+ */
+export function fetchFailure(detail: string): TypeError {
+  const error = new TypeError("fetch failed");
+  // `Error.cause` is ES2022 and this project's lib is ES2020, so the field is
+  // set through a cast. The webview is Chromium and has had `cause` for years;
+  // widening the whole project's lib is a decision of its own, not a side
+  // effect of this fix.
+  (error as TypeError & { cause?: unknown }).cause = new Error(detail);
+  return error;
 }

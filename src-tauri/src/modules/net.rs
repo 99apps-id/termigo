@@ -356,11 +356,15 @@ pub async fn ai_http_request(
     let client = build_safe_client(allow_private, &[(host, safe_ips)])?;
 
     let req = build_request(&client, &method, parsed, headers, body)?;
-    let resp = req.send().await.map_err(|e| e.to_string())?;
+    let resp = req.send().await.map_err(|e| describe_error(&e))?;
 
     let status = resp.status().as_u16();
     let headers = header_map_to_strings(resp.headers());
-    let body = resp.bytes().await.map_err(|e| e.to_string())?.to_vec();
+    let body = resp
+        .bytes()
+        .await
+        .map_err(|e| describe_error(&e))?
+        .to_vec();
     Ok(HttpResponse {
         status,
         headers,
@@ -387,6 +391,29 @@ pub enum AiStreamEvent {
     Error {
         message: String,
     },
+}
+
+/// Render an error with everything under it.
+///
+/// reqwest's `Display` prints only the outer frame - "error sending request for
+/// url (...)" - and drops the cause, which is the half that says anything:
+/// whether the connection was refused, reset mid-flight, timed out, failed DNS,
+/// or presented a certificate that would not verify. Reported without it, every
+/// transport failure reads identically and none of them is actionable.
+fn describe_error(e: &dyn std::error::Error) -> String {
+    let mut out = e.to_string();
+    let mut source = e.source();
+    while let Some(cause) = source {
+        let text = cause.to_string();
+        // Some layers repeat the frame above them; adding it twice only makes
+        // the message longer.
+        if !out.contains(&text) {
+            out.push_str(": ");
+            out.push_str(&text);
+        }
+        source = cause.source();
+    }
+    out
 }
 
 /// How the webview hands over a request body.
@@ -460,10 +487,11 @@ pub async fn ai_http_stream(
     let resp = match req.send().await {
         Ok(r) => r,
         Err(e) => {
+            let message = describe_error(&e);
             let _ = on_event.send(AiStreamEvent::Error {
-                message: e.to_string(),
+                message: message.clone(),
             });
-            return Err(e.to_string());
+            return Err(message);
         }
     };
 
@@ -488,10 +516,11 @@ pub async fn ai_http_stream(
                 }
             }
             Err(e) => {
+                let message = describe_error(&e);
                 let _ = on_event.send(AiStreamEvent::Error {
-                    message: e.to_string(),
+                    message: message.clone(),
                 });
-                return Err(e.to_string());
+                return Err(message);
             }
         }
     }
@@ -664,5 +693,66 @@ mod tests {
             .into_bytes()
             .unwrap()
             .is_empty());
+    }
+
+    // reqwest hides the useful half of a transport failure under `source()`,
+    // so every one of them used to reach the user as the same sentence.
+    #[test]
+    fn describe_error_includes_the_cause_chain() {
+        #[derive(Debug)]
+        struct Inner;
+        impl std::fmt::Display for Inner {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "connection reset by peer (os error 10054)")
+            }
+        }
+        impl std::error::Error for Inner {}
+
+        #[derive(Debug)]
+        struct Outer(Inner);
+        impl std::fmt::Display for Outer {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "error sending request for url (https://example.com)")
+            }
+        }
+        impl std::error::Error for Outer {
+            fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+                Some(&self.0)
+            }
+        }
+
+        let text = describe_error(&Outer(Inner));
+        assert!(text.contains("error sending request"), "{text}");
+        assert!(text.contains("os error 10054"), "{text}");
+    }
+
+    #[test]
+    fn describe_error_does_not_repeat_a_frame() {
+        #[derive(Debug)]
+        struct Echo;
+        impl std::fmt::Display for Echo {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "same text")
+            }
+        }
+        impl std::error::Error for Echo {
+            fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+                None
+            }
+        }
+        assert_eq!(describe_error(&Echo), "same text");
+    }
+
+    #[test]
+    fn describe_error_handles_an_error_with_no_source() {
+        #[derive(Debug)]
+        struct Bare;
+        impl std::fmt::Display for Bare {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "dns error")
+            }
+        }
+        impl std::error::Error for Bare {}
+        assert_eq!(describe_error(&Bare), "dns error");
     }
 }
