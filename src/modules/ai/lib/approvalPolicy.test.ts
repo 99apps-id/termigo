@@ -64,9 +64,17 @@ describe("delete is held back from the edit tier", () => {
     }
   });
 
-  // "Auto-approve all" says nothing waits, and it has to keep meaning that.
-  it("obeys the mode that says nothing waits", () => {
-    expect(isAutoApproved("delete_file", "all")).toBe(true);
+  // The modes delegate routine work, not the power to destroy. Deleting is the
+  // one thing none of them speaks for - including the most permissive, which
+  // used to return before anything could hold it back.
+  it("still asks in the mode that delegates everything else", () => {
+    expect(isAutoApproved("delete_file", "all")).toBe(false);
+  });
+
+  it("keeps delegating everything recoverable in that mode", () => {
+    for (const t of ["edit", "write_file", "move_file", "bash_run"]) {
+      expect(isAutoApproved(t, "all")).toBe(true);
+    }
   });
 
   it("asks in the default mode, like everything else", () => {
@@ -111,10 +119,24 @@ describe("commands on a remote host", () => {
     expect(isAutoApproved("bash_run", "edits", { onRemoteHost: true })).toBe(false);
   });
 
-  it("honours the mode that says nothing waits", () => {
+  it("honours the permissive mode for a command that only changes things", () => {
     expect(
-      isAutoApproved("bash_run", "all", { onRemoteHost: true, command: "rm -rf /" }),
+      isAutoApproved("bash_run", "all", {
+        onRemoteHost: true,
+        command: "systemctl restart nginx",
+      }),
     ).toBe(true);
+  });
+
+  // A shell delete is as permanent as the tool named after it, and a remote
+  // one has no workspace boundary to fall back on.
+  it("still asks for a deleting command, even remotely, even in that mode", () => {
+    expect(
+      isAutoApproved("bash_run", "all", {
+        onRemoteHost: true,
+        command: "rm -rf /",
+      }),
+    ).toBe(false);
   });
 
   it("asks for everything in the default mode", () => {
@@ -176,5 +198,42 @@ describe("custom command tools", () => {
   // writes; running it is what carries the risk.
   it("lets defining one ride along with edits", () => {
     expect(isAutoApproved("create_tool", "edits")).toBe(true);
+  });
+});
+
+// The floor: a small set of irreversible actions that no mode delegates. The
+// modes exist to hand over routine work, and losing an untracked file is not
+// routine work.
+describe("the always-ask floor", () => {
+  it("holds delete_file back in every mode", () => {
+    for (const mode of APPROVAL_MODES) {
+      expect(isAutoApproved("delete_file", mode)).toBe(false);
+    }
+  });
+
+  it("holds a deleting shell command back in every mode", () => {
+    for (const mode of APPROVAL_MODES) {
+      expect(
+        isAutoApproved("bash_run", mode, { command: "rm -rf src" }),
+      ).toBe(false);
+    }
+  });
+
+  // A custom tool is a shell command wearing another name, so the gate follows
+  // the command rather than the tool it arrived under.
+  it("follows the command, not the tool name", () => {
+    expect(
+      isAutoApproved("cmd__cleanup", "all", { command: "rm -rf build" }),
+    ).toBe(false);
+    expect(
+      isAutoApproved("cmd__cleanup", "all", { command: "pnpm build" }),
+    ).toBe(true);
+  });
+
+  it("does not widen into the ordinary work the modes are for", () => {
+    expect(isAutoApproved("write_file", "edits")).toBe(true);
+    expect(isAutoApproved("bash_run", "all", { command: "pnpm test" })).toBe(
+      true,
+    );
   });
 });

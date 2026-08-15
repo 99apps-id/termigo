@@ -108,3 +108,73 @@ export type CommandRisk = "inspect" | "change";
 export function commandRisk(command: string): CommandRisk {
   return isReadOnlyCommand(command) ? "inspect" : "change";
 }
+
+/**
+ * Commands that remove files.
+ *
+ * Every other change an agent makes is recoverable - the file can be read
+ * again, or git still holds it. A delete of something untracked leaves nothing
+ * behind, and that asymmetry is worth a click even from someone who has
+ * delegated everything else. Windows spellings are here because the shell on
+ * this platform is usually PowerShell, where `Remove-Item` and its aliases do
+ * the same job as `rm`.
+ */
+const DELETING = new Set([
+  "rm",
+  "rmdir",
+  "unlink",
+  "shred",
+  "del",
+  "erase",
+  "rd",
+  "remove-item",
+  "ri",
+]);
+
+/** Subcommands that delete, for tools where the verb decides. */
+const DELETING_SUBCOMMANDS: Record<string, Set<string>> = {
+  // `git clean` removes untracked files - precisely the ones git cannot give
+  // back afterwards.
+  git: new Set(["clean"]),
+};
+
+/** Matches a deleting verb anywhere in a line, for the substitution case. */
+const DELETING_ANYWHERE = new RegExp(
+  `(^|[\\s;&|(\`$])(${[...DELETING].join("|")})(\\s|$)`,
+  "i",
+);
+
+/**
+ * Whether any part of the command removes files.
+ *
+ * Fail-closed like the rest of this module. Each segment is judged on its
+ * first word, so `pnpm build && rm -rf dist` is caught rather than read as a
+ * build. A command substitution can hide the verb from a first-word read, so
+ * lines containing one are scanned whole - over-asking there is the safe
+ * direction, and the result is a prompt rather than a refusal.
+ */
+export function deletesFiles(command: string): boolean {
+  const text = command.trim();
+  if (!text) return false;
+
+  for (const segment of text.split(/&&|\|\||;|\|/)) {
+    if (!segment.trim()) continue;
+    const cmd = firstWord(segment).toLowerCase();
+    if (DELETING.has(cmd)) return true;
+    if (DELETING_SUBCOMMANDS[cmd]?.has(secondWord(segment).toLowerCase())) {
+      return true;
+    }
+    // `find -delete` and `-exec` reach past the first word: one deletes
+    // directly, the other runs whatever it is handed.
+    if (
+      DESTRUCTIVE_FLAGS.some((f) =>
+        new RegExp(`(^|\\s)${f}(\\s|$)`).test(segment),
+      )
+    ) {
+      return true;
+    }
+  }
+
+  if (/\$\(|`/.test(text) && DELETING_ANYWHERE.test(text)) return true;
+  return false;
+}

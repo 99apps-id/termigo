@@ -1,7 +1,7 @@
 import { isMcpTool } from "./mcpToolNames";
 import { isExtensionTool } from "./extensionToolNames";
 import { isCustomTool } from "./customToolNames";
-import { commandRisk } from "./commandRisk";
+import { commandRisk, deletesFiles } from "./commandRisk";
 
 // Approval policy for agent tool calls.
 //
@@ -83,7 +83,7 @@ export const APPROVAL_MODE_HINTS: Record<ApprovalMode, string> = {
   ask: "Every file change and command waits for your approval.",
   edits:
     "File edits in the workspace run automatically. Commands and agent hand-offs still ask.",
-  all: "Nothing waits for approval. Safety checks still block unsafe paths and commands.",
+  all: "Everything runs without asking, except deleting files — that always waits, in every mode. Safety checks still block unsafe paths and commands.",
 };
 
 /**
@@ -111,11 +111,32 @@ export type ApprovalContext = {
   command?: string;
 };
 
+/**
+ * Tools no mode delegates, however permissive the mode.
+ *
+ * The modes exist to hand over routine work, not the power to destroy. Every
+ * other tool in both tiers changes bytes that can be recovered - by reading
+ * the file again, or from git; a delete of something untracked leaves nothing
+ * to read at all. `EXEC_TOOLS` already says that asymmetry is worth a click
+ * "even from someone who has already delegated ordinary edits", but the `all`
+ * shortcut used to return before anything could act on it.
+ */
+const ALWAYS_ASK_TOOLS = new Set(["delete_file"]);
+
 export function isAutoApproved(
   toolName: string,
   mode: ApprovalMode,
   ctx: ApprovalContext = {},
 ): boolean {
+  // The floor, checked before every other branch - including the `all`
+  // shortcut and the remote-command path, both of which would otherwise
+  // return first.
+  if (ALWAYS_ASK_TOOLS.has(toolName)) return false;
+  // A shell command deletes just as permanently as the tool named after it,
+  // and `rm -rf src` would otherwise ride through as an ordinary command. Any
+  // tool carrying a `command` is covered, so custom tools cannot route around
+  // this by not being named bash_run.
+  if (ctx.command && deletesFiles(ctx.command)) return false;
   // Remote commands used to ask in every mode. In practice that meant dozens
   // of prompts to set up one server, most of them for `ls` and `docker ps`,
   // and a prompt that always appears is a prompt nobody reads. The gate now
