@@ -12,7 +12,7 @@ import {
 } from "./agent";
 import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
 import { formatAiError } from "./errors";
-import { error as logError } from "@tauri-apps/plugin-log";
+import { error as logError, info as logInfo } from "@tauri-apps/plugin-log";
 import { native } from "./native";
 import type { ToolContext } from "../tools/tools";
 
@@ -108,6 +108,12 @@ type SendOptions = {
 export function createContextAwareTransport(deps: Deps) {
   const run = async (options: SendOptions) => {
     const live = deps.getLive();
+    // Timed because "the first message is slow" has had four plausible causes
+    // and no measurement. This block runs before a single token reaches the
+    // model: project memory, learned memory, MCP servers, skills and custom
+    // tools. MCP is the one that can start a process, so it is the one that
+    // can turn a file read into twenty seconds.
+    const contextStart = performance.now();
     const [projectMemory, learnedMemory, mcpTools, skills, customDefs] = await Promise.all([
       readTermigoMd(live.workspaceRoot),
       readMemory(live.workspaceRoot),
@@ -115,6 +121,10 @@ export function createContextAwareTransport(deps: Deps) {
       listSkills(live.workspaceRoot),
       loadCustomTools(live.workspaceRoot),
     ]);
+    void logInfo(
+      `context assembled in ${Math.round(performance.now() - contextStart)}ms ` +
+        `(mcp tools: ${Object.keys(mcpTools).length}, skills: ${skills.length})`,
+    ).catch(() => {});
     const envBlock = formatEnvBlock(live);
     const messagesForRun = envBlock
       ? injectEnvIntoLastUser(options.messages, envBlock)

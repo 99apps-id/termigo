@@ -1,4 +1,5 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
+import { info as logInfo } from "@tauri-apps/plugin-log";
 
 /** Streaming events emitted by the Rust `ai_http_stream` command. */
 type AiStreamEvent =
@@ -121,6 +122,7 @@ async function proxyFetchImpl(
     throw makeAbortError();
   }
 
+  const started = performance.now();
   return new Promise<Response>((resolve, reject) => {
     let resolved = false;
     let streamController: ReadableStreamDefaultController<Uint8Array> | null =
@@ -146,6 +148,14 @@ async function proxyFetchImpl(
       if (cancelled) return;
       switch (event.kind) {
         case "headers": {
+          // Connect, TLS and the provider's own time-to-first-byte, together.
+          // Splitting "the agent is slow" from "the network is slow" needs
+          // this number next to the context timing, not a guess about which
+          // one it was.
+          void logInfo(
+            `provider responded in ${Math.round(performance.now() - started)}ms ` +
+              `(status ${event.status})`,
+          ).catch(() => {});
           const stream = new ReadableStream<Uint8Array>({
             start(controller) {
               streamController = controller;
