@@ -198,14 +198,17 @@ export function AiStatusBarControls() {
       </IconBtn>
 
       {c.isBusy ? (
+        // Destructive, not ghost. Send sits in this slot the rest of the time
+        // as a filled primary button, so the one control you reach for in a
+        // hurry was the only one with no background at all.
         <Button
           type="button"
           size="icon"
-          variant="ghost"
+          variant="destructive"
           onClick={c.stop}
           className="size-6"
           aria-label="Stop"
-          title="Stop"
+          title="Stop (Esc)"
         >
           <HugeiconsIcon icon={StopCircleIcon} size={13} strokeWidth={1.75} />
         </Button>

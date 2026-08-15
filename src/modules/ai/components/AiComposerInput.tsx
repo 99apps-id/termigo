@@ -252,6 +252,16 @@ export function AiComposerInput() {
                     return;
                   }
                 }
+                // Stopping a run had no keyboard path at all: the only way was
+                // to reach the far corner of the bar with the mouse. Inside the
+                // picker Escape already means "dismiss", handled above, so this
+                // only fires once that is closed. The mini window's global
+                // Escape ignores textareas, so nothing else claims this key.
+                if (e.key === "Escape" && c.isBusy) {
+                  e.preventDefault();
+                  c.stop();
+                  return;
+                }
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
                   c.submit();
