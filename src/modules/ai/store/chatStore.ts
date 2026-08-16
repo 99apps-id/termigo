@@ -72,6 +72,8 @@ export type AgentMeta = {
   /** The user pressed stop, so the transcript can offer to resume. */
   stoppedByUser: boolean;
   compactionNotice: { droppedCount: number; at: number } | null;
+  /** The last fact written to project memory, so a silent write is visible. */
+  memoryNotice: { fact: string; at: number } | null;
 };
 
 const ZERO_USAGE: AgentUsage = {
@@ -92,6 +94,7 @@ const IDLE_META: AgentMeta = {
   runRound: 0,
   stoppedByUser: false,
   compactionNotice: null,
+  memoryNotice: null,
 };
 
 export type MiniState = {

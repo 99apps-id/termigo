@@ -103,6 +103,11 @@ function makeChat(sessionId: string): Chat<UIMessage> {
         compactionNotice: { droppedCount: info.droppedCount, at: Date.now() },
       });
     },
+    onRemember: (info) => {
+      useChatStore.getState().patchAgentMeta({
+        memoryNotice: { fact: info.fact, at: Date.now() },
+      });
+    },
     onFinishMeta: (info) => {
       useChatStore.getState().patchAgentMeta({ stopReason: info.stopReason });
     },

@@ -205,6 +205,7 @@ export function AiChatView({
   const stopReason = useChatStore((s) => s.agentMeta.stopReason);
   const runRound = useChatStore((s) => s.agentMeta.runRound);
   const compactionNotice = useChatStore((s) => s.agentMeta.compactionNotice);
+  const memoryNotice = useChatStore((s) => s.agentMeta.memoryNotice);
   const patchAgentMeta = useChatStore((s) => s.patchAgentMeta);
   const stoppedByUser = useChatStore((s) => s.agentMeta.stoppedByUser);
   // Offer to resume after a stop as well as after the step cap. A stop used to
@@ -256,6 +257,12 @@ export function AiChatView({
             onDismiss={() => patchAgentMeta({ compactionNotice: null })}
           />
         )}
+        {memoryNotice && (
+          <MemoryNotice
+            fact={memoryNotice.fact}
+            onDismiss={() => patchAgentMeta({ memoryNotice: null })}
+          />
+        )}
         {showSpinner && (
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Spinner />
@@ -292,6 +299,45 @@ export function AiChatView({
     </Conversation>
   );
 }
+
+/**
+ * Say what the agent just wrote to project memory.
+ *
+ * A remembered fact joins the system prompt of every later run, including in
+ * sessions months from now, and in the permissive approval modes it is written
+ * without a click. Four wrong ones once rode in that way and steered every
+ * reply until the file was opened by hand. This is the moment to catch that,
+ * and `.termigo/memory.md` is where to remove it.
+ */
+const MemoryNotice = memo(function MemoryNotice({
+  fact,
+  onDismiss,
+}: {
+  fact: string;
+  onDismiss: () => void;
+}) {
+  return (
+    <div className="flex items-start gap-2 rounded-md border border-border/40 bg-muted/30 px-2.5 py-1.5 text-[11px] text-muted-foreground">
+      <span className="mt-1 size-1.5 shrink-0 rounded-full bg-sky-500/80" />
+      <span className="flex-1">
+        <span className="font-medium text-foreground/80">Remembered</span>
+        {" — "}
+        {fact}
+        <span className="mt-0.5 block opacity-70">
+          Kept in .termigo/memory.md and added to every later run. Edit or
+          delete it there.
+        </span>
+      </span>
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="shrink-0 text-[10.5px] underline opacity-70 hover:opacity-100"
+      >
+        Dismiss
+      </button>
+    </div>
+  );
+});
 
 const CompactionNotice = memo(function CompactionNotice({
   droppedCount,

@@ -61,6 +61,10 @@ const TOOL_LABELS: Record<string, (input: Record<string, unknown>) => string> =
     todo_write: (i) =>
       `Updating plan (${Array.isArray(i.todos) ? i.todos.length : 0} items)`,
     run_subagent: (i) => `Spawning ${String(i.type ?? "subagent")} subagent`,
+    // Named rather than left to the "Calling remember" fallback: what is being
+    // written outlives the run, so it is the one tool whose argument matters
+    // more than its name.
+    remember: (i) => `Remembering: ${ellipsize(String(i.fact ?? ""), 60)}`,
   };
 
 function shortPath(p: unknown): string {
@@ -431,6 +435,9 @@ export type RunAgentOptions = {
   onStep?: (step: string | null) => void;
   onUsage?: (delta: AgentUsageDelta) => void;
   onCompact?: (info: { droppedCount: number }) => void;
+  /** A durable fact was written to project memory. Surfaced because it
+   *  outlives the run and, in the permissive modes, needed no click. */
+  onRemember?: (info: { fact: string }) => void;
   onFinishMeta?: (info: {
     stopReason: AgentStopReason | null;
     finishReason: string;
@@ -664,6 +671,22 @@ export async function runAgentStream(opts: RunAgentOptions) {
           );
         } else if (step.text) {
           opts.onStep("Writing");
+        }
+      }
+      // A memory write outlives the conversation it was made in, and in the
+      // permissive approval modes it happens without a click. Four wrong facts
+      // once rode in unnoticed and steered every later reply until the file
+      // was read by hand. Announcing it is what makes that catchable.
+      for (const r of step.toolResults ?? []) {
+        const result = r as {
+          toolName?: string;
+          output?: { stored?: boolean; remembered?: string };
+        };
+        if (result.toolName !== "remember") continue;
+        // Only when it actually stored: the tool declines duplicates and
+        // over-long facts, and announcing those would be a lie.
+        if (result.output?.stored && result.output.remembered) {
+          opts.onRemember?.({ fact: result.output.remembered });
         }
       }
       if (step.usage) {

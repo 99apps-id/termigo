@@ -116,6 +116,7 @@ type Deps = {
   onStep?: (step: string | null) => void;
   onUsage?: (delta: AgentUsageDelta) => void;
   onCompact?: (info: { droppedCount: number }) => void;
+  onRemember?: (info: { fact: string }) => void;
   onFinishMeta?: (info: {
     stopReason: AgentStopReason | null;
     finishReason: string;
@@ -173,6 +174,7 @@ export function createContextAwareTransport(deps: Deps) {
       onStep: deps.onStep,
       onUsage: deps.onUsage,
       onCompact: deps.onCompact,
+      onRemember: deps.onRemember,
       onFinishMeta: deps.onFinishMeta,
       lmstudioBaseURL: deps.getLmstudioBaseURL?.(),
       lmstudioModelId: deps.getLmstudioModelId?.(),

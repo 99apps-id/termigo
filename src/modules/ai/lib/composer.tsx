@@ -323,6 +323,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
       runRound: 0,
       stoppedByUser: false,
       compactionNotice: null,
+      memoryNotice: null,
     });
     if (!store.mini.open) store.openMini();
     void (async () => {
