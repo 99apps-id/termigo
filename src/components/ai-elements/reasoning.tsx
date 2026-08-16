@@ -153,10 +153,21 @@ const defaultGetThinkingMessage = (isStreaming: boolean, duration?: number) => {
   if (isStreaming || duration === 0) {
     return <Shimmer duration={1}>Thinking</Shimmer>;
   }
+  // The finished label stays in the transcript, so its sweep is counted rather
+  // than endless: one repainting element per reasoning block, forever, is not
+  // what a finished state should cost.
   if (duration === undefined) {
-    return <span>Reasoned</span>;
+    return (
+      <Shimmer as="span" duration={1.4} iterations={2}>
+        Reasoned
+      </Shimmer>
+    );
   }
-  return <span>Reasoned for {duration}s</span>;
+  return (
+    <Shimmer as="span" duration={1.4} iterations={2}>
+      {`Reasoned for ${duration}s`}
+    </Shimmer>
+  );
 };
 
 export const ReasoningTrigger = memo(

@@ -475,7 +475,11 @@ html *::-webkit-scrollbar {
       var(--color-muted-foreground),
       var(--color-muted-foreground)
     );
-  animation: termigo-shimmer var(--shimmer-duration, 2s) linear infinite;
+  animation: termigo-shimmer var(--shimmer-duration, 2s) linear
+    var(--shimmer-iterations, infinite);
+  /* Settle on the plain end state once a finite sweep is done, rather than
+     snapping back to the mid-sweep frame. */
+  animation-fill-mode: forwards;
 }
 
 @media (prefers-reduced-motion: reduce) {
