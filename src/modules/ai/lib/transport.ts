@@ -16,7 +16,20 @@ import { error as logError, info as logInfo } from "@tauri-apps/plugin-log";
 import { native } from "./native";
 import type { ToolContext } from "../tools/tools";
 
-const TERMIGO_MD_MAX_BYTES = 32 * 1024;
+/**
+ * How much of `TERMIGO.md` reaches the model.
+ *
+ * Project memory is part of the system prompt, so it is paid on every request
+ * and in full on the first one, where nothing is cached yet. This repo's own
+ * file is 30 KB - about 7,700 tokens spent before the user has typed anything,
+ * and the largest single reason the first answer is slow.
+ *
+ * 10 KB keeps the top of the document, which is where an architecture note
+ * puts its overview, and drops the reference detail further down. The agent
+ * can still read the file with `read_file` when it needs the rest; what it
+ * loses is having all of it memorised up front.
+ */
+const TERMIGO_MD_MAX_BYTES = 10 * 1024;
 type MemoryCacheEntry = { content: string | null; mtime: number };
 const projectMemoryCache = new Map<string, MemoryCacheEntry>();
 
@@ -38,6 +51,22 @@ function logAndFormatAiError(error: unknown): string {
   return message;
 }
 
+/**
+ * Cut project memory to the budget at a line boundary, and say so.
+ *
+ * A blind slice ends mid-sentence, which reads to the model as a fact that
+ * stops halfway rather than a document that was cut. Saying it was truncated
+ * also tells the agent the rest exists and can be read.
+ */
+export function truncateProjectMemory(content: string): string {
+  if (content.length <= TERMIGO_MD_MAX_BYTES) return content;
+  const cut = content.slice(0, TERMIGO_MD_MAX_BYTES);
+  const lastBreak = cut.lastIndexOf("\n");
+  // A file with no newline in the budget has nothing better to cut on.
+  const body = lastBreak > 0 ? cut.slice(0, lastBreak) : cut;
+  return `${body}\n\n[TERMIGO.md truncated here; read the file for the rest]`;
+}
+
 async function readTermigoMd(workspaceRoot: string | null): Promise<string | null> {
   if (!workspaceRoot) return null;
   const path = `${workspaceRoot.replace(/\/$/, "")}/TERMIGO.md`;
@@ -49,10 +78,7 @@ async function readTermigoMd(workspaceRoot: string | null): Promise<string | nul
       projectMemoryCache.set(workspaceRoot, { content: null, mtime: Date.now() });
       return null;
     }
-    const content =
-      r.content.length > TERMIGO_MD_MAX_BYTES
-        ? r.content.slice(0, TERMIGO_MD_MAX_BYTES)
-        : r.content;
+    const content = truncateProjectMemory(r.content);
     projectMemoryCache.set(workspaceRoot, { content, mtime: Date.now() });
     return content;
   } catch {
