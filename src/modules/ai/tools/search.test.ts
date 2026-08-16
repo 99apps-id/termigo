@@ -122,3 +122,38 @@ describe("AI search tools path safety", () => {
     ]);
   });
 });
+
+// A model with exactly one pattern writes `"glob": "src/**/*.ts"`, not a
+// one-element list. The array-only schema rejected the whole call, so the tool
+// never ran and the run died on a validation error instead of a search.
+describe("grep glob accepts one pattern or several", () => {
+  const schemaOf = (tools: Record<string, unknown>) =>
+    (tools.grep as { inputSchema: { parse: (v: unknown) => unknown } })
+      .inputSchema;
+
+  it("takes a bare string and normalises it to a list", () => {
+    const tools = buildSearchTools(makeContext());
+    const parsed = schemaOf(tools).parse({
+      pattern: "fs_read_file",
+      glob: "src-tauri/src/lib.rs",
+    }) as { glob?: string[] };
+    expect(parsed.glob).toEqual(["src-tauri/src/lib.rs"]);
+  });
+
+  it("still takes a list", () => {
+    const tools = buildSearchTools(makeContext());
+    const parsed = schemaOf(tools).parse({
+      pattern: "x",
+      glob: ["**/*.ts", "src/**/*.tsx"],
+    }) as { glob?: string[] };
+    expect(parsed.glob).toEqual(["**/*.ts", "src/**/*.tsx"]);
+  });
+
+  it("leaves it absent when omitted", () => {
+    const tools = buildSearchTools(makeContext());
+    const parsed = schemaOf(tools).parse({ pattern: "x" }) as {
+      glob?: string[];
+    };
+    expect(parsed.glob).toBeUndefined();
+  });
+});

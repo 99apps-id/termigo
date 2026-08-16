@@ -69,11 +69,19 @@ export function buildSearchTools(ctx: ToolContext) {
           .describe(
             "Root to search under. Defaults to workspace root, then active cwd.",
           ),
+        // A bare string is accepted as well as a list. Models reach for
+        // `"glob": "src/**/*.ts"` when they have exactly one pattern, and the
+        // array-only schema rejected the whole call - the tool never ran, and
+        // the run died on a validation error rather than a search.
+        // `.transform` before `.optional()`: the other order makes the key
+        // required-with-undefined rather than optional, which every existing
+        // caller that omits a glob would then fail to type-check against.
         glob: z
-          .array(z.string())
+          .union([z.string(), z.array(z.string())])
+          .transform((g) => (typeof g === "string" ? [g] : g))
           .optional()
           .describe(
-            "Optional include-globs over relative paths, e.g. ['**/*.ts', 'src/**/*.tsx'].",
+            "Optional include-globs over relative paths. One pattern or several: 'src/**/*.ts' or ['**/*.ts', 'src/**/*.tsx'].",
           ),
         case_insensitive: z.boolean().optional(),
         max_results: z.number().int().min(1).max(500).optional(),
