@@ -155,10 +155,7 @@ export function createContextAwareTransport(deps: Deps) {
     ]);
     const contextMs = performance.now() - contextStart;
     const envBlock = formatEnvBlock(live);
-    const messagesForRun =
-      envBlock && !isResumingApproval(options.messages)
-        ? appendEnvTurn(options.messages, envBlock)
-        : options.messages;
+    const messagesForRun = prepareOutgoingMessages(options.messages, envBlock);
     const result = await runAgentStream({
       keys: deps.getKeys(),
       modelId: deps.getModelId(),
@@ -264,6 +261,23 @@ export function isResumingApproval(messages: readonly UIMessage[]): boolean {
     (part: unknown) =>
       (part as { state?: string }).state === "approval-responded",
   );
+}
+
+/**
+ * The stored history turned into the copy that goes out on the wire.
+ *
+ * One function rather than three lines inline in `run`, because what it decides
+ * is an invariant the provider enforces and nothing else checks: the shape of
+ * the last message. `approvalResume.test.ts` runs this the whole way to model
+ * messages, which is where the seam that broke actually lives.
+ */
+export function prepareOutgoingMessages(
+  messages: UIMessage[],
+  envBlock: string | null,
+): UIMessage[] {
+  if (!envBlock) return messages;
+  if (isResumingApproval(messages)) return messages;
+  return appendEnvTurn(messages, envBlock);
 }
 
 export function appendEnvTurn(
