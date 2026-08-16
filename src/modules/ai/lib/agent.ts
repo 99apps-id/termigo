@@ -608,6 +608,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
       };
     }),
   ).length;
+  const toolCount = Object.keys(tools).length;
   const promptBytes = {
     system: Math.max(0, systemTotal - projectBytes - learnedBytes),
     project: projectBytes,
@@ -736,7 +737,10 @@ export async function runAgentStream(opts: RunAgentOptions) {
         `run: context ${Math.round(opts.contextMs ?? 0)}ms | ` +
           `prompt ${kb(promptBytes.total)}KB ` +
           `(sys ${kb(promptBytes.system)} / proj ${kb(promptBytes.project)} / ` +
-          `mem ${kb(promptBytes.learned)} / tools ${kb(promptBytes.tools)}) | ` +
+          // Count as well as size: 11.6 KB alone cannot tell "no MCP server
+          // attached" from "one attached that measures small", and the first
+          // reading of this line asked exactly that question.
+          `mem ${kb(promptBytes.learned)} / ${toolCount} tools ${kb(promptBytes.tools)}) | ` +
           `tokens ${runInput}in ${runOutput}out, cache ${cachePct}% | ` +
           `steps ${stepsSeen}/${stepBudget} | stop ${settledStop ?? (finishReason || "done")} | ` +
           `${modelId}`,
