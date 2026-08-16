@@ -63,20 +63,18 @@ describe("sanitizeUiMessages", () => {
     expect(parts[1].type).toBe("text");
   });
 
-  // No exception for a live approval any more. This app converts UI messages
-  // to model messages itself, and an OpenAI-compatible provider has no way to
-  // express "approved, result to follow" - it sees a tool_call with nothing
-  // answering it. Nothing is lost: the run no longer sends until every call
-  // has produced a result, so a live approval never arrives here.
-  it("closes out approval-responded even at the end of the conversation", () => {
-    const out = sanitizeUiMessages([
+  it("keeps approval-responded while the run is being continued", () => {
+    const messages = [
       userMessage("u1"),
       assistantMessage("a1", [
         toolPart("approval-responded", "call_1"),
         { type: "text", text: "decided" },
       ]),
-    ]);
-    expect(partsOf(out[1])[0].state).toBe("output-error");
+    ];
+    const out = sanitizeUiMessages(messages);
+    expect(out).toHaveLength(2);
+    const tool = partsOf(out[1]).find((p) => p.state === "approval-responded");
+    expect(tool).toBeDefined();
   });
 
   it("keeps result and output-available parts", () => {
@@ -146,14 +144,14 @@ describe("sanitizeUiMessages: resumed sessions", () => {
     expect(tool.errorText).toMatch(/interrupted/i);
   });
 
-  it("closes out approved calls wherever they sit", () => {
+  it("closes out an approved call left in an earlier turn of a continued run", () => {
     const out = sanitizeUiMessages([
-      assistantMessage("a1", [toolPart("approval-responded", "older")]),
+      assistantMessage("a1", [toolPart("approval-responded", "stale")]),
       userMessage("u1"),
-      assistantMessage("a2", [toolPart("approval-responded", "newer")]),
+      assistantMessage("a2", [toolPart("approval-responded", "live")]),
     ]);
     expect(partsOf(out[0])[0].state).toBe("output-error");
-    expect(partsOf(out[2])[0].state).toBe("output-error");
+    expect(partsOf(out[2])[0].state).toBe("approval-responded");
   });
 
   it("drops a call whose arguments were still streaming", () => {
@@ -217,6 +215,48 @@ describe("sanitizeUiMessages: resumed sessions", () => {
   });
 });
 
+// The bug this guards: the env block is appended as a user turn on every
+// request, so "is the last message an assistant turn" answered no every single
+// time. An approved call was never recognised as live, every one was reported
+// to the model as interrupted, and the model tried again - a loop that left 56
+// calls stranded in `approval-responded`, 37 of them bash_run.
+describe("sanitizeUiMessages: the trailing env turn", () => {
+  const ENV = "<env>\nworkspace_root: C:/project/termigo\n</env>";
+  const envTurn = () =>
+    ({ id: "env", role: "user", parts: [{ type: "text", text: ENV }] }) as UIMessage;
+
+  it("still recognises a live approval behind the env turn", () => {
+    const out = sanitizeUiMessages([
+      userMessage("u1"),
+      assistantMessage("a1", [toolPart("approval-responded", "call_1")]),
+      envTurn(),
+    ]);
+    const tool = (out[1].parts as Array<{ state?: string }>)[0];
+    expect(tool.state).toBe("approval-responded");
+  });
+
+  it("still closes out an approval the conversation has moved past", () => {
+    const out = sanitizeUiMessages([
+      assistantMessage("a1", [toolPart("approval-responded", "stale")]),
+      userMessage("u2"),
+      envTurn(),
+    ]);
+    expect((out[0].parts as Array<{ state?: string }>)[0].state).toBe(
+      "output-error",
+    );
+  });
+
+  it("does not treat a real request as an env turn", () => {
+    const out = sanitizeUiMessages([
+      assistantMessage("a1", [toolPart("approval-responded", "stale")]),
+      userMessage("u2"),
+    ]);
+    expect((out[0].parts as Array<{ state?: string }>)[0].state).toBe(
+      "output-error",
+    );
+  });
+});
+
 // `convertToModelMessages` emits a `tool-approval-request` for any part still
 // carrying an `approval`, and answers it only when `approval.approved` is set.
 // A call interrupted while waiting for an answer therefore produced a request
@@ -257,7 +297,9 @@ describe("sanitizeUiMessages: the approval field", () => {
     expect("approval" in tool).toBe(false);
   });
 
-  it("drops it even for the newest call in the conversation", () => {
+  // A live approval is left completely alone: the SDK is about to execute it,
+  // and the approval conversation is what makes that work.
+  it("leaves a live approval and its field untouched", () => {
     const out = sanitizeUiMessages([
       userMessage("u1"),
       assistantMessage("a1", [
@@ -265,8 +307,8 @@ describe("sanitizeUiMessages: the approval field", () => {
       ]),
     ]);
     const tool = (out[1].parts as Array<Record<string, unknown>>)[0];
-    expect(tool.state).toBe("output-error");
-    expect("approval" in tool).toBe(false);
+    expect(tool.state).toBe("approval-responded");
+    expect(tool.approval).toEqual({ id: "ap1", approved: true });
   });
 
   it("keeps everything else the call carried", () => {

@@ -35,12 +35,11 @@ function isToolPart(type: string): boolean {
  * States holding a call that has not produced a result: still waiting to run,
  * waiting on an approval nobody answered, or approved but never executed.
  *
- * `approval-responded` is included, with no exception for a live one. This app
- * converts UI messages to model messages itself, and the OpenAI-compatible
- * providers have no way to express "approved, result to follow" - the call
- * arrives as a `tool_calls` entry with nothing answering it and the request is
- * rejected. Nothing is lost by closing it: the run no longer sends until every
- * call has actually produced a result, so a live approval never reaches here.
+ * `approval-responded` is the subtle one. While a run is being continued the
+ * user has answered and the SDK is about to execute the call, so it must be
+ * left alone - that is what this filter originally existed to protect. Once
+ * the conversation has moved past that turn the call can never execute, and
+ * leaving it is exactly what poisons a restored session.
  */
 const UNFINISHED = new Set([
   "input-available",
@@ -70,11 +69,47 @@ function closeAsInterrupted(part: AnyPart): AnyPart {
   } as AnyPart;
 }
 
+/**
+ * Index of the newest message that is not just the appended environment turn.
+ *
+ * The env block travels as a user turn of its own, added to the outgoing copy
+ * on every request. Any decision about "what is at the end of this
+ * conversation" has to look past it, or it answers a question about the
+ * app's own bookkeeping instead of the conversation.
+ */
+function lastMeaningfulIndex(messages: readonly UIMessage[]): number {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role !== "user") return i;
+    const text = m.parts
+      .map((p) => (p as { type?: string; text?: string }))
+      .filter((p) => p.type === "text")
+      .map((p) => p.text ?? "")
+      .join("");
+    if (text.replace(/<env>[\s\S]*?<\/env>/gi, " ").trim()) return i;
+  }
+  return -1;
+}
+
 export function sanitizeUiMessages(
   messages: readonly UIMessage[],
 ): UIMessage[] {
+  // A run continued straight after an approval ends on the assistant turn that
+  // holds it. Anything earlier - or any history that has since moved on to a
+  // new user message - is settled and can no longer execute.
+  //
+  // The trailing environment turn does not count. It is appended to the
+  // outgoing copy on every request, so measuring "is the last message an
+  // assistant turn" against it answered no every single time: an approved call
+  // was never recognised as live, every one was reported to the model as
+  // interrupted, and the model reasonably tried again. That loop left 56 calls
+  // stranded in `approval-responded` here, 37 of them `bash_run`.
+  const liveIdx = lastMeaningfulIndex(messages);
+  const continuingRun = liveIdx >= 0 && messages[liveIdx].role === "assistant";
+
   const out: UIMessage[] = [];
-  for (const message of messages) {
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i];
     if (message.role !== "assistant") {
       out.push(message);
       continue;
@@ -87,6 +122,9 @@ export function sanitizeUiMessages(
       // resolve - anything we emitted would carry truncated input.
       if (state === "input-streaming") return [];
       if (!UNFINISHED.has(state)) return [part];
+      if (state === "approval-responded" && continuingRun && i === liveIdx) {
+        return [part];
+      }
       return [closeAsInterrupted(part)];
     });
     // An assistant turn left holding only a half-streamed call carries nothing
