@@ -222,7 +222,16 @@ export const ReasoningContent = memo(
       )}
       {...props}
     >
-      <div className="whitespace-pre-wrap wrap-break-word">{children}</div>
+      {/*
+        Bounded and scrollable rather than as tall as the thinking happens to
+        be. A multi-step run folds every step's reasoning into one block, and
+        left unbounded that block pushed the answer - and the tool calls that
+        produced it - off the screen. Capped, it reads the way VS Code's does:
+        present and readable, without the rest of the conversation moving.
+      */}
+      <div className="max-h-56 overflow-y-auto whitespace-pre-wrap wrap-break-word">
+        {children}
+      </div>
     </CollapsibleContent>
   ),
 );
