@@ -89,17 +89,22 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   length, entry count and total size, because everything in it costs context on
   every request. The sweep only runs in the auto-approve modes: in
   `Ask every time`, nothing is written without a click.
-- **Sub-agents run as a batch, not one after another.** A request that spans
-  several parts — build the frontend and the backend, audit four modules — is
-  split into tasks that run at the same time, each with its own fresh context,
-  and their summaries come back together. Tasks can also be chained: one that
-  declares `depends_on` waits for the others and receives what they found, so
-  "frontend and backend" can agree on a contract written by a task that ran
-  first, rather than producing two halves that do not meet. The first step of a
-  broad request is pinned to this fan-out, because a model asked politely in a
-  prompt to parallelise will ignore it; a narrow request is left alone, and
-  telling it not to use sub-agents is respected. Sub-agents are read-only, so a
-  batch can explore widely without anything being changed behind you.
+- **Sub-agents read in parallel.** Work that means covering a lot of ground —
+  auditing a project, exploring an unfamiliar codebase, reviewing four modules —
+  is split into tasks that run at the same time, each with its own fresh
+  context, and their findings come back together. Tasks can be chained: one
+  that declares `depends_on` waits for the others and receives what they found,
+  so a task that synthesises can be handed everything the others gathered.
+  A request to study something broad is pinned to this fan-out, because a model
+  asked politely in a prompt to parallelise will ignore it; a narrow request is
+  left alone, and telling it not to use sub-agents is respected.
+
+  **They read; they do not write.** A sub-agent's tools are `read_file`,
+  `list_directory`, `grep` and `glob`, and what it returns is a written summary,
+  not code. So a batch can explore widely with nothing changed behind you — but
+  asking for a site to be built does not become four builders working at once.
+  The main agent still makes every edit, in order. Concurrent writing needs an
+  approval flow that a headless run does not have yet.
 - **One reasoning block per run, not one per step.** The agent's thinking is
   collected into a single block that scrolls, instead of a new "Reasoned" label
   stacking up on every step and pushing the answer off screen. The tool calls it
