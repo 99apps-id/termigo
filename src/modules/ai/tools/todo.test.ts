@@ -63,9 +63,13 @@ describe("todo_write", () => {
     expect(r.ok).toBe(true);
     expect(r.count).toBe(2);
     expect(r.inProgress).toBe("first");
+    // The workspace tag rides along with every write: a session outlives the
+    // project it was started in, and an untagged list followed the user into
+    // the next folder still listing the previous one's work.
     expect(storeMock.setTodos).toHaveBeenCalledWith(
       "session",
       expect.any(Array),
+      "/workspace",
     );
   });
 

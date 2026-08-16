@@ -1,4 +1,6 @@
 import { useChat, type UIMessage } from "@ai-sdk/react";
+import { isResumingApproval } from "../lib/transport";
+import { useTodosStore } from "../store/todoStore";
 import type { ToolUIPart, UIMessagePart } from "ai";
 import { useEffect, useMemo, useRef } from "react";
 import { native } from "../lib/native";
@@ -119,6 +121,23 @@ function Bridge({
       ...(runStatus === "idle" ? { error: null } : {}),
     });
   }, [status, approvalsPending, patch]);
+
+  // A run that stopped leaves its `in_progress` todo saying work is under way,
+  // and nothing ever revisits it - this app's own store had five frozen that
+  // way. Stand them down once the run is genuinely over.
+  //
+  // "Genuinely" is the hard part. The moment an approval is answered,
+  // `approvalsPending` drops to zero and the chat reads as ready, a beat before
+  // the auto-send resumes the run. Standing down there would fight the agent
+  // mid-task, so the same check the transport uses to decide whether a resume
+  // is in flight decides it here.
+  useEffect(() => {
+    if (!sessionId) return;
+    if (status === "submitted" || status === "streaming") return;
+    if (approvalsPending > 0) return;
+    if (isResumingApproval(messages)) return;
+    useTodosStore.getState().runStopped(sessionId);
+  }, [sessionId, status, approvalsPending, messages]);
 
   useEffect(() => {
     if (approvalsPending > 0) openMini();

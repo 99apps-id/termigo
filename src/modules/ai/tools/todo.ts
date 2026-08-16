@@ -43,7 +43,12 @@ export function buildTodoTools(ctx: ToolContext) {
         const err = validateTodos(normalized);
         if (err) return { error: err };
 
-        useTodosStore.getState().setTodos(sessionId, normalized);
+        // Tagged with the project it was written for: the session survives a
+        // project switch, and an untagged list followed the user into the new
+        // folder still listing the old one's work.
+        useTodosStore
+          .getState()
+          .setTodos(sessionId, normalized, ctx.getWorkspaceRoot());
 
         return {
           ok: true,

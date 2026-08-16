@@ -12,23 +12,34 @@ import { CheckmarkSquare02Icon, SquareIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect } from "react";
 import type { Todo } from "../lib/todos";
+import { belongsToWorkspace, EMPTY_RECORD, isFinished } from "../lib/todos";
+import { useChatStore } from "../store/chatStore";
 import { useTodosStore } from "../store/todoStore";
 
 type Props = { sessionId: string | null };
 
-const EMPTY_TODOS: Todo[] = [];
-
 export function TodoStrip({ sessionId }: Props) {
   const hydrate = useTodosStore((s) => s.hydrate);
-  const todos =
+  const record =
     useTodosStore((s) => (sessionId ? s.bySession[sessionId] : undefined)) ??
-    EMPTY_TODOS;
+    EMPTY_RECORD;
+  const workspaceRoot = useChatStore((s) => s.live.getWorkspaceRoot());
 
   useEffect(() => {
     if (sessionId) void hydrate(sessionId);
   }, [sessionId, hydrate]);
 
-  if (!sessionId || todos.length === 0) return null;
+  if (!sessionId || record.items.length === 0) return null;
+  // A chat session outlives the project it was started in, so a list written
+  // for another workspace is not this project's work and must not sit on top
+  // of it.
+  if (!belongsToWorkspace(record, workspaceRoot)) return null;
+  // Done is done. The strip used to check only whether the list was empty, so
+  // a finished run left a 5/5 bar holding up to 35% of the panel until the
+  // session was deleted. The list stays on disk; it just stops taking space.
+  if (isFinished(record.items)) return null;
+
+  const todos = record.items;
 
   const completed = todos.filter((t) => t.status === "completed").length;
   const pct = Math.round((completed / todos.length) * 100);
