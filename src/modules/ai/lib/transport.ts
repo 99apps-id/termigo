@@ -12,7 +12,7 @@ import {
 } from "./agent";
 import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
 import { formatAiError } from "./errors";
-import { error as logError, info as logInfo } from "@tauri-apps/plugin-log";
+import { error as logError } from "@tauri-apps/plugin-log";
 import { native } from "./native";
 import type { ToolContext } from "../tools/tools";
 
@@ -147,10 +147,7 @@ export function createContextAwareTransport(deps: Deps) {
       listSkills(live.workspaceRoot),
       loadCustomTools(live.workspaceRoot),
     ]);
-    void logInfo(
-      `context assembled in ${Math.round(performance.now() - contextStart)}ms ` +
-        `(mcp tools: ${Object.keys(mcpTools).length}, skills: ${skills.length})`,
-    ).catch(() => {});
+    const contextMs = performance.now() - contextStart;
     const envBlock = formatEnvBlock(live);
     const messagesForRun = envBlock
       ? appendEnvTurn(options.messages, envBlock)
@@ -192,6 +189,7 @@ export function createContextAwareTransport(deps: Deps) {
       planMode: deps.getPlanMode?.(),
       stepBudget: deps.getStepBudget?.(),
       captureDebug: deps.getCaptureDebug?.(),
+      contextMs,
       projectMemory,
       uiMessages: messagesForRun,
       abortSignal: options.abortSignal,

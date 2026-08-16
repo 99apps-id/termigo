@@ -36,6 +36,7 @@ import { prepareAgentPrompt } from "./prompt";
 import { createProxyFetch, proxyFetch } from "./proxyFetch";
 import { sanitizeUiMessages } from "./sanitizeMessages";
 import { useDebugStore } from "../store/debugStore";
+import { info as logInfo } from "@tauri-apps/plugin-log";
 
 const localProxyFetch = createProxyFetch({ allowPrivateNetwork: true });
 
@@ -440,6 +441,10 @@ export type RunAgentOptions = {
   /** Record the assembled request for the inspector. Read from preferences by
    *  the caller so this module stays free of the settings store. */
   captureDebug?: boolean;
+  /** How long the caller spent assembling context before this ran. Reported in
+   *  the per-run line so the wait before the model is visible next to the wait
+   *  caused by the model. */
+  contextMs?: number;
   lmstudioBaseURL?: string;
   lmstudioModelId?: string;
   mlxBaseURL?: string;
@@ -561,6 +566,36 @@ export async function runAgentStream(opts: RunAgentOptions) {
     ...buildTools(opts.toolContext),
   };
 
+  // What the model is handed before it reads a word of the request. Measured
+  // as components rather than one number: a total says "slow", a breakdown
+  // says which addition made it slow. `system` here is the base prompt plus
+  // skills, persona and custom instructions - project and learned memory are
+  // reported separately even though they live inside it, so the two that grow
+  // on their own are visible on their own.
+  const projectBytes = opts.projectMemory?.length ?? 0;
+  const learnedBytes = learnedBlock(opts.learnedMemory ?? []).length;
+  const systemTotal = prompt.system.reduce(
+    (n, m) => n + String(m.content).length,
+    0,
+  );
+  const toolBytes = JSON.stringify(
+    Object.entries(tools).map(([name, t]) => ({
+      name,
+      description: (t as { description?: string } | undefined)?.description,
+    })),
+  ).length;
+  const promptBytes = {
+    system: Math.max(0, systemTotal - projectBytes - learnedBytes),
+    project: projectBytes,
+    learned: learnedBytes,
+    tools: toolBytes,
+    total: systemTotal + toolBytes,
+  };
+
+  let runInput = 0;
+  let runCached = 0;
+  let runOutput = 0;
+
   // Snapshot what is about to be sent, while it is still assembled and before
   // the provider SDK attaches credentials. Off by default; the cost of being
   // on is one object per step, capped at 30 in memory.
@@ -614,6 +649,11 @@ export async function runAgentStream(opts: RunAgentOptions) {
           opts.onStep("Writing");
         }
       }
+      if (step.usage) {
+        runInput += step.usage.inputTokens ?? 0;
+        runCached += step.usage.inputTokenDetails?.cacheReadTokens ?? 0;
+        runOutput += step.usage.outputTokens ?? 0;
+      }
       if (opts.onUsage && step.usage) {
         const u = step.usage;
         const stepInput = u.inputTokens ?? 0;
@@ -634,11 +674,33 @@ export async function runAgentStream(opts: RunAgentOptions) {
       // The predicates fire before the final step is counted in some SDK
       // paths, so fall back to the step count rather than reporting no reason
       // for a run that plainly ran out of budget.
-      opts.onFinishMeta?.({
-        stopReason:
-          stopReason ?? (stepsSeen >= stepBudget ? "step-cap" : null),
-        finishReason,
-      });
+      const settledStop =
+        stopReason ?? (stepsSeen >= stepBudget ? "step-cap" : null);
+      opts.onFinishMeta?.({ stopReason: settledStop, finishReason });
+
+      // One line per run, in the app log rather than only on screen.
+      //
+      // Every performance question this project has had was answered by
+      // archaeology: reading the session store off disk, writing throwaway
+      // scripts, sampling TCP connections. The prompt reached 38 KB across
+      // sixty-odd commits with nothing reporting that it had, and "slower than
+      // it used to be" could not be checked against anything.
+      //
+      // The composition is the part that prevents a repeat. A feature that
+      // adds ten kilobytes to every request shows up here the day it lands,
+      // instead of six months later as a feeling.
+      const kb = (n: number) => (n / 1024).toFixed(1);
+      const cachePct =
+        runInput > 0 ? Math.round((runCached / runInput) * 100) : 0;
+      void logInfo(
+        `run: context ${Math.round(opts.contextMs ?? 0)}ms | ` +
+          `prompt ${kb(promptBytes.total)}KB ` +
+          `(sys ${kb(promptBytes.system)} / proj ${kb(promptBytes.project)} / ` +
+          `mem ${kb(promptBytes.learned)} / tools ${kb(promptBytes.tools)}) | ` +
+          `tokens ${runInput}in ${runOutput}out, cache ${cachePct}% | ` +
+          `steps ${stepsSeen}/${stepBudget} | stop ${settledStop ?? (finishReason || "done")} | ` +
+          `${modelId}`,
+      ).catch(() => {});
     },
   });
 }
