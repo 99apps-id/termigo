@@ -153,7 +153,7 @@ export function createContextAwareTransport(deps: Deps) {
     ).catch(() => {});
     const envBlock = formatEnvBlock(live);
     const messagesForRun = envBlock
-      ? injectEnvIntoLastUser(options.messages, envBlock)
+      ? appendEnvTurn(options.messages, envBlock)
       : options.messages;
     const result = await runAgentStream({
       keys: deps.getKeys(),
@@ -210,34 +210,38 @@ export function createContextAwareTransport(deps: Deps) {
   };
 }
 
-function injectEnvIntoLastUser(
+/**
+ * Append the environment as its own trailing turn.
+ *
+ * It used to be prepended into the last user message, which quietly destroyed
+ * prefix caching. The block goes onto the outgoing copy, never into stored
+ * history, so the message that carried it on one turn arrives without it on
+ * the next:
+ *
+ *   turn N     [system, u1+env]
+ *   turn N+1   [system, u1, a1, u2+env]      <- u1 no longer matches
+ *
+ * Providers cache on an exact token prefix, so a difference at `u1` invalidates
+ * everything after it. Every turn re-processed the whole conversation, and only
+ * the system prompt survived - the opposite of what the cache is for.
+ *
+ * As a trailing turn the history stays byte-identical across requests and the
+ * only part that changes is last, where a change costs nothing. It has to be
+ * last for the same reason it could not be a second system message: anything
+ * before the history would invalidate the history.
+ */
+export function appendEnvTurn(
   messages: UIMessage[],
   envBlock: string,
 ): UIMessage[] {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i];
-    if (m.role !== "user") continue;
-    const parts = m.parts as ReadonlyArray<{ type: string; text?: string }>;
-    let textIdx = -1;
-    for (let j = 0; j < parts.length; j++) {
-      if (parts[j].type === "text") {
-        textIdx = j;
-        break;
-      }
-    }
-    const nextParts =
-      textIdx === -1
-        ? [{ type: "text", text: envBlock }, ...parts]
-        : parts.map((p, idx) =>
-            idx === textIdx
-              ? { ...p, text: `${envBlock}\n\n${p.text ?? ""}` }
-              : p,
-          );
-    const out = messages.slice();
-    out[i] = { ...m, parts: nextParts } as UIMessage;
-    return out;
-  }
-  return messages;
+  return [
+    ...messages,
+    {
+      id: `env-${messages.length}`,
+      role: "user",
+      parts: [{ type: "text", text: envBlock }],
+    } as UIMessage,
+  ];
 }
 
 function formatEnvBlock(live: LiveSnapshot): string | null {
