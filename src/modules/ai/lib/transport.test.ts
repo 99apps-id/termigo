@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { appendEnvTurn, truncateProjectMemory } from "./transport";
+import {
+  appendEnvTurn,
+  isResumingApproval,
+  truncateProjectMemory,
+} from "./transport";
 
 const LIMIT = 10 * 1024;
 
@@ -87,7 +91,71 @@ describe("appendEnvTurn", () => {
   });
 
   it("does not fold the env into the user's own text", () => {
-    const out = appendEnvTurn([user("u1", "selamat malam")], "<env>\ncwd: /x\n</env>");
+    const out = appendEnvTurn(
+      [user("u1", "selamat malam")],
+      "<env>\ncwd: /x\n</env>",
+    );
     expect(textOf(out[0])).toBe("selamat malam");
+  });
+});
+
+// The env turn is appended to every outgoing copy, so it decides what the last
+// message is - and `collectToolApprovals` reads approvals from the last message
+// only, requiring it to be the `tool` message that carries them:
+//
+//     const lastMessage = messages.at(-1);
+//     if (lastMessage?.role != "tool") return { approvedToolApprovals: [] };
+//
+// With a user turn appended after it, `streamText` found no approval, never ran
+// the approved command, and sent the provider an assistant `tool_calls` with
+// nothing answering it. The user saw their approved command fail with "must be
+// followed by tool messages responding to each tool_call_id".
+describe("isResumingApproval", () => {
+  const user = (id: string) =>
+    ({ id, role: "user", parts: [{ type: "text", text: "hi" }] }) as never;
+  const withTool = (id: string, state: string) =>
+    ({
+      id,
+      role: "assistant",
+      parts: [
+        { type: "step-start" },
+        {
+          type: "tool-bash_run",
+          state,
+          toolCallId: "c1",
+          input: { command: "which openclaw" },
+          approval: { id: "ap1", approved: true },
+        },
+      ],
+    }) as never;
+
+  it("holds the env turn back while an approved call is waiting to run", () => {
+    expect(
+      isResumingApproval([user("u1"), withTool("a1", "approval-responded")]),
+    ).toBe(true);
+  });
+
+  it("lets an ordinary continuation have it: results already end the history", () => {
+    expect(
+      isResumingApproval([user("u1"), withTool("a1", "output-available")]),
+    ).toBe(false);
+  });
+
+  // Still waiting on the user, so nothing is being resumed and no request is
+  // in flight for the env block to disturb.
+  it("lets an unanswered approval have it", () => {
+    expect(
+      isResumingApproval([user("u1"), withTool("a1", "approval-requested")]),
+    ).toBe(false);
+  });
+
+  it("lets a plain user turn have it", () => {
+    expect(
+      isResumingApproval([withTool("a1", "approval-responded"), user("u2")]),
+    ).toBe(false);
+  });
+
+  it("lets an empty history have it", () => {
+    expect(isResumingApproval([])).toBe(false);
   });
 });

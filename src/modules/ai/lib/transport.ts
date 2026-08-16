@@ -150,9 +150,10 @@ export function createContextAwareTransport(deps: Deps) {
     ]);
     const contextMs = performance.now() - contextStart;
     const envBlock = formatEnvBlock(live);
-    const messagesForRun = envBlock
-      ? appendEnvTurn(options.messages, envBlock)
-      : options.messages;
+    const messagesForRun =
+      envBlock && !isResumingApproval(options.messages)
+        ? appendEnvTurn(options.messages, envBlock)
+        : options.messages;
     const result = await runAgentStream({
       keys: deps.getKeys(),
       modelId: deps.getModelId(),
@@ -230,6 +231,36 @@ export function createContextAwareTransport(deps: Deps) {
  * last for the same reason it could not be a second system message: anything
  * before the history would invalidate the history.
  */
+/**
+ * Whether the run is resuming a tool call the user has just approved.
+ *
+ * This decides whether the environment turn may be appended, because the SDK
+ * finds approvals in exactly one place:
+ *
+ *     const lastMessage = messages.at(-1);
+ *     if (lastMessage?.role != "tool") return { approvedToolApprovals: [] };
+ *
+ * `convertToModelMessages` turns an answered approval into a trailing `tool`
+ * message carrying the response. Appending the env block put a `user` message
+ * after it, so `streamText` found no approvals, never executed the call, and
+ * forwarded an assistant `tool_calls` with nothing answering it - which is the
+ * provider's "must be followed by tool messages responding to each
+ * tool_call_id" rejection, reported as a failure of the command the user had
+ * just approved.
+ *
+ * Only the approval resume is held back. An ordinary continuation already ends
+ * in a `tool` message full of results, where a trailing user turn changes
+ * nothing, and the env block is refreshed on the user's next real turn anyway.
+ */
+export function isResumingApproval(messages: readonly UIMessage[]): boolean {
+  const last = messages[messages.length - 1];
+  if (last?.role !== "assistant") return false;
+  return last.parts.some(
+    (part: unknown) =>
+      (part as { state?: string }).state === "approval-responded",
+  );
+}
+
 export function appendEnvTurn(
   messages: UIMessage[],
   envBlock: string,
