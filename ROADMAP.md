@@ -71,13 +71,30 @@ The themes below frame every scope decision.
 
 - [x] Multiple cloud and local providers (BYOK)
 - [x] Multi-agent and sub-agents
+- [x] Sub-agent orchestration: batched fan-out with concurrency limits, and `depends_on` chaining so a task receives what earlier tasks found
 - [x] Approval-gated Claude Code orchestration with spawn, output inspection, and follow-up
 - [x] Voice input
 - [x] Reusable prompt snippets via `#handle`
 - [x] Project memory and per-project configuration
+- [x] Self-maintaining memory the agent writes and reads back, bounded in size
+- [x] Reusable skills in `.termigo/skills/`, loaded on demand, discoverable across other agents' libraries
+- [x] MCP servers, per-project and per-user, sharing one config with the Go companion
+- [x] Extension-contributed AI tools
+- [x] Agent-defined tools as shell templates in `.termigo/tools.json`
 - [x] Tools with per-action approval gating (file write / edit, bash, and filesystem mutations)
+- [x] Graduated auto-approval modes, with deletion never delegated in any mode
+- [x] Step budgets that escalate per Continue, with named stop reasons
+- [x] Per-run diagnostics line and an opt-in request inspector
 - [x] Workspace file picker
 - [x] Auto-compact for long context
+
+### SSH and remote
+
+- [x] SSH sessions with key and password auth, and `known_hosts` verification
+- [x] SFTP-backed remote file browsing and editing
+- [x] Port forwarding, so a service on the remote host is reachable locally
+- [x] Agent file tools follow the session onto the remote host, with `grep` and `glob` running server-side
+- [x] Remote commands gated by what they do rather than by being remote
 
 ### Previews
 
@@ -111,12 +128,12 @@ The themes below frame every scope decision.
 
 ### Coming next
 
-- [ ] SSH support (PTY auth and known_hosts first; SFTP and port forwarding later)
-- [ ] Inline terminal auto-suggestions (history-based first; AI-powered opt-in later)
+- [ ] AI-powered inline terminal suggestions, opt-in (history-based suggestions have shipped)
 - [ ] AI agent reliability and workflow improvements (tool execution, context management, recovery, and long-running tasks)
+- [ ] Sub-agents that write, not only read - the concurrent-approval flow needs designing first
 - [ ] Expand external coding-agent orchestration beyond Claude Code
-- [ ] Complete, extensible slash-command and reusable skills system
-- [ ] Approval flow improvements (YOLO / auto-approve, project-scoped policies, per-tool trust)
+- [ ] Extensible slash commands (a fixed set has shipped; skills are done)
+- [ ] Project-scoped approval policies and per-tool trust (the auto-approve modes have shipped)
 - [ ] Persistent terminal processes across app restarts
 
 ### Longer horizon

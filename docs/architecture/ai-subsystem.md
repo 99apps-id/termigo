@@ -55,7 +55,11 @@ The tool set is assembled in `src/modules/ai/tools/tools.ts` from `fs`, `edit`, 
 
 ## Sub-agents
 
-`src/modules/ai/agents/registry.ts` defines read-only sub-agents: `explore`, `code-review`, `security`, and `general`. Each has a whitelist of tools and its own system prompt. `run_subagent` cannot recurse (the subagent tool set excludes `run_subagent` itself).
+`src/modules/ai/agents/registry.ts` defines read-only sub-agents: `explore`, `code-review`, `security`, and `general`. Each has a whitelist of tools and its own system prompt. Sub-agents cannot recurse (the subagent tool set excludes the spawner tools themselves).
+
+Two spawners live in `tools/subagent.ts`. `run_subagent` runs one. `run_subagents` takes a batch and is the one to prefer: independent tasks run concurrently up to `max_concurrency`, and a task's `depends_on` makes it wait for the tasks it names and receive their summaries as context — scatter, then gather. A task whose dependency failed is skipped rather than run without it; cycles and self-references are rejected; tasks beyond the cap are dropped and reported in `note` rather than silently. Each sub-agent starts with a fresh history, so a prompt that leans on the parent conversation will not work — dependency summaries are the only context injected.
+
+Fan-out on step 0 is forced rather than requested. `lib/orchestrationIntent.ts` classifies the request and, when it is broad, `prepareStep` pins step 0 with `toolChoice: { type: "tool", toolName: "run_subagents" }`. A prompt asking the model to parallelise is ignored often enough to be useless. The classifier is deliberately conservative in one direction: "don't use subagents for this" and questions *about* sub-agents must not trigger a fan-out, since forcing one there is the worst possible reading of the request.
 
 ## Sessions
 
@@ -82,7 +86,26 @@ Tool definitions live under `src/modules/ai/tools/`:
 - `edit` / `multi_edit` enforce a read-before-edit invariant: the model must have read the file earlier in the session.
 - In plan mode, mutating tools queue edits for batch review instead of applying them immediately.
 
-Auto-send after approval uses `lastAssistantMessageIsCompleteWithApprovalResponses`.
+### Approval resume: nothing may follow the approval
+
+Auto-send after approval uses `lastAssistantMessageIsCompleteWithApprovalResponses`, and `streamText` executes the approved call on the next request. It finds the approval in one place only:
+
+```js
+// collect-tool-approvals.ts
+const lastMessage = messages.at(-1);
+if (lastMessage?.role != "tool") {
+  return { approvedToolApprovals: [], deniedToolApprovals: [] };
+}
+```
+
+`convertToModelMessages` turns an answered approval into a trailing `tool` message holding the response — it survives `pruneMessages` and compaction intact. But **anything appended after it silently disables the whole approval mechanism**: `streamText` finds no approvals, never runs the tool, and forwards an assistant `tool_calls` with nothing answering it. The provider then rejects the request with "An assistant message with 'tool_calls' must be followed by tool messages responding to each 'tool_call_id'" — an error that names the conversation history, not the approval, which is why it reads as a corrupted session.
+
+The `<env>` block did exactly this, and it cost three releases of fixes aimed at the sanitiser before the cause was found. `isResumingApproval` (`lib/transport.ts`) now holds the block back for that one case; an ordinary continuation still gets it, because that history already ends in a `tool` message of results.
+
+Two things follow for anyone changing this area:
+
+- Anything new that appends to the outgoing copy must check `isResumingApproval` first.
+- Do not "fix" a dangling `tool_calls` by switching to `lastAssistantMessageIsCompleteWithToolCalls`. It requires every call to reach `output-available` or `output-error`, and only `streamText` can put it there — which needs the send that condition withholds. Approving a command would hang silently instead of failing loudly.
 
 `isAutoApproved` (`lib/approvalPolicy.ts`) decides what a mode may skip. Ahead of every branch — including the `all` shortcut — sits a floor no mode delegates: `delete_file`, and any tool carrying a `command` that `deletesFiles` recognises. See [security model](security-model.md#deleting-is-never-delegated).
 

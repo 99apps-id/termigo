@@ -89,6 +89,28 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   length, entry count and total size, because everything in it costs context on
   every request. The sweep only runs in the auto-approve modes: in
   `Ask every time`, nothing is written without a click.
+- **Sub-agents run as a batch, not one after another.** A request that spans
+  several parts — build the frontend and the backend, audit four modules — is
+  split into tasks that run at the same time, each with its own fresh context,
+  and their summaries come back together. Tasks can also be chained: one that
+  declares `depends_on` waits for the others and receives what they found, so
+  "frontend and backend" can agree on a contract written by a task that ran
+  first, rather than producing two halves that do not meet. The first step of a
+  broad request is pinned to this fan-out, because a model asked politely in a
+  prompt to parallelise will ignore it; a narrow request is left alone, and
+  telling it not to use sub-agents is respected. Sub-agents are read-only, so a
+  batch can explore widely without anything being changed behind you.
+- **One reasoning block per run, not one per step.** The agent's thinking is
+  collected into a single block that scrolls, instead of a new "Reasoned" label
+  stacking up on every step and pushing the answer off screen. The tool calls it
+  produced stay visible around it, so you can still see what it actually did.
+- **Every run writes one line you can read.** The app log records, per request:
+  how long context assembly took, the prompt size broken down by what
+  contributed it, the cache hit rate, how many steps were used against the
+  budget, why the run stopped, and the model. When the agent feels slow, that
+  line says which part was slow — an MCP server starting, a large project
+  memory, a cold cache — instead of leaving you to guess. Most of the fixes in
+  recent releases were found by reading it.
 - **Steer, stop and resume a run.** Typing while the agent works queues the
   message and delivers it when the current run settles, so a correction reaches
   it instead of being dropped — attachments included. Queued messages are shown

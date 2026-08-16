@@ -44,10 +44,10 @@ This is the allow side of the file-system boundary. Any new feature that spawns 
 In `src/modules/ai/tools/tools.ts`:
 
 - Read-only tools (`read_file`, `list_directory`, `grep`, `glob`) auto-execute after passing the deny-list.
-- Mutating tools (`write_file`, `edit`, `multi_edit`, `create_directory`, `run_command`, `shell_session_run`, `shell_bg_spawn`) set `needsApproval: true`. The AI SDK pauses and surfaces a `tool-approval-request` part rendered as a confirmation card.
+- Mutating tools (`write_file`, `edit`, `multi_edit`, `create_directory`, `move_file`, `copy_file`, `delete_file`, `replace_in_files`, `bash_run`, `bash_background`) set `needsApproval: true`. The AI SDK pauses and surfaces a `tool-approval-request` part rendered as a confirmation card.
 - `edit` / `multi_edit` enforce a read-before-edit invariant: the model must have read the file earlier in the session.
 
-Auto-send after approval uses `lastAssistantMessageIsCompleteWithApprovalResponses`.
+Auto-send after approval uses `lastAssistantMessageIsCompleteWithApprovalResponses`, and the approval must be the last message when the request goes out or `streamText` never executes the call. See [AI subsystem](ai-subsystem.md#approval-resume-nothing-may-follow-the-approval).
 
 ### Deleting is never delegated
 
