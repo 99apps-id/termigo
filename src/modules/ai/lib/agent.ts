@@ -578,11 +578,28 @@ export async function runAgentStream(opts: RunAgentOptions) {
     (n, m) => n + String(m.content).length,
     0,
   );
+  // Counting name and description alone reported 11.6 KB where the real
+  // payload was nearer 33 KB, because the input schemas are the bulk of it -
+  // and an undercount in the one report meant to catch growth is worse than
+  // no number at all.
+  //
+  // MCP tools are built with `jsonSchema()`, which keeps the raw schema on
+  // `.jsonSchema`, so the third-party half - the part that arrives unbounded
+  // from someone else's server - is measured exactly. Built-in tools describe
+  // themselves with Zod, which only becomes JSON at request time; they are
+  // approximated by their description. That side is fixed and changes only
+  // when this repo changes it, which is the half that needs watching least.
   const toolBytes = JSON.stringify(
-    Object.entries(tools).map(([name, t]) => ({
-      name,
-      description: (t as { description?: string } | undefined)?.description,
-    })),
+    Object.entries(tools).map(([name, t]) => {
+      const tool = t as
+        | { description?: string; inputSchema?: { jsonSchema?: unknown } }
+        | undefined;
+      return {
+        name,
+        description: tool?.description,
+        schema: tool?.inputSchema?.jsonSchema,
+      };
+    }),
   ).length;
   const promptBytes = {
     system: Math.max(0, systemTotal - projectBytes - learnedBytes),
