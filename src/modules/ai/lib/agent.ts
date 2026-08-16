@@ -17,6 +17,7 @@ import {
   LMSTUDIO_DEFAULT_BASE_URL,
   MAX_AGENT_STEPS,
   MLX_DEFAULT_BASE_URL,
+  modelAllowsForcedToolChoice,
   modelKeepsReasoning,
   OLLAMA_DEFAULT_BASE_URL,
   providerNeedsKey,
@@ -645,8 +646,14 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // environment moved into a message of its own, the last user message is that
   // block rather than anything the user typed - reading it would test the
   // workspace path for breadth words instead of the request.
+  // Pinning is an optimisation, not a requirement: without it the model still
+  // has `run_subagents` and the prompt still describes when to use it. So a
+  // model that rejects a pinned choice loses some reliability of delegation,
+  // which is far better than losing the request.
   const forceFanout =
-    "run_subagents" in tools && wantsForcedFanout(latestUserRequest(prompt.messages));
+    "run_subagents" in tools &&
+    modelAllowsForcedToolChoice(info) &&
+    wantsForcedFanout(latestUserRequest(prompt.messages));
   const promptBytes = {
     system: Math.max(0, systemTotal - projectBytes - learnedBytes),
     project: projectBytes,

@@ -689,6 +689,23 @@ export function modelKeepsReasoning(m: ModelInfo): boolean {
   );
 }
 
+/**
+ * Whether the model accepts being told which tool to call.
+ *
+ * Reasoning models generally do not. DeepSeek answers a pinned
+ * `toolChoice: { type: "tool" }` with "Thinking mode does not support this
+ * tool_choice" and fails the whole request, which turned a broad request like
+ * "audit this repo" into an error on exactly the models most worth asking it.
+ *
+ * Kept apart from `modelKeepsReasoning` on purpose. That one is about whether
+ * reasoning survives in the history; this is about what the API accepts. They
+ * happen to agree today, and folding them together would break quietly the
+ * first time they stop agreeing.
+ */
+export function modelAllowsForcedToolChoice(m: ModelInfo): boolean {
+  return !(m.tags?.includes("reasoning") ?? false);
+}
+
 export function modelSupportsTemperature(
   provider: ProviderId,
   modelId: string,
