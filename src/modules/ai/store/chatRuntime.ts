@@ -1,7 +1,7 @@
 import { Chat, type UIMessage } from "@ai-sdk/react";
 import {
   type ChatTransport,
-  lastAssistantMessageIsCompleteWithApprovalResponses,
+  lastAssistantMessageIsCompleteWithToolCalls,
 } from "ai";
 import {
   getModel,
@@ -132,7 +132,22 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     id: sessionId,
     transport,
     messages: initialMessages,
-    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
+    // Wait for the tools to have actually run, not merely to have been
+    // approved.
+    //
+    // `lastAssistantMessageIsCompleteWithApprovalResponses` fires while a call
+    // is still `approval-responded`, because the SDK expects to receive the
+    // approval and execute the call itself. This app converts UI messages to
+    // model messages before `streamText` sees them, so by then the approval is
+    // flattened into a `tool_calls` entry with nothing answering it - and the
+    // OpenAI-compatible providers do not speak the approval protocol at all.
+    // Every approved bash command was rejected with "insufficient tool
+    // messages following tool_calls".
+    //
+    // This condition requires every call in the last step to have reached
+    // `output-available` or `output-error`, so the request carries results
+    // rather than a promise of them.
+    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
     onError: (e) => {
       useChatStore.getState().patchAgentMeta({
         status: "error",
