@@ -6,6 +6,7 @@ import {
   type LanguageModel,
   type StopCondition,
   type ToolSet,
+  type ModelMessage,
   type UIMessage,
 } from "ai";
 import {
@@ -35,6 +36,7 @@ import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
 import { prepareAgentPrompt } from "./prompt";
 import { createProxyFetch, proxyFetch } from "./proxyFetch";
 import { sanitizeUiMessages } from "./sanitizeMessages";
+import { wantsForcedFanout } from "./orchestrationIntent";
 import { useDebugStore } from "../store/debugStore";
 import { info as logInfo } from "@tauri-apps/plugin-log";
 
@@ -75,6 +77,30 @@ function shortPath(p: unknown): string {
 
 function ellipsize(s: string, max: number): string {
   return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+}
+
+/**
+ * The newest thing the user actually typed.
+ *
+ * Not simply the last user message: the environment block travels as a user
+ * turn of its own now, so the last one is `<env>…</env>` rather than a
+ * request. Walking back past any turn that is only an env block finds the
+ * message a decision should be made about.
+ */
+export function latestUserRequest(messages: readonly ModelMessage[]): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role !== "user") continue;
+    const text =
+      typeof m.content === "string"
+        ? m.content
+        : (m.content as { type: string; text?: string }[])
+            .filter((p) => p.type === "text")
+            .map((p) => p.text ?? "")
+            .join("\n");
+    if (text.replace(/<env>[\s\S]*?<\/env>/gi, " ").trim()) return text;
+  }
+  return "";
 }
 
 export type BuildModelOptions = {
@@ -609,6 +635,18 @@ export async function runAgentStream(opts: RunAgentOptions) {
     }),
   ).length;
   const toolCount = Object.keys(tools).length;
+
+  // Pin the first step to a fan-out when the request is broad enough to be
+  // worth dividing. A prompt-level mandate does not hold: models read files
+  // inline regardless of what the system prompt asks for, which is how the
+  // feature ends up present and unused.
+  //
+  // `latestUserRequest` skips the trailing env turn on purpose. Since the
+  // environment moved into a message of its own, the last user message is that
+  // block rather than anything the user typed - reading it would test the
+  // workspace path for breadth words instead of the request.
+  const forceFanout =
+    "run_subagents" in tools && wantsForcedFanout(latestUserRequest(prompt.messages));
   const promptBytes = {
     system: Math.max(0, systemTotal - projectBytes - learnedBytes),
     project: projectBytes,
@@ -658,6 +696,16 @@ export async function runAgentStream(opts: RunAgentOptions) {
     // `StopCondition<ToolSet>[]`. The predicates only touch fields common to
     // every ToolSet, so a structural cast is safe.
     stopWhen: trackingStopWhen as never,
+    // Only step 0, and only the choice - the model still decides the tasks,
+    // and every step after this one is free again so it can synthesise.
+    ...(forceFanout
+      ? {
+          prepareStep: ({ stepNumber }: { stepNumber: number }) =>
+            stepNumber === 0
+              ? { toolChoice: { type: "tool", toolName: "run_subagents" } }
+              : {},
+        }
+      : {}),
     abortSignal: opts.abortSignal,
     onStepFinish: (step) => {
       stepsSeen++;

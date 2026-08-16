@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { wantsForcedFanout } from "./orchestrationIntent";
+import { latestUserRequest } from "./agent";
 
 describe("wantsForcedFanout", () => {
   it("fires on a study verb with a breadth cue", () => {
@@ -84,5 +85,60 @@ describe("wantsForcedFanout", () => {
   it("treats an empty message as nothing to fan out", () => {
     expect(wantsForcedFanout("")).toBe(false);
     expect(wantsForcedFanout("   ")).toBe(false);
+  });
+});
+
+// The env block travels as a user turn of its own now, so the newest user
+// message is `<env>…</env>` rather than anything typed. Reading that one would
+// test the workspace path for breadth words instead of the request.
+describe("latestUserRequest", () => {
+  const user = (text: string) => ({ role: "user" as const, content: text });
+  const assistant = (text: string) => ({
+    role: "assistant" as const,
+    content: text,
+  });
+  const ENV = "<env>\nworkspace_root: C:/project/termigo\n</env>";
+
+  it("skips a trailing env turn to find the real request", () => {
+    expect(
+      latestUserRequest([user("pahami fungsi ini"), user(ENV)]),
+    ).toBe("pahami fungsi ini");
+  });
+
+  it("takes the newest request when several turns exist", () => {
+    expect(
+      latestUserRequest([
+        user("first"),
+        assistant("reply"),
+        user("second"),
+        user(ENV),
+      ]),
+    ).toBe("second");
+  });
+
+  it("reads text out of a parts array", () => {
+    expect(
+      latestUserRequest([
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "audit seluruh proyek" },
+          ] as never,
+        },
+        user(ENV),
+      ]),
+    ).toBe("audit seluruh proyek");
+  });
+
+  it("returns empty when there is nothing but env", () => {
+    expect(latestUserRequest([user(ENV)])).toBe("");
+    expect(latestUserRequest([])).toBe("");
+  });
+
+  // The two put together: a narrow request must stay narrow even though the
+  // env block right after it contains the word "project".
+  it("keeps a narrow request narrow despite the env block", () => {
+    const text = latestUserRequest([user("explain this line"), user(ENV)]);
+    expect(wantsForcedFanout(text)).toBe(false);
   });
 });
