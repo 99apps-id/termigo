@@ -28,8 +28,13 @@ import type { ToolContext } from "../tools/tools";
  * puts its overview, and drops the reference detail further down. The agent
  * can still read the file with `read_file` when it needs the rest; what it
  * loses is having all of it memorised up front.
+ *
+ * Counted in characters, not bytes: `String.length` is UTF-16 code units. The
+ * two only diverge on non-ASCII text, and this is prose about code, but the
+ * old name said bytes and the check said characters.
  */
-const TERMIGO_MD_MAX_BYTES = 10 * 1024;
+export const TERMIGO_MD_MAX_CHARS = 10 * 1024;
+
 type MemoryCacheEntry = { content: string | null; mtime: number };
 const projectMemoryCache = new Map<string, MemoryCacheEntry>();
 
@@ -59,8 +64,8 @@ function logAndFormatAiError(error: unknown): string {
  * also tells the agent the rest exists and can be read.
  */
 export function truncateProjectMemory(content: string): string {
-  if (content.length <= TERMIGO_MD_MAX_BYTES) return content;
-  const cut = content.slice(0, TERMIGO_MD_MAX_BYTES);
+  if (content.length <= TERMIGO_MD_MAX_CHARS) return content;
+  const cut = content.slice(0, TERMIGO_MD_MAX_CHARS);
   const lastBreak = cut.lastIndexOf("\n");
   // A file with no newline in the budget has nothing better to cut on.
   const body = lastBreak > 0 ? cut.slice(0, lastBreak) : cut;

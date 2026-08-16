@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 import {
   appendEnvTurn,
   isResumingApproval,
+  TERMIGO_MD_MAX_CHARS,
   truncateProjectMemory,
 } from "./transport";
 
@@ -157,5 +159,27 @@ describe("isResumingApproval", () => {
 
   it("lets an empty history have it", () => {
     expect(isResumingApproval([])).toBe(false);
+  });
+});
+
+// This repo's own TERMIGO.md is the agent's project memory, and only the first
+// TERMIGO_MD_MAX_CHARS of it are sent. It had grown to 32 KB: the cut landed at
+// line 88 of 188, so the entire AI subsystem section, the UI conventions and
+// the known gotchas were invisible to the agent while still costing every
+// reader who opened the file the impression that they were not.
+//
+// The file was restructured to fit, with the detail moved into docs/. That
+// only stays true if something checks, so this does - a doc budget is not the
+// kind of thing anyone remembers while writing a paragraph.
+describe("TERMIGO.md fits the budget the agent actually receives", () => {
+  it("is not silently truncated before it reaches the model", () => {
+    const doc = readFileSync("TERMIGO.md", "utf8");
+    expect(
+      doc.length,
+      `TERMIGO.md is ${doc.length} chars, over the ${TERMIGO_MD_MAX_CHARS} the ` +
+        "agent receives. Everything past the cut is invisible to it. Move " +
+        "detail into docs/architecture/ and leave a pointer, rather than " +
+        "raising the cap: project memory is paid on every request.",
+    ).toBeLessThanOrEqual(TERMIGO_MD_MAX_CHARS);
   });
 });
