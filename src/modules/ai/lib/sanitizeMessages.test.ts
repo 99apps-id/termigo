@@ -214,3 +214,45 @@ describe("sanitizeUiMessages: resumed sessions", () => {
     }
   });
 });
+
+// The bug this guards: the env block is appended as a user turn on every
+// request, so "is the last message an assistant turn" answered no every single
+// time. An approved call was never recognised as live, every one was reported
+// to the model as interrupted, and the model tried again - a loop that left 56
+// calls stranded in `approval-responded`, 37 of them bash_run.
+describe("sanitizeUiMessages: the trailing env turn", () => {
+  const ENV = "<env>\nworkspace_root: C:/project/termigo\n</env>";
+  const envTurn = () =>
+    ({ id: "env", role: "user", parts: [{ type: "text", text: ENV }] }) as UIMessage;
+
+  it("still recognises a live approval behind the env turn", () => {
+    const out = sanitizeUiMessages([
+      userMessage("u1"),
+      assistantMessage("a1", [toolPart("approval-responded", "call_1")]),
+      envTurn(),
+    ]);
+    const tool = (out[1].parts as Array<{ state?: string }>)[0];
+    expect(tool.state).toBe("approval-responded");
+  });
+
+  it("still closes out an approval the conversation has moved past", () => {
+    const out = sanitizeUiMessages([
+      assistantMessage("a1", [toolPart("approval-responded", "stale")]),
+      userMessage("u2"),
+      envTurn(),
+    ]);
+    expect((out[0].parts as Array<{ state?: string }>)[0].state).toBe(
+      "output-error",
+    );
+  });
+
+  it("does not treat a real request as an env turn", () => {
+    const out = sanitizeUiMessages([
+      assistantMessage("a1", [toolPart("approval-responded", "stale")]),
+      userMessage("u2"),
+    ]);
+    expect((out[0].parts as Array<{ state?: string }>)[0].state).toBe(
+      "output-error",
+    );
+  });
+});

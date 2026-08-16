@@ -56,14 +56,43 @@ function closeAsInterrupted(part: AnyPart): AnyPart {
   } as AnyPart;
 }
 
+/**
+ * Index of the newest message that is not just the appended environment turn.
+ *
+ * The env block travels as a user turn of its own, added to the outgoing copy
+ * on every request. Any decision about "what is at the end of this
+ * conversation" has to look past it, or it answers a question about the
+ * app's own bookkeeping instead of the conversation.
+ */
+function lastMeaningfulIndex(messages: readonly UIMessage[]): number {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role !== "user") return i;
+    const text = m.parts
+      .map((p) => (p as { type?: string; text?: string }))
+      .filter((p) => p.type === "text")
+      .map((p) => p.text ?? "")
+      .join("");
+    if (text.replace(/<env>[\s\S]*?<\/env>/gi, " ").trim()) return i;
+  }
+  return -1;
+}
+
 export function sanitizeUiMessages(
   messages: readonly UIMessage[],
 ): UIMessage[] {
-  const lastIdx = messages.length - 1;
   // A run continued straight after an approval ends on the assistant turn that
   // holds it. Anything earlier - or any history that has since moved on to a
   // new user message - is settled and can no longer execute.
-  const continuingRun = messages[lastIdx]?.role === "assistant";
+  //
+  // The trailing environment turn does not count. It is appended to the
+  // outgoing copy on every request, so measuring "is the last message an
+  // assistant turn" against it answered no every single time: an approved call
+  // was never recognised as live, every one was reported to the model as
+  // interrupted, and the model reasonably tried again. That loop left 56 calls
+  // stranded in `approval-responded` here, 37 of them `bash_run`.
+  const liveIdx = lastMeaningfulIndex(messages);
+  const continuingRun = liveIdx >= 0 && messages[liveIdx].role === "assistant";
 
   const out: UIMessage[] = [];
   for (let i = 0; i < messages.length; i++) {
@@ -80,7 +109,7 @@ export function sanitizeUiMessages(
       // resolve - anything we emitted would carry truncated input.
       if (state === "input-streaming") return [];
       if (!UNFINISHED.has(state)) return [part];
-      if (state === "approval-responded" && continuingRun && i === lastIdx) {
+      if (state === "approval-responded" && continuingRun && i === liveIdx) {
         return [part];
       }
       return [closeAsInterrupted(part)];
