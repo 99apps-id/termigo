@@ -55,7 +55,7 @@ Auto-executes (no approval) — subagents are read-only by design.`,
           .optional()
           .describe("Short label shown in the chat UI for the spawn card."),
       }),
-      execute: async ({ type, prompt, description }) => {
+      execute: async ({ type, prompt, description }, opts) => {
         const { apiKeys, selectedModelId, patchAgentMeta } =
           useChatStore.getState();
         try {
@@ -65,6 +65,8 @@ Auto-executes (no approval) — subagents are read-only by design.`,
             keys: apiKeys,
             modelId: selectedModelId,
             toolContext: ctx,
+            requester: description ?? type,
+            abortSignal: opts?.abortSignal,
             onStep: (label) => patchAgentMeta({ step: label }),
           });
           return {
@@ -127,7 +129,8 @@ Auto-executes: subagents are read-only.`,
             `How many may run at once. Defaults to ${MAX_CONCURRENCY}, which is also the cap.`,
           ),
       }),
-      execute: async ({ tasks, max_concurrency }) => {
+      execute: async ({ tasks, max_concurrency }, opts) => {
+        const batchSignal = opts?.abortSignal;
         const notes: string[] = [];
         let batch = tasks;
         if (batch.length > MAX_TASKS) {
@@ -197,6 +200,10 @@ Auto-executes: subagents are read-only.`,
               keys: apiKeys,
               modelId: selectedModelId,
               toolContext: ctx,
+              // Numbered, because several run at once and the approval queue
+              // is unreadable if every row says "builder".
+              requester: `${task.description ?? task.type} #${i + 1}`,
+              abortSignal: batchSignal,
               onStep: (label) =>
                 patchAgentMeta({
                   step: `${task.description ?? task.type}: ${label}`,

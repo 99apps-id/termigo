@@ -1,4 +1,9 @@
-export type SubagentType = "explore" | "code-review" | "security" | "general";
+export type SubagentType =
+  | "explore"
+  | "code-review"
+  | "security"
+  | "general"
+  | "builder";
 
 export type SubagentDef = {
   id: SubagentType;
@@ -14,6 +19,27 @@ export type SubagentDef = {
 };
 
 const READ_ONLY_TOOLS = ["read_file", "list_directory", "grep", "glob"];
+
+/**
+ * What a builder may do, and deliberately no more.
+ *
+ * `edit` and `multi_edit` match `old_string` exactly, so if a sibling builder
+ * changed the file first the edit fails loudly instead of overwriting work.
+ * `write_file` is allowed only because the runner refuses it on a path that
+ * already exists - wholesale overwrite is the one write with no such check,
+ * and four agents at once is exactly where it would lose someone's work.
+ *
+ * Absent on purpose: `delete_file` (never delegated in any mode, and a headless
+ * agent is the last place to start), `move_file` and `replace_in_files` (broad,
+ * hard to review after the fact), and anything that runs a shell.
+ */
+const BUILDER_TOOLS = [
+  ...READ_ONLY_TOOLS,
+  "write_file",
+  "create_directory",
+  "edit",
+  "multi_edit",
+];
 
 export const SUBAGENTS: Record<SubagentType, SubagentDef> = {
   explore: {
@@ -47,5 +73,20 @@ export const SUBAGENTS: Record<SubagentType, SubagentDef> = {
       "General-purpose worker for multi-step research questions that span many files.",
     tools: READ_ONLY_TOOLS,
     systemPrompt: `You are a general-purpose research subagent. Answer the spawn question by reading the codebase. Don't speculate — verify. Return a tight summary with the evidence you used (paths, line numbers).`,
+  },
+  builder: {
+    id: "builder",
+    label: "Builder",
+    description:
+      "Writes code for one self-contained piece of work. Every write asks the user first.",
+    tools: BUILDER_TOOLS,
+    systemPrompt: `You are a builder subagent. You implement ONE self-contained piece of work described in your prompt, then stop.
+
+Rules:
+- Read before you write. You have your own read history; nothing another agent read counts for you.
+- Prefer \`edit\`/\`multi_edit\` over \`write_file\`. \`write_file\` only creates new files; it will refuse a path that already exists.
+- Stay inside the files your prompt names. Other builders are working in parallel on theirs.
+- Every write waits for the user to approve it. A denial is an answer, not an error: stop and report what you did not do.
+- Return a short summary: files created or changed, and anything you could not finish.`,
   },
 };

@@ -16,6 +16,7 @@ import {
   type ModelId,
   type ProviderId,
 } from "../config";
+import { useApprovalQueue } from "./approvalQueueStore";
 import { useTodosStore } from "./todoStore";
 import type { AgentStopReason, AgentUsage } from "../lib/agent";
 import { EMPTY_PROVIDER_KEYS, type ProviderKeys, type CustomEndpointKeys } from "../lib/keyring";
@@ -59,6 +60,15 @@ export type AgentMeta = {
   status: AgentRunStatus;
   step: string | null;
   approvalsPending: number;
+  /**
+   * The approvals the main agent is waiting on, in the order they were asked.
+   *
+   * The count alone was enough while the only way to answer was clicking the
+   * card in front of you. `/approve 2` needs to name one, and the ids live in
+   * the message list, which is React-side only - so the bridge publishes them
+   * here for anything outside React to address.
+   */
+  pendingApprovals: { id: string; toolName: string; summary: string }[];
   error: string | null;
   tokens: AgentUsage;
   lastInputTokens: number;
@@ -86,6 +96,7 @@ const IDLE_META: AgentMeta = {
   status: "idle",
   step: null,
   approvalsPending: 0,
+  pendingApprovals: [],
   error: null,
   tokens: ZERO_USAGE,
   lastInputTokens: 0,
@@ -511,5 +522,10 @@ export function getChat(sessionId?: string): Chat<UIMessage> | undefined {
 export function stop(): void {
   const id = useChatStore.getState().activeSessionId;
   if (!id) return;
+  // Deny anything blocked on the user before stopping the stream. A sub-agent
+  // waiting on an approval is not reached by aborting the chat - it is waiting
+  // on a promise, and Stop has to be an answer to that question too, or the
+  // agent hangs until the app closes.
+  useApprovalQueue.getState().cancelAll();
   void chats.get(id)?.stop();
 }

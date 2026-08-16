@@ -42,6 +42,7 @@ import { AgentSwitcher } from "./AgentSwitcher";
 import { AiChatView } from "./AiChat";
 import { QueuedSteerRow } from "./QueuedSteerRow";
 import { PlanDiffReview } from "./PlanDiffReview";
+import { ApprovalQueueStrip } from "./ApprovalQueueStrip";
 import { TodoStrip } from "./TodoStrip";
 
 const SUGGESTIONS = [
@@ -216,6 +217,7 @@ function Body({
         <QueuedSteerRow />
       </div>
 
+      <ApprovalQueueStrip />
       <TodoStrip sessionId={sessionId} />
     </>
   );

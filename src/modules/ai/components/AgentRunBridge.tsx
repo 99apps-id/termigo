@@ -1,4 +1,5 @@
 import { useChat, type UIMessage } from "@ai-sdk/react";
+import { summarizeInput } from "../lib/approvalQueue";
 import { isResumingApproval } from "../lib/transport";
 import { useTodosStore } from "../store/todoStore";
 import type { ToolUIPart, UIMessagePart } from "ai";
@@ -94,16 +95,29 @@ function Bridge({
     return () => flushPersist(sessionId);
   }, [sessionId]);
 
-  const approvalsPending = useMemo(() => {
-    let n = 0;
+  // Collected rather than counted: `/approve 2` has to name one, and the ids
+  // only exist here in the message list.
+  const pendingApprovals = useMemo(() => {
+    const out: { id: string; toolName: string; summary: string }[] = [];
     for (const m of messages) {
       if (m.role !== "assistant") continue;
       for (const p of m.parts) {
-        if ((p as { state?: string }).state === "approval-requested") n++;
+        const part = p as {
+          state?: string;
+          type?: string;
+          input?: unknown;
+          approval?: { id?: string };
+        };
+        if (part.state !== "approval-requested") continue;
+        const id = part.approval?.id;
+        if (!id) continue;
+        const toolName = (part.type ?? "").replace(/^tool-/, "") || "tool";
+        out.push({ id, toolName, summary: summarizeInput(part.input) });
       }
     }
-    return n;
+    return out;
   }, [messages]);
+  const approvalsPending = pendingApprovals.length;
 
   useEffect(() => {
     let runStatus: AgentRunStatus;
@@ -115,12 +129,13 @@ function Bridge({
     patch({
       status: runStatus,
       approvalsPending,
+      pendingApprovals,
       ...(runStatus === "idle" || runStatus === "error"
         ? { step: null }
         : {}),
       ...(runStatus === "idle" ? { error: null } : {}),
     });
-  }, [status, approvalsPending, patch]);
+  }, [status, approvalsPending, pendingApprovals, patch]);
 
   // A run that stopped leaves its `in_progress` todo saying work is under way,
   // and nothing ever revisits it - this app's own store had five frozen that

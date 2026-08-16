@@ -4,6 +4,14 @@ import {
   SparklesIcon,
 } from "@hugeicons/core-free-icons";
 import { usePlanStore } from "../store/planStore";
+import { useChatStore } from "../store/chatStore";
+import { useApprovalQueue } from "../store/approvalQueueStore";
+import {
+  formatQueue,
+  parseApprovalTarget,
+  resolveTarget,
+  type PendingApproval,
+} from "./approvalQueue";
 
 /**
  * Outcome of intercepting a slash command from the composer.
@@ -49,6 +57,18 @@ export type SlashCommandMeta = {
 };
 
 export const SLASH_COMMANDS: Record<string, SlashCommandMeta> = {
+  approve: {
+    name: "approve",
+    invocation: "/approve",
+    label: "Approve waiting work",
+    icon: CheckListIcon,
+  },
+  deny: {
+    name: "deny",
+    invocation: "/deny",
+    label: "Deny waiting work",
+    icon: CheckListIcon,
+  },
   init: {
     name: "init",
     invocation: "/init",
@@ -115,7 +135,72 @@ export function tryRunSlashCommand(input: string): SlashOutcome {
         commandName: "claude-code",
       };
     }
+    case "approve":
+      return respondToWaiting(tail, true);
+    case "deny":
+      return respondToWaiting(tail, false);
     default:
       return { kind: "none" };
   }
+}
+
+/**
+ * Everything waiting on the user, main agent and sub-agents together, in one
+ * numbering.
+ *
+ * They arrive by different routes - the main agent's approvals ride the SDK
+ * message round-trip, a sub-agent's block on a promise - but the person
+ * answering should not have to know which. The main agent's come first because
+ * its work is what the sub-agents were spawned from.
+ */
+function waitingQueue(): PendingApproval[] {
+  const meta = useChatStore.getState().agentMeta;
+  const fromAgent: PendingApproval[] = meta.pendingApprovals.map((a) => ({
+    id: a.id,
+    requester: "agent",
+    toolName: a.toolName,
+    summary: a.summary,
+    requestedAt: 0,
+  }));
+  return [...fromAgent, ...useApprovalQueue.getState().pending];
+}
+
+function respondToWaiting(arg: string, approved: boolean): SlashOutcome {
+  const verb = approved ? "Approved" : "Denied";
+  const queue = waitingQueue();
+
+  if (arg.trim().toLowerCase() === "list" || arg.trim() === "?") {
+    return { kind: "handled", toast: formatQueue(queue) };
+  }
+
+  const target = parseApprovalTarget(arg);
+  if (!target) {
+    return {
+      kind: "handled",
+      toast: `Usage: /${approved ? "approve" : "deny"} [n | all | list]`,
+    };
+  }
+
+  const picked = resolveTarget(queue, target);
+  if ("error" in picked) {
+    const detail = queue.length > 1 ? `
+${formatQueue(queue)}` : "";
+    return { kind: "handled", toast: `${picked.error}${detail}` };
+  }
+
+  const ids = new Set(picked.ids);
+  const agentIds = queue
+    .filter((q) => q.requester === "agent" && ids.has(q.id))
+    .map((q) => q.id);
+  const queueIds = picked.ids.filter((id) => !agentIds.includes(id));
+
+  for (const id of agentIds) {
+    useChatStore.getState().respondToApproval(id, approved);
+  }
+  if (queueIds.length > 0) {
+    useApprovalQueue.getState().respond(queueIds, approved);
+  }
+
+  const n = agentIds.length + queueIds.length;
+  return { kind: "handled", toast: `${verb} ${n}` };
 }
