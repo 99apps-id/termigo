@@ -489,6 +489,16 @@ const RenderedMessage = memo(function RenderedMessage({
       <MessageContent>
         <div className="flex flex-col gap-3">
           {groups.map((g) => {
+            if (g.kind === "reasoning") {
+              return (
+                <PartAppear key={`${message.id}-${g.key}`}>
+                  <Reasoning>
+                    <ReasoningTrigger />
+                    <ReasoningContent>{g.text}</ReasoningContent>
+                  </Reasoning>
+                </PartAppear>
+              );
+            }
             if (g.kind === "reads") {
               return (
                 <PartAppear key={`${message.id}-${g.key}`}>
@@ -525,7 +535,8 @@ const RenderedMessage = memo(function RenderedMessage({
 
 type Group =
   | { kind: "single"; part: AnyPart; idx: number; key: string }
-  | { kind: "reads"; parts: AnyPart[]; key: string };
+  | { kind: "reads"; parts: AnyPart[]; key: string }
+  | { kind: "reasoning"; text: string; key: string };
 
 function partType(p: AnyPart): string {
   return (p as { type?: string }).type ?? "";
@@ -564,6 +575,13 @@ function buildPartGroups(parts: AnyPart[]): Group[] {
     }
     run = null;
   };
+  // Every reasoning part in the message folds into one block, shown where the
+  // first one appeared. A multi-step run emits one per step, so a five-step
+  // task stacked five "Reasoned for 2s" labels down the transcript and buried
+  // the work between them. One label for the whole run reads the way VS Code's
+  // does; the thinking itself is all still there, in order, inside it.
+  let reasoning: { text: string[]; key: string } | null = null;
+
   parts.forEach((p, i) => {
     if (isReadFilePart(p)) {
       if (!run) run = { parts: [], startIdx: i };
@@ -571,9 +589,35 @@ function buildPartGroups(parts: AnyPart[]): Group[] {
       return;
     }
     flushRun();
+    if (partType(p) === "reasoning") {
+      const text = (p as unknown as { text?: string }).text ?? "";
+      if (!reasoning) {
+        reasoning = { text: [], key: `reasoning-${partKey(p, i)}` };
+        // Placeholder in position; its text is filled in as later parts arrive.
+        out.push({ kind: "reasoning", text: "", key: reasoning.key });
+      }
+      if (text) reasoning.text.push(text);
+      return;
+    }
     out.push({ kind: "single", part: p, idx: i, key: partKey(p, i) });
   });
   flushRun();
+
+  if (reasoning) {
+    const merged = reasoning as { text: string[]; key: string };
+    const slot = out.findIndex(
+      (g) => g.kind === "reasoning" && g.key === merged.key,
+    );
+    if (slot !== -1) {
+      out[slot] = {
+        kind: "reasoning",
+        // Blank line between steps: it is several passes of thinking, not one
+        // paragraph, and running them together reads as a non sequitur.
+        text: merged.text.join("\n\n"),
+        key: merged.key,
+      };
+    }
+  }
   return out;
 }
 
