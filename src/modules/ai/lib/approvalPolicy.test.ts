@@ -3,6 +3,7 @@ import {
   APPROVAL_MODES,
   approvalTier,
   isAutoApproved,
+  subagentWriteNeedsApproval,
   type ApprovalMode,
 } from "./approvalPolicy";
 
@@ -235,5 +236,52 @@ describe("the always-ask floor", () => {
     expect(isAutoApproved("bash_run", "all", { command: "pnpm test" })).toBe(
       true,
     );
+  });
+});
+
+// Sub-agents ask through the approval queue, not the SDK protocol, so none of
+// the machinery that answers the main agent's questions reaches them. Both of
+// these gaps were found by auditing that seam rather than by anything failing.
+describe("a sub-agent write asks only when it should", () => {
+  it("asks in ask-every-time, which is the whole point of that mode", () => {
+    expect(
+      subagentWriteNeedsApproval("write_file", "ask", { planActive: false }),
+    ).toBe(true);
+  });
+
+  // The reported shape: mode set to Auto all, builders spawned, and every
+  // write stopped anyway. A blocked sub-agent looks exactly like a slow one.
+  it("does not ask under auto-approve all", () => {
+    expect(
+      subagentWriteNeedsApproval("write_file", "all", { planActive: false }),
+    ).toBe(false);
+  });
+
+  it("does not ask under auto-approve edits, since a write is an edit", () => {
+    for (const tool of ["write_file", "edit", "multi_edit", "create_directory"]) {
+      expect(
+        subagentWriteNeedsApproval(tool, "edits", { planActive: false }),
+        tool,
+      ).toBe(false);
+    }
+  });
+
+  // Plan mode does not perform the write; it queues it for the review the user
+  // is about to do. Asking would be the same edit approved twice.
+  it("does not ask in plan mode, in any approval mode", () => {
+    for (const mode of ["ask", "edits", "all"] as const) {
+      expect(
+        subagentWriteNeedsApproval("write_file", mode, { planActive: true }),
+        mode,
+      ).toBe(false);
+    }
+  });
+
+  // The floor holds here too: no mode delegates a delete, so if a delete tool
+  // were ever handed to a sub-agent it would still have to ask.
+  it("still asks for a delete under auto-approve all", () => {
+    expect(
+      subagentWriteNeedsApproval("delete_file", "all", { planActive: false }),
+    ).toBe(true);
   });
 });

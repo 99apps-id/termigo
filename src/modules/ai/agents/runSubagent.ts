@@ -7,7 +7,11 @@ import { buildFsTools } from "../tools/fs";
 import { buildSearchTools } from "../tools/search";
 import { buildEditTools } from "../tools/edit";
 import { summarizeInput } from "../lib/approvalQueue";
+import { subagentWriteNeedsApproval } from "../lib/approvalPolicy";
 import { useApprovalQueue } from "../store/approvalQueueStore";
+import { useChatStore } from "../store/chatStore";
+import { usePlanStore } from "../store/planStore";
+import { usePreferencesStore } from "@/modules/settings/preferences";
 import { native } from "../lib/native";
 import { SUBAGENTS, type SubagentType } from "./registry";
 
@@ -50,6 +54,16 @@ function gate<T extends AnyTool>(
   return {
     ...tool,
     execute: async (input: never, opts: never) => {
+      const mustAsk = subagentWriteNeedsApproval(
+        toolName,
+        usePreferencesStore.getState().agentApprovalMode,
+        {
+          planActive: usePlanStore.getState().active,
+          onRemoteHost: !!useChatStore.getState().live.getRemoteSession(),
+        },
+      );
+      if (!mustAsk) return inner(input, opts);
+
       const approved = await useApprovalQueue.getState().request(
         { requester, toolName, summary: summarizeInput(input) },
         abortSignal,

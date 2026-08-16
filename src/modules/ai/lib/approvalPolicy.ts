@@ -175,3 +175,27 @@ export function approvalTier(toolName: string): "edit" | "exec" {
   if (isMcpTool(toolName)) return "exec";
   return EDIT_TOOLS.has(toolName) ? "edit" : EXEC_TOOLS.has(toolName) ? "exec" : "exec";
 }
+
+/**
+ * Whether a sub-agent's write has to stop and ask.
+ *
+ * Sub-agents ask through the approval queue rather than the SDK's approval
+ * protocol, so none of the machinery that answers the main agent's questions
+ * reaches them. Both of these were found by auditing that gap:
+ *
+ * - The mode the user chose applies here too. It did not at first, so a run
+ *   under `Auto-approve all` stopped dead on every builder write - and since a
+ *   blocked sub-agent looks exactly like a slow one, it read as a hang rather
+ *   than as a question.
+ * - Plan mode already routes a write into the review queue instead of
+ *   performing it. Asking first would make the user approve the same edit
+ *   twice: once here, once in the plan they are about to review.
+ */
+export function subagentWriteNeedsApproval(
+  toolName: string,
+  mode: ApprovalMode,
+  ctx: { planActive: boolean; onRemoteHost?: boolean } = { planActive: false },
+): boolean {
+  if (ctx.planActive) return false;
+  return !isAutoApproved(toolName, mode, { onRemoteHost: ctx.onRemoteHost });
+}
