@@ -256,3 +256,70 @@ describe("sanitizeUiMessages: the trailing env turn", () => {
     );
   });
 });
+
+// `convertToModelMessages` emits a `tool-approval-request` for any part still
+// carrying an `approval`, and answers it only when `approval.approved` is set.
+// A call interrupted while waiting for an answer therefore produced a request
+// with no response, and the provider rejected the whole message with
+// "insufficient tool messages following tool_calls".
+describe("sanitizeUiMessages: the approval field", () => {
+  const withApproval = (state: string, id: string, approval: unknown) => ({
+    type: "tool-bash_run",
+    state,
+    toolCallId: id,
+    toolName: "bash_run",
+    input: { command: "which openclaw" },
+    approval,
+  });
+
+  it("drops a half-open approval when closing a call out", () => {
+    const out = sanitizeUiMessages([
+      userMessage("u1"),
+      assistantMessage("a1", [
+        withApproval("approval-requested", "c1", { id: "ap1" }),
+      ]),
+      userMessage("u2"),
+    ]);
+    const tool = (out[1].parts as Array<Record<string, unknown>>)[0];
+    expect(tool.state).toBe("output-error");
+    expect("approval" in tool).toBe(false);
+  });
+
+  it("drops it for an approved-but-never-run call too", () => {
+    const out = sanitizeUiMessages([
+      assistantMessage("a1", [
+        withApproval("approval-responded", "c1", { id: "ap1", approved: true }),
+      ]),
+      userMessage("u2"),
+    ]);
+    const tool = (out[0].parts as Array<Record<string, unknown>>)[0];
+    expect(tool.state).toBe("output-error");
+    expect("approval" in tool).toBe(false);
+  });
+
+  // A live approval is left completely alone: the SDK is about to execute it,
+  // and the approval conversation is what makes that work.
+  it("leaves a live approval and its field untouched", () => {
+    const out = sanitizeUiMessages([
+      userMessage("u1"),
+      assistantMessage("a1", [
+        withApproval("approval-responded", "c1", { id: "ap1", approved: true }),
+      ]),
+    ]);
+    const tool = (out[1].parts as Array<Record<string, unknown>>)[0];
+    expect(tool.state).toBe("approval-responded");
+    expect(tool.approval).toEqual({ id: "ap1", approved: true });
+  });
+
+  it("keeps everything else the call carried", () => {
+    const out = sanitizeUiMessages([
+      assistantMessage("a1", [
+        withApproval("approval-requested", "c1", { id: "ap1" }),
+      ]),
+      userMessage("u2"),
+    ]);
+    const tool = (out[0].parts as Array<Record<string, unknown>>)[0];
+    expect(tool.toolCallId).toBe("c1");
+    expect(tool.input).toEqual({ command: "which openclaw" });
+  });
+});

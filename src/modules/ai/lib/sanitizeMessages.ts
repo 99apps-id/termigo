@@ -47,10 +47,23 @@ const UNFINISHED = new Set([
   "approval-responded",
 ]);
 
-/** Turn an unfinished call into a resolved one the provider will accept. */
+/**
+ * Turn an unfinished call into a resolved one the provider will accept.
+ *
+ * The `approval` field has to go with it. `convertToModelMessages` emits a
+ * `tool-approval-request` for any part still carrying one, and answers it only
+ * when `approval.approved` is set - so a call interrupted while it was waiting
+ * for an answer produced a request with no response, and the provider rejected
+ * the whole message with "insufficient tool messages following tool_calls".
+ * Marking the call errored while leaving the approval conversation half-open
+ * described two different things at once.
+ */
 function closeAsInterrupted(part: AnyPart): AnyPart {
+  const { approval: _approval, ...rest } = part as Record<string, unknown> & {
+    approval?: unknown;
+  };
   return {
-    ...(part as Record<string, unknown>),
+    ...rest,
     state: "output-error",
     errorText: INTERRUPTED_TEXT,
   } as AnyPart;
