@@ -12,7 +12,7 @@ describe("wordWrapExtension", () => {
     expect(state.facet(EditorView.contentAttributes)).toEqual(
       expect.arrayContaining([
         { class: "cm-lineWrapping" },
-        { style: "--terax-editor-wrap-column: 80ch" },
+        { style: "--termigo-editor-wrap-column: 80ch" },
       ]),
     );
   });

@@ -576,7 +576,7 @@ function notificationTestTitle(status: NotificationTestState): string {
     case "denied":
       return "Notifications are disabled by the system";
     case "failed":
-      return "Terax could not request a native notification";
+      return "Termigo could not request a native notification";
     default:
       return "Send a native test notification after two seconds";
   }

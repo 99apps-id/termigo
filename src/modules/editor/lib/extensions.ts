@@ -23,7 +23,7 @@ export function indentExtension(unit: string): Extension {
 
 export const DEFAULT_INDENT: Extension = indentExtension("  ");
 
-const WORD_WRAP_COLUMN_VAR = "--terax-editor-wrap-column";
+const WORD_WRAP_COLUMN_VAR = "--termigo-editor-wrap-column";
 const WORD_WRAP_COLUMN_THEME = EditorView.theme({
   ".cm-content.cm-lineWrapping": {
     maxWidth: `var(${WORD_WRAP_COLUMN_VAR})`,
