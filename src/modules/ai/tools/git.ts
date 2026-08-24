@@ -63,6 +63,16 @@ export function gitPullCommand(): string {
   return "git pull --ff-only";
 }
 
+export function gitStashCommand(message: string | undefined): string {
+  const msg = (message ?? "").trim();
+  if (!msg) return "git stash push";
+  return `git stash push -m ${quoteShellArg(msg)}`;
+}
+
+export function gitStashPopCommand(): string {
+  return "git stash pop";
+}
+
 export function gitLogCommand(limit: number): string {
   const n = Math.max(1, Math.min(200, Math.floor(limit)));
   return `git log --oneline -n ${n}`;
@@ -490,6 +500,84 @@ export function buildGitTools(ctx: ToolContext) {
             cwd,
           );
           const r = await native.shellSessionRun(shellId, command, cwd, 180);
+          return {
+            command,
+            stdout: r.stdout,
+            stderr: r.stderr,
+            exit_code: r.exit_code,
+          };
+        } catch (e) {
+          return { error: String(e) };
+        }
+      },
+    }),
+
+    git_stash: tool({
+      description:
+        "Park the current working-tree changes in a stash (without committing), keeping the tree clean. Use before a speculative change you may want to abandon. Untracked files are not stashed. Requires approval.",
+      inputSchema: z.object({
+        message: z
+          .string()
+          .optional()
+          .describe("Short label for the stash. Defaults to an empty label."),
+      }),
+      needsApproval: true,
+      execute: async ({ message }) => {
+        if (ctx.getRemoteSession()) {
+          return remoteUnsupported(
+            "git_stash",
+            "Use bash_run with `git stash` on the remote host.",
+          );
+        }
+        const sid = ctx.getSessionId();
+        if (!sid) return { error: "no active chat session" };
+        const cwd = repoRootFor(ctx.getWorkspaceRoot(), ctx.getCwd());
+        const command = gitStashCommand(message);
+        const safety = checkShellCommand(command);
+        if (!safety.ok) return { error: safety.reason };
+        try {
+          const shellId = await getSessionShell(
+            sessionShellKey("git", sid, ctx.getWorkspaceRoot()),
+            cwd,
+          );
+          const r = await native.shellSessionRun(shellId, command, cwd, 120);
+          return {
+            command,
+            stashed: message ?? "unnamed",
+            stdout: r.stdout,
+            stderr: r.stderr,
+            exit_code: r.exit_code,
+          };
+        } catch (e) {
+          return { error: String(e) };
+        }
+      },
+    }),
+
+    git_stash_pop: tool({
+      description:
+        "Restore the most recent stash and drop it from the list. Use after git_stash to get your parked changes back. Requires approval.",
+      inputSchema: z.object({}),
+      needsApproval: true,
+      execute: async () => {
+        if (ctx.getRemoteSession()) {
+          return remoteUnsupported(
+            "git_stash_pop",
+            "Use bash_run with `git stash pop` on the remote host.",
+          );
+        }
+        const sid = ctx.getSessionId();
+        if (!sid) return { error: "no active chat session" };
+        const cwd = repoRootFor(ctx.getWorkspaceRoot(), ctx.getCwd());
+        const command = gitStashPopCommand();
+        const safety = checkShellCommand(command);
+        if (!safety.ok) return { error: safety.reason };
+        try {
+          const shellId = await getSessionShell(
+            sessionShellKey("git", sid, ctx.getWorkspaceRoot()),
+            cwd,
+          );
+          const r = await native.shellSessionRun(shellId, command, cwd, 120);
           return {
             command,
             stdout: r.stdout,

@@ -4,6 +4,8 @@ import {
   gitLogCommand,
   gitPullCommand,
   gitPushCommand,
+  gitStashCommand,
+  gitStashPopCommand,
   gitStatusCommand,
   revertCommand,
   validBranch,
@@ -52,5 +54,13 @@ describe("git command builders", () => {
 
   it("builds a fast-forward pull command", () => {
     expect(gitPullCommand()).toBe("git pull --ff-only");
+  });
+
+  it("builds stash push/pop commands", () => {
+    expect(gitStashCommand(undefined)).toBe("git stash push");
+    expect(gitStashCommand("wip: auth")).toBe(
+      "git stash push -m 'wip: auth'",
+    );
+    expect(gitStashPopCommand()).toBe("git stash pop");
   });
 });
