@@ -75,7 +75,7 @@ function Row({
   );
 }
 
-function RunSummary({ run }: { run: RunDiagnostics }) {
+export function RunSummary({ run }: { run: RunDiagnostics }) {
   const stoppedAt = run.stopReason ?? (run.finishReason || "done");
   return (
     <div className="space-y-1">

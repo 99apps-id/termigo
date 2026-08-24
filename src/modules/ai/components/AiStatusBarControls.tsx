@@ -11,8 +11,7 @@ import { fmtShortcut, MOD_KEY } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import { ApprovalModeControl } from "./ApprovalModeControl";
-import { DebugRequestsDialog } from "./DebugRequestsDialog";
-import { RunDiagnosticsDialog } from "./RunDiagnosticsDialog";
+import { AgentDiagnosticsDialog } from "./AgentDiagnosticsDialog";
 import { ChangeReviewDialog } from "./ChangeReviewDialog";
 import {
   Add01Icon,
@@ -104,8 +103,6 @@ export function AiOpenButton({ onOpen }: { onOpen: () => void }) {
 export function AiStatusBarControls() {
   const c = useComposer();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const debugCaptureEnabled = usePreferencesStore((s) => s.debugCaptureEnabled);
-  const [debugOpen, setDebugOpen] = useState(false);
   const [diagOpen, setDiagOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const toggleMini = useChatStore((s) => s.toggleMini);
@@ -128,27 +125,14 @@ export function AiStatusBarControls() {
 
       <ApprovalModeControl className="mr-0.5" />
 
-      {/* Only offered while capturing is on, so an inspector with nothing to
-          inspect never takes up space in the bar. */}
-      {debugCaptureEnabled && (
-        <>
-          <IconBtn
-            title="Inspect requests sent to the provider"
-            onClick={() => setDebugOpen(true)}
-          >
-            <HugeiconsIcon icon={InspectCodeIcon} size={13} strokeWidth={2} />
-          </IconBtn>
-          <DebugRequestsDialog open={debugOpen} onOpenChange={setDebugOpen} />
-        </>
-      )}
-
+      {/* One surface for run metrics, the request inspector, and context state. */}
       <IconBtn
-        title="Why was the last run slow?"
+        title="Agent diagnostics (run / requests / context)"
         onClick={() => setDiagOpen(true)}
       >
-        <HugeiconsIcon icon={Clock01Icon} size={13} strokeWidth={2} />
+        <HugeiconsIcon icon={InspectCodeIcon} size={13} strokeWidth={2} />
       </IconBtn>
-      <RunDiagnosticsDialog open={diagOpen} onOpenChange={setDiagOpen} />
+      <AgentDiagnosticsDialog open={diagOpen} onOpenChange={setDiagOpen} />
 
       <IconBtn
         title="Review changes in the working tree"
