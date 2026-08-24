@@ -13,6 +13,7 @@ import {
   type AgentRunStatus,
 } from "../store/chatStore";
 import { getOrCreateChat } from "../store/chatRuntime";
+import { usePreferencesStore } from "@/modules/settings/preferences";
 
 /**
  * Headless bridge that mirrors chat lifecycle into the store, so the status
@@ -70,6 +71,8 @@ function Bridge({
   const openMini = useChatStore((s) => s.openMini);
   const persistMessages = useChatStore((s) => s.persistMessages);
   const setApprovalResponder = useChatStore((s) => s.setApprovalResponder);
+  const runStatus = useChatStore((s) => s.agentMeta.status);
+  const reviewAfterApply = usePreferencesStore((s) => s.agentReviewAfterApply);
 
   // Expose the approval responder so the diff tab can resolve approvals.
   // We keep it in a ref-stable closure so identity is stable per render.
@@ -163,10 +166,31 @@ function Bridge({
   // open duplicates. Reset when the session changes.
   const openedRef = useRef<Set<string>>(new Set());
   const fileMutationFingerprintRef = useRef<string>("");
+  // Diff tabs opened this run, closed when the run settles when
+  // `reviewAfterApply` is on (the applied edit stays visible to review).
+  const runOpenRef = useRef<Set<string>>(new Set());
+  const wasBusyRef = useRef(false);
   useEffect(() => {
     openedRef.current = new Set();
     fileMutationFingerprintRef.current = "";
+    runOpenRef.current = new Set();
+    wasBusyRef.current = false;
   }, [sessionId]);
+
+  // Close the review tabs when the run settles. A new source of truth is that
+  // the tab stays open after the write so the user can check what changed,
+  // rather than flashing closed the moment the approval is answered.
+  useEffect(() => {
+    const busy = runStatus !== "idle";
+    if (wasBusyRef.current && !busy) {
+      for (const id of runOpenRef.current) {
+        closeAiDiffTab(id);
+        openedRef.current.delete(id);
+      }
+      runOpenRef.current = new Set();
+    }
+    wasBusyRef.current = busy;
+  }, [runStatus, closeAiDiffTab]);
 
   // Cheap fingerprint of file-mutation tool parts only. The diff-tab effect
   // is the most expensive thing on the streaming path, so we skip it when
@@ -228,7 +252,13 @@ function Bridge({
           state === "output-available" ||
           state === "output-error"
         ) {
-          if (openedRef.current.has(approvalId)) toClose.add(approvalId);
+          if (!openedRef.current.has(approvalId)) continue;
+          if (state === "output-error" || !reviewAfterApply) {
+            // Failed write, or review-after-apply off: close immediately.
+            toClose.add(approvalId);
+            runOpenRef.current.delete(approvalId);
+          }
+          // Else keep the tab open; runOpenRef holds it for the settle effect.
         }
       }
     }
@@ -247,6 +277,8 @@ function Bridge({
         if (cancelled) return;
         // Mark as opened up-front so a re-render mid-await doesn't double-open.
         openedRef.current.add(p.approvalId);
+        // Track for close-on-settle under review-after-apply.
+        runOpenRef.current.add(p.approvalId);
         let abs: string;
         try {
           abs = resolvePath(p.path, cwd);
@@ -280,7 +312,7 @@ function Bridge({
     return () => {
       cancelled = true;
     };
-  }, [messages, fileMutationFingerprint, openAiDiffTab, closeAiDiffTab]);
+  }, [messages, fileMutationFingerprint, openAiDiffTab, closeAiDiffTab, reviewAfterApply]);
 
   return null;
 }

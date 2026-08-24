@@ -18,17 +18,21 @@ import {
 } from "../config";
 import { useApprovalQueue } from "./approvalQueueStore";
 import { useTodosStore } from "./todoStore";
-import type { AgentStopReason, AgentUsage } from "../lib/agent";
+import type { AgentStopReason, AgentUsage, RunDiagnostics } from "../lib/agent";
 import { EMPTY_PROVIDER_KEYS, type ProviderKeys, type CustomEndpointKeys } from "../lib/keyring";
 import {
+  deleteRunMeta,
   deleteSessionData,
   deriveTitle,
   loadAll,
   loadMessages,
+  loadRunMeta,
   newSessionId,
   saveActiveId,
   saveMessages,
+  saveRunMeta,
   saveSessionsList,
+  type RunMeta,
   type SessionMeta,
 } from "../lib/sessions";
 import { pushRecentModel } from "../lib/modelPrefs";
@@ -169,11 +173,22 @@ type StoreState = {
   patchAgentMeta: (patch: Partial<AgentMeta>) => void;
   resetAgentMeta: () => void;
 
+  /** Performance summary of the last finished run, for the on-screen view. */
+  lastRun: RunDiagnostics | null;
+  setLastRun: (r: RunDiagnostics | null) => void;
+
   /** Text typed while a run was in flight, waiting for it to end. */
   steerQueue: SteerQueue;
   queueSteer: (message: SteerMessage) => void;
   cancelSteer: (index: number) => void;
   clearSteer: () => void;
+
+  /**
+   * Persist the active session's run state so the transcript can offer
+   * "Continue" after an app restart. Persists when a run ended stopped or hit
+   * a guard; clears it when a run starts fresh.
+   */
+  syncRunMeta: () => void;
 
   // Sessions
   sessionsHydrated: boolean;
@@ -244,6 +259,15 @@ export function flushPersist(id?: string): void {
     return;
   }
   for (const key of Array.from(pendingPersist.keys())) flushPersistEntry(key);
+}
+
+function runMetaToMetaPatch(meta: RunMeta | null): Partial<AgentMeta> | null {
+  if (!meta) return null;
+  return {
+    runRound: meta.runRound,
+    stopReason: (meta.stopReason as AgentStopReason | null) ?? null,
+    stoppedByUser: meta.stoppedByUser,
+  };
 }
 
 export const useChatStore = create<StoreState>((set, get) => ({
@@ -318,12 +342,33 @@ export const useChatStore = create<StoreState>((set, get) => ({
     set((s) => ({ agentMeta: { ...s.agentMeta, ...patch } })),
   resetAgentMeta: () => set({ agentMeta: IDLE_META }),
 
+  lastRun: null,
+  setLastRun: (r) => set({ lastRun: r }),
+
   steerQueue: EMPTY_QUEUE,
   queueSteer: (message) =>
     set((s) => ({ steerQueue: enqueue(s.steerQueue, message) })),
   cancelSteer: (index) =>
     set((s) => ({ steerQueue: removeSteer(s.steerQueue, index) })),
   clearSteer: () => set({ steerQueue: EMPTY_QUEUE }),
+
+  syncRunMeta: () => {
+    const { activeSessionId, agentMeta } = get();
+    const id = activeSessionId;
+    if (!id) return;
+    const interrupted =
+      agentMeta.stopReason !== null || agentMeta.stoppedByUser;
+    if (interrupted) {
+      void saveRunMeta(id, {
+        runRound: agentMeta.runRound,
+        stopReason: agentMeta.stopReason,
+        stoppedByUser: agentMeta.stoppedByUser,
+        at: Date.now(),
+      });
+    } else {
+      void deleteRunMeta(id);
+    }
+  },
 
   sessionsHydrated: false,
   sessions: [],
@@ -360,6 +405,12 @@ export const useChatStore = create<StoreState>((set, get) => ({
       activeSessionId: freshId,
       sessionsHydrated: true,
     });
+    // Restore an interrupted run so the active chat can offer "Continue"
+    // after the app was closed mid-run.
+    void loadRunMeta(freshId).then((meta) => {
+      const patch = runMetaToMetaPatch(meta);
+      if (patch) useChatStore.getState().patchAgentMeta(patch);
+    });
   },
 
   newSession: () => {
@@ -388,6 +439,14 @@ export const useChatStore = create<StoreState>((set, get) => ({
     const flip = () => {
       set({ activeSessionId: id, agentMeta: IDLE_META });
       void saveActiveId(id);
+      // Restore an interrupted run for the switched-to session so it can offer
+      // "Continue". Guard on still-active so a fast double switch cannot apply
+      // the first session's meta to the second.
+      void loadRunMeta(id).then((meta) => {
+        if (useChatStore.getState().activeSessionId !== id) return;
+        const patch = runMetaToMetaPatch(meta);
+        if (patch) useChatStore.getState().patchAgentMeta(patch);
+      });
     };
     if (chats.has(id) || seedMessages.has(id)) {
       flip();

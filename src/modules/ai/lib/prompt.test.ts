@@ -36,12 +36,12 @@ describe("prepareAgentPrompt", () => {
     );
 
     expect(prompt.system[0].providerOptions).toEqual({
-      anthropic: { cacheControl: { type: "ephemeral" } },
+      anthropic: { cacheControl: { type: "ephemeral", ttl: "1h" } },
     });
     expect(prompt.system[1].providerOptions).toBeUndefined();
     expect(prompt.messages[0].providerOptions).toBeUndefined();
     expect(prompt.messages[1].providerOptions).toEqual({
-      anthropic: { cacheControl: { type: "ephemeral" } },
+      anthropic: { cacheControl: { type: "ephemeral", ttl: "1h" } },
     });
     expect(history.every((message) => message.providerOptions == null)).toBe(
       true,

@@ -9,9 +9,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 use termigo_control_protocol::{
-    CallerContext, ControlDescriptor, ControlRequest, ControlResponse, OpenParams,
-    MAX_MESSAGE_BYTES, METHOD_CAPABILITIES, METHOD_IDENTIFY, METHOD_OPEN, METHOD_PING,
-    PROTOCOL_VERSION, SERVER_RESPONSE_ID,
+    CallerContext, ControlDescriptor, ControlRequest, ControlResponse, FocusParams, OpenParams,
+    MAX_MESSAGE_BYTES, METHOD_CAPABILITIES, METHOD_FOCUS, METHOD_IDENTIFY, METHOD_OPEN,
+    METHOD_PING, METHOD_STATUS, PROTOCOL_VERSION, SERVER_RESPONSE_ID,
 };
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
@@ -131,7 +131,9 @@ fn parse_args(mut args: Vec<OsString>) -> Result<Config, CliError> {
         Some("--version" | "-V" | "version") => no_extra_args(args, Action::Version)?,
         Some("ping") => request_without_params(args, METHOD_PING)?,
         Some("capabilities") => request_without_params(args, METHOD_CAPABILITIES)?,
+        Some("status") => request_without_params(args, METHOD_STATUS)?,
         Some("identify") => request_without_params(args, METHOD_IDENTIFY)?,
+        Some("focus") => parse_focus(args)?,
         Some("open") => parse_open(args)?,
         Some("--") => {
             args.insert(0, command);
@@ -184,7 +186,7 @@ fn unknown_command_error(command: &OsString) -> CliError {
     let mut message = format!(
         "unknown command '{name}'\n\n\
          This is the Termigo control CLI. It supports: open, ping, capabilities, \
-         identify, version, help.\n\
+         status, identify, focus, version, help.\n\
          Run 'termigo help' for usage, or pass a file path to open it."
     );
     if COMPANION_COMMANDS.contains(&name.as_ref()) {
@@ -193,7 +195,7 @@ fn unknown_command_error(command: &OsString) -> CliError {
              Build it with:  cd cli && go build -o termi-go ./cmd/termigo\n\
              Then run:       termi-go {name} --help\n\n\
              This binary controls a running Termigo window: open, ping, capabilities, \
-             identify, version, help."
+             status, identify, focus, version, help."
         );
     }
     usage_error(message)
@@ -307,6 +309,42 @@ fn parse_open(args: Vec<OsString>) -> Result<Action, CliError> {
     })?;
     Ok(Action::Request {
         method: METHOD_OPEN,
+        params,
+    })
+}
+
+fn parse_focus(args: Vec<OsString>) -> Result<Action, CliError> {
+    let mut query: Option<OsString> = None;
+    let mut options = true;
+    for arg in args {
+        match arg.to_str() {
+            Some("--") if options => options = false,
+            Some(value) if options && value.starts_with('-') => {
+                return Err(usage_error(format!("unknown focus option '{value}'")));
+            }
+            _ if query.is_none() => query = Some(arg.clone()),
+            _ => return Err(usage_error("focus accepts exactly one query string")),
+        }
+    }
+    let query = query
+        .ok_or_else(|| usage_error("focus requires a query (a tab title, path or label)"))?
+        .into_string()
+        .map_err(|_| {
+            CliError::new(
+                "non_utf8_query",
+                "Termigo cannot focus a non-UTF-8 query",
+                EXIT_USAGE,
+            )
+        })?;
+    let params = serde_json::to_value(FocusParams { query }).map_err(|error| {
+        CliError::new(
+            "serialization_error",
+            format!("could not encode focus request: {error}"),
+            EXIT_PROTOCOL,
+        )
+    })?;
+    Ok(Action::Request {
+        method: METHOD_FOCUS,
         params,
     })
 }
@@ -561,6 +599,22 @@ fn print_result(method: &str, result: Value, as_json: bool) {
                 }
             }
         }
+        METHOD_STATUS => {
+            let os = result.get("os").and_then(Value::as_str).unwrap_or("unknown");
+            let arch = result.get("arch").and_then(Value::as_str).unwrap_or("unknown");
+            let version = result
+                .get("app_version")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
+            println!("Termigo {version} ({os}/{arch})");
+        }
+        METHOD_FOCUS => {
+            let path = result
+                .get("label")
+                .and_then(Value::as_str)
+                .unwrap_or("tab");
+            println!("Focused '{path}' in Termigo");
+        }
         METHOD_IDENTIFY => {
             let space = result
                 .get("space_id")
@@ -592,7 +646,7 @@ fn print_result(method: &str, result: Value, as_json: bool) {
 fn print_help() {
     println!(
         "Termigo command line interface\n\n\
-Usage:\n  termigo <file> [--line <n>] [--no-focus] [--json]\n  termigo open <file> [--line <n>] [--no-focus] [--json]\n  termigo ping [--json]\n  termigo capabilities [--json]\n  termigo identify [--json]\n  termigo --version\n\n\
+Usage:\n  termigo <file> [--line <n>] [--no-focus] [--json]\n  termigo open <file> [--line <n>] [--no-focus] [--json]\n  termigo ping [--json]\n  termigo capabilities [--json]\n  termigo status [--json]\n  termigo identify [--json]\n  termigo focus <query> [--json]\n  termigo --version\n\n\
 The app must be running. Commands launched in a Termigo pane target that pane's space."
     );
 }
@@ -653,6 +707,36 @@ mod tests {
                 params: json!({}),
             }
         );
+    }
+
+    #[test]
+    fn parses_status_and_focus_commands() {
+        let status = parse_args(args(&["status"])).expect("parse status");
+        assert_eq!(
+            status.action,
+            Action::Request {
+                method: METHOD_STATUS,
+                params: json!({}),
+            }
+        );
+
+        let focus = parse_args(args(&["focus", "src/App.tsx", "--json"])).expect("parse focus");
+        assert!(focus.json);
+        assert_eq!(
+            focus.action,
+            Action::Request {
+                method: METHOD_FOCUS,
+                params: json!({ "query": "src/App.tsx" }),
+            }
+        );
+    }
+
+    #[test]
+    fn focus_rejects_missing_or_extra_query() {
+        let error = parse_args(args(&["focus"])).expect_err("missing query");
+        assert_eq!(error.code, "usage");
+        let error = parse_args(args(&["focus", "a", "b"])).expect_err("extra query");
+        assert_eq!(error.code, "usage");
     }
 
     #[test]

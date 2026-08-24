@@ -37,12 +37,12 @@ type BatchResult = {
 export function buildSubagentTools(ctx: ToolContext) {
   return {
     run_subagent: tool({
-      description: `Spawn an isolated subagent with its own restricted toolset and a fresh message history. Use when you need to delegate a self-contained read-only investigation (large search, code review, security audit) without polluting your own context. The subagent returns a single text summary; pick a 'type' that matches its job.
+      description: `Spawn an isolated subagent with its own restricted toolset and a fresh message history. Use when you need to delegate a self-contained investigation (large search, code review, security audit) without polluting your own context, or a single self-contained code change to a \`builder\`. The subagent returns a single text summary; pick a 'type' that matches its job.
 
 Types:
 ${TYPE_KEYS.map((k) => `- ${k}: ${SUBAGENTS[k].description}`).join("\n")}
 
-Auto-executes (no approval) — subagents are read-only by design.`,
+Auto-executes (no approval) for the read-only types (explore, code-review, security, general). The \`builder\` type can write, but every write goes through the user's approval queue and \`write_file\` refuses an existing path — so delegation here never silently mutates the workspace.`,
       inputSchema: z.object({
         type: z.enum(TYPE_KEYS),
         prompt: z
@@ -95,7 +95,7 @@ At most ${MAX_TASKS} tasks per call; extras are dropped and reported in \`note\`
 
 Use this for anything spanning more than one file — studying, exploring, reviewing or auditing a codebase — rather than reading files one at a time.
 
-Auto-executes: subagents are read-only.`,
+Auto-executes for the read-only types (explore, code-review, security, general). A \`builder\` task can write, but each write asks the user first via the approval queue, and \`write_file\` refuses a path that already exists — so a batch of builders never silently overwrites the workspace.`,
       inputSchema: z.object({
         tasks: z
           .array(

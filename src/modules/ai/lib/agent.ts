@@ -453,6 +453,34 @@ const EMPTY_USAGE: AgentUsage = {
   cachedInputTokens: 0,
 };
 
+/**
+ * The per-run performance summary, surfaced on screen so "why is it slow" has
+ * an answer without reading the app log. Mirrors the run-log line but as
+ * structured data the UI can render.
+ */
+export type RunDiagnostics = {
+  contextMs: number;
+  promptBytes: {
+    system: number;
+    project: number;
+    learned: number;
+    tools: number;
+    total: number;
+  };
+  toolCount: number;
+  tokens: { input: number; output: number; cached: number };
+  cachePct: number;
+  steps: number;
+  stepBudget: number;
+  stopReason: AgentStopReason | null;
+  finishReason: string;
+  modelId: string;
+  provider: string;
+  contextLimit: number;
+  compactedAway: number | null;
+  at: number;
+};
+
 export type RunAgentOptions = {
   keys: ProviderKeys;
   modelId?: string;
@@ -468,6 +496,8 @@ export type RunAgentOptions = {
   onFinishMeta?: (info: {
     stopReason: AgentStopReason | null;
     finishReason: string;
+    /** Per-run performance summary for the on-screen diagnostics view. */
+    metrics: RunDiagnostics;
   }) => void;
   /** Loop budget for this round. Defaults to the first tier; the caller raises
    *  it on each Continue so a long task deepens instead of stalling. */
@@ -772,7 +802,30 @@ export async function runAgentStream(opts: RunAgentOptions) {
       // for a run that plainly ran out of budget.
       const settledStop =
         stopReason ?? (stepsSeen >= stepBudget ? "step-cap" : null);
-      opts.onFinishMeta?.({ stopReason: settledStop, finishReason });
+      const kb = (n: number) => (n / 1024).toFixed(1);
+      const cachePct =
+        runInput > 0 ? Math.round((runCached / runInput) * 100) : 0;
+      const metrics: RunDiagnostics = {
+        contextMs: Math.round(opts.contextMs ?? 0),
+        promptBytes,
+        toolCount,
+        tokens: {
+          input: runInput,
+          output: runOutput,
+          cached: runCached,
+        },
+        cachePct,
+        steps: stepsSeen,
+        stepBudget,
+        stopReason: settledStop,
+        finishReason,
+        modelId,
+        provider,
+        contextLimit: getModelContextLimit(modelId, compatCtxOverride),
+        compactedAway: compact.compacted ? compact.droppedCount : null,
+        at: Date.now(),
+      };
+      opts.onFinishMeta?.({ stopReason: settledStop, finishReason, metrics });
 
       // One line per run, in the app log rather than only on screen.
       //
@@ -785,9 +838,6 @@ export async function runAgentStream(opts: RunAgentOptions) {
       // The composition is the part that prevents a repeat. A feature that
       // adds ten kilobytes to every request shows up here the day it lands,
       // instead of six months later as a feeling.
-      const kb = (n: number) => (n / 1024).toFixed(1);
-      const cachePct =
-        runInput > 0 ? Math.round((runCached / runInput) * 100) : 0;
       void logInfo(
         `run: context ${Math.round(opts.contextMs ?? 0)}ms | ` +
           `prompt ${kb(promptBytes.total)}KB ` +

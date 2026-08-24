@@ -7,12 +7,16 @@ pub const METHOD_PING: &str = "ping";
 pub const METHOD_CAPABILITIES: &str = "capabilities";
 pub const METHOD_IDENTIFY: &str = "identify";
 pub const METHOD_OPEN: &str = "open";
+pub const METHOD_FOCUS: &str = "focus";
+pub const METHOD_STATUS: &str = "status";
 pub const SERVER_RESPONSE_ID: &str = "server";
 pub const METHODS: &[&str] = &[
     METHOD_PING,
     METHOD_CAPABILITIES,
     METHOD_IDENTIFY,
     METHOD_OPEN,
+    METHOD_FOCUS,
+    METHOD_STATUS,
 ];
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -122,6 +126,13 @@ pub struct OpenParams {
     pub focus: bool,
 }
 
+/// Focus the workspace on a tab. `query` is a substring of the tab's title,
+/// path or label; the frontend picks the best match.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct FocusParams {
+    pub query: String,
+}
+
 fn default_focus() -> bool {
     true
 }
@@ -163,5 +174,14 @@ mod tests {
         let params: OpenParams =
             serde_json::from_value(json!({ "path": "/tmp/a" })).expect("deserialize open params");
         assert!(params.focus);
+    }
+
+    #[test]
+    fn focus_requires_a_query() {
+        let params: FocusParams =
+            serde_json::from_value(json!({ "query": "src/App.tsx" })).expect("deserialize focus");
+        assert_eq!(params.query, "src/App.tsx");
+        assert!(METHODS.contains(&METHOD_FOCUS));
+        assert!(METHODS.contains(&METHOD_STATUS));
     }
 }

@@ -12,6 +12,10 @@ import { buildSubagentTools } from "./subagent";
 import { buildTerminalTools } from "./terminal";
 import { buildMemoryTools } from "./memory";
 import { buildTodoTools } from "./todo";
+import { buildVerifyTools } from "./verify";
+import { buildGitTools } from "./git";
+import { buildHarnessTools } from "./harness";
+import { buildReviewTools } from "./review";
 
 export { resolvePath, type ToolContext } from "./context";
 
@@ -49,6 +53,10 @@ export function buildTools(ctx: import("./context").ToolContext) {
     ...buildTodoTools(ctx),
     ...buildMemoryTools(ctx),
     ...buildManagedAgentTools(ctx),
+    ...buildVerifyTools(ctx),
+    ...buildGitTools(ctx),
+    ...buildHarnessTools(ctx),
+    ...buildReviewTools(ctx),
   } as const;
 
   // Skill tools last, and told what the others are called: the dependency

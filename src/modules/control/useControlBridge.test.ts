@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseOpenRequest } from "./useControlBridge";
+import { parseFocusRequest, parseOpenRequest } from "./useControlBridge";
 
 describe("parseOpenRequest", () => {
   it("defaults focus only when it is absent", () => {
@@ -17,4 +17,22 @@ describe("parseOpenRequest", () => {
       );
     },
   );
+});
+
+describe("parseFocusRequest", () => {
+  it("requires a non-empty query", () => {
+    expect(parseFocusRequest({ query: "src/App.tsx" })).toEqual({
+      query: "src/App.tsx",
+    });
+    expect(() => parseFocusRequest({ query: "" })).toThrow(
+      "focus query is required",
+    );
+    expect(() => parseFocusRequest({ query: "   " })).toThrow(
+      "focus query is required",
+    );
+    expect(() => parseFocusRequest(null)).toThrow(
+      "focus parameters are required",
+    );
+    expect(() => parseFocusRequest({})).toThrow("focus query is required");
+  });
 });

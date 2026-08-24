@@ -13,7 +13,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -119,6 +121,18 @@ func Run(ctx context.Context, providerID string, options RunOptions, out, errOut
 	}
 	if strings.TrimSpace(options.Prompt) == "" {
 		return errors.New("prompt must not be empty")
+	}
+	// A typo in --workspace must not silently run the provider CLI in the
+	// wrong directory. The provider trusts this as its project root; refusing a
+	// non-existent path beats an agent that edits somewhere unexpected.
+	if options.Workspace != "" {
+		if !filepath.IsAbs(options.Workspace) {
+			return errors.New("workspace must be an absolute path")
+		}
+		info, statErr := os.Stat(options.Workspace)
+		if statErr != nil || !info.IsDir() {
+			return fmt.Errorf("workspace %q is not a directory", options.Workspace)
+		}
 	}
 	if provider.Local {
 		return runOllama(ctx, options, out)

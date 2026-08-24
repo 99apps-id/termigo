@@ -25,7 +25,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: asset: https://asset.localhost http://asset.localhost blob:; media-src 'self' asset: https://asset.localhost http://asset.localhost blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost https: http://localhost:* http://127.0.0.1:*; frame-src 'self' http: https: asset: https://asset.localhost; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'",
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: asset: https://asset.localhost http://asset.localhost blob:; media-src 'self' asset: https://asset.localhost http://asset.localhost blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost https: http://localhost:* http://127.0.0.1:*; frame-src 'self' https: http://localhost:* http://127.0.0.1:* http://[::1]:* asset: https://asset.localhost; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'",
       "assetProtocol": {
         "enable": true,
         "scope": []
@@ -38,7 +38,7 @@
       "binaries/termigo-cli"
     ],
     "targets": "all",
-    "createUpdaterArtifacts": false,
+    "createUpdaterArtifacts": true,
     "copyright": "Copyright 2026 99apps-id (fork of Terax by Crynta)",
     "license": "Apache-2.0",
     "publisher": "99apps-id",
@@ -158,7 +158,7 @@
   },
   "plugins": {
     "updater": {
-      "active": false,
+      "active": true,
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDNCQUJGRDhBQjYwRTM0NjkKUldScE5BNjJpdjJyT3dIN0dqbUpHaDA4QW1GaDVmTTllRXdZVk96dFNTRUZ3Y2hiVGszYjFqRloK",
       "endpoints": [
         "https://github.com/99apps-id/termigo/releases/latest/download/latest.json"

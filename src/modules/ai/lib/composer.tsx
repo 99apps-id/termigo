@@ -325,6 +325,8 @@ export function AiComposerProvider({ children }: ProviderProps) {
       compactionNotice: null,
       memoryNotice: null,
     });
+    // A fresh task has nothing to resume, so drop the persisted run marker.
+    store.syncRunMeta();
     if (!store.mini.open) store.openMini();
     void (async () => {
       const { sendParts } = await import("../store/chatRuntime");

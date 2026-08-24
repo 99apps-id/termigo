@@ -11,9 +11,10 @@ use std::time::{Duration, SystemTime};
 use serde_json::{json, Value};
 use tauri::{Emitter, Manager};
 use termigo_control_protocol::{
-    ControlDescriptor, ControlRequest, ControlResponse, FrontendRequest, FrontendResponse,
-    OpenParams, MAX_MESSAGE_BYTES, METHODS, METHOD_CAPABILITIES, METHOD_IDENTIFY, METHOD_OPEN,
-    METHOD_PING, PROTOCOL_VERSION, SERVER_RESPONSE_ID,
+    ControlDescriptor, ControlRequest, ControlResponse, FocusParams, FrontendRequest,
+    FrontendResponse, OpenParams, MAX_MESSAGE_BYTES, METHODS, METHOD_CAPABILITIES, METHOD_FOCUS,
+    METHOD_IDENTIFY, METHOD_OPEN, METHOD_PING, METHOD_STATUS, PROTOCOL_VERSION,
+    SERVER_RESPONSE_ID,
 };
 
 use crate::modules::{fs, workspace};
@@ -338,7 +339,33 @@ fn route_request(
                 "methods": METHODS,
             }),
         ),
+        METHOD_STATUS => ControlResponse::success(
+            request.id,
+            json!({
+                "app_version": env!("CARGO_PKG_VERSION"),
+                "protocol": PROTOCOL_VERSION,
+                "os": std::env::consts::OS,
+                "arch": std::env::consts::ARCH,
+                "methods": METHODS,
+            }),
+        ),
         METHOD_IDENTIFY => forward_to_frontend(request, app, state),
+        METHOD_FOCUS => {
+            let params: FocusParams = match serde_json::from_value(request.params.clone()) {
+                Ok(params) => params,
+                Err(error) => {
+                    return ControlResponse::failure(
+                        request.id,
+                        "invalid_params",
+                        format!("invalid focus parameters: {error}"),
+                    );
+                }
+            };
+            if let Ok(serialized) = serde_json::to_value(params) {
+                request.params = serialized;
+            }
+            forward_to_frontend(request, app, state)
+        }
         METHOD_OPEN => {
             let params: OpenParams = match serde_json::from_value(request.params.clone()) {
                 Ok(params) => params,

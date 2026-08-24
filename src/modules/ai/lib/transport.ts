@@ -9,6 +9,7 @@ import {
   runAgentStream,
   type AgentStopReason,
   type AgentUsageDelta,
+  type RunDiagnostics,
 } from "./agent";
 import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
 import { formatAiError } from "./errors";
@@ -125,6 +126,7 @@ type Deps = {
   onFinishMeta?: (info: {
     stopReason: AgentStopReason | null;
     finishReason: string;
+    metrics: RunDiagnostics;
   }) => void;
   getPlanMode?: () => boolean;
   getStepBudget?: () => number;

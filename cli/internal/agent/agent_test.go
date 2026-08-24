@@ -1,11 +1,29 @@
 package agent
 
 import (
+	"context"
+	"io"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/99apps-id/termigo/cli/internal/config"
 )
+
+// A typo in --workspace must not silently run the provider in the wrong
+// directory; both a relative path and a missing directory are rejected before
+// any process is spawned.
+func TestRunRejectsBadWorkspace(t *testing.T) {
+	err := Run(context.Background(), "codex", RunOptions{Workspace: "relative/path", Prompt: "hi"}, io.Discard, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "absolute") {
+		t.Fatalf("expected absolute-path error, got: %v", err)
+	}
+
+	err = Run(context.Background(), "codex", RunOptions{Workspace: t.TempDir() + "/missing", Prompt: "hi"}, io.Discard, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "not a directory") {
+		t.Fatalf("expected not-a-directory error, got: %v", err)
+	}
+}
 
 func TestDetectWithoutProvidersIsGraceful(t *testing.T) {
 	// Test environments rarely have codex/claude/gemini installed; the

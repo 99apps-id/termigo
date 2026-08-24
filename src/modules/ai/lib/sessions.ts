@@ -12,8 +12,21 @@ const STORE_PATH = "termigo-ai-sessions.json";
 const KEY_SESSIONS = "sessions";
 const KEY_ACTIVE = "activeId";
 const messagesKey = (id: string) => `messages:${id}`;
+const runMetaKey = (id: string) => `runMeta:${id}`;
 
 const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
+
+/**
+ * Where the active session's run was left off, persisted so the app can offer
+ * "Continue" after a restart. `stopReason` and `stoppedByUser` mirror
+ * `agentMeta`; `runRound` keeps the budget ladder where a Continue left it.
+ */
+export type RunMeta = {
+  runRound: number;
+  stopReason: string | null;
+  stoppedByUser: boolean;
+  at: number;
+};
 
 export type LoadedSessions = {
   sessions: SessionMeta[];
@@ -55,6 +68,18 @@ export async function saveMessages(
 
 export async function deleteSessionData(id: string): Promise<void> {
   await store.delete(messagesKey(id));
+}
+
+export async function saveRunMeta(id: string, meta: RunMeta): Promise<void> {
+  await store.set(runMetaKey(id), meta);
+}
+
+export async function loadRunMeta(id: string): Promise<RunMeta | null> {
+  return (await store.get<RunMeta>(runMetaKey(id))) ?? null;
+}
+
+export async function deleteRunMeta(id: string): Promise<void> {
+  await store.delete(runMetaKey(id));
 }
 
 export function newSessionId(): string {

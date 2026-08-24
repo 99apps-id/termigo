@@ -110,6 +110,8 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     },
     onFinishMeta: (info) => {
       useChatStore.getState().patchAgentMeta({ stopReason: info.stopReason });
+      useChatStore.getState().setLastRun(info.metrics);
+      useChatStore.getState().syncRunMeta();
     },
     onUsage: (delta) => {
       const cur = useChatStore.getState().agentMeta.tokens;
@@ -255,6 +257,7 @@ export async function stopRun(): Promise<void> {
   // Remembered so the transcript can offer "Continue" after a stop, the same
   // way it does after the step cap. Without it a stop is a dead end.
   useChatStore.getState().patchAgentMeta({ stoppedByUser: true });
+  useChatStore.getState().syncRunMeta();
   // The stop leaves `status` settled, so the queued text sends as a fresh turn
   // rather than piling onto the run that was just abandoned.
   await flushSteer();

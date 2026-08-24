@@ -11,7 +11,9 @@ termigo <file> [--line <n>] [--no-focus] [--json]
 termigo open <file> [--line <n>] [--no-focus] [--json]
 termigo ping [--json]
 termigo capabilities [--json]
+termigo status [--json]
 termigo identify [--json]
+termigo focus <query> [--json]
 ```
 
 The app must already be running. A command launched inside a Termigo pane targets that pane's space, even if another space or tab has UI focus. An external client without pane context falls back to the active UI context.

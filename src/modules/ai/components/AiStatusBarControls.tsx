@@ -12,6 +12,8 @@ import { cn } from "@/lib/utils";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import { ApprovalModeControl } from "./ApprovalModeControl";
 import { DebugRequestsDialog } from "./DebugRequestsDialog";
+import { RunDiagnosticsDialog } from "./RunDiagnosticsDialog";
+import { ChangeReviewDialog } from "./ChangeReviewDialog";
 import {
   Add01Icon,
   AiBookIcon,
@@ -27,6 +29,7 @@ import {
   CpuIcon,
   DeepseekIcon,
   FavouriteIcon,
+  FileDiffIcon,
   FlashIcon,
   GlobeIcon,
   GoogleGeminiIcon,
@@ -103,6 +106,8 @@ export function AiStatusBarControls() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const debugCaptureEnabled = usePreferencesStore((s) => s.debugCaptureEnabled);
   const [debugOpen, setDebugOpen] = useState(false);
+  const [diagOpen, setDiagOpen] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
   const toggleMini = useChatStore((s) => s.toggleMini);
   const miniOpen = useChatStore((s) => s.mini.open);
   const closePanel = useChatStore((s) => s.closePanel);
@@ -136,6 +141,22 @@ export function AiStatusBarControls() {
           <DebugRequestsDialog open={debugOpen} onOpenChange={setDebugOpen} />
         </>
       )}
+
+      <IconBtn
+        title="Why was the last run slow?"
+        onClick={() => setDiagOpen(true)}
+      >
+        <HugeiconsIcon icon={Clock01Icon} size={13} strokeWidth={2} />
+      </IconBtn>
+      <RunDiagnosticsDialog open={diagOpen} onOpenChange={setDiagOpen} />
+
+      <IconBtn
+        title="Review changes in the working tree"
+        onClick={() => setReviewOpen(true)}
+      >
+        <HugeiconsIcon icon={FileDiffIcon} size={13} strokeWidth={2} />
+      </IconBtn>
+      <ChangeReviewDialog open={reviewOpen} onOpenChange={setReviewOpen} />
 
       <IconBtn
         title="Attach file or image"

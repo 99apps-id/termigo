@@ -29,6 +29,7 @@ import {
 } from "@/modules/ai/store/snippetsStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
+  setAgentReviewAfterApply,
   setCustomInstructions,
   setDebugCaptureEnabled,
 } from "@/modules/settings/store";
@@ -56,6 +57,9 @@ export function AgentsSection() {
   const customInstructions = usePreferencesStore((s) => s.customInstructions);
   const debugCaptureEnabled = usePreferencesStore(
     (s) => s.debugCaptureEnabled,
+  );
+  const agentReviewAfterApply = usePreferencesStore(
+    (s) => s.agentReviewAfterApply,
   );
   const customAgents = useAgentsStore((s) => s.customAgents);
   const activeAgentId = useAgentsStore((s) => s.activeId);
@@ -95,6 +99,15 @@ export function AgentsSection() {
           <Switch
             checked={debugCaptureEnabled}
             onCheckedChange={(v) => void setDebugCaptureEnabled(v)}
+          />
+        </SettingRow>
+        <SettingRow
+          title="Review edits after applying"
+          description="Keep the AI diff tab open after a file edit is applied so you can review what changed, and close it when the run finishes. Turn off for the previous behavior (the tab closes once you approve)."
+        >
+          <Switch
+            checked={agentReviewAfterApply}
+            onCheckedChange={(v) => void setAgentReviewAfterApply(v)}
           />
         </SettingRow>
       </section>

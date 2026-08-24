@@ -32,12 +32,20 @@ type OpenRequest = {
   focus: boolean;
 };
 
+type FocusRequest = {
+  query: string;
+};
+
 type UseControlBridgeOptions = {
   ready: boolean;
   tabsRef: RefObject<Tab[]>;
   activeTabIdRef: RefObject<number>;
   activeSpaceIdRef: RefObject<string | null>;
   onOpen: (request: OpenRequest & { spaceId: string }) => number | null;
+  onFocus: (request: FocusRequest & { spaceId: string }) => {
+    ok: boolean;
+    label?: string;
+  };
 };
 
 class RequestError extends Error {
@@ -79,6 +87,17 @@ export function parseOpenRequest(params: unknown): OpenRequest {
   };
 }
 
+export function parseFocusRequest(params: unknown): FocusRequest {
+  if (typeof params !== "object" || params === null) {
+    throw new RequestError("invalid_params", "focus parameters are required");
+  }
+  const value = params as Record<string, unknown>;
+  if (typeof value.query !== "string" || value.query.trim().length === 0) {
+    throw new RequestError("invalid_params", "focus query is required");
+  }
+  return { query: value.query };
+}
+
 const setFrontendReady = createReadinessQueue((ready) =>
   invoke("control_frontend_ready", { ready }),
 );
@@ -102,6 +121,7 @@ export function useControlBridge({
   activeTabIdRef,
   activeSpaceIdRef,
   onOpen,
+  onFocus,
 }: UseControlBridgeOptions): void {
   useEffect(() => {
     if (!ready) return;
@@ -118,6 +138,25 @@ export function useControlBridge({
         );
         if (request.method === "identify") {
           await respond(request.id, { ok: true, result: context });
+          return;
+        }
+        if (request.method === "focus") {
+          const focus = parseFocusRequest(request.params);
+          const focused = onFocus({ query: focus.query, spaceId: context.space_id });
+          if (!focused.ok) {
+            throw new RequestError(
+              "focus_failed",
+              `no tab matched the query '${focus.query}'`,
+            );
+          }
+          await respond(request.id, {
+            ok: true,
+            result: {
+              query: focus.query,
+              space_id: context.space_id,
+              label: focused.label ?? null,
+            },
+          });
           return;
         }
         if (request.method === "open") {

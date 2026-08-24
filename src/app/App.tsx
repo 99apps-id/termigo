@@ -86,7 +86,9 @@ import {
   useTabs,
   useWindowTitle,
   useWorkspaceCwd,
+  type Tab,
 } from "@/modules/tabs";
+import { labelFor } from "@/modules/tabs/lib/tabLabel";
 import { DEFAULT_SPACE_ID } from "@/modules/tabs/lib/useTabs";
 import {
   clearFocusedTerminal,
@@ -1357,12 +1359,55 @@ ${found.foundAt}`
     [openFileTab],
   );
 
+  const focusControlTab = useCallback(
+    (target: { query: string; spaceId: string }): {
+      ok: boolean;
+      label?: string;
+    } => {
+      const q = target.query.trim().toLowerCase();
+      if (!q) return { ok: false };
+      const tabs = tabsRef.current ?? [];
+      // Prefer tabs already in the caller's space, then fall back to any.
+      const inSpace = tabs.filter((t) => t.spaceId === target.spaceId);
+      const pool = inSpace.length > 0 ? inSpace : tabs;
+      const score = (t: Tab): number => {
+        const label = labelFor(t).toLowerCase();
+        const path = "path" in t ? ((t.path as string) ?? "").toLowerCase() : "";
+        const cwd =
+          "cwd" in t ? ((t.cwd as string | undefined) ?? "").toLowerCase() : "";
+        if (label === q || path === q) return 0;
+        if (label.startsWith(q) || path.startsWith(q) || cwd.startsWith(q)) {
+          return 1;
+        }
+        if (label.includes(q) || path.includes(q) || cwd.includes(q)) return 2;
+        return -1;
+      };
+      let best: Tab | null = null;
+      let bestScore = Infinity;
+      for (const t of pool) {
+        const s = score(t);
+        if (s >= 0 && s < bestScore) {
+          bestScore = s;
+          best = t;
+        }
+      }
+      if (!best) return { ok: false };
+      if (useSpaces.getState().activeId !== best.spaceId) {
+        useSpaces.getState().setActive(best.spaceId);
+      }
+      setActiveId(best.id);
+      return { ok: true, label: labelFor(best) };
+    },
+    [setActiveId],
+  );
+
   useControlBridge({
     ready: spacesHydrated && launchCwdResolved,
     tabsRef,
     activeTabIdRef: activeIdRef,
     activeSpaceIdRef,
     onOpen: openControlFile,
+    onFocus: focusControlTab,
   });
 
   useEffect(() => {
