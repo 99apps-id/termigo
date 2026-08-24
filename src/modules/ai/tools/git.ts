@@ -59,6 +59,10 @@ export function gitPushCommand(): string {
   return "git push";
 }
 
+export function gitPullCommand(): string {
+  return "git pull --ff-only";
+}
+
 export function gitLogCommand(limit: number): string {
   const n = Math.max(1, Math.min(200, Math.floor(limit)));
   return `git log --oneline -n ${n}`;
@@ -450,6 +454,42 @@ export function buildGitTools(ctx: ToolContext) {
             cwd,
           );
           const r = await native.shellSessionRun(shellId, command, cwd, 60);
+          return {
+            command,
+            stdout: r.stdout,
+            stderr: r.stderr,
+            exit_code: r.exit_code,
+          };
+        } catch (e) {
+          return { error: String(e) };
+        }
+      },
+    }),
+
+    git_pull: tool({
+      description:
+        "Pull the latest commits from the upstream (fast-forward only). Use before starting work so the branch is up to date. Requires approval.",
+      inputSchema: z.object({}),
+      needsApproval: true,
+      execute: async () => {
+        if (ctx.getRemoteSession()) {
+          return remoteUnsupported(
+            "git_pull",
+            "Use bash_run with `git pull --ff-only` on the remote host.",
+          );
+        }
+        const sid = ctx.getSessionId();
+        if (!sid) return { error: "no active chat session" };
+        const cwd = repoRootFor(ctx.getWorkspaceRoot(), ctx.getCwd());
+        const command = gitPullCommand();
+        const safety = checkShellCommand(command);
+        if (!safety.ok) return { error: safety.reason };
+        try {
+          const shellId = await getSessionShell(
+            sessionShellKey("git", sid, ctx.getWorkspaceRoot()),
+            cwd,
+          );
+          const r = await native.shellSessionRun(shellId, command, cwd, 180);
           return {
             command,
             stdout: r.stdout,

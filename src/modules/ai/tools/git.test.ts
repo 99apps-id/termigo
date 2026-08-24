@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   gitDiffCommand,
   gitLogCommand,
+  gitPullCommand,
   gitPushCommand,
   gitStatusCommand,
   revertCommand,
@@ -47,5 +48,9 @@ describe("git command builders", () => {
     // Clamps an out-of-range limit.
     expect(gitLogCommand(999)).toBe("git log --oneline -n 200");
     expect(gitLogCommand(0)).toBe("git log --oneline -n 1");
+  });
+
+  it("builds a fast-forward pull command", () => {
+    expect(gitPullCommand()).toBe("git pull --ff-only");
   });
 });
