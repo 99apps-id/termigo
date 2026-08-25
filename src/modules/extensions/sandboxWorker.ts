@@ -20,7 +20,7 @@ let idSeq = 1;
 const pending = new Map<number, Pending>();
 const toolHandlers = new Map<string, Handler>();
 const commandHandlers = new Map<string, Handler>();
-const panelHandlers = new Map<string, () => void>();
+const panelHandlers = new Map<string, (fields: Record<string, string>) => void>();
 const listeners = new Map<string, ((payload: unknown) => void)[]>();
 
 function send(msg: WorkerMessage): void {
@@ -116,7 +116,7 @@ function buildCtx(id: string): Record<string, unknown> {
       toggle: (panelId: string) => call({ kind: "panel:toggle", panelId }),
       setView: (panelId: string, html: string, events: string[] = []) =>
         call({ kind: "ui:mountPanel", panelId, html, events }),
-      on: (event: string, handler: () => void) => {
+      on: (event: string, handler: (fields: Record<string, string>) => void) => {
         panelHandlers.set(event, handler);
       },
     },
@@ -187,9 +187,10 @@ async function handle(msg: HostMessage): Promise<void> {
     }
     case "ui:event": {
       // Host-managed panel click. The host rendered our HTML and routed an
-      // element's `data-ext-event` here; run the bound handler.
+      // element's `data-ext-event` here (with its `data-ext-field` values);
+      // run the bound handler.
       const fn = panelHandlers.get(msg.event);
-      if (fn) void fn();
+      if (fn) void fn(msg.fields ?? {});
       break;
     }
     case "deactivate":

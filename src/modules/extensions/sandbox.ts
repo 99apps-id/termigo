@@ -50,7 +50,7 @@ export type HostMessage =
   | { type: "invoke_tool"; name: string; args: Record<string, unknown>; callId: number }
   | { type: "invoke_command"; id: string; args: unknown[]; callId: number }
   | { type: "event"; channel: string; payload: unknown }
-  | { type: "ui:event"; panelId: string; event: string }
+  | { type: "ui:event"; panelId: string; event: string; fields?: Record<string, string> }
   | { type: "deactivate" };
 
 /** Outbound message from the worker to the host for calls the host initiated. */

@@ -31,7 +31,12 @@ type BridgeHooks = {
 async function buildExecutor(
   ext: ExtensionRuntime,
   hooks: BridgeHooks,
-  postToWorker: (msg: { type: "ui:event"; panelId: string; event: string }) => void,
+  postToWorker: (msg: {
+    type: "ui:event";
+    panelId: string;
+    event: string;
+    fields?: Record<string, string>;
+  }) => void,
 ): Promise<SandboxExecutor> {
   const store = new LazyStore(STORAGE_FILE(ext.id), { defaults: {}, autoSave: 200 });
   const log = (level: "info" | "warn" | "error", args: unknown[]): void => {
@@ -111,7 +116,21 @@ async function buildExecutor(
         const handler = (e: Event): void => {
           const target = e.target as HTMLElement | null;
           const ev = target?.getAttribute?.("data-ext-event");
-          if (ev) postToWorker({ type: "ui:event", panelId, event: ev });
+          if (!ev) return;
+          // Send the clicked element's `data-ext-field` values back too, so the
+          // worker can read the current value of an input without touching the
+          // host DOM.
+          const fields: Record<string, string> = {};
+          container
+            .querySelectorAll<HTMLElement>("[data-ext-field]")
+            .forEach((el) => {
+              const name = el.getAttribute("data-ext-field");
+              if (name) {
+                const input = el as HTMLInputElement;
+                fields[name] = input.value ?? el.textContent ?? "";
+              }
+            });
+          postToWorker({ type: "ui:event", panelId, event: ev, fields });
         };
         container.addEventListener("click", handler);
         return () => {
