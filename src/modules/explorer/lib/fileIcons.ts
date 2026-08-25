@@ -2654,28 +2654,14 @@ const fileIcons: FileIcons = {
   },
 };
 
-const { languageIds, fileExtensions, fileNames } = Object.entries(
-  fileIcons,
-).reduce(
-  ({ languageIds, fileExtensions, fileNames }, [name, icon]) => ({
-    languageIds: {
-      ...languageIds,
-      ...icon.languageIds?.reduce((a, c) => ({ ...a, [c]: name }), {}),
-    },
-    fileExtensions: {
-      ...fileExtensions,
-      ...icon.fileExtensions?.reduce((a, c) => ({ ...a, [c]: name }), {}),
-    },
-    fileNames: {
-      ...fileNames,
-      ...icon.fileNames?.reduce((a, c) => ({ ...a, [c]: name }), {}),
-    },
-  }),
-  {
-    languageIds: {},
-    fileExtensions: {},
-    fileNames: {},
-  },
-);
+const languageIds: Record<string, string> = {};
+const fileExtensions: Record<string, string> = {};
+const fileNames: Record<string, string> = {};
+
+for (const [name, icon] of Object.entries(fileIcons)) {
+  for (const id of icon.languageIds ?? []) languageIds[id] = name;
+  for (const ext of icon.fileExtensions ?? []) fileExtensions[ext] = name;
+  for (const fileName of icon.fileNames ?? []) fileNames[fileName] = name;
+}
 
 export { fileExtensions, fileIcons, fileNames, languageIds };

@@ -30,7 +30,7 @@ export function diagnosticsReporter(getPath: () => string): Extension {
       return;
     }
     const total = diagnosticCount(update.state);
-    let items: DiagnosticItem[] = [];
+    const items: DiagnosticItem[] = [];
     if (total > 0) {
       const seen = new Set<Diagnostic>();
       forEachDiagnostic(update.state, (d, from) => {

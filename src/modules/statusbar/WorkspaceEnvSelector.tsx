@@ -19,8 +19,6 @@ type Props = {
 };
 
 export function WorkspaceEnvSelector({ onSelect }: Props) {
-  if (!IS_WINDOWS) return null;
-
   const env = useWorkspaceEnvStore((s) => s.env);
   const distros = useWorkspaceEnvStore((s) => s.distros);
   const loading = useWorkspaceEnvStore((s) => s.loading);
@@ -32,6 +30,9 @@ export function WorkspaceEnvSelector({ onSelect }: Props) {
       void refreshDistros();
     }
   };
+
+  // Hooks above; early return after so the hook order never varies between renders.
+  if (!IS_WINDOWS) return null;
 
   const label = env.kind === "wsl" ? `WSL: ${env.distro}` : "Windows";
 

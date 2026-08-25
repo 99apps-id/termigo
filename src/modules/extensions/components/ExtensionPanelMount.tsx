@@ -50,6 +50,7 @@ export function ExtensionPanelMount({
     if (!renderer) return;
     const el = containerRef.current;
     if (!el) return;
+    // biome-ignore lint/suspicious/noConfusingVoidType: cleanup is a function or nothing
     let cleanup: (() => void) | void;
     try {
       cleanup = renderer(el, { surface, reuseKey });

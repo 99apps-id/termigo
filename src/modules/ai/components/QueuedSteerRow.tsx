@@ -20,6 +20,7 @@ export function QueuedSteerRow() {
         <div
           // Index is the identity here: the queue is an ordered buffer with no
           // stable ids, and cancel addresses a position.
+          // biome-ignore lint/suspicious/noArrayIndexKey: ordered buffer, index is the identity
           key={`${i}-${m.preview}`}
           className="flex items-center gap-1.5 rounded-md border border-border/60 bg-muted/40 px-2 py-1 text-[11px] text-muted-foreground"
         >

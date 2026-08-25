@@ -125,7 +125,7 @@ export function buildFsTools(ctx: ToolContext) {
   return {
     read_file: tool({
       description:
-        "Read a UTF-8 text file. Defaults to the first 2000 lines (capped at 25KB). Pass `offset`/`limit` for line-based windowing of large files. Refuses binary, oversized, or sensitive files (.env, keys, credentials). If you call this on the same path twice in a session without edits in between, the second call returns `unchanged: true` instead of re-emitting the content — re-read the prior tool result. When the active terminal is an SSH session, paths resolve on the remote host (POSIX) and reads go over SFTP; Windows drive paths (C:\...) still read locally.",
+        "Read a UTF-8 text file. Defaults to the first 2000 lines (capped at 25KB). Pass `offset`/`limit` for line-based windowing of large files. Refuses binary, oversized, or sensitive files (.env, keys, credentials). If you call this on the same path twice in a session without edits in between, the second call returns `unchanged: true` instead of re-emitting the content — re-read the prior tool result. When the active terminal is an SSH session, paths resolve on the remote host (POSIX) and reads go over SFTP; Windows drive paths (C:...) still read locally.",
       inputSchema: z.object({
         path: z
           .string()
@@ -203,7 +203,7 @@ export function buildFsTools(ctx: ToolContext) {
 
     list_directory: tool({
       description:
-        "List immediate entries (files + directories) in a directory. Hidden entries are omitted. When the active terminal is an SSH session, the directory is listed on the remote host over SFTP (POSIX paths); Windows drive paths (C:\...) still list locally.",
+        "List immediate entries (files + directories) in a directory. Hidden entries are omitted. When the active terminal is an SSH session, the directory is listed on the remote host over SFTP (POSIX paths); Windows drive paths (C:...) still list locally.",
       inputSchema: z.object({
         path: z
           .string()

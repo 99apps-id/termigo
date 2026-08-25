@@ -135,6 +135,7 @@ const ContextChips = memo(function ContextChips({
     <div className="mb-1 flex flex-wrap gap-1">
       {chips.map((c, i) => (
         <span
+          // biome-ignore lint/suspicious/noArrayIndexKey: context chips are a positional, fixed-order list
           key={i}
           className="inline-flex items-center gap-1 rounded-md border border-border/50 bg-card/60 px-1.5 py-0.5 text-[10.5px] text-muted-foreground"
         >
@@ -572,15 +573,16 @@ function buildPartGroups(parts: AnyPart[]): Group[] {
   let run: { parts: AnyPart[]; startIdx: number } | null = null;
   const flushRun = () => {
     if (!run) return;
-    if (run.parts.length >= 2) {
+    const { parts: runParts, startIdx } = run;
+    if (runParts.length >= 2) {
       out.push({
         kind: "reads",
-        parts: run.parts,
-        key: `reads-${partKey(run.parts[0], run.startIdx)}`,
+        parts: runParts,
+        key: `reads-${partKey(runParts[0], startIdx)}`,
       });
     } else {
-      run.parts.forEach((p, k) => {
-        const idx = run!.startIdx + k;
+      runParts.forEach((p, k) => {
+        const idx = startIdx + k;
         out.push({ kind: "single", part: p, idx, key: partKey(p, idx) });
       });
     }

@@ -74,9 +74,11 @@ async function applyEdits(
       // Recover count via direct search to avoid divide-by-zero edge cases.
       let n = 0;
       let i = 0;
-      while ((i = before.indexOf(e.old_string, i)) !== -1) {
+      while (true) {
+        const found = before.indexOf(e.old_string, i);
+        if (found === -1) break;
         n++;
-        i += e.old_string.length;
+        i = found + e.old_string.length;
       }
       if (n === 0) {
         return {

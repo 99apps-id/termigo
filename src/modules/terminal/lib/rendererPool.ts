@@ -423,7 +423,11 @@ function pickSlotFor(leafId: number): PickResult {
       best = s;
     }
   }
-  const chosen = best!;
+  if (!best) {
+    // Unreachable: the early returns above guarantee a candidate exists.
+    return { slot: createSlot(), previousLeafId: null };
+  }
+  const chosen = best;
   return { slot: chosen, previousLeafId: chosen.currentLeafId };
 }
 

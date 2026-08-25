@@ -887,7 +887,7 @@ function CommitDetail({
                 size={11}
                 strokeWidth={1.9}
               />
-              {hostLabel(remoteWeb!)}
+              {remoteWeb ? hostLabel(remoteWeb) : ""}
             </Button>
           ) : null}
         </div>

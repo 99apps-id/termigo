@@ -669,24 +669,25 @@ export async function runAgentStream(opts: RunAgentOptions) {
     },
   ];
 
+  const hooksConfig = opts.hooksConfig;
   const tools = {
     ...(opts.mcpTools ?? {}),
     ...(opts.extensionTools ?? {}),
     ...(opts.customTools ?? {}),
     ...buildTools({
       ...opts.toolContext,
-      firePreToolHook: opts.hooksConfig
+      firePreToolHook: hooksConfig
         ? async (toolName, args) => {
-            await fireHooksForEvent(opts.hooksConfig!, "PreToolUse", toolName, { args }, {
+            await fireHooksForEvent(hooksConfig, "PreToolUse", toolName, { args }, {
               getWorkspaceRoot: opts.toolContext.getWorkspaceRoot,
               getCwd: opts.toolContext.getCwd,
               makeRunId: () => opts.runId ?? makeRunId(opts.toolContext.getSessionId()),
             });
           }
         : undefined,
-      firePostToolHook: opts.hooksConfig
+      firePostToolHook: hooksConfig
         ? async (toolName, args, result) => {
-            await fireHooksForEvent(opts.hooksConfig!, "PostToolUse", toolName, { args, result }, {
+            await fireHooksForEvent(hooksConfig, "PostToolUse", toolName, { args, result }, {
               getWorkspaceRoot: opts.toolContext.getWorkspaceRoot,
               getCwd: opts.toolContext.getCwd,
               makeRunId: () => opts.runId ?? makeRunId(opts.toolContext.getSessionId()),

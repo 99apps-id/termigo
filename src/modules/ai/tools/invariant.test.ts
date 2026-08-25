@@ -20,6 +20,7 @@ describe("invariant tools", () => {
 
     await pinExec(
       { fact: "Always use pnpm, never npm", category: "constraint" },
+      // biome-ignore lint/suspicious/noExplicitAny: tool ctx is built by the harness, empty is enough here
       {} as any,
     );
 
@@ -32,6 +33,7 @@ describe("invariant tools", () => {
     if (!unpinExec) throw new Error("unpin_invariant execute missing");
 
     const firstId = getPinnedInvariants()[0].id;
+    // biome-ignore lint/suspicious/noExplicitAny: tool ctx is built by the harness, empty is enough here
     await unpinExec({ id: firstId }, {} as any);
     expect(getPinnedInvariants()).toHaveLength(0);
     expect(formatInvariantsBlock()).toBe("");

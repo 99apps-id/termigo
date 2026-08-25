@@ -85,6 +85,7 @@ Tool definitions live under `src/modules/ai/tools/`:
 - Mutating tools (`write_file`, `edit`, `multi_edit`, `create_directory`, `bash_run`, `bash_background`) set `needsApproval: true`. The AI SDK pauses and the UI renders an approval card.
 - `edit` / `multi_edit` enforce a read-before-edit invariant: the model must have read the file earlier in the session.
 - In plan mode, mutating tools queue edits for batch review instead of applying them immediately.
+- Pending approvals can be answered in a batch. `lib/approvalQueue.ts` accepts a comma/range list (`1,3` or `2,4-6`); `parseApprovalTarget` resolves it against the queued items. The `delete_file` floor still applies in every mode (see [security model](security-model.md#deleting-is-never-delegated)).
 
 ### Approval resume: nothing may follow the approval
 
@@ -137,6 +138,14 @@ AI-proposed file edits open in an `ai-diff` tab. The user accepts or rejects per
 ## Live context bridge
 
 `App.tsx` calls `setLive({ getCwd, getTerminalContext, … })` so tools can read the currently active terminal's cwd and the last 300 lines of buffer. It is lazy by design - tools call for it only when needed rather than pre-snapshotting every turn.
+
+## Context meter
+
+`components/ContextMeter.tsx` (mounted in `AiStatusBarControls`) shows the live input token count against the model's context limit (`getModelContextLimit`). The fill bar turns amber above 70% and red above 90%, so the user sees when compaction is about to trigger.
+
+## Scheduled runs
+
+`lib/scheduler.ts` lets the user queue an agent prompt to run on a schedule. The pure helpers (`parseScheduleWhen`, `computeNextDueAt`, `dueTasks`) are unit-tested; `startScheduler`/`stopScheduler` run a 15-second tick that lazily imports `chatStore`, `sessionDirectiveStore`, and `chatRuntime` inside the tick so the AI stack stays out of the eager bundle.
 
 ## Invariants
 

@@ -123,7 +123,6 @@ function decodeBase64(b64: string): Uint8Array {
  * Tauri runtime, and so the error boundary below has something to wrap.
  */
 export function dispatchSshEvent(event: SshEvent, handlers: SshHandlers): void {
-  {
     switch (event.type) {
       case "connected":
         handlers.onConnected?.(event.fingerprint);
@@ -152,7 +151,6 @@ export function dispatchSshEvent(event: SshEvent, handlers: SshHandlers): void {
         handlers.onError?.(event.message);
         break;
     }
-  }
 }
 
 export async function openSsh(input: SshOpenInput, handlers: SshHandlers): Promise<SshSession> {

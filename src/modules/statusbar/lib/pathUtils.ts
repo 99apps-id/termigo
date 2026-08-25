@@ -21,9 +21,9 @@ export function segmentsFromCwd(cwd: string, home: string | null): Segment[] {
   let rootSegment: Segment;
   let tail: string;
 
-  if (usingHome) {
-    rootSegment = { label: "~", fullPath: normHome!, isHome: true };
-    tail = normCwd.slice(normHome!.length).replace(/^\//, "");
+  if (usingHome && normHome) {
+    rootSegment = { label: "~", fullPath: normHome, isHome: true };
+    tail = normCwd.slice(normHome.length).replace(/^\//, "");
   } else {
     const driveMatch = WINDOWS_DRIVE.exec(normCwd);
     if (driveMatch) {

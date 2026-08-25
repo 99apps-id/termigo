@@ -440,6 +440,7 @@ export type PanelRenderer = (
    *  instance per key (the API Client runs one workbench per collection) can
    *  tell its mounts apart. Undefined for a panel opened without a key. */
   ctx?: { surface: "tab" | "pane"; reuseKey?: string },
+  // biome-ignore lint/suspicious/noConfusingVoidType: a renderer returns a cleanup function or nothing
 ) => (() => void) | void;
 
 class PanelRendererRegistry {

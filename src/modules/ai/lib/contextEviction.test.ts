@@ -43,7 +43,9 @@ describe("contextEviction", () => {
     expect(result.summary.evictedToolCalls).toBe(1);
     expect(result.summary.estimatedTokensSaved).toBeGreaterThan(0);
 
+    // biome-ignore lint/suspicious/noExplicitAny: tool content shape is SDK-typed, cast to read part fields
     const firstToolPart = (result.messages[1].content as any)[0];
+    // biome-ignore lint/suspicious/noExplicitAny: tool content shape is SDK-typed, cast to read part fields
     const secondToolPart = (result.messages[3].content as any)[0];
 
     expect(firstToolPart.output.value).toContain("evicted to save context");
@@ -89,7 +91,9 @@ describe("contextEviction", () => {
     const result = evictObsoleteToolOutputs(messages);
     expect(result.summary.evictedToolCalls).toBe(1);
 
+    // biome-ignore lint/suspicious/noExplicitAny: tool content shape is SDK-typed, cast to read part fields
     const first = (result.messages[0].content as any)[0];
+    // biome-ignore lint/suspicious/noExplicitAny: tool content shape is SDK-typed, cast to read part fields
     const second = (result.messages[1].content as any)[0];
     expect(first.output.value).toContain("evicted to save context");
     expect(second.output.value.content).toBe("new content");
@@ -112,6 +116,7 @@ describe("contextEviction", () => {
 
     const result = evictObsoleteToolOutputs(messages);
     expect(result.summary.evictedToolCalls).toBe(0);
+    // biome-ignore lint/suspicious/noExplicitAny: tool content shape is SDK-typed, cast to read part fields
     expect((result.messages[0].content as any)[0].output.value.stdout).toBe("ok");
   });
 });

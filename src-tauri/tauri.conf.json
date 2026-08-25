@@ -38,7 +38,7 @@
       "binaries/termigo-cli"
     ],
     "targets": "all",
-    "createUpdaterArtifacts": true,
+    "createUpdaterArtifacts": false,
     "copyright": "Copyright 2026 99apps-id (fork of Terax by Crynta)",
     "license": "Apache-2.0",
     "publisher": "99apps-id",

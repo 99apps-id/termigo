@@ -115,7 +115,6 @@ function pickLanguage(name?: CodeEditorLanguage): Extension {
       return json();
     case "javascript":
       return javascript();
-    case "plain":
     default:
       return [];
   }

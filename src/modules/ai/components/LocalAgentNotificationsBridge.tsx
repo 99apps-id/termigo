@@ -37,8 +37,9 @@ export function LocalAgentNotificationsBridge() {
   const prev = useRef<RunStatus>(status);
 
   useEffect(() => {
+    const live = liveStatus(status);
     useAgentStore.getState().setLocalAgent(
-      liveStatus(status) ? { agent: AGENT, status: liveStatus(status)! } : null,
+      live ? { agent: AGENT, status: live } : null,
     );
 
     const was = prev.current;

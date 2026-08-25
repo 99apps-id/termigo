@@ -229,6 +229,7 @@ function UnifiedDiffPreview({
       <div className="max-h-72 overflow-auto">
         {shown.map((l, i) => (
           <div
+            // biome-ignore lint/suspicious/noArrayIndexKey: diff lines are positional, never reordered
             key={i}
             className={cn(
               "flex whitespace-pre",

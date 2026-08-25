@@ -244,7 +244,7 @@ export function ExtensionSidebarSection({
   // non-expandable row with no children is a plain leaf (the flat-list case).
   const renderRow = (item: (typeof items)[number], depth: number): ReactNode => {
     const hasActions = !!(item.actions && item.actions.length > 0);
-    const actionHoverPad = hasActions ? actionHoverPadding(item.actions!.length) : undefined;
+    const actionHoverPad = hasActions ? actionHoverPadding(item.actions?.length ?? 0) : undefined;
     const onContextMenu = section.onItemContextMenu;
     const rowContent = (
       <div

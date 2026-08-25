@@ -11,7 +11,6 @@ import { useSshRightPanelStore } from "@/modules/ssh/sshRightPanelStore";
 import { SshFileExplorer } from "@/modules/ssh/SshFileExplorer";
 import { findLeafRemoteCwd, isSshLeaf } from "@/modules/terminal/lib/panes";
 import { useSshActiveSessionStore } from "@/modules/ssh/sshActiveSession";
-import { lazy as _lazySsh } from "react";
 import { consumeLaunchFiles, getLaunchDir } from "@/lib/launchDir";
 import { quoteShellArg } from "@/lib/shellQuote";
 import { usePresence } from "@/lib/usePresence";

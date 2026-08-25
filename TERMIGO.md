@@ -71,7 +71,7 @@ One line each; every module in full, with the invariants that are easy to break,
 - **tabs/** tab list and active id, the source of truth - **spaces/** projects with their own root, env and tabs - **workspace/** Local and WSL
 - **header/**, **statusbar/**, **sidebar/**, **command-palette/**, **shortcuts/** app chrome and the keymap registry - **theme/**, **settings/**, **updater/**
 - **source-control/**, **git-history/** staging, commits, diffs, commit graph - **lsp/** opt-in language servers, zero cost until enabled
-- **ssh/** sessions as tabs, host-key TOFU, SFTP explorer, forwarding - **agents/** launching and notifications for coding agents - **ai/** the agent itself, below
+- **ssh/** sessions as tabs, host-key TOFU, SFTP explorer, forwarding - **extensions/** manifest + registries + sandbox, runs untrusted extension code in a worker - **agents/** launching and notifications for coding agents - **ai/** the agent itself, below
 
 ### Go CLI (`cli/`)
 

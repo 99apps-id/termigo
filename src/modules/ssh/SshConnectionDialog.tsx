@@ -667,6 +667,7 @@ export function SshConnectionDialog({ open, onOpenChange, editing, onSaved }: Pr
                   // Index key: rows have no id and are only ever appended or
                   // removed as a whole, so React never has to match them up.
                   <div
+                    // biome-ignore lint/suspicious/noArrayIndexKey: rows only append or remove as a whole, no stable id
                     key={i}
                     className="grid grid-cols-[4.5rem_auto_1fr_4.5rem_auto] items-center gap-1.5"
                   >

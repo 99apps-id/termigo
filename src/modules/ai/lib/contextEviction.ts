@@ -54,7 +54,7 @@ export function evictObsoleteToolOutputs(
     if (msg.role !== "tool") continue;
 
     if (Array.isArray(msg.content)) {
-      for (const part of msg.content as any[]) {
+      for (const part of msg.content as { type: string; toolName?: string; input?: unknown; output?: unknown }[]) {
         if (part.type === "tool-result" && part.toolName === "read_file") {
           const path = readPath(part);
           if (path) {

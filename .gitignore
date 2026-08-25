@@ -40,6 +40,12 @@ clippy.out
 clippy.err
 build-*.log
 
+# Local audit and portable-build scratch artifacts
+lint-*.txt
+dist-win/
+termigo-portable-win.zip
+scripts/audit-lint.ps1
+
 # Go companion CLI build output (build it at release time, not in tracking)
 cli/bin/
 

@@ -100,6 +100,7 @@ function PixelBar({
   return (
     <span className={cn("inline-flex shrink-0 items-center", className)} aria-hidden>
       {Array.from({ length: cells }).map((_, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: pixel cells are positional, no stable identity
         <span key={i} className={cn(cellClass, i < filled ? fill : "bg-muted-foreground/25")} />
       ))}
     </span>
@@ -115,6 +116,7 @@ function TooltipBody({ item }: { item: StatusItem }) {
     <div className="flex min-w-[196px] flex-col gap-1.5">
       {title ? <div className="text-foreground text-xs font-medium">{title}</div> : null}
       {rows.map((r, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: detail rows are positional
         <div key={i} className="flex items-center gap-2 text-[11px] leading-none">
           {r.label ? <span className="text-muted-foreground w-14 shrink-0">{r.label}</span> : null}
           {r.progress != null ? (

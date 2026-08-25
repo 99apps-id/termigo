@@ -204,6 +204,7 @@ function ShortcutRow({
                 <KbdGroup>
                   {getBindingTokens(bindings[0]).map((t, i) => (
                     <Kbd
+                      // biome-ignore lint/suspicious/noArrayIndexKey: binding tokens are positional
                       key={i}
                       className="group-hover:bg-accent group-hover:text-accent-foreground transition-colors"
                     >
