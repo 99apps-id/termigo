@@ -1,4 +1,4 @@
-import { USE_CUSTOM_WINDOW_CONTROLS } from "@/lib/platform";
+import { IS_MAC } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import {
   Cancel01Icon,
@@ -19,7 +19,7 @@ export function WindowControls({ closeOnly = false }: Props) {
   const [maximized, setMaximized] = useState(false);
 
   useEffect(() => {
-    if (!USE_CUSTOM_WINDOW_CONTROLS || closeOnly) return;
+    if (IS_MAC || closeOnly) return;
     const w = getCurrentWindow();
     let unlisten: (() => void) | undefined;
     void w.isMaximized().then(setMaximized);
@@ -33,7 +33,7 @@ export function WindowControls({ closeOnly = false }: Props) {
     return () => unlisten?.();
   }, [closeOnly]);
 
-  if (!USE_CUSTOM_WINDOW_CONTROLS) return null;
+  if (IS_MAC) return null;
 
   const w = getCurrentWindow();
 

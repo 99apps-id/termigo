@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { WindowControls } from "@/components/WindowControls";
-import { IS_MAC, USE_CUSTOM_WINDOW_CONTROLS } from "@/lib/platform";
+import { IS_MAC } from "@/lib/platform";
 import { NotificationBell } from "@/modules/agents";
 import type { AgentLaunchRequest } from "@/modules/agents/lib/launcher";
 import type { Tab } from "@/modules/tabs";
@@ -231,7 +231,7 @@ export function Header({
 
       {!IS_MAC && settingsButton}
 
-      {USE_CUSTOM_WINDOW_CONTROLS && (
+      {!IS_MAC && (
         <>
           <span className="ml-1 h-5 w-px shrink-0 bg-border/60" />
           <WindowControls />
