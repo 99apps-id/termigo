@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { cn } from "@/lib/utils";
+import { Shimmer } from "@/components/ai-elements/shimmer";
 
 export type ThoughtNode = {
   id: string;
@@ -57,7 +58,16 @@ export function ThinkingTreeHUD({
                   {node.type === "tool" ? "🛠️" : node.type === "check" ? "🧪" : "💭"}
                 </span>
                 <div className="min-w-0">
-                  <div className="truncate font-medium text-foreground">{node.title}</div>
+                  <div className="truncate font-medium text-foreground">
+                    <Shimmer
+                      as="span"
+                      duration={node.status === "running" ? 1 : 1.4}
+                      iterations={node.status === "running" ? "infinite" : 2}
+                      className="truncate font-medium text-foreground"
+                    >
+                      {node.title}
+                    </Shimmer>
+                  </div>
                   {node.details && (
                     <div className="text-[10px] text-muted-foreground truncate">{node.details}</div>
                   )}

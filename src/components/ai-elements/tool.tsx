@@ -28,7 +28,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import type { DynamicToolUIPart, ToolUIPart } from "ai";
 import type { ComponentProps, ReactNode } from "react";
 import { isValidElement, memo, useState } from "react";
-
+import { Shimmer } from "./shimmer";
 
 export type ToolPart = ToolUIPart | DynamicToolUIPart;
 
@@ -183,7 +183,14 @@ const ToolImpl = ({
           strokeWidth={1.75}
           className="shrink-0 text-muted-foreground"
         />
-        <span className="shrink-0 font-medium text-foreground">{label}</span>
+        <Shimmer
+          as="span"
+          duration={state === "input-streaming" || state === "input-available" ? 1 : 1.4}
+          iterations={state === "input-streaming" || state === "input-available" ? "infinite" : 2}
+          className="shrink-0 font-medium text-foreground"
+        >
+          {label}
+        </Shimmer>
         {summary ? (
           <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">
             {summary}

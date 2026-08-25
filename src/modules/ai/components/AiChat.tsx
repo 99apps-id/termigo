@@ -21,6 +21,7 @@ import {
   ReasoningContent,
   ReasoningTrigger,
 } from "@/components/ai-elements/reasoning";
+import { Shimmer } from "@/components/ai-elements/shimmer";
 import { Tool } from "@/components/ai-elements/tool";
 import {
   Collapsible,
@@ -678,7 +679,14 @@ const ReadGroup = memo(function ReadGroup({ parts }: { parts: AnyPart[] }) {
           strokeWidth={1.75}
           className="shrink-0 text-muted-foreground"
         />
-        <span className="shrink-0 font-medium text-foreground">Read</span>
+        <Shimmer
+          as="span"
+          duration={1.4}
+          iterations={2}
+          className="shrink-0 font-medium text-foreground"
+        >
+          Read
+        </Shimmer>
         <span className="shrink-0 text-[11px] text-muted-foreground">
           {count} file{count === 1 ? "" : "s"}
         </span>
@@ -745,7 +753,14 @@ const ReadRow = memo(function ReadRow({ part }: { part: AnyPart }) {
         strokeWidth={1.75}
         className="shrink-0 text-muted-foreground"
       />
-      <span className="shrink-0 font-medium text-foreground">Read</span>
+      <Shimmer
+        as="span"
+        duration={state === "input-streaming" || state === "input-available" ? 1 : 1.4}
+        iterations={state === "input-streaming" || state === "input-available" ? "infinite" : 2}
+        className="shrink-0 font-medium text-foreground"
+      >
+        Read
+      </Shimmer>
       <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">
         {path ?? ""}
       </span>
