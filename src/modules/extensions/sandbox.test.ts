@@ -19,6 +19,10 @@ function makeExecutor(): SandboxExecutor {
     aiStop: vi.fn(),
     onToolRegister: vi.fn(),
     onCommandRegister: vi.fn(),
+    panelOpen: vi.fn(),
+    panelClose: vi.fn(),
+    panelToggle: vi.fn(),
+    onPanelMount: vi.fn(),
     onDomUnsupported: vi.fn(),
     log: vi.fn(),
   };
@@ -90,5 +94,37 @@ describe("sandbox dispatcher", () => {
     });
     expect(resp.ok).toBe(true);
     expect(executor.log).toHaveBeenCalledWith("warn", ["hello"]);
+  });
+
+  it("gates panel open / mount behind panels:register", async () => {
+    const { executor, resp } = await dispatch([], {
+      id: 7,
+      kind: "panel:open",
+      panelId: "p",
+    });
+    expect(resp.ok).toBe(false);
+    expect(executor.panelOpen).not.toHaveBeenCalled();
+
+    const { executor: ex2, resp: r2 } = await dispatch([], {
+      id: 8,
+      kind: "ui:mountPanel",
+      panelId: "p",
+      html: "<div>hi</div>",
+      events: ["go"],
+    });
+    expect(r2.ok).toBe(false);
+    expect(ex2.onPanelMount).not.toHaveBeenCalled();
+  });
+
+  it("mounts a host-managed panel when panels:register is declared", async () => {
+    const { executor, resp } = await dispatch(["panels:register"], {
+      id: 9,
+      kind: "ui:mountPanel",
+      panelId: "p",
+      html: "<button data-ext-event=\"go\">Go</button>",
+      events: ["go"],
+    });
+    expect(resp.ok).toBe(true);
+    expect(executor.onPanelMount).toHaveBeenCalledWith("p", expect.stringContaining("go"), ["go"]);
   });
 });

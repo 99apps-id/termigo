@@ -32,6 +32,10 @@ export type SandboxRequest =
   | { id: number; kind: "ai:stop" }
   | { id: number; kind: "tool:register"; name: string }
   | { id: number; kind: "command:register"; commandId: string }
+  | { id: number; kind: "panel:open"; panelId: string }
+  | { id: number; kind: "panel:close" }
+  | { id: number; kind: "panel:toggle"; panelId: string }
+  | { id: number; kind: "ui:mountPanel"; panelId: string; html: string; events: string[] }
   | { id: number; kind: "dom:unsupported"; surface: string }
   | { id: number; kind: "logger"; level: "info" | "warn" | "error"; args: unknown[] };
 
@@ -46,6 +50,7 @@ export type HostMessage =
   | { type: "invoke_tool"; name: string; args: Record<string, unknown>; callId: number }
   | { type: "invoke_command"; id: string; args: unknown[]; callId: number }
   | { type: "event"; channel: string; payload: unknown }
+  | { type: "ui:event"; panelId: string; event: string }
   | { type: "deactivate" };
 
 /** Outbound message from the worker to the host for calls the host initiated. */
@@ -79,6 +84,12 @@ export type SandboxExecutor = {
   /** Called when the worker registers a command handler; the host sets a bridge
    *  handler in the commands registry. */
   onCommandRegister(id: string): void;
+  panelOpen(panelId: string): void;
+  panelClose(): void;
+  panelToggle(panelId: string): void;
+  /** Called when the worker mounts a host-managed panel view. The host stores
+   *  the HTML and wires `data-ext-event` clicks back to the worker. */
+  onPanelMount(panelId: string, html: string, events: string[]): void;
   onDomUnsupported(surface: string): void;
   log(level: "info" | "warn" | "error", args: unknown[]): void;
 };
@@ -173,6 +184,30 @@ export function createSandboxDispatcher(
           executor.onCommandRegister(req.commandId);
           value = undefined;
           break;
+        case "panel:open":
+          require("panels:register");
+          executor.panelOpen(req.panelId);
+          value = undefined;
+          break;
+        case "panel:close":
+          require("panels:register");
+          executor.panelClose();
+          value = undefined;
+          break;
+        case "panel:toggle":
+          require("panels:register");
+          executor.panelToggle(req.panelId);
+          value = undefined;
+          break;
+        case "ui:mountPanel": {
+          // Mounting a panel renders HTML, not raw IPC; the permission gate is
+          // the same as opening a panel, so an extension cannot smuggle a
+          // renderer without `panels:register`.
+          require("panels:register");
+          executor.onPanelMount(req.panelId, req.html, req.events);
+          value = undefined;
+          break;
+        }
         case "dom:unsupported":
           executor.onDomUnsupported(req.surface);
           value = undefined;

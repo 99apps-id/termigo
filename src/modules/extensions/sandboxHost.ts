@@ -9,7 +9,8 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { LazyStore } from "@tauri-apps/plugin-store";
 import * as chatMod from "@/modules/ai/store/chatStore";
-import { aiToolsRegistry, commandsRegistry } from "./registries";
+import { aiToolsRegistry, commandsRegistry, panelRenderersRegistry } from "./registries";
+import { useRightPanelStore } from "./rightPanelStore";
 import type { ExtensionRuntime } from "./host";
 import {
   createSandboxDispatcher,
@@ -30,6 +31,7 @@ type BridgeHooks = {
 async function buildExecutor(
   ext: ExtensionRuntime,
   hooks: BridgeHooks,
+  postToWorker: (msg: { type: "ui:event"; panelId: string; event: string }) => void,
 ): Promise<SandboxExecutor> {
   const store = new LazyStore(STORAGE_FILE(ext.id), { defaults: {}, autoSave: 200 });
   const log = (level: "info" | "warn" | "error", args: unknown[]): void => {
@@ -89,6 +91,34 @@ async function buildExecutor(
     onCommandRegister: (id) => {
       commandsRegistry.setRuntime(ext.id, id, (...args: unknown[]) => hooks.invokeCommand(id, args));
     },
+    panelOpen: (panelId) => {
+      useRightPanelStore.getState().open(ext.id, panelId);
+    },
+    panelClose: () => {
+      useRightPanelStore.getState().close(ext.id);
+    },
+    panelToggle: (panelId) => {
+      useRightPanelStore.getState().toggle(ext.id, panelId);
+    },
+    onPanelMount: (panelId, html, events) => {
+      void events;
+      // Host-managed panel: the worker sent an HTML template. The host renders
+      // it and routes any `data-ext-event` click back to the worker, so the
+      // extension keeps its interactive handlers without running DOM code in
+      // the main webview.
+      panelRenderersRegistry.set(ext.id, panelId, (container) => {
+        container.innerHTML = html;
+        const handler = (e: Event): void => {
+          const target = e.target as HTMLElement | null;
+          const ev = target?.getAttribute?.("data-ext-event");
+          if (ev) postToWorker({ type: "ui:event", panelId, event: ev });
+        };
+        container.addEventListener("click", handler);
+        return () => {
+          container.removeEventListener("click", handler);
+        };
+      });
+    },
     onDomUnsupported: (surface) => {
       log("warn", [`${surface} is not available in the sandbox; use the declared manifest contributes instead`]);
     },
@@ -134,7 +164,7 @@ export async function activateSandboxed(
     return p;
   };
 
-  const executor = await buildExecutor(ext, { invokeTool, invokeCommand });
+  const executor = await buildExecutor(ext, { invokeTool, invokeCommand }, post);
   const dispatch = createSandboxDispatcher(
     { id: ext.id, declared: ext.manifest.permissions },
     executor,

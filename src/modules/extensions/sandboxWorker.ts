@@ -20,6 +20,7 @@ let idSeq = 1;
 const pending = new Map<number, Pending>();
 const toolHandlers = new Map<string, Handler>();
 const commandHandlers = new Map<string, Handler>();
+const panelHandlers = new Map<string, () => void>();
 const listeners = new Map<string, ((payload: unknown) => void)[]>();
 
 function send(msg: WorkerMessage): void {
@@ -89,13 +90,40 @@ function buildCtx(id: string): Record<string, unknown> {
       void call({ kind: "command:register", commandId: id });
     },
     addDisposer: () => {},
-    // DOM / UI surfaces are not available in a worker sandbox. They report an
-    // unsupported error so the extension degrades instead of pretending.
-    headerBar: { setItem: () => call({ kind: "dom:unsupported", surface: "headerBar" }), removeItem: () => {} },
-    statusBar: { setItem: () => call({ kind: "dom:unsupported", surface: "statusBar" }), removeItem: () => {} },
-    registerPanelRenderer: () => call({ kind: "dom:unsupported", surface: "panel" }),
-    panel: { open: () => call({ kind: "dom:unsupported", surface: "panel" }), close: () => {}, toggle: () => {} },
-    sidebar: { setSection: () => call({ kind: "dom:unsupported", surface: "sidebar" }), removeSection: () => {} },
+    // DOM / UI surfaces are host-managed in the sandbox. Panels are rendered by
+    // the host from an HTML template the worker sends; events flow back over
+    // `ui:event`. statusBar / headerBar / sidebar are not supported yet.
+    headerBar: {
+      setItem: () => call({ kind: "dom:unsupported", surface: "headerBar" }),
+      removeItem: () => {},
+    },
+    statusBar: {
+      setItem: () => call({ kind: "dom:unsupported", surface: "statusBar" }),
+      removeItem: () => {},
+    },
+    registerPanelRenderer: (panelId: string, view: unknown) => {
+      if (view && typeof view === "object" && "html" in view) {
+        const spec = view as { html: string; events?: string[] };
+        return call({ kind: "ui:mountPanel", panelId, html: spec.html, events: spec.events ?? [] });
+      }
+      // A function renderer cannot cross a worker boundary; host-managed panels
+      // take an HTML template instead. Degrade so the extension is honest.
+      return call({ kind: "dom:unsupported", surface: "panel" });
+    },
+    panel: {
+      open: (panelId: string) => call({ kind: "panel:open", panelId }),
+      close: () => call({ kind: "panel:close" }),
+      toggle: (panelId: string) => call({ kind: "panel:toggle", panelId }),
+      setView: (panelId: string, html: string, events: string[] = []) =>
+        call({ kind: "ui:mountPanel", panelId, html, events }),
+      on: (event: string, handler: () => void) => {
+        panelHandlers.set(event, handler);
+      },
+    },
+    sidebar: {
+      setSection: () => call({ kind: "dom:unsupported", surface: "sidebar" }),
+      removeSection: () => {},
+    },
     app: {
       getContext: () => ({}),
       onContextChange: () => () => {},
@@ -155,6 +183,13 @@ async function handle(msg: HostMessage): Promise<void> {
     }
     case "event": {
       for (const cb of listeners.get(msg.channel) ?? []) cb(msg.payload);
+      break;
+    }
+    case "ui:event": {
+      // Host-managed panel click. The host rendered our HTML and routed an
+      // element's `data-ext-event` here; run the bound handler.
+      const fn = panelHandlers.get(msg.event);
+      if (fn) void fn();
       break;
     }
     case "deactivate":
