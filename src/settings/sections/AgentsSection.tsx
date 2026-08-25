@@ -30,6 +30,7 @@ import {
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   setAgentReviewAfterApply,
+  setCostBudgetUsd,
   setCustomInstructions,
   setDebugCaptureEnabled,
 } from "@/modules/settings/store";
@@ -61,6 +62,7 @@ export function AgentsSection() {
   const agentReviewAfterApply = usePreferencesStore(
     (s) => s.agentReviewAfterApply,
   );
+  const costBudgetUsd = usePreferencesStore((s) => s.costBudgetUsd);
   const customAgents = useAgentsStore((s) => s.customAgents);
   const activeAgentId = useAgentsStore((s) => s.activeId);
   const setActiveAgentId = useAgentsStore((s) => s.setActiveId);
@@ -108,6 +110,19 @@ export function AgentsSection() {
           <Switch
             checked={agentReviewAfterApply}
             onCheckedChange={(v) => void setAgentReviewAfterApply(v)}
+          />
+        </SettingRow>
+        <SettingRow
+          title="Cost budget (USD)"
+          description="Maximum cost per agent session. 0 = unlimited. Enforced after each step."
+        >
+          <Input
+            type="number"
+            value={costBudgetUsd}
+            onChange={(e) => void setCostBudgetUsd(Number(e.target.value) || 0)}
+            className="w-full"
+            min={0}
+            step={0.01}
           />
         </SettingRow>
       </section>

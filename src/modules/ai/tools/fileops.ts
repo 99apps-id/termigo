@@ -18,6 +18,7 @@ import { sftpDelete, sftpRename } from "@/modules/ssh/sftp";
 import { routePath, remoteUnsupported } from "../lib/remoteFs";
 import { checkWritableCanonical } from "../lib/security";
 import { checkWritable } from "../lib/security";
+import { enforcePolicy } from "../lib/policyEngine";
 import { resolvePath, type ToolContext } from "./context";
 
 /** Last path segment, for reporting where a copy actually landed. */
@@ -84,6 +85,14 @@ export function buildFileOpsTools(ctx: ToolContext) {
         const dest = await checkWritableCanonical(toPath, native.canonicalize);
         if (!dest.ok) return { error: dest.reason, path: toPath };
 
+        const policy = await enforcePolicy({
+          toolName: "move_file",
+          path: toPath,
+        });
+        if (!policy.allowed) {
+          return { error: `Policy blocked: ${policy.reason}` };
+        }
+
         try {
           await native.rename(src.canonical, toPath);
           return { moved: true, from: src.canonical, to: toPath };
@@ -121,6 +130,14 @@ export function buildFileOpsTools(ctx: ToolContext) {
         if (!src.ok) return { error: src.reason, path: sourcePath };
         const dest = await checkWritableCanonical(destPath, native.canonicalize);
         if (!dest.ok) return { error: dest.reason, path: destPath };
+
+        const policy = await enforcePolicy({
+          toolName: "copy_file",
+          path: destPath,
+        });
+        if (!policy.allowed) {
+          return { error: `Policy blocked: ${policy.reason}` };
+        }
 
         try {
           await native.copyInto([src.canonical], dest.canonical);
@@ -165,6 +182,13 @@ export function buildFileOpsTools(ctx: ToolContext) {
         const reqPath = target.path;
         const safety = await checkWritableCanonical(reqPath, native.canonicalize);
         if (!safety.ok) return { error: safety.reason, path: reqPath };
+        const policy = await enforcePolicy({
+          toolName: "delete_file",
+          path: reqPath,
+        });
+        if (!policy.allowed) {
+          return { error: `Policy blocked: ${policy.reason}`, path: reqPath };
+        }
         try {
           await native.deletePath(safety.canonical);
           return { deleted: true, path: safety.canonical };

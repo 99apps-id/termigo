@@ -12,6 +12,7 @@ import {
 import {
   DEFAULT_MODEL_ID,
   endpointIdFromCompatModel,
+  estimateCost,
   getModelContextLimit,
   isCompatModelId,
   LMSTUDIO_DEFAULT_BASE_URL,
@@ -26,15 +27,15 @@ import {
   type CustomEndpoint,
   type ProviderId,
 } from "../config";
+import type { CustomEndpointKeys, ProviderKeys } from "./keyring";
 import { buildTools, type ToolContext } from "../tools/tools";
 import type { McpToolset } from "./mcpTools";
 import type { ExtensionToolset } from "./extensionTools";
 import type { CustomToolset } from "./customToolsIo";
+import { prepareAgentPrompt } from "./prompt";
 import { skillsBlock, type Skill } from "./skills";
 import { compactModelMessagesDetailed } from "./compact";
 import { memoryBlock as learnedBlock, type MemoryEntry } from "./memory";
-import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
-import { prepareAgentPrompt } from "./prompt";
 import { createProxyFetch, proxyFetch } from "./proxyFetch";
 import { sanitizeUiMessages } from "./sanitizeMessages";
 import { wantsForcedFanout } from "./orchestrationIntent";
@@ -434,7 +435,7 @@ export function noProgressStop<T extends ToolSet>(
  * until the budget ran out. Naming the guard that tripped lets the UI say
  * whether continuing is worth a click.
  */
-export type AgentStopReason = "step-cap" | "tool-repetition" | "no-progress";
+export type AgentStopReason = "step-cap" | "tool-repetition" | "no-progress" | "cost-cap";
 
 export type AgentUsage = {
   inputTokens: number;
@@ -478,6 +479,8 @@ export type RunDiagnostics = {
   provider: string;
   contextLimit: number;
   compactedAway: number | null;
+  estimatedCostUsd: number | null;
+  costBudgetUsd: number;
   at: number;
 };
 
@@ -502,6 +505,8 @@ export type RunAgentOptions = {
   /** Loop budget for this round. Defaults to the first tier; the caller raises
    *  it on each Continue so a long task deepens instead of stalling. */
   stepBudget?: number;
+  /** Maximum cost in USD allowed for this run. 0 = unlimited. */
+  costBudgetUsd?: number;
   /** Record the assembled request for the inspector. Read from preferences by
    *  the caller so this module stays free of the settings store. */
   captureDebug?: boolean;
@@ -597,11 +602,13 @@ export async function runAgentStream(opts: RunAgentOptions) {
   );
 
   let stepsSeen = 0;
+  let runCost = 0;
   // Three guards, any of which ends the loop. Each wrapper records which one
   // tripped first so the UI can explain the stop instead of offering the same
   // blank "continue" for every cause.
   let stopReason: AgentStopReason | null = null;
   const stepBudget = opts.stepBudget ?? MAX_AGENT_STEPS;
+  const costBudget = opts.costBudgetUsd ?? 0;
   const capPred = stepCountIs(stepBudget);
   const repeatPred = noToolRepetition<ToolSet>(3);
   const idlePred = noProgressStop<ToolSet>(2);
@@ -621,6 +628,21 @@ export async function runAgentStream(opts: RunAgentOptions) {
       stopReason ??= "no-progress";
       return true;
     },
+    (_args) => {
+      if (costBudget <= 0) return false;
+      const current = estimateCost(modelId, {
+        inputTokens: runInput,
+        outputTokens: runOutput,
+        cachedInputTokens: runCached,
+      });
+      if (current == null) return false;
+      runCost = current;
+      if (runCost >= costBudget) {
+        stopReason ??= "cost-cap";
+        return true;
+      }
+      return false;
+    },
   ];
 
   const tools = {
@@ -639,7 +661,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
   const projectBytes = opts.projectMemory?.length ?? 0;
   const learnedBytes = learnedBlock(opts.learnedMemory ?? []).length;
   const systemTotal = prompt.system.reduce(
-    (n, m) => n + String(m.content).length,
+    (n: number, m: { content: unknown }) => n + String(m.content).length,
     0,
   );
   // Counting name and description alone reported 11.6 KB where the real
@@ -823,6 +845,8 @@ export async function runAgentStream(opts: RunAgentOptions) {
         provider,
         contextLimit: getModelContextLimit(modelId, compatCtxOverride),
         compactedAway: compact.compacted ? compact.droppedCount : null,
+        estimatedCostUsd: runCost || null,
+        costBudgetUsd: costBudget,
         at: Date.now(),
       };
       opts.onFinishMeta?.({ stopReason: settledStop, finishReason, metrics });

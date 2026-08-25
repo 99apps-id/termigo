@@ -130,6 +130,7 @@ type Deps = {
   }) => void;
   getPlanMode?: () => boolean;
   getStepBudget?: () => number;
+  getCostBudgetUsd?: () => number;
   getCaptureDebug?: () => boolean;
 };
 
@@ -195,6 +196,7 @@ export function createContextAwareTransport(deps: Deps) {
       customEndpointKeys: deps.getCustomEndpointKeys?.(),
       planMode: deps.getPlanMode?.(),
       stepBudget: deps.getStepBudget?.(),
+      costBudgetUsd: deps.getCostBudgetUsd?.(),
       captureDebug: deps.getCaptureDebug?.(),
       contextMs,
       projectMemory,

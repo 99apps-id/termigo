@@ -400,6 +400,12 @@ function stopCopy(
         hint: "The agent was describing rather than doing. Say what to change.",
         action: "Continue anyway",
       };
+    case "cost-cap":
+      return {
+        text: "Stopped: reached the maximum cost budget for this run.",
+        hint: "Adjust the cost budget in settings if you wish to allow higher spend.",
+        action: "Continue anyway",
+      };
     case "stopped":
       return { text: "You stopped this run.", action: "Resume" };
   }

@@ -119,6 +119,24 @@ export function RunSummary({ run }: { run: RunDiagnostics }) {
         value={stoppedAt}
         hint={new Date(run.at).toLocaleTimeString()}
       />
+      {run.estimatedCostUsd != null ? (
+        <Row
+          label="Estimated cost"
+          value={`$${run.estimatedCostUsd.toFixed(4)}`}
+          hint={
+            run.costBudgetUsd > 0
+              ? `budget $${run.costBudgetUsd.toFixed(2)}`
+              : undefined
+          }
+        />
+      ) : null}
+      {run.stopReason === "cost-cap" ? (
+        <Row
+          label="Cost cap"
+          value="hit"
+          hint="Run stopped because the budget was reached."
+        />
+      ) : null}
     </div>
   );
 }

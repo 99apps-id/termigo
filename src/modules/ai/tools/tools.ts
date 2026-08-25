@@ -16,6 +16,15 @@ import { buildVerifyTools } from "./verify";
 import { buildGitTools } from "./git";
 import { buildHarnessTools } from "./harness";
 import { buildReviewTools } from "./review";
+import { buildWorkflowTools } from "./workflow";
+import { buildPolicyTools } from "../lib/policyEngine";
+import { buildSkillRegistryTools } from "../lib/skillRegistry";
+import { buildGithubTools } from "./github";
+import { buildCodeSearchTools } from "./codeSearch";
+import { buildLspTools } from "./lsp";
+import { buildWorktreeTools } from "./worktree";
+import { buildInvariantTools } from "./invariant";
+import { buildPtyDriverTools } from "./ptyDriver";
 
 export { resolvePath, type ToolContext } from "./context";
 
@@ -57,6 +66,15 @@ export function buildTools(ctx: import("./context").ToolContext) {
     ...buildGitTools(ctx),
     ...buildHarnessTools(ctx),
     ...buildReviewTools(ctx),
+    ...buildWorkflowTools(ctx),
+    ...buildPolicyTools(),
+    ...buildSkillRegistryTools(),
+    ...buildGithubTools(ctx),
+    ...buildCodeSearchTools(ctx),
+    ...buildLspTools(ctx),
+    ...buildWorktreeTools(ctx),
+    ...buildInvariantTools(),
+    ...buildPtyDriverTools(ctx),
   } as const;
 
   // Skill tools last, and told what the others are called: the dependency

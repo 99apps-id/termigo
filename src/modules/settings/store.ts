@@ -193,6 +193,8 @@ export type Preferences = {
   lspCustomServers: LspCustomServer[];
   /** Extension-contributed keybindings overrides, keyed by command id. */
   extensionShortcuts: Record<string, KeyBinding[]>;
+  /** Maximum cost in USD allowed per agent session (0 = unlimited) */
+  costBudgetUsd: number;
 };
 
 export type EditorFormatter =
@@ -287,6 +289,7 @@ const KEY_EDITOR_CUSTOM_FORMAT_COMMAND = "editorCustomFormatCommand";
 const KEY_LSP_ACTIVATION = "lspActivation";
 const KEY_LSP_CUSTOM_SERVERS = "lspCustomServers";
 const KEY_EXTENSION_SHORTCUTS = "extensionShortcuts";
+const KEY_COST_BUDGET_USD = "costBudgetUsd";
 
 export const TERMINAL_FONT_SIZE_DEFAULT = 14;
 export const TERMINAL_FONT_SIZE_MIN = 8;
@@ -379,6 +382,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   lspActivation: {},
   lspCustomServers: [],
   extensionShortcuts: {},
+  costBudgetUsd: 0,
 };
 
 const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
@@ -552,6 +556,8 @@ export async function loadPreferences(): Promise<Preferences> {
     agentReviewAfterApply:
       get<boolean>(KEY_AGENT_REVIEW_AFTER_APPLY) ??
       DEFAULT_PREFERENCES.agentReviewAfterApply,
+    costBudgetUsd:
+      get<number>(KEY_COST_BUDGET_USD) ?? DEFAULT_PREFERENCES.costBudgetUsd,
     agentLaunchCommands: normalizeAgentLaunchCommands(
       get<unknown>(KEY_AGENT_LAUNCH_COMMANDS),
     ),
@@ -935,6 +941,10 @@ export async function setAgentReviewAfterApply(value: boolean): Promise<void> {
   await writePref(KEY_AGENT_REVIEW_AFTER_APPLY, value);
 }
 
+export async function setCostBudgetUsd(value: number): Promise<void> {
+  await writePref(KEY_COST_BUDGET_USD, value);
+}
+
 export async function setAgentLaunchCommands(
   value: AgentLaunchCommands,
 ): Promise<void> {
@@ -1029,6 +1039,7 @@ export async function onPreferencesChange(
     [KEY_LSP_ACTIVATION]: "lspActivation",
     [KEY_LSP_CUSTOM_SERVERS]: "lspCustomServers",
     [KEY_EXTENSION_SHORTCUTS]: "extensionShortcuts",
+    [KEY_COST_BUDGET_USD]: "costBudgetUsd",
   };
   // Same-process writes still fire onChange immediately; cross-window writes
   // arrive via the Tauri event emitted by writePref().

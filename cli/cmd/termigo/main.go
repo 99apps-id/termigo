@@ -15,8 +15,10 @@ import (
 	"github.com/99apps-id/termigo/cli/internal/agent"
 	"github.com/99apps-id/termigo/cli/internal/config"
 	"github.com/99apps-id/termigo/cli/internal/doctor"
+	"github.com/99apps-id/termigo/cli/internal/harness"
 	"github.com/99apps-id/termigo/cli/internal/initcmd"
 	"github.com/99apps-id/termigo/cli/internal/mcp"
+	"github.com/99apps-id/termigo/cli/internal/mcpserver"
 	"github.com/99apps-id/termigo/cli/internal/skill"
 )
 
@@ -49,6 +51,10 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return runSkill(args[1:], stdout)
 	case "mcp":
 		return runMCP(args[1:], stdout)
+	case "mcp-server":
+		return runMCPServer(args[1:], stdout)
+	case "harness":
+		return runHarness(args[1:], stdout)
 	case "config":
 		return runConfig(args[1:], stdout)
 	default:
@@ -106,6 +112,8 @@ Commands:
   mcp add <name> <command> [args]  Add a project MCP server
   mcp remove <name>                Remove a project MCP server
   mcp ping <server>                Check that an MCP server responds
+  mcp-server                       Run Termigo MCP server over stdio
+  harness run <dataset> [options]  Run automated benchmark evaluations
   config                           Show the user configuration
   config set <key> <value>         Set a config value (e.g. defaultAgent)
   version                          Print CLI version
@@ -642,3 +650,63 @@ func runConfig(args []string, stdout io.Writer) error {
 		return fmt.Errorf("unknown config command %q", args[0])
 	}
 }
+
+func runHarness(args []string, stdout io.Writer) error {
+	if len(args) == 0 || args[0] != "run" {
+		return errors.New("usage: termigo harness run <dataset.jsonl> [--model=<id>] [--timeout=<sec>]")
+	}
+
+	if len(args) < 2 {
+		return errors.New("missing dataset path; usage: termigo harness run <dataset.jsonl>")
+	}
+
+	datasetPath := args[1]
+	modelID := "default"
+	timeout := 120 * time.Second
+	workspace := "."
+
+	for _, arg := range args[2:] {
+		switch {
+		case strings.HasPrefix(arg, "--model="):
+			modelID = strings.TrimPrefix(arg, "--model=")
+		case strings.HasPrefix(arg, "--timeout="):
+			secs, err := strconv.Atoi(strings.TrimPrefix(arg, "--timeout="))
+			if err == nil && secs > 0 {
+				timeout = time.Duration(secs) * time.Second
+			}
+		case strings.HasPrefix(arg, "--workspace="):
+			workspace = strings.TrimPrefix(arg, "--workspace=")
+		}
+	}
+
+	opts := harness.Options{
+		DatasetPath: datasetPath,
+		ModelID:     modelID,
+		Timeout:     timeout,
+		Workspace:   workspace,
+	}
+
+	report, err := harness.Run(context.Background(), opts, stdout)
+	if err != nil {
+		return err
+	}
+
+	_, _ = fmt.Fprintf(stdout, "\n--- Evaluation Report ---\n")
+	_, _ = fmt.Fprintf(stdout, "Total Cases:  %d\n", report.TotalCases)
+	_, _ = fmt.Fprintf(stdout, "Passed Cases: %d\n", report.PassedCases)
+	_, _ = fmt.Fprintf(stdout, "Pass Rate:    %.1f%%\n", report.PassRate)
+	_, _ = fmt.Fprintf(stdout, "Total Time:   %v\n", report.TotalTime.Round(time.Millisecond))
+	return nil
+}
+
+func runMCPServer(args []string, stdout io.Writer) error {
+	workspace := "."
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "--workspace=") {
+			workspace = strings.TrimPrefix(arg, "--workspace=")
+		}
+	}
+	server := mcpserver.New(workspace)
+	return server.Serve(context.Background(), os.Stdin, os.Stdout)
+}
+

@@ -5,6 +5,7 @@ import { checkShellCommand } from "../lib/security";
 import { remoteUnsupported } from "../lib/remoteFs";
 import { getSessionShell, sessionShellKey } from "../lib/sessionShell";
 import { quoteShellArg } from "@/lib/shellQuote";
+import { enforcePolicy } from "../lib/policyEngine";
 import type { ToolContext } from "./context";
 
 // A git branch name may use letters, digits, and `- _ . /`, but must not
@@ -326,6 +327,14 @@ export function buildGitTools(ctx: ToolContext) {
         const command = `git add ${add} && git commit -m ${quoteShellArg(message)}`;
         const safety = checkShellCommand(command);
         if (!safety.ok) return { error: safety.reason };
+        const policy = await enforcePolicy({
+          toolName: "git_commit",
+          command,
+          path: cwd,
+        });
+        if (!policy.allowed) {
+          return { error: `Policy blocked: ${policy.reason}` };
+        }
         try {
           const shellId = await getSessionShell(
             sessionShellKey("git", sid, ctx.getWorkspaceRoot()),
@@ -415,6 +424,14 @@ export function buildGitTools(ctx: ToolContext) {
         const command = gitPushCommand();
         const safety = checkShellCommand(command);
         if (!safety.ok) return { error: safety.reason };
+        const policy = await enforcePolicy({
+          toolName: "git_push",
+          command,
+          path: cwd,
+        });
+        if (!policy.allowed) {
+          return { error: `Policy blocked: ${policy.reason}` };
+        }
         try {
           const shellId = await getSessionShell(
             sessionShellKey("git", sid, ctx.getWorkspaceRoot()),

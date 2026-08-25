@@ -196,6 +196,20 @@ function Toolbar({ block, all, onSearch }: ChromeProps) {
   return (
     <div className="bt-tools">
       {failed && <span className="bt-exit">exit {block.exitCode}</span>}
+      {failed && (
+        <button
+          type="button"
+          title="Fix error with AI agent"
+          className="bt-btn text-amber-500 hover:text-amber-400"
+          onClick={() => {
+            const out = capAttachOutput(all.readOutput(block.id) ?? "");
+            const prompt = `Fix error in command \`${block.command}\`:\n\`\`\`\n${out}\n\`\`\``;
+            useChatStore.getState().attachSelection(prompt, "terminal");
+          }}
+        >
+          <HugeiconsIcon icon={SparklesIcon} size={12.5} strokeWidth={1.75} />
+        </button>
+      )}
       {duration && <span className="bt-dur">{duration}</span>}
       {!block.running && !!block.command && (
         <button

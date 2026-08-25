@@ -203,6 +203,12 @@ export function buildVerifyTools(ctx: ToolContext) {
         } finally {
           abortSignal?.removeEventListener("abort", onAbort);
         }
+        const combined = `${r.stdout}\n${r.stderr}`.trim();
+        const failureSummary =
+          r.exit_code !== 0
+            ? (await import("../lib/testLoop")).distillTestOutput(combined)
+            : undefined;
+
         return {
           command: actualCommand,
           kind,
@@ -213,6 +219,7 @@ export function buildVerifyTools(ctx: ToolContext) {
           exit_code: r.exit_code,
           timed_out: r.timed_out,
           truncated: r.truncated,
+          distilled_error: failureSummary,
         };
       },
     }),

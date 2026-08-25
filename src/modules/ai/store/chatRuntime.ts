@@ -77,6 +77,8 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     getPlanMode: () => usePlanStore.getState().active,
     getStepBudget: () =>
       stepBudgetForRound(useChatStore.getState().agentMeta.runRound),
+    getCostBudgetUsd: () =>
+      usePreferencesStore.getState().costBudgetUsd,
     getCaptureDebug: () =>
       usePreferencesStore.getState().debugCaptureEnabled,
     getLmstudioBaseURL: () => usePreferencesStore.getState().lmstudioBaseURL,

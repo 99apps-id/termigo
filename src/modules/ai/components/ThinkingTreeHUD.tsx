@@ -1,0 +1,90 @@
+import { useState } from "react";
+import { cn } from "@/lib/utils";
+
+export type ThoughtNode = {
+  id: string;
+  title: string;
+  type: "thinking" | "tool" | "check" | "plan";
+  status: "running" | "completed" | "failed";
+  details?: string;
+  durationMs?: number;
+  substeps?: ThoughtNode[];
+};
+
+export function ThinkingTreeHUD({
+  nodes,
+  className,
+  defaultExpanded = true,
+}: {
+  nodes: ThoughtNode[];
+  className?: string;
+  defaultExpanded?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
+
+  if (!nodes || nodes.length === 0) return null;
+
+  return (
+    <div
+      className={cn(
+        "rounded-lg border border-border/50 bg-card/60 p-2.5 text-xs backdrop-blur-sm transition-all",
+        className,
+      )}
+    >
+      <button
+        type="button"
+        onClick={() => setExpanded(!expanded)}
+        className="flex w-full items-center justify-between font-mono text-[11px] font-medium text-muted-foreground hover:text-foreground"
+      >
+        <div className="flex items-center gap-2">
+          <span className="inline-block h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+          <span>Agent Execution & Reasoning ({nodes.length} steps)</span>
+        </div>
+        <span className="text-[10px] text-muted-foreground/80">
+          {expanded ? "▾ Collapse" : "▸ Expand"}
+        </span>
+      </button>
+
+      {expanded && (
+        <div className="mt-2.5 space-y-1.5 border-t border-border/30 pt-2 font-mono text-[11px]">
+          {nodes.map((node) => (
+            <div
+              key={node.id}
+              className="flex items-start justify-between rounded p-1.5 hover:bg-accent/40"
+            >
+              <div className="flex items-start gap-2 overflow-hidden pr-2">
+                <span className="mt-0.5 text-[10px] text-muted-foreground">
+                  {node.type === "tool" ? "🛠️" : node.type === "check" ? "🧪" : "💭"}
+                </span>
+                <div className="min-w-0">
+                  <div className="truncate font-medium text-foreground">{node.title}</div>
+                  {node.details && (
+                    <div className="text-[10px] text-muted-foreground truncate">{node.details}</div>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1.5 shrink-0">
+                {node.durationMs != null && (
+                  <span className="text-[10px] text-muted-foreground">{node.durationMs}ms</span>
+                )}
+                <span
+                  className={cn(
+                    "rounded px-1.5 py-0.2 text-[9px] uppercase",
+                    node.status === "completed"
+                      ? "bg-emerald-500/10 text-emerald-500"
+                      : node.status === "running"
+                        ? "bg-blue-500/10 text-blue-500 animate-pulse"
+                        : "bg-destructive/10 text-destructive",
+                  )}
+                >
+                  {node.status}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
