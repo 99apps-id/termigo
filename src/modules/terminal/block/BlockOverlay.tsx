@@ -211,6 +211,19 @@ function Toolbar({ block, all, onSearch }: ChromeProps) {
         </button>
       )}
       {duration && <span className="bt-dur">{duration}</span>}
+      {!block.running && (
+        <button
+          type="button"
+          title="Copy output"
+          className="bt-btn"
+          onClick={() => {
+            const o = all.readOutput(block.id) ?? "";
+            if (o) copy(o, "Output copied");
+          }}
+        >
+          <HugeiconsIcon icon={Copy01Icon} size={12.5} strokeWidth={1.75} />
+        </button>
+      )}
       {!block.running && !!block.command && (
         <button
           type="button"
