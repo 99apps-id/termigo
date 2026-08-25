@@ -10,13 +10,14 @@ import {
   KeyboardIcon,
   PaintBoardIcon,
   PlugSocketIcon,
+  PuzzleIcon,
   Settings01Icon,
   SourceCodeIcon,
   UserMultiple02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { type JSX, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState, type ComponentType } from "react";
 import { AboutSection } from "./sections/AboutSection";
 import { AgentsSection } from "./sections/AgentsSection";
 import { EditorSection } from "./sections/EditorSection";
@@ -27,11 +28,17 @@ import { ShortcutsSection } from "./sections/ShortcutsSection";
 import { SqlSection } from "./sections/SqlSection";
 import { ThemesSection } from "./sections/ThemesSection";
 
+// Lazy so the extension store (which bridges to the AI chat store) stays out
+// of the settings window's eager bundle; it loads only when the tab is opened.
+const ExtensionsSection = lazy(async () => ({
+  default: (await import("./sections/ExtensionsSection")).ExtensionsSection,
+}));
+
 const TABS: {
   id: SettingsTab;
   label: string;
   icon: typeof Settings01Icon;
-  component: () => JSX.Element;
+  component: ComponentType;
 }[] = [
   {
     id: "general",
@@ -71,6 +78,12 @@ const TABS: {
     component: McpSection,
   },
   {
+    id: "extensions",
+    label: "Extensions",
+    icon: PuzzleIcon,
+    component: ExtensionsSection,
+  },
+  {
     id: "sql",
     label: "SQL",
     icon: DatabaseIcon,
@@ -92,6 +105,7 @@ const VALID_TABS: SettingsTab[] = [
   "models",
   "agents",
   "mcp",
+  "extensions",
   "sql",
   "about",
 ];
@@ -167,7 +181,11 @@ export function SettingsApp() {
 
       <main className="min-h-0 flex-1 overflow-y-auto px-8 pt-6 pb-7 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <div className="mx-auto w-full max-w-160">
-          {ActiveSection && <ActiveSection />}
+          {ActiveSection ? (
+            <Suspense fallback={<p className="text-[12px] text-muted-foreground">Loading…</p>}>
+              <ActiveSection />
+            </Suspense>
+          ) : null}
         </div>
       </main>
     </div>

@@ -8,6 +8,7 @@ export type SettingsTab =
   | "models"
   | "agents"
   | "mcp"
+  | "extensions"
   | "sql"
   | "about";
 
