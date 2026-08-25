@@ -49,6 +49,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   compatModelIdForEndpoint,
+  estimateCost,
   getCompatModelInfo,
   getModel,
   isCompatModelId,
@@ -184,6 +185,8 @@ export function AiStatusBarControls() {
       <ModelDropdown />
 
       <TodayCostChip />
+
+      <RunCostChip />
 
       <span className="mx-1 h-8 w-px bg-border" aria-hidden />
       <Button
@@ -791,6 +794,48 @@ function TodayCostChip() {
         className="text-muted-foreground/70"
       />
       {`$${today.toFixed(2)}`}
+    </span>
+  );
+}
+
+/**
+ * Live per-run cost estimate, derived from the tokens the current run has
+ * already produced and the selected model's pricing. Shown only while a run
+ * is in flight so an idle bar stays quiet; hidden for local/keyless models
+ * whose cost is not priced.
+ */
+function RunCostChip() {
+  const status = useChatStore((s) => s.agentMeta.status);
+  const tokens = useChatStore((s) => s.agentMeta.tokens);
+  const modelId = useChatStore((s) => s.selectedModelId);
+
+  const inFlight =
+    status === "thinking" || status === "streaming" || status === "awaiting-approval";
+
+  const cost = useMemo(
+    () =>
+      estimateCost(modelId, {
+        inputTokens: tokens.inputTokens,
+        outputTokens: tokens.outputTokens,
+        cachedInputTokens: tokens.cachedInputTokens,
+      }),
+    [modelId, tokens],
+  );
+
+  if (!inFlight || cost == null || cost <= 0) return null;
+
+  return (
+    <span
+      className="flex items-center gap-1 rounded-md px-1.5 text-[10.5px] text-muted-foreground"
+      title={`Estimated cost of the current run: $${cost.toFixed(4)}`}
+    >
+      <HugeiconsIcon
+        icon={CoinsDollarIcon}
+        size={11}
+        strokeWidth={1.75}
+        className="animate-pulse text-foreground/60"
+      />
+      <span className="tabular-nums">~${cost.toFixed(2)}</span>
     </span>
   );
 }
