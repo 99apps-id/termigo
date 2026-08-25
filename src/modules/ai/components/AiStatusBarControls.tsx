@@ -13,6 +13,7 @@ import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import { ApprovalModeControl } from "./ApprovalModeControl";
 import { AgentDiagnosticsDialog } from "./AgentDiagnosticsDialog";
 import { ChangeReviewDialog } from "./ChangeReviewDialog";
+import { ContextMeter } from "./ContextMeter";
 import {
   Add01Icon,
   AiBookIcon,
@@ -126,6 +127,9 @@ export function AiStatusBarControls() {
       />
 
       <ApprovalModeControl className="mr-0.5" />
+
+      {/* Live context / token meter against the model's window. */}
+      <ContextMeter />
 
       {/* One surface for run metrics, the request inspector, and context state. */}
       <IconBtn
