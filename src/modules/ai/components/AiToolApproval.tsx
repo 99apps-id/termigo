@@ -177,11 +177,12 @@ function PreviewBlock({
     const removed = oldStr ? oldStr.split("\n").length : 0;
     const added = newStr ? newStr.split("\n").length : 0;
     return (
-      <div className="space-y-0.5 font-mono text-[11px]">
+      <div className="space-y-1.5 font-mono text-[11px]">
         <div className="text-muted-foreground">
           {String(input.path ?? "")}
           {input.replace_all ? " · replace all" : ""}
         </div>
+        <InlineDiff oldStr={oldStr} newStr={newStr} />
         <div className="text-[10.5px] text-muted-foreground/80">
           −{removed} / +{added} line{added === 1 && removed === 1 ? "" : "s"} ·
           review in the diff tab
@@ -194,8 +195,22 @@ function PreviewBlock({
       ? (input.edits as Array<{ old_string?: string; new_string?: string }>)
       : [];
     return (
-      <div className="space-y-0.5 font-mono text-[11px]">
+      <div className="space-y-1.5 font-mono text-[11px]">
         <div className="text-muted-foreground">{String(input.path ?? "")}</div>
+        <div className="space-y-1.5">
+          {edits.map((e, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: static edit list, order never changes
+            <div key={i} className="space-y-0.5">
+              <div className="text-[10.5px] text-muted-foreground/80">
+                edit {i + 1}
+              </div>
+              <InlineDiff
+                oldStr={e.old_string ?? ""}
+                newStr={e.new_string ?? ""}
+              />
+            </div>
+          ))}
+        </div>
         <div className="text-[10.5px] text-muted-foreground/80">
           {edits.length} edit{edits.length === 1 ? "" : "s"} · review in the
           diff tab
@@ -214,6 +229,47 @@ function PreviewBlock({
     <pre className="overflow-auto rounded-md bg-muted/60 p-2 font-mono text-[11px] leading-relaxed">
       {JSON.stringify(input, null, 2)}
     </pre>
+  );
+}
+
+// Compact inline diff for an edit in the approval card. Shows the removed
+// block in red and the added block in green so the user sees exactly what
+// changes before approving, without opening the diff tab. Long blocks are
+// capped so a huge paste does not flood the card.
+function InlineDiff({ oldStr, newStr }: { oldStr: string; newStr: string }) {
+  const CAP = 24;
+  const oldLines = oldStr ? oldStr.split("\n") : [];
+  const newLines = newStr ? newStr.split("\n") : [];
+  const oldShown = oldLines.length > CAP ? oldLines.slice(0, CAP) : oldLines;
+  const newShown = newLines.length > CAP ? newLines.slice(0, CAP) : newLines;
+
+  return (
+    <div className="max-h-52 overflow-auto rounded-md bg-muted/40 font-mono text-[11px] leading-relaxed">
+      {oldShown.map((l, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: static diff lines, order never changes
+        <div key={`o${i}`} className="whitespace-pre-wrap bg-red-500/10 px-2 text-red-500">
+          <span className="mr-1 select-none text-muted-foreground">−</span>
+          {l || " "}
+        </div>
+      ))}
+      {oldLines.length > oldShown.length && (
+        <div className="px-2 text-[10px] text-muted-foreground">
+          … {oldLines.length - oldShown.length} more removed lines
+        </div>
+      )}
+      {newShown.map((l, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: static diff lines, order never changes
+        <div key={`n${i}`} className="whitespace-pre-wrap bg-green-500/10 px-2 text-green-600">
+          <span className="mr-1 select-none text-muted-foreground">+</span>
+          {l || " "}
+        </div>
+      ))}
+      {newLines.length > newShown.length && (
+        <div className="px-2 text-[10px] text-muted-foreground">
+          … {newLines.length - newShown.length} more added lines
+        </div>
+      )}
+    </div>
   );
 }
 
