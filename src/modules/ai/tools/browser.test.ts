@@ -32,10 +32,22 @@ function makeCtx(): ToolContext {
 
 const OPTS = { toolCallId: "t", messages: [] } as never;
 
+type Exec = (
+  args: Record<string, unknown>,
+  options: { toolCallId: string; messages: never[] },
+) => Promise<unknown>;
+
+function execOf(tool: { execute?: unknown }): Exec {
+  const fn = tool.execute;
+  if (typeof fn !== "function") throw new Error("tool has no execute");
+  return fn as Exec;
+}
+
 describe("browser tools", () => {
   it("refuses SSRF targets in browser_open before touching the context", async () => {
     const ctx = makeCtx();
     const tools = buildBrowserTools(ctx);
+    const run = execOf(tools.browser_open);
     for (const url of [
       "http://169.254.169.254",
       "http://127.0.0.1",
@@ -43,10 +55,7 @@ describe("browser tools", () => {
       "http://[fe80::1]/",
       "file:///etc/passwd",
     ]) {
-      const r = (await tools.browser_open.execute(
-        { instance: "x", url },
-        OPTS,
-      )) as { error?: string };
+      const r = (await run({ instance: "x", url }, OPTS)) as { error?: string };
       expect(r.error, url).toBeTruthy();
     }
     expect(ctx.browserOpen).not.toHaveBeenCalled();
@@ -55,18 +64,18 @@ describe("browser tools", () => {
   it("opens an external site and passes through the context", async () => {
     const ctx = makeCtx();
     const tools = buildBrowserTools(ctx);
-    const r = await tools.browser_open.execute(
+    const r = (await execOf(tools.browser_open)(
       { instance: "docs", url: "https://example.com" },
       OPTS,
-    );
-    expect(r).toEqual({ url: "https://example.com" });
+    )) as { url?: string };
+    expect(r.url).toBe("https://example.com");
     expect(ctx.browserOpen).toHaveBeenCalledWith("docs", "https://example.com");
   });
 
   it("refuses a metadata URL in browser_navigate", async () => {
     const ctx = makeCtx();
     const tools = buildBrowserTools(ctx);
-    const r = (await tools.browser_navigate.execute(
+    const r = (await execOf(tools.browser_navigate)(
       { instance: "x", url: "http://169.254.169.254" },
       OPTS,
     )) as { error?: string };
@@ -77,12 +86,13 @@ describe("browser tools", () => {
   it("injects click JS with a JSON-quoted selector", async () => {
     const ctx = makeCtx();
     const tools = buildBrowserTools(ctx);
-    const r = await tools.browser_click.execute(
+    const r = (await execOf(tools.browser_click)(
       { instance: "docs", selector: "button.submit" },
       OPTS,
-    );
-    expect(r).toEqual({ ok: true });
-    const js = (ctx.browserEval as ReturnType<typeof vi.fn>).mock.calls[0][1] as string;
+    )) as { ok?: boolean };
+    expect(r.ok).toBe(true);
+    const calls = (ctx.browserEval as ReturnType<typeof vi.fn>).mock.calls;
+    const js = calls[0][1] as string;
     expect(js).toContain("document.querySelector(\"button.submit\")");
     expect(js).toContain("el.click()");
   });
@@ -90,12 +100,13 @@ describe("browser tools", () => {
   it("injects type JS that fires input/change events", async () => {
     const ctx = makeCtx();
     const tools = buildBrowserTools(ctx);
-    const r = await tools.browser_type.execute(
+    const r = (await execOf(tools.browser_type)(
       { instance: "docs", selector: "input[name='q']", text: "hello" },
       OPTS,
-    );
-    expect(r).toEqual({ ok: true });
-    const js = (ctx.browserEval as ReturnType<typeof vi.fn>).mock.calls[0][1] as string;
+    )) as { ok?: boolean };
+    expect(r.ok).toBe(true);
+    const calls = (ctx.browserEval as ReturnType<typeof vi.fn>).mock.calls;
+    const js = calls[0][1] as string;
     expect(js).toContain("input[name='q']");
     expect(js).toContain("dispatchEvent(new Event('input'");
   });
@@ -103,7 +114,10 @@ describe("browser tools", () => {
   it("lists open instances", async () => {
     const ctx = makeCtx();
     const tools = buildBrowserTools(ctx);
-    const r = await tools.browser_list.execute({}, OPTS);
-    expect(r).toEqual({ instances: ["docs"] });
+    const r = (await execOf(tools.browser_list)(
+      {},
+      OPTS,
+    )) as { instances?: string[] };
+    expect(r.instances).toEqual(["docs"]);
   });
 });

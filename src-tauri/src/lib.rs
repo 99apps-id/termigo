@@ -2,7 +2,7 @@ pub mod modules;
 
 use modules::{
     agent, browser, control, extensions, fs, git, history, lsp, mcp, net, pty, secrets, shell,
-    ssh, workspace,
+    sql, ssh, workspace,
 };
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -352,6 +352,7 @@ pub fn run() {
             browser::browser_url,
             browser::browser_close,
             browser::browser_list,
+            sql::sql_run,
             agent::agent_enable_hooks,
             agent::agent_locate_command,
             agent::agent_hooks_status,

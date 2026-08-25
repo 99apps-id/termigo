@@ -6,6 +6,7 @@ import {
 import { usePlanStore } from "../store/planStore";
 import { useChatStore } from "../store/chatStore";
 import { useApprovalQueue } from "../store/approvalQueueStore";
+import { useSessionDirectiveStore } from "../store/sessionDirectiveStore";
 import {
   formatQueue,
   parseApprovalTarget,
@@ -87,6 +88,18 @@ export const SLASH_COMMANDS: Record<string, SlashCommandMeta> = {
     label: "Delegate to Claude Code",
     icon: ClaudeIcon,
   },
+  goal: {
+    name: "goal",
+    invocation: "/goal",
+    label: "Set the session goal",
+    icon: SparklesIcon,
+  },
+  schedule: {
+    name: "schedule",
+    invocation: "/schedule",
+    label: "Schedule a recurring task",
+    icon: CheckListIcon,
+  },
 };
 
 export const TERMIGO_CMD_RE =
@@ -139,9 +152,74 @@ export function tryRunSlashCommand(input: string): SlashOutcome {
       return respondToWaiting(tail, true);
     case "deny":
       return respondToWaiting(tail, false);
+    case "goal":
+      return respondToGoal(tail);
+    case "schedule":
+      return respondToSchedule(tail);
     default:
       return { kind: "none" };
   }
+}
+
+function respondToGoal(tail: string): SlashOutcome {
+  const sessionId = useChatStore.getState().activeSessionId ?? "";
+  const store = useSessionDirectiveStore.getState();
+  if (tail === "off") {
+    store.setGoal(sessionId, null);
+    return { kind: "handled", toast: "Goal cleared" };
+  }
+  if (!tail) {
+    const goal = store.getGoal(sessionId);
+    return {
+      kind: "handled",
+      toast: goal ? `Goal: ${goal}` : "No goal set. Usage: /goal <goal>",
+    };
+  }
+  store.setGoal(sessionId, tail);
+  return { kind: "handled", toast: "Goal set" };
+}
+
+function respondToSchedule(tail: string): SlashOutcome {
+  const sessionId = useChatStore.getState().activeSessionId ?? "";
+  const store = useSessionDirectiveStore.getState();
+  if (!tail) {
+    return {
+      kind: "handled",
+      toast: "Usage: /schedule <when> <prompt> | list | remove <n>",
+    };
+  }
+  if (tail === "list") {
+    const schedules = store.getSchedules(sessionId);
+    if (schedules.length === 0) {
+      return { kind: "handled", toast: "No scheduled tasks." };
+    }
+    const lines = schedules.map(
+      (s, i) => `${i + 1}. ${s.enabled ? "" : "(paused) "}${s.when}: ${s.prompt}`,
+    );
+    return { kind: "handled", toast: lines.join("\n") };
+  }
+  if (tail.startsWith("remove ")) {
+    const n = Number(tail.slice(7).trim());
+    const schedules = store.getSchedules(sessionId);
+    const target = schedules[n - 1];
+    if (!target) return { kind: "handled", toast: "No such schedule." };
+    store.removeSchedule(sessionId, target.id);
+    return { kind: "handled", toast: `Removed schedule ${n}` };
+  }
+  const sp = tail.indexOf(" ");
+  if (sp === -1) {
+    return {
+      kind: "handled",
+      toast: "Usage: /schedule <when> <prompt>",
+    };
+  }
+  const when = tail.slice(0, sp).trim();
+  const prompt = tail.slice(sp + 1).trim();
+  if (!prompt) {
+    return { kind: "handled", toast: "Usage: /schedule <when> <prompt>" };
+  }
+  store.addSchedule(sessionId, when, prompt);
+  return { kind: "handled", toast: `Scheduled "${when}": ${prompt}` };
 }
 
 /**

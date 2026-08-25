@@ -103,6 +103,8 @@ type LiveSnapshot = {
   terminalPrivate: boolean;
   workspaceRoot: string | null;
   activeFile: string | null;
+  goal: string | null;
+  schedules: { when: string; prompt: string; enabled: boolean }[];
 };
 
 type Deps = {
@@ -343,6 +345,13 @@ function formatEnvBlock(live: LiveSnapshot): string | null {
   if (live.cwd) lines.push(`active_terminal_cwd: ${live.cwd}`);
   if (live.activeFile) lines.push(`active_file: ${live.activeFile}`);
   if (live.terminalPrivate) lines.push("active_terminal_mode: private");
+  if (live.goal) lines.push(`goal: ${live.goal}`);
+  if (live.schedules.length > 0) {
+    lines.push("schedules:");
+    for (const s of live.schedules) {
+      lines.push(`  - ${s.enabled ? "" : "(paused) "}${s.when}: ${s.prompt}`);
+    }
+  }
   if (lines.length === 0) return null;
   return `<env>\n${lines.join("\n")}\n</env>`;
 }

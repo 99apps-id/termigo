@@ -5,6 +5,7 @@ import type { SettingsTab } from "@/modules/settings/openSettingsWindow";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   AiScanIcon,
+  DatabaseIcon,
   InformationCircleIcon,
   KeyboardIcon,
   PaintBoardIcon,
@@ -23,6 +24,7 @@ import { GeneralSection } from "./sections/GeneralSection";
 import { McpSection } from "./sections/McpSection";
 import { ModelsSection } from "./sections/ModelsSection";
 import { ShortcutsSection } from "./sections/ShortcutsSection";
+import { SqlSection } from "./sections/SqlSection";
 import { ThemesSection } from "./sections/ThemesSection";
 
 const TABS: {
@@ -69,6 +71,12 @@ const TABS: {
     component: McpSection,
   },
   {
+    id: "sql",
+    label: "SQL",
+    icon: DatabaseIcon,
+    component: SqlSection,
+  },
+  {
     id: "about",
     label: "About",
     icon: InformationCircleIcon,
@@ -83,6 +91,8 @@ const VALID_TABS: SettingsTab[] = [
   "shortcuts",
   "models",
   "agents",
+  "mcp",
+  "sql",
   "about",
 ];
 

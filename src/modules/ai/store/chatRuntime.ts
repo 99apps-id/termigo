@@ -10,6 +10,7 @@ import {
   type ModelId,
 } from "../config";
 import { usePreferencesStore } from "@/modules/settings/preferences";
+import { useSessionDirectiveStore } from "./sessionDirectiveStore";
 import { BUILTIN_AGENTS } from "../lib/agents";
 import { useAgentsStore } from "./agentsStore";
 import { usePlanStore } from "./planStore";
@@ -92,11 +93,14 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     },
     getLive: () => {
       const live = useChatStore.getState().live;
+      const directives = useSessionDirectiveStore.getState();
       return {
         cwd: live.getCwd(),
         terminalPrivate: live.isActiveTerminalPrivate(),
         workspaceRoot: live.getWorkspaceRoot(),
         activeFile: live.getActiveFile(),
+        goal: directives.getGoal(sessionId),
+        schedules: directives.getSchedules(sessionId),
       };
     },
     getPlanMode: () => usePlanStore.getState().active,

@@ -28,6 +28,7 @@ import { buildTestLoopTools } from "./testLoopTools";
 import { buildPtyDriverTools } from "./ptyDriver";
 import { buildOrchestratorTools } from "../lib/orchestrator";
 import { buildBrowserTools } from "./browser";
+import { buildSqlTools } from "./sql";
 
 export { resolvePath, type ToolContext } from "./context";
 
@@ -151,6 +152,7 @@ export function buildTools(ctx: import("./context").ToolContext) {
     ...buildPtyDriverTools(ctx),
     ...buildOrchestratorTools(ctx),
     ...buildBrowserTools(ctx),
+    ...buildSqlTools(),
   } as const;
 
   // Store a reference so the workflow / orchestrator engines can dispatch
