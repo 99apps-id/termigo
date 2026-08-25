@@ -1,6 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { checkShellCommand } from "../lib/security";
+import { isSafePreviewUrl } from "../lib/browserGuard";
 import type { ToolContext } from "./context";
 
 export function buildTerminalTools(ctx: ToolContext) {
@@ -80,15 +81,11 @@ export function buildTerminalTools(ctx: ToolContext) {
         if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
           return { error: "only http/https URLs are allowed", url };
         }
-        const host = parsed.hostname;
-        const isLocal =
-          host === "localhost" ||
-          host === "127.0.0.1" ||
-          host === "0.0.0.0" ||
-          host === "[::1]" ||
-          host === "::1" ||
-          host.endsWith(".localhost");
-        if (!isLocal) {
+        // Route the host check through the SSRF guard so decimal/hex-dotted
+        // IPv4, IPv6 link-local and cloud-metadata tricks cannot masquerade as
+        // a loopback dev server. `isSafePreviewUrl` re-allows loopback, which
+        // the raw guard refuses, while still rejecting the rest.
+        if (!isSafePreviewUrl(url)) {
           return {
             error:
               "open_preview is restricted to localhost URLs. Ask the user to paste the external URL into the preview address bar instead.",
