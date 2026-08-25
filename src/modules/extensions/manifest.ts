@@ -140,6 +140,9 @@ export const ManifestSchema = z
     homepage: z.string().nullish(),
     icon: z.string().nullish(),
     main: z.string().nullish(),
+    /** Opt-in worker sandbox: run the extension module in a Web Worker instead
+     *  of the main webview. Only "worker" is supported today. */
+    sandbox: z.literal("worker").optional(),
     permissions: z.array(z.string()).default([]),
     // Rust emits JSON `null` when `contributes` is omitted. `.default({})`
     // only fires on `undefined`, so coerce `null` to `undefined` first.
