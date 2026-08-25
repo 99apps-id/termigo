@@ -18,7 +18,7 @@ export type ErrorSummary = {
  * Filters out noise, success lines, and irrelevant log banners.
  */
 export function distillTestOutput(output: string): ErrorSummary {
-  if (!output || !output.trim()) {
+  if (!output?.trim()) {
     return {
       kind: "unknown",
       conciseMessage: "Command failed with empty output",
@@ -56,7 +56,7 @@ export function distillTestOutput(output: string): ErrorSummary {
     if (match) {
       files.add(match[1]);
       const num = parseInt(match[2], 10);
-      if (!isNaN(num)) lineNums.add(num);
+      if (!Number.isNaN(num)) lineNums.add(num);
       failingLines.push(trimmed);
     }
   }
@@ -83,4 +83,65 @@ export function shouldRetryTest(opts: {
 }): boolean {
   if (opts.exitCode === 0) return false;
   return opts.attempt < opts.maxRetries;
+}
+
+/**
+ * Build the retry guidance shown to the model after a focused test run, so the
+ * test-fix loop is capped and the model is told when to stop instead of
+ * re-running the same failing test forever.
+ */
+export function retryGuidance(opts: {
+  attempt: number;
+  maxRetries: number;
+  exitCode: number;
+}): { shouldRetry: boolean; guidance: string } {
+  if (opts.exitCode === 0) {
+    return { shouldRetry: false, guidance: "Tests passed. No retry needed." };
+  }
+  if (shouldRetryTest(opts)) {
+    return {
+      shouldRetry: true,
+      guidance: `Attempt ${opts.attempt}/${opts.maxRetries}. Read distilled_error, fix the reported files, then call test_file again.`,
+    };
+  }
+  return {
+    shouldRetry: false,
+    guidance: `Attempt ${opts.attempt}/${opts.maxRetries} reached the retry limit. Stop re-running the same test; summarize the remaining failure and ask the user how to proceed.`,
+  };
+}
+
+/**
+ * Track per-file test attempts so the fix->re-run loop is bounded. Keyed by an
+ * opaque string (typically `sessionId:filePath`). A passing run resets the
+ * counter for that key; a failing run increments it.
+ */
+export class TestAttemptTracker {
+  private attempts = new Map<string, number>();
+
+  constructor(private readonly maxRetries: number) {}
+
+  /** Record a run and return the 1-based attempt number for this key. */
+  record(key: string, exitCode: number): number {
+    if (exitCode === 0) {
+      this.attempts.set(key, 0);
+      return 0;
+    }
+    const next = (this.attempts.get(key) ?? 0) + 1;
+    this.attempts.set(key, next);
+    return next;
+  }
+
+  /** Current attempt count for a key without recording a new run. */
+  peek(key: string): number {
+    return this.attempts.get(key) ?? 0;
+  }
+
+  get max(): number {
+    return this.maxRetries;
+  }
+
+  /** Forget all tracked attempts (e.g. when a chat session ends). */
+  reset(): void {
+    this.attempts.clear();
+  }
 }

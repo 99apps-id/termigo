@@ -67,3 +67,8 @@ export function resolveRemotePath(
     ? `${remoteCwd}${rawPath}`
     : `${remoteCwd}/${rawPath}`;
 }
+
+// Re-export dispatcher utilities from tools.ts so callers can import them from
+// a single place. The implementation lives there because it references the
+// module-level `currentToolRegistry` set by `buildTools`.
+export { dispatchTool, resetToolRegistry } from "./tools";

@@ -1,7 +1,25 @@
-import { diagnosticCount, forEachDiagnostic } from "@codemirror/lint";
+import {
+  diagnosticCount,
+  forEachDiagnostic,
+  type Diagnostic,
+} from "@codemirror/lint";
 import type { Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import { useDiagnosticsStore } from "./diagnosticsStore";
+import {
+  type DiagnosticItem,
+  useDiagnosticsStore,
+} from "./diagnosticsStore";
+
+function toItem(state: EditorView["state"], d: Diagnostic, from: number): DiagnosticItem {
+  const line = state.doc.lineAt(Math.min(from, Math.max(0, state.doc.length - 1)));
+  return {
+    line: line.number,
+    column: from - line.from + 1,
+    severity: d.severity,
+    message: d.message,
+    source: d.source ?? null,
+  };
+}
 
 export function diagnosticsReporter(getPath: () => string): Extension {
   return EditorView.updateListener.of((update) => {
@@ -12,14 +30,15 @@ export function diagnosticsReporter(getPath: () => string): Extension {
       return;
     }
     const total = diagnosticCount(update.state);
-    let errors = 0;
-    let warnings = 0;
+    let items: DiagnosticItem[] = [];
     if (total > 0) {
-      forEachDiagnostic(update.state, (d) => {
-        if (d.severity === "error") errors += 1;
-        else if (d.severity === "warning") warnings += 1;
+      const seen = new Set<Diagnostic>();
+      forEachDiagnostic(update.state, (d, from) => {
+        if (seen.has(d)) return;
+        seen.add(d);
+        items.push(toItem(update.state, d, from));
       });
     }
-    useDiagnosticsStore.getState().report(getPath(), { errors, warnings });
+    useDiagnosticsStore.getState().report(getPath(), items);
   });
 }

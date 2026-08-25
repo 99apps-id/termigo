@@ -155,9 +155,11 @@ func (s *Server) handleRequest(out io.Writer, req RPCRequest) {
 		}
 
 		if params.Name == "termigo_get_diagnostics" {
+			path, _ := params.Arguments["path"].(string)
+			text := s.runDiagnostics(context.Background(), path)
 			s.sendResult(out, req.ID, map[string]interface{}{
 				"content": []map[string]string{
-					{"type": "text", "text": "No active diagnostic issues found."},
+					{"type": "text", "text": text},
 				},
 			})
 			return

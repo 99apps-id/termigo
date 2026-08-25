@@ -12,7 +12,9 @@ describe("invariant tools", () => {
   });
 
   it("pins, lists, and formats invariants into prompt block", async () => {
-    const tools = buildInvariantTools();
+    const tools = buildInvariantTools({
+      getWorkspaceRoot: () => null,
+    } as never);
     const pinExec = tools.pin_invariant.execute;
     if (!pinExec) throw new Error("pin_invariant execute missing");
 

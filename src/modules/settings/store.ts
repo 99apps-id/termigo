@@ -152,6 +152,11 @@ export type Preferences = {
   openrouterModelId: string;
   /** How much the agent may do without stopping for approval. */
   agentApprovalMode: ApprovalMode;
+  /**
+   * Tools the user chose "always allow" for. These skip the approval prompt
+   * in every session until removed.
+   */
+  agentAlwaysAllowedTools: string[];
   sttProvider: SttProvider;
   groqSttModel: string;
   whispercppBaseURL: string;
@@ -252,6 +257,7 @@ const KEY_OPENAI_COMPAT_CONTEXT_LIMIT = "openaiCompatibleContextLimit";
 const KEY_CUSTOM_ENDPOINTS = "customEndpoints";
 const KEY_OPENROUTER_MODEL_ID = "openrouterModelId";
 const KEY_AGENT_APPROVAL_MODE = "agentApprovalMode";
+const KEY_AGENT_ALWAYS_ALLOWED_TOOLS = "agentAlwaysAllowedTools";
 const KEY_STT_PROVIDER = "sttProvider";
 const KEY_GROQ_STT_MODEL = "groqSttModel";
 const KEY_WHISPERCPP_BASE_URL = "whispercppBaseURL";
@@ -346,6 +352,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   customEndpoints: [],
   openrouterModelId: "",
   agentApprovalMode: DEFAULT_APPROVAL_MODE,
+  agentAlwaysAllowedTools: [],
   sttProvider: DEFAULT_STT_PROVIDER,
   groqSttModel: "whisper-large-v3-turbo",
   whispercppBaseURL: WHISPERCPP_DEFAULT_BASE_URL,
@@ -488,6 +495,10 @@ export async function loadPreferences(): Promise<Preferences> {
     agentApprovalMode:
       get<ApprovalMode>(KEY_AGENT_APPROVAL_MODE) ??
       DEFAULT_PREFERENCES.agentApprovalMode,
+    agentAlwaysAllowedTools: (
+      get<string[]>(KEY_AGENT_ALWAYS_ALLOWED_TOOLS) ??
+      DEFAULT_PREFERENCES.agentAlwaysAllowedTools
+    ).filter((t) => typeof t === "string" && t.length > 0),
     sttProvider:
       get<SttProvider>(KEY_STT_PROVIDER) ?? DEFAULT_PREFERENCES.sttProvider,
     groqSttModel:
@@ -763,6 +774,12 @@ export async function setAgentApprovalMode(value: ApprovalMode): Promise<void> {
   await writePref(KEY_AGENT_APPROVAL_MODE, value);
 }
 
+export async function setAgentAlwaysAllowedTools(
+  value: string[],
+): Promise<void> {
+  await writePref(KEY_AGENT_ALWAYS_ALLOWED_TOOLS, value);
+}
+
 export async function setSttProvider(value: SttProvider): Promise<void> {
   await writePref(KEY_STT_PROVIDER, value);
 }
@@ -1024,6 +1041,7 @@ export async function onPreferencesChange(
     [KEY_LAST_WSL_DISTRO]: "lastWslDistro",
     [KEY_ZOOM_LEVEL]: "zoomLevel",
     [KEY_AGENT_APPROVAL_MODE]: "agentApprovalMode",
+    [KEY_AGENT_ALWAYS_ALLOWED_TOOLS]: "agentAlwaysAllowedTools",
     [KEY_AGENT_NOTIFICATIONS]: "agentNotifications",
     [KEY_DEBUG_CAPTURE]: "debugCaptureEnabled",
     [KEY_AGENT_REVIEW_AFTER_APPLY]: "agentReviewAfterApply",

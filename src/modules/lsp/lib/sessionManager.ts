@@ -1,3 +1,5 @@
+import type { ReadResult } from "@/modules/ai/lib/native";
+import { resolveLanguageSync } from "@/modules/editor/lib/languageResolver";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import type { Extension } from "@codemirror/state";
@@ -380,6 +382,102 @@ export async function restartPresetSessions(presetId: string): Promise<void> {
   const store = useLspRuntimeStore.getState();
   store.clearFailed(presetId);
   store.bumpGeneration(presetId);
+}
+
+// A live LSP session + the document opened into it, for the agent's
+// read-only query tools (definition, references). The client is the same
+// TermigoLspClient the editor uses, so a file the user has open queries its
+// already-indexed project without spawning a second server.
+export type LspQueryHandle = {
+  client: TermigoLspClient;
+  root: string;
+  presetId: string;
+  languageId: string;
+  uri: string;
+  /** Release the reference this query took on the session. */
+  release: () => void;
+};
+
+/**
+ * Resolve the live LSP session that serves `path` and ensure the document is
+ * open on it, for read-only agent queries. Reuses the editor's session pool,
+ * session caps, crash backoff and idle shutdown.
+ *
+ * Returns null when there is no enabled, reachable language server for the
+ * file's language, when no project root can be resolved, or when the file is
+ * too large / unreadable to open into the server.
+ */
+export async function acquireQuerySession(
+  path: string,
+): Promise<LspQueryHandle | null> {
+  if (currentWorkspaceEnv().kind !== "local") return null;
+  const prefs = usePreferencesStore.getState();
+  const langId = resolveLanguageSync(path)?.id;
+  if (!langId) return null;
+  const preset = serverForLanguage(
+    langId,
+    prefs.lspCustomServers,
+    prefs.lspActivation,
+  );
+  if (!preset) return null;
+  if (prefs.lspActivation[preset.id] !== "enabled") return null;
+  if (!(await detectBinary(preset.command))) return null;
+
+  const markers =
+    preset.rootMarkers.length > 0 ? preset.rootMarkers : [".git"];
+  const root = await invoke<string | null>("lsp_resolve_root", {
+    path,
+    markers,
+  }).catch(() => null);
+  if (!root) return null;
+  const key = `${preset.id}\u0000${root}`;
+  if (crashedOut(key)) return null;
+  if (
+    !sessions.has(key) &&
+    [...sessions.values()].filter((m) => m.preset.id === preset.id).length >=
+      MAX_SESSIONS_PER_PRESET
+  ) {
+    return null;
+  }
+
+  const managed =
+    sessions.get(key) ?? (await getOrCreateSession(key, preset, root));
+  if (!managed) return null;
+  try {
+    await managed.client.initializePromise;
+  } catch {
+    return null;
+  }
+
+  const uri = pathToFileUri(path);
+  const languageId = preset.languages[langId] ?? langId;
+  let opened = false;
+  if (!managed.refs.has(uri)) {
+    const result = await invoke<ReadResult>("fs_read_file", {
+      path,
+      workspace: currentWorkspaceEnv(),
+    }).catch(() => null);
+    if (!result || result.kind !== "text") return null;
+    await managed.client.textDocumentDidOpen({
+      textDocument: { uri, languageId, version: 1, text: result.content },
+    });
+    addRef(managed, uri);
+    opened = true;
+  }
+
+  let released = false;
+  return {
+    client: managed.client,
+    root: managed.root,
+    presetId: preset.id,
+    languageId,
+    uri,
+    release: () => {
+      if (released) return;
+      released = true;
+      if (opened) releaseRef(managed, uri);
+    },
+  };
 }
 
 // Disabling can happen in the Settings window; sessions live here. React to

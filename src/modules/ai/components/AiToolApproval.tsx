@@ -2,10 +2,12 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   Cancel01Icon,
+  Clock01Icon,
   Edit02Icon,
   FileEditIcon,
   FilePlusIcon,
   FolderAddIcon,
+  Infinity01Icon,
   TerminalIcon,
   Tick02Icon,
   ToolsIcon,
@@ -13,6 +15,9 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ToolUIPart } from "ai";
 import { memo } from "react";
+import { usePreferencesStore } from "@/modules/settings/preferences";
+import { setAgentAlwaysAllowedTools } from "@/modules/settings/store";
+import { rememberSessionAllowed } from "../store/approvalQueueStore";
 
 type Props = {
   part: Extract<ToolUIPart, { state: "approval-requested" }>;
@@ -67,6 +72,37 @@ function AiToolApprovalImpl({ part, toolName, onRespond }: Props) {
         >
           <HugeiconsIcon icon={Cancel01Icon} size={12} strokeWidth={2} />
           Deny
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => {
+            rememberSessionAllowed(toolName);
+            onRespond(true);
+          }}
+          className="h-7 gap-1.5 text-[11px]"
+          title="Approve, and don't ask again for this tool this session"
+        >
+          <HugeiconsIcon icon={Clock01Icon} size={12} strokeWidth={2} />
+          This session
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => {
+            rememberSessionAllowed(toolName);
+            const list =
+              usePreferencesStore.getState().agentAlwaysAllowedTools;
+            if (!list.includes(toolName)) {
+              void setAgentAlwaysAllowedTools([...list, toolName]);
+            }
+            onRespond(true);
+          }}
+          className="h-7 gap-1.5 text-[11px]"
+          title="Approve, and never ask again for this tool"
+        >
+          <HugeiconsIcon icon={Infinity01Icon} size={12} strokeWidth={2} />
+          Always
         </Button>
         <Button
           size="sm"

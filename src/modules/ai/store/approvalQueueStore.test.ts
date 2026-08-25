@@ -3,7 +3,13 @@
 // because "the sub-agent hangs forever" is the failure mode that matters and
 // no amount of target-parsing coverage would catch it.
 import { beforeEach, describe, expect, it } from "vitest";
-import { useApprovalQueue } from "./approvalQueueStore";
+import {
+  clearSessionAllowed,
+  isApprovedDecision,
+  isSessionAllowed,
+  rememberSessionAllowed,
+  useApprovalQueue,
+} from "./approvalQueueStore";
 
 const req = (requester = "builder #1") => ({
   requester,
@@ -17,6 +23,7 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
 beforeEach(() => {
   useApprovalQueue.getState().cancelAll();
   useApprovalQueue.setState({ pending: [] });
+  clearSessionAllowed();
 });
 
 describe("a request waits until it is answered", () => {
@@ -33,20 +40,20 @@ describe("a request waits until it is answered", () => {
     expect(useApprovalQueue.getState().pending).toHaveLength(1);
   });
 
-  it("resolves true when approved", async () => {
+  it("resolves approve when approved", async () => {
     const p = useApprovalQueue.getState().request(req());
     await tick();
     const [entry] = useApprovalQueue.getState().pending;
     useApprovalQueue.getState().respond([entry.id], true);
-    await expect(p).resolves.toBe(true);
+    await expect(p).resolves.toBe("approve");
   });
 
-  it("resolves false when denied, which is an answer and not an error", async () => {
+  it("resolves deny when denied, which is an answer and not an error", async () => {
     const p = useApprovalQueue.getState().request(req());
     await tick();
     const [entry] = useApprovalQueue.getState().pending;
     useApprovalQueue.getState().respond([entry.id], false);
-    await expect(p).resolves.toBe(false);
+    await expect(p).resolves.toBe("deny");
   });
 
   it("leaves the queue empty once answered", async () => {
@@ -57,6 +64,51 @@ describe("a request waits until it is answered", () => {
       .respond([useApprovalQueue.getState().pending[0].id], true);
     await p;
     expect(useApprovalQueue.getState().pending).toHaveLength(0);
+  });
+});
+
+describe("the answer is a decision, not a yes/no", () => {
+  it("respondWith passes a session allowance through", async () => {
+    const p = useApprovalQueue.getState().request(req());
+    await tick();
+    const [entry] = useApprovalQueue.getState().pending;
+    useApprovalQueue.getState().respondWith([entry.id], "allow-session");
+    await expect(p).resolves.toBe("allow-session");
+  });
+
+  it("respondWith passes a permanent allowance through", async () => {
+    const p = useApprovalQueue.getState().request(req());
+    await tick();
+    const [entry] = useApprovalQueue.getState().pending;
+    useApprovalQueue.getState().respondWith([entry.id], "allow-always");
+    await expect(p).resolves.toBe("allow-always");
+  });
+
+  it("treats every allowance as an approval", () => {
+    expect(isApprovedDecision("approve")).toBe(true);
+    expect(isApprovedDecision("allow-session")).toBe(true);
+    expect(isApprovedDecision("allow-always")).toBe(true);
+    expect(isApprovedDecision("deny")).toBe(false);
+  });
+});
+
+describe("session memory remembers what the user allowed", () => {
+  it("starts empty", () => {
+    expect(isSessionAllowed("write_file")).toBe(false);
+  });
+
+  it("remembers a tool once allowed", () => {
+    rememberSessionAllowed("write_file");
+    expect(isSessionAllowed("write_file")).toBe(true);
+    expect(isSessionAllowed("edit")).toBe(false);
+  });
+
+  it("clears everything on demand", () => {
+    rememberSessionAllowed("write_file");
+    rememberSessionAllowed("edit");
+    clearSessionAllowed();
+    expect(isSessionAllowed("write_file")).toBe(false);
+    expect(isSessionAllowed("edit")).toBe(false);
   });
 });
 
@@ -82,7 +134,7 @@ describe("several agents wait at once", () => {
     await tick();
     const [first] = useApprovalQueue.getState().pending;
     useApprovalQueue.getState().respond([first.id], true);
-    await expect(a).resolves.toBe(true);
+    await expect(a).resolves.toBe("approve");
     expect(bSettled).toBe(false);
     expect(useApprovalQueue.getState().pending).toHaveLength(1);
   });
@@ -104,8 +156,8 @@ describe("stopping ends work that is blocked", () => {
     const b = useApprovalQueue.getState().request(req("builder #2"));
     await tick();
     expect(useApprovalQueue.getState().cancelAll()).toBe(2);
-    await expect(a).resolves.toBe(false);
-    await expect(b).resolves.toBe(false);
+    await expect(a).resolves.toBe("deny");
+    await expect(b).resolves.toBe("deny");
     expect(useApprovalQueue.getState().pending).toHaveLength(0);
   });
 
@@ -114,7 +166,7 @@ describe("stopping ends work that is blocked", () => {
     const p = useApprovalQueue.getState().request(req(), ac.signal);
     await tick();
     ac.abort();
-    await expect(p).resolves.toBe(false);
+    await expect(p).resolves.toBe("deny");
     expect(useApprovalQueue.getState().pending).toHaveLength(0);
   });
 
@@ -123,7 +175,7 @@ describe("stopping ends work that is blocked", () => {
     ac.abort();
     await expect(
       useApprovalQueue.getState().request(req(), ac.signal),
-    ).resolves.toBe(false);
+    ).resolves.toBe("deny");
     expect(useApprovalQueue.getState().pending).toHaveLength(0);
   });
 
@@ -134,6 +186,6 @@ describe("stopping ends work that is blocked", () => {
     const [entry] = useApprovalQueue.getState().pending;
     useApprovalQueue.getState().respond([entry.id], true);
     expect(useApprovalQueue.getState().respond([entry.id], false)).toBe(0);
-    await expect(p).resolves.toBe(true);
+    await expect(p).resolves.toBe("approve");
   });
 });

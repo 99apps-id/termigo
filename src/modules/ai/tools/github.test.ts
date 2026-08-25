@@ -11,7 +11,9 @@ import {
 const shellSessionRun = vi.fn();
 vi.mock("../lib/native", () => ({
   native: {
+    shellSessionOpen: vi.fn().mockResolvedValue(7),
     shellSessionRun: (...a: unknown[]) => shellSessionRun(...a),
+    shellSessionClose: vi.fn().mockResolvedValue(undefined),
   },
 }));
 

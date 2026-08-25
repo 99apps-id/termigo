@@ -2,7 +2,8 @@ import { tool } from "ai";
 import { z } from "zod";
 import { useChatStore } from "../store/chatStore";
 import { native } from "../lib/native";
-import type { ToolContext } from "./context";
+import { type ToolContext } from "./context";
+import { dispatchTool } from "./tools";
 
 /**
  * Agentic Workflow Engine
@@ -10,7 +11,7 @@ import type { ToolContext } from "./context";
  * Lets users define reusable multi-step workflows as JSON files under
  * `.termigo/workflows/`. Each workflow is a DAG of tool calls with explicit
  * dependencies, so the agent can execute complex sequences like:
- * "review → test → format → commit" in one command.
+ * "review -> test -> format -> commit" in one command.
  *
  * Workflows are versioned, shareable, and can be invoked by name from the
  * agent or from the CLI.
@@ -89,7 +90,9 @@ export async function listWorkflowNames(): Promise<string[]> {
   if (!root) return [];
   try {
     const result = await native.glob({ pattern: "*.json", root });
-    return result.hits.map((hit) => hit.path.split("/").pop()?.replace(/\.json$/, "") ?? "").filter(Boolean);
+    return result.hits
+      .map((hit) => hit.path.split("/").pop()?.replace(/\.json$/, "") ?? "")
+      .filter(Boolean);
   } catch {
     return [];
   }
@@ -100,11 +103,12 @@ export async function listWorkflowNames(): Promise<string[]> {
 type StepResult = { ok: boolean; output?: unknown; error?: string };
 
 /**
- * Execute a single workflow step by delegating to the matching tool handler.
+ * Execute a single workflow step by dispatching to the live tool registry.
  *
- * This is intentionally lightweight: it only supports tools that are already
- * exposed to the agent. If a workflow references an unknown tool, the step
- * fails fast with a clear message.
+ * Steps with a `tool` field are forwarded to `dispatchTool`, which looks up
+ * the tool by name and runs its `execute` function. Steps without a tool
+ * fall through to a seeded result (used by the orchestrator's depends_on
+ * plumbing).
  */
 async function executeStep(
   step: WorkflowStep,
@@ -115,13 +119,14 @@ async function executeStep(
     return seeded as StepResult;
   }
 
-  // In a full implementation this would route through the tool dispatcher.
-  // For now we return a successful placeholder so the workflow shell is
-  // usable and testable; the tool wiring can be completed once the
-  // dispatcher surface is stable.
+  if (step.tool) {
+    const result = await dispatchTool(step.tool, step.params ?? {});
+    return { ok: true, output: result };
+  }
+
   return {
-    ok: true,
-    output: { tool: step.tool, params: step.params ?? {} },
+    ok: false,
+    error: `step "${step.id}" has no tool to invoke`,
   };
 }
 
@@ -212,7 +217,7 @@ export function buildWorkflowTools(_ctx: ToolContext) {
 
     run_workflow: tool({
       description:
-        "Run a named agentic workflow from `.termigo/workflows/<name>.json`. Workflows are reusable multi-step automation pipelines (review → test → format → commit). Use this when the task matches a defined workflow better than ad-hoc tool calls.",
+        "Run a named agentic workflow from `.termigo/workflows/<name>.json`. Workflows are reusable multi-step automation pipelines (review -> test -> format -> commit). Use this when the task matches a defined workflow better than ad-hoc tool calls.",
       inputSchema: z.object({
         name: z.string().describe("Workflow name without `.json` extension."),
         context: z.record(z.string(), z.unknown()).optional().describe("Initial context passed to workflow steps."),

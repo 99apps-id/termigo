@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { generateSandboxInfo, buildWorktreeCommands } from "../lib/worktree";
+import {
+  generateSandboxInfo,
+  buildWorktreeCommands,
+  worktreeAddCommand,
+  worktreeRemoveCommand,
+  worktreeDeleteBranchCommand,
+} from "../lib/worktree";
 import { buildWorktreeTools } from "./worktree";
 import type { ToolContext } from "./context";
 
@@ -36,6 +42,19 @@ describe("worktree isolation", () => {
     expect(cmds.add).toEqual(["worktree", "add", "-b", "termigo-sandbox/task-1", ".termigo/worktrees/task-1", "HEAD"]);
     expect(cmds.remove).toEqual(["worktree", "remove", "--force", ".termigo/worktrees/task-1"]);
     expect(cmds.deleteBranch).toEqual(["branch", "-D", "termigo-sandbox/task-1"]);
+  });
+
+  it("builds quoted shell commands for worktree operations", () => {
+    const add = worktreeAddCommand(".termigo/worktrees/task 1", "termigo-sandbox/task 1");
+    expect(add).toBe(
+      "git worktree add -b 'termigo-sandbox/task 1' '.termigo/worktrees/task 1' HEAD",
+    );
+
+    const remove = worktreeRemoveCommand(".termigo/worktrees/task-1");
+    expect(remove).toBe("git worktree remove --force '.termigo/worktrees/task-1'");
+
+    const del = worktreeDeleteBranchCommand("termigo-sandbox/task-1");
+    expect(del).toBe("git branch -D 'termigo-sandbox/task-1'");
   });
 
   it("builds worktree tools properly", () => {

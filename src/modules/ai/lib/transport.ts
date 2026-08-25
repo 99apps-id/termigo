@@ -2,6 +2,7 @@ import type { UIMessage } from "@ai-sdk/react";
 import { readMemory } from "./memory";
 import { getMcpTools } from "./mcpTools";
 import { listSkills } from "./skills";
+import { hydrateInvariants } from "../tools/invariant";
 import { buildExtensionTools } from "./extensionTools";
 import { buildCustomTools, loadCustomTools } from "./customToolsIo";
 import type { CustomEndpoint } from "../config";
@@ -155,6 +156,10 @@ export function createContextAwareTransport(deps: Deps) {
       getMcpTools(live.workspaceRoot),
       listSkills(live.workspaceRoot),
       loadCustomTools(live.workspaceRoot),
+      // Loads `.termigo/invariants.json` into the invariant module so the
+      // system prompt assembled inside runAgentStream sees every pinned
+      // constraint, including ones pinned in earlier sessions.
+      hydrateInvariants(live.workspaceRoot),
     ]);
     const contextMs = performance.now() - contextStart;
     const envBlock = formatEnvBlock(live);

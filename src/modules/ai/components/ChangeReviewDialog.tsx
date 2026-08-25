@@ -9,6 +9,9 @@ import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useChatStore } from "../store/chatStore";
 import { native, type GitChangedFile } from "../lib/native";
+import { parseUnifiedDiff, reverseApplyHunk } from "../lib/diffParse";
+import { InlineDiffReview, type FileDiff } from "./InlineDiffReview";
+import { joinPath } from "@/modules/explorer/lib/useFileTree";
 
 /**
  * One place to see everything the agent (or anyone) changed in the working
@@ -27,6 +30,7 @@ export function ChangeReviewDialog({
   const [files, setFiles] = useState<GitChangedFile[]>([]);
   const [selected, setSelected] = useState<GitChangedFile | null>(null);
   const [diff, setDiff] = useState("");
+  const [fileDiff, setFileDiff] = useState<FileDiff | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -66,19 +70,68 @@ export function ChangeReviewDialog({
       setFiles([]);
       setSelected(null);
       setDiff("");
+      setFileDiff(null);
       setError(null);
     }
   }, [open, load]);
 
   const selectFile = async (file: GitChangedFile) => {
     setSelected(file);
+    setFileDiff(null);
     if (!repoRoot) return;
     try {
       const res = await native.gitDiff(repoRoot, file.path, file.staged);
       setDiff(res.diffText);
+      const parsed = parseUnifiedDiff(res.diffText);
+      setFileDiff(parsed.length > 0 ? parsed[0] : null);
     } catch (e) {
       setDiff(`(could not read diff: ${String(e)})`);
     }
+  };
+
+  const reloadSelectedDiff = async () => {
+    if (!repoRoot || !selected) return;
+    try {
+      const res = await native.gitDiff(repoRoot, selected.path, selected.staged);
+      setDiff(res.diffText);
+      const parsed = parseUnifiedDiff(res.diffText);
+      setFileDiff(parsed.length > 0 ? parsed[0] : null);
+    } catch {
+      // keep whatever we had; the toast below the caller covers hard failures
+    }
+  };
+
+  // The diff shown is the working tree, so changes already exist on disk.
+  // "Accept" therefore means keep the change (nothing to write); "Reject"
+  // means undo just that hunk by reverse-applying it against the file.
+  const rejectHunk = async (hunkId: string) => {
+    if (!repoRoot || !fileDiff) return;
+    const hunk = fileDiff.hunks.find((h) => h.id === hunkId);
+    if (!hunk) return;
+    try {
+      const abs = joinPath(repoRoot, fileDiff.filePath);
+      const read = await native.readFile(abs);
+      if (read.kind !== "text") {
+        toast.error("Cannot edit a non-text file from here.");
+        return;
+      }
+      const next = reverseApplyHunk(read.content, hunk);
+      if (next === null) {
+        toast.error("Hunk no longer applies cleanly; reload the diff.");
+        return;
+      }
+      await native.writeFile(abs, next);
+      toast.success(`Reverted hunk in ${fileDiff.filePath}`);
+      await reloadSelectedDiff();
+    } catch (e) {
+      toast.error(String(e));
+    }
+  };
+
+  const discardFileDiff = async () => {
+    if (!repoRoot || !selected) return;
+    await revertFile(selected);
+    setFileDiff(null);
   };
 
   const revertFile = async (file: GitChangedFile) => {
@@ -165,9 +218,22 @@ export function ChangeReviewDialog({
               ) : null}
             </ul>
 
-            <pre className="min-h-0 flex-1 overflow-auto rounded-md border border-border bg-card/60 p-2.5 text-[10px] leading-relaxed">
-              {shownDiff || (selected ? "No diff for this file." : "No diff.")}
-            </pre>
+            {fileDiff ? (
+              <InlineDiffReview
+                key={diff}
+                fileDiff={fileDiff}
+                onRejectHunk={(hunkId) => void rejectHunk(hunkId)}
+                onApplyAll={() =>
+                  toast.success(`All hunks kept in ${fileDiff.filePath}`)
+                }
+                onDiscardAll={() => void discardFileDiff()}
+                className="min-h-0 flex-1 overflow-auto"
+              />
+            ) : (
+              <pre className="min-h-0 flex-1 overflow-auto rounded-md border border-border bg-card/60 p-2.5 text-[10px] leading-relaxed">
+                {shownDiff || (selected ? "No diff for this file." : "No diff.")}
+              </pre>
+            )}
           </div>
         )}
 

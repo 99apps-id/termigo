@@ -10,13 +10,15 @@ import { cn } from "@/lib/utils";
 import { useChatStore } from "../store/chatStore";
 import { useDebugStore, type DebugCapture } from "../store/debugStore";
 import { RunSummary } from "./RunDiagnosticsDialog";
+import { TrajectoryTimeline } from "./TrajectoryTimeline";
 
-type Tab = "run" | "requests" | "context";
+type Tab = "run" | "requests" | "context" | "trajectory";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "run", label: "Run" },
   { id: "requests", label: "Requests" },
   { id: "context", label: "Context" },
+  { id: "trajectory", label: "Trajectory" },
 ];
 
 /**
@@ -116,6 +118,8 @@ export function AgentDiagnosticsDialog({
                 </pre>
               </div>
             )
+          ) : tab === "trajectory" ? (
+            <TrajectoryTimeline />
           ) : (
             <ContextView
               modelId={lastRun?.modelId ?? null}

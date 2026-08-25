@@ -11,6 +11,7 @@ import type { UIMessage } from "ai";
 import { useChatStore } from "../store/chatStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { isAutoApproved } from "../lib/approvalPolicy";
+import { isSessionAllowed } from "../store/approvalQueueStore";
 
 type ApprovalResponder = (arg: {
   id: string;
@@ -28,12 +29,14 @@ export function useAutoApproval(
   respond: ApprovalResponder,
 ): void {
   const mode = usePreferencesStore((s) => s.agentApprovalMode);
+  const alwaysAllowed = usePreferencesStore(
+    (s) => s.agentAlwaysAllowedTools,
+  );
   // One response per approval id. The part stays in the message list after it
   // is answered, and re-answering resumes the run twice.
   const answered = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    if (mode === "ask") return;
     const last = messages[messages.length - 1];
     if (!last || last.role !== "assistant") return;
 
@@ -43,6 +46,19 @@ export function useAutoApproval(
       if (!id || answered.current.has(id)) continue;
 
       const tool = toolNameOf(String(part.type ?? ""));
+      if (!tool) continue;
+
+      // An explicit allowance answers the question whatever the mode says:
+      // "allow this session" and "always allow" were chosen by the user, so
+      // they hold even while the global mode is still "ask".
+      if (isSessionAllowed(tool) || alwaysAllowed.includes(tool)) {
+        answered.current.add(id);
+        void respond({ id, approved: true });
+        continue;
+      }
+
+      if (mode === "ask") continue;
+
       // Read at answer time, not render time: the user can focus an SSH tab
       // between the request and this effect, and the machine the command would
       // land on is what decides whether a mode may speak for them.
@@ -51,10 +67,10 @@ export function useAutoApproval(
       // so it has to reach the policy rather than being inferred from the name.
       const input = part.input as { command?: unknown } | undefined;
       const command = typeof input?.command === "string" ? input.command : undefined;
-      if (!tool || !isAutoApproved(tool, mode, { onRemoteHost, command })) continue;
+      if (!isAutoApproved(tool, mode, { onRemoteHost, command })) continue;
 
       answered.current.add(id);
       void respond({ id, approved: true });
     }
-  }, [messages, mode, respond]);
+  }, [messages, mode, alwaysAllowed, respond]);
 }

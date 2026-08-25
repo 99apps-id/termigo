@@ -87,19 +87,31 @@ export const useTrajectoryStore = create<TrajectoryState>((set) => ({
     })),
 
   finishRun: ({ status, totalTokens, totalCostUsd }) =>
-    set((state) => ({
-      runs: state.runs.map((r) =>
-        r.runId === state.activeRunId
-          ? {
-              ...r,
-              status,
-              finishedAt: Date.now(),
-              totalTokens: totalTokens ?? r.totalTokens,
-              totalCostUsd,
-            }
-          : r,
-      ),
-    })),
+    set((state) => {
+      const active = state.runs.find((r) => r.runId === state.activeRunId);
+      // A run can only end once. onAbort and onFinish can both fire for the
+      // same abort (the SDK reports the abort and then the final partial
+      // result), and whichever arrives second must not rewrite the first
+      // verdict - an aborted run flipping to "completed" would be a lie.
+      if (active?.status !== "running") return state;
+
+      return {
+        // The run is no longer open: clear the pointer so a late callback
+        // cannot finish something that has already ended.
+        activeRunId: null,
+        runs: state.runs.map((r) =>
+          r.runId === state.activeRunId
+            ? {
+                ...r,
+                status,
+                finishedAt: Date.now(),
+                totalTokens: totalTokens ?? r.totalTokens,
+                totalCostUsd: totalCostUsd ?? r.totalCostUsd,
+              }
+            : r,
+        ),
+      };
+    }),
 
   selectStep: (stepId) => set({ selectedStepId: stepId }),
 

@@ -5,6 +5,8 @@
  * git worktree sandbox before applying them to the user's working tree.
  */
 
+import { quoteShellArg } from "@/lib/shellQuote";
+
 export type WorktreeSandbox = {
   id: string;
   branchName: string;
@@ -42,6 +44,22 @@ export function buildWorktreeCommands(opts: {
     deleteBranch: ["branch", "-D", opts.branchName],
     list: ["worktree", "list", "--porcelain"],
   };
+}
+
+/**
+ * Shell command builders (quoted) for executing worktree operations through a
+ * session shell. Exported so the constructed shell line is testable.
+ */
+export function worktreeAddCommand(worktreePath: string, branchName: string): string {
+  return `git worktree add -b ${quoteShellArg(branchName)} ${quoteShellArg(worktreePath)} HEAD`;
+}
+
+export function worktreeRemoveCommand(worktreePath: string): string {
+  return `git worktree remove --force ${quoteShellArg(worktreePath)}`;
+}
+
+export function worktreeDeleteBranchCommand(branchName: string): string {
+  return `git branch -D ${quoteShellArg(branchName)}`;
 }
 
 /**

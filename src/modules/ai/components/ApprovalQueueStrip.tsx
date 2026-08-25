@@ -1,6 +1,11 @@
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Cancel01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
+import {
+  Cancel01Icon,
+  Clock01Icon,
+  Infinity01Icon,
+  Tick02Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useApprovalQueue } from "../store/approvalQueueStore";
 
@@ -15,7 +20,7 @@ import { useApprovalQueue } from "../store/approvalQueueStore";
  */
 export function ApprovalQueueStrip() {
   const pending = useApprovalQueue((s) => s.pending);
-  const respond = useApprovalQueue((s) => s.respond);
+  const respondWith = useApprovalQueue((s) => s.respondWith);
 
   if (pending.length === 0) return null;
 
@@ -36,7 +41,12 @@ export function ApprovalQueueStrip() {
           size="sm"
           variant="ghost"
           className="h-6 px-2 text-[11px]"
-          onClick={() => respond(pending.map((p) => p.id), false)}
+          onClick={() =>
+            respondWith(
+              pending.map((p) => p.id),
+              "deny",
+            )
+          }
         >
           Deny all
         </Button>
@@ -66,16 +76,42 @@ export function ApprovalQueueStrip() {
                 variant="ghost"
                 className="h-6 w-6 p-0"
                 aria-label={`Deny ${i + 1}`}
-                onClick={() => respond([p.id], false)}
+                title="Deny"
+                onClick={() => respondWith([p.id], "deny")}
               >
                 <HugeiconsIcon icon={Cancel01Icon} size={12} strokeWidth={2} />
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-6 w-6 p-0"
+                aria-label={`Allow ${p.toolName} for this session`}
+                title="Allow for this session"
+                onClick={() => respondWith([p.id], "allow-session")}
+              >
+                <HugeiconsIcon icon={Clock01Icon} size={12} strokeWidth={2} />
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-6 w-6 p-0"
+                aria-label={`Always allow ${p.toolName}`}
+                title="Always allow"
+                onClick={() => respondWith([p.id], "allow-always")}
+              >
+                <HugeiconsIcon
+                  icon={Infinity01Icon}
+                  size={12}
+                  strokeWidth={2}
+                />
               </Button>
               <Button
                 size="sm"
                 variant="default"
                 className="h-6 w-6 p-0"
                 aria-label={`Approve ${i + 1}`}
-                onClick={() => respond([p.id], true)}
+                title="Approve once"
+                onClick={() => respondWith([p.id], "approve")}
               >
                 <HugeiconsIcon icon={Tick02Icon} size={12} strokeWidth={2} />
               </Button>

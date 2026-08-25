@@ -24,9 +24,54 @@ import { buildCodeSearchTools } from "./codeSearch";
 import { buildLspTools } from "./lsp";
 import { buildWorktreeTools } from "./worktree";
 import { buildInvariantTools } from "./invariant";
+import { buildTestLoopTools } from "./testLoopTools";
 import { buildPtyDriverTools } from "./ptyDriver";
+import { buildOrchestratorTools } from "../lib/orchestrator";
 
 export { resolvePath, type ToolContext } from "./context";
+
+/**
+ * The currently-registered tool map, set by `buildTools` each time the agent
+ * builds its tool set. The workflow and orchestrator engines use this to
+ * dispatch JSON-defined steps to the actual tool implementations.
+ */
+let currentToolRegistry: Record<string, unknown> = {};
+
+/**
+ * Reset the registry to empty. Used by tests so one suite's `buildTools`
+ * call cannot leak into the next.
+ */
+export function resetToolRegistry(): void {
+  currentToolRegistry = {};
+}
+
+/**
+ * Look up and invoke a registered tool by name. This is the bridge that lets
+ * JSON-defined workflow steps and orchestration pipelines call any tool the
+ * agent can call.
+ *
+ * The registry is set by `buildTools` at the start of each agent run, so a
+ * step always dispatches to the tool set the current run was built with.
+ */
+export async function dispatchTool(
+  name: string,
+  args: Record<string, unknown>,
+): Promise<unknown> {
+  const tool = currentToolRegistry[name];
+  if (!tool) {
+    return {
+      error: `unknown tool "${name}". Available: ${Object.keys(currentToolRegistry).join(", ")}`,
+    };
+  }
+  const callId = `workflow-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  try {
+    return await (tool as { execute: (args: Record<string, unknown>, options: { toolCallId?: string }) => Promise<unknown> }).execute(args, {
+      toolCallId: callId,
+    });
+  } catch (e) {
+    return { error: `tool "${name}" threw: ${String(e)}` };
+  }
+}
 
 /**
  * AI tool definitions.
@@ -73,9 +118,15 @@ export function buildTools(ctx: import("./context").ToolContext) {
     ...buildCodeSearchTools(ctx),
     ...buildLspTools(ctx),
     ...buildWorktreeTools(ctx),
-    ...buildInvariantTools(),
+    ...buildInvariantTools(ctx),
+    ...buildTestLoopTools(ctx),
     ...buildPtyDriverTools(ctx),
+    ...buildOrchestratorTools(ctx),
   } as const;
+
+  // Store a reference so the workflow / orchestrator engines can dispatch
+  // JSON-defined steps to the real tool implementations.
+  currentToolRegistry = base as unknown as Record<string, unknown>;
 
   // Skill tools last, and told what the others are called: the dependency
   // checker compares a skill against the real registry rather than a list kept

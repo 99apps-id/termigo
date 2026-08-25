@@ -40,6 +40,9 @@ import { createProxyFetch, proxyFetch } from "./proxyFetch";
 import { sanitizeUiMessages } from "./sanitizeMessages";
 import { wantsForcedFanout } from "./orchestrationIntent";
 import { useDebugStore } from "../store/debugStore";
+import { useTrajectoryStore } from "../store/trajectoryStore";
+import { evictObsoleteToolOutputs } from "./contextEviction";
+import { formatInvariantsBlock } from "../tools/invariant";
 import { info as logInfo } from "@tauri-apps/plugin-log";
 
 const localProxyFetch = createProxyFetch({ allowPrivateNetwork: true });
@@ -368,9 +371,13 @@ function buildStableSystem(
     projectMemory && projectMemory.trim().length > 0
       ? `\n\n## PROJECT — TERMIGO.md\n${projectMemory.trim()}`
       : "";
+  // Pinned invariants are constraints the agent itself flagged as session-wide,
+  // so they sit with the other durable facts and ride along on every step.
+  const invariantBlock = formatInvariantsBlock();
+  const invariantSection = invariantBlock ? `\n\n${invariantBlock}` : "";
   // Skills sit after facts and before persona: the model should know what it
   // already knows how to do before it is told how to behave.
-  return `${base}${memoryBlock}${learnedBlock(learned)}${skillsBlock(skills)}${personaBlock}${customBlock}`;
+  return `${base}${memoryBlock}${learnedBlock(learned)}${invariantSection}${skillsBlock(skills)}${personaBlock}${customBlock}`;
 }
 
 /** Stable key for a value, so equivalent inputs written in a different key
@@ -594,10 +601,22 @@ export async function runAgentStream(opts: RunAgentOptions) {
     opts.onCompact?.({ droppedCount: compact.droppedCount });
   }
 
+  // Compaction trims by size; this trims by redundancy. A file read three
+  // times across a long turn keeps three copies in history, of which only the
+  // newest can still matter. Collapse the stale ones before the prompt is
+  // assembled so the savings land on the request that is about to be sent.
+  const eviction = evictObsoleteToolOutputs(compactedHistory);
+  const evictedHistory = eviction.messages;
+  if (eviction.summary.evictedToolCalls > 0) {
+    void logInfo(
+      `eviction: collapsed ${eviction.summary.evictedToolCalls} stale read_file output(s), ~${eviction.summary.estimatedTokensSaved} tokens saved`,
+    ).catch(() => {});
+  }
+
   const prompt = prepareAgentPrompt(
     stableSystem,
     opts.planMode ? PLAN_MODE_PROMPT : null,
-    compactedHistory,
+    evictedHistory,
     provider,
   );
 
@@ -718,6 +737,16 @@ export async function runAgentStream(opts: RunAgentOptions) {
   let runCached = 0;
   let runOutput = 0;
 
+  // The trajectory store records every tool call this run makes, so the
+  // timeline and reasoning HUD have real data instead of an empty state.
+  // A fresh id per run keeps consecutive runs separate in the store.
+  const trajectoryRunId = `run-${Date.now().toString(36)}-${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
+  const trajectory = useTrajectoryStore.getState();
+  trajectory.startRun({ runId: trajectoryRunId, modelId });
+  let trajectoryStepIndex = 0;
+
   // Snapshot what is about to be sent, while it is still assembled and before
   // the provider SDK attaches credentials. Off by default; the cost of being
   // on is one object per step, capped at 30 in memory.
@@ -814,6 +843,47 @@ export async function runAgentStream(opts: RunAgentOptions) {
           lastCachedTokens: stepCached,
         });
       }
+
+      // Record each tool invocation in the trajectory store. By the time
+      // onStepFinish fires the results for this step are already in, so each
+      // call is appended with its final status and output rather than being
+      // flipped from pending later.
+      const calls = step.toolCalls ?? [];
+      if (calls.length > 0) {
+        const traj = useTrajectoryStore.getState();
+        const resultsByCallId = new Map<string, unknown>();
+        for (const r of step.toolResults ?? []) {
+          const res = r as { toolCallId?: string; output?: unknown };
+          if (res.toolCallId) resultsByCallId.set(res.toolCallId, res.output);
+        }
+        for (const call of calls) {
+          const c = call as {
+            toolCallId?: string;
+            toolName: string;
+            input?: unknown;
+          };
+          const output = c.toolCallId
+            ? resultsByCallId.get(c.toolCallId)
+            : undefined;
+          const hasResult =
+            c.toolCallId != null && resultsByCallId.has(c.toolCallId);
+          // Tools signal failure by returning `{ error }` rather than throwing,
+          // so that shape is what marks a step red in the timeline.
+          const isError =
+            output != null &&
+            typeof output === "object" &&
+            "error" in (output as Record<string, unknown>);
+          traj.appendStep({
+            id: `${trajectoryRunId}-s${trajectoryStepIndex}`,
+            stepIndex: trajectoryStepIndex,
+            toolName: c.toolName,
+            args: (c.input ?? {}) as Record<string, unknown>,
+            status: hasResult ? (isError ? "error" : "success") : "running",
+            output,
+          });
+          trajectoryStepIndex++;
+        }
+      }
     },
     onFinish: (result) => {
       opts.onStep?.(null);
@@ -851,6 +921,14 @@ export async function runAgentStream(opts: RunAgentOptions) {
       };
       opts.onFinishMeta?.({ stopReason: settledStop, finishReason, metrics });
 
+      // Close out the trajectory run. An early stop by a guard is a failed run in
+      // the timeline's vocabulary; a clean finish is completed.
+      useTrajectoryStore.getState().finishRun({
+        status: settledStop ? "failed" : "completed",
+        totalTokens: runInput + runOutput,
+        totalCostUsd: runCost > 0 ? runCost : undefined,
+      });
+
       // One line per run, in the app log rather than only on screen.
       //
       // Every performance question this project has had was answered by
@@ -874,6 +952,18 @@ export async function runAgentStream(opts: RunAgentOptions) {
           `steps ${stepsSeen}/${stepBudget} | stop ${settledStop ?? (finishReason || "done")} | ` +
           `${modelId}`,
       ).catch(() => {});
+    },
+    // An abort with zero completed steps never reaches onFinish: the SDK has
+    // nothing to report, so the trajectory run would stay "running" forever.
+    // onAbort fires on exactly that path and closes it out. finishRun ignores
+    // a run that is already finished, so the two callbacks cannot fight.
+    onAbort: () => {
+      opts.onStep?.(null);
+      useTrajectoryStore.getState().finishRun({
+        status: "aborted",
+        totalTokens: runInput + runOutput,
+        totalCostUsd: runCost > 0 ? runCost : undefined,
+      });
     },
   });
 }

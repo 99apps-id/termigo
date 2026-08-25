@@ -52,6 +52,7 @@ import type { AgentStopReason } from "../lib/agent";
 import { stepBudgetForRound } from "../config";
 import { memo, useCallback, useMemo } from "react";
 import { AiToolApproval } from "./AiToolApproval";
+import { TrajectoryThinkingHUD } from "./TrajectoryThinkingHUD";
 
 function CommandSnippet({ name }: { name: string }) {
   const meta = SLASH_COMMANDS[name];
@@ -270,6 +271,7 @@ export function AiChatView({
             <span className="truncate">{step ?? "Thinking…"}</span>
           </div>
         )}
+        {isBusy && <TrajectoryThinkingHUD />}
         {showContinue && (
           <ContinueRow
             kind={continueKind}

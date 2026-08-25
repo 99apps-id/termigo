@@ -1,6 +1,6 @@
 import { generateText, stepCountIs } from "ai";
 import { DEFAULT_MODEL_ID, getModel, type ModelId } from "../config";
-import { buildLanguageModel } from "../lib/agent";
+import { buildLanguageModel, noProgressStop, noToolRepetition } from "../lib/agent";
 import type { ProviderKeys } from "../lib/keyring";
 import type { ToolContext } from "../tools/context";
 import { buildFsTools } from "../tools/fs";
@@ -8,10 +8,15 @@ import { buildSearchTools } from "../tools/search";
 import { buildEditTools } from "../tools/edit";
 import { summarizeInput } from "../lib/approvalQueue";
 import { subagentWriteNeedsApproval } from "../lib/approvalPolicy";
-import { useApprovalQueue } from "../store/approvalQueueStore";
+import {
+  isSessionAllowed,
+  rememberSessionAllowed,
+  useApprovalQueue,
+} from "../store/approvalQueueStore";
 import { useChatStore } from "../store/chatStore";
 import { usePlanStore } from "../store/planStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
+import { setAgentAlwaysAllowedTools } from "@/modules/settings/store";
 import { native } from "../lib/native";
 import { SUBAGENTS, type SubagentType } from "./registry";
 
@@ -33,7 +38,25 @@ type Args = {
 /** Writes a sub-agent may perform only after the user says so. */
 const GATED = new Set(["write_file", "create_directory", "edit", "multi_edit"]);
 
+/**
+ * How many consecutive denials end the run outright.
+ *
+ * A denied write returns an error result, and a model that ignores the "do
+ * not retry" instruction simply asks again - that was the loop this breaker
+ * closes. Three denials in a row is a conversation the user is losing; the
+ * sub-agent stops itself instead of spending its whole step budget re-asking.
+ */
+const MAX_CONSECUTIVE_DENIALS = 3;
+
 type AnyTool = { execute?: (input: never, opts: never) => unknown };
+
+/** Shared loop-breaker state for one sub-agent run. */
+type DenialBreaker = {
+  denials: number;
+  tripped: boolean;
+  /** Ends the run: no further model step can re-ask. */
+  trip: () => void;
+};
 
 /**
  * Make a tool ask before it acts.
@@ -42,11 +65,16 @@ type AnyTool = { execute?: (input: never, opts: never) => unknown };
  * run and resuming from the next request, and a sub-agent has no message
  * boundary to end at. `execute` is plain async code in the same runtime as the
  * UI, so it can just wait for the user - which is what the approval queue is.
+ *
+ * The answer is a decision, not a yes/no: besides approve-once and deny, the
+ * user can allow the tool for this session or permanently, both of which are
+ * remembered here so later calls of the same tool skip the queue entirely.
  */
 function gate<T extends AnyTool>(
   tool: T,
   toolName: string,
   requester: string,
+  breaker: DenialBreaker,
   abortSignal?: AbortSignal,
 ): T {
   const inner = tool.execute;
@@ -54,6 +82,18 @@ function gate<T extends AnyTool>(
   return {
     ...tool,
     execute: async (input: never, opts: never) => {
+      // A session or permanent allowance answers the question before it is
+      // asked. Checked first so an allowed tool never touches the queue,
+      // whatever the approval mode says.
+      if (isSessionAllowed(toolName)) return inner(input, opts);
+      if (
+        usePreferencesStore
+          .getState()
+          .agentAlwaysAllowedTools.includes(toolName)
+      ) {
+        return inner(input, opts);
+      }
+
       const mustAsk = subagentWriteNeedsApproval(
         toolName,
         usePreferencesStore.getState().agentApprovalMode,
@@ -64,17 +104,48 @@ function gate<T extends AnyTool>(
       );
       if (!mustAsk) return inner(input, opts);
 
-      const approved = await useApprovalQueue.getState().request(
+      const decision = await useApprovalQueue.getState().request(
         { requester, toolName, summary: summarizeInput(input) },
         abortSignal,
       );
-      if (!approved) {
+
+      if (decision === "allow-session") {
+        rememberSessionAllowed(toolName);
+        breaker.denials = 0;
+        return inner(input, opts);
+      }
+      if (decision === "allow-always") {
+        rememberSessionAllowed(toolName);
+        const list = usePreferencesStore.getState().agentAlwaysAllowedTools;
+        if (!list.includes(toolName)) {
+          // Fire-and-forget: the call is approved the moment the user clicks,
+          // and a slow disk write must not delay it.
+          void setAgentAlwaysAllowedTools([...list, toolName]);
+        }
+        breaker.denials = 0;
+        return inner(input, opts);
+      }
+      if (decision === "approve") {
+        breaker.denials = 0;
+        return inner(input, opts);
+      }
+
+      // Denied. Count consecutive denials and stop the run when the user is
+      // clearly saying no - otherwise the model can spend every remaining
+      // step re-asking the same question.
+      breaker.denials++;
+      if (breaker.denials >= MAX_CONSECUTIVE_DENIALS) {
+        breaker.tripped = true;
+        breaker.trip();
         return {
           error:
-            "denied by the user. Do not retry this write; report it as not done.",
+            "denied by the user three times in a row. This sub-agent is stopping; report the write as not done.",
         };
       }
-      return inner(input, opts);
+      return {
+        error:
+          "denied by the user. Do not retry this write; report it as not done.",
+      };
     },
   };
 }
@@ -140,6 +211,23 @@ export async function runSubagent({
   };
 
   const tools: Record<string, unknown> = {};
+
+  // One breaker per run. When the user denies enough times in a row, tripping
+  // it aborts the whole generateText call - a tool-level error alone would
+  // just hand the model another step to re-ask with.
+  const controller = new AbortController();
+  const breaker: DenialBreaker = {
+    denials: 0,
+    tripped: false,
+    trip: () => controller.abort(),
+  };
+  // An outer abort (user stopped the main run) must reach this controller too,
+  // or the sub-agent keeps running after the parent is gone.
+  if (abortSignal) {
+    if (abortSignal.aborted) controller.abort();
+    else abortSignal.addEventListener("abort", () => controller.abort(), { once: true });
+  }
+
   for (const t of def.tools) {
     const found = available[t];
     if (!found) continue;
@@ -148,7 +236,7 @@ export async function runSubagent({
       continue;
     }
     const guarded = t === "write_file" ? newFilesOnly(found as AnyTool) : found;
-    tools[t] = gate(guarded as AnyTool, t, requester ?? type, abortSignal);
+    tools[t] = gate(guarded as AnyTool, t, requester ?? type, breaker, controller.signal);
   }
 
   const model = await buildLanguageModel(
@@ -159,28 +247,52 @@ export async function runSubagent({
   );
 
   const start = Date.now();
-  const result = await generateText({
-    model,
-    system: def.systemPrompt,
-    prompt,
-    tools: tools as Parameters<typeof generateText>[0]["tools"],
-    stopWhen: stepCountIs(SUBAGENT_MAX_STEPS),
-    // Stop has to reach a sub-agent too. Without this, stopping the main run
-    // left every spawned agent working - harmless while they only read, not
-    // once they write.
-    abortSignal,
-    onStepFinish: (step) => {
-      if (!onStep) return;
-      const last = step.toolCalls?.[step.toolCalls.length - 1];
-      if (last) onStep(`${type}: ${last.toolName}`);
-    },
-  });
+  try {
+    const result = await generateText({
+      model,
+      system: def.systemPrompt,
+      prompt,
+      tools: tools as Parameters<typeof generateText>[0]["tools"],
+      // The step cap alone is not enough: a model that repeats the same tool
+      // call or stalls without progress burns all twelve steps doing nothing.
+      // The same guards the main run uses close that loop here too.
+      stopWhen: [
+        stepCountIs(SUBAGENT_MAX_STEPS),
+        noToolRepetition(3),
+        noProgressStop(2),
+      ],
+      // Stop has to reach a sub-agent too. Without this, stopping the main run
+      // left every spawned agent working - harmless while they only read, not
+      // once they write.
+      abortSignal: controller.signal,
+      onStepFinish: (step) => {
+        if (!onStep) return;
+        const last = step.toolCalls?.[step.toolCalls.length - 1];
+        if (last) onStep(`${type}: ${last.toolName}`);
+      },
+    });
 
-  return {
-    summary: result.text || "(no output)",
-    stepCount: result.steps?.length ?? 0,
-    durationMs: Date.now() - start,
-  };
+    return {
+      summary: result.text || "(no output)",
+      stepCount: result.steps?.length ?? 0,
+      durationMs: Date.now() - start,
+    };
+  } catch (e) {
+    // The denial breaker trips by aborting the run, and a user stop of the
+    // main run aborts it from outside. Both surface here as AbortError; turn
+    // them into a clean result so the caller sees what happened instead of a
+    // raw error string.
+    if (controller.signal.aborted) {
+      return {
+        summary: breaker.tripped
+          ? "Stopped: the user denied the same write three times in a row. Nothing was written; report the change as not done."
+          : "Stopped: the run was aborted.",
+        stepCount: 0,
+        durationMs: Date.now() - start,
+      };
+    }
+    throw e;
+  }
 }
 
 export const DEFAULT_SUBAGENT_MODEL: ModelId = DEFAULT_MODEL_ID;
