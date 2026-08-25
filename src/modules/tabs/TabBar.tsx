@@ -54,6 +54,7 @@ import {
 import { labelFor } from "./lib/tabLabel";
 import type { EditorTab, Tab } from "./lib/useTabs";
 import { NewTabMenu } from "./NewTabMenu";
+import { usePreferencesStore } from "@/modules/settings/preferences";
 
 type Props = {
   tabs: Tab[];
@@ -470,6 +471,7 @@ export function TabBar({
                     <span className={cn("truncate", isPreview && "italic")}>
                       {labelFor(t)}
                     </span>
+                    <PersistBadge tab={t} />
                     {t.kind === "editor" && t.dirty ? (
                       <span
                         aria-label="Unsaved changes"
@@ -606,6 +608,23 @@ function DropIndicator() {
       aria-hidden
       className="my-0.5 w-0.5 shrink-0 self-stretch rounded-full bg-primary"
     />
+  );
+}
+
+// A tiny badge on terminal tabs that are opted into tmux persistence, so the
+// user knows their process will survive an app restart. Hidden by default,
+// since persistence is opt-in.
+function PersistBadge({ tab }: { tab: Tab }) {
+  const persist = usePreferencesStore((s) => s.persistTerminals);
+  if (!persist || tab.kind !== "terminal" || tab.private) return null;
+  return (
+    <span
+      aria-label="Persisted across app restarts (tmux)"
+      className="shrink-0 rounded-sm border border-border/60 px-0.5 text-[8px] uppercase leading-3 tracking-wide text-muted-foreground/70"
+      title="Persisted across app restarts via tmux"
+    >
+      tmux
+    </span>
   );
 }
 
