@@ -1,7 +1,7 @@
 pub mod modules;
 
 use modules::{
-    agent, control, extensions, fs, git, history, lsp, mcp, net, pty, secrets, shell,
+    agent, browser, control, extensions, fs, git, history, lsp, mcp, net, pty, secrets, shell,
     ssh, workspace,
 };
 use std::path::PathBuf;
@@ -223,6 +223,11 @@ pub fn run() {
             if let Err(error) = control::start(_app.handle().clone(), control_for_setup.clone()) {
                 log::warn!("could not start Termigo control server: {error}");
             }
+            // Register the browser value-return listener so extract / console
+            // payloads emitted by injected JS reach the per-instance state.
+            if let Some(browser) = _app.try_state::<browser::BrowserState>() {
+                browser::browser_start(_app.handle(), browser.inner());
+            }
             // macOS skips parent() for the settings window, so tie its lifecycle
             // to the main window here instead. Other platforms keep parent().
             #[cfg(target_os = "macos")]
@@ -243,6 +248,7 @@ pub fn run() {
         })
         .manage(pty::PtyState::default())
         .manage(control_state)
+        .manage(browser::BrowserState::default())
         .manage(shell::ShellState::default())
         .manage(secrets::SecretsState::default())
         .manage(ssh::SshState::default())
@@ -333,6 +339,19 @@ pub fn run() {
             get_launch_dir,
             get_launch_files,
             open_settings_window,
+            browser::browser_open,
+            browser::browser_navigate,
+            browser::browser_back,
+            browser::browser_forward,
+            browser::browser_reload,
+            browser::browser_wait,
+            browser::browser_eval,
+            browser::browser_extract,
+            browser::browser_console,
+            browser::browser_screenshot,
+            browser::browser_url,
+            browser::browser_close,
+            browser::browser_list,
             agent::agent_enable_hooks,
             agent::agent_locate_command,
             agent::agent_hooks_status,

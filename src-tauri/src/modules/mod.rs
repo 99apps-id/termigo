@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod browser;
 pub mod control;
 pub mod extensions;
 pub mod fs;

@@ -27,6 +27,44 @@ export type ToolContext = {
   injectIntoActivePty: (text: string) => boolean;
   /** Open a new preview tab (in-app iframe) at the given URL. */
   openPreview: (url: string) => boolean;
+  /** Open a native browser webview for the agent, returning its current URL. */
+  browserOpen: (
+    instance: string,
+    url: string,
+  ) => Promise<{ url: string | null } | { error: string }>;
+  /** Navigate an open browser webview to a URL. */
+  browserNavigate: (
+    instance: string,
+    url: string,
+  ) => Promise<{ url: string | null } | { error: string }>;
+  browserBack: (instance: string) => Promise<{ ok: true } | { error: string }>;
+  browserForward: (
+    instance: string,
+  ) => Promise<{ ok: true } | { error: string }>;
+  browserReload: (
+    instance: string,
+  ) => Promise<{ ok: true } | { error: string }>;
+  /** Extract the page text from a browser webview. */
+  browserExtract: (
+    instance: string,
+  ) => Promise<{ text: string } | { error: string }>;
+  /** Run arbitrary JS inside the browser webview (used by click/type). */
+  browserEval: (
+    instance: string,
+    js: string,
+  ) => Promise<{ ok: true } | { error: string }>;
+  browserScreenshot: (
+    instance: string,
+  ) => Promise<{ screenshot: string } | { error: string }>;
+  browserConsole: (
+    instance: string,
+  ) => Promise<{ console: string } | { error: string }>;
+  browserUrl: (instance: string) => Promise<{ url: string } | { error: string }>;
+  browserClose: (
+    instance: string,
+  ) => Promise<{ ok: true } | { error: string }>;
+  /** Instances currently open, for the agent's `<env>` browsers list. */
+  browserList: () => Promise<string[]>;
   /** Spawn a Claude Code agent in a new terminal tab, bound to this session. */
   spawnAgent: (prompt: string) => { tabId: number; leafId: number } | null;
   /** Read the terminal scrollback tail of a managed agent's leaf. */

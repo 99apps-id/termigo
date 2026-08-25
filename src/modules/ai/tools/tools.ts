@@ -27,6 +27,7 @@ import { buildInvariantTools } from "./invariant";
 import { buildTestLoopTools } from "./testLoopTools";
 import { buildPtyDriverTools } from "./ptyDriver";
 import { buildOrchestratorTools } from "../lib/orchestrator";
+import { buildBrowserTools } from "./browser";
 
 export { resolvePath, type ToolContext } from "./context";
 
@@ -149,6 +150,7 @@ export function buildTools(ctx: import("./context").ToolContext) {
     ...buildTestLoopTools(ctx),
     ...buildPtyDriverTools(ctx),
     ...buildOrchestratorTools(ctx),
+    ...buildBrowserTools(ctx),
   } as const;
 
   // Store a reference so the workflow / orchestrator engines can dispatch

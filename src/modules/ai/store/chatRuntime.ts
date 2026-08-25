@@ -47,6 +47,29 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     injectIntoActivePty: (text) =>
       useChatStore.getState().live.injectIntoActivePty(text),
     openPreview: (url) => useChatStore.getState().live.openPreview(url),
+    browserOpen: (instance, url) =>
+      useChatStore.getState().live.browserOpen(instance, url),
+    browserNavigate: (instance, url) =>
+      useChatStore.getState().live.browserNavigate(instance, url),
+    browserBack: (instance) =>
+      useChatStore.getState().live.browserBack(instance),
+    browserForward: (instance) =>
+      useChatStore.getState().live.browserForward(instance),
+    browserReload: (instance) =>
+      useChatStore.getState().live.browserReload(instance),
+    browserExtract: (instance) =>
+      useChatStore.getState().live.browserExtract(instance),
+    browserEval: (instance, js) =>
+      useChatStore.getState().live.browserEval(instance, js),
+    browserScreenshot: (instance) =>
+      useChatStore.getState().live.browserScreenshot(instance),
+    browserConsole: (instance) =>
+      useChatStore.getState().live.browserConsole(instance),
+    browserUrl: (instance) =>
+      useChatStore.getState().live.browserUrl(instance),
+    browserClose: (instance) =>
+      useChatStore.getState().live.browserClose(instance),
+    browserList: () => useChatStore.getState().live.browserList(),
     spawnAgent: (prompt) =>
       useChatStore.getState().live.spawnManagedAgent(prompt, sessionId),
     readAgentOutput: (leafId) =>

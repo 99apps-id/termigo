@@ -46,6 +46,41 @@ export type Live = {
   getWorkspaceRoot: () => string | null;
   getActiveFile: () => string | null;
   openPreview: (url: string) => boolean;
+  browserOpen: (
+    instance: string,
+    url: string,
+  ) => Promise<{ url: string | null } | { error: string }>;
+  browserNavigate: (
+    instance: string,
+    url: string,
+  ) => Promise<{ url: string | null } | { error: string }>;
+  browserBack: (instance: string) => Promise<{ ok: true } | { error: string }>;
+  browserForward: (
+    instance: string,
+  ) => Promise<{ ok: true } | { error: string }>;
+  browserReload: (
+    instance: string,
+  ) => Promise<{ ok: true } | { error: string }>;
+  browserExtract: (
+    instance: string,
+  ) => Promise<{ text: string } | { error: string }>;
+  browserEval: (
+    instance: string,
+    js: string,
+  ) => Promise<{ ok: true } | { error: string }>;
+  browserScreenshot: (
+    instance: string,
+  ) => Promise<{ screenshot: string } | { error: string }>;
+  browserConsole: (
+    instance: string,
+  ) => Promise<{ console: string } | { error: string }>;
+  browserUrl: (
+    instance: string,
+  ) => Promise<{ url: string } | { error: string }>;
+  browserClose: (
+    instance: string,
+  ) => Promise<{ ok: true } | { error: string }>;
+  browserList: () => Promise<string[]>;
   spawnManagedAgent: (
     prompt: string,
     sessionId: string,
@@ -212,6 +247,18 @@ const NOOP_LIVE: Live = {
   getWorkspaceRoot: () => null,
   getActiveFile: () => null,
   openPreview: () => false,
+  browserOpen: async () => ({ error: "browser bridge unavailable" }),
+  browserNavigate: async () => ({ error: "browser bridge unavailable" }),
+  browserBack: async () => ({ error: "browser bridge unavailable" }),
+  browserForward: async () => ({ error: "browser bridge unavailable" }),
+  browserReload: async () => ({ error: "browser bridge unavailable" }),
+  browserExtract: async () => ({ error: "browser bridge unavailable" }),
+  browserEval: async () => ({ error: "browser bridge unavailable" }),
+  browserScreenshot: async () => ({ error: "browser bridge unavailable" }),
+  browserConsole: async () => ({ error: "browser bridge unavailable" }),
+  browserUrl: async () => ({ error: "browser bridge unavailable" }),
+  browserClose: async () => ({ error: "browser bridge unavailable" }),
+  browserList: async () => [],
   spawnManagedAgent: () => null,
   readLeafBuffer: () => null,
 };

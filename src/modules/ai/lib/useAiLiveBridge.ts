@@ -13,6 +13,20 @@ import {
 import type { Tab } from "@/modules/tabs";
 import type { Live } from "../store/chatStore";
 import { redactSensitive } from "./redact";
+import {
+  browserOpen as openBrowser,
+  browserNavigate,
+  browserBack,
+  browserForward,
+  browserReload,
+  browserExtract,
+  browserEval,
+  browserScreenshot,
+  browserConsole,
+  browserUrl,
+  browserClose,
+  browserList,
+} from "../browser/bridge";
 
 type TuiWaitResult = "ready" | "gone" | "timeout";
 
@@ -131,6 +145,95 @@ export function useAiLiveBridge(params: Params) {
       openPreview: (url: string) => {
         ref.current.openPreviewTab(url);
         return true;
+      },
+      browserOpen: async (instance, url) => {
+        try {
+          return await openBrowser(instance, url);
+        } catch (e) {
+          return { error: String(e) };
+        }
+      },
+      browserNavigate: async (instance, url) => {
+        try {
+          return await browserNavigate(instance, url);
+        } catch (e) {
+          return { error: String(e) };
+        }
+      },
+      browserBack: async (instance) => {
+        try {
+          await browserBack(instance);
+          return { ok: true as const };
+        } catch (e) {
+          return { error: String(e) };
+        }
+      },
+      browserForward: async (instance) => {
+        try {
+          await browserForward(instance);
+          return { ok: true as const };
+        } catch (e) {
+          return { error: String(e) };
+        }
+      },
+      browserReload: async (instance) => {
+        try {
+          await browserReload(instance);
+          return { ok: true as const };
+        } catch (e) {
+          return { error: String(e) };
+        }
+      },
+      browserExtract: async (instance) => {
+        try {
+          return { text: await browserExtract(instance) };
+        } catch (e) {
+          return { error: String(e) };
+        }
+      },
+      browserEval: async (instance, js) => {
+        try {
+          await browserEval(instance, js);
+          return { ok: true as const };
+        } catch (e) {
+          return { error: String(e) };
+        }
+      },
+      browserScreenshot: async (instance) => {
+        try {
+          return { screenshot: await browserScreenshot(instance) };
+        } catch (e) {
+          return { error: String(e) };
+        }
+      },
+      browserConsole: async (instance) => {
+        try {
+          return { console: await browserConsole(instance) };
+        } catch (e) {
+          return { error: String(e) };
+        }
+      },
+      browserUrl: async (instance) => {
+        try {
+          return { url: await browserUrl(instance) };
+        } catch (e) {
+          return { error: String(e) };
+        }
+      },
+      browserClose: async (instance) => {
+        try {
+          await browserClose(instance);
+          return { ok: true as const };
+        } catch (e) {
+          return { error: String(e) };
+        }
+      },
+      browserList: async () => {
+        try {
+          return await browserList();
+        } catch {
+          return [];
+        }
       },
       spawnManagedAgent: (prompt: string, sessionId: string) => {
         const trimmed = prompt.trim();
