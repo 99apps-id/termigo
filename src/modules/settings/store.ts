@@ -200,6 +200,25 @@ export type Preferences = {
   extensionShortcuts: Record<string, KeyBinding[]>;
   /** Maximum cost in USD allowed per agent session (0 = unlimited) */
   costBudgetUsd: number;
+  /** Maximum cost in USD allowed per calendar day (0 = unlimited) */
+  costDailyBudgetUsd: number;
+  /**
+   * Model used for spawned sub-agents. Empty string means "same as the main
+   * run". Lets a cheap or local model do the fan-out while the frontier model
+   * orchestrates.
+   */
+  subagentModelId: string;
+  /**
+   * Snapshot the working tree as a `checkpoint:` git commit before every
+   * agent run, so a bad run can be rolled back from the checkpoint timeline.
+   */
+  autoCheckpoint: boolean;
+  /**
+   * Keep terminal processes alive across app restart by running each leaf's
+   * shell inside a named tmux session, and reattaching on reopen. Requires
+   * tmux on the host; ignored when the setting is off or tmux is absent.
+   */
+  persistTerminals: boolean;
 };
 
 export type EditorFormatter =
@@ -296,6 +315,10 @@ const KEY_LSP_ACTIVATION = "lspActivation";
 const KEY_LSP_CUSTOM_SERVERS = "lspCustomServers";
 const KEY_EXTENSION_SHORTCUTS = "extensionShortcuts";
 const KEY_COST_BUDGET_USD = "costBudgetUsd";
+const KEY_COST_DAILY_BUDGET_USD = "costDailyBudgetUsd";
+const KEY_SUBAGENT_MODEL_ID = "subagentModelId";
+const KEY_AUTO_CHECKPOINT = "autoCheckpoint";
+const KEY_PERSIST_TERMINALS = "persistTerminals";
 
 export const TERMINAL_FONT_SIZE_DEFAULT = 14;
 export const TERMINAL_FONT_SIZE_MIN = 8;
@@ -390,6 +413,10 @@ export const DEFAULT_PREFERENCES: Preferences = {
   lspCustomServers: [],
   extensionShortcuts: {},
   costBudgetUsd: 0,
+  costDailyBudgetUsd: 0,
+  subagentModelId: "",
+  autoCheckpoint: true,
+  persistTerminals: false,
 };
 
 const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
@@ -569,6 +596,17 @@ export async function loadPreferences(): Promise<Preferences> {
       DEFAULT_PREFERENCES.agentReviewAfterApply,
     costBudgetUsd:
       get<number>(KEY_COST_BUDGET_USD) ?? DEFAULT_PREFERENCES.costBudgetUsd,
+    costDailyBudgetUsd:
+      get<number>(KEY_COST_DAILY_BUDGET_USD) ??
+      DEFAULT_PREFERENCES.costDailyBudgetUsd,
+    subagentModelId:
+      get<string>(KEY_SUBAGENT_MODEL_ID) ??
+      DEFAULT_PREFERENCES.subagentModelId,
+    autoCheckpoint:
+      get<boolean>(KEY_AUTO_CHECKPOINT) ?? DEFAULT_PREFERENCES.autoCheckpoint,
+    persistTerminals:
+      get<boolean>(KEY_PERSIST_TERMINALS) ??
+      DEFAULT_PREFERENCES.persistTerminals,
     agentLaunchCommands: normalizeAgentLaunchCommands(
       get<unknown>(KEY_AGENT_LAUNCH_COMMANDS),
     ),
@@ -962,6 +1000,22 @@ export async function setCostBudgetUsd(value: number): Promise<void> {
   await writePref(KEY_COST_BUDGET_USD, value);
 }
 
+export async function setCostDailyBudgetUsd(value: number): Promise<void> {
+  await writePref(KEY_COST_DAILY_BUDGET_USD, value);
+}
+
+export async function setSubagentModelId(value: string): Promise<void> {
+  await writePref(KEY_SUBAGENT_MODEL_ID, value);
+}
+
+export async function setAutoCheckpoint(value: boolean): Promise<void> {
+  await writePref(KEY_AUTO_CHECKPOINT, value);
+}
+
+export async function setPersistTerminals(value: boolean): Promise<void> {
+  await writePref(KEY_PERSIST_TERMINALS, value);
+}
+
 export async function setAgentLaunchCommands(
   value: AgentLaunchCommands,
 ): Promise<void> {
@@ -1058,6 +1112,10 @@ export async function onPreferencesChange(
     [KEY_LSP_CUSTOM_SERVERS]: "lspCustomServers",
     [KEY_EXTENSION_SHORTCUTS]: "extensionShortcuts",
     [KEY_COST_BUDGET_USD]: "costBudgetUsd",
+    [KEY_COST_DAILY_BUDGET_USD]: "costDailyBudgetUsd",
+    [KEY_SUBAGENT_MODEL_ID]: "subagentModelId",
+    [KEY_AUTO_CHECKPOINT]: "autoCheckpoint",
+    [KEY_PERSIST_TERMINALS]: "persistTerminals",
   };
   // Same-process writes still fire onChange immediately; cross-window writes
   // arrive via the Tauri event emitted by writePref().

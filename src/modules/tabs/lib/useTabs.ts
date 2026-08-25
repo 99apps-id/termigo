@@ -21,7 +21,18 @@ import {
   splitLeaf,
   swapLeafInDirection,
 } from "@/modules/terminal/lib/panes";
+import { makePersistKey } from "@/modules/terminal/lib/persistTerminals";
 import { disposeSession } from "@/modules/terminal/lib/useTerminalSession";
+
+/** Build a leaf carrying a stable persist key for terminal-process persistence. */
+function leafNode(cwd: string | undefined, leafId: number): PaneNode {
+  return {
+    kind: "leaf",
+    id: leafId,
+    cwd,
+    persistKey: makePersistKey(cwd, String(leafId)),
+  };
+}
 import {
   useCallback,
   useEffect,
@@ -551,7 +562,7 @@ function coldTerminalTab(
     cold: true,
     title: cwd ? basename(cwd) : "shell",
     cwd,
-    paneTree: { kind: "leaf", id: leafId, cwd },
+    paneTree: leafNode(cwd, leafId),
     activeLeafId: leafId,
   };
 }
@@ -600,7 +611,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
         cold: true,
         title: initial?.title ?? "shell",
         cwd: initial?.cwd,
-        paneTree: { kind: "leaf", id: leafId, cwd: initial?.cwd },
+        paneTree: leafNode(initial?.cwd, leafId),
         activeLeafId: leafId,
       },
     ];
@@ -661,7 +672,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
         cold: true,
         title: cwd ? basename(cwd) : "shell",
         cwd,
-        paneTree: { kind: "leaf", id: leafId, cwd },
+        paneTree: leafNode(cwd, leafId),
         activeLeafId: leafId,
       },
     ]);
@@ -757,7 +768,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
         spaceId: activeSpaceIdRef.current,
         title: "shell",
         cwd,
-        paneTree: { kind: "leaf", id: leafId, cwd },
+        paneTree: leafNode(cwd, leafId),
         activeLeafId: leafId,
       },
     ]);
@@ -776,7 +787,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
         spaceId: activeSpaceIdRef.current,
         title: "blocks",
         cwd,
-        paneTree: { kind: "leaf", id: leafId, cwd },
+        paneTree: leafNode(cwd, leafId),
         activeLeafId: leafId,
         blocks: true,
       },
@@ -838,7 +849,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
         spaceId: activeSpaceIdRef.current,
         title: "private",
         cwd,
-        paneTree: { kind: "leaf", id: leafId, cwd },
+        paneTree: leafNode(cwd, leafId),
         activeLeafId: leafId,
         private: true,
       },
@@ -1430,7 +1441,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
           spaceId: activeSpaceIdRef.current,
           title: "shell",
           cwd,
-          paneTree: { kind: "leaf", id: leafId, cwd },
+          paneTree: leafNode(cwd, leafId),
           activeLeafId: leafId,
         },
       ];

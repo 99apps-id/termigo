@@ -37,6 +37,7 @@ import {
   setTerminalScrollback,
   setTerminalShell,
   setTerminalWebglEnabled,
+  setPersistTerminals,
   setZoomLevel,
   TERMINAL_FONT_SIZES,
   TERMINAL_SCROLLBACK_PRESETS,
@@ -102,6 +103,7 @@ export function GeneralSection() {
   const terminalWebglEnabled = usePreferencesStore(
     (s) => s.terminalWebglEnabled,
   );
+  const persistTerminals = usePreferencesStore((s) => s.persistTerminals);
   const terminalCursorBlink = usePreferencesStore((s) => s.terminalCursorBlink);
   const terminalCursorStyle = usePreferencesStore((s) => s.terminalCursorStyle);
   const terminalFontFamily = usePreferencesStore((s) => s.terminalFontFamily);
@@ -273,6 +275,15 @@ export function GeneralSection() {
           <Switch
             checked={terminalWebglEnabled}
             onCheckedChange={(v) => void setTerminalWebglEnabled(v)}
+          />
+        </SettingRow>
+        <SettingRow
+          title="Persist terminal processes"
+          description="Keep terminal processes running across an app restart by hosting each leaf's shell in a named tmux session (requires tmux). Off by default."
+        >
+          <Switch
+            checked={persistTerminals}
+            onCheckedChange={(v) => void setPersistTerminals(v)}
           />
         </SettingRow>
         <SettingRow

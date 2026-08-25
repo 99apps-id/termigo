@@ -29,6 +29,7 @@ import {
 } from "../config";
 import type { CustomEndpointKeys, ProviderKeys } from "./keyring";
 import { buildTools, type ToolContext } from "../tools/tools";
+import { fireHooksForEvent, makeRunId } from "./hooksRunner";
 import type { McpToolset } from "./mcpTools";
 import type { ExtensionToolset } from "./extensionTools";
 import type { CustomToolset } from "./customToolsIo";
@@ -517,6 +518,10 @@ export type RunAgentOptions = {
   /** Record the assembled request for the inspector. Read from preferences by
    *  the caller so this module stays free of the settings store. */
   captureDebug?: boolean;
+  /** Parsed hooks config for this workspace. */
+  hooksConfig?: import("../lib/hooks").HooksConfig;
+  /** Stable run id for hook payload files. */
+  runId?: string;
   /** How long the caller spent assembling context before this ran. Reported in
    *  the per-run line so the wait before the model is visible next to the wait
    *  caused by the model. */
@@ -668,7 +673,27 @@ export async function runAgentStream(opts: RunAgentOptions) {
     ...(opts.mcpTools ?? {}),
     ...(opts.extensionTools ?? {}),
     ...(opts.customTools ?? {}),
-    ...buildTools(opts.toolContext),
+    ...buildTools({
+      ...opts.toolContext,
+      firePreToolHook: opts.hooksConfig
+        ? async (toolName, args) => {
+            await fireHooksForEvent(opts.hooksConfig!, "PreToolUse", toolName, { args }, {
+              getWorkspaceRoot: opts.toolContext.getWorkspaceRoot,
+              getCwd: opts.toolContext.getCwd,
+              makeRunId: () => opts.runId ?? makeRunId(opts.toolContext.getSessionId()),
+            });
+          }
+        : undefined,
+      firePostToolHook: opts.hooksConfig
+        ? async (toolName, args, result) => {
+            await fireHooksForEvent(opts.hooksConfig!, "PostToolUse", toolName, { args, result }, {
+              getWorkspaceRoot: opts.toolContext.getWorkspaceRoot,
+              getCwd: opts.toolContext.getCwd,
+              makeRunId: () => opts.runId ?? makeRunId(opts.toolContext.getSessionId()),
+            });
+          }
+        : undefined,
+    }),
   };
 
   // What the model is handed before it reads a word of the request. Measured

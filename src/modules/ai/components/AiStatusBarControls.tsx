@@ -46,7 +46,7 @@ import {
   Tick01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   compatModelIdForEndpoint,
   getCompatModelInfo,
@@ -62,6 +62,7 @@ import {
   type ProviderId,
 } from "../config";
 import { ACCEPTED_FILES, useComposer } from "../lib/composer";
+import { costToday } from "../lib/costLedger";
 import { toggleFavoriteModel } from "../lib/modelPrefs";
 import { useChatStore } from "../store/chatStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
@@ -181,6 +182,8 @@ export function AiStatusBarControls() {
       )}
 
       <ModelDropdown />
+
+      <TodayCostChip />
 
       <span className="mx-1 h-8 w-px bg-border" aria-hidden />
       <Button
@@ -744,5 +747,50 @@ function IconBtn({
     >
       {children}
     </Button>
+  );
+}
+
+/**
+ * Live readout of today's recorded agent spend, straight from the cost
+ * ledger. Hidden when nothing has been recorded yet, so an idle bar stays
+ * quiet. Refreshes when a run finishes (lastRun changes) and once a minute,
+ * since the day can roll over while the app is open.
+ */
+function TodayCostChip() {
+  const lastRun = useChatStore((s) => s.lastRun);
+  const [today, setToday] = useState<number | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    const load = () => {
+      void costToday()
+        .then((v) => {
+          if (alive) setToday(v > 0 ? v : null);
+        })
+        .catch(() => {});
+    };
+    load();
+    const timer = setInterval(load, 60_000);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [lastRun]);
+
+  if (today == null) return null;
+
+  return (
+    <span
+      className="flex items-center gap-1 rounded-md px-1.5 text-[10.5px] text-muted-foreground"
+      title={`Recorded agent cost today: $${today.toFixed(4)}`}
+    >
+      <HugeiconsIcon
+        icon={CoinsDollarIcon}
+        size={11}
+        strokeWidth={1.75}
+        className="text-muted-foreground/70"
+      />
+      {`$${today.toFixed(2)}`}
+    </span>
   );
 }

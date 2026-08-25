@@ -31,6 +31,33 @@ import { buildOrchestratorTools } from "../lib/orchestrator";
 export { resolvePath, type ToolContext } from "./context";
 
 /**
+ * Wrap a tool's execute function with lifecycle hooks.
+ *
+ * PreToolUse fires before the real execute; PostToolUse fires after. Both
+ * are fire-and-forget: a hook failure must not change the tool result.
+ */
+function withHooks<T extends { execute: (args: Record<string, unknown>, options: { toolCallId?: string }) => Promise<unknown> }>(
+  name: string,
+  tool: T,
+  ctx: { firePreToolHook?: (toolName: string, args: Record<string, unknown>) => Promise<void>; firePostToolHook?: (toolName: string, args: Record<string, unknown>, result: unknown) => Promise<void> },
+): T {
+  const original = tool.execute.bind(tool);
+  return {
+    ...tool,
+    execute: async (args: Record<string, unknown>, options: { toolCallId?: string }) => {
+      if (ctx.firePreToolHook) {
+        await ctx.firePreToolHook(name, args).catch(() => {});
+      }
+      const result = await original(args, options);
+      if (ctx.firePostToolHook) {
+        await ctx.firePostToolHook(name, args, result).catch(() => {});
+      }
+      return result;
+    },
+  };
+}
+
+/**
  * The currently-registered tool map, set by `buildTools` each time the agent
  * builds its tool set. The workflow and orchestrator engines use this to
  * dispatch JSON-defined steps to the actual tool implementations.
@@ -128,10 +155,31 @@ export function buildTools(ctx: import("./context").ToolContext) {
   // JSON-defined steps to the real tool implementations.
   currentToolRegistry = base as unknown as Record<string, unknown>;
 
+  // Wrap every tool with lifecycle hooks. The wrapper is transparent: it
+  // fires PreToolUse before the real execute and PostToolUse after, and
+  // swallows any hook failure so a broken hook never changes the result.
+  // `wrappedBase` re-casts to `typeof base` so the tool set keeps its precise
+  // per-tool type: streamText infers a specific ToolSet from `tools`, and a
+  // lossy `Record<string, unknown>` would break its toolChoice/prepareStep
+  // type-checking.
+  const wrapped: Record<string, unknown> = {};
+  for (const [name, tool] of Object.entries(base)) {
+    wrapped[name] = withHooks(
+      name,
+      tool as unknown as { execute: (args: Record<string, unknown>, options: { toolCallId?: string }) => Promise<unknown> },
+      {
+        firePreToolHook: ctx.firePreToolHook,
+        firePostToolHook: ctx.firePostToolHook,
+      },
+    ) as unknown;
+  }
+  const wrappedBase = wrapped as typeof base;
+  currentToolRegistry = wrappedBase as unknown as Record<string, unknown>;
+
   // Skill tools last, and told what the others are called: the dependency
   // checker compares a skill against the real registry rather than a list kept
   // by hand, so adding or renaming a tool later cannot leave the check stale.
-  return { ...base, ...buildSkillTools(ctx, Object.keys(base)) } as const;
+  return { ...wrappedBase, ...buildSkillTools(ctx, Object.keys(wrappedBase)) } as const;
 }
 
 export type ChatTools = ReturnType<typeof buildTools>;

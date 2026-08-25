@@ -1,5 +1,7 @@
 export type PaneId = number;
 
+import { makePersistKey } from "./persistTerminals";
+
 export type SplitDir = "row" | "col";
 export type PaneDirection = "left" | "right" | "up" | "down";
 export type PaneBounds = {
@@ -21,6 +23,13 @@ export type PaneNode =
       remoteCwd?: string;
       /** When set, this leaf opens an SSH session instead of a local PTY. */
       ssh?: import("@/modules/ssh/lib/ssh-terminal").SshLeafSpec;
+      /**
+       * Stable identity for terminal-process persistence. Generated once at
+       * creation and persisted, so it survives restarts even though the
+       * numeric `id` is reallocated. Absent/inactive when the persistence
+       * setting is off.
+       */
+      persistKey?: string;
     }
   | {
       kind: "split";
@@ -125,7 +134,12 @@ export function splitLeaf(
       (c) => c.kind === "leaf" && c.id === targetId,
     );
     if (idx >= 0) {
-      const newLeaf: PaneNode = { kind: "leaf", id: newLeafId, cwd: newCwd };
+      const newLeaf: PaneNode = {
+        kind: "leaf",
+        id: newLeafId,
+        cwd: newCwd,
+        persistKey: makePersistKey(newCwd, String(newLeafId)),
+      };
       return {
         ...tree,
         children: [
@@ -138,7 +152,12 @@ export function splitLeaf(
   }
   if (isLeaf(tree)) {
     if (tree.id !== targetId) return tree;
-    const newLeaf: PaneNode = { kind: "leaf", id: newLeafId, cwd: newCwd };
+    const newLeaf: PaneNode = {
+      kind: "leaf",
+      id: newLeafId,
+      cwd: newCwd,
+      persistKey: makePersistKey(newCwd, String(newLeafId)),
+    };
     return {
       kind: "split",
       id: newSplitId,

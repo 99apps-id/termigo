@@ -80,6 +80,8 @@ import {
   repositoryTargetIsPending,
   type SourceControlRepositoryTarget,
 } from "./repositoryTarget";
+import { CheckpointTimeline } from "./CheckpointTimeline";
+import { useCheckpoints } from "./useCheckpoints";
 import type { SourceControlSummary } from "./useSourceControl";
 import {
   useSourceControlPanel,
@@ -398,6 +400,7 @@ export const SourceControlPanel = memo(function SourceControlPanel({
   onFollowRepositoryContext,
 }: Props) {
   const scm = useSourceControlPanel(open, sourceControl, onOpenDiff);
+  const checkpoints = useCheckpoints(scm.repo?.repoRoot ?? null, open);
   const refreshAnimationRef = useRef<number | null>(null);
   const [refreshAnimating, setRefreshAnimating] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -975,6 +978,21 @@ export const SourceControlPanel = memo(function SourceControlPanel({
 
               <CommitFeedback feedback={footerFeedback} />
             </div>
+
+            <CheckpointTimeline
+              checkpoints={checkpoints.checkpoints}
+              loading={checkpoints.loading}
+              rollingBackSha={checkpoints.rollingBackSha}
+              onRollback={async (sha) => {
+                const error = await checkpoints.rollback(sha);
+                if (!error) {
+                  // The reset rewrote the working tree, so the change list the
+                  // panel is showing is stale.
+                  await scm.refresh();
+                }
+                return error;
+              }}
+            />
 
             {scm.allClean ? (
               <CleanTreeHint repoLabel={repoLabel} />

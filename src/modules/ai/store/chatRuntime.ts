@@ -24,6 +24,8 @@ import {
   useChatStore,
 } from "./chatStore";
 import { buildLanguageModel } from "../lib/agent";
+import { dayKey, recordRunCost } from "../lib/costLedger";
+import { fireHooksForEvent, makeRunId } from "../lib/hooksRunner";
 import { sweepSessionMemory } from "../lib/memorySweep";
 import {
   flush,
@@ -79,16 +81,12 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       stepBudgetForRound(useChatStore.getState().agentMeta.runRound),
     getCostBudgetUsd: () =>
       usePreferencesStore.getState().costBudgetUsd,
+    getCostDailyBudgetUsd: () =>
+      usePreferencesStore.getState().costDailyBudgetUsd,
     getCaptureDebug: () =>
       usePreferencesStore.getState().debugCaptureEnabled,
-    getLmstudioBaseURL: () => usePreferencesStore.getState().lmstudioBaseURL,
-    getLmstudioModelId: () => usePreferencesStore.getState().lmstudioModelId,
-    getMlxBaseURL: () => usePreferencesStore.getState().mlxBaseURL,
-    getMlxModelId: () => usePreferencesStore.getState().mlxModelId,
-    getOllamaBaseURL: () => usePreferencesStore.getState().ollamaBaseURL,
-    getOllamaModelId: () => usePreferencesStore.getState().ollamaModelId,
-    getOpenaiCompatibleBaseURL: () =>
-      usePreferencesStore.getState().openaiCompatibleBaseURL,
+    getAutoCheckpoint: () =>
+      usePreferencesStore.getState().autoCheckpoint,
     getOpenaiCompatibleModelId: () =>
       usePreferencesStore.getState().openaiCompatibleModelId,
     getOpenaiCompatibleContextLimit: () =>
@@ -114,6 +112,37 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       useChatStore.getState().patchAgentMeta({ stopReason: info.stopReason });
       useChatStore.getState().setLastRun(info.metrics);
       useChatStore.getState().syncRunMeta();
+      // Remember what this run cost. The estimate only exists for priced
+      // models, so unknown ones record nothing rather than a false zero.
+      const m = info.metrics;
+      if (m.estimatedCostUsd != null && m.estimatedCostUsd > 0) {
+        void recordRunCost({
+          at: m.at,
+          day: dayKey(m.at),
+          modelId: m.modelId,
+          provider: m.provider,
+          workspaceRoot: useChatStore.getState().live.getWorkspaceRoot(),
+          costUsd: m.estimatedCostUsd,
+          inputTokens: m.tokens.input,
+          outputTokens: m.tokens.output,
+          cachedTokens: m.tokens.cached,
+        }).catch(() => {});
+      }
+      // Fire Stop hooks after the run finishes. This is the only place the
+      // agent knows the run is truly over, so it is the only reliable place
+      // to signal completion to external tooling.
+      const hooksConfig = (useChatStore.getState().agentMeta as { hooksConfig?: import("../lib/hooks").HooksConfig }).hooksConfig;
+      if (hooksConfig) {
+        void fireHooksForEvent(hooksConfig, "Stop", null, {
+          stopReason: info.stopReason,
+          finishReason: info.finishReason,
+          metrics: info.metrics,
+        }, {
+          getWorkspaceRoot: () => useChatStore.getState().live.getWorkspaceRoot(),
+          getCwd: () => useChatStore.getState().live.getCwd(),
+          makeRunId: () => (useChatStore.getState().agentMeta as { runId?: string }).runId ?? makeRunId(sessionId),
+        }).catch(() => {});
+      }
     },
     onUsage: (delta) => {
       const cur = useChatStore.getState().agentMeta.tokens;

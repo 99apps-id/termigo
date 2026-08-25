@@ -1,6 +1,5 @@
 import { generateText, stepCountIs } from "ai";
-import { DEFAULT_MODEL_ID, getModel, type ModelId } from "../config";
-import { buildLanguageModel, noProgressStop, noToolRepetition } from "../lib/agent";
+import { buildConfiguredLanguageModel, noProgressStop, noToolRepetition } from "../lib/agent";
 import type { ProviderKeys } from "../lib/keyring";
 import type { ToolContext } from "../tools/context";
 import { buildFsTools } from "../tools/fs";
@@ -28,7 +27,6 @@ type Args = {
   keys: ProviderKeys;
   modelId: string;
   toolContext: ToolContext;
-  lmstudioBaseURL?: string;
   onStep?: (label: string) => void;
   /** Label shown in the approval queue: "builder #2". */
   requester?: string;
@@ -191,7 +189,6 @@ export async function runSubagent({
   keys,
   modelId,
   toolContext,
-  lmstudioBaseURL,
   onStep,
   requester,
   abortSignal,
@@ -239,12 +236,25 @@ export async function runSubagent({
     tools[t] = gate(guarded as AnyTool, t, requester ?? type, breaker, controller.signal);
   }
 
-  const model = await buildLanguageModel(
-    getModel(modelId as ModelId).provider,
-    keys,
-    getModel(modelId as ModelId).id,
-    { lmstudioBaseURL },
-  );
+  // Multi-model routing: a cheaper or local model can do the fan-out while the
+  // frontier model orchestrates. The preference wins when set; otherwise the
+  // sub-agent inherits the parent run's model. Resolved through the same
+  // builder the main run uses so local and custom-endpoint models work here too.
+  const prefs = usePreferencesStore.getState();
+  const routedModelId = prefs.subagentModelId.trim() || modelId;
+  const model = await buildConfiguredLanguageModel(routedModelId, keys, {
+    lmstudioBaseURL: prefs.lmstudioBaseURL,
+    lmstudioModelId: prefs.lmstudioModelId,
+    mlxBaseURL: prefs.mlxBaseURL,
+    mlxModelId: prefs.mlxModelId,
+    ollamaBaseURL: prefs.ollamaBaseURL,
+    ollamaModelId: prefs.ollamaModelId,
+    openaiCompatibleBaseURL: prefs.openaiCompatibleBaseURL,
+    openaiCompatibleModelId: prefs.openaiCompatibleModelId,
+    openrouterModelId: prefs.openrouterModelId,
+    customEndpoints: prefs.customEndpoints,
+    customEndpointKeys: useChatStore.getState().customEndpointKeys,
+  });
 
   const start = Date.now();
   try {
@@ -294,5 +304,3 @@ export async function runSubagent({
     throw e;
   }
 }
-
-export const DEFAULT_SUBAGENT_MODEL: ModelId = DEFAULT_MODEL_ID;

@@ -7,6 +7,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { SettingRow } from "../components/SettingRow";
@@ -30,10 +37,24 @@ import {
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   setAgentReviewAfterApply,
+  setAutoCheckpoint,
   setCostBudgetUsd,
+  setCostDailyBudgetUsd,
   setCustomInstructions,
   setDebugCaptureEnabled,
+  setSubagentModelId,
 } from "@/modules/settings/store";
+import {
+  MODELS,
+  compatModelIdForEndpoint,
+  isCompatModelId,
+} from "@/modules/ai/config";
+import {
+  clearCostLedger,
+  costToday,
+  loadCostLedger,
+  sumCost,
+} from "@/modules/ai/lib/costLedger";
 import {
   Add01Icon,
   CheckmarkCircle02Icon,
@@ -62,7 +83,23 @@ export function AgentsSection() {
   const agentReviewAfterApply = usePreferencesStore(
     (s) => s.agentReviewAfterApply,
   );
+  const autoCheckpoint = usePreferencesStore((s) => s.autoCheckpoint);
   const costBudgetUsd = usePreferencesStore((s) => s.costBudgetUsd);
+  const costDailyBudgetUsd = usePreferencesStore((s) => s.costDailyBudgetUsd);
+  const subagentModelId = usePreferencesStore((s) => s.subagentModelId);
+  const customEndpoints = usePreferencesStore((s) => s.customEndpoints);
+
+  // Fall back to "auto" if the stored id no longer resolves (a deleted custom
+  // endpoint), so the select never renders with a value it has no item for.
+  const subagentModelValue =
+    subagentModelId &&
+    (MODELS.some((m) => m.id === subagentModelId) ||
+      (isCompatModelId(subagentModelId) &&
+        customEndpoints.some(
+          (ep) => compatModelIdForEndpoint(ep.id) === subagentModelId,
+        )))
+      ? subagentModelId
+      : "auto";
   const customAgents = useAgentsStore((s) => s.customAgents);
   const activeAgentId = useAgentsStore((s) => s.activeId);
   const setActiveAgentId = useAgentsStore((s) => s.setActiveId);
@@ -79,6 +116,18 @@ export function AgentsSection() {
     void hydrateAgents();
     void hydrateSnippets();
   }, [hydrateAgents, hydrateSnippets]);
+
+  const [todayUsd, setTodayUsd] = useState<number | null>(null);
+  const [totalUsd, setTotalUsd] = useState<number | null>(null);
+
+  const refreshCost = () => {
+    void costToday().then(setTodayUsd).catch(() => setTodayUsd(null));
+    void loadCostLedger()
+      .then((entries) => setTotalUsd(sumCost(entries)))
+      .catch(() => setTotalUsd(null));
+  };
+
+  useEffect(refreshCost, []);
 
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
   const [editingSnippet, setEditingSnippet] = useState<Snippet | null>(null);
@@ -113,6 +162,15 @@ export function AgentsSection() {
           />
         </SettingRow>
         <SettingRow
+          title="Auto-checkpoint before runs"
+          description="Snapshot the working tree as a checkpoint commit before every agent run, so a bad run can be rolled back from the Checkpoints timeline in Source Control. Requires a Git repository."
+        >
+          <Switch
+            checked={autoCheckpoint}
+            onCheckedChange={(v) => void setAutoCheckpoint(v)}
+          />
+        </SettingRow>
+        <SettingRow
           title="Cost budget (USD)"
           description="Maximum cost per agent session. 0 = unlimited. Enforced after each step."
         >
@@ -124,6 +182,72 @@ export function AgentsSection() {
             min={0}
             step={0.01}
           />
+        </SettingRow>
+        <SettingRow
+          title="Daily cost budget (USD)"
+          description="Maximum cost per calendar day across all sessions. 0 = unlimited. New runs are refused once today's recorded spend reaches this."
+        >
+          <Input
+            type="number"
+            value={costDailyBudgetUsd}
+            onChange={(e) =>
+              void setCostDailyBudgetUsd(Number(e.target.value) || 0)
+            }
+            className="w-full"
+            min={0}
+            step={0.01}
+          />
+        </SettingRow>
+        <SettingRow
+          title="Recorded cost"
+          description={
+            todayUsd == null || totalUsd == null
+              ? "Cost of finished agent runs, kept for 92 days."
+              : `$${todayUsd.toFixed(4)} today, $${totalUsd.toFixed(4)} all time. Kept for 92 days.`
+          }
+        >
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 px-2 text-[11px]"
+            onClick={() => {
+              void clearCostLedger().then(refreshCost);
+            }}
+          >
+            Clear
+          </Button>
+        </SettingRow>
+        <SettingRow
+          title="Subagent model"
+          description="Model spawned sub-agents run on. Pick a cheap or local model to do the fan-out while the main run keeps the frontier model. 'Same as main run' inherits the orchestrator's model."
+        >
+          <Select
+            value={subagentModelValue}
+            onValueChange={(v) => void setSubagentModelId(v === "auto" ? "" : v)}
+          >
+            <SelectTrigger size="sm" className="h-8 w-56 text-[12px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="auto" className="text-[12px]">
+                Same as main run
+              </SelectItem>
+              {MODELS.map((m) => (
+                <SelectItem key={m.id} value={m.id} className="text-[12px]">
+                  {m.label}
+                </SelectItem>
+              ))}
+              {customEndpoints.map((ep) => (
+                <SelectItem
+                  key={ep.id}
+                  value={compatModelIdForEndpoint(ep.id)}
+                  className="text-[12px]"
+                >
+                  {ep.modelId || ep.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </SettingRow>
       </section>
 

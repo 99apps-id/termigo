@@ -1,9 +1,67 @@
+use std::ffi::OsString;
 use std::path::PathBuf;
 
 use portable_pty::CommandBuilder;
 
 use crate::modules::control::ShellControlEnv;
 use crate::modules::workspace::{self, WorkspaceEnv};
+
+// Terminal-process persistence. When the user opts in and tmux is present, the
+// leaf's shell is hosted inside a named tmux session so it survives an app
+// restart; on the next open `-A` reattaches to the still-running session.
+// These helpers are unix-only in practice but kept compiled on all platforms
+// so clippy checks them; the Windows build simply never calls them.
+#[allow(dead_code)]
+const PERSIST_SESSION_PREFIX: &str = "termigo-";
+
+#[allow(dead_code)]
+fn tmux_session_name(persist_key: &str) -> String {
+    let filtered: String = persist_key
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+        .take(48)
+        .collect();
+    format!("{PERSIST_SESSION_PREFIX}{filtered}")
+}
+
+#[allow(dead_code)]
+fn tmux_available() -> bool {
+    #[cfg(unix)]
+    {
+        if let Some(path) = std::env::var_os("PATH") {
+            for dir in std::env::split_paths(&path) {
+                if dir.join("tmux").is_file() {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+    #[cfg(not(unix))]
+    {
+        // tmux persistence targets unix shells; inert elsewhere.
+        false
+    }
+}
+
+// Clone the built shell command and prepend a tmux create-or-attach wrapper.
+// Cloning keeps every env var (TERMIGO_TERMINAL, shell-integration hooks, cwd)
+// intact on the tmux client, and tmux passes them through to the session.
+#[allow(dead_code)]
+fn wrap_in_tmux(cmd: &CommandBuilder, persist_key: &str) -> CommandBuilder {
+    let mut wrapped = cmd.clone();
+    let mut argv: Vec<OsString> = vec![
+        OsString::from("tmux"),
+        OsString::from("new-session"),
+        OsString::from("-A"),
+        OsString::from("-s"),
+        OsString::from(tmux_session_name(persist_key)),
+        OsString::from("--"),
+    ];
+    argv.extend(cmd.get_argv().iter().cloned());
+    *wrapped.get_argv_mut() = argv;
+    wrapped
+}
 
 #[cfg(windows)]
 const BASHRC_SCRIPT: &str = include_str!("scripts/bashrc.bash");
@@ -56,16 +114,18 @@ pub fn build_command(
     blocks: bool,
     shell: Option<String>,
     control: Option<ShellControlEnv>,
+    persist: bool,
+    persist_key: Option<String>,
 ) -> Result<CommandBuilder, String> {
     let shell = sanitize_shell_override(shell);
     #[cfg(unix)]
     {
         let _ = workspace;
-        unix::build(cwd, blocks, shell, control)
+        unix::build(cwd, blocks, shell, control, persist, persist_key)
     }
     #[cfg(windows)]
     {
-        windows::build(cwd, workspace, blocks, shell, control)
+        windows::build(cwd, workspace, blocks, shell, control, persist, persist_key)
     }
 }
 
@@ -313,11 +373,23 @@ mod unix {
         blocks: bool,
         shell_override: Option<String>,
         control: Option<super::ShellControlEnv>,
+        persist: bool,
+        persist_key: Option<String>,
     ) -> Result<CommandBuilder, String> {
         let (shell, shell_path) = Shell::resolve(shell_override);
         let mut cmd = CommandBuilder::new(&shell_path);
         super::apply_common(&mut cmd, cwd, blocks, control.as_ref());
         apply_shell_init(&mut cmd, &shell, &shell_path);
+        if persist {
+            if let Some(key) = persist_key.filter(|k| !k.trim().is_empty()) {
+                if super::tmux_available() {
+                    return Ok(super::wrap_in_tmux(&cmd, &key));
+                }
+                log::info!(
+                    "terminal persistence requested but tmux not found; using a normal shell"
+                );
+            }
+        }
         Ok(cmd)
     }
 
@@ -542,6 +614,8 @@ mod windows {
         blocks: bool,
         shell: Option<String>,
         control: Option<super::ShellControlEnv>,
+        _persist: bool,
+        _persist_key: Option<String>,
     ) -> Result<CommandBuilder, String> {
         if let WorkspaceEnv::Wsl { distro } = workspace {
             let _ = (blocks, shell, control);

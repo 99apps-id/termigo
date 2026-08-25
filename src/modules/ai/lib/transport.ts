@@ -5,6 +5,10 @@ import { listSkills } from "./skills";
 import { hydrateInvariants } from "../tools/invariant";
 import { buildExtensionTools } from "./extensionTools";
 import { buildCustomTools, loadCustomTools } from "./customToolsIo";
+import { costToday } from "./costLedger";
+import { autoCheckpointForRun } from "./snapshots";
+import { loadHooks } from "./hooksIo";
+import type { HooksConfig } from "./hooks";
 import type { CustomEndpoint } from "../config";
 import {
   runAgentStream,
@@ -132,7 +136,11 @@ type Deps = {
   getPlanMode?: () => boolean;
   getStepBudget?: () => number;
   getCostBudgetUsd?: () => number;
+  getCostDailyBudgetUsd?: () => number;
   getCaptureDebug?: () => boolean;
+  getAutoCheckpoint?: () => boolean;
+  getHooksConfig?: () => HooksConfig;
+  getRunId?: () => string;
 };
 
 type SendOptions = {
@@ -144,6 +152,32 @@ type SendOptions = {
 export function createContextAwareTransport(deps: Deps) {
   const run = async (options: SendOptions) => {
     const live = deps.getLive();
+    // Daily budget guardrail: refuse to start a run once today's recorded
+    // spend reaches the limit. Checked before any context is assembled so a
+    // blocked run costs nothing at all. 0 means unlimited.
+    const dailyBudget = deps.getCostDailyBudgetUsd?.() ?? 0;
+    if (dailyBudget > 0) {
+      const spentToday = await costToday();
+      if (spentToday >= dailyBudget) {
+        throw new Error(
+          `Daily cost budget reached: $${spentToday.toFixed(4)} spent today, ` +
+            `budget is $${dailyBudget.toFixed(2)}. Raise the daily budget in ` +
+            "Settings > Agents, or wait for tomorrow.",
+        );
+      }
+    }
+    // Workspace snapshot guardrail: checkpoint the working tree before the
+    // run starts, so a bad run can be rolled back from the checkpoint
+    // timeline. Skipped on approval resumes because those continue a run that
+    // is already in flight, and a checkpoint mid-run would capture the
+    // agent's own half-finished edits as the "safe" state.
+    if (
+      deps.getAutoCheckpoint?.() &&
+      !isResumingApproval(options.messages) &&
+      !deps.toolContext.getRemoteSession()
+    ) {
+      await autoCheckpointForRun(live.workspaceRoot);
+    }
     // Timed because "the first message is slow" has had four plausible causes
     // and no measurement. This block runs before a single token reaches the
     // model: project memory, learned memory, MCP servers, skills and custom
@@ -156,9 +190,7 @@ export function createContextAwareTransport(deps: Deps) {
       getMcpTools(live.workspaceRoot),
       listSkills(live.workspaceRoot),
       loadCustomTools(live.workspaceRoot),
-      // Loads `.termigo/invariants.json` into the invariant module so the
-      // system prompt assembled inside runAgentStream sees every pinned
-      // constraint, including ones pinned in earlier sessions.
+      loadHooks(live.workspaceRoot),
       hydrateInvariants(live.workspaceRoot),
     ]);
     const contextMs = performance.now() - contextStart;
@@ -203,6 +235,8 @@ export function createContextAwareTransport(deps: Deps) {
       stepBudget: deps.getStepBudget?.(),
       costBudgetUsd: deps.getCostBudgetUsd?.(),
       captureDebug: deps.getCaptureDebug?.(),
+      hooksConfig: deps.getHooksConfig?.(),
+      runId: deps.getRunId?.(),
       contextMs,
       projectMemory,
       uiMessages: messagesForRun,

@@ -12,7 +12,7 @@ import type {
 } from "@/modules/tabs/lib/useTabs";
 
 export type SerializedNode =
-  | { kind: "leaf"; cwd?: string; active?: boolean }
+  | { kind: "leaf"; cwd?: string; active?: boolean; persistKey?: string }
   | { kind: "split"; dir: SplitDir; children: SerializedNode[] };
 
 export type SerializedTab =
@@ -45,6 +45,7 @@ function serializeNode(node: PaneNode, activeLeafId: number): SerializedNode {
       kind: "leaf",
       ...(node.cwd !== undefined && { cwd: node.cwd }),
       ...(node.id === activeLeafId && { active: true }),
+      ...(node.persistKey !== undefined && { persistKey: node.persistKey }),
     };
   }
   return {
@@ -115,6 +116,7 @@ function hydrateNode(
       kind: "leaf",
       id,
       ...(node.cwd !== undefined && { cwd: node.cwd }),
+      ...(node.persistKey !== undefined && { persistKey: node.persistKey }),
     };
   }
   const children = node.children.map((c) => hydrateNode(c, allocId, acc));

@@ -31,6 +31,8 @@ type Props = {
   /** This leaf is the active pane within its tab — receives auto-focus. */
   focused?: boolean;
   initialCwd?: string;
+  /** Stable identity for terminal-process persistence (tmux). */
+  persistKey?: string;
   /** Enable command-block decorations (OSC 133) for this terminal. */
   blocks?: boolean;
   /** Custom session factory (e.g. SSH); falls back to the local PTY. */
@@ -47,6 +49,7 @@ export const TerminalPane = memo(
       visible,
       focused = true,
       initialCwd,
+      persistKey,
       blocks = false,
       openSession,
       onSearchReady,
@@ -65,6 +68,7 @@ export const TerminalPane = memo(
       visible,
       focused,
       initialCwd,
+      persistKey,
       blocks,
       openSession,
       onSearchReady: (a) => onSearchReady?.(leafId, a),

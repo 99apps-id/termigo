@@ -1,4 +1,5 @@
 import type { PaneNode } from "@/modules/terminal";
+import { makePersistKey } from "@/modules/terminal/lib/persistTerminals";
 
 export const AGENT_LAUNCHERS = [
   {
@@ -117,11 +118,10 @@ export function createAgentPanePlan(
     throw new RangeError("Agent instance count must be between 1 and 4.");
   }
 
-  const leaves = Array.from({ length: instances }, () => ({
-    kind: "leaf" as const,
-    id: allocateId(),
-    cwd,
-  }));
+  const leaves = Array.from({ length: instances }, () => {
+    const id = allocateId();
+    return { kind: "leaf" as const, id, cwd, persistKey: makePersistKey(cwd, String(id)) };
+  });
   const split = (dir: "row" | "col", children: PaneNode[]): PaneNode => ({
     kind: "split",
     id: allocateId(),

@@ -103,6 +103,8 @@ type Session = {
   commandRunning: boolean;
   hiddenReleaseTimer: ReturnType<typeof setTimeout> | null;
   spawnFailed: boolean;
+  /** Stable identity for terminal-process persistence (tmux). */
+  persistKey: string | undefined;
 };
 
 const sessions = new Map<number, Session>();
@@ -447,6 +449,7 @@ function ensureSession(
   leafId: number,
   initialCwd?: string,
   blocks = false,
+  persistKey?: string,
 ): Session {
   const existing = sessions.get(leafId);
   if (existing) return existing;
@@ -484,6 +487,7 @@ function ensureSession(
     commandRunning: false,
     hiddenReleaseTimer: null,
     spawnFailed: false,
+    persistKey,
   };
   sessions.set(leafId, session);
 
@@ -564,6 +568,10 @@ async function openPtyForSession(
   // A custom opener (SSH sessions) replaces the local PTY entirely. The
   // returned object still satisfies PtySession, so the rest of the pipeline
   // (write/resize/close, renderer slot, block mode) is unchanged.
+  const persist =
+    usePreferencesStore.getState().persistTerminals &&
+    !!s.persistKey &&
+    !s.opener;
   const pty = s.opener
     ? await s.opener(startCols, startRows, handlers, cwd)
     : await openPty(
@@ -574,6 +582,8 @@ async function openPtyForSession(
         s.blocks,
         usePreferencesStore.getState().terminalShell || undefined,
         leafId,
+        persist,
+        s.persistKey,
       );
   // Only resize if the bound dims changed during the spawn: a same-size
   // ResizePseudoConsole during conhost warmup is a known ConPTY trigger for
@@ -841,6 +851,7 @@ type Options = {
   visible: boolean;
   focused?: boolean;
   initialCwd?: string;
+  persistKey?: string;
   blocks?: boolean;
   onSearchReady?: (addon: SearchAddon) => void;
   onExit?: (code: number) => void;
@@ -863,6 +874,7 @@ export function useTerminalSession({
   visible,
   focused = true,
   initialCwd,
+  persistKey,
   blocks = false,
   onSearchReady,
   onExit,
@@ -878,9 +890,19 @@ export function useTerminalSession({
   const initialCwdRef = useRef(initialCwd);
   initialCwdRef.current = initialCwd;
 
+  // persistKey is stable for a leaf's lifetime, so it is read through a ref to
+  // keep it out of the effect deps, matching the initialCwd convention.
+  const persistKeyRef = useRef(persistKey);
+  persistKeyRef.current = persistKey;
+
   useEffect(() => {
     let cancelled = false;
-    const s = ensureSession(leafId, initialCwdRef.current, blocks);
+    const s = ensureSession(
+      leafId,
+      initialCwdRef.current,
+      blocks,
+      persistKeyRef.current,
+    );
     s.opener = openSession ?? null;
     s.ready.then(() => {
       if (cancelled || s.disposed) return;
@@ -902,7 +924,12 @@ export function useTerminalSession({
   const [blockMode, setBlockMode] = useState<BlockMode>("prompt");
   useEffect(() => {
     if (!blocks) return;
-    const s = ensureSession(leafId, initialCwdRef.current, blocks);
+    const s = ensureSession(
+      leafId,
+      initialCwdRef.current,
+      blocks,
+      persistKeyRef.current,
+    );
     s.opener = openSession ?? null;
     setBlockMode(s.blockMode);
     const cb = () => setBlockMode(sessions.get(leafId)?.blockMode ?? "prompt");

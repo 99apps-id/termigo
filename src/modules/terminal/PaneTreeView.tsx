@@ -56,6 +56,7 @@ export function PaneTreeView(props: Props) {
           visible={tabVisible}
           focused={focused}
           initialCwd={node.cwd}
+          persistKey={node.persistKey}
           blocks={blocks}
           openSession={sshOpenerFor(node.ssh)}
           ref={b.setRef}

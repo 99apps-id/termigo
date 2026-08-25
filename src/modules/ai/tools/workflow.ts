@@ -2,7 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { useChatStore } from "../store/chatStore";
 import { native } from "../lib/native";
-import { type ToolContext } from "./context";
+import type { ToolContext } from "./context";
 import { dispatchTool } from "./tools";
 
 /**

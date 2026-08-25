@@ -34,6 +34,20 @@ export type ToolContext = {
   readCache: Map<string, { size: number; hash: number }>;
   /** Active chat session id — used by tools that persist per-session state (todos). */
   getSessionId: () => string | null;
+  /**
+   * Fire a PreToolUse hook for the named tool. Returns void; failures are
+   * swallowed by the runner so a broken hook never blocks the agent.
+   */
+  firePreToolHook?: (toolName: string, args: Record<string, unknown>) => Promise<void>;
+  /**
+   * Fire a PostToolUse hook for the named tool. Returns void; failures are
+   * swallowed by the runner so a broken hook never blocks the agent.
+   */
+  firePostToolHook?: (
+    toolName: string,
+    args: Record<string, unknown>,
+    result: unknown,
+  ) => Promise<void>;
 };
 
 export function resolvePath(rawPath: string, cwd: string | null): string {
