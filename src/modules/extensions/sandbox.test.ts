@@ -12,6 +12,14 @@ function makeExecutor(): SandboxExecutor {
     secretsGet: vi.fn(async () => "secret"),
     secretsSet: vi.fn(async () => {}),
     secretsDelete: vi.fn(async () => {}),
+    aiGetState: vi.fn(() => ({ status: "idle" })),
+    aiSetModel: vi.fn(async () => {}),
+    aiSetSubagentsEnabled: vi.fn(async () => {}),
+    aiSendPrompt: vi.fn(async () => true),
+    aiStop: vi.fn(),
+    onToolRegister: vi.fn(),
+    onCommandRegister: vi.fn(),
+    onDomUnsupported: vi.fn(),
     log: vi.fn(),
   };
 }

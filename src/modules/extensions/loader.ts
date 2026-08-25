@@ -9,6 +9,7 @@
 
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
+import { activateSandboxed } from "./sandboxHost";
 
 import { toast } from "@/components/ui/toast";
 import { buildContext, type ExtensionContext } from "./host";
@@ -162,12 +163,45 @@ export async function activate(ext: InstalledExtension): Promise<void> {
   let userDeactivate: ActiveRecord["userDeactivate"] = null;
 
   if (ext.manifest.main) {
+    const text = await invoke<string>("ext_read_asset", {
+      id: ext.id,
+      relPath: ext.manifest.main,
+    });
+
+    // Worker-sandboxed extensions run in a Web Worker (no window / document /
+    // @tauri-apps/api/core). The bridge + permission dispatcher live in
+    // sandboxHost; the handler bindings for its tools/commands are wired there.
+    if (ext.manifest.sandbox === "worker") {
+      try {
+        const sandbox = await activateSandboxed(
+          {
+            id: ext.id,
+            root: ext.root,
+            manifest: { permissions: ext.approved_permissions ?? ext.manifest.permissions },
+          },
+          text,
+        );
+        active.set(ext.id, {
+          context,
+          dispose: async () => {
+            sandbox.dispose();
+            await dispose();
+          },
+          scriptUrl: null,
+          userDeactivate: null,
+        });
+        return;
+      } catch (err) {
+        console.error(`[extensions] failed to sandbox-activate ${ext.id}`, err);
+        await dispose();
+        clearExtensionContributions(ext.id);
+        seedManifestContributions(ext);
+        throw err;
+      }
+    }
+
+    const blob = new Blob([text], { type: "text/javascript" });
     try {
-      const text = await invoke<string>("ext_read_asset", {
-        id: ext.id,
-        relPath: ext.manifest.main,
-      });
-      const blob = new Blob([text], { type: "text/javascript" });
       scriptUrl = URL.createObjectURL(blob);
       const module: unknown = await import(/* @vite-ignore */ scriptUrl);
       const mod = module as {

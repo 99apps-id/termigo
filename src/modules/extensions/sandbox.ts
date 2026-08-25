@@ -25,12 +25,36 @@ export type SandboxRequest =
   | { id: number; kind: "secrets:get"; name: string }
   | { id: number; kind: "secrets:set"; name: string; value: string }
   | { id: number; kind: "secrets:delete"; name: string }
+  | { id: number; kind: "ai:getState" }
+  | { id: number; kind: "ai:setModel"; modelId: string; provider: string }
+  | { id: number; kind: "ai:setSubagentsEnabled"; enabled: boolean }
+  | { id: number; kind: "ai:sendPrompt"; text: string }
+  | { id: number; kind: "ai:stop" }
+  | { id: number; kind: "tool:register"; name: string }
+  | { id: number; kind: "command:register"; commandId: string }
+  | { id: number; kind: "dom:unsupported"; surface: string }
   | { id: number; kind: "logger"; level: "info" | "warn" | "error"; args: unknown[] };
 
 /** Reply from the host to a sandbox request. */
 export type SandboxResponse =
   | { id: number; ok: true; value: unknown }
   | { id: number; ok: false; error: string };
+
+/** Inbound message from the host to the worker (init + calls the host owns). */
+export type HostMessage =
+  | { type: "init"; id: string; code: string }
+  | { type: "invoke_tool"; name: string; args: Record<string, unknown>; callId: number }
+  | { type: "invoke_command"; id: string; args: unknown[]; callId: number }
+  | { type: "event"; channel: string; payload: unknown }
+  | { type: "deactivate" };
+
+/** Outbound message from the worker to the host for calls the host initiated. */
+export type WorkerMessage =
+  | { type: "ready"; id: string }
+  | { type: "tool_result"; callId: number; ok: true; value: unknown }
+  | { type: "tool_result"; callId: number; ok: false; error: string }
+  | { type: "command_result"; callId: number; ok: true; value: unknown }
+  | { type: "command_result"; callId: number; ok: false; error: string };
 
 /** The capability surface a worker-sandboxed extension can call. The host
  *  implements these; `createSandboxDispatcher` gates the security-adjacent ones. */
@@ -44,6 +68,18 @@ export type SandboxExecutor = {
   secretsGet(name: string): Promise<string | null>;
   secretsSet(name: string, value: string): Promise<void>;
   secretsDelete(name: string): Promise<void>;
+  aiGetState(): unknown;
+  aiSetModel(modelId: string, provider: string): Promise<void>;
+  aiSetSubagentsEnabled(enabled: boolean): Promise<void>;
+  aiSendPrompt(text: string): Promise<boolean>;
+  aiStop(): void;
+  /** Called when the worker registers an AI tool handler; the host sets a
+   *  bridge handler in the aiTools registry so the agent can invoke it. */
+  onToolRegister(name: string): void;
+  /** Called when the worker registers a command handler; the host sets a bridge
+   *  handler in the commands registry. */
+  onCommandRegister(id: string): void;
+  onDomUnsupported(surface: string): void;
   log(level: "info" | "warn" | "error", args: unknown[]): void;
 };
 
@@ -106,6 +142,39 @@ export function createSandboxDispatcher(
         case "secrets:delete":
           require("secrets:write");
           await executor.secretsDelete(req.name);
+          value = undefined;
+          break;
+        case "ai:getState":
+          value = executor.aiGetState();
+          break;
+        case "ai:setModel":
+          require("ai:configure");
+          await executor.aiSetModel(req.modelId, req.provider);
+          value = undefined;
+          break;
+        case "ai:setSubagentsEnabled":
+          require("ai:configure");
+          await executor.aiSetSubagentsEnabled(req.enabled);
+          value = undefined;
+          break;
+        case "ai:sendPrompt":
+          require("ai:prompt");
+          value = await executor.aiSendPrompt(req.text);
+          break;
+        case "ai:stop":
+          executor.aiStop();
+          value = undefined;
+          break;
+        case "tool:register":
+          executor.onToolRegister(req.name);
+          value = undefined;
+          break;
+        case "command:register":
+          executor.onCommandRegister(req.commandId);
+          value = undefined;
+          break;
+        case "dom:unsupported":
+          executor.onDomUnsupported(req.surface);
           value = undefined;
           break;
         case "logger":
