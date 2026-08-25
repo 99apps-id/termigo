@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"strings"
+	"time"
 )
 
 // RPCRequest represents a JSON-RPC 2.0 request.
@@ -43,11 +43,26 @@ type Tool struct {
 // Server handles MCP JSON-RPC protocol over stdio.
 type Server struct {
 	workspace string
+	// allowExec gates the shell-exec tool. It is off by default and only on
+	// when TERMIGO_MCP_ALLOW_EXEC is set, so the RCE-capable surface is not
+	// exposed automatically.
+	allowExec bool
 }
 
 // New creates a new MCP server instance.
 func New(workspace string) *Server {
-	return &Server{workspace: workspace}
+	return &Server{workspace: workspace, allowExec: execAllowed()}
+}
+
+// execAllowed reports whether the shell-exec tool may be exposed. It reads the
+// TERMIGO_MCP_ALLOW_EXEC env var, accepting 1/true/yes.
+func execAllowed() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(mcpAllowExecEnv))) {
+	case "1", "true", "yes":
+		return true
+	default:
+		return false
+	}
 }
 
 // Serve reads JSON-RPC requests from in and writes responses to out.
@@ -91,31 +106,31 @@ func (s *Server) handleRequest(out io.Writer, req RPCRequest) {
 		})
 
 	case "tools/list":
-		s.sendResult(out, req.ID, map[string]interface{}{
-			"tools": []Tool{
-				{
-					Name:        "termigo_pty_exec",
-					Description: "Execute a command inside Termigo native terminal environment",
-					InputSchema: map[string]interface{}{
-						"type": "object",
-						"properties": map[string]interface{}{
-							"command": map[string]string{"type": "string", "description": "Shell command to run"},
-						},
-						"required": []string{"command"},
+		tools := []Tool{}
+		if s.allowExec {
+			tools = append(tools, Tool{
+				Name:        "termigo_pty_exec",
+				Description: "Execute a command inside Termigo native terminal environment",
+				InputSchema: map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"command": map[string]string{"type": "string", "description": "Shell command to run"},
 					},
+					"required": []string{"command"},
 				},
-				{
-					Name:        "termigo_get_diagnostics",
-					Description: "Get compiler/linter diagnostics from Termigo workspace",
-					InputSchema: map[string]interface{}{
-						"type": "object",
-						"properties": map[string]interface{}{
-							"path": map[string]string{"type": "string", "description": "Optional relative file path"},
-						},
-					},
+			})
+		}
+		tools = append(tools, Tool{
+			Name:        "termigo_get_diagnostics",
+			Description: "Get compiler/linter diagnostics from Termigo workspace",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"path": map[string]string{"type": "string", "description": "Optional relative file path"},
 				},
 			},
 		})
+		s.sendResult(out, req.ID, map[string]interface{}{"tools": tools})
 
 	case "tools/call":
 		var params struct {
@@ -128,23 +143,35 @@ func (s *Server) handleRequest(out io.Writer, req RPCRequest) {
 		}
 
 		if params.Name == "termigo_pty_exec" {
+			if !s.allowExec {
+				s.sendError(out, req.ID, -32001, "termigo_pty_exec is disabled. Set TERMIGO_MCP_ALLOW_EXEC=1 to enable it.")
+				return
+			}
 			cmdStr, _ := params.Arguments["command"].(string)
 			if cmdStr == "" {
 				s.sendError(out, req.ID, -32602, "Missing command argument")
 				return
 			}
-
-			cmd := exec.Command("sh", "-c", cmdStr)
-			if strings.Contains(strings.ToLower(os.Getenv("OS")), "windows") {
-				cmd = exec.Command("powershell", "-Command", cmdStr)
+			if ok, reason := validateShellCommand(cmdStr); !ok {
+				s.sendError(out, req.ID, -32602, reason)
+				return
 			}
-			cmd.Dir = s.workspace
-			outBytes, err := cmd.CombinedOutput()
+			cwd, ok := safeWorkspaceCwd(s.workspace)
+			if !ok {
+				s.sendError(out, req.ID, -32602, "Invalid workspace")
+				return
+			}
 
-			output := string(outBytes)
-			if err != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), execTimeoutSecs*time.Second)
+			defer cancel()
+			cmd := execCommand(ctx, cmdStr, cwd)
+			output, timedOut, err := execCapped(ctx, cmd, maxExecOutputBytes)
+			if timedOut {
+				output = fmt.Sprintf("Command timed out after %ds.\n%s", execTimeoutSecs, output)
+			} else if err != nil {
 				output = fmt.Sprintf("Error: %v\nOutput: %s", err, output)
 			}
+			output = redactOutput(output)
 
 			s.sendResult(out, req.ID, map[string]interface{}{
 				"content": []map[string]string{
@@ -159,7 +186,7 @@ func (s *Server) handleRequest(out io.Writer, req RPCRequest) {
 			text := s.runDiagnostics(context.Background(), path)
 			s.sendResult(out, req.ID, map[string]interface{}{
 				"content": []map[string]string{
-					{"type": "text", "text": text},
+					{"type": "text", "text": redactOutput(text)},
 				},
 			})
 			return

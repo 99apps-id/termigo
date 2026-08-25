@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -79,6 +78,14 @@ func fileExists(workspace, name string) bool {
 // runDiagnostics executes the detected lint command in the workspace and
 // returns its combined output. An optional path narrows a file-scoped lint.
 func (s *Server) runDiagnostics(ctx context.Context, path string) string {
+	// A file-scoped path is concatenated into a shell command, so it must be a
+	// plain relative path; a hostile path could smuggle shell metacharacters
+	// into `ruff check <path>`.
+	path, ok := safeToolPath(path)
+	if !ok {
+		return "Refused: diagnostics path must be a plain relative file path."
+	}
+
 	command, note := detectLintCommand(s.workspace)
 	if command == "" {
 		return fmt.Sprintf("No diagnostics available: %s.", note)
@@ -90,28 +97,22 @@ func (s *Server) runDiagnostics(ctx context.Context, path string) string {
 		command = fmt.Sprintf("ruff check %s", path)
 	}
 
+	cwd, ok := safeWorkspaceCwd(s.workspace)
+	if !ok {
+		return "Invalid workspace."
+	}
+
 	cmdCtx, cancel := context.WithTimeout(ctx, diagnosticsTimeout)
 	defer cancel()
 
-	var cmd *exec.Cmd
-	if isWindows() {
-		cmd = exec.CommandContext(cmdCtx, "powershell", "-Command", command)
-	} else {
-		cmd = exec.CommandContext(cmdCtx, "sh", "-c", command)
-	}
-	cmd.Dir = s.workspace
+	cmd := execCommand(cmdCtx, command, cwd)
+	output, timedOut, _ := execCapped(cmdCtx, cmd, maxExecOutputBytes)
 
-	outBytes, err := cmd.CombinedOutput()
-	output := strings.TrimSpace(string(outBytes))
-
-	if cmdCtx.Err() == context.DeadlineExceeded {
+	if timedOut {
 		return fmt.Sprintf("Diagnostics command timed out after %s:\n%s", diagnosticsTimeout, output)
 	}
 
 	if output == "" {
-		if err != nil {
-			return fmt.Sprintf("Diagnostics command failed (%v) with no output.", err)
-		}
 		return "No active diagnostic issues found."
 	}
 
