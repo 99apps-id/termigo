@@ -27,6 +27,7 @@ export type PendingApproval = {
 export type ApprovalTarget =
   | { kind: "all" }
   | { kind: "index"; index: number }
+  | { kind: "list"; indices: number[] }
   | { kind: "only" };
 
 /**
@@ -35,6 +36,9 @@ export type ApprovalTarget =
  * Bare means "the only one", not "the first one": with several queued, a bare
  * command is ambiguous and answering the wrong agent is not recoverable by
  * retyping. `parseTarget` says what was asked; the caller decides if it fits.
+ *
+ * A list/range (`1,3`, `1-3`, `2,4-6`) addresses several at once, so a batch of
+ * waiting approvals can be answered in one command instead of one by one.
  */
 export function parseApprovalTarget(arg: string): ApprovalTarget | null {
   const t = arg.trim().toLowerCase();
@@ -43,6 +47,26 @@ export function parseApprovalTarget(arg: string): ApprovalTarget | null {
   if (/^\d+$/.test(t)) {
     const index = Number.parseInt(t, 10);
     return index >= 1 ? { kind: "index", index } : null;
+  }
+  if (/^[\d,-]+$/.test(t) && (t.includes(",") || t.includes("-"))) {
+    const indices: number[] = [];
+    for (const part of t.split(",")) {
+      const p = part.trim();
+      const range = p.match(/^(\d+)-(\d+)$/);
+      if (range) {
+        const a = Number(range[1]);
+        const b = Number(range[2]);
+        if (a < 1 || b < 1 || a > b) return null;
+        for (let i = a; i <= b; i++) indices.push(i);
+      } else if (/^\d+$/.test(p)) {
+        const n = Number(p);
+        if (n < 1) return null;
+        indices.push(n);
+      } else {
+        return null;
+      }
+    }
+    return indices.length > 0 ? { kind: "list", indices } : null;
   }
   return null;
 }
@@ -64,6 +88,17 @@ export function resolveTarget(
         };
       }
       return { ids: [entry.id] };
+    }
+    case "list": {
+      const ids: string[] = [];
+      for (const idx of target.indices) {
+        const entry = pending[idx - 1];
+        if (!entry) {
+          return { error: `there is no #${idx}; ${pending.length} waiting` };
+        }
+        ids.push(entry.id);
+      }
+      return { ids };
     }
     case "only": {
       if (pending.length > 1) {

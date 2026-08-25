@@ -36,6 +36,18 @@ describe("parseApprovalTarget", () => {
     expect(parseApprovalTarget("0")).toBeNull();
     expect(parseApprovalTarget("-1")).toBeNull();
   });
+
+  it("reads a list or range as a batch", () => {
+    expect(parseApprovalTarget("1,3")).toEqual({ kind: "list", indices: [1, 3] });
+    expect(parseApprovalTarget("1-3")).toEqual({ kind: "list", indices: [1, 2, 3] });
+    expect(parseApprovalTarget("2,4-6")).toEqual({ kind: "list", indices: [2, 4, 5, 6] });
+  });
+
+  it("rejects a malformed batch", () => {
+    expect(parseApprovalTarget(("3-1") as string)).toBeNull();
+    expect(parseApprovalTarget("0,2")).toBeNull();
+    expect(parseApprovalTarget("1,x")).toBeNull();
+  });
 });
 
 describe("resolveTarget", () => {
@@ -71,6 +83,20 @@ describe("resolveTarget", () => {
     expect(resolveTarget([], { kind: "all" })).toEqual({
       error: "nothing is waiting for approval",
     });
+  });
+
+  it("selects several ids for a batch list", () => {
+    const q = [entry("a"), entry("b"), entry("c")];
+    expect(resolveTarget(q, { kind: "list", indices: [1, 3] })).toEqual({
+      ids: ["a", "c"],
+    });
+  });
+
+  it("errors on a batch index that does not exist", () => {
+    const q = [entry("a")];
+    const out = resolveTarget(q, { kind: "list", indices: [1, 5] });
+    expect(out).toHaveProperty("error");
+    expect((out as { error: string }).error).toMatch(/no #5/);
   });
 });
 
