@@ -13,6 +13,7 @@ import {
 import type { Tab } from "@/modules/tabs";
 import type { Live } from "../store/chatStore";
 import { redactSensitive } from "./redact";
+import { startScheduler } from "./scheduler";
 import {
   browserOpen as openBrowser,
   browserNavigate,
@@ -74,6 +75,10 @@ export function useAiLiveBridge(params: Params) {
   ref.current = params;
 
   useEffect(() => {
+    // Start the background scheduler in the main window (idempotent). It ticks
+    // on a timer and submits due /schedule tasks as agent runs.
+    startScheduler();
+
     const findCwd = () => {
       const { activeId, tabs, explorerRoot, launchCwd, home } = ref.current;
       const active = tabs.find((x) => x.id === activeId);

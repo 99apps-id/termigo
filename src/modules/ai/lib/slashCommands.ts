@@ -8,6 +8,11 @@ import { useChatStore } from "../store/chatStore";
 import { useApprovalQueue } from "../store/approvalQueueStore";
 import { useSessionDirectiveStore } from "../store/sessionDirectiveStore";
 import {
+  parseScheduleWhen,
+  computeNextDueAt,
+  startScheduler,
+} from "./scheduler";
+import {
   formatQueue,
   parseApprovalTarget,
   resolveTarget,
@@ -218,8 +223,17 @@ function respondToSchedule(tail: string): SlashOutcome {
   if (!prompt) {
     return { kind: "handled", toast: "Usage: /schedule <when> <prompt>" };
   }
-  store.addSchedule(sessionId, when, prompt);
-  return { kind: "handled", toast: `Scheduled "${when}": ${prompt}` };
+  const timing = parseScheduleWhen(when);
+  const nextDueAt = computeNextDueAt(Date.now(), timing);
+  const spec = nextDueAt !== null ? { ...timing, nextDueAt } : undefined;
+  store.addSchedule(sessionId, when, prompt, spec);
+  if (spec) startScheduler();
+  return {
+    kind: "handled",
+    toast: spec
+      ? `Scheduled "${when}": ${prompt}`
+      : `Saved "${when}": ${prompt} (no auto-run; use 'every <N>m' or 'daily at HH:MM')`,
+  };
 }
 
 /**

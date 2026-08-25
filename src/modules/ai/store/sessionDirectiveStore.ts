@@ -8,6 +8,21 @@ export type SessionSchedule = {
   /** The task the agent should run. */
   prompt: string;
   enabled: boolean;
+  /** Recurring interval in ms (e.g. every 30m). Absent for one-off daily tasks. */
+  intervalMs?: number;
+  /** Daily trigger "HH:MM" in local time. Absent for interval tasks. */
+  dailyAt?: string;
+  /** Epoch ms of the next fire. Absent for display-only tasks that never auto-run. */
+  nextDueAt?: number;
+  /** Epoch ms when the task was created. */
+  createdAt?: number;
+};
+
+/** Optional scheduling spec passed alongside a schedule. */
+export type ScheduleSpec = {
+  intervalMs?: number;
+  dailyAt?: string;
+  nextDueAt: number;
 };
 
 type Directives = {
@@ -21,9 +36,11 @@ type State = {
   getGoal: (sessionId: string) => string | null;
   getSchedules: (sessionId: string) => SessionSchedule[];
   setGoal: (sessionId: string, goal: string | null) => void;
-  addSchedule: (sessionId: string, when: string, prompt: string) => void;
+  addSchedule: (sessionId: string, when: string, prompt: string, spec?: ScheduleSpec) => void;
   removeSchedule: (sessionId: string, id: string) => void;
   toggleSchedule: (sessionId: string, id: string) => void;
+  /** Bump a schedule's next fire time after it runs. */
+  updateScheduleNext: (sessionId: string, id: string, nextDueAt: number) => void;
 };
 
 function directivesFor(state: State, sessionId: string): Directives {
@@ -42,7 +59,7 @@ export const useSessionDirectiveStore = create<State>((set, get) => ({
         [sessionId]: { ...directivesFor(state, sessionId), goal },
       },
     })),
-  addSchedule: (sessionId, when, prompt) =>
+  addSchedule: (sessionId, when, prompt, spec) =>
     set((state) => {
       const d = directivesFor(state, sessionId);
       const schedule: SessionSchedule = {
@@ -50,6 +67,10 @@ export const useSessionDirectiveStore = create<State>((set, get) => ({
         when,
         prompt,
         enabled: true,
+        intervalMs: spec?.intervalMs,
+        dailyAt: spec?.dailyAt,
+        nextDueAt: spec?.nextDueAt,
+        createdAt: Date.now(),
       };
       return {
         bySession: {
@@ -81,6 +102,21 @@ export const useSessionDirectiveStore = create<State>((set, get) => ({
             ...d,
             schedules: d.schedules.map((s) =>
               s.id === id ? { ...s, enabled: !s.enabled } : s,
+            ),
+          },
+        },
+      };
+    }),
+  updateScheduleNext: (sessionId, id, nextDueAt) =>
+    set((state) => {
+      const d = directivesFor(state, sessionId);
+      return {
+        bySession: {
+          ...state.bySession,
+          [sessionId]: {
+            ...d,
+            schedules: d.schedules.map((s) =>
+              s.id === id ? { ...s, nextDueAt } : s,
             ),
           },
         },
