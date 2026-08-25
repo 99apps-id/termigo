@@ -461,6 +461,12 @@ const RenderedMessage = memo(function RenderedMessage({
       break;
     }
   }
+  // Hoisted above the user branch so the hook always runs, whatever the role.
+  // The user branch returns early, and a hook after a conditional return
+  // violates the Rules of Hooks (React would throw if the role ever changed).
+  const groups = useMemo(() => buildPartGroups(message.parts as AnyPart[]), [
+    message.parts,
+  ]);
   if (message.role === "user") {
     const rawText = message.parts
       .filter((p): p is { type: "text"; text: string } => p.type === "text")
@@ -488,10 +494,6 @@ const RenderedMessage = memo(function RenderedMessage({
       </Message>
     );
   }
-
-  const groups = useMemo(() => buildPartGroups(message.parts as AnyPart[]), [
-    message.parts,
-  ]);
 
   return (
     <Message from={message.role}>

@@ -13,6 +13,11 @@ dist-ssr
 *.local
 stats.html
 
+# Environment/secret files (never commit API keys or tokens)
+.env
+.env.*
+!.env.example
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

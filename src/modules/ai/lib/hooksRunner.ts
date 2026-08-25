@@ -8,6 +8,7 @@
 
 import { native } from "./native";
 import { shellQuote } from "./remoteSearch";
+import { checkShellCommand } from "./security";
 import {
   type HookEvent,
   type HookRule,
@@ -79,6 +80,12 @@ async function fireHook(
 ): Promise<void> {
   if (!payloadPath) return;
   const command = `${rule.command} ${shellQuote(payloadPath)}`;
+  // The same gate bash_run and custom tools use. A hook runs a shell command
+  // the project author wrote, but it gets no more trust than a command the
+  // model types directly: a broken or hostile hook must not open a path the
+  // agent could not already use.
+  const safety = checkShellCommand(command);
+  if (!safety.ok) return;
   try {
     await native.runCommand(command, cwd ?? undefined, 30);
   } catch {
