@@ -138,6 +138,10 @@ async function buildExecutor(
                 fields[name] = input.value ?? el.textContent ?? "";
               }
             });
+          // Allow per-element args (e.g. a scope chip that carries its target on
+          // its own remove button) without a hidden input per row.
+          const dataExtArg = target?.getAttribute?.("data-ext-arg");
+          if (dataExtArg) fields.arg = dataExtArg;
           postToWorker({ type: "ui:event", panelId, event: ev, fields });
         };
         container.addEventListener("click", handler);
