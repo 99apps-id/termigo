@@ -27,6 +27,8 @@ function makeExecutor(): SandboxExecutor {
     headerBarRemove: vi.fn(),
     statusBarSet: vi.fn(),
     statusBarRemove: vi.fn(),
+    sidebarSet: vi.fn(),
+    sidebarRemove: vi.fn(),
     onDomUnsupported: vi.fn(),
     log: vi.fn(),
   };
@@ -163,5 +165,25 @@ describe("sandbox dispatcher", () => {
       tooltip: "Open",
       event: "hb:h",
     });
+  });
+
+  it("gates sidebar sections behind sidebar:write", async () => {
+    const { executor, resp } = await dispatch([], {
+      id: 13,
+      kind: "sidebar:set",
+      section: { id: "s", title: "T", items: [] },
+    });
+    expect(resp.ok).toBe(false);
+    expect(executor.sidebarSet).not.toHaveBeenCalled();
+
+    const { executor: ex2, resp: r2 } = await dispatch(["sidebar:write"], {
+      id: 14,
+      kind: "sidebar:set",
+      section: { id: "s", title: "T", items: [{ id: "a", label: "A" }] },
+    });
+    expect(r2.ok).toBe(true);
+    expect(ex2.sidebarSet).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "s", title: "T" }),
+    );
   });
 });

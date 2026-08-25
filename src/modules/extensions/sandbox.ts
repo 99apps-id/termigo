@@ -13,6 +13,7 @@
 // AI-tool / command handler bridge are layered on top in `sandboxHost.ts`.
 
 import { checkPermission } from "./permissions";
+import type { SidebarSection } from "./registries";
 
 /** Outbound request from the sandbox (extension) to the host. */
 export type SandboxRequest =
@@ -40,6 +41,8 @@ export type SandboxRequest =
   | { id: number; kind: "headerbar:remove"; itemId: string }
   | { id: number; kind: "statusbar:set"; item: SerializedStatusItem }
   | { id: number; kind: "statusbar:remove"; itemId: string }
+  | { id: number; kind: "sidebar:set"; section: SerializedSidebarSection }
+  | { id: number; kind: "sidebar:remove"; sectionId: string }
   | { id: number; kind: "dom:unsupported"; surface: string }
   | { id: number; kind: "logger"; level: "info" | "warn" | "error"; args: unknown[] };
 
@@ -71,6 +74,19 @@ export type SerializedStatusItem = {
   event?: string;
 };
 
+/** Sidebar sections are host-managed too. The worker sends a serializable
+ *  section (callbacks stripped) plus event names; the host renders it and
+ *  routes item click / toggle / action / context-menu events back. */
+export type SerializedSidebarSection = Omit<
+  SidebarSection,
+  "onItemClick" | "onItemToggle" | "onItemAction" | "onItemContextMenu"
+> & {
+  eventClick?: string;
+  eventToggle?: string;
+  eventAction?: string;
+  eventContext?: string;
+};
+
 /** Inbound message from the host to the worker (init + calls the host owns). */
 export type HostMessage =
   | { type: "init"; id: string; code: string }
@@ -79,6 +95,7 @@ export type HostMessage =
   | { type: "event"; channel: string; payload: unknown }
   | { type: "ui:event"; panelId: string; event: string; fields?: Record<string, string> }
   | { type: "ui:itemClick"; surface: "header" | "status"; id: string; event: string }
+  | { type: "ui:sidebarEvent"; kind: "click" | "toggle" | "action" | "context"; sectionId: string; itemId?: string; actionId?: string; event: string }
   | { type: "deactivate" };
 
 /** Outbound message from the worker to the host for calls the host initiated. */
@@ -122,6 +139,8 @@ export type SandboxExecutor = {
   headerBarRemove(id: string): void;
   statusBarSet(item: SerializedStatusItem): void;
   statusBarRemove(id: string): void;
+  sidebarSet(section: SerializedSidebarSection): void;
+  sidebarRemove(sectionId: string): void;
   onDomUnsupported(surface: string): void;
   log(level: "info" | "warn" | "error", args: unknown[]): void;
 };
@@ -262,6 +281,16 @@ export function createSandboxDispatcher(
         case "statusbar:remove":
           require("statusbar:write");
           executor.statusBarRemove(req.itemId);
+          value = undefined;
+          break;
+        case "sidebar:set":
+          require("sidebar:write");
+          executor.sidebarSet(req.section);
+          value = undefined;
+          break;
+        case "sidebar:remove":
+          require("sidebar:write");
+          executor.sidebarRemove(req.sectionId);
           value = undefined;
           break;
         case "logger":

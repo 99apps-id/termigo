@@ -9,13 +9,14 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { LazyStore } from "@tauri-apps/plugin-store";
 import * as chatMod from "@/modules/ai/store/chatStore";
-import { aiToolsRegistry, commandsRegistry, headerItemsRegistry, panelRenderersRegistry, statusItemsRegistry } from "./registries";
+import { aiToolsRegistry, commandsRegistry, headerItemsRegistry, panelRenderersRegistry, sidebarSectionsRegistry, statusItemsRegistry } from "./registries";
 import { useRightPanelStore } from "./rightPanelStore";
 import type { ExtensionRuntime } from "./host";
 import {
   createSandboxDispatcher,
   type SandboxExecutor,
   type SandboxRequest,
+  type SerializedSidebarSection,
   type WorkerMessage,
 } from "./sandbox";
 
@@ -34,7 +35,15 @@ async function buildExecutor(
   postToWorker: (
     msg:
       | { type: "ui:event"; panelId: string; event: string; fields?: Record<string, string> }
-      | { type: "ui:itemClick"; surface: "header" | "status"; id: string; event: string },
+      | { type: "ui:itemClick"; surface: "header" | "status"; id: string; event: string }
+      | {
+          type: "ui:sidebarEvent";
+          kind: "click" | "toggle" | "action" | "context";
+          sectionId: string;
+          itemId?: string;
+          actionId?: string;
+          event: string;
+        },
   ) => void,
 ): Promise<SandboxExecutor> {
   const store = new LazyStore(STORAGE_FILE(ext.id), { defaults: {}, autoSave: 200 });
@@ -168,6 +177,34 @@ async function buildExecutor(
     },
     statusBarRemove: (id) => {
       statusItemsRegistry.remove(ext.id, id);
+    },
+    sidebarSet: (section: SerializedSidebarSection) => {
+      sidebarSectionsRegistry.set(ext.id, {
+        id: section.id,
+        title: section.title,
+        icon: section.icon,
+        headerActions: section.headerActions,
+        items: section.items,
+        emptyText: section.emptyText,
+        searchable: section.searchable,
+        searchPlaceholder: section.searchPlaceholder,
+        movableToRight: section.movableToRight,
+        onItemClick: (itemId) => {
+          if (section.eventClick) postToWorker({ type: "ui:sidebarEvent", kind: "click", sectionId: section.id, itemId, event: section.eventClick });
+        },
+        onItemToggle: (itemId) => {
+          if (section.eventToggle) postToWorker({ type: "ui:sidebarEvent", kind: "toggle", sectionId: section.id, itemId, event: section.eventToggle });
+        },
+        onItemAction: (itemId, actionId) => {
+          if (section.eventAction) postToWorker({ type: "ui:sidebarEvent", kind: "action", sectionId: section.id, itemId, actionId, event: section.eventAction });
+        },
+        onItemContextMenu: (itemId) => {
+          if (section.eventContext) postToWorker({ type: "ui:sidebarEvent", kind: "context", sectionId: section.id, itemId, event: section.eventContext });
+        },
+      });
+    },
+    sidebarRemove: (sectionId) => {
+      sidebarSectionsRegistry.remove(ext.id, sectionId);
     },
     onDomUnsupported: (surface) => {
       log("warn", [`${surface} is not available in the sandbox; use the declared manifest contributes instead`]);

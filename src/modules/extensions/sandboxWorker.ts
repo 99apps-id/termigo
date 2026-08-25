@@ -8,7 +8,7 @@
 // AI-tool and command handlers registered by the extension stay here and are
 // driven by inbound `invoke_tool` / `invoke_command` messages from the host.
 
-import type { HostMessage, SandboxRequest, WorkerMessage } from "./sandbox";
+import type { HostMessage, SandboxRequest, SerializedSidebarSection, WorkerMessage } from "./sandbox";
 
 declare const self: DedicatedWorkerGlobalScope;
 
@@ -22,6 +22,7 @@ const toolHandlers = new Map<string, Handler>();
 const commandHandlers = new Map<string, Handler>();
 const panelHandlers = new Map<string, (fields: Record<string, string>) => void>();
 const itemHandlers = new Map<string, () => void>();
+const sidebarHandlers = new Map<string, (...args: unknown[]) => void>();
 const listeners = new Map<string, ((payload: unknown) => void)[]>();
 
 function send(msg: WorkerMessage): void {
@@ -152,8 +153,53 @@ function buildCtx(id: string): Record<string, unknown> {
       },
     },
     sidebar: {
-      setSection: () => call({ kind: "dom:unsupported", surface: "sidebar" }),
-      removeSection: () => {},
+      setSection: (section: {
+        id: string;
+        title: string;
+        icon?: string;
+        headerActions?: unknown[];
+        items?: unknown[];
+        emptyText?: string;
+        searchable?: boolean;
+        searchPlaceholder?: string;
+        movableToRight?: boolean;
+        onItemClick?: (itemId: string) => void;
+        onItemToggle?: (itemId: string) => void;
+        onItemAction?: (itemId: string, actionId: string) => void;
+        onItemContextMenu?: (itemId: string, at: { x: number; y: number }) => void;
+      }) => {
+        const clickCb = section.onItemClick;
+        const toggleCb = section.onItemToggle;
+        const actionCb = section.onItemAction;
+        const contextCb = section.onItemContextMenu;
+        const eventClick = clickCb ? `sb:${section.id}:click` : undefined;
+        const eventToggle = toggleCb ? `sb:${section.id}:toggle` : undefined;
+        const eventAction = actionCb ? `sb:${section.id}:action` : undefined;
+        const eventContext = contextCb ? `sb:${section.id}:context` : undefined;
+        if (clickCb && eventClick) sidebarHandlers.set(eventClick, (itemId) => clickCb(String(itemId)));
+        if (toggleCb && eventToggle) sidebarHandlers.set(eventToggle, (itemId) => toggleCb(String(itemId)));
+        if (actionCb && eventAction) sidebarHandlers.set(eventAction, (itemId, actionId) => actionCb(String(itemId), String(actionId)));
+        if (contextCb && eventContext) sidebarHandlers.set(eventContext, (itemId, at) => contextCb(String(itemId), at as { x: number; y: number }));
+        return call({
+          kind: "sidebar:set",
+          section: {
+            id: section.id,
+            title: section.title,
+            icon: section.icon,
+            headerActions: section.headerActions as SerializedSidebarSection["headerActions"],
+            items: section.items as SerializedSidebarSection["items"],
+            emptyText: section.emptyText,
+            searchable: section.searchable,
+            searchPlaceholder: section.searchPlaceholder,
+            movableToRight: section.movableToRight,
+            eventClick,
+            eventToggle,
+            eventAction,
+            eventContext,
+          },
+        });
+      },
+      removeSection: (sectionId: string) => call({ kind: "sidebar:remove", sectionId }),
     },
     app: {
       getContext: () => ({}),
@@ -227,6 +273,11 @@ async function handle(msg: HostMessage): Promise<void> {
     case "ui:itemClick": {
       const fn = itemHandlers.get(msg.event);
       if (fn) fn();
+      break;
+    }
+    case "ui:sidebarEvent": {
+      const fn = sidebarHandlers.get(msg.event);
+      if (fn) fn(msg.itemId, msg.actionId);
       break;
     }
     case "deactivate":
