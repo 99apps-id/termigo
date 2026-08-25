@@ -21,6 +21,7 @@ const pending = new Map<number, Pending>();
 const toolHandlers = new Map<string, Handler>();
 const commandHandlers = new Map<string, Handler>();
 const panelHandlers = new Map<string, (fields: Record<string, string>) => void>();
+const itemHandlers = new Map<string, () => void>();
 const listeners = new Map<string, ((payload: unknown) => void)[]>();
 
 function send(msg: WorkerMessage): void {
@@ -90,16 +91,46 @@ function buildCtx(id: string): Record<string, unknown> {
       void call({ kind: "command:register", commandId: id });
     },
     addDisposer: () => {},
-    // DOM / UI surfaces are host-managed in the sandbox. Panels are rendered by
-    // the host from an HTML template the worker sends; events flow back over
-    // `ui:event`. statusBar / headerBar / sidebar are not supported yet.
+    // DOM / UI surfaces are host-managed in the sandbox. Panels, header items
+    // and status items are rendered by the host from a serializable spec; clicks
+    // route back to the worker over `ui:event` / `ui:itemClick`.
     headerBar: {
-      setItem: () => call({ kind: "dom:unsupported", surface: "headerBar" }),
-      removeItem: () => {},
+      setItem: (item: { id: string; icon: string; tooltip: string; tone?: string; placement?: string; onClick?: () => void }) => {
+        const event = item.onClick ? `hb:${item.id}` : undefined;
+        if (item.onClick && event) itemHandlers.set(event, item.onClick);
+        return call({
+          kind: "headerbar:set",
+          item: {
+            id: item.id,
+            icon: item.icon,
+            tooltip: item.tooltip,
+            tone: item.tone as "default" | "success" | "warning" | "error" | undefined,
+            placement: item.placement as "left" | "right" | undefined,
+            event,
+          },
+        });
+      },
+      removeItem: (id: string) => call({ kind: "headerbar:remove", itemId: id }),
     },
     statusBar: {
-      setItem: () => call({ kind: "dom:unsupported", surface: "statusBar" }),
-      removeItem: () => {},
+      setItem: (item: { id: string; icon: string; tooltip: string; tone?: string; label?: string; progress?: number; kind?: string; onClick?: () => void }) => {
+        const event = item.onClick ? `sb:${item.id}` : undefined;
+        if (item.onClick && event) itemHandlers.set(event, item.onClick);
+        return call({
+          kind: "statusbar:set",
+          item: {
+            id: item.id,
+            icon: item.icon,
+            tooltip: item.tooltip,
+            tone: item.tone as "default" | "success" | "warning" | "error" | undefined,
+            label: item.label,
+            progress: item.progress,
+            kind: item.kind as "status" | "action" | undefined,
+            event,
+          },
+        });
+      },
+      removeItem: (id: string) => call({ kind: "statusbar:remove", itemId: id }),
     },
     registerPanelRenderer: (panelId: string, view: unknown) => {
       if (view && typeof view === "object" && "html" in view) {
@@ -191,6 +222,11 @@ async function handle(msg: HostMessage): Promise<void> {
       // run the bound handler.
       const fn = panelHandlers.get(msg.event);
       if (fn) void fn(msg.fields ?? {});
+      break;
+    }
+    case "ui:itemClick": {
+      const fn = itemHandlers.get(msg.event);
+      if (fn) fn();
       break;
     }
     case "deactivate":

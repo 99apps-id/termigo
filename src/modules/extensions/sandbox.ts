@@ -36,6 +36,10 @@ export type SandboxRequest =
   | { id: number; kind: "panel:close" }
   | { id: number; kind: "panel:toggle"; panelId: string }
   | { id: number; kind: "ui:mountPanel"; panelId: string; html: string; events: string[] }
+  | { id: number; kind: "headerbar:set"; item: SerializedHeaderItem }
+  | { id: number; kind: "headerbar:remove"; itemId: string }
+  | { id: number; kind: "statusbar:set"; item: SerializedStatusItem }
+  | { id: number; kind: "statusbar:remove"; itemId: string }
   | { id: number; kind: "dom:unsupported"; surface: string }
   | { id: number; kind: "logger"; level: "info" | "warn" | "error"; args: unknown[] };
 
@@ -44,6 +48,29 @@ export type SandboxResponse =
   | { id: number; ok: true; value: unknown }
   | { id: number; ok: false; error: string };
 
+/** Header / status items are host-managed in the sandbox: the worker sends a
+ *  serializable spec (no function) and the host renders it; clicks route back
+ *  to the worker via `ui:itemClick` with the `event` name. */
+export type SerializedHeaderItem = {
+  id: string;
+  icon: string;
+  tooltip: string;
+  tone?: "default" | "success" | "warning" | "error";
+  placement?: "left" | "right";
+  event?: string;
+};
+
+export type SerializedStatusItem = {
+  id: string;
+  icon: string;
+  tooltip: string;
+  tone?: "default" | "success" | "warning" | "error";
+  label?: string;
+  progress?: number;
+  kind?: "status" | "action";
+  event?: string;
+};
+
 /** Inbound message from the host to the worker (init + calls the host owns). */
 export type HostMessage =
   | { type: "init"; id: string; code: string }
@@ -51,6 +78,7 @@ export type HostMessage =
   | { type: "invoke_command"; id: string; args: unknown[]; callId: number }
   | { type: "event"; channel: string; payload: unknown }
   | { type: "ui:event"; panelId: string; event: string; fields?: Record<string, string> }
+  | { type: "ui:itemClick"; surface: "header" | "status"; id: string; event: string }
   | { type: "deactivate" };
 
 /** Outbound message from the worker to the host for calls the host initiated. */
@@ -90,6 +118,10 @@ export type SandboxExecutor = {
   /** Called when the worker mounts a host-managed panel view. The host stores
    *  the HTML and wires `data-ext-event` clicks back to the worker. */
   onPanelMount(panelId: string, html: string, events: string[]): void;
+  headerBarSet(item: SerializedHeaderItem): void;
+  headerBarRemove(id: string): void;
+  statusBarSet(item: SerializedStatusItem): void;
+  statusBarRemove(id: string): void;
   onDomUnsupported(surface: string): void;
   log(level: "info" | "warn" | "error", args: unknown[]): void;
 };
@@ -210,6 +242,26 @@ export function createSandboxDispatcher(
         }
         case "dom:unsupported":
           executor.onDomUnsupported(req.surface);
+          value = undefined;
+          break;
+        case "headerbar:set":
+          require("headerbar:write");
+          executor.headerBarSet(req.item);
+          value = undefined;
+          break;
+        case "headerbar:remove":
+          require("headerbar:write");
+          executor.headerBarRemove(req.itemId);
+          value = undefined;
+          break;
+        case "statusbar:set":
+          require("statusbar:write");
+          executor.statusBarSet(req.item);
+          value = undefined;
+          break;
+        case "statusbar:remove":
+          require("statusbar:write");
+          executor.statusBarRemove(req.itemId);
           value = undefined;
           break;
         case "logger":

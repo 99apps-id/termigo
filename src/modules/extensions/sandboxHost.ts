@@ -9,7 +9,7 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { LazyStore } from "@tauri-apps/plugin-store";
 import * as chatMod from "@/modules/ai/store/chatStore";
-import { aiToolsRegistry, commandsRegistry, panelRenderersRegistry } from "./registries";
+import { aiToolsRegistry, commandsRegistry, headerItemsRegistry, panelRenderersRegistry, statusItemsRegistry } from "./registries";
 import { useRightPanelStore } from "./rightPanelStore";
 import type { ExtensionRuntime } from "./host";
 import {
@@ -31,12 +31,11 @@ type BridgeHooks = {
 async function buildExecutor(
   ext: ExtensionRuntime,
   hooks: BridgeHooks,
-  postToWorker: (msg: {
-    type: "ui:event";
-    panelId: string;
-    event: string;
-    fields?: Record<string, string>;
-  }) => void,
+  postToWorker: (
+    msg:
+      | { type: "ui:event"; panelId: string; event: string; fields?: Record<string, string> }
+      | { type: "ui:itemClick"; surface: "header" | "status"; id: string; event: string },
+  ) => void,
 ): Promise<SandboxExecutor> {
   const store = new LazyStore(STORAGE_FILE(ext.id), { defaults: {}, autoSave: 200 });
   const log = (level: "info" | "warn" | "error", args: unknown[]): void => {
@@ -137,6 +136,38 @@ async function buildExecutor(
           container.removeEventListener("click", handler);
         };
       });
+    },
+    headerBarSet: (item) => {
+      headerItemsRegistry.set(ext.id, {
+        id: item.id,
+        icon: item.icon,
+        tooltip: item.tooltip,
+        tone: item.tone,
+        placement: item.placement,
+        onClick: () => {
+          if (item.event) postToWorker({ type: "ui:itemClick", surface: "header", id: item.id, event: item.event });
+        },
+      });
+    },
+    headerBarRemove: (id) => {
+      headerItemsRegistry.remove(ext.id, id);
+    },
+    statusBarSet: (item) => {
+      statusItemsRegistry.set(ext.id, {
+        id: item.id,
+        icon: item.icon,
+        tooltip: item.tooltip,
+        tone: item.tone,
+        label: item.label,
+        progress: item.progress,
+        kind: item.kind,
+        onClick: () => {
+          if (item.event) postToWorker({ type: "ui:itemClick", surface: "status", id: item.id, event: item.event });
+        },
+      });
+    },
+    statusBarRemove: (id) => {
+      statusItemsRegistry.remove(ext.id, id);
     },
     onDomUnsupported: (surface) => {
       log("warn", [`${surface} is not available in the sandbox; use the declared manifest contributes instead`]);

@@ -23,6 +23,10 @@ function makeExecutor(): SandboxExecutor {
     panelClose: vi.fn(),
     panelToggle: vi.fn(),
     onPanelMount: vi.fn(),
+    headerBarSet: vi.fn(),
+    headerBarRemove: vi.fn(),
+    statusBarSet: vi.fn(),
+    statusBarRemove: vi.fn(),
     onDomUnsupported: vi.fn(),
     log: vi.fn(),
   };
@@ -126,5 +130,38 @@ describe("sandbox dispatcher", () => {
     });
     expect(resp.ok).toBe(true);
     expect(executor.onPanelMount).toHaveBeenCalledWith("p", expect.stringContaining("go"), ["go"]);
+  });
+
+  it("gates header/status items behind their write permission", async () => {
+    const { executor, resp } = await dispatch([], {
+      id: 10,
+      kind: "headerbar:set",
+      item: { id: "h", icon: "x", tooltip: "t", event: "e" },
+    });
+    expect(resp.ok).toBe(false);
+    expect(executor.headerBarSet).not.toHaveBeenCalled();
+
+    const { executor: ex2, resp: r2 } = await dispatch([], {
+      id: 11,
+      kind: "statusbar:set",
+      item: { id: "s", icon: "x", tooltip: "t" },
+    });
+    expect(r2.ok).toBe(false);
+    expect(ex2.statusBarSet).not.toHaveBeenCalled();
+  });
+
+  it("sets header/status items when the permission is declared", async () => {
+    const { executor, resp } = await dispatch(["headerbar:write"], {
+      id: 12,
+      kind: "headerbar:set",
+      item: { id: "h", icon: "lucide:Shield", tooltip: "Open", event: "hb:h" },
+    });
+    expect(resp.ok).toBe(true);
+    expect(executor.headerBarSet).toHaveBeenCalledWith({
+      id: "h",
+      icon: "lucide:Shield",
+      tooltip: "Open",
+      event: "hb:h",
+    });
   });
 });
