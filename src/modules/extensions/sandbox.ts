@@ -101,6 +101,7 @@ export type HostMessage =
 /** Outbound message from the worker to the host for calls the host initiated. */
 export type WorkerMessage =
   | { type: "ready"; id: string }
+  | { type: "activate_error"; id: string; error: string }
   | { type: "tool_result"; callId: number; ok: true; value: unknown }
   | { type: "tool_result"; callId: number; ok: false; error: string }
   | { type: "command_result"; callId: number; ok: true; value: unknown }

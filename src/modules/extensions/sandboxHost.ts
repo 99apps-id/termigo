@@ -8,6 +8,7 @@
 
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { LazyStore } from "@tauri-apps/plugin-store";
+import { toast } from "@/components/ui/toast";
 import * as chatMod from "@/modules/ai/store/chatStore";
 import { aiToolsRegistry, commandsRegistry, headerItemsRegistry, panelRenderersRegistry, sidebarSectionsRegistry, statusItemsRegistry } from "./registries";
 import { useRightPanelStore } from "./rightPanelStore";
@@ -271,6 +272,15 @@ export async function activateSandboxed(
       return;
     }
     const msg = data as WorkerMessage;
+    if (msg.type === "activate_error") {
+      // Surface the failure so the user sees why a sandbox extension's panel
+      // stays on \"Loading panel…\" without opening DevTools (disabled in
+      // release builds).
+      toast(`Extension \"${ext.id}\" failed to activate: ${msg.error}`, {
+        variant: "error",
+      });
+      return;
+    }
     if (msg.type === "tool_result" || msg.type === "command_result") {
       const p = pendingToolCalls.get(msg.callId);
       if (p) {

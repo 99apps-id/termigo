@@ -233,7 +233,8 @@ async function handle(msg: HostMessage): Promise<void> {
         }
         send({ type: "ready", id: msg.id });
       } catch (e) {
-        send({ type: "ready", id: msg.id });
+        const error = e instanceof Error ? e.message : String(e);
+        send({ type: "activate_error", id: msg.id, error });
         console.error(`[ext:${msg.id}] sandbox activate failed`, e);
       }
       break;
