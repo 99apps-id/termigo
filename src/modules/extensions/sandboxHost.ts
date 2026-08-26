@@ -262,6 +262,25 @@ export async function activateSandboxed(
     executor,
   );
 
+  let resolveReady: () => void = () => {};
+  let rejectReady: (e: Error) => void = () => {};
+  const readyPromise = new Promise<void>((resolve, reject) => {
+    resolveReady = resolve;
+    rejectReady = reject;
+  });
+  // Host-side bound: if the worker never loads / imports / activates, surface
+  // it. The worker's own activate guard fires activate_error, but a blob import
+  // that hangs would otherwise leave the panel on "Loading panel..." forever.
+  const readyTimeout = setTimeout(
+    () => rejectReady(new Error("worker did not become ready within 12s")),
+    12000,
+  );
+
+  worker.onerror = (e) => {
+    clearTimeout(readyTimeout);
+    rejectReady(new Error(`worker error: ${e.message ?? "unknown"}`));
+  };
+
   worker.onmessage = (e) => {
     const data = e.data as { kind?: string; req?: SandboxRequest } | WorkerMessage;
     if (!data) return;
@@ -272,13 +291,20 @@ export async function activateSandboxed(
       return;
     }
     const msg = data as WorkerMessage;
+    if (msg.type === "ready") {
+      clearTimeout(readyTimeout);
+      resolveReady();
+      return;
+    }
     if (msg.type === "activate_error") {
       // Surface the failure so the user sees why a sandbox extension's panel
       // stays on \"Loading panel…\" without opening DevTools (disabled in
       // release builds).
+      clearTimeout(readyTimeout);
       toast(`Extension \"${ext.id}\" failed to activate: ${msg.error}`, {
         variant: "error",
       });
+      rejectReady(new Error(msg.error));
       return;
     }
     if (msg.type === "tool_result" || msg.type === "command_result") {
@@ -292,6 +318,8 @@ export async function activateSandboxed(
   };
 
   post({ type: "init", id: ext.id, code });
+
+  await readyPromise;
 
   return {
     dispose: () => {
