@@ -29,8 +29,26 @@ pub struct DirEntry {
 // Whether `dir` is inside a git repo. Walks up only; never descends into
 // siblings, so it does not touch protected macOS folders (Desktop, ...).
 fn in_git_repo(dir: &Path) -> bool {
+    // A `.git` in the user's home directory is usually a dotfiles repo, not a
+    // project root. If it counted, every nested folder (AppData, Temp,
+    // Desktop, Downloads) would look like "in a repo" and a stray `.gitignore`
+    // anywhere on the way up would start dimming unrelated files. Stop the
+    // ascent at home and at the filesystem root, so a repo only counts when the
+    // inspected directory is the repo root itself or below a real project repo
+    // found before reaching either boundary.
+    let home = dirs::home_dir();
     let mut cur = dir;
     loop {
+        if let Some(home) = &home {
+            if cur == *home && dir != *home {
+                return false;
+            }
+        }
+        // Ignore a `.git` marker at the filesystem root: it is not a project
+        // boundary (and can be a stray folder, e.g. C:\.git holding only info).
+        if cur.parent().is_none() {
+            return false;
+        }
         if cur.join(".git").exists() {
             return true;
         }
