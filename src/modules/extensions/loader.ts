@@ -99,6 +99,17 @@ function getHostVersion(): Promise<string> {
   return hostVersionPromise;
 }
 
+/** Permissions the runtime enforces. Install records the full declared set as
+ *  approved, but a sideloaded or pre-review copy can carry an empty approved
+ *  list; fall back to the declared permissions so a legitimate extension is not
+ *  silently disabled (it is never MORE than what the manifest declared). */
+function grantPermissions(ext: InstalledExtension): string[] {
+  if (ext.approved_permissions && ext.approved_permissions.length > 0) {
+    return ext.approved_permissions;
+  }
+  return ext.manifest.permissions;
+}
+
 /** Ids already reported by `listInstalled` as unparseable, so the toast fires
  *  once per session instead of on every enable/disable/install/refresh (this
  *  function is called from ~12 places in `store.ts`). */
@@ -156,7 +167,7 @@ export async function activate(ext: InstalledExtension): Promise<void> {
   const { context, dispose } = await buildContext({
     id: ext.id,
     root: ext.root,
-    manifest: { permissions: ext.approved_permissions ?? ext.manifest.permissions },
+    manifest: { permissions: grantPermissions(ext) },
   });
 
   let scriptUrl: string | null = null;
@@ -177,7 +188,7 @@ export async function activate(ext: InstalledExtension): Promise<void> {
           {
             id: ext.id,
             root: ext.root,
-            manifest: { permissions: ext.approved_permissions ?? ext.manifest.permissions },
+            manifest: { permissions: grantPermissions(ext) },
           },
           text,
         );

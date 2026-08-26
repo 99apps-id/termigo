@@ -23,6 +23,7 @@
  */
 import { Kbd } from "@/components/ui/kbd";
 import { IconTooltip } from "@/components/ui/icon-tooltip";
+import { resolveExtIcon } from "@/lib/iconRegistry";
 import { KEY_SEP } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { usePreferencesStore } from "@/modules/settings/preferences";
@@ -218,10 +219,23 @@ function PanelIcon({
   alt: string;
   size: number;
 }) {
-  const Icon = ICON_MAP[extensionId];
-  if (Icon) {
+  const Curated = ICON_MAP[extensionId];
+  if (Curated) {
     return (
-      <Icon
+      <Curated
+        size={size}
+        strokeWidth={size >= 16 ? 1.75 : 2}
+        className="shrink-0"
+        aria-label={alt || undefined}
+      />
+    );
+  }
+  // Third-party `lucide:<Name>` / `hugeicon:<Name>` refs render as line-art
+  // (parity with the header icon row) instead of falling back to an empty box.
+  const Lucide = resolveExtIcon(icon);
+  if (Lucide) {
+    return (
+      <Lucide
         size={size}
         strokeWidth={size >= 16 ? 1.75 : 2}
         className="shrink-0"
