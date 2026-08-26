@@ -170,6 +170,7 @@ function Bridge({
   // `reviewAfterApply` is on (the applied edit stays visible to review).
   const runOpenRef = useRef<Set<string>>(new Set());
   const wasBusyRef = useRef(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies(sessionId): reset per-run refs when the session changes; the body only writes refs and needs sessionId to re-trigger.
   useEffect(() => {
     openedRef.current = new Set();
     fileMutationFingerprintRef.current = "";

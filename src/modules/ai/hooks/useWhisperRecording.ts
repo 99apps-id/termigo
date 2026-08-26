@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useChatStore } from "../store/chatStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
@@ -58,17 +58,20 @@ export function useWhisperRecording({
     !!navigator.mediaDevices?.getUserMedia &&
     typeof MediaRecorder !== "undefined";
 
-  const sttOptions: SttOptions = {
-    groqSttModel,
-    whispercppBaseURL,
-  };
+  // Built inline would create a new object every render, which would make
+  // the `start` callback (and any effect depending on it) churn on each
+  // render. Memoize so it only changes when the model/base URL do.
+  const sttOptions = useMemo<SttOptions>(
+    () => ({ groqSttModel, whispercppBaseURL }),
+    [groqSttModel, whispercppBaseURL],
+  );
 
-  const teardownStream = () => {
+  const teardownStream = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => {
       t.stop();
     });
     streamRef.current = null;
-  };
+  }, []);
 
   const stop = useCallback(() => {
     const rec = recRef.current;
@@ -116,14 +119,14 @@ export function useWhisperRecording({
       teardownStream();
       setState("idle");
     }
-  }, [apiKeys, sttProvider, sttOptions, onResult, state, supported, hasKey]);
+  }, [apiKeys, sttProvider, sttOptions, onResult, state, supported, hasKey, teardownStream]);
 
   useEffect(() => {
     return () => {
       recRef.current?.stop();
       teardownStream();
     };
-  }, []);
+  }, [teardownStream]);
 
   return {
     state,

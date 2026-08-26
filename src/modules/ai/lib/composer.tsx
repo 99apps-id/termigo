@@ -113,9 +113,10 @@ export function AiComposerProvider({ children }: ProviderProps) {
       })();
     }
     prevIsBusyRef.current = isBusy;
-  }, [isBusy, textareaRef]);
+  }, [isBusy]);
 
   // Listen for explorer's "Attach to Agent" event.
+  // biome-ignore lint/correctness/useExhaustiveDependencies(attachFileByPath): the listener is registered once, and attachFileByPath only closes over stable setFiles/share, so the mount-time closure stays correct.
   useEffect(() => {
     const onAttach = (e: Event) => {
       const path = (e as CustomEvent<string>).detail;

@@ -79,6 +79,7 @@ export function AiComposerInput() {
     return () => window.clearTimeout(t);
   }, [fileTrigger]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies(c.value): autoresize must re-run when the text content changes so the textarea grows with input.
   useEffect(() => {
     autoresize(c.textareaRef.current);
   }, [c.value, c.textareaRef]);
@@ -135,6 +136,7 @@ export function AiComposerInput() {
 
   const fileTriggerOpen = fileTrigger !== null;
   const snippetTriggerOpen = trigger !== null;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset the highlight whenever the picker opens/closes or its query changes.
   useEffect(() => {
     setActiveIndex(0);
   }, [snippetTriggerOpen, fileTriggerOpen, fileQuery]);

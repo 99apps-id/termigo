@@ -47,7 +47,7 @@ import {
   Tick01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   compatModelIdForEndpoint,
   estimateCost,
@@ -260,8 +260,10 @@ function ModelDropdown() {
   const [activeProvider, setActiveProvider] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("all");
   const inputRef = useRef<HTMLInputElement>(null);
-  const hasCredentialFor = (id: ProviderId) =>
-    providerNeedsKey(id) ? !!apiKeys[id] : true;
+  const hasCredentialFor = useCallback(
+    (id: ProviderId) => (providerNeedsKey(id) ? !!apiKeys[id] : true),
+    [apiKeys],
+  );
 
   const currentProviderHasKey = isCompatModelId(selected)
     ? true
@@ -283,8 +285,9 @@ function ModelDropdown() {
       (hasKeyFor(p.id) ? configured : unconfigured).push(p);
     }
     return { configured, unconfigured };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apiKeys]);
+    // hasKeyFor is a stable useCallback that only changes when apiKeys do, so
+    // it is the correct trigger for this memo.
+  }, [hasKeyFor]);
 
   const allModels = useMemo(
     () => [...MODELS, ...epModelInfos],
@@ -767,6 +770,7 @@ function TodayCostChip() {
   const lastRun = useChatStore((s) => s.lastRun);
   const [today, setToday] = useState<number | null>(null);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies(lastRun): refresh the chip when a run finishes; the body reads no dep, but a new run must re-fetch spend.
   useEffect(() => {
     let alive = true;
     const load = () => {
