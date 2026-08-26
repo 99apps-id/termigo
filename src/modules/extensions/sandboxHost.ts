@@ -134,6 +134,7 @@ async function buildExecutor(
           const target = e.target as HTMLElement | null;
           const ev = target?.getAttribute?.("data-ext-event");
           if (!ev) return;
+          logInfo(`[ext:${ext.id}] sandboxHost: ui:event '${ev}' clicked`);
           // Send the clicked element's `data-ext-field` values back too, so the
           // worker can read the current value of an input without touching the
           // host DOM.
