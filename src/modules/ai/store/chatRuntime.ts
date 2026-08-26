@@ -1,4 +1,5 @@
 import { Chat, type UIMessage } from "@ai-sdk/react";
+import { info as logInfo } from "@tauri-apps/plugin-log";
 import {
   type ChatTransport,
   lastAssistantMessageIsCompleteWithApprovalResponses,
@@ -248,7 +249,9 @@ export async function sendParts(
   parts: readonly SteerPart[],
 ): Promise<boolean> {
   const c = getOrCreateChat(sessionId);
-  switch (submitAction(c.status, parts.length > 0)) {
+  const action = submitAction(c.status, parts.length > 0);
+  logInfo(`[ai] sendParts: session=${sessionId} status=${c.status} action=${action}`);
+  switch (action) {
     case "ignore":
       return false;
     case "queue":
