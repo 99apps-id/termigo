@@ -256,6 +256,19 @@ export async function runSubagent({
     customEndpointKeys: useChatStore.getState().customEndpointKeys,
   });
 
+  // A hung provider (no first token) used to leave a sub-agent on its step
+  // forever - the main run aborts after 90s, a sub-agent had no equivalent
+  // and could hang a whole run_subagents batch on one stalled model call.
+  // Once the first step lands the timer is cleared, so a slow-but-moving
+  // sub-agent is not killed. Flagged so the catch can name the cause instead
+  // of reporting a bare abort.
+  let firstStepTimer: ReturnType<typeof setTimeout> | null = null;
+  let timedOut = false;
+  firstStepTimer = setTimeout(() => {
+    timedOut = true;
+    controller.abort(new Error("sub-agent model did not respond within 90s"));
+  }, 90_000);
+
   const start = Date.now();
   try {
     const result = await generateText({
@@ -276,6 +289,10 @@ export async function runSubagent({
       // once they write.
       abortSignal: controller.signal,
       onStepFinish: (step) => {
+        if (firstStepTimer) {
+          clearTimeout(firstStepTimer);
+          firstStepTimer = null;
+        }
         if (!onStep) return;
         const last = step.toolCalls?.[step.toolCalls.length - 1];
         if (last) onStep(`${type}: ${last.toolName}`);
@@ -293,10 +310,16 @@ export async function runSubagent({
     // them into a clean result so the caller sees what happened instead of a
     // raw error string.
     if (controller.signal.aborted) {
+      if (firstStepTimer) {
+        clearTimeout(firstStepTimer);
+        firstStepTimer = null;
+      }
       return {
         summary: breaker.tripped
           ? "Stopped: the user denied the same write three times in a row. Nothing was written; report the change as not done."
-          : "Stopped: the run was aborted.",
+          : timedOut
+            ? "Stopped: the sub-agent model did not respond within 90s."
+            : "Stopped: the run was aborted.",
         stepCount: 0,
         durationMs: Date.now() - start,
       };

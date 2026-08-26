@@ -12,7 +12,10 @@ function steps(...calls: (Call[] | null)[]) {
   } as unknown as Parameters<ReturnType<typeof noToolRepetition<ToolSet>>>[0];
 }
 
-const read = (path: string): Call => ({ toolName: "read_file", input: { path } });
+const read = (path: string): Call => ({
+  toolName: "read_file",
+  input: { path },
+});
 
 describe("noToolRepetition", () => {
   const stop = noToolRepetition<ToolSet>(3);
@@ -40,6 +43,24 @@ describe("noToolRepetition", () => {
     const b = [read("a"), read("c")];
     expect(stop(steps(a, a, a))).toBe(true);
     expect(stop(steps(a, a, b))).toBe(false);
+  });
+
+  it("fires on an alternating loop, not just consecutive repeats", () => {
+    // read a, read b, read a, read b, read a: no two consecutive steps are
+    // identical, but the same call recurs 3x inside the window. This is the
+    // loop the old tail check let burn the whole step budget.
+    expect(
+      stop(
+        steps([read("a")], [read("b")], [read("a")], [read("b")], [read("a")]),
+      ),
+    ).toBe(true);
+  });
+
+  it("allows a call that recurs twice in the window", () => {
+    // Two reads of the same file is legitimate work; three is a loop.
+    expect(
+      stop(steps([read("a")], [read("b")], [read("a")], [read("c")])),
+    ).toBe(false);
   });
 
   it("never fires on a step that called no tool", () => {

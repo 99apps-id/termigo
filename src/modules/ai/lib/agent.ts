@@ -399,28 +399,38 @@ function toolCallFingerprint(toolName: string, input: unknown): string {
 }
 
 /**
- * Stops when the last `maxRepeats` steps used the same tool with the same
- * input. Default 3 because some tools (e.g. reading a log) repeat twice
- * legitimately.
+ * Stops when the same tool call (same tool + same input) recurs
+ * `maxRepeats` times inside a sliding window.
+ *
+ * A straight tail check (last N steps identical) lets a loop that alternates
+ * between two calls - read A, read B, read A, read B - slip past forever,
+ * because no two consecutive steps match. Counting recurrences across the
+ * window catches both the consecutive loop and the alternating one.
+ * Default 3 because some tools (e.g. reading a log) repeat twice
+ * legitimately; window is `maxRepeats * 2 - 1` so a 2-cycle shows up.
  */
 export function noToolRepetition<T extends ToolSet>(
   maxRepeats = 3,
 ): StopCondition<T> {
   return ({ steps }) => {
     if (steps.length < maxRepeats) return false;
-    const recent = steps.slice(-maxRepeats);
-    const fingerprints: (string | null)[] = recent.map((s) => {
+    const window = Math.max(maxRepeats * 2 - 1, maxRepeats);
+    const recent = steps.slice(-window);
+    const counts = new Map<string, number>();
+    for (const s of recent) {
       const calls = s.toolCalls;
-      if (!calls || calls.length === 0) return null;
+      if (!calls || calls.length === 0) continue;
       // Cover the full ordered set of tool calls so parallel multi-tool
       // repetition is caught and a step that only matches on its first call
       // (but differs on the rest) isn't falsely flagged.
-      return calls
+      const fp = calls
         .map((c) => toolCallFingerprint(c.toolName, c.input))
         .join("\n");
-    });
-    if (fingerprints.some((x) => x === null)) return false;
-    return fingerprints.every((x) => x === fingerprints[0]);
+      const n = (counts.get(fp) ?? 0) + 1;
+      if (n >= maxRepeats) return true;
+      counts.set(fp, n);
+    }
+    return false;
   };
 }
 
