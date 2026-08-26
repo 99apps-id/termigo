@@ -18,7 +18,7 @@ import {
 } from "./agent";
 import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
 import { formatAiError } from "./errors";
-import { error as logError } from "@tauri-apps/plugin-log";
+import { error as logError, info as logInfo } from "@tauri-apps/plugin-log";
 import { native } from "./native";
 import type { ToolContext } from "../tools/tools";
 
@@ -153,6 +153,7 @@ type SendOptions = {
 
 export function createContextAwareTransport(deps: Deps) {
   const run = async (options: SendOptions) => {
+    logInfo(`[ai] run: start (${options.messages.length} messages)`);
     const live = deps.getLive();
     // Daily budget guardrail: refuse to start a run once today's recorded
     // spend reaches the limit. Checked before any context is assembled so a
@@ -198,6 +199,8 @@ export function createContextAwareTransport(deps: Deps) {
     const contextMs = performance.now() - contextStart;
     const envBlock = formatEnvBlock(live);
     const messagesForRun = prepareOutgoingMessages(options.messages, envBlock);
+    logInfo(`[ai] run: context assembled in ${contextMs.toFixed(0)}ms (${messagesForRun.length} msgs)`);
+    logInfo(`[ai] run: calling runAgentStream`);
     const result = await runAgentStream({
       keys: deps.getKeys(),
       modelId: deps.getModelId(),
@@ -244,6 +247,7 @@ export function createContextAwareTransport(deps: Deps) {
       uiMessages: messagesForRun,
       abortSignal: options.abortSignal,
     });
+    logInfo(`[ai] run: stream created`);
     return result.toUIMessageStream({
       originalMessages: options.messages,
       onError: logAndFormatAiError,

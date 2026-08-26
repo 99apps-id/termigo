@@ -559,6 +559,7 @@ export type RunAgentOptions = {
 };
 
 export async function runAgentStream(opts: RunAgentOptions) {
+  logInfo(`[ai] runAgentStream: enter (model=${opts.modelId ?? DEFAULT_MODEL_ID})`);
   const modelId = opts.modelId ?? DEFAULT_MODEL_ID;
   const model = await buildConfiguredLanguageModel(modelId, opts.keys, {
     lmstudioBaseURL: opts.lmstudioBaseURL,
@@ -627,6 +628,23 @@ export async function runAgentStream(opts: RunAgentOptions) {
 
   let stepsSeen = 0;
   let runCost = 0;
+  // A hung provider (no first token) used to leave the run on "thinking"
+  // forever, unstop-able. Abort the model call if it produces nothing within a
+  // generous window; once the first step lands the timer is cleared, so a long
+  // legitimate run (e.g. a slow scan, a sub-agent fan-out) is not killed.
+  const abortController = new AbortController();
+  if (opts.abortSignal) {
+    opts.abortSignal.addEventListener("abort", () => abortController.abort(), { once: true });
+  }
+  let firstStepTimer: ReturnType<typeof setTimeout> | null = setTimeout(() => {
+    abortController.abort(new Error("model did not respond within 90s"));
+  }, 90_000);
+  const clearFirstStepTimer = (): void => {
+    if (firstStepTimer) {
+      clearTimeout(firstStepTimer);
+      firstStepTimer = null;
+    }
+  };
   // Three guards, any of which ends the loop. Each wrapper records which one
   // tripped first so the UI can explain the stop instead of offering the same
   // blank "continue" for every cause.
@@ -794,6 +812,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
     });
   }
 
+  logInfo(`[ai] runAgentStream: before streamText (${Object.keys(tools).length} tools)`);
   return streamText({
     model,
     system: prompt.system,
@@ -820,8 +839,10 @@ export async function runAgentStream(opts: RunAgentOptions) {
               : {},
         }
       : {}),
-    abortSignal: opts.abortSignal,
+    abortSignal: abortController.signal,
     onStepFinish: (step) => {
+      clearFirstStepTimer();
+      logInfo(`[ai] runAgentStream: step finished (#${stepsSeen})`);
       stepsSeen++;
       if (opts.onStep) {
         const last = step.toolCalls?.[step.toolCalls.length - 1];
