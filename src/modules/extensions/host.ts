@@ -654,10 +654,11 @@ export async function buildContext(ext: ExtensionRuntime): Promise<{
       },
       async sendPrompt(text: string): Promise<boolean> {
         requirePermission(ext.id, declared, "ai:prompt");
-        // Termigo exposes prompt submission through the chat UI; the
-        // imperative send is not part of the current chat store.
-        void text;
-        return false;
+        // Submit the text to the active chat session, same as typing it. The
+        // extension-driven send lets a hub (e.g. a pentest launcher) kick off
+        // an agent run directly instead of only prefilling the composer.
+        const { sendMessage } = await import("@/modules/ai/store/chatRuntime");
+        return sendMessage(String(text ?? ""));
       },
       stop: () => chatMod.stop(),
     },

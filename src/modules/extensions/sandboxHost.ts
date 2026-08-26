@@ -98,7 +98,13 @@ async function buildExecutor(
       chatMod.useChatStore.getState().setSelectedModelId(`${provider}:${modelId}`);
     },
     aiSetSubagentsEnabled: async () => {},
-    aiSendPrompt: async () => false,
+    aiSendPrompt: async (text) => {
+      // Submit the text to the active chat session, same as typing it in the
+      // composer. This is what lets a command-palette / panel launcher start an
+      // agent run; returning false means no active session or no API key.
+      const { sendMessage } = await import("@/modules/ai/store/chatRuntime");
+      return sendMessage(String(text ?? ""));
+    },
     aiStop: () => chatMod.stop(),
     onToolRegister: (name) => {
       aiToolsRegistry.setRuntime(ext.id, name, (args: unknown) => hooks.invokeTool(name, args));
