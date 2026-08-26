@@ -152,6 +152,18 @@ type SendOptions = {
 };
 
 export function createContextAwareTransport(deps: Deps) {
+  // A context-assembly stall (a hung MCP server start, a file read that never
+  // returns) would otherwise leave the run on "thinking" forever with no way
+  // to stop it, because the abort signal only reaches the model call later.
+  const CONTEXT_TIMEOUT_MS = 60_000;
+  const withTimeout = <T>(promise: Promise<T>, ms: number, label: string): Promise<T> =>
+    Promise.race([
+      promise,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s`)), ms),
+      ),
+    ]);
+
   const run = async (options: SendOptions) => {
     logInfo(`[ai] run: start (${options.messages.length} messages)`);
     const live = deps.getLive();
@@ -187,15 +199,19 @@ export function createContextAwareTransport(deps: Deps) {
     // tools. MCP is the one that can start a process, so it is the one that
     // can turn a file read into twenty seconds.
     const contextStart = performance.now();
-    const [projectMemory, learnedMemory, mcpTools, skills, customDefs] = await Promise.all([
-      readTermigoMd(live.workspaceRoot),
-      readMemory(live.workspaceRoot),
-      getMcpTools(live.workspaceRoot),
-      listSkills(live.workspaceRoot),
-      loadCustomTools(live.workspaceRoot),
-      loadHooks(live.workspaceRoot),
-      hydrateInvariants(live.workspaceRoot),
-    ]);
+    const [projectMemory, learnedMemory, mcpTools, skills, customDefs] = await withTimeout(
+      Promise.all([
+        readTermigoMd(live.workspaceRoot),
+        readMemory(live.workspaceRoot),
+        getMcpTools(live.workspaceRoot),
+        listSkills(live.workspaceRoot),
+        loadCustomTools(live.workspaceRoot),
+        loadHooks(live.workspaceRoot),
+        hydrateInvariants(live.workspaceRoot),
+      ]),
+      CONTEXT_TIMEOUT_MS,
+      "context assembly",
+    );
     const contextMs = performance.now() - contextStart;
     const envBlock = formatEnvBlock(live);
     const messagesForRun = prepareOutgoingMessages(options.messages, envBlock);
