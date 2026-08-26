@@ -7,6 +7,7 @@
 // real handler and replies over the message channel).
 
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
+import { error as logError, info as logInfo } from "@tauri-apps/plugin-log";
 import { LazyStore } from "@tauri-apps/plugin-store";
 import { toast } from "@/components/ui/toast";
 import * as chatMod from "@/modules/ai/store/chatStore";
@@ -116,6 +117,7 @@ async function buildExecutor(
     },
     onPanelMount: (panelId, html, events) => {
       void events;
+      logInfo(`[ext:${ext.id}] sandboxHost: register panel renderer '${panelId}' (${html.length} bytes)`);
       // Host-managed panel: the worker sent an HTML template. The host renders
       // it and routes any `data-ext-event` click back to the worker, so the
       // extension keeps its interactive handlers without running DOM code in
@@ -261,6 +263,7 @@ export async function activateSandboxed(
     { id: ext.id, declared: ext.manifest.permissions },
     executor,
   );
+  logInfo(`[ext:${ext.id}] sandboxHost: worker created; executor ready`);
 
   let resolveReady: () => void = () => {};
   let rejectReady: (e: Error) => void = () => {};
@@ -272,11 +275,15 @@ export async function activateSandboxed(
   // it. The worker's own activate guard fires activate_error, but a blob import
   // that hangs would otherwise leave the panel on "Loading panel..." forever.
   const readyTimeout = setTimeout(
-    () => rejectReady(new Error("worker did not become ready within 12s")),
+    () => {
+      logError(`[ext:${ext.id}] sandboxHost: worker not ready within 12s`);
+      rejectReady(new Error("worker did not become ready within 12s"));
+    },
     12000,
   );
 
   worker.onerror = (e) => {
+    logError(`[ext:${ext.id}] sandboxHost: worker onerror: ${e.message ?? "unknown"}`);
     clearTimeout(readyTimeout);
     rejectReady(new Error(`worker error: ${e.message ?? "unknown"}`));
   };
@@ -292,6 +299,7 @@ export async function activateSandboxed(
     }
     const msg = data as WorkerMessage;
     if (msg.type === "ready") {
+      logInfo(`[ext:${ext.id}] sandboxHost: worker ready`);
       clearTimeout(readyTimeout);
       resolveReady();
       return;
@@ -300,8 +308,9 @@ export async function activateSandboxed(
       // Surface the failure so the user sees why a sandbox extension's panel
       // stays on \"Loading panel…\" without opening DevTools (disabled in
       // release builds).
+      logError(`[ext:${ext.id}] sandboxHost: activate_error: ${msg.error}`);
       clearTimeout(readyTimeout);
-      toast(`Extension \"${ext.id}\" failed to activate: ${msg.error}`, {
+      toast(`Extension "${ext.id}" failed to activate: ${msg.error}`, {
         variant: "error",
       });
       rejectReady(new Error(msg.error));
@@ -318,6 +327,7 @@ export async function activateSandboxed(
   };
 
   post({ type: "init", id: ext.id, code });
+  logInfo(`[ext:${ext.id}] sandboxHost: sent init, awaiting ready`);
 
   await readyPromise;
 

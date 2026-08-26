@@ -9,6 +9,7 @@
 
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
+import { error as logError, info as logInfo } from "@tauri-apps/plugin-log";
 import { activateSandboxed } from "./sandboxHost";
 
 import { toast } from "@/components/ui/toast";
@@ -162,12 +163,14 @@ export async function activate(ext: InstalledExtension): Promise<void> {
   // Seed declarative contributions first. If activate() throws, they stay
   // so the user can still disable/uninstall from Settings.
   seedManifestContributions(ext);
+  logInfo(`[ext:${ext.id}] activate: seeded manifest contributions`);
 
   const { context, dispose } = await buildContext({
     id: ext.id,
     root: ext.root,
     manifest: { permissions: grantPermissions(ext) },
   });
+  logInfo(`[ext:${ext.id}] activate: built context`);
 
   let scriptUrl: string | null = null;
   let userDeactivate: ActiveRecord["userDeactivate"] = null;
@@ -177,12 +180,14 @@ export async function activate(ext: InstalledExtension): Promise<void> {
       id: ext.id,
       relPath: ext.manifest.main,
     });
+    logInfo(`[ext:${ext.id}] activate: read main (${text.length} bytes)`);
 
     // Worker-sandboxed extensions run in a Web Worker (no window / document /
     // @tauri-apps/api/core). The bridge + permission dispatcher live in
     // sandboxHost; the handler bindings for its tools/commands are wired there.
     if (ext.manifest.sandbox === "worker") {
       try {
+        logInfo(`[ext:${ext.id}] activate: sandbox activation start`);
         const sandbox = await activateSandboxed(
           {
             id: ext.id,
@@ -191,6 +196,7 @@ export async function activate(ext: InstalledExtension): Promise<void> {
           },
           text,
         );
+        logInfo(`[ext:${ext.id}] activate: sandbox activation ready`);
         active.set(ext.id, {
           context,
           dispose: async () => {
@@ -202,6 +208,7 @@ export async function activate(ext: InstalledExtension): Promise<void> {
         });
         return;
       } catch (err) {
+        logError(`[ext:${ext.id}] activate: sandbox activation failed: ${String(err)}`);
         console.error(`[extensions] failed to sandbox-activate ${ext.id}`, err);
         await dispose();
         clearExtensionContributions(ext.id);
@@ -210,6 +217,7 @@ export async function activate(ext: InstalledExtension): Promise<void> {
       }
     }
 
+    logInfo(`[ext:${ext.id}] activate: non-sandboxed path`);
     const blob = new Blob([text], { type: "text/javascript" });
     try {
       scriptUrl = URL.createObjectURL(blob);
@@ -249,6 +257,7 @@ export async function activate(ext: InstalledExtension): Promise<void> {
     }
   }
 
+  logInfo(`[ext:${ext.id}] activate: complete (active set)`);
   active.set(ext.id, { context, dispose, scriptUrl, userDeactivate });
 }
 
