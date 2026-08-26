@@ -7,6 +7,8 @@ import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { HostKeyPromptDialog } from "@/modules/ssh/HostKeyPromptDialog";
+import { RightPanelHost } from "@/modules/extensions/components/RightPanelHost";
+import { useRightPanelStore } from "@/modules/extensions/rightPanelStore";
 import { useSshRightPanelStore } from "@/modules/ssh/sshRightPanelStore";
 import { SshFileExplorer } from "@/modules/ssh/SshFileExplorer";
 import { findLeafRemoteCwd, isSshLeaf } from "@/modules/terminal/lib/panes";
@@ -1438,6 +1440,7 @@ ${found.foundAt}`
   });
 
   const sshPanelOpen = useSshRightPanelStore((s) => s.open);
+  const extActivePanels = useRightPanelStore((s) => s.panels);
   const activeSshSession = useSshActiveSessionStore((s) => s.session);
 
   // Remote cwd of the focused SSH pane, so the remote tree follows `cd` in the
@@ -1623,6 +1626,24 @@ ${found.foundAt}`
                       currentCwd={activeRemoteCwd}
                       onClose={() => useSshRightPanelStore.getState().closePanel()}
                     />
+                  </div>
+                </ResizablePanel>
+              ) : null}
+              {extActivePanels.length > 0 ? (
+                <ResizablePanel
+                  id="ext-right"
+                  defaultSize="28%"
+                  minSize="16%"
+                  maxSize="45%"
+                >
+                  <div className="flex h-full min-h-0 flex-col border-l border-border/60 bg-card">
+                    {extActivePanels.map((p) => (
+                      <RightPanelHost
+                        key={`${p.extensionId}:${p.panelId}`}
+                        extensionId={p.extensionId}
+                        panelId={p.panelId}
+                      />
+                    ))}
                   </div>
                 </ResizablePanel>
               ) : null}

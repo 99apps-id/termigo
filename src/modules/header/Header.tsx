@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { WindowControls } from "@/components/WindowControls";
+import { ExtensionHeaderItems } from "@/modules/extensions/components/ExtensionHeaderItems";
 import { IS_MAC } from "@/lib/platform";
 import { NotificationBell } from "@/modules/agents";
 import type { AgentLaunchRequest } from "@/modules/agents/lib/launcher";
@@ -230,6 +231,8 @@ export function Header({
       )}
 
       {!IS_MAC && settingsButton}
+
+      <ExtensionHeaderItems placement="right" />
 
       {!IS_MAC && (
         <>

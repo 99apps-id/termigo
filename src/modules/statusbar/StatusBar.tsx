@@ -15,6 +15,12 @@ import { IncognitoIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { CwdBreadcrumb } from "./CwdBreadcrumb";
 import { DiagnosticsBadge } from "./DiagnosticsBadge";
+import { ExtensionStatusItems } from "@/modules/extensions/components/ExtensionStatusItems";
+import {
+  RightPanelActionToggles,
+  RightPanelCompactToggles,
+  RightPanelDefaultToggles,
+} from "@/modules/extensions/components/RightPanelToggleButtons";
 import { WorkspaceEnvSelector } from "./WorkspaceEnvSelector";
 
 type Props = {
@@ -72,12 +78,16 @@ export function StatusBar({
         ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-1.5">
+        <ExtensionStatusItems />
+        <RightPanelCompactToggles />
         <AgentStatusPill onClick={onOpenMini} />
         {panelOpen && hasComposer ? (
           <AiStatusBarControls />
         ) : (
           <AiOpenButton onOpen={onOpenAi} />
         )}
+        <RightPanelDefaultToggles />
+        <RightPanelActionToggles />
       </div>
     </footer>
   );

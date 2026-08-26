@@ -18,6 +18,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { toast } from "@/components/ui/toast";
 import { useExtensionsStore } from "@/modules/extensions/store";
 import type { InstalledExtension } from "@/modules/extensions/loader";
 import { invoke } from "@tauri-apps/api/core";
@@ -97,7 +98,9 @@ export function ExtensionsSection() {
       const result = await invoke<PeekResult>("ext_peek_zip", { zipPath: picked });
       setPeek({ result, spec: { kind: "zip", path: picked } });
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
       console.error("[extensions] peek zip failed", err);
+      toast(`Could not read that package: ${msg}`, { variant: "error" });
     }
   };
 
@@ -108,7 +111,9 @@ export function ExtensionsSection() {
       const result = await invoke<PeekResult>("ext_peek_github", { repo });
       setPeek({ result, spec: { kind: "github", repo } });
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
       console.error("[extensions] peek github failed", err);
+      toast(`Could not read that repository: ${msg}`, { variant: "error" });
     }
   };
 
