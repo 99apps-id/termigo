@@ -1,8 +1,8 @@
 packages:
   - '.'
 
-minimumReleaseAge: 4320
-minimumReleaseAgeStrict: true
+minimumReleaseAge: 0
+minimumReleaseAgeStrict: false
 allowBuilds:
   esbuild: true
   msgpackr-extract: false
