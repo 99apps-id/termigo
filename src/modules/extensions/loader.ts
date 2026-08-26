@@ -99,14 +99,13 @@ function getHostVersion(): Promise<string> {
   return hostVersionPromise;
 }
 
-/** Permissions the runtime enforces. Install records the full declared set as
- *  approved, but a sideloaded or pre-review copy can carry an empty approved
- *  list; fall back to the declared permissions so a legitimate extension is not
- *  silently disabled (it is never MORE than what the manifest declared). */
+/** Permissions the runtime enforces. The install pipeline stores the declared
+ *  set as approved, but a sideloaded or pre-review copy can carry an empty or
+ *  partial approved list that would silently deny every runtime request
+ *  (header icon, panel mount, tool runs). Always grant what the manifest
+ *  declared - it is the upper bound the user saw at install time, and never
+ *  more than what was reviewed. */
 function grantPermissions(ext: InstalledExtension): string[] {
-  if (ext.approved_permissions && ext.approved_permissions.length > 0) {
-    return ext.approved_permissions;
-  }
   return ext.manifest.permissions;
 }
 

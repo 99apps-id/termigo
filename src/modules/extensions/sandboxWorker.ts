@@ -229,7 +229,15 @@ async function handle(msg: HostMessage): Promise<void> {
         const ctx = buildCtx(msg.id);
         const activateFn = mod.activate ?? mod.default?.activate;
         if (typeof activateFn === "function") {
-          await activateFn(ctx);
+          // Guard against an activate() that never resolves (e.g. a hung RPC),
+          // which would otherwise wedge the panel on "Loading panel..." with no
+          // error surfaced.
+          await Promise.race([
+            activateFn(ctx),
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error("activation timed out after 15s")), 15000),
+            ),
+          ]);
         }
         send({ type: "ready", id: msg.id });
       } catch (e) {
