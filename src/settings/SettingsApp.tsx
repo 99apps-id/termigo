@@ -163,7 +163,7 @@ export function SettingsApp() {
           className="flex-1 items-center"
           data-tauri-drag-region
         >
-          <TabsList className="mx-auto h-7 bg-muted/40 px-2">
+          <TabsList className="mx-auto h-7 max-w-full overflow-x-auto bg-muted/40 px-2">
             {TABS.map((t) => (
               <TabsTrigger
                 key={t.id}
