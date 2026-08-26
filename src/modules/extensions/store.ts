@@ -198,7 +198,7 @@ export const useExtensionsStore = create<State & Actions>((set, get) => ({
       if (isMainWindow()) {
         const fresh = list.find((e) => e.id === id);
         if (fresh) {
-          await loader.activate(fresh).catch((e) => {
+          await loader.withActivationTimeout(fresh).catch((e) => {
             console.error(e);
             // Surface enable-time activation failures the same way boot does,
             // so toggling an extension on gives immediate feedback.

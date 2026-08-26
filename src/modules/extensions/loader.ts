@@ -276,6 +276,33 @@ export async function deactivate(id: string): Promise<void> {
   if (rec.scriptUrl) URL.revokeObjectURL(rec.scriptUrl);
 }
 
+// A hang inside `activate()` - a stalled `buildContext`, a slow `ext_read_asset`,
+// or a worker that never becomes ready - leaves a panel on "Loading panel..."
+// forever with no toast, because `bootAll` only surfaces a REJECTED promise.
+// The sandbox path arms its own 12s readiness timeout, but that never fires if
+// the hang happens before it (buildContext / ext_read_asset run first). Race the
+// whole activation against a timeout so any stall rejects and flows to the
+// `.catch`, which is what raises the toast.
+const ACTIVATE_TIMEOUT_MS = 15_000;
+
+export function withActivationTimeout(ext: InstalledExtension): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`activation timed out after ${ACTIVATE_TIMEOUT_MS / 1000}s`));
+    }, ACTIVATE_TIMEOUT_MS);
+    activate(ext).then(
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
 /** Lists installed extensions and activates the enabled ones. Per-ext
  *  failures are logged, not thrown. */
 export async function bootAll(): Promise<InstalledExtension[]> {
@@ -292,7 +319,7 @@ export async function bootAll(): Promise<InstalledExtension[]> {
     installed
       .filter((ext) => ext.enabled)
       .map((ext) =>
-        activate(ext).catch((err) => {
+        withActivationTimeout(ext).catch((err) => {
           console.error(`[extensions] activate ${ext.id} failed`, err);
           // Surface the failure so a developer iterating on their extension sees
           // it without opening DevTools. Manifest contributions stay applied (see
@@ -315,6 +342,9 @@ export async function reload(id: string, fresh?: InstalledExtension): Promise<vo
     const all = await listInstalled();
     next = all.find((e) => e.id === id);
   }
-  if (!next || !next.enabled) return;
-  await activate(next);
+  if (!next?.enabled) return;
+  // Same stall guard as `bootAll`: a toggle from Settings goes through here, so
+  // a hanging activate must still reject and surface as a toast rather than
+  // leaving the panel on "Loading panel..." silently.
+  await withActivationTimeout(next);
 }
