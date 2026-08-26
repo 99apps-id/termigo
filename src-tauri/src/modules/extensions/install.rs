@@ -166,9 +166,9 @@ pub fn install_from_bytes_with_progress(
 
     // Engine-compat gate. Refuse to install an extension that asks for a
     // newer host than this binary. The host version comes from Cargo.toml
-    // at compile time; the constraint comes from `manifest.engines.termigo`
+    // at compile time; the constraint comes from `manifest.engines.tedi`
     // and is parsed by [`super::version::satisfies`].
-    if let Some(req) = manifest.engines.as_ref().and_then(|e| e.termigo.as_deref()) {
+    if let Some(req) = manifest.engines.as_ref().and_then(|e| e.tedi.as_deref()) {
         let host = env!("CARGO_PKG_VERSION");
         if !super::version::satisfies(req, host) {
             let _ = fs::remove_dir_all(&staging);

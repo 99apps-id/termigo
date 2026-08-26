@@ -34,7 +34,7 @@ pub(crate) fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
     std::cmp::Ordering::Equal
 }
 
-/// True iff `host` satisfies the `engines.termigo` constraint. Supports the
+/// True iff `host` satisfies the `engines.tedi` constraint. Supports the
 /// shapes extensions in this project actually use: empty / `*` (any),
 /// `">=X.Y.Z"`, `">X.Y.Z"`, `"<=X.Y.Z"`, `"<X.Y.Z"`, `"=X.Y.Z"`, and plain
 /// `"X.Y.Z"` (exact). Comparison uses [`compare_versions`] so `v` prefixes
