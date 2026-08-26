@@ -44,6 +44,13 @@ function buildCtx(id: string): Record<string, unknown> {
     installPath: "",
     os: { platform: "unknown", arch: "unknown" },
     paths: { home: "" },
+    // Generic backend invoke. Extensions call e.g. `ctx.invoke("shell_run_command",
+    // { command })`; the host dispatcher gates it behind the `invoke:<cmd>`
+    // permission and runs it. Without this, an extension's `ctx.invoke` is
+    // undefined and every tool handler that shells out throws "ctx.invoke is
+    // not a function", which can make the agent retry / loop.
+    invoke: (command: string, args?: Record<string, unknown>) =>
+      call({ kind: "invoke", command, args }),
     storage: {
       get: (key: string) => call({ kind: "storage:get", key }),
       set: (key: string, value: unknown) => call({ kind: "storage:set", key, value }),
