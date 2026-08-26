@@ -288,6 +288,12 @@ export async function runSubagent({
       // left every spawned agent working - harmless while they only read, not
       // once they write.
       abortSignal: controller.signal,
+      experimental_onToolCallStart: () => {
+        if (firstStepTimer) {
+          clearTimeout(firstStepTimer);
+          firstStepTimer = null;
+        }
+      },
       onStepFinish: (step) => {
         if (firstStepTimer) {
           clearTimeout(firstStepTimer);
@@ -323,6 +329,10 @@ export async function runSubagent({
         stepCount: 0,
         durationMs: Date.now() - start,
       };
+    }
+    if (firstStepTimer) {
+      clearTimeout(firstStepTimer);
+      firstStepTimer = null;
     }
     throw e;
   }

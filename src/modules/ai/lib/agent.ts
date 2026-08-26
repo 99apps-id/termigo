@@ -399,6 +399,36 @@ function toolCallFingerprint(toolName: string, input: unknown): string {
 }
 
 /**
+ * Cheap digest of a tool result for the repetition fingerprint.
+ *
+ * The repetition guard compares calls by tool + input, which is right for a
+ * true loop but wrong for the common read -> edit -> read (verify) cycle:
+ * the same `read_file` call with the same path recurs, yet each read returns
+ * different content because the edit changed the file. Folding a digest of
+ * the output into the fingerprint treats "same call, changed result" as
+ * progress, and keeps "same call, same result" as repetition.
+ *
+ * FNV-1a over the first 4 KB plus the length: enough to tell changed output
+ * apart without hashing megabyte-sized results on every step.
+ */
+function resultDigest(output: unknown): string {
+  if (output === undefined || output === null) return "";
+  let text: string;
+  try {
+    text = typeof output === "string" ? output : JSON.stringify(output);
+  } catch {
+    text = String(output);
+  }
+  const bounded = text.length > 4096 ? text.slice(0, 4096) : text;
+  let h = 2166136261;
+  for (let i = 0; i < bounded.length; i++) {
+    h ^= bounded.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return `${text.length}:${(h >>> 0).toString(36)}`;
+}
+
+/**
  * Stops when the same tool call (same tool + same input) recurs
  * `maxRepeats` times inside a sliding window.
  *
@@ -423,8 +453,19 @@ export function noToolRepetition<T extends ToolSet>(
       // Cover the full ordered set of tool calls so parallel multi-tool
       // repetition is caught and a step that only matches on its first call
       // (but differs on the rest) isn't falsely flagged.
+      const results = new Map(
+        (s.toolResults ?? []).map((r) => [
+          (r as { toolCallId?: string }).toolCallId,
+          (r as { output?: unknown }).output,
+        ]),
+      );
       const fp = calls
-        .map((c) => toolCallFingerprint(c.toolName, c.input))
+        .map(
+          (c) =>
+            toolCallFingerprint(c.toolName, c.input) +
+            "::" +
+            resultDigest(results.get(c.toolCallId)),
+        )
         .join("\n");
       const n = (counts.get(fp) ?? 0) + 1;
       if (n >= maxRepeats) return true;
