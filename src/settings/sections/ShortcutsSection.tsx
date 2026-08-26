@@ -196,9 +196,10 @@ function ShortcutRow({
           <Recorder onRecord={onRecord} onCancel={onStopRecording} />
         ) : (
           <>
-            <div
+            <button
+              type="button"
               onClick={onStartRecording}
-              className="flex min-w-[100px] cursor-pointer items-center justify-end gap-1"
+              className="flex min-w-[100px] cursor-pointer items-center justify-end gap-1 border-0 bg-transparent p-0 text-inherit"
             >
               {hasBindings ? (
                 <KbdGroup>
@@ -217,7 +218,7 @@ function ShortcutRow({
                   Unassigned
                 </span>
               )}
-            </div>
+            </button>
 
             <div className="flex items-center gap-1">
               {isModified && (
