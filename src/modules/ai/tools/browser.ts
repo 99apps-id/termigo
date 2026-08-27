@@ -26,7 +26,7 @@ export function buildBrowserTools(ctx: ToolContext) {
   return {
     browser_open: tool({
       description:
-        "Open a browser instance (dedicated webview window) at a web URL. Use this for sites the agent needs to read or drive; the browser is separate from the loopback-only preview. Reuses an existing instance with the same name, or creates a new one.",
+        "Open a browser instance (dedicated webview window) at a web URL, for sites you need to DRIVE (click, type, follow a JS-heavy flow). To just READ a page's content, prefer the `fetch` tool - it is faster and more reliable than this webview. After opening, call browser_wait(~1500ms) before reading or acting so the page can load. Reuses an existing instance with the same name, or creates a new one.",
       inputSchema: z.object({
         instance: z
           .string()
@@ -83,7 +83,7 @@ export function buildBrowserTools(ctx: ToolContext) {
 
     browser_extract: tool({
       description:
-        "Return the visible text of the current page in a browser instance, for reading content the agent cannot reach another way.",
+        "Return the visible text of the current page in a browser instance. Some external pages return no text (they block injected scripts or render in a way this bridge cannot read); when that happens the result says so - do NOT retry, use the `fetch` tool to read the page's HTTP content instead. Call browser_wait first if the page may still be loading.",
       inputSchema: z.object({
         instance: z.string().describe("Instance name."),
       }),

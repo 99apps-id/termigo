@@ -158,6 +158,15 @@ impl BrowserState {
             }
         }
     }
+    /// Drop the stored extract value so a fresh `browser_extract` cannot return
+    /// the previous page's text while the current page is still loading.
+    fn clear_value(&self, instance: &str) {
+        if let Ok(mut map) = self.0.entries.lock() {
+            if let Some(e) = map.get_mut(instance) {
+                e.last_value = None;
+            }
+        }
+    }
     fn list(&self) -> Vec<String> {
         if let Ok(map) = self.0.entries.lock() {
             return map.keys().cloned().collect();
@@ -204,7 +213,21 @@ fn ensure_window(app: &AppHandle, instance: &str, url: &str) -> Result<(), Strin
     .inner_size(1000.0, 720.0)
     .min_inner_size(480.0, 320.0)
     .resizable(true);
-    builder.build().map_err(|e| e.to_string())?;
+    let w = builder.build().map_err(|e| e.to_string())?;
+    let _ = w.set_focus();
+    // WebView2 on Windows paints a runtime-created child window BLACK until it
+    // receives a resize. Nudge the size by a pixel once the webview has had a
+    // moment to initialize, then restore it, which forces a repaint. Harmless
+    // on other platforms.
+    let wc = w.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(450));
+        if let Ok(sz) = wc.inner_size() {
+            let _ = wc.set_size(tauri::PhysicalSize::new(sz.width.saturating_add(1), sz.height));
+            let _ = wc.set_size(sz);
+        }
+        let _ = wc.set_focus();
+    });
     Ok(())
 }
 
@@ -292,19 +315,31 @@ pub fn browser_extract(
     instance: String,
 ) -> Result<String, String> {
     let w = webview(&app, &instance).ok_or("browser instance not open")?;
+    // Clear any value left from a previous page so a slow load cannot return
+    // stale text as if it were the current page.
+    state.clear_value(&instance);
     // Emit the DOM text back through the value channel. The instance label is
-    // embedded so the listener can route it to the right entry.
+    // embedded so the listener can route it to the right entry. The emit only
+    // fires on pages where Tauri's event API is present; many external sites do
+    // not expose it, which is handled by the fallback below.
     let js = format!(
-        "(()=>{{const t=document.body?document.body.innerText:'';window.__TAURI__&&window.__TAURI__.event&&window.__TAURI__.event.emit('{VALUE_EVENT}',{{instance:{instance:?},kind:'extract',value:t}});}})();"
+        "(()=>{{const t=document.body?document.body.innerText:'';try{{window.__TAURI__&&window.__TAURI__.event&&window.__TAURI__.event.emit('{VALUE_EVENT}',{{instance:{instance:?},kind:'extract',value:t}});}}catch(e){{}}}})();"
     );
     w.eval(&js).map_err(|e| e.to_string())?;
-    // The value arrives via the event listener asynchronously; sleep briefly so
-    // the tool returns the freshest value without racing the webview.
-    std::thread::sleep(std::time::Duration::from_millis(120));
-    state
-        .entry(&instance)
-        .and_then(|e| e.last_value)
-        .ok_or_else(|| "no extract value yet; page may not have loaded".to_string())
+    // The value arrives asynchronously via the event listener. Poll for it up to
+    // a couple of seconds so a page that is still loading has time to answer,
+    // instead of failing on the first 120ms tick.
+    for _ in 0..25 {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        if let Some(v) = state.entry(&instance).and_then(|e| e.last_value) {
+            return Ok(v);
+        }
+    }
+    // No text came back. This is a FINAL answer for this call, not a transient
+    // error to retry: returning Ok stops an agent from looping on extract. The
+    // message steers it to the fetch tool, which reads page content over HTTP
+    // and does not depend on the webview's scripting bridge.
+    Ok("(no readable text returned from the page. It may still be loading, may block injected scripts, or may render entirely in a way this bridge cannot read. Do NOT retry browser_extract; use the `fetch` tool to read the page's HTTP content, or browser_screenshot if a visual is needed.)".to_string())
 }
 
 #[tauri::command]
