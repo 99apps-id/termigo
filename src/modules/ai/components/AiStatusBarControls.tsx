@@ -43,7 +43,6 @@ import {
   Search01Icon,
   Settings01Icon,
   StarIcon,
-  StopCircleIcon,
   Tick01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -212,34 +211,24 @@ export function AiStatusBarControls() {
         <HugeiconsIcon icon={Message01Icon} size={13} strokeWidth={1.75} />
       </IconBtn>
 
-      {c.isBusy ? (
-        // Destructive, not ghost. Send sits in this slot the rest of the time
-        // as a filled primary button, so the one control you reach for in a
-        // hurry was the only one with no background at all.
-        <Button
-          type="button"
-          size="icon"
-          variant="destructive"
-          onClick={c.stop}
-          className="size-6"
-          aria-label="Stop"
-          title="Stop (Esc)"
-        >
-          <HugeiconsIcon icon={StopCircleIcon} size={13} strokeWidth={1.75} />
-        </Button>
-      ) : (
-        <Button
-          type="button"
-          size="icon"
-          onClick={c.submit}
-          disabled={!c.canSend}
-          className="h-5.5 w-7.5 ml-1"
-          aria-label="Send"
-          title="Send (Enter)"
-        >
-          <HugeiconsIcon icon={ArrowUpIcon} size={13} strokeWidth={1.75} />
-        </Button>
-      )}
+      {/* One button, like VSCode / the Claude extension: it sends while idle and
+          becomes a stop while the agent runs - same accent, size and position,
+          only the glyph swaps (arrow -> filled square). */}
+      <Button
+        type="button"
+        size="icon"
+        onClick={c.isBusy ? c.stop : c.submit}
+        disabled={!c.isBusy && !c.canSend}
+        className="ml-1 size-7 rounded-lg"
+        aria-label={c.isBusy ? "Stop" : "Send"}
+        title={c.isBusy ? "Stop (Esc)" : "Send (Enter)"}
+      >
+        {c.isBusy ? (
+          <span className="size-2.5 rounded-[2px] bg-current" />
+        ) : (
+          <HugeiconsIcon icon={ArrowUpIcon} size={14} strokeWidth={2.2} />
+        )}
+      </Button>
     </div>
   );
 }
