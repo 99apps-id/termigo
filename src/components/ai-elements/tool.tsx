@@ -24,10 +24,16 @@ import {
   ToolsIcon,
 } from "@hugeicons/core-free-icons";
 import { useChatStore } from "@/modules/ai/store/chatStore";
+import {
+  useSubagentRunStore,
+  type SubagentRun,
+} from "@/modules/ai/store/subagentRunStore";
+import { resolveSubagentLabel, resolveSubagentType } from "@/modules/ai/agents/resolveSubagent";
+import { Spinner } from "@/components/ui/spinner";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { DynamicToolUIPart, ToolUIPart } from "ai";
 import type { ComponentProps, ReactNode } from "react";
-import { isValidElement, memo, useState } from "react";
+import { isValidElement, memo, useEffect, useMemo, useState } from "react";
 import { Shimmer } from "./shimmer";
 
 export type ToolPart = ToolUIPart | DynamicToolUIPart;
@@ -149,14 +155,16 @@ const ToolImpl = ({
   const label = meta?.label ?? toolName;
   const summary = deriveSummary(toolName, input);
   const isError = state === "output-error";
-  const open = defaultOpen ?? isError;
+  const isSubagent = toolName === "run_subagent" || toolName === "run_subagents";
+  // Subagent cards open by default so the live fan-out progress is visible.
+  const open = defaultOpen ?? (isError || isSubagent);
   const isHeavy = HEAVY_CONTENT_TOOLS.has(toolName);
   // For heavy tools, only show details on error — never the streamed input
   // body, which is huge and re-renders per token.
   const showInputBody = !isHeavy && Boolean(input);
   const showOutputBody = !isHeavy && output !== undefined;
   const hasDetails =
-    showInputBody || showOutputBody || Boolean(errorText);
+    showInputBody || showOutputBody || Boolean(errorText) || isSubagent;
 
   return (
     <Collapsible
@@ -210,6 +218,9 @@ const ToolImpl = ({
           className={cn("termigo-collapsible-content")}
         >
           <div className="ml-3 mt-1 space-y-2 border-l border-border/60 pl-3 pb-1">
+            {isSubagent ? (
+              <SubagentLiveDetails toolName={toolName} input={input} />
+            ) : null}
             {showInputBody ? (
               <ToolInput toolName={toolName} input={input} />
             ) : null}
@@ -764,3 +775,178 @@ export const ToolContent = ({ children }: { children?: ReactNode }) => (
   <>{children}</>
 );
 export { ToolInput, ToolOutput };
+
+// ── Live sub-agent runs ─────────────────────────────────────────────────────
+// A run_subagent / run_subagents card shows each spawned agent live: a spinner
+// while it works, its latest step, then a collapsible summary once it finishes.
+// Fed by subagentRunStore (written from the tool's execute), matched back to
+// this card by the type/label of the tasks the card was called with.
+
+function useLiveNow(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [active]);
+  return now;
+}
+
+function fmtDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  const m = Math.floor(ms / 60_000);
+  const s = Math.floor((ms % 60_000) / 1000);
+  return `${m}m ${s}s`;
+}
+
+function expectedSubagentRuns(
+  toolName: string,
+  input: unknown,
+): Array<{ type: string; label?: string }> {
+  if (!input || typeof input !== "object") return [];
+  const data = input as Record<string, unknown>;
+  if (toolName === "run_subagent") {
+    return typeof data.type === "string"
+      ? [{ type: data.type, label: typeof data.description === "string" ? data.description : undefined }]
+      : [];
+  }
+  if (toolName !== "run_subagents" || !Array.isArray(data.tasks)) return [];
+  const out: Array<{ type: string; label?: string }> = [];
+  for (const task of data.tasks) {
+    if (!task || typeof task !== "object") continue;
+    const v = task as Record<string, unknown>;
+    if (typeof v.type !== "string") continue;
+    out.push({ type: v.type, label: typeof v.description === "string" ? v.description : undefined });
+  }
+  return out;
+}
+
+function sameSubagentRun(run: SubagentRun, want: { type: string; label?: string }): boolean {
+  return run.type === resolveSubagentType(want.type) && (run.label ?? "") === (want.label ?? "");
+}
+
+function matchSubagentRuns(toolName: string, input: unknown, runs: SubagentRun[]): SubagentRun[] {
+  const expected = expectedSubagentRuns(toolName, input);
+  if (expected.length === 0 || runs.length === 0) return [];
+  const matched: SubagentRun[] = [];
+  let cursor = runs.length - 1;
+  for (let i = expected.length - 1; i >= 0; i--) {
+    const want = expected[i];
+    let found: SubagentRun | null = null;
+    for (let j = cursor; j >= 0; j--) {
+      if (!sameSubagentRun(runs[j], want)) continue;
+      found = runs[j];
+      cursor = j - 1;
+      break;
+    }
+    if (!found) return [];
+    matched.push(found);
+  }
+  return matched.reverse();
+}
+
+function SubagentLiveDetails({ toolName, input }: { toolName: string; input: unknown }) {
+  const sessionId = useChatStore((s) => s.activeSessionId) ?? "";
+  const runs = useSubagentRunStore((s) => (sessionId ? s.bySession[sessionId] : undefined)) ?? [];
+  const matched = useMemo(
+    () => matchSubagentRuns(toolName, input, runs),
+    [toolName, input, runs],
+  );
+  const active = matched.some((r) => r.status === "running");
+  const now = useLiveNow(active);
+  if (matched.length === 0) return null;
+  return (
+    <div className="space-y-1">
+      <div className="text-[10px] font-medium text-muted-foreground">Progress</div>
+      <div className="space-y-1">
+        {matched.map((run) => (
+          <SubagentRunRow key={run.id} run={run} now={now} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const SubagentRunRow = memo(
+  function SubagentRunRow({ run, now }: { run: SubagentRun; now: number }) {
+    const agentName = resolveSubagentLabel(run.type);
+    const isRunning = run.status === "running";
+    const isError = run.status === "error";
+    const elapsed = isRunning
+      ? now - run.startedAt
+      : (run.durationMs ?? (run.endedAt ? run.endedAt - run.startedAt : 0));
+    const stats = [
+      run.stepCount != null ? `${run.stepCount} step${run.stepCount === 1 ? "" : "s"}` : null,
+      elapsed > 0 ? fmtDuration(elapsed) : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    const summary = run.status === "done" && run.summary?.trim() ? run.summary : null;
+
+    const header = (
+      <>
+        <span className="inline-flex size-3.5 shrink-0 items-center justify-center">
+          {isRunning ? (
+            <Spinner className="size-3" />
+          ) : (
+            <span
+              className={cn(
+                "size-2 rounded-full",
+                isError ? "bg-destructive" : "bg-emerald-500",
+              )}
+            />
+          )}
+        </span>
+        <span className="shrink-0 rounded bg-foreground/10 px-1.5 py-0.5 text-[10px] font-medium text-foreground">
+          {agentName}
+        </span>
+        <span
+          className={cn(
+            "min-w-0 flex-1 truncate",
+            isError ? "text-destructive" : isRunning ? "text-foreground" : "text-muted-foreground",
+          )}
+        >
+          {isError ? run.error?.trim() || "failed" : run.currentStep || run.label || "working"}
+        </span>
+        {stats ? (
+          <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{stats}</span>
+        ) : null}
+      </>
+    );
+
+    const container = cn(
+      "flex flex-col gap-1 rounded-md border border-border/50 bg-muted/25 px-2 py-1.5 text-[11px]",
+      isRunning && "border-primary/30",
+      isError && "border-destructive/30 bg-destructive/5",
+    );
+
+    if (summary) {
+      return (
+        <Collapsible className={container}>
+          <CollapsibleTrigger className="group/sar flex w-full cursor-pointer items-center gap-1.5 text-left">
+            <HugeiconsIcon
+              icon={ArrowRight01Icon}
+              size={11}
+              strokeWidth={2}
+              className="shrink-0 text-muted-foreground transition-transform group-data-[state=open]/sar:rotate-90"
+            />
+            {header}
+          </CollapsibleTrigger>
+          <CollapsibleContent className="termigo-collapsible-content">
+            <div className="mt-1 ml-2 whitespace-pre-wrap border-l border-border/60 pl-2.5 text-[11.5px] leading-relaxed text-foreground/90">
+              {summary}
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
+      );
+    }
+    return (
+      <div className={container}>
+        <div className="flex items-center gap-1.5">{header}</div>
+      </div>
+    );
+  },
+  (a, b) => a.run === b.run && (a.run.status === "running" ? a.now === b.now : true),
+);
