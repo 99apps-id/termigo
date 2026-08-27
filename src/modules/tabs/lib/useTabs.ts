@@ -84,6 +84,11 @@ export type PreviewTab = TabBase & {
   kind: "preview";
   title: string;
   url: string;
+  /** Agent canvas: self-contained HTML the agent rendered (a graph, a plan/
+   *  walkthrough with action buttons). When set, the pane shows this in a
+   *  sandboxed iframe instead of loading `url`. Buttons post actions back to the
+   *  agent via `window.parent.postMessage`. */
+  html?: string;
 };
 
 export type MarkdownTab = TabBase & {
@@ -1013,6 +1018,38 @@ export function useTabs(initial?: Partial<TerminalTab>) {
     return id;
   }, []);
 
+  // Agent canvas: open (or update, by title) a preview tab that renders the
+  // agent's self-contained HTML - a graph, or a plan/walkthrough with action
+  // buttons - in a sandboxed iframe instead of a URL. Reusing the same title
+  // replaces the content, so a plan can advance in place.
+  const openCanvasTab = useCallback((html: string, title?: string) => {
+    const name = (title ?? "Canvas").trim() || "Canvas";
+    const existing = tabsRef.current.find(
+      (t): t is PreviewTab => t.kind === "preview" && t.title === name && t.html !== undefined,
+    );
+    if (existing) {
+      setTabs((t) =>
+        t.map((x) => (x.id === existing.id ? { ...(x as PreviewTab), html, url: "" } : x)),
+      );
+      setActiveId(existing.id);
+      return existing.id;
+    }
+    const id = nextIdRef.current++;
+    setTabs((t) => [
+      ...t,
+      {
+        id,
+        kind: "preview",
+        spaceId: activeSpaceIdRef.current,
+        title: name,
+        url: "",
+        html,
+      },
+    ]);
+    setActiveId(id);
+    return id;
+  }, []);
+
   // Mirrors tabsRef like openFileTab instead of using a functional update: a
   // batch that opens a markdown file before a regular one (multi-file "Open
   // With") would otherwise have the queued markdown update clobbered by
@@ -1478,6 +1515,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
     openFileTab,
     pinTab,
     newPreviewTab,
+    openCanvasTab,
     newMarkdownTab,
     setMarkdownView,
     openAiDiffTab,
