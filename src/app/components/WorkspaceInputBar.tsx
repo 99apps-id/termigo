@@ -102,6 +102,11 @@ export function WorkspaceInputBar({
   }, [showToggle]);
 
   if (!mounted) return null;
+  // When the AI chat is docked, its composer lives inside the dock panel. For a
+  // non-terminal tab the centre bar would then hold only the AI composer, so
+  // hide it entirely and let the dock own the typing area. Terminal/block tabs
+  // keep the centre bar for their shell input.
+  if (panelOpen && !isBlockTab) return null;
 
   const terminalChips = isTerminalTab ? (
     <>
@@ -163,7 +168,7 @@ export function WorkspaceInputBar({
                   </Suspense>
                 </div>
               )}
-              {renderAi && (
+              {renderAi && !panelOpen && (
                 <div className={cn(effectiveMode !== "ai" && "hidden")}>
                   <Suspense fallback={null}>
                     <AiComposerInput />
