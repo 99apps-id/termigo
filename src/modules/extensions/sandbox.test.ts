@@ -17,6 +17,8 @@ function makeExecutor(): SandboxExecutor {
     aiSetSubagentsEnabled: vi.fn(async () => {}),
     aiSendPrompt: vi.fn(async () => true),
     aiStop: vi.fn(),
+    pentestScopeGet: vi.fn(() => []),
+    pentestScopeSet: vi.fn(),
     onToolRegister: vi.fn(),
     onCommandRegister: vi.fn(),
     panelOpen: vi.fn(),

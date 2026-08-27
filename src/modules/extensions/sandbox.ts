@@ -31,6 +31,8 @@ export type SandboxRequest =
   | { id: number; kind: "ai:setSubagentsEnabled"; enabled: boolean }
   | { id: number; kind: "ai:sendPrompt"; text: string }
   | { id: number; kind: "ai:stop" }
+  | { id: number; kind: "pentest:scopeGet" }
+  | { id: number; kind: "pentest:scopeSet"; scope: string[] }
   | { id: number; kind: "tool:register"; name: string }
   | { id: number; kind: "command:register"; commandId: string }
   | { id: number; kind: "panel:open"; panelId: string }
@@ -124,6 +126,10 @@ export type SandboxExecutor = {
   aiSetSubagentsEnabled(enabled: boolean): Promise<void>;
   aiSendPrompt(text: string): Promise<boolean>;
   aiStop(): void;
+  /** The app-level authorized pentest scope, shared with the shell fence so the
+   *  panel and the agent's own commands enforce the same list. */
+  pentestScopeGet(): string[] | Promise<string[]>;
+  pentestScopeSet(scope: string[]): void | Promise<void>;
   /** Called when the worker registers an AI tool handler; the host sets a
    *  bridge handler in the aiTools registry so the agent can invoke it. */
   onToolRegister(name: string): void;
@@ -226,6 +232,15 @@ export function createSandboxDispatcher(
           break;
         case "ai:stop":
           executor.aiStop();
+          value = undefined;
+          break;
+        case "pentest:scopeGet":
+          require("settings:read");
+          value = await executor.pentestScopeGet();
+          break;
+        case "pentest:scopeSet":
+          require("settings:write");
+          await executor.pentestScopeSet(req.scope);
           value = undefined;
           break;
         case "tool:register":

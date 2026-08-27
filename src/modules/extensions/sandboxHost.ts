@@ -124,6 +124,14 @@ async function buildExecutor(
       return sendMessage(String(text ?? ""));
     },
     aiStop: () => chatMod.stop(),
+    pentestScopeGet: async () => {
+      const mod = await import("@/modules/settings/preferences");
+      return mod.usePreferencesStore.getState().pentestScope;
+    },
+    pentestScopeSet: async (scope) => {
+      const mod = await import("@/modules/settings/store");
+      await mod.setPentestScope(scope);
+    },
     onToolRegister: (name) => {
       aiToolsRegistry.setRuntime(ext.id, name, (args: unknown) => hooks.invokeTool(name, args));
     },

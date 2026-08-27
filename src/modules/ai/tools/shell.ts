@@ -5,8 +5,22 @@ import { tool } from "ai";
 import { z } from "zod";
 import { native } from "../lib/native";
 import { checkShellCommand } from "../lib/security";
+import { checkPentestCommand } from "../lib/pentestScope";
 import type { ToolContext } from "./context";
 import { currentWorkspaceEnv, workspaceScopeKey } from "@/modules/workspace";
+import { usePreferencesStore } from "@/modules/settings/preferences";
+
+/**
+ * Both shell tools run the safety deny-list AND the pentest scope fence: an
+ * offensive tool (nmap, ffuf, sqlmap, ...) aimed at a host outside the
+ * authorized scope is refused, and denial-of-service tooling is refused
+ * outright. Ordinary commands pass untouched.
+ */
+function screenCommand(command: string): { ok: true } | { ok: false; reason: string } {
+  const safety = checkShellCommand(command);
+  if (!safety.ok) return safety;
+  return checkPentestCommand(command, usePreferencesStore.getState().pentestScope);
+}
 
 /**
  * Per-session lazy shell-session id. The agent gets one persistent shell per
@@ -41,7 +55,7 @@ export function buildShellTools(ctx: ToolContext) {
       }),
       needsApproval: true,
       execute: async ({ command, timeout_secs }, { abortSignal }) => {
-        const safety = checkShellCommand(command);
+        const safety = screenCommand(command);
         if (!safety.ok) return { error: safety.reason };
 
         // With an SSH terminal focused the model means the server, so the
@@ -139,7 +153,7 @@ export function buildShellTools(ctx: ToolContext) {
             "Use bash_run with `nohup CMD > /tmp/out.log 2>&1 &` and read the log file afterwards.",
           );
         }
-        const safety = checkShellCommand(command);
+        const safety = screenCommand(command);
         if (!safety.ok) return { error: safety.reason };
         const effectiveCwd = cwd ?? ctx.getCwd();
         try {

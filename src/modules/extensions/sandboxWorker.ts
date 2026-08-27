@@ -92,6 +92,14 @@ function buildCtx(id: string, platform?: string): Record<string, unknown> {
       stop: () => call({ kind: "ai:stop" }),
       onStateChange: () => () => {},
     },
+    // Shared authorized pentest scope. Backed by an app-level preference the
+    // shell fence also reads, so a target added in the pentest panel is the
+    // same list the agent's own bash_run is held to. Needs settings:read /
+    // settings:write.
+    pentestScope: {
+      get: () => call({ kind: "pentest:scopeGet" }),
+      set: (scope: string[]) => call({ kind: "pentest:scopeSet", scope }),
+    },
     logger: {
       info: (...args: unknown[]) => call({ kind: "logger", level: "info", args }),
       warn: (...args: unknown[]) => call({ kind: "logger", level: "warn", args }),

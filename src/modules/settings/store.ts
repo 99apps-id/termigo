@@ -157,6 +157,18 @@ export type Preferences = {
    * in every session until removed.
    */
   agentAlwaysAllowedTools: string[];
+  /**
+   * Authorized pentest scope: hosts / IPs / URLs the agent may run offensive
+   * tooling (nmap, ffuf, sqlmap, ...) against. Enforced at the shell boundary
+   * (see `pentestScope.ts`), and mirrored from the pentest extension's panel so
+   * the two share one source of truth. Empty means no fence is configured.
+   */
+  pentestScope: string[];
+  /**
+   * When on, an in-scope, read-tier scan runs without an approval prompt.
+   * Exploit-grade tools (sqlmap, hydra, msfconsole, ...) still always ask.
+   */
+  autoApproveInScopeScans: boolean;
   sttProvider: SttProvider;
   groqSttModel: string;
   whispercppBaseURL: string;
@@ -277,6 +289,8 @@ const KEY_CUSTOM_ENDPOINTS = "customEndpoints";
 const KEY_OPENROUTER_MODEL_ID = "openrouterModelId";
 const KEY_AGENT_APPROVAL_MODE = "agentApprovalMode";
 const KEY_AGENT_ALWAYS_ALLOWED_TOOLS = "agentAlwaysAllowedTools";
+const KEY_PENTEST_SCOPE = "pentestScope";
+const KEY_AUTO_APPROVE_IN_SCOPE_SCANS = "autoApproveInScopeScans";
 const KEY_STT_PROVIDER = "sttProvider";
 const KEY_GROQ_STT_MODEL = "groqSttModel";
 const KEY_WHISPERCPP_BASE_URL = "whispercppBaseURL";
@@ -376,6 +390,8 @@ export const DEFAULT_PREFERENCES: Preferences = {
   openrouterModelId: "",
   agentApprovalMode: DEFAULT_APPROVAL_MODE,
   agentAlwaysAllowedTools: [],
+  pentestScope: [],
+  autoApproveInScopeScans: false,
   sttProvider: DEFAULT_STT_PROVIDER,
   groqSttModel: "whisper-large-v3-turbo",
   whispercppBaseURL: WHISPERCPP_DEFAULT_BASE_URL,
@@ -526,6 +542,12 @@ export async function loadPreferences(): Promise<Preferences> {
       get<string[]>(KEY_AGENT_ALWAYS_ALLOWED_TOOLS) ??
       DEFAULT_PREFERENCES.agentAlwaysAllowedTools
     ).filter((t) => typeof t === "string" && t.length > 0),
+    pentestScope: (get<string[]>(KEY_PENTEST_SCOPE) ?? DEFAULT_PREFERENCES.pentestScope).filter(
+      (t) => typeof t === "string" && t.length > 0,
+    ),
+    autoApproveInScopeScans:
+      get<boolean>(KEY_AUTO_APPROVE_IN_SCOPE_SCANS) ??
+      DEFAULT_PREFERENCES.autoApproveInScopeScans,
     sttProvider:
       get<SttProvider>(KEY_STT_PROVIDER) ?? DEFAULT_PREFERENCES.sttProvider,
     groqSttModel:
@@ -818,6 +840,15 @@ export async function setAgentAlwaysAllowedTools(
   await writePref(KEY_AGENT_ALWAYS_ALLOWED_TOOLS, value);
 }
 
+export async function setPentestScope(value: string[]): Promise<void> {
+  const clean = [...new Set(value.map((v) => String(v).trim()).filter(Boolean))];
+  await writePref(KEY_PENTEST_SCOPE, clean);
+}
+
+export async function setAutoApproveInScopeScans(value: boolean): Promise<void> {
+  await writePref(KEY_AUTO_APPROVE_IN_SCOPE_SCANS, value);
+}
+
 export async function setSttProvider(value: SttProvider): Promise<void> {
   await writePref(KEY_STT_PROVIDER, value);
 }
@@ -1096,6 +1127,8 @@ export async function onPreferencesChange(
     [KEY_ZOOM_LEVEL]: "zoomLevel",
     [KEY_AGENT_APPROVAL_MODE]: "agentApprovalMode",
     [KEY_AGENT_ALWAYS_ALLOWED_TOOLS]: "agentAlwaysAllowedTools",
+    [KEY_PENTEST_SCOPE]: "pentestScope",
+    [KEY_AUTO_APPROVE_IN_SCOPE_SCANS]: "autoApproveInScopeScans",
     [KEY_AGENT_NOTIFICATIONS]: "agentNotifications",
     [KEY_DEBUG_CAPTURE]: "debugCaptureEnabled",
     [KEY_AGENT_REVIEW_AFTER_APPLY]: "agentReviewAfterApply",

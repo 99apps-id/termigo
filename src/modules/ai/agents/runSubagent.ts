@@ -7,6 +7,7 @@ import { buildExtensionTools } from "../lib/extensionTools";
 import { isExtensionTool } from "../lib/extensionToolNames";
 import { isMcpTool } from "../lib/mcpToolNames";
 import { isCustomTool } from "../lib/customToolNames";
+import { isAutoApprovedScan } from "../lib/pentestScope";
 import { summarizeInput } from "../lib/approvalQueue";
 import { subagentWriteNeedsApproval } from "../lib/approvalPolicy";
 import {
@@ -120,6 +121,23 @@ function gate<T extends AnyTool>(
           .agentAlwaysAllowedTools.includes(toolName)
       ) {
         return inner(input, opts);
+      }
+
+      // Scoped auto-approval: an in-scope, read-tier scan (nmap -sV, ffuf, ...)
+      // against a target already in the authorized scope runs without a prompt
+      // when the user turned that on. Exploit-grade tools and out-of-scope
+      // targets still ask. This is what makes an unattended guardian run
+      // feasible without hundreds of clicks; the shell fence has already
+      // refused anything outside scope before the command reaches here.
+      if (toolName === "bash_run" || toolName === "bash_background") {
+        const cmd = (input as { command?: unknown }).command;
+        const prefs = usePreferencesStore.getState();
+        if (
+          typeof cmd === "string" &&
+          isAutoApprovedScan(cmd, prefs.pentestScope, prefs.autoApproveInScopeScans)
+        ) {
+          return inner(input, opts);
+        }
       }
 
       const mustAsk = subagentWriteNeedsApproval(
