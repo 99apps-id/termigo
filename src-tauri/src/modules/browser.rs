@@ -204,12 +204,38 @@ fn ensure_window(app: &AppHandle, instance: &str, url: &str) -> Result<(), Strin
         return Ok(());
     }
     let parsed = reqwest::Url::parse(url).map_err(|e| e.to_string())?;
+    // Injected before page scripts on every navigation. It bridges the page back
+    // to the host over the event channel (granted to `browser-*` windows for
+    // remote URLs by capabilities/browser.json): console output is forwarded so
+    // browser_console works, and a helper lets browser_extract read the rendered
+    // DOM even on JS-heavy / strict-CSP sites (host-injected scripts bypass the
+    // page CSP). The instance name is baked in so the host routes the value.
+    let init = format!(
+        r#"(function(){{
+  var INST = {instance:?};
+  function send(kind, value){{
+    try {{
+      if (window.__TAURI__ && window.__TAURI__.event) {{
+        window.__TAURI__.event.emit('{VALUE_EVENT}', {{ instance: INST, kind: kind, value: String(value).slice(0, 200000) }});
+      }}
+    }} catch (e) {{}}
+  }}
+  window.__termigoExtract = function(){{ send('extract', document.body ? document.body.innerText : ''); }};
+  try {{
+    ['log','warn','error','info'].forEach(function(m){{
+      var orig = console[m];
+      console[m] = function(){{ try {{ send('console', Array.prototype.join.call(arguments, ' ')); }} catch (e) {{}} return orig.apply(console, arguments); }};
+    }});
+  }} catch (e) {{}}
+}})();"#
+    );
     let builder = WebviewWindowBuilder::new(
         app,
         label_for(instance),
         WebviewUrl::External(parsed),
     )
     .title("Termigo Browser")
+    .initialization_script(&init)
     .inner_size(1000.0, 720.0)
     .min_inner_size(480.0, 320.0)
     .resizable(true);
@@ -318,12 +344,11 @@ pub fn browser_extract(
     // Clear any value left from a previous page so a slow load cannot return
     // stale text as if it were the current page.
     state.clear_value(&instance);
-    // Emit the DOM text back through the value channel. The instance label is
-    // embedded so the listener can route it to the right entry. The emit only
-    // fires on pages where Tauri's event API is present; many external sites do
-    // not expose it, which is handled by the fallback below.
+    // Prefer the helper the initialization script installed (it shares one
+    // send() path with the console hook); fall back to an inline emit if the
+    // helper is not present yet (e.g. extract called before the first load).
     let js = format!(
-        "(()=>{{const t=document.body?document.body.innerText:'';try{{window.__TAURI__&&window.__TAURI__.event&&window.__TAURI__.event.emit('{VALUE_EVENT}',{{instance:{instance:?},kind:'extract',value:t}});}}catch(e){{}}}})();"
+        "(()=>{{try{{if(window.__termigoExtract){{window.__termigoExtract();return;}}const t=document.body?document.body.innerText:'';window.__TAURI__&&window.__TAURI__.event&&window.__TAURI__.event.emit('{VALUE_EVENT}',{{instance:{instance:?},kind:'extract',value:String(t).slice(0,200000)}});}}catch(e){{}}}})();"
     );
     w.eval(&js).map_err(|e| e.to_string())?;
     // The value arrives asynchronously via the event listener. Poll for it up to
@@ -348,13 +373,14 @@ pub fn browser_console(
     state: State<'_, BrowserState>,
     instance: String,
 ) -> Result<String, String> {
-    let w = webview(&app, &instance).ok_or("browser instance not open")?;
-    let js = format!(
-        "window.__TAURI__&&window.__TAURI__.event&&window.__TAURI__.event.emit('{VALUE_EVENT}',{{instance:{instance:?},kind:'console',value:'console requested'}});"
-    );
-    w.eval(&js).map_err(|e| e.to_string())?;
-    std::thread::sleep(std::time::Duration::from_millis(120));
+    // Console output is captured live by the window's initialization script,
+    // which forwards each console.* call over the value channel. This just
+    // returns what has accumulated for the instance.
+    let _ = webview(&app, &instance).ok_or("browser instance not open")?;
     let e = state.entry(&instance).ok_or("browser instance not open")?;
+    if e.console.is_empty() {
+        return Ok("(no console output captured for this page)".to_string());
+    }
     Ok(e.console.join("\n"))
 }
 
