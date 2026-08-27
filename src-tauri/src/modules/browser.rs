@@ -20,6 +20,22 @@ use tauri::{AppHandle, Listener, Manager, State, WebviewUrl, WebviewWindowBuilde
 
 const VALUE_EVENT: &str = "termigo:browser-value";
 
+/// WebView2 renders a SECOND webview (our agent browser window) permanently
+/// blank on Windows when its additional browser arguments differ from the main
+/// window's - tauri-apps/tauri#13092. wry applies occlusion / background-
+/// throttling flags to the main webview, so a child created without them
+/// mismatches and comes up white/black. Setting the flags at the WebView2
+/// ENVIRONMENT level (this process-wide env var, read by the WebView2 loader)
+/// makes every webview share the same args, so the child renders. Must run once
+/// at startup, before any webview is created. Ported from TEDI's fix.
+#[cfg(windows)]
+pub fn apply_webview2_browser_args_env() {
+    const ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,CalculateNativeWinOcclusion --disable-backgrounding-occluded-windows --disable-renderer-backgrounding --disable-background-timer-throttling --autoplay-policy=no-user-gesture-required";
+    // Edition 2021: set_var is safe. Called on the main thread at startup before
+    // any webview (or other thread) exists.
+    std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", ARGS);
+}
+
 /// Normalize an IPv4 host to dotted-quad (decimal / hex / octal forms), mirroring
 /// the frontend guard so a numeric-IP trick is caught identically on both sides.
 pub fn normalize_ipv4(host: &str) -> Option<String> {
@@ -197,13 +213,16 @@ fn webview(app: &AppHandle, instance: &str) -> Option<tauri::WebviewWindow> {
 
 fn ensure_window(app: &AppHandle, instance: &str, url: &str) -> Result<(), String> {
     if let Some(w) = webview(app, instance) {
+        log::info!("browser: reuse window '{instance}', navigate to {url}");
         let _ = w.set_focus();
         let _ = w.eval(format!(
             "window.location.href = {url:?};"
         ));
         return Ok(());
     }
+    log::info!("browser: create window '{instance}' at {url}");
     let parsed = reqwest::Url::parse(url).map_err(|e| e.to_string())?;
+    let nav_url = parsed.clone();
     // Injected before page scripts on every navigation. It bridges the page back
     // to the host over the event channel (granted to `browser-*` windows for
     // remote URLs by capabilities/browser.json): console output is forwarded so
@@ -239,7 +258,19 @@ fn ensure_window(app: &AppHandle, instance: &str, url: &str) -> Result<(), Strin
     .inner_size(1000.0, 720.0)
     .min_inner_size(480.0, 320.0)
     .resizable(true);
-    let w = builder.build().map_err(|e| e.to_string())?;
+    let w = builder.build().map_err(|e| {
+        log::error!("browser: window build failed for '{instance}': {e}");
+        e.to_string()
+    })?;
+    log::info!("browser: window '{instance}' built");
+    // Force the navigation explicitly as well. On some WebView2 setups a child
+    // window created with an External builder URL comes up blank until it is
+    // navigated; calling navigate() here is the supported way and is harmless
+    // when the initial load already worked.
+    match w.navigate(nav_url) {
+        Ok(()) => log::info!("browser: navigate() ok for '{instance}'"),
+        Err(e) => log::error!("browser: navigate() failed for '{instance}': {e}"),
+    }
     let _ = w.set_focus();
     // WebView2 on Windows paints a runtime-created child window BLACK until it
     // receives a resize. Nudge the size by a pixel once the webview has had a

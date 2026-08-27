@@ -194,6 +194,13 @@ pub fn run() {
     let control_state = control::ControlState::default();
     let control_for_setup = control_state.clone();
 
+    // Windows: apply the WebView2 browser args at the process ENVIRONMENT level
+    // BEFORE any webview is created, so the main window and the agent's browser
+    // window are built with the SAME additional args. A child whose args differ
+    // from the main webview's renders BLANK on Windows - tauri-apps/tauri#13092.
+    #[cfg(windows)]
+    browser::apply_webview2_browser_args_env();
+
     let builder = tauri::Builder::default();
     #[cfg(target_os = "linux")]
     let builder = builder.plugin(tauri_plugin_clipboard_manager::init());
