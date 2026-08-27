@@ -137,12 +137,36 @@
     }
 }
 
+/* Terminal palette. The `:root` set is the LIGHT variant (the app's default
+   is light; `.dark` flips it). The ANSI colors are chosen so text stays
+   readable on each background: dark-on-light here, light-on-dark under `.dark`.
+   These are also the fallback for the built-in default theme, whose
+   `applyTheme` path uses inline CSS variables per mode. */
 :root {
   --terminal-background: var(--background);
   --terminal-foreground: var(--foreground);
   --terminal-cursor: var(--foreground);
   --terminal-cursor-accent: var(--background);
   --terminal-selection: var(--accent);
+  --terminal-ansi-black: #1e293b;
+  --terminal-ansi-red: #b91c1c;
+  --terminal-ansi-green: #15803d;
+  --terminal-ansi-yellow: #a16207;
+  --terminal-ansi-blue: #1d4ed8;
+  --terminal-ansi-magenta: #7e22ce;
+  --terminal-ansi-cyan: #0e7490;
+  --terminal-ansi-white: #1f2937;
+  --terminal-ansi-bright-black: #64748b;
+  --terminal-ansi-bright-red: #dc2626;
+  --terminal-ansi-bright-green: #16a34a;
+  --terminal-ansi-bright-yellow: #ca8a04;
+  --terminal-ansi-bright-blue: #2563eb;
+  --terminal-ansi-bright-magenta: #9333ea;
+  --terminal-ansi-bright-cyan: #0891b2;
+  --terminal-ansi-bright-white: #0f172a;
+}
+
+.dark {
   --terminal-ansi-black: #141b2e;
   --terminal-ansi-red: #ff6b6b;
   --terminal-ansi-green: #2dd4a7;
