@@ -11,6 +11,7 @@ import type { UIMessage } from "ai";
 import { useChatStore } from "../store/chatStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { isAutoApproved } from "../lib/approvalPolicy";
+import { isAutoApprovedScan } from "../lib/pentestScope";
 import { isSessionAllowed } from "../store/approvalQueueStore";
 
 type ApprovalResponder = (arg: {
@@ -57,16 +58,32 @@ export function useAutoApproval(
         continue;
       }
 
+      // The command decides whether a remote call is inspection or a change,
+      // so it has to reach the policy rather than being inferred from the name.
+      const input = part.input as { command?: unknown } | undefined;
+      const command = typeof input?.command === "string" ? input.command : undefined;
+
+      // Scoped scan auto-approval is its own opt-in, independent of the mode:
+      // an in-scope read-tier scan (nmap -sV, ffuf, ...) runs without a prompt
+      // when the user turned it on, even while the global mode is still "ask".
+      // Exploit-grade tools and out-of-scope targets are excluded by
+      // isAutoApprovedScan, and the shell fence has already refused anything
+      // outside scope before it could reach an approval prompt.
+      if (command && (tool === "bash_run" || tool === "bash_background")) {
+        const prefs = usePreferencesStore.getState();
+        if (isAutoApprovedScan(command, prefs.pentestScope, prefs.autoApproveInScopeScans)) {
+          answered.current.add(id);
+          void respond({ id, approved: true });
+          continue;
+        }
+      }
+
       if (mode === "ask") continue;
 
       // Read at answer time, not render time: the user can focus an SSH tab
       // between the request and this effect, and the machine the command would
       // land on is what decides whether a mode may speak for them.
       const onRemoteHost = !!useChatStore.getState().live.getRemoteSession();
-      // The command decides whether a remote call is inspection or a change,
-      // so it has to reach the policy rather than being inferred from the name.
-      const input = part.input as { command?: unknown } | undefined;
-      const command = typeof input?.command === "string" ? input.command : undefined;
       if (!isAutoApproved(tool, mode, { onRemoteHost, command })) continue;
 
       answered.current.add(id);

@@ -37,11 +37,13 @@ import {
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   setAgentReviewAfterApply,
+  setAutoApproveInScopeScans,
   setAutoCheckpoint,
   setCostBudgetUsd,
   setCostDailyBudgetUsd,
   setCustomInstructions,
   setDebugCaptureEnabled,
+  setPentestScope,
   setSubagentModelId,
 } from "@/modules/settings/store";
 import {
@@ -140,6 +142,8 @@ export function AgentsSection() {
       />
 
       <CustomInstructionsBlock value={customInstructions} />
+
+      <PentestScopeBlock />
 
       <section className="flex flex-col gap-2">
         <Label>Diagnostics</Label>
@@ -694,6 +698,86 @@ function SnippetEditorDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function PentestScopeBlock() {
+  const scope = usePreferencesStore((s) => s.pentestScope);
+  const autoApprove = usePreferencesStore((s) => s.autoApproveInScopeScans);
+  const [draft, setDraft] = useState("");
+
+  const add = () => {
+    const v = draft.trim();
+    if (!v) return;
+    if (!scope.includes(v)) void setPentestScope([...scope, v]);
+    setDraft("");
+  };
+  const remove = (entry: string) =>
+    void setPentestScope(scope.filter((e) => e !== entry));
+
+  return (
+    <section className="flex flex-col gap-2">
+      <div className="flex flex-col">
+        <Label>Pentest scope</Label>
+        <span className="text-[10.5px] text-muted-foreground">
+          Hosts, IPs, or URLs the agent may run scanners (nmap, ffuf, sqlmap, …)
+          against. Any offensive command aimed elsewhere is refused at the shell,
+          and denial-of-service tooling is always refused. Empty means no fence.
+          Shared with the Pentest panel.
+        </span>
+      </div>
+      <div className="flex gap-2">
+        <Input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              add();
+            }
+          }}
+          placeholder="example.com, 10.0.0.0, https://app.example.com"
+          className="h-8 flex-1 text-[12px]"
+        />
+        <Button size="sm" variant="outline" className="h-8 px-3 text-[11px]" onClick={add}>
+          Add
+        </Button>
+      </div>
+      {scope.length > 0 ? (
+        <ul className="flex flex-wrap gap-1.5">
+          {scope.map((entry) => (
+            <li
+              key={entry}
+              className="flex items-center gap-1.5 rounded-full border border-border/60 bg-card/60 py-1 pr-1 pl-2.5 text-[11px]"
+            >
+              <span className="font-mono">{entry}</span>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="size-5 text-muted-foreground hover:text-destructive"
+                onClick={() => remove(entry)}
+                title={`Remove ${entry}`}
+              >
+                <HugeiconsIcon icon={Delete02Icon} size={10} strokeWidth={1.75} />
+              </Button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <div className="rounded-lg border border-dashed border-border/60 bg-card/30 px-4 py-4 text-center text-[11px] text-muted-foreground">
+          No authorized targets. Offensive tools are not fenced until you add one.
+        </div>
+      )}
+      <SettingRow
+        title="Auto-approve in-scope scans"
+        description="Let a read-tier scan (nmap -sV, ffuf, dig, …) against an in-scope target run without an approval prompt. Exploit-grade tools (sqlmap, hydra, msfconsole, …) always ask. Off by default."
+      >
+        <Switch
+          checked={autoApprove}
+          onCheckedChange={(v) => void setAutoApproveInScopeScans(v)}
+        />
+      </SettingRow>
+    </section>
   );
 }
 
