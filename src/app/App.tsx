@@ -35,6 +35,7 @@ import {
   useChatStore,
   useSelectionAskAi,
 } from "@/modules/ai";
+import { AiDockPanel } from "@/modules/ai/components/AiDockPanel";
 import { AiComposerProvider } from "@/modules/ai/lib/composer";
 import { native } from "@/modules/ai/lib/native";
 import { CommandPalette, createCommandItems } from "@/modules/command-palette";
@@ -1647,6 +1648,16 @@ ${found.foundAt}`
                   </div>
                 </ResizablePanel>
               ) : null}
+              {hasComposer && panelOpen ? (
+                <ResizablePanel
+                  id="ai-chat"
+                  defaultSize="30%"
+                  minSize="20%"
+                  maxSize="50%"
+                >
+                  <AiDockPanel />
+                </ResizablePanel>
+              ) : null}
             </ResizablePanelGroup>
           </main>
 
@@ -1683,7 +1694,7 @@ ${found.foundAt}`
             </>
           ) : null}
 
-          {hasComposer && miniPresence.mounted ? (
+          {hasComposer && miniPresence.mounted && !panelOpen ? (
             <AiMiniWindow state={miniPresence.state} />
           ) : null}
           {askPresence.mounted ? (

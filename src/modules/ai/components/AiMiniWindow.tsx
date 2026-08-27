@@ -113,7 +113,7 @@ export function AiMiniWindow({ state }: { state: PresenceState }) {
         <ResizeHandle key={dir} dir={dir} onPointerDown={startResize(dir)} />
       ))}
       {sessionId ? (
-        <Body
+        <AiChatBody
           sessionId={sessionId}
           onClose={closeMini}
           onExpand={expandToPanel}
@@ -160,7 +160,7 @@ function ResizeHandle({
   );
 }
 
-function Body({
+export function AiChatBody({
   sessionId,
   onClose,
   onExpand,
