@@ -513,7 +513,7 @@ fn embed_init_script(instance: &str) -> String {
 /// Bounds are physical pixels relative to the main window. A not-visible or
 /// zero-area request hides an existing webview.
 #[tauri::command]
-pub fn browser_embed_update(
+pub async fn browser_embed_update(
     app: AppHandle,
     window: tauri::Window,
     state: State<'_, BrowserState>,
@@ -531,6 +531,15 @@ pub fn browser_embed_update(
         }
     }
     let label = embed_label(&instance);
+    log::info!(
+        "browser_embed_update: instance={instance} visible={visible} bounds=({:.0},{:.0},{:.0},{:.0}) url_len={} exists={}",
+        bounds.x,
+        bounds.y,
+        bounds.width,
+        bounds.height,
+        url.len(),
+        app.get_webview(&label).is_some(),
+    );
 
     if !visible || bounds.width < 1.0 || bounds.height < 1.0 {
         if let Some(wv) = app.get_webview(&label) {
@@ -559,7 +568,10 @@ pub fn browser_embed_update(
     if url.is_empty() {
         return Ok(());
     }
-    let parsed = reqwest::Url::parse(&url).map_err(|e| e.to_string())?;
+    let parsed = reqwest::Url::parse(&url).map_err(|e| {
+        log::error!("browser_embed_update: bad url '{url}': {e}");
+        e.to_string()
+    })?;
     let builder = WebviewBuilder::new(&label, WebviewUrl::External(parsed))
         .initialization_script(&embed_init_script(&instance))
         // Keep the pane rendering even when occluded / in the background - the
@@ -567,14 +579,23 @@ pub fn browser_embed_update(
         .background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Disabled);
     window
         .add_child(builder, Position::Physical(position), Size::Physical(size))
-        .map_err(|e| e.to_string())?;
-    log::info!("browser: embedded webview '{instance}' created at {url}");
+        .map_err(|e| {
+            log::error!("browser_embed_update: add_child failed for '{instance}': {e}");
+            e.to_string()
+        })?;
+    log::info!(
+        "browser: embedded webview '{instance}' created at {url} at ({},{}) {}x{}",
+        position.x,
+        position.y,
+        size.width,
+        size.height
+    );
     state.record(&instance, Some(url));
     Ok(())
 }
 
 #[tauri::command]
-pub fn browser_embed_navigate(
+pub async fn browser_embed_navigate(
     app: AppHandle,
     state: State<'_, BrowserState>,
     instance: String,
@@ -593,7 +614,7 @@ pub fn browser_embed_navigate(
 }
 
 #[tauri::command]
-pub fn browser_embed_read(
+pub async fn browser_embed_read(
     app: AppHandle,
     state: State<'_, BrowserState>,
     instance: String,
@@ -616,7 +637,7 @@ pub fn browser_embed_read(
 }
 
 #[tauri::command]
-pub fn browser_embed_close(
+pub async fn browser_embed_close(
     app: AppHandle,
     state: State<'_, BrowserState>,
     instance: String,

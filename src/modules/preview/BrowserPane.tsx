@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { error as logError, info as logInfo } from "@tauri-apps/plugin-log";
 import { native } from "@/modules/ai/lib/native";
 
 type Props = {
@@ -41,9 +42,19 @@ export function BrowserPane({ instance, url, visible }: Props) {
         const key = `${visible}:${bounds.x}:${bounds.y}:${bounds.width}:${bounds.height}:${url}`;
         if (key !== lastKey.current) {
           lastKey.current = key;
-          void native.browserEmbedUpdate(instance, url, bounds, visible).then(() => {
-            createdUrl.current = url;
-          }).catch(() => {});
+          if (createdUrl.current === null) {
+            void logInfo(
+              `BrowserPane: first update instance=${instance} visible=${visible} box=${bounds.width}x${bounds.height} url=${url}`,
+            );
+          }
+          void native
+            .browserEmbedUpdate(instance, url, bounds, visible)
+            .then(() => {
+              createdUrl.current = url;
+            })
+            .catch((e) => {
+              void logError(`BrowserPane: browserEmbedUpdate failed: ${String(e)}`);
+            });
         }
       }
       raf = requestAnimationFrame(tick);
