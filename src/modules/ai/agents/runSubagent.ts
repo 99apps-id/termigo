@@ -232,6 +232,58 @@ type RunResult = {
   durationMs: number;
 };
 
+function safeJson(v: unknown): string {
+  try {
+    return typeof v === "string" ? v : (JSON.stringify(v) ?? String(v));
+  } catch {
+    return String(v);
+  }
+}
+
+/**
+ * Recover a summary when the model produced no final text. Reconstructs what it
+ * gathered across the run (each step's text and tool results) and asks once more
+ * - with NO tools offered - for a prose answer. Returns "" when there is nothing
+ * to summarize or the follow-up fails. Ported from TEDI: this is what stops a
+ * completed sub-agent from returning "(no output)".
+ */
+async function synthesizeSummary(
+  model: Parameters<typeof generateText>[0]["model"],
+  systemPrompt: string,
+  prompt: string,
+  result: Awaited<ReturnType<typeof generateText>>,
+  abortSignal: AbortSignal,
+): Promise<string> {
+  const lines: string[] = [];
+  for (const s of result.steps ?? []) {
+    const t = s.text?.trim();
+    if (t) lines.push(t);
+    for (const tr of (s.toolResults ?? []) as Array<{
+      toolName?: string;
+      input?: unknown;
+      output?: unknown;
+      result?: unknown;
+    }>) {
+      const out = tr.output ?? tr.result;
+      const outStr = typeof out === "string" ? out : safeJson(out);
+      lines.push(`${tr.toolName ?? "tool"}(${safeJson(tr.input)}) -> ${outStr.slice(0, 800)}`);
+    }
+  }
+  if (lines.length === 0) return "";
+  const findings = lines.join("\n").slice(0, 12000);
+  try {
+    const fu = await generateText({
+      model,
+      system: systemPrompt,
+      prompt: `${prompt}\n\nHere is what you gathered while working:\n${findings}\n\nNow write your final summary in prose. Do not call tools; do not mention tools.`,
+      abortSignal,
+    } as Parameters<typeof generateText>[0]);
+    return fu.text?.trim() ?? "";
+  } catch {
+    return "";
+  }
+}
+
 export async function runSubagent({
   type,
   prompt,
@@ -356,8 +408,17 @@ export async function runSubagent({
       },
     });
 
+    // Some models (notably smaller / routed ones) go silent once tool calls
+    // fill the history: they burn every step doing tool work and never emit a
+    // final assistant text, so `result.text` is empty and the run looked like
+    // "(no output)" even though it did the work. Recover by reconstructing what
+    // it gathered and asking once more, with NO tools, for a prose summary.
+    const summary =
+      result.text?.trim() ||
+      (await synthesizeSummary(model, def.systemPrompt, prompt, result, controller.signal)) ||
+      "(no output)";
     return {
-      summary: result.text || "(no output)",
+      summary,
       stepCount: result.steps?.length ?? 0,
       durationMs: Date.now() - start,
     };
