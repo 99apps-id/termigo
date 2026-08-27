@@ -2,9 +2,11 @@ import { generateText, stepCountIs } from "ai";
 import { buildConfiguredLanguageModel, noProgressStop, noToolRepetition } from "../lib/agent";
 import type { ProviderKeys } from "../lib/keyring";
 import type { ToolContext } from "../tools/context";
-import { buildFsTools } from "../tools/fs";
-import { buildSearchTools } from "../tools/search";
-import { buildEditTools } from "../tools/edit";
+import { buildTools } from "../tools/tools";
+import { buildExtensionTools } from "../lib/extensionTools";
+import { isExtensionTool } from "../lib/extensionToolNames";
+import { isMcpTool } from "../lib/mcpToolNames";
+import { isCustomTool } from "../lib/customToolNames";
 import { summarizeInput } from "../lib/approvalQueue";
 import { subagentWriteNeedsApproval } from "../lib/approvalPolicy";
 import {
@@ -33,8 +35,36 @@ type Args = {
   abortSignal?: AbortSignal;
 };
 
-/** Writes a sub-agent may perform only after the user says so. */
-const GATED = new Set(["write_file", "create_directory", "edit", "multi_edit"]);
+/**
+ * `write_file` is the one write with no read-before check, so a sub-agent gets
+ * the same new-files-only guard the builder had - see `newFilesOnly`.
+ */
+const WRITE_FILE = "write_file";
+
+/**
+ * Tools a sub-agent never receives.
+ *
+ * Recursion: a sub-agent that could call `run_subagent` / `run_subagents` would
+ * spawn its own sub-agents and nest without bound. It is the single capability
+ * that keeps a sub-agent from being a full peer of the main agent, on purpose.
+ */
+const WITHHELD = new Set(["run_subagent", "run_subagents"]);
+
+/**
+ * Whether a sub-agent tool must route through the approval queue rather than
+ * auto-run.
+ *
+ * A sub-agent holds the same toolset as the main agent, so this is the security
+ * floor that makes that safe: everything the main agent would stop and ask for
+ * asks here too. A built-in tool that mutates or runs a command declares
+ * `needsApproval`; third-party tools (extension / MCP / custom) are always
+ * policy-governed by name. Read-only file/search tools carry neither signal and
+ * auto-run, exactly as they do for the main agent.
+ */
+export function subagentToolNeedsGate(name: string, tool?: unknown): boolean {
+  if (isExtensionTool(name) || isMcpTool(name) || isCustomTool(name)) return true;
+  return (tool as { needsApproval?: unknown } | undefined)?.needsApproval === true;
+}
 
 /**
  * How many consecutive denials end the run outright.
@@ -201,10 +231,13 @@ export async function runSubagent({
   // agent did, which is what sharing the parent's cache amounted to.
   const ctx: ToolContext = { ...toolContext, readCache: new Map() };
 
+  // The full main-agent toolset plus extension tools - a sub-agent is a peer of
+  // the main agent, not a read-only subset. `buildTools` is the same builder the
+  // main run uses; extension tools are added the same way the main run adds them
+  // (fresh each run, since extensions load and unload while the app is open).
   const available: Record<string, unknown> = {
-    ...buildFsTools(ctx),
-    ...buildSearchTools(ctx),
-    ...buildEditTools(ctx),
+    ...buildTools(ctx),
+    ...buildExtensionTools(),
   };
 
   const tools: Record<string, unknown> = {};
@@ -225,15 +258,14 @@ export async function runSubagent({
     else abortSignal.addEventListener("abort", () => controller.abort(), { once: true });
   }
 
-  for (const t of def.tools) {
-    const found = available[t];
-    if (!found) continue;
-    if (!GATED.has(t)) {
-      tools[t] = found;
+  for (const [name, found] of Object.entries(available)) {
+    if (!found || WITHHELD.has(name)) continue;
+    if (!subagentToolNeedsGate(name, found)) {
+      tools[name] = found;
       continue;
     }
-    const guarded = t === "write_file" ? newFilesOnly(found as AnyTool) : found;
-    tools[t] = gate(guarded as AnyTool, t, requester ?? type, breaker, controller.signal);
+    const guarded = name === WRITE_FILE ? newFilesOnly(found as AnyTool) : found;
+    tools[name] = gate(guarded as AnyTool, name, requester ?? type, breaker, controller.signal);
   }
 
   // Multi-model routing: a cheaper or local model can do the fan-out while the
