@@ -16,7 +16,10 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Listener, Manager, State, WebviewUrl, WebviewWindowBuilder};
+use tauri::{
+    AppHandle, Listener, Manager, PhysicalPosition, PhysicalSize, Position, Rect, Size, State,
+    WebviewBuilder, WebviewUrl, WebviewWindowBuilder,
+};
 
 const VALUE_EVENT: &str = "termigo:browser-value";
 
@@ -469,6 +472,156 @@ struct ValuePayload {
     instance: String,
     kind: String,
     value: String,
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Embedded browser: a child webview docked INSIDE the main window (via the
+// unstable `Window::add_child` API), instead of a separate floating window.
+// The child shares the main window's WebView2 environment, which is what makes
+// it render reliably where the floating window came up blank (tauri#13092).
+// The frontend measures its pane rectangle and pushes physical-pixel bounds
+// here every frame; a hidden or zero-area request hides the webview.
+// ──────────────────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmbedBounds {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+fn embed_label(instance: &str) -> String {
+    format!("browser-embed-{instance}")
+}
+
+fn embed_init_script(instance: &str) -> String {
+    format!(
+        r#"(function(){{
+  var INST = {instance:?};
+  function send(kind, value){{
+    try {{ if (window.__TAURI__ && window.__TAURI__.event) {{ window.__TAURI__.event.emit('{VALUE_EVENT}', {{ instance: INST, kind: kind, value: String(value).slice(0, 200000) }}); }} }} catch (e) {{}}
+  }}
+  window.__termigoExtract = function(){{ send('extract', document.body ? document.body.innerText : ''); }};
+  try {{ ['log','warn','error','info'].forEach(function(m){{ var orig = console[m]; console[m] = function(){{ try {{ send('console', Array.prototype.join.call(arguments, ' ')); }} catch (e) {{}} return orig.apply(console, arguments); }}; }}); }} catch (e) {{}}
+}})();"#
+    )
+}
+
+/// Create, reposition, show or hide the embedded browser webview for `instance`.
+/// Bounds are physical pixels relative to the main window. A not-visible or
+/// zero-area request hides an existing webview.
+#[tauri::command]
+pub fn browser_embed_update(
+    app: AppHandle,
+    window: tauri::Window,
+    state: State<'_, BrowserState>,
+    instance: String,
+    url: String,
+    bounds: EmbedBounds,
+    visible: bool,
+) -> Result<(), String> {
+    if instance.is_empty() {
+        return Err("browser instance name cannot be empty".into());
+    }
+    if !url.is_empty() {
+        if let Some(reason) = unsafe_url(&url) {
+            return Err(format!("Refused: {reason}"));
+        }
+    }
+    let label = embed_label(&instance);
+
+    if !visible || bounds.width < 1.0 || bounds.height < 1.0 {
+        if let Some(wv) = app.get_webview(&label) {
+            wv.hide().map_err(|e| e.to_string())?;
+        }
+        return Ok(());
+    }
+
+    let position = PhysicalPosition::new(bounds.x.round() as i32, bounds.y.round() as i32);
+    let size = PhysicalSize::new(
+        (bounds.width.round() as i32).max(1) as u32,
+        (bounds.height.round() as i32).max(1) as u32,
+    );
+
+    if let Some(wv) = app.get_webview(&label) {
+        wv.set_bounds(Rect {
+            position: Position::Physical(position),
+            size: Size::Physical(size),
+        })
+        .map_err(|e| e.to_string())?;
+        wv.show().map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    // First visible call: create the child webview at the pane's rectangle.
+    if url.is_empty() {
+        return Ok(());
+    }
+    let parsed = reqwest::Url::parse(&url).map_err(|e| e.to_string())?;
+    let builder = WebviewBuilder::new(&label, WebviewUrl::External(parsed))
+        .initialization_script(&embed_init_script(&instance));
+    window
+        .add_child(builder, Position::Physical(position), Size::Physical(size))
+        .map_err(|e| e.to_string())?;
+    state.record(&instance, Some(url));
+    Ok(())
+}
+
+#[tauri::command]
+pub fn browser_embed_navigate(
+    app: AppHandle,
+    state: State<'_, BrowserState>,
+    instance: String,
+    url: String,
+) -> Result<(), String> {
+    if let Some(reason) = unsafe_url(&url) {
+        return Err(format!("Refused: {reason}"));
+    }
+    let wv = app
+        .get_webview(&embed_label(&instance))
+        .ok_or("embedded browser not open")?;
+    wv.eval(format!("window.location.href = {url:?};"))
+        .map_err(|e| e.to_string())?;
+    state.record(&instance, Some(url));
+    Ok(())
+}
+
+#[tauri::command]
+pub fn browser_embed_read(
+    app: AppHandle,
+    state: State<'_, BrowserState>,
+    instance: String,
+) -> Result<String, String> {
+    let wv = app
+        .get_webview(&embed_label(&instance))
+        .ok_or("embedded browser not open")?;
+    state.clear_value(&instance);
+    let js = format!(
+        "(()=>{{try{{if(window.__termigoExtract){{window.__termigoExtract();return;}}const t=document.body?document.body.innerText:'';window.__TAURI__&&window.__TAURI__.event&&window.__TAURI__.event.emit('{VALUE_EVENT}',{{instance:{instance:?},kind:'extract',value:String(t).slice(0,200000)}});}}catch(e){{}}}})();"
+    );
+    wv.eval(&js).map_err(|e| e.to_string())?;
+    for _ in 0..25 {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        if let Some(v) = state.entry(&instance).and_then(|e| e.last_value) {
+            return Ok(v);
+        }
+    }
+    Ok("(no readable text returned from the page. It may still be loading.)".to_string())
+}
+
+#[tauri::command]
+pub fn browser_embed_close(
+    app: AppHandle,
+    state: State<'_, BrowserState>,
+    instance: String,
+) -> Result<(), String> {
+    if let Some(wv) = app.get_webview(&embed_label(&instance)) {
+        wv.close().map_err(|e| e.to_string())?;
+    }
+    state.remove(&instance);
+    Ok(())
 }
 
 #[cfg(test)]

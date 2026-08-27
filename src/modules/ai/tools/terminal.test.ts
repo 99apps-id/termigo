@@ -93,7 +93,7 @@ describe("Privacy mode withholds the terminal", () => {
 
 // The preview surface is an in-app iframe, so the host allow-list is what
 // stops an agent opening arbitrary pages inside the user's app.
-describe("open_preview accepts only loopback", () => {
+describe("open_preview accepts loopback and safe external hosts", () => {
   it("accepts the local dev server in its usual spellings", async () => {
     for (const url of [
       "http://localhost:5173",
@@ -107,18 +107,22 @@ describe("open_preview accepts only loopback", () => {
     }
   });
 
-  it("refuses an external host and says what to do instead", async () => {
-    const r = await preview(makeContext(), "https://example.com");
-    expect(r.ok).toBeUndefined();
-    expect(r.error).toMatch(/localhost/i);
-    expect(r.error).toMatch(/address bar/i);
-  });
-
-  // A hostname that merely starts with a loopback name is not loopback.
-  it("is not fooled by a host that only looks local", async () => {
+  it("accepts a safe external host (it renders in the embedded browser)", async () => {
     for (const url of [
+      "https://example.com",
       "http://localhost.evil.com",
       "http://127.0.0.1.evil.com",
+    ]) {
+      const r = await preview(makeContext(), url);
+      expect(r.ok, url).toBe(true);
+    }
+  });
+
+  it("still refuses SSRF targets (metadata, link-local, loopback-IP tricks)", async () => {
+    for (const url of [
+      "http://169.254.169.254/latest/meta-data",
+      "http://metadata.google.internal",
+      "http://[fe80::1]/",
     ]) {
       const r = await preview(makeContext(), url);
       expect(r.ok, url).toBeUndefined();

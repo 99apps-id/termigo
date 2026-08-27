@@ -400,4 +400,19 @@ export const native = {
       branch,
       workspace: currentWorkspaceEnv(),
     }),
+
+  // Embedded browser: a native child webview docked inside the main window at
+  // the pane's rectangle (physical pixels). See src-tauri browser.rs.
+  browserEmbedUpdate: (
+    instance: string,
+    url: string,
+    bounds: { x: number; y: number; width: number; height: number },
+    visible: boolean,
+  ) => invoke<void>("browser_embed_update", { instance, url, bounds, visible }),
+  browserEmbedNavigate: (instance: string, url: string) =>
+    invoke<void>("browser_embed_navigate", { instance, url }),
+  browserEmbedRead: (instance: string) =>
+    invoke<string>("browser_embed_read", { instance }),
+  browserEmbedClose: (instance: string) =>
+    invoke<void>("browser_embed_close", { instance }),
 };

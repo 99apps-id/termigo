@@ -1,7 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { checkShellCommand } from "../lib/security";
-import { isSafePreviewUrl } from "../lib/browserGuard";
+import { isSafePreviewUrl, unsafeBrowserUrl } from "../lib/browserGuard";
 import type { ToolContext } from "./context";
 
 export function buildTerminalTools(ctx: ToolContext) {
@@ -63,12 +63,12 @@ export function buildTerminalTools(ctx: ToolContext) {
 
     open_preview: tool({
       description:
-        "Open a preview tab (in-app iframe) at the given URL — restricted to localhost/loopback addresses for the local dev server. Use this after starting a dev server (e.g. `pnpm dev`, `npm run dev`) to surface the rendered page next to the terminal. To preview external sites, the user should paste the URL into the preview address bar themselves.",
+        "Open a preview tab at the given URL, next to the terminal. A localhost/loopback dev server (e.g. http://localhost:5173) loads in a lightweight iframe; an external http(s) site loads in a real embedded browser (so pages that refuse to be framed still render). Use it to surface a dev server, or to browse a site the user asked about.",
       inputSchema: z.object({
         url: z
           .url()
           .describe(
-            "Full URL to load (e.g. http://localhost:5173). Must include scheme. Only http/https on loopback hosts are accepted.",
+            "Full http(s) URL to load (e.g. http://localhost:5173 or https://example.com). Must include scheme.",
           ),
       }),
       execute: async ({ url }) => {
@@ -81,14 +81,13 @@ export function buildTerminalTools(ctx: ToolContext) {
         if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
           return { error: "only http/https URLs are allowed", url };
         }
-        // Route the host check through the SSRF guard so decimal/hex-dotted
-        // IPv4, IPv6 link-local and cloud-metadata tricks cannot masquerade as
-        // a loopback dev server. `isSafePreviewUrl` re-allows loopback, which
-        // the raw guard refuses, while still rejecting the rest.
-        if (!isSafePreviewUrl(url)) {
+        // A loopback dev server is allowed (isSafePreviewUrl re-allows loopback
+        // the raw guard refuses); any other host must pass the SSRF guard, which
+        // rejects decimal/hex IPv4, IPv6 link-local and cloud-metadata tricks. An
+        // allowed external URL renders in the native embedded browser.
+        if (!isSafePreviewUrl(url) && unsafeBrowserUrl(url) !== null) {
           return {
-            error:
-              "open_preview is restricted to localhost URLs. Ask the user to paste the external URL into the preview address bar instead.",
+            error: "URL blocked: not a loopback dev server and not a safe external host (SSRF/metadata/link-local are refused).",
             url,
           };
         }

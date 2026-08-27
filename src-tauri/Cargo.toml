@@ -31,7 +31,9 @@ tauri-build = { version = "2", features = [] }
 serde_json = "1"
 
 [dependencies]
-tauri = { version = "2", features = ["protocol-asset"] }
+# `unstable` enables the multi-webview API (`Window::add_child` / `get_webview`)
+# used to embed the in-app browser pane inside the main window.
+tauri = { version = "2", features = ["protocol-asset", "unstable"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }

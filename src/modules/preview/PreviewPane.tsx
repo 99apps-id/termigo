@@ -1,4 +1,4 @@
-import { Alert02Icon, Globe02Icon } from "@hugeicons/core-free-icons";
+import { Globe02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   forwardRef,
@@ -11,6 +11,7 @@ import {
   PreviewAddressBar,
   type PreviewAddressBarHandle,
 } from "./PreviewAddressBar";
+import { BrowserPane } from "./BrowserPane";
 
 export type PreviewPaneHandle = {
   reload: () => void;
@@ -36,6 +37,8 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, Props>(
     const [nonce, setNonce] = useState(0);
     const [loaded, setLoaded] = useState(visible);
     const addressRef = useRef<PreviewAddressBarHandle>(null);
+    // Stable per-mount id for the native embedded webview (external URLs).
+    const instanceId = useRef(`pv-${Math.random().toString(36).slice(2, 10)}`).current;
 
     useEffect(() => {
       if (visible) {
@@ -59,7 +62,11 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, Props>(
       [url],
     );
 
-    const showXfoHint = url ? !isLocalUrl(url) : false;
+    // External URLs render in a NATIVE embedded webview (a real browser), not
+    // the iframe - public sites refuse to be framed (X-Frame-Options), which is
+    // the whole reason the embedded browser exists. Local dev servers keep the
+    // lightweight iframe.
+    const external = url ? !isLocalUrl(url) : false;
 
     return (
       <div
@@ -75,29 +82,19 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, Props>(
           onSubmit={onUrlChange}
           onReload={() => setNonce((n) => n + 1)}
         />
-        {showXfoHint ? (
-          <div className="flex h-7 shrink-0 items-center gap-1.5 border-b border-border/60 bg-amber-500/8 px-3 text-[11px] text-amber-600 dark:text-amber-400">
-            <HugeiconsIcon
-              icon={Alert02Icon}
-              size={12}
-              strokeWidth={1.75}
-              className="shrink-0"
-            />
-            <span className="truncate">
-              Many public sites refuse to embed (X-Frame-Options). If the page
-              is blank, open it externally.
-            </span>
-          </div>
-        ) : null}
         <div
           className={
             url
-              ? "relative min-h-0 flex-1 bg-white"
+              ? external
+                ? "relative min-h-0 flex-1 bg-background"
+                : "relative min-h-0 flex-1 bg-white"
               : "relative min-h-0 flex-1 bg-background"
           }
         >
           {url ? (
-            loaded ? (
+            external ? (
+              <BrowserPane instance={instanceId} url={url} visible={visible} />
+            ) : loaded ? (
               <iframe
                 key={`${url}#${nonce}`}
                 src={url}
