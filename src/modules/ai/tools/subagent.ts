@@ -2,6 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { runSubagent } from "../agents/runSubagent";
 import { SUBAGENTS, type SubagentType } from "../agents/registry";
+import { resolveSubagentType } from "../agents/resolveSubagent";
 import { useChatStore } from "../store/chatStore";
 import {
   cascadeSkip,
@@ -44,7 +45,11 @@ ${TYPE_KEYS.map((k) => `- ${k}: ${SUBAGENTS[k].description}`).join("\n")}
 
 Approval works exactly as it does for you: read-only tools auto-run, and every mutating, shell, or extension call goes through the user's approval queue (\`write_file\` also refuses an existing path). So delegation never silently mutates the workspace or runs an un-approved command.`,
       inputSchema: z.object({
-        type: z.enum(TYPE_KEYS),
+        type: z
+          .string()
+          .describe(
+            `Which subagent to spawn. One of: ${TYPE_KEYS.join(", ")}. Common synonyms (search, review, implement, audit, plan) resolve to the closest match, so an approximate name still works.`,
+          ),
         prompt: z
           .string()
           .describe(
@@ -56,28 +61,31 @@ Approval works exactly as it does for you: read-only tools auto-run, and every m
           .describe("Short label shown in the chat UI for the spawn card."),
       }),
       execute: async ({ type, prompt, description }, opts) => {
+        // Resolve loose / synonym names to a real roster id so an approximate
+        // 'type' from the model never fails the call.
+        const resolved = resolveSubagentType(type);
         const { apiKeys, selectedModelId, patchAgentMeta } =
           useChatStore.getState();
         try {
           const r = await runSubagent({
-            type,
+            type: resolved,
             prompt,
             keys: apiKeys,
             modelId: selectedModelId,
             toolContext: ctx,
-            requester: description ?? type,
+            requester: description ?? resolved,
             abortSignal: opts?.abortSignal,
             onStep: (label) => patchAgentMeta({ step: label }),
           });
           return {
-            type,
+            type: resolved,
             description,
             summary: r.summary,
             stepCount: r.stepCount,
             durationMs: r.durationMs,
           };
         } catch (e) {
-          return { error: String(e), type };
+          return { error: String(e), type: resolved };
         }
       },
     }),
@@ -100,7 +108,11 @@ Each task's subagent has the same toolset you do (minus spawning further subagen
         tasks: z
           .array(
             z.object({
-              type: z.enum(TYPE_KEYS),
+              type: z
+                .string()
+                .describe(
+                  `Which subagent to spawn: one of ${TYPE_KEYS.join(", ")} (synonyms like search / review / implement / audit resolve to the closest match).`,
+                ),
               prompt: z
                 .string()
                 .describe(
@@ -153,7 +165,9 @@ Each task's subagent has the same toolset you do (minus spawning further subagen
 
         const results: BatchResult[] = batch.map((t, i) => ({
           index: i,
-          type: t.type,
+          // Resolve loose / synonym names up front so every downstream use
+          // (runSubagent, labels, the returned result) is a real roster id.
+          type: resolveSubagentType(t.type),
           description: t.description,
         }));
         const state: TaskState[] = batch.map(() => ({
@@ -193,20 +207,21 @@ Each task's subagent has the same toolset you do (minus spawning further subagen
           const prompt = context
             ? `${context}\n\n---\n\n${task.prompt}`
             : task.prompt;
+          const resolvedType = results[i].type;
           try {
             const r = await runSubagent({
-              type: task.type,
+              type: resolvedType,
               prompt,
               keys: apiKeys,
               modelId: selectedModelId,
               toolContext: ctx,
               // Numbered, because several run at once and the approval queue
               // is unreadable if every row says "builder".
-              requester: `${task.description ?? task.type} #${i + 1}`,
+              requester: `${task.description ?? resolvedType} #${i + 1}`,
               abortSignal: batchSignal,
               onStep: (label) =>
                 patchAgentMeta({
-                  step: `${task.description ?? task.type}: ${label}`,
+                  step: `${task.description ?? resolvedType}: ${label}`,
                 }),
             });
             results[i].summary = r.summary;

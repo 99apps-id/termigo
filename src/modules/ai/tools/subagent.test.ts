@@ -62,8 +62,10 @@ describe("run_subagent", () => {
       prompt: "review it",
       description: "card",
     });
+    // "reviewer" is a synonym; it resolves to the real roster id "code-review",
+    // and the result echoes the resolved type.
     expect(r).toEqual({
-      type: "reviewer",
+      type: "code-review",
       description: "card",
       summary: "done",
       stepCount: 4,
@@ -74,7 +76,7 @@ describe("run_subagent", () => {
   it("returns an error result instead of throwing when the subagent fails", async () => {
     runSubagentMock.mockRejectedValue(new Error("boom"));
     const r = await run({ type: "reviewer", prompt: "review it" });
-    expect(r.type).toBe("reviewer");
+    expect(r.type).toBe("code-review");
     expect(r.error).toContain("boom");
   });
 });
