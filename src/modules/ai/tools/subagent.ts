@@ -3,6 +3,7 @@ import { z } from "zod";
 import { runSubagent } from "../agents/runSubagent";
 import { SUBAGENTS, type SubagentType } from "../agents/registry";
 import { resolveSubagentType } from "../agents/resolveSubagent";
+import { useSubagentRunStore } from "../store/subagentRunStore";
 import { useChatStore } from "../store/chatStore";
 import {
   cascadeSkip,
@@ -64,8 +65,13 @@ Approval works exactly as it does for you: read-only tools auto-run, and every m
         // Resolve loose / synonym names to a real roster id so an approximate
         // 'type' from the model never fails the call.
         const resolved = resolveSubagentType(type);
-        const { apiKeys, selectedModelId, patchAgentMeta } =
+        const { apiKeys, selectedModelId, patchAgentMeta, activeSessionId } =
           useChatStore.getState();
+        // Register a live run so the tool card can show its progress + result.
+        const sid = activeSessionId ?? "";
+        const runs = useSubagentRunStore.getState();
+        const runId = runs.start(sid, { type: resolved, label: description });
+        let steps = 0;
         try {
           const r = await runSubagent({
             type: resolved,
@@ -75,8 +81,15 @@ Approval works exactly as it does for you: read-only tools auto-run, and every m
             toolContext: ctx,
             requester: description ?? resolved,
             abortSignal: opts?.abortSignal,
-            onStep: (label) => patchAgentMeta({ step: label }),
+            onStep: (label) => {
+              patchAgentMeta({ step: label });
+              steps += 1;
+              useSubagentRunStore.getState().step(sid, runId, { currentStep: label, stepCount: steps });
+            },
           });
+          useSubagentRunStore
+            .getState()
+            .finish(sid, runId, { stepCount: r.stepCount, durationMs: r.durationMs, summary: r.summary });
           return {
             type: resolved,
             description,
@@ -85,6 +98,7 @@ Approval works exactly as it does for you: read-only tools auto-run, and every m
             durationMs: r.durationMs,
           };
         } catch (e) {
+          useSubagentRunStore.getState().fail(sid, runId, String(e));
           return { error: String(e), type: resolved };
         }
       },
@@ -192,8 +206,9 @@ Each task's subagent has the same toolset you do (minus spawning further subagen
           }
         }
 
-        const { apiKeys, selectedModelId, patchAgentMeta } =
+        const { apiKeys, selectedModelId, patchAgentMeta, activeSessionId } =
           useChatStore.getState();
+        const sid = activeSessionId ?? "";
 
         const runOne = async (i: number): Promise<void> => {
           const task = batch[i];
@@ -208,6 +223,10 @@ Each task's subagent has the same toolset you do (minus spawning further subagen
             ? `${context}\n\n---\n\n${task.prompt}`
             : task.prompt;
           const resolvedType = results[i].type;
+          const runId = useSubagentRunStore
+            .getState()
+            .start(sid, { type: resolvedType, label: task.description });
+          let steps = 0;
           try {
             const r = await runSubagent({
               type: resolvedType,
@@ -219,18 +238,27 @@ Each task's subagent has the same toolset you do (minus spawning further subagen
               // is unreadable if every row says "builder".
               requester: `${task.description ?? resolvedType} #${i + 1}`,
               abortSignal: batchSignal,
-              onStep: (label) =>
+              onStep: (label) => {
                 patchAgentMeta({
                   step: `${task.description ?? resolvedType}: ${label}`,
-                }),
+                });
+                steps += 1;
+                useSubagentRunStore
+                  .getState()
+                  .step(sid, runId, { currentStep: label, stepCount: steps });
+              },
             });
             results[i].summary = r.summary;
             results[i].stepCount = r.stepCount;
             results[i].durationMs = r.durationMs;
             state[i] = { settled: true, bad: false, running: false };
+            useSubagentRunStore
+              .getState()
+              .finish(sid, runId, { stepCount: r.stepCount, durationMs: r.durationMs, summary: r.summary });
           } catch (e) {
             results[i].error = String(e);
             state[i] = { settled: true, bad: true, running: false };
+            useSubagentRunStore.getState().fail(sid, runId, String(e));
             for (const s of cascadeSkip(plan.deps, state, i)) {
               results[s.index].skipped ??= s.reason;
             }
