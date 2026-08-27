@@ -26,11 +26,11 @@ export function buildBrowserTools(ctx: ToolContext) {
   return {
     browser_open: tool({
       description:
-        "Open a browser instance (dedicated webview window) at a web URL. Use this for JS-heavy sites you need to render, read, or drive (click, type, follow a flow) - the webview runs JavaScript, so browser_extract returns the fully rendered DOM, unlike `fetch` which sees only raw HTML. After opening, call browser_wait(~1500ms) so the page can load before reading or acting. Reuses an existing instance with the same name, or creates a new one.",
+        "Open a web URL in an in-app browser tab, next to the terminal, and switch to it. The page renders in a real embedded browser (runs JavaScript, so JS-heavy sites work). Use it to show the user a site or to render a page. To read a page's content, prefer the `fetch` tool. SSRF targets are refused.",
       inputSchema: z.object({
         instance: z
           .string()
-          .describe("Instance name, e.g. 'docs'. Prefer reusing an existing name over spawning many."),
+          .describe("A short name for this browser, e.g. 'docs'. Currently informational."),
         url: z
           .url()
           .describe("Full http(s) URL. External sites allowed; SSRF targets are refused."),
@@ -38,8 +38,14 @@ export function buildBrowserTools(ctx: ToolContext) {
       execute: async ({ instance, url }) => {
         const blocked = guard(url);
         if (blocked) return blocked;
-        const res = await ctx.browserOpen(instance, url);
-        return res;
+        // Open as an embedded browser TAB (a native child webview docked in the
+        // window) rather than a separate floating window: the floating
+        // WebviewWindow build hangs on some Windows/WebView2 setups, and a docked
+        // child shares the main window's environment and renders reliably.
+        const ok = ctx.openPreview(url);
+        return ok
+          ? { ok: true, url, instance, note: "Opened in an in-app browser tab." }
+          : { error: "could not open a browser tab (preview surface unavailable)", url };
       },
     }),
 

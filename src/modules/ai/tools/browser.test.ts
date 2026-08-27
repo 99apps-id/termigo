@@ -10,7 +10,7 @@ function makeCtx(): ToolContext {
     getTerminalContext: () => null,
     isActiveTerminalPrivate: () => false,
     injectIntoActivePty: () => false,
-    openPreview: () => false,
+    openPreview: vi.fn(() => true),
     browserOpen: vi.fn(async () => ({ url: "https://example.com" })),
     browserNavigate: vi.fn(async () => ({ url: "https://example.com" })),
     browserBack: vi.fn(async () => ({ ok: true as const })),
@@ -58,18 +58,19 @@ describe("browser tools", () => {
       const r = (await run({ instance: "x", url }, OPTS)) as { error?: string };
       expect(r.error, url).toBeTruthy();
     }
-    expect(ctx.browserOpen).not.toHaveBeenCalled();
+    expect(ctx.openPreview).not.toHaveBeenCalled();
   });
 
-  it("opens an external site and passes through the context", async () => {
+  it("opens an external site as an embedded browser tab", async () => {
     const ctx = makeCtx();
     const tools = buildBrowserTools(ctx);
     const r = (await execOf(tools.browser_open)(
       { instance: "docs", url: "https://example.com" },
       OPTS,
-    )) as { url?: string };
+    )) as { url?: string; ok?: boolean };
+    expect(r.ok).toBe(true);
     expect(r.url).toBe("https://example.com");
-    expect(ctx.browserOpen).toHaveBeenCalledWith("docs", "https://example.com");
+    expect(ctx.openPreview).toHaveBeenCalledWith("https://example.com");
   });
 
   it("refuses a metadata URL in browser_navigate", async () => {

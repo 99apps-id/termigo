@@ -561,10 +561,14 @@ pub fn browser_embed_update(
     }
     let parsed = reqwest::Url::parse(&url).map_err(|e| e.to_string())?;
     let builder = WebviewBuilder::new(&label, WebviewUrl::External(parsed))
-        .initialization_script(&embed_init_script(&instance));
+        .initialization_script(&embed_init_script(&instance))
+        // Keep the pane rendering even when occluded / in the background - the
+        // same flag TEDI relies on so a docked webview does not suspend.
+        .background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Disabled);
     window
         .add_child(builder, Position::Physical(position), Size::Physical(size))
         .map_err(|e| e.to_string())?;
+    log::info!("browser: embedded webview '{instance}' created at {url}");
     state.record(&instance, Some(url));
     Ok(())
 }
