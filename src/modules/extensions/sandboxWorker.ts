@@ -38,11 +38,18 @@ function call(req: DistributiveOmit<SandboxRequest, "id">): Promise<unknown> {
 }
 
 /** Build the ctx proxy handed to the extension's activate(). */
-function buildCtx(id: string): Record<string, unknown> {
+function buildCtx(id: string, platform?: string): Record<string, unknown> {
+  // Map the Tauri OS family ("windows"/"macos"/"linux") the host detected onto
+  // ctx.os.platform, so an extension can adapt (e.g. shell quoting) instead of
+  // always seeing "unknown".
+  const osPlatform =
+    platform === "windows" || platform === "macos" || platform === "linux"
+      ? platform
+      : "unknown";
   return {
     id,
     installPath: "",
-    os: { platform: "unknown", arch: "unknown" },
+    os: { platform: osPlatform, arch: "unknown" },
     paths: { home: "" },
     // Generic backend invoke. Extensions call e.g. `ctx.invoke("shell_run_command",
     // { command })`; the host dispatcher gates it behind the `invoke:<cmd>`
@@ -233,7 +240,7 @@ async function handle(msg: HostMessage): Promise<void> {
           activate?: (ctx: Record<string, unknown>) => unknown;
           default?: { activate?: (ctx: Record<string, unknown>) => unknown };
         };
-        const ctx = buildCtx(msg.id);
+        const ctx = buildCtx(msg.id, msg.platform);
         const activateFn = mod.activate ?? mod.default?.activate;
         if (typeof activateFn === "function") {
           // Guard against an activate() that never resolves (e.g. a hung RPC),

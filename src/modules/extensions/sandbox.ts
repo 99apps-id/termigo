@@ -89,7 +89,7 @@ export type SerializedSidebarSection = Omit<
 
 /** Inbound message from the host to the worker (init + calls the host owns). */
 export type HostMessage =
-  | { type: "init"; id: string; code: string }
+  | { type: "init"; id: string; code: string; platform?: string }
   | { type: "invoke_tool"; name: string; args: Record<string, unknown>; callId: number }
   | { type: "invoke_command"; id: string; args: unknown[]; callId: number }
   | { type: "event"; channel: string; payload: unknown }

@@ -1,6 +1,7 @@
 import { platform } from "@tauri-apps/plugin-os";
 
-const PLATFORM = (() => {
+/** The OS family, or "" when it cannot be read (e.g. outside the Tauri host). */
+export const PLATFORM = (() => {
   try {
     return platform();
   } catch {

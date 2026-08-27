@@ -8,6 +8,8 @@
 
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { error as logError, info as logInfo } from "@tauri-apps/plugin-log";
+import { currentWorkspaceEnv } from "@/modules/workspace";
+import { PLATFORM } from "@/lib/platform";
 import { LazyStore } from "@tauri-apps/plugin-store";
 import { toast } from "@/components/ui/toast";
 import * as chatMod from "@/modules/ai/store/chatStore";
@@ -55,7 +57,23 @@ async function buildExecutor(
   };
 
   return {
-    invoke: (command, args) => tauriInvoke(command, args),
+    invoke: (command, args) => {
+      // A shell command from an extension should run in the SAME workspace the
+      // user is in (Local or a WSL distro), the way the agent's own shell tools
+      // do. Without this the backend defaults to Local, so on Windows an
+      // extension whose toolchain lives in WSL (e.g. the pentest kit's
+      // nmap/dig/curl) runs in PowerShell and finds nothing. Only injected when
+      // the extension did not set its own workspace, and only for the spawn
+      // commands that take one.
+      const injectsWorkspace = command === "shell_run_command" || command === "shell_bg_spawn";
+      if (injectsWorkspace) {
+        const a = (args ?? {}) as Record<string, unknown>;
+        if (a.workspace === undefined) {
+          return tauriInvoke(command, { ...a, workspace: currentWorkspaceEnv() });
+        }
+      }
+      return tauriInvoke(command, args);
+    },
     storageGet: async (key) => (await store.get(key)) ?? null,
     storageSet: async (key, value) => {
       await store.set(key, value);
@@ -333,7 +351,7 @@ export async function activateSandboxed(
     }
   };
 
-  post({ type: "init", id: ext.id, code });
+  post({ type: "init", id: ext.id, code, platform: PLATFORM });
   logInfo(`[ext:${ext.id}] sandboxHost: sent init, awaiting ready`);
 
   await readyPromise;
