@@ -19,7 +19,11 @@ import { usePreferencesStore } from "@/modules/settings/preferences";
 function screenCommand(command: string): { ok: true } | { ok: false; reason: string } {
   const safety = checkShellCommand(command);
   if (!safety.ok) return safety;
-  return checkPentestCommand(command, usePreferencesStore.getState().pentestScope);
+  const prefs = usePreferencesStore.getState();
+  // Scope is enforced only when the user opted in; otherwise the fence just
+  // refuses denial-of-service tooling and lets every target through.
+  const scope = prefs.enforcePentestScope ? prefs.pentestScope : [];
+  return checkPentestCommand(command, scope);
 }
 
 /**

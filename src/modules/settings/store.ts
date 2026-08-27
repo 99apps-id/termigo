@@ -165,6 +165,14 @@ export type Preferences = {
    */
   pentestScope: string[];
   /**
+   * Master switch for the scope fence. OFF by default: the agent may run
+   * scanners against any target, so auditing your own domains needs no setup.
+   * Turn ON to restrict offensive tooling to `pentestScope`. Denial-of-service
+   * tooling is refused either way - that guard is about not harming a target,
+   * not about scope.
+   */
+  enforcePentestScope: boolean;
+  /**
    * When on, an in-scope, read-tier scan runs without an approval prompt.
    * Exploit-grade tools (sqlmap, hydra, msfconsole, ...) still always ask.
    */
@@ -290,6 +298,7 @@ const KEY_OPENROUTER_MODEL_ID = "openrouterModelId";
 const KEY_AGENT_APPROVAL_MODE = "agentApprovalMode";
 const KEY_AGENT_ALWAYS_ALLOWED_TOOLS = "agentAlwaysAllowedTools";
 const KEY_PENTEST_SCOPE = "pentestScope";
+const KEY_ENFORCE_PENTEST_SCOPE = "enforcePentestScope";
 const KEY_AUTO_APPROVE_IN_SCOPE_SCANS = "autoApproveInScopeScans";
 const KEY_STT_PROVIDER = "sttProvider";
 const KEY_GROQ_STT_MODEL = "groqSttModel";
@@ -391,6 +400,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   agentApprovalMode: DEFAULT_APPROVAL_MODE,
   agentAlwaysAllowedTools: [],
   pentestScope: [],
+  enforcePentestScope: false,
   autoApproveInScopeScans: false,
   sttProvider: DEFAULT_STT_PROVIDER,
   groqSttModel: "whisper-large-v3-turbo",
@@ -545,6 +555,9 @@ export async function loadPreferences(): Promise<Preferences> {
     pentestScope: (get<string[]>(KEY_PENTEST_SCOPE) ?? DEFAULT_PREFERENCES.pentestScope).filter(
       (t) => typeof t === "string" && t.length > 0,
     ),
+    enforcePentestScope:
+      get<boolean>(KEY_ENFORCE_PENTEST_SCOPE) ??
+      DEFAULT_PREFERENCES.enforcePentestScope,
     autoApproveInScopeScans:
       get<boolean>(KEY_AUTO_APPROVE_IN_SCOPE_SCANS) ??
       DEFAULT_PREFERENCES.autoApproveInScopeScans,
@@ -845,6 +858,10 @@ export async function setPentestScope(value: string[]): Promise<void> {
   await writePref(KEY_PENTEST_SCOPE, clean);
 }
 
+export async function setEnforcePentestScope(value: boolean): Promise<void> {
+  await writePref(KEY_ENFORCE_PENTEST_SCOPE, value);
+}
+
 export async function setAutoApproveInScopeScans(value: boolean): Promise<void> {
   await writePref(KEY_AUTO_APPROVE_IN_SCOPE_SCANS, value);
 }
@@ -1128,6 +1145,7 @@ export async function onPreferencesChange(
     [KEY_AGENT_APPROVAL_MODE]: "agentApprovalMode",
     [KEY_AGENT_ALWAYS_ALLOWED_TOOLS]: "agentAlwaysAllowedTools",
     [KEY_PENTEST_SCOPE]: "pentestScope",
+    [KEY_ENFORCE_PENTEST_SCOPE]: "enforcePentestScope",
     [KEY_AUTO_APPROVE_IN_SCOPE_SCANS]: "autoApproveInScopeScans",
     [KEY_AGENT_NOTIFICATIONS]: "agentNotifications",
     [KEY_DEBUG_CAPTURE]: "debugCaptureEnabled",

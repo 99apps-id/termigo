@@ -126,7 +126,10 @@ async function buildExecutor(
     aiStop: () => chatMod.stop(),
     pentestScopeGet: async () => {
       const mod = await import("@/modules/settings/preferences");
-      return mod.usePreferencesStore.getState().pentestScope;
+      const prefs = mod.usePreferencesStore.getState();
+      // When scope enforcement is off, hand the extension an empty scope so its
+      // own tools stop fencing too - one switch governs both layers.
+      return prefs.enforcePentestScope ? prefs.pentestScope : [];
     },
     pentestScopeSet: async (scope) => {
       const mod = await import("@/modules/settings/store");

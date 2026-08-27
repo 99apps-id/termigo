@@ -71,7 +71,9 @@ export function useAutoApproval(
       // outside scope before it could reach an approval prompt.
       if (command && (tool === "bash_run" || tool === "bash_background")) {
         const prefs = usePreferencesStore.getState();
-        if (isAutoApprovedScan(command, prefs.pentestScope, prefs.autoApproveInScopeScans)) {
+        // In-scope auto-approval only makes sense while the scope fence is on.
+        const scanScope = prefs.enforcePentestScope ? prefs.pentestScope : [];
+        if (isAutoApprovedScan(command, scanScope, prefs.autoApproveInScopeScans)) {
           answered.current.add(id);
           void respond({ id, approved: true });
           continue;

@@ -43,6 +43,7 @@ import {
   setCostDailyBudgetUsd,
   setCustomInstructions,
   setDebugCaptureEnabled,
+  setEnforcePentestScope,
   setPentestScope,
   setSubagentModelId,
 } from "@/modules/settings/store";
@@ -703,6 +704,7 @@ function SnippetEditorDialog({
 
 function PentestScopeBlock() {
   const scope = usePreferencesStore((s) => s.pentestScope);
+  const enforce = usePreferencesStore((s) => s.enforcePentestScope);
   const autoApprove = usePreferencesStore((s) => s.autoApproveInScopeScans);
   const [draft, setDraft] = useState("");
 
@@ -720,12 +722,23 @@ function PentestScopeBlock() {
       <div className="flex flex-col">
         <Label>Pentest scope</Label>
         <span className="text-[10.5px] text-muted-foreground">
-          Hosts, IPs, or URLs the agent may run scanners (nmap, ffuf, sqlmap, …)
-          against. Any offensive command aimed elsewhere is refused at the shell,
-          and denial-of-service tooling is always refused. Empty means no fence.
-          Shared with the Pentest panel.
+          Off by default: the agent may run scanners against any target, so
+          auditing your own domains needs no setup. Denial-of-service tooling is
+          always refused. Turn on enforcement to restrict offensive tools to the
+          list below (shared with the Pentest panel).
         </span>
       </div>
+      <SettingRow
+        title="Enforce scope"
+        description="When on, offensive commands (nmap, ffuf, sqlmap, …) aimed outside the list are refused at the shell, and the Pentest panel's tools follow the same list."
+      >
+        <Switch
+          checked={enforce}
+          onCheckedChange={(v) => void setEnforcePentestScope(v)}
+        />
+      </SettingRow>
+      {!enforce ? null : (
+      <>
       <div className="flex gap-2">
         <Input
           value={draft}
@@ -765,7 +778,8 @@ function PentestScopeBlock() {
         </ul>
       ) : (
         <div className="rounded-lg border border-dashed border-border/60 bg-card/30 px-4 py-4 text-center text-[11px] text-muted-foreground">
-          No authorized targets. Offensive tools are not fenced until you add one.
+          No authorized targets. Add at least one, or offensive tools are refused
+          while enforcement is on.
         </div>
       )}
       <SettingRow
@@ -777,6 +791,8 @@ function PentestScopeBlock() {
           onCheckedChange={(v) => void setAutoApproveInScopeScans(v)}
         />
       </SettingRow>
+      </>
+      )}
     </section>
   );
 }

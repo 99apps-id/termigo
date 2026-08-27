@@ -132,9 +132,10 @@ function gate<T extends AnyTool>(
       if (toolName === "bash_run" || toolName === "bash_background") {
         const cmd = (input as { command?: unknown }).command;
         const prefs = usePreferencesStore.getState();
+        const scanScope = prefs.enforcePentestScope ? prefs.pentestScope : [];
         if (
           typeof cmd === "string" &&
-          isAutoApprovedScan(cmd, prefs.pentestScope, prefs.autoApproveInScopeScans)
+          isAutoApprovedScan(cmd, scanScope, prefs.autoApproveInScopeScans)
         ) {
           return inner(input, opts);
         }
