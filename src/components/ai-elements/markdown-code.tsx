@@ -3,6 +3,7 @@
 import { isValidElement, type ReactNode } from "react";
 
 import { ChatCodeBlock } from "./chat-code";
+import { MermaidDiagram } from "./mermaid-diagram";
 
 export function markdownCodeText(children?: ReactNode): string {
   if (children == null || typeof children === "boolean") return "";
@@ -43,6 +44,11 @@ export function MarkdownCode({
     );
   }
 
+  const lang = match[1] ?? null;
   const code = markdownCodeText(children).replace(/\n$/, "");
-  return <ChatCodeBlock code={code} lang={match[1] ?? null} />;
+  // A ```mermaid fence renders as a diagram instead of a code block.
+  if (lang?.toLowerCase() === "mermaid") {
+    return <MermaidDiagram code={code} />;
+  }
+  return <ChatCodeBlock code={code} lang={lang} />;
 }

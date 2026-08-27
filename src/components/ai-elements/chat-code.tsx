@@ -21,6 +21,12 @@ import { highlight, isHighlightable, type HighlightedNode } from "./chat-code-le
 const StreamingCtx = createContext(false);
 export const ChatStreamingProvider = StreamingCtx.Provider;
 
+/** True while the parent message is still streaming. Consumers (e.g. the
+ *  mermaid renderer) use it to avoid parsing a half-streamed block. */
+export function useIsStreaming(): boolean {
+  return useContext(StreamingCtx);
+}
+
 const POSIX_SHELL = new Set([
   "bash",
   "sh",
