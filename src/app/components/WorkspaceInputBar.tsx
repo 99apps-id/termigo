@@ -134,7 +134,17 @@ export function WorkspaceInputBar({
       <AiInputBarConnect onAdd={onConnect} />
     ) : (
       <div className="shrink-0 border-t border-border/60 bg-card/40 px-3 py-2">
-        <div className="flex flex-col gap-2 rounded-lg px-1 py-1">
+        <div
+          data-busy={effectiveMode === "ai" && c.isBusy ? "true" : undefined}
+          className={cn(
+            "flex flex-col gap-2",
+            // The AI composer sits in a rounded box with an animated accent glow
+            // circling its border; the terminal shell input keeps its plain look.
+            effectiveMode === "ai"
+              ? "termigo-composer-glow rounded-xl bg-card/60 px-2.5 py-2"
+              : "rounded-lg px-1 py-1",
+          )}
+        >
           <QueuedSteerRow />
           <ChipsRow
             leading={terminalChips}

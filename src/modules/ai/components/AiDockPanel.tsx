@@ -44,9 +44,11 @@ export function AiDockPanel() {
         />
       </div>
       <div className="shrink-0 border-t border-border/60 bg-card/40 px-3 py-2">
-        <Suspense fallback={null}>
-          <AiComposerInput />
-        </Suspense>
+        <div className="termigo-composer-glow rounded-xl bg-card/60 px-2.5 py-2">
+          <Suspense fallback={null}>
+            <AiComposerInput />
+          </Suspense>
+        </div>
       </div>
     </div>
   );
