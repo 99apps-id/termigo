@@ -891,6 +891,14 @@ export async function runAgentStream(opts: RunAgentOptions) {
         }
       : {}),
     abortSignal: abortController.signal,
+    // Clear the "no first response" timer on the first model chunk (a text
+    // delta or a tool-call decision), NOT on step finish. A step that starts
+    // with a long tool (e.g. a 90s nmap scan) keeps the run alive for the
+    // whole tool execution; the timer only exists to catch a provider that
+    // never produces a first token.
+    onChunk: () => {
+      clearFirstStepTimer();
+    },
     onStepFinish: (step) => {
       clearFirstStepTimer();
       logInfo(`[ai] runAgentStream: step finished (#${stepsSeen})`);
