@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { error as logError, info as logInfo } from "@tauri-apps/plugin-log";
 import { native } from "@/modules/ai/lib/native";
+import { anyOverlayIntersects, useAnyOverlayOpen } from "./overlaySuppress";
 
 type Props = {
   /** Stable id for this browser instance (the tab id works well). */
@@ -22,6 +23,12 @@ export function BrowserPane({ instance, url, visible }: Props) {
   const boxRef = useRef<HTMLDivElement>(null);
   const createdUrl = useRef<string | null>(null);
   const lastKey = useRef<string>("");
+  // Hide the native webview while a modal / dropdown / approval popup overlaps
+  // it, so the overlay is never covered (a native webview cannot sit behind the
+  // DOM). Read through a ref so the rAF loop sees the latest without re-subscribing.
+  const overlayOpen = useAnyOverlayOpen();
+  const overlayOpenRef = useRef(overlayOpen);
+  overlayOpenRef.current = overlayOpen;
 
   // Bounds sync: a rAF loop catches every move (splitter drags, sidebar
   // resizes) that a ResizeObserver alone would miss. Only invokes on a real
@@ -32,6 +39,9 @@ export function BrowserPane({ instance, url, visible }: Props) {
       const el = boxRef.current;
       if (el) {
         const r = el.getBoundingClientRect();
+        // Yield to any overlay drawn over the pane by hiding the webview.
+        const show =
+          visible && !(overlayOpenRef.current && anyOverlayIntersects(r));
         const dpr = window.devicePixelRatio || 1;
         const bounds = {
           x: Math.round(r.left * dpr),
@@ -39,16 +49,16 @@ export function BrowserPane({ instance, url, visible }: Props) {
           width: Math.round(r.width * dpr),
           height: Math.round(r.height * dpr),
         };
-        const key = `${visible}:${bounds.x}:${bounds.y}:${bounds.width}:${bounds.height}:${url}`;
+        const key = `${show}:${bounds.x}:${bounds.y}:${bounds.width}:${bounds.height}:${url}`;
         if (key !== lastKey.current) {
           lastKey.current = key;
           if (createdUrl.current === null) {
             void logInfo(
-              `BrowserPane: first update instance=${instance} visible=${visible} box=${bounds.width}x${bounds.height} url=${url}`,
+              `BrowserPane: first update instance=${instance} visible=${show} box=${bounds.width}x${bounds.height} url=${url}`,
             );
           }
           void native
-            .browserEmbedUpdate(instance, url, bounds, visible)
+            .browserEmbedUpdate(instance, url, bounds, show)
             .then(() => {
               createdUrl.current = url;
             })

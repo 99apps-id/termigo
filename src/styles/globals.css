@@ -60,6 +60,11 @@
     --popover-foreground: oklch(0.17 0.03 285);
     --primary: oklch(0.55 0.13 190);
     --primary-foreground: oklch(0.99 0.005 190);
+    /* Warm accent for the composer glow, the send/stop button and the token
+       meter, so those read as one orange family. Defined once (works on both
+       themes) and inherited by the dark block below. */
+    --composer-accent: oklch(0.7 0.17 52);
+    --composer-accent-foreground: oklch(0.99 0.01 60);
     --secondary: oklch(0.94 0.02 290);
     --secondary-foreground: oklch(0.25 0.05 285);
     --muted: oklch(0.945 0.012 295);
@@ -475,7 +480,7 @@ html *::-webkit-scrollbar {
 }
 .termigo-composer-glow {
   position: relative;
-  box-shadow: 0 0 14px -4px color-mix(in oklch, var(--primary) 22%, transparent);
+  box-shadow: 0 0 14px -4px color-mix(in oklch, var(--composer-accent) 22%, transparent);
   transition: box-shadow 0.3s ease;
 }
 .termigo-composer-glow::before {
@@ -486,11 +491,11 @@ html *::-webkit-scrollbar {
   padding: 1.5px;
   background: conic-gradient(
     from var(--termigo-composer-angle),
-    color-mix(in oklch, var(--primary) 16%, transparent) 0deg,
-    color-mix(in oklch, var(--primary) 16%, transparent) 300deg,
-    color-mix(in oklch, var(--primary) 70%, transparent) 335deg,
-    color-mix(in oklch, var(--primary) 95%, white) 350deg,
-    color-mix(in oklch, var(--primary) 16%, transparent) 360deg
+    color-mix(in oklch, var(--composer-accent) 16%, transparent) 0deg,
+    color-mix(in oklch, var(--composer-accent) 16%, transparent) 300deg,
+    color-mix(in oklch, var(--composer-accent) 70%, transparent) 335deg,
+    color-mix(in oklch, var(--composer-accent) 95%, white) 350deg,
+    color-mix(in oklch, var(--composer-accent) 16%, transparent) 360deg
   );
   -webkit-mask:
     linear-gradient(#000 0 0) content-box,
@@ -501,23 +506,23 @@ html *::-webkit-scrollbar {
   pointer-events: none;
 }
 .termigo-composer-glow[data-busy="true"] {
-  box-shadow: 0 0 20px -3px color-mix(in oklch, var(--primary) 38%, transparent);
+  box-shadow: 0 0 20px -3px color-mix(in oklch, var(--composer-accent) 38%, transparent);
 }
 .termigo-composer-glow[data-busy="true"]::before {
   animation-duration: 1.8s;
   background: conic-gradient(
     from var(--termigo-composer-angle),
-    color-mix(in oklch, var(--primary) 22%, transparent) 0deg,
-    color-mix(in oklch, var(--primary) 22%, transparent) 240deg,
-    color-mix(in oklch, var(--primary) 80%, transparent) 315deg,
-    color-mix(in oklch, var(--primary) 100%, white) 345deg,
-    color-mix(in oklch, var(--primary) 22%, transparent) 360deg
+    color-mix(in oklch, var(--composer-accent) 22%, transparent) 0deg,
+    color-mix(in oklch, var(--composer-accent) 22%, transparent) 240deg,
+    color-mix(in oklch, var(--composer-accent) 80%, transparent) 315deg,
+    color-mix(in oklch, var(--composer-accent) 100%, white) 345deg,
+    color-mix(in oklch, var(--composer-accent) 22%, transparent) 360deg
   );
 }
 @media (prefers-reduced-motion: reduce) {
   .termigo-composer-glow::before {
     animation: none;
-    background: color-mix(in oklch, var(--primary) 40%, transparent);
+    background: color-mix(in oklch, var(--composer-accent) 40%, transparent);
   }
 }
 

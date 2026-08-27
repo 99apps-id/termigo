@@ -103,11 +103,27 @@ async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Res
         return Ok(());
     }
 
+    // Fit the settings window inside the main window so it never spills past the
+    // screen edge and hide its own close control on a small display. Preferred
+    // size, but clamped to ~94% of the main window and floored so it still opens
+    // sanely if the main window is tiny.
+    let (win_w, win_h) = app
+        .get_webview_window("main")
+        .and_then(|m| {
+            let scale = m.scale_factor().unwrap_or(1.0).max(0.5);
+            m.inner_size()
+                .ok()
+                .map(|s| (s.width as f64 / scale, s.height as f64 / scale))
+        })
+        .unwrap_or((980.0, 760.0));
+    let w = 980.0_f64.min(win_w * 0.94).max(560.0);
+    let h = 760.0_f64.min(win_h * 0.94).max(460.0);
     let builder = WebviewWindowBuilder::new(&app, "settings", WebviewUrl::App(url_path.into()))
         .title("Settings")
-        .inner_size(1100.0, 760.0)
-        .min_inner_size(960.0, 640.0)
+        .inner_size(w, h)
+        .min_inner_size(w.min(560.0), h.min(440.0))
         .resizable(true)
+        .center()
         .visible(false);
 
     // Tie lifecycle to the main window so settings minimizes/closes with it.

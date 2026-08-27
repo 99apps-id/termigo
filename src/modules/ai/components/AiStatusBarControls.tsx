@@ -219,7 +219,11 @@ export function AiStatusBarControls() {
         size="icon"
         onClick={c.isBusy ? c.stop : c.submit}
         disabled={!c.isBusy && !c.canSend}
-        className="ml-1 size-7 rounded-lg"
+        className="ml-1 size-7 rounded-lg border-0 shadow-none hover:brightness-110 disabled:opacity-50"
+        style={{
+          backgroundColor: "var(--composer-accent)",
+          color: "var(--composer-accent-foreground)",
+        }}
         aria-label={c.isBusy ? "Stop" : "Send"}
         title={c.isBusy ? "Stop (Esc)" : "Send (Enter)"}
       >
