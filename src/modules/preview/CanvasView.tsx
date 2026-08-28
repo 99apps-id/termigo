@@ -1,5 +1,4 @@
 import { useCallback, useRef } from "react";
-import { sendMessage } from "@/modules/ai/store/chatRuntime";
 
 /**
  * Renders the agent's self-contained HTML canvas (a graph, or a plan /
@@ -18,6 +17,25 @@ function sanitize(html: string): string {
     .replace(/\son\w+\s*=\s*[^\s>]+/gi, "");
 }
 
+// The agent's HTML paints its own <body>. When it omits a background — or leans
+// on the OS being in dark mode — the report renders dark-on-dark inside the
+// canvas. Prepend a LIGHT base: a `color-scheme: light` hint (so the iframe's UA
+// colors and form controls are light) plus low-specificity white/near-black
+// defaults. These come first in source order, so any explicit theme the agent
+// ships still wins; only unstyled reports fall back to a clean light sheet.
+const LIGHT_BASE = `<meta name="color-scheme" content="light" />
+<style>
+  :root { color-scheme: light; }
+  html, body { background: #ffffff; color: #1a1a1a; }
+  body { margin: 0; padding: 16px; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+  a { color: #2563eb; }
+</style>
+`;
+
+function wrapCanvas(html: string): string {
+  return LIGHT_BASE + sanitize(html);
+}
+
 export function CanvasView({ html }: { html: string }) {
   const ref = useRef<HTMLIFrameElement>(null);
 
@@ -34,7 +52,13 @@ export function CanvasView({ html }: { html: string }) {
       el.style.cursor = "pointer";
       el.addEventListener("click", () => {
         const action = el.getAttribute("data-canvas-action")?.trim();
-        if (action) void sendMessage(action);
+        if (!action) return;
+        // Lazy-import the chat runtime so the preview surface (eagerly reachable
+        // from the main window) does not pull the AI/markdown/editor stack into
+        // the startup bundle — see src/app/eager-budget.test.ts.
+        void import("@/modules/ai/store/chatRuntime").then(({ sendMessage }) =>
+          sendMessage(action),
+        );
       });
     });
   }, []);
@@ -43,7 +67,7 @@ export function CanvasView({ html }: { html: string }) {
     <iframe
       ref={ref}
       title="Canvas"
-      srcDoc={sanitize(html)}
+      srcDoc={wrapCanvas(html)}
       onLoad={wire}
       className="h-full w-full border-0 bg-white"
       sandbox="allow-same-origin allow-popups allow-forms"

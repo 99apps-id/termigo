@@ -27,6 +27,7 @@ import {
 } from "@/modules/agents";
 import {
   AgentRunBridge,
+  AiDockPanel,
   AiMiniWindow,
   LocalAgentNotificationsBridge,
   SelectionAskAi,
@@ -35,7 +36,6 @@ import {
   useChatStore,
   useSelectionAskAi,
 } from "@/modules/ai";
-import { AiDockPanel } from "@/modules/ai/components/AiDockPanel";
 import { AiComposerProvider } from "@/modules/ai/lib/composer";
 import { native } from "@/modules/ai/lib/native";
 import { CommandPalette, createCommandItems } from "@/modules/command-palette";
