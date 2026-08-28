@@ -11,14 +11,21 @@ import { useSyncExternalStore } from "react";
  * mounted, so the per-frame geometry test only runs while something is open.
  * Ported from TEDI (hide-only; the Windows region "holes" path is omitted).
  */
+// The floating AI mini-window (`[data-ai-mini-window]`) is included so a browser
+// tab beneath it never steals clicks meant for the chat — its approval buttons,
+// composer and controls composite in the DOM and would otherwise sit behind the
+// native webview. It is a direct-ish <body> child, so the shallow observer sees
+// it even though the approval card nested inside is not itself listed here.
 const OVERLAY_SELECTOR =
-  '[data-radix-popper-content-wrapper], [role="dialog"], [role="alertdialog"], [role="menu"]';
+  '[data-radix-popper-content-wrapper], [role="dialog"], [role="alertdialog"], [role="menu"], [data-ai-mini-window]';
 
 /** Radix renders a visually-hidden [role="tooltip"] inside every tooltip popper;
  *  tooltips are transient and non-interactive, so ignore them (a hover would
  *  otherwise flash the whole page away). */
 function isTooltip(el: Element): boolean {
-  return el.querySelector('[data-slot="tooltip-content"], [role="tooltip"]') !== null;
+  return (
+    el.querySelector('[data-slot="tooltip-content"], [role="tooltip"]') !== null
+  );
 }
 
 function hasRealOverlay(): boolean {
@@ -84,7 +91,12 @@ export function anyOverlayIntersects(rect: DOMRect): boolean {
     if (isTooltip(overlays[i])) continue;
     const o = overlays[i].getBoundingClientRect();
     if (o.width < 1 || o.height < 1) continue;
-    if (o.left < rect.right && o.right > rect.left && o.top < rect.bottom && o.bottom > rect.top) {
+    if (
+      o.left < rect.right &&
+      o.right > rect.left &&
+      o.top < rect.bottom &&
+      o.bottom > rect.top
+    ) {
       return true;
     }
   }

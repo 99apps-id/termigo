@@ -3,6 +3,7 @@ import {
   EMPTY_QUEUE,
   enqueue,
   flush,
+  flushOne,
   isBusy,
   previewOf,
   remove,
@@ -53,7 +54,10 @@ describe("submitAction", () => {
 
 describe("queue", () => {
   it("keeps messages in the order they were typed", () => {
-    const q = enqueue(enqueue(EMPTY_QUEUE, msg(text("first"))), msg(text("second")));
+    const q = enqueue(
+      enqueue(EMPTY_QUEUE, msg(text("first"))),
+      msg(text("second")),
+    );
     expect(q.pending.map((m) => m.preview)).toEqual(["first", "second"]);
   });
 
@@ -64,7 +68,10 @@ describe("queue", () => {
   // The reason the queue holds parts rather than strings: an image attached
   // mid-run must survive the wait instead of being silently dropped.
   it("carries attachments through the wait", () => {
-    const q = enqueue(EMPTY_QUEUE, msg(text("look at this"), image("shot.png")));
+    const q = enqueue(
+      EMPTY_QUEUE,
+      msg(text("look at this"), image("shot.png")),
+    );
     const out = flush(q);
     expect(out?.parts).toEqual([
       { type: "text", text: "look at this" },
@@ -75,7 +82,10 @@ describe("queue", () => {
   // Sending each queued message as its own run would have the agent answer the
   // first without ever seeing the rest.
   it("flushes everything pending as one turn, in order", () => {
-    const q = enqueue(enqueue(EMPTY_QUEUE, msg(text("use pnpm"))), msg(text("skip tests")));
+    const q = enqueue(
+      enqueue(EMPTY_QUEUE, msg(text("use pnpm"))),
+      msg(text("skip tests")),
+    );
     expect(flush(q)?.parts).toEqual([
       { type: "text", text: "use pnpm" },
       { type: "text", text: "skip tests" },
@@ -89,12 +99,31 @@ describe("queue", () => {
     expect(flush(out?.next ?? EMPTY_QUEUE)).toBeNull();
   });
 
+  it("flushOne delivers only the oldest task, leaving the rest queued", () => {
+    const q = enqueue(
+      enqueue(EMPTY_QUEUE, msg(text("task one"))),
+      msg(text("task two")),
+    );
+    const out = flushOne(q);
+    expect(out?.parts).toEqual([{ type: "text", text: "task one" }]);
+    // The second task stays queued for the next settle.
+    expect(out?.next.pending.map((m) => m.preview)).toEqual(["task two"]);
+    // Draining again yields the second, then empties.
+    const out2 = flushOne(out?.next ?? EMPTY_QUEUE);
+    expect(out2?.parts).toEqual([{ type: "text", text: "task two" }]);
+    expect(out2?.next).toEqual(EMPTY_QUEUE);
+    expect(flushOne(out2?.next ?? EMPTY_QUEUE)).toBeNull();
+  });
+
   it("reports nothing to flush on an empty queue", () => {
     expect(flush(EMPTY_QUEUE)).toBeNull();
   });
 
   it("cancels one queued message without disturbing the others", () => {
-    const q = [msg(text("a")), msg(text("b")), msg(text("c"))].reduce(enqueue, EMPTY_QUEUE);
+    const q = [msg(text("a")), msg(text("b")), msg(text("c"))].reduce(
+      enqueue,
+      EMPTY_QUEUE,
+    );
     expect(remove(q, 1).pending.map((m) => m.preview)).toEqual(["a", "c"]);
   });
 

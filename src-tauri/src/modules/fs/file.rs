@@ -185,6 +185,12 @@ fn write_atomic(target: &Path, content: &[u8]) -> std::io::Result<()> {
     let parent = target.parent().ok_or_else(|| {
         std::io::Error::new(std::io::ErrorKind::InvalidInput, "path has no parent")
     })?;
+    // Create the parent directory tree so writing "reports/out.html" into a
+    // folder that does not exist yet succeeds instead of failing with a bare
+    // "the system cannot find the file specified (os error 2)".
+    if !parent.as_os_str().is_empty() && !parent.exists() {
+        fs::create_dir_all(parent)?;
+    }
     let mut tmp = NamedTempFile::new_in(parent)?;
     tmp.as_file_mut().write_all(content)?;
     tmp.as_file_mut().sync_all()?;

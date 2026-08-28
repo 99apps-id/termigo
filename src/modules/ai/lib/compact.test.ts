@@ -109,6 +109,42 @@ describe("compactModelMessagesDetailed", () => {
   });
 });
 
+describe("compactModelMessagesDetailed hard cap", () => {
+  // A crude estimate mirroring the module's chars/3.5.
+  const estTokens = (msgs: ModelMessage[]) => {
+    let chars = 0;
+    for (const m of msgs) {
+      if (typeof m.content === "string") chars += m.content.length;
+      else if (Array.isArray(m.content)) {
+        for (const p of m.content as Array<{
+          type: string;
+          output?: unknown;
+        }>) {
+          chars += JSON.stringify(p.output ?? "").length + 32;
+        }
+      }
+    }
+    return chars / 3.5;
+  };
+
+  it("trims a huge tail down to fit the budget", () => {
+    // 40 turns of big tool output — the bulk sits in the last 24 (the tail the
+    // normal passes protect), so only the final hard cap can bring it under.
+    const messages: ModelMessage[] = [];
+    for (let i = 0; i < 40; i++) {
+      messages.push(readCall(`c${i}`, `/f${i}.txt`));
+      messages.push(readResult(`c${i}`, "y".repeat(3000)));
+    }
+    const limit = 20_000;
+    const before = estTokens(messages);
+    const result = compactModelMessagesDetailed(messages, limit);
+    expect(before).toBeGreaterThan(limit); // precondition: it overflowed
+    expect(result.compacted).toBe(true);
+    // After compaction the estimate must be under the window.
+    expect(estTokens(result.messages)).toBeLessThan(limit);
+  });
+});
+
 describe("compactModelMessages", () => {
   it("returns the messages array from the detailed result", () => {
     const messages = [{ role: "user", content: "hi" }] as ModelMessage[];

@@ -13,12 +13,17 @@ import {
 } from "../config";
 import { buildLanguageModel } from "../lib/agent";
 import { BUILTIN_AGENTS } from "../lib/agents";
+import {
+  isContextOverflowError,
+  noteSuccessfulRequest,
+  recordContextOverflow,
+} from "../lib/contextLimitLearning";
 import { dayKey, recordRunCost } from "../lib/costLedger";
 import { humanizeModelError } from "../lib/errorMessage";
 import { fireHooksForEvent, makeRunId } from "../lib/hooksRunner";
 import { sweepSessionMemory } from "../lib/memorySweep";
 import {
-  flush,
+  flushOne,
   previewOf,
   RESUME_PROMPT,
   type SteerPart,
@@ -123,6 +128,9 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       usePreferencesStore.getState().openrouterModelId,
     getCustomEndpoints: () => usePreferencesStore.getState().customEndpoints,
     getCustomEndpointKeys: () => useChatStore.getState().customEndpointKeys,
+    // Queue size, so the run can yield at the next step when a NEW task is typed
+    // while it works (see getSteerCount in the transport).
+    getSteerCount: () => useChatStore.getState().steerQueue.pending.length,
     onStep: (step) => {
       useChatStore.getState().patchAgentMeta({ step });
     },
@@ -186,6 +194,12 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       }
     },
     onUsage: (delta) => {
+      // A request that came back with real headroom lets the learned budget
+      // scale relax, so one overflow does not over-compact the model forever.
+      noteSuccessfulRequest(
+        useChatStore.getState().selectedModelId,
+        delta.lastInputTokens,
+      );
       const cur = useChatStore.getState().agentMeta.tokens;
       useChatStore.getState().patchAgentMeta({
         tokens: {
@@ -208,9 +222,29 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     messages: initialMessages,
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
     onError: (e) => {
+      const raw = e instanceof Error ? e.message : String(e);
+      // A user-pressed Stop surfaces here as an AbortError when it lands before
+      // the model call (during the checkpoint / context phase). That is not a
+      // failure — settle quietly as a stop instead of a red error banner.
+      const aborted =
+        (e as { name?: string })?.name === "AbortError" ||
+        /\baborted\b/i.test(raw);
+      if (aborted) {
+        useChatStore.getState().patchAgentMeta({
+          status: "idle",
+          error: null,
+          stoppedByUser: true,
+        });
+        return;
+      }
+      // Learn the model's real context window from an overflow so the retry
+      // ("Try again" / Continue) compacts to fit instead of failing again.
+      if (isContextOverflowError(raw)) {
+        recordContextOverflow(useChatStore.getState().selectedModelId, raw);
+      }
       useChatStore.getState().patchAgentMeta({
         status: "error",
-        error: humanizeModelError(e instanceof Error ? e.message : String(e)),
+        error: humanizeModelError(raw),
       });
     },
   });
@@ -294,13 +328,18 @@ export async function flushSteer(): Promise<boolean> {
   // no-op rather than a duplicate turn.
   if (flushing) return false;
   const store = useChatStore.getState();
-  const out = flush(store.steerQueue);
+  const out = flushOne(store.steerQueue);
   if (!out) return false;
-  // Clear before awaiting: two composers can both observe the run settle, and
-  // a queue still populated across the await would send the same text twice.
-  store.clearSteer();
+  // Deliver only the OLDEST queued task and leave the rest queued: tasks are
+  // worked one at a time, each as its own turn (the Claude queue model). Pop it
+  // before awaiting so a second observer of the same settle cannot resend it;
+  // the composer re-runs flushSteer on the next settle to pick up the next one.
+  store.cancelSteer(0);
   const sessionId = store.activeSessionId;
   if (!sessionId) return false;
+  // A run that yielded to this queued task set stopReason "steered"; clear it so
+  // no stale "Continue" prompt lingers as the queued task takes over.
+  store.patchAgentMeta({ stopReason: null, stoppedByUser: false });
   flushing = true;
   try {
     const c = getOrCreateChat(sessionId);

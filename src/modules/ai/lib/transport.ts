@@ -1,26 +1,26 @@
 import type { UIMessage } from "@ai-sdk/react";
-import { readMemory } from "./memory";
-import { getMcpTools } from "./mcpTools";
-import { listSkills } from "./skills";
-import { hydrateInvariants } from "../tools/invariant";
-import { buildExtensionTools } from "./extensionTools";
-import { buildCustomTools, loadCustomTools } from "./customToolsIo";
-import { costToday } from "./costLedger";
-import { autoCheckpointForRun } from "./snapshots";
-import { loadHooks } from "./hooksIo";
-import type { HooksConfig } from "./hooks";
+import { error as logError, info as logInfo } from "@tauri-apps/plugin-log";
 import type { CustomEndpoint } from "../config";
+import { hydrateInvariants } from "../tools/invariant";
+import type { ToolContext } from "../tools/tools";
 import {
-  runAgentStream,
   type AgentStopReason,
   type AgentUsageDelta,
   type RunDiagnostics,
+  runAgentStream,
 } from "./agent";
-import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
+import { costToday } from "./costLedger";
+import { buildCustomTools, loadCustomTools } from "./customToolsIo";
 import { formatAiError } from "./errors";
-import { error as logError, info as logInfo } from "@tauri-apps/plugin-log";
+import { buildExtensionTools } from "./extensionTools";
+import type { HooksConfig } from "./hooks";
+import { loadHooks } from "./hooksIo";
+import type { CustomEndpointKeys, ProviderKeys } from "./keyring";
+import { getMcpTools } from "./mcpTools";
+import { readMemory } from "./memory";
 import { native } from "./native";
-import type { ToolContext } from "../tools/tools";
+import { listSkills } from "./skills";
+import { autoCheckpointForRun } from "./snapshots";
 
 /**
  * How much of `TERMIGO.md` reaches the model.
@@ -78,7 +78,9 @@ export function truncateProjectMemory(content: string): string {
   return `${body}\n\n[TERMIGO.md truncated here; read the file for the rest]`;
 }
 
-async function readTermigoMd(workspaceRoot: string | null): Promise<string | null> {
+async function readTermigoMd(
+  workspaceRoot: string | null,
+): Promise<string | null> {
   if (!workspaceRoot) return null;
   const path = `${workspaceRoot.replace(/\/$/, "")}/TERMIGO.md`;
   const cached = projectMemoryCache.get(workspaceRoot);
@@ -86,7 +88,10 @@ async function readTermigoMd(workspaceRoot: string | null): Promise<string | nul
   try {
     const r = await native.readFile(path);
     if (r.kind !== "text") {
-      projectMemoryCache.set(workspaceRoot, { content: null, mtime: Date.now() });
+      projectMemoryCache.set(workspaceRoot, {
+        content: null,
+        mtime: Date.now(),
+      });
       return null;
     }
     const content = truncateProjectMemory(r.content);
@@ -143,6 +148,11 @@ type Deps = {
   getAutoCheckpoint?: () => boolean;
   getHooksConfig?: () => HooksConfig;
   getRunId?: () => string;
+  /** How many messages are queued for the active session right now. The run
+   *  records this at its start and yields at the next step only when the count
+   *  GROWS — i.e. a task typed while THIS run worked — so tasks already waiting
+   *  (delivered one at a time on settle) do not make each run bail immediately. */
+  getSteerCount?: () => number;
 };
 
 type SendOptions = {
@@ -156,17 +166,65 @@ export function createContextAwareTransport(deps: Deps) {
   // returns) would otherwise leave the run on "thinking" forever with no way
   // to stop it, because the abort signal only reaches the model call later.
   const CONTEXT_TIMEOUT_MS = 60_000;
-  const withTimeout = <T>(promise: Promise<T>, ms: number, label: string): Promise<T> =>
+  // The pre-run git checkpoint can hang on a huge or misconfigured repo — e.g.
+  // when a workspace switch fell back to the home directory. Bound it hard so it
+  // can never freeze the run before the model is even called.
+  const CHECKPOINT_TIMEOUT_MS = 12_000;
+  const withTimeout = <T>(
+    promise: Promise<T>,
+    ms: number,
+    label: string,
+  ): Promise<T> =>
     Promise.race([
       promise,
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s`)), ms),
+        setTimeout(
+          () =>
+            reject(
+              new Error(`${label} timed out after ${Math.round(ms / 1000)}s`),
+            ),
+          ms,
+        ),
       ),
     ]);
+  const isAbort = (e: unknown): boolean =>
+    e instanceof DOMException
+      ? e.name === "AbortError"
+      : !!e &&
+        typeof e === "object" &&
+        (e as { name?: string }).name === "AbortError";
+  // Reject as soon as the user hits Stop, even while a pre-stream await (the
+  // checkpoint, context assembly) is still in flight — that is what makes Stop
+  // responsive before the model call, where the abort signal used to first bite.
+  const raceAbort = <T>(
+    promise: Promise<T>,
+    signal?: AbortSignal,
+  ): Promise<T> => {
+    if (!signal) return promise;
+    if (signal.aborted)
+      return Promise.reject(new DOMException("aborted", "AbortError"));
+    return new Promise<T>((resolve, reject) => {
+      const onAbort = () => reject(new DOMException("aborted", "AbortError"));
+      signal.addEventListener("abort", onAbort, { once: true });
+      promise.then(
+        (v) => {
+          signal.removeEventListener("abort", onAbort);
+          resolve(v);
+        },
+        (e) => {
+          signal.removeEventListener("abort", onAbort);
+          reject(e);
+        },
+      );
+    });
+  };
 
   const run = async (options: SendOptions) => {
     logInfo(`[ai] run: start (${options.messages.length} messages)`);
     const live = deps.getLive();
+    // Baseline the queue so the run yields only to a task typed WHILE it runs,
+    // not to tasks already waiting (which are delivered one at a time on settle).
+    const steerBaseline = deps.getSteerCount?.() ?? 0;
     // Daily budget guardrail: refuse to start a run once today's recorded
     // spend reaches the limit. Checked before any context is assembled so a
     // blocked run costs nothing at all. 0 means unlimited.
@@ -186,12 +244,32 @@ export function createContextAwareTransport(deps: Deps) {
     // timeline. Skipped on approval resumes because those continue a run that
     // is already in flight, and a checkpoint mid-run would capture the
     // agent's own half-finished edits as the "safe" state.
+    // Already stopped before we even began — bail without touching git or the
+    // model.
+    if (options.abortSignal?.aborted) {
+      throw new DOMException("aborted", "AbortError");
+    }
     if (
       deps.getAutoCheckpoint?.() &&
       !isResumingApproval(options.messages) &&
       !deps.toolContext.getRemoteSession()
     ) {
-      await autoCheckpointForRun(live.workspaceRoot);
+      // Bounded + abortable + non-fatal: a slow/huge repo (or the home directory
+      // after a workspace fallback) must not hang the run or ignore Stop. A
+      // timeout or git error just skips the checkpoint; only an abort stops.
+      try {
+        await raceAbort(
+          withTimeout(
+            autoCheckpointForRun(live.workspaceRoot),
+            CHECKPOINT_TIMEOUT_MS,
+            "checkpoint",
+          ),
+          options.abortSignal,
+        );
+      } catch (e) {
+        if (isAbort(e)) throw e;
+        logInfo(`[ai] run: checkpoint skipped (${String(e)})`);
+      }
     }
     // Timed because "the first message is slow" has had four plausible causes
     // and no measurement. This block runs before a single token reaches the
@@ -199,23 +277,29 @@ export function createContextAwareTransport(deps: Deps) {
     // tools. MCP is the one that can start a process, so it is the one that
     // can turn a file read into twenty seconds.
     const contextStart = performance.now();
-    const [projectMemory, learnedMemory, mcpTools, skills, customDefs] = await withTimeout(
-      Promise.all([
-        readTermigoMd(live.workspaceRoot),
-        readMemory(live.workspaceRoot),
-        getMcpTools(live.workspaceRoot),
-        listSkills(live.workspaceRoot),
-        loadCustomTools(live.workspaceRoot),
-        loadHooks(live.workspaceRoot),
-        hydrateInvariants(live.workspaceRoot),
-      ]),
-      CONTEXT_TIMEOUT_MS,
-      "context assembly",
-    );
+    const [projectMemory, learnedMemory, mcpTools, skills, customDefs] =
+      await raceAbort(
+        withTimeout(
+          Promise.all([
+            readTermigoMd(live.workspaceRoot),
+            readMemory(live.workspaceRoot),
+            getMcpTools(live.workspaceRoot),
+            listSkills(live.workspaceRoot),
+            loadCustomTools(live.workspaceRoot),
+            loadHooks(live.workspaceRoot),
+            hydrateInvariants(live.workspaceRoot),
+          ]),
+          CONTEXT_TIMEOUT_MS,
+          "context assembly",
+        ),
+        options.abortSignal,
+      );
     const contextMs = performance.now() - contextStart;
     const envBlock = formatEnvBlock(live);
     const messagesForRun = prepareOutgoingMessages(options.messages, envBlock);
-    logInfo(`[ai] run: context assembled in ${contextMs.toFixed(0)}ms (${messagesForRun.length} msgs)`);
+    logInfo(
+      `[ai] run: context assembled in ${contextMs.toFixed(0)}ms (${messagesForRun.length} msgs)`,
+    );
     logInfo(`[ai] run: calling runAgentStream`);
     const result = await runAgentStream({
       keys: deps.getKeys(),
@@ -262,6 +346,7 @@ export function createContextAwareTransport(deps: Deps) {
       projectMemory,
       uiMessages: messagesForRun,
       abortSignal: options.abortSignal,
+      hasPendingSteer: () => (deps.getSteerCount?.() ?? 0) > steerBaseline,
     });
     logInfo(`[ai] run: stream created`);
     return result.toUIMessageStream({

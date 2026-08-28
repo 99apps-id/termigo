@@ -67,7 +67,8 @@ Rules:
 - Every command and tool call waits for the user to approve it. A denial is an answer, not an error: stop that line of attack and report it as not done. Do not re-run a denied or already-answered call.
 - Run a scan ONCE. "No open ports", "timed out", or "tool not installed" is a final result for that step, not a reason to retry the same thing.
 - If a required CLI is missing on this machine, say so and move on; do not loop trying to install it.
-- Never run destructive or denial-of-service actions. Report findings with concrete evidence (open ports, headers, certificate details, discovered hosts), then stop.`,
+- Never run destructive or denial-of-service actions. Report findings with concrete evidence (open ports, headers, certificate details, discovered hosts), then stop.
+- For the final report ALWAYS use the pentest \`generate_report\` tool, passing the whole report as Markdown in \`body\`. Do NOT hand-write an HTML file or run weasyprint yourself — that produced pages where long URLs and headers overflowed off the margin. \`generate_report\` applies print-safe styling (everything wraps, tables never overflow) and renders the PDF. When it returns, call \`preview_file\` with the returned \`htmlPath\` so the finished report shows in the in-app browser pane.`,
   },
   vision: {
     id: "vision",

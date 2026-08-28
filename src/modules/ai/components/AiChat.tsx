@@ -213,15 +213,18 @@ export function AiChatView({
   const stoppedByUser = useChatStore((s) => s.agentMeta.stoppedByUser);
   // Offer to resume after a stop as well as after the step cap. A stop used to
   // be a dead end: the only way on was to retype the request.
+  // "steered" is not a dead end to offer Continue for: the run yielded to a
+  // queued task that flushSteer sends immediately, so no resume prompt is shown.
   const showContinue =
     !isBusy &&
-    (stopReason !== null || stoppedByUser) &&
+    ((stopReason !== null && stopReason !== "steered") || stoppedByUser) &&
     lastMessage?.role === "assistant";
   // A stop the user asked for is described as their own, whatever guard the
   // loop happened to trip on the way out.
-  const continueKind: StopKind = stoppedByUser
-    ? "stopped"
-    : (stopReason ?? "step-cap");
+  const continueKind: StopKind =
+    stoppedByUser || stopReason === "steered"
+      ? "stopped"
+      : (stopReason ?? "step-cap");
 
   const onApproval = useCallback(
     (id: string, approved: boolean) =>
@@ -292,13 +295,29 @@ export function AiChatView({
             <div className="mt-0.5 leading-relaxed opacity-90">
               {humanizeModelError(error.message)}
             </div>
-            <button
-              type="button"
-              onClick={clearError}
-              className="mt-1 underline opacity-80 hover:opacity-100"
-            >
-              Dismiss
-            </button>
+            <div className="mt-1.5 flex items-center gap-3">
+              {/* Retry re-runs the turn. After a context overflow the model's
+                  real window has been learned, so this compacts harder and the
+                  retry actually fits — the "Try again" the user expects. */}
+              <button
+                type="button"
+                onClick={() => {
+                  clearError();
+                  patchAgentMeta({ stopReason: null, stoppedByUser: false });
+                  void resumeRun();
+                }}
+                className="rounded bg-destructive/20 px-2 py-0.5 font-medium hover:bg-destructive/30"
+              >
+                Try again
+              </button>
+              <button
+                type="button"
+                onClick={clearError}
+                className="underline opacity-80 hover:opacity-100"
+              >
+                Dismiss
+              </button>
+            </div>
           </div>
         )}
       </ConversationContent>
@@ -414,6 +433,9 @@ function stopCopy(
         action: "Continue anyway",
       };
     case "stopped":
+    // A steered run yields to a queued task and never surfaces this row, but the
+    // switch stays exhaustive.
+    case "steered":
       return { text: "You stopped this run.", action: "Resume" };
   }
 }
@@ -504,11 +526,17 @@ const RenderedMessage = memo(function RenderedMessage({
     <Message from={message.role}>
       <MessageContent>
         <div className="flex flex-col gap-3">
-          {groups.map((g) => {
+          {groups.map((g, gi) => {
             if (g.kind === "reasoning") {
+              // The reasoning is "live" while the message is still streaming and
+              // this reasoning block is the last thing emitted — that is when the
+              // model is thinking. Passing isStreaming auto-opens it so the user
+              // watches the thinking unfold, then it collapses once (still
+              // openable by clicking the header).
+              const reasoningLive = streaming && gi === groups.length - 1;
               return (
                 <PartAppear key={`${message.id}-${g.key}`}>
-                  <Reasoning>
+                  <Reasoning isStreaming={reasoningLive}>
                     <ReasoningTrigger />
                     <ReasoningContent>{g.text}</ReasoningContent>
                   </Reasoning>

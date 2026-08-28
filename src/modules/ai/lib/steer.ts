@@ -37,7 +37,9 @@ export const EMPTY_QUEUE: SteerQueue = { pending: [] };
  * accepting both keeps callers from having to know which one they hold.
  */
 export function isBusy(status: string): boolean {
-  return status === "submitted" || status === "thinking" || status === "streaming";
+  return (
+    status === "submitted" || status === "thinking" || status === "streaming"
+  );
 }
 
 /** Queue a message. One with no parts is ignored rather than stored. */
@@ -68,6 +70,24 @@ export function flush(
     parts: queue.pending.flatMap((m) => [...m.parts]),
     next: EMPTY_QUEUE,
   };
+}
+
+/**
+ * Take just the OLDEST queued message as the next turn, leaving the rest
+ * queued.
+ *
+ * Queued tasks are processed one at a time, each as its own turn — the Claude
+ * queue model the user asked for: type several while the agent works and it
+ * works through them in order, one after another, instead of merging them into
+ * one giant turn. The composer re-runs this each time a run settles, so the next
+ * queued task starts on its own. Null when nothing is queued.
+ */
+export function flushOne(
+  queue: SteerQueue,
+): { parts: SteerPart[]; next: SteerQueue } | null {
+  if (queue.pending.length === 0) return null;
+  const [first, ...rest] = queue.pending;
+  return { parts: [...first.parts], next: { pending: rest } };
 }
 
 /** What submitting should do right now. */

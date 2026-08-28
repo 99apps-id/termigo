@@ -38,25 +38,41 @@ import { Shimmer } from "./shimmer";
 
 export type ToolPart = ToolUIPart | DynamicToolUIPart;
 
-const TOOL_META: Record<string, { label: string; icon: typeof File01Icon }> = {
-  read_file: { label: "Read", icon: File01Icon },
-  list_directory: { label: "List", icon: FolderOpenIcon },
-  write_file: { label: "Write", icon: FilePlusIcon },
-  create_directory: { label: "Create dir", icon: FolderAddIcon },
-  edit: { label: "Edit", icon: FileEditIcon },
-  multi_edit: { label: "Edit", icon: Edit02Icon },
-  bash_run: { label: "Run", icon: TerminalIcon },
-  bash_background: { label: "Spawn", icon: TerminalIcon },
-  bash_logs: { label: "Logs", icon: TerminalIcon },
-  bash_list: { label: "Jobs", icon: TerminalIcon },
-  bash_kill: { label: "Kill", icon: TerminalIcon },
-  grep: { label: "Search", icon: GlobalSearchIcon },
-  glob: { label: "Glob", icon: Folder01Icon },
-  suggest_command: { label: "Suggest", icon: SparklesIcon },
-  open_preview: { label: "Preview", icon: EyeIcon },
-  run_subagent: { label: "Subagent", icon: RobotIcon },
-  todo_write: { label: "Todos", icon: CheckListIcon },
+// Present tense (shown while the tool runs, with a shimmer) and past tense
+// (shown once it is done, static) — VS Code-style "Running…" → "Ran".
+type ToolMeta = { present: string; past: string; icon: typeof File01Icon };
+const TOOL_META: Record<string, ToolMeta> = {
+  read_file: { present: "Reading", past: "Read", icon: File01Icon },
+  list_directory: { present: "Listing", past: "Listed", icon: FolderOpenIcon },
+  write_file: { present: "Writing", past: "Wrote", icon: FilePlusIcon },
+  create_directory: {
+    present: "Creating",
+    past: "Created",
+    icon: FolderAddIcon,
+  },
+  edit: { present: "Editing", past: "Edited", icon: FileEditIcon },
+  multi_edit: { present: "Editing", past: "Edited", icon: Edit02Icon },
+  bash_run: { present: "Running", past: "Ran", icon: TerminalIcon },
+  bash_background: { present: "Spawning", past: "Spawned", icon: TerminalIcon },
+  bash_logs: { present: "Reading logs", past: "Read logs", icon: TerminalIcon },
+  bash_list: { present: "Listing jobs", past: "Listed jobs", icon: TerminalIcon },
+  bash_kill: { present: "Stopping", past: "Stopped", icon: TerminalIcon },
+  grep: { present: "Searching", past: "Searched", icon: GlobalSearchIcon },
+  glob: { present: "Globbing", past: "Globbed", icon: Folder01Icon },
+  suggest_command: { present: "Suggesting", past: "Suggested", icon: SparklesIcon },
+  open_preview: { present: "Opening", past: "Opened", icon: EyeIcon },
+  preview_file: { present: "Previewing", past: "Previewed", icon: EyeIcon },
+  render_view: { present: "Rendering", past: "Rendered", icon: EyeIcon },
+  run_subagent: { present: "Delegating", past: "Finished", icon: RobotIcon },
+  todo_write: { present: "Updating plan", past: "Updated plan", icon: CheckListIcon },
 };
+
+/** Title-cased tool name as a last-resort present-tense label (MCP / extension /
+ *  custom tools that have no entry above). */
+function fallbackPresent(toolName: string): string {
+  const words = toolName.replace(/[_-]+/g, " ").trim();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : toolName;
+}
 
 const STATUS_DOT: Record<ToolPart["state"], string> = {
   "approval-requested": "bg-amber-500",
@@ -152,7 +168,23 @@ const ToolImpl = ({
 }: ToolProps) => {
   const meta = TOOL_META[toolName];
   const Icon = meta?.icon ?? ToolsIcon;
-  const label = meta?.label ?? toolName;
+  // Present/past + shimmer, VS Code-style. While the tool is preparing or
+  // running the label shimmers in the present tense ("Running…"); once it has
+  // finished it is static and past tense ("Ran"). A pending approval reads as
+  // "1 confirmation pending" and shimmers until the user answers.
+  const pendingApproval = state === "approval-requested";
+  const inProgress =
+    state === "input-streaming" ||
+    state === "input-available" ||
+    state === "approval-responded";
+  const busyLabel = pendingApproval || inProgress;
+  const label = pendingApproval
+    ? "1 confirmation pending"
+    : inProgress
+      ? (meta?.present ?? fallbackPresent(toolName))
+      : state === "output-denied"
+        ? "Denied"
+        : (meta?.past ?? "Finished");
   const summary = deriveSummary(toolName, input);
   const isError = state === "output-error";
   const isSubagent = toolName === "run_subagent" || toolName === "run_subagents";
@@ -197,14 +229,21 @@ const ToolImpl = ({
           strokeWidth={1.75}
           className="shrink-0 text-muted-foreground"
         />
-        <Shimmer
-          as="span"
-          duration={state === "input-streaming" || state === "input-available" ? 1 : 1.4}
-          iterations={state === "input-streaming" || state === "input-available" ? "infinite" : 2}
-          className="shrink-0 font-medium text-foreground"
-        >
-          {label}
-        </Shimmer>
+        {busyLabel ? (
+          <Shimmer
+            as="span"
+            duration={1}
+            iterations="infinite"
+            className={cn(
+              "shrink-0 font-medium",
+              pendingApproval ? "text-amber-600 dark:text-amber-400" : "text-foreground",
+            )}
+          >
+            {label}
+          </Shimmer>
+        ) : (
+          <span className="shrink-0 font-medium text-foreground">{label}</span>
+        )}
         {summary ? (
           <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">
             {summary}
@@ -223,19 +262,32 @@ const ToolImpl = ({
         <CollapsibleContent
           className={cn("termigo-collapsible-content")}
         >
-          <div className="ml-3 mt-1 space-y-2 border-l border-border/60 pl-3 pb-1">
+          <div className="ml-3 mt-1 pb-1">
             {isSubagent ? (
-              <SubagentLiveDetails toolName={toolName} input={input} />
+              <div className="mb-2 border-l border-border/60 pl-3">
+                <SubagentLiveDetails toolName={toolName} input={input} />
+              </div>
             ) : null}
-            {showInputBody ? (
-              <ToolInput toolName={toolName} input={input} />
-            ) : null}
-            {showOutputBody || errorText ? (
-              <ToolOutput
-                toolName={toolName}
-                output={showOutputBody ? output : undefined}
-                errorText={errorText}
-              />
+            {/* IN / OUT box, VS Code-style: a labelled gutter down the left of a
+                single bordered card so the call's input and result read as one
+                unit. */}
+            {showInputBody || showOutputBody || errorText ? (
+              <div className="overflow-hidden rounded-md border border-border/50">
+                {showInputBody ? (
+                  <GutterRow label="IN">
+                    <ToolInput toolName={toolName} input={input} />
+                  </GutterRow>
+                ) : null}
+                {showOutputBody || errorText ? (
+                  <GutterRow label={errorText ? "ERR" : "OUT"} error={!!errorText}>
+                    <ToolOutput
+                      toolName={toolName}
+                      output={showOutputBody ? output : undefined}
+                      errorText={errorText}
+                    />
+                  </GutterRow>
+                ) : null}
+              </div>
             ) : null}
           </div>
         </CollapsibleContent>
@@ -259,29 +311,41 @@ export const Tool = memo(ToolImpl, (a, b) => {
   return a.input === b.input;
 });
 
+/** One labelled row of the IN / OUT box: a small uppercase gutter label on the
+ *  left, the content on the right, rows divided by a hairline. */
+function GutterRow({
+  label,
+  error,
+  children,
+}: {
+  label: string;
+  error?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex gap-2 border-b border-border/40 px-2 py-1.5 last:border-b-0">
+      <span
+        className={cn(
+          "w-7 shrink-0 select-none pt-px font-mono text-[9px] font-semibold uppercase tracking-wider",
+          error ? "text-destructive/80" : "text-muted-foreground/60",
+        )}
+      >
+        {label}
+      </span>
+      <div className="min-w-0 flex-1">{children}</div>
+    </div>
+  );
+}
+
 function ToolInput({ toolName, input }: { toolName: string; input: unknown }) {
   if (input == null) return null;
   const preview = renderInputPreview(toolName, input);
-  if (preview) {
-    return (
-      <div className="space-y-1">
-        <div className="text-[10px] font-medium text-muted-foreground">
-          Input
-        </div>
-        {preview}
-      </div>
-    );
-  }
+  if (preview) return preview;
   return (
-    <div className="space-y-1">
-      <div className="text-[10px] font-medium text-muted-foreground">Input</div>
-      <CodeBlockMini
-        code={
-          typeof input === "string" ? input : JSON.stringify(input, null, 2)
-        }
-        language="json"
-      />
-    </div>
+    <CodeBlockMini
+      code={typeof input === "string" ? input : JSON.stringify(input, null, 2)}
+      language="json"
+    />
   );
 }
 
@@ -436,11 +500,8 @@ function ToolOutput({
 }) {
   if (errorText) {
     return (
-      <div className="space-y-1">
-        <div className="text-[10px] font-medium text-destructive">Error</div>
-        <div className="rounded bg-destructive/10 px-2 py-1.5 font-mono text-[11px] text-destructive whitespace-pre-wrap">
-          {errorText}
-        </div>
+      <div className="font-mono text-[11px] text-destructive whitespace-pre-wrap">
+        {errorText}
       </div>
     );
   }
@@ -460,14 +521,7 @@ function ToolOutput({
     body = <div className="text-[12px]">{output as ReactNode}</div>;
   }
 
-  return (
-    <div className="space-y-1">
-      <div className="text-[10px] font-medium text-muted-foreground">
-        Output
-      </div>
-      {body}
-    </div>
-  );
+  return body;
 }
 
 function renderToolOutput(toolName: string, output: unknown): ReactNode | null {

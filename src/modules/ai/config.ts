@@ -776,8 +776,12 @@ export const MODEL_CONTEXT_LIMITS: Record<string, number> = {
   "grok-4-fast-reasoning": 2_000_000,
   "grok-4.3": 1_000_000,
   "grok-build-0.1": 256_000,
-  "deepseek-v4-pro": 1_000_000,
-  "deepseek-v4-flash": 1_000_000,
+  // DeepSeek V4 serves a 256Ki (262144) window, not 1M. An over-stated limit
+  // is what let compaction believe there was room it did not have, so requests
+  // sailed past the real cap and the provider rejected them (observed:
+  // "maximum context length is 262144 tokens").
+  "deepseek-v4-pro": 262_144,
+  "deepseek-v4-flash": 262_144,
   "deepseek-reasoner": 128_000,
   "gpt-oss-120b": 128_000,
   "llama3.3-70b": 128_000,

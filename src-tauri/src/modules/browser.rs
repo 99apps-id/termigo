@@ -577,7 +577,7 @@ pub async fn browser_embed_update(
         e.to_string()
     })?;
     let builder = WebviewBuilder::new(&label, WebviewUrl::External(parsed))
-        .initialization_script(&embed_init_script(&instance))
+        .initialization_script(embed_init_script(&instance))
         // Keep the pane rendering even when occluded / in the background - the
         // same flag TEDI relies on so a docked webview does not suspend.
         .background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Disabled);

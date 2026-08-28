@@ -176,6 +176,10 @@ export function compactModelMessages(
 /** Text longer than this in a pre-tail message is truncated by the hard pass. */
 const HARD_TEXT_KEEP_CHARS = 600;
 
+/** The final hard cap keeps only this many trailing messages fully intact when
+ *  even the tail must be trimmed to fit the window. */
+const KEEP_MIN_TAIL = 2;
+
 export function compactModelMessagesDetailed(
   messages: ModelMessage[],
   contextLimit: number,
@@ -253,6 +257,41 @@ export function compactModelMessagesDetailed(
         out[i] = { ...out[i], content: next } as ModelMessage;
         dropped++;
         if (estimateTokens(approxBytes(out)) < 0.5 * budget) break;
+      }
+    }
+  }
+
+  // Final hard cap: if the transcript STILL exceeds the budget, the bulk is in
+  // the tail we normally protect (a run of huge tool outputs — a brute-force
+  // sweep, a giant scan). Break into the tail too, keeping only the last few
+  // messages intact, so the request cannot exceed the window even when our
+  // estimate ran low on dense content. This is the floor that makes an
+  // overflow retry actually fit.
+  if (estimateTokens(approxBytes(out)) >= budget) {
+    const hardStop = Math.max(0, out.length - KEEP_MIN_TAIL);
+    for (let i = 0; i < hardStop; i++) {
+      if (out[i].role === "system") continue;
+      if (!Array.isArray(out[i].content)) continue;
+      let local = false;
+      const next = (out[i].content as ToolPart[]).map((part) => {
+        const r = elideToolResult(part);
+        if (r.changed) {
+          local = true;
+          return r.part;
+        }
+        if (part.type === "text") {
+          const t = truncateTextPart(part, HARD_TEXT_KEEP_CHARS);
+          if (t !== part) {
+            local = true;
+            return t;
+          }
+        }
+        return part;
+      });
+      if (local) {
+        out[i] = { ...out[i], content: next } as ModelMessage;
+        dropped++;
+        if (estimateTokens(approxBytes(out)) < 0.8 * budget) break;
       }
     }
   }

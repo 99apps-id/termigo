@@ -34,6 +34,7 @@ import { formatInvariantsBlock } from "../tools/invariant";
 import { buildTools, type ToolContext } from "../tools/tools";
 import { compactModelMessagesDetailed, estimateTokens } from "./compact";
 import { evictObsoleteToolOutputs } from "./contextEviction";
+import { effectiveContextLimit } from "./contextLimitLearning";
 import type { CustomToolset } from "./customToolsIo";
 import type { ExtensionToolset } from "./extensionTools";
 import { fireHooksForEvent, makeRunId } from "./hooksRunner";
@@ -528,7 +529,8 @@ export type AgentStopReason =
   | "step-cap"
   | "tool-repetition"
   | "no-progress"
-  | "cost-cap";
+  | "cost-cap"
+  | "steered";
 
 export type AgentUsage = {
   inputTokens: number;
@@ -641,6 +643,10 @@ export type RunAgentOptions = {
   customTools?: CustomToolset;
   uiMessages: UIMessage[];
   abortSignal?: AbortSignal;
+  /** Returns true when the user has queued a message while this run is in
+   *  flight. The run then stops at the next step boundary so the queued task is
+   *  handled promptly instead of waiting for a long run to finish. */
+  hasPendingSteer?: () => boolean;
 };
 
 export async function runAgentStream(opts: RunAgentOptions) {
@@ -700,9 +706,15 @@ export async function runAgentStream(opts: RunAgentOptions) {
   const TOOLS_AND_OUTPUT_RESERVE_TOKENS = 24_000;
   const reservedTokens =
     estimateTokens(systemChars) + TOOLS_AND_OUTPUT_RESERVE_TOKENS;
+  // The limit compaction targets is the configured window, but capped by what
+  // the provider actually accepted before (learned from a prior overflow) and
+  // scaled down when a previous request overshot — so a wrong config or an
+  // undercounting estimate self-corrects on the retry instead of failing again.
+  const configuredLimit = getModelContextLimit(modelId, compatCtxOverride);
+  const compactionLimit = effectiveContextLimit(modelId, configuredLimit);
   const compact = compactModelMessagesDetailed(
     prunedHistory,
-    getModelContextLimit(modelId, compatCtxOverride),
+    compactionLimit,
     reservedTokens,
   );
   const compactedHistory = compact.messages;
@@ -777,6 +789,17 @@ export async function runAgentStream(opts: RunAgentOptions) {
   };
 
   const trackingStopWhen: StopCondition<ToolSet>[] = [
+    // Highest priority: the user queued a task while this run was working. End at
+    // the next step boundary so that task is picked up promptly (a long run no
+    // longer blocks it), then resume from here on the following turn. No
+    // synthesis step — the queued task is the next thing to do.
+    (_args) => {
+      if (opts.hasPendingSteer?.()) {
+        stopReason ??= "steered";
+        return true;
+      }
+      return false;
+    },
     (args) =>
       (capPred(args) as boolean) ? requestSynthesisOrStop("step-cap") : false,
     (args) =>

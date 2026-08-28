@@ -1,5 +1,19 @@
-import { native, type GitLogEntry } from "./native";
 import { quoteShellArg } from "@/lib/shellQuote";
+import { homeDir } from "@tauri-apps/api/path";
+import { type GitLogEntry, native } from "./native";
+
+/** Whether `path` is the user's home directory (normalised). Checkpointing the
+ *  home dir — a repo of tens of thousands of unrelated files, which is where a
+ *  workspace can land after an environment switch falls back — would stage the
+ *  whole tree and hang, so it is refused. */
+async function isHomeDir(path: string): Promise<boolean> {
+  try {
+    const home = (await homeDir()).replace(/[\\/]+$/, "").toLowerCase();
+    return path.replace(/[\\/]+$/, "").toLowerCase() === home;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Workspace snapshots, built on ordinary git commits.
@@ -59,7 +73,9 @@ export type CheckpointEntry = {
 };
 
 /** Pure filter over a git log; exported for tests. */
-export function checkpointsFromLog(entries: readonly GitLogEntry[]): CheckpointEntry[] {
+export function checkpointsFromLog(
+  entries: readonly GitLogEntry[],
+): CheckpointEntry[] {
   return entries
     .filter((entry) => isCheckpointSubject(entry.subject))
     .map((entry) => ({
@@ -107,7 +123,10 @@ export async function createCheckpoint(
     if (/nothing to commit/i.test(combined)) {
       return { created: false };
     }
-    return { created: false, error: commit.stderr.trim() || "git commit failed" };
+    return {
+      created: false,
+      error: commit.stderr.trim() || "git commit failed",
+    };
   }
   return { created: true };
 }
@@ -134,7 +153,11 @@ export async function rollbackToCheckpoint(
     // A failed pre-rollback snapshot is reported by the reset below if that
     // also fails; it should not itself block restoring a known-good state.
   }
-  const reset = await native.runCommand(rollbackResetCommand(sha), repoRoot, 120);
+  const reset = await native.runCommand(
+    rollbackResetCommand(sha),
+    repoRoot,
+    120,
+  );
   if (reset.exit_code !== 0) {
     return { ok: false, error: reset.stderr.trim() || "git reset failed" };
   }
@@ -156,6 +179,9 @@ export async function autoCheckpointForRun(
   try {
     const repo = await native.gitResolveRepo(workspaceRoot);
     if (!repo) return;
+    // Refuse to checkpoint the home directory: staging tens of thousands of
+    // unrelated files hangs the run (and is never what the user wanted).
+    if (await isHomeDir(repo.repoRoot)) return;
     await createCheckpoint(repo.repoRoot, "auto before run");
   } catch {
     // Never let checkpointing break the run.

@@ -204,6 +204,27 @@ pub fn run() {
         }
     }
 
+    // Log any Rust panic (with its location) before the default hook aborts, so
+    // a crash — e.g. switching workspace environments — leaves a trail in
+    // Termigo.log instead of vanishing. Chained, so backtraces still print.
+    {
+        let default_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let location = info
+                .location()
+                .map(|l| format!("{}:{}", l.file(), l.line()))
+                .unwrap_or_else(|| "unknown".to_string());
+            let msg = info
+                .payload()
+                .downcast_ref::<&str>()
+                .map(|s| (*s).to_string())
+                .or_else(|| info.payload().downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "<non-string panic payload>".to_string());
+            log::error!("PANIC at {location}: {msg}");
+            default_hook(info);
+        }));
+    }
+
     let launch = parse_launch_target();
     let cli_dir = launch.dir.clone();
     workspace::init_launch_cwd(cli_dir.as_deref());
