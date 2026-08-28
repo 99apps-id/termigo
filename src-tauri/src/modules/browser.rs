@@ -505,6 +505,10 @@ fn embed_init_script(instance: &str) -> String {
   }}
   window.__termigoExtract = function(){{ send('extract', document.body ? document.body.innerText : ''); }};
   try {{ ['log','warn','error','info'].forEach(function(m){{ var orig = console[m]; console[m] = function(){{ try {{ send('console', Array.prototype.join.call(arguments, ' ')); }} catch (e) {{}} return orig.apply(console, arguments); }}; }}); }} catch (e) {{}}
+  function reportUrl(){{ send('url', location.href); }}
+  try {{ ['load','popstate','hashchange'].forEach(function(ev){{ window.addEventListener(ev, reportUrl); }}); }} catch (e) {{}}
+  try {{ ['pushState','replaceState'].forEach(function(m){{ var o = history[m]; history[m] = function(){{ var r = o.apply(history, arguments); try {{ reportUrl(); }} catch (e) {{}} return r; }}; }}); }} catch (e) {{}}
+  try {{ setTimeout(reportUrl, 0); }} catch (e) {{}}
 }})();"#
     )
 }

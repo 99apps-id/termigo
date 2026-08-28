@@ -1,3 +1,4 @@
+import { native } from "@/modules/ai/lib/native";
 import { Globe02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -44,6 +45,11 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, Props>(
     // contentWindow.location.reload() throws on cross-origin frames).
     const [nonce, setNonce] = useState(0);
     const [loaded, setLoaded] = useState(visible);
+    // While the address input is focused, hide the native embedded webview so
+    // the DOM input actually receives keystrokes — a native child webview
+    // otherwise keeps keyboard focus and the address bar looks editable but
+    // eats no typing. It reappears (navigated) as soon as the input blurs.
+    const [addressFocused, setAddressFocused] = useState(false);
     const addressRef = useRef<PreviewAddressBarHandle>(null);
     // Stable per-mount id for the native embedded webview (external URLs).
     const instanceId = useRef(
@@ -110,6 +116,34 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, Props>(
           url={url}
           onSubmit={onUrlChange}
           onReload={() => setNonce((n) => n + 1)}
+          onFocusChange={setAddressFocused}
+          // Back/forward drive the native embedded browser's own history; they
+          // only make sense for external pages (the iframe path has no such
+          // control), so they are wired only in that branch.
+          onBack={
+            external
+              ? () => {
+                  void native
+                    .browserEmbedEval(
+                      browserInstance ?? instanceId,
+                      "history.back();",
+                    )
+                    .catch(() => {});
+                }
+              : undefined
+          }
+          onForward={
+            external
+              ? () => {
+                  void native
+                    .browserEmbedEval(
+                      browserInstance ?? instanceId,
+                      "history.forward();",
+                    )
+                    .catch(() => {});
+                }
+              : undefined
+          }
         />
         <div
           className={
@@ -126,6 +160,8 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, Props>(
                 instance={browserInstance ?? instanceId}
                 url={url}
                 visible={visible}
+                suppress={addressFocused}
+                onNavigate={onUrlChange}
               />
             ) : loaded ? (
               <iframe

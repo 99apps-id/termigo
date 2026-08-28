@@ -1,3 +1,4 @@
+import { usePreferencesStore } from "@/modules/settings/preferences";
 import { Chat, type UIMessage } from "@ai-sdk/react";
 import { info as logInfo } from "@tauri-apps/plugin-log";
 import {
@@ -6,17 +7,26 @@ import {
 } from "ai";
 import {
   getModel,
+  type ModelId,
   providerNeedsKey,
   stepBudgetForRound,
-  type ModelId,
 } from "../config";
-import { usePreferencesStore } from "@/modules/settings/preferences";
-import { useSessionDirectiveStore } from "./sessionDirectiveStore";
+import { buildLanguageModel } from "../lib/agent";
 import { BUILTIN_AGENTS } from "../lib/agents";
-import { useAgentsStore } from "./agentsStore";
-import { usePlanStore } from "./planStore";
+import { dayKey, recordRunCost } from "../lib/costLedger";
+import { humanizeModelError } from "../lib/errorMessage";
+import { fireHooksForEvent, makeRunId } from "../lib/hooksRunner";
+import { sweepSessionMemory } from "../lib/memorySweep";
+import {
+  flush,
+  previewOf,
+  RESUME_PROMPT,
+  type SteerPart,
+  submitAction,
+} from "../lib/steer";
 import { createContextAwareTransport } from "../lib/transport";
 import type { ToolContext } from "../tools/tools";
+import { useAgentsStore } from "./agentsStore";
 import {
   chats,
   getActiveProviderKey,
@@ -25,17 +35,8 @@ import {
   touchChat,
   useChatStore,
 } from "./chatStore";
-import { buildLanguageModel } from "../lib/agent";
-import { dayKey, recordRunCost } from "../lib/costLedger";
-import { fireHooksForEvent, makeRunId } from "../lib/hooksRunner";
-import { sweepSessionMemory } from "../lib/memorySweep";
-import {
-  flush,
-  previewOf,
-  RESUME_PROMPT,
-  submitAction,
-  type SteerPart,
-} from "../lib/steer";
+import { usePlanStore } from "./planStore";
+import { useSessionDirectiveStore } from "./sessionDirectiveStore";
 
 function makeChat(sessionId: string): Chat<UIMessage> {
   const readCache = new Map<string, { size: number; hash: number }>();
@@ -48,8 +49,10 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       useChatStore.getState().live.isActiveTerminalPrivate(),
     injectIntoActivePty: (text) =>
       useChatStore.getState().live.injectIntoActivePty(text),
-    openPreview: (url, browserInstance) => useChatStore.getState().live.openPreview(url, browserInstance),
-    openCanvas: (html, title) => useChatStore.getState().live.openCanvas(html, title),
+    openPreview: (url, browserInstance) =>
+      useChatStore.getState().live.openPreview(url, browserInstance),
+    openCanvas: (html, title) =>
+      useChatStore.getState().live.openCanvas(html, title),
     browserOpen: (instance, url) =>
       useChatStore.getState().live.browserOpen(instance, url),
     browserNavigate: (instance, url) =>
@@ -68,13 +71,12 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       useChatStore.getState().live.browserScreenshot(instance),
     browserConsole: (instance) =>
       useChatStore.getState().live.browserConsole(instance),
-    browserUrl: (instance) =>
-      useChatStore.getState().live.browserUrl(instance),
+    browserUrl: (instance) => useChatStore.getState().live.browserUrl(instance),
     browserClose: (instance) =>
       useChatStore.getState().live.browserClose(instance),
     browserList: () => useChatStore.getState().live.browserList(),
-    spawnAgent: (prompt) =>
-      useChatStore.getState().live.spawnManagedAgent(prompt, sessionId),
+    spawnAgent: (prompt, agent) =>
+      useChatStore.getState().live.spawnManagedAgent(prompt, sessionId, agent),
     readAgentOutput: (leafId) =>
       useChatStore.getState().live.readLeafBuffer(leafId),
     readCache,
@@ -108,14 +110,11 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     getPlanMode: () => usePlanStore.getState().active,
     getStepBudget: () =>
       stepBudgetForRound(useChatStore.getState().agentMeta.runRound),
-    getCostBudgetUsd: () =>
-      usePreferencesStore.getState().costBudgetUsd,
+    getCostBudgetUsd: () => usePreferencesStore.getState().costBudgetUsd,
     getCostDailyBudgetUsd: () =>
       usePreferencesStore.getState().costDailyBudgetUsd,
-    getCaptureDebug: () =>
-      usePreferencesStore.getState().debugCaptureEnabled,
-    getAutoCheckpoint: () =>
-      usePreferencesStore.getState().autoCheckpoint,
+    getCaptureDebug: () => usePreferencesStore.getState().debugCaptureEnabled,
+    getAutoCheckpoint: () => usePreferencesStore.getState().autoCheckpoint,
     getOpenaiCompatibleModelId: () =>
       usePreferencesStore.getState().openaiCompatibleModelId,
     getOpenaiCompatibleContextLimit: () =>
@@ -160,17 +159,30 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       // Fire Stop hooks after the run finishes. This is the only place the
       // agent knows the run is truly over, so it is the only reliable place
       // to signal completion to external tooling.
-      const hooksConfig = (useChatStore.getState().agentMeta as { hooksConfig?: import("../lib/hooks").HooksConfig }).hooksConfig;
+      const hooksConfig = (
+        useChatStore.getState().agentMeta as {
+          hooksConfig?: import("../lib/hooks").HooksConfig;
+        }
+      ).hooksConfig;
       if (hooksConfig) {
-        void fireHooksForEvent(hooksConfig, "Stop", null, {
-          stopReason: info.stopReason,
-          finishReason: info.finishReason,
-          metrics: info.metrics,
-        }, {
-          getWorkspaceRoot: () => useChatStore.getState().live.getWorkspaceRoot(),
-          getCwd: () => useChatStore.getState().live.getCwd(),
-          makeRunId: () => (useChatStore.getState().agentMeta as { runId?: string }).runId ?? makeRunId(sessionId),
-        }).catch(() => {});
+        void fireHooksForEvent(
+          hooksConfig,
+          "Stop",
+          null,
+          {
+            stopReason: info.stopReason,
+            finishReason: info.finishReason,
+            metrics: info.metrics,
+          },
+          {
+            getWorkspaceRoot: () =>
+              useChatStore.getState().live.getWorkspaceRoot(),
+            getCwd: () => useChatStore.getState().live.getCwd(),
+            makeRunId: () =>
+              (useChatStore.getState().agentMeta as { runId?: string }).runId ??
+              makeRunId(sessionId),
+          },
+        ).catch(() => {});
       }
     },
     onUsage: (delta) => {
@@ -198,7 +210,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     onError: (e) => {
       useChatStore.getState().patchAgentMeta({
         status: "error",
-        error: e instanceof Error ? e.message : String(e),
+        error: humanizeModelError(e instanceof Error ? e.message : String(e)),
       });
     },
   });
@@ -251,14 +263,14 @@ export async function sendParts(
 ): Promise<boolean> {
   const c = getOrCreateChat(sessionId);
   const action = submitAction(c.status, parts.length > 0);
-  logInfo(`[ai] sendParts: session=${sessionId} status=${c.status} action=${action}`);
+  logInfo(
+    `[ai] sendParts: session=${sessionId} status=${c.status} action=${action}`,
+  );
   switch (action) {
     case "ignore":
       return false;
     case "queue":
-      useChatStore
-        .getState()
-        .queueSteer({ preview: previewOf(parts), parts });
+      useChatStore.getState().queueSteer({ preview: previewOf(parts), parts });
       return true;
     case "send":
       await c.sendMessage({ role: "user", parts } as Parameters<
@@ -324,7 +336,6 @@ export async function stopRun(): Promise<void> {
   // rather than piling onto the run that was just abandoned.
   await flushSteer();
 }
-
 
 // Summarise a session the user has left and append anything durable to
 // .termigo/memory.md. Registered here because this is the one place that can

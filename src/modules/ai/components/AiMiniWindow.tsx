@@ -14,9 +14,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Spinner } from "@/components/ui/spinner";
+import type { PresenceState } from "@/lib/usePresence";
 import { cn } from "@/lib/utils";
-import { useChat, type UIMessage } from "@ai-sdk/react";
+import { usePreferencesStore } from "@/modules/settings/preferences";
+import { type UIMessage, useChat } from "@ai-sdk/react";
 import {
   Add01Icon,
   AlertCircleIcon,
@@ -27,22 +28,23 @@ import {
   TerminalIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import type { PresenceState } from "@/lib/usePresence";
 import { useEffect, useMemo } from "react";
-import { estimateCost, getModel, getModelContextLimit, type ModelId } from "../config";
+import {
+  estimateCost,
+  getModel,
+  getModelContextLimit,
+  type ModelId,
+} from "../config";
 import type { ResizeDir } from "../lib/miniWindowGeometry";
 import type { SessionMeta } from "../lib/sessions";
 import { useMiniWindowGeometry } from "../lib/useMiniWindowGeometry";
-import { useAgentsStore } from "../store/agentsStore";
-import { useChatStore } from "../store/chatStore";
 import { getOrCreateChat } from "../store/chatRuntime";
-import { usePreferencesStore } from "@/modules/settings/preferences";
+import { useChatStore } from "../store/chatStore";
 import { usePlanStore } from "../store/planStore";
-import { AgentSwitcher } from "./AgentSwitcher";
 import { AiChatView } from "./AiChat";
-import { QueuedSteerRow } from "./QueuedSteerRow";
-import { PlanDiffReview } from "./PlanDiffReview";
 import { ApprovalQueueStrip } from "./ApprovalQueueStrip";
+import { PlanDiffReview } from "./PlanDiffReview";
+import { QueuedSteerRow } from "./QueuedSteerRow";
 import { TodoStrip } from "./TodoStrip";
 
 const SUGGESTIONS = [
@@ -155,7 +157,10 @@ function ResizeHandle({
     <div
       data-no-drag
       onPointerDown={onPointerDown}
-      className={cn("absolute z-50 touch-none select-none", RESIZE_HANDLE_CLASS[dir])}
+      className={cn(
+        "absolute z-50 touch-none select-none",
+        RESIZE_HANDLE_CLASS[dir],
+      )}
     />
   );
 }
@@ -172,18 +177,13 @@ export function AiChatBody({
   onHeaderPointerDown: (e: React.PointerEvent) => void;
 }) {
   const focusInput = useChatStore((s) => s.focusInput);
-  const step = useChatStore((s) => s.agentMeta.step);
 
   const chat = useMemo(() => getOrCreateChat(sessionId), [sessionId]);
   const helpers = useChat<UIMessage>({ chat });
-  const isBusy =
-    helpers.status === "submitted" || helpers.status === "streaming";
 
   return (
     <>
       <Header
-        step={step}
-        isBusy={isBusy}
         onClose={onClose}
         onExpand={onExpand}
         messages={helpers.messages}
@@ -259,8 +259,6 @@ function EmptyShell({
   return (
     <>
       <Header
-        step={null}
-        isBusy={false}
         onClose={onClose}
         onExpand={onExpand}
         onHeaderPointerDown={onHeaderPointerDown}
@@ -273,47 +271,38 @@ function EmptyShell({
 }
 
 function Header({
-  step,
-  isBusy,
   onClose,
   messages,
   onHeaderPointerDown,
 }: {
-  step: string | null;
-  isBusy: boolean;
   onClose: () => void;
   onExpand: () => void;
   messages?: UIMessage[];
   onHeaderPointerDown: (e: React.PointerEvent) => void;
 }) {
-  const customAgents = useAgentsStore((s) => s.customAgents);
-  void customAgents;
-
+  // Agent picker and the "Thinking…" indicator deliberately live only in the
+  // composer / chat body — repeating them here just crowded a narrow header and
+  // made the session title overlap. The header keeps the context meter, the
+  // session picker, and close.
   return (
     <div
       onPointerDown={onHeaderPointerDown}
-      className="relative flex h-11 shrink-0 cursor-grab items-center justify-between gap-2 border-b border-border/60 px-3 active:cursor-grabbing"
+      className="relative flex h-11 shrink-0 cursor-grab items-center gap-2 border-b border-border/60 px-3 active:cursor-grabbing"
     >
-      <div className="flex min-w-0 items-center gap-1.5">
-        <AgentSwitcher isMiniWindow />
+      <div className="flex shrink-0 items-center">
         {messages !== undefined ? (
           <ContextIndicator messages={messages} />
         ) : null}
       </div>
-      <div className="flex shrink-0 items-center gap-1">
-        {isBusy ? (
-          <span className="flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground">
-            <Spinner className="size-2.5" />
-            <span className="max-w-32 truncate">{step ?? "Thinking…"}</span>
-          </span>
-        ) : null}
+      <div className="min-w-0 flex-1" />
+      <div className="flex min-w-0 shrink items-center gap-1">
         <SessionPicker />
         <Button
           type="button"
           size="icon"
           variant="ghost"
           onClick={onClose}
-          className="size-5"
+          className="size-5 shrink-0"
           aria-label="Close"
           title="Close (Esc)"
         >
@@ -414,7 +403,9 @@ function ContextIndicator({ messages }: { messages: UIMessage[] }) {
               {tokens.cachedInputTokens > 0 && (
                 <div className="flex items-center justify-between text-muted-foreground">
                   <span>Cache hit</span>
-                  <span className="font-mono text-foreground">{cacheRate}%</span>
+                  <span className="font-mono text-foreground">
+                    {cacheRate}%
+                  </span>
                 </div>
               )}
               {cost != null && (

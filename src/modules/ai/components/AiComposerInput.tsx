@@ -21,6 +21,7 @@ function customCommandMeta(cmd: CustomCommand): SlashCommandMeta {
     icon: CommandIcon,
   };
 }
+
 import { AgentSwitcher } from "./AgentSwitcher";
 import { FilePickerContent } from "./FilePicker";
 import { type PickerItem, SnippetPickerContent } from "./SnippetPicker";

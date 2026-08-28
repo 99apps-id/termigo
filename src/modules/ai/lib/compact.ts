@@ -1,7 +1,8 @@
 import type { ModelMessage } from "ai";
 
 const KEEP_TAIL = 24;
-const ELISION_TEXT = "[elided to save context — see prior tool call in history]";
+const ELISION_TEXT =
+  "[elided to save context — see prior tool call in history]";
 
 type ToolPart = {
   type: string;
@@ -29,6 +30,28 @@ function approxBytes(messages: ModelMessage[]): number {
     }
   }
   return n;
+}
+
+// Characters per token. Deliberately LOW (a real tokenizer produces more tokens
+// than english-prose's ~4-per-token on the dense code, JSON, and base64 that
+// fills an agent transcript). Undercounting is what let a request estimated at
+// "0.69 × limit" arrive as a real 0.99 × limit and overflow, so we bias the
+// estimate upward by dividing by a smaller number.
+const CHARS_PER_TOKEN = 3.5;
+
+/** Rough upward-biased token estimate for a run of characters. */
+export function estimateTokens(chars: number): number {
+  return Math.ceil(chars / CHARS_PER_TOKEN);
+}
+
+/** Truncate an over-long text part, leaving a marker so the model knows why. */
+function truncateTextPart(part: ToolPart, keepChars: number): ToolPart {
+  const text = part.text;
+  if (typeof text !== "string" || text.length <= keepChars) return part;
+  return {
+    ...part,
+    text: `${text.slice(0, keepChars)}\n${ELISION_TEXT}`,
+  };
 }
 
 function elideToolResult(part: ToolPart): { changed: boolean; part: ToolPart } {
@@ -150,24 +173,38 @@ export function compactModelMessages(
   return compactModelMessagesDetailed(messages, contextLimit).messages;
 }
 
+/** Text longer than this in a pre-tail message is truncated by the hard pass. */
+const HARD_TEXT_KEEP_CHARS = 600;
+
 export function compactModelMessagesDetailed(
   messages: ModelMessage[],
   contextLimit: number,
+  reservedTokens = 0,
 ): CompactResult {
+  // The messages are only PART of the request: the system prompt, the tool
+  // schemas, and the room the model needs to answer all count against the same
+  // window. `reservedTokens` carves those out so compaction targets what is
+  // actually left for the transcript, never the raw model limit. Floor at 30%
+  // so a huge reserve can never drive the budget to zero.
+  const budget = Math.max(
+    contextLimit - reservedTokens,
+    Math.floor(contextLimit * 0.3),
+  );
+
   let dropped = 0;
   let working = messages;
-  let approxTokens = approxBytes(working) / 4;
+  let approxTokens = estimateTokens(approxBytes(working));
 
-  if (approxTokens >= 0.55 * contextLimit) {
+  if (approxTokens >= 0.5 * budget) {
     const r = dropSupersededReads(working);
     if (r.touched) {
       working = r.out;
       dropped++;
-      approxTokens = approxBytes(working) / 4;
+      approxTokens = estimateTokens(approxBytes(working));
     }
   }
 
-  if (approxTokens < 0.7 * contextLimit) {
+  if (approxTokens < 0.6 * budget) {
     return {
       messages: working,
       compacted: dropped > 0,
@@ -175,6 +212,10 @@ export function compactModelMessagesDetailed(
     };
   }
 
+  // Aggressive pass 1: elide every tool result before the tail. Tool outputs
+  // (file bodies, command output) are the bulk of a long transcript and the
+  // safest thing to drop — the tool call itself stays, so the structure the
+  // provider validates is untouched.
   const out = working.slice();
   const stopIdx = Math.max(0, out.length - KEEP_TAIL);
   for (let i = 0; i < stopIdx; i++) {
@@ -189,7 +230,30 @@ export function compactModelMessagesDetailed(
     if (local) {
       out[i] = { ...out[i], content: next } as ModelMessage;
       dropped++;
-      if (approxBytes(out) / 4 < 0.6 * contextLimit) break;
+      if (estimateTokens(approxBytes(out)) < 0.45 * budget) break;
+    }
+  }
+
+  // Aggressive pass 2 (hard cap): if eliding tool results was not enough — a
+  // transcript dominated by huge text parts (a giant paste, long model prose) —
+  // truncate the over-long text of pre-tail messages too. Text parts keep the
+  // message shape, so this also never breaks tool-call/result pairing.
+  if (estimateTokens(approxBytes(out)) >= 0.6 * budget) {
+    for (let i = 0; i < stopIdx; i++) {
+      if (out[i].role === "system") continue;
+      if (!Array.isArray(out[i].content)) continue;
+      let local = false;
+      const next = (out[i].content as ToolPart[]).map((part) => {
+        if (part.type !== "text") return part;
+        const t = truncateTextPart(part, HARD_TEXT_KEEP_CHARS);
+        if (t !== part) local = true;
+        return t;
+      });
+      if (local) {
+        out[i] = { ...out[i], content: next } as ModelMessage;
+        dropped++;
+        if (estimateTokens(approxBytes(out)) < 0.5 * budget) break;
+      }
     }
   }
 

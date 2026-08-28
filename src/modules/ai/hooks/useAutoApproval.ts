@@ -12,6 +12,7 @@ import { useChatStore } from "../store/chatStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { isAutoApproved } from "../lib/approvalPolicy";
 import { isAutoApprovedScan } from "../lib/pentestScope";
+import { useApprovalRulesStore } from "../store/approvalRulesStore";
 import { isSessionAllowed } from "../store/approvalQueueStore";
 
 type ApprovalResponder = (arg: {
@@ -60,8 +61,33 @@ export function useAutoApproval(
 
       // The command decides whether a remote call is inspection or a change,
       // so it has to reach the policy rather than being inferred from the name.
-      const input = part.input as { command?: unknown } | undefined;
+      const input = part.input as
+        | { command?: unknown; path?: unknown }
+        | undefined;
       const command = typeof input?.command === "string" ? input.command : undefined;
+      const path = typeof input?.path === "string" ? input.path : undefined;
+
+      // Project-scoped approval rules (.termigo/approvals.json) refine the
+      // global mode per project: `deny` auto-refuses, `allow` auto-approves
+      // regardless of mode, and `ask` forces a manual prompt. First match wins;
+      // no match falls through to the mode logic below.
+      const ruleDecision = useApprovalRulesStore
+        .getState()
+        .evaluate({ tool, command, path });
+      if (ruleDecision) {
+        if (ruleDecision.action === "deny") {
+          answered.current.add(id);
+          void respond({ id, approved: false, reason: ruleDecision.reason });
+          continue;
+        }
+        if (ruleDecision.action === "allow") {
+          answered.current.add(id);
+          void respond({ id, approved: true });
+          continue;
+        }
+        // "ask": leave it for the user, whatever the mode would have done.
+        continue;
+      }
 
       // Scoped scan auto-approval is its own opt-in, independent of the mode:
       // an in-scope read-tier scan (nmap -sV, ffuf, ...) runs without a prompt

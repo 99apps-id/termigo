@@ -4,18 +4,13 @@ import {
   ConversationEmptyState,
   ConversationScrollButton,
 } from "@/components/ai-elements/conversation";
+import { MarkdownCode } from "@/components/ai-elements/markdown-code";
 import {
   Message,
   MessageContent,
   MessageResponse,
   type MessageResponseProps,
 } from "@/components/ai-elements/message";
-import { MarkdownCode } from "@/components/ai-elements/markdown-code";
-import { useAutoApproval } from "../hooks/useAutoApproval";
-import {
-  MarkdownLink,
-  type MarkdownLinkProps,
-} from "@/modules/markdown/MarkdownLink";
 import {
   Reasoning,
   ReasoningContent,
@@ -28,8 +23,12 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
-import { HugeiconsIcon } from "@hugeicons/react";
+import {
+  MarkdownLink,
+  type MarkdownLinkProps,
+} from "@/modules/markdown/MarkdownLink";
 import {
   ArrowRight01Icon,
   CodeIcon,
@@ -37,10 +36,7 @@ import {
   HashtagIcon,
   TerminalIcon,
 } from "@hugeicons/core-free-icons";
-import { SLASH_COMMANDS, TERMIGO_CMD_RE } from "../lib/slashCommands";
-import { Spinner } from "@/components/ui/spinner";
-import { useChatStore } from "../store/chatStore";
-import { resumeRun } from "../store/chatRuntime";
+import { HugeiconsIcon } from "@hugeicons/react";
 import type {
   ChatStatus,
   DynamicToolUIPart,
@@ -48,9 +44,14 @@ import type {
   UIMessage,
   UIMessagePart,
 } from "ai";
-import type { AgentStopReason } from "../lib/agent";
-import { stepBudgetForRound } from "../config";
 import { memo, useCallback, useMemo } from "react";
+import { stepBudgetForRound } from "../config";
+import { useAutoApproval } from "../hooks/useAutoApproval";
+import type { AgentStopReason } from "../lib/agent";
+import { humanizeModelError } from "../lib/errorMessage";
+import { SLASH_COMMANDS, TERMIGO_CMD_RE } from "../lib/slashCommands";
+import { resumeRun } from "../store/chatRuntime";
+import { useChatStore } from "../store/chatStore";
 import { AiToolApproval } from "./AiToolApproval";
 import { TrajectoryThinkingHUD } from "./TrajectoryThinkingHUD";
 
@@ -90,8 +91,7 @@ type ContextChip =
 
 const SELECTION_RE =
   /<selection\s+source="(terminal|editor)">\n?([\s\S]*?)\n?<\/selection>/g;
-const FILE_RE =
-  /<file\s+name="([^"]+)"[^>]*>\n?([\s\S]*?)\n?<\/file>/g;
+const FILE_RE = /<file\s+name="([^"]+)"[^>]*>\n?([\s\S]*?)\n?<\/file>/g;
 const SNIPPET_RE = /<snippet\s+name="([^"]+)">\n?[\s\S]*?\n?<\/snippet>/g;
 
 function countLines(s: string): number {
@@ -219,10 +219,13 @@ export function AiChatView({
     lastMessage?.role === "assistant";
   // A stop the user asked for is described as their own, whatever guard the
   // loop happened to trip on the way out.
-  const continueKind: StopKind = stoppedByUser ? "stopped" : (stopReason ?? "step-cap");
+  const continueKind: StopKind = stoppedByUser
+    ? "stopped"
+    : (stopReason ?? "step-cap");
 
   const onApproval = useCallback(
-    (id: string, approved: boolean) => addToolApprovalResponse({ id, approved }),
+    (id: string, approved: boolean) =>
+      addToolApprovalResponse({ id, approved }),
     [addToolApprovalResponse],
   );
 
@@ -287,7 +290,7 @@ export function AiChatView({
           <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
             <div className="font-medium">Request failed.</div>
             <div className="mt-0.5 leading-relaxed opacity-90">
-              {error.message}
+              {humanizeModelError(error.message)}
             </div>
             <button
               type="button"
@@ -465,9 +468,10 @@ const RenderedMessage = memo(function RenderedMessage({
   // Hoisted above the user branch so the hook always runs, whatever the role.
   // The user branch returns early, and a hook after a conditional return
   // violates the Rules of Hooks (React would throw if the role ever changed).
-  const groups = useMemo(() => buildPartGroups(message.parts as AnyPart[]), [
-    message.parts,
-  ]);
+  const groups = useMemo(
+    () => buildPartGroups(message.parts as AnyPart[]),
+    [message.parts],
+  );
   if (message.role === "user") {
     const rawText = message.parts
       .filter((p): p is { type: "text"; text: string } => p.type === "text")
@@ -715,9 +719,7 @@ const ReadGroup = memo(function ReadGroup({ parts }: { parts: AnyPart[] }) {
                 strokeWidth={1.75}
                 className="shrink-0 opacity-60"
               />
-              <span className="truncate text-foreground">
-                {basename(path)}
-              </span>
+              <span className="truncate text-foreground">{basename(path)}</span>
               <span className="truncate opacity-60">{path}</span>
             </li>
           ))}
@@ -761,8 +763,14 @@ const ReadRow = memo(function ReadRow({ part }: { part: AnyPart }) {
       />
       <Shimmer
         as="span"
-        duration={state === "input-streaming" || state === "input-available" ? 1 : 1.4}
-        iterations={state === "input-streaming" || state === "input-available" ? "infinite" : 2}
+        duration={
+          state === "input-streaming" || state === "input-available" ? 1 : 1.4
+        }
+        iterations={
+          state === "input-streaming" || state === "input-available"
+            ? "infinite"
+            : 2
+        }
         className="shrink-0 font-medium text-foreground"
       >
         Read
@@ -782,12 +790,7 @@ const aiStreamdownComponents = {
 };
 
 function AiMessageResponse(props: Omit<MessageResponseProps, "components">) {
-  return (
-    <MessageResponse
-      {...props}
-      components={aiStreamdownComponents}
-    />
-  );
+  return <MessageResponse {...props} components={aiStreamdownComponents} />;
 }
 
 const RenderedPart = memo(function RenderedPart({

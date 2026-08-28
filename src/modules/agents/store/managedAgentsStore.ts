@@ -15,6 +15,8 @@ export type ManagedAgent = {
   phase: ManagedPhase;
   reviewedAtRound: number;
   pendingReview: boolean;
+  /** Which coding-agent CLI this is (claude, codex, gemini, …). */
+  agent: string;
 };
 
 type ManagedAgentsState = {
@@ -26,6 +28,7 @@ type ManagedAgentsState = {
     task: string;
     cwd: string | null;
     maxRounds?: number;
+    agent?: string;
   }) => void;
   setPhase: (leafId: number, phase: ManagedPhase) => void;
   markReviewed: (leafId: number) => void;
@@ -39,7 +42,7 @@ type ManagedAgentsState = {
 export const useManagedAgentsStore = create<ManagedAgentsState>((set, get) => ({
   agents: {},
 
-  register: ({ leafId, tabId, sessionId, task, cwd, maxRounds }) =>
+  register: ({ leafId, tabId, sessionId, task, cwd, maxRounds, agent }) =>
     set((s) => ({
       agents: {
         ...s.agents,
@@ -54,6 +57,7 @@ export const useManagedAgentsStore = create<ManagedAgentsState>((set, get) => ({
           phase: "spawning",
           reviewedAtRound: -1,
           pendingReview: false,
+          agent: agent ?? "claude",
         },
       },
     })),

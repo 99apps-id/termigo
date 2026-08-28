@@ -1,15 +1,17 @@
+import { info as logInfo } from "@tauri-apps/plugin-log";
 import {
   convertToModelMessages,
+  type LanguageModel,
+  type ModelMessage,
   pruneMessages,
+  type StopCondition,
   stepCountIs,
   streamText,
-  type LanguageModel,
-  type StopCondition,
   type ToolSet,
-  type ModelMessage,
   type UIMessage,
 } from "ai";
 import {
+  type CustomEndpoint,
   DEFAULT_MODEL_ID,
   endpointIdFromCompatModel,
   estimateCost,
@@ -21,30 +23,28 @@ import {
   modelAllowsForcedToolChoice,
   modelKeepsReasoning,
   OLLAMA_DEFAULT_BASE_URL,
+  type ProviderId,
   providerNeedsKey,
   resolveModel,
   selectSystemPrompt,
-  type CustomEndpoint,
-  type ProviderId,
 } from "../config";
-import type { CustomEndpointKeys, ProviderKeys } from "./keyring";
-import { buildTools, type ToolContext } from "../tools/tools";
-import { fireHooksForEvent, makeRunId } from "./hooksRunner";
-import type { McpToolset } from "./mcpTools";
-import type { ExtensionToolset } from "./extensionTools";
-import type { CustomToolset } from "./customToolsIo";
-import { prepareAgentPrompt } from "./prompt";
-import { skillsBlock, type Skill } from "./skills";
-import { compactModelMessagesDetailed } from "./compact";
-import { memoryBlock as learnedBlock, type MemoryEntry } from "./memory";
-import { createProxyFetch, proxyFetch } from "./proxyFetch";
-import { sanitizeUiMessages } from "./sanitizeMessages";
-import { wantsForcedFanout } from "./orchestrationIntent";
 import { useDebugStore } from "../store/debugStore";
 import { useTrajectoryStore } from "../store/trajectoryStore";
-import { evictObsoleteToolOutputs } from "./contextEviction";
 import { formatInvariantsBlock } from "../tools/invariant";
-import { info as logInfo } from "@tauri-apps/plugin-log";
+import { buildTools, type ToolContext } from "../tools/tools";
+import { compactModelMessagesDetailed, estimateTokens } from "./compact";
+import { evictObsoleteToolOutputs } from "./contextEviction";
+import type { CustomToolset } from "./customToolsIo";
+import type { ExtensionToolset } from "./extensionTools";
+import { fireHooksForEvent, makeRunId } from "./hooksRunner";
+import type { CustomEndpointKeys, ProviderKeys } from "./keyring";
+import type { McpToolset } from "./mcpTools";
+import { memoryBlock as learnedBlock, type MemoryEntry } from "./memory";
+import { wantsForcedFanout } from "./orchestrationIntent";
+import { prepareAgentPrompt } from "./prompt";
+import { createProxyFetch, proxyFetch } from "./proxyFetch";
+import { sanitizeUiMessages } from "./sanitizeMessages";
+import { type Skill, skillsBlock } from "./skills";
 
 const localProxyFetch = createProxyFetch({ allowPrivateNetwork: true });
 
@@ -150,12 +150,16 @@ export async function buildLanguageModel(
     }
     case "anthropic": {
       const { createAnthropic } = await import("@ai-sdk/anthropic");
-      built = createAnthropic({ fetch: proxyFetch, apiKey: key })(resolvedModelId);
+      built = createAnthropic({ fetch: proxyFetch, apiKey: key })(
+        resolvedModelId,
+      );
       break;
     }
     case "google": {
       const { createGoogleGenerativeAI } = await import("@ai-sdk/google");
-      built = createGoogleGenerativeAI({ fetch: proxyFetch, apiKey: key })(resolvedModelId);
+      built = createGoogleGenerativeAI({ fetch: proxyFetch, apiKey: key })(
+        resolvedModelId,
+      );
       break;
     }
     case "xai": {
@@ -165,7 +169,9 @@ export async function buildLanguageModel(
     }
     case "cerebras": {
       const { createCerebras } = await import("@ai-sdk/cerebras");
-      built = createCerebras({ fetch: proxyFetch, apiKey: key })(resolvedModelId);
+      built = createCerebras({ fetch: proxyFetch, apiKey: key })(
+        resolvedModelId,
+      );
       break;
     }
     case "deepseek": {
@@ -173,8 +179,9 @@ export async function buildLanguageModel(
       // that pairs with this SDK version is two provider-spec majors behind the
       // rest of the tree; it type-checks by coincidence rather than by being
       // compatible, and DeepSeek works today through the generic path.
-      const { createOpenAICompatible } =
-        await import("@ai-sdk/openai-compatible");
+      const { createOpenAICompatible } = await import(
+        "@ai-sdk/openai-compatible"
+      );
       built = createOpenAICompatible({
         name: "deepseek",
         baseURL: "https://api.deepseek.com",
@@ -190,7 +197,9 @@ export async function buildLanguageModel(
       // reported symptom was a model that answered in prose instead of
       // emitting a tool call anything downstream could parse.
       const { createMistral } = await import("@ai-sdk/mistral");
-      built = createMistral({ apiKey: key, fetch: proxyFetch })(resolvedModelId);
+      built = createMistral({ apiKey: key, fetch: proxyFetch })(
+        resolvedModelId,
+      );
       break;
     }
     case "groq": {
@@ -199,8 +208,9 @@ export async function buildLanguageModel(
       break;
     }
     case "openrouter": {
-      const { createOpenAICompatible } =
-        await import("@ai-sdk/openai-compatible");
+      const { createOpenAICompatible } = await import(
+        "@ai-sdk/openai-compatible"
+      );
       built = createOpenAICompatible({
         name: "openrouter",
         baseURL: "https://openrouter.ai/api/v1",
@@ -219,8 +229,9 @@ export async function buildLanguageModel(
           "OpenAI-compatible provider has no base URL. Set it in Settings → Models.",
         );
       }
-      const { createOpenAICompatible } =
-        await import("@ai-sdk/openai-compatible");
+      const { createOpenAICompatible } = await import(
+        "@ai-sdk/openai-compatible"
+      );
       built = createOpenAICompatible({
         name: "openai-compatible",
         baseURL: compatURL,
@@ -230,8 +241,9 @@ export async function buildLanguageModel(
       break;
     }
     case "lmstudio": {
-      const { createOpenAICompatible } =
-        await import("@ai-sdk/openai-compatible");
+      const { createOpenAICompatible } = await import(
+        "@ai-sdk/openai-compatible"
+      );
       built = createOpenAICompatible({
         name: "lmstudio",
         baseURL: lmstudioURL,
@@ -240,8 +252,9 @@ export async function buildLanguageModel(
       break;
     }
     case "mlx": {
-      const { createOpenAICompatible } =
-        await import("@ai-sdk/openai-compatible");
+      const { createOpenAICompatible } = await import(
+        "@ai-sdk/openai-compatible"
+      );
       built = createOpenAICompatible({
         name: "mlx",
         baseURL: mlxURL,
@@ -250,8 +263,9 @@ export async function buildLanguageModel(
       break;
     }
     case "ollama": {
-      const { createOpenAICompatible } =
-        await import("@ai-sdk/openai-compatible");
+      const { createOpenAICompatible } = await import(
+        "@ai-sdk/openai-compatible"
+      );
       built = createOpenAICompatible({
         name: "ollama",
         baseURL: ollamaURL,
@@ -292,9 +306,7 @@ export function buildConfiguredLanguageModel(
     const ep = local.customEndpoints?.find((e) => e.id === eid);
     if (!ep) throw new Error(`Custom endpoint not found: ${eid}`);
     if (!ep.modelId.trim()) {
-      throw new Error(
-        `${ep.name}: no model id set. Open Settings → Models.`,
-      );
+      throw new Error(`${ep.name}: no model id set. Open Settings → Models.`);
     }
     return buildLanguageModel(
       "openai-compatible",
@@ -475,6 +487,24 @@ export function noToolRepetition<T extends ToolSet>(
   };
 }
 
+/**
+ * Decides, when a guard would stop a stuck run, whether to stop now or hold for
+ * one final tool-less "synthesis" step so the model can summarise instead of
+ * ending on a silent repeated tool call.
+ *
+ * - Model can't take a forced tool choice → stop immediately (no synthesis).
+ * - First trip on a synthesis-capable model → don't stop; mark it requested.
+ * - The synthesis step already ran (requested) → stop now.
+ */
+export function synthesisStopDecision(
+  allowSynthesis: boolean,
+  alreadyRequested: boolean,
+): { stop: boolean; requested: boolean } {
+  if (!allowSynthesis) return { stop: true, requested: false };
+  if (alreadyRequested) return { stop: true, requested: true };
+  return { stop: false, requested: true };
+}
+
 /** Stops after `maxIdle` consecutive text-only steps. A real text turn ends
  *  on its own and never chains another empty step. */
 export function noProgressStop<T extends ToolSet>(
@@ -494,7 +524,11 @@ export function noProgressStop<T extends ToolSet>(
  * until the budget ran out. Naming the guard that tripped lets the UI say
  * whether continuing is worth a click.
  */
-export type AgentStopReason = "step-cap" | "tool-repetition" | "no-progress" | "cost-cap";
+export type AgentStopReason =
+  | "step-cap"
+  | "tool-repetition"
+  | "no-progress"
+  | "cost-cap";
 
 export type AgentUsage = {
   inputTokens: number;
@@ -610,7 +644,9 @@ export type RunAgentOptions = {
 };
 
 export async function runAgentStream(opts: RunAgentOptions) {
-  logInfo(`[ai] runAgentStream: enter (model=${opts.modelId ?? DEFAULT_MODEL_ID})`);
+  logInfo(
+    `[ai] runAgentStream: enter (model=${opts.modelId ?? DEFAULT_MODEL_ID})`,
+  );
   const modelId = opts.modelId ?? DEFAULT_MODEL_ID;
   const model = await buildConfiguredLanguageModel(modelId, opts.keys, {
     lmstudioBaseURL: opts.lmstudioBaseURL,
@@ -638,7 +674,9 @@ export async function runAgentStream(opts: RunAgentOptions) {
     opts.skills ?? [],
   );
 
-  const history = await convertToModelMessages(sanitizeUiMessages(opts.uiMessages));
+  const history = await convertToModelMessages(
+    sanitizeUiMessages(opts.uiMessages),
+  );
   const keepsReasoning = modelKeepsReasoning(info);
   const prunedHistory = pruneMessages({
     messages: history,
@@ -649,9 +687,23 @@ export async function runAgentStream(opts: RunAgentOptions) {
     ? endpoints.find((e) => e.id === endpointIdFromCompatModel(modelId))
         ?.contextLimit
     : opts.openaiCompatibleContextLimit;
+  // The transcript is not the whole request. Reserve room for the system
+  // prompt (measured), the tool schemas, and the model's own answer, so
+  // compaction targets what is actually left for history instead of the raw
+  // window — this is what stopped a compacted-but-still-huge request from
+  // arriving just over the model's hard limit.
+  const systemChars =
+    stableSystem.length + (opts.planMode ? PLAN_MODE_PROMPT.length : 0);
+  // Tool schemas (the full toolset serialised) plus completion headroom and a
+  // safety margin. Generous on purpose: over-reserving only compacts a little
+  // earlier, while under-reserving is what overflows the window.
+  const TOOLS_AND_OUTPUT_RESERVE_TOKENS = 24_000;
+  const reservedTokens =
+    estimateTokens(systemChars) + TOOLS_AND_OUTPUT_RESERVE_TOKENS;
   const compact = compactModelMessagesDetailed(
     prunedHistory,
     getModelContextLimit(modelId, compatCtxOverride),
+    reservedTokens,
   );
   const compactedHistory = compact.messages;
   if (compact.compacted) {
@@ -685,7 +737,9 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // legitimate run (e.g. a slow scan, a sub-agent fan-out) is not killed.
   const abortController = new AbortController();
   if (opts.abortSignal) {
-    opts.abortSignal.addEventListener("abort", () => abortController.abort(), { once: true });
+    opts.abortSignal.addEventListener("abort", () => abortController.abort(), {
+      once: true,
+    });
   }
   let firstStepTimer: ReturnType<typeof setTimeout> | null = setTimeout(() => {
     abortController.abort(new Error("model did not respond within 90s"));
@@ -705,23 +759,37 @@ export async function runAgentStream(opts: RunAgentOptions) {
   const capPred = stepCountIs(stepBudget);
   const repeatPred = noToolRepetition<ToolSet>(3);
   const idlePred = noProgressStop<ToolSet>(2);
+
+  // Forced-synthesis on a stuck stop. When a guard (step cap, tool loop, no
+  // progress) would end the run, the last thing the user saw was usually a
+  // repeated tool call and then silence. Instead, give the model ONE final
+  // tool-less step to summarise what it found and what remains — `prepareStep`
+  // pins `toolChoice: "none"` for that step (see below), and this flag both
+  // requests it and then lets the run stop once the summary lands. Gated on the
+  // model accepting a forced tool choice (reasoning models reject it).
+  const allowSynthesis = modelAllowsForcedToolChoice(info);
+  let synthesisRequested = false;
+  const requestSynthesisOrStop = (reason: AgentStopReason): boolean => {
+    stopReason ??= reason;
+    const d = synthesisStopDecision(allowSynthesis, synthesisRequested);
+    synthesisRequested = d.requested;
+    return d.stop;
+  };
+
   const trackingStopWhen: StopCondition<ToolSet>[] = [
-    (args) => {
-      if (!(capPred(args) as boolean)) return false;
-      stopReason ??= "step-cap";
-      return true;
-    },
-    (args) => {
-      if (!(repeatPred(args) as boolean)) return false;
-      stopReason ??= "tool-repetition";
-      return true;
-    },
-    (args) => {
-      if (!(idlePred(args) as boolean)) return false;
-      stopReason ??= "no-progress";
-      return true;
-    },
+    (args) =>
+      (capPred(args) as boolean) ? requestSynthesisOrStop("step-cap") : false,
+    (args) =>
+      (repeatPred(args) as boolean)
+        ? requestSynthesisOrStop("tool-repetition")
+        : false,
+    (args) =>
+      (idlePred(args) as boolean)
+        ? requestSynthesisOrStop("no-progress")
+        : false,
     (_args) => {
+      // Cost cap stops immediately — the whole point is to not spend more, so
+      // it does not buy an extra synthesis step.
       if (costBudget <= 0) return false;
       const current = estimateCost(modelId, {
         inputTokens: runInput,
@@ -736,6 +804,15 @@ export async function runAgentStream(opts: RunAgentOptions) {
       }
       return false;
     },
+    // Once a synthesis step was requested, stop as soon as the model produces a
+    // tool-less (text) step — that is the summary we asked for.
+    (args) => {
+      if (!synthesisRequested) return false;
+      const steps =
+        (args as { steps?: Array<{ toolCalls?: unknown[] }> }).steps ?? [];
+      const last = steps[steps.length - 1];
+      return (last?.toolCalls?.length ?? 0) === 0;
+    },
   ];
 
   const hooksConfig = opts.hooksConfig;
@@ -747,20 +824,34 @@ export async function runAgentStream(opts: RunAgentOptions) {
       ...opts.toolContext,
       firePreToolHook: hooksConfig
         ? async (toolName, args) => {
-            await fireHooksForEvent(hooksConfig, "PreToolUse", toolName, { args }, {
-              getWorkspaceRoot: opts.toolContext.getWorkspaceRoot,
-              getCwd: opts.toolContext.getCwd,
-              makeRunId: () => opts.runId ?? makeRunId(opts.toolContext.getSessionId()),
-            });
+            await fireHooksForEvent(
+              hooksConfig,
+              "PreToolUse",
+              toolName,
+              { args },
+              {
+                getWorkspaceRoot: opts.toolContext.getWorkspaceRoot,
+                getCwd: opts.toolContext.getCwd,
+                makeRunId: () =>
+                  opts.runId ?? makeRunId(opts.toolContext.getSessionId()),
+              },
+            );
           }
         : undefined,
       firePostToolHook: hooksConfig
         ? async (toolName, args, result) => {
-            await fireHooksForEvent(hooksConfig, "PostToolUse", toolName, { args, result }, {
-              getWorkspaceRoot: opts.toolContext.getWorkspaceRoot,
-              getCwd: opts.toolContext.getCwd,
-              makeRunId: () => opts.runId ?? makeRunId(opts.toolContext.getSessionId()),
-            });
+            await fireHooksForEvent(
+              hooksConfig,
+              "PostToolUse",
+              toolName,
+              { args, result },
+              {
+                getWorkspaceRoot: opts.toolContext.getWorkspaceRoot,
+                getCwd: opts.toolContext.getCwd,
+                makeRunId: () =>
+                  opts.runId ?? makeRunId(opts.toolContext.getSessionId()),
+              },
+            );
           }
         : undefined,
     }),
@@ -863,7 +954,9 @@ export async function runAgentStream(opts: RunAgentOptions) {
     });
   }
 
-  logInfo(`[ai] runAgentStream: before streamText (${Object.keys(tools).length} tools)`);
+  logInfo(
+    `[ai] runAgentStream: before streamText (${Object.keys(tools).length} tools)`,
+  );
   return streamText({
     model,
     system: prompt.system,
@@ -880,16 +973,16 @@ export async function runAgentStream(opts: RunAgentOptions) {
     // `StopCondition<ToolSet>[]`. The predicates only touch fields common to
     // every ToolSet, so a structural cast is safe.
     stopWhen: trackingStopWhen as never,
-    // Only step 0, and only the choice - the model still decides the tasks,
-    // and every step after this one is free again so it can synthesise.
-    ...(forceFanout
-      ? {
-          prepareStep: ({ stepNumber }: { stepNumber: number }) =>
-            stepNumber === 0
-              ? { toolChoice: { type: "tool", toolName: "run_subagents" } }
-              : {},
-        }
-      : {}),
+    // Per-step choice control: a stuck run's final step is pinned tool-less so
+    // the model must summarise (see `synthesisRequested`); the forced-fanout
+    // case pins step 0 to `run_subagents`. Every other step is free.
+    prepareStep: ({ stepNumber }: { stepNumber: number }) => {
+      if (synthesisRequested) return { toolChoice: "none" as const };
+      if (forceFanout && stepNumber === 0) {
+        return { toolChoice: { type: "tool", toolName: "run_subagents" } };
+      }
+      return {};
+    },
     abortSignal: abortController.signal,
     // Clear the "no first response" timer on the first model chunk (a text
     // delta or a tool-call decision), NOT on step finish. A step that starts

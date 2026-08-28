@@ -1436,8 +1436,14 @@ ${found.foundAt}`
   // resolves even when typed straight through without opening the picker. The
   // picker reloads on open for freshness; this covers the direct path.
   useEffect(() => {
-    void import("@/modules/ai/store/customCommandsStore").then(({ useCustomCommandsStore }) =>
-      useCustomCommandsStore.getState().loadFor(explorerRoot ?? launchCwd ?? home ?? null),
+    const root = explorerRoot ?? launchCwd ?? home ?? null;
+    void import("@/modules/ai/store/customCommandsStore").then(
+      ({ useCustomCommandsStore }) =>
+        useCustomCommandsStore.getState().loadFor(root),
+    );
+    void import("@/modules/ai/store/approvalRulesStore").then(
+      ({ useApprovalRulesStore }) =>
+        useApprovalRulesStore.getState().loadFor(root),
     );
   }, [explorerRoot, launchCwd, home]);
 

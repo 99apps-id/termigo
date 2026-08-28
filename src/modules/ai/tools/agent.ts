@@ -1,9 +1,13 @@
 import { tool } from "ai";
 import { remoteUnsupported } from "../lib/remoteFs";
 import { z } from "zod";
+import { AGENT_LAUNCHERS } from "@/modules/agents/lib/launcher";
 import { useManagedAgentsStore } from "@/modules/agents/store/managedAgentsStore";
 import { writeToSession } from "@/modules/terminal";
 import type { ToolContext } from "./context";
+
+const AGENT_IDS = AGENT_LAUNCHERS.map((a) => a.id) as [string, ...string[]];
+const AGENT_LIST = AGENT_LAUNCHERS.map((a) => a.id).join(", ");
 
 // Claude Code's TUI treats a trailing CR in the same write chunk as the text
 // as a literal newline, not a submit. Send the Enter as a separate chunk once
@@ -27,17 +31,21 @@ export function buildManagedAgentTools(ctx: ToolContext) {
   return {
     spawn_coding_agent: tool({
       description:
-        "Spawn a Claude Code agent in a new terminal tab and give it the prompt. Use this when the user (via /claude-code) wants work delegated and no agent is active yet in this session. Craft a complete, self-contained prompt first; the user approves it before the agent starts. Do not call this if an agent is already active — use send_to_agent instead.",
+        `Spawn an external coding-agent CLI in a new terminal tab and give it the prompt. Use this when the user wants work delegated and no agent is active yet in this session. Craft a complete, self-contained prompt first; the user approves it before the agent starts. Do not call this if an agent is already active — use send_to_agent instead. Supported agents: ${AGENT_LIST} (defaults to claude; the CLI must be installed and on PATH).`,
       inputSchema: z.object({
         prompt: z
           .string()
           .min(1)
+          .describe("The full, self-contained task prompt for the agent."),
+        agent: z
+          .enum(AGENT_IDS)
+          .optional()
           .describe(
-            "The full, self-contained task prompt for the Claude Code agent.",
+            `Which coding-agent CLI to launch (${AGENT_LIST}). Defaults to claude. Pick what the user asked for; only claude/codex/gemini/pi support activity hooks.`,
           ),
       }),
       needsApproval: true,
-      execute: async ({ prompt }) => {
+      execute: async ({ prompt, agent }) => {
         // Claude Code runs in a local terminal tab. With an SSH terminal
         // focused the model is usually thinking about the server, and would
         // hand the task to an agent on the wrong machine - which looks like it
@@ -51,25 +59,26 @@ export function buildManagedAgentTools(ctx: ToolContext) {
         const sessionId = ctx.getSessionId();
         if (!sessionId) return { error: "no active chat session" };
         const store = useManagedAgentsStore.getState();
-        if (store.getBySessionId(sessionId)) {
+        const existing = store.getBySessionId(sessionId);
+        if (existing) {
           return {
-            error:
-              "a Claude Code agent is already active in this session; use send_to_agent to give it more work",
+            error: `a ${existing.agent} agent is already active in this session; use send_to_agent to give it more work`,
           };
         }
-        const spawned = ctx.spawnAgent(prompt);
+        const spawned = ctx.spawnAgent(prompt, agent);
         if (!spawned) return { error: "could not spawn the agent" };
         return {
           ok: true,
           tab_id: spawned.tabId,
-          message: "Claude Code agent spawned. It will start working shortly.",
+          agent: agent ?? "claude",
+          message: `${agent ?? "claude"} agent spawned. It will start working shortly.`,
         };
       },
     }),
 
     send_to_agent: tool({
       description:
-        "Send a follow-up instruction to the active Claude Code agent in this session. Use after reviewing its output to request fixes or the next unit of work. The instruction is typed into the agent's prompt and submitted once the user approves. Read its latest output first so the follow-up is informed.",
+        "Send a follow-up instruction to the active coding agent in this session. Use after reviewing its output to request fixes or the next unit of work. The instruction is typed into the agent's prompt and submitted once the user approves. Read its latest output first so the follow-up is informed.",
       inputSchema: z.object({
         instruction: z
           .string()
@@ -86,7 +95,7 @@ export function buildManagedAgentTools(ctx: ToolContext) {
         if (!managed) {
           return {
             error:
-              "no Claude Code agent is active in this session; spawn one with spawn_coding_agent",
+              "no coding agent is active in this session; spawn one with spawn_coding_agent",
           };
         }
         const oneLine = instruction.replace(/\s*\r?\n\s*/g, " ").trim();
@@ -106,7 +115,7 @@ export function buildManagedAgentTools(ctx: ToolContext) {
 
     read_agent_output: tool({
       description:
-        "Inspect the Claude Code agent in this session: whether one is active, its status, and the tail of its terminal output. Call this first when handling a /claude-code request so you know whether to spawn a new agent or follow up with the existing one, and to see what it has done and reported.",
+        "Inspect the coding agent running in this session (claude, codex, gemini, …): whether one is active, which agent it is, its status, and the tail of its terminal output. Call this first when delegating so you know whether to spawn a new agent or follow up with the existing one, and to see what it has done and reported.",
       inputSchema: z.object({
         lines: z
           .number()
@@ -125,6 +134,7 @@ export function buildManagedAgentTools(ctx: ToolContext) {
         const raw = ctx.readAgentOutput(managed.leafId);
         return {
           active: true,
+          agent: managed.agent,
           phase: managed.phase,
           rounds: managed.rounds,
           max_rounds: managed.maxRounds,

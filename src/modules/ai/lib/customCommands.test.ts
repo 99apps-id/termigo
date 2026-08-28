@@ -19,7 +19,10 @@ describe("parseCommand", () => {
   });
 
   it("accepts a body-only file with no frontmatter", () => {
-    const cmd = parseCommand("standup", "Summarise what changed since yesterday.");
+    const cmd = parseCommand(
+      "standup",
+      "Summarise what changed since yesterday.",
+    );
     expect(cmd.description).toBe("");
     expect(cmd.body).toBe("Summarise what changed since yesterday.");
   });

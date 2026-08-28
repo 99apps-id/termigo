@@ -3,23 +3,23 @@ import {
   ClaudeIcon,
   SparklesIcon,
 } from "@hugeicons/core-free-icons";
-import { usePlanStore } from "../store/planStore";
-import { useChatStore } from "../store/chatStore";
 import { useApprovalQueue } from "../store/approvalQueueStore";
+import { useChatStore } from "../store/chatStore";
 import { useCustomCommandsStore } from "../store/customCommandsStore";
-import { expandCommand } from "./customCommands";
+import { usePlanStore } from "../store/planStore";
 import { useSessionDirectiveStore } from "../store/sessionDirectiveStore";
 import {
-  parseScheduleWhen,
-  computeNextDueAt,
-  startScheduler,
-} from "./scheduler";
-import {
   formatQueue,
+  type PendingApproval,
   parseApprovalTarget,
   resolveTarget,
-  type PendingApproval,
 } from "./approvalQueue";
+import { expandCommand } from "./customCommands";
+import {
+  computeNextDueAt,
+  parseScheduleWhen,
+  startScheduler,
+} from "./scheduler";
 
 /**
  * Outcome of intercepting a slash command from the composer.
@@ -212,7 +212,8 @@ function respondToSchedule(tail: string): SlashOutcome {
       return { kind: "handled", toast: "No scheduled tasks." };
     }
     const lines = schedules.map(
-      (s, i) => `${i + 1}. ${s.enabled ? "" : "(paused) "}${s.when}: ${s.prompt}`,
+      (s, i) =>
+        `${i + 1}. ${s.enabled ? "" : "(paused) "}${s.when}: ${s.prompt}`,
     );
     return { kind: "handled", toast: lines.join("\n") };
   }
@@ -288,8 +289,11 @@ function respondToWaiting(arg: string, approved: boolean): SlashOutcome {
 
   const picked = resolveTarget(queue, target);
   if ("error" in picked) {
-    const detail = queue.length > 1 ? `
-${formatQueue(queue)}` : "";
+    const detail =
+      queue.length > 1
+        ? `
+${formatQueue(queue)}`
+        : "";
     return { kind: "handled", toast: `${picked.error}${detail}` };
   }
 

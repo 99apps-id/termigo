@@ -1,6 +1,8 @@
 import { type RefObject, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { AGENT_LAUNCHERS } from "@/modules/agents/lib/launcher";
 import { useManagedAgentsStore } from "@/modules/agents/store/managedAgentsStore";
+import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   findLeafCwd,
   findLeafRemoteCwd,
@@ -31,16 +33,46 @@ import {
 
 type TuiWaitResult = "ready" | "gone" | "timeout";
 
-async function waitForClaudeTuiReady(
+// Markers that mean a coding-agent TUI has finished booting and is showing its
+// prompt. Claude's "shortcuts"/"? for" plus generic prompt glyphs and phrases
+// the other CLIs (codex, gemini, opencode, …) draw, so one detector serves them
+// all. When none appear, `waitForTuiReady` falls back to buffer-stability.
+const TUI_READY_MARKERS = [
+  "shortcuts",
+  "? for",
+  "esc to",
+  "enter to",
+  "ctrl+c",
+  "❯",
+  "▌",
+  "│",
+  "╭",
+  "> ",
+];
+
+async function waitForTuiReady(
   readBuf: () => string | null,
-  timeoutMs = 8000,
+  timeoutMs = 12000,
 ): Promise<TuiWaitResult> {
   const start = Date.now();
+  let lastBuf = "";
+  let stableSince = 0;
   while (Date.now() - start < timeoutMs) {
     const buf = readBuf();
     if (buf === null) return "gone";
-    if (buf.includes("shortcuts") || buf.includes("? for")) return "ready";
-    await new Promise((r) => setTimeout(r, 120));
+    const low = buf.toLowerCase();
+    if (TUI_READY_MARKERS.some((m) => low.includes(m))) return "ready";
+    // Fallback: a non-empty buffer that stops changing for ~1.2s is a booted
+    // TUI whose prompt we simply do not have a marker for.
+    if (buf.length > 0) {
+      if (buf === lastBuf) {
+        if (stableSince && Date.now() - stableSince > 1200) return "ready";
+      } else {
+        lastBuf = buf;
+        stableSince = Date.now();
+      }
+    }
+    await new Promise((r) => setTimeout(r, 150));
   }
   return "timeout";
 }
@@ -245,26 +277,44 @@ export function useAiLiveBridge(params: Params) {
           return [];
         }
       },
-      spawnManagedAgent: (prompt: string, sessionId: string) => {
+      spawnManagedAgent: (
+        prompt: string,
+        sessionId: string,
+        agentId = "claude",
+      ) => {
         const trimmed = prompt.trim();
         if (!trimmed) return null;
         const oneLine = trimmed.replace(/\s*\r?\n\s*/g, " ");
         const cwd = findCwd();
         const short =
           oneLine.length > 32 ? `${oneLine.slice(0, 32)}…` : oneLine;
+        // Resolve the launcher: the user's configured command wins, else the
+        // built-in default. Unknown ids fall back to Claude.
+        const launcher =
+          AGENT_LAUNCHERS.find((a) => a.id === agentId) ?? AGENT_LAUNCHERS[0];
+        const configured =
+          usePreferencesStore.getState().agentLaunchCommands?.[launcher.id];
+        const command = (configured || launcher.defaultCommand).trim();
         const { tabId, leafId } = ref.current.newAgentTab(
           cwd ?? undefined,
-          `claude · ${short}`,
+          `${launcher.id} · ${short}`,
         );
-        useManagedAgentsStore
-          .getState()
-          .register({ leafId, tabId, sessionId, task: oneLine, cwd });
-        const hooksReady = invoke("agent_enable_hooks", { agent: "claude" }).catch(
-          () => {},
-        );
+        useManagedAgentsStore.getState().register({
+          leafId,
+          tabId,
+          sessionId,
+          task: oneLine,
+          cwd,
+          agent: launcher.id,
+        });
+        // Hooks let Termigo observe the agent's activity; only some CLIs support
+        // them. Skip the enable call (and its wait) for those that do not.
+        const hooksReady = launcher.supportsHooks
+          ? invoke("agent_enable_hooks", { agent: launcher.id }).catch(() => {})
+          : Promise.resolve();
         void (async () => {
           await Promise.all([whenSessionReady(leafId), hooksReady]);
-          if (!writeToSession(leafId, "claude\r")) {
+          if (!writeToSession(leafId, `${command}\r`)) {
             useManagedAgentsStore.getState().remove(leafId);
             return;
           }
@@ -272,11 +322,11 @@ export function useAiLiveBridge(params: Params) {
             const term = terminalRefs.current.get(leafId);
             return term ? term.getBuffer(120) : null;
           };
-          const result = await waitForClaudeTuiReady(readBuf);
+          const result = await waitForTuiReady(readBuf);
           if (result !== "ready") {
             if (result === "timeout") {
               console.warn(
-                "[termigo] Claude TUI did not appear in time; aborting prompt send",
+                `[termigo] ${launcher.id} TUI did not appear in time; aborting prompt send`,
               );
             }
             useManagedAgentsStore.getState().remove(leafId);

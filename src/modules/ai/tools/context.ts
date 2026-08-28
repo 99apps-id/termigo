@@ -68,7 +68,10 @@ export type ToolContext = {
   /** Instances currently open, for the agent's `<env>` browsers list. */
   browserList: () => Promise<string[]>;
   /** Spawn a Claude Code agent in a new terminal tab, bound to this session. */
-  spawnAgent: (prompt: string) => { tabId: number; leafId: number } | null;
+  spawnAgent: (
+    prompt: string,
+    agent?: string,
+  ) => { tabId: number; leafId: number } | null;
   /** Read the terminal scrollback tail of a managed agent's leaf. */
   readAgentOutput: (leafId: number) => string | null;
   readCache: Map<string, { size: number; hash: number }>;

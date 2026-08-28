@@ -1,13 +1,25 @@
-import { useEffect, useRef } from "react";
-import { error as logError, info as logInfo } from "@tauri-apps/plugin-log";
 import { native } from "@/modules/ai/lib/native";
+import { listen } from "@tauri-apps/api/event";
+import { error as logError, info as logInfo } from "@tauri-apps/plugin-log";
+import { useEffect, useRef } from "react";
 import { anyOverlayIntersects, useAnyOverlayOpen } from "./overlaySuppress";
+
+// The embedded webview's injected script emits this when the page navigates
+// (load / popstate / hashchange / pushState), carrying the new location.href —
+// see `embed_init_script` in src-tauri browser.rs.
+const BROWSER_VALUE_EVENT = "termigo:browser-value";
 
 type Props = {
   /** Stable id for this browser instance (the tab id works well). */
   instance: string;
   url: string;
   visible: boolean;
+  /** Force the native webview hidden even while visible — used while the
+   *  address bar is focused so the DOM keyboard is not stolen. */
+  suppress?: boolean;
+  /** Fired when the page navigates itself (a link, back/forward) so the address
+   *  bar can follow the real URL instead of showing the one we asked for. */
+  onNavigate?: (url: string) => void;
 };
 
 /**
@@ -19,10 +31,24 @@ type Props = {
  * not visible. Unlike the iframe preview, an external site renders here because
  * it is a real browser, not an embedded frame subject to X-Frame-Options.
  */
-export function BrowserPane({ instance, url, visible }: Props) {
+export function BrowserPane({
+  instance,
+  url,
+  visible,
+  suppress,
+  onNavigate,
+}: Props) {
   const boxRef = useRef<HTMLDivElement>(null);
   const createdUrl = useRef<string | null>(null);
   const lastKey = useRef<string>("");
+  const suppressRef = useRef(suppress);
+  suppressRef.current = suppress;
+  // The last URL the page reported navigating to itself. Kept so the navigate
+  // effect below does NOT push it straight back (which would reload the page
+  // the browser is already on) when the address bar follows a self-navigation.
+  const reportedUrl = useRef<string | null>(null);
+  const onNavigateRef = useRef(onNavigate);
+  onNavigateRef.current = onNavigate;
   // Hide the native webview while a modal / dropdown / approval popup overlaps
   // it, so the overlay is never covered (a native webview cannot sit behind the
   // DOM). Read through a ref so the rAF loop sees the latest without re-subscribing.
@@ -41,7 +67,9 @@ export function BrowserPane({ instance, url, visible }: Props) {
         const r = el.getBoundingClientRect();
         // Yield to any overlay drawn over the pane by hiding the webview.
         const show =
-          visible && !(overlayOpenRef.current && anyOverlayIntersects(r));
+          visible &&
+          !suppressRef.current &&
+          !(overlayOpenRef.current && anyOverlayIntersects(r));
         const dpr = window.devicePixelRatio || 1;
         const bounds = {
           x: Math.round(r.left * dpr),
@@ -63,7 +91,9 @@ export function BrowserPane({ instance, url, visible }: Props) {
               createdUrl.current = url;
             })
             .catch((e) => {
-              void logError(`BrowserPane: browserEmbedUpdate failed: ${String(e)}`);
+              void logError(
+                `BrowserPane: browserEmbedUpdate failed: ${String(e)}`,
+              );
             });
         }
       }
@@ -74,14 +104,43 @@ export function BrowserPane({ instance, url, visible }: Props) {
   }, [instance, url, visible]);
 
   // Navigate an already-created webview when the URL changes (the update path
-  // only navigates on first create).
+  // only navigates on first create). Skip when the change merely echoes a URL
+  // the page navigated to itself — re-navigating there would reload it.
   useEffect(() => {
-    if (createdUrl.current && createdUrl.current !== url) {
-      void native.browserEmbedNavigate(instance, url).then(() => {
-        createdUrl.current = url;
-      }).catch(() => {});
+    if (
+      createdUrl.current &&
+      createdUrl.current !== url &&
+      reportedUrl.current !== url
+    ) {
+      void native
+        .browserEmbedNavigate(instance, url)
+        .then(() => {
+          createdUrl.current = url;
+        })
+        .catch(() => {});
     }
   }, [instance, url]);
+
+  // Follow the embedded page's own navigations (links, back/forward) so the
+  // address bar reflects where it actually is. The injected script emits the
+  // new location.href; we relay it up as long as it really differs.
+  useEffect(() => {
+    const un = listen<{ instance?: string; kind?: string; value?: string }>(
+      BROWSER_VALUE_EVENT,
+      (e) => {
+        const p = e.payload;
+        if (!p || p.instance !== instance || p.kind !== "url") return;
+        const next = typeof p.value === "string" ? p.value : "";
+        if (!next || next === createdUrl.current) return;
+        reportedUrl.current = next;
+        createdUrl.current = next;
+        onNavigateRef.current?.(next);
+      },
+    );
+    return () => {
+      void un.then((f) => f());
+    };
+  }, [instance]);
 
   // Tear the native webview down when the pane unmounts (tab closed).
   useEffect(() => {

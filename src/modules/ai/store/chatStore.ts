@@ -86,6 +86,7 @@ export type Live = {
   spawnManagedAgent: (
     prompt: string,
     sessionId: string,
+    agent?: string,
   ) => { tabId: number; leafId: number } | null;
   readLeafBuffer: (leafId: number) => string | null;
 };

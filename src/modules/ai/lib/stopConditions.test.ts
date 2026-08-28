@@ -1,6 +1,10 @@
-import { describe, expect, it } from "vitest";
 import type { ToolSet } from "ai";
-import { noProgressStop, noToolRepetition } from "./agent";
+import { describe, expect, it } from "vitest";
+import {
+  noProgressStop,
+  noToolRepetition,
+  synthesisStopDecision,
+} from "./agent";
 
 type Call = {
   toolName: string;
@@ -117,7 +121,15 @@ describe("noToolRepetition", () => {
     // The model keeps re-reading a file that never changes: same call, same
     // result - that is a loop, not verification.
     expect(
-      stop(steps([read("a", "v")], [read("b", "w")], [read("a", "v")], [read("b", "w")], [read("a", "v")])),
+      stop(
+        steps(
+          [read("a", "v")],
+          [read("b", "w")],
+          [read("a", "v")],
+          [read("b", "w")],
+          [read("a", "v")],
+        ),
+      ),
     ).toBe(true);
   });
 
@@ -140,5 +152,28 @@ describe("noProgressStop", () => {
 
   it("does not fire on a single step", () => {
     expect(stop(steps(null))).toBe(false);
+  });
+});
+
+describe("synthesisStopDecision", () => {
+  it("stops immediately when the model cannot take a forced tool choice", () => {
+    expect(synthesisStopDecision(false, false)).toEqual({
+      stop: true,
+      requested: false,
+    });
+  });
+
+  it("holds the stop for one synthesis step on the first trip", () => {
+    expect(synthesisStopDecision(true, false)).toEqual({
+      stop: false,
+      requested: true,
+    });
+  });
+
+  it("stops once the synthesis step has already been requested", () => {
+    expect(synthesisStopDecision(true, true)).toEqual({
+      stop: true,
+      requested: true,
+    });
   });
 });
