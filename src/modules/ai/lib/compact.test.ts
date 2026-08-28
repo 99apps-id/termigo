@@ -145,6 +145,48 @@ describe("compactModelMessagesDetailed hard cap", () => {
   });
 });
 
+describe("compactModelMessagesDetailed floor", () => {
+  const estTokens = (msgs: ModelMessage[]) => {
+    let chars = 0;
+    for (const m of msgs) {
+      if (typeof m.content === "string") chars += m.content.length;
+      else if (Array.isArray(m.content)) {
+        for (const p of m.content as Array<{ type: string; output?: unknown }>) {
+          chars += JSON.stringify(p.output ?? "").length + 32;
+        }
+      }
+    }
+    return chars / 3.5;
+  };
+
+  // The unbreakable-loop case: a single tool result larger than the whole
+  // window sits in the KEEP_MIN_TAIL the hard cap protects. Without the floor
+  // pass no budget reduction can make it fit, so every overflow retry fails.
+  it("trims a single giant tool result in the protected tail", () => {
+    const messages: ModelMessage[] = [
+      readCall("c0", "/big.txt"),
+      readResult("c0", "z".repeat(80_000)),
+    ];
+    const limit = 10_000;
+    expect(estTokens(messages)).toBeGreaterThan(limit);
+    const result = compactModelMessagesDetailed(messages, limit);
+    expect(result.compacted).toBe(true);
+    expect(estTokens(result.messages)).toBeLessThan(limit);
+  });
+
+  // A huge string-content message (a giant paste) is invisible to the
+  // array-only passes; the floor must still bring it under the window.
+  it("truncates a huge string-content message", () => {
+    const messages = [
+      { role: "user", content: "q".repeat(80_000) },
+    ] as ModelMessage[];
+    const limit = 10_000;
+    const result = compactModelMessagesDetailed(messages, limit);
+    expect(result.compacted).toBe(true);
+    expect(estTokens(result.messages)).toBeLessThan(limit);
+  });
+});
+
 describe("compactModelMessages", () => {
   it("returns the messages array from the detailed result", () => {
     const messages = [{ role: "user", content: "hi" }] as ModelMessage[];

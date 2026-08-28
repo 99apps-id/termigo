@@ -116,7 +116,9 @@ async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Res
                 .map(|s| (s.width as f64 / scale, s.height as f64 / scale))
         })
         .unwrap_or((980.0, 760.0));
-    let w = 980.0_f64.min(win_w * 0.94).max(560.0);
+    // Hug the 640px content column (max-w-160 in SettingsApp) so the window
+    // doesn't open far wider than its content with big empty side margins.
+    let w = 840.0_f64.min(win_w * 0.94).max(560.0);
     let h = 760.0_f64.min(win_h * 0.94).max(460.0);
     let builder = WebviewWindowBuilder::new(&app, "settings", WebviewUrl::App(url_path.into()))
         .title("Settings")

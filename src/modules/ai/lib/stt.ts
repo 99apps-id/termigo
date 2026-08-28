@@ -1,5 +1,5 @@
 import type { ProviderKeys } from "./keyring";
-import { createProxyFetch, proxyFetch } from "./proxyFetch";
+import { createProxyFetch } from "./proxyFetch";
 
 const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
 const STT_TIMEOUT_GROQ_MS = 30_000;
@@ -53,7 +53,7 @@ async function fetchWithTimeout(
   input: RequestInfo | URL,
   init: RequestInit = {},
   timeoutMs: number,
-  transport: typeof fetch = proxyFetch,
+  transport: typeof fetch = localProxyFetch,
 ): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -67,7 +67,7 @@ async function fetchWithTimeout(
 async function transcribeOpenAI(blob: Blob, apiKey: string): Promise<string> {
   const [{ createOpenAI }, { experimental_transcribe: transcribe }] =
     await Promise.all([import("@ai-sdk/openai"), import("ai")]);
-  const openai = createOpenAI({ apiKey, fetch: proxyFetch });
+  const openai = createOpenAI({ apiKey, fetch: localProxyFetch });
   const buf = new Uint8Array(await blob.arrayBuffer());
   const { text } = await transcribe({
     model: openai.transcription("whisper-1"),
@@ -95,11 +95,15 @@ async function transcribeViaRest(
   const headers: Record<string, string> = { "Content-Type": contentType };
   if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
 
-  const res = await fetchWithTimeout(`${baseURL}/audio/transcriptions`, {
-    method: "POST",
-    headers,
-    body,
-  }, STT_TIMEOUT_GROQ_MS);
+  const res = await fetchWithTimeout(
+    `${baseURL}/audio/transcriptions`,
+    {
+      method: "POST",
+      headers,
+      body,
+    },
+    STT_TIMEOUT_GROQ_MS,
+  );
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     throw new Error(
@@ -121,7 +125,8 @@ async function toWav(blob: Blob): Promise<Blob> {
     const view = new DataView(buffer);
 
     const writeStr = (offset: number, s: string) => {
-      for (let i = 0; i < s.length; i++) view.setUint8(offset + i, s.charCodeAt(i));
+      for (let i = 0; i < s.length; i++)
+        view.setUint8(offset + i, s.charCodeAt(i));
     };
 
     writeStr(0, "RIFF");
@@ -141,7 +146,7 @@ async function toWav(blob: Blob): Promise<Blob> {
     let offset = 44;
     for (let i = 0; i < length; i++) {
       const s = Math.max(-1, Math.min(1, channel[i]));
-      view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+      view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
       offset += 2;
     }
 
@@ -168,11 +173,16 @@ async function transcribeWhisperCpp(
 
   // whisper.cpp is loopback-only (see assertLoopbackUrl), so this transport is
   // the one allowed to reach a private address.
-  const res = await fetchWithTimeout(`${baseURL}/inference`, {
-    method: "POST",
-    headers: { "Content-Type": contentType },
-    body,
-  }, STT_TIMEOUT_WHISPERCPP_MS, localProxyFetch);
+  const res = await fetchWithTimeout(
+    `${baseURL}/inference`,
+    {
+      method: "POST",
+      headers: { "Content-Type": contentType },
+      body,
+    },
+    STT_TIMEOUT_WHISPERCPP_MS,
+    localProxyFetch,
+  );
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     throw new Error(
@@ -225,7 +235,8 @@ export async function transcribeAudio(
     }
     case "whispercpp": {
       const baseURL =
-        options.whispercppBaseURL?.replace(/\/+$/, "") || "http://127.0.0.1:8080";
+        options.whispercppBaseURL?.replace(/\/+$/, "") ||
+        "http://127.0.0.1:8080";
       assertLoopbackUrl(baseURL);
       return transcribeWhisperCpp(baseURL, blob);
     }

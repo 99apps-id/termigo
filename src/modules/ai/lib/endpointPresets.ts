@@ -54,8 +54,8 @@ export const ENDPOINT_PRESETS: EndpointPreset[] = [
     id: "stepfun",
     name: "StepFun",
     baseURL: "https://api.stepfun.com/v1",
-    suggestedModel: "step-2-16k",
-    contextLimit: 16_384,
+    suggestedModel: "step-3",
+    contextLimit: 256_000,
     keysUrl: "https://platform.stepfun.com/",
   },
   {
@@ -73,7 +73,13 @@ export const ENDPOINT_PRESETS: EndpointPreset[] = [
 export function presetToEndpoint(
   preset: EndpointPreset,
   id: string,
-): { id: string; name: string; baseURL: string; modelId: string; contextLimit: number } {
+): {
+  id: string;
+  name: string;
+  baseURL: string;
+  modelId: string;
+  contextLimit: number;
+} {
   return {
     id,
     name: preset.name,

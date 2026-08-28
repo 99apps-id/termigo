@@ -211,7 +211,7 @@ pub fn shell_session_open(
         Some(c) => c.to_string(),
         None => {
             if let WorkspaceEnv::Wsl { distro } = &workspace {
-                crate::modules::workspace::wsl_home(distro.clone())?
+                crate::modules::workspace::wsl_home_blocking(distro)?
             } else {
                 crate::modules::fs::to_canon(dirs::home_dir().unwrap_or_else(|| PathBuf::from("/")))
             }
@@ -287,10 +287,11 @@ pub fn shell_bg_spawn(
     command: String,
     cwd: Option<String>,
     workspace: Option<WorkspaceEnv>,
+    log_path: Option<String>,
 ) -> Result<u32, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     authorize_spawn_cwd(&registry, cwd.as_deref(), &workspace)?;
-    let proc = background::spawn(command, cwd, workspace)?;
+    let proc = background::spawn(command, cwd, workspace, log_path)?;
     let id = state.next_bg_id.fetch_add(1, Ordering::Relaxed);
     state.bg.write().unwrap().insert(id, proc);
     Ok(id)

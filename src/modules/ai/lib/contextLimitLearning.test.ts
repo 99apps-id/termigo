@@ -50,6 +50,23 @@ describe("recordContextOverflow + effectiveContextLimit", () => {
     expect(effectiveContextLimit("other", 256000)).toBe(256000);
   });
 
+  // The loop the user hit: a numberless overflow on a 1M-configured model whose
+  // real cap is far lower. It must shrink relative to what just failed, not
+  // nudge down from 1M forever, so a click or two converges.
+  it("converges on a numberless overflow instead of looping", () => {
+    const first = effectiveContextLimit("m", 1_000_000);
+    expect(first).toBe(1_000_000);
+
+    recordContextOverflow("m", "context_length_exceeded");
+    const second = effectiveContextLimit("m", 1_000_000);
+    expect(second).toBeLessThanOrEqual(400_000);
+    expect(second).toBeLessThan(first);
+
+    recordContextOverflow("m", "context_length_exceeded");
+    const third = effectiveContextLimit("m", 1_000_000);
+    expect(third).toBeLessThan(second);
+  });
+
   it("relaxes the scale after a request fits with headroom", () => {
     recordContextOverflow("m", OVERFLOW);
     const tightened = effectiveContextLimit("m", 1_000_000);

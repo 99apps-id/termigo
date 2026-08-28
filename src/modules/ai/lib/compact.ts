@@ -296,6 +296,60 @@ export function compactModelMessagesDetailed(
     }
   }
 
+  // Absolute floor: the transcript STILL exceeds the budget. This happens when
+  // a single message we protected above is itself larger than the window — one
+  // giant tool result in the tail, or a huge string-content paste anywhere that
+  // the earlier array-only passes never touched. Left alone, no budget
+  // reduction can ever make the request fit, so every overflow retry fails
+  // again — the loop the user hits. Trim EVERYTHING (tail included, both
+  // content shapes); eliding a tool result or truncating text keeps each
+  // message's role and tool-call pairing intact, so the request is always
+  // brought under the window even if the last turn ends up heavily elided.
+  if (estimateTokens(approxBytes(out)) >= budget) {
+    for (let i = 0; i < out.length; i++) {
+      const m = out[i];
+      if (m.role === "system") continue;
+      // Only force-trim a message that ALONE meets or exceeds the whole budget:
+      // it can never fit beside anything else, so it must be cut wherever it
+      // sits, tail included. Smaller messages are left to the passes above so
+      // their choices (e.g. keeping the latest file read intact) stand — and a
+      // transcript that is merely the sum of many mid-size messages converges
+      // instead as the learned budget shrinks on retry.
+      if (estimateTokens(approxBytes([m])) < budget) continue;
+      if (typeof m.content === "string") {
+        if (m.content.length > HARD_TEXT_KEEP_CHARS) {
+          out[i] = {
+            ...m,
+            content: `${m.content.slice(0, HARD_TEXT_KEEP_CHARS)}\n${ELISION_TEXT}`,
+          } as ModelMessage;
+          dropped++;
+        }
+        continue;
+      }
+      if (!Array.isArray(m.content)) continue;
+      let local = false;
+      const next = (m.content as ToolPart[]).map((part) => {
+        const r = elideToolResult(part);
+        if (r.changed) {
+          local = true;
+          return r.part;
+        }
+        if (part.type === "text") {
+          const t = truncateTextPart(part, HARD_TEXT_KEEP_CHARS);
+          if (t !== part) {
+            local = true;
+            return t;
+          }
+        }
+        return part;
+      });
+      if (local) {
+        out[i] = { ...m, content: next } as ModelMessage;
+        dropped++;
+      }
+    }
+  }
+
   return {
     messages: out,
     compacted: dropped > 0,

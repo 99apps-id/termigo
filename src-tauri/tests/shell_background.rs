@@ -18,7 +18,7 @@ fn wait_until<F: Fn() -> bool>(timeout: Duration, check: F) -> bool {
 
 #[test]
 fn spawn_empty_command_errors() {
-    assert!(background::spawn("   ".into(), None, WorkspaceEnv::Local).is_err());
+    assert!(background::spawn("   ".into(), None, WorkspaceEnv::Local, None).is_err());
 }
 
 #[test]
@@ -27,6 +27,7 @@ fn spawn_invalid_cwd_errors() {
         "true".into(),
         Some("/no/such/dir".into()),
         WorkspaceEnv::Local,
+        None,
     );
     assert!(err.is_err());
 }
@@ -37,6 +38,7 @@ fn spawn_captures_stdout_and_exits_zero() {
         "printf 'hello\\n'".into(),
         None,
         WorkspaceEnv::Local,
+        None,
     )
     .expect("spawn");
 
@@ -52,7 +54,7 @@ fn spawn_captures_stdout_and_exits_zero() {
 
 #[test]
 fn spawn_captures_nonzero_exit() {
-    let proc = background::spawn("exit 42".into(), None, WorkspaceEnv::Local).expect("spawn");
+    let proc = background::spawn("exit 42".into(), None, WorkspaceEnv::Local, None).expect("spawn");
 
     assert!(wait_until(Duration::from_secs(5), || {
         proc.read_logs(0).exited
@@ -63,7 +65,7 @@ fn spawn_captures_nonzero_exit() {
 #[test]
 fn kill_terminates_a_running_process() {
     let proc =
-        background::spawn("sleep 30".into(), None, WorkspaceEnv::Local).expect("spawn");
+        background::spawn("sleep 30".into(), None, WorkspaceEnv::Local, None).expect("spawn");
 
     proc.kill();
 
@@ -79,6 +81,7 @@ fn read_logs_advances_offset() {
         "printf 'one\\n'; printf 'two\\n'".into(),
         None,
         WorkspaceEnv::Local,
+        None,
     )
     .expect("spawn");
 
@@ -96,7 +99,7 @@ fn read_logs_advances_offset() {
 
 #[test]
 fn info_reflects_command_and_exit() {
-    let proc = background::spawn("true".into(), None, WorkspaceEnv::Local).expect("spawn");
+    let proc = background::spawn("true".into(), None, WorkspaceEnv::Local, None).expect("spawn");
     let info_running = proc.info(7);
     assert_eq!(info_running.handle, 7);
     assert_eq!(info_running.command, "true");
@@ -107,4 +110,31 @@ fn info_reflects_command_and_exit() {
     let info_done = proc.info(7);
     assert!(info_done.exited);
     assert_eq!(info_done.exit_code, Some(0));
+    assert_eq!(info_done.log_path, None);
+}
+
+#[test]
+fn spawn_writes_full_log_file() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let log_path = dir.path().join("scan.log").to_string_lossy().into_owned();
+    let proc = background::spawn(
+        "printf 'line1\\n'; printf 'line2\\n'".into(),
+        None,
+        WorkspaceEnv::Local,
+        Some(log_path.clone()),
+    )
+    .expect("spawn");
+
+    assert!(wait_until(Duration::from_secs(5), || {
+        proc.read_logs(0).exited
+    }));
+
+    let content = std::fs::read_to_string(&log_path).expect("read log");
+    assert!(content.contains("line1"));
+    assert!(content.contains("line2"));
+    // The full log is also surfaced on the process and its log reads.
+    assert_eq!(proc.info(1).log_path.as_deref(), Some(log_path.as_str()));
+    assert_eq!(proc.read_logs(0).log_path.as_deref(), Some(log_path.as_str()));
+    // The in-memory ring still carries the tail for progress polling.
+    assert!(proc.read_logs(0).bytes.contains("line1"));
 }

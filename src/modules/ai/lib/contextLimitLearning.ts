@@ -18,9 +18,18 @@ type ModelId = string;
 const realLimit = new Map<ModelId, number>();
 /** Budget multiplier in (0,1]. 1 = trust the configured/real limit as-is. */
 const budgetScale = new Map<ModelId, number>();
+/** The limit compaction last actually targeted for a model — so an overflow
+ *  with no numbers in it can shrink relative to what just failed, not the
+ *  configured window. */
+const lastAttempted = new Map<ModelId, number>();
 
 const MIN_SCALE = 0.12;
+const MIN_LIMIT = 8_000;
 const SAFETY = 0.85;
+/** How far below a just-failed limit to aim when the error carries no numbers.
+ *  Aggressive so a 1M-configured model whose real cap is a fraction of that
+ *  converges in a click or two instead of nudging down 30% at a time. */
+const BLIND_SHRINK = 0.4;
 
 /** Parse "maximum context length is N tokens ... requested M tokens" from a
  *  provider error. Either field may be absent. */
@@ -57,10 +66,22 @@ export function recordContextOverflow(modelId: string, message: string): void {
     const target = (max / requested) * SAFETY;
     const prev = budgetScale.get(modelId) ?? 1;
     budgetScale.set(modelId, Math.max(MIN_SCALE, Math.min(prev, target)));
-  } else {
-    // Overflow with no numbers: just tighten a notch.
-    const prev = budgetScale.get(modelId) ?? 1;
-    budgetScale.set(modelId, Math.max(MIN_SCALE, prev * 0.7));
+  } else if (!max) {
+    // Overflow with no numbers to learn from (a terse "context_length_exceeded",
+    // or a wrapped error that dropped the detail). Nudging the scale down from
+    // the CONFIGURED window means a 1M-configured model whose real cap is far
+    // lower takes many retries to fit — which is the loop the user hits. Instead
+    // pin a real ceiling below the limit that JUST failed: the retry then aims
+    // well under what overflowed and converges in a click or two.
+    const attempted = lastAttempted.get(modelId);
+    if (attempted && attempted > MIN_LIMIT) {
+      const ceiling = Math.floor(attempted * BLIND_SHRINK);
+      const prev = realLimit.get(modelId) ?? Number.POSITIVE_INFINITY;
+      realLimit.set(modelId, Math.max(MIN_LIMIT, Math.min(prev, ceiling)));
+    } else {
+      const prev = budgetScale.get(modelId) ?? 1;
+      budgetScale.set(modelId, Math.max(MIN_SCALE, prev * 0.7));
+    }
   }
 }
 
@@ -75,7 +96,11 @@ export function effectiveContextLimit(
   const real = realLimit.get(modelId);
   const base = real ? Math.min(configured, real) : configured;
   const scale = budgetScale.get(modelId) ?? 1;
-  return Math.max(Math.floor(base * scale), 8_000);
+  const result = Math.max(Math.floor(base * scale), MIN_LIMIT);
+  // Remember what we actually targeted so a numberless overflow can shrink
+  // relative to this instead of the configured window.
+  lastAttempted.set(modelId, result);
+  return result;
 }
 
 /**
@@ -101,4 +126,5 @@ export function noteSuccessfulRequest(
 export function resetContextLearning(): void {
   realLimit.clear();
   budgetScale.clear();
+  lastAttempted.clear();
 }

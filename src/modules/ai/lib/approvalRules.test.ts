@@ -3,7 +3,11 @@ import {
   type ApprovalRule,
   evaluateApprovalRules,
   parseApprovalRules,
+  ruleFromApproval,
   ruleMatches,
+  sameRuleTarget,
+  serializeApprovalRules,
+  upsertRule,
 } from "./approvalRules";
 
 describe("ruleMatches", () => {
@@ -138,5 +142,107 @@ describe("parseApprovalRules", () => {
   it("returns [] for a file with no rules array", () => {
     expect(parseApprovalRules({})).toEqual([]);
     expect(parseApprovalRules(null)).toEqual([]);
+  });
+});
+
+describe("ruleFromApproval", () => {
+  it("generalises a shell command to a program glob", () => {
+    expect(
+      ruleFromApproval("bash_run", { command: "git status -s" }, "allow"),
+    ).toEqual({ tools: ["bash_run"], command: "git *", action: "allow" });
+  });
+
+  it("matches a path-qualified program whole, without a trailing glob", () => {
+    expect(
+      ruleFromApproval("bash_run", { command: "./deploy.sh prod" }, "deny"),
+    ).toEqual({ tools: ["bash_run"], command: "./deploy.sh", action: "deny" });
+  });
+
+  it("keys a file tool on its exact path", () => {
+    expect(
+      ruleFromApproval("write_file", { path: "src/App.tsx" }, "allow"),
+    ).toEqual({ tools: ["write_file"], path: "src/App.tsx", action: "allow" });
+  });
+
+  it("keys on the tool alone when there is no path or command", () => {
+    expect(ruleFromApproval("some_tool", {}, "allow")).toEqual({
+      tools: ["some_tool"],
+      action: "allow",
+    });
+  });
+
+  it("refuses to persist an empty shell command", () => {
+    expect(
+      ruleFromApproval("bash_run", { command: "   " }, "allow"),
+    ).toBeNull();
+  });
+
+  // The generalised rule must actually cover sibling calls, or "always allow"
+  // would still prompt on the next `git` subcommand.
+  it("produces a rule that matches sibling commands", () => {
+    const rule = ruleFromApproval(
+      "bash_run",
+      { command: "git status" },
+      "allow",
+    );
+    expect(
+      rule && ruleMatches(rule, { tool: "bash_run", command: "git push" }),
+    ).toBe(true);
+  });
+});
+
+describe("upsertRule", () => {
+  const base: ApprovalRule[] = [
+    { tools: ["bash_run"], command: "git *", action: "allow" },
+    { tools: ["edit"], path: "src/**", action: "allow" },
+  ];
+
+  it("replaces a rule targeting the same calls, keeping the file de-duplicated", () => {
+    const flipped: ApprovalRule = {
+      tools: ["bash_run"],
+      command: "git *",
+      action: "deny",
+    };
+    const out = upsertRule(base, flipped);
+    expect(out).toHaveLength(2);
+    expect(out[0]).toEqual(flipped);
+    expect(out.filter((r) => r.command === "git *")).toHaveLength(1);
+  });
+
+  it("prepends a new rule so it wins over broader rules already present", () => {
+    const fresh: ApprovalRule = {
+      tools: ["write_file"],
+      path: "README.md",
+      action: "deny",
+    };
+    expect(upsertRule(base, fresh)[0]).toEqual(fresh);
+  });
+
+  it("treats tool order as irrelevant when matching targets", () => {
+    expect(
+      sameRuleTarget(
+        { tools: ["a", "b"], action: "allow" },
+        { tools: ["b", "a"], action: "deny" },
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("serializeApprovalRules", () => {
+  it("round-trips through parse unchanged", () => {
+    const rules: ApprovalRule[] = [
+      { tools: ["bash_run"], command: "git *", action: "allow" },
+      { tools: ["edit"], path: "**/*.env", action: "deny", reason: "secrets" },
+    ];
+    const text = serializeApprovalRules(rules);
+    expect(text.endsWith("\n")).toBe(true);
+    expect(parseApprovalRules(JSON.parse(text))).toEqual(rules);
+  });
+
+  it("writes the versioned file shape", () => {
+    expect(JSON.parse(serializeApprovalRules([]))).toEqual({
+      version: 1,
+      rules: [],
+    });
   });
 });

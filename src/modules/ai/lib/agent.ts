@@ -43,11 +43,17 @@ import type { McpToolset } from "./mcpTools";
 import { memoryBlock as learnedBlock, type MemoryEntry } from "./memory";
 import { wantsForcedFanout } from "./orchestrationIntent";
 import { prepareAgentPrompt } from "./prompt";
-import { createProxyFetch, proxyFetch } from "./proxyFetch";
+import { createProxyFetch } from "./proxyFetch";
 import { sanitizeUiMessages } from "./sanitizeMessages";
 import { type Skill, skillsBlock } from "./skills";
 
-const localProxyFetch = createProxyFetch({ allowPrivateNetwork: true });
+// Every model/provider connection uses a trusted, user-configured endpoint, so
+// it must honour the machine's own DNS — including a provider host that a proxy,
+// VPN, or regional route resolves to a private address (which is exactly what
+// blocked deepseek/openai for users on such networks). SSRF hardening belongs on
+// AGENT-controlled URLs (the `fetch` tool, the browser), not on the model API
+// the user configured. So all providers, cloud and local, share this fetch.
+const apiFetch = createProxyFetch({ allowPrivateNetwork: true });
 
 const TOOL_LABELS: Record<string, (input: Record<string, unknown>) => string> =
   {
@@ -146,33 +152,31 @@ export async function buildLanguageModel(
   switch (provider) {
     case "openai": {
       const { createOpenAI } = await import("@ai-sdk/openai");
-      built = createOpenAI({ fetch: proxyFetch, apiKey: key })(resolvedModelId);
+      built = createOpenAI({ fetch: apiFetch, apiKey: key })(resolvedModelId);
       break;
     }
     case "anthropic": {
       const { createAnthropic } = await import("@ai-sdk/anthropic");
-      built = createAnthropic({ fetch: proxyFetch, apiKey: key })(
+      built = createAnthropic({ fetch: apiFetch, apiKey: key })(
         resolvedModelId,
       );
       break;
     }
     case "google": {
       const { createGoogleGenerativeAI } = await import("@ai-sdk/google");
-      built = createGoogleGenerativeAI({ fetch: proxyFetch, apiKey: key })(
+      built = createGoogleGenerativeAI({ fetch: apiFetch, apiKey: key })(
         resolvedModelId,
       );
       break;
     }
     case "xai": {
       const { createXai } = await import("@ai-sdk/xai");
-      built = createXai({ fetch: proxyFetch, apiKey: key })(resolvedModelId);
+      built = createXai({ fetch: apiFetch, apiKey: key })(resolvedModelId);
       break;
     }
     case "cerebras": {
       const { createCerebras } = await import("@ai-sdk/cerebras");
-      built = createCerebras({ fetch: proxyFetch, apiKey: key })(
-        resolvedModelId,
-      );
+      built = createCerebras({ fetch: apiFetch, apiKey: key })(resolvedModelId);
       break;
     }
     case "deepseek": {
@@ -187,7 +191,7 @@ export async function buildLanguageModel(
         name: "deepseek",
         baseURL: "https://api.deepseek.com",
         apiKey: key,
-        fetch: proxyFetch,
+        fetch: apiFetch,
       })(resolvedModelId);
       break;
     }
@@ -198,14 +202,12 @@ export async function buildLanguageModel(
       // reported symptom was a model that answered in prose instead of
       // emitting a tool call anything downstream could parse.
       const { createMistral } = await import("@ai-sdk/mistral");
-      built = createMistral({ apiKey: key, fetch: proxyFetch })(
-        resolvedModelId,
-      );
+      built = createMistral({ apiKey: key, fetch: apiFetch })(resolvedModelId);
       break;
     }
     case "groq": {
       const { createGroq } = await import("@ai-sdk/groq");
-      built = createGroq({ fetch: proxyFetch, apiKey: key })(resolvedModelId);
+      built = createGroq({ fetch: apiFetch, apiKey: key })(resolvedModelId);
       break;
     }
     case "openrouter": {
@@ -220,7 +222,7 @@ export async function buildLanguageModel(
           "HTTP-Referer": "https://termigo.ai",
           "X-Title": "Termigo",
         },
-        fetch: proxyFetch,
+        fetch: apiFetch,
       })(resolvedModelId);
       break;
     }
@@ -237,7 +239,7 @@ export async function buildLanguageModel(
         name: "openai-compatible",
         baseURL: compatURL,
         apiKey: epKey || key || undefined,
-        fetch: localProxyFetch,
+        fetch: apiFetch,
       })(resolvedModelId);
       break;
     }
@@ -248,7 +250,7 @@ export async function buildLanguageModel(
       built = createOpenAICompatible({
         name: "lmstudio",
         baseURL: lmstudioURL,
-        fetch: localProxyFetch,
+        fetch: apiFetch,
       })(resolvedModelId);
       break;
     }
@@ -259,7 +261,7 @@ export async function buildLanguageModel(
       built = createOpenAICompatible({
         name: "mlx",
         baseURL: mlxURL,
-        fetch: localProxyFetch,
+        fetch: apiFetch,
       })(resolvedModelId);
       break;
     }
@@ -270,7 +272,7 @@ export async function buildLanguageModel(
       built = createOpenAICompatible({
         name: "ollama",
         baseURL: ollamaURL,
-        fetch: localProxyFetch,
+        fetch: apiFetch,
       })(resolvedModelId);
       break;
     }

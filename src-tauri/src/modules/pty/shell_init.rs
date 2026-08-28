@@ -813,7 +813,7 @@ mod windows {
     }
 
     fn prepare_wsl_integration_dir(distro: &str, shell: &str) -> Result<(String, PathBuf), String> {
-        let home = crate::modules::workspace::wsl_home(distro.to_string())?;
+        let home = crate::modules::workspace::wsl_home_blocking(distro)?;
         let linux_dir = format!(
             "{}/.cache/termigo/shell-integration/{shell}",
             home.trim_end_matches('/')
@@ -858,7 +858,7 @@ mod windows {
     }
 
     fn prepare_wsl_fish_conf_d(distro: &str) -> Result<(), String> {
-        let home = crate::modules::workspace::wsl_home(distro.to_string())?;
+        let home = crate::modules::workspace::wsl_home_blocking(distro)?;
         let linux_dir = format!("{}/.config/fish/conf.d", home.trim_end_matches('/'));
         let unc_dir = crate::modules::workspace::wsl_path_to_unc(distro, &linux_dir);
         fs::create_dir_all(&unc_dir).map_err(|e| format!("create {}: {e}", unc_dir.display()))?;

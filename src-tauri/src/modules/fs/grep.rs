@@ -169,8 +169,25 @@ fn search_tree(
     }
 }
 
+// Async so a recursive content search never blocks the UI thread — on a large
+// repo (or over a slow WSL/network mount) the walk is the slow part.
 #[tauri::command]
-pub fn fs_grep(
+pub async fn fs_grep(
+    pattern: String,
+    root: String,
+    glob: Option<Vec<String>>,
+    case_insensitive: Option<bool>,
+    max_results: Option<usize>,
+    workspace: Option<WorkspaceEnv>,
+) -> Result<GrepResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        fs_grep_blocking(pattern, root, glob, case_insensitive, max_results, workspace)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn fs_grep_blocking(
     pattern: String,
     root: String,
     glob: Option<Vec<String>>,
@@ -263,8 +280,22 @@ pub struct GlobResponse {
     pub truncated: bool,
 }
 
+// Async: a recursive filename walk must not block the UI thread.
 #[tauri::command]
-pub fn fs_glob(
+pub async fn fs_glob(
+    pattern: String,
+    root: String,
+    max_results: Option<usize>,
+    workspace: Option<WorkspaceEnv>,
+) -> Result<GlobResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        fs_glob_blocking(pattern, root, max_results, workspace)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn fs_glob_blocking(
     pattern: String,
     root: String,
     max_results: Option<usize>,

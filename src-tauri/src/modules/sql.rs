@@ -107,9 +107,17 @@ pub fn run_query(engine: &str, connection: &str, query: &str) -> Result<String, 
     Ok(text)
 }
 
+// Async so a slow query never blocks the UI thread: a sync command runs on the
+// main thread, and `run_query` shells out to the DB client and waits for it.
 #[tauri::command]
-pub fn sql_run(engine: String, connection: String, query: String) -> Result<String, String> {
-    run_query(&engine, &connection, &query)
+pub async fn sql_run(
+    engine: String,
+    connection: String,
+    query: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || run_query(&engine, &connection, &query))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]

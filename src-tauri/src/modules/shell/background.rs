@@ -1,4 +1,6 @@
-use std::io::Read;
+use std::fs::{self, File};
+use std::io::{Read, Write};
+use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
@@ -22,6 +24,10 @@ pub struct BackgroundProc {
     pub exited: AtomicBool,
     pub exit_code: AtomicI32,
     pub exit_unknown: AtomicBool,
+    /// Absolute path of the full-output log file, when the caller requested one.
+    pub log_path: Option<String>,
+    /// Handle to that file; both reader threads append to it as bytes arrive.
+    log_file: Option<Arc<Mutex<File>>>,
 }
 
 #[derive(Serialize)]
@@ -31,6 +37,7 @@ pub struct BackgroundLogResponse {
     pub dropped: u64,
     pub exited: bool,
     pub exit_code: Option<i32>,
+    pub log_path: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -41,6 +48,7 @@ pub struct BackgroundProcInfo {
     pub started_at_ms: u64,
     pub exited: bool,
     pub exit_code: Option<i32>,
+    pub log_path: Option<String>,
 }
 
 impl BackgroundProc {
@@ -58,6 +66,7 @@ impl BackgroundProc {
             dropped,
             exited,
             exit_code,
+            log_path: self.log_path.clone(),
         }
     }
 
@@ -79,6 +88,7 @@ impl BackgroundProc {
             started_at_ms: self.started_at_ms,
             exited,
             exit_code,
+            log_path: self.log_path.clone(),
         }
     }
 }
@@ -93,6 +103,7 @@ pub fn spawn(
     command: String,
     cwd: Option<String>,
     workspace: WorkspaceEnv,
+    log_path: Option<String>,
 ) -> Result<Arc<BackgroundProc>, String> {
     let trimmed = command.trim().to_string();
     if trimmed.is_empty() {
@@ -132,6 +143,44 @@ pub fn spawn(
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
 
+    // Optional full-output log: when the caller passes a log_path, every byte
+    // the child writes is ALSO appended to that file, independent of the ring
+    // buffer. The ring is a fast tail for progress polling; the file is the
+    // complete record, so a scan that overflows the ring (dropped > 0) still
+    // keeps every line of evidence for the report.
+    let (log_path_str, log_file) = match log_path {
+        Some(p) => {
+            let trimmed = p.trim();
+            if trimmed.is_empty() {
+                (None, None)
+            } else {
+                let base = cwd.as_deref().map(|c| resolve_path(c, &workspace));
+                let mut path = PathBuf::from(trimmed);
+                if !path.is_absolute() {
+                    if let Some(b) = base {
+                        path = b.join(path);
+                    } else {
+                        path = resolve_path(trimmed, &workspace);
+                    }
+                }
+                if let Some(parent) = path.parent() {
+                    if !parent.as_os_str().is_empty() && !parent.exists() {
+                        fs::create_dir_all(parent).map_err(|e| {
+                            format!("cannot create log dir {}: {e}", parent.display())
+                        })?;
+                    }
+                }
+                let f = File::create(&path)
+                    .map_err(|e| format!("cannot open log file {}: {e}", path.display()))?;
+                (
+                    Some(path.display().to_string()),
+                    Some(Arc::new(Mutex::new(f))),
+                )
+            }
+        }
+        None => (None, None),
+    };
+
     let proc = Arc::new(BackgroundProc {
         command: trimmed,
         cwd,
@@ -141,6 +190,8 @@ pub fn spawn(
         exited: AtomicBool::new(false),
         exit_code: AtomicI32::new(0),
         exit_unknown: AtomicBool::new(false),
+        log_path: log_path_str,
+        log_file,
     });
 
     {
@@ -151,7 +202,14 @@ pub fn spawn(
             loop {
                 match pipe.read(&mut buf) {
                     Ok(0) => break,
-                    Ok(n) => proc_ref.buffer.lock().unwrap().push(&buf[..n]),
+                    Ok(n) => {
+                        proc_ref.buffer.lock().unwrap().push(&buf[..n]);
+                        if let Some(ref lf) = proc_ref.log_file {
+                            if let Ok(mut f) = lf.lock() {
+                                let _ = f.write_all(&buf[..n]);
+                            }
+                        }
+                    }
                     Err(_) => break,
                 }
             }
@@ -165,7 +223,14 @@ pub fn spawn(
             loop {
                 match pipe.read(&mut buf) {
                     Ok(0) => break,
-                    Ok(n) => proc_ref.buffer.lock().unwrap().push(&buf[..n]),
+                    Ok(n) => {
+                        proc_ref.buffer.lock().unwrap().push(&buf[..n]);
+                        if let Some(ref lf) = proc_ref.log_file {
+                            if let Ok(mut f) = lf.lock() {
+                                let _ = f.write_all(&buf[..n]);
+                            }
+                        }
+                    }
                     Err(_) => break,
                 }
             }

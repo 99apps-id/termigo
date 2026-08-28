@@ -148,8 +148,25 @@ fn natural_cmp(a: &str, b: &str) -> Ordering {
 /// (files and dirs) are hidden unless `show_hidden` is set. `git_decorations`
 /// opts into the per-entry `gitignored` flag; off by default so non-explorer
 /// callers pay nothing.
+// Async so a directory read never blocks the UI thread. Over a WSL UNC path
+// (`\\wsl.localhost\...`) or a slow/network mount, `read_dir` plus the git
+// decoration walk can take a noticeable moment; on the main thread that is a
+// UI hang. `spawn_blocking` keeps the work off it.
 #[tauri::command]
-pub fn fs_read_dir(
+pub async fn fs_read_dir(
+    path: String,
+    show_hidden: bool,
+    git_decorations: Option<bool>,
+    workspace: Option<WorkspaceEnv>,
+) -> Result<Vec<DirEntry>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        fs_read_dir_blocking(path, show_hidden, git_decorations, workspace)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn fs_read_dir_blocking(
     path: String,
     show_hidden: bool,
     git_decorations: Option<bool>,
@@ -235,8 +252,22 @@ pub fn fs_read_dir(
 ///
 /// Symlinks to directories are included (matches shell `cd` semantics).
 /// Hidden entries are filtered by dot-prefix only.
+// Async: same reasoning as fs_read_dir — a directory scan over a slow mount
+// must not run on the UI thread.
 #[tauri::command]
-pub fn list_subdirs(
+pub async fn list_subdirs(
+    path: String,
+    show_hidden: bool,
+    workspace: Option<WorkspaceEnv>,
+) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        list_subdirs_blocking(path, show_hidden, workspace)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn list_subdirs_blocking(
     path: String,
     show_hidden: bool,
     workspace: Option<WorkspaceEnv>,

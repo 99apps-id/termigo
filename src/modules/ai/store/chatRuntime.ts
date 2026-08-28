@@ -43,6 +43,14 @@ import {
 import { usePlanStore } from "./planStore";
 import { useSessionDirectiveStore } from "./sessionDirectiveStore";
 
+// How close a context-overflow auto-resume may follow the previous one, per
+// session. Prevents a run that cannot ever be compacted under the window (e.g.
+// the system prompt + tool schemas alone exceed it) from looping forever: the
+// first overflow retries automatically, a second one within this window falls
+// back to the manual "Try again" button.
+const OVERFLOW_AUTO_RESUME_MS = 60_000;
+const overflowAutoResumeAt = new Map<string, number>();
+
 function makeChat(sessionId: string): Chat<UIMessage> {
   const readCache = new Map<string, { size: number; hash: number }>();
   const toolContext: ToolContext = {
@@ -237,10 +245,33 @@ function makeChat(sessionId: string): Chat<UIMessage> {
         });
         return;
       }
-      // Learn the model's real context window from an overflow so the retry
-      // ("Try again" / Continue) compacts to fit instead of failing again.
+      // Learn the model's real context window from an overflow, then CONTINUE
+      // the same run automatically so a long agentic task does not stop the
+      // moment the transcript outgrows the window: the retry compacts harder
+      // and lands under the cap. The manual "Try again" button stays for when
+      // even the auto-resume cannot fit, or the throttle prevents a repeat.
       if (isContextOverflowError(raw)) {
         recordContextOverflow(useChatStore.getState().selectedModelId, raw);
+        const sessionId = useChatStore.getState().activeSessionId;
+        const now = Date.now();
+        const lastAuto = overflowAutoResumeAt.get(sessionId ?? "") ?? 0;
+        if (sessionId && now - lastAuto > OVERFLOW_AUTO_RESUME_MS) {
+          overflowAutoResumeAt.set(sessionId, now);
+          useChatStore.getState().patchAgentMeta({
+            status: "thinking",
+            error: null,
+            stopReason: null,
+          });
+          setTimeout(() => {
+            void resumeRun().catch(() => {
+              useChatStore.getState().patchAgentMeta({
+                status: "error",
+                error: "The automatic retry could not start. Try again.",
+              });
+            });
+          }, 0);
+          return;
+        }
       }
       useChatStore.getState().patchAgentMeta({
         status: "error",

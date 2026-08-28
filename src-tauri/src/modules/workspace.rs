@@ -491,12 +491,19 @@ fn looks_utf16le(bytes: &[u8]) -> bool {
     nul_odd * 2 >= bytes.len() / 2
 }
 
+/// A wedged `wsl.exe` (booting distro, mid-upgrade) must not block the caller
+/// forever — a probe that never returns is how the UI hung. Cold WSL starts can
+/// legitimately take a few seconds, so the cap is generous rather than tight.
+#[cfg(windows)]
+const WSL_PROBE_TIMEOUT: Duration = Duration::from_secs(15);
+
 #[cfg(windows)]
 fn run_wsl(args: &[&str]) -> Result<String, String> {
     let mut cmd = std::process::Command::new("wsl.exe");
     cmd.args(args);
     crate::modules::proc::hide_console(&mut cmd);
-    let out = cmd.output().map_err(|e| e.to_string())?;
+    let out = crate::modules::proc::output_with_timeout(cmd, WSL_PROBE_TIMEOUT)
+        .map_err(|e| e.to_string())?;
     if !out.status.success() {
         let stderr = decode_command_output(&out.stderr);
         return Err(stderr.trim().to_string());
@@ -518,7 +525,8 @@ pub(crate) fn wsl_exec_capture(
         .arg(program)
         .args(args);
     crate::modules::proc::hide_console(&mut cmd);
-    let out = cmd.output().map_err(|e| e.to_string())?;
+    let out = crate::modules::proc::output_with_timeout(cmd, WSL_PROBE_TIMEOUT)
+        .map_err(|e| e.to_string())?;
     if !out.status.success() {
         let stderr = decode_command_output(&out.stderr);
         return Err(stderr.trim().to_string());
@@ -610,8 +618,41 @@ pub async fn wsl_default_distro() -> Result<Option<String>, String> {
     }
 }
 
+/// A distro's home directory does not change within a session, and resolving it
+/// shells out to `wsl.exe` (a cold start costs seconds). Cache it so repeated
+/// workspace switches are instant instead of paying that cost every time.
+#[cfg(windows)]
+static WSL_HOME_CACHE: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+
+/// Resolve a WSL distro's `$HOME`. Blocking: runs `wsl.exe`. Callers already on
+/// a worker thread (PTY spawn, shell session open) use this directly; the
+/// `wsl_home` command wraps it in `spawn_blocking` so the UI thread never waits.
+#[cfg(windows)]
+pub(crate) fn wsl_home_blocking(distro: &str) -> Result<String, String> {
+    let cache = WSL_HOME_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(map) = cache.lock() {
+        if let Some(home) = map.get(distro) {
+            return Ok(home.clone());
+        }
+    }
+    let out = run_wsl_sh(distro, "printf %s \"$HOME\"")?;
+    let home = normalize_wsl_value(out, "");
+    if home.is_empty() {
+        return Err(format!("could not resolve WSL home for {distro}"));
+    }
+    if let Ok(mut map) = cache.lock() {
+        map.insert(distro.to_string(), home.clone());
+    }
+    Ok(home)
+}
+
+#[cfg(not(windows))]
+pub(crate) fn wsl_home_blocking(_distro: &str) -> Result<String, String> {
+    Err("WSL is only available on Windows".into())
+}
+
 #[tauri::command]
-pub fn wsl_home(distro: String) -> Result<String, String> {
+pub async fn wsl_home(distro: String) -> Result<String, String> {
     #[cfg(not(windows))]
     {
         let _ = distro;
@@ -619,13 +660,9 @@ pub fn wsl_home(distro: String) -> Result<String, String> {
     }
     #[cfg(windows)]
     {
-        let out = run_wsl_sh(&distro, "printf %s \"$HOME\"")?;
-        let home = normalize_wsl_value(out, "");
-        if home.is_empty() {
-            Err(format!("could not resolve WSL home for {distro}"))
-        } else {
-            Ok(home)
-        }
+        tauri::async_runtime::spawn_blocking(move || wsl_home_blocking(&distro))
+            .await
+            .map_err(|e| e.to_string())?
     }
 }
 

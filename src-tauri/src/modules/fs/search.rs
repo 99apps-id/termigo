@@ -44,8 +44,24 @@ const PRUNE_DIRS: &[&str] = &[
     "__pycache__",
 ];
 
+// Async so a filename search never blocks the UI thread — the tree walk is the
+// slow part on a large repo or a slow mount.
 #[tauri::command]
-pub fn fs_search(
+pub async fn fs_search(
+    root: String,
+    query: String,
+    limit: Option<usize>,
+    workspace: Option<WorkspaceEnv>,
+    show_hidden: Option<bool>,
+) -> Result<SearchResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        fs_search_blocking(root, query, limit, workspace, show_hidden)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn fs_search_blocking(
     root: String,
     query: String,
     limit: Option<usize>,

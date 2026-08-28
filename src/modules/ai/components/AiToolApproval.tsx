@@ -1,5 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { usePreferencesStore } from "@/modules/settings/preferences";
+import { setAgentAlwaysAllowedTools } from "@/modules/settings/store";
 import {
   Cancel01Icon,
   Clock01Icon,
@@ -15,9 +17,9 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ToolUIPart } from "ai";
 import { memo } from "react";
-import { usePreferencesStore } from "@/modules/settings/preferences";
-import { setAgentAlwaysAllowedTools } from "@/modules/settings/store";
+import { ruleFromApproval } from "../lib/approvalRules";
 import { rememberSessionAllowed } from "../store/approvalQueueStore";
+import { useApprovalRulesStore } from "../store/approvalRulesStore";
 
 type Props = {
   part: Extract<ToolUIPart, { state: "approval-requested" }>;
@@ -41,6 +43,24 @@ function AiToolApprovalImpl({ part, toolName, onRespond }: Props) {
   const Icon = meta?.icon ?? ToolsIcon;
   const input = part.input as Record<string, unknown>;
 
+  // Persist an "always allow" rule scoped to this call into the project's
+  // `.termigo/approvals.json`, then approve. Only offered when there is a
+  // workspace to write to and the call is specific enough to generalise.
+  const hasWorkspace = useApprovalRulesStore((s) => s.root !== null);
+  const projectRule = ruleFromApproval(
+    toolName,
+    {
+      command: typeof input.command === "string" ? input.command : null,
+      path: typeof input.path === "string" ? input.path : null,
+    },
+    "allow",
+  );
+  const allowInProject = () => {
+    if (projectRule) void useApprovalRulesStore.getState().addRule(projectRule);
+    rememberSessionAllowed(toolName);
+    onRespond(true);
+  };
+
   return (
     <div className="rounded-lg border border-border bg-card shadow-sm">
       <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2">
@@ -51,9 +71,7 @@ function AiToolApprovalImpl({ part, toolName, onRespond }: Props) {
           strokeWidth={1.75}
           className="shrink-0 text-muted-foreground"
         />
-        <span className="text-[12px] font-medium text-foreground">
-          {label}
-        </span>
+        <span className="text-[12px] font-medium text-foreground">{label}</span>
         <span className="ml-auto text-[10px] text-muted-foreground">
           needs approval
         </span>
@@ -91,8 +109,7 @@ function AiToolApprovalImpl({ part, toolName, onRespond }: Props) {
           variant="ghost"
           onClick={() => {
             rememberSessionAllowed(toolName);
-            const list =
-              usePreferencesStore.getState().agentAlwaysAllowedTools;
+            const list = usePreferencesStore.getState().agentAlwaysAllowedTools;
             if (!list.includes(toolName)) {
               void setAgentAlwaysAllowedTools([...list, toolName]);
             }
@@ -104,6 +121,18 @@ function AiToolApprovalImpl({ part, toolName, onRespond }: Props) {
           <HugeiconsIcon icon={Infinity01Icon} size={12} strokeWidth={2} />
           Always
         </Button>
+        {hasWorkspace && projectRule && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={allowInProject}
+            className="h-7 gap-1.5 text-[11px]"
+            title={`Approve, and save an allow rule to this project's .termigo/approvals.json${projectRule.command ? ` (${projectRule.command})` : projectRule.path ? ` (${projectRule.path})` : ""}`}
+          >
+            <HugeiconsIcon icon={FolderAddIcon} size={12} strokeWidth={2} />
+            Project
+          </Button>
+        )}
         <Button
           size="sm"
           variant="default"
@@ -247,7 +276,10 @@ function InlineDiff({ oldStr, newStr }: { oldStr: string; newStr: string }) {
     <div className="max-h-52 overflow-auto rounded-md bg-muted/40 font-mono text-[11px] leading-relaxed">
       {oldShown.map((l, i) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: static diff lines, order never changes
-        <div key={`o${i}`} className="whitespace-pre-wrap bg-red-500/10 px-2 text-red-500">
+        <div
+          key={`o${i}`}
+          className="whitespace-pre-wrap bg-red-500/10 px-2 text-red-500"
+        >
           <span className="mr-1 select-none text-muted-foreground">−</span>
           {l || " "}
         </div>
@@ -259,7 +291,10 @@ function InlineDiff({ oldStr, newStr }: { oldStr: string; newStr: string }) {
       )}
       {newShown.map((l, i) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: static diff lines, order never changes
-        <div key={`n${i}`} className="whitespace-pre-wrap bg-green-500/10 px-2 text-green-600">
+        <div
+          key={`n${i}`}
+          className="whitespace-pre-wrap bg-green-500/10 px-2 text-green-600"
+        >
           <span className="mr-1 select-none text-muted-foreground">+</span>
           {l || " "}
         </div>
@@ -272,4 +307,3 @@ function InlineDiff({ oldStr, newStr }: { oldStr: string; newStr: string }) {
     </div>
   );
 }
-
