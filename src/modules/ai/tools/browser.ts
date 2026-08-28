@@ -1,7 +1,9 @@
 import { tool } from "ai";
 import { z } from "zod";
+import { modelSupportsVision } from "../config";
 import { unsafeBrowserUrl } from "../lib/browserGuard";
 import { native } from "../lib/native";
+import { useChatStore } from "../store/chatStore";
 import type { ToolContext } from "./context";
 
 // The read/act browser tools target the NATIVE embedded webview created by
@@ -194,14 +196,52 @@ export function buildBrowserTools(ctx: ToolContext) {
 
     browser_screenshot: tool({
       description:
-        "Capture a screenshot of the browser instance. The in-app embedded browser does not support pixel capture; use browser_extract to read the page's rendered text instead.",
+        "Capture a screenshot of the browser instance and SEE it — use this to inspect a page's visual layout, verify a UI change, or read something that is drawn rather than text (a chart, a canvas). Requires a vision-capable model and is Windows-only (WebView2). For plain page text, browser_extract is cheaper.",
       inputSchema: z.object({
         instance: z.string().describe("Instance name."),
       }),
-      execute: async () => ({
-        error:
-          "screenshot is not supported for the in-app browser; use browser_extract to read the rendered page text.",
-      }),
+      execute: async ({ instance }) => {
+        const modelId = useChatStore.getState().selectedModelId;
+        if (!modelSupportsVision(modelId)) {
+          return {
+            error:
+              "the selected model has no vision capability, so it cannot see a screenshot — switch to a vision-capable model, or use browser_extract for the page text.",
+          };
+        }
+        try {
+          const data = await native.browserEmbedScreenshot(instance);
+          return {
+            kind: "screenshot" as const,
+            instance,
+            mediaType: "image/png",
+            data,
+          };
+        } catch (e) {
+          return { error: String(e) };
+        }
+      },
+      // Feed the captured PNG to the model as a real visual part.
+      toModelOutput: ({ output }) => {
+        const o = output as {
+          kind?: string;
+          data?: string;
+          mediaType?: string;
+        };
+        if (o && o.kind === "screenshot" && typeof o.data === "string") {
+          return {
+            type: "content",
+            value: [
+              { type: "text", text: "Screenshot of the browser page:" },
+              {
+                type: "image-data",
+                data: o.data,
+                mediaType: o.mediaType ?? "image/png",
+              },
+            ],
+          };
+        }
+        return { type: "json", value: output as never };
+      },
     }),
 
     browser_close: tool({

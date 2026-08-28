@@ -13,9 +13,9 @@ describe("ruleMatches", () => {
       command: "git ",
       action: "allow",
     };
-    expect(
-      ruleMatches(rule, { tool: "bash_run", command: "git status" }),
-    ).toBe(true);
+    expect(ruleMatches(rule, { tool: "bash_run", command: "git status" })).toBe(
+      true,
+    );
     expect(ruleMatches(rule, { tool: "bash_run", command: "npm test" })).toBe(
       false,
     );
@@ -23,9 +23,9 @@ describe("ruleMatches", () => {
 
   it("treats a wildcard command pattern as an anchored glob", () => {
     const rule: ApprovalRule = { command: "git push*", action: "deny" };
-    expect(ruleMatches(rule, { tool: "bash_run", command: "git push -f" })).toBe(
-      true,
-    );
+    expect(
+      ruleMatches(rule, { tool: "bash_run", command: "git push -f" }),
+    ).toBe(true);
     expect(
       ruleMatches(rule, { tool: "bash_run", command: "echo git push" }),
     ).toBe(false);
@@ -50,9 +50,9 @@ describe("ruleMatches", () => {
     expect(ruleMatches(rule, { tool: "write_file", path: "app/.env" })).toBe(
       true,
     );
-    expect(ruleMatches(rule, { tool: "write_file", path: "app/config.ts" })).toBe(
-      false,
-    );
+    expect(
+      ruleMatches(rule, { tool: "write_file", path: "app/config.ts" }),
+    ).toBe(false);
   });
 
   it("respects the tool filter", () => {
@@ -68,13 +68,20 @@ describe("ruleMatches", () => {
 
   it("normalises backslashes in paths", () => {
     const rule: ApprovalRule = { path: "src/**", action: "allow" };
-    expect(ruleMatches(rule, { tool: "edit", path: "src\\a\\b.ts" })).toBe(true);
+    expect(ruleMatches(rule, { tool: "edit", path: "src\\a\\b.ts" })).toBe(
+      true,
+    );
   });
 });
 
 describe("evaluateApprovalRules", () => {
   const rules: ApprovalRule[] = [
-    { tools: ["bash_run"], command: "rm -rf", action: "deny", reason: "danger" },
+    {
+      tools: ["bash_run"],
+      command: "rm -rf",
+      action: "deny",
+      reason: "danger",
+    },
     { tools: ["bash_run"], command: "git ", action: "allow" },
     { tools: ["edit", "write_file"], path: "**/*.env", action: "ask" },
   ];

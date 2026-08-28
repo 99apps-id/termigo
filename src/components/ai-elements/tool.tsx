@@ -474,6 +474,21 @@ function renderToolOutput(toolName: string, output: unknown): ReactNode | null {
   if (!output || typeof output !== "object") return null;
   const o = output as Record<string, unknown>;
 
+  if (toolName === "browser_screenshot" && o.kind === "screenshot") {
+    if (typeof o.data !== "string") return null;
+    const mediaType = typeof o.mediaType === "string" ? o.mediaType : "image/png";
+    return (
+      <div className="space-y-1">
+        {/* biome-ignore lint/nursery/noImgElement: local data URI, no next/image here */}
+        <img
+          src={`data:${mediaType};base64,${o.data}`}
+          alt="browser screenshot"
+          className="max-h-64 max-w-full rounded border border-border/40 object-contain"
+        />
+      </div>
+    );
+  }
+
   if (toolName === "read_file") {
     const path = typeof o.path === "string" ? o.path : "";
     const size = typeof o.size === "number" ? o.size : null;

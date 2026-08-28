@@ -1,9 +1,9 @@
-import { tool } from "ai";
-import { remoteUnsupported } from "../lib/remoteFs";
-import { z } from "zod";
 import { AGENT_LAUNCHERS } from "@/modules/agents/lib/launcher";
 import { useManagedAgentsStore } from "@/modules/agents/store/managedAgentsStore";
 import { writeToSession } from "@/modules/terminal";
+import { tool } from "ai";
+import { z } from "zod";
+import { remoteUnsupported } from "../lib/remoteFs";
 import type { ToolContext } from "./context";
 
 const AGENT_IDS = AGENT_LAUNCHERS.map((a) => a.id) as [string, ...string[]];
@@ -30,8 +30,7 @@ function tailLines(text: string, n: number): string {
 export function buildManagedAgentTools(ctx: ToolContext) {
   return {
     spawn_coding_agent: tool({
-      description:
-        `Spawn an external coding-agent CLI in a new terminal tab and give it the prompt. Use this when the user wants work delegated and no agent is active yet in this session. Craft a complete, self-contained prompt first; the user approves it before the agent starts. Do not call this if an agent is already active — use send_to_agent instead. Supported agents: ${AGENT_LIST} (defaults to claude; the CLI must be installed and on PATH).`,
+      description: `Spawn an external coding-agent CLI in a new terminal tab and give it the prompt. Use this when the user wants work delegated and no agent is active yet in this session. Craft a complete, self-contained prompt first; the user approves it before the agent starts. Do not call this if an agent is already active — use send_to_agent instead. Supported agents: ${AGENT_LIST} (defaults to claude; the CLI must be installed and on PATH).`,
       inputSchema: z.object({
         prompt: z
           .string()
@@ -109,7 +108,11 @@ export function buildManagedAgentTools(ctx: ToolContext) {
         }
         setTimeout(() => writeToSession(managed.leafId, "\r"), SUBMIT_DELAY_MS);
         store.bumpRound(managed.leafId);
-        return { ok: true, sent: oneLine, round: store.get(managed.leafId)?.rounds };
+        return {
+          ok: true,
+          sent: oneLine,
+          round: store.get(managed.leafId)?.rounds,
+        };
       },
     }),
 
@@ -123,7 +126,9 @@ export function buildManagedAgentTools(ctx: ToolContext) {
           .min(1)
           .max(400)
           .optional()
-          .describe("Trailing lines of the agent terminal to return. Default 120."),
+          .describe(
+            "Trailing lines of the agent terminal to return. Default 120.",
+          ),
       }),
       execute: async ({ lines }) => {
         const sessionId = ctx.getSessionId();

@@ -1,26 +1,21 @@
 import type { Chat, UIMessage } from "@ai-sdk/react";
-import {
-  EMPTY_QUEUE,
-  enqueue,
-  remove as removeSteer,
-  type SteerMessage,
-  type SteerQueue,
-} from "../lib/steer";
 import { create } from "zustand";
 import {
   DEFAULT_MODEL_ID,
   endpointIdFromCompatModel,
   getModel,
   isCompatModelId,
-  providerNeedsKey,
   type ModelId,
   type ProviderId,
+  providerNeedsKey,
 } from "../config";
-import { useApprovalQueue } from "./approvalQueueStore";
-import { useTodosStore } from "./todoStore";
-import { useSubagentRunStore } from "./subagentRunStore";
 import type { AgentStopReason, AgentUsage, RunDiagnostics } from "../lib/agent";
-import { EMPTY_PROVIDER_KEYS, type ProviderKeys, type CustomEndpointKeys } from "../lib/keyring";
+import {
+  type CustomEndpointKeys,
+  EMPTY_PROVIDER_KEYS,
+  type ProviderKeys,
+} from "../lib/keyring";
+import { pushRecentModel } from "../lib/modelPrefs";
 import {
   deleteRunMeta,
   deleteSessionData,
@@ -29,14 +24,23 @@ import {
   loadMessages,
   loadRunMeta,
   newSessionId,
+  type RunMeta,
+  type SessionMeta,
   saveActiveId,
   saveMessages,
   saveRunMeta,
   saveSessionsList,
-  type RunMeta,
-  type SessionMeta,
 } from "../lib/sessions";
-import { pushRecentModel } from "../lib/modelPrefs";
+import {
+  EMPTY_QUEUE,
+  enqueue,
+  remove as removeSteer,
+  type SteerMessage,
+  type SteerQueue,
+} from "../lib/steer";
+import { useApprovalQueue } from "./approvalQueueStore";
+import { useSubagentRunStore } from "./subagentRunStore";
+import { useTodosStore } from "./todoStore";
 
 export type Live = {
   getCwd: () => string | null;
@@ -79,9 +83,7 @@ export type Live = {
   browserUrl: (
     instance: string,
   ) => Promise<{ url: string } | { error: string }>;
-  browserClose: (
-    instance: string,
-  ) => Promise<{ ok: true } | { error: string }>;
+  browserClose: (instance: string) => Promise<{ ok: true } | { error: string }>;
   browserList: () => Promise<string[]>;
   spawnManagedAgent: (
     prompt: string,
@@ -160,10 +162,7 @@ export type PendingSelection = {
   source: "terminal" | "editor";
 };
 
-export type ApprovalResponder = (
-  approvalId: string,
-  approved: boolean,
-) => void;
+export type ApprovalResponder = (approvalId: string, approved: boolean) => void;
 
 type StoreState = {
   live: Live;
@@ -379,7 +378,10 @@ export const useChatStore = create<StoreState>((set, get) => ({
     set((s) => ({
       panelOpen: true,
       focusSignal: s.focusSignal + 1,
-      pendingSelections: [...s.pendingSelections, { id, text: trimmed, source }],
+      pendingSelections: [
+        ...s.pendingSelections,
+        { id, text: trimmed, source },
+      ],
     }));
   },
   consumeSelections: () => {
@@ -586,7 +588,8 @@ export function getAgentMeta(): AgentMeta {
 }
 
 export function getActiveProviderKey(): string | null {
-  const { selectedModelId, apiKeys, customEndpointKeys } = useChatStore.getState();
+  const { selectedModelId, apiKeys, customEndpointKeys } =
+    useChatStore.getState();
   if (isCompatModelId(selectedModelId)) {
     const eid = endpointIdFromCompatModel(selectedModelId);
     return customEndpointKeys[eid] ?? null;

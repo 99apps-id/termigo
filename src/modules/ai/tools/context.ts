@@ -61,10 +61,10 @@ export type ToolContext = {
   browserConsole: (
     instance: string,
   ) => Promise<{ console: string } | { error: string }>;
-  browserUrl: (instance: string) => Promise<{ url: string } | { error: string }>;
-  browserClose: (
+  browserUrl: (
     instance: string,
-  ) => Promise<{ ok: true } | { error: string }>;
+  ) => Promise<{ url: string } | { error: string }>;
+  browserClose: (instance: string) => Promise<{ ok: true } | { error: string }>;
   /** Instances currently open, for the agent's `<env>` browsers list. */
   browserList: () => Promise<string[]>;
   /** Spawn a Claude Code agent in a new terminal tab, bound to this session. */
@@ -81,7 +81,10 @@ export type ToolContext = {
    * Fire a PreToolUse hook for the named tool. Returns void; failures are
    * swallowed by the runner so a broken hook never blocks the agent.
    */
-  firePreToolHook?: (toolName: string, args: Record<string, unknown>) => Promise<void>;
+  firePreToolHook?: (
+    toolName: string,
+    args: Record<string, unknown>,
+  ) => Promise<void>;
   /**
    * Fire a PostToolUse hook for the named tool. Returns void; failures are
    * swallowed by the runner so a broken hook never blocks the agent.

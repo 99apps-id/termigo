@@ -6774,7 +6774,9 @@ dependencies = [
  "termigo-control-protocol",
  "tokio",
  "uuid",
+ "webview2-com",
  "which",
+ "windows 0.61.3",
  "windows-sys 0.61.2",
  "zip",
 ]

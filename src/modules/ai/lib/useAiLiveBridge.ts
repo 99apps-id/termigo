@@ -1,8 +1,7 @@
-import { type RefObject, useEffect, useRef } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { AGENT_LAUNCHERS } from "@/modules/agents/lib/launcher";
 import { useManagedAgentsStore } from "@/modules/agents/store/managedAgentsStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
+import type { Tab } from "@/modules/tabs";
 import {
   findLeafCwd,
   findLeafRemoteCwd,
@@ -12,24 +11,25 @@ import {
   whenSessionReady,
   writeToSession,
 } from "@/modules/terminal";
-import type { Tab } from "@/modules/tabs";
+import { invoke } from "@tauri-apps/api/core";
+import { type RefObject, useEffect, useRef } from "react";
+import {
+  browserBack,
+  browserClose,
+  browserConsole,
+  browserEval,
+  browserExtract,
+  browserForward,
+  browserList,
+  browserNavigate,
+  browserReload,
+  browserScreenshot,
+  browserUrl,
+  browserOpen as openBrowser,
+} from "../browser/bridge";
 import type { Live } from "../store/chatStore";
 import { redactSensitive } from "./redact";
 import { startScheduler } from "./scheduler";
-import {
-  browserOpen as openBrowser,
-  browserNavigate,
-  browserBack,
-  browserForward,
-  browserReload,
-  browserExtract,
-  browserEval,
-  browserScreenshot,
-  browserConsole,
-  browserUrl,
-  browserClose,
-  browserList,
-} from "../browser/bridge";
 
 type TuiWaitResult = "ready" | "gone" | "timeout";
 

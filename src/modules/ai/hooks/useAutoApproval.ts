@@ -6,14 +6,14 @@
 // `execute` after approval, so a mode change can widen what proceeds without a
 // click but cannot widen what is allowed to happen.
 
-import { useEffect, useRef } from "react";
-import type { UIMessage } from "ai";
-import { useChatStore } from "../store/chatStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
+import type { UIMessage } from "ai";
+import { useEffect, useRef } from "react";
 import { isAutoApproved } from "../lib/approvalPolicy";
 import { isAutoApprovedScan } from "../lib/pentestScope";
-import { useApprovalRulesStore } from "../store/approvalRulesStore";
 import { isSessionAllowed } from "../store/approvalQueueStore";
+import { useApprovalRulesStore } from "../store/approvalRulesStore";
+import { useChatStore } from "../store/chatStore";
 
 type ApprovalResponder = (arg: {
   id: string;
@@ -31,9 +31,7 @@ export function useAutoApproval(
   respond: ApprovalResponder,
 ): void {
   const mode = usePreferencesStore((s) => s.agentApprovalMode);
-  const alwaysAllowed = usePreferencesStore(
-    (s) => s.agentAlwaysAllowedTools,
-  );
+  const alwaysAllowed = usePreferencesStore((s) => s.agentAlwaysAllowedTools);
   // One response per approval id. The part stays in the message list after it
   // is answered, and re-answering resumes the run twice.
   const answered = useRef<Set<string>>(new Set());
@@ -64,7 +62,8 @@ export function useAutoApproval(
       const input = part.input as
         | { command?: unknown; path?: unknown }
         | undefined;
-      const command = typeof input?.command === "string" ? input.command : undefined;
+      const command =
+        typeof input?.command === "string" ? input.command : undefined;
       const path = typeof input?.path === "string" ? input.path : undefined;
 
       // Project-scoped approval rules (.termigo/approvals.json) refine the
@@ -99,7 +98,9 @@ export function useAutoApproval(
         const prefs = usePreferencesStore.getState();
         // In-scope auto-approval only makes sense while the scope fence is on.
         const scanScope = prefs.enforcePentestScope ? prefs.pentestScope : [];
-        if (isAutoApprovedScan(command, scanScope, prefs.autoApproveInScopeScans)) {
+        if (
+          isAutoApprovedScan(command, scanScope, prefs.autoApproveInScopeScans)
+        ) {
           answered.current.add(id);
           void respond({ id, approved: true });
           continue;

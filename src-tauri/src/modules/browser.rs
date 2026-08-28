@@ -652,6 +652,90 @@ pub async fn browser_embed_eval(
     wv.eval(&js).map_err(|e| e.to_string())
 }
 
+/// Capture a PNG of the embedded browser and return it base64-encoded, so a
+/// vision model can see the page the agent is driving. Windows-only (WebView2
+/// `CapturePreview`); other platforms report that it is unsupported. Any failure
+/// is returned as an error string — it never panics.
+#[tauri::command]
+pub async fn browser_embed_screenshot(
+    app: AppHandle,
+    instance: String,
+) -> Result<String, String> {
+    #[cfg(windows)]
+    {
+        capture_embed_png_base64(&app, &instance)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (&app, &instance);
+        Err("browser screenshot is only supported on Windows (WebView2)".into())
+    }
+}
+
+#[cfg(windows)]
+fn capture_embed_png_base64(app: &AppHandle, instance: &str) -> Result<String, String> {
+    use std::sync::mpsc::channel;
+    use std::time::Duration;
+
+    let wv = app
+        .get_webview(&embed_label(instance))
+        .ok_or("embedded browser not open")?;
+
+    let (tx, rx) = channel::<Result<String, String>>();
+    wv.with_webview(move |pwv| {
+        let tx_ok = tx.clone();
+        let attempt = (|| -> windows::core::Result<()> {
+            use base64::Engine as _;
+            use webview2_com::CapturePreviewCompletedHandler;
+            use webview2_com::Microsoft::Web::WebView2::Win32::COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG;
+            use windows::Win32::Foundation::HGLOBAL;
+            use windows::Win32::System::Com::StructuredStorage::{
+                CreateStreamOnHGlobal, GetHGlobalFromStream,
+            };
+            use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
+
+            unsafe {
+                let controller = pwv.controller();
+                let core = controller.CoreWebView2()?;
+                let stream = CreateStreamOnHGlobal(HGLOBAL(std::ptr::null_mut()), true)?;
+                let stream_read = stream.clone();
+                let handler = CapturePreviewCompletedHandler::create(Box::new(
+                    move |status: windows::core::Result<()>| {
+                        let read = (|| -> Result<String, String> {
+                            status.map_err(|e| e.to_string())?;
+                            let hglobal =
+                                GetHGlobalFromStream(&stream_read).map_err(|e| e.to_string())?;
+                            let size = GlobalSize(hglobal);
+                            let ptr = GlobalLock(hglobal) as *const u8;
+                            if ptr.is_null() {
+                                return Err("GlobalLock returned null".into());
+                            }
+                            let bytes = std::slice::from_raw_parts(ptr, size).to_vec();
+                            let _ = GlobalUnlock(hglobal);
+                            Ok(base64::engine::general_purpose::STANDARD.encode(&bytes))
+                        })();
+                        let _ = tx_ok.send(read);
+                        Ok(())
+                    },
+                ));
+                core.CapturePreview(
+                    COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG,
+                    &stream,
+                    &handler,
+                )?;
+            }
+            Ok(())
+        })();
+        if let Err(e) = attempt {
+            let _ = tx.send(Err(e.to_string()));
+        }
+    })
+    .map_err(|e| e.to_string())?;
+
+    rx.recv_timeout(Duration::from_secs(8))
+        .map_err(|_| "screenshot timed out".to_string())?
+}
+
 #[tauri::command]
 pub async fn browser_embed_close(
     app: AppHandle,
