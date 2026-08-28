@@ -1,5 +1,6 @@
 import { Suspense, lazy } from "react";
 import { useChatStore } from "../store/chatStore";
+import { useComposer } from "../lib/composer";
 import { AiChatBody } from "./AiMiniWindow";
 
 const AiComposerInput = lazy(() =>
@@ -24,6 +25,7 @@ export function AiDockPanel() {
   const sessionId = useChatStore((s) => s.activeSessionId);
   const closePanel = useChatStore((s) => s.closePanel);
   const openMini = useChatStore((s) => s.openMini);
+  const isBusy = useComposer().isBusy;
 
   if (!sessionId) return null;
 
@@ -44,7 +46,10 @@ export function AiDockPanel() {
         />
       </div>
       <div className="shrink-0 border-t border-border/60 bg-card/40 px-3 py-2">
-        <div className="termigo-composer-glow rounded-xl bg-card/60 px-2.5 py-2">
+        <div
+          data-busy={isBusy ? "true" : undefined}
+          className="termigo-composer-glow rounded-xl bg-card/60 px-2.5 py-2"
+        >
           <Suspense fallback={null}>
             <AiComposerInput />
           </Suspense>
