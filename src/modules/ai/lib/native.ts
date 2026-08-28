@@ -413,6 +413,8 @@ export const native = {
     invoke<void>("browser_embed_navigate", { instance, url }),
   browserEmbedRead: (instance: string) =>
     invoke<string>("browser_embed_read", { instance }),
+  browserEmbedEval: (instance: string, js: string) =>
+    invoke<void>("browser_embed_eval", { instance, js }),
   browserEmbedClose: (instance: string) =>
     invoke<void>("browser_embed_close", { instance }),
 };

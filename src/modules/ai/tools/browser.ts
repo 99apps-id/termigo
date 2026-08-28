@@ -1,7 +1,31 @@
 import { tool } from "ai";
 import { z } from "zod";
+import { native } from "../lib/native";
 import { unsafeBrowserUrl } from "../lib/browserGuard";
 import type { ToolContext } from "./context";
+
+// The read/act browser tools target the NATIVE embedded webview created by
+// `browser_open` (label `browser-embed-<instance>`), driven through the
+// `browser_embed_*` Rust commands. The older floating-window `ctx.browser*`
+// bridge is left unused here: the floating WebviewWindow build hangs on some
+// Windows/WebView2 setups, so everything the agent drives runs in the docked
+// child instead. `instance` is the same short name passed to `browser_open`.
+async function embedRead(instance: string) {
+  try {
+    return { text: await native.browserEmbedRead(instance) };
+  } catch (e) {
+    return { error: String(e) };
+  }
+}
+
+async function embedEval(instance: string, js: string) {
+  try {
+    await native.browserEmbedEval(instance, js);
+    return { ok: true as const };
+  } catch (e) {
+    return { error: String(e) };
+  }
+}
 
 // The agent browser is for external pages, so it mirrors TEDI's `unsafeBrowserUrl`
 // policy: refuse non-http(s), cloud metadata, loopback, link-local and non-loopback
@@ -42,9 +66,14 @@ export function buildBrowserTools(ctx: ToolContext) {
         // window) rather than a separate floating window: the floating
         // WebviewWindow build hangs on some Windows/WebView2 setups, and a docked
         // child shares the main window's environment and renders reliably.
-        const ok = ctx.openPreview(url);
+        const ok = ctx.openPreview(url, instance);
         return ok
-          ? { ok: true, url, instance, note: "Opened in an in-app browser tab." }
+          ? {
+              ok: true,
+              url,
+              instance,
+              note: "Opened in an in-app browser tab. Use this same `instance` for browser_extract / browser_navigate / browser_click.",
+            }
           : { error: "could not open a browser tab (preview surface unavailable)", url };
       },
     }),
@@ -59,7 +88,12 @@ export function buildBrowserTools(ctx: ToolContext) {
       execute: async ({ instance, url }) => {
         const blocked = guard(url);
         if (blocked) return blocked;
-        return await ctx.browserNavigate(instance, url);
+        try {
+          await native.browserEmbedNavigate(instance, url);
+          return { ok: true as const, url };
+        } catch (e) {
+          return { error: String(e) };
+        }
       },
     }),
 
@@ -68,7 +102,7 @@ export function buildBrowserTools(ctx: ToolContext) {
       inputSchema: z.object({
         instance: z.string().describe("Instance name."),
       }),
-      execute: async ({ instance }) => await ctx.browserBack(instance),
+      execute: async ({ instance }) => await embedEval(instance, "history.back();"),
     }),
 
     browser_forward: tool({
@@ -76,7 +110,7 @@ export function buildBrowserTools(ctx: ToolContext) {
       inputSchema: z.object({
         instance: z.string().describe("Instance name."),
       }),
-      execute: async ({ instance }) => await ctx.browserForward(instance),
+      execute: async ({ instance }) => await embedEval(instance, "history.forward();"),
     }),
 
     browser_reload: tool({
@@ -84,7 +118,7 @@ export function buildBrowserTools(ctx: ToolContext) {
       inputSchema: z.object({
         instance: z.string().describe("Instance name."),
       }),
-      execute: async ({ instance }) => await ctx.browserReload(instance),
+      execute: async ({ instance }) => await embedEval(instance, "location.reload();"),
     }),
 
     browser_extract: tool({
@@ -93,7 +127,7 @@ export function buildBrowserTools(ctx: ToolContext) {
       inputSchema: z.object({
         instance: z.string().describe("Instance name."),
       }),
-      execute: async ({ instance }) => await ctx.browserExtract(instance),
+      execute: async ({ instance }) => await embedRead(instance),
     }),
 
     browser_click: tool({
@@ -107,7 +141,7 @@ export function buildBrowserTools(ctx: ToolContext) {
         const js = `(()=>{const el=document.querySelector(${cssJson(
           selector,
         )});if(!el){return;}el.click();})();`;
-        return await ctx.browserEval(instance, js);
+        return await embedEval(instance, js);
       },
     }),
 
@@ -123,7 +157,7 @@ export function buildBrowserTools(ctx: ToolContext) {
         const js = `(()=>{const el=document.querySelector(${cssJson(
           selector,
         )});if(!el){return;}el.focus();el.value=${cssJson(text)};el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));})();`;
-        return await ctx.browserEval(instance, js);
+        return await embedEval(instance, js);
       },
     }),
 
@@ -147,45 +181,28 @@ export function buildBrowserTools(ctx: ToolContext) {
 
     browser_screenshot: tool({
       description:
-        "Capture a screenshot of the browser instance. Returns a data URL; on platforms without native webview capture it reports why it cannot.",
+        "Capture a screenshot of the browser instance. The in-app embedded browser does not support pixel capture; use browser_extract to read the page's rendered text instead.",
       inputSchema: z.object({
         instance: z.string().describe("Instance name."),
       }),
-      execute: async ({ instance }) => await ctx.browserScreenshot(instance),
-    }),
-
-    browser_console: tool({
-      description:
-        "Return the console lines captured from the browser instance, useful for debugging a page the agent is driving.",
-      inputSchema: z.object({
-        instance: z.string().describe("Instance name."),
+      execute: async () => ({
+        error:
+          "screenshot is not supported for the in-app browser; use browser_extract to read the rendered page text.",
       }),
-      execute: async ({ instance }) => await ctx.browserConsole(instance),
-    }),
-
-    browser_url: tool({
-      description: "Return the current URL of the browser instance.",
-      inputSchema: z.object({
-        instance: z.string().describe("Instance name."),
-      }),
-      execute: async ({ instance }) => await ctx.browserUrl(instance),
     }),
 
     browser_close: tool({
-      description: "Close a browser instance and free its webview window.",
+      description: "Close a browser instance and free its embedded webview.",
       inputSchema: z.object({
         instance: z.string().describe("Instance name."),
       }),
-      execute: async ({ instance }) => await ctx.browserClose(instance),
-    }),
-
-    browser_list: tool({
-      description:
-        "List open browser instances. Use this to learn the current '<env>' browsers before driving one.",
-      inputSchema: z.object({}),
-      execute: async () => {
-        const instances = await ctx.browserList();
-        return { instances };
+      execute: async ({ instance }) => {
+        try {
+          await native.browserEmbedClose(instance);
+          return { ok: true as const };
+        } catch (e) {
+          return { error: String(e) };
+        }
       },
     }),
   } as const;

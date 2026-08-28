@@ -52,7 +52,7 @@ type Params = {
   explorerRoot: string | null;
   launchCwd: string | null;
   home: string | null;
-  openPreviewTab: (url: string) => void;
+  openPreviewTab: (url: string, browserInstance?: string) => void;
   openCanvasTab: (html: string, title?: string) => void;
   newAgentTab: (
     cwd: string | undefined,
@@ -148,8 +148,8 @@ export function useAiLiveBridge(params: Params) {
         const t = tabs.find((x) => x.id === activeId);
         return t?.kind === "editor" ? t.path : null;
       },
-      openPreview: (url: string) => {
-        ref.current.openPreviewTab(url);
+      openPreview: (url: string, browserInstance?: string) => {
+        ref.current.openPreviewTab(url, browserInstance);
         return true;
       },
       openCanvas: (html: string, title?: string) => {

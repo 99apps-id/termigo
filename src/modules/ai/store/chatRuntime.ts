@@ -48,7 +48,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       useChatStore.getState().live.isActiveTerminalPrivate(),
     injectIntoActivePty: (text) =>
       useChatStore.getState().live.injectIntoActivePty(text),
-    openPreview: (url) => useChatStore.getState().live.openPreview(url),
+    openPreview: (url, browserInstance) => useChatStore.getState().live.openPreview(url, browserInstance),
     openCanvas: (html, title) => useChatStore.getState().live.openCanvas(html, title),
     browserOpen: (instance, url) =>
       useChatStore.getState().live.browserOpen(instance, url),

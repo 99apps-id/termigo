@@ -45,7 +45,7 @@ export type Live = {
   injectIntoActivePty: (text: string) => boolean;
   getWorkspaceRoot: () => string | null;
   getActiveFile: () => string | null;
-  openPreview: (url: string) => boolean;
+  openPreview: (url: string, browserInstance?: string) => boolean;
   openCanvas: (html: string, title?: string) => boolean;
   browserOpen: (
     instance: string,

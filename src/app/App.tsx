@@ -825,8 +825,8 @@ ${found.foundAt}`
   );
 
   const openPreviewTab = useCallback(
-    (url: string) => {
-      const id = newPreviewTab(url);
+    (url: string, browserInstance?: string) => {
+      const id = newPreviewTab(url, browserInstance);
       // Focus the address bar if the URL is empty so the user can type.
       if (!url) {
         setTimeout(() => previewRefs.current.get(id)?.focusAddressBar(), 0);

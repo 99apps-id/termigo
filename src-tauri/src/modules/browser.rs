@@ -637,6 +637,18 @@ pub async fn browser_embed_read(
 }
 
 #[tauri::command]
+pub async fn browser_embed_eval(
+    app: AppHandle,
+    instance: String,
+    js: String,
+) -> Result<(), String> {
+    let wv = app
+        .get_webview(&embed_label(&instance))
+        .ok_or("embedded browser not open")?;
+    wv.eval(&js).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn browser_embed_close(
     app: AppHandle,
     state: State<'_, BrowserState>,

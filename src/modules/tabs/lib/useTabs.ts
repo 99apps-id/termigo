@@ -84,6 +84,10 @@ export type PreviewTab = TabBase & {
   kind: "preview";
   title: string;
   url: string;
+  /** Stable instance name for the native embedded browser webview, when the
+   *  agent opened this tab via browser_open. Lets the browser read/act tools
+   *  target the same webview by name. Absent for user-opened / dev-server tabs. */
+  browserInstance?: string;
   /** Agent canvas: self-contained HTML the agent rendered (a graph, a plan/
    *  walkthrough with action buttons). When set, the pane shows this in a
    *  sandboxed iframe instead of loading `url`. Buttons post actions back to the
@@ -1002,7 +1006,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
     });
   }, []);
 
-  const newPreviewTab = useCallback((url: string) => {
+  const newPreviewTab = useCallback((url: string, browserInstance?: string) => {
     const id = nextIdRef.current++;
     setTabs((t) => [
       ...t,
@@ -1012,6 +1016,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
         spaceId: activeSpaceIdRef.current,
         title: titleFromUrl(url),
         url,
+        ...(browserInstance ? { browserInstance } : {}),
       },
     ]);
     setActiveId(id);

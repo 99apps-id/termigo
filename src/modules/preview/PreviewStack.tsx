@@ -79,6 +79,7 @@ export function PreviewStack({
               ref={getRefCallback(t.id)}
               url={t.url}
               html={t.html}
+              browserInstance={t.browserInstance}
               visible={visible}
               onUrlChange={getUrlCallback(t.id)}
             />

@@ -26,6 +26,8 @@ type Props = {
   onUrlChange: (url: string) => void;
   /** Agent canvas HTML; when set the pane renders it instead of `url`. */
   html?: string;
+  /** Stable name for the native embedded browser webview (agent-opened tabs). */
+  browserInstance?: string;
 };
 
 // Tear the iframe down after this much invisibility — a background dev
@@ -33,7 +35,7 @@ type Props = {
 const SUSPEND_AFTER_MS = 30_000;
 
 export const PreviewPane = forwardRef<PreviewPaneHandle, Props>(
-  function PreviewPane({ url, visible, onUrlChange, html }, ref) {
+  function PreviewPane({ url, visible, onUrlChange, html, browserInstance }, ref) {
     // `nonce` is part of the iframe `key`. Bumping it remounts the iframe,
     // which is the only reliable cross-origin reload (calling
     // contentWindow.location.reload() throws on cross-origin frames).
@@ -115,7 +117,7 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, Props>(
         >
           {url ? (
             external ? (
-              <BrowserPane instance={instanceId} url={url} visible={visible} />
+              <BrowserPane instance={browserInstance ?? instanceId} url={url} visible={visible} />
             ) : loaded ? (
               <iframe
                 key={`${url}#${nonce}`}

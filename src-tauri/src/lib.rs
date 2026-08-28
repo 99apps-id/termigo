@@ -385,6 +385,7 @@ pub fn run() {
             browser::browser_embed_update,
             browser::browser_embed_navigate,
             browser::browser_embed_read,
+            browser::browser_embed_eval,
             browser::browser_embed_close,
             sql::sql_run,
             agent::agent_enable_hooks,

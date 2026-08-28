@@ -26,7 +26,7 @@ export type ToolContext = {
    */
   injectIntoActivePty: (text: string) => boolean;
   /** Open a new preview tab (in-app iframe) at the given URL. */
-  openPreview: (url: string) => boolean;
+  openPreview: (url: string, browserInstance?: string) => boolean;
   /** Open an agent canvas (self-contained HTML: a graph, a plan) in a preview tab. */
   openCanvas: (html: string, title?: string) => boolean;
   /** Open a native browser webview for the agent, returning its current URL. */
