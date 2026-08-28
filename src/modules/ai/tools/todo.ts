@@ -21,8 +21,12 @@ export function buildTodoTools(ctx: ToolContext) {
                 .describe(
                   "Stable id; generated if omitted. Reuse ids across calls to keep UI stable.",
                 ),
-              title: z.string().min(1),
+              // Optional and coerced below: some models send only `description`
+              // (or `text`) and no `title`. Rejecting the whole call over that
+              // was a hard failure on otherwise-valid todos, so accept either.
+              title: z.string().optional(),
               description: z.string().optional(),
+              text: z.string().optional(),
               status: TodoStatus,
             }),
           )
@@ -33,12 +37,19 @@ export function buildTodoTools(ctx: ToolContext) {
         if (!sessionId)
           return { error: "no active session; cannot persist todos" };
 
-        const normalized: Todo[] = todos.map((t) => ({
-          id: t.id ?? newTodoId(),
-          title: t.title,
-          description: t.description,
-          status: t.status,
-        }));
+        const normalized: Todo[] = todos.map((t) => {
+          // Prefer an explicit title; fall back to description / text so a model
+          // that used the wrong field still produces a usable item.
+          const title = (t.title ?? t.description ?? t.text ?? "").trim();
+          return {
+            id: t.id ?? newTodoId(),
+            title: title || "Untitled",
+            // Keep a separate description only when it is not the same string we
+            // promoted to the title.
+            description: t.title ? t.description : undefined,
+            status: t.status,
+          };
+        });
 
         const err = validateTodos(normalized);
         if (err) return { error: err };
