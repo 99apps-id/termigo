@@ -37,7 +37,7 @@ Keys are never persisted outside the OS keychain / Linux secrets file.
 
 1. Resolves the model via `buildConfiguredLanguageModel`.
 2. Builds a stable system prompt from `selectSystemPrompt(modelId)` plus optional persona, custom instructions, and `TERMIGO.md` project memory.
-3. Converts UI messages to model messages, prunes reasoning content if the model does not keep it, and compacts old messages if the context limit is exceeded.
+3. Converts UI messages to model messages, prunes reasoning content if the model does not keep it, and compacts old messages to fit the model's context window — the limit compaction targets is the configured window capped by any real cap the provider has reported (see [Context-window auto-recovery](#context-window-auto-recovery)).
 4. Streams via `streamText` with the tool set from `buildTools(ctx)` and three stop conditions (below).
 5. Emits step labels, usage deltas, and finish metadata including the stop reason.
 
@@ -142,6 +142,15 @@ AI-proposed file edits open in an `ai-diff` tab. The user accepts or rejects per
 ## Context meter
 
 `components/ContextMeter.tsx` (mounted in `AiStatusBarControls`) shows the live input token count against the model's context limit (`getModelContextLimit`). The fill bar turns amber above 70% and red above 90%, so the user sees when compaction is about to trigger.
+
+## Context-window auto-recovery
+
+A long agentic task that outgrows the model's context window used to die mid-way: the provider rejects the request, the run errors, and only a manual click started it again. Termigo now recovers automatically.
+
+- **`lib/contextLimitLearning.ts`** learns a model's REAL window from the provider's own overflow error. `parseContextOverflow` reads `maximum context length is N tokens … requested M tokens`; `recordContextOverflow` stores N and sets a budget scale from the overshoot (M/N), so the next request targets ~85% of the cap. `isContextOverflowError` recognises the common error shapes; `effectiveContextLimit` returns the smaller of the configured limit and any learned real cap, times the scale (floored at 8k). A later request with plenty of headroom (`noteSuccessfulRequest`) relaxes the scale back toward 1, so one overflow does not over-compact the model forever.
+- **`compact.ts`** pins the budget it must hit and adds two floors so a retry actually fits: a final hard cap that trims the protected tail too (keeping only the last `KEEP_MIN_TAIL` messages intact), and an absolute floor that force-trims any single message larger than the whole window — the case no budget reduction can otherwise fix.
+- **Auto-resume.** In `chatRuntime` `onError`, an overflow is recorded and the SAME run is resumed automatically (`resumeRun`) so the task keeps going instead of stopping. A per-session throttle (`overflowAutoResumeAt`, 60s) prevents a loop when compaction can never fit (e.g. the system prompt + tool schemas alone exceed the window). The **Try again** button in `AiChat.tsx` remains as the manual fallback for a second overflow.
+- **`config.ts`** keeps the configured limit as the real cap (DeepSeek V4 is 1M). If a specific endpoint rejects lower, the learning layer scales the effective budget down from the observed overshoot — so the config is not a guess.
 
 ## Scheduled runs
 

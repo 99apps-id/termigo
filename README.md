@@ -134,6 +134,12 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   The transcript names which one fired, because "it repeated itself" and "it ran
   out of budget" call for different responses — one is worth a click, the other
   is worth a sentence of extra detail.
+- **It does not die when it outgrows the window.** If a request exceeds the
+  model's context window, Termigo learns the real limit from the provider's
+  rejection, compacts the transcript harder, and resumes the SAME run
+  automatically — so a long task keeps going instead of stopping mid-way. A
+  per-session throttle stops it looping when compaction can never fit, and a
+  Try again button stays as the manual fallback.
 - **You can read the request, not infer it.** Turn on `Capture requests`
   (Settings → Agents → Diagnostics) and an inspector appears in the AI bar
   holding each request as assembled: the system prompt, the message history

@@ -72,6 +72,8 @@ Output streams from `pty_open` via a Tauri `Channel<PtyEvent>`.
 - `fs_grep_interactive` - interactive content search
 - `fs_glob` - glob matching
 
+**Async note.** `fs_search`, `fs_grep`, `fs_glob`, `fs_read_dir` and `list_subdirs` are `#[tauri::command] async fn` that run their tree walk on `tauri::async_runtime::spawn_blocking`, so a large repo never blocks the UI thread. `fs_list_files` is synchronous.
+
 ### Git (`src-tauri/src/modules/git/`)
 
 All git commands are gated through the workspace authorization registry.
@@ -92,7 +94,7 @@ Three distinct surfaces:
 
 - `shell_run_command` - one-shot subshell exec for AI tools
 - `shell_session_open` / `shell_session_run` / `shell_session_close` - persistent agent shell with state across calls
-- `shell_bg_spawn` / `shell_bg_logs` / `shell_bg_kill` / `shell_bg_list` - long-running background processes with bounded ring-buffer log capture
+- `shell_bg_spawn` / `shell_bg_logs` / `shell_bg_kill` / `shell_bg_list` - long-running background processes with bounded ring-buffer log capture; `shell_bg_spawn` accepts an optional `log_path` to ALSO append the full output to a file, so a run that overflows the ring (reported as `dropped`) still keeps every line of evidence (the path is surfaced via `log_path` on logs/list)
 
 ### Workspace (`src-tauri/src/modules/workspace.rs`)
 
