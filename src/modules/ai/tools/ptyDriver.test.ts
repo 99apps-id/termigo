@@ -11,6 +11,7 @@ function makeContext(buffer: string | null = "Ready on http://localhost:3000\n")
     isActiveTerminalPrivate: () => false,
     injectIntoActivePty: () => true,
     openPreview: () => false,
+    openCanvas: () => false,
     browserOpen: async () => ({ error: "browser bridge unavailable" }),
     browserNavigate: async () => ({ error: "browser bridge unavailable" }),
     browserBack: async () => ({ error: "browser bridge unavailable" }),

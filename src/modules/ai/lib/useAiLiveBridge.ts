@@ -53,6 +53,7 @@ type Params = {
   launchCwd: string | null;
   home: string | null;
   openPreviewTab: (url: string) => void;
+  openCanvasTab: (html: string, title?: string) => void;
   newAgentTab: (
     cwd: string | undefined,
     title: string,
@@ -149,6 +150,10 @@ export function useAiLiveBridge(params: Params) {
       },
       openPreview: (url: string) => {
         ref.current.openPreviewTab(url);
+        return true;
+      },
+      openCanvas: (html: string, title?: string) => {
+        ref.current.openCanvasTab(html, title);
         return true;
       },
       browserOpen: async (instance, url) => {

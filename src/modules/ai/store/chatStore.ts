@@ -46,6 +46,7 @@ export type Live = {
   getWorkspaceRoot: () => string | null;
   getActiveFile: () => string | null;
   openPreview: (url: string) => boolean;
+  openCanvas: (html: string, title?: string) => boolean;
   browserOpen: (
     instance: string,
     url: string,
@@ -247,6 +248,7 @@ const NOOP_LIVE: Live = {
   getWorkspaceRoot: () => null,
   getActiveFile: () => null,
   openPreview: () => false,
+  openCanvas: () => false,
   browserOpen: async () => ({ error: "browser bridge unavailable" }),
   browserNavigate: async () => ({ error: "browser bridge unavailable" }),
   browserBack: async () => ({ error: "browser bridge unavailable" }),

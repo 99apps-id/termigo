@@ -97,5 +97,27 @@ export function buildTerminalTools(ctx: ToolContext) {
       },
     }),
 
+    render_view: tool({
+      description:
+        "Render a self-contained HTML VIEW in a canvas tab beside the workspace: a graph / chart, or a plan / walkthrough the user should see and act on. Interactivity is markup-only (scripts are stripped): give any element data-canvas-action=\"<text>\" and a click sends <text> back to you as the user's next message - e.g. a Proceed or Execute button on a plan, or step actions. Use inline SVG for charts. Reusing the same title updates the view in place. Auto-executes.",
+      inputSchema: z.object({
+        html: z
+          .string()
+          .describe(
+            "Complete self-contained HTML. Inline SVG and inline styles are fine; <script> and inline on* handlers are removed. Put data-canvas-action on any button you want to send an action back.",
+          ),
+        title: z
+          .string()
+          .optional()
+          .describe("Canvas tab title. Reusing the same title updates that canvas instead of opening a new one."),
+      }),
+      execute: async ({ html, title }) => {
+        const ok = ctx.openCanvas(html, title);
+        return ok
+          ? { ok: true, title: title ?? "Canvas" }
+          : { error: "canvas surface unavailable" };
+      },
+    }),
+
   } as const;
 }

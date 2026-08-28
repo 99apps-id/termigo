@@ -159,6 +159,7 @@ export default function App() {
     openFileTab,
     pinTab,
     newPreviewTab,
+    openCanvasTab,
     newMarkdownTab,
     setMarkdownView,
     setOverrideLanguage,
@@ -1436,6 +1437,7 @@ ${found.foundAt}`
     launchCwd,
     home,
     openPreviewTab,
+    openCanvasTab,
     newAgentTab,
     terminalRefs,
   });

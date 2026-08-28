@@ -12,6 +12,7 @@ import {
   type PreviewAddressBarHandle,
 } from "./PreviewAddressBar";
 import { BrowserPane } from "./BrowserPane";
+import { CanvasView } from "./CanvasView";
 
 export type PreviewPaneHandle = {
   reload: () => void;
@@ -23,6 +24,8 @@ type Props = {
   url: string;
   visible: boolean;
   onUrlChange: (url: string) => void;
+  /** Agent canvas HTML; when set the pane renders it instead of `url`. */
+  html?: string;
 };
 
 // Tear the iframe down after this much invisibility — a background dev
@@ -30,7 +33,7 @@ type Props = {
 const SUSPEND_AFTER_MS = 30_000;
 
 export const PreviewPane = forwardRef<PreviewPaneHandle, Props>(
-  function PreviewPane({ url, visible, onUrlChange }, ref) {
+  function PreviewPane({ url, visible, onUrlChange, html }, ref) {
     // `nonce` is part of the iframe `key`. Bumping it remounts the iframe,
     // which is the only reliable cross-origin reload (calling
     // contentWindow.location.reload() throws on cross-origin frames).
@@ -67,6 +70,25 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, Props>(
     // the whole reason the embedded browser exists. Local dev servers keep the
     // lightweight iframe.
     const external = url ? !isLocalUrl(url) : false;
+
+    // Agent canvas: render the HTML the agent produced (a graph, a plan) in a
+    // sandboxed iframe, no address bar. It is a DOM element, so app modals and
+    // menus sit above it.
+    if (html !== undefined) {
+      return (
+        <div
+          className="flex h-full w-full flex-col overflow-hidden rounded-md border border-border/60 bg-white"
+          style={{
+            visibility: visible ? "visible" : "hidden",
+            pointerEvents: visible ? "auto" : "none",
+          }}
+        >
+          <div className="relative min-h-0 flex-1">
+            <CanvasView html={html} />
+          </div>
+        </div>
+      );
+    }
 
     return (
       <div

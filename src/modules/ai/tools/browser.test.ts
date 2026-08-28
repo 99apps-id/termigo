@@ -11,6 +11,7 @@ function makeCtx(): ToolContext {
     isActiveTerminalPrivate: () => false,
     injectIntoActivePty: () => false,
     openPreview: vi.fn(() => true),
+    openCanvas: () => false,
     browserOpen: vi.fn(async () => ({ url: "https://example.com" })),
     browserNavigate: vi.fn(async () => ({ url: "https://example.com" })),
     browserBack: vi.fn(async () => ({ ok: true as const })),
