@@ -10,6 +10,8 @@ import {
   ArrowReloadHorizontalIcon,
   Globe02Icon,
   LinkSquare02Icon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { openUrl } from "@tauri-apps/plugin-opener";
