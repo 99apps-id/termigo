@@ -18,6 +18,7 @@ import {
 } from "../config";
 import { useApprovalQueue } from "./approvalQueueStore";
 import { useTodosStore } from "./todoStore";
+import { useSubagentRunStore } from "./subagentRunStore";
 import type { AgentStopReason, AgentUsage, RunDiagnostics } from "../lib/agent";
 import { EMPTY_PROVIDER_KEYS, type ProviderKeys, type CustomEndpointKeys } from "../lib/keyring";
 import {
@@ -519,6 +520,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
     }
     void deleteSessionData(id);
     void useTodosStore.getState().clearSession(id);
+    void useSubagentRunStore.getState().clearSession(id);
 
     if (remaining.length === 0) {
       const fresh: SessionMeta = {

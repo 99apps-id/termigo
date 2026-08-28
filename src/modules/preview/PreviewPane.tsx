@@ -91,7 +91,7 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, Props>(
           }}
         >
           <div className="relative min-h-0 flex-1">
-            <CanvasView html={html} />
+            <CanvasView key={html} html={html} />
           </div>
         </div>
       );

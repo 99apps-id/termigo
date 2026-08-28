@@ -6,6 +6,7 @@ type Overrides = Partial<{
   isActiveTerminalPrivate: () => boolean;
   getTerminalContext: () => string | null;
   openPreview: (url: string) => boolean;
+  openCanvas: (html: string, title?: string) => boolean;
 }>;
 
 function makeContext(o: Overrides = {}): ToolContext {
@@ -17,6 +18,7 @@ function makeContext(o: Overrides = {}): ToolContext {
     isActiveTerminalPrivate: o.isActiveTerminalPrivate ?? (() => false),
     injectIntoActivePty: () => false,
     openPreview: o.openPreview ?? (() => true),
+    openCanvas: o.openCanvas ?? (() => true),
     spawnAgent: () => null,
     readAgentOutput: () => null,
     readCache: new Map(),
@@ -41,6 +43,30 @@ async function preview(ctx: ToolContext, url: string) {
   if (!execute) throw new Error("open_preview has no execute");
   return (await execute({ url } as never, OPTS)) as {
     ok?: boolean;
+    error?: string;
+  };
+}
+
+async function suggest(ctx: ToolContext, command: string, explanation?: string) {
+  const execute = buildTerminalTools(ctx).suggest_command.execute;
+  if (!execute) throw new Error("suggest_command has no execute");
+  return (await execute({ command, explanation } as never, OPTS)) as {
+    command?: string;
+    explanation?: string;
+    error?: string;
+  };
+}
+
+async function renderView(
+  ctx: ToolContext,
+  html: string,
+  title?: string,
+) {
+  const execute = buildTerminalTools(ctx).render_view.execute;
+  if (!execute) throw new Error("render_view has no execute");
+  return (await execute({ html, title } as never, OPTS)) as {
+    ok?: boolean;
+    title?: string;
     error?: string;
   };
 }
@@ -141,5 +167,52 @@ describe("open_preview accepts loopback and safe external hosts", () => {
       "http://localhost:5173",
     );
     expect(r.error).toMatch(/unavailable/i);
+  });
+});
+
+describe("suggest_command", () => {
+  it("accepts a clean command and returns it", async () => {
+    const r = await suggest(makeContext(), "git status");
+    expect(r.command).toBe("git status");
+    expect(r.error).toBeUndefined();
+  });
+
+  it("passes the explanation through", async () => {
+    const r = await suggest(makeContext(), "pnpm install", "install deps");
+    expect(r.command).toBe("pnpm install");
+    expect(r.explanation).toBe("install deps");
+  });
+
+  it("refuses a command with control characters", async () => {
+    const r = await suggest(makeContext(), "echo hello\nrm -rf /");
+    expect(r.error).toMatch(/control characters/i);
+  });
+
+  it("refuses a command the shell guard blocks", async () => {
+    const r = await suggest(makeContext(), "rm -rf /");
+    expect(r.error).toBeTruthy();
+  });
+});
+
+describe("render_view", () => {
+  it("opens a canvas tab and returns ok", async () => {
+    const r = await renderView(
+      makeContext(),
+      "<h1>Hello</h1>",
+      "Plan",
+    );
+    expect(r.ok).toBe(true);
+    expect(r.title).toBe("Plan");
+  });
+
+  it("defaults the title to Canvas", async () => {
+    const r = await renderView(makeContext(), "<div/>");
+    expect(r.ok).toBe(true);
+    expect(r.title).toBe("Canvas");
+  });
+
+  it("reports when the canvas surface is unavailable", async () => {
+    const r = await renderView(makeContext({ openCanvas: () => false }), "<div/>");
+    expect(r.error).toMatch(/canvas surface unavailable/i);
   });
 });
