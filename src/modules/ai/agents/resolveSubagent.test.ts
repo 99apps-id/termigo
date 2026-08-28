@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { resolveSubagentType, resolveSubagentLabel } from "./resolveSubagent";
 import { SUBAGENTS } from "./registry";
+import { resolveSubagentLabel, resolveSubagentType } from "./resolveSubagent";
 
 describe("resolveSubagentType", () => {
   it("returns exact ids unchanged", () => {
@@ -23,7 +23,9 @@ describe("resolveSubagentType", () => {
     expect(resolveSubagentType("implement")).toBe("builder");
     expect(resolveSubagentType("recon")).toBe("pentest");
     expect(resolveSubagentType("plan")).toBe("general");
-    expect(resolveSubagentType("screenshot")).toBe("general");
+    expect(resolveSubagentType("screenshot")).toBe("vision");
+    expect(resolveSubagentType("image")).toBe("vision");
+    expect(resolveSubagentType("diagram")).toBe("vision");
   });
 
   it("falls back to general for anything unknown, never throws", () => {

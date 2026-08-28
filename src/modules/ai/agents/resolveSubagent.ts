@@ -63,8 +63,7 @@ const SYNONYMS: Record<string, SubagentType> = {
   develop: "builder",
   worker: "builder",
   coder: "builder",
-  // general: research / planning / catch-all (also where image reads land, since
-  // read_file returns images and there is no dedicated visual sub-agent)
+  // general: research / planning / catch-all
   general: "general",
   research: "general",
   plan: "general",
@@ -74,11 +73,19 @@ const SYNONYMS: Record<string, SubagentType> = {
   debug: "general",
   architecture: "general",
   reasoning: "general",
-  image: "general",
-  screenshot: "general",
-  diagram: "general",
-  visual: "general",
-  ocr: "general",
+  // vision: looking at images / screenshots / mockups / diagrams
+  vision: "vision",
+  image: "vision",
+  images: "vision",
+  screenshot: "vision",
+  screengrab: "vision",
+  diagram: "vision",
+  visual: "vision",
+  see: "vision",
+  look: "vision",
+  ocr: "vision",
+  mockup: "vision",
+  design: "vision",
 };
 
 const norm = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -98,7 +105,9 @@ export function resolveSubagentType(type: string): SubagentType {
   // 3. Normalized (ignore case + separators): "code review" / "codereview".
   const nk = norm(key);
   if (nk) {
-    const byNorm = keys.find((k) => norm(k) === nk || norm(SUBAGENTS[k].label) === nk);
+    const byNorm = keys.find(
+      (k) => norm(k) === nk || norm(SUBAGENTS[k].label) === nk,
+    );
     if (byNorm) return byNorm;
   }
   // 4. Synonym.

@@ -7,12 +7,12 @@ import {
   useRef,
   useState,
 } from "react";
+import { BrowserPane } from "./BrowserPane";
+import { CanvasView } from "./CanvasView";
 import {
   PreviewAddressBar,
   type PreviewAddressBarHandle,
 } from "./PreviewAddressBar";
-import { BrowserPane } from "./BrowserPane";
-import { CanvasView } from "./CanvasView";
 
 export type PreviewPaneHandle = {
   reload: () => void;
@@ -35,7 +35,10 @@ type Props = {
 const SUSPEND_AFTER_MS = 30_000;
 
 export const PreviewPane = forwardRef<PreviewPaneHandle, Props>(
-  function PreviewPane({ url, visible, onUrlChange, html, browserInstance }, ref) {
+  function PreviewPane(
+    { url, visible, onUrlChange, html, browserInstance },
+    ref,
+  ) {
     // `nonce` is part of the iframe `key`. Bumping it remounts the iframe,
     // which is the only reliable cross-origin reload (calling
     // contentWindow.location.reload() throws on cross-origin frames).
@@ -43,7 +46,9 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, Props>(
     const [loaded, setLoaded] = useState(visible);
     const addressRef = useRef<PreviewAddressBarHandle>(null);
     // Stable per-mount id for the native embedded webview (external URLs).
-    const instanceId = useRef(`pv-${Math.random().toString(36).slice(2, 10)}`).current;
+    const instanceId = useRef(
+      `pv-${Math.random().toString(36).slice(2, 10)}`,
+    ).current;
 
     useEffect(() => {
       if (visible) {
@@ -117,7 +122,11 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, Props>(
         >
           {url ? (
             external ? (
-              <BrowserPane instance={browserInstance ?? instanceId} url={url} visible={visible} />
+              <BrowserPane
+                instance={browserInstance ?? instanceId}
+                url={url}
+                visible={visible}
+              />
             ) : loaded ? (
               <iframe
                 key={`${url}#${nonce}`}
@@ -192,8 +201,8 @@ function EmptyState() {
             Ports
           </span>{" "}
           dropdown to jump straight to your running dev server. Public sites
-          often block embedding — open them in your browser via the link icon
-          if you see a blank page.
+          often block embedding — open them in your browser via the link icon if
+          you see a blank page.
         </p>
       </div>
     </div>

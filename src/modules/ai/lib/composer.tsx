@@ -1,18 +1,12 @@
+import { currentWorkspaceEnv } from "@/modules/workspace";
 import { invoke } from "@tauri-apps/api/core";
-import type { SteerMessage, SteerPart } from "./steer";
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { useWhisperRecording } from "../hooks/useWhisperRecording";
 import { expandSnippetTokens, type Snippet } from "../lib/snippets";
-import { tryRunSlashCommand, type SlashCommandMeta } from "./slashCommands";
 import { useChatStore } from "../store/chatStore";
 import { useSnippetsStore } from "../store/snippetsStore";
-import { currentWorkspaceEnv } from "@/modules/workspace";
+import { type SlashCommandMeta, tryRunSlashCommand } from "./slashCommands";
+import type { SteerMessage, SteerPart } from "./steer";
 
 export type FileAttachment = {
   id: string;
@@ -142,9 +136,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
         next.push({
           id: sel.id,
           name:
-            sel.source === "editor"
-              ? "Editor selection"
-              : "Terminal selection",
+            sel.source === "editor" ? "Editor selection" : "Terminal selection",
           kind: "selection",
           mediaType: "text/plain",
           text: sel.text,
@@ -190,6 +182,33 @@ export function AiComposerProvider({ children }: ProviderProps) {
   const removeCommand = (name: string) =>
     setPickedCommands((prev) => prev.filter((c) => c.name !== name));
 
+  const attachImageByPath = async (path: string) => {
+    try {
+      const img = await invoke<{
+        media_type: string;
+        data: string;
+        size: number;
+      }>("fs_read_image_base64", { path, workspace: currentWorkspaceEnv() });
+      const name = path.split(/[/\\]/).pop() || path;
+      const id = `path-${path}`;
+      setFiles((prev) => {
+        if (prev.some((f) => f.id === id)) return prev;
+        const att: FileAttachment = {
+          id,
+          name,
+          kind: "image",
+          mediaType: img.media_type,
+          url: `data:${img.media_type};base64,${img.data}`,
+          size: img.size,
+        };
+        return [...prev, att];
+      });
+      useChatStore.getState().focusInput();
+    } catch (e) {
+      console.error("attachImageByPath failed:", e);
+    }
+  };
+
   const attachFileByPath = async (path: string) => {
     try {
       type ReadResult =
@@ -201,7 +220,13 @@ export function AiComposerProvider({ children }: ProviderProps) {
         workspace: currentWorkspaceEnv(),
       });
       if (result.kind !== "text") {
-        // Binary/oversize files: skip (could surface a toast in future).
+        // Images attach as a picture the agent can see (vision), even though
+        // the text reader classifies them as binary.
+        if (isImageAttachmentPath(path)) {
+          await attachImageByPath(path);
+          return;
+        }
+        // Other binary/oversize files: skip (could surface a toast in future).
         console.warn("attachFileByPath: skipped non-text file", path, result);
         return;
       }
@@ -243,7 +268,11 @@ export function AiComposerProvider({ children }: ProviderProps) {
     let effectiveText = trimmed;
     let commandMarker: string | null = null;
     let commandSource = trimmed;
-    if (pickedCommands.length > 0 && !trimmed.startsWith("/") && !trimmed.startsWith("#")) {
+    if (
+      pickedCommands.length > 0 &&
+      !trimmed.startsWith("/") &&
+      !trimmed.startsWith("#")
+    ) {
       commandSource = `#${pickedCommands[0].name} ${trimmed}`.trim();
     }
     if (commandSource.startsWith("/") || commandSource.startsWith("#")) {
@@ -274,10 +303,8 @@ export function AiComposerProvider({ children }: ProviderProps) {
         (f) =>
           `<selection source="${f.source ?? "terminal"}">\n${f.text ?? ""}\n</selection>`,
       );
-    const { body: bodyAfterTokens, blocks: snippetBlocks } = expandSnippetTokens(
-      effectiveText,
-      useSnippetsStore.getState().snippets,
-    );
+    const { body: bodyAfterTokens, blocks: snippetBlocks } =
+      expandSnippetTokens(effectiveText, useSnippetsStore.getState().snippets);
     const seenHandles = new Set<string>();
     const allSnippetBlocks: string[] = [];
     for (const s of pickedSnippets) {
@@ -352,10 +379,10 @@ export function AiComposerProvider({ children }: ProviderProps) {
   // Enabled while busy too: submitting then means "queue this", not "race the
   // run". The stop button remains the way to interrupt.
   const canSend =
-    (value.trim().length > 0 ||
-      files.length > 0 ||
-      pickedSnippets.length > 0 ||
-      pickedCommands.length > 0);
+    value.trim().length > 0 ||
+    files.length > 0 ||
+    pickedSnippets.length > 0 ||
+    pickedCommands.length > 0;
 
   const queued = useChatStore((st) => st.steerQueue.pending);
   const cancelQueued = useChatStore((st) => st.cancelSteer);
@@ -384,6 +411,14 @@ export function AiComposerProvider({ children }: ProviderProps) {
   };
 
   return <Ctx.Provider value={ctx}>{children}</Ctx.Provider>;
+}
+
+const IMAGE_ATTACH_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp"]);
+
+function isImageAttachmentPath(path: string): boolean {
+  const dot = path.lastIndexOf(".");
+  if (dot === -1) return false;
+  return IMAGE_ATTACH_EXTS.has(path.slice(dot + 1).toLowerCase());
 }
 
 async function readAttachment(file: File): Promise<FileAttachment | null> {

@@ -4,15 +4,7 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
 import { Toaster } from "@/components/ui/sonner";
-import { toast } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { HostKeyPromptDialog } from "@/modules/ssh/HostKeyPromptDialog";
-import { RightPanelHost } from "@/modules/extensions/components/RightPanelHost";
-import { useRightPanelStore } from "@/modules/extensions/rightPanelStore";
-import { useSshRightPanelStore } from "@/modules/ssh/sshRightPanelStore";
-import { SshFileExplorer } from "@/modules/ssh/SshFileExplorer";
-import { findLeafRemoteCwd, isSshLeaf } from "@/modules/terminal/lib/panes";
-import { useSshActiveSessionStore } from "@/modules/ssh/sshActiveSession";
 import { consumeLaunchFiles, getLaunchDir } from "@/lib/launchDir";
 import { quoteShellArg } from "@/lib/shellQuote";
 import { usePresence } from "@/lib/usePresence";
@@ -47,6 +39,8 @@ import {
   useEditorFileSync,
 } from "@/modules/editor";
 import { FileExplorer, type FileExplorerHandle } from "@/modules/explorer";
+import { RightPanelHost } from "@/modules/extensions/components/RightPanelHost";
+import { useRightPanelStore } from "@/modules/extensions/rightPanelStore";
 import type { GitHistorySearchHandle } from "@/modules/git-history";
 import {
   Header,
@@ -58,9 +52,9 @@ import type { PreviewPaneHandle } from "@/modules/preview";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
-  shouldDisablePaneSwapShortcut,
   type ShortcutHandlers,
   type ShortcutId,
+  shouldDisablePaneSwapShortcut,
   useGlobalShortcuts,
 } from "@/modules/shortcuts";
 import {
@@ -80,15 +74,19 @@ import {
   useSpaces,
   useSpacesBoot,
 } from "@/modules/spaces";
+import { HostKeyPromptDialog } from "@/modules/ssh/HostKeyPromptDialog";
+import { SshFileExplorer } from "@/modules/ssh/SshFileExplorer";
+import { useSshActiveSessionStore } from "@/modules/ssh/sshActiveSession";
+import { useSshRightPanelStore } from "@/modules/ssh/sshRightPanelStore";
 import { StatusBar } from "@/modules/statusbar";
 import {
-  TabSwitcherHud,
   type CloseTabsPlan,
+  type Tab,
+  TabSwitcherHud,
   useTabSwitcher,
   useTabs,
   useWindowTitle,
   useWorkspaceCwd,
-  type Tab,
 } from "@/modules/tabs";
 import { labelFor } from "@/modules/tabs/lib/tabLabel";
 import { DEFAULT_SPACE_ID } from "@/modules/tabs/lib/useTabs";
@@ -99,20 +97,21 @@ import {
   hasLeaf,
   leafIds,
   navigateFocusedBlocks,
-  ptyIdForLeaf,
   type PaneBounds,
+  ptyIdForLeaf,
   type TerminalPaneHandle,
   useAgentActivityStore,
   useTerminalFileDrop,
   whenSessionReady,
   writeToSession,
 } from "@/modules/terminal";
+import { findLeafRemoteCwd, isSshLeaf } from "@/modules/terminal/lib/panes";
 import { ThemeProvider, useThemeFileEditing } from "@/modules/theme";
 import { UpdaterDialog } from "@/modules/updater";
 import {
   useWorkspaceEnvStore,
-  workspaceScopeKey,
   type WorkspaceEnv,
+  workspaceScopeKey,
 } from "@/modules/workspace";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -126,6 +125,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { toast } from "sonner";
 import { CloseDialogs } from "./components/CloseDialogs";
 import {
   TOGGLE_BLOCK_INPUT_EVENT,
@@ -1321,13 +1321,23 @@ ${found.foundAt}`
   >(new Map());
   const openContentHit = useCallback(
     (path: string, line: number) => {
-      const id = openFileTab(path, true);
+      // Agent output names files relative to the workspace root (e.g.
+      // "src/app/App.tsx:42"); the editor opens by absolute path, so resolve
+      // a relative ref against the workspace before opening. Absolute paths
+      // (POSIX, Windows drive, UNC, ~) pass through untouched.
+      const isAbsolute = /^([A-Za-z]:[\\/]|\\\\|\/|~)/.test(path);
+      const root = explorerRoot ?? launchCwd ?? home ?? null;
+      const resolved =
+        isAbsolute || !root
+          ? path
+          : `${root.replace(/[\\/]$/, "")}/${path.replace(/^[\\/]/, "")}`;
+      const id = openFileTab(resolved, true);
       if (id == null) return;
       const h = editorRefs.current.get(id);
       if (h) h.gotoLine(line);
       else pendingEditorNavigation.current.set(id, { line, focus: true });
     },
-    [openFileTab],
+    [openFileTab, explorerRoot, launchCwd, home],
   );
 
   const openControlFile = useCallback(
@@ -1363,7 +1373,10 @@ ${found.foundAt}`
   );
 
   const focusControlTab = useCallback(
-    (target: { query: string; spaceId: string }): {
+    (target: {
+      query: string;
+      spaceId: string;
+    }): {
       ok: boolean;
       label?: string;
     } => {
@@ -1375,7 +1388,8 @@ ${found.foundAt}`
       const pool = inSpace.length > 0 ? inSpace : tabs;
       const score = (t: Tab): number => {
         const label = labelFor(t).toLowerCase();
-        const path = "path" in t ? ((t.path as string) ?? "").toLowerCase() : "";
+        const path =
+          "path" in t ? ((t.path as string) ?? "").toLowerCase() : "";
         const cwd =
           "cwd" in t ? ((t.cwd as string | undefined) ?? "").toLowerCase() : "";
         if (label === q || path === q) return 0;
@@ -1417,6 +1431,15 @@ ${found.foundAt}`
     setLspNavigator({ openFile: openContentHit });
     return () => setLspNavigator(null);
   }, [openContentHit]);
+
+  // Warm the user-defined slash commands for the active workspace so `/name`
+  // resolves even when typed straight through without opening the picker. The
+  // picker reloads on open for freshness; this covers the direct path.
+  useEffect(() => {
+    void import("@/modules/ai/store/customCommandsStore").then(({ useCustomCommandsStore }) =>
+      useCustomCommandsStore.getState().loadFor(explorerRoot ?? launchCwd ?? home ?? null),
+    );
+  }, [explorerRoot, launchCwd, home]);
 
   const insertHistoryCommand = useMemo(
     () =>
@@ -1627,7 +1650,9 @@ ${found.foundAt}`
                       sessionId={activeSshSession.sessionId}
                       hostLabel={activeSshSession.hostLabel}
                       currentCwd={activeRemoteCwd}
-                      onClose={() => useSshRightPanelStore.getState().closePanel()}
+                      onClose={() =>
+                        useSshRightPanelStore.getState().closePanel()
+                      }
                     />
                   </div>
                 </ResizablePanel>

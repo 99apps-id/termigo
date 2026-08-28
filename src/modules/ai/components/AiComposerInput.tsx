@@ -1,16 +1,29 @@
 import { Popover, PopoverAnchor } from "@/components/ui/popover";
 import { Spinner } from "@/components/ui/spinner";
-import { cn } from "@/lib/utils";
 import { usePresence } from "@/lib/usePresence";
+import { cn } from "@/lib/utils";
+import { CommandIcon } from "@hugeicons/core-free-icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useWorkspaceFiles } from "../hooks/useWorkspaceFiles";
 import { useComposer } from "../lib/composer";
-import { SLASH_COMMANDS } from "../lib/slashCommands";
+import type { CustomCommand } from "../lib/customCommands";
+import { SLASH_COMMANDS, type SlashCommandMeta } from "../lib/slashCommands";
 import { useChatStore } from "../store/chatStore";
+import { useCustomCommandsStore } from "../store/customCommandsStore";
 import { useSnippetsStore } from "../store/snippetsStore";
+
+/** Present a user-defined command as a picker entry, like a built-in one. */
+function customCommandMeta(cmd: CustomCommand): SlashCommandMeta {
+  return {
+    name: cmd.name,
+    invocation: `/${cmd.name}`,
+    label: cmd.description || cmd.name,
+    icon: CommandIcon,
+  };
+}
 import { AgentSwitcher } from "./AgentSwitcher";
 import { FilePickerContent } from "./FilePicker";
-import { SnippetPickerContent, type PickerItem } from "./SnippetPicker";
+import { type PickerItem, SnippetPickerContent } from "./SnippetPicker";
 
 type SnippetTrigger = {
   start: number;
@@ -98,13 +111,21 @@ export function AiComposerInput() {
 
   useEffect(updateTrigger, [c.value, c.textareaRef]);
 
+  const customCommands = useCustomCommandsStore((s) => s.commands);
+
   const filteredItems = useMemo<PickerItem[]>(() => {
     if (!trigger) return [];
     const q = trigger.query;
-    const cmdItems: PickerItem[] = Object.values(SLASH_COMMANDS)
-      .filter(
-        (c) => !q || c.name.includes(q) || c.label.toLowerCase().includes(q),
-      )
+    const matches = (name: string, label: string) =>
+      !q || name.includes(q) || label.toLowerCase().includes(q);
+    const cmdItems: PickerItem[] = [
+      ...Object.values(SLASH_COMMANDS),
+      // User-defined commands, minus any that shadow a built-in name.
+      ...customCommands
+        .filter((c) => !SLASH_COMMANDS[c.name])
+        .map(customCommandMeta),
+    ]
+      .filter((c) => matches(c.name, c.label))
       .map((command) => ({ kind: "command", command }));
     if (trigger.char === "/") return cmdItems;
     const snipItems: PickerItem[] = snippets
@@ -117,7 +138,7 @@ export function AiComposerInput() {
       )
       .map((snippet) => ({ kind: "snippet", snippet }));
     return [...cmdItems, ...snipItems];
-  }, [trigger, snippets]);
+  }, [trigger, snippets, customCommands]);
 
   const FILE_PICKER_CAP = 30;
   const filteredFiles = useMemo<string[]>(() => {
@@ -140,6 +161,16 @@ export function AiComposerInput() {
   useEffect(() => {
     setActiveIndex(0);
   }, [snippetTriggerOpen, fileTriggerOpen, fileQuery]);
+
+  // Rescan `.termigo/commands` when the slash picker opens, so a command file
+  // the user just added shows up without an app restart. Cheap (readDir + a few
+  // small files) and only fires on the `/` trigger.
+  const slashPickerOpen = trigger?.char === "/";
+  useEffect(() => {
+    if (slashPickerOpen) {
+      void useCustomCommandsStore.getState().loadFor(workspaceRoot);
+    }
+  }, [slashPickerOpen, workspaceRoot]);
 
   const pickerOpen = trigger !== null || fileTrigger !== null;
 
@@ -216,6 +247,20 @@ export function AiComposerInput() {
               ref={c.textareaRef}
               value={c.value}
               onChange={(e) => c.setValue(e.target.value)}
+              onPaste={(e) => {
+                // Pasting a screenshot (or any image) attaches it for a vision
+                // model. Text paste falls through to the default behaviour.
+                const files = e.clipboardData?.files;
+                if (!files || files.length === 0) return;
+                const imgs = Array.from(files).filter((f) =>
+                  f.type.startsWith("image/"),
+                );
+                if (imgs.length === 0) return;
+                e.preventDefault();
+                const dt = new DataTransfer();
+                for (const f of imgs) dt.items.add(f);
+                void c.addFiles(dt.files);
+              }}
               onKeyUp={updateTrigger}
               onClick={updateTrigger}
               onSelect={updateTrigger}

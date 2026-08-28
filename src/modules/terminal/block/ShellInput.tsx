@@ -1,8 +1,10 @@
 import { resolveFontFamily } from "@/lib/fonts";
 import { fmtShortcut, MOD_KEY } from "@/lib/platform";
 import { cn } from "@/lib/utils";
+import { usePreferencesStore } from "@/modules/settings/preferences";
 import { useTheme } from "@/modules/theme";
 import { useEffect, useRef } from "react";
+import { useTerminalFont } from "../lib/useTerminalFont";
 import {
   clearLeafBlockSelection,
   getLeafDraft,
@@ -11,7 +13,6 @@ import {
   setLeafInputActivity,
   setLeafInputFocus,
 } from "../lib/useTerminalSession";
-import { useTerminalFont } from "../lib/useTerminalFont";
 import {
   historyCommands,
   historyList,
@@ -70,6 +71,28 @@ export default function ShellInput({
   const fontRef = useRef({ fontFamily, fontSize, fontWeight });
   fontRef.current = { fontFamily, fontSize, fontWeight };
 
+  // History first (instant, local, free). Only when it has no match and the
+  // user has opted in does the AI layer run — lazily imported so the AI SDK
+  // stays out of the terminal's startup bundle.
+  const combinedSuggest = async (line: string): Promise<string | null> => {
+    const fromHistory = await historySuggest(line);
+    if (fromHistory) return fromHistory;
+    if (!usePreferencesStore.getState().terminalAiSuggest) return null;
+    try {
+      const { aiTerminalSuggest } = await import(
+        "@/modules/ai/lib/terminalSuggest"
+      );
+      return await aiTerminalSuggest(line, {
+        cwd: cbRef.current.getCwd(),
+        commands: commandsRef.current,
+      });
+    } catch {
+      return null;
+    }
+  };
+  const suggestRef = useRef(combinedSuggest);
+  suggestRef.current = combinedSuggest;
+
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
@@ -83,7 +106,7 @@ export default function ShellInput({
       getCwd: () => cbRef.current.getCwd(),
       onChange: (text) =>
         setLeafInputActivity(leafIdRef.current, text.length > 0),
-      suggest: historySuggest,
+      suggest: (line) => suggestRef.current(line),
       historyList,
       onSubmit: (text) => {
         historyRecord(text);

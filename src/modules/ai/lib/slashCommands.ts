@@ -6,6 +6,8 @@ import {
 import { usePlanStore } from "../store/planStore";
 import { useChatStore } from "../store/chatStore";
 import { useApprovalQueue } from "../store/approvalQueueStore";
+import { useCustomCommandsStore } from "../store/customCommandsStore";
+import { expandCommand } from "./customCommands";
 import { useSessionDirectiveStore } from "../store/sessionDirectiveStore";
 import {
   parseScheduleWhen,
@@ -119,7 +121,11 @@ export function tryRunSlashCommand(input: string): SlashOutcome {
   const lead = trimmed[0];
   if (lead !== "/" && lead !== "#") return { kind: "none" };
   const [head, ...rest] = trimmed.slice(1).split(/\s+/);
-  if (lead === "#" && !SLASH_COMMANDS[head]) return { kind: "none" };
+  // A built-in name always wins; otherwise a user-defined command may match.
+  const custom = SLASH_COMMANDS[head]
+    ? null
+    : useCustomCommandsStore.getState().get(head);
+  if (lead === "#" && !SLASH_COMMANDS[head] && !custom) return { kind: "none" };
   const tail = rest.join(" ").trim();
 
   switch (head) {
@@ -162,6 +168,13 @@ export function tryRunSlashCommand(input: string): SlashOutcome {
     case "schedule":
       return respondToSchedule(tail);
     default:
+      if (custom) {
+        return {
+          kind: "send-prompt",
+          prompt: expandCommand(custom, tail),
+          commandName: custom.name,
+        };
+      }
       return { kind: "none" };
   }
 }

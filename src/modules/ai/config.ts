@@ -109,7 +109,8 @@ export const PROVIDERS: readonly ProviderInfo[] = [
     label: "MLX",
     keyringAccount: "",
     keyPrefix: null,
-    consoleUrl: "https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/SERVER.md",
+    consoleUrl:
+      "https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/SERVER.md",
   },
   {
     id: "ollama",
@@ -680,6 +681,17 @@ const FREEFORM_PROVIDERS: ReadonlySet<ProviderId> = new Set([
   "mlx",
   "ollama",
 ]);
+
+/**
+ * Whether the model can accept image inputs. Known models carry a "vision" tag;
+ * unknown / custom-endpoint ids are treated as capable (many proxy a vision
+ * model, and a provider that cannot will return its own clear error) rather than
+ * hard-blocking a model we simply don't have metadata for.
+ */
+export function modelSupportsVision(id: string): boolean {
+  if (!isKnownModelId(id)) return true;
+  return getModel(id).tags?.includes("vision") ?? false;
+}
 
 // Reasoning models reject tool-call turns whose reasoning was stripped; keep it.
 export function modelKeepsReasoning(m: ModelInfo): boolean {

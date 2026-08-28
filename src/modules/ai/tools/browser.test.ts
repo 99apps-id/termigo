@@ -32,7 +32,9 @@ function makeCtx(): ToolContext {
     browserReload: vi.fn(async () => ({ ok: true as const })),
     browserExtract: vi.fn(async () => ({ text: "body text" })),
     browserEval: vi.fn(async () => ({ ok: true as const })),
-    browserScreenshot: vi.fn(async () => ({ screenshot: "data:image/png;base64,AA" })),
+    browserScreenshot: vi.fn(async () => ({
+      screenshot: "data:image/png;base64,AA",
+    })),
     browserConsole: vi.fn(async () => ({ console: "warn: hi" })),
     browserUrl: vi.fn(async () => ({ url: "https://example.com" })),
     browserClose: vi.fn(async () => ({ ok: true as const })),
@@ -137,9 +139,10 @@ describe("browser tools", () => {
       OPTS,
     )) as { ok?: boolean };
     expect(r.ok).toBe(true);
-    const calls = (native.browserEmbedEval as ReturnType<typeof vi.fn>).mock.calls;
+    const calls = (native.browserEmbedEval as ReturnType<typeof vi.fn>).mock
+      .calls;
     const js = calls[0][1] as string;
-    expect(js).toContain("document.querySelector(\"button.submit\")");
+    expect(js).toContain('document.querySelector("button.submit")');
     expect(js).toContain("el.click()");
   });
 
@@ -151,7 +154,8 @@ describe("browser tools", () => {
       OPTS,
     )) as { ok?: boolean };
     expect(r.ok).toBe(true);
-    const calls = (native.browserEmbedEval as ReturnType<typeof vi.fn>).mock.calls;
+    const calls = (native.browserEmbedEval as ReturnType<typeof vi.fn>).mock
+      .calls;
     const js = calls[0][1] as string;
     expect(js).toContain("input[name='q']");
     expect(js).toContain("dispatchEvent(new Event('input'");

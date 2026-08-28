@@ -1,7 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { native } from "../lib/native";
 import { unsafeBrowserUrl } from "../lib/browserGuard";
+import { native } from "../lib/native";
 import type { ToolContext } from "./context";
 
 // The read/act browser tools target the NATIVE embedded webview created by
@@ -54,10 +54,14 @@ export function buildBrowserTools(ctx: ToolContext) {
       inputSchema: z.object({
         instance: z
           .string()
-          .describe("A short name for this browser, e.g. 'docs'. Currently informational."),
+          .describe(
+            "A short name for this browser, e.g. 'docs'. Currently informational.",
+          ),
         url: z
           .url()
-          .describe("Full http(s) URL. External sites allowed; SSRF targets are refused."),
+          .describe(
+            "Full http(s) URL. External sites allowed; SSRF targets are refused.",
+          ),
       }),
       execute: async ({ instance, url }) => {
         const blocked = guard(url);
@@ -74,7 +78,11 @@ export function buildBrowserTools(ctx: ToolContext) {
               instance,
               note: "Opened in an in-app browser tab. Use this same `instance` for browser_extract / browser_navigate / browser_click.",
             }
-          : { error: "could not open a browser tab (preview surface unavailable)", url };
+          : {
+              error:
+                "could not open a browser tab (preview surface unavailable)",
+              url,
+            };
       },
     }),
 
@@ -82,7 +90,9 @@ export function buildBrowserTools(ctx: ToolContext) {
       description:
         "Navigate an open browser instance to a new URL. Refuses SSRF targets (metadata, loopback, link-local).",
       inputSchema: z.object({
-        instance: z.string().describe("Instance name returned by browser_open."),
+        instance: z
+          .string()
+          .describe("Instance name returned by browser_open."),
         url: z.url().describe("Full http(s) URL to visit."),
       }),
       execute: async ({ instance, url }) => {
@@ -102,7 +112,8 @@ export function buildBrowserTools(ctx: ToolContext) {
       inputSchema: z.object({
         instance: z.string().describe("Instance name."),
       }),
-      execute: async ({ instance }) => await embedEval(instance, "history.back();"),
+      execute: async ({ instance }) =>
+        await embedEval(instance, "history.back();"),
     }),
 
     browser_forward: tool({
@@ -110,7 +121,8 @@ export function buildBrowserTools(ctx: ToolContext) {
       inputSchema: z.object({
         instance: z.string().describe("Instance name."),
       }),
-      execute: async ({ instance }) => await embedEval(instance, "history.forward();"),
+      execute: async ({ instance }) =>
+        await embedEval(instance, "history.forward();"),
     }),
 
     browser_reload: tool({
@@ -118,7 +130,8 @@ export function buildBrowserTools(ctx: ToolContext) {
       inputSchema: z.object({
         instance: z.string().describe("Instance name."),
       }),
-      execute: async ({ instance }) => await embedEval(instance, "location.reload();"),
+      execute: async ({ instance }) =>
+        await embedEval(instance, "location.reload();"),
     }),
 
     browser_extract: tool({

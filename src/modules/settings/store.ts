@@ -1,7 +1,8 @@
 import {
-  type ApprovalMode,
-  DEFAULT_APPROVAL_MODE,
-} from "@/modules/ai/lib/approvalPolicy";
+  type AgentLaunchCommands,
+  DEFAULT_AGENT_LAUNCH_COMMANDS,
+  normalizeAgentLaunchCommands,
+} from "@/modules/agents/lib/launcher";
 import {
   type AutocompleteProviderId,
   type CustomEndpoint,
@@ -19,10 +20,9 @@ import {
   WHISPERCPP_DEFAULT_BASE_URL,
 } from "@/modules/ai/config";
 import {
-  type AgentLaunchCommands,
-  DEFAULT_AGENT_LAUNCH_COMMANDS,
-  normalizeAgentLaunchCommands,
-} from "@/modules/agents/lib/launcher";
+  type ApprovalMode,
+  DEFAULT_APPROVAL_MODE,
+} from "@/modules/ai/lib/approvalPolicy";
 import type { KeyBinding, ShortcutId } from "@/modules/shortcuts/shortcuts";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { LazyStore } from "@tauri-apps/plugin-store";
@@ -239,6 +239,12 @@ export type Preferences = {
    * tmux on the host; ignored when the setting is off or tmux is absent.
    */
   persistTerminals: boolean;
+  /**
+   * Opt-in AI autosuggestion for the block terminal input: when local history
+   * has no match, ask the selected chat model for the most likely full command
+   * and show it as a ghost completion. Off by default — it spends tokens.
+   */
+  terminalAiSuggest: boolean;
 };
 
 export type EditorFormatter =
@@ -342,6 +348,7 @@ const KEY_COST_DAILY_BUDGET_USD = "costDailyBudgetUsd";
 const KEY_SUBAGENT_MODEL_ID = "subagentModelId";
 const KEY_AUTO_CHECKPOINT = "autoCheckpoint";
 const KEY_PERSIST_TERMINALS = "persistTerminals";
+const KEY_TERMINAL_AI_SUGGEST = "terminalAiSuggest";
 
 export const TERMINAL_FONT_SIZE_DEFAULT = 14;
 export const TERMINAL_FONT_SIZE_MIN = 8;
@@ -443,6 +450,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   subagentModelId: "",
   autoCheckpoint: true,
   persistTerminals: false,
+  terminalAiSuggest: false,
 };
 
 const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
@@ -552,9 +560,9 @@ export async function loadPreferences(): Promise<Preferences> {
       get<string[]>(KEY_AGENT_ALWAYS_ALLOWED_TOOLS) ??
       DEFAULT_PREFERENCES.agentAlwaysAllowedTools
     ).filter((t) => typeof t === "string" && t.length > 0),
-    pentestScope: (get<string[]>(KEY_PENTEST_SCOPE) ?? DEFAULT_PREFERENCES.pentestScope).filter(
-      (t) => typeof t === "string" && t.length > 0,
-    ),
+    pentestScope: (
+      get<string[]>(KEY_PENTEST_SCOPE) ?? DEFAULT_PREFERENCES.pentestScope
+    ).filter((t) => typeof t === "string" && t.length > 0),
     enforcePentestScope:
       get<boolean>(KEY_ENFORCE_PENTEST_SCOPE) ??
       DEFAULT_PREFERENCES.enforcePentestScope,
@@ -635,13 +643,15 @@ export async function loadPreferences(): Promise<Preferences> {
       get<number>(KEY_COST_DAILY_BUDGET_USD) ??
       DEFAULT_PREFERENCES.costDailyBudgetUsd,
     subagentModelId:
-      get<string>(KEY_SUBAGENT_MODEL_ID) ??
-      DEFAULT_PREFERENCES.subagentModelId,
+      get<string>(KEY_SUBAGENT_MODEL_ID) ?? DEFAULT_PREFERENCES.subagentModelId,
     autoCheckpoint:
       get<boolean>(KEY_AUTO_CHECKPOINT) ?? DEFAULT_PREFERENCES.autoCheckpoint,
     persistTerminals:
       get<boolean>(KEY_PERSIST_TERMINALS) ??
       DEFAULT_PREFERENCES.persistTerminals,
+    terminalAiSuggest:
+      get<boolean>(KEY_TERMINAL_AI_SUGGEST) ??
+      DEFAULT_PREFERENCES.terminalAiSuggest,
     agentLaunchCommands: normalizeAgentLaunchCommands(
       get<unknown>(KEY_AGENT_LAUNCH_COMMANDS),
     ),
@@ -854,7 +864,9 @@ export async function setAgentAlwaysAllowedTools(
 }
 
 export async function setPentestScope(value: string[]): Promise<void> {
-  const clean = [...new Set(value.map((v) => String(v).trim()).filter(Boolean))];
+  const clean = [
+    ...new Set(value.map((v) => String(v).trim()).filter(Boolean)),
+  ];
   await writePref(KEY_PENTEST_SCOPE, clean);
 }
 
@@ -862,7 +874,9 @@ export async function setEnforcePentestScope(value: boolean): Promise<void> {
   await writePref(KEY_ENFORCE_PENTEST_SCOPE, value);
 }
 
-export async function setAutoApproveInScopeScans(value: boolean): Promise<void> {
+export async function setAutoApproveInScopeScans(
+  value: boolean,
+): Promise<void> {
   await writePref(KEY_AUTO_APPROVE_IN_SCOPE_SCANS, value);
 }
 
@@ -1064,6 +1078,10 @@ export async function setPersistTerminals(value: boolean): Promise<void> {
   await writePref(KEY_PERSIST_TERMINALS, value);
 }
 
+export async function setTerminalAiSuggest(value: boolean): Promise<void> {
+  await writePref(KEY_TERMINAL_AI_SUGGEST, value);
+}
+
 export async function setAgentLaunchCommands(
   value: AgentLaunchCommands,
 ): Promise<void> {
@@ -1167,6 +1185,7 @@ export async function onPreferencesChange(
     [KEY_SUBAGENT_MODEL_ID]: "subagentModelId",
     [KEY_AUTO_CHECKPOINT]: "autoCheckpoint",
     [KEY_PERSIST_TERMINALS]: "persistTerminals",
+    [KEY_TERMINAL_AI_SUGGEST]: "terminalAiSuggest",
   };
   // Same-process writes still fire onChange immediately; cross-window writes
   // arrive via the Tauri event emitted by writePref().
@@ -1209,14 +1228,20 @@ const EXT_PREFIX = "ext:";
 
 export async function _writeAny(key: string, value: unknown): Promise<void> {
   if (!key.startsWith(EXT_PREFIX)) {
-    throw new Error(`settings._writeAny can only write namespaced extension keys, got "${key}"`);
+    throw new Error(
+      `settings._writeAny can only write namespaced extension keys, got "${key}"`,
+    );
   }
   await writePref(key, value);
 }
 
-export async function _readAny<T = unknown>(key: string): Promise<T | undefined> {
+export async function _readAny<T = unknown>(
+  key: string,
+): Promise<T | undefined> {
   if (!key.startsWith(EXT_PREFIX)) {
-    throw new Error(`settings._readAny can only read namespaced extension keys, got "${key}"`);
+    throw new Error(
+      `settings._readAny can only read namespaced extension keys, got "${key}"`,
+    );
   }
   const v = await store.get<T>(key);
   return v ?? undefined;

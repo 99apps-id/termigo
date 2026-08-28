@@ -4,7 +4,8 @@ export type SubagentType =
   | "security"
   | "general"
   | "builder"
-  | "pentest";
+  | "pentest"
+  | "vision";
 
 export type SubagentDef = {
   id: SubagentType;
@@ -67,6 +68,20 @@ Rules:
 - Run a scan ONCE. "No open ports", "timed out", or "tool not installed" is a final result for that step, not a reason to retry the same thing.
 - If a required CLI is missing on this machine, say so and move on; do not loop trying to install it.
 - Never run destructive or denial-of-service actions. Report findings with concrete evidence (open ports, headers, certificate details, discovered hosts), then stop.`,
+  },
+  vision: {
+    id: "vision",
+    label: "Vision",
+    description:
+      "Looks at images — screenshots, design mocks, diagrams, photos — and answers questions about them. Reads the image with read_file and reports what it sees. Needs a vision-capable model.",
+    systemPrompt: `You are a vision subagent. Your job is to LOOK at the image(s) named in your prompt and answer the question about them.
+
+Rules:
+- Call read_file on each image path first — that hands you the actual picture, not just a filename. read_file accepts png, jpeg, gif and webp.
+- If read_file reports the model has no vision capability, say so and stop: the run needs a vision-capable model (set the sub-agent model, or the main model, to one tagged "vision").
+- Describe only what is actually visible. Do not invent UI, text, or details the image does not show. Quote on-screen text exactly.
+- For a design mock or screenshot, be concrete: layout, components, colors, spacing, and any text or numbers. For a diagram, report the boxes and the arrows between them.
+- Return a tight, structured answer the main agent can act on. Stop as soon as you have answered.`,
   },
   builder: {
     id: "builder",

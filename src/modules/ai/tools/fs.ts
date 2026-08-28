@@ -1,24 +1,26 @@
-import { tool } from "ai";
-import { z } from "zod";
 import {
   sftpCreateDir,
   sftpReadDir,
   sftpReadFile,
   sftpWriteFile,
 } from "@/modules/ssh/sftp";
+import { tool } from "ai";
+import { z } from "zod";
+import { modelSupportsVision } from "../config";
 import { native } from "../lib/native";
+import { fileCacheKey, routePath } from "../lib/remoteFs";
 import {
   checkReadable,
   checkReadableCanonical,
   checkWritable,
   checkWritableCanonical,
 } from "../lib/security";
+import { useChatStore } from "../store/chatStore";
 import { newQueuedEditId, usePlanStore } from "../store/planStore";
-import { fileCacheKey, routePath } from "../lib/remoteFs";
 import {
+  type RemoteFsSession,
   resolvePath,
   resolveRemotePath,
-  type RemoteFsSession,
   type ToolContext,
 } from "./context";
 
@@ -29,6 +31,32 @@ function djb2(s: string): number {
   let h = 5381;
   for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
   return h >>> 0;
+}
+
+const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp"]);
+
+function isImagePath(path: string): boolean {
+  const dot = path.lastIndexOf(".");
+  if (dot === -1) return false;
+  return IMAGE_EXTS.has(path.slice(dot + 1).toLowerCase());
+}
+
+/** Shape of a read_file result that carried an image back for a vision model. */
+type ImageReadOutput = {
+  path: string;
+  kind: "image";
+  mediaType: string;
+  data: string;
+  size: number;
+};
+
+function isImageReadOutput(o: unknown): o is ImageReadOutput {
+  return (
+    !!o &&
+    typeof o === "object" &&
+    (o as { kind?: unknown }).kind === "image" &&
+    typeof (o as { data?: unknown }).data === "string"
+  );
 }
 
 /** Slice file content to the read tool's line/byte caps. Shared by the local
@@ -125,7 +153,7 @@ export function buildFsTools(ctx: ToolContext) {
   return {
     read_file: tool({
       description:
-        "Read a UTF-8 text file. Defaults to the first 2000 lines (capped at 25KB). Pass `offset`/`limit` for line-based windowing of large files. Refuses binary, oversized, or sensitive files (.env, keys, credentials). If you call this on the same path twice in a session without edits in between, the second call returns `unchanged: true` instead of re-emitting the content — re-read the prior tool result. When the active terminal is an SSH session, paths resolve on the remote host (POSIX) and reads go over SFTP; Windows drive paths (C:...) still read locally.",
+        "Read a UTF-8 text file. Defaults to the first 2000 lines (capped at 25KB). Pass `offset`/`limit` for line-based windowing of large files. Refuses other binary, oversized, or sensitive files (.env, keys, credentials). IMAGES (png, jpeg, gif, webp) are returned as a picture you can actually see — call this on a screenshot, mockup, or diagram to look at it (requires a vision-capable model; local files only). If you call this on the same path twice in a session without edits in between, the second call returns `unchanged: true` instead of re-emitting the content — re-read the prior tool result. When the active terminal is an SSH session, paths resolve on the remote host (POSIX) and reads go over SFTP; Windows drive paths (C:...) still read locally.",
       inputSchema: z.object({
         path: z
           .string()
@@ -152,13 +180,50 @@ export function buildFsTools(ctx: ToolContext) {
         if (remote) {
           const remotePath = resolveRemotePath(path, remote.cwd);
           if (remotePath !== null) {
-            return readRemoteFile(remote, remotePath, offset, limit, ctx.readCache);
+            return readRemoteFile(
+              remote,
+              remotePath,
+              offset,
+              limit,
+              ctx.readCache,
+            );
           }
         }
         const reqPath = resolvePath(path, ctx.getCwd());
-        const safety = await checkReadableCanonical(reqPath, native.canonicalize);
+        const safety = await checkReadableCanonical(
+          reqPath,
+          native.canonicalize,
+        );
         if (!safety.ok) return { error: safety.reason, path: reqPath };
         const abs = safety.canonical;
+
+        // Images: hand the raw bytes to the model as a visual part (see
+        // `toModelOutput` below) instead of refusing them as "binary" — but only
+        // when the selected model can actually see, and only for local files
+        // (SFTP image reads are not wired up).
+        if (isImagePath(abs)) {
+          const modelId = useChatStore.getState().selectedModelId;
+          if (!modelSupportsVision(modelId)) {
+            return {
+              error:
+                "this file is an image, but the selected model has no vision capability — switch to a vision-capable model to read it.",
+              path: abs,
+            };
+          }
+          try {
+            const img = await native.readImageBase64(abs);
+            return {
+              path: abs,
+              kind: "image" as const,
+              mediaType: img.media_type,
+              data: img.data,
+              size: img.size,
+            };
+          } catch (e) {
+            return { error: String(e), path: abs };
+          }
+        }
+
         try {
           const r = await native.readFile(abs);
           if (r.kind === "binary")
@@ -172,7 +237,12 @@ export function buildFsTools(ctx: ToolContext) {
           const hash = djb2(r.content);
           const isFullRead = offset === undefined && limit === undefined;
           const prior = ctx.readCache.get(abs);
-          if (isFullRead && prior && prior.size === r.size && prior.hash === hash) {
+          if (
+            isFullRead &&
+            prior &&
+            prior.size === r.size &&
+            prior.hash === hash
+          ) {
             return { path: abs, unchanged: true, size: r.size };
           }
           ctx.readCache.set(abs, { size: r.size, hash });
@@ -199,6 +269,28 @@ export function buildFsTools(ctx: ToolContext) {
           return { error: String(e), path: abs };
         }
       },
+      // When read_file returned an image, feed it to the model as a real visual
+      // part (image-data) rather than a JSON blob of base64 it cannot see. Every
+      // other result stays plain JSON.
+      toModelOutput: ({ output }) => {
+        if (isImageReadOutput(output)) {
+          return {
+            type: "content",
+            value: [
+              {
+                type: "text",
+                text: `Image ${output.path} (${output.mediaType}, ${output.size} bytes)`,
+              },
+              {
+                type: "image-data",
+                data: output.data,
+                mediaType: output.mediaType,
+              },
+            ],
+          };
+        }
+        return { type: "json", value: output as never };
+      },
     }),
 
     list_directory: tool({
@@ -218,7 +310,11 @@ export function buildFsTools(ctx: ToolContext) {
             const safety = checkReadable(remotePath);
             if (!safety.ok) return { error: safety.reason, path: remotePath };
             try {
-              const entries = await sftpReadDir(remote.sessionId, remotePath, false);
+              const entries = await sftpReadDir(
+                remote.sessionId,
+                remotePath,
+                false,
+              );
               return {
                 path: remotePath,
                 entries: entries.map((e) => ({ name: e.name, kind: e.kind })),
@@ -229,7 +325,10 @@ export function buildFsTools(ctx: ToolContext) {
           }
         }
         const reqPath = resolvePath(path, ctx.getCwd());
-        const safety = await checkReadableCanonical(reqPath, native.canonicalize);
+        const safety = await checkReadableCanonical(
+          reqPath,
+          native.canonicalize,
+        );
         if (!safety.ok) return { error: safety.reason, path: reqPath };
         const abs = safety.canonical;
         try {
@@ -277,7 +376,10 @@ export function buildFsTools(ctx: ToolContext) {
         }
 
         const reqPath = target.path;
-        const safety = await checkWritableCanonical(reqPath, native.canonicalize);
+        const safety = await checkWritableCanonical(
+          reqPath,
+          native.canonicalize,
+        );
         if (!safety.ok) return { error: safety.reason, path: reqPath };
         const abs = safety.canonical;
 
@@ -339,7 +441,10 @@ export function buildFsTools(ctx: ToolContext) {
         }
 
         const reqPath = target.path;
-        const safety = await checkWritableCanonical(reqPath, native.canonicalize);
+        const safety = await checkWritableCanonical(
+          reqPath,
+          native.canonicalize,
+        );
         if (!safety.ok) return { error: safety.reason, path: reqPath };
         const abs = safety.canonical;
         if (usePlanStore.getState().active) {

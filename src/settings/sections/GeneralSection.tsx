@@ -26,8 +26,10 @@ import {
   setAutostart,
   setDefaultWorkspaceEnv,
   setExplorerGitDecorations,
+  setPersistTerminals,
   setRestoreWindowState,
   setShowHidden,
+  setTerminalAiSuggest,
   setTerminalCursorBlink,
   setTerminalCursorStyle,
   setTerminalFontFamily,
@@ -37,7 +39,6 @@ import {
   setTerminalScrollback,
   setTerminalShell,
   setTerminalWebglEnabled,
-  setPersistTerminals,
   setZoomLevel,
   TERMINAL_FONT_SIZES,
   TERMINAL_SCROLLBACK_PRESETS,
@@ -104,6 +105,7 @@ export function GeneralSection() {
     (s) => s.terminalWebglEnabled,
   );
   const persistTerminals = usePreferencesStore((s) => s.persistTerminals);
+  const terminalAiSuggest = usePreferencesStore((s) => s.terminalAiSuggest);
   const terminalCursorBlink = usePreferencesStore((s) => s.terminalCursorBlink);
   const terminalCursorStyle = usePreferencesStore((s) => s.terminalCursorStyle);
   const terminalFontFamily = usePreferencesStore((s) => s.terminalFontFamily);
@@ -284,6 +286,15 @@ export function GeneralSection() {
           <Switch
             checked={persistTerminals}
             onCheckedChange={(v) => void setPersistTerminals(v)}
+          />
+        </SettingRow>
+        <SettingRow
+          title="AI command suggestions"
+          description="When local history has no match, ask the selected AI model for the most likely full command and show it as a ghost completion (→ / End to accept). Off by default — it spends tokens on your key."
+        >
+          <Switch
+            checked={terminalAiSuggest}
+            onCheckedChange={(v) => void setTerminalAiSuggest(v)}
           />
         </SettingRow>
         <SettingRow

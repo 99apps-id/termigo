@@ -159,9 +159,15 @@ const ToolImpl = ({
   // Subagent cards open by default so the live fan-out progress is visible.
   const open = defaultOpen ?? (isError || isSubagent);
   const isHeavy = HEAVY_CONTENT_TOOLS.has(toolName);
-  // For heavy tools, only show details on error — never the streamed input
-  // body, which is huge and re-renders per token.
-  const showInputBody = !isHeavy && Boolean(input);
+  // Edit tools are "heavy" (input carries file text), but their input preview is
+  // a compact computed line-diff, not the raw streamed body — and the memo keys
+  // heavy re-renders off the path summary, so it settles once at completion
+  // rather than per token. Surface it so the card expands to an inline diff.
+  const isEditDiff =
+    (toolName === "edit" || toolName === "multi_edit") && Boolean(input);
+  // For other heavy tools, only show details on error — never the streamed
+  // input body, which is huge and re-renders per token.
+  const showInputBody = (!isHeavy && Boolean(input)) || isEditDiff;
   const showOutputBody = !isHeavy && output !== undefined;
   const hasDetails =
     showInputBody || showOutputBody || Boolean(errorText) || isSubagent;
@@ -328,7 +334,95 @@ function renderInputPreview(
       </div>
     );
   }
+  if (toolName === "edit" || toolName === "multi_edit") {
+    const path = str("path");
+    const edits: EditPair[] =
+      toolName === "edit"
+        ? [{ oldStr: str("old_string") ?? "", newStr: str("new_string") ?? "" }]
+        : Array.isArray(i.edits)
+          ? (i.edits as Array<Record<string, unknown>>).map((e) => ({
+              oldStr: typeof e.old_string === "string" ? e.old_string : "",
+              newStr: typeof e.new_string === "string" ? e.new_string : "",
+            }))
+          : [];
+    if (edits.length === 0) return null;
+    return <EditDiffPreview path={path} edits={edits} />;
+  }
   return null;
+}
+
+type EditPair = { oldStr: string; newStr: string };
+type DiffRow = { type: "del" | "add"; text: string };
+
+// A minimal line diff: trim the common head/tail, then everything left in the
+// middle is what actually changed — removed lines then added lines. Good enough
+// to read an edit at a glance without pulling in a full Myers diff.
+function lineDiff(oldStr: string, newStr: string): DiffRow[] {
+  const a = oldStr.split("\n");
+  const b = newStr.split("\n");
+  let start = 0;
+  while (start < a.length && start < b.length && a[start] === b[start]) start++;
+  let ea = a.length;
+  let eb = b.length;
+  while (ea > start && eb > start && a[ea - 1] === b[eb - 1]) {
+    ea--;
+    eb--;
+  }
+  const rows: DiffRow[] = [];
+  for (let i = start; i < ea; i++) rows.push({ type: "del", text: a[i] });
+  for (let i = start; i < eb; i++) rows.push({ type: "add", text: b[i] });
+  return rows;
+}
+
+const MAX_DIFF_ROWS = 40;
+
+function EditDiffPreview({
+  path,
+  edits,
+}: {
+  path: string | null;
+  edits: EditPair[];
+}) {
+  const rows: DiffRow[] = [];
+  for (const e of edits) {
+    if (rows.length >= MAX_DIFF_ROWS) break;
+    rows.push(...lineDiff(e.oldStr, e.newStr));
+  }
+  const shown = rows.slice(0, MAX_DIFF_ROWS);
+  const overflow = rows.length - shown.length;
+
+  return (
+    <div className="space-y-1">
+      {path ? (
+        <div className="truncate font-mono text-[10px] text-muted-foreground">
+          {path}
+        </div>
+      ) : null}
+      <div className="overflow-auto rounded border border-border/40 font-mono text-[11px] leading-relaxed">
+        {shown.map((r, idx) => (
+          <div
+            key={`${r.type}-${idx}-${r.text.slice(0, 24)}`}
+            className={cn(
+              "flex gap-1.5 whitespace-pre px-2",
+              r.type === "del"
+                ? "bg-destructive/10 text-destructive"
+                : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+            )}
+          >
+            <span className="select-none opacity-60">
+              {r.type === "del" ? "−" : "+"}
+            </span>
+            <span className="min-w-0 flex-1">{r.text || " "}</span>
+          </div>
+        ))}
+      </div>
+      {overflow > 0 ? (
+        <div className="text-[10px] text-muted-foreground">
+          +{overflow} more changed line{overflow === 1 ? "" : "s"}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function ToolOutput({
@@ -383,6 +477,27 @@ function renderToolOutput(toolName: string, output: unknown): ReactNode | null {
   if (toolName === "read_file") {
     const path = typeof o.path === "string" ? o.path : "";
     const size = typeof o.size === "number" ? o.size : null;
+    // Image reads carry the picture back for a vision model — show it.
+    if (o.kind === "image" && typeof o.data === "string") {
+      const mediaType =
+        typeof o.mediaType === "string" ? o.mediaType : "image/png";
+      return (
+        <div className="space-y-1">
+          {path ? (
+            <div className="truncate font-mono text-[10px] text-muted-foreground">
+              {path}
+              {size != null ? ` · ${formatBytes(size)}` : ""}
+            </div>
+          ) : null}
+          {/* biome-ignore lint/nursery/noImgElement: local data URI, no next/image here */}
+          <img
+            src={`data:${mediaType};base64,${o.data}`}
+            alt={path || "image"}
+            className="max-h-64 max-w-full rounded border border-border/40 object-contain"
+          />
+        </div>
+      );
+    }
     const content = typeof o.content === "string" ? o.content : "";
     const lines = content ? content.split("\n").length : null;
     return (

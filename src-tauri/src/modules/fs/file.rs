@@ -31,6 +31,76 @@ pub enum ReadResult {
     },
 }
 
+/// Cap for image reads fed to a vision model: large enough for a screenshot or
+/// design mock, small enough to keep the base64 payload and token cost sane.
+const MAX_IMAGE_BYTES: u64 = 8 * 1024 * 1024;
+
+#[derive(Serialize)]
+pub struct ImageReadResult {
+    /// IANA media type, sniffed from magic bytes (falls back to the extension).
+    pub media_type: String,
+    /// Base-64 (standard) encoded image bytes.
+    pub data: String,
+    pub size: u64,
+}
+
+/// Sniff an image's media type from its magic bytes, falling back to the file
+/// extension. Returns None for anything that is not a supported raster image, so
+/// the caller can refuse non-images before base64-encoding a huge blob.
+fn image_media_type(bytes: &[u8], path: &Path) -> Option<&'static str> {
+    if bytes.len() >= 8 && bytes[..8] == [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A] {
+        return Some("image/png");
+    }
+    if bytes.len() >= 3 && bytes[..3] == [0xFF, 0xD8, 0xFF] {
+        return Some("image/jpeg");
+    }
+    if bytes.len() >= 6 && (&bytes[..6] == b"GIF87a" || &bytes[..6] == b"GIF89a") {
+        return Some("image/gif");
+    }
+    if bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        return Some("image/webp");
+    }
+    // No magic match: trust the extension for formats a vision model accepts.
+    match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("png") => Some("image/png"),
+        Some("jpg") | Some("jpeg") => Some("image/jpeg"),
+        Some("gif") => Some("image/gif"),
+        Some("webp") => Some("image/webp"),
+        _ => None,
+    }
+}
+
+#[tauri::command]
+pub async fn fs_read_image_base64(
+    path: String,
+    workspace: Option<WorkspaceEnv>,
+) -> Result<ImageReadResult, String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    let p = resolve_path(&path, &workspace);
+    let meta = std::fs::metadata(&p).map_err(|e| e.to_string())?;
+    let size = meta.len();
+    if size > MAX_IMAGE_BYTES {
+        return Err(format!(
+            "image too large ({size} bytes, limit {MAX_IMAGE_BYTES})"
+        ));
+    }
+    let bytes = std::fs::read(&p).map_err(|e| e.to_string())?;
+    let media_type = image_media_type(&bytes, &p)
+        .ok_or("not a supported image (expected png, jpeg, gif or webp)")?;
+    use base64::Engine as _;
+    let data = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(ImageReadResult {
+        media_type: media_type.to_string(),
+        data,
+        size,
+    })
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum StatKind {
