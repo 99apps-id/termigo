@@ -639,7 +639,9 @@ function BashRunOutput({ data }: { data: Record<string, unknown> }) {
           >
             {t.label}
             {t.count > 0 ? (
-              <span className="ml-1 text-muted-foreground">{t.count}</span>
+              <span className="ml-1 text-muted-foreground">
+                · {formatBytes(t.count)}
+              </span>
             ) : null}
           </button>
         ))}
