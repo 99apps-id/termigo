@@ -19,6 +19,11 @@ import {
   recordContextOverflow,
 } from "../lib/contextLimitLearning";
 import { dayKey, recordRunCost } from "../lib/costLedger";
+import {
+  isConnectivityError,
+  isQuotaError,
+  isRateLimitError,
+} from "../lib/errors";
 import { humanizeModelError } from "../lib/errorMessage";
 import { fireHooksForEvent, makeRunId } from "../lib/hooksRunner";
 import { sweepSessionMemory } from "../lib/memorySweep";
@@ -50,6 +55,37 @@ import { useSessionDirectiveStore } from "./sessionDirectiveStore";
 // back to the manual "Try again" button.
 const OVERFLOW_AUTO_RESUME_MS = 60_000;
 const overflowAutoResumeAt = new Map<string, number>();
+
+// Connectivity recovery: when the provider is unreachable, keep the run
+// resumable and resume it automatically once the network is back, so an
+// internet blip does not kill a long agentic task. Quota / rate-limit errors are
+// recoverable too but have no reliable event to watch for — the user tops up or
+// waits, then clicks "Try again" (their work is preserved).
+const pendingReconnectSessions = new Set<string>();
+let onlineListenerRegistered = false;
+function ensureOnlineListener(): void {
+  if (onlineListenerRegistered) return;
+  onlineListenerRegistered = true;
+  if (typeof window === "undefined") return;
+  window.addEventListener("online", () => {
+    const active = useChatStore.getState().activeSessionId;
+    if (active && pendingReconnectSessions.has(active)) {
+      pendingReconnectSessions.delete(active);
+      useChatStore.getState().patchAgentMeta({
+        status: "thinking",
+        error: null,
+        stopReason: null,
+      });
+      void resumeRun().catch(() => {
+        useChatStore.getState().patchAgentMeta({
+          status: "error",
+          error:
+            "Still can't reach the provider. Check your connection and click Try again.",
+        });
+      });
+    }
+  });
+}
 
 function makeChat(sessionId: string): Chat<UIMessage> {
   const readCache = new Map<string, { size: number; hash: number }>();
@@ -273,6 +309,31 @@ function makeChat(sessionId: string): Chat<UIMessage> {
           return;
         }
       }
+      // A connectivity loss is recoverable once the network is back. Mark the
+      // run as resumable and let the `online` listener (or "Try again") pick it
+      // up — the task/todo state is preserved.
+      if (isConnectivityError(raw)) {
+        const sessionId = useChatStore.getState().activeSessionId;
+        if (sessionId) pendingReconnectSessions.add(sessionId);
+        ensureOnlineListener();
+        useChatStore.getState().patchAgentMeta({
+          status: "error",
+          error:
+            "Connection to the provider was lost. Your run is preserved — it resumes automatically when you're back online, or click Try again.",
+        });
+        return;
+      }
+      // Quota / credits exhausted or a rate limit: recoverable once the user
+      // tops up or waits. The run stays resumable via "Try again".
+      if (isQuotaError(raw) || isRateLimitError(raw)) {
+        useChatStore.getState().patchAgentMeta({
+          status: "error",
+          error: isQuotaError(raw)
+            ? "The provider reports your API quota or credits are exhausted. Top up and click Try again — your work is preserved."
+            : "Rate limit reached. Wait a moment and click Try again — your work is preserved.",
+        });
+        return;
+      }
       useChatStore.getState().patchAgentMeta({
         status: "error",
         error: humanizeModelError(raw),
@@ -327,7 +388,17 @@ export async function sendParts(
   parts: readonly SteerPart[],
 ): Promise<boolean> {
   const c = getOrCreateChat(sessionId);
-  const action = submitAction(c.status, parts.length > 0);
+  // After an error the run is not busy, but the SDK status can look stale
+  // (still "submitted"), which would QUEUE the resume instead of sending it and
+  // leave "Try again" doing nothing. Key off the app's error state so a resume
+  // after a failed run always goes out.
+  const errored = useChatStore.getState().agentMeta.status === "error";
+  const action = errored
+    ? parts.length > 0
+      ? "send"
+      : "ignore"
+    : submitAction(c.status, parts.length > 0);
+  if (errored) pendingReconnectSessions.delete(sessionId);
   logInfo(
     `[ai] sendParts: session=${sessionId} status=${c.status} action=${action}`,
   );
@@ -385,6 +456,10 @@ export async function flushSteer(): Promise<boolean> {
 
 /** Pick the work back up after the user stopped it. */
 export async function resumeRun(): Promise<boolean> {
+  const sessionId = useChatStore.getState().activeSessionId;
+  // A manual resume supersedes any pending reconnect auto-resume for this
+  // session, so the `online` listener does not fire a second one.
+  if (sessionId) pendingReconnectSessions.delete(sessionId);
   // Continuing is the signal that the task is heavier than one round, so the
   // next round gets the next budget tier. Raised before the send so the run
   // reads the new value.

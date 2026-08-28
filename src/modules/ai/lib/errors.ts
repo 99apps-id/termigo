@@ -89,3 +89,44 @@ function errorPrefix(code: string | null, message: string): string | null {
     ? "Model unavailable"
     : null;
 }
+
+/** A network / connectivity failure: the provider (or the route to it) is
+ *  unreachable. Recoverable once the connection is back. */
+export function isConnectivityError(message: string): boolean {
+  const m = String(message ?? "").toLowerCase();
+  return (
+    /cannot connect to api/i.test(m) ||
+    /unreachable host/.test(m) ||
+    /tcp connect error/.test(m) ||
+    /socket operation was attempted to an unreachable/i.test(m) ||
+    /failed to fetch|fetch failed|networkerror/i.test(m) ||
+    /econnrefused|enetunreach|enetdown|ehostunreach|eai_again|etimedout|econnreset/i.test(
+      m,
+    ) ||
+    /connection (?:refused|reset|reset by peer|timed out|closed)/i.test(m) ||
+    /name or service not known|getaddrinfo/i.test(m) ||
+    /no internet|internet connection|offline/i.test(m)
+  );
+}
+
+/** The provider says the account's quota / credits are exhausted (or billing
+ *  failed). Recoverable once the user tops up. */
+export function isQuotaError(message: string): boolean {
+  const m = String(message ?? "").toLowerCase();
+  return (
+    /\binsufficient_quota\b|quota|billing|credit|balance|payment required/i.test(
+      m,
+    ) ||
+    /out of (?:credits|quota|tokens)/i.test(m) ||
+    /exceeded.*(?:quota|limit)/i.test(m)
+  );
+}
+
+/** The provider throttled the request (rate limit / 429). Recoverable after a
+ *  short wait. */
+export function isRateLimitError(message: string): boolean {
+  const m = String(message ?? "").toLowerCase();
+  return (
+    /rate[-_]?limit|429|too many requests|throttl/i.test(m)
+  );
+}

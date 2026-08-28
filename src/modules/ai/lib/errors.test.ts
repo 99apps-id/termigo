@@ -1,7 +1,12 @@
 import { streamText } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it } from "vitest";
-import { formatAiError } from "./errors";
+import {
+  formatAiError,
+  isConnectivityError,
+  isQuotaError,
+  isRateLimitError,
+} from "./errors";
 
 describe("formatAiError", () => {
   it("surfaces nested provider model errors", () => {
@@ -96,5 +101,38 @@ describe("formatAiError", () => {
       errorText:
         "Model unavailable: The model `gpt-5.6-luna` is in limited preview and is not available on this account.",
     });
+  });
+});
+
+describe("transient/recoverable error classifiers", () => {
+  it("recognises connectivity errors", () => {
+    expect(
+      isConnectivityError(
+        "Cannot connect to API: client error (Connect): tcp connect error: A socket operation was attempted to an unreachable host. (os error 10065)",
+      ),
+    ).toBe(true);
+    expect(isConnectivityError("fetch failed: ENETUNREACH")).toBe(true);
+    expect(isConnectivityError("Connection refused")).toBe(true);
+  });
+
+  it("rejects non-connectivity errors", () => {
+    expect(isConnectivityError("The model is in limited preview.")).toBe(false);
+    expect(isConnectivityError("Invalid API key.")).toBe(false);
+  });
+
+  it("recognises quota / credit errors", () => {
+    expect(isQuotaError("Error: insufficient_quota, you have no credits left")).toBe(
+      true,
+    );
+    expect(isQuotaError("402 Payment Required: out of tokens")).toBe(true);
+    expect(isQuotaError("Rate limit reached.")).toBe(false);
+  });
+
+  it("recognises rate limit errors", () => {
+    expect(isRateLimitError("rate_limit_exceeded: Please retry after 10s")).toBe(
+      true,
+    );
+    expect(isRateLimitError("429 Too Many Requests")).toBe(true);
+    expect(isRateLimitError("Invalid API key.")).toBe(false);
   });
 });
