@@ -32,9 +32,9 @@ import {
   applyCursorBlink,
   applyCursorStyle,
   applyLetterSpacing,
-  applyTerminalFont,
   applyTheme as applyPoolTheme,
   applyScrollback,
+  applyTerminalFont,
   applyWebglPreference,
   configureRendererPool,
   discardRetainedSlot,
@@ -349,7 +349,11 @@ async function leafHasForegroundJob(leafId: number): Promise<boolean> {
   try {
     return await invoke<boolean>("pty_has_foreground_job", { id: s.pty.id });
   } catch (e) {
-    console.error("[termigo] pty_has_foreground_job failed for leaf", leafId, e);
+    console.error(
+      "[termigo] pty_has_foreground_job failed for leaf",
+      leafId,
+      e,
+    );
     return false;
   }
 }
@@ -510,6 +514,60 @@ function deliverPtyBytes(leafId: number, bytes: Uint8Array): void {
 }
 
 const SPAWN_RETRY_DELAY_MS = 250;
+
+// First-paint repaint watchdog. Ported from TEDI's `armBlankViewportRepaint`:
+// a fresh shell can lose its FIRST prompt to a ConPTY warmup reflow (the shell
+// prints it, then a startup resize repaints and the prompt-bearing bytes are
+// gone), leaving the pane blank above a live pty — subsequent prompts render
+// fine. A short time after spawn, if the grid is STILL empty and no TUI owns
+// the screen, a SIGWINCH round-trip (toggle the PTY row count, two spaced
+// resizes so ConPTY can't coalesce them into a no-op) makes the shell's line
+// editor repaint its prompt. Inert when the prompt painted normally.
+const FIRST_PAINT_CHECK_MS = 450;
+const FIRST_PAINT_NUDGE_GAP_MS = 120;
+const firstPaintTimers = new Map<number, ReturnType<typeof setTimeout>>();
+
+function gridIsEmpty(leafId: number): boolean {
+  const slot = getLiveSlotForLeaf(leafId);
+  if (!slot) return false; // no live grid to judge; leave it alone
+  const buf = slot.term.buffer.active;
+  const rows = Math.min(buf.length, slot.term.rows);
+  for (let i = 0; i < rows; i++) {
+    if (buf.getLine(i)?.translateToString(true).trim()) return false;
+  }
+  return true;
+}
+
+function cancelFirstPaintRepaint(leafId: number): void {
+  const t = firstPaintTimers.get(leafId);
+  if (t) {
+    clearTimeout(t);
+    firstPaintTimers.delete(leafId);
+  }
+}
+
+function armFirstPaintRepaint(leafId: number, s: Session): void {
+  cancelFirstPaintRepaint(leafId);
+  const timer = setTimeout(() => {
+    firstPaintTimers.delete(leafId);
+    const pty = s.pty;
+    if (s.disposed || !pty) return;
+    if (isLeafAltScreen(leafId)) return; // a foreground TUI owns the screen
+    if (!gridIsEmpty(leafId)) return; // the prompt painted — nothing to do
+    const cols = s.cols > 0 ? s.cols : 80;
+    const rows = s.rows > 0 ? s.rows : 24;
+    const nudged = rows > 1 ? rows - 1 : rows + 1;
+    void pty
+      .resize(cols, nudged)
+      .then(() => new Promise((r) => setTimeout(r, FIRST_PAINT_NUDGE_GAP_MS)))
+      .then(() => {
+        // Restore only if this pty and session are still the live ones.
+        if (!s.disposed && s.pty === pty) return pty.resize(cols, rows);
+      })
+      .catch(() => {});
+  }, FIRST_PAINT_CHECK_MS);
+  firstPaintTimers.set(leafId, timer);
+}
 
 async function openPtyWithRetry(
   leafId: number,
@@ -736,6 +794,7 @@ function attachSession(
           s.pendingInput = "";
         }
         if (s.cols > 0 && s.rows > 0) pty.resize(s.cols, s.rows);
+        armFirstPaintRepaint(leafId, s);
       })
       .catch((e) => {
         s.ptyOpening = false;
@@ -799,6 +858,7 @@ export async function respawnSession(
     s.pendingInput = "";
   }
   if (s.cols > 0 && s.rows > 0) pty.resize(s.cols, s.rows);
+  armFirstPaintRepaint(leafId, s);
 }
 
 export async function leafHasForegroundProcess(
@@ -826,6 +886,7 @@ export function disposeSession(leafId: number): void {
   if (!s) return;
   s.disposed = true;
   cancelHiddenRelease(s);
+  cancelFirstPaintRepaint(leafId);
   disposeLeafSlot(leafId);
   s.hasSlot = false;
   s.snapshot = null;
