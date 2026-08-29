@@ -51,6 +51,7 @@ import {
   setSlotFocused,
 } from "./rendererPool";
 import { useTerminalFont } from "./useTerminalFont";
+import { createWriteMeter, type WriteMeter } from "./writeMeter";
 
 type Callbacks = {
   onSearchReady?: (addon: SearchAddon) => void;
@@ -503,6 +504,33 @@ function ensureSession(
   return session;
 }
 
+// Flow-controlled write path per leaf. A locked Windows session occludes the
+// window; Chromium then throttles xterm's write-drain timers to ~1/s while the
+// PTY keeps pushing at full rate, so an unmetered `term.write` grows an
+// unbounded backlog and eventually throws at xterm's 50 MB ceiling. The meter
+// holds the tail (capped) and flushes when the parser catches up. Only the
+// live-slot path needs it; the dormant ring is already bounded.
+const writeMeters = new Map<number, WriteMeter>();
+
+function getWriteMeter(leafId: number): WriteMeter {
+  let m = writeMeters.get(leafId);
+  if (!m) {
+    m = createWriteMeter(
+      (chunk, done) => {
+        const slot = getLiveSlotForLeaf(leafId);
+        if (slot) slot.term.write(chunk, done);
+        else done(); // no live slot to take it — drop and keep accounting
+      },
+      () => {
+        const s = sessions.get(leafId);
+        return !s || s.disposed;
+      },
+    );
+    writeMeters.set(leafId, m);
+  }
+  return m;
+}
+
 function deliverPtyBytes(leafId: number, bytes: Uint8Array): void {
   const s = sessions.get(leafId);
   if (!s) return;
@@ -512,7 +540,7 @@ function deliverPtyBytes(leafId: number, bytes: Uint8Array): void {
   // Retained slots keep parsing live (render paused); the ring is only for
   // leaves whose buffer was stolen or never bound.
   const slot = getLiveSlotForLeaf(leafId);
-  if (slot) slot.term.write(bytes);
+  if (slot) getWriteMeter(leafId).push(bytes);
   else s.dormantRing.push(bytes);
 }
 
@@ -1002,6 +1030,7 @@ export function disposeSession(leafId: number): void {
   cancelHiddenRelease(s);
   cancelFirstPaintRepaint(leafId);
   cancelNoDataWatchdog(leafId);
+  writeMeters.delete(leafId);
   disposeLeafSlot(leafId);
   s.hasSlot = false;
   s.snapshot = null;
