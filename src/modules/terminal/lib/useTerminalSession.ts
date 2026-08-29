@@ -506,6 +506,9 @@ function ensureSession(
 function deliverPtyBytes(leafId: number, bytes: Uint8Array): void {
   const s = sessions.get(leafId);
   if (!s) return;
+  // The shell spoke — disarm the no-data watchdog (idempotent after the first
+  // byte, since the timer is then gone).
+  cancelNoDataWatchdog(leafId);
   // Retained slots keep parsing live (render paused); the ring is only for
   // leaves whose buffer was stolen or never bound.
   const slot = getLiveSlotForLeaf(leafId);
@@ -546,7 +549,48 @@ function cancelFirstPaintRepaint(leafId: number): void {
   }
 }
 
+// No-data watchdog. Ported from TEDI's `armNoDataWatchdog`: a shell that opens
+// but emits nothing (a wedged init, a profile that hangs) would leave the pane
+// blank forever with the pty live, so first-paint's nudge is inert (the shell
+// isn't processing) and there is no error to act on. If not one byte arrives
+// within the window, surface it as a spawn failure with the same Enter-to-retry
+// banner. Generous window so a slow profile / WSL cold start is not killed;
+// a false positive is recoverable via the retry.
+const NO_DATA_WATCHDOG_MS = 12_000;
+const noDataTimers = new Map<number, ReturnType<typeof setTimeout>>();
+
+function cancelNoDataWatchdog(leafId: number): void {
+  const t = noDataTimers.get(leafId);
+  if (t) {
+    clearTimeout(t);
+    noDataTimers.delete(leafId);
+  }
+}
+
+function armNoDataWatchdog(leafId: number, s: Session): void {
+  if (s.opener) return; // SSH/remote runs its own (slower) connection flow
+  cancelNoDataWatchdog(leafId);
+  const timer = setTimeout(() => {
+    noDataTimers.delete(leafId);
+    if (s.disposed || !s.pty || s.shellExited) return;
+    const dying = s.pty;
+    s.pty = null;
+    void dying.close?.();
+    surfaceSpawnFailure(
+      leafId,
+      s,
+      new Error(
+        `shell did not emit any output within ${Math.round(
+          NO_DATA_WATCHDOG_MS / 1000,
+        )}s of opening — likely stalled during init`,
+      ),
+    );
+  }, NO_DATA_WATCHDOG_MS);
+  noDataTimers.set(leafId, timer);
+}
+
 function armFirstPaintRepaint(leafId: number, s: Session): void {
+  if (s.opener) return; // SSH/remote: no local ConPTY warmup to repair
   cancelFirstPaintRepaint(leafId);
   const timer = setTimeout(() => {
     firstPaintTimers.delete(leafId);
@@ -569,18 +613,57 @@ function armFirstPaintRepaint(leafId: number, s: Session): void {
   firstPaintTimers.set(leafId, timer);
 }
 
+// A `pty_open` that never resolves (a wedged shell, a ConPTY that hangs on
+// init) would otherwise leave the pane on a spinner forever with no error and
+// no way to retry. Bound it — reject on timeout so the retry/error path runs —
+// and close the stray pty if it resolves late so Rust doesn't leak it. Ported
+// from TEDI's `withSpawnTimeout`.
+const SPAWN_TIMEOUT_MS = 15_000;
+
+function withSpawnTimeout(p: Promise<PtySession>): Promise<PtySession> {
+  return new Promise<PtySession>((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(
+        new Error(
+          `shell did not start within ${Math.round(SPAWN_TIMEOUT_MS / 1000)}s`,
+        ),
+      );
+    }, SPAWN_TIMEOUT_MS);
+    p.then(
+      (pty) => {
+        if (settled) {
+          void pty.close?.();
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        resolve(pty);
+      },
+      (e) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
+}
+
 async function openPtyWithRetry(
   leafId: number,
   s: Session,
   cwd: string | undefined,
 ): Promise<PtySession> {
   try {
-    return await openPtyForSession(leafId, s, cwd);
+    return await withSpawnTimeout(openPtyForSession(leafId, s, cwd));
   } catch (e) {
     console.error("[termigo] openPty failed, retrying once:", e);
     await new Promise((r) => setTimeout(r, SPAWN_RETRY_DELAY_MS));
     if (s.disposed) throw e;
-    return openPtyForSession(leafId, s, cwd);
+    return withSpawnTimeout(openPtyForSession(leafId, s, cwd));
   }
 }
 
@@ -602,6 +685,12 @@ function surfaceSpawnFailure(leafId: number, s: Session, e: unknown): void {
   );
 }
 
+// A shell that dies within this window of spawning (bad cwd, missing binary, a
+// broken profile) is a startup failure, not a session the user ended. Show the
+// retry banner instead of the normal exit path (which closes the pane or
+// respawns the last one — a loop on a shell that keeps crashing). From TEDI.
+const SPAWN_GRACE_MS = 3_000;
+
 async function openPtyForSession(
   leafId: number,
   s: Session,
@@ -609,9 +698,32 @@ async function openPtyForSession(
 ): Promise<PtySession> {
   const startCols = s.cols > 0 ? s.cols : 80;
   const startRows = s.rows > 0 ? s.rows : 24;
+  const spawnedAt = Date.now();
   const handlers = {
     onData: (bytes: Uint8Array) => deliverPtyBytes(leafId, bytes),
     onExit: (code: number) => {
+      // Fast non-zero exit during init: surface as a spawn failure (retry
+      // banner) rather than closing/respawning. Skip for SSH (its own flow).
+      if (
+        !s.disposed &&
+        !s.opener &&
+        code !== 0 &&
+        Date.now() - spawnedAt < SPAWN_GRACE_MS
+      ) {
+        s.pty = null;
+        s.pendingInput = "";
+        s.commandRunning = false;
+        cancelNoDataWatchdog(leafId);
+        cancelFirstPaintRepaint(leafId);
+        surfaceSpawnFailure(
+          leafId,
+          s,
+          new Error(
+            `shell exited with code ${code} ${Date.now() - spawnedAt}ms after spawn`,
+          ),
+        );
+        return;
+      }
       s.shellExited = true;
       s.pty = null;
       s.pendingInput = "";
@@ -795,6 +907,7 @@ function attachSession(
         }
         if (s.cols > 0 && s.rows > 0) pty.resize(s.cols, s.rows);
         armFirstPaintRepaint(leafId, s);
+        armNoDataWatchdog(leafId, s);
       })
       .catch((e) => {
         s.ptyOpening = false;
@@ -859,6 +972,7 @@ export async function respawnSession(
   }
   if (s.cols > 0 && s.rows > 0) pty.resize(s.cols, s.rows);
   armFirstPaintRepaint(leafId, s);
+  armNoDataWatchdog(leafId, s);
 }
 
 export async function leafHasForegroundProcess(
@@ -887,6 +1001,7 @@ export function disposeSession(leafId: number): void {
   s.disposed = true;
   cancelHiddenRelease(s);
   cancelFirstPaintRepaint(leafId);
+  cancelNoDataWatchdog(leafId);
   disposeLeafSlot(leafId);
   s.hasSlot = false;
   s.snapshot = null;

@@ -215,6 +215,39 @@ export function applyBackgroundActive(active: boolean): void {
   }
 }
 
+// Delay after a program leaves the alternate screen before repairing the pane,
+// so the relaunched classic renderer's first frame has landed.
+const ALT_EXIT_REPAINT_DELAY_MS = 180;
+
+/**
+ * Repair the pane after a foreground program LEAVES the alternate screen
+ * (CSI ?1049l) — quitting vim/htop, or an AI CLI's `/tui` toggle. Ported from
+ * TEDI: xterm restores the cursor but NOT the normal buffer's scroll region
+ * (DECSTBM), so the relaunched prompt paints against wrong margins and its
+ * line-editor redraw lands off-screen (input LOOKS dead). No pane-pixel change
+ * means the ResizeObserver never repaints. Reset the region (DECSC/DECRC keep
+ * cursor + SGR), clear the WebGL glyph atlas, and force a local repaint — all
+ * renderer-side; nothing is written to the PTY.
+ */
+function armAltExitRepaint(slot: Slot): void {
+  setTimeout(() => {
+    let isAlt = false;
+    try {
+      isAlt = slot.term.buffer.active.type === "alternate";
+    } catch {
+      return;
+    }
+    if (isAlt) return; // a TUI re-entered the alt screen during the delay
+    try {
+      slot.term.write("\x1b7\x1b[r\x1b8");
+      slot.webglAddon?.clearTextureAtlas();
+      slot.term.refresh(0, slot.term.rows - 1);
+    } catch {
+      // A disposed term or a mid-write race: the next real output repaints.
+    }
+  }, ALT_EXIT_REPAINT_DELAY_MS);
+}
+
 function createSlot(): Slot {
   let focusTerminal = () => {};
   const term = new Terminal({
@@ -266,6 +299,26 @@ function createSlot(): Slot {
     lastUsedAt: 0,
     imeState: createImeBridgeState(),
   };
+
+  // Fire the alt-exit repaint only on the alternate->normal edge, so launching
+  // a TUI (normal->alt) is left untouched. The term is pooled across leaves, so
+  // this one subscription serves every leaf that reuses the slot.
+  let sawAltScreen = false;
+  term.buffer.onBufferChange(() => {
+    let isAlt = false;
+    try {
+      isAlt = term.buffer.active.type === "alternate";
+    } catch {
+      return;
+    }
+    if (isAlt) {
+      sawAltScreen = true;
+      return;
+    }
+    if (!sawAltScreen) return;
+    sawAltScreen = false;
+    armAltExitRepaint(slot);
+  });
 
   // Some WKWebView builds bypass xterm's composition events. The pure bridge
   // repairs that path and stands down when native composition is observed.
