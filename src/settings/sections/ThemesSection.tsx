@@ -141,6 +141,7 @@ export function ThemesSection() {
         description="Theme, background image, and customization."
       />
 
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: file drop zone; keyboard users add themes via the button beside the label */}
       <div
         role="presentation"
         className="flex flex-col gap-2"
@@ -317,6 +318,7 @@ export function ThemesSection() {
         </div>
       </div>
 
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: file drop zone; keyboard users add a background via the button beside the label */}
       <div
         role="presentation"
         className="flex flex-col gap-2"

@@ -1,25 +1,26 @@
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { parseCommandLine, parseEnvLines } from "@/modules/ai/lib/mcpArgs";
+import { mcpToolName } from "@/modules/ai/lib/mcpToolNames";
 import {
+  type McpServer,
+  type McpTool,
   mcpAddServer,
   mcpListServers,
   mcpListTools,
   mcpPing,
   mcpRemoveServer,
-  type McpServer,
-  type McpTool,
 } from "@/modules/mcp/bridge";
-import { parseCommandLine, parseEnvLines } from "@/modules/ai/lib/mcpArgs";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Add01Icon, Delete02Icon } from "@hugeicons/core-free-icons";
-import { mcpToolName } from "@/modules/ai/lib/mcpToolNames";
 import {
-  CheckmarkCircle02Icon,
+  Add01Icon,
   Alert02Icon,
+  CheckmarkCircle02Icon,
+  Delete02Icon,
   RefreshIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import { SectionHeader } from "../components/SectionHeader";
 
 const EXAMPLE = `{
@@ -59,7 +60,10 @@ function ServerRow({
     try {
       const alive = await mcpPing(server.name, null);
       if (!alive) {
-        setProbe({ state: "failed", reason: "the server did not answer a ping" });
+        setProbe({
+          state: "failed",
+          reason: "the server did not answer a ping",
+        });
         return;
       }
       const listed = await mcpListTools(server.name, null);
@@ -159,6 +163,7 @@ function ServerRow({
  * common case harder than the file editing this replaces.
  */
 function AddServerForm({ onAdded }: { onAdded: () => void }) {
+  const fid = useId();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [commandLine, setCommandLine] = useState("");
@@ -212,26 +217,36 @@ function AddServerForm({ onAdded }: { onAdded: () => void }) {
 
   return (
     <div className="flex flex-col gap-2 rounded-md border border-border/60 p-3">
-      <label className="text-[11px] font-medium">Name</label>
+      <label htmlFor={`${fid}-name`} className="text-[11px] font-medium">
+        Name
+      </label>
       <Input
+        id={`${fid}-name`}
         value={name}
         onChange={(e) => setName(e.target.value)}
         placeholder="github"
         className="h-8 text-[12px]"
       />
 
-      <label className="text-[11px] font-medium">Command</label>
+      <label htmlFor={`${fid}-command`} className="text-[11px] font-medium">
+        Command
+      </label>
       <Input
+        id={`${fid}-command`}
         value={commandLine}
         onChange={(e) => setCommandLine(e.target.value)}
         placeholder="npx -y @modelcontextprotocol/server-github"
         className="h-8 font-mono text-[11px]"
       />
 
-      <label className="text-[11px] font-medium">
-        Environment <span className="text-muted-foreground">(optional, one KEY=value per line)</span>
+      <label htmlFor={`${fid}-env`} className="text-[11px] font-medium">
+        Environment{" "}
+        <span className="text-muted-foreground">
+          (optional, one KEY=value per line)
+        </span>
       </label>
       <Textarea
+        id={`${fid}-env`}
         value={envText}
         onChange={(e) => setEnvText(e.target.value)}
         placeholder="GITHUB_TOKEN=..."
@@ -242,7 +257,12 @@ function AddServerForm({ onAdded }: { onAdded: () => void }) {
       {error && <p className="text-[11px] text-destructive">{error}</p>}
 
       <div className="flex items-center gap-2">
-        <Button size="sm" onClick={() => void save()} disabled={saving} className="h-7 text-[11px]">
+        <Button
+          size="sm"
+          onClick={() => void save()}
+          disabled={saving}
+          className="h-7 text-[11px]"
+        >
           {saving ? "Saving…" : "Save"}
         </Button>
         <Button
@@ -319,8 +339,8 @@ export function McpSection() {
           <p className="text-[12px] text-muted-foreground">
             No servers configured yet. Create{" "}
             <code className="font-mono text-[11px]">~/.termigo/mcp.json</code>{" "}
-            with the standard <code className="font-mono text-[11px]">mcpServers</code>{" "}
-            shape:
+            with the standard{" "}
+            <code className="font-mono text-[11px]">mcpServers</code> shape:
           </p>
           <pre className="overflow-x-auto rounded-md border border-border/60 bg-muted/40 p-3 font-mono text-[11px] leading-relaxed">
             {EXAMPLE}
@@ -329,7 +349,11 @@ export function McpSection() {
       ) : (
         <div className="flex flex-col gap-2">
           {servers.map((s) => (
-            <ServerRow key={`${s.scope}:${s.name}`} server={s} onRemoved={() => void load()} />
+            <ServerRow
+              key={`${s.scope}:${s.name}`}
+              server={s}
+              onRemoved={() => void load()}
+            />
           ))}
         </div>
       )}
@@ -345,8 +369,8 @@ export function McpSection() {
         </p>
         <p>
           MCP tools always ask for approval, including under{" "}
-          <em>Auto-approve edits</em> — that mode covers files in your workspace,
-          not arbitrary third-party actions.
+          <em>Auto-approve edits</em> — that mode covers files in your
+          workspace, not arbitrary third-party actions.
         </p>
       </div>
     </div>
