@@ -11,9 +11,9 @@ import { BlockOverlay } from "./block/BlockOverlay";
 import { BlockWatermark } from "./block/BlockWatermark";
 import {
   focusLeafInput,
+  type SessionOpener,
   submitToLeaf,
   useTerminalSession,
-  type SessionOpener,
 } from "./lib/useTerminalSession";
 
 export type TerminalPaneHandle = {
@@ -40,6 +40,7 @@ type Props = {
   onSearchReady?: (leafId: number, addon: SearchAddon) => void;
   onExit?: (leafId: number, code: number) => void;
   onCwd?: (leafId: number, cwd: string) => void;
+  onTitle?: (leafId: number, title: string) => void;
 };
 
 export const TerminalPane = memo(
@@ -55,6 +56,7 @@ export const TerminalPane = memo(
       onSearchReady,
       onExit,
       onCwd,
+      onTitle,
     },
     ref,
   ) {
@@ -74,6 +76,7 @@ export const TerminalPane = memo(
       onSearchReady: (a) => onSearchReady?.(leafId, a),
       onExit: (c) => onExit?.(leafId, c),
       onCwd: (c) => onCwd?.(leafId, c),
+      onTitle: (t) => onTitle?.(leafId, t),
     });
 
     useEffect(() => {

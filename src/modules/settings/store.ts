@@ -470,6 +470,81 @@ async function writePref<T>(key: string, value: T): Promise<void> {
   await emit(PREFS_CHANGED_EVENT, { key, value });
 }
 
+/** Marker fields on a settings backup file so an import can reject a file that
+ *  is not one (an SSH backup, arbitrary JSON) before it touches the store. */
+const SETTINGS_BACKUP_KIND = "termigo-settings";
+const SETTINGS_BACKUP_VERSION = 1;
+
+type SettingsBackupFile = {
+  kind: typeof SETTINGS_BACKUP_KIND;
+  version: number;
+  exportedAt: number;
+  entries: Record<string, unknown>;
+};
+
+/**
+ * Serialize every persisted preference to a portable JSON document.
+ *
+ * Dumps the raw store entries rather than an enumerated whitelist so a new
+ * setting is captured without touching this function. No secret lives in the
+ * store — API keys and SSH credentials are in the OS keychain — so the file is
+ * plaintext, and SSH connection export (which does carry secrets) keeps its own
+ * passphrase-encrypted path.
+ */
+export async function exportSettingsJson(): Promise<string> {
+  const entries = await store.entries();
+  const file: SettingsBackupFile = {
+    kind: SETTINGS_BACKUP_KIND,
+    version: SETTINGS_BACKUP_VERSION,
+    exportedAt: Date.now(),
+    entries: Object.fromEntries(entries),
+  };
+  return JSON.stringify(file, null, 2);
+}
+
+/**
+ * Apply a document produced by {@link exportSettingsJson}. Throws a user-facing
+ * message when the file is not a settings backup. Every restored key is mirrored
+ * through the change event so open windows update live without a reload. Returns
+ * how many keys were written.
+ */
+export async function importSettingsJson(text: string): Promise<number> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error("Not a Termigo settings file (invalid JSON).");
+  }
+  if (typeof parsed !== "object" || parsed === null) {
+    throw new Error("Not a Termigo settings backup file.");
+  }
+  const file = parsed as Partial<SettingsBackupFile>;
+  if (file.kind !== SETTINGS_BACKUP_KIND) {
+    throw new Error("Not a Termigo settings backup file.");
+  }
+  if (
+    typeof file.version !== "number" ||
+    file.version > SETTINGS_BACKUP_VERSION
+  ) {
+    throw new Error(
+      "This backup was written by a newer Termigo and cannot be read by this build.",
+    );
+  }
+  if (typeof file.entries !== "object" || file.entries === null) {
+    throw new Error("Backup file has no settings to restore.");
+  }
+  const entries = Object.entries(file.entries);
+  for (const [key, value] of entries) {
+    await store.set(key, value);
+  }
+  await store.save();
+  // Mirror after the single save so a listener that reloads sees the whole set.
+  for (const [key, value] of entries) {
+    await emit(PREFS_CHANGED_EVENT, { key, value });
+  }
+  return entries.length;
+}
+
 export async function loadPreferences(): Promise<Preferences> {
   // Single IPC roundtrip — fetching keys individually fans out to one
   // `plugin:store|get` per setting and is the dominant boot cost.

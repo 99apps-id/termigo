@@ -15,6 +15,9 @@ export function labelFor(t: Tab): string {
   if (t.kind === "git-history") return t.title;
   if (t.kind === "git-commit-file") return t.title;
   if (t.customTitle) return t.customTitle;
+  // A program in the active pane may have set an OSC 0/2 title (ssh, htop, …);
+  // prefer it over the cwd-derived name when the user hasn't pinned one.
+  if (t.kind === "terminal" && t.oscTitle) return t.oscTitle;
   if (!t.cwd) return t.title;
   const parts = t.cwd.split(/[\\/]/).filter(Boolean);
   return parts.length ? parts[parts.length - 1] : "/";

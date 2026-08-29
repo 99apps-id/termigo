@@ -106,6 +106,7 @@ import {
   writeToSession,
 } from "@/modules/terminal";
 import { findLeafRemoteCwd, isSshLeaf } from "@/modules/terminal/lib/panes";
+import { DEV_URL_EVENT } from "@/modules/terminal/lib/useTerminalSession";
 import { ThemeProvider, useThemeFileEditing } from "@/modules/theme";
 import { UpdaterDialog } from "@/modules/updater";
 import {
@@ -173,6 +174,7 @@ export default function App() {
     updateTab,
     selectByIndex,
     setLeafCwd,
+    setLeafTitle,
     focusPane,
     focusNextPaneInTab,
     swapActivePaneInDirection,
@@ -836,6 +838,25 @@ ${found.foundAt}`
     [newPreviewTab],
   );
 
+  // A dev server printed a local url in a terminal (fired from the PTY output
+  // path). Offer to open it in the embedded browser rather than auto-navigating,
+  // so a stray url in `cat`/`git log` output can't hijack a pane.
+  useEffect(() => {
+    const onDevUrl = (e: Event) => {
+      const url = (e as CustomEvent<string>).detail;
+      if (!url) return;
+      toast(`Dev server: ${url}`, {
+        id: `dev-url:${url}`,
+        action: {
+          label: "Buka",
+          onClick: () => openPreviewTab(url),
+        },
+      });
+    };
+    window.addEventListener(DEV_URL_EVENT, onDevUrl);
+    return () => window.removeEventListener(DEV_URL_EVENT, onDevUrl);
+  }, [openPreviewTab]);
+
   const splitActivePaneInActiveTab = useCallback(
     (dir: "row" | "col") => {
       const t = tabsRef.current.find((x) => x.id === activeId);
@@ -1106,6 +1127,11 @@ ${found.foundAt}`
       }
     },
     [setLeafCwd],
+  );
+
+  const handleTerminalTitle = useCallback(
+    (leafId: number, title: string) => setLeafTitle(leafId, title),
+    [setLeafTitle],
   );
 
   const handleFocusLeaf = useCallback(
@@ -1616,6 +1642,7 @@ ${found.foundAt}`
                       registerTerminalHandle={registerTerminalHandle}
                       onSearchReady={handleSearchReady}
                       onCwd={handleTerminalCwd}
+                      onTitle={handleTerminalTitle}
                       onExit={handleLeafExit}
                       onFocusLeaf={handleFocusLeaf}
                       registerEditorHandle={registerEditorHandle}

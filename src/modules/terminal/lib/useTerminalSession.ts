@@ -21,11 +21,13 @@ import {
   createShellIntegrationState,
   registerCwdHandler,
   registerOsc52ClipboardHandler,
+  registerProgressHandler,
   registerPromptTracker,
 } from "./osc-handlers";
 import { openPty, type PtyHandlers, type PtySession } from "./pty-bridge";
 import "../block/block.css";
 import { ensureAgentActivityListener, isAgentActivePty } from "./agentActivity";
+import { containsSchemeSeparator, findLocalUrl } from "./detectUrl";
 import {
   acquireSlot,
   applyBackgroundActive,
@@ -57,6 +59,8 @@ type Callbacks = {
   onSearchReady?: (addon: SearchAddon) => void;
   onExit?: (code: number) => void;
   onCwd?: (cwd: string) => void;
+  /** A program set the terminal title (OSC 0/2) — surfaced on the tab. */
+  onTitle?: (title: string) => void;
 };
 
 type Session = {
@@ -104,6 +108,9 @@ type Session = {
   commandRunning: boolean;
   hiddenReleaseTimer: ReturnType<typeof setTimeout> | null;
   spawnFailed: boolean;
+  /** Last local dev-server url surfaced from this shell's output, so a server
+   *  that reprints its banner doesn't re-toast. Cleared on respawn. */
+  lastDetectedUrl: string | null;
   /** Stable identity for terminal-process persistence (tmux). */
   persistKey: string | undefined;
 };
@@ -492,6 +499,7 @@ function ensureSession(
     commandRunning: false,
     hiddenReleaseTimer: null,
     spawnFailed: false,
+    lastDetectedUrl: null,
     persistKey,
   };
   sessions.set(leafId, session);
@@ -531,6 +539,36 @@ function getWriteMeter(leafId: number): WriteMeter {
   return m;
 }
 
+// ConEmu OSC 9;4 → the window's taskbar/dock progress. Only the focused
+// terminal drives it, so panes don't fight over the one indicator. Lazy-import
+// keeps the window API out of the terminal startup bundle.
+async function setTaskbarProgress(
+  state: number,
+  pct: number | null,
+): Promise<void> {
+  try {
+    const { getCurrentWindow, ProgressBarStatus } = await import(
+      "@tauri-apps/api/window"
+    );
+    const win = getCurrentWindow();
+    const progress =
+      pct != null ? Math.max(0, Math.min(100, Math.round(pct))) : undefined;
+    const status =
+      state === 0
+        ? ProgressBarStatus.None
+        : state === 2
+          ? ProgressBarStatus.Error
+          : state === 3
+            ? ProgressBarStatus.Indeterminate
+            : state === 4
+              ? ProgressBarStatus.Paused
+              : ProgressBarStatus.Normal;
+    await win.setProgressBar({ status, progress });
+  } catch {
+    // No window handle / unsupported platform: progress is cosmetic.
+  }
+}
+
 function deliverPtyBytes(leafId: number, bytes: Uint8Array): void {
   const s = sessions.get(leafId);
   if (!s) return;
@@ -542,7 +580,23 @@ function deliverPtyBytes(leafId: number, bytes: Uint8Array): void {
   const slot = getLiveSlotForLeaf(leafId);
   if (slot) getWriteMeter(leafId).push(bytes);
   else s.dormantRing.push(bytes);
+  maybeDetectDevUrl(s, bytes);
 }
+
+// A dev server (`npm run dev`, vite, `php artisan serve`, uvicorn, …) prints a
+// `http://localhost:PORT` banner. Surface the newest local one so the user can
+// open it in the embedded browser with one click. Skipped for SSH/remote shells:
+// their `localhost:PORT` names a port on the REMOTE host, dead or unrelated here.
+function maybeDetectDevUrl(s: Session, bytes: Uint8Array): void {
+  if (s.opener || !containsSchemeSeparator(bytes)) return;
+  const url = findLocalUrl(new TextDecoder().decode(bytes));
+  if (!url || url === s.lastDetectedUrl) return;
+  s.lastDetectedUrl = url;
+  window.dispatchEvent(new CustomEvent<string>(DEV_URL_EVENT, { detail: url }));
+}
+
+/** Fired at `window` when a local dev-server url is first seen in PTY output. */
+export const DEV_URL_EVENT = "termigo:dev-url";
 
 const SPAWN_RETRY_DELAY_MS = 250;
 
@@ -834,6 +888,18 @@ function bindLeafToSlot(leafId: number, s: Session): void {
     cols: s.cols,
     rows: s.rows,
     registerOsc: (term) => {
+      // OSC 9;4 taskbar/dock progress (cargo/webpack/vite). Only the focused
+      // leaf drives the single window indicator. Shared by both modes.
+      const progress = registerProgressHandler(term, (state, pct) => {
+        if (sessions.get(leafId)?.focusedNow)
+          void setTaskbarProgress(state, pct);
+      });
+      // OSC 0/2 title (ssh, htop, a `title` builtin) → the tab name. xterm's
+      // onTitleChange fires for both.
+      const titleSub = term.onTitleChange((title) => {
+        sessions.get(leafId)?.callbacks.onTitle?.(title);
+      });
+      const disposeTitle = () => titleSub.dispose();
       if (s.blocks) {
         const osc52 = registerOsc52ClipboardHandler(term);
         const deco = new BlockDecorations(term, {
@@ -855,6 +921,8 @@ function bindLeafToSlot(leafId: number, s: Session): void {
         };
         term.textarea?.addEventListener("focus", onGridFocus);
         return [
+          progress,
+          disposeTitle,
           () => {
             s.blockDecorations = null;
             osc52();
@@ -882,7 +950,7 @@ function bindLeafToSlot(leafId: number, s: Session): void {
         shellState,
       );
       const osc52 = registerOsc52ClipboardHandler(term);
-      return [prompt.dispose, cwd, osc52];
+      return [progress, disposeTitle, prompt.dispose, cwd, osc52];
     },
     onSearchReady: (addon) => s.callbacks.onSearchReady?.(addon),
   });
@@ -968,6 +1036,7 @@ export async function respawnSession(
   s.altScreenAtRelease = false;
   s.commandRunning = false;
   s.spawnFailed = false;
+  s.lastDetectedUrl = null;
   cancelHiddenRelease(s);
 
   const slot = getSlotForLeaf(leafId);
@@ -1061,6 +1130,7 @@ type Options = {
   onSearchReady?: (addon: SearchAddon) => void;
   onExit?: (code: number) => void;
   onCwd?: (cwd: string) => void;
+  onTitle?: (title: string) => void;
   /** Custom session factory (e.g. SSH); falls back to the local PTY. */
   openSession?: SessionOpener;
 };
@@ -1084,10 +1154,11 @@ export function useTerminalSession({
   onSearchReady,
   onExit,
   onCwd,
+  onTitle,
   openSession,
 }: Options) {
-  const cbRef = useRef({ onSearchReady, onExit, onCwd });
-  cbRef.current = { onSearchReady, onExit, onCwd };
+  const cbRef = useRef({ onSearchReady, onExit, onCwd, onTitle });
+  cbRef.current = { onSearchReady, onExit, onCwd, onTitle };
 
   // initialCwd seeds the first PTY spawn only. It must NOT be an effect dep:
   // OSC 7 updates the leaf cwd on every `cd`, and re-running the bind effect
@@ -1117,6 +1188,7 @@ export function useTerminalSession({
         onSearchReady: (a) => cbRef.current.onSearchReady?.(a),
         onExit: (c) => cbRef.current.onExit?.(c),
         onCwd: (c) => cbRef.current.onCwd?.(c),
+        onTitle: (t) => cbRef.current.onTitle?.(t),
       });
       if (s.visibleNow && s.focusedNow && !s.blocks) focusSlot(leafId);
     });

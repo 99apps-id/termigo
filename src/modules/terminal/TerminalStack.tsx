@@ -13,6 +13,7 @@ type Props = {
   registerHandle: (leafId: number, handle: TerminalPaneHandle | null) => void;
   onSearchReady: (leafId: number, addon: SearchAddon) => void;
   onCwd: (leafId: number, cwd: string) => void;
+  onTitle: (leafId: number, title: string) => void;
   onExit: (leafId: number, code: number) => void;
   onFocusLeaf: (tabId: number, leafId: number) => void;
 };
@@ -21,6 +22,7 @@ type Bundle = {
   setRef: (h: TerminalPaneHandle | null) => void;
   onSearchReady: (leafId: number, addon: SearchAddon) => void;
   onCwd: (leafId: number, cwd: string) => void;
+  onTitle: (leafId: number, title: string) => void;
   onExit: (leafId: number, code: number) => void;
 };
 
@@ -30,6 +32,7 @@ export function TerminalStack({
   registerHandle,
   onSearchReady,
   onCwd,
+  onTitle,
   onExit,
   onFocusLeaf,
 }: Props) {
@@ -38,6 +41,7 @@ export function TerminalStack({
   const registerRef = useRef(registerHandle);
   const searchReadyRef = useRef(onSearchReady);
   const cwdRef = useRef(onCwd);
+  const titleRef = useRef(onTitle);
   const exitRef = useRef(onExit);
   useEffect(() => {
     registerRef.current = registerHandle;
@@ -48,6 +52,9 @@ export function TerminalStack({
   useEffect(() => {
     cwdRef.current = onCwd;
   }, [onCwd]);
+  useEffect(() => {
+    titleRef.current = onTitle;
+  }, [onTitle]);
   useEffect(() => {
     exitRef.current = onExit;
   }, [onExit]);
@@ -60,6 +67,7 @@ export function TerminalStack({
         setRef: (h) => registerRef.current(leafId, h),
         onSearchReady: (id, addon) => searchReadyRef.current(id, addon),
         onCwd: (id, cwd) => cwdRef.current(id, cwd),
+        onTitle: (id, title) => titleRef.current(id, title),
         onExit: (id, code) => exitRef.current(id, code),
       };
       bundles.current.set(leafId, b);

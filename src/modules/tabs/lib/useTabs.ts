@@ -1,13 +1,16 @@
 import { isMarkdownPath } from "@/lib/utils";
 import {
-  createAgentPanePlan,
   type AgentInstanceCount,
+  createAgentPanePlan,
 } from "@/modules/agents/lib/launcher";
+
 // Re-exported for the extension host (TEDI parity).
 export type { ExtensionTabState } from "@/modules/extensions/tabStateShim";
+
 import {
   findLeafCwd,
   hasLeaf,
+  isSshLeaf,
   leafIds,
   nextLeafId,
   type PaneBounds,
@@ -15,7 +18,6 @@ import {
   type PaneNode,
   removeLeaf,
   type SplitDir,
-  isSshLeaf,
   setLeafCwd as setLeafCwdInTree,
   siblingLeafOf,
   splitLeaf,
@@ -33,6 +35,7 @@ function leafNode(cwd: string | undefined, leafId: number): PaneNode {
     persistKey: makePersistKey(cwd, String(leafId)),
   };
 }
+
 import {
   useCallback,
   useEffect,
@@ -62,6 +65,10 @@ export type TerminalTab = TabBase & {
   private?: boolean;
   /** User-set label that overrides the cwd-derived name. Survives cd. */
   customTitle?: string;
+  /** Title a running program set via OSC 0/2 (ssh, htop, a `title` builtin).
+   *  Shown when there is no user-set customTitle; cleared when the program
+   *  sets an empty title so the name falls back to the cwd. */
+  oscTitle?: string;
 };
 
 export type EditorTab = TabBase & {
@@ -1030,11 +1037,14 @@ export function useTabs(initial?: Partial<TerminalTab>) {
   const openCanvasTab = useCallback((html: string, title?: string) => {
     const name = (title ?? "Canvas").trim() || "Canvas";
     const existing = tabsRef.current.find(
-      (t): t is PreviewTab => t.kind === "preview" && t.title === name && t.html !== undefined,
+      (t): t is PreviewTab =>
+        t.kind === "preview" && t.title === name && t.html !== undefined,
     );
     if (existing) {
       setTabs((t) =>
-        t.map((x) => (x.id === existing.id ? { ...(x as PreviewTab), html, url: "" } : x)),
+        t.map((x) =>
+          x.id === existing.id ? { ...(x as PreviewTab), html, url: "" } : x,
+        ),
       );
       setActiveId(existing.id);
       return existing.id;
@@ -1332,6 +1342,23 @@ export function useTabs(initial?: Partial<TerminalTab>) {
     });
   }, []);
 
+  // A program in the ACTIVE pane set the terminal title (OSC 0/2). Reflect it on
+  // the tab (unless the user pinned a custom name). An empty title clears it so
+  // the name falls back to the cwd. Only the active leaf drives the tab name.
+  const setLeafTitle = useCallback((leafId: number, title: string) => {
+    const clean = title.trim().slice(0, 128) || undefined;
+    setTabs((curr) => {
+      let changed = false;
+      const next = curr.map((t) => {
+        if (t.kind !== "terminal" || t.activeLeafId !== leafId) return t;
+        if (t.oscTitle === clean) return t;
+        changed = true;
+        return { ...t, oscTitle: clean };
+      });
+      return changed ? next : curr;
+    });
+  }, []);
+
   const focusPane = useCallback((tabId: number, leafId: number) => {
     setTabs((curr) =>
       curr.map((t) => {
@@ -1534,6 +1561,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
     updateTab,
     selectByIndex,
     setLeafCwd,
+    setLeafTitle,
     focusPane,
     focusNextPaneInTab,
     swapActivePaneInDirection,

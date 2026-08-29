@@ -3,18 +3,19 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
+import { openSshTerminalFromSpec } from "@/modules/ssh/lib/ssh-terminal";
 import type { SearchAddon } from "@xterm/addon-search";
 import { Fragment } from "react";
 import { useTerminalDropStore } from "./lib/dropStore";
 import { firstLeafSlotId, type PaneNode } from "./lib/panes";
-import { TerminalPane, type TerminalPaneHandle } from "./TerminalPane";
-import { openSshTerminalFromSpec } from "@/modules/ssh/lib/ssh-terminal";
 import type { SessionOpener } from "./lib/useTerminalSession";
+import { TerminalPane, type TerminalPaneHandle } from "./TerminalPane";
 
 type LeafBundle = {
   setRef: (h: TerminalPaneHandle | null) => void;
   onSearchReady: (leafId: number, addon: SearchAddon) => void;
   onCwd: (leafId: number, cwd: string) => void;
+  onTitle: (leafId: number, title: string) => void;
   onExit: (leafId: number, code: number) => void;
 };
 
@@ -27,9 +28,12 @@ type Props = {
   getBundle: (leafId: number) => LeafBundle;
 };
 
-function sshOpenerFor(spec: { connectionId: string } | undefined): SessionOpener | undefined {
+function sshOpenerFor(
+  spec: { connectionId: string } | undefined,
+): SessionOpener | undefined {
   if (!spec) return undefined;
-  return (cols, rows, handlers) => openSshTerminalFromSpec(spec, cols, rows, handlers);
+  return (cols, rows, handlers) =>
+    openSshTerminalFromSpec(spec, cols, rows, handlers);
 }
 
 export function PaneTreeView(props: Props) {
@@ -62,6 +66,7 @@ export function PaneTreeView(props: Props) {
           ref={b.setRef}
           onSearchReady={b.onSearchReady}
           onCwd={b.onCwd}
+          onTitle={b.onTitle}
           onExit={b.onExit}
         />
         <DropOverlay leafId={node.id} />

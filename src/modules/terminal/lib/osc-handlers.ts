@@ -82,6 +82,28 @@ export function registerPromptTracker(
   };
 }
 
+/**
+ * ConEmu's OSC 9;4 progress sub-protocol — build tools (cargo, webpack, vite)
+ * emit it to drive a taskbar progress bar. `9;4;<state>;<pct>`:
+ *   state 0 = clear, 1 = normal (pct), 2 = error, 3 = indeterminate, 4 = paused.
+ * Declines any non-`4;` OSC 9 (iTerm2 notification) so another handler can run.
+ */
+export function registerProgressHandler(
+  term: Terminal,
+  onProgress: (state: number, progress: number | null) => void,
+): () => void {
+  const d = term.parser.registerOscHandler(9, (data) => {
+    if (!data.startsWith("4;")) return false;
+    const parts = data.split(";");
+    const state = Number.parseInt(parts[1] ?? "", 10);
+    if (!Number.isFinite(state)) return false;
+    const raw = parts.length > 2 ? Number.parseInt(parts[2], 10) : Number.NaN;
+    onProgress(state, Number.isFinite(raw) ? raw : null);
+    return true;
+  });
+  return () => d.dispose();
+}
+
 export type ClipboardWriter = (text: string) => void | Promise<void>;
 
 export function registerOsc52ClipboardHandler(

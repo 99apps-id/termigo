@@ -22,6 +22,8 @@ import {
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import type { ThemePref } from "@/modules/settings/store";
 import {
+  exportSettingsJson,
+  importSettingsJson,
   setAgentNotifications,
   setAutostart,
   setDefaultWorkspaceEnv,
@@ -52,7 +54,12 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { invoke } from "@tauri-apps/api/core";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
+import {
+  open as openDialog,
+  save as saveFileDialog,
+} from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { SectionHeader } from "../components/SectionHeader";
 import { SettingRow } from "../components/SettingRow";
 
@@ -111,6 +118,7 @@ export function GeneralSection() {
   const terminalFontFamily = usePreferencesStore((s) => s.terminalFontFamily);
   const terminalFontWeight = usePreferencesStore((s) => s.terminalFontWeight);
   const terminalShell = usePreferencesStore((s) => s.terminalShell);
+  const [backupBusy, setBackupBusy] = useState(false);
   const [shells, setShells] = useState<ShellInfo[]>([]);
   const [wslDistros, setWslDistros] = useState<{ name: string }[]>([]);
   const defaultWorkspaceEnv = usePreferencesStore((s) => s.defaultWorkspaceEnv);
@@ -166,6 +174,50 @@ export function GeneralSection() {
       await setAutostart(next);
     } catch (e) {
       console.error("autostart toggle failed", e);
+    }
+  };
+
+  const exportSettings = async () => {
+    setBackupBusy(true);
+    try {
+      const text = await exportSettingsJson();
+      const target = await saveFileDialog({
+        title: "Export settings",
+        defaultPath: `termigo-settings-${new Date().toISOString().slice(0, 10)}.json`,
+        filters: [{ name: "Termigo settings", extensions: ["json"] }],
+      });
+      if (!target) return; // user cancelled the picker
+      await invoke<void>("fs_write_file", { path: target, content: text });
+      toast.success("Settings exported");
+    } catch (e) {
+      toast.error(`Export failed: ${e instanceof Error ? e.message : e}`);
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+
+  const importSettings = async () => {
+    setBackupBusy(true);
+    try {
+      const path = await openDialog({
+        title: "Restore settings",
+        multiple: false,
+        filters: [{ name: "Termigo settings", extensions: ["json"] }],
+      });
+      if (typeof path !== "string") return; // cancelled
+      const result = await invoke<{ kind: string; content?: string }>(
+        "fs_read_file",
+        { path },
+      );
+      if (result.kind !== "text" || result.content === undefined) {
+        throw new Error("That file is not a UTF-8 text file.");
+      }
+      const count = await importSettingsJson(result.content);
+      toast.success(`Restored ${count} setting${count === 1 ? "" : "s"}`);
+    } catch (e) {
+      toast.error(`Restore failed: ${e instanceof Error ? e.message : e}`);
+    } finally {
+      setBackupBusy(false);
     }
   };
 
@@ -559,6 +611,35 @@ export function GeneralSection() {
             />
           </SettingRow>
         </div>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <Label>Backup &amp; Restore</Label>
+        <SettingRow
+          title="Settings backup"
+          description="Export all preferences to a JSON file, or restore them on another machine. Secrets (API keys, SSH credentials) stay in the OS keychain and are not included."
+        >
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              disabled={backupBusy}
+              onClick={() => void importSettings()}
+            >
+              Restore…
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              disabled={backupBusy}
+              onClick={() => void exportSettings()}
+            >
+              Export…
+            </Button>
+          </div>
+        </SettingRow>
       </div>
     </div>
   );
