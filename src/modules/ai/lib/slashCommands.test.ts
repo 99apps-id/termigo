@@ -1,11 +1,17 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { tryRunSlashCommand, SLASH_COMMANDS } from "./slashCommands";
+import { startPentestRun } from "@/modules/control/lib/startPentestRun";
 import { useSessionDirectiveStore } from "../store/sessionDirectiveStore";
 import { useChatStore } from "../store/chatStore";
+
+vi.mock("@/modules/control/lib/startPentestRun", () => ({
+  startPentestRun: vi.fn().mockResolvedValue({ ok: true }),
+}));
 
 beforeEach(() => {
   useChatStore.setState({ activeSessionId: "s1" });
   useSessionDirectiveStore.setState({ bySession: {} });
+  vi.mocked(startPentestRun).mockClear();
 });
 
 describe("slash commands", () => {
@@ -50,5 +56,26 @@ describe("slash commands", () => {
     const out = tryRunSlashCommand("/schedule just-one-word");
     expect(out.kind).toBe("handled");
     expect((out as { toast?: string }).toast).toMatch(/Usage/);
+  });
+
+  it("starts a pentest run via /pentest <target> [category]", () => {
+    expect(SLASH_COMMANDS.pentest.invocation).toBe("/pentest");
+
+    const withCategory = tryRunSlashCommand("/pentest example.com web");
+    expect(withCategory.kind).toBe("handled");
+    expect((withCategory as { toast?: string }).toast).toContain("example.com");
+    expect(startPentestRun).toHaveBeenCalledWith("example.com", "web");
+
+    vi.mocked(startPentestRun).mockClear();
+    const recon = tryRunSlashCommand("/pentest 10.0.0.5");
+    expect(recon.kind).toBe("handled");
+    expect(startPentestRun).toHaveBeenCalledWith("10.0.0.5", "");
+  });
+
+  it("shows usage when /pentest has no target", () => {
+    const out = tryRunSlashCommand("/pentest");
+    expect(out.kind).toBe("handled");
+    expect((out as { toast?: string }).toast).toMatch(/Usage/);
+    expect(startPentestRun).not.toHaveBeenCalled();
   });
 });

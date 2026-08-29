@@ -10,9 +10,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde_json::{json, Value};
 use termigo_control_protocol::{
     CallerContext, ControlDescriptor, ControlRequest, ControlResponse, FocusParams, OpenParams,
-    PentestRunParams, MAX_MESSAGE_BYTES, METHOD_CAPABILITIES, METHOD_FOCUS, METHOD_IDENTIFY,
-    METHOD_OPEN, METHOD_PENTEST_RUN, METHOD_PING, METHOD_STATUS, PROTOCOL_VERSION,
-    SERVER_RESPONSE_ID,
+    PentestReportParams, PentestRunParams, MAX_MESSAGE_BYTES, METHOD_CAPABILITIES, METHOD_FOCUS,
+    METHOD_IDENTIFY, METHOD_OPEN, METHOD_PENTEST_REPORT, METHOD_PENTEST_RUN, METHOD_PENTEST_STATUS,
+    METHOD_PING, METHOD_STATUS, PROTOCOL_VERSION, SERVER_RESPONSE_ID,
 };
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
@@ -136,6 +136,8 @@ fn parse_args(mut args: Vec<OsString>) -> Result<Config, CliError> {
         Some("identify") => request_without_params(args, METHOD_IDENTIFY)?,
         Some("focus") => parse_focus(args)?,
         Some("pentest-run") => parse_pentest_run(args)?,
+        Some("pentest-status") => request_without_params(args, METHOD_PENTEST_STATUS)?,
+        Some("pentest-report") => parse_pentest_report(args)?,
         Some("open") => parse_open(args)?,
         Some("--") => {
             args.insert(0, command);
@@ -188,7 +190,7 @@ fn unknown_command_error(command: &OsString) -> CliError {
     let mut message = format!(
         "unknown command '{name}'\n\n\
          This is the Termigo control CLI. It supports: open, ping, capabilities, \
-         status, identify, focus, pentest-run, version, help.\n\
+         status, identify, focus, pentest-run, pentest-status, pentest-report, version, help.\n\
          Run 'termigo help' for usage, or pass a file path to open it."
     );
     if COMPANION_COMMANDS.contains(&name.as_ref()) {
@@ -197,7 +199,7 @@ fn unknown_command_error(command: &OsString) -> CliError {
              Build it with:  cd cli && go build -o termi-go ./cmd/termigo\n\
              Then run:       termi-go {name} --help\n\n\
              This binary controls a running Termigo window: open, ping, capabilities, \
-             status, identify, focus, pentest-run, version, help."
+             status, identify, focus, pentest-run, pentest-status, pentest-report, version, help."
         );
     }
     usage_error(message)
@@ -401,6 +403,53 @@ fn parse_pentest_run(args: Vec<OsString>) -> Result<Action, CliError> {
     })?;
     Ok(Action::Request {
         method: METHOD_PENTEST_RUN,
+        params,
+    })
+}
+
+/// `pentest-report [target]` — ask the running app to generate and open the
+/// pentest report. The target is optional: empty means "the last pentest-run
+/// target", so `termigo pentest-report` right after a `pentest-run` reuses it.
+fn parse_pentest_report(args: Vec<OsString>) -> Result<Action, CliError> {
+    let mut positional: Vec<OsString> = Vec::new();
+    let mut options = true;
+    for arg in args {
+        match arg.to_str() {
+            Some("--") if options => options = false,
+            Some(value) if options && value.starts_with('-') => {
+                return Err(usage_error(format!("unknown pentest-report option '{value}'")));
+            }
+            _ => positional.push(arg),
+        }
+    }
+    if positional.len() > 1 {
+        return Err(usage_error(
+            "pentest-report accepts at most a target",
+        ));
+    }
+    let to_text = |value: OsString, label: &str| -> Result<String, CliError> {
+        value.into_string().map_err(|_| {
+            CliError::new(
+                "non_utf8_argument",
+                format!("Termigo cannot use a non-UTF-8 {label}"),
+                EXIT_USAGE,
+            )
+        })
+    };
+    let target = if positional.is_empty() {
+        String::new()
+    } else {
+        to_text(positional.remove(0), "target")?
+    };
+    let params = serde_json::to_value(PentestReportParams { target }).map_err(|error| {
+        CliError::new(
+            "serialization_error",
+            format!("could not encode pentest-report request: {error}"),
+            EXIT_PROTOCOL,
+        )
+    })?;
+    Ok(Action::Request {
+        method: METHOD_PENTEST_REPORT,
         params,
     })
 }
@@ -707,6 +756,33 @@ fn print_result(method: &str, result: Value, as_json: bool) {
                 .unwrap_or("recon");
             println!("Started {category} pentest against {target} in Termigo");
         }
+        METHOD_PENTEST_STATUS => {
+            let run = result.get("run").unwrap_or(&result);
+            let target = run.get("target").and_then(Value::as_str).unwrap_or("");
+            let status = run.get("status").and_then(Value::as_str).unwrap_or("idle");
+            if target.is_empty() {
+                println!("No pentest run started yet (agent: {})", status);
+            } else {
+                let category = run
+                    .get("category")
+                    .and_then(Value::as_str)
+                    .filter(|c| !c.is_empty())
+                    .unwrap_or("recon");
+                let message = result
+                    .get("agent")
+                    .and_then(|a| a.get("status"))
+                    .and_then(Value::as_str)
+                    .unwrap_or(status);
+                println!("Pentest {status}: {category} against {target} (agent {message})");
+            }
+        }
+        METHOD_PENTEST_REPORT => {
+            let target = result
+                .get("target")
+                .and_then(Value::as_str)
+                .unwrap_or("last run");
+            println!("Pentest report requested for {target} in Termigo");
+        }
         _ => println!("{result}"),
     }
 }
@@ -714,10 +790,13 @@ fn print_result(method: &str, result: Value, as_json: bool) {
 fn print_help() {
     println!(
         "Termigo command line interface\n\n\
-Usage:\n  termigo <file> [--line <n>] [--no-focus] [--json]\n  termigo open <file> [--line <n>] [--no-focus] [--json]\n  termigo ping [--json]\n  termigo capabilities [--json]\n  termigo status [--json]\n  termigo identify [--json]\n  termigo focus <query> [--json]\n  termigo pentest-run <target> [category] [--json]\n  termigo --version\n\n\
+Usage:\n  termigo <file> [--line <n>] [--no-focus] [--json]\n  termigo open <file> [--line <n>] [--no-focus] [--json]\n  termigo ping [--json]\n  termigo capabilities [--json]\n  termigo status [--json]\n  termigo identify [--json]\n  termigo focus <query> [--json]\n  termigo pentest-run <target> [category] [--json]\n  termigo pentest-status [--json]\n  termigo pentest-report [target] [--json]\n  termigo --version\n\n\
 The app must be running. Commands launched in a Termigo pane target that pane's space.\n\
-pentest-run starts an approval-gated pentest in the app's agent against an\n\
-authorized target (category: recon, web, network, …; default recon)."
+pentest-run starts an approval-gated pentest in the app's agent against an\
+authorized target (category: recon, web, network, …; default recon);\n\
+pentest-status reports the latest run and the agent's state; pentest-report\
+asks the app to generate and open the report (target optional, defaults to\
+the last pentest-run target)."
     );
 }
 
@@ -844,6 +923,51 @@ mod tests {
         assert!(error.message.contains("at most"));
 
         let error = parse_args(args(&["pentest-run", "--flag", "x"])).expect_err("reject option");
+        assert_eq!(error.code, "usage");
+    }
+
+    #[test]
+    fn parses_pentest_status_and_report_commands() {
+        let status = parse_args(args(&["pentest-status", "--json"])).expect("parse pentest-status");
+        assert!(status.json);
+        assert_eq!(
+            status.action,
+            Action::Request {
+                method: METHOD_PENTEST_STATUS,
+                params: json!({}),
+            }
+        );
+
+        let report = parse_args(args(&["pentest-report", "example.com", "--json"]))
+            .expect("parse pentest-report");
+        assert!(report.json);
+        assert_eq!(
+            report.action,
+            Action::Request {
+                method: METHOD_PENTEST_REPORT,
+                params: json!({ "target": "example.com" }),
+            }
+        );
+
+        // Without a target the report reuses the last pentest-run target.
+        let default = parse_args(args(&["pentest-report"])).expect("parse pentest-report default");
+        assert_eq!(
+            default.action,
+            Action::Request {
+                method: METHOD_PENTEST_REPORT,
+                params: json!({ "target": "" }),
+            }
+        );
+    }
+
+    #[test]
+    fn pentest_report_rejects_extra_arguments_and_options() {
+        let error =
+            parse_args(args(&["pentest-report", "a", "b"])).expect_err("too many");
+        assert_eq!(error.code, "usage");
+        assert!(error.message.contains("at most"));
+
+        let error = parse_args(args(&["pentest-report", "--flag"])).expect_err("reject option");
         assert_eq!(error.code, "usage");
     }
 

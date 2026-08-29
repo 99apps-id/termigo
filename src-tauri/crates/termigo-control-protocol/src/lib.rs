@@ -10,6 +10,8 @@ pub const METHOD_OPEN: &str = "open";
 pub const METHOD_FOCUS: &str = "focus";
 pub const METHOD_STATUS: &str = "status";
 pub const METHOD_PENTEST_RUN: &str = "pentest-run";
+pub const METHOD_PENTEST_STATUS: &str = "pentest-status";
+pub const METHOD_PENTEST_REPORT: &str = "pentest-report";
 pub const SERVER_RESPONSE_ID: &str = "server";
 pub const METHODS: &[&str] = &[
     METHOD_PING,
@@ -19,6 +21,8 @@ pub const METHODS: &[&str] = &[
     METHOD_FOCUS,
     METHOD_STATUS,
     METHOD_PENTEST_RUN,
+    METHOD_PENTEST_STATUS,
+    METHOD_PENTEST_REPORT,
 ];
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -146,6 +150,15 @@ pub struct PentestRunParams {
     pub category: String,
 }
 
+/// Ask the running app to generate and open the pentest report. `target` is
+/// optional: empty means "the last pentest-run target", so `pentest-report`
+/// works right after a `pentest-run` without retyping the target.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+pub struct PentestReportParams {
+    #[serde(default)]
+    pub target: String,
+}
+
 fn default_focus() -> bool {
     true
 }
@@ -205,5 +218,21 @@ mod tests {
         assert_eq!(params.target, "example.com");
         assert_eq!(params.category, "");
         assert!(METHODS.contains(&METHOD_PENTEST_RUN));
+    }
+
+    #[test]
+    fn pentest_report_defaults_target_to_empty() {
+        let params: PentestReportParams = serde_json::from_value(json!({}))
+            .expect("deserialize report params without a target");
+        assert_eq!(params.target, "");
+
+        let with_target: PentestReportParams = serde_json::from_value(json!({
+            "target": "example.com"
+        }))
+        .expect("deserialize report params with a target");
+        assert_eq!(with_target.target, "example.com");
+
+        assert!(METHODS.contains(&METHOD_PENTEST_STATUS));
+        assert!(METHODS.contains(&METHOD_PENTEST_REPORT));
     }
 }

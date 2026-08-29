@@ -12,10 +12,10 @@ use serde_json::{json, Value};
 use tauri::{Emitter, Manager};
 use termigo_control_protocol::{
     ControlDescriptor, ControlRequest, ControlResponse, FocusParams, FrontendRequest,
-    FrontendResponse, OpenParams, PentestRunParams, MAX_MESSAGE_BYTES, METHODS,
-    METHOD_CAPABILITIES, METHOD_FOCUS, METHOD_IDENTIFY, METHOD_OPEN, METHOD_PENTEST_RUN,
-    METHOD_PING, METHOD_STATUS, PROTOCOL_VERSION,
-    SERVER_RESPONSE_ID,
+    FrontendResponse, OpenParams, PentestReportParams, PentestRunParams, MAX_MESSAGE_BYTES,
+    METHODS, METHOD_CAPABILITIES, METHOD_FOCUS, METHOD_IDENTIFY, METHOD_OPEN,
+    METHOD_PENTEST_REPORT, METHOD_PENTEST_RUN, METHOD_PENTEST_STATUS, METHOD_PING,
+    METHOD_STATUS, PROTOCOL_VERSION, SERVER_RESPONSE_ID,
 };
 
 use crate::modules::{fs, workspace};
@@ -419,6 +419,36 @@ fn route_request(
                 Err((code, message)) => ControlResponse::failure(request.id, code, message),
             }
         }
+        METHOD_PENTEST_STATUS => {
+            // No parameters: the frontend reads its own run store + agent state.
+            forward_to_frontend(request, app, state)
+        }
+        METHOD_PENTEST_REPORT => {
+            let params: PentestReportParams = match serde_json::from_value(request.params.clone()) {
+                Ok(params) => params,
+                Err(error) => {
+                    return ControlResponse::failure(
+                        request.id,
+                        "invalid_params",
+                        format!("invalid pentest-report parameters: {error}"),
+                    );
+                }
+            };
+            match validate_pentest_report_params(params) {
+                Ok(params) => match serde_json::to_value(params) {
+                    Ok(params) => {
+                        request.params = params;
+                        forward_to_frontend(request, app, state)
+                    }
+                    Err(error) => ControlResponse::failure(
+                        request.id,
+                        "internal_error",
+                        format!("serialize pentest-report parameters: {error}"),
+                    ),
+                },
+                Err((code, message)) => ControlResponse::failure(request.id, code, message),
+            }
+        }
         _ => ControlResponse::failure(request.id, "unknown_method", "unknown control method"),
     }
 }
@@ -446,6 +476,20 @@ fn validate_pentest_run_params(
         ));
     }
     Ok(PentestRunParams { target, category })
+}
+
+/// Bound and clean a pentest-report request. The target is optional (empty
+/// means "last pentest-run target"); when present it is trimmed and capped so
+/// nothing junk reaches the UI.
+fn validate_pentest_report_params(
+    params: PentestReportParams,
+) -> Result<PentestReportParams, (&'static str, String)> {
+    const MAX_TARGET_LEN: usize = 2048;
+    let target = params.target.trim().to_string();
+    if target.len() > MAX_TARGET_LEN {
+        return Err(("invalid_params", "pentest target is too long".to_string()));
+    }
+    Ok(PentestReportParams { target })
 }
 
 fn validate_open_params(
@@ -924,6 +968,26 @@ mod tests {
         let error = normalize_open_target(open_params(temp.path().to_string_lossy().into_owned()))
             .expect_err("reject directory");
         assert_eq!(error.0, "not_a_file");
+    }
+
+    #[test]
+    fn pentest_report_validation_trims_and_bounds_the_target() {
+        let trimmed = validate_pentest_report_params(PentestReportParams {
+            target: "  example.com  ".into(),
+        })
+        .expect("empty target is allowed and trimmed");
+        assert_eq!(trimmed.target, "example.com");
+
+        let empty = validate_pentest_report_params(PentestReportParams {
+            target: String::new(),
+        })
+        .expect("empty target (last run) is allowed");
+        assert_eq!(empty.target, "");
+
+        let error =
+            validate_pentest_report_params(PentestReportParams { target: "x".repeat(2049) })
+                .expect_err("reject oversized target");
+        assert_eq!(error.0, "invalid_params");
     }
 
     #[test]

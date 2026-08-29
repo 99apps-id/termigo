@@ -32,7 +32,11 @@ import { AiComposerProvider } from "@/modules/ai/lib/composer";
 import { native } from "@/modules/ai/lib/native";
 import { CommandPalette, createCommandItems } from "@/modules/command-palette";
 import { useControlBridge } from "@/modules/control";
-import { buildPentestPrompt } from "@/modules/control/lib/pentestPrompt";
+import {
+  getPentestStatus,
+  requestPentestReport,
+  startPentestRun,
+} from "@/modules/control/lib/startPentestRun";
 import {
   type EditorPaneHandle,
   NewEditorDialog,
@@ -1445,34 +1449,22 @@ ${found.foundAt}`
     [setActiveId],
   );
 
-  // `termigo pentest-run <target> [category]`: authorize the target in the
-  // pentest scope, then start an approval-gated pentest in the in-app agent.
-  // The prompt comes from the pure builder (recon default, same guardrail
-  // language as the panel launchers); the run still surfaces every command for
-  // approval. sendMessage is imported lazily so the AI runtime stays out of
-  // the eager startup bundle (app/eager-budget.test.ts).
+  // `termigo pentest-run <target> [category]`, `pentest-status` and
+  // `pentest-report`: the shared helpers authorize the target in the pentest
+  // scope and start/report the run through the in-app agent. `sendMessage` is
+  // imported lazily inside them so the AI runtime stays out of the eager
+  // startup bundle (app/eager-budget.test.ts).
   const runPentest = useCallback(
-    async (request: { target: string; category: string }) => {
-      try {
-        const { setPentestScope } = await import("@/modules/settings/store");
-        const scope = usePreferencesStore.getState().pentestScope ?? [];
-        if (!scope.includes(request.target)) {
-          await setPentestScope([...scope, request.target]);
-        }
-      } catch (error) {
-        console.error("[termigo] could not authorize pentest target:", error);
-      }
-      const { sendMessage } = await import("@/modules/ai/store/chatRuntime");
-      const prompt = buildPentestPrompt(request.target, request.category);
-      const ok = await sendMessage(prompt);
-      return ok
-        ? { ok: true }
-        : {
-            ok: false,
-            message:
-              "no active chat session; open a workspace and pick a model first",
-          };
-    },
+    (request: { target: string; category: string }) =>
+      startPentestRun(request.target, request.category),
+    [],
+  );
+  const readPentestStatus = useCallback(
+    () => Promise.resolve({ ok: true as const, result: getPentestStatus() }),
+    [],
+  );
+  const runPentestReport = useCallback(
+    (request: { target: string }) => requestPentestReport(request.target),
     [],
   );
 
@@ -1484,6 +1476,8 @@ ${found.foundAt}`
     onOpen: openControlFile,
     onFocus: focusControlTab,
     onPentestRun: runPentest,
+    onPentestStatus: readPentestStatus,
+    onPentestReport: runPentestReport,
   });
 
   useEffect(() => {

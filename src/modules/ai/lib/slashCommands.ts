@@ -1,6 +1,7 @@
 import {
   CheckListIcon,
   ClaudeIcon,
+  ShieldUserIcon,
   SparklesIcon,
 } from "@hugeicons/core-free-icons";
 import { useApprovalQueue } from "../store/approvalQueueStore";
@@ -14,6 +15,7 @@ import {
   parseApprovalTarget,
   resolveTarget,
 } from "./approvalQueue";
+import { startPentestRun } from "@/modules/control/lib/startPentestRun";
 import { expandCommand } from "./customCommands";
 import {
   computeNextDueAt,
@@ -107,6 +109,12 @@ export const SLASH_COMMANDS: Record<string, SlashCommandMeta> = {
     label: "Schedule a recurring task",
     icon: CheckListIcon,
   },
+  pentest: {
+    name: "pentest",
+    invocation: "/pentest",
+    label: "Start a pentest run",
+    icon: ShieldUserIcon,
+  },
 };
 
 export const TERMIGO_CMD_RE =
@@ -167,6 +175,8 @@ export function tryRunSlashCommand(input: string): SlashOutcome {
       return respondToGoal(tail);
     case "schedule":
       return respondToSchedule(tail);
+    case "pentest":
+      return respondToPentest(tail);
     default:
       if (custom) {
         return {
@@ -247,6 +257,34 @@ function respondToSchedule(tail: string): SlashOutcome {
     toast: spec
       ? `Scheduled "${when}": ${prompt}`
       : `Saved "${when}": ${prompt} (no auto-run; use 'every <N>m' or 'daily at HH:MM')`,
+  };
+}
+
+function respondToPentest(tail: string): SlashOutcome {
+  const sp = tail.indexOf(" ");
+  const target = (sp === -1 ? tail : tail.slice(0, sp)).trim();
+  const category = (sp === -1 ? "" : tail.slice(sp + 1)).trim();
+  if (!target) {
+    return {
+      kind: "handled",
+      toast:
+        "Usage: /pentest <target> [category] (recon, web, network, subdomains, tls, headers, full, …)",
+    };
+  }
+  // Fire-and-forget: the shared helper (same one the CLI control plane uses)
+  // authorizes the target in the pentest scope and sends the guardrail prompt.
+  // The run's approvals surface in the chat like any other agent work; a failed
+  // start (no active session) is reported as an error toast.
+  void startPentestRun(target, category).then((result) => {
+    if (!result.ok) {
+      console.warn("[termigo] /pentest could not start:", result.message);
+    }
+  });
+  return {
+    kind: "handled",
+    toast: category
+      ? `Starting ${category} pentest against ${target}…`
+      : `Starting pentest against ${target}…`,
   };
 }
 

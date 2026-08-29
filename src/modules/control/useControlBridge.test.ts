@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   parseFocusRequest,
   parseOpenRequest,
+  parsePentestReportRequest,
   parsePentestRunRequest,
 } from "./useControlBridge";
 
@@ -64,6 +65,23 @@ describe("parsePentestRunRequest", () => {
     );
     expect(() => parsePentestRunRequest(null)).toThrow(
       "pentest-run parameters are required",
+    );
+  });
+});
+
+describe("parsePentestReportRequest", () => {
+  it("reads an optional target, trimmed", () => {
+    expect(parsePentestReportRequest({ target: " example.com " })).toEqual({
+      target: "example.com",
+    });
+    // Empty target = "the last pentest-run target".
+    expect(parsePentestReportRequest({ target: "" })).toEqual({ target: "" });
+    expect(parsePentestReportRequest({})).toEqual({ target: "" });
+  });
+
+  it("rejects a non-object payload", () => {
+    expect(() => parsePentestReportRequest(null)).toThrow(
+      "pentest-report parameters are required",
     );
   });
 });

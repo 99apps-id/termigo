@@ -41,6 +41,10 @@ type PentestRunRequest = {
   category: string;
 };
 
+type PentestReportRequest = {
+  target: string;
+};
+
 type UseControlBridgeOptions = {
   ready: boolean;
   tabsRef: RefObject<Tab[]>;
@@ -55,6 +59,18 @@ type UseControlBridgeOptions = {
    *  kicked off; rejects (or resolves ok:false) when it can't start. */
   onPentestRun: (
     request: PentestRunRequest,
+  ) => Promise<{ ok: boolean; message?: string }>;
+  /** Report the latest pentest run and the agent's live state. `result` is
+   *  the payload echoed back to the caller. */
+  onPentestStatus: () => Promise<{
+    ok: boolean;
+    result?: unknown;
+    message?: string;
+  }>;
+  /** Generate and open the pentest report. `target` is empty when the caller
+   *  wants the last pentest-run target. */
+  onPentestReport: (
+    request: PentestReportRequest,
   ) => Promise<{ ok: boolean; message?: string }>;
 };
 
@@ -125,6 +141,18 @@ export function parsePentestRunRequest(params: unknown): PentestRunRequest {
   return { target, category };
 }
 
+export function parsePentestReportRequest(params: unknown): PentestReportRequest {
+  if (typeof params !== "object" || params === null) {
+    throw new RequestError(
+      "invalid_params",
+      "pentest-report parameters are required",
+    );
+  }
+  const value = params as Record<string, unknown>;
+  const target = typeof value.target === "string" ? value.target.trim() : "";
+  return { target };
+}
+
 const setFrontendReady = createReadinessQueue((ready) =>
   invoke("control_frontend_ready", { ready }),
 );
@@ -150,6 +178,8 @@ export function useControlBridge({
   onOpen,
   onFocus,
   onPentestRun,
+  onPentestStatus,
+  onPentestReport,
 }: UseControlBridgeOptions): void {
   useEffect(() => {
     if (!ready) return;
@@ -207,6 +237,32 @@ export function useControlBridge({
           await respond(request.id, {
             ok: true,
             result: { target: run.target, category: run.category },
+          });
+          return;
+        }
+        if (request.method === "pentest-status") {
+          const status = await onPentestStatus();
+          if (!status.ok) {
+            throw new RequestError(
+              "pentest_status_failed",
+              status.message ?? "could not read the pentest status",
+            );
+          }
+          await respond(request.id, { ok: true, result: status.result });
+          return;
+        }
+        if (request.method === "pentest-report") {
+          const report = parsePentestReportRequest(request.params);
+          const started = await onPentestReport(report);
+          if (!started.ok) {
+            throw new RequestError(
+              "pentest_report_failed",
+              started.message ?? "could not request the pentest report",
+            );
+          }
+          await respond(request.id, {
+            ok: true,
+            result: { target: report.target },
           });
           return;
         }
@@ -293,5 +349,7 @@ export function useControlBridge({
     onOpen,
     onFocus,
     onPentestRun,
+    onPentestStatus,
+    onPentestReport,
   ]);
 }

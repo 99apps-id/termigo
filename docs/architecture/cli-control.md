@@ -15,11 +15,15 @@ termigo status [--json]
 termigo identify [--json]
 termigo focus <query> [--json]
 termigo pentest-run <target> [category] [--json]
+termigo pentest-status [--json]
+termigo pentest-report [target] [--json]
 ```
 
 The app must already be running. A command launched inside a Termigo pane targets that pane's space, even if another space or tab has UI focus. An external client without pane context falls back to the active UI context.
 
 `pentest-run` starts an approval-gated penetration test in the app's in-app agent. `target` (host, IP or URL) is added to the app's pentest scope and the optional `category` (`recon`, `web`, `network`, `subdomains`, `tls`, `headers`, `full`, …; default `recon`) selects the workflow. Every command the run performs still surfaces in the approval queue — this only starts the run, it never auto-approves. The frontend builds the agent prompt from `src/modules/control/lib/pentestPrompt.ts`.
+
+`pentest-status` reports the latest pentest run (target, category, started-at, run status) plus the agent's live state, so a script can tell whether a run is still in flight. `pentest-report [target]` asks the app to generate and open the pentest report; the target is optional and defaults to the last `pentest-run` target. The same three commands are available inside the app as `/pentest <target> [category]`.
 
 ## Components
 
