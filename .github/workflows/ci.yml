@@ -127,6 +127,59 @@ jobs:
         working-directory: src-tauri
         run: cargo nextest run --locked --retries 2
 
+  # End-to-end smoke: boot the REAL app via tauri-driver + WebdriverIO and check
+  # it starts, mounts the UI and spawns a terminal — the integration path unit
+  # tests can't reach. Advisory for now (continue-on-error) because the harness
+  # is new; promote it to a required check once it has proven stable.
+  e2e:
+    runs-on: ubuntu-22.04
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Linux build + webdriver dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            webkit2gtk-driver \
+            xvfb
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+          key: e2e
+
+      - uses: taiki-e/install-action@v2.85.11
+        with:
+          tool: tauri-driver
+
+      - name: Install app dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the app (no bundle)
+        run: pnpm tauri build --no-bundle
+
+      - name: Install e2e dependencies
+        working-directory: e2e
+        run: pnpm install --ignore-workspace --no-frozen-lockfile
+
+      - name: Run e2e smoke tests
+        working-directory: e2e
+        run: xvfb-run -a pnpm test
+
   coverage:
     runs-on: ubuntu-22.04
     needs: rust

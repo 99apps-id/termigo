@@ -1,0 +1,20 @@
+{
+  "name": "termigo-e2e",
+  "private": true,
+  "type": "module",
+  "description": "End-to-end smoke tests that boot the real Termigo binary via tauri-driver + WebdriverIO. Kept as a standalone package so its heavy WDIO stack never touches the app's dependency tree or lockfile.",
+  "scripts": {
+    "test": "wdio run ./wdio.conf.ts"
+  },
+  "devDependencies": {
+    "@wdio/cli": "^9.20.0",
+    "@wdio/globals": "^9.20.0",
+    "@wdio/local-runner": "^9.20.0",
+    "@wdio/mocha-framework": "^9.20.0",
+    "@wdio/spec-reporter": "^9.20.0",
+    "expect-webdriverio": "^5.4.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "webdriverio": "^9.20.0"
+  }
+}

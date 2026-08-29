@@ -69,6 +69,21 @@ When testing `src/modules/ai/lib/security.ts` or the Rust equivalents, cover:
 4. NTFS alternate data streams and trailing dot/space variants are normalized.
 5. Write-only deny prefixes block writes but allow reads where appropriate.
 
+## End-to-end (smoke)
+
+Unit tests (Vitest / `cargo nextest`) cover logic in isolation; they cannot see
+the integration path — the moment the real app boots, the webview mounts, and
+the frontend talks to the Rust backend over IPC. That path is where a whole
+class of bug hides: a boot crash, a blank window, a terminal that never spawns
+because a Rust command was referenced but never registered.
+
+`e2e/` is a standalone WebdriverIO + [`tauri-driver`](https://v2.tauri.app/develop/tests/webdriver/)
+package that boots the built binary and drives its webview. It runs in CI on
+Linux (the `e2e` job in `ci.yml`, advisory until proven stable) and can be run
+locally on Linux/Windows — see [`e2e/README.md`](../../e2e/README.md). Keep smoke
+specs shallow and resilient (they guard the boot/integration path, not fine UI
+detail) and select on the app's stable `data-*` hooks.
+
 ## Invariants
 
 - A local fix with global blast radius must be caught by a test; review alone is not enough.
