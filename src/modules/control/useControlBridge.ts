@@ -45,6 +45,10 @@ type PentestReportRequest = {
   target: string;
 };
 
+type AgentRunRequest = {
+  prompt: string;
+};
+
 type UseControlBridgeOptions = {
   ready: boolean;
   tabsRef: RefObject<Tab[]>;
@@ -72,6 +76,12 @@ type UseControlBridgeOptions = {
   onPentestReport: (
     request: PentestReportRequest,
   ) => Promise<{ ok: boolean; message?: string }>;
+  /** Start a plain agent task (`termigo run "<task>"`). */
+  onAgentRun: (
+    request: AgentRunRequest,
+  ) => Promise<{ ok: boolean; message?: string }>;
+  /** Rich app status for `termigo status`: agent/model/workspace/cost. */
+  onStatus: () => Promise<{ ok: boolean; result?: unknown; message?: string }>;
 };
 
 class RequestError extends Error {
@@ -153,6 +163,18 @@ export function parsePentestReportRequest(params: unknown): PentestReportRequest
   return { target };
 }
 
+export function parseAgentRunRequest(params: unknown): AgentRunRequest {
+  if (typeof params !== "object" || params === null) {
+    throw new RequestError("invalid_params", "run parameters are required");
+  }
+  const value = params as Record<string, unknown>;
+  const prompt = typeof value.prompt === "string" ? value.prompt.trim() : "";
+  if (!prompt) {
+    throw new RequestError("invalid_params", "agent prompt is required");
+  }
+  return { prompt };
+}
+
 const setFrontendReady = createReadinessQueue((ready) =>
   invoke("control_frontend_ready", { ready }),
 );
@@ -180,6 +202,8 @@ export function useControlBridge({
   onPentestRun,
   onPentestStatus,
   onPentestReport,
+  onAgentRun,
+  onStatus,
 }: UseControlBridgeOptions): void {
   useEffect(() => {
     if (!ready) return;
@@ -196,6 +220,39 @@ export function useControlBridge({
         );
         if (request.method === "identify") {
           await respond(request.id, { ok: true, result: context });
+          return;
+        }
+        if (request.method === "status") {
+          const status = await onStatus();
+          if (!status.ok) {
+            throw new RequestError(
+              "status_failed",
+              status.message ?? "could not read the app status",
+            );
+          }
+          await respond(request.id, { ok: true, result: status.result });
+          return;
+        }
+        if (request.method === "run") {
+          const run = parseAgentRunRequest(request.params);
+          try {
+            const window = getCurrentWindow();
+            await window.show();
+            await window.setFocus();
+          } catch (error) {
+            console.warn("[termigo] could not focus for run:", error);
+          }
+          const started = await onAgentRun(run);
+          if (!started.ok) {
+            throw new RequestError(
+              "agent_run_failed",
+              started.message ?? "could not start the agent run",
+            );
+          }
+          await respond(request.id, {
+            ok: true,
+            result: { prompt: run.prompt },
+          });
           return;
         }
         if (request.method === "focus") {
@@ -351,5 +408,7 @@ export function useControlBridge({
     onPentestRun,
     onPentestStatus,
     onPentestReport,
+    onAgentRun,
+    onStatus,
   ]);
 }

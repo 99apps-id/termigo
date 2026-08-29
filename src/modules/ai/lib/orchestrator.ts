@@ -203,6 +203,43 @@ export async function runPipeline(
   };
 }
 
+// ─── User-facing entry point ───────────────────────────────────────────────
+
+/**
+ * Kick off a named pipeline (`/pipeline <name>`). Loads the pipeline from
+ * `.termigo/pipelines/<name>.json` to validate it, then sends a prompt that
+ * asks the agent to run it with the `orchestrate` tool — so steps execute as
+ * sub-agents through the normal approval flow and their progress is visible in
+ * the chat transcript, exactly like a pipeline started by hand.
+ */
+export async function runPipelineByName(
+  name: string,
+): Promise<{ ok: boolean; message?: string }> {
+  const trimmed = name.trim();
+  if (!trimmed) {
+    return { ok: false, message: "pipeline name is required" };
+  }
+  const pipeline = await loadPipeline(trimmed);
+  if (!pipeline) {
+    return {
+      ok: false,
+      message: `Pipeline "${trimmed}" not found in .termigo/pipelines/`,
+    };
+  }
+  const stepIds = pipeline.steps.map((s) => s.id).join(", ");
+  const { sendMessage } = await import("../store/chatRuntime");
+  const prompt = `Run the orchestration pipeline "${trimmed}" (${pipeline.steps.length} steps: ${stepIds}) using the orchestrate tool with the current workspace context. Execute every step in dependency order, wait for approvals, and report the final OrchestrationResult.`;
+  const ok = await sendMessage(prompt);
+  if (!ok) {
+    return {
+      ok: false,
+      message:
+        "no active chat session; open a workspace and pick a model first",
+    };
+  }
+  return { ok: true };
+}
+
 // ─── Agent tools ───────────────────────────────────────────────────────────
 
 export function buildOrchestratorTools(ctx: ToolContext) {

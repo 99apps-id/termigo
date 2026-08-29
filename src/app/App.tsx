@@ -6,6 +6,7 @@ import {
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { consumeLaunchFiles, getLaunchDir } from "@/lib/launchDir";
+import { PLATFORM } from "@/lib/platform";
 import { quoteShellArg } from "@/lib/shellQuote";
 import { usePresence } from "@/lib/usePresence";
 import { useZoom } from "@/lib/useZoom";
@@ -32,6 +33,7 @@ import { AiComposerProvider } from "@/modules/ai/lib/composer";
 import { native } from "@/modules/ai/lib/native";
 import { CommandPalette, createCommandItems } from "@/modules/command-palette";
 import { useControlBridge } from "@/modules/control";
+import { runAgentTask } from "@/modules/control/lib/runAgentTask";
 import {
   getPentestStatus,
   requestPentestReport,
@@ -1467,6 +1469,63 @@ ${found.foundAt}`
     (request: { target: string }) => requestPentestReport(request.target),
     [],
   );
+  // `termigo run "<task>"`: start a plain agent task (approval-gated, no
+  // scope fencing).
+  const runAgent = useCallback((request: { prompt: string }) => {
+    return runAgentTask(request.prompt);
+  }, []);
+  // `termigo status`: platform info the Rust side cannot know plus the live
+  // agent/model/workspace/cost state. Version/arch/cost are read lazily so the
+  // eager startup bundle stays untouched.
+  const readAppStatus = useCallback(async () => {
+    let appVersion: string | null = null;
+    try {
+      const { getVersion } = await import("@tauri-apps/api/app");
+      appVersion = await getVersion();
+    } catch {
+      // outside the Tauri host
+    }
+    let arch: string | null = null;
+    try {
+      const mod = await import("@tauri-apps/plugin-os");
+      arch = mod.arch();
+    } catch {
+      // outside the Tauri host
+    }
+    let costTodayUsd = 0;
+    try {
+      const { costToday } = await import("@/modules/ai/lib/costLedger");
+      costTodayUsd = await costToday();
+    } catch {
+      // ledger unreadable yet
+    }
+    const chat = useChatStore.getState();
+    const meta = chat.agentMeta;
+    return {
+      ok: true as const,
+      result: {
+        app_version: appVersion,
+        protocol: 1,
+        os: PLATFORM,
+        arch,
+        ui: {
+          agent: {
+            status: meta.status,
+            step: meta.step,
+            stopReason: meta.stopReason,
+            runRound: meta.runRound,
+          },
+          model: { id: chat.selectedModelId ?? null },
+          workspace: {
+            root: chat.live.getWorkspaceRoot() ?? null,
+            cwd: chat.live.getCwd() ?? null,
+          },
+          session: { activeId: chat.activeSessionId ?? null },
+          costTodayUsd,
+        },
+      },
+    };
+  }, []);
 
   useControlBridge({
     ready: spacesHydrated && launchCwdResolved,
@@ -1478,6 +1537,8 @@ ${found.foundAt}`
     onPentestRun: runPentest,
     onPentestStatus: readPentestStatus,
     onPentestReport: runPentestReport,
+    onAgentRun: runAgent,
+    onStatus: readAppStatus,
   });
 
   useEffect(() => {

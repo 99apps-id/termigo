@@ -14,6 +14,7 @@ termigo capabilities [--json]
 termigo status [--json]
 termigo identify [--json]
 termigo focus <query> [--json]
+termigo run "<task>" [--json]
 termigo pentest-run <target> [category] [--json]
 termigo pentest-status [--json]
 termigo pentest-report [target] [--json]
@@ -21,9 +22,13 @@ termigo pentest-report [target] [--json]
 
 The app must already be running. A command launched inside a Termigo pane targets that pane's space, even if another space or tab has UI focus. An external client without pane context falls back to the active UI context.
 
+`run "<task>"` starts a plain agent task in the app's in-app agent — the generalization of the pentest commands, with no scope fencing: the prompt is sent to the active chat session and every tool call still surfaces in the approval queue.
+
+`status` reports platform info (version/os/arch/methods) and, when the UI is ready, enriches it with the live agent state (status, current step, stop reason, run round), the active model, the workspace root, the active session and today's spend (from the cost ledger). When the webview is still restoring, it falls back to the platform fields alone so the command still answers a health check.
+
 `pentest-run` starts an approval-gated penetration test in the app's in-app agent. `target` (host, IP or URL) is added to the app's pentest scope and the optional `category` (`recon`, `web`, `network`, `subdomains`, `tls`, `headers`, `full`, …; default `recon`) selects the workflow. Every command the run performs still surfaces in the approval queue — this only starts the run, it never auto-approves. The frontend builds the agent prompt from `src/modules/control/lib/pentestPrompt.ts`.
 
-`pentest-status` reports the latest pentest run (target, category, started-at, run status) plus the agent's live state, so a script can tell whether a run is still in flight. `pentest-report [target]` asks the app to generate and open the pentest report; the target is optional and defaults to the last `pentest-run` target. The same three commands are available inside the app as `/pentest <target> [category]`.
+`pentest-status` reports the latest pentest run (target, category, started-at, run status) plus the agent's live state, so a script can tell whether a run is still in flight. `pentest-report [target]` asks the app to generate and open the pentest report; the target is optional and defaults to the last `pentest-run` target. The pentest commands are also available inside the app as `/pentest <target> [category]`, and orchestration pipelines (`.termigo/pipelines/*.json`, run through the `orchestrate` tool) as `/pipeline <name> | list`.
 
 ## Components
 

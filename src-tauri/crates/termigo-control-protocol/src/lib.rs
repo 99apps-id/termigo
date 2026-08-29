@@ -12,6 +12,7 @@ pub const METHOD_STATUS: &str = "status";
 pub const METHOD_PENTEST_RUN: &str = "pentest-run";
 pub const METHOD_PENTEST_STATUS: &str = "pentest-status";
 pub const METHOD_PENTEST_REPORT: &str = "pentest-report";
+pub const METHOD_AGENT_RUN: &str = "run";
 pub const SERVER_RESPONSE_ID: &str = "server";
 pub const METHODS: &[&str] = &[
     METHOD_PING,
@@ -23,6 +24,7 @@ pub const METHODS: &[&str] = &[
     METHOD_PENTEST_RUN,
     METHOD_PENTEST_STATUS,
     METHOD_PENTEST_REPORT,
+    METHOD_AGENT_RUN,
 ];
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -159,6 +161,14 @@ pub struct PentestReportParams {
     pub target: String,
 }
 
+/// Start a plain agent task through the running app's in-app agent — the
+/// generalization of `pentest-run` (no scope fencing, just a prompt). The run
+/// still surfaces every tool call for approval.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct AgentRunParams {
+    pub prompt: String,
+}
+
 fn default_focus() -> bool {
     true
 }
@@ -234,5 +244,15 @@ mod tests {
 
         assert!(METHODS.contains(&METHOD_PENTEST_STATUS));
         assert!(METHODS.contains(&METHOD_PENTEST_REPORT));
+    }
+
+    #[test]
+    fn agent_run_round_trips_the_prompt() {
+        let params: AgentRunParams = serde_json::from_value(json!({
+            "prompt": "fix the build"
+        }))
+        .expect("deserialize agent run");
+        assert_eq!(params.prompt, "fix the build");
+        assert!(METHODS.contains(&METHOD_AGENT_RUN));
     }
 }

@@ -9,10 +9,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 use termigo_control_protocol::{
-    CallerContext, ControlDescriptor, ControlRequest, ControlResponse, FocusParams, OpenParams,
-    PentestReportParams, PentestRunParams, MAX_MESSAGE_BYTES, METHOD_CAPABILITIES, METHOD_FOCUS,
-    METHOD_IDENTIFY, METHOD_OPEN, METHOD_PENTEST_REPORT, METHOD_PENTEST_RUN, METHOD_PENTEST_STATUS,
-    METHOD_PING, METHOD_STATUS, PROTOCOL_VERSION, SERVER_RESPONSE_ID,
+    AgentRunParams, CallerContext, ControlDescriptor, ControlRequest, ControlResponse, FocusParams,
+    OpenParams, PentestReportParams, PentestRunParams, MAX_MESSAGE_BYTES, METHOD_AGENT_RUN,
+    METHOD_CAPABILITIES, METHOD_FOCUS, METHOD_IDENTIFY, METHOD_OPEN, METHOD_PENTEST_REPORT,
+    METHOD_PENTEST_RUN, METHOD_PENTEST_STATUS, METHOD_PING, METHOD_STATUS, PROTOCOL_VERSION,
+    SERVER_RESPONSE_ID,
 };
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
@@ -138,6 +139,7 @@ fn parse_args(mut args: Vec<OsString>) -> Result<Config, CliError> {
         Some("pentest-run") => parse_pentest_run(args)?,
         Some("pentest-status") => request_without_params(args, METHOD_PENTEST_STATUS)?,
         Some("pentest-report") => parse_pentest_report(args)?,
+        Some("run") => parse_run(args)?,
         Some("open") => parse_open(args)?,
         Some("--") => {
             args.insert(0, command);
@@ -190,7 +192,7 @@ fn unknown_command_error(command: &OsString) -> CliError {
     let mut message = format!(
         "unknown command '{name}'\n\n\
          This is the Termigo control CLI. It supports: open, ping, capabilities, \
-         status, identify, focus, pentest-run, pentest-status, pentest-report, version, help.\n\
+         status, identify, focus, run, pentest-run, pentest-status, pentest-report, version, help.\n\
          Run 'termigo help' for usage, or pass a file path to open it."
     );
     if COMPANION_COMMANDS.contains(&name.as_ref()) {
@@ -199,7 +201,7 @@ fn unknown_command_error(command: &OsString) -> CliError {
              Build it with:  cd cli && go build -o termi-go ./cmd/termigo\n\
              Then run:       termi-go {name} --help\n\n\
              This binary controls a running Termigo window: open, ping, capabilities, \
-             status, identify, focus, pentest-run, pentest-status, pentest-report, version, help."
+             status, identify, focus, run, pentest-run, pentest-status, pentest-report, version, help."
         );
     }
     usage_error(message)
@@ -450,6 +452,51 @@ fn parse_pentest_report(args: Vec<OsString>) -> Result<Action, CliError> {
     })?;
     Ok(Action::Request {
         method: METHOD_PENTEST_REPORT,
+        params,
+    })
+}
+
+/// `run "<task>"` — start a plain agent task in the running app's in-app agent
+/// (the generalization of pentest-run: no scope fencing, just a prompt). The
+/// prompt is a single positional argument, so it is quoted on the shell side.
+fn parse_run(args: Vec<OsString>) -> Result<Action, CliError> {
+    let mut positional: Vec<OsString> = Vec::new();
+    let mut options = true;
+    for arg in args {
+        match arg.to_str() {
+            Some("--") if options => options = false,
+            Some(value) if options && value.starts_with('-') => {
+                return Err(usage_error(format!("unknown run option '{value}'")));
+            }
+            _ => positional.push(arg),
+        }
+    }
+    if positional.is_empty() {
+        return Err(usage_error(
+            "run requires a prompt; usage: termigo run \"<task>\"",
+        ));
+    }
+    if positional.len() > 1 {
+        return Err(usage_error(
+            "run accepts exactly one prompt; quote it as a single argument",
+        ));
+    }
+    let prompt = positional.remove(0).into_string().map_err(|_| {
+        CliError::new(
+            "non_utf8_argument",
+            "Termigo cannot use a non-UTF-8 prompt",
+            EXIT_USAGE,
+        )
+    })?;
+    let params = serde_json::to_value(AgentRunParams { prompt }).map_err(|error| {
+        CliError::new(
+            "serialization_error",
+            format!("could not encode run request: {error}"),
+            EXIT_PROTOCOL,
+        )
+    })?;
+    Ok(Action::Request {
+        method: METHOD_AGENT_RUN,
         params,
     })
 }
@@ -712,6 +759,37 @@ fn print_result(method: &str, result: Value, as_json: bool) {
                 .and_then(Value::as_str)
                 .unwrap_or("unknown");
             println!("Termigo {version} ({os}/{arch})");
+            if let Some(ui) = result.get("ui").and_then(Value::as_object) {
+                if let Some(agent) = ui.get("agent").and_then(Value::as_object) {
+                    let status = agent.get("status").and_then(Value::as_str).unwrap_or("idle");
+                    let step = agent.get("step").and_then(Value::as_str).unwrap_or("");
+                    if !step.is_empty() {
+                        println!("agent: {status} — {step}");
+                    } else {
+                        println!("agent: {status}");
+                    }
+                }
+                if let Some(model) = ui.get("model").and_then(|m| m.get("id")).and_then(Value::as_str) {
+                    if !model.is_empty() {
+                        println!("model: {model}");
+                    }
+                }
+                if let Some(root) = ui
+                    .get("workspace")
+                    .and_then(|w| w.get("root"))
+                    .and_then(Value::as_str)
+                {
+                    println!("workspace: {root}");
+                }
+                if let Some(cost) = ui.get("costTodayUsd").and_then(Value::as_f64) {
+                    println!("cost today: ${cost:.4}");
+                }
+            } else {
+                println!("ui: not ready");
+            }
+        }
+        METHOD_AGENT_RUN => {
+            println!("Started agent task in Termigo");
         }
         METHOD_FOCUS => {
             let path = result
@@ -790,13 +868,13 @@ fn print_result(method: &str, result: Value, as_json: bool) {
 fn print_help() {
     println!(
         "Termigo command line interface\n\n\
-Usage:\n  termigo <file> [--line <n>] [--no-focus] [--json]\n  termigo open <file> [--line <n>] [--no-focus] [--json]\n  termigo ping [--json]\n  termigo capabilities [--json]\n  termigo status [--json]\n  termigo identify [--json]\n  termigo focus <query> [--json]\n  termigo pentest-run <target> [category] [--json]\n  termigo pentest-status [--json]\n  termigo pentest-report [target] [--json]\n  termigo --version\n\n\
+Usage:\n  termigo <file> [--line <n>] [--no-focus] [--json]\n  termigo open <file> [--line <n>] [--no-focus] [--json]\n  termigo ping [--json]\n  termigo capabilities [--json]\n  termigo status [--json]\n  termigo identify [--json]\n  termigo focus <query> [--json]\n  termigo run \"<task>\" [--json]\n  termigo pentest-run <target> [category] [--json]\n  termigo pentest-status [--json]\n  termigo pentest-report [target] [--json]\n  termigo --version\n\n\
 The app must be running. Commands launched in a Termigo pane target that pane's space.\n\
-pentest-run starts an approval-gated pentest in the app's agent against an\
-authorized target (category: recon, web, network, …; default recon);\n\
-pentest-status reports the latest run and the agent's state; pentest-report\
-asks the app to generate and open the report (target optional, defaults to\
-the last pentest-run target)."
+run starts a plain agent task in the app's in-app agent (approval-gated, no\
+scope fencing); pentest-run is the scoped variant that also authorizes a\
+target. pentest-status reports the latest run and the agent's state;\n\
+pentest-report asks the app to generate and open the report (target optional,\n\
+defaults to the last pentest-run target)."
     );
 }
 
@@ -968,6 +1046,33 @@ mod tests {
         assert!(error.message.contains("at most"));
 
         let error = parse_args(args(&["pentest-report", "--flag"])).expect_err("reject option");
+        assert_eq!(error.code, "usage");
+    }
+
+    #[test]
+    fn parses_run_with_a_single_prompt() {
+        let run = parse_args(args(&["run", "fix the build", "--json"])).expect("parse run");
+        assert!(run.json);
+        assert_eq!(
+            run.action,
+            Action::Request {
+                method: METHOD_AGENT_RUN,
+                params: json!({ "prompt": "fix the build" }),
+            }
+        );
+    }
+
+    #[test]
+    fn run_rejects_missing_or_extra_prompts_and_options() {
+        let error = parse_args(args(&["run"])).expect_err("missing prompt");
+        assert_eq!(error.code, "usage");
+        assert!(error.message.contains("prompt"));
+
+        let error = parse_args(args(&["run", "a", "b"])).expect_err("too many");
+        assert_eq!(error.code, "usage");
+        assert!(error.message.contains("one prompt"));
+
+        let error = parse_args(args(&["run", "--flag", "x"])).expect_err("reject option");
         assert_eq!(error.code, "usage");
     }
 

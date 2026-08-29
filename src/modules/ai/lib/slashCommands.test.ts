@@ -1,17 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { tryRunSlashCommand, SLASH_COMMANDS } from "./slashCommands";
 import { startPentestRun } from "@/modules/control/lib/startPentestRun";
+import { listPipelines, runPipelineByName } from "./orchestrator";
 import { useSessionDirectiveStore } from "../store/sessionDirectiveStore";
 import { useChatStore } from "../store/chatStore";
 
 vi.mock("@/modules/control/lib/startPentestRun", () => ({
   startPentestRun: vi.fn().mockResolvedValue({ ok: true }),
 }));
+vi.mock("./orchestrator", () => ({
+  listPipelines: vi.fn().mockResolvedValue([]),
+  runPipelineByName: vi.fn().mockResolvedValue({ ok: true }),
+}));
 
 beforeEach(() => {
   useChatStore.setState({ activeSessionId: "s1" });
   useSessionDirectiveStore.setState({ bySession: {} });
   vi.mocked(startPentestRun).mockClear();
+  vi.mocked(listPipelines).mockClear();
+  vi.mocked(runPipelineByName).mockClear();
 });
 
 describe("slash commands", () => {
@@ -77,5 +84,33 @@ describe("slash commands", () => {
     expect(out.kind).toBe("handled");
     expect((out as { toast?: string }).toast).toMatch(/Usage/);
     expect(startPentestRun).not.toHaveBeenCalled();
+  });
+
+  it("runs a pipeline via /pipeline <name>", async () => {
+    expect(SLASH_COMMANDS.pipeline.invocation).toBe("/pipeline");
+
+    const out = tryRunSlashCommand("/pipeline release");
+    expect(out.kind).toBe("handled");
+    expect((out as { toast?: string }).toast).toContain("release");
+    // The orchestrator is imported lazily (eager-budget guard), so the call
+    // lands on a later microtask.
+    await vi.waitFor(() =>
+      expect(runPipelineByName).toHaveBeenCalledWith("release"),
+    );
+  });
+
+  it("lists pipelines via /pipeline list", async () => {
+    const out = tryRunSlashCommand("/pipeline list");
+    expect(out.kind).toBe("handled");
+    await vi.waitFor(() => expect(listPipelines).toHaveBeenCalled());
+    expect(runPipelineByName).not.toHaveBeenCalled();
+  });
+
+  it("shows usage when /pipeline has no name", () => {
+    const out = tryRunSlashCommand("/pipeline");
+    expect(out.kind).toBe("handled");
+    expect((out as { toast?: string }).toast).toMatch(/Usage/);
+    expect(runPipelineByName).not.toHaveBeenCalled();
+    expect(listPipelines).not.toHaveBeenCalled();
   });
 });

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  parseAgentRunRequest,
   parseFocusRequest,
   parseOpenRequest,
   parsePentestReportRequest,
@@ -82,6 +83,29 @@ describe("parsePentestReportRequest", () => {
   it("rejects a non-object payload", () => {
     expect(() => parsePentestReportRequest(null)).toThrow(
       "pentest-report parameters are required",
+    );
+  });
+});
+
+describe("parseAgentRunRequest", () => {
+  it("reads the trimmed prompt", () => {
+    expect(parseAgentRunRequest({ prompt: "  fix the build  " })).toEqual({
+      prompt: "fix the build",
+    });
+  });
+
+  it("rejects a missing or blank prompt", () => {
+    expect(() => parseAgentRunRequest({})).toThrow(
+      "agent prompt is required",
+    );
+    expect(() => parseAgentRunRequest({ prompt: "" })).toThrow(
+      "agent prompt is required",
+    );
+    expect(() => parseAgentRunRequest({ prompt: "   " })).toThrow(
+      "agent prompt is required",
+    );
+    expect(() => parseAgentRunRequest(null)).toThrow(
+      "run parameters are required",
     );
   });
 });

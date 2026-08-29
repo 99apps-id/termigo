@@ -11,11 +11,11 @@ use std::time::{Duration, SystemTime};
 use serde_json::{json, Value};
 use tauri::{Emitter, Manager};
 use termigo_control_protocol::{
-    ControlDescriptor, ControlRequest, ControlResponse, FocusParams, FrontendRequest,
-    FrontendResponse, OpenParams, PentestReportParams, PentestRunParams, MAX_MESSAGE_BYTES,
-    METHODS, METHOD_CAPABILITIES, METHOD_FOCUS, METHOD_IDENTIFY, METHOD_OPEN,
-    METHOD_PENTEST_REPORT, METHOD_PENTEST_RUN, METHOD_PENTEST_STATUS, METHOD_PING,
-    METHOD_STATUS, PROTOCOL_VERSION, SERVER_RESPONSE_ID,
+    AgentRunParams, ControlDescriptor, ControlRequest, ControlResponse, FocusParams,
+    FrontendRequest, FrontendResponse, OpenParams, PentestReportParams, PentestRunParams,
+    MAX_MESSAGE_BYTES, METHODS, METHOD_AGENT_RUN, METHOD_CAPABILITIES, METHOD_FOCUS,
+    METHOD_IDENTIFY, METHOD_OPEN, METHOD_PENTEST_REPORT, METHOD_PENTEST_RUN,
+    METHOD_PENTEST_STATUS, METHOD_PING, METHOD_STATUS, PROTOCOL_VERSION, SERVER_RESPONSE_ID,
 };
 
 use crate::modules::{fs, workspace};
@@ -340,16 +340,32 @@ fn route_request(
                 "methods": METHODS,
             }),
         ),
-        METHOD_STATUS => ControlResponse::success(
-            request.id,
-            json!({
+        METHOD_STATUS => {
+            // Platform info that the Rust side knows without the UI, so a health
+            // check answers even while the webview is still restoring. The
+            // frontend enriches the same shape with the live agent/model/
+            // workspace/cost fields once it is ready.
+            let id = request.id.clone();
+            let basic = json!({
                 "app_version": env!("CARGO_PKG_VERSION"),
                 "protocol": PROTOCOL_VERSION,
                 "os": std::env::consts::OS,
                 "arch": std::env::consts::ARCH,
                 "methods": METHODS,
-            }),
-        ),
+                "ui": Value::Null,
+            });
+            let response = forward_to_frontend(request, app, state);
+            if !response.ok
+                && response
+                    .error
+                    .as_ref()
+                    .is_some_and(|e| e.code == "frontend_not_ready")
+            {
+                ControlResponse::success(id, basic)
+            } else {
+                response
+            }
+        }
         METHOD_IDENTIFY => forward_to_frontend(request, app, state),
         METHOD_FOCUS => {
             let params: FocusParams = match serde_json::from_value(request.params.clone()) {
@@ -423,6 +439,32 @@ fn route_request(
             // No parameters: the frontend reads its own run store + agent state.
             forward_to_frontend(request, app, state)
         }
+        METHOD_AGENT_RUN => {
+            let params: AgentRunParams = match serde_json::from_value(request.params.clone()) {
+                Ok(params) => params,
+                Err(error) => {
+                    return ControlResponse::failure(
+                        request.id,
+                        "invalid_params",
+                        format!("invalid run parameters: {error}"),
+                    );
+                }
+            };
+            match validate_agent_run_params(params) {
+                Ok(params) => match serde_json::to_value(params) {
+                    Ok(params) => {
+                        request.params = params;
+                        forward_to_frontend(request, app, state)
+                    }
+                    Err(error) => ControlResponse::failure(
+                        request.id,
+                        "internal_error",
+                        format!("serialize run parameters: {error}"),
+                    ),
+                },
+                Err((code, message)) => ControlResponse::failure(request.id, code, message),
+            }
+        }
         METHOD_PENTEST_REPORT => {
             let params: PentestReportParams = match serde_json::from_value(request.params.clone()) {
                 Ok(params) => params,
@@ -490,6 +532,22 @@ fn validate_pentest_report_params(
         return Err(("invalid_params", "pentest target is too long".to_string()));
     }
     Ok(PentestReportParams { target })
+}
+
+/// Bound and clean an agent-run request. The prompt is required and capped so
+/// an oversized or empty payload is refused before it reaches the UI.
+fn validate_agent_run_params(
+    params: AgentRunParams,
+) -> Result<AgentRunParams, (&'static str, String)> {
+    const MAX_PROMPT_LEN: usize = 32 * 1024;
+    let prompt = params.prompt.trim().to_string();
+    if prompt.is_empty() {
+        return Err(("invalid_params", "agent prompt is required".to_string()));
+    }
+    if prompt.len() > MAX_PROMPT_LEN {
+        return Err(("invalid_params", "agent prompt is too long".to_string()));
+    }
+    Ok(AgentRunParams { prompt })
 }
 
 fn validate_open_params(
@@ -987,6 +1045,27 @@ mod tests {
         let error =
             validate_pentest_report_params(PentestReportParams { target: "x".repeat(2049) })
                 .expect_err("reject oversized target");
+        assert_eq!(error.0, "invalid_params");
+    }
+
+    #[test]
+    fn agent_run_validation_trims_and_bounds_the_prompt() {
+        let trimmed = validate_agent_run_params(AgentRunParams {
+            prompt: "  fix the build  ".into(),
+        })
+        .expect("prompt is trimmed");
+        assert_eq!(trimmed.prompt, "fix the build");
+
+        let error = validate_agent_run_params(AgentRunParams {
+            prompt: String::new(),
+        })
+        .expect_err("reject empty prompt");
+        assert_eq!(error.0, "invalid_params");
+
+        let error = validate_agent_run_params(AgentRunParams {
+            prompt: " ".repeat(32 * 1024 + 1),
+        })
+        .expect_err("reject oversized prompt");
         assert_eq!(error.0, "invalid_params");
     }
 

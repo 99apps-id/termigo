@@ -1,9 +1,11 @@
 import {
   CheckListIcon,
   ClaudeIcon,
+  Flowchart02Icon,
   ShieldUserIcon,
   SparklesIcon,
 } from "@hugeicons/core-free-icons";
+import { toast } from "sonner";
 import { useApprovalQueue } from "../store/approvalQueueStore";
 import { useChatStore } from "../store/chatStore";
 import { useCustomCommandsStore } from "../store/customCommandsStore";
@@ -115,6 +117,12 @@ export const SLASH_COMMANDS: Record<string, SlashCommandMeta> = {
     label: "Start a pentest run",
     icon: ShieldUserIcon,
   },
+  pipeline: {
+    name: "pipeline",
+    invocation: "/pipeline",
+    label: "Run an orchestration pipeline",
+    icon: Flowchart02Icon,
+  },
 };
 
 export const TERMIGO_CMD_RE =
@@ -177,6 +185,8 @@ export function tryRunSlashCommand(input: string): SlashOutcome {
       return respondToSchedule(tail);
     case "pentest":
       return respondToPentest(tail);
+    case "pipeline":
+      return respondToPipeline(tail);
     default:
       if (custom) {
         return {
@@ -286,6 +296,53 @@ function respondToPentest(tail: string): SlashOutcome {
       ? `Starting ${category} pentest against ${target}…`
       : `Starting pentest against ${target}…`,
   };
+}
+
+function respondToPipeline(tail: string): SlashOutcome {
+  const name = tail.trim();
+  if (!name) {
+    return {
+      kind: "handled",
+      toast: "Usage: /pipeline <name> | list",
+    };
+  }
+  if (name === "list") {
+    // The orchestrator module statically imports the AI SDK; importing it here
+    // would drag it into the eager startup bundle, so it is loaded on demand
+    // (the same budget guard that keeps composer cheap applies to slash
+    // commands).
+    void import("./orchestrator")
+      .then(({ listPipelines }) => listPipelines())
+      .then((pipelines) => {
+        if (pipelines.length === 0) {
+          toast.error("No pipelines in .termigo/pipelines/");
+          return;
+        }
+        toast(
+          `Pipelines:\n${pipelines
+            .map(
+              (p) =>
+                `• ${p.id} — ${p.steps.length} steps${p.description ? ` (${p.description})` : ""}`,
+            )
+            .join("\n")}`,
+        );
+      })
+      .catch(() => toast.error("Could not list pipelines"));
+    return { kind: "handled", toast: "Listing pipelines…" };
+  }
+  // Fire-and-forget: the helper validates the pipeline file, then sends a
+  // prompt that runs it through the `orchestrate` tool, so step progress is
+  // visible in the chat transcript like any other agent work.
+  void import("./orchestrator")
+    .then(({ runPipelineByName }) => runPipelineByName(name))
+    .then((result) => {
+      if (!result.ok) {
+        toast.error(result.message ?? "Could not start pipeline");
+      } else {
+        toast(`Started pipeline ${name}`);
+      }
+    });
+  return { kind: "handled", toast: `Starting pipeline ${name}…` };
 }
 
 /**
