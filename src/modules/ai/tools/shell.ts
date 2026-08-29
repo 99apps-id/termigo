@@ -1,14 +1,14 @@
-import { remoteUnsupported } from "../lib/remoteFs";
-import { shellQuote } from "../lib/remoteSearch";
+import { usePreferencesStore } from "@/modules/settings/preferences";
 import { sshExec } from "@/modules/ssh/bridge";
+import { currentWorkspaceEnv, workspaceScopeKey } from "@/modules/workspace";
 import { tool } from "ai";
 import { z } from "zod";
 import { native } from "../lib/native";
-import { checkShellCommand } from "../lib/security";
 import { checkPentestCommand } from "../lib/pentestScope";
+import { remoteUnsupported } from "../lib/remoteFs";
+import { shellQuote } from "../lib/remoteSearch";
+import { checkShellCommand } from "../lib/security";
 import type { ToolContext } from "./context";
-import { currentWorkspaceEnv, workspaceScopeKey } from "@/modules/workspace";
-import { usePreferencesStore } from "@/modules/settings/preferences";
 
 /**
  * Both shell tools run the safety deny-list AND the pentest scope fence: an
@@ -16,7 +16,9 @@ import { usePreferencesStore } from "@/modules/settings/preferences";
  * authorized scope is refused, and denial-of-service tooling is refused
  * outright. Ordinary commands pass untouched.
  */
-function screenCommand(command: string): { ok: true } | { ok: false; reason: string } {
+function screenCommand(
+  command: string,
+): { ok: true } | { ok: false; reason: string } {
   const safety = checkShellCommand(command);
   if (!safety.ok) return safety;
   const prefs = usePreferencesStore.getState();
@@ -52,7 +54,7 @@ export function buildShellTools(ctx: ToolContext) {
   return {
     bash_run: tool({
       description:
-        "Run a foreground shell command. When the active terminal is an SSH session the command runs ON THE REMOTE HOST, from the remote shell's working directory, and always asks for approval regardless of the approval mode. Otherwise it runs in this session's persistent local shell, where cwd persists across calls. Use for short-lived commands (lint, test, build, install, service restarts). For long-running local daemons use `bash_background`. NEVER invoke interactive tools (vim, less, top) — they will hang.",
+        "Run a foreground shell command. When the active terminal is an SSH session the command runs ON THE REMOTE HOST, from the remote shell's working directory, and always asks for approval regardless of the approval mode. Otherwise it runs in this session's persistent local shell, where cwd persists across calls. Use for short-lived commands (lint, test, build, install, service restarts). For long-running local daemons use `bash_background`. NEVER invoke interactive tools (vim, less, top) — they will hang. To FIND files, use the `glob` tool (fast, ignores node_modules/.git, capped) — a recursive shell scan (`Get-ChildItem -Recurse`, `find`, `dir /s`) from a large or home directory can time out. Match the shell in the <env> block: on Windows that is PowerShell, so use PowerShell syntax (`2>$null`, not `2>nul`), never cmd/DOS.",
       inputSchema: z.object({
         command: z.string(),
         timeout_secs: z.number().int().min(1).max(300).optional(),
@@ -115,7 +117,12 @@ export function buildShellTools(ctx: ToolContext) {
 
           let r: Awaited<ReturnType<typeof native.shellSessionRun>>;
           try {
-            r = await native.shellSessionRun(shellId, command, cwd, timeout_secs);
+            r = await native.shellSessionRun(
+              shellId,
+              command,
+              cwd,
+              timeout_secs,
+            );
           } finally {
             abortSignal?.removeEventListener("abort", onAbort);
           }

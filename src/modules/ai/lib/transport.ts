@@ -1,3 +1,5 @@
+import { IS_MAC, IS_WINDOWS } from "@/lib/platform";
+import { currentWorkspaceEnv } from "@/modules/workspace";
 import type { UIMessage } from "@ai-sdk/react";
 import { error as logError, info as logInfo } from "@tauri-apps/plugin-log";
 import type { CustomEndpoint } from "../config";
@@ -446,6 +448,22 @@ export function appendEnvTurn(
 
 function formatEnvBlock(live: LiveSnapshot): string | null {
   const lines: string[] = [];
+  // OS + shell so the model writes commands for the RIGHT shell. Without this
+  // a model kept emitting cmd/DOS syntax into PowerShell (`2>nul`, `dir /s /b`),
+  // which errors, and recursive scans from a huge home dir that time out.
+  const wsEnv = currentWorkspaceEnv();
+  if (wsEnv.kind === "wsl") {
+    lines.push(`os: Linux (WSL: ${wsEnv.distro})`);
+    lines.push("shell: bash/sh — POSIX syntax, forward slashes");
+  } else if (IS_WINDOWS) {
+    lines.push("os: Windows");
+    lines.push(
+      "shell: PowerShell — use PowerShell syntax, NOT cmd/DOS: `2>$null` not `2>nul`, `Get-ChildItem` not `dir /s /b`. To find files use the `glob` tool, not `Get-ChildItem -Recurse` from a large dir (it scans node_modules/AppData and times out).",
+    );
+  } else {
+    lines.push(`os: ${IS_MAC ? "macOS" : "Linux"}`);
+    lines.push("shell: /bin/sh — POSIX syntax");
+  }
   if (live.workspaceRoot) lines.push(`workspace_root: ${live.workspaceRoot}`);
   if (live.cwd) lines.push(`active_terminal_cwd: ${live.cwd}`);
   if (live.activeFile) lines.push(`active_file: ${live.activeFile}`);
