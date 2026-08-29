@@ -9,6 +9,7 @@ pub const METHOD_IDENTIFY: &str = "identify";
 pub const METHOD_OPEN: &str = "open";
 pub const METHOD_FOCUS: &str = "focus";
 pub const METHOD_STATUS: &str = "status";
+pub const METHOD_PENTEST_RUN: &str = "pentest-run";
 pub const SERVER_RESPONSE_ID: &str = "server";
 pub const METHODS: &[&str] = &[
     METHOD_PING,
@@ -17,6 +18,7 @@ pub const METHODS: &[&str] = &[
     METHOD_OPEN,
     METHOD_FOCUS,
     METHOD_STATUS,
+    METHOD_PENTEST_RUN,
 ];
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -133,6 +135,17 @@ pub struct FocusParams {
     pub query: String,
 }
 
+/// Kick off a pentest against an authorized target through the running app's
+/// in-app agent. `target` is added to the app's pentest scope and `category`
+/// selects the workflow (recon, web, network, …; empty defaults to recon). The
+/// agent still surfaces every command for approval — this only starts the run.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct PentestRunParams {
+    pub target: String,
+    #[serde(default)]
+    pub category: String,
+}
+
 fn default_focus() -> bool {
     true
 }
@@ -183,5 +196,14 @@ mod tests {
         assert_eq!(params.query, "src/App.tsx");
         assert!(METHODS.contains(&METHOD_FOCUS));
         assert!(METHODS.contains(&METHOD_STATUS));
+    }
+
+    #[test]
+    fn pentest_run_defaults_category_to_empty() {
+        let params: PentestRunParams =
+            serde_json::from_value(json!({ "target": "example.com" })).expect("deserialize pentest");
+        assert_eq!(params.target, "example.com");
+        assert_eq!(params.category, "");
+        assert!(METHODS.contains(&METHOD_PENTEST_RUN));
     }
 }

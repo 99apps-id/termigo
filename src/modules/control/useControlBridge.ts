@@ -36,6 +36,11 @@ type FocusRequest = {
   query: string;
 };
 
+type PentestRunRequest = {
+  target: string;
+  category: string;
+};
+
 type UseControlBridgeOptions = {
   ready: boolean;
   tabsRef: RefObject<Tab[]>;
@@ -46,6 +51,11 @@ type UseControlBridgeOptions = {
     ok: boolean;
     label?: string;
   };
+  /** Start an approval-gated pentest in the agent. Resolves once the run is
+   *  kicked off; rejects (or resolves ok:false) when it can't start. */
+  onPentestRun: (
+    request: PentestRunRequest,
+  ) => Promise<{ ok: boolean; message?: string }>;
 };
 
 class RequestError extends Error {
@@ -98,6 +108,23 @@ export function parseFocusRequest(params: unknown): FocusRequest {
   return { query: value.query };
 }
 
+export function parsePentestRunRequest(params: unknown): PentestRunRequest {
+  if (typeof params !== "object" || params === null) {
+    throw new RequestError(
+      "invalid_params",
+      "pentest-run parameters are required",
+    );
+  }
+  const value = params as Record<string, unknown>;
+  const target = typeof value.target === "string" ? value.target.trim() : "";
+  if (!target) {
+    throw new RequestError("invalid_params", "pentest target is required");
+  }
+  const category =
+    typeof value.category === "string" ? value.category.trim() : "";
+  return { target, category };
+}
+
 const setFrontendReady = createReadinessQueue((ready) =>
   invoke("control_frontend_ready", { ready }),
 );
@@ -122,6 +149,7 @@ export function useControlBridge({
   activeSpaceIdRef,
   onOpen,
   onFocus,
+  onPentestRun,
 }: UseControlBridgeOptions): void {
   useEffect(() => {
     if (!ready) return;
@@ -156,6 +184,29 @@ export function useControlBridge({
               space_id: context.space_id,
               label: focused.label ?? null,
             },
+          });
+          return;
+        }
+        if (request.method === "pentest-run") {
+          const run = parsePentestRunRequest(request.params);
+          // Bring the window forward so the user sees the approvals it will ask.
+          try {
+            const window = getCurrentWindow();
+            await window.show();
+            await window.setFocus();
+          } catch (error) {
+            console.warn("[termigo] could not focus for pentest-run:", error);
+          }
+          const started = await onPentestRun(run);
+          if (!started.ok) {
+            throw new RequestError(
+              "pentest_run_failed",
+              started.message ?? "could not start the pentest run",
+            );
+          }
+          await respond(request.id, {
+            ok: true,
+            result: { target: run.target, category: run.category },
           });
           return;
         }
@@ -234,5 +285,13 @@ export function useControlBridge({
         console.error("[termigo] control bridge cleanup failed:", error);
       });
     };
-  }, [ready, tabsRef, activeTabIdRef, activeSpaceIdRef, onOpen]);
+  }, [
+    ready,
+    tabsRef,
+    activeTabIdRef,
+    activeSpaceIdRef,
+    onOpen,
+    onFocus,
+    onPentestRun,
+  ]);
 }

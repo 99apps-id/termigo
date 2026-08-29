@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { parseFocusRequest, parseOpenRequest } from "./useControlBridge";
+import {
+  parseFocusRequest,
+  parseOpenRequest,
+  parsePentestRunRequest,
+} from "./useControlBridge";
 
 describe("parseOpenRequest", () => {
   it("defaults focus only when it is absent", () => {
@@ -34,5 +38,32 @@ describe("parseFocusRequest", () => {
       "focus parameters are required",
     );
     expect(() => parseFocusRequest({})).toThrow("focus query is required");
+  });
+});
+
+describe("parsePentestRunRequest", () => {
+  it("reads the target and an optional category, trimmed", () => {
+    expect(parsePentestRunRequest({ target: " example.com " })).toEqual({
+      target: "example.com",
+      category: "",
+    });
+    expect(
+      parsePentestRunRequest({ target: "10.0.0.5", category: " web " }),
+    ).toEqual({ target: "10.0.0.5", category: "web" });
+  });
+
+  it("rejects a missing or blank target", () => {
+    expect(() => parsePentestRunRequest({})).toThrow(
+      "pentest target is required",
+    );
+    expect(() => parsePentestRunRequest({ target: "" })).toThrow(
+      "pentest target is required",
+    );
+    expect(() => parsePentestRunRequest({ target: "   " })).toThrow(
+      "pentest target is required",
+    );
+    expect(() => parsePentestRunRequest(null)).toThrow(
+      "pentest-run parameters are required",
+    );
   });
 });

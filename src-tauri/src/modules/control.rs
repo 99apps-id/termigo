@@ -12,8 +12,9 @@ use serde_json::{json, Value};
 use tauri::{Emitter, Manager};
 use termigo_control_protocol::{
     ControlDescriptor, ControlRequest, ControlResponse, FocusParams, FrontendRequest,
-    FrontendResponse, OpenParams, MAX_MESSAGE_BYTES, METHODS, METHOD_CAPABILITIES, METHOD_FOCUS,
-    METHOD_IDENTIFY, METHOD_OPEN, METHOD_PING, METHOD_STATUS, PROTOCOL_VERSION,
+    FrontendResponse, OpenParams, PentestRunParams, MAX_MESSAGE_BYTES, METHODS,
+    METHOD_CAPABILITIES, METHOD_FOCUS, METHOD_IDENTIFY, METHOD_OPEN, METHOD_PENTEST_RUN,
+    METHOD_PING, METHOD_STATUS, PROTOCOL_VERSION,
     SERVER_RESPONSE_ID,
 };
 
@@ -392,8 +393,59 @@ fn route_request(
                 Err((code, message)) => ControlResponse::failure(request.id, code, message),
             }
         }
+        METHOD_PENTEST_RUN => {
+            let params: PentestRunParams = match serde_json::from_value(request.params.clone()) {
+                Ok(params) => params,
+                Err(error) => {
+                    return ControlResponse::failure(
+                        request.id,
+                        "invalid_params",
+                        format!("invalid pentest-run parameters: {error}"),
+                    );
+                }
+            };
+            match validate_pentest_run_params(params) {
+                Ok(params) => match serde_json::to_value(params) {
+                    Ok(params) => {
+                        request.params = params;
+                        forward_to_frontend(request, app, state)
+                    }
+                    Err(error) => ControlResponse::failure(
+                        request.id,
+                        "internal_error",
+                        format!("serialize pentest-run parameters: {error}"),
+                    ),
+                },
+                Err((code, message)) => ControlResponse::failure(request.id, code, message),
+            }
+        }
         _ => ControlResponse::failure(request.id, "unknown_method", "unknown control method"),
     }
+}
+
+/// Bound and clean a pentest-run request before it reaches the UI. The frontend
+/// re-validates the category and enforces the pentest scope; this just rejects
+/// an empty or absurdly long target/category so nothing junk is forwarded.
+fn validate_pentest_run_params(
+    params: PentestRunParams,
+) -> Result<PentestRunParams, (&'static str, String)> {
+    const MAX_TARGET_LEN: usize = 2048;
+    const MAX_CATEGORY_LEN: usize = 64;
+    let target = params.target.trim().to_string();
+    if target.is_empty() {
+        return Err(("invalid_params", "pentest target is required".to_string()));
+    }
+    if target.len() > MAX_TARGET_LEN {
+        return Err(("invalid_params", "pentest target is too long".to_string()));
+    }
+    let category = params.category.trim().to_string();
+    if category.len() > MAX_CATEGORY_LEN {
+        return Err((
+            "invalid_params",
+            "pentest category is too long".to_string(),
+        ));
+    }
+    Ok(PentestRunParams { target, category })
 }
 
 fn validate_open_params(
