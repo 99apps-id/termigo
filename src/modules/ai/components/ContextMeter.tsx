@@ -1,4 +1,5 @@
-import { getModelContextLimit } from "../config";
+import { usePreferencesStore } from "@/modules/settings/preferences";
+import { resolveModelContextLimit } from "../config";
 import { useChatStore } from "../store/chatStore";
 
 /** Compact live context meter shown next to the agent controls. Shows how full
@@ -14,10 +15,13 @@ export function ContextMeter() {
   const tokens = useChatStore((s) => s.agentMeta.tokens);
   const modelId = useChatStore((s) => s.selectedModelId);
 
+  const endpoints = usePreferencesStore((s) => s.customEndpoints);
+  const compatCtx = usePreferencesStore((s) => s.openaiCompatibleContextLimit);
+
   const used = lastInput;
   if (used <= 0) return null;
 
-  const limit = getModelContextLimit(modelId);
+  const limit = resolveModelContextLimit(modelId, endpoints, compatCtx);
   const pct = Math.min(100, Math.round((used / limit) * 100));
   const left = Math.max(0, 100 - pct);
   // Three tiers, like Claude's context indicator: comfortable (accent), getting

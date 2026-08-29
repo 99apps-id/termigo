@@ -860,6 +860,29 @@ export function getModelContextLimit(
   return MODEL_CONTEXT_LIMITS[modelId] ?? 128_000;
 }
 
+/**
+ * Context limit for display, resolving a custom endpoint's own `contextLimit`.
+ *
+ * `getModelContextLimit` needs the override passed in; UI callers (the context
+ * meter, the mini-window) only hold the model id, so a custom endpoint like
+ * StepFun kept showing the 128k fallback even when its saved limit was 256k.
+ * This looks the endpoint up so the display matches what the agent actually
+ * uses. The legacy single OpenAI-compatible provider falls back to its own pref.
+ */
+export function resolveModelContextLimit(
+  modelId: string | undefined,
+  endpoints: readonly CustomEndpoint[],
+  openaiCompatibleContextLimit?: number,
+): number {
+  if (modelId && isCompatModelId(modelId)) {
+    const ep = endpoints.find(
+      (e) => e.id === endpointIdFromCompatModel(modelId),
+    );
+    return getModelContextLimit(modelId, ep?.contextLimit);
+  }
+  return getModelContextLimit(modelId, openaiCompatibleContextLimit);
+}
+
 export type ModelPricing = {
   input: number;
   output: number;

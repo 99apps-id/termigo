@@ -32,8 +32,8 @@ import { useEffect, useMemo } from "react";
 import {
   estimateCost,
   getModel,
-  getModelContextLimit,
   type ModelId,
+  resolveModelContextLimit,
 } from "../config";
 import type { ResizeDir } from "../lib/miniWindowGeometry";
 import type { SessionMeta } from "../lib/sessions";
@@ -348,7 +348,12 @@ function ContextIndicator({ messages }: { messages: UIMessage[] }) {
   const openaiCompatibleContextLimit = usePreferencesStore(
     (s) => s.openaiCompatibleContextLimit,
   );
-  const max = getModelContextLimit(modelId, openaiCompatibleContextLimit);
+  const customEndpoints = usePreferencesStore((s) => s.customEndpoints);
+  const max = resolveModelContextLimit(
+    modelId,
+    customEndpoints,
+    openaiCompatibleContextLimit,
+  );
   const modelLabel = useMemo(() => {
     try {
       return getModel(modelId as ModelId).label;

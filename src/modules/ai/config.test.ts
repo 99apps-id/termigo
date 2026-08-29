@@ -1,18 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
-  MAX_AGENT_STEPS,
-  stepBudgetForRound,
+  type CustomEndpoint,
   compatModelIdForEndpoint,
   endpointIdFromCompatModel,
   getModelContextLimit,
   isCompatModelId,
+  MAX_AGENT_STEPS,
+  MODEL_PRICING,
   migrateLegacyCompatEndpoint,
   modelKeepsReasoning,
   modelSupportsTemperature,
   modelUsesReasoningTokens,
-  MODEL_PRICING,
   resolveModel,
-  type CustomEndpoint,
+  resolveModelContextLimit,
+  stepBudgetForRound,
 } from "./config";
 
 const endpoint: CustomEndpoint = {
@@ -100,14 +101,19 @@ describe("current model pricing", () => {
     ["claude-fable-5", 10, 50, 1],
     ["claude-sonnet-5", 3, 15, 0.3],
     ["grok-4.5", 2, 6, 0.5],
-  ] as const)("uses the published token pricing for %s", (modelId, input, output, cacheRead) => {
-    expect(MODEL_PRICING[modelId]).toEqual({ input, output, cacheRead });
-  });
+  ] as const)(
+    "uses the published token pricing for %s",
+    (modelId, input, output, cacheRead) => {
+      expect(MODEL_PRICING[modelId]).toEqual({ input, output, cacheRead });
+    },
+  );
 });
 
 describe("modelKeepsReasoning", () => {
   it("keeps reasoning for compat endpoints (freeform provider)", () => {
-    const info = resolveModel(compatModelIdForEndpoint(endpoint.id), [endpoint]);
+    const info = resolveModel(compatModelIdForEndpoint(endpoint.id), [
+      endpoint,
+    ]);
     expect(modelKeepsReasoning(info)).toBe(true);
   });
 
@@ -147,9 +153,12 @@ describe("model sampling capabilities", () => {
     ["anthropic", "claude-sonnet-5"],
     ["xai", "grok-4.5"],
     ["groq", "openai/gpt-oss-20b"],
-  ] as const)("allocates a reasoning output budget for %s/%s", (provider, modelId) => {
-    expect(modelUsesReasoningTokens(provider, modelId)).toBe(true);
-  });
+  ] as const)(
+    "allocates a reasoning output budget for %s/%s",
+    (provider, modelId) => {
+      expect(modelUsesReasoningTokens(provider, modelId)).toBe(true);
+    },
+  );
 });
 
 describe("migrateLegacyCompatEndpoint", () => {
@@ -201,5 +210,27 @@ describe("stepBudgetForRound", () => {
         stepBudgetForRound(r - 1),
       );
     }
+  });
+});
+
+describe("resolveModelContextLimit", () => {
+  it("uses a custom endpoint's own contextLimit for its compat model", () => {
+    const eps = [
+      {
+        id: "stepfun",
+        name: "StepFun",
+        baseURL: "x",
+        modelId: "step-3",
+        contextLimit: 256_000,
+      },
+    ];
+    const mid = compatModelIdForEndpoint("stepfun");
+    // Without endpoints it falls back to 128k; with them it must be the saved 256k.
+    expect(getModelContextLimit(mid)).toBe(128_000);
+    expect(resolveModelContextLimit(mid, eps)).toBe(256_000);
+  });
+
+  it("leaves a first-class model at its configured limit", () => {
+    expect(resolveModelContextLimit("claude-opus-4-7", [])).toBe(1_000_000);
   });
 });
