@@ -140,6 +140,11 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   automatically — so a long task keeps going instead of stopping mid-way. A
   per-session throttle stops it looping when compaction can never fit, and a
   Try again button stays as the manual fallback.
+- **It survives a dropped connection or an exhausted quota.** If the internet
+  drops, the agent pauses and resumes automatically when you're back online; if
+  the provider's quota or credits run out (or a rate limit is hit), the run is
+  preserved so you can top up or wait and click Try again to continue exactly
+  where it left off.
 - **You can read the request, not infer it.** Turn on `Capture requests`
   (Settings → Agents → Diagnostics) and an inspector appears in the AI bar
   holding each request as assembled: the system prompt, the message history

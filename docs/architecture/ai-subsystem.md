@@ -152,6 +152,14 @@ A long agentic task that outgrows the model's context window used to die mid-way
 - **Auto-resume.** In `chatRuntime` `onError`, an overflow is recorded and the SAME run is resumed automatically (`resumeRun`) so the task keeps going instead of stopping. A per-session throttle (`overflowAutoResumeAt`, 60s) prevents a loop when compaction can never fit (e.g. the system prompt + tool schemas alone exceed the window). The **Try again** button in `AiChat.tsx` remains as the manual fallback for a second overflow.
 - **`config.ts`** keeps the configured limit as the real cap (DeepSeek V4 is 1M). If a specific endpoint rejects lower, the learning layer scales the effective budget down from the observed overshoot — so the config is not a guess.
 
+## Transient provider-error recovery
+
+A run can also stop for reasons that are not the model's fault — the internet drops, the provider's quota runs out, or a rate limit is hit. These are recoverable: once the condition clears, the same run should continue, not start over. `chatRuntime` `onError` classifies them:
+
+- **Connectivity loss** (`lib/errors.ts` `isConnectivityError`: unreachable host / tcp connect / fetch failed / `ENETUNREACH` / connection refused / DNS) marks the run resumable and adds the session to `pendingReconnectSessions`; a `window` `online` listener then resumes it automatically when the network is back. A manual **Try again** also works.
+- **Quota / credit exhaustion** (`isQuotaError`: `insufficient_quota`, quota, credit, 402) and **rate limits** (`isRateLimitError`: rate_limit, 429, throttle) are recoverable but have no event to watch for — the user tops up or waits, then clicks **Try again**; the task/todo state is preserved.
+- **Resume always sends.** `sendParts` keys off `agentMeta.status === "error"` so a resume after a failed run is sent, never queued: the AI SDK status can look `submitted` after an error, which would queue the `RESUME_PROMPT` and leave "Try again" doing nothing.
+
 ## Scheduled runs
 
 `lib/scheduler.ts` lets the user queue an agent prompt to run on a schedule. The pure helpers (`parseScheduleWhen`, `computeNextDueAt`, `dueTasks`) are unit-tested; `startScheduler`/`stopScheduler` run a 15-second tick that lazily imports `chatStore`, `sessionDirectiveStore`, and `chatRuntime` inside the tick so the AI stack stays out of the eager bundle.
