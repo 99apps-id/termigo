@@ -19,6 +19,7 @@ import {
   type OsNotificationResult,
   testAgentOsNotification,
 } from "@/modules/agents/lib/notify";
+import { LANGUAGES, useT } from "@/modules/i18n";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import type { ThemePref } from "@/modules/settings/store";
 import {
@@ -28,6 +29,7 @@ import {
   setAutostart,
   setDefaultWorkspaceEnv,
   setExplorerGitDecorations,
+  setLanguage,
   setPersistTerminals,
   setRestoreWindowState,
   setShowHidden,
@@ -101,6 +103,8 @@ type NotificationTestState =
 
 export function GeneralSection() {
   const { mode, setMode } = useTheme();
+  const t = useT();
+  const language = usePreferencesStore((s) => s.language);
 
   const autostart = usePreferencesStore((s) => s.autostart);
   const restoreWindowState = usePreferencesStore((s) => s.restoreWindowState);
@@ -188,9 +192,13 @@ export function GeneralSection() {
       });
       if (!target) return; // user cancelled the picker
       await invoke<void>("fs_write_file", { path: target, content: text });
-      toast.success("Settings exported");
+      toast.success(t("settings.backup.exported"));
     } catch (e) {
-      toast.error(`Export failed: ${e instanceof Error ? e.message : e}`);
+      toast.error(
+        t("settings.backup.exportFailed", {
+          error: e instanceof Error ? e.message : String(e),
+        }),
+      );
     } finally {
       setBackupBusy(false);
     }
@@ -210,12 +218,16 @@ export function GeneralSection() {
         { path },
       );
       if (result.kind !== "text" || result.content === undefined) {
-        throw new Error("That file is not a UTF-8 text file.");
+        throw new Error(t("settings.backup.notText"));
       }
       const count = await importSettingsJson(result.content);
-      toast.success(`Restored ${count} setting${count === 1 ? "" : "s"}`);
+      toast.success(t("settings.backup.restored", { count }));
     } catch (e) {
-      toast.error(`Restore failed: ${e instanceof Error ? e.message : e}`);
+      toast.error(
+        t("settings.backup.restoreFailed", {
+          error: e instanceof Error ? e.message : String(e),
+        }),
+      );
     } finally {
       setBackupBusy(false);
     }
@@ -590,11 +602,35 @@ export function GeneralSection() {
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label>Startup</Label>
+        <Label>{t("settings.general.language")}</Label>
+        <SettingRow
+          title={t("settings.general.language")}
+          description={t("settings.general.languageDesc")}
+        >
+          <Select
+            value={language}
+            onValueChange={(v) => void setLanguage(v as typeof language)}
+          >
+            <SelectTrigger size="sm" className="w-44">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {LANGUAGES.map((l) => (
+                <SelectItem key={l.id} value={l.id}>
+                  {l.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </SettingRow>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <Label>{t("settings.general.startup")}</Label>
         <div className="flex flex-col gap-2">
           <SettingRow
-            title="Launch at login"
-            description="Open Termigo automatically when you sign in."
+            title={t("settings.general.launchAtLogin")}
+            description={t("settings.general.launchAtLoginDesc")}
           >
             <Switch
               checked={autostart}
@@ -602,8 +638,8 @@ export function GeneralSection() {
             />
           </SettingRow>
           <SettingRow
-            title="Restore window position & size"
-            description="Reopen the main window where you left it. Applies on next launch."
+            title={t("settings.general.restoreWindow")}
+            description={t("settings.general.restoreWindowDesc")}
           >
             <Switch
               checked={restoreWindowState}
@@ -614,10 +650,10 @@ export function GeneralSection() {
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label>Backup &amp; Restore</Label>
+        <Label>{t("settings.general.backupHeading")}</Label>
         <SettingRow
-          title="Settings backup"
-          description="Export all preferences to a JSON file, or restore them on another machine. Secrets (API keys, SSH credentials) stay in the OS keychain and are not included."
+          title={t("settings.general.backupTitle")}
+          description={t("settings.general.backupDesc")}
         >
           <div className="flex items-center gap-2">
             <Button
@@ -627,7 +663,7 @@ export function GeneralSection() {
               disabled={backupBusy}
               onClick={() => void importSettings()}
             >
-              Restore…
+              {t("common.restore")}
             </Button>
             <Button
               type="button"
@@ -636,7 +672,7 @@ export function GeneralSection() {
               disabled={backupBusy}
               onClick={() => void exportSettings()}
             >
-              Export…
+              {t("common.export")}
             </Button>
           </div>
         </SettingRow>
