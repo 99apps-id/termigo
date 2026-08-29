@@ -20,12 +20,15 @@ export const termigoDefault: Theme = {
         secondary: "#efeafd",
         secondaryForeground: "#2a2350",
         muted: "#f1eefb",
-        mutedForeground: "#6a6490",
+        // Darkened from #6a6490: the old value left small/secondary text faint
+        // on the near-white stage (sub-AA once opacity variants stack).
+        mutedForeground: "#575081",
         accent: "#e9e2fb",
         accentForeground: "#2a2350",
         destructive: "#dc2626",
-        border: "#e3ddf3",
-        input: "#e3ddf3",
+        // Darkened from #e3ddf3 so outline buttons and inputs have visible edges.
+        border: "#d0c8e6",
+        input: "#d0c8e6",
         ring: "#14b8a6",
         sidebar: "#f4f0fc",
         sidebarForeground: "#1d1b2e",
@@ -33,7 +36,7 @@ export const termigoDefault: Theme = {
         sidebarPrimaryForeground: "#ffffff",
         sidebarAccent: "#e9e2fb",
         sidebarAccentForeground: "#2a2350",
-        sidebarBorder: "#e3ddf3",
+        sidebarBorder: "#d0c8e6",
         sidebarRing: "#14b8a6",
       },
     },

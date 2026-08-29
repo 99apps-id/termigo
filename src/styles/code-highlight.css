@@ -3,23 +3,26 @@
  * Light/dark split through the existing `.dark` variant. */
 
 :root {
+  /* Light-mode tokens darkened where lightness was >= 0.5: on the near-white
+     code background those read too faint for small code text. Hue/chroma kept,
+     so the syntax stays colorful — just legible. Dark mode is unchanged. */
   --tok-keyword: oklch(0.45 0.15 270);
   --tok-name: oklch(0.32 0.05 250);
-  --tok-type: oklch(0.55 0.13 200);
+  --tok-type: oklch(0.5 0.13 200);
   --tok-property: oklch(0.42 0.13 25);
-  --tok-operator: oklch(0.55 0.04 250);
-  --tok-comment: oklch(0.55 0.02 250);
-  --tok-string: oklch(0.48 0.13 150);
-  --tok-number: oklch(0.52 0.14 50);
-  --tok-bool: oklch(0.52 0.15 30);
-  --tok-regexp: oklch(0.5 0.15 0);
-  --tok-meta: oklch(0.5 0.1 290);
+  --tok-operator: oklch(0.48 0.04 250);
+  --tok-comment: oklch(0.5 0.02 250);
+  --tok-string: oklch(0.46 0.13 150);
+  --tok-number: oklch(0.48 0.14 50);
+  --tok-bool: oklch(0.48 0.15 30);
+  --tok-regexp: oklch(0.47 0.15 0);
+  --tok-meta: oklch(0.46 0.1 290);
   --tok-tag: oklch(0.45 0.16 25);
-  --tok-attr: oklch(0.5 0.14 70);
-  --tok-punctuation: oklch(0.5 0.02 250);
+  --tok-attr: oklch(0.47 0.14 70);
+  --tok-punctuation: oklch(0.46 0.02 250);
   --tok-heading: oklch(0.42 0.13 25);
-  --tok-link: oklch(0.5 0.15 240);
-  --tok-invalid: oklch(0.55 0.22 25);
+  --tok-link: oklch(0.46 0.15 240);
+  --tok-invalid: oklch(0.52 0.22 25);
 }
 
 :is(.dark *) {
