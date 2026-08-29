@@ -126,6 +126,7 @@
     "@vitejs/plugin-react": "^6.0.5",
     "babel-plugin-react-compiler": "^1.0.0",
     "knip": "^6.32.1",
+    "prettier": "^3.9.5",
     "react-compiler-healthcheck": "^1.0.0",
     "react-scan": "^0.5.7",
     "rollup-plugin-visualizer": "^7.0.1",

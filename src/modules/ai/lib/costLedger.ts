@@ -62,6 +62,60 @@ export function entriesForWorkspace(
   return entries.filter((e) => e.workspaceRoot === workspaceRoot);
 }
 
+export type ModelSpend = {
+  modelId: string;
+  provider: string;
+  costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
+  runs: number;
+};
+
+/** Roll the ledger up per model, most-expensive first — the "where did the
+ *  money go" breakdown a cost panel leads with. */
+export function aggregateByModel(entries: readonly CostEntry[]): ModelSpend[] {
+  const byModel = new Map<string, ModelSpend>();
+  for (const e of entries) {
+    const cur = byModel.get(e.modelId) ?? {
+      modelId: e.modelId,
+      provider: e.provider,
+      costUsd: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedTokens: 0,
+      runs: 0,
+    };
+    cur.costUsd += e.costUsd;
+    cur.inputTokens += e.inputTokens;
+    cur.outputTokens += e.outputTokens;
+    cur.cachedTokens += e.cachedTokens;
+    cur.runs += 1;
+    byModel.set(e.modelId, cur);
+  }
+  return [...byModel.values()].sort((a, b) => b.costUsd - a.costUsd);
+}
+
+export type DaySpend = { day: string; costUsd: number; runs: number };
+
+/** Roll the ledger up per calendar day, most-recent first — the last `limit`
+ *  days for a compact spend-over-time list. */
+export function aggregateByDay(
+  entries: readonly CostEntry[],
+  limit = 14,
+): DaySpend[] {
+  const byDay = new Map<string, DaySpend>();
+  for (const e of entries) {
+    const cur = byDay.get(e.day) ?? { day: e.day, costUsd: 0, runs: 0 };
+    cur.costUsd += e.costUsd;
+    cur.runs += 1;
+    byDay.set(e.day, cur);
+  }
+  return [...byDay.values()]
+    .sort((a, b) => (a.day < b.day ? 1 : -1))
+    .slice(0, limit);
+}
+
 const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
 
 export async function loadCostLedger(): Promise<CostEntry[]> {

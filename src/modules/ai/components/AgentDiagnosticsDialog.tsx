@@ -5,19 +5,21 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { useMemo, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { type ReactNode, useMemo, useState } from "react";
 import { useChatStore } from "../store/chatStore";
-import { useDebugStore, type DebugCapture } from "../store/debugStore";
+import { type DebugCapture, useDebugStore } from "../store/debugStore";
+import { CostPanel } from "./CostPanel";
 import { RunSummary } from "./RunDiagnosticsDialog";
 import { RunJourney } from "./RunJourney";
 
-type Tab = "run" | "requests" | "context" | "journey";
+type Tab = "run" | "requests" | "context" | "cost" | "journey";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "run", label: "Run" },
   { id: "requests", label: "Requests" },
   { id: "context", label: "Context" },
+  { id: "cost", label: "Cost" },
   { id: "journey", label: "Journey" },
 ];
 
@@ -120,6 +122,8 @@ export function AgentDiagnosticsDialog({
             )
           ) : tab === "journey" ? (
             <RunJourney />
+          ) : tab === "cost" ? (
+            <CostPanel />
           ) : (
             <ContextView
               modelId={lastRun?.modelId ?? null}

@@ -1,8 +1,8 @@
 pub mod modules;
 
 use modules::{
-    agent, browser, control, extensions, fs, git, history, lsp, mcp, net, pty, secrets, shell,
-    sql, ssh, workspace,
+    agent, browser, chatgpt_auth, control, extensions, fs, git, history, lsp, mcp, net, pty,
+    secrets, shell, sql, ssh, workspace,
 };
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -412,6 +412,8 @@ pub fn run() {
             browser::browser_embed_eval,
             browser::browser_embed_screenshot,
             browser::browser_embed_close,
+            chatgpt_auth::chatgpt_auth_login,
+            chatgpt_auth::chatgpt_auth_refresh,
             sql::sql_run,
             agent::agent_enable_hooks,
             agent::agent_locate_command,

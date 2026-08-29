@@ -170,6 +170,8 @@ export function EditorSection() {
 
 const FORMATTER_OPTIONS: EditorFormatter[] = [
   "lsp",
+  // Bundled Prettier — formats web files in-process, no external install.
+  "prettier-builtin",
   ...(Object.keys(FORMATTERS) as EditorFormatter[]),
   "custom",
 ];

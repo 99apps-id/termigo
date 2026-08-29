@@ -11,6 +11,8 @@ import {
   type UIMessage,
 } from "ai";
 import {
+  CHATGPT_BASE_URL,
+  CHATGPT_HEADERS,
   type CustomEndpoint,
   DEFAULT_MODEL_ID,
   endpointIdFromCompatModel,
@@ -32,6 +34,7 @@ import { useDebugStore } from "../store/debugStore";
 import { useTrajectoryStore } from "../store/trajectoryStore";
 import { formatInvariantsBlock } from "../tools/invariant";
 import { buildTools, type ToolContext } from "../tools/tools";
+import { getChatGptAccess } from "./chatgptAuth";
 import { compactModelMessagesDetailed, estimateTokens } from "./compact";
 import { evictObsoleteToolOutputs } from "./contextEviction";
 import { effectiveContextLimit } from "./contextLimitLearning";
@@ -276,6 +279,31 @@ export async function buildLanguageModel(
       })(resolvedModelId);
       break;
     }
+    case "chatgpt": {
+      const { createOpenAI } = await import("@ai-sdk/openai");
+      const auth = await getChatGptAccess();
+      if (!auth) {
+        throw new Error(
+          "Not signed in with a ChatGPT account. Open Settings → Models and sign in, or pick an API-key model.",
+        );
+      }
+      // `.responses()`: this backend speaks the Responses API only. `apiFetch`
+      // proxies through Rust, which is REQUIRED here — chatgpt.com sends no CORS
+      // headers for this route and the webview refuses to send `originator`.
+      // Returned, NOT cached: the access token rotates on refresh, so a cached
+      // model would keep serving an expired token until restart.
+      return createOpenAI({
+        baseURL: CHATGPT_BASE_URL,
+        apiKey: auth.accessToken,
+        headers: {
+          ...CHATGPT_HEADERS,
+          // Omitted rather than sent empty when the claim was missing: an empty
+          // header reads as "account none" and 401s less clearly than absence.
+          ...(auth.accountId ? { "chatgpt-account-id": auth.accountId } : {}),
+        },
+        fetch: apiFetch,
+      }).responses(resolvedModelId);
+    }
     default: {
       const _exhaustive: never = provider;
       throw new Error(`Unsupported provider: ${_exhaustive as ProviderId}`);
@@ -321,6 +349,10 @@ export function buildConfiguredLanguageModel(
   }
   const m = resolveModel(modelId);
   let resolvedId: string = m.id;
+  // The chatgpt-* ids are internal (they avoid colliding with the same-named
+  // key-billed OpenAI models); the Codex backend expects the bare model name.
+  if (m.id === "chatgpt-codex") resolvedId = "gpt-5.3-codex";
+  else if (m.id === "chatgpt-codex-mini") resolvedId = "gpt-5.3-codex-mini";
   if (m.id === "lmstudio-local") {
     if (!local.lmstudioModelId?.trim()) {
       throw new Error(

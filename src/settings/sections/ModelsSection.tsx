@@ -18,10 +18,6 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import {
-  getBindingTokens,
-  SHORTCUTS,
-} from "@/modules/shortcuts/shortcuts";
-import {
   type CustomEndpoint,
   compatModelIdForEndpoint,
   DEFAULT_MODEL_ID,
@@ -41,6 +37,11 @@ import {
   WHISPERCPP_DEFAULT_BASE_URL,
 } from "@/modules/ai/config";
 import {
+  ENDPOINT_PRESETS,
+  type EndpointPreset,
+  presetToEndpoint,
+} from "@/modules/ai/lib/endpointPresets";
+import {
   type CustomEndpointKeys,
   clearCustomEndpointKey,
   clearKey,
@@ -51,11 +52,6 @@ import {
 } from "@/modules/ai/lib/keyring";
 import { useChatStore } from "@/modules/ai/store/chatStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
-import {
-  ENDPOINT_PRESETS,
-  presetToEndpoint,
-  type EndpointPreset,
-} from "@/modules/ai/lib/endpointPresets";
 import {
   type AutocompleteTrigger,
   emitKeysChanged,
@@ -81,6 +77,7 @@ import {
   setSttProvider,
   setWhispercppBaseURL,
 } from "@/modules/settings/store";
+import { getBindingTokens, SHORTCUTS } from "@/modules/shortcuts/shortcuts";
 import {
   Add01Icon,
   ArrowDown01Icon,
@@ -94,6 +91,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useMemo, useState } from "react";
+import { ChatGptAccountCard } from "../components/ChatGptAccountCard";
 import { ProviderIcon } from "../components/ProviderIcon";
 import { ProviderKeyCard } from "../components/ProviderKeyCard";
 import { SectionHeader } from "../components/SectionHeader";
@@ -458,6 +456,9 @@ export function ModelsSection() {
                 onRemove={() => removeCustomEndpoint(ep.id)}
               />
             ))}
+            {/* Sign in with a ChatGPT account (subscription, no API key). Always
+                shown so it is discoverable without an "add provider" step. */}
+            <ChatGptAccountCard />
           </div>
         )}
       </div>

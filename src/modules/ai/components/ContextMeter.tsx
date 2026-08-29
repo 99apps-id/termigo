@@ -1,5 +1,5 @@
-import { useChatStore } from "../store/chatStore";
 import { getModelContextLimit } from "../config";
+import { useChatStore } from "../store/chatStore";
 
 /** Compact live context meter shown next to the agent controls. Shows how full
  *  the model's context window is RIGHT NOW - the input of the most recent
@@ -19,23 +19,40 @@ export function ContextMeter() {
 
   const limit = getModelContextLimit(modelId);
   const pct = Math.min(100, Math.round((used / limit) * 100));
-  // The accent orange, shared with the composer glow and send/stop button; only
-  // an over-90% window turns red as a warning.
-  const fill = pct > 90 ? "var(--destructive)" : "var(--composer-accent)";
+  const left = Math.max(0, 100 - pct);
+  // Three tiers, like Claude's context indicator: comfortable (accent), getting
+  // full (amber), nearly out (red). The last is a real warning — the next step
+  // may not fit and force a compaction.
+  const tier = pct > 90 ? "danger" : pct > 75 ? "warn" : "ok";
+  const fill =
+    tier === "danger"
+      ? "var(--destructive)"
+      : tier === "warn"
+        ? "#d1863a"
+        : "var(--composer-accent)";
+  const pctColor =
+    tier === "danger"
+      ? "text-destructive"
+      : tier === "warn"
+        ? "text-amber-500"
+        : "text-foreground";
 
   return (
     <button
       type="button"
-      className="flex h-6 items-center gap-1.5 rounded-md border border-border/60 bg-card px-2 text-[11px] text-muted-foreground"
-      title={`Context window: ${used.toLocaleString()} / ${limit.toLocaleString()} tokens · ${pct}% (last request)\
+      className="flex h-6 items-center gap-1.5 rounded-md border border-border/60 bg-card pl-1.5 pr-2 text-[11px] text-muted-foreground"
+      title={`Context window: ${used.toLocaleString()} / ${limit.toLocaleString()} tokens · ${pct}% used, ${left}% left (last request)\
 cached ${lastCached.toLocaleString()} · run output ${tokens.outputTokens.toLocaleString()}`}
     >
-      <span className="tabular-nums">{fmtK(used)} / {fmtK(limit)}</span>
-      <span className="h-1.5 w-10 overflow-hidden rounded-full bg-muted">
+      <span className="h-2 w-16 overflow-hidden rounded-full bg-muted">
         <span
           className="block h-full transition-all"
           style={{ width: `${pct}%`, backgroundColor: fill }}
         />
+      </span>
+      <span className={`font-medium tabular-nums ${pctColor}`}>{pct}%</span>
+      <span className="tabular-nums text-muted-foreground/80">
+        {fmtK(used)}/{fmtK(limit)}
       </span>
     </button>
   );

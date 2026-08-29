@@ -13,7 +13,8 @@ export type ProviderId =
   | "openai-compatible"
   | "lmstudio"
   | "mlx"
-  | "ollama";
+  | "ollama"
+  | "chatgpt";
 
 export type ProviderInfo = {
   id: ProviderId;
@@ -118,6 +119,17 @@ export const PROVIDERS: readonly ProviderInfo[] = [
     keyringAccount: "",
     keyPrefix: null,
     consoleUrl: "https://ollama.com/download",
+  },
+  {
+    // Signed in with a ChatGPT account, not a pasted key. `keyringAccount` is
+    // still where the credential lives (the whole OAuth token set as JSON), so
+    // the keychain stays the one home for secrets — but nothing types a key in,
+    // which is why `providerNeedsKey` (KEYLESS_PROVIDERS) excludes it.
+    id: "chatgpt",
+    label: "ChatGPT account",
+    keyringAccount: "chatgpt-oauth",
+    keyPrefix: null,
+    consoleUrl: "https://chatgpt.com/",
   },
 ] as const;
 
@@ -631,7 +643,44 @@ export const MODELS = [
     description: "Local models via Ollama.",
     capabilities: { intelligence: 3, speed: 3, cost: 5 },
   },
+  // ── ChatGPT account (subscription; OAuth sign-in, no API key) ──────────────
+  // Routed to OpenAI's Codex backend (CHATGPT_BASE_URL), so a ChatGPT Plus/Pro
+  // subscription pays for the turn rather than API credits. INTERNAL ids
+  // (`chatgpt-*`) so they never collide with the key-billed "openai" models of
+  // the same name; buildLanguageModel maps them to the real backend id.
+  {
+    id: "chatgpt-codex",
+    provider: "chatgpt",
+    label: "GPT-5.3 Codex",
+    hint: "Coding",
+    description: "Subscription coding model (ChatGPT Plus/Pro).",
+    capabilities: { intelligence: 5, speed: 3, cost: 5 },
+    tags: ["reasoning", "tools", "coding"],
+    supportsTemperature: false,
+  },
+  {
+    id: "chatgpt-codex-mini",
+    provider: "chatgpt",
+    label: "GPT-5.3 Codex mini",
+    hint: "Fast",
+    description: "Fast subscription coding model (ChatGPT Plus/Pro).",
+    capabilities: { intelligence: 4, speed: 5, cost: 5 },
+    tags: ["tools", "coding"],
+    supportsTemperature: false,
+  },
 ] as const satisfies readonly ModelInfo[];
+
+// Routed to OpenAI's Codex backend — NOT api.openai.com (that bills API
+// credits; this draws on the ChatGPT subscription). Best-effort against a
+// private endpoint OpenAI documents for its own Codex client; it can change.
+export const CHATGPT_BASE_URL = "https://chatgpt.com/backend-api/codex";
+// The endpoint gates on these. `originator` identifies the caller as the Codex
+// client; `OpenAI-Beta` opts into the Responses shape. The per-request
+// `chatgpt-account-id` is added in buildLanguageModel from the signed-in token.
+export const CHATGPT_HEADERS: Record<string, string> = {
+  originator: "codex_cli_rs",
+  "OpenAI-Beta": "responses=experimental",
+};
 
 export type ModelId = (typeof MODELS)[number]["id"];
 
@@ -748,6 +797,8 @@ export const DEFAULT_MODEL_ID: ModelId = "gpt-5.4-mini";
  *  context-usage indicator in the AI mini-window header. Conservative
  *  estimates — actual provider limits may shift. */
 export const MODEL_CONTEXT_LIMITS: Record<string, number> = {
+  "chatgpt-codex": 400_000,
+  "chatgpt-codex-mini": 400_000,
   "gpt-5.6": 1_050_000,
   "gpt-5.6-terra": 1_050_000,
   "gpt-5.6-luna": 1_050_000,
@@ -875,6 +926,7 @@ export const KEYLESS_PROVIDERS: readonly ProviderId[] = [
   "lmstudio",
   "mlx",
   "ollama",
+  "chatgpt",
   "openai-compatible",
 ] as const;
 

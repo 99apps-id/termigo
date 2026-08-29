@@ -53,6 +53,8 @@ import {
   resolveFormatter,
   runExternalFormatter,
 } from "./lib/externalFormat";
+import { languageFromPath } from "./lib/formatters/lang";
+import { formatWithPrettier } from "./lib/formatters/prettier";
 import { detectIndentUnit } from "./lib/indent";
 import { type LanguageResult, resolveLanguage } from "./lib/languageResolver";
 import { FORCE_READ_LIMIT, useDocument } from "./lib/useDocument";
@@ -211,13 +213,54 @@ export const EditorPane = memo(
               "No active language server for this file. Enable one in the statusbar, or pick an external formatter in Settings.",
           });
         }
+      } else if (
+        prefs.editorFormatOnSave &&
+        formatter === "prettier-builtin" &&
+        view
+      ) {
+        // Bundled Prettier: format in-process (no external binary) and apply
+        // to the buffer BEFORE the save, so the formatted text is what gets
+        // written. A failure never blocks the save — it falls through.
+        try {
+          const before = view.state.doc.toString();
+          const lang = languageFromPath(pathRef.current);
+          const formatted = lang
+            ? await formatWithPrettier({
+                language: lang,
+                content: before,
+                filepath: pathRef.current,
+              })
+            : before;
+          // The user may have typed (or the view remounted) during the await;
+          // applying a stale result would clobber those edits.
+          const live = cmRef.current?.view;
+          if (
+            live === view &&
+            live.state.doc.toString() === before &&
+            formatted !== before &&
+            formatted.trim() !== ""
+          ) {
+            applyFormattedContent(view, formatted);
+          }
+        } catch (e) {
+          if (!warnedNoFormatRef.current) {
+            warnedNoFormatRef.current = true;
+            toast.error("Prettier format failed", {
+              description: String(e).slice(0, 300),
+            });
+          }
+        }
       }
       // Snapshot before save: edits typed during the formatter round-trip
       // must not be clobbered by the disk read-back.
       const docAtSave = view?.state.doc;
       const saved = await saveRef.current();
       if (!saved) return;
-      if (prefs.editorFormatOnSave && formatter !== "lsp") {
+      if (
+        prefs.editorFormatOnSave &&
+        formatter !== "lsp" &&
+        formatter !== "prettier-builtin"
+      ) {
         const error = await runExternalFormatter(
           formatter,
           pathRef.current,
@@ -624,7 +667,8 @@ export const EditorPane = memo(
         );
       }
 
-      const canForce = doc.status === "toolarge" && doc.size <= FORCE_READ_LIMIT;
+      const canForce =
+        doc.status === "toolarge" && doc.size <= FORCE_READ_LIMIT;
       return (
         <div className="flex h-full flex-col items-center justify-center gap-1 px-6 text-center">
           <div className="text-sm text-foreground">

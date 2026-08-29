@@ -23,6 +23,11 @@ export function basename(path: string): string {
   return parts.length ? parts[parts.length - 1] : path;
 }
 
+/** Join a directory and a child segment with a single forward slash. */
+export function joinPath(dir: string, child: string): string {
+  return dir.endsWith("/") ? `${dir}${child}` : `${dir}/${child}`;
+}
+
 /** Parent directory in forward-slash form. Returns "" when there is no parent. */
 export function dirname(path: string): string {
   const parts = pathSegments(path);

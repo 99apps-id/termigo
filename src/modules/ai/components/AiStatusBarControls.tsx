@@ -10,10 +10,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { fmtShortcut, MOD_KEY } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
-import { ApprovalModeControl } from "./ApprovalModeControl";
-import { AgentDiagnosticsDialog } from "./AgentDiagnosticsDialog";
-import { ChangeReviewDialog } from "./ChangeReviewDialog";
-import { ContextMeter } from "./ContextMeter";
+import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   Add01Icon,
   AiBookIcon,
@@ -33,14 +30,14 @@ import {
   FlashIcon,
   GlobeIcon,
   GoogleGeminiIcon,
-  InspectCodeIcon,
   Grok02Icon,
-  MistralIcon,
+  InspectCodeIcon,
   Message01Icon,
   Mic01Icon,
+  MistralIcon,
   PlugIcon,
-  ServerStack01Icon,
   Search01Icon,
+  ServerStack01Icon,
   Settings01Icon,
   StarIcon,
   Tick01Icon,
@@ -54,19 +51,22 @@ import {
   getModel,
   isCompatModelId,
   MODELS,
-  providerNeedsKey,
-  PROVIDERS,
-  STT_PROVIDER_LABELS,
   type ModelCapabilities,
   type ModelId,
   type ModelInfo,
+  PROVIDERS,
   type ProviderId,
+  providerNeedsKey,
+  STT_PROVIDER_LABELS,
 } from "../config";
 import { ACCEPTED_FILES, useComposer } from "../lib/composer";
 import { costToday } from "../lib/costLedger";
 import { toggleFavoriteModel } from "../lib/modelPrefs";
 import { useChatStore } from "../store/chatStore";
-import { usePreferencesStore } from "@/modules/settings/preferences";
+import { AgentDiagnosticsDialog } from "./AgentDiagnosticsDialog";
+import { ApprovalModeControl } from "./ApprovalModeControl";
+import { ChangeReviewDialog } from "./ChangeReviewDialog";
+import { ContextMeter } from "./ContextMeter";
 
 const PROVIDER_ICON = {
   openai: ChatGptIcon,
@@ -82,6 +82,7 @@ const PROVIDER_ICON = {
   lmstudio: ComputerIcon,
   mlx: AppleIcon,
   ollama: ServerStack01Icon,
+  chatgpt: ChatGptIcon,
 } as const satisfies Record<ProviderId, typeof ChatGptIcon>;
 
 export function AiOpenButton({ onOpen }: { onOpen: () => void }) {
@@ -132,7 +133,7 @@ export function AiStatusBarControls() {
 
       {/* One surface for run metrics, the request inspector, and context state. */}
       <IconBtn
-        title="Agent diagnostics (run / requests / context)"
+        title="Agent diagnostics — run journey, checkpoints & restore, requests, context"
         onClick={() => setDiagOpen(true)}
       >
         <HugeiconsIcon icon={InspectCodeIcon} size={13} strokeWidth={2} />
@@ -172,7 +173,7 @@ export function AiStatusBarControls() {
           disabled={c.isBusy || c.voice.transcribing || !c.voice.hasKey}
           className={cn(
             c.voice.recording &&
-            "bg-destructive/10 text-destructive hover:bg-destructive/15",
+              "bg-destructive/10 text-destructive hover:bg-destructive/15",
           )}
         >
           {c.voice.recording ? (
@@ -282,10 +283,7 @@ function ModelDropdown() {
     // it is the correct trigger for this memo.
   }, [hasKeyFor]);
 
-  const allModels = useMemo(
-    () => [...MODELS, ...epModelInfos],
-    [epModelInfos],
-  );
+  const allModels = useMemo(() => [...MODELS, ...epModelInfos], [epModelInfos]);
 
   const COMPAT_PROVIDER_ID = "__compat__";
 
@@ -406,22 +404,21 @@ function ModelDropdown() {
               active={activeProvider === null}
               onClick={() => setActiveProvider(null)}
             />
-            {[...sortedProviders.configured, ...sortedProviders.unconfigured].map(
-              (p) => (
-                <ProviderPill
-                  key={p.id}
-                  icon={PROVIDER_ICON[p.id]}
-                  title={
-                    hasKeyFor(p.id)
-                      ? p.label
-                      : `${p.label} — not configured`
-                  }
-                  active={activeProvider === p.id}
-                  muted={!hasKeyFor(p.id)}
-                  onClick={() => setActiveProvider(p.id)}
-                />
-              ),
-            )}
+            {[
+              ...sortedProviders.configured,
+              ...sortedProviders.unconfigured,
+            ].map((p) => (
+              <ProviderPill
+                key={p.id}
+                icon={PROVIDER_ICON[p.id]}
+                title={
+                  hasKeyFor(p.id) ? p.label : `${p.label} — not configured`
+                }
+                active={activeProvider === p.id}
+                muted={!hasKeyFor(p.id)}
+                onClick={() => setActiveProvider(p.id)}
+              />
+            ))}
             {customEndpoints.length > 0 && (
               <ProviderPill
                 icon={PlugIcon}
@@ -463,10 +460,7 @@ function ModelDropdown() {
                   key={m.id}
                   model={m}
                   selected={m.id === selected}
-                  hasKey={
-                    isCompatModelId(m.id) ||
-                    hasKeyFor(m.provider)
-                  }
+                  hasKey={isCompatModelId(m.id) || hasKeyFor(m.provider)}
                   favorite={favoriteIds.includes(m.id)}
                   showProviderIcon={activeProvider === null}
                   onPick={() => {
@@ -559,11 +553,7 @@ function ProviderHeader({ providerId }: { providerId: ProviderId }) {
   if (!p) return null;
   return (
     <div className="flex items-center gap-1.5 px-3 pt-1 pb-1.5 text-[11px] font-medium tracking-tight text-muted-foreground/90">
-      <HugeiconsIcon
-        icon={PROVIDER_ICON[p.id]}
-        size={13}
-        strokeWidth={1.75}
-      />
+      <HugeiconsIcon icon={PROVIDER_ICON[p.id]} size={13} strokeWidth={1.75} />
       <span>{p.label}</span>
     </div>
   );
@@ -678,11 +668,7 @@ function CapabilityBars({ caps }: { caps: ModelCapabilities }) {
     <div className="ml-auto flex items-center gap-1.5">
       <CapBar icon={BrainIcon} value={caps.intelligence} label="Intelligence" />
       <CapBar icon={FlashIcon} value={caps.speed} label="Speed" />
-      <CapBar
-        icon={CoinsDollarIcon}
-        value={caps.cost}
-        label="Affordability"
-      />
+      <CapBar icon={CoinsDollarIcon} value={caps.cost} label="Affordability" />
     </div>
   );
 }
@@ -697,10 +683,7 @@ function CapBar({
   label: string;
 }) {
   return (
-    <span
-      className="flex items-center gap-0.5"
-      title={`${label}: ${value}/5`}
-    >
+    <span className="flex items-center gap-0.5" title={`${label}: ${value}/5`}>
       <HugeiconsIcon
         icon={icon}
         size={10}
@@ -811,7 +794,9 @@ function RunCostChip() {
   const modelId = useChatStore((s) => s.selectedModelId);
 
   const inFlight =
-    status === "thinking" || status === "streaming" || status === "awaiting-approval";
+    status === "thinking" ||
+    status === "streaming" ||
+    status === "awaiting-approval";
 
   const cost = useMemo(
     () =>

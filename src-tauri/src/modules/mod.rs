@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod browser;
+pub mod chatgpt_auth;
 pub mod control;
 pub mod extensions;
 pub mod fs;

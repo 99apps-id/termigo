@@ -1,3 +1,4 @@
+import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import {
   ArrowTurnBackwardIcon,
@@ -5,12 +6,16 @@ import {
   TerminalIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { buildJourney, type JourneyEvent, relativeTime } from "../lib/journey";
 import { native } from "../lib/native";
-import { listCheckpoints, type CheckpointEntry } from "../lib/snapshots";
-import { buildJourney, relativeTime, type JourneyEvent } from "../lib/journey";
-import { useTrajectoryStore } from "../store/trajectoryStore";
+import {
+  type CheckpointEntry,
+  listCheckpoints,
+  rollbackToCheckpoint,
+} from "../lib/snapshots";
 import { useChatStore } from "../store/chatStore";
+import { useTrajectoryStore } from "../store/trajectoryStore";
 
 const STATUS_STYLE: Record<string, string> = {
   pending: "bg-muted text-muted-foreground",
@@ -19,10 +24,22 @@ const STATUS_STYLE: Record<string, string> = {
   error: "bg-destructive/10 text-destructive",
 };
 
-function Event({ event, now }: { event: JourneyEvent; now: number }) {
+function Event({
+  event,
+  now,
+  onRestore,
+  restoring,
+}: {
+  event: JourneyEvent;
+  now: number;
+  onRestore: (cp: CheckpointEntry) => void;
+  restoring: string | null;
+}) {
   if (event.kind === "checkpoint") {
+    const cp = event.checkpoint;
+    const busy = restoring === cp.sha;
     return (
-      <div className="flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-2 py-1.5 text-left">
+      <div className="group flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-2 py-1.5 text-left">
         <HugeiconsIcon
           icon={ArrowTurnBackwardIcon}
           size={12}
@@ -34,12 +51,26 @@ function Event({ event, now }: { event: JourneyEvent; now: number }) {
             checkpoint
           </span>
           <span className="ml-1.5 truncate text-[11px] text-muted-foreground">
-            {event.checkpoint.label}
+            {cp.label}
           </span>
         </div>
         <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
-          {event.checkpoint.shortSha}
+          {cp.shortSha}
         </span>
+        <button
+          type="button"
+          disabled={restoring !== null}
+          onClick={() => onRestore(cp)}
+          title="Restore the working tree to this checkpoint (your current changes are checkpointed first, so this can be undone)"
+          className={cn(
+            "shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors",
+            busy
+              ? "text-amber-500"
+              : "text-muted-foreground opacity-0 hover:bg-amber-500/15 hover:text-amber-600 group-hover:opacity-100 disabled:opacity-40",
+          )}
+        >
+          {busy ? "Restoring…" : "Restore"}
+        </button>
       </div>
     );
   }
@@ -85,30 +116,79 @@ export function RunJourney({ className }: { className?: string }) {
   const { runs, activeRunId } = useTrajectoryStore();
   const workspaceRoot = useChatStore((s) => s.live.getWorkspaceRoot());
   const [checkpoints, setCheckpoints] = useState<CheckpointEntry[]>([]);
+  const [repoRoot, setRepoRoot] = useState<string | null>(null);
+  const [restoring, setRestoring] = useState<string | null>(null);
   const currentRun =
     runs.find((r) => r.runId === activeRunId) ?? runs[runs.length - 1];
+  const runId = currentRun?.runId;
 
-  // Reload checkpoints when the run or the workspace changes. Checkpoints are
-  // loaded lazily so a workspace without git history shows none rather than a
-  // failure.
+  // Load the repo root and its checkpoints. Kept as a callback so a restore can
+  // refresh the list afterwards (it adds a "before rollback" checkpoint).
+  const reload = useCallback(async () => {
+    if (!workspaceRoot) {
+      setRepoRoot(null);
+      setCheckpoints([]);
+      return;
+    }
+    try {
+      const repo = await native.gitResolveRepo(workspaceRoot);
+      if (!repo) {
+        setRepoRoot(null);
+        setCheckpoints([]);
+        return;
+      }
+      setRepoRoot(repo.repoRoot);
+      setCheckpoints(await listCheckpoints(repo.repoRoot, 200));
+    } catch {
+      // No repo, or git unavailable — the journey shows steps only.
+    }
+  }, [workspaceRoot]);
+
+  // Checkpoints are loaded lazily so a workspace without git history shows none
+  // rather than a failure.
   useEffect(() => {
     let alive = true;
     setCheckpoints([]);
-    if (!workspaceRoot || !currentRun?.runId) return;
-    void (async () => {
-      try {
-        const repo = await native.gitResolveRepo(workspaceRoot);
-        if (!alive || !repo) return;
-        const cps = await listCheckpoints(repo.repoRoot, 200);
-        if (alive) setCheckpoints(cps);
-      } catch {
-        // No repo, or git unavailable — the journey shows steps only.
-      }
-    })();
+    if (!runId) return;
+    void reload().then(() => {
+      if (!alive) return;
+    });
     return () => {
       alive = false;
     };
-  }, [workspaceRoot, currentRun?.runId]);
+  }, [reload, runId]);
+
+  const handleRestore = useCallback(
+    async (cp: CheckpointEntry) => {
+      if (!repoRoot || restoring) return;
+      const ok = window.confirm(
+        `Restore the working tree to this checkpoint?\n\n` +
+          `“${cp.label}” · ${cp.shortSha}\n\n` +
+          `Your current changes are checkpointed first, so you can undo this ` +
+          `by restoring the "before rollback" checkpoint.`,
+      );
+      if (!ok) return;
+      setRestoring(cp.sha);
+      try {
+        const res = await rollbackToCheckpoint(repoRoot, cp.sha);
+        if (res.ok) {
+          toast(`Restored to checkpoint ${cp.shortSha}`, {
+            variant: "success",
+          });
+          await reload();
+        } else {
+          toast(res.error || "Restore failed", { variant: "error" });
+        }
+      } catch (e) {
+        toast(e instanceof Error ? e.message : "Restore failed", {
+          variant: "error",
+        });
+      } finally {
+        setRestoring(null);
+      }
+    },
+    [repoRoot, restoring, reload],
+  );
 
   const now = useMemo(() => Date.now(), []);
 
@@ -165,7 +245,9 @@ export function RunJourney({ className }: { className?: string }) {
         {currentRun.totalCostUsd != null && (
           <span>${currentRun.totalCostUsd.toFixed(4)}</span>
         )}
-        {checkpoints.length > 0 && <span>{checkpoints.length} checkpoints</span>}
+        {checkpoints.length > 0 && (
+          <span>{checkpoints.length} checkpoints</span>
+        )}
       </div>
 
       {events.length === 0 ? (
@@ -175,8 +257,14 @@ export function RunJourney({ className }: { className?: string }) {
       ) : (
         <div className="flex max-h-72 flex-col gap-1.5 overflow-y-auto pr-1">
           {events.map((e, i) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: static run events, order never changes
-            <Event key={i} event={e} now={now} />
+            <Event
+              // biome-ignore lint/suspicious/noArrayIndexKey: static run events, order never changes
+              key={i}
+              event={e}
+              now={now}
+              onRestore={handleRestore}
+              restoring={restoring}
+            />
           ))}
         </div>
       )}

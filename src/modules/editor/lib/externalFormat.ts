@@ -13,7 +13,31 @@ type CommandOutput = {
   timed_out: boolean;
 };
 
-export type ExternalFormatter = Exclude<EditorFormatter, "lsp">;
+// "prettier-builtin" formats in-process (see EditorPane), so it is neither the
+// language server nor a spawn-a-binary external formatter.
+export type ExternalFormatter = Exclude<
+  EditorFormatter,
+  "lsp" | "prettier-builtin"
+>;
+
+/** Termigo language ids the bundled Prettier can format — the same web set the
+ *  external `prettier` preset covers. */
+export const PRETTIER_BUILTIN_LANGS: readonly string[] = [
+  "js",
+  "jsx",
+  "ts",
+  "tsx",
+  "json",
+  "jsonc",
+  "css",
+  "scss",
+  "less",
+  "html",
+  "vue",
+  "md",
+  "yaml",
+  "graphql",
+];
 
 type FormatterDef = {
   label: string;
@@ -68,6 +92,7 @@ export const FORMATTERS: Record<
 
 export const FORMATTER_LABELS: Record<EditorFormatter, string> = {
   lsp: "Language server",
+  "prettier-builtin": "Prettier (built-in)",
   custom: "Custom command",
   ...Object.fromEntries(
     Object.entries(FORMATTERS).map(([id, def]) => [id, def.label]),
@@ -90,6 +115,9 @@ export function resolveFormatter(
   if (override) return override;
   const global = prefs.editorFormatter;
   if (global === "lsp" || global === "custom") return global;
+  if (global === "prettier-builtin") {
+    return langId && PRETTIER_BUILTIN_LANGS.includes(langId) ? global : "lsp";
+  }
   return langId && FORMATTERS[global].langs.includes(langId) ? global : "lsp";
 }
 

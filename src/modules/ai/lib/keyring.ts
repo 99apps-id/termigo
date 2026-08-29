@@ -1,11 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import {
+  type CustomEndpoint,
   getProvider,
   KEYRING_SERVICE,
   PROVIDERS,
-  providerSupportsKey,
-  type CustomEndpoint,
   type ProviderId,
+  providerSupportsKey,
 } from "../config";
 
 export type ProviderKeys = Record<ProviderId, string | null>;
@@ -25,6 +25,7 @@ export const EMPTY_PROVIDER_KEYS: ProviderKeys = {
   lmstudio: null,
   mlx: null,
   ollama: null,
+  chatgpt: null,
 };
 
 export async function getKey(provider: ProviderId): Promise<string | null> {

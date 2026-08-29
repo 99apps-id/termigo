@@ -53,7 +53,7 @@ export const ENDPOINT_PRESETS: EndpointPreset[] = [
   {
     id: "stepfun",
     name: "StepFun",
-    baseURL: "https://api.stepfun.com/v1",
+    baseURL: "https://api.stepfun.ai/step_plan/v1",
     suggestedModel: "step-3",
     contextLimit: 256_000,
     keysUrl: "https://platform.stepfun.com/",

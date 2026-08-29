@@ -26,4 +26,16 @@ describe("resolveFormatter", () => {
   it("unknown language falls back to lsp for external globals", () => {
     expect(resolveFormatter(null, prefs("biome"))).toBe("lsp");
   });
+
+  it("built-in Prettier applies to web languages, falls back to lsp elsewhere", () => {
+    expect(resolveFormatter("ts", prefs("prettier-builtin"))).toBe(
+      "prettier-builtin",
+    );
+    expect(resolveFormatter("css", prefs("prettier-builtin"))).toBe(
+      "prettier-builtin",
+    );
+    // rust/python aren't web languages Prettier handles → language server.
+    expect(resolveFormatter("rs", prefs("prettier-builtin"))).toBe("lsp");
+    expect(resolveFormatter("py", prefs("prettier-builtin"))).toBe("lsp");
+  });
 });

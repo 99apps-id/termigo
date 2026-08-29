@@ -249,6 +249,9 @@ export type Preferences = {
 
 export type EditorFormatter =
   | "lsp"
+  // Bundled Prettier — formats in-process, so web files format with no
+  // external `prettier` install (distinct from "prettier", which shells out).
+  | "prettier-builtin"
   | "biome"
   | "prettier"
   | "ruff"
