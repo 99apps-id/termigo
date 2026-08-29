@@ -86,6 +86,40 @@ export function newSessionId(): string {
   return `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/** All human-readable text in a conversation, lowercased, with the injected
+ *  context wrappers stripped so a search matches what the user and model
+ *  actually said — not terminal/selection/file context spliced into a prompt. */
+export function extractMessageText(messages: UIMessage[]): string {
+  const out: string[] = [];
+  for (const m of messages) {
+    for (const p of m.parts) {
+      if (p.type !== "text") continue;
+      out.push((p as { text: string }).text);
+    }
+  }
+  return out
+    .join("\n")
+    .replace(/<terminal-context[\s\S]*?<\/terminal-context>\s*/g, "")
+    .replace(/<selection[\s\S]*?<\/selection>\s*/g, "")
+    .replace(/<file[\s\S]*?<\/file>\s*/g, "")
+    .toLowerCase();
+}
+
+/** Build a lowercased content index (sessionId -> concatenated message text)
+ *  by loading every session's messages once. Used for full-text history search;
+ *  built lazily by the caller (it touches the store for each session). */
+export async function buildSessionSearchIndex(
+  sessions: SessionMeta[],
+): Promise<Map<string, string>> {
+  const entries = await Promise.all(
+    sessions.map(async (s): Promise<[string, string]> => {
+      const messages = await loadMessages(s.id);
+      return [s.id, messages ? extractMessageText(messages) : ""];
+    }),
+  );
+  return new Map(entries);
+}
+
 export function deriveTitle(messages: UIMessage[]): string {
   for (const m of messages) {
     if (m.role !== "user") continue;

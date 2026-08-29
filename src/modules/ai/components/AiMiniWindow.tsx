@@ -28,7 +28,7 @@ import {
   TerminalIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   estimateCost,
   getModel,
@@ -36,7 +36,7 @@ import {
   resolveModelContextLimit,
 } from "../config";
 import type { ResizeDir } from "../lib/miniWindowGeometry";
-import type { SessionMeta } from "../lib/sessions";
+import { buildSessionSearchIndex, type SessionMeta } from "../lib/sessions";
 import { useMiniWindowGeometry } from "../lib/useMiniWindowGeometry";
 import { getOrCreateChat } from "../store/chatRuntime";
 import { useChatStore } from "../store/chatStore";
@@ -449,13 +449,48 @@ function SessionPicker() {
   const newSession = useChatStore((s) => s.newSession);
   const deleteSession = useChatStore((s) => s.deleteSession);
 
+  const [query, setQuery] = useState("");
+  // Message-content index (sessionId -> lowercased text), built lazily the first
+  // time the user searches so opening the menu stays instant. Invalidated when
+  // the set of sessions changes.
+  const [contentIndex, setContentIndex] = useState<Map<string, string> | null>(
+    null,
+  );
+  const [indexing, setIndexing] = useState(false);
+  const sessionSig = sessions.map((s) => s.id).join(",");
+
+  useEffect(() => {
+    // Depend on the id signature (not the array) so the index is only dropped
+    // when sessions are added/removed, not on every updatedAt bump during a run.
+    void sessionSig;
+    setContentIndex(null);
+  }, [sessionSig]);
+
+  const q = query.trim().toLowerCase();
+
+  useEffect(() => {
+    if (q.length < 2 || contentIndex || indexing) return;
+    setIndexing(true);
+    void buildSessionSearchIndex(sessions)
+      .then(setContentIndex)
+      .finally(() => setIndexing(false));
+  }, [q, contentIndex, indexing, sessions]);
+
   const active = sessions.find((s) => s.id === activeId) ?? null;
   if (!active) return null;
 
   const sorted = [...sessions].sort((a, b) => b.updatedAt - a.updatedAt);
+  const filtered =
+    q.length === 0
+      ? sorted
+      : sorted.filter(
+          (s) =>
+            s.title.toLowerCase().includes(q) ||
+            (contentIndex?.get(s.id)?.includes(q) ?? false),
+        );
 
   return (
-    <DropdownMenu>
+    <DropdownMenu onOpenChange={(open) => !open && setQuery("")}>
       <DropdownMenuTrigger asChild>
         <button
           type="button"
@@ -475,7 +510,7 @@ function SessionPicker() {
           />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="min-w-56">
+      <DropdownMenuContent align="start" className="min-w-64">
         <DropdownMenuItem
           onSelect={() => newSession()}
           className="gap-2 text-xs"
@@ -483,8 +518,36 @@ function SessionPicker() {
           <HugeiconsIcon icon={Add01Icon} size={12} strokeWidth={1.75} />
           New session
         </DropdownMenuItem>
-        {sorted.length > 0 ? <DropdownMenuSeparator /> : null}
-        {sorted.map((s) => (
+        {sessions.length > 0 ? <DropdownMenuSeparator /> : null}
+        {sessions.length > 0 ? (
+          <div className="px-1.5 py-1">
+            <div className="flex items-center gap-1.5 rounded-md border border-border/60 bg-background/60 px-2 py-1">
+              <HugeiconsIcon
+                icon={FilterIcon}
+                size={11}
+                strokeWidth={1.75}
+                className="shrink-0 opacity-60"
+              />
+              <input
+                // Radix runs its own typeahead on printable keys; stop it so
+                // typing reaches this input instead of jumping between items.
+                onKeyDown={(e) => e.stopPropagation()}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search sessions…"
+                className="w-full bg-transparent text-[11px] outline-none placeholder:text-muted-foreground/70"
+                // biome-ignore lint/a11y/noAutofocus: the menu just opened for search
+                autoFocus
+              />
+            </div>
+            {q.length >= 2 && indexing ? (
+              <p className="px-1 pt-1 text-[10px] text-muted-foreground/70">
+                Searching messages…
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+        {filtered.map((s) => (
           <SessionRow
             key={s.id}
             session={s}
@@ -493,6 +556,11 @@ function SessionPicker() {
             onDelete={() => deleteSession(s.id)}
           />
         ))}
+        {q.length > 0 && filtered.length === 0 && !indexing ? (
+          <p className="px-2.5 py-2 text-[11px] text-muted-foreground/70">
+            No sessions match “{query.trim()}”.
+          </p>
+        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   );
