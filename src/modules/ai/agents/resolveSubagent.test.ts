@@ -23,6 +23,16 @@ describe("resolveSubagentType", () => {
     expect(resolveSubagentType("implement")).toBe("builder");
     expect(resolveSubagentType("recon")).toBe("pentest");
     expect(resolveSubagentType("plan")).toBe("general");
+    // Pentest specialists resolve by name and by their own synonyms, while the
+    // bare/ambiguous words stay on the generalist.
+    expect(resolveSubagentType("pentest-web")).toBe("pentest-web");
+    expect(resolveSubagentType("webapp")).toBe("pentest-web");
+    expect(resolveSubagentType("api")).toBe("pentest-web");
+    expect(resolveSubagentType("network")).toBe("pentest-network");
+    expect(resolveSubagentType("activedirectory")).toBe("pentest-network");
+    expect(resolveSubagentType("osint")).toBe("pentest-recon");
+    expect(resolveSubagentType("Pentest · Recon")).toBe("pentest-recon");
+    expect(resolveSubagentType("scan")).toBe("pentest");
     expect(resolveSubagentType("screenshot")).toBe("vision");
     expect(resolveSubagentType("image")).toBe("vision");
     expect(resolveSubagentType("diagram")).toBe("vision");

@@ -42,7 +42,8 @@ const SYNONYMS: Record<string, SubagentType> = {
   injection: "security",
   secrets: "security",
   authz: "security",
-  // pentest / offensive
+  // pentest / offensive — bare/ambiguous words stay on the generalist, which
+  // covers the whole engagement (and owns the final report).
   pentest: "pentest",
   pentesting: "pentest",
   recon: "pentest",
@@ -51,6 +52,22 @@ const SYNONYMS: Record<string, SubagentType> = {
   nmap: "pentest",
   exploit: "pentest",
   offensive: "pentest",
+  // pentest specialists — dispatched by name for focused, parallel work.
+  reconnaissance: "pentest-recon",
+  osint: "pentest-recon",
+  subdomain: "pentest-recon",
+  subdomains: "pentest-recon",
+  attacksurface: "pentest-recon",
+  fingerprint: "pentest-recon",
+  web: "pentest-web",
+  webapp: "pentest-web",
+  webapplication: "pentest-web",
+  api: "pentest-web",
+  appscan: "pentest-web",
+  network: "pentest-network",
+  infra: "pentest-network",
+  infrastructure: "pentest-network",
+  activedirectory: "pentest-network",
   // builder: mutating work
   builder: "builder",
   build: "builder",
