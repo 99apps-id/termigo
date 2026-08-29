@@ -1,5 +1,6 @@
 import { generateText, stepCountIs } from "ai";
 import { buildConfiguredLanguageModel, noProgressStop, noToolRepetition } from "../lib/agent";
+import { repairToolCall } from "../lib/repairToolCall";
 import type { ProviderKeys } from "../lib/keyring";
 import type { ToolContext } from "../tools/context";
 import { buildTools } from "../tools/tools";
@@ -379,6 +380,10 @@ export async function runSubagent({
       system: def.systemPrompt,
       prompt,
       tools: tools as Parameters<typeof generateText>[0]["tools"],
+      // Repair tool-call arguments that a provider (e.g. StepFun) emits as
+      // near-JSON, so a recoverable sub-agent tool call runs instead of
+      // hard-failing with "Invalid input for tool".
+      experimental_repairToolCall: repairToolCall as never,
       // The step cap alone is not enough: a model that repeats the same tool
       // call or stalls without progress burns all twelve steps doing nothing.
       // The same guards the main run uses close that loop here too.

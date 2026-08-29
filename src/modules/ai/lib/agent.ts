@@ -47,6 +47,7 @@ import { memoryBlock as learnedBlock, type MemoryEntry } from "./memory";
 import { wantsForcedFanout } from "./orchestrationIntent";
 import { prepareAgentPrompt } from "./prompt";
 import { createProxyFetch } from "./proxyFetch";
+import { repairToolCall } from "./repairToolCall";
 import { sanitizeUiMessages } from "./sanitizeMessages";
 import { type Skill, skillsBlock } from "./skills";
 
@@ -1030,6 +1031,10 @@ export async function runAgentStream(opts: RunAgentOptions) {
     // `StopCondition<ToolSet>[]`. The predicates only touch fields common to
     // every ToolSet, so a structural cast is safe.
     stopWhen: trackingStopWhen as never,
+    // Repair tool-call arguments that a provider (e.g. StepFun via the
+    // OpenAI-compatible endpoint) emits as near-JSON, so a recoverable input
+    // runs instead of hard-failing with "Invalid input for tool".
+    experimental_repairToolCall: repairToolCall as never,
     // Per-step choice control: a stuck run's final step is pinned tool-less so
     // the model must summarise (see `synthesisRequested`); the forced-fanout
     // case pins step 0 to `run_subagents`. Every other step is free.

@@ -36,6 +36,56 @@ type BatchResult = {
   durationMs?: number;
 };
 
+/** Parse a value that may be a JSON string, returning it unchanged if not. */
+function parseJsonIfString(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
+/**
+ * Normalise the model's tool input for `run_subagents` into `{ tasks[],
+ * max_concurrency? }`. Models — especially openai-compatible ones — sometimes
+ * emit the whole tool call as a JSON string, or `tasks` as a JSON string, or
+ * `max_concurrency` as a numeric string, or double-encode each task. Without
+ * this, the `z.object` schema rejects a quirky-but-recoverable input and the
+ * batch fails with "JSON parsing failed"; normalising first means it runs.
+ */
+export function normalizeBatchInput(input: unknown): unknown {
+  let value = parseJsonIfString(input);
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+
+  const obj = { ...(value as Record<string, unknown>) };
+  obj.tasks = parseJsonIfString(obj.tasks);
+  if (typeof obj.max_concurrency === "string") {
+    const n = Number(obj.max_concurrency);
+    if (Number.isFinite(n)) obj.max_concurrency = n;
+  }
+  if (Array.isArray(obj.tasks)) {
+    obj.tasks = obj.tasks.map((t) => {
+      const parsed = parseJsonIfString(t);
+      // Accept both `0`-based indices and a single `depends_on` number.
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const task = { ...(parsed as Record<string, unknown>) };
+        if (typeof task.depends_on === "number") {
+          task.depends_on = [task.depends_on];
+        }
+        return task;
+      }
+      return parsed;
+    });
+  }
+  return obj;
+}
+
+/** Same idea for the single `run_subagent` call: accept a stringified input. */
+export function normalizeSingleInput(input: unknown): unknown {
+  return parseJsonIfString(input);
+}
+
 export function buildSubagentTools(ctx: ToolContext) {
   return {
     run_subagent: tool({
@@ -45,22 +95,27 @@ Types:
 ${TYPE_KEYS.map((k) => `- ${k}: ${SUBAGENTS[k].description}`).join("\n")}
 
 Approval works exactly as it does for you: read-only tools auto-run, and every mutating, shell, or extension call goes through the user's approval queue (\`write_file\` also refuses an existing path). So delegation never silently mutates the workspace or runs an un-approved command.`,
-      inputSchema: z.object({
-        type: z
-          .string()
-          .describe(
-            `Which subagent to spawn. One of: ${TYPE_KEYS.join(", ")}. Common synonyms (search, review, implement, audit, plan) resolve to the closest match, so an approximate name still works.`,
-          ),
-        prompt: z
-          .string()
-          .describe(
-            "Self-contained instruction. The subagent has no memory of prior conversation — include all relevant context.",
-          ),
-        description: z
-          .string()
-          .optional()
-          .describe("Short label shown in the chat UI for the spawn card."),
-      }),
+      inputSchema: z.preprocess(
+        // Models sometimes send the whole call as a JSON string; normalise so
+        // the object schema below always sees a real object.
+        normalizeSingleInput,
+        z.object({
+          type: z
+            .string()
+            .describe(
+              `Which subagent to spawn. One of: ${TYPE_KEYS.join(", ")}. Common synonyms (search, review, implement, audit, plan) resolve to the closest match, so an approximate name still works.`,
+            ),
+          prompt: z
+            .string()
+            .describe(
+              "Self-contained instruction. The subagent has no memory of prior conversation — include all relevant context.",
+            ),
+          description: z
+            .string()
+            .optional()
+            .describe("Short label shown in the chat UI for the spawn card."),
+        }),
+      ),
       execute: async ({ type, prompt, description }, opts) => {
         // Resolve loose / synonym names to a real roster id so an approximate
         // 'type' from the model never fails the call.
@@ -118,43 +173,48 @@ At most ${MAX_TASKS} tasks per call; extras are dropped and reported in \`note\`
 Use this for anything spanning more than one file — studying, exploring, reviewing or auditing a codebase — rather than reading files one at a time.
 
 Each task's subagent has the same toolset you do (minus spawning further subagents). Approval works as it does for you: read-only tools auto-run, and every mutating, shell, or extension call asks the user first via the approval queue (\`write_file\` also refuses a path that already exists) — so a batch never silently overwrites the workspace or runs an un-approved command.`,
-      inputSchema: z.object({
-        tasks: z
-          .array(
-            z.object({
-              type: z
-                .string()
-                .describe(
-                  `Which subagent to spawn: one of ${TYPE_KEYS.join(", ")} (synonyms like search / review / implement / audit resolve to the closest match).`,
-                ),
-              prompt: z
-                .string()
-                .describe(
-                  "Self-contained instruction. The subagent has no memory of this conversation.",
-                ),
-              description: z
-                .string()
-                .optional()
-                .describe("Short label shown in the chat UI."),
-              depends_on: z
-                .array(z.number().int())
-                .optional()
-                .describe(
-                  "0-based indices of other tasks to wait for. Their summaries arrive as context.",
-                ),
-            }),
-          )
-          .min(1)
-          .describe("The subagents to run."),
-        max_concurrency: z
-          .number()
-          .int()
-          .min(1)
-          .optional()
-          .describe(
-            `How many may run at once. Defaults to ${MAX_CONCURRENCY}, which is also the cap.`,
-          ),
-      }),
+      inputSchema: z.preprocess(
+        // Normalise before validation so a model that emits the whole call (or
+        // the `tasks` field) as a JSON string still runs instead of failing.
+        normalizeBatchInput,
+        z.object({
+          tasks: z
+            .array(
+              z.object({
+                type: z
+                  .string()
+                  .describe(
+                    `Which subagent to spawn: one of ${TYPE_KEYS.join(", ")} (synonyms like search / review / implement / audit resolve to the closest match).`,
+                  ),
+                prompt: z
+                  .string()
+                  .describe(
+                    "Self-contained instruction. The subagent has no memory of this conversation.",
+                  ),
+                description: z
+                  .string()
+                  .optional()
+                  .describe("Short label shown in the chat UI."),
+                depends_on: z
+                  .array(z.number().int())
+                  .optional()
+                  .describe(
+                    "0-based indices of other tasks to wait for. Their summaries arrive as context.",
+                  ),
+              }),
+            )
+            .min(1)
+            .describe("The subagents to run."),
+          max_concurrency: z
+            .number()
+            .int()
+            .min(1)
+            .optional()
+            .describe(
+              `How many may run at once. Defaults to ${MAX_CONCURRENCY}, which is also the cap.`,
+            ),
+        }),
+      ),
       execute: async ({ tasks, max_concurrency }, opts) => {
         const batchSignal = opts?.abortSignal;
         const notes: string[] = [];
