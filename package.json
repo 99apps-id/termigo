@@ -19,6 +19,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "check-types": "tsc --noEmit",
+    "check:commands": "node scripts/check-invoke-commands.mjs",
     "lint": "biome lint ./src",
     "lint:fix": "biome lint --write ./src",
     "format": "biome format --write ./src",

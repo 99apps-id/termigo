@@ -35,6 +35,9 @@ jobs:
       - name: Type-check
         run: pnpm check-types
 
+      - name: Invoke/command registration guard
+        run: pnpm check:commands
+
       - name: Test
         run: pnpm test
 
