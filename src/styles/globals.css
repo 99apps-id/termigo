@@ -63,8 +63,12 @@
     /* Warm accent for the composer glow, the send/stop button and the token
        meter, so those read as one orange family. Defined once (works on both
        themes) and inherited by the dark block below. */
-    --composer-accent: oklch(0.7 0.17 52);
-    --composer-accent-foreground: oklch(0.99 0.01 60);
+    /* Light theme uses a teal accent (aligned with --primary) instead of the
+       warm orange: the orange read as a jarring yellow on the light ground and
+       added a second accent hue to an already busy surface. Dark keeps the
+       orange glow (redefined in the .dark block below). */
+    --composer-accent: oklch(0.6 0.13 195);
+    --composer-accent-foreground: oklch(0.99 0.005 195);
     --secondary: oklch(0.94 0.02 290);
     --secondary-foreground: oklch(0.25 0.05 285);
     --muted: oklch(0.945 0.012 295);
@@ -105,6 +109,10 @@
     --popover-foreground: oklch(0.972 0.006 300);
     --primary: oklch(0.76 0.11 190);
     --primary-foreground: oklch(0.17 0.03 285);
+    /* Dark keeps the signature warm-orange composer glow (light overrides it
+       to teal in :root above). */
+    --composer-accent: oklch(0.7 0.17 52);
+    --composer-accent-foreground: oklch(0.99 0.01 60);
     --secondary: oklch(0.27 0.045 285);
     --secondary-foreground: oklch(0.972 0.006 300);
     --muted: oklch(0.26 0.04 285);

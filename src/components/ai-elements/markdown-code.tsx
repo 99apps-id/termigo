@@ -57,7 +57,7 @@ function FileRefCode({
       type="button"
       onClick={() => getLspNavigator()?.openFile(ref.path, ref.line)}
       title={`Open ${ref.path}${ref.line > 1 ? `:${ref.line}` : ""}`}
-      className="cursor-pointer rounded bg-primary/10 px-1.5 py-0.5 font-mono text-[11px] text-primary underline decoration-primary/40 underline-offset-2 hover:bg-primary/20"
+      className="cursor-pointer rounded px-0.5 font-mono text-[11px] text-foreground underline decoration-primary/50 underline-offset-2 hover:bg-primary/10 hover:text-primary hover:decoration-primary"
     >
       {text}
     </button>
