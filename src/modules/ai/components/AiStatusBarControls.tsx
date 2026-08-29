@@ -64,9 +64,11 @@ import { costToday } from "../lib/costLedger";
 import { toggleFavoriteModel } from "../lib/modelPrefs";
 import { useChatStore } from "../store/chatStore";
 import { AgentDiagnosticsDialog } from "./AgentDiagnosticsDialog";
+import { AgentMemoryDialog } from "./AgentMemoryDialog";
 import { ApprovalModeControl } from "./ApprovalModeControl";
 import { ChangeReviewDialog } from "./ChangeReviewDialog";
 import { ContextMeter } from "./ContextMeter";
+import { RunReplayDialog } from "./RunReplayDialog";
 
 const PROVIDER_ICON = {
   openai: ChatGptIcon,
@@ -108,6 +110,8 @@ export function AiStatusBarControls() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [diagOpen, setDiagOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [replayOpen, setReplayOpen] = useState(false);
+  const [memoryOpen, setMemoryOpen] = useState(false);
   const toggleMini = useChatStore((s) => s.toggleMini);
   const miniOpen = useChatStore((s) => s.mini.open);
   const closePanel = useChatStore((s) => s.closePanel);
@@ -141,12 +145,28 @@ export function AiStatusBarControls() {
       <AgentDiagnosticsDialog open={diagOpen} onOpenChange={setDiagOpen} />
 
       <IconBtn
+        title="Replay past agent runs"
+        onClick={() => setReplayOpen(true)}
+      >
+        <HugeiconsIcon icon={Clock01Icon} size={13} strokeWidth={2} />
+      </IconBtn>
+      <RunReplayDialog open={replayOpen} onOpenChange={setReplayOpen} />
+
+      <IconBtn
         title="Review changes in the working tree"
         onClick={() => setReviewOpen(true)}
       >
         <HugeiconsIcon icon={FileDiffIcon} size={13} strokeWidth={2} />
       </IconBtn>
       <ChangeReviewDialog open={reviewOpen} onOpenChange={setReviewOpen} />
+
+      <IconBtn
+        title="Agent memory — what the agent learned about this project"
+        onClick={() => setMemoryOpen(true)}
+      >
+        <HugeiconsIcon icon={BrainIcon} size={13} strokeWidth={2} />
+      </IconBtn>
+      <AgentMemoryDialog open={memoryOpen} onOpenChange={setMemoryOpen} />
 
       <IconBtn
         title="Attach file or image"

@@ -41,3 +41,46 @@ func TestMCPServerInitializeAndTools(t *testing.T) {
 		t.Errorf("tools error: %+v", toolsResp.Error)
 	}
 }
+
+func TestMCPServerListsControlPlaneTools(t *testing.T) {
+	srv := New(".")
+
+	in := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}
+`)
+	var out bytes.Buffer
+	if err := srv.Serve(context.Background(), in, &out); err != nil {
+		t.Fatalf("Serve failed: %v", err)
+	}
+
+	var resp RPCResponse
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out.String())), &resp); err != nil {
+		t.Fatalf("failed to unmarshal tools response: %v", err)
+	}
+	result, ok := resp.Result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("unexpected result shape: %#v", resp.Result)
+	}
+	tools, ok := result["tools"].([]interface{})
+	if !ok {
+		t.Fatalf("missing tools list: %#v", result)
+	}
+	names := map[string]bool{}
+	for _, tool := range tools {
+		if entry, ok := tool.(map[string]interface{}); ok {
+			if name, ok := entry["name"].(string); ok {
+				names[name] = true
+			}
+		}
+	}
+	for _, want := range []string{
+		"termigo_status",
+		"termigo_focus",
+		"termigo_open",
+		"termigo_run",
+		"termigo_query",
+	} {
+		if !names[want] {
+			t.Errorf("tools/list is missing %q (got %v)", want, names)
+		}
+	}
+}

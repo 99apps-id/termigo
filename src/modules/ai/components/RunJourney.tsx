@@ -15,7 +15,10 @@ import {
   rollbackToCheckpoint,
 } from "../lib/snapshots";
 import { useChatStore } from "../store/chatStore";
-import { useTrajectoryStore } from "../store/trajectoryStore";
+import {
+  type TrajectoryRun,
+  useTrajectoryStore,
+} from "../store/trajectoryStore";
 
 const STATUS_STYLE: Record<string, string> = {
   pending: "bg-muted text-muted-foreground",
@@ -112,14 +115,23 @@ function Event({
  * agent's tool steps with the checkpoints it created, so one view shows what
  * the run did and the safe points it left behind.
  */
-export function RunJourney({ className }: { className?: string }) {
+export function RunJourney({
+  run: externalRun,
+  className,
+}: {
+  /** An external (e.g. persisted, replayed) run; defaults to the active one. */
+  run?: TrajectoryRun | null;
+  className?: string;
+}) {
   const { runs, activeRunId } = useTrajectoryStore();
   const workspaceRoot = useChatStore((s) => s.live.getWorkspaceRoot());
   const [checkpoints, setCheckpoints] = useState<CheckpointEntry[]>([]);
   const [repoRoot, setRepoRoot] = useState<string | null>(null);
   const [restoring, setRestoring] = useState<string | null>(null);
   const currentRun =
-    runs.find((r) => r.runId === activeRunId) ?? runs[runs.length - 1];
+    externalRun ??
+    runs.find((r) => r.runId === activeRunId) ??
+    runs[runs.length - 1];
   const runId = currentRun?.runId;
 
   // Load the repo root and its checkpoints. Kept as a callback so a restore can

@@ -13,15 +13,19 @@ use tauri::{Emitter, Manager};
 use termigo_control_protocol::{
     AgentRunParams, ControlDescriptor, ControlRequest, ControlResponse, FocusParams,
     FrontendRequest, FrontendResponse, OpenParams, PentestReportParams, PentestRunParams,
-    MAX_MESSAGE_BYTES, METHODS, METHOD_AGENT_RUN, METHOD_CAPABILITIES, METHOD_FOCUS,
-    METHOD_IDENTIFY, METHOD_OPEN, METHOD_PENTEST_REPORT, METHOD_PENTEST_RUN,
-    METHOD_PENTEST_STATUS, METHOD_PING, METHOD_STATUS, PROTOCOL_VERSION, SERVER_RESPONSE_ID,
+    QueryParams, RunCommandParams, MAX_MESSAGE_BYTES, METHODS, METHOD_AGENT_RUN,
+    METHOD_CAPABILITIES, METHOD_FOCUS, METHOD_IDENTIFY, METHOD_OPEN, METHOD_PENTEST_REPORT,
+    METHOD_PENTEST_RUN, METHOD_PENTEST_STATUS, METHOD_PING, METHOD_QUERY, METHOD_RUN_COMMAND,
+    METHOD_STATUS, PROTOCOL_VERSION, SERVER_RESPONSE_ID,
 };
 
 use crate::modules::{fs, workspace};
 
 const CONTROL_EVENT: &str = "termigo:control-request";
 const FRONTEND_TIMEOUT: Duration = Duration::from_secs(5);
+/// A query waits for the agent's full answer, which can take minutes of tool
+/// steps — far beyond the 5s budget of one-shot UI actions like focus/open.
+const QUERY_FRONTEND_TIMEOUT: Duration = Duration::from_secs(600);
 const IO_TIMEOUT: Duration = Duration::from_secs(7);
 const MAX_PENDING_REQUESTS: usize = 32;
 const MAX_CONNECTIONS: usize = 32;
@@ -465,6 +469,63 @@ fn route_request(
                 Err((code, message)) => ControlResponse::failure(request.id, code, message),
             }
         }
+        METHOD_QUERY => {
+            let params: QueryParams = match serde_json::from_value(request.params.clone()) {
+                Ok(params) => params,
+                Err(error) => {
+                    return ControlResponse::failure(
+                        request.id,
+                        "invalid_params",
+                        format!("invalid query parameters: {error}"),
+                    );
+                }
+            };
+            match validate_query_params(params) {
+                Ok(params) => match serde_json::to_value(params) {
+                    Ok(params) => {
+                        request.params = params;
+                        forward_to_frontend_with_timeout(
+                            request,
+                            app,
+                            state,
+                            QUERY_FRONTEND_TIMEOUT,
+                        )
+                    }
+                    Err(error) => ControlResponse::failure(
+                        request.id,
+                        "internal_error",
+                        format!("serialize query parameters: {error}"),
+                    ),
+                },
+                Err((code, message)) => ControlResponse::failure(request.id, code, message),
+            }
+        }
+        METHOD_RUN_COMMAND => {
+            let params: RunCommandParams = match serde_json::from_value(request.params.clone()) {
+                Ok(params) => params,
+                Err(error) => {
+                    return ControlResponse::failure(
+                        request.id,
+                        "invalid_params",
+                        format!("invalid run-command parameters: {error}"),
+                    );
+                }
+            };
+            match validate_run_command_params(params) {
+                Ok(params) => match serde_json::to_value(params) {
+                    Ok(params) => {
+                        request.params = params;
+                        forward_to_frontend(request, app, state)
+                    }
+                    Err(error) => ControlResponse::failure(
+                        request.id,
+                        "internal_error",
+                        format!("serialize run-command parameters: {error}"),
+                    ),
+                },
+                Err((code, message)) => ControlResponse::failure(request.id, code, message),
+            }
+        }
         METHOD_PENTEST_REPORT => {
             let params: PentestReportParams = match serde_json::from_value(request.params.clone()) {
                 Ok(params) => params,
@@ -550,6 +611,38 @@ fn validate_agent_run_params(
     Ok(AgentRunParams { prompt })
 }
 
+/// Bound and clean a query request — same rules as an agent run: a required,
+/// trimmed prompt capped well under the 64 KiB message limit.
+fn validate_query_params(
+    params: QueryParams,
+) -> Result<QueryParams, (&'static str, String)> {
+    const MAX_PROMPT_LEN: usize = 32 * 1024;
+    let prompt = params.prompt.trim().to_string();
+    if prompt.is_empty() {
+        return Err(("invalid_params", "query prompt is required".to_string()));
+    }
+    if prompt.len() > MAX_PROMPT_LEN {
+        return Err(("invalid_params", "query prompt is too long".to_string()));
+    }
+    Ok(QueryParams { prompt })
+}
+
+/// Bound a run-command request: a non-empty command id, capped so nothing
+/// junk reaches the frontend command registry.
+fn validate_run_command_params(
+    params: RunCommandParams,
+) -> Result<RunCommandParams, (&'static str, String)> {
+    const MAX_COMMAND_LEN: usize = 256;
+    let command = params.command.trim().to_string();
+    if command.is_empty() {
+        return Err(("invalid_params", "command id is required".to_string()));
+    }
+    if command.len() > MAX_COMMAND_LEN {
+        return Err(("invalid_params", "command id is too long".to_string()));
+    }
+    Ok(RunCommandParams { command })
+}
+
 fn validate_open_params(
     params: OpenParams,
     app: &tauri::AppHandle,
@@ -617,6 +710,15 @@ fn forward_to_frontend(
     app: &tauri::AppHandle,
     state: &ControlState,
 ) -> ControlResponse {
+    forward_to_frontend_with_timeout(request, app, state, FRONTEND_TIMEOUT)
+}
+
+fn forward_to_frontend_with_timeout(
+    request: ControlRequest,
+    app: &tauri::AppHandle,
+    state: &ControlState,
+    timeout: Duration,
+) -> ControlResponse {
     if !state.0.frontend_ready.load(Ordering::Acquire) {
         return ControlResponse::failure(
             request.id,
@@ -662,7 +764,7 @@ fn forward_to_frontend(
         );
     }
 
-    match receiver.recv_timeout(FRONTEND_TIMEOUT) {
+    match receiver.recv_timeout(timeout) {
         Ok(response) if response.ok => {
             ControlResponse::success(id, response.result.unwrap_or(Value::Null))
         }
@@ -1066,6 +1168,48 @@ mod tests {
             prompt: " ".repeat(32 * 1024 + 1),
         })
         .expect_err("reject oversized prompt");
+        assert_eq!(error.0, "invalid_params");
+    }
+
+    #[test]
+    fn query_validation_trims_and_bounds_the_prompt() {
+        let trimmed = validate_query_params(QueryParams {
+            prompt: "  what changed?  ".into(),
+        })
+        .expect("prompt is trimmed");
+        assert_eq!(trimmed.prompt, "what changed?");
+
+        let error = validate_query_params(QueryParams {
+            prompt: String::new(),
+        })
+        .expect_err("reject empty prompt");
+        assert_eq!(error.0, "invalid_params");
+
+        let error = validate_query_params(QueryParams {
+            prompt: "x".repeat(32 * 1024 + 1),
+        })
+        .expect_err("reject oversized prompt");
+        assert_eq!(error.0, "invalid_params");
+    }
+
+    #[test]
+    fn run_command_validation_trims_and_bounds_the_id() {
+        let trimmed = validate_run_command_params(RunCommandParams {
+            command: "  settings.open  ".into(),
+        })
+        .expect("command id is trimmed");
+        assert_eq!(trimmed.command, "settings.open");
+
+        let error = validate_run_command_params(RunCommandParams {
+            command: String::new(),
+        })
+        .expect_err("reject empty id");
+        assert_eq!(error.0, "invalid_params");
+
+        let error = validate_run_command_params(RunCommandParams {
+            command: "x".repeat(257),
+        })
+        .expect_err("reject oversized id");
         assert_eq!(error.0, "invalid_params");
     }
 

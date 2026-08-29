@@ -5,6 +5,8 @@ import {
   parseOpenRequest,
   parsePentestReportRequest,
   parsePentestRunRequest,
+  parseQueryRequest,
+  parseRunCommandRequest,
 } from "./useControlBridge";
 
 describe("parseOpenRequest", () => {
@@ -95,9 +97,7 @@ describe("parseAgentRunRequest", () => {
   });
 
   it("rejects a missing or blank prompt", () => {
-    expect(() => parseAgentRunRequest({})).toThrow(
-      "agent prompt is required",
-    );
+    expect(() => parseAgentRunRequest({})).toThrow("agent prompt is required");
     expect(() => parseAgentRunRequest({ prompt: "" })).toThrow(
       "agent prompt is required",
     );
@@ -106,6 +106,42 @@ describe("parseAgentRunRequest", () => {
     );
     expect(() => parseAgentRunRequest(null)).toThrow(
       "run parameters are required",
+    );
+  });
+});
+
+describe("parseQueryRequest", () => {
+  it("reads the trimmed prompt", () => {
+    expect(parseQueryRequest({ prompt: "  what changed?  " })).toEqual({
+      prompt: "what changed?",
+    });
+  });
+
+  it("rejects a missing or blank prompt", () => {
+    expect(() => parseQueryRequest({})).toThrow("query prompt is required");
+    expect(() => parseQueryRequest({ prompt: "   " })).toThrow(
+      "query prompt is required",
+    );
+    expect(() => parseQueryRequest(null)).toThrow(
+      "query parameters are required",
+    );
+  });
+});
+
+describe("parseRunCommandRequest", () => {
+  it("reads the trimmed command id", () => {
+    expect(parseRunCommandRequest({ command: "  settings.open  " })).toEqual({
+      command: "settings.open",
+    });
+  });
+
+  it("rejects a missing or blank command id", () => {
+    expect(() => parseRunCommandRequest({})).toThrow("command id is required");
+    expect(() => parseRunCommandRequest({ command: "   " })).toThrow(
+      "command id is required",
+    );
+    expect(() => parseRunCommandRequest(null)).toThrow(
+      "run-command parameters are required",
     );
   });
 });

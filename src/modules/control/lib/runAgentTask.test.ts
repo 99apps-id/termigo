@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-
 import { runAgentTask } from "./runAgentTask";
 
 const { sendMessage } = vi.hoisted(() => ({

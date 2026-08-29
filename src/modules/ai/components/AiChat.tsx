@@ -53,6 +53,7 @@ import { SLASH_COMMANDS, TERMIGO_CMD_RE } from "../lib/slashCommands";
 import { resumeRun } from "../store/chatRuntime";
 import { useChatStore } from "../store/chatStore";
 import { AiToolApproval } from "./AiToolApproval";
+import { RollbackSuggestion } from "./RollbackSuggestion";
 import { TrajectoryThinkingHUD } from "./TrajectoryThinkingHUD";
 
 function CommandSnippet({ name }: { name: string }) {
@@ -295,7 +296,7 @@ export function AiChatView({
             <div className="mt-0.5 leading-relaxed opacity-90">
               {humanizeModelError(error.message)}
             </div>
-            <div className="mt-1.5 flex items-center gap-3">
+            <div className="mt-1.5 flex flex-wrap items-center gap-3">
               {/* Retry re-runs the turn. After a context overflow the model's
                   real window has been learned, so this compacts harder and the
                   retry actually fits — the "Try again" the user expects. */}
@@ -310,6 +311,9 @@ export function AiChatView({
               >
                 Try again
               </button>
+              {/* One-click undo to the last checkpoint when the run left the
+                  tree in a bad state. Only renders when a checkpoint exists. */}
+              <RollbackSuggestion />
               <button
                 type="button"
                 onClick={clearError}

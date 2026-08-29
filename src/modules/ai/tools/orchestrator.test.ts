@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { native } from "../lib/native";
 import {
-  loadPipeline,
   listPipelines,
+  loadPipeline,
   runPipelineByName,
 } from "../lib/orchestrator";
-import { native } from "../lib/native";
 
 const { sendMessage } = vi.hoisted(() => ({
   sendMessage: vi.fn<(text: string) => Promise<boolean>>(),
@@ -88,4 +88,3 @@ describe("runPipelineByName", () => {
     expect(result.message).toMatch(/no active chat/);
   });
 });
-

@@ -1,9 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { tryRunSlashCommand, SLASH_COMMANDS } from "./slashCommands";
 import { startPentestRun } from "@/modules/control/lib/startPentestRun";
-import { listPipelines, runPipelineByName } from "./orchestrator";
-import { useSessionDirectiveStore } from "../store/sessionDirectiveStore";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useChatStore } from "../store/chatStore";
+import { useSessionDirectiveStore } from "../store/sessionDirectiveStore";
+import { listPipelines, runPipelineByName } from "./orchestrator";
+import { SLASH_COMMANDS, tryRunSlashCommand } from "./slashCommands";
 
 vi.mock("@/modules/control/lib/startPentestRun", () => ({
   startPentestRun: vi.fn().mockResolvedValue({ ok: true }),
@@ -56,7 +56,9 @@ describe("slash commands", () => {
 
     const rm = tryRunSlashCommand("/schedule remove 1");
     expect(rm.kind).toBe("handled");
-    expect(useSessionDirectiveStore.getState().getSchedules("s1")).toHaveLength(0);
+    expect(useSessionDirectiveStore.getState().getSchedules("s1")).toHaveLength(
+      0,
+    );
   });
 
   it("shows usage when /schedule is malformed", () => {

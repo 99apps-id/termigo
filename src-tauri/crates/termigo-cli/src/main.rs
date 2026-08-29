@@ -10,14 +10,17 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde_json::{json, Value};
 use termigo_control_protocol::{
     AgentRunParams, CallerContext, ControlDescriptor, ControlRequest, ControlResponse, FocusParams,
-    OpenParams, PentestReportParams, PentestRunParams, MAX_MESSAGE_BYTES, METHOD_AGENT_RUN,
-    METHOD_CAPABILITIES, METHOD_FOCUS, METHOD_IDENTIFY, METHOD_OPEN, METHOD_PENTEST_REPORT,
-    METHOD_PENTEST_RUN, METHOD_PENTEST_STATUS, METHOD_PING, METHOD_STATUS, PROTOCOL_VERSION,
-    SERVER_RESPONSE_ID,
+    OpenParams, PentestReportParams, PentestRunParams, QueryParams, RunCommandParams,
+    MAX_MESSAGE_BYTES, METHOD_AGENT_RUN, METHOD_CAPABILITIES, METHOD_FOCUS, METHOD_IDENTIFY,
+    METHOD_OPEN, METHOD_PENTEST_REPORT, METHOD_PENTEST_RUN, METHOD_PENTEST_STATUS, METHOD_PING,
+    METHOD_QUERY, METHOD_RUN_COMMAND, METHOD_STATUS, PROTOCOL_VERSION, SERVER_RESPONSE_ID,
 };
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 const IO_TIMEOUT: Duration = Duration::from_secs(7);
+/// A query waits for the agent's full answer; without this the 7s socket
+/// timeout would fire long before the answer arrives.
+const QUERY_DEFAULT_TIMEOUT: Duration = Duration::from_secs(300);
 const EXIT_USAGE: u8 = 2;
 const EXIT_UNAVAILABLE: u8 = 3;
 const EXIT_PROTOCOL: u8 = 4;
@@ -35,6 +38,8 @@ enum Action {
 struct Config {
     json: bool,
     action: Action,
+    /// Per-command read timeout; `query` needs longer than one-shot actions.
+    read_timeout: Option<Duration>,
 }
 
 #[derive(Debug)]
@@ -100,7 +105,15 @@ fn run(args: Vec<OsString>) -> Result<(), CliError> {
                 params,
                 caller: CallerContext { pane_id: caller },
             };
-            let response = send_request(&endpoint.address, &request)?;
+            let read_timeout = config.read_timeout.unwrap_or(match method {
+                METHOD_QUERY => QUERY_DEFAULT_TIMEOUT,
+                _ => IO_TIMEOUT,
+            });
+            let response = send_request_with_timeout(
+                &endpoint.address,
+                &request,
+                read_timeout,
+            )?;
             if !response.ok {
                 let error = response.error.unwrap_or_else(|| {
                     termigo_control_protocol::ControlError::new(
@@ -123,11 +136,13 @@ fn parse_args(mut args: Vec<OsString>) -> Result<Config, CliError> {
         return Ok(Config {
             json,
             action: Action::Help,
+            read_timeout: None,
         });
     }
 
     let command = args.remove(0);
     let command_text = command.to_str();
+    let mut read_timeout: Option<Duration> = None;
     let action = match command_text {
         Some("help" | "--help" | "-h") => no_extra_args(args, Action::Help)?,
         Some("--version" | "-V" | "version") => no_extra_args(args, Action::Version)?,
@@ -140,6 +155,12 @@ fn parse_args(mut args: Vec<OsString>) -> Result<Config, CliError> {
         Some("pentest-status") => request_without_params(args, METHOD_PENTEST_STATUS)?,
         Some("pentest-report") => parse_pentest_report(args)?,
         Some("run") => parse_run(args)?,
+        Some("query") => {
+            let (action, timeout) = parse_query(args)?;
+            read_timeout = timeout;
+            action
+        }
+        Some("run-command") => parse_run_command(args)?,
         Some("open") => parse_open(args)?,
         Some("--") => {
             args.insert(0, command);
@@ -159,7 +180,11 @@ fn parse_args(mut args: Vec<OsString>) -> Result<Config, CliError> {
         }
         _ => return Err(unknown_command_error(&command)),
     };
-    Ok(Config { json, action })
+    Ok(Config {
+        json,
+        action,
+        read_timeout,
+    })
 }
 
 /// Commands that belong to the Go companion CLI, not to this control client.
@@ -192,7 +217,7 @@ fn unknown_command_error(command: &OsString) -> CliError {
     let mut message = format!(
         "unknown command '{name}'\n\n\
          This is the Termigo control CLI. It supports: open, ping, capabilities, \
-         status, identify, focus, run, pentest-run, pentest-status, pentest-report, version, help.\n\
+         status, identify, focus, run, query, run-command, pentest-run, pentest-status, pentest-report, version, help.\n\
          Run 'termigo help' for usage, or pass a file path to open it."
     );
     if COMPANION_COMMANDS.contains(&name.as_ref()) {
@@ -201,7 +226,7 @@ fn unknown_command_error(command: &OsString) -> CliError {
              Build it with:  cd cli && go build -o termi-go ./cmd/termigo\n\
              Then run:       termi-go {name} --help\n\n\
              This binary controls a running Termigo window: open, ping, capabilities, \
-             status, identify, focus, run, pentest-run, pentest-status, pentest-report, version, help."
+             status, identify, focus, run, query, run-command, pentest-run, pentest-status, pentest-report, version, help."
         );
     }
     usage_error(message)
@@ -501,6 +526,120 @@ fn parse_run(args: Vec<OsString>) -> Result<Action, CliError> {
     })
 }
 
+/// `query "<question>" [--timeout <secs>]` — headless single-shot Q&A for
+/// scripting: send the prompt, wait for the agent's final text answer, print
+/// it. `--timeout` bounds how long to wait (default 300s) and becomes the
+/// socket read timeout.
+fn parse_query(args: Vec<OsString>) -> Result<(Action, Option<Duration>), CliError> {
+    let mut positional: Vec<OsString> = Vec::new();
+    let mut options = true;
+    let mut timeout_secs: Option<u64> = None;
+    let mut iter = args.into_iter();
+    while let Some(arg) = iter.next() {
+        match arg.to_str() {
+            Some("--") if options => options = false,
+            Some("--timeout") if options => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| usage_error("--timeout needs a value: --timeout <secs>"))?;
+                let secs = value
+                    .to_str()
+                    .ok_or_else(|| usage_error("invalid --timeout value"))?;
+                timeout_secs = Some(
+                    secs.parse::<u64>()
+                        .map_err(|_| usage_error(format!("invalid --timeout value '{secs}'")))?,
+                );
+            }
+            Some(value) if options && value.starts_with("--timeout=") => {
+                let secs = value["--timeout=".len()..].trim();
+                timeout_secs = Some(
+                    secs.parse::<u64>()
+                        .map_err(|_| usage_error(format!("invalid --timeout value '{secs}'")))?,
+                );
+            }
+            Some(value) if options && value.starts_with('-') => {
+                return Err(usage_error(format!("unknown query option '{value}'")));
+            }
+            _ => positional.push(arg),
+        }
+    }
+    if positional.is_empty() {
+        return Err(usage_error(
+            "query requires a prompt; usage: termigo query \"<question>\" [--timeout <secs>]",
+        ));
+    }
+    if positional.len() > 1 {
+        return Err(usage_error(
+            "query accepts exactly one prompt; quote it as a single argument",
+        ));
+    }
+    let prompt = positional.remove(0).into_string().map_err(|_| {
+        CliError::new(
+            "non_utf8_argument",
+            "Termigo cannot use a non-UTF-8 prompt",
+            EXIT_USAGE,
+        )
+    })?;
+    let params = serde_json::to_value(QueryParams { prompt }).map_err(|error| {
+        CliError::new(
+            "serialization_error",
+            format!("could not encode query request: {error}"),
+            EXIT_PROTOCOL,
+        )
+    })?;
+    Ok((
+        Action::Request {
+            method: METHOD_QUERY,
+            params,
+        },
+        timeout_secs.map(Duration::from_secs),
+    ))
+}
+
+/// `run-command <id>` — invoke a command-palette command (e.g. `settings.open`)
+/// in the running app by its id.
+fn parse_run_command(args: Vec<OsString>) -> Result<Action, CliError> {
+    let mut positional: Vec<OsString> = Vec::new();
+    let mut options = true;
+    for arg in args {
+        match arg.to_str() {
+            Some("--") if options => options = false,
+            Some(value) if options && value.starts_with('-') => {
+                return Err(usage_error(format!("unknown run-command option '{value}'")));
+            }
+            _ => positional.push(arg),
+        }
+    }
+    if positional.is_empty() {
+        return Err(usage_error(
+            "run-command requires a command id; usage: termigo run-command <id>",
+        ));
+    }
+    if positional.len() > 1 {
+        return Err(usage_error(
+            "run-command accepts exactly one command id",
+        ));
+    }
+    let command = positional.remove(0).into_string().map_err(|_| {
+        CliError::new(
+            "non_utf8_argument",
+            "Termigo cannot use a non-UTF-8 command id",
+            EXIT_USAGE,
+        )
+    })?;
+    let params = serde_json::to_value(RunCommandParams { command }).map_err(|error| {
+        CliError::new(
+            "serialization_error",
+            format!("could not encode run-command request: {error}"),
+            EXIT_PROTOCOL,
+        )
+    })?;
+    Ok(Action::Request {
+        method: METHOD_RUN_COMMAND,
+        params,
+    })
+}
+
 fn usage_error(message: impl Into<String>) -> CliError {
     CliError::new("usage", message, EXIT_USAGE)
 }
@@ -624,7 +763,11 @@ fn process_is_alive(pid: u32) -> bool {
     }
 }
 
-fn send_request(address: &str, request: &ControlRequest) -> Result<ControlResponse, CliError> {
+fn send_request_with_timeout(
+    address: &str,
+    request: &ControlRequest,
+    read_timeout: Duration,
+) -> Result<ControlResponse, CliError> {
     let address = parse_loopback_address(address)?;
     let mut stream = TcpStream::connect_timeout(&address, CONNECT_TIMEOUT).map_err(|error| {
         CliError::new(
@@ -633,7 +776,7 @@ fn send_request(address: &str, request: &ControlRequest) -> Result<ControlRespon
             EXIT_UNAVAILABLE,
         )
     })?;
-    stream.set_read_timeout(Some(IO_TIMEOUT)).ok();
+    stream.set_read_timeout(Some(read_timeout)).ok();
     stream.set_write_timeout(Some(IO_TIMEOUT)).ok();
     write_request(&mut stream, request)?;
 
@@ -791,6 +934,17 @@ fn print_result(method: &str, result: Value, as_json: bool) {
         METHOD_AGENT_RUN => {
             println!("Started agent task in Termigo");
         }
+        METHOD_QUERY => {
+            let text = result.get("text").and_then(Value::as_str).unwrap_or("");
+            println!("{text}");
+        }
+        METHOD_RUN_COMMAND => {
+            let command = result
+                .get("command")
+                .and_then(Value::as_str)
+                .unwrap_or("command");
+            println!("Ran '{command}' in Termigo");
+        }
         METHOD_FOCUS => {
             let path = result
                 .get("label")
@@ -868,13 +1022,13 @@ fn print_result(method: &str, result: Value, as_json: bool) {
 fn print_help() {
     println!(
         "Termigo command line interface\n\n\
-Usage:\n  termigo <file> [--line <n>] [--no-focus] [--json]\n  termigo open <file> [--line <n>] [--no-focus] [--json]\n  termigo ping [--json]\n  termigo capabilities [--json]\n  termigo status [--json]\n  termigo identify [--json]\n  termigo focus <query> [--json]\n  termigo run \"<task>\" [--json]\n  termigo pentest-run <target> [category] [--json]\n  termigo pentest-status [--json]\n  termigo pentest-report [target] [--json]\n  termigo --version\n\n\
+Usage:\n  termigo <file> [--line <n>] [--no-focus] [--json]\n  termigo open <file> [--line <n>] [--no-focus] [--json]\n  termigo ping [--json]\n  termigo capabilities [--json]\n  termigo status [--json]\n  termigo identify [--json]\n  termigo focus <query> [--json]\n  termigo run \"<task>\" [--json]\n  termigo query \"<question>\" [--timeout <secs>] [--json]\n  termigo run-command <id> [--json]\n  termigo pentest-run <target> [category] [--json]\n  termigo pentest-status [--json]\n  termigo pentest-report [target] [--json]\n  termigo --version\n\n\
 The app must be running. Commands launched in a Termigo pane target that pane's space.\n\
 run starts a plain agent task in the app's in-app agent (approval-gated, no\
-scope fencing); pentest-run is the scoped variant that also authorizes a\
-target. pentest-status reports the latest run and the agent's state;\n\
-pentest-report asks the app to generate and open the report (target optional,\n\
-defaults to the last pentest-run target)."
+scope fencing); query is the headless read-only Q&A that prints the answer;\n\
+run-command invokes a command-palette command by id (e.g. settings.open);\n\
+pentest-run is the scoped variant that also authorizes a target. pentest-status\n\
+reports the latest run and the agent's state; pentest-report asks the app to\ngenerate and open the report (target optional, defaults to the last pentest-run\ntarget)."
     );
 }
 
@@ -1073,6 +1227,72 @@ mod tests {
         assert!(error.message.contains("one prompt"));
 
         let error = parse_args(args(&["run", "--flag", "x"])).expect_err("reject option");
+        assert_eq!(error.code, "usage");
+    }
+
+    #[test]
+    fn parses_query_with_prompt_and_optional_timeout() {
+        let config =
+            parse_args(args(&["query", "what changed?", "--json"])).expect("parse query");
+        assert!(config.json);
+        assert_eq!(
+            config.action,
+            Action::Request {
+                method: METHOD_QUERY,
+                params: json!({ "prompt": "what changed?" }),
+            }
+        );
+        // No --timeout: the run() fallback uses the query default.
+        assert_eq!(config.read_timeout, None);
+
+        let with_timeout = parse_args(args(&["query", "hi", "--timeout", "90"]))
+            .expect("parse query with timeout");
+        assert_eq!(with_timeout.read_timeout, Some(Duration::from_secs(90)));
+
+        let equals = parse_args(args(&["query", "hi", "--timeout=45"])).expect("parse = timeout");
+        assert_eq!(equals.read_timeout, Some(Duration::from_secs(45)));
+    }
+
+    #[test]
+    fn query_rejects_missing_prompt_bad_timeout_and_unknown_options() {
+        let error = parse_args(args(&["query"])).expect_err("missing prompt");
+        assert_eq!(error.code, "usage");
+        assert!(error.message.contains("prompt"));
+
+        let error = parse_args(args(&["query", "a", "b"])).expect_err("too many");
+        assert_eq!(error.code, "usage");
+
+        let error = parse_args(args(&["query", "hi", "--timeout", "nope"])).expect_err("bad timeout");
+        assert_eq!(error.code, "usage");
+
+        let error = parse_args(args(&["query", "hi", "--wat"])).expect_err("reject option");
+        assert_eq!(error.code, "usage");
+    }
+
+    #[test]
+    fn parses_run_command_with_a_single_id() {
+        let config = parse_args(args(&["run-command", "settings.open", "--json"]))
+            .expect("parse run-command");
+        assert!(config.json);
+        assert_eq!(
+            config.action,
+            Action::Request {
+                method: METHOD_RUN_COMMAND,
+                params: json!({ "command": "settings.open" }),
+            }
+        );
+    }
+
+    #[test]
+    fn run_command_rejects_missing_or_extra_ids_and_options() {
+        let error = parse_args(args(&["run-command"])).expect_err("missing id");
+        assert_eq!(error.code, "usage");
+        assert!(error.message.contains("command id"));
+
+        let error = parse_args(args(&["run-command", "a", "b"])).expect_err("too many");
+        assert_eq!(error.code, "usage");
+
+        let error = parse_args(args(&["run-command", "--flag", "x"])).expect_err("reject option");
         assert_eq!(error.code, "usage");
     }
 

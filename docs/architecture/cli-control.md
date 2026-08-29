@@ -15,6 +15,8 @@ termigo status [--json]
 termigo identify [--json]
 termigo focus <query> [--json]
 termigo run "<task>" [--json]
+termigo query "<question>" [--timeout <secs>] [--json]
+termigo run-command <id> [--json]
 termigo pentest-run <target> [category] [--json]
 termigo pentest-status [--json]
 termigo pentest-report [target] [--json]
@@ -23,6 +25,10 @@ termigo pentest-report [target] [--json]
 The app must already be running. A command launched inside a Termigo pane targets that pane's space, even if another space or tab has UI focus. An external client without pane context falls back to the active UI context.
 
 `run "<task>"` starts a plain agent task in the app's in-app agent — the generalization of the pentest commands, with no scope fencing: the prompt is sent to the active chat session and every tool call still surfaces in the approval queue.
+
+`query "<question>"` is the headless read-only Q&A: the prompt is wrapped with a read-only directive, sent to the agent, and the final answer text is printed (the server uses a long timeout — default 300s, tune with `--timeout <secs>`). Ideal for scripting: `termigo query "what does the README say?"`.
+
+`run-command <id>` invokes a command-palette command by id (e.g. `settings.open`, `spaces.overview`) in the running app, so an external script can drive UI actions that have no agent equivalent.
 
 `status` reports platform info (version/os/arch/methods) and, when the UI is ready, enriches it with the live agent state (status, current step, stop reason, run round), the active model, the workspace root, the active session and today's spend (from the cost ledger). When the webview is still restoring, it falls back to the platform fields alone so the command still answers a health check.
 

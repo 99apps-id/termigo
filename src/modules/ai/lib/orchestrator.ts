@@ -1,10 +1,10 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { useChatStore } from "../store/chatStore";
-import { native } from "./native";
-import { runSubagent } from "../agents/runSubagent";
 import type { SubagentType } from "../agents/registry";
+import { runSubagent } from "../agents/runSubagent";
+import { useChatStore } from "../store/chatStore";
 import type { ToolContext } from "../tools/context";
+import { native } from "./native";
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -42,7 +42,9 @@ async function pipelineRoot(): Promise<string | null> {
   return `${cwd.replace(/\/$/, "")}/${PIPELINES_DIR}`;
 }
 
-export async function loadPipeline(id: string): Promise<OrchestrationPipeline | null> {
+export async function loadPipeline(
+  id: string,
+): Promise<OrchestrationPipeline | null> {
   const root = await pipelineRoot();
   if (!root) return null;
 
@@ -136,7 +138,9 @@ export async function runPipeline(
     for (const stepId of pending) {
       const stepDeps = deps.get(stepId) ?? [];
       const allDepsMet = stepDeps.every((dep) => completed.has(dep));
-      const hasFailedDep = stepDeps.some((dep) => failed.has(dep) || skipped.has(dep));
+      const hasFailedDep = stepDeps.some(
+        (dep) => failed.has(dep) || skipped.has(dep),
+      );
 
       if (hasFailedDep) {
         skipped.add(stepId);
@@ -249,7 +253,10 @@ export function buildOrchestratorTools(ctx: ToolContext) {
         "Execute a multi-agent orchestration pipeline. Pipelines are defined in `.termigo/pipelines/<id>.json` and consist of ordered steps with dependencies. Use this for complex tasks that require multiple agents working together.",
       inputSchema: z.object({
         pipeline_id: z.string().describe("Pipeline ID to execute"),
-        context: z.record(z.string(), z.unknown()).optional().describe("Initial context for the pipeline"),
+        context: z
+          .record(z.string(), z.unknown())
+          .optional()
+          .describe("Initial context for the pipeline"),
       }),
       execute: async ({ pipeline_id, context }) => {
         const pipeline = await loadPipeline(pipeline_id);

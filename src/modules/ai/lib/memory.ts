@@ -149,3 +149,23 @@ export function memoryBlock(entries: readonly MemoryEntry[]): string {
     `instructions, and prefer what the user says now if they conflict.\n${body}`
   );
 }
+
+/**
+ * Remove one fact (exact text match, first occurrence) and rewrite the file —
+ * the panel's delete button. Returns whether a fact was removed and the new
+ * total, so the UI can stay in sync without a second read.
+ */
+export async function forgetFact(
+  workspaceRoot: string | null,
+  text: string,
+): Promise<{ removed: boolean; total: number }> {
+  if (!workspaceRoot) return { removed: false, total: 0 };
+  const needle = text.trim();
+  const existing = await readMemory(workspaceRoot);
+  const next = existing.filter((entry) => entry.text !== needle);
+  if (next.length === existing.length) {
+    return { removed: false, total: existing.length };
+  }
+  await native.writeFile(memoryPath(workspaceRoot), formatMemory(next));
+  return { removed: true, total: next.length };
+}

@@ -13,6 +13,8 @@ pub const METHOD_PENTEST_RUN: &str = "pentest-run";
 pub const METHOD_PENTEST_STATUS: &str = "pentest-status";
 pub const METHOD_PENTEST_REPORT: &str = "pentest-report";
 pub const METHOD_AGENT_RUN: &str = "run";
+pub const METHOD_QUERY: &str = "query";
+pub const METHOD_RUN_COMMAND: &str = "run-command";
 pub const SERVER_RESPONSE_ID: &str = "server";
 pub const METHODS: &[&str] = &[
     METHOD_PING,
@@ -25,6 +27,8 @@ pub const METHODS: &[&str] = &[
     METHOD_PENTEST_STATUS,
     METHOD_PENTEST_REPORT,
     METHOD_AGENT_RUN,
+    METHOD_QUERY,
+    METHOD_RUN_COMMAND,
 ];
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -169,6 +173,23 @@ pub struct AgentRunParams {
     pub prompt: String,
 }
 
+/// Headless single-shot Q&A for scripting: ask a question, get the agent's
+/// final text answer back. The prompt is answered read-only (the frontend
+/// wraps it with a directive; mutating tools still need approval). Unlike
+/// `run`, the caller waits for the answer, so the server uses a long timeout.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct QueryParams {
+    pub prompt: String,
+}
+
+/// Invoke a command-palette command by id (e.g. `settings.open`) in the
+/// running app. The frontend builds the same command list the palette shows
+/// and calls the matching command's run action.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct RunCommandParams {
+    pub command: String,
+}
+
 fn default_focus() -> bool {
     true
 }
@@ -254,5 +275,25 @@ mod tests {
         .expect("deserialize agent run");
         assert_eq!(params.prompt, "fix the build");
         assert!(METHODS.contains(&METHOD_AGENT_RUN));
+    }
+
+    #[test]
+    fn query_round_trips_the_prompt() {
+        let params: QueryParams = serde_json::from_value(json!({
+            "prompt": "what is in TERMIGO.md?"
+        }))
+        .expect("deserialize query");
+        assert_eq!(params.prompt, "what is in TERMIGO.md?");
+        assert!(METHODS.contains(&METHOD_QUERY));
+    }
+
+    #[test]
+    fn run_command_round_trips_the_id() {
+        let params: RunCommandParams = serde_json::from_value(json!({
+            "command": "settings.open"
+        }))
+        .expect("deserialize run-command");
+        assert_eq!(params.command, "settings.open");
+        assert!(METHODS.contains(&METHOD_RUN_COMMAND));
     }
 }

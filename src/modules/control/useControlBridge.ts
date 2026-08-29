@@ -49,6 +49,14 @@ type AgentRunRequest = {
   prompt: string;
 };
 
+type QueryRequest = {
+  prompt: string;
+};
+
+type RunCommandRequest = {
+  command: string;
+};
+
 type UseControlBridgeOptions = {
   ready: boolean;
   tabsRef: RefObject<Tab[]>;
@@ -82,6 +90,14 @@ type UseControlBridgeOptions = {
   ) => Promise<{ ok: boolean; message?: string }>;
   /** Rich app status for `termigo status`: agent/model/workspace/cost. */
   onStatus: () => Promise<{ ok: boolean; result?: unknown; message?: string }>;
+  /** Headless read-only Q&A (`termigo query`): resolve with `{ ok, text }`. */
+  onQuery: (
+    request: QueryRequest,
+  ) => Promise<{ ok: boolean; text?: string; message?: string }>;
+  /** Invoke a command-palette command by id (`termigo run-command`). */
+  onRunCommand: (
+    request: RunCommandRequest,
+  ) => Promise<{ ok: boolean; label?: string; message?: string }>;
 };
 
 class RequestError extends Error {
@@ -151,7 +167,9 @@ export function parsePentestRunRequest(params: unknown): PentestRunRequest {
   return { target, category };
 }
 
-export function parsePentestReportRequest(params: unknown): PentestReportRequest {
+export function parsePentestReportRequest(
+  params: unknown,
+): PentestReportRequest {
   if (typeof params !== "object" || params === null) {
     throw new RequestError(
       "invalid_params",
@@ -173,6 +191,33 @@ export function parseAgentRunRequest(params: unknown): AgentRunRequest {
     throw new RequestError("invalid_params", "agent prompt is required");
   }
   return { prompt };
+}
+
+export function parseQueryRequest(params: unknown): QueryRequest {
+  if (typeof params !== "object" || params === null) {
+    throw new RequestError("invalid_params", "query parameters are required");
+  }
+  const value = params as Record<string, unknown>;
+  const prompt = typeof value.prompt === "string" ? value.prompt.trim() : "";
+  if (!prompt) {
+    throw new RequestError("invalid_params", "query prompt is required");
+  }
+  return { prompt };
+}
+
+export function parseRunCommandRequest(params: unknown): RunCommandRequest {
+  if (typeof params !== "object" || params === null) {
+    throw new RequestError(
+      "invalid_params",
+      "run-command parameters are required",
+    );
+  }
+  const value = params as Record<string, unknown>;
+  const command = typeof value.command === "string" ? value.command.trim() : "";
+  if (!command) {
+    throw new RequestError("invalid_params", "command id is required");
+  }
+  return { command };
 }
 
 const setFrontendReady = createReadinessQueue((ready) =>
@@ -204,6 +249,8 @@ export function useControlBridge({
   onPentestReport,
   onAgentRun,
   onStatus,
+  onQuery,
+  onRunCommand,
 }: UseControlBridgeOptions): void {
   useEffect(() => {
     if (!ready) return;
@@ -233,6 +280,43 @@ export function useControlBridge({
           await respond(request.id, { ok: true, result: status.result });
           return;
         }
+        if (request.method === "query") {
+          const query = parseQueryRequest(request.params);
+          try {
+            const window = getCurrentWindow();
+            await window.show();
+            await window.setFocus();
+          } catch (error) {
+            console.warn("[termigo] could not focus for query:", error);
+          }
+          const answer = await onQuery(query);
+          if (!answer.ok) {
+            throw new RequestError(
+              "query_failed",
+              answer.message ?? "could not get an answer from the agent",
+            );
+          }
+          await respond(request.id, {
+            ok: true,
+            result: { prompt: query.prompt, text: answer.text ?? "" },
+          });
+          return;
+        }
+        if (request.method === "run-command") {
+          const run = parseRunCommandRequest(request.params);
+          const result = await onRunCommand(run);
+          if (!result.ok) {
+            throw new RequestError(
+              "run_command_failed",
+              result.message ?? `unknown command '${run.command}'`,
+            );
+          }
+          await respond(request.id, {
+            ok: true,
+            result: { command: run.command, label: result.label ?? null },
+          });
+          return;
+        }
         if (request.method === "run") {
           const run = parseAgentRunRequest(request.params);
           try {
@@ -257,7 +341,10 @@ export function useControlBridge({
         }
         if (request.method === "focus") {
           const focus = parseFocusRequest(request.params);
-          const focused = onFocus({ query: focus.query, spaceId: context.space_id });
+          const focused = onFocus({
+            query: focus.query,
+            spaceId: context.space_id,
+          });
           if (!focused.ok) {
             throw new RequestError(
               "focus_failed",
@@ -410,5 +497,7 @@ export function useControlBridge({
     onPentestReport,
     onAgentRun,
     onStatus,
+    onQuery,
+    onRunCommand,
   ]);
 }

@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { saveTrajectoryRun } from "../lib/trajectoryIo";
 
 export type TrajectoryStep = {
   id: string;
@@ -95,20 +96,23 @@ export const useTrajectoryStore = create<TrajectoryState>((set) => ({
       // verdict - an aborted run flipping to "completed" would be a lie.
       if (active?.status !== "running") return state;
 
+      const finished: TrajectoryRun = {
+        ...active,
+        status,
+        finishedAt: Date.now(),
+        totalTokens: totalTokens ?? active.totalTokens,
+        totalCostUsd: totalCostUsd ?? active.totalCostUsd,
+      };
+      // Persist for the replay browser after a restart; a failed save only
+      // logs and never blocks the run from ending.
+      void saveTrajectoryRun(finished).catch(() => {});
+
       return {
         // The run is no longer open: clear the pointer so a late callback
         // cannot finish something that has already ended.
         activeRunId: null,
         runs: state.runs.map((r) =>
-          r.runId === state.activeRunId
-            ? {
-                ...r,
-                status,
-                finishedAt: Date.now(),
-                totalTokens: totalTokens ?? r.totalTokens,
-                totalCostUsd: totalCostUsd ?? r.totalCostUsd,
-              }
-            : r,
+          r.runId === finished.runId ? finished : r,
         ),
       };
     }),

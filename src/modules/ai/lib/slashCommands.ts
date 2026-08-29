@@ -1,3 +1,4 @@
+import { startPentestRun } from "@/modules/control/lib/startPentestRun";
 import {
   CheckListIcon,
   ClaudeIcon,
@@ -17,7 +18,6 @@ import {
   parseApprovalTarget,
   resolveTarget,
 } from "./approvalQueue";
-import { startPentestRun } from "@/modules/control/lib/startPentestRun";
 import { expandCommand } from "./customCommands";
 import {
   computeNextDueAt,

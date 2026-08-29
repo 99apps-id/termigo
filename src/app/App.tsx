@@ -569,7 +569,7 @@ export default function App() {
       return;
     }
     const selection = captureActiveSelection();
-    if (!selection || !selection.trim()) {
+    if (!selection?.trim()) {
       focusInput(null);
       return;
     }
@@ -683,7 +683,7 @@ ${found.foundAt}`
       const tabId = newTab(path);
       setTimeout(() => {
         const tab = tabsRef.current.find((x) => x.id === tabId);
-        if (!tab || tab.kind !== "terminal") return;
+        if (tab?.kind !== "terminal") return;
         const t = terminalRefs.current.get(tab.activeLeafId);
         if (!t) return;
         t.write(`cd ${quoteShellArg(path)}\r`);
@@ -867,7 +867,7 @@ ${found.foundAt}`
   const splitActivePaneInActiveTab = useCallback(
     (dir: "row" | "col") => {
       const t = tabsRef.current.find((x) => x.id === activeId);
-      if (!t || t.kind !== "terminal") return;
+      if (t?.kind !== "terminal") return;
       splitActivePane(activeId, dir);
     },
     [activeId, splitActivePane],
@@ -1040,7 +1040,7 @@ ${found.foundAt}`
         );
         if (!inTerminal) return false;
         const sel = captureActiveSelection();
-        return !sel || !sel.trim();
+        return !sel?.trim();
       }
       if (id === "terminal.clear") {
         // Only intercept ⌘K while a terminal is focused; elsewhere let the key
@@ -1071,7 +1071,7 @@ ${found.foundAt}`
       }
       return false;
     },
-    [activeTab],
+    [activeTab, captureActiveSelection],
   );
 
   useGlobalShortcuts(shortcutHandlers, { isDisabled: shortcutsDisabled });
@@ -1159,7 +1159,7 @@ ${found.foundAt}`
       const tab = all.find(
         (t) => t.kind === "terminal" && hasLeaf(t.paneTree, leafId),
       );
-      if (!tab || tab.kind !== "terminal") return;
+      if (tab?.kind !== "terminal") return;
       // Last pane of the last tab: quit instead of respawning a shell.
       if (leafIds(tab.paneTree).length === 1 && all.length === 1) {
         void getCurrentWindow().close();
@@ -1293,41 +1293,38 @@ ${found.foundAt}`
     />
   );
 
-  const commandPaletteItems = useMemo(
+  const allCommandItems = useMemo(
     () =>
-      commandPaletteOpen
-        ? createCommandItems({
-            tabs,
-            activeId,
-            searchTarget,
-            explorerRoot,
-            home,
-            openNewTab,
-            openNewBlock: openNewBlockTab,
-            openNewPrivate: openNewPrivateTab,
-            openNewEditor: () => setNewEditorOpen(true),
-            openNewPreview: () => openPreviewTab(""),
-            openGitGraph: openGitGraphFromContext,
-            toggleSourceControl,
-            closeActiveTabOrPane: handleCloseTabOrPane,
-            splitPaneRight: () => splitActivePaneInActiveTab("row"),
-            splitPaneDown: () => splitActivePaneInActiveTab("col"),
-            focusSearch: () => searchInlineRef.current?.focus(),
-            focusExplorerSearch: () => explorerRef.current?.focusSearch(),
-            toggleSidebar,
-            toggleAi: togglePanelAndFocus,
-            askAiSelection: askFromSelection,
-            openSettings: () => void openSettingsWindow(),
-            openKeyboardShortcuts: () => void openSettingsWindow("shortcuts"),
-            spaces: useSpaces.getState().spaces,
-            activeSpaceId,
-            openSpacesOverview: () => setSwitcherOpen(true),
-            newSpace: () => void handleNewSpace(),
-            switchSpace: (id) => useSpaces.getState().setActive(id),
-          })
-        : [],
+      createCommandItems({
+        tabs,
+        activeId,
+        searchTarget,
+        explorerRoot,
+        home,
+        openNewTab,
+        openNewBlock: openNewBlockTab,
+        openNewPrivate: openNewPrivateTab,
+        openNewEditor: () => setNewEditorOpen(true),
+        openNewPreview: () => openPreviewTab(""),
+        openGitGraph: openGitGraphFromContext,
+        toggleSourceControl,
+        closeActiveTabOrPane: handleCloseTabOrPane,
+        splitPaneRight: () => splitActivePaneInActiveTab("row"),
+        splitPaneDown: () => splitActivePaneInActiveTab("col"),
+        focusSearch: () => searchInlineRef.current?.focus(),
+        focusExplorerSearch: () => explorerRef.current?.focusSearch(),
+        toggleSidebar,
+        toggleAi: togglePanelAndFocus,
+        askAiSelection: askFromSelection,
+        openSettings: () => void openSettingsWindow(),
+        openKeyboardShortcuts: () => void openSettingsWindow("shortcuts"),
+        spaces: useSpaces.getState().spaces,
+        activeSpaceId,
+        openSpacesOverview: () => setSwitcherOpen(true),
+        newSpace: () => void handleNewSpace(),
+        switchSpace: (id) => useSpaces.getState().setActive(id),
+      }),
     [
-      commandPaletteOpen,
       tabs,
       activeId,
       searchTarget,
@@ -1348,6 +1345,9 @@ ${found.foundAt}`
       handleNewSpace,
     ],
   );
+  // The palette shows the commands only while open; the same list backs
+  // `termigo run-command <id>` so an external caller can invoke one by id.
+  const commandPaletteItems = commandPaletteOpen ? allCommandItems : [];
 
   const pendingEditorNavigation = useRef<
     Map<number, { line?: number; focus: boolean }>
@@ -1474,6 +1474,29 @@ ${found.foundAt}`
   const runAgent = useCallback((request: { prompt: string }) => {
     return runAgentTask(request.prompt);
   }, []);
+  // `termigo query "<question>"`: headless read-only Q&A that returns the
+  // agent's final answer.
+  const answerQuery = useCallback((request: { prompt: string }) => {
+    return import("@/modules/control/lib/queryAgent").then(({ runQuery }) =>
+      runQuery(request.prompt),
+    );
+  }, []);
+  // `termigo run-command <id>`: invoke a command-palette command by id.
+  const runCommandById = useCallback(
+    async (request: { command: string }) => {
+      const item = allCommandItems.find((c) => c.id === request.command);
+      if (!item) {
+        return { ok: false, message: `unknown command '${request.command}'` };
+      }
+      try {
+        item.run();
+        return { ok: true, label: item.title };
+      } catch (error) {
+        return { ok: false, message: String(error) };
+      }
+    },
+    [allCommandItems],
+  );
   // `termigo status`: platform info the Rust side cannot know plus the live
   // agent/model/workspace/cost state. Version/arch/cost are read lazily so the
   // eager startup bundle stays untouched.
@@ -1539,6 +1562,8 @@ ${found.foundAt}`
     onPentestReport: runPentestReport,
     onAgentRun: runAgent,
     onStatus: readAppStatus,
+    onQuery: answerQuery,
+    onRunCommand: runCommandById,
   });
 
   useEffect(() => {

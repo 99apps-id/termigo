@@ -130,6 +130,62 @@ func (s *Server) handleRequest(out io.Writer, req RPCRequest) {
 				},
 			},
 		})
+		// Control-plane mirror: drive a running Termigo the same way the
+		// bundled `termigo` CLI does. The app must be running (it owns the
+		// control endpoint + token); every agent-driving call stays
+		// approval-gated in the app.
+		tools = append(tools, Tool{
+			Name:        "termigo_status",
+			Description: "Report Termigo's version, platform and live state (agent status, active model, workspace, today's cost)",
+			InputSchema: map[string]interface{}{
+				"type":       "object",
+				"properties": map[string]interface{}{},
+			},
+		})
+		tools = append(tools, Tool{
+			Name:        "termigo_focus",
+			Description: "Focus a Termigo tab whose title, path or cwd matches the query",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"query": map[string]string{"type": "string", "description": "Substring of a tab's title, path or label"},
+				},
+				"required": []string{"query"},
+			},
+		})
+		tools = append(tools, Tool{
+			Name:        "termigo_open",
+			Description: "Open a file in a Termigo editor tab (must be inside an authorized workspace)",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"path": map[string]string{"type": "string", "description": "Absolute file path to open"},
+				},
+				"required": []string{"path"},
+			},
+		})
+		tools = append(tools, Tool{
+			Name:        "termigo_run",
+			Description: "Start an approval-gated agent task in Termigo's in-app agent (non-blocking)",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"prompt": map[string]string{"type": "string", "description": "The task to run"},
+				},
+				"required": []string{"prompt"},
+			},
+		})
+		tools = append(tools, Tool{
+			Name:        "termigo_query",
+			Description: "Ask Termigo's agent a read-only question and wait for the text answer (can take minutes)",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"prompt": map[string]string{"type": "string", "description": "The question to answer read-only"},
+				},
+				"required": []string{"prompt"},
+			},
+		})
 		s.sendResult(out, req.ID, map[string]interface{}{"tools": tools})
 
 	case "tools/call":
@@ -187,6 +243,21 @@ func (s *Server) handleRequest(out io.Writer, req RPCRequest) {
 			s.sendResult(out, req.ID, map[string]interface{}{
 				"content": []map[string]string{
 					{"type": "text", "text": redactOutput(text)},
+				},
+			})
+			return
+		}
+
+		// Control-plane mirror tools (termigo_status/focus/open/run/query).
+		if isControlTool(params.Name) {
+			text, err := callControlTool(params.Name, params.Arguments)
+			if err != nil {
+				s.sendError(out, req.ID, -32002, err.Error())
+				return
+			}
+			s.sendResult(out, req.ID, map[string]interface{}{
+				"content": []map[string]string{
+					{"type": "text", "text": text},
 				},
 			})
 			return
