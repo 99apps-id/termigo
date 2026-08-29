@@ -44,6 +44,12 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
 - xterm.js with WebGL renderer, multi-tab with background streaming
 - Split panels (horizontal and vertical)
 - Inline search, link detection, true-color
+- Programs that set the terminal title (ssh, htop, a `title` builtin) name the
+  tab; long-running commands report progress on the taskbar (OSC 9;4)
+- Dev-server URLs printed in a terminal are detected and open in the embedded
+  browser with one click
+- Flow-controlled write path stays responsive under a flood of output (and when
+  the screen is locked), instead of growing an unbounded backlog
 - Drag files from the explorer into a terminal as shell-safe quoted paths
 - Per-tab workspace environments on Windows (Local or WSL distro)
 - Spaces restore tabs, working directories, and split layouts across launches
@@ -99,12 +105,15 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   asked politely in a prompt to parallelise will ignore it; a narrow request is
   left alone, and telling it not to use sub-agents is respected.
 
-  **They read; they do not write.** A sub-agent's tools are `read_file`,
-  `list_directory`, `grep` and `glob`, and what it returns is a written summary,
-  not code. So a batch can explore widely with nothing changed behind you — but
-  asking for a site to be built does not become four builders working at once.
-  The main agent still makes every edit, in order. Concurrent writing needs an
-  approval flow that a headless run does not have yet.
+  **Full toolset, held by approval — not read-only.** A sub-agent gets the same
+  tools as the main agent (read, search, edit, shell, git, extensions), so it
+  can actually do the job it was given; what keeps that safe is that every
+  mutating, exec or third-party call routes through the same approval queue, so
+  nothing runs without your click. The one thing withheld is `run_subagent`
+  itself, so a sub-agent cannot spawn its own and nest without bound. Alongside
+  the general roster there are focused **pentest specialists**
+  (`pentest-recon`, `pentest-web`, `pentest-network`) the main agent can dispatch
+  in parallel on one authorized, in-scope target.
 - **One reasoning block per run, not one per step.** The agent's thinking is
   collected into a single block that scrolls, instead of a new "Reasoned" label
   stacking up on every step and pushing the answer off screen. The tool calls it
@@ -116,6 +125,9 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   line says which part was slow — an MCP server starting, a large project
   memory, a cold cache — instead of leaving you to guess. Most of the fixes in
   recent releases were found by reading it.
+- **Searchable chat history.** Sessions persist across launches; the session
+  picker filters them by title as you type and, on demand, by what was actually
+  said in the messages.
 - **Steer, stop and resume a run.** Typing while the agent works queues the
   message and delivers it when the current run settles, so a correction reaches
   it instead of being dropped — attachments included. Queued messages are shown
@@ -279,6 +291,12 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
 - Custom themes built in-app, bundled presets, background images with
   adjustable opacity and blur
 - Editor theme is independent from the app theme
+- Light and dark themes tuned for legible contrast (WCAG-aware muted text,
+  visible control edges, and readable syntax highlighting)
+- **Interface language:** English or Bahasa Indonesia (Settings › General)
+- **Settings backup & restore:** export every preference to a JSON file and
+  restore it on another machine (secrets stay in the OS keychain, never in the
+  file)
 
 ## Getting started
 

@@ -9,6 +9,7 @@ The canonical commands are what CI runs (`.github/workflows/ci.yml`):
 ```bash
 pnpm lint
 pnpm check-types
+pnpm check:commands               # every invoke("x") has a registered Rust command
 pnpm test
 
 cd src-tauri
@@ -17,6 +18,13 @@ cargo nextest run --locked        # CI uses nextest
 ```
 
 If you do not have `cargo-nextest` installed, `cargo test --locked` is the local fallback. Install nextest with `cargo install cargo-nextest`.
+
+`pnpm check:commands` (`scripts/check-invoke-commands.mjs`) cross-checks every
+string-literal `invoke("cmd")` in `src/` against the commands registered in
+`src-tauri/src/lib.rs`'s `generate_handler!`, and fails on any that is missing —
+the "referenced from the UI but never registered" bug that shipped SSH backup
+broken. If a command is genuinely dynamic or handled outside `generate_handler!`,
+add it to the `ALLOWLIST` in that script with a comment saying why.
 
 ## What must have a test
 
