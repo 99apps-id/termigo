@@ -6728,7 +6728,7 @@ dependencies = [
 
 [[package]]
 name = "termigo"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "base64 0.23.1",
  "bytes",
@@ -6785,7 +6785,7 @@ dependencies = [
 
 [[package]]
 name = "termigo-cli"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "dirs 6.0.0",
  "libc",
@@ -6797,7 +6797,7 @@ dependencies = [
 
 [[package]]
 name = "termigo-control-protocol"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "serde",
  "serde_json",
