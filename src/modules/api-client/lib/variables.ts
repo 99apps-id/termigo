@@ -28,6 +28,8 @@ export function substituteVariables(
 ): string {
   return input.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (whole, name: string) => {
     const key = name.trim();
-    return Object.hasOwn(variables, key) ? variables[key] : whole;
+    return Object.prototype.hasOwnProperty.call(variables, key)
+      ? variables[key]
+      : whole;
   });
 }
