@@ -186,6 +186,13 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     // Queue size, so the run can yield at the next step when a NEW task is typed
     // while it works (see getSteerCount in the transport).
     getSteerCount: () => useChatStore.getState().steerQueue.pending.length,
+    onRoundStart: () => {
+      // Fires once per agentic-loop round (each sendMessages) so the UI can
+      // show "Round N · step X" and a user can tell the run is still going.
+      useChatStore.getState().patchAgentMeta({
+        round: useChatStore.getState().agentMeta.round + 1,
+      });
+    },
     onStep: (step) => {
       useChatStore.getState().patchAgentMeta({ step });
     },
@@ -428,6 +435,9 @@ export async function sendParts(
       useChatStore.getState().queueSteer({ preview: previewOf(parts), parts });
       return true;
     case "send":
+      // A fresh user turn resets the loop-round counter; the first model call
+      // of this turn will bump it to 1.
+      useChatStore.getState().patchAgentMeta({ round: 0 });
       await c.sendMessage({ role: "user", parts } as Parameters<
         typeof c.sendMessage
       >[0]);
@@ -460,6 +470,8 @@ export async function flushSteer(): Promise<boolean> {
   if (!sessionId) return false;
   // A queued correction is the user's own input, so it supersedes a stop.
   stopLatch.delete(sessionId);
+  // A fresh user turn resets the loop-round counter (see sendParts).
+  store.patchAgentMeta({ round: 0 });
   // A run that yielded to this queued task set stopReason "steered"; clear it so
   // no stale "Continue" prompt lingers as the queued task takes over.
   store.patchAgentMeta({ stopReason: null, stoppedByUser: false });

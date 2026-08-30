@@ -136,6 +136,9 @@ type Deps = {
   getCustomEndpoints?: () => readonly CustomEndpoint[];
   getCustomEndpointKeys?: () => CustomEndpointKeys;
   onStep?: (step: string | null) => void;
+  /** Fires at the start of every agentic-loop round (each `sendMessages`), so
+   *  the UI can surface "Round N" and a user can tell a run is progressing. */
+  onRoundStart?: () => void;
   onUsage?: (delta: AgentUsageDelta) => void;
   onCompact?: (info: { droppedCount: number }) => void;
   onRemember?: (info: { fact: string }) => void;
@@ -225,6 +228,7 @@ export function createContextAwareTransport(deps: Deps) {
 
   const run = async (options: SendOptions) => {
     logInfo(`[ai] run: start (${options.messages.length} messages)`);
+    deps.onRoundStart?.();
     const live = deps.getLive();
     // Baseline the queue so the run yields only to a task typed WHILE it runs,
     // not to tasks already waiting (which are delivered one at a time on settle).

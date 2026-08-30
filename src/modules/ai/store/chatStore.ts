@@ -123,6 +123,14 @@ export type AgentMeta = {
   /** Rounds spent on the current task (0-based). Reset by a new user message,
    *  raised by Continue, and read to pick this round's step budget. */
   runRound: number;
+  /**
+   * The agentic-loop round, i.e. how many fresh model calls this run has made
+   * (each `sendMessages`). Increments every time the agent starts a new round
+   * and is reset when a new user turn begins. Lets the UI show "Round N · step
+   * X" so a user can tell a long run is still progressing, rather than looking
+   * stuck. Distinct from `runRound` (the resume budget tier).
+   */
+  round: number;
   /** The user pressed stop, so the transcript can offer to resume. */
   stoppedByUser: boolean;
   compactionNotice: { droppedCount: number; at: number } | null;
@@ -147,6 +155,7 @@ const IDLE_META: AgentMeta = {
   lastCachedTokens: 0,
   stopReason: null,
   runRound: 0,
+  round: 0,
   stoppedByUser: false,
   compactionNotice: null,
   memoryNotice: null,

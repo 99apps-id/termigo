@@ -208,6 +208,7 @@ export function AiChatView({
   const step = useChatStore((s) => s.agentMeta.step);
   const stopReason = useChatStore((s) => s.agentMeta.stopReason);
   const runRound = useChatStore((s) => s.agentMeta.runRound);
+  const round = useChatStore((s) => s.agentMeta.round);
   const compactionNotice = useChatStore((s) => s.agentMeta.compactionNotice);
   const memoryNotice = useChatStore((s) => s.agentMeta.memoryNotice);
   const patchAgentMeta = useChatStore((s) => s.patchAgentMeta);
@@ -276,10 +277,14 @@ export function AiChatView({
         {showSpinner && (
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Spinner />
-            <span className="truncate">{step ?? "Thinking…"}</span>
+            <span className="truncate">
+              {round > 0
+                ? `Round ${round} · ${step ?? "Thinking…"}`
+                : (step ?? "Thinking…")}
+            </span>
           </div>
         )}
-        {isBusy && <TrajectoryThinkingHUD />}
+        {isBusy && <TrajectoryThinkingHUD round={round} />}
         {showContinue && (
           <ContinueRow
             kind={continueKind}
