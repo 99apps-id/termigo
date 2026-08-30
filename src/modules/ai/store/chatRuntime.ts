@@ -145,6 +145,9 @@ function ensureOnlineListener(): void {
 }
 
 function makeChat(sessionId: string): Chat<UIMessage> {
+  // Set when the loop cap (not the user) refuses a round, so the AbortError it
+  // surfaces is settled as an automatic stop rather than a "user stopped".
+  let loopCapRefused = false;
   const readCache = new Map<string, { size: number; hash: number }>();
   const toolContext: ToolContext = {
     getCwd: () =>
@@ -256,7 +259,11 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       // Aggregate loop cap: stop a run that keeps calling tools round after
       // round without producing a final summary.
       if (useChatStore.getState().agentMeta.round >= MAX_LOOP_ROUNDS) {
-        useChatStore.getState().patchAgentMeta({ stopReason: "step-cap" });
+        loopCapRefused = true;
+        useChatStore.getState().patchAgentMeta({
+          stopReason: "step-cap",
+          stoppedByUser: false,
+        });
         return true;
       }
       return false;
@@ -365,6 +372,16 @@ function makeChat(sessionId: string): Chat<UIMessage> {
         (e as { name?: string })?.name === "AbortError" ||
         /\baborted\b/i.test(raw);
       if (aborted) {
+        // A loop-cap refusal is an automatic stop, not a user stop.
+        if (loopCapRefused) {
+          loopCapRefused = false;
+          useChatStore.getState().patchAgentMeta({
+            status: "idle",
+            error: null,
+            stoppedByUser: false,
+          });
+          return;
+        }
         useChatStore.getState().patchAgentMeta({
           status: "idle",
           error: null,
