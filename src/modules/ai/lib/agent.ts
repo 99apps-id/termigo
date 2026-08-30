@@ -31,6 +31,7 @@ import {
   selectSystemPrompt,
 } from "../config";
 import { useDebugStore } from "../store/debugStore";
+import { useTodosStore } from "../store/todoStore";
 import { useTrajectoryStore } from "../store/trajectoryStore";
 import { formatInvariantsBlock } from "../tools/invariant";
 import { buildTools, type ToolContext } from "../tools/tools";
@@ -1189,6 +1190,16 @@ export async function runAgentStream(opts: RunAgentOptions) {
         totalTokens: runInput + runOutput,
         totalCostUsd: runCost > 0 ? runCost : undefined,
       });
+
+      // A clean finish means the model decided it was done (its last step was a
+      // summary, no more tools). If it forgot to check off the item it was
+      // actively working on, mark it complete now so the todo list reflects the
+      // run instead of leaving everything unchecked. Pending items are left
+      // alone — those may genuinely be unfinished.
+      if (!settledStop) {
+        const sessionId = opts.toolContext.getSessionId();
+        if (sessionId) useTodosStore.getState().completeInProgress(sessionId);
+      }
 
       // One line per run, in the app log rather than only on screen.
       //

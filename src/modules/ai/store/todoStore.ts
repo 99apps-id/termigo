@@ -1,8 +1,8 @@
 import { create } from "zustand";
 import {
   belongsToWorkspace,
-  deleteTodos as persistDelete,
   EMPTY_RECORD,
+  deleteTodos as persistDelete,
   loadTodos as persistLoad,
   saveTodos as persistSave,
   standDownRunning,
@@ -23,6 +23,12 @@ type TodosState = {
   ) => void;
   /** Stand down anything still marked running, once a run has stopped. */
   runStopped: (sessionId: string) => void;
+  /**
+   * Mark the currently `in_progress` item completed. Called when a run settles
+   * cleanly, as a fallback for the model forgetting to check the item it was
+   * actively working on. Leaves `pending` items alone (those may be unfinished).
+   */
+  completeInProgress: (sessionId: string) => void;
   clearSession: (sessionId: string) => Promise<void>;
 };
 
@@ -56,6 +62,19 @@ export const useTodosStore = create<TodosState>((set, get) => ({
     // Reference equality means nothing was running, so nothing to write.
     if (items === current.items) return;
     const record: TodoRecord = { ...current, items };
+    set((s) => ({ bySession: { ...s.bySession, [sessionId]: record } }));
+    void persistSave(sessionId, record);
+  },
+
+  completeInProgress(sessionId) {
+    const current = get().bySession[sessionId];
+    if (!current) return;
+    const update = (items: Todo[]) =>
+      items.map((t) =>
+        t.status === "in_progress" ? { ...t, status: "completed" as const } : t,
+      );
+    if (!current.items.some((t) => t.status === "in_progress")) return;
+    const record: TodoRecord = { ...current, items: update(current.items) };
     set((s) => ({ bySession: { ...s.bySession, [sessionId]: record } }));
     void persistSave(sessionId, record);
   },
