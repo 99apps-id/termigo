@@ -20,12 +20,7 @@ Production-grade or it does not ship. Every change is judged against all of thes
 - **UI/UX**: polished, professional, premium. Every state and detail considered.
 - **Architecture**: new or changed logic lives in pure, dependency-light functions (functional core); tauri commands and React components stay thin (imperative shell). Keeps it testable without a later rewrite.
 
-Verify before claiming done:
-
-- Frontend: `pnpm lint`, `pnpm check-types`, `pnpm test`
-- Rust: `cd src-tauri && cargo clippy --all-targets --locked -- -D warnings`, `cd src-tauri && cargo nextest run --locked` (or `cargo test --locked`)
-
-A change to a core subsystem (terminal/shell spawn, workspace auth, git, fs, IPC or AI tool surface) needs a test that locks the invariant.
+Verify: `pnpm lint`/`check-types`/`test`; Rust `cargo clippy --all-targets --locked -- -D warnings`, `cargo nextest run --locked` (fallback `cargo test`). A core-subsystem change (terminal/shell, workspace auth, git, fs, IPC or AI tools) needs a test that locks the invariant.
 
 ## Conventions
 
@@ -116,4 +111,4 @@ Per-platform window styling, the capability allowlist and bundle / updater confi
 
 Long-form contributor guides live under `docs/`. These guides elaborate on `TERMIGO.md`; if anything conflicts, `TERMIGO.md` wins.
 
-`docs/README.md` indexes them. Under `docs/architecture/`: `module-layout` (every frontend module in full), `two-process-model` (IPC and command reference), `pty-shell-integration`, `ai-subsystem` (sub-agents, tools, approval, adding a provider), `security-model`, `platform-and-bundle`, `terminal-renderer-pool`, `cli-control`. Under `docs/contributing/`: `testing`.
+`docs/README.md` indexes them. Under `docs/architecture/`: `module-layout` (every frontend module in full), `two-process-model` (IPC + command reference), `pty-shell-integration`, `ai-subsystem` (sub-agents, tools, approval, adding a provider), `security-model`, `platform-and-bundle`, `terminal-renderer-pool`, `cli-control`. Under `docs/contributing/`: `testing`.
