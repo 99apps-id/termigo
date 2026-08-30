@@ -201,8 +201,11 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   so a task, its edits, approvals and memory all behave exactly as if you had
   typed in the chat. Configured in Settings → Agents → Telegram relay (the
   token lives in the OS keychain, never a settings file). The bot answers
-  `/status`, `/help`, `/query <question>`, `/run <task>`, `/stop`, `/new` and
-  `/cost`, and shows a live status chip in the AI status bar. It long-polls
+  `/status`, `/help`, `/query <question>`, `/run <task>`, `/stop`, `/new`,
+  `/model` (an interactive provider → model picker for the models active in
+  Termigo, including custom endpoints such as StepFun) and `/cost`, and shows a
+  live status chip in the AI status bar. Just type a question or task directly
+  — no `/query` prefix needed. It long-polls
   from the desktop app, so it is only reachable while Termigo is open.
 - **Deleting is never delegated.** No mode speaks for you here, including
   `Auto-approve all`: `delete_file` always asks, and so does any command that
@@ -485,11 +488,29 @@ See [`docs/`](docs/) for the MCP, skills, agents, and architecture guides.
 </p>
 
 <p align="center">
-  <img src="docs/termigo-model.png" alt="Provider and model settings" width="900" />
+  <img src="docs/termigo-model-picker.png" alt="Picking a model by provider" width="900" />
   <br/>
   <sub>
-    Settings → Models: connect providers (keys in the OS keychain), pick the
-    chat and autocomplete models, and turn on voice input
+    Picking a model: choose a provider, then a model. Only the providers active
+    in Termigo are offered, and custom endpoints such as StepFun appear too
+  </sub>
+</p>
+
+<p align="center">
+  <img src="docs/termigo-custom-agents.png" alt="Custom coding agents in Settings" width="900" />
+  <br/>
+  <sub>
+    Settings → Agents: register a user-defined coding-agent CLI so it becomes a
+    first-class target for the agent and the launch panel
+  </sub>
+</p>
+
+<p align="center">
+  <img src="docs/termigo-telegram.png" alt="Telegram relay with a model menu" width="900" />
+  <br/>
+  <sub>
+    Telegram relay: message the agent from your phone — just type a question (no
+    /query needed), and /model opens a provider + model picker
   </sub>
 </p>
 
