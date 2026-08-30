@@ -3,13 +3,23 @@
 //
 // The bot long-polls the Telegram Bot API from the webview (CSP already allows
 // `https:`). It only runs while the app is open, which is what a desktop relay
-// wants. Structure is complete; /query and /run submit a task and ack, and a
-// later enhancement can stream the final answer back.
+// wants. /query and /run submit a task, ack immediately, then stream the
+// agent's final answer back to the chat once the run settles.
 
 import { getTelegramToken } from "./keyring";
 import { useTelegramStore } from "./store";
 
 const API = "https://api.telegram.org";
+
+/** Minimal view of a chat + its messages, so we read the final answer without
+ *  pulling the full AI SDK types into this module. */
+type ChatLike = {
+  status?: string;
+  messages: Array<{
+    role: string;
+    parts?: Array<{ type?: string; text?: string }>;
+  }>;
+};
 
 type Update = {
   update_id: number;
@@ -87,13 +97,123 @@ async function buildStatus(): Promise<string> {
     .join("\n");
 }
 
-async function dispatchToAgent(text: string): Promise<void> {
-  const chat = await import("../ai/store/chatRuntime");
-  const state = await import("../ai/store/chatStore");
-  if (!state.useChatStore.getState().activeSessionId) {
-    state.useChatStore.getState().newSession();
+/** Number of assistant messages in a session (used as a baseline to detect a
+ *  fresh answer after our dispatch). */
+function countAssistantMessages(
+  getChat: (id: string) => ChatLike | undefined,
+  sessionId: string,
+): number {
+  const chat = getChat(sessionId);
+  return chat ? chat.messages.filter((m) => m.role === "assistant").length : 0;
+}
+
+/** Extract the final assistant text, considering only assistant messages newer
+ *  than the `sinceCount` baseline captured before the dispatch. */
+function lastAssistantText(
+  getChat: (id: string) => ChatLike | undefined,
+  sessionId: string,
+  sinceCount: number,
+): string | null {
+  const chat = getChat(sessionId);
+  if (!chat) return null;
+  const assistants = chat.messages.filter((m) => m.role === "assistant");
+  const relevant = assistants.slice(sinceCount);
+  if (relevant.length === 0) return null;
+  const last = relevant[relevant.length - 1];
+  const text = (last.parts ?? [])
+    .filter((p): p is { type: "text"; text: string } => p.type === "text")
+    .map((p) => p.text)
+    .join("\n");
+  return text.trim() || null;
+}
+
+function runBusy(chatStatus: string, appStatus: string): boolean {
+  return (
+    chatStatus === "submitted" ||
+    chatStatus === "streaming" ||
+    appStatus === "thinking" ||
+    appStatus === "streaming" ||
+    appStatus === "awaiting-approval"
+  );
+}
+
+/**
+ * Wait until the dispatched run produces a fresh assistant answer and settles.
+ * Returns the text to send back, or a short status line when nothing came.
+ */
+async function waitForReply(
+  store: typeof import("../ai/store/chatStore"),
+  signal: AbortSignal,
+  sessionId: string,
+  baseline: number,
+): Promise<string> {
+  const started = Date.now();
+  const MAX_WAIT = 30 * 60 * 1000;
+  while (!signal.aborted && Date.now() - started < MAX_WAIT) {
+    const appStatus = store.useChatStore.getState().agentMeta.status;
+    const chatStatus = store.getChat(sessionId)?.status ?? "";
+    const busy = runBusy(chatStatus, appStatus);
+    const count = countAssistantMessages(store.getChat, sessionId);
+    const queued = store.useChatStore.getState().steerQueue.pending.length > 0;
+
+    if (count > baseline) {
+      // A fresh answer exists; send it once the run has settled and nothing is
+      // still queued behind our message.
+      if (!busy && !queued) {
+        return (
+          lastAssistantText(store.getChat, sessionId, baseline) ??
+          "Run finished."
+        );
+      }
+    } else if (!busy && Date.now() - started > 25_000) {
+      // Never produced a new assistant message — likely a refusal/error.
+      const err = store.useChatStore.getState().agentMeta.error;
+      return err
+        ? `Run ended with an error: ${err}`
+        : "Run produced no text output.";
+    }
+    await sleep(signal, 1500);
   }
-  await chat.sendMessage(text);
+  return "Run is still in progress or waiting for approval in Termigo — the result is not streamed here.";
+}
+
+/**
+ * Submit a task to the in-app agent and stream its final answer back to the
+ * calling Telegram chat. Runs in the background so the long-poll stays open.
+ */
+async function dispatchAndStream(
+  text: string,
+  chatId: number,
+  signal: AbortSignal,
+): Promise<void> {
+  try {
+    const store = await import("../ai/store/chatStore");
+    const runtime = await import("../ai/store/chatRuntime");
+    if (!store.useChatStore.getState().activeSessionId) {
+      store.useChatStore.getState().newSession();
+    }
+    const sessionId = store.useChatStore.getState().activeSessionId;
+    if (!sessionId) return;
+    const baseline = countAssistantMessages(store.getChat, sessionId);
+    const accepted = await runtime.sendMessage(text);
+    if (!accepted) {
+      await sendTelegram(
+        chatId,
+        "Could not start the agent run — check the model / API key.",
+        signal,
+      );
+      return;
+    }
+    const reply = await waitForReply(store, signal, sessionId, baseline);
+    await sendTelegram(chatId, reply, signal);
+  } catch (e) {
+    if (signal.aborted) return;
+    await sendTelegram(
+      chatId,
+      `Error during run: ${e instanceof Error ? e.message : String(e)}`,
+      signal,
+    ).catch(() => {});
+  }
 }
 
 const HELP = [
@@ -158,7 +278,7 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
           signal,
         ));
       await sendTelegram(chatId, "Running query in the app…", signal);
-      await dispatchToAgent(tail);
+      void dispatchAndStream(tail, chatId, signal);
       return;
     }
     case "/run": {
@@ -169,7 +289,7 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
         "Task submitted — the agent works in the app.",
         signal,
       );
-      await dispatchToAgent(tail);
+      void dispatchAndStream(tail, chatId, signal);
       return;
     }
     case "/stop": {
