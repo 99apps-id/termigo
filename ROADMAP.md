@@ -130,7 +130,6 @@ The themes below frame every scope decision.
 
 - [ ] AI-powered inline terminal suggestions, opt-in (history-based suggestions have shipped)
 - [ ] AI agent reliability and workflow improvements (tool execution, context management, recovery, and long-running tasks)
-- [ ] Sub-agents that write, not only read - the concurrent-approval flow needs designing first
 - [ ] Expand external coding-agent orchestration beyond Claude Code
 - [ ] Extensible slash commands (a fixed set has shipped; skills are done)
 - [ ] Project-scoped approval policies and per-tool trust (the auto-approve modes have shipped)

@@ -181,13 +181,13 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
 - Tool calls are **approval-gated**; approvals resume the run (including
   OpenAI-compatible providers such as DeepSeek)
 - **Graduated auto-approval.** Choose how much the agent may do without
-  stopping: `Ask every time` (default), `Auto-approve edits` (file changes in
-  the workspace run, commands and agent hand-offs still ask), or
-  `Auto-approve all`. The mode is always visible in the AI status bar, never
-  buried in settings. Crucially it changes only *what stops for a click*: the
-  path and shell-command safety checks run inside every tool regardless, so no
-  mode can authorise something the safety layer refuses. Read-only tools never
-  asked in the first place.
+  stopping: `Auto-approve all` (the default for a fresh install), `Auto-approve
+  edits` (file changes in the workspace run, commands and agent hand-offs still
+  ask), or `Ask every time`. The mode is always visible in the AI status bar,
+  never buried in settings. Crucially it changes only *what stops for a click*:
+  the path and shell-command safety checks run inside every tool regardless, so
+  no mode can authorise something the safety layer refuses. Read-only tools
+  never asked in the first place.
 - **Deleting is never delegated.** No mode speaks for you here, including
   `Auto-approve all`: `delete_file` always asks, and so does any command that
   removes files — `rm`, `rmdir`, `git clean`, `find -delete`, PowerShell's
