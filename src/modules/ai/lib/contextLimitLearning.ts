@@ -22,6 +22,10 @@ const budgetScale = new Map<ModelId, number>();
  *  with no numbers in it can shrink relative to what just failed, not the
  *  configured window. */
 const lastAttempted = new Map<ModelId, number>();
+/** The window we believe a model has (configured, refined by a learned real
+ *  limit). Used to gauge how full a successful request got without waiting for
+ *  the first overflow to learn the cap. */
+const knownWindow = new Map<ModelId, number>();
 
 const MIN_SCALE = 0.12;
 const MIN_LIMIT = 8_000;
@@ -98,6 +102,7 @@ export function effectiveContextLimit(
 ): number {
   const real = realLimit.get(modelId);
   const base = real ? Math.min(configured, real) : configured;
+  if (!knownWindow.has(modelId)) knownWindow.set(modelId, base);
   const scale = budgetScale.get(modelId) ?? 1;
   const result = Math.max(Math.floor(base * scale), MIN_LIMIT);
   // Remember what we actually targeted so a numberless overflow can shrink
@@ -109,18 +114,31 @@ export function effectiveContextLimit(
 /**
  * After a request SUCCEEDS, feed back its real input-token count so the scale
  * can relax once the conversation is small again — otherwise a single overflow
- * would over-compact the model forever.
+ * would over-compact the model forever. It also TIGHTENS the scale when the
+ * request used most of the window, so the next round compacts earlier and the
+ * transcript cannot grow past the limit and dead-end the chat.
  */
 export function noteSuccessfulRequest(
   modelId: string,
   realInputTokens: number,
 ): void {
+  if (!modelId || realInputTokens <= 0) return;
+  const window = knownWindow.get(modelId) ?? realLimit.get(modelId);
+  if (!window) return;
+  // Near the limit even though this request fit — the next round appends more
+  // (assistant text plus tool results), so tighten so compaction trims before
+  // the transcript overflows instead of hard-failing after a few rounds.
+  if (realInputTokens > 0.7 * window) {
+    const prev = budgetScale.get(modelId) ?? 1;
+    budgetScale.set(modelId, Math.max(MIN_SCALE, Math.min(prev, 0.85)));
+    return;
+  }
   const scale = budgetScale.get(modelId);
   if (!scale || scale >= 1) return;
   const real = realLimit.get(modelId);
   if (!real) return;
   // Plenty of headroom used → we over-tightened; ease the scale back up.
-  if (realInputTokens > 0 && realInputTokens < 0.45 * real) {
+  if (realInputTokens < 0.45 * real) {
     budgetScale.set(modelId, Math.min(1, scale * 1.4));
   }
 }
@@ -130,4 +148,5 @@ export function resetContextLearning(): void {
   realLimit.clear();
   budgetScale.clear();
   lastAttempted.clear();
+  knownWindow.clear();
 }

@@ -51,12 +51,16 @@ import { useSessionDirectiveStore } from "./sessionDirectiveStore";
 import { useTodosStore } from "./todoStore";
 
 // How close a context-overflow auto-resume may follow the previous one, per
-// session. Prevents a run that cannot ever be compacted under the window (e.g.
-// the system prompt + tool schemas alone exceed it) from looping forever: the
-// first overflow retries automatically, a second one within this window falls
-// back to the manual "Try again" button.
-const OVERFLOW_AUTO_RESUME_MS = 60_000;
+// session, and how many it may attempt before giving up. A run that cannot
+// ever be compacted under the window (e.g. the system prompt + tool schemas
+// alone exceed it) would otherwise loop forever, so we cap the retries; but a
+// single overflow should not hard-stop the chat, because each retry compacts
+// harder (the learned scale shrinks), so a long but recoverable transcript
+// keeps going instead of dead-ending on "Request failed".
+const OVERFLOW_AUTO_RESUME_MS = 30_000;
+const MAX_OVERFLOW_RESUMES = 3;
 const overflowAutoResumeAt = new Map<string, number>();
+const overflowAutoResumeCount = new Map<string, number>();
 
 // Sessions the user has explicitly stopped since the last user-initiated send.
 // `Chat.stop()` aborts the in-flight round, but the Chat may still auto-continue
@@ -239,6 +243,11 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       useChatStore.getState().patchAgentMeta({ stopReason: info.stopReason });
       useChatStore.getState().setLastRun(info.metrics);
       useChatStore.getState().syncRunMeta();
+      // A run that actually finished (not an overflow error) means the request
+      // fit this time — allow the session to auto-resume on a future overflow
+      // instead of exhausting its retry budget permanently.
+      const fr = info.finishReason ?? "";
+      if (fr && fr !== "error") overflowAutoResumeCount.delete(sessionId);
       // Remember what this run cost. The estimate only exists for priced
       // models, so unknown ones record nothing rather than a false zero.
       const m = info.metrics;
@@ -338,8 +347,14 @@ function makeChat(sessionId: string): Chat<UIMessage> {
         const sessionId = useChatStore.getState().activeSessionId;
         const now = Date.now();
         const lastAuto = overflowAutoResumeAt.get(sessionId ?? "") ?? 0;
-        if (sessionId && now - lastAuto > OVERFLOW_AUTO_RESUME_MS) {
+        const attempts = overflowAutoResumeCount.get(sessionId ?? "") ?? 0;
+        if (
+          sessionId &&
+          attempts < MAX_OVERFLOW_RESUMES &&
+          now - lastAuto > OVERFLOW_AUTO_RESUME_MS
+        ) {
           overflowAutoResumeAt.set(sessionId, now);
+          overflowAutoResumeCount.set(sessionId, attempts + 1);
           useChatStore.getState().patchAgentMeta({
             status: "thinking",
             error: null,

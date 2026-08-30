@@ -749,8 +749,10 @@ export async function runAgentStream(opts: RunAgentOptions) {
     stableSystem.length + (opts.planMode ? PLAN_MODE_PROMPT.length : 0);
   // Tool schemas (the full toolset serialised) plus completion headroom and a
   // safety margin. Generous on purpose: over-reserving only compacts a little
-  // earlier, while under-reserving is what overflows the window.
-  const TOOLS_AND_OUTPUT_RESERVE_TOKENS = 24_000;
+  // earlier, while under-reserving is what overflows the window. 32k (not 24k)
+  // because a large toolset's schemas (e.g. 100+ tools ≈ 10k tokens) also count
+  // against the same window and were previously left unreserved.
+  const TOOLS_AND_OUTPUT_RESERVE_TOKENS = 32_000;
   const reservedTokens =
     estimateTokens(systemChars) + TOOLS_AND_OUTPUT_RESERVE_TOKENS;
   // The limit compaction targets is the configured window, but capped by what

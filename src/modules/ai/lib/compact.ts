@@ -37,7 +37,13 @@ function approxBytes(messages: ModelMessage[]): number {
 // fills an agent transcript). Undercounting is what let a request estimated at
 // "0.69 × limit" arrive as a real 0.99 × limit and overflow, so we bias the
 // estimate upward by dividing by a smaller number.
-const CHARS_PER_TOKEN = 3.5;
+//
+// 2.6 (not the old 3.5): the provider's own reported token counts in prod ran
+// ~1.5× our estimate on tool-heavy transcripts, so a request the compactor
+// judged "plenty of room" still arrived over the window after a few rounds.
+// A more conservative estimate only compacts a little earlier — the safe
+// direction — and is what stops a short-but-dense transcript from overflowing.
+const CHARS_PER_TOKEN = 2.6;
 
 /** Rough upward-biased token estimate for a run of characters. */
 export function estimateTokens(chars: number): number {
