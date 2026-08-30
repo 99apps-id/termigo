@@ -19,12 +19,12 @@ import {
   recordContextOverflow,
 } from "../lib/contextLimitLearning";
 import { dayKey, recordRunCost } from "../lib/costLedger";
+import { humanizeModelError } from "../lib/errorMessage";
 import {
   isConnectivityError,
   isQuotaError,
   isRateLimitError,
 } from "../lib/errors";
-import { humanizeModelError } from "../lib/errorMessage";
 import { fireHooksForEvent, makeRunId } from "../lib/hooksRunner";
 import { sweepSessionMemory } from "../lib/memorySweep";
 import {
@@ -47,6 +47,7 @@ import {
 } from "./chatStore";
 import { usePlanStore } from "./planStore";
 import { useSessionDirectiveStore } from "./sessionDirectiveStore";
+import { useTodosStore } from "./todoStore";
 
 // How close a context-overflow auto-resume may follow the previous one, per
 // session. Prevents a run that cannot ever be compacted under the window (e.g.
@@ -147,6 +148,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     getLive: () => {
       const live = useChatStore.getState().live;
       const directives = useSessionDirectiveStore.getState();
+      const todos = useTodosStore.getState().bySession[sessionId]?.items ?? [];
       return {
         cwd: live.getCwd(),
         terminalPrivate: live.isActiveTerminalPrivate(),
@@ -154,6 +156,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
         activeFile: live.getActiveFile(),
         goal: directives.getGoal(sessionId),
         schedules: directives.getSchedules(sessionId),
+        todos: todos.map((t) => ({ title: t.title, status: t.status })),
       };
     },
     getPlanMode: () => usePlanStore.getState().active,

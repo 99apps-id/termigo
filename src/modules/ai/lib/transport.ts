@@ -112,6 +112,7 @@ type LiveSnapshot = {
   activeFile: string | null;
   goal: string | null;
   schedules: { when: string; prompt: string; enabled: boolean }[];
+  todos: { title: string; status: "pending" | "in_progress" | "completed" }[];
 };
 
 type Deps = {
@@ -473,6 +474,15 @@ function formatEnvBlock(live: LiveSnapshot): string | null {
     lines.push("schedules:");
     for (const s of live.schedules) {
       lines.push(`  - ${s.enabled ? "" : "(paused) "}${s.when}: ${s.prompt}`);
+    }
+  }
+  // Current todo list with live status. Seen every turn, it is a standing
+  // reminder to check items off as you finish them (todo_write), instead of
+  // leaving the list stale until the end.
+  if (live.todos.length > 0) {
+    lines.push("todos:");
+    for (const t of live.todos) {
+      lines.push(`  - [${t.status}] ${t.title}`);
     }
   }
   if (lines.length === 0) return null;
