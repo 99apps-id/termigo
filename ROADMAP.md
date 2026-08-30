@@ -129,11 +129,19 @@ The themes below frame every scope decision.
 ### Coming next
 
 - [ ] AI-powered inline terminal suggestions, opt-in (history-based suggestions have shipped)
-- [ ] AI agent reliability and workflow improvements (tool execution, context management, recovery, and long-running tasks)
-- [ ] Expand external coding-agent orchestration beyond Claude Code
+- [x] AI agent reliability and workflow improvements — tool execution, context
+  management, recovery, and long-running tasks. Shipped: context-window
+  auto-recovery, transient-provider-error recovery, interrupted-run recovery
+  after a restart, loop round-cap, no-progress / tool-error guards, and the
+  per-run workspace anchor.
+- [x] Expand external coding-agent orchestration beyond Claude Code — built-in
+  launchers for Codex, Gemini, Pi, OpenCode, Grok, Aider, Qwen and Cursor, plus
+  user-defined custom coding-agent CLIs in Settings.
 - [ ] Extensible slash commands (a fixed set has shipped; skills are done)
 - [ ] Project-scoped approval policies and per-tool trust (the auto-approve modes have shipped)
-- [ ] Persistent terminal processes across app restarts
+- [x] Persistent terminal processes across app restarts — Unix via a named tmux
+  session per leaf; the setting is now surfaced honestly where tmux isn't
+  available (Windows remains a guarded no-op, pending a detached PTY host).
 
 ### Longer horizon
 

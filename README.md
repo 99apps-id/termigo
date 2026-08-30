@@ -53,6 +53,9 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
 - Drag files from the explorer into a terminal as shell-safe quoted paths
 - Per-tab workspace environments on Windows (Local or WSL distro)
 - Spaces restore tabs, working directories, and split layouts across launches
+- **Persist terminal processes across restarts** (opt-in): host each leaf's
+  shell inside a named tmux session (Unix) so it survives an app relaunch; the
+  setting is surfaced honestly where tmux isn't available (Windows)
 
 ### SSH & remote files
 
@@ -157,6 +160,11 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   the provider's quota or credits run out (or a rate limit is hit), the run is
   preserved so you can top up or wait and click Try again to continue exactly
   where it left off.
+- **A run cut off by a restart is recoverable.** The transcript is persisted,
+  and when the app reopens the interrupted session is brought back with a
+  **Resume** row — the budget ladder is kept, so continuing does not restart
+  the task from scratch. (A deliberate stop or a guard that tripped offers the
+  same continue path.)
 - **You can read the request, not infer it.** Turn on `Capture requests`
   (Settings → Agents → Diagnostics) and an inspector appears in the AI bar
   holding each request as assembled: the system prompt, the message history
@@ -263,8 +271,13 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   is a statement about files in this workspace, not about arbitrary third-party
   actions. A server that fails to start costs only its own tools, not everyone
   else's.
-- Coding-agent orchestration: spawn Claude Code in a terminal, inspect output,
-  send follow-up work through approval-gated tools
+- Coding-agent orchestration: spawn an external agent CLI in a terminal
+  (Claude Code, Codex, Gemini, Pi, OpenCode, Grok, Aider, Qwen, Cursor),
+  inspect its output, and send follow-up work through approval-gated tools;
+  activity hooks are enabled for the CLIs that support them
+- **User-defined coding-agent CLIs.** Register your own agent command in
+  Settings → Agents → Custom coding agents and it becomes a first-class target
+  for `spawn_coding_agent` and the launch panel the same as the built-ins
 - Composer: prompt snippets via `#handle`, files via `@path`, voice input
 - Custom agents with their own system prompt and tool subset
 - Plan mode for multi-step work, generates and confirms before doing
