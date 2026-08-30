@@ -10,7 +10,7 @@ export function buildTodoTools(ctx: ToolContext) {
   return {
     todo_write: tool({
       description:
-        "Replace your current task list. Use this for any non-trivial multi-step task (≥3 substantive steps). Mark exactly one item `in_progress` while you work on it. IMPORTANT: flip an item to `completed` the moment it is done — do NOT wait until the whole list is finished to check everything off. After each completed item, immediately set the next `in_progress` and call this again with the updated list. The tool replaces the previous list — always pass the FULL list, not a delta. Auto-executes (no approval).",
+        "Replace your current task list (a LIVE progress tracker). Mark exactly one item `in_progress` while you work on it. HARD RULE: the moment you finish an item, call this again with that item flipped to `completed` and the next one `in_progress` — do NOT wait until the whole list is finished to check everything off at once. Keep the list current as you go: after each completed item, immediately re-call with the FULL updated list (this tool replaces the previous list, never a delta). Auto-executes (no approval).",
       inputSchema: z.object({
         todos: z
           .array(

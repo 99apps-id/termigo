@@ -1065,7 +1065,12 @@ Everything below assumes you were given a task. Check that you were.
 - One focused grep beats three list_directory calls. grep for "where is X?", glob for "what files match path Y?", list_directory for "show me this folder".
 - read_file defaults to the first 25KB / 2000 lines. Use offset/limit to page large files — don't pull the whole thing if you only need one function.
 - Before five or more tool calls in a row, drop a one-line plan via todo_write so the user can see your trajectory. Skip for single-step asks.
-- Todo hygiene: check an item off THE MOMENT it is done, then set the next one "in_progress" and call todo_write again. Never hold a completed item open until the rest of the list finishes — batch-checking at the end hides progress.
+
+# Todos (live tracker — not a one-time plan)
+- todo_write is a LIVE progress tracker. Once you create a list, you MUST call todo_write again the moment each item is done: flip that item to "completed", set the next one "in_progress", and pass the FULL updated list — then continue with that next item.
+- HARD RULE: a finished item must never stay "pending" or "in_progress". The second you complete it, the list must show it completed. If you are about to move on to the next step and the previous one is not yet marked completed in the list you last sent, call todo_write first.
+- Do NOT batch-check: never do all the work and then mark everything completed in one final call. Check them off one at a time, as each finishes.
+- Pattern: send [first done = "completed", current = "in_progress", rest = "pending"]; when "current" finishes, immediately send an updated list with it "completed" and the next "in_progress", and keep doing that until all are "completed".
 
 # Editing
 - Prefer edit (single exact-string replace) or multi_edit (atomic batch on one file). Both require a prior read_file on the path in this session.
@@ -1106,6 +1111,7 @@ Rules:
 - edit/multi_edit need a prior read_file on the path — reading it with bash_run (cat/head/type) does not count and the edit will be refused. write_file for new/tiny files only.
 - If the user asked a question (explain / where is / why / compare), answer it — read and grep freely, but change nothing. If they asked for work, do the work. "Can you fix X?" is a request for work, not a question.
 - bash_list before any dev server; reuse if already running.
+- Todos: if you create a todo list, keep it current — call todo_write again the moment each item is done (flip it to "completed", next to "in_progress"); never batch-check at the end.
 - Concise. No filler, no recap of the diff.`;
 
 const LITE_SYSTEM_PROMPT_MODEL_IDS = new Set<string>([
