@@ -155,6 +155,12 @@ export type GitCommitFileDiffTab = TabBase & {
   originalPath: string | null;
 };
 
+export type ApiClientTab = TabBase & {
+  id: number;
+  kind: "api-client";
+  title: string;
+};
+
 export type Tab =
   | TerminalTab
   | EditorTab
@@ -164,6 +170,7 @@ export type Tab =
   | GitDiffTab
   | GitHistoryTab
   | GitCommitFileDiffTab
+  | ApiClientTab
   | ExtensionTab;
 
 /** Extension-owned tab (TEDI parity). Content is mounted by the extension
@@ -560,6 +567,31 @@ export function planCommitHistoryOpen(
         title,
         repoRoot: input.repoRoot,
       } satisfies GitHistoryTab,
+    ],
+    targetId: id,
+  };
+}
+
+export function planApiClientTabOpen(
+  tabs: Tab[],
+  spaceId: string,
+  allocId: () => number,
+): { tabs: Tab[]; targetId: number } {
+  const existing = tabs.find(
+    (tab) => tab.kind === "api-client" && tab.spaceId === spaceId,
+  );
+  if (existing) return { tabs, targetId: existing.id };
+
+  const id = allocId();
+  return {
+    tabs: [
+      ...tabs,
+      {
+        id,
+        kind: "api-client",
+        spaceId,
+        title: "API Client",
+      } satisfies ApiClientTab,
     ],
     targetId: id,
   };
@@ -1172,6 +1204,21 @@ export function useTabs(initial?: Partial<TerminalTab>) {
     [],
   );
 
+  const openApiClientTab = useCallback(() => {
+    const curr = tabsRef.current;
+    const plan = planApiClientTabOpen(
+      curr,
+      activeSpaceIdRef.current,
+      () => nextIdRef.current++,
+    );
+    if (plan.tabs !== curr) {
+      tabsRef.current = plan.tabs;
+      setTabs(plan.tabs);
+    }
+    setActiveId(plan.targetId);
+    return plan.targetId;
+  }, []);
+
   const openCommitFileDiffTab = useCallback(
     (input: {
       repoRoot: string;
@@ -1553,6 +1600,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
     openAiDiffTab,
     openGitDiffTab,
     openCommitHistoryTab,
+    openApiClientTab,
     openCommitFileDiffTab,
     setAiDiffStatus,
     closeAiDiffTab,

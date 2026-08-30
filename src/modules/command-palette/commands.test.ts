@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
 import type { Tab } from "@/modules/tabs";
+import { describe, expect, it } from "vitest";
 import {
   type CommandPaletteActionContext,
   createCommandItems,
@@ -33,6 +33,7 @@ function baseContext(
     openNewPrivate: noop,
     openNewEditor: noop,
     openNewPreview: noop,
+    openApiClient: noop,
     openGitGraph: noop,
     toggleSourceControl: noop,
     closeActiveTabOrPane: noop,

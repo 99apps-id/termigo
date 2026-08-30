@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { ApiClientStack } from "@/modules/api-client";
 import { AiDiffStack, EditorStack, GitDiffStack } from "@/modules/editor";
 import { GitHistoryStack } from "@/modules/git-history";
 import { MarkdownStack } from "@/modules/markdown";
@@ -69,6 +70,7 @@ export function WorkspaceSurface({
   const isAiDiffTab = kind === "ai-diff";
   const isGitDiffTab = kind === "git-diff" || kind === "git-commit-file";
   const isGitHistoryTab = kind === "git-history";
+  const isApiClientTab = kind === "api-client";
 
   return (
     <div className="relative h-full min-h-0">
@@ -169,6 +171,15 @@ export function WorkspaceSurface({
           onOpenCommitFile={onOpenCommitFile}
           onSearchHandle={onGitHistorySearchHandle}
         />
+      </div>
+      <div
+        className={cn(
+          "absolute inset-0 px-3 pt-2 pb-2",
+          !isApiClientTab && "invisible pointer-events-none",
+        )}
+        aria-hidden={!isApiClientTab}
+      >
+        <ApiClientStack />
       </div>
     </div>
   );
