@@ -123,6 +123,12 @@ export const SLASH_COMMANDS: Record<string, SlashCommandMeta> = {
     label: "Run an orchestration pipeline",
     icon: Flowchart02Icon,
   },
+  new: {
+    name: "new",
+    invocation: "/new",
+    label: "Start a new chat",
+    icon: SparklesIcon,
+  },
 };
 
 export const TERMIGO_CMD_RE =
@@ -187,6 +193,13 @@ export function tryRunSlashCommand(input: string): SlashOutcome {
       return respondToPentest(tail);
     case "pipeline":
       return respondToPipeline(tail);
+    case "new":
+      // A fresh session clears the whole transcript — the escape hatch when a
+      // run has outgrown the model's context window and even a compacted retry
+      // cannot fit (or the conversation is just a dead end). The old session
+      // stays in the history list, so nothing is lost.
+      useChatStore.getState().newSession();
+      return { kind: "handled", toast: "New chat started" };
     default:
       if (custom) {
         return {

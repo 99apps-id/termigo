@@ -49,8 +49,11 @@ export function isContextOverflowError(message: string): boolean {
   const l = message.toLowerCase();
   return (
     l.includes("maximum context length") ||
+    l.includes("context length") ||
     l.includes("context_length_exceeded") ||
-    (l.includes("context length") && l.includes("token"))
+    l.includes("context window") ||
+    l.includes("too many tokens") ||
+    (l.includes("token") && l.includes("exceed"))
   );
 }
 

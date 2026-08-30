@@ -33,6 +33,16 @@ describe("isContextOverflowError", () => {
     expect(isContextOverflowError(OVERFLOW)).toBe(true);
     expect(isContextOverflowError("429 rate limit")).toBe(false);
   });
+
+  it("recognises alternate provider phrasings", () => {
+    expect(
+      isContextOverflowError(
+        "This conversation is too long for the model's context window.",
+      ),
+    ).toBe(true);
+    expect(isContextOverflowError("context_length_exceeded")).toBe(true);
+    expect(isContextOverflowError("too many tokens in the request")).toBe(true);
+  });
 });
 
 describe("recordContextOverflow + effectiveContextLimit", () => {

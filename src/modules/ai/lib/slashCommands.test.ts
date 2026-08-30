@@ -42,6 +42,17 @@ describe("slash commands", () => {
     expect((out as { toast?: string }).toast).toMatch(/No goal set/);
   });
 
+  it("starts a new chat session on /new", () => {
+    const spy = vi
+      .spyOn(useChatStore.getState(), "newSession")
+      .mockImplementation(() => "s2");
+    const out = tryRunSlashCommand("/new");
+    expect(out.kind).toBe("handled");
+    expect((out as { toast?: string }).toast).toMatch(/New chat/);
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
   it("adds, lists and removes schedules", () => {
     const add = tryRunSlashCommand("/schedule daily-at-9 run tests");
     expect(add.kind).toBe("handled");
