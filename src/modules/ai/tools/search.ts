@@ -1,4 +1,7 @@
 import { sshExec } from "@/modules/ssh/bridge";
+import { tool } from "ai";
+import { z } from "zod";
+import { native } from "../lib/native";
 import {
   buildFindCommand,
   buildGrepCommand,
@@ -8,9 +11,6 @@ import {
   REMOTE_SEARCH_MAX_RESULTS,
   resolveRemoteRoot,
 } from "../lib/remoteSearch";
-import { tool } from "ai";
-import { z } from "zod";
-import { native } from "../lib/native";
 import { checkReadable, checkReadableCanonical } from "../lib/security";
 import { resolvePath, type ToolContext } from "./context";
 
@@ -25,13 +25,18 @@ function resolveRoot(
       return { ok: false, error: String(e) };
     }
   }
-  const ws = ctx.getWorkspaceRoot();
-  if (ws) return { ok: true, path: ws };
+  // Search where file operations actually resolve: the active terminal cwd.
+  // Both `resolvePath` (relative file paths) and the remote `resolveRemoteRoot`
+  // default to cwd, so grep/glob should too. Previously they defaulted to the
+  // workspace root, which made them search a different tree than read_file when
+  // analysing a repo that is the shell cwd but not the explorer root.
   const cwd = ctx.getCwd();
   if (cwd) return { ok: true, path: cwd };
+  const ws = ctx.getWorkspaceRoot();
+  if (ws) return { ok: true, path: ws };
   return {
     ok: false,
-    error: "no workspace root or active cwd; pass `root` explicitly.",
+    error: "no active cwd or workspace root; pass `root` explicitly.",
   };
 }
 
@@ -67,7 +72,7 @@ export function buildSearchTools(ctx: ToolContext) {
           .string()
           .optional()
           .describe(
-            "Root to search under. Defaults to workspace root, then active cwd.",
+            "Root to search under. Defaults to the active terminal cwd, then the workspace root.",
           ),
         // A bare string is accepted as well as a list. Models reach for
         // `"glob": "src/**/*.ts"` when they have exactly one pattern, and the
@@ -116,7 +121,10 @@ export function buildSearchTools(ctx: ToolContext) {
               return { remote: true, root: target, hits: [], count: 0 };
             }
             if (out.exitCode !== null && out.exitCode > 1 && !out.stdout) {
-              return { error: out.stderr.trim() || `grep exited ${out.exitCode}`, remote: true };
+              return {
+                error: out.stderr.trim() || `grep exited ${out.exitCode}`,
+                remote: true,
+              };
             }
             const hits = parseGrepOutput(out.stdout);
             return {
@@ -174,7 +182,12 @@ export function buildSearchTools(ctx: ToolContext) {
         "Find files by path pattern (gitignore-aware). Use over `list_directory` when you want all matches recursively. Patterns use globset syntax: `**/*.ts`, `src/**/test_*.py`. Returns up to `max_results` matches.",
       inputSchema: z.object({
         pattern: z.string().describe("Glob pattern over relative paths."),
-        root: z.string().optional(),
+        root: z
+          .string()
+          .optional()
+          .describe(
+            "Root to search under. Defaults to the active terminal cwd, then the workspace root.",
+          ),
         max_results: z.number().int().min(1).max(2000).optional(),
       }),
       execute: async ({ pattern, root, max_results }) => {
@@ -186,7 +199,11 @@ export function buildSearchTools(ctx: ToolContext) {
           try {
             const out = await sshExec(
               remote.sessionId,
-              buildFindCommand({ pattern, path: target, maxResults: max_results }),
+              buildFindCommand({
+                pattern,
+                path: target,
+                maxResults: max_results,
+              }),
             );
             const paths = parseFindOutput(out.stdout);
             return {

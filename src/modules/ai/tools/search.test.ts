@@ -134,6 +134,40 @@ describe("AI search tools path safety", () => {
       { path: "/home/me/project/src/index.ts", rel: "src/index.ts" },
     ]);
   });
+
+  it("defaults grep root to the active cwd, not the workspace root", async () => {
+    nativeMock.grep.mockResolvedValue({
+      hits: [
+        {
+          path: "/repo/app/routes.ts",
+          rel: "app/routes.ts",
+          line: 3,
+          text: "x",
+        },
+      ],
+      truncated: false,
+      files_scanned: 1,
+    });
+    nativeMock.canonicalize.mockResolvedValue("/repo");
+
+    // The shell cwd is the repo being analysed; the explorer root is elsewhere.
+    const ctx = makeContext();
+    ctx.getCwd = () => "/repo";
+    ctx.getWorkspaceRoot = () => "/elsewhere";
+
+    const tools = buildSearchTools(ctx);
+    const execute = tools.grep.execute;
+    if (!execute) throw new Error("grep tool execute missing");
+    const result = (await execute({ pattern: "x" }, toolOptions)) as {
+      root: string;
+      hits: unknown[];
+    };
+
+    expect(result.root).toBe("/repo");
+    expect(nativeMock.grep).toHaveBeenCalledWith(
+      expect.objectContaining({ root: "/repo" }),
+    );
+  });
 });
 
 // A model with exactly one pattern writes `"glob": "src/**/*.ts"`, not a
