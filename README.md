@@ -420,13 +420,12 @@ See [`docs/`](docs/) for the MCP, skills, agents, and architecture guides.
 ## Screenshots
 
 <p align="center">
-  <img src="docs/termigo-windows.png" alt="Termigo on Windows" width="900" />
+  <img src="docs/termigo-browser-windows.png" alt="The workspace with a browser tab" width="900" />
   <br/>
   <sub>
-    The workspace: the agent auditing an Android app (the “Audit Keamanan” tab)
-    with a browser tab open beside it and a task checklist it is working
-    through, spaces and tabs across the top, and the approval mode always
-    visible in the status bar
+    The window: the agent auditing a project with a browser tab open beside it,
+    spaces and tabs across the top, and the approval mode always visible in the
+    status bar
   </sub>
 </p>
 
@@ -441,7 +440,7 @@ See [`docs/`](docs/) for the MCP, skills, agents, and architecture guides.
 </p>
 
 <p align="center">
-  <img src="docs/termigo-running-hermes-vps.png" alt="A terminal running a TUI coding agent" width="900" />
+  <img src="docs/termigo-running-antigravity-cli.png" alt="A terminal running the Antigravity coding agent" width="900" />
   <br/>
   <sub>
     A terminal is a full terminal: run any CLI in it — here the Antigravity
@@ -457,15 +456,6 @@ See [`docs/`](docs/) for the MCP, skills, agents, and architecture guides.
     Adding a host: password, private key or ssh-agent, an optional ProxyJump
     chain and port forwards. Credentials go to the OS keychain, never to a file
     in the repo
-  </sub>
-</p>
-
-<p align="center">
-  <img src="docs/termigo-settings-agents.png" alt="Agents settings with the Telegram relay" width="900" />
-  <br/>
-  <sub>
-    Settings → Agents: the Telegram relay (token in the OS keychain, owner chat
-    id, status badge) and the pentest scope auto-approval
   </sub>
 </p>
 
@@ -493,15 +483,6 @@ See [`docs/`](docs/) for the MCP, skills, agents, and architecture guides.
   <sub>
     Picking a model: choose a provider, then a model. Only the providers active
     in Termigo are offered, and custom endpoints such as StepFun appear too
-  </sub>
-</p>
-
-<p align="center">
-  <img src="docs/termigo-custom-agents.png" alt="Custom coding agents in Settings" width="900" />
-  <br/>
-  <sub>
-    Settings → Agents: register a user-defined coding-agent CLI so it becomes a
-    first-class target for the agent and the launch panel
   </sub>
 </p>
 
