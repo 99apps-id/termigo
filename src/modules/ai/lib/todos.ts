@@ -23,6 +23,23 @@ export type TodoRecord = {
 
 export const EMPTY_RECORD: TodoRecord = { workspaceRoot: null, items: [] };
 
+/**
+ * Render the current todo list as a short, status-tracked block, or null when
+ * there is nothing to show. Injected into each agent step's system prompt (and
+ * the env block) so the model is reminded of what is done / in progress /
+ * pending at every decision point — the way Copilot's per-item checklist works.
+ */
+export function formatTodoStatusBlock(
+  items: { title: string; status: TodoStatus }[],
+): string | null {
+  if (items.length === 0) return null;
+  const lines = items.map((t) => `- [${t.status}] ${t.title}`);
+  return [
+    "Current todo list — keep it accurate: mark each item [completed] the moment you finish it, then set the next [in_progress].",
+    ...lines,
+  ].join("\n");
+}
+
 const STORE_PATH = "termigo-ai-todos.json";
 const todosKey = (sessionId: string) => `todos:${sessionId}`;
 
@@ -37,7 +54,11 @@ const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
  */
 export function parseStoredTodos(raw: unknown): TodoRecord {
   if (Array.isArray(raw)) return { workspaceRoot: null, items: raw as Todo[] };
-  if (raw && typeof raw === "object" && Array.isArray((raw as TodoRecord).items)) {
+  if (
+    raw &&
+    typeof raw === "object" &&
+    Array.isArray((raw as TodoRecord).items)
+  ) {
     const rec = raw as TodoRecord;
     return { workspaceRoot: rec.workspaceRoot ?? null, items: rec.items };
   }

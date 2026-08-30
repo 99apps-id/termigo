@@ -23,6 +23,7 @@ import { readMemory } from "./memory";
 import { native } from "./native";
 import { listSkills } from "./skills";
 import { autoCheckpointForRun } from "./snapshots";
+import { formatTodoStatusBlock } from "./todos";
 
 /**
  * How much of `TERMIGO.md` reaches the model.
@@ -479,12 +480,8 @@ function formatEnvBlock(live: LiveSnapshot): string | null {
   // Current todo list with live status. Seen every turn, it is a standing
   // reminder to check items off as you finish them (todo_write), instead of
   // leaving the list stale until the end.
-  if (live.todos.length > 0) {
-    lines.push("todos:");
-    for (const t of live.todos) {
-      lines.push(`  - [${t.status}] ${t.title}`);
-    }
-  }
+  const todoBlock = formatTodoStatusBlock(live.todos);
+  if (todoBlock) lines.push(todoBlock);
   if (lines.length === 0) return null;
   return `<env>\n${lines.join("\n")}\n</env>`;
 }

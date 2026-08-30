@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   belongsToWorkspace,
+  formatTodoStatusBlock,
   isFinished,
   parseStoredTodos,
   standDownRunning,
@@ -55,11 +56,15 @@ const item = (id: string, status: Todo["status"]): Todo => ({
 // mid-run.
 describe("a finished list stops taking up the screen", () => {
   it("is finished when every item is completed", () => {
-    expect(isFinished([item("a", "completed"), item("b", "completed")])).toBe(true);
+    expect(isFinished([item("a", "completed"), item("b", "completed")])).toBe(
+      true,
+    );
   });
 
   it("is not finished while one is still pending", () => {
-    expect(isFinished([item("a", "completed"), item("b", "pending")])).toBe(false);
+    expect(isFinished([item("a", "completed"), item("b", "pending")])).toBe(
+      false,
+    );
   });
 
   // The old check was `todos.length === 0`, which an empty list also satisfies.
@@ -71,12 +76,18 @@ describe("a finished list stops taking up the screen", () => {
 
 describe("a stopped run does not leave work claiming to be running", () => {
   it("stands the running item back down to pending", () => {
-    const out = standDownRunning([item("a", "completed"), item("b", "in_progress")]);
+    const out = standDownRunning([
+      item("a", "completed"),
+      item("b", "in_progress"),
+    ]);
     expect(out.map((t) => t.status)).toEqual(["completed", "pending"]);
   });
 
   it("leaves completed work completed", () => {
-    const out = standDownRunning([item("a", "completed"), item("b", "in_progress")]);
+    const out = standDownRunning([
+      item("a", "completed"),
+      item("b", "in_progress"),
+    ]);
     expect(out[0].status).toBe("completed");
   });
 
@@ -89,21 +100,29 @@ describe("a stopped run does not leave work claiming to be running", () => {
 
 describe("a list belongs to the project it was written in", () => {
   it("shows in the workspace it was written for", () => {
-    expect(belongsToWorkspace({ workspaceRoot: "/a", items: [] }, "/a")).toBe(true);
+    expect(belongsToWorkspace({ workspaceRoot: "/a", items: [] }, "/a")).toBe(
+      true,
+    );
   });
 
   it("hides in a different one, which is the reported bug", () => {
-    expect(belongsToWorkspace({ workspaceRoot: "/a", items: [] }, "/b")).toBe(false);
+    expect(belongsToWorkspace({ workspaceRoot: "/a", items: [] }, "/b")).toBe(
+      false,
+    );
   });
 
   it("hides when no project is open", () => {
-    expect(belongsToWorkspace({ workspaceRoot: "/a", items: [] }, null)).toBe(false);
+    expect(belongsToWorkspace({ workspaceRoot: "/a", items: [] }, null)).toBe(
+      false,
+    );
   });
 
   // Lists written before the tag existed have no project recorded. Hiding
   // those would read as data loss, so they keep the reach they already had.
   it("shows an untagged list everywhere", () => {
-    expect(belongsToWorkspace({ workspaceRoot: null, items: [] }, "/b")).toBe(true);
+    expect(belongsToWorkspace({ workspaceRoot: null, items: [] }, "/b")).toBe(
+      true,
+    );
   });
 });
 
@@ -115,7 +134,10 @@ describe("stored lists survive the shape change", () => {
   });
 
   it("reads a tagged record", () => {
-    const rec = parseStoredTodos({ workspaceRoot: "/w", items: [item("a", "pending")] });
+    const rec = parseStoredTodos({
+      workspaceRoot: "/w",
+      items: [item("a", "pending")],
+    });
     expect(rec.workspaceRoot).toBe("/w");
     expect(rec.items).toHaveLength(1);
   });
@@ -124,5 +146,22 @@ describe("stored lists survive the shape change", () => {
     for (const junk of [null, undefined, 42, "todos", {}]) {
       expect(parseStoredTodos(junk).items).toEqual([]);
     }
+  });
+});
+
+describe("formatTodoStatusBlock", () => {
+  it("returns null for an empty list", () => {
+    expect(formatTodoStatusBlock([])).toBeNull();
+  });
+
+  it("renders each item with its status", () => {
+    const block = formatTodoStatusBlock([
+      { title: "one", status: "completed" },
+      { title: "two", status: "in_progress" },
+      { title: "three", status: "pending" },
+    ]);
+    expect(block).toContain("- [completed] one");
+    expect(block).toContain("- [in_progress] two");
+    expect(block).toContain("- [pending] three");
   });
 });

@@ -51,6 +51,7 @@ import { createProxyFetch } from "./proxyFetch";
 import { repairToolCall } from "./repairToolCall";
 import { sanitizeUiMessages } from "./sanitizeMessages";
 import { type Skill, skillsBlock } from "./skills";
+import { formatTodoStatusBlock } from "./todos";
 
 // Every model/provider connection uses a trusted, user-configured endpoint, so
 // it must honour the machine's own DNS — including a provider host that a proxy,
@@ -1016,9 +1017,11 @@ export async function runAgentStream(opts: RunAgentOptions) {
   logInfo(
     `[ai] runAgentStream: before streamText (${Object.keys(tools).length} tools)`,
   );
+  const baseSystem = prompt.system;
+  const sessionId = opts.toolContext.getSessionId();
   return streamText({
     model,
-    system: prompt.system,
+    system: baseSystem,
     messages: prompt.messages,
     allowSystemInMessages: false,
     // MCP last: a server cannot shadow a built-in tool by naming a tool after
@@ -1038,13 +1041,28 @@ export async function runAgentStream(opts: RunAgentOptions) {
     experimental_repairToolCall: repairToolCall as never,
     // Per-step choice control: a stuck run's final step is pinned tool-less so
     // the model must summarise (see `synthesisRequested`); the forced-fanout
-    // case pins step 0 to `run_subagents`. Every other step is free.
+    // case pins step 0 to `run_subagents`. Every other step is free. The
+    // system prompt is also refreshed each step with the live todo list, so the
+    // model is reminded at every tool decision what is done / in progress —
+    // the mechanical nudge that gets items checked off as they finish instead
+    // of being left stale until the end.
     prepareStep: ({ stepNumber }: { stepNumber: number }) => {
-      if (synthesisRequested) return { toolChoice: "none" as const };
-      if (forceFanout && stepNumber === 0) {
-        return { toolChoice: { type: "tool", toolName: "run_subagents" } };
-      }
-      return {};
+      const toolChoice = synthesisRequested
+        ? ("none" as const)
+        : forceFanout && stepNumber === 0
+          ? ({ type: "tool", toolName: "run_subagents" } as const)
+          : undefined;
+      const todos =
+        sessionId != null
+          ? (useTodosStore.getState().bySession[sessionId]?.items ?? [])
+          : [];
+      const todoBlock = formatTodoStatusBlock(todos);
+      // Omit `system` when there is nothing to inject so the original system
+      // prompt (set on streamText) is used untouched; when there IS a todo list
+      // the block is appended so the model sees live progress every step.
+      return todoBlock
+        ? { toolChoice, system: `${baseSystem}\n\n${todoBlock}` }
+        : { toolChoice };
     },
     abortSignal: abortController.signal,
     // Clear the "no first response" timer on the first model chunk (a text
