@@ -576,7 +576,8 @@ export type AgentStopReason =
   | "tool-repetition"
   | "no-progress"
   | "cost-cap"
-  | "steered";
+  | "steered"
+  | "aborted";
 
 export type AgentUsage = {
   inputTokens: number;
@@ -843,10 +844,20 @@ export async function runAgentStream(opts: RunAgentOptions) {
   };
 
   const trackingStopWhen: StopCondition<ToolSet>[] = [
-    // Highest priority: the user queued a task while this run was working. End at
-    // the next step boundary so that task is picked up promptly (a long run no
-    // longer blocks it), then resume from here on the following turn. No
-    // synthesis step — the queued task is the next thing to do.
+    // Highest priority: the user pressed Stop. End the step loop at the next
+    // step boundary even if the model call did not reject — this is what makes
+    // Stop reliably halt a looping agent, not only the in-flight round.
+    (_args) => {
+      if (opts.abortSignal?.aborted) {
+        stopReason ??= "aborted";
+        return true;
+      }
+      return false;
+    },
+    // Next: the user queued a task while this run was working. End at the next
+    // step boundary so that task is picked up promptly (a long run no longer
+    // blocks it), then resume from here on the following turn. No synthesis
+    // step — the queued task is the next thing to do.
     (_args) => {
       if (opts.hasPendingSteer?.()) {
         stopReason ??= "steered";

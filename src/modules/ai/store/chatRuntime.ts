@@ -57,6 +57,14 @@ import { useTodosStore } from "./todoStore";
 const OVERFLOW_AUTO_RESUME_MS = 60_000;
 const overflowAutoResumeAt = new Map<string, number>();
 
+// Sessions the user has explicitly stopped since the last user-initiated send.
+// `Chat.stop()` aborts the in-flight round, but the Chat may still auto-continue
+// to the next tool round via `sendAutomaticallyWhen` (or because the stream
+// completed normally before the stop landed). The latch suppresses that
+// continuation so a pressed Stop actually ends the loop. It is cleared on a
+// fresh user send / resume / queued-correction flush.
+const stopLatch = new Set<string>();
+
 // Connectivity recovery: when the provider is unreachable, keep the run
 // resumable and resume it automatically once the network is back, so an
 // internet blip does not kill a long agentic task. Quota / rate-limit errors are
@@ -267,7 +275,13 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     id: sessionId,
     transport,
     messages: initialMessages,
-    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
+    // The SDK's `stop()` aborts the in-flight round but the Chat still
+    // auto-continues to the next tool round through this predicate. A user
+    // stop must end the loop, so suppress the auto-continue while a stop is
+    // latched for this session (clear see `stopLatch`).
+    sendAutomaticallyWhen: (args) =>
+      !stopLatch.has(sessionId) &&
+      lastAssistantMessageIsCompleteWithApprovalResponses(args),
     onError: (e) => {
       const raw = e instanceof Error ? e.message : String(e);
       // A user-pressed Stop surfaces here as an AbortError when it lands before
@@ -390,6 +404,8 @@ export async function sendParts(
   sessionId: string,
   parts: readonly SteerPart[],
 ): Promise<boolean> {
+  // A fresh user message supersedes a prior stop, so let it run.
+  stopLatch.delete(sessionId);
   const c = getOrCreateChat(sessionId);
   // After an error the run is not busy, but the SDK status can look stale
   // (still "submitted"), which would QUEUE the resume instead of sending it and
@@ -442,6 +458,8 @@ export async function flushSteer(): Promise<boolean> {
   store.cancelSteer(0);
   const sessionId = store.activeSessionId;
   if (!sessionId) return false;
+  // A queued correction is the user's own input, so it supersedes a stop.
+  stopLatch.delete(sessionId);
   // A run that yielded to this queued task set stopReason "steered"; clear it so
   // no stale "Continue" prompt lingers as the queued task takes over.
   store.patchAgentMeta({ stopReason: null, stoppedByUser: false });
@@ -475,6 +493,10 @@ export async function resumeRun(): Promise<boolean> {
 export async function stopRun(): Promise<void> {
   const sessionId = useChatStore.getState().activeSessionId;
   if (!sessionId) return;
+  // Latch before aborting so the Chat's auto-continue (which may fire from the
+  // round that just completed) is suppressed even if `stop()` returns early
+  // because it landed between rounds.
+  stopLatch.add(sessionId);
   await chats.get(sessionId)?.stop();
   // Remembered so the transcript can offer "Continue" after a stop, the same
   // way it does after the step cap. Without it a stop is a dead end.

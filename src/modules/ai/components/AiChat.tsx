@@ -440,6 +440,9 @@ function stopCopy(
     // A steered run yields to a queued task and never surfaces this row, but the
     // switch stays exhaustive.
     case "steered":
+    // A user-pressed Stop aborts the step loop; surface the same "You stopped"
+    // copy rather than an unrelated budget/loop explanation.
+    case "aborted":
       return { text: "You stopped this run.", action: "Resume" };
   }
 }
