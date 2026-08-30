@@ -31,6 +31,12 @@ The pending buffer is capped at 4 MiB; on overflow it is discarded and replaced 
 
 `shell_init::build_command` (`shell_init.rs:53`) builds the `CommandBuilder` used to spawn the shell. The path and arguments depend on the platform and the selected workspace environment (Local or a WSL distro).
 
+### Terminal-process persistence
+
+When the user enables "Persist terminal processes" (`persistTerminals`), a leaf's shell is hosted inside a **named tmux session** so it survives an app restart; on the next open `tmux new-session -A -s <key>` reattaches to a still-running session, else creates one. Each leaf carries a stable `persistKey` (serialized into Spaces) so the same session is reattached across restarts.
+
+This is **Unix-only** by design: Windows has no tmux, and a ConPTY child is bound to a Job Object that kills it on app exit, so process persistence there would need a separate host process. `shell_init::persist_available()` (exposed as the `pty_persist_available` command) reports whether tmux is usable, and the frontend uses it to keep the setting from being a silent no-op — the settings row shows a hint when it isn't supported, and the tab "tmux" badge is hidden.
+
 ### Unix
 
 Integration scripts live in `src-tauri/src/modules/pty/scripts/`:
