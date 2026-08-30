@@ -6,7 +6,10 @@ import {
   clearTelegramToken,
   setTelegramToken,
 } from "@/modules/telegram/keyring";
-import { useTelegramStore } from "@/modules/telegram/store";
+import {
+  syncTelegramFromStorage,
+  useTelegramStore,
+} from "@/modules/telegram/store";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { SettingRow } from "../components/SettingRow";
@@ -34,6 +37,17 @@ export function TelegramBlock() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // The bot polls in the main window; mirror its live online/error state here
+  // so the status badge is accurate without reopening the settings window.
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (!e.key || e.key === "termigo-telegram")
+        void syncTelegramFromStorage();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
 
   useEffect(() => {
     setChatIdDraft(chatId ?? "");
@@ -71,7 +85,9 @@ export function TelegramBlock() {
       ? "disabled"
       : online
         ? "online"
-        : "error";
+        : lastError
+          ? "error"
+          : "connecting";
 
   return (
     <section className="flex flex-col gap-2">
