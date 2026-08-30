@@ -380,6 +380,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
             error: null,
             stoppedByUser: false,
           });
+          useChatStore.getState().syncRunMeta();
           return;
         }
         useChatStore.getState().patchAgentMeta({
@@ -387,6 +388,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
           error: null,
           stoppedByUser: true,
         });
+        useChatStore.getState().syncRunMeta();
         return;
       }
       // Learn the model's real context window from an overflow, then CONTINUE
@@ -418,6 +420,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
                 status: "error",
                 error: "The automatic retry could not start. Try again.",
               });
+              useChatStore.getState().syncRunMeta();
             });
           }, 0);
           return;
@@ -425,7 +428,9 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       }
       // A connectivity loss is recoverable once the network is back. Mark the
       // run as resumable and let the `online` listener (or "Try again") pick it
-      // up — the task/todo state is preserved.
+      // up — the task/todo state is preserved. The run is no longer "in flight"
+      // (it errored), so clear the in-flight marker: a later restart must not
+      // read it as an interrupted run, and resume re-marks it.
       if (isConnectivityError(raw)) {
         const sessionId = useChatStore.getState().activeSessionId;
         if (sessionId) pendingReconnectSessions.add(sessionId);
@@ -435,6 +440,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
           error:
             "Connection to the provider was lost. Your run is preserved — it resumes automatically when you're back online, or click Try again.",
         });
+        useChatStore.getState().syncRunMeta();
         return;
       }
       // Quota / credits exhausted or a rate limit: recoverable once the user
@@ -446,12 +452,14 @@ function makeChat(sessionId: string): Chat<UIMessage> {
             ? "The provider reports your API quota or credits are exhausted. Top up and click Try again — your work is preserved."
             : "Rate limit reached. Wait a moment and click Try again — your work is preserved.",
         });
+        useChatStore.getState().syncRunMeta();
         return;
       }
       useChatStore.getState().patchAgentMeta({
         status: "error",
         error: humanizeModelError(raw),
       });
+      useChatStore.getState().syncRunMeta();
     },
   });
 }
@@ -540,6 +548,9 @@ export async function sendParts(
           remote: live.getRemoteSession(),
         });
       }
+      // Persist that the run is now in flight, so a restart mid-run can offer
+      // "Resume" rather than silently losing it.
+      useChatStore.getState().markRunStarted();
       await c.sendMessage({ role: "user", parts } as Parameters<
         typeof c.sendMessage
       >[0]);
@@ -577,6 +588,8 @@ export async function flushSteer(): Promise<boolean> {
   // A run that yielded to this queued task set stopReason "steered"; clear it so
   // no stale "Continue" prompt lingers as the queued task takes over.
   store.patchAgentMeta({ stopReason: null, stoppedByUser: false });
+  // A queued task starts a fresh run, so mark it in flight for restart recovery.
+  store.markRunStarted();
   flushing = true;
   try {
     const c = getOrCreateChat(sessionId);

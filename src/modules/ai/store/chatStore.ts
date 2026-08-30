@@ -17,17 +17,20 @@ import {
 } from "../lib/keyring";
 import { pushRecentModel } from "../lib/modelPrefs";
 import {
+  deleteRunInFlight,
   deleteRunMeta,
   deleteSessionData,
   deriveTitle,
   loadAll,
   loadMessages,
+  loadRunInFlight,
   loadRunMeta,
   newSessionId,
   type RunMeta,
   type SessionMeta,
   saveActiveId,
   saveMessages,
+  saveRunInFlight,
   saveRunMeta,
   saveSessionsList,
 } from "../lib/sessions";
@@ -236,6 +239,13 @@ type StoreState = {
    */
   syncRunMeta: () => void;
 
+  /**
+   * Persist that the active session's run is now in flight. Combined with
+   * `syncRunMeta`, this lets a run cut off by an app restart be offered as
+   * "Resume" rather than silently lost.
+   */
+  markRunStarted: () => void;
+
   // Sessions
   sessionsHydrated: boolean;
   sessions: SessionMeta[];
@@ -320,13 +330,61 @@ export function flushPersist(id?: string): void {
   for (const key of Array.from(pendingPersist.keys())) flushPersistEntry(key);
 }
 
-function runMetaToMetaPatch(meta: RunMeta | null): Partial<AgentMeta> | null {
-  if (!meta) return null;
-  return {
-    runRound: meta.runRound,
-    stopReason: (meta.stopReason as AgentStopReason | null) ?? null,
-    stoppedByUser: meta.stoppedByUser,
-  };
+/**
+ * The `AgentMeta` patch to apply when a session is opened after a restart, so
+ * the transcript can offer "Continue"/"Resume".
+ *
+ * - `RunMeta` with a stop (user stop or a guard) → restore that stop so the
+ *   existing "Continue" affordance shows.
+ * - `RunMeta` with no stop but still in flight → the app closed mid-run; treat
+ *   as `"interrupted"` and offer "Resume".
+ * - No `RunMeta` but a stale in-flight marker → same interrupted case, the run
+ *   had not yet recorded where it stopped.
+ */
+export function runInterruptedPatch(
+  meta: RunMeta | null,
+  inFlight: number | null,
+): Partial<AgentMeta> | null {
+  if (meta) {
+    if (meta.stopReason !== null || meta.stoppedByUser) {
+      return {
+        runRound: meta.runRound,
+        stopReason: (meta.stopReason as AgentStopReason | null) ?? null,
+        stoppedByUser: meta.stoppedByUser,
+      };
+    }
+    if (inFlight !== null) {
+      return {
+        runRound: meta.runRound,
+        stopReason: "interrupted",
+        stoppedByUser: false,
+      };
+    }
+    return null;
+  }
+  if (inFlight !== null) {
+    return { stopReason: "interrupted", stoppedByUser: false };
+  }
+  return null;
+}
+
+async function loadInterruptedPatch(
+  id: string,
+): Promise<Partial<AgentMeta> | null> {
+  const [meta, inFlight] = await Promise.all([
+    loadRunMeta(id),
+    loadRunInFlight(id),
+  ]);
+  return runInterruptedPatch(meta, inFlight);
+}
+
+async function hasInterruptedRun(id: string): Promise<boolean> {
+  const [meta, inFlight] = await Promise.all([
+    loadRunMeta(id),
+    loadRunInFlight(id),
+  ]);
+  if (inFlight !== null) return true;
+  return meta !== null && (meta.stopReason !== null || meta.stoppedByUser);
 }
 
 export const useChatStore = create<StoreState>((set, get) => ({
@@ -418,6 +476,10 @@ export const useChatStore = create<StoreState>((set, get) => ({
     const { activeSessionId, agentMeta } = get();
     const id = activeSessionId;
     if (!id) return;
+    // A settled run is no longer "in flight" — whether it finished, stopped, or
+    // errored. Clearing the marker here means a restart no longer reads it as
+    // an interrupted run.
+    void deleteRunInFlight(id);
     const interrupted =
       agentMeta.stopReason !== null || agentMeta.stoppedByUser;
     if (interrupted) {
@@ -432,13 +494,26 @@ export const useChatStore = create<StoreState>((set, get) => ({
     }
   },
 
+  markRunStarted: () => {
+    const { activeSessionId, agentMeta } = get();
+    const id = activeSessionId;
+    if (!id) return;
+    void saveRunInFlight(id, Date.now());
+    void saveRunMeta(id, {
+      runRound: agentMeta.runRound,
+      stopReason: null,
+      stoppedByUser: false,
+      at: Date.now(),
+    });
+  },
+
   sessionsHydrated: false,
   sessions: [],
   activeSessionId: null,
 
   hydrateSessions: async () => {
     if (get().sessionsHydrated) return;
-    const { sessions } = await loadAll();
+    const { sessions, activeId } = await loadAll();
 
     // Reuse the most recent untitled "New chat" session if one exists from
     // the previous run — no point stacking empty placeholder sessions every
@@ -460,18 +535,32 @@ export const useChatStore = create<StoreState>((set, get) => ({
       nextSessions = [fresh, ...sessions];
       void saveSessionsList(nextSessions);
     }
-    void saveActiveId(freshId);
+
+    // If a run was cut off mid-flight (the app closed while the model was
+    // working), reopen that session so the user can resume immediately rather
+    // than hunting through history. Otherwise keep the fresh placeholder.
+    const resumed =
+      activeId && sessions.some((s) => s.id === activeId)
+        ? await hasInterruptedRun(activeId)
+        : false;
+    const targetId = resumed && activeId ? activeId : freshId;
+    if (targetId !== freshId) {
+      const msgs = await loadMessages(targetId);
+      if (msgs && msgs.length > 0) seedMessages.set(targetId, msgs);
+    }
+    void saveActiveId(targetId);
 
     set({
       sessions: nextSessions,
-      activeSessionId: freshId,
+      activeSessionId: targetId,
       sessionsHydrated: true,
     });
-    // Restore an interrupted run so the active chat can offer "Continue"
+    // Restore an interrupted run so the active chat can offer "Continue"/"Resume"
     // after the app was closed mid-run.
-    void loadRunMeta(freshId).then((meta) => {
-      const patch = runMetaToMetaPatch(meta);
-      if (patch) useChatStore.getState().patchAgentMeta(patch);
+    void loadInterruptedPatch(targetId).then((patch) => {
+      if (!patch) return;
+      if (useChatStore.getState().activeSessionId !== targetId) return;
+      useChatStore.getState().patchAgentMeta(patch);
     });
   },
 
@@ -502,11 +591,10 @@ export const useChatStore = create<StoreState>((set, get) => ({
       set({ activeSessionId: id, agentMeta: IDLE_META });
       void saveActiveId(id);
       // Restore an interrupted run for the switched-to session so it can offer
-      // "Continue". Guard on still-active so a fast double switch cannot apply
-      // the first session's meta to the second.
-      void loadRunMeta(id).then((meta) => {
+      // "Continue"/"Resume". Guard on still-active so a fast double switch
+      // cannot apply the first session's meta to the second.
+      void loadInterruptedPatch(id).then((patch) => {
         if (useChatStore.getState().activeSessionId !== id) return;
-        const patch = runMetaToMetaPatch(meta);
         if (patch) useChatStore.getState().patchAgentMeta(patch);
       });
     };

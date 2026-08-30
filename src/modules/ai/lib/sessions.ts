@@ -82,6 +82,26 @@ export async function deleteRunMeta(id: string): Promise<void> {
   await store.delete(runMetaKey(id));
 }
 
+/**
+ * Whether a run is currently in flight for the session. Set when a run starts,
+ * cleared when it settles (finishes, stops, or errors). On boot it tells us a
+ * run was cut off mid-flight by the app closing — distinct from a deliberate
+ * stop (which writes `RunMeta` with `stoppedByUser`/`stopReason`).
+ */
+const runInFlightKey = (id: string) => `runInFlight:${id}`;
+
+export async function saveRunInFlight(id: string, at: number): Promise<void> {
+  await store.set(runInFlightKey(id), at);
+}
+
+export async function loadRunInFlight(id: string): Promise<number | null> {
+  return (await store.get<number>(runInFlightKey(id))) ?? null;
+}
+
+export async function deleteRunInFlight(id: string): Promise<void> {
+  await store.delete(runInFlightKey(id));
+}
+
 export function newSessionId(): string {
   return `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }

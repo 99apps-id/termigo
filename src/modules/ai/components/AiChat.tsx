@@ -455,6 +455,12 @@ function stopCopy(
     // copy rather than an unrelated budget/loop explanation.
     case "aborted":
       return { text: "You stopped this run.", action: "Resume" };
+    case "interrupted":
+      return {
+        text: "This run was interrupted — the app closed or the run was cut off.",
+        hint: "Your progress is preserved. Resume to pick up where it stopped.",
+        action: "Resume",
+      };
   }
 }
 

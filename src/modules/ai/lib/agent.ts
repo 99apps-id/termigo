@@ -621,7 +621,8 @@ export type AgentStopReason =
   | "tool-error"
   | "cost-cap"
   | "steered"
-  | "aborted";
+  | "aborted"
+  | "interrupted";
 
 export type AgentUsage = {
   inputTokens: number;
