@@ -90,4 +90,49 @@ describe("repairToolCall", () => {
     // Valid -> no repair -> null.
     expect(result).toBeNull();
   });
+
+  it("rewrites a near-miss tool name to the real tool", async () => {
+    const tools = {
+      "ext_termigo-pentest-kit_run_pentest_tool": {},
+      "ext_termigo-pentest-kit_recon": {},
+      "ext_termigo-pentest-kit_scan": {},
+    };
+    const result = await repairToolCall({
+      tools,
+      toolCall: {
+        toolCallId: "1",
+        toolName: "ext_termigo-pentest-kool_run_pentest_tool",
+        input: '{"target":"example.test"}',
+      },
+    });
+    expect(result?.toolName).toBe("ext_termigo-pentest-kit_run_pentest_tool");
+    expect(result?.input).toBe('{"target":"example.test"}');
+  });
+
+  it("does not rewrite one real tool into a different one", async () => {
+    const tools = {
+      read_file: {},
+      write_file: {},
+      read_dir: {},
+    };
+    const result = await repairToolCall({
+      tools,
+      toolCall: { toolCallId: "1", toolName: "read_file", input: "{}" },
+    });
+    // `read_file` is a real tool, so this is not a NoSuchTool — no rewrite.
+    expect(result).toBeNull();
+  });
+
+  it("returns null when the misspelled name has no close match", async () => {
+    const tools = { run_subagents: {}, run_subagent: {} };
+    const result = await repairToolCall({
+      tools,
+      toolCall: {
+        toolCallId: "1",
+        toolName: "totally_unrelated_tool",
+        input: "{}",
+      },
+    });
+    expect(result).toBeNull();
+  });
 });

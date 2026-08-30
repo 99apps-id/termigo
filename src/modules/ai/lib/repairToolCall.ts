@@ -84,11 +84,63 @@ export function repairJsonText(text: string): string {
 }
 
 /**
+ * Edit distance between two strings (Levenshtein). Used to match a tool name
+ * the model typed slightly wrong to the closest one we actually expose.
+ */
+function editDistance(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  let prev = new Array<number>(n + 1);
+  let curr = new Array<number>(n + 1);
+  for (let j = 0; j <= n; j++) prev[j] = j;
+  for (let i = 1; i <= m; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+    }
+    [prev, curr] = [curr, prev];
+  }
+  return prev[n];
+}
+
+/**
+ * Find the available tool name closest to `requested`. Accepts the match only
+ * when the edit distance is small relative to the name length, so we fix a
+ * near-miss typo (e.g. `ext_...-kool_...` → `ext_...-kit_...`) without ever
+ * rewriting one real tool name into a different real tool.
+ */
+function bestToolMatch(
+  requested: string,
+  available: readonly string[],
+): string | null {
+  let best = "";
+  let bestDistance = Infinity;
+  for (const name of available) {
+    const d = editDistance(requested, name);
+    if (d < bestDistance) {
+      bestDistance = d;
+      best = name;
+    }
+  }
+  if (best === "") return null;
+  const longer = Math.max(requested.length, best.length);
+  // Allow a couple of edits, growing with the name length, but never enough to
+  // turn one genuinely different, similarly-named tool into another.
+  const threshold = Math.max(2, Math.round(longer * 0.12));
+  return bestDistance <= threshold ? best : null;
+}
+
+/**
  * The `experimental_repairToolCall` hook. Returns a repaired tool call whose
- * `input` is clean JSON, or `null` to let the original error surface.
+ * name is a real tool and whose `input` is clean JSON, or `null` to let the
+ * original error surface.
  */
 export async function repairToolCall({
   toolCall,
+  tools,
 }: {
   toolCall: {
     toolCallId: string;
@@ -96,11 +148,29 @@ export async function repairToolCall({
     input?: string;
     args?: string;
   };
+  tools?: Record<string, unknown>;
 }): Promise<{
   toolCallId: string;
   toolName: string;
   input: string;
 } | null> {
+  // A tool the model named that we do not expose (a `NoSuchToolError`). The
+  // model often mis-types a long, hyphenated extension tool name — fix it to
+  // the nearest real tool instead of killing the whole run. Only possible when
+  // we have the toolset to match against.
+  const toolKeys = tools ? Object.keys(tools) : [];
+  if (toolKeys.length > 0 && !toolKeys.includes(toolCall.toolName)) {
+    const match = bestToolMatch(toolCall.toolName, toolKeys);
+    if (match) {
+      return {
+        toolCallId: toolCall.toolCallId,
+        toolName: match,
+        input: String(toolCall.input ?? toolCall.args ?? "{}"),
+      };
+    }
+    return null;
+  }
+
   const raw = stripCodeFence(String(toolCall.input ?? toolCall.args ?? ""));
   if (raw.length === 0) return null;
 
