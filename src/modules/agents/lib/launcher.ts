@@ -38,6 +38,12 @@ export const AGENT_LAUNCHERS = [
     defaultCommand: "grok",
     supportsHooks: false,
   },
+  {
+    id: "aider",
+    label: "Aider",
+    defaultCommand: "aider",
+    supportsHooks: false,
+  },
 ] as const;
 
 export type AgentLauncherId = (typeof AGENT_LAUNCHERS)[number]["id"];
@@ -120,7 +126,12 @@ export function createAgentPanePlan(
 
   const leaves = Array.from({ length: instances }, () => {
     const id = allocateId();
-    return { kind: "leaf" as const, id, cwd, persistKey: makePersistKey(cwd, String(id)) };
+    return {
+      kind: "leaf" as const,
+      id,
+      cwd,
+      persistKey: makePersistKey(cwd, String(id)),
+    };
   });
   const split = (dir: "row" | "col", children: PaneNode[]): PaneNode => ({
     kind: "split",
