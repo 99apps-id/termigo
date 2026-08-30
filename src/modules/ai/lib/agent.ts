@@ -41,6 +41,15 @@ import { evictObsoleteToolOutputs } from "./contextEviction";
 import { effectiveContextLimit } from "./contextLimitLearning";
 import type { CustomToolset } from "./customToolsIo";
 import type { ExtensionToolset } from "./extensionTools";
+import { recordRun } from "./harnessFrontier";
+import {
+  appendSystemHint,
+  applyProfileToStepBudget,
+  applyProfileToSystem,
+  applyProfileToTools,
+  getProfile,
+} from "./harnessProfile";
+import { activeProfileIdFor } from "./harnessProfileStore";
 import { fireHooksForEvent, makeRunId } from "./hooksRunner";
 import type { CustomEndpointKeys, ProviderKeys } from "./keyring";
 import type { McpToolset } from "./mcpTools";
@@ -803,7 +812,15 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // tripped first so the UI can explain the stop instead of offering the same
   // blank "continue" for every cause.
   let stopReason: AgentStopReason | null = null;
-  const stepBudget = opts.stepBudget ?? MAX_AGENT_STEPS;
+  // The active harness profile for this workspace adjusts the system prompt,
+  // the exposed toolset and the loop budget (see harnessProfile.ts).
+  const workspaceRoot = opts.toolContext.getWorkspaceRoot();
+  const profile = getProfile(activeProfileIdFor(workspaceRoot));
+
+  const stepBudget = applyProfileToStepBudget(
+    opts.stepBudget ?? MAX_AGENT_STEPS,
+    profile,
+  );
   const costBudget = opts.costBudgetUsd ?? 0;
   const capPred = stepCountIs(stepBudget);
   const repeatPred = noToolRepetition<ToolSet>(3);
@@ -876,7 +893,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
   ];
 
   const hooksConfig = opts.hooksConfig;
-  const tools = {
+  const rawTools = {
     ...(opts.mcpTools ?? {}),
     ...(opts.extensionTools ?? {}),
     ...(opts.customTools ?? {}),
@@ -916,6 +933,8 @@ export async function runAgentStream(opts: RunAgentOptions) {
         : undefined,
     }),
   };
+  // Reorder/hide tools per the active harness profile (see harnessProfile.ts).
+  const tools = applyProfileToTools(rawTools, profile);
 
   // What the model is handed before it reads a word of the request. Measured
   // as components rather than one number: a total says "slow", a breakdown
@@ -1017,7 +1036,8 @@ export async function runAgentStream(opts: RunAgentOptions) {
   logInfo(
     `[ai] runAgentStream: before streamText (${Object.keys(tools).length} tools)`,
   );
-  const baseSystem = prompt.system;
+  // Apply the harness profile's prompt prelude (if any) to the base system.
+  const baseSystem = applyProfileToSystem(prompt.system, profile);
   const sessionId = opts.toolContext.getSessionId();
   return streamText({
     model,
@@ -1057,12 +1077,13 @@ export async function runAgentStream(opts: RunAgentOptions) {
           ? (useTodosStore.getState().bySession[sessionId]?.items ?? [])
           : [];
       const todoBlock = formatTodoStatusBlock(todos);
-      // Omit `system` when there is nothing to inject so the original system
-      // prompt (set on streamText) is used untouched; when there IS a todo list
-      // the block is appended so the model sees live progress every step.
-      return todoBlock
-        ? { toolChoice, system: `${baseSystem}\n\n${todoBlock}` }
-        : { toolChoice };
+      // When there is a live todo list the system gets the todo block appended
+      // as a system message so the model sees live progress every step;
+      // otherwise the (profile-applied) system is used untouched.
+      const system = todoBlock
+        ? appendSystemHint(baseSystem, todoBlock)
+        : baseSystem;
+      return { toolChoice, system };
     },
     abortSignal: abortController.signal,
     // Clear the "no first response" timer on the first model chunk (a text
@@ -1217,6 +1238,15 @@ export async function runAgentStream(opts: RunAgentOptions) {
       if (!settledStop) {
         const sessionId = opts.toolContext.getSessionId();
         if (sessionId) useTodosStore.getState().completeInProgress(sessionId);
+      }
+
+      // Feed this run's outcome into the harness frontier so the best profile
+      // for this workspace can be learned over time (see harnessFrontier.ts).
+      if (workspaceRoot) {
+        void recordRun(workspaceRoot, profile.id, {
+          success: !settledStop,
+          steps: stepsSeen,
+        }).catch(() => {});
       }
 
       // One line per run, in the app log rather than only on screen.

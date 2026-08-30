@@ -7,6 +7,7 @@ export type SettingsTab =
   | "shortcuts"
   | "models"
   | "agents"
+  | "harness"
   | "mcp"
   | "extensions"
   | "sql"

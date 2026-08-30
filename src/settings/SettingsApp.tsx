@@ -12,16 +12,18 @@ import {
   PlugSocketIcon,
   PuzzleIcon,
   Settings01Icon,
+  SlidersHorizontalIcon,
   SourceCodeIcon,
   UserMultiple02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { lazy, Suspense, useEffect, useState, type ComponentType } from "react";
+import { type ComponentType, lazy, Suspense, useEffect, useState } from "react";
 import { AboutSection } from "./sections/AboutSection";
 import { AgentsSection } from "./sections/AgentsSection";
 import { EditorSection } from "./sections/EditorSection";
 import { GeneralSection } from "./sections/GeneralSection";
+import { HarnessSection } from "./sections/HarnessSection";
 import { McpSection } from "./sections/McpSection";
 import { ModelsSection } from "./sections/ModelsSection";
 import { ShortcutsSection } from "./sections/ShortcutsSection";
@@ -72,6 +74,12 @@ const TABS: {
     component: AgentsSection,
   },
   {
+    id: "harness",
+    label: "Harness",
+    icon: SlidersHorizontalIcon,
+    component: HarnessSection,
+  },
+  {
     id: "mcp",
     label: "MCP",
     icon: PlugSocketIcon,
@@ -104,6 +112,7 @@ const VALID_TABS: SettingsTab[] = [
   "shortcuts",
   "models",
   "agents",
+  "harness",
   "mcp",
   "extensions",
   "sql",
@@ -182,7 +191,11 @@ export function SettingsApp() {
       <main className="min-h-0 flex-1 overflow-y-auto px-8 pt-6 pb-7 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <div className="mx-auto w-full max-w-160">
           {ActiveSection ? (
-            <Suspense fallback={<p className="text-[12px] text-muted-foreground">Loading…</p>}>
+            <Suspense
+              fallback={
+                <p className="text-[12px] text-muted-foreground">Loading…</p>
+              }
+            >
               <ActiveSection />
             </Suspense>
           ) : null}
