@@ -110,8 +110,10 @@ export function resolvePath(rawPath: string, cwd: string | null): string {
 /**
  * Resolve a tool-supplied path against a remote SSH session. Absolute POSIX
  * paths (`/...`) and relative paths resolve on the remote host; Windows drive
- * paths (`C:\...`, `C:/...`) always stay local. Returns null for local paths
- * so callers can fall back to the local filesystem.
+ * paths (`C:\...`, `C:/...`) always stay local. Returns null when the path
+ * cannot be routed to the remote host (local path, or relative path with no
+ * remote cwd yet) so callers can fall back to the local filesystem rather than
+ * throwing a hard error mid-run.
  */
 export function resolveRemotePath(
   rawPath: string,
@@ -119,10 +121,7 @@ export function resolveRemotePath(
 ): string | null {
   if (/^[a-zA-Z]:[\\/]/.test(rawPath)) return null;
   if (rawPath.startsWith("/")) return rawPath;
-  if (!remoteCwd)
-    throw new Error(
-      `cannot resolve relative remote path "${rawPath}": no remote cwd yet. Pass an absolute remote path.`,
-    );
+  if (!remoteCwd) return null;
   return remoteCwd.endsWith("/")
     ? `${remoteCwd}${rawPath}`
     : `${remoteCwd}/${rawPath}`;

@@ -3,11 +3,15 @@ import { resolvePath, resolveRemotePath } from "./context";
 
 describe("resolveRemotePath", () => {
   it("resolves a relative path against the remote cwd with a forward slash", () => {
-    expect(resolveRemotePath("src/main.ts", "/root/app")).toBe("/root/app/src/main.ts");
+    expect(resolveRemotePath("src/main.ts", "/root/app")).toBe(
+      "/root/app/src/main.ts",
+    );
   });
 
   it("does not double the slash when the remote cwd ends with one", () => {
-    expect(resolveRemotePath("config.yaml", "/root/app/")).toBe("/root/app/config.yaml");
+    expect(resolveRemotePath("config.yaml", "/root/app/")).toBe(
+      "/root/app/config.yaml",
+    );
   });
 
   it("passes absolute POSIX paths through unchanged", () => {
@@ -20,15 +24,15 @@ describe("resolveRemotePath", () => {
     expect(resolveRemotePath("C:/Users/me/file.txt", "/root")).toBeNull();
   });
 
-  it("throws a helpful error for a relative path with no remote cwd", () => {
-    expect(() => resolveRemotePath("src/main.ts", null)).toThrow(
-      /no remote cwd yet/,
-    );
+  it("returns null for a relative path with no remote cwd so the read falls back to local", () => {
+    expect(resolveRemotePath("src/main.ts", null)).toBeNull();
   });
 });
 
 describe("resolvePath", () => {
   it("still resolves local Windows paths against a backslash cwd", () => {
-    expect(resolvePath("src\\main.ts", "C:\\project")).toBe("C:\\project\\src\\main.ts");
+    expect(resolvePath("src\\main.ts", "C:\\project")).toBe(
+      "C:\\project\\src\\main.ts",
+    );
   });
 });
