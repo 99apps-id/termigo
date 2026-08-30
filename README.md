@@ -197,15 +197,16 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   no mode can authorise something the safety layer refuses. Read-only tools
   never asked in the first place.
 - **Relay Telegram into the agent.** Give a bot its token and message it from
-  your phone: it drives Termigo's own in-app agent and streams the answer back,
-  so a task, its edits, approvals and memory all behave exactly as if you had
-  typed in the chat. Configured in Settings → Agents → Telegram relay (the
-  token lives in the OS keychain, never a settings file). The bot answers
-  `/status`, `/help`, `/query <question>`, `/run <task>`, `/stop`, `/new`,
-  `/model` (an interactive provider → model picker for the models active in
-  Termigo, including custom endpoints such as StepFun) and `/cost`, and shows a
-  live status chip in the AI status bar. Just type a question or task directly
-  — no `/query` prefix needed. It long-polls
+  your phone: it drives Termigo's own in-app agent and streams live progress
+  (the current step, the loop round, the task checklist and approvals) plus the
+  final answer back, so a task, its edits, approvals and memory all behave
+  exactly as if you had typed in the chat. Configured in Settings → Agents →
+  Telegram relay (the token lives in the OS keychain, never a settings file).
+  The bot answers `/status`, `/help`, `/query <question>`, `/run <task>`,
+  `/stop`, `/new`, `/model` (an interactive provider → model picker for the
+  models active in Termigo, including custom endpoints such as StepFun) and
+  `/cost`, and shows a live status chip in the AI status bar. Just type a
+  question or task directly — no `/query` prefix needed. It long-polls
   from the desktop app, so it is only reachable while Termigo is open.
 - **Deleting is never delegated.** No mode speaks for you here, including
   `Auto-approve all`: `delete_file` always asks, and so does any command that

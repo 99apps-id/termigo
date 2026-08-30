@@ -280,6 +280,92 @@ async function waitForReply(
  * Submit a task to the in-app agent and stream its final answer back to the
  * calling Telegram chat. Runs in the background so the long-poll stays open.
  */
+function statusLabel(status: string): string | null {
+  switch (status) {
+    case "thinking":
+      return "Thinking…";
+    case "streaming":
+      return "Working…";
+    case "awaiting-approval":
+      return "Waiting for your approval…";
+    default:
+      return null;
+  }
+}
+
+/** Compact, status-tracked todo block for Telegram (no emojis). */
+function compactTodoBlock(
+  items: { title: string; status: string }[],
+): string | null {
+  if (items.length === 0) return null;
+  return `Todo:\n${items.map((t) => `- [${t.status}] ${t.title}`).join("\n")}`;
+}
+
+// One live progress publisher per chat, so a new task supersedes the previous
+// run's stream instead of both posting updates.
+const progressCtrls = new Map<number, AbortController>();
+
+/**
+ * Stream the agent's live progress (status, round, current step, todo list)
+ * into the Telegram chat while the run is in flight. Stops when `signal`
+ * aborts. Kept throttled so a fast agent does not spam the chat: at most one
+ * message per ~3s, and only on meaningful change.
+ */
+async function publishProgress(
+  chatId: number,
+  sessionId: string,
+  signal: AbortSignal,
+): Promise<void> {
+  const store = await import("../ai/store/chatStore");
+  const todosStore = await import("../ai/store/todoStore");
+  const startMeta = store.useChatStore.getState().agentMeta;
+  let lastStatus = startMeta.status;
+  let lastRound = startMeta.round;
+  let lastStep = startMeta.step ?? "";
+  let lastTodoSig = "";
+  let lastSentAt = 0;
+  const started = Date.now();
+  const MAX_WAIT = 30 * 60 * 1000;
+
+  while (!signal.aborted && Date.now() - started < MAX_WAIT) {
+    const meta = store.useChatStore.getState().agentMeta;
+    const status = meta.status;
+    const round = meta.round;
+    const step = meta.step ?? "";
+    const todos =
+      todosStore.useTodosStore.getState().bySession[sessionId]?.items ?? [];
+    const now = Date.now();
+
+    if (status !== lastStatus) {
+      lastStatus = status;
+      const line = statusLabel(status);
+      if (line) {
+        await sendTelegram(chatId, line, signal).catch(() => {});
+        lastSentAt = now;
+      }
+    }
+    if (round > 0 && round !== lastRound) {
+      lastRound = round;
+      await sendTelegram(chatId, `Round ${round}`, signal).catch(() => {});
+      lastSentAt = now;
+    }
+    if (step && step !== lastStep && now - lastSentAt >= 2500) {
+      lastStep = step;
+      await sendTelegram(chatId, `↳ ${step}`, signal).catch(() => {});
+      lastSentAt = now;
+    }
+    const sig = todos.map((t) => `${t.status}|${t.title}`).join(";");
+    if (todos.length > 0 && sig !== lastTodoSig && now - lastSentAt >= 3000) {
+      lastTodoSig = sig;
+      const block = compactTodoBlock(todos);
+      if (block) await sendTelegram(chatId, block, signal).catch(() => {});
+      lastSentAt = now;
+    }
+
+    await sleep(signal, 1200);
+  }
+}
+
 async function dispatchAndStream(
   text: string,
   chatId: number,
@@ -303,8 +389,20 @@ async function dispatchAndStream(
       );
       return;
     }
-    const reply = await waitForReply(store, signal, sessionId, baseline);
-    await sendTelegram(chatId, reply, signal);
+    // Stream live progress alongside the run, superseding any prior stream.
+    const progressCtl = new AbortController();
+    progressCtrls.get(chatId)?.abort();
+    progressCtrls.set(chatId, progressCtl);
+    void publishProgress(chatId, sessionId, progressCtl.signal).catch(() => {});
+    try {
+      const reply = await waitForReply(store, signal, sessionId, baseline);
+      await sendTelegram(chatId, reply, signal);
+    } finally {
+      progressCtl.abort();
+      if (progressCtrls.get(chatId) === progressCtl) {
+        progressCtrls.delete(chatId);
+      }
+    }
   } catch (e) {
     if (signal.aborted) return;
     await sendTelegram(
@@ -438,7 +536,7 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
           "Usage: /query <question>",
           signal,
         ));
-      await sendTelegram(chatId, "Running query in the app…", signal);
+      await sendTelegram(chatId, "Started — I'll post progress here.", signal);
       void dispatchAndStream(tail, chatId, signal);
       return;
     }
@@ -447,7 +545,7 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
         return void (await sendTelegram(chatId, "Usage: /run <task>", signal));
       await sendTelegram(
         chatId,
-        "Task submitted — the agent works in the app.",
+        "Task submitted — I'll post progress here.",
         signal,
       );
       void dispatchAndStream(tail, chatId, signal);
@@ -527,7 +625,11 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
         await sendTelegram(chatId, HELP, signal);
         return;
       }
-      await sendTelegram(chatId, "Running in the app…", signal);
+      await sendTelegram(
+        chatId,
+        "Started — working on it; progress will show here.",
+        signal,
+      );
       void dispatchAndStream(text, chatId, signal);
       return;
   }
