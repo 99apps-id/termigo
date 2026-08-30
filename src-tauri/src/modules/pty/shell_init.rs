@@ -44,6 +44,16 @@ fn tmux_available() -> bool {
     }
 }
 
+/// Whether terminal-process persistence is usable on this host. Windows has no
+/// tmux (and a ConPTY child is bound to a Job Object that kills it on app
+/// exit), so this is false there; on Unix it is true only when tmux is on PATH.
+/// The frontend uses this to keep the "persist terminals" setting from being a
+/// silent no-op.
+#[allow(dead_code)]
+pub(crate) fn persist_available() -> bool {
+    tmux_available()
+}
+
 // Clone the built shell command and prepend a tmux create-or-attach wrapper.
 // Cloning keeps every env var (TERMIGO_TERMINAL, shell-integration hooks, cwd)
 // intact on the tmux client, and tmux passes them through to the session.

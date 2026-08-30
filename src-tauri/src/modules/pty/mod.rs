@@ -337,3 +337,11 @@ pub fn pty_shell_name() -> String {
 pub fn pty_list_shells() -> Vec<shell_init::ShellInfo> {
     shell_init::list_shells()
 }
+
+/// Whether terminal-process persistence is usable on this host. Mirrors the
+/// shell's tmux availability so the frontend can keep the "persist terminals"
+/// setting honest (it is a no-op on Windows / without tmux).
+#[tauri::command]
+pub fn pty_persist_available() -> bool {
+    shell_init::persist_available()
+}

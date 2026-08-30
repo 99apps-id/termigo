@@ -29,6 +29,7 @@ import {
   tabAgentStatus,
   useAgentActivityStore,
 } from "@/modules/terminal";
+import { getPersistAvailability } from "@/modules/terminal/lib/persistAvailability";
 import {
   ArrowLeft01Icon,
   ArrowRight01Icon,
@@ -683,10 +684,22 @@ function DropIndicator() {
 
 // A tiny badge on terminal tabs that are opted into tmux persistence, so the
 // user knows their process will survive an app restart. Hidden by default,
-// since persistence is opt-in.
+// since persistence is opt-in, and hidden entirely where tmux isn't available
+// (Windows) so it doesn't promise something the setting can't deliver.
 function PersistBadge({ tab }: { tab: Tab }) {
   const persist = usePreferencesStore((s) => s.persistTerminals);
-  if (!persist || tab.kind !== "terminal" || tab.private) return null;
+  const [available, setAvailable] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    void getPersistAvailability().then((v) => {
+      if (alive) setAvailable(v);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  if (!persist || !available || tab.kind !== "terminal" || tab.private)
+    return null;
   return (
     <span
       aria-label="Persisted across app restarts (tmux)"

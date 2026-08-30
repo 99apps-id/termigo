@@ -47,6 +47,7 @@ import {
   TERMINAL_FONT_SIZES,
   TERMINAL_SCROLLBACK_PRESETS,
 } from "@/modules/settings/store";
+import { getPersistAvailability } from "@/modules/terminal/lib/persistAvailability";
 import { useTheme } from "@/modules/theme";
 import {
   ComputerIcon,
@@ -133,6 +134,20 @@ export function GeneralSection() {
   const terminalScrollback = usePreferencesStore((s) => s.terminalScrollback);
   const zoomLevel = usePreferencesStore((s) => s.zoomLevel);
   const agentNotifications = usePreferencesStore((s) => s.agentNotifications);
+  // Whether "persist terminal processes" can work on this host (tmux present;
+  // always false on Windows). Keeps the toggle honest instead of a silent no-op.
+  const [persistAvailable, setPersistAvailable] = useState<boolean | null>(
+    null,
+  );
+  useEffect(() => {
+    let alive = true;
+    void getPersistAvailability().then((v) => {
+      if (alive) setPersistAvailable(v);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
   const [notificationTest, setNotificationTest] =
     useState<NotificationTestState>("idle");
   const notificationTestPending =
@@ -352,6 +367,13 @@ export function GeneralSection() {
             onCheckedChange={(v) => void setPersistTerminals(v)}
           />
         </SettingRow>
+        {persistAvailable === false ? (
+          <div className="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+            Terminal-process persistence needs tmux, which isn't available on
+            this platform (it's unsupported on Windows). Processes won't survive
+            an app restart here; the setting is a no-op.
+          </div>
+        ) : null}
         <SettingRow
           title="AI command suggestions"
           description="When local history has no match, ask the selected AI model for the most likely full command and show it as a ghost completion (→ / End to accept). Off by default — it spends tokens on your key."
