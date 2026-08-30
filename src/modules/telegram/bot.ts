@@ -96,6 +96,42 @@ async function dispatchToAgent(text: string): Promise<void> {
   await chat.sendMessage(text);
 }
 
+const HELP = [
+  "/status — bot + agent status",
+  "/query <question> — read-only question",
+  "/run <task> — run a task in the agent",
+  "/stop — stop the current run",
+  "/new — start a new agent session",
+  "/model [id] — show or set the model",
+  "/cost — today's & total spend",
+].join("\n");
+
+async function listModelChoices(): Promise<string[]> {
+  const { MODELS, compatModelIdForEndpoint } = await import("../ai/config");
+  const { usePreferencesStore } = await import(
+    "@/modules/settings/preferences"
+  );
+  const builtin = MODELS.map((m) => m.id);
+  const custom = usePreferencesStore
+    .getState()
+    .customEndpoints.map((ep) => compatModelIdForEndpoint(ep.id));
+  return [...builtin, ...custom];
+}
+
+async function isValidModel(id: string): Promise<boolean> {
+  const { MODELS, isCompatModelId, compatModelIdForEndpoint } = await import(
+    "../ai/config"
+  );
+  const { usePreferencesStore } = await import(
+    "@/modules/settings/preferences"
+  );
+  if (MODELS.some((m) => m.id === id)) return true;
+  if (!isCompatModelId(id)) return false;
+  return usePreferencesStore
+    .getState()
+    .customEndpoints.some((ep) => compatModelIdForEndpoint(ep.id) === id);
+}
+
 async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
   const msg = u.message;
   if (!msg?.text) return;
@@ -110,6 +146,9 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
   switch (head) {
     case "/status":
       await sendTelegram(chatId, await buildStatus(), signal);
+      return;
+    case "/help":
+      await sendTelegram(chatId, HELP, signal);
       return;
     case "/query": {
       if (!tail)
@@ -133,12 +172,61 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
       await dispatchToAgent(tail);
       return;
     }
-    default:
+    case "/stop": {
+      const runtime = await import("../ai/store/chatRuntime");
+      await runtime.stopRun();
       await sendTelegram(
         chatId,
-        "Unknown command. Try /status, /query <question>, /run <task>.",
+        "Stop requested — the current run will settle.",
         signal,
       );
+      return;
+    }
+    case "/new": {
+      const state = await import("../ai/store/chatStore");
+      state.useChatStore.getState().newSession();
+      await sendTelegram(chatId, "New agent session started.", signal);
+      return;
+    }
+    case "/model": {
+      const state = await import("../ai/store/chatStore");
+      if (!tail) {
+        const current = state.useChatStore.getState().selectedModelId;
+        const ids = await listModelChoices();
+        await sendTelegram(
+          chatId,
+          `Current: ${current}\n\n${ids.join("\n")}`,
+          signal,
+        );
+        return;
+      }
+      if (!(await isValidModel(tail))) {
+        await sendTelegram(
+          chatId,
+          `Unknown model '${tail}'. Send /model for the list.`,
+          signal,
+        );
+        return;
+      }
+      state.useChatStore.getState().setSelectedModelId(tail);
+      await sendTelegram(chatId, `Model set to ${tail}.`, signal);
+      return;
+    }
+    case "/cost": {
+      const { costToday, loadCostLedger, sumCost } = await import(
+        "../ai/lib/costLedger"
+      );
+      const today = await costToday();
+      const total = sumCost(await loadCostLedger());
+      await sendTelegram(
+        chatId,
+        `Cost today: $${today.toFixed(4)}\nTotal recorded: $${total.toFixed(4)}`,
+        signal,
+      );
+      return;
+    }
+    default:
+      await sendTelegram(chatId, HELP, signal);
   }
 }
 
