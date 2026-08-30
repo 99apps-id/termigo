@@ -97,6 +97,7 @@ import {
 } from "@/modules/tabs";
 import { labelFor } from "@/modules/tabs/lib/tabLabel";
 import { DEFAULT_SPACE_ID } from "@/modules/tabs/lib/useTabs";
+import { useTelegramBot } from "@/modules/telegram/useTelegramBot";
 import {
   clearFocusedTerminal,
   disposeSession,
@@ -200,6 +201,10 @@ export default function App() {
       useExtensionsStore.getState().init(),
     );
   }, []);
+
+  // Relay Telegram messages to the in-app agent. Starts the bot long-poll only
+  // when enabled and a token is present (see useTelegramBot on mount).
+  useTelegramBot();
 
   // Mirror `tabs` into a ref so callbacks scheduled with `setTimeout`
   // (e.g. cdInNewTab) read the latest pane state instead of a stale closure.

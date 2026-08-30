@@ -11,6 +11,7 @@ import { fmtShortcut, MOD_KEY } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import { usePreferencesStore } from "@/modules/settings/preferences";
+import { useTelegramStore } from "@/modules/telegram/store";
 import {
   Add01Icon,
   AiBookIcon,
@@ -93,6 +94,28 @@ const PROVIDER_ICON = {
  * a climbing round means the run is progressing; a flat one means it is stuck
  * or looping.
  */
+/**
+ * Live Telegram relay status chip. Shows whether the bot is online, or a subtle
+ * dot when enabled but not yet polling (e.g. no connection). Hidden when the
+ * relay is off or no token is set.
+ */
+function TelegramStatusChip() {
+  const enabled = useTelegramStore((s) => s.enabled);
+  const online = useTelegramStore((s) => s.online);
+  const hasToken = useTelegramStore((s) => s.hasToken);
+  if (!enabled || !hasToken) return null;
+  const dot = online ? "bg-emerald-500" : "bg-amber-500";
+  return (
+    <span
+      className="flex h-6 items-center gap-1 rounded-md border border-border/60 bg-card px-2 text-[11px] text-muted-foreground"
+      title={online ? "Telegram relay online" : "Telegram relay: connecting…"}
+    >
+      <span className={cn("h-1.5 w-1.5 rounded-full", dot)} />
+      <span>TG</span>
+    </span>
+  );
+}
+
 function RoundChip() {
   const status = useChatStore((s) => s.agentMeta.status);
   const round = useChatStore((s) => s.agentMeta.round);
@@ -162,6 +185,9 @@ export function AiStatusBarControls() {
       {/* Live round counter, so a running loop's progress is visible even when
           the chat panel is minimized. */}
       <RoundChip />
+
+      {/* Telegram relay status. */}
+      <TelegramStatusChip />
 
       {/* One surface for run metrics, the request inspector, and context state. */}
       <IconBtn

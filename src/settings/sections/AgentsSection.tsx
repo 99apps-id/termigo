@@ -14,16 +14,26 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
-import { SettingRow } from "../components/SettingRow";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { AGENT_ICONS } from "@/modules/ai/components/AgentSwitcher";
+import {
+  compatModelIdForEndpoint,
+  isCompatModelId,
+  MODELS,
+} from "@/modules/ai/config";
 import {
   type Agent,
   type AgentIconId,
   BUILTIN_AGENTS,
 } from "@/modules/ai/lib/agents";
+import {
+  clearCostLedger,
+  costToday,
+  loadCostLedger,
+  sumCost,
+} from "@/modules/ai/lib/costLedger";
 import {
   isValidHandle,
   normalizeHandle,
@@ -48,17 +58,6 @@ import {
   setSubagentModelId,
 } from "@/modules/settings/store";
 import {
-  MODELS,
-  compatModelIdForEndpoint,
-  isCompatModelId,
-} from "@/modules/ai/config";
-import {
-  clearCostLedger,
-  costToday,
-  loadCostLedger,
-  sumCost,
-} from "@/modules/ai/lib/costLedger";
-import {
   Add01Icon,
   CheckmarkCircle02Icon,
   Delete02Icon,
@@ -68,6 +67,8 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useRef, useState } from "react";
 import { SectionHeader } from "../components/SectionHeader";
+import { SettingRow } from "../components/SettingRow";
+import { TelegramBlock } from "./TelegramBlock";
 
 const ICON_OPTIONS: AgentIconId[] = [
   "coder",
@@ -80,9 +81,7 @@ const ICON_OPTIONS: AgentIconId[] = [
 
 export function AgentsSection() {
   const customInstructions = usePreferencesStore((s) => s.customInstructions);
-  const debugCaptureEnabled = usePreferencesStore(
-    (s) => s.debugCaptureEnabled,
-  );
+  const debugCaptureEnabled = usePreferencesStore((s) => s.debugCaptureEnabled);
   const agentReviewAfterApply = usePreferencesStore(
     (s) => s.agentReviewAfterApply,
   );
@@ -124,7 +123,9 @@ export function AgentsSection() {
   const [totalUsd, setTotalUsd] = useState<number | null>(null);
 
   const refreshCost = () => {
-    void costToday().then(setTodayUsd).catch(() => setTodayUsd(null));
+    void costToday()
+      .then(setTodayUsd)
+      .catch(() => setTodayUsd(null));
     void loadCostLedger()
       .then((entries) => setTotalUsd(sumCost(entries)))
       .catch(() => setTotalUsd(null));
@@ -145,6 +146,8 @@ export function AgentsSection() {
       <CustomInstructionsBlock value={customInstructions} />
 
       <PentestScopeBlock />
+
+      <TelegramBlock />
 
       <section className="flex flex-col gap-2">
         <Label>Diagnostics</Label>
@@ -228,7 +231,9 @@ export function AgentsSection() {
         >
           <Select
             value={subagentModelValue}
-            onValueChange={(v) => void setSubagentModelId(v === "auto" ? "" : v)}
+            onValueChange={(v) =>
+              void setSubagentModelId(v === "auto" ? "" : v)
+            }
           >
             <SelectTrigger size="sm" className="h-8 w-56 text-[12px]">
               <SelectValue />
@@ -738,60 +743,69 @@ function PentestScopeBlock() {
         />
       </SettingRow>
       {!enforce ? null : (
-      <>
-      <div className="flex gap-2">
-        <Input
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              add();
-            }
-          }}
-          placeholder="example.com, 10.0.0.0, https://app.example.com"
-          className="h-8 flex-1 text-[12px]"
-        />
-        <Button size="sm" variant="outline" className="h-8 px-3 text-[11px]" onClick={add}>
-          Add
-        </Button>
-      </div>
-      {scope.length > 0 ? (
-        <ul className="flex flex-wrap gap-1.5">
-          {scope.map((entry) => (
-            <li
-              key={entry}
-              className="flex items-center gap-1.5 rounded-full border border-border/60 bg-card/60 py-1 pr-1 pl-2.5 text-[11px]"
+        <>
+          <div className="flex gap-2">
+            <Input
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  add();
+                }
+              }}
+              placeholder="example.com, 10.0.0.0, https://app.example.com"
+              className="h-8 flex-1 text-[12px]"
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 px-3 text-[11px]"
+              onClick={add}
             >
-              <span className="font-mono">{entry}</span>
-              <Button
-                size="icon"
-                variant="ghost"
-                className="size-5 text-muted-foreground hover:text-destructive"
-                onClick={() => remove(entry)}
-                title={`Remove ${entry}`}
-              >
-                <HugeiconsIcon icon={Delete02Icon} size={10} strokeWidth={1.75} />
-              </Button>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <div className="rounded-lg border border-dashed border-border/60 bg-card/30 px-4 py-4 text-center text-[11px] text-muted-foreground">
-          No authorized targets. Add at least one, or offensive tools are refused
-          while enforcement is on.
-        </div>
-      )}
-      <SettingRow
-        title="Auto-approve in-scope scans"
-        description="Let a read-tier scan (nmap -sV, ffuf, dig, …) against an in-scope target run without an approval prompt. Exploit-grade tools (sqlmap, hydra, msfconsole, …) always ask. Off by default."
-      >
-        <Switch
-          checked={autoApprove}
-          onCheckedChange={(v) => void setAutoApproveInScopeScans(v)}
-        />
-      </SettingRow>
-      </>
+              Add
+            </Button>
+          </div>
+          {scope.length > 0 ? (
+            <ul className="flex flex-wrap gap-1.5">
+              {scope.map((entry) => (
+                <li
+                  key={entry}
+                  className="flex items-center gap-1.5 rounded-full border border-border/60 bg-card/60 py-1 pr-1 pl-2.5 text-[11px]"
+                >
+                  <span className="font-mono">{entry}</span>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="size-5 text-muted-foreground hover:text-destructive"
+                    onClick={() => remove(entry)}
+                    title={`Remove ${entry}`}
+                  >
+                    <HugeiconsIcon
+                      icon={Delete02Icon}
+                      size={10}
+                      strokeWidth={1.75}
+                    />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="rounded-lg border border-dashed border-border/60 bg-card/30 px-4 py-4 text-center text-[11px] text-muted-foreground">
+              No authorized targets. Add at least one, or offensive tools are
+              refused while enforcement is on.
+            </div>
+          )}
+          <SettingRow
+            title="Auto-approve in-scope scans"
+            description="Let a read-tier scan (nmap -sV, ffuf, dig, …) against an in-scope target run without an approval prompt. Exploit-grade tools (sqlmap, hydra, msfconsole, …) always ask. Off by default."
+          >
+            <Switch
+              checked={autoApprove}
+              onCheckedChange={(v) => void setAutoApproveInScopeScans(v)}
+            />
+          </SettingRow>
+        </>
       )}
     </section>
   );
