@@ -188,6 +188,14 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   the path and shell-command safety checks run inside every tool regardless, so
   no mode can authorise something the safety layer refuses. Read-only tools
   never asked in the first place.
+- **Relay Telegram into the agent.** Give a bot its token and message it from
+  your phone: it drives Termigo's own in-app agent and streams the answer back,
+  so a task, its edits, approvals and memory all behave exactly as if you had
+  typed in the chat. Configured in Settings → Agents → Telegram relay (the
+  token lives in the OS keychain, never a settings file). The bot answers
+  `/status`, `/help`, `/query <question>`, `/run <task>`, `/stop`, `/new` and
+  `/cost`, and shows a live status chip in the AI status bar. It long-polls
+  from the desktop app, so it is only reachable while Termigo is open.
 - **Deleting is never delegated.** No mode speaks for you here, including
   `Auto-approve all`: `delete_file` always asks, and so does any command that
   removes files — `rm`, `rmdir`, `git clean`, `find -delete`, PowerShell's
@@ -399,28 +407,30 @@ See [`docs/`](docs/) for the MCP, skills, agents, and architecture guides.
   <img src="docs/termigo-windows.png" alt="Termigo on Windows" width="900" />
   <br/>
   <sub>
-    The workspace: file tree, editor with the TypeScript LSP attached, the
-    agent panel floating over it, spaces and tabs across the top, and the
-    approval mode always visible in the status bar
+    The workspace: the agent auditing an Android app (the “Audit Keamanan” tab)
+    with a browser tab open beside it and a task checklist it is working
+    through, spaces and tabs across the top, and the approval mode always
+    visible in the status bar
   </sub>
 </p>
 
 <p align="center">
-  <img src="docs/termigo-remote-vps.png" alt="The agent inspecting a remote server over SSH" width="900" />
+  <img src="docs/termigo-remote-vps.png" alt="The agent working on a remote server over SSH" width="900" />
   <br/>
   <sub>
-    The agent working on a server: an SSH tab, the remote filesystem browsable
-    beside the local project, and a health report it gathered by running
-    inspection commands on the host
+    Connected to a VPS over SSH: the remote <code>/etc</code> filesystem browsable
+    in the explorer beside the local project, and an SSH tab that is an ordinary
+    terminal
   </sub>
 </p>
 
 <p align="center">
-  <img src="docs/termigo-running-hermes-vps.png" alt="An SSH session in Termigo running a terminal agent on the remote host" width="900" />
+  <img src="docs/termigo-running-hermes-vps.png" alt="A terminal running a TUI coding agent" width="900" />
   <br/>
   <sub>
-    An SSH tab is an ordinary terminal: a TUI agent running on the remote host,
-    full-colour and interactive, beside the local project tree
+    A terminal is a full terminal: run any CLI in it — here the Antigravity
+    coding agent in accept-edits mode — interactive and full-colour, beside the
+    local project tree
   </sub>
 </p>
 
@@ -431,6 +441,50 @@ See [`docs/`](docs/) for the MCP, skills, agents, and architecture guides.
     Adding a host: password, private key or ssh-agent, an optional ProxyJump
     chain and port forwards. Credentials go to the OS keychain, never to a file
     in the repo
+  </sub>
+</p>
+
+<p align="center">
+  <img src="docs/termigo-settings-agents.png" alt="Agents settings with the Telegram relay" width="900" />
+  <br/>
+  <sub>
+    Settings → Agents: the Telegram relay (token in the OS keychain, owner chat
+    id, status badge) and the pentest scope auto-approval
+  </sub>
+</p>
+
+<p align="center">
+  <img src="docs/termigo-settings-extensions.png" alt="The Extensions manager in Settings" width="900" />
+  <br/>
+  <sub>
+    Settings → Extensions: install, enable and update packages — here the
+    Termigo Pentest &amp; RE Kit from a GitHub repo or local zip
+  </sub>
+</p>
+
+<p align="center">
+  <img src="docs/termigo-settings-harness.png" alt="Agent harness profiles in Settings" width="900" />
+  <br/>
+  <sub>
+    Settings → Harness: pick how the agent is driven — Balanced, Plan first,
+    Verify before finish, Terminal-first, Shorter loop
+  </sub>
+</p>
+
+<p align="center">
+  <img src="docs/termigo-model.png" alt="Provider and model settings" width="900" />
+  <br/>
+  <sub>
+    Settings → Models: connect providers (keys in the OS keychain), pick the
+    chat and autocomplete models, and turn on voice input
+  </sub>
+</p>
+
+<p align="center">
+  <img src="docs/termigo-themes.png" alt="Theme picker in Settings" width="900" />
+  <br/>
+  <sub>
+    Settings → Themes: pick a palette, or import and create a `.termigo-theme`
   </sub>
 </p>
 
