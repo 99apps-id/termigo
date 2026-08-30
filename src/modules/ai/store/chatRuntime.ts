@@ -62,6 +62,27 @@ const MAX_OVERFLOW_RESUMES = 3;
 const overflowAutoResumeAt = new Map<string, number>();
 const overflowAutoResumeCount = new Map<string, number>();
 
+// Cap the agentic loop in ROUNDS, not per-round steps. The step budget (25)
+// resets every round, so a model that does a few tool calls per round and never
+// summarises can loop across rounds forever while each round looks "within
+// budget". This cap is the aggregate guard: once a run has made this many model
+// calls without finishing, the next round is refused (the transcript offers
+// Continue, which resets the per-run counter). 24 is generous — real tasks
+// rarely need it, and a genuinely stuck run is stopped before it burns tokens.
+const MAX_LOOP_ROUNDS = 24;
+
+// Pin the workspace the agent works on for the whole run. The toolContext reads
+// these instead of the live (mutable) context, so switching tabs, opening
+// another folder or connecting an SSH session mid-run cannot silently redirect
+// the agent to a different directory or host — which would fail its tool calls
+// and make it loop. Refreshed only when the user submits a fresh task.
+type RunAnchor = {
+  cwd: string | null;
+  root: string | null;
+  remote: import("../tools/context").RemoteFsSession | null;
+};
+const runAnchor = new Map<string, RunAnchor>();
+
 // Sessions the user has explicitly stopped since the last user-initiated send.
 // `Chat.stop()` aborts the in-flight round, but the Chat may still auto-continue
 // to the next tool round via `sendAutomaticallyWhen` (or because the stream
@@ -126,9 +147,14 @@ function ensureOnlineListener(): void {
 function makeChat(sessionId: string): Chat<UIMessage> {
   const readCache = new Map<string, { size: number; hash: number }>();
   const toolContext: ToolContext = {
-    getCwd: () => useChatStore.getState().live.getCwd(),
-    getRemoteSession: () => useChatStore.getState().live.getRemoteSession(),
-    getWorkspaceRoot: () => useChatStore.getState().live.getWorkspaceRoot(),
+    getCwd: () =>
+      runAnchor.get(sessionId)?.cwd ?? useChatStore.getState().live.getCwd(),
+    getRemoteSession: () =>
+      runAnchor.get(sessionId)?.remote ??
+      useChatStore.getState().live.getRemoteSession(),
+    getWorkspaceRoot: () =>
+      runAnchor.get(sessionId)?.root ??
+      useChatStore.getState().live.getWorkspaceRoot(),
     getTerminalContext: () => useChatStore.getState().live.getTerminalContext(),
     isActiveTerminalPrivate: () =>
       useChatStore.getState().live.isActiveTerminalPrivate(),
@@ -220,12 +246,21 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       useChatStore.getState().patchAgentMeta({ round: next });
       maybeToastRound(next);
     },
-    // Refuse the SDK's next auto-continue round when a Stop was latched. The
-    // latch is cleared on the user's next send (sendParts/flushSteer), so a
-    // fresh message starts normally. Keeping this here (instead of wrapping
-    // `sendAutomaticallyWhen`) leaves the Chat's own continuation semantics
-    // untouched.
-    shouldRefuseRun: (id) => stopLatch.has(id),
+    // Refuse the SDK's next auto-continue round when a Stop was latched or the
+    // agent has looped too long. The latch / round counter is cleared on the
+    // user's next send (sendParts/flushSteer), so a fresh message starts
+    // normally. Keeping this here (instead of wrapping `sendAutomaticallyWhen`)
+    // leaves the Chat's own continuation semantics untouched.
+    shouldRefuseRun: (id) => {
+      if (stopLatch.has(id)) return true;
+      // Aggregate loop cap: stop a run that keeps calling tools round after
+      // round without producing a final summary.
+      if (useChatStore.getState().agentMeta.round >= MAX_LOOP_ROUNDS) {
+        useChatStore.getState().patchAgentMeta({ stopReason: "step-cap" });
+        return true;
+      }
+      return false;
+    },
     onStep: (step) => {
       useChatStore.getState().patchAgentMeta({ step });
     },
@@ -476,6 +511,18 @@ export async function sendParts(
       // A fresh user turn resets the loop-round counter; the first model call
       // of this turn will bump it to 1.
       useChatStore.getState().patchAgentMeta({ round: 0 });
+      // Pin the workspace anchor for the whole run (see runAnchor above). The
+      // auto-continue rounds that follow do NOT go through sendParts, so the
+      // agent stays on the folder / host the user was looking at when they sent
+      // the task, even if they switch elsewhere mid-run.
+      {
+        const live = useChatStore.getState().live;
+        runAnchor.set(sessionId, {
+          cwd: live.getCwd(),
+          root: live.getWorkspaceRoot(),
+          remote: live.getRemoteSession(),
+        });
+      }
       await c.sendMessage({ role: "user", parts } as Parameters<
         typeof c.sendMessage
       >[0]);
