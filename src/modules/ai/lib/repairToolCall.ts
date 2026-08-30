@@ -50,7 +50,12 @@ export function repairJsonText(text: string): string {
         let j = i + 1;
         while (j < text.length && /[ \t]/.test(text[j])) j++;
         const next = text[j];
-        const isStructural = next === undefined || next === "," || next === "}" || next === "]" || next === ":";
+        const isStructural =
+          next === undefined ||
+          next === "," ||
+          next === "}" ||
+          next === "]" ||
+          next === ":";
         if (isStructural) {
           inString = false;
           out += ch;
@@ -85,7 +90,12 @@ export function repairJsonText(text: string): string {
 export async function repairToolCall({
   toolCall,
 }: {
-  toolCall: { toolCallId: string; toolName: string; input?: string; args?: string };
+  toolCall: {
+    toolCallId: string;
+    toolName: string;
+    input?: string;
+    args?: string;
+  };
 }): Promise<{
   toolCallId: string;
   toolName: string;

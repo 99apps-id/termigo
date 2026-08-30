@@ -46,7 +46,11 @@ describe("repairJsonText", () => {
 describe("repairToolCall", () => {
   it("returns null for already-valid input", async () => {
     const result = await repairToolCall({
-      toolCall: { toolCallId: "1", toolName: "run_subagents", input: '{"tasks":[]}' },
+      toolCall: {
+        toolCallId: "1",
+        toolName: "run_subagents",
+        input: '{"tasks":[]}',
+      },
     });
     expect(result).toBeNull();
   });
@@ -62,9 +66,10 @@ describe("repairToolCall", () => {
       },
     });
     expect(result).not.toBeNull();
-    expect(result!.toolName).toBe("run_subagents");
+    expect(result?.toolName).toBe("run_subagents");
     // The SDK re-parses `input`, so it must be valid JSON text.
-    expect(() => JSON.parse(result!.input)).not.toThrow();
+    if (!result) return;
+    expect(() => JSON.parse(result.input)).not.toThrow();
   });
 
   it("returns null on an empty input", async () => {
@@ -76,7 +81,11 @@ describe("repairToolCall", () => {
 
   it("falls back to the args field when input is absent", async () => {
     const result = await repairToolCall({
-      toolCall: { toolCallId: "1", toolName: "run_subagents", args: '{"tasks":[]}' },
+      toolCall: {
+        toolCallId: "1",
+        toolName: "run_subagents",
+        args: '{"tasks":[]}',
+      },
     });
     // Valid -> no repair -> null.
     expect(result).toBeNull();

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { mergeRuns } from "./trajectoryIo";
 import type { TrajectoryRun } from "../store/trajectoryStore";
+import { mergeRuns } from "./trajectoryIo";
 
 function run(id: string, startedAt = Date.now()): TrajectoryRun {
   return {
@@ -27,7 +27,19 @@ describe("mergeRuns", () => {
   });
 
   it("keeps an updated run's step count", () => {
-    const updated: TrajectoryRun = { ...run("a"), steps: [{ id: "s1", stepIndex: 0, toolName: "read_file", args: {}, status: "success", timestamp: 1 }] };
+    const updated: TrajectoryRun = {
+      ...run("a"),
+      steps: [
+        {
+          id: "s1",
+          stepIndex: 0,
+          toolName: "read_file",
+          args: {},
+          status: "success",
+          timestamp: 1,
+        },
+      ],
+    };
     const next = mergeRuns([run("a"), run("b")], updated);
     expect(next.find((r) => r.runId === "a")?.steps).toHaveLength(1);
   });

@@ -1,6 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { newTodoId, validateTodos, type Todo } from "../lib/todos";
+import { newTodoId, type Todo, validateTodos } from "../lib/todos";
 import { useTodosStore } from "../store/todoStore";
 import type { ToolContext } from "./context";
 
@@ -10,7 +10,7 @@ export function buildTodoTools(ctx: ToolContext) {
   return {
     todo_write: tool({
       description:
-        "Replace your current task list. Use this for any non-trivial multi-step task (≥3 substantive steps). Mark exactly one item `in_progress` while you work on it; flip it to `completed` and the next to `in_progress` as you go. The tool replaces the previous list — always pass the FULL list, not a delta. Auto-executes (no approval).",
+        "Replace your current task list. Use this for any non-trivial multi-step task (≥3 substantive steps). Mark exactly one item `in_progress` while you work on it. IMPORTANT: flip an item to `completed` the moment it is done — do NOT wait until the whole list is finished to check everything off. After each completed item, immediately set the next `in_progress` and call this again with the updated list. The tool replaces the previous list — always pass the FULL list, not a delta. Auto-executes (no approval).",
       inputSchema: z.object({
         todos: z
           .array(

@@ -1,16 +1,21 @@
+import { usePreferencesStore } from "@/modules/settings/preferences";
+import { setAgentAlwaysAllowedTools } from "@/modules/settings/store";
 import { generateText, stepCountIs } from "ai";
-import { buildConfiguredLanguageModel, noProgressStop, noToolRepetition } from "../lib/agent";
-import { repairToolCall } from "../lib/repairToolCall";
-import type { ProviderKeys } from "../lib/keyring";
-import type { ToolContext } from "../tools/context";
-import { buildTools } from "../tools/tools";
-import { buildExtensionTools } from "../lib/extensionTools";
-import { isExtensionTool } from "../lib/extensionToolNames";
-import { isMcpTool } from "../lib/mcpToolNames";
-import { isCustomTool } from "../lib/customToolNames";
-import { isAutoApprovedScan } from "../lib/pentestScope";
-import { summarizeInput } from "../lib/approvalQueue";
+import {
+  buildConfiguredLanguageModel,
+  noProgressStop,
+  noToolRepetition,
+} from "../lib/agent";
 import { subagentWriteNeedsApproval } from "../lib/approvalPolicy";
+import { summarizeInput } from "../lib/approvalQueue";
+import { isCustomTool } from "../lib/customToolNames";
+import { isExtensionTool } from "../lib/extensionToolNames";
+import { buildExtensionTools } from "../lib/extensionTools";
+import type { ProviderKeys } from "../lib/keyring";
+import { isMcpTool } from "../lib/mcpToolNames";
+import { native } from "../lib/native";
+import { isAutoApprovedScan } from "../lib/pentestScope";
+import { repairToolCall } from "../lib/repairToolCall";
 import {
   isSessionAllowed,
   rememberSessionAllowed,
@@ -18,9 +23,8 @@ import {
 } from "../store/approvalQueueStore";
 import { useChatStore } from "../store/chatStore";
 import { usePlanStore } from "../store/planStore";
-import { usePreferencesStore } from "@/modules/settings/preferences";
-import { setAgentAlwaysAllowedTools } from "@/modules/settings/store";
-import { native } from "../lib/native";
+import type { ToolContext } from "../tools/context";
+import { buildTools } from "../tools/tools";
 import { SUBAGENTS, type SubagentType } from "./registry";
 
 const SUBAGENT_MAX_STEPS = 12;
@@ -64,8 +68,11 @@ const WITHHELD = new Set(["run_subagent", "run_subagents"]);
  * auto-run, exactly as they do for the main agent.
  */
 export function subagentToolNeedsGate(name: string, tool?: unknown): boolean {
-  if (isExtensionTool(name) || isMcpTool(name) || isCustomTool(name)) return true;
-  return (tool as { needsApproval?: unknown } | undefined)?.needsApproval === true;
+  if (isExtensionTool(name) || isMcpTool(name) || isCustomTool(name))
+    return true;
+  return (
+    (tool as { needsApproval?: unknown } | undefined)?.needsApproval === true
+  );
 }
 
 /**
@@ -152,10 +159,12 @@ function gate<T extends AnyTool>(
       );
       if (!mustAsk) return inner(input, opts);
 
-      const decision = await useApprovalQueue.getState().request(
-        { requester, toolName, summary: summarizeInput(input) },
-        abortSignal,
-      );
+      const decision = await useApprovalQueue
+        .getState()
+        .request(
+          { requester, toolName, summary: summarizeInput(input) },
+          abortSignal,
+        );
 
       if (decision === "allow-session") {
         rememberSessionAllowed(toolName);
@@ -267,7 +276,9 @@ async function synthesizeSummary(
     }>) {
       const out = tr.output ?? tr.result;
       const outStr = typeof out === "string" ? out : safeJson(out);
-      lines.push(`${tr.toolName ?? "tool"}(${safeJson(tr.input)}) -> ${outStr.slice(0, 800)}`);
+      lines.push(
+        `${tr.toolName ?? "tool"}(${safeJson(tr.input)}) -> ${outStr.slice(0, 800)}`,
+      );
     }
   }
   if (lines.length === 0) return "";
@@ -327,7 +338,10 @@ export async function runSubagent({
   // or the sub-agent keeps running after the parent is gone.
   if (abortSignal) {
     if (abortSignal.aborted) controller.abort();
-    else abortSignal.addEventListener("abort", () => controller.abort(), { once: true });
+    else
+      abortSignal.addEventListener("abort", () => controller.abort(), {
+        once: true,
+      });
   }
 
   for (const [name, found] of Object.entries(available)) {
@@ -336,8 +350,15 @@ export async function runSubagent({
       tools[name] = found;
       continue;
     }
-    const guarded = name === WRITE_FILE ? newFilesOnly(found as AnyTool) : found;
-    tools[name] = gate(guarded as AnyTool, name, requester ?? type, breaker, controller.signal);
+    const guarded =
+      name === WRITE_FILE ? newFilesOnly(found as AnyTool) : found;
+    tools[name] = gate(
+      guarded as AnyTool,
+      name,
+      requester ?? type,
+      breaker,
+      controller.signal,
+    );
   }
 
   // Multi-model routing: a cheaper or local model can do the fan-out while the
@@ -420,7 +441,13 @@ export async function runSubagent({
     // it gathered and asking once more, with NO tools, for a prose summary.
     const summary =
       result.text?.trim() ||
-      (await synthesizeSummary(model, def.systemPrompt, prompt, result, controller.signal)) ||
+      (await synthesizeSummary(
+        model,
+        def.systemPrompt,
+        prompt,
+        result,
+        controller.signal,
+      )) ||
       "(no output)";
     return {
       summary,

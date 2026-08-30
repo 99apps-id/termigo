@@ -13,7 +13,9 @@ import { useChatStore } from "@/modules/ai/store/chatStore";
 const QUERY_MAX_TEXT = 60 * 1024;
 const POLL_MS = 150;
 
-export type QueryResult = { ok: true; text: string } | { ok: false; message: string };
+export type QueryResult =
+  | { ok: true; text: string }
+  | { ok: false; message: string };
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -41,7 +43,8 @@ export async function runQuery(
   if (!sessionId) {
     return {
       ok: false,
-      message: "no active chat session; open a workspace and pick a model first",
+      message:
+        "no active chat session; open a workspace and pick a model first",
     };
   }
   const beforeCount = getOrCreateChat(sessionId).messages.length;
@@ -49,7 +52,8 @@ export async function runQuery(
   if (!ok) {
     return {
       ok: false,
-      message: "no active chat session; open a workspace and pick a model first",
+      message:
+        "no active chat session; open a workspace and pick a model first",
     };
   }
 

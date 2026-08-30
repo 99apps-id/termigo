@@ -1,8 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-
 import { useChatStore } from "@/modules/ai/store/chatStore";
-
-import { runQuery, type QueryResult } from "./queryAgent";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { type QueryResult, runQuery } from "./queryAgent";
 
 function failureMessage(result: QueryResult): string {
   if (result.ok) throw new Error("expected a failure result");
@@ -73,7 +71,11 @@ describe("runQuery", () => {
 
   it("reports an agent error stop", async () => {
     useChatStore.setState({
-      agentMeta: { ...useChatStore.getState().agentMeta, status: "error", error: "boom" },
+      agentMeta: {
+        ...useChatStore.getState().agentMeta,
+        status: "error",
+        error: "boom",
+      },
     });
     const result = await runQuery("hi", 500);
     expect(result.ok).toBe(false);

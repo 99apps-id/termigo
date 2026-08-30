@@ -104,7 +104,9 @@ export function RunReplayDialog({
                           <span className="truncate font-mono">
                             {run.modelId}
                           </span>
-                          <span className="shrink-0">{run.steps.length} steps</span>
+                          <span className="shrink-0">
+                            {run.steps.length} steps
+                          </span>
                           <span
                             className={cn(
                               "ml-auto shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide",

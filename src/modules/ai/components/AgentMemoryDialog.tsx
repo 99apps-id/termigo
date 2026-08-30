@@ -11,11 +11,7 @@ import { BrainIcon, Cancel01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import {
-  forgetFact,
-  readMemory,
-  type MemoryEntry,
-} from "../lib/memory";
+import { forgetFact, type MemoryEntry, readMemory } from "../lib/memory";
 import { useChatStore } from "../store/chatStore";
 
 /**
@@ -73,10 +69,10 @@ export function AgentMemoryDialog({
         </DialogHeader>
 
         <p className="text-[11px] leading-relaxed text-muted-foreground">
-          Facts the agent recorded in <code className="font-mono">.termigo/memory.md</code>.
-          They reach the system prompt of every run, so a wrong entry steers
-          later replies — delete it here (or edit the file) to make the agent
-          forget.
+          Facts the agent recorded in{" "}
+          <code className="font-mono">.termigo/memory.md</code>. They reach the
+          system prompt of every run, so a wrong entry steers later replies —
+          delete it here (or edit the file) to make the agent forget.
         </p>
 
         {!workspaceRoot ? (
@@ -113,7 +109,11 @@ export function AgentMemoryDialog({
                     disabled={busy === entry.text}
                     onClick={() => void forget(entry)}
                   >
-                    <HugeiconsIcon icon={Cancel01Icon} size={12} strokeWidth={2} />
+                    <HugeiconsIcon
+                      icon={Cancel01Icon}
+                      size={12}
+                      strokeWidth={2}
+                    />
                   </Button>
                 </li>
               ))}

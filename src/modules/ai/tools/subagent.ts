@@ -1,16 +1,16 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { runSubagent } from "../agents/runSubagent";
 import { SUBAGENTS, type SubagentType } from "../agents/registry";
 import { resolveSubagentType } from "../agents/resolveSubagent";
-import { useSubagentRunStore } from "../store/subagentRunStore";
-import { useChatStore } from "../store/chatStore";
+import { runSubagent } from "../agents/runSubagent";
 import {
   cascadeSkip,
   planSubagentBatch,
   readyTasks,
   type TaskState,
 } from "../lib/subagentSchedule";
+import { useChatStore } from "../store/chatStore";
+import { useSubagentRunStore } from "../store/subagentRunStore";
 import type { ToolContext } from "./context";
 
 const TYPE_KEYS = Object.keys(SUBAGENTS) as [SubagentType, ...SubagentType[]];
@@ -55,7 +55,7 @@ function parseJsonIfString(value: unknown): unknown {
  * batch fails with "JSON parsing failed"; normalising first means it runs.
  */
 export function normalizeBatchInput(input: unknown): unknown {
-  let value = parseJsonIfString(input);
+  const value = parseJsonIfString(input);
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
 
   const obj = { ...(value as Record<string, unknown>) };
@@ -139,12 +139,18 @@ Approval works exactly as it does for you: read-only tools auto-run, and every m
             onStep: (label) => {
               patchAgentMeta({ step: label });
               steps += 1;
-              useSubagentRunStore.getState().step(sid, runId, { currentStep: label, stepCount: steps });
+              useSubagentRunStore
+                .getState()
+                .step(sid, runId, { currentStep: label, stepCount: steps });
             },
           });
           useSubagentRunStore
             .getState()
-            .finish(sid, runId, { stepCount: r.stepCount, durationMs: r.durationMs, summary: r.summary });
+            .finish(sid, runId, {
+              stepCount: r.stepCount,
+              durationMs: r.durationMs,
+              summary: r.summary,
+            });
           return {
             type: resolved,
             description,
@@ -314,7 +320,11 @@ Each task's subagent has the same toolset you do (minus spawning further subagen
             state[i] = { settled: true, bad: false, running: false };
             useSubagentRunStore
               .getState()
-              .finish(sid, runId, { stepCount: r.stepCount, durationMs: r.durationMs, summary: r.summary });
+              .finish(sid, runId, {
+                stepCount: r.stepCount,
+                durationMs: r.durationMs,
+                summary: r.summary,
+              });
           } catch (e) {
             results[i].error = String(e);
             state[i] = { settled: true, bad: true, running: false };
@@ -330,7 +340,11 @@ Each task's subagent has the same toolset you do (minus spawning further subagen
         // one task ends instead of when the whole wave does.
         const inFlight = new Map<number, Promise<void>>();
         while (state.some((s) => !s.settled) || inFlight.size > 0) {
-          for (const i of readyTasks(plan.deps, state, concurrency - inFlight.size)) {
+          for (const i of readyTasks(
+            plan.deps,
+            state,
+            concurrency - inFlight.size,
+          )) {
             state[i].running = true;
             inFlight.set(
               i,

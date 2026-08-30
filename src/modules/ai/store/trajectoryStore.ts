@@ -33,7 +33,11 @@ type TrajectoryState = {
   startRun: (opts: { runId: string; modelId: string; taskId?: string }) => void;
   appendStep: (step: Omit<TrajectoryStep, "timestamp">) => void;
   updateStep: (stepId: string, patch: Partial<TrajectoryStep>) => void;
-  finishRun: (opts: { status: TrajectoryRun["status"]; totalTokens?: number; totalCostUsd?: number }) => void;
+  finishRun: (opts: {
+    status: TrajectoryRun["status"];
+    totalTokens?: number;
+    totalCostUsd?: number;
+  }) => void;
   selectStep: (stepId: string | null) => void;
   clearRuns: () => void;
 };

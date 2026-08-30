@@ -4,9 +4,9 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useState } from "react";
 import { native } from "../lib/native";
 import {
+  type CheckpointEntry,
   listCheckpoints,
   rollbackToCheckpoint,
-  type CheckpointEntry,
 } from "../lib/snapshots";
 import { useChatStore } from "../store/chatStore";
 
@@ -78,7 +78,11 @@ export function RollbackSuggestion() {
       title="Restore the working tree to the last checkpoint (your current changes are checkpointed first, so this can be undone)"
       className="flex items-center gap-1.5 rounded bg-amber-500/20 px-2 py-0.5 font-medium text-amber-600 hover:bg-amber-500/30 disabled:opacity-50"
     >
-      <HugeiconsIcon icon={ArrowTurnBackwardIcon} size={12} strokeWidth={1.75} />
+      <HugeiconsIcon
+        icon={ArrowTurnBackwardIcon}
+        size={12}
+        strokeWidth={1.75}
+      />
       {busy ? "Rolling back…" : "Undo to last checkpoint"}
     </button>
   );

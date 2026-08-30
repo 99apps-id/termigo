@@ -116,7 +116,10 @@ export async function rememberFact(
   today = new Date().toISOString().slice(0, 10),
 ): Promise<RememberOutcome> {
   if (!workspaceRoot) {
-    return { stored: false, reason: "no workspace is open, so there is nowhere to store this" };
+    return {
+      stored: false,
+      reason: "no workspace is open, so there is nowhere to store this",
+    };
   }
   const text = normalizeFact(rawFact);
   if (!text) return { stored: false, reason: "the fact was empty" };
