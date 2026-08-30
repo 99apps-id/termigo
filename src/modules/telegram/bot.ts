@@ -24,6 +24,11 @@ type ChatLike = {
 type Update = {
   update_id: number;
   message?: { chat: { id: number }; text?: string };
+  callback_query?: {
+    id: string;
+    message?: { chat: { id: number }; message_id?: number };
+    data?: string;
+  };
 };
 
 let loopController: AbortController | null = null;
@@ -81,6 +86,69 @@ async function sendTelegram(
   await apiPost("sendMessage", { chat_id: chatId, text }, signal);
 }
 
+async function sendKeyboard(
+  chatId: number,
+  text: string,
+  keyboard: InlineButton[][],
+  signal: AbortSignal,
+): Promise<void> {
+  await apiPost(
+    "sendMessage",
+    { chat_id: chatId, text, reply_markup: { inline_keyboard: keyboard } },
+    signal,
+  );
+}
+
+async function editKeyboard(
+  chatId: number,
+  messageId: number,
+  text: string,
+  keyboard: InlineButton[][],
+  signal: AbortSignal,
+): Promise<void> {
+  await apiPost(
+    "editMessageText",
+    {
+      chat_id: chatId,
+      message_id: messageId,
+      text,
+      reply_markup: { inline_keyboard: keyboard },
+    },
+    signal,
+  );
+}
+
+async function answerCallback(
+  callbackId: string,
+  text: string | null,
+  signal: AbortSignal,
+): Promise<void> {
+  await apiPost(
+    "answerCallbackQuery",
+    { callback_query_id: callbackId, text },
+    signal,
+  );
+}
+
+async function modelLabel(modelId: string): Promise<string> {
+  const { MODELS, isCompatModelId, endpointIdFromCompatModel } = await import(
+    "../ai/config"
+  );
+  const { usePreferencesStore } = await import(
+    "@/modules/settings/preferences"
+  );
+  const m = MODELS.find((x) => x.id === modelId);
+  if (m) return m.label;
+  if (isCompatModelId(modelId)) {
+    const eid = endpointIdFromCompatModel(modelId);
+    const ep = usePreferencesStore
+      .getState()
+      .customEndpoints.find((e) => e.id === eid);
+    return ep?.modelId || ep?.name || modelId;
+  }
+  return modelId;
+}
+
 async function buildStatus(): Promise<string> {
   const store = useTelegramStore.getState();
   const chat = await import("../ai/store/chatStore");
@@ -88,13 +156,44 @@ async function buildStatus(): Promise<string> {
   const model = chat.useChatStore.getState().selectedModelId;
   return [
     `Termigo bot ${store.online ? "online" : "offline"}`,
-    `Model: ${model}`,
+    `Model: ${await modelLabel(model)}`,
     `Agent: ${meta.status}`,
     `Enabled: ${store.enabled ? "yes" : "no"}`,
     store.lastError ? `Error: ${store.lastError}` : null,
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+type InlineButton = { text: string; callback_data: string };
+type ModelChoice = { id: string; label: string };
+type ProviderGroup = { key: string; label: string; models: ModelChoice[] };
+
+async function buildProviderGroups(): Promise<ProviderGroup[]> {
+  const { MODELS, PROVIDERS, isCompatModelId, compatModelIdForEndpoint } =
+    await import("../ai/config");
+  const { usePreferencesStore } = await import(
+    "@/modules/settings/preferences"
+  );
+  const chat = await import("../ai/store/chatStore");
+  const state = chat.useChatStore.getState();
+  const { buildModelGroups } = await import("./modelGroups");
+
+  const providerLabel = (id: string): string => {
+    if (id === "openai-compatible") return "OpenAI Compatible";
+    return PROVIDERS.find((p) => p.id === id)?.label ?? id;
+  };
+
+  return buildModelGroups({
+    models: MODELS,
+    providerLabel,
+    current: state.selectedModelId,
+    apiKeys: state.apiKeys as Record<string, string | undefined>,
+    customEndpointKeys: state.customEndpointKeys,
+    customEndpoints: usePreferencesStore.getState().customEndpoints,
+    isCompatModelId,
+    compatModelIdForEndpoint,
+  });
 }
 
 /** Number of assistant messages in a session (used as a baseline to detect a
@@ -218,25 +317,14 @@ async function dispatchAndStream(
 
 const HELP = [
   "/status — bot + agent status",
-  "/query <question> — read-only question",
+  "/query <question> — read-only question (or just type the question)",
   "/run <task> — run a task in the agent",
   "/stop — stop the current run",
   "/new — start a new agent session",
-  "/model [id] — show or set the model",
+  "/model — pick a model (opens a provider → model menu)",
+  "/model <id> — set the model directly",
   "/cost — today's & total spend",
 ].join("\n");
-
-async function listModelChoices(): Promise<string[]> {
-  const { MODELS, compatModelIdForEndpoint } = await import("../ai/config");
-  const { usePreferencesStore } = await import(
-    "@/modules/settings/preferences"
-  );
-  const builtin = MODELS.map((m) => m.id);
-  const custom = usePreferencesStore
-    .getState()
-    .customEndpoints.map((ep) => compatModelIdForEndpoint(ep.id));
-  return [...builtin, ...custom];
-}
 
 async function isValidModel(id: string): Promise<boolean> {
   const { MODELS, isCompatModelId, compatModelIdForEndpoint } = await import(
@@ -252,7 +340,80 @@ async function isValidModel(id: string): Promise<boolean> {
     .customEndpoints.some((ep) => compatModelIdForEndpoint(ep.id) === id);
 }
 
+/** Mark the currently-selected model in the model keyboard with a check. */
+function markModelButtons(
+  models: ModelChoice[],
+  current: string,
+): InlineButton[][] {
+  return models.map((m) => [
+    {
+      text: m.id === current ? `✓ ${m.label}` : m.label,
+      callback_data: `ms:${m.id}`,
+    },
+  ]);
+}
+
+/** Answer an inline-keyboard callback from the /model menu. */
+async function handleCallback(
+  cb: NonNullable<Update["callback_query"]>,
+  signal: AbortSignal,
+): Promise<void> {
+  const data = cb.data ?? "";
+  const msg = cb.message;
+  if (!msg?.message_id) {
+    await answerCallback(cb.id, null, signal);
+    return;
+  }
+  const chatId = msg.chat.id;
+  const messageId = msg.message_id;
+
+  if (data.startsWith("mp:")) {
+    const key = data.slice(3);
+    const groups = await buildProviderGroups();
+    const group = groups.find((g) => g.key === key);
+    if (!group) {
+      await answerCallback(
+        cb.id,
+        "That provider is no longer available.",
+        signal,
+      );
+      return;
+    }
+    await answerCallback(cb.id, null, signal);
+    const state = await import("../ai/store/chatStore");
+    const current = state.useChatStore.getState().selectedModelId;
+    await editKeyboard(
+      chatId,
+      messageId,
+      `Pick a model for ${group.label}:`,
+      markModelButtons(group.models, current),
+      signal,
+    );
+    return;
+  }
+
+  if (data.startsWith("ms:")) {
+    const model = data.slice(3);
+    if (!(await isValidModel(model))) {
+      await answerCallback(cb.id, "Unknown model.", signal);
+      return;
+    }
+    const state = await import("../ai/store/chatStore");
+    state.useChatStore.getState().setSelectedModelId(model);
+    await answerCallback(cb.id, `Model set to ${model}`, signal);
+    await editKeyboard(chatId, messageId, `Model set to ${model}.`, [], signal);
+    return;
+  }
+
+  await answerCallback(cb.id, null, signal);
+}
+
 async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
+  // Inline-keyboard taps from the /model menu come through as callback_query.
+  if (u.callback_query) {
+    await handleCallback(u.callback_query, signal);
+    return;
+  }
   const msg = u.message;
   if (!msg?.text) return;
   const chatId = msg.chat.id;
@@ -311,11 +472,25 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
     case "/model": {
       const state = await import("../ai/store/chatStore");
       if (!tail) {
+        // Interactive picker: providers first, then a model per provider. Only
+        // providers the user can actually reach (plus the current one) appear.
         const current = state.useChatStore.getState().selectedModelId;
-        const ids = await listModelChoices();
-        await sendTelegram(
+        const groups = await buildProviderGroups();
+        const keyboard = groups.map((g) => [
+          { text: g.label, callback_data: `mp:${g.key}` },
+        ]);
+        if (keyboard.length === 0) {
+          await sendTelegram(
+            chatId,
+            `Current model: ${current}\n\nNo other providers are configured.`,
+            signal,
+          );
+          return;
+        }
+        await sendKeyboard(
           chatId,
-          `Current: ${current}\n\n${ids.join("\n")}`,
+          `Current model: ${current}\n\nChoose a provider:`,
+          keyboard,
           signal,
         );
         return;
@@ -323,7 +498,7 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
       if (!(await isValidModel(tail))) {
         await sendTelegram(
           chatId,
-          `Unknown model '${tail}'. Send /model for the list.`,
+          `Unknown model '${tail}'. Send /model for the picker.`,
           signal,
         );
         return;
@@ -346,7 +521,15 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
       return;
     }
     default:
-      await sendTelegram(chatId, HELP, signal);
+      // A bare message is a question/task — no /query prefix needed. Unknown
+      // slash commands still get help so a typo isn't silently sent to the app.
+      if (text.startsWith("/")) {
+        await sendTelegram(chatId, HELP, signal);
+        return;
+      }
+      await sendTelegram(chatId, "Running in the app…", signal);
+      void dispatchAndStream(text, chatId, signal);
+      return;
   }
 }
 
