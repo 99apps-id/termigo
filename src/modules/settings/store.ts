@@ -1,7 +1,9 @@
 import {
   type AgentLaunchCommands,
+  type CustomAgentLauncher,
   DEFAULT_AGENT_LAUNCH_COMMANDS,
   normalizeAgentLaunchCommands,
+  normalizeCustomAgentLaunchers,
 } from "@/modules/agents/lib/launcher";
 import {
   type AutocompleteProviderId,
@@ -209,6 +211,8 @@ export type Preferences = {
   /** Keep the AI edit diff tab open for review after the write runs (close when the run settles). */
   agentReviewAfterApply: boolean;
   agentLaunchCommands: AgentLaunchCommands;
+  /** User-defined coding-agent CLIs. */
+  customAgentLaunchers: CustomAgentLauncher[];
   defaultWorkspaceEnv: string;
   shortcuts: Record<ShortcutId, KeyBinding[]>;
   editorAutoSave: boolean;
@@ -341,6 +345,7 @@ const KEY_AGENT_NOTIFICATIONS = "agentNotifications";
 const KEY_DEBUG_CAPTURE = "debugCaptureEnabled";
 const KEY_AGENT_REVIEW_AFTER_APPLY = "agentReviewAfterApply";
 const KEY_AGENT_LAUNCH_COMMANDS = "agentLaunchCommands";
+const KEY_CUSTOM_AGENT_LAUNCHERS = "customAgentLaunchers";
 const KEY_DEFAULT_WORKSPACE_ENV = "defaultWorkspaceEnv";
 const KEY_SHORTCUTS = "shortcuts";
 const KEY_EDITOR_AUTO_SAVE = "editorAutoSave";
@@ -444,6 +449,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   debugCaptureEnabled: false,
   agentReviewAfterApply: true,
   agentLaunchCommands: DEFAULT_AGENT_LAUNCH_COMMANDS,
+  customAgentLaunchers: [],
   defaultWorkspaceEnv: "local",
   shortcuts: {} as Record<ShortcutId, KeyBinding[]>,
   editorAutoSave: false,
@@ -743,6 +749,9 @@ export async function loadPreferences(): Promise<Preferences> {
       DEFAULT_PREFERENCES.terminalAiSuggest,
     agentLaunchCommands: normalizeAgentLaunchCommands(
       get<unknown>(KEY_AGENT_LAUNCH_COMMANDS),
+    ),
+    customAgentLaunchers: normalizeCustomAgentLaunchers(
+      get<unknown>(KEY_CUSTOM_AGENT_LAUNCHERS),
     ),
     defaultWorkspaceEnv:
       get<string>(KEY_DEFAULT_WORKSPACE_ENV) ??
@@ -1184,6 +1193,15 @@ export async function setAgentLaunchCommands(
   );
 }
 
+export async function setCustomAgentLaunchers(
+  value: CustomAgentLauncher[],
+): Promise<void> {
+  await writePref(
+    KEY_CUSTOM_AGENT_LAUNCHERS,
+    normalizeCustomAgentLaunchers(value),
+  );
+}
+
 export async function setDefaultWorkspaceEnv(value: string): Promise<void> {
   await writePref(KEY_DEFAULT_WORKSPACE_ENV, value);
 }
@@ -1263,6 +1281,7 @@ export async function onPreferencesChange(
     [KEY_DEBUG_CAPTURE]: "debugCaptureEnabled",
     [KEY_AGENT_REVIEW_AFTER_APPLY]: "agentReviewAfterApply",
     [KEY_AGENT_LAUNCH_COMMANDS]: "agentLaunchCommands",
+    [KEY_CUSTOM_AGENT_LAUNCHERS]: "customAgentLaunchers",
     [KEY_DEFAULT_WORKSPACE_ENV]: "defaultWorkspaceEnv",
     [KEY_SHORTCUTS]: "shortcuts",
     [KEY_EDITOR_AUTO_SAVE]: "editorAutoSave",

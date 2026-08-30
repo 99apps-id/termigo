@@ -14,7 +14,7 @@ import { isMarkdownPath } from "@/lib/utils";
 import {
   type AgentLaunchRequest,
   AgentNotificationsBridge,
-  findAgentLauncher,
+  findAgentLauncherWithCustom,
   nextAttentionTarget,
   validateAgentLaunchCommand,
 } from "@/modules/agents";
@@ -612,7 +612,10 @@ export default function App() {
     (request: AgentLaunchRequest) => {
       const command = validateAgentLaunchCommand(request.command);
       if (!command.ok) return;
-      const launcher = findAgentLauncher(request.agent);
+      const launcher = findAgentLauncherWithCustom(
+        request.agent,
+        usePreferencesStore.getState().customAgentLaunchers,
+      );
 
       // The launcher types the command into a shell, so a CLI that is not on
       // PATH produced a tab, a bare "not recognized", and no hint that PATH was

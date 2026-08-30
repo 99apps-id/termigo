@@ -44,14 +44,41 @@ export const AGENT_LAUNCHERS = [
     defaultCommand: "aider",
     supportsHooks: false,
   },
+  {
+    id: "qwen",
+    label: "Qwen",
+    defaultCommand: "qwen",
+    supportsHooks: false,
+  },
+  {
+    id: "cursor",
+    label: "Cursor",
+    defaultCommand: "cursor",
+    supportsHooks: false,
+  },
 ] as const;
 
 export type AgentLauncherId = (typeof AGENT_LAUNCHERS)[number]["id"];
 export type AgentInstanceCount = 1 | 2 | 3 | 4;
 export type AgentLaunchCommands = Record<AgentLauncherId, string>;
 
+/** A user-defined coding-agent CLI registered in Settings. */
+export type CustomAgentLauncher = {
+  id: string;
+  label: string;
+  command: string;
+};
+
+/** Any launcher (built-in or user-defined) once its command is resolved. */
+export type ResolvedAgentLauncher = {
+  id: string;
+  label: string;
+  defaultCommand: string;
+  supportsHooks: boolean;
+};
+
 export type AgentLaunchRequest = {
-  agent: AgentLauncherId;
+  agent: string;
   command: string;
   instances: AgentInstanceCount;
 };
@@ -106,8 +133,85 @@ export function normalizeAgentLaunchCommands(
   ) as AgentLaunchCommands;
 }
 
-export function findAgentLauncher(id: AgentLauncherId) {
+export function findAgentLauncher(id: string) {
   return AGENT_LAUNCHERS.find((agent) => agent.id === id) ?? AGENT_LAUNCHERS[0];
+}
+
+const MAX_CUSTOM_AGENT_ID_LENGTH = 32;
+const MAX_CUSTOM_AGENT_LABEL_LENGTH = 40;
+
+/** Coerce an unknown stored value into a valid custom agent, or null. */
+export function sanitizeCustomAgent(
+  value: unknown,
+): CustomAgentLauncher | null {
+  if (typeof value !== "object" || value === null) return null;
+  const obj = value as Record<string, unknown>;
+  const id = typeof obj.id === "string" ? obj.id.trim() : "";
+  const label = typeof obj.label === "string" ? obj.label.trim() : "";
+  const command = typeof obj.command === "string" ? obj.command.trim() : "";
+  if (!id || !label || !command) return null;
+  if (id.length > MAX_CUSTOM_AGENT_ID_LENGTH) return null;
+  if (label.length > MAX_CUSTOM_AGENT_LABEL_LENGTH) return null;
+  if (command.length > MAX_AGENT_COMMAND_LENGTH) return null;
+  if (
+    CONTROL_CHARACTERS.test(id) ||
+    CONTROL_CHARACTERS.test(label) ||
+    CONTROL_CHARACTERS.test(command)
+  ) {
+    return null;
+  }
+  return { id, label, command };
+}
+
+/** Load persisted custom agents, dropping invalid, duplicate, or built-in ids. */
+export function normalizeCustomAgentLaunchers(
+  value: unknown,
+): CustomAgentLauncher[] {
+  if (!Array.isArray(value)) return [];
+  const builtinIds = new Set<string>(AGENT_LAUNCHERS.map((a) => a.id));
+  const seen = new Set<string>(builtinIds);
+  const result: CustomAgentLauncher[] = [];
+  for (const item of value) {
+    const agent = sanitizeCustomAgent(item);
+    if (!agent) continue;
+    if (seen.has(agent.id)) continue;
+    seen.add(agent.id);
+    result.push(agent);
+  }
+  return result;
+}
+
+/** All launchable agents: built-ins first, then user-defined. */
+export function getAgentLaunchers(
+  customAgents: readonly CustomAgentLauncher[] = [],
+): ResolvedAgentLauncher[] {
+  const builtinIds = new Set<string>(AGENT_LAUNCHERS.map((a) => a.id));
+  return [
+    ...AGENT_LAUNCHERS.map(({ id, label, defaultCommand, supportsHooks }) => ({
+      id,
+      label,
+      defaultCommand,
+      supportsHooks,
+    })),
+    ...customAgents
+      .filter((c) => !builtinIds.has(c.id))
+      .map(({ id, label, command }) => ({
+        id,
+        label,
+        defaultCommand: command,
+        supportsHooks: false,
+      })),
+  ];
+}
+
+/** Resolve a launcher by id. Custom agents are honoured; unknown ids fall back
+ *  to the first built-in launchable agent. */
+export function findAgentLauncherWithCustom(
+  id: string,
+  customAgents: readonly CustomAgentLauncher[] = [],
+): ResolvedAgentLauncher {
+  const launchers = getAgentLaunchers(customAgents);
+  return launchers.find((agent) => agent.id === id) ?? AGENT_LAUNCHERS[0];
 }
 
 export type AgentPanePlan = {

@@ -1,13 +1,11 @@
-import { AGENT_LAUNCHERS } from "@/modules/agents/lib/launcher";
+import { getAgentLaunchers } from "@/modules/agents/lib/launcher";
 import { useManagedAgentsStore } from "@/modules/agents/store/managedAgentsStore";
+import { usePreferencesStore } from "@/modules/settings/preferences";
 import { writeToSession } from "@/modules/terminal";
 import { tool } from "ai";
 import { z } from "zod";
 import { remoteUnsupported } from "../lib/remoteFs";
 import type { ToolContext } from "./context";
-
-const AGENT_IDS = AGENT_LAUNCHERS.map((a) => a.id) as [string, ...string[]];
-const AGENT_LIST = AGENT_LAUNCHERS.map((a) => a.id).join(", ");
 
 // Claude Code's TUI treats a trailing CR in the same write chunk as the text
 // as a literal newline, not a submit. Send the Enter as a separate chunk once
@@ -28,19 +26,29 @@ function tailLines(text: string, n: number): string {
 }
 
 export function buildManagedAgentTools(ctx: ToolContext) {
+  const customAgentLaunchers =
+    usePreferencesStore.getState().customAgentLaunchers ?? [];
+  const launchers = getAgentLaunchers(customAgentLaunchers);
+  const agentIds = launchers.map((a) => a.id) as [string, ...string[]];
+  const agentList = launchers.map((a) => a.id).join(", ");
+  const hookAgentList = launchers
+    .filter((a) => a.supportsHooks)
+    .map((a) => a.id)
+    .join("/");
+
   return {
     spawn_coding_agent: tool({
-      description: `Spawn an external coding-agent CLI in a new terminal tab and give it the prompt. Use this when the user wants work delegated and no agent is active yet in this session. Craft a complete, self-contained prompt first; the user approves it before the agent starts. Do not call this if an agent is already active — use send_to_agent instead. Supported agents: ${AGENT_LIST} (defaults to claude; the CLI must be installed and on PATH).`,
+      description: `Spawn an external coding-agent CLI in a new terminal tab and give it the prompt. Use this when the user wants work delegated and no agent is active yet in this session. Craft a complete, self-contained prompt first; the user approves it before the agent starts. Do not call this if an agent is already active — use send_to_agent instead. Supported agents: ${agentList} (defaults to claude; the CLI must be installed and on PATH).`,
       inputSchema: z.object({
         prompt: z
           .string()
           .min(1)
           .describe("The full, self-contained task prompt for the agent."),
         agent: z
-          .enum(AGENT_IDS)
+          .enum(agentIds)
           .optional()
           .describe(
-            `Which coding-agent CLI to launch (${AGENT_LIST}). Defaults to claude. Pick what the user asked for; only claude/codex/gemini/pi support activity hooks.`,
+            `Which coding-agent CLI to launch (${agentList}). Defaults to claude. Pick what the user asked for; only ${hookAgentList} support activity hooks.`,
           ),
       }),
       needsApproval: true,

@@ -6,10 +6,10 @@ import {
   AGENT_LAUNCHERS,
   type AgentInstanceCount,
   type AgentLaunchCommands,
-  type AgentLauncherId,
   type AgentLaunchRequest,
   DEFAULT_AGENT_LAUNCH_COMMANDS,
-  findAgentLauncher,
+  findAgentLauncherWithCustom,
+  getAgentLaunchers,
   validateAgentLaunchCommand,
 } from "@/modules/agents/lib/launcher";
 import { usePreferencesStore } from "@/modules/settings/preferences";
@@ -31,15 +31,28 @@ const INSTANCE_COUNTS: AgentInstanceCount[] = [1, 2, 3, 4];
 
 export function AgentLauncherPanel({ onBack, onLaunch }: Props) {
   const storedCommands = usePreferencesStore((s) => s.agentLaunchCommands);
+  const customAgentLaunchers = usePreferencesStore(
+    (s) => s.customAgentLaunchers,
+  );
   const hydrated = usePreferencesStore((s) => s.hydrated);
-  const [agentId, setAgentId] = useState<AgentLauncherId>("claude");
+  const launchers = getAgentLaunchers(customAgentLaunchers);
+  const [agentId, setAgentId] = useState<string>("claude");
   const [instances, setInstances] = useState<AgentInstanceCount>(2);
   const [drafts, setDrafts] = useState<AgentLaunchCommands>(storedCommands);
   const hydratedRef = useRef(hydrated);
   const persistedRef = useRef(storedCommands);
-  const command = drafts[agentId];
+  const selected = findAgentLauncherWithCustom(agentId, customAgentLaunchers);
+  const isCustom = customAgentLaunchers.some((a) => a.id === agentId);
+  const draftsLookup = drafts as Record<string, string | undefined>;
+  const defaultLookup = DEFAULT_AGENT_LAUNCH_COMMANDS as Record<
+    string,
+    string | undefined
+  >;
+  const command = isCustom
+    ? selected.defaultCommand
+    : (draftsLookup[agentId] ?? defaultLookup[agentId] ?? "");
   const validation = validateAgentLaunchCommand(command);
-  const launcher = findAgentLauncher(agentId);
+  const launcher = selected;
 
   useEffect(() => {
     if (!hydrated || hydratedRef.current) return;
@@ -61,10 +74,11 @@ export function AgentLauncherPanel({ onBack, onLaunch }: Props) {
     });
   };
 
-  const persist = (
-    id: AgentLauncherId,
-    value: string,
-  ): AgentLaunchCommands | null => {
+  const persist = (id: string, value: string): AgentLaunchCommands | null => {
+    if (customAgentLaunchers.some((a) => a.id === id)) {
+      // Custom agents keep their command in Settings; nothing to persist here.
+      return drafts;
+    }
     const result = validateAgentLaunchCommand(value);
     if (!result.ok) return null;
     const next = { ...drafts, [id]: result.command };
@@ -73,7 +87,7 @@ export function AgentLauncherPanel({ onBack, onLaunch }: Props) {
     return next;
   };
 
-  const selectAgent = (id: AgentLauncherId) => {
+  const selectAgent = (id: string) => {
     persist(agentId, command);
     setAgentId(id);
   };
@@ -81,7 +95,7 @@ export function AgentLauncherPanel({ onBack, onLaunch }: Props) {
   const resetCommand = () => {
     const next = {
       ...drafts,
-      [agentId]: DEFAULT_AGENT_LAUNCH_COMMANDS[agentId],
+      [agentId]: defaultLookup[agentId] ?? "",
     };
     setDrafts(next);
     save(next);
@@ -90,9 +104,10 @@ export function AgentLauncherPanel({ onBack, onLaunch }: Props) {
   const submit = () => {
     const next = persist(agentId, command);
     if (!next) return;
+    const launchCommand = (next as Record<string, string | undefined>)[agentId];
     onLaunch({
       agent: agentId,
-      command: next[agentId],
+      command: isCustom ? command : (launchCommand ?? command),
       instances,
     });
   };
@@ -127,7 +142,7 @@ export function AgentLauncherPanel({ onBack, onLaunch }: Props) {
       </div>
 
       <div className="mt-1 grid grid-cols-2 gap-1 border-t border-border/60 pt-1.5">
-        {AGENT_LAUNCHERS.map((agent) => {
+        {launchers.map((agent) => {
           const selected = agent.id === agentId;
           return (
             <button
@@ -198,7 +213,7 @@ export function AgentLauncherPanel({ onBack, onLaunch }: Props) {
             type="button"
             onClick={resetCommand}
             disabled={
-              !hydrated || command === DEFAULT_AGENT_LAUNCH_COMMANDS[agentId]
+              !hydrated || isCustom || command === defaultLookup[agentId]
             }
             className="ml-auto flex items-center gap-1 rounded-md px-1 text-[10px] text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
             title={`Reset to ${launcher.defaultCommand}`}
@@ -209,7 +224,7 @@ export function AgentLauncherPanel({ onBack, onLaunch }: Props) {
         </div>
         <Input
           id="agent-start-command"
-          disabled={!hydrated}
+          disabled={!hydrated || isCustom}
           value={command}
           spellCheck={false}
           autoCapitalize="off"
@@ -232,7 +247,9 @@ export function AgentLauncherPanel({ onBack, onLaunch }: Props) {
           )}
         >
           {validation.ok
-            ? "Aliases and flags are supported."
+            ? isCustom
+              ? "Command is set in the agent's definition in Settings."
+              : "Aliases and flags are supported."
             : validation.error}
         </div>
       </div>

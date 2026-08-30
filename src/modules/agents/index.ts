@@ -7,10 +7,16 @@ export {
   type AgentLaunchCommands,
   type AgentLauncherId,
   type AgentLaunchRequest,
+  type CustomAgentLauncher,
   createAgentPanePlan,
   DEFAULT_AGENT_LAUNCH_COMMANDS,
   findAgentLauncher,
+  findAgentLauncherWithCustom,
+  getAgentLaunchers,
   normalizeAgentLaunchCommands,
+  normalizeCustomAgentLaunchers,
+  type ResolvedAgentLauncher,
+  sanitizeCustomAgent,
   validateAgentLaunchCommand,
 } from "./lib/launcher";
 export { nextAttentionTarget } from "./store/agentStore";

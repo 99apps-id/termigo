@@ -17,6 +17,11 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { AgentIcon } from "@/modules/agents/lib/agentIcon";
+import {
+  type CustomAgentLauncher,
+  validateAgentLaunchCommand,
+} from "@/modules/agents/lib/launcher";
 import { AGENT_ICONS } from "@/modules/ai/components/AgentSwitcher";
 import {
   compatModelIdForEndpoint,
@@ -51,6 +56,7 @@ import {
   setAutoCheckpoint,
   setCostBudgetUsd,
   setCostDailyBudgetUsd,
+  setCustomAgentLaunchers,
   setCustomInstructions,
   setDebugCaptureEnabled,
   setEnforcePentestScope,
@@ -135,6 +141,11 @@ export function AgentsSection() {
 
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
   const [editingSnippet, setEditingSnippet] = useState<Snippet | null>(null);
+  const customAgentLaunchers = usePreferencesStore(
+    (s) => s.customAgentLaunchers,
+  );
+  const [editingCustomAgent, setEditingCustomAgent] =
+    useState<CustomAgentLauncher | null>(null);
 
   return (
     <div className="flex flex-col gap-7">
@@ -295,6 +306,100 @@ export function AgentsSection() {
             />
           ))}
         </div>
+      </section>
+
+      <section className="flex flex-col gap-2">
+        <div className="flex items-center justify-between">
+          <div className="flex flex-col">
+            <Label>Custom coding agents</Label>
+            <span className="text-[10.5px] text-muted-foreground">
+              Extra external coding-agent CLIs the AI can delegate to and you
+              can launch from the new-tab menu. The CLI must be installed and on
+              PATH.
+            </span>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 gap-1.5 px-2 text-[11px]"
+            onClick={() =>
+              setEditingCustomAgent({ id: "", label: "", command: "" })
+            }
+          >
+            <HugeiconsIcon icon={Add01Icon} size={12} strokeWidth={1.75} />
+            New agent
+          </Button>
+        </div>
+
+        {customAgentLaunchers.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-border/60 bg-card/30 px-4 py-6 text-center text-[11px] text-muted-foreground">
+            No custom agents yet. Add one to let the AI delegate to a CLI you
+            already use, e.g. <code className="font-mono">qwen</code> or{" "}
+            <code className="font-mono">cursor</code>.
+          </div>
+        ) : (
+          <ul className="flex flex-col gap-1.5">
+            {customAgentLaunchers.map((a) => (
+              <li
+                key={a.id}
+                className="flex items-center gap-2 rounded-lg border border-border/60 bg-card/60 px-3 py-2"
+              >
+                <AgentIcon agent={a.id} size={16} />
+                <div className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate text-[12px] font-medium">
+                    {a.label}
+                  </span>
+                  <code className="truncate font-mono text-[10.5px] text-muted-foreground">
+                    {a.command}
+                  </code>
+                </div>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="size-7"
+                  onClick={() => setEditingCustomAgent(a)}
+                  title="Edit"
+                >
+                  <HugeiconsIcon
+                    icon={Edit02Icon}
+                    size={12}
+                    strokeWidth={1.75}
+                  />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="size-7 text-muted-foreground hover:text-destructive"
+                  onClick={() =>
+                    void setCustomAgentLaunchers(
+                      customAgentLaunchers.filter((x) => x.id !== a.id),
+                    )
+                  }
+                  title="Delete"
+                >
+                  <HugeiconsIcon
+                    icon={Delete02Icon}
+                    size={12}
+                    strokeWidth={1.75}
+                  />
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <CustomAgentDialog
+          agent={editingCustomAgent}
+          existing={customAgentLaunchers}
+          onClose={() => setEditingCustomAgent(null)}
+          onSave={(a) => {
+            const next = customAgentLaunchers.some((x) => x.id === a.id)
+              ? customAgentLaunchers.map((x) => (x.id === a.id ? a : x))
+              : [...customAgentLaunchers, a];
+            void setCustomAgentLaunchers(next);
+            setEditingCustomAgent(null);
+          }}
+        />
       </section>
 
       <section className="flex flex-col gap-2">
@@ -699,6 +804,104 @@ function SnippetEditorDialog({
             Cancel
           </Button>
           <Button size="sm" disabled={!canSave} onClick={() => onSave(draft)}>
+            Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function CustomAgentDialog({
+  agent,
+  existing,
+  onClose,
+  onSave,
+}: {
+  agent: CustomAgentLauncher | null;
+  existing: CustomAgentLauncher[];
+  onClose: () => void;
+  onSave: (a: CustomAgentLauncher) => void;
+}) {
+  const [draft, setDraft] = useState<CustomAgentLauncher | null>(agent);
+  useEffect(() => setDraft(agent), [agent]);
+  if (!draft) return null;
+
+  const trimmedId = draft.id.trim();
+  const idErr = !trimmedId
+    ? "Required."
+    : !/^[a-z0-9][a-z0-9-]*$/.test(trimmedId)
+      ? "Lowercase letters, digits, and dashes only."
+      : existing.some((a) => a.id === trimmedId)
+        ? "Already in use."
+        : null;
+  const commandErr = validateAgentLaunchCommand(draft.command);
+  const canSave = !idErr && draft.label.trim().length > 0 && commandErr.ok;
+
+  return (
+    <Dialog open={!!agent} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="text-[14px]">
+            {existing.some((a) => a.id === trimmedId)
+              ? "Edit coding agent"
+              : "New coding agent"}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="-mx-2 flex max-h-[calc(100vh-14rem)] flex-col gap-3 overflow-y-auto px-2">
+          <div className="flex gap-2">
+            <div className="flex w-32 flex-col gap-1">
+              <Label>ID</Label>
+              <Input
+                value={draft.id}
+                onChange={(e) => setDraft({ ...draft, id: e.target.value })}
+                placeholder="qwen"
+                className="h-8 font-mono text-[11.5px]"
+              />
+              {idErr ? (
+                <span className="text-[10px] text-destructive">{idErr}</span>
+              ) : null}
+            </div>
+            <div className="flex flex-1 flex-col gap-1">
+              <Label>Name</Label>
+              <Input
+                value={draft.label}
+                onChange={(e) => setDraft({ ...draft, label: e.target.value })}
+                placeholder="Qwen"
+                className="h-8 text-[12px]"
+              />
+            </div>
+          </div>
+          <div className="flex flex-col gap-1">
+            <Label>Start command</Label>
+            <Input
+              value={draft.command}
+              onChange={(e) => setDraft({ ...draft, command: e.target.value })}
+              placeholder="qwen"
+              className="h-8 font-mono text-[11.5px]"
+            />
+            {!commandErr.ok ? (
+              <span className="text-[10px] text-destructive">
+                {commandErr.error}
+              </span>
+            ) : null}
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            disabled={!canSave}
+            onClick={() =>
+              onSave({
+                id: trimmedId,
+                label: draft.label.trim(),
+                command: draft.command.trim(),
+              })
+            }
+          >
             Save
           </Button>
         </DialogFooter>

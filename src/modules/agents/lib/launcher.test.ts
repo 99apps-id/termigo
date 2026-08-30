@@ -5,7 +5,11 @@ import {
   type AgentInstanceCount,
   createAgentPanePlan,
   DEFAULT_AGENT_LAUNCH_COMMANDS,
+  findAgentLauncherWithCustom,
+  getAgentLaunchers,
   normalizeAgentLaunchCommands,
+  normalizeCustomAgentLaunchers,
+  sanitizeCustomAgent,
   validateAgentLaunchCommand,
 } from "./launcher";
 
@@ -57,7 +61,75 @@ describe("agent launch commands", () => {
       opencode: "opencode",
       grok: "grok",
       aider: "aider",
+      qwen: "qwen",
+      cursor: "cursor",
     });
+  });
+});
+
+describe("custom agent launchers", () => {
+  it("sanitizes valid custom agents and rejects malformed ones", () => {
+    expect(
+      sanitizeCustomAgent({ id: "qwen", label: "Qwen", command: "qwen" }),
+    ).toEqual({ id: "qwen", label: "Qwen", command: "qwen" });
+    expect(
+      sanitizeCustomAgent({
+        id: "  qwen  ",
+        label: "Qwen",
+        command: "  qwen ",
+      }),
+    ).toEqual({ id: "qwen", label: "Qwen", command: "qwen" });
+    expect(sanitizeCustomAgent(null)).toBeNull();
+    expect(sanitizeCustomAgent("nope")).toBeNull();
+    expect(
+      sanitizeCustomAgent({ id: "", label: "X", command: "x" }),
+    ).toBeNull();
+    expect(
+      sanitizeCustomAgent({ id: "a\nb", label: "X", command: "x" }),
+    ).toBeNull();
+    expect(
+      sanitizeCustomAgent({ id: "x", label: "X", command: "x".repeat(257) }),
+    ).toBeNull();
+  });
+
+  it("drops invalid, duplicate, and built-in ids when loading", () => {
+    expect(
+      normalizeCustomAgentLaunchers([
+        { id: "my-agent", label: "My", command: "my" },
+        { id: "my-agent", label: "Dup", command: "my2" },
+        { id: "", label: "Empty", command: "x" },
+        { id: "claude", label: "Claude", command: "cc" },
+        { id: "ok", label: "Ok", command: "ok" },
+        "junk",
+      ]),
+    ).toEqual([
+      { id: "my-agent", label: "My", command: "my" },
+      { id: "ok", label: "Ok", command: "ok" },
+    ]);
+  });
+
+  it("merges custom agents after the built-ins in getAgentLaunchers", () => {
+    const launchers = getAgentLaunchers([
+      { id: "my-agent", label: "My", command: "my" },
+    ]);
+    expect(launchers.map((l) => l.id)).toEqual([
+      ...AGENT_LAUNCHERS.map((a) => a.id),
+      "my-agent",
+    ]);
+    const custom = launchers.find((l) => l.id === "my-agent");
+    expect(custom).toMatchObject({
+      label: "My",
+      defaultCommand: "my",
+      supportsHooks: false,
+    });
+  });
+
+  it("finds a custom launcher by id and falls back to the first built-in", () => {
+    const custom = [{ id: "my-agent", label: "My", command: "my" }];
+    expect(findAgentLauncherWithCustom("my-agent", custom).id).toBe("my-agent");
+    expect(findAgentLauncherWithCustom("nope", custom).id).toBe(
+      AGENT_LAUNCHERS[0].id,
+    );
   });
 });
 

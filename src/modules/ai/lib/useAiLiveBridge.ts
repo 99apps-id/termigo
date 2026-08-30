@@ -1,4 +1,4 @@
-import { AGENT_LAUNCHERS } from "@/modules/agents/lib/launcher";
+import { findAgentLauncherWithCustom } from "@/modules/agents/lib/launcher";
 import { useManagedAgentsStore } from "@/modules/agents/store/managedAgentsStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import type { Tab } from "@/modules/tabs";
@@ -289,12 +289,20 @@ export function useAiLiveBridge(params: Params) {
         const short =
           oneLine.length > 32 ? `${oneLine.slice(0, 32)}…` : oneLine;
         // Resolve the launcher: the user's configured command wins, else the
-        // built-in default. Unknown ids fall back to Claude.
-        const launcher =
-          AGENT_LAUNCHERS.find((a) => a.id === agentId) ?? AGENT_LAUNCHERS[0];
-        const configured =
-          usePreferencesStore.getState().agentLaunchCommands?.[launcher.id];
-        const command = (configured || launcher.defaultCommand).trim();
+        // built-in default. Custom agents use their stored command. Unknown ids
+        // fall back to Claude.
+        const prefs = usePreferencesStore.getState();
+        const launcher = findAgentLauncherWithCustom(
+          agentId,
+          prefs.customAgentLaunchers,
+        );
+        const launchCommands = prefs.agentLaunchCommands as Record<
+          string,
+          string | undefined
+        >;
+        const command = (
+          launchCommands[launcher.id] ?? launcher.defaultCommand
+        ).trim();
         const { tabId, leafId } = ref.current.newAgentTab(
           cwd ?? undefined,
           `${launcher.id} · ${short}`,
