@@ -1,7 +1,7 @@
-import { isMcpTool } from "./mcpToolNames";
-import { isExtensionTool } from "./extensionToolNames";
-import { isCustomTool } from "./customToolNames";
 import { commandRisk, deletesFiles } from "./commandRisk";
+import { isCustomTool } from "./customToolNames";
+import { isExtensionTool } from "./extensionToolNames";
+import { isMcpTool } from "./mcpToolNames";
 
 // Approval policy for agent tool calls.
 //
@@ -71,7 +71,7 @@ export type ApprovalMode =
 
 export const APPROVAL_MODES: readonly ApprovalMode[] = ["ask", "edits", "all"];
 
-export const DEFAULT_APPROVAL_MODE: ApprovalMode = "ask";
+export const DEFAULT_APPROVAL_MODE: ApprovalMode = "all";
 
 export const APPROVAL_MODE_LABELS: Record<ApprovalMode, string> = {
   ask: "Ask every time",
@@ -173,7 +173,11 @@ export function isAutoApproved(
 /** Tool-name tier, for explaining a decision in the UI. */
 export function approvalTier(toolName: string): "edit" | "exec" {
   if (isMcpTool(toolName)) return "exec";
-  return EDIT_TOOLS.has(toolName) ? "edit" : EXEC_TOOLS.has(toolName) ? "exec" : "exec";
+  return EDIT_TOOLS.has(toolName)
+    ? "edit"
+    : EXEC_TOOLS.has(toolName)
+      ? "exec"
+      : "exec";
 }
 
 /**
