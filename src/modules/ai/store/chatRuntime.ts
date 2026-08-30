@@ -5,6 +5,7 @@ import {
   type ChatTransport,
   lastAssistantMessageIsCompleteWithApprovalResponses,
 } from "ai";
+import { toast } from "sonner";
 import {
   getModel,
   type ModelId,
@@ -64,6 +65,22 @@ const overflowAutoResumeAt = new Map<string, number>();
 // continuation so a pressed Stop actually ends the loop. It is cleared on a
 // fresh user send / resume / queued-correction flush.
 const stopLatch = new Set<string>();
+
+// Throttle the "Round N started" toast so a fast agentic loop cannot spam the
+// screen. Only the first round of a run toasts (round 2+, since round 1 is the
+// initial send), and at most once per 3s.
+let lastRoundToastAt = 0;
+let lastRoundToast = 0;
+function maybeToastRound(round: number): void {
+  if (round < 2) return;
+  const now = Date.now();
+  if (now - lastRoundToastAt < 3000 && round === lastRoundToast) return;
+  lastRoundToastAt = now;
+  lastRoundToast = round;
+  toast.info(`Agent round ${round}`, {
+    description: "Starting a new model call — the run is still going.",
+  });
+}
 
 // Connectivity recovery: when the provider is unreachable, keep the run
 // resumable and resume it automatically once the network is back, so an
@@ -189,9 +206,9 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     onRoundStart: () => {
       // Fires once per agentic-loop round (each sendMessages) so the UI can
       // show "Round N · step X" and a user can tell the run is still going.
-      useChatStore.getState().patchAgentMeta({
-        round: useChatStore.getState().agentMeta.round + 1,
-      });
+      const next = useChatStore.getState().agentMeta.round + 1;
+      useChatStore.getState().patchAgentMeta({ round: next });
+      maybeToastRound(next);
     },
     onStep: (step) => {
       useChatStore.getState().patchAgentMeta({ step });

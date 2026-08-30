@@ -87,6 +87,30 @@ const PROVIDER_ICON = {
   chatgpt: ChatGptIcon,
 } as const satisfies Record<ProviderId, typeof ChatGptIcon>;
 
+/**
+ * Live "Round N" chip shown while the agent is working. Sit next to the context
+ * meter so the round number is visible even when the chat panel is minimized —
+ * a climbing round means the run is progressing; a flat one means it is stuck
+ * or looping.
+ */
+function RoundChip() {
+  const status = useChatStore((s) => s.agentMeta.status);
+  const round = useChatStore((s) => s.agentMeta.round);
+  const busy =
+    status === "thinking" ||
+    status === "streaming" ||
+    status === "awaiting-approval";
+  if (!busy || round <= 0) return null;
+  return (
+    <span
+      className="flex h-6 items-center gap-1 rounded-md border border-border/60 bg-card px-2 text-[11px] tabular-nums text-muted-foreground"
+      title={`Round ${round} — the agent's current model call in this run. A climbing number means it is progressing.`}
+    >
+      <span className="font-medium text-foreground/80">R{round}</span>
+    </span>
+  );
+}
+
 export function AiOpenButton({ onOpen }: { onOpen: () => void }) {
   return (
     <button
@@ -134,6 +158,10 @@ export function AiStatusBarControls() {
 
       {/* Live context / token meter against the model's window. */}
       <ContextMeter />
+
+      {/* Live round counter, so a running loop's progress is visible even when
+          the chat panel is minimized. */}
+      <RoundChip />
 
       {/* One surface for run metrics, the request inspector, and context state. */}
       <IconBtn
