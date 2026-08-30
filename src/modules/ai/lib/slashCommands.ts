@@ -1,12 +1,17 @@
 import { startPentestRun } from "@/modules/control/lib/startPentestRun";
+import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
+  CancelCircleIcon,
   CheckListIcon,
   ClaudeIcon,
+  CpuIcon,
   Flowchart02Icon,
+  HelpCircleIcon,
   ShieldUserIcon,
   SparklesIcon,
 } from "@hugeicons/core-free-icons";
 import { toast } from "sonner";
+import { compatModelIdForEndpoint, MODELS } from "../config";
 import { useApprovalQueue } from "../store/approvalQueueStore";
 import { useChatStore } from "../store/chatStore";
 import { useCustomCommandsStore } from "../store/customCommandsStore";
@@ -129,6 +134,24 @@ export const SLASH_COMMANDS: Record<string, SlashCommandMeta> = {
     label: "Start a new chat",
     icon: SparklesIcon,
   },
+  model: {
+    name: "model",
+    invocation: "/model",
+    label: "Switch the active model",
+    icon: CpuIcon,
+  },
+  stop: {
+    name: "stop",
+    invocation: "/stop",
+    label: "Stop the current run",
+    icon: CancelCircleIcon,
+  },
+  help: {
+    name: "help",
+    invocation: "/help",
+    label: "List slash commands",
+    icon: HelpCircleIcon,
+  },
 };
 
 export const TERMIGO_CMD_RE =
@@ -136,6 +159,32 @@ export const TERMIGO_CMD_RE =
 
 export function wrapWithCommandMarker(prompt: string, name: string): string {
   return `<termigo-command name="${name}" />\n\n${prompt}`;
+}
+
+/** Resolve a user-typed model query to a selectable model id + label. Matches
+ *  built-in models by id/label/hint and custom endpoints by name/id, so both
+ *  `/model gpt-5.6` and `/model DeepSeek` work. */
+function resolveModel(query: string): { id: string; label: string } | null {
+  const q = query.trim().toLowerCase();
+  if (!q) return null;
+  const builtin = MODELS.find(
+    (m) =>
+      m.id.toLowerCase() === q ||
+      m.label.toLowerCase() === q ||
+      m.hint.toLowerCase() === q,
+  );
+  if (builtin) return { id: builtin.id, label: builtin.label };
+  for (const ep of usePreferencesStore.getState().customEndpoints) {
+    const compatId = compatModelIdForEndpoint(ep.id);
+    if (
+      ep.id.toLowerCase() === q ||
+      ep.name.toLowerCase() === q ||
+      compatId.toLowerCase() === q
+    ) {
+      return { id: compatId, label: ep.name };
+    }
+  }
+  return null;
 }
 
 export function tryRunSlashCommand(input: string): SlashOutcome {
@@ -200,6 +249,41 @@ export function tryRunSlashCommand(input: string): SlashOutcome {
       // stays in the history list, so nothing is lost.
       useChatStore.getState().newSession();
       return { kind: "handled", toast: "New chat started" };
+    case "model": {
+      const store = useChatStore.getState();
+      if (!tail) {
+        return {
+          kind: "handled",
+          toast: `Current model: ${store.selectedModelId}`,
+        };
+      }
+      const found = resolveModel(tail);
+      if (!found) {
+        return {
+          kind: "handled",
+          toast: `Unknown model "${tail}". Try /model <id>, e.g. /model gpt-5.6`,
+        };
+      }
+      store.setSelectedModelId(found.id);
+      return { kind: "handled", toast: `Model: ${found.label}` };
+    }
+    case "stop": {
+      // Stop the current run. chatRuntime is imported lazily so this file does
+      // not pull the AI SDK into the eager graph.
+      void (async () => {
+        const { stopRun } = await import("../store/chatRuntime");
+        await stopRun();
+      })().catch(() => {
+        toast.error("Could not stop the run");
+      });
+      return { kind: "handled", toast: "Stopping…" };
+    }
+    case "help": {
+      const list = Object.values(SLASH_COMMANDS)
+        .map((c) => `${c.invocation} — ${c.label}`)
+        .join("\n");
+      return { kind: "handled", toast: `Slash commands\n${list}` };
+    }
     default:
       if (custom) {
         return {

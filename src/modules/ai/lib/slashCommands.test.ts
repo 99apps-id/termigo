@@ -126,4 +126,41 @@ describe("slash commands", () => {
     expect(runPipelineByName).not.toHaveBeenCalled();
     expect(listPipelines).not.toHaveBeenCalled();
   });
+
+  it("registers /model, /stop and /help", () => {
+    expect(SLASH_COMMANDS.model.invocation).toBe("/model");
+    expect(SLASH_COMMANDS.model.label).toBe("Switch the active model");
+    expect(SLASH_COMMANDS.stop.invocation).toBe("/stop");
+    expect(SLASH_COMMANDS.help.invocation).toBe("/help");
+  });
+
+  it("switches the active model via /model", () => {
+    const spy = vi
+      .spyOn(useChatStore.getState(), "setSelectedModelId")
+      .mockImplementation(() => {});
+    const out = tryRunSlashCommand("/model gpt-5.6");
+    expect(out.kind).toBe("handled");
+    expect(spy).toHaveBeenCalledWith("gpt-5.6");
+    expect((out as { toast?: string }).toast).toMatch(/Model/);
+    spy.mockRestore();
+  });
+
+  it("reports unknown model on /model <bad>", () => {
+    const out = tryRunSlashCommand("/model def-not-a-model");
+    expect(out.kind).toBe("handled");
+    expect((out as { toast?: string }).toast).toMatch(/Unknown model/);
+  });
+
+  it("reports the current model when /model has no argument", () => {
+    const out = tryRunSlashCommand("/model");
+    expect(out.kind).toBe("handled");
+    expect((out as { toast?: string }).toast).toMatch(/Current model/);
+  });
+
+  it("lists the slash commands on /help", () => {
+    const out = tryRunSlashCommand("/help");
+    expect(out.kind).toBe("handled");
+    expect((out as { toast?: string }).toast).toContain("/new");
+    expect((out as { toast?: string }).toast).toContain("/stop");
+  });
 });
