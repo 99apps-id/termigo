@@ -435,6 +435,12 @@ function stopCopy(
         hint: "The agent was describing rather than doing. Say what to change.",
         action: "Continue anyway",
       };
+    case "tool-error":
+      return {
+        text: "Stopped: three turns in a row, every tool call failed.",
+        hint: "The agent kept hitting a failing tool. Check the command/path it was trying, then continue.",
+        action: "Continue anyway",
+      };
     case "cost-cap":
       return {
         text: "Stopped: reached the maximum cost budget for this run.",

@@ -563,6 +563,49 @@ export function noProgressStop<T extends ToolSet>(
   };
 }
 
+/** True when a tool result is an error object (`{ error }`) rather than data. */
+function isErrorResult(output: unknown): boolean {
+  return (
+    output != null &&
+    typeof output === "object" &&
+    "error" in (output as Record<string, unknown>)
+  );
+}
+
+/**
+ * Stops after `maxErrors` consecutive steps in which EVERY tool call returned an
+ * error, so a run stuck on a persistently failing tool (command not found, path
+ * denied, a server that keeps rejecting) does not burn round after round
+ * retrying it.
+ *
+ * A step that produced any real result is progress, even if one call in a batch
+ * failed; only a step where the agent got nothing back counts. This catches the
+ * agent trying a slightly different input each time, which `noToolRepetition`
+ * (which matches by input) would miss.
+ */
+export function noErrorProgress<T extends ToolSet>(
+  maxErrors = 3,
+): StopCondition<T> {
+  return ({ steps }) => {
+    if (steps.length < maxErrors) return false;
+    return steps
+      .slice(-maxErrors)
+      .every((s: { toolCalls?: unknown[]; toolResults?: unknown[] }) => {
+        const calls = s.toolCalls;
+        if (!calls || calls.length === 0) return false;
+        const results = new Map(
+          (s.toolResults ?? []).map((r) => [
+            (r as { toolCallId?: string }).toolCallId,
+            (r as { output?: unknown }).output,
+          ]),
+        );
+        return calls.every((c) =>
+          isErrorResult(results.get((c as { toolCallId?: string }).toolCallId)),
+        );
+      });
+  };
+}
+
 /**
  * Why a run ended early, when it did.
  *
@@ -575,6 +618,7 @@ export type AgentStopReason =
   | "step-cap"
   | "tool-repetition"
   | "no-progress"
+  | "tool-error"
   | "cost-cap"
   | "steered"
   | "aborted";
@@ -828,6 +872,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
   const capPred = stepCountIs(stepBudget);
   const repeatPred = noToolRepetition<ToolSet>(3);
   const idlePred = noProgressStop<ToolSet>(2);
+  const errorPred = noErrorProgress<ToolSet>(3);
 
   // Forced-synthesis on a stuck stop. When a guard (step cap, tool loop, no
   // progress) would end the run, the last thing the user saw was usually a
@@ -876,6 +921,10 @@ export async function runAgentStream(opts: RunAgentOptions) {
     (args) =>
       (idlePred(args) as boolean)
         ? requestSynthesisOrStop("no-progress")
+        : false,
+    (args) =>
+      (errorPred(args) as boolean)
+        ? requestSynthesisOrStop("tool-error")
         : false,
     (_args) => {
       // Cost cap stops immediately — the whole point is to not spend more, so

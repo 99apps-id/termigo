@@ -1,6 +1,7 @@
 import type { ToolSet } from "ai";
 import { describe, expect, it } from "vitest";
 import {
+  noErrorProgress,
   noProgressStop,
   noToolRepetition,
   synthesisStopDecision,
@@ -152,6 +153,64 @@ describe("noProgressStop", () => {
 
   it("does not fire on a single step", () => {
     expect(stop(steps(null))).toBe(false);
+  });
+});
+
+describe("noErrorProgress", () => {
+  const stop = noErrorProgress<ToolSet>(3);
+  const fail = (tool: string, msg = "boom"): Call => ({
+    toolName: tool,
+    toolCallId: `${tool}-fail`,
+    input: tool === "bash_run" ? { command: "x" } : { path: "/x" },
+    output: { error: msg },
+  });
+
+  it("does not fire before there are enough steps", () => {
+    expect(stop(steps([fail("bash_run")], [fail("bash_run")]))).toBe(false);
+  });
+
+  it("fires after three consecutive all-error steps", () => {
+    expect(
+      stop(steps([fail("bash_run")], [fail("bash_run")], [fail("bash_run")])),
+    ).toBe(true);
+  });
+
+  it("does not fire when a step returned a real result", () => {
+    expect(
+      stop(
+        steps(
+          [fail("bash_run")],
+          [fail("bash_run")],
+          [
+            {
+              toolName: "bash_run",
+              toolCallId: "ok",
+              input: { command: "x" },
+              output: "done",
+            },
+          ],
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  it("does not fire on a step that called no tool", () => {
+    expect(stop(steps(null, [fail("bash_run")], [fail("bash_run")]))).toBe(
+      false,
+    );
+  });
+
+  it("requires every call in a batch to error, not just one", () => {
+    const batch = [
+      fail("bash_run"),
+      {
+        toolName: "read_file",
+        toolCallId: "read-ok",
+        input: { path: "/x" },
+        output: "data",
+      },
+    ];
+    expect(stop(steps(batch, batch, batch))).toBe(false);
   });
 });
 
