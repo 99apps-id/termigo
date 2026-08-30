@@ -160,6 +160,15 @@ A run can also stop for reasons that are not the model's fault — the internet 
 - **Quota / credit exhaustion** (`isQuotaError`: `insufficient_quota`, quota, credit, 402) and **rate limits** (`isRateLimitError`: rate_limit, 429, throttle) are recoverable but have no event to watch for — the user tops up or waits, then clicks **Try again**; the task/todo state is preserved.
 - **Resume always sends.** `sendParts` keys off `agentMeta.status === "error"` so a resume after a failed run is sent, never queued: the AI SDK status can look `submitted` after an error, which would queue the `RESUME_PROMPT` and leave "Try again" doing nothing.
 
+## Interrupted-run recovery
+
+A run that is cut off by the app closing (restart, crash) is recoverable, not lost. The transcript is persisted by `AgentRunBridge`, and a marker distinguishes "mid-flight when the app closed" from a deliberate stop.
+
+- **In-flight marker.** `lib/sessions.ts` stores `runInFlight:<id>` when a run starts (`markRunStarted` in `chatStore`, called from the `sendParts` send-branch and `flushSteer`) and clears it when the run settles or errors (`syncRunMeta`, called from `onFinishMeta`, `stopRun`, and every `onError` settle branch). `markRunStarted` also writes a `RunMeta` with no stop so the budget ladder survives.
+- **Restoring on boot.** `chatStore.hydrateSessions` reopens the previously-active session (the stored `activeId`) when it has an interrupted run — either a saved `RunMeta` stop, or a stale in-flight marker — seeding its messages so the chat is not empty. Otherwise it keeps the fresh-placeholder behaviour. `switchSession` uses the same `loadInterruptedPatch` logic.
+- **What "interrupted" means.** A `RunMeta` with a stop (user stop, guard, cost-cap) restores that stop's `Continue`. A `RunMeta` with no stop but a live in-flight marker — or a marker with no `RunMeta` — means the app closed mid-run and is restored as `stopReason: "interrupted"`, offering **Resume**. `runInterruptedPatch` (pure, exported for tests) decides.
+- **Resume path.** The transcript shows a **Resume** row (`AiChat.tsx` `stopCopy` case `"interrupted"`); clicking it runs `resumeRun`, which bumps `runRound` and sends `RESUME_PROMPT` through `sendParts`, re-marking the run in flight.
+
 ## Scheduled runs
 
 `lib/scheduler.ts` lets the user queue an agent prompt to run on a schedule. The pure helpers (`parseScheduleWhen`, `computeNextDueAt`, `dueTasks`) are unit-tested; `startScheduler`/`stopScheduler` run a 15-second tick that lazily imports `chatStore`, `sessionDirectiveStore`, and `chatRuntime` inside the tick so the AI stack stays out of the eager bundle.
