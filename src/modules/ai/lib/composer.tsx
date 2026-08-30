@@ -1,6 +1,7 @@
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import { invoke } from "@tauri-apps/api/core";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { useWhisperRecording } from "../hooks/useWhisperRecording";
 import { expandSnippetTokens, type Snippet } from "../lib/snippets";
 import { useChatStore } from "../store/chatStore";
@@ -357,8 +358,18 @@ export function AiComposerProvider({ children }: ProviderProps) {
     store.syncRunMeta();
     if (!store.mini.open) store.openMini();
     void (async () => {
-      const { sendParts } = await import("../store/chatRuntime");
-      void sendParts(sessionId, parts as unknown as SteerPart[]);
+      try {
+        const { sendParts } = await import("../store/chatRuntime");
+        await sendParts(sessionId, parts as unknown as SteerPart[]);
+      } catch (e) {
+        // A silent failure here is why a typed message "doesn't show up": make
+        // it visible so it is never a mystery again.
+        console.error("[composer] send failed", e);
+        toast.error(
+          `Could not send your message${e instanceof Error ? `: ${e.message}` : ""}`,
+          { id: "composer-send-failed" },
+        );
+      }
     })();
     setValue("");
     setFiles([]);

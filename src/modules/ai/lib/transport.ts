@@ -139,6 +139,10 @@ type Deps = {
   /** Fires at the start of every agentic-loop round (each `sendMessages`), so
    *  the UI can surface "Round N" and a user can tell a run is progressing. */
   onRoundStart?: () => void;
+  /** Returns true when a round for this session should be refused — used to
+   *  carry a user Stop across to the next auto-continue round (which is
+   *  dispatched by the SDK directly, bypassing the user send path). */
+  shouldRefuseRun?: (sessionId: string) => boolean;
   onUsage?: (delta: AgentUsageDelta) => void;
   onCompact?: (info: { droppedCount: number }) => void;
   onRemember?: (info: { fact: string }) => void;
@@ -228,6 +232,12 @@ export function createContextAwareTransport(deps: Deps) {
 
   const run = async (options: SendOptions) => {
     logInfo(`[ai] run: start (${options.messages.length} messages)`);
+    // A stop latched for this session refuses the SDK's auto-continue round,
+    // which is dispatched directly (not via sendParts). This is what makes a
+    // pressed Stop end the loop even when it lands between rounds.
+    if (deps.shouldRefuseRun?.(String(options.chatId))) {
+      throw new DOMException("aborted", "AbortError");
+    }
     deps.onRoundStart?.();
     const live = deps.getLive();
     // Baseline the queue so the run yields only to a task typed WHILE it runs,

@@ -77,9 +77,15 @@ function maybeToastRound(round: number): void {
   if (now - lastRoundToastAt < 3000 && round === lastRoundToast) return;
   lastRoundToastAt = now;
   lastRoundToast = round;
-  toast.info(`Agent round ${round}`, {
-    description: "Starting a new model call — the run is still going.",
-  });
+  // Never let a toast failure break the run — this fires at the start of every
+  // round and a render/notification error must not stop the agent.
+  try {
+    toast.info(`Agent round ${round}`, {
+      description: "Starting a new model call — the run is still going.",
+    });
+  } catch {
+    // ignore
+  }
 }
 
 // Connectivity recovery: when the provider is unreachable, keep the run
@@ -210,6 +216,12 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       useChatStore.getState().patchAgentMeta({ round: next });
       maybeToastRound(next);
     },
+    // Refuse the SDK's next auto-continue round when a Stop was latched. The
+    // latch is cleared on the user's next send (sendParts/flushSteer), so a
+    // fresh message starts normally. Keeping this here (instead of wrapping
+    // `sendAutomaticallyWhen`) leaves the Chat's own continuation semantics
+    // untouched.
+    shouldRefuseRun: (id) => stopLatch.has(id),
     onStep: (step) => {
       useChatStore.getState().patchAgentMeta({ step });
     },
@@ -299,13 +311,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     id: sessionId,
     transport,
     messages: initialMessages,
-    // The SDK's `stop()` aborts the in-flight round but the Chat still
-    // auto-continues to the next tool round through this predicate. A user
-    // stop must end the loop, so suppress the auto-continue while a stop is
-    // latched for this session (clear see `stopLatch`).
-    sendAutomaticallyWhen: (args) =>
-      !stopLatch.has(sessionId) &&
-      lastAssistantMessageIsCompleteWithApprovalResponses(args),
+    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
     onError: (e) => {
       const raw = e instanceof Error ? e.message : String(e);
       // A user-pressed Stop surfaces here as an AbortError when it lands before
