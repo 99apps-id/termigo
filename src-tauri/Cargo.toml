@@ -1,6 +1,6 @@
 [package]
 name = "termigo"
-version = "0.9.4"
+version = "0.9.5"
 description = "Termigo — an open-source AI-native terminal emulator"
 authors = ["99apps-id"]
 license = "Apache-2.0"
@@ -13,7 +13,7 @@ default-members = [".", "crates/termigo-cli", "crates/termigo-control-protocol"]
 resolver = "2"
 
 [workspace.package]
-version = "0.9.4"
+version = "0.9.5"
 edition = "2021"
 license = "Apache-2.0"
 
