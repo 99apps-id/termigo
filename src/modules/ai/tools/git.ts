@@ -22,8 +22,18 @@ function validBranch(name: string): boolean {
 // Exported for unit tests; not part of the tool surface.
 export { validBranch };
 
-function repoRootFor(root: string | null, cwd: string | null): string {
-  return cwd ?? root ?? ".";
+/**
+ * Resolve the directory git commands run in.
+ *
+ * Git is a *project* operation, so the workspace root is the anchor — not the
+ * active terminal's cwd, which may be anywhere (the user's home, a subdir, or
+ * an unrelated repo) and would make `git status` report the wrong tree or
+ * "not a git repository". The workspace root is prefered, then the terminal
+ * cwd, then "." — the same order BatikCode's agent host uses (cwd from the
+ * session/workspace, falling back to the shell's working dir).
+ */
+export function repoRootFor(root: string | null, cwd: string | null): string {
+  return root ?? cwd ?? ".";
 }
 
 const DIFF_CAP = 8000;

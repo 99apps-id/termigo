@@ -103,7 +103,14 @@ export function buildShellTools(ctx: ToolContext) {
         const sid = ctx.getSessionId();
         if (!sid) return { error: "no active chat session" };
         try {
-          const cwd = ctx.getCwd();
+          // Project-first cwd (BatikCode parity): a command the agent runs is
+          // usually about the workspace, so anchor it at the workspace root and
+          // fall back to the terminal cwd, then home. Anchoring only at the
+          // active terminal's cwd made `git status` / `ls` report the wrong
+          // tree whenever the focused terminal was somewhere else (home, a
+          // subdir, an unrelated repo). The persistent shell still lets a
+          // command `cd` and keep that directory for the next call.
+          const cwd = ctx.getWorkspaceRoot() ?? ctx.getCwd();
           const shellId = await getSessionShell(workspaceSessionKey(sid), cwd);
 
           // Stop has to reach the command, not just the model stream. Without
@@ -166,7 +173,9 @@ export function buildShellTools(ctx: ToolContext) {
         }
         const safety = screenCommand(command);
         if (!safety.ok) return { error: safety.reason };
-        const effectiveCwd = cwd ?? ctx.getCwd();
+        // Project-first cwd, matching bash_run: a model-supplied cwd wins, else
+        // the workspace root, else the terminal cwd.
+        const effectiveCwd = cwd ?? ctx.getWorkspaceRoot() ?? ctx.getCwd();
         try {
           const handle = await native.shellBgSpawn(command, effectiveCwd);
           return { handle, command, cwd: effectiveCwd, ok: true };

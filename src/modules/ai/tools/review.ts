@@ -1,13 +1,13 @@
+import { quoteShellArg } from "@/lib/shellQuote";
 import { tool } from "ai";
 import { z } from "zod";
+import { runSubagent } from "../agents/runSubagent";
 import { native } from "../lib/native";
 import { checkShellCommand } from "../lib/security";
 import { getSessionShell, sessionShellKey } from "../lib/sessionShell";
-import { quoteShellArg } from "@/lib/shellQuote";
-import { runSubagent } from "../agents/runSubagent";
 import { useChatStore } from "../store/chatStore";
-import { gitDiffCommand } from "./git";
 import type { ToolContext } from "./context";
+import { gitDiffCommand } from "./git";
 
 const DIFF_CAP = 32_000;
 
@@ -18,10 +18,14 @@ async function runGit(
   cap = DIFF_CAP,
 ): Promise<{ command: string; stdout: string } | { error: string }> {
   if (ctx.getRemoteSession()) {
-    return { error: "git commands are local-only; use bash_run on the remote host" };
+    return {
+      error: "git commands are local-only; use bash_run on the remote host",
+    };
   }
   const sid = ctx.getSessionId();
   if (!sid) return { error: "no active chat session" };
+  // Project-first cwd (BatikCode parity): review is a project operation, so
+  // anchor at the workspace root and fall back to the terminal cwd.
   const cwd = ctx.getWorkspaceRoot() ?? ctx.getCwd() ?? ".";
   const safety = checkShellCommand(command);
   if (!safety.ok) return { error: safety.reason };
@@ -90,10 +94,7 @@ export function buildReviewTools(ctx: ToolContext) {
           .boolean()
           .optional()
           .describe("Include staged changes instead of unstaged."),
-        scope: z
-          .string()
-          .optional()
-          .describe("Limit to one path (e.g. src/)."),
+        scope: z.string().optional().describe("Limit to one path (e.g. src/)."),
       }),
       execute: async ({ staged, scope }) => {
         const base = staged ? "git diff --cached" : "git diff";

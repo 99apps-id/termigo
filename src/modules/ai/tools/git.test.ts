@@ -9,6 +9,7 @@ import {
   gitStashCommand,
   gitStashPopCommand,
   gitStatusCommand,
+  repoRootFor,
   revertCommand,
   validBranch,
 } from "./git";
@@ -49,6 +50,15 @@ describe("validBranch", () => {
 describe("git command builders", () => {
   it("builds a concise status command", () => {
     expect(gitStatusCommand()).toBe("git status --short --branch");
+  });
+
+  it("resolves git cwd from the workspace root first, then the terminal cwd", () => {
+    // A project operation must stay on the repo even when the active terminal
+    // is elsewhere (home, a subdir, another repo) - BatikCode parity.
+    expect(repoRootFor("/repo", "/home")).toBe("/repo");
+    expect(repoRootFor("/repo", null)).toBe("/repo");
+    expect(repoRootFor(null, "/cwd")).toBe("/cwd");
+    expect(repoRootFor(null, null)).toBe(".");
   });
 
   it("builds a plain diff, a staged diff, and a path-scoped diff", () => {
