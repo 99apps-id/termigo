@@ -60,6 +60,7 @@ import { AiToolApproval } from "./AiToolApproval";
 import { ConfirmationCarousel } from "./ConfirmationCarousel";
 import { ElicitationCarousel } from "./ElicitationCarousel";
 import { RollbackSuggestion } from "./RollbackSuggestion";
+import { RunProgressHUD } from "./RunProgressHUD";
 import { TrajectoryThinkingHUD } from "./TrajectoryThinkingHUD";
 
 /**
@@ -312,6 +313,7 @@ export function AiChatView({
         )}
         <ElicitationCarousel />
         <ConfirmationCarousel />
+        <RunProgressHUD />
         {showSpinner && (
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Spinner />

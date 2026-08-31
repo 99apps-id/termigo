@@ -1294,13 +1294,17 @@ export async function runAgentStream(opts: RunAgentOptions) {
       });
 
       // A clean finish means the model decided it was done (its last step was a
-      // summary, no more tools). If it forgot to check off the item it was
-      // actively working on, mark it complete now so the todo list reflects the
-      // run instead of leaving everything unchecked. Pending items are left
-      // alone — those may genuinely be unfinished.
+      // summary, no more tools). If it forgot to check off the items it began —
+      // the one it was actively working on, and any earlier ones it neglected —
+      // mark them complete now so the todo list reflects the run instead of
+      // leaving everything unchecked. Items it never started (still `pending`)
+      // are left alone, because the model may legitimately judge some of the
+      // plan out of scope. This is the fallback BatikCode's todo tracking relies
+      // on: the model is nudged every step, and when it still forgets, the clean
+      // finish closes the gap rather than leaving a stale checklist.
       if (!settledStop) {
         const sessionId = opts.toolContext.getSessionId();
-        if (sessionId) useTodosStore.getState().completeInProgress(sessionId);
+        if (sessionId) useTodosStore.getState().completeStarted(sessionId);
       }
 
       // Feed this run's outcome into the harness frontier so the best profile

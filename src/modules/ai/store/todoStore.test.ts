@@ -61,3 +61,53 @@ describe("useTodosStore.completeInProgress", () => {
     ).not.toThrow();
   });
 });
+
+describe("useTodosStore.completeStarted", () => {
+  beforeEach(() => {
+    useTodosStore.setState({ bySession: {}, hydrated: new Set() });
+  });
+
+  it("marks every item that was started (in_progress or forgotten) completed", () => {
+    useTodosStore.setState({
+      bySession: {
+        s1: {
+          workspaceRoot: "/w",
+          items: [
+            { id: "1", title: "done", status: "completed" },
+            { id: "2", title: "working", status: "in_progress" },
+            { id: "3", title: "forgot to check", status: "in_progress" },
+            { id: "4", title: "not started", status: "pending" },
+          ],
+        },
+      },
+    });
+    useTodosStore.getState().completeStarted("s1");
+    const items = useTodosStore.getState().bySession.s1.items;
+    // Anything begun (in_progress, or an earlier one left un-checked) is now
+    // done; a genuinely-unstarted pending item is left alone.
+    expect(items.find((t) => t.id === "1")?.status).toBe("completed");
+    expect(items.find((t) => t.id === "2")?.status).toBe("completed");
+    expect(items.find((t) => t.id === "3")?.status).toBe("completed");
+    expect(items.find((t) => t.id === "4")?.status).toBe("pending");
+  });
+
+  it("leaves the list unchanged when every item is pending", () => {
+    useTodosStore.setState({
+      bySession: {
+        s1: {
+          workspaceRoot: "/w",
+          items: [{ id: "1", title: "a", status: "pending" }],
+        },
+      },
+    });
+    const before = useTodosStore.getState().bySession.s1.items;
+    useTodosStore.getState().completeStarted("s1");
+    expect(useTodosStore.getState().bySession.s1.items).toBe(before);
+  });
+
+  it("does nothing for an unknown session", () => {
+    expect(() =>
+      useTodosStore.getState().completeStarted("nope"),
+    ).not.toThrow();
+  });
+});
