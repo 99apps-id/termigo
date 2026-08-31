@@ -45,6 +45,7 @@ export type ReasoningProps = ComponentProps<typeof Collapsible> & {
   defaultOpen?: boolean;
   onOpenChange?: (open: boolean) => void;
   duration?: number;
+  showReasoning?: boolean;
 };
 
 const AUTO_CLOSE_DELAY = 1000;
@@ -58,10 +59,11 @@ export const Reasoning = memo(
     defaultOpen,
     onOpenChange,
     duration: durationProp,
+    showReasoning = true,
     children,
     ...props
   }: ReasoningProps) => {
-    const resolvedDefaultOpen = defaultOpen ?? isStreaming;
+    const resolvedDefaultOpen = showReasoning ? (defaultOpen ?? isStreaming) : false;
     // Track if defaultOpen was explicitly set to false (to prevent auto-open)
     const isExplicitlyClosed = defaultOpen === false;
 
@@ -127,6 +129,10 @@ export const Reasoning = memo(
       () => ({ duration, isOpen, isStreaming, setIsOpen }),
       [duration, isOpen, isStreaming, setIsOpen],
     );
+
+    if (!showReasoning) {
+      return null;
+    }
 
     return (
       <ReasoningContext.Provider value={contextValue}>

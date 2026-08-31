@@ -52,6 +52,7 @@ import { humanizeModelError } from "../lib/errorMessage";
 import { SLASH_COMMANDS, TERMIGO_CMD_RE } from "../lib/slashCommands";
 import { resumeRun } from "../store/chatRuntime";
 import { useChatStore } from "../store/chatStore";
+import { usePreferencesStore } from "@/modules/settings/preferences";
 import { AiToolApproval } from "./AiToolApproval";
 import { RollbackSuggestion } from "./RollbackSuggestion";
 import { TrajectoryThinkingHUD } from "./TrajectoryThinkingHUD";
@@ -213,6 +214,7 @@ export function AiChatView({
   const memoryNotice = useChatStore((s) => s.agentMeta.memoryNotice);
   const patchAgentMeta = useChatStore((s) => s.patchAgentMeta);
   const stoppedByUser = useChatStore((s) => s.agentMeta.stoppedByUser);
+  const showReasoning = usePreferencesStore((s) => s.showReasoning);
   // Offer to resume after a stop as well as after the step cap. A stop used to
   // be a dead end: the only way on was to retype the request.
   // "steered" is not a dead end to offer Continue for: the run yielded to a
@@ -260,6 +262,7 @@ export function AiChatView({
             message={m}
             onApproval={onApproval}
             streaming={m.id === streamingMessageId}
+            showReasoning={showReasoning}
           />
         ))}
         {compactionNotice && (
@@ -497,10 +500,12 @@ const RenderedMessage = memo(function RenderedMessage({
   message,
   onApproval,
   streaming,
+  showReasoning,
 }: {
   message: UIMessage;
   onApproval: (id: string, approved: boolean) => void;
   streaming: boolean;
+  showReasoning: boolean;
 }) {
   // Index of the trailing text part — only that one is "live" mid-stream.
   // Earlier text parts (separated by tool calls) are already finalized.
@@ -558,14 +563,14 @@ const RenderedMessage = memo(function RenderedMessage({
               // watches the thinking unfold, then it collapses once (still
               // openable by clicking the header).
               const reasoningLive = streaming && gi === groups.length - 1;
-              return (
+              return showReasoning ? (
                 <PartAppear key={`${message.id}-${g.key}`}>
-                  <Reasoning isStreaming={reasoningLive}>
+                  <Reasoning isStreaming={reasoningLive} showReasoning={showReasoning}>
                     <ReasoningTrigger />
                     <ReasoningContent>{g.text}</ReasoningContent>
                   </Reasoning>
                 </PartAppear>
-              );
+              ) : null;
             }
             if (g.kind === "reads") {
               return (
@@ -591,6 +596,7 @@ const RenderedMessage = memo(function RenderedMessage({
                   part={g.part}
                   onApproval={onApproval}
                   streaming={streaming && g.idx === lastTextIdx}
+                  showReasoning={showReasoning}
                 />
               </PartAppear>
             );
@@ -849,10 +855,12 @@ const RenderedPart = memo(function RenderedPart({
   part,
   onApproval,
   streaming,
+  showReasoning,
 }: {
   part: AnyPart;
   onApproval: (id: string, approved: boolean) => void;
   streaming: boolean;
+  showReasoning: boolean;
 }) {
   if (part.type === "text") {
     return (
@@ -863,14 +871,14 @@ const RenderedPart = memo(function RenderedPart({
   }
 
   if (part.type === "reasoning") {
-    return (
-      <Reasoning>
+    return showReasoning ? (
+      <Reasoning showReasoning={showReasoning}>
         <ReasoningTrigger />
         <ReasoningContent>
           {(part as unknown as { text: string }).text}
         </ReasoningContent>
       </Reasoning>
-    );
+    ) : null;
   }
 
   if (

@@ -254,6 +254,8 @@ export type Preferences = {
    * and show it as a ghost completion. Off by default — it spends tokens.
    */
   terminalAiSuggest: boolean;
+  /** Show reasoning/thinking blocks in the AI chat. */
+  showReasoning: boolean;
 };
 
 export type EditorFormatter =
@@ -363,6 +365,7 @@ const KEY_SUBAGENT_MODEL_ID = "subagentModelId";
 const KEY_AUTO_CHECKPOINT = "autoCheckpoint";
 const KEY_PERSIST_TERMINALS = "persistTerminals";
 const KEY_TERMINAL_AI_SUGGEST = "terminalAiSuggest";
+const KEY_SHOW_REASONING = "showReasoning";
 
 export const TERMINAL_FONT_SIZE_DEFAULT = 14;
 export const TERMINAL_FONT_SIZE_MIN = 8;
@@ -467,6 +470,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   autoCheckpoint: true,
   persistTerminals: false,
   terminalAiSuggest: false,
+  showReasoning: true,
 };
 
 const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
@@ -747,6 +751,8 @@ export async function loadPreferences(): Promise<Preferences> {
     terminalAiSuggest:
       get<boolean>(KEY_TERMINAL_AI_SUGGEST) ??
       DEFAULT_PREFERENCES.terminalAiSuggest,
+    showReasoning:
+      get<boolean>(KEY_SHOW_REASONING) ?? DEFAULT_PREFERENCES.showReasoning,
     agentLaunchCommands: normalizeAgentLaunchCommands(
       get<unknown>(KEY_AGENT_LAUNCH_COMMANDS),
     ),
@@ -1184,6 +1190,10 @@ export async function setTerminalAiSuggest(value: boolean): Promise<void> {
   await writePref(KEY_TERMINAL_AI_SUGGEST, value);
 }
 
+export async function setShowReasoning(value: boolean): Promise<void> {
+  await writePref(KEY_SHOW_REASONING, value);
+}
+
 export async function setAgentLaunchCommands(
   value: AgentLaunchCommands,
 ): Promise<void> {
@@ -1293,6 +1303,7 @@ export async function onPreferencesChange(
     [KEY_LSP_ACTIVATION]: "lspActivation",
     [KEY_LSP_CUSTOM_SERVERS]: "lspCustomServers",
     [KEY_EXTENSION_SHORTCUTS]: "extensionShortcuts",
+    [KEY_SHOW_REASONING]: "showReasoning",
     [KEY_COST_BUDGET_USD]: "costBudgetUsd",
     [KEY_COST_DAILY_BUDGET_USD]: "costDailyBudgetUsd",
     [KEY_SUBAGENT_MODEL_ID]: "subagentModelId",
