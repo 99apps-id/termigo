@@ -112,8 +112,9 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   tools as the main agent (read, search, edit, shell, git, extensions), so it
   can actually do the job it was given; what keeps that safe is that every
   mutating, exec or third-party call routes through the same approval queue, so
-  nothing runs without your click. The one thing withheld is `run_subagent`
-  itself, so a sub-agent cannot spawn its own and nest without bound. Alongside
+  nothing runs without your click. Spawn tools are withheld only at the
+  nesting-depth cap (`subagentMaxDepth`, default 3), so a sub-agent can
+  delegate to its own sub-agents up to that bound and no further. Alongside
   the general roster there are focused **pentest specialists**
   (`pentest-recon`, `pentest-web`, `pentest-network`) the main agent can dispatch
   in parallel on one authorized, in-scope target.
@@ -211,7 +212,11 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   Conversations mirror both ways, and a diagram the agent draws (a fenced
   Mermaid block) is rasterised and posted as a picture along with any report
   file it previewed (`preview_file`), so graphs and finished reports show up
-  on your phone too.
+  on your phone too. While a run is in flight the bot keeps a live
+  "typing…" indicator in the chat (alongside the status / step / todo
+  stream), and messages it injected are never echoed back — the mirror is
+  paused before a Telegram dispatch is submitted, so you never see your own
+  text twice.
 - **Deleting is never delegated.** No mode speaks for you here, including
   `Auto-approve all`: `delete_file` always asks, and so does any command that
   removes files — `rm`, `rmdir`, `git clean`, `find -delete`, PowerShell's
@@ -279,6 +284,38 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   is a statement about files in this workspace, not about arbitrary third-party
   actions. A server that fails to start costs only its own tools, not everyone
   else's.
+- **Web search, documents, images, clipboard, environment.** `web_search`
+  queries DuckDuckGo through the same SSRF-guarded HTTP path as `fetch` (no API
+  key needed) and returns the top results — title, URL, snippet — so the agent
+  can answer questions that live outside the workspace. `read_pdf` extracts the
+  text of a PDF (handles compressed streams, page-by-page, capped) so a report
+  or spec can be read straight into context; scanned/image-only PDFs report
+  that they need OCR. `read_image` hands an image file to the model as a real
+  visual part, so a screenshot, mockup or diagram on disk can be seen (requires
+  a vision-capable model). `clipboard_get` / `clipboard_set` read and replace
+  the clipboard (write asks for approval), and `env_get` / `env_list` inspect
+  the process environment read-only — enough to answer "what is PATH?" without
+  a shell round-trip.
+- **Artifacts the agent produced stay reachable.** Canvases (`render_view`),
+  previews (`open_preview`) and files (`write_file`) land in an **Artifacts**
+  panel (the layers button in the AI status bar), and each can be reopened —
+  files in the editor, previews and canvases in a preview tab — so something
+  the agent drew or wrote is one click away instead of buried in the
+  transcript.
+- **The agent can ask you a question mid-run.** `ask_user` renders a clickable
+  chooser in the chat (2–6 options) and the agent waits for your pick — useful
+  for choosing between approaches or confirming a risky call — instead of
+  guessing and having to redo work.
+- **Opt-in post-execution confirmation.** When enabled (Settings → Agents →
+  Confirm after mutations), a mutating tool that succeeds pauses the run and
+  asks **Keep / Revert** before the agent continues; Revert restores the
+  touched paths from git. Off by default so everyday runs stay uninterrupted.
+- **Sub-agents can nest — up to a depth you choose.** A sub-agent may spawn its
+  own sub-agents (each with the full toolset), capped by the `subagentMaxDepth`
+  preference (1–5, default 3); at the cap the spawn tools are withheld so
+  recursion cannot loop. A configured sub-agent model that would cost more than
+  the main run falls back to the main model instead. Finished sub-agent runs
+  are persisted to disk and shown with depth and step detail in the run cards.
 - Coding-agent orchestration: spawn an external agent CLI in a terminal
   (Claude Code, Codex, Gemini, Pi, OpenCode, Grok, Aider, Qwen, Cursor),
   inspect its output, and send follow-up work through approval-gated tools;

@@ -79,6 +79,14 @@ The themes below frame every scope decision.
 - [x] Self-maintaining memory the agent writes and reads back, bounded in size
 - [x] Reusable skills in `.termigo/skills/`, loaded on demand, discoverable across other agents' libraries
 - [x] MCP servers, per-project and per-user, sharing one config with the Go companion
+- [x] Web search (`web_search`, DuckDuckGo-backed, SSRF-guarded, no API key)
+- [x] Document and image tools: `read_pdf` (text extraction from compressed PDFs) and `read_image` (vision-capable image reading)
+- [x] Clipboard and environment tools: `clipboard_get` / `clipboard_set` and `env_get` / `env_list`
+- [x] Git history tools: `git_blame` and `git_show` (inspect any commit)
+- [x] Artifacts panel — canvases, previews and files the agent produced, reopened in one click
+- [x] In-chat elicitation (`ask_user`) — the agent pauses for a clickable choice
+- [x] Opt-in post-execution confirmation (Keep / Revert after a mutating tool, with git-based revert)
+- [x] Sub-agent nesting depth (1–5), cost-tier guard, and sub-agent runs persisted to disk
 - [x] Extension-contributed AI tools
 - [x] Agent-defined tools as shell templates in `.termigo/tools.json`
 - [x] Tools with per-action approval gating (file write / edit, bash, and filesystem mutations)
@@ -132,11 +140,18 @@ The themes below frame every scope decision.
 - [x] AI agent reliability and workflow improvements — tool execution, context
   management, recovery, and long-running tasks. Shipped: context-window
   auto-recovery, transient-provider-error recovery, interrupted-run recovery
-  after a restart, loop round-cap, no-progress / tool-error guards, and the
-  per-run workspace anchor.
+  after a restart, loop round-cap, no-progress / tool-error guards, the
+  per-run workspace anchor, and rotating thinking-phrase status (no step
+  spam).
 - [x] Expand external coding-agent orchestration beyond Claude Code — built-in
   launchers for Codex, Gemini, Pi, OpenCode, Grok, Aider, Qwen and Cursor, plus
   user-defined custom coding-agent CLIs in Settings.
+- [x] Agent UX parity with BatikCode-style host agents — sub-agent nesting
+  depth, cost-tier guard, persisted sub-agent runs, editable/resendable user
+  messages, live background-command output, and modified-file chips in tool
+  cards.
+- [x] Telegram relay polish — typing indicator while the agent works, and an
+  echo fix so messages the bot injects are never mirrored back.
 - [ ] Extensible slash commands (a fixed set has shipped; skills are done)
 - [ ] Project-scoped approval policies and per-tool trust (the auto-approve modes have shipped)
 - [x] Persistent terminal processes across app restarts — Unix via a named tmux
