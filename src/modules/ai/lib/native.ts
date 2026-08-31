@@ -153,6 +153,13 @@ export const native = {
       "fs_read_image_base64",
       { path, workspace: currentWorkspaceEnv() },
     ),
+  readFileBase64: (path: string) =>
+    invoke<{
+      media_type: string;
+      data: string;
+      size: number;
+      file_name: string;
+    }>("fs_read_file_base64", { path, workspace: currentWorkspaceEnv() }),
   writeFile: (path: string, content: string) =>
     invoke<void>("fs_write_file", {
       path,

@@ -118,12 +118,15 @@ async function apiPostForm(
   return res.json();
 }
 
-function dataUrlToBytes(dataUrl: string): Uint8Array<ArrayBuffer> {
-  const base64 = dataUrl.split(",")[1] ?? "";
-  const bin = atob(base64);
+function base64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
+  const bin = atob(b64);
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
   return bytes;
+}
+
+function dataUrlToBytes(dataUrl: string): Uint8Array<ArrayBuffer> {
+  return base64ToBytes(dataUrl.split(",")[1] ?? "");
 }
 
 /** Send a PNG (as a data URL) as a photo. Used for rasterised Mermaid. */
@@ -517,7 +520,7 @@ async function sendReportFiles(
   const paths = reportFilesFromAssistant(getChat, sessionId, sinceCount);
   if (paths.length === 0) return;
   const { native } = await import("../ai/lib/native");
-  const { readFile, readImageBase64 } = native;
+  const { readFile, readImageBase64, readFileBase64 } = native;
   const IMAGE_EXT = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp"]);
   for (const path of paths) {
     const ext = path.slice(path.lastIndexOf(".") + 1).toLowerCase();
@@ -530,13 +533,26 @@ async function sendReportFiles(
         );
       }
     } else {
-      const r = await readFile(path).catch(() => null);
-      if (r && r.kind === "text") {
-        const bytes = new TextEncoder().encode(r.content);
-        const name = path.split(/[\\/]/).pop() ?? "report.txt";
-        await sendDocument(chatId, bytes, name, "Report", signal).catch(
+      // Prefer the raw base64 reader so binary files (PDF) can be uploaded;
+      // fall back to the text reader for a plain HTML/Markdown report.
+      const bin = await readFileBase64(path).catch(() => null);
+      if (bin) {
+        const bytes = base64ToBytes(bin.data);
+        const name = bin.file_name || path.split(/[\\/]/).pop() || "report";
+        const caption =
+          bin.media_type === "application/pdf" ? "Report (PDF)" : "Report";
+        await sendDocument(chatId, bytes, name, caption, signal).catch(
           () => {},
         );
+      } else {
+        const r = await readFile(path).catch(() => null);
+        if (r && r.kind === "text") {
+          const bytes = new TextEncoder().encode(r.content);
+          const name = path.split(/[\\/]/).pop() ?? "report.txt";
+          await sendDocument(chatId, bytes, name, "Report", signal).catch(
+            () => {},
+          );
+        }
       }
     }
   }

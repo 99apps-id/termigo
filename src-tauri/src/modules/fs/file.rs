@@ -101,6 +101,73 @@ pub async fn fs_read_image_base64(
     })
 }
 
+/// Cap for arbitrary-file base64 reads (used to send a report to Telegram).
+const MAX_FILE_BASE64_BYTES: u64 = 25 * 1024 * 1024;
+
+#[derive(Serialize)]
+pub struct FileReadBase64 {
+    /// IANA media type, guessed from the extension (or octet-stream).
+    pub media_type: String,
+    /// Base-64 (standard) encoded file bytes.
+    pub data: String,
+    pub size: u64,
+    /// File name (basename) used as the Telegram document name.
+    pub file_name: String,
+}
+
+fn file_media_type(path: &Path) -> String {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase());
+    match ext.as_deref() {
+        Some("pdf") => "application/pdf",
+        Some("html") | Some("htm") => "text/html",
+        Some("md") | Some("markdown") => "text/markdown",
+        Some("txt") => "text/plain",
+        Some("csv") => "text/csv",
+        Some("json") => "application/json",
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        _ => "application/octet-stream",
+    }
+    .to_string()
+}
+
+/// Read any file as base-64 so the webview can upload it (e.g. a PDF report)
+/// to Telegram. Unlike `fs_read_image_base64` it does not require an image.
+#[tauri::command]
+pub async fn fs_read_file_base64(
+    path: String,
+    workspace: Option<WorkspaceEnv>,
+) -> Result<FileReadBase64, String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    let p = resolve_path(&path, &workspace);
+    let meta = std::fs::metadata(&p).map_err(|e| e.to_string())?;
+    let size = meta.len();
+    if size > MAX_FILE_BASE64_BYTES {
+        return Err(format!(
+            "file too large ({size} bytes, limit {MAX_FILE_BASE64_BYTES})"
+        ));
+    }
+    let bytes = std::fs::read(&p).map_err(|e| e.to_string())?;
+    use base64::Engine as _;
+    let data = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    let file_name = p
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("file")
+        .to_string();
+    Ok(FileReadBase64 {
+        media_type: file_media_type(&p),
+        data,
+        size,
+        file_name,
+    })
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum StatKind {
@@ -288,6 +355,24 @@ mod tests {
             }
             _ => panic!("expected text"),
         }
+    }
+
+    #[test]
+    fn file_base64_media_type_and_name() {
+        use base64::Engine as _;
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("report.pdf");
+        std::fs::write(&f, b"%PDF-1.4 fake").unwrap();
+        assert_eq!(file_media_type(&f), "application/pdf");
+        assert_eq!(f.file_name().and_then(|n| n.to_str()), Some("report.pdf"));
+        let bytes = std::fs::read(&f).unwrap();
+        assert_eq!(
+            base64::engine::general_purpose::STANDARD.decode(
+                base64::engine::general_purpose::STANDARD.encode(&bytes)
+            )
+            .unwrap(),
+            bytes
+        );
     }
 
     #[test]
