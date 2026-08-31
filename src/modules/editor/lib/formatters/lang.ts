@@ -187,5 +187,5 @@ export const BUILTIN_LANGUAGES: ReadonlySet<string> = new Set([
 
 /** Ordered list of every known language for table rendering. */
 export const ALL_LANGUAGES: readonly string[] = Object.keys(LANGUAGE_LABELS).sort((a, b) =>
-  LANGUAGE_LABELS[a]!.localeCompare(LANGUAGE_LABELS[b]!),
+  LANGUAGE_LABELS[a]?.localeCompare(LANGUAGE_LABELS[b]!) ?? 0,
 );

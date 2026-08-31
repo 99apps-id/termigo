@@ -88,10 +88,10 @@ describe("buildExtensionTools", () => {
   it("honours the declared approval preference", () => {
     list.mockReturnValue([declared("a", "auto"), declared("b", "needsApproval")]);
     const tools = buildExtensionTools();
-    expect((tools["ext__my_ext__a"] as { needsApproval: boolean }).needsApproval).toBe(
+    expect((tools.ext__my_ext__a as { needsApproval: boolean }).needsApproval).toBe(
       false,
     );
-    expect((tools["ext__my_ext__b"] as { needsApproval: boolean }).needsApproval).toBe(
+    expect((tools.ext__my_ext__b as { needsApproval: boolean }).needsApproval).toBe(
       true,
     );
   });

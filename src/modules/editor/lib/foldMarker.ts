@@ -11,7 +11,7 @@
  */
 export function makeFoldMarker(open: boolean): HTMLElement {
   const span = document.createElement("span");
-  span.className = "cm-foldMarker" + (open ? " cm-foldMarker-open" : "");
+  span.className = `cm-foldMarker${open ? " cm-foldMarker-open" : ""}`;
   span.innerHTML = open
     ? '<svg viewBox="0 0 16 16" width="10" height="10" aria-hidden="true"><path d="M4 6 L8 10 L12 6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>'
     : '<svg viewBox="0 0 16 16" width="10" height="10" aria-hidden="true"><path d="M6 4 L10 8 L6 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';

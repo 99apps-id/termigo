@@ -135,7 +135,7 @@ describe("loadMcpTools", () => {
     });
 
     const tools = await loadMcpTools("/ws");
-    expect(tools["mcp__s__t"].needsApproval).toBe(true);
+    expect(tools.mcp__s__t.needsApproval).toBe(true);
   });
 
   // A failing call must not collapse the run; the model should see the error
@@ -149,7 +149,7 @@ describe("loadMcpTools", () => {
     callTool.mockRejectedValue(new Error("server died"));
 
     const tools = await loadMcpTools("/ws");
-    const exec = tools["mcp__s__t"].execute as (
+    const exec = tools.mcp__s__t.execute as (
       a: unknown,
       o: unknown,
     ) => Promise<unknown>;

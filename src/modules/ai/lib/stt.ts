@@ -93,7 +93,7 @@ async function transcribeViaRest(
   );
 
   const headers: Record<string, string> = { "Content-Type": contentType };
-  if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
 
   const res = await fetchWithTimeout(
     `${baseURL}/audio/transcriptions`,
