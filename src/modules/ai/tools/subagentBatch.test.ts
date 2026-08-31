@@ -74,10 +74,13 @@ async function run(input: unknown): Promise<BatchOut> {
   const tools = buildSubagentTools(ctx());
   const execute = tools.run_subagents.execute;
   if (!execute) throw new Error("run_subagents has no execute");
-  return (await execute(input as never, {
-    toolCallId: "t",
-    messages: [],
-  } as never)) as BatchOut;
+  return (await execute(
+    input as never,
+    {
+      toolCallId: "t",
+      messages: [],
+    } as never,
+  )) as BatchOut;
 }
 
 beforeEach(() => {

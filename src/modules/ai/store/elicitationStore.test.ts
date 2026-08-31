@@ -17,10 +17,9 @@ describe("elicitationStore (ask_user / question carousel)", () => {
       "C",
     ]);
 
-    useElicitationStore.getState().answer(
-      useElicitationStore.getState().pending[0].id,
-      "B",
-    );
+    useElicitationStore
+      .getState()
+      .answer(useElicitationStore.getState().pending[0].id, "B");
     await expect(promise).resolves.toBe("B");
     expect(useElicitationStore.getState().pending).toHaveLength(0);
   });

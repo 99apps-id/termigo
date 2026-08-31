@@ -38,7 +38,7 @@ export function useAutoApproval(
 
   useEffect(() => {
     const last = messages[messages.length - 1];
-    if (!last || last.role !== "assistant") return;
+    if (last?.role !== "assistant") return;
 
     for (const part of last.parts as Array<Record<string, unknown>>) {
       if (part.state !== "approval-requested") continue;
