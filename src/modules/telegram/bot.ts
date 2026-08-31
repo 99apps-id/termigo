@@ -16,8 +16,14 @@ const API = "https://api.telegram.org";
 type ChatLike = {
   status?: string;
   messages: Array<{
+    id?: string;
     role: string;
-    parts?: Array<{ type?: string; text?: string }>;
+    parts?: Array<{
+      type?: string;
+      text?: string;
+      toolName?: string;
+      output?: unknown;
+    }>;
   }>;
 };
 
@@ -32,6 +38,12 @@ type Update = {
 };
 
 let loopController: AbortController | null = null;
+let mirrorController: AbortController | null = null;
+
+// Set while the bot is relaying a Telegram-initiated dispatch, so the Termigo →
+// Telegram mirror stays quiet (the bot posts the run's own answer) instead of
+// double-posting the injected user message and the assistant reply.
+let mirrorPaused = false;
 
 async function apiGet(path: string, signal: AbortSignal): Promise<unknown> {
   const token = await getTelegramToken();
@@ -79,11 +91,74 @@ function sleep(signal: AbortSignal, ms: number): Promise<void> {
 }
 
 async function sendTelegram(
-  chatId: number,
+  chatId: number | string,
   text: string,
   signal: AbortSignal,
 ): Promise<void> {
   await apiPost("sendMessage", { chat_id: chatId, text }, signal);
+}
+
+/** Multipart POST — Telegram uploads photos/documents via form-data, not JSON. */
+async function apiPostForm(
+  path: string,
+  form: FormData,
+  signal: AbortSignal,
+): Promise<unknown> {
+  const token = await getTelegramToken();
+  if (!token) throw new Error("No Telegram token configured");
+  const res = await fetch(`${API}/bot${token}/${path}`, {
+    method: "POST",
+    body: form,
+    signal,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Telegram API ${res.status}: ${text.slice(0, 200)}`);
+  }
+  return res.json();
+}
+
+function dataUrlToBytes(dataUrl: string): Uint8Array<ArrayBuffer> {
+  const base64 = dataUrl.split(",")[1] ?? "";
+  const bin = atob(base64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+/** Send a PNG (as a data URL) as a photo. Used for rasterised Mermaid. */
+async function sendPhoto(
+  chatId: number | string,
+  dataUrl: string,
+  caption: string,
+  signal: AbortSignal,
+): Promise<void> {
+  const form = new FormData();
+  form.append("chat_id", String(chatId));
+  form.append(
+    "photo",
+    new Blob([dataUrlToBytes(dataUrl)], { type: "image/png" }),
+    "diagram.png",
+  );
+  if (caption) form.append("caption", caption.slice(0, 1024));
+  await apiPostForm("sendPhoto", form, signal);
+}
+
+/** Send raw bytes as a document (PDF, HTML, Markdown, image…). */
+async function sendDocument(
+  chatId: number | string,
+  bytes: Uint8Array,
+  filename: string,
+  caption: string,
+  signal: AbortSignal,
+): Promise<void> {
+  const form = new FormData();
+  form.append("chat_id", String(chatId));
+  // Copy to an ArrayBuffer-backed view; Blob rejects a generic Uint8Array.
+  const copy = new Uint8Array(bytes);
+  form.append("document", new Blob([copy]), filename);
+  if (caption) form.append("caption", caption.slice(0, 1024));
+  await apiPostForm("sendDocument", form, signal);
 }
 
 async function sendKeyboard(
@@ -366,6 +441,158 @@ async function publishProgress(
   }
 }
 
+function messageText(m: {
+  role: string;
+  parts?: Array<{ type?: string; text?: string }>;
+}): string {
+  const text = (m.parts ?? [])
+    .filter((p): p is { type: "text"; text: string } => p.type === "text")
+    .map((p) => p.text)
+    .join("\n");
+  return text.trim();
+}
+
+/** Telegram caps a message at 4096 chars; clamp so a long reply is not dropped. */
+function clampTelegramText(text: string): string {
+  return text.length > 4000 ? `${text.slice(0, 4000)}…` : text;
+}
+
+/**
+ * Send a reply plus any Mermaid blocks rendered to PNG, so a diagram the agent
+ * produced actually shows in Telegram instead of as raw source. Text is sent
+ * first (never dropped); diagrams are best-effort after it.
+ */
+async function sendReplyWithDiagrams(
+  chatId: number | string,
+  text: string,
+  signal: AbortSignal,
+): Promise<void> {
+  await sendTelegram(chatId, clampTelegramText(text), signal);
+  const { extractMermaidBlocks, renderMermaidToPng } = await import(
+    "./mermaidImage"
+  );
+  const blocks = extractMermaidBlocks(text);
+  for (const block of blocks) {
+    const png = await renderMermaidToPng(block);
+    if (png) {
+      await sendPhoto(chatId, png, "Mermaid diagram", signal).catch(() => {});
+    }
+  }
+}
+
+/** Local report/document files the agent previewed via `preview_file` since the
+ *  baseline, so a finished HTML/Markdown report (or image) can be shared to the
+ *  chat. PDFs hit the pane's not-renderable error and are skipped. */
+function reportFilesFromAssistant(
+  getChat: (id: string) => ChatLike | undefined,
+  sessionId: string,
+  sinceCount: number,
+): string[] {
+  const chat = getChat(sessionId);
+  if (!chat) return [];
+  const assistants = chat.messages.filter((m) => m.role === "assistant");
+  const relevant = assistants.slice(sinceCount);
+  const paths: string[] = [];
+  for (const m of relevant) {
+    for (const p of m.parts ?? []) {
+      if (p.type !== "tool-call" && p.type !== "tool") continue;
+      if (!p.toolName?.includes("preview_file")) continue;
+      const out = p.output as
+        | { ok?: boolean; error?: string; path?: string }
+        | undefined;
+      if (out?.ok && out.path) paths.push(out.path);
+    }
+  }
+  return [...new Set(paths)];
+}
+
+/** Best-effort: send report files (HTML/Markdown, images) the agent previewed. */
+async function sendReportFiles(
+  chatId: number | string,
+  getChat: (id: string) => ChatLike | undefined,
+  sessionId: string,
+  sinceCount: number,
+  signal: AbortSignal,
+): Promise<void> {
+  const paths = reportFilesFromAssistant(getChat, sessionId, sinceCount);
+  if (paths.length === 0) return;
+  const { native } = await import("../ai/lib/native");
+  const { readFile, readImageBase64 } = native;
+  const IMAGE_EXT = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp"]);
+  for (const path of paths) {
+    const ext = path.slice(path.lastIndexOf(".") + 1).toLowerCase();
+    if (IMAGE_EXT.has(ext)) {
+      const img = await readImageBase64(path).catch(() => null);
+      if (img) {
+        const dataUrl = `data:${img.media_type};base64,${img.data}`;
+        await sendPhoto(chatId, dataUrl, "Report image", signal).catch(
+          () => {},
+        );
+      }
+    } else {
+      const r = await readFile(path).catch(() => null);
+      if (r && r.kind === "text") {
+        const bytes = new TextEncoder().encode(r.content);
+        const name = path.split(/[\\/]/).pop() ?? "report.txt";
+        await sendDocument(chatId, bytes, name, "Report", signal).catch(
+          () => {},
+        );
+      }
+    }
+  }
+}
+
+/**
+ * Mirror the in-app conversation into Telegram in the other direction: a
+ * message typed in Termigo (and the agent's reply once the run settles) shows
+ * up in the bot's chat. Suppressed while the bot is relaying a Telegram run so
+ * it doesn't echo messages it injected itself.
+ */
+async function runMirror(signal: AbortSignal): Promise<void> {
+  let seenSession = "";
+  let seen = new Set<string>();
+  while (!signal.aborted) {
+    try {
+      const store = await import("../ai/store/chatStore");
+      const { enabled, chatId } = useTelegramStore.getState();
+      const state = store.useChatStore.getState();
+      if (enabled && chatId && state.activeSessionId) {
+        const sessionId = state.activeSessionId;
+        const chat = store.getChat(sessionId);
+        const messages = chat?.messages ?? [];
+        if (sessionId !== seenSession) {
+          seenSession = sessionId;
+          // Seed so pre-existing history is not replayed to Telegram — only
+          // messages added from now on are mirrored.
+          seen = new Set(messages.map((m) => m.id).filter(Boolean) as string[]);
+        }
+        const settled =
+          state.agentMeta.status === "idle" ||
+          state.agentMeta.status === "error";
+        for (const m of messages) {
+          if (m.id && seen.has(m.id)) continue;
+          const text = messageText(m);
+          // Bot-injected messages and streaming assistant text are handled by
+          // the bot itself (the run's answer); don't mirror them.
+          if (!text || mirrorPaused) {
+            if (m.id) seen.add(m.id);
+            continue;
+          }
+          if (m.role === "assistant" && !settled) {
+            // Still streaming; send once the run settles so the reply is whole.
+            continue;
+          }
+          await sendReplyWithDiagrams(chatId, text, signal).catch(() => {});
+          if (m.id) seen.add(m.id);
+        }
+      }
+    } catch {
+      // Mirroring is best-effort; never let it break the long-poll loop.
+    }
+    await sleep(signal, 2000);
+  }
+}
+
 async function dispatchAndStream(
   text: string,
   chatId: number,
@@ -390,14 +617,19 @@ async function dispatchAndStream(
       return;
     }
     // Stream live progress alongside the run, superseding any prior stream.
+    // Pause the Termigo → Telegram mirror so it does not echo this dispatch.
+    mirrorPaused = true;
     const progressCtl = new AbortController();
     progressCtrls.get(chatId)?.abort();
     progressCtrls.set(chatId, progressCtl);
     void publishProgress(chatId, sessionId, progressCtl.signal).catch(() => {});
     try {
       const reply = await waitForReply(store, signal, sessionId, baseline);
-      await sendTelegram(chatId, reply, signal);
+      await sendReplyWithDiagrams(chatId, reply, signal);
+      // Share any report/document file the agent previewed in this run.
+      await sendReportFiles(chatId, store.getChat, sessionId, baseline, signal);
     } finally {
+      mirrorPaused = false;
       progressCtl.abort();
       if (progressCtrls.get(chatId) === progressCtl) {
         progressCtrls.delete(chatId);
@@ -666,14 +898,19 @@ export function startTelegramBot(): void {
   if (loopController) return;
   const controller = new AbortController();
   loopController = controller;
+  const mirror = new AbortController();
+  mirrorController = mirror;
   useTelegramStore.getState().setOnline(true);
   useTelegramStore.getState().setLastError(null);
   void runLoop(controller.signal);
+  void runMirror(mirror.signal);
 }
 
 /** Stop the long-polling loop. */
 export function stopTelegramBot(): void {
   loopController?.abort();
   loopController = null;
+  mirrorController?.abort();
+  mirrorController = null;
   useTelegramStore.getState().setOnline(false);
 }

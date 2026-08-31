@@ -208,6 +208,10 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   `/cost`, and shows a live status chip in the AI status bar. Just type a
   question or task directly — no `/query` prefix needed. It long-polls
   from the desktop app, so it is only reachable while Termigo is open.
+  Conversations mirror both ways, and a diagram the agent draws (a fenced
+  Mermaid block) is rasterised and posted as a picture along with any report
+  file it previewed (`preview_file`), so graphs and finished reports show up
+  on your phone too.
 - **Deleting is never delegated.** No mode speaks for you here, including
   `Auto-approve all`: `delete_file` always asks, and so does any command that
   removes files — `rm`, `rmdir`, `git clean`, `find -delete`, PowerShell's

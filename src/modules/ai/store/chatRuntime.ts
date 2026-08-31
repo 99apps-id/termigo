@@ -8,7 +8,9 @@ import {
 import { toast } from "sonner";
 import {
   getModel,
+  isCompatModelId,
   type ModelId,
+  type ProviderId,
   providerNeedsKey,
   stepBudgetForRound,
 } from "../config";
@@ -486,12 +488,20 @@ export function getOrCreateChat(sessionId: string): Chat<UIMessage> {
  * Returns whether anything was accepted; the caller clears its input either
  * way, because from the user's side the message has been taken.
  */
+/** Provider for a model id, resolving user-defined OpenAI-compatible endpoints.
+ *  `getModel` only knows built-in models and throws for a `compat-*` id (e.g.
+ *  StepFun), so the send path must use this instead. */
+function providerForModel(modelId: string): ProviderId {
+  if (isCompatModelId(modelId)) return "openai-compatible";
+  return getModel(modelId as ModelId).provider;
+}
+
 export async function sendMessage(text: string): Promise<boolean> {
   const state = useChatStore.getState();
   const sessionId = state.activeSessionId;
   if (!sessionId) return false;
   if (
-    providerNeedsKey(getModel(state.selectedModelId as ModelId).provider) &&
+    providerNeedsKey(providerForModel(state.selectedModelId)) &&
     !getActiveProviderKey()
   )
     return false;
@@ -648,7 +658,7 @@ setSessionLeftHandler((_sessionId, messages) => {
     const mode = usePreferencesStore.getState().agentApprovalMode;
     try {
       const model = await buildLanguageModel(
-        getModel(state.selectedModelId as ModelId).provider,
+        providerForModel(state.selectedModelId),
         state.apiKeys,
         state.selectedModelId,
       );
