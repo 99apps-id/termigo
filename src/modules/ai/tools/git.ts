@@ -1,11 +1,11 @@
+import { quoteShellArg } from "@/lib/shellQuote";
 import { tool } from "ai";
 import { z } from "zod";
 import { native } from "../lib/native";
-import { checkShellCommand } from "../lib/security";
-import { remoteUnsupported } from "../lib/remoteFs";
-import { getSessionShell, sessionShellKey } from "../lib/sessionShell";
-import { quoteShellArg } from "@/lib/shellQuote";
 import { enforcePolicy } from "../lib/policyEngine";
+import { remoteUnsupported } from "../lib/remoteFs";
+import { checkShellCommand } from "../lib/security";
+import { getSessionShell, sessionShellKey } from "../lib/sessionShell";
 import type { ToolContext } from "./context";
 
 // A git branch name may use letters, digits, and `- _ . /`, but must not
@@ -18,13 +18,11 @@ function validBranch(name: string): boolean {
   // Control bytes and CR/LF would break the single-line command.
   return !/[\x00-\x1f]/.test(name);
 }
+
 // Exported for unit tests; not part of the tool surface.
 export { validBranch };
 
-function repoRootFor(
-  root: string | null,
-  cwd: string | null,
-): string {
+function repoRootFor(root: string | null, cwd: string | null): string {
   return cwd ?? root ?? ".";
 }
 
@@ -79,6 +77,46 @@ export function gitLogCommand(limit: number): string {
   return `git log --oneline -n ${n}`;
 }
 
+/**
+ * `git blame` with an optional path and line range. A file may be at a
+ * sub-path of the repo, so the file is always quoted; when no file is given
+ * the whole tree is blamed line-by-line.
+ */
+export function gitBlameCommand(opts: {
+  path?: string;
+  lines?: string;
+}): string {
+  const args = ["blame", "--line-porcelain"];
+  if (opts.lines) args.push(`-L ${opts.lines}`);
+  if (opts.path) {
+    args.push("--");
+    args.push(quoteShellArg(opts.path));
+  }
+  return `git ${args.join(" ")}`;
+}
+
+/**
+ * `git show` for one commit (with optional path filter). Falls back to HEAD
+ * when the ref is empty. `--stat` shows the file list without a full diff so
+ * a long commit does not flood the model; the caller decides via `statOnly`.
+ */
+export function gitShowCommand(opts: {
+  ref?: string;
+  path?: string;
+  statOnly?: boolean;
+}): string {
+  const ref = (opts.ref ?? "HEAD").trim() || "HEAD";
+  const args = ["show", "--format=fuller"];
+  // Stat by default; only a full diff when the caller explicitly asks for it.
+  if (opts.statOnly !== false) args.push("--stat");
+  args.push(quoteShellArg(ref));
+  if (opts.path) {
+    args.push("--");
+    args.push(quoteShellArg(opts.path));
+  }
+  return `git ${args.join(" ")}`;
+}
+
 export function buildGitTools(ctx: ToolContext) {
   return {
     git_status: tool({
@@ -123,7 +161,9 @@ export function buildGitTools(ctx: ToolContext) {
         staged: z
           .boolean()
           .optional()
-          .describe("Show the staged diff (git diff --staged) instead of unstaged."),
+          .describe(
+            "Show the staged diff (git diff --staged) instead of unstaged.",
+          ),
         path: z
           .string()
           .optional()
@@ -211,7 +251,9 @@ export function buildGitTools(ctx: ToolContext) {
         message: z
           .string()
           .optional()
-          .describe("Short label for the checkpoint. Defaults to `checkpoint`."),
+          .describe(
+            "Short label for the checkpoint. Defaults to `checkpoint`.",
+          ),
       }),
       needsApproval: true,
       execute: async ({ message }) => {
@@ -255,7 +297,9 @@ export function buildGitTools(ctx: ToolContext) {
       inputSchema: z.object({
         name: z
           .string()
-          .describe("Branch name. Use `type/description` (feat/, fix/, docs/)."),
+          .describe(
+            "Branch name. Use `type/description` (feat/, fix/, docs/).",
+          ),
       }),
       needsApproval: true,
       execute: async ({ name }) => {
@@ -360,7 +404,10 @@ export function buildGitTools(ctx: ToolContext) {
       inputSchema: z.object({
         title: z.string().describe("PR title."),
         body: z.string().optional().describe("PR body (Markdown)."),
-        base: z.string().optional().describe("Target branch (default: repo default)."),
+        base: z
+          .string()
+          .optional()
+          .describe("Target branch (default: repo default)."),
         branch: z
           .string()
           .optional()
@@ -398,7 +445,10 @@ export function buildGitTools(ctx: ToolContext) {
             exit_code: r.exit_code,
             // `gh` writes the URL to stderr on success; surface it so the
             // model can hand the user a link.
-            url: /https:\/\/[^\s]+/.exec(r.stderr)?.[0] ?? r.stdout.match(/https:\/\/[^\s]+/)?.[0] ?? null,
+            url:
+              /https:\/\/[^\s]+/.exec(r.stderr)?.[0] ??
+              r.stdout.match(/https:\/\/[^\s]+/)?.[0] ??
+              null,
           };
         } catch (e) {
           return { error: String(e) };
@@ -484,6 +534,106 @@ export function buildGitTools(ctx: ToolContext) {
           return {
             command,
             stdout: r.stdout,
+            stderr: r.stderr,
+            exit_code: r.exit_code,
+          };
+        } catch (e) {
+          return { error: String(e) };
+        }
+      },
+    }),
+
+    git_blame: tool({
+      description:
+        "Show who last changed each line of a file (git blame), with commit, author, and date per line. Read-only, auto-executes. Use to attribute a line or find which commit introduced it — e.g. 'who wrote this line?' or 'when did this regression appear?'. Optionally limit to a line range like '5-20'.",
+      inputSchema: z.object({
+        path: z
+          .string()
+          .describe(
+            "File to blame, relative to the repo root or the active cwd.",
+          ),
+        lines: z
+          .string()
+          .optional()
+          .describe(
+            "Optional line range, git syntax e.g. '5' or '5-20' (1-based).",
+          ),
+      }),
+      execute: async ({ path, lines }) => {
+        if (ctx.getRemoteSession()) {
+          return remoteUnsupported(
+            "git_blame",
+            "Use bash_run with `git blame` on the remote host.",
+          );
+        }
+        const sid = ctx.getSessionId();
+        if (!sid) return { error: "no active chat session" };
+        const cwd = repoRootFor(ctx.getWorkspaceRoot(), ctx.getCwd());
+        const command = gitBlameCommand({ path, lines });
+        const safety = checkShellCommand(command);
+        if (!safety.ok) return { error: safety.reason };
+        try {
+          const shellId = await getSessionShell(
+            sessionShellKey("git", sid, ctx.getWorkspaceRoot()),
+            cwd,
+          );
+          const r = await native.shellSessionRun(shellId, command, cwd, 120);
+          return {
+            command,
+            stdout: truncate(r.stdout),
+            stderr: r.stderr,
+            exit_code: r.exit_code,
+          };
+        } catch (e) {
+          return { error: String(e) };
+        }
+      },
+    }),
+
+    git_show: tool({
+      description:
+        "Inspect a specific commit: metadata plus either the file list (--stat, default) or the full diff for one file. Read-only, auto-executes. Use to see what a commit changed without opening the diff UI — e.g. 'what did abc1234 do?'. Pass a ref (sha, branch, tag, or HEAD~2); defaults to HEAD.",
+      inputSchema: z.object({
+        ref: z
+          .string()
+          .optional()
+          .describe(
+            "Commit ref: sha, branch, tag, or HEAD~N. Defaults to HEAD.",
+          ),
+        path: z
+          .string()
+          .optional()
+          .describe("Limit the diff to one file (relative to repo root)."),
+        full_diff: z
+          .boolean()
+          .optional()
+          .describe(
+            "Show the full diff instead of the file list. Omit for a quick look; set only when the change itself matters.",
+          ),
+      }),
+      execute: async ({ ref, path, full_diff }) => {
+        if (ctx.getRemoteSession()) {
+          return remoteUnsupported(
+            "git_show",
+            "Use bash_run with `git show` on the remote host.",
+          );
+        }
+        const sid = ctx.getSessionId();
+        if (!sid) return { error: "no active chat session" };
+        const cwd = repoRootFor(ctx.getWorkspaceRoot(), ctx.getCwd());
+        const command = gitShowCommand({ ref, path, statOnly: !full_diff });
+        const safety = checkShellCommand(command);
+        if (!safety.ok) return { error: safety.reason };
+        try {
+          const shellId = await getSessionShell(
+            sessionShellKey("git", sid, ctx.getWorkspaceRoot()),
+            cwd,
+          );
+          const r = await native.shellSessionRun(shellId, command, cwd, 120);
+          return {
+            command,
+            ref: (ref ?? "HEAD").trim() || "HEAD",
+            stdout: truncate(r.stdout),
             stderr: r.stderr,
             exit_code: r.exit_code,
           };

@@ -32,6 +32,7 @@ import { buildTerminalTools } from "./terminal";
 import { buildTestLoopTools } from "./testLoopTools";
 import { buildTodoTools } from "./todo";
 import { buildVerifyTools } from "./verify";
+import { buildWebSearchTools } from "./webSearch";
 import { buildWorkflowTools } from "./workflow";
 import { buildWorktreeTools } from "./worktree";
 
@@ -195,6 +196,7 @@ export function buildTools(
     ...buildOrchestratorTools(ctx),
     ...buildBrowserTools(ctx),
     ...buildSqlTools(),
+    ...buildWebSearchTools(),
   } as const;
 
   // Store a reference so the workflow / orchestrator engines can dispatch
