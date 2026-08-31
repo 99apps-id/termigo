@@ -2,7 +2,7 @@ pub mod modules;
 
 use modules::{
     agent, backup, browser, chatgpt_auth, control, extensions, fs, git, history, lsp, mcp, net,
-    pty, secrets, shell, sql, ssh, workspace,
+    pty, secrets, shell, sql, ssh, system, workspace,
 };
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -419,6 +419,10 @@ pub fn run() {
             backup::backup_seal,
             backup::backup_open,
             sql::sql_run,
+            system::clipboard_get,
+            system::clipboard_set,
+            system::env_get,
+            system::env_list,
             agent::agent_enable_hooks,
             agent::agent_locate_command,
             agent::agent_hooks_status,

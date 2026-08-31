@@ -16,4 +16,5 @@ pub mod secrets;
 pub mod shell;
 pub mod sql;
 pub mod ssh;
+pub mod system;
 pub mod workspace;

@@ -6730,6 +6730,7 @@ dependencies = [
 name = "termigo"
 version = "0.9.5"
 dependencies = [
+ "arboard",
  "base64 0.23.1",
  "bytes",
  "dirs 6.0.0",

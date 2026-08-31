@@ -17,9 +17,11 @@ import { buildFsTools } from "./fs";
 import { buildGitTools } from "./git";
 import { buildGithubTools } from "./github";
 import { buildHarnessTools } from "./harness";
+import { buildImageTools } from "./image";
 import { buildInvariantTools } from "./invariant";
 import { buildLspTools } from "./lsp";
 import { buildMemoryTools } from "./memory";
+import { buildPdfTools } from "./pdf";
 import { buildPtyDriverTools } from "./ptyDriver";
 import { buildReplaceTools } from "./replace";
 import { buildReviewTools } from "./review";
@@ -28,6 +30,7 @@ import { buildShellTools } from "./shell";
 import { buildSkillTools } from "./skills";
 import { buildSqlTools } from "./sql";
 import { buildSubagentTools } from "./subagent";
+import { buildSystemTools } from "./system";
 import { buildTerminalTools } from "./terminal";
 import { buildTestLoopTools } from "./testLoopTools";
 import { buildTodoTools } from "./todo";
@@ -197,6 +200,9 @@ export function buildTools(
     ...buildBrowserTools(ctx),
     ...buildSqlTools(),
     ...buildWebSearchTools(),
+    ...buildPdfTools(ctx),
+    ...buildImageTools(ctx),
+    ...buildSystemTools(),
   } as const;
 
   // Store a reference so the workflow / orchestrator engines can dispatch

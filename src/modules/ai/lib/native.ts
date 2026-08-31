@@ -430,4 +430,9 @@ export const native = {
     invoke<string>("browser_embed_screenshot", { instance }),
   browserEmbedClose: (instance: string) =>
     invoke<void>("browser_embed_close", { instance }),
+
+  clipboardGet: () => invoke<string>("clipboard_get"),
+  clipboardSet: (text: string) => invoke<void>("clipboard_set", { text }),
+  envGet: (name: string) => invoke<string | null>("env_get", { name }),
+  envList: () => invoke<Array<{ name: string; value: string }>>("env_list"),
 };
