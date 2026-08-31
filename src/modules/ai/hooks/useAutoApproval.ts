@@ -42,7 +42,7 @@ export function useAutoApproval(
 
     for (const part of last.parts as Array<Record<string, unknown>>) {
       if (part.state !== "approval-requested") continue;
-      const id = part.approval?.id;
+      const id = (part.approval as { id?: string } | undefined)?.id;
       if (!id || answered.current.has(id)) continue;
 
       const tool = toolNameOf(String(part.type ?? ""));

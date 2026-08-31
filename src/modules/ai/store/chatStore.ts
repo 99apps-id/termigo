@@ -42,6 +42,7 @@ import {
   type SteerQueue,
 } from "../lib/steer";
 import { useApprovalQueue } from "./approvalQueueStore";
+import { useArtifactsStore } from "./artifactsStore";
 import { useSubagentRunStore } from "./subagentRunStore";
 import { useTodosStore } from "./todoStore";
 
@@ -621,6 +622,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
     void deleteSessionData(id);
     void useTodosStore.getState().clearSession(id);
     void useSubagentRunStore.getState().clearSession(id);
+    void useArtifactsStore.getState().clearSession(id);
 
     if (remaining.length === 0) {
       const fresh: SessionMeta = {

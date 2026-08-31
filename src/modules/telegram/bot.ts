@@ -42,8 +42,16 @@ let mirrorController: AbortController | null = null;
 
 // Set while the bot is relaying a Telegram-initiated dispatch, so the Termigo →
 // Telegram mirror stays quiet (the bot posts the run's own answer) instead of
-// double-posting the injected user message and the assistant reply.
-let mirrorPaused = false;
+// double-posting the injected user message and the assistant reply. A counter,
+// not a boolean: dispatches can overlap (the long-poll keeps running while one
+// is in flight), so each dispatch holds one pause.
+let mirrorPauseCount = 0;
+function pauseMirror(): void {
+  mirrorPauseCount += 1;
+}
+function resumeMirror(): void {
+  mirrorPauseCount = Math.max(0, mirrorPauseCount - 1);
+}
 
 async function apiGet(path: string, signal: AbortSignal): Promise<unknown> {
   const token = await getTelegramToken();
@@ -96,6 +104,21 @@ async function sendTelegram(
   signal: AbortSignal,
 ): Promise<void> {
   await apiPost("sendMessage", { chat_id: chatId, text }, signal);
+}
+
+/**
+ * Show the "typing…" bubble in the Telegram chat. The bubble lasts ~5s, so a
+ * caller re-sends it on an interval while the agent is busy.
+ */
+async function sendTyping(
+  chatId: number | string,
+  signal: AbortSignal,
+): Promise<void> {
+  await apiPost(
+    "sendChatAction",
+    { chat_id: chatId, action: "typing" },
+    signal,
+  );
 }
 
 /** Multipart POST — Telegram uploads photos/documents via form-data, not JSON. */
@@ -402,6 +425,9 @@ async function publishProgress(
   let lastStep = startMeta.step ?? "";
   let lastTodoSig = "";
   let lastSentAt = 0;
+  // Telegram's typing bubble lasts ~5s; re-send it on an interval so the chat
+  // keeps showing "typing…" for the whole run, not just at the first tick.
+  let lastTypingAt = 0;
   const started = Date.now();
   const MAX_WAIT = 30 * 60 * 1000;
 
@@ -413,6 +439,17 @@ async function publishProgress(
     const todos =
       todosStore.useTodosStore.getState().bySession[sessionId]?.items ?? [];
     const now = Date.now();
+
+    // Keep the "typing…" bubble alive while the run is busy (thinking,
+    // streaming, or awaiting approval).
+    const busy =
+      status === "thinking" ||
+      status === "streaming" ||
+      status === "awaiting-approval";
+    if (busy && now - lastTypingAt >= 4000) {
+      lastTypingAt = now;
+      await sendTyping(chatId, signal).catch(() => {});
+    }
 
     if (status !== lastStatus) {
       lastStatus = status;
@@ -590,7 +627,7 @@ async function runMirror(signal: AbortSignal): Promise<void> {
           const text = messageText(m);
           // Bot-injected messages and streaming assistant text are handled by
           // the bot itself (the run's answer); don't mirror them.
-          if (!text || mirrorPaused) {
+          if (!text || mirrorPauseCount > 0) {
             if (m.id) seen.add(m.id);
             continue;
           }
@@ -623,33 +660,47 @@ async function dispatchAndStream(
     const sessionId = store.useChatStore.getState().activeSessionId;
     if (!sessionId) return;
     const baseline = countAssistantMessages(store.getChat, sessionId);
-    const accepted = await runtime.sendMessage(text);
-    if (!accepted) {
-      await sendTelegram(
-        chatId,
-        "Could not start the agent run — check the model / API key.",
-        signal,
-      );
-      return;
-    }
-    // Stream live progress alongside the run, superseding any prior stream.
-    // Pause the Termigo → Telegram mirror so it does not echo this dispatch.
-    mirrorPaused = true;
-    const progressCtl = new AbortController();
-    progressCtrls.get(chatId)?.abort();
-    progressCtrls.set(chatId, progressCtl);
-    void publishProgress(chatId, sessionId, progressCtl.signal).catch(() => {});
+    // Pause the mirror BEFORE injecting the user message. The mirror ticks
+    // every 2s; pausing after `sendMessage` leaves a window where it can read
+    // the freshly-injected user message and echo the user's own text back to
+    // Telegram. With the counter, overlapping dispatches each hold one pause.
+    pauseMirror();
     try {
-      const reply = await waitForReply(store, signal, sessionId, baseline);
-      await sendReplyWithDiagrams(chatId, reply, signal);
-      // Share any report/document file the agent previewed in this run.
-      await sendReportFiles(chatId, store.getChat, sessionId, baseline, signal);
-    } finally {
-      mirrorPaused = false;
-      progressCtl.abort();
-      if (progressCtrls.get(chatId) === progressCtl) {
-        progressCtrls.delete(chatId);
+      const accepted = await runtime.sendMessage(text);
+      if (!accepted) {
+        await sendTelegram(
+          chatId,
+          "Could not start the agent run — check the model / API key.",
+          signal,
+        );
+        return;
       }
+      // Stream live progress alongside the run, superseding any prior stream.
+      const progressCtl = new AbortController();
+      progressCtrls.get(chatId)?.abort();
+      progressCtrls.set(chatId, progressCtl);
+      void publishProgress(chatId, sessionId, progressCtl.signal).catch(
+        () => {},
+      );
+      try {
+        const reply = await waitForReply(store, signal, sessionId, baseline);
+        await sendReplyWithDiagrams(chatId, reply, signal);
+        // Share any report/document file the agent previewed in this run.
+        await sendReportFiles(
+          chatId,
+          store.getChat,
+          sessionId,
+          baseline,
+          signal,
+        );
+      } finally {
+        progressCtl.abort();
+        if (progressCtrls.get(chatId) === progressCtl) {
+          progressCtrls.delete(chatId);
+        }
+      }
+    } finally {
+      resumeMirror();
     }
   } catch (e) {
     if (signal.aborted) return;

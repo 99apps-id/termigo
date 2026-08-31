@@ -7,6 +7,8 @@ import {
 import { MarkdownCode } from "@/components/ai-elements/markdown-code";
 import {
   Message,
+  MessageAction,
+  MessageActions,
   MessageContent,
   MessageResponse,
   type MessageResponseProps,
@@ -29,9 +31,11 @@ import {
   MarkdownLink,
   type MarkdownLinkProps,
 } from "@/modules/markdown/MarkdownLink";
+import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   ArrowRight01Icon,
   CodeIcon,
+  Edit02Icon,
   File01Icon,
   HashtagIcon,
   TerminalIcon,
@@ -44,7 +48,7 @@ import type {
   UIMessage,
   UIMessagePart,
 } from "ai";
-import { memo, useCallback, useMemo } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { stepBudgetForRound } from "../config";
 import { useAutoApproval } from "../hooks/useAutoApproval";
 import type { AgentStopReason } from "../lib/agent";
@@ -52,10 +56,38 @@ import { humanizeModelError } from "../lib/errorMessage";
 import { SLASH_COMMANDS, TERMIGO_CMD_RE } from "../lib/slashCommands";
 import { resumeRun } from "../store/chatRuntime";
 import { useChatStore } from "../store/chatStore";
-import { usePreferencesStore } from "@/modules/settings/preferences";
 import { AiToolApproval } from "./AiToolApproval";
+import { ConfirmationCarousel } from "./ConfirmationCarousel";
+import { ElicitationCarousel } from "./ElicitationCarousel";
 import { RollbackSuggestion } from "./RollbackSuggestion";
 import { TrajectoryThinkingHUD } from "./TrajectoryThinkingHUD";
+
+/**
+ * Rotating "working" phrases, in the style of VS Code's chat thinking part
+ * (`chatThinkingContentPart`) — a calm status word that cycles while the model
+ * is thinking (no tool step active yet) instead of a static "Thinking…". No
+ * round labels: Termigo surfaces progress through the step HUD, not a counter.
+ */
+const THINKING_PHRASES = [
+  "Processing",
+  "Preparing",
+  "Loading",
+  "Analyzing",
+  "Evaluating",
+] as const;
+
+function useRotatingPhrase(active: boolean, intervalMs = 2200): string {
+  const [index, setIndex] = useState(0);
+  useEffect(() => {
+    if (!active) return;
+    const id = setInterval(
+      () => setIndex((i) => (i + 1) % THINKING_PHRASES.length),
+      intervalMs,
+    );
+    return () => clearInterval(id);
+  }, [active, intervalMs]);
+  return THINKING_PHRASES[index];
+}
 
 function CommandSnippet({ name }: { name: string }) {
   const meta = SLASH_COMMANDS[name];
@@ -209,7 +241,8 @@ export function AiChatView({
   const step = useChatStore((s) => s.agentMeta.step);
   const stopReason = useChatStore((s) => s.agentMeta.stopReason);
   const runRound = useChatStore((s) => s.agentMeta.runRound);
-  const round = useChatStore((s) => s.agentMeta.round);
+  // BatikCode-style rotating "working" phrase while the model is thinking.
+  const thinkingPhrase = useRotatingPhrase(isBusy && !step);
   const compactionNotice = useChatStore((s) => s.agentMeta.compactionNotice);
   const memoryNotice = useChatStore((s) => s.agentMeta.memoryNotice);
   const patchAgentMeta = useChatStore((s) => s.patchAgentMeta);
@@ -277,17 +310,15 @@ export function AiChatView({
             onDismiss={() => patchAgentMeta({ memoryNotice: null })}
           />
         )}
+        <ElicitationCarousel />
+        <ConfirmationCarousel />
         {showSpinner && (
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Spinner />
-            <span className="truncate">
-              {round > 0
-                ? `Round ${round} · ${step ?? "Thinking…"}`
-                : (step ?? "Thinking…")}
-            </span>
+            <span className="truncate">{step ?? `${thinkingPhrase}…`}</span>
           </div>
         )}
-        {isBusy && <TrajectoryThinkingHUD round={round} />}
+        {isBusy && <TrajectoryThinkingHUD />}
         {showContinue && (
           <ContinueRow
             kind={continueKind}
@@ -523,6 +554,7 @@ const RenderedMessage = memo(function RenderedMessage({
     () => buildPartGroups(message.parts as AnyPart[]),
     [message.parts],
   );
+  const focusInput = useChatStore((s) => s.focusInput);
   if (message.role === "user") {
     const rawText = message.parts
       .filter((p): p is { type: "text"; text: string } => p.type === "text")
@@ -547,6 +579,17 @@ const RenderedMessage = memo(function RenderedMessage({
             </p>
           ) : null}
         </MessageContent>
+        {rawText.trim() ? (
+          <MessageActions>
+            <MessageAction
+              tooltip="Edit and resend"
+              label="Edit message"
+              onClick={() => focusInput(rawText)}
+            >
+              <HugeiconsIcon icon={Edit02Icon} size={13} strokeWidth={1.75} />
+            </MessageAction>
+          </MessageActions>
+        ) : null}
       </Message>
     );
   }
@@ -565,7 +608,10 @@ const RenderedMessage = memo(function RenderedMessage({
               const reasoningLive = streaming && gi === groups.length - 1;
               return showReasoning ? (
                 <PartAppear key={`${message.id}-${g.key}`}>
-                  <Reasoning isStreaming={reasoningLive} showReasoning={showReasoning}>
+                  <Reasoning
+                    isStreaming={reasoningLive}
+                    showReasoning={showReasoning}
+                  >
                     <ReasoningTrigger />
                     <ReasoningContent>{g.text}</ReasoningContent>
                   </Reasoning>

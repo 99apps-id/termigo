@@ -944,6 +944,31 @@ export function estimateCost(
   );
 }
 
+/** Per-input-token USD price for a model, or null when unpriced (custom endpoints). */
+export function modelInputCostUsd(modelId: string | undefined): number | null {
+  if (!modelId) return null;
+  const p = MODEL_PRICING[modelId];
+  return p ? p.input : null;
+}
+
+/**
+ * A subagent model may not cost more than `multiplier`× the main model's input
+ * price (BatikCode parity: the `checkMultiplierConstraint` cost-tier guard).
+ * Returns true when the subagent model is over budget. Both must be priced for a
+ * comparison; if either is unpriced (custom endpoint, local, unknown) we can't
+ * say it's over budget, so it's allowed rather than wrongly blocked.
+ */
+export function subagentModelExceedsBudget(
+  subagentModelId: string | undefined,
+  mainModelId: string | undefined,
+  multiplier = 1.5,
+): boolean {
+  const sub = modelInputCostUsd(subagentModelId);
+  const main = modelInputCostUsd(mainModelId);
+  if (sub == null || main == null) return false;
+  return sub > main * multiplier;
+}
+
 /** Providers that do not require an API key (local servers, key-optional). */
 export const KEYLESS_PROVIDERS: readonly ProviderId[] = [
   "lmstudio",

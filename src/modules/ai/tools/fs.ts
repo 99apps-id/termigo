@@ -15,6 +15,7 @@ import {
   checkWritable,
   checkWritableCanonical,
 } from "../lib/security";
+import { useArtifactsStore } from "../store/artifactsStore";
 import { useChatStore } from "../store/chatStore";
 import { newQueuedEditId, usePlanStore } from "../store/planStore";
 import {
@@ -440,6 +441,12 @@ export function buildFsTools(ctx: ToolContext) {
         try {
           await native.writeFile(abs, content);
           ctx.readCache.set(abs, { size: content.length, hash: djb2(content) });
+          // Surface the written file in the Artifacts panel for quick access.
+          useArtifactsStore.getState().add(ctx.getSessionId() ?? "", {
+            kind: "file",
+            title: abs.split(/[\\/]/).pop() || abs,
+            payload: abs,
+          });
           return { path: abs, bytesWritten: content.length, ok: true };
         } catch (e) {
           return { error: String(e), path: abs };

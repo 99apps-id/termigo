@@ -13,6 +13,8 @@ const runs = vi.hoisted(() => ({
 }));
 
 vi.mock("../agents/runSubagent", () => ({
+  MAX_SUBAGENT_DEPTH: 3,
+  effectiveSubagentMaxDepth: () => 3,
   runSubagent: vi.fn(async ({ prompt }: { prompt: string }) => {
     // The task's own instruction is the last line; dependency context is above.
     const own = prompt.split("\n").pop() as string;

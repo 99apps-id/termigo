@@ -3,6 +3,7 @@ import { z } from "zod";
 import { isSafePreviewUrl, unsafeBrowserUrl } from "../lib/browserGuard";
 import { native } from "../lib/native";
 import { checkShellCommand } from "../lib/security";
+import { useArtifactsStore } from "../store/artifactsStore";
 import { resolvePath, type ToolContext } from "./context";
 
 function escHtml(s: string): string {
@@ -202,6 +203,12 @@ export function buildTerminalTools(ctx: ToolContext) {
         }
         const ok = ctx.openPreview(url);
         if (!ok) return { error: "preview surface unavailable", url };
+        // Surface in the Artifacts panel so the user can jump back to it.
+        useArtifactsStore.getState().add(ctx.getSessionId() ?? "", {
+          kind: "preview",
+          title: url,
+          payload: url,
+        });
         return { url, ok: true };
       },
     }),
@@ -224,9 +231,15 @@ export function buildTerminalTools(ctx: ToolContext) {
       }),
       execute: async ({ html, title }) => {
         const ok = ctx.openCanvas(html, title);
-        return ok
-          ? { ok: true, title: title ?? "Canvas" }
-          : { error: "canvas surface unavailable" };
+        if (!ok) return { error: "canvas surface unavailable" };
+        // Record the canvas as an artifact so the user can reopen it later
+        // without asking the model to re-render it.
+        useArtifactsStore.getState().add(ctx.getSessionId() ?? "", {
+          kind: "canvas",
+          title: title ?? "Canvas",
+          payload: html,
+        });
+        return { ok: true, title: title ?? "Canvas" };
       },
     }),
 

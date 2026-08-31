@@ -1,34 +1,39 @@
+import { buildOrchestratorTools } from "../lib/orchestrator";
+import { buildPolicyTools } from "../lib/policyEngine";
+import {
+  POST_EXECUTE_CONFIRM_TOOLS,
+  withPostExecuteConfirm,
+} from "../lib/postExecuteConfirm";
+import { buildSkillRegistryTools } from "../lib/skillRegistry";
 import { buildManagedAgentTools } from "./agent";
+import { buildBrowserTools } from "./browser";
+import { buildCodeSearchTools } from "./codeSearch";
 import { buildEditTools } from "./edit";
+import { buildElicitationTools } from "./elicitation";
 import { buildFetchTools } from "./fetch";
-import { buildForwardTools } from "./forward";
 import { buildFileOpsTools } from "./fileops";
-import { buildReplaceTools } from "./replace";
-import { buildSkillTools } from "./skills";
+import { buildForwardTools } from "./forward";
 import { buildFsTools } from "./fs";
+import { buildGitTools } from "./git";
+import { buildGithubTools } from "./github";
+import { buildHarnessTools } from "./harness";
+import { buildInvariantTools } from "./invariant";
+import { buildLspTools } from "./lsp";
+import { buildMemoryTools } from "./memory";
+import { buildPtyDriverTools } from "./ptyDriver";
+import { buildReplaceTools } from "./replace";
+import { buildReviewTools } from "./review";
 import { buildSearchTools } from "./search";
 import { buildShellTools } from "./shell";
+import { buildSkillTools } from "./skills";
+import { buildSqlTools } from "./sql";
 import { buildSubagentTools } from "./subagent";
 import { buildTerminalTools } from "./terminal";
-import { buildMemoryTools } from "./memory";
+import { buildTestLoopTools } from "./testLoopTools";
 import { buildTodoTools } from "./todo";
 import { buildVerifyTools } from "./verify";
-import { buildGitTools } from "./git";
-import { buildHarnessTools } from "./harness";
-import { buildReviewTools } from "./review";
 import { buildWorkflowTools } from "./workflow";
-import { buildPolicyTools } from "../lib/policyEngine";
-import { buildSkillRegistryTools } from "../lib/skillRegistry";
-import { buildGithubTools } from "./github";
-import { buildCodeSearchTools } from "./codeSearch";
-import { buildLspTools } from "./lsp";
 import { buildWorktreeTools } from "./worktree";
-import { buildInvariantTools } from "./invariant";
-import { buildTestLoopTools } from "./testLoopTools";
-import { buildPtyDriverTools } from "./ptyDriver";
-import { buildOrchestratorTools } from "../lib/orchestrator";
-import { buildBrowserTools } from "./browser";
-import { buildSqlTools } from "./sql";
 
 export { resolvePath, type ToolContext } from "./context";
 
@@ -38,15 +43,35 @@ export { resolvePath, type ToolContext } from "./context";
  * PreToolUse fires before the real execute; PostToolUse fires after. Both
  * are fire-and-forget: a hook failure must not change the tool result.
  */
-function withHooks<T extends { execute: (args: Record<string, unknown>, options: { toolCallId?: string }) => Promise<unknown> }>(
+function withHooks<
+  T extends {
+    execute: (
+      args: Record<string, unknown>,
+      options: { toolCallId?: string },
+    ) => Promise<unknown>;
+  },
+>(
   name: string,
   tool: T,
-  ctx: { firePreToolHook?: (toolName: string, args: Record<string, unknown>) => Promise<void>; firePostToolHook?: (toolName: string, args: Record<string, unknown>, result: unknown) => Promise<void> },
+  ctx: {
+    firePreToolHook?: (
+      toolName: string,
+      args: Record<string, unknown>,
+    ) => Promise<void>;
+    firePostToolHook?: (
+      toolName: string,
+      args: Record<string, unknown>,
+      result: unknown,
+    ) => Promise<void>;
+  },
 ): T {
   const original = tool.execute.bind(tool);
   return {
     ...tool,
-    execute: async (args: Record<string, unknown>, options: { toolCallId?: string }) => {
+    execute: async (
+      args: Record<string, unknown>,
+      options: { toolCallId?: string },
+    ) => {
       if (ctx.firePreToolHook) {
         await ctx.firePreToolHook(name, args).catch(() => {});
       }
@@ -94,7 +119,14 @@ export async function dispatchTool(
   }
   const callId = `workflow-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   try {
-    return await (tool as { execute: (args: Record<string, unknown>, options: { toolCallId?: string }) => Promise<unknown> }).execute(args, {
+    return await (
+      tool as {
+        execute: (
+          args: Record<string, unknown>,
+          options: { toolCallId?: string },
+        ) => Promise<unknown>;
+      }
+    ).execute(args, {
       toolCallId: callId,
     });
   } catch (e) {
@@ -121,7 +153,16 @@ export async function dispatchTool(
  * active terminal's cwd (provided via `getCwd`); it should not invent paths
  * outside that.
  */
-export function buildTools(ctx: import("./context").ToolContext) {
+/**
+ * @param subagentDepth Nesting depth of the agent this toolset is built for.
+ *   0 = the main agent. A subagent at depth N receives spawn tools that spawn
+ *   depth N+1 children; at `MAX_SUBAGENT_DEPTH` the spawn tools are omitted so
+ *   recursion cannot exceed the cap (BatikCode parity).
+ */
+export function buildTools(
+  ctx: import("./context").ToolContext,
+  subagentDepth = 0,
+) {
   const base = {
     ...buildFsTools(ctx),
     ...buildFileOpsTools(ctx),
@@ -131,10 +172,11 @@ export function buildTools(ctx: import("./context").ToolContext) {
     ...buildEditTools(ctx),
     ...buildSearchTools(ctx),
     ...buildShellTools(ctx),
-    ...buildSubagentTools(ctx),
+    ...buildSubagentTools(ctx, subagentDepth),
     ...buildTerminalTools(ctx),
     ...buildTodoTools(ctx),
     ...buildMemoryTools(ctx),
+    ...buildElicitationTools(),
     ...buildManagedAgentTools(ctx),
     ...buildVerifyTools(ctx),
     ...buildGitTools(ctx),
@@ -168,14 +210,35 @@ export function buildTools(ctx: import("./context").ToolContext) {
   // type-checking.
   const wrapped: Record<string, unknown> = {};
   for (const [name, tool] of Object.entries(base)) {
-    wrapped[name] = withHooks(
+    let wrappedTool = withHooks(
       name,
-      tool as unknown as { execute: (args: Record<string, unknown>, options: { toolCallId?: string }) => Promise<unknown> },
+      tool as unknown as {
+        execute: (
+          args: Record<string, unknown>,
+          options: { toolCallId?: string },
+        ) => Promise<unknown>;
+      },
       {
         firePreToolHook: ctx.firePreToolHook,
         firePostToolHook: ctx.firePostToolHook,
       },
     ) as unknown;
+    // Post-execution confirmation (BatikCode parity): when the preference is
+    // on, mutating tools pause after a successful run and ask the user to
+    // Keep or Revert the change before the agent continues.
+    if (POST_EXECUTE_CONFIRM_TOOLS.has(name)) {
+      wrappedTool = withPostExecuteConfirm(
+        name,
+        wrappedTool as {
+          execute: (
+            args: Record<string, unknown>,
+            options: { toolCallId?: string; abortSignal?: AbortSignal },
+          ) => Promise<unknown>;
+        },
+        ctx,
+      ) as unknown;
+    }
+    wrapped[name] = wrappedTool;
   }
   const wrappedBase = wrapped as typeof base;
   currentToolRegistry = wrappedBase as unknown as Record<string, unknown>;
@@ -183,7 +246,10 @@ export function buildTools(ctx: import("./context").ToolContext) {
   // Skill tools last, and told what the others are called: the dependency
   // checker compares a skill against the real registry rather than a list kept
   // by hand, so adding or renaming a tool later cannot leave the check stale.
-  return { ...wrappedBase, ...buildSkillTools(ctx, Object.keys(wrappedBase)) } as const;
+  return {
+    ...wrappedBase,
+    ...buildSkillTools(ctx, Object.keys(wrappedBase)),
+  } as const;
 }
 
 export type ChatTools = ReturnType<typeof buildTools>;

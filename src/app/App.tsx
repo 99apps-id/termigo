@@ -29,6 +29,7 @@ import {
   useChatStore,
   useSelectionAskAi,
 } from "@/modules/ai";
+import { setArtifactOpener } from "@/modules/ai/lib/artifactOpen";
 import { AiComposerProvider } from "@/modules/ai/lib/composer";
 import { native } from "@/modules/ai/lib/native";
 import { CommandPalette, createCommandItems } from "@/modules/command-palette";
@@ -1581,6 +1582,21 @@ ${found.foundAt}`
     setLspNavigator({ openFile: openContentHit });
     return () => setLspNavigator(null);
   }, [openContentHit]);
+
+  // The Artifacts panel reopens what the agent produced: files in the editor,
+  // previews in a preview tab, canvases re-rendered into a canvas tab.
+  useEffect(() => {
+    setArtifactOpener({
+      openFile: (path) => openFileTab(path, true),
+      openPreview: (url) => {
+        openPreviewTab(url);
+      },
+      openCanvas: (html, title) => {
+        openCanvasTab(html, title);
+      },
+    });
+    return () => setArtifactOpener(null);
+  }, [openFileTab, openPreviewTab, openCanvasTab]);
 
   // Warm the user-defined slash commands for the active workspace so `/name`
   // resolves even when typed straight through without opening the picker. The

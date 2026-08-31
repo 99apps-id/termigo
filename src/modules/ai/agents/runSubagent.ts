@@ -1,6 +1,8 @@
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { setAgentAlwaysAllowedTools } from "@/modules/settings/store";
+import { info as logInfo } from "@tauri-apps/plugin-log";
 import { generateText, stepCountIs } from "ai";
+import { subagentModelExceedsBudget } from "../config";
 import {
   buildConfiguredLanguageModel,
   noProgressStop,
@@ -29,12 +31,38 @@ import { SUBAGENTS, type SubagentType } from "./registry";
 
 const SUBAGENT_MAX_STEPS = 12;
 
+/**
+ * Max subagent nesting depth. A subagent may spawn further subagents up to this
+ * depth, then the spawn tools are withheld (BatikCode parity, instead of a flat
+ * "subagents can never spawn" rule). The main agent is depth 0.
+ */
+export const MAX_SUBAGENT_DEPTH = 3;
+
+/** Tools that spawn subagents — the only ones the depth cap governs. */
+const SPAWN_TOOLS = new Set(["run_subagent", "run_subagents"]);
+
+/**
+ * Effective nesting cap. Reads the user's `subagentMaxDepth` preference
+ * (clamped to 1..5), so the cap is tunable rather than a hard constant; falls
+ * back to `MAX_SUBAGENT_DEPTH` when the pref is absent (e.g. under test mocks).
+ */
+export function effectiveSubagentMaxDepth(): number {
+  const raw = usePreferencesStore.getState()?.subagentMaxDepth;
+  const n =
+    typeof raw === "number" && Number.isFinite(raw)
+      ? Math.floor(raw)
+      : MAX_SUBAGENT_DEPTH;
+  return Math.min(5, Math.max(1, n));
+}
+
 type Args = {
   type: SubagentType;
   prompt: string;
   keys: ProviderKeys;
   modelId: string;
   toolContext: ToolContext;
+  /** Nesting depth of THIS subagent (0 = spawned directly by the main agent). */
+  depth?: number;
   onStep?: (label: string) => void;
   /** Label shown in the approval queue: "builder #2". */
   requester?: string;
@@ -48,13 +76,16 @@ type Args = {
 const WRITE_FILE = "write_file";
 
 /**
- * Tools a sub-agent never receives.
+ * Whether the spawn tools should be withheld at this depth.
  *
- * Recursion: a sub-agent that could call `run_subagent` / `run_subagents` would
- * spawn its own sub-agents and nest without bound. It is the single capability
- * that keeps a sub-agent from being a full peer of the main agent, on purpose.
+ * A sub-agent may spawn its own sub-agents up to `MAX_SUBAGENT_DEPTH`, then
+ * the spawn tools are dropped so the model never sees them (BatikCode parity).
+ * Beyond the cap the set is gated rather than hard-coded, so a sub-agent is a
+ * peer of the main agent that simply cannot recurse without bound.
  */
-const WITHHELD = new Set(["run_subagent", "run_subagents"]);
+function spawnToolsWithheld(depth: number): boolean {
+  return depth >= effectiveSubagentMaxDepth();
+}
 
 /**
  * Whether a sub-agent tool must route through the approval queue rather than
@@ -302,6 +333,7 @@ export async function runSubagent({
   keys,
   modelId,
   toolContext,
+  depth = 0,
   onStep,
   requester,
   abortSignal,
@@ -318,8 +350,9 @@ export async function runSubagent({
   // the main agent, not a read-only subset. `buildTools` is the same builder the
   // main run uses; extension tools are added the same way the main run adds them
   // (fresh each run, since extensions load and unload while the app is open).
+  // `depth` is threaded through so the spawn tools are present up to the cap.
   const available: Record<string, unknown> = {
-    ...buildTools(ctx),
+    ...buildTools(ctx, depth),
     ...buildExtensionTools(),
   };
 
@@ -345,7 +378,10 @@ export async function runSubagent({
   }
 
   for (const [name, found] of Object.entries(available)) {
-    if (!found || WITHHELD.has(name)) continue;
+    if (!found) continue;
+    // Spawn tools are the one thing governed by depth: dropped at the cap so a
+    // sub-agent cannot recurse without bound.
+    if (SPAWN_TOOLS.has(name) && spawnToolsWithheld(depth)) continue;
     if (!subagentToolNeedsGate(name, found)) {
       tools[name] = found;
       continue;
@@ -365,8 +401,22 @@ export async function runSubagent({
   // frontier model orchestrates. The preference wins when set; otherwise the
   // sub-agent inherits the parent run's model. Resolved through the same
   // builder the main run uses so local and custom-endpoint models work here too.
+  //
+  // Cost-tier guard (BatikCode parity): a user-set subagent model must not cost
+  // more than 1.5× the main model's input price, so a cheap orchestrator is not
+  // silently topped up by an expensive worker. Over budget, the sub-agent falls
+  // back to the main model instead of overspending.
   const prefs = usePreferencesStore.getState();
-  const routedModelId = prefs.subagentModelId.trim() || modelId;
+  let routedModelId = prefs.subagentModelId.trim() || modelId;
+  if (
+    prefs.subagentModelId.trim() &&
+    subagentModelExceedsBudget(routedModelId, modelId)
+  ) {
+    void logInfo(
+      `[ai] subagent model ${routedModelId} exceeds the main model's cost tier; falling back to ${modelId}`,
+    ).catch(() => {});
+    routedModelId = modelId;
+  }
   const model = await buildConfiguredLanguageModel(routedModelId, keys, {
     lmstudioBaseURL: prefs.lmstudioBaseURL,
     lmstudioModelId: prefs.lmstudioModelId,

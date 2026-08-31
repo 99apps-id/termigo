@@ -24,6 +24,7 @@ import {
   ToolsIcon,
 } from "@hugeicons/core-free-icons";
 import { useChatStore } from "@/modules/ai/store/chatStore";
+import { native } from "@/modules/ai/lib/native";
 import {
   useSubagentRunStore,
   type SubagentRun,
@@ -33,7 +34,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { DynamicToolUIPart, ToolUIPart } from "ai";
 import type { ComponentProps, ReactNode } from "react";
-import { isValidElement, memo, useEffect, useMemo, useState } from "react";
+import { isValidElement, memo, useEffect, useMemo, useRef, useState } from "react";
 import { Shimmer } from "./shimmer";
 
 export type ToolPart = ToolUIPart | DynamicToolUIPart;
@@ -135,6 +136,84 @@ function deriveSummary(toolName: string, input: unknown): string | null {
   }
 }
 
+type ModifiedFile = {
+  path: string;
+  kind: "edited" | "created" | "deleted" | "moved";
+};
+
+/**
+ * Derive the files a mutating tool changed from its result output, so the tool
+ * card can surface a "Modified files" chip row (BatikCode parity). The edit /
+ * write / fileops tools all return an object carrying a `path` (or from/to for
+ * a move) plus an `ok`/`moved`/`deleted`/`created` flag — this reads that shape
+ * and normalises it to one entry per touched file.
+ */
+function modifiedFilesFromOutput(
+  toolName: string,
+  output: unknown,
+): ModifiedFile[] {
+  if (!output || typeof output !== "object") return [];
+  const o = output as Record<string, unknown>;
+  const hasError =
+    typeof o.error === "string" ||
+    typeof o.binary === "string" ||
+    typeof o.safety === "string";
+  if (hasError) return [];
+
+  const path = typeof o.path === "string" ? o.path : null;
+  const list: ModifiedFile[] = [];
+  switch (toolName) {
+    case "write_file":
+    case "edit":
+    case "multi_edit":
+      if (path) list.push({ path, kind: "edited" });
+      break;
+    case "create_directory":
+      if (path) list.push({ path, kind: "created" });
+      break;
+    case "move":
+      if (typeof o.to === "string" && o.moved === true)
+        list.push({ path: o.to, kind: "moved" });
+      break;
+    case "delete":
+      if (o.deleted === true && path) list.push({ path, kind: "deleted" });
+      break;
+    default:
+      return [];
+  }
+  return list;
+}
+
+const MODIFIED_KIND_LABEL: Record<ModifiedFile["kind"], string> = {
+  edited: "edited",
+  created: "created",
+  deleted: "deleted",
+  moved: "moved",
+};
+
+function ModifiedFilesChips({ files }: { files: ModifiedFile[] }) {
+  return (
+    <div className="space-y-1">
+      <div className="text-[10px] font-medium text-muted-foreground">
+        Modified files
+      </div>
+      <div className="flex flex-wrap gap-1">
+        {files.map((f, i) => (
+          <span
+            key={`${f.path}-${i}`}
+            className="inline-flex items-center gap-1 rounded bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[10px] text-emerald-600 dark:text-emerald-400"
+          >
+            <span className="text-[9px] font-semibold uppercase">
+              {MODIFIED_KIND_LABEL[f.kind]}
+            </span>
+            <span className="truncate max-w-64">{f.path}</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export type ToolProps = ComponentProps<typeof Collapsible> & {
   toolName: string;
   state: ToolPart["state"];
@@ -191,6 +270,8 @@ const ToolImpl = ({
   // Subagent cards open by default so the live fan-out progress is visible.
   const open = defaultOpen ?? (isError || isSubagent);
   const isHeavy = HEAVY_CONTENT_TOOLS.has(toolName);
+  // Files this tool reports as modified (BatikCode "modified files" chips).
+  const modifiedFiles = modifiedFilesFromOutput(toolName, output);
   // Edit tools are "heavy" (input carries file text), but their input preview is
   // a compact computed line-diff, not the raw streamed body — and the memo keys
   // heavy re-renders off the path summary, so it settles once at completion
@@ -202,7 +283,11 @@ const ToolImpl = ({
   const showInputBody = (!isHeavy && Boolean(input)) || isEditDiff;
   const showOutputBody = !isHeavy && output !== undefined;
   const hasDetails =
-    showInputBody || showOutputBody || Boolean(errorText) || isSubagent;
+    showInputBody ||
+    showOutputBody ||
+    Boolean(errorText) ||
+    isSubagent ||
+    modifiedFiles.length > 0;
 
   return (
     <Collapsible
@@ -219,10 +304,16 @@ const ToolImpl = ({
           "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
         )}
       >
-        <span
-          className={cn("size-1.5 shrink-0 rounded-full", STATUS_DOT[state])}
-          aria-label={STATUS_LABEL[state]}
-        />
+        {state === "input-streaming" || state === "input-available" ? (
+          // Granular status: a live spinner while the tool prepares / runs,
+          // then the status dot once it settles (BatikCode parity).
+          <Spinner className="size-3 shrink-0" />
+        ) : (
+          <span
+            className={cn("size-1.5 shrink-0 rounded-full", STATUS_DOT[state])}
+            aria-label={STATUS_LABEL[state]}
+          />
+        )}
         <HugeiconsIcon
           icon={Icon}
           size={13}
@@ -266,6 +357,11 @@ const ToolImpl = ({
             {isSubagent ? (
               <div className="mb-2 border-l border-border/60 pl-3">
                 <SubagentLiveDetails toolName={toolName} input={input} />
+              </div>
+            ) : null}
+            {modifiedFiles.length > 0 ? (
+              <div className="mb-2 border-l border-border/60 pl-3">
+                <ModifiedFilesChips files={modifiedFiles} />
               </div>
             ) : null}
             {/* IN / OUT box, VS Code-style: a labelled gutter down the left of a
@@ -701,11 +797,19 @@ function renderToolOutput(toolName: string, output: unknown): ReactNode | null {
   }
 
   if (toolName === "glob") {
-    const matches = Array.isArray(o.matches)
-      ? (o.matches as string[])
-      : Array.isArray(o.paths)
-        ? (o.paths as string[])
-        : [];
+    // glob returns `hits` — either bare path strings or `{ path }` objects
+    // (grep and glob share `native.search`'s hit shape). Read the real key so
+    // the result renders as a list instead of falling through to JSON.
+    const raw = Array.isArray(o.hits)
+      ? o.hits
+      : Array.isArray(o.matches)
+        ? o.matches
+        : Array.isArray(o.paths)
+          ? o.paths
+          : [];
+    const matches: string[] = raw.map((m) =>
+      typeof m === "string" ? m : (m as { path?: string; rel?: string }).rel ?? (m as { path?: string }).path ?? String(m),
+    );
     if (matches.length === 0) {
       return (
         <div className="text-[11px] italic text-muted-foreground">
@@ -763,23 +867,140 @@ function renderToolOutput(toolName: string, output: unknown): ReactNode | null {
   }
 
   if (toolName === "bash_background") {
-    const handle = typeof o.handle === "string" ? o.handle : null;
+    const handle = typeof o.handle === "number" ? o.handle : null;
     const cmd = typeof o.command === "string" ? o.command : "";
+    if (handle == null) return null;
     return (
-      <div className="space-y-0.5 font-mono text-[11px]">
-        <div className="flex items-center gap-1.5">
-          <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
-          {handle ? <span className="text-foreground">{handle}</span> : null}
-          <span className="text-muted-foreground">running</span>
-        </div>
-        {cmd ? (
-          <div className="truncate text-muted-foreground">{cmd}</div>
-        ) : null}
-      </div>
+      <BashBackgroundLiveOutput handle={handle} command={cmd} />
     );
   }
 
   return null;
+}
+
+/**
+ * Live view of a `bash_background` process. Polls the Rust ring-buffer
+ * (`shell_bg_logs`) on a short interval and appends the new bytes, so a long
+ * dev server / watcher / scan reads as a streaming terminal right in the tool
+ * card (BatikCode `chatTerminalToolProgressPart` parity) instead of a handle
+ * the user has to chase with `bash_logs`.
+ */
+function BashBackgroundLiveOutput({
+  handle,
+  command,
+}: {
+  handle: number;
+  command: string;
+}) {
+  const [log, setLog] = useState("");
+  const [running, setRunning] = useState(true);
+  const [exitCode, setExitCode] = useState<number | null>(null);
+  const [dropped, setDropped] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const scrollRef = useRef<HTMLPreElement>(null);
+
+  useEffect(() => {
+    let alive = true;
+    let offset = 0;
+    const tick = async () => {
+      try {
+        const r = await native.shellBgLogs(handle, offset);
+        if (!alive) return;
+        offset = r.next_offset;
+        if (r.bytes) {
+          setLog((prev) => {
+            const chunk = r.bytes.replace(/\n$/, "");
+            const next = prev ? `${prev}\n${chunk}` : chunk;
+            // Incremental rendering: a long-lived process can push hundreds of
+            // KB/min into the 4MB ring buffer; keep only the tail so the DOM
+            // node never balloons and the card stays smooth (BatikCode
+            // `chatIncrementalRendering` parity).
+            return next.length > 64_000 ? next.slice(next.length - 64_000) : next;
+          });
+        }
+        if (r.dropped > 0) setDropped(r.dropped);
+        if (r.exited) {
+          setRunning(false);
+          setExitCode(r.exit_code);
+        }
+      } catch (e) {
+        if (!alive) return;
+        setError(String(e));
+        setRunning(false);
+      }
+    };
+    void tick();
+    const id = setInterval(tick, 800);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, [handle]);
+
+  // Keep the newest output in view while it streams.
+  useEffect(() => {
+    scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight);
+  }, [log]);
+
+  const status = running
+    ? "running"
+    : exitCode === 0
+      ? "exited"
+      : exitCode != null
+        ? "exited"
+        : "stopped";
+  const statusDot = running
+    ? "bg-emerald-500 animate-pulse"
+    : exitCode === 0
+      ? "bg-muted-foreground/40"
+      : "bg-destructive";
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center gap-1.5">
+        <span
+          className={cn("size-1.5 shrink-0 rounded-full", statusDot)}
+          aria-label={status}
+        />
+        <span className="shrink-0 text-foreground">#{handle}</span>
+        <span className="shrink-0 text-muted-foreground">{status}</span>
+        {exitCode != null ? (
+          <span
+            className={cn(
+              "shrink-0 rounded px-1.5 py-0.5 font-mono text-[10px]",
+              exitCode === 0
+                ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                : "bg-destructive/15 text-destructive",
+            )}
+          >
+            exit {exitCode}
+          </span>
+        ) : null}
+        {dropped > 0 ? (
+          <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 font-mono text-[10px] text-amber-700 dark:text-amber-400">
+            dropped {formatBytes(dropped)}
+          </span>
+        ) : null}
+        {error ? (
+          <span className="shrink-0 font-mono text-[10px] text-destructive">
+            error
+          </span>
+        ) : null}
+      </div>
+      {command ? (
+        <div className="truncate text-muted-foreground">{command}</div>
+      ) : null}
+      {error ? (
+        <div className="font-mono text-[11px] text-destructive">{error}</div>
+      ) : null}
+      <pre
+        ref={scrollRef}
+        className="max-h-56 overflow-auto rounded bg-muted/40 p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap"
+      >
+        {log || " "}
+      </pre>
+    </div>
+  );
 }
 
 function BashRunOutput({ data }: { data: Record<string, unknown> }) {
@@ -854,7 +1075,7 @@ function BashRunOutput({ data }: { data: Record<string, unknown> }) {
         ) : null}
       </div>
       <pre className="max-h-72 overflow-auto rounded bg-muted/40 p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap">
-        {tab === "stdout" ? stdout || " " : stderr || " "}
+        {tab === "stdout" ? tailForDisplay(stdout) || " " : tailForDisplay(stderr) || " "}
       </pre>
       {cwdAfter ? (
         <div className="font-mono text-[10px] text-muted-foreground">
@@ -886,6 +1107,14 @@ function highlightMatch(text: string, pattern: string): ReactNode {
       <span key={i}>{p}</span>
     ),
   );
+}
+
+// Incremental rendering: keep only the tail of a very large output so the DOM
+// node stays bounded even when a command floods stdout (BatikCode
+// `chatIncrementalRendering` parity).
+function tailForDisplay(text: string, maxChars = 96_000): string {
+  if (text.length <= maxChars) return text;
+  return `…[truncated ${formatBytes(text.length - maxChars)}]…\n${text.slice(text.length - maxChars)}`;
 }
 
 function formatBytes(n: number): string {
@@ -1088,6 +1317,11 @@ const SubagentRunRow = memo(
         <span className="shrink-0 rounded bg-foreground/10 px-1.5 py-0.5 text-[10px] font-medium text-foreground">
           {agentName}
         </span>
+        {run.depth != null && run.depth > 0 ? (
+          <span className="shrink-0 rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+            L{run.depth}
+          </span>
+        ) : null}
         <span
           className={cn(
             "min-w-0 flex-1 truncate",
@@ -1121,8 +1355,27 @@ const SubagentRunRow = memo(
             {header}
           </CollapsibleTrigger>
           <CollapsibleContent className="termigo-collapsible-content">
-            <div className="mt-1 ml-2 whitespace-pre-wrap border-l border-border/60 pl-2.5 text-[11.5px] leading-relaxed text-foreground/90">
-              {summary}
+            <div className="mt-1 ml-2 space-y-1.5 border-l border-border/60 pl-2.5">
+              <div className="whitespace-pre-wrap text-[11.5px] leading-relaxed text-foreground/90">
+                {summary}
+              </div>
+              {run.steps && run.steps.length > 0 ? (
+                <div className="space-y-0.5">
+                  <div className="text-[10px] font-medium text-muted-foreground">
+                    Steps
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {run.steps.map((s, i) => (
+                      <span
+                        key={i}
+                        className="rounded bg-foreground/10 px-1.5 py-0.5 font-mono text-[10px] text-foreground/80"
+                      >
+                        {s}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </div>
           </CollapsibleContent>
         </Collapsible>

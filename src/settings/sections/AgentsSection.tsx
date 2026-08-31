@@ -54,6 +54,7 @@ import {
   setAgentReviewAfterApply,
   setAutoApproveInScopeScans,
   setAutoCheckpoint,
+  setConfirmAfterMutations,
   setCostBudgetUsd,
   setCostDailyBudgetUsd,
   setCustomAgentLaunchers,
@@ -62,6 +63,7 @@ import {
   setEnforcePentestScope,
   setPentestScope,
   setShowReasoning,
+  setSubagentMaxDepth,
   setSubagentModelId,
 } from "@/modules/settings/store";
 import {
@@ -97,6 +99,10 @@ export function AgentsSection() {
   const costBudgetUsd = usePreferencesStore((s) => s.costBudgetUsd);
   const costDailyBudgetUsd = usePreferencesStore((s) => s.costDailyBudgetUsd);
   const subagentModelId = usePreferencesStore((s) => s.subagentModelId);
+  const subagentMaxDepth = usePreferencesStore((s) => s.subagentMaxDepth);
+  const confirmAfterMutations = usePreferencesStore(
+    (s) => s.confirmAfterMutations,
+  );
   const customEndpoints = usePreferencesStore((s) => s.customEndpoints);
 
   // Fall back to "auto" if the stored id no longer resolves (a deleted custom
@@ -190,15 +196,15 @@ export function AgentsSection() {
             checked={autoCheckpoint}
             onCheckedChange={(v) => void setAutoCheckpoint(v)}
           />
-        <SettingRow
-          title="Show reasoning"
-          description="Show model reasoning/thinking blocks in the AI chat. Turn this off to hide chain-of-thought output and keep the transcript compact."
-        >
-          <Switch
-            checked={showReasoning}
-            onCheckedChange={(v) => void setShowReasoning(v)}
-          />
-        </SettingRow>
+          <SettingRow
+            title="Show reasoning"
+            description="Show model reasoning/thinking blocks in the AI chat. Turn this off to hide chain-of-thought output and keep the transcript compact."
+          >
+            <Switch
+              checked={showReasoning}
+              onCheckedChange={(v) => void setShowReasoning(v)}
+            />
+          </SettingRow>
         </SettingRow>
         <SettingRow
           title="Cost budget (USD)"
@@ -280,6 +286,35 @@ export function AgentsSection() {
               ))}
             </SelectContent>
           </Select>
+        </SettingRow>
+        <SettingRow
+          title="Subagent nesting depth"
+          description="How deep a subagent may spawn further subagents (1–5). At the limit the spawn tools are withheld so recursion cannot loop; the main agent is depth 1."
+        >
+          <Select
+            value={String(subagentMaxDepth)}
+            onValueChange={(v) => void setSubagentMaxDepth(Number(v))}
+          >
+            <SelectTrigger size="sm" className="h-8 w-24 text-[12px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {[1, 2, 3, 4, 5].map((d) => (
+                <SelectItem key={d} value={String(d)} className="text-[12px]">
+                  {d}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </SettingRow>
+        <SettingRow
+          title="Confirm after mutations"
+          description="After a mutating tool (write/edit/bash) succeeds, pause the run and ask Keep or Revert before the agent continues. Revert restores the touched paths from git."
+        >
+          <Switch
+            checked={confirmAfterMutations}
+            onCheckedChange={(v) => void setConfirmAfterMutations(v)}
+          />
         </SettingRow>
       </section>
 

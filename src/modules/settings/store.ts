@@ -238,6 +238,11 @@ export type Preferences = {
    */
   subagentModelId: string;
   /**
+   * Max nesting depth for subagents: a subagent may spawn further subagents up
+   * to this depth, then the spawn tools are withheld (BatikCode parity).
+   */
+  subagentMaxDepth: number;
+  /**
    * Snapshot the working tree as a `checkpoint:` git commit before every
    * agent run, so a bad run can be rolled back from the checkpoint timeline.
    */
@@ -256,6 +261,13 @@ export type Preferences = {
   terminalAiSuggest: boolean;
   /** Show reasoning/thinking blocks in the AI chat. */
   showReasoning: boolean;
+  /**
+   * Opt-in post-execution confirmation: after a mutating tool (write_file,
+   * edit, multi_edit, bash_run) succeeds, pause the run and ask Keep / Revert
+   * before the agent continues (BatikCode `PendingResultConfirmation` parity).
+   * Off by default — it adds a click per mutation.
+   */
+  confirmAfterMutations: boolean;
 };
 
 export type EditorFormatter =
@@ -362,10 +374,12 @@ const KEY_EXTENSION_SHORTCUTS = "extensionShortcuts";
 const KEY_COST_BUDGET_USD = "costBudgetUsd";
 const KEY_COST_DAILY_BUDGET_USD = "costDailyBudgetUsd";
 const KEY_SUBAGENT_MODEL_ID = "subagentModelId";
+const KEY_SUBAGENT_MAX_DEPTH = "subagentMaxDepth";
 const KEY_AUTO_CHECKPOINT = "autoCheckpoint";
 const KEY_PERSIST_TERMINALS = "persistTerminals";
 const KEY_TERMINAL_AI_SUGGEST = "terminalAiSuggest";
 const KEY_SHOW_REASONING = "showReasoning";
+const KEY_CONFIRM_AFTER_MUTATIONS = "confirmAfterMutations";
 
 export const TERMINAL_FONT_SIZE_DEFAULT = 14;
 export const TERMINAL_FONT_SIZE_MIN = 8;
@@ -467,10 +481,12 @@ export const DEFAULT_PREFERENCES: Preferences = {
   costBudgetUsd: 0,
   costDailyBudgetUsd: 0,
   subagentModelId: "",
+  subagentMaxDepth: 3,
   autoCheckpoint: true,
   persistTerminals: false,
   terminalAiSuggest: false,
   showReasoning: true,
+  confirmAfterMutations: false,
 };
 
 const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
@@ -743,6 +759,10 @@ export async function loadPreferences(): Promise<Preferences> {
       DEFAULT_PREFERENCES.costDailyBudgetUsd,
     subagentModelId:
       get<string>(KEY_SUBAGENT_MODEL_ID) ?? DEFAULT_PREFERENCES.subagentModelId,
+    subagentMaxDepth: clampSubagentMaxDepth(
+      get<number>(KEY_SUBAGENT_MAX_DEPTH) ??
+        DEFAULT_PREFERENCES.subagentMaxDepth,
+    ),
     autoCheckpoint:
       get<boolean>(KEY_AUTO_CHECKPOINT) ?? DEFAULT_PREFERENCES.autoCheckpoint,
     persistTerminals:
@@ -753,6 +773,9 @@ export async function loadPreferences(): Promise<Preferences> {
       DEFAULT_PREFERENCES.terminalAiSuggest,
     showReasoning:
       get<boolean>(KEY_SHOW_REASONING) ?? DEFAULT_PREFERENCES.showReasoning,
+    confirmAfterMutations:
+      get<boolean>(KEY_CONFIRM_AFTER_MUTATIONS) ??
+      DEFAULT_PREFERENCES.confirmAfterMutations,
     agentLaunchCommands: normalizeAgentLaunchCommands(
       get<unknown>(KEY_AGENT_LAUNCH_COMMANDS),
     ),
@@ -1178,6 +1201,16 @@ export async function setSubagentModelId(value: string): Promise<void> {
   await writePref(KEY_SUBAGENT_MODEL_ID, value);
 }
 
+/** Subagent nesting depth is bounded to 1..5 (a 0 or negative cap is nonsense). */
+export function clampSubagentMaxDepth(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_PREFERENCES.subagentMaxDepth;
+  return Math.min(5, Math.max(1, Math.round(value)));
+}
+
+export async function setSubagentMaxDepth(value: number): Promise<void> {
+  await writePref(KEY_SUBAGENT_MAX_DEPTH, clampSubagentMaxDepth(value));
+}
+
 export async function setAutoCheckpoint(value: boolean): Promise<void> {
   await writePref(KEY_AUTO_CHECKPOINT, value);
 }
@@ -1192,6 +1225,10 @@ export async function setTerminalAiSuggest(value: boolean): Promise<void> {
 
 export async function setShowReasoning(value: boolean): Promise<void> {
   await writePref(KEY_SHOW_REASONING, value);
+}
+
+export async function setConfirmAfterMutations(value: boolean): Promise<void> {
+  await writePref(KEY_CONFIRM_AFTER_MUTATIONS, value);
 }
 
 export async function setAgentLaunchCommands(
@@ -1307,9 +1344,11 @@ export async function onPreferencesChange(
     [KEY_COST_BUDGET_USD]: "costBudgetUsd",
     [KEY_COST_DAILY_BUDGET_USD]: "costDailyBudgetUsd",
     [KEY_SUBAGENT_MODEL_ID]: "subagentModelId",
+    [KEY_SUBAGENT_MAX_DEPTH]: "subagentMaxDepth",
     [KEY_AUTO_CHECKPOINT]: "autoCheckpoint",
     [KEY_PERSIST_TERMINALS]: "persistTerminals",
     [KEY_TERMINAL_AI_SUGGEST]: "terminalAiSuggest",
+    [KEY_CONFIRM_AFTER_MUTATIONS]: "confirmAfterMutations",
   };
   // Same-process writes still fire onChange immediately; cross-window writes
   // arrive via the Tauri event emitted by writePref().

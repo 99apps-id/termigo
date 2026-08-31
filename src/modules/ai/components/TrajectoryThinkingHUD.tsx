@@ -49,13 +49,7 @@ function toNodes(steps: readonly TrajectoryStep[]): ThoughtNode[] {
  * trajectory store that the run loop fills, so it shows real steps rather than
  * a static placeholder. Renders nothing when there is no active run.
  */
-export function TrajectoryThinkingHUD({
-  round,
-  className,
-}: {
-  round?: number;
-  className?: string;
-}) {
+export function TrajectoryThinkingHUD({ className }: { className?: string }) {
   const runs = useTrajectoryStore((s) => s.runs);
   const activeRunId = useTrajectoryStore((s) => s.activeRunId);
 
@@ -70,11 +64,6 @@ export function TrajectoryThinkingHUD({
 
   return (
     <div className="space-y-1">
-      {round != null && round > 0 ? (
-        <div className="text-[10px] font-medium tracking-wide text-muted-foreground">
-          Round {round}
-        </div>
-      ) : null}
       <ThinkingTreeHUD nodes={nodes} className={className} />
     </div>
   );

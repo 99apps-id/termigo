@@ -2,7 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { SUBAGENTS, type SubagentType } from "../agents/registry";
 import { resolveSubagentType } from "../agents/resolveSubagent";
-import { runSubagent } from "../agents/runSubagent";
+import { effectiveSubagentMaxDepth, runSubagent } from "../agents/runSubagent";
 import {
   cascadeSkip,
   planSubagentBatch,
@@ -10,7 +10,10 @@ import {
   type TaskState,
 } from "../lib/subagentSchedule";
 import { useChatStore } from "../store/chatStore";
-import { useSubagentRunStore } from "../store/subagentRunStore";
+import {
+  ensureSubagentRunsHydrated,
+  useSubagentRunStore,
+} from "../store/subagentRunStore";
 import type { ToolContext } from "./context";
 
 const TYPE_KEYS = Object.keys(SUBAGENTS) as [SubagentType, ...SubagentType[]];
@@ -86,10 +89,20 @@ export function normalizeSingleInput(input: unknown): unknown {
   return parseJsonIfString(input);
 }
 
-export function buildSubagentTools(ctx: ToolContext) {
+/**
+ * @param depth Nesting depth of the agent this toolset is built for. The main
+ *   agent passes 0; a subagent at depth N spawns depth N+1 children. At the cap
+ *   the spawn tools are omitted so recursion stops (BatikCode parity).
+ */
+export function buildSubagentTools(ctx: ToolContext, depth = 0) {
+  // A child of this agent is one level deeper. The spawn tools are always
+  // declared so the toolset stays stable; `runSubagent` drops them at the cap
+  // so a subagent at max depth never sees them (BatikCode parity).
+  const childDepth = depth + 1;
+
   return {
     run_subagent: tool({
-      description: `Spawn an isolated subagent with a fresh message history. It has the SAME toolset you do (read, search, edit, shell, git, extensions) minus the ability to spawn its own subagents, so it can carry a self-contained task end to end without polluting your context. The subagent returns a single text summary; pick a 'type' that matches its job.
+      description: `Spawn an isolated subagent with a fresh message history. It has the SAME toolset you do (read, search, edit, shell, git, extensions) and may itself spawn further subagents, so it can carry a self-contained task end to end without polluting your context. The subagent returns a single text summary; pick a 'type' that matches its job.
 
 Types:
 ${TYPE_KEYS.map((k) => `- ${k}: ${SUBAGENTS[k].description}`).join("\n")}
@@ -117,6 +130,15 @@ Approval works exactly as it does for you: read-only tools auto-run, and every m
         }),
       ),
       execute: async ({ type, prompt, description }, opts) => {
+        // Defensive belt: a subagent at the nesting cap must never spawn. The
+        // toolset already drops these tools, but if one slips through, refuse
+        // rather than loop.
+        if (childDepth > effectiveSubagentMaxDepth()) {
+          return {
+            error:
+              "subagent nesting depth cap reached; this agent cannot spawn further subagents",
+          };
+        }
         // Resolve loose / synonym names to a real roster id so an approximate
         // 'type' from the model never fails the call.
         const resolved = resolveSubagentType(type);
@@ -124,8 +146,13 @@ Approval works exactly as it does for you: read-only tools auto-run, and every m
           useChatStore.getState();
         // Register a live run so the tool card can show its progress + result.
         const sid = activeSessionId ?? "";
+        await ensureSubagentRunsHydrated();
         const runs = useSubagentRunStore.getState();
-        const runId = runs.start(sid, { type: resolved, label: description });
+        const runId = runs.start(sid, {
+          type: resolved,
+          label: description,
+          depth: childDepth,
+        });
         let steps = 0;
         try {
           const r = await runSubagent({
@@ -134,6 +161,7 @@ Approval works exactly as it does for you: read-only tools auto-run, and every m
             keys: apiKeys,
             modelId: selectedModelId,
             toolContext: ctx,
+            depth: childDepth,
             requester: description ?? resolved,
             abortSignal: opts?.abortSignal,
             onStep: (label) => {
@@ -144,13 +172,11 @@ Approval works exactly as it does for you: read-only tools auto-run, and every m
                 .step(sid, runId, { currentStep: label, stepCount: steps });
             },
           });
-          useSubagentRunStore
-            .getState()
-            .finish(sid, runId, {
-              stepCount: r.stepCount,
-              durationMs: r.durationMs,
-              summary: r.summary,
-            });
+          useSubagentRunStore.getState().finish(sid, runId, {
+            stepCount: r.stepCount,
+            durationMs: r.durationMs,
+            summary: r.summary,
+          });
           return {
             type: resolved,
             description,
@@ -178,7 +204,7 @@ At most ${MAX_TASKS} tasks per call; extras are dropped and reported in \`note\`
 
 Use this for anything spanning more than one file — studying, exploring, reviewing or auditing a codebase — rather than reading files one at a time.
 
-Each task's subagent has the same toolset you do (minus spawning further subagents). Approval works as it does for you: read-only tools auto-run, and every mutating, shell, or extension call asks the user first via the approval queue (\`write_file\` also refuses a path that already exists) — so a batch never silently overwrites the workspace or runs an un-approved command.`,
+Each task's subagent has the same toolset you do and may itself spawn further subagents (nesting is bounded by a max depth). Approval works as it does for you: read-only tools auto-run, and every mutating, shell, or extension call asks the user first via the approval queue (\`write_file\` also refuses a path that already exists) — so a batch never silently overwrites the workspace or runs an un-approved command.`,
       inputSchema: z.preprocess(
         // Normalise before validation so a model that emits the whole call (or
         // the `tasks` field) as a JSON string still runs instead of failing.
@@ -222,6 +248,12 @@ Each task's subagent has the same toolset you do (minus spawning further subagen
         }),
       ),
       execute: async ({ tasks, max_concurrency }, opts) => {
+        if (childDepth > effectiveSubagentMaxDepth()) {
+          return {
+            error:
+              "subagent nesting depth cap reached; this agent cannot spawn further subagents",
+          };
+        }
         const batchSignal = opts?.abortSignal;
         const notes: string[] = [];
         let batch = tasks;
@@ -275,6 +307,7 @@ Each task's subagent has the same toolset you do (minus spawning further subagen
         const { apiKeys, selectedModelId, patchAgentMeta, activeSessionId } =
           useChatStore.getState();
         const sid = activeSessionId ?? "";
+        await ensureSubagentRunsHydrated();
 
         const runOne = async (i: number): Promise<void> => {
           const task = batch[i];
@@ -289,9 +322,11 @@ Each task's subagent has the same toolset you do (minus spawning further subagen
             ? `${context}\n\n---\n\n${task.prompt}`
             : task.prompt;
           const resolvedType = results[i].type;
-          const runId = useSubagentRunStore
-            .getState()
-            .start(sid, { type: resolvedType, label: task.description });
+          const runId = useSubagentRunStore.getState().start(sid, {
+            type: resolvedType,
+            label: task.description,
+            depth: childDepth,
+          });
           let steps = 0;
           try {
             const r = await runSubagent({
@@ -300,6 +335,7 @@ Each task's subagent has the same toolset you do (minus spawning further subagen
               keys: apiKeys,
               modelId: selectedModelId,
               toolContext: ctx,
+              depth: childDepth,
               // Numbered, because several run at once and the approval queue
               // is unreadable if every row says "builder".
               requester: `${task.description ?? resolvedType} #${i + 1}`,
@@ -318,13 +354,11 @@ Each task's subagent has the same toolset you do (minus spawning further subagen
             results[i].stepCount = r.stepCount;
             results[i].durationMs = r.durationMs;
             state[i] = { settled: true, bad: false, running: false };
-            useSubagentRunStore
-              .getState()
-              .finish(sid, runId, {
-                stepCount: r.stepCount,
-                durationMs: r.durationMs,
-                summary: r.summary,
-              });
+            useSubagentRunStore.getState().finish(sid, runId, {
+              stepCount: r.stepCount,
+              durationMs: r.durationMs,
+              summary: r.summary,
+            });
           } catch (e) {
             results[i].error = String(e);
             state[i] = { settled: true, bad: true, running: false };

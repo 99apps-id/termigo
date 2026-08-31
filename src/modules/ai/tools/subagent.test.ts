@@ -4,7 +4,11 @@ import type { ToolContext } from "./context";
 
 const runSubagentMock = vi.hoisted(() => vi.fn());
 
-vi.mock("../agents/runSubagent", () => ({ runSubagent: runSubagentMock }));
+vi.mock("../agents/runSubagent", () => ({
+  MAX_SUBAGENT_DEPTH: 3,
+  effectiveSubagentMaxDepth: () => 3,
+  runSubagent: runSubagentMock,
+}));
 vi.mock("../store/chatStore", () => ({
   useChatStore: {
     getState: () => ({

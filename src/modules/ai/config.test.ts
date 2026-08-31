@@ -14,6 +14,7 @@ import {
   resolveModel,
   resolveModelContextLimit,
   stepBudgetForRound,
+  subagentModelExceedsBudget,
 } from "./config";
 
 const endpoint: CustomEndpoint = {
@@ -107,6 +108,43 @@ describe("current model pricing", () => {
       expect(MODEL_PRICING[modelId]).toEqual({ input, output, cacheRead });
     },
   );
+});
+
+describe("subagentModelExceedsBudget (BatikCode cost-tier guard)", () => {
+  it("flags a subagent model that is much pricier than the main model", () => {
+    expect(
+      subagentModelExceedsBudget("claude-opus-4-7", "deepseek-v4-flash"),
+    ).toBe(true);
+  });
+
+  it("allows a cheaper or equal subagent model", () => {
+    expect(
+      subagentModelExceedsBudget("deepseek-v4-flash", "claude-opus-4-7"),
+    ).toBe(false);
+  });
+
+  it("allows a modest premium within the multiplier", () => {
+    // deepseek-v4-pro (0.28) vs deepseek-v4-flash (0.07): exactly 4x, over 1.5x.
+    expect(
+      subagentModelExceedsBudget("deepseek-v4-pro", "deepseek-v4-flash"),
+    ).toBe(true);
+  });
+
+  it("cannot judge an unpriced model (custom endpoint / local), so it allows", () => {
+    expect(
+      subagentModelExceedsBudget("openai-compatible-custom", "gpt-5.6"),
+    ).toBe(false);
+  });
+
+  it("ignores an empty / undefined subagent model", () => {
+    expect(subagentModelExceedsBudget(undefined, "gpt-5.6")).toBe(false);
+  });
+
+  it("respects a custom multiplier", () => {
+    expect(
+      subagentModelExceedsBudget("deepseek-v4-pro", "deepseek-v4-flash", 10),
+    ).toBe(false);
+  });
 });
 
 describe("modelKeepsReasoning", () => {

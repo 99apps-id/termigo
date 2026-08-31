@@ -33,6 +33,7 @@ import {
   GoogleGeminiIcon,
   Grok02Icon,
   InspectCodeIcon,
+  Layers02Icon,
   Message01Icon,
   Mic01Icon,
   MistralIcon,
@@ -67,6 +68,7 @@ import { useChatStore } from "../store/chatStore";
 import { AgentDiagnosticsDialog } from "./AgentDiagnosticsDialog";
 import { AgentMemoryDialog } from "./AgentMemoryDialog";
 import { ApprovalModeControl } from "./ApprovalModeControl";
+import { ArtifactsDialog } from "./ArtifactsDialog";
 import { ChangeReviewDialog } from "./ChangeReviewDialog";
 import { ContextMeter } from "./ContextMeter";
 import { RunReplayDialog } from "./RunReplayDialog";
@@ -159,6 +161,7 @@ export function AiStatusBarControls() {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [replayOpen, setReplayOpen] = useState(false);
   const [memoryOpen, setMemoryOpen] = useState(false);
+  const [artifactsOpen, setArtifactsOpen] = useState(false);
   const toggleMini = useChatStore((s) => s.toggleMini);
   const miniOpen = useChatStore((s) => s.mini.open);
   const closePanel = useChatStore((s) => s.closePanel);
@@ -221,6 +224,14 @@ export function AiStatusBarControls() {
         <HugeiconsIcon icon={BrainIcon} size={13} strokeWidth={2} />
       </IconBtn>
       <AgentMemoryDialog open={memoryOpen} onOpenChange={setMemoryOpen} />
+
+      <IconBtn
+        title="Artifacts — canvases, previews, and files the agent produced"
+        onClick={() => setArtifactsOpen(true)}
+      >
+        <HugeiconsIcon icon={Layers02Icon} size={13} strokeWidth={2} />
+      </IconBtn>
+      <ArtifactsDialog open={artifactsOpen} onOpenChange={setArtifactsOpen} />
 
       <IconBtn
         title="Attach file or image"
