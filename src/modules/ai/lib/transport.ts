@@ -145,6 +145,9 @@ type Deps = {
   shouldRefuseRun?: (sessionId: string) => boolean;
   onUsage?: (delta: AgentUsageDelta) => void;
   onCompact?: (info: { droppedCount: number }) => void;
+  /** An early, verified span of the transcript was replaced by a checkpoint
+   *  summary before this request was sent. */
+  onPrune?: (info: { prunedMessages: number }) => void;
   onRemember?: (info: { fact: string }) => void;
   onFinishMeta?: (info: {
     stopReason: AgentStopReason | null;
@@ -340,6 +343,7 @@ export function createContextAwareTransport(deps: Deps) {
       onStep: deps.onStep,
       onUsage: deps.onUsage,
       onCompact: deps.onCompact,
+      onPrune: deps.onPrune,
       onRemember: deps.onRemember,
       onFinishMeta: deps.onFinishMeta,
       lmstudioBaseURL: deps.getLmstudioBaseURL?.(),

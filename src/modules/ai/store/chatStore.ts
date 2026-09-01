@@ -138,6 +138,9 @@ export type AgentMeta = {
   /** The user pressed stop, so the transcript can offer to resume. */
   stoppedByUser: boolean;
   compactionNotice: { droppedCount: number; at: number } | null;
+  /** A verified span of history was pruned into a checkpoint summary, so the
+   *  user can see the context-saving pass that just ran. */
+  pruneNotice: { prunedMessages: number; at: number } | null;
   /** The last fact written to project memory, so a silent write is visible. */
   memoryNotice: { fact: string; at: number } | null;
 };
@@ -162,6 +165,7 @@ const IDLE_META: AgentMeta = {
   round: 0,
   stoppedByUser: false,
   compactionNotice: null,
+  pruneNotice: null,
   memoryNotice: null,
 };
 

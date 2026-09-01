@@ -352,6 +352,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
       runRound: 0,
       stoppedByUser: false,
       compactionNotice: null,
+      pruneNotice: null,
       memoryNotice: null,
     });
     // A fresh task has nothing to resume, so drop the persisted run marker.

@@ -39,6 +39,7 @@ import { getChatGptAccess } from "./chatgptAuth";
 import { compactModelMessagesDetailed, estimateTokens } from "./compact";
 import { evictObsoleteToolOutputs } from "./contextEviction";
 import { effectiveContextLimit } from "./contextLimitLearning";
+import { pruneVerifiedPrefix } from "./contextPrune";
 import type { CustomToolset } from "./customToolsIo";
 import type { ExtensionToolset } from "./extensionTools";
 import { recordRun } from "./harnessFrontier";
@@ -680,6 +681,9 @@ export type RunAgentOptions = {
   onStep?: (step: string | null) => void;
   onUsage?: (delta: AgentUsageDelta) => void;
   onCompact?: (info: { droppedCount: number }) => void;
+  /** An early, verified span of the transcript was replaced by a checkpoint
+   *  summary (context pruning) before this request was sent. */
+  onPrune?: (info: { prunedMessages: number }) => void;
   /** A durable fact was written to project memory. Surfaced because it
    *  outlives the run and, in the permissive modes, needed no click. */
   onRemember?: (info: { fact: string }) => void;
@@ -828,10 +832,25 @@ export async function runAgentStream(opts: RunAgentOptions) {
     ).catch(() => {});
   }
 
+  // Context pruning: an early span whose work is already saved to git (a
+  // successful git_checkpoint / git_commit) is replaced by a short checkpoint
+  // summary instead of shipping the full chat. This is the difference between
+  // "trim the big tool outputs" (compaction/eviction above) and "don't send
+  // the finished work at all". Runs after those so it prunes the smallest,
+  // already-trimmed history.
+  const prune = pruneVerifiedPrefix(evictedHistory);
+  const finalHistory = prune.messages;
+  if (prune.pruned) {
+    void logInfo(
+      `[ai] context prune: ${prune.cutAt} verified message(s) → checkpoint summary (${prune.summary?.length ?? 0} chars)`,
+    ).catch(() => {});
+    opts.onPrune?.({ prunedMessages: prune.cutAt });
+  }
+
   const prompt = prepareAgentPrompt(
     stableSystem,
     opts.planMode ? PLAN_MODE_PROMPT : null,
-    evictedHistory,
+    finalHistory,
     provider,
   );
 

@@ -28,6 +28,8 @@ export function substituteVariables(
 ): string {
   return input.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (whole, name: string) => {
     const key = name.trim();
+    // `Object.hasOwn` is ES2022 and the tsconfig lib targets es2020; use the
+    // call form so the build stays green.
     return Object.hasOwn(variables, key) ? variables[key] : whole;
   });
 }

@@ -245,6 +245,7 @@ export function AiChatView({
   // BatikCode-style rotating "working" phrase while the model is thinking.
   const thinkingPhrase = useRotatingPhrase(isBusy && !step);
   const compactionNotice = useChatStore((s) => s.agentMeta.compactionNotice);
+  const pruneNotice = useChatStore((s) => s.agentMeta.pruneNotice);
   const memoryNotice = useChatStore((s) => s.agentMeta.memoryNotice);
   const patchAgentMeta = useChatStore((s) => s.patchAgentMeta);
   const stoppedByUser = useChatStore((s) => s.agentMeta.stoppedByUser);
@@ -303,6 +304,12 @@ export function AiChatView({
           <CompactionNotice
             droppedCount={compactionNotice.droppedCount}
             onDismiss={() => patchAgentMeta({ compactionNotice: null })}
+          />
+        )}
+        {pruneNotice && (
+          <PruneNotice
+            prunedMessages={pruneNotice.prunedMessages}
+            onDismiss={() => patchAgentMeta({ pruneNotice: null })}
           />
         )}
         {memoryNotice && (
@@ -423,6 +430,32 @@ const CompactionNotice = memo(function CompactionNotice({
       <span className="flex-1 truncate">
         Context compacted — {droppedCount} older tool result
         {droppedCount === 1 ? "" : "s"} elided to save tokens.
+      </span>
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="text-[10.5px] underline opacity-70 hover:opacity-100"
+      >
+        Dismiss
+      </button>
+    </div>
+  );
+});
+
+const PruneNotice = memo(function PruneNotice({
+  prunedMessages,
+  onDismiss,
+}: {
+  prunedMessages: number;
+  onDismiss: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-2 rounded-md border border-border/40 bg-muted/30 px-2.5 py-1.5 text-[11px] text-muted-foreground">
+      <span className="size-1.5 shrink-0 rounded-full bg-emerald-500/80" />
+      <span className="flex-1 truncate">
+        Context pruned — {prunedMessages} verified message
+        {prunedMessages === 1 ? "" : "s"} replaced by a checkpoint summary to
+        save tokens.
       </span>
       <button
         type="button"
