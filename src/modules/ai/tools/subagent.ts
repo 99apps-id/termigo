@@ -1,10 +1,15 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { SUBAGENTS, type SubagentType } from "../agents/registry";
-import { resolveSubagentType } from "../agents/resolveSubagent";
+import {
+  resolveSubagentType,
+  routeSubagentType,
+} from "../agents/resolveSubagent";
 import { effectiveSubagentMaxDepth, runSubagent } from "../agents/runSubagent";
 import {
   cascadeSkip,
+  detectBatchConflicts,
+  pathsInPrompt,
   planSubagentBatch,
   readyTasks,
   type TaskState,
@@ -275,13 +280,34 @@ Each task's subagent has the same toolset you do and may itself spawn further su
           );
         }
 
-        const results: BatchResult[] = batch.map((t, i) => ({
-          index: i,
+        // Two tasks touching the same file is the batch's merge conflict: each
+        // edits from the same baseline, both write, the second overwrites the
+        // first. Reported before anything runs so the orchestrator (or the user
+        // reading the card) can decide — the safest default is to note it.
+        const conflicts = detectBatchConflicts(
+          batch.map((t) => ({ paths: pathsInPrompt(t.prompt) })),
+        );
+        for (const c of conflicts) {
+          notes.push(
+            `Conflict: task #${c.indexA} and #${c.indexB} both touch ${c.path} — they may overwrite each other; consider a depends_on edge or reviewing after.`,
+          );
+        }
+
+        const results: BatchResult[] = batch.map((t, i) => {
           // Resolve loose / synonym names up front so every downstream use
           // (runSubagent, labels, the returned result) is a real roster id.
-          type: resolveSubagentType(t.type),
-          description: t.description,
-        }));
+          // When the model gave no type at all, route by the prompt's domain
+          // (frontend/backend/infra/testing) so a batch stays coherent.
+          const rawType = (t.type ?? "").trim();
+          const routed = rawType ? null : routeSubagentType(t.prompt ?? "");
+          return {
+            index: i,
+            type: rawType
+              ? resolveSubagentType(rawType)
+              : (routed?.type ?? "general"),
+            description: t.description,
+          };
+        });
         const state: TaskState[] = batch.map(() => ({
           settled: false,
           bad: false,

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   cascadeSkip,
+  detectBatchConflicts,
+  pathsInPrompt,
   planSubagentBatch,
   readyTasks,
   type TaskState,
@@ -36,10 +38,7 @@ describe("planSubagentBatch", () => {
   });
 
   it("rejects a two-task cycle", () => {
-    const plan = planSubagentBatch([
-      { depends_on: [1] },
-      { depends_on: [0] },
-    ]);
+    const plan = planSubagentBatch([{ depends_on: [1] }, { depends_on: [0] }]);
     expect(plan.unrunnable.map((u) => u.index)).toEqual([0, 1]);
   });
 
@@ -157,5 +156,59 @@ describe("cascadeSkip", () => {
     state[0] = { settled: true, bad: true, running: false };
     cascadeSkip(deps, state, 0);
     expect(state.every((s) => s.settled)).toBe(true);
+  });
+});
+
+describe("pathsInPrompt", () => {
+  it("pulls path-like tokens and file extensions out of a prompt", () => {
+    const paths = pathsInPrompt(
+      "Update src/App.tsx and lib/utils.ts, then check package.json",
+    );
+    expect(paths).toContain("src/App.tsx");
+    expect(paths).toContain("lib/utils.ts");
+    expect(paths).toContain("package.json");
+  });
+
+  it("returns an empty list for a prompt with no paths", () => {
+    expect(pathsInPrompt("explain the architecture")).toEqual([]);
+  });
+});
+
+describe("detectBatchConflicts", () => {
+  it("finds two tasks touching the same file", () => {
+    const conflicts = detectBatchConflicts([
+      { paths: ["src/App.tsx"] },
+      { paths: ["src/App.tsx"] },
+    ]);
+    expect(conflicts).toEqual([{ indexA: 0, indexB: 1, path: "src/App.tsx" }]);
+  });
+
+  it("reports every pair when three tasks share a file", () => {
+    const conflicts = detectBatchConflicts([
+      { paths: ["a.ts"] },
+      { paths: ["a.ts"] },
+      { paths: ["a.ts"] },
+    ]);
+    expect(conflicts.map((c) => `${c.indexA}-${c.indexB}`).sort()).toEqual([
+      "0-1",
+      "0-2",
+      "1-2",
+    ]);
+  });
+
+  it("ignores tasks that touch different files", () => {
+    const conflicts = detectBatchConflicts([
+      { paths: ["src/a.ts"] },
+      { paths: ["src/b.ts"] },
+    ]);
+    expect(conflicts).toEqual([]);
+  });
+
+  it("normalises a leading ./ before comparing", () => {
+    const conflicts = detectBatchConflicts([
+      { paths: ["src/App.tsx"] },
+      { paths: ["./src/App.tsx"] },
+    ]);
+    expect(conflicts).toHaveLength(1);
   });
 });

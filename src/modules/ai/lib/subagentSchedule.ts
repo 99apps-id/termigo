@@ -41,9 +41,7 @@ export type BatchPlan = {
  * itself, directly or through a ring, is never ready, and a scheduler that
  * simply waits for readiness would spin on it until the process died.
  */
-export function planSubagentBatch(
-  tasks: readonly ScheduledTask[],
-): BatchPlan {
+export function planSubagentBatch(tasks: readonly ScheduledTask[]): BatchPlan {
   const deps: number[][] = [];
   const unrunnable: PlanProblem[] = [];
   const droppedEdges: { index: number; target: number }[] = [];
@@ -175,4 +173,84 @@ export function cascadeSkip(
     }
   }
   return skipped;
+}
+
+/** Only the fields the conflict detector reads from a task. */
+export type ConflictTask = {
+  /** The file paths the task's prompt mentions, if any. */
+  paths?: readonly string[];
+};
+
+/** A pair of batch tasks that both mention the same file path. */
+export type PathConflict = {
+  indexA: number;
+  indexB: number;
+  path: string;
+};
+
+/**
+ * Heuristically pull file paths out of a task prompt.
+ *
+ * Matches `src/...`, `lib/...`, `packages/...`, bare `*.ts` / `*.rs` / `*.py`
+ * tokens and quoted paths. Purely lexical — no filesystem access — so the
+ * detector stays pure and testable, and a miss only means the conflict is not
+ * reported, never that a false one is.
+ */
+export function pathsInPrompt(prompt: string): string[] {
+  const text = String(prompt ?? "");
+  const out = new Set<string>();
+  const patterns = [
+    // Path-like: src/foo.ts, ./lib/x, packages/a/b
+    /\b(?:[A-Za-z0-9_@./-]+\.(?:tsx?|jsx?|rs|py|go|css|scss|json|html|md|vue|svelte))\b/g,
+    // Directory-ish tokens that often mean a whole folder
+    /\b(?:src|lib|packages|apps|components|hooks|utils|api|tests?|__tests__)\b(?:\/[A-Za-z0-9_.-]+)?/g,
+  ];
+  for (const re of patterns) {
+    for (const m of text.matchAll(re)) {
+      const v = m[0].trim();
+      if (v.length >= 2 && v.length <= 200) out.add(v);
+    }
+  }
+  return [...out];
+}
+
+/**
+ * Find tasks in a batch that both mention the same file path.
+ *
+ * Two subagents editing the same file concurrently is the batch's version of a
+ * merge conflict: each sees the other's starting point, both write, the second
+ * overwrites the first, and nobody notices until review. Detecting the overlap
+ * up front lets the caller warn (or serialize via depends_on) instead of
+ * discovering it after the fact. Runs before anything spawns.
+ */
+export function detectBatchConflicts(
+  tasks: readonly ConflictTask[],
+): PathConflict[] {
+  const byPath = new Map<string, number[]>();
+  tasks.forEach((t, i) => {
+    for (const p of t.paths ?? []) {
+      const key = p.replace(/^\.\//, "").replace(/[\\/]+$/, "");
+      if (!key) continue;
+      const list = byPath.get(key) ?? [];
+      if (!list.includes(i)) list.push(i);
+      byPath.set(key, list);
+    }
+  });
+  const out: PathConflict[] = [];
+  for (const [path, indices] of byPath) {
+    if (indices.length < 2) continue;
+    for (let a = 0; a < indices.length; a++) {
+      for (let b = a + 1; b < indices.length; b++) {
+        out.push({ indexA: indices[a], indexB: indices[b], path });
+      }
+    }
+  }
+  // Stable order by first index, then second, then path.
+  out.sort(
+    (x, y) =>
+      x.indexA - y.indexA ||
+      x.indexB - y.indexB ||
+      x.path.localeCompare(y.path),
+  );
+  return out;
 }

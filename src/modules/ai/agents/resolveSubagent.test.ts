@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { SUBAGENTS } from "./registry";
-import { resolveSubagentLabel, resolveSubagentType } from "./resolveSubagent";
+import {
+  resolveSubagentLabel,
+  resolveSubagentType,
+  routeSubagentType,
+} from "./resolveSubagent";
 
 describe("resolveSubagentType", () => {
   it("returns exact ids unchanged", () => {
@@ -50,5 +54,41 @@ describe("resolveSubagentLabel", () => {
   it("shows the label of the agent that actually runs", () => {
     expect(resolveSubagentLabel("search")).toBe(SUBAGENTS.explore.label);
     expect(resolveSubagentLabel("recon")).toBe(SUBAGENTS.pentest.label);
+  });
+});
+
+describe("routeSubagentType", () => {
+  it("routes frontend work to the builder", () => {
+    const r = routeSubagentType("Fix the React frontend — update src/App.tsx");
+    expect(r.type).toBe("builder");
+    expect(r.route).toBe("frontend");
+  });
+
+  it("routes backend / api / db work to the builder", () => {
+    expect(
+      routeSubagentType("Write the API schema and auth middleware").type,
+    ).toBe("builder");
+    expect(routeSubagentType("Update the database migration").type).toBe(
+      "builder",
+    );
+  });
+
+  it("routes infra / deploy work to the generalist", () => {
+    expect(routeSubagentType("Audit the Docker compose setup").type).toBe(
+      "general",
+    );
+    expect(routeSubagentType("Review the CI/CD pipeline").type).toBe("general");
+  });
+
+  it("routes testing work to code-review", () => {
+    expect(routeSubagentType("Add unit tests for the parser").type).toBe(
+      "code-review",
+    );
+  });
+
+  it("falls back to general for an ambiguous prompt", () => {
+    const r = routeSubagentType("Summarize what you find");
+    expect(r.type).toBe("general");
+    expect(r.route).toBeNull();
   });
 });

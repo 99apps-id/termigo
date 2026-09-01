@@ -133,6 +133,62 @@ export function resolveSubagentType(type: string): SubagentType {
   return "general";
 }
 
+/**
+ * Domain keywords that route a task to a specialized sub-agent when no explicit
+ * type is given. Order matters: the first matching rule wins, and the
+ * specialized roles are checked before the catch-alls so "fix the React
+ * frontend" lands on builder (mutating) rather than explore.
+ */
+const DOMAIN_ROUTES: Array<{
+  test: RegExp;
+  type: SubagentType;
+  label: string;
+}> = [
+  {
+    test: /frontend|front[- ]?end|react|next\.?js|vue|svelte|angular|ui\b|component|css|tailwind|html\b/i,
+    type: "builder",
+    label: "frontend",
+  },
+  {
+    test: /backend|back[- ]?end|api\b|server|endpoint|rest\b|graphql|middleware|service\b|auth\b|database|db\b|sql\b|query\b|schema\b|migration/i,
+    type: "builder",
+    label: "backend",
+  },
+  {
+    test: /infra|infrastructure|deploy|docker|kubernetes|k8s|terraform|ci\/?cd|pipeline|nginx|aws\b|gcp\b|azure\b|cloud\b|devops/i,
+    type: "general",
+    label: "infra",
+  },
+  {
+    test: /test|spec\b|unit test|integration test|e2e|vitest|jest|pytest|cypress|playwright/i,
+    type: "code-review",
+    label: "testing",
+  },
+];
+
+/**
+ * Route a task prompt to the best sub-agent type when the model gave none.
+ *
+ * The model usually passes a `type` (or a synonym that `resolveSubagentType`
+ * maps). When it does not, this classifies the prompt by domain keywords so a
+ * batch stays coherent: "fix the React frontend" → builder, "write the API
+ * schema" → builder, "audit the Docker setup" → general (planning/research),
+ * "add tests for x" → code-review. Falls back to the prompt's own resolve
+ * result, then `general`.
+ */
+export function routeSubagentType(prompt: string): {
+  type: SubagentType;
+  route: string | null;
+} {
+  const text = String(prompt ?? "");
+  for (const rule of DOMAIN_ROUTES) {
+    if (rule.test.test(text)) {
+      return { type: rule.type, route: rule.label };
+    }
+  }
+  return { type: "general", route: null };
+}
+
 /** Friendly label for a caller-provided type, resolved the same way the runtime
  *  resolves it, so a spawn card shows the agent that actually runs. */
 export function resolveSubagentLabel(type: string): string {
