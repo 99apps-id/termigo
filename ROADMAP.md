@@ -149,8 +149,11 @@ The themes below frame every scope decision.
   user-defined custom coding-agent CLIs in Settings.
 - [x] Agent UX parity with BatikCode-style host agents — sub-agent nesting
   depth, cost-tier guard, persisted sub-agent runs, editable/resendable user
-  messages, live background-command output, and modified-file chips in tool
-  cards.
+  messages, live background-command output, modified-file chips in tool
+  cards, a centralized agent registry/factory (`buildSubagentSpec`,
+  `buildAgentTools`, `resolveAgentForPrompt`), and a live run-progress HUD
+  showing the current step, the todo list with a derived active item, and the
+  sub-agents running in a fan-out.
 - [x] Telegram relay polish — typing indicator while the agent works, and an
   echo fix so messages the bot injects are never mirrored back.
 - [ ] Extensible slash commands (a fixed set has shipped; skills are done)
