@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  activeTodoIndex,
   belongsToWorkspace,
   formatTodoStatusBlock,
   isFinished,
@@ -163,5 +164,37 @@ describe("formatTodoStatusBlock", () => {
     expect(block).toContain("- [completed] one");
     expect(block).toContain("- [in_progress] two");
     expect(block).toContain("- [pending] three");
+  });
+});
+
+describe("activeTodoIndex", () => {
+  it("prefers the explicit in_progress item", () => {
+    expect(
+      activeTodoIndex([
+        { status: "completed" },
+        { status: "in_progress" },
+        { status: "pending" },
+      ]),
+    ).toBe(1);
+  });
+
+  it("derives the first non-completed item when none is marked", () => {
+    expect(
+      activeTodoIndex([
+        { status: "completed" },
+        { status: "pending" },
+        { status: "pending" },
+      ]),
+    ).toBe(1);
+  });
+
+  it("returns -1 when every item is completed", () => {
+    expect(
+      activeTodoIndex([{ status: "completed" }, { status: "completed" }]),
+    ).toBe(-1);
+  });
+
+  it("returns -1 for an empty list", () => {
+    expect(activeTodoIndex([])).toBe(-1);
   });
 });

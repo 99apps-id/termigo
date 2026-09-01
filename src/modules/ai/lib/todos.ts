@@ -40,6 +40,26 @@ export function formatTodoStatusBlock(
   ].join("\n");
 }
 
+/**
+ * The index of the todo a run is currently working on, for the live HUD.
+ *
+ * The model is supposed to keep exactly one item `in_progress`, but it often
+ * forgets to mark the next item as it moves on (the same gap the auto-check
+ * fallback covers on settle). The HUD therefore derives the "active" item: an
+ * explicit `in_progress` wins; otherwise the first non-completed item stands in
+ * as "up next", so the user always sees which line the current step belongs to.
+ * Returns -1 when there is nothing left to do.
+ */
+export function activeTodoIndex(items: { status: TodoStatus }[]): number {
+  for (let i = 0; i < items.length; i++) {
+    if (items[i].status === "in_progress") return i;
+  }
+  for (let i = 0; i < items.length; i++) {
+    if (items[i].status === "pending") return i;
+  }
+  return -1;
+}
+
 const STORE_PATH = "termigo-ai-todos.json";
 const todosKey = (sessionId: string) => `todos:${sessionId}`;
 
