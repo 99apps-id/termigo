@@ -156,8 +156,17 @@ The themes below frame every scope decision.
   sub-agents running in a fan-out.
 - [x] Telegram relay polish — typing indicator while the agent works, and an
   echo fix so messages the bot injects are never mirrored back.
-- [ ] Extensible slash commands (a fixed set has shipped; skills are done)
-- [ ] Project-scoped approval policies and per-tool trust (the auto-approve modes have shipped)
+- [x] Extensible slash commands — a fixed set ships (`/init`, `/plan`, `/goal`,
+  `/model`, …), and user-authored commands live in `.termigo/commands/*.md`
+  (frontmatter `description:` + a prompt body, `$ARGUMENTS` placeholder),
+  listed by the `/` picker and re-scanned on open.
+- [x] Project-scoped approval policies and per-tool trust — `.termigo/approvals.json`
+  rules (per tool / path glob / command pattern) refine the global approval
+  mode per project: `allow` auto-runs, `deny` auto-refuses, `ask` forces a
+  prompt. Applied to the main agent and, since the latest pass, to sub-agents
+  too, so a rule set for the agent holds for its workers. Managed from the
+  approval-mode control and the per-approval "always allow in this project"
+  affordance.
 - [x] Persistent terminal processes across app restarts — Unix via a named tmux
   session per leaf; the setting is now surfaced honestly where tmux isn't
   available (Windows remains a guarded no-op, pending a detached PTY host).

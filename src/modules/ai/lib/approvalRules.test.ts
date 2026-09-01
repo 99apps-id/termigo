@@ -7,6 +7,7 @@ import {
   ruleMatches,
   sameRuleTarget,
   serializeApprovalRules,
+  subagentRuleGate,
   upsertRule,
 } from "./approvalRules";
 
@@ -244,5 +245,51 @@ describe("serializeApprovalRules", () => {
       version: 1,
       rules: [],
     });
+  });
+});
+
+describe("subagentRuleGate", () => {
+  const rules: ApprovalRule[] = [
+    {
+      tools: ["bash_run"],
+      command: "rm -rf",
+      action: "deny",
+      reason: "danger",
+    },
+    { tools: ["bash_run"], command: "git ", action: "allow" },
+    { tools: ["edit", "write_file"], path: "**/*.env", action: "ask" },
+  ];
+
+  it("auto-refuses a denied call", () => {
+    expect(
+      subagentRuleGate(rules, {
+        tool: "bash_run",
+        command: "rm -rf build",
+      }),
+    ).toBe("deny");
+  });
+
+  it("auto-runs an allowed call without the queue", () => {
+    expect(
+      subagentRuleGate(rules, { tool: "bash_run", command: "git status" }),
+    ).toBe("allow");
+  });
+
+  it("falls through to the queue when a rule forces ask", () => {
+    expect(subagentRuleGate(rules, { tool: "edit", path: "app/.env" })).toBe(
+      "ask",
+    );
+  });
+
+  it("falls through to the queue when no rule matches", () => {
+    expect(subagentRuleGate(rules, { tool: "edit", path: "src/App.tsx" })).toBe(
+      "ask",
+    );
+  });
+
+  it("falls through to the queue with no rules at all", () => {
+    expect(
+      subagentRuleGate([], { tool: "bash_run", command: "git status" }),
+    ).toBe("ask");
   });
 });

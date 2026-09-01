@@ -110,6 +110,23 @@ Two things follow for anyone changing this area:
 
 `isAutoApproved` (`lib/approvalPolicy.ts`) decides what a mode may skip. Ahead of every branch — including the `all` shortcut — sits a floor no mode delegates: `delete_file`, and any tool carrying a `command` that `deletesFiles` recognises. See [security model](security-model.md#deleting-is-never-delegated).
 
+### Project-scoped approval rules (`.termigo/approvals.json`)
+
+The global mode is a blunt instrument, so per-project **per-tool trust** refines it without loosening it everywhere. Rules live in `.termigo/approvals.json` (`{ version: 1, rules: [...] }`); each rule keys on tool names, a path glob (`src/**`, `**/*.env`) or a command pattern (`git *`, bare patterns are substrings, wildcards are anchored globs), and carries an action: `allow` (auto-run), `deny` (auto-refuse, with an optional `reason`) or `ask` (force a manual prompt even when the mode would wave it through). First match wins.
+
+- **`lib/approvalRules.ts`** — pure matching/parse/serialize; `ruleMatches` (glob → anchored case-insensitive regex), `evaluateApprovalRules` (first match), `ruleFromApproval` (turn one approval into a persisted rule, generalising `git status` → `git *`), `upsertRule` (de-dupe by target), and `subagentRuleGate` (map a decision onto a sub-agent call).
+- **`store/approvalRulesStore.ts`** — loads the active workspace's file, evaluates synchronously, persists edits (add / remove / cycle action).
+- **Applied to the main agent** in `hooks/useAutoApproval.ts` (deny auto-refuses, allow auto-approves, ask leaves it for the user) **and to sub-agents** in `runSubagent.ts`'s `gate()` via `subagentRuleGate`, so a rule set for the agent holds for its workers. Precedence: an explicit session/global allowance wins, then the rules, then the scoped-scan opt-in, then the mode.
+- **Managed from the UI** in `ApprovalModeControl.tsx` (list / cycle / remove) and the per-approval "always allow in this project" affordance in `AiToolApproval.tsx`.
+
+### User-authored slash commands (`.termigo/commands/*.md`)
+
+Alongside the built-in `/init`, `/plan`, `/goal`, `/model`, … a user can author per-project commands: one Markdown file per command under `.termigo/commands/`, frontmatter `description:` for the picker and the body as the prompt template, with `$ARGUMENTS` replaced by whatever the user typed after the name (Claude Code's convention; when the placeholder is absent the arguments are appended).
+
+- **`lib/customCommands.ts`** — `parseCommand` (frontmatter + body), `expandCommand` (`$ARGUMENTS` substitution), `listCustomCommands` (scan, never throws), `isValidCommandName` (the same slug rule skills use, so `../../etc/passwd` cannot be a command).
+- **`store/customCommandsStore.ts`** holds the loaded list; `tryRunSlashCommand` (`lib/slashCommands.ts`) resolves `/name` to a built-in or the user's command and emits the expanded prompt.
+- **UI** — `AiComposerInput`'s `/` picker lists built-in and custom commands together (custom ones shadowed by a built-in name are hidden), and re-scans `.termigo/commands` when the picker opens so a new file shows up without a restart.
+
 ## Transport
 
 `proxyFetch` (`lib/proxyFetch.ts`) routes provider calls through the Rust `ai_http_stream` command rather than the webview's own `fetch`, so keys and SSRF checks stay off the page. Bodies do not cross as `number[]`: JSON writes that as decimal digits and commas, measured at 3.0x the payload, and an agent re-sends the whole conversation on every step. A request body is already a JSON string and now travels as itself (`{ kind: "text" }`); binary bodies pay base64 (`{ kind: "base64" }`). Response chunks use base64 because a chunk boundary can split a UTF-8 sequence — and because every channel message under 8 KB is injected into the webview as JavaScript source, so inflation there is script the engine then has to parse, once per chunk.

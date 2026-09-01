@@ -10,6 +10,7 @@ import {
 } from "../lib/agent";
 import { subagentWriteNeedsApproval } from "../lib/approvalPolicy";
 import { summarizeInput } from "../lib/approvalQueue";
+import { subagentRuleGate } from "../lib/approvalRules";
 import { isCustomTool } from "../lib/customToolNames";
 import { isExtensionTool } from "../lib/extensionToolNames";
 import { buildExtensionTools } from "../lib/extensionTools";
@@ -25,6 +26,7 @@ import {
   rememberSessionAllowed,
   useApprovalQueue,
 } from "../store/approvalQueueStore";
+import { useApprovalRulesStore } from "../store/approvalRulesStore";
 import { useChatStore } from "../store/chatStore";
 import { usePlanStore } from "../store/planStore";
 import type { ToolContext } from "../tools/context";
@@ -147,6 +149,30 @@ function gate<T extends AnyTool>(
       ) {
         return inner(input, opts);
       }
+
+      // Project-scoped approval rules (.termigo/approvals.json) hold for
+      // sub-agents too — a rule the user set for their own agent must not be
+      // bypassed by a worker. deny auto-refuses, allow auto-runs, and ask (or
+      // no match) falls through to the queue below. Same precedence as the
+      // main agent's auto-approval path: an explicit session/global allowance
+      // wins, then the rules, then the scoped-scan opt-in.
+      const ruleInput = input as { command?: unknown; path?: unknown };
+      const ruleGate = subagentRuleGate(
+        useApprovalRulesStore.getState().rules,
+        {
+          tool: toolName,
+          command:
+            typeof ruleInput.command === "string" ? ruleInput.command : null,
+          path: typeof ruleInput.path === "string" ? ruleInput.path : null,
+        },
+      );
+      if (ruleGate === "deny") {
+        return {
+          error:
+            "denied by a project approval rule (.termigo/approvals.json). Do not retry this call; report it as not done.",
+        };
+      }
+      if (ruleGate === "allow") return inner(input, opts);
 
       // Scoped auto-approval: an in-scope, read-tier scan (nmap -sV, ffuf, ...)
       // against a target already in the authorized scope runs without a prompt
