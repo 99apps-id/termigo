@@ -42,6 +42,7 @@ import { getOrCreateChat } from "../store/chatRuntime";
 import { useChatStore } from "../store/chatStore";
 import { usePlanStore } from "../store/planStore";
 import { AiChatView } from "./AiChat";
+import { AiChatErrorBoundary } from "./AiChatErrorBoundary";
 import { ApprovalQueueStrip } from "./ApprovalQueueStrip";
 import { PlanDiffReview } from "./PlanDiffReview";
 import { QueuedSteerRow } from "./QueuedSteerRow";
@@ -197,14 +198,16 @@ export function AiChatBody({
           <EmptyState onPick={focusInput} />
         ) : (
           <div className="flex min-h-0 flex-1 flex-col [&_.text-sm]:text-[12px] [&_p]:leading-relaxed">
-            <AiChatView
-              messages={helpers.messages}
-              status={helpers.status}
-              error={helpers.error}
-              clearError={helpers.clearError}
-              addToolApprovalResponse={helpers.addToolApprovalResponse}
-              stop={helpers.stop}
-            />
+            <AiChatErrorBoundary sessionId={sessionId}>
+              <AiChatView
+                messages={helpers.messages}
+                status={helpers.status}
+                error={helpers.error}
+                clearError={helpers.clearError}
+                addToolApprovalResponse={helpers.addToolApprovalResponse}
+                stop={helpers.stop}
+              />
+            </AiChatErrorBoundary>
           </div>
         )}
       </div>
