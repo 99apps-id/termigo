@@ -68,6 +68,7 @@ async function renderView(
     ok?: boolean;
     title?: string;
     error?: string;
+    mermaid?: string;
   };
 }
 
@@ -214,5 +215,28 @@ describe("render_view", () => {
   it("reports when the canvas surface is unavailable", async () => {
     const r = await renderView(makeContext({ openCanvas: () => false }), "<div/>");
     expect(r.error).toMatch(/canvas surface unavailable/i);
+  });
+
+  // The canvas strips <script> and runs no scripts, so a Mermaid HTML view
+  // would render blank. The tool must NOT open the canvas — it returns the
+  // fenced block so the model shows the diagram in chat instead.
+  it("refuses a Mermaid HTML view and returns the fenced block", async () => {
+    const html = `<html><head><script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script></head>
+<body><pre class="mermaid">flowchart LR
+A --> B</pre></body></html>`;
+    const openCanvas = vi.fn(() => true);
+    const r = await renderView(makeContext({ openCanvas }), html, "Graph");
+    expect(openCanvas).not.toHaveBeenCalled();
+    expect(r.ok).toBeUndefined();
+    expect(r.error).toMatch(/blank/i);
+    expect(r.mermaid).toContain("flowchart LR");
+    expect(r.mermaid).toContain("A --> B");
+  });
+
+  it("detects a fenced mermaid block inside the HTML too", async () => {
+    const html = `<div>plan</div>\n\`\`\`mermaid\nsequenceDiagram\nA->>B: hi\n\`\`\`\n`;
+    const r = await renderView(makeContext({ openCanvas: vi.fn(() => true) }), html);
+    expect(r.ok).toBeUndefined();
+    expect(r.mermaid).toContain("sequenceDiagram");
   });
 });

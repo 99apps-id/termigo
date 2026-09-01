@@ -108,6 +108,24 @@ const PREVIEW_DOC_CSS = `<style>
   a{color:#1a6f62;}
 </style>`;
 
+// The canvas strips <script> and runs no scripts (sandbox without
+// allow-scripts), so an HTML view that relies on the Mermaid CDN renders as a
+// blank card. Catch that before opening the canvas: if the content is clearly a
+// Mermaid document, return the fenced block so the model can show it in chat
+// (which renders Mermaid properly) instead of a blank preview.
+function findMermaidFlows(html: string): string[] {
+  const flows: string[] = [];
+  // Fenced ```mermaid code inside the HTML.
+  const fence =
+    /```mermaid\s*\n([\s\S]*?)(?:```|$)/gi;
+  // <pre class="mermaid">…</pre> (common Mermaid-hosted export).
+  const pre =
+    /<pre[^>]*class=["'][^"']*\bmermaid\b[^"']*["'][^>]*>([\s\S]*?)<\/pre>/gi;
+  for (const m of html.matchAll(fence)) flows.push(m[1].trim());
+  for (const m of html.matchAll(pre)) flows.push(m[1].trim());
+  return flows.filter(Boolean);
+}
+
 export function buildTerminalTools(ctx: ToolContext) {
   return {
     suggest_command: tool({
@@ -230,6 +248,17 @@ export function buildTerminalTools(ctx: ToolContext) {
           ),
       }),
       execute: async ({ html, title }) => {
+        // Mermaid only renders in chat (the canvas disables scripts), so if the
+        // view is a Mermaid document, return the fenced block instead of
+        // opening a blank canvas.
+        const flows = findMermaidFlows(html);
+        if (flows.length > 0) {
+          return {
+            error:
+              "The canvas cannot run Mermaid's <script> (scripts are stripped), so this diagram would render blank. Show it in chat instead:",
+            mermaid: flows.join("\n\n"),
+          };
+        }
         const ok = ctx.openCanvas(html, title);
         if (!ok) return { error: "canvas surface unavailable" };
         // Record the canvas as an artifact so the user can reopen it later
@@ -283,6 +312,18 @@ export function buildTerminalTools(ctx: ToolContext) {
             : ext === "md" || ext === "markdown"
               ? `${PREVIEW_DOC_CSS}\n${mdToHtml(content)}`
               : `${PREVIEW_DOC_CSS}\n<pre>${escHtml(content)}</pre>`;
+        // A report that is (or embeds) a Mermaid diagram cannot render in the
+        // canvas — scripts are disabled — so hand the fenced block to the model
+        // to show in chat instead of opening a blank preview.
+        const flows = findMermaidFlows(doc);
+        if (flows.length > 0) {
+          return {
+            error:
+              "This document is a Mermaid diagram. The preview pane disables scripts, so it would render blank there — show it in chat instead:",
+            mermaid: flows.join("\n\n"),
+            path: abs,
+          };
+        }
         const ok = ctx.openCanvas(doc, title ?? path.split(/[/\\]/).pop());
         return ok
           ? { ok: true, path: abs }
