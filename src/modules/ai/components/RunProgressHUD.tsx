@@ -46,15 +46,22 @@ export function RunProgressHUD() {
   const status = useChatStore((s) => s.agentMeta.status);
   const step = useChatStore((s) => s.agentMeta.step);
   const sessionId = useChatStore((s) => s.activeSessionId);
+  // Selectors return a STABLE reference (the store's own array, or undefined) —
+  // a selector that built a fresh `?? []` here returned a new array every
+  // render, which zustand v5's useSyncExternalStore reads as a change on every
+  // snapshot and re-renders forever (the AI-chat-panel hang). The `?? []`
+  // fallback happens outside the selector instead.
   const todos = useTodosStore(
     (s) =>
-      (s.bySession[sessionId ?? ""]?.items ?? []) as
+      s.bySession[sessionId ?? ""]?.items as
         | { id: string; title: string; status: string }[]
         | undefined,
   );
   const subRuns = useSubagentRunStore(
     (s) =>
-      (sessionId ? (s.bySession[sessionId] ?? []) : []) as SubagentRunLike[],
+      (sessionId ? s.bySession[sessionId] : undefined) as
+        | SubagentRunLike[]
+        | undefined,
   );
 
   const running =
@@ -70,7 +77,7 @@ export function RunProgressHUD() {
       status: t.status as "pending" | "in_progress" | "completed",
     })),
   );
-  const liveSubagents = subRuns
+  const liveSubagents = (subRuns ?? [])
     .filter((r) => r.status === "running")
     .slice(-MAX_LIVE_SUBAGENTS);
   if (!step && !hasTodos && liveSubagents.length === 0) return null;
