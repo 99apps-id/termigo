@@ -209,6 +209,17 @@ Features adopted from the BatikCode (VS Code fork) agent host, adapted to Termig
 - **Artifacts panel.** `store/artifactsStore.ts` (per-session, cap 50) records canvases (`render_view`), previews (`open_preview`), and files (`write_file`) the agent produced; `lib/artifactOpen.ts` is a module-level opener registry (mirrors `setLspNavigator`); `components/ArtifactsDialog.tsx` (Layers02 button in `AiStatusBarControls`) lists and reopens them — files in the editor, previews/canvases in preview tabs. `App.tsx` registers `setArtifactOpener`; `chatStore.deleteSession` clears the session's artifacts.
 - **Post-execution confirmation.** Opt-in `confirmAfterMutations` preference (default off). `lib/postExecuteConfirm.ts` wraps the mutating tools (`write_file`, `edit`, `multi_edit`, `bash_run`) so a successful run registers a confirmation in `store/confirmationStore.ts` and awaits the user's **Keep / Revert** before the agent continues (BatikCode `PendingResultConfirmation` parity). Revert is best-effort `git restore` of the touched paths via the shared session shell; a dismissed/aborted confirmation keeps the change (never auto-reverts). UI: `components/ConfirmationCarousel.tsx` mounted next to the elicitation carousel; toggle in Settings → Agents.
 
+### Dev server in the browser pane — composed, not a dedicated tool
+
+There is deliberately **no** dedicated `dev_server` orchestration tool (one that detects the dev command, spawns it, health-polls the port and opens the page). That matches VS Code / BatikCode, which have no such first-class agent tool either; the agent composes the same workflow from tools that already exist and are already safe:
+
+1. **Spawn** — `bash_background` starts the server (`pnpm dev`, `vite`, `next dev`, …), returning a `handle`; `bash_list` (always called first) guards against spawning a duplicate of an already-running dev server.
+2. **Watch / stop** — `bash_logs <handle>` tails the ring buffer (the framework prints its "Local: http://localhost:5173/" line), `bash_kill <handle>` stops it.
+3. **Open** — `open_preview` accepts the loopback URL (`http://localhost:<port>`) and opens it in the in-app preview/browser tab.
+4. **Control / execute** — the `browser_*` tools drive the page in that tab: `browser_navigate`, `browser_click`, `browser_type`, `browser_eval`, `browser_extract`, `browser_screenshot`, `browser_console`, `browser_url`.
+
+A one-tool wrapper would save the model a couple of calls but duplicate an existing, already-guarded surface (and would need a new loopback-only HTTP probe in Rust that the composition avoids entirely). The composed workflow is what the model is told in the system prompt; see `ROADMAP.md` "What Termigo is not".
+
 ## Scheduled runs
 
 `lib/scheduler.ts` lets the user queue an agent prompt to run on a schedule. The pure helpers (`parseScheduleWhen`, `computeNextDueAt`, `dueTasks`) are unit-tested; `startScheduler`/`stopScheduler` run a 15-second tick that lazily imports `chatStore`, `sessionDirectiveStore`, and `chatRuntime` inside the tick so the AI stack stays out of the eager bundle.

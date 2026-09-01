@@ -16,6 +16,7 @@ The product is opinionated: terminal-first, AI as a primitive (not a sidebar), l
 - Not a browser. Web preview exists for local dev servers and lightweight doc viewing only.
 - Not a general workspace. Tools and formats that pull the product away from the terminal-first surface are out of scope.
 - Not a one-size-fits-all CLI replacement. The goal is the best terminal-first AI-native development environment, not a shell with extras.
+- **No dedicated "dev-server in the browser pane" agent tool** (a `dev_server` orchestration tool that detects the dev command, spawns it, health-polls the port and drives the page). Like VS Code / BatikCode, this is deliberately **out of scope**: the agent already composes the same workflow from `bash_background` (spawn) + `bash_logs`/`bash_kill` (watch/stop) + `open_preview` (open `http://localhost:<port>`) + the `browser_*` tools (`browser_navigate`, `browser_click`, `browser_type`, `browser_eval`, `browser_extract`, `browser_screenshot`), and `bash_list` guards against duplicate dev servers. A one-tool wrapper would save the model a couple of calls but would duplicate an existing, already-safe surface — against the lightweight-everything theme.
 
 ## Themes
 
