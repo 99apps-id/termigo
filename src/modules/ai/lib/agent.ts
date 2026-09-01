@@ -564,13 +564,21 @@ export function noProgressStop<T extends ToolSet>(
   };
 }
 
-/** True when a tool result is an error object (`{ error }`) rather than data. */
+/** True when a tool result is an error (or failure) rather than data. */
 function isErrorResult(output: unknown): boolean {
-  return (
-    output != null &&
-    typeof output === "object" &&
-    "error" in (output as Record<string, unknown>)
-  );
+  if (output == null || typeof output !== "object") return false;
+  const record = output as Record<string, unknown>;
+  // A tool surfaced its failure as an { error: "..." } object.
+  if (record.error) return true;
+  // Command tools (bash_run, git_*, run_checks, test_loop) report failure as a
+  // non-zero exit_code or a timed_out flag, not an { error } object. Missing
+  // them here meant a command that kept failing was invisible to noErrorProgress
+  // and the agent retried it round after round — the "hang" seen when lint or
+  // build never passes.
+  const code = record.exit_code;
+  if (typeof code === "number" && code !== 0) return true;
+  if (record.timed_out === true) return true;
+  return false;
 }
 
 /**

@@ -212,6 +212,58 @@ describe("noErrorProgress", () => {
     ];
     expect(stop(steps(batch, batch, batch))).toBe(false);
   });
+
+  // Command tools (bash_run, git_*, run_checks) report failure as
+  // exit_code !== 0 or timed_out: true — NOT an { error } object. Before the
+  // fix, a command that failed round after round looked like data and the
+  // guard never fired, so the agent retried a failing lint/build forever.
+  it("treats a non-zero exit_code as an error", () => {
+    const cmdFail: Call = {
+      toolName: "bash_run",
+      toolCallId: "lint-fail",
+      input: { command: "npm run lint" },
+      output: {
+        command: "npm run lint",
+        stdout: "error",
+        stderr: "some lint errors",
+        exit_code: 1,
+        timed_out: false,
+      },
+    };
+    expect(stop(steps([cmdFail], [cmdFail], [cmdFail]))).toBe(true);
+  });
+
+  it("treats a timed_out command as an error", () => {
+    const timeout: Call = {
+      toolName: "bash_run",
+      toolCallId: "build-timeout",
+      input: { command: "npm run build" },
+      output: {
+        command: "npm run build",
+        stdout: "",
+        stderr: "",
+        exit_code: null,
+        timed_out: true,
+      },
+    };
+    expect(stop(steps([timeout], [timeout], [timeout]))).toBe(true);
+  });
+
+  it("does not treat exit_code 0 as an error", () => {
+    const ok: Call = {
+      toolName: "bash_run",
+      toolCallId: "lint-ok",
+      input: { command: "npm run lint" },
+      output: {
+        command: "npm run lint",
+        stdout: "clean",
+        stderr: "",
+        exit_code: 0,
+        timed_out: false,
+      },
+    };
+    expect(stop(steps([ok], [ok], [ok]))).toBe(false);
+  });
 });
 
 describe("synthesisStopDecision", () => {
