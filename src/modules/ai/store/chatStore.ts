@@ -383,15 +383,6 @@ async function loadInterruptedPatch(
   return runInterruptedPatch(meta, inFlight);
 }
 
-async function hasInterruptedRun(id: string): Promise<boolean> {
-  const [meta, inFlight] = await Promise.all([
-    loadRunMeta(id),
-    loadRunInFlight(id),
-  ]);
-  if (inFlight !== null) return true;
-  return meta !== null && (meta.stopReason !== null || meta.stoppedByUser);
-}
-
 export const useChatStore = create<StoreState>((set, get) => ({
   live: NOOP_LIVE,
   setLive: (live) => set({ live }),
@@ -518,12 +509,20 @@ export const useChatStore = create<StoreState>((set, get) => ({
 
   hydrateSessions: async () => {
     if (get().sessionsHydrated) return;
-    const { sessions, activeId } = await loadAll();
+    const { sessions } = await loadAll();
 
-    // Reuse the most recent untitled "New chat" session if one exists from
-    // the previous run — no point stacking empty placeholder sessions every
-    // launch. Otherwise prepend a fresh one.
-    const reusable = sessions[0]?.title === "New chat" ? sessions[0] : null;
+    // Always start on a fresh, empty session so the AI chat window does not
+    // reopen with the previous task's history (or an interrupted run to
+    // resume) — that reads as "the old chat came back". Prior sessions stay in
+    // the list and can still be opened from history; they just are not the
+    // active one on launch. Reuse the most recent genuine "New chat"
+    // placeholder (one with no messages) so an empty session is not stacked
+    // every launch; otherwise prepend a fresh one.
+    let reusable = sessions[0]?.title === "New chat" ? sessions[0] : null;
+    if (reusable) {
+      const msgs = await loadMessages(reusable.id);
+      if (msgs && msgs.length > 0) reusable = null;
+    }
     let nextSessions: SessionMeta[];
     let freshId: string;
     if (reusable) {
@@ -541,31 +540,11 @@ export const useChatStore = create<StoreState>((set, get) => ({
       void saveSessionsList(nextSessions);
     }
 
-    // If a run was cut off mid-flight (the app closed while the model was
-    // working), reopen that session so the user can resume immediately rather
-    // than hunting through history. Otherwise keep the fresh placeholder.
-    const resumed =
-      activeId && sessions.some((s) => s.id === activeId)
-        ? await hasInterruptedRun(activeId)
-        : false;
-    const targetId = resumed && activeId ? activeId : freshId;
-    if (targetId !== freshId) {
-      const msgs = await loadMessages(targetId);
-      if (msgs && msgs.length > 0) seedMessages.set(targetId, msgs);
-    }
-    void saveActiveId(targetId);
-
+    void saveActiveId(freshId);
     set({
       sessions: nextSessions,
-      activeSessionId: targetId,
+      activeSessionId: freshId,
       sessionsHydrated: true,
-    });
-    // Restore an interrupted run so the active chat can offer "Continue"/"Resume"
-    // after the app was closed mid-run.
-    void loadInterruptedPatch(targetId).then((patch) => {
-      if (!patch) return;
-      if (useChatStore.getState().activeSessionId !== targetId) return;
-      useChatStore.getState().patchAgentMeta(patch);
     });
   },
 
