@@ -198,15 +198,15 @@ export function AgentsSection() {
             checked={autoCheckpoint}
             onCheckedChange={(v) => void setAutoCheckpoint(v)}
           />
-          <SettingRow
-            title="Show reasoning"
-            description="Show model reasoning/thinking blocks in the AI chat. Turn this off to hide chain-of-thought output and keep the transcript compact."
-          >
-            <Switch
-              checked={showReasoning}
-              onCheckedChange={(v) => void setShowReasoning(v)}
-            />
-          </SettingRow>
+        </SettingRow>
+        <SettingRow
+          title="Show reasoning"
+          description="Show model reasoning/thinking blocks in the AI chat. Turn this off to hide chain-of-thought output and keep the transcript compact."
+        >
+          <Switch
+            checked={showReasoning}
+            onCheckedChange={(v) => void setShowReasoning(v)}
+          />
         </SettingRow>
         <SettingRow
           title="Cost budget (USD)"
