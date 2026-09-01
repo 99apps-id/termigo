@@ -141,8 +141,9 @@ The themes below frame every scope decision.
   management, recovery, and long-running tasks. Shipped: context-window
   auto-recovery, transient-provider-error recovery, interrupted-run recovery
   after a restart, loop round-cap, no-progress / tool-error guards, the
-  per-run workspace anchor, and rotating thinking-phrase status (no step
-  spam).
+  per-run workspace anchor, rotating thinking-phrase status (no step spam),
+  and context pruning — a verified span of history (saved to git via a
+  checkpoint) is collapsed into a checkpoint summary each turn to save tokens.
 - [x] Expand external coding-agent orchestration beyond Claude Code — built-in
   launchers for Codex, Gemini, Pi, OpenCode, Grok, Aider, Qwen and Cursor, plus
   user-defined custom coding-agent CLIs in Settings.

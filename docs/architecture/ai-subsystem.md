@@ -152,6 +152,14 @@ A long agentic task that outgrows the model's context window used to die mid-way
 - **Auto-resume.** In `chatRuntime` `onError`, an overflow is recorded and the SAME run is resumed automatically (`resumeRun`) so the task keeps going instead of stopping. A per-session throttle (`overflowAutoResumeAt`, 60s) prevents a loop when compaction can never fit (e.g. the system prompt + tool schemas alone exceed the window). The **Try again** button in `AiChat.tsx` remains as the manual fallback for a second overflow.
 - **`config.ts`** keeps the configured limit as the real cap (DeepSeek V4 is 1M). If a specific endpoint rejects lower, the learning layer scales the effective budget down from the observed overshoot — so the config is not a guess.
 
+## Context pruning
+
+Compaction trims messages *by size* but still ships every message on every turn, so a long task keeps re-paying for its finished history. Context pruning goes further: when an early span of the transcript is **verified** — its mutations are saved to git via a successful `git_checkpoint` / `git_commit` — the whole span is replaced by a single user message carrying a compressed checkpoint summary (files changed, files read, commands/checks run with exit status, a compact diff note). The model keeps knowing the current state without the history that produced it.
+
+- **`lib/contextPrune.ts`** `findVerifiedCut` picks the highest safe cut: the prefix must be self-contained (every tool-call inside has its tool-result inside — never a dangling call or orphaned result), contain at least one verified checkpoint, be at least `PRUNE_MIN_VERIFIED_MESSAGES` long, and leave `PRUNE_TAIL_KEEP` trailing messages fully intact. `summarizeSegment` pairs commands/checks by `toolCallId` (not by string-matching the command, which breaks on `run_checks {kind}` overrides) and treats `exit_code ≠ 0` or any `error` as a failure. `formatPruneSummary` caps at 1800 chars.
+- **Pipeline order** in `runAgentStream` (`agent.ts`): SDK `pruneMessages` → `compactModelMessagesDetailed` → `evictObsoleteToolOutputs` → `pruneVerifiedPrefix` (last, so it prunes the smallest already-trimmed history). When it fires, `opts.onPrune({ prunedMessages })` surfaces a `PruneNotice` in the chat (`AgentMeta.pruneNotice`).
+- **Why it is safe.** A cut only happens on a balanced tool-call/result boundary and after the work is committed to git, so the collapsed span is reproducible from the checkpoint; the summary message is plain text, so provider tool-call/result validation is never affected.
+
 ## Transient provider-error recovery
 
 A run can also stop for reasons that are not the model's fault — the internet drops, the provider's quota runs out, or a rate limit is hit. These are recoverable: once the condition clears, the same run should continue, not start over. `chatRuntime` `onError` classifies them:

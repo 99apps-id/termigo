@@ -156,6 +156,12 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   automatically — so a long task keeps going instead of stopping mid-way. A
   per-session throttle stops it looping when compaction can never fit, and a
   Try again button stays as the manual fallback.
+- **Finished work stops costing tokens.** Once a span of history is verified —
+  its changes are saved to git by a checkpoint or commit — the next turn
+  replaces that whole span with a short checkpoint summary (files changed,
+  commands and checks run, a compact diff note) instead of resending the full
+  chat. The model keeps knowing the current state without re-paying for the
+  history that produced it.
 - **It survives a dropped connection or an exhausted quota.** If the internet
   drops, the agent pauses and resumes automatically when you're back online; if
   the provider's quota or credits run out (or a rate limit is hit), the run is
