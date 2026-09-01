@@ -268,6 +268,14 @@ export type Preferences = {
    * Off by default — it adds a click per mutation.
    */
   confirmAfterMutations: boolean;
+  /**
+   * Opt-in automatic verification after an edit: after write_file / edit /
+   * multi_edit succeeds, best-effort format + lint runs and the outcome is
+   * folded into the tool result so the model sees whether the change is valid
+   * (full-agentic read -> change -> verify -> repair). Off by default — it
+   * costs a little time per edit.
+   */
+  autoVerifyAfterEdit: boolean;
 };
 
 export type EditorFormatter =
@@ -380,6 +388,7 @@ const KEY_PERSIST_TERMINALS = "persistTerminals";
 const KEY_TERMINAL_AI_SUGGEST = "terminalAiSuggest";
 const KEY_SHOW_REASONING = "showReasoning";
 const KEY_CONFIRM_AFTER_MUTATIONS = "confirmAfterMutations";
+const KEY_AUTO_VERIFY_AFTER_EDIT = "autoVerifyAfterEdit";
 
 export const TERMINAL_FONT_SIZE_DEFAULT = 14;
 export const TERMINAL_FONT_SIZE_MIN = 8;
@@ -487,6 +496,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   terminalAiSuggest: false,
   showReasoning: true,
   confirmAfterMutations: false,
+  autoVerifyAfterEdit: false,
 };
 
 const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
@@ -776,6 +786,9 @@ export async function loadPreferences(): Promise<Preferences> {
     confirmAfterMutations:
       get<boolean>(KEY_CONFIRM_AFTER_MUTATIONS) ??
       DEFAULT_PREFERENCES.confirmAfterMutations,
+    autoVerifyAfterEdit:
+      get<boolean>(KEY_AUTO_VERIFY_AFTER_EDIT) ??
+      DEFAULT_PREFERENCES.autoVerifyAfterEdit,
     agentLaunchCommands: normalizeAgentLaunchCommands(
       get<unknown>(KEY_AGENT_LAUNCH_COMMANDS),
     ),
@@ -1231,6 +1244,10 @@ export async function setConfirmAfterMutations(value: boolean): Promise<void> {
   await writePref(KEY_CONFIRM_AFTER_MUTATIONS, value);
 }
 
+export async function setAutoVerifyAfterEdit(value: boolean): Promise<void> {
+  await writePref(KEY_AUTO_VERIFY_AFTER_EDIT, value);
+}
+
 export async function setAgentLaunchCommands(
   value: AgentLaunchCommands,
 ): Promise<void> {
@@ -1349,6 +1366,7 @@ export async function onPreferencesChange(
     [KEY_PERSIST_TERMINALS]: "persistTerminals",
     [KEY_TERMINAL_AI_SUGGEST]: "terminalAiSuggest",
     [KEY_CONFIRM_AFTER_MUTATIONS]: "confirmAfterMutations",
+    [KEY_AUTO_VERIFY_AFTER_EDIT]: "autoVerifyAfterEdit",
   };
   // Same-process writes still fire onChange immediately; cross-window writes
   // arrive via the Tauri event emitted by writePref().

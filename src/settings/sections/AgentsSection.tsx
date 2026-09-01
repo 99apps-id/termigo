@@ -54,6 +54,7 @@ import {
   setAgentReviewAfterApply,
   setAutoApproveInScopeScans,
   setAutoCheckpoint,
+  setAutoVerifyAfterEdit,
   setConfirmAfterMutations,
   setCostBudgetUsd,
   setCostDailyBudgetUsd,
@@ -103,6 +104,7 @@ export function AgentsSection() {
   const confirmAfterMutations = usePreferencesStore(
     (s) => s.confirmAfterMutations,
   );
+  const autoVerifyAfterEdit = usePreferencesStore((s) => s.autoVerifyAfterEdit);
   const customEndpoints = usePreferencesStore((s) => s.customEndpoints);
 
   // Fall back to "auto" if the stored id no longer resolves (a deleted custom
@@ -314,6 +316,15 @@ export function AgentsSection() {
           <Switch
             checked={confirmAfterMutations}
             onCheckedChange={(v) => void setConfirmAfterMutations(v)}
+          />
+        </SettingRow>
+        <SettingRow
+          title="Auto-verify after edits"
+          description="After write/edit/multi_edit succeeds, best-effort format + lint runs and the outcome is folded into the tool result, so the agent sees whether the change is valid and can repair it (read → change → verify → repair)."
+        >
+          <Switch
+            checked={autoVerifyAfterEdit}
+            onCheckedChange={(v) => void setAutoVerifyAfterEdit(v)}
           />
         </SettingRow>
       </section>

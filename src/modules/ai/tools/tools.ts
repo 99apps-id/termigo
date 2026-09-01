@@ -1,3 +1,4 @@
+import { withAutoVerify } from "../lib/autoVerify";
 import { buildOrchestratorTools } from "../lib/orchestrator";
 import { buildPolicyTools } from "../lib/policyEngine";
 import {
@@ -246,6 +247,19 @@ export function buildTools(
         ctx,
       ) as unknown;
     }
+    // Automatic verification (full-agentic loop): when the preference is on, a
+    // successful edit folds a best-effort format + lint outcome into the tool
+    // result so the model sees whether the change is valid.
+    wrappedTool = withAutoVerify(
+      name,
+      wrappedTool as {
+        execute: (
+          args: Record<string, unknown>,
+          options: { toolCallId?: string; abortSignal?: AbortSignal },
+        ) => Promise<unknown>;
+      },
+      ctx,
+    ) as unknown;
     wrapped[name] = wrappedTool;
   }
   const wrappedBase = wrapped as typeof base;
