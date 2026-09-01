@@ -501,14 +501,34 @@ impl RequestBody {
     }
 }
 
-#[tauri::command]
-pub async fn ai_http_stream(
+/// How long to wait for a provider's response headers before giving up.
+///
+/// `reqwest` resolves `send()` only once headers arrive, and a provider that
+/// accepts the connection and then says nothing left the Rust task blocked
+/// there forever. That made the agent hang: a forwarded Stop rejects the
+/// frontend stream, but it cannot interrupt a `send()` that is waiting on the
+/// wire. This bound is what finally lets the request settle.
+const AI_STREAM_FIRST_BYTE_TIMEOUT: Duration = Duration::from_secs(90);
+/// How long the body may go without a chunk before it is treated as a stalled
+/// provider. A healthy stream keeps sending, so this never trips; it only
+/// stops the case where headers arrive and then the connection goes silent
+/// mid-response.
+const AI_STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+
+#[derive(Clone, Copy)]
+struct StreamTimeouts {
+    first_byte: Duration,
+    idle: Duration,
+}
+
+async fn stream_http(
     url: String,
     method: String,
     headers: Option<HashMap<String, String>>,
     body: Option<RequestBody>,
     allow_private_network: Option<bool>,
-    on_event: Channel<AiStreamEvent>,
+    on_event: &Channel<AiStreamEvent>,
+    timeouts: StreamTimeouts,
 ) -> Result<(), String> {
     let allow_private = allow_private_network.unwrap_or(false);
     let body = match body.map(RequestBody::into_bytes).transpose() {
@@ -542,13 +562,25 @@ pub async fn ai_http_stream(
     };
 
     let req = build_request(&client, &method, parsed, headers, body)?;
-    let resp = match req.send().await {
-        Ok(r) => r,
-        Err(e) => {
+
+    // Time-to-first-byte bound. Dropping the cancelled future aborts the
+    // in-flight HTTP request, so a silent provider neither hangs the agent nor
+    // keeps a connection open.
+    let resp = match tokio::time::timeout(timeouts.first_byte, req.send()).await {
+        Ok(Ok(r)) => r,
+        Ok(Err(e)) => {
             let message = describe_error(&e);
             let _ = on_event.send(AiStreamEvent::Error {
                 message: message.clone(),
             });
+            return Err(message);
+        }
+        Err(_) => {
+            let message = format!(
+                "provider did not respond within {}s",
+                timeouts.first_byte.as_secs(),
+            );
+            let _ = on_event.send(AiStreamEvent::Error { message: message.clone() });
             return Err(message);
         }
     };
@@ -558,9 +590,22 @@ pub async fn ai_http_stream(
     let _ = on_event.send(AiStreamEvent::Headers { status, headers });
 
     let mut stream = resp.bytes_stream();
-    while let Some(item) = stream.next().await {
+    loop {
+        // Idle bound: a provider that sends headers and then goes quiet is
+        // stalled, not slowly working.
+        let item = tokio::select! {
+            item = stream.next() => item,
+            _ = tokio::time::sleep(timeouts.idle) => {
+                let message = format!(
+                    "provider stream stalled (no data for {}s)",
+                    timeouts.idle.as_secs(),
+                );
+                let _ = on_event.send(AiStreamEvent::Error { message: message.clone() });
+                return Err(message);
+            }
+        };
         match item {
-            Ok(chunk) => {
+            Some(Ok(chunk)) => {
                 use base64::Engine as _;
                 let bytes: Bytes = chunk;
                 if on_event
@@ -573,18 +618,43 @@ pub async fn ai_http_stream(
                     return Ok(());
                 }
             }
-            Err(e) => {
+            Some(Err(e)) => {
                 let message = describe_error(&e);
                 let _ = on_event.send(AiStreamEvent::Error {
                     message: message.clone(),
                 });
                 return Err(message);
             }
+            None => break,
         }
     }
 
     let _ = on_event.send(AiStreamEvent::End);
     Ok(())
+}
+
+#[tauri::command]
+pub async fn ai_http_stream(
+    url: String,
+    method: String,
+    headers: Option<HashMap<String, String>>,
+    body: Option<RequestBody>,
+    allow_private_network: Option<bool>,
+    on_event: Channel<AiStreamEvent>,
+) -> Result<(), String> {
+    stream_http(
+        url,
+        method,
+        headers,
+        body,
+        allow_private_network,
+        &on_event,
+        StreamTimeouts {
+            first_byte: AI_STREAM_FIRST_BYTE_TIMEOUT,
+            idle: AI_STREAM_IDLE_TIMEOUT,
+        },
+    )
+    .await
 }
 
 /// Result of a dev-server health probe. Probe failures are NOT errors: the
@@ -907,6 +977,44 @@ mod tests {
         drop(map);
         // Cloned clients share a pool; both being usable is the observable part.
         drop((first, second));
+    }
+
+    // A provider that accepts the connection and then says nothing used to
+    // leave the agent hanging forever: `send()` only resolves once headers
+    // arrive, and there was no bound on that wait. The first-byte timeout is
+    // the guard, and the test keeps it from regressing. It is also what makes
+    // a forwarded Stop able to settle the run.
+    #[tokio::test]
+    async fn ai_http_stream_times_out_when_the_provider_never_responds() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        // Accept the socket but never write a response.
+        let _server = tokio::spawn(async move {
+            let (_socket, _peer) = listener.accept().await.expect("accept");
+            std::future::pending::<()>().await;
+        });
+
+        let channel = Channel::new(|_msg| Ok(()));
+        let err = stream_http(
+            format!("http://{addr}/v1/chat/completions"),
+            "POST".to_string(),
+            None,
+            None,
+            Some(true), // loopback requires explicit opt-in
+            &channel,
+            StreamTimeouts {
+                first_byte: Duration::from_millis(400),
+                idle: Duration::from_millis(400),
+            },
+        )
+        .await
+        .expect_err("a silent provider must time out");
+        assert!(
+            err.contains("did not respond"),
+            "expected a first-byte timeout, got: {err}"
+        );
     }
 
     #[tokio::test]
