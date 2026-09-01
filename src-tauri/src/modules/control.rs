@@ -573,10 +573,7 @@ fn validate_pentest_run_params(
     }
     let category = params.category.trim().to_string();
     if category.len() > MAX_CATEGORY_LEN {
-        return Err((
-            "invalid_params",
-            "pentest category is too long".to_string(),
-        ));
+        return Err(("invalid_params", "pentest category is too long".to_string()));
     }
     Ok(PentestRunParams { target, category })
 }
@@ -613,9 +610,7 @@ fn validate_agent_run_params(
 
 /// Bound and clean a query request — same rules as an agent run: a required,
 /// trimmed prompt capped well under the 64 KiB message limit.
-fn validate_query_params(
-    params: QueryParams,
-) -> Result<QueryParams, (&'static str, String)> {
+fn validate_query_params(params: QueryParams) -> Result<QueryParams, (&'static str, String)> {
     const MAX_PROMPT_LEN: usize = 32 * 1024;
     let prompt = params.prompt.trim().to_string();
     if prompt.is_empty() {
@@ -1021,7 +1016,11 @@ fn prepare_cli_launcher(descriptor: &Path, cli_path: &Path) -> Result<PathBuf, S
             .map_err(|error| format!("secure CLI bin directory: {error}"))?;
     }
 
-    let launcher = bin_dir.join(if cfg!(windows) { "termigo.exe" } else { "termigo" });
+    let launcher = bin_dir.join(if cfg!(windows) {
+        "termigo.exe"
+    } else {
+        "termigo"
+    });
     if std::fs::symlink_metadata(&launcher).is_ok() {
         std::fs::remove_file(&launcher)
             .map_err(|error| format!("replace stale CLI launcher: {error}"))?;
@@ -1040,7 +1039,11 @@ fn prepare_cli_launcher(descriptor: &Path, cli_path: &Path) -> Result<PathBuf, S
 }
 
 fn remove_launcher_dir(bin_dir: &Path) {
-    let launcher = bin_dir.join(if cfg!(windows) { "termigo.exe" } else { "termigo" });
+    let launcher = bin_dir.join(if cfg!(windows) {
+        "termigo.exe"
+    } else {
+        "termigo"
+    });
     let _ = std::fs::remove_file(launcher);
     let _ = std::fs::remove_dir(bin_dir);
     if let Some(run_dir) = bin_dir.parent() {
@@ -1144,9 +1147,10 @@ mod tests {
         .expect("empty target (last run) is allowed");
         assert_eq!(empty.target, "");
 
-        let error =
-            validate_pentest_report_params(PentestReportParams { target: "x".repeat(2049) })
-                .expect_err("reject oversized target");
+        let error = validate_pentest_report_params(PentestReportParams {
+            target: "x".repeat(2049),
+        })
+        .expect_err("reject oversized target");
         assert_eq!(error.0, "invalid_params");
     }
 
@@ -1294,7 +1298,11 @@ mod tests {
         let descriptor = temp.path().join("control.json");
 
         let bin_dir = prepare_cli_launcher(&descriptor, &cli).expect("prepare launcher");
-        let launcher = bin_dir.join(if cfg!(windows) { "termigo.exe" } else { "termigo" });
+        let launcher = bin_dir.join(if cfg!(windows) {
+            "termigo.exe"
+        } else {
+            "termigo"
+        });
         assert_eq!(std::fs::read(&launcher).expect("read launcher"), b"cli");
 
         remove_launcher_dir(&bin_dir);

@@ -5,6 +5,7 @@ import {
   flush,
   flushOne,
   isBusy,
+  prepend,
   previewOf,
   remove,
   type SteerMessage,
@@ -26,7 +27,12 @@ describe("isBusy", () => {
   // Two vocabularies reach this: the SDK's chat status and the app's own agent
   // status. Missing either would let a message race the run it meant to adjust.
   it("accepts both status vocabularies", () => {
-    for (const s of ["submitted", "thinking", "streaming"]) {
+    for (const s of [
+      "submitted",
+      "thinking",
+      "streaming",
+      "awaiting-approval",
+    ]) {
       expect(isBusy(s)).toBe(true);
     }
   });
@@ -44,6 +50,7 @@ describe("submitAction", () => {
   it("queues instead of racing an in-flight run", () => {
     expect(submitAction("streaming", true)).toBe("queue");
     expect(submitAction("thinking", true)).toBe("queue");
+    expect(submitAction("awaiting-approval", true)).toBe("queue");
   });
 
   it("ignores an empty composer in either state", () => {
@@ -59,6 +66,13 @@ describe("queue", () => {
       msg(text("second")),
     );
     expect(q.pending.map((m) => m.preview)).toEqual(["first", "second"]);
+  });
+
+  it("restores a failed delivery before newer queued messages", () => {
+    const q = enqueue(EMPTY_QUEUE, msg(text("newer")));
+    expect(
+      prepend(q, msg(text("failed"))).pending.map((m) => m.preview),
+    ).toEqual(["failed", "newer"]);
   });
 
   it("refuses a message with no parts", () => {

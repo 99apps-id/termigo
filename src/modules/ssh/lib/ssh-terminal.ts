@@ -72,7 +72,9 @@ export async function openSshTerminalSession(
 
   const registerSession = () => {
     if (sessionId === null) return;
-    useSshActiveSessionStore.getState().setSession({ sessionId, hostLabel });
+    useSshActiveSessionStore
+      .getState()
+      .setSession({ sessionId, connectionId: conn.id, hostLabel });
   };
   const forgetSession = () => {
     if (sessionId === null) return; // never registered; nothing to clear

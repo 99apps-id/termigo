@@ -63,6 +63,9 @@ const OVERFLOW_AUTO_RESUME_MS = 30_000;
 const MAX_OVERFLOW_RESUMES = 3;
 const overflowAutoResumeAt = new Map<string, number>();
 const overflowAutoResumeCount = new Map<string, number>();
+const TRANSIENT_RETRY_DELAY_MS = 3_000;
+const MAX_TRANSIENT_RETRIES = 2;
+const transientRetryCount = new Map<string, number>();
 
 // Cap the agentic loop in ROUNDS, not per-round steps. The step budget (25)
 // resets every round, so a model that does a few tool calls per round and never
@@ -144,6 +147,29 @@ function ensureOnlineListener(): void {
       });
     }
   });
+}
+
+function scheduleTransientRetry(sessionId: string): boolean {
+  if (useChatStore.getState().activeSessionId !== sessionId) return false;
+  const attempts = transientRetryCount.get(sessionId) ?? 0;
+  if (attempts >= MAX_TRANSIENT_RETRIES) return false;
+  transientRetryCount.set(sessionId, attempts + 1);
+  useChatStore.getState().patchAgentMeta({
+    status: "thinking",
+    error: null,
+    stopReason: null,
+  });
+  setTimeout(() => {
+    if (useChatStore.getState().activeSessionId !== sessionId) return;
+    void resumeRun().catch(() => {
+      useChatStore.getState().patchAgentMeta({
+        status: "error",
+        error: "The automatic retry could not start. Try again.",
+      });
+      useChatStore.getState().syncRunMeta();
+    });
+  }, TRANSIENT_RETRY_DELAY_MS);
+  return true;
 }
 
 function makeChat(sessionId: string): Chat<UIMessage> {
@@ -296,7 +322,10 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       // fit this time — allow the session to auto-resume on a future overflow
       // instead of exhausting its retry budget permanently.
       const fr = info.finishReason ?? "";
-      if (fr && fr !== "error") overflowAutoResumeCount.delete(sessionId);
+      if (fr && fr !== "error") {
+        overflowAutoResumeCount.delete(sessionId);
+        transientRetryCount.delete(sessionId);
+      }
       // Remember what this run cost. The estimate only exists for priced
       // models, so unknown ones record nothing rather than a false zero.
       const m = info.metrics;
@@ -439,8 +468,10 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       // (it errored), so clear the in-flight marker: a later restart must not
       // read it as an interrupted run, and resume re-marks it.
       if (isConnectivityError(raw)) {
-        const sessionId = useChatStore.getState().activeSessionId;
-        if (sessionId) pendingReconnectSessions.add(sessionId);
+        if (scheduleTransientRetry(sessionId)) return;
+        if (useChatStore.getState().activeSessionId === sessionId) {
+          pendingReconnectSessions.add(sessionId);
+        }
         ensureOnlineListener();
         useChatStore.getState().patchAgentMeta({
           status: "error",
@@ -532,11 +563,17 @@ export async function sendParts(
   // leave "Try again" doing nothing. Key off the app's error state so a resume
   // after a failed run always goes out.
   const errored = useChatStore.getState().agentMeta.status === "error";
-  const action = errored
+  const awaitingApproval =
+    useChatStore.getState().agentMeta.status === "awaiting-approval";
+  const action = awaitingApproval
     ? parts.length > 0
-      ? "send"
+      ? "queue"
       : "ignore"
-    : submitAction(c.status, parts.length > 0);
+    : errored
+      ? parts.length > 0
+        ? "send"
+        : "ignore"
+      : submitAction(c.status, parts.length > 0);
   if (errored) pendingReconnectSessions.delete(sessionId);
   logInfo(
     `[ai] sendParts: session=${sessionId} status=${c.status} action=${action}`,
@@ -611,6 +648,20 @@ export async function flushSteer(): Promise<boolean> {
     await c.sendMessage({ role: "user", parts: out.parts } as Parameters<
       typeof c.sendMessage
     >[0]);
+  } catch (e) {
+    // The message was removed before the await to prevent a second observer
+    // from sending it twice. Restore it at the front when sending failed, so
+    // the user's correction and attachments are not lost or reordered.
+    useChatStore.getState().restoreSteer({
+      preview: previewOf(out.parts),
+      parts: out.parts,
+    });
+    useChatStore.getState().patchAgentMeta({
+      status: "error",
+      error: humanizeModelError(String(e)),
+    });
+    useChatStore.getState().syncRunMeta();
+    return false;
   } finally {
     flushing = false;
   }

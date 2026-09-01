@@ -52,9 +52,7 @@ pub fn normalize_ipv4(host: &str) -> Option<String> {
         }
     };
     let is_octal = |s: &str| {
-        s.len() > 1
-            && s.starts_with('0')
-            && s.bytes().all(|b| (b'0'..=b'7').contains(&b))
+        s.len() > 1 && s.starts_with('0') && s.bytes().all(|b| (b'0'..=b'7').contains(&b))
     };
     if h.contains('.') {
         let parts: Vec<&str> = h.split('.').collect();
@@ -83,14 +81,11 @@ pub fn normalize_ipv4(host: &str) -> Option<String> {
             (10u32, h.as_str())
         };
         let n = u32::from_str_radix(digits, base).ok()?;
-        return Some([
-            (n >> 24) as u8,
-            (n >> 16) as u8,
-            (n >> 8) as u8,
-            n as u8,
-        ]
-        .map(|b| b.to_string())
-        .join("."));
+        return Some(
+            [(n >> 24) as u8, (n >> 16) as u8, (n >> 8) as u8, n as u8]
+                .map(|b| b.to_string())
+                .join("."),
+        );
     }
     None
 }
@@ -99,7 +94,10 @@ pub fn normalize_ipv4(host: &str) -> Option<String> {
 /// with the frontend `unsafeBrowserUrl` policy so the network path is always
 /// guarded on the backend.
 pub fn unsafe_url(url: &str) -> Option<String> {
-    let parsed = reqwest::Url::parse(url).ok()?;
+    let parsed = match reqwest::Url::parse(url) {
+        Ok(parsed) => parsed,
+        Err(_) => return Some("invalid URL".to_string()),
+    };
     if !(parsed.scheme() == "http" || parsed.scheme() == "https") {
         return Some("only http/https URLs are allowed".to_string());
     }
@@ -114,6 +112,9 @@ pub fn unsafe_url(url: &str) -> Option<String> {
         return Some("cloud-metadata endpoints are blocked".to_string());
     }
     if let Some(ip) = normalize_ipv4(&host) {
+        if ip == "0.0.0.0" {
+            return Some("wildcard bind addresses are not valid browser targets".to_string());
+        }
         if ip.starts_with("127.") {
             return Some("loopback addresses are blocked".to_string());
         }
@@ -132,6 +133,8 @@ pub fn unsafe_url(url: &str) -> Option<String> {
 struct BrowserEntry {
     url: Option<String>,
     last_value: Option<String>,
+    last_value_kind: Option<String>,
+    last_eval: Option<Result<(), String>>,
     console: Vec<String>,
 }
 
@@ -149,11 +152,15 @@ impl BrowserState {
     }
     fn record(&self, instance: &str, url: Option<String>) {
         if let Ok(mut map) = self.0.entries.lock() {
-            let e = map.entry(instance.to_string()).or_insert_with(|| BrowserEntry {
-                url: None,
-                last_value: None,
-                console: Vec::new(),
-            });
+            let e = map
+                .entry(instance.to_string())
+                .or_insert_with(|| BrowserEntry {
+                    url: None,
+                    last_value: None,
+                    last_value_kind: None,
+                    last_eval: None,
+                    console: Vec::new(),
+                });
             if url.is_some() {
                 e.url = url;
             }
@@ -161,19 +168,28 @@ impl BrowserState {
     }
     fn record_value(&self, instance: &str, kind: &str, value: &str) {
         if let Ok(mut map) = self.0.entries.lock() {
-            let e = map.entry(instance.to_string()).or_insert_with(|| BrowserEntry {
-                url: None,
-                last_value: None,
-                console: Vec::new(),
-            });
+            let e = map
+                .entry(instance.to_string())
+                .or_insert_with(|| BrowserEntry {
+                    url: None,
+                    last_value: None,
+                    last_value_kind: None,
+                    last_eval: None,
+                    console: Vec::new(),
+                });
             if kind == "console" {
                 e.console.push(value.to_string());
                 if e.console.len() > 500 {
                     let drain = e.console.len() - 500;
                     e.console.drain(..drain);
                 }
+            } else if kind == "eval-ok" {
+                e.last_eval = Some(Ok(()));
+            } else if kind == "eval-error" {
+                e.last_eval = Some(Err(value.to_string()));
             } else {
                 e.last_value = Some(value.to_string());
+                e.last_value_kind = Some(kind.to_string());
             }
         }
     }
@@ -183,6 +199,14 @@ impl BrowserState {
         if let Ok(mut map) = self.0.entries.lock() {
             if let Some(e) = map.get_mut(instance) {
                 e.last_value = None;
+                e.last_value_kind = None;
+            }
+        }
+    }
+    fn clear_eval(&self, instance: &str) {
+        if let Ok(mut map) = self.0.entries.lock() {
+            if let Some(e) = map.get_mut(instance) {
+                e.last_eval = None;
             }
         }
     }
@@ -218,9 +242,7 @@ fn ensure_window(app: &AppHandle, instance: &str, url: &str) -> Result<(), Strin
     if let Some(w) = webview(app, instance) {
         log::info!("browser: reuse window '{instance}', navigate to {url}");
         let _ = w.set_focus();
-        let _ = w.eval(format!(
-            "window.location.href = {url:?};"
-        ));
+        let _ = w.eval(format!("window.location.href = {url:?};"));
         return Ok(());
     }
     log::info!("browser: create window '{instance}' at {url}");
@@ -251,16 +273,12 @@ fn ensure_window(app: &AppHandle, instance: &str, url: &str) -> Result<(), Strin
   }} catch (e) {{}}
 }})();"#
     );
-    let builder = WebviewWindowBuilder::new(
-        app,
-        label_for(instance),
-        WebviewUrl::External(parsed),
-    )
-    .title("Termigo Browser")
-    .initialization_script(&init)
-    .inner_size(1000.0, 720.0)
-    .min_inner_size(480.0, 320.0)
-    .resizable(true);
+    let builder = WebviewWindowBuilder::new(app, label_for(instance), WebviewUrl::External(parsed))
+        .title("Termigo Browser")
+        .initialization_script(&init)
+        .inner_size(1000.0, 720.0)
+        .min_inner_size(480.0, 320.0)
+        .resizable(true);
     let w = builder.build().map_err(|e| {
         log::error!("browser: window build failed for '{instance}': {e}");
         e.to_string()
@@ -283,7 +301,10 @@ fn ensure_window(app: &AppHandle, instance: &str, url: &str) -> Result<(), Strin
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(450));
         if let Ok(sz) = wc.inner_size() {
-            let _ = wc.set_size(tauri::PhysicalSize::new(sz.width.saturating_add(1), sz.height));
+            let _ = wc.set_size(tauri::PhysicalSize::new(
+                sz.width.saturating_add(1),
+                sz.height,
+            ));
             let _ = wc.set_size(sz);
         }
         let _ = wc.set_focus();
@@ -359,11 +380,7 @@ pub fn browser_wait(instance: String, ms: u64) -> String {
 }
 
 #[tauri::command]
-pub fn browser_eval(
-    app: AppHandle,
-    instance: String,
-    js: String,
-) -> Result<(), String> {
+pub fn browser_eval(app: AppHandle, instance: String, js: String) -> Result<(), String> {
     let w = webview(&app, &instance).ok_or("browser instance not open")?;
     w.eval(&js).map_err(|e| e.to_string())
 }
@@ -377,7 +394,7 @@ pub fn browser_extract(
     let w = webview(&app, &instance).ok_or("browser instance not open")?;
     // Clear any value left from a previous page so a slow load cannot return
     // stale text as if it were the current page.
-    state.clear_value(&instance);
+    state.clear_eval(&instance);
     // Prefer the helper the initialization script installed (it shares one
     // send() path with the console hook); fall back to an inline emit if the
     // helper is not present yet (e.g. extract called before the first load).
@@ -643,13 +660,27 @@ pub async fn browser_embed_read(
 #[tauri::command]
 pub async fn browser_embed_eval(
     app: AppHandle,
+    state: State<'_, BrowserState>,
     instance: String,
     js: String,
 ) -> Result<(), String> {
     let wv = app
         .get_webview(&embed_label(&instance))
         .ok_or("embedded browser not open")?;
-    wv.eval(&js).map_err(|e| e.to_string())
+    state.clear_value(&instance);
+    let wrapped = format!(
+        r#"(()=>{{try{{const result=({js});window.__TAURI__&&window.__TAURI__.event&&window.__TAURI__.event.emit('{VALUE_EVENT}',{{instance:{instance:?},kind:'eval-ok',value:String(result ?? '')}});}}catch(e){{window.__TAURI__&&window.__TAURI__.event&&window.__TAURI__.event.emit('{VALUE_EVENT}',{{instance:{instance:?},kind:'eval-error',value:String(e && e.message ? e.message : e)}});}}}})();"#
+    );
+    wv.eval(&wrapped).map_err(|e| e.to_string())?;
+    for _ in 0..10 {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        if let Some(entry) = state.entry(&instance) {
+            if let Some(result) = entry.last_eval {
+                return result;
+            }
+        }
+    }
+    Err("browser action did not return a result; the page may still be loading".into())
 }
 
 /// Capture a PNG of the embedded browser and return it base64-encoded, so a
@@ -657,10 +688,7 @@ pub async fn browser_embed_eval(
 /// `CapturePreview`); other platforms report that it is unsupported. Any failure
 /// is returned as an error string — it never panics.
 #[tauri::command]
-pub async fn browser_embed_screenshot(
-    app: AppHandle,
-    instance: String,
-) -> Result<String, String> {
+pub async fn browser_embed_screenshot(app: AppHandle, instance: String) -> Result<String, String> {
     #[cfg(windows)]
     {
         capture_embed_png_base64(&app, &instance)
@@ -764,8 +792,10 @@ mod tests {
 
     #[test]
     fn refuses_metadata_loopback_link_local_and_ipv6() {
+        assert!(unsafe_url("not a url").is_some());
         assert!(unsafe_url("http://169.254.169.254").is_some());
         assert!(unsafe_url("http://metadata.google.internal").is_some());
+        assert!(unsafe_url("http://0.0.0.0:5173").is_some());
         assert!(unsafe_url("http://127.0.0.1").is_some());
         assert!(unsafe_url("http://2130706433").is_some());
         assert!(unsafe_url("http://[fe80::1]/").is_some());

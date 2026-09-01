@@ -155,7 +155,9 @@ export function buildBrowserTools(ctx: ToolContext) {
       execute: async ({ instance, selector }) => {
         const js = `(()=>{const el=document.querySelector(${cssJson(
           selector,
-        )});if(!el){return;}el.click();})();`;
+        )});if(!el){throw new Error('No element matched selector: '+${cssJson(
+          selector,
+        )});}el.click();})();`;
         return await embedEval(instance, js);
       },
     }),
@@ -171,7 +173,11 @@ export function buildBrowserTools(ctx: ToolContext) {
       execute: async ({ instance, selector, text }) => {
         const js = `(()=>{const el=document.querySelector(${cssJson(
           selector,
-        )});if(!el){return;}el.focus();el.value=${cssJson(text)};el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));})();`;
+        )});if(!el){throw new Error('No element matched selector: '+${cssJson(
+          selector,
+        )});}if(!('value' in el)){throw new Error('Selector does not match an input-like element: '+${cssJson(
+          selector,
+        )});}el.focus();el.value=${cssJson(text)};el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));})();`;
         return await embedEval(instance, js);
       },
     }),

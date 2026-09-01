@@ -336,8 +336,7 @@ fn build_safe_client(
     allow_private: bool,
     pinned: &[(String, Vec<IpAddr>)],
 ) -> Result<reqwest::Client, String> {
-    let mut builder = reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(10));
+    let mut builder = reqwest::Client::builder().connect_timeout(Duration::from_secs(10));
     // Pin reqwest's resolver to the IPs we just classified. Without this,
     // reqwest's own DNS lookup could return a different (private/metadata) IP
     // for the same hostname between classify and connect — classic DNS
@@ -420,11 +419,7 @@ pub async fn ai_http_request(
 
     let status = resp.status().as_u16();
     let headers = header_map_to_strings(resp.headers());
-    let body = resp
-        .bytes()
-        .await
-        .map_err(|e| describe_error(&e))?
-        .to_vec();
+    let body = resp.bytes().await.map_err(|e| describe_error(&e))?.to_vec();
     Ok(HttpResponse {
         status,
         headers,
@@ -580,7 +575,9 @@ async fn stream_http(
                 "provider did not respond within {}s",
                 timeouts.first_byte.as_secs(),
             );
-            let _ = on_event.send(AiStreamEvent::Error { message: message.clone() });
+            let _ = on_event.send(AiStreamEvent::Error {
+                message: message.clone(),
+            });
             return Err(message);
         }
     };
@@ -701,10 +698,7 @@ fn validate_probe_url(url: &str) -> Result<reqwest::Url, String> {
 /// Used by the `dev_server` tool to wait until a spawned server is listening
 /// before opening it in the preview pane.
 #[tauri::command]
-pub async fn http_probe(
-    url: String,
-    timeout_ms: Option<u64>,
-) -> Result<HttpProbe, String> {
+pub async fn http_probe(url: String, timeout_ms: Option<u64>) -> Result<HttpProbe, String> {
     let parsed = validate_probe_url(&url)?;
     let timeout = Duration::from_millis(timeout_ms.unwrap_or(2_000).clamp(200, 15_000));
     let client = reqwest::Client::builder()
@@ -755,10 +749,7 @@ mod tests {
             IpKind::BlockedMetadata
         );
         // IPv6 link-local fe80::/10
-        assert_eq!(
-            ip_kind("fe80::1".parse().unwrap()),
-            IpKind::BlockedMetadata
-        );
+        assert_eq!(ip_kind("fe80::1".parse().unwrap()), IpKind::BlockedMetadata);
     }
 
     #[test]
@@ -848,8 +839,8 @@ mod tests {
     // crosses as itself, so these guard the decode on the other side.
     #[test]
     fn text_body_crosses_without_encoding() {
-        let b: RequestBody = serde_json::from_str(r#"{"kind":"text","text":"{\"a\":1}"}"#)
-            .expect("parses");
+        let b: RequestBody =
+            serde_json::from_str(r#"{"kind":"text","text":"{\"a\":1}"}"#).expect("parses");
         assert_eq!(b.into_bytes().unwrap(), br#"{"a":1}"#.to_vec());
     }
 
@@ -888,14 +879,18 @@ mod tests {
 
     #[test]
     fn empty_bodies_are_empty_not_errors() {
-        assert!(RequestBody::Text { text: String::new() }
-            .into_bytes()
-            .unwrap()
-            .is_empty());
-        assert!(RequestBody::Base64 { data: String::new() }
-            .into_bytes()
-            .unwrap()
-            .is_empty());
+        assert!(RequestBody::Text {
+            text: String::new()
+        }
+        .into_bytes()
+        .unwrap()
+        .is_empty());
+        assert!(RequestBody::Base64 {
+            data: String::new()
+        }
+        .into_bytes()
+        .unwrap()
+        .is_empty());
     }
 
     // reqwest hides the useful half of a transport failure under `source()`,

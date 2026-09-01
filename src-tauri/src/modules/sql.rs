@@ -23,7 +23,8 @@ fn is_engine(engine: &str) -> bool {
 /// Reject control bytes so a crafted connection string or query cannot smuggle
 /// terminal escape sequences or an extra command into the child process.
 fn has_control_bytes(s: &str) -> bool {
-    s.bytes().any(|b| b == 0 || b == 0x1b || (b < 0x20 && b != b'\n' && b != b'\r'))
+    s.bytes()
+        .any(|b| b == 0 || b == 0x1b || (b < 0x20 && b != b'\n' && b != b'\r'))
 }
 
 /// Build the argv (engine + connection + any flags) without a shell. For psql
@@ -60,7 +61,9 @@ pub fn validate_query(query: &str) -> Result<(), String> {
         return Err("query cannot be empty".into());
     }
     if query.chars().count() > MAX_QUERY_CHARS {
-        return Err(format!("query too long (over {MAX_QUERY_CHARS} characters)"));
+        return Err(format!(
+            "query too long (over {MAX_QUERY_CHARS} characters)"
+        ));
     }
     if has_control_bytes(query) {
         return Err("query contains control bytes".into());
@@ -110,11 +113,7 @@ pub fn run_query(engine: &str, connection: &str, query: &str) -> Result<String, 
 // Async so a slow query never blocks the UI thread: a sync command runs on the
 // main thread, and `run_query` shells out to the DB client and waits for it.
 #[tauri::command]
-pub async fn sql_run(
-    engine: String,
-    connection: String,
-    query: String,
-) -> Result<String, String> {
+pub async fn sql_run(engine: String, connection: String, query: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || run_query(&engine, &connection, &query))
         .await
         .map_err(|e| e.to_string())?

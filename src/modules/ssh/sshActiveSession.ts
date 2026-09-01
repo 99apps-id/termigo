@@ -6,6 +6,7 @@ import { create } from "zustand";
 
 export type ActiveSshSession = {
   sessionId: number;
+  connectionId: string;
   hostLabel: string;
 };
 

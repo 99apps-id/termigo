@@ -189,18 +189,25 @@ export function createContextAwareTransport(deps: Deps) {
     ms: number,
     label: string,
   ): Promise<T> =>
-    Promise.race([
-      promise,
-      new Promise<never>((_, reject) =>
-        setTimeout(
-          () =>
-            reject(
-              new Error(`${label} timed out after ${Math.round(ms / 1000)}s`),
-            ),
-          ms,
-        ),
-      ),
-    ]);
+    new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(
+        () =>
+          reject(
+            new Error(`${label} timed out after ${Math.round(ms / 1000)}s`),
+          ),
+        ms,
+      );
+      promise.then(
+        (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      );
+    });
   const isAbort = (e: unknown): boolean =>
     e instanceof DOMException
       ? e.name === "AbortError"

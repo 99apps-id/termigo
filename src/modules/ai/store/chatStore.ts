@@ -37,6 +37,7 @@ import {
 import {
   EMPTY_QUEUE,
   enqueue,
+  prepend as prependSteer,
   remove as removeSteer,
   type SteerMessage,
   type SteerQueue,
@@ -234,6 +235,7 @@ type StoreState = {
   /** Text typed while a run was in flight, waiting for it to end. */
   steerQueue: SteerQueue;
   queueSteer: (message: SteerMessage) => void;
+  restoreSteer: (message: SteerMessage) => void;
   cancelSteer: (index: number) => void;
   clearSteer: () => void;
 
@@ -464,6 +466,8 @@ export const useChatStore = create<StoreState>((set, get) => ({
   steerQueue: EMPTY_QUEUE,
   queueSteer: (message) =>
     set((s) => ({ steerQueue: enqueue(s.steerQueue, message) })),
+  restoreSteer: (message) =>
+    set((s) => ({ steerQueue: prependSteer(s.steerQueue, message) })),
   cancelSteer: (index) =>
     set((s) => ({ steerQueue: removeSteer(s.steerQueue, index) })),
   clearSteer: () => set({ steerQueue: EMPTY_QUEUE }),

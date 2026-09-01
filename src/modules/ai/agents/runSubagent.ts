@@ -103,6 +103,7 @@ export function subagentToolNeedsGate(name: string, tool?: unknown): boolean {
  * sub-agent stops itself instead of spending its whole step budget re-asking.
  */
 const MAX_CONSECUTIVE_DENIALS = 3;
+const SUMMARY_TIMEOUT_MS = 90_000;
 
 type AnyTool = { execute?: (input: never, opts: never) => unknown };
 
@@ -511,18 +512,28 @@ export async function runSubagent({
     // final assistant text, so `result.text` is empty and the run looked like
     // "(no output)" even though it did the work. Recover by reconstructing what
     // it gathered and asking once more, with NO tools, for a prose summary.
-    const summary =
-      result.text?.trim() ||
-      (await synthesizeSummary(
-        model,
-        spec.systemPrompt,
-        prompt,
-        result,
-        controller.signal,
-      )) ||
-      "(no output)";
+    let summary = result.text?.trim();
+    if (!summary) {
+      const summaryTimer = setTimeout(() => {
+        timedOut = true;
+        controller.abort(
+          new Error("sub-agent summary did not respond within 90s"),
+        );
+      }, SUMMARY_TIMEOUT_MS);
+      try {
+        summary = await synthesizeSummary(
+          model,
+          spec.systemPrompt,
+          prompt,
+          result,
+          controller.signal,
+        );
+      } finally {
+        clearTimeout(summaryTimer);
+      }
+    }
     return {
-      summary,
+      summary: summary || "(no output)",
       stepCount: result.steps?.length ?? 0,
       durationMs: Date.now() - start,
     };

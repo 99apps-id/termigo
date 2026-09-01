@@ -1,19 +1,19 @@
-import { useChat, type UIMessage } from "@ai-sdk/react";
-import { summarizeInput } from "../lib/approvalQueue";
-import { isResumingApproval } from "../lib/transport";
-import { useTodosStore } from "../store/todoStore";
+import { usePreferencesStore } from "@/modules/settings/preferences";
+import { type UIMessage, useChat } from "@ai-sdk/react";
 import type { ToolUIPart, UIMessagePart } from "ai";
 import { useEffect, useMemo, useRef } from "react";
+import { summarizeInput } from "../lib/approvalQueue";
 import { native } from "../lib/native";
 import { checkReadable } from "../lib/security";
-import { resolvePath } from "../tools/tools";
+import { isResumingApproval } from "../lib/transport";
+import { getOrCreateChat } from "../store/chatRuntime";
 import {
+  type AgentRunStatus,
   flushPersist,
   useChatStore,
-  type AgentRunStatus,
 } from "../store/chatStore";
-import { getOrCreateChat } from "../store/chatRuntime";
-import { usePreferencesStore } from "@/modules/settings/preferences";
+import { useTodosStore } from "../store/todoStore";
+import { resolvePath } from "../tools/tools";
 
 /**
  * Headless bridge that mirrors chat lifecycle into the store, so the status
@@ -58,11 +58,7 @@ type ToolPartLike = ToolUIPart & {
 
 type AnyPart = UIMessagePart<Record<string, never>, Record<string, never>>;
 
-function Bridge({
-  sessionId,
-  openAiDiffTab,
-  closeAiDiffTab,
-}: BridgeProps) {
+function Bridge({ sessionId, openAiDiffTab, closeAiDiffTab }: BridgeProps) {
   const chat = useMemo(() => getOrCreateChat(sessionId), [sessionId]);
   const { status, messages, addToolApprovalResponse } = useChat<UIMessage>({
     chat,
@@ -108,13 +104,17 @@ function Bridge({
         const part = p as {
           state?: string;
           type?: string;
+          toolName?: string;
           input?: unknown;
           approval?: { id?: string };
         };
         if (part.state !== "approval-requested") continue;
         const id = part.approval?.id;
         if (!id) continue;
-        const toolName = (part.type ?? "").replace(/^tool-/, "") || "tool";
+        const toolName =
+          part.type === "dynamic-tool" && typeof part.toolName === "string"
+            ? part.toolName
+            : (part.type ?? "").replace(/^tool-/, "") || "tool";
         out.push({ id, toolName, summary: summarizeInput(part.input) });
       }
     }
@@ -133,9 +133,7 @@ function Bridge({
       status: runStatus,
       approvalsPending,
       pendingApprovals,
-      ...(runStatus === "idle" || runStatus === "error"
-        ? { step: null }
-        : {}),
+      ...(runStatus === "idle" || runStatus === "error" ? { step: null } : {}),
       ...(runStatus === "idle" ? { error: null } : {}),
     });
   }, [status, approvalsPending, pendingApprovals, patch]);
@@ -208,8 +206,7 @@ function Bridge({
           t === "tool-multi_edit"
         ) {
           const state = (p as { state?: string }).state ?? "";
-          const id =
-            (p as { approval?: { id?: string } }).approval?.id ?? "";
+          const id = (p as { approval?: { id?: string } }).approval?.id ?? "";
           fp += `${id}:${state}|`;
         }
       }
@@ -313,7 +310,13 @@ function Bridge({
     return () => {
       cancelled = true;
     };
-  }, [messages, fileMutationFingerprint, openAiDiffTab, closeAiDiffTab, reviewAfterApply]);
+  }, [
+    messages,
+    fileMutationFingerprint,
+    openAiDiffTab,
+    closeAiDiffTab,
+    reviewAfterApply,
+  ]);
 
   return null;
 }

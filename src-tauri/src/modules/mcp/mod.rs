@@ -117,8 +117,14 @@ where
     // Written via a temp file and renamed: a half-written registry would be
     // unparseable, and this file is the only record of the user's servers.
     let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, format!("{body}
-")).map_err(|e| e.to_string())?;
+    std::fs::write(
+        &tmp,
+        format!(
+            "{body}
+"
+        ),
+    )
+    .map_err(|e| e.to_string())?;
     std::fs::rename(&tmp, &path).map_err(|e| e.to_string())
 }
 
@@ -149,7 +155,11 @@ pub async fn mcp_add_server(
         if !env.is_empty() {
             entry.insert(
                 "env".into(),
-                Value::Object(env.into_iter().map(|(k, v)| (k, Value::String(v))).collect()),
+                Value::Object(
+                    env.into_iter()
+                        .map(|(k, v)| (k, Value::String(v)))
+                        .collect(),
+                ),
             );
         }
         servers.insert(trimmed, Value::Object(entry));
@@ -391,9 +401,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         assert!(read_registry(&dir.path().join("nope.json"), "project", None).is_empty());
         write_registry(dir.path(), "{ not json");
-        assert!(
-            read_registry(&dir.path().join(WORKSPACE_REGISTRY), "project", None).is_empty()
-        );
+        assert!(read_registry(&dir.path().join(WORKSPACE_REGISTRY), "project", None).is_empty());
     }
 
     #[test]

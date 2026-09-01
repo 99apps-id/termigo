@@ -143,6 +143,7 @@ describe("browser tools", () => {
       .calls;
     const js = calls[0][1] as string;
     expect(js).toContain('document.querySelector("button.submit")');
+    expect(js).toContain("No element matched selector");
     expect(js).toContain("el.click()");
   });
 
@@ -158,6 +159,8 @@ describe("browser tools", () => {
       .calls;
     const js = calls[0][1] as string;
     expect(js).toContain("input[name='q']");
+    expect(js).toContain("No element matched selector");
+    expect(js).toContain("input-like element");
     expect(js).toContain("dispatchEvent(new Event('input'");
   });
 

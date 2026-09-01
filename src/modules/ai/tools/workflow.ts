@@ -1,7 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { useChatStore } from "../store/chatStore";
 import { native } from "../lib/native";
+import { useChatStore } from "../store/chatStore";
 import type { ToolContext } from "./context";
 import { dispatchTool } from "./tools";
 
@@ -70,7 +70,9 @@ async function workflowRoot(): Promise<string | null> {
 /**
  * Load a workflow definition by name from `.termigo/workflows/<name>.json`.
  */
-export async function loadWorkflow(name: string): Promise<WorkflowDefinition | null> {
+export async function loadWorkflow(
+  name: string,
+): Promise<WorkflowDefinition | null> {
   const root = await workflowRoot();
   if (!root) return null;
   try {
@@ -91,7 +93,13 @@ export async function listWorkflowNames(): Promise<string[]> {
   try {
     const result = await native.glob({ pattern: "*.json", root });
     return result.hits
-      .map((hit) => hit.path.split("/").pop()?.replace(/\.json$/, "") ?? "")
+      .map(
+        (hit) =>
+          hit.path
+            .split("/")
+            .pop()
+            ?.replace(/\.json$/, "") ?? "",
+      )
       .filter(Boolean);
   } catch {
     return [];
@@ -101,6 +109,18 @@ export async function listWorkflowNames(): Promise<string[]> {
 // ─── Execution ─────────────────────────────────────────────────────────────
 
 type StepResult = { ok: boolean; output?: unknown; error?: string };
+type ToolDispatcher = (
+  name: string,
+  args: Record<string, unknown>,
+) => Promise<unknown>;
+
+function isErrorOutput(output: unknown): output is { error: string } {
+  return (
+    output !== null &&
+    typeof output === "object" &&
+    typeof (output as { error?: unknown }).error === "string"
+  );
+}
 
 /**
  * Execute a single workflow step by dispatching to the live tool registry.
@@ -113,14 +133,20 @@ type StepResult = { ok: boolean; output?: unknown; error?: string };
 async function executeStep(
   step: WorkflowStep,
   context: Record<string, unknown>,
+  dispatch: ToolDispatcher,
 ): Promise<StepResult> {
   const seeded = context[step.id];
-  if (seeded && typeof seeded === "object" && "ok" in (seeded as Record<string, unknown>)) {
+  if (
+    seeded &&
+    typeof seeded === "object" &&
+    "ok" in (seeded as Record<string, unknown>)
+  ) {
     return seeded as StepResult;
   }
 
   if (step.tool) {
-    const result = await dispatchTool(step.tool, step.params ?? {});
+    const result = await dispatch(step.tool, step.params ?? {});
+    if (isErrorOutput(result)) return { ok: false, error: result.error };
     return { ok: true, output: result };
   }
 
@@ -137,6 +163,7 @@ async function executeStep(
 export async function runWorkflow(
   workflow: WorkflowDefinition,
   initialContext: Record<string, unknown> = {},
+  dispatch: ToolDispatcher = dispatchTool,
 ): Promise<WorkflowRunResult> {
   const completed = new Set<string>();
   const failed = new Set<string>();
@@ -168,7 +195,7 @@ export async function runWorkflow(
         continue;
       }
 
-      const result = await executeStep(step, results);
+      const result = await executeStep(step, results, dispatch);
       results[step.id] = result.output;
 
       if (result.ok) {
@@ -197,7 +224,10 @@ export async function runWorkflow(
 
 // ─── Agent tools ───────────────────────────────────────────────────────────
 
-export function buildWorkflowTools(_ctx: ToolContext) {
+export function buildWorkflowTools(
+  _ctx: ToolContext,
+  dispatch?: ToolDispatcher,
+) {
   return {
     list_workflows: tool({
       description:
@@ -220,14 +250,19 @@ export function buildWorkflowTools(_ctx: ToolContext) {
         "Run a named agentic workflow from `.termigo/workflows/<name>.json`. Workflows are reusable multi-step automation pipelines (review -> test -> format -> commit). Use this when the task matches a defined workflow better than ad-hoc tool calls.",
       inputSchema: z.object({
         name: z.string().describe("Workflow name without `.json` extension."),
-        context: z.record(z.string(), z.unknown()).optional().describe("Initial context passed to workflow steps."),
+        context: z
+          .record(z.string(), z.unknown())
+          .optional()
+          .describe("Initial context passed to workflow steps."),
       }),
       execute: async ({ name, context }) => {
         const workflow = await loadWorkflow(name);
         if (!workflow) {
-          return { error: `workflow "${name}" not found in .termigo/workflows/` };
+          return {
+            error: `workflow "${name}" not found in .termigo/workflows/`,
+          };
         }
-        const result = await runWorkflow(workflow, context ?? {});
+        const result = await runWorkflow(workflow, context ?? {}, dispatch);
         return result;
       },
     }),

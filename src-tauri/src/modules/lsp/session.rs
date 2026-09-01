@@ -349,10 +349,7 @@ mod tests {
             if !alive {
                 break;
             }
-            assert!(
-                Instant::now() < deadline,
-                "grandchild survived group kill",
-            );
+            assert!(Instant::now() < deadline, "grandchild survived group kill",);
             thread::sleep(Duration::from_millis(20));
         }
     }

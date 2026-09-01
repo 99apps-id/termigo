@@ -1,3 +1,4 @@
+import { summarizeInput } from "../lib/approvalQueue";
 import { withAutoVerify } from "../lib/autoVerify";
 import { buildOrchestratorTools } from "../lib/orchestrator";
 import { buildPolicyTools } from "../lib/policyEngine";
@@ -6,6 +7,7 @@ import {
   withPostExecuteConfirm,
 } from "../lib/postExecuteConfirm";
 import { buildSkillRegistryTools } from "../lib/skillRegistry";
+import { useApprovalQueue } from "../store/approvalQueueStore";
 import { buildManagedAgentTools } from "./agent";
 import { buildBrowserTools } from "./browser";
 import { buildCodeSearchTools } from "./codeSearch";
@@ -117,11 +119,29 @@ export async function dispatchTool(
   name: string,
   args: Record<string, unknown>,
 ): Promise<unknown> {
-  const tool = currentToolRegistry[name];
+  return dispatchRegisteredTool(currentToolRegistry, name, args);
+}
+
+async function dispatchRegisteredTool(
+  registry: Record<string, unknown>,
+  name: string,
+  args: Record<string, unknown>,
+): Promise<unknown> {
+  const tool = registry[name];
   if (!tool) {
     return {
-      error: `unknown tool "${name}". Available: ${Object.keys(currentToolRegistry).join(", ")}`,
+      error: `unknown tool "${name}". Available: ${Object.keys(registry).join(", ")}`,
     };
+  }
+  if ((tool as { needsApproval?: unknown }).needsApproval === true) {
+    const decision = await useApprovalQueue.getState().request({
+      requester: "workflow",
+      toolName: name,
+      summary: summarizeInput(args),
+    });
+    if (decision === "deny") {
+      return { error: `workflow action "${name}" was denied by the user` };
+    }
   }
   const callId = `workflow-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   try {
@@ -169,6 +189,13 @@ export function buildTools(
   ctx: import("./context").ToolContext,
   subagentDepth = 0,
 ) {
+  // A workflow can spawn a subagent, and that subagent builds another toolset.
+  // Keep workflow steps bound to this run's completed snapshot so they cannot
+  // fall through the mutable module-level registry into the child's context.
+  let dispatchForThisRun = dispatchTool;
+  const workflowTools = buildWorkflowTools(ctx, (name, args) =>
+    dispatchForThisRun(name, args),
+  );
   const base = {
     ...buildFsTools(ctx),
     ...buildFileOpsTools(ctx),
@@ -188,7 +215,7 @@ export function buildTools(
     ...buildGitTools(ctx),
     ...buildHarnessTools(ctx),
     ...buildReviewTools(ctx),
-    ...buildWorkflowTools(ctx),
+    ...workflowTools,
     ...buildPolicyTools(),
     ...buildSkillRegistryTools(),
     ...buildGithubTools(ctx),
@@ -266,6 +293,12 @@ export function buildTools(
   }
   const wrappedBase = wrapped as typeof base;
   currentToolRegistry = wrappedBase as unknown as Record<string, unknown>;
+  dispatchForThisRun = (name, args) =>
+    dispatchRegisteredTool(
+      wrappedBase as unknown as Record<string, unknown>,
+      name,
+      args,
+    );
 
   // Skill tools last, and told what the others are called: the dependency
   // checker compares a skill against the real registry rather than a list kept

@@ -16,6 +16,11 @@ async function sessionForConnection(connectionId: string): Promise<number> {
   const { useSshActiveSessionStore } = await import("./sshActiveSession");
   const session = useSshActiveSessionStore.getState().session;
   if (!session) throw new Error("ssh: no active session for this connection");
+  if (session.connectionId !== connectionId) {
+    throw new Error(
+      `ssh: the active session belongs to ${session.hostLabel}, not connection ${connectionId}`,
+    );
+  }
   return session.sessionId;
 }
 

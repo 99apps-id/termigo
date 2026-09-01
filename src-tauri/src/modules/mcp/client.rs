@@ -169,11 +169,7 @@ impl McpClient {
         serde_json::from_value(tools).map_err(|e| format!("bad tools/list response: {e}"))
     }
 
-    pub async fn call_tool(
-        &mut self,
-        name: &str,
-        arguments: Value,
-    ) -> Result<Value, String> {
+    pub async fn call_tool(&mut self, name: &str, arguments: Value) -> Result<Value, String> {
         self.request(
             "tools/call",
             json!({ "name": name, "arguments": arguments }),

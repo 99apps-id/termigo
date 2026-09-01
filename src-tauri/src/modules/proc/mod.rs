@@ -38,10 +38,7 @@ pub fn output_with_timeout(mut cmd: Command, timeout: Duration) -> io::Result<Ou
         Ok(res) => res,
         Err(_) => {
             kill_tree(pid);
-            Err(io::Error::new(
-                io::ErrorKind::TimedOut,
-                "command timed out",
-            ))
+            Err(io::Error::new(io::ErrorKind::TimedOut, "command timed out"))
         }
     }
 }

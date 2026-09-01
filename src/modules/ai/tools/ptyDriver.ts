@@ -14,7 +14,14 @@ export function buildPtyDriverTools(ctx: ToolContext) {
       description:
         "Read the active terminal's screen buffer / scrollback output. Read-only, auto-executes.",
       inputSchema: z.object({
-        max_lines: z.number().int().min(1).max(200).optional().default(50).describe("Maximum lines from the bottom of the buffer to return."),
+        max_lines: z
+          .number()
+          .int()
+          .min(1)
+          .max(200)
+          .optional()
+          .default(50)
+          .describe("Maximum lines from the bottom of the buffer to return."),
       }),
       execute: async ({ max_lines }) => {
         const raw = ctx.getTerminalContext();
@@ -39,7 +46,9 @@ export function buildPtyDriverTools(ctx: ToolContext) {
       description:
         "Type interactive input into the active terminal (e.g. answering [y/N] prompts, sending Enter, or injecting text). Requires approval.",
       inputSchema: z.object({
-        input: z.string().describe("Text or keystroke to send into the terminal prompt."),
+        input: z
+          .string()
+          .describe("Text or keystroke to send into the terminal prompt."),
       }),
       needsApproval: true,
       execute: async ({ input }) => {
@@ -63,7 +72,11 @@ export function buildPtyDriverTools(ctx: ToolContext) {
       description:
         "Check if a specific regex or substring has appeared in the active terminal buffer. Read-only, auto-executes.",
       inputSchema: z.object({
-        pattern: z.string().describe("Substring or regex pattern to look for in terminal output."),
+        pattern: z
+          .string()
+          .describe(
+            "Substring or regex pattern to look for in terminal output.",
+          ),
       }),
       execute: async ({ pattern }) => {
         const raw = ctx.getTerminalContext();
@@ -74,7 +87,15 @@ export function buildPtyDriverTools(ctx: ToolContext) {
           };
         }
 
-        const re = new RegExp(pattern, "i");
+        let re: RegExp;
+        try {
+          re = new RegExp(pattern, "i");
+        } catch (e) {
+          return {
+            found: false,
+            error: `Invalid regex pattern: ${String(e)}`,
+          };
+        }
         const matched = re.test(raw);
         return {
           pattern,

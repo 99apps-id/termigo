@@ -102,6 +102,9 @@ export function unsafeBrowserUrl(url: string): string | null {
   }
   // IP-literal tricks that resolve to loopback or link-local are refused.
   const ipv4 = normalizeIpv4(host);
+  if (ipv4 === "0.0.0.0") {
+    return "Refused: wildcard bind addresses are not valid browser targets";
+  }
   if (ipv4?.startsWith("127.")) {
     return "Refused: loopback addresses are blocked in an in-app browser";
   }
@@ -132,7 +135,6 @@ export function isSafePreviewUrl(url: string): boolean {
   const ipv4 = normalizeIpv4(host);
   const loopback =
     host === "localhost" ||
-    host === "0.0.0.0" ||
     host === "[::1]" ||
     host === "::1" ||
     ipv4?.startsWith("127.") ||

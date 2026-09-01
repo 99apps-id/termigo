@@ -109,11 +109,7 @@ fn run(args: Vec<OsString>) -> Result<(), CliError> {
                 METHOD_QUERY => QUERY_DEFAULT_TIMEOUT,
                 _ => IO_TIMEOUT,
             });
-            let response = send_request_with_timeout(
-                &endpoint.address,
-                &request,
-                read_timeout,
-            )?;
+            let response = send_request_with_timeout(&endpoint.address, &request, read_timeout)?;
             if !response.ok {
                 let error = response.error.unwrap_or_else(|| {
                     termigo_control_protocol::ControlError::new(
@@ -444,15 +440,15 @@ fn parse_pentest_report(args: Vec<OsString>) -> Result<Action, CliError> {
         match arg.to_str() {
             Some("--") if options => options = false,
             Some(value) if options && value.starts_with('-') => {
-                return Err(usage_error(format!("unknown pentest-report option '{value}'")));
+                return Err(usage_error(format!(
+                    "unknown pentest-report option '{value}'"
+                )));
             }
             _ => positional.push(arg),
         }
     }
     if positional.len() > 1 {
-        return Err(usage_error(
-            "pentest-report accepts at most a target",
-        ));
+        return Err(usage_error("pentest-report accepts at most a target"));
     }
     let to_text = |value: OsString, label: &str| -> Result<String, CliError> {
         value.into_string().map_err(|_| {
@@ -616,9 +612,7 @@ fn parse_run_command(args: Vec<OsString>) -> Result<Action, CliError> {
         ));
     }
     if positional.len() > 1 {
-        return Err(usage_error(
-            "run-command accepts exactly one command id",
-        ));
+        return Err(usage_error("run-command accepts exactly one command id"));
     }
     let command = positional.remove(0).into_string().map_err(|_| {
         CliError::new(
@@ -895,8 +889,14 @@ fn print_result(method: &str, result: Value, as_json: bool) {
             }
         }
         METHOD_STATUS => {
-            let os = result.get("os").and_then(Value::as_str).unwrap_or("unknown");
-            let arch = result.get("arch").and_then(Value::as_str).unwrap_or("unknown");
+            let os = result
+                .get("os")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
+            let arch = result
+                .get("arch")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
             let version = result
                 .get("app_version")
                 .and_then(Value::as_str)
@@ -904,7 +904,10 @@ fn print_result(method: &str, result: Value, as_json: bool) {
             println!("Termigo {version} ({os}/{arch})");
             if let Some(ui) = result.get("ui").and_then(Value::as_object) {
                 if let Some(agent) = ui.get("agent").and_then(Value::as_object) {
-                    let status = agent.get("status").and_then(Value::as_str).unwrap_or("idle");
+                    let status = agent
+                        .get("status")
+                        .and_then(Value::as_str)
+                        .unwrap_or("idle");
                     let step = agent.get("step").and_then(Value::as_str).unwrap_or("");
                     if !step.is_empty() {
                         println!("agent: {status} — {step}");
@@ -912,7 +915,11 @@ fn print_result(method: &str, result: Value, as_json: bool) {
                         println!("agent: {status}");
                     }
                 }
-                if let Some(model) = ui.get("model").and_then(|m| m.get("id")).and_then(Value::as_str) {
+                if let Some(model) = ui
+                    .get("model")
+                    .and_then(|m| m.get("id"))
+                    .and_then(Value::as_str)
+                {
                     if !model.is_empty() {
                         println!("model: {model}");
                     }
@@ -946,10 +953,7 @@ fn print_result(method: &str, result: Value, as_json: bool) {
             println!("Ran '{command}' in Termigo");
         }
         METHOD_FOCUS => {
-            let path = result
-                .get("label")
-                .and_then(Value::as_str)
-                .unwrap_or("tab");
+            let path = result.get("label").and_then(Value::as_str).unwrap_or("tab");
             println!("Focused '{path}' in Termigo");
         }
         METHOD_IDENTIFY => {
@@ -1047,7 +1051,11 @@ mod tests {
     #[test]
     fn unknown_commands_are_not_treated_as_file_paths() {
         let error = parse_args(args(&["agen", "list"])).expect_err("agen is not a command");
-        assert!(error.message.contains("unknown command 'agen'"), "{}", error.message);
+        assert!(
+            error.message.contains("unknown command 'agen'"),
+            "{}",
+            error.message
+        );
 
         for command in ["agent", "mcp", "skill", "doctor", "init", "config"] {
             let error =
@@ -1065,7 +1073,13 @@ mod tests {
     /// an unknown command.
     #[test]
     fn path_like_arguments_still_use_the_open_shorthand() {
-        for path in ["notes.txt", "./notes.txt", "docs/SSH.md", ".env", "C:/tmp/a.txt"] {
+        for path in [
+            "notes.txt",
+            "./notes.txt",
+            "docs/SSH.md",
+            ".env",
+            "C:/tmp/a.txt",
+        ] {
             let error = parse_args(args(&[path])).expect_err("these paths do not exist");
             assert_eq!(error.code, "path_not_found", "{path} routed away from open");
         }
@@ -1149,8 +1163,8 @@ mod tests {
         assert_eq!(error.code, "usage");
         assert!(error.message.contains("target"));
 
-        let error =
-            parse_args(args(&["pentest-run", "example.com", "web", "extra"])).expect_err("too many");
+        let error = parse_args(args(&["pentest-run", "example.com", "web", "extra"]))
+            .expect_err("too many");
         assert_eq!(error.code, "usage");
         assert!(error.message.contains("at most"));
 
@@ -1194,8 +1208,7 @@ mod tests {
 
     #[test]
     fn pentest_report_rejects_extra_arguments_and_options() {
-        let error =
-            parse_args(args(&["pentest-report", "a", "b"])).expect_err("too many");
+        let error = parse_args(args(&["pentest-report", "a", "b"])).expect_err("too many");
         assert_eq!(error.code, "usage");
         assert!(error.message.contains("at most"));
 
@@ -1232,8 +1245,7 @@ mod tests {
 
     #[test]
     fn parses_query_with_prompt_and_optional_timeout() {
-        let config =
-            parse_args(args(&["query", "what changed?", "--json"])).expect("parse query");
+        let config = parse_args(args(&["query", "what changed?", "--json"])).expect("parse query");
         assert!(config.json);
         assert_eq!(
             config.action,
@@ -1262,7 +1274,8 @@ mod tests {
         let error = parse_args(args(&["query", "a", "b"])).expect_err("too many");
         assert_eq!(error.code, "usage");
 
-        let error = parse_args(args(&["query", "hi", "--timeout", "nope"])).expect_err("bad timeout");
+        let error =
+            parse_args(args(&["query", "hi", "--timeout", "nope"])).expect_err("bad timeout");
         assert_eq!(error.code, "usage");
 
         let error = parse_args(args(&["query", "hi", "--wat"])).expect_err("reject option");

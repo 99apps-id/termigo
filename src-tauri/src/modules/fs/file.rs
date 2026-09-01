@@ -286,9 +286,7 @@ pub async fn fs_write_file(
     if let Some(perms) = original_permissions {
         let _ = fs::set_permissions(&target, perms);
     }
-    let mtime = fs::metadata(&target)
-        .map(|m| mtime_millis(&m))
-        .unwrap_or(0);
+    let mtime = fs::metadata(&target).map(|m| mtime_millis(&m)).unwrap_or(0);
     let _ = app.emit(
         "fs:file-written",
         FileWrittenEvent {
@@ -367,10 +365,9 @@ mod tests {
         assert_eq!(f.file_name().and_then(|n| n.to_str()), Some("report.pdf"));
         let bytes = std::fs::read(&f).unwrap();
         assert_eq!(
-            base64::engine::general_purpose::STANDARD.decode(
-                base64::engine::general_purpose::STANDARD.encode(&bytes)
-            )
-            .unwrap(),
+            base64::engine::general_purpose::STANDARD
+                .decode(base64::engine::general_purpose::STANDARD.encode(&bytes))
+                .unwrap(),
             bytes
         );
     }

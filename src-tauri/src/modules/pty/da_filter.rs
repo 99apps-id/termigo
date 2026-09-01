@@ -37,12 +37,7 @@ impl DaFilter {
         }
     }
 
-    pub fn process<F: FnMut(&[u8])>(
-        &mut self,
-        input: &[u8],
-        out: &mut Vec<u8>,
-        mut respond: F,
-    ) {
+    pub fn process<F: FnMut(&[u8])>(&mut self, input: &[u8], out: &mut Vec<u8>, mut respond: F) {
         if matches!(self.state, State::Idle) && !input.contains(&ESC) {
             out.extend_from_slice(input);
             if !input.is_empty() {
@@ -82,8 +77,7 @@ impl DaFilter {
                     if (0x40..=0x7e).contains(&b) {
                         if b == FINAL_C {
                             let middle = &self.hold[2..self.hold.len() - 1];
-                            let is_response =
-                                middle.contains(&b'?') || middle.contains(&b';');
+                            let is_response = middle.contains(&b'?') || middle.contains(&b';');
                             let is_startup_query = !self.saw_output && out.is_empty();
                             let prefix = middle.first().copied().unwrap_or(0);
                             if is_response || !is_startup_query {

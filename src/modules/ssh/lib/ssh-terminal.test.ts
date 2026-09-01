@@ -22,9 +22,9 @@ vi.mock("../connections", () => ({
 const openSsh = vi.fn();
 vi.mock("../bridge", () => ({ openSsh: (...a: unknown[]) => openSsh(...a) }));
 
-import { openSshTerminalSession } from "./ssh-terminal";
-import type { SshConnection } from "../connections";
 import type { SshHandlers } from "../bridge";
+import type { SshConnection } from "../connections";
+import { openSshTerminalSession } from "./ssh-terminal";
 
 const conn = {
   id: "c1",
@@ -60,6 +60,7 @@ describe("openSshTerminalSession", () => {
     // the file browser with no session and the terminal with no output.
     expect(setSession).toHaveBeenCalledWith({
       sessionId: 7,
+      connectionId: "c1",
       hostLabel: "root@vps.example.com",
     });
   });

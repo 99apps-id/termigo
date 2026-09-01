@@ -113,6 +113,11 @@ describe("transient/recoverable error classifiers", () => {
     ).toBe(true);
     expect(isConnectivityError("fetch failed: ENETUNREACH")).toBe(true);
     expect(isConnectivityError("Connection refused")).toBe(true);
+    expect(
+      isConnectivityError(
+        "Failed after 3 attempts. Last error: Cannot connect to API: provider did not respond within 90s",
+      ),
+    ).toBe(true);
   });
 
   it("rejects non-connectivity errors", () => {
@@ -121,17 +126,17 @@ describe("transient/recoverable error classifiers", () => {
   });
 
   it("recognises quota / credit errors", () => {
-    expect(isQuotaError("Error: insufficient_quota, you have no credits left")).toBe(
-      true,
-    );
+    expect(
+      isQuotaError("Error: insufficient_quota, you have no credits left"),
+    ).toBe(true);
     expect(isQuotaError("402 Payment Required: out of tokens")).toBe(true);
     expect(isQuotaError("Rate limit reached.")).toBe(false);
   });
 
   it("recognises rate limit errors", () => {
-    expect(isRateLimitError("rate_limit_exceeded: Please retry after 10s")).toBe(
-      true,
-    );
+    expect(
+      isRateLimitError("rate_limit_exceeded: Please retry after 10s"),
+    ).toBe(true);
     expect(isRateLimitError("429 Too Many Requests")).toBe(true);
     expect(isRateLimitError("Invalid API key.")).toBe(false);
   });

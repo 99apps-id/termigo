@@ -195,7 +195,10 @@ fn merge_hooks(mut root: Value, spec: &AgentSpec) -> Value {
 fn existing_config(contents: Option<&str>, path: &std::path::Path) -> Result<Value, String> {
     match contents {
         Some(s) if !s.trim().is_empty() => serde_json::from_str::<Value>(s).map_err(|e| {
-            format!("{} is not valid JSON ({e}); refusing to overwrite", path.display())
+            format!(
+                "{} is not valid JSON ({e}); refusing to overwrite",
+                path.display()
+            )
         }),
         _ => Ok(json!({})),
     }
@@ -461,8 +464,10 @@ mod tests {
     fn pi_extension_install_preserves_symlink() {
         use std::os::unix::fs::symlink;
 
-        let dir =
-            std::env::temp_dir().join(format!("termigo-pi-extension-symlink-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "termigo-pi-extension-symlink-{}",
+            std::process::id()
+        ));
         let target = dir.join("managed.ts");
         let path = dir.join(PI_EXTENSION_FILE);
         let _ = std::fs::remove_dir_all(&dir);
@@ -575,12 +580,18 @@ fn candidate_dirs() -> Vec<(std::path::PathBuf, &'static str)> {
     };
     if cfg!(windows) {
         if let Ok(appdata) = std::env::var("APPDATA") {
-            out.push((std::path::PathBuf::from(appdata).join("npm"), "the npm global folder"));
+            out.push((
+                std::path::PathBuf::from(appdata).join("npm"),
+                "the npm global folder",
+            ));
         }
     }
     out.push((home.join(".local").join("bin"), "~/.local/bin"));
     out.push((home.join(".bun").join("bin"), "the bun global folder"));
-    out.push((home.join(".npm-global").join("bin"), "the npm global folder"));
+    out.push((
+        home.join(".npm-global").join("bin"),
+        "the npm global folder",
+    ));
     out
 }
 
@@ -650,7 +661,11 @@ pub async fn agent_locate_command(command: String) -> Result<AgentLocation, Stri
     }
 
     if which::which(&name).is_ok() {
-        return Ok(AgentLocation { on_path: true, found_at: None, found_in: None });
+        return Ok(AgentLocation {
+            on_path: true,
+            found_at: None,
+            found_in: None,
+        });
     }
 
     for (dir, label) in candidate_dirs() {
@@ -674,5 +689,9 @@ pub async fn agent_locate_command(command: String) -> Result<AgentLocation, Stri
         });
     }
 
-    Ok(AgentLocation { on_path: false, found_at: None, found_in: None })
+    Ok(AgentLocation {
+        on_path: false,
+        found_at: None,
+        found_in: None,
+    })
 }

@@ -244,8 +244,8 @@ mod tests {
 
     #[test]
     fn pentest_run_defaults_category_to_empty() {
-        let params: PentestRunParams =
-            serde_json::from_value(json!({ "target": "example.com" })).expect("deserialize pentest");
+        let params: PentestRunParams = serde_json::from_value(json!({ "target": "example.com" }))
+            .expect("deserialize pentest");
         assert_eq!(params.target, "example.com");
         assert_eq!(params.category, "");
         assert!(METHODS.contains(&METHOD_PENTEST_RUN));
@@ -253,8 +253,8 @@ mod tests {
 
     #[test]
     fn pentest_report_defaults_target_to_empty() {
-        let params: PentestReportParams = serde_json::from_value(json!({}))
-            .expect("deserialize report params without a target");
+        let params: PentestReportParams =
+            serde_json::from_value(json!({})).expect("deserialize report params without a target");
         assert_eq!(params.target, "");
 
         let with_target: PentestReportParams = serde_json::from_value(json!({

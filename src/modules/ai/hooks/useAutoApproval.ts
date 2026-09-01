@@ -21,9 +21,16 @@ type ApprovalResponder = (arg: {
   reason?: string;
 }) => void | PromiseLike<void>;
 
-/** `tool-write_file` -> `write_file`. */
-function toolNameOf(partType: string): string {
-  return partType.startsWith("tool-") ? partType.slice("tool-".length) : "";
+/** `tool-write_file` -> `write_file`; dynamic tools carry their name separately. */
+export function toolNameOf(part: {
+  type?: unknown;
+  toolName?: unknown;
+}): string {
+  if (part.type === "dynamic-tool" && typeof part.toolName === "string") {
+    return part.toolName;
+  }
+  const type = typeof part.type === "string" ? part.type : "";
+  return type.startsWith("tool-") ? type.slice("tool-".length) : "";
 }
 
 export function useAutoApproval(
@@ -45,7 +52,7 @@ export function useAutoApproval(
       const id = (part.approval as { id?: string } | undefined)?.id;
       if (!id || answered.current.has(id)) continue;
 
-      const tool = toolNameOf(String(part.type ?? ""));
+      const tool = toolNameOf(part);
       if (!tool) continue;
 
       // An explicit allowance answers the question whatever the mode says:

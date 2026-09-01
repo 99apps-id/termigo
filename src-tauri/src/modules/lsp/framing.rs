@@ -20,7 +20,10 @@ impl fmt::Display for FramingError {
             Self::MissingContentLength => write!(f, "lsp frame missing Content-Length header"),
             Self::InvalidContentLength(v) => write!(f, "lsp frame invalid Content-Length: {v}"),
             Self::ContentTooLarge(n) => {
-                write!(f, "lsp frame Content-Length {n} exceeds cap {MAX_CONTENT_LEN}")
+                write!(
+                    f,
+                    "lsp frame Content-Length {n} exceeds cap {MAX_CONTENT_LEN}"
+                )
             }
             Self::InvalidUtf8 => write!(f, "lsp frame payload is not valid UTF-8"),
         }
@@ -66,7 +69,10 @@ impl FrameDecoder {
                         None => {
                             // Terminator may straddle this chunk and the next.
                             self.phase = Phase::Headers {
-                                scan_from: self.buf.len().saturating_sub(HEADER_TERMINATOR.len() - 1),
+                                scan_from: self
+                                    .buf
+                                    .len()
+                                    .saturating_sub(HEADER_TERMINATOR.len() - 1),
                             };
                             return Ok(out);
                         }
@@ -139,7 +145,10 @@ mod tests {
         let mut bytes = frame(r#"{"a":1}"#);
         bytes.extend(frame(r#"{"b":2}"#));
         let msgs = d.push(&bytes).unwrap();
-        assert_eq!(msgs, vec![r#"{"a":1}"#.to_string(), r#"{"b":2}"#.to_string()]);
+        assert_eq!(
+            msgs,
+            vec![r#"{"a":1}"#.to_string(), r#"{"b":2}"#.to_string()]
+        );
     }
 
     #[test]
@@ -160,7 +169,10 @@ mod tests {
         // Split in the middle of \r\n\r\n.
         let split = bytes.windows(4).position(|w| w == b"\r\n\r\n").unwrap() + 2;
         assert!(d.push(&bytes[..split]).unwrap().is_empty());
-        assert_eq!(d.push(&bytes[split..]).unwrap(), vec![r#"{"x":1}"#.to_string()]);
+        assert_eq!(
+            d.push(&bytes[split..]).unwrap(),
+            vec![r#"{"x":1}"#.to_string()]
+        );
     }
 
     #[test]

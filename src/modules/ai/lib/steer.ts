@@ -38,7 +38,10 @@ export const EMPTY_QUEUE: SteerQueue = { pending: [] };
  */
 export function isBusy(status: string): boolean {
   return (
-    status === "submitted" || status === "thinking" || status === "streaming"
+    status === "submitted" ||
+    status === "thinking" ||
+    status === "streaming" ||
+    status === "awaiting-approval"
   );
 }
 
@@ -46,6 +49,12 @@ export function isBusy(status: string): boolean {
 export function enqueue(queue: SteerQueue, message: SteerMessage): SteerQueue {
   if (message.parts.length === 0) return queue;
   return { pending: [...queue.pending, message] };
+}
+
+/** Put a failed delivery back before messages typed while it was sending. */
+export function prepend(queue: SteerQueue, message: SteerMessage): SteerQueue {
+  if (message.parts.length === 0) return queue;
+  return { pending: [message, ...queue.pending] };
 }
 
 /** Drop one queued message; used by the per-message cancel in the UI. */

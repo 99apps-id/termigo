@@ -1,7 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const { dispatchTool } = vi.hoisted(() => ({
+  dispatchTool:
+    vi.fn<(name: string, args: Record<string, unknown>) => Promise<unknown>>(),
+}));
+
+vi.mock("./tools", () => ({ dispatchTool }));
+
 import {
-  loadWorkflow,
   listWorkflowNames,
+  loadWorkflow,
   runWorkflow,
   type WorkflowDefinition,
 } from "./workflow";
@@ -14,6 +22,10 @@ function def(overrides: Partial<WorkflowDefinition> = {}): WorkflowDefinition {
     ...overrides,
   };
 }
+
+beforeEach(() => {
+  dispatchTool.mockReset().mockResolvedValue({ ok: true });
+});
 
 describe("runWorkflow", () => {
   it("runs independent steps in order and returns completed ids", async () => {
@@ -79,6 +91,22 @@ describe("runWorkflow", () => {
     expect(result.failed).toEqual(["a"]);
     expect(result.skipped).toEqual([]);
     expect(result.stoppedAt).toBeUndefined();
+  });
+
+  it("stops and skips dependents when a dispatched tool returns an error", async () => {
+    dispatchTool.mockResolvedValueOnce({ error: "approval denied" });
+    const result = await runWorkflow(
+      def({
+        steps: [
+          { id: "write", tool: "write_file" },
+          { id: "verify", tool: "run_checks", depends_on: ["write"] },
+        ],
+      }),
+    );
+
+    expect(result.failed).toEqual(["write"]);
+    expect(result.skipped).toEqual(["verify"]);
+    expect(dispatchTool).toHaveBeenCalledTimes(1);
   });
 });
 

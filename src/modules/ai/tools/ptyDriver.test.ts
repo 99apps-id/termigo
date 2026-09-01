@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildPtyDriverTools } from "./ptyDriver";
 import type { ToolContext } from "./context";
+import { buildPtyDriverTools } from "./ptyDriver";
 
-function makeContext(buffer: string | null = "Ready on http://localhost:3000\n"): ToolContext {
+function makeContext(
+  buffer: string | null = "Ready on http://localhost:3000\n",
+): ToolContext {
   return {
     getCwd: () => "/workspace",
     getWorkspaceRoot: () => "/workspace",
@@ -59,5 +61,16 @@ describe("ptyDriver tools", () => {
     // biome-ignore lint/suspicious/noExplicitAny: tool ctx and result are harness-typed, empty exec ctx is enough
     const notFound = (await exec({ pattern: "port 3000" }, {} as any)) as any;
     expect(notFound.found).toBe(false);
+  });
+
+  it("returns a tool error rather than throwing for an invalid regex", async () => {
+    const tools = buildPtyDriverTools(makeContext());
+    const exec = tools.pty_wait_for_pattern.execute;
+    if (!exec) throw new Error("pty_wait_for_pattern execute missing");
+
+    // biome-ignore lint/suspicious/noExplicitAny: tool ctx and result are harness-typed, empty exec ctx is enough
+    const result = (await exec({ pattern: "(" }, {} as any)) as any;
+    expect(result.found).toBe(false);
+    expect(result.error).toMatch(/invalid regex/i);
   });
 });

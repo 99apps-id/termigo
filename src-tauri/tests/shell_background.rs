@@ -34,13 +34,8 @@ fn spawn_invalid_cwd_errors() {
 
 #[test]
 fn spawn_captures_stdout_and_exits_zero() {
-    let proc = background::spawn(
-        "printf 'hello\\n'".into(),
-        None,
-        WorkspaceEnv::Local,
-        None,
-    )
-    .expect("spawn");
+    let proc = background::spawn("printf 'hello\\n'".into(), None, WorkspaceEnv::Local, None)
+        .expect("spawn");
 
     assert!(wait_until(Duration::from_secs(5), || {
         proc.read_logs(0).exited
@@ -93,7 +88,10 @@ fn read_logs_advances_offset() {
     assert!(first.next_offset > 0);
 
     let next = proc.read_logs(first.next_offset);
-    assert!(next.bytes.is_empty(), "consumed offset must return no bytes");
+    assert!(
+        next.bytes.is_empty(),
+        "consumed offset must return no bytes"
+    );
     assert_eq!(next.next_offset, first.next_offset);
 }
 
@@ -134,7 +132,10 @@ fn spawn_writes_full_log_file() {
     assert!(content.contains("line2"));
     // The full log is also surfaced on the process and its log reads.
     assert_eq!(proc.info(1).log_path.as_deref(), Some(log_path.as_str()));
-    assert_eq!(proc.read_logs(0).log_path.as_deref(), Some(log_path.as_str()));
+    assert_eq!(
+        proc.read_logs(0).log_path.as_deref(),
+        Some(log_path.as_str())
+    );
     // The in-memory ring still carries the tail for progress polling.
     assert!(proc.read_logs(0).bytes.contains("line1"));
 }

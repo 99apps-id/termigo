@@ -44,6 +44,7 @@ describe("unsafeBrowserUrl", () => {
   it("rejects loopback / link-local IP tricks", () => {
     expect(unsafeBrowserUrl("http://2130706433:5173")).toMatch(/loopback/);
     expect(unsafeBrowserUrl("http://127.0.0.1")).toMatch(/loopback/);
+    expect(unsafeBrowserUrl("http://0.0.0.0:5173")).toMatch(/wildcard/);
     expect(unsafeBrowserUrl("http://169.254.169.254")).toMatch(
       /metadata|link-local/,
     );
@@ -56,6 +57,7 @@ describe("isSafePreviewUrl", () => {
     expect(isSafePreviewUrl("http://localhost:5173")).toBe(true);
     expect(isSafePreviewUrl("http://127.0.0.1:3000")).toBe(true);
     expect(isSafePreviewUrl("http://localhost:5173/x")).toBe(true);
+    expect(isSafePreviewUrl("http://0.0.0.0:5173")).toBe(false);
   });
 
   it("rejects external and metadata URLs", () => {

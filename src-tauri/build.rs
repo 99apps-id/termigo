@@ -20,7 +20,8 @@ fn configure_sidecar() {
     } else {
         ""
     };
-    let path = std::path::PathBuf::from("binaries").join(format!("termigo-cli-{target}{extension}"));
+    let path =
+        std::path::PathBuf::from("binaries").join(format!("termigo-cli-{target}{extension}"));
     let valid =
         std::fs::metadata(&path).is_ok_and(|metadata| metadata.is_file() && metadata.len() > 0);
     if valid {
