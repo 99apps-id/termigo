@@ -21,7 +21,10 @@ use crate::modules::workspace::validate_wsl_distro_name;
 use background::{BackgroundLogResponse, BackgroundProc, BackgroundProcInfo};
 use session::{SessionRunOutput, ShellSession};
 
-const DEFAULT_TIMEOUT_SECS: u64 = 30;
+// 30s was too short: a project-wide lint/test/build (`eslint .`, `pnpm test`,
+// `cargo build`) easily exceeds it and times out, so the agent re-runs it. 120s
+// covers a normal one; pass `timeout_secs` (up to 300) for a genuinely slow job.
+const DEFAULT_TIMEOUT_SECS: u64 = 120;
 const MAX_TIMEOUT_SECS: u64 = 300;
 const MAX_OUTPUT_BYTES: usize = 256 * 1024;
 

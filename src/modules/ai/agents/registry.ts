@@ -63,6 +63,10 @@ export const SUBAGENTS: Record<SubagentType, SubagentDef> = {
     label: "Code review",
     description:
       "Reviews changed code for correctness, architecture, performance, security.",
+    // The diff is already in the prompt, so the reviewer does not need to
+    // explore the repo. A small step budget keeps the review fast — the budget
+    // ladder is for a real task, not for re-reading a diff that was provided.
+    maxSteps: 6,
     systemPrompt: `You are a code-review subagent. Inspect the requested code and report only ACTIONABLE findings: correctness bugs, architecture violations, performance issues, security risks. Skip style/formatting. Format each finding as: "[MUST/SHOULD/NIT] file:line — issue → fix". If nothing is wrong, say "Looks good." Do NOT propose unrelated cleanups.`,
   },
   security: {

@@ -54,10 +54,18 @@ export function buildShellTools(ctx: ToolContext) {
   return {
     bash_run: tool({
       description:
-        "Run a foreground shell command. When the active terminal is an SSH session the command runs ON THE REMOTE HOST, from the remote shell's working directory, and always asks for approval regardless of the approval mode. Otherwise it runs in this session's persistent local shell, where cwd persists across calls. Use for short-lived commands (lint, test, build, install, service restarts). For long-running local daemons use `bash_background`. NEVER invoke interactive tools (vim, less, top) — they will hang. To FIND files, use the `glob` tool (fast, ignores node_modules/.git, capped) — a recursive shell scan (`Get-ChildItem -Recurse`, `find`, `dir /s`) from a large or home directory can time out. Match the shell in the <env> block: on Windows that is PowerShell, so use PowerShell syntax (`2>$null`, not `2>nul`), never cmd/DOS.",
+        "Run a foreground shell command. When the active terminal is an SSH session the command runs ON THE REMOTE HOST, from the remote shell's working directory, and always asks for approval regardless of the approval mode. Otherwise it runs in this session's persistent local shell, where cwd persists across calls. Use for short-lived commands (build, install, service restarts, a quick grep). For project-wide lint/test use `run_checks` instead (it defaults to 300s). For long-running local daemons use `bash_background`. NEVER invoke interactive tools (vim, less, top) — they will hang. To FIND files, use the `glob` tool (fast, ignores node_modules/.git, capped) — a recursive shell scan (`Get-ChildItem -Recurse`, `find`, `dir /s`) from a large or home directory can time out. Match the shell in the <env> block: on Windows that is PowerShell, so use PowerShell syntax (`2>$null`, not `2>nul`), never cmd/DOS.",
       inputSchema: z.object({
         command: z.string(),
-        timeout_secs: z.number().int().min(1).max(300).optional(),
+        timeout_secs: z
+          .number()
+          .int()
+          .min(1)
+          .max(300)
+          .optional()
+          .describe(
+            "Timeout in seconds. Default 120. A project-wide build/install may need more — pass up to 300.",
+          ),
       }),
       needsApproval: true,
       execute: async ({ command, timeout_secs }, { abortSignal }) => {
