@@ -81,9 +81,15 @@ export function devPort(command: string): number {
 }
 
 /** Loopback URLs to probe for a port, in order. `localhost` may resolve to
- *  IPv6 (`::1`) where the server bound only IPv4, so 127.0.0.1 is probed too. */
+ *  IPv6 (`::1`) where the server bound only IPv4, so 127.0.0.1 is probed too;
+ *  the explicit `[::1]` covers a server that bound only IPv6 on a host where
+ *  `localhost` resolves to 127.0.0.1. */
 export function candidateUrls(port: number): string[] {
-  return [`http://localhost:${port}`, `http://127.0.0.1:${port}`];
+  return [
+    `http://localhost:${port}`,
+    `http://127.0.0.1:${port}`,
+    `http://[::1]:${port}`,
+  ];
 }
 
 /** Resolve a project's dev-server command from its manifests.

@@ -29,6 +29,7 @@ async function waitForDevServer(
   let offset = 0;
   let url: string | null = null;
   let logsTail = "";
+  let exited = false;
 
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -44,7 +45,7 @@ async function waitForDevServer(
       logsTail = logs.bytes.slice(-4000);
       const found = findLocalUrl(logs.bytes);
       if (found) url = found;
-      if (logs.exited && !url) break;
+      if (logs.exited) exited = true;
     }
 
     if (url) {
@@ -56,6 +57,9 @@ async function waitForDevServer(
         const probe = await native.httpProbe(candidate, 1500).catch(() => null);
         if (probe?.ok) return { url: candidate, ready: true, logsTail };
       }
+      // The process exited and its URL never answered — waiting out the whole
+      // deadline would burn 60s on a dead server.
+      if (exited) break;
     } else if (portHint > 0) {
       // No URL printed yet — probe the hinted port directly so a server that
       // logs to stderr (not captured) is still caught.
@@ -66,6 +70,9 @@ async function waitForDevServer(
           return { url: candidate, ready: true, logsTail };
         }
       }
+      if (exited) break;
+    } else if (exited) {
+      break;
     }
     await sleep(500);
   }

@@ -640,6 +640,12 @@ pub async fn http_probe(
     let client = reqwest::Client::builder()
         .timeout(timeout)
         .redirect(reqwest::redirect::Policy::none())
+        // Dev servers that serve https (vite --https, CRA, mkcert-less setups)
+        // use a self-signed certificate, so the default TLS verification would
+        // fail every probe even though the server is up. The probe is
+        // loopback-ONLY (see validate_probe_url), so disabling verification
+        // here cannot reach anything but a local process the agent spawned.
+        .danger_accept_invalid_certs(true)
         .build()
         .map_err(|e| e.to_string())?;
     match client.get(parsed).send().await {

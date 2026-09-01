@@ -59,6 +59,9 @@ const EXEC_TOOLS = new Set([
   "bash_background",
   "spawn_coding_agent",
   "send_to_agent",
+  // Spawning a dev server runs a long-lived process and opens a page — an
+  // exec-tier action, so it never rides along with "auto-approve edits".
+  "dev_server",
 ]);
 
 export type ApprovalMode =

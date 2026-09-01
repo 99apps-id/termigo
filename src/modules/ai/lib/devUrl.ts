@@ -17,7 +17,7 @@ const CSI_RE = /\x1b\[[0-9;?]*[ -/]*[@-~]/g;
 
 /** Loopback http(s) urls. A remote server's url is tunnelled before it gets here. */
 export const LOCAL_URL_RE =
-  /\bhttps?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::\d{1,5})?(?:\/[^\s\x1b]*)?/g;
+  /\bhttps?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?::\d{1,5})?(?:\/[^\s\x1b]*)?/g;
 
 /** `http://localhost:8000/admin].` -> `http://localhost:8000/admin`. */
 export function stripTrailingPunct(url: string): string {

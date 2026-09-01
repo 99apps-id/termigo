@@ -45,6 +45,12 @@ describe("findLocalUrl", () => {
     );
   });
 
+  it("finds an IPv6 loopback url", () => {
+    expect(findLocalUrl("Server listening on http://[::1]:3000/")).toBe(
+      "http://[::1]:3000/",
+    );
+  });
+
   it("keeps a path prefix", () => {
     expect(findLocalUrl("   ➜  Local:  http://localhost:1420/")).toBe(
       "http://localhost:1420/",
