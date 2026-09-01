@@ -16,11 +16,26 @@ export type SubagentType =
   | "pentest-network"
   | "vision";
 
+/** Cross-cutting characteristics of an agent, so the factory and the UI can
+ *  derive behaviour (model choice, read-tier tooling) from one place instead
+ *  of re-encoding per-call rules. */
+export type SubagentCapabilities = {
+  /** Needs a vision-capable model (read_file image support). */
+  vision?: boolean;
+  /** Read-tier only by design — never writes or executes. Its tool calls are
+   *  still approval-gated, but the agent itself is pointed at enumeration. */
+  readOnly?: boolean;
+};
+
 export type SubagentDef = {
   id: SubagentType;
   label: string;
   description: string;
   systemPrompt: string;
+  /** Step budget for one run of this agent. Defaults to the shared sub-agent
+   *  budget when absent. */
+  maxSteps?: number;
+  capabilities?: SubagentCapabilities;
 };
 
 /**
@@ -95,6 +110,7 @@ Reporting discipline:
     label: "Pentest · Recon",
     description:
       "Recon specialist for an authorized target: maps the attack surface (subdomains, DNS, live hosts, open ports/services, web tech, exposed endpoints). Read-tier enumeration only. Run several pentest specialists in parallel on the same in-scope target.",
+    capabilities: { readOnly: true },
     systemPrompt: `You are a RECON penetration-testing subagent. Act ONLY on the target named in your prompt, already confirmed to be in the authorized scope — touch no other host. Every command and tool call is approval-gated; a denial ends that line of enquiry, do not retry it. Stay strictly non-destructive.
 
 Your job is attack-surface mapping, nothing more. Enumerate: subdomains (${pt("subdomains")}), DNS records and — only if authorized — AXFR (${pt("dns")}), live hosts and open ports/services and versions (${pt("portscan")} / ${pt("scan")}), virtual hosts (${pt("vhosts")}), and the web tech stack / security headers (${pt("httpcheck")}). Run \`${pt("tool_check")}\` first if unsure what is installed.
@@ -106,6 +122,7 @@ Do NOT exploit, brute-force, or run intrusive checks — that is a different spe
     label: "Pentest · Web",
     description:
       "Web app & API testing specialist for an authorized target: security headers, TLS, content discovery, and injection/auth/access-control/SSRF/XSS leads validated with a minimal non-destructive PoC.",
+    capabilities: { readOnly: true },
     systemPrompt: `You are a WEB-APPLICATION penetration-testing subagent. Act ONLY on the target named in your prompt, already confirmed to be in the authorized scope — touch no other host. Every command and tool call is approval-gated; a denial ends that line, do not retry it. Stay strictly non-destructive: prove an issue with the lightest possible evidence, never by damaging data.
 
 Focus on the web/API surface: security headers (${pt("httpcheck")}), TLS/cert hygiene (${pt("sslcheck")}), content and vhost discovery (${pt("vhosts")} / ${pt("scan")}), and injection / broken auth / access-control (IDOR) / SSRF / XSS. Use ${pt("run_pentest_tool")} for sqlmap, ffuf, nikto, etc. when a dedicated tool does not cover it. Run \`${pt("tool_check")}\` first if unsure what is installed.
@@ -117,6 +134,7 @@ Treat every scanner hit as a LEAD: confirm it yourself with a minimal request/re
     label: "Pentest · Network",
     description:
       "Network & infrastructure specialist for an authorized target: full port/service scanning, SMB/AD/SNMP service enumeration, and TLS posture. Read-tier and default-cred checks only, non-destructive.",
+    capabilities: { readOnly: true },
     systemPrompt: `You are a NETWORK / INFRASTRUCTURE penetration-testing subagent. Act ONLY on the target named in your prompt, already confirmed to be in the authorized scope — touch no other host. Every command and tool call is approval-gated; a denial ends that line, do not retry it. Stay strictly non-destructive — never run denial-of-service or flooding actions.
 
 Focus on hosts and services: full port/service/version scanning (${pt("portscan")}, or ${pt("scan_start")}/${pt("scan_poll")}/${pt("scan_stop")} for a long scan), and enumeration of SMB/AD (enum4linux, netexec — READ actions only), SNMP, and TLS posture (${pt("sslcheck")}), via ${pt("run_pentest_tool")} where no dedicated tool exists. Run \`${pt("tool_check")}\` first if unsure what is installed.
@@ -128,6 +146,7 @@ Do not attempt credential brute force or exploitation without an explicit instru
     label: "Vision",
     description:
       "Looks at images — screenshots, design mocks, diagrams, photos — and answers questions about them. Reads the image with read_file and reports what it sees. Needs a vision-capable model.",
+    capabilities: { vision: true },
     systemPrompt: `You are a vision subagent. Your job is to LOOK at the image(s) named in your prompt and answer the question about them.
 
 Rules:
@@ -152,3 +171,23 @@ Rules:
 - Return a short summary: files created or changed, and anything you could not finish.`,
   },
 };
+
+/**
+ * Look up a sub-agent def by id. Unknown ids fall back to the general worker
+ * (the same safe default the resolver uses) so a caller that resolved a
+ * free-form string never has to handle a miss.
+ */
+export function subagentDef(type: SubagentType | string): SubagentDef {
+  const def = SUBAGENTS[type as SubagentType];
+  return def ?? SUBAGENTS.general;
+}
+
+/** Whether this agent needs a vision-capable model to do its job. */
+export function subagentNeedsVision(type: SubagentType | string): boolean {
+  return subagentDef(type).capabilities?.vision === true;
+}
+
+/** Whether this agent is read-tier only by design (never writes/executes). */
+export function subagentIsReadOnly(type: SubagentType | string): boolean {
+  return subagentDef(type).capabilities?.readOnly === true;
+}

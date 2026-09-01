@@ -10,6 +10,7 @@ import {
   type ToolSet,
   type UIMessage,
 } from "ai";
+import { buildAgentTools } from "../agents/agentFactory";
 import {
   CHATGPT_BASE_URL,
   CHATGPT_HEADERS,
@@ -47,7 +48,6 @@ import {
   appendSystemHint,
   applyProfileToStepBudget,
   applyProfileToSystem,
-  applyProfileToTools,
   getProfile,
 } from "./harnessProfile";
 import { activeProfileIdFor } from "./harnessProfileStore";
@@ -1016,7 +1016,9 @@ export async function runAgentStream(opts: RunAgentOptions) {
     }),
   };
   // Reorder/hide tools per the active harness profile (see harnessProfile.ts).
-  const tools = applyProfileToTools(rawTools, profile);
+  // Main agent passes no depth, so its spawn tools are never withheld — the
+  // same context-safe injection a sub-agent goes through, minus the nesting cap.
+  const tools = buildAgentTools(rawTools, { profile });
 
   // What the model is handed before it reads a word of the request. Measured
   // as components rather than one number: a total says "slow", a breakdown

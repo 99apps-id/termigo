@@ -13,6 +13,8 @@ import { summarizeInput } from "../lib/approvalQueue";
 import { isCustomTool } from "../lib/customToolNames";
 import { isExtensionTool } from "../lib/extensionToolNames";
 import { buildExtensionTools } from "../lib/extensionTools";
+import { getProfile } from "../lib/harnessProfile";
+import { activeProfileIdFor } from "../lib/harnessProfileStore";
 import type { ProviderKeys } from "../lib/keyring";
 import { isMcpTool } from "../lib/mcpToolNames";
 import { native } from "../lib/native";
@@ -27,9 +29,8 @@ import { useChatStore } from "../store/chatStore";
 import { usePlanStore } from "../store/planStore";
 import type { ToolContext } from "../tools/context";
 import { buildTools } from "../tools/tools";
+import { buildAgentTools, buildSubagentSpec } from "./agentFactory";
 import { SUBAGENTS, type SubagentType } from "./registry";
-
-const SUBAGENT_MAX_STEPS = 12;
 
 /**
  * Max subagent nesting depth. A subagent may spawn further subagents up to this
@@ -37,9 +38,6 @@ const SUBAGENT_MAX_STEPS = 12;
  * "subagents can never spawn" rule). The main agent is depth 0.
  */
 export const MAX_SUBAGENT_DEPTH = 3;
-
-/** Tools that spawn subagents — the only ones the depth cap governs. */
-const SPAWN_TOOLS = new Set(["run_subagent", "run_subagents"]);
 
 /**
  * Effective nesting cap. Reads the user's `subagentMaxDepth` preference
@@ -74,18 +72,6 @@ type Args = {
  * the same new-files-only guard the builder had - see `newFilesOnly`.
  */
 const WRITE_FILE = "write_file";
-
-/**
- * Whether the spawn tools should be withheld at this depth.
- *
- * A sub-agent may spawn its own sub-agents up to `MAX_SUBAGENT_DEPTH`, then
- * the spawn tools are dropped so the model never sees them (BatikCode parity).
- * Beyond the cap the set is gated rather than hard-coded, so a sub-agent is a
- * peer of the main agent that simply cannot recurse without bound.
- */
-function spawnToolsWithheld(depth: number): boolean {
-  return depth >= effectiveSubagentMaxDepth();
-}
 
 /**
  * Whether a sub-agent tool must route through the approval queue rather than
@@ -346,17 +332,30 @@ export async function runSubagent({
   // agent did, which is what sharing the parent's cache amounted to.
   const ctx: ToolContext = { ...toolContext, readCache: new Map() };
 
+  // Centralized spec: the roster def resolved against the active harness
+  // profile, so a sub-agent carries the same profile guidance as the main run
+  // (prelude, budget, capabilities) instead of a bare prompt.
+  const workspaceRoot = ctx.getWorkspaceRoot();
+  const profile = getProfile(activeProfileIdFor(workspaceRoot));
+  const spec = buildSubagentSpec(type, profile);
+
   // The full main-agent toolset plus extension tools - a sub-agent is a peer of
   // the main agent, not a read-only subset. `buildTools` is the same builder the
   // main run uses; extension tools are added the same way the main run adds them
   // (fresh each run, since extensions load and unload while the app is open).
-  // `depth` is threaded through so the spawn tools are present up to the cap.
+  // `buildAgentTools` then applies the profile's tool rules and withholds the
+  // spawn tools at the nesting cap (the one thing governed by depth).
   const available: Record<string, unknown> = {
     ...buildTools(ctx, depth),
     ...buildExtensionTools(),
   };
 
   const tools: Record<string, unknown> = {};
+  const injected = buildAgentTools(available, {
+    profile,
+    depth,
+    maxDepth: effectiveSubagentMaxDepth(),
+  });
 
   // One breaker per run. When the user denies enough times in a row, tripping
   // it aborts the whole generateText call - a tool-level error alone would
@@ -377,11 +376,8 @@ export async function runSubagent({
       });
   }
 
-  for (const [name, found] of Object.entries(available)) {
+  for (const [name, found] of Object.entries(injected)) {
     if (!found) continue;
-    // Spawn tools are the one thing governed by depth: dropped at the cap so a
-    // sub-agent cannot recurse without bound.
-    if (SPAWN_TOOLS.has(name) && spawnToolsWithheld(depth)) continue;
     if (!subagentToolNeedsGate(name, found)) {
       tools[name] = found;
       continue;
@@ -448,7 +444,7 @@ export async function runSubagent({
   try {
     const result = await generateText({
       model,
-      system: def.systemPrompt,
+      system: spec.systemPrompt,
       prompt,
       tools: tools as Parameters<typeof generateText>[0]["tools"],
       // Repair tool-call arguments that a provider (e.g. StepFun) emits as
@@ -459,7 +455,7 @@ export async function runSubagent({
       // call or stalls without progress burns all twelve steps doing nothing.
       // The same guards the main run uses close that loop here too.
       stopWhen: [
-        stepCountIs(SUBAGENT_MAX_STEPS),
+        stepCountIs(spec.maxSteps),
         noToolRepetition(3),
         noProgressStop(2),
       ],
@@ -493,7 +489,7 @@ export async function runSubagent({
       result.text?.trim() ||
       (await synthesizeSummary(
         model,
-        def.systemPrompt,
+        spec.systemPrompt,
         prompt,
         result,
         controller.signal,
