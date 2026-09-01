@@ -285,6 +285,15 @@ export const native = {
         exit_code: number | null;
       }[]
     >("shell_bg_list"),
+  /** Health-probe a LOOPBACK dev-server URL (the `dev_server` tool waits on
+   *  this until the spawned server is listening). Loopback-only, no redirects,
+   *  short timeout; a non-responding server returns `{ ok: false }`, not an
+   *  error. */
+  httpProbe: (url: string, timeoutMs?: number) =>
+    invoke<{ ok: boolean; status: number | null; error: string | null }>(
+      "http_probe",
+      { url, timeoutMs: timeoutMs ?? null },
+    ),
   gitResolveRepo: (cwd: string) =>
     invoke<GitRepoInfo | null>("git_resolve_repo", {
       cwd,

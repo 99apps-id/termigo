@@ -587,6 +587,75 @@ pub async fn ai_http_stream(
     Ok(())
 }
 
+/// Result of a dev-server health probe. Probe failures are NOT errors: the
+/// server not being up yet is the normal mid-boot state, so it returns `ok:
+/// false` with the cause instead of rejecting the command.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HttpProbe {
+    pub ok: bool,
+    pub status: Option<u16>,
+    pub error: Option<String>,
+}
+
+/// Parse a URL for `http_probe`. The probe exists to health-check a LOCAL dev
+/// server the agent spawned, so it is the inverse of `validate_url`: only
+/// loopback hosts (localhost / 127.0.0.1 / ::1) are accepted, everything else
+/// — including private LAN addresses and any public host — is refused.
+fn validate_probe_url(url: &str) -> Result<reqwest::Url, String> {
+    let parsed = reqwest::Url::parse(url).map_err(|e| format!("invalid url: {e}"))?;
+    if parsed.scheme() != "http" && parsed.scheme() != "https" {
+        return Err("only http(s) urls are allowed".to_string());
+    }
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "missing host".to_string())?;
+    // `host_str()` returns IPv6 WITH brackets (`[::1]`), which won't parse as
+    // an IpAddr; strip them before the loopback check.
+    let host_trimmed = host.trim_start_matches('[').trim_end_matches(']');
+    let is_loopback = host.eq_ignore_ascii_case("localhost")
+        || host_trimmed
+            .parse::<IpAddr>()
+            .map(|ip| ip.is_loopback())
+            .unwrap_or(false);
+    if !is_loopback {
+        return Err(
+            "http_probe only accepts loopback addresses (localhost / 127.0.0.1 / ::1) — the dev server must be local"
+                .to_string(),
+        );
+    }
+    Ok(parsed)
+}
+
+/// Health-probe a local dev server: GET the URL and report whether it
+/// responded and with what status. Loopback-only, no redirects, short timeout.
+/// Used by the `dev_server` tool to wait until a spawned server is listening
+/// before opening it in the preview pane.
+#[tauri::command]
+pub async fn http_probe(
+    url: String,
+    timeout_ms: Option<u64>,
+) -> Result<HttpProbe, String> {
+    let parsed = validate_probe_url(&url)?;
+    let timeout = Duration::from_millis(timeout_ms.unwrap_or(2_000).clamp(200, 15_000));
+    let client = reqwest::Client::builder()
+        .timeout(timeout)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| e.to_string())?;
+    match client.get(parsed).send().await {
+        Ok(resp) => Ok(HttpProbe {
+            ok: true,
+            status: Some(resp.status().as_u16()),
+            error: None,
+        }),
+        Err(e) => Ok(HttpProbe {
+            ok: false,
+            status: None,
+            error: Some(describe_error(&e)),
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -854,5 +923,23 @@ mod tests {
     fn client_ttl_is_short_enough_to_follow_a_moved_endpoint() {
         assert!(CLIENT_TTL <= Duration::from_secs(600), "{CLIENT_TTL:?}");
         assert!(CLIENT_TTL >= Duration::from_secs(60), "{CLIENT_TTL:?}");
+    }
+
+    #[test]
+    fn probe_url_accepts_only_loopback_hosts() {
+        assert!(validate_probe_url("http://localhost:5173/").is_ok());
+        assert!(validate_probe_url("http://127.0.0.1:8080").is_ok());
+        assert!(validate_probe_url("http://[::1]:3000/").is_ok());
+        assert!(validate_probe_url("http://localhost").is_ok());
+        assert!(validate_probe_url("https://127.0.0.1:8443").is_ok());
+    }
+
+    #[test]
+    fn probe_url_refuses_public_private_and_non_http() {
+        assert!(validate_probe_url("http://example.com/").is_err());
+        assert!(validate_probe_url("http://192.168.1.10:8080/").is_err());
+        assert!(validate_probe_url("http://10.0.0.1/").is_err());
+        assert!(validate_probe_url("ftp://localhost/").is_err());
+        assert!(validate_probe_url("file:///etc/passwd").is_err());
     }
 }

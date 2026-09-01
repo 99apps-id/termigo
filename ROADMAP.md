@@ -16,7 +16,6 @@ The product is opinionated: terminal-first, AI as a primitive (not a sidebar), l
 - Not a browser. Web preview exists for local dev servers and lightweight doc viewing only.
 - Not a general workspace. Tools and formats that pull the product away from the terminal-first surface are out of scope.
 - Not a one-size-fits-all CLI replacement. The goal is the best terminal-first AI-native development environment, not a shell with extras.
-- **No dedicated "dev-server in the browser pane" agent tool** (a `dev_server` orchestration tool that detects the dev command, spawns it, health-polls the port and drives the page). Like VS Code / BatikCode, this is deliberately **out of scope**: the agent already composes the same workflow from `bash_background` (spawn) + `bash_logs`/`bash_kill` (watch/stop) + `open_preview` (open `http://localhost:<port>`) + the `browser_*` tools (`browser_navigate`, `browser_click`, `browser_type`, `browser_eval`, `browser_extract`, `browser_screenshot`), and `bash_list` guards against duplicate dev servers. A one-tool wrapper would save the model a couple of calls but would duplicate an existing, already-safe surface — against the lightweight-everything theme.
 
 ## Themes
 
@@ -85,6 +84,13 @@ The themes below frame every scope decision.
 - [x] Clipboard and environment tools: `clipboard_get` / `clipboard_set` and `env_get` / `env_list`
 - [x] Git history tools: `git_blame` and `git_show` (inspect any commit)
 - [x] Artifacts panel — canvases, previews and files the agent produced, reopened in one click
+- [x] Dev-server orchestration (`dev_server`) — detects the project's dev command
+  (package.json scripts), spawns it in the background (deduping a running
+  instance), reads the server's own log for the real URL (ported `findLocalUrl`
+  from TEDI, ANSI-safe, `0.0.0.0` → `127.0.0.1`), health-probes the loopback
+  port until it responds (Rust `http_probe`, loopback-only), then opens it in
+  the browser pane. Watch/stop via `bash_logs`/`bash_kill`, control the page
+  via the `browser_*` tools.
 - [x] In-chat elicitation (`ask_user`) — the agent pauses for a clickable choice
 - [x] Opt-in post-execution confirmation (Keep / Revert after a mutating tool, with git-based revert)
 - [x] Sub-agent nesting depth (1–5), cost-tier guard, and sub-agent runs persisted to disk

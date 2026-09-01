@@ -470,6 +470,7 @@ pub fn run() {
             net::lm_ping,
             net::ai_http_request,
             net::ai_http_stream,
+            net::http_probe,
             history::history_suggest,
             history::history_commands,
             history::history_record,

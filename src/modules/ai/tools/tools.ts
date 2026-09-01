@@ -9,6 +9,7 @@ import { buildSkillRegistryTools } from "../lib/skillRegistry";
 import { buildManagedAgentTools } from "./agent";
 import { buildBrowserTools } from "./browser";
 import { buildCodeSearchTools } from "./codeSearch";
+import { buildDevServerTools } from "./devServer";
 import { buildEditTools } from "./edit";
 import { buildElicitationTools } from "./elicitation";
 import { buildFetchTools } from "./fetch";
@@ -192,6 +193,7 @@ export function buildTools(
     ...buildSkillRegistryTools(),
     ...buildGithubTools(ctx),
     ...buildCodeSearchTools(ctx),
+    ...buildDevServerTools(ctx),
     ...buildLspTools(ctx),
     ...buildWorktreeTools(ctx),
     ...buildInvariantTools(ctx),

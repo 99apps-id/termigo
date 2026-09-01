@@ -209,16 +209,17 @@ Features adopted from the BatikCode (VS Code fork) agent host, adapted to Termig
 - **Artifacts panel.** `store/artifactsStore.ts` (per-session, cap 50) records canvases (`render_view`), previews (`open_preview`), and files (`write_file`) the agent produced; `lib/artifactOpen.ts` is a module-level opener registry (mirrors `setLspNavigator`); `components/ArtifactsDialog.tsx` (Layers02 button in `AiStatusBarControls`) lists and reopens them — files in the editor, previews/canvases in preview tabs. `App.tsx` registers `setArtifactOpener`; `chatStore.deleteSession` clears the session's artifacts.
 - **Post-execution confirmation.** Opt-in `confirmAfterMutations` preference (default off). `lib/postExecuteConfirm.ts` wraps the mutating tools (`write_file`, `edit`, `multi_edit`, `bash_run`) so a successful run registers a confirmation in `store/confirmationStore.ts` and awaits the user's **Keep / Revert** before the agent continues (BatikCode `PendingResultConfirmation` parity). Revert is best-effort `git restore` of the touched paths via the shared session shell; a dismissed/aborted confirmation keeps the change (never auto-reverts). UI: `components/ConfirmationCarousel.tsx` mounted next to the elicitation carousel; toggle in Settings → Agents.
 
-### Dev server in the browser pane — composed, not a dedicated tool
+### Dev-server orchestration (`dev_server`)
 
-There is deliberately **no** dedicated `dev_server` orchestration tool (one that detects the dev command, spawns it, health-polls the port and opens the page). That matches VS Code / BatikCode, which have no such first-class agent tool either; the agent composes the same workflow from tools that already exist and are already safe:
+One tool turns "run the app and show me" into a started, opened, controllable dev server in the browser pane — the piece VS Code / BatikCode lack (there the agent runs a terminal task and the user opens the browser themselves). It composes the background shell + preview + browser tools, plus two pieces ported or added for it:
 
-1. **Spawn** — `bash_background` starts the server (`pnpm dev`, `vite`, `next dev`, …), returning a `handle`; `bash_list` (always called first) guards against spawning a duplicate of an already-running dev server.
-2. **Watch / stop** — `bash_logs <handle>` tails the ring buffer (the framework prints its "Local: http://localhost:5173/" line), `bash_kill <handle>` stops it.
-3. **Open** — `open_preview` accepts the loopback URL (`http://localhost:<port>`) and opens it in the in-app preview/browser tab.
-4. **Control / execute** — the `browser_*` tools drive the page in that tab: `browser_navigate`, `browser_click`, `browser_type`, `browser_eval`, `browser_extract`, `browser_screenshot`, `browser_console`, `browser_url`.
+1. **Detect** — `lib/devServer.ts` (`detectDevCommand`) resolves the project's dev command from `package.json` scripts (`dev` → `start` → `serve` → `develop` → `dev:web`) and a port hint: an explicit `--port N` / `-p N` / `PORT=N` / `:N` in the command, else a framework default (Vite 5173, Next 3000, Webpack 8080, Cargo/Go 8000, …).
+2. **Spawn (deduped)** — spawns via `bash_background`, but first lists running background processes (`bash_list`) and reuses an identical dev server instead of stacking a second one.
+3. **Learn the real URL** — `lib/devUrl.ts` ports TEDI's `findLocalUrl`: it strips ANSI escapes (Vite prints the port in bold, which used to split the match), picks the last `http(s)://localhost|127.0.0.1|0.0.0.0` URL, rewrites `0.0.0.0` → `127.0.0.1` (a bind address, never a connect one) and drops trailing punctuation. The tool tails `bash_logs` with it until a URL appears — so the port, path and host the server ACTUALLY chose are used, not a guess.
+4. **Health-probe** — the Rust `http_probe` command (`net.rs`) GETs the URL with a short timeout, no redirects, and — the inverse of `ai_http_request`'s guard — accepts **only loopback** hosts (localhost / 127.0.0.1 / ::1), because it exists purely to wait on a local server the agent spawned.
+5. **Open + control** — once the URL responds (a 4xx still counts as up), `dev_server` opens it via `open_preview` (`instance` `dev-<handle>`) and returns the handle, URL and a log tail; the `browser_*` tools (`browser_navigate`, `browser_click`, `browser_type`, `browser_eval`, `browser_extract`, `browser_screenshot`) then drive the page, and `bash_logs`/`bash_kill` watch or stop the server.
 
-A one-tool wrapper would save the model a couple of calls but duplicate an existing, already-guarded surface (and would need a new loopback-only HTTP probe in Rust that the composition avoids entirely). The composed workflow is what the model is told in the system prompt; see `ROADMAP.md` "What Termigo is not".
+On a remote SSH session the tool refuses and points at the composed path (`bash_run` + `forward_remote_port` + `open_preview`) instead.
 
 ## Scheduled runs
 
