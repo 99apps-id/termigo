@@ -124,3 +124,16 @@ export function previewOf(parts: readonly SteerPart[], max = 80): string {
 /** Prompt used to pick work back up after the user stopped the agent. */
 export const RESUME_PROMPT =
   "Continue from where you stopped. Don't recap — just keep going.";
+
+/**
+ * Whether a send is the continuation prompt the resume paths inject (Continue,
+ * overflow auto-retry, reconnect auto-resume) rather than a fresh user task.
+ * A resume keeps the session's todo list — it is the same task; a new task
+ * replaces it, so a list abandoned mid-plan does not sit on top of the chat
+ * after the user has moved on.
+ */
+export function isResumeParts(parts: readonly SteerPart[]): boolean {
+  if (parts.length !== 1) return false;
+  const [first] = parts;
+  return first?.type === "text" && first.text === RESUME_PROMPT;
+}

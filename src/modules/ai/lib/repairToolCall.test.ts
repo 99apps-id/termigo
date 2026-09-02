@@ -41,6 +41,26 @@ describe("repairJsonText", () => {
     expect(() => JSON.parse(repaired)).not.toThrow();
     expect(JSON.parse(repaired).tasks).toEqual([1, 2]);
   });
+
+  // The bash_run failure from the field: a PowerShell command carrying raw
+  // Windows paths (`C:\project`, `C:\Program Files`) and a regex (`\d`) inside
+  // the JSON string. Strict parse rejects \p, \P, \d; doubling them keeps the
+  // literal path the model meant.
+  it("doubles invalid backslash escapes so Windows paths parse", () => {
+    const input =
+      '{"command":"Set-Location C:\\project\\star; $p = @(1..3 | % { C:\\Program Files\\x.exe -d $_ })"}';
+    const repaired = repairJsonText(input);
+    expect(() => JSON.parse(repaired)).not.toThrow();
+    expect(JSON.parse(repaired).command).toBe(
+      "Set-Location C:\\project\\star; $p = @(1..3 | % { C:\\Program Files\\x.exe -d $_ })",
+    );
+  });
+
+  it("leaves valid JSON escapes untouched", () => {
+    const input = '{"text":"line\\nquote \\" slash \\/ done"}';
+    expect(repairJsonText(input)).toBe(input);
+    expect(() => JSON.parse(input)).not.toThrow();
+  });
 });
 
 describe("repairToolCall", () => {

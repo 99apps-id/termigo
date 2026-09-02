@@ -38,8 +38,27 @@ export function repairJsonText(text: string): string {
         continue;
       }
       if (ch === "\\") {
-        out += ch;
-        escaped = true;
+        // A valid JSON escape passes through untouched. Anything else - most
+        // often a Windows path emitted raw (`C:\project`, `\Users`, `\d` from a
+        // regex) - is not JSON at all, and strict parse rejects it. Double the
+        // backslash so the literal path the model meant survives parsing.
+        const next = text[i + 1];
+        if (
+          next === '"' ||
+          next === "\\" ||
+          next === "/" ||
+          next === "b" ||
+          next === "f" ||
+          next === "n" ||
+          next === "r" ||
+          next === "t" ||
+          next === "u"
+        ) {
+          out += ch;
+          escaped = true;
+          continue;
+        }
+        out += "\\\\";
         continue;
       }
       if (ch === '"') {

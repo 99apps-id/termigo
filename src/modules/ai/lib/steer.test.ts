@@ -5,8 +5,10 @@ import {
   flush,
   flushOne,
   isBusy,
+  isResumeParts,
   prepend,
   previewOf,
+  RESUME_PROMPT,
   remove,
   type SteerMessage,
   type SteerPart,
@@ -145,6 +147,24 @@ describe("queue", () => {
     const q = enqueue(EMPTY_QUEUE, msg(text("a")));
     expect(remove(q, 5)).toBe(q);
     expect(remove(q, -1)).toBe(q);
+  });
+});
+
+describe("isResumeParts", () => {
+  it("recognises the continuation prompt the resume paths inject", () => {
+    expect(isResumeParts([text(RESUME_PROMPT)])).toBe(true);
+  });
+
+  it("treats a fresh user task as not a resume", () => {
+    expect(isResumeParts([text("fix the build")])).toBe(false);
+  });
+
+  it("treats a resume bundled with anything else as a new task", () => {
+    expect(isResumeParts([text(RESUME_PROMPT), image("shot.png")])).toBe(false);
+  });
+
+  it("is false for an empty send", () => {
+    expect(isResumeParts([])).toBe(false);
   });
 });
 

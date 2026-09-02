@@ -115,7 +115,21 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, Props>(
           ref={addressRef}
           url={url}
           onSubmit={onUrlChange}
-          onReload={() => setNonce((n) => n + 1)}
+          onReload={() => {
+            // The native embedded webview is not an iframe: bumping the nonce
+            // remounts nothing there, so reload must drive the page itself.
+            if (external) {
+              void native
+                .browserEmbedEval(
+                  browserInstance ?? instanceId,
+                  "location.reload();",
+                )
+                .catch(() => {});
+              return;
+            }
+            setLoaded(true);
+            setNonce((n) => n + 1);
+          }}
           onFocusChange={setAddressFocused}
           // Back/forward drive the native embedded browser's own history; they
           // only make sense for external pages (the iframe path has no such

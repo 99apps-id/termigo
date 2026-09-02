@@ -1113,6 +1113,7 @@ Everything below assumes you were given a task. Check that you were.
 
 # Shell
 - bash_run for short-lived commands needed for the task (build, install, search, service restart). cwd persists across calls in the session shell. Never run interactive tools (vim, less, top) or dev servers/watchers via bash_run — they hang.
+- In commands, write Windows paths with forward slashes (\`C:/project/app\`, not \`C:\\project\\app\`): PowerShell accepts them, and backslashes break JSON argument parsing.
 - For a project-wide lint/test, prefer \`run_checks\` (kind=lint|test): it detects the right runner and defaults to a 300s timeout. If you must use bash_run for a slow lint/test/build/install, pass \`timeout_secs\` (up to 300) — the 120s default is not enough for a whole-tree lint/build.
 - bash_background for dev servers, watchers, log tailers. Read output via bash_logs, terminate via bash_kill.
 - BEFORE spawning any dev server (pnpm dev, next dev, vite, cargo watch, ...) call bash_list. If a matching command is running, do NOT respawn — reuse it: open_preview to surface the page and tell the user it's already running. Only restart on explicit user request (bash_kill the old handle first).

@@ -32,6 +32,7 @@ import { fireHooksForEvent, makeRunId } from "../lib/hooksRunner";
 import { sweepSessionMemory } from "../lib/memorySweep";
 import {
   flushOne,
+  isResumeParts,
   previewOf,
   RESUME_PROMPT,
   type SteerPart,
@@ -588,6 +589,14 @@ export async function sendParts(
       // A fresh user turn resets the loop-round counter; the first model call
       // of this turn will bump it to 1.
       useChatStore.getState().patchAgentMeta({ round: 0 });
+      // A new task supersedes the previous task's todo list: the strip hides
+      // only when every item is completed, so a list the agent abandoned
+      // mid-plan (leftover pending items) would otherwise sit on top of the
+      // chat while the user has already moved on. A resume is the same task,
+      // so it keeps the list.
+      if (!isResumeParts(parts)) {
+        void useTodosStore.getState().clearSession(sessionId);
+      }
       // Pin the workspace anchor for the whole run (see runAnchor above). The
       // auto-continue rounds that follow do NOT go through sendParts, so the
       // agent stays on the folder / host the user was looking at when they sent
@@ -637,6 +646,11 @@ export async function flushSteer(): Promise<boolean> {
   stopLatch.delete(sessionId);
   // A fresh user turn resets the loop-round counter (see sendParts).
   store.patchAgentMeta({ round: 0 });
+  // A queued task is a new task, not a resume: clear the previous task's list
+  // so the strip does not carry stale work into it (see sendParts).
+  if (!isResumeParts(out.parts)) {
+    void useTodosStore.getState().clearSession(sessionId);
+  }
   // A run that yielded to this queued task set stopReason "steered"; clear it so
   // no stale "Continue" prompt lingers as the queued task takes over.
   store.patchAgentMeta({ stopReason: null, stoppedByUser: false });
