@@ -877,10 +877,22 @@ export async function runAgentStream(opts: RunAgentOptions) {
   let firstStepTimer: ReturnType<typeof setTimeout> | null = setTimeout(() => {
     abortController.abort(new Error("model did not respond within 90s"));
   }, 90_000);
+  // A provider that accepts the connection and then goes silent looked exactly
+  // like one that is merely slow: 90 seconds of dead air with a bare spinner.
+  // At 30s without a first token, name the wait in the step label (the HUD
+  // reads "Round N · <step>"), so the pause is an explained stall rather than
+  // a suspected hang.
+  let stallNotice: ReturnType<typeof setTimeout> | null = setTimeout(() => {
+    opts.onStep?.("Waiting for provider — no response yet…");
+  }, 30_000);
   const clearFirstStepTimer = (): void => {
     if (firstStepTimer) {
       clearTimeout(firstStepTimer);
       firstStepTimer = null;
+    }
+    if (stallNotice) {
+      clearTimeout(stallNotice);
+      stallNotice = null;
     }
   };
   // Three guards, any of which ends the loop. Each wrapper records which one

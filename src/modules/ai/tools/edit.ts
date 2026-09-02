@@ -1,12 +1,51 @@
+import { sftpReadFile, sftpWriteFile } from "@/modules/ssh/sftp";
 import { tool } from "ai";
 import { z } from "zod";
 import { native } from "../lib/native";
-import { checkWritableCanonical } from "../lib/security";
-import { newQueuedEditId, usePlanStore } from "../store/planStore";
-import { sftpReadFile, sftpWriteFile } from "@/modules/ssh/sftp";
 import { fileCacheKey, routePath } from "../lib/remoteFs";
-import { checkWritable } from "../lib/security";
+import { checkWritable, checkWritableCanonical } from "../lib/security";
+import { newQueuedEditId, usePlanStore } from "../store/planStore";
 import { resolvePath, type ToolContext } from "./context";
+
+/**
+ * Recover the file path from an `edit`/`multi_edit` call.
+ *
+ * Models routinely emit the path under a different key — `file_path`,
+ * `filename`, `file`, `target` — or, when `old_string`/`new_string` are huge,
+ * drop the leading `path` field entirely. The strict `z.string()` schema then
+ * threw "Invalid input for tool edit: Type validation failed", a red card the
+ * agent read as a corrupt session and retried blindly. Normalising aliases
+ * first means the common misspellings just work; a genuinely absent path
+ * falls through to a plain error result (see the execute guard) the model can
+ * correct on the next step instead of a hard SDK rejection.
+ */
+const PATH_KEYS = [
+  "path",
+  "file_path",
+  "filepath",
+  "file",
+  "filename",
+  "target",
+  "target_path",
+];
+
+function pickPath(obj: Record<string, unknown>): string | undefined {
+  for (const k of PATH_KEYS) {
+    const v = obj[k];
+    if (typeof v === "string" && v.trim()) return v;
+  }
+  return undefined;
+}
+
+export function normalizeEditInput(input: unknown): unknown {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return input;
+  const obj = { ...(input as Record<string, unknown>) };
+  if (typeof obj.path !== "string" || !obj.path.trim()) {
+    const p = pickPath(obj);
+    if (p) obj.path = p;
+  }
+  return obj;
+}
 
 type EditResult =
   | { ok: true; replacements: number; bytesWritten: number; path: string }
@@ -46,8 +85,7 @@ async function applyEdits(
   io: EditIo = LOCAL_IO,
 ): Promise<EditResult> {
   const r = await io.read(abs);
-  if (r.kind === "binary")
-    return { error: "binary file refused", path: abs };
+  if (r.kind === "binary") return { error: "binary file refused", path: abs };
   if (r.kind === "toolarge")
     return { error: `file too large (${r.size} bytes)`, path: abs };
 
@@ -131,7 +169,10 @@ async function applyEdits(
 
   try {
     await io.write(abs, content);
-    readCache.set(io.cacheKey(abs), { size: content.length, hash: djb2(content) });
+    readCache.set(io.cacheKey(abs), {
+      size: content.length,
+      hash: djb2(content),
+    });
     return {
       ok: true,
       replacements: totalReplacements,
@@ -152,7 +193,9 @@ async function applyEdits(
 async function resolveEditTarget(
   ctx: ToolContext,
   path: string,
-): Promise<{ ok: true; abs: string; io: EditIo } | { ok: false; error: EditResult }> {
+): Promise<
+  { ok: true; abs: string; io: EditIo } | { ok: false; error: EditResult }
+> {
   const target = routePath(ctx.getRemoteSession(), path, (p) =>
     resolvePath(p, ctx.getCwd()),
   );
@@ -192,17 +235,35 @@ export function buildEditTools(ctx: ToolContext) {
   return {
     edit: tool({
       description:
-        "Replace an exact string in a file. Requires read_file on this path first in the current session — this prevents blind edits. `old_string` must be unique in the file unless `replace_all: true`. Asks for user approval before writing.",
-      inputSchema: z.object({
-        path: z.string(),
-        old_string: z
-          .string()
-          .describe("Exact substring to replace. Must be unique unless replace_all."),
-        new_string: z.string().describe("Replacement substring."),
-        replace_all: z.boolean().optional(),
-      }),
+        "Replace an exact string in a file. Requires read_file on this path first in the current session — this prevents blind edits. `old_string` must be unique in the file unless `replace_all: true`. Asks for user approval before writing. Always include `path`.",
+      inputSchema: z.preprocess(
+        normalizeEditInput,
+        z.object({
+          // Optional so a model that drops the key (the huge old/new strings
+          // crowd it out) yields a plain error result the next step can fix,
+          // not a hard SDK validation rejection that reads as a corrupt tool.
+          path: z
+            .string()
+            .optional()
+            .describe("File to edit (absolute, or relative to the cwd)."),
+          old_string: z
+            .string()
+            .describe(
+              "Exact substring to replace. Must be unique unless replace_all.",
+            ),
+          new_string: z.string().describe("Replacement substring."),
+          replace_all: z.boolean().optional(),
+        }),
+      ),
       needsApproval: true,
       execute: async ({ path, old_string, new_string, replace_all }) => {
+        if (!path || !path.trim()) {
+          return {
+            error:
+              "missing `path` — name the file to edit (and read_file it first).",
+            path: "",
+          };
+        }
         const resolved = await resolveEditTarget(ctx, path);
         if (!resolved.ok) return resolved.error;
         const { abs, io } = resolved;
@@ -225,21 +286,31 @@ export function buildEditTools(ctx: ToolContext) {
 
     multi_edit: tool({
       description:
-        "Apply several exact-string replacements to a single file atomically. Each edit is applied in order to the running buffer; if any edit's old_string is missing or non-unique, the whole batch aborts before writing. Requires prior read_file on the path. Asks for user approval before writing.",
-      inputSchema: z.object({
-        path: z.string(),
-        edits: z
-          .array(
-            z.object({
-              old_string: z.string(),
-              new_string: z.string(),
-              replace_all: z.boolean().optional(),
-            }),
-          )
-          .min(1),
-      }),
+        "Apply several exact-string replacements to a single file atomically. Each edit is applied in order to the running buffer; if any edit's old_string is missing or non-unique, the whole batch aborts before writing. Requires prior read_file on the path. Asks for user approval before writing. Always include `path`.",
+      inputSchema: z.preprocess(
+        normalizeEditInput,
+        z.object({
+          path: z.string().optional(),
+          edits: z
+            .array(
+              z.object({
+                old_string: z.string(),
+                new_string: z.string(),
+                replace_all: z.boolean().optional(),
+              }),
+            )
+            .min(1),
+        }),
+      ),
       needsApproval: true,
       execute: async ({ path, edits }) => {
+        if (!path || !path.trim()) {
+          return {
+            error:
+              "missing `path` — name the file to edit (and read_file it first).",
+            path: "",
+          };
+        }
         const resolved = await resolveEditTarget(ctx, path);
         if (!resolved.ok) return resolved.error;
         const { abs, io } = resolved;

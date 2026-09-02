@@ -22,7 +22,7 @@ vi.mock("../store/planStore", () => ({
   usePlanStore: { getState: () => ({ active: false, enqueue: vi.fn() }) },
 }));
 
-import { buildEditTools } from "./edit";
+import { buildEditTools, normalizeEditInput } from "./edit";
 
 const toolOptions: ToolExecutionOptions = {
   toolCallId: "tool-call",
@@ -229,6 +229,48 @@ describe("multi_edit atomicity", () => {
       ],
     });
     expect(result.error).toContain("not unique");
+    expect(nativeMock.writeFile).not.toHaveBeenCalled();
+  });
+});
+
+describe("edit path normalisation", () => {
+  // The failure the screenshots showed: a model drops `path` (the huge
+  // old/new strings crowd it out) or emits it under a synonym, and the strict
+  // schema threw "Invalid input for tool edit" — a red card read as a corrupt
+  // session. Aliases now resolve; a truly absent path is a clean error.
+  it("recovers path from common synonyms", () => {
+    for (const key of ["file_path", "filepath", "file", "filename", "target"]) {
+      const out = normalizeEditInput({
+        [key]: FILE,
+        old_string: "a",
+        new_string: "b",
+      }) as { path?: string };
+      expect(out.path, key).toBe(FILE);
+    }
+  });
+
+  it("keeps an explicit path and does not overwrite it", () => {
+    const out = normalizeEditInput({
+      path: FILE,
+      file_path: "/other.txt",
+      old_string: "a",
+      new_string: "b",
+    }) as { path?: string };
+    expect(out.path).toBe(FILE);
+  });
+
+  it("leaves a non-object input untouched", () => {
+    expect(normalizeEditInput("nope")).toBe("nope");
+    expect(normalizeEditInput(null)).toBe(null);
+  });
+
+  it("returns a clean error (not a throw) when path is missing entirely", async () => {
+    setFile("hello world");
+    const result = await runEdit(readContext(), {
+      old_string: "hello",
+      new_string: "bye",
+    });
+    expect(result.error).toContain("path");
     expect(nativeMock.writeFile).not.toHaveBeenCalled();
   });
 });
