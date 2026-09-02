@@ -116,8 +116,7 @@ const PREVIEW_DOC_CSS = `<style>
 function findMermaidFlows(html: string): string[] {
   const flows: string[] = [];
   // Fenced ```mermaid code inside the HTML.
-  const fence =
-    /```mermaid\s*\n([\s\S]*?)(?:```|$)/gi;
+  const fence = /```mermaid\s*\n([\s\S]*?)(?:```|$)/gi;
   // <pre class="mermaid">…</pre> (common Mermaid-hosted export).
   const pre =
     /<pre[^>]*class=["'][^"']*\bmermaid\b[^"']*["'][^>]*>([\s\S]*?)<\/pre>/gi;
@@ -213,6 +212,16 @@ export function buildTerminalTools(ctx: ToolContext) {
         // rejects decimal/hex IPv4, IPv6 link-local and cloud-metadata tricks. An
         // allowed external URL renders in the native embedded browser.
         if (!isSafePreviewUrl(url) && unsafeBrowserUrl(url) !== null) {
+          // The dev-server banner prints `http://0.0.0.0:5173` and models copy
+          // it verbatim; a nameless error made them retry the same URL. Say
+          // what to send instead.
+          if (parsed.hostname === "0.0.0.0" || parsed.hostname === "[::]") {
+            const port = parsed.port ? `:${parsed.port}` : "";
+            return {
+              error: `0.0.0.0 is a wildcard bind address, not a target to connect to. Open http://localhost${port} instead (same server).`,
+              url,
+            };
+          }
           return {
             error:
               "URL blocked: not a loopback dev server and not a safe external host (SSRF/metadata/link-local are refused).",

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildTerminalTools } from "./terminal";
 import type { ToolContext } from "./context";
+import { buildTerminalTools } from "./terminal";
 
 type Overrides = Partial<{
   isActiveTerminalPrivate: () => boolean;
@@ -47,7 +47,11 @@ async function preview(ctx: ToolContext, url: string) {
   };
 }
 
-async function suggest(ctx: ToolContext, command: string, explanation?: string) {
+async function suggest(
+  ctx: ToolContext,
+  command: string,
+  explanation?: string,
+) {
   const execute = buildTerminalTools(ctx).suggest_command.execute;
   if (!execute) throw new Error("suggest_command has no execute");
   return (await execute({ command, explanation } as never, OPTS)) as {
@@ -57,11 +61,7 @@ async function suggest(ctx: ToolContext, command: string, explanation?: string) 
   };
 }
 
-async function renderView(
-  ctx: ToolContext,
-  html: string,
-  title?: string,
-) {
+async function renderView(ctx: ToolContext, html: string, title?: string) {
   const execute = buildTerminalTools(ctx).render_view.execute;
   if (!execute) throw new Error("render_view has no execute");
   return (await execute({ html, title } as never, OPTS)) as {
@@ -125,7 +125,6 @@ describe("open_preview accepts loopback and safe external hosts", () => {
     for (const url of [
       "http://localhost:5173",
       "http://127.0.0.1:3000/path",
-      "http://0.0.0.0:8080",
       "http://app.localhost:1234",
       "https://localhost:5173",
     ]) {
@@ -150,11 +149,22 @@ describe("open_preview accepts loopback and safe external hosts", () => {
       "http://169.254.169.254/latest/meta-data",
       "http://metadata.google.internal",
       "http://[fe80::1]/",
+      // 0.0.0.0 is a wildcard BIND address, never a destination a client can
+      // address — dev-server logs print it, but the preview target is
+      // localhost/127.0.0.1. browserGuard refuses it on purpose.
+      "http://0.0.0.0:8080",
     ]) {
       const r = await preview(makeContext(), url);
       expect(r.ok, url).toBeUndefined();
       expect(r.error, url).toBeTruthy();
     }
+  });
+
+  it("tells the model what to use instead of a wildcard bind address", async () => {
+    // Dev-server banners print http://0.0.0.0:5173; a nameless refusal made
+    // the agent retry the same URL. The error now names the fix + the port.
+    const r = await preview(makeContext(), "http://0.0.0.0:5173");
+    expect(r.error).toMatch(/localhost:5173/);
   });
 
   it("refuses a scheme that is not http or https", async () => {
@@ -197,11 +207,7 @@ describe("suggest_command", () => {
 
 describe("render_view", () => {
   it("opens a canvas tab and returns ok", async () => {
-    const r = await renderView(
-      makeContext(),
-      "<h1>Hello</h1>",
-      "Plan",
-    );
+    const r = await renderView(makeContext(), "<h1>Hello</h1>", "Plan");
     expect(r.ok).toBe(true);
     expect(r.title).toBe("Plan");
   });
@@ -213,7 +219,10 @@ describe("render_view", () => {
   });
 
   it("reports when the canvas surface is unavailable", async () => {
-    const r = await renderView(makeContext({ openCanvas: () => false }), "<div/>");
+    const r = await renderView(
+      makeContext({ openCanvas: () => false }),
+      "<div/>",
+    );
     expect(r.error).toMatch(/canvas surface unavailable/i);
   });
 
@@ -235,7 +244,10 @@ A --> B</pre></body></html>`;
 
   it("detects a fenced mermaid block inside the HTML too", async () => {
     const html = `<div>plan</div>\n\`\`\`mermaid\nsequenceDiagram\nA->>B: hi\n\`\`\`\n`;
-    const r = await renderView(makeContext({ openCanvas: vi.fn(() => true) }), html);
+    const r = await renderView(
+      makeContext({ openCanvas: vi.fn(() => true) }),
+      html,
+    );
     expect(r.ok).toBeUndefined();
     expect(r.mermaid).toContain("sequenceDiagram");
   });
