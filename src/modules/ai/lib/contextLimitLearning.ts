@@ -57,6 +57,15 @@ export function isContextOverflowError(message: string): boolean {
     l.includes("context_length_exceeded") ||
     l.includes("context window") ||
     l.includes("too many tokens") ||
+    l.includes("prompt is too long") ||
+    // A gateway/provider that caps the HTTP BODY rather than the token count
+    // ("Request body size exceeds maximum allowed size", HTTP 413) is the same
+    // failure from the agent's point of view: the transcript we sent is too
+    // big and must be compacted harder. Left unclassified it reads as a dead
+    // end — "Try again" re-sends the same oversized body and fails identically.
+    l.includes("body size") ||
+    l.includes("payload too large") ||
+    l.includes("request too large") ||
     (l.includes("token") && l.includes("exceed"))
   );
 }

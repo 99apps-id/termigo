@@ -53,6 +53,13 @@ The budget escalates instead of being fixed. `AGENT_STEP_BUDGETS` (`config.ts`) 
 
 The tool set is assembled in `src/modules/ai/tools/tools.ts` from `fs`, `edit`, `search`, `shell`, `subagent`, `terminal`, `todo`, and `managedAgent` builders.
 
+### One request in flight per session
+
+A `Chat` must never carry two concurrent requests. `Chat.sendMessage` is not serialised through the SDK's `jobExecutor`, and when a round settles the SDK auto-continues into the next tool round a microtask later. A queued steering task is therefore delivered by `flushSteer` only after a macrotask (`setTimeout(0)`) and only while the live `Chat.status` is not busy — the same liveness rule `sendParts` applies via `submitAction`. Delivering into the `ready`→`submitted` gap races the SDK's own continuation, and two loops append to the same transcript at once, roughly doubling it every cycle until compaction and the provider's request-body cap both give out. The stop path passes `bypassBusyCheck` because an aborted round never auto-continues, so there is nothing to race and waiting would strand the queued task.
+
+Compaction (`compact.ts`) is linear in transcript size: each message is measured once and a running byte total is updated by delta on every rewrite. Re-measuring the whole transcript (a full `JSON.stringify`) inside each trim step's break check is O(N²) and froze a large session for minutes. A `write_file` transcript also shrinks the tool-CALL `input` bodies, not just the elided results — otherwise a build's file bodies stay on the wire and the request overflows the body-size cap even when the token estimate fits.
+
+
 ## Sub-agents
 
 `src/modules/ai/agents/registry.ts` defines the sub-agent types: `explore`, `code-review`, `security`, `general`, `builder`, and `pentest`. They differ only in system prompt, not in what they may touch: every type gets the SAME toolset as the main agent (`buildTools` + extension tools), so a sub-agent is a peer that can edit, run commands and drive extensions, not a read-only subset. What keeps that safe is approval, not restriction — `runSubagent` routes every mutating, exec or third-party tool through the user's approval queue (`subagentToolNeedsGate`), exactly as the main agent gates them, so nothing runs without a click. The one capability withheld is `run_subagent` / `run_subagents`: a sub-agent cannot spawn its own sub-agents, so it cannot recurse without bound.

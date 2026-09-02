@@ -41,6 +41,20 @@ function writeCall(id: string, path: string): ModelMessage {
   } as unknown as ModelMessage;
 }
 
+function writeCallWithContent(id: string, path: string, content: string) {
+  return {
+    role: "assistant",
+    content: [
+      {
+        type: "tool-call",
+        toolCallId: id,
+        toolName: "write_file",
+        input: { path, content },
+      },
+    ],
+  } as unknown as ModelMessage;
+}
+
 function outputOf(message: ModelMessage): { __elided?: boolean } {
   const parts = message.content as Array<{ output?: { __elided?: boolean } }>;
   return parts[0].output ?? {};
@@ -151,7 +165,10 @@ describe("compactModelMessagesDetailed floor", () => {
     for (const m of msgs) {
       if (typeof m.content === "string") chars += m.content.length;
       else if (Array.isArray(m.content)) {
-        for (const p of m.content as Array<{ type: string; output?: unknown }>) {
+        for (const p of m.content as Array<{
+          type: string;
+          output?: unknown;
+        }>) {
           chars += JSON.stringify(p.output ?? "").length + 32;
         }
       }
@@ -184,6 +201,88 @@ describe("compactModelMessagesDetailed floor", () => {
     const result = compactModelMessagesDetailed(messages, limit);
     expect(result.compacted).toBe(true);
     expect(estTokens(result.messages)).toBeLessThan(limit);
+  });
+});
+
+describe("compactModelMessagesDetailed tool-call inputs", () => {
+  // A build transcript (an app scaffold: many write_file calls) is dominated by
+  // the file bodies carried in the CALL input, not the results. Eliding the
+  // result alone leaves the whole body on the wire — which is how a "compacted"
+  // request still arrived over the provider's body-size cap (HTTP 413).
+  it("shrinks a superseded write_file's content input, keeping its shape", () => {
+    const messages: ModelMessage[] = [];
+    for (let i = 0; i < 30; i++) {
+      messages.push(
+        writeCallWithContent(`c${i}`, `/f${i}.txt`, "w".repeat(4000)),
+      );
+      messages.push(readResult(`r${i}`, "ok"));
+    }
+    messages.push({ role: "user", content: "done?" } as ModelMessage);
+    const limit = 20_000;
+    const result = compactModelMessagesDetailed(messages, limit);
+    expect(result.compacted).toBe(true);
+    // A pre-tail call must have had its content truncated...
+    const firstCall = (
+      result.messages[0].content as Array<{
+        input?: { content?: string; path?: string };
+        type: string;
+      }>
+    )[0];
+    expect(firstCall.type).toBe("tool-call");
+    expect(firstCall.input?.path).toBe("/f0.txt"); // keys survive
+    expect((firstCall.input?.content ?? "").length).toBeLessThan(1000);
+    // ...and the whole transcript must fit the budget.
+    const est = (msgs: ModelMessage[]) => {
+      let chars = 0;
+      for (const m of msgs) {
+        if (typeof m.content === "string") chars += m.content.length;
+        else if (Array.isArray(m.content))
+          for (const p of m.content as Array<Record<string, unknown>>)
+            chars += JSON.stringify(p.input ?? p.output ?? "").length + 32;
+      }
+      return chars / 2.6;
+    };
+    expect(est(result.messages)).toBeLessThan(limit);
+  });
+
+  it("keeps the newest tool-call inputs in the tail intact", () => {
+    const messages: ModelMessage[] = [
+      writeCallWithContent("c0", "/old.txt", "w".repeat(20_000)),
+      readResult("r0", "ok"),
+      { role: "user", content: "now write another" } as ModelMessage,
+      writeCallWithContent("c1", "/new.txt", "v".repeat(20_000)),
+    ];
+    const limit = 20_000;
+    const result = compactModelMessagesDetailed(messages, limit);
+    const untouched = (
+      result.messages[3].content as Array<{
+        input?: { content?: string };
+      }>
+    )[0].input?.content;
+    expect(untouched).toBe("v".repeat(20_000));
+  });
+});
+
+describe("compactModelMessagesDetailed performance", () => {
+  // Regression: the passes used to re-measure the WHOLE transcript
+  // (JSON.stringify over every message) inside each trim step's break check —
+  // O(N^2). A 959-message session froze the app for eight minutes between
+  // "runAgentStream: enter" and the model call. Sizes are now measured once
+  // per message and updated by delta, so a large transcript compacts in ms.
+  it("compacts a 1000-message transcript quickly", () => {
+    const messages: ModelMessage[] = [];
+    for (let i = 0; i < 500; i++) {
+      messages.push(readCall(`c${i}`, `/f${i}.txt`));
+      messages.push(readResult(`c${i}`, "z".repeat(1500)));
+    }
+    const limit = 40_000;
+    const t0 = performance.now();
+    const result = compactModelMessagesDetailed(messages, limit, 12_000);
+    const elapsed = performance.now() - t0;
+    expect(result.compacted).toBe(true);
+    // Generous ceiling: the quadratic version needed minutes here; the linear
+    // one lands well under a second even on a slow CI.
+    expect(elapsed).toBeLessThan(2000);
   });
 });
 

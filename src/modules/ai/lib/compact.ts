@@ -13,23 +13,54 @@ type ToolPart = {
   [k: string]: unknown;
 };
 
-function approxBytes(messages: ModelMessage[]): number {
+/** Serialized size of one message. `approxBytes` summed these; measuring the
+ *  WHOLE transcript on every trim step is O(N^2) and froze a large session for
+ *  minutes (see compactModelMessagesDetailed), so callers size each message
+ *  once and keep a running total instead. */
+function messageBytes(m: ModelMessage): number {
+  if (typeof m.content === "string") return m.content.length;
+  if (!Array.isArray(m.content)) return 0;
   let n = 0;
-  for (const m of messages) {
-    if (typeof m.content === "string") n += m.content.length;
-    else if (Array.isArray(m.content)) {
-      for (const part of m.content as ToolPart[]) {
-        if (part.type === "text" && typeof part.text === "string")
-          n += (part.text as string).length;
-        else if (part.type === "tool-result")
-          n += JSON.stringify(part.output ?? "").length;
-        else if (part.type === "tool-call")
-          n += JSON.stringify(part.input ?? "").length;
-        else n += 64;
-      }
-    }
+  for (const part of m.content as ToolPart[]) {
+    if (part.type === "text" && typeof part.text === "string")
+      n += (part.text as string).length;
+    else if (part.type === "tool-result")
+      n += JSON.stringify(part.output ?? "").length;
+    else if (part.type === "tool-call")
+      n += JSON.stringify(part.input ?? "").length;
+    else n += 64;
   }
   return n;
+}
+
+/** Shrink the string payloads of a tool-call input — a `write_file`'s content,
+ *  an `edit`'s old/new strings. A call whose result has already been elided is
+ *  dead weight just like the result, and a transcript that builds many files
+ *  (an app scaffold) is dominated by these payloads, which the result-only
+ *  passes never touched — so a request kept arriving over the provider's body
+ *  size cap. Keeps the part's type/toolCallId/toolName, so the tool-call/result
+ *  pairing the provider validates is untouched; only oversized string fields
+ *  are truncated. */
+function shrinkToolCallInput(
+  part: ToolPart,
+  keepChars: number,
+): { changed: boolean; part: ToolPart } {
+  if (part.type !== "tool-call") return { changed: false, part };
+  const input = part.input;
+  if (!input || typeof input !== "object") return { changed: false, part };
+  const obj = input as Record<string, unknown>;
+  let changed = false;
+  const next: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (typeof v === "string" && v.length > keepChars) {
+      next[k] = `${v.slice(0, keepChars)}\n${ELISION_TEXT}`;
+      changed = true;
+    } else {
+      next[k] = v;
+    }
+  }
+  if (!changed) return { changed: false, part };
+  return { changed: true, part: { ...part, input: next } };
 }
 
 // Characters per token. Deliberately LOW (a real tokenizer produces more tokens
@@ -203,14 +234,23 @@ export function compactModelMessagesDetailed(
 
   let dropped = 0;
   let working = messages;
-  let approxTokens = estimateTokens(approxBytes(working));
+  // Running byte total. The previous code re-measured the WHOLE transcript
+  // (JSON.stringify over every message) inside each trim step's break check —
+  // O(N^2) in transcript size, which froze a 959-message session for eight
+  // minutes between "runAgentStream: enter" and the model call. Sizes are
+  // measured once per message and updated by delta on every rewrite instead.
+  let sizes = working.map(messageBytes);
+  let totalBytes = sizes.reduce((a, b) => a + b, 0);
+  let approxTokens = estimateTokens(totalBytes);
 
   if (approxTokens >= 0.5 * budget) {
     const r = dropSupersededReads(working);
     if (r.touched) {
       working = r.out;
       dropped++;
-      approxTokens = estimateTokens(approxBytes(working));
+      sizes = working.map(messageBytes);
+      totalBytes = sizes.reduce((a, b) => a + b, 0);
+      approxTokens = estimateTokens(totalBytes);
     }
   }
 
@@ -222,10 +262,23 @@ export function compactModelMessagesDetailed(
     };
   }
 
+  // Rewrite message i and fold its new size into the running total.
+  const replaceAt = (i: number, m: ModelMessage): void => {
+    const nb = messageBytes(m);
+    totalBytes += nb - sizes[i];
+    sizes[i] = nb;
+    approxTokens = estimateTokens(totalBytes);
+    out[i] = m;
+  };
+
   // Aggressive pass 1: elide every tool result before the tail. Tool outputs
   // (file bodies, command output) are the bulk of a long transcript and the
   // safest thing to drop — the tool call itself stays, so the structure the
-  // provider validates is untouched.
+  // provider validates is untouched. A pre-tail call's INPUT is shrunk in the
+  // same breath: a `write_file` argument carries the whole file body, and
+  // leaving it while eliding its result keeps the wire payload almost as large
+  // — which is how a "compacted" transcript still arrived over the provider's
+  // request-body size cap (HTTP 413).
   const out = working.slice();
   const stopIdx = Math.max(0, out.length - KEEP_TAIL);
   for (let i = 0; i < stopIdx; i++) {
@@ -234,13 +287,21 @@ export function compactModelMessagesDetailed(
     let local = false;
     const next = (out[i].content as ToolPart[]).map((part) => {
       const r = elideToolResult(part);
-      if (r.changed) local = true;
-      return r.part;
+      if (r.changed) {
+        local = true;
+        return r.part;
+      }
+      const s = shrinkToolCallInput(part, HARD_TEXT_KEEP_CHARS);
+      if (s.changed) {
+        local = true;
+        return s.part;
+      }
+      return part;
     });
     if (local) {
-      out[i] = { ...out[i], content: next } as ModelMessage;
+      replaceAt(i, { ...out[i], content: next } as ModelMessage);
       dropped++;
-      if (estimateTokens(approxBytes(out)) < 0.45 * budget) break;
+      if (approxTokens < 0.45 * budget) break;
     }
   }
 
@@ -248,7 +309,7 @@ export function compactModelMessagesDetailed(
   // transcript dominated by huge text parts (a giant paste, long model prose) —
   // truncate the over-long text of pre-tail messages too. Text parts keep the
   // message shape, so this also never breaks tool-call/result pairing.
-  if (estimateTokens(approxBytes(out)) >= 0.6 * budget) {
+  if (approxTokens >= 0.6 * budget) {
     for (let i = 0; i < stopIdx; i++) {
       if (out[i].role === "system") continue;
       if (!Array.isArray(out[i].content)) continue;
@@ -260,9 +321,9 @@ export function compactModelMessagesDetailed(
         return t;
       });
       if (local) {
-        out[i] = { ...out[i], content: next } as ModelMessage;
+        replaceAt(i, { ...out[i], content: next } as ModelMessage);
         dropped++;
-        if (estimateTokens(approxBytes(out)) < 0.5 * budget) break;
+        if (approxTokens < 0.5 * budget) break;
       }
     }
   }
@@ -273,7 +334,7 @@ export function compactModelMessagesDetailed(
   // messages intact, so the request cannot exceed the window even when our
   // estimate ran low on dense content. This is the floor that makes an
   // overflow retry actually fit.
-  if (estimateTokens(approxBytes(out)) >= budget) {
+  if (approxTokens >= budget) {
     const hardStop = Math.max(0, out.length - KEEP_MIN_TAIL);
     for (let i = 0; i < hardStop; i++) {
       if (out[i].role === "system") continue;
@@ -292,12 +353,17 @@ export function compactModelMessagesDetailed(
             return t;
           }
         }
+        const s = shrinkToolCallInput(part, HARD_TEXT_KEEP_CHARS);
+        if (s.changed) {
+          local = true;
+          return s.part;
+        }
         return part;
       });
       if (local) {
-        out[i] = { ...out[i], content: next } as ModelMessage;
+        replaceAt(i, { ...out[i], content: next } as ModelMessage);
         dropped++;
-        if (estimateTokens(approxBytes(out)) < 0.8 * budget) break;
+        if (approxTokens < 0.8 * budget) break;
       }
     }
   }
@@ -311,7 +377,7 @@ export function compactModelMessagesDetailed(
   // content shapes); eliding a tool result or truncating text keeps each
   // message's role and tool-call pairing intact, so the request is always
   // brought under the window even if the last turn ends up heavily elided.
-  if (estimateTokens(approxBytes(out)) >= budget) {
+  if (approxTokens >= budget) {
     for (let i = 0; i < out.length; i++) {
       const m = out[i];
       if (m.role === "system") continue;
@@ -321,13 +387,13 @@ export function compactModelMessagesDetailed(
       // their choices (e.g. keeping the latest file read intact) stand — and a
       // transcript that is merely the sum of many mid-size messages converges
       // instead as the learned budget shrinks on retry.
-      if (estimateTokens(approxBytes([m])) < budget) continue;
+      if (estimateTokens(sizes[i]) < budget) continue;
       if (typeof m.content === "string") {
         if (m.content.length > HARD_TEXT_KEEP_CHARS) {
-          out[i] = {
+          replaceAt(i, {
             ...m,
             content: `${m.content.slice(0, HARD_TEXT_KEEP_CHARS)}\n${ELISION_TEXT}`,
-          } as ModelMessage;
+          } as ModelMessage);
           dropped++;
         }
         continue;
@@ -347,10 +413,15 @@ export function compactModelMessagesDetailed(
             return t;
           }
         }
+        const s = shrinkToolCallInput(part, HARD_TEXT_KEEP_CHARS);
+        if (s.changed) {
+          local = true;
+          return s.part;
+        }
         return part;
       });
       if (local) {
-        out[i] = { ...m, content: next } as ModelMessage;
+        replaceAt(i, { ...m, content: next } as ModelMessage);
         dropped++;
       }
     }

@@ -4,6 +4,7 @@ import {
   enqueue,
   flush,
   flushOne,
+  flushShouldHold,
   isBusy,
   isResumeParts,
   prepend,
@@ -58,6 +59,26 @@ describe("submitAction", () => {
   it("ignores an empty composer in either state", () => {
     expect(submitAction("ready", false)).toBe("ignore");
     expect(submitAction("streaming", false)).toBe("ignore");
+  });
+});
+
+describe("flushShouldHold", () => {
+  // The flush path must obey the same liveness rule as submitAction: sending a
+  // queued task while the SDK's auto-continue round is in flight races it, and
+  // two concurrent requests on one Chat double the transcript every cycle.
+  it("holds while a round is in flight", () => {
+    expect(flushShouldHold("submitted")).toBe(true);
+    expect(flushShouldHold("streaming")).toBe(true);
+  });
+
+  it("lets the flush through once the run has settled", () => {
+    expect(flushShouldHold("ready")).toBe(false);
+    expect(flushShouldHold("idle")).toBe(false);
+    expect(flushShouldHold("error")).toBe(false);
+  });
+
+  it("proceeds when there is no live chat for the session", () => {
+    expect(flushShouldHold(null)).toBe(false);
   });
 });
 

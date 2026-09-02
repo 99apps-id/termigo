@@ -32,6 +32,7 @@ import { fireHooksForEvent, makeRunId } from "../lib/hooksRunner";
 import { sweepSessionMemory } from "../lib/memorySweep";
 import {
   flushOne,
+  flushShouldHold,
   isResumeParts,
   previewOf,
   RESUME_PROMPT,
@@ -625,61 +626,88 @@ export async function sendParts(
  * Called when a run settles, including after a stop: text typed while the agent
  * was working is a correction, and abandoning it because the user also hit stop
  * would silently discard something they explicitly wrote.
+ *
+ * `bypassBusyCheck` is for the stop path only. An aborted round never reaches
+ * its auto-continue check, so there is nothing to race — and the abort may take
+ * more than one tick to settle the status, so waiting there would strand the
+ * queued task with no further settle to retry it.
  */
 let flushing = false;
 
-export async function flushSteer(): Promise<boolean> {
+export async function flushSteer(bypassBusyCheck = false): Promise<boolean> {
   // Both composers can observe the same settle; the flag makes the second a
-  // no-op rather than a duplicate turn.
+  // no-op rather than a duplicate turn. Held across the deferral below so a
+  // second observer cannot pass the checks while the first is still waiting.
   if (flushing) return false;
-  const store = useChatStore.getState();
-  const out = flushOne(store.steerQueue);
-  if (!out) return false;
-  // Deliver only the OLDEST queued task and leave the rest queued: tasks are
-  // worked one at a time, each as its own turn (the Claude queue model). Pop it
-  // before awaiting so a second observer of the same settle cannot resend it;
-  // the composer re-runs flushSteer on the next settle to pick up the next one.
-  store.cancelSteer(0);
-  const sessionId = store.activeSessionId;
-  if (!sessionId) return false;
-  // A queued correction is the user's own input, so it supersedes a stop.
-  stopLatch.delete(sessionId);
-  // A fresh user turn resets the loop-round counter (see sendParts).
-  store.patchAgentMeta({ round: 0 });
-  // A queued task is a new task, not a resume: clear the previous task's list
-  // so the strip does not carry stale work into it (see sendParts).
-  if (!isResumeParts(out.parts)) {
-    void useTodosStore.getState().clearSession(sessionId);
-  }
-  // A run that yielded to this queued task set stopReason "steered"; clear it so
-  // no stale "Continue" prompt lingers as the queued task takes over.
-  store.patchAgentMeta({ stopReason: null, stoppedByUser: false });
-  // A queued task starts a fresh run, so mark it in flight for restart recovery.
-  store.markRunStarted();
+  if (useChatStore.getState().steerQueue.pending.length === 0) return false;
   flushing = true;
   try {
-    const c = getOrCreateChat(sessionId);
-    await c.sendMessage({ role: "user", parts: out.parts } as Parameters<
-      typeof c.sendMessage
-    >[0]);
-  } catch (e) {
-    // The message was removed before the await to prevent a second observer
-    // from sending it twice. Restore it at the front when sending failed, so
-    // the user's correction and attachments are not lost or reordered.
-    useChatStore.getState().restoreSteer({
-      preview: previewOf(out.parts),
-      parts: out.parts,
-    });
-    useChatStore.getState().patchAgentMeta({
-      status: "error",
-      error: humanizeModelError(String(e)),
-    });
-    useChatStore.getState().syncRunMeta();
-    return false;
+    const sessionId = useChatStore.getState().activeSessionId;
+    if (!sessionId) return false;
+    if (!bypassBusyCheck) {
+      // Wait one macrotask before reading the live status. The SDK's
+      // auto-continue into the next tool round fires as a microtask chain the
+      // moment a round settles, so a synchronous check can still read "ready"
+      // while a continuation is already scheduled — and delivering into that
+      // gap races it: two concurrent requests append to the same transcript at
+      // once and it doubles every cycle (the 959-message blowup that froze
+      // compaction and overflowed the provider's request-body cap). The timer
+      // runs after that chain, when the Chat reads "submitted" and the guard
+      // below holds the task queued instead. `sendParts` already keys off the
+      // live status via submitAction; this makes the flush path obey the same
+      // rule. Every later settle re-runs this, so the queue drains on the round
+      // that no longer auto-continues — nothing is stranded.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const live = chats.get(sessionId);
+      if (flushShouldHold(live?.status ?? null)) return false;
+    }
+    const store = useChatStore.getState();
+    const out = flushOne(store.steerQueue);
+    if (!out) return false;
+    // Deliver only the OLDEST queued task and leave the rest queued: tasks are
+    // worked one at a time, each as its own turn (the Claude queue model). Pop
+    // it before awaiting so a second observer of the same settle cannot resend
+    // it; the composer re-runs flushSteer on the next settle for the next one.
+    store.cancelSteer(0);
+    // A queued correction is the user's own input, so it supersedes a stop.
+    stopLatch.delete(sessionId);
+    // A fresh user turn resets the loop-round counter (see sendParts).
+    store.patchAgentMeta({ round: 0 });
+    // A queued task is a new task, not a resume: clear the previous task's list
+    // so the strip does not carry stale work into it (see sendParts).
+    if (!isResumeParts(out.parts)) {
+      void useTodosStore.getState().clearSession(sessionId);
+    }
+    // A run that yielded to this queued task set stopReason "steered"; clear it
+    // so no stale "Continue" prompt lingers as the queued task takes over.
+    store.patchAgentMeta({ stopReason: null, stoppedByUser: false });
+    // A queued task starts a fresh run, so mark it in flight for restart
+    // recovery.
+    store.markRunStarted();
+    try {
+      const c = getOrCreateChat(sessionId);
+      await c.sendMessage({ role: "user", parts: out.parts } as Parameters<
+        typeof c.sendMessage
+      >[0]);
+    } catch (e) {
+      // The message was removed before the await to prevent a second observer
+      // from sending it twice. Restore it at the front when sending failed, so
+      // the user's correction and attachments are not lost or reordered.
+      useChatStore.getState().restoreSteer({
+        preview: previewOf(out.parts),
+        parts: out.parts,
+      });
+      useChatStore.getState().patchAgentMeta({
+        status: "error",
+        error: humanizeModelError(String(e)),
+      });
+      useChatStore.getState().syncRunMeta();
+      return false;
+    }
+    return true;
   } finally {
     flushing = false;
   }
-  return true;
 }
 
 /** Pick the work back up after the user stopped it. */
@@ -710,8 +738,10 @@ export async function stopRun(): Promise<void> {
   useChatStore.getState().patchAgentMeta({ stoppedByUser: true });
   useChatStore.getState().syncRunMeta();
   // The stop leaves `status` settled, so the queued text sends as a fresh turn
-  // rather than piling onto the run that was just abandoned.
-  await flushSteer();
+  // rather than piling onto the run that was just abandoned. Bypassed the busy
+  // check because an aborted round never auto-continues, and the abort may take
+  // more than one tick to settle the status — waiting would strand the task.
+  await flushSteer(true);
 }
 
 // Summarise a session the user has left and append anything durable to

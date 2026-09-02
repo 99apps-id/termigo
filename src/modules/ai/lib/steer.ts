@@ -108,6 +108,20 @@ export function submitAction(
   return isBusy(status) ? "queue" : "send";
 }
 
+/**
+ * Whether a queued-task flush must wait instead of delivering.
+ *
+ * The same liveness rule as `submitAction`, applied to the flush path: while a
+ * round is in flight, sending the queued task would race the SDK's own
+ * auto-continue into the next tool round — two concurrent requests appending
+ * to one transcript, which doubles it every cycle until compaction and the
+ * provider's body cap both give out. Null (no live chat) means nothing is in
+ * flight, so the flush may proceed.
+ */
+export function flushShouldHold(status: string | null): boolean {
+  return status !== null && isBusy(status);
+}
+
 /** One-line label for a queued message, for the pending chip. */
 export function previewOf(parts: readonly SteerPart[], max = 80): string {
   const text = parts
