@@ -21,6 +21,7 @@ import { isMcpTool } from "../lib/mcpToolNames";
 import { native } from "../lib/native";
 import { isAutoApprovedScan } from "../lib/pentestScope";
 import { repairToolCall } from "../lib/repairToolCall";
+import { subagentMadeProgress } from "../lib/subagentProgress";
 import {
   isSessionAllowed,
   rememberSessionAllowed,
@@ -462,17 +463,25 @@ export async function runSubagent({
   // of reporting a bare abort.
   let firstStepTimer: ReturnType<typeof setTimeout> | null = null;
   let timedOut = false;
-  firstStepTimer = setTimeout(() => {
-    timedOut = true;
-    controller.abort(new Error("sub-agent model did not respond within 90s"));
-  }, 90_000);
+  const armTimer = () => {
+    if (firstStepTimer) clearTimeout(firstStepTimer);
+    firstStepTimer = setTimeout(() => {
+      timedOut = true;
+      controller.abort(new Error("sub-agent model did not respond within 90s"));
+    }, 90_000);
+  };
+  const disarmTimer = () => {
+    if (firstStepTimer) {
+      clearTimeout(firstStepTimer);
+      firstStepTimer = null;
+    }
+  };
 
-  const start = Date.now();
-  try {
-    const result = await generateText({
+  const runAttempt = (attemptPrompt: string) =>
+    generateText({
       model,
       system: spec.systemPrompt,
-      prompt,
+      prompt: attemptPrompt,
       tools: tools as Parameters<typeof generateText>[0]["tools"],
       // Repair tool-call arguments that a provider (e.g. StepFun) emits as
       // near-JSON, so a recoverable sub-agent tool call runs instead of
@@ -490,22 +499,39 @@ export async function runSubagent({
       // left every spawned agent working - harmless while they only read, not
       // once they write.
       abortSignal: controller.signal,
-      experimental_onToolCallStart: () => {
-        if (firstStepTimer) {
-          clearTimeout(firstStepTimer);
-          firstStepTimer = null;
-        }
-      },
+      experimental_onToolCallStart: disarmTimer,
       onStepFinish: (step) => {
-        if (firstStepTimer) {
-          clearTimeout(firstStepTimer);
-          firstStepTimer = null;
-        }
+        disarmTimer();
         if (!onStep) return;
         const last = step.toolCalls?.[step.toolCalls.length - 1];
         if (last) onStep(`${type}: ${last.toolName}`);
       },
     });
+
+  const start = Date.now();
+  try {
+    armTimer();
+    let result = await runAttempt(prompt);
+    // The empty-completion failure mode: some routed / small compat models
+    // answer "no text, no tool call" in a few seconds, and the run used to
+    // report that as "(no output)" - indistinguishable from a task that ran
+    // and found nothing. Nudge once with an explicit instruction; if the
+    // second attempt is empty too, throw so the spawning tool surfaces it as
+    // an error result the orchestrator (and noErrorProgress) can act on.
+    if (!result.text?.trim() && !subagentMadeProgress(result)) {
+      void logInfo(
+        `[ai] sub-agent (${type}) returned an empty completion; retrying once`,
+      ).catch(() => {});
+      armTimer();
+      result = await runAttempt(
+        `${prompt}\n\n(Your previous attempt returned nothing at all - no text and no tool call. Do the work now: call the tools you need, then finish with a short text answer. Never reply with an empty message.)`,
+      );
+      if (!result.text?.trim() && !subagentMadeProgress(result)) {
+        throw new Error(
+          `sub-agent model returned an empty completion twice (no text, no tool calls) - the task did not run; retry it, or switch the sub-agent model in Settings > Agents`,
+        );
+      }
+    }
 
     // Some models (notably smaller / routed ones) go silent once tool calls
     // fill the history: they burn every step doing tool work and never emit a
