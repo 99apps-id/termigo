@@ -217,6 +217,24 @@ const HARD_TEXT_KEEP_CHARS = 600;
  *  even the tail must be trimmed to fit the window. */
 const KEEP_MIN_TAIL = 2;
 
+/** Absolute ceiling on the serialized transcript, in characters. A provider
+ *  gateway may cap the HTTP BODY independently of the token window (HTTP 413
+ *  "Request body size exceeds maximum allowed size"), and our token estimate
+ *  is not a byte count — a build transcript of many write_file payloads fit
+ *  the learned token budget and still crossed the wire cap. 1.2 MB is far
+ *  above any healthy request yet small enough that the estimate's slop cannot
+ *  carry a compacted transcript over a real gateway limit. */
+const MAX_TRANSCRIPT_BYTES = 1_200_000;
+
+/** Every oversized string in a tool-call input is capped at this on EVERY
+ *  request, tail included — not just when the transcript is over budget. An
+ *  agent that builds an app writes whole files through `write_file`; without
+ *  a standing cap a single round of large writes can cross the body limit
+ *  before compaction ever engages. A file genuinely bigger than this is
+ *  written in sections (edit/create-then-append), which the system prompt
+ *  already prescribes. */
+const TOOL_CALL_INPUT_CAP_CHARS = 60_000;
+
 export function compactModelMessagesDetailed(
   messages: ModelMessage[],
   contextLimit: number,
@@ -234,6 +252,30 @@ export function compactModelMessagesDetailed(
 
   let dropped = 0;
   let working = messages;
+  // Standing per-call cap: shrink oversized tool-call inputs (file bodies in
+  // write_file/edit arguments) EVERYWHERE before anything else. These are the
+  // payload an app-building run is made of, and the result-eliding passes
+  // never touched them, which is how a "compacted" request still arrived over
+  // the provider's body-size cap. The tail's newest call is left intact so the
+  // work in progress is never corrupted.
+  {
+    const tailStart = Math.max(0, working.length - 1);
+    let any = false;
+    const capped = working.map((m, i): ModelMessage => {
+      if (i >= tailStart || !Array.isArray(m.content)) return m;
+      let local = false;
+      const next = (m.content as ToolPart[]).map((part) => {
+        const s = shrinkToolCallInput(part, TOOL_CALL_INPUT_CAP_CHARS);
+        if (s.changed) {
+          local = true;
+          any = true;
+        }
+        return s.part;
+      });
+      return local ? ({ ...m, content: next } as ModelMessage) : m;
+    });
+    if (any) working = capped;
+  }
   // Running byte total. The previous code re-measured the WHOLE transcript
   // (JSON.stringify over every message) inside each trim step's break check —
   // O(N^2) in transcript size, which froze a 959-message session for eight
@@ -242,8 +284,12 @@ export function compactModelMessagesDetailed(
   let sizes = working.map(messageBytes);
   let totalBytes = sizes.reduce((a, b) => a + b, 0);
   let approxTokens = estimateTokens(totalBytes);
+  // The body cap is a hard ceiling regardless of how generous the token budget
+  // is: a 2.6-chars-per-token read of a dense transcript can sit comfortably
+  // inside `budget` and still be a multi-megabyte HTTP body.
+  const tokenBudget = Math.min(budget, estimateTokens(MAX_TRANSCRIPT_BYTES));
 
-  if (approxTokens >= 0.5 * budget) {
+  if (approxTokens >= 0.5 * tokenBudget) {
     const r = dropSupersededReads(working);
     if (r.touched) {
       working = r.out;
@@ -254,7 +300,7 @@ export function compactModelMessagesDetailed(
     }
   }
 
-  if (approxTokens < 0.6 * budget) {
+  if (approxTokens < 0.6 * tokenBudget && totalBytes < MAX_TRANSCRIPT_BYTES) {
     return {
       messages: working,
       compacted: dropped > 0,
@@ -301,7 +347,11 @@ export function compactModelMessagesDetailed(
     if (local) {
       replaceAt(i, { ...out[i], content: next } as ModelMessage);
       dropped++;
-      if (approxTokens < 0.45 * budget) break;
+      if (
+        approxTokens < 0.45 * tokenBudget &&
+        totalBytes < MAX_TRANSCRIPT_BYTES
+      )
+        break;
     }
   }
 
@@ -309,7 +359,7 @@ export function compactModelMessagesDetailed(
   // transcript dominated by huge text parts (a giant paste, long model prose) —
   // truncate the over-long text of pre-tail messages too. Text parts keep the
   // message shape, so this also never breaks tool-call/result pairing.
-  if (approxTokens >= 0.6 * budget) {
+  if (approxTokens >= 0.6 * tokenBudget || totalBytes >= MAX_TRANSCRIPT_BYTES) {
     for (let i = 0; i < stopIdx; i++) {
       if (out[i].role === "system") continue;
       if (!Array.isArray(out[i].content)) continue;
@@ -323,7 +373,11 @@ export function compactModelMessagesDetailed(
       if (local) {
         replaceAt(i, { ...out[i], content: next } as ModelMessage);
         dropped++;
-        if (approxTokens < 0.5 * budget) break;
+        if (
+          approxTokens < 0.5 * tokenBudget &&
+          totalBytes < MAX_TRANSCRIPT_BYTES
+        )
+          break;
       }
     }
   }
@@ -334,7 +388,7 @@ export function compactModelMessagesDetailed(
   // messages intact, so the request cannot exceed the window even when our
   // estimate ran low on dense content. This is the floor that makes an
   // overflow retry actually fit.
-  if (approxTokens >= budget) {
+  if (approxTokens >= tokenBudget || totalBytes >= MAX_TRANSCRIPT_BYTES) {
     const hardStop = Math.max(0, out.length - KEEP_MIN_TAIL);
     for (let i = 0; i < hardStop; i++) {
       if (out[i].role === "system") continue;
@@ -363,7 +417,11 @@ export function compactModelMessagesDetailed(
       if (local) {
         replaceAt(i, { ...out[i], content: next } as ModelMessage);
         dropped++;
-        if (approxTokens < 0.8 * budget) break;
+        if (
+          approxTokens < 0.8 * tokenBudget &&
+          totalBytes < 0.8 * MAX_TRANSCRIPT_BYTES
+        )
+          break;
       }
     }
   }
@@ -377,7 +435,7 @@ export function compactModelMessagesDetailed(
   // content shapes); eliding a tool result or truncating text keeps each
   // message's role and tool-call pairing intact, so the request is always
   // brought under the window even if the last turn ends up heavily elided.
-  if (approxTokens >= budget) {
+  if (approxTokens >= tokenBudget || totalBytes >= MAX_TRANSCRIPT_BYTES) {
     for (let i = 0; i < out.length; i++) {
       const m = out[i];
       if (m.role === "system") continue;
@@ -387,7 +445,11 @@ export function compactModelMessagesDetailed(
       // their choices (e.g. keeping the latest file read intact) stand — and a
       // transcript that is merely the sum of many mid-size messages converges
       // instead as the learned budget shrinks on retry.
-      if (estimateTokens(sizes[i]) < budget) continue;
+      if (
+        estimateTokens(sizes[i]) < tokenBudget &&
+        sizes[i] < 0.5 * MAX_TRANSCRIPT_BYTES
+      )
+        continue;
       if (typeof m.content === "string") {
         if (m.content.length > HARD_TEXT_KEEP_CHARS) {
           replaceAt(i, {

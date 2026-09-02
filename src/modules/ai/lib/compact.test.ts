@@ -286,6 +286,51 @@ describe("compactModelMessagesDetailed performance", () => {
   });
 });
 
+describe("compactModelMessagesDetailed body-size cap", () => {
+  // A provider gateway can cap the HTTP BODY independently of the token
+  // window (413 "Request body size exceeds maximum allowed size"). A build
+  // transcript of big write_file payloads fit the token estimate and still
+  // crossed the wire cap, so the compactor now enforces a byte ceiling too.
+  it("shrinks a transcript that fits the token budget but not the body cap", () => {
+    const messages: ModelMessage[] = [];
+    // ~2 MB of tool results — under any real token budget's eye at a huge
+    // limit, but over the 1.2 MB body ceiling.
+    for (let i = 0; i < 100; i++) {
+      messages.push(readCall(`c${i}`, `/f${i}.txt`));
+      messages.push(readResult(`c${i}`, "b".repeat(20_000)));
+    }
+    const result = compactModelMessagesDetailed(messages, 10_000_000);
+    expect(result.compacted).toBe(true);
+    let bytes = 0;
+    for (const m of result.messages) {
+      for (const p of m.content as Array<Record<string, unknown>>) {
+        bytes += JSON.stringify(p.input ?? p.output ?? "").length;
+      }
+    }
+    expect(bytes).toBeLessThan(1_200_000);
+  });
+
+  // The standing per-call cap: an oversized write_file body is truncated on
+  // EVERY request, even a small transcript well inside its budget — this is
+  // the payload a gateway 413s, and waiting for the budget to trip is too
+  // late. The newest message stays intact so work in progress is safe.
+  it("caps oversized tool-call inputs even when the transcript fits", () => {
+    const messages: ModelMessage[] = [
+      writeCallWithContent("c0", "/big.txt", "w".repeat(100_000)),
+      readResult("r0", "ok"),
+      { role: "user", content: "next" } as ModelMessage,
+    ];
+    const result = compactModelMessagesDetailed(messages, 1_000_000);
+    const input = (
+      result.messages[0].content as Array<{
+        input?: { content?: string; path?: string };
+      }>
+    )[0].input;
+    expect((input?.content ?? "").length).toBeLessThan(70_000);
+    expect(input?.path).toBe("/big.txt");
+  });
+});
+
 describe("compactModelMessages", () => {
   it("returns the messages array from the detailed result", () => {
     const messages = [{ role: "user", content: "hi" }] as ModelMessage[];
