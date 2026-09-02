@@ -36,6 +36,17 @@ describe("humanizeModelError", () => {
     ).toContain("stopped responding");
   });
 
+  it("explains a provider content-moderation rejection", () => {
+    const out = humanizeModelError(
+      'data: {"error":{"code":"data_inspection_failed","param":null,"message":"Input text data may contain inappropriate content.","type":"data_inspection_failed"}}',
+    ).toLowerCase();
+    expect(out).toContain("content filter");
+    // The actionable part: retrying the same content is futile.
+    expect(out).toContain("will fail again");
+    // It must not be misread as a key problem (these ride a 4xx status).
+    expect(out).not.toContain("api key");
+  });
+
   it("passes an unrecognised message through", () => {
     expect(humanizeModelError("Some novel provider error")).toBe(
       "Some novel provider error",

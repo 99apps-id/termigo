@@ -45,6 +45,22 @@ export function humanizeModelError(raw: string | null | undefined): string {
     return "The provider rate-limited this request. Wait a few seconds and press Continue, or switch to another model.";
   }
 
+  // Provider-side content moderation. DashScope / Qwen-compatible endpoints
+  // (and others) run an input filter that rejects a request outright with
+  // `data_inspection_failed` / "inappropriate content". It is deterministic -
+  // the same text fails every retry - so "Try again" only repeats it. Checked
+  // before the auth branch: these rejections can ride a 4xx status, and the
+  // filter message - not the key - is what the user has to act on.
+  if (
+    l.includes("data_inspection_failed") ||
+    l.includes("inappropriate content") ||
+    l.includes("content policy") ||
+    l.includes("content_filter") ||
+    (l.includes("content") && l.includes("inspection"))
+  ) {
+    return "The provider's content filter rejected this request (it flagged the text as inappropriate). This is not a bug and retrying the same request will fail again. Rephrase the task to avoid the flagged wording, or switch to a model without that filter in Settings → Providers.";
+  }
+
   // Auth / key problems.
   if (
     l.includes("invalid api key") ||
