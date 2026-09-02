@@ -100,8 +100,24 @@ export const useTrajectoryStore = create<TrajectoryState>((set) => ({
       // verdict - an aborted run flipping to "completed" would be a lie.
       if (active?.status !== "running") return state;
 
+      // A step left "running" never received a result — its round died (an
+      // invalid tool call that failed validation, an abort mid-execute, a
+      // provider error). Closing it as "error" here is the difference between
+      // an honest red card and a card that sits on "RUNNING" forever, which
+      // users read as "the agent is waiting for me" when nothing is waiting.
+      const steps = active.steps.map((s) =>
+        s.status === "running"
+          ? {
+              ...s,
+              status: "error" as const,
+              output: { error: "no result — the call did not complete" },
+            }
+          : s,
+      );
+
       const finished: TrajectoryRun = {
         ...active,
+        steps,
         status,
         finishedAt: Date.now(),
         totalTokens: totalTokens ?? active.totalTokens,

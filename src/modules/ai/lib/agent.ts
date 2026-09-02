@@ -1244,10 +1244,28 @@ export async function runAgentStream(opts: RunAgentOptions) {
       const calls = step.toolCalls ?? [];
       if (calls.length > 0) {
         const traj = useTrajectoryStore.getState();
-        const resultsByCallId = new Map<string, unknown>();
+        const resultsByCallId = new Map<
+          string,
+          { output: unknown; failed: boolean }
+        >();
+        // A failed call (schema-validation reject, thrown execute) lands as a
+        // `tool-error` part: it carries `.error`, not `.output`. Reading only
+        // `.output` made those calls look "resultless", so their card either
+        // went green (hasResult true, error invisible) or stayed RUNNING
+        // forever when the round died mid-flight — a dead card the user
+        // mistook for a question awaiting their click.
         for (const r of step.toolResults ?? []) {
-          const res = r as { toolCallId?: string; output?: unknown };
-          if (res.toolCallId) resultsByCallId.set(res.toolCallId, res.output);
+          const res = r as {
+            type?: string;
+            toolCallId?: string;
+            output?: unknown;
+            error?: unknown;
+          };
+          if (!res.toolCallId) continue;
+          resultsByCallId.set(res.toolCallId, {
+            output: res.output,
+            failed: res.type === "tool-error" || res.error != null,
+          });
         }
         for (const call of calls) {
           const c = call as {
@@ -1255,17 +1273,19 @@ export async function runAgentStream(opts: RunAgentOptions) {
             toolName: string;
             input?: unknown;
           };
-          const output = c.toolCallId
+          const hit = c.toolCallId
             ? resultsByCallId.get(c.toolCallId)
             : undefined;
           const hasResult =
             c.toolCallId != null && resultsByCallId.has(c.toolCallId);
+          const output = hit?.output;
           // Tools signal failure by returning `{ error }` rather than throwing,
           // so that shape is what marks a step red in the timeline.
           const isError =
-            output != null &&
-            typeof output === "object" &&
-            "error" in (output as Record<string, unknown>);
+            hit?.failed === true ||
+            (output != null &&
+              typeof output === "object" &&
+              "error" in (output as Record<string, unknown>));
           traj.appendStep({
             id: `${trajectoryRunId}-s${trajectoryStepIndex}`,
             stepIndex: trajectoryStepIndex,

@@ -11,6 +11,30 @@ describe("checkReadable — secret basenames", () => {
     expect(checkReadable("/home/me/.env")).toMatchObject({ ok: false });
   });
 
+  // Committed templates carry variable NAMES, never values — an agent
+  // scaffolding a project must be able to read them. The blanket `.env*`
+  // deny used to block them and the agent reported a phantom failure.
+  it("allows .env.example and other template suffixes", () => {
+    expect(
+      checkReadable("C:\\project\\catatstock\\.env.example"),
+    ).toMatchObject({ ok: true });
+    expect(checkReadable("/repo/.env.sample")).toMatchObject({ ok: true });
+    expect(checkReadable("/repo/.env.template")).toMatchObject({ ok: true });
+    expect(checkReadable("/repo/.env.dist")).toMatchObject({ ok: true });
+  });
+
+  it("still blocks real secrets and template-lookalikes", () => {
+    expect(checkReadable("/repo/.env")).toMatchObject({ ok: false });
+    expect(checkReadable("/repo/.env.local")).toMatchObject({ ok: false });
+    // A template name with a tail is not a template — could be a real backup.
+    expect(checkReadable("/repo/.env.example.bak")).toMatchObject({
+      ok: false,
+    });
+    expect(checkReadable("/repo/.env.example.local")).toMatchObject({
+      ok: false,
+    });
+  });
+
   it("blocks .env.local and .env.production", () => {
     expect(checkReadable("/home/me/.env.local")).toMatchObject({ ok: false });
     expect(checkReadable("/home/me/.env.production")).toMatchObject({
@@ -42,9 +66,11 @@ describe("checkReadable — secret basenames", () => {
     expect(checkReadable("/home/me/Documents/id_rsa_old")).toMatchObject({
       ok: false,
     });
-    expect(checkReadable("/home/me/Documents/id_ed25519-backup")).toMatchObject({
-      ok: false,
-    });
+    expect(checkReadable("/home/me/Documents/id_ed25519-backup")).toMatchObject(
+      {
+        ok: false,
+      },
+    );
     expect(checkReadable("/home/me/Documents/id_rsa.pub")).toMatchObject({
       ok: false,
     });
@@ -227,17 +253,23 @@ describe("checkShellCommand — home directory rm guard", () => {
 
   it("blocks rm -rf on home subdirectories", () => {
     expect(checkShellCommand("rm -rf ~/subdir")).toMatchObject({ ok: false });
-    expect(checkShellCommand("rm -rf ~/subdir && ls")).toMatchObject({ ok: false });
+    expect(checkShellCommand("rm -rf ~/subdir && ls")).toMatchObject({
+      ok: false,
+    });
   });
 
   it("blocks rm -rf when the home target is immediately followed by a pipe", () => {
     expect(checkShellCommand("rm -rf ~|cat")).toMatchObject({ ok: false });
     expect(checkShellCommand("rm -rf $HOME|cat")).toMatchObject({ ok: false });
-    expect(checkShellCommand("rm -rf ${HOME}|cat")).toMatchObject({ ok: false });
+    expect(checkShellCommand("rm -rf ${HOME}|cat")).toMatchObject({
+      ok: false,
+    });
   });
 
   it("does not block rm -rf on explicit absolute paths", () => {
-    expect(checkShellCommand("rm -rf /home/me/safe")).toMatchObject({ ok: true });
+    expect(checkShellCommand("rm -rf /home/me/safe")).toMatchObject({
+      ok: true,
+    });
   });
 });
 
@@ -263,7 +295,11 @@ describe("recursive delete of the home directory", () => {
   });
 
   it("leaves ordinary deletes alone", () => {
-    for (const cmd of ["rm -rf ./build", "rm -rf node_modules", "rm file.txt"]) {
+    for (const cmd of [
+      "rm -rf ./build",
+      "rm -rf node_modules",
+      "rm file.txt",
+    ]) {
       expect(checkShellCommand(cmd).ok, cmd).toBe(true);
     }
   });

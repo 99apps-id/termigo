@@ -28,6 +28,20 @@
  *    into a protected directory.
  */
 
+/**
+ * Safe `.env` TEMPLATE names. Repos commit these deliberately (they carry
+ * variable NAMES, never values) precisely so tooling can read them — an
+ * agent scaffolding a project needs `.env.example` to know which keys to
+ * ask for. A blanket `.env*` deny blocked them and the agent reported a
+ * phantom "can't read config" failure. Checked BEFORE the deny patterns:
+ * a file that actually holds secrets is never named one of these, and
+ * every other `.env*` spelling (`.env`, `.env.local`, `.env.production`,
+ * even `.env.example.bak`) stays blocked. The anchor is exact — no suffix
+ * after the template word — so `.env.example.local` cannot use the
+ * exemption as a smuggling tail.
+ */
+const SAFE_ENV_TEMPLATE_RE = /^\.env[._-](example|sample|template|dist)$/i;
+
 const SECRET_BASENAME_PATTERNS: RegExp[] = [
   // Match `.env` and `.env.<suffix>` with no required tail anchor — Windows
   // strips trailing dots/spaces at open time and NTFS exposes alternate data
@@ -206,12 +220,14 @@ export function checkReadable(path: string): SafetyResult {
   }
 
   const base = basename(path);
-  for (const re of SECRET_BASENAME_PATTERNS) {
-    if (re.test(base)) {
-      return {
-        ok: false,
-        reason: `Refused: "${base}" matches a sensitive-file pattern.`,
-      };
+  if (!SAFE_ENV_TEMPLATE_RE.test(base)) {
+    for (const re of SECRET_BASENAME_PATTERNS) {
+      if (re.test(base)) {
+        return {
+          ok: false,
+          reason: `Refused: "${base}" matches a sensitive-file pattern.`,
+        };
+      }
     }
   }
 
@@ -237,7 +253,10 @@ export function checkWritable(path: string): SafetyResult {
   // Ensure the comparison surface has a leading separator for prefix matching.
   const cmpForPrefix = cmp.startsWith("/") ? cmp : `/${cmp}`;
   for (const prefix of WRITE_DENY_PREFIXES) {
-    if (cmpForPrefix.startsWith(prefix) || `${cmpForPrefix}/`.startsWith(prefix)) {
+    if (
+      cmpForPrefix.startsWith(prefix) ||
+      `${cmpForPrefix}/`.startsWith(prefix)
+    ) {
       return {
         ok: false,
         reason: `Refused: writes under "${prefix.replace(/\/$/, "")}" are not allowed.`,
@@ -342,7 +361,8 @@ export function checkShellCommand(cmd: string): SafetyResult {
   if (/[\u202A-\u202E\u2066-\u2069\u200E\u200F\u061C]/.test(c)) {
     return {
       ok: false,
-      reason: "Refused: command contains Unicode bidirectional override characters.",
+      reason:
+        "Refused: command contains Unicode bidirectional override characters.",
     };
   }
   // rm -rf / (and variants with quoted /, --no-preserve-root, etc.)
@@ -376,7 +396,8 @@ export function checkShellCommand(cmd: string): SafetyResult {
   ) {
     return {
       ok: false,
-      reason: "Refused: command attempts to recursively delete the home directory.",
+      reason:
+        "Refused: command attempts to recursively delete the home directory.",
     };
   }
   if (/--no-preserve-root/.test(c)) {
@@ -384,7 +405,10 @@ export function checkShellCommand(cmd: string): SafetyResult {
   }
   // dd to a raw disk device
   if (/\bdd\b[^|]*\bof=\/dev\/(disk|sd|nvme|hd)/i.test(c)) {
-    return { ok: false, reason: "Refused: dd to a block device is not allowed." };
+    return {
+      ok: false,
+      reason: "Refused: dd to a block device is not allowed.",
+    };
   }
   // mkfs / fdisk / diskutil eraseDisk / parted
   if (
