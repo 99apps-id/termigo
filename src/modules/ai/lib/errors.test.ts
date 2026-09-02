@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatAiError,
   isConnectivityError,
+  isContentFilterError,
   isQuotaError,
   isRateLimitError,
 } from "./errors";
@@ -139,5 +140,16 @@ describe("transient/recoverable error classifiers", () => {
     ).toBe(true);
     expect(isRateLimitError("429 Too Many Requests")).toBe(true);
     expect(isRateLimitError("Invalid API key.")).toBe(false);
+  });
+
+  it("recognises provider content-moderation rejections", () => {
+    expect(
+      isContentFilterError(
+        'data: {"error":{"code":"data_inspection_failed","param":null,"message":"Input text data may contain inappropriate content.","type":"data_inspection_failed"}}',
+      ),
+    ).toBe(true);
+    expect(isContentFilterError("Content policy violation")).toBe(true);
+    expect(isContentFilterError("Connection refused")).toBe(false);
+    expect(isContentFilterError("429 Too Many Requests")).toBe(false);
   });
 });

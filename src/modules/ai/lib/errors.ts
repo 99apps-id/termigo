@@ -126,7 +126,20 @@ export function isQuotaError(message: string): boolean {
  *  short wait. */
 export function isRateLimitError(message: string): boolean {
   const m = String(message ?? "").toLowerCase();
+  return /rate[-_]?limit|429|too many requests|throttl/i.test(m);
+}
+
+/** The provider's content-moderation filter rejected the request outright
+ *  (DashScope / Qwen `data_inspection_failed`, "inappropriate content", etc.).
+ *  Deterministic: the flagged text is baked into the saved history, so
+ *  resending it fails identically every time. A plain retry cannot fix it -
+ *  the escape is a new chat (empty history) or a model without that filter. */
+export function isContentFilterError(message: string): boolean {
+  const m = String(message ?? "").toLowerCase();
   return (
-    /rate[-_]?limit|429|too many requests|throttl/i.test(m)
+    /data_inspection_failed|inappropriate content|content policy|content_filter/i.test(
+      m,
+    ) ||
+    (m.includes("content") && m.includes("inspection"))
   );
 }

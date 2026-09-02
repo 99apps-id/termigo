@@ -53,6 +53,7 @@ import { stepBudgetForRound } from "../config";
 import { useAutoApproval } from "../hooks/useAutoApproval";
 import type { AgentStopReason } from "../lib/agent";
 import { humanizeModelError } from "../lib/errorMessage";
+import { isContentFilterError } from "../lib/errors";
 import { SLASH_COMMANDS, TERMIGO_CMD_RE } from "../lib/slashCommands";
 import { resumeRun } from "../store/chatRuntime";
 import { useChatStore } from "../store/chatStore";
@@ -359,6 +360,22 @@ export function AiChatView({
               >
                 Try again
               </button>
+              {/* A content-moderation rejection replays the same flagged
+                  history, so "Try again" can never clear it. The one action
+                  that does is a fresh chat (empty history) - offer it only
+                  for that error class, where retry is provably futile. */}
+              {isContentFilterError(error.message) ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    clearError();
+                    useChatStore.getState().newSession();
+                  }}
+                  className="rounded bg-destructive/20 px-2 py-0.5 font-medium hover:bg-destructive/30"
+                >
+                  Start a new chat
+                </button>
+              ) : null}
               {/* One-click undo to the last checkpoint when the run left the
                   tree in a bad state. Only renders when a checkpoint exists. */}
               <RollbackSuggestion />
