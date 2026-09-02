@@ -83,6 +83,11 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, Props>(
     // the whole reason the embedded browser exists. Local dev servers keep the
     // lightweight iframe.
     const external = url ? !isLocalUrl(url) : false;
+    // An agent-driven tab (a stable `browserInstance`) ALWAYS renders in the
+    // native webview, even for a loopback dev server: the agent's
+    // browser_extract / browser_screenshot / click / type tools drive that
+    // webview, and the iframe path would leave them with nothing to read.
+    const asNative = url ? external || browserInstance !== undefined : false;
 
     // Agent canvas: render the HTML the agent produced (a graph, a plan) in a
     // sandboxed iframe, no address bar. It is a DOM element, so app modals and
@@ -118,7 +123,7 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, Props>(
           onReload={() => {
             // The native embedded webview is not an iframe: bumping the nonce
             // remounts nothing there, so reload must drive the page itself.
-            if (external) {
+            if (asNative) {
               void native
                 .browserEmbedEval(
                   browserInstance ?? instanceId,
@@ -132,10 +137,10 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, Props>(
           }}
           onFocusChange={setAddressFocused}
           // Back/forward drive the native embedded browser's own history; they
-          // only make sense for external pages (the iframe path has no such
-          // control), so they are wired only in that branch.
+          // only make sense in the native branch (the iframe path has no such
+          // control), so they are wired only when the pane hosts a webview.
           onBack={
-            external
+            asNative
               ? () => {
                   void native
                     .browserEmbedEval(
@@ -147,7 +152,7 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, Props>(
               : undefined
           }
           onForward={
-            external
+            asNative
               ? () => {
                   void native
                     .browserEmbedEval(
@@ -162,14 +167,14 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, Props>(
         <div
           className={
             url
-              ? external
+              ? asNative
                 ? "relative min-h-0 flex-1 bg-background"
                 : "relative min-h-0 flex-1 bg-white"
               : "relative min-h-0 flex-1 bg-background"
           }
         >
           {url ? (
-            external ? (
+            asNative ? (
               <BrowserPane
                 instance={browserInstance ?? instanceId}
                 url={url}

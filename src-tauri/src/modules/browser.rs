@@ -513,6 +513,22 @@ fn embed_label(instance: &str) -> String {
     format!("browser-embed-{instance}")
 }
 
+/// Wait briefly for the embedded webview to exist. `browser_open` only marks
+/// the pane; the React BrowserPane creates the native webview on its first
+/// animation frame, so an agent calling browser_extract / screenshot right
+/// after browser_open can arrive before it exists. Poll instead of failing on
+/// a race that always resolves within ~100ms.
+fn wait_embed_webview(app: &AppHandle, instance: &str) -> Option<tauri::Webview> {
+    let label = embed_label(instance);
+    for _ in 0..30 {
+        if let Some(wv) = app.get_webview(&label) {
+            return Some(wv);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    app.get_webview(&label)
+}
+
 fn embed_init_script(instance: &str) -> String {
     format!(
         r#"(function(){{
@@ -625,9 +641,7 @@ pub async fn browser_embed_navigate(
     if let Some(reason) = unsafe_url(&url) {
         return Err(format!("Refused: {reason}"));
     }
-    let wv = app
-        .get_webview(&embed_label(&instance))
-        .ok_or("embedded browser not open")?;
+    let wv = wait_embed_webview(&app, &instance).ok_or("embedded browser not open")?;
     wv.eval(format!("window.location.href = {url:?};"))
         .map_err(|e| e.to_string())?;
     state.record(&instance, Some(url));
@@ -640,9 +654,7 @@ pub async fn browser_embed_read(
     state: State<'_, BrowserState>,
     instance: String,
 ) -> Result<String, String> {
-    let wv = app
-        .get_webview(&embed_label(&instance))
-        .ok_or("embedded browser not open")?;
+    let wv = wait_embed_webview(&app, &instance).ok_or("embedded browser not open")?;
     state.clear_value(&instance);
     let js = format!(
         "(()=>{{try{{if(window.__termigoExtract){{window.__termigoExtract();return;}}const t=document.body?document.body.innerText:'';window.__TAURI__&&window.__TAURI__.event&&window.__TAURI__.event.emit('{VALUE_EVENT}',{{instance:{instance:?},kind:'extract',value:String(t).slice(0,200000)}});}}catch(e){{}}}})();"
@@ -664,9 +676,7 @@ pub async fn browser_embed_eval(
     instance: String,
     js: String,
 ) -> Result<(), String> {
-    let wv = app
-        .get_webview(&embed_label(&instance))
-        .ok_or("embedded browser not open")?;
+    let wv = wait_embed_webview(&app, &instance).ok_or("embedded browser not open")?;
     state.clear_value(&instance);
     let wrapped = format!(
         r#"(()=>{{try{{const result=({js});window.__TAURI__&&window.__TAURI__.event&&window.__TAURI__.event.emit('{VALUE_EVENT}',{{instance:{instance:?},kind:'eval-ok',value:String(result ?? '')}});}}catch(e){{window.__TAURI__&&window.__TAURI__.event&&window.__TAURI__.event.emit('{VALUE_EVENT}',{{instance:{instance:?},kind:'eval-error',value:String(e && e.message ? e.message : e)}});}}}})();"#
@@ -705,9 +715,7 @@ fn capture_embed_png_base64(app: &AppHandle, instance: &str) -> Result<String, S
     use std::sync::mpsc::channel;
     use std::time::Duration;
 
-    let wv = app
-        .get_webview(&embed_label(instance))
-        .ok_or("embedded browser not open")?;
+    let wv = wait_embed_webview(app, instance).ok_or("embedded browser not open")?;
 
     let (tx, rx) = channel::<Result<String, String>>();
     wv.with_webview(move |pwv| {
