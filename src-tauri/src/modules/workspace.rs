@@ -433,7 +433,66 @@ fn wsl_drvfs_to_windows(path: &str) -> Option<PathBuf> {
 }
 
 #[cfg(windows)]
+fn is_windows_drive_path(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    bytes.len() >= 2
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes.len() == 2 || bytes[2] == b'\\' || bytes[2] == b'/')
+}
+
+#[cfg(windows)]
+fn is_wsl_unc_path(path: &str) -> bool {
+    let normalized = path.replace('\\', "/");
+    normalized.starts_with("//wsl.localhost/") || normalized.starts_with("//wsl$/")
+}
+
+#[cfg(windows)]
+pub fn host_to_wsl_path(path: &str, distro: &str) -> String {
+    let normalized = path.replace('\\', "/");
+    let unc_localhost_prefix = format!("//wsl.localhost/{}/", distro.to_ascii_lowercase());
+    let unc_dollar_prefix = format!("//wsl$/{}/", distro.to_ascii_lowercase());
+    let lower = normalized.to_ascii_lowercase();
+    if lower.starts_with(&unc_localhost_prefix) {
+        return format!("/{}", &normalized[unc_localhost_prefix.len()..]);
+    }
+    if lower.starts_with(&unc_dollar_prefix) {
+        return format!("/{}", &normalized[unc_dollar_prefix.len()..]);
+    }
+    if lower == format!("//wsl.localhost/{}", distro.to_ascii_lowercase())
+        || lower == format!("//wsl$/{}", distro.to_ascii_lowercase())
+    {
+        return "/".to_string();
+    }
+    if is_windows_drive_path(path) {
+        let drive = path.chars().next().unwrap().to_ascii_lowercase();
+        let tail = if path.len() > 2 {
+            normalized[2..].trim_start_matches('/')
+        } else {
+            ""
+        };
+        return if tail.is_empty() {
+            format!("/mnt/{drive}")
+        } else {
+            format!("/mnt/{drive}/{tail}")
+        };
+    }
+    if normalized.starts_with('/') && !normalized.starts_with("//") {
+        return normalized;
+    }
+    normalized
+}
+
+#[cfg(not(windows))]
+pub fn host_to_wsl_path(path: &str, _distro: &str) -> String {
+    path.to_string()
+}
+
+#[cfg(windows)]
 pub fn wsl_path_to_unc(distro: &str, path: &str) -> PathBuf {
+    if is_wsl_unc_path(path) {
+        return PathBuf::from(path);
+    }
     // Defense-in-depth: refuse to construct a UNC path with a distro name that
     // could escape the WSL share root via `..`, `\`, or other path metachars.
     // Returns a clearly-invalid path that downstream `is_dir()`/`metadata()`
@@ -458,6 +517,9 @@ pub fn wsl_path_to_unc(distro: &str, path: &str) -> PathBuf {
 
 #[cfg(windows)]
 pub fn wsl_path_to_host(distro: &str, path: &str) -> PathBuf {
+    if is_windows_drive_path(path) || is_wsl_unc_path(path) {
+        return PathBuf::from(path);
+    }
     // `/mnt/<drive>` is drvfs-backed Windows storage. Accessing it through the
     // WSL UNC share can return "Access is denied" on Windows even though the
     // same path is readable inside WSL. Use the native drive path instead.
@@ -784,6 +846,28 @@ mod tests {
         assert_eq!(
             resolve_path("/home/vinicios/repo", &workspace),
             wsl_path_to_host("Ubuntu", "/home/vinicios/repo")
+        );
+    }
+
+    #[test]
+    fn host_to_wsl_path_converts_windows_drive_and_unc_correctly() {
+        assert_eq!(host_to_wsl_path(r"C:\Users\test\project", "Ubuntu"), "/mnt/c/Users/test/project");
+        assert_eq!(host_to_wsl_path("C:/Users/test/project", "Ubuntu"), "/mnt/c/Users/test/project");
+        assert_eq!(host_to_wsl_path(r"\\wsl.localhost\Ubuntu\home\test\pentest", "Ubuntu"), "/home/test/pentest");
+        assert_eq!(host_to_wsl_path("//wsl.localhost/Ubuntu/home/test/pentest", "Ubuntu"), "/home/test/pentest");
+        assert_eq!(host_to_wsl_path(r"\\wsl$\Ubuntu\var\log", "Ubuntu"), "/var/log");
+        assert_eq!(host_to_wsl_path("/usr/share/wordlists", "Ubuntu"), "/usr/share/wordlists");
+    }
+
+    #[test]
+    fn wsl_path_to_host_preserves_existing_host_paths() {
+        assert_eq!(
+            wsl_path_to_host("Ubuntu", r"C:\project\termigo"),
+            PathBuf::from(r"C:\project\termigo")
+        );
+        assert_eq!(
+            wsl_path_to_host("Ubuntu", r"\\wsl.localhost\Ubuntu\home\test"),
+            PathBuf::from(r"\\wsl.localhost\Ubuntu\home\test")
         );
     }
 

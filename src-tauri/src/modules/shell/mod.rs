@@ -345,7 +345,8 @@ pub(crate) fn build_oneshot_command(
         let mut cmd = Command::new("wsl.exe");
         cmd.arg("-d").arg(distro);
         if let Some(cwd) = cwd.filter(|s| !s.is_empty()) {
-            cmd.arg("--cd").arg(cwd);
+            let wsl_cwd = crate::modules::workspace::host_to_wsl_path(cwd, distro);
+            cmd.arg("--cd").arg(wsl_cwd);
         }
         cmd.arg("--exec").arg("sh").arg("-lc").arg(command);
         return Ok(cmd);

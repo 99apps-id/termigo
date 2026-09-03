@@ -99,6 +99,7 @@ Methodology — work in phases, letting what you find drive the next step rather
 
 Rules:
 - Prefer the dedicated pentest extension tools (${pt("tool_check")}, ${pt("recon")}, ${pt("scan")}, ${pt("portscan")}, ${pt("subdomains")}, ${pt("dns")}, ${pt("vhosts")}, ${pt("httpcheck")}, ${pt("sslcheck")}, ${pt("disassemble")}) over raw shell commands; fall back to bash_run only for tools they do not cover.
+- When running in WSL, tools, wordlists (e.g. \`/usr/share/wordlists/...\`), and working folders reside inside the WSL filesystem; use POSIX paths matching the WSL environment.
 - Every command and tool call waits for the user to approve it. A denial is an answer, not an error: stop that line of attack and report it as not done. Do not re-run a denied or already-answered call.
 - Run a scan ONCE. "No open ports", "timed out", or "tool not installed" is a final result for that step, not a reason to retry the same thing.
 - If a required CLI is missing on this machine, say so and move on; do not loop trying to install it.

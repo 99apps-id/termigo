@@ -92,19 +92,76 @@ export async function listPipelines(): Promise<OrchestrationPipeline[]> {
 
 type StepResult = { ok: boolean; output?: unknown; error?: string };
 
+/**
+ * Replace placeholders like `{{stepId.output}}`, `{{stepId}}`, `{{stepId.summary}}`,
+ * or `{{stepId.error}}` with values from previous pipeline step outputs or context.
+ */
+export function interpolatePrompt(
+  prompt: string,
+  context: Record<string, unknown>,
+): string {
+  return prompt.replace(
+    /\{\{\s*([a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)?)\s*\}\}/g,
+    (match, path: string) => {
+      const parts = path.split(".");
+      const stepId = parts[0]!;
+      const field = parts[1];
+
+      if (!(stepId in context)) {
+        return match;
+      }
+
+      const stepVal = context[stepId];
+      let resolved: unknown = stepVal;
+
+      if (field) {
+        if (
+          stepVal &&
+          typeof stepVal === "object" &&
+          field in (stepVal as Record<string, unknown>)
+        ) {
+          resolved = (stepVal as Record<string, unknown>)[field];
+        } else if (field === "output") {
+          resolved = stepVal;
+        } else {
+          resolved = undefined;
+        }
+      }
+
+      if (resolved === undefined || resolved === null) {
+        return "";
+      }
+      if (typeof resolved === "string") {
+        return resolved;
+      }
+      if (typeof resolved === "number" || typeof resolved === "boolean") {
+        return String(resolved);
+      }
+      try {
+        return JSON.stringify(resolved, null, 2);
+      } catch {
+        return String(resolved);
+      }
+    },
+  );
+}
+
 async function executeStep(
   step: OrchestrationStep,
   toolContext: ToolContext,
+  context: Record<string, unknown> = {},
 ): Promise<StepResult> {
   const { apiKeys, selectedModelId } = useChatStore.getState();
   if (!apiKeys || !selectedModelId) {
     return { ok: false, error: "no provider key/model configured" };
   }
 
+  const prompt = interpolatePrompt(step.prompt, context);
+
   try {
     const r = await runSubagent({
       type: step.type,
-      prompt: step.prompt,
+      prompt,
       keys: apiKeys,
       modelId: selectedModelId,
       toolContext,
@@ -163,7 +220,7 @@ export async function runPipeline(
 
     if (parallelSteps.length > 0) {
       const stepPromises = parallelSteps.map(async (step) => {
-        const result = await executeStep(step, toolContext);
+        const result = await executeStep(step, toolContext, results);
         return { step, result };
       });
 
@@ -183,7 +240,7 @@ export async function runPipeline(
 
     for (const step of sequentialSteps) {
       pending.delete(step.id);
-      const result = await executeStep(step, toolContext);
+      const result = await executeStep(step, toolContext, results);
 
       if (result.ok) {
         completed.add(step.id);

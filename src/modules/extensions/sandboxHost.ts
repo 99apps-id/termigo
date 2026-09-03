@@ -58,14 +58,16 @@ async function buildExecutor(
 
   return {
     invoke: (command, args) => {
-      // A shell command from an extension should run in the SAME workspace the
-      // user is in (Local or a WSL distro), the way the agent's own shell tools
-      // do. Without this the backend defaults to Local, so on Windows an
-      // extension whose toolchain lives in WSL (e.g. the pentest kit's
-      // nmap/dig/curl) runs in PowerShell and finds nothing. Only injected when
-      // the extension did not set its own workspace, and only for the spawn
-      // commands that take one.
-      const injectsWorkspace = command === "shell_run_command" || command === "shell_bg_spawn";
+      // Commands from an extension (shell execution, filesystem access, etc.)
+      // should run in the SAME workspace the user is in (Local or a WSL distro),
+      // the way the agent's own tools do. Without this the backend defaults to
+      // Local, so on Windows an extension whose toolchain lives in WSL (e.g.
+      // the pentest kit's nmap/dig/curl/wordlists) runs in PowerShell/Windows fs
+      // and fails to locate the right tools or folders.
+      const injectsWorkspace =
+        command.startsWith("shell_") ||
+        command.startsWith("fs_") ||
+        command.startsWith("workspace_");
       if (injectsWorkspace) {
         const a = (args ?? {}) as Record<string, unknown>;
         if (a.workspace === undefined) {

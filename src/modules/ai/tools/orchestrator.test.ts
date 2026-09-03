@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { native } from "../lib/native";
 import {
+  interpolatePrompt,
   listPipelines,
   loadPipeline,
   runPipeline,
@@ -131,3 +132,43 @@ describe("runPipelineByName", () => {
     expect(result.completed).toEqual([]);
   });
 });
+
+describe("interpolatePrompt", () => {
+  it("interpolates simple step output", () => {
+    const prompt = "Fix issues based on audit: {{audit.output}}";
+    const context = { audit: "Found 2 vulnerabilities in auth module" };
+    expect(interpolatePrompt(prompt, context)).toBe(
+      "Fix issues based on audit: Found 2 vulnerabilities in auth module",
+    );
+  });
+
+  it("supports shorthand {{stepId}}", () => {
+    const prompt = "Summary: {{recon}}";
+    const context = { recon: "Open ports: 80, 443" };
+    expect(interpolatePrompt(prompt, context)).toBe("Summary: Open ports: 80, 443");
+  });
+
+  it("formats structured objects and arrays as pretty JSON", () => {
+    const prompt = "Review findings: {{vulns}}";
+    const context = { vulns: [{ id: "CVE-1", severity: "high" }] };
+    const out = interpolatePrompt(prompt, context);
+    expect(out).toContain('"id": "CVE-1"');
+    expect(out).toContain('"severity": "high"');
+  });
+
+  it("resolves nested properties like summary or error", () => {
+    const prompt = "Status: {{step1.summary}} (error: {{step1.error}})";
+    const context = {
+      step1: { summary: "All checks passed", error: null },
+    };
+    expect(interpolatePrompt(prompt, context)).toBe(
+      "Status: All checks passed (error: )",
+    );
+  });
+
+  it("leaves unmatched placeholders untouched", () => {
+    const prompt = "Input: {{unknown_step.output}}";
+    expect(interpolatePrompt(prompt, {})).toBe("Input: {{unknown_step.output}}");
+  });
+});
+

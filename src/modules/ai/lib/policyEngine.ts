@@ -1,5 +1,3 @@
-import { tool } from "ai";
-import { z } from "zod";
 import { useChatStore } from "../store/chatStore";
 import { native } from "./native";
 
@@ -37,7 +35,7 @@ export type PolicySet = {
 
 // ─── Default policies ─────────────────────────────────────────────────────
 
-const DEFAULT_POLICIES: PolicySet = {
+export const DEFAULT_POLICIES: PolicySet = {
   version: 1,
   rules: [
     {
@@ -118,31 +116,78 @@ const DEFAULT_POLICIES: PolicySet = {
 
 // ─── Storage ──────────────────────────────────────────────────────────────
 
-const POLICY_PATH = ".termigo/policies.json";
+export const POLICY_PATH = ".termigo/policies.json";
 
-async function loadPolicies(): Promise<PolicySet> {
+export async function loadCustomPolicies(): Promise<PolicyRule[]> {
   const root = useChatStore.getState().live.getWorkspaceRoot() ?? ".";
   const path = `${root.replace(/\/$/, "")}/${POLICY_PATH}`;
   try {
     const r = await native.readFile(path);
-    if (r.kind !== "text" || !r.content) return DEFAULT_POLICIES;
+    if (r.kind !== "text" || !r.content) return [];
     const custom = JSON.parse(r.content) as Partial<PolicySet>;
-    const customRules = Array.isArray(custom.rules) ? custom.rules : [];
-    const customIds = new Set(customRules.map((rule) => rule.id));
-    const mergedRules = [
-      ...DEFAULT_POLICIES.rules.filter((rule) => !customIds.has(rule.id)),
-      ...customRules,
-    ];
-    return {
-      version:
-        typeof custom.version === "number"
-          ? custom.version
-          : DEFAULT_POLICIES.version,
-      rules: mergedRules,
-    };
+    return Array.isArray(custom.rules) ? custom.rules : [];
   } catch {
-    return DEFAULT_POLICIES;
+    return [];
   }
+}
+
+export async function saveCustomPolicy(rule: PolicyRule): Promise<boolean> {
+  const root = useChatStore.getState().live.getWorkspaceRoot() ?? ".";
+  const path = `${root.replace(/\/$/, "")}/${POLICY_PATH}`;
+  try {
+    const currentRules = await loadCustomPolicies();
+    const filtered = currentRules.filter((r) => r.id !== rule.id);
+    const updatedRules = [...filtered, rule];
+    const content = JSON.stringify(
+      {
+        version: 1,
+        rules: updatedRules,
+      },
+      null,
+      2,
+    );
+    await native.writeFile(path, content);
+    return true;
+  } catch (e) {
+    console.error("[policyEngine] failed to save custom policy:", e);
+    return false;
+  }
+}
+
+export async function removeCustomPolicy(ruleId: string): Promise<boolean> {
+  const root = useChatStore.getState().live.getWorkspaceRoot() ?? ".";
+  const path = `${root.replace(/\/$/, "")}/${POLICY_PATH}`;
+  try {
+    const currentRules = await loadCustomPolicies();
+    const updatedRules = currentRules.filter((r) => r.id !== ruleId);
+    const content = JSON.stringify(
+      {
+        version: 1,
+        rules: updatedRules,
+      },
+      null,
+      2,
+    );
+    await native.writeFile(path, content);
+    return true;
+  } catch (e) {
+    console.error("[policyEngine] failed to remove custom policy:", e);
+    return false;
+  }
+}
+
+export async function loadPolicies(): Promise<PolicySet> {
+  const customRules = await loadCustomPolicies();
+  if (customRules.length === 0) return DEFAULT_POLICIES;
+  const customIds = new Set(customRules.map((rule) => rule.id));
+  const mergedRules = [
+    ...DEFAULT_POLICIES.rules.filter((rule) => !customIds.has(rule.id)),
+    ...customRules,
+  ];
+  return {
+    version: DEFAULT_POLICIES.version,
+    rules: mergedRules,
+  };
 }
 
 // ─── Evaluation ───────────────────────────────────────────────────────────
@@ -195,28 +240,6 @@ export async function evaluatePolicy(
   }
 
   return { allowed: true };
-}
-
-// ─── Agent tool ───────────────────────────────────────────────────────────
-
-export function buildPolicyTools() {
-  return {
-    list_policies: tool({
-      description:
-        "List active agentic policies for this workspace. Returns policy names and descriptions.",
-      inputSchema: z.object({}),
-      execute: async () => {
-        const policies = await loadPolicies();
-        return {
-          policies: policies.rules.map((r) => ({
-            id: r.id,
-            description: r.description,
-            block: r.block ?? false,
-          })),
-        };
-      },
-    }),
-  } as const;
 }
 
 /**

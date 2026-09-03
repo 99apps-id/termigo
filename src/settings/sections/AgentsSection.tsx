@@ -49,6 +49,13 @@ import {
   newSnippetId,
   useSnippetsStore,
 } from "@/modules/ai/store/snippetsStore";
+import {
+  DEFAULT_POLICIES,
+  loadCustomPolicies,
+  removeCustomPolicy,
+  saveCustomPolicy,
+  type PolicyRule,
+} from "@/modules/ai/lib/policyEngine";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   setAgentReviewAfterApply,
@@ -167,6 +174,8 @@ export function AgentsSection() {
       <CustomInstructionsBlock value={customInstructions} />
 
       <PentestScopeBlock />
+
+      <WorkspacePoliciesBlock />
 
       <TelegramBlock />
 
@@ -1067,6 +1076,210 @@ function PentestScopeBlock() {
           </SettingRow>
         </>
       )}
+    </section>
+  );
+}
+
+function WorkspacePoliciesBlock() {
+  const [customRules, setCustomRules] = useState<PolicyRule[]>([]);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [newId, setNewId] = useState("");
+  const [newDesc, setNewDesc] = useState("");
+  const [newCommands, setNewCommands] = useState("");
+  const [newTools, setNewTools] = useState("");
+  const [isBlock, setIsBlock] = useState(true);
+
+  const refresh = async () => {
+    try {
+      const rules = await loadCustomPolicies();
+      setCustomRules(rules);
+    } catch {
+      setCustomRules([]);
+    }
+  };
+
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  const handleSave = async () => {
+    const id = newId.trim().toLowerCase().replace(/\s+/g, "-");
+    const rule: PolicyRule = {
+      id,
+      description: newDesc.trim() || id,
+      block: isBlock,
+      commands: newCommands
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
+      tools: newTools
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
+    };
+    await saveCustomPolicy(rule);
+    setDialogOpen(false);
+    setNewId("");
+    setNewDesc("");
+    setNewCommands("");
+    setNewTools("");
+    setIsBlock(true);
+    await refresh();
+  };
+
+  const handleDelete = async (id: string) => {
+    await removeCustomPolicy(id);
+    await refresh();
+  };
+
+  return (
+    <section className="flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <div className="flex flex-col">
+          <Label>Workspace Guardrails & Policies</Label>
+          <span className="text-[10.5px] text-muted-foreground">
+            Enforces security guardrails on agent tool execution and terminal commands. Custom policies are stored in .termigo/policies.json.
+          </span>
+        </div>
+        <Button
+          size="xs"
+          variant="outline"
+          className="h-7 text-[11px] gap-1"
+          onClick={() => setDialogOpen(true)}
+        >
+          <HugeiconsIcon icon={Add01Icon} className="h-3.5 w-3.5" />
+          Add Policy
+        </Button>
+      </div>
+
+      <div className="flex flex-col divide-y divide-border/60 rounded-md border border-border/80 bg-card/40">
+        {DEFAULT_POLICIES.rules.map((rule) => (
+          <div key={rule.id} className="flex items-center justify-between p-2.5 px-3 text-[11.5px]">
+            <div className="flex flex-col gap-0.5">
+              <div className="flex items-center gap-2 font-mono text-[11px] font-medium text-foreground">
+                {rule.id}
+                <span className="rounded bg-muted px-1.5 py-0.5 text-[9.5px] font-sans text-muted-foreground">
+                  Built-in
+                </span>
+              </div>
+              <span className="text-[10.5px] text-muted-foreground">
+                {rule.description ?? "Built-in security guardrail"}
+              </span>
+            </div>
+            <span className="text-[10.5px] text-muted-foreground">Active</span>
+          </div>
+        ))}
+
+        {customRules.map((rule) => (
+          <div key={rule.id} className="flex items-center justify-between p-2.5 px-3 text-[11.5px]">
+            <div className="flex flex-col gap-0.5">
+              <div className="flex items-center gap-2 font-mono text-[11px] font-medium text-foreground">
+                {rule.id}
+                <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[9.5px] font-sans text-primary">
+                  Custom
+                </span>
+                {rule.block ? (
+                  <span className="rounded bg-destructive/15 px-1.5 py-0.5 text-[9.5px] font-sans text-destructive">
+                    Block
+                  </span>
+                ) : (
+                  <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[9.5px] font-sans text-amber-500">
+                    Warn
+                  </span>
+                )}
+              </div>
+              <span className="text-[10.5px] text-muted-foreground">
+                {rule.description || "Workspace custom policy"}
+              </span>
+              {(rule.commands?.length || rule.tools?.length) ? (
+                <div className="flex flex-wrap gap-1.5 pt-1 text-[10px] font-mono text-muted-foreground">
+                  {rule.commands?.map((c) => (
+                    <span key={c} className="rounded bg-muted/60 px-1 py-0.5">
+                      cmd: {c}
+                    </span>
+                  ))}
+                  {rule.tools?.map((t) => (
+                    <span key={t} className="rounded bg-muted/60 px-1 py-0.5">
+                      tool: {t}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="size-6 text-muted-foreground hover:text-destructive"
+              onClick={() => void handleDelete(rule.id)}
+            >
+              <HugeiconsIcon icon={Delete02Icon} className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        ))}
+      </div>
+
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add Custom Guardrail Policy</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-3 py-2">
+            <div className="flex flex-col gap-1">
+              <Label>Policy ID</Label>
+              <Input
+                value={newId}
+                onChange={(e) => setNewId(e.target.value)}
+                placeholder="e.g. block-dangerous-cleanup"
+                className="h-8 text-[12px] font-mono"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label>Description</Label>
+              <Input
+                value={newDesc}
+                onChange={(e) => setNewDesc(e.target.value)}
+                placeholder="e.g. Disallow running destructive cleanup scripts"
+                className="h-8 text-[12px]"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label>Commands filter (comma-separated)</Label>
+              <Input
+                value={newCommands}
+                onChange={(e) => setNewCommands(e.target.value)}
+                placeholder="e.g. rm -rf, DROP DATABASE, shred"
+                className="h-8 text-[12px] font-mono"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label>Tools filter (comma-separated)</Label>
+              <Input
+                value={newTools}
+                onChange={(e) => setNewTools(e.target.value)}
+                placeholder="e.g. bash_run, write_file"
+                className="h-8 text-[12px] font-mono"
+              />
+            </div>
+            <div className="flex items-center justify-between pt-1">
+              <div className="flex flex-col">
+                <span className="text-[12px] font-medium text-foreground">Hard block</span>
+                <span className="text-[10.5px] text-muted-foreground">
+                  Refuse tool call immediately instead of warning
+                </span>
+              </div>
+              <Switch checked={isBlock} onCheckedChange={setIsBlock} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={() => setDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button size="sm" onClick={() => void handleSave()} disabled={!newId.trim()}>
+              Save Policy
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }

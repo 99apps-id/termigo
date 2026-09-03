@@ -1,7 +1,7 @@
 import { summarizeInput } from "../lib/approvalQueue";
 import { withAutoVerify } from "../lib/autoVerify";
 import { buildOrchestratorTools } from "../lib/orchestrator";
-import { buildPolicyTools } from "../lib/policyEngine";
+import { buildPolicyTools } from "./policyTools";
 import {
   POST_EXECUTE_CONFIRM_TOOLS,
   withPostExecuteConfirm,
