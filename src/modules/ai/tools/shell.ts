@@ -158,7 +158,7 @@ export function buildShellTools(ctx: ToolContext) {
 
     bash_background: tool({
       description:
-        "Spawn a long-running background process (e.g. `pnpm dev`, `cargo watch`, log tailers). Returns a handle; use `bash_logs` to read its output and `bash_kill` to stop it. Output is captured into a 4MB ring buffer. Asks for user approval.",
+        "Spawn a long-running background process (e.g. `pnpm dev`, `cargo watch`, log tailers). Returns a handle; use `bash_wait` to block until it finishes (builds, installs), `bash_logs` to read its output while it runs, and `bash_kill` to stop it. Output is captured into a 4MB ring buffer. Asks for user approval.",
       inputSchema: z.object({
         command: z.string(),
         cwd: z.string().nullable().optional(),
@@ -195,7 +195,7 @@ export function buildShellTools(ctx: ToolContext) {
 
     bash_logs: tool({
       description:
-        "Read accumulated logs from a `bash_background` process. Pass `since_offset` from the previous response's `next_offset` to tail incrementally. `dropped` reports bytes evicted by the ring buffer.",
+        "Read accumulated logs from a `bash_background` process. Pass `since_offset` from the previous response's `next_offset` to tail incrementally. `dropped` reports bytes evicted by the ring buffer. To block until the process finishes, use `bash_wait`.",
       inputSchema: z.object({
         handle: z.number().int(),
         since_offset: z.number().int().optional(),
@@ -206,6 +206,71 @@ export function buildShellTools(ctx: ToolContext) {
           return r;
         } catch (e) {
           return { error: String(e) };
+        }
+      },
+    }),
+
+    bash_wait: tool({
+      description:
+        "Wait for a `bash_background` process to exit (a build, an install, a test run), polling its log. Returns the final `exit_code` and the last log tail, or `timed_out: true` while it is still running — call again to keep waiting, or `bash_logs` to read progress meanwhile. Auto-executes.",
+      inputSchema: z.object({
+        handle: z.number().int(),
+        timeout_secs: z
+          .number()
+          .int()
+          .min(1)
+          .max(600)
+          .optional()
+          .describe(
+            "How long to wait for exit before returning timed_out (default 120).",
+          ),
+      }),
+      execute: async ({ handle, timeout_secs }) => {
+        if (ctx.getRemoteSession()) {
+          return remoteUnsupported(
+            "Background processes",
+            "Use bash_run with `nohup CMD > /tmp/out.log 2>&1 &` and read the log file afterwards.",
+          );
+        }
+        const deadline = Date.now() + (timeout_secs ?? 120) * 1000;
+        const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+        // shell_bg_logs reports `exited` + `exit_code` without a separate
+        // registry call, so one poll shape serves both "still running" and
+        // "done". Keep the tail of the last read so a finished build's output
+        // arrives with the exit code instead of needing a follow-up bash_logs.
+        let last = {
+          bytes: "",
+          next_offset: 0,
+          dropped: 0,
+          exited: false,
+          exit_code: null as number | null,
+        };
+        for (;;) {
+          try {
+            last = await native.shellBgLogs(handle, last.next_offset);
+          } catch (e) {
+            return { error: String(e) };
+          }
+          if (last.exited) {
+            return {
+              handle,
+              exited: true,
+              exit_code: last.exit_code,
+              timed_out: false,
+              tail: last.bytes.slice(-4000),
+            };
+          }
+          if (Date.now() >= deadline) {
+            return {
+              handle,
+              exited: false,
+              exit_code: null,
+              timed_out: true,
+              tail: last.bytes.slice(-4000),
+              note: "still running — call bash_wait again, or bash_kill to stop it",
+            };
+          }
+          await sleep(500);
         }
       },
     }),

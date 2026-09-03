@@ -14,14 +14,17 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...a: unknown[]) => invoke(...a),
 }));
 
-vi.mock("../lib/native", () => ({
-  native: { shellSessionRun: vi.fn(), shellSessionOpen: vi.fn() },
+const nativeFns = vi.hoisted(() => ({
+  shellSessionRun: vi.fn(),
+  shellSessionOpen: vi.fn(),
+  shellBgLogs: vi.fn(),
 }));
+vi.mock("../lib/native", () => ({ native: nativeFns }));
 
 import { buildManagedAgentTools } from "./agent";
+import type { ToolContext } from "./context";
 import { buildFetchTools } from "./fetch";
 import { buildShellTools } from "./shell";
-import type { ToolContext } from "./context";
 
 function ctxWith(remote: { sessionId: number; cwd: string | null } | null) {
   return {
@@ -36,7 +39,9 @@ function ctxWith(remote: { sessionId: number; cwd: string | null } | null) {
 }
 
 function exec(tools: Record<string, unknown>, name: string, args: unknown) {
-  const t = tools[name] as { execute: (a: unknown, o: unknown) => Promise<unknown> };
+  const t = tools[name] as {
+    execute: (a: unknown, o: unknown) => Promise<unknown>;
+  };
   return t.execute(args, {});
 }
 
@@ -44,14 +49,20 @@ describe("spawn_coding_agent", () => {
   // A local agent happily does local work, so delegating to it while the user
   // is on a server looks like it succeeded.
   it("refuses while an SSH terminal is focused", async () => {
-    const tools = buildManagedAgentTools(ctxWith({ sessionId: 4, cwd: "/srv" }));
-    const out = await exec(tools, "spawn_coding_agent", { prompt: "fix the build" });
+    const tools = buildManagedAgentTools(
+      ctxWith({ sessionId: 4, cwd: "/srv" }),
+    );
+    const out = await exec(tools, "spawn_coding_agent", {
+      prompt: "fix the build",
+    });
     expect(String((out as { error: string }).error)).toContain("coding agent");
   });
 
   it("still works with no session open", async () => {
     const tools = buildManagedAgentTools(ctxWith(null));
-    const out = await exec(tools, "spawn_coding_agent", { prompt: "fix the build" });
+    const out = await exec(tools, "spawn_coding_agent", {
+      prompt: "fix the build",
+    });
     expect(out).not.toHaveProperty("error");
   });
 });
@@ -91,10 +102,44 @@ describe("bash_run on the remote host", () => {
 
   it("quotes a directory that would otherwise break the command", async () => {
     sshExec.mockClear();
-    sshExec.mockResolvedValue({ stdout: "", stderr: "", exitCode: 0, truncated: false });
-    const tools = buildShellTools(ctxWith({ sessionId: 9, cwd: "/srv/my app" }));
+    sshExec.mockResolvedValue({
+      stdout: "",
+      stderr: "",
+      exitCode: 0,
+      truncated: false,
+    });
+    const tools = buildShellTools(
+      ctxWith({ sessionId: 9, cwd: "/srv/my app" }),
+    );
     await exec(tools, "bash_run", { command: "ls" });
-    expect(sshExec).toHaveBeenCalledWith(9, "cd '/srv/my app' && ls", undefined);
+    expect(sshExec).toHaveBeenCalledWith(
+      9,
+      "cd '/srv/my app' && ls",
+      undefined,
+    );
+  });
+});
+
+describe("bash_wait", () => {
+  // The model reaches for bash_wait to block on a background build; it used
+  // not to exist, and the provider rejected the call ("unavailable tool").
+  it("returns the exit code once the process has exited", async () => {
+    nativeFns.shellBgLogs.mockResolvedValue({
+      bytes: "build ok",
+      next_offset: 8,
+      dropped: 0,
+      exited: true,
+      exit_code: 0,
+    });
+    const tools = buildShellTools(ctxWith(null));
+    const out = await exec(tools, "bash_wait", { handle: 3 });
+    expect(out).toMatchObject({ exited: true, exit_code: 0, timed_out: false });
+  });
+
+  it("refuses while an SSH terminal is focused (no remote process registry)", async () => {
+    const tools = buildShellTools(ctxWith({ sessionId: 9, cwd: "/srv" }));
+    const out = await exec(tools, "bash_wait", { handle: 3 });
+    expect(String((out as { error: string }).error)).toContain("Background");
   });
 });
 
@@ -107,8 +152,13 @@ describe("fetch", () => {
       headers: { "content-type": "text/plain" },
       body: Array.from(new TextEncoder().encode("hello")),
     });
-    const out = await exec(buildFetchTools(), "fetch", { url: "https://x.dev" });
-    expect(out).toMatchObject({ fetchedFrom: "local machine", content: "hello" });
+    const out = await exec(buildFetchTools(), "fetch", {
+      url: "https://x.dev",
+    });
+    expect(out).toMatchObject({
+      fetchedFrom: "local machine",
+      content: "hello",
+    });
   });
 
   // Not a parameter the model can set: the guard exists so an agent reading a
