@@ -39,7 +39,7 @@ export function humanizeModelError(raw: string | null | undefined): string {
   // the run learns to drop it (toolChoiceLearning), so pressing Try again /
   // Continue after the auto-retry normally just works.
   if (l.includes("tool_choice") || l.includes("tool choice")) {
-    return "This model does not accept a forced tool choice (it runs in a thinking mode that rejects one). Termigo removes the pin for this model automatically — press Continue or Try again to carry on.";
+    return "This model doesn't support forcing a specific tool call. Termigo stopped forcing it automatically — press Continue or Try again to carry on.";
   }
 
   // Rate limited.

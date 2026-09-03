@@ -882,9 +882,10 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // like one that is merely slow: 90 seconds of dead air with a bare spinner.
   // At 30s without a first token, name the wait in the step label (the HUD
   // reads "Round N · <step>"), so the pause is an explained stall rather than
-  // a suspected hang.
+  // a suspected hang. "Model", not "provider": that is the word users pick in
+  // Settings and see in the header; "provider" is our internal plumbing.
   let stallNotice: ReturnType<typeof setTimeout> | null = setTimeout(() => {
-    opts.onStep?.("Waiting for provider — no response yet…");
+    opts.onStep?.("The model is taking a while to respond — still waiting…");
   }, 30_000);
   const clearFirstStepTimer = (): void => {
     if (firstStepTimer) {

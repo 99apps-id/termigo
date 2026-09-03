@@ -501,7 +501,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
               useChatStore.getState().patchAgentMeta({
                 status: "error",
                 error:
-                  "The provider does not accept forced tool choices on this model. The pin was removed — press Try again to continue.",
+                  "This model doesn't support forcing a specific tool call. Termigo stopped forcing it — press Try again to continue.",
               });
               useChatStore.getState().syncRunMeta();
             });

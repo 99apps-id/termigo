@@ -40,9 +40,12 @@ describe("humanizeModelError", () => {
     const out = humanizeModelError(
       'data: {"error":{"code":"invalid_parameter_error","param":null,"message":"The tool_choice parameter does not support being set to required or object in thinking mode","type":"invalid_request_error"}}',
     ).toLowerCase();
-    expect(out).toContain("forced tool choice");
+    expect(out).toContain("forcing a specific tool call");
     // The actionable part: the pin is dropped, a retry works.
     expect(out).toContain("try again");
+    // Plain language: no internal jargon on screen.
+    expect(out).not.toContain("pin");
+    expect(out).not.toContain("provider");
   });
 
   it("explains a provider content-moderation rejection", () => {
