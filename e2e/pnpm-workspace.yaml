@@ -1,0 +1,10 @@
+# e2e is a standalone project (pnpm install --ignore-workspace, its own
+# lockfile), so it does NOT inherit the root pnpm-workspace.yaml. pnpm >= 10
+# refuses to run dependency build scripts unless they are explicitly allowed
+# here (ERR_PNPM_IGNORED_BUILDS). The WebdriverIO driver packages download
+# their binaries in postinstall — they MUST be allowed or the smoke tests have
+# no driver to talk to the app.
+allowBuilds:
+  edgedriver: true
+  esbuild: true
+  geckodriver: true
