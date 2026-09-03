@@ -29,8 +29,8 @@ lockfile.
 
 ```bash
 cd e2e
-pnpm install --ignore-workspace   # standalone install, its own lockfile
-pnpm test                         # wdio run ./wdio.conf.ts
+pnpm install   # standalone install (e2e/pnpm-workspace.yaml = its own root)
+pnpm test      # wdio run ./wdio.conf.ts
 ```
 
 Environment overrides:

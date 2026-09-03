@@ -177,7 +177,11 @@ jobs:
 
       - name: Install e2e dependencies
         working-directory: e2e
-        run: pnpm install --ignore-workspace --no-frozen-lockfile
+        # e2e has its own pnpm-workspace.yaml (allowBuilds for the WebdriverIO
+        # driver postinstalls), so it is its own workspace root. NO
+        # --ignore-workspace: that flag would skip the local workspace file and
+        # pnpm 11 would hard-error with ERR_PNPM_IGNORED_BUILDS on the drivers.
+        run: pnpm install --no-frozen-lockfile
 
       - name: Run e2e smoke tests
         working-directory: e2e
