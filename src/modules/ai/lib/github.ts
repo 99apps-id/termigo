@@ -69,7 +69,7 @@ export async function createPr(
     "create",
     `--title ${quoteShellArg(title)}`,
     `--body ${quoteShellArg(body)}`,
-    `--base ${quoteShellArg(base)}`,
+    ...(base.trim() ? [`--base ${quoteShellArg(base.trim())}`] : []),
     `--head ${quoteShellArg(head)}`,
     "--json",
     "number,title,body,state,author,createdAt,updatedAt,url,baseRefName,headRefName",

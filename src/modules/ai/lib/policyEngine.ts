@@ -1,3 +1,5 @@
+import { tool } from "ai";
+import { z } from "zod";
 import { useChatStore } from "../store/chatStore";
 import { native } from "./native";
 
@@ -124,7 +126,20 @@ async function loadPolicies(): Promise<PolicySet> {
   try {
     const r = await native.readFile(path);
     if (r.kind !== "text" || !r.content) return DEFAULT_POLICIES;
-    return JSON.parse(r.content) as PolicySet;
+    const custom = JSON.parse(r.content) as Partial<PolicySet>;
+    const customRules = Array.isArray(custom.rules) ? custom.rules : [];
+    const customIds = new Set(customRules.map((rule) => rule.id));
+    const mergedRules = [
+      ...DEFAULT_POLICIES.rules.filter((rule) => !customIds.has(rule.id)),
+      ...customRules,
+    ];
+    return {
+      version:
+        typeof custom.version === "number"
+          ? custom.version
+          : DEFAULT_POLICIES.version,
+      rules: mergedRules,
+    };
   } catch {
     return DEFAULT_POLICIES;
   }
@@ -138,21 +153,29 @@ export async function evaluatePolicy(
   const policies = await loadPolicies();
 
   for (const rule of policies.rules) {
-    // Check if rule applies to this tool
-    if (rule.tools && rule.tools.length > 0 && ctx.toolName) {
-      const tool = ctx.toolName;
-      const matchesTool = rule.tools.some(
-        (t) => tool === t || tool.endsWith(`/${t}`),
-      );
-      if (!matchesTool) continue;
+    let toolMatched = false;
+    let toolSpecified = false;
+    if (rule.tools && rule.tools.length > 0) {
+      toolSpecified = true;
+      if (ctx.toolName) {
+        const toolName = ctx.toolName;
+        toolMatched = rule.tools.some(
+          (t) => toolName === t || toolName.endsWith(`/${t}`),
+        );
+      }
+      if (!toolMatched) continue;
     }
 
-    // Check if rule applies to this command
-    if (rule.commands && rule.commands.length > 0 && ctx.command) {
-      const matchesCommand = rule.commands.some((pattern) =>
-        ctx.command?.includes(pattern),
-      );
-      if (!matchesCommand) continue;
+    let commandMatched = false;
+    let commandSpecified = false;
+    if (rule.commands && rule.commands.length > 0) {
+      commandSpecified = true;
+      if (ctx.command) {
+        commandMatched = rule.commands.some((pattern) =>
+          ctx.command?.includes(pattern),
+        );
+      }
+      if (!commandMatched) continue;
     }
 
     // Run custom evaluation if present
@@ -161,14 +184,18 @@ export async function evaluatePolicy(
       if (!result.allowed) {
         return result;
       }
+    } else if (rule.block !== false && (toolSpecified || commandSpecified)) {
+      return {
+        allowed: false,
+        reason:
+          rule.description || `Action blocked by policy rule "${rule.id}".`,
+        ruleId: rule.id,
+      };
     }
   }
 
   return { allowed: true };
 }
-
-import { tool } from "ai";
-import { z } from "zod";
 
 // ─── Agent tool ───────────────────────────────────────────────────────────
 

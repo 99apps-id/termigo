@@ -195,6 +195,13 @@ export async function runPipeline(
         break;
       }
     }
+
+    if (stoppedAt) {
+      for (const stepId of pending) {
+        skipped.add(stepId);
+      }
+      break;
+    }
   }
 
   return {

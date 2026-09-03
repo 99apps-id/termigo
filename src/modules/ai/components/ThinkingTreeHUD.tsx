@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { BrainIcon, TerminalIcon, Tick01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { cn } from "@/lib/utils";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 
@@ -42,7 +44,7 @@ export function ThinkingTreeHUD({
           <span>Agent Execution & Reasoning ({nodes.length} steps)</span>
         </div>
         <span className="text-[10px] text-muted-foreground/80">
-          {expanded ? "▾ Collapse" : "▸ Expand"}
+          {expanded ? "Collapse" : "Expand"}
         </span>
       </button>
 
@@ -54,8 +56,14 @@ export function ThinkingTreeHUD({
               className="flex items-start justify-between rounded p-1.5 hover:bg-accent/40"
             >
               <div className="flex items-start gap-2 overflow-hidden pr-2">
-                <span className="mt-0.5 text-[10px] text-muted-foreground">
-                  {node.type === "tool" ? "🛠️" : node.type === "check" ? "🧪" : "💭"}
+                <span className="mt-0.5 shrink-0 text-muted-foreground">
+                  {node.type === "tool" ? (
+                    <HugeiconsIcon icon={TerminalIcon} size={12} />
+                  ) : node.type === "check" ? (
+                    <HugeiconsIcon icon={Tick01Icon} size={12} />
+                  ) : (
+                    <HugeiconsIcon icon={BrainIcon} size={12} />
+                  )}
                 </span>
                 <div className="min-w-0">
                   <div className="truncate font-medium text-foreground">

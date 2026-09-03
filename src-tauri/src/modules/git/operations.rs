@@ -43,6 +43,9 @@ fn resolve_repo_in_authorized(
         return Ok(None);
     };
     let canonical_root = canonical_dir(registry, &root_line, &cwd.workspace)?;
+    if is_unintended_home_repo(&canonical_root.local_path, &cwd.local_path) {
+        return Ok(None);
+    }
     let _ = registry.authorize(&canonical_root.local_path);
 
     let head = match git_stdout_lines(
@@ -101,6 +104,12 @@ pub fn panel_snapshot(
         });
     };
     let canonical_root = canonical_dir(registry, &root_line, &cwd.workspace)?;
+    if is_unintended_home_repo(&canonical_root.local_path, &cwd.local_path) {
+        return Ok(GitPanelSnapshot {
+            repo: None,
+            status: None,
+        });
+    }
     let _ = registry.authorize(&canonical_root.local_path);
 
     let status = status_inner(&canonical_root)?;
@@ -1139,6 +1148,14 @@ pub fn checkout_branch(
         DEFAULT_TIMEOUT_SECS,
     )?;
     ensure_success(&output, "git checkout failed")
+}
+
+fn is_unintended_home_repo(canonical_root: &Path, cwd: &Path) -> bool {
+    let Some(home) = dirs::home_dir() else {
+        return false;
+    };
+    let home = std::fs::canonicalize(home).unwrap_or_else(|_| dirs::home_dir().unwrap());
+    canonical_root == home && cwd != home
 }
 
 #[cfg(test)]

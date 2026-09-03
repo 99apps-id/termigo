@@ -3,6 +3,7 @@ import { native } from "../lib/native";
 import {
   listPipelines,
   loadPipeline,
+  runPipeline,
   runPipelineByName,
 } from "../lib/orchestrator";
 
@@ -86,5 +87,47 @@ describe("runPipelineByName", () => {
     const result = await runPipelineByName("release");
     expect(result.ok).toBe(false);
     expect(result.message).toMatch(/no active chat/);
+  });
+
+  it("stops pipeline execution and skips pending steps when a sequential step fails", async () => {
+    const pipeline = {
+      id: "failing-pipe",
+      name: "Failing Pipe",
+      steps: [
+        { id: "step1", type: "general" as const, prompt: "First step" },
+        { id: "step2", type: "general" as const, prompt: "Second independent step" },
+      ],
+    };
+    const mockContext = {
+      getCwd: () => ".",
+      getWorkspaceRoot: () => ".",
+      getRemoteSession: () => null,
+      getTerminalContext: () => null,
+      isActiveTerminalPrivate: () => false,
+      injectIntoActivePty: () => false,
+      openPreview: () => false,
+      openCanvas: () => false,
+      browserOpen: async () => ({ error: "disabled" }),
+      browserNavigate: async () => ({ error: "disabled" }),
+      browserBack: async () => ({ error: "disabled" }),
+      browserForward: async () => ({ error: "disabled" }),
+      browserReload: async () => ({ error: "disabled" }),
+      browserExtract: async () => ({ error: "disabled" }),
+      browserEval: async () => ({ error: "disabled" }),
+      browserScreenshot: async () => ({ error: "disabled" }),
+      browserConsole: async () => ({ error: "disabled" }),
+      browserUrl: async () => ({ error: "disabled" }),
+      browserClose: async () => ({ error: "disabled" }),
+      browserList: async () => [],
+      spawnAgent: () => null,
+      readAgentOutput: () => null,
+      readCache: new Map(),
+      getSessionId: () => "sid",
+    };
+    const result = await runPipeline(pipeline, mockContext);
+    expect(result.stoppedAt).toBe("step1");
+    expect(result.failed).toContain("step1");
+    expect(result.skipped).toContain("step2");
+    expect(result.completed).toEqual([]);
   });
 });

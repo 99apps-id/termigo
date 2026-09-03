@@ -42,6 +42,31 @@ describe("github helpers", () => {
     const result = await createPr("Test PR", "Body", "main", "feature", "/tmp");
     expect(result.ok).toBe(true);
     expect(result.pr?.number).toBe(1);
+    const cmd = shellSessionRun.mock.calls[0][1] as string;
+    expect(cmd).toContain("--base 'main'");
+  });
+
+  it("createPr omits --base flag when base is empty", async () => {
+    shellSessionRun.mockResolvedValue({
+      stdout: JSON.stringify({
+        number: 2,
+        title: "PR Without Base",
+        body: "",
+        state: "OPEN",
+        author: { login: "test" },
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+        url: "https://github.com/99apps-id/termigo/pull/2",
+        baseRefName: "main",
+        headRefName: "feature",
+      }),
+      stderr: "",
+      exit_code: 0,
+    });
+    const result = await createPr("PR Without Base", "", "", "feature", "/tmp");
+    expect(result.ok).toBe(true);
+    const cmd = shellSessionRun.mock.calls[0][1] as string;
+    expect(cmd).not.toContain("--base");
   });
 
   it("getPr returns error when gh fails", async () => {
