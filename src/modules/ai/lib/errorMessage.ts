@@ -34,6 +34,14 @@ export function humanizeModelError(raw: string | null | undefined): string {
     return "Your API key is out of quota or credits. Add credits with your provider, or switch provider/model in Settings → Providers.";
   }
 
+  // A "thinking mode" endpoint refused a forced tool choice (the fan-out pin
+  // or a synthesis pin). Deterministic for the pin, but the pin is optional —
+  // the run learns to drop it (toolChoiceLearning), so pressing Try again /
+  // Continue after the auto-retry normally just works.
+  if (l.includes("tool_choice") || l.includes("tool choice")) {
+    return "This model does not accept a forced tool choice (it runs in a thinking mode that rejects one). Termigo removes the pin for this model automatically — press Continue or Try again to carry on.";
+  }
+
   // Rate limited.
   if (
     l.includes("rate limit") ||

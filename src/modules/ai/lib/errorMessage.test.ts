@@ -36,6 +36,15 @@ describe("humanizeModelError", () => {
     ).toContain("stopped responding");
   });
 
+  it("explains a thinking-mode rejection of a forced tool choice", () => {
+    const out = humanizeModelError(
+      'data: {"error":{"code":"invalid_parameter_error","param":null,"message":"The tool_choice parameter does not support being set to required or object in thinking mode","type":"invalid_request_error"}}',
+    ).toLowerCase();
+    expect(out).toContain("forced tool choice");
+    // The actionable part: the pin is dropped, a retry works.
+    expect(out).toContain("try again");
+  });
+
   it("explains a provider content-moderation rejection", () => {
     const out = humanizeModelError(
       'data: {"error":{"code":"data_inspection_failed","param":null,"message":"Input text data may contain inappropriate content.","type":"data_inspection_failed"}}',

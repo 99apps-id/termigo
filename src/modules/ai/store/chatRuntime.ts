@@ -39,6 +39,10 @@ import {
   type SteerPart,
   submitAction,
 } from "../lib/steer";
+import {
+  isToolChoiceRejectionError,
+  recordToolChoiceRejection,
+} from "../lib/toolChoiceLearning";
 import { createContextAwareTransport } from "../lib/transport";
 import type { ToolContext } from "../tools/tools";
 import { useAgentsStore } from "./agentsStore";
@@ -68,6 +72,15 @@ const overflowAutoResumeCount = new Map<string, number>();
 const TRANSIENT_RETRY_DELAY_MS = 3_000;
 const MAX_TRANSIENT_RETRIES = 2;
 const transientRetryCount = new Map<string, number>();
+
+// A "thinking mode" endpoint (Qwen-style OpenAI-compatible) rejects a pinned
+// tool_choice with HTTP 400. The rejection is recorded against the model (see
+// toolChoiceLearning.ts), so an immediate resume — which sends no pin — fixes
+// the request rather than dead-ending on a red card. One auto-resume per
+// window: if the failure was not our pin, a second attempt should surface as
+// an error, not loop.
+const TOOLCHOICE_AUTO_RESUME_MS = 5_000;
+const toolChoiceAutoResumeAt = new Map<string, number>();
 
 // Cap the agentic loop in ROUNDS, not per-round steps. The step budget (25)
 // resets every round, so a model that does a few tool calls per round and never
@@ -457,6 +470,38 @@ function makeChat(sessionId: string): Chat<UIMessage> {
               useChatStore.getState().patchAgentMeta({
                 status: "error",
                 error: "The automatic retry could not start. Try again.",
+              });
+              useChatStore.getState().syncRunMeta();
+            });
+          }, 0);
+          return;
+        }
+      }
+      // A "thinking mode" endpoint rejected the pinned tool_choice (the forced
+      // fan-out on a broad request, e.g. "audit this repo"). Record it so the
+      // pin is dropped for this model, then resume immediately — the same
+      // request without the pin is accepted, and the model still has
+      // run_subagents to use on its own. Without this, the user gets a raw
+      // red card and "Try again" only works when the retry happens to skip
+      // the fan-out heuristic.
+      if (isToolChoiceRejectionError(raw)) {
+        recordToolChoiceRejection(useChatStore.getState().selectedModelId);
+        const sessionId = useChatStore.getState().activeSessionId;
+        const now = Date.now();
+        const lastAuto = toolChoiceAutoResumeAt.get(sessionId ?? "") ?? 0;
+        if (sessionId && now - lastAuto > TOOLCHOICE_AUTO_RESUME_MS) {
+          toolChoiceAutoResumeAt.set(sessionId, now);
+          useChatStore.getState().patchAgentMeta({
+            status: "thinking",
+            error: null,
+            stopReason: null,
+          });
+          setTimeout(() => {
+            void resumeRun().catch(() => {
+              useChatStore.getState().patchAgentMeta({
+                status: "error",
+                error:
+                  "The provider does not accept forced tool choices on this model. The pin was removed — press Try again to continue.",
               });
               useChatStore.getState().syncRunMeta();
             });

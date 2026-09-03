@@ -62,6 +62,7 @@ import { repairToolCall } from "./repairToolCall";
 import { sanitizeUiMessages } from "./sanitizeMessages";
 import { type Skill, skillsBlock } from "./skills";
 import { formatTodoStatusBlock } from "./todos";
+import { modelRejectsForcedToolChoice } from "./toolChoiceLearning";
 
 // Every model/provider connection uses a trusted, user-configured endpoint, so
 // it must honour the machine's own DNS — including a provider host that a proxy,
@@ -1089,10 +1090,13 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // Pinning is an optimisation, not a requirement: without it the model still
   // has `run_subagents` and the prompt still describes when to use it. So a
   // model that rejects a pinned choice loses some reliability of delegation,
-  // which is far better than losing the request.
+  // which is far better than losing the request. The static tag check only
+  // covers the built-in registry — a custom endpoint that rejected the pin on
+  // an earlier round (learned in toolChoiceLearning) is honoured here too.
   const forceFanout =
     "run_subagents" in tools &&
     modelAllowsForcedToolChoice(info) &&
+    !modelRejectsForcedToolChoice(modelId) &&
     wantsForcedFanout(latestUserRequest(prompt.messages));
   const promptBytes = {
     system: Math.max(0, systemTotal - projectBytes - learnedBytes),
