@@ -9,9 +9,11 @@ allowBuilds:
   msw: true
 
 # Patched versions of transitive dependencies flagged by `pnpm audit`.
-# All three arrive through streamdown -> mermaid; there is no direct dependency
-# to bump, so they are pinned here until streamdown ships the newer tree.
+# dompurify and nanoid arrive through streamdown -> mermaid; there is no direct
+# dependency to bump for them, so they are pinned here until streamdown ships
+# the newer tree. mermaid itself is a DIRECT dependency (^11.16.1), so it needs
+# no override: pnpm dedupes streamdown's mermaid to that single instance, and
+# pnpm >= 11 rejects an override that conflicts with a direct dependency.
 overrides:
   dompurify: '>=3.4.9'
-  mermaid: '>=11.16.1'
   nanoid: '>=3.3.18'
