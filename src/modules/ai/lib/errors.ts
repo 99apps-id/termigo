@@ -105,7 +105,11 @@ export function isConnectivityError(message: string): boolean {
     ) ||
     /connection (?:refused|reset|reset by peer|timed out|closed)/i.test(m) ||
     /name or service not known|getaddrinfo/i.test(m) ||
-    /no internet|internet connection|offline/i.test(m)
+    /no internet|internet connection|offline/i.test(m) ||
+    // Our own Rust transport names a mid-stream stall explicitly
+    // ("provider stream stalled (no data for Ns)"). It reaches the classifier
+    // through the error's cause chain when the SDK unwraps it.
+    /stream stalled|did not respond within/i.test(m)
   );
 }
 

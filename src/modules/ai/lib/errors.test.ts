@@ -119,6 +119,12 @@ describe("transient/recoverable error classifiers", () => {
         "Failed after 3 attempts. Last error: Cannot connect to API: provider did not respond within 90s",
       ),
     ).toBe(true);
+    // Our Rust transport's mid-stream stall wording (the pentest-report
+    // "fetch failed" case): must classify as connectivity so the transient
+    // auto-retry picks it up instead of leaving a dead red card.
+    expect(
+      isConnectivityError("provider stream stalled (no data for 120s)"),
+    ).toBe(true);
   });
 
   it("rejects non-connectivity errors", () => {

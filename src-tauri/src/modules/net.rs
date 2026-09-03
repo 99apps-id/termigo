@@ -505,10 +505,15 @@ impl RequestBody {
 /// wire. This bound is what finally lets the request settle.
 const AI_STREAM_FIRST_BYTE_TIMEOUT: Duration = Duration::from_secs(90);
 /// How long the body may go without a chunk before it is treated as a stalled
-/// provider. A healthy stream keeps sending, so this never trips; it only
-/// stops the case where headers arrive and then the connection goes silent
-/// mid-response.
-const AI_STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+/// provider: only stops the case where headers arrive and then the connection
+/// goes silent mid-response. 120s, not 30s: a thinking-mode model streams in
+/// bursts, and a long generation (e.g. a pentest report) can legitimately
+/// pause over half a minute while it composes the next section. A 30s bound
+/// killed those healthy-but-bursty streams mid-report — the "fetch failed"
+/// card users saw — while the auto-retry had to restart the whole round.
+/// The JS-side watchdog (90s no first token) still catches a provider that
+/// never starts at all.
+const AI_STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Clone, Copy)]
 struct StreamTimeouts {
