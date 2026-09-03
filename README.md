@@ -167,6 +167,13 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   the provider's quota or credits run out (or a rate limit is hit), the run is
   preserved so you can top up or wait and click Try again to continue exactly
   where it left off.
+- **Provider quirks heal themselves.** A custom endpoint whose "thinking mode"
+  rejects a pinned tool call gets the pin dropped and the same request resent
+  automatically (broad "audit this repo" prompts no longer die on a red card);
+  a long, bursty generation — a report from a thinking-mode model can pause
+  over half a minute between chunks — is given a generous idle bound instead of
+  being killed as stalled, and a genuine mid-stream stall routes to the same
+  auto-retry rather than a dead error card.
 - **A run cut off by a restart is recoverable.** The transcript is persisted,
   and when the app reopens the interrupted session is brought back with a
   **Resume** row — the budget ladder is kept, so continuing does not restart
@@ -191,8 +198,9 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
 - Agentic workflow: plans, sub-agents, project memory via `TERMIGO.md`,
   read, write, edit, multi-edit, grep, glob, move, copy, delete,
   cross-file literal replace, HTTP fetch, bash with approval gating,
-  background processes, and SSH port forwarding so a service on a remote host
-  becomes reachable locally
+  background processes (`bash_background` spawn, `bash_wait` to block until
+  a build or install finishes, `bash_logs` to tail, `bash_kill` to stop), and
+  SSH port forwarding so a service on a remote host becomes reachable locally
 - Tool calls are **approval-gated**; approvals resume the run (including
   OpenAI-compatible providers such as DeepSeek)
 - **Graduated auto-approval.** Choose how much the agent may do without

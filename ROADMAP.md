@@ -89,8 +89,9 @@ The themes below frame every scope decision.
   instance), reads the server's own log for the real URL (ported `findLocalUrl`
   from TEDI, ANSI-safe, `0.0.0.0` → `127.0.0.1`), health-probes the loopback
   port until it responds (Rust `http_probe`, loopback-only), then opens it in
-  the browser pane. Watch/stop via `bash_logs`/`bash_kill`, control the page
-  via the `browser_*` tools.
+  the browser pane. Watch/stop via `bash_logs`/`bash_kill`, block on a
+  background build/install with `bash_wait`, and control the page via the
+  `browser_*` tools.
 - [x] In-chat elicitation (`ask_user`) — the agent pauses for a clickable choice
 - [x] Opt-in post-execution confirmation (Keep / Revert after a mutating tool, with git-based revert)
 - [x] Sub-agent nesting depth (1–5), cost-tier guard, and sub-agent runs persisted to disk
@@ -149,8 +150,13 @@ The themes below frame every scope decision.
   auto-recovery, transient-provider-error recovery, interrupted-run recovery
   after a restart, loop round-cap, no-progress / tool-error guards, the
   per-run workspace anchor, rotating thinking-phrase status (no step spam),
-  and context pruning — a verified span of history (saved to git via a
-  checkpoint) is collapsed into a checkpoint summary each turn to save tokens.
+  context pruning — a verified span of history (saved to git via a
+  checkpoint) is collapsed into a checkpoint summary each turn to save
+  tokens — forced tool-choice recovery for thinking-mode endpoints (the pin
+  is learned away and the request auto-resumes), a burst-tolerant mid-stream
+  idle bound (120s) with stall routing to the transient auto-retry,
+  dropped-path repair for edit/multi_edit, and plain-language status/error
+  copy.
 - [x] Expand external coding-agent orchestration beyond Claude Code — built-in
   launchers for Codex, Gemini, Pi, OpenCode, Grok, Aider, Qwen and Cursor, plus
   user-defined custom coding-agent CLIs in Settings.

@@ -189,8 +189,18 @@ Compaction trims messages *by size* but still ships every message on every turn,
 A run can also stop for reasons that are not the model's fault — the internet drops, the provider's quota runs out, or a rate limit is hit. These are recoverable: once the condition clears, the same run should continue, not start over. `chatRuntime` `onError` classifies them:
 
 - **Connectivity loss** (`lib/errors.ts` `isConnectivityError`: unreachable host / tcp connect / fetch failed / `ENETUNREACH` / connection refused / DNS) marks the run resumable and adds the session to `pendingReconnectSessions`; a `window` `online` listener then resumes it automatically when the network is back. A manual **Try again** also works.
+- **Mid-stream stall** is a connectivity failure from the run's point of view, and the classifier says so: Rust's own wording — `provider stream stalled (no data for Ns)` (net.rs `AI_STREAM_IDLE_TIMEOUT`, 120 s — a bursty thinking-mode generation can legitimately pause over half a minute) — is matched by `isConnectivityError`, so a genuine stall takes the same transient auto-retry path instead of leaving a dead red card.
 - **Quota / credit exhaustion** (`isQuotaError`: `insufficient_quota`, quota, credit, 402) and **rate limits** (`isRateLimitError`: rate_limit, 429, throttle) are recoverable but have no event to watch for — the user tops up or waits, then clicks **Try again**; the task/todo state is preserved.
 - **Resume always sends.** `sendParts` keys off `agentMeta.status === "error"` so a resume after a failed run is sent, never queued: the AI SDK status can look `submitted` after an error, which would queue the `RESUME_PROMPT` and leave "Try again" doing nothing.
+
+## Forced tool-choice learning
+
+Two places hand the provider a non-default `tool_choice`: the forced fan-out pin (step 0 → `{ type: "tool", toolName: "run_subagents" }` on a broad request) and the synthesis step (`"none"`). The static guard in `config.ts` (`modelAllowsForcedToolChoice`) only reads reasoning **tags** from the built-in registry — a user-defined OpenAI-compatible endpoint (`compat-*`) has no tags, so it was assumed capable. A Qwen-style "thinking mode" endpoint answers a required/object `tool_choice` with HTTP 400 ("The tool_choice parameter does not support being set to required or object in thinking mode"), which killed the whole request on exactly the broad prompts the fan-out is meant to serve.
+
+- **`lib/toolChoiceLearning.ts`** classifies the rejection (`isToolChoiceRejectionError`) and records the model id (`recordToolChoiceRejection`). In-memory, like `contextLimitLearning`: a wrong guess costs one failed round, and persistence would keep a fixed model un-pinned across restarts.
+- **`agent.ts`** `forceFanout` adds `!modelRejectsForcedToolChoice(modelId)` — after one rejection the pin is dropped for that model, and the request succeeds (the model still has `run_subagents`; pinning was an optimisation, not a requirement).
+- **`chatRuntime` `onError`** records the rejection and resumes the run once (5 s throttle). The retry sends no pin and is accepted, so the user does not see the failure at all; the manual **Try again** stays as the fallback if even that fails.
+- Only the object pin needs the learning — `"none"` is accepted by thinking-mode endpoints, so the synthesis step is unaffected.
 
 ## Interrupted-run recovery
 

@@ -6,6 +6,7 @@ If a guide conflicts with `TERMIGO.md`, `TERMIGO.md` wins.
 
 ## Getting started
 
+- [CHANGELOG.md](../CHANGELOG.md) - release notes for every tagged version
 - [TERMIGO.md](../TERMIGO.md) - the architecture source of truth; read this first
 - [CONTRIBUTING.md](../CONTRIBUTING.md) - how to contribute, quality bar, project layout
 
