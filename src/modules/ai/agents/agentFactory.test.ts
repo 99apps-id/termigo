@@ -97,6 +97,8 @@ describe("buildAgentTools", () => {
     const tools = buildAgentTools(noTools());
     expect(tools.run_subagent).toBeDefined();
     expect(tools.run_subagents).toBeDefined();
+  });
+
   it("capability-gates disallowed tools for specialized subagents (Hermes style)", () => {
     const fixture = {
       read_file: { execute: () => undefined },

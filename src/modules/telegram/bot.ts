@@ -492,7 +492,6 @@ async function publishProgress(
   const todosStore = await import("../ai/store/todoStore");
   const startMeta = store.useChatStore.getState().agentMeta;
   let lastStatus = startMeta.status;
-  let lastRound = startMeta.round;
   let lastStep = startMeta.step ?? "";
   let lastTodoSig = "";
   let lastSentAt = 0;
@@ -507,7 +506,6 @@ async function publishProgress(
   while (!signal.aborted && Date.now() - started < MAX_WAIT) {
     const meta = store.useChatStore.getState().agentMeta;
     const status = meta.status;
-    const round = meta.round;
     const step = meta.step ?? "";
     const todos =
       todosStore.useTodosStore.getState().bySession[sessionId]?.items ?? [];

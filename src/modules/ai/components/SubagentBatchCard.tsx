@@ -89,11 +89,11 @@ export function extractWorkerData(
 
       const rawType = String(res?.type ?? task.type ?? "general");
       const label = String(
-        res?.description ??
+        (res?.description ??
           task.description ??
           (typeof task.prompt === "string"
             ? task.prompt.slice(0, 50).trim()
-            : "") ||
+            : "")) ||
           `Task #${idx}`,
       );
 
@@ -149,11 +149,11 @@ export function extractWorkerData(
   // Single subagent
   const rawType = String(outObj?.type ?? inObj?.type ?? "general");
   const label = String(
-    outObj?.description ??
+    (outObj?.description ??
       inObj?.description ??
       (typeof inObj?.prompt === "string"
         ? inObj.prompt.slice(0, 50).trim()
-        : "") ||
+        : "")) ||
       "Subagent",
   );
 
@@ -453,7 +453,7 @@ const WorkerRow = memo(function WorkerRow({
             {isRunning && worker.currentStep && (
               <div className="font-mono text-[10.5px] text-primary">
                 <Shimmer as="span" duration={1} iterations="infinite">
-                  -&gt; {worker.currentStep}
+                  {`-> ${worker.currentStep}`}
                 </Shimmer>
               </div>
             )}
