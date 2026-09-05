@@ -22,6 +22,7 @@ import { describe, expect, it } from "vitest";
 import { convertToModelMessages, type ModelMessage, type UIMessage } from "ai";
 import { prepareOutgoingMessages } from "./transport";
 import { sanitizeUiMessages } from "./sanitizeMessages";
+import { isResumingApproval } from "./approvalResume";
 
 const ENV = "<env>\nworkspace_root: /w\n</env>";
 
@@ -229,4 +230,41 @@ describe("no history leaves a tool call unanswered", () => {
       expect(unanswered(await outgoing(history))).toEqual([]);
     });
   }
+});
+
+describe("isResumingApproval", () => {
+  it("detects live approved call awaiting tool execution", () => {
+    const history = [
+      user("u1"),
+      assistant("a1", [
+        { type: "step-start" },
+        call("approval-responded", "c1", { id: "ap1", approved: true }),
+      ]),
+    ];
+    expect(isResumingApproval(history)).toBe(true);
+  });
+
+  it("returns false if last turn is user turn", () => {
+    const history = [
+      user("u1"),
+      assistant("a1", [call("approval-responded", "c1", { id: "ap1", approved: true })]),
+      user("u2"),
+    ];
+    expect(isResumingApproval(history)).toBe(false);
+  });
+
+  it("returns false if tool call already has output", () => {
+    const history = [
+      user("u1"),
+      assistant("a1", [
+        { type: "step-start" },
+        { ...call("output-available", "c1"), output: { ok: true } },
+      ]),
+    ];
+    expect(isResumingApproval(history)).toBe(false);
+  });
+
+  it("returns false on empty messages", () => {
+    expect(isResumingApproval([])).toBe(false);
+  });
 });

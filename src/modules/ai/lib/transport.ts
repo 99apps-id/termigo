@@ -458,14 +458,8 @@ export function createContextAwareTransport(deps: Deps) {
  * in a `tool` message full of results, where a trailing user turn changes
  * nothing, and the env block is refreshed on the user's next real turn anyway.
  */
-export function isResumingApproval(messages: readonly UIMessage[]): boolean {
-  const last = messages[messages.length - 1];
-  if (last?.role !== "assistant") return false;
-  return last.parts.some(
-    (part: unknown) =>
-      (part as { state?: string }).state === "approval-responded",
-  );
-}
+import { isResumingApproval } from "./approvalResume";
+export { isResumingApproval };
 
 /**
  * The stored history turned into the copy that goes out on the wire.

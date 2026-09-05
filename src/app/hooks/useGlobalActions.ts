@@ -39,7 +39,6 @@ type Params = {
   activeId: number;
   setActiveId: (id: number) => void;
   activeTab: Tab | undefined;
-  activeTerminalTab: Tab | null;
   activeLeafId: number | null;
   activeSpaceId: string | null;
   inheritedCwdForNewTab: () => string | undefined;
@@ -48,7 +47,7 @@ type Params = {
   newPrivateTab: (cwd?: string) => number;
   openPreviewTab: (url: string, browserInstance?: string) => number;
   setNewEditorOpen: (open: boolean) => void;
-  handleClose: (tabId: number) => Promise<boolean>;
+  handleClose: (tabId: number) => Promise<void>;
   selectByIndex: (index: number, spaceId: string) => void;
   splitActivePane: (tabId: number, direction: "row" | "col") => void;
   swapActivePaneInDirection: (
@@ -76,7 +75,6 @@ export function useGlobalActions({
   activeId,
   setActiveId,
   activeTab,
-  activeTerminalTab,
   activeLeafId,
   activeSpaceId,
   inheritedCwdForNewTab,

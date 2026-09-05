@@ -243,7 +243,6 @@ export default function App() {
 
   // Terminal lifecycle management (sessions, handles, search addons, attention)
   const {
-    searchAddons,
     activeSearchAddon,
     terminalRefs,
     clearTerminalState,
@@ -454,11 +453,7 @@ export default function App() {
   // Global user actions, shortcuts, zoom, zen mode, selection AI, tab/pane navigation
   const {
     zenMode,
-    setZenMode,
     switcherState,
-    stepSwitcher,
-    cycleSpace,
-    captureActiveSelection,
     togglePanelAndFocus,
     handleAttachFileToAgent,
     askFromSelection,
@@ -471,19 +466,14 @@ export default function App() {
     sendCd,
     cdInNewTab,
     splitActivePaneInActiveTab,
-    swapActivePane,
     handleCloseTabOrPane,
     activateAgentTarget,
-    zoomIn,
-    zoomOut,
-    zoomReset,
   } = useGlobalActions({
     tabs,
     tabsRef,
     activeId,
     setActiveId,
     activeTab,
-    activeTerminalTab,
     activeLeafId,
     activeSpaceId,
     inheritedCwdForNewTab,
@@ -1388,7 +1378,7 @@ export default function App() {
               state={askPresence.state}
               x={askPopup?.x ?? 0}
               y={askPopup?.y ?? 0}
-              onAsk={onAskFromSelection}
+              onAsk={askFromSelection}
               onDismiss={() => setAskPopup(null)}
             />
           ) : null}

@@ -43,6 +43,7 @@ import {
   recordToolChoiceRejection,
 } from "../lib/toolChoiceLearning";
 import { createContextAwareTransport } from "../lib/transport";
+import { isResumingApproval } from "../lib/approvalResume";
 import type { ToolContext } from "../tools/tools";
 import { useAgentsStore } from "./agentsStore";
 import {
@@ -109,6 +110,9 @@ const runAnchor = new Map<string, RunAnchor>();
 // continuation so a pressed Stop actually ends the loop. It is cleared on a
 // fresh user send / resume / queued-correction flush.
 const stopLatch = new Set<string>();
+
+// Tracks failed / aborted approval resumes per session to prevent infinite auto-send retry storms.
+const approvalResumeFailureCount = new Map<string, number>();
 
 
 // Connectivity recovery: when the provider is unreachable, keep the run
@@ -390,8 +394,19 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     id: sessionId,
     transport,
     messages: initialMessages,
-    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
+    sendAutomaticallyWhen: (messages) => {
+      if (stopLatch.has(sessionId)) return false;
+      const failCount = approvalResumeFailureCount.get(sessionId) ?? 0;
+      if (failCount >= 1) return false;
+      return lastAssistantMessageIsCompleteWithApprovalResponses(messages);
+    },
     onError: (e) => {
+      if (isResumingApproval(chats.get(sessionId)?.messages ?? [])) {
+        approvalResumeFailureCount.set(
+          sessionId,
+          (approvalResumeFailureCount.get(sessionId) ?? 0) + 1,
+        );
+      }
       const raw = e instanceof Error ? e.message : String(e);
       // A user-pressed Stop surfaces here as an AbortError when it lands before
       // the model call (during the checkpoint / context phase). That is not a
@@ -581,6 +596,7 @@ export async function sendParts(
 ): Promise<boolean> {
   // A fresh user message supersedes a prior stop, so let it run.
   stopLatch.delete(sessionId);
+  approvalResumeFailureCount.delete(sessionId);
   const c = getOrCreateChat(sessionId);
   // After an error the run is not busy, but the SDK status can look stale
   // (still "submitted"), which would QUEUE the resume instead of sending it and
@@ -737,7 +753,11 @@ export async function resumeRun(): Promise<boolean> {
   const sessionId = useChatStore.getState().activeSessionId;
   // A manual resume supersedes any pending reconnect auto-resume for this
   // session, so the `online` listener does not fire a second one.
-  if (sessionId) pendingReconnectSessions.delete(sessionId);
+  if (sessionId) {
+    pendingReconnectSessions.delete(sessionId);
+    stopLatch.delete(sessionId);
+    approvalResumeFailureCount.delete(sessionId);
+  }
   // Continuing is the signal that the task is heavier than one round, so the
   // next round gets the next budget tier. Raised before the send so the run
   // reads the new value.
@@ -754,11 +774,13 @@ export async function stopRun(): Promise<void> {
   // round that just completed) is suppressed even if `stop()` returns early
   // because it landed between rounds.
   stopLatch.add(sessionId);
-  await chats.get(sessionId)?.stop();
-  // Remembered so the transcript can offer "Continue" after a stop, the same
-  // way it does after the step cap. Without it a stop is a dead end.
-  useChatStore.getState().patchAgentMeta({ stoppedByUser: true });
+  approvalResumeFailureCount.set(sessionId, 1);
+  useChatStore.getState().patchAgentMeta({
+    status: "idle",
+    stoppedByUser: true,
+  });
   useChatStore.getState().syncRunMeta();
+  await chats.get(sessionId)?.stop();
   // The stop leaves `status` settled, so the queued text sends as a fresh turn
   // rather than piling onto the run that was just abandoned. Bypassed the busy
   // check because an aborted round never auto-continues, and the abort may take

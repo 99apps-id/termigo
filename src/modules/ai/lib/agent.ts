@@ -63,6 +63,7 @@ import { sanitizeUiMessages } from "./sanitizeMessages";
 import { type Skill, skillsBlock } from "./skills";
 import { formatTodoStatusBlock } from "./todos";
 import { modelRejectsForcedToolChoice } from "./toolChoiceLearning";
+import { isResumingApproval } from "./approvalResume";
 
 // Every model/provider connection uses a trusted, user-configured endpoint, so
 // it must honour the machine's own DNS — including a provider host that a proxy,
@@ -875,18 +876,23 @@ export async function runAgentStream(opts: RunAgentOptions) {
       once: true,
     });
   }
-  let firstStepTimer: ReturnType<typeof setTimeout> | null = setTimeout(() => {
-    abortController.abort(new Error("model did not respond within 90s"));
-  }, 90_000);
+  const resumingApproval = isResumingApproval(opts.uiMessages ?? []);
+  let firstStepTimer: ReturnType<typeof setTimeout> | null = resumingApproval
+    ? null
+    : setTimeout(() => {
+        abortController.abort(new Error("model did not respond within 90s"));
+      }, 90_000);
   // A provider that accepts the connection and then goes silent looked exactly
   // like one that is merely slow: 90 seconds of dead air with a bare spinner.
   // At 30s without a first token, name the wait in the step label (the HUD
   // reads "Round N · <step>"), so the pause is an explained stall rather than
   // a suspected hang. "Model", not "provider": that is the word users pick in
   // Settings and see in the header; "provider" is our internal plumbing.
-  let stallNotice: ReturnType<typeof setTimeout> | null = setTimeout(() => {
-    opts.onStep?.("The model is taking a while to respond — still waiting…");
-  }, 30_000);
+  let stallNotice: ReturnType<typeof setTimeout> | null = resumingApproval
+    ? null
+    : setTimeout(() => {
+        opts.onStep?.("The model is taking a while to respond — still waiting…");
+      }, 30_000);
   const clearFirstStepTimer = (): void => {
     if (firstStepTimer) {
       clearTimeout(firstStepTimer);
@@ -1207,6 +1213,16 @@ export async function runAgentStream(opts: RunAgentOptions) {
       clearFirstStepTimer();
       logInfo(`[ai] runAgentStream: step finished (#${stepsSeen})`);
       stepsSeen++;
+      if (resumingApproval && stepsSeen === 1) {
+        // Step 0 executed the approved tool. Step 1 now prompts the model with
+        // the tool result; arm the watchdog for the model's first token.
+        firstStepTimer = setTimeout(() => {
+          abortController.abort(new Error("model did not respond within 90s"));
+        }, 90_000);
+        stallNotice = setTimeout(() => {
+          opts.onStep?.("The model is taking a while to respond — still waiting…");
+        }, 30_000);
+      }
       if (opts.onStep) {
         const last = step.toolCalls?.[step.toolCalls.length - 1];
         if (last) {
