@@ -13,6 +13,25 @@ import { native } from "../lib/native";
 
 const CLIPBOARD_TEXT_CAP = 8 * 1024;
 
+const SENSITIVE_ENV_PATTERNS = [
+  /key/i,
+  /secret/i,
+  /token/i,
+  /password/i,
+  /passwd/i,
+  /auth/i,
+  /credential/i,
+  /private/i,
+  /cookie/i,
+  /bearer/i,
+  /api[_-]?key/i,
+];
+
+export function isSensitiveEnvVar(name: string): boolean {
+  if (/^author$/i.test(name)) return false;
+  return SENSITIVE_ENV_PATTERNS.some((p) => p.test(name));
+}
+
 export function buildSystemTools() {
   return {
     clipboard_get: tool({
@@ -37,7 +56,7 @@ export function buildSystemTools() {
 
     clipboard_set: tool({
       description:
-        "Replace the clipboard with the given text. Use when the user asks you to copy something — a command, a code snippet, a path. Requires approval (it overwrites what the user may have on the clipboard).",
+        "Replace the clipboard with the given text. Use when the user asks you to copy something - a command, a code snippet, a path. Requires approval (it overwrites what the user may have on the clipboard).",
       inputSchema: z.object({
         text: z
           .string()
@@ -57,7 +76,7 @@ export function buildSystemTools() {
 
     env_get: tool({
       description:
-        "Read one environment variable of the Termigo process, e.g. PATH, HOME, USER, NODE_ENV. Use to answer questions about the environment ('what is PATH?', 'is CI set?'). Read-only, auto-executes.",
+        "Read one environment variable of the Termigo process, e.g. PATH, HOME, USER, NODE_ENV. Use to answer questions about the environment ('what is PATH?', 'is CI set?'). Sensitive variables (keys, secrets, passwords, tokens) are redacted. Read-only, auto-executes.",
       inputSchema: z.object({
         name: z
           .string()
@@ -66,6 +85,14 @@ export function buildSystemTools() {
           .describe("Environment variable name, e.g. PATH."),
       }),
       execute: async ({ name }) => {
+        if (isSensitiveEnvVar(name)) {
+          return {
+            name,
+            present: true,
+            redacted: true,
+            note: "Refused: environment variable is sensitive/secret and cannot be read by the agent.",
+          };
+        }
         try {
           const value = await native.envGet(name);
           if (value === null) return { name, present: false };
@@ -78,14 +105,17 @@ export function buildSystemTools() {
 
     env_list: tool({
       description:
-        "List the Termigo process environment variables (up to 200, values capped). Use to see the environment at a glance — PATH, HOME, language, or whether a variable exists. Read-only, auto-executes.",
+        "List the Termigo process environment variables (up to 200, values capped). Sensitive values (keys, tokens, secrets) are redacted with [REDACTED]. Use to see the environment at a glance - PATH, HOME, language, or whether a variable exists. Read-only, auto-executes.",
       inputSchema: z.object({}),
       execute: async () => {
         try {
           const vars = await native.envList();
           return {
             count: vars.length,
-            vars: vars.map((v) => ({ name: v.name, value: v.value })),
+            vars: vars.map((v) => ({
+              name: v.name,
+              value: isSensitiveEnvVar(v.name) ? "[REDACTED]" : v.value,
+            })),
           };
         } catch (e) {
           return { error: String(e) };

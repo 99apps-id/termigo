@@ -55,7 +55,7 @@ export function TodoStrip({ sessionId }: Props) {
   return (
     <div
       className={cn(
-        "flex flex-col min-h-0 shrink-0 border-t-2 border-border/40 bg-muted/80 px-3 py-1.5 shadow-[0_-4px_12px_-8px_rgba(0,0,0,0.2)] transition-all duration-200 ease-in-out",
+        "flex flex-col min-h-0 shrink-0 border-t-2 border-border/80 bg-card px-3 py-1.5 shadow-[0_-4px_12px_-8px_rgba(0,0,0,0.15)] transition-all duration-200 ease-in-out dark:border-border/40 dark:bg-muted/80 dark:shadow-[0_-4px_12px_-8px_rgba(0,0,0,0.2)]",
         isMinimized ? "max-h-[38px]" : "max-h-[35%]",
       )}
     >
@@ -69,7 +69,7 @@ export function TodoStrip({ sessionId }: Props) {
             as="span"
             duration={inProgress > 0 ? 1 : 1.4}
             iterations={inProgress > 0 ? "infinite" : 2}
-            className="text-[11px] font-medium text-foreground"
+            className="text-[11px] font-semibold text-foreground"
           >
             Todos
           </Shimmer>
@@ -115,12 +115,12 @@ function TodoRow({ todo }: { todo: Todo }) {
     <li
       className={cn(
         "flex items-start gap-2 rounded px-1.5 py-1 text-[11px] leading-snug",
-        isInProgress && "border-l-2 border-foreground/50 bg-muted/40",
+        isInProgress && "border-l-2 border-primary bg-primary/10 dark:border-foreground/50 dark:bg-muted/40",
       )}
     >
       <span className="mt-[2px] inline-flex size-3.5 shrink-0 items-center justify-center">
         {isInProgress ? (
-          <Spinner className="size-3" />
+          <Spinner className="size-3 text-primary" />
         ) : (
           <HugeiconsIcon
             icon={
@@ -134,9 +134,9 @@ function TodoRow({ todo }: { todo: Todo }) {
         className={cn(
           "min-w-0 flex-1",
           todo.status === "completed"
-            ? "text-muted-foreground/60 line-through"
+            ? "text-muted-foreground line-through opacity-70"
             : isInProgress
-              ? "text-foreground"
+              ? "text-foreground font-medium"
               : "text-muted-foreground",
         )}
       >

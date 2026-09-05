@@ -172,8 +172,8 @@ export function useAiLiveBridge(params: Params) {
         return true;
       },
       getWorkspaceRoot: () => {
-        const { explorerRoot, launchCwd, home } = ref.current;
-        return explorerRoot ?? launchCwd ?? home ?? null;
+        const { explorerRoot, launchCwd } = ref.current;
+        return explorerRoot ?? launchCwd ?? null;
       },
       getActiveFile: () => {
         const { activeId, tabs } = ref.current;

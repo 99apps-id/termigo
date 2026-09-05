@@ -89,15 +89,32 @@ function outputText(part: Part): string {
 function resultOk(part: Part): boolean {
   const out = part.output;
   if (out == null) return false;
-  const raw = typeof out === "string" ? out : JSON.stringify(out);
   if (typeof out === "object") {
-    const obj = out as { error?: unknown };
+    const obj = out as {
+      error?: unknown;
+      ok?: unknown;
+      exit_code?: unknown;
+      passed?: unknown;
+      timed_out?: unknown;
+    };
     if (obj.error) return false;
+    if (obj.ok === false) return false;
+    if (obj.passed === false) return false;
+    if (obj.timed_out === true) return false;
+    if (typeof obj.exit_code === "number" && obj.exit_code !== 0) return false;
+    const raw = JSON.stringify(out);
+    const exitMatch = /"exit_code"\s*:\s*(-?\d+)/.exec(raw);
+    if (exitMatch && exitMatch[1] !== "0") return false;
+    return true;
   }
-  if (/error/i.test(raw)) return false;
-  const exitMatch = /"exit_code"\s*:\s*(-?\d+)/.exec(raw);
-  if (exitMatch && exitMatch[1] !== "0") return false;
-  return raw.length > 0;
+  if (typeof out === "string") {
+    const trimmed = out.trim();
+    if (/^(error|fatal)[:\s]/i.test(trimmed)) return false;
+    const exitMatch = /"exit_code"\s*:\s*(-?\d+)/.exec(trimmed);
+    if (exitMatch && exitMatch[1] !== "0") return false;
+    return trimmed.length > 0;
+  }
+  return false;
 }
 
 function hasVerifiedSignal(m: ModelMessage): boolean {

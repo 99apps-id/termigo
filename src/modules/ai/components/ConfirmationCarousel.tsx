@@ -18,11 +18,11 @@ export function ConfirmationCarousel() {
       {pending.map((c) => (
         <div
           key={c.id}
-          className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2.5"
+          className="rounded-lg border border-amber-500/40 bg-card px-3 py-2.5 shadow-xs dark:border-amber-500/30 dark:bg-amber-500/5"
         >
           <div className="flex items-start gap-2">
             <span className="min-w-0 flex-1 text-[12.5px] leading-relaxed text-foreground">
-              <span className="font-medium">Keep this change?</span>{" "}
+              <span className="font-semibold">Keep this change?</span>{" "}
               <span className="text-muted-foreground">{c.summary}</span>
             </span>
           </div>
@@ -31,7 +31,7 @@ export function ConfirmationCarousel() {
               {c.touchedPaths.map((p) => (
                 <span
                   key={p}
-                  className="max-w-full truncate rounded bg-background/70 px-1.5 py-0.5 font-mono text-[10.5px] text-muted-foreground"
+                  className="max-w-full truncate rounded border border-border/60 bg-muted px-1.5 py-0.5 font-mono text-[10.5px] text-foreground dark:border-transparent dark:bg-background/70 dark:text-muted-foreground"
                   title={p}
                 >
                   {p}
@@ -44,8 +44,8 @@ export function ConfirmationCarousel() {
               type="button"
               onClick={() => resolve(c.id, true)}
               className={cn(
-                "rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1 text-[11.5px] font-medium text-emerald-300 transition-colors",
-                "hover:bg-emerald-500/20",
+                "rounded-md border border-emerald-500/40 bg-emerald-500/15 px-2.5 py-1 text-[11.5px] font-semibold text-emerald-800 transition-colors dark:bg-emerald-500/10 dark:text-emerald-300",
+                "hover:bg-emerald-500/25 dark:hover:bg-emerald-500/20",
                 "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
               )}
             >
@@ -55,8 +55,8 @@ export function ConfirmationCarousel() {
               type="button"
               onClick={() => resolve(c.id, false)}
               className={cn(
-                "rounded-md border border-red-500/40 bg-red-500/10 px-2.5 py-1 text-[11.5px] font-medium text-red-300 transition-colors",
-                "hover:bg-red-500/20",
+                "rounded-md border border-destructive/40 bg-destructive/15 px-2.5 py-1 text-[11.5px] font-semibold text-destructive transition-colors dark:bg-red-500/10 dark:text-red-300",
+                "hover:bg-destructive/25 dark:hover:bg-red-500/20",
                 "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
               )}
             >

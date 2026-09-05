@@ -190,7 +190,7 @@ export const native = {
   deletePath: (path: string) =>
     invoke<void>("fs_delete", { path, workspace: currentWorkspaceEnv() }),
   // AI tooling never sees dot-prefixed entries regardless of the user's
-  // explorer preference — keeps .git / .env / .ssh out of agent context.
+  // explorer preference - keeps .git / .env / .ssh out of agent context.
   readDir: (path: string) =>
     invoke<DirEntry[]>("fs_read_dir", {
       path,
@@ -278,11 +278,13 @@ export const native = {
     invoke<
       {
         handle: number;
+        pid: number;
         command: string;
         cwd: string | null;
         started_at_ms: number;
         exited: boolean;
         exit_code: number | null;
+        log_path?: string | null;
       }[]
     >("shell_bg_list"),
   /** Health-probe a LOOPBACK dev-server URL (the `dev_server` tool waits on

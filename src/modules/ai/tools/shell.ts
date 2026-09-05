@@ -54,7 +54,7 @@ export function buildShellTools(ctx: ToolContext) {
   return {
     bash_run: tool({
       description:
-        "Run a foreground shell command. When the active terminal is an SSH session the command runs ON THE REMOTE HOST, from the remote shell's working directory, and always asks for approval regardless of the approval mode. Otherwise it runs in this session's persistent local shell, where cwd persists across calls. Use for short-lived commands (build, install, service restarts, a quick grep). For project-wide lint/test use `run_checks` instead (it defaults to 300s). For long-running local daemons use `bash_background`. NEVER invoke interactive tools (vim, less, top) — they will hang. To FIND files, use the `glob` tool (fast, ignores node_modules/.git, capped) — a recursive shell scan (`Get-ChildItem -Recurse`, `find`, `dir /s`) from a large or home directory can time out. Match the shell in the <env> block: on Windows that is PowerShell, so use PowerShell syntax (`2>$null`, not `2>nul`), never cmd/DOS.",
+        "Run a foreground shell command. When the active terminal is an SSH session the command runs ON THE REMOTE HOST, from the remote shell's working directory, and always asks for approval regardless of the approval mode. Otherwise it runs in this session's persistent local shell, where cwd persists across calls. Use for short-lived commands (build, install, service restarts, a quick grep). For project-wide lint/test use `run_checks` instead (it defaults to 300s). For long-running local daemons use `bash_background`. NEVER invoke interactive tools (vim, less, top) - they will hang. To FIND files, use the `glob` tool (fast, ignores node_modules/.git, capped) - a recursive shell scan (`Get-ChildItem -Recurse`, `find`, `dir /s`) from a large or home directory can time out. Match the shell in the <env> block: on Windows that is PowerShell, so use PowerShell syntax (`2>$null`, not `2>nul`), never cmd/DOS.",
       inputSchema: z.object({
         command: z.string(),
         timeout_secs: z
@@ -64,7 +64,7 @@ export function buildShellTools(ctx: ToolContext) {
           .max(300)
           .optional()
           .describe(
-            "Timeout in seconds. Default 120. A project-wide build/install may need more — pass up to 300.",
+            "Timeout in seconds. Default 120. A project-wide build/install may need more - pass up to 300.",
           ),
       }),
       needsApproval: true,
@@ -86,6 +86,7 @@ export function buildShellTools(ctx: ToolContext) {
             : command;
           try {
             const out = await sshExec(remote.sessionId, full, timeout_secs);
+            const isSilentSuccess = !out.stdout && !out.stderr && out.exitCode === 0;
             return {
               command,
               remote: true,
@@ -94,6 +95,9 @@ export function buildShellTools(ctx: ToolContext) {
               stderr: out.stderr,
               exit_code: out.exitCode,
               truncated: out.truncated,
+              ...(isSilentSuccess
+                ? { info: "Command completed successfully with no output (exit code 0)." }
+                : {}),
               // Say where it ran when that is not what the model would assume.
               // A shell the OSC 7 hook does not fit (fish, dash) reports no
               // directory, so the command runs from the SSH user's home and a
@@ -141,6 +145,7 @@ export function buildShellTools(ctx: ToolContext) {
           } finally {
             abortSignal?.removeEventListener("abort", onAbort);
           }
+          const isSilentSuccess = !r.stdout && !r.stderr && r.exit_code === 0;
           return {
             command,
             stdout: r.stdout,
@@ -149,6 +154,14 @@ export function buildShellTools(ctx: ToolContext) {
             timed_out: r.timed_out,
             truncated: r.truncated,
             cwd_after: r.cwd_after,
+            ...(isSilentSuccess
+              ? { info: "Command completed successfully with no output (exit code 0)." }
+              : {}),
+            ...(r.timed_out
+              ? {
+                  hint: `Command timed out after ${timeout_secs ?? 120}s. If this is a long-running process (like a server, watcher, or interactive script), use bash_background instead of bash_run.`,
+                }
+              : {}),
           };
         } catch (e) {
           return { error: String(e) };
@@ -212,7 +225,7 @@ export function buildShellTools(ctx: ToolContext) {
 
     bash_wait: tool({
       description:
-        "Wait for a `bash_background` process to exit (a build, an install, a test run), polling its log. Returns the final `exit_code` and the last log tail, or `timed_out: true` while it is still running — call again to keep waiting, or `bash_logs` to read progress meanwhile. Auto-executes.",
+        "Wait for a `bash_background` process to exit (a build, an install, a test run), polling its log. Returns the final `exit_code` and the last log tail, or `timed_out: true` while it is still running - call again to keep waiting, or `bash_logs` to read progress meanwhile. Auto-executes.",
       inputSchema: z.object({
         handle: z.number().int(),
         timeout_secs: z
@@ -225,15 +238,33 @@ export function buildShellTools(ctx: ToolContext) {
             "How long to wait for exit before returning timed_out (default 120).",
           ),
       }),
-      execute: async ({ handle, timeout_secs }) => {
+      execute: async (
+        { handle, timeout_secs },
+        { abortSignal }: { abortSignal?: AbortSignal } = {},
+      ) => {
         if (ctx.getRemoteSession()) {
           return remoteUnsupported(
             "Background processes",
             "Use bash_run with `nohup CMD > /tmp/out.log 2>&1 &` and read the log file afterwards.",
           );
         }
+        if (abortSignal?.aborted) {
+          return { handle, exited: false, timed_out: true, note: "aborted" };
+        }
         const deadline = Date.now() + (timeout_secs ?? 120) * 1000;
-        const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+        const sleep = (ms: number) =>
+          new Promise((r) => {
+            if (abortSignal?.aborted) return r(undefined);
+            const t = setTimeout(r, ms);
+            abortSignal?.addEventListener(
+              "abort",
+              () => {
+                clearTimeout(t);
+                r(undefined);
+              },
+              { once: true },
+            );
+          });
         // shell_bg_logs reports `exited` + `exit_code` without a separate
         // registry call, so one poll shape serves both "still running" and
         // "done". Keep the tail of the last read so a finished build's output
@@ -246,6 +277,16 @@ export function buildShellTools(ctx: ToolContext) {
           exit_code: null as number | null,
         };
         for (;;) {
+          if (abortSignal?.aborted) {
+            return {
+              handle,
+              exited: last.exited,
+              exit_code: last.exit_code,
+              timed_out: true,
+              tail: last.bytes.slice(-4000),
+              note: "aborted by user",
+            };
+          }
           try {
             last = await native.shellBgLogs(handle, last.next_offset);
           } catch (e) {
@@ -267,7 +308,7 @@ export function buildShellTools(ctx: ToolContext) {
               exit_code: null,
               timed_out: true,
               tail: last.bytes.slice(-4000),
-              note: "still running — call bash_wait again, or bash_kill to stop it",
+              note: "still running - call bash_wait again, or bash_kill to stop it",
             };
           }
           await sleep(500);
@@ -277,7 +318,7 @@ export function buildShellTools(ctx: ToolContext) {
 
     bash_list: tool({
       description:
-        "List all background processes spawned by `bash_background` in this app — running and exited. **Always call this BEFORE spawning a new long-running process** (especially dev servers like `pnpm dev`, `next dev`, `vite`) to avoid duplicates. If a matching process is already running, reuse it (call `open_preview` again instead of respawning). Auto-executes.",
+        "List all background processes spawned by `bash_background` in this app - running and exited. **Always call this BEFORE spawning a new long-running process** (especially dev servers like `pnpm dev`, `next dev`, `vite`) to avoid duplicates. If a matching process is already running, reuse it (call `open_preview` again instead of respawning). Auto-executes.",
       inputSchema: z.object({}),
       execute: async () => {
         try {
@@ -291,7 +332,7 @@ export function buildShellTools(ctx: ToolContext) {
 
     bash_kill: tool({
       description:
-        "Terminate a `bash_background` process by handle. Idempotent — kills nothing if the handle is unknown or already exited.",
+        "Terminate a `bash_background` process by handle. Idempotent - kills nothing if the handle is unknown or already exited.",
       inputSchema: z.object({ handle: z.number().int() }),
       execute: async ({ handle }) => {
         try {

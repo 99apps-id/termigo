@@ -5,8 +5,8 @@ import { useSubagentRunStore } from "../store/subagentRunStore";
 import { useTodosStore } from "../store/todoStore";
 
 const STATUS_STYLE: Record<string, string> = {
-  completed: "text-emerald-400",
-  in_progress: "text-sky-400",
+  completed: "text-emerald-700 dark:text-emerald-400 font-semibold",
+  in_progress: "text-sky-700 dark:text-sky-400 font-semibold",
   pending: "text-muted-foreground",
 };
 
@@ -32,8 +32,8 @@ type SubagentRunLike = {
  * and the sub-agents currently running in a fan-out. Unlike the old status-bar
  * spinner text, this always renders during a run (not only when the last
  * message is the user's), so the user can see what task the agent is on, which
- * items remain — and, when the agent spawned a batch, which workers are still
- * out — the way BatikCode's todo checklist stays visible in the chat.
+ * items remain - and, when the agent spawned a batch, which workers are still
+ * out - the way BatikCode's todo checklist stays visible in the chat.
  *
  * The todo list is live: items appear the moment the agent writes them and
  * flip status as it marks them. When the model forgets to set the next item
@@ -46,7 +46,7 @@ export function RunProgressHUD() {
   const status = useChatStore((s) => s.agentMeta.status);
   const step = useChatStore((s) => s.agentMeta.step);
   const sessionId = useChatStore((s) => s.activeSessionId);
-  // Selectors return a STABLE reference (the store's own array, or undefined) —
+  // Selectors return a STABLE reference (the store's own array, or undefined) -
   // a selector that built a fresh `?? []` here returned a new array every
   // render, which zustand v5's useSyncExternalStore reads as a change on every
   // snapshot and re-renders forever (the AI-chat-panel hang). The `?? []`
@@ -83,12 +83,12 @@ export function RunProgressHUD() {
   if (!step && !hasTodos && liveSubagents.length === 0) return null;
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border/60 bg-background/40 px-3 py-2.5">
+    <div className="flex flex-col gap-2 rounded-lg border border-border/80 bg-card px-3 py-2.5 shadow-xs dark:border-border/60 dark:bg-background/40">
       {step && (
         <div className="flex items-center gap-2 text-[12px] text-foreground">
           <span className="relative flex size-2">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400 opacity-60" />
-            <span className="relative inline-flex size-2 rounded-full bg-sky-400" />
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-500 opacity-60 dark:bg-sky-400" />
+            <span className="relative inline-flex size-2 rounded-full bg-sky-500 dark:bg-sky-400" />
           </span>
           <span className="min-w-0 truncate">{step}</span>
         </div>
@@ -126,7 +126,7 @@ export function RunProgressHUD() {
                     t.status === "completed"
                       ? "text-muted-foreground line-through decoration-muted-foreground/60"
                       : isActive
-                        ? "text-foreground"
+                        ? "text-foreground font-medium"
                         : "text-muted-foreground",
                   )}
                 >
@@ -149,12 +149,12 @@ export function RunProgressHUD() {
                 className="flex items-center gap-2 text-[12px] leading-snug"
               >
                 <span className="relative flex size-1.5 shrink-0">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-violet-400 opacity-60" />
-                  <span className="relative inline-flex size-1.5 rounded-full bg-violet-400" />
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-violet-500 opacity-60 dark:bg-violet-400" />
+                  <span className="relative inline-flex size-1.5 rounded-full bg-violet-500 dark:bg-violet-400" />
                 </span>
                 <span className="min-w-0 truncate text-muted-foreground">
                   <span className="text-foreground">{r.label || r.type}</span>
-                  {r.currentStep ? ` — ${r.currentStep}` : ""}
+                  {r.currentStep ? ` - ${r.currentStep}` : ""}
                 </span>
               </li>
             ))}

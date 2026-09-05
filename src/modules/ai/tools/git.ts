@@ -87,6 +87,12 @@ export function gitLogCommand(limit: number): string {
   return `git log --oneline -n ${n}`;
 }
 
+const BLAME_LINES_RE = /^(\d+(?:[-,+]\d+)?|:[a-zA-Z_]\w*)$/;
+
+export function validBlameLines(lines: string): boolean {
+  return BLAME_LINES_RE.test(lines.trim());
+}
+
 /**
  * `git blame` with an optional path and line range. A file may be at a
  * sub-path of the repo, so the file is always quoted; when no file is given
@@ -97,7 +103,13 @@ export function gitBlameCommand(opts: {
   lines?: string;
 }): string {
   const args = ["blame", "--line-porcelain"];
-  if (opts.lines) args.push(`-L ${opts.lines}`);
+  if (opts.lines) {
+    const trimmed = opts.lines.trim();
+    if (!validBlameLines(trimmed)) {
+      throw new Error(`invalid blame line range "${opts.lines}"`);
+    }
+    args.push(`-L ${trimmed}`);
+  }
   if (opts.path) {
     args.push("--");
     args.push(quoteShellArg(opts.path));
@@ -116,6 +128,9 @@ export function gitShowCommand(opts: {
   statOnly?: boolean;
 }): string {
   const ref = (opts.ref ?? "HEAD").trim() || "HEAD";
+  if (ref.startsWith("-")) {
+    throw new Error(`invalid ref "${ref}": refs must not start with a dash`);
+  }
   const args = ["show", "--format=fuller"];
   // Stat by default; only a full diff when the caller explicitly asks for it.
   if (opts.statOnly !== false) args.push("--stat");
@@ -564,6 +579,9 @@ export function buildGitTools(ctx: ToolContext) {
           ),
         lines: z
           .string()
+          .refine((v) => validBlameLines(v), {
+            message: "Invalid line range format. Use e.g. '5', '5-20', or ':funcName'",
+          })
           .optional()
           .describe(
             "Optional line range, git syntax e.g. '5' or '5-20' (1-based).",
@@ -579,7 +597,12 @@ export function buildGitTools(ctx: ToolContext) {
         const sid = ctx.getSessionId();
         if (!sid) return { error: "no active chat session" };
         const cwd = repoRootFor(ctx.getWorkspaceRoot(), ctx.getCwd());
-        const command = gitBlameCommand({ path, lines });
+        let command: string;
+        try {
+          command = gitBlameCommand({ path, lines });
+        } catch (e) {
+          return { error: String(e) };
+        }
         const safety = checkShellCommand(command);
         if (!safety.ok) return { error: safety.reason };
         try {
@@ -606,6 +629,9 @@ export function buildGitTools(ctx: ToolContext) {
       inputSchema: z.object({
         ref: z
           .string()
+          .refine((v) => !v.trim().startsWith("-"), {
+            message: "Commit ref must not start with a dash",
+          })
           .optional()
           .describe(
             "Commit ref: sha, branch, tag, or HEAD~N. Defaults to HEAD.",

@@ -67,11 +67,13 @@ export function useAutoApproval(
       // The command decides whether a remote call is inspection or a change,
       // so it has to reach the policy rather than being inferred from the name.
       const input = part.input as
-        | { command?: unknown; path?: unknown }
+        | { command?: unknown; path?: unknown; action?: unknown }
         | undefined;
       const command =
         typeof input?.command === "string" ? input.command : undefined;
       const path = typeof input?.path === "string" ? input.path : undefined;
+      const action =
+        typeof input?.action === "string" ? input.action : undefined;
 
       // Project-scoped approval rules (.termigo/approvals.json) refine the
       // global mode per project: `deny` auto-refuses, `allow` auto-approves
@@ -120,7 +122,8 @@ export function useAutoApproval(
       // between the request and this effect, and the machine the command would
       // land on is what decides whether a mode may speak for them.
       const onRemoteHost = !!useChatStore.getState().live.getRemoteSession();
-      if (!isAutoApproved(tool, mode, { onRemoteHost, command })) continue;
+      if (!isAutoApproved(tool, mode, { onRemoteHost, command, action }))
+        continue;
 
       answered.current.add(id);
       void respond({ id, approved: true });

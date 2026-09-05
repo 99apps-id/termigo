@@ -1,4 +1,4 @@
-import { type RefObject, useCallback, useEffect, useState } from "react";
+import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
 import { homeDir } from "@tauri-apps/api/path";
 import { native } from "@/modules/ai/lib/native";
 import type { Tab } from "@/modules/tabs";
@@ -38,6 +38,7 @@ export function useWorkspaceSwitcher({
   const [home, setHome] = useState<string | null>(null);
   const [launchCwd, setLaunchCwd] = useState<string | null>(null);
   const [launchCwdResolved, setLaunchCwdResolved] = useState(false);
+  const isSwitchingWorkspaceRef = useRef(false);
 
   useEffect(() => {
     homeDir()
@@ -67,7 +68,7 @@ export function useWorkspaceSwitcher({
     try {
       await native.workspaceAuthorize(nextHome);
     } catch {
-      // Non-fatal — git panel will surface "not authorized" if needed.
+      // Non-fatal - git panel will surface "not authorized" if needed.
     }
   }, []);
 
@@ -96,11 +97,18 @@ export function useWorkspaceSwitcher({
         return false;
       }
 
-      clearWorkspaceState();
-      setWorkspaceEnv(env.kind === "local" ? LOCAL_WORKSPACE : env);
-      await authorizeHome(nextHome);
-      resetWorkspace(nextHome);
-      return true;
+      isSwitchingWorkspaceRef.current = true;
+      try {
+        clearWorkspaceState();
+        setWorkspaceEnv(env.kind === "local" ? LOCAL_WORKSPACE : env);
+        await authorizeHome(nextHome);
+        resetWorkspace(nextHome);
+        return true;
+      } finally {
+        setTimeout(() => {
+          isSwitchingWorkspaceRef.current = false;
+        }, 500);
+      }
     },
     [
       workspaceEnv,
@@ -133,5 +141,6 @@ export function useWorkspaceSwitcher({
     launchCwdResolved,
     switchWorkspace,
     adoptWorkspaceEnv,
+    isSwitchingWorkspaceRef,
   };
 }

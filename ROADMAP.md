@@ -79,6 +79,9 @@ The themes below frame every scope decision.
 - [x] Self-maintaining memory the agent writes and reads back, bounded in size
 - [x] Reusable skills in `.termigo/skills/`, loaded on demand, discoverable across other agents' libraries
 - [x] MCP servers, per-project and per-user, sharing one config with the Go companion
+- [x] MCP protocol resilience: handles nullable tool descriptions, flexible string/int JSON-RPC IDs, and reactive cache invalidation upon configuration changes
+- [x] SQL Explorer: native database connection management (SQLite, PostgreSQL, MySQL/MariaDB), schema inspection, and agent tools (`list_sql_connections`, `run_sql`) with strict approval gating
+- [x] Telegram bot relay reliability: echo elimination with synchronous dispatch locking (`startTelegramDispatch`) and origin fingerprinting
 - [x] Web search (`web_search`, DuckDuckGo-backed, SSRF-guarded, no API key)
 - [x] Document and image tools: `read_pdf` (text extraction from compressed PDFs) and `read_image` (vision-capable image reading)
 - [x] Clipboard and environment tools: `clipboard_get` / `clipboard_set` and `env_get` / `env_list`
@@ -167,8 +170,9 @@ The themes below frame every scope decision.
   `buildAgentTools`, `resolveAgentForPrompt`), and a live run-progress HUD
   showing the current step, the todo list with a derived active item, and the
   sub-agents running in a fan-out.
-- [x] Telegram relay polish — typing indicator while the agent works, and an
-  echo fix so messages the bot injects are never mirrored back.
+- [x] Telegram relay polish - typing indicator while the agent works, an
+  echo fix so messages the bot injects are never mirrored back, synchronous
+  dispatch locking, and prompt fingerprinting.
 - [x] Extensible slash commands — a fixed set ships (`/init`, `/plan`, `/goal`,
   `/model`, …), and user-authored commands live in `.termigo/commands/*.md`
   (frontmatter `description:` + a prompt body, `$ARGUMENTS` placeholder),

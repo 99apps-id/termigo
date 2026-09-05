@@ -133,7 +133,7 @@ export function WorkspaceInputBar({
     !hasComposer && !isBlockTab ? (
       <AiInputBarConnect onAdd={onConnect} />
     ) : (
-      <div className="shrink-0 border-t border-border/60 bg-card/40 px-3 py-2">
+      <div className="shrink-0 border-t border-border bg-card px-3 py-2 shadow-2xs dark:border-border/60 dark:bg-card/40">
         <div
           data-busy={effectiveMode === "ai" && c.isBusy ? "true" : undefined}
           className={cn(
@@ -141,7 +141,7 @@ export function WorkspaceInputBar({
             // The AI composer sits in a rounded box with an animated accent glow
             // circling its border; the terminal shell input keeps its plain look.
             effectiveMode === "ai"
-              ? "termigo-composer-glow rounded-xl bg-card/60 px-2.5 py-2"
+              ? "termigo-composer-glow rounded-xl border border-border/80 bg-card px-2.5 py-2 shadow-xs dark:border-transparent dark:bg-card/60"
               : "rounded-lg px-1 py-1",
           )}
         >
@@ -216,10 +216,10 @@ function ModeToggle({
   onChange: (next: "shell" | "ai") => void;
 }) {
   return (
-    <div className="relative grid shrink-0 grid-cols-2 rounded-md p-0.5 text-[10.5px] ring-1 ring-inset ring-border/35">
+    <div className="relative grid shrink-0 grid-cols-2 rounded-md bg-muted/60 p-0.5 text-[10.5px] ring-1 ring-inset ring-border/80 dark:bg-transparent dark:ring-border/35">
       <span
         aria-hidden
-        className="pointer-events-none absolute inset-y-0.5 left-0.5 w-[calc(50%-2px)] rounded-[4px] bg-accent/60 transition-transform duration-200 ease-out"
+        className="pointer-events-none absolute inset-y-0.5 left-0.5 w-[calc(50%-2px)] rounded-[4px] bg-card shadow-2xs transition-transform duration-200 ease-out dark:bg-accent/60 dark:shadow-none"
         style={{
           transform: mode === "ai" ? "translateX(100%)" : "translateX(0)",
         }}
@@ -256,10 +256,10 @@ function SegButton({
       type="button"
       onClick={onClick}
       className={cn(
-        "relative z-10 flex items-center justify-center gap-1 rounded-[4px] px-2 py-[2.5px] font-medium transition-colors",
+        "relative z-10 flex items-center justify-center gap-1 rounded-[4px] px-2 py-[2.5px] transition-colors",
         active
-          ? "text-foreground/90"
-          : "text-muted-foreground/70 hover:text-foreground",
+          ? "font-semibold text-foreground"
+          : "font-medium text-muted-foreground hover:text-foreground",
       )}
     >
       <HugeiconsIcon icon={icon} size={11} strokeWidth={1.75} />

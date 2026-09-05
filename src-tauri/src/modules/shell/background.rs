@@ -43,6 +43,7 @@ pub struct BackgroundLogResponse {
 #[derive(Serialize)]
 pub struct BackgroundProcInfo {
     pub handle: u32,
+    pub pid: u32,
     pub command: String,
     pub cwd: Option<String>,
     pub started_at_ms: u64,
@@ -83,6 +84,7 @@ impl BackgroundProc {
         };
         BackgroundProcInfo {
             handle,
+            pid: self.child.id(),
             command: self.command.clone(),
             cwd: self.cwd.clone(),
             started_at_ms: self.started_at_ms,

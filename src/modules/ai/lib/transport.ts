@@ -81,30 +81,55 @@ export function truncateProjectMemory(content: string): string {
   return `${body}\n\n[TERMIGO.md truncated here; read the file for the rest]`;
 }
 
-async function readTermigoMd(
+export const PROJECT_RULE_FILES = [
+  "TERMIGO.md",
+  ".termigorules",
+  "CLAUDE.md",
+  "AGENTS.md",
+] as const;
+
+export async function readProjectRules(
   workspaceRoot: string | null,
 ): Promise<string | null> {
   if (!workspaceRoot) return null;
-  const path = `${workspaceRoot.replace(/\/$/, "")}/TERMIGO.md`;
   const cached = projectMemoryCache.get(workspaceRoot);
   if (cached && Date.now() - cached.mtime < 30_000) return cached.content;
-  try {
-    const r = await native.readFile(path);
-    if (r.kind !== "text") {
-      projectMemoryCache.set(workspaceRoot, {
-        content: null,
-        mtime: Date.now(),
-      });
-      return null;
+
+  const root = workspaceRoot.replace(/\/$/, "");
+  const foundFiles: Array<{ name: string; content: string }> = [];
+
+  for (const filename of PROJECT_RULE_FILES) {
+    const path = `${root}/${filename}`;
+    try {
+      const r = await native.readFile(path);
+      if (r.kind === "text" && r.content.trim()) {
+        foundFiles.push({ name: filename, content: r.content.trim() });
+      }
+    } catch {
+      // Ignore missing or unreadable rule files
     }
-    const content = truncateProjectMemory(r.content);
-    projectMemoryCache.set(workspaceRoot, { content, mtime: Date.now() });
-    return content;
-  } catch {
+  }
+
+  if (foundFiles.length === 0) {
     projectMemoryCache.set(workspaceRoot, { content: null, mtime: Date.now() });
     return null;
   }
+
+  let combined = "";
+  if (foundFiles.length === 1) {
+    combined = foundFiles[0].content;
+  } else {
+    combined = foundFiles
+      .map((f) => `<!-- Rules from ${f.name} -->\n${f.content}`)
+      .join("\n\n");
+  }
+
+  const content = truncateProjectMemory(combined);
+  projectMemoryCache.set(workspaceRoot, { content, mtime: Date.now() });
+  return content;
 }
+
+export const readTermigoMd = readProjectRules;
 
 type LiveSnapshot = {
   cwd: string | null;
@@ -139,7 +164,7 @@ type Deps = {
   /** Fires at the start of every agentic-loop round (each `sendMessages`), so
    *  the UI can surface "Round N" and a user can tell a run is progressing. */
   onRoundStart?: () => void;
-  /** Returns true when a round for this session should be refused — used to
+  /** Returns true when a round for this session should be refused - used to
    *  carry a user Stop across to the next auto-continue round (which is
    *  dispatched by the SDK directly, bypassing the user send path). */
   shouldRefuseRun?: (sessionId: string) => boolean;
@@ -164,7 +189,7 @@ type Deps = {
   getRunId?: () => string;
   /** How many messages are queued for the active session right now. The run
    *  records this at its start and yields at the next step only when the count
-   *  GROWS — i.e. a task typed while THIS run worked — so tasks already waiting
+   *  GROWS - i.e. a task typed while THIS run worked - so tasks already waiting
    *  (delivered one at a time on settle) do not make each run bail immediately. */
   getSteerCount?: () => number;
 };
@@ -180,7 +205,7 @@ export function createContextAwareTransport(deps: Deps) {
   // returns) would otherwise leave the run on "thinking" forever with no way
   // to stop it, because the abort signal only reaches the model call later.
   const CONTEXT_TIMEOUT_MS = 60_000;
-  // The pre-run git checkpoint can hang on a huge or misconfigured repo — e.g.
+  // The pre-run git checkpoint can hang on a huge or misconfigured repo - e.g.
   // when a workspace switch fell back to the home directory. Bound it hard so it
   // can never freeze the run before the model is even called.
   const CHECKPOINT_TIMEOUT_MS = 12_000;
@@ -215,7 +240,7 @@ export function createContextAwareTransport(deps: Deps) {
         typeof e === "object" &&
         (e as { name?: string }).name === "AbortError";
   // Reject as soon as the user hits Stop, even while a pre-stream await (the
-  // checkpoint, context assembly) is still in flight — that is what makes Stop
+  // checkpoint, context assembly) is still in flight - that is what makes Stop
   // responsive before the model call, where the abort signal used to first bite.
   const raceAbort = <T>(
     promise: Promise<T>,
@@ -272,7 +297,7 @@ export function createContextAwareTransport(deps: Deps) {
     // timeline. Skipped on approval resumes because those continue a run that
     // is already in flight, and a checkpoint mid-run would capture the
     // agent's own half-finished edits as the "safe" state.
-    // Already stopped before we even began — bail without touching git or the
+    // Already stopped before we even began - bail without touching git or the
     // model.
     if (options.abortSignal?.aborted) {
       throw new DOMException("aborted", "AbortError");
@@ -481,15 +506,15 @@ function formatEnvBlock(live: LiveSnapshot): string | null {
   const wsEnv = currentWorkspaceEnv();
   if (wsEnv.kind === "wsl") {
     lines.push(`os: Linux (WSL: ${wsEnv.distro})`);
-    lines.push("shell: bash/sh — POSIX syntax, forward slashes");
+    lines.push("shell: bash/sh - POSIX syntax, forward slashes");
   } else if (IS_WINDOWS) {
     lines.push("os: Windows");
     lines.push(
-      "shell: PowerShell — use PowerShell syntax, NOT cmd/DOS: `2>$null` not `2>nul`, `Get-ChildItem` not `dir /s /b`. To find files use the `glob` tool, not `Get-ChildItem -Recurse` from a large dir (it scans node_modules/AppData and times out).",
+      "shell: PowerShell - use PowerShell syntax, NOT cmd/DOS: `2>$null` not `2>nul`, `Get-ChildItem` not `dir /s /b`. To find files use the `glob` tool, not `Get-ChildItem -Recurse` from a large dir (it scans node_modules/AppData and times out).",
     );
   } else {
     lines.push(`os: ${IS_MAC ? "macOS" : "Linux"}`);
-    lines.push("shell: /bin/sh — POSIX syntax");
+    lines.push("shell: /bin/sh - POSIX syntax");
   }
   if (live.workspaceRoot) lines.push(`workspace_root: ${live.workspaceRoot}`);
   if (live.cwd) lines.push(`active_terminal_cwd: ${live.cwd}`);

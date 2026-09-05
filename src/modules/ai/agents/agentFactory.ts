@@ -38,7 +38,7 @@ export const DEFAULT_SUBAGENT_MAX_STEPS = 12;
 /** Default nesting cap when no preference is available (see runSubagent). */
 export const DEFAULT_MAX_SUBAGENT_DEPTH = 3;
 
-/** Tools that spawn sub-agents — the only ones the depth cap governs. */
+/** Tools that spawn sub-agents - the only ones the depth cap governs. */
 export const SPAWN_TOOLS = new Set(["run_subagent", "run_subagents"]);
 
 /** A fully-resolved, runnable agent description. */
@@ -60,33 +60,93 @@ export function spawnToolsWithheld(depth: number, maxDepth: number): boolean {
   return depth >= maxDepth;
 }
 
+/** Tools withheld from specific subagent specializations (Hermes capability-gated toolsets). */
+export const SUBAGENT_DISALLOWED_TOOLS: Partial<
+  Record<SubagentType, ReadonlySet<string>>
+> = {
+  "code-review": new Set([
+    "write_file",
+    "edit",
+    "multi_edit",
+    "delete_file",
+    "move_file",
+    "copy_file",
+    "dev_server",
+    "process",
+    "browser_open",
+    "browser_click",
+    "browser_type",
+    "browser_navigate",
+    "browser_connect",
+    "browser_snapshot",
+    "sql_query",
+    "sql_execute",
+  ]),
+  explore: new Set([
+    "delete_file",
+    "dev_server",
+    "process",
+    "sql_execute",
+    "browser_type",
+    "browser_click",
+  ]),
+  security: new Set([
+    "write_file",
+    "edit",
+    "multi_edit",
+    "delete_file",
+    "dev_server",
+    "process",
+    "sql_execute",
+  ]),
+  "pentest-recon": new Set([
+    "write_file",
+    "edit",
+    "multi_edit",
+    "delete_file",
+    "dev_server",
+    "process",
+  ]),
+};
+
 /**
  * Context-safe tool injection.
  *
  * Applies the harness profile's tool rules (reorder `prioritizeTools`, drop
- * `hideTools`) to any agent's toolset, and — when `depth` is given — withholds
- * the spawn tools at the nesting cap so a sub-agent cannot recurse without
- * bound. The main agent passes no `depth`, so its spawn tools are never
- * withheld. `maxDepth` is passed in (not read from the store) so the factory
+ * `hideTools`) to any agent's toolset, capability-gates tools by subagent specialization,
+ * and - when `depth` is given - withholds the spawn tools at the nesting cap so a
+ * sub-agent cannot recurse without bound. The main agent passes no `depth`, so its spawn
+ * tools are never withheld. `maxDepth` is passed in (not read from the store) so the factory
  * stays pure and testable; the runner supplies `effectiveSubagentMaxDepth()`.
  */
 export function buildAgentTools<T>(
   tools: Record<string, T>,
-  opts: { profile?: HarnessProfile; depth?: number; maxDepth?: number } = {},
+  opts: {
+    profile?: HarnessProfile;
+    depth?: number;
+    maxDepth?: number;
+    subagentType?: SubagentType;
+  } = {},
 ): Record<string, T> {
   const profiled = opts.profile
     ? applyProfileToTools(tools, opts.profile)
     : { ...tools };
 
-  const depth = opts.depth;
-  if (depth === undefined) return profiled;
+  const disallowed = opts.subagentType
+    ? SUBAGENT_DISALLOWED_TOOLS[opts.subagentType]
+    : undefined;
 
+  const depth = opts.depth;
   const maxDepth = opts.maxDepth ?? DEFAULT_MAX_SUBAGENT_DEPTH;
-  if (!spawnToolsWithheld(depth, maxDepth)) return profiled;
+  const withholdSpawn =
+    depth !== undefined && spawnToolsWithheld(depth, maxDepth);
+
+  if (!disallowed && !withholdSpawn) return profiled;
 
   const out: Record<string, T> = {};
   for (const [name, tool] of Object.entries(profiled)) {
-    if (SPAWN_TOOLS.has(name)) continue;
+    if (withholdSpawn && SPAWN_TOOLS.has(name)) continue;
+    if (disallowed && disallowed.has(name)) continue;
     out[name] = tool;
   }
   return out;

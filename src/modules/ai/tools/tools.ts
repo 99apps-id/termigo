@@ -2,6 +2,7 @@ import { summarizeInput } from "../lib/approvalQueue";
 import { withAutoVerify } from "../lib/autoVerify";
 import { buildOrchestratorTools } from "../lib/orchestrator";
 import { buildPolicyTools } from "./policyTools";
+import { buildProcessTools } from "./process";
 import {
   POST_EXECUTE_CONFIRM_TOOLS,
   withPostExecuteConfirm,
@@ -42,6 +43,8 @@ import { buildVerifyTools } from "./verify";
 import { buildWebSearchTools } from "./webSearch";
 import { buildWorkflowTools } from "./workflow";
 import { buildWorktreeTools } from "./worktree";
+import { tool } from "ai";
+import { z } from "zod";
 
 export { resolvePath, type ToolContext } from "./context";
 
@@ -168,7 +171,7 @@ async function dispatchRegisteredTool(
  *    auto-execute, but go through the security guard which refuses obvious
  *    secret paths (.env*, .ssh/, credentials, etc.).
  *  - Mutating tools (`write_file`, `edit`, `multi_edit`, `create_directory`,
- *    `run_command`) require explicit user approval — the AI SDK pauses on
+ *    `run_command`) require explicit user approval - the AI SDK pauses on
  *    tool-call and surfaces a `tool-approval-request` part that the UI
  *    renders as a confirmation card.
  *  - `edit` / `multi_edit` additionally enforce a read-before-edit invariant
@@ -233,6 +236,36 @@ export function buildTools(
     ...buildPdfTools(ctx),
     ...buildImageTools(ctx),
     ...buildSystemTools(),
+    ...buildProcessTools(ctx),
+    unknown_tool_fallback: tool({
+      description:
+        "Internal fallback for unrecognized tool names. Informs the model that the requested tool does not exist.",
+      inputSchema: z.object({
+        requested_tool: z.string(),
+        provided_input: z.string().optional(),
+      }),
+      execute: async ({ requested_tool }) => {
+        const available = [
+          "read_file",
+          "write_file",
+          "edit",
+          "multi_edit",
+          "create_directory",
+          "list_directory",
+          "bash_run",
+          "bash_background",
+          "grep",
+          "glob",
+          "fetch",
+          "run_subagent",
+          "run_subagents",
+          "todo_write",
+        ];
+        return {
+          error: `Tool "${requested_tool}" does not exist in this environment. Available tools: ${available.join(", ")}. Please use one of these valid tools instead.`,
+        };
+      },
+    }),
   } as const;
 
   // Store a reference so the workflow / orchestrator engines can dispatch

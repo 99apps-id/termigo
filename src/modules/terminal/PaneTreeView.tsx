@@ -48,7 +48,7 @@ export function PaneTreeView(props: Props) {
           if (!focused) onFocusLeaf(node.id);
         }}
         // Catches focus from Tab, programmatic focus, or any path that
-        // skips mousedown — keeps activeLeafId in sync with DOM focus.
+        // skips mousedown - keeps activeLeafId in sync with DOM focus.
         onFocus={() => {
           if (!focused) onFocusLeaf(node.id);
         }}
@@ -97,7 +97,7 @@ function DropOverlay({ leafId }: { leafId: number }) {
   const active = useTerminalDropStore((s) => s.targetLeafId === leafId);
   if (!active) return null;
   return (
-    <div className="pointer-events-none absolute inset-2 grid place-items-center rounded-lg border border-primary/45 bg-background/70 text-xs font-medium text-foreground shadow-lg backdrop-blur-sm">
+    <div className="pointer-events-none absolute inset-2 grid place-items-center rounded-lg border border-primary/60 bg-card/90 text-xs font-semibold text-foreground shadow-lg backdrop-blur-sm dark:border-primary/45 dark:bg-background/70 dark:font-medium">
       Drop file path here
     </div>
   );

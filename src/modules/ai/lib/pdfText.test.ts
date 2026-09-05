@@ -27,12 +27,19 @@ describe("pdfText (lightweight PDF text extraction)", () => {
     expect(text).toBe("Hello World");
   });
 
-  it("extracts text from TJ arrays with kerning offsets", async () => {
+  it("extracts text from hex-encoded Tj operators", async () => {
+    // 48656c6c6f = "Hello"
+    const pdf = buildMinimalPdf("BT /F1 12 Tf 72 720 Td <48656c6c6f> Tj ET");
+    const text = await extractPdfText(pdf);
+    expect(text).toBe("Hello");
+  });
+
+  it("extracts text from TJ arrays with kerning offsets and hex strings", async () => {
     const pdf = buildMinimalPdf(
-      "BT /F1 12 Tf 72 720 Td [(Hi) 120 ( there)] TJ ET",
+      "BT /F1 12 Tf 72 720 Td [(Hi) 120 ( there ) 50 <576f726c64>] TJ ET",
     );
     const text = await extractPdfText(pdf);
-    expect(text).toBe("Hi there");
+    expect(text).toBe("Hi there World");
   });
 
   it("returns one page per content stream", async () => {

@@ -107,7 +107,7 @@
   left: 0;
   right: 0;
   height: 1px;
-  background: color-mix(in srgb, var(--foreground, #fff) 8%, transparent);
+  background: var(--border, color-mix(in srgb, var(--foreground, #fff) 12%, transparent));
   pointer-events: none;
 }
 
@@ -130,7 +130,7 @@
   align-items: center;
   justify-content: space-between;
   height: 18px;
-  opacity: 0.72;
+  opacity: 0.88;
   transition: opacity var(--dur-fast) var(--ease-soft);
 }
 
@@ -222,6 +222,28 @@
   pointer-events: none;
 }
 
+.bt-lens-fix {
+  width: auto;
+  gap: 4px;
+  padding: 0 6px;
+  font-size: 10px;
+  font-weight: 500;
+  background: color-mix(in srgb, var(--primary, #3b82f6) 14%, transparent);
+  color: var(--primary, #60a5fa);
+  border-radius: 4px;
+}
+
+.bt-lens-fix:hover {
+  background: color-mix(in srgb, var(--primary, #3b82f6) 24%, transparent);
+  color: var(--foreground, #fff);
+}
+
+.bt-lens-label {
+  font-size: 10px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
 .bt-search-input {
   width: 9rem;
   background: transparent;
@@ -253,7 +275,7 @@
   gap: 7px;
   padding: 3px 6px 3px 10px;
   background: color-mix(in srgb, var(--popover, #1b1b1d) 96%, transparent);
-  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  border-bottom: 1px solid var(--border);
 }
 
 .bt-sticky-icon {

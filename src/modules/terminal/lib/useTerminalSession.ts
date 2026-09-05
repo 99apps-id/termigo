@@ -59,7 +59,7 @@ type Callbacks = {
   onSearchReady?: (addon: SearchAddon) => void;
   onExit?: (code: number) => void;
   onCwd?: (cwd: string) => void;
-  /** A program set the terminal title (OSC 0/2) — surfaced on the tab. */
+  /** A program set the terminal title (OSC 0/2) - surfaced on the tab. */
   onTitle?: (title: string) => void;
 };
 
@@ -293,7 +293,7 @@ export function blockWatermarkState(leafId: number): WatermarkState {
 
 /**
  * Clear the scrollback and screen of the currently focused terminal, keeping
- * the active prompt line — macOS Terminal's ⌘K behaviour. Returns false when no
+ * the active prompt line - macOS Terminal's ⌘K behaviour. Returns false when no
  * focused terminal slot is bound (e.g. focus is in the editor or AI panel).
  */
 export function clearFocusedTerminal(): boolean {
@@ -527,7 +527,7 @@ function getWriteMeter(leafId: number): WriteMeter {
       (chunk, done) => {
         const slot = getLiveSlotForLeaf(leafId);
         if (slot) slot.term.write(chunk, done);
-        else done(); // no live slot to take it — drop and keep accounting
+        else done(); // no live slot to take it - drop and keep accounting
       },
       () => {
         const s = sessions.get(leafId);
@@ -572,7 +572,7 @@ async function setTaskbarProgress(
 function deliverPtyBytes(leafId: number, bytes: Uint8Array): void {
   const s = sessions.get(leafId);
   if (!s) return;
-  // The shell spoke — disarm the no-data watchdog (idempotent after the first
+  // The shell spoke - disarm the no-data watchdog (idempotent after the first
   // byte, since the timer is then gone).
   cancelNoDataWatchdog(leafId);
   // Retained slots keep parsing live (render paused); the ring is only for
@@ -603,7 +603,7 @@ const SPAWN_RETRY_DELAY_MS = 250;
 // First-paint repaint watchdog. Ported from TEDI's `armBlankViewportRepaint`:
 // a fresh shell can lose its FIRST prompt to a ConPTY warmup reflow (the shell
 // prints it, then a startup resize repaints and the prompt-bearing bytes are
-// gone), leaving the pane blank above a live pty — subsequent prompts render
+// gone), leaving the pane blank above a live pty - subsequent prompts render
 // fine. A short time after spawn, if the grid is STILL empty and no TUI owns
 // the screen, a SIGWINCH round-trip (toggle the PTY row count, two spaced
 // resizes so ConPTY can't coalesce them into a no-op) makes the shell's line
@@ -664,7 +664,7 @@ function armNoDataWatchdog(leafId: number, s: Session): void {
       new Error(
         `shell did not emit any output within ${Math.round(
           NO_DATA_WATCHDOG_MS / 1000,
-        )}s of opening — likely stalled during init`,
+        )}s of opening - likely stalled during init`,
       ),
     );
   }, NO_DATA_WATCHDOG_MS);
@@ -679,7 +679,7 @@ function armFirstPaintRepaint(leafId: number, s: Session): void {
     const pty = s.pty;
     if (s.disposed || !pty) return;
     if (isLeafAltScreen(leafId)) return; // a foreground TUI owns the screen
-    if (!gridIsEmpty(leafId)) return; // the prompt painted — nothing to do
+    if (!gridIsEmpty(leafId)) return; // the prompt painted - nothing to do
     const cols = s.cols > 0 ? s.cols : 80;
     const rows = s.rows > 0 ? s.rows : 24;
     const nudged = rows > 1 ? rows - 1 : rows + 1;
@@ -697,7 +697,7 @@ function armFirstPaintRepaint(leafId: number, s: Session): void {
 
 // A `pty_open` that never resolves (a wedged shell, a ConPTY that hangs on
 // init) would otherwise leave the pane on a spinner forever with no error and
-// no way to retry. Bound it — reject on timeout so the retry/error path runs —
+// no way to retry. Bound it - reject on timeout so the retry/error path runs -
 // and close the stray pty if it resolves late so Rust doesn't leak it. Ported
 // from TEDI's `withSpawnTimeout`.
 const SPAWN_TIMEOUT_MS = 15_000;
@@ -770,7 +770,7 @@ function surfaceSpawnFailure(leafId: number, s: Session, e: unknown): void {
 // A shell that dies within this window of spawning (bad cwd, missing binary, a
 // broken profile) is a startup failure, not a session the user ended. Show the
 // retry banner instead of the normal exit path (which closes the pane or
-// respawns the last one — a loop on a shell that keeps crashing). From TEDI.
+// respawns the last one - a loop on a shell that keeps crashing). From TEDI.
 const SPAWN_GRACE_MS = 3_000;
 
 async function openPtyForSession(
@@ -784,10 +784,10 @@ async function openPtyForSession(
   const handlers = {
     onData: (bytes: Uint8Array) => deliverPtyBytes(leafId, bytes),
     onExit: (code: number) => {
+      if (s.disposed) return;
       // Fast non-zero exit during init: surface as a spawn failure (retry
       // banner) rather than closing/respawning. Skip for SSH (its own flow).
       if (
-        !s.disposed &&
         !s.opener &&
         code !== 0 &&
         Date.now() - spawnedAt < SPAWN_GRACE_MS
@@ -931,7 +931,7 @@ function bindLeafToSlot(leafId: number, s: Session): void {
           },
         ];
       }
-      // Shared in-command flag — see osc-handlers.ts. The prompt tracker
+      // Shared in-command flag - see osc-handlers.ts. The prompt tracker
       // flips it on OSC 133 B/C/D/A; the cwd handler reads it to ignore OSC
       // 7 emitted by untrusted command output (remote SSH, `cat` of an
       // attacker file, etc.).
@@ -1096,6 +1096,8 @@ export function disposeSession(leafId: number): void {
   const s = sessions.get(leafId);
   if (!s) return;
   s.disposed = true;
+  s.callbacks = {};
+  s.pendingExit = null;
   cancelHiddenRelease(s);
   cancelFirstPaintRepaint(leafId);
   cancelNoDataWatchdog(leafId);

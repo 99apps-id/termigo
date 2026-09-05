@@ -5,7 +5,6 @@ import {
   type ChatTransport,
   lastAssistantMessageIsCompleteWithApprovalResponses,
 } from "ai";
-import { toast } from "sonner";
 import {
   getModel,
   isCompatModelId,
@@ -75,7 +74,7 @@ const transientRetryCount = new Map<string, number>();
 
 // A "thinking mode" endpoint (Qwen-style OpenAI-compatible) rejects a pinned
 // tool_choice with HTTP 400. The rejection is recorded against the model (see
-// toolChoiceLearning.ts), so an immediate resume — which sends no pin — fixes
+// toolChoiceLearning.ts), so an immediate resume - which sends no pin - fixes
 // the request rather than dead-ending on a red card. One auto-resume per
 // window: if the failure was not our pin, a second attempt should surface as
 // an error, not loop.
@@ -87,14 +86,14 @@ const toolChoiceAutoResumeAt = new Map<string, number>();
 // summarises can loop across rounds forever while each round looks "within
 // budget". This cap is the aggregate guard: once a run has made this many model
 // calls without finishing, the next round is refused (the transcript offers
-// Continue, which resets the per-run counter). 24 is generous — real tasks
+// Continue, which resets the per-run counter). 24 is generous - real tasks
 // rarely need it, and a genuinely stuck run is stopped before it burns tokens.
 const MAX_LOOP_ROUNDS = 24;
 
 // Pin the workspace the agent works on for the whole run. The toolContext reads
 // these instead of the live (mutable) context, so switching tabs, opening
 // another folder or connecting an SSH session mid-run cannot silently redirect
-// the agent to a different directory or host — which would fail its tool calls
+// the agent to a different directory or host - which would fail its tool calls
 // and make it loop. Refreshed only when the user submits a fresh task.
 type RunAnchor = {
   cwd: string | null;
@@ -111,32 +110,11 @@ const runAnchor = new Map<string, RunAnchor>();
 // fresh user send / resume / queued-correction flush.
 const stopLatch = new Set<string>();
 
-// Throttle the "Round N started" toast so a fast agentic loop cannot spam the
-// screen. Only the first round of a run toasts (round 2+, since round 1 is the
-// initial send), and at most once per 3s.
-let lastRoundToastAt = 0;
-let lastRoundToast = 0;
-function maybeToastRound(round: number): void {
-  if (round < 2) return;
-  const now = Date.now();
-  if (now - lastRoundToastAt < 3000 && round === lastRoundToast) return;
-  lastRoundToastAt = now;
-  lastRoundToast = round;
-  // Never let a toast failure break the run — this fires at the start of every
-  // round and a render/notification error must not stop the agent.
-  try {
-    toast.info(`Agent round ${round}`, {
-      description: "Starting a new model call — the run is still going.",
-    });
-  } catch {
-    // ignore
-  }
-}
 
 // Connectivity recovery: when the provider is unreachable, keep the run
 // resumable and resume it automatically once the network is back, so an
 // internet blip does not kill a long agentic task. Quota / rate-limit errors are
-// recoverable too but have no reliable event to watch for — the user tops up or
+// recoverable too but have no reliable event to watch for - the user tops up or
 // waits, then clicks "Try again" (their work is preserved).
 const pendingReconnectSessions = new Set<string>();
 let onlineListenerRegistered = false;
@@ -290,7 +268,6 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       // show "Round N · step X" and a user can tell the run is still going.
       const next = useChatStore.getState().agentMeta.round + 1;
       useChatStore.getState().patchAgentMeta({ round: next });
-      maybeToastRound(next);
     },
     // Refuse the SDK's next auto-continue round when a Stop was latched or the
     // agent has looped too long. The latch / round counter is cleared on the
@@ -334,7 +311,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       useChatStore.getState().setLastRun(info.metrics);
       useChatStore.getState().syncRunMeta();
       // A run that actually finished (not an overflow error) means the request
-      // fit this time — allow the session to auto-resume on a future overflow
+      // fit this time - allow the session to auto-resume on a future overflow
       // instead of exhausting its retry budget permanently.
       const fr = info.finishReason ?? "";
       if (fr && fr !== "error") {
@@ -418,7 +395,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       const raw = e instanceof Error ? e.message : String(e);
       // A user-pressed Stop surfaces here as an AbortError when it lands before
       // the model call (during the checkpoint / context phase). That is not a
-      // failure — settle quietly as a stop instead of a red error banner.
+      // failure - settle quietly as a stop instead of a red error banner.
       const aborted =
         (e as { name?: string })?.name === "AbortError" ||
         /\baborted\b/i.test(raw);
@@ -479,7 +456,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       }
       // A "thinking mode" endpoint rejected the pinned tool_choice (the forced
       // fan-out on a broad request, e.g. "audit this repo"). Record it so the
-      // pin is dropped for this model, then resume immediately — the same
+      // pin is dropped for this model, then resume immediately - the same
       // request without the pin is accepted, and the model still has
       // run_subagents to use on its own. Without this, the user gets a raw
       // red card and "Try again" only works when the retry happens to skip
@@ -501,7 +478,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
               useChatStore.getState().patchAgentMeta({
                 status: "error",
                 error:
-                  "This model doesn't support forcing a specific tool call. Termigo stopped forcing it — press Try again to continue.",
+                  "This model doesn't support forcing a specific tool call. Termigo stopped forcing it - press Try again to continue.",
               });
               useChatStore.getState().syncRunMeta();
             });
@@ -511,7 +488,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       }
       // A connectivity loss is recoverable once the network is back. Mark the
       // run as resumable and let the `online` listener (or "Try again") pick it
-      // up — the task/todo state is preserved. The run is no longer "in flight"
+      // up - the task/todo state is preserved. The run is no longer "in flight"
       // (it errored), so clear the in-flight marker: a later restart must not
       // read it as an interrupted run, and resume re-marks it.
       if (isConnectivityError(raw)) {
@@ -523,7 +500,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
         useChatStore.getState().patchAgentMeta({
           status: "error",
           error:
-            "Connection to the provider was lost. Your run is preserved — it resumes automatically when you're back online, or click Try again.",
+            "Connection to the provider was lost. Your run is preserved - it resumes automatically when you're back online, or click Try again.",
         });
         useChatStore.getState().syncRunMeta();
         return;
@@ -534,8 +511,8 @@ function makeChat(sessionId: string): Chat<UIMessage> {
         useChatStore.getState().patchAgentMeta({
           status: "error",
           error: isQuotaError(raw)
-            ? "The provider reports your API quota or credits are exhausted. Top up and click Try again — your work is preserved."
-            : "Rate limit reached. Wait a moment and click Try again — your work is preserved.",
+            ? "The provider reports your API quota or credits are exhausted. Top up and click Try again - your work is preserved."
+            : "Rate limit reached. Wait a moment and click Try again - your work is preserved.",
         });
         useChatStore.getState().syncRunMeta();
         return;
@@ -673,7 +650,7 @@ export async function sendParts(
  * would silently discard something they explicitly wrote.
  *
  * `bypassBusyCheck` is for the stop path only. An aborted round never reaches
- * its auto-continue check, so there is nothing to race — and the abort may take
+ * its auto-continue check, so there is nothing to race - and the abort may take
  * more than one tick to settle the status, so waiting there would strand the
  * queued task with no further settle to retry it.
  */
@@ -693,7 +670,7 @@ export async function flushSteer(bypassBusyCheck = false): Promise<boolean> {
       // Wait one macrotask before reading the live status. The SDK's
       // auto-continue into the next tool round fires as a microtask chain the
       // moment a round settles, so a synchronous check can still read "ready"
-      // while a continuation is already scheduled — and delivering into that
+      // while a continuation is already scheduled - and delivering into that
       // gap races it: two concurrent requests append to the same transcript at
       // once and it doubles every cycle (the 959-message blowup that froze
       // compaction and overflowed the provider's request-body cap). The timer
@@ -701,7 +678,7 @@ export async function flushSteer(bypassBusyCheck = false): Promise<boolean> {
       // below holds the task queued instead. `sendParts` already keys off the
       // live status via submitAction; this makes the flush path obey the same
       // rule. Every later settle re-runs this, so the queue drains on the round
-      // that no longer auto-continues — nothing is stranded.
+      // that no longer auto-continues - nothing is stranded.
       await new Promise((resolve) => setTimeout(resolve, 0));
       const live = chats.get(sessionId);
       if (flushShouldHold(live?.status ?? null)) return false;
@@ -785,7 +762,7 @@ export async function stopRun(): Promise<void> {
   // The stop leaves `status` settled, so the queued text sends as a fresh turn
   // rather than piling onto the run that was just abandoned. Bypassed the busy
   // check because an aborted round never auto-continues, and the abort may take
-  // more than one tick to settle the status — waiting would strand the task.
+  // more than one tick to settle the status - waiting would strand the task.
   await flushSteer(true);
 }
 

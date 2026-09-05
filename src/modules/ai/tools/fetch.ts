@@ -37,11 +37,34 @@ function header(headers: Record<string, string>, name: string): string {
   return "";
 }
 
+const FETCH_TIMEOUT_MS = 15_000;
+
+function withFetchTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  url: string,
+): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(
+        () =>
+          reject(
+            new Error(
+              `HTTP request timed out after ${Math.round(ms / 1000)}s for ${url}`,
+            ),
+          ),
+        ms,
+      ),
+    ),
+  ]);
+}
+
 export function buildFetchTools() {
   return {
     fetch: tool({
       description:
-        "Fetch a URL over HTTP(S) and return its text. Always fetches from THIS machine, never from a connected SSH host — for a URL only reachable inside the server's network, use bash_run with curl instead. HTML is reduced to readable text; JSON and plain text come back as-is. Private, loopback and link-local addresses are refused. Binary responses are reported but not returned. Asks for approval.",
+        "Fetch a URL over HTTP(S) and return its text. Always fetches from THIS machine, never from a connected SSH host - for a URL only reachable inside the server's network, use bash_run with curl instead. HTML is reduced to readable text; JSON and plain text come back as-is. Private, loopback and link-local addresses are refused. Binary responses are reported but not returned. Asks for approval.",
       inputSchema: z.object({
         url: z.string().describe("Absolute http(s) URL."),
         raw: z
@@ -55,20 +78,37 @@ export function buildFetchTools() {
       execute: async ({ url, raw }) => {
         let resp: HttpResponse;
         try {
-          resp = await invoke<HttpResponse>("ai_http_request", {
+          resp = await withFetchTimeout(
+            invoke<HttpResponse>("ai_http_request", {
+              url,
+              method: "GET",
+              headers: null,
+              body: null,
+              // Never model-controlled. See the note at the top of this file.
+              allowPrivateNetwork: false,
+            }),
+            FETCH_TIMEOUT_MS,
             url,
-            method: "GET",
-            headers: null,
-            body: null,
-            // Never model-controlled. See the note at the top of this file.
-            allowPrivateNetwork: false,
-          });
+          );
         } catch (e) {
-          return { error: String(e), url };
+          return {
+            error: String(e),
+            url,
+            hint: "Request failed or timed out. If the site is down, slow, or blocks scrapers, consider using web_search or curl via bash_run.",
+          };
         }
 
         const contentType = header(resp.headers, "content-type");
         const bytes = new Uint8Array(resp.body);
+
+        if (bytes.length === 0) {
+          return {
+            url,
+            status: resp.status,
+            content: "",
+            note: `Response body was empty (HTTP ${resp.status}). The server returned no content, or is blocking automated requests. If this page requires browser JavaScript execution, use browser_navigate instead.`,
+          };
+        }
 
         if (!isTextual(contentType)) {
           // Returned rather than decoded: feeding a binary blob through a text

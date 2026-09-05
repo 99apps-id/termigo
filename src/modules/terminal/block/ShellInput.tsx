@@ -72,7 +72,7 @@ export default function ShellInput({
   fontRef.current = { fontFamily, fontSize, fontWeight };
 
   // History first (instant, local, free). Only when it has no match and the
-  // user has opted in does the AI layer run — lazily imported so the AI SDK
+  // user has opted in does the AI layer run - lazily imported so the AI SDK
   // stays out of the terminal's startup bundle.
   const combinedSuggest = async (line: string): Promise<string | null> => {
     const fromHistory = await historySuggest(line);
@@ -180,7 +180,7 @@ export default function ShellInput({
       onCopyCapture={onCopyCapture}
     >
       <span
-        className="select-none pt-px text-primary/80"
+        className="select-none pt-px font-semibold text-primary"
         style={{
           fontFamily,
           fontSize: `${fontSize}px`,

@@ -7,20 +7,21 @@ export function buildMemoryTools(ctx: ToolContext) {
   return {
     remember: tool({
       description:
-        "Record one durable fact about this project so future sessions start with it. " +
-        "Use it for things that stay true: build and test commands, conventions the user " +
-        "corrected you on, architectural decisions, paths that matter, things never to run. " +
+        "Record one durable fact or lesson about this project so future sessions start with it. " +
+        "Use it for: mistakes/traps to avoid (start with '[GOTCHA]'), verified build/test commands, " +
+        "conventions the user corrected you on, architectural decisions, paths that matter, and things never to run. " +
         "Do NOT use it for the current task, transient state, file contents you can re-read, " +
-        "or anything the user has not confirmed. One fact per call, written as a short " +
-        "standalone sentence that will still make sense with no conversation around it. " +
+        "or unverified assumptions. For full multi-step procedures (like deployment or pentest routines), " +
+        "use `create_skill` instead. One fact per call, written as a short standalone sentence. " +
         "Stored in .termigo/memory.md, which the user can edit or delete. Asks for approval.",
       inputSchema: z.object({
         fact: z
           .string()
           .min(1)
           .describe(
-            "A single durable fact, phrased to stand alone. Good: 'Tests run with pnpm test; " +
-              "npm is not used in this repo.' Bad: 'The user asked me to fix the dialog.'",
+            "A single durable fact or avoided mistake, phrased to stand alone. " +
+              "Good: '[GOTCHA] Tests fail under npm; always use pnpm test.' or " +
+              "'Internal imports must use the @/ path alias.' Bad: 'I fixed a bug.'",
           ),
       }),
       needsApproval: true,

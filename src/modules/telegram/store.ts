@@ -59,7 +59,7 @@ export const useTelegramStore = create<TelegramBotState>()(
  * Re-read the persisted fields into this window's store and refresh hasToken
  * from the keychain. The bot runs in the main window but is configured in the
  * settings window; both share the same localStorage, so a change in one fires a
- * `storage` event in the other. Both windows call this from their listener —
+ * `storage` event in the other. Both windows call this from their listener -
  * and both guards skip no-op writes so windows do not ping-pong each other.
  */
 export async function syncTelegramFromStorage(): Promise<void> {

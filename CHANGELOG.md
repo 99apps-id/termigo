@@ -8,7 +8,7 @@ The last tagged public release before this cycle was **v0.9.5**; v0.9.6 and
 v0.9.7 were built and validated locally but never tagged. **v0.9.8** therefore
 carries everything shipped since v0.9.5.
 
-## [0.9.8] - 2026-09-03
+## [0.9.8] - 2026-09-05
 
 ### Added
 
@@ -60,6 +60,12 @@ carries everything shipped since v0.9.5.
   - In-chat elicitation (`ask_user`), opt-in post-execution Keep / Revert
     confirmation, and an **Artifacts** panel for canvases/previews/files the
     agent produced.
+  - `list_sql_connections` - discover saved database connection profiles (PostgreSQL, MySQL/MariaDB, SQLite) from the workspace store.
+  - `run_sql` connection resolution - execute queries against saved databases by name (e.g. `local_postgres` or `app_db`) without manually typing raw connection strings, with approval gating under `EXEC_TOOLS`.
+  - MCP tool deserialization resilience - gracefully handle MCP tools with nullable descriptions (`description: null`) instead of failing tool registration.
+  - MCP client JSON-RPC ID flexibility - accept both string and integer request/response IDs from MCP stdio servers.
+  - MCP cache invalidation - automatically invalidate and reload registered MCP tools when adding or removing servers in Settings.
+  - SQL Explorer query cards - custom syntax-highlighted SQL blocks and status chips in the AI tool chat feed.
 
 - **Agent UX (BatikCode parity)**
   - Live run-progress HUD: current step, loop round, live todo list with a
@@ -105,6 +111,11 @@ carries everything shipped since v0.9.5.
   sub-agent completions surface instead of "(no output)".
 - Terminal-home-dir git discovery guard, policy-engine evaluation, and lint
   cleanups (see commit history for details).
+- Telegram bot relay prompt echo race condition: fixed an issue where user input typed in Telegram was mirrored back as an echo before the assistant reply stream. Implemented synchronous locking via `startTelegramDispatch`, module-scoped tracking (`seenMessageIds`, `seenFingerprints`), and prompt fingerprinting (`recordTelegramText`, `isTelegramOriginText`).
+- SQL Explorer execution accuracy: fixed false-positive "Query OK" reporting by verifying command exit status codes (`output.status.success()`).
+- SQL CLI binary normalization: mapped database engines to standard CLI binaries (`sqlite` to `sqlite3`, `postgres` to `psql`), added `--uri=` flag support for MySQL/MariaDB, and added Windows `CREATE_NO_WINDOW` execution flags.
+- SQL output truncation inversion: shifted truncation to head-truncation to ensure table headers and leading rows remain readable when query outputs exceed size caps.
+- Light theme contrast: improved contrast across file explorer trees, git status indicators, terminal pane borders, stack tabs, and shell input overlays.
 
 ## [0.9.5] - 2026-08-31
 

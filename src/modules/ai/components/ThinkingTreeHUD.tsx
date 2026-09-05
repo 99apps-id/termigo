@@ -30,7 +30,7 @@ export function ThinkingTreeHUD({
   return (
     <div
       className={cn(
-        "rounded-lg border border-border/50 bg-card/60 p-2.5 text-xs backdrop-blur-sm transition-all",
+        "rounded-lg border border-border/80 bg-card p-2.5 text-xs shadow-xs transition-all dark:border-border/50 dark:bg-card/60",
         className,
       )}
     >
@@ -43,7 +43,7 @@ export function ThinkingTreeHUD({
           <span className="inline-block h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
           <span>Agent Execution & Reasoning ({nodes.length} steps)</span>
         </div>
-        <span className="text-[10px] text-muted-foreground/80">
+        <span className="text-[10px] text-muted-foreground">
           {expanded ? "Collapse" : "Expand"}
         </span>
       </button>
@@ -53,7 +53,7 @@ export function ThinkingTreeHUD({
           {nodes.map((node) => (
             <div
               key={node.id}
-              className="flex items-start justify-between rounded p-1.5 hover:bg-accent/40"
+              className="flex items-start justify-between rounded p-1.5 hover:bg-muted/50"
             >
               <div className="flex items-start gap-2 overflow-hidden pr-2">
                 <span className="mt-0.5 shrink-0 text-muted-foreground">
@@ -88,12 +88,12 @@ export function ThinkingTreeHUD({
                 )}
                 <span
                   className={cn(
-                    "rounded px-1.5 py-0.2 text-[9px] uppercase",
+                    "rounded px-1.5 py-0.5 text-[9px] uppercase",
                     node.status === "completed"
-                      ? "bg-emerald-500/10 text-emerald-500"
+                      ? "border border-emerald-500/20 bg-emerald-500/15 font-semibold text-emerald-800 dark:border-transparent dark:bg-emerald-500/10 dark:text-emerald-400"
                       : node.status === "running"
-                        ? "bg-blue-500/10 text-blue-500 animate-pulse"
-                        : "bg-destructive/10 text-destructive",
+                        ? "border border-blue-500/20 bg-blue-500/15 font-semibold text-blue-700 animate-pulse dark:border-transparent dark:bg-blue-500/10 dark:text-blue-400"
+                        : "border border-destructive/20 bg-destructive/15 font-semibold text-destructive dark:border-transparent dark:bg-destructive/10 dark:text-red-300",
                   )}
                 >
                   {node.status}

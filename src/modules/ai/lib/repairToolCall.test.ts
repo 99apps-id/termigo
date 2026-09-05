@@ -139,11 +139,77 @@ describe("repairToolCall", () => {
       tools,
       toolCall: { toolCallId: "1", toolName: "read_file", input: "{}" },
     });
-    // `read_file` is a real tool, so this is not a NoSuchTool — no rewrite.
+    // `read_file` is a real tool, so this is not a NoSuchTool - no rewrite.
     expect(result).toBeNull();
   });
 
-  it("returns null when the misspelled name has no close match", async () => {
+  it("rewrites cross-ecosystem aliases to canonical Termigo tools", async () => {
+    const tools = {
+      read_file: {},
+      write_file: {},
+      edit: {},
+      bash_run: {},
+      grep: {},
+      fetch: {},
+    };
+
+    // view_file -> read_file
+    const r1 = await repairToolCall({
+      tools,
+      toolCall: {
+        toolCallId: "c1",
+        toolName: "view_file",
+        input: '{"AbsolutePath":"/home/user/test.txt"}',
+      },
+    });
+    expect(r1?.toolName).toBe("read_file");
+    expect(JSON.parse(r1!.input).path).toBe("/home/user/test.txt");
+
+    // run_command -> bash_run
+    const r2 = await repairToolCall({
+      tools,
+      toolCall: {
+        toolCallId: "c2",
+        toolName: "run_command",
+        input: '{"CommandLine":"pnpm test"}',
+      },
+    });
+    expect(r2?.toolName).toBe("bash_run");
+    expect(JSON.parse(r2!.input).command).toBe("pnpm test");
+
+    // replace_file_content -> edit
+    const r3 = await repairToolCall({
+      tools,
+      toolCall: {
+        toolCallId: "c3",
+        toolName: "replace_file_content",
+        input:
+          '{"TargetFile":"a.ts","TargetContent":"old","ReplacementContent":"new"}',
+      },
+    });
+    expect(r3?.toolName).toBe("edit");
+    expect(JSON.parse(r3!.input).old_string).toBe("old");
+    expect(JSON.parse(r3!.input).new_string).toBe("new");
+    expect(JSON.parse(r3!.input).path).toBe("a.ts");
+  });
+
+  it("redirects unmapped tools to unknown_tool_fallback when registered", async () => {
+    const tools = { unknown_tool_fallback: {} };
+    const result = await repairToolCall({
+      tools,
+      toolCall: {
+        toolCallId: "c4",
+        toolName: "unrecognized_fancy_tool",
+        input: '{"arg":"val"}',
+      },
+    });
+    expect(result?.toolName).toBe("unknown_tool_fallback");
+    expect(JSON.parse(result!.input).requested_tool).toBe(
+      "unrecognized_fancy_tool",
+    );
+  });
+
+  it("returns null when the misspelled name has no close match and no fallback tool", async () => {
     const tools = { run_subagents: {}, run_subagent: {} };
     const result = await repairToolCall({
       tools,

@@ -164,6 +164,44 @@ describe("browser tools", () => {
     expect(js).toContain("dispatchEvent(new Event('input'");
   });
 
+  it("supports ref IDs for browser_click and browser_type", async () => {
+    const ctx = makeCtx();
+    const tools = buildBrowserTools(ctx);
+    await execOf(tools.browser_click)({ instance: "docs", ref: "@e1" }, OPTS);
+    let calls = (native.browserEmbedEval as ReturnType<typeof vi.fn>).mock
+      .calls;
+    expect(calls[0][1]).toContain('[data-termigo-ref=\\"@e1\\"]');
+
+    await execOf(tools.browser_type)(
+      { instance: "docs", ref: "e2", text: "termigo" },
+      OPTS,
+    );
+    calls = (native.browserEmbedEval as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls[1][1]).toContain('[data-termigo-ref=\\"@e2\\"]');
+  });
+
+  it("takes accessibility snapshot via browser_snapshot", async () => {
+    const ctx = makeCtx();
+    const tools = buildBrowserTools(ctx);
+    const r = (await execOf(tools.browser_snapshot)(
+      { instance: "docs" },
+      OPTS,
+    )) as { snapshot?: string };
+    expect(r.snapshot).toBe("body text");
+    expect(native.browserEmbedEval).toHaveBeenCalled();
+    expect(native.browserEmbedRead).toHaveBeenCalledWith("docs");
+  });
+
+  it("refuses SSRF URLs in browser_connect new_tab", async () => {
+    const ctx = makeCtx();
+    const tools = buildBrowserTools(ctx);
+    const r = (await execOf(tools.browser_connect)(
+      { action: "new_tab", url: "http://169.254.169.254/latest/meta-data" },
+      OPTS,
+    )) as { error?: string };
+    expect(r.error).toBeTruthy();
+  });
+
   it("closes the embed webview by instance", async () => {
     const ctx = makeCtx();
     const tools = buildBrowserTools(ctx);

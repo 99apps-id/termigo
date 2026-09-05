@@ -51,7 +51,7 @@ pub struct Session {
     pub master: Mutex<Box<dyn MasterPty + Send>>,
     // Set by the waiter once the child exits, so pty_open can reap a shell
     // that died before it was registered.
-    pub(super) exited: Arc<AtomicBool>,
+    pub(crate) exited: Arc<AtomicBool>,
 }
 
 impl Drop for Session {
@@ -70,7 +70,7 @@ impl Drop for Session {
 #[cfg(windows)]
 static CONPTY_LIFECYCLE_LOCK: Mutex<()> = Mutex::new(());
 
-pub(super) fn drop_session(session: Arc<Session>) {
+pub(crate) fn drop_session(session: Arc<Session>) {
     #[cfg(windows)]
     let _guard = CONPTY_LIFECYCLE_LOCK.lock().unwrap();
     drop(session);

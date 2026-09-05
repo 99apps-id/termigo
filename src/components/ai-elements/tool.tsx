@@ -35,12 +35,13 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import type { DynamicToolUIPart, ToolUIPart } from "ai";
 import type { ComponentProps, ReactNode } from "react";
 import { isValidElement, memo, useEffect, useMemo, useRef, useState } from "react";
+import { isMcpTool, parseMcpToolName } from "@/modules/ai/lib/mcpToolNames";
 import { Shimmer } from "./shimmer";
 
 export type ToolPart = ToolUIPart | DynamicToolUIPart;
 
 // Present tense (shown while the tool runs, with a shimmer) and past tense
-// (shown once it is done, static) — VS Code-style "Running…" → "Ran".
+// (shown once it is done, static) - VS Code-style "Running..." -> "Ran".
 type ToolMeta = { present: string; past: string; icon: typeof File01Icon };
 const TOOL_META: Record<string, ToolMeta> = {
   read_file: { present: "Reading", past: "Read", icon: File01Icon },
@@ -66,11 +67,23 @@ const TOOL_META: Record<string, ToolMeta> = {
   render_view: { present: "Rendering", past: "Rendered", icon: EyeIcon },
   run_subagent: { present: "Delegating", past: "Finished", icon: RobotIcon },
   todo_write: { present: "Updating plan", past: "Updated plan", icon: CheckListIcon },
+  run_sql: { present: "Running SQL", past: "Ran SQL", icon: TerminalIcon },
+  list_sql_connections: {
+    present: "Listing DBs",
+    past: "Listed DBs",
+    icon: FolderOpenIcon,
+  },
 };
 
 /** Title-cased tool name as a last-resort present-tense label (MCP / extension /
  *  custom tools that have no entry above). */
 function fallbackPresent(toolName: string): string {
+  if (isMcpTool(toolName)) {
+    const parsed = parseMcpToolName(toolName);
+    if (parsed) {
+      return `MCP: ${parsed.server} / ${parsed.tool}`;
+    }
+  }
   const words = toolName.replace(/[_-]+/g, " ").trim();
   return words ? words.charAt(0).toUpperCase() + words.slice(1) : toolName;
 }
@@ -131,8 +144,25 @@ function deriveSummary(toolName: string, input: unknown): string | null {
         ? `${items.length} item${items.length === 1 ? "" : "s"}`
         : null;
     }
-    default:
+    case "run_sql":
+      return str("query") ?? str("connection");
+    case "list_sql_connections":
+      return "Saved database connections";
+    default: {
+      if (isMcpTool(toolName)) {
+        const parsed = parseMcpToolName(toolName);
+        const arg =
+          str("query") ??
+          str("path") ??
+          str("url") ??
+          str("command") ??
+          str("prompt") ??
+          str("message");
+        if (parsed && arg) return `${parsed.server}: ${arg}`;
+        if (parsed) return parsed.tool;
+      }
       return null;
+    }
   }
 }
 
@@ -145,7 +175,7 @@ type ModifiedFile = {
  * Derive the files a mutating tool changed from its result output, so the tool
  * card can surface a "Modified files" chip row (BatikCode parity). The edit /
  * write / fileops tools all return an object carrying a `path` (or from/to for
- * a move) plus an `ok`/`moved`/`deleted`/`created` flag — this reads that shape
+ * a move) plus an `ok`/`moved`/`deleted`/`created` flag - this reads that shape
  * and normalises it to one entry per touched file.
  */
 function modifiedFilesFromOutput(
@@ -273,12 +303,12 @@ const ToolImpl = ({
   // Files this tool reports as modified (BatikCode "modified files" chips).
   const modifiedFiles = modifiedFilesFromOutput(toolName, output);
   // Edit tools are "heavy" (input carries file text), but their input preview is
-  // a compact computed line-diff, not the raw streamed body — and the memo keys
+  // a compact computed line-diff, not the raw streamed body - and the memo keys
   // heavy re-renders off the path summary, so it settles once at completion
   // rather than per token. Surface it so the card expands to an inline diff.
   const isEditDiff =
     (toolName === "edit" || toolName === "multi_edit") && Boolean(input);
-  // For other heavy tools, only show details on error — never the streamed
+  // For other heavy tools, only show details on error - never the streamed
   // input body, which is huge and re-renders per token.
   const showInputBody = (!isHeavy && Boolean(input)) || isEditDiff;
   const showOutputBody = !isHeavy && output !== undefined;
@@ -393,7 +423,7 @@ const ToolImpl = ({
 };
 
 // For heavy tools, the only thing that should trigger a re-render is a
-// state transition or the path summary changing — NOT every input-content
+// state transition or the path summary changing - NOT every input-content
 // token. We compare the cheap derived summary instead of the input ref.
 export const Tool = memo(ToolImpl, (a, b) => {
   if (a.toolName !== b.toolName || a.state !== b.state) return false;
@@ -515,7 +545,7 @@ type EditPair = { oldStr: string; newStr: string };
 type DiffRow = { type: "del" | "add"; text: string };
 
 // A minimal line diff: trim the common head/tail, then everything left in the
-// middle is what actually changed — removed lines then added lines. Good enough
+// middle is what actually changed - removed lines then added lines. Good enough
 // to read an edit at a glance without pulling in a full Myers diff.
 function lineDiff(oldStr: string, newStr: string): DiffRow[] {
   const a = oldStr.split("\n");
@@ -624,6 +654,25 @@ function renderToolOutput(toolName: string, output: unknown): ReactNode | null {
   if (!output || typeof output !== "object") return null;
   const o = output as Record<string, unknown>;
 
+  if (toolName === "run_sql" && typeof o.output === "string") {
+    return <CodeBlockMini code={o.output} language="sql" />;
+  }
+
+  if (isMcpTool(toolName) && Array.isArray(o.content)) {
+    const textBlocks = o.content
+      .filter(
+        (c: unknown) =>
+          typeof c === "object" &&
+          c !== null &&
+          (c as { type?: string }).type === "text" &&
+          typeof (c as { text?: string }).text === "string",
+      )
+      .map((c: unknown) => (c as { text: string }).text);
+    if (textBlocks.length > 0) {
+      return <CodeBlockMini code={textBlocks.join("\n\n")} language="text" />;
+    }
+  }
+
   if (toolName === "browser_screenshot" && o.kind === "screenshot") {
     if (typeof o.data !== "string") return null;
     const mediaType = typeof o.mediaType === "string" ? o.mediaType : "image/png";
@@ -642,7 +691,7 @@ function renderToolOutput(toolName: string, output: unknown): ReactNode | null {
   if (toolName === "read_file") {
     const path = typeof o.path === "string" ? o.path : "";
     const size = typeof o.size === "number" ? o.size : null;
-    // Image reads carry the picture back for a vision model — show it.
+    // Image reads carry the picture back for a vision model - show it.
     if (o.kind === "image" && typeof o.data === "string") {
       const mediaType =
         typeof o.mediaType === "string" ? o.mediaType : "image/png";
@@ -797,7 +846,7 @@ function renderToolOutput(toolName: string, output: unknown): ReactNode | null {
   }
 
   if (toolName === "glob") {
-    // glob returns `hits` — either bare path strings or `{ path }` objects
+    // glob returns `hits` - either bare path strings or `{ path }` objects
     // (grep and glob share `native.search`'s hit shape). Read the real key so
     // the result renders as a list instead of falling through to JSON.
     const raw = Array.isArray(o.hits)
@@ -1124,7 +1173,7 @@ function formatBytes(n: number): string {
 }
 
 function CodeBlockMini({ code }: { code: string; language: string }) {
-  // Tool input/output is debug-grade detail — JSON arrives pre-formatted and
+  // Tool input/output is debug-grade detail - JSON arrives pre-formatted and
   // file content is shown in the editor diff tab. Highlighting here is not
   // worth the parser hop.
   return (
@@ -1182,7 +1231,7 @@ function SuggestCommandCard({
   );
 }
 
-// Compatibility re-exports — the previous API exposed these subcomponents,
+// Compatibility re-exports - the previous API exposed these subcomponents,
 // but the new compact <Tool /> takes everything via props. Kept as no-ops
 // to avoid breaking accidental imports.
 export const ToolHeader = () => null;

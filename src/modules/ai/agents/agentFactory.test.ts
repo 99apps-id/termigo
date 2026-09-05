@@ -70,7 +70,7 @@ describe("buildAgentTools", () => {
     const tools = buildAgentTools(noTools(), {
       profile: BUILTIN_PROFILES.no_todo,
     });
-    // no_todo hides todo_write, which is not in our fixture — but the shape is
+    // no_todo hides todo_write, which is not in our fixture - but the shape is
     // what matters: hideTools must be honoured.
     expect(tools.read_file).toBeDefined();
   });
@@ -97,6 +97,29 @@ describe("buildAgentTools", () => {
     const tools = buildAgentTools(noTools());
     expect(tools.run_subagent).toBeDefined();
     expect(tools.run_subagents).toBeDefined();
+  });
+
+  it("capability-gates disallowed tools for specialized subagents (Hermes style)", () => {
+    const fixture = {
+      read_file: { execute: () => undefined },
+      edit: { execute: () => undefined },
+      write_file: { execute: () => undefined },
+      bash_run: { execute: () => undefined },
+      process: { execute: () => undefined },
+    };
+    const reviewTools = buildAgentTools(fixture, {
+      subagentType: "code-review",
+    });
+    expect(reviewTools.read_file).toBeDefined();
+    expect(reviewTools.bash_run).toBeDefined();
+    expect(reviewTools.edit).toBeUndefined();
+    expect(reviewTools.write_file).toBeUndefined();
+    expect(reviewTools.process).toBeUndefined();
+
+    const exploreTools = buildAgentTools(fixture, {
+      subagentType: "explore",
+    });
+    expect(exploreTools.process).toBeUndefined();
   });
 });
 
