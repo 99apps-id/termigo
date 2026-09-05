@@ -25,9 +25,9 @@ export function ApprovalQueueStrip() {
   if (pending.length === 0) return null;
 
   return (
-    <div className="flex flex-col min-h-0 shrink-0 border-t-2 border-amber-500/40 bg-amber-500/5 px-3 py-1.5 max-h-[35%]">
+    <div className="flex flex-col min-h-0 shrink-0 border-t-2 border-amber-500/50 bg-card px-3 py-1.5 max-h-[35%] shadow-sm dark:bg-amber-500/5 dark:border-amber-500/40">
       <div className="my-1.5 flex items-center gap-2 shrink-0">
-        <span className="text-[11px] font-medium text-foreground">
+        <span className="text-[11px] font-semibold text-foreground">
           Waiting for you
         </span>
         <span className="text-[11px] tabular-nums font-mono text-muted-foreground">
@@ -57,7 +57,7 @@ export function ApprovalQueueStrip() {
           {pending.map((p, i) => (
             <div
               key={p.id}
-              className="flex items-center gap-2 rounded border border-border/50 bg-background/60 px-2 py-1"
+              className="flex items-center gap-2 rounded border border-border/80 bg-muted/40 px-2 py-1 text-foreground dark:border-border/50 dark:bg-background/60"
             >
               <span className="w-4 shrink-0 text-[11px] tabular-nums font-mono text-muted-foreground">
                 {i + 1}
@@ -68,7 +68,7 @@ export function ApprovalQueueStrip() {
               <span className="shrink-0 text-[11px] font-mono text-muted-foreground">
                 {p.toolName}
               </span>
-              <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
+              <span className="min-w-0 flex-1 truncate text-[11px] text-foreground/85 dark:text-muted-foreground">
                 {p.summary}
               </span>
               <Button

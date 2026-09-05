@@ -18,10 +18,10 @@ export function ElicitationCarousel() {
       {pending.map((q) => (
         <div
           key={q.id}
-          className="rounded-lg border border-primary/25 bg-primary/5 px-3 py-2.5"
+          className="rounded-lg border border-primary/35 bg-card px-3 py-2.5 shadow-xs dark:border-primary/25 dark:bg-primary/5"
         >
           <div className="flex items-start gap-2">
-            <span className="min-w-0 flex-1 text-[12.5px] leading-relaxed text-foreground">
+            <span className="min-w-0 flex-1 text-[12.5px] font-medium leading-relaxed text-foreground">
               {q.question}
             </span>
             <button
@@ -52,8 +52,8 @@ export function ElicitationCarousel() {
                 type="button"
                 onClick={() => answer(q.id, opt)}
                 className={cn(
-                  "rounded-md border border-border/60 bg-background/70 px-2.5 py-1 text-left text-[11.5px] text-foreground transition-colors",
-                  "hover:border-primary/50 hover:bg-primary/10",
+                  "rounded-md border border-border/80 bg-card px-2.5 py-1 text-left text-[11.5px] font-medium text-foreground shadow-2xs transition-colors dark:border-border/60 dark:bg-background/70",
+                  "hover:border-primary hover:bg-primary/10",
                   "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
                 )}
               >

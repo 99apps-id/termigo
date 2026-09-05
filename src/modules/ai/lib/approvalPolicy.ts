@@ -29,6 +29,7 @@ const EDIT_TOOLS = new Set([
   // how the agent gets better; gating it above edits would make improving
   // itself cost more than editing the code it just learned about.
   "create_skill",
+  "update_skill",
   // Defining a tool writes a JSON file. Running one is a shell command, and
   // is gated as such by the cmd__ prefix below.
   "create_tool",
@@ -59,9 +60,12 @@ const EXEC_TOOLS = new Set([
   "bash_background",
   "spawn_coding_agent",
   "send_to_agent",
-  // Spawning a dev server runs a long-lived process and opens a page — an
+  // Spawning a dev server runs a long-lived process and opens a page - an
   // exec-tier action, so it never rides along with "auto-approve edits".
   "dev_server",
+  "process",
+  // Executing arbitrary SQL queries against a live database CLI.
+  "run_sql",
 ]);
 
 export type ApprovalMode =
@@ -86,7 +90,7 @@ export const APPROVAL_MODE_HINTS: Record<ApprovalMode, string> = {
   ask: "Every file change and command waits for your approval.",
   edits:
     "File edits in the workspace run automatically. Commands and agent hand-offs still ask.",
-  all: "Everything runs without asking, except deleting files — that always waits, in every mode. Safety checks still block unsafe paths and commands.",
+  all: "Everything runs without asking, except deleting files - that always waits, in every mode. Safety checks still block unsafe paths and commands.",
 };
 
 /**
@@ -112,6 +116,8 @@ export type ApprovalContext = {
   onRemoteHost?: boolean;
   /** The shell command, when the call is one. Decides inspect vs change. */
   command?: string;
+  /** Action parameter for multi-action tools like process. */
+  action?: string;
 };
 
 /**
@@ -153,6 +159,15 @@ export function isAutoApproved(
     // server still stops - and the classifier treats whatever it does not
     // recognise as changing the server.
     return commandRisk(ctx.command ?? "") === "inspect";
+  }
+  // For process management, read-only inspection actions do not mutate or spawn
+  // anything, so they auto-approve in 'edits' mode just like other read operations.
+  if (
+    toolName === "process" &&
+    ctx.action &&
+    ["list", "status", "logs", "wait", "find_port"].includes(ctx.action)
+  ) {
+    return mode !== "ask";
   }
   if (mode === "all") return true;
   // An MCP tool is third-party code doing something this app cannot inspect,

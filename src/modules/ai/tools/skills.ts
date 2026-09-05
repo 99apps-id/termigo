@@ -8,6 +8,7 @@ import {
   readSkill,
   saveSkill,
   slugifySkillName,
+  updateSkill,
 } from "../lib/skills";
 import { checkSkillDependencies, dependencyWarning } from "../lib/skillDeps";
 import type { ToolContext } from "./context";
@@ -19,7 +20,7 @@ export function buildSkillTools(
   return {
     use_skill: tool({
       description:
-        "Read a skill you wrote in an earlier session. The available skills and what each is for are listed in your system prompt — call this with a name from that list BEFORE working out your own approach, since the skill already contains one that worked. Read-only, so it runs without approval.",
+        "Read a skill you wrote in an earlier session. The available skills and what each is for are listed in your system prompt - call this with a name from that list BEFORE working out your own approach, since the skill already contains one that worked. Read-only, so it runs without approval.",
       inputSchema: z.object({
         name: z
           .string()
@@ -62,7 +63,7 @@ ${skill.body}`,
 
     find_skill: tool({
       description:
-        "Search every skill library on this machine — this workspace, your user-level skills, and those installed by other agent tools — for one matching a query. Use it when a task looks like something a skill would cover but nothing in your prompt matches. Returns names and descriptions; call `use_skill` with a returned path to read one. Read-only, so it runs without approval.",
+        "Search every skill library on this machine - this workspace, your user-level skills, and those installed by other agent tools - for one matching a query. Use it when a task looks like something a skill would cover but nothing in your prompt matches. Returns names and descriptions; call `use_skill` with a returned path to read one. Read-only, so it runs without approval.",
       inputSchema: z.object({
         query: z
           .string()
@@ -93,7 +94,7 @@ ${skill.body}`,
 
     create_tool: tool({
       description:
-        "Define a reusable shell command as a named tool, so a command worth repeating becomes something you can call by name instead of retyping. Use AFTER running a command that will recur with different arguments — a deploy script, a log tail, a migration runner. The command is a template with {{placeholders}}; every argument is shell-quoted when it runs, so a value can never become a second command. Stored in .termigo/tools.json. Re-using a name replaces that tool. Asks for approval.",
+        "Define a reusable shell command as a named tool, so a command worth repeating becomes something you can call by name instead of retyping. Use AFTER running a command that will recur with different arguments - a deploy script, a log tail, a migration runner. The command is a template with {{placeholders}}; every argument is shell-quoted when it runs, so a value can never become a second command. Stored in .termigo/tools.json. Re-using a name replaces that tool. Asks for approval.",
       inputSchema: z.object({
         name: z
           .string()
@@ -147,7 +148,7 @@ ${skill.body}`,
 
     create_skill: tool({
       description:
-        "Save a reusable procedure so future sessions start from it instead of working it out again. Write one AFTER finishing something non-obvious that will recur: a deploy sequence, a debugging route that worked, a release checklist, the way this project's tooling actually behaves. Do NOT write one for a single-use task, for something you have not verified, or for facts — use `remember` for those. Re-saving an existing name replaces it, which is how a skill gets better with use. Asks for approval.",
+        "Save a reusable procedure so future sessions start from it instead of working it out again. Write one AFTER finishing something non-obvious that will recur: a deploy sequence, a debugging route that worked, a release checklist, the way this project's tooling actually behaves. Do NOT write one for a single-use task, for something you have not verified, or for facts - use `remember` for those. Re-saving an existing name replaces it, which is how a skill gets better with use. Asks for approval.",
       inputSchema: z.object({
         name: z
           .string()
@@ -191,6 +192,45 @@ ${skill.body}`,
           path: outcome.path,
           replaced: outcome.replaced,
           limit_bytes: MAX_SKILL_BYTES,
+        };
+      },
+    }),
+
+    update_skill: tool({
+      description:
+        "Update or refine an existing skill in .termigo/skills/ based on new learnings, troubleshooting, or changed steps (Hermes Agent self-improving loop). Allows updating the description, replacing content, or appending new troubleshooting notes. Asks for approval.",
+      inputSchema: z.object({
+        name: z
+          .string()
+          .describe("Name of the existing skill to update, e.g. 'deploy-to-vps'."),
+        description: z
+          .string()
+          .optional()
+          .describe("Updated trigger description (if changed)."),
+        content: z
+          .string()
+          .optional()
+          .describe("New full procedure content (if replacing entire body)."),
+        append: z
+          .string()
+          .optional()
+          .describe(
+            "Text/notes to append to the existing skill content (e.g. edge cases, verified workarounds).",
+          ),
+      }),
+      needsApproval: true,
+      execute: async ({ name, description, content, append }) => {
+        const outcome = await updateSkill(ctx.getWorkspaceRoot(), name, {
+          description,
+          body: content,
+          append,
+        });
+        if (!outcome.saved) return { saved: false, reason: outcome.reason };
+        return {
+          saved: true,
+          name,
+          path: outcome.path,
+          note: "Skill updated successfully for future runs.",
         };
       },
     }),

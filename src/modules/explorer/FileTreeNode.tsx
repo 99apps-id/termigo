@@ -135,13 +135,13 @@ function FileTreeNodeImpl({
               onClick={handleNodeSelect}
               onDoubleClick={() => !isDir && tree.beginRename(path)}
               className={cn(
-                "group text-sidebar-foreground/85 hover:bg-sidebar-accent/40 relative flex w-full cursor-pointer items-center gap-2 px-1.5 py-0.5 text-left text-[13px] transition-colors",
+                "group relative flex w-full cursor-pointer items-center gap-2 px-1.5 py-0.5 text-left text-[13px] text-sidebar-foreground transition-colors hover:bg-sidebar-accent/60 dark:hover:bg-sidebar-accent/40",
                 isSelected &&
                   "bg-sidebar-accent text-sidebar-accent-foreground shadow-[inset_2px_0_0_0_var(--ring)]",
               )}
               style={{ paddingLeft: 6 + depth * 12 }}
             >
-              <span className="text-muted-foreground flex size-3.5 shrink-0 items-center justify-center">
+              <span className="flex size-3.5 shrink-0 items-center justify-center text-muted-foreground">
                 {isDir ? (
                   <ChevronRight
                     size={12}
@@ -151,14 +151,14 @@ function FileTreeNodeImpl({
                 ) : null}
               </span>
               {iconUrl ? (
-                <img src={iconUrl} alt="" className={cn("size-4 shrink-0", dim && "opacity-50")} />
+                <img src={iconUrl} alt="" className={cn("size-4 shrink-0", dim && "opacity-60")} />
               ) : (
                 <span className="size-4 shrink-0" />
               )}
               <span
                 className={cn(
                   "min-w-0 flex-1 truncate",
-                  dim && "opacity-50",
+                  dim && "opacity-60",
                   deco?.tone,
                   deco?.status === "deleted" && "line-through",
                 )}
@@ -169,7 +169,7 @@ function FileTreeNodeImpl({
                   it undefined. Muted mono so it reads as metadata, not content.
                   mr-2 clears the ScrollArea overlay thumb like the git letter. */}
               {entry.permissions && (
-                <span className="text-muted-foreground/60 mr-2 shrink-0 font-mono text-[10px] tracking-tight tabular-nums">
+                <span className="mr-2 shrink-0 font-mono text-[10px] tracking-tight tabular-nums text-muted-foreground opacity-75">
                   {entry.permissions}
                 </span>
               )}

@@ -32,13 +32,15 @@ export type WebSearchResult = {
  * A result that is already a plain URL is passed through unchanged.
  */
 export function decodeDdgUrl(href: string): string {
-  if (!href.includes("uddg=")) return href;
-  const m = href.match(/[?&]uddg=([^&]+)/);
-  if (!m) return href;
+  let raw = href.trim();
+  if (raw.startsWith("//")) raw = `https:${raw}`;
+  if (!raw.includes("uddg=")) return raw;
+  const m = raw.match(/[?&]uddg=([^&]+)/);
+  if (!m) return raw;
   try {
     return decodeURIComponent(m[1]);
   } catch {
-    return href;
+    return raw;
   }
 }
 

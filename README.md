@@ -297,7 +297,15 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   tools always ask for approval, including under `Auto-approve edits`: that mode
   is a statement about files in this workspace, not about arbitrary third-party
   actions. A server that fails to start costs only its own tools, not everyone
-  else's.
+  else's. Tools with nullable descriptions (`description: null`) and dynamic
+  string/int JSON-RPC IDs are handled gracefully, and changing servers in
+  Settings immediately refreshes the active agent tool cache.
+- **Database interaction (`run_sql`, `list_sql_connections`).** The agent can list
+  configured database profiles from the SQL Explorer store and execute queries
+  against saved connections by name (e.g. `run_sql` with `connection: "app_db"`
+  or a direct URI). All queries stop for confirmation under the `EXEC_TOOLS`
+  approval policy, and results are presented in-chat with custom SQL syntax
+  blocks and head-preserved row outputs.
 - **Web search, documents, images, clipboard, environment.** `web_search`
   queries DuckDuckGo through the same SSRF-guarded HTTP path as `fetch` (no API
   key needed) and returns the top results — title, URL, snippet — so the agent
@@ -365,6 +373,14 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   live updates when files change on disk
 - Attach files and selections directly to the AI side-panel
 - Web preview auto-detects local dev servers; external URLs open in a child webview
+ 
+### SQL Explorer
+
+- Connect to and manage SQLite, PostgreSQL, and MySQL/MariaDB databases
+- Interactive SQL query runner with tabular results and syntax highlighting
+- Seamless AI agent integration via `list_sql_connections` and `run_sql` tools
+- Security-first design: all agent database queries require explicit approval under `EXEC_TOOLS`
+- Normalized CLI binary execution across platforms with Windows `CREATE_NO_WINDOW` support
 
 ### Themes & customization
 

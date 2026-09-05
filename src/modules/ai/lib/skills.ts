@@ -202,6 +202,60 @@ export async function saveSkill(
   return { saved: true, path: skillPath(workspaceRoot, skill.name), replaced };
 }
 
+/** Update or refine an existing skill (Hermes-style evolution). */
+export async function updateSkill(
+  workspaceRoot: string | null,
+  name: string,
+  updates: {
+    description?: string;
+    body?: string;
+    append?: string;
+  },
+): Promise<SaveOutcome> {
+  if (!workspaceRoot) {
+    return {
+      saved: false,
+      reason: "no workspace is open, so there is nowhere to store this",
+    };
+  }
+  const slug = slugifySkillName(name);
+  if (!slug) {
+    return {
+      saved: false,
+      reason: `"${name}" cannot be turned into a valid skill name`,
+    };
+  }
+  if (
+    !updates.description?.trim() &&
+    updates.body === undefined &&
+    !updates.append?.trim()
+  ) {
+    return {
+      saved: false,
+      reason:
+        "at least one of 'description', 'content', or 'append' must be provided to update a skill",
+    };
+  }
+  const existing = await readSkill(workspaceRoot, slug);
+  if (!existing) {
+    return {
+      saved: false,
+      reason: `skill "${name}" does not exist; use create_skill to create a new one`,
+    };
+  }
+  let newBody =
+    updates.body !== undefined ? updates.body.trim() : existing.body;
+  if (updates.append && updates.append.trim()) {
+    newBody = `${newBody}\n\n${updates.append.trim()}`;
+  }
+  const newDesc = updates.description?.trim() || existing.description;
+  return saveSkill(workspaceRoot, {
+    name: existing.name,
+    description: newDesc,
+    body: newBody,
+  });
+}
+
 /**
  * The prompt block: names and descriptions only.
  *

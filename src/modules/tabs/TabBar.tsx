@@ -201,7 +201,7 @@ export function TabBar({
     return () => el.removeEventListener("wheel", onWheel);
   }, []);
 
-  // Whether the strip overflows and can scroll each way — drives the ‹ › nudge
+  // Whether the strip overflows and can scroll each way - drives the ‹ › nudge
   // buttons. Wheel/trackpad scrolling always worked, but was invisible; the
   // buttons give the overflow a clickable, discoverable affordance.
   const [overflow, setOverflow] = useState({ left: false, right: false });
@@ -264,7 +264,7 @@ export function TabBar({
             >
               <span
                 aria-hidden
-                className="pointer-events-none absolute left-0 top-1/2 h-7 rounded-md bg-gradient-to-br from-teal-400/15 via-sky-400/12 to-violet-400/18 shadow-[0_0_12px_rgba(116,155,255,0.18)] ring-1 ring-inset ring-teal-400/25"
+                className="pointer-events-none absolute left-0 top-1/2 h-7 rounded-md bg-card shadow-xs ring-1 ring-inset ring-border/80 dark:bg-gradient-to-br dark:from-teal-400/15 dark:via-sky-400/12 dark:to-violet-400/18 dark:shadow-[0_0_12px_rgba(116,155,255,0.18)] dark:ring-teal-400/25"
                 style={
                   pill
                     ? {
@@ -388,8 +388,8 @@ export function TabBar({
                       "group relative z-[1] h-7 shrink-0 justify-between gap-1.5 rounded-md bg-transparent text-xs transition-colors data-active:bg-transparent dark:data-active:bg-transparent",
                       isNew && "termigo-tab-in",
                       isActive
-                        ? "text-foreground dark:text-foreground"
-                        : "text-muted-foreground hover:text-foreground/80 dark:text-muted-foreground",
+                        ? "font-medium text-foreground dark:text-foreground"
+                        : "text-muted-foreground hover:text-foreground dark:text-muted-foreground",
                       draggingId === t.id && "opacity-50",
                       compact
                         ? "px-1.5!"
@@ -536,7 +536,7 @@ export function TabBar({
                           e.stopPropagation();
                           onClose(t.id);
                         }}
-                        className="rounded p-0.5 opacity-0 transition-opacity hover:bg-accent hover:opacity-100 group-hover:opacity-60"
+                        className="rounded p-0.5 opacity-0 transition-opacity hover:bg-accent hover:opacity-100 group-hover:opacity-75"
                       >
                         <HugeiconsIcon
                           icon={Cancel01Icon}

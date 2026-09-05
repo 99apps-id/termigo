@@ -506,9 +506,9 @@ export const FileExplorer = memo(
         tabIndex={0}
         onKeyDown={handleKeyDown}
       >
-        <div className="flex h-8 shrink-0 items-center gap-1 border-b border-border/60 px-2">
+        <div className="flex h-8 shrink-0 items-center gap-1 border-b border-border px-2">
           <span
-            className="flex flex-1 items-center truncate text-xs font-medium text-foreground/80"
+            className="flex flex-1 items-center truncate text-xs font-medium text-foreground"
             title={rootPath}
           >
             <img
@@ -858,7 +858,7 @@ export const FileExplorer = memo(
         {dnd.dragLabel ? (
           <div
             ref={dnd.ghostRef}
-            className="pointer-events-none fixed left-0 top-0 z-50 flex items-center gap-1.5 rounded-sm border border-border/70 bg-card/95 px-2 py-1 text-[12px] text-foreground shadow-md"
+            className="pointer-events-none fixed left-0 top-0 z-50 flex items-center gap-1.5 rounded-sm border border-border bg-card px-2 py-1 text-[12px] text-foreground shadow-md dark:bg-card/95"
           >
             {dnd.dragLabel}
           </div>

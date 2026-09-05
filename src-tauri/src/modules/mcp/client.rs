@@ -41,11 +41,19 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 /// limit while we wait for a reply that is never coming.
 const MAX_LINE_BYTES: usize = 8 * 1024 * 1024;
 
+fn deserialize_null_as_empty_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let opt = Option::<String>::deserialize(deserializer)?;
+    Ok(opt.unwrap_or_default())
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpTool {
     pub name: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_as_empty_string")]
     pub description: String,
     /// JSON Schema for the tool's arguments, passed through untouched.
     #[serde(default)]
@@ -248,7 +256,12 @@ impl McpClient {
             let Ok(message) = serde_json::from_str::<Value>(line.trim()) else {
                 continue; // not JSON: a log line on stdout
             };
-            if message.get("id").and_then(Value::as_u64) != Some(id) {
+            let matches_id = match message.get("id") {
+                Some(Value::Number(n)) => n.as_u64() == Some(id),
+                Some(Value::String(s)) => s.parse::<u64>().ok() == Some(id),
+                _ => false,
+            };
+            if !matches_id {
                 continue; // a notification, or an answer to something else
             }
             if let Some(error) = message.get("error") {

@@ -87,12 +87,12 @@ function EntryRowImpl(props: EntryRowProps) {
       onClick={handleClick}
       onDoubleClick={() => !isDir && actions.beginRename(path)}
       className={cn(
-        "group flex h-6 w-full min-w-0 cursor-pointer items-center gap-2 rounded-sm px-1.5 text-left text-[13px] transition-colors hover:bg-accent/70",
+        "group flex h-6 w-full min-w-0 cursor-pointer items-center gap-2 rounded-sm px-1.5 text-left text-[13px] transition-colors hover:bg-accent",
         isSelected
           ? "bg-accent text-foreground"
           : gitignored
-            ? "text-muted-foreground/70"
-            : "text-foreground/85",
+            ? "text-muted-foreground/75"
+            : "text-foreground",
         isDropTarget && "bg-primary/10 ring-1 ring-inset ring-primary/60",
       )}
       style={{ paddingLeft }}

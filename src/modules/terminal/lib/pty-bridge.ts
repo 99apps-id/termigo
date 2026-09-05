@@ -26,7 +26,7 @@ export async function openPty(
   persist?: boolean,
   persistKey?: string,
 ): Promise<PtySession> {
-  // Raw bytes — no base64/JSON round-trip; messages arrive as ArrayBuffer.
+  // Raw bytes - no base64/JSON round-trip; messages arrive as ArrayBuffer.
   const onData = new Channel<ArrayBuffer>();
   const onExit = new Channel<number>();
 
@@ -70,6 +70,7 @@ export async function openPty(
     close: async () => {
       if (closed) return;
       closed = true;
+      releaseHandlers();
       try {
         await invoke("pty_close", { id });
       } finally {

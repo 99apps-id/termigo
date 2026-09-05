@@ -103,6 +103,15 @@ describe("git command builders", () => {
     expect(gitBlameCommand({})).toBe("git blame --line-porcelain");
   });
 
+  it("rejects malicious or invalid blame lines ranges", () => {
+    expect(() =>
+      gitBlameCommand({ path: "src/App.tsx", lines: "5; rm -rf /" }),
+    ).toThrow();
+    expect(() =>
+      gitBlameCommand({ path: "src/App.tsx", lines: "1`calc`" }),
+    ).toThrow();
+  });
+
   it("builds a show command with stat by default and full diff on request", () => {
     expect(gitShowCommand({})).toBe("git show --format=fuller --stat 'HEAD'");
     expect(gitShowCommand({ ref: "abc1234" })).toBe(
@@ -117,5 +126,9 @@ describe("git command builders", () => {
     expect(
       gitShowCommand({ ref: "abc", path: "src/App.tsx", statOnly: true }),
     ).toBe("git show --format=fuller --stat 'abc' -- 'src/App.tsx'");
+  });
+
+  it("rejects option-like refs starting with a dash in gitShowCommand", () => {
+    expect(() => gitShowCommand({ ref: "--output=/tmp/pwn" })).toThrow();
   });
 });

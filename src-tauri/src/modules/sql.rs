@@ -1,4 +1,4 @@
-//! SQL Explorer — run a query against a user-configured database CLI.
+//! SQL Explorer - run a query against a user-configured database CLI.
 //!
 //! Execution is delegated to an installed CLI (`sqlite3`, `duckdb`, `psql`,
 //! `mysql`, ...) chosen by the user in Settings. The query is piped over stdin,
@@ -27,6 +27,16 @@ fn has_control_bytes(s: &str) -> bool {
         .any(|b| b == 0 || b == 0x1b || (b < 0x20 && b != b'\n' && b != b'\r'))
 }
 
+/// Resolve a command name against PATH before spawning it.
+fn resolve_program(command: &str) -> std::ffi::OsString {
+    if command.contains('/') || command.contains('\\') {
+        return command.into();
+    }
+    which::which(command)
+        .map(std::path::PathBuf::into_os_string)
+        .unwrap_or_else(|_| command.into())
+}
+
 /// Build the argv (engine + connection + any flags) without a shell. For psql
 /// we read the query from stdin via `-f -`; sqlite/duckdb/mysql read stdin by
 /// default. The connection is a single argv entry, never split.
@@ -46,8 +56,28 @@ pub fn build_sql_argv(engine: &str, connection: &str) -> Result<Vec<String>, Str
     if has_control_bytes(connection) {
         return Err("connection string contains control bytes".into());
     }
-    let mut argv = vec![engine.to_string(), connection.to_string()];
-    if matches!(engine, "psql" | "postgres") {
+
+    // Normalize engine alias to the installed CLI binary name.
+    let binary = match engine {
+        "sqlite" | "sqlite3" => "sqlite3",
+        "postgres" | "psql" => "psql",
+        "duckdb" => "duckdb",
+        "mysql" => "mysql",
+        "mariadb" => "mariadb",
+        _ => return Err(format!("unsupported engine \"{engine}\"")),
+    };
+
+    let mut argv = vec![binary.to_string()];
+
+    if matches!(binary, "mysql" | "mariadb")
+        && (connection.starts_with("mysql://") || connection.starts_with("mariadb://"))
+    {
+        argv.push(format!("--uri={connection}"));
+    } else {
+        argv.push(connection.to_string());
+    }
+
+    if binary == "psql" {
         // psql reads the script from stdin when given `-f -`.
         argv.push("-f".into());
         argv.push("-".into());
@@ -77,11 +107,18 @@ pub fn run_query(engine: &str, connection: &str, query: &str) -> Result<String, 
     let argv = build_sql_argv(engine, connection)?;
     validate_query(query)?;
 
-    let mut cmd = Command::new(&argv[0]);
+    let mut cmd = Command::new(resolve_program(&argv[0]));
     cmd.args(&argv[1..])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
 
     let mut child = cmd.spawn().map_err(|e| format!("spawn {engine}: {e}"))?;
     {
@@ -94,18 +131,29 @@ pub fn run_query(engine: &str, connection: &str, query: &str) -> Result<String, 
         .wait_with_output()
         .map_err(|e| format!("wait for {engine}: {e}"))?;
 
+    let stdout_text = String::from_utf8_lossy(&output.stdout);
+    let stderr_text = String::from_utf8_lossy(&output.stderr);
+
+    if !output.status.success() {
+        let err_msg = if !stderr_text.trim().is_empty() {
+            stderr_text.trim()
+        } else if !stdout_text.trim().is_empty() {
+            stdout_text.trim()
+        } else {
+            "query execution failed"
+        };
+        return Err(format!("{engine} error: {err_msg}"));
+    }
+
     let mut text = String::with_capacity(MAX_OUTPUT_CHARS.saturating_mul(2));
-    text.push_str(&String::from_utf8_lossy(&output.stdout));
-    if !output.stderr.is_empty() {
+    text.push_str(&stdout_text);
+    if !stderr_text.is_empty() {
         text.push_str("\n[stderr]\n");
-        text.push_str(&String::from_utf8_lossy(&output.stderr));
+        text.push_str(&stderr_text);
     }
     if text.chars().count() > MAX_OUTPUT_CHARS {
-        let tail: String = text
-            .chars()
-            .skip(text.chars().count() - MAX_OUTPUT_CHARS)
-            .collect();
-        text = format!("…[truncated]…\n{tail}");
+        let head: String = text.chars().take(MAX_OUTPUT_CHARS).collect();
+        text = format!("{head}\n…[output truncated]…");
     }
     Ok(text)
 }
@@ -133,6 +181,24 @@ mod tests {
     fn psql_reads_query_from_stdin() {
         let argv = build_sql_argv("psql", "postgres://u@h/db").unwrap();
         assert_eq!(argv, vec!["psql", "postgres://u@h/db", "-f", "-"]);
+    }
+
+    #[test]
+    fn normalizes_engine_aliases() {
+        let sqlite = build_sql_argv("sqlite", "/tmp/app.db").unwrap();
+        assert_eq!(sqlite, vec!["sqlite3", "/tmp/app.db"]);
+
+        let postgres = build_sql_argv("postgres", "postgres://u@h/db").unwrap();
+        assert_eq!(postgres, vec!["psql", "postgres://u@h/db", "-f", "-"]);
+    }
+
+    #[test]
+    fn mysql_uri_uses_uri_flag() {
+        let argv = build_sql_argv("mysql", "mysql://root:pass@localhost:3306/db").unwrap();
+        assert_eq!(argv, vec!["mysql", "--uri=mysql://root:pass@localhost:3306/db"]);
+
+        let plain = build_sql_argv("mysql", "testdb").unwrap();
+        assert_eq!(plain, vec!["mysql", "testdb"]);
     }
 
     #[test]

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import {
   appendEnvTurn,
   isResumingApproval,
+  PROJECT_RULE_FILES,
   TERMIGO_MD_MAX_CHARS,
   truncateProjectMemory,
 } from "./transport";
@@ -46,11 +47,18 @@ describe("truncateProjectMemory", () => {
     expect(out.length).toBeLessThan(LIMIT + 200);
     expect(out).toMatch(/truncated here/);
   });
+
+  it("discovers TERMIGO.md, .termigorules, CLAUDE.md, and AGENTS.md", () => {
+    expect(PROJECT_RULE_FILES).toContain("TERMIGO.md");
+    expect(PROJECT_RULE_FILES).toContain(".termigorules");
+    expect(PROJECT_RULE_FILES).toContain("CLAUDE.md");
+    expect(PROJECT_RULE_FILES).toContain("AGENTS.md");
+  });
 });
 
 // Providers cache on an exact token prefix. The env block used to be merged
 // into the last user message on the outgoing copy only, so the message that
-// carried it on one turn arrived without it on the next — and the difference
+// carried it on one turn arrived without it on the next - and the difference
 // landed at the first user message, invalidating everything after it.
 describe("appendEnvTurn", () => {
   const user = (id: string, text: string) =>

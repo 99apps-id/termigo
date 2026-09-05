@@ -24,6 +24,7 @@ async function waitForDevServer(
   handle: number,
   portHint: number,
   timeoutSecs: number,
+  abortSignal?: AbortSignal,
 ): Promise<{ url: string | null; ready: boolean; logsTail: string }> {
   const deadline = Date.now() + timeoutSecs * 1000;
   let offset = 0;
@@ -31,9 +32,22 @@ async function waitForDevServer(
   let logsTail = "";
   let exited = false;
 
-  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const sleep = (ms: number) =>
+    new Promise((r) => {
+      if (abortSignal?.aborted) return r(undefined);
+      const t = setTimeout(r, ms);
+      abortSignal?.addEventListener(
+        "abort",
+        () => {
+          clearTimeout(t);
+          r(undefined);
+        },
+        { once: true },
+      );
+    });
 
   while (Date.now() < deadline) {
+    if (abortSignal?.aborted) break;
     let logs: Awaited<ReturnType<typeof native.shellBgLogs>> | null = null;
     try {
       logs = await native.shellBgLogs(handle, offset);
@@ -106,12 +120,18 @@ export function buildDevServerTools(ctx: ToolContext) {
           .describe("How long to wait for the server to start. Default 60."),
       }),
       needsApproval: true,
-      execute: async ({ command, open, timeout_secs }) => {
+      execute: async (
+        { command, open, timeout_secs },
+        { abortSignal }: { abortSignal?: AbortSignal } = {},
+      ) => {
         if (ctx.getRemoteSession()) {
           return remoteUnsupported(
             "dev_server",
             "Start the server on the remote host with bash_run (nohup … &) and use forward_remote_port + open_preview for its URL.",
           );
+        }
+        if (abortSignal?.aborted) {
+          return { error: "dev_server aborted" };
         }
         const root = ctx.getWorkspaceRoot() ?? ctx.getCwd();
         if (!root) {
@@ -159,6 +179,7 @@ export function buildDevServerTools(ctx: ToolContext) {
               existing.handle,
               portHint,
               Math.min(timeout_secs ?? 60, 30),
+              abortSignal,
             );
             const opened =
               open !== false && waited.url
@@ -190,6 +211,7 @@ export function buildDevServerTools(ctx: ToolContext) {
           handle,
           portHint,
           timeout_secs ?? 60,
+          abortSignal,
         );
         const opened =
           open !== false && waited.url

@@ -32,7 +32,7 @@ export function SidebarRail({ activeView, onSelectView, changedCount }: Props) {
   return (
     <div
       style={{ height: SIDEBAR_RAIL_HEIGHT }}
-      className="flex shrink-0 items-stretch gap-1 border-t border-border/60 bg-card/85 px-1.5 py-1 backdrop-blur"
+      className="flex shrink-0 items-stretch gap-1 border-t border-border bg-card px-1.5 py-1 backdrop-blur dark:border-border/60 dark:bg-card/85"
     >
       {items.map((item) => {
         const isActive = item.id === activeView;
@@ -45,11 +45,11 @@ export function SidebarRail({ activeView, onSelectView, changedCount }: Props) {
             aria-pressed={isActive}
             onClick={() => onSelectView(item.id)}
             className={cn(
-              "group relative flex flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-md text-[11px] font-medium outline-none transition-colors duration-[var(--dur-base)]",
+              "group relative flex flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-md text-[11px] outline-none transition-colors duration-[var(--dur-base)]",
               "focus-visible:ring-2 focus-visible:ring-primary/40",
               isActive
-                ? "bg-foreground/[0.07] text-foreground dark:bg-foreground/[0.09]"
-                : "text-muted-foreground hover:bg-foreground/[0.045] hover:text-foreground",
+                ? "bg-accent font-semibold text-foreground shadow-2xs dark:bg-foreground/[0.09] dark:font-medium"
+                : "font-medium text-muted-foreground hover:bg-muted/70 hover:text-foreground",
             )}
           >
             <HugeiconsIcon
@@ -60,7 +60,7 @@ export function SidebarRail({ activeView, onSelectView, changedCount }: Props) {
             />
             <span>{item.label}</span>
             {showBadge ? (
-              <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full border border-border/60 bg-card px-1 text-[9px] font-semibold leading-none tabular-nums text-muted-foreground/95">
+              <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full border border-border bg-card px-1 text-[9px] font-semibold leading-none tabular-nums text-foreground shadow-2xs dark:border-border/60 dark:text-muted-foreground/95">
                 {(item.badge ?? 0) > 99 ? "99+" : item.badge}
               </span>
             ) : null}

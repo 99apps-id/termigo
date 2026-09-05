@@ -8,7 +8,7 @@ export function buildForwardTools(ctx: ToolContext) {
   return {
     forward_remote_port: tool({
       description:
-        "Tunnel a port on the connected SSH host to this machine, so a service running on the server becomes reachable at 127.0.0.1 locally. Use it after starting something on the server that you or the user needs to open — a dev server, an admin UI, a database. Returns the local port, which is then a localhost URL `open_preview` will accept. The tunnel closes with the SSH session. Asks for approval.",
+        "Tunnel a port on the connected SSH host to this machine, so a service running on the server becomes reachable at 127.0.0.1 locally. Use it after starting something on the server that you or the user needs to open - a dev server, an admin UI, a database. Returns the local port, which is then a localhost URL `open_preview` will accept. The tunnel closes with the SSH session. Asks for approval.",
       inputSchema: z.object({
         remote_port: z
           .number()

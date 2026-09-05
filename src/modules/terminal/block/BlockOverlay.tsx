@@ -200,14 +200,15 @@ function Toolbar({ block, all, onSearch }: ChromeProps) {
         <button
           type="button"
           title="Fix error with AI agent"
-          className="bt-btn text-amber-500 hover:text-amber-400"
+          className="bt-btn bt-lens-fix"
           onClick={() => {
             const out = capAttachOutput(all.readOutput(block.id) ?? "");
             const prompt = `Fix error in command \`${block.command}\`:\n\`\`\`\n${out}\n\`\`\``;
             useChatStore.getState().attachSelection(prompt, "terminal");
           }}
         >
-          <HugeiconsIcon icon={SparklesIcon} size={12.5} strokeWidth={1.75} />
+          <HugeiconsIcon icon={SparklesIcon} size={11.5} strokeWidth={1.75} />
+          <span className="bt-lens-label">Fix with Agent</span>
         </button>
       )}
       {duration && <span className="bt-dur">{duration}</span>}

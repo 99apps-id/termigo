@@ -43,6 +43,34 @@ function cssJson(value: string): string {
   return JSON.stringify(value);
 }
 
+function resolveTargetSelector(
+  ref?: string,
+  selector?: string,
+): { targetSelector: string } | { error: string } {
+  if (ref && ref.trim()) {
+    let clean = ref.trim();
+    if (!clean.startsWith("@")) {
+      clean = clean.startsWith("e") ? "@" + clean : "@e" + clean;
+    } else if (
+      clean.startsWith("@") &&
+      !clean.startsWith("@e") &&
+      /^\d+$/.test(clean.slice(1))
+    ) {
+      clean = "@e" + clean.slice(1);
+    }
+    if (!/^@e\d+$/.test(clean)) {
+      return {
+        error: `Invalid ref format "${ref}". Expected ref returned by browser_snapshot like "@e1", "@e2".`,
+      };
+    }
+    return { targetSelector: `[data-termigo-ref="${clean}"]` };
+  }
+  if (selector && selector.trim()) {
+    return { targetSelector: selector.trim() };
+  }
+  return { error: "Either selector or ref must be provided" };
+}
+
 export function buildBrowserTools(ctx: ToolContext) {
   const guard = (url: string): { error: string } | null => {
     const reason = guardUrl(url);
@@ -145,18 +173,81 @@ export function buildBrowserTools(ctx: ToolContext) {
       execute: async ({ instance }) => await embedRead(instance),
     }),
 
-    browser_click: tool({
+    browser_snapshot: tool({
       description:
-        "Click an element in the browser instance by CSS selector. The selector must match exactly one element.",
+        "Capture an accessibility snapshot of the current page with short ref IDs (@e1, @e2, ...) assigned to all interactive elements (buttons, links, inputs). Returns a clean, token-efficient text representation of the UI tree. Pass the assigned ref ID directly to browser_click or browser_type instead of complex CSS selectors. Auto-executes.",
       inputSchema: z.object({
         instance: z.string().describe("Instance name."),
-        selector: z.string().describe("CSS selector for the element to click."),
       }),
-      execute: async ({ instance, selector }) => {
+      execute: async ({ instance }) => {
+        const js = `(()=>{
+          try {
+            var origExtract = window.__termigoExtract;
+            window.__termigoExtract = function() {
+              try {
+                var counter = 1;
+                var items = [];
+                var interactive = document.querySelectorAll('button, a[href], input, textarea, select, [role="button"], [role="link"], [role="tab"], [tabindex="0"]');
+                interactive.forEach(function(el) {
+                  if (el.offsetParent === null && el.offsetWidth === 0 && el.offsetHeight === 0) return;
+                  var ref = '@e' + (counter++);
+                  el.setAttribute('data-termigo-ref', ref);
+                  var tag = el.tagName.toLowerCase();
+                  var role = el.getAttribute('role') || tag;
+                  var text = (el.innerText || el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('title') || (el.value !== undefined ? String(el.value) : '') || '').replace(/\\s+/g, ' ').trim().slice(0, 80);
+                  var href = el.getAttribute('href');
+                  var info = '[' + role + '] ' + (text ? '"' + text + '" ' : '') + 'ref=' + ref;
+                  if (href && href !== '#' && !href.startsWith('javascript:')) {
+                    info += ' href=' + href.slice(0, 60);
+                  }
+                  items.push(info);
+                });
+                var title = document.title || 'Untitled';
+                var headingEls = Array.from(document.querySelectorAll('h1, h2, h3')).slice(0, 10).map(function(h) { return h.tagName.toLowerCase() + ': "' + h.innerText.replace(/\\s+/g, ' ').trim() + '"'; });
+                var out = 'Title: ' + title + '\\nURL: ' + location.href + '\\nHeadings:\\n' + headingEls.map(function(h) { return '  ' + h; }).join('\\n') + '\\n\\nInteractive Elements (' + items.length + '):\\n' + items.slice(0, 80).map(function(i) { return '  ' + i; }).join('\\n');
+                if (window.__TAURI__ && window.__TAURI__.event) {
+                  window.__TAURI__.event.emit('termigo:browser-value', { instance: ${JSON.stringify(instance)}, kind: 'extract', value: out });
+                }
+              } catch(err) {
+                if (origExtract) origExtract();
+              } finally {
+                window.__termigoExtract = origExtract;
+              }
+            };
+          } catch(e) {}
+        })();`;
+        try {
+          await native.browserEmbedEval(instance, js).catch(() => {});
+          const snapshot = await native.browserEmbedRead(instance);
+          return { snapshot };
+        } catch (e) {
+          return { error: String(e) };
+        }
+      },
+    }),
+
+    browser_click: tool({
+      description:
+        "Click an element in the browser instance by ref ID (e.g. '@e1' returned by browser_snapshot) or CSS selector.",
+      inputSchema: z.object({
+        instance: z.string().describe("Instance name."),
+        selector: z
+          .string()
+          .optional()
+          .describe("CSS selector for the element. Omit if using `ref`."),
+        ref: z
+          .string()
+          .optional()
+          .describe("Element reference ID from browser_snapshot, e.g. '@e1'."),
+      }),
+      execute: async ({ instance, selector, ref }) => {
+        const target = resolveTargetSelector(ref, selector);
+        if ("error" in target) return target;
+        const targetSelector = target.targetSelector;
         const js = `(()=>{const el=document.querySelector(${cssJson(
-          selector,
+          targetSelector,
         )});if(!el){throw new Error('No element matched selector: '+${cssJson(
-          selector,
+          targetSelector,
         )});}el.click();})();`;
         return await embedEval(instance, js);
       },
@@ -164,20 +255,28 @@ export function buildBrowserTools(ctx: ToolContext) {
 
     browser_type: tool({
       description:
-        "Type text into an input in the browser instance by CSS selector, focusing it and firing input/change events.",
+        "Type text into an input in the browser instance by ref ID (e.g. '@e3') or CSS selector.",
       inputSchema: z.object({
         instance: z.string().describe("Instance name."),
-        selector: z.string().describe("CSS selector for the input element."),
+        selector: z
+          .string()
+          .optional()
+          .describe("CSS selector for the input. Omit if using `ref`."),
+        ref: z
+          .string()
+          .optional()
+          .describe("Element reference ID from browser_snapshot, e.g. '@e3'."),
         text: z.string().describe("Text to type."),
       }),
-      execute: async ({ instance, selector, text }) => {
+      execute: async ({ instance, selector, ref, text }) => {
+        const target = resolveTargetSelector(ref, selector);
+        if ("error" in target) return target;
+        const targetSelector = target.targetSelector;
         const js = `(()=>{const el=document.querySelector(${cssJson(
-          selector,
+          targetSelector,
         )});if(!el){throw new Error('No element matched selector: '+${cssJson(
-          selector,
-        )});}if(!('value' in el)){throw new Error('Selector does not match an input-like element: '+${cssJson(
-          selector,
-        )});}el.focus();el.value=${cssJson(text)};el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));})();`;
+          targetSelector,
+        )});}if('value' in el){el.focus();el.value=${cssJson(text)};el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));}else if(el.isContentEditable){el.focus();el.innerText=${cssJson(text)};el.dispatchEvent(new Event('input',{bubbles:true}));}else{throw new Error('Selector does not match an input-like element: '+${cssJson(targetSelector)});}})();`;
         return await embedEval(instance, js);
       },
     }),
@@ -200,9 +299,91 @@ export function buildBrowserTools(ctx: ToolContext) {
       },
     }),
 
+    browser_connect: tool({
+      description:
+        "Connect to a running Chrome, Edge, or Brave browser via Chrome DevTools Protocol (CDP) on localhost (e.g. port 9222 or custom). Inspects existing user tabs, cookies, or opens/focuses tabs in the user's actual browser session without starting a new headless browser. Auto-executes.",
+      inputSchema: z.object({
+        port: z
+          .number()
+          .int()
+          .min(1024)
+          .max(65535)
+          .optional()
+          .describe("CDP remote debugging port (default 9222)."),
+        action: z
+          .enum(["version", "list_tabs", "new_tab", "activate_tab", "close_tab"])
+          .optional()
+          .describe("Action to perform with CDP (default 'list_tabs')."),
+        url: z
+          .string()
+          .optional()
+          .describe("URL to open when action is 'new_tab'."),
+        target_id: z
+          .string()
+          .optional()
+          .describe("Tab/target ID for activate_tab or close_tab."),
+      }),
+      execute: async ({ port = 9222, action = "list_tabs", url, target_id }) => {
+        const base = `http://127.0.0.1:${port}`;
+        try {
+          if (action === "version") {
+            const res = await fetch(`${base}/json/version`, { signal: AbortSignal.timeout(3000) });
+            if (!res.ok) return { error: `CDP error HTTP ${res.status}` };
+            return await res.json();
+          }
+          if (action === "list_tabs") {
+            const res = await fetch(`${base}/json/list`, { signal: AbortSignal.timeout(3000) });
+            if (!res.ok) return { error: `CDP error HTTP ${res.status}` };
+            const list = await res.json();
+            if (!Array.isArray(list)) {
+              return { error: `Port ${port} is not a valid Chrome DevTools Protocol endpoint.` };
+            }
+            return {
+              count: list.length,
+              tabs: list.filter((t) => t && t.type === "page").map((t) => ({
+                id: t.id,
+                title: t.title,
+                url: t.url,
+              })),
+            };
+          }
+          if (action === "new_tab") {
+            if (url) {
+              const blocked = guard(url);
+              if (blocked) return blocked;
+            }
+            const endpoint = url ? `${base}/json/new?${encodeURIComponent(url)}` : `${base}/json/new`;
+            const res = await fetch(endpoint, { method: "PUT", signal: AbortSignal.timeout(3000) });
+            if (!res.ok) return { error: `CDP error HTTP ${res.status}` };
+            return await res.json();
+          }
+          if (action === "activate_tab") {
+            if (!target_id || !target_id.trim()) {
+              return { error: "action 'activate_tab' requires 'target_id'" };
+            }
+            const res = await fetch(`${base}/json/activate/${encodeURIComponent(target_id.trim())}`, { signal: AbortSignal.timeout(3000) });
+            return { ok: res.ok, activated: target_id };
+          }
+          if (action === "close_tab") {
+            if (!target_id || !target_id.trim()) {
+              return { error: "action 'close_tab' requires 'target_id'" };
+            }
+            const res = await fetch(`${base}/json/close/${encodeURIComponent(target_id.trim())}`, { signal: AbortSignal.timeout(3000) });
+            return { ok: res.ok, closed: target_id };
+          }
+          return { error: `Unsupported CDP action: ${action}` };
+        } catch (e) {
+          return {
+            connected: false,
+            error: `Could not connect to browser on port ${port}: ${String(e)}. Ensure your browser was launched with --remote-debugging-port=${port}`,
+          };
+        }
+      },
+    }),
+
     browser_screenshot: tool({
       description:
-        "Capture a screenshot of the browser instance and SEE it — use this to inspect a page's visual layout, verify a UI change, or read something that is drawn rather than text (a chart, a canvas). Requires a vision-capable model and is Windows-only (WebView2). For plain page text, browser_extract is cheaper.",
+        "Capture a screenshot of the browser instance and SEE it - use this to inspect a page's visual layout, verify a UI change, or read something that is drawn rather than text (a chart, a canvas). Requires a vision-capable model and is Windows-only (WebView2). For plain page text, browser_extract is cheaper.",
       inputSchema: z.object({
         instance: z.string().describe("Instance name."),
       }),
@@ -211,7 +392,7 @@ export function buildBrowserTools(ctx: ToolContext) {
         if (!modelSupportsVision(modelId)) {
           return {
             error:
-              "the selected model has no vision capability, so it cannot see a screenshot — switch to a vision-capable model, or use browser_extract for the page text.",
+              "the selected model has no vision capability, so it cannot see a screenshot - switch to a vision-capable model, or use browser_extract for the page text.",
           };
         }
         try {

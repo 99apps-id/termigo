@@ -28,7 +28,7 @@ type Props = {
   leafId: number;
   /** Tab containing this pane is on screen. */
   visible: boolean;
-  /** This leaf is the active pane within its tab — receives auto-focus. */
+  /** This leaf is the active pane within its tab - receives auto-focus. */
   focused?: boolean;
   initialCwd?: string;
   /** Stable identity for terminal-process persistence (tmux). */

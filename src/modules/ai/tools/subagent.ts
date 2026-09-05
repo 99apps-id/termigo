@@ -56,7 +56,7 @@ function parseJsonIfString(value: unknown): unknown {
 
 /**
  * Normalise the model's tool input for `run_subagents` into `{ tasks[],
- * max_concurrency? }`. Models — especially openai-compatible ones — sometimes
+ * max_concurrency? }`. Models - especially openai-compatible ones - sometimes
  * emit the whole tool call as a JSON string, or `tasks` as a JSON string, or
  * `max_concurrency` as a numeric string, or double-encode each task. Without
  * this, the `z.object` schema rejects a quirky-but-recoverable input and the
@@ -126,7 +126,7 @@ Approval works exactly as it does for you: read-only tools auto-run, and every m
           prompt: z
             .string()
             .describe(
-              "Self-contained instruction. The subagent has no memory of prior conversation — include all relevant context.",
+              "Self-contained instruction. The subagent has no memory of prior conversation - include all relevant context.",
             ),
           description: z
             .string()
@@ -203,13 +203,13 @@ Two patterns, combinable:
 - Fan-out: independent tasks run concurrently (bounded by max_concurrency, cap ${MAX_CONCURRENCY}).
 - Scatter then gather: a task's \`depends_on\` lists the tasks it waits for, and it receives their summaries as context. e.g. tasks 0,1,2 explore three modules; task 3 (depends_on [0,1,2]) synthesises from them.
 
-Each subagent has a fresh history and no memory of this conversation, so every prompt must stand alone — dependency summaries are injected for you. A task whose dependency fails is skipped rather than run without it. Cycles and self-references are rejected.
+Each subagent has a fresh history and no memory of this conversation, so every prompt must stand alone - dependency summaries are injected for you. A task whose dependency fails is skipped rather than run without it. Cycles and self-references are rejected.
 
 At most ${MAX_TASKS} tasks per call; extras are dropped and reported in \`note\`, never silently. Read \`note\` before trusting the results.
 
-Use this for anything spanning more than one file — studying, exploring, reviewing or auditing a codebase — rather than reading files one at a time.
+Use this for anything spanning more than one file - studying, exploring, reviewing or auditing a codebase - rather than reading files one at a time.
 
-Each task's subagent has the same toolset you do and may itself spawn further subagents (nesting is bounded by a max depth). Approval works as it does for you: read-only tools auto-run, and every mutating, shell, or extension call asks the user first via the approval queue (\`write_file\` also refuses a path that already exists) — so a batch never silently overwrites the workspace or runs an un-approved command.`,
+Each task's subagent has the same toolset you do and may itself spawn further subagents (nesting is bounded by a max depth). Approval works as it does for you: read-only tools auto-run, and every mutating, shell, or extension call asks the user first via the approval queue (\`write_file\` also refuses a path that already exists) - so a batch never silently overwrites the workspace or runs an un-approved command.`,
       inputSchema: z.preprocess(
         // Normalise before validation so a model that emits the whole call (or
         // the `tasks` field) as a JSON string still runs instead of failing.
@@ -283,13 +283,13 @@ Each task's subagent has the same toolset you do and may itself spawn further su
         // Two tasks touching the same file is the batch's merge conflict: each
         // edits from the same baseline, both write, the second overwrites the
         // first. Reported before anything runs so the orchestrator (or the user
-        // reading the card) can decide — the safest default is to note it.
+        // reading the card) can decide - the safest default is to note it.
         const conflicts = detectBatchConflicts(
           batch.map((t) => ({ paths: pathsInPrompt(t.prompt) })),
         );
         for (const c of conflicts) {
           notes.push(
-            `Conflict: task #${c.indexA} and #${c.indexB} both touch ${c.path} — they may overwrite each other; consider a depends_on edge or reviewing after.`,
+            `Conflict: task #${c.indexA} and #${c.indexB} both touch ${c.path} - they may overwrite each other; consider a depends_on edge or reviewing after.`,
           );
         }
 

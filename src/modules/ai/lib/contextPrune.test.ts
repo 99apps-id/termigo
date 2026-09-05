@@ -274,4 +274,24 @@ describe("pruneVerifiedPrefix", () => {
     const twice = pruneVerifiedPrefix(once.messages);
     expect(twice.pruned).toBe(false);
   });
+
+  it("recognizes checkpoints whose commit message contains the word error", () => {
+    const transcript = verifiedTranscript();
+    // Replace checkpoint message with one containing 'error'
+    const idx = transcript.findIndex(
+      (m) =>
+        m.role === "tool" &&
+        Array.isArray(m.content) &&
+        (m.content as ToolPart[]).some((p) => p.toolName === "git_checkpoint"),
+    );
+    expect(idx).toBeGreaterThan(-1);
+    transcript[idx] = toolResult("c1", "git_checkpoint", {
+      command: "git commit -m 'checkpoint: fix error in auth'",
+      message: "checkpoint: fix error in auth",
+      exit_code: 0,
+    });
+    const result = pruneVerifiedPrefix(transcript);
+    expect(result.pruned).toBe(true);
+    expect(result.summary).toContain("checkpoint: fix error in auth");
+  });
 });

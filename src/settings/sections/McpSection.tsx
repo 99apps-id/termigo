@@ -3,6 +3,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { parseCommandLine, parseEnvLines } from "@/modules/ai/lib/mcpArgs";
 import { mcpToolName } from "@/modules/ai/lib/mcpToolNames";
+import { invalidateMcpTools } from "@/modules/ai/lib/mcpTools";
 import {
   type McpServer,
   type McpTool,
@@ -97,7 +98,12 @@ function ServerRow({
           <Button
             size="sm"
             variant="ghost"
-            onClick={() => void mcpRemoveServer(server.name).then(onRemoved)}
+            onClick={() =>
+              void mcpRemoveServer(server.name).then(() => {
+                invalidateMcpTools();
+                onRemoved();
+              })
+            }
             title={`Remove ${server.name}`}
             aria-label={`Remove ${server.name}`}
             className="h-7 px-2 text-[11px] text-muted-foreground hover:text-destructive"
@@ -191,6 +197,7 @@ function AddServerForm({ onAdded }: { onAdded: () => void }) {
         args,
         env: parseEnvLines(envText),
       });
+      invalidateMcpTools();
       reset();
       setOpen(false);
       onAdded();
@@ -369,7 +376,7 @@ export function McpSection() {
         </p>
         <p>
           MCP tools always ask for approval, including under{" "}
-          <em>Auto-approve edits</em> — that mode covers files in your
+          <em>Auto-approve edits</em> - that mode covers files in your
           workspace, not arbitrary third-party actions.
         </p>
       </div>

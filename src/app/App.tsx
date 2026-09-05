@@ -234,12 +234,13 @@ export default function App() {
   const terminalPathDropTarget = useTerminalFileDrop();
   const explorerRef = useRef<FileExplorerHandle>(null);
 
-  // Drives session disposal off the pane tree, not React lifecycles —
+  // Drives session disposal off the pane tree, not React lifecycles -
   // split/unsplit re-mount components but the leaf is still live.
   const liveLeavesRef = useRef<Set<number>>(new Set());
 
   const clearWorkspaceState = useCallback(() => {
     for (const id of liveLeavesRef.current) disposeSession(id);
+    liveLeavesRef.current.clear();
     searchAddons.current.clear();
     terminalRefs.current.clear();
     editorRefs.current.clear();
@@ -256,6 +257,7 @@ export default function App() {
     launchCwdResolved,
     switchWorkspace,
     adoptWorkspaceEnv,
+    isSwitchingWorkspaceRef,
   } = useWorkspaceSwitcher({
     tabsRef,
     workspaceEnv,
@@ -560,7 +562,7 @@ export default function App() {
         return;
       }
       // Dispatch a window event the composer listens for. Same pattern as
-      // selections — keeps file-explorer decoupled from the AI module.
+      // selections - keeps file-explorer decoupled from the AI module.
       window.dispatchEvent(
         new CustomEvent<string>("termigo:ai-attach-file", { detail: path }),
       );
@@ -722,7 +724,7 @@ ${found.foundAt}`
   );
 
   // Warm start: the backend emits once the window already exists. Attach on
-  // mount so an "Open With" that lands mid-restore isn't dropped — the backend
+  // mount so an "Open With" that lands mid-restore isn't dropped - the backend
   // also seeds the drain-once state, so the boot drain below is the safety net.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -741,7 +743,7 @@ ${found.foundAt}`
   }, [openLaunchFiles]);
 
   // Cold start: files arrive as CLI args (Linux/Windows) or the macOS open-files
-  // event, and get_launch_files drains them once. Wait for `booted` — the spaces
+  // event, and get_launch_files drains them once. Wait for `booted` - the spaces
   // restore ends in replaceTabs(), which overwrites the whole tab list and would
   // discard a launch tab opened before it, making the file flash open and vanish.
   // Booting first also lands the tab in the restored active space, and lets
@@ -1165,6 +1167,8 @@ ${found.foundAt}`
 
   const handleLeafExit = useCallback(
     (leafId: number, _code: number) => {
+      // Never quit or close panes if a workspace switch is in progress.
+      if (isSwitchingWorkspaceRef.current) return;
       const all = tabsRef.current;
       const tab = all.find(
         (t) => t.kind === "terminal" && hasLeaf(t.paneTree, leafId),
@@ -1177,7 +1181,7 @@ ${found.foundAt}`
         closePaneByLeaf(leafId);
       }
     },
-    [closePaneByLeaf],
+    [closePaneByLeaf, isSwitchingWorkspaceRef],
   );
 
   const handleEditorDirty = useCallback(
@@ -1725,7 +1729,7 @@ ${found.foundAt}`
                   persistSidebarCollapsed(size.inPixels <= 0);
                 }}
               >
-                <div className="flex h-full min-h-0 flex-col border-r border-border/60 bg-card">
+                <div className="flex h-full min-h-0 flex-col border-r border-border bg-card">
                   <div
                     key={sidebarView}
                     className="min-h-0 flex-1 termigo-panel-in"
@@ -1818,7 +1822,7 @@ ${found.foundAt}`
                   minSize="16%"
                   maxSize="45%"
                 >
-                  <div className="flex h-full min-h-0 flex-col border-l border-border/60 bg-card">
+                  <div className="flex h-full min-h-0 flex-col border-l border-border bg-card">
                     <SshFileExplorer
                       sessionId={activeSshSession.sessionId}
                       hostLabel={activeSshSession.hostLabel}

@@ -168,7 +168,7 @@ describe("commands on a remote host", () => {
 
 // An extension declaring `auto` is asking for its tool to run unattended.
 // That is honoured, but it is the tool's preference, not a statement that
-// "auto-approve edits" — a claim about files in this workspace — covers
+// "auto-approve edits" - a claim about files in this workspace - covers
 // third-party code doing something this app cannot inspect.
 describe("extension tools", () => {
   it("does not ride along with auto-approve edits", () => {
@@ -185,7 +185,7 @@ describe("extension tools", () => {
 });
 
 // A custom tool runs a shell command, so it belongs with bash_run rather than
-// with the file edits — whoever wrote the template.
+// with the file edits - whoever wrote the template.
 describe("custom command tools", () => {
   it("does not ride along with auto-approve edits", () => {
     expect(isAutoApproved("cmd__deploy", "edits")).toBe(false);
@@ -236,6 +236,28 @@ describe("the always-ask floor", () => {
     expect(isAutoApproved("bash_run", "all", { command: "pnpm test" })).toBe(
       true,
     );
+  });
+});
+
+describe("Hermes tool approval policy", () => {
+  it("treats update_skill as an edit tool", () => {
+    expect(approvalTier("update_skill")).toBe("edit");
+    expect(isAutoApproved("update_skill", "ask")).toBe(false);
+    expect(isAutoApproved("update_skill", "edits")).toBe(true);
+    expect(isAutoApproved("update_skill", "all")).toBe(true);
+  });
+
+  it("treats process tool as exec tier with inspection auto-approved in edits mode", () => {
+    expect(approvalTier("process")).toBe("exec");
+    expect(isAutoApproved("process", "ask", { action: "list" })).toBe(false);
+    expect(isAutoApproved("process", "edits", { action: "spawn" })).toBe(false);
+    expect(isAutoApproved("process", "edits", { action: "kill" })).toBe(false);
+    expect(isAutoApproved("process", "edits", { action: "list" })).toBe(true);
+    expect(isAutoApproved("process", "edits", { action: "status" })).toBe(true);
+    expect(isAutoApproved("process", "edits", { action: "logs" })).toBe(true);
+    expect(isAutoApproved("process", "edits", { action: "wait" })).toBe(true);
+    expect(isAutoApproved("process", "edits", { action: "find_port" })).toBe(true);
+    expect(isAutoApproved("process", "all", { action: "spawn" })).toBe(true);
   });
 });
 

@@ -1,4 +1,4 @@
-// Telegram bot relay — drives Termigo's in-app agent via the normal chat
+// Telegram bot relay - drives Termigo's in-app agent via the normal chat
 // path (`sendMessage`), so the bot behaves exactly like typing in the app.
 //
 // The bot long-polls the Telegram Bot API from the webview (CSP already allows
@@ -40,7 +40,7 @@ type Update = {
 let loopController: AbortController | null = null;
 let mirrorController: AbortController | null = null;
 
-// Set while the bot is relaying a Telegram-initiated dispatch, so the Termigo →
+// Set while the bot is relaying a Telegram-initiated dispatch, so the Termigo ->
 // Telegram mirror stays quiet (the bot posts the run's own answer) instead of
 // double-posting the injected user message and the assistant reply. A counter,
 // not a boolean: dispatches can overlap (the long-poll keeps running while one
@@ -51,6 +51,69 @@ function pauseMirror(): void {
 }
 function resumeMirror(): void {
   mirrorPauseCount = Math.max(0, mirrorPauseCount - 1);
+}
+
+const seenMessageIds = new Set<string>();
+const seenFingerprints = new Set<string>();
+const telegramOriginMessageIds = new Set<string>();
+const recentTelegramPrompts = new Map<string, number>();
+
+function recordTelegramText(text: string): void {
+  const norm = text.trim();
+  if (!norm) return;
+  recentTelegramPrompts.set(norm, Date.now());
+  const now = Date.now();
+  if (recentTelegramPrompts.size > 50) {
+    for (const [k, ts] of recentTelegramPrompts) {
+      if (now - ts > 10 * 60 * 1000) recentTelegramPrompts.delete(k);
+    }
+  }
+}
+
+function isTelegramOriginText(text: string): boolean {
+  const norm = text.trim();
+  if (!norm) return false;
+  const ts = recentTelegramPrompts.get(norm);
+  if (!ts) return false;
+  if (Date.now() - ts < 10 * 60 * 1000) return true;
+  recentTelegramPrompts.delete(norm);
+  return false;
+}
+
+function markMessageSeen(
+  id: string | undefined,
+  sessionId: string,
+  role: string,
+  text: string,
+): void {
+  if (id) {
+    seenMessageIds.add(id);
+    if (seenMessageIds.size > 2000) {
+      for (const item of seenMessageIds) {
+        seenMessageIds.delete(item);
+        break;
+      }
+    }
+  }
+  const fp = `${sessionId}:${role}:${id ?? text.slice(0, 80)}`;
+  seenFingerprints.add(fp);
+  if (seenFingerprints.size > 2000) {
+    for (const item of seenFingerprints) {
+      seenFingerprints.delete(item);
+      break;
+    }
+  }
+}
+
+function isMessageSeen(
+  id: string | undefined,
+  sessionId: string,
+  role: string,
+  text: string,
+): boolean {
+  if (id && seenMessageIds.has(id)) return true;
+  const fp = `${sessionId}:${role}:${id ?? text.slice(0, 80)}`;
+  return seenFingerprints.has(fp);
 }
 
 async function apiGet(path: string, signal: AbortSignal): Promise<unknown> {
@@ -85,6 +148,7 @@ async function apiPost(
 }
 
 function sleep(signal: AbortSignal, ms: number): Promise<void> {
+  if (signal.aborted) return Promise.resolve();
   return new Promise((resolve) => {
     const t = setTimeout(resolve, ms);
     signal.addEventListener(
@@ -121,7 +185,7 @@ async function sendTyping(
   );
 }
 
-/** Multipart POST — Telegram uploads photos/documents via form-data, not JSON. */
+/** Multipart POST - Telegram uploads photos/documents via form-data, not JSON. */
 async function apiPostForm(
   path: string,
   form: FormData,
@@ -349,10 +413,12 @@ async function waitForReply(
 ): Promise<string> {
   const started = Date.now();
   const MAX_WAIT = 30 * 60 * 1000;
+  let everBusy = false;
   while (!signal.aborted && Date.now() - started < MAX_WAIT) {
     const appStatus = store.useChatStore.getState().agentMeta.status;
     const chatStatus = store.getChat(sessionId)?.status ?? "";
     const busy = runBusy(chatStatus, appStatus);
+    if (busy) everBusy = true;
     const count = countAssistantMessages(store.getChat, sessionId);
     const queued = store.useChatStore.getState().steerQueue.pending.length > 0;
 
@@ -365,16 +431,21 @@ async function waitForReply(
           "Run finished."
         );
       }
-    } else if (!busy && Date.now() - started > 25_000) {
-      // Never produced a new assistant message — likely a refusal/error.
+    } else {
       const err = store.useChatStore.getState().agentMeta.error;
-      return err
-        ? `Run ended with an error: ${err}`
-        : "Run produced no text output.";
+      if (err) {
+        return `Run ended with an error: ${err}`;
+      }
+      if (everBusy && !busy && !queued) {
+        return "Run produced no text output.";
+      }
+      if (!busy && Date.now() - started > 25_000) {
+        return "Run produced no text output.";
+      }
     }
     await sleep(signal, 1500);
   }
-  return "Run is still in progress or waiting for approval in Termigo — the result is not streamed here.";
+  return "Run is still in progress or waiting for approval. Use Telegram inline buttons or /status to check.";
 }
 
 /**
@@ -428,6 +499,8 @@ async function publishProgress(
   // Telegram's typing bubble lasts ~5s; re-send it on an interval so the chat
   // keeps showing "typing…" for the whole run, not just at the first tick.
   let lastTypingAt = 0;
+  const sentApprovalIds = new Set<string>();
+  const sentElicitationIds = new Set<string>();
   const started = Date.now();
   const MAX_WAIT = 30 * 60 * 1000;
 
@@ -454,16 +527,74 @@ async function publishProgress(
     if (status !== lastStatus) {
       lastStatus = status;
       const line = statusLabel(status);
-      if (line) {
+      if (line && status !== "awaiting-approval") {
         await sendTelegram(chatId, line, signal).catch(() => {});
         lastSentAt = now;
       }
     }
-    if (round > 0 && round !== lastRound) {
-      lastRound = round;
-      await sendTelegram(chatId, `Round ${round}`, signal).catch(() => {});
-      lastSentAt = now;
+
+    // Surface pending tool approvals as interactive inline buttons in Telegram
+    const pendingApprovals = meta.pendingApprovals ?? [];
+    for (const p of pendingApprovals) {
+      if (!sentApprovalIds.has(p.id)) {
+        sentApprovalIds.add(p.id);
+        const keyboard: InlineButton[][] = [
+          [
+            { text: "Approve", callback_data: `ap:approve:${p.id}` },
+            { text: "Deny", callback_data: `ap:deny:${p.id}` },
+          ],
+        ];
+        await sendKeyboard(
+          chatId,
+          `Action Approval Required:\nTool: ${p.toolName}\nTarget: ${p.summary}`,
+          keyboard,
+          signal,
+        ).catch(() => {});
+        lastSentAt = now;
+      }
     }
+
+    // Surface approval queue requests (subagents / gated tools)
+    const aqStore = await import("../ai/store/approvalQueueStore");
+    const aqPending = aqStore.useApprovalQueue.getState().pending;
+    for (const q of aqPending) {
+      if (!sentApprovalIds.has(q.id)) {
+        sentApprovalIds.add(q.id);
+        const keyboard: InlineButton[][] = [
+          [
+            { text: "Approve", callback_data: `aq:approve:${q.id}` },
+            { text: "Deny", callback_data: `aq:deny:${q.id}` },
+          ],
+        ];
+        await sendKeyboard(
+          chatId,
+          `Approval Required (${q.requester}):\nTool: ${q.toolName}\nTarget: ${q.summary}`,
+          keyboard,
+          signal,
+        ).catch(() => {});
+        lastSentAt = now;
+      }
+    }
+
+    // Surface questions from ask_user (elicitation)
+    const elStore = await import("../ai/store/elicitationStore");
+    const elPending = elStore.useElicitationStore.getState().pending;
+    for (const el of elPending) {
+      if (!sentElicitationIds.has(el.id)) {
+        sentElicitationIds.add(el.id);
+        const keyboard: InlineButton[][] = el.options.slice(0, 6).map((opt, i) => [
+          { text: opt.slice(0, 40), callback_data: `el:${el.id}:${i}` },
+        ]);
+        await sendKeyboard(
+          chatId,
+          `Agent Question:\n${el.question}`,
+          keyboard,
+          signal,
+        ).catch(() => {});
+        lastSentAt = now;
+      }
+    }
+
     if (step && step !== lastStep && now - lastSentAt >= 2500) {
       lastStep = step;
       await sendTelegram(chatId, `↳ ${step}`, signal).catch(() => {});
@@ -603,7 +734,6 @@ async function sendReportFiles(
  */
 async function runMirror(signal: AbortSignal): Promise<void> {
   let seenSession = "";
-  let seen = new Set<string>();
   while (!signal.aborted) {
     try {
       const store = await import("../ai/store/chatStore");
@@ -615,20 +745,28 @@ async function runMirror(signal: AbortSignal): Promise<void> {
         const messages = chat?.messages ?? [];
         if (sessionId !== seenSession) {
           seenSession = sessionId;
-          // Seed so pre-existing history is not replayed to Telegram — only
+          // Seed so pre-existing history is not replayed to Telegram - only
           // messages added from now on are mirrored.
-          seen = new Set(messages.map((m) => m.id).filter(Boolean) as string[]);
+          for (const m of messages) {
+            markMessageSeen(m.id, sessionId, m.role, messageText(m));
+          }
         }
         const settled =
           state.agentMeta.status === "idle" ||
           state.agentMeta.status === "error";
         for (const m of messages) {
-          if (m.id && seen.has(m.id)) continue;
           const text = messageText(m);
-          // Bot-injected messages and streaming assistant text are handled by
-          // the bot itself (the run's answer); don't mirror them.
-          if (!text || mirrorPauseCount > 0) {
-            if (m.id) seen.add(m.id);
+          if (isMessageSeen(m.id, sessionId, m.role, text)) continue;
+
+          // Telegram-origin messages and streaming assistant text are handled
+          // by the bot relay itself (dispatchAndStream); never mirror them.
+          if (
+            !text ||
+            mirrorPauseCount > 0 ||
+            (m.id && telegramOriginMessageIds.has(m.id)) ||
+            (m.role === "user" && isTelegramOriginText(text))
+          ) {
+            markMessageSeen(m.id, sessionId, m.role, text);
             continue;
           }
           if (m.role === "assistant" && !settled) {
@@ -636,7 +774,7 @@ async function runMirror(signal: AbortSignal): Promise<void> {
             continue;
           }
           await sendReplyWithDiagrams(chatId, text, signal).catch(() => {});
-          if (m.id) seen.add(m.id);
+          markMessageSeen(m.id, sessionId, m.role, text);
         }
       }
     } catch {
@@ -660,21 +798,35 @@ async function dispatchAndStream(
     const sessionId = store.useChatStore.getState().activeSessionId;
     if (!sessionId) return;
     const baseline = countAssistantMessages(store.getChat, sessionId);
-    // Pause the mirror BEFORE injecting the user message. The mirror ticks
-    // every 2s; pausing after `sendMessage` leaves a window where it can read
-    // the freshly-injected user message and echo the user's own text back to
-    // Telegram. With the counter, overlapping dispatches each hold one pause.
+
+    // Snapshot existing message IDs prior to injecting this prompt.
+    const priorChat = store.getChat(sessionId);
+    const priorIds = new Set(
+      (priorChat?.messages ?? []).map((m) => m.id).filter(Boolean) as string[],
+    );
+
+    // Pause the mirror before injecting the user message.
     pauseMirror();
     try {
       const accepted = await runtime.sendMessage(text);
       if (!accepted) {
         await sendTelegram(
           chatId,
-          "Could not start the agent run — check the model / API key.",
+          "Could not start the agent run - check the model / API key.",
           signal,
         );
         return;
       }
+
+      // Immediately mark the freshly-injected user message as seen and Telegram-origin.
+      const chatAfterSend = store.getChat(sessionId);
+      for (const m of chatAfterSend?.messages ?? []) {
+        if (m.id && !priorIds.has(m.id)) {
+          markMessageSeen(m.id, sessionId, m.role, messageText(m));
+          telegramOriginMessageIds.add(m.id);
+        }
+      }
+
       // Stream live progress alongside the run, superseding any prior stream.
       const progressCtl = new AbortController();
       progressCtrls.get(chatId)?.abort();
@@ -685,6 +837,16 @@ async function dispatchAndStream(
       try {
         const reply = await waitForReply(store, signal, sessionId, baseline);
         await sendReplyWithDiagrams(chatId, reply, signal);
+
+        // Immediately mark fresh assistant message(s) as seen and Telegram-origin.
+        const chatAfterReply = store.getChat(sessionId);
+        for (const m of chatAfterReply?.messages ?? []) {
+          if (m.id && !priorIds.has(m.id)) {
+            markMessageSeen(m.id, sessionId, m.role, messageText(m));
+            telegramOriginMessageIds.add(m.id);
+          }
+        }
+
         // Share any report/document file the agent previewed in this run.
         await sendReportFiles(
           chatId,
@@ -712,15 +874,50 @@ async function dispatchAndStream(
   }
 }
 
+/**
+ * Dispatch a Telegram-initiated task with immediate synchronous mirror lock
+ * and prompt tracking, preventing any race condition where the user's prompt
+ * or resulting reply could be mirrored back to Telegram.
+ */
+function startTelegramDispatch(
+  text: string,
+  chatId: number,
+  signal: AbortSignal,
+  ackText: string,
+): void {
+  pauseMirror();
+  recordTelegramText(text);
+  void (async () => {
+    try {
+      await sendTelegram(chatId, ackText, signal).catch(() => {});
+      await dispatchAndStream(text, chatId, signal);
+    } catch (e) {
+      if (!signal.aborted) {
+        await sendTelegram(
+          chatId,
+          `Error during run: ${e instanceof Error ? e.message : String(e)}`,
+          signal,
+        ).catch(() => {});
+      }
+    } finally {
+      resumeMirror();
+    }
+  })();
+}
+
 const HELP = [
-  "/status — bot + agent status",
-  "/query <question> — read-only question (or just type the question)",
-  "/run <task> — run a task in the agent",
-  "/stop — stop the current run",
-  "/new — start a new agent session",
-  "/model — pick a model (opens a provider → model menu)",
-  "/model <id> — set the model directly",
-  "/cost — today's & total spend",
+  "/status - bot + agent status",
+  "/query <question> - read-only question (or just type the question)",
+  "/run <task> - run a task in the agent",
+  "/approve - approve all pending actions",
+  "/deny - deny all pending actions",
+  "/mode [all|edits|ask] - view or set autonomy approval mode",
+  "/scope [list|add <host>|clear] - view or manage pentest scope",
+  "/stop - stop the current run",
+  "/new - start a new agent session",
+  "/model - pick a model (opens a provider -> model menu)",
+  "/model <id> - set the model directly",
+  "/cost - today's & total spend",
 ].join("\n");
 
 async function isValidModel(id: string): Promise<boolean> {
@@ -762,6 +959,11 @@ async function handleCallback(
     return;
   }
   const chatId = msg.chat.id;
+  const owner = useTelegramStore.getState().chatId;
+  if (owner && String(owner) !== String(chatId)) {
+    await answerCallback(cb.id, "Unauthorized.", signal);
+    return;
+  }
   const messageId = msg.message_id;
 
   if (data.startsWith("mp:")) {
@@ -802,6 +1004,54 @@ async function handleCallback(
     return;
   }
 
+  if (data.startsWith("ap:")) {
+    const [, action, id] = data.split(":");
+    const approved = action === "approve";
+    const state = await import("../ai/store/chatStore");
+    state.useChatStore.getState().respondToApproval(id, approved);
+    await answerCallback(cb.id, approved ? "Approved." : "Denied.", signal);
+    await editKeyboard(
+      chatId,
+      messageId,
+      `Action ${approved ? "Approved" : "Denied"} via Telegram.`,
+      [],
+      signal,
+    );
+    return;
+  }
+
+  if (data.startsWith("aq:")) {
+    const [, action, id] = data.split(":");
+    const approved = action === "approve";
+    const aq = await import("../ai/store/approvalQueueStore");
+    aq.useApprovalQueue.getState().respond([id], approved);
+    await answerCallback(cb.id, approved ? "Approved." : "Denied.", signal);
+    await editKeyboard(
+      chatId,
+      messageId,
+      `Action ${approved ? "Approved" : "Denied"} via Telegram.`,
+      [],
+      signal,
+    );
+    return;
+  }
+
+  if (data.startsWith("el:")) {
+    const [, id, idxStr] = data.split(":");
+    const idx = parseInt(idxStr, 10);
+    const el = await import("../ai/store/elicitationStore");
+    const item = el.useElicitationStore.getState().pending.find((p) => p.id === id);
+    if (item && item.options[idx]) {
+      const choice = item.options[idx];
+      el.useElicitationStore.getState().answer(id, choice);
+      await answerCallback(cb.id, `Selected: ${choice}`, signal);
+      await editKeyboard(chatId, messageId, `Selected: ${choice}`, [], signal);
+      return;
+    }
+    await answerCallback(cb.id, "Question no longer pending.", signal);
+    return;
+  }
+
   await answerCallback(cb.id, null, signal);
 }
 
@@ -835,19 +1085,23 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
           "Usage: /query <question>",
           signal,
         ));
-      await sendTelegram(chatId, "Started — I'll post progress here.", signal);
-      void dispatchAndStream(tail, chatId, signal);
+      startTelegramDispatch(
+        tail,
+        chatId,
+        signal,
+        "Started - I'll post progress here.",
+      );
       return;
     }
     case "/run": {
       if (!tail)
         return void (await sendTelegram(chatId, "Usage: /run <task>", signal));
-      await sendTelegram(
+      startTelegramDispatch(
+        tail,
         chatId,
-        "Task submitted — I'll post progress here.",
         signal,
+        "Task submitted - I'll post progress here.",
       );
-      void dispatchAndStream(tail, chatId, signal);
       return;
     }
     case "/stop": {
@@ -855,7 +1109,7 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
       await runtime.stopRun();
       await sendTelegram(
         chatId,
-        "Stop requested — the current run will settle.",
+        "Stop requested - the current run will settle.",
         signal,
       );
       return;
@@ -917,19 +1171,122 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
       );
       return;
     }
+    case "/approve": {
+      const state = await import("../ai/store/chatStore");
+      const aq = await import("../ai/store/approvalQueueStore");
+      const pending = state.useChatStore.getState().agentMeta.pendingApprovals ?? [];
+      const aqPending = aq.useApprovalQueue.getState().pending;
+      let count = 0;
+      for (const p of pending) {
+        state.useChatStore.getState().respondToApproval(p.id, true);
+        count++;
+      }
+      for (const q of aqPending) {
+        aq.useApprovalQueue.getState().respond([q.id], true);
+        count++;
+      }
+      await sendTelegram(chatId, `Approved ${count} pending action(s).`, signal);
+      return;
+    }
+    case "/deny": {
+      const state = await import("../ai/store/chatStore");
+      const aq = await import("../ai/store/approvalQueueStore");
+      const pending = state.useChatStore.getState().agentMeta.pendingApprovals ?? [];
+      const aqPending = aq.useApprovalQueue.getState().pending;
+      let count = 0;
+      for (const p of pending) {
+        state.useChatStore.getState().respondToApproval(p.id, false);
+        count++;
+      }
+      for (const q of aqPending) {
+        aq.useApprovalQueue.getState().respond([q.id], false);
+        count++;
+      }
+      await sendTelegram(chatId, `Denied ${count} pending action(s).`, signal);
+      return;
+    }
+    case "/mode": {
+      const { usePreferencesStore } = await import("@/modules/settings/preferences");
+      const { setAgentApprovalMode } = await import("@/modules/settings/store");
+      const current = usePreferencesStore.getState().agentApprovalMode;
+      if (!tail) {
+        await sendTelegram(
+          chatId,
+          `Current approval mode: ${current}\n\nTo change: /mode all (autonomous), /mode edits (auto edits), /mode ask (always ask)`,
+          signal,
+        );
+        return;
+      }
+      if (tail === "all" || tail === "auto") {
+        await setAgentApprovalMode("all");
+        await sendTelegram(chatId, "Approval mode set to: all (autonomous execution).", signal);
+        return;
+      }
+      if (tail === "edits") {
+        await setAgentApprovalMode("edits");
+        await sendTelegram(chatId, "Approval mode set to: edits (auto file edits).", signal);
+        return;
+      }
+      if (tail === "ask") {
+        await setAgentApprovalMode("ask");
+        await sendTelegram(chatId, "Approval mode set to: ask (prompt every time).", signal);
+        return;
+      }
+      await sendTelegram(chatId, "Unknown mode. Use: /mode all, /mode edits, or /mode ask", signal);
+      return;
+    }
+    case "/scope": {
+      const { usePreferencesStore } = await import("@/modules/settings/preferences");
+      const { setPentestScope, setEnforcePentestScope } = await import("@/modules/settings/store");
+      const prefs = usePreferencesStore.getState();
+      const scope = prefs.pentestScope ?? [];
+      const [sub, ...args] = tail.split(/\s+/);
+      if (!tail || sub === "list") {
+        const list = scope.length > 0 ? scope.map((h) => `- ${h}`).join("\n") : "(empty)";
+        await sendTelegram(
+          chatId,
+          `Authorized Pentest Scope:\n${list}\nEnforced: ${prefs.enforcePentestScope ? "yes" : "no"}\n\nCommands: /scope add <ip-or-host>, /scope clear, /scope toggle`,
+          signal,
+        );
+        return;
+      }
+      if (sub === "add") {
+        const host = args.join(" ").trim();
+        if (!host) {
+          await sendTelegram(chatId, "Usage: /scope add <ip-or-host>", signal);
+          return;
+        }
+        await setPentestScope([...new Set([...scope, host])]);
+        await sendTelegram(chatId, `Added '${host}' to authorized pentest scope.`, signal);
+        return;
+      }
+      if (sub === "clear") {
+        await setPentestScope([]);
+        await sendTelegram(chatId, "Authorized pentest scope cleared.", signal);
+        return;
+      }
+      if (sub === "toggle") {
+        const next = !prefs.enforcePentestScope;
+        await setEnforcePentestScope(next);
+        await sendTelegram(chatId, `Pentest scope enforcement: ${next ? "enabled" : "disabled"}.`, signal);
+        return;
+      }
+      await sendTelegram(chatId, "Usage: /scope [list | add <host> | clear | toggle]", signal);
+      return;
+    }
     default:
-      // A bare message is a question/task — no /query prefix needed. Unknown
+      // A bare message is a question/task - no /query prefix needed. Unknown
       // slash commands still get help so a typo isn't silently sent to the app.
       if (text.startsWith("/")) {
         await sendTelegram(chatId, HELP, signal);
         return;
       }
-      await sendTelegram(
+      startTelegramDispatch(
+        text,
         chatId,
-        "Started — working on it; progress will show here.",
         signal,
+        "Started - working on it; progress will show here.",
       );
-      void dispatchAndStream(text, chatId, signal);
       return;
   }
 }
@@ -981,3 +1338,17 @@ export function stopTelegramBot(): void {
   mirrorController = null;
   useTelegramStore.getState().setOnline(false);
 }
+
+export const _testOnly = {
+  seenMessageIds,
+  seenFingerprints,
+  telegramOriginMessageIds,
+  recentTelegramPrompts,
+  recordTelegramText,
+  isTelegramOriginText,
+  markMessageSeen,
+  isMessageSeen,
+  pauseMirror,
+  resumeMirror,
+  getMirrorPauseCount: () => mirrorPauseCount,
+};
