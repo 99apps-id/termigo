@@ -1,4 +1,4 @@
-import { info as logInfo } from "@tauri-apps/plugin-log";
+import { info as logInfo, warn as logWarn } from "@tauri-apps/plugin-log";
 import {
   convertToModelMessages,
   type LanguageModel,
@@ -880,6 +880,9 @@ export async function runAgentStream(opts: RunAgentOptions) {
   let firstStepTimer: ReturnType<typeof setTimeout> | null = resumingApproval
     ? null
     : setTimeout(() => {
+        void logWarn(
+          `[ai] model did not produce first token within 90s (model=${modelId}, provider=${provider})`,
+        ).catch(() => {});
         abortController.abort(new Error("model did not respond within 90s"));
       }, 90_000);
   // A provider that accepts the connection and then goes silent looked exactly
@@ -1217,6 +1220,9 @@ export async function runAgentStream(opts: RunAgentOptions) {
         // Step 0 executed the approved tool. Step 1 now prompts the model with
         // the tool result; arm the watchdog for the model's first token.
         firstStepTimer = setTimeout(() => {
+          void logWarn(
+            `[ai] model did not produce first token after approval within 90s (model=${modelId}, provider=${provider})`,
+          ).catch(() => {});
           abortController.abort(new Error("model did not respond within 90s"));
         }, 90_000);
         stallNotice = setTimeout(() => {
@@ -1373,6 +1379,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
         status: settledStop ? "failed" : "completed",
         totalTokens: runInput + runOutput,
         totalCostUsd: runCost > 0 ? runCost : undefined,
+        finishReason,
       });
 
       // A clean finish means the model decided it was done (its last step was a
@@ -1428,10 +1435,14 @@ export async function runAgentStream(opts: RunAgentOptions) {
     // a run that is already finished, so the two callbacks cannot fight.
     onAbort: () => {
       opts.onStep?.(null);
+      void logWarn(
+        `[ai] stream aborted (runId=${trajectoryRunId}, modelId=${modelId})`,
+      ).catch(() => {});
       useTrajectoryStore.getState().finishRun({
         status: "aborted",
         totalTokens: runInput + runOutput,
         totalCostUsd: runCost > 0 ? runCost : undefined,
+        finishReason: "abort",
       });
     },
   });

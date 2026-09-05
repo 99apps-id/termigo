@@ -45,7 +45,13 @@ if (Test-Path (Join-Path $TargetRelease "termigo-cli.exe")) {
 $BundleNsis = Join-Path $TargetRelease "bundle\nsis"
 if (Test-Path $BundleNsis) {
     Copy-Item -Path "$BundleNsis\*.exe" -Destination $DistWin -Force
-    Write-Host "==> Copied installer to dist-win/" -ForegroundColor Green
+    Write-Host "==> Copied NSIS installer to dist-win/" -ForegroundColor Green
+}
+
+$BundleMsi = Join-Path $TargetRelease "bundle\msi"
+if (Test-Path $BundleMsi) {
+    Copy-Item -Path "$BundleMsi\*.msi" -Destination $DistWin -Force
+    Write-Host "==> Copied MSI installer to dist-win/" -ForegroundColor Green
 }
 
 Write-Host "==> Windows build complete! Artifacts located in $DistWin" -ForegroundColor Green

@@ -64,4 +64,22 @@ describe("trajectoryStore", () => {
     expect(run?.steps[0].status).toBe("error");
     expect(run?.steps[1].status).toBe("success");
   });
+
+  it("marks leftover running steps as awaiting-approval when run pauses on tool-calls", () => {
+    const store = useTrajectoryStore.getState();
+    store.startRun({ runId: "run-3", modelId: "m" });
+    store.appendStep({
+      id: "step-bash",
+      stepIndex: 0,
+      toolName: "bash_run",
+      args: { command: "sudo ufw status" },
+      status: "running",
+    });
+    store.finishRun({ status: "completed", finishReason: "tool-calls" });
+    const run = useTrajectoryStore
+      .getState()
+      .runs.find((r) => r.runId === "run-3");
+    expect(run?.steps[0].status).toBe("awaiting-approval");
+    expect(run?.steps[0].output).toBeUndefined();
+  });
 });

@@ -6,7 +6,7 @@ export type TrajectoryStep = {
   stepIndex: number;
   toolName: string;
   args: Record<string, unknown>;
-  status: "pending" | "running" | "success" | "error";
+  status: "pending" | "running" | "success" | "error" | "awaiting-approval";
   output?: unknown;
   durationMs?: number;
   tokensUsed?: number;
@@ -37,6 +37,7 @@ type TrajectoryState = {
     status: TrajectoryRun["status"];
     totalTokens?: number;
     totalCostUsd?: number;
+    finishReason?: string;
   }) => void;
   selectStep: (stepId: string | null) => void;
   clearRuns: () => void;
@@ -91,7 +92,7 @@ export const useTrajectoryStore = create<TrajectoryState>((set) => ({
       })),
     })),
 
-  finishRun: ({ status, totalTokens, totalCostUsd }) =>
+  finishRun: ({ status, totalTokens, totalCostUsd, finishReason }) =>
     set((state) => {
       const active = state.runs.find((r) => r.runId === state.activeRunId);
       // A run can only end once. onAbort and onFinish can both fire for the
@@ -105,13 +106,23 @@ export const useTrajectoryStore = create<TrajectoryState>((set) => ({
       // provider error). Closing it as "error" here is the difference between
       // an honest red card and a card that sits on "RUNNING" forever, which
       // users read as "the agent is waiting for me" when nothing is waiting.
+      //
+      // Exception: if the run paused on "tool-calls" (waiting for user approval),
+      // the step was NOT an error; it is legitimately awaiting user confirmation.
+      const isToolCallsPause =
+        finishReason === "tool-calls" || finishReason === "tool_calls";
       const steps = active.steps.map((s) =>
         s.status === "running"
-          ? {
-              ...s,
-              status: "error" as const,
-              output: { error: "no result — the call did not complete" },
-            }
+          ? isToolCallsPause
+            ? {
+                ...s,
+                status: "awaiting-approval" as const,
+              }
+            : {
+                ...s,
+                status: "error" as const,
+                output: { error: "no result — the call did not complete" },
+              }
           : s,
       );
 

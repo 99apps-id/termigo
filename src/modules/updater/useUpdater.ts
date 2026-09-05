@@ -109,7 +109,17 @@ export function useUpdater({ autoCheck = true }: HookOptions = {}) {
         setStatus({ kind: "uptodate" });
       }
     } catch (err) {
-      setStatus({ kind: "error", message: String(err) });
+      if (!manual) {
+        // Automatic startup check should fail silently without intrusive error modals
+        setStatus({ kind: "idle" });
+      } else {
+        const msg = String(err);
+        if (msg.includes("disabled") || msg.includes("not active") || msg.includes("inactive")) {
+          setStatus({ kind: "uptodate" });
+        } else {
+          setStatus({ kind: "error", message: msg });
+        }
+      }
     }
   }, []);
 
