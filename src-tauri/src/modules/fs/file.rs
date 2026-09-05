@@ -222,8 +222,19 @@ fn read_file_sync(p: &Path, force: bool) -> Result<ReadResult, String> {
         e.to_string()
     })?;
 
-    // Null-byte sniff on the first chunk. Not perfect (misses UTF-16 BOM
-    // cases) but catches the common "this is a PNG" mistake cheaply.
+    // Support UTF-16 with BOM for text files (common with Windows PowerShell)
+    if is_likely_text_file(p, &bytes) {
+        if let Some(content) = try_decode_utf16(&bytes) {
+            return Ok(ReadResult::Text {
+                content,
+                size,
+                mtime: mtime_millis(&meta),
+            });
+        }
+    }
+
+    // Null-byte sniff on the first chunk. Catches the common
+    // "this is a PNG / EXE" mistake cheaply.
     let sniff_len = bytes.len().min(BINARY_SNIFF_BYTES);
     if bytes[..sniff_len].contains(&0) {
         return Ok(ReadResult::Binary { size });
@@ -235,8 +246,114 @@ fn read_file_sync(p: &Path, force: bool) -> Result<ReadResult, String> {
             size,
             mtime: mtime_millis(&meta),
         }),
-        Err(_) => Ok(ReadResult::Binary { size }),
+        Err(e) => {
+            let raw = e.into_bytes();
+            if is_likely_text_file(p, &raw) {
+                let content = decode_fallback_text(&raw);
+                Ok(ReadResult::Text {
+                    content,
+                    size,
+                    mtime: mtime_millis(&meta),
+                })
+            } else {
+                Ok(ReadResult::Binary { size })
+            }
+        }
     }
+}
+
+fn try_decode_utf16(bytes: &[u8]) -> Option<String> {
+    if bytes.len() >= 2 && bytes.starts_with(&[0xFF, 0xFE]) {
+        let u16_chars: Vec<u16> = bytes[2..]
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
+        String::from_utf16(&u16_chars).ok()
+    } else if bytes.len() >= 2 && bytes.starts_with(&[0xFE, 0xFF]) {
+        let u16_chars: Vec<u16> = bytes[2..]
+            .chunks_exact(2)
+            .map(|c| u16::from_be_bytes([c[0], c[1]]))
+            .collect();
+        String::from_utf16(&u16_chars).ok()
+    } else {
+        None
+    }
+}
+
+fn is_likely_text_file(path: &Path, bytes: &[u8]) -> bool {
+    if let Some(ext) = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+    {
+        match ext.as_str() {
+            "txt" | "md" | "markdown" | "json" | "js" | "mjs" | "cjs" | "ts" | "tsx" | "jsx"
+            | "css" | "scss" | "less" | "html" | "htm" | "xml" | "svg" | "yaml" | "yml"
+            | "toml" | "ini" | "conf" | "cfg" | "sh" | "bash" | "zsh" | "fish" | "ps1"
+            | "bat" | "cmd" | "py" | "rs" | "go" | "c" | "cpp" | "h" | "hpp" | "java" | "kt"
+            | "php" | "rb" | "sql" | "log" | "env" | "csv" | "tsv" | "rules" | "diff"
+            | "patch" => {
+                return true;
+            }
+            _ => {}
+        }
+    }
+
+    if bytes.is_empty() {
+        return true;
+    }
+
+    let sample_len = bytes.len().min(4096);
+    let sample = &bytes[..sample_len];
+    let printable_or_ws = sample
+        .iter()
+        .filter(|&&b| b == b'\t' || b == b'\n' || b == b'\r' || (0x20..=0x7E).contains(&b))
+        .count();
+    (printable_or_ws as f64 / sample_len as f64) >= 0.80
+}
+
+fn decode_fallback_text(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len());
+    for &b in bytes {
+        if b < 0x80 {
+            out.push(b as char);
+        } else if (0x80..=0x9F).contains(&b) {
+            let ch = match b {
+                0x80 => '€',
+                0x82 => '‚',
+                0x83 => 'ƒ',
+                0x84 => '„',
+                0x85 => '…',
+                0x86 => '†',
+                0x87 => '‡',
+                0x88 => 'ˆ',
+                0x89 => '‰',
+                0x8A => 'Š',
+                0x8B => '‹',
+                0x8C => 'Œ',
+                0x8E => 'Ž',
+                0x91 => '‘',
+                0x92 => '’',
+                0x93 => '“',
+                0x94 => '”',
+                0x95 => '•',
+                0x96 => '–',
+                0x97 => '—',
+                0x98 => '˜',
+                0x99 => '™',
+                0x9A => 'š',
+                0x9B => '›',
+                0x9C => 'œ',
+                0x9E => 'ž',
+                0x9F => 'Ÿ',
+                _ => '?',
+            };
+            out.push(ch);
+        } else {
+            out.push(char::from_u32(b as u32).unwrap_or('?'));
+        }
+    }
+    out
 }
 
 #[derive(Serialize, Clone)]
@@ -393,6 +510,43 @@ mod tests {
             read_file_sync(&f, false).unwrap(),
             ReadResult::Binary { .. }
         ));
+    }
+
+    #[test]
+    fn read_file_reads_windows_1252_text_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("memory.md");
+        // Windows-1252 em-dash (0x97) in markdown text
+        let mut bytes = b"## 2026-08-18 -- App blank\n".to_vec();
+        bytes[14] = 0x97; // replace with Windows-1252 em-dash
+        std::fs::write(&f, bytes).unwrap();
+        let res = read_file_sync(&f, false).unwrap();
+        match res {
+            ReadResult::Text { content, .. } => {
+                assert!(content.contains("App blank"));
+                assert!(content.contains('—'));
+            }
+            _ => panic!("expected ReadResult::Text for windows-1252 markdown file"),
+        }
+    }
+
+    #[test]
+    fn read_file_reads_utf16_le_bom_text_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("output.txt");
+        // UTF-16 LE BOM + "hello"
+        let mut bytes = vec![0xFF, 0xFE];
+        for ch in "hello\n".encode_utf16() {
+            bytes.extend_from_slice(&ch.to_le_bytes());
+        }
+        std::fs::write(&f, bytes).unwrap();
+        let res = read_file_sync(&f, false).unwrap();
+        match res {
+            ReadResult::Text { content, .. } => {
+                assert_eq!(content, "hello\n");
+            }
+            _ => panic!("expected ReadResult::Text for UTF-16 LE BOM text file"),
+        }
     }
 
     #[test]
