@@ -91,6 +91,7 @@ export const BUILTIN_PROFILES: Record<string, HarnessProfile> = {
     promptPrelude:
       "You are operating in FULLY AUTONOMOUS mode. Your primary objective is to complete the user request completely and verify your work.\n" +
       "- Break down ambiguous goals into concrete milestones.\n" +
+      "- Ground all actions in reality: never assume file paths, code symbols, or dependencies exist without discovering or reading them first.\n" +
       "- If a command or tool encounters an error or timeout, do NOT stop or ask for help prematurely; diagnose the cause, pivot to an alternative command/tool, and continue.\n" +
       "- Verify your solution thoroughly with inspection, test, or lint commands before concluding.",
     stepBudgetDelta: 25,

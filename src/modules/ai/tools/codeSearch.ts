@@ -13,21 +13,27 @@ export function buildCodeSearchTools(ctx: ToolContext) {
   return {
     code_search: tool({
       description:
-        "Semantic code search across the workspace. Uses a local TF-IDF index over code chunks to find relevant code by natural language query. Returns file paths, line ranges, relevance scores, and snippets. Use this when you need to find where something is implemented, or discover relevant code without knowing exact symbols.",
+        "Codebase search across the workspace. Uses Okapi BM25 ranking over code and configuration chunks with code-aware tokenization, path boosting, and exact substring matching. Returns file paths, line ranges, relevance scores, and centered snippets. Use this when you need to find where something is implemented, discover symbols, or locate relevant code without knowing exact filenames.",
       inputSchema: z.object({
-        query: z.string().describe("Natural language query describing the code you are looking for."),
+        query: z.string().describe("Natural language query or code symbol to search for."),
         max_results: z.number().int().min(1).max(20).optional().describe("Maximum results to return. Defaults to 10."),
+        path_filter: z.string().optional().describe("Optional subdirectory or path filter to narrow results (e.g. 'src/modules/ai')."),
       }),
-      execute: async ({ query, max_results }) => {
+      execute: async ({ query, max_results, path_filter }) => {
         const root = ctx.getWorkspaceRoot() ?? ctx.getCwd();
         if (!root) return { error: "no workspace root or cwd available" };
 
         const stats = getIndexStats();
-        if (stats.chunks === 0) {
-          await indexWorkspace(root);
+        if (stats.chunks === 0 && !indexing) {
+          indexing = true;
+          try {
+            await indexWorkspace(root);
+          } finally {
+            indexing = false;
+          }
         }
 
-        const results = searchCode(query, max_results ?? 10);
+        const results = searchCode(query, max_results ?? 10, path_filter);
         return {
           query,
           stats: getIndexStats(),
@@ -38,7 +44,7 @@ export function buildCodeSearchTools(ctx: ToolContext) {
 
     code_index: tool({
       description:
-        "Index the workspace for semantic code search. Rebuilds the local TF-IDF index over code files. Use this when the index is stale or you want to ensure fresh results.",
+        "Index the workspace for codebase search. Rebuilds the local BM25 index over code and configuration files. Use this when files have changed or you want to ensure fresh results.",
       inputSchema: z.object({}),
       execute: async () => {
         if (indexing) return { status: "indexing" };

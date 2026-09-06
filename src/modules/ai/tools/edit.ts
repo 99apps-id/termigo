@@ -120,7 +120,7 @@ async function applyEdits(
       }
       if (n === 0) {
         return {
-          error: `old_string not found: ${JSON.stringify(e.old_string.slice(0, 80))}`,
+          error: `old_string not found: ${JSON.stringify(e.old_string.slice(0, 80))}. Grounding check: re-read the file with read_file to inspect the current lines, indentation, and whitespace verbatim.`,
           path: abs,
         };
       }
@@ -130,7 +130,7 @@ async function applyEdits(
       const first = content.indexOf(e.old_string);
       if (first === -1) {
         return {
-          error: `old_string not found: ${JSON.stringify(e.old_string.slice(0, 80))}`,
+          error: `old_string not found: ${JSON.stringify(e.old_string.slice(0, 80))}. Grounding check: re-read the file with read_file to inspect the current lines, indentation, and whitespace verbatim.`,
           path: abs,
         };
       }

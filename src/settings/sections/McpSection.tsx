@@ -3,9 +3,6 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { parseCommandLine, parseEnvLines } from "@/modules/ai/lib/mcpArgs";
 import { mcpToolName } from "@/modules/ai/lib/mcpToolNames";
-function invalidateMcpTools(): void {
-  void import("@/modules/ai/lib/mcpTools").then((m) => m.invalidateMcpTools());
-}
 import {
   type McpServer,
   type McpTool,
@@ -25,6 +22,10 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useId, useState } from "react";
 import { SectionHeader } from "../components/SectionHeader";
+
+function invalidateMcpTools(): void {
+  void import("@/modules/ai/lib/mcpTools").then((m) => m.invalidateMcpTools());
+}
 
 const EXAMPLE = `{
   "mcpServers": {
