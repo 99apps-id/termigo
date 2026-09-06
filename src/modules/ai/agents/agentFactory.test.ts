@@ -121,6 +121,26 @@ describe("buildAgentTools", () => {
     });
     expect(exploreTools.process).toBeUndefined();
   });
+
+  it("filters non-core tools when compactToolTier is enabled", () => {
+    const fixture = {
+      read_file: { execute: () => undefined },
+      edit: { execute: () => undefined },
+      bash_run: { execute: () => undefined },
+      process: { execute: () => undefined },
+      browser_open: { execute: () => undefined },
+      sql_query: { execute: () => undefined },
+    };
+    const compactTools = buildAgentTools(fixture, {
+      compactToolTier: true,
+    });
+    expect(compactTools.read_file).toBeDefined();
+    expect(compactTools.edit).toBeDefined();
+    expect(compactTools.bash_run).toBeDefined();
+    expect(compactTools.process).toBeUndefined();
+    expect(compactTools.browser_open).toBeUndefined();
+    expect(compactTools.sql_query).toBeUndefined();
+  });
 });
 
 describe("spawnToolsWithheld", () => {

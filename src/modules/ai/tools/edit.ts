@@ -77,6 +77,78 @@ const LOCAL_IO: EditIo = {
   cacheKey: (p) => fileCacheKey(p),
 };
 
+function normalizeWhitespace(s: string): string {
+  return s
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+/g, " ")
+    .trim();
+}
+
+/**
+ * Generates actionable grounding diagnostics when `old_string` fails to match.
+ * Pinpoints line endings, casing, whitespace/indentation shifts, or closest
+ * matching line blocks so the agent can self-repair its edit arguments.
+ */
+export function diagnoseMismatch(content: string, target: string): string {
+  if (!target || !content) {
+    return `old_string not found: ${JSON.stringify(target.slice(0, 80))}. Grounding check: re-read the file with read_file to inspect the current lines, indentation, and whitespace verbatim.`;
+  }
+
+  const contentLf = content.replace(/\r\n/g, "\n");
+  const targetLf = target.replace(/\r\n/g, "\n");
+
+  // 1. Line-ending discrepancy
+  if (contentLf.includes(targetLf)) {
+    return `old_string not found (line-ending mismatch: file uses \\r\\n while target uses \\n or vice versa). Grounding check: re-read the file with read_file to inspect verbatim line endings.`;
+  }
+
+  // 2. Case-insensitive match
+  const lowerContent = contentLf.toLowerCase();
+  const lowerTarget = targetLf.toLowerCase();
+  const caseIdx = lowerContent.indexOf(lowerTarget);
+  if (caseIdx !== -1) {
+    const lineNum = contentLf.slice(0, caseIdx).split("\n").length;
+    const actualSnippet = contentLf.slice(caseIdx, caseIdx + targetLf.length);
+    return `old_string not found: ${JSON.stringify(target.slice(0, 80))}. Grounding check: case mismatch near line ${lineNum}. Verbatim content in file: ${JSON.stringify(actualSnippet.slice(0, 100))}. Copy the verbatim characters.`;
+  }
+
+  // 3. Whitespace / indentation discrepancy
+  const targetWsNorm = normalizeWhitespace(targetLf);
+  const lines = contentLf.split("\n");
+  const targetLines = targetLf.split("\n");
+  const targetLineCount = targetLines.length;
+
+  for (let i = 0; i <= lines.length - targetLineCount; i++) {
+    const windowSlice = lines.slice(i, i + targetLineCount);
+    const windowText = windowSlice.join("\n");
+    if (normalizeWhitespace(windowText) === targetWsNorm) {
+      const startLine = i + 1;
+      const endLine = i + targetLineCount;
+      return `old_string not found: ${JSON.stringify(target.slice(0, 80))}. Grounding check: indentation/whitespace mismatch at lines ${startLine}-${endLine}. Verbatim content in file:\n${windowText}\nCopy this exact verbatim string.`;
+    }
+  }
+
+  // 4. Partial / starting line anchor match
+  const firstTargetLine = targetLines[0]?.trim();
+  if (firstTargetLine && firstTargetLine.length >= 4) {
+    for (let i = 0; i < lines.length; i++) {
+      if (
+        lines[i].trim() === firstTargetLine ||
+        lines[i].includes(firstTargetLine)
+      ) {
+        const startLine = i + 1;
+        const windowSlice = lines.slice(
+          i,
+          Math.min(lines.length, i + Math.max(3, targetLineCount)),
+        );
+        return `old_string not found: ${JSON.stringify(target.slice(0, 80))}. Grounding check: anchor match found starting at line ${startLine}. Verbatim content in file:\n${windowSlice.join("\n")}\nRe-read with read_file or copy the verbatim lines above.`;
+      }
+    }
+  }
+
+  return `old_string not found: ${JSON.stringify(target.slice(0, 80))}. Grounding check: re-read the file with read_file to inspect the current lines, indentation, and whitespace verbatim.`;
+}
+
 async function applyEdits(
   abs: string,
   edits: { old_string: string; new_string: string; replace_all?: boolean }[],
@@ -120,7 +192,7 @@ async function applyEdits(
       }
       if (n === 0) {
         return {
-          error: `old_string not found: ${JSON.stringify(e.old_string.slice(0, 80))}. Grounding check: re-read the file with read_file to inspect the current lines, indentation, and whitespace verbatim.`,
+          error: diagnoseMismatch(content, e.old_string),
           path: abs,
         };
       }
@@ -130,7 +202,7 @@ async function applyEdits(
       const first = content.indexOf(e.old_string);
       if (first === -1) {
         return {
-          error: `old_string not found: ${JSON.stringify(e.old_string.slice(0, 80))}. Grounding check: re-read the file with read_file to inspect the current lines, indentation, and whitespace verbatim.`,
+          error: diagnoseMismatch(content, e.old_string),
           path: abs,
         };
       }

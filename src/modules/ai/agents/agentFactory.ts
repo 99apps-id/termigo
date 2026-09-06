@@ -109,11 +109,43 @@ export const SUBAGENT_DISALLOWED_TOOLS: Partial<
   ]),
 };
 
+/** Core tools guaranteed in compact tiers. */
+export const CORE_TOOL_NAMES = new Set([
+  "read_file",
+  "write_file",
+  "edit",
+  "multi_edit",
+  "create_directory",
+  "list_directory",
+  "grep",
+  "glob",
+  "code_search",
+  "code_index",
+  "bash_run",
+  "bash_background",
+  "bash_logs",
+  "bash_list",
+  "bash_kill",
+  "run_checks",
+  "todo_write",
+  "review_changes",
+  "review_run",
+  "get_terminal_output",
+  "git_status",
+  "git_diff",
+  "git_log",
+  "git_checkpoint",
+  "git_commit",
+  "run_subagent",
+  "run_subagents",
+]);
+
 /**
  * Context-safe tool injection.
  *
  * Applies the harness profile's tool rules (reorder `prioritizeTools`, drop
  * `hideTools`) to any agent's toolset, capability-gates tools by subagent specialization,
+ * prunes to core tools when `compactToolTier` is set (e.g. for small-context models),
  * and - when `depth` is given - withholds the spawn tools at the nesting cap so a
  * sub-agent cannot recurse without bound. The main agent passes no `depth`, so its spawn
  * tools are never withheld. `maxDepth` is passed in (not read from the store) so the factory
@@ -126,6 +158,7 @@ export function buildAgentTools<T>(
     depth?: number;
     maxDepth?: number;
     subagentType?: SubagentType;
+    compactToolTier?: boolean;
   } = {},
 ): Record<string, T> {
   const profiled = opts.profile
@@ -140,13 +173,15 @@ export function buildAgentTools<T>(
   const maxDepth = opts.maxDepth ?? DEFAULT_MAX_SUBAGENT_DEPTH;
   const withholdSpawn =
     depth !== undefined && spawnToolsWithheld(depth, maxDepth);
+  const compactTier = opts.compactToolTier === true;
 
-  if (!disallowed && !withholdSpawn) return profiled;
+  if (!disallowed && !withholdSpawn && !compactTier) return profiled;
 
   const out: Record<string, T> = {};
   for (const [name, tool] of Object.entries(profiled)) {
     if (withholdSpawn && SPAWN_TOOLS.has(name)) continue;
     if (disallowed && disallowed.has(name)) continue;
+    if (compactTier && !CORE_TOOL_NAMES.has(name)) continue;
     out[name] = tool;
   }
   return out;

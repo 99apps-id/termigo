@@ -19,6 +19,7 @@ import {
   endpointIdFromCompatModel,
   estimateCost,
   getModelContextLimit,
+  isCompactTierModel,
   isCompatModelId,
   LMSTUDIO_DEFAULT_BASE_URL,
   MAX_AGENT_STEPS,
@@ -1128,9 +1129,13 @@ export async function runAgentStream(opts: RunAgentOptions) {
     }),
   };
   // Reorder/hide tools per the active harness profile (see harnessProfile.ts).
-  // Main agent passes no depth, so its spawn tools are never withheld — the
+  // Main agent passes no depth, so its spawn tools are never withheld - the
   // same context-safe injection a sub-agent goes through, minus the nesting cap.
-  const tools = buildAgentTools(rawTools, { profile });
+  // When running on a compact tier model, tool set is pruned to core tools to preserve context.
+  const tools = buildAgentTools(rawTools, {
+    profile,
+    compactToolTier: isCompactTierModel(modelId),
+  });
 
   // What the model is handed before it reads a word of the request. Measured
   // as components rather than one number: a total says "slow", a breakdown

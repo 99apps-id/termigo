@@ -9,6 +9,7 @@ export type CodeChunk = {
   text: string;
   tokens: string[];
   tokenCounts: Map<string, number>;
+  scopeHeader?: string;
 };
 
 export type SearchResult = {
@@ -17,23 +18,112 @@ export type SearchResult = {
   endLine: number;
   score: number;
   snippet: string;
+  scopeHeader?: string;
 };
 
 // ─── Tokenizer ────────────────────────────────────────────────────────────
 
 const STOP_WORDS = new Set([
-  "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
-  "have", "has", "had", "do", "does", "did", "will", "would", "could",
-  "should", "may", "might", "shall", "can", "to", "of", "in", "for",
-  "on", "with", "at", "by", "from", "as", "into", "through", "during",
-  "before", "after", "above", "below", "between", "out", "off", "over",
-  "under", "again", "further", "then", "once", "here", "there", "when",
-  "where", "why", "how", "all", "both", "each", "few", "more", "most",
-  "other", "some", "such", "no", "nor", "not", "only", "own", "same",
-  "so", "than", "too", "very", "just", "because", "but", "and", "or",
-  "if", "while", "about", "up", "down", "this", "that", "these", "those",
-  "const", "let", "var", "function", "return", "import", "export",
-  "true", "false", "null", "undefined",
+  "the",
+  "a",
+  "an",
+  "is",
+  "are",
+  "was",
+  "were",
+  "be",
+  "been",
+  "being",
+  "have",
+  "has",
+  "had",
+  "do",
+  "does",
+  "did",
+  "will",
+  "would",
+  "could",
+  "should",
+  "may",
+  "might",
+  "shall",
+  "can",
+  "to",
+  "of",
+  "in",
+  "for",
+  "on",
+  "with",
+  "at",
+  "by",
+  "from",
+  "as",
+  "into",
+  "through",
+  "during",
+  "before",
+  "after",
+  "above",
+  "below",
+  "between",
+  "out",
+  "off",
+  "over",
+  "under",
+  "again",
+  "further",
+  "then",
+  "once",
+  "here",
+  "there",
+  "when",
+  "where",
+  "why",
+  "how",
+  "all",
+  "both",
+  "each",
+  "few",
+  "more",
+  "most",
+  "other",
+  "some",
+  "such",
+  "no",
+  "nor",
+  "not",
+  "only",
+  "own",
+  "same",
+  "so",
+  "than",
+  "too",
+  "very",
+  "just",
+  "because",
+  "but",
+  "and",
+  "or",
+  "if",
+  "while",
+  "about",
+  "up",
+  "down",
+  "this",
+  "that",
+  "these",
+  "those",
+  "const",
+  "let",
+  "var",
+  "function",
+  "return",
+  "import",
+  "export",
+  "true",
+  "false",
+  "null",
+  "undefined",
 ]);
 
 export function tokenize(text: string): string[] {
@@ -73,17 +163,59 @@ export function tokenize(text: string): string[] {
 const CHUNK_LINES = 80;
 const CHUNK_OVERLAP = 20;
 
-function chunkLines(lines: string[]): { start: number; end: number; text: string }[] {
-  const chunks: { start: number; end: number; text: string }[] = [];
+const DECLARATION_BOUNDARY_REGEX =
+  /^(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function|class|interface|type|enum|struct|impl|trait|fn|def|pub(?:\s*\([^)]+\))?\s+(?:fn|struct|enum|trait|type|impl)|const\s+[A-Z0-9_]+\s*=|var\s+[A-Z0-9_]+\s*=)/;
+
+export function findScopeHeader(
+  lines: string[],
+  currentLineIndex: number,
+): string | null {
+  for (let i = currentLineIndex; i >= Math.max(0, currentLineIndex - 25); i--) {
+    const line = lines[i]?.trim();
+    if (!line) continue;
+    if (DECLARATION_BOUNDARY_REGEX.test(line)) {
+      const match = line.slice(0, 80);
+      return match.endsWith("{") || match.endsWith(":")
+        ? match
+        : `${match} ...`;
+    }
+  }
+  return null;
+}
+
+export function chunkLines(
+  lines: string[],
+): { start: number; end: number; text: string; scopeHeader?: string }[] {
+  const chunks: {
+    start: number;
+    end: number;
+    text: string;
+    scopeHeader?: string;
+  }[] = [];
   let i = 0;
   while (i < lines.length) {
     const start = i;
-    const end = Math.min(i + CHUNK_LINES, lines.length);
-    const text = lines.slice(start, end).join("\n");
-    chunks.push({ start, end, text });
-    i += CHUNK_LINES - CHUNK_OVERLAP;
+    let end = Math.min(i + CHUNK_LINES, lines.length);
+
+    // If we are not at the end of the file, prefer breaking at a declaration boundary or empty line
+    if (end < lines.length) {
+      const searchMin = Math.max(start + CHUNK_OVERLAP, end - 15);
+      for (let cand = end; cand >= searchMin; cand--) {
+        const line = lines[cand]?.trim() ?? "";
+        if (DECLARATION_BOUNDARY_REGEX.test(line) || line === "") {
+          end = cand;
+          break;
+        }
+      }
+    }
+
+    const slice = lines.slice(start, end);
+    const scopeHeader = findScopeHeader(lines, start) ?? undefined;
+    const text = slice.join("\n");
+    chunks.push({ start, end, text, scopeHeader });
+
+    i = Math.max(start + CHUNK_OVERLAP, end);
     if (i >= lines.length) break;
-    if (i < start + CHUNK_OVERLAP) i = start + CHUNK_OVERLAP;
   }
   return chunks;
 }
@@ -96,22 +228,48 @@ let totalChunksCount = 0;
 let totalTokensCount = 0;
 
 export const INDEXABLE_EXTENSIONS = [
-  ".ts", ".tsx", ".js", ".jsx", ".py", ".rs", ".go", ".md",
-  ".json", ".yaml", ".yml", ".toml", ".sql", ".sh", ".c",
-  ".cpp", ".h", ".html", ".css",
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".py",
+  ".rs",
+  ".go",
+  ".md",
+  ".json",
+  ".yaml",
+  ".yml",
+  ".toml",
+  ".sql",
+  ".sh",
+  ".c",
+  ".cpp",
+  ".h",
+  ".html",
+  ".css",
 ];
 
 const IGNORED_PATH_PARTS = [
-  "/node_modules/", "\\node_modules\\",
-  "/target/", "\\target\\",
-  "/dist/", "\\dist\\",
-  "/dist-win/", "\\dist-win\\",
-  "/.git/", "\\.git\\",
-  "/.termigo/", "\\.termigo\\",
-  "/.vscode/", "\\.vscode\\",
-  "/build/", "\\build\\",
-  "/coverage/", "\\coverage\\",
-  "/.next/", "\\.next\\",
+  "/node_modules/",
+  "\\node_modules\\",
+  "/target/",
+  "\\target\\",
+  "/dist/",
+  "\\dist\\",
+  "/dist-win/",
+  "\\dist-win\\",
+  "/.git/",
+  "\\.git\\",
+  "/.termigo/",
+  "\\.termigo\\",
+  "/.vscode/",
+  "\\.vscode\\",
+  "/build/",
+  "\\build\\",
+  "/coverage/",
+  "\\coverage\\",
+  "/.next/",
+  "\\.next\\",
 ];
 
 const IGNORED_FILENAMES = new Set([
@@ -127,7 +285,8 @@ function shouldSkipPath(path: string): boolean {
   }
   const basename = path.split(/[/\\]/).pop() ?? "";
   if (IGNORED_FILENAMES.has(basename)) return true;
-  if (basename.endsWith(".min.js") || basename.endsWith(".min.css")) return true;
+  if (basename.endsWith(".min.js") || basename.endsWith(".min.css"))
+    return true;
   return false;
 }
 
@@ -179,6 +338,7 @@ export async function indexWorkspace(
               text: p.text,
               tokens,
               tokenCounts: counts,
+              scopeHeader: p.scopeHeader,
             });
           }
 
@@ -258,7 +418,10 @@ export function searchCode(
   const scored: { chunk: CodeChunk; score: number }[] = [];
 
   for (const [filePath, chunks] of index.entries()) {
-    if (filterPath && !filePath.toLowerCase().includes(filterPath.toLowerCase())) {
+    if (
+      filterPath &&
+      !filePath.toLowerCase().includes(filterPath.toLowerCase())
+    ) {
       continue;
     }
 
@@ -290,7 +453,10 @@ export function searchCode(
       }
 
       // Exact substring match bonus
-      if (queryLower.length > 2 && chunk.text.toLowerCase().includes(queryLower)) {
+      if (
+        queryLower.length > 2 &&
+        chunk.text.toLowerCase().includes(queryLower)
+      ) {
         bm25Score += 2.5;
       }
       if (queryLower.length > 2 && pathLower.includes(queryLower)) {
@@ -306,13 +472,18 @@ export function searchCode(
   scored.sort((a, b) => b.score - a.score);
 
   return scored.slice(0, maxResults).map(({ chunk, score }) => {
-    const { snippet, startLine } = extractCenteredSnippet(chunk, queryTokens, 8);
+    const { snippet, startLine } = extractCenteredSnippet(
+      chunk,
+      queryTokens,
+      8,
+    );
     return {
       path: chunk.path,
       startLine,
       endLine: Math.min(chunk.endLine, startLine + 8),
       score: Number(score.toFixed(3)),
       snippet,
+      scopeHeader: chunk.scopeHeader,
     };
   });
 }

@@ -22,7 +22,7 @@ vi.mock("../store/planStore", () => ({
   usePlanStore: { getState: () => ({ active: false, enqueue: vi.fn() }) },
 }));
 
-import { buildEditTools, normalizeEditInput } from "./edit";
+import { buildEditTools, diagnoseMismatch, normalizeEditInput } from "./edit";
 
 const toolOptions: ToolExecutionOptions = {
   toolCallId: "tool-call",
@@ -272,5 +272,39 @@ describe("edit path normalisation", () => {
     });
     expect(result.error).toContain("path");
     expect(nativeMock.writeFile).not.toHaveBeenCalled();
+  });
+});
+
+describe("diagnoseMismatch grounding hints", () => {
+  const content = "function compute() {\n  const x = 10;\n  return x * 2;\n}";
+
+  it("detects case mismatch and provides verbatim content", () => {
+    const hint = diagnoseMismatch(content, "CONST X = 10;");
+    expect(hint).toContain("case mismatch");
+    expect(hint).toContain("const x = 10;");
+  });
+
+  it("detects indentation mismatch and provides exact lines", () => {
+    const hint = diagnoseMismatch(
+      content,
+      "    const x = 10;\n    return x * 2;",
+    );
+    expect(hint).toContain("indentation/whitespace mismatch");
+    expect(hint).toContain("const x = 10;");
+  });
+
+  it("detects anchor match when starting line matches", () => {
+    const hint = diagnoseMismatch(
+      content,
+      "function compute() {\n  const wrong = 99;\n}",
+    );
+    expect(hint).toContain("anchor match");
+    expect(hint).toContain("function compute() {");
+  });
+
+  it("detects line ending differences", () => {
+    const crlfContent = "line 1\r\nline 2\r\n";
+    const hint = diagnoseMismatch(crlfContent, "line 1\nline 2");
+    expect(hint).toContain("line-ending mismatch");
   });
 });

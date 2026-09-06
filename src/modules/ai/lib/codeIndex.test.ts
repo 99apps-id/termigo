@@ -5,6 +5,8 @@ import {
   getIndexStats,
   indexWorkspace,
   INDEXABLE_EXTENSIONS,
+  chunkLines,
+  findScopeHeader,
 } from "./codeIndex";
 
 describe("tokenize", () => {
@@ -63,5 +65,32 @@ describe("searchCode with empty or null workspace", () => {
     expect(INDEXABLE_EXTENSIONS).toContain(".json");
     expect(INDEXABLE_EXTENSIONS).toContain(".yaml");
     expect(INDEXABLE_EXTENSIONS).toContain(".sql");
+  });
+});
+
+describe("syntax-aware chunkLines and findScopeHeader", () => {
+  it("detects scope header for function, class, and interface", () => {
+    const lines = [
+      "export class TokenManager {",
+      "  private token: string;",
+      "  constructor() {",
+      "    this.token = '';",
+      "  }",
+      "}",
+    ];
+    expect(findScopeHeader(lines, 3)).toContain("TokenManager");
+    expect(findScopeHeader(lines, 0)).toContain("TokenManager");
+  });
+
+  it("chunks lines with boundary awareness and scope metadata", () => {
+    const dummyLines = Array.from({ length: 120 }, (_, i) => {
+      if (i === 0) return "export function runProcess() {";
+      if (i === 70) return "export function nextStage() {";
+      return `  const x_${i} = ${i};`;
+    });
+
+    const chunks = chunkLines(dummyLines);
+    expect(chunks.length).toBeGreaterThanOrEqual(2);
+    expect(chunks[0].scopeHeader).toContain("runProcess");
   });
 });

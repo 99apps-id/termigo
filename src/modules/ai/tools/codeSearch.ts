@@ -1,10 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
-import {
-  indexWorkspace,
-  searchCode,
-  getIndexStats,
-} from "../lib/codeIndex";
+import { indexWorkspace, searchCode, getIndexStats } from "../lib/codeIndex";
 import type { ToolContext } from "./context";
 
 let indexing = false;
@@ -13,11 +9,24 @@ export function buildCodeSearchTools(ctx: ToolContext) {
   return {
     code_search: tool({
       description:
-        "Codebase search across the workspace. Uses Okapi BM25 ranking over code and configuration chunks with code-aware tokenization, path boosting, and exact substring matching. Returns file paths, line ranges, relevance scores, and centered snippets. Use this when you need to find where something is implemented, discover symbols, or locate relevant code without knowing exact filenames.",
+        "Codebase search across the workspace. Uses Okapi BM25 ranking over syntax-aware code and configuration chunks with scope-boundary detection, path boosting, and exact substring matching. Returns file paths, line ranges, relevance scores, centered snippets, and enclosing scope headers (functions, classes, structs). Use this when you need to find where something is implemented, discover symbols, or locate relevant code without knowing exact filenames.",
       inputSchema: z.object({
-        query: z.string().describe("Natural language query or code symbol to search for."),
-        max_results: z.number().int().min(1).max(20).optional().describe("Maximum results to return. Defaults to 10."),
-        path_filter: z.string().optional().describe("Optional subdirectory or path filter to narrow results (e.g. 'src/modules/ai')."),
+        query: z
+          .string()
+          .describe("Natural language query or code symbol to search for."),
+        max_results: z
+          .number()
+          .int()
+          .min(1)
+          .max(20)
+          .optional()
+          .describe("Maximum results to return. Defaults to 10."),
+        path_filter: z
+          .string()
+          .optional()
+          .describe(
+            "Optional subdirectory or path filter to narrow results (e.g. 'src/modules/ai').",
+          ),
       }),
       execute: async ({ query, max_results, path_filter }) => {
         const root = ctx.getWorkspaceRoot() ?? ctx.getCwd();
