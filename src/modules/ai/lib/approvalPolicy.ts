@@ -158,7 +158,7 @@ export function isAutoApproved(
     // the read-only tools that never asked. Anything that could change the
     // server still stops - and the classifier treats whatever it does not
     // recognise as changing the server.
-    return commandRisk(ctx.command ?? "") === "inspect";
+    return commandRisk(ctx.command ?? "", { allowSudo: true }) === "inspect";
   }
   // For process management, read-only inspection actions do not mutate or spawn
   // anything, so they auto-approve in 'edits' mode just like other read operations.

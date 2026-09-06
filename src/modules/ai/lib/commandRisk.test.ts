@@ -15,6 +15,14 @@ describe("inspection commands", () => {
       "tail -n 100 /var/log/syslog",
       "whoami",
       "uname -a",
+      "find /var/log -name '*.log'",
+      "nmap -p 80,443 127.0.0.1",
+      "whois example.com",
+      "traceroute 8.8.8.8",
+      "ip route show",
+      "ss -tulpn",
+      "lsblk",
+      "pgrep node",
     ]) {
       expect(isReadOnlyCommand(c)).toBe(true);
     }
@@ -90,6 +98,13 @@ describe("commands that change something", () => {
   it("refuses anything asking for privileges", () => {
     expect(isReadOnlyCommand("sudo ls")).toBe(false);
     expect(isReadOnlyCommand("su -c ls")).toBe(false);
+  });
+
+  it("allows sudo inspection when allowSudo option is enabled", () => {
+    expect(isReadOnlyCommand("sudo ls -la", { allowSudo: true })).toBe(true);
+    expect(isReadOnlyCommand("sudo -u root cat /etc/shadow", { allowSudo: true })).toBe(true);
+    expect(isReadOnlyCommand("sudo rm -rf /", { allowSudo: true })).toBe(false);
+    expect(isReadOnlyCommand("sudo systemctl restart nginx", { allowSudo: true })).toBe(false);
   });
 
   // Fail-closed is the whole design: being wrong in the permissive direction

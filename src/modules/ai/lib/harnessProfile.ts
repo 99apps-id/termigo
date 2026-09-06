@@ -83,6 +83,19 @@ export const BUILTIN_PROFILES: Record<string, HarnessProfile> = {
       "Hide the todo tools for lighter tasks, so short asks do not carry plan overhead.",
     hideTools: ["todo_write"],
   },
+  autonomous: {
+    id: "autonomous",
+    label: "Fully autonomous",
+    description:
+      "Self-directed execution with higher step budget, proactive failure pivoting, and continuous progress towards task completion without premature stop.",
+    promptPrelude:
+      "You are operating in FULLY AUTONOMOUS mode. Your primary objective is to complete the user request completely and verify your work.\n" +
+      "- Break down ambiguous goals into concrete milestones.\n" +
+      "- If a command or tool encounters an error or timeout, do NOT stop or ask for help prematurely; diagnose the cause, pivot to an alternative command/tool, and continue.\n" +
+      "- Verify your solution thoroughly with inspection, test, or lint commands before concluding.",
+    stepBudgetDelta: 25,
+    stepBudgetCap: 50,
+  },
 };
 
 /** Resolve a profile id, falling back to the balanced default. */

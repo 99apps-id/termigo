@@ -1,10 +1,12 @@
 import type { ToolSet } from "ai";
 import { describe, expect, it } from "vitest";
 import {
+  evaluateCircuitBreaker,
   noErrorProgress,
   noProgressStop,
   noToolRepetition,
   synthesisStopDecision,
+  type CircuitBreakerState,
 } from "./agent";
 
 type Call = {
@@ -286,5 +288,62 @@ describe("synthesisStopDecision", () => {
       stop: true,
       requested: true,
     });
+  });
+});
+
+describe("evaluateCircuitBreaker", () => {
+  const initState: CircuitBreakerState = {
+    lastFailedFingerprint: null,
+    consecutiveFailureCount: 0,
+    activeNudge: null,
+  };
+
+  it("does not trip on a single failure", () => {
+    const calls = [{ toolName: "bash_run", input: { command: "curl foo" }, toolCallId: "c1" }];
+    const results = new Map<string, unknown>([
+      ["c1", { exit_code: 1, stderr: "connection refused" }],
+    ]);
+    const next = evaluateCircuitBreaker(calls, results, initState);
+    expect(next.consecutiveFailureCount).toBe(1);
+    expect(next.activeNudge).toBeNull();
+  });
+
+  it("trips circuit breaker on repeated failure with the same input", () => {
+    const calls = [{ toolName: "bash_run", input: { command: "curl foo" }, toolCallId: "c1" }];
+    const results = new Map<string, unknown>([
+      ["c1", { exit_code: 1, stderr: "connection refused" }],
+    ]);
+    const first = evaluateCircuitBreaker(calls, results, initState);
+    const second = evaluateCircuitBreaker(calls, results, first);
+    expect(second.consecutiveFailureCount).toBe(2);
+    expect(second.activeNudge).toContain("REPEATED FAILURE DETECTED");
+    expect(second.activeNudge).toContain("DO NOT retry the exact same arguments");
+  });
+
+  it("trips immediately on command timeout", () => {
+    const calls = [{ toolName: "bash_run", input: { command: "npm run dev" }, toolCallId: "c1" }];
+    const results = new Map<string, unknown>([
+      ["c1", { timed_out: true, exit_code: null }],
+    ]);
+    const next = evaluateCircuitBreaker(calls, results, initState);
+    expect(next.activeNudge).toContain("COMMAND TIMED OUT");
+    expect(next.activeNudge).toContain("bash_background");
+  });
+
+  it("clears circuit breaker when a step succeeds", () => {
+    const calls = [{ toolName: "bash_run", input: { command: "npm run dev" }, toolCallId: "c1" }];
+    const timeoutResults = new Map<string, unknown>([
+      ["c1", { timed_out: true }],
+    ]);
+    const timedOut = evaluateCircuitBreaker(calls, timeoutResults, initState);
+    expect(timedOut.activeNudge).not.toBeNull();
+
+    const successCalls = [{ toolName: "read_file", input: { path: "package.json" }, toolCallId: "c2" }];
+    const successResults = new Map<string, unknown>([
+      ["c2", "{\"name\": \"termigo\"}"],
+    ]);
+    const cleared = evaluateCircuitBreaker(successCalls, successResults, timedOut);
+    expect(cleared.activeNudge).toBeNull();
+    expect(cleared.consecutiveFailureCount).toBe(0);
   });
 });

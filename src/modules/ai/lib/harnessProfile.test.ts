@@ -24,6 +24,7 @@ describe("getProfile", () => {
 
   it("resolves a known profile", () => {
     expect(getProfile("no_todo").id).toBe("no_todo");
+    expect(getProfile("autonomous").id).toBe("autonomous");
   });
 });
 

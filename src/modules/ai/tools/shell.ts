@@ -50,6 +50,40 @@ function workspaceSessionKey(sessionId: string): string {
   return `${sessionId}:${workspaceScopeKey(currentWorkspaceEnv())}`;
 }
 
+/**
+ * Cap command output returned to the model to prevent prompt context bloat.
+ * Preserves the beginning (head) and end (tail) of output when it exceeds maxChars.
+ */
+export function truncateCommandOutput(
+  text: string,
+  maxChars = 4000,
+  headLines = 25,
+  tailLines = 25,
+): { text: string; truncated: boolean } {
+  if (!text || text.length <= maxChars) {
+    return { text, truncated: false };
+  }
+
+  const lines = text.split("\n");
+  if (lines.length <= headLines + tailLines) {
+    const half = Math.floor(maxChars / 2);
+    const head = text.slice(0, half);
+    const tail = text.slice(-half);
+    return {
+      text: `${head}\n\n... [Output truncated: ${text.length - maxChars} characters omitted] ...\n\n${tail}`,
+      truncated: true,
+    };
+  }
+
+  const head = lines.slice(0, headLines).join("\n");
+  const tail = lines.slice(-tailLines).join("\n");
+  const omittedLines = lines.length - (headLines + tailLines);
+  return {
+    text: `${head}\n\n... [Output truncated: ${omittedLines} lines omitted (${text.length} chars total). Use grep, head/tail, or more specific filters] ...\n\n${tail}`,
+    truncated: true,
+  };
+}
+
 export function buildShellTools(ctx: ToolContext) {
   return {
     bash_run: tool({
@@ -87,14 +121,16 @@ export function buildShellTools(ctx: ToolContext) {
           try {
             const out = await sshExec(remote.sessionId, full, timeout_secs);
             const isSilentSuccess = !out.stdout && !out.stderr && out.exitCode === 0;
+            const stdoutTrunc = truncateCommandOutput(out.stdout ?? "");
+            const stderrTrunc = truncateCommandOutput(out.stderr ?? "");
             return {
               command,
               remote: true,
               cwd: remote.cwd,
-              stdout: out.stdout,
-              stderr: out.stderr,
+              stdout: stdoutTrunc.text,
+              stderr: stderrTrunc.text,
               exit_code: out.exitCode,
-              truncated: out.truncated,
+              truncated: out.truncated || stdoutTrunc.truncated || stderrTrunc.truncated,
               ...(isSilentSuccess
                 ? { info: "Command completed successfully with no output (exit code 0)." }
                 : {}),
@@ -146,13 +182,15 @@ export function buildShellTools(ctx: ToolContext) {
             abortSignal?.removeEventListener("abort", onAbort);
           }
           const isSilentSuccess = !r.stdout && !r.stderr && r.exit_code === 0;
+          const stdoutTrunc = truncateCommandOutput(r.stdout ?? "");
+          const stderrTrunc = truncateCommandOutput(r.stderr ?? "");
           return {
             command,
-            stdout: r.stdout,
-            stderr: r.stderr,
+            stdout: stdoutTrunc.text,
+            stderr: stderrTrunc.text,
             exit_code: r.exit_code,
             timed_out: r.timed_out,
-            truncated: r.truncated,
+            truncated: r.truncated || stdoutTrunc.truncated || stderrTrunc.truncated,
             cwd_after: r.cwd_after,
             ...(isSilentSuccess
               ? { info: "Command completed successfully with no output (exit code 0)." }

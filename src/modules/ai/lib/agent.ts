@@ -456,7 +456,7 @@ function stableStringify(v: unknown): string {
 }
 
 /** Fingerprint for a tool call. Canonicalizes args so equivalent inputs match. */
-function toolCallFingerprint(toolName: string, input: unknown): string {
+export function toolCallFingerprint(toolName: string, input: unknown): string {
   return `${toolName}::${stableStringify(input)}`;
 }
 
@@ -567,7 +567,7 @@ export function noProgressStop<T extends ToolSet>(
 }
 
 /** True when a tool result is an error (or failure) rather than data. */
-function isErrorResult(output: unknown): boolean {
+export function isErrorResult(output: unknown): boolean {
   if (output == null || typeof output !== "object") return false;
   const record = output as Record<string, unknown>;
   // A tool surfaced its failure as an { error: "..." } object.
@@ -581,6 +581,87 @@ function isErrorResult(output: unknown): boolean {
   if (typeof code === "number" && code !== 0) return true;
   if (record.timed_out === true) return true;
   return false;
+}
+
+export type CircuitBreakerState = {
+  lastFailedFingerprint: string | null;
+  consecutiveFailureCount: number;
+  activeNudge: string | null;
+};
+
+/**
+ * Circuit breaker: monitors consecutive tool failures and timeouts.
+ *
+ * When a tool times out or fails repeatedly with the exact same signature,
+ * generates an urgent directive injected into the next step's system prompt
+ * forcing the model to pivot rather than burn cycles retrying identically.
+ */
+export function evaluateCircuitBreaker(
+  calls: Array<{ toolName: string; input: unknown; toolCallId?: string }>,
+  results: Map<string, unknown>,
+  state: CircuitBreakerState,
+): CircuitBreakerState {
+  if (calls.length === 0) return state;
+
+  let stepHasTimeout = false;
+  let stepHasError = false;
+  let stepFailureFp: string | null = null;
+  let failedToolName = "tool";
+
+  for (const call of calls) {
+    const output = call.toolCallId ? results.get(call.toolCallId) : undefined;
+    if (
+      output &&
+      typeof output === "object" &&
+      (output as Record<string, unknown>).timed_out === true
+    ) {
+      stepHasTimeout = true;
+      failedToolName = call.toolName;
+    }
+    if (isErrorResult(output)) {
+      stepHasError = true;
+      failedToolName = call.toolName;
+      stepFailureFp = toolCallFingerprint(call.toolName, call.input);
+    }
+  }
+
+  if (stepHasTimeout) {
+    return {
+      lastFailedFingerprint: null,
+      consecutiveFailureCount: 0,
+      activeNudge:
+        `[CIRCUIT BREAKER: COMMAND TIMED OUT]\n` +
+        `The tool "${failedToolName}" timed out before completing.\n` +
+        `DO NOT retry this exact command in the foreground with bash_run.\n` +
+        `Pivot immediately: use bash_background if starting a long-running service/daemon, supply non-interactive flags, or check system logs.`,
+    };
+  }
+
+  if (stepHasError && stepFailureFp) {
+    const count =
+      stepFailureFp === state.lastFailedFingerprint
+        ? state.consecutiveFailureCount + 1
+        : 1;
+
+    const activeNudge =
+      count >= 2
+        ? `[CIRCUIT BREAKER: REPEATED FAILURE DETECTED]\n` +
+          `The tool "${failedToolName}" failed repeatedly with the same arguments (${count} times).\n` +
+          `DO NOT retry the exact same arguments or command again. Pivot immediately: inspect prerequisites, diagnose error causes, adjust arguments, or use an alternative approach.`
+        : null;
+
+    return {
+      lastFailedFingerprint: stepFailureFp,
+      consecutiveFailureCount: count,
+      activeNudge,
+    };
+  }
+
+  return {
+    lastFailedFingerprint: null,
+    consecutiveFailureCount: 0,
+    activeNudge: null,
+  };
 }
 
 /**
@@ -1157,6 +1238,11 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // Apply the harness profile's prompt prelude (if any) to the base system.
   const baseSystem = applyProfileToSystem(prompt.system, profile);
   const sessionId = opts.toolContext.getSessionId();
+  let circuitBreakerState: CircuitBreakerState = {
+    lastFailedFingerprint: null,
+    consecutiveFailureCount: 0,
+    activeNudge: null,
+  };
   return streamText({
     model,
     system: baseSystem,
@@ -1198,9 +1284,12 @@ export async function runAgentStream(opts: RunAgentOptions) {
       // When there is a live todo list the system gets the todo block appended
       // as a system message so the model sees live progress every step;
       // otherwise the (profile-applied) system is used untouched.
-      const system = todoBlock
+      let system = todoBlock
         ? appendSystemHint(baseSystem, todoBlock)
         : baseSystem;
+      if (circuitBreakerState.activeNudge) {
+        system = appendSystemHint(system, circuitBreakerState.activeNudge);
+      }
       return { toolChoice, system };
     },
     abortSignal: abortController.signal,
@@ -1306,6 +1395,18 @@ export async function runAgentStream(opts: RunAgentOptions) {
             failed: res.type === "tool-error" || res.error != null,
           });
         }
+        const cbResultsMap = new Map<string, unknown>();
+        for (const [id, r] of resultsByCallId.entries()) {
+          cbResultsMap.set(
+            id,
+            r.output ?? (r.failed ? { error: "tool call failed" } : undefined),
+          );
+        }
+        circuitBreakerState = evaluateCircuitBreaker(
+          calls as Array<{ toolName: string; input: unknown; toolCallId?: string }>,
+          cbResultsMap,
+          circuitBreakerState,
+        );
         for (const call of calls) {
           const c = call as {
             toolCallId?: string;

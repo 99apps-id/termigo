@@ -13,11 +13,6 @@ export type ContextChip =
   | { kind: "file"; name: string; lines: number }
   | { kind: "snippet"; name: string };
 
-const SELECTION_RE =
-  /<selection\s+source="(terminal|editor)">\n?([\s\S]*?)\n?<\/selection>/g;
-const FILE_RE = /<file\s+name="([^"]+)"[^>]*>\n?([\s\S]*?)\n?<\/file>/g;
-const SNIPPET_RE = /<snippet\s+name="([^"]+)">\n?[\s\S]*?\n?<\/snippet>/g;
-
 function countLines(s: string): number {
   if (!s) return 0;
   const trimmed = s.replace(/\n+$/, "");
@@ -30,23 +25,36 @@ export function stripUserContextBlocks(text: string): {
   chips: ContextChip[];
 } {
   const chips: ContextChip[] = [];
-  let out = text;
-  out = out.replace(SELECTION_RE, (_m, source: string, body: string) => {
-    chips.push({
-      kind: "selection",
-      source: source === "editor" ? "editor" : "terminal",
-      lines: countLines(body),
-    });
-    return "";
-  });
-  out = out.replace(FILE_RE, (_m, name: string, body: string) => {
-    chips.push({ kind: "file", name, lines: countLines(body) });
-    return "";
-  });
-  out = out.replace(SNIPPET_RE, (_m, name: string) => {
-    chips.push({ kind: "snippet", name });
-    return "";
-  });
+  const combined =
+    /<selection\s+source="(terminal|editor)">\n?([\s\S]*?)\n?<\/selection>|<file\s+name="([^"]+)"[^>]*>\n?([\s\S]*?)\n?<\/file>|<snippet\s+name="([^"]+)">\n?[\s\S]*?\n?<\/snippet>/g;
+  const out = text.replace(
+    combined,
+    (
+      _m,
+      selSrc?: string,
+      selBody?: string,
+      fileName?: string,
+      fileBody?: string,
+      snipName?: string,
+    ) => {
+      if (selSrc) {
+        chips.push({
+          kind: "selection",
+          source: selSrc === "editor" ? "editor" : "terminal",
+          lines: countLines(selBody ?? ""),
+        });
+      } else if (fileName) {
+        chips.push({
+          kind: "file",
+          name: fileName,
+          lines: countLines(fileBody ?? ""),
+        });
+      } else if (snipName) {
+        chips.push({ kind: "snippet", name: snipName });
+      }
+      return "";
+    },
+  );
   return { text: out.trim(), chips };
 }
 

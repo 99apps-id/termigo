@@ -3,7 +3,9 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { parseCommandLine, parseEnvLines } from "@/modules/ai/lib/mcpArgs";
 import { mcpToolName } from "@/modules/ai/lib/mcpToolNames";
-import { invalidateMcpTools } from "@/modules/ai/lib/mcpTools";
+function invalidateMcpTools(): void {
+  void import("@/modules/ai/lib/mcpTools").then((m) => m.invalidateMcpTools());
+}
 import {
   type McpServer,
   type McpTool,

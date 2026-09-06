@@ -92,7 +92,7 @@ describe("commands on a remote host", () => {
   // most of them for `ls`. A prompt that always appears is a prompt nobody
   // reads, so the gate sits on risk rather than on being remote.
   it("lets inspection through once edits are delegated", () => {
-    for (const command of ["ls -la", "docker ps", "git status", "cat /etc/hosts"]) {
+    for (const command of ["ls -la", "docker ps", "git status", "cat /etc/hosts", "sudo cat /var/log/syslog"]) {
       expect(isAutoApproved("bash_run", "edits", { onRemoteHost: true, command })).toBe(
         true,
       );

@@ -8,7 +8,7 @@ import {
   type WorkspaceEnv,
 } from "@/modules/workspace";
 
-async function resolveEnvHome(env: WorkspaceEnv): Promise<string> {
+export async function resolveEnvHome(env: WorkspaceEnv): Promise<string> {
   return env.kind === "wsl"
     ? getWslHome(env.distro)
     : (await homeDir()).replace(/\\/g, "/");

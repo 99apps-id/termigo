@@ -22,6 +22,9 @@ const READ_ONLY = new Set([
   "dirname", "basename", "realpath", "test", "true", "false", "sleep",
   "curl", "wget", "dig", "nslookup", "host", "ping", "ss", "netstat", "lsof",
   "md5sum", "sha256sum", "diff", "tree", "jq", "yq", "column", "tee",
+  // Reconnaissance, audit, and system inspection tools
+  "find", "nmap", "whois", "traceroute", "tracepath", "ip", "ifconfig", "arp",
+  "route", "lsblk", "blkid", "pgrep",
 ]);
 
 /** Subcommands that only report, for tools where the verb decides. */
@@ -69,7 +72,10 @@ function secondWord(segment: string): string {
  * Every segment must qualify: one `&&` away from `rm -rf` is not an inspection
  * command, however harmless the first half looks.
  */
-export function isReadOnlyCommand(command: string): boolean {
+export function isReadOnlyCommand(
+  command: string,
+  opts: { allowSudo?: boolean } = {},
+): boolean {
   const text = command.trim();
   if (!text) return false;
 
@@ -81,12 +87,32 @@ export function isReadOnlyCommand(command: string): boolean {
   if (/\$\(|`/.test(text)) return false;
 
   const segments = text.split(/&&|\|\||;|\|/);
-  for (const segment of segments) {
-    if (!segment.trim()) continue;
-    const cmd = firstWord(segment);
+  for (const rawSegment of segments) {
+    let segment = rawSegment.trim();
+    if (!segment) continue;
+    let cmd = firstWord(segment);
     if (!cmd) return false;
-    // sudo says the command needs privileges it would not otherwise have.
-    if (cmd === "sudo" || cmd === "doas" || cmd === "su") return false;
+
+    // Handle sudo / doas prefix when explicitly allowed (e.g. autonomous or remote inspection)
+    if (cmd === "sudo" || cmd === "doas") {
+      if (!opts.allowSudo) return false;
+      const parts = segment.split(/\s+/);
+      let idx = 1;
+      while (idx < parts.length && parts[idx]?.startsWith("-")) {
+        // Skip flags with arguments like -u user or -g group
+        if ((parts[idx] === "-u" || parts[idx] === "-g" || parts[idx] === "-C") && idx + 1 < parts.length) {
+          idx += 2;
+        } else {
+          idx += 1;
+        }
+      }
+      if (idx >= parts.length) return false;
+      segment = parts.slice(idx).join(" ");
+      cmd = firstWord(segment);
+    }
+
+    // su is always refused as it opens interactive shell or executes arbitrary commands
+    if (cmd === "su") return false;
 
     if (DESTRUCTIVE_FLAGS.some((f) => new RegExp(`(^|\\s)${f}(\\s|$)`).test(segment))) {
       return false;
@@ -105,8 +131,11 @@ export function isReadOnlyCommand(command: string): boolean {
 /** The label used in the approval decision and in explaining it. */
 export type CommandRisk = "inspect" | "change";
 
-export function commandRisk(command: string): CommandRisk {
-  return isReadOnlyCommand(command) ? "inspect" : "change";
+export function commandRisk(
+  command: string,
+  opts: { allowSudo?: boolean } = {},
+): CommandRisk {
+  return isReadOnlyCommand(command, opts) ? "inspect" : "change";
 }
 
 /**
