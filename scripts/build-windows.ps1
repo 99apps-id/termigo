@@ -15,15 +15,22 @@ if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
 $RootDir = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $RootDir
 
-Write-Host "==> Installing dependencies..." -ForegroundColor Cyan
-pnpm install --frozen-lockfile
+Write-Host "==> Ensuring dependencies..." -ForegroundColor Cyan
+if (-not (Test-Path "node_modules/.bin/tsc")) {
+    $env:CI = "true"
+    pnpm dlx pnpm@11.9.0 install --frozen-lockfile
+    if ($LASTEXITCODE -ne 0) { throw "pnpm install failed" }
+}
 
 Write-Host "==> Building frontend and CLI..." -ForegroundColor Cyan
 pnpm build:cli
+if ($LASTEXITCODE -ne 0) { throw "build:cli failed" }
 pnpm build
+if ($LASTEXITCODE -ne 0) { throw "frontend build failed" }
 
 Write-Host "==> Building Tauri Windows application..." -ForegroundColor Cyan
 pnpm tauri build
+if ($LASTEXITCODE -ne 0) { throw "tauri build failed" }
 
 $TargetRelease = Join-Path $RootDir "src-tauri\target\release"
 $DistWin = Join-Path $RootDir "dist-win"
