@@ -64,7 +64,7 @@ const WORKFLOW_DIR = ".termigo/workflows";
  */
 async function workflowRoot(): Promise<string | null> {
   const cwd = useChatStore.getState().live.getWorkspaceRoot() ?? ".";
-  return `${cwd.replace(/\/$/, "")}/${WORKFLOW_DIR}`;
+  return `${cwd.replace(/[\\/]+$/, "")}/${WORKFLOW_DIR}`;
 }
 
 /**
@@ -95,8 +95,8 @@ export async function listWorkflowNames(): Promise<string[]> {
     return result.hits
       .map(
         (hit) =>
-          hit.path
-            .split("/")
+          (hit.rel ?? hit.path)
+            .split(/[\\/]/)
             .pop()
             ?.replace(/\.json$/, "") ?? "",
       )
@@ -164,6 +164,7 @@ export async function runWorkflow(
   workflow: WorkflowDefinition,
   initialContext: Record<string, unknown> = {},
   dispatch: ToolDispatcher = dispatchTool,
+  abortSignal?: AbortSignal,
 ): Promise<WorkflowRunResult> {
   const completed = new Set<string>();
   const failed = new Set<string>();
@@ -172,7 +173,23 @@ export async function runWorkflow(
   const pending = new Set(workflow.steps.map((s) => s.id));
   let stoppedAt: string | undefined;
 
+  const deadline =
+    typeof workflow.timeoutSeconds === "number" && workflow.timeoutSeconds > 0
+      ? Date.now() + workflow.timeoutSeconds * 1000
+      : null;
+
   while (pending.size > 0) {
+    if (abortSignal?.aborted) {
+      stoppedAt = "aborted";
+      for (const id of pending) skipped.add(id);
+      break;
+    }
+    if (deadline && Date.now() > deadline) {
+      stoppedAt = "timed_out";
+      for (const id of pending) skipped.add(id);
+      break;
+    }
+
     const ready = workflow.steps.filter((s) => {
       if (!pending.has(s.id)) return false;
       const deps = s.depends_on ?? [];
@@ -185,6 +202,19 @@ export async function runWorkflow(
     }
 
     for (const step of ready) {
+      if (abortSignal?.aborted) {
+        stoppedAt = "aborted";
+        for (const id of pending) skipped.add(id);
+        pending.clear();
+        break;
+      }
+      if (deadline && Date.now() > deadline) {
+        stoppedAt = "timed_out";
+        for (const id of pending) skipped.add(id);
+        pending.clear();
+        break;
+      }
+
       pending.delete(step.id);
       const shouldSkip =
         (step.depends_on ?? []).some((d) => failed.has(d)) &&
@@ -219,6 +249,9 @@ export async function runWorkflow(
     skipped: Array.from(skipped),
     results,
     stoppedAt,
+    ...(stoppedAt === "timed_out"
+      ? { error: `workflow exceeded timeout of ${workflow.timeoutSeconds}s` }
+      : {}),
   };
 }
 
@@ -255,14 +288,19 @@ export function buildWorkflowTools(
           .optional()
           .describe("Initial context passed to workflow steps."),
       }),
-      execute: async ({ name, context }) => {
+      execute: async ({ name, context }, { abortSignal }) => {
         const workflow = await loadWorkflow(name);
         if (!workflow) {
           return {
             error: `workflow "${name}" not found in .termigo/workflows/`,
           };
         }
-        const result = await runWorkflow(workflow, context ?? {}, dispatch);
+        const result = await runWorkflow(
+          workflow,
+          context ?? {},
+          dispatch,
+          abortSignal,
+        );
         return result;
       },
     }),

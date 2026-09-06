@@ -198,29 +198,72 @@ export function gate<T extends AnyTool>(
   };
 }
 
+function isReportDocument(path: string): boolean {
+  const norm = path.toLowerCase().replace(/\\/g, "/");
+  const base = norm.split("/").pop() ?? "";
+  if (base.endsWith(".md") || base.endsWith(".markdown")) return true;
+  if (
+    norm.includes("/reports/") ||
+    norm.includes("/docs/") ||
+    base.startsWith("report") ||
+    base.startsWith("audit") ||
+    base.startsWith("summary")
+  ) {
+    return true;
+  }
+  return false;
+}
+
 /**
- * Refuse `write_file` on a path that already exists.
+ * Refuse unprompted overwrite of existing code files by subagents.
  *
- * `edit` fails loudly when a sibling changed the file first, because it has to
- * match `old_string`. `write_file` has no such check - it replaces the whole
- * file - so with several builders running it is the one call that can silently
- * destroy another's work. Creating new files stays allowed, which is what a
- * builder actually needs.
+ * edit fails loudly when a sibling changed the file first, because it has to
+ * match old_string. write_file replaces the whole file, so with several
+ * builders running it could silently destroy another's work.
+ * Overwrites are allowed when:
+ * 1. overwrite: true is explicitly provided.
+ * 2. The target is a report or documentation document.
+ * 3. The file was created earlier by this same subagent run.
  */
 export function newFilesOnly<T extends AnyTool>(tool: T): T {
   const inner = tool.execute;
   if (!inner) return tool;
+  const selfCreated = new Set<string>();
+
   return {
     ...tool,
     execute: async (input: never, opts: never) => {
-      const path = (input as { path?: unknown })?.path;
-      if (typeof path === "string") {
-        const existing = await native.readFile(path).catch(() => null);
-        if (existing) {
-          return {
-            error: `${path} already exists. A builder may only create new files - use edit for an existing one.`,
-          };
+      const typed = input as {
+        path?: unknown;
+        file_path?: unknown;
+        file?: unknown;
+        overwrite?: unknown;
+      };
+      const rawPath =
+        typeof typed?.path === "string"
+          ? typed.path
+          : typeof typed?.file_path === "string"
+            ? typed.file_path
+            : typeof typed?.file === "string"
+              ? typed.file
+              : undefined;
+
+      if (typeof rawPath === "string" && rawPath.trim()) {
+        const path = rawPath.trim();
+        const canOverwrite =
+          typed.overwrite === true ||
+          isReportDocument(path) ||
+          selfCreated.has(path);
+
+        if (!canOverwrite) {
+          const existing = await native.readFile(path).catch(() => null);
+          if (existing) {
+            return {
+              error: `${path} already exists. If you intend to overwrite this file entirely, supply overwrite: true; or call read_file followed by edit/multi_edit for safe in-place modifications.`,
+            };
+          }
         }
+        selfCreated.add(path);
       }
       return inner(input, opts);
     },

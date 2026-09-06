@@ -2,10 +2,11 @@ import { Popover, PopoverAnchor } from "@/components/ui/popover";
 import { Spinner } from "@/components/ui/spinner";
 import { usePresence } from "@/lib/usePresence";
 import { cn } from "@/lib/utils";
-import { CommandIcon } from "@hugeicons/core-free-icons";
+import { Add01Icon, CommandIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useWorkspaceFiles } from "../hooks/useWorkspaceFiles";
-import { useComposer } from "../lib/composer";
+import { ACCEPTED_FILES, useComposer } from "../lib/composer";
 import type { CustomCommand } from "../lib/customCommands";
 import { SLASH_COMMANDS, type SlashCommandMeta } from "../lib/slashCommands";
 import { useChatStore } from "../store/chatStore";
@@ -239,28 +240,176 @@ export function AiComposerInput() {
   const lastVoiceLabel = useRef("");
   if (voiceLabel) lastVoiceLabel.current = voiceLabel;
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const handleAttachClick = async () => {
+    if (c.isBusy) return;
+    try {
+      const { open: openFileDialog } = await import(
+        "@tauri-apps/plugin-dialog"
+      );
+      const selected = await openFileDialog({
+        multiple: true,
+        title: "Attach Image or Document",
+        filters: [
+          {
+            name: "Supported Files",
+            extensions: [
+              "png",
+              "jpg",
+              "jpeg",
+              "gif",
+              "webp",
+              "svg",
+              "bmp",
+              "ico",
+              "pdf",
+              "txt",
+              "md",
+              "markdown",
+              "json",
+              "yaml",
+              "yml",
+              "toml",
+              "py",
+              "js",
+              "ts",
+              "tsx",
+              "jsx",
+              "rs",
+              "go",
+              "java",
+              "c",
+              "cpp",
+              "h",
+              "hpp",
+              "cs",
+              "php",
+              "rb",
+              "swift",
+              "kt",
+              "html",
+              "css",
+              "scss",
+              "sql",
+              "csv",
+              "tsv",
+              "log",
+              "env",
+              "config",
+              "conf",
+              "ini",
+              "xml",
+            ],
+          },
+          {
+            name: "Images",
+            extensions: [
+              "png",
+              "jpg",
+              "jpeg",
+              "gif",
+              "webp",
+              "svg",
+              "bmp",
+              "ico",
+            ],
+          },
+          {
+            name: "Documents",
+            extensions: [
+              "pdf",
+              "txt",
+              "md",
+              "markdown",
+              "json",
+              "yaml",
+              "yml",
+              "toml",
+              "csv",
+              "tsv",
+              "log",
+            ],
+          },
+          {
+            name: "All Files",
+            extensions: ["*"],
+          },
+        ],
+      });
+      if (!selected) return;
+      const paths = Array.isArray(selected) ? selected : [selected];
+      for (const p of paths) {
+        if (typeof p === "string" && p.length > 0) {
+          await c.attachFileByPath(p);
+        }
+      }
+    } catch {
+      fileInputRef.current?.click();
+    }
+  };
+
   return (
     <>
       <Popover open={pickerOpen}>
         <PopoverAnchor asChild>
-          <div className="flex items-start gap-2">
+          <div
+            role="presentation"
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setIsDragging(true);
+            }}
+            onDragLeave={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setIsDragging(false);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setIsDragging(false);
+              const files = e.dataTransfer?.files;
+              if (files && files.length > 0) {
+                void c.addFiles(files);
+              }
+            }}
+            className={cn(
+              "flex items-start gap-2 rounded-lg transition-colors",
+              isDragging && "ring-1 ring-primary/40 bg-primary/5",
+            )}
+          >
             <textarea
               ref={c.textareaRef}
               value={c.value}
               onChange={(e) => c.setValue(e.target.value)}
               onPaste={(e) => {
-                // Pasting a screenshot (or any image) attaches it for a vision
-                // model. Text paste falls through to the default behaviour.
-                const files = e.clipboardData?.files;
-                if (!files || files.length === 0) return;
-                const imgs = Array.from(files).filter((f) =>
-                  f.type.startsWith("image/"),
-                );
-                if (imgs.length === 0) return;
-                e.preventDefault();
-                const dt = new DataTransfer();
-                for (const f of imgs) dt.items.add(f);
-                void c.addFiles(dt.files);
+                // Pasting a screenshot, image, or document attaches it to the composer.
+                // Text paste falls through to the default textarea behaviour.
+                const fileList: File[] = [];
+                const items = e.clipboardData?.items;
+                if (items && items.length > 0) {
+                  for (const item of Array.from(items)) {
+                    if (item.kind === "file") {
+                      const f = item.getAsFile();
+                      if (f) fileList.push(f);
+                    }
+                  }
+                }
+                if (
+                  fileList.length === 0 &&
+                  e.clipboardData?.files &&
+                  e.clipboardData.files.length > 0
+                ) {
+                  for (const f of Array.from(e.clipboardData.files)) {
+                    fileList.push(f);
+                  }
+                }
+                if (fileList.length > 0) {
+                  e.preventDefault();
+                  void c.addFiles(fileList);
+                }
               }}
               onKeyUp={updateTrigger}
               onClick={updateTrigger}
@@ -310,7 +459,11 @@ export function AiComposerInput() {
                   c.stop();
                   return;
                 }
-                if (e.key === "Enter" && !e.shiftKey) {
+                if (
+                  e.key === "Enter" &&
+                  !e.shiftKey &&
+                  !e.nativeEvent.isComposing
+                ) {
                   e.preventDefault();
                   c.submit();
                 }
@@ -322,7 +475,30 @@ export function AiComposerInput() {
                 "placeholder:text-muted-foreground/60",
               )}
             />
-            <AgentSwitcher />
+            <div className="flex shrink-0 items-center gap-0.5">
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept={ACCEPTED_FILES}
+                className="hidden"
+                onChange={(e) => {
+                  void c.addFiles(e.target.files);
+                  e.target.value = "";
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => void handleAttachClick()}
+                disabled={c.isBusy}
+                title="Attach image or document"
+                aria-label="Attach image or document"
+                className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+              >
+                <HugeiconsIcon icon={Add01Icon} size={14} strokeWidth={2} />
+              </button>
+              <AgentSwitcher />
+            </div>
           </div>
         </PopoverAnchor>
         {fileTrigger ? (

@@ -1,5 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ToolContext } from "./context";
+
+vi.mock("../lib/native", () => ({
+  native: {
+    readFile: vi.fn(),
+  },
+}));
+
+import { native } from "../lib/native";
 import { buildTerminalTools } from "./terminal";
 
 type Overrides = Partial<{
@@ -68,6 +76,19 @@ async function renderView(ctx: ToolContext, html: string, title?: string) {
     ok?: boolean;
     title?: string;
     error?: string;
+    mermaid?: string;
+  };
+}
+
+async function previewFile(ctx: ToolContext, path: string, title?: string) {
+  const execute = buildTerminalTools(ctx).preview_file.execute;
+  if (!execute) throw new Error("preview_file has no execute");
+  return (await execute({ path, title } as never, OPTS)) as {
+    ok?: boolean;
+    path?: string;
+    error?: string;
+    notice?: string;
+    hasMermaid?: boolean;
     mermaid?: string;
   };
 }
@@ -250,5 +271,52 @@ A --> B</pre></body></html>`;
     );
     expect(r.ok).toBeUndefined();
     expect(r.mermaid).toContain("sequenceDiagram");
+  });
+});
+
+describe("preview_file", () => {
+  it("opens a canvas tab for markdown reports and returns ok", async () => {
+    vi.mocked(native.readFile).mockResolvedValue({
+      kind: "text",
+      content: "# Executive Summary\n\nAll tests passed successfully.",
+      size: 50,
+    });
+    const openCanvas = vi.fn(() => true);
+    const r = await previewFile(makeContext({ openCanvas }), "report.md", "Executive Report");
+    expect(openCanvas).toHaveBeenCalled();
+    expect(r.ok).toBe(true);
+    expect(r.path).toBe("/workspace/report.md");
+  });
+
+  it("opens canvas for markdown documents containing Mermaid diagrams without failing", async () => {
+    vi.mocked(native.readFile).mockResolvedValue({
+      kind: "text",
+      content: "# Architecture Report\n\n```mermaid\nflowchart TD\nClient --> Server\n```\n\nDetails below.",
+      size: 90,
+    });
+    const openCanvas = vi.fn(() => true);
+    const r = await previewFile(makeContext({ openCanvas }), "arch_report.md");
+    expect(openCanvas).toHaveBeenCalled();
+    expect(r.ok).toBe(true);
+    expect(r.hasMermaid).toBe(true);
+  });
+
+  it("returns notice for standalone Mermaid diagram files", async () => {
+    vi.mocked(native.readFile).mockResolvedValue({
+      kind: "text",
+      content: "```mermaid\nflowchart LR\nA --> B\n```",
+      size: 35,
+    });
+    const openCanvas = vi.fn(() => true);
+    const r = await previewFile(makeContext({ openCanvas }), "diagram.mmd");
+    expect(openCanvas).not.toHaveBeenCalled();
+    expect(r.ok).toBeUndefined();
+    expect(r.notice).toContain("standalone Mermaid diagram");
+    expect(r.mermaid).toContain("flowchart LR");
+  });
+
+  it("refuses PDF files with helpful guidance", async () => {
+    const r = await previewFile(makeContext(), "document.pdf");
+    expect(r.error).toContain("PDF cannot render");
   });
 });

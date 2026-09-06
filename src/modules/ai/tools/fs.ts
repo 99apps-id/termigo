@@ -178,6 +178,49 @@ async function readRemoteFile(
   }
 }
 
+const WRITE_PATH_KEYS = [
+  "path",
+  "file_path",
+  "filepath",
+  "file",
+  "filename",
+  "target",
+  "target_path",
+];
+
+const WRITE_CONTENT_KEYS = [
+  "content",
+  "contents",
+  "text",
+  "body",
+  "data",
+  "code",
+];
+
+export function normalizeWriteFileInput(input: unknown): unknown {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return input;
+  const obj = { ...(input as Record<string, unknown>) };
+  if (typeof obj.path !== "string" || !obj.path.trim()) {
+    for (const k of WRITE_PATH_KEYS) {
+      const v = obj[k];
+      if (typeof v === "string" && v.trim()) {
+        obj.path = v;
+        break;
+      }
+    }
+  }
+  if (typeof obj.content !== "string") {
+    for (const k of WRITE_CONTENT_KEYS) {
+      const v = obj[k];
+      if (typeof v === "string") {
+        obj.content = v;
+        break;
+      }
+    }
+  }
+  return obj;
+}
+
 export function buildFsTools(ctx: ToolContext) {
   return {
     read_file: tool({
@@ -376,13 +419,32 @@ export function buildFsTools(ctx: ToolContext) {
 
     write_file: tool({
       description:
-        "Create or overwrite a file with the given content. Always asks the user before running. Prefer `edit` / `multi_edit` for in-place changes — only use `write_file` for creating a brand-new file or fully replacing a tiny one.",
-      inputSchema: z.object({
-        path: z.string(),
-        content: z.string(),
-      }),
+        "Create or overwrite a file with the given content. Always asks the user before running. Prefer edit / multi_edit for in-place changes; use write_file for creating new files, reports, or fully replacing a file.",
+      inputSchema: z.preprocess(
+        normalizeWriteFileInput,
+        z.object({
+          path: z.string().describe("File path (absolute or relative to cwd)."),
+          content: z.string().describe("File content to write."),
+          overwrite: z
+            .boolean()
+            .optional()
+            .describe(
+              "Explicitly permit overwriting an existing file. Default true for write_file.",
+            ),
+        }),
+      ),
       needsApproval: true,
-      execute: async ({ path, content }) => {
+      execute: async (rawArgs) => {
+        const input = (normalizeWriteFileInput(rawArgs) ?? {}) as {
+          path?: string;
+          content?: string;
+          overwrite?: boolean;
+        };
+        const path = input.path;
+        const content = typeof input.content === "string" ? input.content : "";
+        if (!path || !path.trim()) {
+          return { error: "missing path - name the file to write.", path: "" };
+        }
         // Writes follow reads onto the remote host. Leaving them local was the
         // dangerous half of the original state: the agent could read a remote
         // file and write the edit to this machine, with nothing saying so.

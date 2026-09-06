@@ -67,6 +67,17 @@ describe("toolSchema", () => {
       });
     }
   });
+
+  it("ensures properties is an object when type is object", () => {
+    expect(toolSchema({ type: "object" })).toEqual({
+      type: "object",
+      properties: {},
+    });
+    expect(toolSchema({ type: "object", properties: null })).toEqual({
+      type: "object",
+      properties: {},
+    });
+  });
 });
 
 describe("describeMcpTool", () => {

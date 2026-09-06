@@ -39,7 +39,7 @@ const PIPELINES_DIR = ".termigo/pipelines";
 
 async function pipelineRoot(): Promise<string | null> {
   const cwd = useChatStore.getState().live.getWorkspaceRoot() ?? ".";
-  return `${cwd.replace(/\/$/, "")}/${PIPELINES_DIR}`;
+  return `${cwd.replace(/[\\/]+$/, "")}/${PIPELINES_DIR}`;
 }
 
 export async function loadPipeline(
@@ -104,10 +104,9 @@ export function interpolatePrompt(
     /\{\{\s*([a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)?)\s*\}\}/g,
     (match, path: string) => {
       const parts = path.split(".");
-      const stepId = parts[0]!;
+      const stepId = parts[0];
       const field = parts[1];
-
-      if (!(stepId in context)) {
+      if (!stepId || !(stepId in context)) {
         return match;
       }
 
@@ -150,6 +149,7 @@ async function executeStep(
   step: OrchestrationStep,
   toolContext: ToolContext,
   context: Record<string, unknown> = {},
+  abortSignal?: AbortSignal,
 ): Promise<StepResult> {
   const { apiKeys, selectedModelId } = useChatStore.getState();
   if (!apiKeys || !selectedModelId) {
@@ -166,7 +166,11 @@ async function executeStep(
       modelId: selectedModelId,
       toolContext,
       requester: step.description ?? step.type,
+      abortSignal,
     });
+    if (r.aborted) {
+      return { ok: false, error: r.summary };
+    }
     return { ok: true, output: r.summary };
   } catch (e) {
     return { ok: false, error: String(e) };
@@ -177,6 +181,7 @@ export async function runPipeline(
   pipeline: OrchestrationPipeline,
   toolContext: ToolContext,
   initialContext: Record<string, unknown> = {},
+  abortSignal?: AbortSignal,
 ): Promise<OrchestrationResult> {
   const completed = new Set<string>();
   const failed = new Set<string>();
@@ -191,6 +196,14 @@ export async function runPipeline(
   }
 
   while (pending.size > 0) {
+    if (abortSignal?.aborted) {
+      stoppedAt = "aborted";
+      for (const stepId of pending) {
+        skipped.add(stepId);
+      }
+      break;
+    }
+
     const ready: OrchestrationStep[] = [];
     for (const stepId of pending) {
       const stepDeps = deps.get(stepId) ?? [];
@@ -220,7 +233,12 @@ export async function runPipeline(
 
     if (parallelSteps.length > 0) {
       const stepPromises = parallelSteps.map(async (step) => {
-        const result = await executeStep(step, toolContext, results);
+        const result = await executeStep(
+          step,
+          toolContext,
+          results,
+          abortSignal,
+        );
         return { step, result };
       });
 
@@ -234,13 +252,31 @@ export async function runPipeline(
         } else {
           failed.add(step.id);
           results[step.id] = { error: result.error };
+          if (!stoppedAt) stoppedAt = step.id;
         }
       }
     }
 
+    if (stoppedAt || abortSignal?.aborted) {
+      if (!stoppedAt && abortSignal?.aborted) stoppedAt = "aborted";
+      for (const stepId of pending) {
+        skipped.add(stepId);
+      }
+      break;
+    }
+
     for (const step of sequentialSteps) {
+      if (abortSignal?.aborted) {
+        stoppedAt = "aborted";
+        break;
+      }
       pending.delete(step.id);
-      const result = await executeStep(step, toolContext, results);
+      const result = await executeStep(
+        step,
+        toolContext,
+        results,
+        abortSignal,
+      );
 
       if (result.ok) {
         completed.add(step.id);
@@ -322,12 +358,17 @@ export function buildOrchestratorTools(ctx: ToolContext) {
           .optional()
           .describe("Initial context for the pipeline"),
       }),
-      execute: async ({ pipeline_id, context }) => {
+      execute: async ({ pipeline_id, context }, { abortSignal }) => {
         const pipeline = await loadPipeline(pipeline_id);
         if (!pipeline) {
           return { error: `Pipeline "${pipeline_id}" not found` };
         }
-        const result = await runPipeline(pipeline, ctx, context ?? {});
+        const result = await runPipeline(
+          pipeline,
+          ctx,
+          context ?? {},
+          abortSignal,
+        );
         return result;
       },
     }),

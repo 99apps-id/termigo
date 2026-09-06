@@ -93,7 +93,7 @@ function ServerRow({
           className="h-7 gap-1.5 text-[11px]"
         >
           <HugeiconsIcon icon={RefreshIcon} size={12} strokeWidth={1.75} />
-          {probe.state === "running" ? "Testing…" : "Test"}
+          {probe.state === "running" ? "Testing..." : "Test"}
         </Button>
         {/* Only user-scope entries: a project entry lives in the workspace
             file, which this panel does not manage. */}

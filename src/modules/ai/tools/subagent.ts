@@ -177,6 +177,16 @@ Approval works exactly as it does for you: read-only tools auto-run, and every m
                 .step(sid, runId, { currentStep: label, stepCount: steps });
             },
           });
+          if (r.aborted) {
+            useSubagentRunStore.getState().fail(sid, runId, r.summary);
+            return {
+              error: r.summary,
+              type: resolved,
+              description,
+              stepCount: r.stepCount,
+              durationMs: r.durationMs,
+            };
+          }
           useSubagentRunStore.getState().finish(sid, runId, {
             stepCount: r.stepCount,
             durationMs: r.durationMs,
@@ -376,6 +386,17 @@ Each task's subagent has the same toolset you do and may itself spawn further su
                   .step(sid, runId, { currentStep: label, stepCount: steps });
               },
             });
+            if (r.aborted) {
+              results[i].error = r.summary;
+              results[i].stepCount = r.stepCount;
+              results[i].durationMs = r.durationMs;
+              state[i] = { settled: true, bad: true, running: false };
+              useSubagentRunStore.getState().fail(sid, runId, r.summary);
+              for (const s of cascadeSkip(plan.deps, state, i)) {
+                results[s.index].skipped ??= s.reason;
+              }
+              return;
+            }
             results[i].summary = r.summary;
             results[i].stepCount = r.stepCount;
             results[i].durationMs = r.durationMs;
@@ -400,16 +421,26 @@ Each task's subagent has the same toolset you do and may itself spawn further su
         // one task ends instead of when the whole wave does.
         const inFlight = new Map<number, Promise<void>>();
         while (state.some((s) => !s.settled) || inFlight.size > 0) {
-          for (const i of readyTasks(
-            plan.deps,
-            state,
-            concurrency - inFlight.size,
-          )) {
-            state[i].running = true;
-            inFlight.set(
-              i,
-              runOne(i).finally(() => inFlight.delete(i)),
-            );
+          if (batchSignal?.aborted) {
+            for (let idx = 0; idx < state.length; idx++) {
+              if (!state[idx].settled && !state[idx].running) {
+                state[idx] = { settled: true, bad: true, running: false };
+                results[idx].skipped = "Batch aborted";
+              }
+            }
+          }
+          if (!batchSignal?.aborted) {
+            for (const i of readyTasks(
+              plan.deps,
+              state,
+              concurrency - inFlight.size,
+            )) {
+              state[i].running = true;
+              inFlight.set(
+                i,
+                runOne(i).finally(() => inFlight.delete(i)),
+              );
+            }
           }
           if (inFlight.size === 0) break; // nothing running and nothing ready
           await Promise.race(inFlight.values());

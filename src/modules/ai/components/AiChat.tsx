@@ -20,6 +20,8 @@ import {
 } from "@/components/ai-elements/reasoning";
 import { Tool } from "@/components/ai-elements/tool";
 import { Spinner } from "@/components/ui/spinner";
+import { SubagentBatchCard } from "@/modules/ai/components/SubagentBatchCard";
+import { ToolDiffCard } from "@/modules/ai/components/ToolDiffCard";
 import {
   MarkdownLink,
   type MarkdownLinkProps,
@@ -27,12 +29,7 @@ import {
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { Edit02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import type {
-  ChatStatus,
-  DynamicToolUIPart,
-  ToolUIPart,
-  UIMessage,
-} from "ai";
+import type { ChatStatus, DynamicToolUIPart, ToolUIPart, UIMessage } from "ai";
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useAutoApproval } from "../hooks/useAutoApproval";
 import { humanizeModelError } from "../lib/errorMessage";
@@ -53,19 +50,13 @@ import {
   PruneNotice,
   type StopKind,
 } from "./ChatNotices";
+import { PartAppear, ReadGroup, ReadRow } from "./ChatReadGroup";
 import { ConfirmationCarousel } from "./ConfirmationCarousel";
+import { type AnyPart, buildPartGroups, partType } from "./chatPartGrouping";
 import { ElicitationCarousel } from "./ElicitationCarousel";
 import { RollbackSuggestion } from "./RollbackSuggestion";
 import { RunProgressHUD } from "./RunProgressHUD";
 import { TrajectoryThinkingHUD } from "./TrajectoryThinkingHUD";
-import { SubagentBatchCard } from "@/modules/ai/components/SubagentBatchCard";
-import { ToolDiffCard } from "@/modules/ai/components/ToolDiffCard";
-import {
-  type AnyPart,
-  buildPartGroups,
-  partType,
-} from "./chatPartGrouping";
-import { PartAppear, ReadGroup, ReadRow } from "./ChatReadGroup";
 
 /**
  * Rotating "working" phrases, in the style of VS Code's chat thinking part
@@ -314,6 +305,17 @@ const RenderedMessage = memo(function RenderedMessage({
       .map((p) => p.text)
       .join("\n");
 
+    const fileParts = message.parts.filter(
+      (
+        p,
+      ): p is {
+        type: "file";
+        mediaType: string;
+        url: string;
+        filename?: string;
+      } => p.type === "file",
+    );
+
     const cmdMatch = rawText.match(TERMIGO_CMD_RE);
     const commandName = cmdMatch?.[1] ?? null;
     const withoutCmd = cmdMatch ? rawText.slice(cmdMatch[0].length) : rawText;
@@ -325,6 +327,55 @@ const RenderedMessage = memo(function RenderedMessage({
           {commandName ? <CommandSnippet name={commandName} /> : null}
           {stripped.chips.length > 0 ? (
             <ContextChips chips={stripped.chips} />
+          ) : null}
+          {fileParts.length > 0 ? (
+            <div className="my-1.5 flex flex-wrap gap-2">
+              {fileParts.map((f, i) => {
+                const isImage =
+                  Boolean(f.mediaType?.startsWith("image/")) ||
+                  f.url.startsWith("data:image/") ||
+                  /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(f.filename ?? "");
+                if (isImage) {
+                  return (
+                    <a
+                      // biome-ignore lint/suspicious/noArrayIndexKey: attachments are ordered positionally
+                      key={`${f.filename ?? "img"}-${i}`}
+                      href={f.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="group relative block overflow-hidden rounded-lg border border-border/70 bg-card shadow-2xs transition-transform hover:scale-[1.01]"
+                    >
+                      <img
+                        src={f.url}
+                        alt={f.filename ?? "Attached image"}
+                        className="max-h-56 max-w-xs rounded-lg object-contain"
+                      />
+                      {f.filename && (
+                        <div className="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/70 to-transparent p-1 px-1.5 text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100">
+                          {f.filename}
+                        </div>
+                      )}
+                    </a>
+                  );
+                }
+                return (
+                  <div
+                    // biome-ignore lint/suspicious/noArrayIndexKey: attachments are ordered positionally
+                    key={`${f.filename ?? "file"}-${i}`}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-border/80 bg-card px-2 py-1 text-[11px] shadow-2xs"
+                  >
+                    <span className="font-mono text-[9.5px] font-semibold text-primary">
+                      {f.filename
+                        ?.slice(f.filename.lastIndexOf(".") + 1)
+                        .toUpperCase() || "FILE"}
+                    </span>
+                    <span className="max-w-[14rem] truncate font-medium text-foreground">
+                      {f.filename ?? "Document"}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
           ) : null}
           {stripped.text ? (
             <p className="whitespace-pre-wrap wrap-break-word">

@@ -1,4 +1,8 @@
-import { CodeIcon, HashtagIcon, TerminalIcon } from "@hugeicons/core-free-icons";
+import {
+  CodeIcon,
+  HashtagIcon,
+  TerminalIcon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ReactNode } from "react";
 import type { FileAttachment } from "../lib/composer";
@@ -74,7 +78,13 @@ export function ChipsRow({
 
 function fileIcon(f: FileAttachment): ReactNode {
   if (f.kind === "image" && f.url) {
-    return <img src={f.url} alt="" className="size-4 shrink-0 rounded object-cover" />;
+    return (
+      <img
+        src={f.url}
+        alt=""
+        className="size-4 shrink-0 rounded object-cover"
+      />
+    );
   }
   if (f.kind === "selection") {
     return (
@@ -84,6 +94,13 @@ function fileIcon(f: FileAttachment): ReactNode {
         strokeWidth={1.75}
         className="shrink-0 opacity-80"
       />
+    );
+  }
+  if (f.kind === "file") {
+    return (
+      <span className="shrink-0 rounded bg-primary/10 px-1 py-0.2 font-mono text-[9.5px] font-semibold text-primary">
+        {extOf(f.name)}
+      </span>
     );
   }
   return (

@@ -58,7 +58,8 @@ export function evictObsoleteToolOutputs(
         if (part.type === "tool-result" && part.toolName === "read_file") {
           const path = readPath(part);
           if (path) {
-            if (seenReadPaths.has(path)) {
+            const pathKey = path.replace(/\\/g, "/").toLowerCase();
+            if (seenReadPaths.has(pathKey)) {
               const prevOutput =
                 typeof part.output === "string"
                   ? part.output
@@ -73,7 +74,7 @@ export function evictObsoleteToolOutputs(
               };
               evictedCount++;
             } else {
-              seenReadPaths.add(path);
+              seenReadPaths.add(pathKey);
             }
           }
         }

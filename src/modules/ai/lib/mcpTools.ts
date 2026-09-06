@@ -46,9 +46,14 @@ export function toolSchema(input: unknown): Record<string, unknown> {
     typeof input === "object" &&
     input !== null &&
     (input as { type?: unknown }).type === "object";
-  return ok
-    ? (input as Record<string, unknown>)
-    : { type: "object", properties: {}, additionalProperties: true };
+  if (!ok) {
+    return { type: "object", properties: {}, additionalProperties: true };
+  }
+  const raw = input as Record<string, unknown>;
+  if (typeof raw.properties === "object" && raw.properties !== null) {
+    return raw;
+  }
+  return { ...raw, properties: {} };
 }
 
 // Re-exported so callers have one MCP entry point; the light module stays

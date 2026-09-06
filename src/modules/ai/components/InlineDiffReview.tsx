@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
@@ -33,6 +33,10 @@ export function InlineDiffReview({
   className?: string;
 }) {
   const [hunks, setHunks] = useState(fileDiff.hunks);
+
+  useEffect(() => {
+    setHunks(fileDiff.hunks);
+  }, [fileDiff.hunks]);
 
   const handleAction = (hunkId: string, action: "accepted" | "rejected") => {
     setHunks((prev) =>

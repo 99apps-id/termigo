@@ -666,7 +666,7 @@ pub async fn browser_embed_read(
             return Ok(v);
         }
     }
-    Ok("(no readable text returned from the page. It may still be loading.)".to_string())
+    Ok("(no readable text returned from the page. It may block scripts, be offline, or render without DOM text. Do not retry browser_extract in a loop.)".to_string())
 }
 
 #[tauri::command]

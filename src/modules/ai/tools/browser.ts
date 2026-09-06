@@ -12,11 +12,49 @@ import type { ToolContext } from "./context";
 // bridge is left unused here: the floating WebviewWindow build hangs on some
 // Windows/WebView2 setups, so everything the agent drives runs in the docked
 // child instead. `instance` is the same short name passed to `browser_open`.
+// Tracks consecutive unreadable extracts per instance to prevent infinite wait and extract loops.
+const emptyExtractCounts = new Map<string, number>();
+
 async function embedRead(instance: string) {
   try {
-    return { text: await native.browserEmbedRead(instance) };
+    const text = await native.browserEmbedRead(instance);
+    const isUnreadable =
+      !text ||
+      text.trim().length === 0 ||
+      text.startsWith("(no readable text");
+
+    if (isUnreadable) {
+      const count = (emptyExtractCounts.get(instance) ?? 0) + 1;
+      emptyExtractCounts.set(instance, count);
+      if (count >= 2) {
+        return {
+          text: "",
+          error:
+            "No readable text could be extracted from this page after multiple attempts. The page may block injected scripts, be offline, or render without DOM text. Do not retry browser_extract or browser_wait again on this page. Fall back to fetch if available, or continue the task using local workspace files and inform the user.",
+        };
+      }
+      return {
+        text: "(no readable text returned from the page. It may block scripts, be offline, or render without DOM text. Do not retry browser_extract in a loop.)",
+      };
+    }
+
+    emptyExtractCounts.delete(instance);
+    return { text };
   } catch (e) {
-    return { error: String(e) };
+    const errStr = String(e);
+    const isOffline =
+      /getaddrinfo|econnrefused|enetunreach|offline|dns|unreachable/i.test(
+        errStr,
+      );
+    return {
+      error: errStr,
+      ...(isOffline
+        ? {
+            isOffline: true,
+            hint: "The network appears to be offline or the browser host is unreachable. Do not retry external browser requests; continue using local files.",
+          }
+        : {}),
+    };
   }
 }
 
@@ -130,9 +168,24 @@ export function buildBrowserTools(ctx: ToolContext) {
         if (blocked) return blocked;
         try {
           await native.browserEmbedNavigate(instance, url);
+          emptyExtractCounts.delete(instance);
           return { ok: true as const, url };
         } catch (e) {
-          return { error: String(e) };
+          const errStr = String(e);
+          const isOffline =
+            /getaddrinfo|econnrefused|enetunreach|offline|dns|unreachable/i.test(
+              errStr,
+            );
+          return {
+            error: errStr,
+            url,
+            ...(isOffline
+              ? {
+                  isOffline: true,
+                  hint: "Browser navigation failed because the network is offline or the host is unreachable. Stop attempting browser navigation and continue working with local workspace resources.",
+                }
+              : {}),
+          };
         }
       },
     }),
@@ -166,7 +219,7 @@ export function buildBrowserTools(ctx: ToolContext) {
 
     browser_extract: tool({
       description:
-        "Return the visible text of the current page in a browser instance - the fully rendered DOM, including content added by JavaScript. Call browser_wait first if the page may still be loading. If it returns the '(no readable text)' notice the page had not rendered yet: wait longer and call once more, and only then fall back to `fetch`.",
+        "Return the visible text of the current page in a browser instance - the fully rendered DOM, including content added by JavaScript. If it returns no readable text, do not loop on browser_wait; fall back to other tools or continue with local files.",
       inputSchema: z.object({
         instance: z.string().describe("Instance name."),
       }),

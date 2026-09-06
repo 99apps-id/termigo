@@ -273,6 +273,21 @@ describe("edit path normalisation", () => {
     expect(result.error).toContain("path");
     expect(nativeMock.writeFile).not.toHaveBeenCalled();
   });
+
+  it("reconciles LF in edit input with CRLF file content", async () => {
+    setFile("line 1\r\nline 2\r\nline 3");
+    const result = await runEdit(readContext(), {
+      path: FILE,
+      old_string: "line 1\nline 2",
+      new_string: "line 1 modified\nline 2 modified",
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.replacements).toBe(1);
+    expect(nativeMock.writeFile).toHaveBeenCalledWith(
+      FILE,
+      "line 1 modified\r\nline 2 modified\r\nline 3",
+    );
+  });
 });
 
 describe("diagnoseMismatch grounding hints", () => {

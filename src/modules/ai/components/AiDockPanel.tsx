@@ -1,7 +1,8 @@
-import { Suspense, lazy } from "react";
-import { useChatStore } from "../store/chatStore";
+import { lazy, Suspense } from "react";
 import { useComposer } from "../lib/composer";
+import { useChatStore } from "../store/chatStore";
 import { AiChatBody } from "./AiMiniWindow";
+import { ChipsRow } from "./ChipsRow";
 
 const AiComposerInput = lazy(() =>
   import("./AiComposerInput").then((m) => ({ default: m.AiComposerInput })),
@@ -25,7 +26,7 @@ export function AiDockPanel() {
   const sessionId = useChatStore((s) => s.activeSessionId);
   const closePanel = useChatStore((s) => s.closePanel);
   const openMini = useChatStore((s) => s.openMini);
-  const isBusy = useComposer().isBusy;
+  const c = useComposer();
 
   if (!sessionId) return null;
 
@@ -34,6 +35,11 @@ export function AiDockPanel() {
     closePanel();
     openMini();
   };
+
+  const hasChips =
+    c.files.length > 0 ||
+    c.pickedSnippets.length > 0 ||
+    c.pickedCommands.length > 0;
 
   return (
     <div className="flex h-full min-h-0 flex-col border-l border-border/60 bg-card text-[12px]">
@@ -47,9 +53,25 @@ export function AiDockPanel() {
       </div>
       <div className="shrink-0 border-t border-border/60 bg-card/40 px-3 py-2">
         <div
-          data-busy={isBusy ? "true" : undefined}
-          className="termigo-composer-glow rounded-xl bg-card/60 px-2.5 py-2"
+          data-busy={c.isBusy ? "true" : undefined}
+          className="termigo-composer-glow flex flex-col gap-2 rounded-xl bg-card/60 px-2.5 py-2"
         >
+          {hasChips && (
+            <ChipsRow
+              files={c.files}
+              onRemoveFile={c.removeFile}
+              snippets={c.pickedSnippets}
+              onRemoveSnippet={(id) => {
+                const snip = c.pickedSnippets.find((s) => s.id === id);
+                c.removeSnippet(id);
+                if (!snip) return;
+                const re = new RegExp(`(^|\\s)#${snip.handle}\\b ?`);
+                c.setValue((v) => v.replace(re, (_m, lead: string) => lead));
+              }}
+              commands={c.pickedCommands}
+              onRemoveCommand={(name) => c.removeCommand(name)}
+            />
+          )}
           <Suspense fallback={null}>
             <AiComposerInput />
           </Suspense>

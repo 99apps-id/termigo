@@ -1,9 +1,30 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { indexWorkspace, searchCode, getIndexStats } from "../lib/codeIndex";
+import {
+  indexWorkspace,
+  searchCode,
+  getIndexStats,
+  getIndexedRoot,
+} from "../lib/codeIndex";
 import type { ToolContext } from "./context";
 
-let indexing = false;
+let indexingPromise: Promise<{ files: number; chunks: number }> | null = null;
+
+async function ensureIndexed(
+  root: string,
+): Promise<{ files: number; chunks: number }> {
+  const stats = getIndexStats();
+  const currentIndexed = getIndexedRoot();
+  if (stats.chunks > 0 && currentIndexed === root) {
+    return stats;
+  }
+  if (!indexingPromise) {
+    indexingPromise = indexWorkspace(root).finally(() => {
+      indexingPromise = null;
+    });
+  }
+  return indexingPromise;
+}
 
 export function buildCodeSearchTools(ctx: ToolContext) {
   return {
@@ -32,15 +53,7 @@ export function buildCodeSearchTools(ctx: ToolContext) {
         const root = ctx.getWorkspaceRoot() ?? ctx.getCwd();
         if (!root) return { error: "no workspace root or cwd available" };
 
-        const stats = getIndexStats();
-        if (stats.chunks === 0 && !indexing) {
-          indexing = true;
-          try {
-            await indexWorkspace(root);
-          } finally {
-            indexing = false;
-          }
-        }
+        await ensureIndexed(root);
 
         const results = searchCode(query, max_results ?? 10, path_filter);
         return {
@@ -56,16 +69,17 @@ export function buildCodeSearchTools(ctx: ToolContext) {
         "Index the workspace for codebase search. Rebuilds the local BM25 index over code and configuration files. Use this when files have changed or you want to ensure fresh results.",
       inputSchema: z.object({}),
       execute: async () => {
-        if (indexing) return { status: "indexing" };
         const root = ctx.getWorkspaceRoot() ?? ctx.getCwd();
         if (!root) return { error: "no workspace root or cwd available" };
-        indexing = true;
-        try {
-          const stats = await indexWorkspace(root);
+        if (indexingPromise) {
+          const stats = await indexingPromise;
           return { status: "ok", ...stats };
-        } finally {
-          indexing = false;
         }
+        indexingPromise = indexWorkspace(root).finally(() => {
+          indexingPromise = null;
+        });
+        const stats = await indexingPromise;
+        return { status: "ok", ...stats };
       },
     }),
   };

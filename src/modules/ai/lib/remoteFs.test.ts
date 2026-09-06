@@ -62,6 +62,31 @@ describe("routePath with a session", () => {
     });
   });
 
+  it("resolves tilde paths against the remote home directory", () => {
+    expect(routePath(session, "~", local)).toEqual({
+      kind: "remote",
+      sessionId: 7,
+      path: "/root",
+    });
+    expect(routePath(session, "~/app.log", local)).toEqual({
+      kind: "remote",
+      sessionId: 7,
+      path: "/root/app.log",
+    });
+    expect(
+      routePath({ sessionId: 2, cwd: "/home/ubuntu/repo" }, "~/.bashrc", local),
+    ).toEqual({
+      kind: "remote",
+      sessionId: 2,
+      path: "/home/ubuntu/.bashrc",
+    });
+  });
+
+  it("errors on tilde path if home directory cannot be inferred", () => {
+    const t = routePath({ sessionId: 2, cwd: "/var/log" }, "~/app.log", local);
+    expect(t.kind).toBe("error");
+  });
+
   // Guessing a base would mean writing to an arbitrary remote directory.
   it("refuses a relative path before the shell has reported a cwd", () => {
     const t = routePath({ sessionId: 3, cwd: null }, "a.txt", local);

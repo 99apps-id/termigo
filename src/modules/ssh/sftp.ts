@@ -17,7 +17,8 @@ export type SftpDirEntry = {
 /** Basename of a local OS path, tolerating both `/` and `\\` separators so a
  *  Windows drop path (`C:\\Users\\me\\file.txt`) resolves correctly. */
 export function localBasename(p: string): string {
-  const parts = p.split(/[\\/]/);
+  const trimmed = p.replace(/[\\/]+$/, "");
+  const parts = trimmed.split(/[\\/]/);
   return parts[parts.length - 1] || p;
 }
 

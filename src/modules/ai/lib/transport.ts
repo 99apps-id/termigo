@@ -330,23 +330,32 @@ export function createContextAwareTransport(deps: Deps) {
     // tools. MCP is the one that can start a process, so it is the one that
     // can turn a file read into twenty seconds.
     const contextStart = performance.now();
-    const [projectMemory, learnedMemory, mcpTools, skills, customDefs] =
-      await raceAbort(
-        withTimeout(
-          Promise.all([
-            readTermigoMd(live.workspaceRoot),
-            readMemory(live.workspaceRoot),
-            getMcpTools(live.workspaceRoot),
-            listSkills(live.workspaceRoot),
-            loadCustomTools(live.workspaceRoot),
-            loadHooks(live.workspaceRoot),
-            hydrateInvariants(live.workspaceRoot),
-          ]),
-          CONTEXT_TIMEOUT_MS,
-          "context assembly",
-        ),
-        options.abortSignal,
-      );
+    const [
+      projectMemory,
+      learnedMemory,
+      mcpTools,
+      skills,
+      customDefs,
+      loadedHooks,
+    ] = await raceAbort(
+      withTimeout(
+        Promise.all([
+          readTermigoMd(live.workspaceRoot),
+          readMemory(live.workspaceRoot),
+          getMcpTools(live.workspaceRoot),
+          listSkills(live.workspaceRoot),
+          loadCustomTools(live.workspaceRoot),
+          loadHooks(live.workspaceRoot),
+          hydrateInvariants(live.workspaceRoot),
+        ]),
+        CONTEXT_TIMEOUT_MS,
+        "context assembly",
+      ),
+      options.abortSignal,
+    );
+    if (loadedHooks && !loadedHooks.ok) {
+      logInfo(`[ai] run: failed to parse hooks.json: ${loadedHooks.reason}`);
+    }
     const contextMs = performance.now() - contextStart;
     const envBlock = formatEnvBlock(live);
     const messagesForRun = prepareOutgoingMessages(options.messages, envBlock);
@@ -394,7 +403,9 @@ export function createContextAwareTransport(deps: Deps) {
       stepBudget: deps.getStepBudget?.(),
       costBudgetUsd: deps.getCostBudgetUsd?.(),
       captureDebug: deps.getCaptureDebug?.(),
-      hooksConfig: deps.getHooksConfig?.(),
+      hooksConfig:
+        (loadedHooks?.ok ? loadedHooks.config : undefined) ??
+        deps.getHooksConfig?.(),
       runId: deps.getRunId?.(),
       contextMs,
       projectMemory,

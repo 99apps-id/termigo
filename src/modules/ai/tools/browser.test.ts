@@ -212,4 +212,42 @@ describe("browser tools", () => {
     expect(r.ok).toBe(true);
     expect(native.browserEmbedClose).toHaveBeenCalledWith("docs");
   });
+
+  it("breaks repetition loop when browser_extract repeatedly returns no readable text", async () => {
+    const ctx = makeCtx();
+    const tools = buildBrowserTools(ctx);
+    (native.browserEmbedRead as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      "(no readable text returned from the page. It may still be loading.)",
+    );
+    const first = (await execOf(tools.browser_extract)(
+      { instance: "loop-test" },
+      OPTS,
+    )) as { text?: string; error?: string };
+    expect(first.text).toContain("no readable text");
+    expect(first.error).toBeUndefined();
+
+    (native.browserEmbedRead as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      "(no readable text returned from the page. It may still be loading.)",
+    );
+    const second = (await execOf(tools.browser_extract)(
+      { instance: "loop-test" },
+      OPTS,
+    )) as { text?: string; error?: string };
+    expect(second.error).toContain("No readable text could be extracted");
+  });
+
+  it("reports isOffline flag when browser_navigate encounters a network or DNS failure", async () => {
+    const ctx = makeCtx();
+    const tools = buildBrowserTools(ctx);
+    (
+      native.browserEmbedNavigate as ReturnType<typeof vi.fn>
+    ).mockRejectedValueOnce(new Error("getaddrinfo ENOTFOUND example.invalid"));
+    const r = (await execOf(tools.browser_navigate)(
+      { instance: "docs", url: "https://example.invalid" },
+      OPTS,
+    )) as { error?: string; isOffline?: boolean; hint?: string };
+    expect(r.error).toContain("ENOTFOUND");
+    expect(r.isOffline).toBe(true);
+    expect(r.hint).toContain("network is offline");
+  });
 });

@@ -70,6 +70,7 @@ type RunResult = {
   summary: string;
   stepCount: number;
   durationMs: number;
+  aborted?: boolean;
 };
 
 export async function runSubagent({
@@ -314,6 +315,7 @@ export async function runSubagent({
             : "Stopped: the run was aborted.",
         stepCount: 0,
         durationMs: Date.now() - start,
+        aborted: true,
       };
     }
     if (firstStepTimer) {

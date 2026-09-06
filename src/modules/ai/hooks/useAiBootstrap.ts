@@ -7,6 +7,10 @@ import {
   getAllKeys,
   hasAnyKey,
 } from "../lib/keyring";
+import {
+  isSignedInToChatGpt,
+  onChatGptAuthChanged,
+} from "../lib/chatgptAuth";
 import { useAgentsStore } from "../store/agentsStore";
 import { useChatStore } from "../store/chatStore";
 import { useSnippetsStore } from "../store/snippetsStore";
@@ -54,7 +58,8 @@ export function useAiBootstrap(): {
     customEndpoints.some(
       (e) => e.baseURL.trim().length > 0 && e.modelId.trim().length > 0,
     );
-  const hasComposer = hasAnyKey(apiKeys) || hasLocalModel;
+  const [hasChatGptAuth, setHasChatGptAuth] = useState(false);
+  const hasComposer = hasAnyKey(apiKeys) || hasLocalModel || hasChatGptAuth;
 
   const prefsHydrated = usePreferencesStore((s) => s.hydrated);
   const [keysLoaded, setKeysLoaded] = useState(false);
@@ -66,6 +71,10 @@ export function useAiBootstrap(): {
         setApiKeys(keys);
         setKeysLoaded(true);
       });
+      void isSignedInToChatGpt().then((signedIn) => {
+        if (!alive) return;
+        setHasChatGptAuth(signedIn);
+      });
       if (!prefsHydrated) return;
       void getAllCustomEndpointKeys(
         usePreferencesStore.getState().customEndpoints,
@@ -76,9 +85,11 @@ export function useAiBootstrap(): {
     };
     reload();
     const unlistenP = onKeysChanged(reload);
+    const unlistenChatGpt = onChatGptAuthChanged(reload);
     return () => {
       alive = false;
       void unlistenP.then((fn) => fn());
+      unlistenChatGpt();
     };
   }, [setApiKeys, setCustomEndpointKeys, prefsHydrated]);
 

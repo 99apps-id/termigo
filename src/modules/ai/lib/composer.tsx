@@ -12,7 +12,7 @@ import type { SteerMessage, SteerPart } from "./steer";
 export type FileAttachment = {
   id: string;
   name: string;
-  kind: "image" | "text" | "selection";
+  kind: "image" | "text" | "selection" | "file";
   mediaType: string;
   url?: string;
   text?: string;
@@ -27,7 +27,7 @@ type MessagePart =
 
 export const MAX_TEXT_INLINE = 200_000;
 export const ACCEPTED_FILES =
-  "image/*,.txt,.md,.json,.yaml,.yml,.toml,.sh,.zsh,.bash,.py,.js,.jsx,.ts,.tsx,.rs,.go,.java,.c,.cpp,.h,.hpp,.html,.css,.csv,.log,.env,.config,.conf,.ini,Dockerfile,.dockerfile";
+  "image/*,application/pdf,.pdf,.txt,.md,.markdown,.json,.yaml,.yml,.toml,.sh,.zsh,.bash,.py,.js,.jsx,.ts,.tsx,.rs,.go,.java,.c,.cpp,.h,.hpp,.cs,.php,.rb,.swift,.kt,.html,.css,.scss,.sql,.csv,.tsv,.log,.env,.config,.conf,.ini,.xml,Dockerfile,.dockerfile";
 
 type Voice = ReturnType<typeof useWhisperRecording>;
 
@@ -36,7 +36,7 @@ type ComposerCtx = {
   value: string;
   setValue: React.Dispatch<React.SetStateAction<string>>;
   files: FileAttachment[];
-  addFiles: (list: FileList | null) => Promise<void>;
+  addFiles: (list: FileList | File[] | readonly File[] | null) => Promise<void>;
   /** Attach a file by absolute path — used by the file explorer's "Attach to Agent". */
   attachFileByPath: (path: string) => Promise<void>;
   removeFile: (id: string) => void;
@@ -159,7 +159,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
     },
   });
 
-  const addFiles = async (list: FileList | null) => {
+  const addFiles = async (list: FileList | File[] | readonly File[] | null) => {
     if (!list) return;
     const next: FileAttachment[] = [];
     for (const f of Array.from(list)) {
@@ -210,11 +210,57 @@ export function AiComposerProvider({ children }: ProviderProps) {
       useChatStore.getState().focusInput();
     } catch (e) {
       console.error("attachImageByPath failed:", e);
+      toast.error(
+        `Could not attach image "${path.split(/[/\\]/).pop() || path}"`,
+      );
+    }
+  };
+
+  const attachPdfByPath = async (path: string) => {
+    try {
+      type ReadResult = {
+        media_type: string;
+        data: string;
+        size: number;
+        file_name: string;
+      };
+      const doc = await invoke<ReadResult>("fs_read_file_base64", {
+        path,
+        workspace: currentWorkspaceEnv(),
+      });
+      const name = path.split(/[/\\]/).pop() || path;
+      const id = `path-${path}`;
+      setFiles((prev) => {
+        if (prev.some((f) => f.id === id)) return prev;
+        const att: FileAttachment = {
+          id,
+          name,
+          kind: "file",
+          mediaType: doc.media_type || "application/pdf",
+          url: `data:${doc.media_type || "application/pdf"};base64,${doc.data}`,
+          size: Number(doc.size),
+        };
+        return [...prev, att];
+      });
+      useChatStore.getState().focusInput();
+    } catch (e) {
+      console.error("attachPdfByPath failed:", e);
+      toast.error(
+        `Could not attach PDF "${path.split(/[/\\]/).pop() || path}"`,
+      );
     }
   };
 
   const attachFileByPath = async (path: string) => {
     try {
+      if (isImageAttachmentPath(path)) {
+        await attachImageByPath(path);
+        return;
+      }
+      if (isPdfPath(path)) {
+        await attachPdfByPath(path);
+        return;
+      }
       type ReadResult =
         | { kind: "text"; content: string; size: number }
         | { kind: "binary"; size: number }
@@ -223,18 +269,17 @@ export function AiComposerProvider({ children }: ProviderProps) {
         path,
         workspace: currentWorkspaceEnv(),
       });
-      if (result.kind !== "text") {
-        // Images attach as a picture the agent can see (vision), even though
-        // the text reader classifies them as binary.
-        if (isImageAttachmentPath(path)) {
-          await attachImageByPath(path);
-          return;
-        }
-        // Other binary/oversize files: skip (could surface a toast in future).
-        console.warn("attachFileByPath: skipped non-text file", path, result);
+      const name = path.split(/[/\\]/).pop() || path;
+      if (result.kind === "toolarge") {
+        toast.error(
+          `File "${name}" is too large to attach (limit ${result.limit} bytes)`,
+        );
         return;
       }
-      const name = path.split("/").pop() || path;
+      if (result.kind !== "text") {
+        toast.error(`Binary file "${name}" cannot be attached as text`);
+        return;
+      }
       const id = `path-${path}`;
       setFiles((prev) => {
         if (prev.some((f) => f.id === id)) return prev;
@@ -252,6 +297,9 @@ export function AiComposerProvider({ children }: ProviderProps) {
       useChatStore.getState().focusInput();
     } catch (e) {
       console.error("attachFileByPath failed:", e);
+      toast.error(
+        `Could not attach file "${path.split(/[/\\]/).pop() || path}"`,
+      );
     }
   };
 
@@ -336,7 +384,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
     if (composed) parts.push({ type: "text", text: composed });
 
     for (const f of files) {
-      if (f.kind === "image" && f.url) {
+      if ((f.kind === "image" || f.kind === "file") && f.url) {
         parts.push({
           type: "file",
           mediaType: f.mediaType,
@@ -346,7 +394,17 @@ export function AiComposerProvider({ children }: ProviderProps) {
       }
     }
 
-    if (!sessionId) return;
+    if (parts.length > 0 && !parts.some((p) => p.type === "text")) {
+      parts.unshift({
+        type: "text",
+        text: "Please inspect the attached file(s).",
+      });
+    }
+
+    let targetSessionId = sessionId;
+    if (!targetSessionId) {
+      targetSessionId = useChatStore.getState().newSession();
+    }
     const store = useChatStore.getState();
     // A typed message starts a new task, so the escalation ladder resets to
     // its first rung. Continue is the only thing that climbs it.
@@ -364,7 +422,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
     void (async () => {
       try {
         const { sendParts } = await import("../store/chatRuntime");
-        await sendParts(sessionId, parts as unknown as SteerPart[]);
+        await sendParts(targetSessionId, parts as unknown as SteerPart[]);
       } catch (e) {
         // A silent failure here is why a typed message "doesn't show up": make
         // it visible so it is never a mystery again.
@@ -428,37 +486,114 @@ export function AiComposerProvider({ children }: ProviderProps) {
   return <Ctx.Provider value={ctx}>{children}</Ctx.Provider>;
 }
 
-const IMAGE_ATTACH_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp"]);
+export const IMAGE_ATTACH_EXTS = new Set([
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "svg",
+  "bmp",
+  "ico",
+]);
 
-function isImageAttachmentPath(path: string): boolean {
+export function isImageAttachmentPath(path: string): boolean {
   const dot = path.lastIndexOf(".");
   if (dot === -1) return false;
   return IMAGE_ATTACH_EXTS.has(path.slice(dot + 1).toLowerCase());
 }
 
+export function isPdfPath(path: string): boolean {
+  const dot = path.lastIndexOf(".");
+  if (dot === -1) return false;
+  return path.slice(dot + 1).toLowerCase() === "pdf";
+}
+
+export function imageMediaTypeFromName(name: string): string {
+  const ext = name.slice(name.lastIndexOf(".") + 1).toLowerCase();
+  switch (ext) {
+    case "png":
+      return "image/png";
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg";
+    case "gif":
+      return "image/gif";
+    case "webp":
+      return "image/webp";
+    case "svg":
+      return "image/svg+xml";
+    case "bmp":
+      return "image/bmp";
+    case "ico":
+      return "image/x-icon";
+    default:
+      return "image/png";
+  }
+}
+
+const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+const MAX_PDF_BYTES = 20 * 1024 * 1024;
+
 async function readAttachment(file: File): Promise<FileAttachment | null> {
   const id = `${file.name}-${file.size}-${file.lastModified}`;
-  if (file.type.startsWith("image/")) {
+  const isImage =
+    file.type.startsWith("image/") || isImageAttachmentPath(file.name);
+  if (isImage) {
+    if (file.size > MAX_IMAGE_BYTES) {
+      toast.error(`Image "${file.name}" is too large (max 20 MB)`);
+      return null;
+    }
+    const mediaType = file.type || imageMediaTypeFromName(file.name);
     const url = await readAsDataURL(file);
     return {
       id,
       name: file.name,
       kind: "image",
-      mediaType: file.type || "image/png",
+      mediaType,
       url,
       size: file.size,
     };
   }
-  if (file.size > MAX_TEXT_INLINE) return null;
-  const text = await file.text();
-  return {
-    id,
-    name: file.name,
-    kind: "text",
-    mediaType: file.type || "text/plain",
-    text,
-    size: file.size,
-  };
+
+  const isPdf = file.type === "application/pdf" || isPdfPath(file.name);
+  if (isPdf) {
+    if (file.size > MAX_PDF_BYTES) {
+      toast.error(`PDF "${file.name}" is too large (max 20 MB)`);
+      return null;
+    }
+    const url = await readAsDataURL(file);
+    return {
+      id,
+      name: file.name,
+      kind: "file",
+      mediaType: "application/pdf",
+      url,
+      size: file.size,
+    };
+  }
+
+  if (file.size > MAX_TEXT_INLINE) {
+    toast.error(
+      `File "${file.name}" is too large (max ${Math.round(MAX_TEXT_INLINE / 1000)} KB for text)`,
+    );
+    return null;
+  }
+
+  try {
+    const text = await file.text();
+    return {
+      id,
+      name: file.name,
+      kind: "text",
+      mediaType: file.type || "text/plain",
+      text,
+      size: file.size,
+    };
+  } catch {
+    toast.error(`Could not read "${file.name}" as text`);
+    return null;
+  }
 }
 
 function readAsDataURL(file: Blob): Promise<string> {

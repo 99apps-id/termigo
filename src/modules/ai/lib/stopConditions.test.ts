@@ -330,6 +330,16 @@ describe("evaluateCircuitBreaker", () => {
     expect(next.activeNudge).toContain("bash_background");
   });
 
+  it("trips immediately when tool reports environment is offline", () => {
+    const calls = [{ toolName: "web_search", input: { query: "vitest docs" }, toolCallId: "c1" }];
+    const results = new Map<string, unknown>([
+      ["c1", { error: "Network connection unavailable", isOffline: true }],
+    ]);
+    const next = evaluateCircuitBreaker(calls, results, initState);
+    expect(next.activeNudge).toContain("ENVIRONMENT IS OFFLINE");
+    expect(next.activeNudge).toContain("DO NOT attempt any further web searches");
+  });
+
   it("clears circuit breaker when a step succeeds", () => {
     const calls = [{ toolName: "bash_run", input: { command: "npm run dev" }, toolCallId: "c1" }];
     const timeoutResults = new Map<string, unknown>([

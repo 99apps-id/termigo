@@ -304,7 +304,7 @@ export async function buildLanguageModel(
         );
       }
       // `.responses()`: this backend speaks the Responses API only. `apiFetch`
-      // proxies through Rust, which is REQUIRED here — chatgpt.com sends no CORS
+      // proxies through Rust, which is REQUIRED here - chatgpt.com sends no CORS
       // headers for this route and the webview refuses to send `originator`.
       // Returned, NOT cached: the access token rotates on refresh, so a cached
       // model would keep serving an expired token until restart.
@@ -571,12 +571,19 @@ export function noProgressStop<T extends ToolSet>(
 export function isErrorResult(output: unknown): boolean {
   if (output == null || typeof output !== "object") return false;
   const record = output as Record<string, unknown>;
-  // A tool surfaced its failure as an { error: "..." } object.
+  // A tool surfaced its failure as an { error: "..." } object or offline signal.
   if (record.error) return true;
+  if (record.isOffline === true) return true;
+  if (
+    typeof record.text === "string" &&
+    record.text.startsWith("(no readable text returned from the page")
+  ) {
+    return true;
+  }
   // Command tools (bash_run, git_*, run_checks, test_loop) report failure as a
   // non-zero exit_code or a timed_out flag, not an { error } object. Missing
   // them here meant a command that kept failing was invisible to noErrorProgress
-  // and the agent retried it round after round — the "hang" seen when lint or
+  // and the agent retried it round after round - the "hang" seen when lint or
   // build never passes.
   const code = record.exit_code;
   if (typeof code === "number" && code !== 0) return true;
@@ -604,6 +611,7 @@ export function evaluateCircuitBreaker(
 ): CircuitBreakerState {
   if (calls.length === 0) return state;
 
+  let stepIsOffline = false;
   let stepHasTimeout = false;
   let stepHasError = false;
   let stepFailureFp: string | null = null;
@@ -611,19 +619,33 @@ export function evaluateCircuitBreaker(
 
   for (const call of calls) {
     const output = call.toolCallId ? results.get(call.toolCallId) : undefined;
-    if (
-      output &&
-      typeof output === "object" &&
-      (output as Record<string, unknown>).timed_out === true
-    ) {
-      stepHasTimeout = true;
-      failedToolName = call.toolName;
+    if (output && typeof output === "object") {
+      const rec = output as Record<string, unknown>;
+      if (rec.isOffline === true) {
+        stepIsOffline = true;
+      }
+      if (rec.timed_out === true) {
+        stepHasTimeout = true;
+        failedToolName = call.toolName;
+      }
     }
     if (isErrorResult(output)) {
       stepHasError = true;
       failedToolName = call.toolName;
       stepFailureFp = toolCallFingerprint(call.toolName, call.input);
     }
+  }
+
+  if (stepIsOffline) {
+    return {
+      lastFailedFingerprint: null,
+      consecutiveFailureCount: 0,
+      activeNudge:
+        `[CIRCUIT BREAKER: ENVIRONMENT IS OFFLINE]\n` +
+        `External network requests are failing because the system has no internet connection or the host is unreachable.\n` +
+        `DO NOT attempt any further web searches, HTTP fetches, or browser navigations.\n` +
+        `Pivot immediately: complete your task using local repository files, local documentation, code inspection, and offline tools.`,
+    };
   }
 
   if (stepHasTimeout) {

@@ -97,6 +97,56 @@ describe("newFilesOnly", () => {
     expect(result).toEqual({ success: true });
     expect(inner).toHaveBeenCalled();
   });
+
+  it("allows overwriting when overwrite: true is explicitly passed", async () => {
+    vi.mocked(native.readFile).mockResolvedValue("existing content");
+    const inner = vi.fn().mockResolvedValue({ success: true });
+    const guarded = newFilesOnly({ execute: inner });
+
+    const result = await guarded.execute(
+      { path: "/workspace/foo.txt", overwrite: true } as never,
+      {} as never,
+    );
+
+    expect(result).toEqual({ success: true });
+    expect(inner).toHaveBeenCalled();
+  });
+
+  it("allows subagents to write and update markdown report files", async () => {
+    vi.mocked(native.readFile).mockResolvedValue("prior report");
+    const inner = vi.fn().mockResolvedValue({ success: true });
+    const guarded = newFilesOnly({ execute: inner });
+
+    const result = await guarded.execute(
+      { path: "/workspace/audit_report.md" } as never,
+      {} as never,
+    );
+
+    expect(result).toEqual({ success: true });
+    expect(inner).toHaveBeenCalled();
+  });
+
+  it("allows subagents to update files they created during the same run", async () => {
+    vi.mocked(native.readFile).mockRejectedValueOnce(new Error("not found"));
+    const inner = vi.fn().mockResolvedValue({ success: true });
+    const guarded = newFilesOnly({ execute: inner });
+
+    // Step 1: creates file
+    await guarded.execute(
+      { path: "/workspace/generated.code" } as never,
+      {} as never,
+    );
+
+    // Step 2: updates same file later in the run even though file now exists
+    vi.mocked(native.readFile).mockResolvedValueOnce("step 1 content");
+    const step2 = await guarded.execute(
+      { path: "/workspace/generated.code" } as never,
+      {} as never,
+    );
+
+    expect(step2).toEqual({ success: true });
+    expect(inner).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("gate & breaker", () => {

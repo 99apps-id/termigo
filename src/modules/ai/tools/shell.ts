@@ -168,7 +168,11 @@ export function buildShellTools(ctx: ToolContext) {
           const onAbort = () => {
             void native.shellSessionInterrupt(shellId).catch(() => {});
           };
-          abortSignal?.addEventListener("abort", onAbort, { once: true });
+          if (abortSignal?.aborted) {
+            onAbort();
+          } else {
+            abortSignal?.addEventListener("abort", onAbort, { once: true });
+          }
 
           let r: Awaited<ReturnType<typeof native.shellSessionRun>>;
           try {

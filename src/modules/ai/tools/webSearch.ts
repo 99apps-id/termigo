@@ -135,11 +135,25 @@ export function buildWebSearchTools() {
                 "Mozilla/5.0 (compatible; TermigoBot/1.0; +https://github.com/99apps-id/termigo)",
             },
             body: null,
-            // Never model-controlled — same invariant as `fetch`.
+            // Never model-controlled: same invariant as fetch.
             allowPrivateNetwork: false,
           });
         } catch (e) {
-          return { error: String(e), query };
+          const errStr = String(e);
+          const isOffline =
+            /getaddrinfo|econnrefused|enetunreach|offline|dns|unreachable|network/i.test(
+              errStr,
+            );
+          return {
+            error: errStr,
+            query,
+            ...(isOffline
+              ? {
+                  isOffline: true,
+                  hint: "Search failed because the machine is offline or DNS resolution failed. DO NOT retry search queries or web tools. Continue the task using local repository files, documentation, and tools.",
+                }
+              : {}),
+          };
         }
 
         const contentType = header(resp.headers, "content-type");

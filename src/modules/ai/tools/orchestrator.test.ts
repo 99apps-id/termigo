@@ -131,6 +131,49 @@ describe("runPipelineByName", () => {
     expect(result.skipped).toContain("step2");
     expect(result.completed).toEqual([]);
   });
+
+  it("aborts pipeline immediately when abortSignal is triggered", async () => {
+    const pipeline = {
+      id: "aborted-pipe",
+      name: "Aborted Pipe",
+      steps: [
+        { id: "step1", type: "general" as const, prompt: "First step" },
+        { id: "step2", type: "general" as const, prompt: "Second step" },
+      ],
+    };
+    const mockContext = {
+      getCwd: () => ".",
+      getWorkspaceRoot: () => ".",
+      getRemoteSession: () => null,
+      getTerminalContext: () => null,
+      isActiveTerminalPrivate: () => false,
+      injectIntoActivePty: () => false,
+      openPreview: () => false,
+      openCanvas: () => false,
+      browserOpen: async () => ({ error: "disabled" }),
+      browserNavigate: async () => ({ error: "disabled" }),
+      browserBack: async () => ({ error: "disabled" }),
+      browserForward: async () => ({ error: "disabled" }),
+      browserReload: async () => ({ error: "disabled" }),
+      browserExtract: async () => ({ error: "disabled" }),
+      browserEval: async () => ({ error: "disabled" }),
+      browserScreenshot: async () => ({ error: "disabled" }),
+      browserConsole: async () => ({ error: "disabled" }),
+      browserUrl: async () => ({ error: "disabled" }),
+      browserClose: async () => ({ error: "disabled" }),
+      browserList: async () => [],
+      spawnAgent: () => null,
+      readAgentOutput: () => null,
+      readCache: new Map(),
+      getSessionId: () => "sid",
+    };
+    const controller = new AbortController();
+    controller.abort();
+    const result = await runPipeline(pipeline, mockContext, {}, controller.signal);
+    expect(result.stoppedAt).toBe("aborted");
+    expect(result.skipped).toContain("step1");
+    expect(result.skipped).toContain("step2");
+  });
 });
 
 describe("interpolatePrompt", () => {

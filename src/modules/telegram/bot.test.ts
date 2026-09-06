@@ -14,6 +14,8 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
     pauseMirror,
     resumeMirror,
     getMirrorPauseCount,
+    splitTelegramText,
+    clampTelegramText,
   } = _testOnly;
 
   beforeEach(() => {
@@ -68,6 +70,29 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
       expect(getMirrorPauseCount()).toBe(initial);
       resumeMirror();
       expect(getMirrorPauseCount()).toBe(Math.max(0, initial - 1));
+    });
+  });
+
+  describe("message chunking", () => {
+    it("leaves messages under 4000 characters in a single chunk", () => {
+      const short = "Short message";
+      expect(splitTelegramText(short)).toEqual([short]);
+    });
+
+    it("splits long messages at line breaks when available", () => {
+      const line1 = "a".repeat(2500);
+      const line2 = "b".repeat(2000);
+      const combined = `${line1}\n${line2}`;
+      const chunks = splitTelegramText(combined);
+      expect(chunks.length).toBe(2);
+      expect(chunks[0]).toBe(line1);
+      expect(chunks[1]).toBe(line2);
+    });
+
+    it("clamps without throwing", () => {
+      const longText = "x".repeat(5000);
+      expect(clampTelegramText(longText).length).toBe(4003);
+      expect(clampTelegramText(longText).endsWith("...")).toBe(true);
     });
   });
 });

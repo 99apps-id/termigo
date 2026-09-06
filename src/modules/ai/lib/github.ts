@@ -57,6 +57,32 @@ async function runGh(
   }
 }
 
+async function withBodyArg<T>(
+  body: string,
+  cwd: string,
+  fn: (bodyArg: string) => Promise<T>,
+): Promise<T> {
+  const hasNewlines = /[\r\n]/.test(body);
+  if (!hasNewlines) {
+    return fn(`--body ${quoteShellArg(body)}`);
+  }
+
+  // Multiline markdown bodies: write to temporary file to avoid breaking
+  // checkShellCommand single-line / control-character security invariants.
+  const tempName = `.termigo/tmp_gh_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.md`;
+  const tempPath = `${cwd.replace(/[\\/]+$/, "")}/${tempName}`;
+  try {
+    await native.writeFile(tempPath, body);
+    return await fn(`--body-file ${quoteShellArg(tempPath)}`);
+  } finally {
+    try {
+      await native.deletePath(tempPath);
+    } catch {
+      // Ignore cleanup error
+    }
+  }
+}
+
 export async function createPr(
   title: string,
   body: string,
@@ -64,38 +90,41 @@ export async function createPr(
   head: string,
   cwd: string,
 ): Promise<{ ok: boolean; pr?: GhPr; error?: string }> {
-  const args = [
-    "pr",
-    "create",
-    `--title ${quoteShellArg(title)}`,
-    `--body ${quoteShellArg(body)}`,
-    ...(base.trim() ? [`--base ${quoteShellArg(base.trim())}`] : []),
-    `--head ${quoteShellArg(head)}`,
-    "--json",
-    "number,title,body,state,author,createdAt,updatedAt,url,baseRefName,headRefName",
-  ];
-  const r = await runGh(args, cwd);
-  if (r.exit_code !== 0) {
-    return { ok: false, error: r.stderr || r.stdout };
-  }
-  try {
-    const data = JSON.parse(r.stdout);
-    const pr: GhPr = {
-      number: data.number,
-      title: data.title,
-      body: data.body,
-      state: data.state,
-      author: data.author?.login ?? "unknown",
-      createdAt: data.createdAt,
-      updatedAt: data.updatedAt,
-      url: data.url,
-      baseRef: data.baseRefName,
-      headRef: data.headRefName,
-    };
-    return { ok: true, pr };
-  } catch (e) {
-    return { ok: false, error: `Failed to parse PR data: ${e}` };
-  }
+  const cleanTitle = title.replace(/[\r\n]+/g, " ").trim();
+  return withBodyArg(body, cwd, async (bodyArg) => {
+    const args = [
+      "pr",
+      "create",
+      `--title ${quoteShellArg(cleanTitle)}`,
+      bodyArg,
+      ...(base.trim() ? [`--base ${quoteShellArg(base.trim())}`] : []),
+      `--head ${quoteShellArg(head)}`,
+      "--json",
+      "number,title,body,state,author,createdAt,updatedAt,url,baseRefName,headRefName",
+    ];
+    const r = await runGh(args, cwd);
+    if (r.exit_code !== 0) {
+      return { ok: false, error: r.stderr || r.stdout };
+    }
+    try {
+      const data = JSON.parse(r.stdout);
+      const pr: GhPr = {
+        number: data.number,
+        title: data.title,
+        body: data.body,
+        state: data.state,
+        author: data.author?.login ?? "unknown",
+        createdAt: data.createdAt,
+        updatedAt: data.updatedAt,
+        url: data.url,
+        baseRef: data.baseRefName,
+        headRef: data.headRefName,
+      };
+      return { ok: true, pr };
+    } catch (e) {
+      return { ok: false, error: `Failed to parse PR data: ${e}` };
+    }
+  });
 }
 
 export async function getPr(
@@ -175,32 +204,34 @@ export async function reviewPr(
   body: string,
   cwd: string,
 ): Promise<{ ok: boolean; review?: GhReview; error?: string }> {
-  const args = [
-    "pr",
-    "review",
-    String(number),
-    `--${state.toLowerCase()}`,
-    `--body ${quoteShellArg(body)}`,
-    "--json",
-    "id,state,body,author,createdAt",
-  ];
-  const r = await runGh(args, cwd);
-  if (r.exit_code !== 0) {
-    return { ok: false, error: r.stderr || r.stdout };
-  }
-  try {
-    const data = JSON.parse(r.stdout);
-    const review: GhReview = {
-      id: data.id,
-      state: data.state,
-      body: data.body,
-      author: data.author?.login ?? "unknown",
-      createdAt: data.createdAt,
-    };
-    return { ok: true, review };
-  } catch (e) {
-    return { ok: false, error: `Failed to parse review data: ${e}` };
-  }
+  return withBodyArg(body, cwd, async (bodyArg) => {
+    const args = [
+      "pr",
+      "review",
+      String(number),
+      `--${state.toLowerCase()}`,
+      bodyArg,
+      "--json",
+      "id,state,body,author,createdAt",
+    ];
+    const r = await runGh(args, cwd);
+    if (r.exit_code !== 0) {
+      return { ok: false, error: r.stderr || r.stdout };
+    }
+    try {
+      const data = JSON.parse(r.stdout);
+      const review: GhReview = {
+        id: data.id,
+        state: data.state,
+        body: data.body,
+        author: data.author?.login ?? "unknown",
+        createdAt: data.createdAt,
+      };
+      return { ok: true, review };
+    } catch (e) {
+      return { ok: false, error: `Failed to parse review data: ${e}` };
+    }
+  });
 }
 
 export async function commentPr(
@@ -208,30 +239,32 @@ export async function commentPr(
   body: string,
   cwd: string,
 ): Promise<{ ok: boolean; comment?: GhComment; error?: string }> {
-  const args = [
-    "pr",
-    "comment",
-    String(number),
-    `--body ${quoteShellArg(body)}`,
-    "--json",
-    "id,body,author,createdAt",
-  ];
-  const r = await runGh(args, cwd);
-  if (r.exit_code !== 0) {
-    return { ok: false, error: r.stderr || r.stdout };
-  }
-  try {
-    const data = JSON.parse(r.stdout);
-    const comment: GhComment = {
-      id: data.id,
-      body: data.body,
-      author: data.author?.login ?? "unknown",
-      createdAt: data.createdAt,
-    };
-    return { ok: true, comment };
-  } catch (e) {
-    return { ok: false, error: `Failed to parse comment data: ${e}` };
-  }
+  return withBodyArg(body, cwd, async (bodyArg) => {
+    const args = [
+      "pr",
+      "comment",
+      String(number),
+      bodyArg,
+      "--json",
+      "id,body,author,createdAt",
+    ];
+    const r = await runGh(args, cwd);
+    if (r.exit_code !== 0) {
+      return { ok: false, error: r.stderr || r.stdout };
+    }
+    try {
+      const data = JSON.parse(r.stdout);
+      const comment: GhComment = {
+        id: data.id,
+        body: data.body,
+        author: data.author?.login ?? "unknown",
+        createdAt: data.createdAt,
+      };
+      return { ok: true, comment };
+    } catch (e) {
+      return { ok: false, error: `Failed to parse comment data: ${e}` };
+    }
+  });
 }
 
 export async function mergePr(

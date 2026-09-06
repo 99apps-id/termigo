@@ -321,22 +321,44 @@ export function buildTerminalTools(ctx: ToolContext) {
             : ext === "md" || ext === "markdown"
               ? `${PREVIEW_DOC_CSS}\n${mdToHtml(content)}`
               : `${PREVIEW_DOC_CSS}\n<pre>${escHtml(content)}</pre>`;
-        // A report that is (or embeds) a Mermaid diagram cannot render in the
-        // canvas — scripts are disabled — so hand the fenced block to the model
-        // to show in chat instead of opening a blank preview.
-        const flows = findMermaidFlows(doc);
-        if (flows.length > 0) {
+        const isPureDiagram =
+          ext === "mmd" ||
+          (!content.includes("#") &&
+            !content.includes("<h") &&
+            /^\s*(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|gitGraph)\b/m.test(
+              content,
+            ));
+
+        const flows = findMermaidFlows(content);
+        if (isPureDiagram && flows.length > 0) {
           return {
-            error:
-              "This document is a Mermaid diagram. The preview pane disables scripts, so it would render blank there — show it in chat instead:",
+            notice:
+              "This file is a standalone Mermaid diagram. The preview canvas disables scripts, so render it directly in chat using a fenced ```mermaid block:",
             mermaid: flows.join("\n\n"),
             path: abs,
           };
         }
-        const ok = ctx.openCanvas(doc, title ?? path.split(/[/\\]/).pop());
-        return ok
-          ? { ok: true, path: abs }
-          : { error: "preview surface unavailable", path: abs };
+
+        const paneTitle = title ?? (path.split(/[/\\]/).pop() || "Document");
+        const ok = ctx.openCanvas(doc, paneTitle);
+        if (ok) {
+          useArtifactsStore.getState().add(ctx.getSessionId() ?? "", {
+            kind: "file",
+            title: paneTitle,
+            payload: abs,
+          });
+          return {
+            ok: true,
+            path: abs,
+            ...(flows.length > 0
+              ? {
+                  hasMermaid: true,
+                  note: "Document opened in preview pane. Mermaid code blocks are rendered as syntax blocks; you can also emit the diagram in chat for interactive visualization.",
+                }
+              : {}),
+          };
+        }
+        return { error: "preview surface unavailable", path: abs };
       },
     }),
   } as const;

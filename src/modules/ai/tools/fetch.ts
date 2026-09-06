@@ -91,10 +91,22 @@ export function buildFetchTools() {
             url,
           );
         } catch (e) {
+          const errStr = String(e);
+          const isOffline =
+            /getaddrinfo|econnrefused|enetunreach|offline|dns|unreachable|fetch failed|timed out|network/i.test(
+              errStr,
+            );
           return {
-            error: String(e),
+            error: errStr,
             url,
-            hint: "Request failed or timed out. If the site is down, slow, or blocks scrapers, consider using web_search or curl via bash_run.",
+            ...(isOffline
+              ? {
+                  isOffline: true,
+                  hint: "Network request failed because the machine is offline or the host is unreachable. DO NOT loop on web_search or fetch. Continue the task using local repository files, documentation, and tools.",
+                }
+              : {
+                  hint: "Request failed or timed out. If the site is down, slow, or blocks scrapers, consider using web_search or curl via bash_run.",
+                }),
           };
         }
 

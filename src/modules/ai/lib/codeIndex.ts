@@ -227,6 +227,20 @@ const docFrequencies = new Map<string, number>();
 let totalChunksCount = 0;
 let totalTokensCount = 0;
 
+let indexedRoot: string | null = null;
+
+export function getIndexedRoot(): string | null {
+  return indexedRoot;
+}
+
+export function clearIndex(): void {
+  index.clear();
+  docFrequencies.clear();
+  totalChunksCount = 0;
+  totalTokensCount = 0;
+  indexedRoot = null;
+}
+
 export const INDEXABLE_EXTENSIONS = [
   ".ts",
   ".tsx",
@@ -249,28 +263,18 @@ export const INDEXABLE_EXTENSIONS = [
   ".css",
 ];
 
-const IGNORED_PATH_PARTS = [
-  "/node_modules/",
-  "\\node_modules\\",
-  "/target/",
-  "\\target\\",
-  "/dist/",
-  "\\dist\\",
-  "/dist-win/",
-  "\\dist-win\\",
-  "/.git/",
-  "\\.git\\",
-  "/.termigo/",
-  "\\.termigo\\",
-  "/.vscode/",
-  "\\.vscode\\",
-  "/build/",
-  "\\build\\",
-  "/coverage/",
-  "\\coverage\\",
-  "/.next/",
-  "\\.next\\",
-];
+const IGNORED_DIR_NAMES = new Set([
+  "node_modules",
+  "target",
+  "dist",
+  "dist-win",
+  ".git",
+  ".termigo",
+  ".vscode",
+  "build",
+  "coverage",
+  ".next",
+]);
 
 const IGNORED_FILENAMES = new Set([
   "package-lock.json",
@@ -280,10 +284,11 @@ const IGNORED_FILENAMES = new Set([
 ]);
 
 function shouldSkipPath(path: string): boolean {
-  for (const part of IGNORED_PATH_PARTS) {
-    if (path.includes(part)) return true;
+  const parts = path.split(/[/\\]/);
+  for (const part of parts) {
+    if (IGNORED_DIR_NAMES.has(part)) return true;
   }
-  const basename = path.split(/[/\\]/).pop() ?? "";
+  const basename = parts[parts.length - 1] ?? "";
   if (IGNORED_FILENAMES.has(basename)) return true;
   if (basename.endsWith(".min.js") || basename.endsWith(".min.css"))
     return true;
@@ -293,25 +298,32 @@ function shouldSkipPath(path: string): boolean {
 export async function indexWorkspace(
   root: string | null,
 ): Promise<{ files: number; chunks: number }> {
-  if (!root) return { files: 0, chunks: 0 };
+  if (!root) {
+    clearIndex();
+    return { files: 0, chunks: 0 };
+  }
   index.clear();
   docFrequencies.clear();
   totalChunksCount = 0;
   totalTokensCount = 0;
+  indexedRoot = root;
 
   let files = 0;
+  const seenFiles = new Set<string>();
 
   for (const ext of INDEXABLE_EXTENSIONS) {
     try {
       const result = await native.glob({ pattern: `**/*${ext}`, root });
       for (const hit of result.hits) {
+        if (seenFiles.has(hit.path)) continue;
+        seenFiles.add(hit.path);
         if (shouldSkipPath(hit.path)) continue;
         try {
           const read = await native.readFile(hit.path);
           if (read.kind !== "text" || !read.content) continue;
           if (read.size > 500_000) continue; // Skip huge generated files
 
-          const lines = read.content.split("\n");
+          const lines = read.content.replace(/\r\n/g, "\n").split("\n");
           const pieces = chunkLines(lines);
           const indexed: CodeChunk[] = [];
 
@@ -384,7 +396,7 @@ function extractCenteredSnippet(
 
   const half = Math.floor(windowSize / 2);
   let startIdx = Math.max(0, bestLine - half);
-  let endIdx = Math.min(lines.length, startIdx + windowSize);
+  const endIdx = Math.min(lines.length, startIdx + windowSize);
   if (endIdx - startIdx < windowSize) {
     startIdx = Math.max(0, endIdx - windowSize);
   }

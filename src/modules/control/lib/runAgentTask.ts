@@ -1,4 +1,4 @@
-// Start a plain agent task through the in-app agent — the frontend half of
+// Start a plain agent task through the in-app agent - the frontend half of
 // `termigo run "<task>"`. Unlike the pentest helpers there is no scope or run
 // store: the task is generic, and the chat transcript is its own record.
 //

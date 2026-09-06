@@ -26,6 +26,12 @@ export function isWindowsPath(p: string): boolean {
   return /^[a-zA-Z]:[\\/]/.test(p);
 }
 
+/** Extract the user's home directory prefix from a remote cwd path. */
+function remoteHomeFromCwd(cwd: string): string | null {
+  const m = cwd.match(/^(\/home\/[^/]+|\/root|\/Users\/[^/]+)/);
+  return m ? m[1] : null;
+}
+
 /**
  * Resolve a tool-supplied path against the active session.
  *
@@ -42,6 +48,24 @@ export function routePath(
   }
   if (rawPath.startsWith("/")) {
     return { kind: "remote", sessionId: remote.sessionId, path: rawPath };
+  }
+  if (rawPath === "~" || rawPath.startsWith("~/")) {
+    if (!remote.cwd) {
+      return {
+        kind: "error",
+        reason: `cannot resolve the relative path "${rawPath}": the remote shell has not reported a working directory yet. Pass an absolute remote path.`,
+      };
+    }
+    const home = remoteHomeFromCwd(remote.cwd);
+    if (!home) {
+      return {
+        kind: "error",
+        reason: `cannot resolve the home directory path "${rawPath}": remote home directory cannot be inferred from "${remote.cwd}". Pass an absolute remote path.`,
+      };
+    }
+    const sub = rawPath === "~" ? "" : rawPath.slice(2);
+    const resolved = sub ? `${home}/${sub}` : home;
+    return { kind: "remote", sessionId: remote.sessionId, path: resolved };
   }
   if (!remote.cwd) {
     return {

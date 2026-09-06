@@ -175,20 +175,44 @@ async function applyEdits(
     if (e.old_string.length === 0) {
       return { error: "old_string cannot be empty", path: abs };
     }
+
+    let targetOld = e.old_string;
+    let targetNew = e.new_string;
+
+    // Line-ending reconciliation: if the file uses CRLF but the edit uses LF (or vice versa),
+    // adapt the edit strings to match the file's line ending style.
+    if (
+      content.includes("\r\n") &&
+      !targetOld.includes("\r\n") &&
+      targetOld.includes("\n")
+    ) {
+      const crlfOld = targetOld.replace(/\n/g, "\r\n");
+      if (content.includes(crlfOld)) {
+        targetOld = crlfOld;
+        targetNew = targetNew.replace(/\r\n/g, "\n").replace(/\n/g, "\r\n");
+      }
+    } else if (!content.includes("\r\n") && targetOld.includes("\r\n")) {
+      const lfOld = targetOld.replace(/\r\n/g, "\n");
+      if (content.includes(lfOld)) {
+        targetOld = lfOld;
+        targetNew = targetNew.replace(/\r\n/g, "\n");
+      }
+    }
+
     if (e.replace_all) {
       const before = content;
-      content = content.split(e.old_string).join(e.new_string);
+      content = content.split(targetOld).join(targetNew);
       const occurrences =
         (before.length - content.length) /
-          (e.old_string.length - e.new_string.length || 1) || 0;
+          (targetOld.length - targetNew.length || 1) || 0;
       // Recover count via direct search to avoid divide-by-zero edge cases.
       let n = 0;
       let i = 0;
       while (true) {
-        const found = before.indexOf(e.old_string, i);
+        const found = before.indexOf(targetOld, i);
         if (found === -1) break;
         n++;
-        i = found + e.old_string.length;
+        i = found + targetOld.length;
       }
       if (n === 0) {
         return {
@@ -199,14 +223,14 @@ async function applyEdits(
       totalReplacements += n;
       void occurrences;
     } else {
-      const first = content.indexOf(e.old_string);
+      const first = content.indexOf(targetOld);
       if (first === -1) {
         return {
           error: diagnoseMismatch(content, e.old_string),
           path: abs,
         };
       }
-      const second = content.indexOf(e.old_string, first + 1);
+      const second = content.indexOf(targetOld, first + 1);
       if (second !== -1) {
         return {
           error:
@@ -216,8 +240,8 @@ async function applyEdits(
       }
       content =
         content.slice(0, first) +
-        e.new_string +
-        content.slice(first + e.old_string.length);
+        targetNew +
+        content.slice(first + targetOld.length);
       totalReplacements += 1;
     }
   }
@@ -332,7 +356,7 @@ export function buildEditTools(ctx: ToolContext) {
         if (!path || !path.trim()) {
           return {
             error:
-              "missing `path` — name the file to edit (and read_file it first).",
+              "missing `path` - name the file to edit (and read_file it first).",
             path: "",
           };
         }
@@ -342,7 +366,7 @@ export function buildEditTools(ctx: ToolContext) {
         if (!ctx.readCache.has(io.cacheKey(abs))) {
           return {
             error:
-              "must call read_file on this path first (read-before-edit invariant).",
+              `must call read_file on this path first (read-before-edit requirement). Call read_file("${abs}") before editing.`,
             path: abs,
           };
         }
@@ -379,7 +403,7 @@ export function buildEditTools(ctx: ToolContext) {
         if (!path || !path.trim()) {
           return {
             error:
-              "missing `path` — name the file to edit (and read_file it first).",
+              "missing `path` - name the file to edit (and read_file it first).",
             path: "",
           };
         }
@@ -389,7 +413,7 @@ export function buildEditTools(ctx: ToolContext) {
         if (!ctx.readCache.has(io.cacheKey(abs))) {
           return {
             error:
-              "must call read_file on this path first (read-before-edit invariant).",
+              `must call read_file on this path first (read-before-edit requirement). Call read_file("${abs}") before editing.`,
             path: abs,
           };
         }

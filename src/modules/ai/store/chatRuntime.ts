@@ -368,6 +368,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       }
     },
     onUsage: (delta) => {
+      transientRetryCount.delete(sessionId);
       // A request that came back with real headroom lets the learned budget
       // scale relax, so one overflow does not over-compact the model forever.
       noteSuccessfulRequest(
@@ -507,7 +508,24 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       // (it errored), so clear the in-flight marker: a later restart must not
       // read it as an interrupted run, and resume re-marks it.
       if (isConnectivityError(raw)) {
+        const modelId = useChatStore.getState().selectedModelId;
+        const provider = providerForModel(modelId);
+        const isLocalProvider =
+          provider === "ollama" ||
+          provider === "lmstudio" ||
+          provider === "mlx";
+
         if (scheduleTransientRetry(sessionId)) return;
+
+        if (isLocalProvider) {
+          useChatStore.getState().patchAgentMeta({
+            status: "error",
+            error: `Could not connect to local model daemon (${provider}). Ensure your local service is running, then click Try again - your work is preserved.`,
+          });
+          useChatStore.getState().syncRunMeta();
+          return;
+        }
+
         if (useChatStore.getState().activeSessionId === sessionId) {
           pendingReconnectSessions.add(sessionId);
         }
@@ -573,8 +591,7 @@ function providerForModel(modelId: string): ProviderId {
 
 export async function sendMessage(text: string): Promise<boolean> {
   const state = useChatStore.getState();
-  const sessionId = state.activeSessionId;
-  if (!sessionId) return false;
+  const sessionId = state.activeSessionId ?? state.newSession();
   if (
     providerNeedsKey(providerForModel(state.selectedModelId)) &&
     !getActiveProviderKey()
@@ -597,6 +614,7 @@ export async function sendParts(
   // A fresh user message supersedes a prior stop, so let it run.
   stopLatch.delete(sessionId);
   approvalResumeFailureCount.delete(sessionId);
+  transientRetryCount.delete(sessionId);
   const c = getOrCreateChat(sessionId);
   // After an error the run is not busy, but the SDK status can look stale
   // (still "submitted"), which would QUEUE the resume instead of sending it and

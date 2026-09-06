@@ -162,16 +162,44 @@ function sleep(signal: AbortSignal, ms: number): Promise<void> {
   });
 }
 
+/** Split long messages on newline/word boundaries so nothing is truncated. */
+function splitTelegramText(text: string, maxLen = 4000): string[] {
+  if (text.length <= maxLen) return [text];
+  const chunks: string[] = [];
+  let remaining = text;
+  while (remaining.length > 0) {
+    if (remaining.length <= maxLen) {
+      chunks.push(remaining);
+      break;
+    }
+    let cut = remaining.lastIndexOf("\n", maxLen);
+    if (cut <= 0) {
+      cut = remaining.lastIndexOf(" ", maxLen);
+    }
+    if (cut <= 0) {
+      cut = maxLen;
+    }
+    const chunk = remaining.slice(0, cut).trimEnd();
+    if (chunk.length > 0) chunks.push(chunk);
+    remaining = remaining.slice(cut).trimStart();
+  }
+  return chunks;
+}
+
 async function sendTelegram(
   chatId: number | string,
   text: string,
   signal: AbortSignal,
 ): Promise<void> {
-  await apiPost("sendMessage", { chat_id: chatId, text }, signal);
+  const chunks = splitTelegramText(text);
+  for (const chunk of chunks) {
+    if (signal.aborted) break;
+    await apiPost("sendMessage", { chat_id: chatId, text: chunk }, signal);
+  }
 }
 
 /**
- * Show the "typing…" bubble in the Telegram chat. The bubble lasts ~5s, so a
+ * Show the "typing..." bubble in the Telegram chat. The bubble lasts ~5s, so a
  * caller re-sends it on an interval while the agent is busy.
  */
 async function sendTyping(
@@ -621,9 +649,9 @@ function messageText(m: {
   return text.trim();
 }
 
-/** Telegram caps a message at 4096 chars; clamp so a long reply is not dropped. */
+/** Telegram caps a message at 4096 chars; chunking is preferred over lossy clamping. */
 function clampTelegramText(text: string): string {
-  return text.length > 4000 ? `${text.slice(0, 4000)}…` : text;
+  return text.length > 4000 ? `${text.slice(0, 4000)}...` : text;
 }
 
 /**
@@ -636,7 +664,7 @@ async function sendReplyWithDiagrams(
   text: string,
   signal: AbortSignal,
 ): Promise<void> {
-  await sendTelegram(chatId, clampTelegramText(text), signal);
+  await sendTelegram(chatId, text, signal);
   const { extractMermaidBlocks, renderMermaidToPng } = await import(
     "./mermaidImage"
   );
@@ -1349,4 +1377,6 @@ export const _testOnly = {
   pauseMirror,
   resumeMirror,
   getMirrorPauseCount: () => mirrorPauseCount,
+  splitTelegramText,
+  clampTelegramText,
 };

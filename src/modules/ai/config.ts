@@ -982,7 +982,7 @@ export function providerNeedsKey(id: ProviderId): boolean {
   return !KEYLESS_PROVIDERS.includes(id);
 }
 
-/** True for providers that accept an API key — required *or* optional.
+/** True for providers that accept an API key - required *or* optional.
  *  Used by Settings to decide whether to render a key card at all. */
 export function providerSupportsKey(id: ProviderId): boolean {
   if (providerNeedsKey(id)) return true;
