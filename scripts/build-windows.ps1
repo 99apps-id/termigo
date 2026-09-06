@@ -1,5 +1,5 @@
 # Termigo Windows Build Script
-# Builds Termigo for Windows without bumping the version (maintains v0.9.8)
+# Builds Termigo for Windows without bumping the version (maintains current version)
 
 $ErrorActionPreference = "Stop"
 

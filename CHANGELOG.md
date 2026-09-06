@@ -8,6 +8,32 @@ The last tagged public release before this cycle was **v0.9.5**; v0.9.6 and
 v0.9.7 were built and validated locally but never tagged. **v0.9.8** therefore
 carries everything shipped since v0.9.5.
 
+## [0.9.9] - 2026-09-06
+
+### Added
+
+- **RAG codebase search and grounding**
+  - BM25-ranked hybrid retrieval for repository symbols and files.
+  - Strict grounding anti-hallucination enforcement before code mutations.
+- **Agent autonomy enhancements**
+  - Loop circuit breaker and automatic command output truncation.
+  - Expanded filesystem inspection and autonomous harness profile controls.
+- **WSL and pentest pipeline integration**
+  - WSL path translation across pentest tools and pipeline context piping.
+  - Guardrail policies configuration interface.
+
+### Fixed
+
+- **File encoding and compatibility**
+  - Read non-UTF-8 (Windows-1252) and UTF-16 BOM text files cleanly without panics.
+- **Agent trajectory and updater noise**
+  - Eliminate false positive error reporting on trajectories and quiet noisy updater logs.
+  - Stream watchdog logging for prolonged model executions.
+  - Use explorer and launch cwd for workspace root resolution.
+- **CI and cross-platform build**
+  - Gate macOS launch imports in Rust backend to keep Linux and Windows builds warning-free.
+  - Configure pnpm 11 workspace dependencies and driver scripts for e2e runner.
+
 ## [0.9.8] - 2026-09-05
 
 ### Added

@@ -3,15 +3,16 @@ pub mod modules;
 pub mod settings_window;
 
 use std::sync::Mutex;
-use tauri::{Emitter, Manager};
+use tauri::Manager;
+#[cfg(target_os = "macos")]
+use tauri::Emitter;
 #[cfg(target_os = "macos")]
 use tauri::WindowEvent;
 use tauri_plugin_window_state::StateFlags;
 
-use launch::{
-    get_launch_dir, get_launch_files, parse_launch_target, resolve_launch_target, LaunchDir,
-    LaunchEntry, LaunchFiles,
-};
+use launch::{get_launch_dir, get_launch_files, parse_launch_target, LaunchDir, LaunchFiles};
+#[cfg(target_os = "macos")]
+use launch::{resolve_launch_target, LaunchEntry};
 use modules::{
     agent, backup, browser, chatgpt_auth, control, extensions, fs, git, history, lsp, mcp, net,
     pty, secrets, shell, sql, ssh, system, workspace,
