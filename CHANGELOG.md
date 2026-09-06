@@ -33,6 +33,7 @@ carries everything shipped since v0.9.5.
 - **CI and cross-platform build**
   - Gate macOS launch imports in Rust backend to keep Linux and Windows builds warning-free.
   - Configure pnpm 11 workspace dependencies and driver scripts for e2e runner.
+  - Synchronize pnpm-lock.yaml dependency overrides for pnpm 11 frozen-lockfile verification.
 
 ## [0.9.8] - 2026-09-05
 

@@ -176,9 +176,19 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   auto-retry rather than a dead error card.
 - **A run cut off by a restart is recoverable.** The transcript is persisted,
   and when the app reopens the interrupted session is brought back with a
-  **Resume** row — the budget ladder is kept, so continuing does not restart
+  **Resume** row - the budget ladder is kept, so continuing does not restart
   the task from scratch. (A deliberate stop or a guard that tripped offers the
   same continue path.)
+- **Grounded RAG and hallucination defense.** Codebase exploration combines
+  BM25 lexical ranking with symbol retrieval to locate relevant references
+  swiftly. The agent enforces grounding validation before proposing edits:
+  paths and function references must resolve against real workspace files,
+  preventing hallucinated imports or phantom paths.
+- **Autonomous execution guards.** A loop circuit breaker detects repetitive
+  no-progress iterations early, while command outputs are automatically truncated
+  to prevent massive terminal dumps from saturating the context window.
+  Autonomous harness profiles let you fine-tune agent behavior between
+  cautious interactive pair-programming and unattended autonomous tasks.
 - **You can read the request, not infer it.** Turn on `Capture requests`
   (Settings → Agents → Diagnostics) and an inspector appears in the AI bar
   holding each request as assembled: the system prompt, the message history

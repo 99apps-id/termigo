@@ -106,6 +106,9 @@ The themes below frame every scope decision.
 - [x] Per-run diagnostics line and an opt-in request inspector
 - [x] Workspace file picker
 - [x] Auto-compact for long context
+- [x] Hybrid RAG codebase search: BM25-ranked retrieval across repository symbols and files with grounding anti-hallucination verification
+- [x] Agent autonomy controls: loop circuit breaker, automatic output truncation for verbose logs, and configurable autonomous harness profiles
+- [x] WSL path translation across pentest tools, pipeline context piping, and guardrail policies interface
 
 ### SSH and remote
 

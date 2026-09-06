@@ -264,16 +264,22 @@ fn read_file_sync(p: &Path, force: bool) -> Result<ReadResult, String> {
 
 fn try_decode_utf16(bytes: &[u8]) -> Option<String> {
     if bytes.len() >= 2 && bytes.starts_with(&[0xFF, 0xFE]) {
-        let u16_chars: Vec<u16> = bytes[2..]
-            .chunks_exact(2)
-            .map(|c| u16::from_le_bytes([c[0], c[1]]))
-            .collect();
+        let payload = &bytes[2..];
+        let mut u16_chars = Vec::with_capacity(payload.len() / 2);
+        let mut i = 0;
+        while i + 1 < payload.len() {
+            u16_chars.push(u16::from_le_bytes([payload[i], payload[i + 1]]));
+            i += 2;
+        }
         String::from_utf16(&u16_chars).ok()
     } else if bytes.len() >= 2 && bytes.starts_with(&[0xFE, 0xFF]) {
-        let u16_chars: Vec<u16> = bytes[2..]
-            .chunks_exact(2)
-            .map(|c| u16::from_be_bytes([c[0], c[1]]))
-            .collect();
+        let payload = &bytes[2..];
+        let mut u16_chars = Vec::with_capacity(payload.len() / 2);
+        let mut i = 0;
+        while i + 1 < payload.len() {
+            u16_chars.push(u16::from_be_bytes([payload[i], payload[i + 1]]));
+            i += 2;
+        }
         String::from_utf16(&u16_chars).ok()
     } else {
         None
