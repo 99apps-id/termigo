@@ -976,7 +976,9 @@ export async function runAgentStream(opts: RunAgentOptions) {
   let stallNotice: ReturnType<typeof setTimeout> | null = resumingApproval
     ? null
     : setTimeout(() => {
-        opts.onStep?.("The model is taking a while to respond — still waiting…");
+        opts.onStep?.(
+          "The model is taking a while to respond — still waiting…",
+        );
       }, 30_000);
   const clearFirstStepTimer = (): void => {
     if (firstStepTimer) {
@@ -1320,7 +1322,9 @@ export async function runAgentStream(opts: RunAgentOptions) {
           abortController.abort(new Error("model did not respond within 90s"));
         }, 90_000);
         stallNotice = setTimeout(() => {
-          opts.onStep?.("The model is taking a while to respond — still waiting…");
+          opts.onStep?.(
+            "The model is taking a while to respond — still waiting…",
+          );
         }, 30_000);
       }
       if (opts.onStep) {
@@ -1408,7 +1412,11 @@ export async function runAgentStream(opts: RunAgentOptions) {
           );
         }
         circuitBreakerState = evaluateCircuitBreaker(
-          calls as Array<{ toolName: string; input: unknown; toolCallId?: string }>,
+          calls as Array<{
+            toolName: string;
+            input: unknown;
+            toolCallId?: string;
+          }>,
           cbResultsMap,
           circuitBreakerState,
         );
