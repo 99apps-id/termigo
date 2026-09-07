@@ -16,6 +16,7 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
     getMirrorPauseCount,
     splitTelegramText,
     clampTelegramText,
+    runBusy,
   } = _testOnly;
 
   beforeEach(() => {
@@ -95,4 +96,22 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
       expect(clampTelegramText(longText).endsWith("...")).toBe(true);
     });
   });
+
+  describe("runBusy detection", () => {
+    it("recognizes in-flight chat statuses as busy", () => {
+      expect(runBusy("submitted", "idle")).toBe(true);
+      expect(runBusy("streaming", "idle")).toBe(true);
+      expect(runBusy("ready", "idle")).toBe(false);
+      expect(runBusy("", "idle")).toBe(false);
+    });
+
+    it("recognizes in-flight app statuses as busy", () => {
+      expect(runBusy("ready", "thinking")).toBe(true);
+      expect(runBusy("ready", "streaming")).toBe(true);
+      expect(runBusy("ready", "awaiting-approval")).toBe(true);
+      expect(runBusy("ready", "error")).toBe(false);
+      expect(runBusy("ready", "idle")).toBe(false);
+    });
+  });
 });
+

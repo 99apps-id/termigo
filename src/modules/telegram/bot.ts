@@ -549,19 +549,23 @@ async function publishProgress(
         todosStore.useTodosStore.getState().bySession[sessionId]?.items ?? [];
       const now = Date.now();
 
-      // Keep the "typing…" bubble alive while the run is busy (thinking,
+      // Keep the "typing..." bubble alive while the run is busy (thinking,
       // streaming, or awaiting approval).
+      const chat = store.getChat(sessionId);
+      const chatStatus = chat?.status ?? "";
       const busy =
+        runBusy(chatStatus, status) ||
         status === "thinking" ||
         status === "streaming" ||
-        status === "awaiting-approval";
-      if (busy && now - lastTypingAt >= 3500) {
+        status === "awaiting-approval" ||
+        progressMessageId === null;
+
+      if (busy && now - lastTypingAt >= 3000) {
         lastTypingAt = now;
         await sendTyping(chatId, signal).catch(() => {});
       }
 
       // Collect tool parts from the active assistant message
-      const chat = store.getChat(sessionId);
       const messages = chat?.messages ?? [];
       const lastAssistant = [...messages]
         .reverse()
@@ -572,7 +576,7 @@ async function publishProgress(
 
       // Format compact live progress
       const liveText = formatLiveProgress({
-        status,
+        status: status === "idle" && busy ? "thinking" : status,
         round: meta.round,
         step,
         tools: toolSummaries,
@@ -583,6 +587,9 @@ async function publishProgress(
         progressMessageId = await sendProgressMessage(chatId, liveText, signal);
         lastLiveText = liveText;
         lastSentAt = now;
+        lastTypingAt = now;
+        // Telegram client clears typing indicator when a message is received; re-send typing immediately.
+        await sendTyping(chatId, signal).catch(() => {});
       } else if (liveText !== lastLiveText && now - lastSentAt >= 1500) {
         lastLiveText = liveText;
         await editProgressMessage(chatId, progressMessageId, liveText, signal);
@@ -832,6 +839,13 @@ async function runMirror(signal: AbortSignal): Promise<void> {
           await sendReplyWithDiagrams(chatId, text, signal).catch(() => {});
           markMessageSeen(m.id, sessionId, m.role, text);
         }
+
+        if (mirrorPauseCount === 0) {
+          const chatStatus = chat?.status ?? "";
+          if (runBusy(chatStatus, state.agentMeta.status)) {
+            await sendTyping(chatId, signal).catch(() => {});
+          }
+        }
       }
     } catch {
       // Mirroring is best-effort; never let it break the long-poll loop.
@@ -864,33 +878,36 @@ async function dispatchAndStream(
     // Pause the mirror before injecting the user message.
     pauseMirror();
     try {
-      const accepted = await runtime.sendMessage(text);
-      if (!accepted) {
-        await sendTelegram(
-          chatId,
-          "Could not start the agent run - check the model / API key.",
-          signal,
-        );
-        return;
-      }
-
-      // Immediately mark the freshly-injected user message as seen and Telegram-origin.
-      const chatAfterSend = store.getChat(sessionId);
-      for (const m of chatAfterSend?.messages ?? []) {
-        if (m.id && !priorIds.has(m.id)) {
-          markMessageSeen(m.id, sessionId, m.role, messageText(m));
-          telegramOriginMessageIds.add(m.id);
-        }
-      }
-
-      // Stream live progress alongside the run, superseding any prior stream.
+      // Stream live progress and continuous typing alongside the run, superseding any prior stream.
+      // Started BEFORE awaiting sendMessage so typing and live status appear immediately.
       const progressCtl = new AbortController();
       progressCtrls.get(chatId)?.abort();
       progressCtrls.set(chatId, progressCtl);
       void publishProgress(chatId, sessionId, progressCtl.signal).catch(
         () => {},
       );
+
       try {
+        const accepted = await runtime.sendMessage(text);
+        if (!accepted) {
+          progressCtl.abort();
+          await sendTelegram(
+            chatId,
+            "Could not start the agent run - check the model / API key.",
+            signal,
+          );
+          return;
+        }
+
+        // Immediately mark the freshly-injected user message as seen and Telegram-origin.
+        const chatAfterSend = store.getChat(sessionId);
+        for (const m of chatAfterSend?.messages ?? []) {
+          if (m.id && !priorIds.has(m.id)) {
+            markMessageSeen(m.id, sessionId, m.role, messageText(m));
+            telegramOriginMessageIds.add(m.id);
+          }
+        }
+
         const reply = await waitForReply(store, signal, sessionId, baseline);
         await sendReplyWithDiagrams(chatId, reply, signal);
 
@@ -946,6 +963,7 @@ function startTelegramDispatch(
   void (async () => {
     try {
       await sendTelegram(chatId, ackText, signal).catch(() => {});
+      await sendTyping(chatId, signal).catch(() => {});
       await dispatchAndStream(text, chatId, signal);
     } catch (e) {
       if (!signal.aborted) {
@@ -1452,4 +1470,5 @@ export const _testOnly = {
   getMirrorPauseCount: () => mirrorPauseCount,
   splitTelegramText,
   clampTelegramText,
+  runBusy,
 };
