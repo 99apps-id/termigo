@@ -1019,6 +1019,9 @@ export async function runAgentStream(opts: RunAgentOptions) {
       stallNotice = null;
     }
   };
+  abortController.signal.addEventListener("abort", clearFirstStepTimer, {
+    once: true,
+  });
   // Three guards, any of which ends the loop. Each wrapper records which one
   // tripped first so the UI can explain the stop instead of offering the same
   // blank "continue" for every cause.
@@ -1481,6 +1484,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
       }
     },
     onFinish: (result) => {
+      clearFirstStepTimer();
       opts.onStep?.(null);
       const finishReason =
         (result as { finishReason?: string } | undefined)?.finishReason ?? "";
@@ -1577,6 +1581,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
     // onAbort fires on exactly that path and closes it out. finishRun ignores
     // a run that is already finished, so the two callbacks cannot fight.
     onAbort: () => {
+      clearFirstStepTimer();
       opts.onStep?.(null);
       void logWarn(
         `[ai] stream aborted (runId=${trajectoryRunId}, modelId=${modelId})`,

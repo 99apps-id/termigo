@@ -24,6 +24,11 @@ carries everything shipped since v0.9.5.
   - General memory entries are ranked and filtered by query keyword overlap to protect system prompt headroom.
   - All `[GOTCHA]` and safety constraint entries are unconditionally preserved.
 
+### Fixed
+
+- **Approval watchdog timer leak**
+  - Clear the 90-second post-approval watchdog timer on stream completion (`onFinish`), user cancellation (`onAbort`), and abort controller events, eliminating spurious timeout warnings and background abort signals.
+
 ## [0.9.9] - 2026-09-06
 
 ### Added
