@@ -223,6 +223,75 @@ export function escapeHtml(text: string): string {
 }
 
 /**
+ * Formats a Markdown table into an aligned, monospace text table suitable
+ * for Telegram's <pre> blocks.
+ */
+export function formatMarkdownTable(markdownTable: string): string {
+  const lines = markdownTable
+    .trim()
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  if (lines.length < 2) return markdownTable;
+
+  const parseRow = (line: string): string[] => {
+    let row = line;
+    if (row.startsWith("|")) row = row.slice(1);
+    if (row.endsWith("|")) row = row.slice(0, -1);
+    return row
+      .replace(/\\\|/g, "\x00PIPE\x00")
+      .split("|")
+      .map((c) => c.replace(/\x00PIPE\x00/g, "|").trim());
+  };
+
+  const rows = lines.map(parseRow);
+  if (rows.length < 2) return markdownTable;
+
+  // Verify the second row is a separator line (e.g. ---, :---:, etc.)
+  const isSeparator = rows[1].every((c) => /^:?-+:?$/.test(c));
+  if (!isSeparator) return markdownTable;
+
+  const header = rows[0];
+  const dataRows = rows.slice(2);
+  const colCount = Math.max(
+    ...rows.filter((_, idx) => idx !== 1).map((r) => r.length),
+  );
+
+  // Calculate maximum visible length per column
+  const colWidths: number[] = Array(colCount).fill(0);
+  for (let c = 0; c < colCount; c++) {
+    colWidths[c] = (header[c] ?? "").length;
+    for (const r of dataRows) {
+      colWidths[c] = Math.max(colWidths[c], (r[c] ?? "").length);
+    }
+    colWidths[c] = Math.max(colWidths[c], 3);
+  }
+
+  const pad = (str: string, len: number) =>
+    str + " ".repeat(Math.max(0, len - str.length));
+
+  const topBorder =
+    "┌─" + colWidths.map((w) => "─".repeat(w)).join("─┬─") + "─┐";
+  const headerLine =
+    "│ " +
+    colWidths.map((_, i) => pad(header[i] ?? "", colWidths[i])).join(" │ ") +
+    " │";
+  const midBorder =
+    "├─" + colWidths.map((w) => "─".repeat(w)).join("─┼─") + "─┤";
+  const dataLines = dataRows.map(
+    (r) =>
+      "│ " +
+      colWidths.map((_, i) => pad(r[i] ?? "", colWidths[i])).join(" │ ") +
+      " │",
+  );
+  const botBorder =
+    "└─" + colWidths.map((w) => "─".repeat(w)).join("─┴─") + "─┘";
+
+  return [topBorder, headerLine, midBorder, ...dataLines, botBorder].join("\n");
+}
+
+/**
  * Converts CommonMark / GitHub Markdown to Telegram-compatible HTML formatting:
  * - **bold** -> <b>bold</b>
  * - *italic* or _italic_ -> <i>italic</i>
@@ -230,6 +299,7 @@ export function escapeHtml(text: string): string {
  * - ~~strikethrough~~ -> <s>strikethrough</s>
  * - `inline code` -> <code>inline code</code>
  * - ```code block``` -> <pre><code>code block</code></pre>
+ * - Markdown tables -> clean monospace box tables inside <pre><code>...</code></pre>
  * - [link](url) -> <a href="url">link</a>
  * - Unicode emojis pass through natively
  */
@@ -267,7 +337,22 @@ export function markdownToTelegramHtml(markdown: string): string {
     return `\x00IC_${idx}\x00`;
   });
 
-  // 4. Escape remaining HTML entities so raw <, >, & do not break Telegram parsing
+  // 4. Extract and format markdown tables into preformatted code blocks
+  text = text.replace(
+    /(?:^|\n)((?:\|[^\r\n]+\|\r?\n?)+)/g,
+    (fullMatch, tableBlock: string) => {
+      const formatted = formatMarkdownTable(tableBlock);
+      if (formatted !== tableBlock) {
+        const idx = codeBlocks.length;
+        const escaped = escapeHtml(formatted);
+        codeBlocks.push(`<pre><code>${escaped}</code></pre>`);
+        return `\n\x00CB_${idx}\x00\n`;
+      }
+      return fullMatch;
+    },
+  );
+
+  // 5. Escape remaining HTML entities so raw <, >, & do not break Telegram parsing
   text = escapeHtml(text);
 
   // 5. Allow explicit user HTML tags: <b>, <i>, <u>, <s>, <code>, <pre>, <blockquote>

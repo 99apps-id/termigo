@@ -3,6 +3,7 @@ import {
   escapeHtml,
   extractToolSummaries,
   formatLiveProgress,
+  formatMarkdownTable,
   markdownToTelegramHtml,
   summarizeToolInput,
   summarizeToolOutput,
@@ -257,5 +258,67 @@ describe("progressFormat", () => {
       expect(result).toContain('<a href="https://example.com">website</a>');
       expect(result).toContain("✨");
     });
+
+    it("converts markdown tables to monospace preformatted box tables", () => {
+      const input = [
+        "Berikut hasil pemeriksaan:",
+        "| Service | Status | Port |",
+        "| --- | --- | --- |",
+        "| Postgres | Active | 5432 |",
+        "| Redis | Inactive | 6379 |",
+        "Semua layanan terdeteksi.",
+      ].join("\n");
+
+      const result = markdownToTelegramHtml(input);
+      expect(result).toContain("Berikut hasil pemeriksaan:");
+      expect(result).toContain("<pre><code>┌─");
+      expect(result).toContain("│ Service");
+      expect(result).toContain("│ Postgres");
+      expect(result).toContain("└─");
+      expect(result).toContain("Semua layanan terdeteksi.");
+    });
+  });
+
+  describe("formatMarkdownTable", () => {
+    it("converts standard markdown table to box-drawing monospace table", () => {
+      const md = [
+        "| Name | Age | City |",
+        "| --- | :---: | ---: |",
+        "| Alice | 30 | Jakarta |",
+        "| Bob | 25 | Bandung |",
+      ].join("\n");
+
+      const table = formatMarkdownTable(md);
+      const lines = table.split("\n");
+      expect(lines).toHaveLength(6);
+      expect(lines[0]).toMatch(/^┌─.+─┐$/);
+      expect(lines[1]).toContain("Name");
+      expect(lines[2]).toMatch(/^├─.+─┤$/);
+      expect(lines[3]).toContain("Alice");
+      expect(lines[4]).toContain("Bob");
+      expect(lines[5]).toMatch(/^└─.+─┘$/);
+    });
+
+    it("handles escaped pipes inside cells correctly", () => {
+      const md = [
+        "| Pattern | Meaning |",
+        "| --- | --- |",
+        "| a \\| b | OR condition |",
+      ].join("\n");
+
+      const table = formatMarkdownTable(md);
+      expect(table).toContain("a | b");
+      expect(table).toContain("OR condition");
+    });
+
+    it("returns original text if separator row is missing", () => {
+      const invalid = "| Col1 | Col2 |\n| Val1 | Val2 |";
+      expect(formatMarkdownTable(invalid)).toBe(invalid);
+    });
+
+    it("returns original text for non-table strings", () => {
+      expect(formatMarkdownTable("just plain text")).toBe("just plain text");
+    });
   });
 });
+
