@@ -6,7 +6,7 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { getTelegramToken } from "./keyring";
+import { getTelegramOwner, getTelegramToken } from "./keyring";
 
 export type TelegramBotState = {
   enabled: boolean;
@@ -26,7 +26,7 @@ export type TelegramBotState = {
 
 export const useTelegramStore = create<TelegramBotState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       enabled: false,
       online: false,
       hasToken: false,
@@ -39,7 +39,19 @@ export const useTelegramStore = create<TelegramBotState>()(
       setHasToken: (v) => set({ hasToken: v }),
       refresh: async () => {
         const token = await getTelegramToken();
-        set({ hasToken: !!token });
+        const owner = await getTelegramOwner();
+        const hasToken = !!token;
+        const cur = get();
+        const raw =
+          typeof localStorage !== "undefined"
+            ? localStorage.getItem("termigo-telegram")
+            : null;
+        const shouldEnable = hasToken && (cur.enabled || !raw);
+        set({
+          hasToken,
+          ...(shouldEnable ? { enabled: true } : {}),
+          ...(owner && !cur.chatId ? { chatId: owner } : {}),
+        });
       },
     }),
     {

@@ -17,6 +17,18 @@ export async function getTelegramToken(): Promise<string | null> {
   }
 }
 
+export async function getTelegramOwner(): Promise<string | null> {
+  try {
+    const v = await invoke<string | null>("secrets_get", {
+      service: SERVICE,
+      account: "owner",
+    });
+    return v && v.length > 0 ? v : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function setTelegramToken(token: string): Promise<void> {
   const t = token.trim();
   if (!t) throw new Error("Token is empty");
