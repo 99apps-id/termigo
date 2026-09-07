@@ -29,7 +29,7 @@ pnpm build
 if ($LASTEXITCODE -ne 0) { throw "frontend build failed" }
 
 Write-Host "==> Building Tauri Windows application..." -ForegroundColor Cyan
-pnpm tauri build
+pnpm tauri build --bundles nsis msi
 if ($LASTEXITCODE -ne 0) { throw "tauri build failed" }
 
 $TargetRelease = Join-Path $RootDir "src-tauri\target\release"
