@@ -451,6 +451,7 @@ async function buildStatus(): Promise<string> {
     `Model: ${await modelLabel(model)}`,
     `Agent: ${meta.status}`,
     `Enabled: ${store.enabled ? "yes" : "no"}`,
+    `Paired: ${store.chatId ? `yes (ID: ${store.chatId})` : "no (open to all chats)"}`,
     store.lastError ? `Error: ${store.lastError}` : null,
   ]
     .filter(Boolean)
@@ -1045,6 +1046,8 @@ function startTelegramDispatch(
 
 const HELP = [
   "/status - bot + agent status",
+  "/pair - lock bot to this chat ID (only you can access)",
+  "/unpair - unlock bot from this chat ID",
   "/query <question> - read-only question (or just type the question)",
   "/run <task> - run a task in the agent",
   "/approve - approve all pending actions",
@@ -1215,6 +1218,32 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
     case "/status":
       await sendTelegram(chatId, await buildStatus(), signal);
       return;
+    case "/pair": {
+      const curOwner = useTelegramStore.getState().chatId;
+      if (curOwner && String(curOwner) !== String(chatId)) {
+        return;
+      }
+      useTelegramStore.getState().setChatId(String(chatId));
+      await sendTelegram(
+        chatId,
+        `Paired successfully. This bot is now locked to your chat ID (${chatId}). Messages from other chats will be ignored.`,
+        signal,
+      );
+      return;
+    }
+    case "/unpair": {
+      const curOwner = useTelegramStore.getState().chatId;
+      if (curOwner && String(curOwner) !== String(chatId)) {
+        return;
+      }
+      useTelegramStore.getState().setChatId(null);
+      await sendTelegram(
+        chatId,
+        "Bot has been unpaired. Any chat can now interact with this bot.",
+        signal,
+      );
+      return;
+    }
     case "/help":
       await sendTelegram(chatId, HELP, signal);
       return;
