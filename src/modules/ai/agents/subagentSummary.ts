@@ -55,3 +55,62 @@ export async function synthesizeSummary(
     return "";
   }
 }
+
+/**
+ * Detect whether a returned subagent summary is actually an unfinished
+ * sentence (e.g. pre-tool thought cut off by step exhaustion) or a garbled
+ * stream of pseudo tool-calls emitted by an interrupted model.
+ */
+export function isUnfinishedOrGarbledSummary(
+  summary: string,
+  result: {
+    steps?: Array<{
+      toolCalls?: Array<unknown>;
+      finishReason?: string;
+      text?: string;
+    }>;
+  },
+  maxSteps: number,
+): boolean {
+  const trimmed = (summary ?? "").trim();
+  if (!trimmed) return true;
+
+  const steps = result.steps ?? [];
+  const lastStep = steps[steps.length - 1];
+  const lastStepHasToolCalls = Boolean(
+    lastStep?.toolCalls && lastStep.toolCalls.length > 0,
+  );
+  const hitStepLimit = steps.length >= maxSteps;
+
+  // If the run ended with an active tool call or step cap, check if the text
+  // was merely a brief pre-tool sentence (e.g. "Let me check ...:")
+  if (lastStepHasToolCalls || hitStepLimit) {
+    if (/:$/.test(trimmed) || trimmed.length < 120) {
+      return true;
+    }
+  }
+
+  // Hallucinated pseudo tool tags or simulated tool outputs
+  if (
+    /<(?:tool_call|function|tool_code)[\s>]/i.test(trimmed) ||
+    /<\/(?:tool_call|function|tool_code)>/i.test(trimmed) ||
+    /\bread_file\s*\(\s*\{/i.test(trimmed) ||
+    /\b(?:list_directory|bash_run|grep|glob)\s*\(\s*\{/i.test(trimmed)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Remove raw pseudo-tool tags from text if synthesis fallback is needed.
+ */
+export function sanitizeGarbledSummary(text: string): string {
+  if (!text) return "";
+  return text
+    .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, "")
+    .replace(/<function[\s\S]*?<\/function>/gi, "")
+    .replace(/<\/?(?:tool_call|function|tool_code)>/gi, "")
+    .trim();
+}

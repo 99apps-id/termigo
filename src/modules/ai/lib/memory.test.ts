@@ -1,5 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("@tauri-apps/api/path", () => ({
+  homeDir: vi.fn().mockResolvedValue("/mock/home"),
+}));
+
 import {
+  forgetFact,
   formatMemory,
   isDuplicate,
   MAX_FACT_CHARS,
@@ -9,6 +15,7 @@ import {
   normalizeFact,
   parseMemory,
   prune,
+  rememberFact,
   type MemoryEntry,
 } from "./memory";
 
@@ -102,3 +109,144 @@ describe("prompt block", () => {
     );
   });
 });
+
+describe("gotchas, global memory, and relevance in memoryBlock", () => {
+  it("partitions gotchas into their own section", () => {
+    const block = memoryBlock([
+      entry("Database runs on port 5432."),
+      entry("[GOTCHA] Never run drop database on staging."),
+      entry("Always avoid modifying generated types."),
+    ]);
+    expect(block).toContain("AVOIDED MISTAKES & TRAPS (GOTCHAS)");
+    expect(block).toContain("[GOTCHA] Never run drop database on staging.");
+    expect(block).toContain("Always avoid modifying generated types.");
+    expect(block).toContain("PROJECT CONVENTIONS & FACTS");
+    expect(block).toContain("Database runs on port 5432.");
+  });
+
+  it("includes global conventions when globalEntries are present", () => {
+    const block = memoryBlock(
+      [entry("Project fact.")],
+      [
+        entry("[GOTCHA] Global trap to avoid."),
+        entry("User prefers tabs over spaces."),
+      ],
+    );
+    expect(block).toContain("GLOBAL CONVENTIONS (~/.termigo/memory.md)");
+    expect(block).toContain("Global gotchas and avoided traps:");
+    expect(block).toContain("[GOTCHA] Global trap to avoid.");
+    expect(block).toContain("Global preferences:");
+    expect(block).toContain("User prefers tabs over spaces.");
+  });
+
+  it("ranks general facts by keyword match against query while keeping gotchas", () => {
+    const facts = [
+      entry("Fact about auth token verification."),
+      entry("Fact about payment stripe webhook."),
+      entry("Fact about database postgres migrations."),
+      entry("[GOTCHA] Do not restart redis without backup."),
+    ];
+
+    const block = memoryBlock(facts, [], "How does stripe webhook auth work?");
+    // Gotchas are always kept
+    expect(block).toContain("[GOTCHA] Do not restart redis without backup.");
+    // High relevance facts appear
+    expect(block).toContain("Fact about auth token verification.");
+    expect(block).toContain("Fact about payment stripe webhook.");
+  });
+});
+
+describe("rememberFact and forgetFact with scopes", () => {
+  it("remembers facts into project memory", async () => {
+    const { native } = await import("./native");
+    const writtenFiles = new Map<string, string>();
+    vi.spyOn(native, "readFile").mockImplementation(async (p) => {
+      const c = writtenFiles.get(p);
+      if (c) return { kind: "text", content: c, size: c.length };
+      return { kind: "text", content: "", size: 0 };
+    });
+    vi.spyOn(native, "writeFile").mockImplementation(async (p, content) => {
+      writtenFiles.set(p, content);
+    });
+    vi.spyOn(native, "createDir").mockResolvedValue(undefined as unknown as void);
+
+    const outcome = await rememberFact(
+      "/workspace",
+      "Internal imports must use @/ alias.",
+      "2026-08-15",
+      "project",
+    );
+    expect(outcome).toEqual({
+      stored: true,
+      total: 1,
+      scope: "project",
+    });
+    expect(writtenFiles.get("/workspace/.termigo/memory.md")).toContain(
+      "Internal imports must use @/ alias.",
+    );
+
+    // Duplicate check
+    const dup = await rememberFact(
+      "/workspace",
+      "Internal imports must use @/ alias.",
+      "2026-08-15",
+      "project",
+    );
+    expect(dup).toEqual({ stored: false, reason: "already remembered" });
+
+    // Forget fact
+    const forgot = await forgetFact(
+      "/workspace",
+      "Internal imports must use @/ alias.",
+      "project",
+    );
+    expect(forgot.removed).toBe(true);
+    expect(forgot.total).toBe(0);
+  });
+
+  it("remembers and forgets facts in global memory", async () => {
+    const { native } = await import("./native");
+    const writtenFiles = new Map<string, string>();
+    vi.spyOn(native, "readFile").mockImplementation(async (p) => {
+      const c = writtenFiles.get(p);
+      if (c) return { kind: "text", content: c, size: c.length };
+      return { kind: "text", content: "", size: 0 };
+    });
+    vi.spyOn(native, "writeFile").mockImplementation(async (p, content) => {
+      writtenFiles.set(p, content);
+    });
+    vi.spyOn(native, "createDir").mockResolvedValue(undefined as unknown as void);
+
+    const outcome = await rememberFact(
+      null,
+      "Always use TypeScript strict mode across all projects.",
+      "2026-08-15",
+      "global",
+    );
+    expect(outcome.stored).toBe(true);
+    if (outcome.stored) {
+      expect(outcome.scope).toBe("global");
+      expect(outcome.total).toBe(1);
+    }
+
+    const dup = await rememberFact(
+      null,
+      "Always use TypeScript strict mode across all projects.",
+      "2026-08-15",
+      "global",
+    );
+    expect(dup).toEqual({
+      stored: false,
+      reason: "already remembered globally",
+    });
+
+    const forgot = await forgetFact(
+      null,
+      "Always use TypeScript strict mode across all projects.",
+      "global",
+    );
+    expect(forgot.removed).toBe(true);
+    expect(forgot.total).toBe(0);
+  });
+});
+

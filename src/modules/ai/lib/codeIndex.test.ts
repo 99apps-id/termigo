@@ -7,6 +7,10 @@ import {
   INDEXABLE_EXTENSIONS,
   chunkLines,
   findScopeHeader,
+  clearIndex,
+  CODE_INDEX_CACHE_REL_PATH,
+  saveIndexCache,
+  loadIndexCache,
 } from "./codeIndex";
 
 describe("tokenize", () => {
@@ -94,3 +98,65 @@ describe("syntax-aware chunkLines and findScopeHeader", () => {
     expect(chunks[0].scopeHeader).toContain("runProcess");
   });
 });
+
+describe("code index persistence and cache", () => {
+  it("saves and loads index cache correctly", async () => {
+    const { native } = await import("./native");
+    const writtenFiles = new Map<string, string>();
+    vi.spyOn(native, "readFile").mockImplementation(async (p) => {
+      const c = writtenFiles.get(p);
+      if (c) return { kind: "text", content: c, size: c.length };
+      return { kind: "text", content: "", size: 0 };
+    });
+    vi.spyOn(native, "writeFile").mockImplementation(async (p, content) => {
+      writtenFiles.set(p, content);
+    });
+    vi.spyOn(native, "createDir").mockResolvedValue(
+      undefined as unknown as void,
+    );
+    vi.spyOn(native, "glob").mockResolvedValue({
+      hits: [{ path: "/workspace/src/auth.ts", rel: "src/auth.ts" }],
+      truncated: false,
+    });
+
+    // Mock initial read of file
+    const fileContent =
+      "export function authenticateUser(token: string) { return true; }";
+    writtenFiles.set("/workspace/src/auth.ts", fileContent);
+
+    // Initial indexing builds and caches
+    const stats1 = await indexWorkspace("/workspace");
+    expect(stats1.files).toBe(1);
+    expect(stats1.chunks).toBeGreaterThan(0);
+
+    const cacheFile = writtenFiles.get(
+      `/workspace/${CODE_INDEX_CACHE_REL_PATH}`,
+    );
+    expect(cacheFile).toBeDefined();
+    expect(cacheFile).toContain("authenticateUser");
+
+    // Clear memory index
+    clearIndex();
+    expect(getIndexStats().chunks).toBe(0);
+
+    // Second call loads from cache without calling glob
+    const globSpy = vi.spyOn(native, "glob");
+    globSpy.mockClear();
+
+    const stats2 = await indexWorkspace("/workspace");
+    expect(stats2.files).toBe(1);
+    expect(stats2.chunks).toBe(stats1.chunks);
+    expect(globSpy).not.toHaveBeenCalled();
+
+    // Forced reindex bypasses cache and calls glob
+    const stats3 = await indexWorkspace("/workspace", true);
+    expect(stats3.files).toBe(1);
+    expect(globSpy).toHaveBeenCalled();
+
+    // Verify search works on loaded index
+    const results = searchCode("authenticateUser");
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0].path).toBe("/workspace/src/auth.ts");
+  });
+});
+

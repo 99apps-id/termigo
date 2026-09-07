@@ -67,6 +67,27 @@ describe("transcriptText", () => {
     } as unknown as UIMessage;
     expect(transcriptText([toolOnly])).toBe("");
   });
+
+  it("extracts failed tool calls and command exits for gotcha learning", () => {
+    const failingMsg = {
+      id: "t2",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool-bash_run",
+          input: { command: "powershell -Command '[500..700]'" },
+          output: {
+            exit_code: 1,
+            stderr: "Missing type name after '['",
+          },
+        },
+      ],
+    } as unknown as UIMessage;
+    const text = transcriptText([failingMsg]);
+    expect(text).toContain("[COMMAND FAILED");
+    expect(text).toContain("exit 1");
+    expect(text).toContain("Missing type name after '['");
+  });
 });
 
 describe("parseFacts", () => {

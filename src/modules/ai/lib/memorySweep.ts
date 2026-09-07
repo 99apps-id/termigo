@@ -49,17 +49,57 @@ export function shouldSweep(
   return messages.length >= MIN_MESSAGES_TO_SWEEP;
 }
 
-/** Flatten a transcript to plain text, keeping the tail if it is long. */
+function extractToolFailure(part: Record<string, unknown>): string | null {
+  const type = String(part.type ?? "");
+  const isTool = type.startsWith("tool-") || type === "dynamic-tool";
+  if (!isTool) return null;
+
+  const toolName = type.replace(/^tool-/, "");
+  if (part.state === "output-error" || part.errorText) {
+    const err = String(part.errorText ?? "tool call failed").slice(0, 300);
+    return `[TOOL ERROR: ${toolName}] ${err}`;
+  }
+
+  const output = part.output ?? part.result;
+  if (output && typeof output === "object") {
+    const rec = output as Record<string, unknown>;
+    if (rec.error) {
+      return `[TOOL FAILED: ${toolName}] ${String(rec.error).slice(0, 300)}`;
+    }
+    const exitCode =
+      typeof rec.exit_code === "number" ? rec.exit_code : rec.exitCode;
+    if (typeof exitCode === "number" && exitCode !== 0) {
+      const stderr = String(
+        rec.stderr ?? rec.errorText ?? rec.output ?? "",
+      ).trim();
+      const input = (part.input ?? part.args) as
+        | Record<string, unknown>
+        | undefined;
+      const cmd = input?.command ?? input?.cmd ?? "";
+      const cmdLabel = cmd ? ` (${String(cmd).slice(0, 100)})` : "";
+      return `[COMMAND FAILED${cmdLabel} exit ${exitCode}] ${stderr.slice(0, 400)}`;
+    }
+  }
+
+  return null;
+}
+
+/** Flatten a transcript to plain text, capturing both dialogue and tool errors. */
 export function transcriptText(messages: readonly UIMessage[]): string {
   const lines: string[] = [];
   for (const message of messages) {
     if (message.role !== "user" && message.role !== "assistant") continue;
-    const text = message.parts
-      .filter((p) => (p as { type?: string }).type === "text")
-      .map((p) => (p as { text?: string }).text ?? "")
-      .join(" ")
-      .trim();
-    if (text) lines.push(`${message.role}: ${text}`);
+    const partsText: string[] = [];
+    for (const p of message.parts as Array<Record<string, unknown>>) {
+      if (p.type === "text" && typeof p.text === "string" && p.text.trim()) {
+        partsText.push(p.text.trim());
+      } else {
+        const failure = extractToolFailure(p);
+        if (failure) partsText.push(failure);
+      }
+    }
+    const joinedParts = partsText.join(" ").trim();
+    if (joinedParts) lines.push(`${message.role}: ${joinedParts}`);
   }
   const joined = lines.join("\n");
   return joined.length > MAX_TRANSCRIPT_CHARS

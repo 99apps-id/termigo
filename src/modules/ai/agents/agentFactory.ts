@@ -151,6 +151,9 @@ export const CORE_TOOL_NAMES = new Set([
  * tools are never withheld. `maxDepth` is passed in (not read from the store) so the factory
  * stays pure and testable; the runner supplies `effectiveSubagentMaxDepth()`.
  */
+/** Tools that only the main session agent may access; withheld from all subagents. */
+export const SUBAGENT_FORBIDDEN_TOOLS = new Set(["todo_write"]);
+
 export function buildAgentTools<T>(
   tools: Record<string, T>,
   opts: {
@@ -170,16 +173,17 @@ export function buildAgentTools<T>(
     : undefined;
 
   const depth = opts.depth;
+  const isSubagent = depth !== undefined;
   const maxDepth = opts.maxDepth ?? DEFAULT_MAX_SUBAGENT_DEPTH;
-  const withholdSpawn =
-    depth !== undefined && spawnToolsWithheld(depth, maxDepth);
+  const withholdSpawn = isSubagent && spawnToolsWithheld(depth, maxDepth);
   const compactTier = opts.compactToolTier === true;
 
-  if (!disallowed && !withholdSpawn && !compactTier) return profiled;
+  if (!disallowed && !withholdSpawn && !isSubagent && !compactTier) return profiled;
 
   const out: Record<string, T> = {};
   for (const [name, tool] of Object.entries(profiled)) {
     if (withholdSpawn && SPAWN_TOOLS.has(name)) continue;
+    if (isSubagent && SUBAGENT_FORBIDDEN_TOOLS.has(name)) continue;
     if (disallowed && disallowed.has(name)) continue;
     if (compactTier && !CORE_TOOL_NAMES.has(name)) continue;
     out[name] = tool;

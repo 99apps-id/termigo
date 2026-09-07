@@ -8,6 +8,22 @@ The last tagged public release before this cycle was **v0.9.5**; v0.9.6 and
 v0.9.7 were built and validated locally but never tagged. **v0.9.8** therefore
 carries everything shipped since v0.9.5.
 
+## [0.9.10] - 2026-09-07
+
+### Added
+
+- **Failure-driven memory learning**
+  - Memory sweep transcript extraction captures non-zero command exit codes, stderr outputs, and tool errors so mistakes and build traps are learned automatically as `[GOTCHA]` entries.
+- **Global memory layer**
+  - Cross-workspace memory support stored in `~/.termigo/memory.md` alongside project `.termigo/memory.md`.
+  - Tool `remember` and functions `rememberFact`/`forgetFact` accept `scope: "project" | "global"`.
+- **FTS code index persistence**
+  - Okapi BM25 codebase index is cached to disk at `.termigo/code-index.json` for warm-startup retrieval.
+  - Tool `code_index` forces fresh re-indexing on demand.
+- **Relevance-scored memory injection**
+  - General memory entries are ranked and filtered by query keyword overlap to protect system prompt headroom.
+  - All `[GOTCHA]` and safety constraint entries are unconditionally preserved.
+
 ## [0.9.9] - 2026-09-06
 
 ### Added

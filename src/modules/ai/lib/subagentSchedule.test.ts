@@ -211,4 +211,28 @@ describe("detectBatchConflicts", () => {
     ]);
     expect(conflicts).toHaveLength(1);
   });
+
+  it("ignores bare directory tokens without file extensions", () => {
+    const conflicts = detectBatchConflicts([
+      { paths: ["src", "src/components", "utils"] },
+      { paths: ["src", "src/components", "utils"] },
+    ]);
+    expect(conflicts).toEqual([]);
+  });
+
+  it("ignores conflicts when both tasks are read-only", () => {
+    const conflicts = detectBatchConflicts([
+      { paths: ["src/App.tsx"], canMutate: false },
+      { paths: ["src/App.tsx"], canMutate: false },
+    ]);
+    expect(conflicts).toEqual([]);
+  });
+
+  it("detects conflict if at least one task can mutate", () => {
+    const conflicts = detectBatchConflicts([
+      { paths: ["src/App.tsx"], canMutate: false },
+      { paths: ["src/App.tsx"], canMutate: true },
+    ]);
+    expect(conflicts).toHaveLength(1);
+  });
 });

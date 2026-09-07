@@ -295,13 +295,130 @@ function shouldSkipPath(path: string): boolean {
   return false;
 }
 
+export const CODE_INDEX_CACHE_REL_PATH = ".termigo/code-index.json";
+
+function codeIndexCachePath(root: string): string {
+  return `${root.replace(/[\\/]$/, "")}/${CODE_INDEX_CACHE_REL_PATH}`;
+}
+
+export type SerializedCodeChunk = {
+  path: string;
+  startLine: number;
+  endLine: number;
+  text: string;
+  tokens: string[];
+  scopeHeader?: string;
+};
+
+export type SerializedCodeIndex = {
+  version: 1;
+  root: string;
+  savedAt: number;
+  totalChunksCount: number;
+  totalTokensCount: number;
+  docFrequencies: [string, number][];
+  files: {
+    path: string;
+    chunks: SerializedCodeChunk[];
+  }[];
+};
+
+export async function saveIndexCache(root: string | null): Promise<boolean> {
+  if (!root || index.size === 0) return false;
+  try {
+    const dir = `${root.replace(/[\\/]$/, "")}/.termigo`;
+    try {
+      await native.createDir(dir);
+    } catch {
+      // already exists
+    }
+    const filesList: Array<{ path: string; chunks: SerializedCodeChunk[] }> = [];
+    for (const [path, chunks] of index.entries()) {
+      filesList.push({
+        path,
+        chunks: chunks.map((c) => ({
+          path: c.path,
+          startLine: c.startLine,
+          endLine: c.endLine,
+          text: c.text,
+          tokens: c.tokens,
+          scopeHeader: c.scopeHeader,
+        })),
+      });
+    }
+    const payload: SerializedCodeIndex = {
+      version: 1,
+      root,
+      savedAt: Date.now(),
+      totalChunksCount,
+      totalTokensCount,
+      docFrequencies: Array.from(docFrequencies.entries()),
+      files: filesList,
+    };
+    await native.writeFile(codeIndexCachePath(root), JSON.stringify(payload));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function loadIndexCache(
+  root: string | null,
+): Promise<{ files: number; chunks: number } | null> {
+  if (!root) return null;
+  try {
+    const res = await native.readFile(codeIndexCachePath(root));
+    if (res.kind !== "text" || !res.content) return null;
+    const data = JSON.parse(res.content) as SerializedCodeIndex;
+    if (data.version !== 1 || data.root !== root) return null;
+
+    clearIndex();
+    indexedRoot = root;
+    totalChunksCount = data.totalChunksCount;
+    totalTokensCount = data.totalTokensCount;
+    for (const [term, freq] of data.docFrequencies) {
+      docFrequencies.set(term, freq);
+    }
+    for (const f of data.files) {
+      const chunks: CodeChunk[] = f.chunks.map((c) => {
+        const counts = new Map<string, number>();
+        for (const t of c.tokens) {
+          counts.set(t, (counts.get(t) ?? 0) + 1);
+        }
+        return {
+          path: c.path,
+          startLine: c.startLine,
+          endLine: c.endLine,
+          text: c.text,
+          tokens: c.tokens,
+          tokenCounts: counts,
+          scopeHeader: c.scopeHeader,
+        };
+      });
+      index.set(f.path, chunks);
+    }
+    return { files: data.files.length, chunks: totalChunksCount };
+  } catch {
+    return null;
+  }
+}
+
 export async function indexWorkspace(
   root: string | null,
+  forceReindex = false,
 ): Promise<{ files: number; chunks: number }> {
   if (!root) {
     clearIndex();
     return { files: 0, chunks: 0 };
   }
+
+  if (!forceReindex) {
+    const cached = await loadIndexCache(root);
+    if (cached && cached.chunks > 0) {
+      return cached;
+    }
+  }
+
   index.clear();
   docFrequencies.clear();
   totalChunksCount = 0;
@@ -363,6 +480,10 @@ export async function indexWorkspace(
     } catch {
       // ignore glob errors
     }
+  }
+
+  if (files > 0) {
+    await saveIndexCache(root);
   }
 
   return { files, chunks: totalChunksCount };

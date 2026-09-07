@@ -75,7 +75,7 @@ export function buildCodeSearchTools(ctx: ToolContext) {
           const stats = await indexingPromise;
           return { status: "ok", ...stats };
         }
-        indexingPromise = indexWorkspace(root).finally(() => {
+        indexingPromise = indexWorkspace(root, true).finally(() => {
           indexingPromise = null;
         });
         const stats = await indexingPromise;

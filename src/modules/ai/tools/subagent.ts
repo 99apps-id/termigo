@@ -1,6 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { SUBAGENTS, type SubagentType } from "../agents/registry";
+import { SUBAGENTS, subagentIsReadOnly, type SubagentType } from "../agents/registry";
 import {
   resolveSubagentType,
   routeSubagentType,
@@ -290,19 +290,6 @@ Each task's subagent has the same toolset you do and may itself spawn further su
           );
         }
 
-        // Two tasks touching the same file is the batch's merge conflict: each
-        // edits from the same baseline, both write, the second overwrites the
-        // first. Reported before anything runs so the orchestrator (or the user
-        // reading the card) can decide - the safest default is to note it.
-        const conflicts = detectBatchConflicts(
-          batch.map((t) => ({ paths: pathsInPrompt(t.prompt) })),
-        );
-        for (const c of conflicts) {
-          notes.push(
-            `Conflict: task #${c.indexA} and #${c.indexB} both touch ${c.path} - they may overwrite each other; consider a depends_on edge or reviewing after.`,
-          );
-        }
-
         const results: BatchResult[] = batch.map((t, i) => {
           // Resolve loose / synonym names up front so every downstream use
           // (runSubagent, labels, the returned result) is a real roster id.
@@ -318,6 +305,22 @@ Each task's subagent has the same toolset you do and may itself spawn further su
             description: t.description,
           };
         });
+
+        // Two tasks touching the same file is the batch's merge conflict: each
+        // edits from the same baseline, both write, the second overwrites the
+        // first. Reported before anything runs so the orchestrator (or the user
+        // reading the card) can decide - the safest default is to note it.
+        const conflicts = detectBatchConflicts(
+          batch.map((t, i) => ({
+            paths: pathsInPrompt(t.prompt),
+            canMutate: !subagentIsReadOnly(results[i].type),
+          })),
+        );
+        for (const c of conflicts) {
+          notes.push(
+            `Conflict: task #${c.indexA} and #${c.indexB} both touch ${c.path} - they may overwrite each other; consider a depends_on edge or reviewing after.`,
+          );
+        }
         const state: TaskState[] = batch.map(() => ({
           settled: false,
           bad: false,

@@ -423,17 +423,19 @@ function buildStableSystem(
   projectMemory: string | null,
   learned: readonly MemoryEntry[],
   skills: readonly Skill[],
+  globalLearned?: readonly MemoryEntry[],
+  userQuery?: string,
 ): string {
   const base = selectSystemPrompt(modelId);
   const personaBlock = persona?.instructions.trim()
-    ? `\n\n## ACTIVE AGENT — ${persona.name}\n${persona.instructions.trim()}`
+    ? `\n\n## ACTIVE AGENT -- ${persona.name}\n${persona.instructions.trim()}`
     : "";
   const customBlock = customInstructions?.trim()
-    ? `\n\n## USER CUSTOM INSTRUCTIONS — follow unless they conflict with safety rules above\n${customInstructions.trim()}`
+    ? `\n\n## USER CUSTOM INSTRUCTIONS -- follow unless they conflict with safety rules above\n${customInstructions.trim()}`
     : "";
   const memoryBlock =
     projectMemory && projectMemory.trim().length > 0
-      ? `\n\n## PROJECT — TERMIGO.md\n${projectMemory.trim()}`
+      ? `\n\n## PROJECT -- TERMIGO.md\n${projectMemory.trim()}`
       : "";
   // Pinned invariants are constraints the agent itself flagged as session-wide,
   // so they sit with the other durable facts and ride along on every step.
@@ -441,7 +443,7 @@ function buildStableSystem(
   const invariantSection = invariantBlock ? `\n\n${invariantBlock}` : "";
   // Skills sit after facts and before persona: the model should know what it
   // already knows how to do before it is told how to behave.
-  return `${base}${memoryBlock}${learnedBlock(learned)}${invariantSection}${skillsBlock(skills)}${personaBlock}${customBlock}`;
+  return `${base}${memoryBlock}${learnedBlock(learned, globalLearned, userQuery)}${invariantSection}${skillsBlock(skills)}${personaBlock}${customBlock}`;
 }
 
 /** Stable key for a value, so equivalent inputs written in a different key
@@ -839,6 +841,8 @@ export type RunAgentOptions = {
   projectMemory?: string | null;
   /** Facts the agent recorded in earlier sessions (.termigo/memory.md). */
   learnedMemory?: readonly MemoryEntry[];
+  /** Facts recorded across workspaces (~/.termigo/memory.md). */
+  globalMemory?: readonly MemoryEntry[];
   /**
    * Tools discovered from configured MCP servers. Passed in rather than built
    * here because discovery has to start each server and await `tools/list`,
@@ -881,6 +885,11 @@ export async function runAgentStream(opts: RunAgentOptions) {
   const info = resolveModel(modelId, endpoints);
   const provider = info.provider;
 
+  const history = await convertToModelMessages(
+    sanitizeUiMessages(opts.uiMessages),
+  );
+  const userQuery = latestUserRequest(history);
+
   const stableSystem = buildStableSystem(
     modelId,
     opts.agentPersona ?? null,
@@ -888,10 +897,8 @@ export async function runAgentStream(opts: RunAgentOptions) {
     opts.projectMemory ?? null,
     opts.learnedMemory ?? [],
     opts.skills ?? [],
-  );
-
-  const history = await convertToModelMessages(
-    sanitizeUiMessages(opts.uiMessages),
+    opts.globalMemory ?? [],
+    userQuery,
   );
   const keepsReasoning = modelKeepsReasoning(info);
   const prunedHistory = pruneMessages({

@@ -87,17 +87,22 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   — so a large collection stays reachable without any of it sitting in the
   prompt. Skills written for another agent still parse, and `use_skill` says so
   when one calls tools Termigo does not have.
-- **Self-maintaining memory.** The agent records durable project facts in
-  `.termigo/memory.md` and reads them back in every later session, so build
-  commands, conventions and decisions do not have to be re-explained. Facts are
-  captured two ways: a `remember` tool the model calls deliberately (visible in
-  the transcript, approval-gated like any workspace write), and a summary sweep
-  when a session is left behind. Your hand-written `TERMIGO.md` is never
-  rewritten, so you can always tell what you wrote from what the agent
-  inferred, and deleting a line makes it forget. The file is bounded in entry
-  length, entry count and total size, because everything in it costs context on
-  every request. The sweep only runs in the auto-approve modes: in
-  `Ask every time`, nothing is written without a click.
+- **Self-maintaining and global memory.** The agent records durable project facts in
+  `.termigo/memory.md` (and machine-wide preferences in `~/.termigo/memory.md`)
+  and reads them back in every later session, so build commands, conventions and
+  decisions do not have to be re-explained. Facts are captured two ways: a
+  `remember` tool the model calls deliberately (visible in the transcript,
+  approval-gated like any workspace write, supporting `scope: "project" | "global"`),
+  and a failure-aware summary sweep when a session is left behind that extracts
+  failed terminal commands, non-zero exit codes, and tool errors into actionable
+  `[GOTCHA]` entries. When assembled into system prompts, general facts are
+  relevance-ranked against the active query while all safety-critical gotchas are
+  unconditionally preserved. Your hand-written `TERMIGO.md` is never rewritten,
+  so you can always tell what you wrote from what the agent inferred, and
+  deleting a line makes it forget. The file is bounded in entry length, entry
+  count and total size, because everything in it costs context on every request.
+  The sweep only runs in the auto-approve modes: in `Ask every time`, nothing is
+  written without a click.
 - **Sub-agents read in parallel.** Work that means covering a lot of ground —
   auditing a project, exploring an unfamiliar codebase, reviewing four modules —
   is split into tasks that run at the same time, each with its own fresh
@@ -179,11 +184,13 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   **Resume** row - the budget ladder is kept, so continuing does not restart
   the task from scratch. (A deliberate stop or a guard that tripped offers the
   same continue path.)
-- **Grounded RAG and hallucination defense.** Codebase exploration combines
-  BM25 lexical ranking with symbol retrieval to locate relevant references
-  swiftly. The agent enforces grounding validation before proposing edits:
-  paths and function references must resolve against real workspace files,
-  preventing hallucinated imports or phantom paths.
+- **Grounded RAG and persistent code index.** Codebase exploration combines
+  Okapi BM25 lexical ranking with scope-boundary detection and symbol retrieval
+  to locate relevant references swiftly. The BM25 index is cached to disk at
+  `.termigo/code-index.json` for instantaneous warm startups across sessions.
+  The agent enforces grounding validation before proposing edits: paths and
+  function references must resolve against real workspace files, preventing
+  hallucinated imports or phantom paths.
 - **Autonomous execution guards.** A loop circuit breaker detects repetitive
   no-progress iterations early, while command outputs are automatically truncated
   to prevent massive terminal dumps from saturating the context window.

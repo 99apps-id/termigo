@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { safeJson, synthesizeSummary } from "./subagentSummary";
+import {
+  isUnfinishedOrGarbledSummary,
+  safeJson,
+  sanitizeGarbledSummary,
+  synthesizeSummary,
+} from "./subagentSummary";
 
 vi.mock("ai", () => ({
   generateText: vi.fn(),
@@ -73,5 +78,65 @@ describe("synthesizeSummary", () => {
 
     expect(res).toBe("Synthesized summary.");
     expect(generateText).toHaveBeenCalled();
+  });
+});
+
+describe("isUnfinishedOrGarbledSummary", () => {
+  it("flags empty or whitespace-only summary", () => {
+    expect(isUnfinishedOrGarbledSummary("", { steps: [] }, 6)).toBe(true);
+    expect(isUnfinishedOrGarbledSummary("   ", { steps: [] }, 6)).toBe(true);
+  });
+
+  it("flags incomplete sentences ending with a colon after hitting step limit or tool call", () => {
+    const result = {
+      steps: [
+        { toolCalls: [{ toolName: "read_file" }] },
+      ],
+    };
+    expect(
+      isUnfinishedOrGarbledSummary(
+        "Let me check the Tauri command module registration and the project.rs:",
+        result,
+        1,
+      ),
+    ).toBe(true);
+  });
+
+  it("flags raw hallucinated pseudo tool tags", () => {
+    const result = { steps: [{ toolCalls: [] }] };
+    expect(
+      isUnfinishedOrGarbledSummary(
+        "<tool_call><function=read_file><args>...</args></function></tool_call>",
+        result,
+        6,
+      ),
+    ).toBe(true);
+    expect(
+      isUnfinishedOrGarbledSummary(
+        "read_file({\"path\":\"foo.rs\"}) -> { ... }",
+        result,
+        6,
+      ),
+    ).toBe(true);
+  });
+
+  it("accepts a normal finished prose summary", () => {
+    const result = {
+      steps: [
+        { toolCalls: [{ toolName: "read_file" }] },
+        { toolCalls: [] },
+      ],
+    };
+    const goodSummary =
+      "Audit findings: 1. In downloader.rs: missing validation for protocol schemes. 2. In video.rs: unchecked integer conversion. Everything else looks fine.";
+    expect(isUnfinishedOrGarbledSummary(goodSummary, result, 6)).toBe(false);
+  });
+});
+
+describe("sanitizeGarbledSummary", () => {
+  it("strips pseudo tool tags from text", () => {
+    const raw = "Leading text <tool_call><function=read_file>content</function></tool_call> trailing text";
+    const cleaned = sanitizeGarbledSummary(raw);
+    expect(cleaned).toBe("Leading text  trailing text");
   });
 });

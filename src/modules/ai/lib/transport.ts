@@ -19,7 +19,7 @@ import type { HooksConfig } from "./hooks";
 import { loadHooks } from "./hooksIo";
 import type { CustomEndpointKeys, ProviderKeys } from "./keyring";
 import { getMcpTools } from "./mcpTools";
-import { readMemory } from "./memory";
+import { readGlobalMemory, readMemory } from "./memory";
 import { native } from "./native";
 import { listSkills } from "./skills";
 import { autoCheckpointForRun } from "./snapshots";
@@ -333,6 +333,7 @@ export function createContextAwareTransport(deps: Deps) {
     const [
       projectMemory,
       learnedMemory,
+      globalMemory,
       mcpTools,
       skills,
       customDefs,
@@ -342,6 +343,7 @@ export function createContextAwareTransport(deps: Deps) {
         Promise.all([
           readTermigoMd(live.workspaceRoot),
           readMemory(live.workspaceRoot),
+          readGlobalMemory(),
           getMcpTools(live.workspaceRoot),
           listSkills(live.workspaceRoot),
           loadCustomTools(live.workspaceRoot),
@@ -368,6 +370,7 @@ export function createContextAwareTransport(deps: Deps) {
       modelId: deps.getModelId(),
       customInstructions: deps.getCustomInstructions(),
       learnedMemory,
+      globalMemory,
       mcpTools,
       skills,
       // Read at send time, not cached: extensions are enabled, disabled and

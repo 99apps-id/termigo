@@ -27,7 +27,12 @@ import {
   subagentToolNeedsGate,
   WRITE_FILE,
 } from "./subagentGating";
-import { SUMMARY_TIMEOUT_MS, synthesizeSummary } from "./subagentSummary";
+import {
+  isUnfinishedOrGarbledSummary,
+  sanitizeGarbledSummary,
+  SUMMARY_TIMEOUT_MS,
+  synthesizeSummary,
+} from "./subagentSummary";
 
 export { subagentToolNeedsGate };
 
@@ -273,7 +278,7 @@ export async function runSubagent({
     // "(no output)" even though it did the work. Recover by reconstructing what
     // it gathered and asking once more, with NO tools, for a prose summary.
     let summary = result.text?.trim();
-    if (!summary) {
+    if (!summary || isUnfinishedOrGarbledSummary(summary, result, spec.maxSteps)) {
       const summaryTimer = setTimeout(() => {
         timedOut = true;
         controller.abort(
@@ -281,13 +286,18 @@ export async function runSubagent({
         );
       }, SUMMARY_TIMEOUT_MS);
       try {
-        summary = await synthesizeSummary(
+        const synthesized = await synthesizeSummary(
           model,
           spec.systemPrompt,
           prompt,
           result,
           controller.signal,
         );
+        if (synthesized) {
+          summary = synthesized;
+        } else if (summary) {
+          summary = sanitizeGarbledSummary(summary);
+        }
       } finally {
         clearTimeout(summaryTimer);
       }

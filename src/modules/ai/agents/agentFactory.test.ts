@@ -99,6 +99,19 @@ describe("buildAgentTools", () => {
     expect(tools.run_subagents).toBeDefined();
   });
 
+  it("withholds todo_write from subagents but keeps it for the main agent", () => {
+    const fixture = {
+      todo_write: { execute: () => undefined },
+      read_file: { execute: () => undefined },
+    };
+    const mainTools = buildAgentTools(fixture);
+    expect(mainTools.todo_write).toBeDefined();
+
+    const subTools = buildAgentTools(fixture, { depth: 1 });
+    expect(subTools.todo_write).toBeUndefined();
+    expect(subTools.read_file).toBeDefined();
+  });
+
   it("capability-gates disallowed tools for specialized subagents (Hermes style)", () => {
     const fixture = {
       read_file: { execute: () => undefined },

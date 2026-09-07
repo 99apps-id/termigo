@@ -179,6 +179,8 @@ export function cascadeSkip(
 export type ConflictTask = {
   /** The file paths the task's prompt mentions, if any. */
   paths?: readonly string[];
+  /** Whether this task can mutate files. Defaults to true. */
+  canMutate?: boolean;
 };
 
 /** A pair of batch tasks that both mention the same file path. */
@@ -192,7 +194,7 @@ export type PathConflict = {
  * Heuristically pull file paths out of a task prompt.
  *
  * Matches `src/...`, `lib/...`, `packages/...`, bare `*.ts` / `*.rs` / `*.py`
- * tokens and quoted paths. Purely lexical — no filesystem access — so the
+ * tokens and quoted paths. Purely lexical - no filesystem access - so the
  * detector stays pure and testable, and a miss only means the conflict is not
  * reported, never that a false one is.
  */
@@ -231,6 +233,9 @@ export function detectBatchConflicts(
     for (const p of t.paths ?? []) {
       const key = p.replace(/^\.\//, "").replace(/[\\/]+$/, "");
       if (!key) continue;
+      // Bare directory tokens (e.g. 'src', 'src/components', 'utils') do not represent a concrete file
+      // to overwrite. Only specific paths with a file extension trigger file overwrite warnings.
+      if (!/\.[A-Za-z0-9_-]+$/.test(key)) continue;
       const list = byPath.get(key) ?? [];
       if (!list.includes(i)) list.push(i);
       byPath.set(key, list);
@@ -241,6 +246,15 @@ export function detectBatchConflicts(
     if (indices.length < 2) continue;
     for (let a = 0; a < indices.length; a++) {
       for (let b = a + 1; b < indices.length; b++) {
+        const taskA = tasks[indices[a]];
+        const taskB = tasks[indices[b]];
+        // A conflict warning that tasks "may overwrite each other" only makes sense if at least one
+        // of the tasks has the ability to mutate files. If both tasks are read-only (e.g. review/audit),
+        // concurrent reads are safe and expected.
+        const canMutateA = taskA?.canMutate !== false;
+        const canMutateB = taskB?.canMutate !== false;
+        if (!canMutateA && !canMutateB) continue;
+
         out.push({ indexA: indices[a], indexB: indices[b], path });
       }
     }
