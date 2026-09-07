@@ -919,14 +919,13 @@ async function runMirror(signal: AbortSignal): Promise<void> {
   }
 }
 
-async function dispatchAndStream(
-  text: string,
+async function runAgentAndStream(
+  action: () => Promise<boolean>,
   chatId: number,
   signal: AbortSignal,
 ): Promise<void> {
   try {
     const store = await import("../ai/store/chatStore");
-    const runtime = await import("../ai/store/chatRuntime");
     if (!store.useChatStore.getState().activeSessionId) {
       store.useChatStore.getState().newSession();
     }
@@ -944,7 +943,6 @@ async function dispatchAndStream(
     pauseMirror();
     try {
       // Stream live progress and continuous typing alongside the run, superseding any prior stream.
-      // Started BEFORE awaiting sendMessage so typing and live status appear immediately.
       const progressCtl = new AbortController();
       progressCtrls.get(chatId)?.abort();
       progressCtrls.set(chatId, progressCtl);
@@ -953,12 +951,12 @@ async function dispatchAndStream(
       );
 
       try {
-        const accepted = await runtime.sendMessage(text);
+        const accepted = await action();
         if (!accepted) {
           progressCtl.abort();
           await sendTelegram(
             chatId,
-            "Could not start the agent run - check the model / API key.",
+            "Could not start or resume the agent run - check the model / API key.",
             signal,
           );
           return;
@@ -983,6 +981,20 @@ async function dispatchAndStream(
             markMessageSeen(m.id, sessionId, m.role, messageText(m));
             telegramOriginMessageIds.add(m.id);
           }
+        }
+
+        // If run stopped due to step-cap, offer one-click continuation button
+        const stopReason = store.useChatStore.getState().agentMeta.stopReason;
+        if (stopReason === "step-cap") {
+          const currentRound = store.useChatStore.getState().agentMeta.runRound;
+          const { stepBudgetForRound } = await import("../ai/config");
+          const nextBudget = stepBudgetForRound(currentRound + 1);
+          await sendKeyboard(
+            chatId,
+            `Batas langkah tercapai (Round selesai). Lanjut ke Round berikutnya (${nextBudget} steps)?`,
+            [[{ text: `⏩ Lanjut Round (${nextBudget} steps)`, callback_data: "resume:run" }]],
+            signal,
+          ).catch(() => {});
         }
 
         // Share any report/document file the agent previewed in this run.
@@ -1010,6 +1022,57 @@ async function dispatchAndStream(
       signal,
     ).catch(() => {});
   }
+}
+
+async function dispatchAndStream(
+  text: string,
+  chatId: number,
+  signal: AbortSignal,
+): Promise<void> {
+  const runtime = await import("../ai/store/chatRuntime");
+  await runAgentAndStream(() => runtime.sendMessage(text), chatId, signal);
+}
+
+/**
+ * Resume a paused/capped run, bumping to the next step budget tier (25 -> 50 -> 100).
+ */
+function startTelegramResume(chatId: number, signal: AbortSignal): void {
+  pauseMirror();
+  void (async () => {
+    try {
+      const store = await import("../ai/store/chatStore");
+      const runtime = await import("../ai/store/chatRuntime");
+      const { stepBudgetForRound } = await import("../ai/config");
+      const sessionId = store.useChatStore.getState().activeSessionId;
+      if (!sessionId) {
+        await sendTelegram(
+          chatId,
+          "Tidak ada sesi aktif untuk dilanjutkan.",
+          signal,
+        );
+        return;
+      }
+      const currentRound = store.useChatStore.getState().agentMeta.runRound;
+      const nextBudget = stepBudgetForRound(currentRound + 1);
+      await sendTelegram(
+        chatId,
+        `Melanjutkan ke round berikutnya (${nextBudget} steps)...`,
+        signal,
+      ).catch(() => {});
+      await sendTyping(chatId, signal).catch(() => {});
+      await runAgentAndStream(() => runtime.resumeRun(), chatId, signal);
+    } catch (e) {
+      if (!signal.aborted) {
+        await sendTelegram(
+          chatId,
+          `Error during resume: ${e instanceof Error ? e.message : String(e)}`,
+          signal,
+        ).catch(() => {});
+      }
+    } finally {
+      resumeMirror();
+    }
+  })();
 }
 
 /**
@@ -1050,6 +1113,7 @@ const HELP = [
   "/unpair - unlock bot from this chat ID",
   "/query <question> - read-only question (or just type the question)",
   "/run <task> - run a task in the agent",
+  "/continue - continue to next round (50/100 steps)",
   "/approve - approve all pending actions",
   "/deny - deny all pending actions",
   "/mode [all|edits|ask] - view or set autonomy approval mode",
@@ -1195,6 +1259,21 @@ async function handleCallback(
     return;
   }
 
+  if (data === "resume:run") {
+    await answerCallback(cb.id, "Melanjutkan ke round berikutnya...", signal);
+    if (messageId) {
+      await editKeyboard(
+        chatId,
+        messageId,
+        "Melanjutkan round berikutnya...",
+        [],
+        signal,
+      ).catch(() => {});
+    }
+    startTelegramResume(chatId, signal);
+    return;
+  }
+
   await answerCallback(cb.id, null, signal);
 }
 
@@ -1271,6 +1350,12 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
         signal,
         "Task submitted - I'll post progress here.",
       );
+      return;
+    }
+    case "/continue":
+    case "/resume":
+    case "/next": {
+      startTelegramResume(chatId, signal);
       return;
     }
     case "/stop": {
