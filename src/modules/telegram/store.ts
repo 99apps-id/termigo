@@ -46,7 +46,7 @@ export const useTelegramStore = create<TelegramBotState>()(
           typeof localStorage !== "undefined"
             ? localStorage.getItem("termigo-telegram")
             : null;
-        const shouldEnable = hasToken && (cur.enabled || !raw);
+        const shouldEnable = hasToken && (cur.enabled || !raw || !!owner);
         set({
           hasToken,
           ...(shouldEnable ? { enabled: true } : {}),
