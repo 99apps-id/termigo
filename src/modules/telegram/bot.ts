@@ -198,6 +198,41 @@ async function sendTelegram(
   }
 }
 
+async function sendProgressMessage(
+  chatId: number | string,
+  text: string,
+  signal: AbortSignal,
+): Promise<number | null> {
+  try {
+    const res = (await apiPost(
+      "sendMessage",
+      { chat_id: chatId, text },
+      signal,
+    )) as { ok?: boolean; result?: { message_id?: number } };
+    return res?.result?.message_id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function editProgressMessage(
+  chatId: number | string,
+  messageId: number,
+  text: string,
+  signal: AbortSignal,
+): Promise<boolean> {
+  try {
+    await apiPost(
+      "editMessageText",
+      { chat_id: chatId, message_id: messageId, text },
+      signal,
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Show the "typing..." bubble in the Telegram chat. The bubble lasts ~5s, so a
  * caller re-sends it on an interval while the agent is busy.
@@ -476,31 +511,6 @@ async function waitForReply(
   return "Run is still in progress or waiting for approval. Use Telegram inline buttons or /status to check.";
 }
 
-/**
- * Submit a task to the in-app agent and stream its final answer back to the
- * calling Telegram chat. Runs in the background so the long-poll stays open.
- */
-function statusLabel(status: string): string | null {
-  switch (status) {
-    case "thinking":
-      return "Thinking…";
-    case "streaming":
-      return "Working…";
-    case "awaiting-approval":
-      return "Waiting for your approval…";
-    default:
-      return null;
-  }
-}
-
-/** Compact, status-tracked todo block for Telegram (no emojis). */
-function compactTodoBlock(
-  items: { title: string; status: string }[],
-): string | null {
-  if (items.length === 0) return null;
-  return `Todo:\n${items.map((t) => `- [${t.status}] ${t.title}`).join("\n")}`;
-}
-
 // One live progress publisher per chat, so a new task supersedes the previous
 // run's stream instead of both posting updates.
 const progressCtrls = new Map<number, AbortController>();
@@ -518,123 +528,143 @@ async function publishProgress(
 ): Promise<void> {
   const store = await import("../ai/store/chatStore");
   const todosStore = await import("../ai/store/todoStore");
-  const startMeta = store.useChatStore.getState().agentMeta;
-  let lastStatus = startMeta.status;
-  let lastStep = startMeta.step ?? "";
-  let lastTodoSig = "";
+  const { extractToolSummaries, formatLiveProgress } = await import(
+    "./progressFormat"
+  );
+  let progressMessageId: number | null = null;
+  let lastLiveText = "";
   let lastSentAt = 0;
-  // Telegram's typing bubble lasts ~5s; re-send it on an interval so the chat
-  // keeps showing "typing…" for the whole run, not just at the first tick.
   let lastTypingAt = 0;
   const sentApprovalIds = new Set<string>();
   const sentElicitationIds = new Set<string>();
   const started = Date.now();
   const MAX_WAIT = 30 * 60 * 1000;
 
-  while (!signal.aborted && Date.now() - started < MAX_WAIT) {
-    const meta = store.useChatStore.getState().agentMeta;
-    const status = meta.status;
-    const step = meta.step ?? "";
-    const todos =
-      todosStore.useTodosStore.getState().bySession[sessionId]?.items ?? [];
-    const now = Date.now();
+  try {
+    while (!signal.aborted && Date.now() - started < MAX_WAIT) {
+      const meta = store.useChatStore.getState().agentMeta;
+      const status = meta.status;
+      const step = meta.step ?? "";
+      const todos =
+        todosStore.useTodosStore.getState().bySession[sessionId]?.items ?? [];
+      const now = Date.now();
 
-    // Keep the "typing…" bubble alive while the run is busy (thinking,
-    // streaming, or awaiting approval).
-    const busy =
-      status === "thinking" ||
-      status === "streaming" ||
-      status === "awaiting-approval";
-    if (busy && now - lastTypingAt >= 4000) {
-      lastTypingAt = now;
-      await sendTyping(chatId, signal).catch(() => {});
-    }
+      // Keep the "typing…" bubble alive while the run is busy (thinking,
+      // streaming, or awaiting approval).
+      const busy =
+        status === "thinking" ||
+        status === "streaming" ||
+        status === "awaiting-approval";
+      if (busy && now - lastTypingAt >= 3500) {
+        lastTypingAt = now;
+        await sendTyping(chatId, signal).catch(() => {});
+      }
 
-    if (status !== lastStatus) {
-      lastStatus = status;
-      const line = statusLabel(status);
-      if (line && status !== "awaiting-approval") {
-        await sendTelegram(chatId, line, signal).catch(() => {});
+      // Collect tool parts from the active assistant message
+      const chat = store.getChat(sessionId);
+      const messages = chat?.messages ?? [];
+      const lastAssistant = [...messages]
+        .reverse()
+        .find((m) => m.role === "assistant");
+      const toolSummaries = lastAssistant?.parts
+        ? extractToolSummaries(lastAssistant.parts)
+        : [];
+
+      // Format compact live progress
+      const liveText = formatLiveProgress({
+        status,
+        round: meta.round,
+        step,
+        tools: toolSummaries,
+        todos,
+      });
+
+      if (!progressMessageId) {
+        progressMessageId = await sendProgressMessage(chatId, liveText, signal);
+        lastLiveText = liveText;
+        lastSentAt = now;
+      } else if (liveText !== lastLiveText && now - lastSentAt >= 1500) {
+        lastLiveText = liveText;
+        await editProgressMessage(chatId, progressMessageId, liveText, signal);
         lastSentAt = now;
       }
-    }
 
-    // Surface pending tool approvals as interactive inline buttons in Telegram
-    const pendingApprovals = meta.pendingApprovals ?? [];
-    for (const p of pendingApprovals) {
-      if (!sentApprovalIds.has(p.id)) {
-        sentApprovalIds.add(p.id);
-        const keyboard: InlineButton[][] = [
-          [
-            { text: "Approve", callback_data: `ap:approve:${p.id}` },
-            { text: "Deny", callback_data: `ap:deny:${p.id}` },
-          ],
-        ];
-        await sendKeyboard(
-          chatId,
-          `Action Approval Required:\nTool: ${p.toolName}\nTarget: ${p.summary}`,
-          keyboard,
-          signal,
-        ).catch(() => {});
-        lastSentAt = now;
+      // Surface pending tool approvals as interactive inline buttons in Telegram
+      const pendingApprovals = meta.pendingApprovals ?? [];
+      for (const p of pendingApprovals) {
+        if (!sentApprovalIds.has(p.id)) {
+          sentApprovalIds.add(p.id);
+          const keyboard: InlineButton[][] = [
+            [
+              { text: "Approve", callback_data: `ap:approve:${p.id}` },
+              { text: "Deny", callback_data: `ap:deny:${p.id}` },
+            ],
+          ];
+          await sendKeyboard(
+            chatId,
+            `Action Approval Required:\nTool: ${p.toolName}\nTarget: ${p.summary}`,
+            keyboard,
+            signal,
+          ).catch(() => {});
+          lastSentAt = now;
+        }
       }
-    }
 
-    // Surface approval queue requests (subagents / gated tools)
-    const aqStore = await import("../ai/store/approvalQueueStore");
-    const aqPending = aqStore.useApprovalQueue.getState().pending;
-    for (const q of aqPending) {
-      if (!sentApprovalIds.has(q.id)) {
-        sentApprovalIds.add(q.id);
-        const keyboard: InlineButton[][] = [
-          [
-            { text: "Approve", callback_data: `aq:approve:${q.id}` },
-            { text: "Deny", callback_data: `aq:deny:${q.id}` },
-          ],
-        ];
-        await sendKeyboard(
-          chatId,
-          `Approval Required (${q.requester}):\nTool: ${q.toolName}\nTarget: ${q.summary}`,
-          keyboard,
-          signal,
-        ).catch(() => {});
-        lastSentAt = now;
+      // Surface approval queue requests (subagents / gated tools)
+      const aqStore = await import("../ai/store/approvalQueueStore");
+      const aqPending = aqStore.useApprovalQueue.getState().pending;
+      for (const q of aqPending) {
+        if (!sentApprovalIds.has(q.id)) {
+          sentApprovalIds.add(q.id);
+          const keyboard: InlineButton[][] = [
+            [
+              { text: "Approve", callback_data: `aq:approve:${q.id}` },
+              { text: "Deny", callback_data: `aq:deny:${q.id}` },
+            ],
+          ];
+          await sendKeyboard(
+            chatId,
+            `Approval Required (${q.requester}):\nTool: ${q.toolName}\nTarget: ${q.summary}`,
+            keyboard,
+            signal,
+          ).catch(() => {});
+          lastSentAt = now;
+        }
       }
-    }
 
-    // Surface questions from ask_user (elicitation)
-    const elStore = await import("../ai/store/elicitationStore");
-    const elPending = elStore.useElicitationStore.getState().pending;
-    for (const el of elPending) {
-      if (!sentElicitationIds.has(el.id)) {
-        sentElicitationIds.add(el.id);
-        const keyboard: InlineButton[][] = el.options.slice(0, 6).map((opt, i) => [
-          { text: opt.slice(0, 40), callback_data: `el:${el.id}:${i}` },
-        ]);
-        await sendKeyboard(
-          chatId,
-          `Agent Question:\n${el.question}`,
-          keyboard,
-          signal,
-        ).catch(() => {});
-        lastSentAt = now;
+      // Surface questions from ask_user (elicitation)
+      const elStore = await import("../ai/store/elicitationStore");
+      const elPending = elStore.useElicitationStore.getState().pending;
+      for (const el of elPending) {
+        if (!sentElicitationIds.has(el.id)) {
+          sentElicitationIds.add(el.id);
+          const keyboard: InlineButton[][] = el.options
+            .slice(0, 6)
+            .map((opt, i) => [
+              { text: opt.slice(0, 40), callback_data: `el:${el.id}:${i}` },
+            ]);
+          await sendKeyboard(
+            chatId,
+            `Agent Question:\n${el.question}`,
+            keyboard,
+            signal,
+          ).catch(() => {});
+          lastSentAt = now;
+        }
       }
-    }
 
-    if (step && step !== lastStep && now - lastSentAt >= 2500) {
-      lastStep = step;
-      await sendTelegram(chatId, `↳ ${step}`, signal).catch(() => {});
-      lastSentAt = now;
+      await sleep(signal, 1000);
     }
-    const sig = todos.map((t) => `${t.status}|${t.title}`).join(";");
-    if (todos.length > 0 && sig !== lastTodoSig && now - lastSentAt >= 3000) {
-      lastTodoSig = sig;
-      const block = compactTodoBlock(todos);
-      if (block) await sendTelegram(chatId, block, signal).catch(() => {});
-      lastSentAt = now;
+  } finally {
+    if (progressMessageId) {
+      const doneText = formatLiveProgress({ status: "idle", completed: true });
+      await editProgressMessage(
+        chatId,
+        progressMessageId,
+        doneText,
+        AbortSignal.timeout(4000),
+      ).catch(() => {});
     }
-
-    await sleep(signal, 1200);
   }
 }
 
@@ -1066,7 +1096,9 @@ async function handleCallback(
     const [, id, idxStr] = data.split(":");
     const idx = parseInt(idxStr, 10);
     const el = await import("../ai/store/elicitationStore");
-    const item = el.useElicitationStore.getState().pending.find((p) => p.id === id);
+    const item = el.useElicitationStore
+      .getState()
+      .pending.find((p) => p.id === id);
     if (item && item.options[idx]) {
       const choice = item.options[idx];
       el.useElicitationStore.getState().answer(id, choice);
@@ -1200,7 +1232,8 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
     case "/approve": {
       const state = await import("../ai/store/chatStore");
       const aq = await import("../ai/store/approvalQueueStore");
-      const pending = state.useChatStore.getState().agentMeta.pendingApprovals ?? [];
+      const pending =
+        state.useChatStore.getState().agentMeta.pendingApprovals ?? [];
       const aqPending = aq.useApprovalQueue.getState().pending;
       let count = 0;
       for (const p of pending) {
@@ -1211,13 +1244,18 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
         aq.useApprovalQueue.getState().respond([q.id], true);
         count++;
       }
-      await sendTelegram(chatId, `Approved ${count} pending action(s).`, signal);
+      await sendTelegram(
+        chatId,
+        `Approved ${count} pending action(s).`,
+        signal,
+      );
       return;
     }
     case "/deny": {
       const state = await import("../ai/store/chatStore");
       const aq = await import("../ai/store/approvalQueueStore");
-      const pending = state.useChatStore.getState().agentMeta.pendingApprovals ?? [];
+      const pending =
+        state.useChatStore.getState().agentMeta.pendingApprovals ?? [];
       const aqPending = aq.useApprovalQueue.getState().pending;
       let count = 0;
       for (const p of pending) {
@@ -1232,7 +1270,9 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
       return;
     }
     case "/mode": {
-      const { usePreferencesStore } = await import("@/modules/settings/preferences");
+      const { usePreferencesStore } = await import(
+        "@/modules/settings/preferences"
+      );
       const { setAgentApprovalMode } = await import("@/modules/settings/store");
       const current = usePreferencesStore.getState().agentApprovalMode;
       if (!tail) {
@@ -1245,30 +1285,51 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
       }
       if (tail === "all" || tail === "auto") {
         await setAgentApprovalMode("all");
-        await sendTelegram(chatId, "Approval mode set to: all (autonomous execution).", signal);
+        await sendTelegram(
+          chatId,
+          "Approval mode set to: all (autonomous execution).",
+          signal,
+        );
         return;
       }
       if (tail === "edits") {
         await setAgentApprovalMode("edits");
-        await sendTelegram(chatId, "Approval mode set to: edits (auto file edits).", signal);
+        await sendTelegram(
+          chatId,
+          "Approval mode set to: edits (auto file edits).",
+          signal,
+        );
         return;
       }
       if (tail === "ask") {
         await setAgentApprovalMode("ask");
-        await sendTelegram(chatId, "Approval mode set to: ask (prompt every time).", signal);
+        await sendTelegram(
+          chatId,
+          "Approval mode set to: ask (prompt every time).",
+          signal,
+        );
         return;
       }
-      await sendTelegram(chatId, "Unknown mode. Use: /mode all, /mode edits, or /mode ask", signal);
+      await sendTelegram(
+        chatId,
+        "Unknown mode. Use: /mode all, /mode edits, or /mode ask",
+        signal,
+      );
       return;
     }
     case "/scope": {
-      const { usePreferencesStore } = await import("@/modules/settings/preferences");
-      const { setPentestScope, setEnforcePentestScope } = await import("@/modules/settings/store");
+      const { usePreferencesStore } = await import(
+        "@/modules/settings/preferences"
+      );
+      const { setPentestScope, setEnforcePentestScope } = await import(
+        "@/modules/settings/store"
+      );
       const prefs = usePreferencesStore.getState();
       const scope = prefs.pentestScope ?? [];
       const [sub, ...args] = tail.split(/\s+/);
       if (!tail || sub === "list") {
-        const list = scope.length > 0 ? scope.map((h) => `- ${h}`).join("\n") : "(empty)";
+        const list =
+          scope.length > 0 ? scope.map((h) => `- ${h}`).join("\n") : "(empty)";
         await sendTelegram(
           chatId,
           `Authorized Pentest Scope:\n${list}\nEnforced: ${prefs.enforcePentestScope ? "yes" : "no"}\n\nCommands: /scope add <ip-or-host>, /scope clear, /scope toggle`,
@@ -1283,7 +1344,11 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
           return;
         }
         await setPentestScope([...new Set([...scope, host])]);
-        await sendTelegram(chatId, `Added '${host}' to authorized pentest scope.`, signal);
+        await sendTelegram(
+          chatId,
+          `Added '${host}' to authorized pentest scope.`,
+          signal,
+        );
         return;
       }
       if (sub === "clear") {
@@ -1294,10 +1359,18 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
       if (sub === "toggle") {
         const next = !prefs.enforcePentestScope;
         await setEnforcePentestScope(next);
-        await sendTelegram(chatId, `Pentest scope enforcement: ${next ? "enabled" : "disabled"}.`, signal);
+        await sendTelegram(
+          chatId,
+          `Pentest scope enforcement: ${next ? "enabled" : "disabled"}.`,
+          signal,
+        );
         return;
       }
-      await sendTelegram(chatId, "Usage: /scope [list | add <host> | clear | toggle]", signal);
+      await sendTelegram(
+        chatId,
+        "Usage: /scope [list | add <host> | clear | toggle]",
+        signal,
+      );
       return;
     }
     default:
