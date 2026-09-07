@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  escapeHtml,
   extractToolSummaries,
   formatLiveProgress,
+  markdownToTelegramHtml,
   summarizeToolInput,
   summarizeToolOutput,
   truncate,
@@ -165,10 +167,10 @@ describe("progressFormat", () => {
   describe("formatLiveProgress", () => {
     it("formats completed state cleanly", () => {
       const text = formatLiveProgress({ status: "idle", completed: true });
-      expect(text).toBe("[Termigo Agent] Finished.");
+      expect(text).toBe("**[Termigo Agent]** Finished.");
     });
 
-    it("formats in-progress status with active and recent tools", () => {
+    it("displays only currently running tool and task, past tools disappear automatically", () => {
       const text = formatLiveProgress({
         status: "streaming",
         round: 0,
@@ -186,16 +188,74 @@ describe("progressFormat", () => {
             input: "Get-ChildItem ...",
           },
         ],
-        todos: [{ title: "Clean duplicate files", status: "in_progress" }],
+        todos: [
+          { title: "Scan folder", status: "completed" },
+          { title: "Clean duplicate files", status: "in_progress" },
+          { title: "Report results", status: "pending" },
+        ],
       });
 
-      expect(text).toContain("[Termigo Agent] Status: Working... (round 1)");
-      expect(text).toContain("Step: Organizing files");
-      expect(text).toContain(
-        "Active:\n* bash_run [running]\n  in: Get-ChildItem ...",
+      expect(text).toContain("**[Termigo Agent]** *Working...* (round 1)");
+      expect(text).toContain("Step: *Organizing files*");
+      expect(text).toContain("Task: **Clean duplicate files**");
+      expect(text).toContain("Running: `bash_run` [running]\n`Get-ChildItem ...`");
+      // Completed tools and tasks disappear automatically
+      expect(text).not.toContain("list_directory");
+      expect(text).not.toContain("Recent:");
+      expect(text).not.toContain("Scan folder");
+      expect(text).not.toContain("Report results");
+    });
+  });
+
+  describe("markdownToTelegramHtml", () => {
+    it("converts bold syntax without leaving asterisks", () => {
+      expect(markdownToTelegramHtml("Teks **tebal** dan kuat")).toBe(
+        "Teks <b>tebal</b> dan kuat",
       );
-      expect(text).toContain("Recent:\n- list_directory [done]");
-      expect(text).toContain("Todo:\n- [in_progress] Clean duplicate files");
+    });
+
+    it("converts italic syntax with asterisks and underscores", () => {
+      expect(markdownToTelegramHtml("Teks *miring* dan _miring juga_")).toBe(
+        "Teks <i>miring</i> dan <i>miring juga</i>",
+      );
+      // Preserves snake_case variables outside code
+      expect(markdownToTelegramHtml("variable_name_test")).toBe(
+        "variable_name_test",
+      );
+    });
+
+    it("converts underline syntax", () => {
+      expect(markdownToTelegramHtml("Teks __bergaris bawah__")).toBe(
+        "Teks <u>bergaris bawah</u>",
+      );
+      expect(markdownToTelegramHtml("Teks <u>html underline</u>")).toBe(
+        "Teks <u>html underline</u>",
+      );
+    });
+
+    it("converts strikethrough syntax", () => {
+      expect(markdownToTelegramHtml("Teks ~~dicoret~~")).toBe(
+        "Teks <s>dicoret</s>",
+      );
+    });
+
+    it("converts inline code and code blocks with HTML escaping", () => {
+      expect(markdownToTelegramHtml("Perintah `Get-ChildItem <path> & test`")).toBe(
+        "Perintah <code>Get-ChildItem &lt;path&gt; &amp; test</code>",
+      );
+
+      const codeBlock = "```bash\necho 'hello <world> & all'\n```";
+      expect(markdownToTelegramHtml(codeBlock)).toBe(
+        '<pre><code class="language-bash">echo \'hello &lt;world&gt; &amp; all\'</code></pre>',
+      );
+    });
+
+    it("preserves emojis and converts links and headings", () => {
+      const input = "### Hasil Task 🚀\nSilakan cek [website](https://example.com) ✨";
+      const result = markdownToTelegramHtml(input);
+      expect(result).toContain("<b>Hasil Task 🚀</b>");
+      expect(result).toContain('<a href="https://example.com">website</a>');
+      expect(result).toContain("✨");
     });
   });
 });

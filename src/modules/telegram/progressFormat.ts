@@ -215,9 +215,116 @@ export function extractToolSummaries(parts: unknown[]): ToolCallSummary[] {
   return summaries;
 }
 
+export function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+/**
+ * Converts CommonMark / GitHub Markdown to Telegram-compatible HTML formatting:
+ * - **bold** -> <b>bold</b>
+ * - *italic* or _italic_ -> <i>italic</i>
+ * - __underline__ -> <u>underline</u>
+ * - ~~strikethrough~~ -> <s>strikethrough</s>
+ * - `inline code` -> <code>inline code</code>
+ * - ```code block``` -> <pre><code>code block</code></pre>
+ * - [link](url) -> <a href="url">link</a>
+ * - Unicode emojis pass through natively
+ */
+export function markdownToTelegramHtml(markdown: string): string {
+  if (!markdown) return "";
+
+  const codeBlocks: string[] = [];
+  const inlineCodes: string[] = [];
+
+  // 1. Extract fenced code blocks: ```lang\ncode\n```
+  let text = markdown.replace(
+    /```([a-zA-Z0-9_-]*)\r?\n([\s\S]*?)\r?\n```/g,
+    (_, lang, code) => {
+      const idx = codeBlocks.length;
+      const escaped = escapeHtml(code);
+      const html = lang
+        ? `<pre><code class="language-${lang}">${escaped}</code></pre>`
+        : `<pre><code>${escaped}</code></pre>`;
+      codeBlocks.push(html);
+      return `\x00CB_${idx}\x00`;
+    },
+  );
+
+  // 2. Extract non-newline code blocks: ```code```
+  text = text.replace(/```([\s\S]*?)```/g, (_, code) => {
+    const idx = codeBlocks.length;
+    codeBlocks.push(`<pre><code>${escapeHtml(code)}</code></pre>`);
+    return `\x00CB_${idx}\x00`;
+  });
+
+  // 3. Extract inline code: `code`
+  text = text.replace(/`([^`\r\n]+)`/g, (_, code) => {
+    const idx = inlineCodes.length;
+    inlineCodes.push(`<code>${escapeHtml(code)}</code>`);
+    return `\x00IC_${idx}\x00`;
+  });
+
+  // 4. Escape remaining HTML entities so raw <, >, & do not break Telegram parsing
+  text = escapeHtml(text);
+
+  // 5. Allow explicit user HTML tags: <b>, <i>, <u>, <s>, <code>, <pre>, <blockquote>
+  text = text.replace(
+    /&lt;(\/)?(b|i|u|s|code|pre|blockquote)&gt;/gi,
+    "<$1$2>",
+  );
+
+  // 6. Headings (# Title) -> <b>Title</b>
+  text = text.replace(/^(#{1,6})\s+(.+)$/gm, "<b>$2</b>");
+
+  // 7. Bold + Italic: ***text***
+  text = text.replace(/\*\*\*(.+?)\*\*\*/g, "<b><i>$1</i></b>");
+
+  // 8. Bold: **text**
+  text = text.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+
+  // 9. Underline: __text__
+  text = text.replace(/__(.+?)__/g, "<u>$1</u>");
+
+  // 10. Italic: *text* (avoiding remaining single asterisks)
+  text = text.replace(/(?<!\*)\*([^*\r\n]+?)\*(?!\*)/g, "<i>$1</i>");
+
+  // 11. Italic: _text_ (only when surrounded by whitespace or punctuation, to avoid snake_case)
+  text = text.replace(
+    /(?<=^|[\s(\[{])_([^_ \r\n][^_\r\n]*?[^_ \r\n]|\S)_(?=[)\]}\s.,:;!?]|$)/gm,
+    "<i>$1</i>",
+  );
+
+  // 12. Strikethrough: ~~text~~
+  text = text.replace(/~~(.+?)~~/g, "<s>$1</s>");
+
+  // 13. Links: [label](url)
+  text = text.replace(
+    /\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/g,
+    '<a href="$2">$1</a>',
+  );
+
+  // 14. Blockquotes: > quote
+  text = text.replace(/^&gt;\s+(.+)$/gm, "<blockquote>$1</blockquote>");
+
+  // 15. Restore inline code and code blocks
+  text = text.replace(
+    /\x00IC_(\d+)\x00/g,
+    (_, idx) => inlineCodes[Number(idx)] ?? "",
+  );
+  text = text.replace(
+    /\x00CB_(\d+)\x00/g,
+    (_, idx) => codeBlocks[Number(idx)] ?? "",
+  );
+
+  return text;
+}
+
 export function formatLiveProgress(opts: FormatLiveProgressOptions): string {
   if (opts.completed) {
-    return "[Termigo Agent] Finished.";
+    return "**[Termigo Agent]** Finished.";
   }
 
   const lines: string[] = [];
@@ -232,46 +339,32 @@ export function formatLiveProgress(opts: FormatLiveProgressOptions): string {
     typeof opts.round === "number" && opts.round >= 0
       ? ` (round ${opts.round + 1})`
       : "";
-  lines.push(`[Termigo Agent] Status: ${statusLabel}${roundPart}`);
+  lines.push(`**[Termigo Agent]** *${statusLabel}*${roundPart}`);
 
   if (opts.step) {
-    lines.push(`Step: ${opts.step}`);
+    lines.push(`Step: *${opts.step}*`);
   }
 
+  // Display only the currently in-progress task; past/completed tasks disappear automatically
+  const inProgressTodo = opts.todos?.find((t) => t.status === "in_progress");
+  if (inProgressTodo) {
+    lines.push(`Task: **${truncate(inProgressTodo.title, 60)}**`);
+  }
+
+  // Display only the currently running tool; past/completed tools disappear automatically
   const tools = opts.tools ?? [];
-  if (tools.length > 0) {
-    const active = tools.filter(
-      (t) => t.state === "running" || t.state === "awaiting-approval",
-    );
-    const recentCompleted = tools
-      .filter((t) => t.state === "done" || t.state === "error")
-      .slice(-2);
+  const active = tools.filter(
+    (t) => t.state === "running" || t.state === "awaiting-approval",
+  );
 
-    if (active.length > 0) {
-      lines.push("");
-      lines.push("Active:");
-      for (const t of active.slice(-1)) {
-        lines.push(`* ${t.toolName} [${t.state}]`);
-        if (t.input) lines.push(`  in: ${t.input}`);
+  if (active.length > 0) {
+    for (const t of active.slice(-1)) {
+      const stateLabel =
+        t.state === "awaiting-approval" ? "awaiting approval" : "running";
+      lines.push(`Running: \`${t.toolName}\` [${stateLabel}]`);
+      if (t.input) {
+        lines.push(`\`${t.input}\``);
       }
-    }
-
-    if (recentCompleted.length > 0) {
-      lines.push("");
-      lines.push("Recent:");
-      for (const t of recentCompleted) {
-        lines.push(`- ${t.toolName} [${t.state}]`);
-        if (t.input) lines.push(`  in: ${t.input}`);
-        if (t.output) lines.push(`  out: ${t.output}`);
-      }
-    }
-  }
-
-  if (opts.todos && opts.todos.length > 0) {
-    lines.push("");
-    lines.push("Todo:");
-    for (const t of opts.todos.slice(0, 5)) {
-      lines.push(`- [${t.status}] ${truncate(t.title, 40)}`);
     }
   }
 

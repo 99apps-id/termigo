@@ -7,6 +7,7 @@
 // agent's final answer back to the chat once the run settles.
 
 import { getTelegramToken } from "./keyring";
+import { markdownToTelegramHtml } from "./progressFormat";
 import { useTelegramStore } from "./store";
 
 const API = "https://api.telegram.org";
@@ -194,7 +195,16 @@ async function sendTelegram(
   const chunks = splitTelegramText(text);
   for (const chunk of chunks) {
     if (signal.aborted) break;
-    await apiPost("sendMessage", { chat_id: chatId, text: chunk }, signal);
+    const html = markdownToTelegramHtml(chunk);
+    try {
+      await apiPost(
+        "sendMessage",
+        { chat_id: chatId, text: html, parse_mode: "HTML" },
+        signal,
+      );
+    } catch {
+      await apiPost("sendMessage", { chat_id: chatId, text: chunk }, signal);
+    }
   }
 }
 
@@ -203,15 +213,25 @@ async function sendProgressMessage(
   text: string,
   signal: AbortSignal,
 ): Promise<number | null> {
+  const html = markdownToTelegramHtml(text);
   try {
     const res = (await apiPost(
       "sendMessage",
-      { chat_id: chatId, text },
+      { chat_id: chatId, text: html, parse_mode: "HTML" },
       signal,
     )) as { ok?: boolean; result?: { message_id?: number } };
     return res?.result?.message_id ?? null;
   } catch {
-    return null;
+    try {
+      const res = (await apiPost(
+        "sendMessage",
+        { chat_id: chatId, text },
+        signal,
+      )) as { ok?: boolean; result?: { message_id?: number } };
+      return res?.result?.message_id ?? null;
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -221,15 +241,30 @@ async function editProgressMessage(
   text: string,
   signal: AbortSignal,
 ): Promise<boolean> {
+  const html = markdownToTelegramHtml(text);
   try {
     await apiPost(
       "editMessageText",
-      { chat_id: chatId, message_id: messageId, text },
+      {
+        chat_id: chatId,
+        message_id: messageId,
+        text: html,
+        parse_mode: "HTML",
+      },
       signal,
     );
     return true;
   } catch {
-    return false;
+    try {
+      await apiPost(
+        "editMessageText",
+        { chat_id: chatId, message_id: messageId, text },
+        signal,
+      );
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
@@ -320,11 +355,25 @@ async function sendKeyboard(
   keyboard: InlineButton[][],
   signal: AbortSignal,
 ): Promise<void> {
-  await apiPost(
-    "sendMessage",
-    { chat_id: chatId, text, reply_markup: { inline_keyboard: keyboard } },
-    signal,
-  );
+  const html = markdownToTelegramHtml(text);
+  try {
+    await apiPost(
+      "sendMessage",
+      {
+        chat_id: chatId,
+        text: html,
+        parse_mode: "HTML",
+        reply_markup: { inline_keyboard: keyboard },
+      },
+      signal,
+    );
+  } catch {
+    await apiPost(
+      "sendMessage",
+      { chat_id: chatId, text, reply_markup: { inline_keyboard: keyboard } },
+      signal,
+    );
+  }
 }
 
 async function editKeyboard(
@@ -334,16 +383,31 @@ async function editKeyboard(
   keyboard: InlineButton[][],
   signal: AbortSignal,
 ): Promise<void> {
-  await apiPost(
-    "editMessageText",
-    {
-      chat_id: chatId,
-      message_id: messageId,
-      text,
-      reply_markup: { inline_keyboard: keyboard },
-    },
-    signal,
-  );
+  const html = markdownToTelegramHtml(text);
+  try {
+    await apiPost(
+      "editMessageText",
+      {
+        chat_id: chatId,
+        message_id: messageId,
+        text: html,
+        parse_mode: "HTML",
+        reply_markup: { inline_keyboard: keyboard },
+      },
+      signal,
+    );
+  } catch {
+    await apiPost(
+      "editMessageText",
+      {
+        chat_id: chatId,
+        message_id: messageId,
+        text,
+        reply_markup: { inline_keyboard: keyboard },
+      },
+      signal,
+    );
+  }
 }
 
 async function answerCallback(
