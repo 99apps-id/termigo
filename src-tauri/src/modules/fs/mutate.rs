@@ -42,14 +42,28 @@ pub fn fs_rename(from: String, to: String, workspace: Option<WorkspaceEnv>) -> R
     if to_p.exists() {
         return Err(format!("already exists: {}", to_p.display()));
     }
-    std::fs::rename(&from_p, &to_p).map_err(|e| {
+    if let Err(e) = std::fs::rename(&from_p, &to_p) {
+        if from_p.is_file() {
+            std::fs::copy(&from_p, &to_p)
+                .and_then(|_| std::fs::remove_file(&from_p))
+                .map_err(|copy_err| {
+                    log::debug!(
+                        "fs_rename copy-fallback({} -> {}) failed: {copy_err}",
+                        from_p.display(),
+                        to_p.display()
+                    );
+                    copy_err.to_string()
+                })?;
+            return Ok(());
+        }
         log::debug!(
             "fs_rename({} -> {}) failed: {e}",
             from_p.display(),
             to_p.display()
         );
-        e.to_string()
-    })
+        return Err(e.to_string());
+    }
+    Ok(())
 }
 
 /// Deletes a file or directory (recursively for dirs). Callers are

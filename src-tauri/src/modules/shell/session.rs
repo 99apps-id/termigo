@@ -106,7 +106,15 @@ impl ShellSession {
         }
         let cwd = self.current_cwd();
         let effective_workspace = workspace_hint.unwrap_or_else(|| self.workspace.clone());
-        let wrapped = wrap_with_sentinel(&trimmed, &effective_workspace, &self.sentinel);
+        #[cfg(windows)]
+        let cmd_to_wrap = if !effective_workspace.is_wsl() {
+            unwrap_powershell_command(&trimmed)
+        } else {
+            trimmed
+        };
+        #[cfg(not(windows))]
+        let cmd_to_wrap = trimmed;
+        let wrapped = wrap_with_sentinel(&cmd_to_wrap, &effective_workspace, &self.sentinel);
 
         let (tx, rx) = mpsc::channel::<Result<super::CommandOutput, String>>();
         let cwd_for_thread = cwd.clone();
@@ -141,6 +149,35 @@ impl ShellSession {
             cwd_after: resolved_cwd,
         })
     }
+}
+
+#[cfg(windows)]
+fn unwrap_powershell_command(cmd: &str) -> String {
+    let s = cmd.trim();
+    let lower = s.to_ascii_lowercase();
+    if !(lower.starts_with("powershell") || lower.starts_with("pwsh")) {
+        return cmd.to_string();
+    }
+    let after_cmd = if let Some(idx) = lower.find("-command ") {
+        &s[idx + 9..]
+    } else if let Some(idx) = lower.find("-c ") {
+        &s[idx + 3..]
+    } else {
+        return cmd.to_string();
+    };
+    let script = after_cmd.trim();
+    if script.starts_with('{') && script.ends_with('}') && script.len() >= 2 {
+        return script[1..script.len() - 1].trim().to_string();
+    }
+    if script.starts_with('"') && script.ends_with('"') && script.len() >= 2 {
+        let inner = &script[1..script.len() - 1];
+        return inner.replace("\\\"", "\"").replace("\"\"", "\"");
+    }
+    if script.starts_with('\'') && script.ends_with('\'') && script.len() >= 2 {
+        let inner = &script[1..script.len() - 1];
+        return inner.replace("''", "'");
+    }
+    script.to_string()
 }
 
 fn wrap_posix_with_sentinel(command: &str, sentinel: &str) -> String {
@@ -217,5 +254,15 @@ mod tests {
         let s = ShellSession::new("/tmp".into(), WorkspaceEnv::Local);
         let wrapped = wrap_with_sentinel("echo hi", &WorkspaceEnv::Local, &s.sentinel);
         assert!(wrapped.contains(&s.sentinel));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn unwrap_strips_redundant_powershell_wrapper() {
+        let cmd = "powershell -NoProfile -Command \"$c = Get-Content file.txt; $c[0..10]\"";
+        assert_eq!(
+            unwrap_powershell_command(cmd),
+            "$c = Get-Content file.txt; $c[0..10]"
+        );
     }
 }

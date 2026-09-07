@@ -13,7 +13,7 @@ const MAX_READ_BYTES: u64 = 10 * 1024 * 1024; // 10 MB
 const FORCE_MAX_READ_BYTES: u64 = 50 * 1024 * 1024;
 const BINARY_SNIFF_BYTES: usize = 8 * 1024;
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum ReadResult {
     Text {
@@ -207,6 +207,10 @@ fn read_file_sync(p: &Path, force: bool) -> Result<ReadResult, String> {
         e.to_string()
     })?;
 
+    if meta.is_dir() {
+        return Err(format!("'{}' is a directory, not a file", p.display()));
+    }
+
     let size = meta.len();
     let limit = if force {
         FORCE_MAX_READ_BYTES
@@ -381,11 +385,30 @@ fn write_atomic(target: &Path, content: &[u8]) -> std::io::Result<()> {
     if !parent.as_os_str().is_empty() && !parent.exists() {
         fs::create_dir_all(parent)?;
     }
-    let mut tmp = NamedTempFile::new_in(parent)?;
-    tmp.as_file_mut().write_all(content)?;
-    tmp.as_file_mut().sync_all()?;
-    tmp.persist(target).map_err(|e| e.error)?;
-    Ok(())
+    match NamedTempFile::new_in(parent) {
+        Ok(mut tmp) => {
+            tmp.as_file_mut().write_all(content)?;
+            tmp.as_file_mut().sync_all()?;
+            match tmp.persist(target) {
+                Ok(_) => Ok(()),
+                Err(persist_err) => {
+                    log::debug!(
+                        "write_atomic persist({}) failed ({}), falling back to direct write",
+                        target.display(),
+                        persist_err.error
+                    );
+                    fs::write(target, content)
+                }
+            }
+        }
+        Err(e) => {
+            log::debug!(
+                "write_atomic new_in({}) failed ({e}), falling back to direct write",
+                parent.display()
+            );
+            fs::write(target, content)
+        }
+    }
 }
 
 /// Returns the new mtime so the editor can track disk state for conflict
@@ -577,6 +600,13 @@ mod tests {
         std::fs::write(&target, b"old").unwrap();
         write_atomic(&target, b"new").unwrap();
         assert_eq!(std::fs::read(&target).unwrap(), b"new");
+    }
+
+    #[test]
+    fn read_file_refuses_directory_with_clear_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = read_file_sync(dir.path(), false).unwrap_err();
+        assert!(err.contains("is a directory, not a file"));
     }
 
     #[cfg(unix)]

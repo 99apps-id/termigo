@@ -1,5 +1,12 @@
+import { usePreferencesStore } from "@/modules/settings/preferences";
 import { describe, expect, it } from "vitest";
-import { makeSummary, POST_EXECUTE_CONFIRM_TOOLS } from "./postExecuteConfirm";
+import type { ToolContext } from "../tools/context";
+import { useConfirmationStore } from "../store/confirmationStore";
+import {
+  makeSummary,
+  POST_EXECUTE_CONFIRM_TOOLS,
+  withPostExecuteConfirm,
+} from "./postExecuteConfirm";
 
 describe("postExecuteConfirm (BatikCode PendingResultConfirmation parity)", () => {
   it("marks the mutating tools that pause for confirmation", () => {
@@ -35,5 +42,43 @@ describe("postExecuteConfirm (BatikCode PendingResultConfirmation parity)", () =
     expect(makeSummary("bash_run", { command: "npm run build" }, [])).toBe(
       "Ran command: npm run build",
     );
+  });
+
+  it("bypasses confirmation when agent approval mode is all", async () => {
+    usePreferencesStore.setState({
+      confirmAfterMutations: true,
+      agentApprovalMode: "all",
+    });
+    const fakeTool = {
+      execute: async () => ({ ok: true, path: "/p/a.ts" }),
+    };
+    const ctx = {
+      getSessionId: () => "s1",
+      getWorkspaceRoot: () => "/p",
+      getCwd: () => "/p",
+    } as unknown as ToolContext;
+    const wrapped = withPostExecuteConfirm("write_file", fakeTool, ctx);
+    const result = await wrapped.execute({ path: "/p/a.ts" }, {});
+    expect(result).toEqual({ ok: true, path: "/p/a.ts" });
+    expect(useConfirmationStore.getState().pending).toHaveLength(0);
+  });
+
+  it("bypasses confirmation for edit tools when agent approval mode is edits", async () => {
+    usePreferencesStore.setState({
+      confirmAfterMutations: true,
+      agentApprovalMode: "edits",
+    });
+    const fakeTool = {
+      execute: async () => ({ ok: true, path: "/p/b.ts" }),
+    };
+    const ctx = {
+      getSessionId: () => "s1",
+      getWorkspaceRoot: () => "/p",
+      getCwd: () => "/p",
+    } as unknown as ToolContext;
+    const wrapped = withPostExecuteConfirm("edit", fakeTool, ctx);
+    const result = await wrapped.execute({ path: "/p/b.ts" }, {});
+    expect(result).toEqual({ ok: true, path: "/p/b.ts" });
+    expect(useConfirmationStore.getState().pending).toHaveLength(0);
   });
 });

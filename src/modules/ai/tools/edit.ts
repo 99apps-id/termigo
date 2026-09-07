@@ -179,22 +179,15 @@ async function applyEdits(
     let targetOld = e.old_string;
     let targetNew = e.new_string;
 
-    // Line-ending reconciliation: if the file uses CRLF but the edit uses LF (or vice versa),
-    // adapt the edit strings to match the file's line ending style.
-    if (
-      content.includes("\r\n") &&
-      !targetOld.includes("\r\n") &&
-      targetOld.includes("\n")
-    ) {
-      const crlfOld = targetOld.replace(/\n/g, "\r\n");
+    // Line-ending reconciliation: if exact match fails, normalize line endings to find the match.
+    if (content.indexOf(targetOld) === -1) {
+      const normalizedOld = targetOld.replace(/\r\n/g, "\n");
+      const crlfOld = normalizedOld.replace(/\n/g, "\r\n");
       if (content.includes(crlfOld)) {
         targetOld = crlfOld;
         targetNew = targetNew.replace(/\r\n/g, "\n").replace(/\n/g, "\r\n");
-      }
-    } else if (!content.includes("\r\n") && targetOld.includes("\r\n")) {
-      const lfOld = targetOld.replace(/\r\n/g, "\n");
-      if (content.includes(lfOld)) {
-        targetOld = lfOld;
+      } else if (content.includes(normalizedOld)) {
+        targetOld = normalizedOld;
         targetNew = targetNew.replace(/\r\n/g, "\n");
       }
     }
@@ -331,7 +324,7 @@ export function buildEditTools(ctx: ToolContext) {
   return {
     edit: tool({
       description:
-        "Replace an exact string in a file. Requires read_file on this path first in the current session — this prevents blind edits. `old_string` must be unique in the file unless `replace_all: true`. Asks for user approval before writing. Always include `path`.",
+        "Replace an exact string in a file. `old_string` must be unique in the file unless `replace_all: true`. Asks for user approval before writing. Always include `path`.",
       inputSchema: z.preprocess(
         normalizeEditInput,
         z.object({
@@ -356,19 +349,26 @@ export function buildEditTools(ctx: ToolContext) {
         if (!path || !path.trim()) {
           return {
             error:
-              "missing `path` - name the file to edit (and read_file it first).",
+              "missing `path` - name the file to edit.",
             path: "",
           };
         }
         const resolved = await resolveEditTarget(ctx, path);
         if (!resolved.ok) return resolved.error;
         const { abs, io } = resolved;
-        if (!ctx.readCache.has(io.cacheKey(abs))) {
-          return {
-            error:
-              `must call read_file on this path first (read-before-edit requirement). Call read_file("${abs}") before editing.`,
-            path: abs,
-          };
+        const cacheKey = io.cacheKey(abs);
+        if (!ctx.readCache.has(cacheKey)) {
+          try {
+            const r = await io.read(abs);
+            if (r.kind === "text") {
+              ctx.readCache.set(cacheKey, {
+                size: r.size,
+                hash: djb2(r.content),
+              });
+            }
+          } catch {
+            // Ignore - applyEdits handles read failures cleanly
+          }
         }
         return applyEdits(
           abs,
@@ -382,7 +382,7 @@ export function buildEditTools(ctx: ToolContext) {
 
     multi_edit: tool({
       description:
-        "Apply several exact-string replacements to a single file atomically. Each edit is applied in order to the running buffer; if any edit's old_string is missing or non-unique, the whole batch aborts before writing. Requires prior read_file on the path. Asks for user approval before writing. Always include `path`.",
+        "Apply several exact-string replacements to a single file atomically. Each edit is applied in order to the running buffer; if any edit's old_string is missing or non-unique, the whole batch aborts before writing. Asks for user approval before writing. Always include `path`.",
       inputSchema: z.preprocess(
         normalizeEditInput,
         z.object({
@@ -403,19 +403,26 @@ export function buildEditTools(ctx: ToolContext) {
         if (!path || !path.trim()) {
           return {
             error:
-              "missing `path` - name the file to edit (and read_file it first).",
+              "missing `path` - name the file to edit.",
             path: "",
           };
         }
         const resolved = await resolveEditTarget(ctx, path);
         if (!resolved.ok) return resolved.error;
         const { abs, io } = resolved;
-        if (!ctx.readCache.has(io.cacheKey(abs))) {
-          return {
-            error:
-              `must call read_file on this path first (read-before-edit requirement). Call read_file("${abs}") before editing.`,
-            path: abs,
-          };
+        const cacheKey = io.cacheKey(abs);
+        if (!ctx.readCache.has(cacheKey)) {
+          try {
+            const r = await io.read(abs);
+            if (r.kind === "text") {
+              ctx.readCache.set(cacheKey, {
+                size: r.size,
+                hash: djb2(r.content),
+              });
+            }
+          } catch {
+            // Ignore - applyEdits handles read failures cleanly
+          }
         }
         return applyEdits(abs, edits, "multi_edit", ctx.readCache, io);
       },

@@ -1,4 +1,5 @@
 import { usePreferencesStore } from "@/modules/settings/preferences";
+import { isSessionAllowed } from "../store/approvalQueueStore";
 import { useConfirmationStore } from "../store/confirmationStore";
 import type { ToolContext } from "../tools/context";
 import { revertCommand } from "../tools/git";
@@ -89,6 +90,22 @@ export function withPostExecuteConfirm<
       }
       const sessionId = ctx.getSessionId();
       if (!sessionId) return result;
+
+      // When the approval policy allows autonomous execution (e.g. mode is "all",
+      // mode is "edits" for workspace file tools, or the tool is session/always allowed),
+      // do not pause the run for manual Keep or Revert clicks. Edit and save automatically.
+      const prefs = usePreferencesStore.getState();
+      const mode = prefs.agentApprovalMode;
+      const alwaysAllowed = prefs.agentAlwaysAllowedTools;
+      const isAuto =
+        mode === "all" ||
+        alwaysAllowed.includes(name) ||
+        isSessionAllowed(name) ||
+        (mode === "edits" && (name === "write_file" || name === "edit" || name === "multi_edit"));
+
+      if (isAuto) {
+        return result;
+      }
 
       const touchedPaths = touchedPathsFromResult(result);
       const summary = makeSummary(name, args, touchedPaths);

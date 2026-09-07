@@ -194,6 +194,62 @@ pub async fn fs_grep(
     .map_err(|e| e.to_string())?
 }
 
+fn search_single_file(
+    file_path: &Path,
+    root_display: &str,
+    workspace: &WorkspaceEnv,
+    matcher: &RegexMatcher,
+    cap: usize,
+) -> GrepResponse {
+    let mut hits = Vec::new();
+    let mut truncated = false;
+
+    if let Ok(meta) = std::fs::metadata(file_path) {
+        if meta.len() > FILE_SIZE_CAP {
+            return GrepResponse {
+                hits,
+                truncated: false,
+                files_scanned: 1,
+            };
+        }
+    }
+
+    let rel = file_path
+        .file_name()
+        .map(|n| to_canon(Path::new(n)))
+        .unwrap_or_default();
+    let abs = display_path(file_path, file_path, root_display, workspace);
+
+    let mut searcher = SearcherBuilder::new()
+        .binary_detection(BinaryDetection::quit(b'\x00'))
+        .line_number(true)
+        .build();
+
+    let _ = searcher.search_path(
+        matcher,
+        file_path,
+        UTF8(|line_num, text| {
+            if hits.len() >= cap {
+                truncated = true;
+                return Ok(false);
+            }
+            hits.push(GrepHit {
+                path: abs.clone(),
+                rel: rel.clone(),
+                line: line_num,
+                text: text.trim_end_matches('\n').to_string(),
+            });
+            Ok(true)
+        }),
+    );
+
+    GrepResponse {
+        hits,
+        truncated,
+        files_scanned: 1,
+    }
+}
+
 fn fs_grep_blocking(
     pattern: String,
     root: String,
@@ -207,8 +263,8 @@ fn fs_grep_blocking(
     }
     let workspace = WorkspaceEnv::from_option(workspace);
     let root_path = resolve_path(&root, &workspace);
-    if !root_path.is_dir() {
-        return Err(format!("not a directory: {root}"));
+    if !root_path.exists() {
+        return Err(format!("not found: {root}"));
     }
     let cap = max_results
         .unwrap_or(DEFAULT_MAX_RESULTS)
@@ -219,6 +275,20 @@ fn fs_grep_blocking(
         .line_terminator(Some(b'\n'))
         .build(&pattern)
         .map_err(|e| format!("bad regex: {e}"))?;
+
+    if root_path.is_file() {
+        return Ok(search_single_file(
+            &root_path,
+            &root,
+            &workspace,
+            &matcher,
+            cap,
+        ));
+    }
+
+    if !root_path.is_dir() {
+        return Err(format!("not a directory: {root}"));
+    }
 
     let globs = build_globset(glob.as_deref().unwrap_or(&[]))?;
 
@@ -250,8 +320,8 @@ pub fn fs_grep_interactive(
 
     let workspace = WorkspaceEnv::from_option(workspace);
     let root_path = resolve_path(&root, &workspace);
-    if !root_path.is_dir() {
-        return Err(format!("not a directory: {root}"));
+    if !root_path.exists() {
+        return Err(format!("not found: {root}"));
     }
     let cap = max_results
         .unwrap_or(DEFAULT_MAX_RESULTS)
@@ -262,6 +332,20 @@ pub fn fs_grep_interactive(
         .line_terminator(Some(b'\n'))
         .build(&escape_literal(&pattern))
         .map_err(|e| format!("bad pattern: {e}"))?;
+
+    if root_path.is_file() {
+        return Ok(search_single_file(
+            &root_path,
+            &root,
+            &workspace,
+            &matcher,
+            cap,
+        ));
+    }
+
+    if !root_path.is_dir() {
+        return Err(format!("not a directory: {root}"));
+    }
 
     let cancel = || state.generation.load(Ordering::SeqCst) != my_gen;
     Ok(search_tree(
@@ -414,5 +498,25 @@ mod tests {
             &|| true,
         );
         assert!(stopped.hits.is_empty(), "cancelled search yields nothing");
+    }
+
+    #[test]
+    fn fs_grep_blocking_searches_single_file_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("target.rs");
+        std::fs::write(&file_path, "fn recalculate() {\n    let count = 10;\n}\n").unwrap();
+        let res = fs_grep_blocking(
+            "recalculate|count".into(),
+            file_path.to_string_lossy().to_string(),
+            None,
+            None,
+            Some(30),
+            None,
+        )
+        .unwrap();
+        assert_eq!(res.hits.len(), 2);
+        assert_eq!(res.hits[0].line, 1);
+        assert_eq!(res.hits[1].line, 2);
+        assert_eq!(res.files_scanned, 1);
     }
 }

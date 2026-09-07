@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { buildFsTools, normalizeWriteFileInput } from "./fs";
+import {
+  READ_BYTE_CAP,
+  buildFsTools,
+  normalizeWriteFileInput,
+  sliceLines,
+} from "./fs";
 import type { ToolContext } from "./context";
 
 vi.mock("../lib/native", () => ({
@@ -95,3 +100,69 @@ describe("write_file tool execution", () => {
     expect(native.writeFile).toHaveBeenCalledWith("/workspace/report.md", "# Hello World");
   });
 });
+
+describe("sliceLines and read_file windowing", () => {
+  it("READ_BYTE_CAP is 64KB", () => {
+    expect(READ_BYTE_CAP).toBe(64 * 1024);
+  });
+
+  it("slices content with offset and limit correctly", () => {
+    const lines = Array.from({ length: 1000 }, (_, i) => `line ${i + 1}`);
+    const content = lines.join("\n");
+
+    const sliced = sliceLines(content, 500, 200);
+    expect(sliced.total_lines).toBe(1000);
+    expect(sliced.start_line).toBe(500);
+    expect(sliced.end_line).toBe(700);
+    expect(sliced.truncated).toBe(true);
+    expect(sliced.content.startsWith("line 501\n")).toBe(true);
+    expect(sliced.content.endsWith("\nline 700")).toBe(true);
+  });
+
+  it("returns helpful hint when read_file truncates", async () => {
+    const ctx = makeCtx();
+    const tools = buildFsTools(ctx);
+    const lines = Array.from({ length: 3000 }, (_, i) => `line ${i + 1}`);
+    vi.mocked(native.readFile).mockResolvedValue({
+      kind: "text",
+      content: lines.join("\n"),
+      size: 30000,
+    });
+
+    const exec = tools.read_file.execute as (
+      args: unknown,
+      opts: unknown,
+    ) => Promise<{ truncated?: boolean; hint?: string }>;
+
+    const res = await exec(
+      { path: "large.ts" },
+      { toolCallId: "t2", messages: [] },
+    );
+
+    expect(res.truncated).toBe(true);
+    expect(res.hint).toContain("offset and limit");
+  });
+
+  it("create_directory succeeds when directory already exists", async () => {
+    const ctx = makeCtx();
+    const tools = buildFsTools(ctx);
+    vi.mocked(native.createDir).mockRejectedValueOnce(
+      new Error("already exists: /workspace/docs"),
+    );
+
+    const exec = tools.create_directory.execute as (
+      args: unknown,
+      opts: unknown,
+    ) => Promise<{ ok?: boolean; already_exists?: boolean }>;
+
+    const res = await exec(
+      { path: "docs" },
+      { toolCallId: "t3", messages: [] },
+    );
+
+    expect(res.ok).toBe(true);
+    expect(res.already_exists).toBe(true);
+  });
+});
+
+

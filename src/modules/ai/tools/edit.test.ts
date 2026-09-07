@@ -88,15 +88,16 @@ beforeEach(() => {
 });
 
 describe("edit tool guards", () => {
-  it("refuses to edit a file that was never read (read-before-edit)", async () => {
+  it("auto-seeds the read cache and applies edit when file was not explicitly read with read_file", async () => {
     setFile("hello world");
     const result = await runEdit(makeContext(new Map()), {
       path: FILE,
       old_string: "hello",
       new_string: "bye",
     });
-    expect(result.error).toContain("read_file");
-    expect(nativeMock.writeFile).not.toHaveBeenCalled();
+    expect(result.error).toBeUndefined();
+    expect(result.replacements).toBe(1);
+    expect(nativeMock.writeFile).toHaveBeenCalledWith(FILE, "bye world");
   });
 
   it("errors when old_string is absent", async () => {
@@ -189,6 +190,20 @@ describe("edit tool replacement", () => {
     });
     expect(result.replacements).toBe(3);
     expect(nativeMock.writeFile).toHaveBeenCalledWith(FILE, "z b z b z");
+  });
+
+  it("reconciles CRLF line endings when edit input uses LF", async () => {
+    setFile("first line\r\nsecond line\r\nthird line\r\n");
+    const result = await runEdit(readContext(), {
+      path: FILE,
+      old_string: "first line\nsecond line",
+      new_string: "first line modified\nsecond line modified",
+    });
+    expect(result.replacements).toBe(1);
+    expect(nativeMock.writeFile).toHaveBeenCalledWith(
+      FILE,
+      "first line modified\r\nsecond line modified\r\nthird line\r\n",
+    );
   });
 });
 

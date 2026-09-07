@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { checkShellCommand } from "../lib/security";
 import {
   gitBlameCommand,
+  gitCommitMessageArgs,
   gitDiffCommand,
   gitLogCommand,
   gitPullCommand,
@@ -131,4 +133,26 @@ describe("git command builders", () => {
   it("rejects option-like refs starting with a dash in gitShowCommand", () => {
     expect(() => gitShowCommand({ ref: "--output=/tmp/pwn" })).toThrow();
   });
+
+  it("splits multiline commit messages into clean -m flags without CR/LF", () => {
+    const raw =
+      "fix: export issues\n\n- resolve video bounds\n- fix audio sync";
+    const args = gitCommitMessageArgs(raw);
+    expect(args).toBe(
+      "-m 'fix: export issues' -m '- resolve video bounds' -m '- fix audio sync'",
+    );
+    // Ensure no CR/LF control characters remain
+    expect(/[\r\n]/.test(args)).toBe(false);
+
+    // Verify it passes checkShellCommand
+    const cmd = `git commit ${args}`;
+    expect(checkShellCommand(cmd)).toMatchObject({ ok: true });
+  });
+
+  it("handles single-line and empty commit messages cleanly", () => {
+    expect(gitCommitMessageArgs("fix: quick fix")).toBe("-m 'fix: quick fix'");
+    expect(gitCommitMessageArgs("")).toBe("-m 'update'");
+    expect(gitCommitMessageArgs("   ")).toBe("-m 'update'");
+  });
 });
+

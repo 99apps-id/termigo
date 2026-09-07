@@ -25,8 +25,8 @@ import {
   type ToolContext,
 } from "./context";
 
-const READ_BYTE_CAP = 25 * 1024;
-const READ_LINE_CAP = 2000;
+export const READ_BYTE_CAP = 64 * 1024;
+export const READ_LINE_CAP = 2000;
 
 function djb2(s: string): number {
   let h = 5381;
@@ -90,7 +90,7 @@ function isImageReadOutput(o: unknown): o is ImageReadOutput {
 
 /** Slice file content to the read tool's line/byte caps. Shared by the local
  *  and remote read paths so both honour identical limits. */
-function sliceLines(
+export function sliceLines(
   content: string,
   offset: number | undefined,
   limit: number | undefined,
@@ -167,9 +167,9 @@ async function readRemoteFile(
       ...(sliced.truncated
         ? {
             truncated: true,
-            ...(isFullRead
-              ? { hint: "call read_file with offset to continue" }
-              : {}),
+            hint: isFullRead
+              ? "call read_file with offset and limit to continue reading remaining lines (e.g. offset: 500, limit: 500)"
+              : "call read_file with next offset to continue",
           }
         : {}),
     };
@@ -225,7 +225,7 @@ export function buildFsTools(ctx: ToolContext) {
   return {
     read_file: tool({
       description:
-        "Read a UTF-8 text file. Defaults to the first 2000 lines (capped at 25KB). Pass `offset`/`limit` for line-based windowing of large files. Refuses other binary, oversized, or sensitive files (.env, keys, credentials). IMAGES (png, jpeg, gif, webp) are returned as a picture you can actually see — call this on a screenshot, mockup, or diagram to look at it (requires a vision-capable model; local files only). If you call this on the same path twice in a session without edits in between, the second call returns `unchanged: true` instead of re-emitting the content — re-read the prior tool result. When the active terminal is an SSH session, paths resolve on the remote host (POSIX) and reads go over SFTP; Windows drive paths (C:...) still read locally.",
+        "Read a UTF-8 text file. Defaults to the first 2000 lines (capped at 64KB). Pass `offset`/`limit` for line-based windowing of large files. Refuses other binary, oversized, or sensitive files (.env, keys, credentials). IMAGES (png, jpeg, gif, webp) are returned as a picture you can actually see - call this on a screenshot, mockup, or diagram to look at it (requires a vision-capable model; local files only). If you call this on the same path twice in a session without edits in between, the second call returns `unchanged: true` instead of re-emitting the content - re-read the prior tool result. When the active terminal is an SSH session, paths resolve on the remote host (POSIX) and reads go over SFTP; Windows drive paths (C:...) still read locally.",
       inputSchema: z.object({
         path: z
           .string()
@@ -332,9 +332,9 @@ export function buildFsTools(ctx: ToolContext) {
             ...(sliced.truncated
               ? {
                   truncated: true,
-                  ...(isFullRead
-                    ? { hint: "call read_file with offset to continue" }
-                    : {}),
+                  hint: isFullRead
+                    ? "call read_file with offset and limit to continue reading remaining lines (e.g. offset: 500, limit: 500)"
+                    : "call read_file with next offset to continue",
                 }
               : {}),
           };
@@ -562,7 +562,11 @@ export function buildFsTools(ctx: ToolContext) {
           await native.createDir(abs);
           return { path: abs, ok: true };
         } catch (e) {
-          return { error: String(e), path: abs };
+          const msg = String(e);
+          if (msg.includes("already exists")) {
+            return { path: abs, ok: true, already_exists: true };
+          }
+          return { error: msg, path: abs };
         }
       },
     }),

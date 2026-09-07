@@ -84,11 +84,50 @@ export function truncateCommandOutput(
   };
 }
 
+/**
+ * Unwraps redundant `powershell [-NoProfile] [-Command] "<script>"` wrappers.
+ *
+ * When running on Windows, Termigo's persistent shell session is already PowerShell.
+ * If the model runs `powershell -NoProfile -Command "$c = ...; $c[500..720]..."`,
+ * the outer PowerShell parses the argument as a double-quoted expandable string,
+ * expanding variables like `$c` to empty strings and causing parser errors such as
+ * "Missing type name after '['". Unwrapping allows the command to run directly in the
+ * active PowerShell process without nested double-quote variable interpolation.
+ */
+export function unwrapPowershellCommand(command: string): string {
+  const trimmed = command.trim();
+  const match = trimmed.match(
+    /^(?:powershell(?:\.exe)?|pwsh(?:\.exe)?)\s+(?:-(?:NoProfile|NonInteractive|ExecutionPolicy\s+\S+|WindowStyle\s+\S+|STA|MTA)\s+)*(?:-(?:Command|c)\s+)?([\s\S]+)$/i,
+  );
+  if (!match) return command;
+
+  const script = match[1].trim();
+
+  // If wrapped in script block `{ ... }`
+  if (script.startsWith("{") && script.endsWith("}")) {
+    return script.slice(1, -1).trim();
+  }
+
+  // If wrapped in double quotes `"..."`
+  if (script.startsWith('"') && script.endsWith('"') && script.length >= 2) {
+    const unquoted = script.slice(1, -1);
+    return unquoted.replace(/\\"/g, '"').replace(/""/g, '"');
+  }
+
+  // If wrapped in single quotes `'...'`
+  if (script.startsWith("'") && script.endsWith("'") && script.length >= 2) {
+    const unquoted = script.slice(1, -1);
+    return unquoted.replace(/''/g, "'");
+  }
+
+  return script;
+}
+
 export function buildShellTools(ctx: ToolContext) {
   return {
     bash_run: tool({
       description:
-        "Run a foreground shell command. When the active terminal is an SSH session the command runs ON THE REMOTE HOST, from the remote shell's working directory, and always asks for approval regardless of the approval mode. Otherwise it runs in this session's persistent local shell, where cwd persists across calls. Use for short-lived commands (build, install, service restarts, a quick grep). For project-wide lint/test use `run_checks` instead (it defaults to 300s). For long-running local daemons use `bash_background`. NEVER invoke interactive tools (vim, less, top) - they will hang. To FIND files, use the `glob` tool (fast, ignores node_modules/.git, capped) - a recursive shell scan (`Get-ChildItem -Recurse`, `find`, `dir /s`) from a large or home directory can time out. Match the shell in the <env> block: on Windows that is PowerShell, so use PowerShell syntax (`2>$null`, not `2>nul`), never cmd/DOS.",
+        "Run a foreground shell command. When the active terminal is an SSH session the command runs ON THE REMOTE HOST, from the remote shell's working directory, and always asks for approval regardless of the approval mode. Otherwise it runs in this session's persistent local shell, where cwd persists across calls. Use for short-lived commands (build, install, service restarts, a quick grep). For project-wide lint/test use `run_checks` instead (it defaults to 300s). For long-running local daemons use `bash_background`. NEVER invoke interactive tools (vim, less, top) - they will hang. To FIND files, use the `glob` tool (fast, ignores node_modules/.git, capped) - a recursive shell scan (`Get-ChildItem -Recurse`, `find`, `dir /s`) from a large or home directory can time out. Match the shell in the <env> block: on Windows that is PowerShell, so use PowerShell syntax (`2>$null`, not `2>nul`), never cmd/DOS. Do NOT use `&&` to chain commands on Windows PowerShell; use `;` instead (e.g. `cd dir; cargo check`) because PowerShell 5.1 does not support `&&`. You are ALREADY inside a persistent PowerShell session on Windows: do NOT prefix commands with `powershell -Command \"...\"` or `powershell -NoProfile -Command \"...\"`. Run PowerShell commands directly (e.g. `Get-Content ...`).",
       inputSchema: z.object({
         command: z.string(),
         timeout_secs: z
@@ -103,9 +142,6 @@ export function buildShellTools(ctx: ToolContext) {
       }),
       needsApproval: true,
       execute: async ({ command, timeout_secs }, { abortSignal }) => {
-        const safety = screenCommand(command);
-        if (!safety.ok) return { error: safety.reason };
-
         // With an SSH terminal focused the model means the server, so the
         // command runs there. This one always asks, in every approval mode:
         // see REMOTE_ALWAYS_ASK in approvalPolicy. The safety check above ran
@@ -115,6 +151,8 @@ export function buildShellTools(ctx: ToolContext) {
           // Run from the shell's own directory. The exec channel starts in the
           // SSH user's home, so `docker compose up` would otherwise run
           // somewhere other than the project the user is looking at.
+          const safety = screenCommand(command);
+          if (!safety.ok) return { error: safety.reason };
           const full = remote.cwd
             ? `cd ${shellQuote(remote.cwd)} && ${command}`
             : command;
@@ -148,6 +186,11 @@ export function buildShellTools(ctx: ToolContext) {
             return { error: String(e), command, remote: true };
           }
         }
+
+        const effectiveCommand = unwrapPowershellCommand(command);
+        const safety = screenCommand(effectiveCommand);
+        if (!safety.ok) return { error: safety.reason };
+
         const sid = ctx.getSessionId();
         if (!sid) return { error: "no active chat session" };
         try {
@@ -178,7 +221,7 @@ export function buildShellTools(ctx: ToolContext) {
           try {
             r = await native.shellSessionRun(
               shellId,
-              command,
+              effectiveCommand,
               cwd,
               timeout_secs,
             );
@@ -189,7 +232,7 @@ export function buildShellTools(ctx: ToolContext) {
           const stdoutTrunc = truncateCommandOutput(r.stdout ?? "");
           const stderrTrunc = truncateCommandOutput(r.stderr ?? "");
           return {
-            command,
+            command: effectiveCommand,
             stdout: stdoutTrunc.text,
             stderr: stderrTrunc.text,
             exit_code: r.exit_code,
@@ -234,14 +277,15 @@ export function buildShellTools(ctx: ToolContext) {
             "Use bash_run with `nohup CMD > /tmp/out.log 2>&1 &` and read the log file afterwards.",
           );
         }
-        const safety = screenCommand(command);
+        const effectiveCommand = unwrapPowershellCommand(command);
+        const safety = screenCommand(effectiveCommand);
         if (!safety.ok) return { error: safety.reason };
         // Project-first cwd, matching bash_run: a model-supplied cwd wins, else
         // the workspace root, else the terminal cwd.
         const effectiveCwd = cwd ?? ctx.getWorkspaceRoot() ?? ctx.getCwd();
         try {
-          const handle = await native.shellBgSpawn(command, effectiveCwd);
-          return { handle, command, cwd: effectiveCwd, ok: true };
+          const handle = await native.shellBgSpawn(effectiveCommand, effectiveCwd);
+          return { handle, command: effectiveCommand, cwd: effectiveCwd, ok: true };
         } catch (e) {
           return { error: String(e) };
         }

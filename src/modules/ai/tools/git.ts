@@ -68,6 +68,22 @@ export function gitPushCommand(): string {
   return "git push";
 }
 
+/**
+ * Convert a commit message into git -m arguments.
+ * Splits paragraphs and lines so no raw CR/LF control characters enter the shell command.
+ * Git concatenates multiple -m arguments as separate paragraphs.
+ */
+export function gitCommitMessageArgs(message: string): string {
+  const paragraphs = message
+    .split(/\r?\n\r?\n|\r?\n/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (paragraphs.length === 0) {
+    return `-m ${quoteShellArg(message.trim() || "update")}`;
+  }
+  return paragraphs.map((p) => `-m ${quoteShellArg(p)}`).join(" ");
+}
+
 export function gitPullCommand(): string {
   return "git pull --ff-only";
 }
@@ -292,23 +308,40 @@ export function buildGitTools(ctx: ToolContext) {
         if (!sid) return { error: "no active chat session" };
         const cwd = repoRootFor(ctx.getWorkspaceRoot(), ctx.getCwd());
         const label = (message ?? "checkpoint").trim() || "checkpoint";
-        const command = `git add -A && git commit -m ${quoteShellArg(
-          `checkpoint: ${label}`,
-        )}`;
-        const safety = checkShellCommand(command);
-        if (!safety.ok) return { error: safety.reason };
+        const addCommand = "git add -A";
+        const commitCommand = `git commit ${gitCommitMessageArgs(`checkpoint: ${label}`)}`;
+        const safetyAdd = checkShellCommand(addCommand);
+        if (!safetyAdd.ok) return { error: safetyAdd.reason };
+        const safetyCommit = checkShellCommand(commitCommand);
+        if (!safetyCommit.ok) return { error: safetyCommit.reason };
+        const combined = `${addCommand}; ${commitCommand}`;
         try {
           const shellId = await getSessionShell(
             sessionShellKey("git", sid, ctx.getWorkspaceRoot()),
             cwd,
           );
-          const r = await native.shellSessionRun(shellId, command, cwd, 120);
+          const addRes = await native.shellSessionRun(shellId, addCommand, cwd, 60);
+          if (addRes.exit_code !== 0) {
+            return {
+              command: addCommand,
+              message: `checkpoint: ${label}`,
+              stdout: addRes.stdout,
+              stderr: addRes.stderr,
+              exit_code: addRes.exit_code,
+            };
+          }
+          const commitRes = await native.shellSessionRun(
+            shellId,
+            commitCommand,
+            cwd,
+            120,
+          );
           return {
-            command,
+            command: combined,
             message: `checkpoint: ${label}`,
-            stdout: r.stdout,
-            stderr: r.stderr,
-            exit_code: r.exit_code,
+            stdout: commitRes.stdout,
+            stderr: commitRes.stderr,
+            exit_code: commitRes.exit_code,
           };
         } catch (e) {
           return { error: String(e) };
@@ -393,12 +426,16 @@ export function buildGitTools(ctx: ToolContext) {
         const add = paths?.length
           ? paths.map((p) => quoteShellArg(p)).join(" ")
           : "-A";
-        const command = `git add ${add} && git commit -m ${quoteShellArg(message)}`;
-        const safety = checkShellCommand(command);
-        if (!safety.ok) return { error: safety.reason };
+        const addCommand = `git add ${add}`;
+        const commitCommand = `git commit ${gitCommitMessageArgs(message)}`;
+        const safetyAdd = checkShellCommand(addCommand);
+        if (!safetyAdd.ok) return { error: safetyAdd.reason };
+        const safetyCommit = checkShellCommand(commitCommand);
+        if (!safetyCommit.ok) return { error: safetyCommit.reason };
+        const combined = `${addCommand}; ${commitCommand}`;
         const policy = await enforcePolicy({
           toolName: "git_commit",
-          command,
+          command: combined,
           path: cwd,
         });
         if (!policy.allowed) {
@@ -409,13 +446,28 @@ export function buildGitTools(ctx: ToolContext) {
             sessionShellKey("git", sid, ctx.getWorkspaceRoot()),
             cwd,
           );
-          const r = await native.shellSessionRun(shellId, command, cwd, 120);
+          const addRes = await native.shellSessionRun(shellId, addCommand, cwd, 60);
+          if (addRes.exit_code !== 0) {
+            return {
+              command: addCommand,
+              message,
+              stdout: addRes.stdout,
+              stderr: addRes.stderr,
+              exit_code: addRes.exit_code,
+            };
+          }
+          const commitRes = await native.shellSessionRun(
+            shellId,
+            commitCommand,
+            cwd,
+            120,
+          );
           return {
-            command,
+            command: combined,
             message,
-            stdout: r.stdout,
-            stderr: r.stderr,
-            exit_code: r.exit_code,
+            stdout: commitRes.stdout,
+            stderr: commitRes.stderr,
+            exit_code: commitRes.exit_code,
           };
         } catch (e) {
           return { error: String(e) };

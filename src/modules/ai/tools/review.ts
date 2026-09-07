@@ -73,11 +73,12 @@ export function buildReviewTools(ctx: ToolContext) {
         try {
           const r = await runSubagent({
             type: "code-review",
-            prompt: `Review the following git diff for correctness bugs, security risks and architecture issues. Report only ACTIONABLE findings, each as "[MUST/SHOULD/NIT] — issue → fix". If nothing is wrong say "Looks good."\n\n\`\`\`diff\n${diff.stdout}\n\`\`\``,
+            prompt: `Review the following git diff for correctness bugs, security risks and architecture issues. Report only ACTIONABLE findings, each as "[MUST/SHOULD/NIT] - issue -> fix". If nothing is wrong say "Looks good."\n\n\`\`\`diff\n${diff.stdout}\n\`\`\``,
             keys: apiKeys,
             modelId: selectedModelId,
             toolContext: ctx,
             requester: "code review",
+            abortSignal: AbortSignal.timeout(45_000),
           });
           return { command: diff.command, summary: r.summary };
         } catch (e) {
