@@ -1,0 +1,17 @@
+[Unit]
+Description=Termigo Headless AI Telegram Relay
+After=network.target
+
+[Service]
+Type=simple
+User=admin
+WorkingDirectory=/opt/termigo
+ExecStart=/opt/termigo/scripts/run-headless.sh
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
