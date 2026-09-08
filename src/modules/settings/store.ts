@@ -276,6 +276,16 @@ export type Preferences = {
    * costs a little time per edit.
    */
   autoVerifyAfterEdit: boolean;
+  /**
+   * Keep a task running when it only paused on its step budget. Reaching the
+   * round's budget is not a failure - the transcript is intact and the next
+   * round simply gets the next rung (25 -> 50 -> 100) - so the agent resumes
+   * itself instead of waiting for a "Continue" click per round. Guards that
+   * fire on a STUCK agent (repetition, no progress, repeated tool errors,
+   * cost caps) still stop for the user, and a bounded number of continues per
+   * task keeps a runaway loop from spending unattended. On by default.
+   */
+  agentAutoContinue: boolean;
 };
 
 export type EditorFormatter =
@@ -389,6 +399,7 @@ const KEY_TERMINAL_AI_SUGGEST = "terminalAiSuggest";
 const KEY_SHOW_REASONING = "showReasoning";
 const KEY_CONFIRM_AFTER_MUTATIONS = "confirmAfterMutations";
 const KEY_AUTO_VERIFY_AFTER_EDIT = "autoVerifyAfterEdit";
+const KEY_AGENT_AUTO_CONTINUE = "agentAutoContinue";
 
 export const TERMINAL_FONT_SIZE_DEFAULT = 14;
 export const TERMINAL_FONT_SIZE_MIN = 8;
@@ -497,6 +508,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   showReasoning: true,
   confirmAfterMutations: false,
   autoVerifyAfterEdit: false,
+  agentAutoContinue: true,
 };
 
 const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
@@ -789,6 +801,9 @@ export async function loadPreferences(): Promise<Preferences> {
     autoVerifyAfterEdit:
       get<boolean>(KEY_AUTO_VERIFY_AFTER_EDIT) ??
       DEFAULT_PREFERENCES.autoVerifyAfterEdit,
+    agentAutoContinue:
+      get<boolean>(KEY_AGENT_AUTO_CONTINUE) ??
+      DEFAULT_PREFERENCES.agentAutoContinue,
     agentLaunchCommands: normalizeAgentLaunchCommands(
       get<unknown>(KEY_AGENT_LAUNCH_COMMANDS),
     ),
@@ -1248,6 +1263,10 @@ export async function setAutoVerifyAfterEdit(value: boolean): Promise<void> {
   await writePref(KEY_AUTO_VERIFY_AFTER_EDIT, value);
 }
 
+export async function setAgentAutoContinue(value: boolean): Promise<void> {
+  await writePref(KEY_AGENT_AUTO_CONTINUE, value);
+}
+
 export async function setAgentLaunchCommands(
   value: AgentLaunchCommands,
 ): Promise<void> {
@@ -1367,6 +1386,7 @@ export async function onPreferencesChange(
     [KEY_TERMINAL_AI_SUGGEST]: "terminalAiSuggest",
     [KEY_CONFIRM_AFTER_MUTATIONS]: "confirmAfterMutations",
     [KEY_AUTO_VERIFY_AFTER_EDIT]: "autoVerifyAfterEdit",
+    [KEY_AGENT_AUTO_CONTINUE]: "agentAutoContinue",
   };
   // Same-process writes still fire onChange immediately; cross-window writes
   // arrive via the Tauri event emitted by writePref().
