@@ -1,6 +1,6 @@
+import type { ModelMessage } from "ai";
 import { describe, expect, it } from "vitest";
 import { evictObsoleteToolOutputs } from "./contextEviction";
-import type { ModelMessage } from "ai";
 
 describe("contextEviction", () => {
   it("evicts older read_file outputs while keeping the latest read intact", () => {
@@ -17,7 +17,12 @@ describe("contextEviction", () => {
             toolCallId: "call-1",
             toolName: "read_file",
             input: { path: "src/main.ts" },
-            output: { type: "text", value: "console.log('version 1 - very long source code content');", path: "src/main.ts" },
+            output: {
+              type: "text",
+              value:
+                "console.log('version 1 - very long source code content');",
+              path: "src/main.ts",
+            },
           },
         ],
       },
@@ -33,7 +38,11 @@ describe("contextEviction", () => {
             toolCallId: "call-2",
             toolName: "read_file",
             input: { path: "src/main.ts" },
-            output: { type: "text", value: "console.log('version 2 - latest updated content');", path: "src/main.ts" },
+            output: {
+              type: "text",
+              value: "console.log('version 2 - latest updated content');",
+              path: "src/main.ts",
+            },
           },
         ],
       },
@@ -49,7 +58,9 @@ describe("contextEviction", () => {
     const secondToolPart = (result.messages[3].content as any)[0];
 
     expect(firstToolPart.output.value).toContain("evicted to save context");
-    expect(secondToolPart.output.value).toBe("console.log('version 2 - latest updated content');");
+    expect(secondToolPart.output.value).toBe(
+      "console.log('version 2 - latest updated content');",
+    );
   });
 
   it("finds the path inside SDK-wrapped outputs ({ type: 'json', value })", () => {
@@ -67,7 +78,10 @@ describe("contextEviction", () => {
             toolName: "read_file",
             output: {
               type: "json",
-              value: { path: "src/main.ts", content: "old content, long enough to matter" },
+              value: {
+                path: "src/main.ts",
+                content: "old content, long enough to matter",
+              },
             },
           },
         ],
@@ -117,6 +131,52 @@ describe("contextEviction", () => {
     const result = evictObsoleteToolOutputs(messages);
     expect(result.summary.evictedToolCalls).toBe(0);
     // biome-ignore lint/suspicious/noExplicitAny: tool content shape is SDK-typed, cast to read part fields
-    expect((result.messages[0].content as any)[0].output.value.stdout).toBe("ok");
+    expect((result.messages[0].content as any)[0].output.value.stdout).toBe(
+      "ok",
+    );
+  });
+
+  it("evicts stale duplicate reads inside ONE collapsed message", () => {
+    // An auto-continuing turn collapses its whole tool history into a single
+    // tool message (the 0.9.10 log shape: 15 read_file parts in one 24 KB
+    // message). Dedupe must work PART-WISE inside that array, not just across
+    // messages — the older copy of the same path is dead weight even when both
+    // results sit in the same message.
+    const messages = [
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "c1",
+            toolName: "read_file",
+            output: {
+              type: "json",
+              value: {
+                path: "src/main.ts",
+                content: "old copy, long enough to matter here",
+              },
+            },
+          },
+          {
+            type: "tool-result",
+            toolCallId: "c2",
+            toolName: "read_file",
+            output: {
+              type: "json",
+              value: { path: "src/main.ts", content: "new copy" },
+            },
+          },
+        ],
+      },
+    ] as unknown as ModelMessage[];
+
+    const result = evictObsoleteToolOutputs(messages);
+    expect(result.summary.evictedToolCalls).toBe(1);
+    // biome-ignore lint/suspicious/noExplicitAny: tool content shape is SDK-typed, cast to read part fields
+    const parts = result.messages[0].content as any[];
+    // Walking backwards keeps the NEWEST (c2) intact and evicts the older (c1).
+    expect(parts[0].output.value).toContain("evicted to save context");
+    expect(parts[1].output.value.content).toBe("new copy");
   });
 });

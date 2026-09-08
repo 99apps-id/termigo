@@ -39,22 +39,34 @@ function readPath(part: { input?: unknown; output?: unknown }): string | null {
  * older `read_file` outputs waste precious context tokens without providing value.
  * This function preserves the latest file read while collapsing older duplicate reads.
  */
-export function evictObsoleteToolOutputs(
-  messages: readonly ModelMessage[],
-): { messages: ModelMessage[]; summary: EvictionSummary } {
+export function evictObsoleteToolOutputs(messages: readonly ModelMessage[]): {
+  messages: ModelMessage[];
+  summary: EvictionSummary;
+} {
   let evictedCount = 0;
   let estimatedTokens = 0;
 
   const seenReadPaths = new Set<string>();
   const cloned: ModelMessage[] = JSON.parse(JSON.stringify(messages));
 
-  // Walk backwards from newest to oldest
+  // Walk backwards from newest to oldest. Both loops must go newest-first:
+  // an auto-continuing turn collapses its whole tool history into ONE message
+  // (the 0.9.10 log shape: 15 read_file parts in one 24 KB message), and a
+  // forward walk over the parts array would evict the NEWEST duplicate and
+  // keep the stale one - backwards.
   for (let i = cloned.length - 1; i >= 0; i--) {
     const msg = cloned[i];
     if (msg.role !== "tool") continue;
 
     if (Array.isArray(msg.content)) {
-      for (const part of msg.content as { type: string; toolName?: string; input?: unknown; output?: unknown }[]) {
+      const parts = msg.content as {
+        type: string;
+        toolName?: string;
+        input?: unknown;
+        output?: unknown;
+      }[];
+      for (let p = parts.length - 1; p >= 0; p--) {
+        const part = parts[p];
         if (part.type === "tool-result" && part.toolName === "read_file") {
           const path = readPath(part);
           if (path) {

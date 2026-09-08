@@ -202,6 +202,81 @@ describe("compactModelMessagesDetailed floor", () => {
     expect(result.compacted).toBe(true);
     expect(estTokens(result.messages)).toBeLessThan(limit);
   });
+
+  // The collapsed-turn case (the 0.9.10 log): an auto-continuing turn puts
+  // dozens of tool calls in ONE assistant message and their results in ONE
+  // tool message, so the whole turn is two messages - inside KEEP_TAIL, where
+  // the message-count passes cannot reach it. Under budget pressure the
+  // tail-elision pass must elide the OLDEST results in that message and keep
+  // the newest TAIL_RESULTS_KEEP, leaving the call parts (pairing) intact.
+  it("elides stale tool results inside a collapsed tail turn", () => {
+    const calls = Array.from({ length: 10 }, (_, i) => ({
+      type: "tool-call",
+      toolCallId: `c${i}`,
+      toolName: "bash_run",
+      input: { command: `echo ${i}` },
+    }));
+    const results = Array.from({ length: 10 }, (_, i) => ({
+      type: "tool-result",
+      toolCallId: `c${i}`,
+      toolName: "bash_run",
+      output: { type: "text", value: "r".repeat(300) },
+    }));
+    // Enough small turns BEFORE the collapsed one that the collapsed turn
+    // (2 messages: calls + results) sits inside the KEEP_TAIL the pre-tail
+    // passes never touch - the exact 0.9.10 shape, where the whole budget
+    // pressure lives inside ONE assistant/tool pair.
+    const warmup: ModelMessage[] = Array.from({ length: 30 }, (_, i) => ({
+      role: i % 2 === 0 ? "user" : "assistant",
+      content: `step ${i}`,
+    })) as unknown as ModelMessage[];
+    const messages = [
+      ...warmup,
+      { role: "assistant", content: calls },
+      { role: "tool", content: results },
+    ] as unknown as ModelMessage[];
+    // 10x300 chars ≈ 1150 est-tokens against a 1000-token budget: over the
+    // 0.6 trigger, but small enough that eliding 4 of the 10 clears it — the
+    // pass must stop at the floor of 6 kept and not eat the working set.
+    const result = compactModelMessagesDetailed(messages, 1000);
+    expect(result.compacted).toBe(true);
+    // biome-ignore lint/suspicious/noExplicitAny: reading part shape in a test
+    const parts = result.messages[result.messages.length - 1].content as any[];
+    const elided = parts.filter((p) => p.output?.__elided === true);
+    expect(elided.length).toBe(4); // 10 - TAIL_RESULTS_KEEP(6)
+    // The oldest are gone, the newest six are intact.
+    expect(parts[0].output.__elided).toBe(true);
+    expect(parts[3].output.__elided).toBe(true);
+    expect(parts[4].output?.__elided).toBeUndefined();
+    expect(parts[9].output?.__elided).toBeUndefined();
+    // Tool-call parts keep their ids: provider pairing is untouched.
+    const callMsg = result.messages[result.messages.length - 2];
+    // biome-ignore lint/suspicious/noExplicitAny: reading part shape in a test
+    const callParts = callMsg.content as any[];
+    expect(callParts.every((p) => p.type === "tool-call" && p.toolCallId)).toBe(
+      true,
+    );
+  });
+
+  // Under budget there is no reason to touch the tail's fresh results at all.
+  it("leaves tail tool results alone when the transcript fits", () => {
+    const results = Array.from({ length: 10 }, (_, i) => ({
+      type: "tool-result",
+      toolCallId: `c${i}`,
+      toolName: "bash_run",
+      output: { type: "text", value: `out ${i}` },
+    }));
+    const messages = [
+      { role: "user", content: "ls" },
+      { role: "tool", content: results },
+    ] as unknown as ModelMessage[];
+    const result = compactModelMessagesDetailed(messages, 100_000);
+    expect(result.compacted).toBe(false);
+    const tailMsg = result.messages[1];
+    // biome-ignore lint/suspicious/noExplicitAny: reading part shape in a test
+    const tailParts = tailMsg.content as any[];
+    expect(tailParts[0].output.__elided).toBeUndefined();
+  });
 });
 
 describe("compactModelMessagesDetailed tool-call inputs", () => {

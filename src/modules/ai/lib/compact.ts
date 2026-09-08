@@ -1,6 +1,10 @@
 import type { ModelMessage } from "ai";
 
 const KEEP_TAIL = 24;
+// Note: KEEP_TAIL counts MESSAGES, but one auto-continuing turn collapses
+// dozens of tool calls into a single assistant message + one tool message of
+// results - the whole turn can be two messages. The tail-elision pass below
+// (TAIL_RESULTS_KEEP) is what reaches the stale results inside it.
 const ELISION_TEXT =
   "[elided to save context — see prior tool call in history]";
 
@@ -375,6 +379,57 @@ export function compactModelMessagesDetailed(
         dropped++;
         if (
           approxTokens < 0.5 * tokenBudget &&
+          totalBytes < MAX_TRANSCRIPT_BYTES
+        )
+          break;
+      }
+    }
+  }
+
+  // Tail result elision. The passes above trim by MESSAGE COUNT, but an
+  // auto-continuing turn collapses dozens of tool calls into ONE assistant
+  // message (plus one tool message of results), so KEEP_TAIL can protect an
+  // entire turn's worth of stale output: the transcript grows INSIDE the
+  // protected tail, the pre-tail passes cannot reach it, and the hard cap
+  // below still keeps the last KEEP_MIN_TAIL messages - which IS that
+  // collapsed turn. Left alone, the only thing that can fit the request is the
+  // floor pass, which force-trims the whole message to 600 chars and destroys
+  // the model's current working set. Instead, under the same budget pressure,
+  // elide the OLDEST tool results inside the tail and keep the newest
+  // TAIL_RESULTS_KEEP: a result from thirty calls ago has already been acted
+  // on, while the last few are what the next step reads. Eliding keeps each
+  // part's type/toolCallId, so provider pairing is untouched.
+  const TAIL_RESULTS_KEEP = 6;
+  if (approxTokens >= 0.6 * tokenBudget || totalBytes >= MAX_TRANSCRIPT_BYTES) {
+    let tailResults = 0;
+    for (let i = stopIdx; i < out.length; i++) {
+      if (!Array.isArray(out[i].content)) continue;
+      for (const part of out[i].content as ToolPart[]) {
+        if (part.type === "tool-result") tailResults++;
+      }
+    }
+    let canElide = Math.max(0, tailResults - TAIL_RESULTS_KEEP);
+    for (let i = stopIdx; i < out.length && canElide > 0; i++) {
+      if (out[i].role === "system") continue;
+      if (!Array.isArray(out[i].content)) continue;
+      let local = false;
+      const next = (out[i].content as ToolPart[]).map((part) => {
+        if (part.type !== "tool-result") return part;
+        // The budget is per PART, not per message: a collapsed turn keeps its
+        // whole result set in ONE message, so the map must stop eliding once
+        // the newest TAIL_RESULTS_KEEP are what remains.
+        if (canElide <= 0) return part;
+        const r = elideToolResult(part);
+        if (!r.changed) return part;
+        canElide--;
+        local = true;
+        return r.part;
+      });
+      if (local) {
+        replaceAt(i, { ...out[i], content: next } as ModelMessage);
+        dropped++;
+        if (
+          approxTokens < 0.45 * tokenBudget &&
           totalBytes < MAX_TRANSCRIPT_BYTES
         )
           break;
