@@ -7,6 +7,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useWorkspaceFiles } from "../hooks/useWorkspaceFiles";
 import { ACCEPTED_FILES, useComposer } from "../lib/composer";
+import { splitComposerHighlights } from "../lib/composerHighlights";
 import type { CustomCommand } from "../lib/customCommands";
 import { SLASH_COMMANDS, type SlashCommandMeta } from "../lib/slashCommands";
 import { useChatStore } from "../store/chatStore";
@@ -114,6 +115,29 @@ export function AiComposerInput() {
   useEffect(updateTrigger, [c.value, c.textareaRef]);
 
   const customCommands = useCustomCommandsStore((s) => s.commands);
+
+  // Live syntax highlighting (Hermes' composerHighlights, adapted): the
+  // tokens the pickers trigger on — /commands, #snippets, @files — light up
+  // as they are recognised, so the user sees the composer parse what they
+  // type instead of trusting an invisible trigger detector.
+  const highlightVocab = useMemo(() => {
+    const commands = new Set<string>(Object.keys(SLASH_COMMANDS));
+    for (const cmd of customCommands) commands.add(cmd.name.toLowerCase());
+    const snippetSet = new Set<string>(
+      snippets.map((s) => s.handle.toLowerCase()),
+    );
+    return { commands, snippets: snippetSet };
+  }, [customCommands, snippets]);
+  const highlightSpans = useMemo(
+    () => splitComposerHighlights(c.value, highlightVocab),
+    [c.value, highlightVocab],
+  );
+  const backdropRef = useRef<HTMLDivElement>(null);
+  const syncBackdropScroll = () => {
+    const el = c.textareaRef.current;
+    const bd = backdropRef.current;
+    if (el && bd) bd.scrollTop = el.scrollTop;
+  };
 
   const filteredItems = useMemo<PickerItem[]>(() => {
     if (!trigger) return [];
@@ -380,10 +404,41 @@ export function AiComposerInput() {
               isDragging && "ring-1 ring-primary/40 bg-primary/5",
             )}
           >
-            <textarea
-              ref={c.textareaRef}
-              value={c.value}
-              onChange={(e) => c.setValue(e.target.value)}
+            <div className="relative min-w-0 flex-1">
+              {/* Highlight backdrop: renders the same text with transparent
+                  glyphs and a tinted background behind recognised reference
+                  tokens. Identical font metrics + synced scroll keep it
+                  pixel-aligned under the textarea, which paints the real
+                  text and caret on top. */}
+              <div
+                ref={backdropRef}
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0 overflow-hidden text-[13px] leading-relaxed text-transparent"
+              >
+                {highlightSpans.map((s, i) =>
+                  s.ref ? (
+                    // biome-ignore lint/suspicious/noArrayIndexKey: spans are positional segments of one string, rebuilt wholesale on every keystroke
+                    <span
+                      key={i}
+                      className="rounded-[3px] bg-primary/15 ring-1 ring-inset ring-primary/25"
+                    >
+                      {s.text}
+                    </span>
+                  ) : (
+                    // biome-ignore lint/suspicious/noArrayIndexKey: spans are positional segments of one string, rebuilt wholesale on every keystroke
+                    <span key={i}>{s.text}</span>
+                  ),
+                )}
+                {/* A trailing newline collapses in a div; pad it so the last
+                    line keeps its height and the backdrop matches the
+                    textarea's scrollHeight. */}
+                {c.value.endsWith("\n") && <br />}
+              </div>
+              <textarea
+                ref={c.textareaRef}
+                value={c.value}
+                onChange={(e) => c.setValue(e.target.value)}
+                onScroll={syncBackdropScroll}
               onPaste={(e) => {
                 // Pasting a screenshot, image, or document attaches it to the composer.
                 // Text paste falls through to the default textarea behaviour.

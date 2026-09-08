@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, vi } from "vitest";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { _testOnly, TelegramApiError } from "./bot";
 import { useTelegramStore } from "./store";
 
@@ -79,10 +79,16 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
     });
 
     it("falls back to fingerprint when id is missing", () => {
-      expect(isMessageSeen(undefined, "s-1", "user", "test fallback")).toBe(false);
+      expect(isMessageSeen(undefined, "s-1", "user", "test fallback")).toBe(
+        false,
+      );
       markMessageSeen(undefined, "s-1", "user", "test fallback");
-      expect(isMessageSeen(undefined, "s-1", "user", "test fallback")).toBe(true);
-      expect(isMessageSeen(undefined, "s-2", "user", "test fallback")).toBe(false);
+      expect(isMessageSeen(undefined, "s-1", "user", "test fallback")).toBe(
+        true,
+      );
+      expect(isMessageSeen(undefined, "s-2", "user", "test fallback")).toBe(
+        false,
+      );
     });
   });
 
@@ -174,7 +180,9 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
       expect(_testOnly.isTelegramOriginText("Audit port 8080")).toBe(true);
       expect(
         sentBodies.some((b) =>
-          b.text?.includes("The agent is busy. Your request will be processed shortly."),
+          b.text?.includes(
+            "The agent is busy. Your request will be processed shortly.",
+          ),
         ),
       ).toBe(true);
       expect(
@@ -524,4 +532,3 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
     });
   });
 });
-
