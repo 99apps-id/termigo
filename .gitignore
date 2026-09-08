@@ -60,3 +60,6 @@ cli/bin/
 
 # Agent session memory and workspace-local agent state
 .termigo/
+
+# Local security audit reports (not for public repo)
+SECURITY-AUDIT-*.md
