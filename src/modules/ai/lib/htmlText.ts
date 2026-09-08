@@ -101,6 +101,63 @@ export function htmlToText(html: string): string {
   return lines.join("\n");
 }
 
+export function htmlToMarkdown(html: string): string {
+  let cleaned = html
+    .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[\s\S]*?<\/style>/gi, " ")
+    .replace(/<nav\b[\s\S]*?<\/nav>/gi, " ")
+    .replace(/<footer\b[\s\S]*?<\/footer>/gi, " ")
+    .replace(/<header\b[\s\S]*?<\/header>/gi, " ")
+    .replace(/<aside\b[\s\S]*?<\/aside>/gi, " ")
+    .replace(/<noscript\b[\s\S]*?<\/noscript>/gi, " ")
+    .replace(/<!--[\s\S]*?-->/g, " ");
+
+  // Convert headings
+  cleaned = cleaned.replace(
+    /<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi,
+    (_, level, content) => {
+      const hashes = "#".repeat(Number(level));
+      return `\n\n${hashes} ${content.replace(/<[^>]+>/g, " ").trim()}\n\n`;
+    },
+  );
+
+  // Convert list items
+  cleaned = cleaned.replace(/<li\b[^>]*>([\s\S]*?)<\/li>/gi, (_, content) => {
+    return `\n- ${content.replace(/<[^>]+>/g, " ").trim()}`;
+  });
+
+  // Convert blockquotes
+  cleaned = cleaned.replace(
+    /<blockquote\b[^>]*>([\s\S]*?)<\/blockquote>/gi,
+    (_, content) => {
+      return `\n> ${content.replace(/<[^>]+>/g, " ").trim()}\n`;
+    },
+  );
+
+  // Convert links [text](href)
+  cleaned = cleaned.replace(
+    /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi,
+    (_, href, text) => {
+      const cleanText = text.replace(/<[^>]+>/g, " ").trim();
+      if (!cleanText || href.startsWith("javascript:") || href.startsWith("#")) {
+        return cleanText;
+      }
+      return `[${cleanText}](${href})`;
+    },
+  );
+
+  const lines = cleaned
+    .split(BLOCK_END)
+    .map((chunk) =>
+      decodeEntities(chunk.replace(/<[^>]+>/g, " "))
+        .replace(/\s+/g, " ")
+        .trim(),
+    )
+    .filter((line) => line.length > 0);
+
+  return lines.join("\n\n");
+}
+
 /** Apply the byte cap, reporting whether anything was cut. */
 export function capText(
   text: string,

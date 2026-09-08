@@ -104,11 +104,14 @@ function isTextual(contentType: string): boolean {
   return /text\/html|application\/xhtml|text\/plain/i.test(contentType);
 }
 
+import { capText, decodeEntities, extractTitle, htmlToMarkdown, looksLikeHtml } from "../lib/htmlText";
+import { useChatStore } from "../store/chatStore";
+
 export function buildWebSearchTools() {
   return {
     web_search: tool({
       description:
-        "Search the web (DuckDuckGo) for a query and return the top results — each with title, URL and a short snippet. Use when the answer lives outside the workspace: current docs, a library's README, an error message, a known issue. Read-only; the search itself asks for approval (the results page is fetched from this machine). Follow up by calling fetch on any promising URL for the full page. Private/loopback addresses are refused by the fetch guard.",
+        "Search the web for a query and return top results (title, URL, snippet). Uses DuckDuckGo by default (zero-config, free) with automatic fallback to configured search APIs (Tavily, Brave). Read-only; asks for approval.",
       inputSchema: z.object({
         query: z
           .string()
@@ -120,6 +123,68 @@ export function buildWebSearchTools() {
       }),
       needsApproval: true,
       execute: async ({ query }) => {
+        const apiKeys = useChatStore.getState().apiKeys as Record<string, string | undefined>;
+        const tavilyKey = apiKeys.tavily?.trim();
+        const braveKey = apiKeys.brave?.trim();
+
+        // 1. Tavily Search (if key is configured)
+        if (tavilyKey) {
+          try {
+            const res = await fetch("https://api.tavily.com/search", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                api_key: tavilyKey,
+                query,
+                max_results: 6,
+                include_snippets: true,
+              }),
+            });
+            if (res.ok) {
+              const json = (await res.json()) as {
+                results?: Array<{ title?: string; url?: string; content?: string }>;
+              };
+              const results: WebSearchResult[] = (json.results ?? []).map((r) => ({
+                title: r.title || "",
+                url: r.url || "",
+                snippet: r.content || "",
+              }));
+              return { provider: "tavily", query, count: results.length, results };
+            }
+          } catch {
+            // Fall through to DuckDuckGo on network failure
+          }
+        }
+
+        // 2. Brave Search (if key is configured)
+        if (braveKey) {
+          try {
+            const res = await fetch(
+              `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}`,
+              {
+                headers: {
+                  Accept: "application/json",
+                  "X-Subscription-Token": braveKey,
+                },
+              },
+            );
+            if (res.ok) {
+              const json = (await res.json()) as {
+                web?: { results?: Array<{ title?: string; url?: string; description?: string }> };
+              };
+              const results: WebSearchResult[] = (json.web?.results ?? []).map((r) => ({
+                title: r.title || "",
+                url: r.url || "",
+                snippet: r.description || "",
+              }));
+              return { provider: "brave", query, count: results.length, results };
+            }
+          } catch {
+            // Fall through to DuckDuckGo
+          }
+        }
+
+        // 3. DuckDuckGo HTML scraper (default zero-config fallback)
         const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(
           query,
         )}`;
@@ -129,13 +194,10 @@ export function buildWebSearchTools() {
             url,
             method: "GET",
             headers: {
-              // DDG serves the HTML variant to browsers; without a UA it may
-              // redirect to a JS-only page that has no results markup.
               "User-Agent":
                 "Mozilla/5.0 (compatible; TermigoBot/1.0; +https://github.com/99apps-id/termigo)",
             },
             body: null,
-            // Never model-controlled: same invariant as fetch.
             allowPrivateNetwork: false,
           });
         } catch (e) {
@@ -167,6 +229,7 @@ export function buildWebSearchTools() {
         const body = new TextDecoder("utf-8").decode(new Uint8Array(resp.body));
         const results = parseDuckDuckGoResults(body);
         return {
+          provider: "duckduckgo",
           query,
           count: results.length,
           results,
@@ -174,6 +237,75 @@ export function buildWebSearchTools() {
             results.length === 0
               ? "No parseable results — the markup may have changed, or the query returned nothing."
               : undefined,
+        };
+      },
+    }),
+
+    web_fetch: tool({
+      description:
+        "Fetch and extract clean, readable text/markdown from a web page (stripping scripts, styling, ads, and navigation boilerplate). For single-page JavaScript web apps, set `use_reader: true` to render via reader mode. Read-only; asks for approval.",
+      inputSchema: z.object({
+        url: z.string().describe("Absolute HTTP or HTTPS URL to fetch."),
+        use_reader: z
+          .boolean()
+          .optional()
+          .describe(
+            "If true, use reader service (r.jina.ai) to render JavaScript SPAs into clean markdown.",
+          ),
+      }),
+      needsApproval: true,
+      execute: async ({ url, use_reader }) => {
+        const fetchUrl = use_reader ? `https://r.jina.ai/${encodeURI(url)}` : url;
+        let resp: HttpResponse;
+        try {
+          resp = await invoke<HttpResponse>("ai_http_request", {
+            url: fetchUrl,
+            method: "GET",
+            headers: {
+              "User-Agent":
+                "Mozilla/5.0 (compatible; TermigoBot/1.0; +https://github.com/99apps-id/termigo)",
+            },
+            body: null,
+            allowPrivateNetwork: false,
+          });
+        } catch (e) {
+          return { error: String(e), url };
+        }
+
+        const contentType = header(resp.headers, "content-type");
+        const bytes = new Uint8Array(resp.body);
+        if (bytes.length === 0) {
+          return {
+            url,
+            status: resp.status,
+            content: "",
+            note: "Empty response body.",
+          };
+        }
+
+        const body = new TextDecoder("utf-8").decode(bytes);
+        if (use_reader) {
+          const capped = capText(body);
+          return {
+            url,
+            readerMode: true,
+            status: resp.status,
+            content: capped.text,
+            ...(capped.truncated ? { truncated: true } : {}),
+          };
+        }
+
+        const isHtml = looksLikeHtml(contentType, body);
+        const text = isHtml ? htmlToMarkdown(body) : body;
+        const capped = capText(text);
+
+        return {
+          url,
+          status: resp.status,
+          contentType,
+          ...(isHtml ? { title: extractTitle(body) } : {}),
+          content: capped.text,
+          ...(capped.truncated ? { truncated: true } : {}),
         };
       },
     }),
