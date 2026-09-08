@@ -44,6 +44,7 @@ build-*.log
 lint-*.txt
 dist-win/
 termigo-portable-win.zip
+*.tar.gz
 scripts/audit-lint.ps1
 
 # Local penetration-test reports (sensitive client findings; do not commit)
