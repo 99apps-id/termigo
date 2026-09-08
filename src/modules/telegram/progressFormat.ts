@@ -407,6 +407,110 @@ export function markdownToTelegramHtml(markdown: string): string {
   return text;
 }
 
+export function getToolDoneVerb(toolName: string): string {
+  switch (toolName) {
+    case "bash_run":
+    case "bash_background":
+    case "run_checks":
+    case "terminal_run":
+      return "Ran";
+    case "read_file":
+    case "read_image":
+      return "Read";
+    case "fetch":
+    case "web_fetch":
+      return "Fetched";
+    case "web_search":
+      return "Searched";
+    case "write_file":
+      return "Wrote";
+    case "edit":
+    case "multi_edit":
+    case "replace":
+      return "Edited";
+    case "glob":
+      return "Globbed";
+    case "list_directory":
+      return "Listed";
+    case "grep":
+    case "search":
+    case "code_search":
+      return "Searched";
+    case "delete_file":
+      return "Deleted";
+    case "move_file":
+      return "Moved";
+    case "copy_file":
+      return "Copied";
+    case "generate_image":
+      return "Generated image";
+    case "run_subagent":
+    case "run_subagents":
+      return "Delegated";
+    default:
+      return `Executed ${toolName}`;
+  }
+}
+
+export function getToolRunningVerb(toolName: string): string {
+  switch (toolName) {
+    case "bash_run":
+    case "bash_background":
+    case "run_checks":
+    case "terminal_run":
+      return "Running";
+    case "read_file":
+    case "read_image":
+      return "Reading";
+    case "fetch":
+    case "web_fetch":
+      return "Fetching";
+    case "web_search":
+      return "Searching";
+    case "write_file":
+      return "Writing";
+    case "edit":
+    case "multi_edit":
+    case "replace":
+      return "Editing";
+    case "glob":
+      return "Globbing";
+    case "list_directory":
+      return "Listing";
+    case "grep":
+    case "search":
+    case "code_search":
+      return "Searching";
+    case "generate_image":
+      return "Generating image";
+    case "run_subagent":
+    case "run_subagents":
+      return "Delegating to subagent";
+    default:
+      return `Running ${toolName}`;
+  }
+}
+
+export function formatToolActivity(t: ToolCallSummary): string {
+  const { toolName, state, input, output } = t;
+  const inputSnippet = input ? ` \`${truncate(input, 60)}\`` : "";
+  const outSnippet = output ? ` -> _${truncate(output, 50)}_` : "";
+
+  if (state === "running") {
+    const verb = getToolRunningVerb(toolName);
+    return `⚡ ${verb}${inputSnippet}`;
+  }
+  if (state === "awaiting-approval") {
+    return `🔒 Approval required: \`${toolName}\`${inputSnippet}`;
+  }
+  if (state === "error") {
+    return `❌ Failed: \`${toolName}\`${inputSnippet}${outSnippet}`;
+  }
+  // state === "done"
+  const verb = getToolDoneVerb(toolName);
+  return `✓ ${verb}${inputSnippet}${outSnippet}`;
+}
+
 export function formatLiveProgress(opts: FormatLiveProgressOptions): string {
   if (opts.completed) {
     return "**[Termigo Agent]** Finished.";
@@ -420,36 +524,41 @@ export function formatLiveProgress(opts: FormatLiveProgressOptions): string {
         ? "Thinking..."
         : "Working...";
 
-  const roundPart =
+  const stepPart =
     typeof opts.round === "number" && opts.round >= 0
-      ? ` (round ${opts.round + 1})`
+      ? ` (Step ${opts.round + 1})`
       : "";
-  lines.push(`**[Termigo Agent]** *${statusLabel}*${roundPart}`);
+  lines.push(`**[Termigo Agent]** *${statusLabel}*${stepPart}`);
 
   if (opts.step) {
     lines.push(`Step: *${opts.step}*`);
   }
 
-  // Display only the currently in-progress task; past/completed tasks disappear automatically
+  // Display active in-progress task
   const inProgressTodo = opts.todos?.find((t) => t.status === "in_progress");
   if (inProgressTodo) {
     lines.push(`Task: **${truncate(inProgressTodo.title, 60)}**`);
   }
 
-  // Display only the currently running tool; past/completed tools disappear automatically
+  // Display lively tool execution trail (recent completed + active running)
   const tools = opts.tools ?? [];
-  const active = tools.filter(
-    (t) => t.state === "running" || t.state === "awaiting-approval",
-  );
+  if (tools.length > 0) {
+    const active = tools.filter(
+      (t) => t.state === "running" || t.state === "awaiting-approval",
+    );
+    const completed = tools.filter(
+      (t) => t.state === "done" || t.state === "error",
+    );
 
-  if (active.length > 0) {
-    for (const t of active.slice(-1)) {
-      const stateLabel =
-        t.state === "awaiting-approval" ? "awaiting approval" : "running";
-      lines.push(`Running: \`${t.toolName}\` [${stateLabel}]`);
-      if (t.input) {
-        lines.push(`\`${t.input}\``);
-      }
+    // Show up to 3 most recent completed tools so the user sees real activity trail
+    const recentDone = completed.slice(-3);
+    for (const t of recentDone) {
+      lines.push(formatToolActivity(t));
+    }
+
+    // Show active running / awaiting approval tool(s)
+    for (const t of active.slice(-2)) {
+      lines.push(formatToolActivity(t));
     }
   }
 

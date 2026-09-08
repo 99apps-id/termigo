@@ -445,6 +445,35 @@ pub async fn fs_write_file(
 }
 
 #[tauri::command]
+pub async fn fs_write_file_base64(
+    path: String,
+    data: String,
+    workspace: Option<WorkspaceEnv>,
+    source: Option<String>,
+    app: tauri::AppHandle,
+) -> Result<u64, String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    let target = resolve_path(&path, &workspace);
+    use base64::Engine as _;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&data)
+        .map_err(|e| format!("invalid base64: {e}"))?;
+    write_atomic(&target, &bytes).map_err(|e| {
+        log::warn!("fs_write_file_base64({}) failed: {e}", target.display());
+        e.to_string()
+    })?;
+    let mtime = fs::metadata(&target).map(|m| mtime_millis(&m)).unwrap_or(0);
+    let _ = app.emit(
+        "fs:file-written",
+        FileWrittenEvent {
+            path: path.clone(),
+            source,
+        },
+    );
+    Ok(mtime)
+}
+
+#[tauri::command]
 pub async fn fs_canonicalize(
     path: String,
     workspace: Option<WorkspaceEnv>,

@@ -992,8 +992,8 @@ async function runAgentAndStream(
           const nextBudget = stepBudgetForRound(currentRound + 1);
           await sendKeyboard(
             chatId,
-            `Batas langkah tercapai (Round selesai). Lanjut ke Round berikutnya (${nextBudget} steps)?`,
-            [[{ text: `>> Lanjut Round (${nextBudget} steps)`, callback_data: "resume:run" }]],
+            `Batas langkah tercapai (Step selesai). Lanjut ke Step berikutnya (${nextBudget} steps)?`,
+            [[{ text: `>> Lanjut Step (${nextBudget} steps)`, callback_data: "resume:run" }]],
             signal,
           ).catch(() => {});
         }
@@ -1057,7 +1057,7 @@ function startTelegramResume(chatId: number, signal: AbortSignal): void {
       const nextBudget = stepBudgetForRound(currentRound + 1);
       await sendTelegram(
         chatId,
-        `Melanjutkan ke round berikutnya (${nextBudget} steps)...`,
+        `Melanjutkan ke step berikutnya (${nextBudget} steps)...`,
         signal,
       ).catch(() => {});
       await sendTyping(chatId, signal).catch(() => {});
@@ -1114,7 +1114,7 @@ const HELP = [
   "/unpair - unlock bot from this chat ID",
   "/query <question> - read-only question (or just type the question)",
   "/run <task> - run a task in the agent",
-  "/continue - continue to next round (50/100 steps)",
+  "/continue - continue to next step (50/100 steps)",
   "/approve - approve all pending actions",
   "/deny - deny all pending actions",
   "/mode [all|edits|ask] - view or set autonomy approval mode",
@@ -1261,12 +1261,12 @@ async function handleCallback(
   }
 
   if (data === "resume:run") {
-    await answerCallback(cb.id, "Melanjutkan ke round berikutnya...", signal);
+    await answerCallback(cb.id, "Melanjutkan ke step berikutnya...", signal);
     if (messageId) {
       await editKeyboard(
         chatId,
         messageId,
-        "Melanjutkan round berikutnya...",
+        "Melanjutkan step berikutnya...",
         [],
         signal,
       ).catch(() => {});

@@ -166,6 +166,12 @@ export const native = {
       content,
       workspace: currentWorkspaceEnv(),
     }),
+  writeFileBase64: (path: string, data: string) =>
+    invoke<number>("fs_write_file_base64", {
+      path,
+      data,
+      workspace: currentWorkspaceEnv(),
+    }),
   canonicalize: (path: string) =>
     invoke<string>("fs_canonicalize", {
       path,

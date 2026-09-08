@@ -171,7 +171,7 @@ describe("progressFormat", () => {
       expect(text).toBe("**[Termigo Agent]** Finished.");
     });
 
-    it("displays only currently running tool and task, past tools disappear automatically", () => {
+    it("displays Step, active task, and lively tool activity trail (Ran, Listed, etc.)", () => {
       const text = formatLiveProgress({
         status: "streaming",
         round: 0,
@@ -196,13 +196,11 @@ describe("progressFormat", () => {
         ],
       });
 
-      expect(text).toContain("**[Termigo Agent]** *Working...* (round 1)");
+      expect(text).toContain("**[Termigo Agent]** *Working...* (Step 1)");
       expect(text).toContain("Step: *Organizing files*");
       expect(text).toContain("Task: **Clean duplicate files**");
-      expect(text).toContain("Running: `bash_run` [running]\n`Get-ChildItem ...`");
-      // Completed tools and tasks disappear automatically
-      expect(text).not.toContain("list_directory");
-      expect(text).not.toContain("Recent:");
+      expect(text).toContain("✓ Listed `C:/Users/Iwan/Downloads` -> _19 entries_");
+      expect(text).toContain("⚡ Running `Get-ChildItem ...`");
       expect(text).not.toContain("Scan folder");
       expect(text).not.toContain("Report results");
     });

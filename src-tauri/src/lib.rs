@@ -167,6 +167,7 @@ pub fn run() {
             fs::file::fs_read_image_base64,
             fs::file::fs_read_file_base64,
             fs::file::fs_write_file,
+            fs::file::fs_write_file_base64,
             fs::file::fs_stat,
             fs::file::fs_canonicalize,
             fs::mutate::fs_create_file,
