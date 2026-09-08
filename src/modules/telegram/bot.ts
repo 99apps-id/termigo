@@ -983,9 +983,10 @@ async function runAgentAndStream(
           }
         }
 
-        // If run stopped due to step-cap, offer one-click continuation button
+        // If run stopped due to step-cap by user request, offer one-click continuation button
         const stopReason = store.useChatStore.getState().agentMeta.stopReason;
-        if (stopReason === "step-cap") {
+        const stoppedByUser = store.useChatStore.getState().agentMeta.stoppedByUser;
+        if (stopReason === "step-cap" && stoppedByUser) {
           const currentRound = store.useChatStore.getState().agentMeta.runRound;
           const { stepBudgetForRound } = await import("../ai/config");
           const nextBudget = stepBudgetForRound(currentRound + 1);

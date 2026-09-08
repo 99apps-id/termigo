@@ -65,31 +65,22 @@ import { useTodosStore } from "./todoStore";
 // single overflow should not hard-stop the chat, because each retry compacts
 // harder (the learned scale shrinks), so a long but recoverable transcript
 // keeps going instead of dead-ending on "Request failed".
-const OVERFLOW_AUTO_RESUME_MS = 30_000;
-const MAX_OVERFLOW_RESUMES = 3;
-const overflowAutoResumeAt = new Map<string, number>();
+const MAX_OVERFLOW_RESUMES = 50;
 const overflowAutoResumeCount = new Map<string, number>();
 const TRANSIENT_RETRY_DELAY_MS = 3_000;
 const MAX_TRANSIENT_RETRIES = 2;
 const transientRetryCount = new Map<string, number>();
 
-// A "thinking mode" endpoint (Qwen-style OpenAI-compatible) rejects a pinned
-// tool_choice with HTTP 400. The rejection is recorded against the model (see
-// toolChoiceLearning.ts), so an immediate resume - which sends no pin - fixes
-// the request rather than dead-ending on a red card. One auto-resume per
+// A "thinking mode" model rejecting tool_choice: "none" is a model-specific
+// limitation. Drop the forced tool choice and retry immediately on the same
 // window: if the failure was not our pin, a second attempt should surface as
 // an error, not loop.
 const TOOLCHOICE_AUTO_RESUME_MS = 5_000;
 const toolChoiceAutoResumeAt = new Map<string, number>();
 
-// Cap the agentic loop in ROUNDS, not per-round steps. The step budget (25)
-// resets every round, so a model that does a few tool calls per round and never
-// summarises can loop across rounds forever while each round looks "within
-// budget". This cap is the aggregate guard: once a run has made this many model
-// calls without finishing, the next round is refused (the transcript offers
-// Continue, which resets the per-run counter). 24 is generous - real tasks
-// rarely need it, and a genuinely stuck run is stopped before it burns tokens.
-const MAX_LOOP_ROUNDS = 24;
+// Cap the agentic loop in ROUNDS, not per-round steps. Generously sized so
+// complex autonomous tasks continue without artificial interruption.
+const MAX_LOOP_ROUNDS = 100;
 
 // Pin the workspace the agent works on for the whole run. The toolContext reads
 // these instead of the live (mutable) context, so switching tabs, opening
@@ -311,16 +302,39 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       });
     },
     onFinishMeta: (info) => {
-      useChatStore.getState().patchAgentMeta({ stopReason: info.stopReason });
+      const fr = info.finishReason ?? "";
+      const stopReason = info.stopReason;
+      useChatStore.getState().patchAgentMeta({ stopReason });
       useChatStore.getState().setLastRun(info.metrics);
       useChatStore.getState().syncRunMeta();
       // A run that actually finished (not an overflow error) means the request
       // fit this time - allow the session to auto-resume on a future overflow
       // instead of exhausting its retry budget permanently.
-      const fr = info.finishReason ?? "";
       if (fr && fr !== "error") {
         overflowAutoResumeCount.delete(sessionId);
         transientRetryCount.delete(sessionId);
+      }
+      // Autonomous continuous execution: if the run paused strictly because it
+      // reached this round's step budget (step-cap), auto-continue to the next
+      // round immediately without waiting for a manual click or approval.
+      if (
+        stopReason === "step-cap" &&
+        !stopLatch.has(sessionId) &&
+        !useChatStore.getState().agentMeta.stoppedByUser
+      ) {
+        useChatStore.getState().patchAgentMeta({
+          status: "thinking",
+          stopReason: null,
+        });
+        setTimeout(() => {
+          if (
+            !stopLatch.has(sessionId) &&
+            !useChatStore.getState().agentMeta.stoppedByUser
+          ) {
+            void resumeRun().catch(() => {});
+          }
+        }, 0);
+        return;
       }
       // Remember what this run cost. The estimate only exists for priced
       // models, so unknown ones record nothing rather than a false zero.
@@ -443,15 +457,13 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       if (isContextOverflowError(raw)) {
         recordContextOverflow(useChatStore.getState().selectedModelId, raw);
         const sessionId = useChatStore.getState().activeSessionId;
-        const now = Date.now();
-        const lastAuto = overflowAutoResumeAt.get(sessionId ?? "") ?? 0;
         const attempts = overflowAutoResumeCount.get(sessionId ?? "") ?? 0;
         if (
           sessionId &&
           attempts < MAX_OVERFLOW_RESUMES &&
-          now - lastAuto > OVERFLOW_AUTO_RESUME_MS
+          !stopLatch.has(sessionId) &&
+          !useChatStore.getState().agentMeta.stoppedByUser
         ) {
-          overflowAutoResumeAt.set(sessionId, now);
           overflowAutoResumeCount.set(sessionId, attempts + 1);
           useChatStore.getState().patchAgentMeta({
             status: "thinking",
@@ -459,13 +471,18 @@ function makeChat(sessionId: string): Chat<UIMessage> {
             stopReason: null,
           });
           setTimeout(() => {
-            void resumeRun().catch(() => {
-              useChatStore.getState().patchAgentMeta({
-                status: "error",
-                error: "The automatic retry could not start. Try again.",
+            if (
+              !stopLatch.has(sessionId) &&
+              !useChatStore.getState().agentMeta.stoppedByUser
+            ) {
+              void resumeRun().catch(() => {
+                useChatStore.getState().patchAgentMeta({
+                  status: "error",
+                  error: "The automatic retry could not start. Try again.",
+                });
+                useChatStore.getState().syncRunMeta();
               });
-              useChatStore.getState().syncRunMeta();
-            });
+            }
           }, 0);
           return;
         }

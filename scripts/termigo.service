@@ -12,6 +12,8 @@ RestartSec=5
 StandardOutput=journal
 StandardError=journal
 LimitNOFILE=65536
+MemoryHigh=2G
+MemoryMax=2560M
 
 [Install]
 WantedBy=multi-user.target
