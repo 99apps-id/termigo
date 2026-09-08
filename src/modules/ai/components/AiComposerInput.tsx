@@ -526,10 +526,11 @@ export function AiComposerInput() {
               placeholder="Ask Termigo anything   -   # for snippets and commands, @ for files"
               rows={1}
               className={cn(
-                "max-h-40 flex-1 resize-none bg-transparent text-[13px] leading-relaxed outline-none",
+                "relative max-h-40 w-full resize-none bg-transparent text-[13px] leading-relaxed outline-none",
                 "placeholder:text-muted-foreground/60",
               )}
             />
+            </div>
             <div className="flex shrink-0 items-center gap-0.5">
               <input
                 ref={fileInputRef}

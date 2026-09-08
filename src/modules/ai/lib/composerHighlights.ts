@@ -20,24 +20,29 @@ export type HighlightVocab = {
 
 type Span = { start: number; end: number };
 
-// A trigger token: `/`, `#` or `@` at the start of input or after whitespace,
-// followed by the typed word (possibly empty — the user just pressed the key).
-// Paths like `/usr/local` or `a/b` never match: the lookbehind requires a
-// boundary and the token stops at the first non-word character.
-const tokenRe = () => /(?<=^|\s)([/#@])([\w-]*)/g;
+// A `/command` or `#snippet` trigger: at the start of input or after
+// whitespace, followed by the typed word (possibly empty — the user just
+// pressed the key). Paths like `/usr/local` or `a/b` never match: the
+// lookbehind requires a boundary and the token stops at the first non-word
+// character.
+const wordTokenRe = () => /(?<=^|\s)([/#])([\w-]*)/g;
+
+// An `@file` ref runs to the next whitespace — paths contain `/` and `.`, and
+// the file picker's own trigger detection scans back to whitespace, so the
+// highlight must cover the same span the picker would.
+const atTokenRe = () => /(?<=^|\s)@\S*/g;
 
 const matchSpans = (text: string, vocab: HighlightVocab): Span[] => {
   const spans: Span[] = [];
-  for (const m of text.matchAll(tokenRe())) {
+  for (const m of text.matchAll(atTokenRe())) {
+    // `@file` refs light up as soon as the `@` is typed: any token is a
+    // candidate path and the picker is already open on it.
+    spans.push({ start: m.index ?? 0, end: (m.index ?? 0) + m[0].length });
+  }
+  for (const m of text.matchAll(wordTokenRe())) {
     const kind = m[1];
     const word = m[2] ?? "";
     const start = m.index ?? 0;
-    // `@file` refs light up as soon as the `@` is typed: any token is a
-    // candidate path and the picker is already open on it.
-    if (kind === "@") {
-      spans.push({ start, end: start + m[0].length });
-      continue;
-    }
     const known = kind === "/" ? vocab.commands : vocab.snippets;
     // A completed name lights up; so does a prefix of one — that is the user
     // mid-typing with the picker open, and the highlight is the feedback that
