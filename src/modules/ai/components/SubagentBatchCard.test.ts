@@ -119,4 +119,26 @@ describe("extractWorkerData", () => {
     expect(workers[1].status).toBe("skipped");
     expect(workers[1].skipped).toBe("dependency failed");
   });
+
+  it("extracts workers when input contains todos instead of tasks", () => {
+    const input = {
+      max_concurrency: 4,
+      todos:
+        '[{"id": "map", "status": "completed", "title": "Petakan struktur kode Rust + TypeScript"}, {"id": "ipc", "status": "in_progress", "title": "Audit surface IPC/Tauri commands + capabilities allowlist"}]',
+    };
+
+    const { workers, maxConcurrency } = extractWorkerData(
+      "run_subagents",
+      input,
+      undefined,
+      [],
+    );
+
+    expect(maxConcurrency).toBe(4);
+    expect(workers).toHaveLength(2);
+    expect(workers[0].label).toBe("Petakan struktur kode Rust + TypeScript");
+    expect(workers[1].label).toBe(
+      "Audit surface IPC/Tauri commands + capabilities allowlist",
+    );
+  });
 });

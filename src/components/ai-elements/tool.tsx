@@ -29,6 +29,10 @@ import {
   useSubagentRunStore,
   type SubagentRun,
 } from "@/modules/ai/store/subagentRunStore";
+import {
+  normalizeBatchInput,
+  normalizeSingleInput,
+} from "@/modules/ai/lib/normalizeSubagentInput";
 import { resolveSubagentLabel, resolveSubagentType } from "@/modules/ai/agents/resolveSubagent";
 import { Spinner } from "@/components/ui/spinner";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -1269,20 +1273,27 @@ function expectedSubagentRuns(
   toolName: string,
   input: unknown,
 ): Array<{ type: string; label?: string }> {
-  if (!input || typeof input !== "object") return [];
-  const data = input as Record<string, unknown>;
   if (toolName === "run_subagent") {
-    return typeof data.type === "string"
-      ? [{ type: data.type, label: typeof data.description === "string" ? data.description : undefined }]
-      : [];
+    const single = normalizeSingleInput(input);
+    if (!single || typeof single !== "object") return [];
+    const data = single as Record<string, unknown>;
+    const type = typeof data.type === "string" ? data.type : "general";
+    const label = typeof data.description === "string" ? data.description : undefined;
+    return [{ type, label }];
   }
-  if (toolName !== "run_subagents" || !Array.isArray(data.tasks)) return [];
+  if (toolName !== "run_subagents") return [];
+  const batch = normalizeBatchInput(input);
+  if (!batch || typeof batch !== "object") return [];
+  const data = batch as Record<string, unknown>;
+  if (!Array.isArray(data.tasks)) return [];
   const out: Array<{ type: string; label?: string }> = [];
   for (const task of data.tasks) {
     if (!task || typeof task !== "object") continue;
     const v = task as Record<string, unknown>;
-    if (typeof v.type !== "string") continue;
-    out.push({ type: v.type, label: typeof v.description === "string" ? v.description : undefined });
+    out.push({
+      type: typeof v.type === "string" ? v.type : "general",
+      label: typeof v.description === "string" ? v.description : undefined,
+    });
   }
   return out;
 }

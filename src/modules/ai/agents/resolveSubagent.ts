@@ -27,6 +27,8 @@ const SYNONYMS: Record<string, SubagentType> = {
   investigate: "explore",
   trace: "explore",
   understand: "explore",
+  map: "explore",
+  mapping: "explore",
   // code review
   review: "code-review",
   reviewer: "code-review",

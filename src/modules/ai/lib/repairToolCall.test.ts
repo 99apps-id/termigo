@@ -221,4 +221,28 @@ describe("repairToolCall", () => {
     });
     expect(result).toBeNull();
   });
+
+  it("repairs run_subagents when tasks are passed as todos", async () => {
+    const tools = { run_subagents: {} };
+    const result = await repairToolCall({
+      tools,
+      toolCall: {
+        toolCallId: "sub-1",
+        toolName: "run_subagents",
+        input: JSON.stringify({
+          max_concurrency: 4,
+          todos:
+            '[{"id": "map", "status": "completed", "title": "Petakan struktur kode Rust + TypeScript"}]',
+        }),
+      },
+    });
+    expect(result).not.toBeNull();
+    expect(result?.toolName).toBe("run_subagents");
+    const parsed = JSON.parse(result!.input);
+    expect(parsed.tasks).toHaveLength(1);
+    expect(parsed.tasks[0].prompt).toBe(
+      "Petakan struktur kode Rust + TypeScript",
+    );
+    expect(parsed.max_concurrency).toBe(4);
+  });
 });

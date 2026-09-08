@@ -8,6 +8,10 @@ import {
   useSubagentRunStore,
 } from "@/modules/ai/store/subagentRunStore";
 import {
+  normalizeBatchInput,
+  normalizeSingleInput,
+} from "@/modules/ai/lib/normalizeSubagentInput";
+import {
   AlertCircleIcon,
   ArrowRight01Icon,
   Clock01Icon,
@@ -57,10 +61,14 @@ export function extractWorkerData(
   maxConcurrency?: number;
 } {
   const isBatch = toolName === "run_subagents";
+  const normalizedIn = isBatch
+    ? (normalizeBatchInput(input) as Record<string, unknown> | null)
+    : (normalizeSingleInput(input) as Record<string, unknown> | null);
   const inObj =
-    input && typeof input === "object"
+    (normalizedIn && typeof normalizedIn === "object" ? normalizedIn : null) ??
+    (input && typeof input === "object"
       ? (input as Record<string, unknown>)
-      : null;
+      : null);
   const outObj =
     output && typeof output === "object"
       ? (output as Record<string, unknown>)

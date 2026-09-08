@@ -9,6 +9,7 @@
 // makes a best-effort repair so a recoverable input runs instead of failing.
 
 import { parsePartialJson } from "ai";
+import { normalizeBatchInput } from "./normalizeSubagentInput";
 
 /** Strip a markdown code fence (` ```json ... ``` `) around the args. */
 function stripCodeFence(text: string): string {
@@ -447,9 +448,22 @@ export async function repairToolCall({
   const raw = stripCodeFence(String(toolCall.input ?? toolCall.args ?? ""));
   if (raw.length === 0) return null;
 
-  // Already valid - let the SDK re-parse as usual.
+  // Already valid JSON - check if semantic repair is needed (e.g. run_subagents with todos)
   try {
-    JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    if (toolCall.toolName === "run_subagents" && parsed && typeof parsed === "object") {
+      const origTasks = (parsed as Record<string, unknown>).tasks;
+      if (!Array.isArray(origTasks) || typeof origTasks === "string") {
+        const normalized = normalizeBatchInput(parsed);
+        if (
+          normalized &&
+          typeof normalized === "object" &&
+          Array.isArray((normalized as Record<string, unknown>).tasks)
+        ) {
+          return { ...toolCall, input: JSON.stringify(normalized) };
+        }
+      }
+    }
     return null;
   } catch {
     // fall through to repair
@@ -459,12 +473,32 @@ export async function repairToolCall({
   // Try strict, then the SDK's lenient partial parser as a final fallback. We
   // always return `input` as a JSON *string* because the SDK re-parses it.
   try {
-    JSON.parse(repaired);
+    const parsed = JSON.parse(repaired);
+    if (toolCall.toolName === "run_subagents" && parsed && typeof parsed === "object") {
+      const normalized = normalizeBatchInput(parsed);
+      if (
+        normalized &&
+        typeof normalized === "object" &&
+        Array.isArray((normalized as Record<string, unknown>).tasks)
+      ) {
+        return { ...toolCall, input: JSON.stringify(normalized) };
+      }
+    }
     return { ...toolCall, input: repaired };
   } catch {
     try {
       const { value } = await parsePartialJson(repaired);
       if (value !== undefined) {
+        if (toolCall.toolName === "run_subagents" && value && typeof value === "object") {
+          const normalized = normalizeBatchInput(value);
+          if (
+            normalized &&
+            typeof normalized === "object" &&
+            Array.isArray((normalized as Record<string, unknown>).tasks)
+          ) {
+            return { ...toolCall, input: JSON.stringify(normalized) };
+          }
+        }
         return { ...toolCall, input: JSON.stringify(value) };
       }
     } catch {

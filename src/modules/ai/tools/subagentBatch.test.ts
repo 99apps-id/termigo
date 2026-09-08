@@ -192,4 +192,50 @@ describe("run_subagents", () => {
     });
     expect(out.results.map((r) => r.index)).toEqual([0, 1]);
   });
+
+  it("handles user error payload with todos and stringified array", async () => {
+    const rawInput = {
+      max_concurrency: 4,
+      todos:
+        '[{"id": "map", "status": "completed", "title": "Petakan struktur kode Rust + TypeScript"}, {"id": "ipc", "status": "in_progress", "title": "Audit surface IPC/Tauri commands + capabilities allowlist"}, {"id": "subagent-audit", "status": "in_progress", "title": "Audit paralel: control server, ssh, pty/shell, extensions, net/ssrf"}]',
+    };
+
+    const tools = buildSubagentTools(ctx());
+    // Test schema validation
+    const parsed = tools.run_subagents.inputSchema.parse(rawInput) as {
+      tasks: Array<{ prompt: string; type?: string; description?: string }>;
+      max_concurrency?: number;
+    };
+    expect(parsed.tasks).toHaveLength(3);
+    expect(parsed.tasks[0].prompt).toBe(
+      "Petakan struktur kode Rust + TypeScript",
+    );
+    expect(parsed.tasks[1].prompt).toBe(
+      "Audit surface IPC/Tauri commands + capabilities allowlist",
+    );
+    expect(parsed.tasks[2].prompt).toBe(
+      "Audit paralel: control server, ssh, pty/shell, extensions, net/ssrf",
+    );
+    expect(parsed.max_concurrency).toBe(4);
+
+    // Test tool execution
+    const out = await run(parsed);
+    expect(out.count).toBe(3);
+    expect(out.results).toHaveLength(3);
+  });
+
+  it("resolves named dependencies in tasks", async () => {
+    const rawInput = {
+      tasks: [
+        { id: "step-1", title: "Task 1" },
+        { id: "step-2", title: "Task 2", depends_on: ["step-1"] },
+      ],
+    };
+
+    const tools = buildSubagentTools(ctx());
+    const parsed = tools.run_subagents.inputSchema.parse(rawInput) as {
+      tasks: Array<{ depends_on?: number[] }>;
+    };
+    expect(parsed.tasks[1].depends_on).toEqual([0]);
+  });
 });
