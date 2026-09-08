@@ -49,21 +49,47 @@ export const useTrajectoryStore = create<TrajectoryState>((set) => ({
   selectedStepId: null,
 
   startRun: ({ runId, modelId, taskId }) =>
-    set((state) => ({
-      activeRunId: runId,
-      runs: [
-        ...state.runs,
-        {
-          runId,
-          taskId,
-          modelId,
-          startedAt: Date.now(),
-          steps: [],
-          totalTokens: 0,
-          status: "running",
-        },
-      ],
-    })),
+    set((state) => {
+      // A step left "awaiting-approval" on an earlier run was answered - that
+      // is precisely why a new round is starting now (the SDK auto-continues
+      // once an approval is responded to). The run that paused recorded the
+      // call but never saw its result land (the result belongs to THIS round),
+      // so its card sat on "awaiting-approval" forever - a ghost the user read
+      // as "still waiting for my click" on a command that already ran. Flip
+      // those to "success" and re-persist them so the replay timeline is
+      // honest. Only untouched by a run still "running" (its own pause is real).
+      const reconciled = state.runs.map((r) => {
+        if (r.status === "running") return r;
+        if (!r.steps.some((s) => s.status === "awaiting-approval")) return r;
+        const fixed: TrajectoryRun = {
+          ...r,
+          steps: r.steps.map((s) =>
+            s.status === "awaiting-approval"
+              ? { ...s, status: "success" as const }
+              : s,
+          ),
+        };
+        // Fire-and-forget: correct the on-disk copy too. A failed save only
+        // leaves the stale replay entry; it must never block the new run.
+        void saveTrajectoryRun(fixed).catch(() => {});
+        return fixed;
+      });
+      return {
+        activeRunId: runId,
+        runs: [
+          ...reconciled,
+          {
+            runId,
+            taskId,
+            modelId,
+            startedAt: Date.now(),
+            steps: [],
+            totalTokens: 0,
+            status: "running" as const,
+          },
+        ],
+      };
+    }),
 
   appendStep: (step) =>
     set((state) => {

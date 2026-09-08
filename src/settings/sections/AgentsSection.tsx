@@ -40,6 +40,13 @@ import {
   sumCost,
 } from "@/modules/ai/lib/costLedger";
 import {
+  DEFAULT_POLICIES,
+  loadCustomPolicies,
+  type PolicyRule,
+  removeCustomPolicy,
+  saveCustomPolicy,
+} from "@/modules/ai/lib/policyEngine";
+import {
   isValidHandle,
   normalizeHandle,
   type Snippet,
@@ -49,15 +56,9 @@ import {
   newSnippetId,
   useSnippetsStore,
 } from "@/modules/ai/store/snippetsStore";
-import {
-  DEFAULT_POLICIES,
-  loadCustomPolicies,
-  removeCustomPolicy,
-  saveCustomPolicy,
-  type PolicyRule,
-} from "@/modules/ai/lib/policyEngine";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
+  setAgentAutoContinue,
   setAgentReviewAfterApply,
   setAutoApproveInScopeScans,
   setAutoCheckpoint,
@@ -112,6 +113,7 @@ export function AgentsSection() {
     (s) => s.confirmAfterMutations,
   );
   const autoVerifyAfterEdit = usePreferencesStore((s) => s.autoVerifyAfterEdit);
+  const agentAutoContinue = usePreferencesStore((s) => s.agentAutoContinue);
   const customEndpoints = usePreferencesStore((s) => s.customEndpoints);
 
   // Fall back to "auto" if the stored id no longer resolves (a deleted custom
@@ -334,6 +336,15 @@ export function AgentsSection() {
           <Switch
             checked={autoVerifyAfterEdit}
             onCheckedChange={(v) => void setAutoVerifyAfterEdit(v)}
+          />
+        </SettingRow>
+        <SettingRow
+          title="Auto-continue on budget pause"
+          description="When a run only paused because it used up this round's step budget, continue it automatically with the next budget instead of waiting for a Continue click each round. Stops that signal a stuck agent (repeating tools, no progress, repeated errors, cost caps) still wait for you."
+        >
+          <Switch
+            checked={agentAutoContinue}
+            onCheckedChange={(v) => void setAgentAutoContinue(v)}
           />
         </SettingRow>
       </section>
@@ -1138,7 +1149,8 @@ function WorkspacePoliciesBlock() {
         <div className="flex flex-col">
           <Label>Workspace Guardrails & Policies</Label>
           <span className="text-[10.5px] text-muted-foreground">
-            Enforces security guardrails on agent tool execution and terminal commands. Custom policies are stored in .termigo/policies.json.
+            Enforces security guardrails on agent tool execution and terminal
+            commands. Custom policies are stored in .termigo/policies.json.
           </span>
         </div>
         <Button
@@ -1154,7 +1166,10 @@ function WorkspacePoliciesBlock() {
 
       <div className="flex flex-col divide-y divide-border/60 rounded-md border border-border/80 bg-card/40">
         {DEFAULT_POLICIES.rules.map((rule) => (
-          <div key={rule.id} className="flex items-center justify-between p-2.5 px-3 text-[11.5px]">
+          <div
+            key={rule.id}
+            className="flex items-center justify-between p-2.5 px-3 text-[11.5px]"
+          >
             <div className="flex flex-col gap-0.5">
               <div className="flex items-center gap-2 font-mono text-[11px] font-medium text-foreground">
                 {rule.id}
@@ -1171,7 +1186,10 @@ function WorkspacePoliciesBlock() {
         ))}
 
         {customRules.map((rule) => (
-          <div key={rule.id} className="flex items-center justify-between p-2.5 px-3 text-[11.5px]">
+          <div
+            key={rule.id}
+            className="flex items-center justify-between p-2.5 px-3 text-[11.5px]"
+          >
             <div className="flex flex-col gap-0.5">
               <div className="flex items-center gap-2 font-mono text-[11px] font-medium text-foreground">
                 {rule.id}
@@ -1191,7 +1209,7 @@ function WorkspacePoliciesBlock() {
               <span className="text-[10.5px] text-muted-foreground">
                 {rule.description || "Workspace custom policy"}
               </span>
-              {(rule.commands?.length || rule.tools?.length) ? (
+              {rule.commands?.length || rule.tools?.length ? (
                 <div className="flex flex-wrap gap-1.5 pt-1 text-[10px] font-mono text-muted-foreground">
                   {rule.commands?.map((c) => (
                     <span key={c} className="rounded bg-muted/60 px-1 py-0.5">
@@ -1262,7 +1280,9 @@ function WorkspacePoliciesBlock() {
             </div>
             <div className="flex items-center justify-between pt-1">
               <div className="flex flex-col">
-                <span className="text-[12px] font-medium text-foreground">Hard block</span>
+                <span className="text-[12px] font-medium text-foreground">
+                  Hard block
+                </span>
                 <span className="text-[10.5px] text-muted-foreground">
                   Refuse tool call immediately instead of warning
                 </span>
@@ -1271,10 +1291,18 @@ function WorkspacePoliciesBlock() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="ghost" size="sm" onClick={() => setDialogOpen(false)}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setDialogOpen(false)}
+            >
               Cancel
             </Button>
-            <Button size="sm" onClick={() => void handleSave()} disabled={!newId.trim()}>
+            <Button
+              size="sm"
+              onClick={() => void handleSave()}
+              disabled={!newId.trim()}
+            >
               Save Policy
             </Button>
           </DialogFooter>

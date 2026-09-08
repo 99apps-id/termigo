@@ -82,4 +82,33 @@ describe("trajectoryStore", () => {
     expect(run?.steps[0].status).toBe("awaiting-approval");
     expect(run?.steps[0].output).toBeUndefined();
   });
+
+  it("reconciles a previous run's awaiting-approval step when a new run starts", () => {
+    // An approval-gated round ends with its tool call marked
+    // "awaiting-approval"; the call then RUNS in the next round, so the old
+    // card must stop claiming the agent waits for a click once that round
+    // begins. Without this the replay timeline is a field of ghost cards.
+    const store = useTrajectoryStore.getState();
+    store.startRun({ runId: "run-old", modelId: "m" });
+    store.appendStep({
+      id: "step-old",
+      stepIndex: 0,
+      toolName: "bash_run",
+      args: { command: "npm run build" },
+      status: "running",
+    });
+    store.finishRun({ status: "completed", finishReason: "tool-calls" });
+    expect(
+      useTrajectoryStore.getState().runs.find((r) => r.runId === "run-old")
+        ?.steps[0].status,
+    ).toBe("awaiting-approval");
+
+    useTrajectoryStore.getState().startRun({ runId: "run-new", modelId: "m" });
+    const old = useTrajectoryStore
+      .getState()
+      .runs.find((r) => r.runId === "run-old");
+    expect(old?.steps[0].status).toBe("success");
+    // The new run is untouched; a genuinely running pause is never rewritten.
+    expect(useTrajectoryStore.getState().activeRunId).toBe("run-new");
+  });
 });

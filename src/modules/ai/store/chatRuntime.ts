@@ -15,6 +15,8 @@ import {
 } from "../config";
 import { buildLanguageModel } from "../lib/agent";
 import { BUILTIN_AGENTS } from "../lib/agents";
+import { isResumingApproval } from "../lib/approvalResume";
+import { AUTO_CONTINUE_DELAY_MS, autoContinueSlot } from "../lib/autoContinue";
 import {
   isContextOverflowError,
   noteSuccessfulRequest,
@@ -43,7 +45,6 @@ import {
   recordToolChoiceRejection,
 } from "../lib/toolChoiceLearning";
 import { createContextAwareTransport } from "../lib/transport";
-import { isResumingApproval } from "../lib/approvalResume";
 import type { ToolContext } from "../tools/tools";
 import { useAgentsStore } from "./agentsStore";
 import {
@@ -82,6 +83,62 @@ const toolChoiceAutoResumeAt = new Map<string, number>();
 // complex autonomous tasks continue without artificial interruption.
 const MAX_LOOP_ROUNDS = 100;
 
+// How many times one task may resume itself after pausing on its step budget
+// (see autoContinue.ts). Reaching the budget is a pause, not trouble - but each
+// resume resets the round counter above, so without a per-task bound an
+// unattended loop could keep spending forever. Cleared by a fresh user message
+// or a delivered queued task, both of which start a new piece of work.
+const autoContinueCount = new Map<string, number>();
+
+/**
+ * Continue a budget-paused run on the user's behalf.
+ *
+ * Only for pauses that are not a sign of trouble: the round simply ran out of
+ * steps. The next round gets the next rung of the 25 -> 50 -> 100 ladder, so a
+ * long task deepens instead of stalling on a click per round.
+ *
+ * Refuses when the user stopped, switched session, or queued a task that owns
+ * the next turn; when the preference is off; or when the task has used its
+ * automatic continues. In each of those cases the run stays as it was and the
+ * manual Continue button does the same thing on click.
+ */
+function requestAutoContinue(sessionId: string): boolean {
+  if (!usePreferencesStore.getState().agentAutoContinue) return false;
+  if (stopLatch.has(sessionId)) return false;
+  if (useChatStore.getState().activeSessionId !== sessionId) return false;
+  if (useChatStore.getState().agentMeta.stoppedByUser) return false;
+  // A task the user typed while we were working owns the next turn; racing it
+  // with a resume would queue their correction behind work it supersedes.
+  if (useChatStore.getState().steerQueue.pending.length > 0) return false;
+  const used = autoContinueCount.get(sessionId) ?? 0;
+  if (!autoContinueSlot(used)) return false;
+  autoContinueCount.set(sessionId, used + 1);
+  useChatStore.getState().patchAgentMeta({
+    status: "thinking",
+    stopReason: null,
+    error: null,
+  });
+  setTimeout(() => {
+    const live = useChatStore.getState();
+    if (
+      stopLatch.has(sessionId) ||
+      live.activeSessionId !== sessionId ||
+      live.agentMeta.stoppedByUser
+    ) {
+      return;
+    }
+    void resumeRun().catch(() => {
+      useChatStore.getState().patchAgentMeta({
+        status: "error",
+        error:
+          "The automatic continue could not start. Press Continue to go on.",
+      });
+      useChatStore.getState().syncRunMeta();
+    });
+  }, AUTO_CONTINUE_DELAY_MS);
+  return true;
+}
+
 // Pin the workspace the agent works on for the whole run. The toolContext reads
 // these instead of the live (mutable) context, so switching tabs, opening
 // another folder or connecting an SSH session mid-run cannot silently redirect
@@ -104,7 +161,6 @@ const stopLatch = new Set<string>();
 
 // Tracks failed / aborted approval resumes per session to prevent infinite auto-send retry storms.
 const approvalResumeFailureCount = new Map<string, number>();
-
 
 // Connectivity recovery: when the provider is unreachable, keep the run
 // resumable and resume it automatically once the network is back, so an
@@ -314,28 +370,6 @@ function makeChat(sessionId: string): Chat<UIMessage> {
         overflowAutoResumeCount.delete(sessionId);
         transientRetryCount.delete(sessionId);
       }
-      // Autonomous continuous execution: if the run paused strictly because it
-      // reached this round's step budget (step-cap), auto-continue to the next
-      // round immediately without waiting for a manual click or approval.
-      if (
-        stopReason === "step-cap" &&
-        !stopLatch.has(sessionId) &&
-        !useChatStore.getState().agentMeta.stoppedByUser
-      ) {
-        useChatStore.getState().patchAgentMeta({
-          status: "thinking",
-          stopReason: null,
-        });
-        setTimeout(() => {
-          if (
-            !stopLatch.has(sessionId) &&
-            !useChatStore.getState().agentMeta.stoppedByUser
-          ) {
-            void resumeRun().catch(() => {});
-          }
-        }, 0);
-        return;
-      }
       // Remember what this run cost. The estimate only exists for priced
       // models, so unknown ones record nothing rather than a false zero.
       const m = info.metrics;
@@ -380,6 +414,13 @@ function makeChat(sessionId: string): Chat<UIMessage> {
           },
         ).catch(() => {});
       }
+      // Autonomous continuous execution: a run that paused strictly because it
+      // reached this round's step budget is not trouble - the transcript is
+      // intact and the next round gets the next rung of the ladder. Continue it
+      // without waiting for a click (bounded + preference-gated; see
+      // requestAutoContinue). Runs LAST so the cost of this round is recorded
+      // and Stop hooks fire before the next round begins.
+      if (stopReason === "step-cap") requestAutoContinue(sessionId);
     },
     onUsage: (delta) => {
       transientRetryCount.delete(sessionId);
@@ -430,9 +471,15 @@ function makeChat(sessionId: string): Chat<UIMessage> {
         (e as { name?: string })?.name === "AbortError" ||
         /\baborted\b/i.test(raw);
       if (aborted) {
-        // A loop-cap refusal is an automatic stop, not a user stop.
+        // A loop-cap refusal is an automatic stop, not a user stop. The
+        // aggregate round guard tripped (the run kept auto-continuing without
+        // a final summary); offer the same bounded auto-continue the per-round
+        // budget pause does, so a progressing task keeps going without a click.
+        // requestAutoContinue honours the preference / budget / stop latch and
+        // returns false when it should not, leaving the manual Continue button.
         if (loopCapRefused) {
           loopCapRefused = false;
+          if (requestAutoContinue(sessionId)) return;
           useChatStore.getState().patchAgentMeta({
             status: "idle",
             error: null,
@@ -632,6 +679,10 @@ export async function sendParts(
   stopLatch.delete(sessionId);
   approvalResumeFailureCount.delete(sessionId);
   transientRetryCount.delete(sessionId);
+  // A genuinely new task earns a fresh automatic-continue budget. A resume
+  // (the injected continuation prompt, from Continue or an auto-continue) is
+  // the same task and must NOT reset it, or the budget would never be spent.
+  if (!isResumeParts(parts)) autoContinueCount.delete(sessionId);
   const c = getOrCreateChat(sessionId);
   // After an error the run is not busy, but the SDK status can look stale
   // (still "submitted"), which would QUEUE the resume instead of sending it and
@@ -744,6 +795,9 @@ export async function flushSteer(bypassBusyCheck = false): Promise<boolean> {
     store.cancelSteer(0);
     // A queued correction is the user's own input, so it supersedes a stop.
     stopLatch.delete(sessionId);
+    // A genuinely new queued task also earns a fresh automatic-continue budget;
+    // a queued resume is the same task and keeps whatever budget it has.
+    if (!isResumeParts(out.parts)) autoContinueCount.delete(sessionId);
     // A fresh user turn resets the loop-round counter (see sendParts).
     store.patchAgentMeta({ round: 0 });
     // A queued task is a new task, not a resume: clear the previous task's list
