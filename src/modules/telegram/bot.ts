@@ -992,7 +992,7 @@ async function runAgentAndStream(
           await sendKeyboard(
             chatId,
             `Batas langkah tercapai (Round selesai). Lanjut ke Round berikutnya (${nextBudget} steps)?`,
-            [[{ text: `⏩ Lanjut Round (${nextBudget} steps)`, callback_data: "resume:run" }]],
+            [[{ text: `>> Lanjut Round (${nextBudget} steps)`, callback_data: "resume:run" }]],
             signal,
           ).catch(() => {});
         }
