@@ -23,8 +23,10 @@ import { buildGitTools } from "./git";
 import { buildGithubTools } from "./github";
 import { buildHarnessTools } from "./harness";
 import { buildImageTools } from "./image";
+import { buildImageGenerationTools } from "./imageGeneration";
 import { buildInvariantTools } from "./invariant";
 import { buildLspTools } from "./lsp";
+import { buildMcpOAuthTools } from "./mcpOAuth";
 import { buildMemoryTools } from "./memory";
 import { buildPdfTools } from "./pdf";
 import { buildPtyDriverTools } from "./ptyDriver";
@@ -235,6 +237,8 @@ export function buildTools(
     ...buildWebSearchTools(),
     ...buildPdfTools(ctx),
     ...buildImageTools(ctx),
+    ...buildImageGenerationTools(ctx),
+    ...buildMcpOAuthTools(),
     ...buildSystemTools(),
     ...buildProcessTools(ctx),
     unknown_tool_fallback: tool({

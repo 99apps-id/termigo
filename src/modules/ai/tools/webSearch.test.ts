@@ -101,4 +101,18 @@ describe("webSearch (DuckDuckGo)", () => {
     );
     expect(dirty[0].title).toBe("Hi");
   });
+
+  it("builds web_search and web_fetch tools properly", async () => {
+    const { buildWebSearchTools } = await import("./webSearch");
+    const tools = buildWebSearchTools();
+    expect(tools.web_search).toBeDefined();
+    expect(tools.web_fetch).toBeDefined();
+
+    const parsed = tools.web_fetch.inputSchema.parse({
+      url: "https://example.com/article",
+      use_reader: true,
+    });
+    expect(parsed.url).toBe("https://example.com/article");
+    expect(parsed.use_reader).toBe(true);
+  });
 });

@@ -1,16 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
+  editableTextOf,
   EMPTY_QUEUE,
   enqueue,
   flush,
   flushOne,
   flushShouldHold,
+  getQueueWindow,
   isBusy,
   isResumeParts,
   prepend,
   previewOf,
-  RESUME_PROMPT,
   remove,
+  replaceAt,
+  RESUME_PROMPT,
   type SteerMessage,
   type SteerPart,
   submitAction,
@@ -200,5 +203,70 @@ describe("previewOf", () => {
 
   it("describes an attachment-only message instead of showing nothing", () => {
     expect(previewOf([image("a.png"), image("b.png")])).toBe("2 attachment(s)");
+  });
+});
+
+describe("getQueueWindow", () => {
+  it("shows the oldest rows first when nothing is focused", () => {
+    const w = getQueueWindow(5);
+    expect(w).toEqual({ start: 0, end: 3, showLead: false, showTail: true });
+  });
+
+  it("shows everything when the queue fits the window", () => {
+    const w = getQueueWindow(2);
+    expect(w).toEqual({ start: 0, end: 2, showLead: false, showTail: false });
+  });
+
+  it("slides so a focused row stays visible", () => {
+    const w = getQueueWindow(5, 4);
+    expect(w.start).toBeLessThanOrEqual(4);
+    expect(w.end).toBeGreaterThan(4);
+  });
+
+  it("clamps the focus slide to the last window", () => {
+    const w = getQueueWindow(10, 9);
+    expect(w).toEqual({ start: 7, end: 10, showLead: true, showTail: false });
+  });
+
+  it("is empty-safe", () => {
+    expect(getQueueWindow(0)).toEqual({
+      start: 0,
+      end: 0,
+      showLead: false,
+      showTail: false,
+    });
+  });
+});
+
+describe("replaceAt", () => {
+  it("swaps a message in place, keeping the send order", () => {
+    let q = enqueue(EMPTY_QUEUE, msg(text("a")));
+    q = enqueue(q, msg(text("b")));
+    q = enqueue(q, msg(text("c")));
+    const next = replaceAt(q, 1, msg(text("B!")));
+    expect(next.pending.map((m) => m.preview)).toEqual(["a", "B!", "c"]);
+  });
+
+  it("drops the row when the replacement is null", () => {
+    let q = enqueue(EMPTY_QUEUE, msg(text("a")));
+    q = enqueue(q, msg(text("b")));
+    expect(replaceAt(q, 0, null).pending.map((m) => m.preview)).toEqual(["b"]);
+  });
+
+  it("ignores an out-of-range index", () => {
+    const q = enqueue(EMPTY_QUEUE, msg(text("a")));
+    expect(replaceAt(q, 5, msg(text("x")))).toBe(q);
+  });
+});
+
+describe("editableTextOf", () => {
+  it("joins the text parts and leaves attachments out", () => {
+    expect(editableTextOf([text("one"), image("a.png"), text("two")])).toBe(
+      "one\n\ntwo",
+    );
+  });
+
+  it("is empty for an attachment-only message", () => {
+    expect(editableTextOf([image("a.png")])).toBe("");
   });
 });

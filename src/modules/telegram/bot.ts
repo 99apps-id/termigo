@@ -30,9 +30,14 @@ type ChatLike = {
 
 type Update = {
   update_id: number;
-  message?: { chat: { id: number }; text?: string };
+  message?: {
+    chat: { id: number };
+    from?: { id: number };
+    text?: string;
+  };
   callback_query?: {
     id: string;
+    from?: { id: number };
     message?: { chat: { id: number }; message_id?: number };
     data?: string;
   };
@@ -117,35 +122,110 @@ function isMessageSeen(
   return seenFingerprints.has(fp);
 }
 
-async function apiGet(path: string, signal: AbortSignal): Promise<unknown> {
+export class TelegramApiError extends Error {
+  readonly status: number;
+  readonly description: string;
+  readonly retryAfter?: number;
+
+  constructor(status: number, description: string, retryAfter?: number) {
+    super(`Telegram API ${status}: ${description}`);
+    this.name = "TelegramApiError";
+    this.status = status;
+    this.description = description;
+    this.retryAfter = retryAfter;
+  }
+}
+
+function mergeSignals(
+  parent: AbortSignal,
+  timeoutMs: number,
+): { signal: AbortSignal; cleanup: () => void } {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => {
+    ctrl.abort(new Error(`Timeout after ${timeoutMs}ms`));
+  }, timeoutMs);
+
+  const onParentAbort = () => {
+    ctrl.abort(parent.reason);
+  };
+
+  if (parent.aborted) {
+    ctrl.abort(parent.reason);
+  } else {
+    parent.addEventListener("abort", onParentAbort, { once: true });
+  }
+
+  return {
+    signal: ctrl.signal,
+    cleanup: () => {
+      clearTimeout(t);
+      parent.removeEventListener("abort", onParentAbort);
+    },
+  };
+}
+
+async function parseTelegramError(res: Response): Promise<TelegramApiError> {
+  const text = await res.text().catch(() => "");
+  try {
+    const json = JSON.parse(text) as {
+      ok?: boolean;
+      error_code?: number;
+      description?: string;
+      parameters?: { retry_after?: number };
+    };
+    const desc = json.description || text.slice(0, 200) || res.statusText;
+    const retryAfter = json.parameters?.retry_after;
+    return new TelegramApiError(res.status, desc, retryAfter);
+  } catch {
+    return new TelegramApiError(
+      res.status,
+      text.slice(0, 200) || res.statusText,
+    );
+  }
+}
+
+async function apiGet(
+  path: string,
+  signal: AbortSignal,
+  timeoutMs = 15_000,
+): Promise<unknown> {
   const token = await getTelegramToken();
   if (!token) throw new Error("No Telegram token configured");
-  const res = await fetch(`${API}/bot${token}/${path}`, { signal });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`Telegram API ${res.status}: ${body.slice(0, 200)}`);
+  const { signal: reqSignal, cleanup } = mergeSignals(signal, timeoutMs);
+  try {
+    const res = await fetch(`${API}/bot${token}/${path}`, { signal: reqSignal });
+    if (!res.ok) {
+      throw await parseTelegramError(res);
+    }
+    return await res.json();
+  } finally {
+    cleanup();
   }
-  return res.json();
 }
 
 async function apiPost(
   path: string,
   body: unknown,
   signal: AbortSignal,
+  timeoutMs = 15_000,
 ): Promise<unknown> {
   const token = await getTelegramToken();
   if (!token) throw new Error("No Telegram token configured");
-  const res = await fetch(`${API}/bot${token}/${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-    signal,
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Telegram API ${res.status}: ${text.slice(0, 200)}`);
+  const { signal: reqSignal, cleanup } = mergeSignals(signal, timeoutMs);
+  try {
+    const res = await fetch(`${API}/bot${token}/${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: reqSignal,
+    });
+    if (!res.ok) {
+      throw await parseTelegramError(res);
+    }
+    return await res.json();
+  } finally {
+    cleanup();
   }
-  return res.json();
 }
 
 function sleep(signal: AbortSignal, ms: number): Promise<void> {
@@ -242,29 +322,84 @@ async function editProgressMessage(
   signal: AbortSignal,
 ): Promise<boolean> {
   const html = markdownToTelegramHtml(text);
-  try {
-    await apiPost(
+  const tryPost = async (body: { text: string; parse_mode?: string }) => {
+    return (await apiPost(
       "editMessageText",
       {
         chat_id: chatId,
         message_id: messageId,
-        text: html,
-        parse_mode: "HTML",
+        ...body,
       },
       signal,
+      10_000,
+    )) as { ok?: boolean };
+  };
+
+  try {
+    await tryPost({ text: html, parse_mode: "HTML" });
+    return true;
+  } catch (err) {
+    if (err instanceof TelegramApiError) {
+      const desc = err.description.toLowerCase();
+      // Exact message already displayed on Telegram: treat as success (Hermes pattern)
+      if (desc.includes("message is not modified")) {
+        return true;
+      }
+      // Rate limited: if retry_after is small (<=3s), back off briefly, else skip intermediate progress
+      if (err.status === 429) {
+        const waitSec = err.retryAfter ?? 2;
+        if (waitSec <= 3 && !signal.aborted) {
+          await sleep(signal, waitSec * 1000);
+          try {
+            await tryPost({ text: html, parse_mode: "HTML" });
+            return true;
+          } catch (retryErr) {
+            if (
+              retryErr instanceof TelegramApiError &&
+              retryErr.description
+                .toLowerCase()
+                .includes("message is not modified")
+            ) {
+              return true;
+            }
+            return false;
+          }
+        }
+        return false;
+      }
+    }
+    // Fallback to plain text if HTML entity parsing fails
+    try {
+      await tryPost({ text });
+      return true;
+    } catch (fallbackErr) {
+      if (
+        fallbackErr instanceof TelegramApiError &&
+        fallbackErr.description
+          .toLowerCase()
+          .includes("message is not modified")
+      ) {
+        return true;
+      }
+      return false;
+    }
+  }
+}
+
+async function deleteTelegramMessage(
+  chatId: number | string,
+  messageId: number,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  try {
+    await apiPost(
+      "deleteMessage",
+      { chat_id: chatId, message_id: messageId },
+      signal ?? AbortSignal.timeout(4000),
     );
     return true;
   } catch {
-    try {
-      await apiPost(
-        "editMessageText",
-        { chat_id: chatId, message_id: messageId, text },
-        signal,
-      );
-      return true;
-    } catch {
-      return false;
-    }
+    return false;
   }
 }
 
@@ -288,19 +423,24 @@ async function apiPostForm(
   path: string,
   form: FormData,
   signal: AbortSignal,
+  timeoutMs = 45_000,
 ): Promise<unknown> {
   const token = await getTelegramToken();
   if (!token) throw new Error("No Telegram token configured");
-  const res = await fetch(`${API}/bot${token}/${path}`, {
-    method: "POST",
-    body: form,
-    signal,
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Telegram API ${res.status}: ${text.slice(0, 200)}`);
+  const { signal: reqSignal, cleanup } = mergeSignals(signal, timeoutMs);
+  try {
+    const res = await fetch(`${API}/bot${token}/${path}`, {
+      method: "POST",
+      body: form,
+      signal: reqSignal,
+    });
+    if (!res.ok) {
+      throw await parseTelegramError(res);
+    }
+    return await res.json();
+  } finally {
+    cleanup();
   }
-  return res.json();
 }
 
 function base64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
@@ -548,12 +688,10 @@ async function waitForReply(
     const busy = runBusy(chatStatus, appStatus);
     if (busy) everBusy = true;
     const count = countAssistantMessages(store.getChat, sessionId);
-    const queued = store.useChatStore.getState().steerQueue.pending.length > 0;
 
     if (count > baseline) {
-      // A fresh answer exists; send it once the run has settled and nothing is
-      // still queued behind our message.
-      if (!busy && !queued) {
+      // A fresh answer exists; send it once the run has settled.
+      if (!busy) {
         return (
           lastAssistantText(store.getChat, sessionId, baseline) ??
           "Run finished."
@@ -564,7 +702,7 @@ async function waitForReply(
       if (err) {
         return `Run ended with an error: ${err}`;
       }
-      if (everBusy && !busy && !queued) {
+      if (everBusy && !busy) {
         return "Run produced no text output.";
       }
       if (!busy && Date.now() - started > 25_000) {
@@ -579,6 +717,8 @@ async function waitForReply(
 // One live progress publisher per chat, so a new task supersedes the previous
 // run's stream instead of both posting updates.
 const progressCtrls = new Map<number, AbortController>();
+// Track the last finished progress message per chat so it can be cleared when a new task starts.
+const lastFinishedProgressMessageIds = new Map<number, number>();
 
 /**
  * Stream the agent's live progress (status, round, current step, todo list)
@@ -590,6 +730,7 @@ async function publishProgress(
   chatId: number,
   sessionId: string,
   signal: AbortSignal,
+  initialText?: string,
 ): Promise<void> {
   const store = await import("../ai/store/chatStore");
   const todosStore = await import("../ai/store/todoStore");
@@ -604,6 +745,14 @@ async function publishProgress(
   const sentElicitationIds = new Set<string>();
   const started = Date.now();
   const MAX_WAIT = 30 * 60 * 1000;
+
+  if (initialText) {
+    progressMessageId = await sendProgressMessage(chatId, initialText, signal);
+    lastLiveText = initialText;
+    lastSentAt = Date.now();
+    lastTypingAt = Date.now();
+    await sendTyping(chatId, signal).catch(() => {});
+  }
 
   try {
     while (!signal.aborted && Date.now() - started < MAX_WAIT) {
@@ -736,6 +885,7 @@ async function publishProgress(
         doneText,
         AbortSignal.timeout(4000),
       ).catch(() => {});
+      lastFinishedProgressMessageIds.set(chatId, progressMessageId);
     }
   }
 }
@@ -923,6 +1073,7 @@ async function runAgentAndStream(
   action: () => Promise<boolean>,
   chatId: number,
   signal: AbortSignal,
+  initialText?: string,
 ): Promise<void> {
   try {
     const store = await import("../ai/store/chatStore");
@@ -946,9 +1097,12 @@ async function runAgentAndStream(
       const progressCtl = new AbortController();
       progressCtrls.get(chatId)?.abort();
       progressCtrls.set(chatId, progressCtl);
-      void publishProgress(chatId, sessionId, progressCtl.signal).catch(
-        () => {},
-      );
+      void publishProgress(
+        chatId,
+        sessionId,
+        progressCtl.signal,
+        initialText,
+      ).catch(() => {});
 
       try {
         const accepted = await action();
@@ -971,15 +1125,32 @@ async function runAgentAndStream(
           }
         }
 
-        const reply = await waitForReply(store, signal, sessionId, baseline);
-        await sendReplyWithDiagrams(chatId, reply, signal);
+        let currentBaseline = baseline;
+        while (!signal.aborted) {
+          const reply = await waitForReply(store, signal, sessionId, currentBaseline);
+          await sendReplyWithDiagrams(chatId, reply, signal);
 
-        // Immediately mark fresh assistant message(s) as seen and Telegram-origin.
-        const chatAfterReply = store.getChat(sessionId);
-        for (const m of chatAfterReply?.messages ?? []) {
-          if (m.id && !priorIds.has(m.id)) {
-            markMessageSeen(m.id, sessionId, m.role, messageText(m));
-            telegramOriginMessageIds.add(m.id);
+          // Immediately mark fresh assistant message(s) as seen and Telegram-origin.
+          const chatAfterReply = store.getChat(sessionId);
+          for (const m of chatAfterReply?.messages ?? []) {
+            if (m.id && !priorIds.has(m.id)) {
+              markMessageSeen(m.id, sessionId, m.role, messageText(m));
+              telegramOriginMessageIds.add(m.id);
+            }
+          }
+
+          currentBaseline = countAssistantMessages(store.getChat, sessionId);
+
+          const queued = store.useChatStore.getState().steerQueue.pending.length > 0;
+          const appStatus = store.useChatStore.getState().agentMeta.status;
+          const chatStatus = store.getChat(sessionId)?.status ?? "";
+          const busy = runBusy(chatStatus, appStatus);
+
+          if (!queued && !busy) break;
+
+          if (!busy && queued) {
+            const runtime = await import("../ai/store/chatRuntime");
+            await runtime.flushSteer();
           }
         }
 
@@ -1029,9 +1200,15 @@ async function dispatchAndStream(
   text: string,
   chatId: number,
   signal: AbortSignal,
+  initialText?: string,
 ): Promise<void> {
   const runtime = await import("../ai/store/chatRuntime");
-  await runAgentAndStream(() => runtime.sendMessage(text), chatId, signal);
+  await runAgentAndStream(
+    () => runtime.sendMessage(text),
+    chatId,
+    signal,
+    initialText,
+  );
 }
 
 /**
@@ -1080,32 +1257,60 @@ function startTelegramResume(chatId: number, signal: AbortSignal): void {
  * Dispatch a Telegram-initiated task with immediate synchronous mirror lock
  * and prompt tracking, preventing any race condition where the user's prompt
  * or resulting reply could be mirrored back to Telegram.
+ *
+ * If the agent is currently working on a task, the incoming message is handled
+ * as a steer message: the user is notified that the agent is busy, and the
+ * request is queued to run shortly after the current task finishes.
  */
-function startTelegramDispatch(
+async function startTelegramDispatch(
   text: string,
   chatId: number,
   signal: AbortSignal,
   ackText: string,
-): void {
-  pauseMirror();
-  recordTelegramText(text);
-  void (async () => {
+): Promise<void> {
+  try {
+    const store = await import("../ai/store/chatStore");
+    const runtime = await import("../ai/store/chatRuntime");
+    const sessionId = store.useChatStore.getState().activeSessionId;
+    const appStatus = store.useChatStore.getState().agentMeta.status;
+    const chatStatus = sessionId ? store.getChat(sessionId)?.status ?? "" : "";
+    const busy = runBusy(chatStatus, appStatus);
+
+    if (busy) {
+      recordTelegramText(text);
+      await sendTelegram(
+        chatId,
+        "The agent is busy. Your request will be processed shortly.",
+        signal,
+      ).catch(() => {});
+      await runtime.sendMessage(text);
+      return;
+    }
+
+    // Clean up previous finished progress message if any so it disappears on new task start
+    const prevDoneMsgId = lastFinishedProgressMessageIds.get(chatId);
+    if (prevDoneMsgId) {
+      lastFinishedProgressMessageIds.delete(chatId);
+      void deleteTelegramMessage(chatId, prevDoneMsgId);
+    }
+
+    pauseMirror();
+    recordTelegramText(text);
     try {
-      await sendTelegram(chatId, ackText, signal).catch(() => {});
       await sendTyping(chatId, signal).catch(() => {});
-      await dispatchAndStream(text, chatId, signal);
-    } catch (e) {
-      if (!signal.aborted) {
-        await sendTelegram(
-          chatId,
-          `Error during run: ${e instanceof Error ? e.message : String(e)}`,
-          signal,
-        ).catch(() => {});
-      }
+      await dispatchAndStream(text, chatId, signal, ackText);
     } finally {
       resumeMirror();
     }
-  })();
+  } catch (e) {
+    if (!signal.aborted) {
+      await sendTelegram(
+        chatId,
+        `Error during run: ${e instanceof Error ? e.message : String(e)}`,
+        signal,
+      ).catch(() => {});
+    }
+  }
 }
 
 const HELP = [
@@ -1167,6 +1372,20 @@ async function handleCallback(
   const chatId = msg.chat.id;
   const owner = useTelegramStore.getState().chatId;
   if (owner && String(owner) !== String(chatId)) {
+    await answerCallback(cb.id, "Unauthorized.", signal);
+    return;
+  }
+  // Sensitive callbacks (tool approval, subagent approval, elicitation answer)
+  // must come from the pairing *user*: a group chat shares one chatId with all
+  // members, so the chat-level check above would let any member act as owner.
+  const ownerUserId = useTelegramStore.getState().ownerUserId;
+  if (
+    ownerUserId &&
+    (data.startsWith("ap:") ||
+      data.startsWith("aq:") ||
+      data.startsWith("el:")) &&
+    (!cb.from || String(cb.from.id) !== String(ownerUserId))
+  ) {
     await answerCallback(cb.id, "Unauthorized.", signal);
     return;
   }
@@ -1249,7 +1468,7 @@ async function handleCallback(
     const item = el.useElicitationStore
       .getState()
       .pending.find((p) => p.id === id);
-    if (item && item.options[idx]) {
+    if (item?.options[idx]) {
       const choice = item.options[idx];
       el.useElicitationStore.getState().answer(id, choice);
       await answerCallback(cb.id, `Selected: ${choice}`, signal);
@@ -1304,6 +1523,9 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
         return;
       }
       useTelegramStore.getState().setChatId(String(chatId));
+      if (msg.from?.id != null) {
+        useTelegramStore.getState().setOwnerUserId(String(msg.from.id));
+      }
       await sendTelegram(
         chatId,
         `Paired successfully. This bot is now locked to your chat ID (${chatId}). Messages from other chats will be ignored.`,
@@ -1316,7 +1538,15 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
       if (curOwner && String(curOwner) !== String(chatId)) {
         return;
       }
+      const ownerUserId = useTelegramStore.getState().ownerUserId;
+      if (
+        ownerUserId &&
+        (!msg.from || String(msg.from.id) !== String(ownerUserId))
+      ) {
+        return;
+      }
       useTelegramStore.getState().setChatId(null);
+      useTelegramStore.getState().setOwnerUserId(null);
       await sendTelegram(
         chatId,
         "Bot has been unpaired. Any chat can now interact with this bot.",
@@ -1427,6 +1657,13 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
       return;
     }
     case "/approve": {
+      const ownerUserId = useTelegramStore.getState().ownerUserId;
+      if (
+        ownerUserId &&
+        (!msg.from || String(msg.from.id) !== String(ownerUserId))
+      ) {
+        return;
+      }
       const state = await import("../ai/store/chatStore");
       const aq = await import("../ai/store/approvalQueueStore");
       const pending =
@@ -1449,6 +1686,13 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
       return;
     }
     case "/deny": {
+      const ownerUserId = useTelegramStore.getState().ownerUserId;
+      if (
+        ownerUserId &&
+        (!msg.from || String(msg.from.id) !== String(ownerUserId))
+      ) {
+        return;
+      }
       const state = await import("../ai/store/chatStore");
       const aq = await import("../ai/store/approvalQueueStore");
       const pending =
@@ -1467,6 +1711,13 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
       return;
     }
     case "/mode": {
+      const ownerUserId = useTelegramStore.getState().ownerUserId;
+      if (
+        ownerUserId &&
+        (!msg.from || String(msg.from.id) !== String(ownerUserId))
+      ) {
+        return;
+      }
       const { usePreferencesStore } = await import(
         "@/modules/settings/preferences"
       );
@@ -1515,6 +1766,13 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
       return;
     }
     case "/scope": {
+      const ownerUserId = useTelegramStore.getState().ownerUserId;
+      if (
+        ownerUserId &&
+        (!msg.from || String(msg.from.id) !== String(ownerUserId))
+      ) {
+        return;
+      }
       const { usePreferencesStore } = await import(
         "@/modules/settings/preferences"
       );
@@ -1581,33 +1839,60 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
         text,
         chatId,
         signal,
-        "Started - working on it; progress will show here.",
+        "Started working on your request.\nProgress updates will appear here.",
       );
       return;
   }
 }
 
+let currentUpdateOffset = 0;
+let lastPollProgressTime = Date.now();
+const POLLING_STALL_TIMEOUT_MS = 75_000;
+let watchdogTimer: ReturnType<typeof setInterval> | null = null;
+
+function checkPollingStall(): void {
+  if (!useTelegramStore.getState().enabled || !loopController) return;
+  const elapsed = Date.now() - lastPollProgressTime;
+  if (elapsed > POLLING_STALL_TIMEOUT_MS) {
+    console.warn(
+      `[Telegram] Polling stall detected: no getUpdates progress for ${Math.round(
+        elapsed / 1000,
+      )}s. Reconnecting poller...`,
+    );
+    // Recycle controller so the hanging fetch terminates cleanly
+    const oldCtrl = loopController;
+    loopController = new AbortController();
+    lastPollProgressTime = Date.now();
+    oldCtrl.abort(new Error("Polling stall watchdog timeout"));
+    void runLoop(loopController.signal);
+  }
+}
+
 async function runLoop(signal: AbortSignal): Promise<void> {
-  let myOffset = 0;
   while (!signal.aborted && useTelegramStore.getState().enabled) {
     try {
       const data = (await apiGet(
-        `getUpdates?offset=${myOffset}&timeout=30`,
+        `getUpdates?offset=${currentUpdateOffset}&timeout=30`,
         signal,
+        45_000,
       )) as { ok: boolean; result: Update[] };
+      lastPollProgressTime = Date.now();
       useTelegramStore.getState().setOnline(true);
       useTelegramStore.getState().setLastError(null);
       for (const u of data.result ?? []) {
-        myOffset = Math.max(myOffset, u.update_id + 1);
+        currentUpdateOffset = Math.max(currentUpdateOffset, u.update_id + 1);
         await handleUpdate(u, signal);
       }
     } catch (e) {
       if (signal.aborted) break;
       useTelegramStore.getState().setOnline(false);
-      useTelegramStore
-        .getState()
-        .setLastError(e instanceof Error ? e.message : String(e));
-      await sleep(signal, 5000);
+      const errMsg = e instanceof Error ? e.message : String(e);
+      useTelegramStore.getState().setLastError(errMsg);
+      let backoffMs = 5000;
+      if (e instanceof TelegramApiError && e.status === 429) {
+        backoffMs = Math.max(1000, (e.retryAfter ?? 5) * 1000);
+      }
+      await sleep(signal, backoffMs);
     }
   }
   useTelegramStore.getState().setOnline(false);
@@ -1620,6 +1905,9 @@ export function startTelegramBot(): void {
   loopController = controller;
   const mirror = new AbortController();
   mirrorController = mirror;
+  lastPollProgressTime = Date.now();
+  if (watchdogTimer) clearInterval(watchdogTimer);
+  watchdogTimer = setInterval(checkPollingStall, 15_000);
   useTelegramStore.getState().setOnline(true);
   useTelegramStore.getState().setLastError(null);
   void runLoop(controller.signal);
@@ -1628,6 +1916,10 @@ export function startTelegramBot(): void {
 
 /** Stop the long-polling loop. */
 export function stopTelegramBot(): void {
+  if (watchdogTimer) {
+    clearInterval(watchdogTimer);
+    watchdogTimer = null;
+  }
   loopController?.abort();
   loopController = null;
   mirrorController?.abort();
@@ -1650,4 +1942,23 @@ export const _testOnly = {
   splitTelegramText,
   clampTelegramText,
   runBusy,
+  startTelegramDispatch,
+  sendTelegram,
+  deleteTelegramMessage,
+  lastFinishedProgressMessageIds,
+  checkPollingStall,
+  getLastPollProgressTime: () => lastPollProgressTime,
+  setLastPollProgressTime: (t: number) => {
+    lastPollProgressTime = t;
+  },
+  getCurrentUpdateOffset: () => currentUpdateOffset,
+  setCurrentUpdateOffset: (offset: number) => {
+    currentUpdateOffset = offset;
+  },
+  POLLING_STALL_TIMEOUT_MS,
+  editProgressMessage,
+  apiGet,
+  apiPost,
+  handleCallback,
+  handleUpdate,
 };

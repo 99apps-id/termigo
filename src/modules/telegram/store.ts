@@ -15,10 +15,15 @@ export type TelegramBotState = {
   lastError: string | null;
   /** Optional owner chat id the bot only answers. */
   chatId: string | null;
+  /** Optional owner *user* id, pinned at /pair. Checked on sensitive
+   *  callbacks (approve/deny/elicitation) so a member of a paired group chat
+   *  cannot take owner actions. */
+  ownerUserId: string | null;
   setEnabled: (v: boolean) => void;
   setOnline: (v: boolean) => void;
   setLastError: (e: string | null) => void;
   setChatId: (id: string | null) => void;
+  setOwnerUserId: (id: string | null) => void;
   setHasToken: (v: boolean) => void;
   /** Re-read hasToken from the keychain (called on app start / after token save). */
   refresh: () => Promise<void>;
@@ -32,10 +37,12 @@ export const useTelegramStore = create<TelegramBotState>()(
       hasToken: false,
       lastError: null,
       chatId: null,
+      ownerUserId: null,
       setEnabled: (v) => set({ enabled: v }),
       setOnline: (v) => set({ online: v }),
       setLastError: (e) => set({ lastError: e }),
       setChatId: (id) => set({ chatId: id }),
+      setOwnerUserId: (id) => set({ ownerUserId: id }),
       setHasToken: (v) => set({ hasToken: v }),
       refresh: async () => {
         const token = await getTelegramToken();
@@ -51,6 +58,7 @@ export const useTelegramStore = create<TelegramBotState>()(
           hasToken,
           ...(shouldEnable ? { enabled: true } : {}),
           ...(owner && !cur.chatId ? { chatId: owner } : {}),
+          ...(owner && !cur.ownerUserId ? { ownerUserId: owner } : {}),
         });
       },
     }),
@@ -59,6 +67,7 @@ export const useTelegramStore = create<TelegramBotState>()(
       partialize: (s) => ({
         enabled: s.enabled,
         chatId: s.chatId,
+        ownerUserId: s.ownerUserId,
         hasToken: s.hasToken,
         online: s.online,
         lastError: s.lastError,
@@ -91,6 +100,10 @@ export async function syncTelegramFromStorage(): Promise<void> {
           useTelegramStore.getState().setChatId(state.chatId);
         if (state.chatId === null && cur.chatId !== null)
           useTelegramStore.getState().setChatId(null);
+        if (typeof state.ownerUserId === "string" && state.ownerUserId !== cur.ownerUserId)
+          useTelegramStore.getState().setOwnerUserId(state.ownerUserId);
+        if (state.ownerUserId === null && cur.ownerUserId !== null)
+          useTelegramStore.getState().setOwnerUserId(null);
         if (typeof state.online === "boolean" && state.online !== cur.online)
           useTelegramStore.getState().setOnline(state.online);
         if (

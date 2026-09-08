@@ -64,6 +64,74 @@ export function remove(queue: SteerQueue, index: number): SteerQueue {
 }
 
 /**
+ * Replace one queued message in place. Used by the strip's edit action: the
+ * text goes back to the composer while any attachments stay queued at the same
+ * position, so a re-queue does not shuffle the send order.
+ */
+export function replaceAt(
+  queue: SteerQueue,
+  index: number,
+  message: SteerMessage | null,
+): SteerQueue {
+  if (index < 0 || index >= queue.pending.length) return queue;
+  const next = queue.pending.filter((_, i) => i !== index);
+  if (message && message.parts.length > 0) next.splice(index, 0, message);
+  return { pending: next };
+}
+
+/**
+ * How many queued rows the strip shows before collapsing the rest into an
+ * "…and N more" tail. A long queue must not eat the composer: the strip is a
+ * status line, not a document. Ported from Hermes' QUEUE_WINDOW.
+ */
+export const QUEUE_WINDOW = 3;
+
+export type QueueWindow = {
+  /** First index shown. */
+  start: number;
+  /** One past the last index shown. */
+  end: number;
+  /** True when rows before `start` are hidden (render a leading ellipsis). */
+  showLead: boolean;
+  /** True when rows from `end` on are hidden (render a trailing count). */
+  showTail: boolean;
+};
+
+/**
+ * Which slice of the queue the strip renders.
+ *
+ * Normally the OLDEST rows (they send first). When a row is being edited the
+ * window slides so that row stays visible — the user must never watch the row
+ * they are working on scroll out of view. Ported from Hermes' getQueueWindow.
+ */
+export function getQueueWindow(
+  queueLen: number,
+  focusIdx: number | null = null,
+): QueueWindow {
+  const start =
+    focusIdx === null
+      ? 0
+      : Math.max(
+          0,
+          Math.min(focusIdx - 1, Math.max(0, queueLen - QUEUE_WINDOW)),
+        );
+  const end = Math.min(queueLen, start + QUEUE_WINDOW);
+  return { start, end, showLead: start > 0, showTail: end < queueLen };
+}
+
+/**
+ * The editable text of a queued message: its text parts joined, attachments
+ * excluded (they ride along in `parts` and cannot be edited as text). Used by
+ * the strip's "edit" action to pull a queued message back into the composer.
+ */
+export function editableTextOf(parts: readonly SteerPart[]): string {
+  return parts
+    .filter((p) => p.type === "text")
+    .map((p) => (typeof p.text === "string" ? p.text : ""))
+    .join("\n\n");
+}
+
+/**
  * Take everything pending as one turn.
  *
  * Null when there is nothing to send, so callers branch once instead of

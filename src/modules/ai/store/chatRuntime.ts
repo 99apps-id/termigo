@@ -688,10 +688,13 @@ export async function sendParts(
   // (still "submitted"), which would QUEUE the resume instead of sending it and
   // leave "Try again" doing nothing. Key off the app's error state so a resume
   // after a failed run always goes out.
-  const errored = useChatStore.getState().agentMeta.status === "error";
-  const awaitingApproval =
-    useChatStore.getState().agentMeta.status === "awaiting-approval";
-  const action = awaitingApproval
+  const appStatus = useChatStore.getState().agentMeta.status;
+  const errored = appStatus === "error";
+  const isAgentBusy =
+    appStatus === "awaiting-approval" ||
+    appStatus === "thinking" ||
+    appStatus === "streaming";
+  const action = isAgentBusy
     ? parts.length > 0
       ? "queue"
       : "ignore"

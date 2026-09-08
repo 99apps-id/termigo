@@ -13,7 +13,14 @@
 import { invoke } from "@tauri-apps/api/core";
 import { tool } from "ai";
 import { z } from "zod";
-import { decodeEntities } from "../lib/htmlText";
+import {
+  capText,
+  decodeEntities,
+  extractTitle,
+  htmlToMarkdown,
+  looksLikeHtml,
+} from "../lib/htmlText";
+import { useChatStore } from "../store/chatStore";
 
 type HttpResponse = {
   status: number;
@@ -103,9 +110,6 @@ function header(headers: Record<string, string>, name: string): string {
 function isTextual(contentType: string): boolean {
   return /text\/html|application\/xhtml|text\/plain/i.test(contentType);
 }
-
-import { capText, decodeEntities, extractTitle, htmlToMarkdown, looksLikeHtml } from "../lib/htmlText";
-import { useChatStore } from "../store/chatStore";
 
 export function buildWebSearchTools() {
   return {

@@ -7,7 +7,12 @@ import { expandSnippetTokens, type Snippet } from "../lib/snippets";
 import { useChatStore } from "../store/chatStore";
 import { useSnippetsStore } from "../store/snippetsStore";
 import { type SlashCommandMeta, tryRunSlashCommand } from "./slashCommands";
-import type { SteerMessage, SteerPart } from "./steer";
+import {
+  editableTextOf,
+  previewOf,
+  type SteerMessage,
+  type SteerPart,
+} from "./steer";
 
 export type FileAttachment = {
   id: string;
@@ -54,6 +59,8 @@ type ComposerCtx = {
   /** Messages typed during the current run, waiting for it to settle. */
   queued: readonly SteerMessage[];
   cancelQueued: (index: number) => void;
+  /** Pull a queued message's text back into the composer to revise it. */
+  editQueued: (index: number) => void;
 };
 
 const Ctx = createContext<ComposerCtx | null>(null);
@@ -460,6 +467,25 @@ export function AiComposerProvider({ children }: ProviderProps) {
   const queued = useChatStore((st) => st.steerQueue.pending);
   const cancelQueued = useChatStore((st) => st.cancelSteer);
 
+  // Pull a queued message back into the composer so it can be revised before
+  // it sends (Hermes' queue-edit, adapted: Hermes edits in place inside the
+  // strip; here the composer IS the editor, so the text moves back into it).
+  // Attachments cannot be edited as text — they stay queued at the same
+  // position so nothing is silently dropped and the send order is unchanged.
+  const editQueued = (index: number) => {
+    const store = useChatStore.getState();
+    const msg = store.steerQueue.pending[index];
+    if (!msg) return;
+    const text = editableTextOf(msg.parts);
+    const rest = msg.parts.filter((p) => p.type !== "text");
+    store.replaceSteer(
+      index,
+      rest.length > 0 ? { preview: previewOf(rest), parts: rest } : null,
+    );
+    setValue((v) => (v.trim() ? `${text}\n${v}` : text));
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  };
+
   const ctx: ComposerCtx = {
     textareaRef,
     value,
@@ -476,6 +502,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
     removeCommand,
     queued,
     cancelQueued,
+    editQueued,
     isBusy,
     submit,
     stop,

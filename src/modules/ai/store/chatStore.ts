@@ -39,6 +39,7 @@ import {
   enqueue,
   prepend as prependSteer,
   remove as removeSteer,
+  replaceAt as replaceSteerAt,
   type SteerMessage,
   type SteerQueue,
 } from "../lib/steer";
@@ -237,6 +238,8 @@ type StoreState = {
   queueSteer: (message: SteerMessage) => void;
   restoreSteer: (message: SteerMessage) => void;
   cancelSteer: (index: number) => void;
+  /** Swap a queued message for a replacement (or drop it with null) in place. */
+  replaceSteer: (index: number, message: SteerMessage | null) => void;
   clearSteer: () => void;
 
   /**
@@ -470,6 +473,8 @@ export const useChatStore = create<StoreState>((set, get) => ({
     set((s) => ({ steerQueue: prependSteer(s.steerQueue, message) })),
   cancelSteer: (index) =>
     set((s) => ({ steerQueue: removeSteer(s.steerQueue, index) })),
+  replaceSteer: (index, message) =>
+    set((s) => ({ steerQueue: replaceSteerAt(s.steerQueue, index, message) })),
   clearSteer: () => set({ steerQueue: EMPTY_QUEUE }),
 
   syncRunMeta: () => {
