@@ -238,6 +238,13 @@ export type Preferences = {
    */
   subagentModelId: string;
   /**
+   * Model used for vision-capable subagents (e.g. the "vision" subagent that
+   * reads images via read_file). Empty string means "same as subagentModelId".
+   * Set this to a model tagged "vision" so a vision subagent can actually read
+   * images instead of reporting "no vision capability".
+   */
+  subagentVisionModelId: string;
+  /**
    * Max nesting depth for subagents: a subagent may spawn further subagents up
    * to this depth, then the spawn tools are withheld (BatikCode parity).
    */
@@ -401,6 +408,7 @@ const KEY_EXTENSION_SHORTCUTS = "extensionShortcuts";
 const KEY_COST_BUDGET_USD = "costBudgetUsd";
 const KEY_COST_DAILY_BUDGET_USD = "costDailyBudgetUsd";
 const KEY_SUBAGENT_MODEL_ID = "subagentModelId";
+const KEY_SUBAGENT_VISION_MODEL_ID = "subagentVisionModelId";
 const KEY_SUBAGENT_MAX_DEPTH = "subagentMaxDepth";
 const KEY_AUTO_CHECKPOINT = "autoCheckpoint";
 const KEY_PERSIST_TERMINALS = "persistTerminals";
@@ -511,6 +519,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   costBudgetUsd: 0,
   costDailyBudgetUsd: 0,
   subagentModelId: "",
+  subagentVisionModelId: "",
   subagentMaxDepth: 3,
   autoCheckpoint: true,
   persistTerminals: false,
@@ -792,6 +801,9 @@ export async function loadPreferences(): Promise<Preferences> {
       DEFAULT_PREFERENCES.costDailyBudgetUsd,
     subagentModelId:
       get<string>(KEY_SUBAGENT_MODEL_ID) ?? DEFAULT_PREFERENCES.subagentModelId,
+    subagentVisionModelId:
+      get<string>(KEY_SUBAGENT_VISION_MODEL_ID) ??
+      DEFAULT_PREFERENCES.subagentVisionModelId,
     subagentMaxDepth: clampSubagentMaxDepth(
       get<number>(KEY_SUBAGENT_MAX_DEPTH) ??
         DEFAULT_PREFERENCES.subagentMaxDepth,
@@ -1397,6 +1409,7 @@ export async function onPreferencesChange(
     [KEY_COST_BUDGET_USD]: "costBudgetUsd",
     [KEY_COST_DAILY_BUDGET_USD]: "costDailyBudgetUsd",
     [KEY_SUBAGENT_MODEL_ID]: "subagentModelId",
+    [KEY_SUBAGENT_VISION_MODEL_ID]: "subagentVisionModelId",
     [KEY_SUBAGENT_MAX_DEPTH]: "subagentMaxDepth",
     [KEY_AUTO_CHECKPOINT]: "autoCheckpoint",
     [KEY_PERSIST_TERMINALS]: "persistTerminals",

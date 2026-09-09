@@ -170,7 +170,13 @@ export async function runSubagent({
   // back to the main model instead of overspending.
   const prefs = usePreferencesStore.getState();
   let routedModelId = prefs.subagentModelId.trim() || modelId;
-  if (
+  // A vision subagent (e.g. the "vision" agent that reads images via read_file)
+  // must run on a vision-capable model. Default to subagentVisionModelId when
+  // set and this subagent needs vision; otherwise it would inherit a non-vision
+  // subagent model and report "no vision capability" instead of reading images.
+  if (type === "vision" && prefs.subagentVisionModelId.trim()) {
+    routedModelId = prefs.subagentVisionModelId.trim();
+  } else if (
     prefs.subagentModelId.trim() &&
     subagentModelExceedsBudget(routedModelId, modelId)
   ) {
