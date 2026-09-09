@@ -24,10 +24,33 @@ export type FormatLiveProgressOptions = {
    *  waits instead of freezing. */
   elapsedMs?: number;
   completed?: boolean;
+  mode?: "question" | "task";
+  modelLabel?: string;
 };
 
 function collapseWhitespace(text: string): string {
   return text.replace(/\s+/g, " ").trim();
+}
+
+export function resolveModelLabel(modelId?: string): string {
+  if (!modelId) return "";
+  try {
+    const { MODELS, isCompatModelId, compatModelIdForEndpoint } = require("../ai/config");
+    if (MODELS.some((m: any) => m.id === modelId)) {
+      const m = MODELS.find((m: any) => m.id === modelId);
+      return [m.provider, m.id].filter(Boolean).join(" ");
+    }
+    if (isCompatModelId(modelId)) {
+      const eid = compatModelIdForEndpoint(modelId);
+      const custom = (require("../settings/preferences").usePreferencesStore?.getState?.()?.customEndpoints ?? []).find((ep: any) => ep.id === eid);
+      const name = custom?.name || custom?.provider || "";
+      const mid = custom?.modelId || "";
+      return [name, mid].filter(Boolean).join(" ") || modelId;
+    }
+  } catch {
+    // fallback: return raw id
+  }
+  return modelId;
 }
 
 export function truncate(text: string, maxLen: number): string {
@@ -518,61 +541,68 @@ export function formatToolActivity(t: ToolCallSummary): string {
 
 export function formatLiveProgress(opts: FormatLiveProgressOptions): string {
   if (opts.completed) {
-    return "**[Termigo Agent]** Finished.";
+    return "**[Termigo Agent]** Selesai.";
+  }
+
+  if (opts.mode === "question") {
+    return "";
   }
 
   const lines: string[] = [];
   const statusLabel =
     opts.status === "awaiting-approval"
-      ? "Waiting for approval..."
+      ? "Menunggu persetujuan..."
       : opts.status === "thinking"
-        ? "Thinking..."
-        : "Working...";
-  // Ticking elapsed counter: guarantees the message text changes on every
-  // tick, so the heartbeat edit above always produces a visible update even
-  // when the tool/step trail is empty (long-running step = not frozen).
+        ? "Merencanakan..."
+        : opts.status === "streaming"
+          ? "Menulis jawaban..."
+          : "Sedang mengerjakan...";
+
   const elapsedPart =
-    typeof opts.elapsedMs === "number" && !opts.completed
+    typeof opts.elapsedMs === "number"
       ? ` · ${Math.floor(opts.elapsedMs / 1000)}s`
       : "";
 
   const stepPart =
     typeof opts.round === "number" && opts.round >= 0
-      ? ` (Step ${opts.round + 1})`
+      ? ` (langkah ${opts.round + 1})`
       : "";
+
+  const modelPart = opts.modelLabel ? ` • ${opts.modelLabel}` : "";
+
   lines.push(
-    `**[Termigo Agent]** *${statusLabel}*${stepPart}${elapsedPart}`,
+    `**[Termigo Agent]** *${statusLabel}*${stepPart}${modelPart}${elapsedPart}`,
   );
 
   if (opts.step) {
-    lines.push(`Step: *${opts.step}*`);
+    lines.push(`*${truncate(opts.step, 120)}*`);
   }
 
-  // Display active in-progress task
   const inProgressTodo = opts.todos?.find((t) => t.status === "in_progress");
   if (inProgressTodo) {
-    lines.push(`Task: **${truncate(inProgressTodo.title, 60)}**`);
+    lines.push(`🔹 ${truncate(inProgressTodo.title, 100)}`);
   }
 
-  // Display lively tool execution trail (recent completed + active running)
   const tools = opts.tools ?? [];
   if (tools.length > 0) {
     const active = tools.filter(
       (t) => t.state === "running" || t.state === "awaiting-approval",
     );
-    const completed = tools.filter(
-      (t) => t.state === "done" || t.state === "error",
-    );
+    const recentDone = tools
+      .filter((t) => t.state === "done" || t.state === "error")
+      .slice(-2);
 
-    // Show up to 3 most recent completed tools so the user sees real activity trail
-    const recentDone = completed.slice(-3);
     for (const t of recentDone) {
-      lines.push(formatToolActivity(t));
+      const verb = getToolDoneVerb(t.toolName);
+      const snippet = t.input ? ` \`${truncate(t.input, 40)}\`` : "";
+      const out = t.output ? ` → _${truncate(t.output, 50)}_` : "";
+      lines.push(`✓ ${verb}${snippet}${out}`);
     }
 
-    // Show active running / awaiting approval tool(s)
-    for (const t of active.slice(-2)) {
-      lines.push(formatToolActivity(t));
+    for (const t of active.slice(-1)) {
+      const verb = getToolRunningVerb(t.toolName);
+      const snippet = t.input ? ` \`${truncate(t.input, 40)}\`` : "";
+      lines.push(`⚡ ${verb}${snippet}`);
     }
   }
 

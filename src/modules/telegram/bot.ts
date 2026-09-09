@@ -731,10 +731,11 @@ async function publishProgress(
   sessionId: string,
   signal: AbortSignal,
   initialText?: string,
+  mode: "task" | "question" = "task",
 ): Promise<void> {
   const store = await import("../ai/store/chatStore");
   const todosStore = await import("../ai/store/todoStore");
-  const { extractToolSummaries, formatLiveProgress } = await import(
+  const { extractToolSummaries, formatLiveProgress, resolveModelLabel } = await import(
     "./progressFormat"
   );
   let progressMessageId: number | null = null;
@@ -746,6 +747,10 @@ async function publishProgress(
   const sentElicitationIds = new Set<string>();
   const started = Date.now();
   const MAX_WAIT = 30 * 60 * 1000;
+
+  if (mode === "question") {
+    return;
+  }
 
   if (initialText) {
     progressMessageId = await sendProgressMessage(chatId, initialText, signal);
@@ -797,6 +802,8 @@ async function publishProgress(
         tools: toolSummaries,
         todos,
         elapsedMs: now - started,
+        mode,
+        modelLabel: resolveModelLabel(store.useChatStore.getState().selectedModelId),
       });
 
       if (!progressMessageId) {
@@ -1099,6 +1106,7 @@ async function runAgentAndStream(
   chatId: number,
   signal: AbortSignal,
   initialText?: string,
+  _mode: "task" | "question" = "task",
 ): Promise<void> {
   try {
     const store = await import("../ai/store/chatStore");
@@ -1226,6 +1234,7 @@ async function dispatchAndStream(
   chatId: number,
   signal: AbortSignal,
   initialText?: string,
+  mode: "task" | "question" = "task",
 ): Promise<void> {
   const runtime = await import("../ai/store/chatRuntime");
   await runAgentAndStream(
@@ -1233,6 +1242,7 @@ async function dispatchAndStream(
     chatId,
     signal,
     initialText,
+    mode,
   );
 }
 
@@ -1292,6 +1302,7 @@ async function startTelegramDispatch(
   chatId: number,
   signal: AbortSignal,
   ackText: string,
+  mode: "task" | "question" = "task",
 ): Promise<void> {
   try {
     const store = await import("../ai/store/chatStore");
@@ -1323,7 +1334,7 @@ async function startTelegramDispatch(
     recordTelegramText(text);
     try {
       await sendTyping(chatId, signal).catch(() => {});
-      await dispatchAndStream(text, chatId, signal, ackText);
+      await dispatchAndStream(text, chatId, signal, ackText, mode);
     } finally {
       resumeMirror();
     }
@@ -1629,7 +1640,8 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
         tail,
         chatId,
         signal,
-        "Started - I'll post progress here.",
+        "Pertanyaan diterima, langsung jawab tanpa progress.",
+        "question",
       );
       return;
     }
@@ -1641,6 +1653,7 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
         chatId,
         signal,
         "Task submitted - I'll post progress here.",
+        "task",
       );
       return;
     }

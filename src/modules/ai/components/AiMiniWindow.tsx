@@ -34,6 +34,8 @@ import {
   getModel,
   type ModelId,
   resolveModelContextLimit,
+  isCompatModelId,
+  compatModelIdForEndpoint as endpointIdFromCompatModel,
 } from "../config";
 import type { ResizeDir } from "../lib/miniWindowGeometry";
 import { buildSessionSearchIndex, type SessionMeta } from "../lib/sessions";
@@ -361,9 +363,14 @@ function ContextIndicator({ messages }: { messages: UIMessage[] }) {
     try {
       return getModel(modelId as ModelId).label;
     } catch {
+      if (isCompatModelId(modelId)) {
+        const eid = endpointIdFromCompatModel(modelId);
+        const ep = customEndpoints.find((e) => e.id === eid);
+        return ep?.modelId || ep?.name || modelId;
+      }
       return modelId;
     }
-  }, [modelId]);
+  }, [modelId, customEndpoints]);
   const cost = estimateCost(modelId, tokens);
   const cacheRate =
     tokens.inputTokens > 0
