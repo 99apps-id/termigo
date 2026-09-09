@@ -32,18 +32,23 @@ function collapseWhitespace(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
-export function resolveModelLabel(modelId?: string): string {
+export async function resolveModelLabel(modelId?: string): Promise<string> {
   if (!modelId) return "";
   try {
-    const { MODELS, isCompatModelId, compatModelIdForEndpoint } = require("../ai/config");
-    if (MODELS.some((m: any) => m.id === modelId)) {
-      const m = MODELS.find((m: any) => m.id === modelId);
-      return [m.provider, m.id].filter(Boolean).join(" ");
+    const { MODELS, isCompatModelId, endpointIdFromCompatModel } = await import(
+      "../ai/config",
+    );
+    const m = MODELS.find((x: any) => x.id === modelId);
+    if (m) {
+      return [m.provider, m.label].filter(Boolean).join(" ") || modelId;
     }
     if (isCompatModelId(modelId)) {
-      const eid = compatModelIdForEndpoint(modelId);
-      const custom = (require("../settings/preferences").usePreferencesStore?.getState?.()?.customEndpoints ?? []).find((ep: any) => ep.id === eid);
-      const name = custom?.name || custom?.provider || "";
+      const eid = endpointIdFromCompatModel(modelId);
+      const prefs = await import("../settings/preferences");
+      const endpoints =
+        prefs?.usePreferencesStore?.getState?.()?.customEndpoints ?? [];
+      const custom = endpoints.find((ep: any) => ep.id === eid);
+      const name = custom?.name || "";
       const mid = custom?.modelId || "";
       return [name, mid].filter(Boolean).join(" ") || modelId;
     }

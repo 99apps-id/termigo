@@ -168,7 +168,7 @@ describe("progressFormat", () => {
   describe("formatLiveProgress", () => {
     it("formats completed state cleanly", () => {
       const text = formatLiveProgress({ status: "idle", completed: true });
-      expect(text).toBe("**[Termigo Agent]** Finished.");
+      expect(text).toBe("**[Termigo Agent]** Selesai.");
     });
 
     it("displays Step, active task, and lively tool activity trail (Ran, Listed, etc.)", () => {
@@ -196,10 +196,10 @@ describe("progressFormat", () => {
         ],
       });
 
-      expect(text).toContain("**[Termigo Agent]** *Working...* (Step 1)");
-      expect(text).toContain("Step: *Organizing files*");
-      expect(text).toContain("Task: **Clean duplicate files**");
-      expect(text).toContain("✓ Listed `C:/Users/Iwan/Downloads` -> _19 entries_");
+      expect(text).toContain("**[Termigo Agent]** *Menulis jawaban...* (langkah 1)");
+      expect(text).toContain("*Organizing files*");
+      expect(text).toContain("🔹 Clean duplicate files");
+      expect(text).toContain("✓ Listed `C:/Users/Iwan/Downloads` → _19 entries_");
       expect(text).toContain("⚡ Running `Get-ChildItem ...`");
       expect(text).not.toContain("Scan folder");
       expect(text).not.toContain("Report results");

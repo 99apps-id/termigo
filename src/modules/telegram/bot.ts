@@ -803,7 +803,9 @@ async function publishProgress(
         todos,
         elapsedMs: now - started,
         mode,
-        modelLabel: resolveModelLabel(store.useChatStore.getState().selectedModelId),
+        modelLabel: await resolveModelLabel(
+          store.useChatStore.getState().selectedModelId,
+        ),
       });
 
       if (!progressMessageId) {
