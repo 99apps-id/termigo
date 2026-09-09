@@ -32,15 +32,63 @@ mem_bytes() { systemctl show "$SERVICE" -p MemoryCurrent --value; }
 has_tg_conn() { ss -tnp 2>/dev/null | grep -E "149\\.154|2001:67c" | grep -qE "WebKitNetworkPr|termigo"; }
 log() { echo "[deploy-termigo] $*"; }
 
-# --- select source binary ---
+# --- guard: jangan memutus pekerjaan agent yang sedang berjalan ---
+# Deploy stop service (untuk menimpa binary), yang menghentikan webview &
+# konteks run aktif. Kalau agent sedang bekerja, deploy batal agar tidak
+# memutus pekerjaan di tengah jalan (run terputus = "diam" / tidak selesai).
+# `--force` menimpa guard (hanya untuk kasus mendesak).
+FORCE=0
+for a in "$@"; do [ "$a" = "--force" ] && FORCE=1; done
+
+# Baca status agent dari kontrol server (termigo-cli status --json).
+# Jalankan sebagai user pemilik app (admin), bukan root: kontrol server di
+# 127.0.0.1:46443 hanya bisa diakses oleh user yang men-jalankan app, jadi
+# di bawah sudo kita harus `runuser -u admin` supaya query berhasil.
+AGENT_USER="${AGENT_USER:-admin}"
+agent_status() {
+  if [ -x "${APP_DIR}/termigo-cli" ]; then
+    runuser -u "$AGENT_USER" -- "${APP_DIR}/termigo-cli" status --json 2>/dev/null \
+      | grep -o '"status":"[^"]*"' | head -1 | cut -d'"' -f4 | tr -d '[:space:]'
+  fi
+}
+
+agent_status_busy() {
+  local s
+  s="$(agent_status)"
+  case "$s" in
+    thinking|streaming|awaiting-approval|running) return 0 ;;
+  esac
+  return 1
+}
+
+if ! agent_status_busy 2>/dev/null; then
+  :
+else
+  if [ "$FORCE" = "1" ]; then
+    log "⚠ agent sedang BERJALAN (status=$(agent_status)) — dipaksa lanjut via --force"
+  else
+    log "⛔ agent sedang BERJALAN (status=$(agent_status)). Deploy dibatalkan agar tidak memutus pekerjaan."
+    log "   Tunggu selesai, atau jalankan ulang dengan --force untuk memaksa (tidak disarankan)."
+    exit 2
+  fi
+fi
+
+# --- select source binary (abaikan flag --force) ---
 SRC=""
-if [ "${1:-}" = "--build" ]; then
+ARGS=()
+for a in "$@"; do
+  case "$a" in
+    --build) SRC_BUILD=1 ;;
+    --force) : ;;  # already handled by guard; skip as source
+    *) ARGS+=("$a") ;;
+  esac
+done
+if [ "${SRC_BUILD:-0}" = "1" ]; then
   log "Building new binary (tauri build --no-bundle) ..."
   ( cd "$APP_DIR" && export PATH="$APP_DIR/node_modules/.bin:$PATH" && npx tauri build --no-bundle )
   SRC="$TARGET_RELEASE"
-  shift
-elif [ -n "${1:-}" ]; then
-  SRC="$1"; shift
+elif [ "${#ARGS[@]}" -gt 0 ]; then
+  SRC="${ARGS[0]}"
 elif [ -f "$TARGET_RELEASE" ]; then
   SRC="$TARGET_RELEASE"
 else
