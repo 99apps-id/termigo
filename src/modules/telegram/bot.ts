@@ -741,6 +741,7 @@ async function publishProgress(
   let lastLiveText = "";
   let lastSentAt = 0;
   let lastTypingAt = 0;
+  let lastLiveTextPokeAt = 0;
   const sentApprovalIds = new Set<string>();
   const sentElicitationIds = new Set<string>();
   const started = Date.now();
@@ -795,6 +796,7 @@ async function publishProgress(
         step,
         tools: toolSummaries,
         todos,
+        elapsedMs: now - started,
       });
 
       if (!progressMessageId) {
@@ -808,6 +810,21 @@ async function publishProgress(
         lastLiveText = liveText;
         await editProgressMessage(chatId, progressMessageId, liveText, signal);
         lastSentAt = now;
+      } else if (
+        // Heartbeat: even when the live text is unchanged (a long-running tool /
+        // model wait with no new step or tool trail), keep poking the bubble so
+        // the run never reads as frozen. The typing action is transient in
+        // Telegram and clears on any inbound message, so this keeps a visible
+        // "working" signal during long steps.
+        busy &&
+        now - lastLiveTextPokeAt >= 5000
+      ) {
+        lastLiveTextPokeAt = now;
+        // Re-send the bubble; also refresh the progress text with the live
+        // status so it visibly ticks even when the tool trail is empty.
+        await sendTyping(chatId, signal).catch(() => {});
+        await editProgressMessage(chatId, progressMessageId, liveText, signal)
+          .catch(() => {});
       }
 
       // Surface pending tool approvals as interactive inline buttons in Telegram

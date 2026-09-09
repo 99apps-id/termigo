@@ -18,6 +18,11 @@ export type FormatLiveProgressOptions = {
   step?: string | null;
   tools?: ToolCallSummary[];
   todos?: { title: string; status: string }[];
+  /** Elapsed time in ms since the run started. Rendered as a ticking "· Xs"
+   *  counter so the progress text always changes even when no new tool/step
+   *  has appeared — this keeps the Telegram message visibly alive during long
+   *  waits instead of freezing. */
+  elapsedMs?: number;
   completed?: boolean;
 };
 
@@ -523,12 +528,21 @@ export function formatLiveProgress(opts: FormatLiveProgressOptions): string {
       : opts.status === "thinking"
         ? "Thinking..."
         : "Working...";
+  // Ticking elapsed counter: guarantees the message text changes on every
+  // tick, so the heartbeat edit above always produces a visible update even
+  // when the tool/step trail is empty (long-running step = not frozen).
+  const elapsedPart =
+    typeof opts.elapsedMs === "number" && !opts.completed
+      ? ` · ${Math.floor(opts.elapsedMs / 1000)}s`
+      : "";
 
   const stepPart =
     typeof opts.round === "number" && opts.round >= 0
       ? ` (Step ${opts.round + 1})`
       : "";
-  lines.push(`**[Termigo Agent]** *${statusLabel}*${stepPart}`);
+  lines.push(
+    `**[Termigo Agent]** *${statusLabel}*${stepPart}${elapsedPart}`,
+  );
 
   if (opts.step) {
     lines.push(`Step: *${opts.step}*`);
