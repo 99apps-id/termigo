@@ -10,7 +10,7 @@ export function buildTodoTools(ctx: ToolContext) {
   return {
     todo_write: tool({
       description:
-        "Manage a structured todo list to track progress and plan tasks throughout the run. Use it VERY frequently to ensure task visibility and proper planning.\n\nWhen to use:\n- Complex multi-step work requiring planning and tracking\n- When the user provides multiple tasks or requests\n- After receiving new instructions that require multiple steps\n- BEFORE starting work on any todo (mark as in_progress)\n- IMMEDIATELY after completing each todo (mark completed individually)\n\nCRITICAL workflow (share this with the user):\n1. Plan tasks by writing a todo list with specific, actionable items\n2. Mark exactly ONE todo as in_progress before starting work\n3. Complete the work for that todo\n4. Mark that todo as completed IMMEDIATELY — do NOT wait until the whole list is finished to check everything off at once, and do NOT batch completions\n5. Move to the next todo and repeat\n\nTodo states:\n- pending: not yet begun\n- in_progress: currently working (limit ONE at a time)\n- completed: finished successfully\n\nThis tool REPLACES the previous list (never a delta), so each call passes the FULL updated list with statuses. Auto-executes (no approval).",
+        "Manage a structured todo list to track progress and plan tasks throughout the run. Use it VERY frequently to ensure task visibility and proper planning.\n\nWhen to use:\n- Complex multi-step work requiring planning and tracking\n- When the user provides multiple tasks or requests\n- After receiving new instructions that require multiple steps\n- BEFORE starting work on any todo (mark as in_progress)\n- IMMEDIATELY after completing each todo (mark completed individually)\n\nCRITICAL workflow (share this with the user):\n1. Plan tasks by writing a todo list with specific, actionable items\n2. Mark exactly ONE todo as in_progress before starting work\n3. Complete the work for that todo\n4. Mark that todo as completed IMMEDIATELY — do NOT wait until the whole list is finished to check everything off at once, and do NOT batch completions\n5. Move to the next todo and repeat\n\nTodo states:\n- pending: not yet begun\n- in_progress: currently working (limit ONE at a time)\n- completed: finished successfully\n\nNesting: an item may set `parent` to another item's id to become a subtask; the UI indents children under their parent. Keep the tree shallow (2-3 levels) and prefer flat lists for simple work.\n\nThis tool REPLACES the previous list (never a delta), so each call passes the FULL updated list with statuses. Auto-executes (no approval).",
       inputSchema: z.object({
         todos: z
           .array(
@@ -28,6 +28,12 @@ export function buildTodoTools(ctx: ToolContext) {
               description: z.string().optional(),
               text: z.string().optional(),
               status: TodoStatus,
+              parent: z
+                .string()
+                .optional()
+                .describe(
+                  "Optional id of the parent todo, to nest this item as a subtask. Omit for top-level items.",
+                ),
             }),
           )
           .describe("The complete list of todos for this task."),
@@ -48,6 +54,9 @@ export function buildTodoTools(ctx: ToolContext) {
             // promoted to the title.
             description: t.title ? t.description : undefined,
             status: t.status,
+            // Nesting is optional; a dangling parent degrades to root in the
+            // renderer (todoTree), so no validation is needed here.
+            ...(t.parent ? { parent: t.parent } : {}),
           };
         });
 

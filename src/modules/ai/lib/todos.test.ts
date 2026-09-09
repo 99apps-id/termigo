@@ -7,6 +7,7 @@ import {
   parseStoredTodos,
   standDownRunning,
   type Todo,
+  todoTree,
   validateTodos,
 } from "./todos";
 
@@ -164,6 +165,114 @@ describe("formatTodoStatusBlock", () => {
     expect(block).toContain("- [completed] one");
     expect(block).toContain("- [in_progress] two");
     expect(block).toContain("- [pending] three");
+  });
+
+  it("indents nested items under their parent", () => {
+    const block = formatTodoStatusBlock([
+      { id: "a", title: "parent", status: "in_progress" },
+      { id: "b", title: "child", status: "pending", parent: "a" },
+      { id: "c", title: "grandchild", status: "pending", parent: "b" },
+    ]);
+    expect(block).toContain("- [in_progress] parent");
+    expect(block).toContain("  - [pending] child");
+    expect(block).toContain("    - [pending] grandchild");
+  });
+
+  it("caps indentation at depth 4", () => {
+    const items = Array.from({ length: 8 }, (_, i) => ({
+      id: `n${i}`,
+      title: `level ${i}`,
+      status: "pending" as const,
+      ...(i > 0 ? { parent: `n${i - 1}` } : {}),
+    }));
+    const block = formatTodoStatusBlock(items) ?? "";
+    const deepest = block
+      .split("\n")
+      .find((l) => l.includes("level 7")) ?? "";
+    expect(deepest.startsWith("        - ")).toBe(true); // 8 spaces = 4 levels
+    expect(deepest.startsWith("          ")).toBe(false); // not 5+
+  });
+});
+
+describe("todoTree", () => {
+  it("returns an empty list unchanged", () => {
+    expect(todoTree([])).toEqual([]);
+  });
+
+  it("keeps a flat list flat, in order", () => {
+    const items = [item("a", "pending"), item("b", "completed")];
+    expect(todoTree(items).map(([t, d]) => [t.id, d])).toEqual([
+      ["a", 0],
+      ["b", 0],
+    ]);
+  });
+
+  it("places children directly after their parent", () => {
+    const items: Todo[] = [
+      { ...item("a", "pending") },
+      { ...item("b", "pending"), parent: "a" },
+      { ...item("c", "pending") },
+      { ...item("d", "pending"), parent: "a" },
+    ];
+    expect(todoTree(items).map(([t, d]) => [t.id, d])).toEqual([
+      ["a", 0],
+      ["b", 1],
+      ["d", 1],
+      ["c", 0],
+    ]);
+  });
+
+  it("nests grandchildren one level deeper", () => {
+    const items: Todo[] = [
+      { ...item("a", "pending") },
+      { ...item("b", "pending"), parent: "a" },
+      { ...item("c", "pending"), parent: "b" },
+    ];
+    expect(todoTree(items).map(([, d]) => d)).toEqual([0, 1, 2]);
+  });
+
+  it("treats a dangling parent as a root", () => {
+    const items: Todo[] = [
+      { ...item("a", "pending"), parent: "missing" },
+      { ...item("b", "pending") },
+    ];
+    expect(todoTree(items).map(([t, d]) => [t.id, d])).toEqual([
+      ["a", 0],
+      ["b", 0],
+    ]);
+  });
+
+  it("treats a self-parent as a root", () => {
+    const items: Todo[] = [{ ...item("a", "pending"), parent: "a" }];
+    expect(todoTree(items).map(([t, d]) => [t.id, d])).toEqual([["a", 0]]);
+  });
+
+  it("appends cycle members flat so nothing is lost", () => {
+    const items: Todo[] = [
+      { ...item("a", "pending") },
+      { ...item("b", "pending"), parent: "c" },
+      { ...item("c", "pending"), parent: "b" },
+    ];
+    const out = todoTree(items);
+    expect(out).toHaveLength(3);
+    expect(out.map(([t]) => t.id).sort()).toEqual(["a", "b", "c"]);
+    // "a" is the only root; b and c land flat at depth 0.
+    expect(out.map(([t, d]) => [t.id, d])).toEqual([
+      ["a", 0],
+      ["b", 0],
+      ["c", 0],
+    ]);
+  });
+
+  it("never emits an item twice", () => {
+    const items: Todo[] = [
+      { ...item("a", "pending") },
+      { ...item("b", "pending"), parent: "a" },
+      { ...item("c", "pending"), parent: "b" },
+      { ...item("d", "pending"), parent: "a" },
+    ];
+    const ids = todoTree(items).map(([t]) => t.id);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 });
 

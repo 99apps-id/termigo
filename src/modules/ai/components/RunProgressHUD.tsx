@@ -1,4 +1,10 @@
 import { cn } from "@/lib/utils";
+import {
+  aggregateRuns,
+  formatRunSummary,
+  sparkline,
+  widthByDepth,
+} from "../lib/subagentTree";
 import { activeTodoIndex } from "../lib/todos";
 import { useChatStore } from "../store/chatStore";
 import { useSubagentRunStore } from "../store/subagentRunStore";
@@ -24,6 +30,9 @@ type SubagentRunLike = {
   label?: string;
   status: "running" | "done" | "error";
   currentStep?: string;
+  depth?: number;
+  stepCount?: number;
+  durationMs?: number;
 };
 
 /**
@@ -77,9 +86,15 @@ export function RunProgressHUD() {
       status: t.status as "pending" | "in_progress" | "completed",
     })),
   );
-  const liveSubagents = (subRuns ?? [])
-    .filter((r) => r.status === "running")
-    .slice(-MAX_LIVE_SUBAGENTS);
+  const runningSubagents = (subRuns ?? []).filter(
+    (r) => r.status === "running",
+  );
+  const liveSubagents = runningSubagents.slice(-MAX_LIVE_SUBAGENTS);
+  // Fan-out shape + totals (Hermes subagent-tree sparkline): the bars show how
+  // many workers are out at each nesting depth, so a deep spawn reads at a
+  // glance instead of hiding behind the 4-row cap.
+  const fanSpark = sparkline(widthByDepth(runningSubagents));
+  const fanSummary = formatRunSummary(aggregateRuns(runningSubagents));
   if (!step && !hasTodos && liveSubagents.length === 0) return null;
 
   return (
@@ -139,8 +154,22 @@ export function RunProgressHUD() {
       )}
       {liveSubagents.length > 0 && (
         <div className="border-t border-border/50 pt-1.5">
-          <div className="mb-1 text-[10.5px] uppercase tracking-wide text-muted-foreground">
-            Sub-agents · {liveSubagents.length} running
+          <div className="mb-1 flex items-center gap-1.5 text-[10.5px] uppercase tracking-wide text-muted-foreground">
+            <span>
+              Sub-agents · {liveSubagents.length} running
+              {runningSubagents.length > liveSubagents.length
+                ? ` (of ${runningSubagents.length})`
+                : ""}
+            </span>
+            {fanSpark && (
+              <span
+                aria-hidden
+                className="font-mono text-[11px] normal-case tracking-normal text-violet-600 dark:text-violet-400"
+                title={fanSummary || undefined}
+              >
+                {fanSpark}
+              </span>
+            )}
           </div>
           <ul className="space-y-1">
             {liveSubagents.map((r) => (

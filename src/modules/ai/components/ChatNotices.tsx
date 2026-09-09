@@ -138,6 +138,12 @@ export function stopCopy(
         hint: "Another round would likely repeat it. Adding a detail usually helps more.",
         action: "Continue anyway",
       };
+    case "text-repetition":
+      return {
+        text: "Stopped: the response degenerated into repeating the same text.",
+        hint: "The model was echoing itself rather than producing new content. Rephrasing the request usually breaks the loop.",
+        action: "Continue anyway",
+      };
     case "no-progress":
       return {
         text: "Stopped: two turns in a row made no tool call.",

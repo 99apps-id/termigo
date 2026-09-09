@@ -18,7 +18,12 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useState } from "react";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import type { Todo } from "../lib/todos";
-import { belongsToWorkspace, EMPTY_RECORD, isFinished } from "../lib/todos";
+import {
+  belongsToWorkspace,
+  EMPTY_RECORD,
+  isFinished,
+  todoTree,
+} from "../lib/todos";
 import { useChatStore } from "../store/chatStore";
 import { useTodosStore } from "../store/todoStore";
 
@@ -99,8 +104,8 @@ export function TodoStrip({ sessionId }: Props) {
       {!isMinimized && (
         <ScrollArea className="flex-1 min-h-0 pt-0.5 animate-in fade-in-0 duration-150">
           <ul className="flex flex-col gap-0.5">
-            {todos.map((t) => (
-              <TodoRow key={t.id} todo={t} />
+            {todoTree(todos).map(([t, depth]) => (
+              <TodoRow key={t.id} todo={t} depth={depth} />
             ))}
           </ul>
         </ScrollArea>
@@ -109,10 +114,13 @@ export function TodoStrip({ sessionId }: Props) {
   );
 }
 
-function TodoRow({ todo }: { todo: Todo }) {
+function TodoRow({ todo, depth = 0 }: { todo: Todo; depth?: number }) {
   const isInProgress = todo.status === "in_progress";
   const row = (
     <li
+      // Nested subtasks indent under their parent (capped so a runaway tree
+      // cannot push rows off-screen), mirroring the prompt block's hierarchy.
+      style={depth > 0 ? { marginLeft: Math.min(depth, 4) * 12 } : undefined}
       className={cn(
         "flex items-start gap-2 rounded px-1.5 py-1 text-[11px] leading-snug",
         isInProgress && "border-l-2 border-primary bg-primary/10 dark:border-foreground/50 dark:bg-muted/40",

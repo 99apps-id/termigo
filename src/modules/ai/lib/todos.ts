@@ -7,7 +7,63 @@ export type Todo = {
   title: string;
   description?: string;
   status: TodoStatus;
+  /** Optional parent id, for nesting subtasks under a bigger item. Dangling
+   *  or cyclic parents degrade to root level — nothing is ever hidden. */
+  parent?: string;
 };
+
+/**
+ * DFS order of a (possibly nested) todo list: `[item, depth]` pairs, parents
+ * before children. Ported from Hermes' `todoTree()` so both surfaces render
+ * the same hierarchy from the same `parent` field.
+ *
+ * Robust by construction: a `parent` that names a missing item (or the item
+ * itself) is treated as a root, and members of a parent cycle — which no DFS
+ * from a root can reach — are appended flat at the end so no item is lost.
+ */
+export function todoTree<T extends { id: string; parent?: string }>(
+  todos: readonly T[],
+): [T, number][] {
+  const ids = new Set(todos.map((t) => t.id));
+  const kids = new Map<string, T[]>();
+  const roots: T[] = [];
+
+  for (const t of todos) {
+    if (t.parent && ids.has(t.parent) && t.parent !== t.id) {
+      const list = kids.get(t.parent) ?? [];
+      list.push(t);
+      kids.set(t.parent, list);
+    } else {
+      roots.push(t);
+    }
+  }
+
+  const out: [T, number][] = [];
+  const seen = new Set<string>();
+
+  const walk = (item: T, depth: number) => {
+    if (seen.has(item.id)) return;
+    seen.add(item.id);
+    out.push([item, depth]);
+    for (const kid of kids.get(item.id) ?? []) {
+      walk(kid, depth + 1);
+    }
+  };
+
+  for (const root of roots) {
+    walk(root, 0);
+  }
+
+  // Cycle members never reach a root — append them flat so nothing is lost.
+  for (const t of todos) {
+    if (!seen.has(t.id)) {
+      seen.add(t.id);
+      out.push([t, 0]);
+    }
+  }
+
+  return out;
+}
 
 /**
  * A session's list, tagged with the workspace it was written for.
@@ -28,12 +84,21 @@ export const EMPTY_RECORD: TodoRecord = { workspaceRoot: null, items: [] };
  * there is nothing to show. Injected into each agent step's system prompt (and
  * the env block) so the model is reminded of what is done / in progress /
  * pending at every decision point — the way Copilot's per-item checklist works.
+ *
+ * Nested items are indented under their parent (via `todoTree`) so the model
+ * sees the same hierarchy the UI renders. Items without a `parent` render flat,
+ * exactly as before.
  */
 export function formatTodoStatusBlock(
-  items: { title: string; status: TodoStatus }[],
+  items: { id?: string; title: string; status: TodoStatus; parent?: string }[],
 ): string | null {
   if (items.length === 0) return null;
-  const lines = items.map((t) => `- [${t.status}] ${t.title}`);
+  // todoTree keys off `id`; callers without ids (legacy shapes) get a stable
+  // positional one so nothing collides in the seen-set.
+  const withIds = items.map((t, i) => ({ ...t, id: t.id ?? `idx-${i}` }));
+  const lines = todoTree(withIds).map(
+    ([t, depth]) => `${"  ".repeat(Math.min(depth, 4))}- [${t.status}] ${t.title}`,
+  );
   return [
     "Current todo list — keep it accurate: mark each item [completed] the moment you finish it, then set the next [in_progress].",
     ...lines,

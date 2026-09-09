@@ -60,6 +60,7 @@ import { wantsForcedFanout } from "./orchestrationIntent";
 import { prepareAgentPrompt } from "./prompt";
 import { createProxyFetch } from "./proxyFetch";
 import { repairToolCall } from "./repairToolCall";
+import { isRepetitionDominated } from "./repetitionGuard";
 import { sanitizeUiMessages } from "./sanitizeMessages";
 import { type Skill, skillsBlock } from "./skills";
 import { formatTodoStatusBlock } from "./todos";
@@ -739,6 +740,7 @@ export function noErrorProgress<T extends ToolSet>(
 export type AgentStopReason =
   | "step-cap"
   | "tool-repetition"
+  | "text-repetition"
   | "no-progress"
   | "tool-error"
   | "cost-cap"
@@ -1094,6 +1096,19 @@ export async function runAgentStream(opts: RunAgentOptions) {
       (repeatPred(args) as boolean)
         ? requestSynthesisOrStop("tool-repetition")
         : false,
+    // Text repetition loop: a step whose prose is mostly one repeated 60+
+    // char window is degenerate output (the model echoing itself). Continuing
+    // would spend more budget on noise, so end at the step boundary — with
+    // the same single forced-synthesis chance the other stuck guards get, in
+    // case the loop was confined to one step and a real summary is possible.
+    (args) => {
+      const steps =
+        (args as { steps?: Array<{ text?: string }> }).steps ?? [];
+      const last = steps[steps.length - 1];
+      return last && isRepetitionDominated(last.text)
+        ? requestSynthesisOrStop("text-repetition")
+        : false;
+    },
     (args) =>
       (idlePred(args) as boolean)
         ? requestSynthesisOrStop("no-progress")
