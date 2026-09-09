@@ -820,6 +820,10 @@ async function publishProgress(
               { text: "Approve", callback_data: `ap:approve:${p.id}` },
               { text: "Deny", callback_data: `ap:deny:${p.id}` },
             ],
+            [
+              { text: "Allow session", callback_data: `ap:session:${p.id}` },
+              { text: "Allow always", callback_data: `ap:always:${p.id}` },
+            ],
           ];
           await sendKeyboard(
             chatId,
@@ -841,6 +845,10 @@ async function publishProgress(
             [
               { text: "Approve", callback_data: `aq:approve:${q.id}` },
               { text: "Deny", callback_data: `aq:deny:${q.id}` },
+            ],
+            [
+              { text: "Allow session", callback_data: `aq:session:${q.id}` },
+              { text: "Allow always", callback_data: `aq:always:${q.id}` },
             ],
           ];
           await sendKeyboard(
@@ -1431,10 +1439,40 @@ async function handleCallback(
 
   if (data.startsWith("ap:")) {
     const [, action, id] = data.split(":");
-    const approved = action === "approve";
+    const approved = action === "approve" || action === "session" || action === "always";
     const state = await import("../ai/store/chatStore");
     state.useChatStore.getState().respondToApproval(id, approved);
-    await answerCallback(cb.id, approved ? "Approved." : "Denied.", signal);
+    // Allow session / allow always also record the tool so future calls skip the prompt.
+    if (action === "session" || action === "always") {
+      const aqStore = await import("../ai/store/approvalQueueStore");
+      const tool = (await import("../ai/store/chatStore")).useChatStore
+        .getState()
+        .agentMeta.pendingApprovals?.find((p) => p.id === id)?.toolName;
+      if (tool) {
+        if (action === "session") {
+          aqStore.rememberSessionAllowed(tool);
+        } else {
+          aqStore.rememberSessionAllowed(tool);
+          const settingsStore = await import("../settings/store");
+          const prefs = await import("../settings/preferences");
+          const list = prefs.usePreferencesStore.getState().agentAlwaysAllowedTools;
+          if (!list.includes(tool)) {
+            settingsStore.setAgentAlwaysAllowedTools([...list, tool]);
+          }
+        }
+      }
+    }
+    await answerCallback(
+      cb.id,
+      approved
+        ? action === "session"
+          ? "Allowed for this session."
+          : action === "always"
+            ? "Always allowed."
+            : "Approved."
+        : "Denied.",
+      signal,
+    );
     // Remove the approval card entirely (no "Action Approved via Telegram" text)
     await deleteTelegramMessage(chatId, messageId, signal);
     return;
@@ -1442,10 +1480,26 @@ async function handleCallback(
 
   if (data.startsWith("aq:")) {
     const [, action, id] = data.split(":");
-    const approved = action === "approve";
     const aq = await import("../ai/store/approvalQueueStore");
-    aq.useApprovalQueue.getState().respond([id], approved);
-    await answerCallback(cb.id, approved ? "Approved." : "Denied.", signal);
+    const approved = action === "approve" || action === "session" || action === "always";
+    if (action === "session") {
+      aq.useApprovalQueue.getState().respondWith([id], "allow-session");
+    } else if (action === "always") {
+      aq.useApprovalQueue.getState().respondWith([id], "allow-always");
+    } else {
+      aq.useApprovalQueue.getState().respond([id], approved);
+    }
+    await answerCallback(
+      cb.id,
+      action === "session"
+        ? "Allowed for this session."
+        : action === "always"
+          ? "Always allowed."
+          : approved
+            ? "Approved."
+            : "Denied.",
+      signal,
+    );
     // Remove the approval card entirely (no "Action Approved via Telegram" text)
     await deleteTelegramMessage(chatId, messageId, signal);
     return;
