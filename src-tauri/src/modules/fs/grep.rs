@@ -9,6 +9,7 @@ use grep_searcher::{BinaryDetection, SearcherBuilder};
 use ignore::{WalkBuilder, WalkState};
 use serde::Serialize;
 
+use super::security;
 use super::to_canon;
 use crate::modules::workspace::{resolve_path, WorkspaceEnv};
 
@@ -110,6 +111,9 @@ fn search_tree(
                 return WalkState::Continue;
             }
             let path = dent.path();
+            if security::is_protected(path) {
+                return WalkState::Continue;
+            }
             let rel = match path.strip_prefix(&root_path) {
                 Ok(r) => to_canon(r),
                 Err(_) => return WalkState::Continue,
@@ -266,6 +270,7 @@ fn fs_grep_blocking(
     if !root_path.exists() {
         return Err(format!("not found: {root}"));
     }
+    security::validate_read(&root_path)?;
     let cap = max_results
         .unwrap_or(DEFAULT_MAX_RESULTS)
         .clamp(1, HARD_MAX_RESULTS);
@@ -323,6 +328,7 @@ pub fn fs_grep_interactive(
     if !root_path.exists() {
         return Err(format!("not found: {root}"));
     }
+    security::validate_read(&root_path)?;
     let cap = max_results
         .unwrap_or(DEFAULT_MAX_RESULTS)
         .clamp(1, HARD_MAX_RESULTS);
@@ -394,6 +400,7 @@ fn fs_glob_blocking(
     if !root_path.is_dir() {
         return Err(format!("not a directory: {root}"));
     }
+    security::validate_read(&root_path)?;
     let cap = max_results.unwrap_or(500).clamp(1, HARD_MAX_RESULTS);
 
     let glob = Glob::new(&pattern).map_err(|e| format!("bad glob: {e}"))?;
@@ -422,6 +429,9 @@ fn fs_glob_blocking(
             continue;
         }
         let path = dent.path();
+        if security::is_protected(path) {
+            continue;
+        }
         let rel = match path.strip_prefix(&root_path) {
             Ok(r) => to_canon(r),
             Err(_) => continue,

@@ -6751,6 +6751,7 @@ dependencies = [
  "objc2-foundation",
  "portable-pty",
  "proptest",
+ "regex",
  "reqwest 0.12.28",
  "ring",
  "russh",

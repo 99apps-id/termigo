@@ -3,6 +3,7 @@ use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
 use serde::Serialize;
 
+use super::security;
 use super::to_canon;
 use crate::modules::workspace::{resolve_path, WorkspaceEnv};
 
@@ -82,6 +83,7 @@ fn fs_search_blocking(
     if !root_path.is_dir() {
         return Err(format!("not a directory: {root}"));
     }
+    security::validate_read(&root_path)?;
 
     let mut cands: Vec<SearchHit> = Vec::new();
     let mut scanned: usize = 0;
@@ -116,6 +118,9 @@ fn fs_search_blocking(
         }
         let path = dent.path();
         if path == root_path {
+            continue;
+        }
+        if security::is_protected(path) {
             continue;
         }
         let rel = match path.strip_prefix(&root_path) {
@@ -190,6 +195,7 @@ pub fn fs_list_files(
     if !root_path.is_dir() {
         return Err(format!("not a directory: {root}"));
     }
+    security::validate_read(&root_path)?;
 
     let walker = WalkBuilder::new(&root_path)
         .hidden(!show_hidden)
@@ -226,6 +232,9 @@ pub fn fs_list_files(
             continue;
         }
         let path = dent.path();
+        if security::is_protected(path) {
+            continue;
+        }
         let rel = match path.strip_prefix(&root_path) {
             Ok(r) => to_canon(r),
             Err(_) => continue,

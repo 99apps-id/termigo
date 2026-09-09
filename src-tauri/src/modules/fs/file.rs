@@ -6,6 +6,7 @@ use serde::Serialize;
 use tauri::Emitter;
 use tempfile::NamedTempFile;
 
+use super::security::{guard_read, guard_write};
 use crate::modules::workspace::{resolve_path, WorkspaceEnv};
 
 const MAX_READ_BYTES: u64 = 10 * 1024 * 1024; // 10 MB
@@ -81,7 +82,7 @@ pub async fn fs_read_image_base64(
     workspace: Option<WorkspaceEnv>,
 ) -> Result<ImageReadResult, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
-    let p = resolve_path(&path, &workspace);
+    let p = guard_read(&resolve_path(&path, &workspace))?;
     let meta = std::fs::metadata(&p).map_err(|e| e.to_string())?;
     let size = meta.len();
     if size > MAX_IMAGE_BYTES {
@@ -144,7 +145,7 @@ pub async fn fs_read_file_base64(
     workspace: Option<WorkspaceEnv>,
 ) -> Result<FileReadBase64, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
-    let p = resolve_path(&path, &workspace);
+    let p = guard_read(&resolve_path(&path, &workspace))?;
     let meta = std::fs::metadata(&p).map_err(|e| e.to_string())?;
     let size = meta.len();
     if size > MAX_FILE_BASE64_BYTES {
@@ -198,7 +199,8 @@ pub async fn fs_read_file(
     force: Option<bool>,
 ) -> Result<ReadResult, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
-    read_file_sync(&resolve_path(&path, &workspace), force.unwrap_or(false))
+    let resolved = guard_read(&resolve_path(&path, &workspace))?;
+    read_file_sync(&resolved, force.unwrap_or(false))
 }
 
 fn read_file_sync(p: &Path, force: bool) -> Result<ReadResult, String> {
@@ -422,7 +424,7 @@ pub async fn fs_write_file(
     app: tauri::AppHandle,
 ) -> Result<u64, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
-    let target = resolve_path(&path, &workspace);
+    let target = guard_write(&resolve_path(&path, &workspace))?;
     let original_permissions = fs::metadata(&target).ok().map(|m| m.permissions());
     write_atomic(&target, content.as_bytes()).map_err(|e| {
         log::warn!("fs_write_file({}) failed: {e}", target.display());
@@ -453,7 +455,7 @@ pub async fn fs_write_file_base64(
     app: tauri::AppHandle,
 ) -> Result<u64, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
-    let target = resolve_path(&path, &workspace);
+    let target = guard_write(&resolve_path(&path, &workspace))?;
     use base64::Engine as _;
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(&data)
@@ -479,7 +481,7 @@ pub async fn fs_canonicalize(
     workspace: Option<WorkspaceEnv>,
 ) -> Result<String, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
-    let p = resolve_path(&path, &workspace);
+    let p = guard_read(&resolve_path(&path, &workspace))?;
     let canon = std::fs::canonicalize(&p).map_err(|e| e.to_string())?;
     Ok(super::to_canon(&canon))
 }

@@ -6,6 +6,7 @@ use std::time::UNIX_EPOCH;
 use ignore::WalkBuilder;
 use serde::Serialize;
 
+use super::security;
 use crate::modules::workspace::{resolve_path, WorkspaceEnv};
 
 #[derive(Serialize)]
@@ -174,6 +175,7 @@ fn fs_read_dir_blocking(
 ) -> Result<Vec<DirEntry>, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     let root = resolve_path(&path, &workspace);
+    security::validate_read(&root)?;
     let read = std::fs::read_dir(&root).map_err(|e| {
         log::debug!("fs_read_dir({}) failed: {e}", root.display());
         e.to_string()
@@ -274,6 +276,7 @@ fn list_subdirs_blocking(
 ) -> Result<Vec<String>, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     let root = resolve_path(&path, &workspace);
+    security::validate_read(&root)?;
     let read = std::fs::read_dir(&root).map_err(|e| {
         log::debug!("list_subdirs({}) read_dir failed: {e}", root.display());
         e.to_string()

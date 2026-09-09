@@ -1,10 +1,11 @@
+use super::security::{guard_read, guard_write};
 use crate::modules::workspace::{resolve_path, WorkspaceEnv};
 
 /// Creates a new empty file. Fails if the file already exists.
 #[tauri::command]
 pub fn fs_create_file(path: String, workspace: Option<WorkspaceEnv>) -> Result<(), String> {
     let workspace = WorkspaceEnv::from_option(workspace);
-    let p = resolve_path(&path, &workspace);
+    let p = guard_write(&resolve_path(&path, &workspace))?;
     if p.exists() {
         return Err(format!("already exists: {}", p.display()));
     }
@@ -20,7 +21,7 @@ pub fn fs_create_file(path: String, workspace: Option<WorkspaceEnv>) -> Result<(
 #[tauri::command]
 pub fn fs_create_dir(path: String, workspace: Option<WorkspaceEnv>) -> Result<(), String> {
     let workspace = WorkspaceEnv::from_option(workspace);
-    let p = resolve_path(&path, &workspace);
+    let p = guard_write(&resolve_path(&path, &workspace))?;
     if p.exists() {
         return Err(format!("already exists: {}", p.display()));
     }
@@ -36,6 +37,8 @@ pub fn fs_rename(from: String, to: String, workspace: Option<WorkspaceEnv>) -> R
     let workspace = WorkspaceEnv::from_option(workspace);
     let from_p = resolve_path(&from, &workspace);
     let to_p = resolve_path(&to, &workspace);
+    super::security::validate_read(&from_p)?;
+    super::security::validate_write(&to_p)?;
     if !from_p.exists() {
         return Err(format!("not found: {}", from_p.display()));
     }
@@ -72,6 +75,7 @@ pub fn fs_rename(from: String, to: String, workspace: Option<WorkspaceEnv>) -> R
 pub fn fs_delete(path: String, workspace: Option<WorkspaceEnv>) -> Result<(), String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     let p = resolve_path(&path, &workspace);
+    super::security::validate_write(&p)?;
     let meta = std::fs::symlink_metadata(&p).map_err(|e| {
         log::debug!("fs_delete stat({}) failed: {e}", p.display());
         e.to_string()
@@ -112,13 +116,13 @@ pub fn fs_copy(
     workspace: Option<WorkspaceEnv>,
 ) -> Result<(), String> {
     let workspace = WorkspaceEnv::from_option(workspace);
-    let dest = resolve_path(&dest_dir, &workspace);
+    let dest = guard_write(&resolve_path(&dest_dir, &workspace))?;
     for source in &sources {
-        let src = std::path::PathBuf::from(source);
+        let src = guard_read(std::path::Path::new(source))?;
         let name = src
             .file_name()
             .ok_or_else(|| format!("invalid source: {source}"))?;
-        let target = dest.join(name);
+        let target = guard_write(&dest.join(name))?;
         if target.exists() {
             return Err(format!("already exists: {}", target.display()));
         }
