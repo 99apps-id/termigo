@@ -1435,13 +1435,8 @@ async function handleCallback(
     const state = await import("../ai/store/chatStore");
     state.useChatStore.getState().respondToApproval(id, approved);
     await answerCallback(cb.id, approved ? "Approved." : "Denied.", signal);
-    await editKeyboard(
-      chatId,
-      messageId,
-      `Action ${approved ? "Approved" : "Denied"} via Telegram.`,
-      [],
-      signal,
-    );
+    // Remove the approval card entirely (no "Action Approved via Telegram" text)
+    await deleteTelegramMessage(chatId, messageId, signal);
     return;
   }
 
@@ -1451,13 +1446,8 @@ async function handleCallback(
     const aq = await import("../ai/store/approvalQueueStore");
     aq.useApprovalQueue.getState().respond([id], approved);
     await answerCallback(cb.id, approved ? "Approved." : "Denied.", signal);
-    await editKeyboard(
-      chatId,
-      messageId,
-      `Action ${approved ? "Approved" : "Denied"} via Telegram.`,
-      [],
-      signal,
-    );
+    // Remove the approval card entirely (no "Action Approved via Telegram" text)
+    await deleteTelegramMessage(chatId, messageId, signal);
     return;
   }
 
