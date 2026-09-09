@@ -48,6 +48,7 @@ import {
   ContinueRow,
   MemoryNotice,
   PruneNotice,
+  SideQuestionNotice,
   type StopKind,
 } from "./ChatNotices";
 import { PartAppear, ReadGroup, ReadRow } from "./ChatReadGroup";
@@ -124,6 +125,7 @@ export function AiChatView({
   const compactionNotice = useChatStore((s) => s.agentMeta.compactionNotice);
   const pruneNotice = useChatStore((s) => s.agentMeta.pruneNotice);
   const memoryNotice = useChatStore((s) => s.agentMeta.memoryNotice);
+  const sideQuestion = useChatStore((s) => s.agentMeta.sideQuestion);
   const patchAgentMeta = useChatStore((s) => s.patchAgentMeta);
   const stoppedByUser = useChatStore((s) => s.agentMeta.stoppedByUser);
   const showReasoning = usePreferencesStore((s) => s.showReasoning);
@@ -193,6 +195,13 @@ export function AiChatView({
           <MemoryNotice
             fact={memoryNotice.fact}
             onDismiss={() => patchAgentMeta({ memoryNotice: null })}
+          />
+        )}
+        {sideQuestion && (
+          <SideQuestionNotice
+            question={sideQuestion.question}
+            answer={sideQuestion.answer}
+            onDismiss={() => patchAgentMeta({ sideQuestion: null })}
           />
         )}
         <ElicitationCarousel />

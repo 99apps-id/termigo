@@ -45,6 +45,11 @@ import {
   recordToolChoiceRejection,
 } from "../lib/toolChoiceLearning";
 import { createContextAwareTransport } from "../lib/transport";
+import {
+  buildVerifyNudge,
+  isVerifyNudgeParts,
+  MAX_VERIFY_NUDGES,
+} from "../lib/verifyOnStop";
 import type { ToolContext } from "../tools/tools";
 import { useAgentsStore } from "./agentsStore";
 import {
@@ -90,6 +95,12 @@ const MAX_LOOP_ROUNDS = 100;
 // or a delivered queued task, both of which start a new piece of work.
 const autoContinueCount = new Map<string, number>();
 
+// Verification-on-stop nudges sent for the current task, per session. Bounded
+// by MAX_VERIFY_NUDGES so a model that keeps finishing without verifying
+// eventually gets its summary through instead of looping. Cleared by a fresh
+// user message or a delivered queued task.
+const verifyNudgeCount = new Map<string, number>();
+
 /**
  * Continue a budget-paused run on the user's behalf.
  *
@@ -132,6 +143,62 @@ function requestAutoContinue(sessionId: string): boolean {
         status: "error",
         error:
           "The automatic continue could not start. Press Continue to go on.",
+      });
+      useChatStore.getState().syncRunMeta();
+    });
+  }, AUTO_CONTINUE_DELAY_MS);
+  return true;
+}
+
+/**
+ * Verification-on-stop gate (Hermes parity, policy only).
+ *
+ * A run that ended CLEANLY right after editing code — with no fresh passing
+ * verification evidence since the last edit — gets one bounded synthetic
+ * follow-up asking the agent to run the checks, repair failures, and
+ * summarise what passed (or name the concrete blocker). The gate never runs
+ * checks itself; it only reads the ledger the agent loop kept.
+ *
+ * Same refusals as requestAutoContinue (user stopped, switched session,
+ * queued task owns the next turn) plus its own budget: at most
+ * MAX_VERIFY_NUDGES per task, and only when the preference is on.
+ */
+function requestVerifyNudge(
+  sessionId: string,
+  verify: { changedCodePaths: string[]; verifiedAfterLastEdit: boolean },
+): boolean {
+  if (!usePreferencesStore.getState().verifyOnStop) return false;
+  if (verify.verifiedAfterLastEdit) return false;
+  if (stopLatch.has(sessionId)) return false;
+  if (useChatStore.getState().activeSessionId !== sessionId) return false;
+  if (useChatStore.getState().agentMeta.stoppedByUser) return false;
+  if (useChatStore.getState().steerQueue.pending.length > 0) return false;
+  const attempts = verifyNudgeCount.get(sessionId) ?? 0;
+  const nudge = buildVerifyNudge(
+    verify.changedCodePaths,
+    attempts,
+    MAX_VERIFY_NUDGES,
+  );
+  if (!nudge) return false;
+  verifyNudgeCount.set(sessionId, attempts + 1);
+  useChatStore.getState().patchAgentMeta({
+    status: "thinking",
+    stopReason: null,
+    error: null,
+  });
+  setTimeout(() => {
+    const live = useChatStore.getState();
+    if (
+      stopLatch.has(sessionId) ||
+      live.activeSessionId !== sessionId ||
+      live.agentMeta.stoppedByUser
+    ) {
+      return;
+    }
+    void sendMessage(nudge).catch(() => {
+      useChatStore.getState().patchAgentMeta({
+        status: "error",
+        error: "The verification follow-up could not start.",
       });
       useChatStore.getState().syncRunMeta();
     });
@@ -421,6 +488,13 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       // requestAutoContinue). Runs LAST so the cost of this round is recorded
       // and Stop hooks fire before the next round begins.
       if (stopReason === "step-cap") requestAutoContinue(sessionId);
+      // Verification-on-stop: a CLEAN finish right after unverified code edits
+      // gets one bounded follow-up (preference-gated; see requestVerifyNudge).
+      // Runs after the step-cap branch so a budget pause continues as before —
+      // the gate only applies when the model believed it was done.
+      if (stopReason === null) {
+        requestVerifyNudge(sessionId, info.verify);
+      }
     },
     onUsage: (delta) => {
       transientRetryCount.delete(sessionId);
@@ -682,7 +756,12 @@ export async function sendParts(
   // A genuinely new task earns a fresh automatic-continue budget. A resume
   // (the injected continuation prompt, from Continue or an auto-continue) is
   // the same task and must NOT reset it, or the budget would never be spent.
-  if (!isResumeParts(parts)) autoContinueCount.delete(sessionId);
+  // A verification nudge is the same task too (it continues the run that just
+  // finished), so it keeps the budget; a fresh task clears the nudge counter.
+  if (!isResumeParts(parts) && !isVerifyNudgeParts(parts)) {
+    autoContinueCount.delete(sessionId);
+    verifyNudgeCount.delete(sessionId);
+  }
   const c = getOrCreateChat(sessionId);
   // After an error the run is not busy, but the SDK status can look stale
   // (still "submitted"), which would QUEUE the resume instead of sending it and
@@ -721,8 +800,8 @@ export async function sendParts(
       // only when every item is completed, so a list the agent abandoned
       // mid-plan (leftover pending items) would otherwise sit on top of the
       // chat while the user has already moved on. A resume is the same task,
-      // so it keeps the list.
-      if (!isResumeParts(parts)) {
+      // so it keeps the list — and so does a verification nudge.
+      if (!isResumeParts(parts) && !isVerifyNudgeParts(parts)) {
         void useTodosStore.getState().clearSession(sessionId);
       }
       // Pin the workspace anchor for the whole run (see runAnchor above). The
@@ -800,12 +879,15 @@ export async function flushSteer(bypassBusyCheck = false): Promise<boolean> {
     stopLatch.delete(sessionId);
     // A genuinely new queued task also earns a fresh automatic-continue budget;
     // a queued resume is the same task and keeps whatever budget it has.
-    if (!isResumeParts(out.parts)) autoContinueCount.delete(sessionId);
+    if (!isResumeParts(out.parts) && !isVerifyNudgeParts(out.parts)) {
+      autoContinueCount.delete(sessionId);
+      verifyNudgeCount.delete(sessionId);
+    }
     // A fresh user turn resets the loop-round counter (see sendParts).
     store.patchAgentMeta({ round: 0 });
     // A queued task is a new task, not a resume: clear the previous task's list
     // so the strip does not carry stale work into it (see sendParts).
-    if (!isResumeParts(out.parts)) {
+    if (!isResumeParts(out.parts) && !isVerifyNudgeParts(out.parts)) {
       void useTodosStore.getState().clearSession(sessionId);
     }
     // A run that yielded to this queued task set stopReason "steered"; clear it

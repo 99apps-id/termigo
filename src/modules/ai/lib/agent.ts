@@ -65,6 +65,11 @@ import { type Skill, skillsBlock } from "./skills";
 import { formatTodoStatusBlock } from "./todos";
 import { modelRejectsForcedToolChoice } from "./toolChoiceLearning";
 import { isResumingApproval } from "./approvalResume";
+import {
+  newVerifyLedger,
+  recordToolResult,
+  type VerifyLedger,
+} from "./verifyOnStop";
 
 // Every model/provider connection uses a trusted, user-configured endpoint, so
 // it must honour the machine's own DNS — including a provider host that a proxy,
@@ -808,6 +813,10 @@ export type RunAgentOptions = {
     finishReason: string;
     /** Per-run performance summary for the on-screen diagnostics view. */
     metrics: RunDiagnostics;
+    /** Passive verification ledger for the verify-on-stop gate (see
+     *  verifyOnStop.ts): which code files this run edited and whether fresh
+     *  passing verification evidence landed after the last edit. */
+    verify: { changedCodePaths: string[]; verifiedAfterLastEdit: boolean };
   }) => void;
   /** Loop budget for this round. Defaults to the first tier; the caller raises
    *  it on each Continue so a long task deepens instead of stalling. */
@@ -1282,6 +1291,10 @@ export async function runAgentStream(opts: RunAgentOptions) {
     consecutiveFailureCount: 0,
     activeNudge: null,
   };
+  // Verification-on-stop ledger: tracks code edits and fresh passing evidence
+  // across the whole run. Reported via onFinishMeta so the runtime can fire a
+  // bounded nudge when the model ends cleanly right after unverified edits.
+  let verifyLedger: VerifyLedger = newVerifyLedger();
   return streamText({
     model,
     system: baseSystem,
@@ -1387,6 +1400,20 @@ export async function runAgentStream(opts: RunAgentOptions) {
         if (result.output?.stored && result.output.remembered) {
           opts.onRemember?.({ fact: result.output.remembered });
         }
+      }
+      // Verification-on-stop ledger: fold every successful tool result (edits
+      // add changed code paths; passing checks mark fresh evidence). Failed
+      // calls carry `.error` / land as `tool-error` parts and are skipped.
+      for (const r of step.toolResults ?? []) {
+        const res = r as {
+          type?: string;
+          toolName?: string;
+          output?: unknown;
+          error?: unknown;
+        };
+        if (!res.toolName) continue;
+        if (res.type === "tool-error" || res.error != null) continue;
+        verifyLedger = recordToolResult(verifyLedger, res.toolName, res.output);
       }
       if (step.usage) {
         runInput += step.usage.inputTokens ?? 0;
@@ -1518,7 +1545,15 @@ export async function runAgentStream(opts: RunAgentOptions) {
         costBudgetUsd: costBudget,
         at: Date.now(),
       };
-      opts.onFinishMeta?.({ stopReason: settledStop, finishReason, metrics });
+      opts.onFinishMeta?.({
+        stopReason: settledStop,
+        finishReason,
+        metrics,
+        verify: {
+          changedCodePaths: verifyLedger.changedCodePaths,
+          verifiedAfterLastEdit: verifyLedger.verifiedAfterLastEdit,
+        },
+      });
 
       // Close out the trajectory run. An early stop by a guard is a failed run in
       // the timeline's vocabulary; a clean finish is completed.

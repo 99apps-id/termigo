@@ -145,6 +145,10 @@ export type AgentMeta = {
   pruneNotice: { prunedMessages: number; at: number } | null;
   /** The last fact written to project memory, so a silent write is visible. */
   memoryNotice: { fact: string; at: number } | null;
+  /** The last `/btw` side-question answer. Rendered as a dismissible notice
+   *  so the answer never enters the transcript (the main run's context and
+   *  prompt cache stay untouched). */
+  sideQuestion: { question: string; answer: string; at: number } | null;
 };
 
 const ZERO_USAGE: AgentUsage = {
@@ -169,6 +173,7 @@ const IDLE_META: AgentMeta = {
   compactionNotice: null,
   pruneNotice: null,
   memoryNotice: null,
+  sideQuestion: null,
 };
 
 export type MiniState = {

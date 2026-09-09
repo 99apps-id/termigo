@@ -74,6 +74,7 @@ import {
   setShowReasoning,
   setSubagentMaxDepth,
   setSubagentModelId,
+  setVerifyOnStop,
 } from "@/modules/settings/store";
 import {
   Add01Icon,
@@ -113,6 +114,7 @@ export function AgentsSection() {
     (s) => s.confirmAfterMutations,
   );
   const autoVerifyAfterEdit = usePreferencesStore((s) => s.autoVerifyAfterEdit);
+  const verifyOnStop = usePreferencesStore((s) => s.verifyOnStop);
   const agentAutoContinue = usePreferencesStore((s) => s.agentAutoContinue);
   const customEndpoints = usePreferencesStore((s) => s.customEndpoints);
 
@@ -336,6 +338,15 @@ export function AgentsSection() {
           <Switch
             checked={autoVerifyAfterEdit}
             onCheckedChange={(v) => void setAutoVerifyAfterEdit(v)}
+          />
+        </SettingRow>
+        <SettingRow
+          title="Verify on stop"
+          description="When a run ends right after editing code with no fresh passing verification, send a bounded follow-up (max 2) asking the agent to run checks, repair failures, and summarise — or name the concrete blocker. Prose-only edits never trigger it."
+        >
+          <Switch
+            checked={verifyOnStop}
+            onCheckedChange={(v) => void setVerifyOnStop(v)}
           />
         </SettingRow>
         <SettingRow

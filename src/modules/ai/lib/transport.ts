@@ -178,6 +178,8 @@ type Deps = {
     stopReason: AgentStopReason | null;
     finishReason: string;
     metrics: RunDiagnostics;
+    /** Passive verification ledger for the verify-on-stop gate. */
+    verify: { changedCodePaths: string[]; verifiedAfterLastEdit: boolean };
   }) => void;
   getPlanMode?: () => boolean;
   getStepBudget?: () => number;

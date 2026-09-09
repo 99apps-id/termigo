@@ -277,6 +277,15 @@ export type Preferences = {
    */
   autoVerifyAfterEdit: boolean;
   /**
+   * Verification-on-stop gate: when a run ends cleanly right after editing
+   * code with no fresh passing verification evidence (run_checks / a passing
+   * test-lint-build command / auto-verify lint), send ONE bounded follow-up
+   * asking the agent to verify, repair, and summarise — or name the concrete
+   * blocker. Off by default (opt-in, like Hermes); prose-only edits never
+   * trigger it.
+   */
+  verifyOnStop: boolean;
+  /**
    * Keep a task running when it only paused on its step budget. Reaching the
    * round's budget is not a failure - the transcript is intact and the next
    * round simply gets the next rung (25 -> 50 -> 100) - so the agent resumes
@@ -399,6 +408,7 @@ const KEY_TERMINAL_AI_SUGGEST = "terminalAiSuggest";
 const KEY_SHOW_REASONING = "showReasoning";
 const KEY_CONFIRM_AFTER_MUTATIONS = "confirmAfterMutations";
 const KEY_AUTO_VERIFY_AFTER_EDIT = "autoVerifyAfterEdit";
+const KEY_VERIFY_ON_STOP = "verifyOnStop";
 const KEY_AGENT_AUTO_CONTINUE = "agentAutoContinue";
 
 export const TERMINAL_FONT_SIZE_DEFAULT = 14;
@@ -508,6 +518,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   showReasoning: true,
   confirmAfterMutations: false,
   autoVerifyAfterEdit: false,
+  verifyOnStop: false,
   agentAutoContinue: true,
 };
 
@@ -801,6 +812,8 @@ export async function loadPreferences(): Promise<Preferences> {
     autoVerifyAfterEdit:
       get<boolean>(KEY_AUTO_VERIFY_AFTER_EDIT) ??
       DEFAULT_PREFERENCES.autoVerifyAfterEdit,
+    verifyOnStop:
+      get<boolean>(KEY_VERIFY_ON_STOP) ?? DEFAULT_PREFERENCES.verifyOnStop,
     agentAutoContinue:
       get<boolean>(KEY_AGENT_AUTO_CONTINUE) ??
       DEFAULT_PREFERENCES.agentAutoContinue,
@@ -1263,6 +1276,10 @@ export async function setAutoVerifyAfterEdit(value: boolean): Promise<void> {
   await writePref(KEY_AUTO_VERIFY_AFTER_EDIT, value);
 }
 
+export async function setVerifyOnStop(value: boolean): Promise<void> {
+  await writePref(KEY_VERIFY_ON_STOP, value);
+}
+
 export async function setAgentAutoContinue(value: boolean): Promise<void> {
   await writePref(KEY_AGENT_AUTO_CONTINUE, value);
 }
@@ -1386,6 +1403,7 @@ export async function onPreferencesChange(
     [KEY_TERMINAL_AI_SUGGEST]: "terminalAiSuggest",
     [KEY_CONFIRM_AFTER_MUTATIONS]: "confirmAfterMutations",
     [KEY_AUTO_VERIFY_AFTER_EDIT]: "autoVerifyAfterEdit",
+    [KEY_VERIFY_ON_STOP]: "verifyOnStop",
     [KEY_AGENT_AUTO_CONTINUE]: "agentAutoContinue",
   };
   // Same-process writes still fire onChange immediately; cross-window writes

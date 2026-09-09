@@ -13,7 +13,7 @@ import {
 import { toast } from "sonner";
 import { compatModelIdForEndpoint, MODELS } from "../config";
 import { useApprovalQueue } from "../store/approvalQueueStore";
-import { useChatStore } from "../store/chatStore";
+import { getChat, useChatStore } from "../store/chatStore";
 import { useCustomCommandsStore } from "../store/customCommandsStore";
 import { usePlanStore } from "../store/planStore";
 import { useSessionDirectiveStore } from "../store/sessionDirectiveStore";
@@ -146,6 +146,12 @@ export const SLASH_COMMANDS: Record<string, SlashCommandMeta> = {
     label: "Stop the current run",
     icon: CancelCircleIcon,
   },
+  btw: {
+    name: "btw",
+    invocation: "/btw",
+    label: "Ask a side question about this chat",
+    icon: HelpCircleIcon,
+  },
   help: {
     name: "help",
     invocation: "/help",
@@ -277,6 +283,39 @@ export function tryRunSlashCommand(input: string): SlashOutcome {
         toast.error("Could not stop the run");
       });
       return { kind: "handled", toast: "Stopping…" };
+    }
+    case "btw": {
+      // Side question ABOUT the conversation, answered without touching it:
+      // no synthetic turns, no prompt-cache invalidation. The answer lands in
+      // agentMeta.sideQuestion and renders as a dismissible notice. sideQuestion
+      // is imported lazily so this file does not pull the AI SDK into the eager
+      // graph.
+      if (!tail) {
+        return {
+          kind: "handled",
+          toast: "Usage: /btw <question about this conversation>",
+        };
+      }
+      const sessionId = useChatStore.getState().activeSessionId;
+      const messages = sessionId ? getChat(sessionId)?.messages : undefined;
+      if (!messages || messages.length === 0) {
+        return {
+          kind: "handled",
+          toast: "Nothing to ask about yet — this chat has no messages.",
+        };
+      }
+      void (async () => {
+        const { answerSideQuestion } = await import("./sideQuestion");
+        const answer = await answerSideQuestion(tail, messages);
+        useChatStore
+          .getState()
+          .patchAgentMeta({
+            sideQuestion: { question: tail, answer, at: Date.now() },
+          });
+      })().catch((e) => {
+        toast.error(`Side question failed: ${String(e)}`);
+      });
+      return { kind: "handled", toast: "Asking…" };
     }
     case "help": {
       const list = Object.values(SLASH_COMMANDS)

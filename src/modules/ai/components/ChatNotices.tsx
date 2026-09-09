@@ -32,6 +32,40 @@ export const MemoryNotice = memo(function MemoryNotice({
   );
 });
 
+export const SideQuestionNotice = memo(function SideQuestionNotice({
+  question,
+  answer,
+  onDismiss,
+}: {
+  question: string;
+  answer: string;
+  onDismiss: () => void;
+}) {
+  return (
+    <div className="flex items-start gap-2 rounded-md border border-border/80 bg-card px-2.5 py-1.5 text-[11px] text-muted-foreground shadow-2xs dark:border-border/40 dark:bg-muted/30">
+      <span className="mt-1 size-1.5 shrink-0 rounded-full bg-violet-500/80" />
+      <span className="min-w-0 flex-1">
+        <span className="font-medium text-foreground">/btw</span>{" "}
+        <span className="opacity-75">{question}</span>
+        <span className="mt-1 block whitespace-pre-wrap break-words text-foreground">
+          {answer}
+        </span>
+        <span className="mt-0.5 block opacity-75">
+          Answered from a transcript snapshot — the main conversation is
+          untouched.
+        </span>
+      </span>
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="shrink-0 text-[10.5px] underline opacity-75 hover:opacity-100"
+      >
+        Dismiss
+      </button>
+    </div>
+  );
+});
+
 export const CompactionNotice = memo(function CompactionNotice({
   droppedCount,
   onDismiss,

@@ -413,7 +413,7 @@ export function AiComposerInput() {
               <div
                 ref={backdropRef}
                 aria-hidden="true"
-                className="pointer-events-none absolute inset-0 overflow-hidden text-[13px] leading-relaxed text-transparent"
+                className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words text-[13px] leading-relaxed text-transparent"
               >
                 {highlightSpans.map((s) =>
                   s.ref ? (
