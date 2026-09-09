@@ -415,18 +415,16 @@ export function AiComposerInput() {
                 aria-hidden="true"
                 className="pointer-events-none absolute inset-0 overflow-hidden text-[13px] leading-relaxed text-transparent"
               >
-                {highlightSpans.map((s, i) =>
+                {highlightSpans.map((s) =>
                   s.ref ? (
-                    // biome-ignore lint/suspicious/noArrayIndexKey: spans are positional segments of one string, rebuilt wholesale on every keystroke
                     <span
-                      key={i}
+                      key={s.start}
                       className="rounded-[3px] bg-primary/15 ring-1 ring-inset ring-primary/25"
                     >
                       {s.text}
                     </span>
                   ) : (
-                    // biome-ignore lint/suspicious/noArrayIndexKey: spans are positional segments of one string, rebuilt wholesale on every keystroke
-                    <span key={i}>{s.text}</span>
+                    <span key={s.start}>{s.text}</span>
                   ),
                 )}
                 {/* A trailing newline collapses in a div; pad it so the last

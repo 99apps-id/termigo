@@ -39,9 +39,8 @@ export function QueuedSteerRow() {
         const idx = win.start + i;
         return (
           <div
-            // Index is the identity here: the queue is an ordered buffer with no
-            // stable ids, and cancel/edit address a position.
-            // biome-ignore lint/suspicious/noArrayIndexKey: ordered buffer, index is the identity
+            // The queue is an ordered buffer with no stable ids; position plus
+            // preview is the identity cancel/edit address.
             key={`${idx}-${m.preview}`}
             className="group flex items-center gap-1.5 rounded-md border border-border/60 bg-muted/40 px-2 py-1 text-[11px] text-muted-foreground"
           >

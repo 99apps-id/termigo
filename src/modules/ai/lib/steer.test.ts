@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  editableTextOf,
   EMPTY_QUEUE,
+  editableTextOf,
   enqueue,
   flush,
   flushOne,
@@ -11,9 +11,9 @@ import {
   isResumeParts,
   prepend,
   previewOf,
+  RESUME_PROMPT,
   remove,
   replaceAt,
-  RESUME_PROMPT,
   type SteerMessage,
   type SteerPart,
   submitAction,

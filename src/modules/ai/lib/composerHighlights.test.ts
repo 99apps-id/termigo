@@ -67,13 +67,13 @@ describe("splitComposerHighlights", () => {
 
   it("returns one plain span for text with no tokens", () => {
     expect(splitComposerHighlights("hello world", vocab)).toEqual([
-      { ref: false, text: "hello world" },
+      { ref: false, text: "hello world", start: 0 },
     ]);
   });
 
   it("returns one plain span for empty input", () => {
     expect(splitComposerHighlights("", vocab)).toEqual([
-      { ref: false, text: "" },
+      { ref: false, text: "", start: 0 },
     ]);
   });
 

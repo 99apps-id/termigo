@@ -9,7 +9,12 @@
 // carries `lastIndex` between callers and silently skips the first match in
 // the next string it is handed.
 
-export type ComposerHighlight = { ref: boolean; text: string };
+export type ComposerHighlight = {
+  ref: boolean;
+  text: string;
+  /** Offset of the span in the source string — a stable identity for keys. */
+  start: number;
+};
 
 export type HighlightVocab = {
   /** Known slash-command names (no leading `/`). */
@@ -77,13 +82,17 @@ export function splitComposerHighlights(
   let last = 0;
   for (const span of spans) {
     if (span.start > last) {
-      out.push({ ref: false, text: text.slice(last, span.start) });
+      out.push({ ref: false, text: text.slice(last, span.start), start: last });
     }
-    out.push({ ref: true, text: text.slice(span.start, span.end) });
+    out.push({
+      ref: true,
+      text: text.slice(span.start, span.end),
+      start: span.start,
+    });
     last = span.end;
   }
   if (last < text.length || out.length === 0) {
-    out.push({ ref: false, text: text.slice(last) });
+    out.push({ ref: false, text: text.slice(last), start: last });
   }
   return out;
 }
