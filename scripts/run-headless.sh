@@ -2,6 +2,17 @@
 # Headless launcher for Termigo on Linux servers without a physical display.
 # Disables WebKit accelerated compositing to prevent Mesa llvmpipe software
 # rasterizer busy-loops, and runs inside an isolated D-Bus session.
+#
+# ==== PENGAMAN (2026-09-09) ====
+# Launcher ini TIDAK lagi otomatis memilih binary termuda dari
+# src-tauri/target/release/termigo. Alasan: build rusak dapat langsung
+# menimpa binary yang bekerja saat restart -> webview gagal boot -> bot mati.
+#
+# Sekarang launcher SELALU menjalankan binary pinned di ${APP_DIR}/termigo
+# (path yang sama dengan `binaries/termigo-cli` companion). Update hanya
+# dipakai bila deploy script memindahkan binary ke sini SETELAH lolos
+# smoke-test (lihat scripts/deploy-termigo.sh). Build di
+# src-tauri/target/release/ tidak pernah otomatis dipakai.
 
 set -euo pipefail
 
@@ -13,25 +24,11 @@ export LIBGL_ALWAYS_SOFTWARE=1
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="$(dirname "${SCRIPT_DIR}")"
 
-# Pick the freshest termigo build: prefer a binary just produced by
-# `pnpm tauri build` (src-tauri/target/release/termigo) when it is newer than
-# a manually copied app-root binary, so the next restart picks up a rebuild
-# automatically instead of running a stale copy.
-ROOT_BIN="${APP_DIR}/termigo"
-TARGET_BIN="${APP_DIR}/src-tauri/target/release/termigo"
-EXECUTABLE=""
-if [ -x "${TARGET_BIN}" ] && [ -x "${ROOT_BIN}" ]; then
-  if [ "${TARGET_BIN}" -nt "${ROOT_BIN}" ]; then
-    EXECUTABLE="${TARGET_BIN}"
-  else
-    EXECUTABLE="${ROOT_BIN}"
-  fi
-elif [ -x "${ROOT_BIN}" ]; then
-  EXECUTABLE="${ROOT_BIN}"
-elif [ -x "${TARGET_BIN}" ]; then
-  EXECUTABLE="${TARGET_BIN}"
-else
-  echo "Error: termigo executable not found in ${APP_DIR}" >&2
+# Binary pinned (known-good). Hanya deploy script yang menimpa file ini.
+EXECUTABLE="${APP_DIR}/termigo"
+
+if [ ! -x "${EXECUTABLE}" ]; then
+  echo "Error: pinned termigo executable not found: ${EXECUTABLE}" >&2
   exit 1
 fi
 
