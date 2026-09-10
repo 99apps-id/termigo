@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   type CustomEndpoint,
   compatModelIdForEndpoint,
+  DEFAULT_MODEL_ID,
   endpointIdFromCompatModel,
   getModelContextLimit,
   isCompatModelId,
   MAX_AGENT_STEPS,
   MODEL_PRICING,
+  MODELS,
   migrateLegacyCompatEndpoint,
   modelKeepsReasoning,
   modelSupportsTemperature,
@@ -67,8 +69,8 @@ describe("resolveModel", () => {
     expect(resolveModel(modelId).provider).toBe(provider);
   });
 
-  it("throws on an unknown static model id", () => {
-    expect(() => resolveModel("nope-not-real")).toThrow();
+  it("falls back to the first known model for an unknown static model id", () => {
+    expect(resolveModel("nope-not-real").id).toBe(MODELS[0].id);
   });
 });
 
