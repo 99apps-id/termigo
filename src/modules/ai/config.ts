@@ -719,7 +719,7 @@ export function resolveModel(
 export function getModel(id: string): ModelInfo {
   const m = MODELS.find((x) => x.id === id);
   if (m) return m;
-  const fallback = MODELS.find((x) => x.id === DEFAULT_MODEL_ID);
+  const fallback = MODELS.find((x) => x.id === (DEFAULT_MODEL_ID as ModelId));
   if (fallback) return fallback;
   return MODELS[0];
 }
