@@ -1469,11 +1469,27 @@ function startTelegramResume(chatId: number, signal: AbortSignal): void {
         );
         return;
       }
+      const chatStatus = sessionId ? store.getChat(sessionId)?.status ?? "" : "";
+      const appStatus = store.useChatStore.getState().agentMeta.status;
+      const aqStore = await import("../ai/store/approvalQueueStore");
+      const pendingApprovals = getPendingApprovals(
+        sessionId,
+        store,
+        aqStore.useApprovalQueue,
+      );
+      const busy = runBusy(chatStatus, appStatus, pendingApprovals.length > 0);
+      if (busy) {
+        await sendTelegram(
+          chatId,
+          "Agent is still working. Wait for it to finish, or send /stop first.",
+          signal,
+        ).catch(() => {});
+        return;
+      }
       const currentRound = store.useChatStore.getState().agentMeta.runRound;
-      const nextBudget = stepBudgetForRound(currentRound + 1);
       await sendTelegram(
         chatId,
-        `Continuing to next round (${nextBudget} steps)...`,
+        `Resuming...`,
         signal,
       ).catch(() => {});
       await sendTyping(chatId, signal).catch(() => {});
