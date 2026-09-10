@@ -850,6 +850,8 @@ async function publishProgress(
   const sentElicitationIds = new Set<string>();
   const started = Date.now();
   const MAX_WAIT = 30 * 60 * 1000;
+  // Tracks step-cap detection to avoid sending the Continue button twice
+  let stepCapNotified = false;
 
   if (mode === "question") {
     return;
@@ -990,6 +992,65 @@ async function publishProgress(
             signal,
           ).catch(() => {});
           lastSentAt = now;
+        }
+      }
+
+      // Step-cap detection inside the progress loop.
+      //
+      // Problem: requestAutoContinue() clears stopReason to null within 1.2 s
+      // of the cap being set, so by the time runAgentAndStream checks stopReason
+      // (after waitForReply returns) the value is already null when auto-continue
+      // is active. The next auto-continue round then starts seamlessly — great.
+      // But once the auto-continue budget is exhausted (MAX_AUTO_CONTINUES = 8)
+      // the runtime leaves stopReason === "step-cap", status === "idle", and does
+      // NOT restart the run. At that point the progress loop is still alive and
+      // is the first code that can observe the settled state.
+      //
+      // Detection: we see status=idle && stopReason=step-cap && !busy.
+      // Wait one extra progress tick (~1 s) to let auto-continue fire if it will;
+      // if the status is STILL idle after that, the run has truly stopped and we
+      // send the Continue keyboard.
+      if (!busy && !stepCapNotified) {
+        const latestMeta = store.useChatStore.getState().agentMeta;
+        if (
+          latestMeta.status === "idle" &&
+          latestMeta.stopReason === "step-cap" &&
+          !latestMeta.stoppedByUser
+        ) {
+          // Give the 1.2 s auto-continue timer a full extra second to fire.
+          await sleep(signal, 1500);
+          if (signal.aborted) break;
+          // Re-check: if auto-continue kicked in, status is now "thinking".
+          const afterWait = store.useChatStore.getState().agentMeta;
+          if (
+            afterWait.status === "idle" &&
+            afterWait.stopReason === "step-cap"
+          ) {
+            // Auto-continue did not fire (budget exhausted or preference off).
+            // Notify the user and offer a manual Continue button.
+            stepCapNotified = true;
+            const { stepBudgetForRound } = await import("../ai/config");
+            const nextBudget = stepBudgetForRound(
+              (afterWait.runRound ?? 0) + 1,
+            );
+            await sendKeyboard(
+              chatId,
+              `Step limit reached (round ${afterWait.runRound ?? 1}). Continue to next round (${nextBudget} steps)?`,
+              [
+                [
+                  {
+                    text: `>> Continue (${nextBudget} steps)`,
+                    callback_data: "resume:run",
+                  },
+                ],
+              ],
+              signal,
+            ).catch(() => {});
+            // The progress loop can stop now — the run is idle.
+            break;
+          }
+          // Auto-continue fired; reset the flag so we can detect the next cap.
+          stepCapNotified = false;
         }
       }
 
@@ -1284,19 +1345,36 @@ async function runAgentAndStream(
           }
         }
 
-        // If run stopped due to step-cap, offer one-click continuation button
+        // If run stopped due to step-cap, offer one-click continuation button.
+        //
+        // Race-condition guard: requestAutoContinue() resets stopReason → null
+        // within AUTO_CONTINUE_DELAY_MS (1.2 s) of it being set. Wait slightly
+        // longer so the auto-continue timer has settled; only then decide whether
+        // to send a keyboard (manual-continue path) or stay quiet (auto fires).
+        // publishProgress handles the keyboard when the budget is exhausted; this
+        // block is the fallback for cases where publishProgress was already
+        // aborted before the cap was detected.
+        await sleep(signal, 1800);
         const stopReason = store.useChatStore.getState().agentMeta.stopReason;
-        if (stopReason === "step-cap") {
+        const statusAfterWait = store.useChatStore.getState().agentMeta.status;
+        if (stopReason === "step-cap" && statusAfterWait === "idle") {
           const currentRound = store.useChatStore.getState().agentMeta.runRound;
           const { stepBudgetForRound } = await import("../ai/config");
-          const nextBudget = stepBudgetForRound(currentRound + 1);
+          const nextBudget = stepBudgetForRound((currentRound ?? 0) + 1);
           await sendKeyboard(
             chatId,
-            `Step limit reached. Continue to next round (${nextBudget} steps)?`,
-            [[{ text: `>> Continue Step (${nextBudget} steps)`, callback_data: "resume:run" }]],
+            `Step limit reached (round ${currentRound ?? 1}). Continue to next round (${nextBudget} steps)?`,
+            [
+              [
+                {
+                  text: `>> Continue (${nextBudget} steps)`,
+                  callback_data: "resume:run",
+                },
+              ],
+            ],
             signal,
           ).catch(() => {});
-        } else if (stopReason) {
+        } else if (stopReason && stopReason !== "step-cap" && statusAfterWait === "idle") {
           await sendTelegram(
             chatId,
             `Agent paused (${stopReason}). Reply with /continue or your next instruction to proceed.`,
