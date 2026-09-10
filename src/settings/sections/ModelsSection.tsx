@@ -27,7 +27,6 @@ import {
   getProvider,
   isCompatModelId,
   MODELS,
-  type ModelId,
   PROVIDERS,
   type ProviderId,
   type ProviderInfo,
@@ -567,7 +566,7 @@ function DefaultsBlock({
   keys,
   customEndpoints,
 }: {
-  defaultModel: ModelId;
+  defaultModel: string;
   configuredIds: Set<ProviderId>;
   keys: KeysMap;
   customEndpoints: readonly CustomEndpoint[];
@@ -580,6 +579,7 @@ function DefaultsBlock({
           <DefaultModelPicker
             defaultModel={defaultModel}
             configuredIds={configuredIds}
+            customEndpoints={customEndpoints}
           />
         </FieldRow>
         <AutocompleteRow
@@ -595,12 +595,16 @@ function DefaultsBlock({
 function DefaultModelPicker({
   defaultModel,
   configuredIds,
+  customEndpoints,
 }: {
-  defaultModel: ModelId;
+  defaultModel: string;
   configuredIds: Set<ProviderId>;
+  customEndpoints: readonly CustomEndpoint[];
 }) {
-  const m = getModel(defaultModel);
-  const hasAny = configuredIds.size > 0;
+  const m = isCompatModelId(defaultModel)
+    ? getCompatModelInfo(defaultModel, customEndpoints)
+    : getModel(defaultModel);
+  const hasAny = configuredIds.size > 0 || customEndpoints.length > 0;
 
   return (
     <DropdownMenu>
@@ -631,6 +635,34 @@ function DefaultModelPicker({
         className="min-w-70 p-1"
       >
         <div className="max-h-72 overflow-y-auto overscroll-contain pr-1">
+          {customEndpoints.length > 0 && (
+            <div className="px-1 pt-1.5 first:pt-1">
+              <div className="mb-0.5 flex items-center gap-1.5 px-2 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+                <ProviderIcon provider="openai-compatible" size={11} />
+                <span>Custom Endpoints</span>
+              </div>
+              {customEndpoints.map((ep) => {
+                const compatId = compatModelIdForEndpoint(ep.id);
+                return (
+                  <DropdownMenuItem
+                    key={ep.id}
+                    onSelect={() => void setDefaultModel(compatId)}
+                    className={cn(
+                      "flex items-start gap-2 text-[12px]",
+                      compatId === defaultModel && "bg-accent/50",
+                    )}
+                  >
+                    <span className="flex flex-1 flex-col">
+                      <span>{ep.modelId || ep.name}</span>
+                      <span className="text-[10px] text-muted-foreground">
+                        {ep.name ? `${ep.name} - ${ep.baseURL}` : ep.baseURL}
+                      </span>
+                    </span>
+                  </DropdownMenuItem>
+                );
+              })}
+            </div>
+          )}
           {PROVIDERS.filter((p) => configuredIds.has(p.id)).map((p) => {
             const models = MODELS.filter((x) => x.provider === p.id);
             if (models.length === 0) return null;
@@ -643,7 +675,7 @@ function DefaultModelPicker({
                 {models.map((mod) => (
                   <DropdownMenuItem
                     key={mod.id}
-                    onSelect={() => void setDefaultModel(mod.id as ModelId)}
+                    onSelect={() => void setDefaultModel(mod.id)}
                     className={cn(
                       "flex items-start gap-2 text-[12px]",
                       mod.id === defaultModel && "bg-accent/50",

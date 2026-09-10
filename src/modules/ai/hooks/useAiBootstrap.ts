@@ -11,6 +11,12 @@ import {
   isSignedInToChatGpt,
   onChatGptAuthChanged,
 } from "../lib/chatgptAuth";
+import {
+  DEFAULT_MODEL_ID,
+  compatModelIdForEndpoint,
+  isCompatModelId,
+  isKnownModelId,
+} from "../config";
 import { useAgentsStore } from "../store/agentsStore";
 import { useChatStore } from "../store/chatStore";
 import { useSnippetsStore } from "../store/snippetsStore";
@@ -102,8 +108,30 @@ export function useAiBootstrap(): {
   }, [initPrefs]);
   useEffect(() => {
     if (!prefsHydrated) return;
-    setSelectedModelId(prefDefaultModel);
-  }, [prefsHydrated, prefDefaultModel, setSelectedModelId]);
+    const rawDefault = String(prefDefaultModel);
+    const isValid =
+      isKnownModelId(rawDefault) ||
+      (isCompatModelId(rawDefault) &&
+        customEndpoints.some(
+          (ep) => compatModelIdForEndpoint(ep.id) === rawDefault,
+        ));
+    if (isValid) {
+      setSelectedModelId(rawDefault);
+    } else {
+      const matchedEp = customEndpoints.find(
+        (ep) =>
+          ep.modelId.toLowerCase() === rawDefault.toLowerCase() ||
+          ep.name.toLowerCase() === rawDefault.toLowerCase(),
+      );
+      if (matchedEp) {
+        setSelectedModelId(compatModelIdForEndpoint(matchedEp.id));
+      } else if (customEndpoints.length > 0) {
+        setSelectedModelId(compatModelIdForEndpoint(customEndpoints[0].id));
+      } else {
+        setSelectedModelId(DEFAULT_MODEL_ID);
+      }
+    }
+  }, [prefsHydrated, prefDefaultModel, setSelectedModelId, customEndpoints]);
 
   useEffect(() => {
     void hydrateSessions();

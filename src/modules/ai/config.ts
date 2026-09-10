@@ -697,7 +697,7 @@ export function getCompatModelInfo(
     label: ep?.modelId || name,
     hint: name,
     description: ep
-      ? `${name} — ${ep.baseURL}`
+      ? `${name} - ${ep.baseURL}`
       : "Custom OpenAI-compatible endpoint",
     capabilities: { intelligence: 3, speed: 3, cost: 3 },
   };
@@ -708,15 +708,15 @@ export function resolveModel(
   endpoints: readonly CustomEndpoint[] = [],
 ): ModelInfo {
   if (isCompatModelId(modelId)) return getCompatModelInfo(modelId, endpoints);
-  const m = MODELS.find((x) => x.id === modelId);
-  if (!m) throw new Error(`Unknown model: ${modelId}`);
-  return m;
+  return getModel(modelId as ModelId);
 }
 
-export function getModel(id: ModelId): ModelInfo {
+export function getModel(id: string): ModelInfo {
   const m = MODELS.find((x) => x.id === id);
-  if (!m) throw new Error(`Unknown model: ${id}`);
-  return m;
+  if (m) return m;
+  const fallback = MODELS.find((x) => x.id === DEFAULT_MODEL_ID);
+  if (fallback) return fallback;
+  return MODELS[0];
 }
 
 export function isKnownModelId(id: string): id is ModelId {

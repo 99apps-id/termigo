@@ -1469,19 +1469,35 @@ const HELP = [
   "/cost - today's & total spend",
 ].join("\n");
 
-async function isValidModel(id: string): Promise<boolean> {
+async function resolveModelInput(id: string): Promise<string | null> {
   const { MODELS, isCompatModelId, compatModelIdForEndpoint } = await import(
     "../ai/config"
   );
   const { usePreferencesStore } = await import(
     "@/modules/settings/preferences"
   );
-  if (MODELS.some((m) => m.id === id)) return true;
-  if (!isCompatModelId(id)) return false;
-  return usePreferencesStore
-    .getState()
-    .customEndpoints.some((ep) => compatModelIdForEndpoint(ep.id) === id);
+  const trimmed = id.trim();
+  const lower = trimmed.toLowerCase();
+  const direct = MODELS.find((m) => m.id.toLowerCase() === lower);
+  if (direct) return direct.id;
+
+  const eps = usePreferencesStore.getState().customEndpoints;
+  if (isCompatModelId(trimmed)) {
+    const match = eps.find(
+      (ep) => compatModelIdForEndpoint(ep.id) === trimmed,
+    );
+    if (match) return trimmed;
+  }
+  const epMatch = eps.find(
+    (ep) =>
+      ep.modelId.toLowerCase() === lower ||
+      ep.name.toLowerCase() === lower ||
+      ep.id.toLowerCase() === lower,
+  );
+  if (epMatch) return compatModelIdForEndpoint(epMatch.id);
+  return null;
 }
+
 
 /** Mark the currently-selected model in the model keyboard with a check. */
 function markModelButtons(
@@ -1555,15 +1571,18 @@ async function handleCallback(
   }
 
   if (data.startsWith("ms:")) {
-    const model = data.slice(3);
-    if (!(await isValidModel(model))) {
+    const rawModel = data.slice(3);
+    const resolved = await resolveModelInput(rawModel);
+    if (!resolved) {
       await answerCallback(cb.id, "Unknown model.", signal);
       return;
     }
     const state = await import("../ai/store/chatStore");
-    state.useChatStore.getState().setSelectedModelId(model);
-    await answerCallback(cb.id, `Model set to ${model}`, signal);
-    await editKeyboard(chatId, messageId, `Model set to ${model}.`, [], signal);
+    state.useChatStore.getState().setSelectedModelId(resolved);
+    const { setDefaultModel } = await import("@/modules/settings/store");
+    void setDefaultModel(resolved);
+    await answerCallback(cb.id, `Model set to ${resolved}`, signal);
+    await editKeyboard(chatId, messageId, `Model set to ${resolved}.`, [], signal);
     return;
   }
 
@@ -1807,7 +1826,8 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
         );
         return;
       }
-      if (!(await isValidModel(tail))) {
+      const resolved = await resolveModelInput(tail);
+      if (!resolved) {
         await sendTelegram(
           chatId,
           `Unknown model '${tail}'. Send /model for the picker.`,
@@ -1815,8 +1835,10 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
         );
         return;
       }
-      state.useChatStore.getState().setSelectedModelId(tail);
-      await sendTelegram(chatId, `Model set to ${tail}.`, signal);
+      state.useChatStore.getState().setSelectedModelId(resolved);
+      const { setDefaultModel } = await import("@/modules/settings/store");
+      void setDefaultModel(resolved);
+      await sendTelegram(chatId, `Model set to ${resolved}.`, signal);
       return;
     }
     case "/cost": {
