@@ -571,22 +571,10 @@ async function answerCallback(
 }
 
 async function modelLabel(modelId: string): Promise<string> {
-  const { MODELS, isCompatModelId, endpointIdFromCompatModel } = await import(
-    "../ai/config"
-  );
-  const { usePreferencesStore } = await import(
-    "@/modules/settings/preferences"
-  );
-  const m = MODELS.find((x) => x.id === modelId);
-  if (m) return m.label;
-  if (isCompatModelId(modelId)) {
-    const eid = endpointIdFromCompatModel(modelId);
-    const ep = usePreferencesStore
-      .getState()
-      .customEndpoints.find((e) => e.id === eid);
-    return ep?.modelId || ep?.name || modelId;
-  }
-  return modelId;
+  const { resolveModelLabel } = await import("../ai/config");
+  const { usePreferencesStore } = await import("@/modules/settings/preferences");
+  const endpoints = usePreferencesStore.getState().customEndpoints;
+  return resolveModelLabel(modelId, endpoints);
 }
 
 async function buildStatus(): Promise<string> {
