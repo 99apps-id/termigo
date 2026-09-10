@@ -558,7 +558,7 @@ export function formatLiveProgress(opts: FormatLiveProgressOptions): string {
     opts.status === "awaiting-approval"
       ? "Waiting for approval..."
       : opts.status === "thinking"
-        ? "Planning..."
+        ? "Thinking..."
         : opts.status === "streaming"
           ? "Writing response..."
           : "Working...";
