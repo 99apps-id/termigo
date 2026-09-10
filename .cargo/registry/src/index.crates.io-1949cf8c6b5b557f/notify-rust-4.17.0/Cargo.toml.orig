@@ -1,0 +1,83 @@
+[package]
+name = "notify-rust"
+version = "4.17.0"
+authors = ["Hendrik Sollich <hendrik@hoodie.de>"]
+description = "Show desktop notifications (linux, bsd, mac). Pure Rust dbus client and server."
+repository = "https://github.com/hoodie/notify-rust"
+documentation = "https://docs.rs/notify-rust/"
+edition = "2021"
+rust-version = "1.63.0"
+license = "MIT/Apache-2.0"
+keywords = ["desktop", "notification", "notify", "linux", "macos"]
+readme = "README.md"
+include = [
+  "README.md",
+  "History.md",
+  "CHANGELOG.md",
+  "LICENSE-*",
+  "Cargo.toml",
+  "src/**/*.rs",
+  "tests/*.rs"
+]
+
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+dbus = { version = "0.9", optional = true }
+lazy_static = { version = "1.5", optional = true }
+image = { version = "0.25", optional = true, default-features = false }
+zbus = { version = "5", optional = true, default-features = false }
+serde = { version = "1", features = ["derive"], optional = true }
+log = "0.4"
+env_logger ={ version ="0.11", optional = true }
+futures-lite = { version = "2.6.0"}
+
+[target.'cfg(target_os="macos")'.dependencies]
+mac-notification-sys = "0.6"
+chrono = { version = "0.4", optional = true}
+
+[target.'cfg(target_os="windows")'.dependencies]
+winrt-notification = { package = "tauri-winrt-notification", version = "0.7" }
+
+[features]
+default = ["z"]
+# server = []
+d = ["dbus"]
+d_vendored = ["dbus/vendored"]
+z = ["zbus", "serde", "async"]
+z-with-tokio = ["zbus", "serde", "tokio"]
+async = ["zbus/async-io"]
+tokio = ["zbus/tokio"]
+debug_namespace = []
+images = ["images_no_default_features", "image/rayon", "image/default-formats"]
+images_no_default_features = ["image", "lazy_static"]
+
+[dev-dependencies]
+color-backtrace = "0.7" # wait for MSVR 1.70 to update
+ctor = "0.12"
+maplit = "1.0"
+
+[dev-dependencies.async-std]
+version = "1.12.0"
+features = ["attributes"]
+
+[[example]]
+name = "images"
+path = "examples/images.rs"
+required-features = ["images"]
+
+[[example]]
+name = "schedule"
+path = "examples/schedule.rs"
+required-features = ["chrono"]
+
+[[example]]
+name = "wait_for_closing_async"
+path = "examples/wait_for_closing_async.rs"
+required-features = ["async"]
+
+[[example]]
+name = "simple_async"
+path = "examples/simple_async.rs"
+required-features = ["async"]
+
+[dependencies]
+futures-lite = "2.6.0"

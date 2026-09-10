@@ -6,6 +6,8 @@ export type SessionMeta = {
   title: string;
   createdAt: number;
   updatedAt: number;
+  chatId?: number;
+  threadId?: number | null;
 };
 
 const STORE_PATH = "termigo-ai-sessions.json";
@@ -104,6 +106,19 @@ export async function deleteRunInFlight(id: string): Promise<void> {
 
 export function newSessionId(): string {
   return `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export function sessionKey(chatId: number, threadId?: number | null): string {
+  return threadId ? `${chatId}:${threadId}` : `${chatId}`;
+}
+
+export function resolveSessionId(
+  chatId: number,
+  threadId?: number | null,
+  fallback?: string | null,
+): string | null {
+  if (threadId) return `${chatId}:${threadId}`;
+  return chatId ? `${chatId}` : fallback ?? null;
 }
 
 /** All human-readable text in a conversation, lowercased, with the injected

@@ -9,6 +9,7 @@
 import { getTelegramToken } from "./keyring";
 import { markdownToTelegramHtml, summarizeToolInput } from "./progressFormat";
 import { useTelegramStore } from "./store";
+import { ensureChatSession } from "../ai/store/chatStore";
 
 const API = "https://api.telegram.org";
 
@@ -39,11 +40,12 @@ type Update = {
     chat: { id: number };
     from?: { id: number };
     text?: string;
+    message_thread_id?: number | null;
   };
   callback_query?: {
     id: string;
     from?: { id: number };
-    message?: { chat: { id: number }; message_id?: number };
+    message?: { chat: { id: number }; message_id?: number; message_thread_id?: number | null };
     data?: string;
   };
 };
@@ -1450,8 +1452,16 @@ function startTelegramResume(chatId: number, signal: AbortSignal): void {
     try {
       const store = await import("../ai/store/chatStore");
       const runtime = await import("../ai/store/chatRuntime");
-      const { stepBudgetForRound } = await import("../ai/config");
       const sessionId = store.useChatStore.getState().activeSessionId;
+      const pendingSteer = store.useChatStore.getState().steerQueue.pending.length > 0;
+      if (pendingSteer) {
+        await sendTelegram(
+          chatId,
+          "Ada pesan tertunda. Tunggu selesai, atau pakai /new untuk mulai baru.",
+          signal,
+        ).catch(() => {});
+        return;
+      }
       if (!sessionId) {
         await sendTelegram(
           chatId,
@@ -1460,11 +1470,26 @@ function startTelegramResume(chatId: number, signal: AbortSignal): void {
         );
         return;
       }
-      const currentRound = store.useChatStore.getState().agentMeta.runRound;
-      const nextBudget = stepBudgetForRound(currentRound + 1);
+      const chatStatus = sessionId ? store.getChat(sessionId)?.status ?? "" : "";
+      const appStatus = store.useChatStore.getState().agentMeta.status;
+      const aqStore = await import("../ai/store/approvalQueueStore");
+      const pendingApprovals = getPendingApprovals(
+        sessionId,
+        store,
+        aqStore.useApprovalQueue,
+      );
+      const busy = runBusy(chatStatus, appStatus, pendingApprovals.length > 0);
+      if (busy) {
+        await sendTelegram(
+          chatId,
+          "Agent is still working. Wait for it to finish, or send /stop first.",
+          signal,
+        ).catch(() => {});
+        return;
+      }
       await sendTelegram(
         chatId,
-        `Continuing to next round (${nextBudget} steps)...`,
+        `Resuming...`,
         signal,
       ).catch(() => {});
       await sendTyping(chatId, signal).catch(() => {});
@@ -1850,6 +1875,7 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
           "Usage: /query <question>",
           signal,
         ));
+      await ensureChatSession(chatId, msg.message_thread_id ?? null);
       startTelegramDispatch(
         tail,
         chatId,
@@ -1862,6 +1888,7 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
     case "/run": {
       if (!tail)
         return void (await sendTelegram(chatId, "Usage: /run <task>", signal));
+      await ensureChatSession(chatId, msg.message_thread_id ?? null);
       startTelegramDispatch(
         tail,
         chatId,
@@ -1874,10 +1901,12 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
     case "/continue":
     case "/resume":
     case "/next": {
+      await ensureChatSession(chatId, msg.message_thread_id ?? null);
       startTelegramResume(chatId, signal);
       return;
     }
     case "/stop": {
+      await ensureChatSession(chatId, msg.message_thread_id ?? null);
       const runtime = await import("../ai/store/chatRuntime");
       await runtime.stopRun();
       await sendTelegram(
@@ -1889,7 +1918,7 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
     }
     case "/new": {
       const state = await import("../ai/store/chatStore");
-      state.useChatStore.getState().newSession();
+      state.useChatStore.getState().newSession(chatId, msg.message_thread_id ?? null);
       await sendTelegram(chatId, "New agent session started.", signal);
       return;
     }
