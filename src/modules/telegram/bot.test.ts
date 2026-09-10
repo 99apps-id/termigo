@@ -531,4 +531,74 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
       }
     });
   });
+
+  describe("getPendingApprovals extraction and deduplication", () => {
+    it("extracts approvals from sdk messages, agentMeta, and approvalQueue without duplicate ids", () => {
+      const mockChat = {
+        messages: [
+          {
+            role: "assistant",
+            parts: [
+              {
+                state: "approval-requested",
+                id: "appr-1",
+                toolName: "bash",
+                input: { command: "cargo build" },
+              },
+            ],
+          },
+        ],
+      };
+
+      const mockChatStore = {
+        getChat: vi.fn().mockReturnValue(mockChat),
+        getState: vi.fn().mockReturnValue({
+          agentMeta: {
+            pendingApprovals: [
+              {
+                id: "appr-1",
+                toolName: "bash",
+                summary: "cargo build",
+              },
+              {
+                id: "appr-2",
+                toolName: "file_write",
+                summary: "write config.json",
+              },
+            ],
+          },
+        }),
+      };
+
+      const mockAqStore = {
+        getState: vi.fn().mockReturnValue({
+          pending: [
+            {
+              id: "appr-2",
+              toolName: "file_write",
+              summary: "duplicate write config.json",
+            },
+            {
+              id: "appr-3",
+              toolName: "git_push",
+              summary: "push to main",
+            },
+          ],
+        }),
+      };
+
+      const approvals = _testOnly.getPendingApprovals(
+        "sess-1",
+        mockChatStore,
+        mockAqStore,
+      );
+
+      expect(approvals).toHaveLength(3);
+      expect(approvals[0].id).toBe("appr-1");
+      expect(approvals[0].toolName).toBe("bash");
+      expect(approvals[1].id).toBe("appr-2");
+      expect(approvals[2].id).toBe("appr-3");
+    });
+  });
 });
+

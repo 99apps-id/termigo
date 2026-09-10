@@ -546,7 +546,7 @@ export function formatToolActivity(t: ToolCallSummary): string {
 
 export function formatLiveProgress(opts: FormatLiveProgressOptions): string {
   if (opts.completed) {
-    return "**[Termigo Agent]** Selesai.";
+    return "**[Termigo Agent]** Completed.";
   }
 
   if (opts.mode === "question") {
@@ -556,12 +556,12 @@ export function formatLiveProgress(opts: FormatLiveProgressOptions): string {
   const lines: string[] = [];
   const statusLabel =
     opts.status === "awaiting-approval"
-      ? "Menunggu persetujuan..."
+      ? "Waiting for approval..."
       : opts.status === "thinking"
-        ? "Merencanakan..."
+        ? "Planning..."
         : opts.status === "streaming"
-          ? "Menulis jawaban..."
-          : "Sedang mengerjakan...";
+          ? "Writing response..."
+          : "Working...";
 
   const elapsedPart =
     typeof opts.elapsedMs === "number"
@@ -570,7 +570,7 @@ export function formatLiveProgress(opts: FormatLiveProgressOptions): string {
 
   const stepPart =
     typeof opts.round === "number" && opts.round >= 0
-      ? ` (langkah ${opts.round + 1})`
+      ? ` (step ${opts.round + 1})`
       : "";
 
   const modelPart = opts.modelLabel ? ` • ${opts.modelLabel}` : "";
@@ -605,9 +605,14 @@ export function formatLiveProgress(opts: FormatLiveProgressOptions): string {
     }
 
     for (const t of active.slice(-1)) {
-      const verb = getToolRunningVerb(t.toolName);
-      const snippet = t.input ? ` \`${truncate(t.input, 40)}\`` : "";
-      lines.push(`⚡ ${verb}${snippet}`);
+      if (t.state === "awaiting-approval") {
+        const snippet = t.input ? ` \`${truncate(t.input, 40)}\`` : "";
+        lines.push(`🔒 Approval required: \`${t.toolName}\`${snippet}`);
+      } else {
+        const verb = getToolRunningVerb(t.toolName);
+        const snippet = t.input ? ` \`${truncate(t.input, 40)}\`` : "";
+        lines.push(`⚡ ${verb}${snippet}`);
+      }
     }
   }
 

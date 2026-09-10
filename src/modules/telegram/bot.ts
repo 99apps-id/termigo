@@ -7,7 +7,7 @@
 // agent's final answer back to the chat once the run settles.
 
 import { getTelegramToken } from "./keyring";
-import { markdownToTelegramHtml } from "./progressFormat";
+import { markdownToTelegramHtml, summarizeToolInput } from "./progressFormat";
 import { useTelegramStore } from "./store";
 
 const API = "https://api.telegram.org";
@@ -24,6 +24,11 @@ type ChatLike = {
       text?: string;
       toolName?: string;
       output?: unknown;
+      input?: unknown;
+      state?: string;
+      approval?: { id?: string };
+      approvalId?: string;
+      id?: string;
     }>;
   }>;
 };
@@ -63,6 +68,7 @@ const seenMessageIds = new Set<string>();
 const seenFingerprints = new Set<string>();
 const telegramOriginMessageIds = new Set<string>();
 const recentTelegramPrompts = new Map<string, number>();
+const sentApprovalIds = new Set<string>();
 
 function recordTelegramText(text: string): void {
   const norm = text.trim();
@@ -659,8 +665,104 @@ function lastAssistantText(
   return text.trim() || null;
 }
 
-function runBusy(chatStatus: string, appStatus: string): boolean {
+export type PendingApprovalInfo = {
+  id: string;
+  toolName: string;
+  summary: string;
+  source: "sdk" | "queue";
+};
+
+export function getPendingApprovals(
+  sessionId: string,
+  chatStore?: any,
+  aqStore?: any,
+): PendingApprovalInfo[] {
+  const result: PendingApprovalInfo[] = [];
+  const seen = new Set<string>();
+
+  // 1. Direct scan from active Chat instance
+  if (chatStore && sessionId) {
+    const chatGetter =
+      typeof chatStore.getChat === "function" ? chatStore.getChat : null;
+    const chat = chatGetter ? chatGetter(sessionId) : null;
+    if (chat) {
+      for (const m of chat.messages) {
+        if (m.role !== "assistant") continue;
+        for (const p of m.parts ?? []) {
+          const part = p as {
+            state?: string;
+            type?: string;
+            toolName?: string;
+            input?: unknown;
+            approval?: { id?: string };
+            approvalId?: string;
+            id?: string;
+          };
+          if (part.state === "approval-requested") {
+            const id = part.approval?.id || part.approvalId || part.id;
+            if (id && !seen.has(id)) {
+              seen.add(id);
+              const toolName =
+                typeof part.toolName === "string" && part.toolName
+                  ? part.toolName
+                  : (part.type ?? "").replace(/^tool-/, "") || "tool";
+              const summary = summarizeToolInput(toolName, part.input);
+              result.push({ id, toolName, summary, source: "sdk" });
+            }
+          }
+        }
+      }
+    }
+
+    // 2. ChatStore agentMeta.pendingApprovals (populated by AgentRunBridge)
+    const chatState =
+      typeof chatStore.getState === "function"
+        ? chatStore.getState()
+        : chatStore.useChatStore?.getState?.();
+    const metaPending = chatState?.agentMeta?.pendingApprovals ?? [];
+    for (const p of metaPending) {
+      if (p.id && !seen.has(p.id)) {
+        seen.add(p.id);
+        result.push({
+          id: p.id,
+          toolName: p.toolName,
+          summary: p.summary,
+          source: "sdk",
+        });
+      }
+    }
+  }
+
+  // 3. Approval queue store
+  if (aqStore) {
+    const queueState =
+      typeof aqStore.getState === "function"
+        ? aqStore.getState()
+        : aqStore.useApprovalQueue?.getState?.();
+    const queuePending = queueState?.pending ?? [];
+    for (const q of queuePending) {
+      if (q.id && !seen.has(q.id)) {
+        seen.add(q.id);
+        result.push({
+          id: q.id,
+          toolName: q.toolName,
+          summary: q.summary,
+          source: "queue",
+        });
+      }
+    }
+  }
+
+  return result;
+}
+
+function runBusy(
+  chatStatus: string,
+  appStatus: string,
+  hasPendingApproval = false,
+): boolean {
   return (
+    hasPendingApproval ||
     chatStatus === "submitted" ||
     chatStatus === "streaming" ||
     appStatus === "thinking" ||
@@ -682,10 +784,12 @@ async function waitForReply(
   const started = Date.now();
   const MAX_WAIT = 30 * 60 * 1000;
   let everBusy = false;
+  const aqStore = await import("../ai/store/approvalQueueStore");
   while (!signal.aborted && Date.now() - started < MAX_WAIT) {
     const appStatus = store.useChatStore.getState().agentMeta.status;
     const chatStatus = store.getChat(sessionId)?.status ?? "";
-    const busy = runBusy(chatStatus, appStatus);
+    const pending = getPendingApprovals(sessionId, store, aqStore);
+    const busy = runBusy(chatStatus, appStatus, pending.length > 0);
     if (busy) everBusy = true;
     const count = countAssistantMessages(store.getChat, sessionId);
 
@@ -743,7 +847,6 @@ async function publishProgress(
   let lastSentAt = 0;
   let lastTypingAt = 0;
   let lastLiveTextPokeAt = 0;
-  const sentApprovalIds = new Set<string>();
   const sentElicitationIds = new Set<string>();
   const started = Date.now();
   const MAX_WAIT = 30 * 60 * 1000;
@@ -773,8 +876,10 @@ async function publishProgress(
       // streaming, or awaiting approval).
       const chat = store.getChat(sessionId);
       const chatStatus = chat?.status ?? "";
+      const aqStore = await import("../ai/store/approvalQueueStore");
+      const pendingApprovals = getPendingApprovals(sessionId, store, aqStore);
       const busy =
-        runBusy(chatStatus, status) ||
+        runBusy(chatStatus, status, pendingApprovals.length > 0) ||
         status === "thinking" ||
         status === "streaming" ||
         status === "awaiting-approval" ||
@@ -795,8 +900,14 @@ async function publishProgress(
         : [];
 
       // Format compact live progress
+      const liveStatus =
+        pendingApprovals.length > 0
+          ? "awaiting-approval"
+          : status === "idle" && busy
+            ? "thinking"
+            : status;
       const liveText = formatLiveProgress({
-        status: status === "idle" && busy ? "thinking" : status,
+        status: liveStatus,
         round: meta.round,
         step,
         tools: toolSummaries,
@@ -836,50 +947,24 @@ async function publishProgress(
           .catch(() => {});
       }
 
-      // Surface pending tool approvals as interactive inline buttons in Telegram
-      const pendingApprovals = meta.pendingApprovals ?? [];
+      // Surface pending approvals as interactive inline buttons in Telegram
       for (const p of pendingApprovals) {
         if (!sentApprovalIds.has(p.id)) {
           sentApprovalIds.add(p.id);
+          const prefix = p.source === "queue" ? "aq" : "ap";
           const keyboard: InlineButton[][] = [
             [
-              { text: "Approve", callback_data: `ap:approve:${p.id}` },
-              { text: "Deny", callback_data: `ap:deny:${p.id}` },
+              { text: "Approve", callback_data: `${prefix}:approve:${p.id}` },
+              { text: "Deny", callback_data: `${prefix}:deny:${p.id}` },
             ],
             [
-              { text: "Allow session", callback_data: `ap:session:${p.id}` },
-              { text: "Allow always", callback_data: `ap:always:${p.id}` },
+              { text: "Allow session", callback_data: `${prefix}:session:${p.id}` },
+              { text: "Allow always", callback_data: `${prefix}:always:${p.id}` },
             ],
           ];
           await sendKeyboard(
             chatId,
-            `Action Approval Required:\nTool: ${p.toolName}\nTarget: ${p.summary}`,
-            keyboard,
-            signal,
-          ).catch(() => {});
-          lastSentAt = now;
-        }
-      }
-
-      // Surface approval queue requests (subagents / gated tools)
-      const aqStore = await import("../ai/store/approvalQueueStore");
-      const aqPending = aqStore.useApprovalQueue.getState().pending;
-      for (const q of aqPending) {
-        if (!sentApprovalIds.has(q.id)) {
-          sentApprovalIds.add(q.id);
-          const keyboard: InlineButton[][] = [
-            [
-              { text: "Approve", callback_data: `aq:approve:${q.id}` },
-              { text: "Deny", callback_data: `aq:deny:${q.id}` },
-            ],
-            [
-              { text: "Allow session", callback_data: `aq:session:${q.id}` },
-              { text: "Allow always", callback_data: `aq:always:${q.id}` },
-            ],
-          ];
-          await sendKeyboard(
-            chatId,
-            `Approval Required (${q.requester}):\nTool: ${q.toolName}\nTarget: ${q.summary}`,
+            `Action Approval Required:\nTool: ${p.toolName}\nTarget: ${p.summary || p.toolName}\n(Reply /approve or /deny)`,
             keyboard,
             signal,
           ).catch(() => {});
@@ -1091,7 +1176,11 @@ async function runMirror(signal: AbortSignal): Promise<void> {
 
         if (mirrorPauseCount === 0) {
           const chatStatus = chat?.status ?? "";
-          if (runBusy(chatStatus, state.agentMeta.status)) {
+          const aqStore = await import("../ai/store/approvalQueueStore");
+          const pending = sessionId
+            ? getPendingApprovals(sessionId, store, aqStore.useApprovalQueue)
+            : [];
+          if (runBusy(chatStatus, state.agentMeta.status, pending.length > 0)) {
             await sendTyping(chatId, signal).catch(() => {});
           }
         }
@@ -1179,7 +1268,13 @@ async function runAgentAndStream(
           const queued = store.useChatStore.getState().steerQueue.pending.length > 0;
           const appStatus = store.useChatStore.getState().agentMeta.status;
           const chatStatus = store.getChat(sessionId)?.status ?? "";
-          const busy = runBusy(chatStatus, appStatus);
+          const aqStore = await import("../ai/store/approvalQueueStore");
+          const pendingApprovals = getPendingApprovals(
+            sessionId,
+            store,
+            aqStore.useApprovalQueue,
+          );
+          const busy = runBusy(chatStatus, appStatus, pendingApprovals.length > 0);
 
           if (!queued && !busy) break;
 
@@ -1189,17 +1284,22 @@ async function runAgentAndStream(
           }
         }
 
-        // If run stopped due to step-cap by user request, offer one-click continuation button
+        // If run stopped due to step-cap, offer one-click continuation button
         const stopReason = store.useChatStore.getState().agentMeta.stopReason;
-        const stoppedByUser = store.useChatStore.getState().agentMeta.stoppedByUser;
-        if (stopReason === "step-cap" && stoppedByUser) {
+        if (stopReason === "step-cap") {
           const currentRound = store.useChatStore.getState().agentMeta.runRound;
           const { stepBudgetForRound } = await import("../ai/config");
           const nextBudget = stepBudgetForRound(currentRound + 1);
           await sendKeyboard(
             chatId,
-            `Batas langkah tercapai (Step selesai). Lanjut ke Step berikutnya (${nextBudget} steps)?`,
-            [[{ text: `>> Lanjut Step (${nextBudget} steps)`, callback_data: "resume:run" }]],
+            `Step limit reached. Continue to next round (${nextBudget} steps)?`,
+            [[{ text: `>> Continue Step (${nextBudget} steps)`, callback_data: "resume:run" }]],
+            signal,
+          ).catch(() => {});
+        } else if (stopReason) {
+          await sendTelegram(
+            chatId,
+            `Agent paused (${stopReason}). Reply with /continue or your next instruction to proceed.`,
             signal,
           ).catch(() => {});
         }
@@ -1262,7 +1362,7 @@ function startTelegramResume(chatId: number, signal: AbortSignal): void {
       if (!sessionId) {
         await sendTelegram(
           chatId,
-          "Tidak ada sesi aktif untuk dilanjutkan.",
+          "No active session to resume.",
           signal,
         );
         return;
@@ -1271,7 +1371,7 @@ function startTelegramResume(chatId: number, signal: AbortSignal): void {
       const nextBudget = stepBudgetForRound(currentRound + 1);
       await sendTelegram(
         chatId,
-        `Melanjutkan ke step berikutnya (${nextBudget} steps)...`,
+        `Continuing to next round (${nextBudget} steps)...`,
         signal,
       ).catch(() => {});
       await sendTyping(chatId, signal).catch(() => {});
@@ -1554,12 +1654,12 @@ async function handleCallback(
   }
 
   if (data === "resume:run") {
-    await answerCallback(cb.id, "Melanjutkan ke step berikutnya...", signal);
+    await answerCallback(cb.id, "Continuing to next round...", signal);
     if (messageId) {
       await editKeyboard(
         chatId,
         messageId,
-        "Melanjutkan step berikutnya...",
+        "Continuing to next round...",
         [],
         signal,
       ).catch(() => {});
@@ -1642,7 +1742,7 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
         tail,
         chatId,
         signal,
-        "Pertanyaan diterima, langsung jawab tanpa progress.",
+        "Question received, answering directly without progress.",
         "question",
       );
       return;
@@ -1742,16 +1842,14 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
       }
       const state = await import("../ai/store/chatStore");
       const aq = await import("../ai/store/approvalQueueStore");
-      const pending =
-        state.useChatStore.getState().agentMeta.pendingApprovals ?? [];
-      const aqPending = aq.useApprovalQueue.getState().pending;
+      const sessionId = state.useChatStore.getState().activeSessionId;
+      const pending = sessionId
+        ? getPendingApprovals(sessionId, state, aq.useApprovalQueue)
+        : [];
       let count = 0;
       for (const p of pending) {
         state.useChatStore.getState().respondToApproval(p.id, true);
-        count++;
-      }
-      for (const q of aqPending) {
-        aq.useApprovalQueue.getState().respond([q.id], true);
+        aq.useApprovalQueue.getState().respond([p.id], true);
         count++;
       }
       await sendTelegram(
@@ -1771,16 +1869,14 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
       }
       const state = await import("../ai/store/chatStore");
       const aq = await import("../ai/store/approvalQueueStore");
-      const pending =
-        state.useChatStore.getState().agentMeta.pendingApprovals ?? [];
-      const aqPending = aq.useApprovalQueue.getState().pending;
+      const sessionId = state.useChatStore.getState().activeSessionId;
+      const pending = sessionId
+        ? getPendingApprovals(sessionId, state, aq.useApprovalQueue)
+        : [];
       let count = 0;
       for (const p of pending) {
         state.useChatStore.getState().respondToApproval(p.id, false);
-        count++;
-      }
-      for (const q of aqPending) {
-        aq.useApprovalQueue.getState().respond([q.id], false);
+        aq.useApprovalQueue.getState().respond([p.id], false);
         count++;
       }
       await sendTelegram(chatId, `Denied ${count} pending action(s).`, signal);
@@ -1971,7 +2067,9 @@ async function runLoop(signal: AbortSignal): Promise<void> {
       await sleep(signal, backoffMs);
     }
   }
-  useTelegramStore.getState().setOnline(false);
+  if (loopController?.signal === signal) {
+    useTelegramStore.getState().setOnline(false);
+  }
 }
 
 /** Start the long-polling loop (idempotent). */
@@ -2018,6 +2116,7 @@ export const _testOnly = {
   splitTelegramText,
   clampTelegramText,
   runBusy,
+  getPendingApprovals,
   startTelegramDispatch,
   sendTelegram,
   deleteTelegramMessage,

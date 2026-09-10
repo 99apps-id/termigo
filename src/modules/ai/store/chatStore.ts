@@ -401,7 +401,34 @@ export const useChatStore = create<StoreState>((set, get) => ({
   setApprovalResponder: (fn) => set({ approvalResponder: fn }),
   respondToApproval: (approvalId, approved) => {
     const fn = get().approvalResponder;
-    if (fn) fn(approvalId, approved);
+    if (fn) {
+      fn(approvalId, approved);
+      return;
+    }
+    const sessionId = get().activeSessionId;
+    if (sessionId) {
+      const chat = getChat(sessionId);
+      if (
+        chat &&
+        typeof (
+          chat as {
+            addToolApprovalResponse?: (a: {
+              id: string;
+              approved: boolean;
+            }) => void;
+          }
+        ).addToolApprovalResponse === "function"
+      ) {
+        (
+          chat as {
+            addToolApprovalResponse: (a: {
+              id: string;
+              approved: boolean;
+            }) => void;
+          }
+        ).addToolApprovalResponse({ id: approvalId, approved });
+      }
+    }
   },
 
   apiKeys: { ...EMPTY_PROVIDER_KEYS },
