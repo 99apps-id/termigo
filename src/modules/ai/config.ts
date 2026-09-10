@@ -723,10 +723,11 @@ export function resolveModel(
   return getModel(modelId as ModelId);
 }
 
-export function getModel(id: string): ModelInfo {
+export function getModel(id: string, endpoints: readonly CustomEndpoint[] = []): ModelInfo {
   const m = MODELS.find((x) => x.id === id);
   if (m) return m;
-  const fallback = MODELS.find((x) => x.id === (DEFAULT_MODEL_ID as ModelId));
+  if (isCompatModelId(id)) return getCompatModelInfo(id, endpoints);
+  const fallback = MODELS.find((x) => x.id === DEFAULT_MODEL_ID);
   if (fallback) return fallback;
   return MODELS[0];
 }
@@ -803,7 +804,7 @@ export function modelUsesReasoningTokens(
   );
 }
 
-export const DEFAULT_MODEL_ID = "compat-15292c18";
+export const DEFAULT_MODEL_ID: ModelId = "gpt-5.4-mini";
 
 /** Approximate context window (in tokens) per model. Used for the
  *  context-usage indicator in the AI mini-window header. Conservative
