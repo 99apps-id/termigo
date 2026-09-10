@@ -595,7 +595,7 @@ export function formatLiveProgress(opts: FormatLiveProgressOptions): string {
     );
     const recentDone = tools
       .filter((t) => t.state === "done" || t.state === "error")
-      .slice(-2);
+      .slice(-3);
 
     for (const t of recentDone) {
       const verb = getToolDoneVerb(t.toolName);
@@ -604,7 +604,7 @@ export function formatLiveProgress(opts: FormatLiveProgressOptions): string {
       lines.push(`✓ ${verb}${snippet}${out}`);
     }
 
-    for (const t of active.slice(-1)) {
+    for (const t of active.slice(-2)) {
       if (t.state === "awaiting-approval") {
         const snippet = t.input ? ` \`${truncate(t.input, 40)}\`` : "";
         lines.push(`🔒 Approval required: \`${t.toolName}\`${snippet}`);
@@ -616,5 +616,6 @@ export function formatLiveProgress(opts: FormatLiveProgressOptions): string {
     }
   }
 
-  return lines.join("\n");
+  const trimmed = lines.filter((line) => line.trim() !== "");
+  return trimmed.length > 0 ? trimmed.join("\n") : "**[Termigo Agent]** Working...";
 }
