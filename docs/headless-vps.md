@@ -25,18 +25,23 @@ sudo apt update && sudo apt install -y \
 From the Termigo repository root on the server:
 
 ```bash
-# Build frontend web assets
+# Install Node dependencies
 pnpm install
-pnpm build
 
-# Build release binaries (Termigo and CLI companion)
-cargo build --release --manifest-path src-tauri/Cargo.toml
+# Build CLI companion + frontend + Rust binary (all-in-one via Tauri)
+# This runs: pnpm build:cli && pnpm build (frontend) then compiles Rust.
+# Do NOT use raw "cargo build" - it skips the frontend bundle step.
+pnpm tauri build --no-bundle
 
 # Place executables in application root
 cp src-tauri/target/release/termigo ./termigo
 cp src-tauri/target/release/termigo-cli ./termigo-cli
 chmod +x ./termigo ./termigo-cli scripts/run-headless.sh
 ```
+
+> **Important:** Always use `pnpm tauri build --no-bundle` (or `scripts/deploy-termigo.sh --build`)
+> to build Termigo. Raw `cargo build --release` skips the frontend bundle and produces a
+> binary that cannot serve the UI - Telegram bot will not respond.
 
 ---
 

@@ -84,8 +84,8 @@ for a in "$@"; do
   esac
 done
 if [ "${SRC_BUILD:-0}" = "1" ]; then
-  log "Building new binary (tauri build --no-bundle) ..."
-  ( cd "$APP_DIR" && export PATH="$APP_DIR/node_modules/.bin:$PATH" && npx tauri build --no-bundle )
+  log "Building new binary (pnpm tauri build --no-bundle) ..."
+  ( cd "$APP_DIR" && export PATH="$APP_DIR/node_modules/.bin:$PATH" && pnpm tauri build --no-bundle )
   SRC="$TARGET_RELEASE"
 elif [ "${#ARGS[@]}" -gt 0 ]; then
   SRC="${ARGS[0]}"
