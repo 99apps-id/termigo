@@ -796,7 +796,7 @@ export function modelUsesReasoningTokens(
   );
 }
 
-export const DEFAULT_MODEL_ID: ModelId = "gpt-5.4-mini";
+export const DEFAULT_MODEL_ID = "compat-15292c18";
 
 /** Approximate context window (in tokens) per model. Used for the
  *  context-usage indicator in the AI mini-window header. Conservative
