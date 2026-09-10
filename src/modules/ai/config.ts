@@ -684,9 +684,16 @@ export const CHATGPT_HEADERS: Record<string, string> = {
 
 export type ModelId = (typeof MODELS)[number]["id"];
 
-export function resolveModelLabel(modelId: string, endpoints: readonly CustomEndpoint[] = []): string {
+export function resolveModelLabel(
+  modelId: string,
+  endpoints: readonly CustomEndpoint[] = [],
+): string {
   const info = resolveModel(modelId, endpoints);
-  return [PROVIDERS.find(p => p.id === info.provider)?.label, info.label].filter(Boolean).join(' ') || modelId;
+  return (
+    [PROVIDERS.find((p) => p.id === info.provider)?.label, info.label]
+      .filter(Boolean)
+      .join(" ") || modelId
+  );
 }
 
 export function getCompatModelInfo(

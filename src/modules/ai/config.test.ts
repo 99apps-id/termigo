@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   type CustomEndpoint,
   compatModelIdForEndpoint,
-  DEFAULT_MODEL_ID,
   endpointIdFromCompatModel,
   getModelContextLimit,
   isCompatModelId,

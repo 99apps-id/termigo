@@ -26,6 +26,7 @@ export type FormatLiveProgressOptions = {
   completed?: boolean;
   mode?: "question" | "task";
   modelLabel?: string;
+  subagents?: Array<{ label?: string; status: string; currentStep?: string }>;
 };
 
 function collapseWhitespace(text: string): string {
@@ -36,7 +37,7 @@ export async function resolveModelLabel(modelId?: string): Promise<string> {
   if (!modelId) return "";
   try {
     const { MODELS, isCompatModelId, endpointIdFromCompatModel } = await import(
-      "../ai/config",
+      "../ai/config"
     );
     const m = MODELS.find((x: any) => x.id === modelId);
     if (m) {
@@ -304,22 +305,19 @@ export function formatMarkdownTable(markdownTable: string): string {
   const pad = (str: string, len: number) =>
     str + " ".repeat(Math.max(0, len - str.length));
 
-  const topBorder =
-    "┌─" + colWidths.map((w) => "─".repeat(w)).join("─┬─") + "─┐";
+  const topBorder = `┌─${colWidths.map((w) => "─".repeat(w)).join("─┬─")}─┐`;
   const headerLine =
     "│ " +
     colWidths.map((_, i) => pad(header[i] ?? "", colWidths[i])).join(" │ ") +
     " │";
-  const midBorder =
-    "├─" + colWidths.map((w) => "─".repeat(w)).join("─┼─") + "─┤";
+  const midBorder = `├─${colWidths.map((w) => "─".repeat(w)).join("─┼─")}─┤`;
   const dataLines = dataRows.map(
     (r) =>
       "│ " +
       colWidths.map((_, i) => pad(r[i] ?? "", colWidths[i])).join(" │ ") +
       " │",
   );
-  const botBorder =
-    "└─" + colWidths.map((w) => "─".repeat(w)).join("─┴─") + "─┘";
+  const botBorder = `└─${colWidths.map((w) => "─".repeat(w)).join("─┴─")}─┘`;
 
   return [topBorder, headerLine, midBorder, ...dataLines, botBorder].join("\n");
 }
@@ -389,10 +387,7 @@ export function markdownToTelegramHtml(markdown: string): string {
   text = escapeHtml(text);
 
   // 5. Allow explicit user HTML tags: <b>, <i>, <u>, <s>, <code>, <pre>, <blockquote>
-  text = text.replace(
-    /&lt;(\/)?(b|i|u|s|code|pre|blockquote)&gt;/gi,
-    "<$1$2>",
-  );
+  text = text.replace(/&lt;(\/)?(b|i|u|s|code|pre|blockquote)&gt;/gi, "<$1$2>");
 
   // 6. Headings (# Title) -> <b>Title</b>
   text = text.replace(/^(#{1,6})\s+(.+)$/gm, "<b>$2</b>");
@@ -411,7 +406,7 @@ export function markdownToTelegramHtml(markdown: string): string {
 
   // 11. Italic: _text_ (only when surrounded by whitespace or punctuation, to avoid snake_case)
   text = text.replace(
-    /(?<=^|[\s(\[{])_([^_ \r\n][^_\r\n]*?[^_ \r\n]|\S)_(?=[)\]}\s.,:;!?]|$)/gm,
+    /(?<=^|[\s([{])_([^_ \r\n][^_\r\n]*?[^_ \r\n]|\S)_(?=[)\]}\s.,:;!?]|$)/gm,
     "<i>$1</i>",
   );
 
@@ -420,7 +415,7 @@ export function markdownToTelegramHtml(markdown: string): string {
 
   // 13. Links: [label](url)
   text = text.replace(
-    /\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/g,
+    /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
     '<a href="$2">$1</a>',
   );
 
@@ -583,7 +578,14 @@ export function formatLiveProgress(opts: FormatLiveProgressOptions): string {
     lines.push(`*${truncate(opts.step, 120)}*`);
   }
 
-  const inProgressTodo = opts.todos?.find((t) => t.status === "in_progress");
+  const pendingTodos = (opts.todos ?? []).filter(
+    (t) => t.status !== "completed",
+  );
+  const completedTodos = (opts.todos ?? []).filter(
+    (t) => t.status === "completed",
+  );
+  const visibleTodos = pendingTodos.length > 0 ? pendingTodos : completedTodos;
+  const inProgressTodo = visibleTodos.find((t) => t.status === "in_progress");
   if (inProgressTodo) {
     lines.push(`🔹 ${truncate(inProgressTodo.title, 100)}`);
   }
@@ -595,7 +597,7 @@ export function formatLiveProgress(opts: FormatLiveProgressOptions): string {
     );
     const recentDone = tools
       .filter((t) => t.state === "done" || t.state === "error")
-      .slice(-3);
+      .slice(-2);
 
     for (const t of recentDone) {
       const verb = getToolDoneVerb(t.toolName);
@@ -616,6 +618,26 @@ export function formatLiveProgress(opts: FormatLiveProgressOptions): string {
     }
   }
 
+  const subagents = opts.subagents ?? [];
+  const liveSubagents = subagents.filter((s) => s.status !== "done");
+  const visibleSubagents =
+    liveSubagents.length > 0 ? liveSubagents.slice(-2) : subagents.slice(-2);
+  for (const sub of visibleSubagents) {
+    const label = sub.label ?? "subagent";
+    const status =
+      sub.status === "running"
+        ? "Running"
+        : sub.status === "error"
+          ? "Failed"
+          : sub.status === "done"
+            ? "Done"
+            : sub.status;
+    const step = sub.currentStep ? `: ${truncate(sub.currentStep, 60)}` : "";
+    lines.push(`↳ ${label}: *${status}*${step}`);
+  }
+
   const trimmed = lines.filter((line) => line.trim() !== "");
-  return trimmed.length > 0 ? trimmed.join("\n") : "**[Termigo Agent]** Working...";
+  return trimmed.length > 0
+    ? trimmed.join("\n")
+    : "**[Termigo Agent]** Working...";
 }

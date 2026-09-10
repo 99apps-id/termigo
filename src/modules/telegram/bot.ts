@@ -6,10 +6,10 @@
 // wants. /query and /run submit a task, ack immediately, then stream the
 // agent's final answer back to the chat once the run settles.
 
+import { ensureChatSession } from "../ai/store/chatStore";
 import { getTelegramToken } from "./keyring";
 import { markdownToTelegramHtml, summarizeToolInput } from "./progressFormat";
 import { useTelegramStore } from "./store";
-import { ensureChatSession } from "../ai/store/chatStore";
 
 const API = "https://api.telegram.org";
 
@@ -45,7 +45,11 @@ type Update = {
   callback_query?: {
     id: string;
     from?: { id: number };
-    message?: { chat: { id: number }; message_id?: number; message_thread_id?: number | null };
+    message?: {
+      chat: { id: number };
+      message_id?: number;
+      message_thread_id?: number | null;
+    };
     data?: string;
   };
 };
@@ -201,7 +205,9 @@ async function apiGet(
   if (!token) throw new Error("No Telegram token configured");
   const { signal: reqSignal, cleanup } = mergeSignals(signal, timeoutMs);
   try {
-    const res = await fetch(`${API}/bot${token}/${path}`, { signal: reqSignal });
+    const res = await fetch(`${API}/bot${token}/${path}`, {
+      signal: reqSignal,
+    });
     if (!res.ok) {
       throw await parseTelegramError(res);
     }
@@ -572,7 +578,9 @@ async function answerCallback(
 
 async function modelLabel(modelId: string): Promise<string> {
   const { resolveModelLabel } = await import("../ai/config");
-  const { usePreferencesStore } = await import("@/modules/settings/preferences");
+  const { usePreferencesStore } = await import(
+    "@/modules/settings/preferences"
+  );
   const endpoints = usePreferencesStore.getState().customEndpoints;
   return resolveModelLabel(modelId, endpoints);
 }
@@ -813,10 +821,16 @@ async function waitForReply(
         if (stopReason === "step-cap") {
           await sleep(signal, 2000);
           const afterWait = store.useChatStore.getState().agentMeta;
-          if (afterWait.status === "thinking" || afterWait.status === "streaming") {
+          if (
+            afterWait.status === "thinking" ||
+            afterWait.status === "streaming"
+          ) {
             continue;
           }
-          if (afterWait.stopReason === "step-cap" && afterWait.status === "idle") {
+          if (
+            afterWait.stopReason === "step-cap" &&
+            afterWait.status === "idle"
+          ) {
             return "Step limit reached. Use /continue or the Continue button to proceed.";
           }
         }
@@ -852,9 +866,8 @@ async function publishProgress(
 ): Promise<void> {
   const store = await import("../ai/store/chatStore");
   const todosStore = await import("../ai/store/todoStore");
-  const { extractToolSummaries, formatLiveProgress, resolveModelLabel } = await import(
-    "./progressFormat"
-  );
+  const { extractToolSummaries, formatLiveProgress, resolveModelLabel } =
+    await import("./progressFormat");
   let progressMessageId: number | null = null;
   let lastLiveText = "";
   let lastSentAt = 0;
@@ -958,8 +971,12 @@ async function publishProgress(
         // Re-send the bubble; also refresh the progress text with the live
         // status so it visibly ticks even when the tool trail is empty.
         await sendTyping(chatId, signal).catch(() => {});
-        await editProgressMessage(chatId, progressMessageId, liveText, signal)
-          .catch(() => {});
+        await editProgressMessage(
+          chatId,
+          progressMessageId,
+          liveText,
+          signal,
+        ).catch(() => {});
       }
 
       // Surface pending approvals as interactive inline buttons in Telegram
@@ -973,8 +990,14 @@ async function publishProgress(
               { text: "Deny", callback_data: `${prefix}:deny:${p.id}` },
             ],
             [
-              { text: "Allow session", callback_data: `${prefix}:session:${p.id}` },
-              { text: "Allow always", callback_data: `${prefix}:always:${p.id}` },
+              {
+                text: "Allow session",
+                callback_data: `${prefix}:session:${p.id}`,
+              },
+              {
+                text: "Allow always",
+                callback_data: `${prefix}:always:${p.id}`,
+              },
             ],
           ];
           await sendKeyboard(
@@ -1326,8 +1349,14 @@ async function runAgentAndStream(
         let currentBaseline = baseline;
         let stopReasonSnapshot: string | null = null;
         while (!signal.aborted) {
-          const reply = await waitForReply(store, signal, sessionId, currentBaseline);
-          stopReasonSnapshot = store.useChatStore.getState().agentMeta.stopReason;
+          const reply = await waitForReply(
+            store,
+            signal,
+            sessionId,
+            currentBaseline,
+          );
+          stopReasonSnapshot =
+            store.useChatStore.getState().agentMeta.stopReason;
           await sendReplyWithDiagrams(chatId, reply, signal);
 
           // Immediately mark fresh assistant message(s) as seen and Telegram-origin.
@@ -1341,7 +1370,8 @@ async function runAgentAndStream(
 
           currentBaseline = countAssistantMessages(store.getChat, sessionId);
 
-          const queued = store.useChatStore.getState().steerQueue.pending.length > 0;
+          const queued =
+            store.useChatStore.getState().steerQueue.pending.length > 0;
           const appStatus = store.useChatStore.getState().agentMeta.status;
           const chatStatus = store.getChat(sessionId)?.status ?? "";
           const aqStore = await import("../ai/store/approvalQueueStore");
@@ -1350,7 +1380,11 @@ async function runAgentAndStream(
             store,
             aqStore.useApprovalQueue,
           );
-          const busy = runBusy(chatStatus, appStatus, pendingApprovals.length > 0);
+          const busy = runBusy(
+            chatStatus,
+            appStatus,
+            pendingApprovals.length > 0,
+          );
 
           if (!queued && !busy) break;
 
@@ -1391,7 +1425,11 @@ async function runAgentAndStream(
             ],
             signal,
           ).catch(() => {});
-        } else if (stopReason && stopReason !== "step-cap" && statusAfterWait === "idle") {
+        } else if (
+          stopReason &&
+          stopReason !== "step-cap" &&
+          statusAfterWait === "idle"
+        ) {
           await sendTelegram(
             chatId,
             `Agent paused (${stopReason}). Reply with /continue or your next instruction to proceed.`,
@@ -1453,7 +1491,8 @@ function startTelegramResume(chatId: number, signal: AbortSignal): void {
       const store = await import("../ai/store/chatStore");
       const runtime = await import("../ai/store/chatRuntime");
       const sessionId = store.useChatStore.getState().activeSessionId;
-      const pendingSteer = store.useChatStore.getState().steerQueue.pending.length > 0;
+      const pendingSteer =
+        store.useChatStore.getState().steerQueue.pending.length > 0;
       if (pendingSteer) {
         await sendTelegram(
           chatId,
@@ -1463,14 +1502,12 @@ function startTelegramResume(chatId: number, signal: AbortSignal): void {
         return;
       }
       if (!sessionId) {
-        await sendTelegram(
-          chatId,
-          "No active session to resume.",
-          signal,
-        );
+        await sendTelegram(chatId, "No active session to resume.", signal);
         return;
       }
-      const chatStatus = sessionId ? store.getChat(sessionId)?.status ?? "" : "";
+      const chatStatus = sessionId
+        ? (store.getChat(sessionId)?.status ?? "")
+        : "";
       const appStatus = store.useChatStore.getState().agentMeta.status;
       const aqStore = await import("../ai/store/approvalQueueStore");
       const pendingApprovals = getPendingApprovals(
@@ -1487,11 +1524,7 @@ function startTelegramResume(chatId: number, signal: AbortSignal): void {
         ).catch(() => {});
         return;
       }
-      await sendTelegram(
-        chatId,
-        `Resuming...`,
-        signal,
-      ).catch(() => {});
+      await sendTelegram(chatId, `Resuming...`, signal).catch(() => {});
       await sendTyping(chatId, signal).catch(() => {});
       await runAgentAndStream(() => runtime.resumeRun(), chatId, signal);
     } catch (e) {
@@ -1529,7 +1562,9 @@ async function startTelegramDispatch(
     const runtime = await import("../ai/store/chatRuntime");
     const sessionId = store.useChatStore.getState().activeSessionId;
     const appStatus = store.useChatStore.getState().agentMeta.status;
-    const chatStatus = sessionId ? store.getChat(sessionId)?.status ?? "" : "";
+    const chatStatus = sessionId
+      ? (store.getChat(sessionId)?.status ?? "")
+      : "";
     const busy = runBusy(chatStatus, appStatus);
 
     if (busy) {
@@ -1601,9 +1636,7 @@ async function resolveModelInput(id: string): Promise<string | null> {
 
   const eps = usePreferencesStore.getState().customEndpoints;
   if (isCompatModelId(trimmed)) {
-    const match = eps.find(
-      (ep) => compatModelIdForEndpoint(ep.id) === trimmed,
-    );
+    const match = eps.find((ep) => compatModelIdForEndpoint(ep.id) === trimmed);
     if (match) return trimmed;
   }
   const epMatch = eps.find(
@@ -1615,7 +1648,6 @@ async function resolveModelInput(id: string): Promise<string | null> {
   if (epMatch) return compatModelIdForEndpoint(epMatch.id);
   return null;
 }
-
 
 /** Mark the currently-selected model in the model keyboard with a check. */
 function markModelButtons(
@@ -1700,13 +1732,20 @@ async function handleCallback(
     const { setDefaultModel } = await import("@/modules/settings/store");
     void setDefaultModel(resolved);
     await answerCallback(cb.id, `Model set to ${resolved}`, signal);
-    await editKeyboard(chatId, messageId, `Model set to ${resolved}.`, [], signal);
+    await editKeyboard(
+      chatId,
+      messageId,
+      `Model set to ${resolved}.`,
+      [],
+      signal,
+    );
     return;
   }
 
   if (data.startsWith("ap:")) {
     const [, action, id] = data.split(":");
-    const approved = action === "approve" || action === "session" || action === "always";
+    const approved =
+      action === "approve" || action === "session" || action === "always";
     const state = await import("../ai/store/chatStore");
     state.useChatStore.getState().respondToApproval(id, approved);
     // Allow session / allow always also record the tool so future calls skip the prompt.
@@ -1722,7 +1761,8 @@ async function handleCallback(
           aqStore.rememberSessionAllowed(tool);
           const settingsStore = await import("../settings/store");
           const prefs = await import("../settings/preferences");
-          const list = prefs.usePreferencesStore.getState().agentAlwaysAllowedTools;
+          const list =
+            prefs.usePreferencesStore.getState().agentAlwaysAllowedTools;
           if (!list.includes(tool)) {
             settingsStore.setAgentAlwaysAllowedTools([...list, tool]);
           }
@@ -1748,7 +1788,8 @@ async function handleCallback(
   if (data.startsWith("aq:")) {
     const [, action, id] = data.split(":");
     const aq = await import("../ai/store/approvalQueueStore");
-    const approved = action === "approve" || action === "session" || action === "always";
+    const approved =
+      action === "approve" || action === "session" || action === "always";
     if (action === "session") {
       aq.useApprovalQueue.getState().respondWith([id], "allow-session");
     } else if (action === "always") {
@@ -1918,7 +1959,9 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
     }
     case "/new": {
       const state = await import("../ai/store/chatStore");
-      state.useChatStore.getState().newSession(chatId, msg.message_thread_id ?? null);
+      state.useChatStore
+        .getState()
+        .newSession(chatId, msg.message_thread_id ?? null);
       await sendTelegram(chatId, "New agent session started.", signal);
       return;
     }
