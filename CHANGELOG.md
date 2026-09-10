@@ -4,9 +4,109 @@ All notable changes to Termigo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-The last tagged public release before this cycle was **v0.9.5**; v0.9.6 and
-v0.9.7 were built and validated locally but never tagged. **v0.9.8** therefore
-carries everything shipped since v0.9.5.
+## [Unreleased] - 0.9.11
+
+### Added
+
+- **Telegram relay - major UX overhaul**
+  - Hermes-style progress output: compact one-line step summaries with tool
+    call counts, elapsed time, and todo checklist; past tasks auto-hidden to
+    keep the chat clean.
+  - `/continue` command and inline button so the agent can resume past the
+    step-cap without leaving the phone.
+  - `/approve`, `Allow session`, and `Allow always` inline approval buttons -
+    the approval request is now never silent: the bot always posts the pending
+    action and waits for a tap rather than hanging invisibly.
+  - `/model` shows an interactive provider + model picker including custom
+    endpoints (e.g. StepFun, Qwen/DashScope) by friendly name.
+  - Live typing indicator runs concurrently with agent dispatch so the chat
+    never appears frozen during long steps.
+  - Agent-pause notifications surface immediately when the agent stops between
+    step-cap rounds.
+  - Rich Markdown-to-Telegram formatting: tables converted to monospace
+    preformatted blocks, fenced code blocks, bold headings.
+  - `/pair` and `/unpair` commands; owner ID from secrets enables auto-enable
+    in headless environments without an interactive GUI.
+  - All progress labels, callbacks, and status messages translated to English.
+
+- **Custom/compat model endpoints as default model**
+  - `Preferences.defaultModelId` now accepts `compat-*` IDs (custom OpenAI-
+    compatible endpoints such as StepFun or Qwen/DashScope) - previously any
+    compat model saved as the default was silently reverted to the built-in
+    default on next launch.
+  - `getModel()` no longer throws on unknown IDs - returns a safe fallback
+    instead of crashing React hydration and taking down the Telegram bot.
+  - `useAiBootstrap` validates the stored default model ID on launch and falls
+    back gracefully when the stored value references a deleted or renamed
+    endpoint.
+  - `/model` command in the Telegram bot resolves raw endpoint names and model
+    IDs (e.g. `step-3.7-flash`) to the correct compat ID before persisting.
+  - The Default Model picker in Settings now shows custom endpoints in a
+    dedicated option group.
+
+- **Headless / VPS deployment**
+  - `scripts/deploy-termigo.sh`: safe deploy with automatic smoke-test
+    (memory threshold + Telegram connection check) and rollback on failure.
+  - `scripts/termigo-watchdog.sh`: systemd-friendly watchdog that restarts
+    the service if the Telegram connection drops.
+  - `scripts/run-headless.sh`: Xvfb + dbus-run-session launcher with WebKit
+    compositing and DMA-BUF renderer disabled for GPU-less servers.
+  - Deploy guard: `deploy-termigo.sh` refuses to interrupt a running agent
+    unless `--force` is passed.
+  - `termigo.service` systemd unit template included in `scripts/`.
+  - `docs/headless-vps.md`: full VPS deployment guide updated to use
+    `pnpm tauri build --no-bundle` (raw `cargo build` skips frontend bundling
+    and produces a non-functional binary).
+
+- **AI agent**
+  - Vision-capable model routing: sub-agents that need to read images are
+    automatically dispatched to a vision-capable model.
+  - Autonomous continuous execution: agent runs multiple rounds without
+    manual `/continue` when in auto-approve mode.
+  - Instant context-overflow recovery.
+
+- **Security**
+  - Rust IPC boundary enforces a deny-list for secret paths: any `read_file`,
+    `write_file`, or `stat` call targeting `secrets.json` or the OS keychain
+    paths is rejected at the IPC layer before reaching the filesystem.
+
+### Fixed
+
+- **Telegram**
+  - `resolveModelLabel` now resolves compat endpoint IDs to human-readable
+    labels using the correct async import path.
+  - Approval hang: bot now extracts pending approvals directly from the active
+    chat message queue, so the agent never hangs silently awaiting a tap.
+  - "Action Approved via Telegram" banner removed from the Termigo chat after
+    an approval is granted via bot.
+  - Live progress kept visibly alive during long steps with continuous
+    message-edit pings.
+  - Continue button used ASCII `->` instead of an emoji (fixes rendering on
+    some Telegram clients).
+
+- **AI model / compat**
+  - `loadPreferences()` no longer silently reverts a compat model ID to the
+    built-in default - fixes Telegram bot going silent after a restart when
+    `defaultModelId` is a custom endpoint.
+  - React hydration no longer crashes when `defaultModelId` references an
+    endpoint that was renamed or deleted.
+
+- **Build / deploy**
+  - `deploy-termigo.sh --build` now calls `pnpm tauri build --no-bundle`
+    instead of `npx tauri build`, ensuring `beforeBuildCommand` (frontend
+    bundle) runs correctly.
+  - `docs/headless-vps.md` corrected: replace `cargo build --release` with
+    `pnpm tauri build --no-bundle` to produce a working binary.
+  - `scripts/run-headless.sh` always picks the freshest termigo binary on
+    restart.
+
+- **AI agent**
+  - Subagent input schema normalisation and todo payload repair.
+  - Budget auto-continue hardened; trajectory ghost approval cards reconciled.
+  - Collapsed-turn bloat trimmed: stale tail results elided and duplicate
+    reads within one message deduplicated.
+  - `git commit` execution made robust with line-ending reconciliation and
+    idempotent `mkdir`.
 
 ## [0.9.10] - 2026-09-07
 

@@ -20,6 +20,8 @@
     <img src="https://img.shields.io/github/license/99apps-id/termigo?color=blue" alt="license" />
     <img src="https://img.shields.io/badge/runtime-no%20Electron-brightgreen" alt="no Electron" />
     <img src="https://img.shields.io/badge/telemetry-none-blue" alt="no telemetry" />
+    <a href="https://github.com/99apps-id/termigo/actions/workflows/ci.yml"><img src="https://github.com/99apps-id/termigo/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+    <a href="https://github.com/99apps-id/termigo/releases/latest"><img src="https://img.shields.io/github/v/release/99apps-id/termigo" alt="latest release" /></a>
   </p>
 </div>
 
@@ -232,22 +234,33 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   your phone: it drives Termigo's own in-app agent and streams live progress
   (the current step, the loop round, the task checklist and approvals) plus the
   final answer back, so a task, its edits, approvals and memory all behave
-  exactly as if you had typed in the chat. Configured in Settings → Agents →
+  exactly as if you had typed in the chat. Configured in Settings - Agents -
   Telegram relay (the token lives in the OS keychain, never a settings file).
   The bot answers `/status`, `/help`, `/query <question>`, `/run <task>`,
-  `/stop`, `/new`, `/model` (an interactive provider → model picker for the
-  models active in Termigo, including custom endpoints such as StepFun) and
-  `/cost`, and shows a live status chip in the AI status bar. Just type a
-  question or task directly — no `/query` prefix needed. It long-polls
-  from the desktop app, so it is only reachable while Termigo is open.
+  `/stop`, `/new`, `/continue`, `/approve`, `/model` (an interactive provider
+  + model picker for the models active in Termigo, including custom endpoints
+  such as StepFun and Qwen/DashScope) and `/cost`, and shows a live status
+  chip in the AI status bar. Just type a question or task directly - no
+  `/query` prefix needed. It long-polls from the desktop app, so it is only
+  reachable while Termigo is open.
+  - **Approvals never hang silently**: when the agent needs a click, the bot
+    posts the pending action with `Allow session`, `Allow always`, and `Deny`
+    inline buttons. No more typing `/approve` without knowing why.
+  - **Step-cap continuation**: `/continue` (or the inline button) resumes the
+    agent past the 25-step default without leaving Telegram.
+  - **Custom endpoint models**: `/model` resolves raw model names and endpoint
+    IDs (e.g. `step-3.7-flash`) to the correct compat ID and persists the
+    choice as the new default.
   Conversations mirror both ways, and a diagram the agent draws (a fenced
   Mermaid block) is rasterised and posted as a picture along with any report
   file it previewed (`preview_file`), so graphs and finished reports show up
   on your phone too. While a run is in flight the bot keeps a live
-  "typing…" indicator in the chat (alongside the status / step / todo
-  stream), and messages it injected are never echoed back — the mirror is
+  "typing..." indicator in the chat (alongside the status / step / todo
+  stream), and messages it injected are never echoed back - the mirror is
   paused before a Telegram dispatch is submitted, so you never see your own
   text twice.
+  For headless / always-on deployment (e.g. a VPS running 24/7), see
+  [`docs/headless-vps.md`](docs/headless-vps.md).
 - **Deleting is never delegated.** No mode speaks for you here, including
   `Auto-approve all`: `delete_file` always asks, and so does any command that
   removes files — `rm`, `rmdir`, `git clean`, `find -delete`, PowerShell's
@@ -424,16 +437,22 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
 
 ```bash
 pnpm install
-pnpm tauri:dev       # development
-pnpm tauri build     # production bundle
+pnpm tauri dev       # development (starts vite + Tauri)
+pnpm tauri build     # production bundle (MSI + NSIS on Windows, AppImage + deb on Linux)
 ```
+
+> **VPS / headless:** see [`docs/headless-vps.md`](docs/headless-vps.md) for the
+> Xvfb + systemd setup. Always use `pnpm tauri build --no-bundle` on the server -
+> raw `cargo build` skips the frontend and produces a non-functional binary.
 
 Checks:
 
 ```bash
-pnpm check-types     # tsc --noEmit
-pnpm test            # vitest
-cd src-tauri && cargo clippy --all-targets -- -D warnings && cargo test
+pnpm check-types          # tsc --noEmit
+pnpm lint                 # biome lint
+pnpm test                 # vitest
+pnpm check:commands       # guard: all invoke() names are registered in Rust
+cd src-tauri && cargo clippy --all-targets -- -D warnings && cargo nextest run
 ```
 
 ### Windows notes
