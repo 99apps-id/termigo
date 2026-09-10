@@ -794,7 +794,19 @@ async function waitForReply(
     } else {
       const err = store.useChatStore.getState().agentMeta.error;
       if (err) {
-        return `Run ended with an error: ${err}`;
+        const fresh = lastAssistantText(store.getChat, sessionId, baseline);
+        if (fresh) {
+          return fresh;
+        }
+        const sanitized = String(err).trim();
+        if (
+          sanitized.includes("content you provided") ||
+          sanitized.includes("machine outputted") ||
+          sanitized.includes("blocked")
+        ) {
+          return "The provider blocked the request or response. Please rephrase or switch model in Settings → Providers.";
+        }
+        return `Run ended with an error: ${sanitized}`;
       }
       if (everBusy && !busy) {
         const stopReason = store.useChatStore.getState().agentMeta.stopReason;
