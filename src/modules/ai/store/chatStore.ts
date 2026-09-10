@@ -33,6 +33,7 @@ import {
   saveRunInFlight,
   saveRunMeta,
   saveSessionsList,
+  sessionKey,
 } from "../lib/sessions";
 import {
   EMPTY_QUEUE,
@@ -266,7 +267,7 @@ type StoreState = {
   sessions: SessionMeta[];
   activeSessionId: string | null;
   hydrateSessions: () => Promise<void>;
-  newSession: () => string;
+  newSession: (chatId?: number, threadId?: number | null) => string;
   switchSession: (id: string) => void;
   deleteSession: (id: string) => void;
   renameSession: (id: string, title: string) => void;
@@ -589,7 +590,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
     });
   },
 
-  newSession: () => {
+  newSession: (chatId?: number, threadId?: number | null) => {
     notifySessionLeft(get().activeSessionId);
     const id = newSessionId();
     const meta: SessionMeta = {
@@ -597,6 +598,8 @@ export const useChatStore = create<StoreState>((set, get) => ({
       title: "New chat",
       createdAt: Date.now(),
       updatedAt: Date.now(),
+      chatId,
+      threadId,
     };
     const next = [meta, ...get().sessions];
     set({ sessions: next, activeSessionId: id, agentMeta: IDLE_META });
@@ -705,6 +708,18 @@ export const useChatStore = create<StoreState>((set, get) => ({
     void saveSessionsList(next);
   },
 }));
+
+export function resolveChatSession(chatId: number, threadId?: number | null) {
+  const key = sessionKey(chatId, threadId);
+  const session = useChatStore.getState().sessions.find((s) => sessionKey(s.chatId ?? 0, s.threadId) === key);
+  return session?.id ?? null;
+}
+
+export async function ensureChatSession(chatId: number, threadId?: number | null) {
+  const existing = resolveChatSession(chatId, threadId);
+  if (existing) return existing;
+  return useChatStore.getState().newSession(chatId, threadId);
+}
 
 export function getAgentMeta(): AgentMeta {
   return useChatStore.getState().agentMeta;

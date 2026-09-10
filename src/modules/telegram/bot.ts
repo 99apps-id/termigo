@@ -9,6 +9,7 @@
 import { getTelegramToken } from "./keyring";
 import { markdownToTelegramHtml, summarizeToolInput } from "./progressFormat";
 import { useTelegramStore } from "./store";
+import { ensureChatSession } from "../ai/store/chatStore";
 
 const API = "https://api.telegram.org";
 
@@ -39,11 +40,12 @@ type Update = {
     chat: { id: number };
     from?: { id: number };
     text?: string;
+    message_thread_id?: number | null;
   };
   callback_query?: {
     id: string;
     from?: { id: number };
-    message?: { chat: { id: number }; message_id?: number };
+    message?: { chat: { id: number }; message_id?: number; message_thread_id?: number | null };
     data?: string;
   };
 };
@@ -1450,7 +1452,6 @@ function startTelegramResume(chatId: number, signal: AbortSignal): void {
     try {
       const store = await import("../ai/store/chatStore");
       const runtime = await import("../ai/store/chatRuntime");
-      const { stepBudgetForRound } = await import("../ai/config");
       const sessionId = store.useChatStore.getState().activeSessionId;
       const pendingSteer = store.useChatStore.getState().steerQueue.pending.length > 0;
       if (pendingSteer) {
@@ -1486,7 +1487,6 @@ function startTelegramResume(chatId: number, signal: AbortSignal): void {
         ).catch(() => {});
         return;
       }
-      const currentRound = store.useChatStore.getState().agentMeta.runRound;
       await sendTelegram(
         chatId,
         `Resuming...`,
@@ -1875,6 +1875,7 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
           "Usage: /query <question>",
           signal,
         ));
+      await ensureChatSession(chatId, msg.message_thread_id ?? null);
       startTelegramDispatch(
         tail,
         chatId,
@@ -1887,6 +1888,7 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
     case "/run": {
       if (!tail)
         return void (await sendTelegram(chatId, "Usage: /run <task>", signal));
+      await ensureChatSession(chatId, msg.message_thread_id ?? null);
       startTelegramDispatch(
         tail,
         chatId,
@@ -1899,10 +1901,12 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
     case "/continue":
     case "/resume":
     case "/next": {
+      await ensureChatSession(chatId, msg.message_thread_id ?? null);
       startTelegramResume(chatId, signal);
       return;
     }
     case "/stop": {
+      await ensureChatSession(chatId, msg.message_thread_id ?? null);
       const runtime = await import("../ai/store/chatRuntime");
       await runtime.stopRun();
       await sendTelegram(
@@ -1914,7 +1918,7 @@ async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
     }
     case "/new": {
       const state = await import("../ai/store/chatStore");
-      state.useChatStore.getState().newSession();
+      state.useChatStore.getState().newSession(chatId, msg.message_thread_id ?? null);
       await sendTelegram(chatId, "New agent session started.", signal);
       return;
     }
