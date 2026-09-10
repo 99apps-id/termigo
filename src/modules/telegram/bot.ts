@@ -807,6 +807,17 @@ async function waitForReply(
         return `Run ended with an error: ${err}`;
       }
       if (everBusy && !busy) {
+        const stopReason = store.useChatStore.getState().agentMeta.stopReason;
+        if (stopReason === "step-cap") {
+          await sleep(signal, 2000);
+          const afterWait = store.useChatStore.getState().agentMeta;
+          if (afterWait.status === "thinking" || afterWait.status === "streaming") {
+            continue;
+          }
+          if (afterWait.stopReason === "step-cap" && afterWait.status === "idle") {
+            return "Step limit reached. Use /continue or the Continue button to proceed.";
+          }
+        }
         return "Run produced no text output.";
       }
       if (!busy && Date.now() - started > 25_000) {
@@ -1311,8 +1322,10 @@ async function runAgentAndStream(
         }
 
         let currentBaseline = baseline;
+        let stopReasonSnapshot: string | null = null;
         while (!signal.aborted) {
           const reply = await waitForReply(store, signal, sessionId, currentBaseline);
+          stopReasonSnapshot = store.useChatStore.getState().agentMeta.stopReason;
           await sendReplyWithDiagrams(chatId, reply, signal);
 
           // Immediately mark fresh assistant message(s) as seen and Telegram-origin.
@@ -1355,7 +1368,9 @@ async function runAgentAndStream(
         // block is the fallback for cases where publishProgress was already
         // aborted before the cap was detected.
         await sleep(signal, 1800);
-        const stopReason = store.useChatStore.getState().agentMeta.stopReason;
+        const stopReason =
+          stopReasonSnapshot ??
+          store.useChatStore.getState().agentMeta.stopReason;
         const statusAfterWait = store.useChatStore.getState().agentMeta.status;
         if (stopReason === "step-cap" && statusAfterWait === "idle") {
           const currentRound = store.useChatStore.getState().agentMeta.runRound;
