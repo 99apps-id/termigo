@@ -1452,6 +1452,15 @@ function startTelegramResume(chatId: number, signal: AbortSignal): void {
       const runtime = await import("../ai/store/chatRuntime");
       const { stepBudgetForRound } = await import("../ai/config");
       const sessionId = store.useChatStore.getState().activeSessionId;
+      const pendingSteer = store.useChatStore.getState().steerQueue.pending.length > 0;
+      if (pendingSteer) {
+        await sendTelegram(
+          chatId,
+          "Ada pesan tertunda. Tunggu selesai, atau pakai /new untuk mulai baru.",
+          signal,
+        ).catch(() => {});
+        return;
+      }
       if (!sessionId) {
         await sendTelegram(
           chatId,
