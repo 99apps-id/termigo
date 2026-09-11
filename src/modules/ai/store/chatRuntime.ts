@@ -938,6 +938,11 @@ export async function resumeRun(): Promise<boolean> {
     stopLatch.delete(sessionId);
     approvalResumeFailureCount.delete(sessionId);
   }
+  // Clear approval-gate state so the run can actually continue after /approve.
+  useChatStore.getState().patchAgentMeta({
+    status: "thinking",
+    pendingApprovals: undefined,
+  });
   // Continuing is the signal that the task is heavier than one round, so the
   // next round gets the next budget tier. Raised before the send so the run
   // reads the new value.
