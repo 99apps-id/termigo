@@ -70,7 +70,39 @@ kill %1 2>/dev/null
 
 ## 3. Deployment & Service
 
-Place the binary in `/opt/termigo/` and install the systemd service:
+Place the binary in `/opt/termigo/` and install the systemd service.
+
+### 3.1 systemd unit
+
+The repo ships `scripts/termigo.service`. Install it as `/etc/systemd/system/termigo.service`:
+
+```ini
+[Unit]
+Description=Termigo Headless AI Telegram Relay
+After=network.target
+
+[Service]
+Type=simple
+User=admin
+WorkingDirectory=/opt/termigo
+ExecStart=/opt/termigo/scripts/run-headless.sh
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+LimitNOFILE=65536
+MemoryHigh=2G
+MemoryMax=2560M
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo cp /opt/termigo/scripts/termigo.service /etc/systemd/system/termigo.service
+```
+
+### 3.2 Binary deployment
 
 ```bash
 # Stop existing service
