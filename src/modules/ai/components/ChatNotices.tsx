@@ -156,6 +156,12 @@ export function stopCopy(
         hint: "The agent kept hitting a failing tool. Check the command/path it was trying, then continue.",
         action: "Continue anyway",
       };
+    case "tool-only-loop":
+      return {
+        text: "Stopped: the model asked for tools repeatedly without producing a final answer.",
+        hint: "Try rephrasing the request, or review whether the available tools match the task.",
+        action: "Continue anyway",
+      };
     case "cost-cap":
       return {
         text: "Stopped: reached the maximum cost budget for this run.",
@@ -172,6 +178,8 @@ export function stopCopy(
         hint: "Your progress is preserved. Resume to pick up where it stopped.",
         action: "Resume",
       };
+    default:
+      return { text: "Run stopped.", action: "Resume" };
   }
 }
 

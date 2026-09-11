@@ -748,7 +748,8 @@ export type AgentStopReason =
   | "cost-cap"
   | "steered"
   | "aborted"
-  | "interrupted";
+  | "interrupted"
+  | "tool-only-loop";
 
 export type AgentUsage = {
   inputTokens: number;
