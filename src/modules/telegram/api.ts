@@ -1,7 +1,7 @@
 // Telegram API helpers and media senders for the bot relay.
 
 import { getTelegramToken } from "./keyring";
-import { markdownToTelegramHtml } from "./progressFormat";
+import { escapePlainTextToHtml, markdownToTelegramHtml } from "./progressFormat";
 
 export const API = "https://api.telegram.org";
 
@@ -138,10 +138,22 @@ export function sleep(signal: AbortSignal, ms: number): Promise<void> {
 export function splitTelegramText(text: string, maxLen = 4000): string[] {
   if (text.length <= maxLen) return [text];
   const chunks: string[] = [];
-  let start = 0;
-  while (start < text.length) {
-    chunks.push(text.slice(start, start + maxLen));
-    start += maxLen;
+  let remaining = text;
+  while (remaining.length > 0) {
+    if (remaining.length <= maxLen) {
+      chunks.push(remaining);
+      break;
+    }
+    let cut = remaining.lastIndexOf("\n", maxLen);
+    if (cut <= 0) {
+      cut = remaining.lastIndexOf(" ", maxLen);
+    }
+    if (cut <= 0) {
+      cut = maxLen;
+    }
+    const chunk = remaining.slice(0, cut).trimEnd();
+    if (chunk.length > 0) chunks.push(chunk);
+    remaining = remaining.slice(cut).trimStart();
   }
   return chunks;
 }
@@ -151,9 +163,23 @@ export async function sendTelegram(
   text: string,
   signal: AbortSignal,
 ): Promise<void> {
-  const chunks = splitTelegramText(markdownToTelegramHtml(text));
+  const chunks = splitTelegramText(text);
   for (const chunk of chunks) {
-    await apiPost("sendMessage", { chat_id: chatId, text: chunk, parse_mode: "HTML" }, signal);
+    if (signal.aborted) break;
+    const html = markdownToTelegramHtml(chunk);
+    try {
+      await apiPost(
+        "sendMessage",
+        { chat_id: chatId, text: html, parse_mode: "HTML" },
+        signal,
+      );
+    } catch {
+      await apiPost(
+        "sendMessage",
+        { chat_id: chatId, text: escapePlainTextToHtml(chunk), parse_mode: "HTML" },
+        signal,
+      );
+    }
   }
 }
 
@@ -161,14 +187,35 @@ export async function sendProgressMessage(
   chatId: number | string,
   text: string,
   signal: AbortSignal,
-): Promise<number> {
-  const res = await apiPost<{ result: { message_id: number } }>("sendMessage", {
-    chat_id: chatId,
-    text: markdownToTelegramHtml(text),
-    parse_mode: "HTML",
-    disable_notification: true,
-  }, signal);
-  return res.result.message_id;
+): Promise<number | null> {
+  const html = markdownToTelegramHtml(text);
+  try {
+    const res = (await apiPost<{ result: { message_id?: number } }>(
+      "sendMessage",
+      {
+        chat_id: chatId,
+        text: html,
+        parse_mode: "HTML",
+        disable_notification: true,
+      },
+      signal,
+    )) as { ok?: boolean; result?: { message_id?: number } };
+    return res?.result?.message_id ?? null;
+  } catch {
+    try {
+      const res = (await apiPost<{ result: { message_id?: number } }>(
+        "sendMessage",
+        {
+          chat_id: chatId,
+          text,
+        },
+        signal,
+      )) as { ok?: boolean; result?: { message_id?: number } };
+      return res?.result?.message_id ?? null;
+    } catch {
+      return null;
+    }
+  }
 }
 
 export async function editProgressMessage(
@@ -176,14 +223,33 @@ export async function editProgressMessage(
   messageId: number,
   text: string,
   signal: AbortSignal,
-): Promise<void> {
+): Promise<boolean> {
   const html = markdownToTelegramHtml(text);
-  await apiPost("editMessageText", {
-    chat_id: chatId,
-    message_id: messageId,
-    text: html,
-    parse_mode: "HTML",
-  }, signal);
+  const tryPost = async (body: { text: string; parse_mode?: string }) => {
+    return (await apiPost(
+      "editMessageText",
+      {
+        chat_id: chatId,
+        message_id: messageId,
+        ...body,
+      },
+      signal,
+    )) as { ok?: boolean };
+  };
+
+  try {
+    const res = await tryPost({ text: html, parse_mode: "HTML" });
+    if (res?.ok) return true;
+  } catch {
+    // fall through to plain-text fallback
+  }
+
+  try {
+    const res = await tryPost({ text: escapePlainTextToHtml(text) });
+    return !!res?.ok;
+  } catch {
+    return false;
+  }
 }
 
 export async function deleteTelegramMessage(
