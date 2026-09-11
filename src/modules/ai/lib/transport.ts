@@ -161,6 +161,9 @@ type Deps = {
   getOpenrouterModelId?: () => string | undefined;
   getCustomEndpoints?: () => readonly CustomEndpoint[];
   getCustomEndpointKeys?: () => CustomEndpointKeys;
+  /** Registry model id -> provider-side model id, so a vendor rename is a
+   *  setting change rather than an app release (see `resolveApiModelId`). */
+  getModelIdOverrides?: () => Readonly<Record<string, string>>;
   onStep?: (step: string | null) => void;
   /** Fires at the start of every agentic-loop round (each `sendMessages`), so
    *  the UI can surface "Round N" and a user can tell a run is progressing. */
@@ -409,6 +412,7 @@ export function createContextAwareTransport(deps: Deps) {
       openrouterModelId: deps.getOpenrouterModelId?.(),
       customEndpoints: deps.getCustomEndpoints?.(),
       customEndpointKeys: deps.getCustomEndpointKeys?.(),
+      modelIdOverrides: deps.getModelIdOverrides?.(),
       planMode: deps.getPlanMode?.(),
       stepBudget: deps.getStepBudget?.(),
       costBudgetUsd: deps.getCostBudgetUsd?.(),

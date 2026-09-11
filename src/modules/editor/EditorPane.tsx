@@ -412,6 +412,7 @@ export const EditorPane = memo(
               ollamaBaseURL: s.ollamaBaseURL,
               openaiCompatibleBaseURL:
                 compatEp?.baseURL ?? s.openaiCompatibleBaseURL,
+              modelIdOverrides: s.modelIdOverrides,
             };
           },
           getPath: () => pathRef.current,

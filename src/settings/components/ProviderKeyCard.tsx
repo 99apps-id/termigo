@@ -3,8 +3,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
-import type { ProviderInfo } from "@/modules/ai/config";
 import {
+  type ModelInfo,
+  type ProviderInfo,
+  resolveApiModelId,
+} from "@/modules/ai/config";
+import {
+  ArrowDown01Icon,
   ArrowUpRight01Icon,
   Cancel01Icon,
   CheckmarkCircle02Icon,
@@ -23,6 +28,11 @@ type Props = {
   onSave: (key: string) => Promise<void>;
   onClear: () => Promise<void>;
   onRemove?: () => void;
+  /** Registry models this provider offers, so each wire id is editable. */
+  models?: readonly ModelInfo[];
+  /** Registry model id -> provider-side id. */
+  modelIdOverrides?: Readonly<Record<string, string>>;
+  onSetModelIdOverride?: (modelId: string, apiModelId: string) => void;
 };
 
 function maskKey(key: string): string {
@@ -36,12 +46,16 @@ export function ProviderKeyCard({
   onSave,
   onClear,
   onRemove,
+  models,
+  modelIdOverrides,
+  onSetModelIdOverride,
 }: Props) {
   const [editing, setEditing] = useState(!currentKey);
   const [value, setValue] = useState("");
   const [reveal, setReveal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showModels, setShowModels] = useState(false);
 
   useEffect(() => {
     setEditing(!currentKey);
@@ -203,6 +217,111 @@ export function ProviderKeyCard({
             </Button>
           ) : null}
         </div>
+      )}
+
+      {models && models.length > 0 && onSetModelIdOverride ? (
+        <div className="flex flex-col gap-1.5 border-t border-border/40 pt-1.5">
+          <button
+            type="button"
+            onClick={() => setShowModels((v) => !v)}
+            className="flex items-center gap-1 text-[10.5px] text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <HugeiconsIcon
+              icon={ArrowDown01Icon}
+              size={11}
+              strokeWidth={2}
+              className={cn("transition-transform", showModels && "rotate-180")}
+            />
+            Model IDs
+            {hasAnyOverride(models, modelIdOverrides) ? (
+              <span className="text-[10px] text-foreground/70">· edited</span>
+            ) : null}
+          </button>
+          {showModels ? (
+            <div className="flex flex-col gap-1.5">
+              <p className="text-[10.5px] leading-relaxed text-muted-foreground/80">
+                {provider.label} renames models over time. The id below is what
+                a request actually sends; change it when a model is renamed
+                without waiting for an app update. Clear it to use the built-in
+                default.
+              </p>
+              {models.map((m) => (
+                <ModelIdRow
+                  key={m.id}
+                  model={m}
+                  override={modelIdOverrides?.[m.id] ?? ""}
+                  onChange={(v) => onSetModelIdOverride(m.id, v)}
+                />
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** True when at least one of this provider's models has an override set. */
+function hasAnyOverride(
+  models: readonly ModelInfo[],
+  overrides?: Readonly<Record<string, string>>,
+): boolean {
+  if (!overrides) return false;
+  return models.some((m) => (overrides[m.id] ?? "").trim().length > 0);
+}
+
+function ModelIdRow({
+  model,
+  override,
+  onChange,
+}: {
+  model: ModelInfo;
+  override: string;
+  onChange: (value: string) => void;
+}) {
+  const fallback = resolveApiModelId(model.id);
+  const [draft, setDraft] = useState(override);
+  useEffect(() => setDraft(override), [override]);
+
+  const commit = () => {
+    const v = draft.trim();
+    if (v === override) return;
+    onChange(v);
+  };
+
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-32 shrink-0 truncate text-[11px] text-muted-foreground">
+        {model.label}
+      </span>
+      <Input
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            commit();
+          } else if (e.key === "Escape") {
+            setDraft(override);
+          }
+        }}
+        placeholder={fallback}
+        spellCheck={false}
+        className="h-7 flex-1 font-mono text-[11px]"
+      />
+      {override && override !== fallback ? (
+        <Button
+          size="icon"
+          variant="ghost"
+          onClick={() => onChange("")}
+          title="Reset to default"
+          className="size-7 text-muted-foreground hover:text-foreground"
+        >
+          <HugeiconsIcon icon={Cancel01Icon} size={12} strokeWidth={1.75} />
+        </Button>
+      ) : (
+        <span className="size-7 shrink-0" />
       )}
     </div>
   );

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   type CustomEndpoint,
+  apiModelIdDiffers,
   compatModelIdForEndpoint,
   endpointIdFromCompatModel,
   getModelContextLimit,
@@ -13,8 +14,10 @@ import {
   modelKeepsReasoning,
   modelSupportsTemperature,
   modelUsesReasoningTokens,
+  resolveApiModelId,
   resolveModel,
   resolveModelContextLimit,
+  resolveModelLabel,
   stepBudgetForRound,
   subagentModelExceedsBudget,
 } from "./config";
@@ -272,5 +275,86 @@ describe("resolveModelContextLimit", () => {
 
   it("leaves a first-class model at its configured limit", () => {
     expect(resolveModelContextLimit("claude-opus-4-7", [])).toBe(1_000_000);
+  });
+});
+
+describe("resolveApiModelId", () => {
+  it("returns the registry id for an ordinary model", () => {
+    expect(resolveApiModelId("claude-opus-4-7")).toBe("claude-opus-4-7");
+    expect(apiModelIdDiffers("claude-opus-4-7")).toBe(false);
+  });
+
+  it("uses the registry apiModelId when it differs from the id", () => {
+    // The chatgpt-* ids are internal; the Codex backend wants the bare name.
+    expect(resolveApiModelId("chatgpt-codex")).toBe("gpt-5.3-codex");
+    expect(apiModelIdDiffers("chatgpt-codex")).toBe(true);
+  });
+
+  it("lets a user override win over the registry apiModelId", () => {
+    expect(
+      resolveApiModelId("deepseek-v4-flash", {
+        "deepseek-v4-flash": "deepseek-flash-latest",
+      }),
+    ).toBe("deepseek-flash-latest");
+  });
+
+  it("ignores a blank override so clearing the field restores the default", () => {
+    expect(resolveApiModelId("deepseek-v4-flash", { "deepseek-v4-flash": " " }))
+      .toBe("deepseek-flash");
+  });
+
+  it("passes a compat model id through untouched", () => {
+    const mid = compatModelIdForEndpoint("stepfun");
+    expect(resolveApiModelId(mid, { [mid]: "nope" })).toBe(mid);
+    expect(apiModelIdDiffers(mid)).toBe(false);
+  });
+
+  it("returns an unknown id unchanged rather than guessing", () => {
+    expect(resolveApiModelId("some-future-model")).toBe("some-future-model");
+  });
+});
+
+describe("DeepSeek model registry", () => {
+  it("lists the current line-up and drops the retired reasoner", () => {
+    const ids = MODELS.filter((m) => m.provider === "deepseek").map(
+      (m) => m.id,
+    );
+    expect(ids).toContain("deepseek-v4-pro");
+    expect(ids).toContain("deepseek-v4-flash");
+    expect(ids).not.toContain("deepseek-reasoner");
+  });
+
+  it("sends the renamed everyday tier as deepseek-flash", () => {
+    expect(resolveApiModelId("deepseek-v4-flash")).toBe("deepseek-flash");
+    expect(resolveApiModelId("deepseek-v4-pro")).toBe("deepseek-v4-pro");
+  });
+
+  it("keeps pricing and context limits keyed by the stable registry id", () => {
+    expect(MODEL_PRICING["deepseek-v4-flash"]).toBeDefined();
+    expect(getModelContextLimit("deepseek-v4-flash")).toBe(1_000_000);
+  });
+});
+
+describe("resolveModelLabel", () => {
+  it("does not repeat the brand in the label", () => {
+    expect(resolveModelLabel("deepseek-v4-pro")).toBe("DeepSeek V4 Pro");
+  });
+
+  it("appends the wire id only when it differs", () => {
+    expect(resolveModelLabel("deepseek-v4-flash")).toBe(
+      "DeepSeek Flash (deepseek-flash)",
+    );
+    expect(
+      resolveModelLabel("deepseek-v4-flash", [], {
+        "deepseek-v4-flash": "deepseek-flash-2",
+      }),
+    ).toBe("DeepSeek Flash (deepseek-flash-2)");
+  });
+
+  it("keeps a compat endpoint's own name and model id as the label", () => {
+    const mid = compatModelIdForEndpoint(endpoint.id);
+    expect(resolveModelLabel(mid, [endpoint], {})).toBe(
+      "My LLM llama-3.3-70b",
+    );
   });
 });

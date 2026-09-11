@@ -70,4 +70,28 @@ describe("buildModelGroups", () => {
     );
     expect(groups.find((x) => x.key === "endpoint:stepfun")).toBeDefined();
   });
+
+  it("shows the provider-side id when it differs from the registry id", () => {
+    const groups = buildModelGroups(
+      input({
+        models: [
+          { id: "deepseek-v4-flash", provider: "openai", label: "DeepSeek Flash" },
+        ],
+        apiModelIdFor: (id) =>
+          id === "deepseek-v4-flash" ? "deepseek-flash" : id,
+      }),
+    );
+    expect(groups[0].models).toEqual([
+      { id: "deepseek-v4-flash", label: "DeepSeek Flash (deepseek-flash)" },
+    ]);
+  });
+
+  it("leaves the label alone when the wire id matches", () => {
+    const groups = buildModelGroups(
+      input({ apiModelIdFor: (id) => id }),
+    );
+    expect(groups.find((g) => g.key === "openai")?.models).toEqual([
+      { id: "gpt-5.6", label: "GPT-5.6 Sol" },
+    ]);
+  });
 });

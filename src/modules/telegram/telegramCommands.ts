@@ -86,6 +86,7 @@ export async function buildStatus(): Promise<string> {
 export async function buildProviderGroups(): Promise<ProviderGroup[]> {
   const { MODELS, PROVIDERS, isCompatModelId, compatModelIdForEndpoint } =
     await import("../ai/config");
+  const { resolveApiModelId } = await import("../ai/config");
   const { usePreferencesStore } = await import(
     "@/modules/settings/preferences"
   );
@@ -98,6 +99,8 @@ export async function buildProviderGroups(): Promise<ProviderGroup[]> {
     return PROVIDERS.find((p) => p.id === id)?.label ?? id;
   };
 
+  const overrides = usePreferencesStore.getState().modelIdOverrides;
+
   return buildModelGroups({
     models: MODELS,
     providerLabel,
@@ -107,6 +110,7 @@ export async function buildProviderGroups(): Promise<ProviderGroup[]> {
     customEndpoints: usePreferencesStore.getState().customEndpoints,
     isCompatModelId,
     compatModelIdForEndpoint,
+    apiModelIdFor: (modelId: string) => resolveApiModelId(modelId, overrides),
   });
 }
 
@@ -130,9 +134,8 @@ export const HELP = [
 ].join("\n");
 
 export async function resolveModelInput(id: string): Promise<string | null> {
-  const { MODELS, isCompatModelId, compatModelIdForEndpoint } = await import(
-    "../ai/config"
-  );
+  const { MODELS, isCompatModelId, compatModelIdForEndpoint, resolveApiModelId } =
+    await import("../ai/config");
   const { usePreferencesStore } = await import(
     "@/modules/settings/preferences"
   );
@@ -141,7 +144,16 @@ export async function resolveModelInput(id: string): Promise<string | null> {
   const direct = MODELS.find((m) => m.id.toLowerCase() === lower);
   if (direct) return direct.id;
 
-  const eps = usePreferencesStore.getState().customEndpoints;
+  const prefs = usePreferencesStore.getState();
+  // Accept the provider-side id too (e.g. `/model deepseek-flash`), since that
+  // is the name the vendor documents and the one the user reads in the picker.
+  const byApiId = MODELS.find(
+    (m) =>
+      resolveApiModelId(m.id, prefs.modelIdOverrides).toLowerCase() === lower,
+  );
+  if (byApiId) return byApiId.id;
+
+  const eps = prefs.customEndpoints;
   if (isCompatModelId(trimmed)) {
     const match = eps.find((ep) => compatModelIdForEndpoint(ep.id) === trimmed);
     if (match) return trimmed;
@@ -239,14 +251,9 @@ export async function handleCallback(
     state.useChatStore.getState().setSelectedModelId(resolved);
     const { setDefaultModel } = await import("@/modules/settings/store");
     await setDefaultModel(resolved).catch(() => {});
-    await answerCallback(cb.id, `Model set to ${resolved}`, signal);
-    await editKeyboard(
-      chatId,
-      messageId,
-      `Model set to ${resolved}.`,
-      [],
-      signal,
-    );
+    const settled = await modelLabel(resolved);
+    await answerCallback(cb.id, `Model set to ${settled}`, signal);
+    await editKeyboard(chatId, messageId, `Model set to ${settled}.`, [], signal);
     return;
   }
 
@@ -488,6 +495,7 @@ export async function handleUpdate(u: Update, signal: AbortSignal): Promise<void
       const state = await import("../ai/store/chatStore");
       if (!tail) {
         const current = state.useChatStore.getState().selectedModelId;
+        const currentLabel = await modelLabel(current);
         const groups = await buildProviderGroups();
         const keyboard = groups.map((g) => [
           { text: g.label, callback_data: `mp:${g.key}` },
@@ -495,14 +503,14 @@ export async function handleUpdate(u: Update, signal: AbortSignal): Promise<void
         if (keyboard.length === 0) {
           await sendTelegram(
             chatId,
-            `Current model: ${current}\n\nNo other providers are configured.`,
+            `Current model: ${currentLabel}\n\nNo other providers are configured.`,
             signal,
           );
           return;
         }
         await sendKeyboard(
           chatId,
-          `Current model: ${current}\n\nChoose a provider:`,
+          `Current model: ${currentLabel}\n\nChoose a provider:`,
           keyboard,
           signal,
         );
@@ -520,7 +528,11 @@ export async function handleUpdate(u: Update, signal: AbortSignal): Promise<void
       state.useChatStore.getState().setSelectedModelId(resolved);
       const { setDefaultModel } = await import("@/modules/settings/store");
       await setDefaultModel(resolved).catch(() => {});
-      await sendTelegram(chatId, `Model set to ${resolved}.`, signal);
+      await sendTelegram(
+        chatId,
+        `Model set to ${await modelLabel(resolved)}.`,
+        signal,
+      );
       return;
     }
     case "/cost": {

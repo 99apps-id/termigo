@@ -66,6 +66,7 @@ import {
   setLmstudioModelId,
   setMlxBaseURL,
   setMlxModelId,
+  setModelIdOverrides,
   setOllamaBaseURL,
   setOllamaModelId,
   setOpenaiCompatibleBaseURL,
@@ -169,6 +170,7 @@ export function ModelsSection() {
   );
   const openrouterModelId = usePreferencesStore((s) => s.openrouterModelId);
   const customEndpoints = usePreferencesStore((s) => s.customEndpoints);
+  const modelIdOverrides = usePreferencesStore((s) => s.modelIdOverrides);
 
   useEffect(() => {
     void getAllKeys().then(setKeys);
@@ -441,6 +443,14 @@ export function ModelsSection() {
                   onSave={(v) => onSaveKey(p.id, v)}
                   onClear={() => onClearKey(p.id)}
                   onRemove={() => removeProvider(p.id)}
+                  models={MODELS.filter((m) => m.provider === p.id)}
+                  modelIdOverrides={modelIdOverrides}
+                  onSetModelIdOverride={(modelId, apiModelId) => {
+                    const next = { ...modelIdOverrides };
+                    if (apiModelId.trim()) next[modelId] = apiModelId.trim();
+                    else delete next[modelId];
+                    void setModelIdOverrides(next);
+                  }}
                 />
               );
             })}

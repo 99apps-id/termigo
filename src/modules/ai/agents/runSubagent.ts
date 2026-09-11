@@ -197,6 +197,7 @@ export async function runSubagent({
     openrouterModelId: prefs.openrouterModelId,
     customEndpoints: prefs.customEndpoints,
     customEndpointKeys: useChatStore.getState().customEndpointKeys,
+    modelIdOverrides: prefs.modelIdOverrides,
   });
 
   // A hung provider (no first token) used to leave a sub-agent on its step

@@ -891,6 +891,9 @@ export function useSourceControlPanel(
           openaiCompatibleBaseURL,
           openaiCompatibleModelId,
           openrouterModelId,
+          modelIdOverrides: prefs.modelIdOverrides,
+          customEndpoints: prefs.customEndpoints,
+          customEndpointKeys: chatState.customEndpointKeys,
         },
       );
       const result = await generateText({

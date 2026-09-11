@@ -147,6 +147,7 @@ export async function answerSideQuestion(
     openrouterModelId: prefs.openrouterModelId,
     customEndpoints: prefs.customEndpoints,
     customEndpointKeys,
+    modelIdOverrides: prefs.modelIdOverrides,
   });
 
   const transcript = renderTranscript(messages);

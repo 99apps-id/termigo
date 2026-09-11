@@ -711,7 +711,7 @@ export function resolveApiModelId(
   if (isCompatModelId(modelId)) return modelId;
   const override = overrides[modelId]?.trim();
   if (override) return override;
-  const m = MODELS.find((x) => x.id === modelId);
+  const m: ModelInfo | undefined = MODELS.find((x) => x.id === modelId);
   return m?.apiModelId?.trim() || modelId;
 }
 
@@ -726,22 +726,36 @@ export function apiModelIdDiffers(
   );
 }
 
+/**
+ * A human label for a model id, with the wire id when the two differ.
+ *
+ * The provider prefix is dropped when the model's own label already carries the
+ * brand ("DeepSeek DeepSeek Flash" reads like a bug), and the provider-side id
+ * is appended only when it is not what the registry calls the model - the case
+ * where a request fails with an unknown model.
+ */
 export function resolveModelLabel(
   modelId: string,
   endpoints: readonly CustomEndpoint[] = [],
   overrides: Readonly<Record<string, string>> = {},
 ): string {
-  const info = resolveModel(modelId, endpoints);
-  const base =
-    [PROVIDERS.find((p) => p.id === info.provider)?.label, info.label]
-      .filter(Boolean)
-      .join(" ") || modelId;
-  // A compat endpoint's label already IS its wire id; for a built-in model whose
-  // wire id differs (a vendor rename or a user override) both are worth showing,
-  // because the wire id is the one that fails when it is wrong.
-  const wire = isCompatModelId(modelId)
-    ? ""
-    : resolveApiModelId(modelId, overrides);
+  // A compat endpoint has no registry metadata: its own name and model id are
+  // the label, and "OpenAI Compatible" would say less than the endpoint does.
+  if (isCompatModelId(modelId)) {
+    const ep = endpoints.find(
+      (e) => e.id === endpointIdFromCompatModel(modelId),
+    );
+    return [ep?.name, ep?.modelId].filter(Boolean).join(" ") || modelId;
+  }
+  const info = resolveModel(modelId);
+  const providerLabel = PROVIDERS.find((p) => p.id === info.provider)?.label;
+  const branded =
+    providerLabel &&
+    !info.label.toLowerCase().startsWith(providerLabel.toLowerCase())
+      ? `${providerLabel} ${info.label}`
+      : info.label;
+  const base = branded || modelId;
+  const wire = resolveApiModelId(modelId, overrides);
   return wire && wire !== modelId ? `${base} (${wire})` : base;
 }
 
@@ -981,7 +995,6 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
   "grok-build-0.1": { input: 1, output: 2 },
   "deepseek-v4-pro": { input: 0.28, output: 1.1, cacheRead: 0.028 },
   "deepseek-v4-flash": { input: 0.07, output: 0.27, cacheRead: 0.007 },
-  "deepseek-reasoner": { input: 0.55, output: 2.19, cacheRead: 0.14 },
 };
 
 export function estimateCost(

@@ -33,26 +33,24 @@ function collapseWhitespace(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
+/**
+ * The label shown for the active model in Telegram, resolved through the same
+ * function the rest of the app uses so a renamed model reads the same in the
+ * progress bubble, `/status` and the `/model` picker. Appends the provider-side
+ * id when it differs from the registry id (a vendor rename, or a user override
+ * set in Settings).
+ */
 export async function resolveModelLabel(modelId?: string): Promise<string> {
   if (!modelId) return "";
   try {
-    const { MODELS, isCompatModelId, endpointIdFromCompatModel } = await import(
-      "../ai/config"
+    const { resolveModelLabel: label } = await import("../ai/config");
+    const prefs = await import("../settings/preferences");
+    const state = prefs?.usePreferencesStore?.getState?.();
+    return label(
+      modelId,
+      state?.customEndpoints ?? [],
+      state?.modelIdOverrides ?? {},
     );
-    const m = MODELS.find((x: any) => x.id === modelId);
-    if (m) {
-      return [m.provider, m.label].filter(Boolean).join(" ") || modelId;
-    }
-    if (isCompatModelId(modelId)) {
-      const eid = endpointIdFromCompatModel(modelId);
-      const prefs = await import("../settings/preferences");
-      const endpoints =
-        prefs?.usePreferencesStore?.getState?.()?.customEndpoints ?? [];
-      const custom = endpoints.find((ep: any) => ep.id === eid);
-      const name = custom?.name || "";
-      const mid = custom?.modelId || "";
-      return [name, mid].filter(Boolean).join(" ") || modelId;
-    }
   } catch {
     // fallback: return raw id
   }

@@ -4,6 +4,7 @@ import {
   LMSTUDIO_DEFAULT_BASE_URL,
   modelSupportsTemperature,
   modelUsesReasoningTokens,
+  resolveApiModelId,
 } from "@/modules/ai/config";
 import { buildLanguageModel } from "@/modules/ai/lib/agent";
 import { EMPTY_PROVIDER_KEYS } from "@/modules/ai/lib/keyring";
@@ -22,6 +23,8 @@ export type CompletionDeps = {
   mlxBaseURL?: string;
   ollamaBaseURL?: string;
   openaiCompatibleBaseURL?: string;
+  /** Registry model id -> provider-side id, so a renamed model still works. */
+  modelIdOverrides?: Readonly<Record<string, string>>;
 };
 
 const MAX_OUTPUT_TOKENS_DEFAULT = 128;
@@ -41,12 +44,17 @@ export async function requestCompletion(
     throw new Error(`No autocomplete model id set for ${deps.provider}.`);
   }
   const keys = { ...EMPTY_PROVIDER_KEYS, [deps.provider]: deps.apiKey };
-  const model = await buildLanguageModel(deps.provider, keys, modelId, {
-    lmstudioBaseURL: deps.lmstudioBaseURL || LMSTUDIO_DEFAULT_BASE_URL,
-    mlxBaseURL: deps.mlxBaseURL,
-    ollamaBaseURL: deps.ollamaBaseURL,
-    openaiCompatibleBaseURL: deps.openaiCompatibleBaseURL,
-  });
+  const model = await buildLanguageModel(
+    deps.provider,
+    keys,
+    resolveApiModelId(modelId, deps.modelIdOverrides),
+    {
+      lmstudioBaseURL: deps.lmstudioBaseURL || LMSTUDIO_DEFAULT_BASE_URL,
+      mlxBaseURL: deps.mlxBaseURL,
+      ollamaBaseURL: deps.ollamaBaseURL,
+      openaiCompatibleBaseURL: deps.openaiCompatibleBaseURL,
+    },
+  );
 
   const isReasoning = modelUsesReasoningTokens(deps.provider, modelId);
   const providerOptions = isReasoning

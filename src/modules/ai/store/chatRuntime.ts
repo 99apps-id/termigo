@@ -378,6 +378,8 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       usePreferencesStore.getState().openrouterModelId,
     getCustomEndpoints: () => usePreferencesStore.getState().customEndpoints,
     getCustomEndpointKeys: () => useChatStore.getState().customEndpointKeys,
+    getModelIdOverrides: () =>
+      usePreferencesStore.getState().modelIdOverrides,
     // Queue size, so the run can yield at the next step when a NEW task is typed
     // while it works (see getSteerCount in the transport).
     getSteerCount: () => useChatStore.getState().steerQueue.pending.length,

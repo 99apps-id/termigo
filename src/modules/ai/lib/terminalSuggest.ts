@@ -92,6 +92,7 @@ async function callModel(
     openrouterModelId: prefs.openrouterModelId,
     customEndpoints: prefs.customEndpoints,
     customEndpointKeys,
+    modelIdOverrides: prefs.modelIdOverrides,
   });
   const { text } = await generateText({
     model,

@@ -25,6 +25,10 @@ export type ModelGroupsInput = {
   customEndpoints: readonly EndpointLike[];
   isCompatModelId: (id: string) => boolean;
   compatModelIdForEndpoint: (id: string) => string;
+  /** Registry model id -> the id the provider actually accepts. Shown next to
+   *  the friendly label whenever the two differ (a vendor rename, or a user
+   *  override in Settings), because the wire id is the one that fails. */
+  apiModelIdFor?: (modelId: string) => string;
 };
 
 const LOCAL_PROVIDERS = new Set(["ollama", "lmstudio", "mlx"]);
@@ -39,7 +43,14 @@ export function buildModelGroups(input: ModelGroupsInput): ProviderGroup[] {
     customEndpoints,
     isCompatModelId,
     compatModelIdForEndpoint,
+    apiModelIdFor,
   } = input;
+
+  // "DeepSeek Flash (deepseek-flash)" when the wire id differs, else the label.
+  const labelFor = (m: BuiltinLike): string => {
+    const wire = apiModelIdFor?.(m.id);
+    return wire && wire !== m.id ? `${m.label} (${wire})` : m.label;
+  };
 
   const currentProvider = isCompatModelId(current)
     ? "openai-compatible"
@@ -60,7 +71,7 @@ export function buildModelGroups(input: ModelGroupsInput): ProviderGroup[] {
       seen.set(m.provider, g);
       groups.push(g);
     }
-    g.models.push({ id: m.id, label: m.label });
+    g.models.push({ id: m.id, label: labelFor(m) });
   }
 
   // A user-defined OpenAI-compatible endpoint (e.g. StepFun) is its own group

@@ -157,6 +157,16 @@ export type Preferences = {
   openaiCompatibleContextLimit: number;
   customEndpoints: CustomEndpoint[];
   openrouterModelId: string;
+  /**
+   * Registry model id -> the id sent to the provider.
+   *
+   * Vendors rename models on their own schedule (DeepSeek retired
+   * `deepseek-reasoner` and serves `deepseek-flash`), and a hardcoded id is
+   * wrong the week it changes. The registry keeps a stable id as the key for
+   * saved selections and pricing; this remaps what actually goes on the wire,
+   * so a rename costs a correction in Settings rather than a release.
+   */
+  modelIdOverrides: Record<string, string>;
   /** How much the agent may do without stopping for approval. */
   agentApprovalMode: ApprovalMode;
   /**
@@ -361,6 +371,7 @@ const KEY_OPENAI_COMPAT_BASE_URL = "openaiCompatibleBaseURL";
 const KEY_OPENAI_COMPAT_MODEL_ID = "openaiCompatibleModelId";
 const KEY_OPENAI_COMPAT_CONTEXT_LIMIT = "openaiCompatibleContextLimit";
 const KEY_CUSTOM_ENDPOINTS = "customEndpoints";
+const KEY_MODEL_ID_OVERRIDES = "modelIdOverrides";
 const KEY_OPENROUTER_MODEL_ID = "openrouterModelId";
 const KEY_AGENT_APPROVAL_MODE = "agentApprovalMode";
 const KEY_AGENT_ALWAYS_ALLOWED_TOOLS = "agentAlwaysAllowedTools";
@@ -473,6 +484,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   openaiCompatibleModelId: "",
   openaiCompatibleContextLimit: 128_000,
   customEndpoints: [],
+  modelIdOverrides: {},
   openrouterModelId: "",
   agentApprovalMode: DEFAULT_APPROVAL_MODE,
   agentAlwaysAllowedTools: [],
@@ -710,6 +722,16 @@ export async function loadPreferences(): Promise<Preferences> {
     openrouterModelId:
       get<string>(KEY_OPENROUTER_MODEL_ID) ??
       DEFAULT_PREFERENCES.openrouterModelId,
+    modelIdOverrides: (() => {
+      const stored = get<Record<string, unknown>>(KEY_MODEL_ID_OVERRIDES);
+      const out: Record<string, string> = {};
+      for (const [key, value] of Object.entries(stored ?? {})) {
+        if (typeof value === "string" && value.trim()) {
+          out[key] = value.trim();
+        }
+      }
+      return out;
+    })(),
     agentApprovalMode:
       get<ApprovalMode>(KEY_AGENT_APPROVAL_MODE) ??
       DEFAULT_PREFERENCES.agentApprovalMode,
@@ -1037,6 +1059,25 @@ export async function setOpenrouterModelId(value: string): Promise<void> {
   await writePref(KEY_OPENROUTER_MODEL_ID, value);
 }
 
+/**
+ * Replace the model-id override map.
+ *
+ * Stored whole rather than per-entry so the caller (which already holds the
+ * current map from the preferences store) is the single writer, and blank
+ * entries are dropped so clearing a field restores the registry default.
+ */
+export async function setModelIdOverrides(
+  value: Record<string, string>,
+): Promise<void> {
+  const cleaned: Record<string, string> = {};
+  for (const [key, raw] of Object.entries(value)) {
+    const id = key.trim();
+    const apiModelId = raw.trim();
+    if (id && apiModelId) cleaned[id] = apiModelId;
+  }
+  await writePref(KEY_MODEL_ID_OVERRIDES, cleaned);
+}
+
 export async function setAgentApprovalMode(value: ApprovalMode): Promise<void> {
   await writePref(KEY_AGENT_APPROVAL_MODE, value);
 }
@@ -1362,6 +1403,7 @@ export async function onPreferencesChange(
     [KEY_OPENAI_COMPAT_MODEL_ID]: "openaiCompatibleModelId",
     [KEY_OPENAI_COMPAT_CONTEXT_LIMIT]: "openaiCompatibleContextLimit",
     [KEY_CUSTOM_ENDPOINTS]: "customEndpoints",
+    [KEY_MODEL_ID_OVERRIDES]: "modelIdOverrides",
     [KEY_OPENROUTER_MODEL_ID]: "openrouterModelId",
     [KEY_STT_PROVIDER]: "sttProvider",
     [KEY_GROQ_STT_MODEL]: "groqSttModel",

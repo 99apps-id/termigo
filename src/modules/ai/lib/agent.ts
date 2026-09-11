@@ -35,6 +35,7 @@ import {
   OLLAMA_DEFAULT_BASE_URL,
   type ProviderId,
   providerNeedsKey,
+  resolveApiModelId,
   resolveModel,
   selectSystemPrompt,
 } from "../config";
@@ -372,6 +373,9 @@ export type LocalProviderConfig = {
   openrouterModelId?: string;
   customEndpoints?: readonly CustomEndpoint[];
   customEndpointKeys?: CustomEndpointKeys;
+  /** Registry model id -> provider-side model id. Lets a vendor rename a model
+   *  without a release (see `config.resolveApiModelId`). */
+  modelIdOverrides?: Readonly<Record<string, string>>;
 };
 
 export function buildConfiguredLanguageModel(
@@ -395,11 +399,10 @@ export function buildConfiguredLanguageModel(
     );
   }
   const m = resolveModel(modelId);
-  let resolvedId: string = m.id;
-  // The chatgpt-* ids are internal (they avoid colliding with the same-named
-  // key-billed OpenAI models); the Codex backend expects the bare model name.
-  if (m.id === "chatgpt-codex") resolvedId = "gpt-5.3-codex";
-  else if (m.id === "chatgpt-codex-mini") resolvedId = "gpt-5.3-codex-mini";
+  // The registry id is internal; the wire id comes from the model's own
+  // `apiModelId` (e.g. the chatgpt-* ids map to the bare Codex names) and can be
+  // overridden by the user when a vendor renames a model.
+  let resolvedId: string = resolveApiModelId(m.id, local.modelIdOverrides);
   if (m.id === "lmstudio-local") {
     if (!local.lmstudioModelId?.trim()) {
       throw new Error(
@@ -902,6 +905,8 @@ export type RunAgentOptions = {
   openrouterModelId?: string;
   customEndpoints?: readonly CustomEndpoint[];
   customEndpointKeys?: CustomEndpointKeys;
+  /** Registry model id -> provider-side model id, read from preferences. */
+  modelIdOverrides?: Readonly<Record<string, string>>;
   planMode?: boolean;
   projectMemory?: string | null;
   /** Facts the agent recorded in earlier sessions (.termigo/memory.md). */
@@ -947,6 +952,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
     openrouterModelId: opts.openrouterModelId,
     customEndpoints: opts.customEndpoints,
     customEndpointKeys: opts.customEndpointKeys,
+    modelIdOverrides: opts.modelIdOverrides,
   });
   const endpoints = opts.customEndpoints ?? [];
   const info = resolveModel(modelId, endpoints);
