@@ -8,7 +8,11 @@
 
 import { ensureChatSession } from "../ai/store/chatStore";
 import { getTelegramToken } from "./keyring";
-import { markdownToTelegramHtml, summarizeToolInput } from "./progressFormat";
+import {
+  escapePlainTextToHtml,
+  markdownToTelegramHtml,
+  summarizeToolInput,
+} from "./progressFormat";
 import { useTelegramStore } from "./store";
 
 const API = "https://api.telegram.org";
@@ -75,6 +79,7 @@ const seenFingerprints = new Set<string>();
 const telegramOriginMessageIds = new Set<string>();
 const recentTelegramPrompts = new Map<string, number>();
 const sentApprovalIds = new Set<string>();
+const TELEGRAM_ORIGIN_MAX = 500;
 
 function recordTelegramText(text: string): void {
   const norm = text.trim();
@@ -106,20 +111,20 @@ function markMessageSeen(
 ): void {
   if (id) {
     seenMessageIds.add(id);
-    if (seenMessageIds.size > 2000) {
-      for (const item of seenMessageIds) {
-        seenMessageIds.delete(item);
-        break;
-      }
+    while (seenMessageIds.size > 2000) {
+      const iter = seenMessageIds.values();
+      const first = iter.next();
+      if (first.done) break;
+      seenMessageIds.delete(first.value);
     }
   }
   const fp = `${sessionId}:${role}:${id ?? text.slice(0, 80)}`;
   seenFingerprints.add(fp);
-  if (seenFingerprints.size > 2000) {
-    for (const item of seenFingerprints) {
-      seenFingerprints.delete(item);
-      break;
-    }
+  while (seenFingerprints.size > 2000) {
+    const iter = seenFingerprints.values();
+    const first = iter.next();
+    if (first.done) break;
+    seenFingerprints.delete(first.value);
   }
 }
 
@@ -297,7 +302,11 @@ async function sendTelegram(
         signal,
       );
     } catch {
-      await apiPost("sendMessage", { chat_id: chatId, text: chunk }, signal);
+      await apiPost(
+        "sendMessage",
+        { chat_id: chatId, text: escapePlainTextToHtml(chunk), parse_mode: "HTML" },
+        signal,
+      );
     }
   }
 }
@@ -1343,6 +1352,12 @@ async function runAgentAndStream(
           if (m.id && !priorIds.has(m.id)) {
             markMessageSeen(m.id, sessionId, m.role, messageText(m));
             telegramOriginMessageIds.add(m.id);
+            while (telegramOriginMessageIds.size > TELEGRAM_ORIGIN_MAX) {
+              const iter = telegramOriginMessageIds.values();
+              const first = iter.next();
+              if (first.done) break;
+              telegramOriginMessageIds.delete(first.value);
+            }
           }
         }
 

@@ -96,9 +96,9 @@ export const useApprovalQueue = create<ApprovalQueueState>((set, get) => ({
       const expiryTimer = setTimeout(() => {
         if (!settled) {
           settle("deny");
-          void logWarn(
+          console.warn(
             `[ai] approval auto-expired after ${ttlMs}ms id=${entry.id} tool=${entry.toolName}`,
-          ).catch(() => {});
+          );
         }
       }, ttlMs);
 

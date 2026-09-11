@@ -253,7 +253,12 @@ export function escapeHtml(text: string): string {
   return text
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+    .replace(/>/g, "&gt;")
+}
+
+/** Convert plain text for Telegram HTML parse_mode without interpreting markdown. */
+export function escapePlainTextToHtml(text: string): string {
+  return escapeHtml(text).replace(/\n/g, "<br>");
 }
 
 /**
