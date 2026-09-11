@@ -180,7 +180,7 @@ Place your custom model endpoints, providers, and agent preferences in `termigo-
   "customEndpoints": [
     {
       "id": "15292c18",
-      "label": "deepseek-v4-flash",
+      "label": "deepseek-flash",
       "provider": "deepseek",
       "baseURL": "https://api.deepseek.com/v1",
       "apiKey": "<REDACTED>"

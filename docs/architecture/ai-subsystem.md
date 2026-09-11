@@ -20,6 +20,19 @@ Cloud providers are defined in `src/modules/ai/config.ts`:
 
 Model metadata (context limits, costs, reasoning behavior) lives in the model registry in `config.ts`. `resolveModel` maps a model id to its provider and defaults.
 
+### Renamed models and the API model id
+
+Vendors rename their models on their own schedule: DeepSeek retired `deepseek-reasoner` and now serves `deepseek-flash` / `deepseek-v4-pro`. A hardcoded id is therefore wrong the week it changes, and wrong in a shipped binary.
+
+The registry therefore separates two ids:
+
+- **`ModelInfo.id`** is the stable registry key. Saved selections, favourites, recents, `MODEL_PRICING` and `MODEL_CONTEXT_LIMITS` all key off it, so it never has to change.
+- **`ModelInfo.apiModelId`** is what actually goes on the wire. The `chatgpt-*` entries use it to map to the bare Codex names.
+
+`resolveApiModelId(modelId, overrides)` is the single resolution point, with the precedence **user override > `apiModelId` > registry id**. `modelIdOverrides` is a preference (Settings → Models → a provider → *Model IDs*), so a rename costs a correction rather than a release. Every path that builds a model passes it through: `runAgentStream`, sub-agents, side questions, terminal suggest, inline autocomplete and commit-message generation.
+
+`resolveModelLabel(modelId, endpoints, overrides)` renders the display label and appends the wire id only when the two differ (`DeepSeek Flash (deepseek-flash)`); Telegram's `/model`, `/status` and progress bubble all go through it.
+
 ### Adding a new provider
 
 1. Add a `ProviderInfo` entry to `PROVIDERS` in `src/modules/ai/config.ts`.
@@ -246,6 +259,7 @@ On a remote SSH session the tool refuses and points at the composed path (`bash_
 
 - Keep the Vercel AI SDK v6 chat shape (`streamText`, tools, step limits); the rest of the UI depends on it.
 - Keys only via `secrets_*` commands; never disk, settings store, or `localStorage`.
+- A model id sent to a provider comes from `resolveApiModelId`; never hardcode one at a call site, or a vendor rename needs a release.
 - New providers must justify their bundle cost and unique value.
 - Mutating tools require approval; read-only tools still pass the deny-list.
 - Deleting is never delegated: no approval mode may skip `delete_file` or a command that removes files.

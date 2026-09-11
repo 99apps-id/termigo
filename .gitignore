@@ -39,6 +39,7 @@ src-tauri/binaries/
 clippy.out
 clippy.err
 build-*.log
+tsc-*.txt
 
 # Local audit and portable-build scratch artifacts
 lint-*.txt
