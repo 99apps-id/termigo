@@ -4,6 +4,41 @@ All notable changes to Termigo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.9.12 - 2026-09-11
+
+### Security
+
+- **Go CLI / MCP server hardening (9 audit findings addressed)**
+  - **F-01 CRITICAL**: `EvalCommand` in benchmark dataset now requires an
+    allow-listed base command (`grep`, `wc`, `diff`, `find`, `sed`, `awk`,
+    `jq`, `cat`, `ls`, `echo`, `python3`, `node`, `go`, etc.) and rejects
+    shell metacharacters before execution. Previously any command in a JSONL
+    dataset was executed verbatim via `sh -c` / `cmd /c`.
+  - **F-05 MEDIUM**: `LoadDataset` and `Run` enforce workspace containment,
+    preventing path-traversal datasets such as `--dataset /etc/shadow`.
+  - **F-02 HIGH**: `validateShellCommand` in the Go MCP server now blocks
+    `;`, `&&`, `||`, `|`, `$(...)`, backticks, and `${...}` in addition to
+    the existing CR/LF, bidi-override, `rm -rf`, `dd`, `mkfs`, fork-bomb,
+    and `curl|sh` checks.
+  - **F-03 HIGH**: Windows control-plane liveness probe now uses a TCP
+    reachability check to the descriptor address instead of signal-based
+    `processAlive`, which always returned `true` on Windows and allowed stale
+    descriptor token replay.
+  - **F-04 HIGH**: `.termigo/mcp.json` `command` fields are validated against
+    an allow-list of trusted executables (`npx`, `uvx`, `bunx`, `node`,
+    `python3`, `go`, `bun`, `deno`, `npm`, `pnpm`, `yarn`, `java`, `ruby`,
+    `rustc`, `cargo`) in both the Go CLI and the Tauri Rust backend,
+    preventing supply-chain backdoors via project registries.
+  - **F-06 MEDIUM**: Ollama endpoint validation now restricts HTTP to
+    `localhost`, `127.0.0.1`, and `::1`; HTTPS is allowed for remote
+    endpoints. Cross-host redirects are blocked.
+  - **F-07 MEDIUM**: Preview address bar `probeUrl` now validates protocol
+    (`http:`/`https:` only) and blocks private/internal IPv4 ranges
+    (`10/8`, `172.16/12`, `192.168/16`, `127/8`, `169.254/16`) and IPv6
+    loopback/link-local/unique-local addresses over HTTP.
+  - **F-08 LOW**: Documented the intentionally `unsafe` macOS Objective-C
+    block that disables press-and-hold in `main.rs`.
+
 ## [Unreleased] - 0.9.11
 
 ### Added
