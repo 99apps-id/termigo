@@ -275,6 +275,20 @@ describe("progressFormat", () => {
       expect(result).toContain("└─");
       expect(result).toContain("Semua layanan terdeteksi.");
     });
+
+    it("does not emit unsupported <blockquote> tags", () => {
+      const input = "> quote block\n> another line";
+      const result = markdownToTelegramHtml(input);
+      expect(result).not.toContain("<blockquote>");
+      expect(result).toContain("&gt; quote block");
+      expect(result).toContain("&gt; another line");
+    });
+
+    it("strips unsupported control characters and zero-width chars", () => {
+      const input = "normal\x00\x01\x02\x7f\u200btext";
+      const result = markdownToTelegramHtml(input);
+      expect(result).toBe("normaltext");
+    });
   });
 
   describe("formatMarkdownTable", () => {

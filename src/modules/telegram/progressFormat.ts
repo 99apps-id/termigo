@@ -256,9 +256,20 @@ export function escapeHtml(text: string): string {
     .replace(/>/g, "&gt;")
 }
 
+/** Strip characters Telegram HTML parse_mode does not accept. */
+export function sanitizeForTelegramHtml(text: string): string {
+  // Remove C0 controls except HT(0x09), LF(0x0A), CR(0x0D)
+  // Remove DEL(0x7F)
+  // Remove C1 controls 0x80-0x9F
+  // Note: intentionally keep valid emoji/surrogate pairs; Telegram accepts them.
+  return text
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "")
+    .replace(/[\u200b-\u200f\u2028-\u202f\u2060-\u206f\ufeff]/g, ""); // zero-width / line-separator / bidi / unicode control
+}
+
 /** Convert plain text for Telegram HTML parse_mode without interpreting markdown. */
 export function escapePlainTextToHtml(text: string): string {
-  return escapeHtml(text).replace(/\n/g, "\n");
+  return sanitizeForTelegramHtml(escapeHtml(text)).replace(/\n/g, "\n");
 }
 
 /**
@@ -391,8 +402,8 @@ export function markdownToTelegramHtml(markdown: string): string {
   // 5. Escape remaining HTML entities so raw <, >, & do not break Telegram parsing
   text = escapeHtml(text);
 
-  // 5. Allow explicit user HTML tags: <b>, <i>, <u>, <s>, <code>, <pre>, <blockquote>
-  text = text.replace(/&lt;(\/)?(b|i|u|s|code|pre|blockquote)&gt;/gi, "<$1$2>");
+  // 5. Allow explicit user HTML tags: <b>, <i>, <u>, <s>, <code>, <pre>
+  text = text.replace(/&lt;(\/)?(b|i|u|s|code|pre)&gt;/gi, "<$1$2>");
 
   // 6. Headings (# Title) -> <b>Title</b>
   text = text.replace(/^(#{1,6})\s+(.+)$/gm, "<b>$2</b>");
@@ -424,8 +435,9 @@ export function markdownToTelegramHtml(markdown: string): string {
     '<a href="$2">$1</a>',
   );
 
-  // 14. Blockquotes: > quote
-  text = text.replace(/^&gt;\s+(.+)$/gm, "<blockquote>$1</blockquote>");
+  // 14. Blockquotes: > quote -> Telegram HTML parse_mode does not support <blockquote>,
+  // so keep them as quoted lines instead of an unsupported tag.
+  text = text.replace(/^&gt;\s+(.+)$/gm, "&gt; $1");
 
   // 15. Restore inline code and code blocks
   text = text.replace(
@@ -436,6 +448,9 @@ export function markdownToTelegramHtml(markdown: string): string {
     /\x00CB_(\d+)\x00/g,
     (_, idx) => codeBlocks[Number(idx)] ?? "",
   );
+
+  // Final sanitization: Telegram HTML parse_mode rejects some characters/tags.
+  text = sanitizeForTelegramHtml(text);
 
   return text;
 }
