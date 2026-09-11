@@ -103,6 +103,20 @@ export const PreviewAddressBar = forwardRef<PreviewAddressBarHandle, Props>(
         setNotice("Enter a URL or pick a port preset.");
         return;
       }
+      try {
+        const parsed = new URL(next);
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+          setNotice("Only http and https URLs are allowed.");
+          return;
+        }
+        if (parsed.protocol === "http:" && isPrivateHost(parsed.hostname)) {
+          setNotice("Private/internal addresses are not allowed over HTTP.");
+          return;
+        }
+      } catch {
+        setNotice("Invalid URL.");
+        return;
+      }
       setNotice(null);
       if (next !== url) onSubmit(next);
       else onReload();
@@ -300,11 +314,9 @@ async function probeUrl(url: string): Promise<boolean> {
   try {
     const parsed = new URL(url);
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      setNotice("Only http and https URLs are allowed.");
       return false;
     }
     if (parsed.protocol === "http:" && isPrivateHost(parsed.hostname)) {
-      setNotice("Private/internal addresses are not allowed over HTTP.");
       return false;
     }
     await fetch(url, {
