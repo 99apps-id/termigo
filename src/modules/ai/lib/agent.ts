@@ -71,6 +71,10 @@ import {
   recordToolResult,
   type VerifyLedger,
 } from "./verifyOnStop";
+import {
+  formatUserModelBlock,
+  type UserModel,
+} from "./userModel";
 
 // Every model/provider connection uses a trusted, user-configured endpoint, so
 // it must honour the machine's own DNS — including a provider host that a proxy,
@@ -431,6 +435,7 @@ function buildStableSystem(
   skills: readonly Skill[],
   globalLearned?: readonly MemoryEntry[],
   userQuery?: string,
+  userModel?: UserModel,
 ): string {
   const base = selectSystemPrompt(modelId);
   const personaBlock = persona?.instructions.trim()
@@ -443,13 +448,10 @@ function buildStableSystem(
     projectMemory && projectMemory.trim().length > 0
       ? `\n\n## PROJECT -- TERMIGO.md\n${projectMemory.trim()}`
       : "";
-  // Pinned invariants are constraints the agent itself flagged as session-wide,
-  // so they sit with the other durable facts and ride along on every step.
   const invariantBlock = formatInvariantsBlock();
   const invariantSection = invariantBlock ? `\n\n${invariantBlock}` : "";
-  // Skills sit after facts and before persona: the model should know what it
-  // already knows how to do before it is told how to behave.
-  return `${base}${memoryBlock}${learnedBlock(learned, globalLearned, userQuery)}${invariantSection}${skillsBlock(skills)}${personaBlock}${customBlock}`;
+  const userModelBlock = formatUserModelBlock(userModel);
+  return `${base}${memoryBlock}${learnedBlock(learned, globalLearned, userQuery)}${invariantSection}${userModelBlock}${skillsBlock(skills)}${personaBlock}${customBlock}`;
 }
 
 /** Stable key for a value, so equivalent inputs written in a different key

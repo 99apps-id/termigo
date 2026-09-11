@@ -66,6 +66,20 @@ export async function saveMessages(
   messages: UIMessage[],
 ): Promise<void> {
   await store.set(messagesKey(id), messages);
+  try {
+    const { indexMessage } = await import("./fts5");
+    for (const m of messages) {
+      for (const p of m.parts) {
+        if (p.type !== "text") continue;
+        const text = (p as { text?: string }).text;
+        if (typeof text === "string" && text.trim()) {
+          indexMessage(id, m.id, text);
+        }
+      }
+    }
+  } catch {
+    // search index is best-effort; never break session persistence.
+  }
 }
 
 export async function deleteSessionData(id: string): Promise<void> {

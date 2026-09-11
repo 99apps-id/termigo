@@ -32,6 +32,8 @@ import { buildPdfTools } from "./pdf";
 import { buildPtyDriverTools } from "./ptyDriver";
 import { buildReplaceTools } from "./replace";
 import { buildReviewTools } from "./review";
+import { buildSearchHistoryTools } from "./searchHistory";
+import { buildSelfImprovementTools } from "./selfImprovement";
 import { buildSearchTools } from "./search";
 import { buildShellTools } from "./shell";
 import { buildSkillTools } from "./skills";
@@ -209,6 +211,8 @@ export function buildTools(
     ...buildReplaceTools(ctx),
     ...buildEditTools(ctx),
     ...buildSearchTools(ctx),
+    ...buildSearchHistoryTools(),
+    ...buildSelfImprovementTools(),
     ...buildShellTools(ctx),
     ...buildSubagentTools(ctx, subagentDepth),
     ...buildTerminalTools(ctx),
