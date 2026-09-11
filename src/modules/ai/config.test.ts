@@ -8,6 +8,7 @@ import {
   MAX_AGENT_STEPS,
   MODEL_PRICING,
   MODELS,
+  DEFAULT_MODEL_ID,
   migrateLegacyCompatEndpoint,
   modelKeepsReasoning,
   modelSupportsTemperature,
@@ -68,8 +69,8 @@ describe("resolveModel", () => {
     expect(resolveModel(modelId).provider).toBe(provider);
   });
 
-  it("falls back to the first known model for an unknown static model id", () => {
-    expect(resolveModel("nope-not-real").id).toBe(MODELS[0].id);
+  it("falls back to the default model for an unknown static model id", () => {
+    expect(resolveModel("nope-not-real").id).toBe(DEFAULT_MODEL_ID);
   });
 });
 

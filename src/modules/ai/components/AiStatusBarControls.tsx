@@ -275,6 +275,8 @@ export function AiStatusBarControls() {
 
       <TodayCostChip />
 
+      <TokenUsageChip />
+
       <RunCostChip />
 
       <span className="mx-1 h-8 w-px bg-border" aria-hidden />
@@ -863,6 +865,57 @@ function TodayCostChip() {
         className="text-muted-foreground/70"
       />
       {`$${today.toFixed(2)}`}
+    </span>
+  );
+}
+
+function fmtK(n: number): string {
+  if (n < 1000) return String(n);
+  return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
+}
+
+/**
+ * Compact token usage chip: shows last request input / cached tokens, plus
+ * run totals, so the user can see token spend without opening diagnostics.
+ */
+function TokenUsageChip() {
+  const tokens = useChatStore((s) => s.agentMeta.tokens);
+  const lastInput = useChatStore((s) => s.agentMeta.lastInputTokens);
+  const lastCached = useChatStore((s) => s.agentMeta.lastCachedTokens);
+  const status = useChatStore((s) => s.agentMeta.status);
+  const busy =
+    status === "thinking" ||
+    status === "streaming" ||
+    status === "awaiting-approval";
+
+  const hasData = lastInput > 0 || tokens.inputTokens > 0;
+  if (!hasData) return null;
+
+  const title = `Tokens: last input ${fmtK(lastInput || tokens.inputTokens)} · cached ${fmtK(lastCached)} · run output ${fmtK(tokens.outputTokens)}`;
+
+  return (
+    <span
+      className="flex items-center gap-1 rounded-md px-1.5 text-[10.5px] text-muted-foreground"
+      title={title}
+    >
+      <HugeiconsIcon
+        icon={CpuIcon}
+        size={11}
+        strokeWidth={1.75}
+        className="text-muted-foreground/70"
+      />
+      <span className="tabular-nums">
+        {fmtK(lastInput || tokens.inputTokens)}
+      </span>
+      <span className="text-muted-foreground/70">/</span>
+      <span className="tabular-nums text-muted-foreground/80">
+        {fmtK(tokens.outputTokens)}
+      </span>
+      {busy && lastCached > 0 && (
+        <span className="text-muted-foreground/70">
+          ({fmtK(lastCached)} cached)
+        </span>
+      )}
     </span>
   );
 }
