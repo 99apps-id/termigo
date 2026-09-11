@@ -102,16 +102,21 @@ export function buildSelfImprovementTools() {
       }),
       execute: async ({ name, reason }: { name: string; reason: string }) => {
         const model = await getOrCreateUserModel();
-        if (!model.suggestedSkills.includes(name)) {
-          model.suggestedSkills.push(name);
+        const trimmed = name.trim();
+        if (!model.suggestedSkills.includes(trimmed)) {
+          model.suggestedSkills.push(trimmed);
           while (model.suggestedSkills.length > 50) model.suggestedSkills.shift();
-          await saveUserModel(model);
         }
+        model.suggestedSkillCounts = model.suggestedSkillCounts ?? {};
+        const next = (model.suggestedSkillCounts[trimmed] ?? 0) + 1;
+        model.suggestedSkillCounts[trimmed] = next;
+        await saveUserModel(model);
         return {
           ok: true,
-          suggestion: { name, reason },
+          suggestion: { name: trimmed, reason },
+          count: next,
           suggestedSkills: model.suggestedSkills,
-          next: "Use promote_suggested_skill to turn this into a real skill.",
+          next: "Use review_suggested_skills to inspect candidates before promotion.",
         };
       },
     }),
@@ -179,8 +184,28 @@ export function buildSelfImprovementTools() {
           facts: model.facts.length,
           patterns: model.patterns.length,
           suggestedSkills: model.suggestedSkills.length,
+          suggestedSkillCounts: Object.entries(model.suggestedSkillCounts ?? {}).slice(-12),
           topPreferences: model.preferences.slice(-8),
           recentFacts: model.facts.slice(-10),
+        };
+      },
+    }),
+
+    review_suggested_skills: tool({
+      description:
+        "Review suggested skills sorted by suggestion count. Use this before promote_suggested_skill to pick candidates with real repetition.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        const model = await getOrCreateUserModel();
+        const counts = model.suggestedSkillCounts ?? {};
+        const ranked = model.suggestedSkills
+          .map((name) => ({ name, count: counts[name] ?? 0 }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 20);
+        return {
+          ok: true,
+          ranked,
+          total: model.suggestedSkills.length,
         };
       },
     }),

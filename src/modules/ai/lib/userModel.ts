@@ -41,6 +41,8 @@ export type UserModel = {
   patterns: string[];
   /** Suggested skills to create. */
   suggestedSkills: string[];
+  /** Suggested skill counts. */
+  suggestedSkillCounts: Record<string, number>;
   /** Last compacted ISO date. */
   lastCompactedAt: string | null;
 };
@@ -50,6 +52,7 @@ const DEFAULT: UserModel = {
   facts: [],
   patterns: [],
   suggestedSkills: [],
+  suggestedSkillCounts: {},
   lastCompactedAt: null,
 };
 
@@ -80,6 +83,9 @@ export async function loadUserModel(): Promise<UserModel> {
       suggestedSkills: Array.isArray(parsed.suggestedSkills)
         ? parsed.suggestedSkills
         : [],
+      suggestedSkillCounts: parsed.suggestedSkillCounts && typeof parsed.suggestedSkillCounts === "object"
+        ? parsed.suggestedSkillCounts
+        : {},
     };
   } catch {
     return { ...DEFAULT };
@@ -140,6 +146,15 @@ export function formatUserModelBlock(model: UserModel | undefined): string {
   if (facts.length > 0) {
     parts.push(
       "### LEARNED FACTS\n" + facts.map((f) => `- ${f.text}`).join("\n") + "\n",
+    );
+  }
+
+  const suggested = model.suggestedSkills.slice(-12);
+  if (suggested.length > 0) {
+    parts.push(
+      "### SUGGESTED SKILLS\n" +
+        suggested.map((name) => `- ${name}`).join("\n") +
+        "\n",
     );
   }
 
