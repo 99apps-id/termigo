@@ -1363,6 +1363,7 @@ async function runAgentAndStream(
 
         let currentBaseline = baseline;
         let stopReasonSnapshot: string | null = null;
+        let fallbackSent = false;
         while (!signal.aborted) {
           const reply = await waitForReply(
             store,
@@ -1372,6 +1373,16 @@ async function runAgentAndStream(
           );
           stopReasonSnapshot =
             store.useChatStore.getState().agentMeta.stopReason;
+
+          // Only surface the no-output fallback once per run; otherwise the
+          // polling loop will spam the same status line into the chat.
+          if (reply === "Run produced no text output." || reply === "Run is still in progress or waiting for approval. Use Telegram inline buttons or /status to check.") {
+            if (fallbackSent) {
+              continue;
+            }
+            fallbackSent = true;
+          }
+
           await sendReplyWithDiagrams(chatId, reply, signal);
 
           // Immediately mark fresh assistant message(s) as seen and Telegram-origin.
