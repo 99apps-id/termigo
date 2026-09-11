@@ -1066,6 +1066,8 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // model accepting a forced tool choice (reasoning models reject it).
   const allowSynthesis = modelAllowsForcedToolChoice(info);
   let synthesisRequested = false;
+  let consecutiveToolOnlySteps = 0;
+  const MAX_TOOL_ONLY_STEPS_BEFORE_SYNTHESIS = 2;
   const requestSynthesisOrStop = (reason: AgentStopReason): boolean => {
     stopReason ??= reason;
     const d = synthesisStopDecision(allowSynthesis, synthesisRequested);
@@ -1451,6 +1453,23 @@ export async function runAgentStream(opts: RunAgentOptions) {
           lastInputTokens: stepInput,
           lastCachedTokens: stepCached,
         });
+      }
+
+      // Guard: if the model emits tool-only steps repeatedly with no prose,
+      // force a synthesis step so the run can surface a user-facing summary
+      // instead of looping silently on tool calls.
+      const hasToolCalls = (step.toolCalls?.length ?? 0) > 0;
+      const hasText = Boolean(step.text?.trim());
+      if (hasToolCalls && !hasText) {
+        consecutiveToolOnlySteps += 1;
+      } else {
+        consecutiveToolOnlySteps = 0;
+      }
+      if (
+        !synthesisRequested &&
+        consecutiveToolOnlySteps >= MAX_TOOL_ONLY_STEPS_BEFORE_SYNTHESIS
+      ) {
+        void requestSynthesisOrStop("tool-only-loop");
       }
 
       // Record each tool invocation in the trajectory store. By the time

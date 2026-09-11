@@ -13,6 +13,8 @@ const MAX_READ_BYTES: u64 = 10 * 1024 * 1024; // 10 MB
 /// Ceiling for explicit "open anyway"; mirrored as FORCE_READ_LIMIT in useDocument.ts.
 const FORCE_MAX_READ_BYTES: u64 = 50 * 1024 * 1024;
 const BINARY_SNIFF_BYTES: usize = 8 * 1024;
+const MAX_WRITE_BYTES: u64 = 50 * 1024 * 1024; // 50 MB
+const MAX_WRITE_BASE64_BYTES: u64 = 50 * 1024 * 1024; // 50 MB decoded
 
 #[derive(Serialize, Debug)]
 #[serde(tag = "kind", rename_all = "lowercase")]
@@ -423,6 +425,14 @@ pub async fn fs_write_file(
     source: Option<String>,
     app: tauri::AppHandle,
 ) -> Result<u64, String> {
+    let content_len = content.len() as u64;
+    if content_len > MAX_WRITE_BYTES {
+        return Err(format!(
+            "write refused: {} bytes exceeds limit {MAX_WRITE_BYTES}",
+            content_len
+        ));
+    }
+
     let workspace = WorkspaceEnv::from_option(workspace);
     let target = guard_write(&resolve_path(&path, &workspace))?;
     let original_permissions = fs::metadata(&target).ok().map(|m| m.permissions());
@@ -454,6 +464,14 @@ pub async fn fs_write_file_base64(
     source: Option<String>,
     app: tauri::AppHandle,
 ) -> Result<u64, String> {
+    let decoded_len = data.len() as u64;
+    if decoded_len > MAX_WRITE_BASE64_BYTES {
+        return Err(format!(
+            "write refused: base64 input {} bytes exceeds limit {MAX_WRITE_BASE64_BYTES}",
+            decoded_len
+        ));
+    }
+
     let workspace = WorkspaceEnv::from_option(workspace);
     let target = guard_write(&resolve_path(&path, &workspace))?;
     use base64::Engine as _;

@@ -59,14 +59,27 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
         return Err("empty command".into());
     }
 
-    // 1. Reject metacharacters.
-    if trimmed.chars().any(|c| SHELL_METACHARACTERS.contains(&c)) {
+    // 1. Reject metacharacters outside quotes.
+    let mut in_quote = false;
+    let mut quote_char = '\0';
+    let mut prev = '\0';
+    let mut bad: Vec<char> = Vec::new();
+    for c in trimmed.chars() {
+        if !in_quote && (c == '"' || c == '\'') {
+            in_quote = true;
+            quote_char = c;
+        } else if in_quote && c == quote_char && prev != '\\' {
+            in_quote = false;
+            quote_char = '\0';
+        } else if !in_quote && SHELL_METACHARACTERS.contains(&c) {
+            bad.push(c);
+        }
+        prev = c;
+    }
+    if !bad.is_empty() {
         return Err(format!(
             "command contains shell metacharacters {:?}; use a PTY session for pipelines, redirects, or chained commands",
-            SHELL_METACHARACTERS
-                .iter()
-                .map(|c| c.to_string())
-                .collect::<Vec<_>>()
+            bad
         ));
     }
 
@@ -597,5 +610,12 @@ mod tests_sandbox {
         assert!(validate_shell_command("cat file | grep secret").is_err());
         assert!(validate_shell_command("echo hello > out.txt").is_err());
         assert!(validate_shell_command("cat `id`").is_err());
+    }
+
+    #[test]
+    fn validate_shell_command_allows_quoted_arguments() {
+        assert!(validate_shell_command(r#"node -e "console.log(1+1)""#).is_ok());
+        assert!(validate_shell_command(r#"echo "hello > world""#).is_ok());
+        assert!(validate_shell_command(r#"echo 'hello | world'"#).is_ok());
     }
 }
