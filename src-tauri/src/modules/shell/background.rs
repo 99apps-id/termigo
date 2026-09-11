@@ -111,6 +111,10 @@ pub fn spawn(
     if trimmed.is_empty() {
         return Err("empty command".into());
     }
+
+    // Enforce the same agent sandbox for background shell jobs.
+    crate::modules::shell::validate_shell_command(&trimmed)?;
+
     if let Some(ref dir) = cwd {
         if !resolve_path(dir, &workspace).is_dir() {
             return Err(format!("cwd is not a directory: {dir}"));

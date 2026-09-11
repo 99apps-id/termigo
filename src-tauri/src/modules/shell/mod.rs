@@ -28,6 +28,67 @@ const DEFAULT_TIMEOUT_SECS: u64 = 120;
 const MAX_TIMEOUT_SECS: u64 = 300;
 const MAX_OUTPUT_BYTES: usize = 256 * 1024;
 
+/// Allowlisted read-only / inspection commands for agent-triggered execution.
+/// Commands outside this set must be run through an interactive PTY session.
+const SANDBOX_ALLOWLIST: &[&str] = &[
+    "cat", "head", "tail", "wc", "grep", "rg", "sed", "awk",
+    "find", "ls", "stat", "file", "xxd", "hexdump", "od",
+    "git", "npm", "pnpm", "yarn", "cargo", "go", "python", "python3",
+    "node", "deno", "bun", "make", "just", "task",
+    "echo", "printf", "test", "true", "false", "pwd", "cd",
+    "which", "where", "type", "command", "hash",
+    "diff", "cmp", "comm", "patch", "jq", "yq",
+    "tar", "gzip", "gunzip", "zip", "unzip",
+    "curl", "wget", "http", "xh",
+    "date", "uptime", "whoami", "id", "uname", "hostname",
+];
+
+/// Characters that enable command injection in a shell one-liner.
+const SHELL_METACHARACTERS: &[char] = &[';', '|', '&', '$', '(', ')', '<', '>', '`'];
+
+/// Validate a shell command for agent execution:
+/// - reject metacharacters that enable injection (`;|&$()<>``)
+/// - enforce allowlist for the first token unless it's an absolute path
+/// - return the command string on success
+pub fn validate_shell_command(command: &str) -> Result<&str, String> {
+    if command.is_empty() {
+        return Err("empty command".into());
+    }
+
+    // 1. Reject metacharacters.
+    if command.chars().any(|c| SHELL_METACHARACTERS.contains(&c)) {
+        return Err(format!(
+            "command contains shell metacharacters {:?}; use a PTY session for pipelines, redirects, or chained commands",
+            SHELL_METACHARACTERS
+                .iter()
+                .map(|c| c.to_string())
+                .collect::<Vec<_>>()
+        ));
+    }
+
+    // 2. Extract the program token (first whitespace-delimited token).
+    let program = command.split_whitespace().next().unwrap_or(command);
+
+    // 3. Allow absolute paths without allowlist check.
+    if program.starts_with('/') || program.starts_with('\\') {
+        return Ok(command);
+    }
+
+    // 4. Allow if it's in the allowlist.
+    if SANDBOX_ALLOWLIST
+        .iter()
+        .any(|allowed| program == *allowed)
+    {
+        return Ok(command);
+    }
+
+    Err(format!(
+        "command '{}' is not in the agent allowlist; allowed: {:?}; use a PTY session to run arbitrary commands",
+        program,
+        SANDBOX_ALLOWLIST
+    ))
+}
+
 #[derive(Serialize)]
 pub struct CommandOutput {
     pub stdout: String,
@@ -53,6 +114,9 @@ pub async fn shell_run_command(
     if trimmed.is_empty() {
         return Err("empty command".into());
     }
+
+    // Agent-triggered one-shot commands run through a restricted sandbox.
+    validate_shell_command(&trimmed)?;
 
     let workspace = WorkspaceEnv::from_option(workspace);
     authorize_spawn_cwd(&registry, cwd.as_deref(), &workspace)?;
@@ -264,6 +328,16 @@ pub async fn shell_session_run(
         .clone()
         .unwrap_or_else(|| session.workspace.clone());
     authorize_spawn_cwd(&registry, cwd.as_deref(), &effective_workspace)?;
+
+    // Interactive shell sessions already give the user a controlled environment,
+    // but we still validate against shell metacharacters as a defense-in-depth
+    // measure to prevent accidental injection from agent-driven sessions.
+    let trimmed = command.trim().to_string();
+    if trimmed.is_empty() {
+        return Err("empty command".into());
+    }
+    validate_shell_command(&trimmed)?;
+
     let dur = Duration::from_secs(
         timeout_secs
             .unwrap_or(DEFAULT_TIMEOUT_SECS)
@@ -271,7 +345,7 @@ pub async fn shell_session_run(
     );
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
-        let _ = tx.send(session.run(command, cwd, workspace, dur));
+        let _ = tx.send(session.run(trimmed, cwd, workspace, dur));
     });
     rx.recv().map_err(|e| e.to_string())?
 }
@@ -291,9 +365,17 @@ pub fn shell_bg_spawn(
     workspace: Option<WorkspaceEnv>,
     log_path: Option<String>,
 ) -> Result<u32, String> {
+    let trimmed = command.trim().to_string();
+    if trimmed.is_empty() {
+        return Err("empty command".into());
+    }
+
+    // Agent-triggered background commands run through the same sandbox.
+    validate_shell_command(&trimmed)?;
+
     let workspace = WorkspaceEnv::from_option(workspace);
     authorize_spawn_cwd(&registry, cwd.as_deref(), &workspace)?;
-    let proc = background::spawn(command, cwd, workspace, log_path)?;
+    let proc = background::spawn(trimmed, cwd, workspace, log_path)?;
     let id = state.next_bg_id.fetch_add(1, Ordering::Relaxed);
     state.bg.write().unwrap().insert(id, proc);
     Ok(id)

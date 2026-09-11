@@ -157,20 +157,29 @@ pub fn process_is_alive(pid: u32) -> bool {
 
 #[cfg(windows)]
 pub fn process_is_alive(pid: u32) -> bool {
-    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ACCESS_DENIED};
+    use windows_sys::Win32::Foundation::{CloseHandle, GetExitCodeProcess, GetLastError, ERROR_INVALID_PARAMETER, ERROR_ACCESS_DENIED};
     use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+    use windows_sys::Win32::System::Threading::STILL_ACTIVE;
 
     if pid == 0 {
         return false;
     }
     unsafe {
         let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
-        if !handle.is_null() {
-            CloseHandle(handle);
-            true
-        } else {
-            GetLastError() == ERROR_ACCESS_DENIED
+        if handle.is_null() {
+            let err = GetLastError();
+            // ERROR_INVALID_PARAMETER usually means the PID doesn't exist.
+            return err != ERROR_INVALID_PARAMETER && err != ERROR_ACCESS_DENIED;
         }
+
+        let mut exit_code = 0u32;
+        let ok = GetExitCodeProcess(handle, &mut exit_code);
+        CloseHandle(handle);
+        if !ok {
+            // If we can't query the exit code, assume it's alive if we got this far.
+            return true;
+        }
+        exit_code == STILL_ACTIVE
     }
 }
 
