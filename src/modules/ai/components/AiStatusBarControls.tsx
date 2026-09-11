@@ -59,6 +59,7 @@ import {
   PROVIDERS,
   type ProviderId,
   providerNeedsKey,
+  resolveApiModelId,
   STT_PROVIDER_LABELS,
 } from "../config";
 import { ACCEPTED_FILES, useComposer } from "../lib/composer";
@@ -334,6 +335,13 @@ function ModelDropdown() {
   const favoriteIds = usePreferencesStore((s) => s.favoriteModelIds);
   const recentIds = usePreferencesStore((s) => s.recentModelIds);
   const customEndpoints = usePreferencesStore((s) => s.customEndpoints);
+  const modelIdOverrides = usePreferencesStore((s) => s.modelIdOverrides);
+  // The id the request will actually carry, so a vendor rename or an override
+  // is visible where the model is picked instead of only in Settings.
+  const apiModelIdFor = useCallback(
+    (id: string) => resolveApiModelId(id, modelIdOverrides),
+    [modelIdOverrides],
+  );
   const current = isCompatModelId(selected)
     ? getCompatModelInfo(selected, customEndpoints)
     : getModel(selected as ModelId);
@@ -546,6 +554,7 @@ function ModelDropdown() {
                 <ModelRow
                   key={m.id}
                   model={m}
+                  wireId={apiModelIdFor(m.id)}
                   selected={m.id === selected}
                   hasKey={isCompatModelId(m.id) || hasKeyFor(m.provider)}
                   favorite={favoriteIds.includes(m.id)}
@@ -668,6 +677,7 @@ function ProviderConfigureCTA({ providerId }: { providerId: ProviderId }) {
 
 function ModelRow({
   model,
+  wireId,
   selected,
   hasKey,
   favorite,
@@ -676,6 +686,8 @@ function ModelRow({
   onToggleFavorite,
 }: {
   model: ModelInfo;
+  /** The id sent to the provider, when it differs from the registry id. */
+  wireId?: string;
   selected: boolean;
   hasKey: boolean;
   favorite: boolean;
@@ -731,6 +743,13 @@ function ModelRow({
         <span className="shrink-0 text-[12px] font-medium leading-none">
           {model.label}
         </span>
+        {/* The wire id, when a vendor rename or an override moved it: the one
+            string that has to be right for the request to work. */}
+        {wireId && wireId !== model.id ? (
+          <span className="shrink-0 truncate font-mono text-[10px] leading-none text-muted-foreground/70">
+            {wireId}
+          </span>
+        ) : null}
         <span className="truncate text-[10.5px] leading-none text-muted-foreground">
           {model.description}
         </span>
