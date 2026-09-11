@@ -585,7 +585,7 @@ async function modelLabel(modelId: string): Promise<string> {
   return resolveModelLabel(modelId, endpoints);
 }
 
-async function buildStatus(): Promise<string> {
+export async function buildStatus(): Promise<string> {
   const store = useTelegramStore.getState();
   const chat = await import("../ai/store/chatStore");
   const meta = chat.getAgentMeta();
@@ -606,7 +606,7 @@ type InlineButton = { text: string; callback_data: string };
 type ModelChoice = { id: string; label: string };
 type ProviderGroup = { key: string; label: string; models: ModelChoice[] };
 
-async function buildProviderGroups(): Promise<ProviderGroup[]> {
+export async function buildProviderGroups(): Promise<ProviderGroup[]> {
   const { MODELS, PROVIDERS, isCompatModelId, compatModelIdForEndpoint } =
     await import("../ai/config");
   const { usePreferencesStore } = await import(
@@ -1226,7 +1226,7 @@ async function sendReportFiles(
  * up in the bot's chat. Suppressed while the bot is relaying a Telegram run so
  * it doesn't echo messages it injected itself.
  */
-async function runMirror(signal: AbortSignal): Promise<void> {
+export async function runMirror(signal: AbortSignal): Promise<void> {
   let seenSession = "";
   while (!signal.aborted) {
     try {
@@ -1484,7 +1484,7 @@ async function dispatchAndStream(
 /**
  * Resume a paused/capped run, bumping to the next step budget tier (25 -> 50 -> 100).
  */
-function startTelegramResume(chatId: number, signal: AbortSignal): void {
+export function startTelegramResume(chatId: number, signal: AbortSignal): void {
   pauseMirror();
   void (async () => {
     try {
@@ -1550,7 +1550,7 @@ function startTelegramResume(chatId: number, signal: AbortSignal): void {
  * as a steer message: the user is notified that the agent is busy, and the
  * request is queued to run shortly after the current task finishes.
  */
-async function startTelegramDispatch(
+export async function startTelegramDispatch(
   text: string,
   chatId: number,
   signal: AbortSignal,
@@ -1622,7 +1622,7 @@ const HELP = [
   "/cost - today's & total spend",
 ].join("\n");
 
-async function resolveModelInput(id: string): Promise<string | null> {
+export async function resolveModelInput(id: string): Promise<string | null> {
   const { MODELS, isCompatModelId, compatModelIdForEndpoint } = await import(
     "../ai/config"
   );
