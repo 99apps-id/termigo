@@ -2275,7 +2275,7 @@ async function runLoop(signal: AbortSignal): Promise<void> {
 }
 
 /** Start the long-polling loop (idempotent). */
-export function startTelegramBot(): void {
+export async function startTelegramBot(): Promise<void> {
   if (loopController) return;
   const controller = new AbortController();
   loopController = controller;
@@ -2286,6 +2286,15 @@ export function startTelegramBot(): void {
   watchdogTimer = setInterval(checkPollingStall, 15_000);
   useTelegramStore.getState().setOnline(true);
   useTelegramStore.getState().setLastError(null);
+  try {
+    const { cleanupStaleApprovals } = await import("../ai/store/approvalQueueStore");
+    const cleaned = await cleanupStaleApprovals();
+    if (cleaned > 0) {
+      console.warn(`[ai] cleaned ${cleaned} stale approvals on startup`);
+    }
+  } catch {
+    // best-effort cleanup; if the store isn't ready yet, the next cycle will catch it.
+  }
   void runLoop(controller.signal);
   void runMirror(mirror.signal);
 }

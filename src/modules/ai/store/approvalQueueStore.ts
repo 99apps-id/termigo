@@ -23,6 +23,29 @@ export function isApprovedDecision(d: ApprovalDecision): boolean {
   return d !== "deny";
 }
 
+const MAX_APPROVAL_AGE_MS = 30 * 60 * 1000;
+
+function cleanStaleApprovalsNow(): PendingApproval[] {
+  const cutoff = Date.now() - MAX_APPROVAL_AGE_MS;
+  const current = useApprovalQueue.getState().pending;
+  const stale = current.filter((p) => p.requestedAt < cutoff);
+  if (stale.length === 0) return [];
+  useApprovalQueue.setState((s) => ({
+    pending: s.pending.filter((p) => p.requestedAt >= cutoff),
+  }));
+  for (const p of stale) {
+    const settle = waiting.get(p.id);
+    if (settle) settle("deny");
+    waiting.delete(p.id);
+  }
+  return stale;
+}
+
+/** Clean stale approvals: older than 30 minutes are auto-denied on startup. */
+export async function cleanupStaleApprovals(): Promise<number> {
+  return cleanStaleApprovalsNow().length;
+}
+
 /**
  * Session-scoped memory of tools the user has allowed.
  *

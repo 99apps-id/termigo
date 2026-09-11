@@ -31,7 +31,7 @@ export function useTelegramBot(): void {
 
   useEffect(() => {
     if (enabled && hasToken) {
-      startTelegramBot();
+      void startTelegramBot();
       return () => stopTelegramBot();
     }
     stopTelegramBot();
