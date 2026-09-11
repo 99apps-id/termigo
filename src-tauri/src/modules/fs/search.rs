@@ -5,7 +5,9 @@ use serde::Serialize;
 
 use super::security;
 use super::to_canon;
-use crate::modules::workspace::{resolve_path, WorkspaceEnv};
+use crate::modules::workspace::{
+    require_authorized, resolve_path, WorkspaceEnv, WorkspaceRegistry,
+};
 
 #[derive(Serialize, Clone)]
 pub struct SearchHit {
@@ -54,7 +56,12 @@ pub async fn fs_search(
     limit: Option<usize>,
     workspace: Option<WorkspaceEnv>,
     show_hidden: Option<bool>,
+    registry: tauri::State<'_, WorkspaceRegistry>,
 ) -> Result<SearchResult, String> {
+    let ws = WorkspaceEnv::from_option(workspace.clone());
+    let root_path = resolve_path(&root, &ws);
+    security::validate_read(&root_path)?;
+    require_authorized(&registry, &root_path)?;
     tauri::async_runtime::spawn_blocking(move || {
         fs_search_blocking(root, query, limit, workspace, show_hidden)
     })
@@ -62,7 +69,7 @@ pub async fn fs_search(
     .map_err(|e| e.to_string())?
 }
 
-fn fs_search_blocking(
+pub fn fs_search_blocking(
     root: String,
     query: String,
     limit: Option<usize>,
@@ -176,6 +183,21 @@ pub struct ListFilesResult {
 
 #[tauri::command]
 pub fn fs_list_files(
+    root: String,
+    limit: Option<usize>,
+    max_depth: Option<usize>,
+    workspace: Option<WorkspaceEnv>,
+    show_hidden: Option<bool>,
+    registry: tauri::State<'_, WorkspaceRegistry>,
+) -> Result<ListFilesResult, String> {
+    let ws = WorkspaceEnv::from_option(workspace.clone());
+    let root_path = resolve_path(&root, &ws);
+    security::validate_read(&root_path)?;
+    require_authorized(&registry, &root_path)?;
+    list_files_blocking(root, limit, max_depth, workspace, show_hidden)
+}
+
+pub fn list_files_blocking(
     root: String,
     limit: Option<usize>,
     max_depth: Option<usize>,

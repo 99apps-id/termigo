@@ -72,6 +72,40 @@ impl WorkspaceRegistry {
         set.iter().any(|root| target.starts_with(root))
     }
 
+    /// Like [`Self::is_authorized`] but canonicalizes first, so a `..` segment
+    /// or a symlink cannot defeat the component-wise `starts_with`. A path that
+    /// does not exist yet (a new file, or a chain of new directories) is checked
+    /// via its nearest existing ancestor with the plain remaining components
+    /// re-appended; a `..` anywhere in that tail, or a path with no resolvable
+    /// ancestor, is refused.
+    pub fn is_authorized_canonical(&self, target: &Path) -> bool {
+        if let Ok(canon) = std::fs::canonicalize(target) {
+            return self.is_authorized(&canon);
+        }
+        let mut current = target;
+        let mut tail: Vec<&std::ffi::OsStr> = Vec::new();
+        loop {
+            let Some(name) = current.file_name() else {
+                return false;
+            };
+            if name == std::ffi::OsStr::new("..") {
+                return false;
+            }
+            tail.push(name);
+            let Some(parent) = current.parent() else {
+                return false;
+            };
+            if let Ok(canon) = std::fs::canonicalize(parent) {
+                let mut joined = canon;
+                for part in tail.iter().rev() {
+                    joined.push(*part);
+                }
+                return self.is_authorized(&joined);
+            }
+            current = parent;
+        }
+    }
+
     pub fn canonicalize_cached<P: AsRef<Path>>(&self, path: P) -> std::io::Result<PathBuf> {
         let key = path.as_ref().to_path_buf();
         {
@@ -104,6 +138,21 @@ impl WorkspaceRegistry {
             },
         );
         Ok(canonical)
+    }
+}
+
+/// Reject a path the registry has not authorized. The allow-side gate every
+/// `fs::*` command must pass; `fs::security`'s deny-list is the other half.
+/// Canonicalizes first (see `is_authorized_canonical`) so a traversal or a
+/// symlink cannot slip past the root check.
+pub fn require_authorized(registry: &WorkspaceRegistry, path: &Path) -> Result<(), String> {
+    if registry.is_authorized_canonical(path) {
+        Ok(())
+    } else {
+        Err(format!(
+            "path is outside the authorized workspace: {}",
+            path.display()
+        ))
     }
 }
 

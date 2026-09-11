@@ -1,13 +1,15 @@
 use std::cmp::Ordering;
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use ignore::WalkBuilder;
 use serde::Serialize;
 
 use super::security;
-use crate::modules::workspace::{resolve_path, WorkspaceEnv};
+use crate::modules::workspace::{
+    require_authorized, resolve_path, WorkspaceEnv, WorkspaceRegistry,
+};
 
 #[derive(Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -159,23 +161,24 @@ pub async fn fs_read_dir(
     show_hidden: bool,
     git_decorations: Option<bool>,
     workspace: Option<WorkspaceEnv>,
+    registry: tauri::State<'_, WorkspaceRegistry>,
 ) -> Result<Vec<DirEntry>, String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    let root = resolve_path(&path, &workspace);
+    security::validate_read(&root)?;
+    require_authorized(&registry, &root)?;
     tauri::async_runtime::spawn_blocking(move || {
-        fs_read_dir_blocking(path, show_hidden, git_decorations, workspace)
+        fs_read_dir_blocking(root, show_hidden, git_decorations)
     })
     .await
     .map_err(|e| e.to_string())?
 }
 
-fn fs_read_dir_blocking(
-    path: String,
+pub fn fs_read_dir_blocking(
+    root: PathBuf,
     show_hidden: bool,
     git_decorations: Option<bool>,
-    workspace: Option<WorkspaceEnv>,
 ) -> Result<Vec<DirEntry>, String> {
-    let workspace = WorkspaceEnv::from_option(workspace);
-    let root = resolve_path(&path, &workspace);
-    security::validate_read(&root)?;
     let read = std::fs::read_dir(&root).map_err(|e| {
         log::debug!("fs_read_dir({}) failed: {e}", root.display());
         e.to_string()
@@ -261,22 +264,18 @@ pub async fn list_subdirs(
     path: String,
     show_hidden: bool,
     workspace: Option<WorkspaceEnv>,
-) -> Result<Vec<String>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        list_subdirs_blocking(path, show_hidden, workspace)
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-fn list_subdirs_blocking(
-    path: String,
-    show_hidden: bool,
-    workspace: Option<WorkspaceEnv>,
+    registry: tauri::State<'_, WorkspaceRegistry>,
 ) -> Result<Vec<String>, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     let root = resolve_path(&path, &workspace);
     security::validate_read(&root)?;
+    require_authorized(&registry, &root)?;
+    tauri::async_runtime::spawn_blocking(move || list_subdirs_blocking(root, show_hidden))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub fn list_subdirs_blocking(root: PathBuf, show_hidden: bool) -> Result<Vec<String>, String> {
     let read = std::fs::read_dir(&root).map_err(|e| {
         log::debug!("list_subdirs({}) read_dir failed: {e}", root.display());
         e.to_string()

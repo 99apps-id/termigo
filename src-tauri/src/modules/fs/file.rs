@@ -7,7 +7,7 @@ use tauri::Emitter;
 use tempfile::NamedTempFile;
 
 use super::security::{guard_read, guard_write};
-use crate::modules::workspace::{resolve_path, WorkspaceEnv};
+use crate::modules::workspace::{require_authorized, resolve_path, WorkspaceEnv, WorkspaceRegistry};
 
 const MAX_READ_BYTES: u64 = 10 * 1024 * 1024; // 10 MB
 /// Ceiling for explicit "open anyway"; mirrored as FORCE_READ_LIMIT in useDocument.ts.
@@ -82,9 +82,11 @@ fn image_media_type(bytes: &[u8], path: &Path) -> Option<&'static str> {
 pub async fn fs_read_image_base64(
     path: String,
     workspace: Option<WorkspaceEnv>,
+    registry: tauri::State<'_, WorkspaceRegistry>,
 ) -> Result<ImageReadResult, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     let p = guard_read(&resolve_path(&path, &workspace))?;
+    require_authorized(&registry, &p)?;
     let meta = std::fs::metadata(&p).map_err(|e| e.to_string())?;
     let size = meta.len();
     if size > MAX_IMAGE_BYTES {
@@ -145,9 +147,11 @@ fn file_media_type(path: &Path) -> String {
 pub async fn fs_read_file_base64(
     path: String,
     workspace: Option<WorkspaceEnv>,
+    registry: tauri::State<'_, WorkspaceRegistry>,
 ) -> Result<FileReadBase64, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     let p = guard_read(&resolve_path(&path, &workspace))?;
+    require_authorized(&registry, &p)?;
     let meta = std::fs::metadata(&p).map_err(|e| e.to_string())?;
     let size = meta.len();
     if size > MAX_FILE_BASE64_BYTES {
@@ -199,9 +203,11 @@ pub async fn fs_read_file(
     path: String,
     workspace: Option<WorkspaceEnv>,
     force: Option<bool>,
+    registry: tauri::State<'_, WorkspaceRegistry>,
 ) -> Result<ReadResult, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     let resolved = guard_read(&resolve_path(&path, &workspace))?;
+    require_authorized(&registry, &resolved)?;
     read_file_sync(&resolved, force.unwrap_or(false))
 }
 
@@ -419,6 +425,7 @@ pub async fn fs_write_file(
     workspace: Option<WorkspaceEnv>,
     source: Option<String>,
     app: tauri::AppHandle,
+    registry: tauri::State<'_, WorkspaceRegistry>,
 ) -> Result<u64, String> {
     let content_len = content.len() as u64;
     if content_len > MAX_WRITE_BYTES {
@@ -430,6 +437,7 @@ pub async fn fs_write_file(
 
     let workspace = WorkspaceEnv::from_option(workspace);
     let target = guard_write(&resolve_path(&path, &workspace))?;
+    require_authorized(&registry, &target)?;
     let original_permissions = fs::metadata(&target).ok().map(|m| m.permissions());
     write_atomic(&target, content.as_bytes()).map_err(|e| {
         log::warn!("fs_write_file({}) failed: {e}", target.display());
@@ -460,6 +468,7 @@ pub async fn fs_write_file_base64(
     workspace: Option<WorkspaceEnv>,
     source: Option<String>,
     app: tauri::AppHandle,
+    registry: tauri::State<'_, WorkspaceRegistry>,
 ) -> Result<u64, String> {
     let decoded_len = data.len() as u64;
     if decoded_len > MAX_WRITE_BASE64_BYTES {
@@ -471,6 +480,7 @@ pub async fn fs_write_file_base64(
 
     let workspace = WorkspaceEnv::from_option(workspace);
     let target = guard_write(&resolve_path(&path, &workspace))?;
+    require_authorized(&registry, &target)?;
     use base64::Engine as _;
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(&data)
@@ -494,17 +504,25 @@ pub async fn fs_write_file_base64(
 pub async fn fs_canonicalize(
     path: String,
     workspace: Option<WorkspaceEnv>,
+    registry: tauri::State<'_, WorkspaceRegistry>,
 ) -> Result<String, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     let p = guard_read(&resolve_path(&path, &workspace))?;
+    require_authorized(&registry, &p)?;
     let canon = std::fs::canonicalize(&p).map_err(|e| e.to_string())?;
     Ok(super::to_canon(&canon))
 }
 
 #[tauri::command]
-pub async fn fs_stat(path: String, workspace: Option<WorkspaceEnv>) -> Result<FileStat, String> {
+pub async fn fs_stat(
+    path: String,
+    workspace: Option<WorkspaceEnv>,
+    registry: tauri::State<'_, WorkspaceRegistry>,
+) -> Result<FileStat, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     let p = resolve_path(&path, &workspace);
+    super::security::validate_read(&p)?;
+    require_authorized(&registry, &p)?;
     let meta = std::fs::metadata(&p).map_err(|e| e.to_string())?;
     // fs::metadata follows symlinks, so the link check needs symlink_metadata.
     let kind = if std::fs::symlink_metadata(&p)

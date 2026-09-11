@@ -171,9 +171,7 @@ pub async fn mcp_add_server(
     if command.trim().is_empty() {
         return Err("a server needs a command".into());
     }
-    if let Err(e) = validate_mcp_command(&command) {
-        return Err(e);
-    }
+    validate_mcp_command(&command)?;
     edit_user_registry(move |servers| {
         let mut entry = serde_json::Map::new();
         entry.insert("command".into(), Value::String(command.trim().to_string()));
@@ -438,16 +436,19 @@ mod tests {
     #[test]
     fn project_scope_overrides_user_scope_for_the_same_name() {
         let dir = tempfile::tempdir().unwrap();
+        // Commands must pass the F-04 allow-list, so the fixture uses real
+        // allow-listed executables (the scope-override logic is what is under
+        // test, not the allow-list itself).
         write_registry(
             dir.path(),
-            r#"{"mcpServers":{"shared":{"command":"project-cmd"}}}"#,
+            r#"{"mcpServers":{"shared":{"command":"node"}}}"#,
         );
         let mut by_name: HashMap<String, ServerConfig> = HashMap::new();
         by_name.insert(
             "shared".into(),
             ServerConfig {
                 name: "shared".into(),
-                command: "user-cmd".into(),
+                command: "npx".into(),
                 args: vec![],
                 env: HashMap::new(),
                 scope: "user".into(),
@@ -461,7 +462,7 @@ mod tests {
         ) {
             by_name.insert(server.name.clone(), server);
         }
-        assert_eq!(by_name["shared"].command, "project-cmd");
+        assert_eq!(by_name["shared"].command, "node");
         assert_eq!(by_name["shared"].scope, "project");
     }
 }

@@ -4,6 +4,49 @@ All notable changes to Termigo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+
+- **Rust filesystem layer hardening**
+  - **F-14 CRITICAL**: 20 of 21 `fs::*` commands resolved a path and applied
+    the secret deny-list, but never consulted
+    `WorkspaceRegistry::is_authorized` - the invariant that
+    `docs/architecture/security-model.md` states. A compromised webview could
+    read, write, or delete any non-deny-listed path on disk. Every read, write,
+    and mutation `fs::*` command now takes the registry and refuses a path
+    outside an authorized root via the new `workspace::require_authorized`
+    (`fs_watch_remove`, which only releases a watch subscription and touches no
+    data, is unchanged). The check is
+    canonicalisation-safe: `WorkspaceRegistry::is_authorized_canonical`
+    resolves the nearest existing ancestor and refuses an unresolved `..`, so
+    the component-wise `starts_with` cannot be traversed around.
+  - **F-09 MEDIUM**: `fs_stat` was the only read command with no deny-list at
+    all, leaking existence/size/mtime for `~/.ssh/id_rsa`, `/etc/shadow`, and
+    every other secret path. It now routes through `validate_read` like the
+    rest.
+  - **F-10 MEDIUM**: `atomic_write` staged into the deterministic
+    `.<name>.termigo.tmp`, so a pre-planted symlink there redirected the write
+    and truncated the link target - exactly the attack the random-suffix
+    `write_atomic` in `file.rs` already defends against. Staging now uses a
+    per-write randomised sibling opened with `O_EXCL`.
+  - **F-11 MEDIUM**: `fs_grep_interactive` ran a synchronous full-tree walk on
+    the UI thread: it froze the UI and blocked the next query from bumping the
+    generation counter, so its own supersession cancellation could never fire.
+    It is now `async` + `spawn_blocking`, matching `fs_grep`.
+  - **F-12 HIGH**: `fs_copy` used drag-drop sources literally (never resolved,
+    never checked) and recursed with `std::fs::copy`, following symlinks with
+    no per-entry check - a symlink inside a copied tree pointing at `~/.ssh`
+    was copied by target, and a self-referential link looped. `copy_recursive`
+    now skips symlinks and re-applies the deny-list to every child.
+
+### Fixed
+
+- **MCP scope test**: `project_scope_overrides_user_scope_for_the_same_name`
+  used `project-cmd` / `user-cmd`, which the F-04 command allow-list rejects,
+  so the project entry was dropped and the assertion failed. The fixture now
+  uses allow-listed executables (`node` / `npx`).
+
 ## 0.9.12 - 2026-09-11
 
 ### Security

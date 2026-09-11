@@ -11,7 +11,9 @@ use serde::Serialize;
 
 use super::security;
 use super::to_canon;
-use crate::modules::workspace::{resolve_path, WorkspaceEnv};
+use crate::modules::workspace::{
+    require_authorized, resolve_path, WorkspaceEnv, WorkspaceRegistry,
+};
 
 const FILE_SIZE_CAP: u64 = 5 * 1024 * 1024;
 const DEFAULT_MAX_RESULTS: usize = 200;
@@ -23,7 +25,7 @@ const HARD_MAX_RESULTS: usize = 2000;
 /// them run to completion.
 #[derive(Default)]
 pub struct ContentSearchState {
-    generation: AtomicU64,
+    generation: Arc<AtomicU64>,
 }
 
 #[derive(Serialize)]
@@ -183,7 +185,12 @@ pub async fn fs_grep(
     case_insensitive: Option<bool>,
     max_results: Option<usize>,
     workspace: Option<WorkspaceEnv>,
+    registry: tauri::State<'_, WorkspaceRegistry>,
 ) -> Result<GrepResponse, String> {
+    let ws = WorkspaceEnv::from_option(workspace.clone());
+    let root_path = resolve_path(&root, &ws);
+    security::validate_read(&root_path)?;
+    require_authorized(&registry, &root_path)?;
     tauri::async_runtime::spawn_blocking(move || {
         fs_grep_blocking(
             pattern,
@@ -254,7 +261,7 @@ fn search_single_file(
     }
 }
 
-fn fs_grep_blocking(
+pub fn fs_grep_blocking(
     pattern: String,
     root: String,
     glob: Option<Vec<String>>,
@@ -311,52 +318,62 @@ fn fs_grep_blocking(
 /// Interactive content search for the command palette. Treats the query as a
 /// literal (smart-case), and self-cancels when a newer query arrives.
 #[tauri::command]
-pub fn fs_grep_interactive(
+pub async fn fs_grep_interactive(
     state: tauri::State<'_, ContentSearchState>,
     pattern: String,
     root: String,
     max_results: Option<usize>,
     workspace: Option<WorkspaceEnv>,
+    registry: tauri::State<'_, WorkspaceRegistry>,
 ) -> Result<GrepResponse, String> {
     if pattern.trim().is_empty() {
         return Err("empty pattern".into());
     }
-    let my_gen = state.generation.fetch_add(1, Ordering::SeqCst) + 1;
-
     let workspace = WorkspaceEnv::from_option(workspace);
     let root_path = resolve_path(&root, &workspace);
     if !root_path.exists() {
         return Err(format!("not found: {root}"));
     }
     security::validate_read(&root_path)?;
+    require_authorized(&registry, &root_path)?;
     let cap = max_results
         .unwrap_or(DEFAULT_MAX_RESULTS)
         .clamp(1, HARD_MAX_RESULTS);
 
-    let matcher = RegexMatcherBuilder::new()
-        .case_smart(true)
-        .line_terminator(Some(b'\n'))
-        .build(&escape_literal(&pattern))
-        .map_err(|e| format!("bad pattern: {e}"))?;
+    let my_gen = state.generation.fetch_add(1, Ordering::SeqCst) + 1;
+    let generation = state.generation.clone();
 
-    if root_path.is_file() {
-        return Ok(search_single_file(
-            &root_path,
-            &root,
-            &workspace,
-            &matcher,
-            cap,
-        ));
-    }
+    // Off the UI thread: the tree walk is the slow part, and on the main thread
+    // it would both freeze the UI and block the next query from bumping the
+    // generation, so the supersession check below could never fire.
+    tauri::async_runtime::spawn_blocking(move || {
+        let matcher = RegexMatcherBuilder::new()
+            .case_smart(true)
+            .line_terminator(Some(b'\n'))
+            .build(&escape_literal(&pattern))
+            .map_err(|e| format!("bad pattern: {e}"))?;
 
-    if !root_path.is_dir() {
-        return Err(format!("not a directory: {root}"));
-    }
+        if root_path.is_file() {
+            return Ok(search_single_file(
+                &root_path,
+                &root,
+                &workspace,
+                &matcher,
+                cap,
+            ));
+        }
 
-    let cancel = || state.generation.load(Ordering::SeqCst) != my_gen;
-    Ok(search_tree(
-        &root_path, &root, &workspace, &matcher, &None, cap, &cancel,
-    ))
+        if !root_path.is_dir() {
+            return Err(format!("not a directory: {root}"));
+        }
+
+        let cancel = || generation.load(Ordering::SeqCst) != my_gen;
+        Ok(search_tree(
+            &root_path, &root, &workspace, &matcher, &None, cap, &cancel,
+        ))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[derive(Serialize)]
@@ -378,7 +395,12 @@ pub async fn fs_glob(
     root: String,
     max_results: Option<usize>,
     workspace: Option<WorkspaceEnv>,
+    registry: tauri::State<'_, WorkspaceRegistry>,
 ) -> Result<GlobResponse, String> {
+    let ws = WorkspaceEnv::from_option(workspace.clone());
+    let root_path = resolve_path(&root, &ws);
+    security::validate_read(&root_path)?;
+    require_authorized(&registry, &root_path)?;
     tauri::async_runtime::spawn_blocking(move || {
         fs_glob_blocking(pattern, root, max_results, workspace)
     })
@@ -386,7 +408,7 @@ pub async fn fs_glob(
     .map_err(|e| e.to_string())?
 }
 
-fn fs_glob_blocking(
+pub fn fs_glob_blocking(
     pattern: String,
     root: String,
     max_results: Option<usize>,

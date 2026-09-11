@@ -39,6 +39,8 @@ The comparison surface normalizes paths: backslashes to forward slashes, strips 
 
 This is the allow side of the file-system boundary. Any new feature that spawns a shell or mutates files outside the current workspace must interact with this registry.
 
+Every `fs::*` command enforces it: after the deny-list guard it calls `workspace::require_authorized`, which canonicalises the target (`WorkspaceRegistry::is_authorized_canonical`) so a `..` segment or a symlink cannot defeat the root check, and refuses any path outside an authorized root. The read/write commands delegate to pure `*_blocking` walkers so the authorization stays in the thin command shell and the walkers remain unit-testable.
+
 ## AI tool approval flow
 
 In `src/modules/ai/tools/tools.ts`:
