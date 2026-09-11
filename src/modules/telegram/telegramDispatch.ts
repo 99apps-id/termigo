@@ -21,7 +21,6 @@ import {
 } from "./telegramHelpers";
 import {
   telegramOriginMessageIds,
-  TELEGRAM_ORIGIN_MAX,
   recordTelegramText,
   isTelegramOriginText,
   markMessageSeen,
@@ -29,6 +28,7 @@ import {
   pauseMirror,
   resumeMirror,
   getMirrorPauseCount,
+  rememberTelegramOrigin,
 } from "./telegramDedup";
 import {
   publishProgress,
@@ -52,6 +52,13 @@ function sleep(signal: AbortSignal, ms: number): Promise<void> {
   });
 }
 
+/** How many times the mirror re-attempts a Termigo -> Telegram send before it
+ *  gives up and marks the message seen. Bounded so a permanently undeliverable
+ *  message cannot be re-sent every two seconds for the life of the session. */
+const MAX_MIRROR_SEND_ATTEMPTS = 3;
+/** Consecutive mirror-send failures, keyed by session + message. */
+const mirrorSendFailures = new Map<string, number>();
+
 function base64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
   const binary = atob(b64);
   const bytes = new Uint8Array(binary.length);
@@ -60,6 +67,13 @@ function base64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
   }
   return bytes;
 }
+
+/** Terminal lines waitForReply can return, named so the send loop can tell a
+ *  real answer apart from a status fallback without string-matching drift. */
+export const NO_OUTPUT_REPLY = "Run produced no text output.";
+export const STILL_RUNNING_REPLY =
+  "Run is still in progress or waiting for approval. Use Telegram inline buttons or /status to check.";
+const FALLBACK_REPLIES = new Set([NO_OUTPUT_REPLY, STILL_RUNNING_REPLY]);
 
 /**
  * Send a reply plus any Mermaid blocks rendered to PNG, so a diagram the agent
@@ -99,8 +113,17 @@ function reportFilesFromAssistant(
   const paths: string[] = [];
   for (const m of relevant) {
     for (const p of m.parts ?? []) {
-      if (p.type !== "tool-call" && p.type !== "tool") continue;
-      if (!p.toolName?.includes("preview_file")) continue;
+      // Built-in tools arrive as `tool-<name>` parts (only dynamic/MCP tools
+      // carry `toolName`), so checking `type === "tool-call"` alone never
+      // matched and this whole report-sending path was dead.
+      const type = typeof p.type === "string" ? p.type : "";
+      const toolName =
+        typeof p.toolName === "string"
+          ? p.toolName
+          : type.startsWith("tool-")
+            ? type.slice(5)
+            : "";
+      if (!toolName.includes("preview_file")) continue;
       const out = p.output as
         | { ok?: boolean; error?: string; path?: string }
         | undefined;
@@ -206,8 +229,23 @@ export async function runMirror(signal: AbortSignal): Promise<void> {
             // Still streaming; send once the run settles so the reply is whole.
             continue;
           }
-          await sendReplyWithDiagrams(chatId, text, signal).catch(() => {});
-          markMessageSeen(m.id, sessionId, m.role, text);
+          const mirrorKey = `${sessionId}:${m.id ?? text.slice(0, 40)}`;
+          try {
+            await sendReplyWithDiagrams(chatId, text, signal);
+            markMessageSeen(m.id, sessionId, m.role, text);
+            mirrorSendFailures.delete(mirrorKey);
+          } catch {
+            // Do NOT mark a failed send as seen: mirroring is best-effort, so
+            // the next tick should retry. Bound the retries so a permanently
+            // undeliverable message cannot be re-sent every two seconds.
+            const attempts = (mirrorSendFailures.get(mirrorKey) ?? 0) + 1;
+            if (attempts >= MAX_MIRROR_SEND_ATTEMPTS) {
+              mirrorSendFailures.delete(mirrorKey);
+              markMessageSeen(m.id, sessionId, m.role, text);
+            } else {
+              mirrorSendFailures.set(mirrorKey, attempts);
+            }
+          }
         }
 
         if (getMirrorPauseCount() === 0) {
@@ -293,15 +331,15 @@ async function waitForReply(
             return "Step limit reached. Use /continue or the Continue button to proceed.";
           }
         }
-        return "Run produced no text output.";
+        return NO_OUTPUT_REPLY;
       }
       if (!busy && Date.now() - started > 25_000) {
-        return "Run produced no text output.";
+        return NO_OUTPUT_REPLY;
       }
     }
     await sleep(signal, 1500);
   }
-  return "Run is still in progress or waiting for approval. Use Telegram inline buttons or /status to check.";
+  return STILL_RUNNING_REPLY;
 }
 
 export async function runAgentAndStream(
@@ -309,7 +347,7 @@ export async function runAgentAndStream(
   chatId: number,
   signal: AbortSignal,
   initialText?: string,
-  _mode: "task" | "question" = "task",
+  mode: "task" | "question" = "task",
 ): Promise<void> {
   try {
     const store = await import("../ai/store/chatStore");
@@ -338,6 +376,7 @@ export async function runAgentAndStream(
         sessionId,
         progressCtl.signal,
         initialText,
+        mode,
       ).catch(() => {});
 
       try {
@@ -357,13 +396,7 @@ export async function runAgentAndStream(
         for (const m of chatAfterSend?.messages ?? []) {
           if (m.id && !priorIds.has(m.id)) {
             markMessageSeen(m.id, sessionId, m.role, messageText(m));
-            telegramOriginMessageIds.add(m.id);
-            while (telegramOriginMessageIds.size > TELEGRAM_ORIGIN_MAX) {
-              const iter = telegramOriginMessageIds.values();
-              const first = iter.next();
-              if (first.done) break;
-              telegramOriginMessageIds.delete(first.value);
-            }
+            rememberTelegramOrigin(m.id);
           }
         }
 
@@ -380,23 +413,25 @@ export async function runAgentAndStream(
           stopReasonSnapshot =
             store.useChatStore.getState().agentMeta.stopReason;
 
-          // Only surface the no-output fallback once per run; otherwise the
-          // polling loop will spam the same status line into the chat.
-          if (reply === "Run produced no text output." || reply === "Run is still in progress or waiting for approval. Use Telegram inline buttons or /status to check.") {
-            if (fallbackSent) {
-              continue;
-            }
-            fallbackSent = true;
+          // Surface a status fallback at most once per run. It must NOT skip
+          // the settle check below: `continue` used to jump straight back into
+          // waitForReply, so a settled run with no fresh assistant text spun
+          // here forever (one 25s wait per cycle) instead of reaching `break`.
+          const isFallback = FALLBACK_REPLIES.has(reply);
+          if (isFallback && fallbackSent) {
+            // Already told the user once. Fall through to the settle check so
+            // an actually-idle run can end this handler.
+          } else {
+            if (isFallback) fallbackSent = true;
+            await sendReplyWithDiagrams(chatId, reply, signal);
           }
-
-          await sendReplyWithDiagrams(chatId, reply, signal);
 
           // Immediately mark fresh assistant message(s) as seen and Telegram-origin.
           const chatAfterReply = store.getChat(sessionId);
           for (const m of chatAfterReply?.messages ?? []) {
             if (m.id && !priorIds.has(m.id)) {
               markMessageSeen(m.id, sessionId, m.role, messageText(m));
-              telegramOriginMessageIds.add(m.id);
+              rememberTelegramOrigin(m.id);
             }
           }
 
@@ -509,7 +544,10 @@ export async function dispatchAndStream(
  * Resume a paused/capped run, bumping to the next step budget tier (25 -> 50 -> 100).
  */
 export function startTelegramResume(chatId: number, signal: AbortSignal): void {
-  pauseMirror();
+  // No pauseMirror here: runAgentAndStream pauses the mirror for the whole run
+  // and releases it in its own finally. A bare pause on this path (which has
+  // several early returns) left the counter permanently above zero, which
+  // silently disabled Termigo -> Telegram mirroring for the rest of the session.
   void (async () => {
     try {
       const store = await import("../ai/store/chatStore");

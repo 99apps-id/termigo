@@ -198,6 +198,16 @@ export type ModelInfo = {
   capabilities: ModelCapabilities;
   tags?: readonly ModelTag[];
   supportsTemperature?: boolean;
+  /**
+   * The id sent to the provider, when it differs from the registry `id`.
+   *
+   * Vendors rename models (DeepSeek's `deepseek-reasoner` was replaced by
+   * `deepseek-flash` / `deepseek-v4-pro`), but the registry `id` has to stay
+   * stable: it is the key for saved selections, favourites, pricing, context
+   * limits and tests. This is what actually goes on the wire, and it can be
+   * changed again without an app release through `modelIdOverrides`.
+   */
+  apiModelId?: string;
 };
 
 export const MODELS = [
@@ -479,6 +489,10 @@ export const MODELS = [
   },
 
   // ── DeepSeek ──────────────────────────────────────────────────────────────
+  // DeepSeek renamed its line-up: `deepseek-reasoner` is retired and the
+  // everyday tier is served as `deepseek-flash`. The registry ids stay as they
+  // were (saved preferences and pricing key off them); `apiModelId` is what the
+  // request actually carries, and Settings lets it be corrected again.
   {
     id: "deepseek-v4-pro",
     provider: "deepseek",
@@ -487,24 +501,17 @@ export const MODELS = [
     description: "Strong open-weight code model.",
     capabilities: { intelligence: 5, speed: 3, cost: 4 },
     tags: ["reasoning", "tools", "coding"],
+    apiModelId: "deepseek-v4-pro",
   },
   {
     id: "deepseek-v4-flash",
     provider: "deepseek",
-    label: "DeepSeek V4 Flash",
+    label: "DeepSeek Flash",
     hint: "Fast",
     description: "Cheap and fast everyday tier.",
     capabilities: { intelligence: 4, speed: 5, cost: 5 },
     tags: ["reasoning", "tools"],
-  },
-  {
-    id: "deepseek-reasoner",
-    provider: "deepseek",
-    label: "DeepSeek Reasoner",
-    hint: "Thinking",
-    description: "Chain-of-thought at open-weight prices.",
-    capabilities: { intelligence: 5, speed: 2, cost: 4 },
-    tags: ["reasoning", "coding"],
+    apiModelId: "deepseek-flash",
   },
 
   // ── Mistral ────────────────────────────────────────────────────────────────
@@ -647,7 +654,7 @@ export const MODELS = [
   // Routed to OpenAI's Codex backend (CHATGPT_BASE_URL), so a ChatGPT Plus/Pro
   // subscription pays for the turn rather than API credits. INTERNAL ids
   // (`chatgpt-*`) so they never collide with the key-billed "openai" models of
-  // the same name; buildLanguageModel maps them to the real backend id.
+  // the same name; `apiModelId` is the real backend id.
   {
     id: "chatgpt-codex",
     provider: "chatgpt",
@@ -657,6 +664,7 @@ export const MODELS = [
     capabilities: { intelligence: 5, speed: 3, cost: 5 },
     tags: ["reasoning", "tools", "coding"],
     supportsTemperature: false,
+    apiModelId: "gpt-5.3-codex",
   },
   {
     id: "chatgpt-codex-mini",
@@ -667,6 +675,7 @@ export const MODELS = [
     capabilities: { intelligence: 4, speed: 5, cost: 5 },
     tags: ["tools", "coding"],
     supportsTemperature: false,
+    apiModelId: "gpt-5.3-codex-mini",
   },
 ] as const satisfies readonly ModelInfo[];
 
@@ -684,16 +693,56 @@ export const CHATGPT_HEADERS: Record<string, string> = {
 
 export type ModelId = (typeof MODELS)[number]["id"];
 
+/**
+ * The model id that goes on the wire for a registry model id.
+ *
+ * Precedence: a user override > the registry's `apiModelId` > the registry id.
+ * Kept pure and dependency-light so every caller (the run, sub-agents, the
+ * autocomplete path, the Telegram picker) resolves the same id from the same
+ * place; a vendor rename is a data change, not a code change.
+ *
+ * A `compat-*` id is returned unchanged: its real model id lives on the
+ * endpoint and is resolved by the caller that owns the endpoint list.
+ */
+export function resolveApiModelId(
+  modelId: string,
+  overrides: Readonly<Record<string, string>> = {},
+): string {
+  if (isCompatModelId(modelId)) return modelId;
+  const override = overrides[modelId]?.trim();
+  if (override) return override;
+  const m = MODELS.find((x) => x.id === modelId);
+  return m?.apiModelId?.trim() || modelId;
+}
+
+/** True when the id on the wire differs from the registry id. */
+export function apiModelIdDiffers(
+  modelId: string,
+  overrides: Readonly<Record<string, string>> = {},
+): boolean {
+  return (
+    !isCompatModelId(modelId) &&
+    resolveApiModelId(modelId, overrides) !== modelId
+  );
+}
+
 export function resolveModelLabel(
   modelId: string,
   endpoints: readonly CustomEndpoint[] = [],
+  overrides: Readonly<Record<string, string>> = {},
 ): string {
   const info = resolveModel(modelId, endpoints);
-  return (
+  const base =
     [PROVIDERS.find((p) => p.id === info.provider)?.label, info.label]
       .filter(Boolean)
-      .join(" ") || modelId
-  );
+      .join(" ") || modelId;
+  // A compat endpoint's label already IS its wire id; for a built-in model whose
+  // wire id differs (a vendor rename or a user override) both are worth showing,
+  // because the wire id is the one that fails when it is wrong.
+  const wire = isCompatModelId(modelId)
+    ? ""
+    : resolveApiModelId(modelId, overrides);
+  return wire && wire !== modelId ? `${base} (${wire})` : base;
 }
 
 export function getCompatModelInfo(
@@ -845,7 +894,6 @@ export const MODEL_CONTEXT_LIMITS: Record<string, number> = {
   // from the observed overshoot — so this stays the real cap, not a guess.
   "deepseek-v4-pro": 1_000_000,
   "deepseek-v4-flash": 1_000_000,
-  "deepseek-reasoner": 128_000,
   "gpt-oss-120b": 128_000,
   "llama3.3-70b": 128_000,
   "qwen-3-32b": 32_000,

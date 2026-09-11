@@ -587,6 +587,36 @@ export function synthesisStopDecision(
   return { stop: false, requested: true };
 }
 
+/** What a completed step means once a forced tool-less synthesis step was
+ *  requested. */
+export type SynthesisStepOutcome = "pending" | "summary" | "ignored";
+
+/**
+ * Classifies the step that follows a synthesis request.
+ *
+ * `requestedAtStepCount` is the number of completed steps at the moment the
+ * request was made, so a count not greater than it is still the step that
+ * raised the request (the request is made from that step's own boundary).
+ *
+ * - `pending`: the synthesis step has not run yet.
+ * - `summary`: the model produced prose (or no tool call at all), which is the
+ *   user-facing answer we asked for.
+ * - `ignored`: the step was tool-only. `toolChoice: "none"` is not honoured by
+ *   every provider, and without this branch the ignored step falls through to
+ *   the step cap, whose stop reason is auto-continued - replaying the exact same
+ *   context and the exact same tool-only loop forever.
+ */
+export function synthesisStepOutcome(
+  completedSteps: number,
+  requestedAtStepCount: number,
+  lastStep: { toolCalls: number; hasText: boolean },
+): SynthesisStepOutcome {
+  if (requestedAtStepCount < 0 || completedSteps <= requestedAtStepCount) {
+    return "pending";
+  }
+  return lastStep.toolCalls === 0 || lastStep.hasText ? "summary" : "ignored";
+}
+
 /** Stops after `maxIdle` consecutive text-only steps. A real text turn ends
  *  on its own and never chains another empty step. */
 export function noProgressStop<T extends ToolSet>(
@@ -1097,12 +1127,25 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // model accepting a forced tool choice (reasoning models reject it).
   const allowSynthesis = modelAllowsForcedToolChoice(info);
   let synthesisRequested = false;
+  // Step count when the synthesis step was requested, so the stop conditions can
+  // tell "the step that asked for it" from "the step that answered it".
+  let synthesisRequestedAtStepCount = -1;
+  // Set when a guard decides the run must end but cannot stop the loop itself
+  // (onStepFinish runs before the stop conditions are checked). The first stop
+  // condition honours it.
+  let forcedStop = false;
   let consecutiveToolOnlySteps = 0;
   const MAX_TOOL_ONLY_STEPS_BEFORE_SYNTHESIS = 2;
   const requestSynthesisOrStop = (reason: AgentStopReason): boolean => {
-    stopReason ??= reason;
     const d = synthesisStopDecision(allowSynthesis, synthesisRequested);
+    if (d.requested && synthesisRequestedAtStepCount < 0) {
+      synthesisRequestedAtStepCount = stepsSeen;
+    }
     synthesisRequested = d.requested;
+    stopReason ??= reason;
+    if (d.stop) {
+      forcedStop = true;
+    }
     return d.stop;
   };
 
@@ -1127,6 +1170,31 @@ export async function runAgentStream(opts: RunAgentOptions) {
         return true;
       }
       return false;
+    },
+    // A guard that fired from onStepFinish (the tool-only-loop check) set this;
+    // onStepFinish cannot end the loop by returning, so carry it here.
+    (_args) => forcedStop,
+    // The synthesis step ran and the model called tools anyway: the provider
+    // ignored `toolChoice: "none"`. This MUST win over the step-cap reason
+    // recorded when synthesis was requested, because "step-cap" is the one
+    // reason the runtime auto-continues - and auto-continuing here replays the
+    // same context into the same tool-only loop indefinitely.
+    (args) => {
+      const steps =
+        (args as { steps?: Array<{ toolCalls?: unknown[]; text?: string }> })
+          .steps ?? [];
+      const last = steps[steps.length - 1];
+      const outcome = synthesisStepOutcome(
+        steps.length,
+        synthesisRequestedAtStepCount,
+        {
+          toolCalls: last?.toolCalls?.length ?? 0,
+          hasText: Boolean(last?.text?.trim()),
+        },
+      );
+      if (outcome !== "ignored") return false;
+      stopReason = "tool-only-loop";
+      return true;
     },
     (args) =>
       (capPred(args) as boolean) ? requestSynthesisOrStop("step-cap") : false,
@@ -1173,13 +1241,24 @@ export async function runAgentStream(opts: RunAgentOptions) {
       return false;
     },
     // Once a synthesis step was requested, stop as soon as the model produces a
-    // tool-less (text) step — that is the summary we asked for.
+    // tool-less (text) step — that is the summary we asked for. `ignored` is
+    // handled above (it must not be reported as the auto-continued reason).
     (args) => {
       if (!synthesisRequested) return false;
       const steps =
-        (args as { steps?: Array<{ toolCalls?: unknown[] }> }).steps ?? [];
+        (args as { steps?: Array<{ toolCalls?: unknown[]; text?: string }> })
+          .steps ?? [];
       const last = steps[steps.length - 1];
-      return (last?.toolCalls?.length ?? 0) === 0;
+      return (
+        synthesisStepOutcome(
+          steps.length,
+          synthesisRequestedAtStepCount,
+          {
+            toolCalls: last?.toolCalls?.length ?? 0,
+            hasText: Boolean(last?.text?.trim()),
+          },
+        ) === "summary"
+      );
     },
   ];
 

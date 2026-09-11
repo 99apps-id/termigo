@@ -46,6 +46,26 @@ async function modelLabel(modelId: string): Promise<string> {
   return resolveModelLabel(modelId);
 }
 
+/**
+ * Whether a message may act as the paired owner.
+ *
+ * A chat id is shared by every member of a group, so the chat-level check is
+ * not enough: any member could otherwise send /run, drive the default prompt
+ * path, or /stop and /new the owner's session. `ownerUserId` is pinned at
+ * /pair; when it is unset, a private chat id IS the user id (group ids are
+ * negative), which covers bots paired from Settings - that path writes the chat
+ * id but never a user id. When neither is known the bot is open, matching the
+ * documented "open to all chats" state.
+ */
+function isOwnerUser(from?: { id: number }): boolean {
+  const store = useTelegramStore.getState();
+  const ownerUserId = store.ownerUserId;
+  if (ownerUserId) return !!from && String(from.id) === String(ownerUserId);
+  const chatId = store.chatId;
+  if (!chatId || chatId.startsWith("-")) return true;
+  return !!from && String(from.id) === chatId;
+}
+
 export async function buildStatus(): Promise<string> {
   const store = useTelegramStore.getState();
   const chat = await import("../ai/store/chatStore");
@@ -166,17 +186,18 @@ export async function handleCallback(
     await answerCallback(cb.id, "Unauthorized.", signal);
     return;
   }
-  // Sensitive callbacks (tool approval, subagent approval, elicitation answer)
-  // must come from the pairing *user*: a group chat shares one chatId with all
-  // members, so the chat-level check above would let any member act as owner.
-  const ownerUserId = useTelegramStore.getState().ownerUserId;
-  if (
-    ownerUserId &&
-    (data.startsWith("ap:") ||
-      data.startsWith("aq:") ||
-      data.startsWith("el:")) &&
-    (!cb.from || String(cb.from.id) !== String(ownerUserId))
-  ) {
+  // Sensitive callbacks must come from the pairing *user*: a group chat shares
+  // one chatId with all members, so the chat-level check above would let any
+  // member take an owner action. `resume:run` starts a real agent round, and
+  // `mp:`/`ms:` change the model every later run uses, so they are included.
+  const sensitiveCallback =
+    data.startsWith("ap:") ||
+    data.startsWith("aq:") ||
+    data.startsWith("el:") ||
+    data.startsWith("resume:") ||
+    data.startsWith("mp:") ||
+    data.startsWith("ms:");
+  if (sensitiveCallback && !isOwnerUser(cb.from)) {
     await answerCallback(cb.id, "Unauthorized.", signal);
     return;
   }
@@ -217,7 +238,7 @@ export async function handleCallback(
     const state = await import("../ai/store/chatStore");
     state.useChatStore.getState().setSelectedModelId(resolved);
     const { setDefaultModel } = await import("@/modules/settings/store");
-    void setDefaultModel(resolved);
+    await setDefaultModel(resolved).catch(() => {});
     await answerCallback(cb.id, `Model set to ${resolved}`, signal);
     await editKeyboard(
       chatId,
@@ -230,7 +251,10 @@ export async function handleCallback(
   }
 
   if (data.startsWith("ap:")) {
-    const [, action, id] = data.split(":");
+    const [, action, ...rest] = data.split(":");
+    // Rejoin so an approval id containing a colon is not silently truncated
+    // (which reported "Approved." while answering nothing).
+    const id = rest.join(":");
     const approved =
       action === "approve" || action === "session" || action === "always";
     const state = await import("../ai/store/chatStore");
@@ -271,7 +295,8 @@ export async function handleCallback(
   }
 
   if (data.startsWith("aq:")) {
-    const [, action, id] = data.split(":");
+    const [, action, ...rest] = data.split(":");
+    const id = rest.join(":");
     const aq = await import("../ai/store/approvalQueueStore");
     const approved =
       action === "approve" || action === "session" || action === "always";
@@ -298,8 +323,12 @@ export async function handleCallback(
   }
 
   if (data.startsWith("el:")) {
-    const [, id, idxStr] = data.split(":");
-    const idx = parseInt(idxStr, 10);
+    // The index is the LAST colon-separated field, so an id that contains a
+    // colon (opaque, third-party supplied) is preserved.
+    const rest = data.slice(3);
+    const sep = rest.lastIndexOf(":");
+    const id = sep === -1 ? rest : rest.slice(0, sep);
+    const idx = parseInt(sep === -1 ? "" : rest.slice(sep + 1), 10);
     const el = await import("../ai/store/elicitationStore");
     const item = el.useElicitationStore
       .getState()
@@ -394,6 +423,7 @@ export async function handleUpdate(u: Update, signal: AbortSignal): Promise<void
       await sendTelegram(chatId, HELP, signal);
       return;
     case "/query": {
+      if (!isOwnerUser(msg.from)) return;
       if (!tail)
         return void (await sendTelegram(
           chatId,
@@ -411,6 +441,7 @@ export async function handleUpdate(u: Update, signal: AbortSignal): Promise<void
       return;
     }
     case "/run": {
+      if (!isOwnerUser(msg.from)) return;
       if (!tail)
         return void (await sendTelegram(chatId, "Usage: /run <task>", signal));
       await ensureChatSession(chatId, msg.message_thread_id ?? null);
@@ -426,11 +457,13 @@ export async function handleUpdate(u: Update, signal: AbortSignal): Promise<void
     case "/continue":
     case "/resume":
     case "/next": {
+      if (!isOwnerUser(msg.from)) return;
       await ensureChatSession(chatId, msg.message_thread_id ?? null);
       startTelegramResume(chatId, signal);
       return;
     }
     case "/stop": {
+      if (!isOwnerUser(msg.from)) return;
       await ensureChatSession(chatId, msg.message_thread_id ?? null);
       const runtime = await import("../ai/store/chatRuntime");
       await runtime.stopRun();
@@ -442,6 +475,7 @@ export async function handleUpdate(u: Update, signal: AbortSignal): Promise<void
       return;
     }
     case "/new": {
+      if (!isOwnerUser(msg.from)) return;
       const state = await import("../ai/store/chatStore");
       state.useChatStore
         .getState()
@@ -450,6 +484,7 @@ export async function handleUpdate(u: Update, signal: AbortSignal): Promise<void
       return;
     }
     case "/model": {
+      if (!isOwnerUser(msg.from)) return;
       const state = await import("../ai/store/chatStore");
       if (!tail) {
         const current = state.useChatStore.getState().selectedModelId;
@@ -484,11 +519,12 @@ export async function handleUpdate(u: Update, signal: AbortSignal): Promise<void
       }
       state.useChatStore.getState().setSelectedModelId(resolved);
       const { setDefaultModel } = await import("@/modules/settings/store");
-      void setDefaultModel(resolved);
+      await setDefaultModel(resolved).catch(() => {});
       await sendTelegram(chatId, `Model set to ${resolved}.`, signal);
       return;
     }
     case "/cost": {
+      if (!isOwnerUser(msg.from)) return;
       const { costToday, loadCostLedger, sumCost } = await import(
         "../ai/lib/costLedger"
       );
@@ -679,6 +715,7 @@ export async function handleUpdate(u: Update, signal: AbortSignal): Promise<void
         await sendTelegram(chatId, HELP, signal);
         return;
       }
+      if (!isOwnerUser(msg.from)) return;
       startTelegramDispatch(
         text,
         chatId,

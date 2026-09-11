@@ -10,6 +10,14 @@ import { useTelegramStore } from "./store";
 
 export let loopController: AbortController | null = null;
 export let mirrorController: AbortController | null = null;
+/**
+ * Signal the update handlers (and therefore the agent runs they dispatch) run
+ * under. Kept separate from `loopController` on purpose: the stall watchdog
+ * recycles `loopController` to recover `getUpdates`, and aborting the signal
+ * the runs share would cancel every in-flight run the moment polling hiccups.
+ * Only `stopTelegramBot` aborts this one.
+ */
+export let relayController: AbortController | null = null;
 
 export let currentUpdateOffset = 0;
 export let lastPollProgressTime = Date.now();
@@ -68,9 +76,25 @@ async function runLoop(signal: AbortSignal): Promise<void> {
       lastPollProgressTime = Date.now();
       useTelegramStore.getState().setOnline(true);
       useTelegramStore.getState().setLastError(null);
+      // Handlers run under the relay signal, not the poll signal, so a watchdog
+      // recycle of the poller never cancels an in-flight agent run.
+      const relaySignal = relayController?.signal ?? signal;
       for (const u of data.result ?? []) {
+        if (signal.aborted || relaySignal.aborted) break;
+        // One bad update (a malformed payload, a 400 from answerCallback on an
+        // expired query) must not drop the rest of the batch. Catch per update
+        // and still advance past it, or Telegram redelivers the poison update
+        // on every poll forever.
+        try {
+          await handleUpdate(u, relaySignal);
+        } catch (e) {
+          console.warn(
+            `[Telegram] update ${u.update_id} handler failed: ${
+              e instanceof Error ? e.message : String(e)
+            }`,
+          );
+        }
         currentUpdateOffset = Math.max(currentUpdateOffset, u.update_id + 1);
-        await handleUpdate(u, signal);
       }
     } catch (e) {
       if (signal.aborted) break;
@@ -96,6 +120,7 @@ export async function startTelegramBot(): Promise<void> {
   loopController = controller;
   const mirror = new AbortController();
   mirrorController = mirror;
+  relayController = new AbortController();
   lastPollProgressTime = Date.now();
   if (watchdogTimer) clearInterval(watchdogTimer);
   watchdogTimer = setInterval(checkPollingStall, 15_000);
@@ -124,5 +149,7 @@ export function stopTelegramBot(): void {
   loopController = null;
   mirrorController?.abort();
   mirrorController = null;
+  relayController?.abort();
+  relayController = null;
   useTelegramStore.getState().setOnline(false);
 }

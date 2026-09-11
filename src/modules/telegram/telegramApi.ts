@@ -148,15 +148,17 @@ export async function apiPostForm(
 export function sleep(signal: AbortSignal, ms: number): Promise<void> {
   if (signal.aborted) return Promise.resolve();
   return new Promise((resolve) => {
-    const t = setTimeout(resolve, ms);
-    signal.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(t);
-        resolve();
-      },
-      { once: true },
-    );
+    const onAbort = () => {
+      clearTimeout(t);
+      resolve();
+    };
+    const t = setTimeout(() => {
+      // Remove the listener when the timer wins, or a long-lived signal
+      // accumulates one per sleep (the 429 backoff path hit this).
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", onAbort, { once: true });
   });
 }
 

@@ -230,6 +230,10 @@ export function extractToolSummaries(parts: unknown[]): ToolCallSummary[] {
 
     if (rawState === "approval-requested") {
       state = "awaiting-approval";
+    } else if (rawState === "output-error") {
+      // `output-error` is a real part state in this codebase; without this a
+      // failed call rendered as "⚡ Running ..." for the rest of the run.
+      state = "error";
     } else if (rawState === "output-available") {
       const out = part.output as Record<string, unknown> | undefined;
       state = out && typeof out.error === "string" ? "error" : "done";
@@ -429,10 +433,12 @@ export function markdownToTelegramHtml(markdown: string): string {
   // 12. Strikethrough: ~~text~~
   text = text.replace(/~~(.+?)~~/g, "<s>$1</s>");
 
-  // 13. Links: [label](url)
+  // 13. Links: [label](url). The URL goes into an attribute, so a quote must
+  // not be able to close it early (escapeHtml does not touch quotes).
   text = text.replace(
     /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
-    '<a href="$2">$1</a>',
+    (_match, label: string, url: string) =>
+      `<a href="${url.replace(/"/g, "%22")}">${label}</a>`,
   );
 
   // 14. Blockquotes: > quote -> Telegram HTML parse_mode does not support <blockquote>,

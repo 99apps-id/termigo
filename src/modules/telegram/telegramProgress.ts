@@ -17,6 +17,19 @@ export const progressCtrls = new Map<number, AbortController>();
 export const lastFinishedProgressMessageIds = new Map<number, number>();
 export const sentApprovalIds = new Set<string>();
 
+/** Approval ids are remembered so a prompt is only ever posted once, but they
+ *  are otherwise useless after the run. Cap the set so a long-lived session
+ *  cannot grow it without bound, dropping the oldest (insertion order). */
+const SENT_APPROVAL_IDS_MAX = 200;
+function rememberSentApproval(id: string): void {
+  sentApprovalIds.add(id);
+  while (sentApprovalIds.size > SENT_APPROVAL_IDS_MAX) {
+    const first = sentApprovalIds.values().next();
+    if (first.done) break;
+    sentApprovalIds.delete(first.value);
+  }
+}
+
 function sleep(signal: AbortSignal, ms: number): Promise<void> {
   return new Promise((resolve) => {
     if (signal.aborted) return resolve();
@@ -49,10 +62,21 @@ export async function publishProgress(
   let lastSentAt = 0;
   let lastTypingAt = 0;
   let lastLiveTextPokeAt = 0;
+  // Consecutive failures of the FIRST progress send. A persistent failure (the
+  // bot blocked by the user, the chat deleted, HTML the fallback also rejects)
+  // would otherwise re-send every second for the whole run, and that request
+  // flood trips Telegram's per-token rate limit, breaking long-polling too.
+  let progressSendFailures = 0;
+  // Per-id send attempts, so a prompt whose send failed is retried a bounded
+  // number of times instead of being recorded as delivered (lost forever) or
+  // retried forever.
+  const approvalSendAttempts = new Map<string, number>();
+  const elicitationSendAttempts = new Map<string, number>();
   const sentElicitationIds = new Set<string>();
   const started = Date.now();
   const MAX_WAIT = 30 * 60 * 1000;
-  // Tracks step-cap detection to avoid sending the Continue button twice
+  const MAX_PROMPT_SEND_ATTEMPTS = 3;
+  // Tracks step-cap detection so the auto-continue re-check runs at most once.
   let stepCapNotified = false;
 
   if (mode === "question") {
@@ -124,12 +148,19 @@ export async function publishProgress(
       });
 
       if (!progressMessageId) {
-        progressMessageId = await sendProgressMessage(chatId, liveText, signal);
-        lastLiveText = liveText;
-        lastSentAt = now;
-        lastTypingAt = now;
-        // Telegram client clears typing indicator when a message is received; re-send typing immediately.
-        await sendTyping(chatId, signal).catch(() => {});
+        const sentId = await sendProgressMessage(chatId, liveText, signal);
+        if (sentId == null) {
+          progressSendFailures += 1;
+          if (progressSendFailures >= MAX_PROMPT_SEND_ATTEMPTS) return;
+        } else {
+          progressSendFailures = 0;
+          progressMessageId = sentId;
+          lastLiveText = liveText;
+          lastSentAt = now;
+          lastTypingAt = now;
+          // Telegram client clears typing indicator when a message is received; re-send typing immediately.
+          await sendTyping(chatId, signal).catch(() => {});
+        }
       } else if (liveText !== lastLiveText && now - lastSentAt >= 1500) {
         lastLiveText = liveText;
         await editProgressMessage(chatId, progressMessageId, liveText, signal);
@@ -150,54 +181,83 @@ export async function publishProgress(
 
       // Surface pending approvals as interactive inline buttons in Telegram
       for (const p of pendingApprovals) {
-        if (!sentApprovalIds.has(p.id)) {
-          sentApprovalIds.add(p.id);
-          const prefix = p.source === "queue" ? "aq" : "ap";
-          const keyboard: InlineButton[][] = [
-            [
-              { text: "Approve", callback_data: `${prefix}:approve:${p.id}` },
-              { text: "Deny", callback_data: `${prefix}:deny:${p.id}` },
-            ],
-            [
-              {
-                text: "Allow session",
-                callback_data: `${prefix}:session:${p.id}`,
-              },
-              {
-                text: "Allow always",
-                callback_data: `${prefix}:always:${p.id}`,
-              },
-            ],
-          ];
-          await sendKeyboard(
-            chatId,
-            `Action Approval Required:\nTool: ${p.toolName}\nTarget: ${p.summary || p.toolName}\n(Reply /approve or /deny)`,
-            keyboard,
-            signal,
-          ).catch(() => {});
-          lastSentAt = now;
+        if (sentApprovalIds.has(p.id)) continue;
+        const attempts = approvalSendAttempts.get(p.id) ?? 0;
+        if (attempts >= MAX_PROMPT_SEND_ATTEMPTS) {
+          // Persistent send failure: stop retrying so the loop does not hammer
+          // Telegram. /approve and /deny still work from the chat.
+          rememberSentApproval(p.id);
+          continue;
         }
+        const prefix = p.source === "queue" ? "aq" : "ap";
+        const keyboard: InlineButton[][] = [
+          [
+            { text: "Approve", callback_data: `${prefix}:approve:${p.id}` },
+            { text: "Deny", callback_data: `${prefix}:deny:${p.id}` },
+          ],
+          [
+            {
+              text: "Allow session",
+              callback_data: `${prefix}:session:${p.id}`,
+            },
+            {
+              text: "Allow always",
+              callback_data: `${prefix}:always:${p.id}`,
+            },
+          ],
+        ];
+        // Record only a delivered prompt: recording first meant a single failed
+        // send lost the approval forever and the run sat in awaiting-approval
+        // with nothing for the user to click.
+        const ok = await sendKeyboard(
+          chatId,
+          `Action Approval Required:\nTool: ${p.toolName}\nTarget: ${p.summary || p.toolName}\n(Reply /approve or /deny)`,
+          keyboard,
+          signal,
+        ).then(
+          () => true,
+          () => false,
+        );
+        if (ok) {
+          rememberSentApproval(p.id);
+          approvalSendAttempts.delete(p.id);
+        } else {
+          approvalSendAttempts.set(p.id, attempts + 1);
+        }
+        lastSentAt = now;
       }
 
       // Surface questions from ask_user (elicitation)
       const elStore = await import("../ai/store/elicitationStore");
       const elPending = elStore.useElicitationStore.getState().pending;
       for (const el of elPending) {
-        if (!sentElicitationIds.has(el.id)) {
+        if (sentElicitationIds.has(el.id)) continue;
+        const attempts = elicitationSendAttempts.get(el.id) ?? 0;
+        if (attempts >= MAX_PROMPT_SEND_ATTEMPTS) {
           sentElicitationIds.add(el.id);
-          const keyboard: InlineButton[][] = el.options
-            .slice(0, 6)
-            .map((opt, i) => [
-              { text: opt.slice(0, 40), callback_data: `el:${el.id}:${i}` },
-            ]);
-          await sendKeyboard(
-            chatId,
-            `Agent Question:\n${el.question}`,
-            keyboard,
-            signal,
-          ).catch(() => {});
-          lastSentAt = now;
+          continue;
         }
+        const keyboard: InlineButton[][] = el.options
+          .slice(0, 6)
+          .map((opt, i) => [
+            { text: opt.slice(0, 40), callback_data: `el:${el.id}:${i}` },
+          ]);
+        const ok = await sendKeyboard(
+          chatId,
+          `Agent Question:\n${el.question}`,
+          keyboard,
+          signal,
+        ).then(
+          () => true,
+          () => false,
+        );
+        if (ok) {
+          sentElicitationIds.add(el.id);
+          elicitationSendAttempts.delete(el.id);
+        } else {
+          elicitationSendAttempts.set(el.id, attempts + 1);
+        }
+        lastSentAt = now;
       }
 
       if (!busy && !stepCapNotified) {
@@ -214,24 +274,10 @@ export async function publishProgress(
             afterWait.status === "idle" &&
             afterWait.stopReason === "step-cap"
           ) {
+            // The Continue keyboard is sent by runAgentAndStream, which owns
+            // the post-run prompts. Sending it here too produced two identical
+            // buttons (and two queued resumes if both were tapped).
             stepCapNotified = true;
-            const { stepBudgetForRound } = await import("../ai/config");
-            const nextBudget = stepBudgetForRound(
-              (afterWait.runRound ?? 0) + 1,
-            );
-            await sendKeyboard(
-              chatId,
-              `Step limit reached (round ${afterWait.runRound ?? 1}). Continue to next round (${nextBudget} steps)?`,
-              [
-                [
-                  {
-                    text: `>> Continue (${nextBudget} steps)`,
-                    callback_data: "resume:run",
-                  },
-                ],
-              ],
-              signal,
-            ).catch(() => {});
             break;
           }
           stepCapNotified = false;

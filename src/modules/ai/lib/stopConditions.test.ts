@@ -5,6 +5,7 @@ import {
   noErrorProgress,
   noProgressStop,
   noToolRepetition,
+  synthesisStepOutcome,
   synthesisStopDecision,
   type CircuitBreakerState,
 } from "./agent";
@@ -288,6 +289,38 @@ describe("synthesisStopDecision", () => {
       stop: true,
       requested: true,
     });
+  });
+});
+
+describe("synthesisStepOutcome", () => {
+  const step = (toolCalls: number, hasText = false) => ({
+    toolCalls,
+    hasText,
+  });
+
+  it("is pending before the synthesis step has run", () => {
+    expect(synthesisStepOutcome(3, 3, step(1))).toBe("pending");
+    expect(synthesisStepOutcome(2, 3, step(0))).toBe("pending");
+  });
+
+  it("is pending when no synthesis was requested", () => {
+    expect(synthesisStepOutcome(5, -1, step(2))).toBe("pending");
+  });
+
+  it("is a summary when the step after the request has no tool calls", () => {
+    expect(synthesisStepOutcome(4, 3, step(0))).toBe("summary");
+  });
+
+  it("is a summary when the step produced prose alongside a tool call", () => {
+    // The user got a real answer, so this is not the degenerate tool-only loop.
+    expect(synthesisStepOutcome(4, 3, step(1, true))).toBe("summary");
+  });
+
+  it("is ignored when the step after the request is tool-only", () => {
+    // This is the case that used to fall through to the step cap and get
+    // auto-continued, replaying the same context into the same tool-only loop.
+    expect(synthesisStepOutcome(4, 3, step(1))).toBe("ignored");
+    expect(synthesisStepOutcome(4, 3, step(3))).toBe("ignored");
   });
 });
 

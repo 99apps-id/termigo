@@ -39,6 +39,18 @@ export function isTelegramOriginText(text: string): boolean {
   return false;
 }
 
+/** Stable key for the seen-message set. When a message carries no id the text
+ *  stands in, but folded with its length so two distinct id-less messages that
+ *  share their first 80 characters are not treated as one. */
+function seenFingerprint(
+  sessionId: string,
+  role: string,
+  id: string | undefined,
+  text: string,
+): string {
+  return `${sessionId}:${role}:${id ?? `${text.length}:${text.slice(0, 80)}`}`;
+}
+
 export function markMessageSeen(
   id: string | undefined,
   sessionId: string,
@@ -54,7 +66,7 @@ export function markMessageSeen(
       seenMessageIds.delete(first.value);
     }
   }
-  const fp = `${sessionId}:${role}:${id ?? text.slice(0, 80)}`;
+  const fp = seenFingerprint(sessionId, role, id, text);
   seenFingerprints.add(fp);
   while (seenFingerprints.size > 2000) {
     const iter = seenFingerprints.values();
@@ -71,8 +83,7 @@ export function isMessageSeen(
   text: string,
 ): boolean {
   if (id && seenMessageIds.has(id)) return true;
-  const fp = `${sessionId}:${role}:${id ?? text.slice(0, 80)}`;
-  return seenFingerprints.has(fp);
+  return seenFingerprints.has(seenFingerprint(sessionId, role, id, text));
 }
 
 export function pauseMirror(): void {
@@ -85,6 +96,18 @@ export function resumeMirror(): void {
 
 export function getMirrorPauseCount(): number {
   return mirrorPauseCount;
+}
+
+/** Record a message id as Telegram-origin, keeping the set bounded. Both the
+ *  post-inject and post-reply marking passes must use this; the second pass
+ *  used to add without trimming, so the cap was meaningless. */
+export function rememberTelegramOrigin(id: string): void {
+  telegramOriginMessageIds.add(id);
+  while (telegramOriginMessageIds.size > TELEGRAM_ORIGIN_MAX) {
+    const first = telegramOriginMessageIds.values().next();
+    if (first.done) break;
+    telegramOriginMessageIds.delete(first.value);
+  }
 }
 
 // Exported for tests and internal consumers.
