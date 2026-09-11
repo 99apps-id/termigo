@@ -1,0 +1,463 @@
+// Telegram Bot API HTTP client and low-level message senders.
+//
+// Extracted from bot.ts so the polling, command, and progress layers can
+// share one token-aware fetch wrapper plus retry/rate-limit behaviour.
+
+import { getTelegramToken } from "./keyring";
+import {
+  markdownToTelegramHtml,
+  escapePlainTextToHtml,
+} from "./progressFormat";
+
+export type InlineButton = { text: string; callback_data: string };
+
+export const API = "https://api.telegram.org";
+
+export class TelegramApiError extends Error {
+  readonly status: number;
+  readonly description: string;
+  readonly retryAfter?: number;
+
+  constructor(status: number, description: string, retryAfter?: number) {
+    super(`Telegram API ${status}: ${description}`);
+    this.name = "TelegramApiError";
+    this.status = status;
+    this.description = description;
+    this.retryAfter = retryAfter;
+  }
+}
+
+function mergeSignals(
+  parent: AbortSignal,
+  timeoutMs: number,
+): { signal: AbortSignal; cleanup: () => void } {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => {
+    ctrl.abort(new Error(`Timeout after ${timeoutMs}ms`));
+  }, timeoutMs);
+
+  const onParentAbort = () => {
+    ctrl.abort(parent.reason);
+  };
+
+  if (parent.aborted) {
+    ctrl.abort(parent.reason);
+  } else {
+    parent.addEventListener("abort", onParentAbort, { once: true });
+  }
+
+  return {
+    signal: ctrl.signal,
+    cleanup: () => {
+      clearTimeout(t);
+      parent.removeEventListener("abort", onParentAbort);
+    },
+  };
+}
+
+async function parseTelegramError(res: Response): Promise<TelegramApiError> {
+  const text = await res.text().catch(() => "");
+  try {
+    const json = JSON.parse(text) as {
+      ok?: boolean;
+      error_code?: number;
+      description?: string;
+      parameters?: { retry_after?: number };
+    };
+    const desc = json.description || text.slice(0, 200) || res.statusText;
+    const retryAfter = json.parameters?.retry_after;
+    return new TelegramApiError(res.status, desc, retryAfter);
+  } catch {
+    return new TelegramApiError(
+      res.status,
+      text.slice(0, 200) || res.statusText,
+    );
+  }
+}
+
+export async function apiGet(
+  path: string,
+  signal: AbortSignal,
+  timeoutMs = 15_000,
+): Promise<unknown> {
+  const token = await getTelegramToken();
+  if (!token) throw new Error("No Telegram token configured");
+  const { signal: reqSignal, cleanup } = mergeSignals(signal, timeoutMs);
+  try {
+    const res = await fetch(`${API}/bot${token}/${path}`, {
+      signal: reqSignal,
+    });
+    if (!res.ok) {
+      throw await parseTelegramError(res);
+    }
+    return await res.json();
+  } finally {
+    cleanup();
+  }
+}
+
+export async function apiPost(
+  path: string,
+  body: unknown,
+  signal: AbortSignal,
+  timeoutMs = 15_000,
+): Promise<unknown> {
+  const token = await getTelegramToken();
+  if (!token) throw new Error("No Telegram token configured");
+  const { signal: reqSignal, cleanup } = mergeSignals(signal, timeoutMs);
+  try {
+    const res = await fetch(`${API}/bot${token}/${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: reqSignal,
+    });
+    if (!res.ok) {
+      throw await parseTelegramError(res);
+    }
+    return await res.json();
+  } finally {
+    cleanup();
+  }
+}
+
+export async function apiPostForm(
+  path: string,
+  form: FormData,
+  signal: AbortSignal,
+  timeoutMs = 45_000,
+): Promise<unknown> {
+  const token = await getTelegramToken();
+  if (!token) throw new Error("No Telegram token configured");
+  const { signal: reqSignal, cleanup } = mergeSignals(signal, timeoutMs);
+  try {
+    const res = await fetch(`${API}/bot${token}/${path}`, {
+      method: "POST",
+      body: form,
+      signal: reqSignal,
+    });
+    if (!res.ok) {
+      throw await parseTelegramError(res);
+    }
+    return await res.json();
+  } finally {
+    cleanup();
+  }
+}
+
+export function sleep(signal: AbortSignal, ms: number): Promise<void> {
+  if (signal.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const t = setTimeout(resolve, ms);
+    signal.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(t);
+        resolve();
+      },
+      { once: true },
+    );
+  });
+}
+
+/** Split long messages on newline/word boundaries so nothing is truncated. */
+export function splitTelegramText(text: string, maxLen = 4000): string[] {
+  if (text.length <= maxLen) return [text];
+  const chunks: string[] = [];
+  let remaining = text;
+  while (remaining.length > 0) {
+    if (remaining.length <= maxLen) {
+      chunks.push(remaining);
+      break;
+    }
+    let cut = remaining.lastIndexOf("\n", maxLen);
+    if (cut <= 0) {
+      cut = remaining.lastIndexOf(" ", maxLen);
+    }
+    if (cut <= 0) {
+      cut = maxLen;
+    }
+    const chunk = remaining.slice(0, cut).trimEnd();
+    if (chunk.length > 0) chunks.push(chunk);
+    remaining = remaining.slice(cut).trimStart();
+  }
+  return chunks;
+}
+
+export async function sendTelegram(
+  chatId: number | string,
+  text: string,
+  signal: AbortSignal,
+): Promise<void> {
+  const chunks = splitTelegramText(text);
+  for (const chunk of chunks) {
+    if (signal.aborted) break;
+    const html = markdownToTelegramHtml(chunk);
+    try {
+      await apiPost(
+        "sendMessage",
+        { chat_id: chatId, text: html, parse_mode: "HTML" },
+        signal,
+      );
+    } catch {
+      await apiPost(
+        "sendMessage",
+        {
+          chat_id: chatId,
+          text: escapePlainTextToHtml(chunk),
+          parse_mode: "HTML",
+        },
+        signal,
+      );
+    }
+  }
+}
+
+export async function sendProgressMessage(
+  chatId: number | string,
+  text: string,
+  signal: AbortSignal,
+): Promise<number | null> {
+  const html = markdownToTelegramHtml(text);
+  try {
+    const res = (await apiPost(
+      "sendMessage",
+      { chat_id: chatId, text: html, parse_mode: "HTML" },
+      signal,
+    )) as { ok?: boolean; result?: { message_id?: number } };
+    return res?.result?.message_id ?? null;
+  } catch {
+    try {
+      const res = (await apiPost(
+        "sendMessage",
+        { chat_id: chatId, text },
+        signal,
+      )) as { ok?: boolean; result?: { message_id?: number } };
+      return res?.result?.message_id ?? null;
+    } catch {
+      return null;
+    }
+  }
+}
+
+export async function editProgressMessage(
+  chatId: number | string,
+  messageId: number,
+  text: string,
+  signal: AbortSignal,
+): Promise<boolean> {
+  const html = markdownToTelegramHtml(text);
+  const tryPost = async (body: { text: string; parse_mode?: string }) => {
+    return (await apiPost(
+      "editMessageText",
+      {
+        chat_id: chatId,
+        message_id: messageId,
+        ...body,
+      },
+      signal,
+      10_000,
+    )) as { ok?: boolean };
+  };
+
+  try {
+    await tryPost({ text: html, parse_mode: "HTML" });
+    return true;
+  } catch (err) {
+    if (err instanceof TelegramApiError) {
+      const desc = err.description.toLowerCase();
+      // Exact message already displayed on Telegram: treat as success (Hermes pattern)
+      if (desc.includes("message is not modified")) {
+        return true;
+      }
+      // Rate limited: if retry_after is small (<=3s), back off briefly, else skip intermediate progress
+      if (err.status === 429) {
+        const waitSec = err.retryAfter ?? 2;
+        if (waitSec <= 3 && !signal.aborted) {
+          await sleep(signal, waitSec * 1000);
+          try {
+            await tryPost({ text: html, parse_mode: "HTML" });
+            return true;
+          } catch (retryErr) {
+            if (
+              retryErr instanceof TelegramApiError &&
+              retryErr.description
+                .toLowerCase()
+                .includes("message is not modified")
+            ) {
+              return true;
+            }
+            return false;
+          }
+        }
+        return false;
+      }
+    }
+    // Fallback to plain text if HTML entity parsing fails
+    try {
+      await tryPost({ text });
+      return true;
+    } catch (fallbackErr) {
+      if (
+        fallbackErr instanceof TelegramApiError &&
+        fallbackErr.description
+          .toLowerCase()
+          .includes("message is not modified")
+      ) {
+        return true;
+      }
+      return false;
+    }
+  }
+}
+
+export async function deleteTelegramMessage(
+  chatId: number | string,
+  messageId: number,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  try {
+    await apiPost(
+      "deleteMessage",
+      { chat_id: chatId, message_id: messageId },
+      signal ?? AbortSignal.timeout(4000),
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Show the "typing..." bubble in the Telegram chat. The bubble lasts ~5s, so a
+ * caller re-sends it on an interval while the agent is busy.
+ */
+export async function sendTyping(
+  chatId: number | string,
+  signal: AbortSignal,
+): Promise<void> {
+  await apiPost(
+    "sendChatAction",
+    { chat_id: chatId, action: "typing" },
+    signal,
+  );
+}
+
+function base64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+export function dataUrlToBytes(dataUrl: string): Uint8Array<ArrayBuffer> {
+  return base64ToBytes(dataUrl.split(",")[1] ?? "");
+}
+
+/** Send a PNG (as a data URL) as a photo. Used for rasterised Mermaid. */
+export async function sendPhoto(
+  chatId: number | string,
+  dataUrl: string,
+  caption: string,
+  signal: AbortSignal,
+): Promise<void> {
+  const form = new FormData();
+  form.append("chat_id", String(chatId));
+  form.append(
+    "photo",
+    new Blob([dataUrlToBytes(dataUrl)], { type: "image/png" }),
+    "diagram.png",
+  );
+  if (caption) form.append("caption", caption.slice(0, 1024));
+  await apiPostForm("sendPhoto", form, signal);
+}
+
+/** Send raw bytes as a document (PDF, HTML, Markdown, image…). */
+export async function sendDocument(
+  chatId: number | string,
+  bytes: Uint8Array,
+  filename: string,
+  caption: string,
+  signal: AbortSignal,
+): Promise<void> {
+  const form = new FormData();
+  form.append("chat_id", String(chatId));
+  // Copy to an ArrayBuffer-backed view; Blob rejects a generic Uint8Array.
+  const copy = new Uint8Array(bytes);
+  form.append("document", new Blob([copy]), filename);
+  if (caption) form.append("caption", caption.slice(0, 1024));
+  await apiPostForm("sendDocument", form, signal);
+}
+
+export async function sendKeyboard(
+  chatId: number,
+  text: string,
+  keyboard: InlineButton[][],
+  signal: AbortSignal,
+): Promise<void> {
+  const html = markdownToTelegramHtml(text);
+  try {
+    await apiPost(
+      "sendMessage",
+      {
+        chat_id: chatId,
+        text: html,
+        parse_mode: "HTML",
+        reply_markup: { inline_keyboard: keyboard },
+      },
+      signal,
+    );
+  } catch {
+    await apiPost(
+      "sendMessage",
+      { chat_id: chatId, text, reply_markup: { inline_keyboard: keyboard } },
+      signal,
+    );
+  }
+}
+
+export async function editKeyboard(
+  chatId: number,
+  messageId: number,
+  text: string,
+  keyboard: InlineButton[][],
+  signal: AbortSignal,
+): Promise<void> {
+  const html = markdownToTelegramHtml(text);
+  try {
+    await apiPost(
+      "editMessageText",
+      {
+        chat_id: chatId,
+        message_id: messageId,
+        text: html,
+        parse_mode: "HTML",
+        reply_markup: { inline_keyboard: keyboard },
+      },
+      signal,
+    );
+  } catch {
+    await apiPost(
+      "editMessageText",
+      {
+        chat_id: chatId,
+        message_id: messageId,
+        text,
+        reply_markup: { inline_keyboard: keyboard },
+      },
+      signal,
+    );
+  }
+}
+
+export async function answerCallback(
+  callbackId: string,
+  text: string | null,
+  signal: AbortSignal,
+): Promise<void> {
+  await apiPost(
+    "answerCallbackQuery",
+    { callback_query_id: callbackId, text },
+    signal,
+  );
+}
