@@ -91,15 +91,29 @@ export const useApprovalQueue = create<ApprovalQueueState>((set, get) => ({
         resolve(decision);
       };
 
+      // Auto-expire stale approvals so they cannot hang the bot forever.
+      const ttlMs = 5 * 60 * 1000;
+      const expiryTimer = setTimeout(() => {
+        if (!settled) {
+          settle("deny");
+          void logWarn(
+            `[ai] approval auto-expired after ${ttlMs}ms id=${entry.id} tool=${entry.toolName}`,
+          ).catch(() => {});
+        }
+      }, ttlMs);
+
+      const cancelExpiry = () => clearTimeout(expiryTimer);
+
       waiting.set(entry.id, settle);
       set((s) => ({ pending: [...s.pending, entry] }));
 
       // Stop has to reach work that is blocked, not just work that is running.
       // Without this a denied-by-stop call would hold its sub-agent open until
       // the app closed.
-      abortSignal?.addEventListener("abort", () => settle("deny"), {
-        once: true,
-      });
+      abortSignal?.addEventListener("abort", () => {
+        cancelExpiry();
+        settle("deny");
+      }, { once: true });
     });
   },
 
