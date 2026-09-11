@@ -6,6 +6,7 @@ import {
   getOrCreateUserModel,
   saveUserModel,
 } from "../lib/userModel";
+import { saveSkill, type Skill } from "../lib/skills";
 
 const MAX_PREFERENCES = 40;
 const MAX_FACTS = 120;
@@ -110,7 +111,59 @@ export function buildSelfImprovementTools() {
           ok: true,
           suggestion: { name, reason },
           suggestedSkills: model.suggestedSkills,
+          next: "Use promote_suggested_skill to turn this into a real skill.",
         };
+      },
+    }),
+
+    promote_suggested_skill: tool({
+      description:
+        "Turn a suggested skill into a real SKILL.md under .termigo/skills. Use this only after the user approved the idea or it clearly recurred across sessions.",
+      inputSchema: z.object({
+        name: z.string().min(1).describe("Skill name to create or replace."),
+        description: z.string().min(1).describe("When to use this skill."),
+        body: z.string().min(1).describe("Skill procedure/markdown body."),
+      }),
+      execute: async ({ name, description, body }: { name: string; description: string; body: string }) => {
+        const model = await getOrCreateUserModel();
+        const skill: Skill = {
+          name,
+          description: description.slice(0, 300),
+          body: body.trim().slice(0, 16 * 1024),
+        };
+        const outcome = await saveSkill(null, skill);
+        if (!outcome.saved) {
+          return { ok: false, reason: outcome.reason };
+        }
+        const idx = model.suggestedSkills.indexOf(name);
+        if (idx >= 0) {
+          model.suggestedSkills.splice(idx, 1);
+          await saveUserModel(model);
+        }
+        return {
+          ok: true,
+          path: outcome.path,
+          replaced: outcome.replaced,
+          suggestedSkills: model.suggestedSkills,
+        };
+      },
+    }),
+
+    dismiss_suggested_skill: tool({
+      description:
+        "Remove a suggested skill without creating it. Use this when the suggestion is irrelevant, outdated, or too broad.",
+      inputSchema: z.object({
+        name: z.string().min(1).describe("Suggested skill name to remove."),
+      }),
+      execute: async ({ name }: { name: string }) => {
+        const model = await getOrCreateUserModel();
+        const idx = model.suggestedSkills.indexOf(name);
+        const removed = idx >= 0;
+        if (removed) {
+          model.suggestedSkills.splice(idx, 1);
+          await saveUserModel(model);
+        }
+        return { ok: true, removed, suggestedSkills: model.suggestedSkills };
       },
     }),
 
