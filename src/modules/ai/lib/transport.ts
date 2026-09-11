@@ -24,6 +24,7 @@ import { native } from "./native";
 import { listSkills } from "./skills";
 import { autoCheckpointForRun } from "./snapshots";
 import { formatTodoStatusBlock } from "./todos";
+import { getOrCreateUserModel } from "./userModel";
 
 /**
  * How much of `TERMIGO.md` reaches the model.
@@ -340,6 +341,8 @@ export function createContextAwareTransport(deps: Deps) {
       skills,
       customDefs,
       loadedHooks,
+      _invariants,
+      userModel,
     ] = await raceAbort(
       withTimeout(
         Promise.all([
@@ -351,6 +354,7 @@ export function createContextAwareTransport(deps: Deps) {
           loadCustomTools(live.workspaceRoot),
           loadHooks(live.workspaceRoot),
           hydrateInvariants(live.workspaceRoot),
+          getOrCreateUserModel().catch(() => undefined),
         ]),
         CONTEXT_TIMEOUT_MS,
         "context assembly",
@@ -373,6 +377,7 @@ export function createContextAwareTransport(deps: Deps) {
       customInstructions: deps.getCustomInstructions(),
       learnedMemory,
       globalMemory,
+      userModel,
       mcpTools,
       skills,
       // Read at send time, not cached: extensions are enabled, disabled and

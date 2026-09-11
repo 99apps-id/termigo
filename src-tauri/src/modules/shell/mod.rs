@@ -41,6 +41,9 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
     "tar", "gzip", "gunzip", "zip", "unzip",
     "curl", "wget", "http", "xh",
     "date", "uptime", "whoami", "id", "uname", "hostname",
+    // Pentest & network recon tooling supported by Termigo
+    "nmap", "masscan", "rustscan", "nikto", "nuclei", "httpx", "wpscan",
+    "sqlmap", "ffuf", "gobuster", "dirsearch", "subfinder",
 ];
 
 /// Characters that enable command injection in a shell one-liner.
@@ -51,12 +54,13 @@ const SHELL_METACHARACTERS: &[char] = &[';', '|', '&', '$', '(', ')', '<', '>', 
 /// - enforce allowlist for the first token unless it's an absolute path
 /// - return the command string on success
 pub fn validate_shell_command(command: &str) -> Result<&str, String> {
-    if command.is_empty() {
+    let trimmed = command.trim();
+    if trimmed.is_empty() {
         return Err("empty command".into());
     }
 
     // 1. Reject metacharacters.
-    if command.chars().any(|c| SHELL_METACHARACTERS.contains(&c)) {
+    if trimmed.chars().any(|c| SHELL_METACHARACTERS.contains(&c)) {
         return Err(format!(
             "command contains shell metacharacters {:?}; use a PTY session for pipelines, redirects, or chained commands",
             SHELL_METACHARACTERS
@@ -66,18 +70,37 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
         ));
     }
 
-    // 2. Extract the program token (first whitespace-delimited token).
-    let program = command.split_whitespace().next().unwrap_or(command);
+    // 2. Extract the program token (first whitespace-delimited token, stripped of quotes).
+    let raw_program = trimmed.split_whitespace().next().unwrap_or(trimmed);
+    let program = raw_program.trim_matches(['"', '\'']);
 
-    // 3. Allow absolute paths without allowlist check.
-    if program.starts_with('/') || program.starts_with('\\') {
+    // 3. Allow absolute or rooted paths on Unix (/...) and Windows (C:\..., \...).
+    let path = std::path::Path::new(program);
+    let is_windows_drive_path = program.len() >= 3
+        && program.as_bytes()[0].is_ascii_alphabetic()
+        && program.as_bytes()[1] == b':'
+        && (program.as_bytes()[2] == b'\\' || program.as_bytes()[2] == b'/');
+
+    if path.is_absolute()
+        || path.has_root()
+        || program.starts_with('/')
+        || program.starts_with('\\')
+        || is_windows_drive_path
+    {
         return Ok(command);
     }
 
-    // 4. Allow if it's in the allowlist.
+    // 4. Strip executable extensions for matching (.exe, .cmd, .bat).
+    let base_program = program
+        .strip_suffix(".exe")
+        .or_else(|| program.strip_suffix(".cmd"))
+        .or_else(|| program.strip_suffix(".bat"))
+        .unwrap_or(program);
+
+    // 5. Allow if it's in the allowlist.
     if SANDBOX_ALLOWLIST
         .iter()
-        .any(|allowed| program == *allowed)
+        .any(|allowed| base_program.eq_ignore_ascii_case(allowed))
     {
         return Ok(command);
     }
@@ -545,5 +568,34 @@ mod tests {
         assert_eq!(cmd.get_program(), "/bin/sh");
         let args: Vec<_> = cmd.get_args().collect();
         assert_eq!(args, vec!["-c", "echo hi"]);
+    }
+}
+
+#[cfg(test)]
+mod tests_sandbox {
+    use super::*;
+
+    #[test]
+    fn validate_shell_command_allows_standard_tools() {
+        assert!(validate_shell_command("git status").is_ok());
+        assert!(validate_shell_command("npm test").is_ok());
+        assert!(validate_shell_command("nmap -sV 127.0.0.1").is_ok());
+        assert!(validate_shell_command("cargo check").is_ok());
+        assert!(validate_shell_command("python script.py").is_ok());
+    }
+
+    #[test]
+    fn validate_shell_command_allows_windows_paths_and_extensions() {
+        assert!(validate_shell_command(r#"C:\tools\mytool.exe --flag"#).is_ok());
+        assert!(validate_shell_command(r#""C:\Program Files\tool.exe" arg"#).is_ok());
+        assert!(validate_shell_command("git.exe status").is_ok());
+    }
+
+    #[test]
+    fn validate_shell_command_blocks_metacharacters() {
+        assert!(validate_shell_command("git status && rm -rf /").is_err());
+        assert!(validate_shell_command("cat file | grep secret").is_err());
+        assert!(validate_shell_command("echo hello > out.txt").is_err());
+        assert!(validate_shell_command("cat `id`").is_err());
     }
 }

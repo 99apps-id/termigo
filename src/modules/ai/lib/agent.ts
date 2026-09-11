@@ -868,6 +868,8 @@ export type RunAgentOptions = {
   extensionTools?: ExtensionToolset;
   /** Command tools defined in this workspace. */
   customTools?: CustomToolset;
+  /** Learned user preferences, facts, and suggested skills. */
+  userModel?: UserModel;
   uiMessages: UIMessage[];
   abortSignal?: AbortSignal;
   /** Returns true when the user has queued a message while this run is in
@@ -912,6 +914,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
     opts.skills ?? [],
     opts.globalMemory ?? [],
     userQuery,
+    opts.userModel,
   );
   const keepsReasoning = modelKeepsReasoning(info);
   const prunedHistory = pruneMessages({

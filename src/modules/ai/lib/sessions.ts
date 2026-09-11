@@ -67,15 +67,19 @@ export async function saveMessages(
 ): Promise<void> {
   await store.set(messagesKey(id), messages);
   try {
-    const { indexMessage } = await import("./fts5");
+    const { indexMessagesBatch } = await import("./fts5");
+    const items: Array<{ messageId: string; text: string }> = [];
     for (const m of messages) {
       for (const p of m.parts) {
         if (p.type !== "text") continue;
         const text = (p as { text?: string }).text;
         if (typeof text === "string" && text.trim()) {
-          indexMessage(id, m.id, text);
+          items.push({ messageId: m.id, text });
         }
       }
+    }
+    if (items.length > 0) {
+      void indexMessagesBatch(id, items);
     }
   } catch {
     // search index is best-effort; never break session persistence.
@@ -84,6 +88,12 @@ export async function saveMessages(
 
 export async function deleteSessionData(id: string): Promise<void> {
   await store.delete(messagesKey(id));
+  try {
+    const { deleteSessionFromIndex } = await import("./fts5");
+    void deleteSessionFromIndex(id);
+  } catch {
+    // best-effort
+  }
 }
 
 export async function saveRunMeta(id: string, meta: RunMeta): Promise<void> {

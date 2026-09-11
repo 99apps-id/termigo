@@ -106,9 +106,19 @@ export const useApprovalQueue = create<ApprovalQueueState>((set, get) => ({
 
     return new Promise<ApprovalDecision>((resolve) => {
       let settled = false;
+      let expiryTimer: ReturnType<typeof setTimeout> | undefined;
+
+      const cancelExpiry = () => {
+        if (expiryTimer !== undefined) {
+          clearTimeout(expiryTimer);
+          expiryTimer = undefined;
+        }
+      };
+
       const settle = (decision: ApprovalDecision) => {
         if (settled) return;
         settled = true;
+        cancelExpiry();
         waiting.delete(entry.id);
         set((s) => ({ pending: s.pending.filter((p) => p.id !== entry.id) }));
         resolve(decision);
@@ -116,7 +126,7 @@ export const useApprovalQueue = create<ApprovalQueueState>((set, get) => ({
 
       // Auto-expire stale approvals so they cannot hang the bot forever.
       const ttlMs = 5 * 60 * 1000;
-      const expiryTimer = setTimeout(() => {
+      expiryTimer = setTimeout(() => {
         if (!settled) {
           settle("deny");
           console.warn(
@@ -124,8 +134,6 @@ export const useApprovalQueue = create<ApprovalQueueState>((set, get) => ({
           );
         }
       }, ttlMs);
-
-      const cancelExpiry = () => clearTimeout(expiryTimer);
 
       waiting.set(entry.id, settle);
       set((s) => ({ pending: [...s.pending, entry] }));
