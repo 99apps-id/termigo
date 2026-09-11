@@ -70,8 +70,9 @@ func TestLoadControlDescriptorValidation(t *testing.T) {
 }
 
 func TestLoadControlDescriptorStaleProcess(t *testing.T) {
-	// INT32_MAX cannot be a live PID on any supported OS. Windows skips the
-	// probe (processAlive returns true there), so this exercises the unix path.
+	// INT32_MAX cannot be a live PID on any supported OS. On Windows the
+	// liveness probe is a TCP reachability check to the descriptor address,
+	// so 127.0.0.1:1 is unreachable and the descriptor is still rejected.
 	const deadPID = 2147483647
 	path := writeDescriptor(t, t.TempDir(), &ControlDescriptor{
 		Protocol: controlProtocolVersion,
@@ -79,9 +80,6 @@ func TestLoadControlDescriptorStaleProcess(t *testing.T) {
 		Token:    "x",
 		PID:      deadPID,
 	})
-	if processAlive(deadPID) {
-		t.Skip("platform does not support the liveness probe")
-	}
 	if _, err := loadControlDescriptorFrom(path); err == nil {
 		t.Fatal("expected stale-process error")
 	}

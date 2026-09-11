@@ -270,8 +270,43 @@ export const PreviewAddressBar = forwardRef<PreviewAddressBarHandle, Props>(
   },
 );
 
+function isPrivateIPv4(ip: string): boolean {
+  const parts = ip.split(".").map(Number);
+  if (parts.length !== 4 || parts.some((p) => Number.isNaN(p) || p < 0 || p > 255)) {
+    return false;
+  }
+  if (parts[0] === 10) return true;
+  if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
+  if (parts[0] === 192 && parts[1] === 168) return true;
+  if (parts[0] === 127) return true;
+  if (parts[0] === 169 && parts[1] === 254) return true;
+  return false;
+}
+
+function isPrivateHost(host: string): boolean {
+  if (host === "localhost" || host === "::1") return false;
+  if (/^\[.+\]$/.test(host)) host = host.slice(1, -1);
+  if (/^[\d.:a-fA-F]+$/.test(host) && (host.includes(":") || /^\d{1,3}(\.\d{1,3}){3}$/.test(host))) {
+    if (host.includes(":")) {
+      // IPv6 loopback / link-local / unique local
+      return host === "::1" || host.startsWith("fe80") || host.startsWith("fc") || host.startsWith("fd");
+    }
+    return isPrivateIPv4(host);
+  }
+  return false;
+}
+
 async function probeUrl(url: string): Promise<boolean> {
   try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      setNotice("Only http and https URLs are allowed.");
+      return false;
+    }
+    if (parsed.protocol === "http:" && isPrivateHost(parsed.hostname)) {
+      setNotice("Private/internal addresses are not allowed over HTTP.");
+      return false;
+    }
     await fetch(url, {
       method: "GET",
       mode: "no-cors",
@@ -289,8 +324,6 @@ function normalizeUrl(raw: string): string | null {
   if (!trimmed) return null;
   if (/^https?:\/\//i.test(trimmed)) return trimmed;
   if (/^localhost(:|\/|$)/i.test(trimmed)) return `http://${trimmed}`;
-  if (/^\d{1,3}(\.\d{1,3}){3}(:|\/|$)/.test(trimmed))
-    return `http://${trimmed}`;
   if (/^[\w.-]+\.[a-z]{2,}/i.test(trimmed)) return `https://${trimmed}`;
   return trimmed;
 }

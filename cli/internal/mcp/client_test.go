@@ -170,8 +170,8 @@ func TestRegistryMergeAndEdit(t *testing.T) {
 	userJSON := `{
   "mcpServers": {
     "user-server": {
-      "command": "docker",
-      "args": ["run", "--rm", "user-server"]
+      "command": "node",
+      "args": ["server.js"]
     }
   }
 }`
@@ -194,7 +194,7 @@ func TestRegistryMergeAndEdit(t *testing.T) {
 		t.Fatalf("scopes wrong: %+v", byName)
 	}
 
-	added, err := Add(workspace, "new-server", config.MCPServer{Command: "python", Args: []string{"server.py"}})
+	added, err := Add(workspace, "new-server", config.MCPServer{Command: "node", Args: []string{"server.js"}})
 	_ = added
 	if err != nil {
 		t.Fatalf("Add failed: %v", err)
@@ -205,7 +205,7 @@ func TestRegistryMergeAndEdit(t *testing.T) {
 	}
 	found := false
 	for _, server := range registry.Servers {
-		if server.Name == "new-server" && server.Command == "python" {
+		if server.Name == "new-server" && server.Command == "node" {
 			found = true
 		}
 	}

@@ -47,6 +47,7 @@ var (
 	rePipeToShell    = regexp.MustCompile(`\b(curl|wget)\b[^|;&]*\|\s*(ba|z|k|d|fi|c)?sh\b`)
 	reUnsafeToolPath = regexp.MustCompile(`[^A-Za-z0-9._/]`)
 	reRedact         = regexp.MustCompile(`(sk-[A-Za-z0-9_-]{20,}|sk-ant-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|xox[baprs]-[A-Za-z0-9-]{10,})`)
+	reShellMeta      = regexp.MustCompile(`[;|&$(){}` + "`" + `]`)
 )
 
 // validateShellCommand returns whether a command is permitted and, if not, a
@@ -82,6 +83,9 @@ func validateShellCommand(cmd string) (bool, string) {
 	}
 	if rePipeToShell.MatchString(c) {
 		return false, "Refused: piping a network download directly into a shell is blocked. Download first, inspect, then run."
+	}
+	if reShellMeta.MatchString(c) {
+		return false, "Refused: command contains shell metacharacters (; | & $ ( ) { } `)."
 	}
 	return true, ""
 }

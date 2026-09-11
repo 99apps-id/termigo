@@ -23,6 +23,15 @@ use client::{McpClient, McpTool};
 /// Project-scoped registry, relative to the workspace root.
 const WORKSPACE_REGISTRY: &str = ".termigo/mcp.json";
 
+/// Base executables allowed to run as MCP servers. Arbitrary commands from a
+/// project registry would let any contributor add a backdoor (see
+/// CVE-2024-22471 / Cody), so the launcher is restricted to well-known
+/// package runners and language CLIs.
+const ALLOWED_MCP_COMMANDS: &[&str] = &[
+    "npx", "uvx", "bunx", "node", "python3", "go", "bun", "deno", "npm", "pnpm",
+    "yarn", "java", "ruby", "rustc", "cargo",
+];
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServerConfig {
     pub name: String,
@@ -60,19 +69,38 @@ fn read_registry(path: &Path, scope: &str, cwd: Option<&Path>) -> Vec<ServerConf
     };
     let Ok(file) = serde_json::from_str::<RegistryFile>(&text) else {
         log::warn!("mcp: ignoring malformed registry at {}", path.display());
-        return Vec::new();
+        return Vec::new(); // malformed registry is not fatal
     };
     file.servers
         .into_iter()
-        .map(|(name, entry)| ServerConfig {
-            name,
-            command: entry.command,
-            args: entry.args,
-            env: entry.env,
-            scope: scope.to_string(),
-            cwd: cwd.map(|p| p.to_string_lossy().into_owned()),
+        .filter_map(|(name, entry)| {
+            if let Err(e) = validate_mcp_command(&entry.command) {
+                log::warn!("mcp: ignoring server {name} in {}: {e}", path.display());
+                None
+            } else {
+                Some(ServerConfig {
+                    name,
+                    command: entry.command,
+                    args: entry.args,
+                    env: entry.env,
+                    scope: scope.to_string(),
+                    cwd: cwd.map(|p| p.to_string_lossy().into_owned()),
+                })
+            }
         })
         .collect()
+}
+
+fn validate_mcp_command(command: &str) -> Result<(), String> {
+    let cmd = command.trim();
+    if cmd.is_empty() {
+        return Err("command is empty".into());
+    }
+    let base = cmd.split_whitespace().next().ok_or("empty command")?;
+    if !ALLOWED_MCP_COMMANDS.contains(&base) {
+        return Err(format!("MCP command {base:?} is not allowed"));
+    }
+    Ok(())
 }
 
 fn user_registry_path() -> Option<PathBuf> {
@@ -142,6 +170,9 @@ pub async fn mcp_add_server(
     }
     if command.trim().is_empty() {
         return Err("a server needs a command".into());
+    }
+    if let Err(e) = validate_mcp_command(&command) {
+        return Err(e);
     }
     edit_user_registry(move |servers| {
         let mut entry = serde_json::Map::new();

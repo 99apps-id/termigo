@@ -100,10 +100,26 @@ func loadControlDescriptorFrom(path string) (*ControlDescriptor, error) {
 	if desc.Address == "" || desc.Token == "" {
 		return nil, fmt.Errorf("Termigo control descriptor is incomplete")
 	}
-	if !processAlive(desc.PID) {
+	if runtime.GOOS == "windows" {
+		if !tcpReachable(desc.Address) {
+			return nil, fmt.Errorf("Termigo is not running (stale control descriptor)")
+		}
+	} else if !processAlive(desc.PID) {
 		return nil, fmt.Errorf("Termigo is not running (stale control descriptor)")
 	}
 	return &desc, nil
+}
+
+// tcpReachable reports whether a TCP endpoint is accepting connections. It is
+// used as the liveness probe on Windows, where signal-based process checks are
+// unreliable.
+func tcpReachable(address string) bool {
+	conn, err := net.DialTimeout("tcp", address, controlConnectTimeout)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
 }
 
 // processAlive reports whether a process id refers to a live process. Signal 0

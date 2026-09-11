@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -206,12 +207,40 @@ func cliArgs(providerID string, options RunOptions) ([]string, error) {
 	}
 }
 
+// validateOllamaEndpoint ensures the configured endpoint is either a local
+// loopback address or an HTTPS URL, preventing SSRF and data exfiltration
+// through a compromised config file.
+func validateOllamaEndpoint(raw string) (string, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("invalid Ollama endpoint %q: %w", raw, err)
+	}
+	switch u.Scheme {
+	case "http", "https":
+	default:
+		return "", fmt.Errorf("unsupported Ollama endpoint scheme %q in %q", u.Scheme, raw)
+	}
+	host := u.Hostname()
+	if u.Scheme == "http" {
+		if host != "localhost" && host != "127.0.0.1" && host != "::1" {
+			return "", fmt.Errorf("non-local HTTP Ollama endpoint %q is not allowed", raw)
+		}
+	}
+	return raw, nil
+}
+
 // runOllama talks to a local Ollama server over its HTTP API.
 func runOllama(ctx context.Context, options RunOptions, out io.Writer) error {
 	endpoint := strings.TrimRight(options.Endpoint, "/")
 	if endpoint == "" {
 		endpoint = "http://localhost:11434"
 	}
+	validated, err := validateOllamaEndpoint(endpoint)
+	if err != nil {
+		return err
+	}
+	endpoint = validated
+
 	model := options.Model
 	if model == "" {
 		model = "qwen2.5-coder:latest"
@@ -232,7 +261,20 @@ func runOllama(ctx context.Context, options RunOptions, out io.Writer) error {
 		return err
 	}
 	request.Header.Set("Content-Type", "application/json")
-	response, err := http.DefaultClient.Do(request)
+
+	parsedURL, _ := url.Parse(endpoint)
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) > 0 {
+				// Block redirects to a different host than the original endpoint.
+				if req.URL.Hostname() != parsedURL.Hostname() {
+					return fmt.Errorf("blocked redirect from %s to %s", parsedURL.Hostname(), req.URL.Hostname())
+				}
+			}
+			return nil
+		},
+	}
+	response, err := client.Do(request)
 	if err != nil {
 		return fmt.Errorf("ollama endpoint %s unreachable: %w", endpoint, err)
 	}

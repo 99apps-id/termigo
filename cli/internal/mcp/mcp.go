@@ -32,6 +32,36 @@ import (
 // WorkspaceFileName is the project-scoped MCP registry file.
 const WorkspaceFileName = ".termigo/mcp.json"
 
+// allowedMCPCommands is an allow-list of base executables that can be used to
+// run an MCP server. Allowing arbitrary commands from a project-level registry
+// file is equivalent to adding a backdoor to every contributor who pulls the
+// repo (see CVE-2024-22471 / Cody).
+var allowedMCPCommands = map[string]struct{}{
+	"npx": {}, "uvx": {}, "bunx": {}, "node": {}, "python3": {}, "go": {},
+	"bun": {}, "deno": {}, "npm": {}, "pnpm": {}, "yarn": {}, "java": {},
+	"ruby": {}, "rustc": {}, "cargo": {},
+}
+
+// validateMCPCommand ensures the MCP server executable is on the allow-list.
+// It strips a trailing "run"/"exec" subcommand for launchers that need it,
+// so "go run ." is accepted because the base "go" is allowed.
+func validateMCPCommand(command string) error {
+	cmd := strings.TrimSpace(command)
+	if cmd == "" {
+		return fmt.Errorf("command is empty")
+	}
+	base := cmd
+	fields := strings.Fields(base)
+	if len(fields) == 0 {
+		return fmt.Errorf("command is empty")
+	}
+	baseCmd := fields[0]
+	if _, ok := allowedMCPCommands[baseCmd]; !ok {
+		return fmt.Errorf("MCP command %q is not allowed", baseCmd)
+	}
+	return nil
+}
+
 // Server is one configured MCP server.
 type Server struct {
 	Name    string            `json:"name"`
@@ -100,6 +130,9 @@ func loadFile(path, scope string) ([]Server, error) {
 		if server.Command == "" {
 			return nil, fmt.Errorf("%s: server %q has no command", path, name)
 		}
+		if err := validateMCPCommand(server.Command); err != nil {
+			return nil, fmt.Errorf("%s: server %q: %w", path, name, err)
+		}
 		servers = append(servers, Server{
 			Name:    name,
 			Command: server.Command,
@@ -122,6 +155,9 @@ func Add(workspace, name string, server config.MCPServer) (Server, error) {
 	}
 	if server.Command == "" {
 		return Server{}, errors.New("server command must not be empty")
+	}
+	if err := validateMCPCommand(server.Command); err != nil {
+		return Server{}, err
 	}
 
 	path := filepath.Join(workspace, WorkspaceFileName)
