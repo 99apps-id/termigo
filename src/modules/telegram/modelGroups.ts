@@ -6,7 +6,22 @@
 // user-defined OpenAI-compatible endpoints (e.g. StepFun) are their own group.
 // Kept pure so it is tested without the AI stack / Tauri stores.
 
-export type ModelChoice = { id: string; label: string };
+export type ModelChoice = {
+  /** Callback payload and registry id. Never shown to the user for a custom
+   *  endpoint, whose real name is `displayId`. */
+  id: string;
+  label: string;
+  /**
+   * What the user types with `/model <id>`.
+   *
+   * For a custom endpoint the registry id is the synthetic `compat-<endpoint>`
+   * form, which is an implementation detail: showing it made the picker look
+   * broken and gave the user a string they had no way to recognise. The
+   * endpoint's name (or its model id) is what they typed into Settings, and
+   * `resolveModelInput` accepts it.
+   */
+  displayId: string;
+};
 export type ProviderGroup = {
   key: string;
   label: string;
@@ -71,7 +86,7 @@ export function buildModelGroups(input: ModelGroupsInput): ProviderGroup[] {
       seen.set(m.provider, g);
       groups.push(g);
     }
-    g.models.push({ id: m.id, label: labelFor(m) });
+    g.models.push({ id: m.id, label: labelFor(m), displayId: m.id });
   }
 
   // A user-defined OpenAI-compatible endpoint (e.g. StepFun) is its own group
@@ -84,7 +99,15 @@ export function buildModelGroups(input: ModelGroupsInput): ProviderGroup[] {
     groups.push({
       key: `endpoint:${ep.id}`,
       label: ep.name || ep.modelId || "Custom endpoint",
-      models: [{ id: modelId, label: ep.modelId || ep.name }],
+      models: [
+        {
+          id: modelId,
+          label: ep.modelId || ep.name || "Custom endpoint",
+          // What the user typed into Settings, and what `/model <text>`
+          // resolves: the internal compat-<id> must never be shown.
+          displayId: ep.name || ep.modelId || "",
+        },
+      ],
     });
   }
   return groups;

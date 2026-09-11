@@ -240,6 +240,14 @@ pub async fn ssh_sftp_upload(
     // Cap the whole-file read so a huge drop can't OOM the app. Matches the
     // read-file guard's intent; uploads get a larger ceiling.
     const MAX_UPLOAD_BYTES: u64 = 256 * 1024 * 1024;
+    // The local side of an upload is a file READ, so it passes the same
+    // secret deny-list as every other read. The module doc claimed only
+    // user-dragged absolute paths reach here, but that was a description of
+    // the caller, not a check: without this, a path named by a compromised
+    // webview (`~/.ssh/id_rsa`, `.env`, a credentials store) was read and
+    // shipped to the remote host. The workspace registry is deliberately NOT
+    // applied - uploading a file from outside the open project is legitimate.
+    crate::modules::fs::security::validate_read(std::path::Path::new(&local_path))?;
     let read_path = local_path.clone();
     let bytes = tokio::task::spawn_blocking(move || {
         let meta = std::fs::metadata(&read_path).map_err(|e| format!("read local file: {e}"))?;

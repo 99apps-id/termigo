@@ -52,6 +52,7 @@ import {
   type Snippet,
 } from "@/modules/ai/lib/snippets";
 import { newAgentId, useAgentsStore } from "@/modules/ai/store/agentsStore";
+import { TOOL_GROUPS } from "@/modules/ai/tools/toolGroups";
 import {
   newSnippetId,
   useSnippetsStore,
@@ -69,11 +70,13 @@ import {
   setCustomAgentLaunchers,
   setCustomInstructions,
   setDebugCaptureEnabled,
+  setDisabledToolGroups,
   setEnforcePentestScope,
   setPentestScope,
   setShowReasoning,
   setSubagentMaxDepth,
   setSubagentModelId,
+  setToolSearchEnabled,
   setVerifyOnStop,
 } from "@/modules/settings/store";
 import {
@@ -176,6 +179,8 @@ export function AgentsSection() {
       />
 
       <CustomInstructionsBlock value={customInstructions} />
+
+      <ToolGroupsBlock />
 
       <PentestScopeBlock />
 
@@ -1319,6 +1324,70 @@ function WorkspacePoliciesBlock() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </section>
+  );
+}
+
+/**
+ * Turn off whole domains of agent tools.
+ *
+ * The full toolset is ~125 tools and ~79 KB of JSON Schema sent on every
+ * request, before any conversation. Each group here is a domain the model
+ * cannot use in a session that never touches it, so switching one off removes
+ * its schemas from the request entirely and leaves the budget to the task.
+ */
+function ToolGroupsBlock() {
+  const disabled = usePreferencesStore((s) => s.disabledToolGroups);
+  const toolSearch = usePreferencesStore((s) => s.toolSearchEnabled);
+  const grouped = TOOL_GROUPS.reduce((n, g) => n + g.tools.length, 0);
+  const off = TOOL_GROUPS.filter((g) => disabled.includes(g.id)).reduce(
+    (n, g) => n + g.tools.length,
+    0,
+  );
+
+  const toggle = (id: string, enabled: boolean) => {
+    const next = enabled
+      ? disabled.filter((x) => x !== id)
+      : [...disabled, id];
+    void setDisabledToolGroups(next);
+  };
+
+  return (
+    <section className="flex flex-col gap-2">
+      <Label>Tool loading</Label>
+      <SettingRow
+        title="Load tools on demand"
+        description="Send the coding loop plus a search tool, and add a domain to the request only when the agent asks for it. Saves most of the tool schemas from every request. The agent may need one extra step the first time it uses a domain."
+      >
+        <Switch
+          checked={toolSearch}
+          onCheckedChange={(v) => void setToolSearchEnabled(v)}
+        />
+      </SettingRow>
+      <Label>Tool domains</Label>
+      <p className="text-[11px] leading-relaxed text-muted-foreground">
+        Every enabled tool sends its full schema with each request. Switch off
+        the domains you never use and the model gets that context back. The
+        core loop (files, shell, search, git, sub-agents) always stays on.
+        {off > 0
+          ? ` ${off} of ${grouped} optional tools are currently off.`
+          : ""}
+      </p>
+      {TOOL_GROUPS.map((group) => {
+        const enabled = !disabled.includes(group.id);
+        return (
+          <SettingRow
+            key={group.id}
+            title={`${group.label} (${group.tools.length} tools)`}
+            description={group.description}
+          >
+            <Switch
+              checked={enabled}
+              onCheckedChange={(v) => toggle(group.id, v)}
+            />
+          </SettingRow>
+        );
+      })}
     </section>
   );
 }

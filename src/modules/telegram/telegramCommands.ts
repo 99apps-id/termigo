@@ -41,9 +41,21 @@ export type Update = {
   };
 };
 
+/**
+ * Display label for a model id.
+ *
+ * Never throws and never returns empty: it is cosmetic, and a failure while
+ * resolving it must not abort the command that was going to answer the user.
+ * The label path touches the settings store, so a throw here would take
+ * `/status` and `/model` down with it.
+ */
 async function modelLabel(modelId: string): Promise<string> {
-  const { resolveModelLabel } = await import("./progressFormat");
-  return resolveModelLabel(modelId);
+  try {
+    const { resolveModelLabel } = await import("./progressFormat");
+    return (await resolveModelLabel(modelId)) || modelId;
+  } catch {
+    return modelId;
+  }
 }
 
 /**
@@ -66,52 +78,76 @@ function isOwnerUser(from?: { id: number }): boolean {
   return !!from && String(from.id) === chatId;
 }
 
+/**
+ * The `/status` reply.
+ *
+ * The bot's own half is always reported; the agent half is filled in when the
+ * AI store is reachable. `/status` is the command a user reaches for when
+ * something is wrong, so it must answer even when the thing it reports on is
+ * the thing that is failing.
+ */
 export async function buildStatus(): Promise<string> {
   const store = useTelegramStore.getState();
-  const chat = await import("../ai/store/chatStore");
-  const meta = chat.getAgentMeta();
-  const model = chat.useChatStore.getState().selectedModelId;
-  return [
+  const lines: (string | null)[] = [
     `Termigo bot ${store.online ? "online" : "offline"}`,
-    `Model: ${await modelLabel(model)}`,
-    `Agent: ${meta.status}`,
     `Enabled: ${store.enabled ? "yes" : "no"}`,
     `Paired: ${store.chatId ? `yes (ID: ${store.chatId})` : "no (open to all chats)"}`,
-    store.lastError ? `Error: ${store.lastError}` : null,
-  ]
-    .filter(Boolean)
-    .join("\n");
+  ];
+  try {
+    const chat = await import("../ai/store/chatStore");
+    const meta = chat.getAgentMeta();
+    const model = chat.useChatStore.getState().selectedModelId;
+    lines.push(`Model: ${await modelLabel(model)}`);
+    lines.push(`Agent: ${meta.status}`);
+  } catch {
+    lines.push("Agent: unavailable (the AI subsystem is not loaded)");
+  }
+  if (store.lastError) lines.push(`Error: ${store.lastError}`);
+  return lines.filter(Boolean).join("\n");
 }
 
+/**
+ * Providers and their models for the `/model` picker.
+ *
+ * Returns an empty list rather than throwing: this runs inside a command
+ * handler and a callback handler, and an exception here used to leave the user
+ * with no reply at all. An empty list degrades to a plain message, which is
+ * recoverable; a thrown handler is not.
+ */
 export async function buildProviderGroups(): Promise<ProviderGroup[]> {
-  const { MODELS, PROVIDERS, isCompatModelId, compatModelIdForEndpoint } =
-    await import("../ai/config");
-  const { resolveApiModelId } = await import("../ai/config");
-  const { usePreferencesStore } = await import(
-    "@/modules/settings/preferences"
-  );
-  const chat = await import("../ai/store/chatStore");
-  const state = chat.useChatStore.getState();
-  const { buildModelGroups } = await import("./modelGroups");
+  try {
+    const { MODELS, PROVIDERS, isCompatModelId, compatModelIdForEndpoint } =
+      await import("../ai/config");
+    const { resolveApiModelId } = await import("../ai/config");
+    const { usePreferencesStore } = await import(
+      "@/modules/settings/preferences"
+    );
+    const chat = await import("../ai/store/chatStore");
+    const state = chat.useChatStore.getState();
+    const { buildModelGroups } = await import("./modelGroups");
 
-  const providerLabel = (id: string): string => {
-    if (id === "openai-compatible") return "OpenAI Compatible";
-    return PROVIDERS.find((p) => p.id === id)?.label ?? id;
-  };
+    const providerLabel = (id: string): string => {
+      if (id === "openai-compatible") return "OpenAI Compatible";
+      return PROVIDERS.find((p) => p.id === id)?.label ?? id;
+    };
 
-  const overrides = usePreferencesStore.getState().modelIdOverrides;
+    const prefs = usePreferencesStore.getState();
 
-  return buildModelGroups({
-    models: MODELS,
-    providerLabel,
-    current: state.selectedModelId,
-    apiKeys: state.apiKeys as Record<string, string | undefined>,
-    customEndpointKeys: state.customEndpointKeys,
-    customEndpoints: usePreferencesStore.getState().customEndpoints,
-    isCompatModelId,
-    compatModelIdForEndpoint,
-    apiModelIdFor: (modelId: string) => resolveApiModelId(modelId, overrides),
-  });
+    return buildModelGroups({
+      models: MODELS,
+      providerLabel,
+      current: state.selectedModelId,
+      apiKeys: state.apiKeys as Record<string, string | undefined>,
+      customEndpointKeys: state.customEndpointKeys,
+      customEndpoints: prefs.customEndpoints,
+      isCompatModelId,
+      compatModelIdForEndpoint,
+      apiModelIdFor: (modelId: string) =>
+        resolveApiModelId(modelId, prefs.modelIdOverrides),
+    });
+  } catch {
+    return [];
+  }
 }
 
 export const HELP = [
@@ -133,39 +169,30 @@ export const HELP = [
   "/cost - today's & total spend",
 ].join("\n");
 
+/**
+ * Resolve what the user typed to a registry model id.
+ *
+ * Delegates to `normalizeModelId` so the bot, the settings bootstrap and the
+ * VPS setup script all agree on precedence - a `deepseek-flash` that names a
+ * configured endpoint must resolve to that endpoint everywhere, not to a
+ * built-in model in one place and the endpoint in another.
+ *
+ * Never throws; returns null when nothing matches, so the caller can reply
+ * "unknown model" instead of dying. Accepts the registry id, the
+ * `compat-<endpoint id>` form, a bare endpoint id, an endpoint's name, its
+ * provider-side model id, and a built-in model's renamed wire id.
+ */
 export async function resolveModelInput(id: string): Promise<string | null> {
-  const { MODELS, isCompatModelId, compatModelIdForEndpoint, resolveApiModelId } =
-    await import("../ai/config");
-  const { usePreferencesStore } = await import(
-    "@/modules/settings/preferences"
-  );
-  const trimmed = id.trim();
-  const lower = trimmed.toLowerCase();
-  const direct = MODELS.find((m) => m.id.toLowerCase() === lower);
-  if (direct) return direct.id;
-
-  const prefs = usePreferencesStore.getState();
-  // Accept the provider-side id too (e.g. `/model deepseek-flash`), since that
-  // is the name the vendor documents and the one the user reads in the picker.
-  const byApiId = MODELS.find(
-    (m) =>
-      resolveApiModelId(m.id, prefs.modelIdOverrides).toLowerCase() === lower,
-  );
-  if (byApiId) return byApiId.id;
-
-  const eps = prefs.customEndpoints;
-  if (isCompatModelId(trimmed)) {
-    const match = eps.find((ep) => compatModelIdForEndpoint(ep.id) === trimmed);
-    if (match) return trimmed;
+  try {
+    const { normalizeModelId } = await import("../ai/config");
+    const { usePreferencesStore } = await import(
+      "@/modules/settings/preferences"
+    );
+    const prefs = usePreferencesStore.getState();
+    return normalizeModelId(id, prefs.customEndpoints, prefs.modelIdOverrides);
+  } catch {
+    return null;
   }
-  const epMatch = eps.find(
-    (ep) =>
-      ep.modelId.toLowerCase() === lower ||
-      ep.name.toLowerCase() === lower ||
-      ep.id.toLowerCase() === lower,
-  );
-  if (epMatch) return compatModelIdForEndpoint(epMatch.id);
-  return null;
 }
 
 /** Mark the currently-selected model in the model keyboard with a check. */
@@ -179,6 +206,42 @@ function markModelButtons(
       callback_data: `ms:${m.id}`,
     },
   ]);
+}
+
+/**
+ * Text form of the model menu.
+ *
+ * Used when an inline keyboard cannot be delivered (a rejected keyboard, a
+ * transient API failure, a message too old to edit). The picker is
+ * user-driven and must never be a dead end: `/model <id>` works for every id
+ * listed here, so the bot stays usable even with no buttons at all.
+ */
+function modelMenuText(
+  groups: ProviderGroup[],
+  heading: string,
+  currentId: string,
+  currentLabel: string,
+): string {
+  const lines = [heading, `Current model: ${currentLabel}`, ""];
+  if (groups.length === 0) {
+    lines.push("No providers are configured.");
+    return lines.join("\n");
+  }
+  lines.push("Send /model <id> to switch directly:");
+  for (const g of groups) {
+    lines.push("", g.label);
+    for (const m of g.models) {
+      // `label` plus the text the user types. The internal compat-<id> form is
+      // never shown; `displayId` falls back to the registry id for built-ins.
+      const typed = m.displayId || m.id;
+      const shown =
+        m.label && m.label.toLowerCase() !== typed.toLowerCase()
+          ? `${m.label} - /model ${typed}`
+          : `/model ${typed}`;
+      lines.push(`  ${m.id === currentId ? "•" : "-"} ${shown}`);
+    }
+  }
+  return lines.join("\n");
 }
 
 /** Answer an inline-keyboard callback from the /model menu. */
@@ -230,13 +293,27 @@ export async function handleCallback(
     await answerCallback(cb.id, null, signal);
     const state = await import("../ai/store/chatStore");
     const current = state.useChatStore.getState().selectedModelId;
-    await editKeyboard(
+    const shown = await editKeyboard(
       chatId,
       messageId,
       `Pick a model for ${group.label}:`,
       markModelButtons(group.models, current),
       signal,
     );
+    if (!shown) {
+      // The edit failed (message too old, keyboard rejected). Post the list as
+      // a fresh message so the picker is still reachable.
+      await sendTelegram(
+        chatId,
+        modelMenuText(
+          [group],
+          `Pick a model for ${group.label}:`,
+          current,
+          await modelLabel(current),
+        ),
+        signal,
+      ).catch(() => {});
+    }
     return;
   }
 
@@ -438,7 +515,7 @@ export async function handleUpdate(u: Update, signal: AbortSignal): Promise<void
           signal,
         ));
       await ensureChatSession(chatId, msg.message_thread_id ?? null);
-      startTelegramDispatch(
+      void startTelegramDispatch(
         tail,
         chatId,
         signal,
@@ -452,7 +529,7 @@ export async function handleUpdate(u: Update, signal: AbortSignal): Promise<void
       if (!tail)
         return void (await sendTelegram(chatId, "Usage: /run <task>", signal));
       await ensureChatSession(chatId, msg.message_thread_id ?? null);
-      startTelegramDispatch(
+      void startTelegramDispatch(
         tail,
         chatId,
         signal,
@@ -508,12 +585,26 @@ export async function handleUpdate(u: Update, signal: AbortSignal): Promise<void
           );
           return;
         }
-        await sendKeyboard(
+        const shown = await sendKeyboard(
           chatId,
           `Current model: ${currentLabel}\n\nChoose a provider:`,
           keyboard,
           signal,
         );
+        if (!shown) {
+          // A rejected or undeliverable keyboard must not leave the user with
+          // no reply: fall back to the id list, which `/model <id>` accepts.
+          await sendTelegram(
+            chatId,
+            modelMenuText(
+              groups,
+              "Could not show the model buttons.",
+              current,
+              currentLabel,
+            ),
+            signal,
+          ).catch(() => {});
+        }
         return;
       }
       const resolved = await resolveModelInput(tail);
@@ -728,7 +819,7 @@ export async function handleUpdate(u: Update, signal: AbortSignal): Promise<void
         return;
       }
       if (!isOwnerUser(msg.from)) return;
-      startTelegramDispatch(
+      void startTelegramDispatch(
         text,
         chatId,
         signal,

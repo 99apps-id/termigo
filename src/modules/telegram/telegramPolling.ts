@@ -124,10 +124,16 @@ export async function startTelegramBot(): Promise<void> {
   lastPollProgressTime = Date.now();
   if (watchdogTimer) clearInterval(watchdogTimer);
   watchdogTimer = setInterval(checkPollingStall, 15_000);
-  useTelegramStore.getState().setOnline(true);
-  useTelegramStore.getState().setLastError(null);
+  // Start polling BEFORE any awaiting setup. The bot used to report itself
+  // online and only then await the stale-approval cleanup, so a slow or hung
+  // AI-store import left it claiming to be online with nothing polling - which
+  // looks exactly like "Telegram tidak bisa dipakai".
+  void runLoop(controller.signal);
+  void runMirror(mirror.signal);
   try {
-    const { cleanupStaleApprovals } = await import("../ai/store/approvalQueueStore");
+    const { cleanupStaleApprovals } = await import(
+      "../ai/store/approvalQueueStore"
+    );
     const cleaned = await cleanupStaleApprovals();
     if (cleaned > 0) {
       console.warn(`[ai] cleaned ${cleaned} stale approvals on startup`);
@@ -135,8 +141,6 @@ export async function startTelegramBot(): Promise<void> {
   } catch {
     // best-effort cleanup; if the store isn't ready yet, the next cycle will catch it.
   }
-  void runLoop(controller.signal);
-  void runMirror(mirror.signal);
 }
 
 /** Stop the long-polling loop. */

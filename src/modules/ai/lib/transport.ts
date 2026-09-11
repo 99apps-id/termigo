@@ -164,6 +164,12 @@ type Deps = {
   /** Registry model id -> provider-side model id, so a vendor rename is a
    *  setting change rather than an app release (see `resolveApiModelId`). */
   getModelIdOverrides?: () => Readonly<Record<string, string>>;
+  /** Optional tool domains the user turned off, so unused schemas are never
+   *  sent (see tools/toolGroups.ts). */
+  getDisabledToolGroups?: () => readonly string[];
+  /** Load tools on demand rather than sending every schema (see
+   *  tools/toolSearch.ts). */
+  getToolSearchEnabled?: () => boolean;
   onStep?: (step: string | null) => void;
   /** Fires at the start of every agentic-loop round (each `sendMessages`), so
    *  the UI can surface "Round N" and a user can tell a run is progressing. */
@@ -413,6 +419,8 @@ export function createContextAwareTransport(deps: Deps) {
       customEndpoints: deps.getCustomEndpoints?.(),
       customEndpointKeys: deps.getCustomEndpointKeys?.(),
       modelIdOverrides: deps.getModelIdOverrides?.(),
+      disabledToolGroups: deps.getDisabledToolGroups?.(),
+      toolSearchEnabled: deps.getToolSearchEnabled?.(),
       planMode: deps.getPlanMode?.(),
       stepBudget: deps.getStepBudget?.(),
       costBudgetUsd: deps.getCostBudgetUsd?.(),

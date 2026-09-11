@@ -47,7 +47,45 @@ describe("buildModelGroups", () => {
     );
     const g = groups.find((x) => x.key === "endpoint:stepfun");
     expect(g).toMatchObject({ label: "StepFun" });
-    expect(g?.models).toEqual([{ id: "compat-stepfun", label: "mid-1" }]);
+    expect(g?.models).toEqual([
+      { id: "compat-stepfun", label: "mid-1", displayId: "StepFun" },
+    ]);
+  });
+
+  it("never shows the internal compat- id as the display id", () => {
+    const groups = buildModelGroups(
+      input({
+        customEndpointKeys: { stepfun: "k" },
+        customEndpoints: [{ id: "stepfun", name: "StepFun", modelId: "mid-1" }],
+      }),
+    );
+    for (const g of groups) {
+      for (const m of g.models) {
+        expect(m.displayId.startsWith("compat-")).toBe(false);
+        expect(m.displayId.length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("falls back to the endpoint's model id when it has no name", () => {
+    const groups = buildModelGroups(
+      input({
+        customEndpointKeys: { zai: "k" },
+        customEndpoints: [{ id: "zai", name: "", modelId: "glm" }],
+      }),
+    );
+    expect(
+      groups.find((x) => x.key === "endpoint:zai")?.models[0],
+    ).toEqual({ id: "compat-zai", label: "glm", displayId: "glm" });
+  });
+
+  it("uses the registry id as the display id for built-in models", () => {
+    const groups = buildModelGroups(input());
+    expect(groups.find((g) => g.key === "openai")?.models[0]).toEqual({
+      id: "gpt-5.6",
+      label: "GPT-5.6 Sol",
+      displayId: "gpt-5.6",
+    });
   });
 
   it("hides a custom endpoint that has no key and is not current", () => {
@@ -82,7 +120,11 @@ describe("buildModelGroups", () => {
       }),
     );
     expect(groups[0].models).toEqual([
-      { id: "deepseek-v4-flash", label: "DeepSeek Flash (deepseek-flash)" },
+      {
+        id: "deepseek-v4-flash",
+        label: "DeepSeek Flash (deepseek-flash)",
+        displayId: "deepseek-v4-flash",
+      },
     ]);
   });
 
@@ -91,7 +133,7 @@ describe("buildModelGroups", () => {
       input({ apiModelIdFor: (id) => id }),
     );
     expect(groups.find((g) => g.key === "openai")?.models).toEqual([
-      { id: "gpt-5.6", label: "GPT-5.6 Sol" },
+      { id: "gpt-5.6", label: "GPT-5.6 Sol", displayId: "gpt-5.6" },
     ]);
   });
 });

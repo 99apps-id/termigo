@@ -9,6 +9,7 @@
 // makes a best-effort repair so a recoverable input runs instead of failing.
 
 import { parsePartialJson } from "ai";
+import { bestToolMatch } from "./toolNames";
 import { normalizeBatchInput } from "./normalizeSubagentInput";
 
 /** Strip a markdown code fence (` ```json ... ``` `) around the args. */
@@ -101,56 +102,6 @@ export function repairJsonText(text: string): string {
   }
   // Remove a trailing comma before a closing brace/bracket.
   return out.replace(/,\s*([}\]])/g, "$1");
-}
-
-/**
- * Edit distance between two strings (Levenshtein). Used to match a tool name
- * the model typed slightly wrong to the closest one we actually expose.
- */
-function editDistance(a: string, b: string): number {
-  const m = a.length;
-  const n = b.length;
-  if (m === 0) return n;
-  if (n === 0) return m;
-  let prev = new Array<number>(n + 1);
-  let curr = new Array<number>(n + 1);
-  for (let j = 0; j <= n; j++) prev[j] = j;
-  for (let i = 1; i <= m; i++) {
-    curr[0] = i;
-    for (let j = 1; j <= n; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
-    }
-    [prev, curr] = [curr, prev];
-  }
-  return prev[n];
-}
-
-/**
- * Find the available tool name closest to `requested`. Accepts the match only
- * when the edit distance is small relative to the name length, so we fix a
- * near-miss typo (e.g. `ext_...-kool_...` → `ext_...-kit_...`) without ever
- * rewriting one real tool name into a different real tool.
- */
-function bestToolMatch(
-  requested: string,
-  available: readonly string[],
-): string | null {
-  let best = "";
-  let bestDistance = Infinity;
-  for (const name of available) {
-    const d = editDistance(requested, name);
-    if (d < bestDistance) {
-      bestDistance = d;
-      best = name;
-    }
-  }
-  if (best === "") return null;
-  const longer = Math.max(requested.length, best.length);
-  // Allow a couple of edits, growing with the name length, but never enough to
-  // turn one genuinely different, similarly-named tool into another.
-  const threshold = Math.max(2, Math.round(longer * 0.12));
-  return bestDistance <= threshold ? best : null;
 }
 
 /**

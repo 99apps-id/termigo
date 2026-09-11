@@ -173,18 +173,23 @@ describe("AI search tools path safety", () => {
 // A model with exactly one pattern writes `"glob": "src/**/*.ts"`, not a
 // one-element list. The array-only schema rejected the whole call, so the tool
 // never ran and the run died on a validation error instead of a search.
+//
+// The bare-string form is normalised in `execute`, not by a Zod `.transform()`:
+// a transform cannot be expressed in JSON Schema, so it made this the one tool
+// whose schema could not be measured for the request-size report.
 describe("grep glob accepts one pattern or several", () => {
   const schemaOf = (tools: Record<string, unknown>) =>
     (tools.grep as { inputSchema: { parse: (v: unknown) => unknown } })
       .inputSchema;
 
-  it("takes a bare string and normalises it to a list", () => {
+  it("accepts a bare string", () => {
     const tools = buildSearchTools(makeContext());
-    const parsed = schemaOf(tools).parse({
-      pattern: "fs_read_file",
-      glob: "src-tauri/src/lib.rs",
-    }) as { glob?: string[] };
-    expect(parsed.glob).toEqual(["src-tauri/src/lib.rs"]);
+    expect(() =>
+      schemaOf(tools).parse({
+        pattern: "fs_read_file",
+        glob: "src-tauri/src/lib.rs",
+      }),
+    ).not.toThrow();
   });
 
   it("still takes a list", () => {
@@ -202,5 +207,23 @@ describe("grep glob accepts one pattern or several", () => {
       glob?: string[];
     };
     expect(parsed.glob).toBeUndefined();
+  });
+
+  it("sends the same search for a bare string as for a one-element list", async () => {
+    // The behavior the transform used to provide, now checked where it happens.
+    const run = async (glob: string | string[]) => {
+      nativeMock.grep.mockClear();
+      nativeMock.canonicalize.mockResolvedValue("/repo");
+      const ctx = makeContext();
+      ctx.getCwd = () => "/repo";
+      const execute = buildSearchTools(ctx).grep.execute;
+      if (!execute) throw new Error("grep tool execute missing");
+      await execute({ pattern: "x", glob }, toolOptions);
+      return nativeMock.grep.mock.calls[0]?.[0];
+    };
+    const bare = await run("src/**/*.ts");
+    const list = await run(["src/**/*.ts"]);
+    expect(bare).toEqual(list);
+    expect(bare).toMatchObject({ glob: ["src/**/*.ts"] });
   });
 });

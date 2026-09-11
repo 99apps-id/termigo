@@ -1,6 +1,7 @@
 import { summarizeInput } from "../lib/approvalQueue";
 import { withAutoVerify } from "../lib/autoVerify";
 import { buildOrchestratorTools } from "../lib/orchestrator";
+import { KNOWN_TOOL_ALIASES } from "../lib/repairToolCall";
 import { buildPolicyTools } from "./policyTools";
 import { buildProcessTools } from "./process";
 import {
@@ -8,6 +9,10 @@ import {
   withPostExecuteConfirm,
 } from "../lib/postExecuteConfirm";
 import { buildSkillRegistryTools } from "../lib/skillRegistry";
+import {
+  buildUnknownToolFallback,
+  UNKNOWN_TOOL_NAME,
+} from "./toolFallback";
 import { useApprovalQueue } from "../store/approvalQueueStore";
 import { buildManagedAgentTools } from "./agent";
 import { buildBrowserTools } from "./browser";
@@ -47,8 +52,6 @@ import { buildVerifyTools } from "./verify";
 import { buildWebSearchTools } from "./webSearch";
 import { buildWorkflowTools } from "./workflow";
 import { buildWorktreeTools } from "./worktree";
-import { tool } from "ai";
-import { z } from "zod";
 
 export { resolvePath, type ToolContext } from "./context";
 
@@ -191,10 +194,15 @@ async function dispatchRegisteredTool(
  *   0 = the main agent. A subagent at depth N receives spawn tools that spawn
  *   depth N+1 children; at `MAX_SUBAGENT_DEPTH` the spawn tools are omitted so
  *   recursion cannot exceed the cap (BatikCode parity).
+ * @param opts.findToolsName Name of the on-demand discovery tool, when the run
+ *   loads tools lazily. Included in the unknown-tool reply so a model that asked
+ *   for something absent is pointed at discovery instead of concluding the
+ *   capability does not exist.
  */
 export function buildTools(
   ctx: import("./context").ToolContext,
   subagentDepth = 0,
+  opts: { findToolsName?: string } = {},
 ) {
   // A workflow can spawn a subagent, and that subagent builds another toolset.
   // Keep workflow steps bound to this run's completed snapshot so they cannot
@@ -203,7 +211,7 @@ export function buildTools(
   const workflowTools = buildWorkflowTools(ctx, (name, args) =>
     dispatchForThisRun(name, args),
   );
-  const base = {
+  const partial = {
     ...buildFsTools(ctx),
     ...buildFileOpsTools(ctx),
     ...buildFetchTools(),
@@ -245,36 +253,26 @@ export function buildTools(
     ...buildMcpOAuthTools(),
     ...buildSystemTools(),
     ...buildProcessTools(ctx),
-    unknown_tool_fallback: tool({
-      description:
-        "Internal fallback for unrecognized tool names. Informs the model that the requested tool does not exist.",
-      inputSchema: z.object({
-        requested_tool: z.string(),
-        provided_input: z.string().optional(),
-      }),
-      execute: async ({ requested_tool }) => {
-        const available = [
-          "read_file",
-          "write_file",
-          "edit",
-          "multi_edit",
-          "create_directory",
-          "list_directory",
-          "bash_run",
-          "bash_background",
-          "grep",
-          "glob",
-          "fetch",
-          "run_subagent",
-          "run_subagents",
-          "todo_write",
-        ];
-        return {
-          error: `Tool "${requested_tool}" does not exist in this environment. Available tools: ${available.join(", ")}. Please use one of these valid tools instead.`,
-        };
-      },
-    }),
   } as const;
+
+  // The unknown-tool fallback is added last and reads its own toolset, so its
+  // reply names the tools that actually exist in THIS request. It used to carry
+  // a hardcoded list of 13 names written when the toolset was smaller; a model
+  // asking for a real tool outside those 13 was told it did not exist.
+  //
+  // Self-reference needs the explicit type: `base` is read inside its own
+  // initializer, which TypeScript cannot infer.
+  const base: typeof partial & {
+    [UNKNOWN_TOOL_NAME]: ReturnType<typeof buildUnknownToolFallback>;
+  } = {
+    ...partial,
+    [UNKNOWN_TOOL_NAME]: buildUnknownToolFallback({
+      available: () => Object.keys(base),
+      aliasFor: (name) =>
+        KNOWN_TOOL_ALIASES[name.toLowerCase()]?.canonical ?? null,
+      findToolsName: opts.findToolsName,
+    }),
+  };
 
   // Store a reference so the workflow / orchestrator engines can dispatch
   // JSON-defined steps to the real tool implementations.

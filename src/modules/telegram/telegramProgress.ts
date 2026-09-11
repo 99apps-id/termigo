@@ -208,15 +208,13 @@ export async function publishProgress(
         ];
         // Record only a delivered prompt: recording first meant a single failed
         // send lost the approval forever and the run sat in awaiting-approval
-        // with nothing for the user to click.
+        // with nothing for the user to click. `sendKeyboard` resolves false
+        // (never rejects) so the result is the delivery signal.
         const ok = await sendKeyboard(
           chatId,
           `Action Approval Required:\nTool: ${p.toolName}\nTarget: ${p.summary || p.toolName}\n(Reply /approve or /deny)`,
           keyboard,
           signal,
-        ).then(
-          () => true,
-          () => false,
         );
         if (ok) {
           rememberSentApproval(p.id);
@@ -247,9 +245,6 @@ export async function publishProgress(
           `Agent Question:\n${el.question}`,
           keyboard,
           signal,
-        ).then(
-          () => true,
-          () => false,
         );
         if (ok) {
           sentElicitationIds.add(el.id);

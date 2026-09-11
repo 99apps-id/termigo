@@ -78,12 +78,15 @@ export function buildSearchTools(ctx: ToolContext) {
         // `"glob": "src/**/*.ts"` when they have exactly one pattern, and the
         // array-only schema rejected the whole call - the tool never ran, and
         // the run died on a validation error rather than a search.
-        // `.transform` before `.optional()`: the other order makes the key
-        // required-with-undefined rather than optional, which every existing
-        // caller that omits a glob would then fail to type-check against.
+        //
+        // Normalised in `execute` rather than with `.transform()`: a Zod
+        // transform cannot be expressed in JSON Schema, so `z.toJSONSchema`
+        // throws on it and the tool's schema became the one entry in the
+        // payload that could not be measured (`lib/toolPayload.ts` reports it
+        // as `unmeasured`). Keeping the schema declarative means the reported
+        // request size is exact.
         glob: z
           .union([z.string(), z.array(z.string())])
-          .transform((g) => (typeof g === "string" ? [g] : g))
           .optional()
           .describe(
             "Optional include-globs over relative paths. One pattern or several: 'src/**/*.ts' or ['**/*.ts', 'src/**/*.tsx'].",
@@ -94,10 +97,12 @@ export function buildSearchTools(ctx: ToolContext) {
       execute: async ({
         pattern,
         root,
-        glob,
+        glob: globInput,
         case_insensitive,
         max_results,
       }) => {
+        const glob =
+          typeof globInput === "string" ? [globInput] : globInput;
         const remote = ctx.getRemoteSession();
         if (remote) {
           // The server's own grep, not an SFTP walk: a recursive walk is one

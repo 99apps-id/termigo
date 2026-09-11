@@ -6,7 +6,73 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Security
+### Added
+
+- **On-demand tool loading.** The full toolset is ~80 KB of JSON Schema sent on
+  every request. With Settings → Agents → *Load tools on demand* on, a run
+  starts with the coding loop (39 tools / 31.4 KB / ~8.0k tokens) plus a
+  `find_tools` search, and a domain joins the request when the model asks for it
+  by keyword. Measured saving: 61% (~12.5k tokens per request) against the full
+  125-tool set, with full capability kept - unlike the compact tier, this keeps
+  `ask_user`, the file operations and the verification loop. `find_tools` costs
+  1.1 KB and indexes the 87 deferred tools; a discovered tool stays active for
+  the rest of the run, so re-use costs no extra step.
+- **Tool domains** (Settings → Agents): switch off whole optional domains -
+  browser, GitHub, LSP, web, skills, self-improvement, workflows, previews,
+  agent handoff, PTY driving, worktrees, SQL, PDF, image generation, history -
+  and their schemas leave the request. Every group off: 56 tools / 40.6 KB /
+  ~10.4k tokens, a 49% cut. The core loop is deliberately not groupable.
+
+### Fixed
+
+- **An unknown tool call answered with a stale, wrong list.** The
+  `unknown_tool_fallback` reply named 13 hardcoded tools, written when the
+  toolset was smaller. A model asking for a real tool outside those 13 -
+  `git_status`, `run_checks`, every browser and GitHub tool - was told it did
+  not exist and gave up on the capability. The reply is now built from the
+  toolset actually in the request, adds "did you mean" candidates, names the
+  equivalent tool when the cross-ecosystem alias table knows one, and points at
+  `find_tools` when the run loads tools on demand.
+- **An unanswered approval could hold a run open indefinitely.** The approval
+  queue auto-denies after five minutes, but the SDK approval path (a
+  `needsApproval` tool call paused for the user) had no deadline, so a card the
+  user did not answer left `agentMeta.status` on `awaiting-approval` with
+  nothing saying for how long. Both paths now share the same five-minute window
+  and a reason the user and the model can both read.
+- **The run log under-reported the tool payload by more than half.** The tool
+  component of the prompt measurement counted `inputSchema.jsonSchema`, which
+  exists only on `jsonSchema()`-built MCP tools, and fell back to the
+  description for everything else - so built-in Zod schemas were invisible and
+  the line reported 37 KB where the real block was 79 KB. `lib/toolPayload.ts`
+  converts each Zod schema to the JSON Schema that is serialised (cached per
+  tool name), and a schema that cannot be converted is reported as
+  `unmeasured` in the log rather than passed off as exact.
+- **`grep` schema was not representable as JSON Schema.** A Zod `.transform()`
+  normalising a bare string glob to a list made this the one tool whose schema
+  could not be measured. The normalisation moved into `execute`, where the same
+  behaviour is asserted end-to-end; the schema stays declarative.
+
+- **Completion of the F-14 boundary: commands the fs-only audit missed**
+  - **`sql_run`**: a local database file (`sqlite3` / `duckdb` connection) was
+    passed straight to the client with no deny-list and no workspace check, so
+    any database on disk - a browser profile, a password-manager store, a
+    credential DB - could be opened from inside the agent. A local file
+    connection now passes `validate_read` and `require_authorized`; a URL or a
+    bare database name is server-resolved and needs no filesystem gate. The
+    split is `local_db_path`, unit-tested.
+  - **`ssh_sftp_upload`**: the local source path was read and shipped to the
+    remote host unchecked. The module doc claimed only user-dragged absolute
+    paths arrive, but that described the caller, not the command. It now passes
+    the secret deny-list. The workspace registry is deliberately not applied,
+    because uploading a file from outside the open project is legitimate.
+  - **`ext_peek_zip` / `ext_install_from_zip`**: the chosen package path is now
+    run through the deny-list before it is read.
+  - **Enforcement**: `src-tauri/tests/command_authorization.rs` parses the
+    registered command catalogue, finds every command taking a path-like
+    parameter, and fails when its module consults neither the registry nor the
+    deny-list. Exemptions are written down with a reason, and a companion test
+    fails if an exempted command is renamed or removed. Verified by removing the
+    `sql_run` check and watching the test name it.
 
 - **Rust filesystem layer hardening**
   - **F-14 CRITICAL**: 20 of 21 `fs::*` commands resolved a path and applied

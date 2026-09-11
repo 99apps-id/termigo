@@ -9,6 +9,7 @@
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import type { UIMessage } from "ai";
 import { useEffect, useRef } from "react";
+import { APPROVAL_EXPIRED_REASON, APPROVAL_TTL_MS, reconcileApprovalTimers } from "../lib/approvalExpiry";
 import { isAutoApproved } from "../lib/approvalPolicy";
 import { isAutoApprovedScan } from "../lib/pentestScope";
 import { isSessionAllowed } from "../store/approvalQueueStore";
@@ -42,15 +43,36 @@ export function useAutoApproval(
   // One response per approval id. The part stays in the message list after it
   // is answered, and re-answering resumes the run twice.
   const answered = useRef<Set<string>>(new Set());
+  // Deadline per approval the user has NOT answered. The effect below re-runs on
+  // every streamed token, so the timers live in a ref and are only touched when
+  // the set of awaiting approvals actually changes.
+  const expiryTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(
+    new Map(),
+  );
+
+  // Clear timers on unmount so a dismissed chat cannot fire a response into a
+  // run that is gone.
+  useEffect(() => {
+    const timers = expiryTimers.current;
+    return () => {
+      for (const t of timers.values()) clearTimeout(t);
+      timers.clear();
+    };
+  }, []);
 
   useEffect(() => {
     const last = messages[messages.length - 1];
     if (last?.role !== "assistant") return;
 
+    // Every approval still awaiting an answer, whether or not this effect
+    // decides it. Used at the end to arm a deadline for the ones it does not.
+    const awaiting: string[] = [];
+
     for (const part of last.parts as Array<Record<string, unknown>>) {
       if (part.state !== "approval-requested") continue;
       const id = (part.approval as { id?: string } | undefined)?.id;
       if (!id || answered.current.has(id)) continue;
+      awaiting.push(id);
 
       const tool = toolNameOf(part);
       if (!tool) continue;
@@ -127,6 +149,36 @@ export function useAutoApproval(
 
       answered.current.add(id);
       void respond({ id, approved: true });
+    }
+
+    // What is left is waiting on the user. Arm a deadline for each so an
+    // approval nobody answers cannot hold the run open forever, and drop timers
+    // whose approval was already dealt with.
+    const timers = expiryTimers.current;
+    const { arm, clear } = reconcileApprovalTimers(
+      new Set(timers.keys()),
+      awaiting,
+    );
+    for (const id of clear) {
+      const t = timers.get(id);
+      if (t !== undefined) clearTimeout(t);
+      timers.delete(id);
+    }
+    for (const id of arm) {
+      timers.set(
+        id,
+        setTimeout(() => {
+          timers.delete(id);
+          if (answered.current.has(id)) return;
+          answered.current.add(id);
+          console.warn(`[ai] approval expired unanswered id=${id}`);
+          void respond({
+            id,
+            approved: false,
+            reason: APPROVAL_EXPIRED_REASON,
+          });
+        }, APPROVAL_TTL_MS),
+      );
     }
   }, [messages, mode, alwaysAllowed, respond]);
 }

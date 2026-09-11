@@ -799,6 +799,59 @@ export function isKnownModelId(id: string): id is ModelId {
   return MODELS.some((x) => x.id === id);
 }
 
+/**
+ * Resolve whatever a config file, a command or a stored preference calls a
+ * model into the id the app can actually run with.
+ *
+ * Hand-written config (`termigo-settings.json` on a VPS, a support note, a
+ * migration) rarely carries the internal `compat-<id>` form. What people write
+ * is the endpoint id, the endpoint's name, or the model id the provider
+ * itself uses, and every one of those used to resolve to "not a known model"
+ * and fall through to a default that then failed for want of a key - which is
+ * the "Telegram loads but never answers" report.
+ *
+ * Returns null when nothing matches, so the caller can pick a fallback
+ * deliberately instead of receiving a silently wrong model.
+ */
+export function normalizeModelId(
+  id: string,
+  endpoints: readonly CustomEndpoint[] = [],
+  overrides: Readonly<Record<string, string>> = {},
+): string | null {
+  const raw = id.trim();
+  if (!raw) return null;
+
+  if (isKnownModelId(raw)) return raw;
+
+  if (isCompatModelId(raw)) {
+    const eid = endpointIdFromCompatModel(raw);
+    return endpoints.some((e) => e.id === eid) ? raw : null;
+  }
+
+  const lower = raw.toLowerCase();
+  // The endpoint's own id is the form the deployment guide documented, so it
+  // is the one most likely to be sitting in an existing config.
+  //
+  // Checked BEFORE the built-in wire-id alias below, because the two can
+  // collide: an endpoint configured with `modelId: "deepseek-flash"` and the
+  // built-in DeepSeek model now served as `deepseek-flash` both match that
+  // string. The endpoint is what the user deliberately configured, so it wins.
+  const ep =
+    endpoints.find((e) => e.id === raw) ??
+    endpoints.find((e) => e.modelId.toLowerCase() === lower) ??
+    endpoints.find((e) => e.name.toLowerCase() === lower);
+  if (ep) return compatModelIdForEndpoint(ep.id);
+
+  // The provider-side id of a built-in model: `deepseek-flash` for the
+  // registry's `deepseek-v4-flash` (a rename or a user override). Only reached
+  // when no configured endpoint claims the string.
+  const byApiId = MODELS.find(
+    (m) =>
+      resolveApiModelId(m.id, overrides).toLowerCase() === lower,
+  );
+  return byApiId ? byApiId.id : null;
+}
+
 const FREEFORM_PROVIDERS: ReadonlySet<ProviderId> = new Set([
   "openrouter",
   "openai-compatible",
@@ -1243,8 +1296,51 @@ const LITE_SYSTEM_PROMPT_MODEL_IDS = new Set<string>([
   "grok-build-0.1",
 ]);
 
+/**
+ * The provider-side names of those same lite-tier models.
+ *
+ * A model reached through a custom OpenAI-compatible endpoint is addressed by
+ * a synthetic `compat-<endpoint>` id, and the endpoint names the model the way
+ * the vendor does (`deepseek-flash`), not the way the registry does
+ * (`deepseek-v4-flash`). Matching only registry ids meant a small, fast model
+ * configured as a custom endpoint silently got the full prompt and all ~126
+ * tool schemas - exactly the configuration where instruction-following suffers
+ * most.
+ */
+const LITE_SYSTEM_PROMPT_API_IDS: ReadonlySet<string> = new Set(
+  MODELS.filter((m) => LITE_SYSTEM_PROMPT_MODEL_IDS.has(m.id)).map((m) =>
+    resolveApiModelId(m.id).toLowerCase(),
+  ),
+);
+
 export function isCompactTierModel(modelId: string | undefined): boolean {
-  return !!modelId && LITE_SYSTEM_PROMPT_MODEL_IDS.has(modelId);
+  if (!modelId) return false;
+  const id = modelId.toLowerCase();
+  return (
+    LITE_SYSTEM_PROMPT_MODEL_IDS.has(id) || LITE_SYSTEM_PROMPT_API_IDS.has(id)
+  );
+}
+
+/**
+ * The model name to decide tiers and prompts with.
+ *
+ * A built-in resolves to the id it is served under; a custom endpoint resolves
+ * to the model it actually serves, because that name - not the synthetic id -
+ * is what identifies the model. Pure, so the caller owns the endpoint list.
+ */
+export function effectiveModelName(
+  modelId: string | undefined,
+  endpoints: readonly CustomEndpoint[] = [],
+  overrides: Readonly<Record<string, string>> = {},
+): string {
+  if (!modelId) return "";
+  if (isCompatModelId(modelId)) {
+    const ep = endpoints.find(
+      (e) => e.id === endpointIdFromCompatModel(modelId),
+    );
+    return ep?.modelId.trim() || modelId;
+  }
+  return resolveApiModelId(modelId, overrides);
 }
 
 export function selectSystemPrompt(modelId: string | undefined): string {

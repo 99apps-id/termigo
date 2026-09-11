@@ -167,6 +167,24 @@ export type Preferences = {
    * so a rename costs a correction in Settings rather than a release.
    */
   modelIdOverrides: Record<string, string>;
+  /**
+   * Optional tool domains the user turned off.
+   *
+   * The full toolset is ~125 tools and ~79 KB of JSON Schema on every request.
+   * Each id here drops that domain's schemas from the request entirely, so a
+   * session that never drives a browser stops paying for the browser tools.
+   * Empty means everything is offered (the previous behaviour).
+   */
+  disabledToolGroups: string[];
+  /**
+   * Load agent tools on demand instead of sending every schema up front.
+   *
+   * The full toolset is ~80 KB of JSON Schema on every request. With this on,
+   * a run starts with the coding loop plus a `find_tools` search, and a domain
+   * is added to the request when the model asks for it. Off sends everything,
+   * which is what every earlier version did.
+   */
+  toolSearchEnabled: boolean;
   /** How much the agent may do without stopping for approval. */
   agentApprovalMode: ApprovalMode;
   /**
@@ -372,6 +390,8 @@ const KEY_OPENAI_COMPAT_MODEL_ID = "openaiCompatibleModelId";
 const KEY_OPENAI_COMPAT_CONTEXT_LIMIT = "openaiCompatibleContextLimit";
 const KEY_CUSTOM_ENDPOINTS = "customEndpoints";
 const KEY_MODEL_ID_OVERRIDES = "modelIdOverrides";
+const KEY_DISABLED_TOOL_GROUPS = "disabledToolGroups";
+const KEY_TOOL_SEARCH_ENABLED = "toolSearchEnabled";
 const KEY_OPENROUTER_MODEL_ID = "openrouterModelId";
 const KEY_AGENT_APPROVAL_MODE = "agentApprovalMode";
 const KEY_AGENT_ALWAYS_ALLOWED_TOOLS = "agentAlwaysAllowedTools";
@@ -485,6 +505,8 @@ export const DEFAULT_PREFERENCES: Preferences = {
   openaiCompatibleContextLimit: 128_000,
   customEndpoints: [],
   modelIdOverrides: {},
+  disabledToolGroups: [],
+  toolSearchEnabled: false,
   openrouterModelId: "",
   agentApprovalMode: DEFAULT_APPROVAL_MODE,
   agentAlwaysAllowedTools: [],
@@ -732,6 +754,13 @@ export async function loadPreferences(): Promise<Preferences> {
       }
       return out;
     })(),
+    disabledToolGroups: (
+      get<string[]>(KEY_DISABLED_TOOL_GROUPS) ??
+      DEFAULT_PREFERENCES.disabledToolGroups
+    ).filter((g) => typeof g === "string" && g.length > 0),
+    toolSearchEnabled:
+      get<boolean>(KEY_TOOL_SEARCH_ENABLED) ??
+      DEFAULT_PREFERENCES.toolSearchEnabled,
     agentApprovalMode:
       get<ApprovalMode>(KEY_AGENT_APPROVAL_MODE) ??
       DEFAULT_PREFERENCES.agentApprovalMode,
@@ -1369,6 +1398,24 @@ export async function resetShortcuts(): Promise<void> {
   await writePref(KEY_SHORTCUTS, DEFAULT_PREFERENCES.shortcuts);
 }
 
+/**
+ * Replace the set of disabled tool groups.
+ *
+ * Stored as a list of ids; unknown ids are kept out so a stale preference
+ * cannot grow without bound, and duplicates are collapsed so the settings list
+ * and the applied set cannot disagree.
+ */
+export async function setDisabledToolGroups(
+  value: readonly string[],
+): Promise<void> {
+  const cleaned = [...new Set(value.filter((g) => typeof g === "string" && g))];
+  await writePref(KEY_DISABLED_TOOL_GROUPS, cleaned);
+}
+
+export async function setToolSearchEnabled(value: boolean): Promise<void> {
+  await writePref(KEY_TOOL_SEARCH_ENABLED, value);
+}
+
 export type PrefKey = keyof Preferences;
 
 /** Subscribe to changes from any window (settings → main). */
@@ -1404,6 +1451,8 @@ export async function onPreferencesChange(
     [KEY_OPENAI_COMPAT_CONTEXT_LIMIT]: "openaiCompatibleContextLimit",
     [KEY_CUSTOM_ENDPOINTS]: "customEndpoints",
     [KEY_MODEL_ID_OVERRIDES]: "modelIdOverrides",
+    [KEY_DISABLED_TOOL_GROUPS]: "disabledToolGroups",
+    [KEY_TOOL_SEARCH_ENABLED]: "toolSearchEnabled",
     [KEY_OPENROUTER_MODEL_ID]: "openrouterModelId",
     [KEY_STT_PROVIDER]: "sttProvider",
     [KEY_GROQ_STT_MODEL]: "groqSttModel",

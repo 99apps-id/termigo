@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { firePendingReviewForSession } from "@/modules/agents/lib/review";
 import { usePreferencesStore } from "@/modules/settings/preferences";
-import { onKeysChanged } from "@/modules/settings/store";
+import { onKeysChanged, setDefaultModel } from "@/modules/settings/store";
 import {
   getAllCustomEndpointKeys,
   getAllKeys,
@@ -14,8 +14,7 @@ import {
 import {
   DEFAULT_MODEL_ID,
   compatModelIdForEndpoint,
-  isCompatModelId,
-  isKnownModelId,
+  normalizeModelId,
 } from "../config";
 import { useAgentsStore } from "../store/agentsStore";
 import { useChatStore } from "../store/chatStore";
@@ -55,6 +54,7 @@ export function useAiBootstrap(): {
     (s) => s.openaiCompatibleBaseURL,
   );
   const customEndpoints = usePreferencesStore((s) => s.customEndpoints);
+  const modelIdOverrides = usePreferencesStore((s) => s.modelIdOverrides);
   const hasLocalModel =
     (lmstudioBaseURL.trim().length > 0 && lmstudioModelId.trim().length > 0) ||
     (mlxBaseURL.trim().length > 0 && mlxModelId.trim().length > 0) ||
@@ -108,30 +108,35 @@ export function useAiBootstrap(): {
   }, [initPrefs]);
   useEffect(() => {
     if (!prefsHydrated) return;
-    const rawDefault = String(prefDefaultModel);
-    const isValid =
-      isKnownModelId(rawDefault) ||
-      (isCompatModelId(rawDefault) &&
-        customEndpoints.some(
-          (ep) => compatModelIdForEndpoint(ep.id) === rawDefault,
-        ));
-    if (isValid) {
-      setSelectedModelId(rawDefault);
-    } else {
-      const matchedEp = customEndpoints.find(
-        (ep) =>
-          ep.modelId.toLowerCase() === rawDefault.toLowerCase() ||
-          ep.name.toLowerCase() === rawDefault.toLowerCase(),
-      );
-      if (matchedEp) {
-        setSelectedModelId(compatModelIdForEndpoint(matchedEp.id));
-      } else if (customEndpoints.length > 0) {
-        setSelectedModelId(compatModelIdForEndpoint(customEndpoints[0].id));
-      } else {
-        setSelectedModelId(DEFAULT_MODEL_ID);
-      }
+    const rawDefault = String(prefDefaultModel).trim();
+    // Accepts the registry id, the compat-<id> form, a bare endpoint id, an
+    // endpoint's name, or the provider's own model id. Hand-written config on
+    // a VPS uses most of those, and only the compat-<id> form used to work.
+    const resolved = normalizeModelId(
+      rawDefault,
+      customEndpoints,
+      modelIdOverrides,
+    );
+    if (resolved) {
+      setSelectedModelId(resolved);
+      // Write the repair back: a bare endpoint id left in the settings file
+      // would resolve the same way on every boot, and the next reader (a
+      // support note, the deployment guide) learns the wrong shape from it.
+      if (resolved !== rawDefault) void setDefaultModel(resolved).catch(() => {});
+      return;
     }
-  }, [prefsHydrated, prefDefaultModel, setSelectedModelId, customEndpoints]);
+    setSelectedModelId(
+      customEndpoints.length > 0
+        ? compatModelIdForEndpoint(customEndpoints[0].id)
+        : DEFAULT_MODEL_ID,
+    );
+  }, [
+    prefsHydrated,
+    prefDefaultModel,
+    setSelectedModelId,
+    customEndpoints,
+    modelIdOverrides,
+  ]);
 
   useEffect(() => {
     void hydrateSessions();

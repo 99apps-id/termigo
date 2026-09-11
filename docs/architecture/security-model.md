@@ -41,6 +41,28 @@ This is the allow side of the file-system boundary. Any new feature that spawns 
 
 Every `fs::*` command enforces it: after the deny-list guard it calls `workspace::require_authorized`, which canonicalises the target (`WorkspaceRegistry::is_authorized_canonical`) so a `..` segment or a symlink cannot defeat the root check, and refuses any path outside an authorized root. The read/write commands delegate to pure `*_blocking` walkers so the authorization stays in the thin command shell and the walkers remain unit-testable.
 
+Outside `fs::*`, the same boundary applies to every command that names a local path:
+
+- `sql_run` gates a local database file (`sqlite3` / `duckdb` connection) with the deny-list plus `require_authorized` before spawning the client. A URL or a bare database name is server-resolved and needs no filesystem gate.
+- `ssh_sftp_upload` runs the local source path through the deny-list. The workspace registry is deliberately not applied - uploading a file from outside the open project is legitimate - but a secret path cannot be read and shipped to a remote host.
+- `ext_peek_zip` / `ext_install_from_zip` run the chosen package path through the deny-list.
+- `ext_read_asset` / `ext_read_asset_bytes` are confined to the extension's own sandbox directory by `resolve_asset`, which refuses `..` and absolute relative paths.
+- Git commands delegate every repo path to `git::operations`, which consults the registry.
+
+### Enforcement
+
+The rule above is checked mechanically, not by review:
+`src-tauri/tests/command_authorization.rs` parses the registered command
+catalogue out of `lib.rs`, finds every command that takes a path-like
+parameter, and fails when the implementing module calls neither an
+authorization helper nor the deny-list. Commands that legitimately need
+neither are listed there with a written reason, and a second test fails if an
+allow-listed command is renamed or removed, so the list cannot rot.
+
+That test exists because the invariant previously lived only in prose: 20 of
+21 `fs::*` commands had no registry check while this document claimed they
+did, and `sql_run` was missed by the audit that fixed them.
+
 ## AI tool approval flow
 
 In `src/modules/ai/tools/tools.ts`:

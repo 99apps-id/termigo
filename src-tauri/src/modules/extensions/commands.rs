@@ -229,6 +229,9 @@ pub async fn ext_install_from_zip(
     // caller that never showed a dialog) skips the check.
     approved_permissions: Option<Vec<String>>,
 ) -> Result<ListEntry, String> {
+    // Same file-read gate as `ext_peek_zip`: the package path is chosen by the
+    // user, but it must not be a secret path.
+    crate::modules::fs::security::validate_read(std::path::Path::new(&zip_path))?;
     // Stat first so accidentally pointing at a multi-GB ISO does not OOM
     // the install path; `fs::read` would otherwise allocate the whole file
     // before the cap fires.
@@ -253,6 +256,11 @@ pub async fn ext_install_from_zip(
 
 #[tauri::command]
 pub async fn ext_peek_zip(zip_path: String) -> Result<PeekResult, String> {
+    // A local package path is a file read, so it passes the same secret
+    // deny-list the `fs::*` readers do. Installing from anywhere the user
+    // picked is legitimate; reading a credential file as if it were a package
+    // is not.
+    crate::modules::fs::security::validate_read(std::path::Path::new(&zip_path))?;
     let meta = fs::metadata(&zip_path).map_err(|e| format!("stat {zip_path}: {e}"))?;
     if meta.len() > MAX_DOWNLOAD_BYTES {
         return Err(format!(

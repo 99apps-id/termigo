@@ -20,6 +20,39 @@ Cloud providers are defined in `src/modules/ai/config.ts`:
 
 Model metadata (context limits, costs, reasoning behavior) lives in the model registry in `config.ts`. `resolveModel` maps a model id to its provider and defaults.
 
+### Tool payload: what the toolset costs, and three ways to stop paying
+
+Every enabled tool sends its full JSON Schema with every request, before a word of the conversation. Measured on this repo's own toolset:
+
+| | tools | schema | ≈ tokens |
+| --- | --- | --- | --- |
+| Full set | 125 | 80.2 KB | 20,543 |
+| Optional domains off | 56 | 40.6 KB | 10,405 |
+| On-demand loading | 39 | 31.4 KB | 8,037 |
+
+Three levers, usable together:
+
+1. **Tool domains** (Settings → Agents): switch off whole domains a session cannot use. The groups are browser automation, GitHub, LSP, web access, skill authoring, self-improvement, workflows and policies, the invariant ledger, previews and dev servers, coding-agent handoff, PTY driving, worktrees, SQL, PDF reading, image generation, and command-history search.
+2. **On-demand loading** (`tools/toolSearch.ts`): the run starts with the coding loop plus `find_tools`, and a deferred tool joins the request when the model asks for it by keyword. `find_tools` costs 1.1 KB and indexes the 87 deferred tools.
+3. **Compact tier** (`CORE_TOOL_NAMES`): 27 tools / 21.7 KB, applied automatically for small models. Search mode supersedes it, because it keeps full capability at a similar cost.
+
+`tools/toolGroups.ts` and `tools/toolSearch.ts` are pure and unit-tested; both are applied in `runAgentStream` before the harness profile and before the payload is measured, so the reported size is what is actually sent.
+
+Three properties are deliberate:
+
+- **Explicit name lists, not prefix patterns.** A pattern would silently gate a tool added later that merely shares a prefix; an explicit list makes a rename a test failure.
+- **The core loop is not groupable, and search mode keeps full capability.** Files, shell, search, git, sub-agents, todos, verification, `ask_user` and the file operations stay on. A toggle that can break basic coding is a foot gun.
+- **`find_tools` in the unknown-tool reply.** When a run defers tools, a call for a name that does not exist is answered with the discovery hint as well as a did-you-mean list, so a model that guessed wrong reaches the right tool instead of declaring the capability missing.
+
+`lib/toolPayload.ts` measures the payload by converting each Zod schema to the JSON Schema that is serialised, cached per tool name. This replaced a measurement that counted `.jsonSchema` (present only on `jsonSchema()`-built MCP tools) and fell back to the description for everything else, so the run log reported 37 KB where the real block was 79 KB — an undercount of more than half in the one report meant to catch prompt growth. A Zod `.transform()` cannot be expressed in JSON Schema, so a schema that cannot be converted is counted as `unmeasured` and the log line says so rather than looking precise; the tests assert the current set measures exactly and stays under a ceiling.
+
+### Missing tools and unanswered approvals
+
+Two failure modes that read to the user as "the agent is broken" rather than as an error, both now bounded:
+
+- **A tool name that does not exist** (`tools/toolFallback.ts`). A model trained elsewhere reaches for `view_file` or `run_command`; `lib/repairToolCall.ts` rewrites the ones the alias table knows and a near-miss matcher (`lib/toolNames.ts`) fixes typos, so most never reach the fallback. What is left gets a reply built from the toolset actually in the request, with "did you mean" candidates and the equivalent tool named.
+- **An approval nobody answers** (`lib/approvalExpiry.ts`). The SDK pauses a run on `approval-requested` and has no deadline of its own, so an ignored card left the run on `awaiting-approval` indefinitely. Both the SDK path and the approval queue now auto-deny after five minutes with a reason, so the model sees the refusal and can adapt.
+
 ### Renamed models and the API model id
 
 Vendors rename their models on their own schedule: DeepSeek retired `deepseek-reasoner` and now serves `deepseek-flash` / `deepseek-v4-pro`. A hardcoded id is therefore wrong the week it changes, and wrong in a shipped binary.
@@ -261,6 +294,9 @@ On a remote SSH session the tool refuses and points at the composed path (`bash_
 - Keys only via `secrets_*` commands; never disk, settings store, or `localStorage`.
 - A model id sent to a provider comes from `resolveApiModelId`; never hardcode one at a call site, or a vendor rename needs a release.
 - New providers must justify their bundle cost and unique value.
+- A new tool must be either in `CORE_TOOL_NAMES` (always sent) or in a `toolGroups.ts` group (opt-out); `toolGroups.test.ts` fails otherwise, so nothing becomes a permanent per-request cost by default.
+- A deferred tool must be reachable two ways: always-on, or indexed for `find_tools`. `toolSearch.test.ts` fails on a tool that is neither, because the model could never call it.
+- A new tool name must be matched by `lib/toolNames.ts` (not a private copy) so the repair hook and the unknown-tool reply agree on what "close enough" means.
 - Mutating tools require approval; read-only tools still pass the deny-list.
 - Deleting is never delegated: no approval mode may skip `delete_file` or a command that removes files.
 - Nothing unresolved reaches the provider: every tool call without a result is closed out as interrupted, never deleted.

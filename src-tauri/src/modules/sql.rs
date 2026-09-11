@@ -158,10 +158,43 @@ pub fn run_query(engine: &str, connection: &str, query: &str) -> Result<String, 
     Ok(text)
 }
 
+/// The on-disk database a connection string names, when the engine reads one.
+///
+/// `None` for anything that is not a local file: a URL connection
+/// (`postgres://`, `mysql://`) is resolved by the server, a bare name is a
+/// database on the server, and `:memory:` touches nothing. Those need no
+/// filesystem gate; a path does.
+pub fn local_db_path(engine: &str, connection: &str) -> Option<std::path::PathBuf> {
+    let trimmed = connection.trim();
+    if trimmed.is_empty() || trimmed == ":memory:" || trimmed.contains("://") {
+        return None;
+    }
+    match engine {
+        // These two open the argument as a file on this machine.
+        "sqlite3" | "sqlite" | "duckdb" => Some(std::path::PathBuf::from(trimmed)),
+        _ => None,
+    }
+}
+
 // Async so a slow query never blocks the UI thread: a sync command runs on the
 // main thread, and `run_query` shells out to the DB client and waits for it.
 #[tauri::command]
-pub async fn sql_run(engine: String, connection: String, query: String) -> Result<String, String> {
+pub async fn sql_run(
+    engine: String,
+    connection: String,
+    query: String,
+    registry: tauri::State<'_, crate::modules::workspace::WorkspaceRegistry>,
+) -> Result<String, String> {
+    // A local database file is a file read like any other. Without this gate,
+    // `sqlite3 <path>` was a way to open any database on disk - a browser
+    // profile, a password manager store, a credential DB - from inside the
+    // agent, outside the workspace authorization that `fs::*` now enforces.
+    // The deny-list and the authorized-root check are the same two halves the
+    // `fs::*` commands pass, so the boundary is one rule rather than two.
+    if let Some(db) = local_db_path(&engine, &connection) {
+        crate::modules::fs::security::validate_read(&db)?;
+        crate::modules::workspace::require_authorized(&registry, &db)?;
+    }
     tauri::async_runtime::spawn_blocking(move || run_query(&engine, &connection, &query))
         .await
         .map_err(|e| e.to_string())?
@@ -214,5 +247,33 @@ mod tests {
         assert!(validate_query("").is_err());
         assert!(validate_query("SELECT 1;\x00").is_err());
         assert!(validate_query(&"x".repeat(MAX_QUERY_CHARS + 1)).is_err());
+    }
+
+    #[test]
+    fn local_file_connections_are_recognized_for_authorization() {
+        // The two engines that open their argument as a file on this machine.
+        assert_eq!(
+            local_db_path("sqlite3", "/tmp/app.db"),
+            Some(std::path::PathBuf::from("/tmp/app.db"))
+        );
+        assert_eq!(
+            local_db_path("sqlite", "/tmp/app.db"),
+            Some(std::path::PathBuf::from("/tmp/app.db"))
+        );
+        assert_eq!(
+            local_db_path("duckdb", "data.duckdb"),
+            Some(std::path::PathBuf::from("data.duckdb"))
+        );
+    }
+
+    #[test]
+    fn non_file_connections_need_no_filesystem_gate() {
+        // Server-resolved: a URI, a database name, or an in-memory database.
+        assert_eq!(local_db_path("psql", "postgres://u@h/db"), None);
+        assert_eq!(local_db_path("postgres", "postgres://u@h/db"), None);
+        assert_eq!(local_db_path("mysql", "mysql://root@localhost/db"), None);
+        assert_eq!(local_db_path("mysql", "testdb"), None);
+        assert_eq!(local_db_path("sqlite3", ":memory:"), None);
+        assert_eq!(local_db_path("sqlite3", "   "), None);
     }
 }

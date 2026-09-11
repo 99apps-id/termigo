@@ -75,6 +75,15 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   xAI (Grok), Cerebras, OpenRouter, DeepSeek, Mistral, plus any
   OpenAI-compatible endpoint
 - **Local / offline:** LM Studio, MLX, Ollama
+- **Tool context you control.** The full toolset is ~125 tools and ~80 KB of
+  JSON Schema on every request. Settings → Agents offers two independent
+  levers: switch off whole optional domains (browser, GitHub, LSP, web, skills,
+  SQL, PDF, images, worktrees, …), and turn on **load tools on demand**, which
+  sends the coding loop plus a `find_tools` search and adds a domain when the
+  agent asks for it — measured at 8.0k tokens per request instead of 20.5k, with
+  full capability kept. A tool call for a name that does not exist is answered
+  with the real toolset, a "did you mean" list, and the discovery hint, so the
+  agent corrects itself instead of reporting the capability as missing.
 - **Skills.** The agent writes reusable procedures for itself in
   `.termigo/skills/<name>/SKILL.md` — a deploy sequence, a debugging route that
   worked, a release checklist — and reads them back in later sessions. This is

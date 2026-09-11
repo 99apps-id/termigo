@@ -152,27 +152,27 @@ sudo systemctl daemon-reload
 sudo systemctl enable "$SERVICE_NAME"
 
 # ── Verify settings before start ─────────────────────────────────────────────
+# A custom endpoint's model id in the app is the synthetic `compat-<endpoint id>`
+# form. A hand-written config usually carries the bare endpoint id (or the
+# endpoint name / model id) instead, which the app cannot resolve, so it fell
+# back to a default model with no key - the bot answered nothing. The helper
+# accepts all forms, rewrites the file to the stored form, and fails only when
+# the id genuinely matches nothing.
 SETTINGS_FILE="$SETTINGS_DIR/termigo-settings.json"
-if [[ -f "$SETTINGS_FILE" ]]; then
+MODEL_ID_CHECKER="$(dirname "$0")/check-settings-model-id.py"
+if [[ -f "$SETTINGS_FILE" && -f "$MODEL_ID_CHECKER" ]]; then
   echo ""
-  echo "Checking termigo-settings.json for invalid defaultModelId..."
-  DEFAULT_MODEL=$(python3 -c "
-import json, sys
-try:
-    s = json.load(open('$SETTINGS_FILE'))
-    dm = s.get('defaultModelId','')
-    eps = [e.get('id','') for e in s.get('customEndpoints',[])]
-    models = [m.get('id','') for ep in s.get('customEndpoints',[]) for m in ep.get('models',[])]
-    all_ids = eps + models
-    if dm and dm not in all_ids and all_ids:
-        print(f'INVALID: defaultModelId={dm!r} not in endpoints')
-        print(f'Valid IDs: {all_ids[:5]}')
-        sys.exit(1)
-    print(f'OK: defaultModelId={dm!r}')
-except Exception as e:
-    print(f'SKIP: {e}')
-" 2>&1)
-  echo "  $DEFAULT_MODEL"
+  echo "Checking termigo-settings.json defaultModelId..."
+  SETTINGS_CHECK=$(python3 "$MODEL_ID_CHECKER" "$SETTINGS_FILE" 2>&1)
+  SETTINGS_STATUS=$?
+  echo "  $SETTINGS_CHECK"
+
+  if [[ $SETTINGS_STATUS -ne 0 ]]; then
+    echo ""
+    echo "✗ Refusing to start: defaultModelId cannot be resolved."
+    echo "  Set it to one of the ids listed above, then re-run this script."
+    exit 1
+  fi
 fi
 
 echo ""

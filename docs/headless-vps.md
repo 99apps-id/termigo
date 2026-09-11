@@ -169,25 +169,48 @@ termigo-cli status --json | jq '.telegram.chatId'
 
 ### B. Settings (`termigo-settings.json`)
 
-Place your custom model endpoints, providers, and agent preferences in `termigo-settings.json`. Critical fields:
+Place your custom model endpoints and agent preferences in `termigo-settings.json` (in the data directory above).
 
-- `defaultModelId`: Must match an ID present in `customEndpoints`. If this references a missing model, the workspace hydration will fail and Telegram will not respond.
-- `customEndpoints`: Array of `{ id, label, provider, baseURL, apiKey, ... }` for each model endpoint.
+**How a model id works.** An OpenAI-compatible endpoint is addressed by a synthetic model id built from its endpoint id:
+
+```
+customEndpoints[].id = "15292c18"   ->   defaultModelId = "compat-15292c18"
+```
+
+`defaultModelId` must be `compat-<customEndpoints[].id>` for a custom endpoint, or a built-in registry id (e.g. `gpt-5.4-mini`). Writing the bare endpoint id, the endpoint's `name`, or its `modelId` also works - the app and the setup script translate it - but `compat-<id>` is what gets stored, so use that form and avoid surprises.
+
+**Fields.** `customEndpoints` entries have exactly these keys:
+
+| Field | Meaning |
+| --- | --- |
+| `id` | Your internal id for the endpoint (`compat-` ids are derived from it). |
+| `name` | Display name, e.g. `DeepSeek`. |
+| `baseURL` | OpenAI-compatible base URL, e.g. `https://api.deepseek.com/v1`. |
+| `modelId` | The model id the provider itself expects, e.g. `deepseek-flash`. |
+| `contextLimit` | Context window in tokens, e.g. `1000000`. |
+
+There is no `label`, `provider` or `apiKey` field: the label is `name`, the provider is always `openai-compatible`, and keys belong in the OS keychain, never in this file.
 
 ```json
 {
-  "defaultModelId": "15292c18",
+  "defaultModelId": "compat-15292c18",
   "customEndpoints": [
     {
       "id": "15292c18",
-      "label": "deepseek-flash",
-      "provider": "deepseek",
+      "name": "DeepSeek",
       "baseURL": "https://api.deepseek.com/v1",
-      "apiKey": "<REDACTED>"
+      "modelId": "deepseek-flash",
+      "contextLimit": 1000000
     }
   ]
 }
 ```
+
+Set the endpoint's key in the keychain (Settings → Models, or `secrets_set`); the file above only names the model.
+
+**Renamed models.** If a provider renames a model, change `modelId` here (or Settings → Models → *Model IDs*) rather than the app. For a built-in provider such as DeepSeek, Settings exposes a per-model override for the same purpose.
+
+Run `scripts/vps-setup-and-build.sh` after editing: it rewrites a legacy `defaultModelId` into the `compat-<id>` form and refuses to start the service when the id cannot be resolved, which is the usual cause of "the bot is up but never replies".
 
 ### C. Multi-User Setup
 
@@ -221,14 +244,16 @@ The systemd service uses this launcher by default.
 1. Check binary size: `ls -lh /opt/termigo/termigo` — must be ≥ 16 MB.
 2. Check logs: `journalctl -u termigo -n 50` — look for GTK panic, workspace hydration failure, or missing assets.
 3. Verify Telegram connection: `ss -tnp | grep 149.154.166.110` — if empty, token may be invalid or workspace hydration failed.
-4. Check `defaultModelId` in `termigo-settings.json` — must exist in `customEndpoints`.
+4. Check `defaultModelId` in `termigo-settings.json` — for a custom endpoint it must be `compat-<customEndpoints[].id>`, and the endpoint's key must be in the keychain. `scripts/vps-setup-and-build.sh` rewrites a bare endpoint id and refuses to start on an unresolvable one.
 5. Rollback if needed: `cp /opt/termigo/termigo.prev-TIMESTAMP /opt/termigo/termigo && systemctl restart termigo`
 
 ### "still restoring its workspace"
 
-The `defaultModelId` in `termigo-settings.json` references a model ID not present in `customEndpoints`. Fix by either:
-- Adding the missing model to `customEndpoints`, or
-- Updating `defaultModelId` to a valid ID from `customEndpoints`.
+The `defaultModelId` in `termigo-settings.json` does not resolve to a runnable model. Fix by either:
+- Setting it to `compat-<customEndpoints[].id>` (or a built-in registry id such as `gpt-5.4-mini`), or
+- Adding the missing endpoint to `customEndpoints` and setting the key for it.
+
+A bare endpoint id, the endpoint `name` and its `modelId` are all accepted and rewritten to the `compat-<id>` form, but if nothing matches, the app falls back to a built-in model that has no key - which is why the bot starts but never answers.
 
 ### Step cap / approval hangs
 

@@ -127,6 +127,22 @@ function hasVerifiedSignal(m: ModelMessage): boolean {
 }
 
 /**
+ * Index just past the LAST successful checkpoint/commit in the transcript, or
+ * 0 when there is none.
+ *
+ * This is the real ceiling for a safe cut. A checkpoint proves the work up to
+ * it is saved to git; it says nothing about anything after it. Cutting later
+ * would drop in-flight, unverified work - including the user's current request
+ * and the model's own reasoning - and leave the model operating on a file list.
+ */
+function lastVerifiedEnd(messages: ModelMessage[]): number {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (hasVerifiedSignal(messages[i])) return i + 1;
+  }
+  return 0;
+}
+
+/**
  * Find the highest index `c` (in message-count terms) such that the prefix
  * `[0, c)` is self-contained (every tool-call inside has its result inside),
  * contains at least one verified checkpoint/commit, and leaves the tail intact.
@@ -135,6 +151,15 @@ function hasVerifiedSignal(m: ModelMessage): boolean {
 export function findVerifiedCut(messages: ModelMessage[]): number {
   const n = messages.length;
   if (n < PRUNE_MIN_VERIFIED_MESSAGES + PRUNE_TAIL_KEEP) return -1;
+
+  // Never cut past the last checkpoint. Without this ceiling a single early
+  // checkpoint made every later boundary look prunable - the guard only asked
+  // whether the prefix contained *a* checkpoint, not whether the work after it
+  // was covered by one - so the cut ran to `n - PRUNE_TAIL_KEEP` on every turn
+  // and collapsed the whole conversation (observed: 290-334 messages pruned,
+  // 6 kept) into a 1800-char file list.
+  const maxCut = Math.min(n - PRUNE_TAIL_KEEP, lastVerifiedEnd(messages));
+  if (maxCut < PRUNE_MIN_VERIFIED_MESSAGES) return -1;
 
   const balance = new Array<number>(n + 1).fill(0);
   const verifiedPrefix = new Array<number>(n + 1).fill(0);
@@ -147,7 +172,6 @@ export function findVerifiedCut(messages: ModelMessage[]): number {
     verifiedPrefix[i + 1] = v;
   }
 
-  const maxCut = n - PRUNE_TAIL_KEEP;
   for (let c = maxCut; c >= PRUNE_MIN_VERIFIED_MESSAGES; c--) {
     if (balance[c] !== 0) continue;
     if (verifiedPrefix[c] === 0) continue;

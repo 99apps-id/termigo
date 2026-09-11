@@ -25,6 +25,7 @@ import {
   endpointIdFromCompatModel,
   estimateCost,
   getModelContextLimit,
+  effectiveModelName,
   isCompactTierModel,
   isCompatModelId,
   LMSTUDIO_DEFAULT_BASE_URL,
@@ -43,7 +44,17 @@ import { useDebugStore } from "../store/debugStore";
 import { useTodosStore } from "../store/todoStore";
 import { useTrajectoryStore } from "../store/trajectoryStore";
 import { formatInvariantsBlock } from "../tools/invariant";
+import { applyDisabledToolGroups } from "../tools/toolGroups";
+import {
+  buildFindToolsTool,
+  buildToolIndex,
+  FIND_TOOLS_NAME,
+  TOOL_SEARCH_ALWAYS_ON,
+  TOOL_SEARCH_HINT,
+  type ToolIndexEntry,
+} from "../tools/toolSearch";
 import { buildTools, type ToolContext } from "../tools/tools";
+import { isResumingApproval } from "./approvalResume";
 import { getChatGptAccess } from "./chatgptAuth";
 import { compactModelMessagesDetailed, estimateTokens } from "./compact";
 import { evictObsoleteToolOutputs } from "./contextEviction";
@@ -72,16 +83,16 @@ import { sanitizeUiMessages } from "./sanitizeMessages";
 import { type Skill, skillsBlock } from "./skills";
 import { formatTodoStatusBlock } from "./todos";
 import { modelRejectsForcedToolChoice } from "./toolChoiceLearning";
-import { isResumingApproval } from "./approvalResume";
+import { measureToolPayload } from "./toolPayload";
+import {
+  formatUserModelBlock,
+  type UserModel,
+} from "./userModel";
 import {
   newVerifyLedger,
   recordToolResult,
   type VerifyLedger,
 } from "./verifyOnStop";
-import {
-  formatUserModelBlock,
-  type UserModel,
-} from "./userModel";
 
 // Every model/provider connection uses a trusted, user-configured endpoint, so
 // it must honour the machine's own DNS — including a provider host that a proxy,
@@ -191,7 +202,7 @@ export async function buildLanguageModel(
   const ollamaURL = options.ollamaBaseURL ?? OLLAMA_DEFAULT_BASE_URL;
   const compatURL = options.openaiCompatibleBaseURL ?? "";
   const epKey = customEndpointKey ?? "";
-  const cacheKey = `${provider} ${resolvedModelId} ${lmstudioURL} ${mlxURL} ${ollamaURL} ${compatURL} ${epKey ? "ep=" + epKey : ""}`;
+  const cacheKey = `${provider} ${resolvedModelId} ${lmstudioURL} ${mlxURL} ${ollamaURL} ${compatURL} ${epKey ? `ep=${epKey}` : ""}`;
   const hit = modelCache.get(cacheKey);
   if (hit) {
     hit.touched = Date.now();
@@ -451,7 +462,8 @@ const PLAN_MODE_PROMPT = `## PLAN MODE — ACTIVE
 Mutating tools (write_file, edit, multi_edit, create_directory) will queue their changes for the user to review as a single diff. Do NOT execute bash_run or bash_background while plan mode is active — restrict yourself to reads (read_file, grep, glob, list_directory) and the queued mutations. After queueing the full set of edits, stop and return a brief summary; do not continue acting until the user has accepted/rejected.`;
 
 function buildStableSystem(
-  modelId: string,
+  /** The model name to pick the prompt tier with (see `effectiveModelName`). */
+  modelNameForTier: string,
   persona: { name: string; instructions: string } | null,
   customInstructions: string | undefined,
   projectMemory: string | null,
@@ -461,7 +473,7 @@ function buildStableSystem(
   userQuery?: string,
   userModel?: UserModel,
 ): string {
-  const base = selectSystemPrompt(modelId);
+  const base = selectSystemPrompt(modelNameForTier);
   const personaBlock = persona?.instructions.trim()
     ? `\n\n## ACTIVE AGENT -- ${persona.name}\n${persona.instructions.trim()}`
     : "";
@@ -907,6 +919,11 @@ export type RunAgentOptions = {
   customEndpointKeys?: CustomEndpointKeys;
   /** Registry model id -> provider-side model id, read from preferences. */
   modelIdOverrides?: Readonly<Record<string, string>>;
+  /** Optional tool domains the user turned off (see tools/toolGroups.ts). */
+  disabledToolGroups?: readonly string[];
+  /** Load tools on demand instead of sending every schema (see
+   *  tools/toolSearch.ts). Off means the full toolset is sent, as before. */
+  toolSearchEnabled?: boolean;
   planMode?: boolean;
   projectMemory?: string | null;
   /** Facts the agent recorded in earlier sessions (.termigo/memory.md). */
@@ -957,6 +974,14 @@ export async function runAgentStream(opts: RunAgentOptions) {
   const endpoints = opts.customEndpoints ?? [];
   const info = resolveModel(modelId, endpoints);
   const provider = info.provider;
+  // Tier decisions key off the model the provider actually serves, not the
+  // synthetic `compat-<endpoint>` id, so a small model configured as a custom
+  // endpoint still gets the lite prompt and the core toolset.
+  const tierModelName = effectiveModelName(
+    modelId,
+    endpoints,
+    opts.modelIdOverrides,
+  );
 
   const history = await convertToModelMessages(
     sanitizeUiMessages(opts.uiMessages),
@@ -964,7 +989,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
   const userQuery = latestUserRequest(history);
 
   const stableSystem = buildStableSystem(
-    modelId,
+    tierModelName,
     opts.agentPersona ?? null,
     opts.customInstructions,
     opts.projectMemory ?? null,
@@ -1269,6 +1294,9 @@ export async function runAgentStream(opts: RunAgentOptions) {
   ];
 
   const hooksConfig = opts.hooksConfig;
+  // Resolved before the toolset is built: the unknown-tool fallback advertises
+  // the discovery tool only when this run actually defers schemas.
+  const toolSearchOn = opts.toolSearchEnabled === true;
   const rawTools = {
     ...(opts.mcpTools ?? {}),
     ...(opts.extensionTools ?? {}),
@@ -1307,15 +1335,55 @@ export async function runAgentStream(opts: RunAgentOptions) {
             );
           }
         : undefined,
+    }, 0, {
+      // Only advertised when the run actually defers tools, so a normal run
+      // never tells the model about a discovery tool it does not have.
+      findToolsName: toolSearchOn ? FIND_TOOLS_NAME : undefined,
     }),
   };
+  // Drop the schema blocks of any domain the user turned off. Applied before
+  // the profile rules so a hidden group costs nothing to process, and before
+  // the payload measurement so the reported size is what is actually sent.
+  //
+  // Typed as `ToolSet` rather than `Record<string, unknown>`: the latter is
+  // wider and stops being assignable to `streamText({ tools })`, which would
+  // have hidden any real mismatch behind a cast at the call site.
+  const gatedTools: ToolSet = applyDisabledToolGroups(
+    rawTools,
+    opts.disabledToolGroups ?? [],
+  );
+  // Search mode: send the coding loop plus `find_tools`, and activate the rest
+  // for the remainder of the run once the model asks for it by keyword (see
+  // tools/toolSearch.ts). `discovered` is deliberately run-local.
+  const discoveredTools = new Set<string>();
+  const alwaysActive = new Set<string>();
+  let findToolsIndex: ToolIndexEntry[] = [];
+  if (toolSearchOn) {
+    for (const name of Object.keys(gatedTools)) {
+      if (TOOL_SEARCH_ALWAYS_ON.has(name)) alwaysActive.add(name);
+    }
+    findToolsIndex = buildToolIndex(gatedTools, TOOL_SEARCH_ALWAYS_ON);
+    gatedTools[FIND_TOOLS_NAME] = buildFindToolsTool({
+      index: findToolsIndex,
+      discover: (names) => {
+        for (const name of names) discoveredTools.add(name);
+      },
+    });
+    alwaysActive.add(FIND_TOOLS_NAME);
+  }
   // Reorder/hide tools per the active harness profile (see harnessProfile.ts).
   // Main agent passes no depth, so its spawn tools are never withheld - the
   // same context-safe injection a sub-agent goes through, minus the nesting cap.
   // When running on a compact tier model, tool set is pruned to core tools to preserve context.
-  const tools = buildAgentTools(rawTools, {
+  //
+  // The compact-tier prune is skipped in search mode: it keeps only
+  // `CORE_TOOL_NAMES` and would drop `find_tools` itself, leaving a small model
+  // with neither the deferred tools nor the way to ask for them. Search mode is
+  // strictly the better trade for the same model - it gets the same core plus
+  // discovery - so it supersedes the prune rather than stacking with it.
+  const tools = buildAgentTools(gatedTools, {
     profile,
-    compactToolTier: isCompactTierModel(modelId),
+    compactToolTier: !toolSearchOn && isCompactTierModel(tierModelName),
   });
 
   // What the model is handed before it reads a word of the request. Measured
@@ -1333,26 +1401,13 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // Counting name and description alone reported 11.6 KB where the real
   // payload was nearer 33 KB, because the input schemas are the bulk of it -
   // and an undercount in the one report meant to catch growth is worse than
-  // no number at all.
-  //
-  // MCP tools are built with `jsonSchema()`, which keeps the raw schema on
-  // `.jsonSchema`, so the third-party half - the part that arrives unbounded
-  // from someone else's server - is measured exactly. Built-in tools describe
-  // themselves with Zod, which only becomes JSON at request time; they are
-  // approximated by their description. That side is fixed and changes only
-  // when this repo changes it, which is the half that needs watching least.
-  const toolBytes = JSON.stringify(
-    Object.entries(tools).map(([name, t]) => {
-      const tool = t as
-        | { description?: string; inputSchema?: { jsonSchema?: unknown } }
-        | undefined;
-      return {
-        name,
-        description: tool?.description,
-        schema: tool?.inputSchema?.jsonSchema,
-      };
-    }),
-  ).length;
+  // no number at all. `measureToolPayload` converts the Zod schema to the JSON
+  // Schema that is actually serialised, cached per tool name so the conversion
+  // is paid once per process rather than once per run. Tools whose schema
+  // cannot be converted are reported through `unmeasured`, so an inexact total
+  // is labelled instead of being passed off as exact.
+  const toolPayload = measureToolPayload(tools);
+  const toolBytes = toolPayload.bytes;
   const toolCount = Object.keys(tools).length;
 
   // Pin the first step to a fan-out when the request is broad enough to be
@@ -1422,7 +1477,12 @@ export async function runAgentStream(opts: RunAgentOptions) {
     `[ai] runAgentStream: before streamText (${Object.keys(tools).length} tools)`,
   );
   // Apply the harness profile's prompt prelude (if any) to the base system.
-  const baseSystem = applyProfileToSystem(prompt.system, profile);
+  const systemWithProfile = applyProfileToSystem(prompt.system, profile);
+  // In search mode the model must know deferred tools exist, or it reports a
+  // missing capability instead of asking for it.
+  const baseSystem = toolSearchOn
+    ? appendSystemHint(systemWithProfile, TOOL_SEARCH_HINT)
+    : systemWithProfile;
   const sessionId = opts.toolContext.getSessionId();
   let circuitBreakerState: CircuitBreakerState = {
     lastFailedFingerprint: null,
@@ -1480,7 +1540,15 @@ export async function runAgentStream(opts: RunAgentOptions) {
       if (circuitBreakerState.activeNudge) {
         system = appendSystemHint(system, circuitBreakerState.activeNudge);
       }
-      return { toolChoice, system };
+      // Search mode: only the always-on set, plus whatever the model has asked
+      // for. The SDK filters the serialised tool list by this, so a deferred
+      // tool costs nothing until it is discovered.
+      const activeTools = toolSearchOn
+        ? Object.keys(tools).filter(
+            (name) => alwaysActive.has(name) || discoveredTools.has(name),
+          )
+        : undefined;
+      return { toolChoice, system, ...(activeTools ? { activeTools } : {}) };
     },
     abortSignal: abortController.signal,
     // Clear the "no first response" timer on the first model chunk (a text
@@ -1764,7 +1832,10 @@ export async function runAgentStream(opts: RunAgentOptions) {
             // Count as well as size: 11.6 KB alone cannot tell "no MCP server
             // attached" from "one attached that measures small", and the first
             // reading of this line asked exactly that question.
-            `mem ${kb(promptBytes.learned)} / ${toolCount} tools ${kb(promptBytes.tools)}) | ` +
+            `mem ${kb(promptBytes.learned)} / ${toolCount} tools ${kb(promptBytes.tools)}` +
+            // An undercounted schema would make this line quietly useless, so
+            // an inexact total says so instead of looking precise.
+            `${toolPayload.unmeasured > 0 ? ` (${toolPayload.unmeasured} unmeasured)` : ""}) | ` +
             `tokens ${runInput}in ${runOutput}out, cache ${cachePct}% | ` +
             `steps ${stepsSeen}/${stepBudget} | stop ${settledStop ?? (finishReason || "done")} | ` +
             `${modelId}`,

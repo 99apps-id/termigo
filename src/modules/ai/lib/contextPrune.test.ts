@@ -156,6 +156,62 @@ describe("findVerifiedCut", () => {
     );
     expect(findVerifiedCut(broken)).toBe(-1);
   });
+
+  it("never cuts past the last checkpoint, so unverified work survives", () => {
+    // One checkpoint early, then a long stretch of unverified work. The
+    // checkpoint proves only the work before it is saved; everything after is
+    // in flight and must reach the model.
+    const messages: ModelMessage[] = [
+      user("start the refactor"),
+      toolCall("c1", "git_checkpoint", { message: "cp" }),
+      toolResult("c1", "git_checkpoint", {
+        message: "checkpoint: cp",
+        exit_code: 0,
+      }),
+    ];
+    for (let i = 0; i < 30; i++) {
+      messages.push(toolCall(`r${i}`, "read_file", { path: `src/f${i}.ts` }));
+      messages.push(toolResult(`r${i}`, "read_file", { path: `src/f${i}.ts` }));
+    }
+    messages.push(user("now also rename the helper"));
+
+    // Cut would run to n - 6 and discard 30+ unverified rounds. The only
+    // prunable span is the 3 messages up to the checkpoint, which is below the
+    // minimum worth collapsing - so nothing is pruned at all.
+    expect(findVerifiedCut(messages)).toBe(-1);
+  });
+
+  it("cuts at the last checkpoint rather than at the tail budget", () => {
+    // Two checkpoints: the second one is the ceiling.
+    const messages: ModelMessage[] = [
+      user("first task"),
+      toolCall("c1", "git_checkpoint", { message: "one" }),
+      toolResult("c1", "git_checkpoint", {
+        message: "checkpoint: one",
+        exit_code: 0,
+      }),
+      toolCall("r1", "read_file", { path: "src/a.ts" }),
+      toolResult("r1", "read_file", { path: "src/a.ts" }),
+      toolCall("c2", "git_commit", { message: "two" }),
+      toolResult("c2", "git_commit", {
+        message: "checkpoint: two",
+        exit_code: 0,
+      }),
+      toolCall("r2", "read_file", { path: "src/b.ts" }),
+      toolResult("r2", "read_file", { path: "src/b.ts" }),
+      user("a later request"),
+      assistant("working on it"),
+      toolCall("r3", "read_file", { path: "src/c.ts" }),
+      toolResult("r3", "read_file", { path: "src/c.ts" }),
+      assistant("still working"),
+    ];
+    const cut = findVerifiedCut(messages);
+    // The second checkpoint's result is index 6, so the ceiling is 7.
+    expect(cut).toBe(7);
+    // The unverified reads after it are kept.
+    expect(messages.slice(cut)).toContain(messages[7]);
+    expect(messages.slice(cut)).toContain(messages[9]);
+  });
 });
 
 describe("summarizeSegment", () => {
@@ -264,6 +320,30 @@ describe("pruneVerifiedPrefix", () => {
     const result = pruneVerifiedPrefix(messages);
     expect(result.pruned).toBe(false);
     expect(result.messages).toEqual(messages);
+  });
+
+  it("never prunes away the user's latest request", () => {
+    // The invariant that matters to the person using the app: whatever they
+    // most recently asked for must survive into the request. The old ceiling
+    // (`n - PRUNE_TAIL_KEEP`) held only when the transcript ended within six
+    // messages of a checkpoint, which is not the common case.
+    const messages: ModelMessage[] = [
+      user("early task"),
+      toolCall("c1", "git_checkpoint", { message: "one" }),
+      toolResult("c1", "git_checkpoint", {
+        message: "checkpoint: one",
+        exit_code: 0,
+      }),
+    ];
+    for (let i = 0; i < 40; i++) {
+      messages.push(toolCall(`x${i}`, "read_file", { path: `src/f${i}.ts` }));
+      messages.push(toolResult(`x${i}`, "read_file", { path: `src/f${i}.ts` }));
+    }
+    const request = "please fix the failing test in auth.spec.ts";
+    messages.push(user(request));
+
+    const result = pruneVerifiedPrefix(messages);
+    expect(JSON.stringify(result.messages)).toContain(request);
   });
 
   it("is idempotent on the already-pruned result", () => {

@@ -3,8 +3,10 @@ import {
   type CustomEndpoint,
   apiModelIdDiffers,
   compatModelIdForEndpoint,
+  effectiveModelName,
   endpointIdFromCompatModel,
   getModelContextLimit,
+  isCompactTierModel,
   isCompatModelId,
   MAX_AGENT_STEPS,
   MODEL_PRICING,
@@ -14,6 +16,7 @@ import {
   modelKeepsReasoning,
   modelSupportsTemperature,
   modelUsesReasoningTokens,
+  normalizeModelId,
   resolveApiModelId,
   resolveModel,
   resolveModelContextLimit,
@@ -356,5 +359,135 @@ describe("resolveModelLabel", () => {
     expect(resolveModelLabel(mid, [endpoint], {})).toBe(
       "My LLM llama-3.3-70b",
     );
+  });
+});
+
+describe("normalizeModelId", () => {
+  const eps: CustomEndpoint[] = [
+    {
+      id: "15292c18",
+      name: "DeepSeek",
+      baseURL: "https://api.deepseek.com/v1",
+      modelId: "deepseek-flash",
+      contextLimit: 1_000_000,
+    },
+  ];
+
+  it("accepts a built-in registry id unchanged", () => {
+    expect(normalizeModelId("gpt-5.4-mini", eps)).toBe("gpt-5.4-mini");
+  });
+
+  it("accepts the compat form when the endpoint exists", () => {
+    expect(normalizeModelId("compat-15292c18", eps)).toBe("compat-15292c18");
+  });
+
+  it("rejects a compat id whose endpoint is gone", () => {
+    expect(normalizeModelId("compat-missing", eps)).toBeNull();
+  });
+
+  it("maps a bare endpoint id to the compat form", () => {
+    // The form the deployment guide used to document, and what most existing
+    // hand-written VPS configs contain.
+    expect(normalizeModelId("15292c18", eps)).toBe("compat-15292c18");
+  });
+
+  it("maps the endpoint name, case-insensitively", () => {
+    expect(normalizeModelId("deepseek", eps)).toBe("compat-15292c18");
+    expect(normalizeModelId("  DeepSeek  ", eps)).toBe("compat-15292c18");
+  });
+
+  it("maps the endpoint's provider-side model id", () => {
+    expect(normalizeModelId("deepseek-flash", eps)).toBe("compat-15292c18");
+  });
+
+  it("prefers a configured endpoint over a built-in wire-id alias", () => {
+    // `deepseek-flash` is both this endpoint's modelId and the id the built-in
+    // DeepSeek model is served under. The endpoint is what the user configured.
+    expect(normalizeModelId("deepseek-flash", eps)).toBe("compat-15292c18");
+    // With no such endpoint, the same string resolves to the built-in model.
+    expect(normalizeModelId("deepseek-flash", [])).toBe("deepseek-v4-flash");
+  });
+
+  it("maps a built-in provider's renamed wire id", () => {
+    expect(normalizeModelId("deepseek-flash", [])).toBe("deepseek-v4-flash");
+  });
+
+  it("honours a user override when matching a wire id", () => {
+    expect(
+      normalizeModelId("my-model", [], { "deepseek-v4-pro": "my-model" }),
+    ).toBe("deepseek-v4-pro");
+  });
+
+  it("returns null for an unknown id rather than guessing", () => {
+    expect(normalizeModelId("nope", eps)).toBeNull();
+    expect(normalizeModelId("", eps)).toBeNull();
+    expect(normalizeModelId("   ", [])).toBeNull();
+  });
+
+  it("returns null when a bare id matches nothing and no endpoint exists", () => {
+    expect(normalizeModelId("15292c18", [])).toBeNull();
+  });
+});
+
+describe("compact tier detection", () => {
+  it("matches a lite model by its registry id", () => {
+    expect(isCompactTierModel("deepseek-v4-flash")).toBe(true);
+    expect(isCompactTierModel("claude-haiku-4-5")).toBe(true);
+  });
+
+  it("matches a lite model by the id the provider serves it under", () => {
+    // A user who selected the built-in model directly.
+    expect(isCompactTierModel("deepseek-flash")).toBe(true);
+  });
+
+  it("does not match a non-lite model", () => {
+    expect(isCompactTierModel("claude-opus-4-7")).toBe(false);
+    expect(isCompactTierModel("deepseek-v4-pro")).toBe(false);
+    expect(isCompactTierModel(undefined)).toBe(false);
+  });
+
+  it("resolves a custom endpoint to the model it actually serves", () => {
+    const eps: CustomEndpoint[] = [
+      {
+        id: "ep1",
+        name: "DeepSeek",
+        baseURL: "https://api.deepseek.com",
+        modelId: "deepseek-flash",
+        contextLimit: 1_000_000,
+      },
+    ];
+    const mid = compatModelIdForEndpoint("ep1");
+    expect(effectiveModelName(mid, eps)).toBe("deepseek-flash");
+    // The synthetic id alone would miss the lite tier; the resolved name hits.
+    expect(isCompactTierModel(mid)).toBe(false);
+    expect(isCompactTierModel(effectiveModelName(mid, eps))).toBe(true);
+  });
+
+  it("keeps a non-lite custom endpoint on the full tier", () => {
+    const eps: CustomEndpoint[] = [
+      {
+        id: "ep2",
+        name: "Big",
+        baseURL: "https://x/v1",
+        modelId: "some-70b-instruct",
+        contextLimit: 128_000,
+      },
+    ];
+    const name = effectiveModelName(compatModelIdForEndpoint("ep2"), eps);
+    expect(name).toBe("some-70b-instruct");
+    expect(isCompactTierModel(name)).toBe(false);
+  });
+
+  it("falls back to the compat id when the endpoint is unknown", () => {
+    expect(effectiveModelName("compat-gone", [])).toBe("compat-gone");
+  });
+
+  it("resolves a built-in through its rename override", () => {
+    expect(effectiveModelName("deepseek-v4-flash")).toBe("deepseek-flash");
+    expect(
+      effectiveModelName("deepseek-v4-pro", [], {
+        "deepseek-v4-pro": "deepseek-flash",
+      }),
+    ).toBe("deepseek-flash");
   });
 });
