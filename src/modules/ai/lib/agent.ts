@@ -1,4 +1,10 @@
 import { info as logInfo, warn as logWarn } from "@tauri-apps/plugin-log";
+
+function fireAndForget(promise: Promise<unknown>, label: string) {
+  promise.catch((error) => {
+    logWarn(`[ai] fire-and-forget failed: ${label}: ${error instanceof Error ? error.message : String(error)}`);
+  });
+}
 import {
   convertToModelMessages,
   type LanguageModel,
@@ -153,7 +159,18 @@ export type BuildModelOptions = {
   openaiCompatibleBaseURL?: string;
 };
 
-const modelCache = new Map<string, LanguageModel>();
+const MAX_MODEL_CACHE = 64;
+
+type CacheEntry = { built: LanguageModel; touched: number };
+const modelCache = new Map<string, CacheEntry>();
+
+function pruneModelCache() {
+  if (modelCache.size <= MAX_MODEL_CACHE) return;
+  const entries = Array.from(modelCache.entries()).sort((a, b) => a[1].touched - b[1].touched);
+  for (let i = 0; i < entries.length - MAX_MODEL_CACHE; i++) {
+    modelCache.delete(entries[i][0]);
+  }
+}
 
 export async function buildLanguageModel(
   provider: ProviderId,
@@ -173,9 +190,12 @@ export async function buildLanguageModel(
   const ollamaURL = options.ollamaBaseURL ?? OLLAMA_DEFAULT_BASE_URL;
   const compatURL = options.openaiCompatibleBaseURL ?? "";
   const epKey = customEndpointKey ?? "";
-  const cacheKey = `${provider} ${key} ${epKey} ${resolvedModelId} ${lmstudioURL} ${mlxURL} ${ollamaURL} ${compatURL}`;
+  const cacheKey = `${provider} ${resolvedModelId} ${lmstudioURL} ${mlxURL} ${ollamaURL} ${compatURL} ${epKey ? "ep=" + epKey : ""}`;
   const hit = modelCache.get(cacheKey);
-  if (hit) return hit;
+  if (hit) {
+    hit.touched = Date.now();
+    return hit.built;
+  }
 
   let built: LanguageModel;
   switch (provider) {
@@ -335,7 +355,8 @@ export async function buildLanguageModel(
       throw new Error(`Unsupported provider: ${_exhaustive as ProviderId}`);
     }
   }
-  modelCache.set(cacheKey, built);
+  pruneModelCache();
+  modelCache.set(cacheKey, { built, touched: Date.now() });
   return built;
 }
 
@@ -748,7 +769,8 @@ export type AgentStopReason =
   | "cost-cap"
   | "steered"
   | "aborted"
-  | "interrupted";
+  | "interrupted"
+  | "tool-only-loop";
 
 export type AgentUsage = {
   inputTokens: number;
@@ -964,9 +986,12 @@ export async function runAgentStream(opts: RunAgentOptions) {
   const eviction = evictObsoleteToolOutputs(compactedHistory);
   const evictedHistory = eviction.messages;
   if (eviction.summary.evictedToolCalls > 0) {
-    void logInfo(
-      `eviction: collapsed ${eviction.summary.evictedToolCalls} stale read_file output(s), ~${eviction.summary.estimatedTokensSaved} tokens saved`,
-    ).catch(() => {});
+    fireAndForget(
+      logInfo(
+        `eviction: collapsed ${eviction.summary.evictedToolCalls} stale read_file output(s), ~${eviction.summary.estimatedTokensSaved} tokens saved`,
+      ),
+      "eviction-log",
+    );
   }
 
   // Context pruning: an early span whose work is already saved to git (a
@@ -978,9 +1003,12 @@ export async function runAgentStream(opts: RunAgentOptions) {
   const prune = pruneVerifiedPrefix(evictedHistory);
   const finalHistory = prune.messages;
   if (prune.pruned) {
-    void logInfo(
-      `[ai] context prune: ${prune.cutAt} verified message(s) → checkpoint summary (${prune.summary?.length ?? 0} chars)`,
-    ).catch(() => {});
+    fireAndForget(
+      logInfo(
+        `[ai] context prune: ${prune.cutAt} verified message(s) → checkpoint summary (${prune.summary?.length ?? 0} chars)`,
+      ),
+      "context-prune-log",
+    );
     opts.onPrune?.({ prunedMessages: prune.cutAt });
   }
 
@@ -1007,9 +1035,12 @@ export async function runAgentStream(opts: RunAgentOptions) {
   let firstStepTimer: ReturnType<typeof setTimeout> | null = resumingApproval
     ? null
     : setTimeout(() => {
-        void logWarn(
-          `[ai] model did not produce first token within 90s (model=${modelId}, provider=${provider})`,
-        ).catch(() => {});
+        fireAndForget(
+          logWarn(
+            `[ai] model did not produce first token within 90s (model=${modelId}, provider=${provider})`,
+          ),
+          "first-token-timeout",
+        );
         abortController.abort(new Error("model did not respond within 90s"));
       }, 90_000);
   // A provider that accepts the connection and then goes silent looked exactly
@@ -1620,10 +1651,13 @@ export async function runAgentStream(opts: RunAgentOptions) {
       // Feed this run's outcome into the harness frontier so the best profile
       // for this workspace can be learned over time (see harnessFrontier.ts).
       if (workspaceRoot) {
-        void recordRun(workspaceRoot, profile.id, {
-          success: !settledStop,
-          steps: stepsSeen,
-        }).catch(() => {});
+        fireAndForget(
+          recordRun(workspaceRoot, profile.id, {
+            success: !settledStop,
+            steps: stepsSeen,
+          }),
+          "record-run",
+        );
       }
 
       // One line per run, in the app log rather than only on screen.
@@ -1637,18 +1671,21 @@ export async function runAgentStream(opts: RunAgentOptions) {
       // The composition is the part that prevents a repeat. A feature that
       // adds ten kilobytes to every request shows up here the day it lands,
       // instead of six months later as a feeling.
-      void logInfo(
-        `run: context ${Math.round(opts.contextMs ?? 0)}ms | ` +
-          `prompt ${kb(promptBytes.total)}KB ` +
-          `(sys ${kb(promptBytes.system)} / proj ${kb(promptBytes.project)} / ` +
-          // Count as well as size: 11.6 KB alone cannot tell "no MCP server
-          // attached" from "one attached that measures small", and the first
-          // reading of this line asked exactly that question.
-          `mem ${kb(promptBytes.learned)} / ${toolCount} tools ${kb(promptBytes.tools)}) | ` +
-          `tokens ${runInput}in ${runOutput}out, cache ${cachePct}% | ` +
-          `steps ${stepsSeen}/${stepBudget} | stop ${settledStop ?? (finishReason || "done")} | ` +
-          `${modelId}`,
-      ).catch(() => {});
+      fireAndForget(
+        logInfo(
+          `run: context ${Math.round(opts.contextMs ?? 0)}ms | ` +
+            `prompt ${kb(promptBytes.total)}KB ` +
+            `(sys ${kb(promptBytes.system)} / proj ${kb(promptBytes.project)} / ` +
+            // Count as well as size: 11.6 KB alone cannot tell "no MCP server
+            // attached" from "one attached that measures small", and the first
+            // reading of this line asked exactly that question.
+            `mem ${kb(promptBytes.learned)} / ${toolCount} tools ${kb(promptBytes.tools)}) | ` +
+            `tokens ${runInput}in ${runOutput}out, cache ${cachePct}% | ` +
+            `steps ${stepsSeen}/${stepBudget} | stop ${settledStop ?? (finishReason || "done")} | ` +
+            `${modelId}`,
+        ),
+        "run-summary-log",
+      );
     },
     // An abort with zero completed steps never reaches onFinish: the SDK has
     // nothing to report, so the trajectory run would stay "running" forever.

@@ -4,7 +4,6 @@ pub mod session;
 
 use std::collections::HashMap;
 use std::io::Read;
-use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{mpsc, Arc, RwLock};
@@ -75,6 +74,9 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
             bad.push(c);
         }
         prev = c;
+    }
+    if in_quote {
+        return Err("unclosed quote in command".into());
     }
     if !bad.is_empty() {
         return Err(format!(
@@ -172,7 +174,10 @@ pub async fn shell_run_command(
     // runtime stays unblocked.
     let (tx, rx) = mpsc::channel::<Result<CommandOutput, String>>();
     thread::spawn(move || {
-        let _ = tx.send(run_blocking(trimmed, cwd_path, workspace, dur, None));
+        let result = run_blocking(trimmed, cwd_path, workspace, dur, None);
+        if tx.send(result).is_err() {
+            log::warn!("shell_run_command: receiver dropped before result could be sent");
+        }
     });
 
     rx.recv().map_err(|e| e.to_string())?
@@ -259,7 +264,6 @@ fn run_blocking(
         Ok(Err(e)) => return Err(e.to_string()),
         Err(mpsc::RecvTimeoutError::Timeout) => {
             let _ = child.kill();
-            let _ = child.wait();
             (None, true)
         }
         Err(mpsc::RecvTimeoutError::Disconnected) => {
@@ -316,7 +320,8 @@ pub fn shell_session_open(
             if let WorkspaceEnv::Wsl { distro } = &workspace {
                 crate::modules::workspace::wsl_home_blocking(distro)?
             } else {
-                crate::modules::fs::to_canon(dirs::home_dir().unwrap_or_else(|| PathBuf::from("/")))
+                let home = dirs::home_dir().ok_or_else(|| "unable to resolve home directory".to_string())?;
+                crate::modules::fs::to_canon(home)
             }
         }
     };
@@ -361,9 +366,9 @@ pub async fn shell_session_run(
         .cloned()
         .ok_or_else(|| "no shell session".to_string())?;
     let effective_workspace = workspace
-        .clone()
-        .unwrap_or_else(|| session.workspace.clone());
-    authorize_spawn_cwd(&registry, cwd.as_deref(), &effective_workspace)?;
+        .as_ref()
+        .unwrap_or(&session.workspace);
+    authorize_spawn_cwd(&registry, cwd.as_deref(), effective_workspace)?;
 
     // Interactive shell sessions already give the user a controlled environment,
     // but we still validate against shell metacharacters as a defense-in-depth
@@ -381,7 +386,10 @@ pub async fn shell_session_run(
     );
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
-        let _ = tx.send(session.run(trimmed, cwd, workspace, dur));
+        let result = session.run(trimmed, cwd, workspace, dur);
+        if tx.send(result).is_err() {
+            log::warn!("shell_session_run: receiver dropped before result could be sent");
+        }
     });
     rx.recv().map_err(|e| e.to_string())?
 }
@@ -434,11 +442,12 @@ pub fn shell_bg_logs(
 }
 
 #[tauri::command]
-pub fn shell_bg_kill(state: tauri::State<ShellState>, handle: u32) -> Result<(), String> {
+pub fn shell_bg_kill(state: tauri::State<ShellState>, handle: u32) -> Result<bool, String> {
     if let Some(proc) = state.bg.read().unwrap().get(&handle).cloned() {
-        proc.kill();
+        Ok(proc.kill())
+    } else {
+        Ok(false)
     }
-    Ok(())
 }
 
 #[tauri::command]

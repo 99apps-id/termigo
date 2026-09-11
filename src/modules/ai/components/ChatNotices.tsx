@@ -162,6 +162,12 @@ export function stopCopy(
         hint: "Adjust the cost budget in settings if you wish to allow higher spend.",
         action: "Continue anyway",
       };
+    case "tool-only-loop":
+      return {
+        text: "Stopped: the model kept calling tools without producing a summary.",
+        hint: "Continuing may repeat the loop. Try steering the model toward a final answer.",
+        action: "Continue anyway",
+      };
     case "stopped":
     case "steered":
     case "aborted":
@@ -172,6 +178,8 @@ export function stopCopy(
         hint: "Your progress is preserved. Resume to pick up where it stopped.",
         action: "Resume",
       };
+    default:
+      return { text: "This run was stopped.", action: "Resume" };
   }
 }
 

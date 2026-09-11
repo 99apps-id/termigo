@@ -133,15 +133,20 @@ fn comparison_form(p: &str) -> String {
         s = rest.to_string();
     }
     let b = s.as_bytes();
-    if b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':' {
+    let is_windows_style = b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':';
+    if is_windows_style {
         s = s[2..].to_string();
     }
     let segs: Vec<String> = s
         .split('/')
         .map(|seg| {
-            let colon = seg.find(':').unwrap_or(seg.len());
-            let trimmed = seg[..colon].trim_end_matches(|c: char| c == '.' || c.is_whitespace());
-            trimmed.to_string()
+            if is_windows_style {
+                let colon = seg.find(':').unwrap_or(seg.len());
+                let trimmed = seg[..colon].trim_end_matches(|c: char| c == '.' || c.is_whitespace());
+                trimmed.to_string()
+            } else {
+                seg.to_string()
+            }
         })
         .collect();
     s = segs.join("/");

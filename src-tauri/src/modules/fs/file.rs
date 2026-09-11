@@ -305,8 +305,7 @@ fn is_likely_text_file(path: &Path, bytes: &[u8]) -> bool {
             | "css" | "scss" | "less" | "html" | "htm" | "xml" | "svg" | "yaml" | "yml"
             | "toml" | "ini" | "conf" | "cfg" | "sh" | "bash" | "zsh" | "fish" | "ps1"
             | "bat" | "cmd" | "py" | "rs" | "go" | "c" | "cpp" | "h" | "hpp" | "java" | "kt"
-            | "php" | "rb" | "sql" | "log" | "env" | "csv" | "tsv" | "rules" | "diff"
-            | "patch" => {
+            | "php" | "rb" | "sql" | "log" | "env" | "csv" | "tsv" => {
                 return true;
             }
             _ => {}
@@ -364,6 +363,8 @@ fn decode_fallback_text(bytes: &[u8]) -> String {
             };
             out.push(ch);
         } else {
+            // Outside the Windows-1252 table; replace invalid code points with
+            // a placeholder instead of panicking or emitting replacement chars.
             out.push(char::from_u32(b as u32).unwrap_or('?'));
         }
     }
@@ -389,30 +390,24 @@ fn write_atomic(target: &Path, content: &[u8]) -> std::io::Result<()> {
     if !parent.as_os_str().is_empty() && !parent.exists() {
         fs::create_dir_all(parent)?;
     }
-    match NamedTempFile::new_in(parent) {
-        Ok(mut tmp) => {
-            tmp.as_file_mut().write_all(content)?;
-            tmp.as_file_mut().sync_all()?;
-            match tmp.persist(target) {
-                Ok(_) => Ok(()),
-                Err(persist_err) => {
-                    log::debug!(
-                        "write_atomic persist({}) failed ({}), falling back to direct write",
-                        target.display(),
-                        persist_err.error
-                    );
-                    fs::write(target, content)
-                }
-            }
-        }
-        Err(e) => {
-            log::debug!(
-                "write_atomic new_in({}) failed ({e}), falling back to direct write",
-                parent.display()
-            );
-            fs::write(target, content)
-        }
-    }
+    let mut tmp = NamedTempFile::new_in(parent).map_err(|e| {
+        log::debug!(
+            "write_atomic new_in({}) failed ({e})",
+            parent.display()
+        );
+        e
+    })?;
+    tmp.as_file_mut().write_all(content)?;
+    tmp.as_file_mut().sync_all()?;
+    tmp.persist(target).map_err(|e| {
+        log::debug!(
+            "write_atomic persist({}) failed ({})",
+            target.display(),
+            e.error
+        );
+        e.error
+    })?;
+    Ok(())
 }
 
 /// Returns the new mtime so the editor can track disk state for conflict
@@ -442,7 +437,9 @@ pub async fn fs_write_file(
     })?;
 
     if let Some(perms) = original_permissions {
-        let _ = fs::set_permissions(&target, perms);
+        if let Err(e) = fs::set_permissions(&target, perms) {
+            log::warn!("fs_write_file({}) failed to restore permissions: {e}", target.display());
+        }
     }
     let mtime = fs::metadata(&target).map(|m| mtime_millis(&m)).unwrap_or(0);
     let _ = app.emit(

@@ -2,7 +2,7 @@ use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::SystemTime;
@@ -28,6 +28,7 @@ pub struct BackgroundProc {
     pub log_path: Option<String>,
     /// Handle to that file; both reader threads append to it as bytes arrive.
     log_file: Option<Arc<Mutex<File>>>,
+    log_flush_counter: AtomicU32,
 }
 
 #[derive(Serialize)]
@@ -71,8 +72,8 @@ impl BackgroundProc {
         }
     }
 
-    pub fn kill(&self) {
-        let _ = self.child.kill();
+    pub fn kill(&self) -> bool {
+        self.child.kill().is_ok()
     }
 
     pub fn info(&self, handle: u32) -> BackgroundProcInfo {
@@ -198,6 +199,7 @@ pub fn spawn(
         exit_unknown: AtomicBool::new(false),
         log_path: log_path_str,
         log_file,
+        log_flush_counter: AtomicU32::new(0),
     });
 
     {
@@ -254,6 +256,11 @@ pub fn spawn(
                 Err(_) => proc_ref.exit_unknown.store(true, Ordering::Release),
             }
             proc_ref.exited.store(true, Ordering::Release);
+            if let Some(ref lf) = proc_ref.log_file {
+                if let Ok(mut f) = lf.lock() {
+                    let _ = f.flush();
+                }
+            }
         });
     }
 
