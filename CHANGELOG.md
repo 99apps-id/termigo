@@ -8,6 +8,18 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **DeepSeek Flash was treated as a small model.** `deepseek-v4-flash` was in
+  the lite tier, so it got the shortened prompt and only the 27 core tools - 99
+  of 126 were dropped. It is not a small model: it is DeepSeek's everyday
+  reasoning tier (rated 4/5 intelligence, the same as `claude-sonnet-4-6`), it
+  serves a 1M-token window, and it is the provider's *default* model, so this
+  hit every DeepSeek user. Membership was decided by name association: "flash"
+  reads small. The lite tier now says so explicitly and the entry is out.
+- **The Codex models were filed at 400,000 tokens instead of 1,000,000.** The
+  context indicator read four times fuller than it was and the conversation was
+  pruned early - which reads as the agent forgetting context mid-task. Applies
+  to `gpt-5.3-codex` and the ChatGPT-subscription `chatgpt-codex` pair, which
+  route to the same backend.
 - **A model on the compact tier that named a tool outside the pruned set ended
   the run instead of correcting itself.** The compact tier holds the agent to 27
   core tools, and the prune dropped `unknown_tool_fallback` in the same pass -

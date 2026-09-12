@@ -942,8 +942,13 @@ export const DEFAULT_MODEL_ID: ModelId = "gpt-5.4-mini";
  *  context-usage indicator in the AI mini-window header. Conservative
  *  estimates — actual provider limits may shift. */
 export const MODEL_CONTEXT_LIMITS: Record<string, number> = {
-  "chatgpt-codex": 400_000,
-  "chatgpt-codex-mini": 400_000,
+  // Codex serves a 1M-token window, the same generation of models as the
+  // gpt-5.5/5.6 entries below it. It was filed at 400k, which made the context
+  // indicator read four times fuller than it was and pruned the conversation
+  // early. Both the API-billed model and the ChatGPT-subscription pair route to
+  // the same Codex backend, so they share the window.
+  "chatgpt-codex": 1_000_000,
+  "chatgpt-codex-mini": 1_000_000,
   "gpt-5.6": 1_050_000,
   "gpt-5.6-terra": 1_050_000,
   "gpt-5.6-luna": 1_050_000,
@@ -951,7 +956,7 @@ export const MODEL_CONTEXT_LIMITS: Record<string, number> = {
   "gpt-5.5-pro": 1_050_000,
   "gpt-5.4-mini": 400_000,
   "gpt-5.4-nano": 400_000,
-  "gpt-5.3-codex": 400_000,
+  "gpt-5.3-codex": 1_000_000,
   "gpt-4.1-mini": 128_000,
   "claude-fable-5": 1_000_000,
   "claude-sonnet-5": 1_000_000,
@@ -1297,13 +1302,28 @@ Rules:
 - Todos: optional for coding/refactoring. Only use todo_write for large multi-phase tasks, updating milestones as major phases complete.
 - Concise. No filler, no recap of the diff. Deliver technical summary, empirical test proof, and next steps.`;
 
+/**
+ * Models that get the shortened prompt and the pruned toolset.
+ *
+ * Membership is a judgement about instruction-following under a large toolset,
+ * and it is deliberately a list rather than a rule derived from the registry -
+ * `gemini-2.5-flash` has a 1M window and `gemini-3.1-flash-lite` is named
+ * "lite", so neither the context window nor the name decides it alone.
+ *
+ * `deepseek-v4-flash` is NOT here, despite the name. It is DeepSeek's everyday
+ * reasoning tier (the registry rates it 4/5 intelligence, the same as
+ * `claude-sonnet-4-6`), it serves a 1M-token window, and it is the *default*
+ * model for the provider - so treating it as lite pruned 99 of 126 tools for
+ * every new DeepSeek user and made a reach for a real-but-pruned tool fatal.
+ * Do not re-add it by name association: "flash" reads small and this model is
+ * not.
+ */
 const LITE_SYSTEM_PROMPT_MODEL_IDS = new Set<string>([
   "gpt-5.4-nano",
   "gpt-4.1-mini",
   "claude-haiku-4-5",
   "gemini-2.5-flash",
   "gemini-3-flash-preview",
-  "deepseek-v4-flash",
   "gpt-oss-120b",
   "openai/gpt-oss-20b",
   "llama3.3-70b",
@@ -1313,7 +1333,7 @@ const LITE_SYSTEM_PROMPT_MODEL_IDS = new Set<string>([
 ]);
 
 /**
- * The provider-side names of those same lite-tier models.
+ * The provider-side names of the same lite-tier models.
  *
  * A model reached through a custom OpenAI-compatible endpoint is addressed by
  * a synthetic `compat-<endpoint>` id, and the endpoint names the model the way
@@ -1322,6 +1342,11 @@ const LITE_SYSTEM_PROMPT_MODEL_IDS = new Set<string>([
  * configured as a custom endpoint silently got the full prompt and all ~126
  * tool schemas - exactly the configuration where instruction-following suffers
  * most.
+ *
+ * Today every lite model is served under its registry id, so this set is the
+ * same list by a different route; it stays because the resolved id is what the
+ * request actually carries, and a rename (or a user correction) must not
+ * silently move a model onto the full tier.
  */
 const LITE_SYSTEM_PROMPT_API_IDS: ReadonlySet<string> = new Set(
   MODELS.filter((m) => LITE_SYSTEM_PROMPT_MODEL_IDS.has(m.id)).map((m) =>

@@ -100,6 +100,24 @@ describe("getModelContextLimit", () => {
   ] as const)("uses the published context limit for %s", (modelId, limit) => {
     expect(getModelContextLimit(modelId)).toBe(limit);
   });
+
+  // The models served with a 1M-token window. A limit set too LOW is the
+  // harmful direction: the context indicator overstates fullness and the
+  // conversation is pruned early, which reads as the agent forgetting context.
+  it.each([
+    "deepseek-v4-pro",
+    "deepseek-v4-flash",
+    "claude-opus-4-7",
+    "claude-sonnet-4-6",
+    "claude-opus-4-8",
+    "claude-fable-5",
+    "claude-sonnet-5",
+    "gpt-5.3-codex",
+    "chatgpt-codex",
+    "chatgpt-codex-mini",
+  ])("gives %s its 1M-token window", (modelId) => {
+    expect(getModelContextLimit(modelId)).toBe(1_000_000);
+  });
 });
 
 describe("current model pricing", () => {
@@ -431,13 +449,17 @@ describe("normalizeModelId", () => {
 
 describe("compact tier detection", () => {
   it("matches a lite model by its registry id", () => {
-    expect(isCompactTierModel("deepseek-v4-flash")).toBe(true);
     expect(isCompactTierModel("claude-haiku-4-5")).toBe(true);
+    expect(isCompactTierModel("gpt-4.1-mini")).toBe(true);
+    expect(isCompactTierModel("qwen-3-32b")).toBe(true);
   });
 
   it("matches a lite model by the id the provider serves it under", () => {
-    // A user who selected the built-in model directly.
-    expect(isCompactTierModel("deepseek-flash")).toBe(true);
+    // Every lite model is served under its registry id today, so this asserts
+    // the provider-side route is wired to the same list - the route a rename or
+    // a user override reaches the request through.
+    for (const id of ["claude-haiku-4-5", "gemini-2.5-flash", "gpt-4.1-mini"])
+      expect(isCompactTierModel(resolveApiModelId(id))).toBe(true);
   });
 
   it("does not match a non-lite model", () => {
@@ -446,18 +468,46 @@ describe("compact tier detection", () => {
     expect(isCompactTierModel(undefined)).toBe(false);
   });
 
+  // Regression: `deepseek-v4-flash` is DeepSeek's everyday reasoning tier, not a
+  // small model - the registry rates it 4/5 intelligence (the same as
+  // claude-sonnet-4-6), it serves a 1M window, and it is the provider's default.
+  // Classifying it as lite by name association pruned 99 of 126 tools for every
+  // DeepSeek user, and a reach for a real-but-pruned tool ended the run.
+  it("keeps DeepSeek Flash on the full tier, despite the name", () => {
+    expect(isCompactTierModel("deepseek-v4-flash")).toBe(false);
+    expect(isCompactTierModel("deepseek-flash")).toBe(false);
+    expect(isCompactTierModel("deepseek-v4-pro")).toBe(false);
+  });
+
+  it("keeps a DeepSeek endpoint on the full tier", () => {
+    // The exact configuration from the field: a custom OpenAI-compatible
+    // endpoint pointed at DeepSeek, served as `deepseek-flash`.
+    const eps: CustomEndpoint[] = [
+      {
+        id: "762d2bd6",
+        name: "DeepSeek",
+        baseURL: "https://api.deepseek.com",
+        modelId: "deepseek-flash",
+        contextLimit: 1_128_000,
+      },
+    ];
+    const mid = compatModelIdForEndpoint("762d2bd6");
+    expect(effectiveModelName(mid, eps)).toBe("deepseek-flash");
+    expect(isCompactTierModel(effectiveModelName(mid, eps))).toBe(false);
+  });
+
   it("resolves a custom endpoint to the model it actually serves", () => {
     const eps: CustomEndpoint[] = [
       {
         id: "ep1",
-        name: "DeepSeek",
-        baseURL: "https://api.deepseek.com",
-        modelId: "deepseek-flash",
-        contextLimit: 1_000_000,
+        name: "Haiku",
+        baseURL: "https://x/v1",
+        modelId: "claude-haiku-4-5",
+        contextLimit: 200_000,
       },
     ];
     const mid = compatModelIdForEndpoint("ep1");
-    expect(effectiveModelName(mid, eps)).toBe("deepseek-flash");
+    expect(effectiveModelName(mid, eps)).toBe("claude-haiku-4-5");
     // The synthetic id alone would miss the lite tier; the resolved name hits.
     expect(isCompactTierModel(mid)).toBe(false);
     expect(isCompactTierModel(effectiveModelName(mid, eps))).toBe(true);
