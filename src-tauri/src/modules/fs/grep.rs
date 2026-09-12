@@ -18,6 +18,10 @@ use crate::modules::workspace::{
 const FILE_SIZE_CAP: u64 = 5 * 1024 * 1024;
 const DEFAULT_MAX_RESULTS: usize = 200;
 const HARD_MAX_RESULTS: usize = 2000;
+// The glob walk caps its results, but a narrow pattern over a huge root only
+// reaches that cap after visiting every entry. Bound the walk itself, the way
+// the content searches already do.
+const MAX_GLOB_SCANNED: usize = 50_000;
 
 /// Supersession counter for interactive content search. Each new interactive
 /// query bumps the generation; in-flight walks observe the change and quit,
@@ -447,8 +451,10 @@ pub fn fs_glob_blocking(
 
     let mut hits: Vec<GlobHit> = Vec::new();
     let mut truncated = false;
+    let mut scanned = 0usize;
     for dent in walker.flatten() {
-        if hits.len() >= cap {
+        scanned += 1;
+        if hits.len() >= cap || scanned > MAX_GLOB_SCANNED {
             truncated = true;
             break;
         }

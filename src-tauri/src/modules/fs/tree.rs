@@ -204,7 +204,14 @@ pub fn fs_read_dir_blocking(
             // silently drop them from the listing.
             let (meta, was_symlink) = match std::fs::metadata(entry.path()) {
                 Ok(m) => (Some(m), false),
-                Err(_) => (entry.metadata().ok(), true),
+                // A failed follow means a broken symlink, a permission error, or
+                // a transient I/O error. Only the first is a symlink; labelling
+                // every failure one hides the real cause and reports the link's
+                // own size for a file we simply could not stat.
+                Err(_) => match entry.metadata() {
+                    Ok(m) if m.file_type().is_symlink() => (Some(m), true),
+                    other => (other.ok(), false),
+                },
             };
             let meta = meta?;
 
@@ -306,6 +313,35 @@ mod tests {
     fn sorted(mut v: Vec<&str>) -> Vec<&str> {
         v.sort_by(|a, b| natural_cmp(a, b));
         v
+    }
+
+    // Only a real symlink may be reported as one: a stat that failed for any
+    // other reason is not a link, and mislabelling it hides the cause.
+    #[cfg(unix)]
+    #[test]
+    fn only_a_real_symlink_is_labelled_symlink() {
+        use super::{fs_read_dir_blocking, EntryKind};
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("real.txt"), b"x").unwrap();
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        symlink(dir.path().join("gone"), dir.path().join("dangling")).unwrap();
+
+        let entries = fs_read_dir_blocking(dir.path().to_path_buf(), false, None).unwrap();
+        let kind = |name: &str| match &entries
+            .iter()
+            .find(|e| e.name == name)
+            .unwrap_or_else(|| panic!("missing {name}"))
+            .kind
+        {
+            EntryKind::File => "file",
+            EntryKind::Dir => "dir",
+            EntryKind::Symlink => "symlink",
+        };
+        assert_eq!(kind("dangling"), "symlink");
+        assert_eq!(kind("real.txt"), "file");
+        assert_eq!(kind("sub"), "dir");
     }
 
     #[test]

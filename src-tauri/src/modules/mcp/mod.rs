@@ -285,7 +285,11 @@ fn is_transport_failure(error: &str) -> bool {
         || error.contains("cannot flush to MCP server")
         || error.contains("cannot read from MCP server")
         || error.contains("MCP server closed the connection")
-        || error.contains("did not respond")
+        // A request timeout is a transport failure: the pipe is still open but
+        // the server stopped answering, so the pooled process must be dropped.
+        // The text has to match McpClient::request exactly.
+        || error.contains("did not answer")
+        || error.contains("MCP server sent an oversized message")
 }
 
 /// A locked, connected server.
@@ -400,6 +404,21 @@ mod tests {
         let mut file = std::fs::File::create(&path).unwrap();
         file.write_all(body.as_bytes()).unwrap();
         path
+    }
+
+    // The pool only drops a wedged server when the message matches, so this
+    // wording has to track `McpClient::request` exactly.
+    #[test]
+    fn a_request_timeout_counts_as_a_transport_failure() {
+        assert!(is_transport_failure(
+            "MCP server did not answer 'tools/list' within 60s"
+        ));
+        assert!(is_transport_failure(
+            "cannot read from MCP server: broken pipe"
+        ));
+        assert!(is_transport_failure("MCP server closed the connection"));
+        // A tool rejecting its arguments came back over a healthy pipe.
+        assert!(!is_transport_failure("unknown tool: fs_read"));
     }
 
     #[test]

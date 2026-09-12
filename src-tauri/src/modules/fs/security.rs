@@ -285,11 +285,22 @@ pub fn validate_read(path: &std::path::Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Same as `validate_read` for the write deny-list.
+/// Same as `validate_read` for the write deny-list. A target that does not exist
+/// yet cannot be canonicalized, so its parent is resolved instead, exactly as
+/// `guard_write` does: without that fallback a new file behind a symlinked
+/// directory would only ever be checked in its literal spelling, which never
+/// matches the deny-list.
 pub fn validate_write(path: &std::path::Path) -> Result<(), String> {
     check_writable(&path.to_string_lossy())?;
     if let Ok(canon) = std::fs::canonicalize(path) {
         check_writable(&canon.to_string_lossy())?;
+        return Ok(());
+    }
+    if let Some(parent) = path.parent() {
+        if let Ok(canon_parent) = std::fs::canonicalize(parent) {
+            let joined = canon_parent.join(path.file_name().unwrap_or_default());
+            check_writable(&joined.to_string_lossy())?;
+        }
     }
     Ok(())
 }
@@ -375,6 +386,29 @@ mod tests {
         assert!(check_writable("/home/me/project/out.txt").is_ok());
         // Reading a system path is not universally blocked; writing is.
         assert!(check_readable("/usr/bin/ls").is_ok());
+    }
+
+    // A destination that does not exist yet cannot be canonicalized, so the
+    // deny-list has to look at the resolved parent. Otherwise a `..`-free but
+    // symlinked directory would only ever be checked in its literal spelling,
+    // which never matches a protected prefix.
+    #[cfg(unix)]
+    #[test]
+    fn validate_write_resolves_the_parent_of_a_new_file() {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        // /usr/bin is write-denied and is a real directory on both Linux and
+        // macOS (unlike /etc, which is a symlink on macOS and would resolve to
+        // /private/etc, a path the deny-list does not cover).
+        let link = dir.path().join("usr-bin-link");
+        symlink("/usr/bin", &link).unwrap();
+        let escaped = link.join("termigo-should-not-write");
+
+        assert!(check_writable(&escaped.to_string_lossy()).is_ok());
+        assert!(validate_write(&escaped).is_err());
+
+        // A new file in an ordinary directory is still allowed.
+        assert!(validate_write(&dir.path().join("new.txt")).is_ok());
     }
 
     #[test]

@@ -255,6 +255,10 @@ fn read_file_sync(p: &Path, force: bool) -> Result<ReadResult, String> {
     }
 
     match String::from_utf8(bytes) {
+        // `String::from_utf8` accepts NUL, so a first-chunk sniff is not enough:
+        // a text header over a binary body would otherwise reach the editor as
+        // text with embedded NULs.
+        Ok(content) if content.contains('\0') => Ok(ReadResult::Binary { size }),
         Ok(content) => Ok(ReadResult::Text {
             content,
             size,
@@ -587,6 +591,22 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let f = dir.path().join("a.bin");
         std::fs::write(&f, b"PNG\0\x89image").unwrap();
+        assert!(matches!(
+            read_file_sync(&f, false).unwrap(),
+            ReadResult::Binary { .. }
+        ));
+    }
+
+    #[test]
+    fn read_file_detects_a_null_byte_past_the_first_chunk() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("late.bin");
+        // A text header over a binary body: valid UTF-8 with no NUL in the
+        // first 8 KiB, so a first-chunk-only sniff would call it text.
+        let mut bytes = vec![b'a'; 12 * 1024];
+        bytes.push(0);
+        bytes.extend_from_slice(b"trailer");
+        std::fs::write(&f, &bytes).unwrap();
         assert!(matches!(
             read_file_sync(&f, false).unwrap(),
             ReadResult::Binary { .. }

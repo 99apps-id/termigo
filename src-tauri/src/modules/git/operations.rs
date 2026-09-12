@@ -182,7 +182,10 @@ fn diff_inner(
     path: Option<&str>,
     staged: bool,
 ) -> Result<GitDiffResult> {
-    let mut args: Vec<OsString> = vec!["diff".into(), "--no-ext-diff".into()];
+    // `--no-color` for the same reason every sibling reader passes it: with
+    // color.ui=always in the user's config, raw ANSI escapes would land in the
+    // diff text and render as garbage in the editor.
+    let mut args: Vec<OsString> = vec!["diff".into(), "--no-color".into(), "--no-ext-diff".into()];
     if staged {
         args.push("--cached".into());
     }

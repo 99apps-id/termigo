@@ -4,6 +4,10 @@ use std::fmt;
 
 // Cap so a misbehaving server can't make us buffer unbounded data.
 const MAX_CONTENT_LEN: usize = 64 * 1024 * 1024;
+// The body cap only applies once a terminator was found, so a server streaming
+// bytes with no `\r\n\r\n` at all would accumulate headers forever. The header
+// phase needs its own bound.
+const MAX_HEADER_LEN: usize = 64 * 1024;
 const HEADER_TERMINATOR: &[u8] = b"\r\n\r\n";
 
 #[derive(Debug, PartialEq, Eq)]
@@ -11,6 +15,7 @@ pub enum FramingError {
     MissingContentLength,
     InvalidContentLength(String),
     ContentTooLarge(usize),
+    HeaderTooLarge(usize),
     InvalidUtf8,
 }
 
@@ -23,6 +28,12 @@ impl fmt::Display for FramingError {
                 write!(
                     f,
                     "lsp frame Content-Length {n} exceeds cap {MAX_CONTENT_LEN}"
+                )
+            }
+            Self::HeaderTooLarge(n) => {
+                write!(
+                    f,
+                    "lsp frame headers exceed cap {MAX_HEADER_LEN} ({n} bytes buffered)"
                 )
             }
             Self::InvalidUtf8 => write!(f, "lsp frame payload is not valid UTF-8"),
@@ -67,6 +78,9 @@ impl FrameDecoder {
                             self.phase = Phase::Body { len };
                         }
                         None => {
+                            if self.buf.len() > MAX_HEADER_LEN {
+                                return Err(FramingError::HeaderTooLarge(self.buf.len()));
+                            }
                             // Terminator may straddle this chunk and the next.
                             self.phase = Phase::Headers {
                                 scan_from: self
@@ -251,5 +265,21 @@ mod tests {
             d.push(&rest).unwrap(),
             vec![r#"{"first":1}"#.to_string(), r#"{"second":2}"#.to_string()]
         );
+    }
+
+    #[test]
+    fn unterminated_header_stream_errors_instead_of_growing_forever() {
+        let mut d = FrameDecoder::default();
+        // No `\r\n\r\n` anywhere, so the body cap never applies and the header
+        // phase is the only thing standing between us and unbounded growth.
+        let filler = vec![b'a'; 4096];
+        let mut err = None;
+        for _ in 0..64 {
+            if let Err(e) = d.push(&filler) {
+                err = Some(e);
+                break;
+            }
+        }
+        assert!(matches!(err, Some(FramingError::HeaderTooLarge(_))));
     }
 }

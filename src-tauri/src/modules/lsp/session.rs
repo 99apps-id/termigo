@@ -50,12 +50,17 @@ impl LspSession {
     // only the leader leaves them burning CPU. Unix: signal the process
     // group. Windows: the Job Object covers the tree.
     pub fn kill(&self) {
-        *self.stdin.lock().unwrap() = None;
+        // Signal before touching stdin. `write_message` holds this mutex across
+        // a blocking write; if the server stopped reading, that write sits in
+        // the kernel and taking the lock here would deadlock the one call that
+        // could have unblocked it. Killing the process closes the pipe, which
+        // makes the stuck write fail and release the mutex on its own.
         #[cfg(unix)]
         unsafe {
             libc::kill(-(self.child.id() as libc::pid_t), libc::SIGKILL);
         }
         let _ = self.child.kill();
+        *self.stdin.lock().unwrap() = None;
     }
 }
 
