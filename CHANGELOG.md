@@ -6,6 +6,38 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.13] - 2026-09-13
+
+### Added
+
+- **The Go CLI can configure Termigo, not just automate it.** `termigo tui`
+  opens an interactive terminal for a running app: a welcome screen with the
+  wordmark and a numbered menu for setup, models, settings, approval and status.
+  The same actions exist non-interactively - `termigo setup`, `models`,
+  `model <id>`, `settings [<key> | set <key> <value>]`, `approval [<mode>]`,
+  `secret <provider>` - so a headless box can be configured over SSH instead of
+  by hand-editing `termigo-settings.json`. Nothing is reimplemented in Go: the
+  app owns the model registry (~60 TypeScript entries), the settings model and
+  the secret store, so the terminal asks the app over the control socket. A
+  setting therefore goes through the same setter the Settings window uses, which
+  is what keeps validation and normalisation from diverging between the two.
+  `agentApprovalMode` is reachable only through `termigo approval`, never a
+  generic `settings set`: with nobody at the window, `ask` blocks every edit, so
+  loosening it should take an explicit command.
+- **Four control-plane methods back that terminal.** `models-list` returns the
+  catalogue plus which providers already hold a key; `config-get` returns a named
+  set of settings (never the whole preferences blob, which may be printed) and
+  the list of writable keys; `config-set` writes **only** keys on that list;
+  `secret-set` stores a provider key through the app. An unvalidated "set any
+  key" would have turned `config-set` into a way to write arbitrary values into
+  `termigo-settings.json` from any local caller holding the control token, so the
+  allowlist is the security boundary here and is tested as one.
+- **A key typed at a prompt is not echoed, and the terminal says when it cannot
+  hide it.** `termigo secret` and the setup wizard disable terminal echo
+  (`stty -echo` on unix, `SetConsoleMode` on Windows) and warn explicitly when
+  stdin is not a console, instead of letting the operator believe a key was
+  hidden while it sat on screen.
+
 ### Fixed
 
 - **A question from `ask_user` could only be answered by tapping a button, and
@@ -17,7 +49,7 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `3 answer(s), 2959ch sent` for the 4m58s-old run. Now a free-text reply answers
   the pending question (a bare number picks that option, anything else is passed
   through verbatim, so "not that one, do this instead" reaches the agent), and
-  the card carries a `⏭ Tidak dulu (lewati)` button that resolves the question
+  the card carries a `â­ Tidak dulu (lewati)` button that resolves the question
   with no answer so the agent can carry on.
 - **The chat never showed what the agent was saying.** The live card carried
   status, tool lines and the step, but not the assistant's own text, so the agent
@@ -30,6 +62,14 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Telegram's 4096-character limit and break the update instead of making it. The
   separate interim message added earlier for this direction is removed: the card
   is now the single place the text appears, so the prose is not posted twice.
+- **The live card ran the agent's prose into the tool lines.** With the answer
+  now inside the card, the header, the step, the agent's own words and the tool
+  lines were joined into one block, so what the model was saying and what it was
+  doing were indistinguishable at a glance. They are now separated by a blank
+  line, with the tool lines kept adjacent because they are one list of related
+  facts. Blank lines *inside* the agent's text are content and survive: filtering
+  every blank line - the obvious version - silently reflowed the model's
+  paragraphs into a single block.
 - **Every poll did an OS keychain read, and that read had no timeout.** The
   Telegram token was not cached, so `getUpdates` (once per 30s) and every send
   called `secrets_get` - a Tauri IPC call into the OS keychain. Worse, the call
@@ -233,7 +273,7 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - **On-demand tool loading.** The full toolset is ~80 KB of JSON Schema sent on
-  every request. With Settings → Agents → *Load tools on demand* on, a run
+  every request. With Settings â†’ Agents â†’ *Load tools on demand* on, a run
   starts with the coding loop (39 tools / 31.4 KB / ~8.0k tokens) plus a
   `find_tools` search, and a domain joins the request when the model asks for it
   by keyword. Measured saving: 61% (~12.5k tokens per request) against the full
@@ -241,7 +281,7 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `ask_user`, the file operations and the verification loop. `find_tools` costs
   1.1 KB and indexes the 87 deferred tools; a discovered tool stays active for
   the rest of the run, so re-use costs no extra step.
-- **Tool domains** (Settings → Agents): switch off whole optional domains -
+- **Tool domains** (Settings â†’ Agents): switch off whole optional domains -
   browser, GitHub, LSP, web, skills, self-improvement, workflows, previews,
   agent handoff, PTY driving, worktrees, SQL, PDF, image generation, history -
   and their schemas leave the request. Every group off: 56 tools / 40.6 KB /
@@ -538,7 +578,7 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - Forced tool-choice recovery: some custom OpenAI-compatible endpoints run a
     "thinking mode" that rejects a pinned tool call with HTTP 400. Termigo now
     recognises the rejection, drops the pin for that model and resumes the
-    request automatically — broad "audit/analyse this repo" prompts no longer
+    request automatically â€” broad "audit/analyse this repo" prompts no longer
     die on a red card.
   - Mid-stream stall fix: long, bursty generations (e.g. a pentest report from
     a thinking-mode model) that legitimately pause over 30 s between chunks no
@@ -551,19 +591,19 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - Context pruning: a verified span of history (work saved to git by a
     checkpoint/commit) is collapsed into a short checkpoint summary each turn,
     so finished work stops costing tokens.
-  - Edit/multi_edit survive a model that drops or renames the `path` argument —
+  - Edit/multi_edit survive a model that drops or renames the `path` argument â€”
     the call self-corrects instead of hard-failing.
   - ask_user no longer loops when the model sends long options; .env.example
     templates are readable again; stuck "RUNNING" tool cards are closed as
     failed instead of hanging forever.
   - Plain-language status and error copy ("the model is taking a while to
-    respond…" instead of internal terms like "provider"/"pin").
+    respondâ€¦" instead of internal terms like "provider"/"pin").
 
 - **New agent tools**
-  - `bash_wait` — block on a background process until it exits (the tool the
+  - `bash_wait` â€” block on a background process until it exits (the tool the
     model kept reaching for), completing the spawn trio with `bash_background`
     / `bash_logs` / `bash_kill`.
-  - `dev_server` — detect the project's dev command, spawn it in the
+  - `dev_server` â€” detect the project's dev command, spawn it in the
     background, read its log for the real URL, health-probe the loopback port
     and open it in the browser pane.
   - `web_search` (DuckDuckGo-backed, no API key), `git_blame`, `git_show`,
@@ -583,11 +623,11 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Agent UX (BatikCode parity)**
   - Live run-progress HUD: current step, loop round, live todo list with a
     derived active item, and sub-agents running in a fan-out.
-  - Sub-agent nesting depth (1–5) with a cost-tier guard; sub-agent runs
+  - Sub-agent nesting depth (1â€“5) with a cost-tier guard; sub-agent runs
     persisted; parallel fan-out with `depends_on` chaining.
   - Centralised agent registry/factory; project-scoped approval rules
     (`.termigo/approvals.json`) now apply to sub-agents too.
-  - Auto-verify after edits (read → change → verify → repair loop).
+  - Auto-verify after edits (read â†’ change â†’ verify â†’ repair loop).
   - Fresh "New chat" on every launch; searchable, persisted session history.
 
 - **Misc**
@@ -614,7 +654,7 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Agent "hang" on large multi-step builds (concurrent-request race doubling the
   transcript, quadratic compaction, and request bodies over the provider's
-  HTTP cap — compaction now also trims tool-call inputs and enforces a hard
+  HTTP cap â€” compaction now also trims tool-call inputs and enforces a hard
   body ceiling).
 - Content-moderation rejections are explained (and a new chat offered when the
   flagged text poisons history) instead of showing an opaque error.
