@@ -40,6 +40,10 @@ log() { printf '%s %s\n' "$(date +%F_%T)" "$*" >> "$LOG_FILE"; }
 # meng-append selamanya.
 trim_log() {
   local n
+  # Berkas log belum ada pada run pertama. Penjaga ini harus eksplisit: bash
+  # melaporkan sendiri kegagalan redirect input, sehingga `2>/dev/null` pada
+  # perintahnya tidak menutupi pesan itu.
+  [ -f "$LOG_FILE" ] || return 0
   n=$(wc -l < "$LOG_FILE" 2>/dev/null || echo 0)
   if [ "${n:-0}" -gt "$LOG_MAX_LINES" ]; then
     tail -n "$((LOG_MAX_LINES / 2))" "$LOG_FILE" > "${LOG_FILE}.tmp" && mv "${LOG_FILE}.tmp" "$LOG_FILE"
