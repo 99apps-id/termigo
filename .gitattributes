@@ -1,0 +1,7 @@
+# Keep shell scripts LF in the repository and in every checkout.
+#
+# These scripts are the deployment path for the headless VPS (service start,
+# build, watchdog). A CRLF shell script fails there with
+# "$'\r': command not found", which reads like a missing file rather than a line
+# ending problem, and the failure is silent enough to cost an evening.
+*.sh text eol=lf
