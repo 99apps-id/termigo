@@ -40,6 +40,9 @@ clippy.out
 clippy.err
 build-*.log
 tsc-*.txt
+# Commit messages are written to a file because PowerShell has no heredoc.
+.git-commit-msg.txt
+.git-merge-msg.txt
 
 # Local audit and portable-build scratch artifacts
 lint-*.txt
