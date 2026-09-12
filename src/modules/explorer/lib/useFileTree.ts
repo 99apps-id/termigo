@@ -45,7 +45,9 @@ export function joinPath(parent: string, name: string): string {
 }
 
 export function dirname(path: string): string {
-  const i = path.lastIndexOf("/");
+  // Both separators: a path can still arrive with backslashes from the OS even
+  // though the canonical frontend form is forward-slash (see TERMIGO.md).
+  const i = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
   if (i <= 0) return "/";
   return path.slice(0, i);
 }
@@ -414,7 +416,9 @@ export function useFileTree(rootPath: string | null, options?: Options) {
 
   const movePath = useCallback(
     async (from: string, toDir: string) => {
-      const name = from.slice(from.lastIndexOf("/") + 1);
+      const name = from.slice(
+        Math.max(from.lastIndexOf("/"), from.lastIndexOf("\\")) + 1,
+      );
       const to = joinPath(toDir, name);
       if (to === from) return;
       const target = nodesRef.current[toDir];
