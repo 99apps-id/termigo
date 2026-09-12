@@ -68,10 +68,11 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
 ];
 
 /// Characters that enable command injection in a shell one-liner.
-const SHELL_METACHARACTERS: &[char] = &[';', '|', '&', '$', '(', ')', '<', '>', '`'];
+const SHELL_METACHARACTERS: &[char] = &[';', '$', '(', ')', '<', '>', '`'];
 
 /// Validate a shell command for agent execution:
-/// - reject metacharacters that enable injection (`;|&$()<>``)
+/// - reject metacharacters that enable injection (`;$()<>``)
+/// - allow safe chaining operators `&&` and `||`
 /// - enforce allowlist for the first token unless it's an absolute path
 /// - return the command string on success
 pub fn validate_shell_command(command: &str) -> Result<&str, String> {
@@ -80,22 +81,53 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
         return Err("empty command".into());
     }
 
-    // 1. Reject metacharacters outside quotes.
+    // 1. Reject metacharacters outside quotes. Allow `&&` and `||` as safe
+    //    chaining operators; reject single `&`, `|`, and the rest.
     let mut in_quote = false;
     let mut quote_char = '\0';
     let mut prev = '\0';
     let mut bad: Vec<char> = Vec::new();
-    for c in trimmed.chars() {
+    let mut chars = trimmed.chars().collect::<Vec<_>>();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
         if !in_quote && (c == '"' || c == '\'') {
             in_quote = true;
             quote_char = c;
-        } else if in_quote && c == quote_char && prev != '\\' {
+            prev = c;
+            i += 1;
+            continue;
+        }
+        if in_quote && c == quote_char && prev != '\\' {
             in_quote = false;
             quote_char = '\0';
-        } else if !in_quote && SHELL_METACHARACTERS.contains(&c) {
-            bad.push(c);
+            prev = c;
+            i += 1;
+            continue;
+        }
+        if !in_quote {
+            if c == '&' {
+                if i + 1 < chars.len() && chars[i + 1] == '&' {
+                    // `&&` is allowed
+                    i += 2;
+                    prev = c;
+                    continue;
+                }
+                bad.push(c);
+            } else if c == '|' {
+                if i + 1 < chars.len() && chars[i + 1] == '|' {
+                    // `||` is allowed
+                    i += 2;
+                    prev = c;
+                    continue;
+                }
+                bad.push(c);
+            } else if SHELL_METACHARACTERS.contains(&c) {
+                bad.push(c);
+            }
         }
         prev = c;
+        i += 1;
     }
     if in_quote {
         return Err("unclosed quote in command".into());
