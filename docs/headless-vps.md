@@ -33,7 +33,7 @@ pnpm install
 
 # Build CLI companion + frontend + Rust binary (all-in-one via Tauri)
 # This runs: pnpm build:cli && pnpm build (frontend) then compiles Rust.
-# Do NOT use raw "cargo build" — it skips the frontend bundle step.
+# Do NOT use raw "cargo build" - it skips the frontend bundle step.
 pnpm tauri build --no-bundle
 
 # Place executables in application root
@@ -259,11 +259,12 @@ The systemd service uses this launcher by default.
 
 ### Bot not responding after deploy
 
-1. Check binary size: `ls -lh /opt/termigo/termigo` — must be ≥ 16 MB.
-2. Check logs: `journalctl -u termigo -n 50` — look for GTK panic, workspace hydration failure, or missing assets.
-3. Verify Telegram connection: `ss -tnp | grep 149.154.166.110` — if empty, token may be invalid or workspace hydration failed.
-4. Check `defaultModelId` in `termigo-settings.json` — for a custom endpoint it must be `compat-<customEndpoints[].id>`, and the endpoint's key must be in the keychain. `scripts/vps-setup-and-build.sh` rewrites a bare endpoint id and refuses to start on an unresolvable one.
-5. Rollback if needed: `cp /opt/termigo/termigo.prev-TIMESTAMP /opt/termigo/termigo && systemctl restart termigo`
+1. Check binary size: `ls -lh /opt/termigo/termigo` - must be at least 16 MB (a healthy build is ~47 MB).
+2. Ask the app whether it is alive at all: `/opt/termigo/termigo-cli status --json`. A non-null `"ui"` means the webview is up; `frontend_timeout` (or no `ui`) means it is wedged or never booted, which no amount of Telegram debugging will fix.
+3. Check logs: `journalctl -u termigo -n 50` and `grep -ai telegram ~/.local/share/id.99apps.termigo/logs/Termigo.log | tail -20` - look for GTK panic, workspace hydration failure, missing assets, `polling stalled`, or a `409 Conflict`.
+4. Do NOT judge the relay by `ss -tnp | grep 149.154`: long-poll disconnects between requests, so a healthy relay can show no socket at that instant, and other tenants on this box hold their own Telegram sockets. The relay log is the reliable signal.
+5. Check `defaultModelId` in `termigo-settings.json` - for a custom endpoint it must be `compat-<customEndpoints[].id>`, and the endpoint's key must be in the keychain. `scripts/vps-setup-and-build.sh` rewrites a bare endpoint id and refuses to start on an unresolvable one.
+6. Rollback if needed: `sudo systemctl stop termigo && cp /opt/termigo/termigo.bak-TIMESTAMP /opt/termigo/termigo && sudo systemctl start termigo`. Keep `termigo.known-good` pointed at a build you trust; the watchdog rolls back to it on its own after repeated failures.
 
 ### "still restoring its workspace"
 
@@ -292,27 +293,101 @@ Causes: invalid `defaultModelId`, corrupted data directory, or mismatched binary
 
 ### Updating Termigo
 
+Do NOT rebuild while the relay is running. The agent's own build steps run inside
+the service cgroup, so their memory is charged to the app's `MemoryHigh`, which is
+how a field install wedged its webview and went silent for 9 hours. Stop the
+service first: that both narrows the memory the build can use and removes the
+contention.
+
 ```bash
-cd /opt/termigo
-git pull --rebase
-pnpm install
-pnpm tauri build --no-bundle
 sudo systemctl stop termigo
-cp src-tauri/target/release/termigo /opt/termigo/termigo
+cd /opt/termigo
+git pull --ff-only
+# CARGO_BUILD_JOBS=1: this box OOM-killed a parallel release build before.
+CARGO_BUILD_JOBS=1 pnpm tauri build --no-bundle
+
+# Health check BEFORE deploying: a binary without the frontend assets is ~13 MB
+# instead of ~47 MB, and it boots to a blank window that never answers.
+ls -l src-tauri/target/release/termigo
+
+cp -a termigo "termigo.bak-$(date +%s)"
+cp -f src-tauri/target/release/termigo termigo
 sudo systemctl start termigo
+sleep 30
+systemctl is-active termigo                 # active
+/opt/termigo/termigo-cli status --json      # must show a non-null "ui"
 ```
+
+`status --json` returning `frontend_timeout` (no `ui`) means the webview did not
+come up: the binary is not a good one, or the app was starved of memory. Restore
+the previous binary rather than leaving a silent relay running.
 
 ### Watchdog
 
-The watchdog script (`scripts/termigo-watchdog.sh`) monitors service health and auto-restarts on failure. Enable via cron if desired:
+`Restart=always` in the unit only restarts a process that **exits**. The failure
+seen in the field is the opposite: the app stays up while its webview stops
+answering, so the relay goes deaf and systemd has nothing to act on (`NRestarts=0`
+while Telegram was dead for 9 hours). The watchdog covers that case by asking the
+app whether it is still there.
+
+Health is decided by the control plane, not by a socket check: `ss | grep 149.154`
+is timing-dependent, because long-poll disconnects and reconnects, so a healthy
+relay can show no Telegram socket at that instant and a socket check would restart
+it for nothing. The watchdog requires `termigo-cli status --json` to answer with a
+non-null `"ui"` and the process RSS to look like a completed boot.
+
+Install it as a systemd timer (preferred over cron: it is logged by journald and
+survives a reboot):
 
 ```bash
-(crontab -l 2>/dev/null; echo "*/2 * * * * /opt/termigo/scripts/termigo-watchdog.sh") | crontab -
+sudo tee /etc/systemd/system/termigo-watchdog.service >/dev/null <<'EOF'
+[Unit]
+Description=Termigo watchdog (detect a live but wedged app and restart it)
+After=termigo.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/termigo/scripts/termigo-watchdog.sh
+EOF
+
+sudo tee /etc/systemd/system/termigo-watchdog.timer >/dev/null <<'EOF'
+[Unit]
+Description=Run the Termigo watchdog every 2 minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=2min
+AccuracySec=15s
+Unit=termigo-watchdog.service
+
+[Install]
+WantedBy=timers.target
+EOF
+
+# The rollback path needs a known-good binary; without it the watchdog logs
+# that it skipped the rollback and keeps restarting the same bad build.
+cp -p /opt/termigo/termigo /opt/termigo/termigo.known-good
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now termigo-watchdog.timer
+systemctl list-timers termigo-watchdog.timer
+```
+
+What it does, in order: exit if the service has been up for less than `GRACE_SECS`
+(so a boot in progress is not judged and cannot cause a restart loop); reset the
+failure counter when healthy; otherwise restart, and after `MAX_RESTARTS`
+consecutive failures restore `termigo.known-good` over the pinned binary before
+restarting again. Its decisions are appended to `/opt/termigo/.watchdog/watchdog.log`.
+
+```bash
+# What the watchdog has been deciding
+sudo tail -30 /opt/termigo/.watchdog/watchdog.log
 ```
 
 ### Backup
 
 Regularly back up:
-- `/opt/termigo/termigo.prev-*` (binary rollback chain)
+- `/opt/termigo/termigo.bak-*` (binary rollback chain)
+- `/opt/termigo/termigo.known-good` (what the watchdog rolls back to)
 - `~/.local/share/id.99apps.termigo/` (settings, sessions, secrets)
-- `/etc/systemd/system/termigo.service` (service unit)
+- `/etc/systemd/system/termigo.service` and `termigo-watchdog.{service,timer}` (service units)
