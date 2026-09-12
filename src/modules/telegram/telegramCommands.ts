@@ -412,11 +412,26 @@ export async function handleCallback(
     const rest = data.slice(3);
     const sep = rest.lastIndexOf(":");
     const id = sep === -1 ? rest : rest.slice(0, sep);
-    const idx = parseInt(sep === -1 ? "" : rest.slice(sep + 1), 10);
+    const field = sep === -1 ? "" : rest.slice(sep + 1);
     const el = await import("../ai/store/elicitationStore");
     const item = el.useElicitationStore
       .getState()
       .pending.find((p) => p.id === id);
+    // The decline button: resolve the question with null so the agent knows no
+    // answer is coming and can carry on, rather than waiting forever.
+    if (field === "decline") {
+      el.useElicitationStore.getState().cancel(id);
+      await answerCallback(cb.id, "Dilewati", signal);
+      await editKeyboard(
+        chatId,
+        messageId,
+        "⏭ Dilewati. Lanjutkan tanpa jawaban.",
+        [],
+        signal,
+      );
+      return;
+    }
+    const idx = parseInt(field, 10);
     if (item?.options[idx]) {
       const choice = item.options[idx];
       el.useElicitationStore.getState().answer(id, choice);

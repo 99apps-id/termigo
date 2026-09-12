@@ -118,6 +118,26 @@ export function runBusy(
   );
 }
 
+/**
+ * Interpret a free-text reply to a pending `ask_user` question.
+ *
+ * A bare number selects that option (Telegram shows them in order, so "2" is a
+ * natural reply), and anything else is passed through verbatim - the question
+ * is answered by a model, and a sentence like "not that one, do this instead"
+ * is a better answer than being forced onto a button.
+ */
+export function matchElicitationAnswer(
+  text: string,
+  options: readonly string[],
+): string {
+  const trimmed = text.trim();
+  if (/^\d+$/.test(trimmed)) {
+    const n = Number.parseInt(trimmed, 10);
+    if (n >= 1 && n <= options.length) return options[n - 1];
+  }
+  return trimmed;
+}
+
 function summarizeToolInput(toolName: string, input?: unknown): string {
   if (!input) return toolName;
   if (typeof input === "string") {

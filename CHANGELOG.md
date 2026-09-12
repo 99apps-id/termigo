@@ -8,6 +8,17 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **A question from `ask_user` could only be answered by tapping a button, and
+  typing a reply blocked the run.** The question card offered the options and
+  nothing else, so there was no way to say "not now". Worse, a typed reply was
+  routed to the busy branch - which queued it as a NEW task - so the question
+  waited forever while the user's answers piled up as future turns. Observed on a
+  field install: three text messages logged with no dispatch, then `/stop`, then
+  `3 answer(s), 2959ch sent` for the 4m58s-old run. Now a free-text reply answers
+  the pending question (a bare number picks that option, anything else is passed
+  through verbatim, so "not that one, do this instead" reaches the agent), and
+  the card carries a `⏭ Tidak dulu (lewati)` button that resolves the question
+  with no answer so the agent can carry on.
 - **The chat never showed what the agent was saying.** The live card carried
   status, tool lines and the step, but not the assistant's own text, so the agent
   looked like it was working silently: `[Termigo Agent] Writing response... (step

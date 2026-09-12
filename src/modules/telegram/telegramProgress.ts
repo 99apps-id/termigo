@@ -247,6 +247,13 @@ export async function publishProgress(
           .map((opt, i) => [
             { text: opt.slice(0, 40), callback_data: `el:${el.id}:${i}` },
           ]);
+        // Always offered, and deliberately last: a question the agent asked is
+        // not always a question the user wants to answer, and without this the
+        // only way out was to type /stop. A chooser with no decline is a dead
+        // end, and a dead end is what makes someone abandon the bot.
+        keyboard.push([
+          { text: "⏭ Tidak dulu (lewati)", callback_data: `el:${el.id}:decline` },
+        ]);
         const ok = await sendKeyboard(
           chatId,
           `Agent Question:\n${el.question}`,

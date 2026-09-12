@@ -16,6 +16,7 @@ import {
 } from "./telegramApi";
 import {
   getPendingApprovals,
+  matchElicitationAnswer,
   runBusy,
   countAssistantMessages,
   lastAssistantText,
@@ -878,6 +879,27 @@ export async function startTelegramDispatch(
       ? (store.getChat(sessionId)?.status ?? "")
       : "";
     const busy = runBusy(chatStatus, appStatus);
+
+    // A pending `ask_user` question is the one "busy" state where the user's
+    // reply IS the answer. It is checked BEFORE the busy branch, because the
+    // busy branch queued the text as a NEW task and the question then waited
+    // forever: the run sat on the elicitation while the user's answers piled up
+    // as future turns, which only `/stop` released. Observed in the field as
+    // three text messages logged, no dispatch, then
+    // "/stop" followed by "3 answer(s), 2959ch sent" for the 4m58s old run.
+    // Typing is the natural reply; the buttons are an option, not the only way.
+    const elStore = await import("../ai/store/elicitationStore");
+    const pendingQuestion = elStore.useElicitationStore.getState().pending[0];
+    if (pendingQuestion) {
+      const answer = matchElicitationAnswer(text, pendingQuestion.options);
+      recordTelegramText(text);
+      elStore.useElicitationStore.getState().answer(pendingQuestion.id, answer);
+      logRelayInfo(
+        `answered pending question ${pendingQuestion.id} from free text (${text.length}ch)`,
+      );
+      await sendTelegram(chatId, `▸ ${answer}`, signal).catch(() => {});
+      return;
+    }
 
     if (busy) {
       recordTelegramText(text);
