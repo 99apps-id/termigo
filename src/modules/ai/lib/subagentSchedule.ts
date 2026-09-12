@@ -193,10 +193,14 @@ export type PathConflict = {
 /**
  * Heuristically pull file paths out of a task prompt.
  *
- * Matches `src/...`, `lib/...`, `packages/...`, bare `*.ts` / `*.rs` / `*.py`
- * tokens and quoted paths. Purely lexical - no filesystem access - so the
- * detector stays pure and testable, and a miss only means the conflict is not
- * reported, never that a false one is.
+ * Matches `src/...`, `lib/...`, `packages/...` and bare `*.ts` / `*.rs` / `*.py`
+ * tokens. Purely lexical - no filesystem access - so the detector stays pure and
+ * testable.
+ *
+ * This extractor is deliberately permissive and may return tokens that do not
+ * identify a file (a bare `mod.rs`, a directory name). Deciding whether a token
+ * actually names one file is `detectBatchConflicts`' job, because that rule
+ * depends on comparison across the whole batch, not on a single prompt.
  */
 export function pathsInPrompt(prompt: string): string[] {
   const text = String(prompt ?? "");
@@ -224,6 +228,11 @@ export function pathsInPrompt(prompt: string): string[] {
  * overwrites the first, and nobody notices until review. Detecting the overlap
  * up front lets the caller warn (or serialize via depends_on) instead of
  * discovering it after the fact. Runs before anything spawns.
+ *
+ * A path only counts when it identifies one file, which means it must have both
+ * a file extension and a directory component. Anything vaguer (a folder, a bare
+ * basename) is skipped rather than guessed at, and a pair is skipped when both
+ * tasks are read-only.
  */
 export function detectBatchConflicts(
   tasks: readonly ConflictTask[],
@@ -236,6 +245,19 @@ export function detectBatchConflicts(
       // Bare directory tokens (e.g. 'src', 'src/components', 'utils') do not represent a concrete file
       // to overwrite. Only specific paths with a file extension trigger file overwrite warnings.
       if (!/\.[A-Za-z0-9_-]+$/.test(key)) continue;
+      // The token must also carry a directory component, because a bare basename cannot
+      // identify a file: this repo alone has 12 distinct `mod.rs`, and `index.ts`,
+      // `lib.rs`, `main.rs` are just as ambiguous. Audits list files by basename -
+      // "src-tauri/src/modules/fs/ (all files: file.rs, mutate.rs, mod.rs)" - so two tasks
+      // auditing *different* directories both surfaced `mod.rs` and were reported as about to
+      // overwrite a file neither of them would touch. Require a path, so a warning is
+      // always about one identifiable file.
+      //
+      // Trade-off, accepted deliberately: two vague prompts that each name only
+      // "package.json" no longer warn. A warning that is wrong whenever audits run in
+      // parallel is worse than no warning, because it teaches callers to ignore the
+      // real ones.
+      if (!/[\\/]/.test(key)) continue;
       const list = byPath.get(key) ?? [];
       if (!list.includes(i)) list.push(i);
       byPath.set(key, list);

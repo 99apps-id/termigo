@@ -141,6 +141,27 @@ export const CORE_TOOL_NAMES = new Set([
 ]);
 
 /**
+ * Tools that survive every prune, because they are the recovery path itself.
+ *
+ * `unknown_tool_fallback` is what the model is told when it names a tool that
+ * does not exist, and `find_tools` is the only way to reach a deferred tool.
+ * Pruning either one removes the way out of the situation a prune makes likely
+ * - a small model reaching for a tool from its training data instead of this
+ * toolset - so a mistake that used to cost one step ends the run instead. The
+ * AI SDK raises a fatal `NoSuchToolError` when no fallback tool is registered,
+ * which is exactly what a compact-tier DeepSeek endpoint hit with `git_push`.
+ *
+ * Kept as literals rather than imported: `FIND_TOOLS_NAME` lives in
+ * tools/toolSearch.ts, which imports this module, so importing it back would
+ * form a cycle over these top-level `Set`s. `agentFactory.test.ts` pins both
+ * strings to the real exports so the copies cannot drift.
+ */
+export const RECOVERY_TOOL_NAMES: ReadonlySet<string> = new Set([
+  "unknown_tool_fallback",
+  "find_tools",
+]);
+
+/**
  * Context-safe tool injection.
  *
  * Applies the harness profile's tool rules (reorder `prioritizeTools`, drop
@@ -182,10 +203,16 @@ export function buildAgentTools<T>(
 
   const out: Record<string, T> = {};
   for (const [name, tool] of Object.entries(profiled)) {
-    if (withholdSpawn && SPAWN_TOOLS.has(name)) continue;
-    if (isSubagent && SUBAGENT_FORBIDDEN_TOOLS.has(name)) continue;
-    if (disallowed && disallowed.has(name)) continue;
-    if (compactTier && !CORE_TOOL_NAMES.has(name)) continue;
+    // `survivesPrune` covers the three rules that narrow the set by *context*
+    // (nesting cap, per-type restriction, compact tier). Capability gating still
+    // applies: a tool the type may not use stays out, because the fallback asks
+    // for nothing and the recovery path must outlive every prune.
+    const survivesPrune = RECOVERY_TOOL_NAMES.has(name);
+    if (!survivesPrune && withholdSpawn && SPAWN_TOOLS.has(name)) continue;
+    if (!survivesPrune && isSubagent && SUBAGENT_FORBIDDEN_TOOLS.has(name))
+      continue;
+    if (disallowed?.has(name)) continue;
+    if (!survivesPrune && compactTier && !CORE_TOOL_NAMES.has(name)) continue;
     out[name] = tool;
   }
   return out;

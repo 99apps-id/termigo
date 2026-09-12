@@ -185,9 +185,9 @@ describe("detectBatchConflicts", () => {
 
   it("reports every pair when three tasks share a file", () => {
     const conflicts = detectBatchConflicts([
-      { paths: ["a.ts"] },
-      { paths: ["a.ts"] },
-      { paths: ["a.ts"] },
+      { paths: ["src/a.ts"] },
+      { paths: ["src/a.ts"] },
+      { paths: ["src/a.ts"] },
     ]);
     expect(conflicts.map((c) => `${c.indexA}-${c.indexB}`).sort()).toEqual([
       "0-1",
@@ -234,5 +234,54 @@ describe("detectBatchConflicts", () => {
       { paths: ["src/App.tsx"], canMutate: true },
     ]);
     expect(conflicts).toHaveLength(1);
+  });
+
+  it("ignores a bare basename, which cannot identify one file", () => {
+    // This repo has 12 distinct `mod.rs`. Two prompts naming "mod.rs" say nothing
+    // about which one, so a warning would be a guess.
+    const conflicts = detectBatchConflicts([
+      { paths: ["mod.rs"] },
+      { paths: ["mod.rs"] },
+    ]);
+    expect(conflicts).toEqual([]);
+  });
+
+  it("ignores a bare basename when the names match but no directory is given", () => {
+    const conflicts = detectBatchConflicts([
+      { paths: ["package.json"] },
+      { paths: ["package.json"] },
+    ]);
+    expect(conflicts).toEqual([]);
+  });
+
+  it("still reports a full path even when the basenames match", () => {
+    const conflicts = detectBatchConflicts([
+      { paths: ["src-tauri/src/modules/fs/mod.rs"] },
+      { paths: ["src-tauri/src/modules/fs/mod.rs"] },
+    ]);
+    expect(conflicts).toEqual([
+      {
+        indexA: 0,
+        indexB: 1,
+        path: "src-tauri/src/modules/fs/mod.rs",
+      },
+    ]);
+  });
+
+  it("does not warn when two audits list their own different mod.rs", () => {
+    // Regression: a real batch of two explore tasks, one auditing modules/fs/ and
+    // one auditing modules/pty/, produced
+    //   "Conflict: task #0 and #1 both touch mod.rs - they may overwrite each other"
+    // because each prompt listed "mod.rs" as part of its own directory's contents.
+    // Both tasks were read-only audits and neither file was shared.
+    const fsAudit =
+      "Focus ONLY on src-tauri/src/modules/fs/ (all files: file.rs, mutate.rs, search.rs, grep.rs, mod.rs if present) and src-tauri/src/modules/workspace.rs.";
+    const ptyAudit =
+      "Focus ONLY on src-tauri/src/modules/pty/ (all files: mod.rs, shell_init.rs, job.rs) and src-tauri/src/modules/shell/.";
+    const conflicts = detectBatchConflicts([
+      { paths: pathsInPrompt(fsAudit), canMutate: true },
+      { paths: pathsInPrompt(ptyAudit), canMutate: true },
+    ]);
+    expect(conflicts).toEqual([]);
   });
 });

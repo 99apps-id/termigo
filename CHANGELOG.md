@@ -8,6 +8,26 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **A model on the compact tier that named a tool outside the pruned set ended
+  the run instead of correcting itself.** The compact tier holds the agent to 27
+  core tools, and the prune dropped `unknown_tool_fallback` in the same pass -
+  the one tool that answers an unknown name. The AI SDK then raised a fatal
+  `NoSuchToolError`. Observed on the DeepSeek endpoint (`model=compat-762d2bd6`,
+  `before streamText (27 tools)`): the model asked for `git_push`, a real tool
+  the prune had removed, and the reply was
+  `Model tried to call unavailable tool 'git_push'` with no way back. The
+  recovery tools (`unknown_tool_fallback`, `find_tools`) now survive every
+  prune, `prepareStep` keeps them active in search mode, and the prune logs what
+  it dropped and for which model, so a missing capability is visible instead of
+  reading as the agent ignoring the request.
+- **A sub-agent batch was warned about a file conflict that did not exist.**
+  `run_subagents` compares the paths each task prompt mentions, and a bare
+  basename carries no directory. Two audits, one of `modules/fs/` and one of
+  `modules/pty/`, each listed `mod.rs` among its own directory's files, so the
+  batch reported `task #0 and #1 both touch mod.rs - they may overwrite each
+  other`. This repo alone has 12 distinct `mod.rs`. A path now has to identify
+  one file - a directory component and an extension - before it can raise a
+  warning.
 - **The agent could not run the project's own checks.** `pnpm lint` worked
   (the allowlist matches the base command, `pnpm`) while `biome`, `tsc`,
   `vitest` and `knip` did not, so the moment a caller wanted one file

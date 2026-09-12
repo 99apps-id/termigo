@@ -20,6 +20,7 @@ import {
   TOOL_SEARCH_ALWAYS_ON,
   type ToolIndexEntry,
 } from "./toolSearch";
+import { UNKNOWN_TOOL_NAME } from "./toolFallback";
 import { buildTools, type ToolContext } from "./tools";
 
 function stubContext(): ToolContext {
@@ -306,5 +307,13 @@ describe("search mode saves what it claims", () => {
         `${name} must stay in search mode`,
       ).toBe(true);
     }
+  });
+
+  it("keeps the recovery tools active, or a wrong tool name is fatal", () => {
+    // prepareStep narrows the request to this set, so a name left out here is
+    // not merely undiscoverable: calling it raises a NoSuchToolError, and the
+    // repair hook can only redirect to a fallback that is actually active.
+    expect(TOOL_SEARCH_ALWAYS_ON.has(UNKNOWN_TOOL_NAME)).toBe(true);
+    expect(TOOL_SEARCH_ALWAYS_ON.has(FIND_TOOLS_NAME)).toBe(true);
   });
 });

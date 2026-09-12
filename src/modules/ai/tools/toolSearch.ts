@@ -27,7 +27,7 @@
 
 import { tool } from "ai";
 import { z } from "zod";
-import { CORE_TOOL_NAMES } from "../agents/agentFactory";
+import { CORE_TOOL_NAMES, RECOVERY_TOOL_NAMES } from "../agents/agentFactory";
 
 /** The discovery tool's name. Referenced by the fallback message too. */
 export const FIND_TOOLS_NAME = "find_tools";
@@ -39,9 +39,14 @@ export const FIND_TOOLS_NAME = "find_tools";
  * full-capability agent needs and the compact tier drops: asking the user,
  * reading images, running the verify loop, and the file operations that are
  * not plain writes.
+ *
+ * `RECOVERY_TOOL_NAMES` is here because `prepareStep` narrows the request to
+ * this set: leaving `unknown_tool_fallback` out made the SDK treat a wrong tool
+ * name as fatal in search mode too, which is the same hole the compact tier had.
  */
 export const TOOL_SEARCH_ALWAYS_ON: ReadonlySet<string> = new Set([
   ...CORE_TOOL_NAMES,
+  ...RECOVERY_TOOL_NAMES,
   "ask_user",
   "read_image",
   "test_file",

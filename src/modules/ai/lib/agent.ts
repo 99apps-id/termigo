@@ -1389,10 +1389,19 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // with neither the deferred tools nor the way to ask for them. Search mode is
   // strictly the better trade for the same model - it gets the same core plus
   // discovery - so it supersedes the prune rather than stacking with it.
+  const compactToolTier = !toolSearchOn && isCompactTierModel(tierModelName);
   const tools = buildAgentTools(gatedTools, {
     profile,
-    compactToolTier: !toolSearchOn && isCompactTierModel(tierModelName),
+    compactToolTier,
   });
+  // A prune whose only symptom is "the model cannot reach a tool it knows
+  // about" reads as the agent ignoring the request. Say it happened and why:
+  // the log showed "27 tools" while 99 were missing, with nothing explaining it.
+  if (compactToolTier) {
+    logInfo(
+      `[ai] compact tier: pruned ${Object.keys(gatedTools).length} -> ${Object.keys(tools).length} tools for ${tierModelName ?? "unknown model"}`,
+    );
+  }
 
   // What the model is handed before it reads a word of the request. Measured
   // as components rather than one number: a total says "slow", a breakdown

@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { BUILTIN_PROFILES } from "../lib/harnessProfile";
+import { UNKNOWN_TOOL_NAME } from "../tools/toolFallback";
+import { FIND_TOOLS_NAME } from "../tools/toolSearch";
 import {
   buildAgentTools,
   buildSubagentSpec,
   DEFAULT_MAX_SUBAGENT_DEPTH,
   DEFAULT_SUBAGENT_MAX_STEPS,
+  RECOVERY_TOOL_NAMES,
   resolveAgentForPrompt,
   SPAWN_TOOLS,
   spawnToolsWithheld,
@@ -153,6 +156,32 @@ describe("buildAgentTools", () => {
     expect(compactTools.process).toBeUndefined();
     expect(compactTools.browser_open).toBeUndefined();
     expect(compactTools.sql_query).toBeUndefined();
+  });
+
+  it("keeps the recovery tools when the compact tier prunes the rest", () => {
+    // A compact-tier DeepSeek endpoint was handed 27 tools, reached for
+    // `git_push` (real, but not core) and the run ended fatally because the
+    // prune had also dropped the fallback that answers an unknown name.
+    const fixture = {
+      read_file: { execute: () => undefined },
+      git_commit: { execute: () => undefined },
+      git_push: { execute: () => undefined },
+      browser_open: { execute: () => undefined },
+      unknown_tool_fallback: { execute: () => undefined },
+      find_tools: { execute: () => undefined },
+    };
+    const compact = buildAgentTools(fixture, { compactToolTier: true });
+    expect(compact.git_push).toBeUndefined();
+    expect(compact.browser_open).toBeUndefined();
+    expect(compact.unknown_tool_fallback).toBeDefined();
+    expect(compact.find_tools).toBeDefined();
+  });
+
+  it("pins the recovery names to the real tool-name constants", () => {
+    // RECOVERY_TOOL_NAMES holds literals to avoid an import cycle with
+    // tools/toolSearch.ts; this is what stops the copies from drifting.
+    expect(RECOVERY_TOOL_NAMES.has(UNKNOWN_TOOL_NAME)).toBe(true);
+    expect(RECOVERY_TOOL_NAMES.has(FIND_TOOLS_NAME)).toBe(true);
   });
 });
 

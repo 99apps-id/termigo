@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { buildAgentTools } from "../agents/agentFactory";
 import { repairJsonText, repairToolCall } from "./repairToolCall";
 
 describe("repairJsonText", () => {
@@ -220,6 +221,36 @@ describe("repairToolCall", () => {
       },
     });
     expect(result).toBeNull();
+  });
+
+  // The failure from the field: a DeepSeek endpoint running as a compact-tier
+  // model was handed 27 pruned tools, reached for `git_push` - a real tool the
+  // prune had dropped - and the run died with the fatal
+  //   "Model tried to call unavailable tool 'git_push'."
+  // Nothing could recover it, because the prune had dropped
+  // `unknown_tool_fallback` in the same pass. The fix is upstream (the recovery
+  // tools survive every prune), and this asserts the whole chain end to end.
+  it("recovers a pruned tool name on a compact-tier toolset", async () => {
+    const full = {
+      read_file: {},
+      git_commit: {},
+      git_push: {},
+      unknown_tool_fallback: {},
+    };
+    const compact = buildAgentTools(full, { compactToolTier: true });
+    expect(compact.git_push).toBeUndefined();
+    expect(compact.unknown_tool_fallback).toBeDefined();
+
+    const result = await repairToolCall({
+      tools: compact,
+      toolCall: {
+        toolCallId: "c5",
+        toolName: "git_push",
+        input: '{"branch":"main"}',
+      },
+    });
+    expect(result?.toolName).toBe("unknown_tool_fallback");
+    expect(JSON.parse(result!.input).requested_tool).toBe("git_push");
   });
 
   it("repairs run_subagents when tasks are passed as todos", async () => {
