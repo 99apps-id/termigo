@@ -65,18 +65,62 @@ describe("renderAnswerSnippet", () => {
 });
 
 describe("formatLiveProgress with answer text", () => {
-  it("places the agent's words under the header", () => {
+  it("separates the header, the answer and the tool lines with blank lines", () => {
+    // Run together, the card reads as a wall where the agent's prose and the
+    // tool lines are indistinguishable at a glance. The blank lines are what
+    // let the eye split "what it is saying" from "what it is doing".
     const card = formatLiveProgress({
       status: "streaming",
-      round: 12,
-      elapsedMs: 1000,
+      round: 2,
+      elapsedMs: 10_000,
       mode: "task",
-      answerText: "Baik, saya akan mengaudit Repo Termigo.",
+      answerText: "Mulai dengan mencari apakah repo sudah ada di mesin ini.",
+      tools: [
+        { toolName: "list_directory", state: "done", input: "/x/modules", output: "28 entries" },
+        { toolName: "read_file", state: "done", input: "/x/file.rs" },
+        { toolName: "run_subagents", state: "running", input: "explore" },
+      ],
     });
     const lines = card.split("\n");
     expect(lines[0]).toContain("**[Termigo Agent]**");
     expect(lines[0]).toContain("Writing response");
-    expect(lines[1]).toBe("Baik, saya akan mengaudit Repo Termigo.");
+    expect(lines[0]).toContain("step 3");
+    expect(lines[1]).toBe("");
+    expect(lines[2]).toBe(
+      "Mulai dengan mencari apakah repo sudah ada di mesin ini.",
+    );
+    expect(lines[3]).toBe("");
+    // The tool lines stay adjacent: a list of related facts, not four messages.
+    expect(lines[4]).toContain("✓ Listed");
+    expect(lines[5]).toContain("✓ Read");
+    expect(lines[6]).toContain("⚡");
+  });
+
+  it("keeps the step line in its own block", () => {
+    const card = formatLiveProgress({
+      status: "streaming",
+      round: 2,
+      mode: "task",
+      step: "Audit fs/control/secrets guards",
+      answerText: "Mulai dari mencari repo.",
+    });
+    const lines = card.split("\n");
+    expect(lines[0]).toContain("Writing response");
+    expect(lines[1]).toBe("");
+    expect(lines[2]).toBe("*Audit fs/control/secrets guards*");
+    expect(lines[3]).toBe("");
+    expect(lines[4]).toBe("Mulai dari mencari repo.");
+  });
+
+  it("preserves paragraph breaks inside the agent's own text", () => {
+    const card = formatLiveProgress({
+      status: "streaming",
+      round: 1,
+      mode: "task",
+      answerText: "Paragraf pertama.\n\nParagraf kedua.",
+    });
+    // The blank line inside the answer is content, not layout.
+    expect(card).toContain("Paragraf pertama.\n\nParagraf kedua.");
   });
 
   it("omits the body when there is no text yet", () => {
@@ -87,6 +131,18 @@ describe("formatLiveProgress with answer text", () => {
       answerText: "",
     });
     expect(card).toContain("Thinking");
-    expect(card.split("\n").filter((l) => l.trim().length > 0)).toHaveLength(1);
+    expect(card).toBe("**[Termigo Agent]** *Thinking...* (step 1)");
+  });
+
+  it("does not leave a trailing or leading blank line", () => {
+    const card = formatLiveProgress({
+      status: "streaming",
+      round: 0,
+      mode: "task",
+      answerText: "hello",
+    });
+    expect(card.startsWith("\n")).toBe(false);
+    expect(card.endsWith("\n")).toBe(false);
+    expect(card).not.toContain("\n\n\n");
   });
 });

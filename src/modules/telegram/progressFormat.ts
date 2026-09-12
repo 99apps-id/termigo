@@ -263,7 +263,7 @@ export function escapeHtml(text: string): string {
   return text
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
+    .replace(/>/g, "&gt;");
 }
 
 /** Strip characters Telegram HTML parse_mode does not accept. */
@@ -597,7 +597,12 @@ export function formatLiveProgress(opts: FormatLiveProgressOptions): string {
     return "";
   }
 
-  const lines: string[] = [];
+  // Built as sections rather than one flat list, then joined with a blank line.
+  // Run together, a card reads as a wall where the agent's own prose and the
+  // tool lines are indistinguishable at a glance; separated, the eye can tell
+  // "what it is saying" from "what it is doing" without reading either.
+  const sections: string[][] = [];
+
   const statusLabel =
     opts.status === "awaiting-approval"
       ? "Waiting for approval..."
@@ -619,19 +624,21 @@ export function formatLiveProgress(opts: FormatLiveProgressOptions): string {
 
   const modelPart = opts.modelLabel ? ` • ${opts.modelLabel}` : "";
 
-  lines.push(
+  sections.push([
     `**[Termigo Agent]** *${statusLabel}*${stepPart}${modelPart}${elapsedPart}`,
-  );
+  ]);
 
+  // What the agent is working on, in its own words. Its own block because it
+  // changes every step and is what a reader scans for first.
   if (opts.step) {
-    lines.push(`*${truncate(opts.step, 120)}*`);
+    sections.push([`*${truncate(opts.step, 120)}*`]);
   }
 
-  // The agent's own words, right under the header and above the tool lines, so
-  // the chat shows what it is saying while it says it.
+  // The agent's own words, above the tool lines, so the chat shows what it is
+  // saying while it says it.
   const answer = renderAnswerSnippet(opts.answerText ?? "");
   if (answer) {
-    lines.push(answer);
+    sections.push(answer.split("\n"));
   }
 
   const pendingTodos = (opts.todos ?? []).filter(
@@ -643,11 +650,14 @@ export function formatLiveProgress(opts: FormatLiveProgressOptions): string {
   const visibleTodos = pendingTodos.length > 0 ? pendingTodos : completedTodos;
   const inProgressTodo = visibleTodos.find((t) => t.status === "in_progress");
   if (inProgressTodo) {
-    lines.push(`🔹 ${truncate(inProgressTodo.title, 100)}`);
+    sections.push([`🔹 ${truncate(inProgressTodo.title, 100)}`]);
   }
 
   const tools = opts.tools ?? [];
   if (tools.length > 0) {
+    // One block: these are a list of related facts, and blank lines between
+    // them would make four tool calls look like four separate messages.
+    const toolLines: string[] = [];
     const active = tools.filter(
       (t) => t.state === "running" || t.state === "awaiting-approval",
     );
@@ -659,41 +669,67 @@ export function formatLiveProgress(opts: FormatLiveProgressOptions): string {
       const verb = getToolDoneVerb(t.toolName);
       const snippet = t.input ? ` \`${truncate(t.input, 40)}\`` : "";
       const out = t.output ? ` → _${truncate(t.output, 50)}_` : "";
-      lines.push(`✓ ${verb}${snippet}${out}`);
+      toolLines.push(`✓ ${verb}${snippet}${out}`);
     }
 
     for (const t of active.slice(-2)) {
       if (t.state === "awaiting-approval") {
         const snippet = t.input ? ` \`${truncate(t.input, 40)}\`` : "";
-        lines.push(`🔒 Approval required: \`${t.toolName}\`${snippet}`);
+        toolLines.push(`🔒 Approval required: \`${t.toolName}\`${snippet}`);
       } else {
         const verb = getToolRunningVerb(t.toolName);
         const snippet = t.input ? ` \`${truncate(t.input, 40)}\`` : "";
-        lines.push(`⚡ ${verb}${snippet}`);
+        toolLines.push(`⚡ ${verb}${snippet}`);
       }
     }
+
+    if (toolLines.length > 0) sections.push(toolLines);
   }
 
   const subagents = opts.subagents ?? [];
   const liveSubagents = subagents.filter((s) => s.status !== "done");
   const visibleSubagents =
     liveSubagents.length > 0 ? liveSubagents.slice(-2) : subagents.slice(-2);
-  for (const sub of visibleSubagents) {
-    const label = sub.label ?? "subagent";
-    const status =
-      sub.status === "running"
-        ? "Running"
-        : sub.status === "error"
-          ? "Failed"
-          : sub.status === "done"
-            ? "Done"
-            : sub.status;
-    const step = sub.currentStep ? `: ${truncate(sub.currentStep, 60)}` : "";
-    lines.push(`↳ ${label}: *${status}*${step}`);
+  if (visibleSubagents.length > 0) {
+    const subLines: string[] = [];
+    for (const sub of visibleSubagents) {
+      const label = sub.label ?? "subagent";
+      const status =
+        sub.status === "running"
+          ? "Running"
+          : sub.status === "error"
+            ? "Failed"
+            : sub.status === "done"
+              ? "Done"
+              : sub.status;
+      const step = sub.currentStep ? `: ${truncate(sub.currentStep, 60)}` : "";
+      subLines.push(`↳ ${label}: *${status}*${step}`);
+    }
+    sections.push(subLines);
   }
 
-  const trimmed = lines.filter((line) => line.trim() !== "");
-  return trimmed.length > 0
-    ? trimmed.join("\n")
+  const nonEmpty = sections
+    .map(trimBlankEdges)
+    .filter((block) => block.length > 0);
+
+  return nonEmpty.length > 0
+    ? nonEmpty.map((block) => block.join("\n")).join("\n\n")
     : "**[Termigo Agent]** Working...";
+}
+
+/**
+ * Drop blank lines from the START and END of a block, keeping the ones inside.
+ *
+ * The distinction matters for the agent's text: a blank line between two of its
+ * paragraphs is content and has to reach the chat, while a blank line at the
+ * edge would stack with the section separator and produce two empty lines.
+ * Filtering every blank line - the obvious version - silently reflowed the
+ * agent's paragraphs into one block.
+ */
+function trimBlankEdges(lines: string[]): string[] {
+  let start = 0;
+  let end = lines.length;
+  while (start < end && lines[start].trim() === "") start++;
+  while (end > start && lines[end - 1].trim() === "") end--;
+  return lines.slice(start, end);
 }
