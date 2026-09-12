@@ -21,10 +21,10 @@ export WEBKIT_DISABLE_COMPOSITING_MODE=1
 export WEBKIT_DISABLE_DMABUF_RENDERER=1
 export LIBGL_ALWAYS_SOFTWARE=1
 
-# ==== PLafon memori untuk tool build (2026-09-13) ====
+# ==== Plafon memori untuk tool build (2026-09-13) ====
 # Batas memori unit berlaku untuk SELURUH pohon proses, jadi build apa pun yang
 # dijalankan dari dalam relay - termasuk yang dijalankan agent lewat tool shell
-# atau PTY - dibebankan ke kuota aplikasi (MemoryHigh=2G). Terukur: build node +
+# atau PTY - dibebankan ke kuota aplikasi (MemoryHigh). Terukur: build node +
 # rustc mendorong cgroup ke 2.0GB, sehingga webview ter-throttle dan berhenti
 # menjawab, dan relay Telegram mati diam-diam sepanjang malam.
 #
@@ -34,6 +34,17 @@ export LIBGL_ALWAYS_SOFTWARE=1
 # di kotak ini). Operator masih bisa menimpanya kalau memang perlu ruang lebih.
 export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=1536}"
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-1}"
+
+# ==== Arena malloc glibc (2026-09-13, EKSPERIMEN) ====
+# WebKitWebProcess menjalankan ~20 thread, dan glibc membuat satu arena malloc
+# per thread (dibatasi 8 x jumlah core). Setiap arena memegang free-list-nya
+# sendiri dan TIDAK mengembalikannya ke OS, jadi RSS berhenti di lantai tinggi
+# walau beban sudah turun - terukur: webview 870MB saat idle, sementara isi
+# transkrip yang aktif hanya ~1MB.
+#
+# Diuji murni sebagai eksperimen: kalau lantai memori idle tidak turun setelah
+# restart, hapus dua baris ini. Tidak ada yang bergantung padanya.
+export MALLOC_ARENA_MAX="${MALLOC_ARENA_MAX:-2}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="$(dirname "${SCRIPT_DIR}")"
