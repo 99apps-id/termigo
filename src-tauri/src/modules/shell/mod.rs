@@ -70,10 +70,45 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
 /// Characters that enable command injection in a shell one-liner.
 const SHELL_METACHARACTERS: &[char] = &[';', '$', '(', ')', '<', '>', '`'];
 
+/// Whether a program token may run without a PTY.
+///
+/// An absolute or rooted path is always allowed, on Unix (`/...`) and Windows
+/// (`C:\...`, `\...`), because the agent legitimately runs binaries it built.
+/// Anything else has to match the allowlist by base name, with the Windows
+/// shim extensions (`.exe`, `.cmd`, `.bat`) stripped first.
+fn allows_program(program: &str) -> bool {
+    let path = std::path::Path::new(program);
+    let is_windows_drive_path = program.len() >= 3
+        && program.as_bytes()[0].is_ascii_alphabetic()
+        && program.as_bytes()[1] == b':'
+        && (program.as_bytes()[2] == b'\\' || program.as_bytes()[2] == b'/');
+
+    if path.is_absolute()
+        || path.has_root()
+        || program.starts_with('/')
+        || program.starts_with('\\')
+        || is_windows_drive_path
+    {
+        return true;
+    }
+
+    let base_program = program
+        .strip_suffix(".exe")
+        .or_else(|| program.strip_suffix(".cmd"))
+        .or_else(|| program.strip_suffix(".bat"))
+        .unwrap_or(program);
+
+    SANDBOX_ALLOWLIST
+        .iter()
+        .any(|allowed| base_program.eq_ignore_ascii_case(allowed))
+}
+
 /// Validate a shell command for agent execution:
 /// - reject metacharacters that enable injection (`;$()<>``)
-/// - allow safe chaining operators `&&` and `||`
-/// - enforce allowlist for the first token unless it's an absolute path
+/// - allow safe chaining operators `&&` and `||`, but check the program of
+///   EVERY chained segment against the allowlist, not just the first
+/// - enforce the allowlist for each segment's program unless it is an absolute
+///   path
 /// - return the command string on success
 pub fn validate_shell_command(command: &str) -> Result<&str, String> {
     let trimmed = command.trim();
@@ -82,12 +117,17 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
     }
 
     // 1. Reject metacharacters outside quotes. Allow `&&` and `||` as safe
-    //    chaining operators; reject single `&`, `|`, and the rest.
+    //    chaining operators; reject single `&`, `|`, and the rest. A separator
+    //    inside quotes is data, not a chain, so the quote state decides.
     let mut in_quote = false;
     let mut quote_char = '\0';
     let mut prev = '\0';
     let mut bad: Vec<char> = Vec::new();
-    let mut chars = trimmed.chars().collect::<Vec<_>>();
+    let chars = trimmed.chars().collect::<Vec<_>>();
+    // Where each chained segment starts, so its program can be checked too.
+    // Checking only the first token let `git status && rm -rf /` through: `git`
+    // is allowlisted, so the second command ran unvalidated.
+    let mut segment_starts: Vec<usize> = vec![0];
     let mut i = 0;
     while i < chars.len() {
         let c = chars[i];
@@ -109,6 +149,7 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
             if c == '&' {
                 if i + 1 < chars.len() && chars[i + 1] == '&' {
                     // `&&` is allowed
+                    segment_starts.push(i + 2);
                     i += 2;
                     prev = c;
                     continue;
@@ -117,6 +158,7 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
             } else if c == '|' {
                 if i + 1 < chars.len() && chars[i + 1] == '|' {
                     // `||` is allowed
+                    segment_starts.push(i + 2);
                     i += 2;
                     prev = c;
                     continue;
@@ -139,46 +181,29 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
         ));
     }
 
-    // 2. Extract the program token (first whitespace-delimited token, stripped of quotes).
-    let raw_program = trimmed.split_whitespace().next().unwrap_or(trimmed);
-    let program = raw_program.trim_matches(['"', '\'']);
-
-    // 3. Allow absolute or rooted paths on Unix (/...) and Windows (C:\..., \...).
-    let path = std::path::Path::new(program);
-    let is_windows_drive_path = program.len() >= 3
-        && program.as_bytes()[0].is_ascii_alphabetic()
-        && program.as_bytes()[1] == b':'
-        && (program.as_bytes()[2] == b'\\' || program.as_bytes()[2] == b'/');
-
-    if path.is_absolute()
-        || path.has_root()
-        || program.starts_with('/')
-        || program.starts_with('\\')
-        || is_windows_drive_path
-    {
-        return Ok(command);
+    // 2. Every segment's program must be allowed. Segments are delimited by the
+    //    chaining operators found above, so a quoted `&&` is still one segment.
+    for start in &segment_starts {
+        let rest: String = chars[*start..].iter().collect();
+        let segment = rest.trim();
+        if segment.is_empty() {
+            return Err(
+                "empty command in a `&&` / `||` chain; use a PTY session for arbitrary commands"
+                    .into(),
+            );
+        }
+        let raw_program = segment.split_whitespace().next().unwrap_or(segment);
+        let program = raw_program.trim_matches(['"', '\'']);
+        if !allows_program(program) {
+            return Err(format!(
+                "command '{}' is not in the agent allowlist; allowed: {:?}; use a PTY session to run arbitrary commands",
+                program,
+                SANDBOX_ALLOWLIST
+            ));
+        }
     }
 
-    // 4. Strip executable extensions for matching (.exe, .cmd, .bat).
-    let base_program = program
-        .strip_suffix(".exe")
-        .or_else(|| program.strip_suffix(".cmd"))
-        .or_else(|| program.strip_suffix(".bat"))
-        .unwrap_or(program);
-
-    // 5. Allow if it's in the allowlist.
-    if SANDBOX_ALLOWLIST
-        .iter()
-        .any(|allowed| base_program.eq_ignore_ascii_case(allowed))
-    {
-        return Ok(command);
-    }
-
-    Err(format!(
-        "command '{}' is not in the agent allowlist; allowed: {:?}; use a PTY session to run arbitrary commands",
-        program,
-        SANDBOX_ALLOWLIST
-    ))
+    Ok(command)
 }
 
 #[derive(Serialize)]
@@ -723,6 +748,64 @@ mod tests_sandbox {
         assert!(validate_shell_command("cat file | grep secret").is_err());
         assert!(validate_shell_command("echo hello > out.txt").is_err());
         assert!(validate_shell_command("cat `id`").is_err());
+    }
+
+    /// A chain of allowlisted programs is the case the chaining support exists
+    /// for: `pnpm lint && pnpm test` is how the agent verifies its own work.
+    #[test]
+    fn validate_shell_command_allows_chains_of_allowlisted_programs() {
+        assert!(validate_shell_command("pnpm lint && pnpm test").is_ok());
+        assert!(validate_shell_command("biome lint ./src && tsc --noEmit").is_ok());
+        assert!(validate_shell_command("git status || git log").is_ok());
+        assert!(validate_shell_command("cargo fmt && cargo clippy").is_ok());
+    }
+
+    /// The reason chaining is safe to allow at all: every segment's program is
+    /// checked, not just the first. Validating only the first token is what let
+    /// `git status && rm -rf /` through, because `git` is allowlisted.
+    #[test]
+    fn validate_shell_command_refuses_a_chain_with_an_unlisted_later_segment() {
+        let err = validate_shell_command("git status && rm -rf /")
+            .expect_err("a destructive second command must be refused");
+        assert!(err.contains("'rm'"), "{err}");
+        assert!(err.contains("PTY session"), "{err}");
+
+        assert!(validate_shell_command("pnpm test && sh -c 'x'").is_err());
+        assert!(validate_shell_command("pnpm test || sudo rm -rf /").is_err());
+        // Two levels of chaining do not launder the third program either.
+        assert!(
+            validate_shell_command("git status && pnpm test && shred -u f").is_err()
+        );
+    }
+
+    /// A separator inside quotes is data. Splitting on it would turn `echo` into
+    /// a two-segment chain and check a program that is really an argument.
+    #[test]
+    fn validate_shell_command_treats_a_quoted_separator_as_data() {
+        assert!(validate_shell_command(r#"echo "a && b""#).is_ok());
+        assert!(validate_shell_command(r#"echo 'x || y'"#).is_ok());
+        assert!(validate_shell_command(r#"grep "a && b" src/file.ts"#).is_ok());
+    }
+
+    /// A dangling separator leaves a segment with no program to check.
+    #[test]
+    fn validate_shell_command_refuses_an_empty_chain_segment() {
+        assert!(validate_shell_command("git status &&").is_err());
+        assert!(validate_shell_command("&& git status").is_err());
+        assert!(validate_shell_command("git status && ").is_err());
+    }
+
+    /// A binary the agent built is run by path, and that is allowed in a chain
+    /// for the same reason it is allowed on its own: absolute or rooted only.
+    #[test]
+    fn validate_shell_command_allows_a_built_binary_by_path_in_a_chain() {
+        assert!(
+            validate_shell_command("pnpm build && /opt/termigo/target/release/mytool --help").is_ok()
+        );
+        assert!(validate_shell_command(r#"pnpm build && C:\tools\mytool.exe --flag"#).is_ok());
+        // A relative path was never allowed, in a chain or out of one. Asserted
+        // so the boundary is explicit rather than an accident of the allowlist.
+        assert!(validate_shell_command("pnpm build && ./target/release/mytool --help").is_err());
     }
 
     #[test]

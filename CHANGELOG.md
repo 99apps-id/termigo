@@ -8,6 +8,18 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Chaining `&&` / `||` let an unchecked command through.** The agent's shell
+  tool validated only the first token, so `git status && rm -rf /` passed:
+  `git` is allowlisted and the rest of the line was never examined. A chain now
+  has the program of EVERY segment checked, so `pnpm lint && pnpm test` works
+  while a chain ending in an unlisted or destructive program is still refused.
+  A separator inside quotes is data, not a chain (`echo "a && b"` is one
+  command), and a dangling separator is refused rather than skipped. The
+  pre-existing `validate_shell_command_blocks_metacharacters` assertion that
+  `git status && rm -rf /` errors had been failing on `main`.
+- **The `cargo clippy --all-targets --locked -- -D warnings` gate was failing**
+  on an `unused_mut` in `validate_shell_command`, so the Rust gate could not be
+  run at all.
 - **Mirrored replies arrived last and out of order.** The Termigo to Telegram
   mirror held every assistant message until the run settled
   (`if (m.role === "assistant" && !settled) continue;`). One assistant message
