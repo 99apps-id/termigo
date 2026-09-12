@@ -163,8 +163,14 @@ function basename(p: string): string {
  */
 function comparisonForm(p: string): string {
   let s = p.replace(/\\/g, "/");
-  // UNC / extended-length prefix: \\?\C:\... or //?/C:/... → strip up to drive.
-  s = s.replace(/^\/\/\?\//, "/");
+  // UNC / extended-length prefix: \\?\C:\... or //?/C:/... → strip the prefix
+  // AND the drive it wraps, in one step, so \\?\C:\Windows\x compares as
+  // /windows/x exactly like the Rust mirror (fs/security.rs). Stripping only the
+  // prefix left the drive sitting behind a leading slash, where the
+  // `^[a-zA-Z]:` pass below could not match it, so every root-anchored
+  // WRITE_DENY_PREFIXES entry (/windows/, /program files/, ...) silently missed
+  // extended-length paths.
+  s = s.replace(/^\/\/\?\/(?:[a-zA-Z]:)?/, "/");
   // Drive prefix: C:/foo → /foo. Important: do this BEFORE lowercasing so we
   // don't have to special-case "c:" vs "C:".
   s = s.replace(/^[a-zA-Z]:/, "");

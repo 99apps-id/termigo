@@ -133,6 +133,22 @@ describe("checkReadable — protected directories", () => {
     expect(checkWritable("c:/PROGRAM FILES/x")).toMatchObject({ ok: false });
   });
 
+  // An extended-length (`\\?\`) path is the same file to the OS, but it used to
+  // compare as `/c:/windows/...`, so no root-anchored write prefix matched it
+  // and the guard waved the write through. The Rust mirror already normalized
+  // the prefix away; this pins the two in sync.
+  it("rejects writes under extended-length Windows paths", () => {
+    expect(
+      checkWritable("\\\\?\\C:\\Windows\\System32\\drivers\\x.sys"),
+    ).toMatchObject({ ok: false });
+    expect(checkWritable("\\\\?\\C:\\Program Files\\app\\x.dll")).toMatchObject({
+      ok: false,
+    });
+    expect(checkWritable("//?/C:/Windows/System32/x.dll")).toMatchObject({
+      ok: false,
+    });
+  });
+
   it("allows reads in user directories not under any protected dir", () => {
     expect(checkReadable("/home/me/Documents/notes.txt")).toMatchObject({
       ok: true,
