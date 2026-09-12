@@ -198,7 +198,7 @@ export const SHORTCUTS: Shortcut[] = [
   },
   {
     id: "terminal.toggleInput",
-    label: "Toggle Shell / AI input",
+    label: "Focus shell input",
     group: "Terminal",
     defaultBindings: [{ [MOD_PROP]: true, key: "u" }],
   },
