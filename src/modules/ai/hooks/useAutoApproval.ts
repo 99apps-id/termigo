@@ -64,15 +64,10 @@ export function useAutoApproval(
     const last = messages[messages.length - 1];
     if (last?.role !== "assistant") return;
 
-    // Every approval still awaiting an answer, whether or not this effect
-    // decides it. Used at the end to arm a deadline for the ones it does not.
-    const awaiting: string[] = [];
-
     for (const part of last.parts as Array<Record<string, unknown>>) {
       if (part.state !== "approval-requested") continue;
       const id = (part.approval as { id?: string } | undefined)?.id;
       if (!id || answered.current.has(id)) continue;
-      awaiting.push(id);
 
       const tool = toolNameOf(part);
       if (!tool) continue;
