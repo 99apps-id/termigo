@@ -20,6 +20,9 @@ KNOWN_GOOD="${APP_DIR}/termigo.known-good"
 STATE_DIR="${APP_DIR}/.watchdog"
 STATE_FILE="${STATE_DIR}/restarts"
 LOG_FILE="${STATE_DIR}/watchdog.log"
+# Descriptor kontrol milik user yang menjalankan watchdog. Perlu eksplisit
+# supaya kesalahan user terdeteksi, bukan menyerupai aplikasi yang macet.
+DESCRIPTOR="${XDG_CACHE_HOME:-$HOME/.cache}/termigo/control.json"
 
 MAX_RESTARTS=3
 # Ambang RSS aplikasi yang boot penuh. Ini juga yang menangkap boot yang tidak
@@ -91,6 +94,17 @@ trim_log
 if ! is_active; then
   log "service DOWN -> restart"
   restart_service
+  exit 0
+fi
+
+# Penjaga kesalahan konfigurasi: kalau descriptor milik user ini tidak ada,
+# termigo-cli TIDAK AKAN PERNAH menjawab sehat, sehingga setiap pemeriksaan
+# menjadi "tidak sehat" dan watchdog me-restart selamanya. Ini pernah terjadi:
+# unit tanpa User= berjalan sebagai root, sedangkan descriptor ada di
+# /home/<user>/.cache. Kesalahan seperti itu harus berhenti di sini dengan pesan
+# yang jelas, bukan menyerupai aplikasi yang macet.
+if [ ! -f "$DESCRIPTOR" ]; then
+  log "SKIP: $DESCRIPTOR tidak ada - watchdog harus jalan sebagai user pemilik aplikasi (lihat User= di unit)"
   exit 0
 fi
 

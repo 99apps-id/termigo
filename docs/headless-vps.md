@@ -347,6 +347,13 @@ After=termigo.service
 
 [Service]
 Type=oneshot
+TimeoutStartSec=180
+# MUST run as the user that owns the app, because termigo-cli reads the control
+# descriptor from that user's cache directory. As root it finds no descriptor at
+# /root/.cache, answers app_unavailable every time, and the watchdog would
+# restart the service forever - a mistake worth one evening.
+User=admin
+Environment=HOME=/home/admin
 ExecStart=/opt/termigo/scripts/termigo-watchdog.sh
 EOF
 
