@@ -12,12 +12,18 @@ RestartSec=5
 StandardOutput=journal
 StandardError=journal
 LimitNOFILE=65536
-# Measured on the field install: a single ordinary agent run on a session with
-# long history peaks at 1.9-2.1GB, and the old MemoryHigh=2G sat below that, so
-# the webview was throttled until it stopped answering and the relay went silent.
-# The headroom here is what keeps a normal run below the throttle point.
-MemoryHigh=2560M
-MemoryMax=3072M
+# Measured working set of one ordinary agent run on a session with long history:
+# ~2.6GB, and it grows with the transcript. The first attempt at a ceiling
+# (MemoryHigh=2560M) sat exactly AT that working set, so the kernel throttled the
+# app 25,000 times and the webview stayed slow. The soft limit has to sit clearly
+# above the working set to stop the throttling, so it is 3072M here; MemoryMax
+# stays as a real guard, and the 512M band between them is the slow-down zone
+# before a kill.
+#
+# Termigo holds no swap of its own (the box's swap pressure is other tenants),
+# so raising the soft limit costs the host nothing but a ceiling it never had.
+MemoryHigh=3072M
+MemoryMax=3584M
 
 [Install]
 WantedBy=multi-user.target
