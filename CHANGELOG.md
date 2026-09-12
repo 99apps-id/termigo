@@ -6,8 +6,31 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Added
+### Fixed
 
+- **Mirrored replies arrived last and out of order.** The Termigo to Telegram
+  mirror held every assistant message until the run settled
+  (`if (m.role === "assistant" && !settled) continue;`). One assistant message
+  accumulates ALL the steps of a run, the loop walks the transcript in order,
+  and a newer user message was delivered at once - so the held reply landed
+  after content that came later: "output chat ditumpuk di belakang". An
+  assistant message is now sent once and then edited in place while its text
+  grows, the way the other agent bots do it.
+  - Sending immediately instead would have truncated every reply, which is why
+    this needed a state machine rather than a one-line change: `messageText()`
+    joins every text part so the text grows, while `markMessageSeen` keys on the
+    message **id** and `isMessageSeen` returns true on the id alone. The first
+    partial send marks it seen, and the completed answer can never arrive.
+  - A quiet run is deliberately NOT treated as a finished one: provider latency
+    on a real endpoint is 5-70s per step, so quiet text is the middle of a run,
+    not its end. Only `idle`/`error` finalizes.
+  - Also fixed on this path: an assistant message that was empty on its first
+    tick was marked seen and lost (it exists from its first reasoning part), and
+    a message over Telegram's 4096 limit now stops streaming and is delivered in
+    full by the settle path instead of failing to send.
+  - Still true, and unchanged: a Telegram-initiated run is handled by the relay
+    (`dispatchAndStream`), which streams a live progress card and sends the
+    answer when the run settles - the mirror is paused for it.
 - **The Telegram relay now logs what it is doing.** It logged nothing at all:
   `grep -ci telegram` on a running headless install's 238-line log returned 0,
   so a healthy relay, a stalled poller and a run that never produced an answer

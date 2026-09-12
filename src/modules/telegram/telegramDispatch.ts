@@ -10,6 +10,9 @@ import {
   sendDocument,
   sendTyping,
   sendKeyboard,
+  sendProgressMessage,
+  editProgressMessage,
+  splitTelegramText,
 } from "./telegramApi";
 import {
   getPendingApprovals,
@@ -42,6 +45,11 @@ import {
   relayErrorLine,
   runOutcomeLine,
 } from "./telegramLog";
+import {
+  type MirrorStreamState,
+  planMirrorDelivery,
+  startedState,
+} from "./mirrorStream";
 import { useTelegramStore } from "./store";
 
 function sleep(signal: AbortSignal, ms: number): Promise<void> {
@@ -65,6 +73,26 @@ function sleep(signal: AbortSignal, ms: number): Promise<void> {
 const MAX_MIRROR_SEND_ATTEMPTS = 3;
 /** Consecutive mirror-send failures, keyed by session + message. */
 const mirrorSendFailures = new Map<string, number>();
+
+/**
+ * Mirror messages currently being streamed into Telegram, keyed by session +
+ * transcript message. Present means "a Telegram message exists for this
+ * transcript message and its text can still grow", which is what makes an edit
+ * possible instead of a duplicate send.
+ */
+const mirrorStreams = new Map<string, MirrorStreamState>();
+
+/** Bound on in-flight streamed messages, so a long-lived process cannot leak. */
+const MIRROR_STREAM_MAX = 50;
+
+function setMirrorStream(key: string, state: MirrorStreamState): void {
+  mirrorStreams.set(key, state);
+  while (mirrorStreams.size > MIRROR_STREAM_MAX) {
+    const oldest = mirrorStreams.keys().next();
+    if (oldest.done) break;
+    mirrorStreams.delete(oldest.value);
+  }
+}
 
 function base64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
   const binary = atob(b64);
@@ -93,6 +121,15 @@ async function sendReplyWithDiagrams(
   signal: AbortSignal,
 ): Promise<void> {
   await sendTelegram(chatId, text, signal);
+  await sendDiagrams(chatId, text, signal);
+}
+
+/** The Mermaid PNGs for a finished answer, best-effort. */
+async function sendDiagrams(
+  chatId: number | string,
+  text: string,
+  signal: AbortSignal,
+): Promise<void> {
   const { extractMermaidBlocks, renderMermaidToPng } = await import(
     "./mermaidImage"
   );
@@ -103,6 +140,40 @@ async function sendReplyWithDiagrams(
       await sendPhoto(chatId, png, "Mermaid diagram", signal).catch(() => {});
     }
   }
+}
+
+/**
+ * Deliver an answer that was being streamed by editing its Telegram message.
+ *
+ * Only the first chunk can replace the existing message; anything past one
+ * message has to follow as new messages, because an edit cannot be longer than
+ * the limit. Reuses the shared splitter so a long answer keeps its line breaks.
+ */
+async function finalizeStreamedMessage(
+  chatId: number | string,
+  messageId: number,
+  text: string,
+  signal: AbortSignal,
+): Promise<void> {
+  const chunks = splitTelegramText(text);
+  const first = chunks[0] ?? "";
+  const edited = await editProgressMessage(chatId, messageId, first, signal);
+  if (edited) {
+    for (const chunk of chunks.slice(1)) {
+      if (signal.aborted) break;
+      await sendTelegram(chatId, chunk, signal).catch(() => {});
+    }
+  } else {
+    // The edit failed even after its own retries, so the streamed message could
+    // not be completed. Sending the whole answer again would duplicate it, so
+    // mark this as a failure by leaving it at one message and letting the
+    // caller's retry bound decide. Logged because a half-broken answer in the
+    // chat is exactly the kind of thing that needs a cause on record.
+    logRelayWarn(
+      `could not finalize streamed message ${messageId}; it may show a partial answer`,
+    );
+  }
+  await sendDiagrams(chatId, first, signal);
 }
 
 /** Local report/document files the agent previewed via `preview_file` since the
@@ -213,6 +284,10 @@ export async function runMirror(signal: AbortSignal): Promise<void> {
           for (const m of messages) {
             markMessageSeen(m.id, sessionId, m.role, messageText(m));
           }
+          // Anything still mid-stream belongs to the session being left, and
+          // its transcript message is now seeded as seen, so an edit would
+          // target a message the loop no longer walks.
+          mirrorStreams.clear();
         }
         const settled =
           state.agentMeta.status === "idle" ||
@@ -221,10 +296,9 @@ export async function runMirror(signal: AbortSignal): Promise<void> {
           const text = messageText(m);
           if (isMessageSeen(m.id, sessionId, m.role, text)) continue;
 
-          // Telegram-origin messages and streaming assistant text are handled
-          // by the bot relay itself (dispatchAndStream); never mirror them.
+          // Telegram-origin traffic is handled by the bot relay itself
+          // (dispatchAndStream); never mirror it back.
           if (
-            !text ||
             getMirrorPauseCount() > 0 ||
             (m.id && telegramOriginMessageIds.has(m.id)) ||
             (m.role === "user" && isTelegramOriginText(text))
@@ -232,11 +306,101 @@ export async function runMirror(signal: AbortSignal): Promise<void> {
             markMessageSeen(m.id, sessionId, m.role, text);
             continue;
           }
-          if (m.role === "assistant" && !settled) {
-            // Still streaming; send once the run settles so the reply is whole.
+
+          const mirrorKey = `${sessionId}:${m.id ?? text.slice(0, 40)}`;
+
+          // An assistant message is streamed rather than held to the end of the
+          // run: one message accumulates every step, so waiting for `settled`
+          // delivered all of it last and out of order.
+          if (m.role === "assistant") {
+            // `previous` is captured before anything is stored, so a failed
+            // send can leave the recorded state untouched and the same send is
+            // retried next tick instead of being skipped as already delivered.
+            const previous = mirrorStreams.get(mirrorKey) ?? null;
+            const plan = planMirrorDelivery({
+              text,
+              settled,
+              state: previous,
+              now: Date.now(),
+            });
+
+            let delivered = true;
+            try {
+              if (plan.send?.kind === "start") {
+                const id = await sendProgressMessage(
+                  chatId,
+                  plan.send.text,
+                  signal,
+                );
+                delivered = id !== null;
+                if (delivered) {
+                  const next = startedState(id as number, plan);
+                  if (next) setMirrorStream(mirrorKey, next);
+                }
+              } else if (plan.send?.kind === "edit") {
+                delivered = previous
+                  ? await editProgressMessage(
+                      chatId,
+                      previous.messageId,
+                      plan.send.text,
+                      signal,
+                    )
+                  : false;
+                // Only record the taller text once it is actually shown.
+                if (delivered && plan.next) {
+                  setMirrorStream(mirrorKey, plan.next);
+                }
+              } else if (plan.send?.kind === "finalize") {
+                if (previous) {
+                  await finalizeStreamedMessage(
+                    chatId,
+                    previous.messageId,
+                    plan.send.text,
+                    signal,
+                  );
+                } else {
+                  await sendReplyWithDiagrams(chatId, plan.send.text, signal);
+                }
+              } else if (plan.send?.kind === "send") {
+                await sendReplyWithDiagrams(chatId, plan.send.text, signal);
+              } else if (plan.next) {
+                // Nothing to send this tick (throttled, or waiting out an
+                // overflow). Still worth recording, since `next` carries the
+                // overflow flag the later ticks read.
+                setMirrorStream(mirrorKey, plan.next);
+              }
+            } catch {
+              delivered = false;
+            }
+
+            if (plan.markSeen && delivered) {
+              // Only now, with the whole answer in the chat: marking a growing
+              // message as seen earlier is what truncates a reply, because the
+              // dedup key is the message id, not its text.
+              markMessageSeen(m.id, sessionId, m.role, text);
+              mirrorStreams.delete(mirrorKey);
+              mirrorSendFailures.delete(mirrorKey);
+            } else if (!delivered) {
+              const attempts = (mirrorSendFailures.get(mirrorKey) ?? 0) + 1;
+              if (attempts >= MAX_MIRROR_SEND_ATTEMPTS) {
+                logRelayWarn(
+                  `mirror gave up on a ${m.role} message after ${attempts} attempts (session ${sessionId})`,
+                );
+                mirrorSendFailures.delete(mirrorKey);
+                mirrorStreams.delete(mirrorKey);
+                markMessageSeen(m.id, sessionId, m.role, text);
+              } else {
+                mirrorSendFailures.set(mirrorKey, attempts);
+              }
+            }
             continue;
           }
-          const mirrorKey = `${sessionId}:${m.id ?? text.slice(0, 40)}`;
+
+          // A user message typed in the app: one-shot, whole.
+          if (!text) {
+            markMessageSeen(m.id, sessionId, m.role, text);
+            continue;
+          }
           try {
             await sendReplyWithDiagrams(chatId, text, signal);
             markMessageSeen(m.id, sessionId, m.role, text);
