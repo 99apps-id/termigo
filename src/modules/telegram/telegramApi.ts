@@ -262,6 +262,48 @@ export function splitTelegramText(text: string, maxLen = 4000): string[] {
   return chunks;
 }
 
+/**
+ * Send `text` as escaped plain text, split so no single send exceeds the cap.
+ *
+ * The escaped form is LONGER than its source (each `<`, `>` and `&` grows to an
+ * entity), so a chunk that fit the 4000-char markdown budget can still be
+ * rejected as HTML: a 4000-char block of `<` becomes a 16 KB body, Telegram
+ * answers 400, and the old verbatim retry failed the same way. The failure
+ * propagated out of `sendTelegram`, so the caller's reply was never delivered
+ * and `/status`, `/help` or an agent answer vanished silently.
+ *
+ * Splitting by the ESCAPED length fixes it without ever cutting an entity in
+ * half: the split points are chosen on the raw text and each piece is escaped
+ * afterwards. Halving on a line, then a space, guarantees progress (a cut of 0
+ * would not), so it terminates.
+ */
+async function sendEscapedChunk(
+  chatId: number | string,
+  raw: string,
+  signal: AbortSignal,
+): Promise<void> {
+  if (signal.aborted) return;
+  const escaped = escapePlainTextToHtml(raw);
+  if (escaped.length <= TELEGRAM_MAX_MESSAGE_CHARS) {
+    try {
+      await apiPost(
+        "sendMessage",
+        { chat_id: chatId, text: escaped, parse_mode: "HTML" },
+        signal,
+      );
+    } catch {
+      // Give up on this piece; the caller's remaining chunks still go out.
+    }
+    return;
+  }
+  const half = Math.max(1, Math.floor(raw.length / 2));
+  let cut = raw.lastIndexOf("\n", half);
+  if (cut <= 0) cut = raw.lastIndexOf(" ", half);
+  if (cut <= 0) cut = half;
+  await sendEscapedChunk(chatId, raw.slice(0, cut), signal);
+  await sendEscapedChunk(chatId, raw.slice(cut), signal);
+}
+
 export async function sendTelegram(
   chatId: number | string,
   text: string,
@@ -278,15 +320,9 @@ export async function sendTelegram(
         signal,
       );
     } catch {
-      await apiPost(
-        "sendMessage",
-        {
-          chat_id: chatId,
-          text: escapePlainTextToHtml(chunk),
-          parse_mode: "HTML",
-        },
-        signal,
-      );
+      // The HTML was rejected (often because escaping pushed it past the cap).
+      // Fall back to escaped plain text, split to fit.
+      await sendEscapedChunk(chatId, chunk, signal);
     }
   }
 }

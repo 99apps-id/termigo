@@ -322,6 +322,40 @@ export const KNOWN_TOOL_ALIASES: Record<
 };
 
 /**
+ * The JSON *text* the SDK should re-parse for a call whose name we just
+ * rewrote.
+ *
+ * Repairing only the name was not enough: the near-miss branch handed back the
+ * model's raw args, so the SDK's strict parse failed on exactly the input this
+ * hook exists to fix and the whole batch died anyway - the recovery was dead
+ * for any typo'd name paired with near-JSON arguments.
+ */
+async function repairArgsText(raw: string): Promise<string> {
+  const text = stripCodeFence(raw);
+  if (text.length === 0) return "{}";
+  try {
+    JSON.parse(text);
+    return text;
+  } catch {
+    // Fall through to the repair pass.
+  }
+  const repaired = repairJsonText(text);
+  try {
+    JSON.parse(repaired);
+    return repaired;
+  } catch {
+    // Fall through to the lenient partial parser.
+  }
+  try {
+    const { value } = await parsePartialJson(repaired);
+    if (value !== undefined) return JSON.stringify(value);
+  } catch {
+    // Give up: the SDK's own parse error is more useful than a guess.
+  }
+  return repaired;
+}
+
+/**
  * The `experimental_repairToolCall` hook. Returns a repaired tool call whose
  * name is a real tool and whose `input` is clean JSON, or `null` to let the
  * original error surface.
@@ -376,7 +410,9 @@ export async function repairToolCall({
       return {
         toolCallId: toolCall.toolCallId,
         toolName: match,
-        input: String(toolCall.input ?? toolCall.args ?? "{}"),
+        input: await repairArgsText(
+          String(toolCall.input ?? toolCall.args ?? ""),
+        ),
       };
     }
 

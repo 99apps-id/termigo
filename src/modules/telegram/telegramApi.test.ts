@@ -5,14 +5,21 @@
 // approval prompt that means the user has no control surface at all, so the
 // keyboard is filtered rather than sent and rejected.
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   type InlineButton,
   sanitizeInlineKeyboard,
+  sendTelegram,
   splitTelegramText,
   TELEGRAM_MAX_CALLBACK_DATA_BYTES,
   TELEGRAM_MAX_INLINE_BUTTONS,
+  TELEGRAM_MAX_MESSAGE_CHARS,
 } from "./telegramApi";
+
+vi.mock("./keyring", () => ({
+  getTelegramToken: vi.fn().mockResolvedValue("mock_token"),
+  getTelegramOwner: vi.fn().mockResolvedValue(null),
+}));
 
 const button = (callback_data: string, text = "x"): InlineButton => ({
   text,
@@ -117,5 +124,70 @@ describe("splitTelegramText", () => {
     // Every original line survives, in order.
     expect(chunks.join("\n")).toContain("line 0");
     expect(chunks.join("\n")).toContain("line 399");
+  });
+});
+
+describe("sendTelegram", () => {
+  const origFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = origFetch;
+  });
+
+  /** A fetch that behaves like the Bot API: reject an over-cap body with 400. */
+  function mockTelegram() {
+    const delivered: string[] = [];
+    globalThis.fetch = vi.fn(async (_url, init) => {
+      const body = init?.body ? JSON.parse(String(init.body)) : {};
+      const text = typeof body.text === "string" ? body.text : "";
+      if (text.length > TELEGRAM_MAX_MESSAGE_CHARS) {
+        return {
+          ok: false,
+          status: 400,
+          text: async () =>
+            JSON.stringify({
+              ok: false,
+              error_code: 400,
+              description: "Bad Request: message is too long",
+            }),
+        } as unknown as Response;
+      }
+      delivered.push(text);
+      return {
+        ok: true,
+        json: async () => ({ ok: true, result: { message_id: 1 } }),
+        text: async () => JSON.stringify({ ok: true }),
+      } as unknown as Response;
+    });
+    return delivered;
+  }
+
+  it("sends a short message as rendered HTML", async () => {
+    const delivered = mockTelegram();
+    await sendTelegram(1, "**bold** text", new AbortController().signal);
+    expect(delivered).toEqual(["<b>bold</b> text"]);
+  });
+
+  it("delivers text whose escaped form exceeds the cap instead of dropping it", async () => {
+    const delivered = mockTelegram();
+    // 3000 `<` are kept by the HTML renderer and each escapes to `&lt;`, so the
+    // rendered body is 12000 chars: over the 4096 cap. The plain-text fallback
+    // grows the same way, which is what used to lose the whole message.
+    await sendTelegram(1, "<".repeat(3000), new AbortController().signal);
+    expect(delivered.length).toBeGreaterThan(1);
+    for (const body of delivered) {
+      expect(body.length).toBeLessThanOrEqual(TELEGRAM_MAX_MESSAGE_CHARS);
+      // No entity was cut in half by the split.
+      expect(body).not.toMatch(/&(?!lt;|gt;|amp;)/);
+    }
+    expect(delivered.join("")).toBe("&lt;".repeat(3000));
+  });
+
+  it("keeps sending the later chunks when one is rejected", async () => {
+    const delivered = mockTelegram();
+    const text = `${"a".repeat(3900)}\n${"b".repeat(3900)}`;
+    await sendTelegram(1, text, new AbortController().signal);
+    expect(delivered.join("")).toContain("aaa");
+    expect(delivered.join("")).toContain("bbb");
   });
 });

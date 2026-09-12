@@ -73,7 +73,8 @@ const SHELL_METACHARACTERS: &[char] = &[';', '$', '(', ')', '<', '>', '`'];
 /// Validate a shell command for agent execution:
 /// - reject metacharacters that enable injection (`;$()<>``)
 /// - allow safe chaining operators `&&` and `||`
-/// - enforce allowlist for the first token unless it's an absolute path
+/// - reject raw newlines/control chars, which are hidden command separators
+/// - allow `&&`/`||` chaining, but enforce the allowlist on EVERY segment
 /// - return the command string on success
 pub fn validate_shell_command(command: &str) -> Result<&str, String> {
     let trimmed = command.trim();
@@ -81,51 +82,57 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
         return Err("empty command".into());
     }
 
-    // 1. Reject metacharacters outside quotes. Allow `&&` and `||` as safe
-    //    chaining operators; reject single `&`, `|`, and the rest.
+    // 1. Reject stray control characters (NUL, BEL, ...). `\n`, `\r` and `\t`
+    //    are handled below as separators/whitespace.
+    if trimmed
+        .chars()
+        .any(|c| c.is_control() && c != '\n' && c != '\r' && c != '\t')
+    {
+        return Err("command contains control characters".into());
+    }
+
+    // 2. Reject metacharacters outside quotes, and split the command into
+    //    `&&`/`||`-separated segments. `&&`/`||` are allowed as separators, but
+    //    every segment's program is checked in step 3 - so `git && rm -rf /` is
+    //    refused on `rm`, which was the hole when only the first token was read.
     let mut in_quote = false;
     let mut quote_char = '\0';
     let mut prev = '\0';
     let mut bad: Vec<char> = Vec::new();
-    let mut chars = trimmed.chars().collect::<Vec<_>>();
+    let mut segments: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let chars = trimmed.chars().collect::<Vec<_>>();
     let mut i = 0;
     while i < chars.len() {
         let c = chars[i];
         if !in_quote && (c == '"' || c == '\'') {
             in_quote = true;
             quote_char = c;
-            prev = c;
-            i += 1;
-            continue;
-        }
-        if in_quote && c == quote_char && prev != '\\' {
+        } else if in_quote && c == quote_char && prev != '\\' {
             in_quote = false;
             quote_char = '\0';
-            prev = c;
-            i += 1;
-            continue;
-        }
-        if !in_quote {
-            if c == '&' {
-                if i + 1 < chars.len() && chars[i + 1] == '&' {
-                    // `&&` is allowed
-                    i += 2;
-                    prev = c;
-                    continue;
-                }
-                bad.push(c);
-            } else if c == '|' {
-                if i + 1 < chars.len() && chars[i + 1] == '|' {
-                    // `||` is allowed
-                    i += 2;
-                    prev = c;
-                    continue;
-                }
-                bad.push(c);
-            } else if SHELL_METACHARACTERS.contains(&c) {
+        } else if !in_quote {
+            let chained = (c == '&' && chars.get(i + 1) == Some(&'&'))
+                || (c == '|' && chars.get(i + 1) == Some(&'|'));
+            if chained {
+                segments.push(std::mem::take(&mut current));
+                prev = c;
+                i += 2;
+                continue;
+            }
+            if c == '\n' || c == '\r' {
+                // A newline is a command separator exactly like `&&`: the shell
+                // runs every line, so each line must be validated.
+                segments.push(std::mem::take(&mut current));
+                prev = c;
+                i += 1;
+                continue;
+            }
+            if c == '&' || c == '|' || SHELL_METACHARACTERS.contains(&c) {
                 bad.push(c);
             }
         }
+        current.push(c);
         prev = c;
         i += 1;
     }
@@ -138,47 +145,62 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
             bad
         ));
     }
+    segments.push(current);
 
-    // 2. Extract the program token (first whitespace-delimited token, stripped of quotes).
-    let raw_program = trimmed.split_whitespace().next().unwrap_or(trimmed);
-    let program = raw_program.trim_matches(['"', '\'']);
-
-    // 3. Allow absolute or rooted paths on Unix (/...) and Windows (C:\..., \...).
-    let path = std::path::Path::new(program);
-    let is_windows_drive_path = program.len() >= 3
-        && program.as_bytes()[0].is_ascii_alphabetic()
-        && program.as_bytes()[1] == b':'
-        && (program.as_bytes()[2] == b'\\' || program.as_bytes()[2] == b'/');
-
-    if path.is_absolute()
-        || path.has_root()
-        || program.starts_with('/')
-        || program.starts_with('\\')
-        || is_windows_drive_path
-    {
-        return Ok(command);
-    }
-
-    // 4. Strip executable extensions for matching (.exe, .cmd, .bat).
-    let base_program = program
-        .strip_suffix(".exe")
-        .or_else(|| program.strip_suffix(".cmd"))
-        .or_else(|| program.strip_suffix(".bat"))
-        .unwrap_or(program);
-
-    // 5. Allow if it's in the allowlist.
-    if SANDBOX_ALLOWLIST
+    // 3. Every segment must start with an allowlisted program (or an absolute /
+    //    rooted path). Checking each segment - not just the first - is what
+    //    makes `git status && rm -rf /` fail on `rm`. Blank segments (blank
+    //    lines, a trailing separator) carry no command and are dropped.
+    let segments: Vec<&str> = segments
         .iter()
-        .any(|allowed| base_program.eq_ignore_ascii_case(allowed))
-    {
-        return Ok(command);
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if segments.is_empty() {
+        return Err("command contains no executable segment".into());
+    }
+    for segment in segments {
+        let raw_program = segment.split_whitespace().next().unwrap_or(segment);
+        let program = raw_program.trim_matches(['"', '\'']);
+
+        // Allow absolute or rooted paths on Unix (/...) and Windows (C:\..., \...).
+        let path = std::path::Path::new(program);
+        let is_windows_drive_path = program.len() >= 3
+            && program.as_bytes()[0].is_ascii_alphabetic()
+            && program.as_bytes()[1] == b':'
+            && (program.as_bytes()[2] == b'\\' || program.as_bytes()[2] == b'/');
+
+        if path.is_absolute()
+            || path.has_root()
+            || program.starts_with('/')
+            || program.starts_with('\\')
+            || is_windows_drive_path
+        {
+            continue;
+        }
+
+        // Strip executable extensions for matching (.exe, .cmd, .bat).
+        let base_program = program
+            .strip_suffix(".exe")
+            .or_else(|| program.strip_suffix(".cmd"))
+            .or_else(|| program.strip_suffix(".bat"))
+            .unwrap_or(program);
+
+        if SANDBOX_ALLOWLIST
+            .iter()
+            .any(|allowed| base_program.eq_ignore_ascii_case(allowed))
+        {
+            continue;
+        }
+
+        return Err(format!(
+            "command '{}' is not in the agent allowlist; allowed: {:?}; use a PTY session to run arbitrary commands",
+            program,
+            SANDBOX_ALLOWLIST
+        ));
     }
 
-    Err(format!(
-        "command '{}' is not in the agent allowlist; allowed: {:?}; use a PTY session to run arbitrary commands",
-        program,
-        SANDBOX_ALLOWLIST
-    ))
+    Ok(command)
 }
 
 #[derive(Serialize)]
@@ -730,5 +752,30 @@ mod tests_sandbox {
         assert!(validate_shell_command(r#"node -e "console.log(1+1)""#).is_ok());
         assert!(validate_shell_command(r#"echo "hello > world""#).is_ok());
         assert!(validate_shell_command(r#"echo 'hello | world'"#).is_ok());
+    }
+
+    /// Every `&&`/`||` segment is checked against the allowlist, so an
+    /// allowlisted first token cannot smuggle a non-allowlisted command past it.
+    #[test]
+    fn validate_shell_command_enforces_allowlist_on_every_segment() {
+        assert!(validate_shell_command("git status && git diff").is_ok());
+        assert!(validate_shell_command("npm test && cargo check").is_ok());
+        assert!(validate_shell_command("git status || git fetch").is_ok());
+        assert!(validate_shell_command("git log && rm -rf /").is_err());
+        assert!(validate_shell_command("git log || rm -rf /").is_err());
+        // A dangling operator leaves an empty segment.
+        assert!(validate_shell_command("git status &&").is_err());
+    }
+
+    /// A raw newline is a hidden command separator: the allowlist only sees the
+    /// first line, so it must be refused outright rather than executed.
+    #[test]
+    fn validate_shell_command_rejects_newline_injection() {
+        let err = validate_shell_command("echo hi\nrm -rf /")
+            .expect_err("newline injection must be refused");
+        assert!(err.contains("PTY session"), "{err}");
+        assert!(validate_shell_command("echo hi\r\nwhoami").is_err());
+        // A tab is not a separator and stays allowed.
+        assert!(validate_shell_command("echo hi\tthere").is_ok());
     }
 }

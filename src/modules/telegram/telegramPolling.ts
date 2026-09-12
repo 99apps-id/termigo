@@ -19,13 +19,44 @@ export let mirrorController: AbortController | null = null;
  */
 export let relayController: AbortController | null = null;
 
-export let currentUpdateOffset = 0;
+/**
+ * Telegram keeps an unconfirmed update for ~24h and redelivers it on the next
+ * `getUpdates`, so the offset is the bot's only record of what it has already
+ * handled. A module-level `0` therefore meant every app restart replayed that
+ * backlog: an old `/run`, `/approve` or `/mode all` executed a second time. It
+ * is persisted next to the relay's other small state so a restart resumes where
+ * the last poll stopped.
+ */
+const OFFSET_STORAGE_KEY = "termigo-telegram-offset";
+
+function readStoredOffset(): number {
+  if (typeof localStorage === "undefined") return 0;
+  try {
+    const raw = localStorage.getItem(OFFSET_STORAGE_KEY);
+    const n = raw === null ? Number.NaN : Number(raw);
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function persistOffset(offset: number): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(OFFSET_STORAGE_KEY, String(offset));
+  } catch {
+    // A full or unavailable localStorage must not stop the poll loop.
+  }
+}
+
+export let currentUpdateOffset = readStoredOffset();
 export let lastPollProgressTime = Date.now();
 export const POLLING_STALL_TIMEOUT_MS = 75_000;
 export let watchdogTimer: ReturnType<typeof setInterval> | null = null;
 
 export function setCurrentUpdateOffset(offset: number): void {
   currentUpdateOffset = offset;
+  persistOffset(offset);
 }
 
 export function setLastPollProgressTime(t: number): void {
@@ -94,7 +125,9 @@ async function runLoop(signal: AbortSignal): Promise<void> {
             }`,
           );
         }
-        currentUpdateOffset = Math.max(currentUpdateOffset, u.update_id + 1);
+        setCurrentUpdateOffset(
+          Math.max(currentUpdateOffset, u.update_id + 1),
+        );
       }
     } catch (e) {
       if (signal.aborted) break;
@@ -124,6 +157,23 @@ export async function startTelegramBot(): Promise<void> {
   lastPollProgressTime = Date.now();
   if (watchdogTimer) clearInterval(watchdogTimer);
   watchdogTimer = setInterval(checkPollingStall, 15_000);
+  // First start on this machine (nothing stored): drop the backlog in one
+  // call instead of replaying it. `offset=-1` returns only the newest update,
+  // and asking from `lastUpdateId + 1` confirms everything older to Telegram.
+  if (currentUpdateOffset === 0) {
+    try {
+      const latest = (await apiGet(
+        "getUpdates?offset=-1&timeout=0&limit=1",
+        controller.signal,
+        10_000,
+      )) as { result?: Update[] };
+      const lastId = latest?.result?.[latest.result.length - 1]?.update_id;
+      if (typeof lastId === "number") setCurrentUpdateOffset(lastId + 1);
+    } catch {
+      // Offline or a bad token: the loop below reports it and backs off.
+    }
+  }
+
   // Start polling BEFORE any awaiting setup. The bot used to report itself
   // online and only then await the stale-approval cleanup, so a slow or hung
   // AI-store import left it claiming to be online with nothing polling - which

@@ -3,6 +3,7 @@ import {
   escapeHtml,
   extractToolSummaries,
   formatLiveProgress,
+  formatToolActivity,
   formatMarkdownTable,
   markdownToTelegramHtml,
   summarizeToolInput,
@@ -116,6 +117,12 @@ describe("progressFormat", () => {
         summarizeToolOutput("read_file", { error: "file not found" }),
       ).toBe("error: file not found");
     });
+
+    it("names a timeout instead of reporting the default exit 0", () => {
+      expect(
+        summarizeToolOutput("bash_run", { timed_out: true, exit_code: null }),
+      ).toBe("timed out");
+    });
   });
 
   describe("extractToolSummaries", () => {
@@ -162,6 +169,30 @@ describe("progressFormat", () => {
         state: "awaiting-approval",
         input: "C:/temp/junk.exe",
       });
+    });
+
+    // From the field: `npm test` exited 1 and the progress trail (and the
+    // mirrored message) still showed a green "Ran", so the failure was
+    // invisible unless you opened the desktop app.
+    it("reads a non-zero exit code or a timeout as a failure", () => {
+      const summaries = extractToolSummaries([
+        {
+          type: "tool-bash_run",
+          state: "output-available",
+          input: { command: "npm test" },
+          output: { exit_code: 1, stderr: "2 tests failed" },
+        },
+        {
+          type: "tool-bash_run",
+          state: "output-available",
+          input: { command: "sleep 300" },
+          output: { timed_out: true, exit_code: null },
+        },
+      ]);
+
+      expect(summaries[0].state).toBe("error");
+      expect(summaries[1].state).toBe("error");
+      expect(formatToolActivity(summaries[0])).toContain("Failed");
     });
   });
 

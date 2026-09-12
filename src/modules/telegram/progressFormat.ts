@@ -160,6 +160,11 @@ export function summarizeToolOutput(
     const info =
       typeof obj.info === "string" ? collapseWhitespace(obj.info) : "";
 
+    // A command killed by the timeout has no exit code, so the `exit 0`
+    // default below reported a timeout as a clean success.
+    if (obj.timed_out === true) {
+      return truncate(stderr ? `timed out: ${stderr}` : "timed out", maxLen);
+    }
     if (exitCode !== 0 && stderr) {
       return truncate(`exit ${exitCode}: ${stderr}`, maxLen);
     }
@@ -206,6 +211,22 @@ export function summarizeToolOutput(
   return "";
 }
 
+/**
+ * Whether a tool result should read as a failure.
+ *
+ * `output-available` with no `error` string was treated as success, so a shell
+ * command that exited non-zero (or was killed by its timeout) rendered as a
+ * green "✓ Ran" in the progress trail and in the mirrored message. The result
+ * carries the real verdict, so read it instead of assuming success.
+ */
+function isErrorOutput(output: unknown): boolean {
+  if (!output || typeof output !== "object") return false;
+  const out = output as Record<string, unknown>;
+  if (typeof out.error === "string") return true;
+  if (out.timed_out === true) return true;
+  return typeof out.exit_code === "number" && out.exit_code !== 0;
+}
+
 export function extractToolSummaries(parts: unknown[]): ToolCallSummary[] {
   const summaries: ToolCallSummary[] = [];
 
@@ -233,8 +254,7 @@ export function extractToolSummaries(parts: unknown[]): ToolCallSummary[] {
       // failed call rendered as "⚡ Running ..." for the rest of the run.
       state = "error";
     } else if (rawState === "output-available") {
-      const out = part.output as Record<string, unknown> | undefined;
-      state = out && typeof out.error === "string" ? "error" : "done";
+      state = isErrorOutput(part.output) ? "error" : "done";
     }
 
     const input = summarizeToolInput(toolName, part.input);
@@ -422,10 +442,14 @@ export function markdownToTelegramHtml(markdown: string): string {
   // 10. Italic: *text* (avoiding remaining single asterisks)
   text = text.replace(/(?<!\*)\*([^*\r\n]+?)\*(?!\*)/g, "<i>$1</i>");
 
-  // 11. Italic: _text_ (only when surrounded by whitespace or punctuation, to avoid snake_case)
+  // 11. Italic: _text_ (only when surrounded by whitespace or punctuation, to
+  // avoid snake_case). The leading delimiter is captured and re-emitted instead
+  // of matched with a variable-length lookbehind, which not every webview engine
+  // Tauri ships supports (WebKitGTK on Linux, WKWebView on macOS). Output is
+  // identical to the previous lookbehind form.
   text = text.replace(
-    /(?<=^|[\s([{])_([^_ \r\n][^_\r\n]*?[^_ \r\n]|\S)_(?=[)\]}\s.,:;!?]|$)/gm,
-    "<i>$1</i>",
+    /(^|[\s([{])_([^_ \r\n][^_\r\n]*?[^_ \r\n]|\S)_(?=[)\]}\s.,:;!?]|$)/gm,
+    "$1<i>$2</i>",
   );
 
   // 12. Strikethrough: ~~text~~
