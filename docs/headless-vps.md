@@ -147,25 +147,31 @@ termigo-cli status --json
 
 Termigo stores its data in `~/.local/share/id.99apps.termigo/`.
 
-### A. Telegram Token (OS Keyring)
+### A. Telegram Token (secret store)
 
-The Telegram bot token is stored in the OS keyring (`termigo-telegram`), **not** in `secrets.json`. To set or rotate the token:
+The bot token is stored by the app under service `termigo-telegram`, account `token`, and **never** in `termigo-settings.json`.
+
+Where that resolves depends on the platform, and the difference matters on a headless box:
+
+| Platform | Store |
+| --- | --- |
+| Linux (this guide) | `secrets.json` in the data dir, an object keyed `"service::account"`, mode `0600` |
+| macOS / Windows | the OS keychain (`secrets_get` / `secrets_set`) |
+
+So on the VPS the token is the `"termigo-telegram::token"` entry of `~/.local/share/id.99apps.termigo/secrets.json`. `secret-tool` is **not** read by the app on Linux, and the bundled `termigo-cli` has no token command: set the token from the app (Settings, Telegram) or by writing that entry while the service is stopped, then restart it.
+
+Owner pairing is separate state. Sending `/pair` from the chat locks the bot to that account (it takes no argument) and is stored as relay state in the webview's `localStorage` key `termigo-telegram` (`chatId` plus `ownerUserId`), not in the settings file. A `termigo-telegram::owner` entry in the secret store is only a seed, applied on startup when the relay state has no owner yet.
+
+To check that the relay is actually talking to Telegram, do not ask `status`: it reports the app, agent and workspace, and carries no Telegram fields. Use the socket and the relay log:
 
 ```bash
-# Set token via keyring (interactive)
-secret-tool store --label="termigo-telegram" termigo telegram-token
-
-# Or via termigo-cli if available
-termigo-cli set-telegram-token "<YOUR_TELEGRAM_BOT_TOKEN>"
+# One established connection to Telegram (IPv4 and/or IPv6) while the bot is up
+ss -tnp | grep -i telegram || ss -tnp | grep 149.154
+# The relay logs each update, run, stall and poll failure
+grep -i telegram ~/.local/share/id.99apps.termigo/logs/Termigo.log | tail -20
 ```
 
-To find the paired chat ID after first `/pair`:
-
-```bash
-termigo-cli status --json | jq '.telegram.chatId'
-```
-
-> **Note:** On first run without an owner configured, send `/pair <TELEGRAM_USER_ID>` from your Telegram chat to lock the bot to your account.
+> **Note:** Without an owner configured, `/pair` from your Telegram chat locks the bot to that account. Run it once; afterwards only that account may start runs or answer approvals.
 
 ### B. Settings (`termigo-settings.json`)
 
@@ -207,6 +213,18 @@ There is no `label`, `provider` or `apiKey` field: the label is `name`, the prov
 ```
 
 Set the endpoint's key in the keychain (Settings → Models, or `secrets_set`); the file above only names the model.
+
+**Editing settings without the window.** The Go companion in `cli/` can read and change the allowlisted settings over the running app's control socket, which is easier than editing JSON by hand:
+
+```bash
+go build -o termigo ./cli/cmd/termigo      # not installed by the app; build it on the host
+./termigo settings                         # defaultModelId, agentApprovalMode, toolSearchEnabled, groups
+./termigo model deepseek-v4-pro            # set the default model
+./termigo approval ask                     # confirm every edit before it runs
+./termigo tui                              # the same, interactive
+```
+
+These go through the same setters the Settings window uses, so the value is validated and normalised in one place. Writable keys are exactly `defaultModelId`, `toolSearchEnabled`, `disabledToolGroups` and `agentApprovalMode`; anything else is refused by the app with the reason. The bundled `termigo-cli` (the Rust helper next to the app binary) does not have these commands.
 
 **Renamed models.** If a provider renames a model, change `modelId` here (or Settings → Models → *Model IDs*) rather than the app. For a built-in provider such as DeepSeek, Settings exposes a per-model override for the same purpose.
 

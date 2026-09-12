@@ -30,6 +30,8 @@ The app must already be running. A command launched inside a Termigo pane target
 
 `run-command <id>` invokes a command-palette command by id (e.g. `settings.open`, `spaces.overview`) in the running app, so an external script can drive UI actions that have no agent equivalent.
 
+The Go companion in `cli/` carries the terminal-facing group on top of the same protocol: `tui` (an interactive terminal), `setup` (an onboarding wizard), `models`, `model`, `settings`, `approval` and `secret`. They are deliberately not part of the Rust client: each renders its own output and needs the model registry, the settings model and the keychain, none of which exist outside the app. See [Terminal configuration](#terminal-configuration) for the four methods behind them.
+
 `status` reports platform info (version/os/arch/methods) and, when the UI is ready, enriches it with the live agent state (status, current step, stop reason, run round), the active model, the workspace root, the active session and today's spend (from the cost ledger). When the webview is still restoring, it falls back to the platform fields alone so the command still answers a health check.
 
 `pentest-run` starts an approval-gated penetration test in the app's in-app agent. `target` (host, IP or URL) is added to the app's pentest scope and the optional `category` (`recon`, `web`, `network`, `subdomains`, `tls`, `headers`, `full`, …; default `recon`) selects the workflow. Every command the run performs still surfaces in the approval queue — this only starts the run, it never auto-approves. The frontend builds the agent prompt from `src/modules/control/lib/pentestPrompt.ts`.
@@ -64,6 +66,17 @@ Security properties:
 
 The token is injected into Termigo-spawned native shells together with `TERMIGO_PANE_ID`. Child coding agents inherit the caller context intentionally, which gives them the same local UI-control capability as the terminal that launched them. Tokens must never be logged or added to command output.
 
+## Terminal configuration
+
+Four methods exist so a terminal can show and change what only the app knows. The Rust side validates that the parameters are shaped correctly and forwards them; the frontend answers (`src/modules/control/lib/terminalConfig.ts`).
+
+- `models-list` returns the providers and models of this build, plus which providers already hold a key. The registry is ~60 entries of TypeScript, so a CLI cannot guess it and must not try.
+- `config-get` returns a named set of settings (never the whole preferences blob, which may be printed) and the list of keys the app is willing to write.
+- `config-set` writes **only** the keys in that list - `defaultModelId`, `toolSearchEnabled`, `disabledToolGroups`, `agentApprovalMode` - each through the same setter the Settings window uses, so validation and normalisation cannot diverge. An unvalidated "set any key" would be a way to write arbitrary values into `termigo-settings.json` from any local caller holding the token.
+- `secret-set` stores a provider API key through the app, which owns the platform-correct store: the OS keychain on macOS and Windows, a `0600` `secrets.json` in the app data dir on Linux. The key is never returned, logged or echoed.
+
+A value arrives from a command line as text, so the CLI decides how to read it (a bool, a comma-separated list) and the app checks the type again; the app's error names the values it accepts. `agentApprovalMode` is reachable through a command named `approval` rather than folded into a generic set, because with nobody at the window `ask` blocks every edit and the operator should have to say so.
+
 ## Command discovery inside a PTY
 
 The packaged helper is named `termigo-cli` because a macOS app bundle places sidecars beside the GUI executable, which is already named `termigo`. At app startup Termigo creates a user-private, per-process `bin/termigo` hard link to the packaged helper, falling back to a symlink on Unix or a copy on Windows. That directory is prepended to the PTY `PATH`.
@@ -84,6 +97,8 @@ The release profile uses one codegen unit, fat LTO, size optimization, abort-on-
 - Termigo does not yet install a global command for external Terminal.app, PowerShell, or other terminals. The bundled helper and cache descriptor already support that future installer step.
 - The CLI does not launch a stopped Termigo app yet.
 - Split, tab, agent, screen-read, and input commands are not part of protocol version 1 yet.
+- `config-set` is deliberately an allowlist, not a general settings write; a key outside the four is unavailable rather than silently accepted.
+- The terminal group needs the app to be running. Nothing launches a stopped Termigo yet, so an interactive command reports that instead of starting one.
 
 These limits are explicit so unsupported paths fail as unavailable instead of silently targeting the wrong pane or exposing a credential for a command that cannot connect.
 

@@ -496,7 +496,8 @@ to the Go companion below, and asking this binary for them now says so.
 ### 2. Go companion (automation)
 
 Lives in [`cli/`](cli/) and is **not** installed by the app. It automates what
-the desktop surfaces interactively and runs without the app open.
+the desktop surfaces interactively; most of it runs with the app closed, and
+the terminal group at the end of the list below drives a **running** Termigo.
 
 ```bash
 cd cli
@@ -517,6 +518,15 @@ exactly what makes `termigo agent list` fail confusingly.
 ./termi-go mcp list                     # configured MCP servers
 ./termi-go mcp tools fs                 # list tools of an MCP server
 ./termi-go config                       # show user configuration
+
+# drive a running Termigo
+./termi-go tui                          # interactive terminal for the app
+./termi-go setup                        # store a key, then pick a model
+./termi-go models                       # models this Termigo build ships
+./termi-go model deepseek-v4-pro        # set the default model
+./termi-go settings                     # show the app settings
+./termi-go approval ask                 # wait for confirmation on every edit
+./termi-go secret deepseek              # store a key (prompted, not echoed)
 ```
 
 - **Providers:** Codex, Claude Code, Gemini, Antigravity, Ollama (local).
@@ -530,7 +540,16 @@ exactly what makes `termigo agent list` fail confusingly.
   `.termigo/skills/` and `~/.termigo/skills/`
 - **MCP:** standard `mcpServers` registry in `.termigo/mcp.json`, JSON-RPC 2.0
   over stdio (initialize, tools/list, tools/call, ping)
-- **Never stores API keys**: credentials stay with each provider's own CLI
+- **Driving the app:** `tui`, `setup`, `models`, `model`, `settings`, `approval`
+  and `secret` talk to the running app over its loopback control socket, so they
+  need it open. The app owns the model registry, the settings model and the
+  keychain, so the CLI asks instead of keeping a copy that can drift, and
+  settings are written through the same setters the Settings window uses.
+- **API keys:** `secret` hands a key to the running app, which stores it in the
+  OS keychain on macOS and Windows and in `secrets.json` (mode `0600`) in the
+  app data dir on Linux. The CLI keeps no copy and never echoes the value.
+  Credentials for the agent providers above still stay with each provider's own
+  CLI.
 
 See [`docs/`](docs/) for the MCP, skills, agents, and architecture guides.
 

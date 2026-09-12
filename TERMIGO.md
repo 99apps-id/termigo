@@ -70,7 +70,7 @@ One line each; every module in full, with the invariants that are easy to break,
 
 ### Go CLI (`cli/`)
 
-The Go companion (`cli/cmd/termigo`) is the automation layer: `doctor`, `init`, `agent run`, `skill`, `mcp` and `config`. Keep it dependency-light (stdlib + yaml.v3); provider credentials stay with their own CLIs.
+The Go companion (`cli/cmd/termigo`) is the automation layer: `doctor`, `init`, `agent run`, `skill`, `mcp` and `config`, plus a terminal group that drives a running app (`tui`, `setup`, `models`, `model`, `settings`, `approval`, `secret`) over `internal/control`. Keep it dependency-light (stdlib + yaml.v3); provider credentials stay with their own CLIs, and an app API key is stored only by the app.
 
 ### AI subsystem (`src/modules/ai/`)
 
@@ -78,7 +78,7 @@ BYOK, cloud and local, with `PROVIDERS` and the model registry in `config.ts`. P
 
 The parts that are invariants rather than description:
 
-- **Keys** live in the OS keychain via `secrets_*`. Never persist a key to disk, settings, or `localStorage`.
+- **Keys** live in the OS keychain via `secrets_*` (on Linux, a `0600` `secrets.json` in the app data dir). Never persist a key to disk, settings, or `localStorage`.
 - **Agent** (`lib/agent.ts`): keep `Agent` / `DirectChatTransport` shape adhering to AI SDK v6 semantics. Stop reasons report by name. Budgets escalate per Continue: `[25, 50, 100]`.
 - **Tools** (`tools/tools.ts`): inspection tools auto-execute; mutating tools require approval. `lib/security.ts` denies secret paths (`.env*`, `.ssh/`, credentials) on read and write.
 - **Approval resume - trailing message is load-bearing**: `streamText` finds approvals only in `messages.at(-1)`. Nothing may be appended after an answered approval.
