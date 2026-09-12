@@ -189,3 +189,23 @@ export function startedState(
   if (!plan.next) return null;
   return { ...plan.next, messageId };
 }
+
+/**
+ * Whether the final answer should complete the streamed message in place,
+ * rather than be posted as a new message.
+ *
+ * This is the rule that stops the chat from showing the same answer twice: the
+ * text has already been edited onto the screen while the run worked, so posting
+ * it again duplicates it. Two cases force a fresh send instead:
+ *
+ * - a fallback status line is not the streamed answer, so it is always its own
+ *   message;
+ * - `messageId === 0` means no Telegram message was ever created (the text was
+ *   over the limit from the first tick, so streaming was skipped deliberately).
+ */
+export function shouldFinalizeStream(
+  state: MirrorStreamState | null,
+  isFallback: boolean,
+): state is MirrorStreamState {
+  return !isFallback && state !== null && state.messageId > 0;
+}

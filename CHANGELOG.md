@@ -8,6 +8,24 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **A task sent from Telegram was silent, then answered all at once.** For a
+  Telegram-initiated run the relay streamed a progress card (status, tools,
+  step) but held the assistant's own text until the run settled, so a task that
+  spent minutes running tools sent no words at all until the end - the reported
+  "tidak ada respon 2 arah diawal task", with the worry that everything would
+  pile up at the finish. The answer is now shown while it is being written: sent
+  once, then edited in place through the same `mirrorStream` rules the
+  Termigo-to-Telegram direction already uses, and finalized with the whole text.
+  A fallback status line is still its own message, because it is not the
+  streamed answer.
+- **The run summary overstated the tool payload when tools are deferred.**
+  `promptBytes.tools` and `toolCount` measured the FULL toolset even though
+  `prepareStep` narrows each request to the active subset in search mode, so a
+  run reported `145 tools 94.2KB` for a request that actually carried 39 tools
+  and 16,055 input tokens - a line that contradicted its own token count, and
+  the number the original "why is this slow" investigation was read from. The
+  measurement now covers the active set, and the line reads `39/145` so the
+  deferred tools stay visible. The in-app run diagnostics show the same numbers.
 - **Chaining `&&` / `||` let an unchecked command through.** The agent's shell
   tool validated only the first token, so `git status && rm -rf /` passed:
   `git` is allowlisted and the rest of the line was never examined. A chain now

@@ -16,6 +16,7 @@ import {
   MIRROR_EDIT_MIN_INTERVAL_MS,
   type MirrorStreamState,
   planMirrorDelivery,
+  shouldFinalizeStream,
   startedState,
 } from "./mirrorStream";
 
@@ -251,5 +252,29 @@ describe("startedState", () => {
       now: t0,
     });
     expect(startedState(1, plan)).toBeNull();
+  });
+});
+
+describe("shouldFinalizeStream", () => {
+  it("completes the message in place when the answer is already on screen", () => {
+    // Posting it again is what a user sees as the same answer twice.
+    expect(shouldFinalizeStream(streaming(), false)).toBe(true);
+  });
+
+  it("never finalizes a fallback status line into the streamed answer", () => {
+    // "Run produced no text output" is not the streamed text; editing it in
+    // would replace the answer with an unrelated notice.
+    expect(shouldFinalizeStream(streaming(), true)).toBe(false);
+  });
+
+  it("sends fresh when no Telegram message was ever created", () => {
+    // The over-the-limit case: streaming was skipped on purpose.
+    expect(
+      shouldFinalizeStream(streaming({ messageId: 0, pushed: "" }), false),
+    ).toBe(false);
+  });
+
+  it("sends fresh when nothing was streamed at all", () => {
+    expect(shouldFinalizeStream(null, false)).toBe(false);
   });
 });

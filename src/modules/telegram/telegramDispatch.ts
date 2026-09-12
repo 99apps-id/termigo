@@ -48,6 +48,7 @@ import {
 import {
   type MirrorStreamState,
   planMirrorDelivery,
+  shouldFinalizeStream,
   startedState,
 } from "./mirrorStream";
 import { useTelegramStore } from "./store";
@@ -446,12 +447,17 @@ export async function runMirror(signal: AbortSignal): Promise<void> {
 /**
  * Wait until the dispatched run produces a fresh assistant answer and settles.
  * Returns the text to send back, or a short status line when nothing came.
+ *
+ * `onPartial` fires on every tick that has fresh assistant text, so the caller
+ * can show it while the run is still working. It is awaited, so a slow send
+ * throttles the loop instead of queueing edits.
  */
 async function waitForReply(
   store: typeof import("../ai/store/chatStore"),
   signal: AbortSignal,
   sessionId: string,
   baseline: number,
+  onPartial?: (text: string) => Promise<void>,
 ): Promise<string> {
   const started = Date.now();
   const MAX_WAIT = 30 * 60 * 1000;
@@ -466,7 +472,15 @@ async function waitForReply(
     const count = countAssistantMessages(store.getChat, sessionId);
 
     if (count > baseline) {
-      // A fresh answer exists; send it once the run has settled.
+      // Show what the agent has written so far. Sent BEFORE the settle check on
+      // purpose: waiting for the full answer meant a task that spends minutes
+      // running tools sent nothing at all until it finished, which reads as
+      // "the agent is ignoring me".
+      if (onPartial) {
+        const soFar = lastAssistantText(store.getChat, sessionId, baseline);
+        if (soFar) await onPartial(soFar);
+      }
+      // A fresh answer exists; return it once the run has settled.
       if (!busy) {
         return (
           lastAssistantText(store.getChat, sessionId, baseline) ??
@@ -597,12 +611,60 @@ export async function runAgentAndStream(
         let fallbackSent = false;
         let settleStart = Date.now();
         const SETTLE_TIMEOUT = 25_000;
+
+        // The answer is streamed into ONE Telegram message, edited as the agent
+        // writes, then finalized with the whole text. Sending a new message per
+        // partial write would spam the chat; holding everything until the end
+        // (the previous behaviour) left the chat silent through a task that can
+        // run for minutes, which is exactly what "tidak ada respon 2 arah diawal
+        // task" describes.
+        //
+        // Held in an object rather than a `let`: the state is only ever written
+        // from the `onPartial` closure, and TypeScript's control-flow analysis
+        // does not track closure writes, so a bare `let` stays narrowed to its
+        // initial `null` and cannot be read back without a cast.
+        const stream: { state: MirrorStreamState | null } = { state: null };
+        const onPartial = async (partial: string): Promise<void> => {
+          if (signal.aborted) return;
+          const plan = planMirrorDelivery({
+            text: partial,
+            settled: false,
+            state: stream.state,
+            now: Date.now(),
+          });
+          try {
+            if (plan.send?.kind === "start") {
+              const id = await sendProgressMessage(
+                chatId,
+                plan.send.text,
+                signal,
+              );
+              if (id !== null) stream.state = startedState(id, plan);
+            } else if (plan.send?.kind === "edit") {
+              const active = stream.state;
+              if (!active) return;
+              const ok = await editProgressMessage(
+                chatId,
+                active.messageId,
+                plan.send.text,
+                signal,
+              );
+              // Only record the taller text once it is actually shown, so a
+              // failed edit is retried instead of being treated as delivered.
+              if (ok && plan.next) stream.state = plan.next;
+            }
+          } catch {
+            // Streaming is best-effort; the final answer below still sends.
+          }
+        };
+
         while (!signal.aborted) {
           const reply = await waitForReply(
             store,
             signal,
             sessionId,
             currentBaseline,
+            onPartial,
           );
           stopReasonSnapshot =
             store.useChatStore.getState().agentMeta.stopReason;
@@ -619,7 +681,20 @@ export async function runAgentAndStream(
             // an actually-idle run can end this handler.
           } else {
             if (isFallback) fallbackSent = true;
-            await sendReplyWithDiagrams(chatId, reply, signal);
+            const streamed = stream.state;
+            if (shouldFinalizeStream(streamed, isFallback)) {
+              // The answer is already on screen: complete it in place instead of
+              // posting a second copy of the same text.
+              await finalizeStreamedMessage(
+                chatId,
+                streamed.messageId,
+                reply,
+                signal,
+              );
+              stream.state = null;
+            } else {
+              await sendReplyWithDiagrams(chatId, reply, signal);
+            }
             replies += 1;
             sentChars += reply.length;
             if (isFallback) seenFallback = true;

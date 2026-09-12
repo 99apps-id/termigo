@@ -849,6 +849,11 @@ export type RunDiagnostics = {
     total: number;
   };
   toolCount: number;
+  /**
+   * Tools present before the search-mode filter. Equal to `toolCount` on a
+   * normal run; larger when tools are deferred, so the UI can say "39 of 145".
+   */
+  toolsAdvertised?: number;
   tokens: { input: number; output: number; cached: number };
   cachePct: number;
   steps: number;
@@ -1423,9 +1428,23 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // is paid once per process rather than once per run. Tools whose schema
   // cannot be converted are reported through `unmeasured`, so an inexact total
   // is labelled instead of being passed off as exact.
-  const toolPayload = measureToolPayload(tools);
+  //
+  // Measured on the ACTIVE set, not the full one. In search mode `prepareStep`
+  // narrows each request to the always-on set plus whatever the model has
+  // discovered, so measuring everything reported "145 tools 94.2KB" for a
+  // request that actually carried 39 tools and 16,055 input tokens - a line
+  // that contradicted its own token count, and the number the original "why is
+  // this slow" investigation was read from. An instrument that overstates the
+  // payload is the same failure as one that understates it.
+  const toolsAdvertised = Object.keys(tools).length;
+  const measuredTools = toolSearchOn
+    ? Object.fromEntries(
+        Object.entries(tools).filter(([name]) => alwaysActive.has(name)),
+      )
+    : tools;
+  const toolPayload = measureToolPayload(measuredTools);
   const toolBytes = toolPayload.bytes;
-  const toolCount = Object.keys(tools).length;
+  const toolCount = Object.keys(measuredTools).length;
 
   // Pin the first step to a fan-out when the request is broad enough to be
   // worth dividing. A prompt-level mandate does not hold: models read files
@@ -1768,6 +1787,9 @@ export async function runAgentStream(opts: RunAgentOptions) {
         contextMs: Math.round(opts.contextMs ?? 0),
         promptBytes,
         toolCount,
+        ...(toolsAdvertised > toolCount
+          ? { toolsAdvertised }
+          : {}),
         tokens: {
           input: runInput,
           output: runOutput,
@@ -1850,7 +1872,9 @@ export async function runAgentStream(opts: RunAgentOptions) {
             // Count as well as size: 11.6 KB alone cannot tell "no MCP server
             // attached" from "one attached that measures small", and the first
             // reading of this line asked exactly that question.
-            `mem ${kb(promptBytes.learned)} / ${toolCount} tools ${kb(promptBytes.tools)}` +
+            `mem ${kb(promptBytes.learned)} / ${toolCount}${
+              toolsAdvertised > toolCount ? `/${toolsAdvertised}` : ""
+            } tools ${kb(promptBytes.tools)}` +
             // An undercounted schema would make this line quietly useless, so
             // an inexact total says so instead of looking precise.
             `${toolPayload.unmeasured > 0 ? ` (${toolPayload.unmeasured} unmeasured)` : ""}) | ` +
