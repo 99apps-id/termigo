@@ -179,4 +179,85 @@ describe("contextEviction", () => {
     expect(parts[0].output.value).toContain("evicted to save context");
     expect(parts[1].output.value.content).toBe("new copy");
   });
+
+  function twoReadsOfTheSamePath(secondValue: unknown): ModelMessage[] {
+    return [
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "c1",
+            toolName: "read_file",
+            output: {
+              type: "json",
+              value: { path: "src/main.ts", content: "old copy" },
+            },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "c2",
+            toolName: "read_file",
+            output: { type: "json", value: secondValue },
+          },
+        ],
+      },
+    ] as unknown as ModelMessage[];
+  }
+
+  it("returns the caller's array untouched when nothing is evicted", () => {
+    const messages = [
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "c1",
+            toolName: "read_file",
+            output: { type: "json", value: { path: "only.ts", content: "x" } },
+          },
+        ],
+      },
+    ] as unknown as ModelMessage[];
+
+    const result = evictObsoleteToolOutputs(messages);
+    expect(result.summary.evictedToolCalls).toBe(0);
+    // The same array, not an equal copy: a fresh identity on every model call
+    // re-runs anything memoised on the transcript, for no eviction at all.
+    expect(result.messages).toBe(messages);
+  });
+
+  it("never writes into the caller's transcript", () => {
+    const messages = twoReadsOfTheSamePath({
+      path: "src/main.ts",
+      content: "new copy",
+    });
+    const before = JSON.stringify(messages);
+
+    const result = evictObsoleteToolOutputs(messages);
+    expect(result.summary.evictedToolCalls).toBe(1);
+    expect(JSON.stringify(messages)).toBe(before);
+  });
+
+  it("keeps values a JSON round-trip cannot carry", () => {
+    // The kept part is copied, not serialised, so a Uint8Array (image data on a
+    // tool result) survives as the same object instead of becoming { 0: 1, ... }.
+    const bytes = new Uint8Array([1, 2, 3]);
+    const messages = twoReadsOfTheSamePath({
+      path: "src/main.ts",
+      bytes,
+    });
+
+    const result = evictObsoleteToolOutputs(messages);
+    expect(result.summary.evictedToolCalls).toBe(1);
+    const kept = result.messages[1].content as unknown as Array<{
+      output: { value: { bytes: Uint8Array } };
+    }>;
+    expect(kept[0].output.value.bytes).toBe(bytes);
+  });
 });

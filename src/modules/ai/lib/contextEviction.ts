@@ -47,15 +47,22 @@ export function evictObsoleteToolOutputs(messages: readonly ModelMessage[]): {
   let estimatedTokens = 0;
 
   const seenReadPaths = new Set<string>();
-  const cloned: ModelMessage[] = JSON.parse(JSON.stringify(messages));
+  // Copy-on-write: only a message whose output is actually rewritten is
+  // rebuilt. This used to deep-clone the whole transcript through
+  // `JSON.parse(JSON.stringify(...))`, which serialized every message on every
+  // model call, handed back a new array identity even when nothing was
+  // evicted, and dropped anything JSON cannot carry (Uint8Array image data,
+  // undefined, class instances).
+  const out: ModelMessage[] = messages.slice();
+  let rebuilt = false;
 
   // Walk backwards from newest to oldest. Both loops must go newest-first:
   // an auto-continuing turn collapses its whole tool history into ONE message
   // (the 0.9.10 log shape: 15 read_file parts in one 24 KB message), and a
   // forward walk over the parts array would evict the NEWEST duplicate and
   // keep the stale one - backwards.
-  for (let i = cloned.length - 1; i >= 0; i--) {
-    const msg = cloned[i];
+  for (let i = out.length - 1; i >= 0; i--) {
+    const msg = out[i];
     if (msg.role !== "tool") continue;
 
     if (Array.isArray(msg.content)) {
@@ -65,6 +72,7 @@ export function evictObsoleteToolOutputs(messages: readonly ModelMessage[]): {
         input?: unknown;
         output?: unknown;
       }[];
+      let nextParts: typeof parts | null = null;
       for (let p = parts.length - 1; p >= 0; p--) {
         const part = parts[p];
         if (part.type === "tool-result" && part.toolName === "read_file") {
@@ -80,9 +88,15 @@ export function evictObsoleteToolOutputs(messages: readonly ModelMessage[]): {
               // Keep the replacement strictly `{ type, value }`: the SDK's
               // tool-output shape has no room for extra keys, and a stray
               // `path` would travel into the provider payload for nothing.
-              part.output = {
-                type: "text",
-                value: `[Older read_file output for ${path} evicted to save context]`,
+              // The part is copied, never written in place, so the caller's
+              // transcript is left untouched without cloning all of it.
+              if (!nextParts) nextParts = parts.slice();
+              nextParts[p] = {
+                ...part,
+                output: {
+                  type: "text",
+                  value: `[Older read_file output for ${path} evicted to save context]`,
+                },
               };
               evictedCount++;
             } else {
@@ -91,11 +105,15 @@ export function evictObsoleteToolOutputs(messages: readonly ModelMessage[]): {
           }
         }
       }
+      if (nextParts) {
+        out[i] = { ...msg, content: nextParts } as ModelMessage;
+        rebuilt = true;
+      }
     }
   }
 
   return {
-    messages: cloned,
+    messages: rebuilt ? out : (messages as ModelMessage[]),
     summary: {
       messagesProcessed: messages.length,
       evictedToolCalls: evictedCount,
