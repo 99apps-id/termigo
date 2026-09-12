@@ -36,16 +36,20 @@ export type LoadedSessions = {
 };
 
 export async function loadAll(): Promise<LoadedSessions> {
-  // One IPC roundtrip via entries() rather than two parallel get()s. Per-
-  // session messages are loaded lazily via `loadMessages` only when a
-  // session is opened, so cold boot stays at a single store call.
-  const entries = await store.entries();
-  let sessions: SessionMeta[] | undefined;
-  let activeId: string | null | undefined;
-  for (const [k, v] of entries) {
-    if (k === KEY_SESSIONS) sessions = v as SessionMeta[];
-    else if (k === KEY_ACTIVE) activeId = v as string | null;
-  }
+  // Two reads rather than one `entries()`.
+  //
+  // The comment here used to say entries() saved an IPC roundtrip, and it does,
+  // but it also returns EVERY value in the file - and this store holds each
+  // session's whole transcript under `messages:<id>`. On a field install that is
+  // 17MB and 66k strings dragged across IPC and materialised in the webview on
+  // every boot, to read two keys. Per-session messages are still loaded lazily
+  // through `loadMessages`; they were only never supposed to be part of boot.
+  // Two `get()` calls in parallel transfer two values, and the roundtrip they
+  // cost is concurrent.
+  const [sessions, activeId] = await Promise.all([
+    store.get<SessionMeta[]>(KEY_SESSIONS),
+    store.get<string | null>(KEY_ACTIVE),
+  ]);
   return { sessions: sessions ?? [], activeId: activeId ?? null };
 }
 
