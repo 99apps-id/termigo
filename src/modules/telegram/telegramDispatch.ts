@@ -403,6 +403,8 @@ export async function runAgentAndStream(
         let currentBaseline = baseline;
         let stopReasonSnapshot: string | null = null;
         let fallbackSent = false;
+        let settleStart = Date.now();
+        const SETTLE_TIMEOUT = 25_000;
         while (!signal.aborted) {
           const reply = await waitForReply(
             store,
@@ -412,6 +414,7 @@ export async function runAgentAndStream(
           );
           stopReasonSnapshot =
             store.useChatStore.getState().agentMeta.stopReason;
+          settleStart = Date.now();
 
           // Surface a status fallback at most once per run. It must NOT skip
           // the settle check below: `continue` used to jump straight back into
@@ -454,6 +457,10 @@ export async function runAgentAndStream(
           );
 
           if (!queued && !busy) break;
+
+          if (Date.now() - settleStart > SETTLE_TIMEOUT) {
+            break;
+          }
 
           if (!busy && queued) {
             const runtime = await import("../ai/store/chatRuntime");
