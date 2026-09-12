@@ -6,6 +6,12 @@
 import { apiGet, TelegramApiError } from "./telegramApi";
 import { handleUpdate, type Update } from "./telegramCommands";
 import { runMirror } from "./telegramDispatch";
+import {
+  logRelayInfo,
+  logRelayWarn,
+  relayErrorLine,
+  updateLine,
+} from "./telegramLog";
 import { useTelegramStore } from "./store";
 
 export let loopController: AbortController | null = null;
@@ -51,10 +57,14 @@ export function checkPollingStall(): void {
   if (!useTelegramStore.getState().enabled || !loopController) return;
   const elapsed = Date.now() - lastPollProgressTime;
   if (elapsed > POLLING_STALL_TIMEOUT_MS) {
+    // In the file log as well as the console: on a headless install nobody is
+    // watching the console, and a recycled poller is otherwise invisible.
+    const seconds = Math.round(elapsed / 1000);
+    logRelayWarn(
+      `polling stalled: no getUpdates progress for ${seconds}s, recycling poller`,
+    );
     console.warn(
-      `[Telegram] Polling stall detected: no getUpdates progress for ${Math.round(
-        elapsed / 1000,
-      )}s. Reconnecting poller...`,
+      `[Telegram] Polling stall detected: no getUpdates progress for ${seconds}s. Reconnecting poller...`,
     );
     // Recycle controller so the hanging fetch terminates cleanly
     const oldCtrl = loopController;
@@ -81,6 +91,9 @@ async function runLoop(signal: AbortSignal): Promise<void> {
       const relaySignal = relayController?.signal ?? signal;
       for (const u of data.result ?? []) {
         if (signal.aborted || relaySignal.aborted) break;
+        // One line per update, before it is handled: an update that arrives and
+        // then fails is the case that used to leave no trace at all.
+        logRelayInfo(updateLine(u));
         // One bad update (a malformed payload, a 400 from answerCallback on an
         // expired query) must not drop the rest of the batch. Catch per update
         // and still advance past it, or Telegram redelivers the poison update
@@ -88,6 +101,7 @@ async function runLoop(signal: AbortSignal): Promise<void> {
         try {
           await handleUpdate(u, relaySignal);
         } catch (e) {
+          logRelayWarn(relayErrorLine(`update ${u.update_id}`, e));
           console.warn(
             `[Telegram] update ${u.update_id} handler failed: ${
               e instanceof Error ? e.message : String(e)
@@ -105,11 +119,18 @@ async function runLoop(signal: AbortSignal): Promise<void> {
       if (e instanceof TelegramApiError && e.status === 429) {
         backoffMs = Math.max(1000, (e.retryAfter ?? 5) * 1000);
       }
+      // The store keeps lastError for the UI, but the UI is a webview on a
+      // server nobody is looking at. A poll that keeps failing has to reach the
+      // file, or "the bot went quiet" has no cause attached to it.
+      logRelayWarn(
+        `${relayErrorLine("getUpdates", e)} - retrying in ${Math.round(backoffMs / 1000)}s`,
+      );
       await sleep(signal, backoffMs);
     }
   }
   if (loopController?.signal === signal) {
     useTelegramStore.getState().setOnline(false);
+    logRelayInfo("polling stopped");
   }
 }
 
@@ -130,12 +151,16 @@ export async function startTelegramBot(): Promise<void> {
   // looks exactly like "Telegram tidak bisa dipakai".
   void runLoop(controller.signal);
   void runMirror(mirror.signal);
+  logRelayInfo("relay started");
   try {
     const { cleanupStaleApprovals } = await import(
       "../ai/store/approvalQueueStore"
     );
     const cleaned = await cleanupStaleApprovals();
     if (cleaned > 0) {
+      // Stale approvals are the residue of runs killed mid-approval; counting
+      // them is how a recurrence of that bug becomes visible.
+      logRelayInfo(`cleaned ${cleaned} stale approval(s) on start`);
       console.warn(`[ai] cleaned ${cleaned} stale approvals on startup`);
     }
   } catch {
@@ -145,6 +170,10 @@ export async function startTelegramBot(): Promise<void> {
 
 /** Stop the long-polling loop. */
 export function stopTelegramBot(): void {
+  // Only log when something was actually running: this is called on every
+  // render of the effect that owns the bot, including on a mount where the
+  // relay was never started, and a "relay stopped" line there would be noise.
+  const wasRunning = loopController !== null;
   if (watchdogTimer) {
     clearInterval(watchdogTimer);
     watchdogTimer = null;
@@ -156,4 +185,5 @@ export function stopTelegramBot(): void {
   relayController?.abort();
   relayController = null;
   useTelegramStore.getState().setOnline(false);
+  if (wasRunning) logRelayInfo("relay stopped");
 }

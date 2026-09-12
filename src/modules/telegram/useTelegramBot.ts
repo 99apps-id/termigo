@@ -6,6 +6,7 @@
 
 import { useEffect } from "react";
 import { startTelegramBot, stopTelegramBot } from "./bot";
+import { logRelayInfo } from "./telegramLog";
 import { syncTelegramFromStorage, useTelegramStore } from "./store";
 
 const STORAGE_KEY = "termigo-telegram";
@@ -33,6 +34,14 @@ export function useTelegramBot(): void {
     if (enabled && hasToken) {
       void startTelegramBot();
       return () => stopTelegramBot();
+    }
+    // The one state worth naming: the toggle is on, so the UI says "enabled",
+    // but there is no token and nothing is polling. Telegram's side stays
+    // silent, so without this line "the bot is dead" has no cause attached.
+    // Not logged for a plain disabled relay, which is the normal resting state
+    // and would otherwise fire on every mount.
+    if (enabled && !hasToken) {
+      logRelayInfo("relay not started: enabled but no bot token in the keychain");
     }
     stopTelegramBot();
   }, [enabled, hasToken]);

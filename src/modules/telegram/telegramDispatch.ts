@@ -35,6 +35,13 @@ import {
   progressCtrls,
   lastFinishedProgressMessageIds,
 } from "./telegramProgress";
+import {
+  approvalWaitLine,
+  logRelayInfo,
+  logRelayWarn,
+  relayErrorLine,
+  runOutcomeLine,
+} from "./telegramLog";
 import { useTelegramStore } from "./store";
 
 function sleep(signal: AbortSignal, ms: number): Promise<void> {
@@ -240,6 +247,12 @@ export async function runMirror(signal: AbortSignal): Promise<void> {
             // undeliverable message cannot be re-sent every two seconds.
             const attempts = (mirrorSendFailures.get(mirrorKey) ?? 0) + 1;
             if (attempts >= MAX_MIRROR_SEND_ATTEMPTS) {
+              // Giving up is a silent drop: the message is marked seen so it is
+              // never retried, so without this line a reply that never reached
+              // Telegram looks like one that was never generated.
+              logRelayWarn(
+                `mirror gave up on a ${m.role} message after ${attempts} attempts (session ${sessionId})`,
+              );
               mirrorSendFailures.delete(mirrorKey);
               markMessageSeen(m.id, sessionId, m.role, text);
             } else {
@@ -349,6 +362,17 @@ export async function runAgentAndStream(
   initialText?: string,
   mode: "task" | "question" = "task",
 ): Promise<void> {
+  // Counters for the one-line outcome, declared outside the try so the finally
+  // reports them on every path - including the early returns, which is exactly
+  // where a run that never answered used to disappear without a trace.
+  const startedAt = Date.now();
+  let sessionIdForLog = "";
+  let replies = 0;
+  let sentChars = 0;
+  let seenFallback = false;
+  let pendingAtEnd = 0;
+  let approvalWaitLogged = false;
+  let stopReasonAtEnd: string | null = null;
   try {
     const store = await import("../ai/store/chatStore");
     if (!store.useChatStore.getState().activeSessionId) {
@@ -356,6 +380,7 @@ export async function runAgentAndStream(
     }
     const sessionId = store.useChatStore.getState().activeSessionId;
     if (!sessionId) return;
+    sessionIdForLog = sessionId;
     const baseline = countAssistantMessages(store.getChat, sessionId);
 
     // Snapshot existing message IDs prior to injecting this prompt.
@@ -383,6 +408,9 @@ export async function runAgentAndStream(
         const accepted = await action();
         if (!accepted) {
           progressCtl.abort();
+          logRelayWarn(
+            `run ${sessionId} not accepted - the runtime refused to start the agent`,
+          );
           await sendTelegram(
             chatId,
             "Could not start or resume the agent run - check the model / API key.",
@@ -414,6 +442,7 @@ export async function runAgentAndStream(
           );
           stopReasonSnapshot =
             store.useChatStore.getState().agentMeta.stopReason;
+          stopReasonAtEnd = stopReasonSnapshot;
           settleStart = Date.now();
 
           // Surface a status fallback at most once per run. It must NOT skip
@@ -427,6 +456,9 @@ export async function runAgentAndStream(
           } else {
             if (isFallback) fallbackSent = true;
             await sendReplyWithDiagrams(chatId, reply, signal);
+            replies += 1;
+            sentChars += reply.length;
+            if (isFallback) seenFallback = true;
           }
 
           // Immediately mark fresh assistant message(s) as seen and Telegram-origin.
@@ -455,6 +487,19 @@ export async function runAgentAndStream(
             appStatus,
             pendingApprovals.length > 0,
           );
+          // An approval nobody answers is the one state that never resolves on
+          // its own, and the agent log is silent throughout it. Logged once per
+          // run rather than per tick.
+          pendingAtEnd = pendingApprovals.length;
+          if (pendingApprovals.length > 0 && !approvalWaitLogged) {
+            approvalWaitLogged = true;
+            logRelayInfo(
+              approvalWaitLine(
+                pendingApprovals.length,
+                pendingApprovals.map((a) => a.toolName),
+              ),
+            );
+          }
 
           if (!queued && !busy) break;
 
@@ -473,6 +518,7 @@ export async function runAgentAndStream(
         const stopReason =
           stopReasonSnapshot ??
           store.useChatStore.getState().agentMeta.stopReason;
+        stopReasonAtEnd = stopReason;
         const statusAfterWait = store.useChatStore.getState().agentMeta.status;
         if (stopReason === "step-cap" && statusAfterWait === "idle") {
           const currentRound = store.useChatStore.getState().agentMeta.runRound;
@@ -522,11 +568,29 @@ export async function runAgentAndStream(
     }
   } catch (e) {
     if (signal.aborted) return;
+    logRelayWarn(relayErrorLine(`run ${sessionIdForLog || "?"}`, e));
     await sendTelegram(
       chatId,
       `Error during run: ${e instanceof Error ? e.message : String(e)}`,
       signal,
     ).catch(() => {});
+  } finally {
+    // One line per relayed run, on every exit path. This is the line whose
+    // absence made "the agent hangs without producing output" impossible to
+    // confirm from the log.
+    logRelayInfo(
+      runOutcomeLine({
+        sessionId: sessionIdForLog || "?",
+        chatId,
+        elapsedMs: Date.now() - startedAt,
+        replies,
+        sentChars,
+        fallback: seenFallback,
+        stopReason: stopReasonAtEnd,
+        status: signal.aborted ? "aborted" : "settled",
+        pendingApprovals: pendingAtEnd,
+      }),
+    );
   }
 }
 

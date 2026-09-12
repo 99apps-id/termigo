@@ -6,6 +6,24 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **The Telegram relay now logs what it is doing.** It logged nothing at all:
+  `grep -ci telegram` on a running headless install's 238-line log returned 0,
+  so a healthy relay, a stalled poller and a run that never produced an answer
+  were indistinguishable from outside the app - diagnosing "the agent hangs
+  without output" required reading the session store off disk by hand. The
+  relay now records each inbound update (command name, chat, character count),
+  one line per relayed run with the replies and characters actually sent, when
+  it is blocked on an unanswered approval, a stalled poller, poll failures with
+  their backoff, mirror messages it gave up on, and why it did not start. No
+  message bodies, prompts or model output are logged: the file is read next to
+  the session store, but it is also what people paste into a bug report.
+- **A log that fails can no longer fail what it describes.** `logInfo` reaches
+  Tauri's `invoke`, which rejects outside the app, and `void` on that promise
+  left an unhandled rejection that turned a fully-passing test run into a
+  failed one. The relay's log emit swallows its own failure.
+
 ### Fixed
 
 - **DeepSeek Flash was treated as a small model.** `deepseek-v4-flash` was in
