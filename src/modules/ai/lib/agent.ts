@@ -1165,8 +1165,6 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // (onStepFinish runs before the stop conditions are checked). The first stop
   // condition honours it.
   let forcedStop = false;
-  let consecutiveToolOnlySteps = 0;
-  const MAX_TOOL_ONLY_STEPS_BEFORE_SYNTHESIS = 2;
   const requestSynthesisOrStop = (reason: AgentStopReason): boolean => {
     const d = synthesisStopDecision(allowSynthesis, synthesisRequested);
     if (d.requested && synthesisRequestedAtStepCount < 0) {
@@ -1202,8 +1200,8 @@ export async function runAgentStream(opts: RunAgentOptions) {
       }
       return false;
     },
-    // A guard that fired from onStepFinish (the tool-only-loop check) set this;
-    // onStepFinish cannot end the loop by returning, so carry it here.
+    // A guard that fired from onStepFinish set this; onStepFinish cannot end
+    // the loop by returning, so carry it here.
     (_args) => forcedStop,
     // The synthesis step ran and the model called tools anyway: the provider
     // ignored `toolChoice: "none"`. This MUST win over the step-cap reason
@@ -1639,22 +1637,23 @@ export async function runAgentStream(opts: RunAgentOptions) {
         });
       }
 
-      // Guard: if the model emits tool-only steps repeatedly with no prose,
-      // force a synthesis step so the run can surface a user-facing summary
-      // instead of looping silently on tool calls.
-      const hasToolCalls = (step.toolCalls?.length ?? 0) > 0;
-      const hasText = Boolean(step.text?.trim());
-      if (hasToolCalls && !hasText) {
-        consecutiveToolOnlySteps += 1;
-      } else {
-        consecutiveToolOnlySteps = 0;
-      }
-      if (
-        !synthesisRequested &&
-        consecutiveToolOnlySteps >= MAX_TOOL_ONLY_STEPS_BEFORE_SYNTHESIS
-      ) {
-        void requestSynthesisOrStop("tool-only-loop");
-      }
+      // Note: a run of prose-free tool steps is NOT treated as a loop.
+      //
+      // It used to be: two consecutive tool-only steps requested a synthesis
+      // step, and the synthesis step ended the run whichever way it went. But
+      // a coding agent reading eight files emits no prose between them, so the
+      // guard terminated work that was succeeding. The trajectory store shows
+      // what that looked like - a run of 8 varied, all-successful reads
+      // (read_file x7, grep) marked "failed", and one of 6 (read_file x5, glob)
+      // the same, after burning 199k and 75k tokens.
+      //
+      // The signal was never necessary to bound a loop. `noToolRepetition(3)`
+      // catches the same call three times, `noErrorProgress(3)` a tool that
+      // keeps failing, `noProgressStop(2)` a model that narrates without
+      // acting, and the step budget caps the rest. Surfacing a summary instead
+      // of silence is still done - `requestSynthesisOrStop` gives every real
+      // guard that final tool-less step - so the user-facing outcome is kept
+      // without killing a run that is making progress.
 
       // Record each tool invocation in the trajectory store. By the time
       // onStepFinish fires the results for this step are already in, so each

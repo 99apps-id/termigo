@@ -1,4 +1,5 @@
 import type { ToolSet } from "ai";
+import { stepCountIs } from "ai";
 import { describe, expect, it } from "vitest";
 import {
   evaluateCircuitBreaker,
@@ -388,5 +389,85 @@ describe("evaluateCircuitBreaker", () => {
     const cleared = evaluateCircuitBreaker(successCalls, successResults, timedOut);
     expect(cleared.activeNudge).toBeNull();
     expect(cleared.consecutiveFailureCount).toBe(0);
+  });
+});
+
+// The evidence this bundle is written against, from the trajectory store:
+//
+//   run-mtxsloul-t1o6ba  status=failed  steps=8
+//     read_file, read_file, read_file, read_file, grep,
+//     read_file, read_file, read_file       <- all success, all different
+//   run-mtxsipep-0x5p4o  status=failed  steps=6
+//     read_file x5, glob                    <- all success
+//
+// Two runs of ordinary multi-file exploration, terminated by a guard, after
+// burning 199k and 75k tokens. The guard was a prose-free streak: two
+// consecutive steps that called tools without emitting text requested a
+// synthesis step, and the synthesis step ended the run either way. Reading
+// eight files emits no prose between them, so the guard fired on work that was
+// succeeding.
+//
+// It has been removed. A streak of prose-free tool steps is NOT a loop, and
+// this locks that: the predicates the run actually composes must all stay
+// quiet through the recorded shape.
+describe("a prose-free run of successful, varied tools is not a loop", () => {
+  /** The recorded shape: 8 steps, one tool each, all different, all success. */
+  const variedWork = () => {
+    const paths = [
+      "src/App.tsx",
+      "src/main.tsx",
+      "src/lib/utils.ts",
+      "package.json",
+      "vite.config.ts",
+      "src/app/App.tsx",
+      "src/modules/tabs/store.ts",
+      "tsconfig.json",
+    ];
+    const calls: Call[][] = paths.map((path, i) =>
+      i === 4
+        ? [
+            {
+              toolName: "grep",
+              toolCallId: "g1",
+              input: { pattern: "export" },
+              output: "src/a.ts:1:export {}",
+            },
+          ]
+        : [read(path, `contents of ${path}`)],
+    );
+    return steps(...calls);
+  };
+
+  it("is not flagged as repetition", () => {
+    expect(noToolRepetition<ToolSet>(3)(variedWork())).toBe(false);
+  });
+
+  it("is not flagged as no-progress, because every step called a tool", () => {
+    expect(noProgressStop<ToolSet>(2)(variedWork())).toBe(false);
+  });
+
+  it("is not flagged as repeated failure", () => {
+    expect(noErrorProgress<ToolSet>(3)(variedWork())).toBe(false);
+  });
+
+  it("does not stop before the step budget", () => {
+    expect(stepCountIs(25)(variedWork())).toBe(false);
+  });
+
+  it("stops only at the step budget, well past the recorded runs", () => {
+    // The recorded runs died at 6 and 8 steps. The cap is what should end a
+    // long run, and it must not be reached at 8.
+    expect(stepCountIs(8)(variedWork())).toBe(true);
+    expect(stepCountIs(12)(variedWork())).toBe(false);
+  });
+
+  it("still catches the loop it was meant to catch", () => {
+    // The guard is gone, not the protection: the same read three times is
+    // repetition and must trip.
+    expect(
+      noToolRepetition<ToolSet>(3)(
+        steps([read("a", "v")], [read("a", "v")], [read("a", "v")]),
+      ),
+    ).toBe(true);
   });
 });

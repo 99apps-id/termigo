@@ -880,12 +880,26 @@ export function modelKeepsReasoning(m: ModelInfo): boolean {
 }
 
 /**
- * Whether the model accepts being told which tool to call.
+ * Whether we KNOW the model accepts being told which tool to call.
  *
  * Reasoning models generally do not. DeepSeek answers a pinned
  * `toolChoice: { type: "tool" }` with "Thinking mode does not support this
  * tool_choice" and fails the whole request, which turned a broad request like
  * "audit this repo" into an error on exactly the models most worth asking it.
+ *
+ * A model reached through a user-supplied endpoint carries NO metadata - the
+ * compat/local entries have no `tags` at all - so this used to answer "yes" for
+ * every one of them and force the pin anyway. The same 400 came back from a
+ * StepFun thinking-mode endpoint:
+ *
+ *   provider responded in 661ms (status 400)
+ *   ai request failed: Thinking mode does not support this tool_choice
+ *
+ * Absence of metadata is not evidence of capability, and the cost of a wrong
+ * "yes" is a rejected request, so an unknown model is treated as not allowing
+ * it. The pin is an optimisation; the model still has `run_subagents` and can
+ * choose it. `lib/toolChoiceLearning` remains the ground truth for a built-in
+ * model whose tags are wrong.
  *
  * Kept apart from `modelKeepsReasoning` on purpose. That one is about whether
  * reasoning survives in the history; this is about what the API accepts. They
@@ -893,6 +907,8 @@ export function modelKeepsReasoning(m: ModelInfo): boolean {
  * first time they stop agreeing.
  */
 export function modelAllowsForcedToolChoice(m: ModelInfo): boolean {
+  // A user-supplied model id on a freeform provider: no metadata to decide on.
+  if (FREEFORM_PROVIDERS.has(m.provider)) return false;
   return !(m.tags?.includes("reasoning") ?? false);
 }
 
