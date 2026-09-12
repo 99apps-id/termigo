@@ -5,6 +5,14 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { type RefObject, useEffect } from "react";
 import { resolveControlContext } from "./lib/context";
 import { createReadinessQueue } from "./lib/readiness";
+import {
+  WRITABLE_CONFIG_KEYS,
+  listModels,
+  readTerminalConfig,
+  setProviderSecret,
+  writeTerminalConfig,
+} from "./lib/terminalConfig";
+import { getAllKeys } from "@/modules/ai/lib/keyring";
 
 type ControlError = {
   code: string;
@@ -220,6 +228,41 @@ export function parseRunCommandRequest(params: unknown): RunCommandRequest {
   return { command };
 }
 
+export type ConfigSetRequest = { key: string; value: unknown };
+
+export function parseConfigSetRequest(params: unknown): ConfigSetRequest {
+  if (typeof params !== "object" || params === null) {
+    throw new RequestError("invalid_params", "config-set parameters are required");
+  }
+  const value = params as Record<string, unknown>;
+  const key = typeof value.key === "string" ? value.key.trim() : "";
+  if (!key) {
+    throw new RequestError("invalid_params", "config-set needs a key");
+  }
+  // The value stays untyped here on purpose; the writable allowlist and the
+  // per-key type check live in lib/terminalConfig, which owns the settings model.
+  return { key, value: value.value };
+}
+
+export type SecretSetRequest = { provider: string; value: string };
+
+export function parseSecretSetRequest(params: unknown): SecretSetRequest {
+  if (typeof params !== "object" || params === null) {
+    throw new RequestError("invalid_params", "secret-set parameters are required");
+  }
+  const raw = params as Record<string, unknown>;
+  const provider =
+    typeof raw.provider === "string" ? raw.provider.trim() : "";
+  const value = typeof raw.value === "string" ? raw.value : "";
+  if (!provider) {
+    throw new RequestError("invalid_params", "secret-set needs a provider");
+  }
+  if (!value.trim()) {
+    throw new RequestError("invalid_params", "secret-set needs a key");
+  }
+  return { provider, value };
+}
+
 const setFrontendReady = createReadinessQueue((ready) =>
   invoke("control_frontend_ready", { ready }),
 );
@@ -315,6 +358,82 @@ export function useControlBridge({
             ok: true,
             result: { command: run.command, label: result.label ?? null },
           });
+          return;
+        }
+        // Terminal-driven configuration. The model registry and the settings
+        // model live here, so the CLI asks rather than guessing; see
+        // lib/terminalConfig.ts for why, and for the write allowlist that keeps
+        // `config-set` from becoming an arbitrary write into settings.
+        if (request.method === "models-list") {
+          const catalogue = listModels();
+          const config = await readTerminalConfig();
+          const keys = await getAllKeys();
+          await respond(request.id, {
+            ok: true,
+            result: {
+              ...catalogue,
+              current: {
+                defaultModelId: config.defaultModelId,
+                configuredProviders: Object.entries(keys)
+                  .filter(([, v]) => !!v)
+                  .map(([id]) => id),
+              },
+            },
+          });
+          return;
+        }
+        if (request.method === "config-get") {
+          const config = await readTerminalConfig();
+          const raw = request.params as { key?: unknown } | null;
+          const key = typeof raw?.key === "string" ? raw.key.trim() : "";
+          if (key) {
+            if (!(key in config)) {
+              throw new RequestError(
+                "invalid_params",
+                `'${key}' is not readable from the terminal`,
+              );
+            }
+            await respond(request.id, {
+              ok: true,
+              result: {
+                key,
+                value: (config as Record<string, unknown>)[key],
+                writableKeys: WRITABLE_CONFIG_KEYS,
+              },
+            });
+            return;
+          }
+          await respond(request.id, {
+            ok: true,
+            result: { config, writableKeys: WRITABLE_CONFIG_KEYS },
+          });
+          return;
+        }
+        if (request.method === "config-set") {
+          const change = parseConfigSetRequest(request.params);
+          try {
+            const applied = await writeTerminalConfig(change.key, change.value);
+            await respond(request.id, { ok: true, result: applied });
+          } catch (error) {
+            throw new RequestError(
+              "invalid_params",
+              error instanceof Error ? error.message : String(error),
+            );
+          }
+          return;
+        }
+        if (request.method === "secret-set") {
+          const secret = parseSecretSetRequest(request.params);
+          try {
+            const stored = await setProviderSecret(secret.provider, secret.value);
+            // The key itself is never included in the reply.
+            await respond(request.id, { ok: true, result: stored });
+          } catch (error) {
+            throw new RequestError(
+              "secret_set_failed",
+              error instanceof Error ? error.message : String(error),
+            );
+          }
           return;
         }
         if (request.method === "run") {

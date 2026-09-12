@@ -14,15 +14,21 @@ import (
 
 	"github.com/99apps-id/termigo/cli/internal/agent"
 	"github.com/99apps-id/termigo/cli/internal/config"
+	"github.com/99apps-id/termigo/cli/internal/control"
 	"github.com/99apps-id/termigo/cli/internal/doctor"
 	"github.com/99apps-id/termigo/cli/internal/harness"
 	"github.com/99apps-id/termigo/cli/internal/initcmd"
 	"github.com/99apps-id/termigo/cli/internal/mcp"
 	"github.com/99apps-id/termigo/cli/internal/mcpserver"
 	"github.com/99apps-id/termigo/cli/internal/skill"
+	"github.com/99apps-id/termigo/cli/internal/terminal"
 )
 
 var version = "dev"
+
+// stdin is the input for the interactive commands. A variable so tests can drive
+// the terminal without a console.
+var stdin io.Reader = os.Stdin
 
 func main() {
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
@@ -57,6 +63,20 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return runHarness(args[1:], stdout)
 	case "config":
 		return runConfig(args[1:], stdout)
+	case "tui":
+		return runTUI(args[1:], stdout)
+	case "setup":
+		return runSetup(args[1:], stdout)
+	case "models":
+		return runModels(args[1:], stdout)
+	case "model":
+		return runModel(args[1:], stdout)
+	case "settings":
+		return runSettings(args[1:], stdout)
+	case "approval":
+		return runApproval(args[1:], stdout)
+	case "secret":
+		return runSecret(args[1:], stdout)
 	default:
 		return fmt.Errorf("unknown command %q; run 'termigo help'", args[0])
 	}
@@ -119,12 +139,25 @@ Commands:
   version                          Print CLI version
   help                             Show this help
 
+Commands that drive a running Termigo:
+  tui                              Interactive terminal: setup, models, settings
+  setup                            Store a provider API key and pick a model
+  models [--provider <id>]         List the models this Termigo build ships
+  model [<id>]                     Show or set the default model
+  settings [<key>]                 Show the app settings a terminal may see
+  settings set <key> <value>       Change one allowlisted app setting
+  approval [<mode>]                Show or set the agent approval mode
+  secret <provider>                Store a provider API key (prompted, never echoed)
+
 Common options:
   -w, --workspace <dir>            Use a specific workspace (default: current dir)
+  --json                           Machine-readable output where supported
 
 Agent providers: codex, claude, gemini, antigravity, ollama (local).
 Skills live in .termigo/skills/<name>/SKILL.md; MCP servers in .termigo/mcp.json.
-The CLI never stores API keys; provider credentials stay with their own CLIs.
+The app must be running for the commands above that drive it.
+The CLI never stores an API key itself: 'termigo secret' hands it to the running
+app, which keeps it in the OS keychain (on Linux, secrets.json with mode 0600).
 `)
 }
 
@@ -697,6 +730,351 @@ func runHarness(args []string, stdout io.Writer) error {
 	_, _ = fmt.Fprintf(stdout, "Pass Rate:    %.1f%%\n", report.PassRate)
 	_, _ = fmt.Fprintf(stdout, "Total Time:   %v\n", report.TotalTime.Round(time.Millisecond))
 	return nil
+}
+
+// The commands below drive a running Termigo over its control socket. They are
+// the terminal half of the app's terminalConfig surface: the app owns the model
+// registry, the settings model and the keychain, so the CLI asks rather than
+// keeping a copy that can drift.
+
+func runTUI(args []string, stdout io.Writer) error {
+	for _, arg := range args {
+		switch arg {
+		case "--help", "-h":
+			_, err := fmt.Fprintln(stdout, "Usage: termigo tui\n\nInteractive terminal for the running Termigo.")
+			return err
+		default:
+			return fmt.Errorf("unknown tui option %q", arg)
+		}
+	}
+	return terminal.Run(stdin, stdout)
+}
+
+func runSetup(args []string, stdout io.Writer) error {
+	for _, arg := range args {
+		switch arg {
+		case "--help", "-h":
+			_, err := fmt.Fprintln(stdout, "Usage: termigo setup\n\nStores a provider API key through the running app and sets the default model.")
+			return err
+		default:
+			return fmt.Errorf("unknown setup option %q", arg)
+		}
+	}
+	return terminal.Setup(stdin, stdout)
+}
+
+func runModels(args []string, stdout io.Writer) error {
+	jsonOutput := false
+	providerFilter := ""
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
+		switch {
+		case arg == "--json":
+			jsonOutput = true
+		case arg == "--provider":
+			if index+1 >= len(args) {
+				return errors.New("--provider requires an id")
+			}
+			index++
+			providerFilter = args[index]
+		case strings.HasPrefix(arg, "--provider="):
+			providerFilter = strings.TrimPrefix(arg, "--provider=")
+		case arg == "--help", arg == "-h":
+			_, err := fmt.Fprintln(stdout, "Usage: termigo models [--provider <id>] [--json]")
+			return err
+		default:
+			return fmt.Errorf("unknown models option %q", arg)
+		}
+	}
+
+	catalogue, err := control.Models()
+	if err != nil {
+		return err
+	}
+	if providerFilter != "" {
+		if _, ok := catalogue.ProviderByID(providerFilter); !ok {
+			return fmt.Errorf("unknown provider %q; run 'termigo models' for the list", providerFilter)
+		}
+	}
+	if jsonOutput {
+		return writeJSON(stdout, catalogue)
+	}
+
+	current := catalogue.Current.DefaultModelID
+	printed := 0
+	for _, provider := range catalogue.Providers {
+		if providerFilter != "" && provider.ID != providerFilter {
+			continue
+		}
+		models := catalogue.ModelsFor(provider.ID)
+		if len(models) == 0 {
+			continue
+		}
+		keyState := ""
+		if provider.NeedsKey && !catalogue.HasKey(provider.ID) {
+			keyState = "  (no key stored)"
+		}
+		_, _ = fmt.Fprintf(stdout, "%s%s\n", provider.Label, keyState)
+		for _, model := range models {
+			marker := ""
+			if model.ID == current {
+				marker = "  [default]"
+			}
+			_, _ = fmt.Fprintf(stdout, "  %-24s %s%s\n", model.ID, model.Label, marker)
+		}
+		printed++
+	}
+	if printed == 0 {
+		_, _ = fmt.Fprintln(stdout, "No model matches that filter.")
+		return nil
+	}
+	_, _ = fmt.Fprintln(stdout, "\nSet one with 'termigo model <id>'.")
+	return nil
+}
+
+func runModel(args []string, stdout io.Writer) error {
+	jsonOutput := false
+	var modelID string
+	for _, arg := range args {
+		switch {
+		case arg == "--json":
+			jsonOutput = true
+		case arg == "--help", arg == "-h":
+			_, err := fmt.Fprintln(stdout, "Usage: termigo model [<id>] [--json]\n\nWith no id, prints the current default model.")
+			return err
+		case strings.HasPrefix(arg, "-"):
+			return fmt.Errorf("unknown model option %q", arg)
+		default:
+			if modelID != "" {
+				return errors.New("model takes at most one id")
+			}
+			modelID = arg
+		}
+	}
+
+	if modelID == "" {
+		view, err := control.ReadSettings()
+		if err != nil {
+			return err
+		}
+		current := view.Settings.DefaultModelID
+		if current == "" {
+			current = "(not set)"
+		}
+		if jsonOutput {
+			return writeJSON(stdout, map[string]string{"defaultModelId": view.Settings.DefaultModelID})
+		}
+		_, err = fmt.Fprintf(stdout, "Default model: %s\n", current)
+		return err
+	}
+
+	// Validated against the running build's registry, so a typo is a clear error
+	// here instead of a model the app cannot resolve later.
+	catalogue, err := control.Models()
+	if err != nil {
+		return err
+	}
+	model, ok := catalogue.ModelByID(modelID)
+	if !ok {
+		return fmt.Errorf("unknown model id %q; run 'termigo models' for the list", modelID)
+	}
+	change, err := control.SetSetting("defaultModelId", model.ID)
+	if err != nil {
+		return err
+	}
+	if jsonOutput {
+		return writeJSON(stdout, change)
+	}
+	_, err = fmt.Fprintf(stdout, "Default model is now %s (%s).\n", model.Label, model.ID)
+	return err
+}
+
+func runSettings(args []string, stdout io.Writer) error {
+	jsonOutput := false
+	rest := []string{}
+	for _, arg := range args {
+		switch arg {
+		case "--json":
+			jsonOutput = true
+		case "--help", "-h":
+			_, err := fmt.Fprintf(stdout, `Usage:
+  termigo settings [<key>] [--json]        Read the app settings
+  termigo settings set <key> <value>       Change one writable setting
+
+Writable keys: %s
+
+The app is the authority on which keys are writable and what shape each value
+has; it rejects anything else with the reason. agentApprovalMode is also
+reachable as 'termigo approval' because it loosens the approval gate.
+`, strings.Join(control.SettingKeysForHelp(), ", "))
+			return err
+		default:
+			rest = append(rest, arg)
+		}
+	}
+
+	if len(rest) > 0 && rest[0] == "set" {
+		if len(rest) < 3 {
+			return errors.New("usage: termigo settings set <key> <value>")
+		}
+		key, raw := rest[1], strings.Join(rest[2:], " ")
+		value, err := control.ParseSettingValue(key, raw)
+		if err != nil {
+			return err
+		}
+		if key == "agentApprovalMode" {
+			mode, ok := value.(string)
+			if !ok {
+				return fmt.Errorf("agentApprovalMode must be one of %s", strings.Join(control.ApprovalModes, ", "))
+			}
+			if _, err := control.SetApproval(mode); err != nil {
+				return err
+			}
+		} else if _, err := control.SetSetting(key, value); err != nil {
+			return err
+		}
+		if jsonOutput {
+			return writeJSON(stdout, map[string]interface{}{"key": key, "value": value})
+		}
+		_, err = fmt.Fprintf(stdout, "%s is now %s.\n", key, control.FormatSettingValue(value))
+		return err
+	}
+
+	if len(rest) > 1 {
+		return errors.New("usage: termigo settings [<key>] [--json]")
+	}
+	if len(rest) == 1 {
+		value, err := control.Setting(rest[0])
+		if err != nil {
+			return err
+		}
+		if jsonOutput {
+			return writeJSON(stdout, map[string]interface{}{"key": rest[0], "value": value})
+		}
+		_, err = fmt.Fprintf(stdout, "%s = %s\n", rest[0], control.FormatSettingValue(value))
+		return err
+	}
+
+	view, err := control.ReadSettings()
+	if err != nil {
+		return err
+	}
+	if jsonOutput {
+		return writeJSON(stdout, view)
+	}
+	settings := view.Settings
+	defaultModel := settings.DefaultModelID
+	if defaultModel == "" {
+		defaultModel = "(not set)"
+	}
+	groups := "(none)"
+	if len(settings.DisabledToolGroups) > 0 {
+		groups = strings.Join(settings.DisabledToolGroups, ", ")
+	}
+	_, _ = fmt.Fprintf(stdout, "defaultModelId      %s\n", defaultModel)
+	_, _ = fmt.Fprintf(stdout, "agentApprovalMode   %s\n", settings.AgentApprovalMode)
+	_, _ = fmt.Fprintf(stdout, "toolSearchEnabled   %v\n", settings.ToolSearchEnabled)
+	_, _ = fmt.Fprintf(stdout, "disabledToolGroups  %s\n", groups)
+	_, _ = fmt.Fprintf(stdout, "language            %s\n", settings.Language)
+	_, err = fmt.Fprintf(stdout, "\nWritable keys: %s\n", strings.Join(view.WritableKeys, ", "))
+	return err
+}
+
+func runApproval(args []string, stdout io.Writer) error {
+	jsonOutput := false
+	mode := ""
+	for _, arg := range args {
+		switch {
+		case arg == "--json":
+			jsonOutput = true
+		case arg == "--help", arg == "-h":
+			_, err := fmt.Fprintf(stdout, "Usage: termigo approval [<mode>] [--json]\n\nModes: %s\nWith no mode, prints the current one. 'ask' confirms every edit and command,\n'edits' lets file edits run, 'all' (the default) runs everything unconfirmed.\n", strings.Join(control.ApprovalModes, ", "))
+			return err
+		case strings.HasPrefix(arg, "-"):
+			return fmt.Errorf("unknown approval option %q", arg)
+		default:
+			if mode != "" {
+				return errors.New("approval takes at most one mode")
+			}
+			mode = arg
+		}
+	}
+
+	if mode == "" {
+		view, err := control.ReadSettings()
+		if err != nil {
+			return err
+		}
+		if jsonOutput {
+			return writeJSON(stdout, map[string]string{"agentApprovalMode": view.Settings.AgentApprovalMode})
+		}
+		_, err = fmt.Fprintf(stdout, "Approval mode: %s\n", view.Settings.AgentApprovalMode)
+		return err
+	}
+
+	change, err := control.SetApproval(mode)
+	if err != nil {
+		return err
+	}
+	if jsonOutput {
+		return writeJSON(stdout, change)
+	}
+	_, err = fmt.Fprintf(stdout, "Approval mode is now %s.\n", control.FormatSettingValue(change.Value))
+	return err
+}
+
+func runSecret(args []string, stdout io.Writer) error {
+	var provider, key string
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
+		switch {
+		case arg == "--key":
+			if index+1 >= len(args) {
+				return errors.New("--key requires a value")
+			}
+			index++
+			key = args[index]
+		case strings.HasPrefix(arg, "--key="):
+			key = strings.TrimPrefix(arg, "--key=")
+		case arg == "--help", arg == "-h":
+			_, err := fmt.Fprintln(stdout, "Usage: termigo secret <provider> [--key <value>]\n\nWithout --key the value is prompted and never echoed. The key is handed to\nthe running app, which stores it in the OS keychain; the CLI keeps no copy.")
+			return err
+		case strings.HasPrefix(arg, "-"):
+			return fmt.Errorf("unknown secret option %q", arg)
+		default:
+			if provider != "" {
+				return errors.New("secret takes one provider id")
+			}
+			provider = arg
+		}
+	}
+	if provider == "" {
+		return errors.New("usage: termigo secret <provider> [--key <value>]")
+	}
+
+	// The key never reaches the command line unless the caller chose to put it
+	// there: an argument is visible in the process list, which is fine for a
+	// script and wrong for an interactive session.
+	if key == "" {
+		prompted, err := terminal.ReadSecret(stdin, stdout, fmt.Sprintf("API key for %s (not shown): ", provider))
+		if err != nil {
+			return err
+		}
+		key = prompted
+	}
+	if err := control.SetSecret(provider, key); err != nil {
+		return err
+	}
+	_, err := fmt.Fprintf(stdout, "Stored a key for %s.\n", provider)
+	return err
+}
+
+// writeJSON prints a machine-readable result with the same indentation every
+// other command uses.
+func writeJSON(stdout io.Writer, value interface{}) error {
+	encoder := json.NewEncoder(stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(value)
 }
 
 func runMCPServer(args []string, stdout io.Writer) error {

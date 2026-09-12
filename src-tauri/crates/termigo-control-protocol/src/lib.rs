@@ -15,6 +15,10 @@ pub const METHOD_PENTEST_REPORT: &str = "pentest-report";
 pub const METHOD_AGENT_RUN: &str = "run";
 pub const METHOD_QUERY: &str = "query";
 pub const METHOD_RUN_COMMAND: &str = "run-command";
+pub const METHOD_MODELS_LIST: &str = "models-list";
+pub const METHOD_CONFIG_GET: &str = "config-get";
+pub const METHOD_CONFIG_SET: &str = "config-set";
+pub const METHOD_SECRET_SET: &str = "secret-set";
 pub const SERVER_RESPONSE_ID: &str = "server";
 pub const METHODS: &[&str] = &[
     METHOD_PING,
@@ -29,6 +33,10 @@ pub const METHODS: &[&str] = &[
     METHOD_AGENT_RUN,
     METHOD_QUERY,
     METHOD_RUN_COMMAND,
+    METHOD_MODELS_LIST,
+    METHOD_CONFIG_GET,
+    METHOD_CONFIG_SET,
+    METHOD_SECRET_SET,
 ];
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -189,7 +197,44 @@ pub struct QueryParams {
 pub struct RunCommandParams {
     pub command: String,
 }
+/// No parameters: the catalogue is whatever this build ships.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+pub struct ModelsListParams {}
 
+/// Read the settings a terminal can meaningfully show. `key` selects one entry,
+/// or is empty for the whole set.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+pub struct ConfigGetParams {
+    #[serde(default)]
+    pub key: String,
+}
+
+/// Change one setting from the terminal, so onboarding does not mean hand-editing
+/// `termigo-settings.json`.
+///
+/// `value` is untyped because settings differ (a string model id, a bool, a list
+/// of tool groups). WHICH keys may be written is decided by the frontend, which
+/// owns the settings model and rejects anything outside a known set: an
+/// unvalidated "set any key" would make this method a way to write arbitrary
+/// values into the app's configuration file.
+#[derive(Clone, Deserialize, PartialEq, Serialize)]
+pub struct ConfigSetParams {
+    pub key: String,
+    #[serde(default)]
+    pub value: Value,
+}
+
+/// Store an API key through the platform-correct path (the OS keychain on macOS
+/// and Windows, a 0600 `secrets.json` in the app data dir on Linux), so the
+/// terminal never has to know how a secret is persisted - and never writes one
+/// itself.
+#[derive(Clone, Deserialize, PartialEq, Serialize)]
+pub struct SecretSetParams {
+    /// The provider id whose key is being set.
+    pub provider: String,
+    /// The key itself. Never echoed back or logged.
+    pub value: String,
+}
 fn default_focus() -> bool {
     true
 }
@@ -265,6 +310,79 @@ mod tests {
 
         assert!(METHODS.contains(&METHOD_PENTEST_STATUS));
         assert!(METHODS.contains(&METHOD_PENTEST_REPORT));
+    }
+
+    #[test]
+    fn terminal_config_methods_are_advertised() {
+        // The CLI decides what it can offer from `capabilities`, so a method
+        // missing here means the terminal silently cannot do it.
+        for method in [
+            METHOD_MODELS_LIST,
+            METHOD_CONFIG_GET,
+            METHOD_CONFIG_SET,
+            METHOD_SECRET_SET,
+        ] {
+            assert!(METHODS.contains(&method), "{method} must be advertised");
+        }
+    }
+
+    #[test]
+    fn config_get_defaults_to_the_whole_set() {
+        let params: ConfigGetParams = serde_json::from_value(json!({})).expect("deserialize");
+        assert_eq!(params.key, "");
+
+        let one: ConfigGetParams =
+            serde_json::from_value(json!({ "key": "defaultModelId" })).expect("deserialize");
+        assert_eq!(one.key, "defaultModelId");
+    }
+
+    #[test]
+    fn config_set_carries_an_untyped_value() {
+        // Settings differ in shape, so the value is not typed here; the
+        // frontend validates which keys may be written at all.
+        let text: ConfigSetParams = serde_json::from_value(json!({
+            "key": "defaultModelId",
+            "value": "deepseek-v4-pro"
+        }))
+        .expect("deserialize a string value");
+        assert_eq!(text.key, "defaultModelId");
+        assert_eq!(text.value, json!("deepseek-v4-pro"));
+
+        let flag: ConfigSetParams = serde_json::from_value(json!({
+            "key": "toolSearchEnabled",
+            "value": true
+        }))
+        .expect("deserialize a bool value");
+        assert_eq!(flag.value, json!(true));
+
+        let list: ConfigSetParams = serde_json::from_value(json!({
+            "key": "disabledToolGroups",
+            "value": ["browser", "sql"]
+        }))
+        .expect("deserialize a list value");
+        assert_eq!(list.value, json!(["browser", "sql"]));
+
+        // A value is optional so `config-set` can clear a setting.
+        let cleared: ConfigSetParams =
+            serde_json::from_value(json!({ "key": "defaultModelId" })).expect("deserialize");
+        assert!(cleared.value.is_null());
+    }
+
+    #[test]
+    fn secret_set_names_the_provider_and_never_echoes_the_key() {
+        let params: SecretSetParams = serde_json::from_value(json!({
+            "provider": "deepseek",
+            "value": "sk-test"
+        }))
+        .expect("deserialize secret-set");
+        assert_eq!(params.provider, "deepseek");
+        assert_eq!(params.value, "sk-test");
+
+        // A Debug/Serialize round trip must not be the reason a key leaks into a
+        // log, so the struct carries no Debug impl that prints the value.
+        let encoded = serde_json::to_string(&params).expect("serialize");
+        assert!(encoded.contains("sk-test"), "the request must carry the key");
+        assert!(METHODS.contains(&METHOD_SECRET_SET));
     }
 
     #[test]

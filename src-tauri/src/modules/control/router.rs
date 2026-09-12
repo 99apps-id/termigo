@@ -5,11 +5,12 @@ use std::time::Duration;
 use serde_json::{json, Value};
 use tauri::Emitter;
 use termigo_control_protocol::{
-    AgentRunParams, ControlRequest, ControlResponse, FocusParams, FrontendRequest,
+    AgentRunParams, ConfigSetParams, ControlRequest, ControlResponse, FocusParams, FrontendRequest,
     FrontendResponse, OpenParams, PentestReportParams, PentestRunParams, QueryParams,
-    RunCommandParams, METHODS, METHOD_AGENT_RUN, METHOD_CAPABILITIES, METHOD_FOCUS,
-    METHOD_IDENTIFY, METHOD_OPEN, METHOD_PENTEST_REPORT, METHOD_PENTEST_RUN, METHOD_PENTEST_STATUS,
-    METHOD_PING, METHOD_QUERY, METHOD_RUN_COMMAND, METHOD_STATUS, PROTOCOL_VERSION,
+    RunCommandParams, SecretSetParams, METHODS, METHOD_AGENT_RUN, METHOD_CAPABILITIES,
+    METHOD_CONFIG_GET, METHOD_CONFIG_SET, METHOD_FOCUS, METHOD_IDENTIFY, METHOD_MODELS_LIST,
+    METHOD_OPEN, METHOD_PENTEST_REPORT, METHOD_PENTEST_RUN, METHOD_PENTEST_STATUS, METHOD_PING,
+    METHOD_QUERY, METHOD_RUN_COMMAND, METHOD_SECRET_SET, METHOD_STATUS, PROTOCOL_VERSION,
     SERVER_RESPONSE_ID,
 };
 
@@ -279,6 +280,58 @@ pub fn route_request(
                 },
                 Err((code, message)) => ControlResponse::failure(request.id, code, message),
             }
+        }
+        // Terminal-driven configuration. All four are answered by the frontend,
+        // which owns the model registry and the settings model; the Rust side
+        // only validates that the params are shaped right and forwards them.
+        METHOD_MODELS_LIST => forward_to_frontend(request, app, state),
+        METHOD_CONFIG_GET => forward_to_frontend(request, app, state),
+        METHOD_CONFIG_SET => {
+            let params: ConfigSetParams = match serde_json::from_value(request.params.clone()) {
+                Ok(params) => params,
+                Err(error) => {
+                    return ControlResponse::failure(
+                        request.id,
+                        "invalid_params",
+                        format!("invalid config-set parameters: {error}"),
+                    );
+                }
+            };
+            if params.key.trim().is_empty() {
+                return ControlResponse::failure(
+                    request.id,
+                    "invalid_params",
+                    "config-set needs a non-empty key",
+                );
+            }
+            forward_to_frontend(request, app, state)
+        }
+        METHOD_SECRET_SET => {
+            let params: SecretSetParams = match serde_json::from_value(request.params.clone()) {
+                Ok(params) => params,
+                Err(error) => {
+                    return ControlResponse::failure(
+                        request.id,
+                        "invalid_params",
+                        format!("invalid secret-set parameters: {error}"),
+                    );
+                }
+            };
+            if params.provider.trim().is_empty() {
+                return ControlResponse::failure(
+                    request.id,
+                    "invalid_params",
+                    "secret-set needs a provider id",
+                );
+            }
+            if params.value.trim().is_empty() {
+                return ControlResponse::failure(
+                    request.id,
+                    "invalid_params",
+                    "secret-set needs a non-empty key",
+                );
+            }
+            forward_to_frontend(request, app, state)
         }
         _ => ControlResponse::failure(request.id, "unknown_method", "unknown control method"),
     }
