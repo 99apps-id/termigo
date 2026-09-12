@@ -6,8 +6,15 @@ export type Segment = {
 
 const WINDOWS_DRIVE = /^([A-Za-z]:)(.*)$/;
 
+/** Windows drive paths are case-insensitive: OSC 7 reports the case the user
+ *  typed, homeDir() the case the OS stored. */
+const samePath = (a: string, b: string): boolean =>
+  WINDOWS_DRIVE.test(a) && WINDOWS_DRIVE.test(b)
+    ? a.toLowerCase() === b.toLowerCase()
+    : a === b;
+
 function normalize(p: string): string {
-  return p.replace(/\\/g, "/");
+  return p.replace(/\\/g, "/").replace(/\/+$/, "");
 }
 
 export function segmentsFromCwd(cwd: string, home: string | null): Segment[] {
@@ -16,7 +23,9 @@ export function segmentsFromCwd(cwd: string, home: string | null): Segment[] {
 
   const usingHome =
     normHome !== null &&
-    (normCwd === normHome || normCwd.startsWith(normHome + "/"));
+    normHome !== "" &&
+    (samePath(normCwd, normHome) ||
+      normCwd.toLowerCase().startsWith(`${normHome.toLowerCase()}/`));
 
   let rootSegment: Segment;
   let tail: string;

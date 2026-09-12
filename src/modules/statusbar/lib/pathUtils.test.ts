@@ -65,4 +65,30 @@ describe("segmentsFromCwd", () => {
       { label: "/", fullPath: "/", isHome: false },
     ]);
   });
+
+  // OSC 7 reports the cwd in the case the user typed (cd c:\users\me), while
+  // homeDir() reports the case the OS stored. A case-sensitive compare dropped
+  // the ~ root and printed the whole absolute path.
+  it("collapses home on a case-insensitive Windows path", () => {
+    expect(shape("c:/users/me/proj", "C:/Users/Me")).toEqual([
+      { label: "~", fullPath: "C:/Users/Me", isHome: true },
+      { label: "proj", fullPath: "C:/Users/Me/proj", isHome: false },
+    ]);
+    expect(shape("C:\\Users\\Me", "c:/users/me")).toEqual([
+      { label: "~", fullPath: "c:/users/me", isHome: true },
+    ]);
+  });
+
+  it("ignores a trailing separator on home", () => {
+    expect(shape("C:\\Users\\Me\\proj", "C:\\Users\\Me\\")).toEqual([
+      { label: "~", fullPath: "C:/Users/Me", isHome: true },
+      { label: "proj", fullPath: "C:/Users/Me/proj", isHome: false },
+    ]);
+  });
+
+  it("still keeps a Windows sibling that only shares the home prefix", () => {
+    expect(
+      shape("c:/users/mefoo", "C:/Users/Me").map((s) => s.label),
+    ).toEqual(["c:", "users", "mefoo"]);
+  });
 });
