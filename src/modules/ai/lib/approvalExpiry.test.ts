@@ -113,6 +113,29 @@ describe("pendingApprovalIds", () => {
       [],
     );
   });
+
+  it("clears an armed timer once the turn moves on", () => {
+    // The leak this pair exists to prevent. A timer is armed for an approval
+    // awaiting an answer; the user then answers it in the app or resumes past
+    // it, so the transcript's last message is no longer that assistant turn.
+    // The driver effect originally returned early on exactly that shape, so the
+    // timer stayed armed and fired minutes later against an id the run had left
+    // behind - answering a question nobody asked.
+    const armed = new Set(["q1"]);
+    const conversationMovedOn = [
+      {
+        role: "assistant",
+        parts: [{ state: "approval-requested", approval: { id: "q1" } }],
+      },
+      { role: "user", parts: [{ type: "text", text: "actually, do this" }] },
+    ];
+    const awaiting = pendingApprovalIds(conversationMovedOn);
+    expect(awaiting).toEqual([]);
+    expect(reconcileApprovalTimers(armed, awaiting)).toEqual({
+      arm: [],
+      clear: ["q1"],
+    });
+  });
 });
 
 describe("the deadline", () => {

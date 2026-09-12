@@ -9,7 +9,12 @@
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import type { UIMessage } from "ai";
 import { useEffect, useRef } from "react";
-import { APPROVAL_EXPIRED_REASON, APPROVAL_TTL_MS, reconcileApprovalTimers } from "../lib/approvalExpiry";
+import {
+  APPROVAL_EXPIRED_REASON,
+  APPROVAL_TTL_MS,
+  pendingApprovalIds,
+  reconcileApprovalTimers,
+} from "../lib/approvalExpiry";
 import { isAutoApproved } from "../lib/approvalPolicy";
 import { isAutoApprovedScan } from "../lib/pentestScope";
 import { isSessionAllowed } from "../store/approvalQueueStore";
@@ -145,11 +150,23 @@ export function useAutoApproval(
       answered.current.add(id);
       void respond({ id, approved: true });
     }
+  }, [messages, mode, alwaysAllowed, respond]);
 
-    // What is left is waiting on the user. Arm a deadline for each so an
-    // approval nobody answers cannot hold the run open forever, and drop timers
-    // whose approval was already dealt with.
+  // Deadlines, in their own effect so they are reconciled on EVERY change to the
+  // transcript, including the ones the loop above returns early from.
+  //
+  // Keeping this inside that loop was a bug: the loop returns as soon as the last
+  // message is not an assistant turn, which is exactly what happens when the user
+  // answers in the app, resolves the approval through `/approve`, or resumes past
+  // it. The timer armed for that approval stayed armed and fired minutes later
+  // against an id the run had already left behind, answering a question nobody
+  // asked. Running independently means an approval that is no longer pending in
+  // the transcript always clears its timer.
+  useEffect(() => {
     const timers = expiryTimers.current;
+    const awaiting = pendingApprovalIds(messages).filter(
+      (id) => !answered.current.has(id),
+    );
     const { arm, clear } = reconcileApprovalTimers(
       new Set(timers.keys()),
       awaiting,
@@ -175,5 +192,5 @@ export function useAutoApproval(
         }, APPROVAL_TTL_MS),
       );
     }
-  }, [messages, mode, alwaysAllowed, respond]);
+  }, [messages, respond]);
 }
