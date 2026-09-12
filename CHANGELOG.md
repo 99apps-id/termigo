@@ -8,6 +8,26 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **The chat never showed what the agent was saying.** The live card carried
+  status, tool lines and the step, but not the assistant's own text, so the agent
+  looked like it was working silently: `[Termigo Agent] Writing response... (step
+  12)` followed by tool lines and no words from the model. The card now shows the
+  agent's prose under the header and above the tool lines, taken from the
+  message's `text` parts (never `reasoning`, which is scratchpad). The snippet
+  keeps the opening and the newest text when it does not fit, because the card is
+  edited in place on every step and an unbounded answer would eventually exceed
+  Telegram's 4096-character limit and break the update instead of making it. The
+  separate interim message added earlier for this direction is removed: the card
+  is now the single place the text appears, so the prose is not posted twice.
+- **Every poll did an OS keychain read, and that read had no timeout.** The
+  Telegram token was not cached, so `getUpdates` (once per 30s) and every send
+  called `secrets_get` - a Tauri IPC call into the OS keychain. Worse, the call
+  ran BEFORE the request's deadline was created, so a slow keychain left the
+  request with no timeout at all: the poll went silent and the stall watchdog
+  recycled it, which is the measured
+  `polling stalled: no getUpdates progress for 199s` on the field install. The
+  token is now cached in memory (invalidated by the setters, so it cannot go
+  stale) and the deadline starts before the read.
 - **The relay's own recovery caused the stall it was recovering from.** The
   stall watchdog aborted the hanging `getUpdates` and started a replacement
   poller in the same tick. For as long as the old request stayed alive, Telegram

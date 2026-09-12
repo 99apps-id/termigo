@@ -26,6 +26,14 @@ export type FormatLiveProgressOptions = {
   completed?: boolean;
   mode?: "question" | "task";
   modelLabel?: string;
+  /**
+   * The agent's visible answer text so far, shown inside the card while it
+   * works. The card used to carry only status, tools and step, so the chat was
+   * silent about WHAT the agent was saying until the run ended - the assistant's
+   * own prose never appeared, which reads as an agent that ignores the request.
+   * Sourced from the assistant message's text parts, not from reasoning.
+   */
+  answerText?: string;
   subagents?: Array<{ label?: string; status: string; currentStep?: string }>;
 };
 
@@ -563,6 +571,23 @@ export function formatToolActivity(t: ToolCallSummary): string {
   return `✓ ${verb}${inputSnippet}${outSnippet}`;
 }
 
+/**
+ * Fit the agent's answer into the card.
+ *
+ * Keeps the OPENING and the most recent text when it does not fit, because the
+ * opening states what the agent decided to do and the tail is what it is saying
+ * now; the middle is the part a reader can do without. The card is edited in
+ * place, so a bounded snippet keeps every edit inside Telegram's 4096 limit
+ * instead of failing the whole message once the answer grows.
+ */
+export function renderAnswerSnippet(text: string, max = 700): string {
+  const body = text.trim();
+  if (body.length === 0) return "";
+  if (body.length <= max) return body;
+  const half = Math.floor((max - 5) / 2);
+  return `${body.slice(0, half)}\n…\n${body.slice(-half)}`;
+}
+
 export function formatLiveProgress(opts: FormatLiveProgressOptions): string {
   if (opts.completed) {
     return "**[Termigo Agent]** Completed.";
@@ -600,6 +625,13 @@ export function formatLiveProgress(opts: FormatLiveProgressOptions): string {
 
   if (opts.step) {
     lines.push(`*${truncate(opts.step, 120)}*`);
+  }
+
+  // The agent's own words, right under the header and above the tool lines, so
+  // the chat shows what it is saying while it says it.
+  const answer = renderAnswerSnippet(opts.answerText ?? "");
+  if (answer) {
+    lines.push(answer);
   }
 
   const pendingTodos = (opts.todos ?? []).filter(

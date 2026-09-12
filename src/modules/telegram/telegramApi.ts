@@ -156,10 +156,14 @@ export async function apiGet(
   signal: AbortSignal,
   timeoutMs = 15_000,
 ): Promise<unknown> {
-  const token = await getTelegramToken();
-  if (!token) throw new Error("No Telegram token configured");
+  // The deadline is created BEFORE the token read, deliberately. The read is a
+  // Tauri IPC call into the OS keychain; when it ran first, a slow keychain made
+  // the whole request hang with no timeout to fail it, so the poll went silent
+  // and the stall watchdog recycled it instead of reporting an error.
   const { signal: reqSignal, cleanup } = mergeSignals(signal, timeoutMs);
   try {
+    const token = await getTelegramToken();
+    if (!token) throw new Error("No Telegram token configured");
     const res = await fetch(`${API}/bot${token}/${path}`, {
       signal: reqSignal,
     });
@@ -178,10 +182,11 @@ export async function apiPost(
   signal: AbortSignal,
   timeoutMs = 15_000,
 ): Promise<unknown> {
-  const token = await getTelegramToken();
-  if (!token) throw new Error("No Telegram token configured");
+  // Deadline first; see apiGet.
   const { signal: reqSignal, cleanup } = mergeSignals(signal, timeoutMs);
   try {
+    const token = await getTelegramToken();
+    if (!token) throw new Error("No Telegram token configured");
     const res = await fetch(`${API}/bot${token}/${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

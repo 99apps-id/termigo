@@ -11,7 +11,7 @@ import {
   sendTyping,
   type InlineButton,
 } from "./telegramApi";
-import { getPendingApprovals, runBusy } from "./telegramHelpers";
+import { getPendingApprovals, messageText, runBusy } from "./telegramHelpers";
 
 export const progressCtrls = new Map<number, AbortController>();
 export const lastFinishedProgressMessageIds = new Map<number, number>();
@@ -126,6 +126,12 @@ export async function publishProgress(
       const toolSummaries = lastAssistant?.parts
         ? extractToolSummaries(lastAssistant.parts)
         : [];
+      // The assistant's own prose, so the card shows what it is saying as it
+      // says it. Taken from text parts only: reasoning is the agent thinking
+      // aloud, and publishing it would show raw scratchpad in the chat.
+      const answerText = lastAssistant
+        ? messageText(lastAssistant as { role: string; parts?: Array<{ type?: string; text?: string }> })
+        : "";
 
       // Format compact live progress
       const liveStatus =
@@ -142,6 +148,7 @@ export async function publishProgress(
         todos,
         elapsedMs: now - started,
         mode,
+        answerText,
         modelLabel: await resolveModelLabel(
           store.useChatStore.getState().selectedModelId,
         ),

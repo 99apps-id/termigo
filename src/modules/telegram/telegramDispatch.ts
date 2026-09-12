@@ -45,10 +45,12 @@ import {
   relayErrorLine,
   runOutcomeLine,
 } from "./telegramLog";
+// Still used by runMirror (the Termigo -> Telegram direction), which streams a
+// mirrored message by editing it in place. The Telegram -> Termigo direction no
+// longer needs these: its interim text now lives inside the progress card.
 import {
   type MirrorStreamState,
   planMirrorDelivery,
-  shouldFinalizeStream,
   startedState,
 } from "./mirrorStream";
 import { useTelegramStore } from "./store";
@@ -612,59 +614,12 @@ export async function runAgentAndStream(
         let settleStart = Date.now();
         const SETTLE_TIMEOUT = 25_000;
 
-        // The answer is streamed into ONE Telegram message, edited as the agent
-        // writes, then finalized with the whole text. Sending a new message per
-        // partial write would spam the chat; holding everything until the end
-        // (the previous behaviour) left the chat silent through a task that can
-        // run for minutes, which is exactly what "tidak ada respon 2 arah diawal
-        // task" describes.
-        //
-        // Held in an object rather than a `let`: the state is only ever written
-        // from the `onPartial` closure, and TypeScript's control-flow analysis
-        // does not track closure writes, so a bare `let` stays narrowed to its
-        // initial `null` and cannot be read back without a cast.
-        const stream: { state: MirrorStreamState | null } = { state: null };
-        const onPartial = async (partial: string): Promise<void> => {
-          if (signal.aborted) return;
-          const plan = planMirrorDelivery({
-            text: partial,
-            settled: false,
-            state: stream.state,
-            now: Date.now(),
-          });
-          try {
-            if (plan.send?.kind === "start") {
-              const id = await sendProgressMessage(
-                chatId,
-                plan.send.text,
-                signal,
-              );
-              if (id !== null) stream.state = startedState(id, plan);
-            } else if (plan.send?.kind === "edit") {
-              const active = stream.state;
-              if (!active) return;
-              const ok = await editProgressMessage(
-                chatId,
-                active.messageId,
-                plan.send.text,
-                signal,
-              );
-              // Only record the taller text once it is actually shown, so a
-              // failed edit is retried instead of being treated as delivered.
-              if (ok && plan.next) stream.state = plan.next;
-            }
-          } catch {
-            // Streaming is best-effort; the final answer below still sends.
-          }
-        };
-
         while (!signal.aborted) {
           const reply = await waitForReply(
             store,
             signal,
             sessionId,
             currentBaseline,
-            onPartial,
           );
           stopReasonSnapshot =
             store.useChatStore.getState().agentMeta.stopReason;
@@ -681,20 +636,11 @@ export async function runAgentAndStream(
             // an actually-idle run can end this handler.
           } else {
             if (isFallback) fallbackSent = true;
-            const streamed = stream.state;
-            if (shouldFinalizeStream(streamed, isFallback)) {
-              // The answer is already on screen: complete it in place instead of
-              // posting a second copy of the same text.
-              await finalizeStreamedMessage(
-                chatId,
-                streamed.messageId,
-                reply,
-                signal,
-              );
-              stream.state = null;
-            } else {
-              await sendReplyWithDiagrams(chatId, reply, signal);
-            }
+            // The answer is sent once, whole. Interim text is not duplicated
+            // here: the live progress card already shows the agent's own words
+            // as it writes them, so sending them again would post the same
+            // prose twice in one chat.
+            await sendReplyWithDiagrams(chatId, reply, signal);
             replies += 1;
             sentChars += reply.length;
             if (isFallback) seenFallback = true;
