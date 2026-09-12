@@ -311,3 +311,41 @@ describe("recursive delete of the home directory", () => {
     expect(checkShellCommand("cd ~ && rm -rf .").ok).toBe(true);
   });
 });
+
+// Two spellings sat outside every pattern: the `--` end-of-options marker that
+// a cautious shell user actually types, and a trailing glob on the target.
+// `rm -rf -- /` and `rm -rf /*` were both accepted.
+describe("recursive delete of the filesystem root", () => {
+  it("catches the end-of-options and glob spellings", () => {
+    for (const cmd of [
+      "rm -rf /",
+      "rm -rf /*",
+      "rm -rf -- /",
+      "rm -rf -- /*",
+      'rm -rf "/"',
+      "rm -rf -- / && echo done",
+    ]) {
+      expect(checkShellCommand(cmd).ok, cmd).toBe(false);
+    }
+  });
+
+  it("catches a globbed home target behind quotes", () => {
+    for (const cmd of [
+      'rm -rf "$HOME"/*',
+      "rm -rf ~/*",
+      "rm -rf -- $HOME/*",
+    ]) {
+      expect(checkShellCommand(cmd).ok, cmd).toBe(false);
+    }
+  });
+
+  it("leaves the same commands aimed elsewhere alone", () => {
+    for (const cmd of [
+      "rm -rf -- ./build",
+      "rm -rf -- /home/me/build",
+      "rm -rf './out dir'",
+    ]) {
+      expect(checkShellCommand(cmd).ok, cmd).toBe(true);
+    }
+  });
+});

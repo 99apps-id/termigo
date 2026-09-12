@@ -340,6 +340,27 @@ export async function checkWritableCanonical(
   }
 }
 
+/** Every spelling of `rm` with recursive+force, shared by the two destructive
+ *  guards below so they cannot drift apart again (`rm -fr ~` slipped through
+ *  once because one copy of this pattern lost half of itself). */
+const RM_RECURSIVE_FORCE =
+  "(?:-[a-zA-Z]*(?:rf|fr)[a-zA-Z]*|-[a-zA-Z]*r[a-zA-Z]*\\s+-[a-zA-Z]*f[a-zA-Z]*|-[a-zA-Z]*f[a-zA-Z]*\\s+-[a-zA-Z]*r[a-zA-Z]*|--recursive\\s+--force|--force\\s+--recursive)";
+/** `--` ends option parsing; every shell accepts it before the operand. */
+const RM_END_OF_OPTIONS = "(?:--\\s+)?";
+/** The filesystem root, with or without a trailing glob (`/*`). */
+const RM_ROOT_TARGET = "(['\"]?/\\*?['\"]?\\s*(?:$|;|&|\\|))";
+/** `~`, `$HOME`, `${HOME}` and any path under them, quoted or bare. The glob
+ *  allowed after the closing quote is what covers `"$HOME"/*`, which a
+ *  boundary anchored straight after the quote missed. */
+const RM_HOME_TARGET =
+  "(['\"]?(~(?:/[^\\s'\"]*)?|\\$\\{?HOME\\}?(?:/[^\\s'\"]*)?)['\"]?(?:/\\*?)?(?:\\s|$|;|&|\\|))";
+const RM_ROOT_RE = new RegExp(
+  `\\brm\\s+${RM_RECURSIVE_FORCE}\\s+${RM_END_OF_OPTIONS}${RM_ROOT_TARGET}`,
+);
+const RM_HOME_RE = new RegExp(
+  `\\brm\\s+${RM_RECURSIVE_FORCE}\\s+${RM_END_OF_OPTIONS}${RM_HOME_TARGET}`,
+);
+
 export function checkShellCommand(cmd: string): SafetyResult {
   const c = cmd.trim();
   if (c.length === 0) {
@@ -367,7 +388,7 @@ export function checkShellCommand(cmd: string): SafetyResult {
   }
   // rm -rf / (and variants with quoted /, --no-preserve-root, etc.)
   if (
-    /\brm\s+(-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*|-[a-zA-Z]*f[a-zA-Z]*r[a-zA-Z]*|--recursive\s+--force|--force\s+--recursive)\s+(['"]?\/['"]?\s*($|;|&|\|))/.test(
+    RM_ROOT_RE.test(
       c,
     )
   ) {
@@ -390,7 +411,7 @@ export function checkShellCommand(cmd: string): SafetyResult {
   // the same files and no pattern here will catch it. This exists to stop
   // accidents, not a determined path; the approval gate is the real control.
   if (
-    /\brm\s+(?:-[a-zA-Z]*(?:rf|fr)[a-zA-Z]*|-[a-zA-Z]*r[a-zA-Z]*\s+-[a-zA-Z]*f[a-zA-Z]*|-[a-zA-Z]*f[a-zA-Z]*\s+-[a-zA-Z]*r[a-zA-Z]*|--recursive\s+--force|--force\s+--recursive)\s+(['"]?(~(\/[^\s'"]*)?|\$\{?HOME\}?(\/[^\s'"]*)?)['"]?)(\s|$|;|&|\|)/.test(
+    RM_HOME_RE.test(
       c,
     )
   ) {
