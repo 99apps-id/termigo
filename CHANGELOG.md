@@ -8,6 +8,20 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **The relay's own recovery caused the stall it was recovering from.** The
+  stall watchdog aborted the hanging `getUpdates` and started a replacement
+  poller in the same tick. For as long as the old request stayed alive, Telegram
+  saw two clients on one bot token and terminated one with
+  `409 Conflict: terminated by other getUpdates request` - so each recycle
+  caused the next stall. On a field install this showed as a repeating
+  `stalled 188s -> recycle ... 409 Conflict ... stalled 91s -> recycle`, delaying
+  every inbound message by up to three minutes, which reads as the agent
+  hanging. The watchdog now waits for the previous poller to exit (bounded at
+  10s, since a hung fetch can outlive its abort) before starting its
+  replacement, so the two never poll at once. A 409 also backs off for 60s
+  instead of the generic 5s - retrying quickly is exactly what keeps two
+  pollers terminating each other - and logs the cause, because "another client
+  holds this bot token" is a configuration problem, not a network fault.
 - **A task sent from Telegram was silent, then answered all at once.** For a
   Telegram-initiated run the relay streamed a progress card (status, tools,
   step) but held the assistant's own text until the run settled, so a task that

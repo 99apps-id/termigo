@@ -30,6 +30,41 @@ export let lastPollProgressTime = Date.now();
 export const POLLING_STALL_TIMEOUT_MS = 75_000;
 export let watchdogTimer: ReturnType<typeof setInterval> | null = null;
 
+/**
+ * The loop currently polling, so the watchdog can wait for it to finish before
+ * starting its replacement.
+ *
+ * Without this the recovery was the fault: the watchdog aborted the hanging
+ * fetch and started a new poller in the same tick, so for as long as the old
+ * request stayed alive Telegram saw TWO clients polling one bot token and
+ * terminated one with 409 "Conflict: terminated by other getUpdates request".
+ * Each recycle therefore caused the next stall, about 90-190s later, forever.
+ * Observed on the field install as a repeating pattern of
+ *   stalled 188s -> recycle ... 409 Conflict ... stalled 91s -> recycle
+ * which delayed every inbound message by up to three minutes.
+ */
+let loopPromise: Promise<void> | null = null;
+
+/**
+ * How long to wait for the previous poller to exit before starting the
+ * replacement anyway. Bounded, because the whole reason the watchdog exists is
+ * that a hung fetch can outlive its abort signal. 10s is long past the point
+ * where the aborted request has been torn down in the normal case, and short
+ * enough to still recover.
+ */
+const STALL_RECYCLE_GRACE_MS = 10_000;
+
+/**
+ * Backoff after Telegram answers 409.
+ *
+ * Far longer than the generic 5s on purpose: a conflict means another client
+ * holds the bot, and retrying quickly is exactly what keeps two pollers
+ * terminating each other. Standing down gives the other one room, and a real
+ * competing client is a configuration problem the operator has to fix - not
+ * something to hammer at five-second intervals.
+ */
+export const TELEGRAM_CONFLICT_BACKOFF_MS = 60_000;
+
 export function setCurrentUpdateOffset(offset: number): void {
   currentUpdateOffset = offset;
 }
@@ -66,13 +101,50 @@ export function checkPollingStall(): void {
     console.warn(
       `[Telegram] Polling stall detected: no getUpdates progress for ${seconds}s. Reconnecting poller...`,
     );
-    // Recycle controller so the hanging fetch terminates cleanly
     const oldCtrl = loopController;
-    loopController = new AbortController();
+    const oldLoop = loopPromise;
+    const next = new AbortController();
+    loopController = next;
     lastPollProgressTime = Date.now();
+    // Abort so the hanging fetch terminates cleanly.
     oldCtrl.abort(new Error("Polling stall watchdog timeout"));
-    void runLoop(loopController.signal);
+    // Start the replacement only after the old loop has exited (or the grace
+    // period lapses), so the two never poll at the same time. Racing the wait
+    // against a timer keeps recovery possible when the abort does not land.
+    void Promise.race([
+      oldLoop ?? Promise.resolve(),
+      sleep(new AbortController().signal, STALL_RECYCLE_GRACE_MS),
+    ]).then(() => {
+      if (loopController !== next || next.signal.aborted) return;
+      launchLoop(next);
+    });
   }
+}
+
+/** Run `runLoop`, recording the promise so the watchdog can await it. */
+function launchLoop(controller: AbortController): void {
+  const promise = runLoop(controller.signal);
+  loopPromise = promise;
+  void promise.finally(() => {
+    if (loopPromise === promise) loopPromise = null;
+  });
+}
+
+/**
+ * How long to wait before the next `getUpdates` after a failure.
+ *
+ * Exported and pure so the policy is asserted rather than buried in the catch:
+ * a 429 carries its own retry hint, a 409 means another client holds the bot
+ * and must not be retried quickly, and anything else gets a short retry.
+ */
+export function pollBackoffMs(error: unknown): number {
+  if (error instanceof TelegramApiError) {
+    if (error.status === 429) {
+      return Math.max(1000, (error.retryAfter ?? 5) * 1000);
+    }
+    if (error.status === 409) return TELEGRAM_CONFLICT_BACKOFF_MS;
+  }
+  return 5000;
 }
 
 async function runLoop(signal: AbortSignal): Promise<void> {
@@ -115,16 +187,20 @@ async function runLoop(signal: AbortSignal): Promise<void> {
       useTelegramStore.getState().setOnline(false);
       const errMsg = e instanceof Error ? e.message : String(e);
       useTelegramStore.getState().setLastError(errMsg);
-      let backoffMs = 5000;
-      if (e instanceof TelegramApiError && e.status === 429) {
-        backoffMs = Math.max(1000, (e.retryAfter ?? 5) * 1000);
-      }
+      const backoffMs = pollBackoffMs(e);
       // The store keeps lastError for the UI, but the UI is a webview on a
       // server nobody is looking at. A poll that keeps failing has to reach the
       // file, or "the bot went quiet" has no cause attached to it.
       logRelayWarn(
         `${relayErrorLine("getUpdates", e)} - retrying in ${Math.round(backoffMs / 1000)}s`,
       );
+      if (e instanceof TelegramApiError && e.status === 409) {
+        // Named explicitly because it is actionable and otherwise looks like a
+        // network fault: a 409 means a SECOND client is polling this bot token.
+        logRelayWarn(
+          "409 Conflict: another client holds this bot token - check for a second Termigo instance, or another app configured with the same token",
+        );
+      }
       await sleep(signal, backoffMs);
     }
   }
@@ -149,7 +225,7 @@ export async function startTelegramBot(): Promise<void> {
   // online and only then await the stale-approval cleanup, so a slow or hung
   // AI-store import left it claiming to be online with nothing polling - which
   // looks exactly like "Telegram tidak bisa dipakai".
-  void runLoop(controller.signal);
+  launchLoop(controller);
   void runMirror(mirror.signal);
   logRelayInfo("relay started");
   try {
