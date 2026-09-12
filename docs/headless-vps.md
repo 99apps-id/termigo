@@ -391,6 +391,37 @@ restarting again. Its decisions are appended to `/opt/termigo/.watchdog/watchdog
 sudo tail -30 /opt/termigo/.watchdog/watchdog.log
 ```
 
+### Memory: why a build inside the relay is dangerous
+
+The unit's `MemoryHigh` / `MemoryMax` apply to the **whole process tree**. Every
+PTY shell and every command the agent runs is a child of the app, so their memory
+is charged to the app's quota. Measured on a field install: an agent ran node and
+rustc builds inside the relay, the cgroup reached its 2 GB `MemoryHigh`, the
+webview was throttled until it stopped answering, and Telegram was dead for nine
+hours with `NRestarts=0` (systemd had nothing to act on, because the process never
+exited). The watchdog now catches that, but restarting mid-audit loses the work.
+
+`scripts/run-headless.sh` therefore caps the two biggest consumers before the app
+starts, and the caps are inherited by PTY shells and by the agent's commands:
+
+| Variable | Value | Why |
+| --- | --- | --- |
+| `NODE_OPTIONS` | `--max-old-space-size=1536` | Bounds the V8 heap for vite, tsc, rollup and any other node build step. |
+| `CARGO_BUILD_JOBS` | `1` | Serialises rustc. A parallel release build was already OOM-killed on this box. |
+
+This limits builds rather than forbidding them, so an agent can still verify that
+the project compiles. If a build genuinely needs more, override the variable for
+that one run instead of raising the service limit:
+
+```bash
+cd /opt/termigo
+CARGO_BUILD_JOBS=2 NODE_OPTIONS=--max-old-space-size=3072 pnpm build
+```
+
+Better still, do a full build with the relay **stopped** (see
+[Updating Termigo](#updating-termigo)): it removes the contention entirely instead
+of tuning around it.
+
 ### Backup
 
 Regularly back up:

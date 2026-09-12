@@ -21,6 +21,20 @@ export WEBKIT_DISABLE_COMPOSITING_MODE=1
 export WEBKIT_DISABLE_DMABUF_RENDERER=1
 export LIBGL_ALWAYS_SOFTWARE=1
 
+# ==== PLafon memori untuk tool build (2026-09-13) ====
+# Batas memori unit berlaku untuk SELURUH pohon proses, jadi build apa pun yang
+# dijalankan dari dalam relay - termasuk yang dijalankan agent lewat tool shell
+# atau PTY - dibebankan ke kuota aplikasi (MemoryHigh=2G). Terukur: build node +
+# rustc mendorong cgroup ke 2.0GB, sehingga webview ter-throttle dan berhenti
+# menjawab, dan relay Telegram mati diam-diam sepanjang malam.
+#
+# Kedua variabel ini diwarisi oleh shell PTY dan perintah agent, dan keduanya
+# mengekang konsumen terbesarnya tanpa melarang build: heap V8 dibatasi, dan
+# paralelisme rustc dikunci ke 1 (build rilis paralel sudah pernah di-OOM-kill
+# di kotak ini). Operator masih bisa menimpanya kalau memang perlu ruang lebih.
+export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=1536}"
+export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-1}"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="$(dirname "${SCRIPT_DIR}")"
 
