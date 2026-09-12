@@ -80,6 +80,10 @@ export type SubagentRun = {
   /** Final summary text once done, so the live view can show each sub-agent's
    *  result the moment it finishes - without waiting for the whole fan-out. */
   summary?: string;
+  /** The run finished but its review did not inspect anything, so its
+   *  conclusion is unverified (see `lib/subagentEvidence.ts`). A done run that
+   *  carries this must not be shown as a clean result. */
+  inconclusive?: boolean;
 };
 
 const MAX_RUNS_PER_SESSION = 24;
@@ -95,7 +99,12 @@ type SubagentRunState = {
   finish: (
     sessionId: string,
     id: string,
-    patch: { stepCount?: number; durationMs?: number; summary?: string },
+    patch: {
+      stepCount?: number;
+      durationMs?: number;
+      summary?: string;
+      inconclusive?: boolean;
+    },
   ) => void;
   fail: (sessionId: string, id: string, error: string) => void;
   step: (

@@ -8,6 +8,47 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **The agent could not run the project's own checks.** `pnpm lint` worked
+  (the allowlist matches the base command, `pnpm`) while `biome`, `tsc`,
+  `vitest` and `knip` did not, so the moment a caller wanted one file
+  (`biome lint src/x.ts`, `vitest run src/x.test.ts`) or a raw flag it got
+  `command 'biome' is not in the agent allowlist` and had to route a read-only
+  check through a PTY. The project toolchains - JS/TS (`biome`, `tsc`,
+  `vitest`, `knip`, `vite`, `eslint`, `prettier`, `jest`, `mocha`, `playwright`,
+  `size-limit`), Python (`ruff`, `black`, `mypy`, `pytest`, `flake8`, `isort`)
+  and the Go/Rust helpers whose base command is not `go`/`cargo`
+  (`golangci-lint`, `rustfmt`) - are now allowed. This does not widen the trust
+  boundary: `node`, `python`, `bun`, `deno` and `pnpm` were already allowed and
+  each can execute arbitrary code, so a linter or type checker is strictly less
+  powerful than the interpreters beside it. An unknown binary is still refused
+  with the message that names the PTY escape hatch (asserted by a test).
+- **A rejected search pattern came back with no way forward.** `grep` runs
+  ripgrep's engine (RE2 syntax: no look-around, no backreferences). Models write
+  PCRE anyway, and the reply was the engine's own message - accurate, and silent
+  about the replacement, so the next move was usually another guess. Observed:
+  `parseInt\((?!\s*[A-Za-z_$][\w.$]*\s*,)` rejected with "look-around ... is not
+  supported". The error now keeps the engine's message (including the caret that
+  points at the offending column) and adds the specific rewrite, and the tool's
+  schema names the two unsupported constructs up front so most patterns never
+  fail.
+- **A sub-agent audit that abandoned its task was filed as a completed
+  review.** Three of four audits in one batch returned prose saying they could
+  not see the code, and the store recorded every one as `done`:
+
+  > "No actionable findings could be confirmed from this review - but that is a
+  > statement about the evidence, not a clean bill of health..."
+  > "Every body I was able to obtain consisted only of the import preamble."
+
+  The claims were false: the tool layer had returned the full files. The same
+  session's transcript shows `read_file` on `pty/session.rs` - a 409-line,
+  14.8 KB file the audit said it could not read - returning 16.7 KB of content,
+  and another audit described a `glob` result as JSON text "cut off mid-array",
+  which a tool result (an object) cannot be. Sub-agent runs are now judged on
+  their evidence: a review that declares itself incomplete, or that ran no
+  tool calls, is flagged `[inconclusive]` in the summary, marked in the run
+  store, shown as an amber "unverified" badge, and counted in the batch note, so
+  an orchestrator cannot read it as a clean audit.
+
 - **A pinned tool choice was sent to models we have no metadata for, and the
   provider rejected the whole request.** `modelAllowsForcedToolChoice` read
   `tags` off the model info, but `getCompatModelInfo` (and every freeform
@@ -140,9 +181,6 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     no per-entry check - a symlink inside a copied tree pointing at `~/.ssh`
     was copied by target, and a self-referential link looped. `copy_recursive`
     now skips symlinks and re-applies the deny-list to every child.
-
-### Fixed
-
 - **MCP scope test**: `project_scope_overrides_user_scope_for_the_same_name`
   used `project-cmd` / `user-cmd`, which the F-04 command allow-list rejects,
   so the project entry was dropped and the assertion failed. The fixture now

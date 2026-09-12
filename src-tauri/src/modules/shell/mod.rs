@@ -43,6 +43,28 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
     // Pentest & network recon tooling supported by Termigo
     "nmap", "masscan", "rustscan", "nikto", "nuclei", "httpx", "wpscan",
     "sqlmap", "ffuf", "gobuster", "dirsearch", "subfinder",
+    //
+    // Project toolchains. An agent that cannot run the project's own checks
+    // cannot verify its work, and these are the binaries a repository's scripts
+    // invoke. `pnpm lint` worked (the base command is `pnpm`) while `biome`,
+    // `tsc` and `vitest` did not, so the moment a caller wanted one file
+    // (`biome lint src/x.ts`, `vitest run src/x.test.ts`) or a raw flag it hit
+    // "not in the agent allowlist" and had to route through a PTY for a
+    // read-only check.
+    //
+    // This does not widen the trust boundary: `node`, `python`, `bun`, `deno`
+    // and `pnpm` are already allowed, and each of them can execute arbitrary
+    // code. A linter, a type checker and a test runner are strictly less
+    // powerful than the interpreters beside them, so the boundary is unchanged
+    // while the friction is gone.
+    //
+    // JS/TS (`biome`, `tsc`, `vitest`, `knip`, `vite` are this repo's own)
+    "biome", "tsc", "vitest", "knip", "vite", "eslint", "prettier",
+    "jest", "mocha", "playwright", "size-limit",
+    // Python
+    "ruff", "black", "mypy", "pytest", "flake8", "isort",
+    // Go / Rust helpers whose base command is not `go`/`cargo`
+    "golangci-lint", "rustfmt", "clippy-driver",
 ];
 
 /// Characters that enable command injection in a shell one-liner.
@@ -604,6 +626,56 @@ mod tests_sandbox {
         assert!(validate_shell_command("nmap -sV 127.0.0.1").is_ok());
         assert!(validate_shell_command("cargo check").is_ok());
         assert!(validate_shell_command("python script.py").is_ok());
+    }
+
+    /// The failure this covers, verbatim from a run: an agent tried to lint one
+    /// file and was told `command 'biome' is not in the agent allowlist`. A
+    /// coding agent has to be able to run the project's own checks, or it
+    /// cannot verify what it changed.
+    #[test]
+    fn validate_shell_command_allows_project_toolchain() {
+        for cmd in [
+            "biome lint ./src",
+            "biome check --reporter=summary .",
+            "tsc --noEmit",
+            "vitest run src/modules/ai/lib/regexEngine.test.ts",
+            "knip",
+            "eslint src",
+            "prettier --check .",
+            "pytest -q",
+            "ruff check src",
+            "mypy src",
+            "golangci-lint run",
+        ] {
+            assert!(validate_shell_command(cmd).is_ok(), "blocked: {cmd}");
+        }
+    }
+
+    /// Same binaries with a Windows extension and a version suffix, which is how
+    /// they arrive from a package manager's shim directory.
+    #[test]
+    fn validate_shell_command_allows_toolchain_with_extension() {
+        assert!(validate_shell_command("biome.exe lint ./src").is_ok());
+        assert!(validate_shell_command("tsc.cmd --noEmit").is_ok());
+        assert!(validate_shell_command("vitest.bat run").is_ok());
+    }
+
+    /// The allowlist is matched case-insensitively, so a differently-cased shim
+    /// name is not a way to be rejected by surprise.
+    #[test]
+    fn validate_shell_command_allows_toolchain_case_insensitively() {
+        assert!(validate_shell_command("Biome lint ./src").is_ok());
+        assert!(validate_shell_command("TSC --noEmit").is_ok());
+    }
+
+    /// The fix must not have opened the door: an unknown binary is still
+    /// refused, with the message that names the PTY escape hatch.
+    #[test]
+    fn validate_shell_command_still_refuses_unknown_programs() {
+        let err = validate_shell_command("definitely-not-a-tool --go")
+            .expect_err("unknown program must be refused");
+        assert!(err.contains("not in the agent allowlist"), "{err}");
+        assert!(err.contains("PTY session"), "{err}");
     }
 
     #[test]

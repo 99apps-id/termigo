@@ -13,12 +13,17 @@ import { getProfile } from "../lib/harnessProfile";
 import { activeProfileIdFor } from "../lib/harnessProfileStore";
 import type { ProviderKeys } from "../lib/keyring";
 import { repairToolCall } from "../lib/repairToolCall";
+import { judgeSubagentEvidence } from "../lib/subagentEvidence";
 import { subagentMadeProgress } from "../lib/subagentProgress";
 import { useChatStore } from "../store/chatStore";
 import type { ToolContext } from "../tools/context";
 import { buildTools } from "../tools/tools";
 import { buildAgentTools, buildSubagentSpec } from "./agentFactory";
-import { SUBAGENTS, type SubagentType } from "./registry";
+import {
+  SUBAGENTS,
+  subagentIsReadOnly,
+  type SubagentType,
+} from "./registry";
 import {
   type AnyTool,
   type DenialBreaker,
@@ -76,6 +81,9 @@ type RunResult = {
   stepCount: number;
   durationMs: number;
   aborted?: boolean;
+  /** The review did not inspect the repository (see lib/subagentEvidence.ts).
+   *  The summary carries the same warning; this is for the store and the UI. */
+  inconclusive?: boolean;
 };
 
 export async function runSubagent({
@@ -309,10 +317,26 @@ export async function runSubagent({
         clearTimeout(summaryTimer);
       }
     }
+    const steps = result.steps?.length ?? 0;
+    const toolCalls = (result.steps ?? []).reduce(
+      (n, s) => n + (s.toolCalls?.length ?? 0),
+      0,
+    );
+    // A research sub-agent's value depends on having looked; one that returns
+    // prose without inspecting anything must not be filed as a completed
+    // audit. The note travels inside the summary so the orchestrating agent
+    // reads it too, not only the store.
+    const verdict = judgeSubagentEvidence(
+      summary,
+      { steps, toolCalls },
+      { audit: subagentIsReadOnly(type) },
+    );
+    const text = summary || "(no output)";
     return {
-      summary: summary || "(no output)",
-      stepCount: result.steps?.length ?? 0,
+      summary: verdict.note ? `${text}\n\n${verdict.note}` : text,
+      stepCount: steps,
       durationMs: Date.now() - start,
+      ...(verdict.inconclusive ? { inconclusive: true } : {}),
     };
   } catch (e) {
     // The denial breaker trips by aborting the run, and a user stop of the

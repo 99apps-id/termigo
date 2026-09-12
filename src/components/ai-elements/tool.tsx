@@ -1369,7 +1369,11 @@ const SubagentRunRow = memo(
             <span
               className={cn(
                 "size-2 rounded-full",
-                isError ? "bg-destructive" : "bg-emerald-500",
+                isError
+                  ? "bg-destructive"
+                  : run.inconclusive
+                    ? "bg-amber-500"
+                    : "bg-emerald-500",
               )}
             />
           )}
@@ -1380,6 +1384,11 @@ const SubagentRunRow = memo(
         {run.depth != null && run.depth > 0 ? (
           <span className="shrink-0 rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium text-primary">
             L{run.depth}
+          </span>
+        ) : null}
+        {!isRunning && !isError && run.inconclusive ? (
+          <span className="shrink-0 rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">
+            unverified
           </span>
         ) : null}
         <span
@@ -1400,6 +1409,7 @@ const SubagentRunRow = memo(
       "flex flex-col gap-1 rounded-md border border-border/50 bg-muted/25 px-2 py-1.5 text-[11px]",
       isRunning && "border-primary/30",
       isError && "border-destructive/30 bg-destructive/5",
+      !isError && run.inconclusive && "border-amber-500/40 bg-amber-500/5",
     );
 
     if (summary) {

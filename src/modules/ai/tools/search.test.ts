@@ -12,6 +12,7 @@ vi.mock("../lib/native", () => ({
   native: nativeMock,
 }));
 
+import { SEARCH_PATTERN_HINT } from "../lib/regexEngine";
 import { buildSearchTools } from "./search";
 
 const toolOptions: ToolExecutionOptions = {
@@ -225,5 +226,47 @@ describe("grep glob accepts one pattern or several", () => {
     const list = await run(["src/**/*.ts"]);
     expect(bare).toEqual(list);
     expect(bare).toMatchObject({ glob: ["src/**/*.ts"] });
+  });
+});
+
+// `grep` runs ripgrep's engine, which has no look-around and no backreferences.
+// The model habitually writes PCRE anyway, so the dialect is stated in the
+// pattern's own description - and a rejected pattern comes back with the
+// rewrite instead of the bare engine error.
+describe("grep states the engine's limits", () => {
+  const patternDescription = () => {
+    const tools = buildSearchTools(makeContext());
+    const schema = (
+      tools.grep as unknown as {
+        inputSchema: { shape: { pattern: { description?: string } } };
+      }
+    ).inputSchema;
+    return schema.shape.pattern.description ?? "";
+  };
+
+  it("names the unsupported constructs up front", () => {
+    const description = patternDescription();
+    expect(description).toContain(SEARCH_PATTERN_HINT);
+    expect(description).toContain("look-around");
+    expect(description).toContain("backreferences");
+  });
+
+  it("explains a rejection instead of returning the raw engine error", async () => {
+    nativeMock.canonicalize.mockResolvedValue("/repo");
+    nativeMock.grep.mockRejectedValue(
+      new Error(
+        "regex parse error:\n    foo(?!bar)\nerror: look-around, including " +
+          "look-ahead and look-behind, is not supported",
+      ),
+    );
+    const ctx = makeContext();
+    ctx.getCwd = () => "/repo";
+    const execute = buildSearchTools(ctx).grep.execute;
+    if (!execute) throw new Error("grep tool execute missing");
+    const result = (await execute({ pattern: "foo(?!bar)" }, toolOptions)) as {
+      error: string;
+    };
+    expect(result.error).toContain("look-around, including look-ahead");
+    expect(result.error).toContain("This engine has no look-around");
   });
 });

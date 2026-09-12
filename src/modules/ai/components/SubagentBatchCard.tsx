@@ -40,6 +40,8 @@ export type SubagentWorker = {
   summary?: string;
   error?: string;
   skipped?: string;
+  /** Done, but its review inspected nothing - the summary is unverified. */
+  inconclusive?: boolean;
 };
 
 export function fmtDuration(ms: number): string {
@@ -123,6 +125,8 @@ export function extractWorkerData(
         typeof res?.stepCount === "number" ? res.stepCount : undefined;
       const resDuration =
         typeof res?.durationMs === "number" ? res.durationMs : undefined;
+      const resInconclusive =
+        res?.inconclusive === true || matchedRun?.inconclusive === true;
 
       let status: SubagentWorker["status"] = "pending";
       if (resError || matchedRun?.status === "error") {
@@ -148,6 +152,7 @@ export function extractWorkerData(
         summary: resSummary ?? matchedRun?.summary,
         error: resError ?? matchedRun?.error,
         skipped: resSkipped,
+        inconclusive: resInconclusive,
       };
     });
 
@@ -173,6 +178,8 @@ export function extractWorkerData(
     typeof outObj?.stepCount === "number" ? outObj.stepCount : undefined;
   const outDuration =
     typeof outObj?.durationMs === "number" ? outObj.durationMs : undefined;
+  const outInconclusive =
+    outObj?.inconclusive === true || matchedRun?.inconclusive === true;
 
   let status: SubagentWorker["status"] = "pending";
   if (outError || matchedRun?.status === "error") {
@@ -195,6 +202,7 @@ export function extractWorkerData(
       durationMs: outDuration ?? matchedRun?.durationMs,
       summary: outSummary ?? matchedRun?.summary,
       error: outError ?? matchedRun?.error,
+      inconclusive: outInconclusive,
     },
   ];
 
@@ -237,6 +245,7 @@ export const SubagentBatchCard = memo(function SubagentBatchCard({
     (w) => w.status === "error" || w.status === "skipped",
   ).length;
   const runningCount = workers.filter((w) => w.status === "running").length;
+  const unverifiedCount = workers.filter((w) => w.inconclusive).length;
 
   const totalDuration = workers.reduce(
     (acc, w) => acc + (w.durationMs ?? 0),
@@ -248,7 +257,9 @@ export const SubagentBatchCard = memo(function SubagentBatchCard({
       className={cn(
         "my-2 overflow-hidden rounded-lg border border-border/80 bg-card text-[12px] shadow-xs transition-all dark:border-border/70 dark:bg-card/60",
         inProgress && "border-primary/50 bg-primary/10 dark:border-primary/40 dark:bg-primary/5",
-        errorCount > 0 && !inProgress && "border-amber-500/50",
+        (errorCount > 0 || unverifiedCount > 0) &&
+          !inProgress &&
+          "border-amber-500/50",
         className,
       )}
     >
@@ -306,6 +317,11 @@ export const SubagentBatchCard = memo(function SubagentBatchCard({
             <span className="inline-flex items-center gap-1 rounded border border-destructive/20 bg-destructive/15 px-1.5 py-0.5 text-[10.5px] font-semibold text-destructive dark:border-transparent dark:bg-destructive/20 dark:text-red-300">
               <HugeiconsIcon icon={AlertCircleIcon} size={11} strokeWidth={2} />
               <span>{errorCount} issue{errorCount === 1 ? "" : "s"}</span>
+            </span>
+          ) : unverifiedCount > 0 ? (
+            <span className="inline-flex items-center gap-1 rounded border border-amber-500/30 bg-amber-500/15 px-1.5 py-0.5 text-[10.5px] font-semibold text-amber-800 dark:text-amber-300">
+              <HugeiconsIcon icon={AlertCircleIcon} size={11} strokeWidth={2} />
+              <span>{unverifiedCount} unverified</span>
             </span>
           ) : (
             <span className="inline-flex items-center gap-1 rounded border border-emerald-500/20 bg-emerald-500/15 px-1.5 py-0.5 text-[10.5px] font-semibold text-emerald-800 dark:border-transparent dark:bg-emerald-500/20 dark:text-emerald-300">
@@ -399,6 +415,9 @@ const WorkerRow = memo(function WorkerRow({
         "rounded-md border border-border/80 bg-card p-2 shadow-2xs transition-all dark:border-border/50 dark:bg-background/50",
         isRunning && "border-primary/50 bg-primary/10 dark:border-primary/40 dark:bg-primary/5",
         isError && "border-destructive/40 bg-destructive/10 dark:bg-destructive/5",
+        isDone &&
+          worker.inconclusive &&
+          "border-amber-500/40 bg-amber-500/5 dark:bg-amber-500/5",
         isSkipped && "border-border/40 opacity-75 dark:border-border/30",
       )}
     >
@@ -423,6 +442,8 @@ const WorkerRow = memo(function WorkerRow({
           <div className="mt-0.5 flex size-3.5 shrink-0 items-center justify-center">
             {isRunning ? (
               <Spinner className="size-3 text-primary" />
+            ) : isDone && worker.inconclusive ? (
+              <span className="size-2 rounded-full bg-amber-500" />
             ) : isDone ? (
               <span className="size-2 rounded-full bg-emerald-500" />
             ) : isError ? (
@@ -450,6 +471,12 @@ const WorkerRow = memo(function WorkerRow({
                 <span className="inline-flex items-center gap-1 rounded bg-muted/60 px-1.5 py-0.2 text-[9.5px] text-muted-foreground">
                   <HugeiconsIcon icon={GitForkIcon} size={9} strokeWidth={1.8} />
                   <span>waits for #{worker.dependsOn.join(", #")}</span>
+                </span>
+              )}
+
+              {isDone && worker.inconclusive && (
+                <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[9.5px] font-semibold text-amber-800 dark:text-amber-300">
+                  unverified
                 </span>
               )}
 

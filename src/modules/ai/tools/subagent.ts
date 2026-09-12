@@ -42,6 +42,8 @@ type BatchResult = {
   skipped?: string;
   stepCount?: number;
   durationMs?: number;
+  /** Finished, but the review did not look at anything (subagentEvidence). */
+  inconclusive?: boolean;
 };
 
 /** Parse a value that may be a JSON string, returning it unchanged if not. */
@@ -150,6 +152,7 @@ Approval works exactly as it does for you: read-only tools auto-run, and every m
             stepCount: r.stepCount,
             durationMs: r.durationMs,
             summary: r.summary,
+            inconclusive: r.inconclusive,
           });
           return {
             type: resolved,
@@ -157,6 +160,7 @@ Approval works exactly as it does for you: read-only tools auto-run, and every m
             summary: r.summary,
             stepCount: r.stepCount,
             durationMs: r.durationMs,
+            ...(r.inconclusive ? { inconclusive: true } : {}),
           };
         } catch (e) {
           useSubagentRunStore.getState().fail(sid, runId, String(e));
@@ -363,11 +367,13 @@ Each task's subagent has the same toolset you do and may itself spawn further su
             results[i].summary = r.summary;
             results[i].stepCount = r.stepCount;
             results[i].durationMs = r.durationMs;
+            if (r.inconclusive) results[i].inconclusive = true;
             state[i] = { settled: true, bad: false, running: false };
             useSubagentRunStore.getState().finish(sid, runId, {
               stepCount: r.stepCount,
               durationMs: r.durationMs,
               summary: r.summary,
+              inconclusive: r.inconclusive,
             });
           } catch (e) {
             results[i].error = String(e);
@@ -412,10 +418,20 @@ Each task's subagent has the same toolset you do and may itself spawn further su
         const failedOrSkipped = results.filter(
           (r) => r.error || r.skipped,
         ).length;
+        // A run that declares its own review incomplete is neither a success to
+        // build on nor a failure to retry blindly; the aggregate count is what
+        // stops the orchestrator reading the batch as a clean audit.
+        const inconclusive = results.filter((r) => r.inconclusive).length;
+        if (inconclusive) {
+          notes.push(
+            `${inconclusive} of ${results.length} subagent(s) reported an incomplete review - their conclusions are unverified; re-run those with a narrower scope or do that part yourself.`,
+          );
+        }
         return {
           count: results.length,
           maxConcurrency: concurrency,
           ...(failedOrSkipped ? { failedOrSkipped } : {}),
+          ...(inconclusive ? { inconclusive } : {}),
           ...(notes.length ? { note: notes.join(" ") } : {}),
           results,
         };

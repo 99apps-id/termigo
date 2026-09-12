@@ -9,6 +9,8 @@ const runs = vi.hoisted(() => ({
   /** Prompts as the subagent received them, keyed by the task's own text. */
   prompts: new Map<string, string>(),
   fail: new Set<string>(),
+  /** Tasks whose run finishes without having inspected anything. */
+  inconclusive: new Set<string>(),
   delayMs: 0,
 }));
 
@@ -25,7 +27,12 @@ vi.mock("../agents/runSubagent", () => ({
     await new Promise((r) => setTimeout(r, runs.delayMs));
     runs.active--;
     if (runs.fail.has(own)) throw new Error(`boom: ${own}`);
-    return { summary: `summary of ${own}`, stepCount: 1, durationMs: 1 };
+    return {
+      summary: `summary of ${own}`,
+      stepCount: 1,
+      durationMs: 1,
+      ...(runs.inconclusive.has(own) ? { inconclusive: true } : {}),
+    };
   }),
 }));
 
@@ -61,12 +68,14 @@ type BatchOut = {
   count: number;
   maxConcurrency: number;
   failedOrSkipped?: number;
+  inconclusive?: number;
   note?: string;
   results: {
     index: number;
     summary?: string;
     error?: string;
     skipped?: string;
+    inconclusive?: boolean;
   }[];
 };
 
@@ -89,6 +98,7 @@ beforeEach(() => {
   runs.active = 0;
   runs.prompts.clear();
   runs.fail.clear();
+  runs.inconclusive.clear();
   runs.delayMs = 0;
 });
 
@@ -180,6 +190,30 @@ describe("run_subagents", () => {
     });
     expect(out.note).toContain("does not exist");
     expect(out.results[0].summary).toBeTruthy();
+  });
+
+  // A run that produced prose without looking at anything must not read as a
+  // clean audit: the flag has to reach both the payload and the batch note.
+  it("counts a sub-agent that reported an incomplete review", async () => {
+    runs.inconclusive.add("b");
+    const out = await run({
+      tasks: [
+        { type: "code-review", prompt: "a" },
+        { type: "code-review", prompt: "b" },
+      ],
+    });
+    expect(out.inconclusive).toBe(1);
+    expect(out.results[1].inconclusive).toBe(true);
+    expect(out.results[0].inconclusive).toBeUndefined();
+    expect(out.note).toContain("1 of 2 subagent(s)");
+  });
+
+  it("says nothing about inconclusive runs when every run read", async () => {
+    const out = await run({
+      tasks: [{ type: "code-review", prompt: "a" }],
+    });
+    expect(out.inconclusive).toBeUndefined();
+    expect(out.note ?? "").not.toContain("unverified");
   });
 
   it("returns results in the order they were given", async () => {

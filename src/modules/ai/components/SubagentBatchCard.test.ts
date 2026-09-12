@@ -141,4 +141,54 @@ describe("extractWorkerData", () => {
       "Audit surface IPC/Tauri commands + capabilities allowlist",
     );
   });
+
+  // A batch whose workers reported an incomplete review must not read as a
+  // clean fan-out: the flag travels from the tool output, or from the live run
+  // when the output has not landed yet.
+  it("carries the unverified flag from the result or the live run", () => {
+    const flagged = extractWorkerData(
+      "run_subagents",
+      { tasks: [{ type: "code-review", prompt: "a" }] },
+      {
+        count: 1,
+        inconclusive: 1,
+        results: [
+          {
+            index: 0,
+            summary: "Could not obtain the bodies.",
+            inconclusive: true,
+          },
+        ],
+      },
+      [],
+    );
+    expect(flagged.workers[0].status).toBe("done");
+    expect(flagged.workers[0].inconclusive).toBe(true);
+
+    const single = extractWorkerData(
+      "run_subagent",
+      { type: "code-review", prompt: "a" },
+      { summary: "Could not obtain the bodies.", inconclusive: true },
+      [],
+    );
+    expect(single.workers[0].inconclusive).toBe(true);
+
+    const fromRun = extractWorkerData(
+      "run_subagents",
+      { tasks: [{ type: "code-review", prompt: "a" }] },
+      undefined,
+      [
+        {
+          id: "r1",
+          sessionId: "s",
+          type: "code-review",
+          label: "a",
+          status: "done",
+          startedAt: 0,
+          inconclusive: true,
+        },
+      ] as never,
+    );
+    expect(fromRun.workers[0].inconclusive).toBe(true);
+  });
 });

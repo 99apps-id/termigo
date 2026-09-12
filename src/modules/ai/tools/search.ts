@@ -12,6 +12,10 @@ import {
   resolveRemoteRoot,
 } from "../lib/remoteSearch";
 import { checkReadable, checkReadableCanonical } from "../lib/security";
+import {
+  explainSearchEngineError,
+  SEARCH_PATTERN_HINT,
+} from "../lib/regexEngine";
 import { resolvePath, type ToolContext } from "./context";
 
 function resolveRoot(
@@ -66,7 +70,7 @@ export function buildSearchTools(ctx: ToolContext) {
         pattern: z
           .string()
           .describe(
-            "Regex pattern (Rust ripgrep dialect). Anchor and escape literal characters as needed.",
+            `Regex pattern (Rust ripgrep dialect). Anchor and escape literal characters as needed. ${SEARCH_PATTERN_HINT} Match the broader pattern and filter by reading the hits instead.`,
           ),
         root: z
           .string()
@@ -142,7 +146,7 @@ export function buildSearchTools(ctx: ToolContext) {
                 : {}),
             };
           } catch (e) {
-            return { error: String(e), remote: true };
+            return { error: explainSearchEngineError(String(e)), remote: true };
           }
         }
         const r = resolveRoot(root, ctx);
@@ -177,7 +181,7 @@ export function buildSearchTools(ctx: ToolContext) {
             files_scanned: res.files_scanned,
           };
         } catch (e) {
-          return { error: String(e), root: r.path };
+          return { error: explainSearchEngineError(String(e)), root: r.path };
         }
       },
     }),
