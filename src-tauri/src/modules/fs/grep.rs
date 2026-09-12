@@ -113,7 +113,12 @@ fn search_tree(
                 return WalkState::Continue;
             }
             let path = dent.path();
-            if security::is_protected(path) {
+            // Directory pruning alone is not enough here: this walk returns file
+            // *content*, and `fs_read_file` refuses a secret basename whatever
+            // directory it sits in. Without the basename pass, grepping any
+            // authorized tree (a repo, or $HOME) handed back the body of a
+            // `server.key` / `credentials.json` the read tool would have denied.
+            if security::is_protected(path) || security::is_secret_path(path) {
                 return WalkState::Continue;
             }
             let rel = match path.strip_prefix(&root_path) {
@@ -530,6 +535,34 @@ mod tests {
             &|| true,
         );
         assert!(stopped.hits.is_empty(), "cancelled search yields nothing");
+    }
+
+    #[test]
+    fn search_tree_never_returns_secret_file_content() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("notes.txt"), "needle in an ordinary file\n").unwrap();
+        std::fs::write(dir.path().join("server.key"), "needle in a private key\n").unwrap();
+        std::fs::write(
+            dir.path().join("credentials.json"),
+            "needle in credentials\n",
+        )
+        .unwrap();
+
+        let matcher = RegexMatcherBuilder::new().build("needle").unwrap();
+        let ws = WorkspaceEnv::from_option(None);
+        let root_display = dir.path().to_string_lossy().to_string();
+        let res = search_tree(
+            dir.path(),
+            &root_display,
+            &ws,
+            &matcher,
+            &None,
+            100,
+            &|| false,
+        );
+
+        assert_eq!(res.hits.len(), 1, "only the ordinary file may match");
+        assert_eq!(res.hits[0].rel, "notes.txt");
     }
 
     #[test]

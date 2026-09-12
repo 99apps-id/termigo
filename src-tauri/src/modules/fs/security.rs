@@ -184,6 +184,24 @@ pub fn is_protected(path: &Path) -> bool {
     PROTECTED_DIRS.iter().any(|d| is_under_protected(&cmp, d))
 }
 
+/// Basename deny-list with no filesystem access, for the walkers that return
+/// file *content*. `is_protected` only prunes known secret directories, so a
+/// `*.pem` / `id_rsa` / `credentials.json` living in an ordinary directory (or
+/// anywhere under an authorized root such as `$HOME`) had its body echoed back
+/// by the content search while `fs_read_file` refused the very same file. Cheap
+/// on purpose: one regex pass over the file name and no `canonicalize`, so it is
+/// safe to call per entry in a large walk.
+pub fn is_secret_path(path: &Path) -> bool {
+    let name = match path.file_name() {
+        Some(n) => n.to_string_lossy(),
+        None => return false,
+    };
+    if name.is_empty() || safe_env_template().is_match(&name) {
+        return false;
+    }
+    secret_basename_patterns().iter().any(|re| re.is_match(&name))
+}
+
 fn describe_protected(dir: &str) -> &str {
     dir.trim_start_matches('/')
 }
@@ -363,6 +381,23 @@ mod tests {
     fn control_bytes_are_rejected() {
         assert!(check_readable("/tmp/.env\x00.tail").is_err());
         assert!(check_readable("/tmp/.env\ntail").is_err());
+    }
+
+    #[test]
+    fn is_secret_path_flags_non_hidden_secret_names() {
+        // None of these are dotfiles, so the walker's hidden filter never drops
+        // them and the basename deny-list is the only thing between a content
+        // search and the secret.
+        assert!(is_secret_path(Path::new("/home/me/server.key")));
+        assert!(is_secret_path(Path::new("/home/me/deploy.pem")));
+        assert!(is_secret_path(Path::new("/home/me/credentials.json")));
+        assert!(is_secret_path(Path::new("/home/me/id_rsa")));
+        assert!(is_secret_path(Path::new("/home/me/known_hosts")));
+        assert!(is_secret_path(Path::new("/home/me/service-account.json")));
+        // Committed templates stay readable, and ordinary files stay visible.
+        assert!(!is_secret_path(Path::new("/repo/.env.example")));
+        assert!(!is_secret_path(Path::new("/repo/src/main.rs")));
+        assert!(!is_secret_path(Path::new("/home/me/project")));
     }
 
     #[test]
