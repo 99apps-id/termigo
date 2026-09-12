@@ -1,0 +1,64 @@
+fix(ai): stop pinning tool_choice on models we know nothing about; stop killing productive runs
+
+Both bugs were found in the log and trajectory store of the newly built app,
+not by reading code.
+
+## 1. A pinned tool choice was sent to models with no metadata
+
+    [2026-09-12][02:52:58] provider responded in 661ms (status 400)
+    [2026-09-12][02:52:58] ai request failed: Thinking mode does not support this tool_choice
+
+`getCompatModelInfo` - and every freeform provider entry (openrouter-custom,
+openai-compatible-custom, lmstudio-local, mlx-local, ollama-local) - builds its
+ModelInfo without a `tags` key. `modelAllowsForcedToolChoice` read
+`m.tags?.includes("reasoning") ?? false`, which is `false` for a missing key, so
+every such model was treated as accepting a pin and step 0 of a broad request
+was pinned to `run_subagents`. The provider answered with the exact 400 the
+module's own comment predicts, on the first request, before any work.
+
+Absence of metadata is not evidence of capability. An unknown model is now
+treated as not allowing a forced tool choice. The model still has
+`run_subagents` and can choose it - pinning was an optimisation - and
+`lib/toolChoiceLearning` remains the ground truth for a built-in whose tags are
+wrong.
+
+## 2. A prose-free run of tool steps was treated as a loop
+
+    run-mtxsloul-t1o6ba  status=failed  steps=8   199,737 tokens
+      read_file x4, grep, read_file x3         all success, all different
+    run-mtxsipep-0x5p4o  status=failed  steps=6    74,730 tokens
+      read_file x5, glob                       all success
+
+Two runs of ordinary multi-file exploration, terminated by a guard. The guard
+was a prose-free streak: two consecutive steps that called tools without text
+requested a synthesis step, and that step ended the run either way. Reading
+eight files emits no prose between them, so the guard fired on work that was
+succeeding - which is what "the agent did not do what I asked" looked like from
+the outside.
+
+A prose-free streak is not a loop. The guard is removed. Loop protection is
+unchanged: the same call three times (`noToolRepetition`), a tool that keeps
+failing (`noErrorProgress`), a model that narrates without acting
+(`noProgressStop`), the step budget, the cost cap and the round cap all remain,
+and `requestSynthesisOrStop` still gives every real guard its final tool-less
+summary step.
+
+Follow-on, from the same evidence: the endpoint accepted the `toolChoice: "none"`
+pin without honouring it, so the synthesis step came back tool-only and the run
+ended as `tool-only-loop` - which does not auto-continue. Synthesis is therefore
+skipped for models we cannot reason about, keeping the guard's true reason
+(`step-cap` still auto-continues a productive run) instead of converting a
+paused useful run into one the user has to restart by hand.
+
+## Tests
+
+- `forcedToolChoice.test.ts`: a custom endpoint and all five freeform entries
+  must return false; `modelKeepsReasoning` must stay true for the same model (the
+  two questions stay independent); a built-in that takes the pin must still get
+  it. Verified by reverting the fix: 3 tests fail.
+- `stopConditions.test.ts`: the recorded shape (8 varied, all-successful,
+  prose-free steps) must trip no guard, while the same read three times still
+  must.
+
+Gates: pnpm check-types, pnpm lint (103 pre-existing warnings), pnpm test
+(235 files / 2254 tests).

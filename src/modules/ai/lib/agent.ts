@@ -1156,6 +1156,16 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // pins `toolChoice: "none"` for that step (see below), and this flag both
   // requests it and then lets the run stop once the summary lands. Gated on the
   // model accepting a forced tool choice (reasoning models reject it).
+  //
+  // This also covers models we carry no metadata for, and that is deliberate.
+  // A thinking-mode endpoint was observed accepting the "none" pin without
+  // honouring it - the step came back with tool calls, so `synthesisStepOutcome`
+  // returned "ignored" and the run ended as "tool-only-loop" instead of with the
+  // guard's real reason. That is worse than no synthesis at all: "step-cap" is
+  // the reason the runtime auto-continues, so suppressing it turned a paused
+  // useful run into one the user had to restart by hand. Not attempting a
+  // summary keeps the true reason; the cost is a missing closing paragraph on
+  // endpoints we cannot reason about.
   const allowSynthesis = modelAllowsForcedToolChoice(info);
   let synthesisRequested = false;
   // Step count when the synthesis step was requested, so the stop conditions can

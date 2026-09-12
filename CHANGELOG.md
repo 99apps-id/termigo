@@ -6,6 +6,41 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A pinned tool choice was sent to models we have no metadata for, and the
+  provider rejected the whole request.** `modelAllowsForcedToolChoice` read
+  `tags` off the model info, but `getCompatModelInfo` (and every freeform
+  provider entry: OpenRouter custom, OpenAI-compatible custom, LM Studio, MLX,
+  Ollama) builds its model WITHOUT a `tags` key. `undefined?.includes(...)` is
+  falsy, so every one of them was treated as capable and step 0 of a broad
+  request was pinned to `run_subagents`. A StepFun thinking-mode endpoint
+  answered exactly what the module's own comment predicted:
+  `status 400 - "Thinking mode does not support this tool_choice"`, on the first
+  request of the run, before a token of work. Absence of metadata is not
+  evidence of capability, so an unknown model is now treated as not allowing it.
+  The model still has `run_subagents` and may choose it; pinning was an
+  optimisation. `lib/toolChoiceLearning` stays the ground truth for a built-in
+  whose tags are wrong.
+- **A run of prose-free tool steps was treated as a loop, so productive work was
+  terminated.** Two consecutive steps that called tools without emitting text
+  requested a synthesis step, and the synthesis step ended the run whichever way
+  it went - a summary, or an ignored pin. Reading eight files emits no prose
+  between them, so the guard fired on work that was succeeding. The trajectory
+  store shows the cost: a run of 8 varied, all-successful reads
+  (`read_file` x7, `grep`) marked `failed`, another of 6 (`read_file` x5,
+  `glob`) the same, after burning 199k and 75k tokens. A prose-free streak is
+  not a loop; the guard is removed. Loop protection is unchanged - the same call
+  three times (`noToolRepetition`), a tool that keeps failing
+  (`noErrorProgress`), a model that narrates without acting (`noProgressStop`)
+  and the step budget all still apply - and `requestSynthesisOrStop` still gives
+  every real guard its final tool-less summary step.
+  Follow-on: because an unknown endpoint was observed accepting the
+  `toolChoice: "none"` pin without honouring it, synthesis is skipped for those
+  models too. That keeps the guard's true reason (and with it `step-cap`'s
+  auto-continue) instead of converting a paused useful run into
+  `tool-only-loop`, which does not auto-continue.
+
 ### Added
 
 - **On-demand tool loading.** The full toolset is ~80 KB of JSON Schema sent on
