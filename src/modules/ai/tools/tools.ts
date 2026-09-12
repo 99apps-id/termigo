@@ -1,18 +1,12 @@
 import { summarizeInput } from "../lib/approvalQueue";
 import { withAutoVerify } from "../lib/autoVerify";
 import { buildOrchestratorTools } from "../lib/orchestrator";
-import { KNOWN_TOOL_ALIASES } from "../lib/repairToolCall";
-import { buildPolicyTools } from "./policyTools";
-import { buildProcessTools } from "./process";
 import {
   POST_EXECUTE_CONFIRM_TOOLS,
   withPostExecuteConfirm,
 } from "../lib/postExecuteConfirm";
+import { KNOWN_TOOL_ALIASES } from "../lib/repairToolCall";
 import { buildSkillRegistryTools } from "../lib/skillRegistry";
-import {
-  buildUnknownToolFallback,
-  UNKNOWN_TOOL_NAME,
-} from "./toolFallback";
 import { useApprovalQueue } from "../store/approvalQueueStore";
 import { buildManagedAgentTools } from "./agent";
 import { buildBrowserTools } from "./browser";
@@ -34,12 +28,14 @@ import { buildLspTools } from "./lsp";
 import { buildMcpOAuthTools } from "./mcpOAuth";
 import { buildMemoryTools } from "./memory";
 import { buildPdfTools } from "./pdf";
+import { buildPolicyTools } from "./policyTools";
+import { buildProcessTools } from "./process";
 import { buildPtyDriverTools } from "./ptyDriver";
 import { buildReplaceTools } from "./replace";
 import { buildReviewTools } from "./review";
+import { buildSearchTools } from "./search";
 import { buildSearchHistoryTools } from "./searchHistory";
 import { buildSelfImprovementTools } from "./selfImprovement";
-import { buildSearchTools } from "./search";
 import { buildShellTools } from "./shell";
 import { buildSkillTools } from "./skills";
 import { buildSqlTools } from "./sql";
@@ -48,6 +44,10 @@ import { buildSystemTools } from "./system";
 import { buildTerminalTools } from "./terminal";
 import { buildTestLoopTools } from "./testLoopTools";
 import { buildTodoTools } from "./todo";
+import {
+  buildUnknownToolFallback,
+  UNKNOWN_TOOL_NAME,
+} from "./toolFallback";
 import { buildVerifyTools } from "./verify";
 import { buildWebSearchTools } from "./webSearch";
 import { buildWorkflowTools } from "./workflow";

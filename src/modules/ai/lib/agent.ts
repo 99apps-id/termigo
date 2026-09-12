@@ -5,6 +5,7 @@ function fireAndForget(promise: Promise<unknown>, label: string) {
     logWarn(`[ai] fire-and-forget failed: ${label}: ${error instanceof Error ? error.message : String(error)}`);
   });
 }
+
 import {
   convertToModelMessages,
   type LanguageModel,
@@ -22,10 +23,10 @@ import {
   CHATGPT_HEADERS,
   type CustomEndpoint,
   DEFAULT_MODEL_ID,
+  effectiveModelName,
   endpointIdFromCompatModel,
   estimateCost,
   getModelContextLimit,
-  effectiveModelName,
   isCompactTierModel,
   isCompatModelId,
   LMSTUDIO_DEFAULT_BASE_URL,

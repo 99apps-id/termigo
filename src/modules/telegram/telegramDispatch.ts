@@ -3,49 +3,6 @@
 // Extracted from bot.ts so the polling and command layers only route to
 // dispatch functions.
 
-import {
-  sendTelegram,
-  deleteTelegramMessage,
-  sendPhoto,
-  sendDocument,
-  sendTyping,
-  sendKeyboard,
-  sendProgressMessage,
-  editProgressMessage,
-  splitTelegramText,
-} from "./telegramApi";
-import {
-  getPendingApprovals,
-  matchElicitationAnswer,
-  runBusy,
-  countAssistantMessages,
-  lastAssistantText,
-  messageText,
-  type ChatLike,
-} from "./telegramHelpers";
-import {
-  telegramOriginMessageIds,
-  recordTelegramText,
-  isTelegramOriginText,
-  markMessageSeen,
-  isMessageSeen,
-  pauseMirror,
-  resumeMirror,
-  getMirrorPauseCount,
-  rememberTelegramOrigin,
-} from "./telegramDedup";
-import {
-  publishProgress,
-  progressCtrls,
-  lastFinishedProgressMessageIds,
-} from "./telegramProgress";
-import {
-  approvalWaitLine,
-  logRelayInfo,
-  logRelayWarn,
-  relayErrorLine,
-  runOutcomeLine,
-} from "./telegramLog";
 // Still used by runMirror (the Termigo -> Telegram direction), which streams a
 // mirrored message by editing it in place. The Telegram -> Termigo direction no
 // longer needs these: its interim text now lives inside the progress card.
@@ -55,6 +12,49 @@ import {
   startedState,
 } from "./mirrorStream";
 import { useTelegramStore } from "./store";
+import {
+  deleteTelegramMessage,
+  editProgressMessage,
+  sendDocument,
+  sendKeyboard,
+  sendPhoto,
+  sendProgressMessage,
+  sendTelegram,
+  sendTyping,
+  splitTelegramText,
+} from "./telegramApi";
+import {
+  getMirrorPauseCount,
+  isMessageSeen,
+  isTelegramOriginText,
+  markMessageSeen,
+  pauseMirror,
+  recordTelegramText,
+  rememberTelegramOrigin,
+  resumeMirror,
+  telegramOriginMessageIds,
+} from "./telegramDedup";
+import {
+  type ChatLike,
+  countAssistantMessages,
+  getPendingApprovals,
+  lastAssistantText,
+  matchElicitationAnswer,
+  messageText,
+  runBusy,
+} from "./telegramHelpers";
+import {
+  approvalWaitLine,
+  logRelayInfo,
+  logRelayWarn,
+  relayErrorLine,
+  runOutcomeLine,
+} from "./telegramLog";
+import {
+  lastFinishedProgressMessageIds,
+  progressCtrls,
+  publishProgress,
+} from "./telegramProgress";
 
 function sleep(signal: AbortSignal, ms: number): Promise<void> {
   return new Promise((resolve) => {

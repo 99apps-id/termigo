@@ -5,11 +5,11 @@
 // actually builds and pushes the markdown-bubbled progress message.
 
 import {
-  sendProgressMessage,
   editProgressMessage,
-  sendKeyboard,
-  sendTyping,
   type InlineButton,
+  sendKeyboard,
+  sendProgressMessage,
+  sendTyping,
 } from "./telegramApi";
 import { getPendingApprovals, messageText, runBusy } from "./telegramHelpers";
 

@@ -7,9 +7,9 @@ import {
   compatModelIdForEndpoint,
   getCompatModelInfo,
   MODELS,
+  type ModelInfo,
   modelAllowsForcedToolChoice,
   modelKeepsReasoning,
-  type ModelInfo,
 } from "../config";
 
 // `MODELS` is a const array of literals, so a few entries have no `tags` key at

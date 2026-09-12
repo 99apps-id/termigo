@@ -8,12 +8,12 @@
 
 import { describe, expect, it } from "vitest";
 import { bestToolMatch, editDistance, suggestToolNames } from "../lib/toolNames";
-import { buildTools, type ToolContext } from "./tools";
 import {
   buildUnknownToolFallback,
   buildUnknownToolMessage,
   UNKNOWN_TOOL_NAME,
 } from "./toolFallback";
+import { buildTools, type ToolContext } from "./tools";
 
 function stubContext(): ToolContext {
   return {

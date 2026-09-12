@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  type CustomEndpoint,
   apiModelIdDiffers,
+  type CustomEndpoint,
   compatModelIdForEndpoint,
+  DEFAULT_MODEL_ID,
   effectiveModelName,
   endpointIdFromCompatModel,
   getModelContextLimit,
@@ -11,7 +12,6 @@ import {
   MAX_AGENT_STEPS,
   MODEL_PRICING,
   MODELS,
-  DEFAULT_MODEL_ID,
   migrateLegacyCompatEndpoint,
   modelKeepsReasoning,
   modelSupportsTemperature,

@@ -10,6 +10,7 @@
 
 import { describe, expect, it } from "vitest";
 import { measureToolPayload } from "../lib/toolPayload";
+import { UNKNOWN_TOOL_NAME } from "./toolFallback";
 import {
   buildFindToolsTool,
   buildToolIndex,
@@ -20,7 +21,6 @@ import {
   TOOL_SEARCH_ALWAYS_ON,
   type ToolIndexEntry,
 } from "./toolSearch";
-import { UNKNOWN_TOOL_NAME } from "./toolFallback";
 import { buildTools, type ToolContext } from "./tools";
 
 function stubContext(): ToolContext {

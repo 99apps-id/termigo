@@ -3,6 +3,7 @@
 // Extracted from bot.ts so the polling concerns are isolated and the polling
 // layer only depends on the command router.
 
+import { useTelegramStore } from "./store";
 import { apiGet, TelegramApiError } from "./telegramApi";
 import { handleUpdate, type Update } from "./telegramCommands";
 import { runMirror } from "./telegramDispatch";
@@ -12,7 +13,6 @@ import {
   relayErrorLine,
   updateLine,
 } from "./telegramLog";
-import { useTelegramStore } from "./store";
 
 export let loopController: AbortController | null = null;
 export let mirrorController: AbortController | null = null;

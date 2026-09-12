@@ -5,8 +5,8 @@
 
 import { getTelegramToken } from "./keyring";
 import {
-  markdownToTelegramHtml,
   escapePlainTextToHtml,
+  markdownToTelegramHtml,
 } from "./progressFormat";
 
 export type InlineButton = { text: string; callback_data: string };

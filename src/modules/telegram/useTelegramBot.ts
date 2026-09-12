@@ -6,8 +6,8 @@
 
 import { useEffect } from "react";
 import { startTelegramBot, stopTelegramBot } from "./bot";
-import { logRelayInfo } from "./telegramLog";
 import { syncTelegramFromStorage, useTelegramStore } from "./store";
+import { logRelayInfo } from "./telegramLog";
 
 const STORAGE_KEY = "termigo-telegram";
 

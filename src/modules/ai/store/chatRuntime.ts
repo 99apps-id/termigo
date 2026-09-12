@@ -378,8 +378,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       usePreferencesStore.getState().openrouterModelId,
     getCustomEndpoints: () => usePreferencesStore.getState().customEndpoints,
     getCustomEndpointKeys: () => useChatStore.getState().customEndpointKeys,
-    getModelIdOverrides: () =>
-      usePreferencesStore.getState().modelIdOverrides,
+    getModelIdOverrides: () => usePreferencesStore.getState().modelIdOverrides,
     getDisabledToolGroups: () =>
       usePreferencesStore.getState().disabledToolGroups,
     getToolSearchEnabled: () =>

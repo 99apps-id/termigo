@@ -52,11 +52,11 @@ import {
   type Snippet,
 } from "@/modules/ai/lib/snippets";
 import { newAgentId, useAgentsStore } from "@/modules/ai/store/agentsStore";
-import { TOOL_GROUPS } from "@/modules/ai/tools/toolGroups";
 import {
   newSnippetId,
   useSnippetsStore,
 } from "@/modules/ai/store/snippetsStore";
+import { TOOL_GROUPS } from "@/modules/ai/tools/toolGroups";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   setAgentAutoContinue,

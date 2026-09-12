@@ -17,8 +17,8 @@ import { describe, expect, it } from "vitest";
 import { TelegramApiError } from "./telegramApi";
 import {
   POLLING_STALL_TIMEOUT_MS,
-  TELEGRAM_CONFLICT_BACKOFF_MS,
   pollBackoffMs,
+  TELEGRAM_CONFLICT_BACKOFF_MS,
 } from "./telegramPolling";
 
 describe("pollBackoffMs", () => {

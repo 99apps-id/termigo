@@ -1,8 +1,8 @@
 import { cn } from "@/lib/utils";
-import { QueuedSteerRow } from "@/modules/ai/components/QueuedSteerRow";
 import { AiInputBarConnect } from "@/modules/ai";
 import { Chip } from "@/modules/ai/components/Chip";
 import { ChipsRow } from "@/modules/ai/components/ChipsRow";
+import { QueuedSteerRow } from "@/modules/ai/components/QueuedSteerRow";
 import { useComposer } from "@/modules/ai/lib/composer";
 import { useBlockController } from "@/modules/terminal/lib/blockController";
 import { focusLeafInput } from "@/modules/terminal/lib/useTerminalSession";
@@ -12,10 +12,10 @@ import {
   GitBranchIcon,
 } from "@hugeicons/core-free-icons";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { inputSurfaces } from "./inputSurfaces";
 import { OsIcon } from "./OsIcon";
 import { useGitBranch } from "./useGitBranch";
 import { useSystemInfo } from "./useSystemInfo";
-import { inputSurfaces } from "./inputSurfaces";
 
 const ShellInput = lazy(() => import("@/modules/terminal/block/ShellInput"));
 const AiComposerInput = lazy(() =>

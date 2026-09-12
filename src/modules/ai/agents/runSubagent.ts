@@ -21,8 +21,8 @@ import { buildTools } from "../tools/tools";
 import { buildAgentTools, buildSubagentSpec } from "./agentFactory";
 import {
   SUBAGENTS,
-  subagentIsReadOnly,
   type SubagentType,
+  subagentIsReadOnly,
 } from "./registry";
 import {
   type AnyTool,
@@ -34,8 +34,8 @@ import {
 } from "./subagentGating";
 import {
   isUnfinishedOrGarbledSummary,
-  sanitizeGarbledSummary,
   SUMMARY_TIMEOUT_MS,
+  sanitizeGarbledSummary,
   synthesizeSummary,
 } from "./subagentSummary";
 

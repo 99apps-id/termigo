@@ -2,13 +2,13 @@ import type { ToolSet } from "ai";
 import { stepCountIs } from "ai";
 import { describe, expect, it } from "vitest";
 import {
+  type CircuitBreakerState,
   evaluateCircuitBreaker,
   noErrorProgress,
   noProgressStop,
   noToolRepetition,
   synthesisStepOutcome,
   synthesisStopDecision,
-  type CircuitBreakerState,
 } from "./agent";
 
 type Call = {

@@ -492,6 +492,7 @@ export function createContextAwareTransport(deps: Deps) {
  * nothing, and the env block is refreshed on the user's next real turn anyway.
  */
 import { isResumingApproval } from "./approvalResume";
+
 export { isResumingApproval };
 
 /**

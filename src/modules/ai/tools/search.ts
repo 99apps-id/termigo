@@ -3,6 +3,10 @@ import { tool } from "ai";
 import { z } from "zod";
 import { native } from "../lib/native";
 import {
+  explainSearchEngineError,
+  SEARCH_PATTERN_HINT,
+} from "../lib/regexEngine";
+import {
   buildFindCommand,
   buildGrepCommand,
   isNoMatches,
@@ -12,10 +16,6 @@ import {
   resolveRemoteRoot,
 } from "../lib/remoteSearch";
 import { checkReadable, checkReadableCanonical } from "../lib/security";
-import {
-  explainSearchEngineError,
-  SEARCH_PATTERN_HINT,
-} from "../lib/regexEngine";
 import { resolvePath, type ToolContext } from "./context";
 
 function resolveRoot(

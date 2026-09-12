@@ -786,7 +786,10 @@ export function resolveModel(
   return getModel(modelId as ModelId);
 }
 
-export function getModel(id: string, endpoints: readonly CustomEndpoint[] = []): ModelInfo {
+export function getModel(
+  id: string,
+  endpoints: readonly CustomEndpoint[] = [],
+): ModelInfo {
   const m = MODELS.find((x) => x.id === id);
   if (m) return m;
   if (isCompatModelId(id)) return getCompatModelInfo(id, endpoints);
@@ -846,8 +849,7 @@ export function normalizeModelId(
   // registry's `deepseek-v4-flash` (a rename or a user override). Only reached
   // when no configured endpoint claims the string.
   const byApiId = MODELS.find(
-    (m) =>
-      resolveApiModelId(m.id, overrides).toLowerCase() === lower,
+    (m) => resolveApiModelId(m.id, overrides).toLowerCase() === lower,
   );
   return byApiId ? byApiId.id : null;
 }

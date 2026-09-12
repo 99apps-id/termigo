@@ -9,8 +9,8 @@
 // makes a best-effort repair so a recoverable input runs instead of failing.
 
 import { parsePartialJson } from "ai";
-import { bestToolMatch } from "./toolNames";
 import { normalizeBatchInput } from "./normalizeSubagentInput";
+import { bestToolMatch } from "./toolNames";
 
 /** Strip a markdown code fence (` ```json ... ``` `) around the args. */
 function stripCodeFence(text: string): string {
