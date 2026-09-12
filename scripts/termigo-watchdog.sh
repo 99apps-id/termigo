@@ -20,6 +20,14 @@ KNOWN_GOOD="${APP_DIR}/termigo.known-good"
 STATE_DIR="${APP_DIR}/.watchdog"
 STATE_FILE="${STATE_DIR}/restarts"
 LOG_FILE="${STATE_DIR}/watchdog.log"
+# Status agent dari pemeriksaan terakhir yang BERHASIL. Dipakai untuk memutuskan
+# apakah kegagalan menjawab berikutnya pantas dianggap aplikasi macet.
+LAST_STATUS_FILE="${STATE_DIR}/lastStatus"
+# Berapa kali berturut-turut restart ditahan karena run sedang berjalan.
+DEFER_FILE="${STATE_DIR}/defers"
+# Batas penundaan: 5 x 2 menit. Cukup untuk run panjang yang berat, tapi tetap
+# memulihkan aplikasi yang benar-benar macet saat ada run menggantung.
+MAX_DEFER=5
 # Descriptor kontrol milik user yang menjalankan watchdog. Perlu eksplisit
 # supaya kesalahan user terdeteksi, bukan menyerupai aplikasi yang macet.
 DESCRIPTOR="${XDG_CACHE_HOME:-$HOME/.cache}/termigo/control.json"
@@ -75,6 +83,9 @@ uptime_secs() {
 # pada relay yang sehat - itu memicu restart palsu pada versi sebelumnya.
 # `status --json` menjawab {"ok":true,...,"ui":{...}} selama webview hidup, dan
 # menjawab frontend_timeout tepat pada kegagalan yang harus ditangkap.
+#
+# Muatannya hanya punya satu key `"status"`, yaitu status agent, jadi pencocokan
+# substring cukup dan tidak menambah ketergantungan baru.
 healthy() {
   local out bytes
   out=$(timeout "$STATUS_TIMEOUT" "$CLI" status --json 2>/dev/null) || return 1
@@ -82,6 +93,12 @@ healthy() {
     *'"ui":{'*) ;;
     *'"ui": {'*) ;;
     *) return 1 ;;
+  esac
+  # Catat apa yang sedang dikerjakan, untuk keputusan di pemeriksaan berikutnya.
+  case "$out" in
+    *'"status":"idle"'*) echo "idle" > "$LAST_STATUS_FILE" ;;
+    *'"status":"'*) echo "busy" > "$LAST_STATUS_FILE" ;;
+    *) echo "unknown" > "$LAST_STATUS_FILE" ;;
   esac
   bytes=$(memory_bytes)
   [ "${bytes:-0}" -ge "$THRESH_BYTES" ]
@@ -116,8 +133,27 @@ fi
 
 if healthy; then
   echo 0 > "$STATE_FILE"
+  echo 0 > "$DEFER_FILE"
   log "OK mem=$(memory_bytes)"
   exit 0
+fi
+
+# Restart di tengah run adalah tindakan paling merusak yang bisa dilakukan
+# watchdog: pengguna kehilangan pekerjaan yang sedang jalan. Sebuah run berat
+# memang bisa membuat webview lambat menjawab, terukur pada 1.9-2.1GB, dan itu
+# bukan alasan membunuhnya. Kalau pemeriksaan terakhir menunjukkan run sedang
+# berjalan, tahan dulu - tetapi tetap dibatasi, supaya aplikasi yang benar-benar
+# macet saat ada run menggantung tetap dipulihkan.
+LAST_STATUS=$(cat "$LAST_STATUS_FILE" 2>/dev/null || echo unknown)
+if [ "$LAST_STATUS" = "busy" ]; then
+  DEFERS=$(cat "$DEFER_FILE" 2>/dev/null || echo 0)
+  case "$DEFERS" in ''|*[!0-9]*) DEFERS=0 ;; esac
+  if [ "$DEFERS" -lt "$MAX_DEFER" ]; then
+    echo $((DEFERS + 1)) > "$DEFER_FILE"
+    log "DEFER: run masih berjalan, restart ditahan ($((DEFERS + 1))/$MAX_DEFER) mem=$(memory_bytes)"
+    exit 0
+  fi
+  log "DEFER habis ($MAX_DEFER) dengan run masih tercatat berjalan -> restart"
 fi
 
 COUNT=$(cat "$STATE_FILE" 2>/dev/null || echo 0)
@@ -135,8 +171,10 @@ if [ "$COUNT" -ge "$MAX_RESTARTS" ]; then
   fi
   restart_service
   echo 0 > "$STATE_FILE"
+  echo 0 > "$DEFER_FILE"
   exit 1
 fi
 
 restart_service
+echo 0 > "$DEFER_FILE"
 exit 0

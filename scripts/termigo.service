@@ -12,8 +12,12 @@ RestartSec=5
 StandardOutput=journal
 StandardError=journal
 LimitNOFILE=65536
-MemoryHigh=2G
-MemoryMax=2560M
+# Measured on the field install: a single ordinary agent run on a session with
+# long history peaks at 1.9-2.1GB, and the old MemoryHigh=2G sat below that, so
+# the webview was throttled until it stopped answering and the relay went silent.
+# The headroom here is what keeps a normal run below the throttle point.
+MemoryHigh=2560M
+MemoryMax=3072M
 
 [Install]
 WantedBy=multi-user.target
