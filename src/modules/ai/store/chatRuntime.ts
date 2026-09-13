@@ -1,6 +1,6 @@
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { Chat, type UIMessage } from "@ai-sdk/react";
-import { info as logInfo } from "@tauri-apps/plugin-log";
+import { info as logInfo, warn as logWarn } from "@tauri-apps/plugin-log";
 import {
   type ChatTransport,
   lastAssistantMessageIsCompleteWithApprovalResponses,
@@ -17,6 +17,11 @@ import { buildLanguageModel } from "../lib/agent";
 import { BUILTIN_AGENTS } from "../lib/agents";
 import { isResumingApproval } from "../lib/approvalResume";
 import { AUTO_CONTINUE_DELAY_MS, autoContinueSlot } from "../lib/autoContinue";
+import {
+  autoSendGate,
+  INITIAL_AUTO_SEND_STATE,
+  type AutoSendGateState,
+} from "../lib/autoSendGate";
 import {
   isContextOverflowError,
   noteSuccessfulRequest,
@@ -287,6 +292,10 @@ function makeChat(sessionId: string): Chat<UIMessage> {
   // Set when the loop cap (not the user) refuses a round, so the AbortError it
   // surfaces is settled as an automatic stop rather than a "user stopped".
   let loopCapRefused = false;
+  // Loop breaker state for sendAutomaticallyWhen (see the gate there).
+  let autoSendState: AutoSendGateState = INITIAL_AUTO_SEND_STATE;
+  let autoSendDecidedAt = -1;
+  let autoSendAllowed = true;
   const readCache = new Map<string, { size: number; hash: number }>();
   const toolContext: ToolContext = {
     getCwd: () =>
@@ -533,7 +542,41 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       if (stopLatch.has(sessionId)) return false;
       const failCount = approvalResumeFailureCount.get(sessionId) ?? 0;
       if (failCount >= 1) return false;
-      return lastAssistantMessageIsCompleteWithApprovalResponses(messages);
+      if (!lastAssistantMessageIsCompleteWithApprovalResponses(messages)) {
+        return false;
+      }
+      // This predicate is the one automatic path with no bound of its own: the
+      // SDK re-sends whenever the last message carries answered approvals, and
+      // nothing counts how many times it has already done so. A model that
+      // re-requests the same approval every cycle therefore repeats forever.
+      // Observed in the field as `run: start (14 messages)` every few seconds
+      // with `steps 1/25` and `runRound` still 0: an SDK auto-send does not go
+      // through the step-budget ladder, so the run never accumulated anything.
+      // The gate allows resumes that grow the transcript and stops the ones
+      // that do not.
+      //
+      // Decided once per transcript size: the SDK may ask more than once in a
+      // cycle, and counting each ask would tighten the bound silently.
+      const transcript = messages.messages;
+      if (transcript.length === autoSendDecidedAt) return autoSendAllowed;
+      const decision = autoSendGate(autoSendState, transcript.length);
+      autoSendState = decision.state;
+      autoSendDecidedAt = transcript.length;
+      autoSendAllowed = decision.allow;
+      if (decision.stoppedLoop) {
+        logWarn(
+          `[ai] stopped an automatic resume loop after ${decision.state.stalled} unproductive resumes`,
+        );
+        useChatStore.getState().patchAgentMeta({
+          status: "idle",
+          error:
+            "Termigo stopped the run: it kept re-sending the same request without making progress. Send a message to continue.",
+          stopReason: null,
+          stoppedByUser: false,
+        });
+        useChatStore.getState().syncRunMeta();
+      }
+      return autoSendAllowed;
     },
     onError: (e) => {
       if (isResumingApproval(chats.get(sessionId)?.messages ?? [])) {
