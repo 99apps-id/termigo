@@ -422,7 +422,9 @@ mod tests {
         std::fs::create_dir_all(src.path().join("tree/.ssh")).unwrap();
         std::fs::write(src.path().join("tree/.ssh/id_rsa"), b"secret").unwrap();
         std::fs::write(src.path().join("tree/keep.txt"), b"keep").unwrap();
-        symlink(&secret.path().join("id_rsa"), src.path().join("tree/link")).unwrap();
+        // No borrow: `join` already yields an owned PathBuf, and clippy's
+        // needless_borrows_for_generic_args is an error under `-D warnings`.
+        symlink(secret.path().join("id_rsa"), src.path().join("tree/link")).unwrap();
 
         copy_inner(
             &reg,

@@ -27,7 +27,11 @@ fn check_readable_blocks_secret_basenames() {
 #[test]
 #[cfg(unix)]
 fn check_readable_blocks_protected_dirs_on_unix() {
-    let err = check_readable("/home/.ssh/known_hosts").unwrap_err();
+    // `config`, not `known_hosts`: the basename scanner runs before the
+    // directory check and `known_hosts` is on that list, so asserting here with
+    // it tested the wrong guard and would have reported "sensitive-file
+    // pattern" on every platform. This asserts the directory check proper.
+    let err = check_readable("/home/.ssh/config").unwrap_err();
     assert!(err.contains("protected directory"));
 }
 
@@ -52,7 +56,12 @@ fn check_readable_allows_normal_files() {
 #[test]
 #[cfg(unix)]
 fn check_writable_blocks_system_prefixes_on_unix() {
-    let err = check_writable("/etc/passwd").unwrap_err();
+    // `/etc/passwd` is refused by the READ guard first (/etc is a protected
+    // directory), so `check_writable` short-circuits and answers "protected
+    // directory" before the write-prefix list is ever consulted. `/usr/bin` is
+    // write-denied without being read-protected, which is what this test is
+    // about.
+    let err = check_writable("/usr/bin/termigo").unwrap_err();
     assert!(err.contains("writes under"));
 }
 
