@@ -114,6 +114,82 @@ fn map_file_type(ft: FileType) -> &'static str {
     }
 }
 
+/// Longest remote path accepted. Comfortably above POSIX `PATH_MAX` (4096) and
+/// the Windows limit, so a real path always fits while an absurd one fails with
+/// a clear message instead of reaching the server.
+const MAX_REMOTE_PATH_LEN: usize = 4096;
+
+/// Validate and lexically normalize a remote path before it reaches the server.
+///
+/// Deliberately NOT a privilege boundary, and not pretending to be one: this
+/// module's contract is that the remote SSH user's unix permissions are the
+/// boundary, and `..` is how the explorer navigates up a level. Rejecting `..`
+/// outright would break the panel's own parent navigation while adding no
+/// safety, because the same account can open any path it is allowed to open.
+///
+/// What it does enforce:
+/// - no NUL or other control bytes. A NUL can truncate a path at a C boundary,
+///   so the string the app validates and shows would not be the string the
+///   server acts on. That is a real injection class, and it is refused here.
+/// - a length cap, so a pathological path fails locally and legibly.
+/// - lexical normalization of `.`, `//` and `..`, so the location named in the
+///   tree is the location written to. Sent verbatim, `a/../../b` made the server
+///   resolve a different file than the breadcrumb displayed.
+fn validate_remote_path(path: &str) -> Result<String, String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("Refused: empty remote path.".into());
+    }
+    if trimmed.len() > MAX_REMOTE_PATH_LEN {
+        return Err(format!(
+            "Refused: remote path is longer than {MAX_REMOTE_PATH_LEN} bytes."
+        ));
+    }
+    if let Some(bad) = trimmed
+        .bytes()
+        .find(|b| *b < 0x20 || *b == 0x7f)
+    {
+        return Err(format!(
+            "Refused: remote path contains a control byte (0x{bad:02x})."
+        ));
+    }
+
+    let absolute = trimmed.starts_with('/');
+    let mut segments: Vec<&str> = Vec::new();
+    for segment in trimmed.split('/') {
+        match segment {
+            "" | "." => {}
+            ".." => {
+                match segments.last() {
+                    // Cancel the previous segment, the way a shell would.
+                    Some(last) if *last != ".." => {
+                        segments.pop();
+                    }
+                    // An absolute path cannot go above the filesystem root, so
+                    // the escape is refused rather than silently rewritten.
+                    _ if absolute => {
+                        return Err(
+                            "Refused: remote path escapes the filesystem root.".into()
+                        );
+                    }
+                    // A relative path may legitimately start with `..`.
+                    _ => segments.push(".."),
+                }
+            }
+            other => segments.push(other),
+        }
+    }
+
+    let joined = segments.join("/");
+    if absolute {
+        Ok(format!("/{joined}"))
+    } else if joined.is_empty() {
+        Ok(".".into())
+    } else {
+        Ok(joined)
+    }
+}
+
 #[tauri::command]
 pub async fn ssh_sftp_home(state: tauri::State<'_, SshState>, id: u32) -> Result<String, String> {
     on_sftp(&state, id, |sftp| async move {
@@ -129,6 +205,7 @@ pub async fn ssh_sftp_read_dir(
     path: String,
     include_hidden: bool,
 ) -> Result<Vec<SftpEntry>, String> {
+    let path = validate_remote_path(&path)?;
     on_sftp(&state, id, move |sftp| async move {
         let read = sftp.read_dir(path.clone()).await.map_err(humanize)?;
         let mut entries: Vec<SftpEntry> = read
@@ -169,6 +246,7 @@ pub async fn ssh_sftp_read_file(
     id: u32,
     path: String,
 ) -> Result<String, String> {
+    let path = validate_remote_path(&path)?;
     on_sftp(&state, id, move |sftp| async move {
         // Cap the read so a huge (or maliciously oversized) remote file can't
         // OOM the app by being slurped whole into memory + an IPC string.
@@ -199,6 +277,7 @@ pub async fn ssh_sftp_write_file(
     path: String,
     contents: String,
 ) -> Result<(), String> {
+    let path = validate_remote_path(&path)?;
     on_sftp(&state, id, move |sftp| async move {
         // CREATE | TRUNCATE | WRITE matches local fs_write_file's "rewrite
         // in place" contract. The file is replaced atomically from the
@@ -248,6 +327,9 @@ pub async fn ssh_sftp_upload(
     // shipped to the remote host. The workspace registry is deliberately NOT
     // applied - uploading a file from outside the open project is legitimate.
     crate::modules::fs::security::validate_read(std::path::Path::new(&local_path))?;
+    // The remote side gets the same normalization as every other remote path,
+    // so a dropped file lands where the tree says it will.
+    let remote_path = validate_remote_path(&remote_path)?;
     let read_path = local_path.clone();
     let bytes = tokio::task::spawn_blocking(move || {
         let meta = std::fs::metadata(&read_path).map_err(|e| format!("read local file: {e}"))?;
@@ -303,6 +385,7 @@ pub async fn ssh_sftp_create_file(
     id: u32,
     path: String,
 ) -> Result<(), String> {
+    let path = validate_remote_path(&path)?;
     on_sftp(&state, id, move |sftp| async move {
         // EXCL so we do not silently clobber a file the user did not see
         // (e.g. created moments ago by another process).
@@ -328,6 +411,7 @@ pub async fn ssh_sftp_create_dir(
     id: u32,
     path: String,
 ) -> Result<(), String> {
+    let path = validate_remote_path(&path)?;
     on_sftp(&state, id, move |sftp| async move {
         sftp.create_dir(path).await.map_err(humanize)
     })
@@ -341,6 +425,8 @@ pub async fn ssh_sftp_rename(
     from: String,
     to: String,
 ) -> Result<(), String> {
+    let from = validate_remote_path(&from)?;
+    let to = validate_remote_path(&to)?;
     on_sftp(&state, id, move |sftp| async move {
         sftp.rename(from, to).await.map_err(humanize)
     })
@@ -353,6 +439,7 @@ pub async fn ssh_sftp_delete(
     id: u32,
     path: String,
 ) -> Result<(), String> {
+    let path = validate_remote_path(&path)?;
     on_sftp(&state, id, move |sftp| async move {
         // SFTP needs separate calls for files vs dirs. `rmdir` only
         // succeeds on empty dirs on most servers. Stat once to pick the
@@ -396,4 +483,90 @@ pub(super) async fn open_sftp_on_handle(session: &SshSession) -> Result<Arc<Sftp
         .await
         .map_err(|e| format!("ssh: sftp handshake failed: {e}"))?;
     Ok(Arc::new(sftp))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{validate_remote_path, MAX_REMOTE_PATH_LEN};
+
+    #[test]
+    fn an_ordinary_path_is_returned_unchanged() {
+        // No surprise rewrites: a normal path must survive byte-for-byte, or the
+        // explorer's own breadcrumb would stop matching what it navigates to.
+        for path in [
+            "/home/deploy/app/main.rs",
+            "relative/file.txt",
+            "/srv/a b/c.txt",
+            "/home/user/.config/nvim/init.lua",
+            "/",
+        ] {
+            assert_eq!(validate_remote_path(path).unwrap(), path);
+        }
+    }
+
+    #[test]
+    fn collapses_dots_and_duplicate_slashes() {
+        assert_eq!(validate_remote_path("/a/./b").unwrap(), "/a/b");
+        assert_eq!(validate_remote_path("/a//b///c").unwrap(), "/a/b/c");
+        assert_eq!(validate_remote_path("/a/b/").unwrap(), "/a/b");
+    }
+
+    #[test]
+    fn resolves_dot_dot_against_the_preceding_segment() {
+        // The reason this matters: sent verbatim, `a/../../b` made the server
+        // resolve a different file than the location the tree displayed.
+        assert_eq!(validate_remote_path("/a/b/../c").unwrap(), "/a/c");
+        assert_eq!(validate_remote_path("/a/b/../../c").unwrap(), "/c");
+        assert_eq!(validate_remote_path("/a/b/..").unwrap(), "/a");
+    }
+
+    #[test]
+    fn refuses_to_climb_above_an_absolute_root() {
+        // `/..` has no parent. Rewriting it to `/` would silently act on the
+        // wrong directory, so it is refused and named.
+        let err = validate_remote_path("/../etc").unwrap_err();
+        assert!(err.contains("escapes the filesystem root"), "{err}");
+        assert!(validate_remote_path("/..").is_err());
+    }
+
+    #[test]
+    fn a_relative_path_may_start_with_dot_dot() {
+        // Legitimate: the explorer opens relative targets from the session cwd.
+        assert_eq!(validate_remote_path("../sibling").unwrap(), "../sibling");
+        assert_eq!(validate_remote_path("../../x").unwrap(), "../../x");
+        assert_eq!(validate_remote_path("a/../../x").unwrap(), "../x");
+    }
+
+    #[test]
+    fn refuses_empty_and_whitespace() {
+        for path in ["", "   ", "\t", "\n  "] {
+            assert!(validate_remote_path(path).is_err(), "{path:?}");
+        }
+    }
+
+    #[test]
+    fn refuses_control_bytes_and_nul() {
+        // A NUL can truncate the path at a C boundary, so the string shown and
+        // validated would not be the string the server acts on.
+        let err = validate_remote_path("/tmp/ok\0/../../etc/shadow").unwrap_err();
+        assert!(err.contains("control byte"), "{err}");
+        assert!(validate_remote_path("/tmp/a\nb").is_err());
+        assert!(validate_remote_path("/tmp/a\u{7f}").is_err());
+    }
+
+    #[test]
+    fn refuses_an_absurdly_long_path() {
+        let long = format!("/{}", "a".repeat(MAX_REMOTE_PATH_LEN));
+        let err = validate_remote_path(&long).unwrap_err();
+        assert!(err.contains("longer than"), "{err}");
+        // Exactly at the cap is still accepted.
+        let at_cap = format!("/{}", "a".repeat(MAX_REMOTE_PATH_LEN - 1));
+        assert!(validate_remote_path(&at_cap).is_ok());
+    }
+
+    #[test]
+    fn a_relative_path_that_normalizes_away_becomes_dot() {
+        assert_eq!(validate_remote_path("./").unwrap(), ".");
+        assert_eq!(validate_remote_path(".").unwrap(), ".");
+    }
 }
