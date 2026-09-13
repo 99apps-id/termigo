@@ -79,8 +79,13 @@ jobs:
       # Pinned by cli/go.mod rather than a version literal: the module already
       # states the toolchain it requires, and two places to bump is one place to
       # forget.
+      #
+      # v7 rather than v5: v5 bundles a Node 20 runtime, which GitHub now
+      # force-runs on Node 24 and reports as a deprecation on every job. The two
+      # inputs used below are unchanged in v7, and v7 is the current major - the
+      # rest of this workflow is already on checkout@v7 and setup-node@v7.
       - name: Install Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: cli/go.mod
           cache-dependency-path: cli/go.sum
