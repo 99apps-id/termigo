@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  FOREIGN_ROOTS,
   MAX_SKILL_READS,
   queryTerms,
   rankMatches,
@@ -92,6 +93,26 @@ describe("shortlist", () => {
   it("prefers the closest libraries in that fallback", () => {
     const picked = shortlist(many, queryTerms("kubernetes"));
     expect(picked[0].source).toBe("workspace");
+  });
+
+  // The failure this guards is silent and inverted: an unlisted source scores
+  // indexOf -> -1, which sorts ahead of "workspace" (0), so forgetting to
+  // order a new shelf promotes it above the user's own skills.
+  it("ranks a listed foreign shelf behind the workspace, not ahead of it", () => {
+    const picked = shortlist(
+      [candidate("deploy-hermes", "hermes"), candidate("deploy-mine", "workspace")],
+      queryTerms("kubernetes"),
+    );
+    expect(picked[0].source).toBe("workspace");
+  });
+
+  // Hermes' shelf is where another agent's working procedures live, and a
+  // missing root is invisible: find_skill just never returns them.
+  it("searches hermes' own skill shelf", () => {
+    expect(FOREIGN_ROOTS).toContainEqual({
+      rel: ".hermes/skills",
+      source: "hermes",
+    });
   });
 });
 

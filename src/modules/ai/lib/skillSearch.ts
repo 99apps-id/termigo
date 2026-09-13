@@ -17,7 +17,13 @@
 // 620 files to answer one question would take seconds and most of them would
 // score zero.
 
-export type SkillSource = "workspace" | "user" | "codex" | "openclaw" | "claude";
+export type SkillSource =
+  | "workspace"
+  | "user"
+  | "codex"
+  | "openclaw"
+  | "claude"
+  | "hermes";
 
 export type SkillCandidate = {
   /** Directory name, which is also the skill's name. */
@@ -45,6 +51,16 @@ export const FOREIGN_ROOTS: { rel: string; source: SkillSource }[] = [
   { rel: ".openclaw/plugin-skills", source: "openclaw" },
   { rel: ".codex", source: "codex" },
   { rel: ".agents/skills", source: "claude" },
+  // Hermes keeps a real, hand-written shelf - productivity/docx, xlsx,
+  // powerpoint, pdf, email, devops - rather than a plugin cache, and it nests
+  // them one category deep. `**/SKILL.md` already walks that, and the skill's
+  // directory is still the name, so nothing else has to know the layout.
+  //
+  // Reading these in place is the point: a skill that is copied into this
+  // workspace splits into two versions that drift, while one read from its own
+  // shelf keeps improving wherever it is maintained. Reusing another agent's
+  // procedure is cheaper than rewriting it and always will be.
+  { rel: ".hermes/skills", source: "hermes" },
 ];
 
 /** Split a query into lowercase words worth matching on. */
@@ -119,7 +135,18 @@ export function shortlist(
   // Prefer the closest libraries when falling back to a blind sample: a
   // workspace skill is far more likely to be the one meant than the 400th
   // entry of a plugin cache.
-  const order: SkillSource[] = ["workspace", "user", "claude", "openclaw", "codex"];
+  //
+  // Every source a candidate can carry has to appear here. `indexOf` answers
+  // -1 for an unlisted one, and -1 sorts BEFORE "workspace", so a source that
+  // is merely forgotten outranks the workspace's own skills.
+  const order: SkillSource[] = [
+    "workspace",
+    "user",
+    "hermes",
+    "claude",
+    "openclaw",
+    "codex",
+  ];
   return [...candidates]
     .sort((a, b) => order.indexOf(a.source) - order.indexOf(b.source))
     .slice(0, limit);
