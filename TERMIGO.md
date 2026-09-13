@@ -82,7 +82,7 @@ The parts that are invariants rather than description:
 - **Agent** (`lib/agent.ts`): keep `Agent` / `DirectChatTransport` shape adhering to AI SDK v6 semantics. Stop reasons report by name. Budgets escalate per Continue: `[25, 50, 100]`.
 - **Tools** (`tools/tools.ts`): inspection tools auto-execute; mutating tools require approval. `lib/security.ts` denies secret paths (`.env*`, `.ssh/`, credentials) on read and write.
 - **Approval resume - trailing message is load-bearing**: `streamText` finds approvals only in `messages.at(-1)`. Nothing may be appended after an answered approval.
-- **Memory path**: learned memory loads from `.termigo/memory.md` in the workspace root, never from user home.
+- **Memory path**: learned memory loads from `.termigo/memory.md` in the workspace root (project scope). A global fallback at `~/.termigo/memory.md` is also loaded when the project file is absent. Keys never persist to disk, settings, or `localStorage`; they live in the OS keychain via `secrets_*`.
 
 ### UI conventions
 

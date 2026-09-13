@@ -61,7 +61,9 @@ const partTypes = (m: ModelMessage): string[] =>
  */
 function unanswered(messages: ModelMessage[]): string[] {
   const parts = (m: ModelMessage) =>
-    Array.isArray(m.content) ? (m.content as Array<Record<string, unknown>>) : [];
+    Array.isArray(m.content)
+      ? (m.content as Array<Record<string, unknown>>)
+      : [];
 
   const calls: string[] = [];
   const answered = new Set<string>();
@@ -188,7 +190,11 @@ describe("no history leaves a tool call unanswered", () => {
   const cases: Array<[string, UIMessage[]]> = [
     [
       "a call interrupted before it ran",
-      [user("u1"), assistant("a1", [call("input-available", "c1")]), user("u2")],
+      [
+        user("u1"),
+        assistant("a1", [call("input-available", "c1")]),
+        user("u2"),
+      ],
     ],
     [
       "an approval nobody answered",
@@ -202,13 +208,19 @@ describe("no history leaves a tool call unanswered", () => {
       "an approved call the run never executed, then a new message",
       [
         user("u1"),
-        assistant("a1", [call("approval-responded", "c1", { id: "ap1", approved: true })]),
+        assistant("a1", [
+          call("approval-responded", "c1", { id: "ap1", approved: true }),
+        ]),
         user("u2"),
       ],
     ],
     [
       "a session restored mid-stream, arguments half written",
-      [user("u1"), assistant("a1", [call("input-streaming", "c1")]), user("u2")],
+      [
+        user("u1"),
+        assistant("a1", [call("input-streaming", "c1")]),
+        user("u2"),
+      ],
     ],
     [
       "several steps, only the last one live",
@@ -247,7 +259,9 @@ describe("isResumingApproval", () => {
   it("returns false if last turn is user turn", () => {
     const history = [
       user("u1"),
-      assistant("a1", [call("approval-responded", "c1", { id: "ap1", approved: true })]),
+      assistant("a1", [
+        call("approval-responded", "c1", { id: "ap1", approved: true }),
+      ]),
       user("u2"),
     ];
     expect(isResumingApproval(history)).toBe(false);
@@ -266,5 +280,29 @@ describe("isResumingApproval", () => {
 
   it("returns false on empty messages", () => {
     expect(isResumingApproval([])).toBe(false);
+  });
+
+  it("does not treat a restored session with approval in the middle as resuming", async () => {
+    // Simulates: user approves, the run continues with more turns, then the
+    // app restarts. The restored history has approval-responded buried in the
+    // middle, not at the end. sanitizeUiMessages must not close that call as
+    // interrupted - the provider already saw the approval answer.
+    const restored = [
+      user("u1"),
+      assistant("a1", [
+        { type: "step-start" },
+        call("approval-responded", "c1", { id: "ap1", approved: true }),
+        { type: "step-start" },
+        { ...call("output-available", "c1"), output: { ok: true } },
+      ]),
+      user("u2", "thanks"),
+    ];
+    const out = await outgoing(restored);
+    // The call was already executed, so there must be no dangling tool_calls.
+    expect(unanswered(out)).toEqual([]);
+    // The environment turn should still be appended because the last message
+    // is a user turn, not an approval response.
+    expect(out[out.length - 1].role).toBe("user");
+    expect(JSON.stringify(out)).toContain("<env>");
   });
 });
