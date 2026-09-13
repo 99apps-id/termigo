@@ -5,6 +5,12 @@ use termigo_lib::modules::fs::security::{
     check_readable, check_writable, is_protected, is_secret_path,
 };
 
+// Gated because its only caller is the unix-gated symlink test below. Importing
+// it unconditionally compiles on unix and is an unused import on Windows, where
+// clippy runs with `-D warnings`.
+#[cfg(unix)]
+use termigo_lib::modules::fs::security::guard_read;
+
 // ---------------------------------------------------------------------------
 // check_readable / check_writable / is_secret_path / is_protected
 // ---------------------------------------------------------------------------

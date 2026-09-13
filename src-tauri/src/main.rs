@@ -4,19 +4,17 @@
 fn main() {
     #[cfg(target_os = "macos")]
     {
-        // SAFETY: This block calls into the Objective-C runtime to disable the
-        // macOS press-and-hold character popup. This is a pure configuration
-        // change to a system defaults domain — no user input is processed, no
-        // memory is dereferenced beyond the well-known NSUserDefaults API, and
-        // the operation is idempotent. It is intentionally `unsafe` because
-        // FFI into Objective-C requires an unsafe block per Rust's guarantees.
-        use objc2::msg_send;
+        // Disable the macOS press-and-hold character popup.
+        //
+        // These are objc2-foundation's declared methods rather than a raw
+        // `msg_send!`, because the safe wrappers exist for both calls: the
+        // macro form needed an `unsafe` block and, as written, did not compile
+        // on macOS at all - `NSUserDefaults.standardUserDefaults()` is method
+        // syntax on a type, which is E0423.
         use objc2_foundation::{ns_string, NSUserDefaults};
-        unsafe {
-            let defaults = NSUserDefaults.standardUserDefaults();
-            let key = ns_string!("ApplePressAndHoldEnabled");
-            let _: () = msg_send![&defaults, setBool: false, forKey: key];
-        }
+        let defaults = NSUserDefaults::standardUserDefaults();
+        // `ns_string!` already yields `&NSString`, which is what the setter takes.
+        defaults.setBool_forKey(false, ns_string!("ApplePressAndHoldEnabled"));
     }
 
     termigo_lib::run()
