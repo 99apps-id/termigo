@@ -12,6 +12,10 @@ import { native, type GitChangedFile } from "../lib/native";
 import { parseUnifiedDiff, reverseApplyHunk } from "../lib/diffParse";
 import { InlineDiffReview, type FileDiff } from "./InlineDiffReview";
 import { joinPath } from "@/modules/explorer/lib/useFileTree";
+import {
+  sanitizeDiff,
+  secretWarning,
+} from "@/modules/source-control/lib/secretSanitize";
 
 /**
  * One place to see everything the agent (or anyone) changed in the working
@@ -56,7 +60,11 @@ export function ChangeReviewDialog({
       setFiles(status.changedFiles);
       setSelected(null);
       const whole = await native.gitDiff(repo.repoRoot, null, false);
-      setDiff(whole.diffText);
+      const sanitized = sanitizeDiff(whole.diffText);
+      setDiff(sanitized.text);
+      if (sanitized.redacted) {
+        toast.warning(secretWarning(sanitized.patterns), { duration: 5000 });
+      }
     } catch (e) {
       setError(String(e));
     } finally {
@@ -81,9 +89,13 @@ export function ChangeReviewDialog({
     if (!repoRoot) return;
     try {
       const res = await native.gitDiff(repoRoot, file.path, file.staged);
-      setDiff(res.diffText);
-      const parsed = parseUnifiedDiff(res.diffText);
+      const sanitized = sanitizeDiff(res.diffText);
+      setDiff(sanitized.text);
+      const parsed = parseUnifiedDiff(sanitized.text);
       setFileDiff(parsed.length > 0 ? parsed[0] : null);
+      if (sanitized.redacted) {
+        toast.warning(secretWarning(sanitized.patterns), { duration: 5000 });
+      }
     } catch (e) {
       setDiff(`(could not read diff: ${String(e)})`);
     }
@@ -92,10 +104,18 @@ export function ChangeReviewDialog({
   const reloadSelectedDiff = async () => {
     if (!repoRoot || !selected) return;
     try {
-      const res = await native.gitDiff(repoRoot, selected.path, selected.staged);
-      setDiff(res.diffText);
-      const parsed = parseUnifiedDiff(res.diffText);
+      const res = await native.gitDiff(
+        repoRoot,
+        selected.path,
+        selected.staged,
+      );
+      const sanitized = sanitizeDiff(res.diffText);
+      setDiff(sanitized.text);
+      const parsed = parseUnifiedDiff(sanitized.text);
       setFileDiff(parsed.length > 0 ? parsed[0] : null);
+      if (sanitized.redacted) {
+        toast.warning(secretWarning(sanitized.patterns), { duration: 5000 });
+      }
     } catch {
       // keep whatever we had; the toast below the caller covers hard failures
     }
@@ -140,7 +160,9 @@ export function ChangeReviewDialog({
       return;
     }
     try {
-      await native.gitDiscard(repoRoot, [{ path: file.path, untracked: false }]);
+      await native.gitDiscard(repoRoot, [
+        { path: file.path, untracked: false },
+      ]);
       toast.success(`Reverted ${file.path}`);
       await load();
     } catch (e) {
@@ -231,7 +253,8 @@ export function ChangeReviewDialog({
               />
             ) : (
               <pre className="min-h-0 flex-1 overflow-auto rounded-md border border-border bg-card/60 p-2.5 text-[10px] leading-relaxed">
-                {shownDiff || (selected ? "No diff for this file." : "No diff.")}
+                {shownDiff ||
+                  (selected ? "No diff for this file." : "No diff.")}
               </pre>
             )}
           </div>

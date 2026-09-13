@@ -18,6 +18,8 @@ import {
 } from "@/modules/editor/lib/diffCache";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
+import { sanitizeDiff } from "./lib/secretSanitize";
 import type { SourceControlSummary } from "./useSourceControl";
 
 type PanelState = "closed" | "loading" | "no-repo" | "ready" | "error";
@@ -262,7 +264,8 @@ function optimisticStage(
     if (!paths.has(file.path)) return file;
     if (file.staged && !file.unstaged) return file;
     changed = true;
-    const wt = file.worktreeStatus !== " " ? file.worktreeStatus : file.indexStatus;
+    const wt =
+      file.worktreeStatus !== " " ? file.worktreeStatus : file.indexStatus;
     return {
       ...file,
       indexStatus: wt,
@@ -292,7 +295,8 @@ function optimisticUnstage(
       continue;
     }
     changed = true;
-    const idx = file.indexStatus !== " " ? file.indexStatus : file.worktreeStatus;
+    const idx =
+      file.indexStatus !== " " ? file.indexStatus : file.worktreeStatus;
     if (idx === "R" && file.originalPath) {
       next.push({
         path: file.originalPath,
@@ -551,7 +555,11 @@ export function useSourceControlPanel(
   useEffect(() => () => cancelReconcile(), [cancelReconcile]);
 
   const openSelection = useCallback(
-    (sel: DiffSelection, repoRoot: string, file: GitChangedFile | undefined) => {
+    (
+      sel: DiffSelection,
+      repoRoot: string,
+      file: GitChangedFile | undefined,
+    ) => {
       onOpenDiff?.({
         path: sel.path,
         repoRoot,
@@ -649,7 +657,10 @@ export function useSourceControlPanel(
   const selectEntry = useCallback(
     async (entry: SourceControlEntry) => {
       if (!repo) return;
-      const nextSelection: DiffSelection = { path: entry.path, mode: entry.mode };
+      const nextSelection: DiffSelection = {
+        path: entry.path,
+        mode: entry.mode,
+      };
       if (sameSelection(selected, nextSelection)) {
         setActionError(null);
         setActionMessage(null);
@@ -875,7 +886,12 @@ export function useSourceControlPanel(
           import("ai"),
           native.gitDiff(repo.repoRoot, null, true),
         ]);
-      const { text: diffText, truncated } = truncateDiff(diff.diffText);
+      const { text: rawDiffText, truncated } = truncateDiff(diff.diffText);
+      const sanitized = sanitizeDiff(rawDiffText);
+      const diffText = sanitized.text;
+      if (sanitized.redacted) {
+        toast.warning("Potential secret detected in diff and redacted.");
+      }
       const chatState = useChatStore.getState();
       const prefs = usePreferencesStore.getState();
       const model = await buildConfiguredLanguageModel(
