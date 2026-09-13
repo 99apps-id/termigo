@@ -127,7 +127,14 @@ fn kill_terminates_a_running_process() {
         "expected partial output before kill, got: {}",
         first.bytes
     );
-    assert!(first.exited);
+    // `exited` is not set by `kill` itself: the waiter thread sets it once it has
+    // reaped the child, so asserting it on the very next line reads a flag that
+    // is still false and the test fails on timing rather than on behaviour. This
+    // is what the app does too - it polls `read_logs` rather than expecting the
+    // signal to have been reaped synchronously. The assertion still proves the
+    // kill took effect; `wait_until` panics with the deadline if it did not.
+    wait_until(Duration::from_secs(5), || proc.read_logs(0).exited);
+    assert!(proc.read_logs(0).exited, "process did not exit after kill");
 }
 
 #[cfg(unix)]
