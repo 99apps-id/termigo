@@ -34,7 +34,9 @@ export function useTelegramBot(): void {
   // present AND the session already looks enabled (or no saved state exists).
   // Then `refresh` reads the keychain, which is where the token actually lives.
   useEffect(() => {
-    void syncTelegramFromStorage().then(() => useTelegramStore.getState().refresh());
+    void syncTelegramFromStorage().then(() =>
+      useTelegramStore.getState().refresh(),
+    );
   }, []);
 
   // A token read that missed at boot must not leave the relay off until the next
@@ -91,7 +93,9 @@ export function useTelegramBot(): void {
     // Not logged for a plain disabled relay, which is the normal resting state
     // and would otherwise fire on every mount.
     if (enabled && !hasToken) {
-      logRelayInfo("relay not started: enabled but no bot token in the keychain");
+      logRelayInfo(
+        "relay not started: enabled but no bot token in the keychain",
+      );
     }
     stopTelegramBot();
   }, [enabled, hasToken]);

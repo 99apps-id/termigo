@@ -17,11 +17,10 @@ import { buildLanguageModel } from "../lib/agent";
 import { BUILTIN_AGENTS } from "../lib/agents";
 import { isResumingApproval } from "../lib/approvalResume";
 import { AUTO_CONTINUE_DELAY_MS, autoContinueSlot } from "../lib/autoContinue";
-import { pruneStale } from "../lib/pruneStale";
 import {
+  type AutoSendGateState,
   autoSendGate,
   INITIAL_AUTO_SEND_STATE,
-  type AutoSendGateState,
 } from "../lib/autoSendGate";
 import {
   isContextOverflowError,
@@ -37,6 +36,7 @@ import {
 } from "../lib/errors";
 import { fireHooksForEvent, makeRunId } from "../lib/hooksRunner";
 import { sweepSessionMemory } from "../lib/memorySweep";
+import { pruneStale } from "../lib/pruneStale";
 import {
   flushOne,
   flushShouldHold,

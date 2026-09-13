@@ -60,7 +60,10 @@ describe("autoSendGate", () => {
   });
 
   it("recovers when real work arrives again", () => {
-    const stalled = Array.from({ length: MAX_STALLED_AUTO_SENDS + 2 }, () => 14);
+    const stalled = Array.from(
+      { length: MAX_STALLED_AUTO_SENDS + 2 },
+      () => 14,
+    );
     const decisions = run([...stalled, 30, 32]);
     const afterGrowth = decisions.slice(-2);
     expect(afterGrowth.every((d) => d.allow)).toBe(true);
