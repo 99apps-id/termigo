@@ -227,6 +227,18 @@ pub fn fs_read_dir_blocking(
                 return None;
             }
 
+            // A listing must not advertise what reading refuses. The explorer
+            // used to hide secrets by dot-prefix alone, so turning on "show
+            // hidden" listed `id_rsa`, `authorized_keys`, `server.pem` and
+            // `credentials.json` by NAME while `fs_read_file` refused to open
+            // the very same files - the names alone tell an observer which
+            // secrets exist. The content search (`grep`) already excluded them
+            // through `is_secret_path`; the listing did not.
+            let full = entry.path();
+            if security::is_secret_path(&full) || security::is_protected(&full) {
+                return None;
+            }
+
             let size = meta.len();
             let mtime = meta
                 .modified()
@@ -297,6 +309,13 @@ pub fn list_subdirs_blocking(root: PathBuf, show_hidden: bool) -> Result<Vec<Str
                 .unwrap_or(false),
             _ => false,
         })
+        .filter(|entry| {
+            // Same rule as the explorer listing: a breadcrumb must not offer a
+            // directory the reader would refuse, or `.ssh` becomes a clickable
+            // dead end that also reveals itself.
+            let full = entry.path();
+            !security::is_secret_path(&full) && !security::is_protected(&full)
+        })
         .filter_map(|entry| entry.file_name().into_string().ok())
         .filter(|name| show_hidden || !name.starts_with('.'))
         .collect();
@@ -319,8 +338,7 @@ mod tests {
     // other reason is not a link, and mislabelling it hides the cause.
     #[cfg(unix)]
     #[test]
-    fn only_a_real_symlink_is_labelled_symlink() {
-        use super::{fs_read_dir_blocking, EntryKind};
+    fn only_a_real_symlink_is_labelled_symlink() {        use super::{fs_read_dir_blocking, EntryKind};
         use std::os::unix::fs::symlink;
 
         let dir = tempfile::tempdir().unwrap();
@@ -342,6 +360,89 @@ mod tests {
         assert_eq!(kind("dangling"), "symlink");
         assert_eq!(kind("real.txt"), "file");
         assert_eq!(kind("sub"), "dir");
+    }
+
+    /// A listing must not advertise what reading refuses.
+    ///
+    /// The explorer hid secrets by dot-prefix alone, so `show_hidden` listed
+    /// `id_rsa`, `authorized_keys`, `server.pem` and `credentials.json` by name
+    /// while `fs_read_file` refused to open those same files. The names alone
+    /// reveal which secrets exist, which is the leak; the content search already
+    /// excluded them, and the listing did not.
+    #[test]
+    fn a_listing_never_advertises_a_file_it_would_refuse_to_read() {
+        use super::fs_read_dir_blocking;
+
+        let dir = tempfile::tempdir().unwrap();
+        for name in [
+            "id_rsa",
+            "authorized_keys",
+            "server.pem",
+            "signing.key",
+            "credentials.json",
+            "secrets.yaml",
+            ".env",
+            ".env.production",
+        ] {
+            std::fs::write(dir.path().join(name), b"secret").unwrap();
+        }
+        std::fs::create_dir(dir.path().join(".ssh")).unwrap();
+        std::fs::create_dir(dir.path().join(".gnupg")).unwrap();
+        // Ordinary entries, including a plain dotfile that must stay visible.
+        std::fs::write(dir.path().join("app.ts"), b"code").unwrap();
+        std::fs::write(dir.path().join(".editorconfig"), b"cfg").unwrap();
+        std::fs::create_dir(dir.path().join("src")).unwrap();
+
+        for show_hidden in [false, true] {
+            let names: Vec<String> =
+                fs_read_dir_blocking(dir.path().to_path_buf(), show_hidden, None)
+                    .unwrap()
+                    .into_iter()
+                    .map(|e| e.name)
+                    .collect();
+            for hidden in [
+                "id_rsa",
+                "authorized_keys",
+                "server.pem",
+                "signing.key",
+                "credentials.json",
+                "secrets.yaml",
+                ".env",
+                ".env.production",
+                ".ssh",
+                ".gnupg",
+            ] {
+                assert!(
+                    !names.iter().any(|n| n == hidden),
+                    "show_hidden={show_hidden} listed {hidden:?}: {names:?}"
+                );
+            }
+            assert!(names.iter().any(|n| n == "app.ts"), "{names:?}");
+            assert!(names.iter().any(|n| n == "src"), "{names:?}");
+        }
+
+        // The filter is about secrets, not about dotfiles: a harmless hidden
+        // file still appears when the caller asked to see hidden entries.
+        let with_hidden = fs_read_dir_blocking(dir.path().to_path_buf(), true, None).unwrap();
+        assert!(with_hidden.iter().any(|e| e.name == ".editorconfig"));
+        // ...and stays hidden when it did not.
+        let without = fs_read_dir_blocking(dir.path().to_path_buf(), false, None).unwrap();
+        assert!(!without.iter().any(|e| e.name == ".editorconfig"));
+    }
+
+    #[test]
+    fn a_breadcrumb_does_not_offer_protected_directories() {
+        // `.ssh` as a clickable crumb is a dead end: reading inside it is
+        // refused, so offering it only reveals that it exists.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(".ssh")).unwrap();
+        std::fs::create_dir(dir.path().join(".aws")).unwrap();
+        std::fs::create_dir(dir.path().join("project")).unwrap();
+
+        let dirs = super::list_subdirs_blocking(dir.path().to_path_buf(), true).unwrap();
+        assert!(!dirs.iter().any(|d| d == ".ssh"), "{dirs:?}");
+        assert!(!dirs.iter().any(|d| d == ".aws"), "{dirs:?}");
+        assert!(dirs.iter().any(|d| d == "project"), "{dirs:?}");
     }
 
     #[test]
