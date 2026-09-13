@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   escapeHtml,
   extractToolSummaries,
+  formatCompletionCard,
+  formatDuration,
   formatLiveProgress,
   formatMarkdownTable,
+  formatTodoProgress,
   markdownToTelegramHtml,
   summarizeToolInput,
   summarizeToolOutput,
@@ -166,9 +169,47 @@ describe("progressFormat", () => {
   });
 
   describe("formatLiveProgress", () => {
-    it("formats completed state cleanly", () => {
+    it("closes with the outcome, not a bare 'Completed.'", () => {
+      // The card used to be replaced by "Completed." whatever had happened, so
+      // a stopped or failed run closed with the same word as a clean finish and
+      // the record of status, tools and step was thrown away.
       const text = formatLiveProgress({ status: "idle", completed: true });
-      expect(text).toBe("**[Termigo Agent]** Completed.");
+      expect(text).toBe("**[Termigo Agent]** ✓ Done");
+    });
+
+    it("names each way a run can end", () => {
+      const card = (outcome: "done" | "stopped" | "step-cap" | "error") =>
+        formatCompletionCard({ status: "idle", completed: true, outcome });
+      expect(card("done")).toContain("✓ Done");
+      expect(card("stopped")).toContain("⏹ Stopped");
+      expect(card("step-cap")).toContain("⏸ Step limit reached");
+      expect(card("error")).toContain("✗ Ended with error");
+    });
+
+    it("states how much was finished and how long it took", () => {
+      const text = formatCompletionCard({
+        status: "idle",
+        completed: true,
+        elapsedMs: 252_000,
+        todos: [
+          { title: "a", status: "completed" },
+          { title: "b", status: "completed" },
+          { title: "c", status: "in_progress" },
+        ],
+      });
+      expect(text).toBe("**[Termigo Agent]** ✓ Done · 4m 12s\n2/3 steps done");
+    });
+
+    it("omits the progress line when the run kept no list", () => {
+      const text = formatCompletionCard({ status: "idle", completed: true });
+      expect(text).not.toContain("steps done");
+      expect(text.split("\n")).toHaveLength(1);
+    });
+
+    it("omits the duration when it is unknown", () => {
+      expect(formatCompletionCard({ status: "idle", completed: true })).toBe(
+        "**[Termigo Agent]** ✓ Done",
+      );
     });
 
     it("displays Step, active task, and lively tool activity trail (Ran, Listed, etc.)", () => {
@@ -203,6 +244,44 @@ describe("progressFormat", () => {
       expect(text).toContain("⚡ Running `Get-ChildItem ...`");
       expect(text).not.toContain("Scan folder");
       expect(text).not.toContain("Report results");
+    });
+  });
+
+  describe("formatDuration", () => {
+    it("pads the seconds so the width does not jump", () => {
+      expect(formatDuration(8_000)).toBe("0m 08s");
+      expect(formatDuration(59_000)).toBe("0m 59s");
+      expect(formatDuration(60_000)).toBe("1m 00s");
+      expect(formatDuration(3_599_000)).toBe("59m 59s");
+    });
+
+    it("returns nothing for a missing or impossible duration", () => {
+      expect(formatDuration(undefined)).toBe("");
+      expect(formatDuration(-1)).toBe("");
+      expect(formatDuration(Number.NaN)).toBe("");
+    });
+  });
+
+  describe("formatTodoProgress", () => {
+    it("counts only the items the agent marked done", () => {
+      expect(
+        formatTodoProgress([
+          { status: "completed" },
+          { status: "completed" },
+          { status: "pending" },
+        ]),
+      ).toBe("2/3 steps done");
+    });
+
+    it("reports a fully finished list", () => {
+      expect(
+        formatTodoProgress([{ status: "completed" }, { status: "completed" }]),
+      ).toBe("2/2 steps done");
+    });
+
+    it("has nothing to say without a list", () => {
+      expect(formatTodoProgress(undefined)).toBe("");
+      expect(formatTodoProgress([])).toBe("");
     });
   });
 

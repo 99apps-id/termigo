@@ -297,7 +297,26 @@ export async function publishProgress(
     }
   } finally {
     if (progressMessageId) {
-      const doneText = formatLiveProgress({ status: "idle", completed: true });
+      // State the outcome rather than a bare "Completed.". `stoppedByUser` and
+      // `stopReason` are what the desktop app uses to tell a finished run from
+      // one the user stopped, one that hit the step limit and one that failed;
+      // without them every ending read the same in the chat.
+      const finalMeta = store.useChatStore.getState().agentMeta;
+      const outcome = finalMeta.stoppedByUser
+        ? "stopped"
+        : finalMeta.error
+          ? "error"
+          : finalMeta.stopReason === "step-cap"
+            ? "step-cap"
+            : "done";
+      const doneText = formatLiveProgress({
+        status: "idle",
+        completed: true,
+        outcome,
+        elapsedMs: Date.now() - started,
+        todos:
+          todosStore.useTodosStore.getState().bySession[sessionId]?.items ?? [],
+      });
       await editProgressMessage(
         chatId,
         progressMessageId,

@@ -24,6 +24,10 @@ export type FormatLiveProgressOptions = {
    *  waits instead of freezing. */
   elapsedMs?: number;
   completed?: boolean;
+  /** Why the run ended. The closing card used to read "Completed." whatever
+   *  had happened, so a run the user stopped, one that hit the step limit and
+   *  one that failed all closed with the same word as a clean finish. */
+  outcome?: RunOutcome;
   mode?: "question" | "task";
   modelLabel?: string;
   /**
@@ -467,8 +471,7 @@ export function markdownToTelegramHtml(markdown: string): string {
   return text;
 }
 
-export function getToolDoneVerb(toolName: string): string {
-  switch (toolName) {
+export function getToolDoneVerb(toolName: string): string {  switch (toolName) {
     case "bash_run":
     case "bash_background":
     case "run_checks":
@@ -572,6 +575,65 @@ export function formatToolActivity(t: ToolCallSummary): string {
 }
 
 /**
+ * Why a run ended, in the terms the desktop app already shows. The closing card
+ * used to read "Completed." whatever had happened, so a run the user stopped, a
+ * run that hit the step limit and a run that failed all closed with the same
+ * word as a clean finish.
+ */
+export type RunOutcome = "done" | "stopped" | "step-cap" | "error";
+
+const OUTCOME_LABELS: Record<RunOutcome, string> = {
+  done: "✓ Done",
+  stopped: "⏹ Stopped",
+  "step-cap": "⏸ Step limit reached",
+  error: "✗ Ended with error",
+};
+
+/** `4m 12s`, or `0m 08s` under a minute. Empty when the duration is unknown. */
+export function formatDuration(elapsedMs?: number): string {
+  if (
+    typeof elapsedMs !== "number" ||
+    !Number.isFinite(elapsedMs) ||
+    elapsedMs < 0
+  ) {
+    return "";
+  }
+  const totalSeconds = Math.floor(elapsedMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
+}
+
+/**
+ * How many of the run's steps the agent marked done, so the closing card can say
+ * what was actually finished. The desktop app hides its todo strip once every
+ * item is complete; a chat message cannot hide, so it states the count instead.
+ * Empty when the run kept no list.
+ */
+export function formatTodoProgress(todos?: { status: string }[]): string {
+  if (!todos || todos.length === 0) return "";
+  const done = todos.filter((t) => t.status === "completed").length;
+  return `${done}/${todos.length} steps done`;
+}
+
+/**
+ * The card's final state.
+ *
+ * It used to be replaced by a bare "Completed.", which threw away the record of
+ * the status, the tool lines and the step, and left the least informative line
+ * in the chat as the last thing the user saw. The closing card now states the
+ * outcome, how long the run took and how many steps finished, while the agent's
+ * own summary and recommendations follow as their own message.
+ */
+export function formatCompletionCard(opts: FormatLiveProgressOptions): string {
+  const label = OUTCOME_LABELS[opts.outcome ?? "done"] ?? OUTCOME_LABELS.done;
+  const duration = formatDuration(opts.elapsedMs);
+  const header = `**[Termigo Agent]** ${label}${duration ? ` · ${duration}` : ""}`;
+  const progress = formatTodoProgress(opts.todos);
+  return progress ? `${header}\n${progress}` : header;
+}
+
+/**
  * Fit the agent's answer into the card.
  *
  * Keeps the OPENING and the most recent text when it does not fit, because the
@@ -590,7 +652,7 @@ export function renderAnswerSnippet(text: string, max = 700): string {
 
 export function formatLiveProgress(opts: FormatLiveProgressOptions): string {
   if (opts.completed) {
-    return "**[Termigo Agent]** Completed.";
+    return formatCompletionCard(opts);
   }
 
   if (opts.mode === "question") {
