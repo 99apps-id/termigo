@@ -17,6 +17,7 @@ import { buildLanguageModel } from "../lib/agent";
 import { BUILTIN_AGENTS } from "../lib/agents";
 import { isResumingApproval } from "../lib/approvalResume";
 import { AUTO_CONTINUE_DELAY_MS, autoContinueSlot } from "../lib/autoContinue";
+import { pruneStale } from "../lib/pruneStale";
 import {
   autoSendGate,
   INITIAL_AUTO_SEND_STATE,
@@ -87,6 +88,10 @@ const transientRetryCount = new Map<string, number>();
 // window: if the failure was not our pin, a second attempt should surface as
 // an error, not loop.
 const TOOLCHOICE_AUTO_RESUME_MS = 5_000;
+// The throttle is per session and only the active session is consulted, so a row
+// for any other session is dead weight nothing removes (session deletion lives
+// in the chat store, which this module already imports). Age-bounded instead:
+// an entry ten windows old can no longer suppress anything.
 const toolChoiceAutoResumeAt = new Map<string, number>();
 
 // Cap the agentic loop in ROUNDS, not per-round steps. Generously sized so
@@ -206,8 +211,14 @@ type RunAnchor = {
   cwd: string | null;
   root: string | null;
   remote: import("../tools/context").RemoteFsSession | null;
+  /** When the anchor was pinned, so a stale one can be dropped. */
+  at: number;
 };
 const runAnchor = new Map<string, RunAnchor>();
+/** How long a pinned anchor stays eligible for eviction. Comfortably longer
+ *  than any single run, so the only entries dropped are ones whose session has
+ *  not run since. */
+const RUN_ANCHOR_TTL_MS = 30 * 60 * 1000;
 
 // Sessions the user has explicitly stopped since the last user-initiated send.
 // `Chat.stop()` aborts the in-flight round, but the Chat may still auto-continue
@@ -673,6 +684,12 @@ function makeChat(sessionId: string): Chat<UIMessage> {
         const now = Date.now();
         const lastAuto = toolChoiceAutoResumeAt.get(sessionId ?? "") ?? 0;
         if (sessionId && now - lastAuto > TOOLCHOICE_AUTO_RESUME_MS) {
+          pruneStale(
+            toolChoiceAutoResumeAt,
+            (at) => at,
+            now,
+            TOOLCHOICE_AUTO_RESUME_MS * 10,
+          );
           toolChoiceAutoResumeAt.set(sessionId, now);
           useChatStore.getState().patchAgentMeta({
             status: "thinking",
@@ -863,10 +880,15 @@ export async function sendParts(
       // the task, even if they switch elsewhere mid-run.
       {
         const live = useChatStore.getState().live;
+        const at = Date.now();
+        // Bounded before the write: an anchor for a session that has not run in
+        // half an hour can never be read again, and nothing else removes it.
+        pruneStale(runAnchor, (anchor) => anchor.at, at, RUN_ANCHOR_TTL_MS);
         runAnchor.set(sessionId, {
           cwd: live.getCwd(),
           root: live.getWorkspaceRoot(),
           remote: live.getRemoteSession(),
+          at,
         });
       }
       // Persist that the run is now in flight, so a restart mid-run can offer
