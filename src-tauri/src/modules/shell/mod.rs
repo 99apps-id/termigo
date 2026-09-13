@@ -65,10 +65,19 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
     "ruff", "black", "mypy", "pytest", "flake8", "isort",
     // Go / Rust helpers whose base command is not `go`/`cargo`
     "golangci-lint", "rustfmt", "clippy-driver",
+    //
+    // Read-only text and path utilities, added so a pipeline is actually
+    // usable. Allowing `|` (below) removed the refusal but not the friction on
+    // its own: `ls | sort | uniq` and `git log | cut -f1` still failed because
+    // the filter side was unlisted. The rule for this group is that a program
+    // here can neither write to the filesystem nor launch another program:
+    // that excludes `xargs`, `env`, `timeout`, `nice`, `nohup`, `watch`, `tee`
+    // and the shells, each of which would let an unlisted program run behind a
+    // listed name.
+    "sort", "uniq", "cut", "tr", "nl", "paste", "join", "fold", "rev",
+    "basename", "dirname", "realpath", "readlink", "seq", "expr",
+    "sha256sum", "sha1sum", "md5sum", "base64", "strings", "du", "df",
 ];
-
-/// Characters that enable command injection in a shell one-liner.
-const SHELL_METACHARACTERS: &[char] = &[';', '$', '(', ')', '<', '>', '`'];
 
 /// Whether a program token may run without a PTY.
 ///
@@ -103,10 +112,39 @@ fn allows_program(program: &str) -> bool {
         .any(|allowed| base_program.eq_ignore_ascii_case(allowed))
 }
 
+/// Characters refused outright because a shell turns them into something other
+/// than the command we validated.
+///
+/// `$` and the backtick are not negotiable: they expand to text chosen at run
+/// time, so a program name could be assembled AFTER this check and never appear
+/// in it (`CMD=rm` then `$CMD -rf /`). `(` and `)` build subshells, which are
+/// another command list the segment check does not see. `<` and `>` read or
+/// write arbitrary files. Separators are deliberately NOT in this list: they
+/// only need each segment's program checked, which is done below.
+///
+/// A newline used to be missing from this list *and* from the separator set, so
+/// `git status\nrm -rf /` passed validation (the first whitespace token is
+/// `git`) and then ran both lines through `sh -c`. That was a hole in the
+/// allowlist, not a policy choice.
+const SHELL_METACHARACTERS: &[char] = &['$', '(', ')', '<', '>', '`'];
+
+/// Characters that split a command into segments. Each segment's program is
+/// checked against the allowlist, so accepting them adds no reach: `;` and a
+/// newline are separators exactly like `&&`, and a `|` pipeline still runs only
+/// programs that are already allowed.
+///
+/// This is the friction that mattered in practice. One install logged **325**
+/// refusals for metacharacters, the common ones being `|`, `2>&1` and `;`
+/// between two allowlisted programs. The agent's most ordinary request -
+/// `find /home/admin/peraturan_pdf -maxdepth 1 -type f | head -30` - failed on
+/// the pipe alone, even though `find` and `head` are both allowlisted.
+const SHELL_SEPARATORS: &[char] = &[';', '\n', '\r'];
+
 /// Validate a shell command for agent execution:
-/// - reject metacharacters that enable injection (`;$()<>``)
-/// - allow safe chaining operators `&&` and `||`, but check the program of
-///   EVERY chained segment against the allowlist, not just the first
+/// - refuse expansion, subshells and redirection (`$`, backtick, `(`, `)`, `<`, `>`)
+/// - allow `&&`, `||`, `|`, `;` and newlines as separators, but check the program
+///   of EVERY segment against the allowlist, not just the first
+/// - drop the two redirections that cannot name a file (`N>&M`, `>/dev/null`)
 /// - enforce the allowlist for each segment's program unless it is an absolute
 ///   path
 /// - return the command string on success
@@ -116,14 +154,20 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
         return Err("empty command".into());
     }
 
-    // 1. Reject metacharacters outside quotes. Allow `&&` and `||` as safe
-    //    chaining operators; reject single `&`, `|`, and the rest. A separator
-    //    inside quotes is data, not a chain, so the quote state decides.
+    // Remove the redirections that cannot name a file before the character scan,
+    // so `2>&1` and `>/dev/null` are not mistaken for the `&` and `>` that are
+    // refused. These two are the most common ways to keep output readable and
+    // they cannot reach the filesystem, unlike `> file`.
+    let cleaned = strip_dev_null_redirections(trimmed)?;
+
+    // 1. Walk the command outside quotes: separators split it into segments, and
+    //    anything that could turn into a different command is refused. A
+    //    separator inside quotes is data, not a chain, so the quote state decides.
     let mut in_quote = false;
     let mut quote_char = '\0';
     let mut prev = '\0';
     let mut bad: Vec<char> = Vec::new();
-    let chars = trimmed.chars().collect::<Vec<_>>();
+    let chars = cleaned.chars().collect::<Vec<_>>();
     // Where each chained segment starts, so its program can be checked too.
     // Checking only the first token let `git status && rm -rf /` through: `git`
     // is allowlisted, so the second command ran unvalidated.
@@ -148,22 +192,33 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
         if !in_quote {
             if c == '&' {
                 if i + 1 < chars.len() && chars[i + 1] == '&' {
-                    // `&&` is allowed
+                    // `&&` is a separator
                     segment_starts.push(i + 2);
                     i += 2;
                     prev = c;
                     continue;
                 }
+                // A lone `&` backgrounds the command, which hides it from the
+                // segment check. `2>&1` and friends were already removed above.
                 bad.push(c);
             } else if c == '|' {
-                if i + 1 < chars.len() && chars[i + 1] == '|' {
-                    // `||` is allowed
-                    segment_starts.push(i + 2);
-                    i += 2;
-                    prev = c;
-                    continue;
-                }
-                bad.push(c);
+                // Both `||` and a single `|` separate commands whose programs
+                // are checked. A pipeline of allowlisted programs is exactly
+                // what the agent needs and used to be refused.
+                let step = if i + 1 < chars.len() && chars[i + 1] == '|' {
+                    2
+                } else {
+                    1
+                };
+                segment_starts.push(i + step);
+                i += step;
+                prev = c;
+                continue;
+            } else if SHELL_SEPARATORS.contains(&c) {
+                segment_starts.push(i + 1);
+                prev = c;
+                i += 1;
+                continue;
             } else if SHELL_METACHARACTERS.contains(&c) {
                 bad.push(c);
             }
@@ -175,8 +230,15 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
         return Err("unclosed quote in command".into());
     }
     if !bad.is_empty() {
+        let hint = if bad.contains(&'>') {
+            "write the output with the write_file tool instead"
+        } else if bad.contains(&'$') || bad.contains(&'`') {
+            "shell expansion is refused because it can change which program runs"
+        } else {
+            "use a PTY session for what this would do"
+        };
         return Err(format!(
-            "command contains shell metacharacters {:?}; use a PTY session for pipelines, redirects, or chained commands",
+            "command contains shell metacharacters {:?}; {hint}",
             bad
         ));
     }
@@ -204,6 +266,95 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
     }
 
     Ok(command)
+}
+
+/// Drop the redirections that cannot name a file: `N>&M` (join two of the
+/// process's own streams) and `>/dev/null` (discard). Both are replaced with a
+/// space so the character scan never sees the `&` or `>` they contain.
+///
+/// Everything else that redirects is left in place and therefore refused by the
+/// scan, because `> file` writes wherever it is pointed - including the secret
+/// paths the rest of the app refuses to touch. The caller runs the ORIGINAL
+/// command, so the shell still performs these redirections.
+fn strip_dev_null_redirections(command: &str) -> Result<String, String> {
+    const DEV_NULL_LEN: usize = "/dev/null".len();
+    let chars: Vec<char> = command.chars().collect();
+    let mut out = String::with_capacity(command.len());
+    let mut in_quote = false;
+    let mut quote_char = '\0';
+    let mut prev = '\0';
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if !in_quote && (c == '"' || c == '\'') {
+            in_quote = true;
+            quote_char = c;
+            out.push(c);
+            prev = c;
+            i += 1;
+            continue;
+        }
+        if in_quote && c == quote_char && prev != '\\' {
+            in_quote = false;
+            quote_char = '\0';
+            out.push(c);
+            prev = c;
+            i += 1;
+            continue;
+        }
+        if !in_quote {
+            // `N>&M`: two digits with a `>&` between them. A redirection to a
+            // file always has a name (or `/dev/null`, matched below) after the
+            // `>`, so a digit cannot be mistaken for a filename here.
+            if c.is_ascii_digit()
+                && chars.get(i + 1) == Some(&'>')
+                && chars.get(i + 2) == Some(&'&')
+                && chars.get(i + 3).is_some_and(|d| d.is_ascii_digit())
+            {
+                out.push(' ');
+                prev = ' ';
+                i += 4;
+                continue;
+            }
+            // `>` or `N>` followed by `/dev/null`. A second `>` means append, so
+            // `>>` is not matched and stays refused.
+            let gt = if c == '>' {
+                Some(i)
+            } else if c.is_ascii_digit() && chars.get(i + 1) == Some(&'>') {
+                Some(i + 1)
+            } else {
+                None
+            };
+            if let Some(gt) = gt {
+                if chars.get(gt + 1) != Some(&'>') {
+                    let mut j = gt + 1;
+                    while chars.get(j) == Some(&' ') {
+                        j += 1;
+                    }
+                    let is_dev_null = chars.len() >= j + DEV_NULL_LEN
+                        && chars[j..j + DEV_NULL_LEN].iter().collect::<String>() == "/dev/null"
+                        // The name must END there. `/dev/null.txt` and
+                        // `/dev/null-backup` are ordinary files, and accepting
+                        // them would let a redirection write to disk under a
+                        // name that merely starts like the null device.
+                        && chars.get(j + DEV_NULL_LEN).is_none_or(|a| {
+                            a.is_whitespace()
+                                || matches!(a, ';' | '|' | '&' | '<' | '>' | ')' | '"' | '\'')
+                        });
+                    if is_dev_null {
+                        out.push(' ');
+                        prev = ' ';
+                        i = j + DEV_NULL_LEN;
+                        continue;
+                    }
+                }
+            }
+        }
+        out.push(c);
+        prev = c;
+        i += 1;
+    }
+    Ok(out)
 }
 
 #[derive(Serialize)]
@@ -744,10 +895,96 @@ mod tests_sandbox {
 
     #[test]
     fn validate_shell_command_blocks_metacharacters() {
-        assert!(validate_shell_command("git status && rm -rf /").is_err());
-        assert!(validate_shell_command("cat file | grep secret").is_err());
+        // Whatever can change WHICH program runs, or reach a file, stays out.
         assert!(validate_shell_command("echo hello > out.txt").is_err());
+        assert!(validate_shell_command("echo hello >> out.txt").is_err());
         assert!(validate_shell_command("cat `id`").is_err());
+        assert!(validate_shell_command("cat $(echo secret)").is_err());
+        assert!(validate_shell_command("cat file < input").is_err());
+        assert!(validate_shell_command("(git status)").is_err());
+        // A lone `&` backgrounds the command, hiding it from the segment check.
+        assert!(validate_shell_command("git status & git log").is_err());
+    }
+
+    /// A newline used to be neither a metacharacter nor a separator, so it
+    /// passed the whole check and then ran as a second command through `sh -c`.
+    /// `git` is allowlisted and is the first whitespace token, so
+    /// `git status\nrm -rf /` was accepted and did both. That was a hole in the
+    /// allowlist, not a policy choice.
+    #[test]
+    fn validate_shell_command_refuses_a_second_command_on_a_new_line() {
+        let err = validate_shell_command("git status\nrm -rf /")
+            .expect_err("a newline must not smuggle an unlisted program");
+        assert!(err.contains("'rm'"), "{err}");
+        assert!(validate_shell_command("git status\r\nshred -u f").is_err());
+        assert!(validate_shell_command("pnpm test\nsudo rm -rf /").is_err());
+        // A real second command on its own line is still checked and allowed
+        // when its program is fine.
+        assert!(validate_shell_command("git status\ngit log").is_ok());
+    }
+
+    /// The friction that mattered: a pipe between two allowlisted programs was
+    /// refused 325 times on one install, including the agent's most ordinary
+    /// request (`find ... | head -30`).
+    #[test]
+    fn validate_shell_command_allows_a_pipeline_of_allowlisted_programs() {
+        assert!(validate_shell_command("find /tmp -maxdepth 1 -type f | head -30").is_ok());
+        assert!(validate_shell_command("git log | head -20").is_ok());
+        assert!(validate_shell_command("cat file | grep secret | wc -l").is_ok());
+        assert!(validate_shell_command("ls -la | sort | uniq").is_ok());
+    }
+
+    /// A pipeline does not launder an unlisted program either: the pipe is only
+    /// accepted because EVERY segment is still checked.
+    #[test]
+    fn validate_shell_command_refuses_a_pipeline_with_an_unlisted_segment() {
+        let err = validate_shell_command("cat file | rm -rf /")
+            .expect_err("an unlisted segment must be refused");
+        assert!(err.contains("'rm'"), "{err}");
+        assert!(validate_shell_command("git log | sh -c 'rm -rf /'").is_err());
+        assert!(validate_shell_command("git log | sudo rm -rf /").is_err());
+    }
+
+    /// `;` is a separator exactly like `&&`, so each side is checked.
+    #[test]
+    fn validate_shell_command_allows_semicolons_between_allowlisted_programs() {
+        assert!(validate_shell_command("git status; git log").is_ok());
+        let err = validate_shell_command("git status; rm -rf /")
+            .expect_err("an unlisted segment must be refused");
+        assert!(err.contains("'rm'"), "{err}");
+    }
+
+    /// Two redirections cannot name a file, so they are removed before the scan:
+    /// `N>&M` joins the process's own streams and `/dev/null` discards. They were
+    /// among the most common refusals (`['>', '&']`).
+    #[test]
+    fn validate_shell_command_allows_stream_joins_and_dev_null() {
+        assert!(validate_shell_command("pnpm test 2>&1").is_ok());
+        assert!(validate_shell_command("pnpm test 1>&2").is_ok());
+        assert!(validate_shell_command("pnpm test > /dev/null").is_ok());
+        assert!(validate_shell_command("pnpm test 2>/dev/null").is_ok());
+        assert!(validate_shell_command("git status 2>&1 | head -5").is_ok());
+        assert!(validate_shell_command("git log 2>&1 | head -3 | wc -l").is_ok());
+    }
+
+    /// The exemption is narrow on purpose: anything that names a file, or that
+    /// looks like `/dev/null` without being it, still goes through the scan and
+    /// is refused. `guard_write` exists for the same reason on the write path.
+    #[test]
+    fn validate_shell_command_still_refuses_a_redirection_to_a_real_file() {
+        assert!(validate_shell_command("echo x > /dev/nullx").is_err());
+        assert!(validate_shell_command("echo x > /dev/null.txt").is_err());
+        assert!(validate_shell_command("echo x > ~/.ssh/authorized_keys").is_err());
+        assert!(validate_shell_command("echo x 2>> out.txt").is_err());
+        assert!(validate_shell_command("echo x > out.txt 2>&1").is_err());
+    }
+
+    /// A redirection inside quotes is an argument, not a redirection, so it is
+    /// left to the program and the `>` must not be treated as one.
+    #[test]
+    fn validate_shell_command_treats_a_quoted_redirection_as_data() {
+        assert!(validate_shell_command(r#"grep "2>&1" src/file.ts"#).is_ok());
+        assert!(validate_shell_command(r#"echo "> /dev/null""#).is_ok());
     }
 
     /// A chain of allowlisted programs is the case the chaining support exists
