@@ -27,6 +27,7 @@ import {
 } from "./terminalClipboard";
 import { createTerminalLinkHandler } from "./terminalLinks";
 import { pasteIntoTerminal } from "./terminalPaste";
+import { shouldRecoverWebgl } from "./webglRecovery";
 
 export const POOL_MAX_SIZE = 5;
 const FIT_DEBOUNCE_MS = 8;
@@ -62,6 +63,15 @@ export type Slot = {
   readonly host: HTMLDivElement;
   webglAddon: WebglAddon | null;
   webglCanvases: HTMLCanvasElement[];
+  /**
+   * Native context-loss listeners bound to `webglCanvases`, kept so they can be
+   * removed again. Without the reference a listener stays on a canvas the slot
+   * has moved on from, and fires a recovery into it.
+   */
+  webglContextHandlers: {
+    lost: (e: Event) => void;
+    restored: () => void;
+  } | null;
   currentLeafId: number | null;
   // Leaf whose buffer this slot still holds intact after release; serialized
   // only if another leaf steals the slot.
@@ -282,6 +292,7 @@ function createSlot(): Slot {
     host,
     webglAddon: null,
     webglCanvases: [],
+    webglContextHandlers: null,
     currentLeafId: null,
     retainedLeafId: null,
     parked: false,
@@ -883,6 +894,47 @@ const WEBGL_REAP_GRACE_MS = 30_000;
 const SLOT_REAP_GRACE_MS = 45_000;
 const IDLE_SLOTS_KEEP_WARM = 1;
 
+/**
+ * Re-attach WebGL after a context loss, if the slot is one worth recovering.
+ *
+ * The decision itself lives in `shouldRecoverWebgl`, where it is tested: an
+ * unbound or parked slot has its addon disposed by `scheduleWebglReap` within
+ * `WEBGL_REAP_GRACE_MS`, so attaching here would allocate a GPU context that is
+ * about to be thrown away.
+ */
+function recoverWebgl(slot: Slot): void {
+  const enabled = usePreferencesStore.getState().terminalWebglEnabled;
+  if (
+    !shouldRecoverWebgl(
+      {
+        hasAddon: slot.webglAddon !== null,
+        currentLeafId: slot.currentLeafId,
+        parked: slot.parked,
+      },
+      enabled,
+    )
+  ) {
+    return;
+  }
+  attachWebgl(slot);
+  if (slot.webglAddon) {
+    try {
+      slot.term.refresh(0, slot.term.rows - 1);
+    } catch {}
+  }
+}
+
+/** Remove the native context listeners bound to this slot's canvases. */
+function detachWebglContextListeners(slot: Slot): void {
+  const handlers = slot.webglContextHandlers;
+  if (!handlers) return;
+  for (const canvas of slot.webglCanvases) {
+    canvas.removeEventListener("webglcontextlost", handlers.lost);
+    canvas.removeEventListener("webglcontextrestored", handlers.restored);
+  }
+  slot.webglContextHandlers = null;
+}
+
 function attachWebgl(slot: Slot): void {
   if (slot.webglAddon || !slot.term.element) return;
   if (!usePreferencesStore.getState().terminalWebglEnabled) return;
@@ -893,6 +945,7 @@ function attachWebgl(slot: Slot): void {
   try {
     const webgl = new WebglAddon();
     webgl.onContextLoss(() => {
+      detachWebglContextListeners(slot);
       const cur = slot.webglAddon;
       if (cur === webgl) {
         slot.webglAddon = null;
@@ -901,20 +954,8 @@ function attachWebgl(slot: Slot): void {
       try {
         webgl.dispose();
       } catch {}
-      // Recovery: WebKit may transiently lose contexts on sleep/wake or GPU
-      // reset; without re-attach the slot would silently fall back to DOM
-      // forever. Defer past WebKit's reset window before retrying.
-      setTimeout(() => {
-        if (slot.webglAddon || slot.currentLeafId === null || slot.parked)
-          return;
-        if (!usePreferencesStore.getState().terminalWebglEnabled) return;
-        attachWebgl(slot);
-        if (slot.webglAddon) {
-          try {
-            slot.term.refresh(0, slot.term.rows - 1);
-          } catch {}
-        }
-      }, WEBGL_RECOVERY_DELAY_MS);
+      // Defer past the browser's reset window before retrying.
+      setTimeout(() => recoverWebgl(slot), WEBGL_RECOVERY_DELAY_MS);
     });
     slot.term.loadAddon(webgl);
     const after = elem.querySelectorAll<HTMLCanvasElement>("canvas");
@@ -922,6 +963,26 @@ function attachWebgl(slot: Slot): void {
     for (const c of after) if (!before.has(c)) added.push(c);
     slot.webglAddon = webgl;
     slot.webglCanvases = added;
+
+    // The addon reports a lost context, but nothing calls preventDefault on the
+    // native event - and a context the page does not preventDefault is one the
+    // browser will not attempt to restore, so the addon's own recovery never
+    // gets the chance to run. Listening natively also catches the loss earlier
+    // than the addon's detection, and `webglcontextrestored` is the only signal
+    // that the GPU is usable again.
+    const lost = (e: Event) => {
+      e.preventDefault();
+      setTimeout(() => recoverWebgl(slot), WEBGL_RECOVERY_DELAY_MS);
+    };
+    const restored = () => recoverWebgl(slot);
+    // Bound to the tracked canvases only. The set captured before `loadAddon`
+    // is not the addon's, so a listener registered there could never be removed
+    // again - and the canvas it sits on is not the one that will be reloaded.
+    for (const c of slot.webglCanvases) {
+      c.addEventListener("webglcontextlost", lost);
+      c.addEventListener("webglcontextrestored", restored);
+    }
+    slot.webglContextHandlers = { lost, restored };
   } catch (e) {
     console.warn("[termigo-webgl] unavailable:", e);
   }
@@ -930,6 +991,10 @@ function attachWebgl(slot: Slot): void {
 function disposeSlotWebgl(slot: Slot): void {
   if (!slot.webglAddon) return;
   const addon = slot.webglAddon;
+  // Detach before tearing the canvases down: a listener still bound while the
+  // contexts below are released can fire mid-disposal and try to re-attach into
+  // a slot that is being recycled.
+  detachWebglContextListeners(slot);
   for (const canvas of slot.webglCanvases) releaseCanvasContext(canvas);
   slot.webglCanvases = [];
   try {
