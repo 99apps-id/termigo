@@ -423,9 +423,14 @@ pub struct WslDistro {
 
 #[cfg(windows)]
 pub fn resolve_path(path: &str, workspace: &WorkspaceEnv) -> PathBuf {
+    // Normalize incoming paths to forward slashes at the command boundary.
+    // The frontend invariant is forward-slash paths; backslashes from a
+    // misbehaving caller or legacy state are normalized here so downstream
+    // string-based checks (comparison_form, deny-lists) see one canonical form.
+    let normalized = path.replace('\\', "/");
     match workspace {
-        WorkspaceEnv::Local => PathBuf::from(path),
-        WorkspaceEnv::Wsl { distro } => wsl_path_to_host(distro, path),
+        WorkspaceEnv::Local => PathBuf::from(normalized),
+        WorkspaceEnv::Wsl { distro } => wsl_path_to_host(distro, &normalized),
     }
 }
 

@@ -2,9 +2,11 @@ use std::io::Write;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::thread;
+use std::time::Duration;
 
 use portable_pty::PtySize;
 use tauri::ipc::{Channel, Response};
+use tokio::time::timeout;
 
 use super::session::{self, Session};
 use super::shell_init;
@@ -43,7 +45,8 @@ pub async fn pty_open(
         pane_id.and_then(|pane_id| control.shell_env(pane_id))
     };
     let id = state.next_id.fetch_add(1, Ordering::Relaxed);
-    let session = tauri::async_runtime::spawn_blocking(move || {
+    const SPAWN_TIMEOUT: Duration = Duration::from_secs(15);
+    let join_handle = tauri::async_runtime::spawn_blocking(move || {
         session::spawn(
             id,
             app,
@@ -60,17 +63,21 @@ pub async fn pty_open(
             on_exit,
         )
         .map(|(s, _)| s)
-    })
-    .await
-    .map_err(|e| {
-        log::error!("pty_open join failed: {e}");
-        e.to_string()
-    })?
-    .map_err(|e| {
-        log::error!("pty_open failed: {e}");
-        e
-    })?;
-    state.sessions.write().unwrap().insert(id, session);
+    });
+    let timeout_result = timeout(SPAWN_TIMEOUT, join_handle).await;
+    let join_output = match timeout_result {
+        Ok(inner) => inner,
+        Err(_) => {
+            log::error!("pty_open timed out after 15s");
+            return Err(
+                "pty_open timed out after 15s - shell may be misconfigured or profile corrupt"
+                    .to_string(),
+            );
+        }
+    };
+    let spawn_result = join_output.map_err(|e| e.to_string())?;
+    let inner = spawn_result.map_err(|e| e.to_string())?;
+    state.sessions.write().unwrap().insert(id, inner);
     // The shell can exit before this insert (instant failure, `exit` in an rc
     // file); the waiter's reap then ran with the id absent. Re-check and reap
     // so the pseudoconsole isn't stranded.

@@ -268,6 +268,9 @@ pub struct SshSession {
     /// context (SSH has no daemon-side scrollback). Capped.
     mirror_ring: Arc<std::sync::Mutex<VecDeque<u8>>>,
     alive: Arc<AtomicBool>,
+    /// Set to true on the first call to `close`. Guards against double-close
+    /// when the janitor task races with an explicit `ssh_close` from JS.
+    closed: Arc<AtomicBool>,
 }
 
 impl SshSession {
@@ -326,6 +329,16 @@ impl SshSession {
     }
 
     pub async fn close(self: Arc<Self>) {
+        // Guard against double-close when the janitor task races with an
+        // explicit `ssh_close` from JS. Only the first call runs cleanup.
+        if self
+            .closed
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            log::debug!("ssh session already closed");
+            return;
+        }
         let _ = self.write_half.eof().await;
         let _ = self.write_half.close().await;
         // Drop the forward listeners first so their ports are free again the
@@ -999,6 +1012,7 @@ pub async fn connect(
             mirror_sinks: Arc::new(std::sync::Mutex::new(Vec::new())),
             mirror_ring: Arc::new(std::sync::Mutex::new(VecDeque::new())),
             alive: Arc::new(AtomicBool::new(true)),
+            closed: Arc::new(AtomicBool::new(false)),
         }));
     }
 
@@ -1117,6 +1131,7 @@ pub async fn connect(
         mirror_sinks,
         mirror_ring,
         alive,
+        closed: Arc::new(AtomicBool::new(false)),
     }))
 }
 
