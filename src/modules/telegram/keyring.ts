@@ -17,22 +17,54 @@ import { invoke } from "@tauri-apps/api/core";
 const SERVICE = "termigo-telegram";
 const ACCOUNT = "token";
 
-/** `undefined` = never read yet, `null` = read and absent. */
+/** `undefined` = never read yet (or the last read found nothing). */
 let cachedToken: string | null | undefined;
+/** A read already on the wire, so several callers share one keychain round trip. */
+let inFlightTokenRead: Promise<string | null> | null = null;
 
 export async function getTelegramToken(): Promise<string | null> {
-  if (cachedToken !== undefined) return cachedToken;
+  // Only a token that was actually FOUND is cached.
+  //
+  // The exception path below was already guarded against caching a failure, but
+  // the success path cached the absence too: a read that returned no value
+  // before the native store had loaded pinned `null` for the process lifetime,
+  // and nothing re-read it. Measured on a headless install after a deploy: the
+  // app came up healthy, the relay never started, no Telegram socket opened, and
+  // it stayed that way until a restart - the state even still said
+  // `enabled: true`.
+  //
+  // Re-reading costs nothing when there is genuinely no token, because the relay
+  // is not polling in that case. A real token is cached after the first hit, so
+  // the hot path does not touch the keychain again.
+  const found = cachedToken;
+  if (found !== undefined && found !== null) return found;
+  // Callers that arrive together (boot: the mount refresh and the first poll)
+  // share ONE read rather than each spending a keychain round trip. This is what
+  // the cache was added for originally, and dropping the negative cache must not
+  // give that back.
+  if (inFlightTokenRead) return inFlightTokenRead;
+
+  const read = (async (): Promise<string | null> => {
+    try {
+      const v = await invoke<string | null>("secrets_get", {
+        service: SERVICE,
+        account: ACCOUNT,
+      });
+      const token = v && v.length > 0 ? v : null;
+      cachedToken = token;
+      return token;
+    } catch {
+      // Deliberately NOT cached: the keychain may not be available yet at
+      // startup, and caching that failure would disable the bot until a restart.
+      return null;
+    }
+  })();
+
+  inFlightTokenRead = read;
   try {
-    const v = await invoke<string | null>("secrets_get", {
-      service: SERVICE,
-      account: ACCOUNT,
-    });
-    cachedToken = v && v.length > 0 ? v : null;
-    return cachedToken;
-  } catch {
-    // Deliberately NOT cached: the keychain may not be available yet at
-    // startup, and caching that failure would disable the bot until a restart.
-    return null;
+    return await read;
+  } finally {
+    inFlightTokenRead = null;
   }
 }
 

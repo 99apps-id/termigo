@@ -11,14 +11,64 @@ import { logRelayInfo } from "./telegramLog";
 
 const STORAGE_KEY = "termigo-telegram";
 
+/**
+ * How many times a missing token is re-read before the relay is left off.
+ *
+ * Bounded on purpose: the native secret store can answer "nothing" before it has
+ * loaded, and a single answer used to be final. Measured on a headless install
+ * after a deploy: the app came up healthy, localStorage said `enabled: true`,
+ * and the relay never started - no socket, no log line, until a restart.
+ */
+const TOKEN_RETRY_ATTEMPTS = 5;
+const TOKEN_RETRY_DELAY_MS = 3_000;
+
 export function useTelegramBot(): void {
   const enabled = useTelegramStore((s) => s.enabled);
   const hasToken = useTelegramStore((s) => s.hasToken);
 
-  // Re-read hasToken on mount (the token lives in the keychain, not persist).
+  // Re-read BOTH sources on mount.
+  //
+  // The persisted toggle is restored from localStorage first, because a store
+  // that hydrated empty would otherwise stay `enabled: false` while the saved
+  // state still said enabled, and `refresh` only enables when the token is
+  // present AND the session already looks enabled (or no saved state exists).
+  // Then `refresh` reads the keychain, which is where the token actually lives.
   useEffect(() => {
-    void useTelegramStore.getState().refresh();
+    void syncTelegramFromStorage().then(() => useTelegramStore.getState().refresh());
   }, []);
+
+  // A token read that missed at boot must not leave the relay off until the next
+  // restart. Re-read a bounded number of times instead of trusting the first
+  // answer, and stop as soon as a token appears (the effect above then starts
+  // the relay through the usual path).
+  useEffect(() => {
+    if (!enabled || hasToken) return;
+    let cancelled = false;
+    let attempts = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const attempt = () => {
+      if (cancelled) return;
+      attempts += 1;
+      void useTelegramStore
+        .getState()
+        .refresh()
+        .then(() => {
+          if (cancelled || useTelegramStore.getState().hasToken) return;
+          if (attempts < TOKEN_RETRY_ATTEMPTS) {
+            timer = setTimeout(attempt, TOKEN_RETRY_DELAY_MS);
+          } else {
+            logRelayInfo(
+              "relay not started: no bot token in the keychain after retrying",
+            );
+          }
+        });
+    };
+    timer = setTimeout(attempt, TOKEN_RETRY_DELAY_MS);
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [enabled, hasToken]);
 
   // A settings-window change writes the same localStorage key, which fires a
   // storage event here; re-sync so the effect below reacts to the new toggle.
