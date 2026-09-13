@@ -135,14 +135,7 @@ function requestAutoContinue(sessionId: string): boolean {
     error: null,
   });
   setTimeout(() => {
-    const live = useChatStore.getState();
-    if (
-      stopLatch.has(sessionId) ||
-      live.activeSessionId !== sessionId ||
-      live.agentMeta.stoppedByUser
-    ) {
-      return;
-    }
+    if (!canResumeDeferred(sessionId)) return;
     void resumeRun().catch(() => {
       useChatStore.getState().patchAgentMeta({
         status: "error",
@@ -192,14 +185,7 @@ function requestVerifyNudge(
     error: null,
   });
   setTimeout(() => {
-    const live = useChatStore.getState();
-    if (
-      stopLatch.has(sessionId) ||
-      live.activeSessionId !== sessionId ||
-      live.agentMeta.stoppedByUser
-    ) {
-      return;
-    }
+    if (!canResumeDeferred(sessionId)) return;
     void sendMessage(nudge).catch(() => {
       useChatStore.getState().patchAgentMeta({
         status: "error",
@@ -265,6 +251,27 @@ function ensureOnlineListener(): void {
   });
 }
 
+/**
+ * Whether a deferred auto-resume may still run when its timer fires.
+ *
+ * Three recoveries schedule `resumeRun` on a timer: a transient provider
+ * failure, a context overflow, and a rejected tool_choice pin. A timer outlives
+ * the state it was scheduled from - a Stop click, a session switch, or the app
+ * quitting can all land inside the window - and then the resume starts a run
+ * the user had just stopped, or starts it in a session they already left.
+ *
+ * Each callback re-asks here instead of trusting the decision made when it was
+ * scheduled. Before this, the rejected-tool_choice path re-checked nothing at
+ * all and the transient-retry path checked only the session, so a stop landing
+ * in the same tick still resumed.
+ */
+function canResumeDeferred(sessionId: string): boolean {
+  if (stopLatch.has(sessionId)) return false;
+  if (useChatStore.getState().activeSessionId !== sessionId) return false;
+  if (useChatStore.getState().agentMeta.stoppedByUser) return false;
+  return true;
+}
+
 function scheduleTransientRetry(sessionId: string): boolean {
   if (useChatStore.getState().activeSessionId !== sessionId) return false;
   const attempts = transientRetryCount.get(sessionId) ?? 0;
@@ -276,7 +283,7 @@ function scheduleTransientRetry(sessionId: string): boolean {
     stopReason: null,
   });
   setTimeout(() => {
-    if (useChatStore.getState().activeSessionId !== sessionId) return;
+    if (!canResumeDeferred(sessionId)) return;
     void resumeRun().catch(() => {
       useChatStore.getState().patchAgentMeta({
         status: "error",
@@ -640,10 +647,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
             stopReason: null,
           });
           setTimeout(() => {
-            if (
-              !stopLatch.has(sessionId) &&
-              !useChatStore.getState().agentMeta.stoppedByUser
-            ) {
+            if (canResumeDeferred(sessionId)) {
               void resumeRun().catch(() => {
                 useChatStore.getState().patchAgentMeta({
                   status: "error",
@@ -676,6 +680,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
             stopReason: null,
           });
           setTimeout(() => {
+            if (!canResumeDeferred(sessionId)) return;
             void resumeRun().catch(() => {
               useChatStore.getState().patchAgentMeta({
                 status: "error",
