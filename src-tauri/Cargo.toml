@@ -92,6 +92,10 @@ keyring = { version = "3.6", default-features = false, features = [
 # objc2 itself is no longer a direct dependency: the only use was a raw
 # `msg_send!` in main.rs, which now calls objc2-foundation's declared methods.
 # It remains in the tree as objc2-foundation's own dependency.
+objc2-foundation = { version = "0.3", features = ["NSString", "NSUserDefaults"] }
+
+# WebKitGTK can't read external clipboard copies; mac/win webviews can.
+[target.'cfg(target_os = "linux")'.dependencies]
 tauri-plugin-clipboard-manager = "2"
 
 [target.'cfg(target_os = "windows")'.dependencies]

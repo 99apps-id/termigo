@@ -6519,6 +6519,7 @@ dependencies = [
  "log",
  "notify",
  "nucleo-matcher",
+ "objc2-foundation",
  "portable-pty",
  "proptest",
  "regex",
