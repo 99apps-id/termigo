@@ -159,6 +159,7 @@ npm test
 npm publish
 ```
 
-The version in `package.json` tracks the app version, but the download resolves
-the newest *release* rather than this file's version, so the two can drift
-safely when a release is not tagged yet.
+The version in `package.json` is this installer's own version and can run ahead
+of the app: the download resolves the newest *release* rather than this file's
+version, so the two drift safely. 0.9.14 is a patch on top of 0.9.13, which was
+published with a syntax error in `bin/termigo.mjs` and never ran.

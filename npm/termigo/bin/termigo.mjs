@@ -61,8 +61,9 @@ Options
 On a server with no display the app is installed but not started, and the
 command to run it under Xvfb is printed instead.
 
-The terminal companion is installed as `termigo-go` (run `termigo-go tui`). It
-is never called `termigo`, because that name is this command.
+The terminal companion is installed as \`termigo-go\` (run \`termigo-go tui\`). It
+is never called \`termigo\`, because that name is this command.
+
 The app is never installed into a directory on PATH: the name \`termigo\` is
 already this command. On Linux the AppImage goes to ~/.local/share/termigo.
 `;
