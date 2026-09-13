@@ -485,9 +485,14 @@ async function waitForReply(
       }
       // A fresh answer exists; return it once the run has settled.
       if (!busy) {
+        // No text anywhere in the run's fresh messages is the one case with
+        // nothing to send. Returning an ad-hoc line here meant it was not in
+        // FALLBACK_REPLIES, so the relay counted it as a real answer and told
+        // the user "Run finished." The named constant is classified correctly
+        // and says what actually happened.
         return (
           lastAssistantText(store.getChat, sessionId, baseline) ??
-          "Run finished."
+          NO_OUTPUT_REPLY
         );
       }
     } else {

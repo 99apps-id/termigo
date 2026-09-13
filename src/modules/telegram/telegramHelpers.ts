@@ -173,12 +173,23 @@ export function lastAssistantText(
   const assistants = chat.messages.filter((m) => m.role === "assistant");
   const relevant = assistants.slice(sinceCount);
   if (relevant.length === 0) return null;
-  const last = relevant[relevant.length - 1];
-  const text = (last.parts ?? [])
-    .filter((p): p is { type: "text"; text: string } => p.type === "text")
-    .map((p) => p.text)
-    .join("\n");
-  return text.trim() || null;
+  // Walk BACKWARDS and take the newest message that actually says something.
+  //
+  // Reading only the final message looked equivalent and was not: a run's last
+  // assistant message very often ends on a tool call with no closing prose, so
+  // its text parts are empty while the answer sits in the message before it.
+  // Measured on a live install: 9 of 51 stored sessions ended that way, and the
+  // relay answered each of them with a bare "Run finished." because the
+  // extraction returned null. The user asked for an audit and got a status line.
+  for (let i = relevant.length - 1; i >= 0; i -= 1) {
+    const text = (relevant[i].parts ?? [])
+      .filter((p): p is { type: "text"; text: string } => p.type === "text")
+      .map((p) => p.text)
+      .join("\n")
+      .trim();
+    if (text) return text;
+  }
+  return null;
 }
 
 export function messageText(m: {
