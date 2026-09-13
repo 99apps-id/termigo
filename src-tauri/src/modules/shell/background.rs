@@ -11,7 +11,10 @@ use serde::Serialize;
 use shared_child::SharedChild;
 
 use super::ringbuffer::BoundedRingBuffer;
-use crate::modules::workspace::{resolve_path, WorkspaceEnv};
+use crate::modules::fs::security::guard_write;
+use crate::modules::workspace::{
+    require_authorized, resolve_path, WorkspaceEnv, WorkspaceRegistry,
+};
 
 const RING_CAP: usize = 4 * 1024 * 1024;
 
@@ -106,6 +109,7 @@ pub fn spawn(
     cwd: Option<String>,
     workspace: WorkspaceEnv,
     log_path: Option<String>,
+    registry: &WorkspaceRegistry,
 ) -> Result<Arc<BackgroundProc>, String> {
     let trimmed = command.trim().to_string();
     if trimmed.is_empty() {
@@ -169,6 +173,15 @@ pub fn spawn(
                         path = resolve_path(trimmed, &workspace);
                     }
                 }
+                // Authorize and deny-check BEFORE creating anything.
+                //
+                // The parent directory used to be created first, so an
+                // unauthorized path could still cause directory creation outside
+                // the authorized roots even though the file itself was then
+                // refused. Validating first means a rejected path leaves the
+                // filesystem exactly as it found it.
+                require_authorized(registry, &path)?;
+                let _ = guard_write(&path)?;
                 if let Some(parent) = path.parent() {
                     if !parent.as_os_str().is_empty() && !parent.exists() {
                         fs::create_dir_all(parent).map_err(|e| {
@@ -176,6 +189,13 @@ pub fn spawn(
                         })?;
                     }
                 }
+                // Guard again now that the parent exists. `guard_write` falls
+                // back to canonicalizing the parent for a target that does not
+                // exist yet, and that fallback cannot run while the parent is
+                // missing, so this second pass is the one that catches a
+                // symlinked directory. The first pass only had the literal
+                // spelling to work with.
+                let path = guard_write(&path)?;
                 let f = File::create(&path)
                     .map_err(|e| format!("cannot open log file {}: {e}", path.display()))?;
                 (

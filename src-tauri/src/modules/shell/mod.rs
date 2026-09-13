@@ -498,7 +498,7 @@ pub fn shell_bg_spawn(
 
     let workspace = WorkspaceEnv::from_option(workspace);
     authorize_spawn_cwd(&registry, cwd.as_deref(), &workspace)?;
-    let proc = background::spawn(trimmed, cwd, workspace, log_path)?;
+    let proc = background::spawn(trimmed, cwd, workspace, log_path, &registry)?;
     let id = state.next_bg_id.fetch_add(1, Ordering::Relaxed);
     state.bg.write().unwrap().insert(id, proc);
     Ok(id)
