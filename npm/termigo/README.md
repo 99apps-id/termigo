@@ -154,6 +154,7 @@ them. Publish it from this directory so the version stays in step with the app:
 
 ```bash
 cd npm/termigo
+cp ../../LICENSE LICENSE   # keep the license text in step with the root copy
 npm test
 npm publish
 ```

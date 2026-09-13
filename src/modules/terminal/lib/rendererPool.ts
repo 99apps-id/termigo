@@ -901,12 +901,13 @@ function attachWebgl(slot: Slot): void {
       try {
         webgl.dispose();
       } catch {}
-      // Recovery: WebKit may transiently lose contexts on sleep/wake or GPU
-      // reset; without re-attach the slot would silently fall back to DOM
-      // forever. Defer past WebKit's reset window before retrying.
+      // Recovery: WebKit/Chromium may transiently lose contexts on sleep/wake,
+      // GPU reset, or memory pressure. Without re-attach the slot silently
+      // falls back to DOM forever. Defer past the browser's reset window
+      // before retrying. Recovery is allowed for both bound and idle slots so
+      // an actively visible terminal does not stay on the slow DOM renderer.
       setTimeout(() => {
-        if (slot.webglAddon || slot.currentLeafId === null || slot.parked)
-          return;
+        if (slot.webglAddon || slot.parked) return;
         if (!usePreferencesStore.getState().terminalWebglEnabled) return;
         attachWebgl(slot);
         if (slot.webglAddon) {
@@ -917,11 +918,52 @@ function attachWebgl(slot: Slot): void {
       }, WEBGL_RECOVERY_DELAY_MS);
     });
     slot.term.loadAddon(webgl);
+    // Native context-loss event: call preventDefault so the browser can restore
+    // the context later, and schedule a re-attach on restoration.
+    const canvases = elem.querySelectorAll<HTMLCanvasElement>("canvas");
+    const handleLoss = (e: Event) => {
+      e.preventDefault();
+      // xterm's onContextLoss will also fire; this is a belt-and-suspenders
+      // trigger in case the addon's internal detection is late.
+      setTimeout(() => {
+        if (slot.webglAddon || slot.parked) return;
+        if (!usePreferencesStore.getState().terminalWebglEnabled) return;
+        attachWebgl(slot);
+        if (slot.webglAddon) {
+          try {
+            slot.term.refresh(0, slot.term.rows - 1);
+          } catch {}
+        }
+      }, WEBGL_RECOVERY_DELAY_MS);
+    };
+    const handleRestored = () => {
+      if (slot.webglAddon || slot.parked) return;
+      if (!usePreferencesStore.getState().terminalWebglEnabled) return;
+      attachWebgl(slot);
+      if (slot.webglAddon) {
+        try {
+          slot.term.refresh(0, slot.term.rows - 1);
+        } catch {}
+      }
+    };
+    for (const c of canvases) {
+      c.addEventListener("webglcontextlost", handleLoss);
+      c.addEventListener("webglcontextrestored", handleRestored);
+    }
     const after = elem.querySelectorAll<HTMLCanvasElement>("canvas");
     const added: HTMLCanvasElement[] = [];
     for (const c of after) if (!before.has(c)) added.push(c);
     slot.webglAddon = webgl;
     slot.webglCanvases = added;
+    // Track native listeners so they are removed with the slot.
+    slot.webglCanvases.forEach((c) => {
+      c.addEventListener("webglcontextlost", handleLoss);
+      c.addEventListener("webglcontextrestored", handleRestored);
+    });
+    (slot as unknown as Record<string, unknown>)._webglContextHandlers = {
+      handleLoss,
+      handleRestored,
+    };
   } catch (e) {
     console.warn("[termigo-webgl] unavailable:", e);
   }
@@ -930,6 +972,22 @@ function attachWebgl(slot: Slot): void {
 function disposeSlotWebgl(slot: Slot): void {
   if (!slot.webglAddon) return;
   const addon = slot.webglAddon;
+  // Remove native context-loss / context-restored listeners so a disposed
+  // slot cannot attempt a recovery after its canvases are torn down.
+  const handlers = (slot as unknown as Record<string, unknown>)
+    ._webglContextHandlers as
+    | { handleLoss: (e: Event) => void; handleRestored: () => void }
+    | undefined;
+  if (handlers) {
+    for (const canvas of slot.webglCanvases) {
+      canvas.removeEventListener("webglcontextlost", handlers.handleLoss);
+      canvas.removeEventListener(
+        "webglcontextrestored",
+        handlers.handleRestored,
+      );
+    }
+    delete (slot as unknown as Record<string, unknown>)._webglContextHandlers;
+  }
   for (const canvas of slot.webglCanvases) releaseCanvasContext(canvas);
   slot.webglCanvases = [];
   try {
