@@ -35,6 +35,7 @@ is installed, running `termigo` again just opens it.
 | `--silent` | Install without a progress window (Windows only). |
 | `--no-verify` | Install without checking the checksum. |
 | `--no-launch` | Install without starting the app. |
+| `--no-cli` | Do not install the terminal companion. |
 | `--platform`, `--arch` | Override detection, for `--dry-run` on another machine. |
 
 ### Formats
@@ -91,6 +92,39 @@ npx termigo --format deb --no-launch
 > no single-instance guard, and both would use the same data directory
 > (`~/.local/share/id.99apps.termigo/`) and long-poll the same Telegram token.
 > That is not an upgrade; it is two agents sharing one session store.
+
+## The terminal companion
+
+`termigo` also installs **`termigo-go`**, the Go command-line companion, which is
+where the interactive terminal lives:
+
+```bash
+termigo-go tui        # setup, models, settings, approval, live status
+termigo-go status     # and the same actions non-interactively:
+termigo-go models
+termigo-go settings set defaultModelId claude-sonnet-4-6
+termigo-go approval
+termigo-go secret anthropic
+```
+
+Press `q` to leave the TUI. Every one of those commands drives a **running**
+Termigo app over its local control socket (`~/.cache/termigo/control.json` on
+Linux and macOS, `%LOCALAPPDATA%\termigo\control.json` on Windows), so start the
+app first - without it they answer `Termigo is not running`.
+
+It is deliberately not called `termigo`: that name is this installer, and a
+second binary with the same name would shadow one or the other depending on
+`PATH` order. It is installed to `~/.local/bin` on Linux and macOS and to
+`%LOCALAPPDATA%\Programs\termigo-cli` on Windows; if that directory is not on
+`PATH` the command says so, because an installed command that cannot be found by
+name looks exactly like a failed install.
+
+The companion is downloaded separately rather than bundled inside the app, and
+that is a constraint rather than a preference: a Tauri sidecar has to exist for
+every build of the application, and the server that builds the headless binary
+has no Go toolchain. A companion only some builders can produce cannot be a
+build dependency of all of them. It is also **never fatal** - if a release does
+not carry it, the app still installs and the reason is printed.
 
 ## Checksums
 

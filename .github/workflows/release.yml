@@ -70,6 +70,21 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      # The Go companion (`termigo tui`) is built by `pnpm build:cli` alongside
+      # the Rust sidecar, and that build SKIPS the Go binary when no toolchain
+      # is present - which is what lets a server with no Go build every artifact
+      # it needs. Installing Go here is what turns that skip into a build, so a
+      # published release always carries the companion.
+      #
+      # Pinned by cli/go.mod rather than a version literal: the module already
+      # states the toolchain it requires, and two places to bump is one place to
+      # forget.
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
       - name: Write Apple API key to disk
         if: startsWith(matrix.platform, 'macos') && env.HAS_APPLE == 'true'
         shell: bash
@@ -143,6 +158,38 @@ jobs:
           prerelease: false
           args: ${{ matrix.args }}
 
+      # Each matrix leg builds the companion for the machine it runs on, so the
+      # four legs between them publish win32-x64, linux-x64, darwin-x64 and
+      # darwin-arm64 under the names `npm/termigo --with-cli` looks for.
+      #
+      # `gh release upload` rather than a release action: tauri-action has
+      # already created the draft release by this point, and adding the file to
+      # it is exactly one command. The retry covers the parallel matrix - a leg
+      # can finish before the first leg has created the release, and waiting a
+      # few seconds is not the same as the release being missing.
+      - name: Upload the Go companion to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ github.ref_name }}"
+          for asset in src-tauri/binaries/termigo-go-*; do
+            [ -f "$asset" ] || continue
+            echo "uploading $asset"
+            for attempt in $(seq 1 20); do
+              if gh release upload "$TAG" "$asset" --clobber; then
+                break
+              fi
+              if [ "$attempt" = 20 ]; then
+                echo "::error::could not upload $asset to $TAG after 20 attempts"
+                exit 1
+              fi
+              echo "  release not ready yet (attempt $attempt), retrying in 15s"
+              sleep 15
+            done
+          done
       # Strip the bundled libwayland-* libs from the AppImage so it loads the
       # host copies at runtime. The Ubuntu 22.04 build host ships libwayland
       # 1.20, but recent Mesa (Fedora 43 / Arch / Bazzite, Mesa 1.22+) needs

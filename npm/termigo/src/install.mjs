@@ -8,7 +8,7 @@
 // something people are told not to run.
 
 import { spawn } from "node:child_process";
-import { access, chmod, copyFile, mkdir, readdir, rm } from "node:fs/promises";
+import { access, chmod, copyFile, mkdir, readdir, rm, stat } from "node:fs/promises";
 import { constants } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -290,4 +290,80 @@ export async function stagingDir() {
 
 export async function cleanup(dir) {
   await rm(dir, { recursive: true, force: true }).catch(() => {});
+}
+
+// ─── The Go companion (`termigo tui`) ─────────────────────────────────────
+
+/**
+ * Where the companion command is installed.
+ *
+ * `~/.local/bin` on Unix is the conventional per-user bin directory, needs no
+ * privileges, and is already on PATH in most modern shells. Windows has no such
+ * convention, so it goes to a per-user programs directory next to what the npm
+ * installer already creates; the caller reports the PATH situation rather than
+ * assuming either way.
+ *
+ * Never named `termigo`: that name belongs to this installer, and a second
+ * binary with the same name would shadow one or the other depending on PATH
+ * order. The companion is `termigo-go`.
+ */
+export function companionDir({ platform, env = process.env }) {
+  if (platform === "win32") {
+    const local = env.LOCALAPPDATA;
+    if (!local) throw new Error("LOCALAPPDATA is not set, so there is nowhere to install to");
+    return join(local, "Programs", "termigo-cli");
+  }
+  return join(homedir(), ".local", "bin");
+}
+
+/** The companion's file name, which is the release asset name. */
+export function companionName({ platform, arch }) {
+  return `termigo-go${platform === "win32" ? ".exe" : ""}`;
+}
+
+/** Where the companion would live, whether or not it is there. */
+export function companionPath({ platform, arch, env = process.env }) {
+  return join(companionDir({ platform, env }), companionName({ platform, arch }));
+}
+
+/**
+ * Whether the companion is already installed.
+ *
+ * Worth asking before reaching for the network: the common case for this command
+ * is "the app is here, open it", and it should not wait on a round trip - or
+ * fail offline - for a binary that is demonstrably already on disk.
+ */
+export async function companionInstalled({ platform, arch, env = process.env }) {
+  try {
+    return (await stat(companionPath({ platform, arch, env }))).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** Whether a directory is on PATH, using the platform's own separator. */
+export function isOnPath(dir, { platform, env = process.env }) {
+  const raw = env.PATH ?? env.Path ?? "";
+  // Windows compares case-insensitively and tolerates a trailing separator.
+  const normalize = (p) =>
+    p.replace(/[\\/]+$/, "").replace(/\\/g, "/").toLowerCase();
+  const wanted = normalize(dir);
+  const sep = platform === "win32" ? ";" : ":";
+  return raw.split(sep).some((entry) => entry && normalize(entry) === wanted);
+}
+
+/**
+ * Install the companion binary.
+ *
+ * The file arrives already verified, so this only has to place it and make it
+ * executable. The returned `onPath` is the part worth reporting: an installed
+ * command that cannot be found by name looks exactly like a failed install.
+ */
+export async function installCompanion({ file, platform, arch, env = process.env }) {
+  const dir = companionDir({ platform, env });
+  const dest = join(dir, companionName({ platform, arch }));
+  await mkdir(dir, { recursive: true });
+  await copyFile(file, dest);
+  if (platform !== "win32") await chmod(dest, 0o755);
+  return { path: dest, dir, onPath: isOnPath(dir, { platform, env }) };
 }

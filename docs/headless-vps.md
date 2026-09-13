@@ -91,6 +91,23 @@ matter on a server:
 | `--no-launch` | skip starting the app. Not required - a missing display is detected and the start is skipped anyway - but useful in scripts. |
 | `--download-only --dir /tmp` | fetch and verify the file here, install it by hand later. |
 | `--app-version 0.9.11` | pin an exact version instead of the newest. |
+| `--no-cli` | skip the terminal companion (below). |
+
+The same command also installs **`termigo-go`**, the Go companion that carries
+the terminal UI. On a server that is more useful than it sounds: the app is
+already running under Xvfb, so `termigo-go tui` over SSH is a live view of it -
+setup, models, settings, approval and status - and the non-interactive forms
+work in scripts:
+
+```bash
+termigo-go status          # the running app's live state
+termigo-go models          # the models this build ships
+termigo-go approval ask    # \`ask\` blocks every edit; needed when nobody is watching
+```
+
+It lands in `~/.local/bin`, so run it as the user that owns the app (normally
+`admin`) - it reads the control descriptor from that user's cache directory. As
+root it finds no descriptor and answers `Termigo is not running`.
 
 **A release install does not replace the headless setup.** Two things are still
 required, and neither comes from the package:

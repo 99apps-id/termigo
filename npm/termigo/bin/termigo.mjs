@@ -13,8 +13,11 @@ import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
   cleanup,
+  companionInstalled,
+  companionName,
   headlessNotice,
   installApp,
+  installCompanion,
   installedApp,
   launch,
   stagingDir,
@@ -26,7 +29,7 @@ import {
   sha256File,
   verify,
 } from "../src/release.mjs";
-import { FORMATS_BY_PLATFORM, findAsset, resolveArtifact } from "../src/target.mjs";
+import { FORMATS_BY_PLATFORM, findAsset, resolveArtifact, resolveCliArtifact } from "../src/target.mjs";
 
 const self = JSON.parse(
   await readFile(new URL("../package.json", import.meta.url), "utf8"),
@@ -51,11 +54,15 @@ Options
   --silent                install without a progress window (Windows only)
   --no-verify             install without checking the checksum (not advised)
   --no-launch             install without starting the app
+  --no-cli                do not install the terminal companion
   --platform, --arch      override detection (for --dry-run on another machine)
   -h, --help              this text
   -v, --version           the version of this installer
 On a server with no display the app is installed but not started, and the
 command to run it under Xvfb is printed instead.
+
+The terminal companion is installed as `termigo-go` (run `termigo-go tui`). It
+is never called `termigo`, because that name is this command.
 The app is never installed into a directory on PATH: the name \`termigo\` is
 already this command. On Linux the AppImage goes to ~/.local/share/termigo.
 `;
@@ -104,6 +111,7 @@ export function parseArgs(argv) {
     silent: false,
     verify: true,
     launch: true,
+    cli: true,
     dryRun: false,
     list: false,
     reinstall: false,
@@ -145,6 +153,9 @@ export function parseArgs(argv) {
         break;
       case "--no-launch":
         opts.launch = false;
+        break;
+      case "--no-cli":
+        opts.cli = false;
         break;
       case "--dry-run":
         opts.dryRun = true;
@@ -192,6 +203,66 @@ function progressReporter() {
   };
 }
 
+/**
+ * Fetch and install the terminal companion (`termigo-go`).
+ *
+ * Deliberately never fatal. The app is the thing that was asked for; failing
+ * the whole command because a secondary binary is missing from a release would
+ * turn a usable install into no install at all. It reports what happened and
+ * gets out of the way.
+ *
+ * It is also a separate download rather than a bundled sidecar, and that is a
+ * constraint rather than a preference: a Tauri sidecar has to exist for every
+ * build of the app, and the server that builds the headless binary has no Go
+ * toolchain. A companion that only some builders can produce cannot be a build
+ * dependency of all of them.
+ */
+async function addCompanion(opts, knownVersion) {
+  let dir;
+  try {
+    const version = knownVersion ?? opts.appVersion ?? (await latestVersion());
+    const artifact = resolveCliArtifact({
+      platform: opts.platform,
+      arch: opts.arch,
+      version,
+    });
+    const asset = findAsset(await releaseAssets(version), artifact.name);
+
+    if (opts.verify && !asset.sha256) {
+      throw new Error(`release v${version} publishes no checksum for ${artifact.name}`);
+    }
+
+    dir = opts.dir ? join(opts.dir) : await stagingDir();
+    const file = join(dir, companionName({ platform: opts.platform, arch: opts.arch }));
+
+    await download(artifact.url, file);
+    if (opts.verify) {
+      const actual = await sha256File(file);
+      if (!verify(actual, asset.sha256)) {
+        throw new Error(`checksum mismatch for ${artifact.name}`);
+      }
+    }
+
+    const result = await installCompanion({
+      file,
+      platform: opts.platform,
+      arch: opts.arch,
+    });
+    process.stdout.write(`  terminal UI: ${result.path}\n`);
+    if (result.onPath) {
+      process.stdout.write("  run it with: termigo-go tui\n");
+    } else {
+      process.stdout.write(
+        `  ${result.dir} is not on PATH, so \`termigo-go\` will not be found by name.\n`,
+      );
+    }
+  } catch (e) {
+    process.stdout.write(`  terminal UI not installed: ${e.message}\n`);
+  } finally {
+    if (dir && !opts.keep && !opts.dir) await cleanup(dir);
+  }
+}
+
 async function main(argv) {
   const opts = parseArgs(argv);
 
@@ -210,6 +281,12 @@ async function main(argv) {
     const existing = await installedApp({ platform: opts.platform });
     if (existing) {
       process.stdout.write(`Termigo is already installed at ${existing}\n`);
+      // The companion is reconciled only when it is actually missing. Asking
+      // the filesystem first keeps "just open my app" offline and instant, and
+      // still heals an install that predates the terminal UI.
+      if (opts.cli && !(await companionInstalled(opts))) {
+        await addCompanion(opts);
+      }
       if (opts.launch) await startOrExplain(existing, opts.platform);
       return 0;
     }
@@ -292,6 +369,8 @@ async function main(argv) {
       silent: opts.silent,
     });
     process.stdout.write(`  installed: ${result.installedAt ?? result.note}\n`);
+
+    if (opts.cli) await addCompanion(opts, version);
 
     if (opts.launch) {
       const app = result.installedAt ?? (await installedApp({ platform: opts.platform }));

@@ -41,6 +41,13 @@ jobs:
       - name: Test
         run: pnpm test
 
+      # The build scripts are outside `src`, so vitest does not reach them. What
+      # lives there is the mapping from a Rust target triple to the names Go and
+      # Node use, which is the only place a release asset can be named wrongly -
+      # and a wrongly named asset is a 404 a user sees, not a build failure.
+      - name: Test build scripts
+        run: pnpm test:scripts
+
       - name: React Compiler healthcheck (advisory)
         run: pnpm exec react-compiler-healthcheck
         continue-on-error: true

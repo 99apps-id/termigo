@@ -444,8 +444,10 @@ npm i -g termigo     # then just: termigo
 
 The installer has no dependencies and nothing to compile: it picks the right
 release asset for your OS and architecture, checks it against the SHA-256 GitHub
-publishes, and installs it. `--dry-run` shows what it would do, `--format` picks
-a different artifact (`npm/termigo/README.md` has the full list).
+publishes, and installs it. It also installs **`termigo-go`**, the Go companion
+that carries the interactive terminal (`termigo-go tui`). `--dry-run` shows what
+it would do, `--format` picks a different artifact (`npm/termigo/README.md` has
+the full list).
 
 > **Servers:** a release install is safe on a headless VPS, but it is not a
 > replacement for the Xvfb setup in [`docs/headless-vps.md`](docs/headless-vps.md) —

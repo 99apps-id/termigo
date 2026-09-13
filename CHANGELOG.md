@@ -8,29 +8,22 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- **`npx termigo` installs the app from the terminal.** A new `npm/termigo`
-  package with no dependencies and nothing to compile: it detects the OS and
-  architecture, resolves the newest release, checks the download against the
-  SHA-256 GitHub publishes for that asset, installs it, and starts it. `--dry-run`,
-  `--list`, `--format`, `--app-version`, `--download-only` and `--keep` cover the
-  cases between "just install it" and "fetch this exact build for another machine".
-  On a machine with no display it installs but does not start, and prints the
-  `xvfb-run` + `dbus-run-session` command that works instead - a GUI binary
-  spawned into a missing display otherwise fails silently, which is the worst
-  possible outcome on a server you reach over SSH.
-- **Skills from other agents are reused in place, not copied.** `find_skill`
-  searched `.termigo`, `.claude`, `.openclaw`, `.codex` and `.agents`, but not
-  Hermes's shelf - and Hermes is the one of those that keeps real, hand-written
-  procedures (`productivity/docx`, `xlsx`, `pdf`, `devops`, ...). A copy into the
-  workspace would split into two versions that drift while the original keeps
-  improving, so `.hermes/skills` is now searched directly.
-- **The agent can produce and deliver Office documents.** `officecli` is on the
-  shell allowlist, so a report in a format Word or Excel can open is something the
-  agent can write on any machine rather than only where an absolute path happened
-  to be typed. `preview_file` now reports a binary document as delivered instead
-  of answering with a bare error, which is the shape the Telegram relay needs to
-  attach the file - previously a document the agent had just written could not
-  reach the chat at all.
+- **The terminal UI now arrives with the install.** `npx termigo` also fetches
+  **`termigo-go`**, the Go companion that carries `termigo-go tui` and its
+  non-interactive equivalents (`status`, `models`, `settings`, `approval`,
+  `secret`). It replaced a `go build` that every user had to run by hand. It is
+  downloaded as a separate release asset rather than bundled as a Tauri sidecar
+  on purpose: a sidecar in `bundle.externalBin` has to exist for every build,
+  and the server that builds the headless binary has no Go toolchain, so a
+  mandatory companion would have turned "build the server" into "install Go
+  first" for a program the server does not need. It is never fatal either - a
+  release that lacks it still installs the app.
+- **Release builds publish the companion for four targets.** `pnpm build:cli`
+  builds it alongside the Rust sidecar, cross-compiling with `CGO_ENABLED=0`,
+  and the release workflow installs Go and uploads one asset per matrix leg
+  (`termigo-go-win32-x64.exe`, `-linux-x64`, `-darwin-x64`, `-darwin-arm64`).
+  The Go toolchain stays **optional** for everyone else: a machine without it
+  skips that one binary with a warning and still builds everything it owns.
 
 ### Fixed
 

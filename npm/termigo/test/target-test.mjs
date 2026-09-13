@@ -6,7 +6,12 @@
 
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
-import { FORMATS_BY_PLATFORM, findAsset, resolveArtifact } from "../src/target.mjs";
+import {
+  FORMATS_BY_PLATFORM,
+  findAsset,
+  resolveArtifact,
+  resolveCliArtifact,
+} from "../src/target.mjs";
 
 /** Every asset of release v0.9.11, copied from the GitHub API. */
 const PUBLISHED = [
@@ -142,6 +147,50 @@ describe("default formats", () => {
     assert.throws(
       () => resolveArtifact({ platform: "linux", arch: "riscv64", version: VERSION }),
       /unsupported architecture/,
+    );
+  });
+});
+
+describe("resolveCliArtifact", () => {
+  // The name has to match what the release workflow uploads. It builds the
+  // companion on each matrix leg, so the set available is precisely the set of
+  // legs: win32-x64, linux-x64, darwin-x64 and darwin-arm64.
+  it("names the companion asset the way the build script names it", () => {
+    const cases = [
+      [{ platform: "win32", arch: "x64" }, "termigo-go-win32-x64.exe"],
+      [{ platform: "darwin", arch: "x64" }, "termigo-go-darwin-x64"],
+      [{ platform: "darwin", arch: "arm64" }, "termigo-go-darwin-arm64"],
+      [{ platform: "linux", arch: "x64" }, "termigo-go-linux-x64"],
+    ];
+    for (const [target, expected] of cases) {
+      assert.equal(resolveCliArtifact({ ...target, version: VERSION }).name, expected);
+    }
+  });
+
+  it("points at the versioned download path", () => {
+    assert.equal(
+      resolveCliArtifact({ platform: "linux", arch: "x64", version: VERSION }).url,
+      "https://github.com/99apps-id/termigo/releases/download/v0.9.11/termigo-go-linux-x64",
+    );
+  });
+
+  // No build job produces these, so promising them would be a 404 at install
+  // time. The message has to say which ones do exist.
+  it("refuses a machine no job builds for, and lists what does exist", () => {
+    assert.throws(
+      () => resolveCliArtifact({ platform: "linux", arch: "arm64", version: VERSION }),
+      (e) => /no terminal companion is published for linux-arm64/.test(e.message) && /win32-x64/.test(e.message),
+    );
+    assert.throws(
+      () => resolveCliArtifact({ platform: "win32", arch: "arm64", version: VERSION }),
+      /no terminal companion is published/,
+    );
+  });
+
+  it("rejects an unusable version", () => {
+    assert.throws(
+      () => resolveCliArtifact({ platform: "linux", arch: "x64", version: "latest" }),
+      /not a usable release version/,
     );
   });
 });

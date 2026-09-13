@@ -139,3 +139,31 @@ export function findAsset(assets, name) {
     `release has no asset named "${name}"${known.length ? `\navailable:\n  ${known.join("\n  ")}` : ""}`,
   );
 }
+
+// ─── The Go companion (`termigo tui`) ─────────────────────────────────────
+
+/**
+ * The machines the release publishes a companion for.
+ *
+ * Deliberately the same set the app is published for: the build matrix runs one
+ * job per platform, and each job produces one companion. Listing a combination
+ * here that no job builds would turn into a 404 at install time, so the two
+ * lists are meant to be read together.
+ */
+const CLI_ASSETS = new Set(["win32-x64", "darwin-x64", "darwin-arm64", "linux-x64"]);
+
+/** The companion's file name on a release, or a reason there is none. */
+export function resolveCliArtifact({ platform, arch, version }) {
+  if (!version || !/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(version)) {
+    throw new Error(`not a usable release version: ${version}`);
+  }
+  const id = `${platform}-${arch}`;
+  if (!CLI_ASSETS.has(id)) {
+    throw new Error(
+      `no terminal companion is published for ${id}; available: ${[...CLI_ASSETS].join(", ")}`,
+    );
+  }
+  const name = `termigo-go-${id}${platform === "win32" ? ".exe" : ""}`;
+  return { id, name, url: assetUrl(version, name) };
+}
+
