@@ -32,8 +32,16 @@ function isImageGenerationOutput(val: unknown): val is ImageGenerationOutput {
 function resolveDimensions(
   aspectRatio?: string,
   requestedSize?: string,
-): { width: number; height: number; sizeStr: "1024x1024" | "1792x1024" | "1024x1792" } {
-  if (requestedSize === "1792x1024" || requestedSize === "1024x1792" || requestedSize === "1024x1024") {
+): {
+  width: number;
+  height: number;
+  sizeStr: "1024x1024" | "1792x1024" | "1024x1792";
+} {
+  if (
+    requestedSize === "1792x1024" ||
+    requestedSize === "1024x1792" ||
+    requestedSize === "1024x1024"
+  ) {
     const [w, h] = requestedSize.split("x").map(Number);
     return { width: w, height: h, sizeStr: requestedSize };
   }
@@ -49,6 +57,37 @@ function resolveDimensions(
     default:
       return { width: 1024, height: 1024, sizeStr: "1024x1024" };
   }
+}
+
+const MAX_IMAGE_DOWNLOAD_BYTES = 20 * 1024 * 1024; // 20 MB ceiling for image fetches
+
+async function fetchImageWithLimit(url: string): Promise<ArrayBuffer | null> {
+  const head = await fetch(url, { method: "HEAD" });
+  if (head.ok) {
+    const cl = head.headers.get("content-length");
+    if (cl && Number(cl) > MAX_IMAGE_DOWNLOAD_BYTES) {
+      return null;
+    }
+  }
+  const res = await fetch(url);
+  if (!res.ok || !res.body) return null;
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  const reader = res.body.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > MAX_IMAGE_DOWNLOAD_BYTES) return null;
+    chunks.push(value);
+  }
+  const blob = new Uint8Array(total);
+  let offset = 0;
+  for (const c of chunks) {
+    blob.set(c, offset);
+    offset += c.length;
+  }
+  return blob.buffer;
 }
 
 export function buildImageGenerationTools(ctx: ToolContext) {
@@ -80,9 +119,7 @@ export function buildImageGenerationTools(ctx: ToolContext) {
         model: z
           .string()
           .optional()
-          .describe(
-            "Image generation model to use. Defaults to 'dall-e-3'.",
-          ),
+          .describe("Image generation model to use. Defaults to 'dall-e-3'."),
       }),
       execute: async ({ prompt, aspect_ratio, size, output_path, model }) => {
         const { sizeStr } = resolveDimensions(aspect_ratio, size);
@@ -91,10 +128,14 @@ export function buildImageGenerationTools(ctx: ToolContext) {
         // Determine target file path
         const now = Date.now();
         const defaultRel = `.termigo/generated/image_${now}.png`;
-        const rawTarget = output_path && output_path.trim() ? output_path.trim() : defaultRel;
+        const rawTarget =
+          output_path && output_path.trim() ? output_path.trim() : defaultRel;
         const resolvedTarget = resolvePath(rawTarget, ctx.getCwd());
 
-        const safety = await checkWritableCanonical(resolvedTarget, native.canonicalize);
+        const safety = await checkWritableCanonical(
+          resolvedTarget,
+          native.canonicalize,
+        );
         if (!safety.ok) {
           return { error: safety.reason, path: resolvedTarget };
         }
@@ -111,20 +152,23 @@ export function buildImageGenerationTools(ctx: ToolContext) {
         // 1. OpenAI DALL-E
         if (openaiKey) {
           try {
-            const res = await fetch("https://api.openai.com/v1/images/generations", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${openaiKey}`,
+            const res = await fetch(
+              "https://api.openai.com/v1/images/generations",
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${openaiKey}`,
+                },
+                body: JSON.stringify({
+                  model: resolvedModel,
+                  prompt,
+                  n: 1,
+                  size: sizeStr,
+                  response_format: "b64_json",
+                }),
               },
-              body: JSON.stringify({
-                model: resolvedModel,
-                prompt,
-                n: 1,
-                size: sizeStr,
-                response_format: "b64_json",
-              }),
-            });
+            );
 
             if (!res.ok) {
               const errBody = await res.text().catch(() => "");
@@ -134,38 +178,48 @@ export function buildImageGenerationTools(ctx: ToolContext) {
               };
             }
 
-            const json = (await res.json()) as { data?: Array<{ b64_json?: string; url?: string }> };
+            const json = (await res.json()) as {
+              data?: Array<{ b64_json?: string; url?: string }>;
+            };
             const item = json.data?.[0];
             if (item?.b64_json) {
               base64Data = item.b64_json;
             } else if (item?.url) {
               // Fetch remote image if returned as URL
-              const imgRes = await fetch(item.url);
-              if (imgRes.ok) {
-                const ab = await imgRes.arrayBuffer();
+              const ab = await fetchImageWithLimit(item.url);
+              if (ab) {
                 base64Data = btoa(
-                  new Uint8Array(ab).reduce((acc, byte) => acc + String.fromCharCode(byte), ""),
+                  new Uint8Array(ab).reduce(
+                    (acc, byte) => acc + String.fromCharCode(byte),
+                    "",
+                  ),
                 );
               }
             }
           } catch (err) {
-            return { error: `Image generation network error: ${String(err)}`, path: abs };
+            return {
+              error: `Image generation network error: ${String(err)}`,
+              path: abs,
+            };
           }
         } else if (openrouterKey) {
           // 2. OpenRouter Image endpoint fallback
           try {
-            const res = await fetch("https://openrouter.ai/api/v1/images/generations", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${openrouterKey}`,
+            const res = await fetch(
+              "https://openrouter.ai/api/v1/images/generations",
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${openrouterKey}`,
+                },
+                body: JSON.stringify({
+                  prompt,
+                  model: model || "openai/gpt-5.4-image-2",
+                  response_format: "b64_json",
+                }),
               },
-              body: JSON.stringify({
-                prompt,
-                model: model || "openai/gpt-5.4-image-2",
-                response_format: "b64_json",
-              }),
-            });
+            );
 
             if (!res.ok) {
               const errBody = await res.text().catch(() => "");
@@ -175,13 +229,18 @@ export function buildImageGenerationTools(ctx: ToolContext) {
               };
             }
 
-            const json = (await res.json()) as { data?: Array<{ b64_json?: string; url?: string }> };
+            const json = (await res.json()) as {
+              data?: Array<{ b64_json?: string; url?: string }>;
+            };
             const item = json.data?.[0];
             if (item?.b64_json) {
               base64Data = item.b64_json;
             }
           } catch (err) {
-            return { error: `OpenRouter image error: ${String(err)}`, path: abs };
+            return {
+              error: `OpenRouter image error: ${String(err)}`,
+              path: abs,
+            };
           }
         } else if (googleKey) {
           // 3. Google Imagen endpoint
@@ -192,7 +251,10 @@ export function buildImageGenerationTools(ctx: ToolContext) {
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 instances: [{ prompt }],
-                parameters: { sampleCount: 1, aspectRatio: aspect_ratio || "1:1" },
+                parameters: {
+                  sampleCount: 1,
+                  aspectRatio: aspect_ratio || "1:1",
+                },
               }),
             });
 
@@ -205,7 +267,10 @@ export function buildImageGenerationTools(ctx: ToolContext) {
             }
 
             const json = (await res.json()) as {
-              predictions?: Array<{ bytesBase64Encoded?: string; mimeType?: string }>;
+              predictions?: Array<{
+                bytesBase64Encoded?: string;
+                mimeType?: string;
+              }>;
             };
             const pred = json.predictions?.[0];
             if (pred?.bytesBase64Encoded) {
@@ -248,7 +313,10 @@ export function buildImageGenerationTools(ctx: ToolContext) {
             bytesWritten: Math.round((base64Data.length * 3) / 4),
           };
         } catch (err) {
-          return { error: `Failed to save image to disk: ${String(err)}`, path: abs };
+          return {
+            error: `Failed to save image to disk: ${String(err)}`,
+            path: abs,
+          };
         }
       },
       toModelOutput: ({ output }) => {

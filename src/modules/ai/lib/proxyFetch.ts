@@ -1,5 +1,23 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
-import { info as logInfo } from "@tauri-apps/plugin-log";
+import { info as logInfo, warn as logWarn } from "@tauri-apps/plugin-log";
+
+/** RFC1918 + loopback + link-local + unspecified address ranges. */
+const PRIVATE_NET_RE =
+  /^(?:localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+|169\.254\.\d+\.\d+|0\.0\.0\.0|\[::1\]|\[fe80::)|\[::](?:::|$)/i;
+
+function isPrivateUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    // hostname without port
+    const host = u.hostname;
+    if (PRIVATE_NET_RE.test(host)) return true;
+    // bracketed IPv6
+    if (host.startsWith("[") && PRIVATE_NET_RE.test(host)) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
 
 /** Streaming events emitted by the Rust `ai_http_stream` command. */
 type AiStreamEvent =
@@ -116,6 +134,13 @@ async function proxyFetchImpl(
   const method = (init?.method ?? "GET").toUpperCase();
   const headers = headerInitToRecord(init?.headers);
   const body = await bodyToPayload(init?.body);
+
+  // Audit log: record private-network requests so the user can inspect them
+  // in the AI inspector. This is informational only; it does not block.
+  if (isPrivateUrl(url)) {
+    const label = allowPrivateNetwork ? "allow" : "block";
+    logWarn(`[ai] private-network fetch ${label}: ${method} ${url}`);
+  }
 
   const signal = init?.signal;
   if (signal?.aborted) {

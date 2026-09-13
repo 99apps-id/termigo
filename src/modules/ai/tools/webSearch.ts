@@ -28,6 +28,15 @@ type HttpResponse = {
   body: number[];
 };
 
+const DDG_RESPONSE_CAP = 100 * 1024; // 100 KB is plenty for the SERP markup
+
+function capHttpBody(resp: HttpResponse): HttpResponse {
+  if (resp.body.length > DDG_RESPONSE_CAP) {
+    return { ...resp, body: resp.body.slice(0, DDG_RESPONSE_CAP) };
+  }
+  return resp;
+}
+
 export type WebSearchResult = {
   title: string;
   url: string;
@@ -127,7 +136,10 @@ export function buildWebSearchTools() {
       }),
       needsApproval: true,
       execute: async ({ query }) => {
-        const apiKeys = useChatStore.getState().apiKeys as Record<string, string | undefined>;
+        const apiKeys = useChatStore.getState().apiKeys as Record<
+          string,
+          string | undefined
+        >;
         const tavilyKey = apiKeys.tavily?.trim();
         const braveKey = apiKeys.brave?.trim();
 
@@ -146,14 +158,25 @@ export function buildWebSearchTools() {
             });
             if (res.ok) {
               const json = (await res.json()) as {
-                results?: Array<{ title?: string; url?: string; content?: string }>;
+                results?: Array<{
+                  title?: string;
+                  url?: string;
+                  content?: string;
+                }>;
               };
-              const results: WebSearchResult[] = (json.results ?? []).map((r) => ({
-                title: r.title || "",
-                url: r.url || "",
-                snippet: r.content || "",
-              }));
-              return { provider: "tavily", query, count: results.length, results };
+              const results: WebSearchResult[] = (json.results ?? []).map(
+                (r) => ({
+                  title: r.title || "",
+                  url: r.url || "",
+                  snippet: r.content || "",
+                }),
+              );
+              return {
+                provider: "tavily",
+                query,
+                count: results.length,
+                results,
+              };
             }
           } catch {
             // Fall through to DuckDuckGo on network failure
@@ -174,14 +197,27 @@ export function buildWebSearchTools() {
             );
             if (res.ok) {
               const json = (await res.json()) as {
-                web?: { results?: Array<{ title?: string; url?: string; description?: string }> };
+                web?: {
+                  results?: Array<{
+                    title?: string;
+                    url?: string;
+                    description?: string;
+                  }>;
+                };
               };
-              const results: WebSearchResult[] = (json.web?.results ?? []).map((r) => ({
-                title: r.title || "",
-                url: r.url || "",
-                snippet: r.description || "",
-              }));
-              return { provider: "brave", query, count: results.length, results };
+              const results: WebSearchResult[] = (json.web?.results ?? []).map(
+                (r) => ({
+                  title: r.title || "",
+                  url: r.url || "",
+                  snippet: r.description || "",
+                }),
+              );
+              return {
+                provider: "brave",
+                query,
+                count: results.length,
+                results,
+              };
             }
           } catch {
             // Fall through to DuckDuckGo
@@ -194,16 +230,18 @@ export function buildWebSearchTools() {
         )}`;
         let resp: HttpResponse;
         try {
-          resp = await invoke<HttpResponse>("ai_http_request", {
-            url,
-            method: "GET",
-            headers: {
-              "User-Agent":
-                "Mozilla/5.0 (compatible; TermigoBot/1.0; +https://github.com/99apps-id/termigo)",
-            },
-            body: null,
-            allowPrivateNetwork: false,
-          });
+          resp = capHttpBody(
+            await invoke<HttpResponse>("ai_http_request", {
+              url,
+              method: "GET",
+              headers: {
+                "User-Agent":
+                  "Mozilla/5.0 (compatible; TermigoBot/1.0; +https://github.com/99apps-id/termigo)",
+              },
+              body: null,
+              allowPrivateNetwork: false,
+            }),
+          );
         } catch (e) {
           const errStr = String(e);
           const isOffline =
@@ -259,19 +297,23 @@ export function buildWebSearchTools() {
       }),
       needsApproval: true,
       execute: async ({ url, use_reader }) => {
-        const fetchUrl = use_reader ? `https://r.jina.ai/${encodeURI(url)}` : url;
+        const fetchUrl = use_reader
+          ? `https://r.jina.ai/${encodeURI(url)}`
+          : url;
         let resp: HttpResponse;
         try {
-          resp = await invoke<HttpResponse>("ai_http_request", {
-            url: fetchUrl,
-            method: "GET",
-            headers: {
-              "User-Agent":
-                "Mozilla/5.0 (compatible; TermigoBot/1.0; +https://github.com/99apps-id/termigo)",
-            },
-            body: null,
-            allowPrivateNetwork: false,
-          });
+          resp = capHttpBody(
+            await invoke<HttpResponse>("ai_http_request", {
+              url: fetchUrl,
+              method: "GET",
+              headers: {
+                "User-Agent":
+                  "Mozilla/5.0 (compatible; TermigoBot/1.0; +https://github.com/99apps-id/termigo)",
+              },
+              body: null,
+              allowPrivateNetwork: false,
+            }),
+          );
         } catch (e) {
           return { error: String(e), url };
         }
