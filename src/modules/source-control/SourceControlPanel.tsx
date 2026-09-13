@@ -70,6 +70,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -1188,6 +1189,9 @@ function ListHeader({
 }: RowRendererProps & {
   row: Extract<RowDescriptor, { kind: "list-header" }>;
 }) {
+  // Stable per-instance id, so the label and its checkbox stay associated even
+  // when two panels are mounted side by side.
+  const stageAllId = useId();
   return (
     <div className="flex h-7 items-center gap-2 px-3">
       <span className="text-[10.5px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/85">
@@ -1196,9 +1200,18 @@ function ListHeader({
       <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full border border-border/60 px-1 text-[9.5px] font-semibold tabular-nums text-muted-foreground">
         {row.count}
       </span>
-      <label className="ml-auto flex shrink-0 cursor-pointer select-none items-center gap-1.5 text-[10.5px] font-medium text-muted-foreground hover:text-foreground">
+      {/* The visible word and the checkbox are one control, not a label beside
+          a button: `label` with no `for` is a label without a control, so the
+          word "All" was a click target that assistive tech could not name. An
+          explicit htmlFor/id pair keeps the click-to-toggle and makes the
+          association real. */}
+      <label
+        htmlFor={stageAllId}
+        className="ml-auto flex shrink-0 cursor-pointer select-none items-center gap-1.5 text-[10.5px] font-medium text-muted-foreground hover:text-foreground"
+      >
         <span>All</span>
         <Checkbox
+          id={stageAllId}
           aria-label="Stage all changes"
           checked={checkboxValue(headerCheckState)}
           disabled={actionBusy !== null}

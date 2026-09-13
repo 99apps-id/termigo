@@ -110,6 +110,11 @@ export const GraphRail = memo(function GraphRail({
   const overflow = row.laneCount > visible;
 
   return (
+    // Decorative: the commit graph repeats information the adjacent row already
+    // states as text, so it is hidden from assistive tech on purpose. The
+    // noSvgWithoutTitle rule wants a <title>, which would only add a second,
+    // redundant announcement, so the rule is suppressed with that reason.
+    // biome-ignore lint/a11y/noSvgWithoutTitle: decorative graph, aria-hidden below
     <svg
       width={width}
       height={rowHeight}
