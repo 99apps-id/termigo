@@ -9,7 +9,10 @@ import { describe, expect, it } from "vitest";
 import { type ChatLike, lastAssistantText } from "./telegramHelpers";
 
 const text = (value: string) => ({ type: "text", text: value });
-const tool = (name: string) => ({ type: `tool-${name}`, state: "output-available" });
+const tool = (name: string) => ({
+  type: `tool-${name}`,
+  state: "output-available",
+});
 const reasoning = { type: "reasoning", text: "scratchpad" };
 
 /** A chat whose assistant messages have the given parts, in order. */
@@ -17,16 +20,16 @@ function chatWith(messages: ChatLike["messages"]): ChatLike {
   return { messages };
 }
 
-const getter =
-  (chat: ChatLike | undefined) =>
-  (): ChatLike | undefined =>
-    chat;
+const getter = (chat: ChatLike | undefined) => (): ChatLike | undefined => chat;
 
 describe("lastAssistantText", () => {
   it("returns the text of the newest assistant message", () => {
     const chat = chatWith([
       { role: "user", parts: [text("audit this repo")] },
-      { role: "assistant", parts: [tool("read_file"), text("Found three bugs.")] },
+      {
+        role: "assistant",
+        parts: [tool("read_file"), text("Found three bugs.")],
+      },
     ]);
     expect(lastAssistantText(getter(chat), "s1", 0)).toBe("Found three bugs.");
   });
@@ -40,7 +43,10 @@ describe("lastAssistantText", () => {
       { role: "user", parts: [text("audit deeply")] },
       {
         role: "assistant",
-        parts: [tool("bash_run"), text("Audit result: 3 findings, 1 critical.")],
+        parts: [
+          tool("bash_run"),
+          text("Audit result: 3 findings, 1 critical."),
+        ],
       },
       { role: "assistant", parts: [reasoning, tool("git_status")] },
     ]);
@@ -55,7 +61,9 @@ describe("lastAssistantText", () => {
       { role: "assistant", parts: [reasoning, tool("bash_run")] },
       { role: "assistant", parts: [reasoning, tool("bash_run"), tool("grep")] },
     ]);
-    expect(lastAssistantText(getter(chat), "s1", 0)).toBe("The refactor is done.");
+    expect(lastAssistantText(getter(chat), "s1", 0)).toBe(
+      "The refactor is done.",
+    );
   });
 
   it("prefers the newest text over an older one", () => {
@@ -95,9 +103,14 @@ describe("lastAssistantText", () => {
 
   it("joins multiple text parts of the same message", () => {
     const chat = chatWith([
-      { role: "assistant", parts: [text("Step one."), tool("edit"), text("Step two.")] },
+      {
+        role: "assistant",
+        parts: [text("Step one."), tool("edit"), text("Step two.")],
+      },
     ]);
-    expect(lastAssistantText(getter(chat), "s1", 0)).toBe("Step one.\nStep two.");
+    expect(lastAssistantText(getter(chat), "s1", 0)).toBe(
+      "Step one.\nStep two.",
+    );
   });
 
   it("treats whitespace-only text as no text", () => {

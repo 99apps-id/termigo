@@ -146,7 +146,7 @@ export function resolveSessionId(
   fallback?: string | null,
 ): string | null {
   if (threadId) return `${chatId}:${threadId}`;
-  return chatId ? `${chatId}` : fallback ?? null;
+  return chatId ? `${chatId}` : (fallback ?? null);
 }
 
 /** All human-readable text in a conversation, lowercased, with the injected

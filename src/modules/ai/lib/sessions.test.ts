@@ -85,10 +85,18 @@ describe("loadAll", () => {
     // The key that makes enumerating the store expensive: every session's
     // transcript lives here alongside the two keys above.
     harness.data.set("messages:s-1", [
-      { id: "m1", role: "user", parts: [{ type: "text", text: "x".repeat(50_000) }] },
+      {
+        id: "m1",
+        role: "user",
+        parts: [{ type: "text", text: "x".repeat(50_000) }],
+      },
     ]);
     harness.data.set("messages:s-2", [
-      { id: "m2", role: "assistant", parts: [{ type: "text", text: "y".repeat(50_000) }] },
+      {
+        id: "m2",
+        role: "assistant",
+        parts: [{ type: "text", text: "y".repeat(50_000) }],
+      },
     ]);
     harness.calls.length = 0;
   };

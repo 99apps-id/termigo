@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  escapeHtml,
   extractToolSummaries,
   formatCompletionCard,
   formatDuration,
@@ -237,10 +236,14 @@ describe("progressFormat", () => {
         ],
       });
 
-      expect(text).toContain("**[Termigo Agent]** *Writing response...* (step 1)");
+      expect(text).toContain(
+        "**[Termigo Agent]** *Writing response...* (step 1)",
+      );
       expect(text).toContain("*Organizing files*");
       expect(text).toContain("🔹 Clean duplicate files");
-      expect(text).toContain("✓ Listed `C:/Users/Iwan/Downloads` → _19 entries_");
+      expect(text).toContain(
+        "✓ Listed `C:/Users/Iwan/Downloads` → _19 entries_",
+      );
       expect(text).toContain("⚡ Running `Get-ChildItem ...`");
       expect(text).not.toContain("Scan folder");
       expect(text).not.toContain("Report results");
@@ -318,18 +321,19 @@ describe("progressFormat", () => {
     });
 
     it("converts inline code and code blocks with HTML escaping", () => {
-      expect(markdownToTelegramHtml("Perintah `Get-ChildItem <path> & test`")).toBe(
-        "Perintah <code>Get-ChildItem &lt;path&gt; &amp; test</code>",
-      );
+      expect(
+        markdownToTelegramHtml("Perintah `Get-ChildItem <path> & test`"),
+      ).toBe("Perintah <code>Get-ChildItem &lt;path&gt; &amp; test</code>");
 
       const codeBlock = "```bash\necho 'hello <world> & all'\n```";
       expect(markdownToTelegramHtml(codeBlock)).toBe(
-        '<pre><code class="language-bash">echo \'hello &lt;world&gt; &amp; all\'</code></pre>',
+        "<pre><code class=\"language-bash\">echo 'hello &lt;world&gt; &amp; all'</code></pre>",
       );
     });
 
     it("preserves emojis and converts links and headings", () => {
-      const input = "### Hasil Task 🚀\nSilakan cek [website](https://example.com) ✨";
+      const input =
+        "### Hasil Task 🚀\nSilakan cek [website](https://example.com) ✨";
       const result = markdownToTelegramHtml(input);
       expect(result).toContain("<b>Hasil Task 🚀</b>");
       expect(result).toContain('<a href="https://example.com">website</a>');
@@ -412,4 +416,3 @@ describe("progressFormat", () => {
     });
   });
 });
-

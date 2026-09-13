@@ -469,7 +469,11 @@ async function waitForReply(
   while (!signal.aborted && Date.now() - started < MAX_WAIT) {
     const appStatus = store.useChatStore.getState().agentMeta.status;
     const chatStatus = store.getChat(sessionId)?.status ?? "";
-    const pending = getPendingApprovals(sessionId, store, aqStore.useApprovalQueue);
+    const pending = getPendingApprovals(
+      sessionId,
+      store,
+      aqStore.useApprovalQueue,
+    );
     const busy = runBusy(chatStatus, appStatus, pending.length > 0);
     if (busy) everBusy = true;
     const count = countAssistantMessages(store.getChat, sessionId);

@@ -130,7 +130,12 @@ export async function publishProgress(
       // says it. Taken from text parts only: reasoning is the agent thinking
       // aloud, and publishing it would show raw scratchpad in the chat.
       const answerText = lastAssistant
-        ? messageText(lastAssistant as { role: string; parts?: Array<{ type?: string; text?: string }> })
+        ? messageText(
+            lastAssistant as {
+              role: string;
+              parts?: Array<{ type?: string; text?: string }>;
+            },
+          )
         : "";
 
       // Format compact live progress
@@ -172,10 +177,7 @@ export async function publishProgress(
         lastLiveText = liveText;
         await editProgressMessage(chatId, progressMessageId, liveText, signal);
         lastSentAt = now;
-      } else if (
-        busy &&
-        now - lastLiveTextPokeAt >= 5000
-      ) {
+      } else if (busy && now - lastLiveTextPokeAt >= 5000) {
         lastLiveTextPokeAt = now;
         await sendTyping(chatId, signal).catch(() => {});
         await editProgressMessage(
@@ -252,7 +254,10 @@ export async function publishProgress(
         // only way out was to type /stop. A chooser with no decline is a dead
         // end, and a dead end is what makes someone abandon the bot.
         keyboard.push([
-          { text: "⏭ Tidak dulu (lewati)", callback_data: `el:${el.id}:decline` },
+          {
+            text: "⏭ Tidak dulu (lewati)",
+            callback_data: `el:${el.id}:decline`,
+          },
         ]);
         const ok = await sendKeyboard(
           chatId,

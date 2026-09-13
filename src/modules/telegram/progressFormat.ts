@@ -471,7 +471,8 @@ export function markdownToTelegramHtml(markdown: string): string {
   return text;
 }
 
-export function getToolDoneVerb(toolName: string): string {  switch (toolName) {
+export function getToolDoneVerb(toolName: string): string {
+  switch (toolName) {
     case "bash_run":
     case "bash_background":
     case "run_checks":
