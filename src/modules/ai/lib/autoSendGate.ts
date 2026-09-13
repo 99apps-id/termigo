@@ -21,14 +21,14 @@
 export const MAX_STALLED_AUTO_SENDS = 5;
 
 export type AutoSendGateState = {
-  /** Message count at the last allowed automatic send. */
-  lastCount: number;
+  /** Progress at the last allowed automatic send. */
+  lastProgress: number;
   /** How many automatic sends in a row have added nothing. */
   stalled: number;
 };
 
 export const INITIAL_AUTO_SEND_STATE: AutoSendGateState = {
-  lastCount: 0,
+  lastProgress: 0,
   stalled: 0,
 };
 
@@ -42,38 +42,43 @@ export type AutoSendDecision = {
 };
 
 /**
- * Decide whether an automatic resume may happen, given the transcript size now
- * and how many consecutive resumes have already added nothing.
+ * Decide whether an automatic resume may happen, given a progress measure and
+ * how many consecutive resumes have already added nothing.
  *
- * `messageCount` is the whole transcript, so any real work - a tool result, a
- * new assistant message, a user correction - grows it and clears the streak.
+ * `progress` must be something that changes whenever the transcript gains ANY
+ * content. The number of messages is too coarse for that: a tool round appends
+ * its results as parts of the SAME assistant message, so a run doing real work
+ * can loop through many rounds with a constant message count. Measured in the
+ * field: 19 consecutive runs, all `steps 1/25 | stop tool-calls`, while the UI
+ * message count stayed at 14. Counting parts catches both that real work and the
+ * spinning case, without stopping a legitimate tool loop after five rounds.
  */
 export function autoSendGate(
   previous: AutoSendGateState,
-  messageCount: number,
+  progress: number,
   maxStalled: number = MAX_STALLED_AUTO_SENDS,
 ): AutoSendDecision {
   // Progress since the last automatic send: the resume did something.
-  if (messageCount > previous.lastCount) {
+  if (progress > previous.lastProgress) {
     return {
       allow: true,
-      state: { lastCount: messageCount, stalled: 0 },
+      state: { lastProgress: progress, stalled: 0 },
       stoppedLoop: false,
     };
   }
 
   const stalled = previous.stalled + 1;
   if (stalled > maxStalled) {
-    // lastCount is kept, so a later real message still resets the streak.
+    // lastProgress is kept, so a later real message still resets the streak.
     return {
       allow: false,
-      state: { lastCount: previous.lastCount, stalled },
+      state: { lastProgress: previous.lastProgress, stalled },
       stoppedLoop: true,
     };
   }
   return {
     allow: true,
-    state: { lastCount: previous.lastCount, stalled },
+    state: { lastProgress: previous.lastProgress, stalled },
     stoppedLoop: false,
   };
 }

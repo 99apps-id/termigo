@@ -44,7 +44,7 @@ import {
   previewOf,
   RESUME_PROMPT,
   type SteerPart,
-  submitAction,
+  submissionAction,
 } from "../lib/steer";
 import {
   isToolChoiceRejectionError,
@@ -140,7 +140,10 @@ function requestAutoContinue(sessionId: string): boolean {
     error: null,
   });
   setTimeout(() => {
-    if (!canResumeDeferred(sessionId)) return;
+    if (!canResumeDeferred(sessionId)) {
+      releaseFabricatedBusy(sessionId);
+      return;
+    }
     void resumeRun().catch(() => {
       useChatStore.getState().patchAgentMeta({
         status: "error",
@@ -190,7 +193,10 @@ function requestVerifyNudge(
     error: null,
   });
   setTimeout(() => {
-    if (!canResumeDeferred(sessionId)) return;
+    if (!canResumeDeferred(sessionId)) {
+      releaseFabricatedBusy(sessionId);
+      return;
+    }
     void sendMessage(nudge).catch(() => {
       useChatStore.getState().patchAgentMeta({
         status: "error",
@@ -283,6 +289,27 @@ function canResumeDeferred(sessionId: string): boolean {
   return true;
 }
 
+/**
+ * Clear a busy status that a recovery wrote optimistically, when the recovery it
+ * was written for is not going to happen after all.
+ *
+ * The recovery paths set "thinking" so the UI shows the wait, and that is fine
+ * while the resume is coming. Left behind, it is what makes a stall permanent:
+ * an ordinary message submitted afterwards is judged by this field, queued, and
+ * nothing is running to ever flush it.
+ *
+ * Only "thinking" is cleared, and only for the active session. Any other value
+ * came from a real run through AgentRunBridge, and clearing that would hide a
+ * live run instead of unblocking a dead one.
+ */
+function releaseFabricatedBusy(sessionId: string): void {
+  const state = useChatStore.getState();
+  if (state.activeSessionId !== sessionId) return;
+  if (state.agentMeta.status !== "thinking") return;
+  state.patchAgentMeta({ status: "idle" });
+  state.syncRunMeta();
+}
+
 function scheduleTransientRetry(sessionId: string): boolean {
   if (useChatStore.getState().activeSessionId !== sessionId) return false;
   const attempts = transientRetryCount.get(sessionId) ?? 0;
@@ -294,7 +321,10 @@ function scheduleTransientRetry(sessionId: string): boolean {
     stopReason: null,
   });
   setTimeout(() => {
-    if (!canResumeDeferred(sessionId)) return;
+    if (!canResumeDeferred(sessionId)) {
+      releaseFabricatedBusy(sessionId);
+      return;
+    }
     void resumeRun().catch(() => {
       useChatStore.getState().patchAgentMeta({
         status: "error",
@@ -573,13 +603,22 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       // The gate allows resumes that grow the transcript and stops the ones
       // that do not.
       //
-      // Decided once per transcript size: the SDK may ask more than once in a
+      // Progress is counted in PARTS, not messages: a tool round appends its
+      // results to the same assistant message, so a run doing real work can keep
+      // the message count constant for many rounds, and counting messages would
+      // stop it as if it were stuck.
+      //
+      // Decided once per progress value: the SDK may ask more than once in a
       // cycle, and counting each ask would tighten the bound silently.
       const transcript = messages.messages;
-      if (transcript.length === autoSendDecidedAt) return autoSendAllowed;
-      const decision = autoSendGate(autoSendState, transcript.length);
+      const progress = transcript.reduce(
+        (total, message) => total + (message.parts?.length ?? 0),
+        0,
+      );
+      if (progress === autoSendDecidedAt) return autoSendAllowed;
+      const decision = autoSendGate(autoSendState, progress);
       autoSendState = decision.state;
-      autoSendDecidedAt = transcript.length;
+      autoSendDecidedAt = progress;
       autoSendAllowed = decision.allow;
       if (decision.stoppedLoop) {
         logWarn(
@@ -666,6 +705,8 @@ function makeChat(sessionId: string): Chat<UIMessage> {
                 });
                 useChatStore.getState().syncRunMeta();
               });
+            } else {
+              releaseFabricatedBusy(sessionId);
             }
           }, 0);
           return;
@@ -697,7 +738,10 @@ function makeChat(sessionId: string): Chat<UIMessage> {
             stopReason: null,
           });
           setTimeout(() => {
-            if (!canResumeDeferred(sessionId)) return;
+            if (!canResumeDeferred(sessionId)) {
+              releaseFabricatedBusy(sessionId);
+              return;
+            }
             void resumeRun().catch(() => {
               useChatStore.getState().patchAgentMeta({
                 status: "error",
@@ -839,22 +883,16 @@ export async function sendParts(
   // after a failed run always goes out.
   const appStatus = useChatStore.getState().agentMeta.status;
   const errored = appStatus === "error";
-  const isAgentBusy =
-    appStatus === "awaiting-approval" ||
-    appStatus === "thinking" ||
-    appStatus === "streaming";
-  const action = isAgentBusy
-    ? parts.length > 0
-      ? "queue"
-      : "ignore"
-    : errored
-      ? parts.length > 0
-        ? "send"
-        : "ignore"
-      : submitAction(c.status, parts.length > 0);
+  const isRecovery = isResumeParts(parts) || isVerifyNudgeParts(parts);
+  const action = submissionAction({
+    appStatus,
+    sdkStatus: c.status,
+    isRecovery,
+    hasContent: parts.length > 0,
+  });
   if (errored) pendingReconnectSessions.delete(sessionId);
   logInfo(
-    `[ai] sendParts: session=${sessionId} status=${c.status} action=${action}`,
+    `[ai] sendParts: session=${sessionId} sdk=${c.status} app=${appStatus} recovery=${isRecovery} action=${action}`,
   );
   switch (action) {
     case "ignore":
@@ -935,7 +973,7 @@ export async function flushSteer(bypassBusyCheck = false): Promise<boolean> {
       // compaction and overflowed the provider's request-body cap). The timer
       // runs after that chain, when the Chat reads "submitted" and the guard
       // below holds the task queued instead. `sendParts` already keys off the
-      // live status via submitAction; this makes the flush path obey the same
+      // live status via submissionAction; this makes the flush path obey the same
       // rule. Every later settle re-runs this, so the queue drains on the round
       // that no longer auto-continues - nothing is stranded.
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -1008,8 +1046,14 @@ export async function resumeRun(): Promise<boolean> {
     approvalResumeFailureCount.delete(sessionId);
   }
   // Clear approval-gate state so the run can actually continue after /approve.
+  //
+  // Deliberately does NOT set `status: "thinking"`. This is the field the send
+  // classifier consults, so writing "thinking" here made the resume prompt look
+  // like something typed during a run: it was queued instead of sent, no run
+  // started, and nothing ever flushed that queue. AgentRunBridge reports
+  // "thinking" from the SDK's own `submitted` status as soon as the run really
+  // starts, so the UI signal is not lost.
   useChatStore.getState().patchAgentMeta({
-    status: "thinking",
     pendingApprovals: undefined,
   });
   // Continuing is the signal that the task is heavier than one round, so the

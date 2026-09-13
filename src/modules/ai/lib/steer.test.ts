@@ -16,7 +16,7 @@ import {
   replaceAt,
   type SteerMessage,
   type SteerPart,
-  submitAction,
+  submissionAction,
 } from "./steer";
 
 function text(t: string): SteerPart {
@@ -48,25 +48,57 @@ describe("isBusy", () => {
   });
 });
 
-describe("submitAction", () => {
+describe("submissionAction", () => {
+  const decide = (
+    appStatus: string,
+    sdkStatus: string,
+    isRecovery = false,
+    hasContent = true,
+  ) => submissionAction({ appStatus, sdkStatus, isRecovery, hasContent });
+
   it("sends straight away when nothing is running", () => {
-    expect(submitAction("ready", true)).toBe("send");
+    expect(decide("idle", "ready")).toBe("send");
   });
 
   it("queues instead of racing an in-flight run", () => {
-    expect(submitAction("streaming", true)).toBe("queue");
-    expect(submitAction("thinking", true)).toBe("queue");
-    expect(submitAction("awaiting-approval", true)).toBe("queue");
+    expect(decide("streaming", "streaming")).toBe("queue");
+    expect(decide("thinking", "submitted")).toBe("queue");
+    expect(decide("awaiting-approval", "streaming")).toBe("queue");
   });
 
   it("ignores an empty composer in either state", () => {
-    expect(submitAction("ready", false)).toBe("ignore");
-    expect(submitAction("streaming", false)).toBe("ignore");
+    expect(decide("idle", "ready", false, false)).toBe("ignore");
+    expect(decide("streaming", "streaming", false, false)).toBe("ignore");
+  });
+
+  it("sends a recovery prompt even when the app status says busy", () => {
+    // THE deadlock, measured in the field: the recovery paths write "thinking"
+    // into agentMeta before they send. Judging the recovery by that field meant
+    // its own prompt was queued, no run started, the SDK status never changed,
+    // so nothing corrected the status or flushed the queue. Four and a half
+    // hours of silence; every Telegram message queued behind it.
+    expect(decide("thinking", "ready", true)).toBe("send");
+    expect(decide("thinking", "error", true)).toBe("send");
+    expect(decide("awaiting-approval", "ready", true)).toBe("send");
+  });
+
+  it("still queues a recovery prompt when the SDK proves a run is live", () => {
+    // The SDK status is the truth, so a genuine run is still protected from a
+    // second concurrent request.
+    expect(decide("thinking", "submitted", true)).toBe("queue");
+    expect(decide("thinking", "streaming", true)).toBe("queue");
+  });
+
+  it("keeps trusting the app status for an ordinary message", () => {
+    // After an error the SDK status can lag at "submitted" while nothing runs;
+    // queueing there is harmless, dropping the user's message is not.
+    expect(decide("thinking", "submitted")).toBe("queue");
+    expect(decide("error", "error")).toBe("send");
   });
 });
 
 describe("flushShouldHold", () => {
-  // The flush path must obey the same liveness rule as submitAction: sending a
+  // The flush path must obey the same liveness rule as submissionAction: sending a
   // queued task while the SDK's auto-continue round is in flight races it, and
   // two concurrent requests on one Chat double the transcript every cycle.
   it("holds while a round is in flight", () => {

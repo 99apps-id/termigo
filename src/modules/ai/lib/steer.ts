@@ -167,19 +167,46 @@ export function flushOne(
   return { parts: [...first.parts], next: { pending: rest } };
 }
 
-/** What submitting should do right now. */
-export function submitAction(
-  status: string,
-  hasContent: boolean,
-): "ignore" | "send" | "queue" {
+/**
+ * What submitting should do right now.
+ *
+ * Two statuses reach this and they are NOT interchangeable:
+ *
+ * - `sdkStatus` is the Chat's own status. It reports what is actually running,
+ *   and it is the only honest evidence that a run is in flight.
+ * - `appStatus` is `agentMeta.status`. It is usually derived from the SDK status
+ *   by AgentRunBridge, but the recovery paths (auto-continue, transient retry,
+ *   overflow, rejected tool_choice, verify nudge, manual resume) write
+ *   "thinking" into it optimistically BEFORE they send. Reading that back would
+ *   classify the recovery's own prompt as something typed during a run, queue
+ *   it, and then never flush the queue because no run ever started - a permanent
+ *   silent stall. That was measured in the field: four and a half hours of no
+ *   activity, every Telegram message queued, the app reporting "thinking", and
+ *   only `/stop` (which flushes with the busy check bypassed) breaking it.
+ *
+ * So a RECOVERY prompt is judged by the SDK status alone. An ordinary user
+ * message keeps using the app status as well, because after an error the SDK
+ * status can lag (still "submitted") while nothing is running, and queueing
+ * there is harmless whereas dropping the message is not.
+ */
+export function submissionAction(args: {
+  appStatus: string;
+  sdkStatus: string;
+  isRecovery: boolean;
+  hasContent: boolean;
+}): "ignore" | "send" | "queue" {
+  const { appStatus, sdkStatus, isRecovery, hasContent } = args;
   if (!hasContent) return "ignore";
-  return isBusy(status) ? "queue" : "send";
+  // The SDK status is the truth about a live run, and a recovery must not be
+  // held back by a status the recovery itself just invented.
+  if (isRecovery) return isBusy(sdkStatus) ? "queue" : "send";
+  return isBusy(appStatus) ? "queue" : "send";
 }
 
 /**
  * Whether a queued-task flush must wait instead of delivering.
  *
- * The same liveness rule as `submitAction`, applied to the flush path: while a
+ * The same liveness rule as `submissionAction`, applied to the flush path: while a
  * round is in flight, sending the queued task would race the SDK's own
  * auto-continue into the next tool round — two concurrent requests appending
  * to one transcript, which doubles it every cycle until compaction and the

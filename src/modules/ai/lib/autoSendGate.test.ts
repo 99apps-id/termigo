@@ -88,8 +88,21 @@ describe("autoSendGate", () => {
   });
 
   it("starts from the initial state without allowing anything twice for free", () => {
-    expect(INITIAL_AUTO_SEND_STATE).toEqual({ lastCount: 0, stalled: 0 });
+    expect(INITIAL_AUTO_SEND_STATE).toEqual({ lastProgress: 0, stalled: 0 });
     // The very first assessment is progress from an empty transcript.
     expect(autoSendGate(INITIAL_AUTO_SEND_STATE, 1).allow).toBe(true);
+  });
+
+  it("treats growth in parts as progress, not just growth in message count", () => {
+    // Why the caller counts PARTS. A tool round appends its results to the same
+    // assistant message, so real work can add many parts while the number of
+    // messages stays constant. Measuring messages would call that a stall and
+    // stop a run that was making progress - the field log showed exactly that
+    // shape: 19 runs, `steps 1/25 | stop tool-calls`, message count pinned at 14
+    // while the transcript was in fact changing.
+    const decisions = run([10, 14, 18, 22, 26, 30, 34]);
+    expect(decisions.every((d) => d.allow)).toBe(true);
+    // Each growth step also clears the stall streak.
+    expect(decisions.at(-1)?.state.stalled).toBe(0);
   });
 });
