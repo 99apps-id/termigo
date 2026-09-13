@@ -15,6 +15,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useState } from "react";
+import { looksLikeMissingBinary } from "../lib/binaryFailure";
 import { redetectBinary } from "../lib/detect";
 import type { LspPreset } from "../lib/presets";
 import { restartPresetSessions } from "../lib/sessionManager";
@@ -74,6 +75,23 @@ export function LspStatusPill({ filePath }: Props) {
 }
 
 function ErrorPill({ preset, reason }: { preset: LspPreset; reason: string }) {
+  const [copied, setCopied] = useState(false);
+  const install = preset.install;
+  // A binary that is on PATH can still fail to launch - rustup ships a
+  // `rust-analyzer.exe` shim, so the existence check passes and the failure only
+  // shows up here. When that is what happened, the preset already documents the
+  // fix and hiding it leaves the user with a Restart button that repeats the
+  // same error.
+  const offerInstall = install && looksLikeMissingBinary(reason);
+
+  const copy = () => {
+    if (!install) return;
+    void navigator.clipboard.writeText(install.command).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -95,6 +113,31 @@ function ErrorPill({ preset, reason }: { preset: LspPreset; reason: string }) {
           {preset.name} language server stopped
         </div>
         <p className="mb-2 text-muted-foreground">{reason}</p>
+        {offerInstall ? (
+          <div className="mb-2">
+            <p className="mb-1.5 text-muted-foreground">
+              This usually means the command is installed without its server.
+              Install it, then restart:
+            </p>
+            <div className="flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-1.5 font-mono text-[11px]">
+              <span className="min-w-0 flex-1 truncate select-text">
+                {install.command}
+              </span>
+              <button
+                type="button"
+                className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                onClick={copy}
+                title="Copy command"
+              >
+                <HugeiconsIcon
+                  icon={copied ? Tick02Icon : Copy01Icon}
+                  size={12}
+                  strokeWidth={2}
+                />
+              </button>
+            </div>
+          </div>
+        ) : null}
         <div className="flex items-center gap-1.5">
           <button
             type="button"
@@ -111,6 +154,15 @@ function ErrorPill({ preset, reason }: { preset: LspPreset; reason: string }) {
           >
             Disable
           </button>
+          {offerInstall ? (
+            <button
+              type="button"
+              className="ml-auto text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+              onClick={() => void openUrl(install.docsUrl).catch(console.error)}
+            >
+              Documentation
+            </button>
+          ) : null}
         </div>
       </PopoverContent>
     </Popover>
