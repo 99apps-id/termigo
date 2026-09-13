@@ -315,8 +315,22 @@ describe("preview_file", () => {
     expect(r.mermaid).toContain("flowchart LR");
   });
 
-  it("refuses PDF files with helpful guidance", async () => {
-    const r = await previewFile(makeContext(), "document.pdf");
-    expect(r.error).toContain("PDF cannot render");
+  it("reports a PDF as delivered, without opening a canvas", async () => {
+    const openCanvas = vi.fn(() => true);
+    const r = await previewFile(makeContext({ openCanvas }), "document.pdf");
+    expect(r.ok).toBe(true);
+    expect(r.path).toBe("/workspace/document.pdf");
+    expect(r.notice).toContain("PDF cannot render");
+    expect(openCanvas).not.toHaveBeenCalled();
+  });
+
+  it("reports an Office document as delivered without reading it as text", async () => {
+    vi.mocked(native.readFile).mockClear();
+    const openCanvas = vi.fn(() => true);
+    const r = await previewFile(makeContext({ openCanvas }), "budget.xlsx");
+    expect(r.ok).toBe(true);
+    expect(r.path).toBe("/workspace/budget.xlsx");
+    expect(native.readFile).not.toHaveBeenCalled();
+    expect(openCanvas).not.toHaveBeenCalled();
   });
 });

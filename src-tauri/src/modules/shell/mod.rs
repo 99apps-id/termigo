@@ -66,6 +66,17 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
     // Go / Rust helpers whose base command is not `go`/`cargo`
     "golangci-lint", "rustfmt", "clippy-driver",
     //
+    // Document generators. An agent asked for a report in a format the user can
+    // open in Word/Excel/PowerPoint has to be able to produce one, and
+    // `officecli` is the single self-contained binary that writes
+    // .docx/.xlsx/.pptx with no Office install. It belongs here for the same
+    // reason `tar` and `zip` do: it writes the file it was asked to write and
+    // launches nothing else, so it is not a wider trust boundary than the
+    // package managers already listed above it. Without this entry only a
+    // machine-specific absolute path worked, because `allows_program` accepts
+    // rooted paths, so the same instruction behaved differently per host.
+    "officecli",
+    //
     // Read-only text and path utilities, added so a pipeline is actually
     // usable. Allowing `|` (below) removed the refusal but not the friction on
     // its own: `ls | sort | uniq` and `git log | cut -f1` still failed because

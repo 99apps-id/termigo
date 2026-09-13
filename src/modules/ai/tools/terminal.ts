@@ -95,6 +95,25 @@ function mdToHtml(md: string): string {
   return out.join("\n");
 }
 
+/** Extensions that are finished, deliverable documents but cannot be rendered
+ *  in the preview pane: the pane shows text, while these are ZIP containers
+ *  (`native.readFile` reports them as `binary`). They are still worth reporting
+ *  as delivered, because the Telegram relay attaches them by extension. */
+const BINARY_DOC_EXT = new Set([
+  "pdf",
+  "doc",
+  "docx",
+  "xls",
+  "xlsx",
+  "ppt",
+  "pptx",
+  "odt",
+  "ods",
+  "odp",
+  "rtf",
+  "epub",
+]);
+
 const PREVIEW_DOC_CSS = `<style>
   body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#1a1a1a;background:#fff;margin:0;padding:20px;line-height:1.55;max-width:100%;}
   *{overflow-wrap:anywhere;word-break:break-word;}
@@ -283,7 +302,7 @@ export function buildTerminalTools(ctx: ToolContext) {
 
     preview_file: tool({
       description:
-        "Display a local report/document file in the in-app browser pane beside the workspace. Use it to SHOW the user a finished report: an .html or .md file renders styled (headings, tables, code), any other text file shows as text. Ideal right after generating a report. PDFs are saved to disk but not rendered in-pane — point the user to the .html/.md instead.",
+        "Display a local report/document file in the in-app browser pane beside the workspace. Use it to SHOW the user a finished report: an .html or .md file renders styled (headings, tables, code), any other text file shows as text. Ideal right after generating a report. Office and PDF documents (.docx, .xlsx, .pptx, .pdf, .odt, ...) cannot render in the pane, but calling this registers them as deliverables so the file is attached when the session is relayed to Telegram — point the user to the .html/.md version when they need an in-pane view.",
       inputSchema: z.object({
         path: z
           .string()
@@ -298,11 +317,17 @@ export function buildTerminalTools(ctx: ToolContext) {
       execute: async ({ path, title }) => {
         const abs = resolvePath(path, ctx.getCwd());
         const ext = abs.slice(abs.lastIndexOf(".") + 1).toLowerCase();
-        if (ext === "pdf") {
+        // A finished Office/PDF document cannot render here, but it IS a
+        // deliverable: returning `ok` with the path is precisely what lets the
+        // Telegram relay attach it (`sendReportFiles` switches on the
+        // extension). A bare error instead stranded the file on whichever
+        // machine wrote it, which is useless for a report the user asked to be
+        // sent to them.
+        if (BINARY_DOC_EXT.has(ext)) {
           return {
-            error:
-              "PDF cannot render in the in-app pane. Preview the .html version of the report instead, or open the .pdf in the system viewer.",
+            ok: true,
             path: abs,
+            notice: `${ext.toUpperCase()} cannot render in the in-app pane; the file is saved and is attached when this session is relayed to Telegram. Preview the .html or .md version for an in-pane view.`,
           };
         }
         let content: string;
