@@ -4,7 +4,12 @@
 
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
-import { headlessCommand, isHeadless, launch } from "../src/install.mjs";
+import {
+  headlessCommand,
+  headlessNotice,
+  isHeadless,
+  launch,
+} from "../src/install.mjs";
 
 describe("isHeadless", () => {
   it("treats a Linux box with no display as headless", () => {
@@ -38,6 +43,39 @@ describe("headlessCommand", () => {
     assert.match(cmd, /xvfb-run/);
     assert.match(cmd, /dbus-run-session/);
     assert.match(cmd, /Termigo\.AppImage$/);
+  });
+});
+
+describe("headlessNotice", () => {
+  // This text is the entire answer a server user gets. It has to name the exact
+  // file that was installed, the command that works, and the two mistakes that
+  // would otherwise cost them an evening.
+  const notice = headlessNotice("/home/u/.local/share/termigo/Termigo_0.9.11_amd64.AppImage");
+
+  it("names the installed file in the command it prints", () => {
+    assert.match(notice, /Termigo_0\.9\.11_amd64\.AppImage/);
+  });
+
+  it("warns about the D-Bus session", () => {
+    assert.match(notice, /D-Bus/);
+  });
+
+  it("warns that a second instance shares the data directory", () => {
+    assert.match(notice, /SECOND instance/);
+    assert.match(notice, /data directory/);
+  });
+
+  it("points at the headless documentation", () => {
+    assert.match(notice, /docs\/headless-vps\.md/);
+  });
+
+  // The command sits on its own line so it can be copied straight out of the
+  // terminal; an inline reference is the difference between usable and not.
+  it("puts the command on its own indented line, ending at the file", () => {
+    const line = notice.split("\n").find((l) => l.includes("xvfb-run"));
+    assert.ok(line, "the command should have a line of its own");
+    assert.match(line, /^ {4}xvfb-run -a -s '-screen 0 1024x768x24' dbus-run-session /);
+    assert.match(line, /Termigo_0\.9\.11_amd64\.AppImage$/);
   });
 });
 

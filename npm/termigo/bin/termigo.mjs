@@ -13,7 +13,7 @@ import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
   cleanup,
-  headlessCommand,
+  headlessNotice,
   installApp,
   installedApp,
   launch,
@@ -83,16 +83,7 @@ async function startOrExplain(app, platform) {
     process.exitCode = 1;
     return;
   }
-  process.stdout.write(
-    "  not started: no display on this machine (a server, or an SSH session without X).\n" +
-      "\n  Termigo is a desktop app, but it runs headless too - the repository's\n" +
-      "  scripts/run-headless.sh is the supported entry point, and this is what it runs:\n" +
-      `\n    ${headlessCommand(app)}\n` +
-      "\n  Do not run the binary directly without xvfb-run: WebKit looks for a D-Bus\n" +
-      "  session and exits. See docs/headless-vps.md.\n" +
-      "\n  A release install alongside an existing Termigo is a SECOND instance and\n" +
-      "  shares its data directory - check that nothing is already running first.\n",
-  );
+  process.stdout.write(`${headlessNotice(app)}\n`);
 }
 
 const FLAGS_WITH_VALUE = new Set([

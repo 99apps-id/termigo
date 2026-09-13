@@ -108,6 +108,30 @@ export function headlessCommand(app) {
 }
 
 /**
+ * What to print when the app was installed but cannot be started here.
+ *
+ * A pure function so the text is covered by a test: this is the whole answer a
+ * user on a server gets, and it is the difference between "Termigo installed and
+ * did nothing" and knowing the one command that works on that machine.
+ */
+export function headlessNotice(app) {
+  return [
+    "  not started: no display on this machine (a server, or an SSH session without X).",
+    "",
+    "  Termigo is a desktop app, but it runs headless too - the repository's",
+    "  scripts/run-headless.sh is the supported entry point, and this is what it runs:",
+    "",
+    `    ${headlessCommand(app)}`,
+    "",
+    "  Do not run the binary directly without xvfb-run: WebKit looks for a D-Bus",
+    "  session and exits. See docs/headless-vps.md.",
+    "",
+    "  A release install alongside an existing Termigo is a SECOND instance and",
+    "  shares its data directory - check that nothing is already running first.",
+  ].join("\n");
+}
+
+/**
  * Start an installed app, unless there is nowhere to show it.
  *
  * Returns a result rather than throwing: on a server this is the expected
