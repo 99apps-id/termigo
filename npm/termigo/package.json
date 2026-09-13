@@ -1,0 +1,33 @@
+{
+  "name": "termigo",
+  "version": "0.9.13",
+  "description": "Install or start the Termigo desktop app from the terminal.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "termigo": "bin/termigo.mjs"
+  },
+  "files": ["bin", "src", "README.md"],
+  "engines": {
+    "node": ">=18.17"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/99apps-id/termigo.git",
+    "directory": "npm/termigo"
+  },
+  "homepage": "https://github.com/99apps-id/termigo#readme",
+  "bugs": {
+    "url": "https://github.com/99apps-id/termigo/issues"
+  },
+  "keywords": [
+    "termigo",
+    "installer",
+    "terminal",
+    "ai-agent",
+    "tauri"
+  ]
+}

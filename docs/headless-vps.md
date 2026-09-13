@@ -20,6 +20,10 @@ sudo apt update && sudo apt install -y \
 ```
 
 > **Note:** `libgtk-3-dev` and `libwebkit2gtk-4.1-dev` are **not** needed at runtime unless you rebuild from source on the same VPS. For deployment-only, runtime packages above are sufficient.
+>
+> These are needed whether you build from source or install a release. Only the
+> deb and rpm packages declare them as dependencies; the AppImage does not, and
+> `xvfb`/`dbus` are never pulled in by anything (see [section 2, Option B](#option-b-install-a-published-release-instead-of-building)).
 
 ---
 
@@ -65,6 +69,52 @@ kill %1 2>/dev/null
 > ```bash
 > cp /opt/termigo/termigo /opt/termigo/termigo.prev-$(date +%Y%m%d-%H%M%S)
 > ```
+
+### Option B: install a published release instead of building
+
+Building needs a Rust toolchain and around 17 minutes on a small box. If the goal
+is only to *run* Termigo on the server, a published release is enough:
+
+```bash
+npx termigo --format deb        # download, verify, install
+# or, once, to get the command on PATH:
+sudo npm install -g termigo && termigo --format deb
+```
+
+`termigo` detects the machine, downloads the asset built for it, checks it
+against the SHA-256 GitHub publishes for that asset, and installs it. Flags that
+matter on a server:
+
+| Flag | Why |
+| --- | --- |
+| `--format deb` | the Linux default is the AppImage, which installs into `~/.local/share/termigo` and never appears on `PATH`. The deb installs `/usr/bin/termigo`. |
+| `--no-launch` | skip starting the app. Not required - a missing display is detected and the start is skipped anyway - but useful in scripts. |
+| `--download-only --dir /tmp` | fetch and verify the file here, install it by hand later. |
+| `--app-version 0.9.11` | pin an exact version instead of the newest. |
+
+**A release install does not replace the headless setup.** Two things are still
+required, and neither comes from the package:
+
+1. **The runtime libraries.** The deb and rpm declare `libwebkit2gtk-4.1-0` and
+   `libgtk-3-0` as dependencies, so `dpkg` / `dnf` pull them in for you. The
+   AppImage declares nothing at all, so install section 1's packages first or it
+   will not start.
+2. **A display.** `xvfb` and `dbus` are dependencies of nothing the app ships.
+   The wrapper in section 5 is what supplies both; the binary must not be run
+   directly without it.
+
+The releases do bundle the `termigo-cli` control companion
+(`bundle.externalBin` in `tauri.conf.json`). The deb and rpm put it beside the
+app where `run-headless.sh` looks for it; a bare AppImage keeps it inside the
+bundle, so for a shell-visible `termigo-cli` prefer the deb or rpm.
+
+> **Never run two Termigo instances against one data directory.** Termigo has no
+> single-instance guard. Both would use `~/.local/share/id.99apps.termigo/`
+> (`secrets.json`, the session store, the Telegram relay state) and both would
+> long-poll the same bot token - only one wins each update, and the session file
+> is written by both. If the box already runs Termigo from source under systemd,
+> a release install alongside it is **not** an upgrade: stop the service first,
+> or give the second install a separate `HOME`.
 
 ---
 

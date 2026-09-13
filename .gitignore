@@ -69,7 +69,13 @@ cli/bin/
 SECURITY-AUDIT-*.md
 
 # Built binaries & headless-safeguard artifacts (build/ops output, not source)
-termigo
+#
+# Anchored to the repository root on purpose. Without the leading slash these
+# match at ANY depth, and a bare `termigo` silently swallowed the whole
+# `npm/termigo/` install package - `git status` showed a clean tree while an
+# entire new directory sat untracked. Every entry below is a root-level build
+# product, so rooting them is what was meant all along.
+/termigo
 termigo-cli
 termigo.known-good
 termigo.prev-*
