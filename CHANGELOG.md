@@ -6,8 +6,20 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.14] - 2026-09-13
+
 ### Added
 
+- **Install Termigo from the terminal: `npx termigo`.** A dependency-free package
+  that detects the OS and architecture, resolves the newest release, checks the
+  download against the SHA-256 GitHub publishes for that asset, installs it and
+  starts it. `--dry-run`, `--list`, `--format`, `--app-version`,
+  `--download-only` and `--keep` cover the ground between "just install it" and
+  "fetch this exact build for another machine". On a box with no display it
+  installs but does not start, and prints the `xvfb-run` + `dbus-run-session`
+  command that works - a GUI binary spawned into a missing display otherwise
+  fails silently, which is the worst possible outcome on a server you reach
+  over SSH.
 - **The terminal UI now arrives with the install.** `npx termigo` also fetches
   **`termigo-go`**, the Go companion that carries `termigo-go tui` and its
   non-interactive equivalents (`status`, `models`, `settings`, `approval`,
@@ -24,9 +36,74 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`termigo-go-win32-x64.exe`, `-linux-x64`, `-darwin-x64`, `-darwin-arm64`).
   The Go toolchain stays **optional** for everyone else: a machine without it
   skips that one binary with a warning and still builds everything it owns.
+- **The agent can produce and deliver Office documents.** `officecli` is on the
+  shell allowlist, so a report in a format Word or Excel can open is something
+  the agent can write on any machine rather than only where an absolute path
+  happened to be typed. `preview_file` now reports a binary document as
+  delivered instead of answering with a bare error, which is the shape the
+  Telegram relay needs in order to attach the file - previously a document the
+  agent had just written could not reach the chat at all.
+- **Skills written for another agent are reused in place, not copied.**
+  `find_skill` already searched `.termigo`, `.claude`, `.openclaw`, `.codex` and
+  `.agents`, but not Hermes's shelf - and Hermes is the one of those that keeps
+  real, hand-written procedures (`productivity/docx`, `xlsx`, `pdf`, `devops`).
+  A copy into the workspace would split into two versions that drift while the
+  original keeps improving, so `.hermes/skills` is now searched directly.
+
+### Security
+
+- **A diff no longer shows a credential, and no longer sends one to a model.**
+  The changed-file text is the one place a secret passes through the app in plain
+  sight, and it does not stop at the panel: the AI commit-message path builds a
+  prompt from the same text. A key in an uncommitted change would therefore reach
+  both a screenshot and a third party. Diff text now goes through a pattern pass -
+  AWS key ids, GitHub and Slack tokens, Stripe and SendGrid keys, private-key and
+  PEM blocks, netrc and npmrc lines, service-account JSON, passwords embedded in
+  URLs - plus masking of values whose key looks secret (`API_KEY`, `PASSWORD`,
+  `DATABASE_URL`, ...), skipping unresolved shell variables since those are
+  references rather than values. Both call sites say what was masked.
+- **The agent's tools no longer read an unbounded response.** `imageGeneration`
+  followed a URL from a provider response and buffered the whole body; it now
+  probes with `HEAD`, refuses anything already over 20 MB, and counts bytes while
+  streaming so a server that omits `Content-Length` cannot slip past either.
+  `webSearch` reads at most 100 KB of the DuckDuckGo response, which is all the
+  SERP markup needs. `proxyFetch` logs a warning when a request targets a private
+  address range (loopback, RFC1918, link-local) and names whether the caller
+  allowed it - deliberately an audit line rather than a block, because the
+  decision belongs to the `allowPrivateNetwork` flag.
 
 ### Fixed
 
+- **A lost WebGL context is recovered, and the recovery no longer leaks.** Nothing
+  called `preventDefault` on the native `webglcontextlost` event, and a context
+  the page does not `preventDefault` is one the browser will not try to restore -
+  so the renderer's own retry never ran and a terminal stayed on the slow DOM
+  renderer for the rest of the session. The native listeners are now attached, and
+  the decision of *which* slots are worth recovering lives in a tested function:
+  re-attaching for a slot bound to no leaf allocated a GPU context that the reaper
+  was about to dispose, and the listeners are now tracked so they can be detached
+  on loss and again before disposal instead of sitting on a canvas the slot has
+  moved on from.
+- **A shell that refuses to start no longer wedges the terminal pane.** `pty_open`
+  had no upper bound, so a corrupt shell profile meant the command never resolved
+  and the pane waited forever with no error. It now gives up after 15s and names
+  the likely cause.
+- **`ssh_close` racing the janitor is now idempotent.** Cleanup closes halves,
+  drops forward listeners and frees ports, none of which is safe to repeat, so the
+  second call returns early behind a `compare_exchange`.
+- **Backslash paths are normalised at the command boundary.** The frontend
+  invariant is forward slashes; a caller or a piece of legacy state that sent
+  backslashes reached the string-based path checks below in a second spelling of
+  the same path.
+- **A language server that is installed but cannot run now says how to fix it.**
+  `rustup` installs a `rust-analyzer.exe` **shim** into `~/.cargo/bin`, so the
+  binary is on `PATH` and every existence check passes - then the shim fails at
+  launch, because the toolchain has no such component. Because the install hint
+  keyed off "is it on `PATH`", that fell through to a bare error popover: the raw
+  message, a Restart button that repeats it, and no mention of the one command
+  that fixes it. The launch-failure wording is now recognised and the documented
+  fix is offered, while failures that are not about launching (a memory-budget
+  kill, a panic on a large crate) deliberately show nothing extra.
 - **A bare `termigo` line in `.gitignore` was swallowing a whole directory.**
   Without a leading slash the pattern matches at any depth, so `npm/termigo/` was
   invisible: `git status` reported a clean tree while an entire new package sat
@@ -36,6 +113,15 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   reports a missing executable asynchronously as an `error` event; with no
   listener attached that became an unhandled event and Node exited on a raw trace.
   It is now reported as "the install looks incomplete - re-run with `--reinstall`".
+- **The published installer package was itself broken, and is now tested by
+  running it.** `termigo@0.9.13` on npm shipped a syntax error: the help text is
+  one template literal and an edit added unescaped backticks, so the literal
+  closed early and `npx termigo` failed before printing a line. `npm publish` and
+  the registry metadata both looked correct. The suite missed it because every
+  test imported from `src/` and nothing had ever loaded `bin/`; a test now spawns
+  the real binary, and it was verified to fail when the backticks are
+  reintroduced. `0.9.14` is the fixed release and `0.9.13` is deprecated on the
+  registry with a message pointing at it.
 
 ## [0.9.13] - 2026-09-13
 
