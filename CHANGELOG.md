@@ -36,6 +36,32 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `--multiline`, which the engine does not have. It now says the real thing: grep
   is line-oriented, every match is confined to one line, so a pattern cannot span
   a newline. Searching across lines is a different tool's job.
+- **A dropped SSH connection is no longer reported as a successful exit.** When
+  the link to a remote host ended without the remote sending an exit status, the
+  session emitted `exit 0` — indistinguishable from a command that finished
+  cleanly, so a connection that died mid-command read as success. A real exit
+  status could also be overwritten: the close path ran *after* the status arrived
+  and replaced the true code with a hardcoded zero, so `exit 3` reached the UI as
+  `0`. A lost connection now says so (`connection closed without reporting an exit
+  status`) instead of inventing a status, while closing a tab yourself still ends
+  the session cleanly rather than as a failure.
+- **The control protocol accepts a compatible range instead of exact equality.**
+  The app and the Go CLI are published as separate release assets, so a
+  half-upgraded install — new app, older CLI — is a normal state, and the old
+  check (`protocol != PROTOCOL_VERSION`) turned it into a dead control channel
+  with the message "unsupported". A client older than the app is now served, since
+  it speaks a subset of the protocol; only a client *newer* than the app is still
+  refused, because the app cannot know what it expects. The error now names the
+  supported range and says to update both together, instead of leaving the reader
+  to guess.
+- **`scripts/deploy-termigo.sh` snapshots the data directory with the binary.**
+  The stores (settings, sessions, trajectory, secrets, webview local storage) live
+  in the app's data directory, not next to the binary, and a rollback restored only
+  the binary — so the previous build started against data the new build had already
+  rewritten, and settings were lost instead of recovered. The script now takes a
+  timestamped `termigo.prev-data-*.tgz` while the service is stopped (the last
+  consistent moment, before the new build can touch anything) and restores it
+  before the old build starts.
 
 ## [0.9.14] - 2026-09-13
 
