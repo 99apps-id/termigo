@@ -181,6 +181,13 @@ export const TOOL_GROUPS: readonly ToolGroup[] = [
     description: "Search and clear the shell history index.",
     tools: ["search_history", "clear_history_index"],
   },
+  {
+    id: "telegram",
+    label: "Telegram relay",
+    description:
+      "Send a file or a message to your paired Telegram chat, so a long run can report to you while you are away from the desk.",
+    tools: ["telegram_send_document", "telegram_send_message"],
+  },
 ];
 
 /** Every tool name that appears in some group. */
