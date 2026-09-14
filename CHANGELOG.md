@@ -6,6 +6,21 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Subagents can run in their own git worktree.** `run_subagent` and
+  `run_subagents` take an `isolate` flag, which gives each writing subagent a
+  private worktree under `.termigo/worktrees/`. Parallel subagents otherwise edit
+  one directory, where whichever runs second can read the first's half-finished
+  file and a failure leaves the workspace in a state neither of them intended.
+  Nothing merges back on its own: each result reports the worktree path, and the
+  existing `worktree_diff` / `worktree_discard` tools act on it.
+  Off unless asked for. A read-only subagent is never isolated (a worktree would
+  only be a stale copy for it), nor is an SSH session (a local worktree would not
+  contain the work), a non-git workspace, or a task that fails to branch - those
+  share the workspace, and the result says which happened rather than leaving it
+  to be assumed. No subagent is ever failed because isolation could not be set up.
+
 ### Fixed
 
 - **Log timestamps are local time.** `tauri-plugin-log` defaults to
