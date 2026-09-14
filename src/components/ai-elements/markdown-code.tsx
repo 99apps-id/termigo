@@ -102,7 +102,7 @@ export function MarkdownCode({
     }
     return (
       <code
-        className="rounded bg-muted/70 px-1.5 py-0.5 font-mono text-[11px] text-foreground"
+        className="rounded bg-muted/70 px-1.5 py-0.5 font-mono text-[0.875em] text-foreground"
         {...rest}
       >
         {children}
