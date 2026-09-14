@@ -36,7 +36,9 @@ const MISSING_BINARY_MARKERS = [
  * Case-insensitive: the same conditions arrive capitalised differently between
  * shells and between the tools' own error paths.
  */
-export function looksLikeMissingBinary(text: string | null | undefined): boolean {
+export function looksLikeMissingBinary(
+  text: string | null | undefined,
+): boolean {
   if (!text) return false;
   const lower = text.toLowerCase();
   return MISSING_BINARY_MARKERS.some((marker) => lower.includes(marker));

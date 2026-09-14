@@ -282,7 +282,11 @@ describe("preview_file", () => {
       size: 50,
     });
     const openCanvas = vi.fn(() => true);
-    const r = await previewFile(makeContext({ openCanvas }), "report.md", "Executive Report");
+    const r = await previewFile(
+      makeContext({ openCanvas }),
+      "report.md",
+      "Executive Report",
+    );
     expect(openCanvas).toHaveBeenCalled();
     expect(r.ok).toBe(true);
     expect(r.path).toBe("/workspace/report.md");
@@ -291,7 +295,8 @@ describe("preview_file", () => {
   it("opens canvas for markdown documents containing Mermaid diagrams without failing", async () => {
     vi.mocked(native.readFile).mockResolvedValue({
       kind: "text",
-      content: "# Architecture Report\n\n```mermaid\nflowchart TD\nClient --> Server\n```\n\nDetails below.",
+      content:
+        "# Architecture Report\n\n```mermaid\nflowchart TD\nClient --> Server\n```\n\nDetails below.",
       size: 90,
     });
     const openCanvas = vi.fn(() => true);

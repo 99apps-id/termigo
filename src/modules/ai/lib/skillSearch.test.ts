@@ -4,29 +4,36 @@ import {
   MAX_SKILL_READS,
   queryTerms,
   rankMatches,
+  type SkillCandidate,
+  type SkillMatch,
   scoreDescription,
   scoreName,
   shortlist,
   skillNameFromPath,
-  type SkillCandidate,
-  type SkillMatch,
 } from "./skillSearch";
 
-function candidate(name: string, source: SkillCandidate["source"]): SkillCandidate {
+function candidate(
+  name: string,
+  source: SkillCandidate["source"],
+): SkillCandidate {
   return { name, path: `/root/${name}/SKILL.md`, source };
 }
 
 describe("skillNameFromPath", () => {
   it("takes the directory holding the SKILL.md", () => {
-    expect(skillNameFromPath("/home/u/.codex/plugins/airtable/skills/airtable-cli/SKILL.md")).toBe(
-      "airtable-cli",
-    );
+    expect(
+      skillNameFromPath(
+        "/home/u/.codex/plugins/airtable/skills/airtable-cli/SKILL.md",
+      ),
+    ).toBe("airtable-cli");
   });
 
   it("reads Windows separators too", () => {
-    expect(skillNameFromPath("C:\\Users\\n\\.openclaw\\plugin-skills\\canvas\\SKILL.md")).toBe(
-      "canvas",
-    );
+    expect(
+      skillNameFromPath(
+        "C:\\Users\\n\\.openclaw\\plugin-skills\\canvas\\SKILL.md",
+      ),
+    ).toBe("canvas");
   });
 });
 
@@ -50,9 +57,9 @@ describe("scoreName", () => {
   });
 
   it("rewards matching more of the query", () => {
-    expect(scoreName("deploy-docker", queryTerms("deploy docker"))).toBeGreaterThan(
-      scoreName("deploy-nginx", queryTerms("deploy docker")),
-    );
+    expect(
+      scoreName("deploy-docker", queryTerms("deploy docker")),
+    ).toBeGreaterThan(scoreName("deploy-nginx", queryTerms("deploy docker")));
   });
 
   it("scores nothing for an unrelated name", () => {
@@ -72,11 +79,16 @@ describe("shortlist", () => {
   // them score zero.
   it("opens only the names that matched", () => {
     const picked = shortlist(many, queryTerms("airtable"));
-    expect(picked.map((c) => c.name)).toEqual(["airtable-cli", "airtable-filters"]);
+    expect(picked.map((c) => c.name)).toEqual([
+      "airtable-cli",
+      "airtable-filters",
+    ]);
   });
 
   it("never opens more than the read cap", () => {
-    const huge = Array.from({ length: 500 }, (_, i) => candidate(`deploy-${i}`, "codex"));
+    const huge = Array.from({ length: 500 }, (_, i) =>
+      candidate(`deploy-${i}`, "codex"),
+    );
     expect(shortlist(huge, queryTerms("deploy"))).toHaveLength(MAX_SKILL_READS);
   });
 
@@ -100,7 +112,10 @@ describe("shortlist", () => {
   // order a new shelf promotes it above the user's own skills.
   it("ranks a listed foreign shelf behind the workspace, not ahead of it", () => {
     const picked = shortlist(
-      [candidate("deploy-hermes", "hermes"), candidate("deploy-mine", "workspace")],
+      [
+        candidate("deploy-hermes", "hermes"),
+        candidate("deploy-mine", "workspace"),
+      ],
       queryTerms("kubernetes"),
     );
     expect(picked[0].source).toBe("workspace");
@@ -119,8 +134,15 @@ describe("shortlist", () => {
 describe("scoreDescription", () => {
   it("counts query words found in the description", () => {
     // Both terms hit: "deploy" is a prefix of "deploying", "docker" is exact.
-    expect(scoreDescription("Use when deploying with docker", queryTerms("deploy docker"))).toBe(2);
-    expect(scoreDescription("Use when deploying", queryTerms("deploy docker"))).toBe(1);
+    expect(
+      scoreDescription(
+        "Use when deploying with docker",
+        queryTerms("deploy docker"),
+      ),
+    ).toBe(2);
+    expect(
+      scoreDescription("Use when deploying", queryTerms("deploy docker")),
+    ).toBe(1);
     expect(scoreDescription("nothing relevant", queryTerms("deploy"))).toBe(0);
   });
 });
@@ -135,10 +157,9 @@ describe("rankMatches", () => {
   });
 
   it("returns the best first", () => {
-    expect(rankMatches([match("b", 1), match("a", 9)]).map((m) => m.name)).toEqual([
-      "a",
-      "b",
-    ]);
+    expect(
+      rankMatches([match("b", 1), match("a", 9)]).map((m) => m.name),
+    ).toEqual(["a", "b"]);
   });
 
   it("drops anything that scored nothing", () => {
@@ -151,9 +172,8 @@ describe("rankMatches", () => {
   });
 
   it("breaks ties by name so results do not shuffle between calls", () => {
-    expect(rankMatches([match("z", 5), match("a", 5)]).map((m) => m.name)).toEqual([
-      "a",
-      "z",
-    ]);
+    expect(
+      rankMatches([match("z", 5), match("a", 5)]).map((m) => m.name),
+    ).toEqual(["a", "z"]);
   });
 });

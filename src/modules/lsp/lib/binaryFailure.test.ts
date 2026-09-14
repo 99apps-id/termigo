@@ -15,13 +15,21 @@ describe("looksLikeMissingBinary", () => {
   });
 
   it("recognises the usual shell and platform spellings", () => {
-    expect(looksLikeMissingBinary("rust-analyzer: command not found")).toBe(true);
-    expect(looksLikeMissingBinary("Error: spawn pyright-langserver ENOENT")).toBe(true);
+    expect(looksLikeMissingBinary("rust-analyzer: command not found")).toBe(
+      true,
+    );
     expect(
-      looksLikeMissingBinary("The system cannot find the file specified. (os error 2)"),
+      looksLikeMissingBinary("Error: spawn pyright-langserver ENOENT"),
     ).toBe(true);
     expect(
-      looksLikeMissingBinary("'gopls' is not recognized as an internal or external command"),
+      looksLikeMissingBinary(
+        "The system cannot find the file specified. (os error 2)",
+      ),
+    ).toBe(true);
+    expect(
+      looksLikeMissingBinary(
+        "'gopls' is not recognized as an internal or external command",
+      ),
     ).toBe(true);
     expect(looksLikeMissingBinary("Cannot find module 'pyright'")).toBe(true);
   });
@@ -30,10 +38,14 @@ describe("looksLikeMissingBinary", () => {
   // and offering an install command for them sends the user the wrong way.
   it("stays quiet for failures that are not about launching", () => {
     expect(
-      looksLikeMissingBinary("Exceeded the 3072 MB memory budget for this server."),
+      looksLikeMissingBinary(
+        "Exceeded the 3072 MB memory budget for this server.",
+      ),
     ).toBe(false);
     expect(
-      looksLikeMissingBinary("panicked at 'index out of bounds' during crate analysis"),
+      looksLikeMissingBinary(
+        "panicked at 'index out of bounds' during crate analysis",
+      ),
     ).toBe(false);
   });
 
