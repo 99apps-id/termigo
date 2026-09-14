@@ -90,6 +90,35 @@ describe("openSshTerminalSession", () => {
     expect(onExit).toHaveBeenCalledWith(0);
   });
 
+  // The backend used to report a dropped link as `exit 0`, so the pane showed a
+  // clean finish for a connection that died mid-command. It must now say what
+  // happened and close as abnormal instead.
+  it("reports a dropped link as abnormal, not as a clean exit", async () => {
+    clearSession.mockClear();
+    let dropped: ((reason: string) => void) | undefined;
+    openSsh.mockImplementation(async (_i: unknown, h: SshHandlers) => {
+      dropped = h.onDisconnected;
+      return { id: 11, write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+    });
+
+    const onData = vi.fn();
+    const onExit = vi.fn();
+    await openSshTerminalSession(conn, 80, 24, { onData, onExit });
+    dropped?.("connection closed without reporting an exit status");
+
+    expect(onExit).toHaveBeenCalledWith(-1);
+    expect(onExit).not.toHaveBeenCalledWith(0);
+    expect(clearSession).toHaveBeenCalledWith(11);
+    // The reason has to reach the pane, or the user is left guessing why a
+    // session they did not close disappeared.
+    const written = onData.mock.calls
+      .map((c) => new TextDecoder().decode(c[0] as Uint8Array))
+      .join("");
+    expect(written).toContain(
+      "connection closed without reporting an exit status",
+    );
+  });
+
   // A connect that fails before the id exists must report the exit without
   // trying to clear a session that was never registered.
   it("reports a failure that happens before the id exists", async () => {

@@ -102,6 +102,42 @@ pub enum SshEvent {
     /// Remote process exited with this status. Mirrors PtyEvent::Exit so the
     /// frontend can reuse its handler shape.
     Exit { code: i32 },
+    /// The channel ended WITHOUT an exit status, and not because we closed it:
+    /// the link dropped or the peer hung up.
+    ///
+    /// Deliberately not an `Exit`. No status was ever reported, so emitting one
+    /// either way invents the fact that is missing - `0` claims the command
+    /// succeeded and a non-zero claims it failed, and the truth is that we
+    /// cannot tell. A command that was still running when the link died is the
+    /// case this preserves.
+    Disconnected { reason: String },
+}
+
+/// What to report when the channel ends, given what happened before it did.
+///
+/// There are three ways a session ends and conflating them was a real bug: the
+/// remote reported an exit status, WE closed the session, or the peer went away
+/// without saying anything. The third used to be reported as `Exit { code: 0 }`,
+/// which is indistinguishable from a command that succeeded - so a dropped
+/// connection read as a clean finish. That arm also ran AFTER a real
+/// `ExitStatus`, overwriting the true code with a hardcoded zero.
+///
+/// Pure and separate from the pump so the policy is asserted by a test; only a
+/// peer that actually hangs up could exercise it otherwise.
+fn channel_end_event(reported_status: bool, closed_by_us: bool) -> Option<SshEvent> {
+    // A real status already went out. A second Exit would overwrite it, and this
+    // one has no code to offer.
+    if reported_status {
+        return None;
+    }
+    // Closing the tab is neither a failure nor a mystery: keep the clean exit
+    // the pane has always expected.
+    if closed_by_us {
+        return Some(SshEvent::Exit { code: 0 });
+    }
+    Some(SshEvent::Disconnected {
+        reason: "connection closed without reporting an exit status".to_string(),
+    })
 }
 
 /// How long `check_server_key` waits for the user's first-connect decision
@@ -1050,12 +1086,21 @@ pub async fn connect(
     let mirror_ring: Arc<std::sync::Mutex<VecDeque<u8>>> =
         Arc::new(std::sync::Mutex::new(VecDeque::new()));
     let alive = Arc::new(AtomicBool::new(true));
+    // Created before the pump because the pump has to read it: it is how a
+    // deliberate close is told apart from a peer that hung up, and getting that
+    // wrong would make closing a tab look like a dropped connection. Was inline
+    // in the struct literal below, after the pump had already been spawned.
+    let closed = Arc::new(AtomicBool::new(false));
     let pump_sinks = mirror_sinks.clone();
     let pump_ring = mirror_ring.clone();
     let pump_alive = alive.clone();
+    let pump_closed = closed.clone();
 
     let pump = tokio::spawn(async move {
         let _exit_tx = exit_tx;
+        // Whether the peer ever told us how the command ended. Without this, the
+        // close arm below fired after a real exit status and replaced it.
+        let mut reported_status = false;
         // Fan an event to every extra mirror sink, pruning any whose channel has
         // closed (the browser / bridge went away). Without this, dead sinks
         // accumulate across reconnects and the pump wastes a clone + send on
@@ -1088,6 +1133,7 @@ pub async fn connect(
                     fan(&ev);
                 }
                 ChannelMsg::ExitStatus { exit_status } => {
+                    reported_status = true;
                     let ev = SshEvent::Exit {
                         code: exit_status as i32,
                     };
@@ -1096,9 +1142,13 @@ pub async fn connect(
                 }
                 ChannelMsg::Eof | ChannelMsg::Close => {
                     pump_alive.store(false, Ordering::Release);
-                    let ev = SshEvent::Exit { code: 0 };
-                    let _ = on_event_pump.send(ev.clone());
-                    fan(&ev);
+                    if let Some(ev) = channel_end_event(
+                        reported_status,
+                        pump_closed.load(Ordering::Acquire),
+                    ) {
+                        let _ = on_event_pump.send(ev.clone());
+                        fan(&ev);
+                    }
                     return;
                 }
                 _ => {}
@@ -1106,9 +1156,12 @@ pub async fn connect(
         }
         // wait() returned None; peer closed without sending exit-status.
         pump_alive.store(false, Ordering::Release);
-        let ev = SshEvent::Exit { code: 0 };
-        let _ = on_event_pump.send(ev.clone());
-        fan(&ev);
+        if let Some(ev) =
+            channel_end_event(reported_status, pump_closed.load(Ordering::Acquire))
+        {
+            let _ = on_event_pump.send(ev.clone());
+            fan(&ev);
+        }
     });
 
     let created_at_ms = SystemTime::now()
@@ -1131,7 +1184,7 @@ pub async fn connect(
         mirror_sinks,
         mirror_ring,
         alive,
-        closed: Arc::new(AtomicBool::new(false)),
+        closed,
     }))
 }
 
@@ -1184,6 +1237,47 @@ async fn try_keyboard_interactive(
         }
     }
     Err("ssh: keyboard-interactive: too many prompt rounds".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // `SshEvent` derives neither `Debug` nor `PartialEq`, so these assert on the
+    // shape of the event rather than comparing values.
+
+    /// A real exit status must not be followed by a second event. The close arm
+    /// used to fire after `ExitStatus` and replace the true code with a hardcoded
+    /// zero, so `exit 3` reached the UI as a success.
+    #[test]
+    fn a_reported_status_is_not_overwritten_when_the_channel_closes() {
+        assert!(channel_end_event(true, false).is_none(), "a dropped link");
+        assert!(channel_end_event(true, true).is_none(), "a deliberate close");
+    }
+
+    /// Closing the tab is a clean end, not a mystery: this path has always
+    /// reported `Exit { code: 0 }` and still does, so the pane keeps behaving as
+    /// it did.
+    #[test]
+    fn a_deliberate_close_reports_a_clean_exit() {
+        match channel_end_event(false, true) {
+            Some(SshEvent::Exit { code }) => assert_eq!(code, 0),
+            _ => panic!("a deliberate close must still report a clean exit"),
+        }
+    }
+
+    /// The bug this function exists for: a dropped link was reported as
+    /// `Exit { code: 0 }`, indistinguishable from a command that succeeded.
+    #[test]
+    fn a_dropped_link_is_not_reported_as_a_successful_exit() {
+        match channel_end_event(false, false) {
+            Some(SshEvent::Disconnected { reason }) => assert!(
+                reason.contains("without reporting an exit status"),
+                "the reason has to name what is missing: {reason}"
+            ),
+            _ => panic!("a dropped link must not claim an exit code"),
+        }
+    }
 }
 
 #[cfg(test)]

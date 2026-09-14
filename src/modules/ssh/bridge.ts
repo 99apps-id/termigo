@@ -10,6 +10,12 @@ export type SshEvent =
   | { type: "data"; data: string }
   | { type: "stderr"; data: string }
   | { type: "exit"; code: number }
+  // The channel ended WITHOUT an exit status, and not because we closed it:
+  // the link dropped or the peer hung up. Deliberately not `exit` - no code was
+  // ever reported, and inventing one either way would state a fact we do not
+  // have. The backend used to send `exit 0` here, which made a dropped link
+  // indistinguishable from a command that succeeded.
+  | { type: "disconnected"; reason: string }
   | { type: "error"; message: string };
 
 export type SshHandlers = {
@@ -23,6 +29,9 @@ export type SshHandlers = {
   onHostKeyPrompt?: (prompt: SshHostKeyPrompt) => void;
   onData: (bytes: Uint8Array) => void;
   onExit?: (code: number) => void;
+  /** The link dropped without an exit status. Distinct from `onExit`, which
+   *  always carries a code the remote actually reported. */
+  onDisconnected?: (reason: string) => void;
   onError?: (message: string) => void;
 };
 
@@ -146,6 +155,9 @@ export function dispatchSshEvent(event: SshEvent, handlers: SshHandlers): void {
         break;
       case "exit":
         handlers.onExit?.(event.code);
+        break;
+      case "disconnected":
+        handlers.onDisconnected?.(event.reason);
         break;
       case "error":
         handlers.onError?.(event.message);

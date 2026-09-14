@@ -36,6 +36,26 @@ describe("dispatchSshEvent", () => {
     expect(onData).toHaveBeenCalledWith(new TextEncoder().encode("warn"));
   });
 
+  // A dropped link must not be delivered as an exit code. The two are separate
+  // events so nothing downstream can read "connection lost" as "finished" -
+  // which is exactly what the backend used to cause by sending `exit 0` here.
+  it("routes a dropped link separately from an exit", () => {
+    const onExit = vi.fn();
+    const onDisconnected = vi.fn();
+    dispatchSshEvent(
+      {
+        type: "disconnected",
+        reason: "connection closed without reporting an exit status",
+      },
+      { onData: vi.fn(), onExit, onDisconnected },
+    );
+
+    expect(onDisconnected).toHaveBeenCalledWith(
+      "connection closed without reporting an exit status",
+    );
+    expect(onExit).not.toHaveBeenCalled();
+  });
+
   it("ignores events the caller did not subscribe to", () => {
     expect(() =>
       dispatchSshEvent({ type: "connected", fingerprint: "x" }, { onData: vi.fn() }),

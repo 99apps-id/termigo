@@ -89,6 +89,20 @@ export async function openSshTerminalSession(
         forgetSession();
         handlers.onExit?.(code);
       },
+      // The link dropped without an exit status, so there is no code to report.
+      // Print why into the pane and then end the session as abnormal (-1), the
+      // same value `onError` uses for "no status available". Reporting the old
+      // `0` would have shown a dropped connection as a clean finish, and calling
+      // nothing would leave a dead grid the user cannot type into.
+      onDisconnected: (reason) => {
+        handlers.onData(
+          new TextEncoder().encode(
+            `\r\n\x1b[31m[termigo] SSH ${reason}\x1b[0m\r\n`,
+          ),
+        );
+        forgetSession();
+        handlers.onExit?.(-1);
+      },
       onConnected: () => {
         connectedEarly = true;
         registerSession(); // no-op before the id lands; replayed below
