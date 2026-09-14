@@ -89,6 +89,37 @@ function clampMessage(text: string): string {
   return clampText(text, TELEGRAM_MAX_MESSAGE_CHARS);
 }
 
+/**
+ * Truncate HTML-escaped text WITHOUT splitting an entity.
+ *
+ * Escaping expands text - `&` becomes `&amp;`, up to six characters - so the
+ * escaped form can exceed Telegram's limit and has to be cut. A plain slice can
+ * land inside an entity and leave a fragment like `&am`, and Telegram rejects the
+ * WHOLE message for an invalid entity, so the cut backs off to the last complete
+ * one instead.
+ *
+ * This matters because the send below it is the last resort: it runs when the
+ * formatted HTML was too long, so a rejection here loses the message outright
+ * rather than degrading. `2>&1` in a long shell transcript is enough to reach it.
+ *
+ * The other callers clamp BEFORE escaping (`clampMessage(text)` then
+ * `markdownToTelegramHtml`), which cannot split anything - entities do not exist
+ * yet. Only the escaped path needs this.
+ */
+export function clampEscapedHtml(text: string, max: number): string {
+  if (text.length <= max) return text;
+  let cut = Math.max(0, max - 1);
+  const amp = text.lastIndexOf("&", cut);
+  if (amp !== -1) {
+    const semi = text.indexOf(";", amp);
+    // A `;` at or beyond the cut means that entity was left incomplete, so the
+    // cut moves back to its `&`. Escaping only ever emits whole entities, so
+    // they do not overlap and the last one is the only one that can be broken.
+    if (semi === -1 || semi >= cut) cut = amp;
+  }
+  return text.slice(0, cut);
+}
+
 export class TelegramApiError extends Error {
   readonly status: number;
   readonly description: string;
@@ -301,7 +332,13 @@ async function sendSingleChunk(
     "sendMessage",
     {
       chat_id: chatId,
-      text: clampMessage(escapePlainTextToHtml(chunk)),
+      // Clamped AFTER escaping, so it must be entity-aware: a slice here could
+      // leave a half-written entity and Telegram would reject the message that
+      // this fallback exists to deliver.
+      text: clampEscapedHtml(
+        escapePlainTextToHtml(chunk),
+        TELEGRAM_MAX_MESSAGE_CHARS,
+      ),
       parse_mode: "HTML",
     },
     signal,
