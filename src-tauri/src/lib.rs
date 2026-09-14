@@ -91,6 +91,22 @@ pub fn run() {
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(tauri_plugin_log::log::LevelFilter::Info)
+                // Local time, not UTC. The plugin's default is
+                // `TimezoneStrategy::UseUtc`, so a log line carried `[01:02:24]`
+                // while the file's own mtime said `08:02:24` — the same moment,
+                // seven hours apart, which made a live log read as stale and cost
+                // real time to diagnose on both the desktop and the headless VPS.
+                // A log line is read next to `date`/`journalctl` output, so it has
+                // to agree with the clock on the wall.
+                //
+                // Note this call also re-renders the line with the level BEFORE
+                // the target (`[INFO][webview:…]`), where the UTC default wrote
+                // the target first (`[webview:…][INFO]`). Called out because it is
+                // not visible from the call site: setting the strategy installs
+                // the plugin's own format, and that format orders the two that
+                // way. Nothing parses these lines — they are read by people — and
+                // grepping `[WARN]` or `webview` still works either way.
+                .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
                 .build(),
         )
         .plugin(tauri_plugin_opener::init())
