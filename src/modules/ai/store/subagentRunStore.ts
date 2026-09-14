@@ -1,13 +1,16 @@
 import { LazyStore } from "@tauri-apps/plugin-store";
 import { create } from "zustand";
+import { reconcileInterruptedSessions } from "../agents/subagentRunReconcile";
 
 /**
  * Live in-memory status of spawned sub-agents, so a fan-out can be watched as it
  * happens. Written straight from the tool `execute` via `getState()`. Persisted
- * to disk so completed runs survive a restart and can be inspected later; the
- * live "running" rows are restored as their last-known state. Crucially NO
- * imports from `../lib` or `../tools`, so wiring it into `tools/subagent.ts`
- * cannot create a cycle. Ported from TEDI.
+ * to disk so completed runs survive a restart and can be inspected later; a row
+ * restored as `running` is SETTLED on hydrate, because nothing can still be
+ * running in a process that just started (see `agents/subagentRunReconcile`).
+ * Crucially NO imports from `../lib` or `../tools`, so wiring it into
+ * `tools/subagent.ts` cannot create a cycle - the one relative import here is a
+ * module that imports nothing at all. Ported from TEDI.
  */
 export type SubagentRunStatus = "running" | "done" | "error";
 
@@ -43,7 +46,23 @@ export function ensureSubagentRunsHydrated(): Promise<void> {
       const raw =
         await subagentStore.get<Record<string, SubagentRun[]>>(KEY_RUNS);
       if (raw && typeof raw === "object") {
-        useSubagentRunStore.setState({ bySession: raw });
+        // A `running` row from disk describes a run that died with the previous
+        // process, so it is settled here rather than restored. Left as-is it
+        // stayed `running` forever: the UI showed a fan-out that ended an hour
+        // ago as still working, and because `start()` deliberately protects
+        // running rows from the session cap, an un-finishable row could never be
+        // evicted either - so the zombies crowded out the history the
+        // persistence exists to keep. See `subagentRunReconcile`.
+        const { bySession, settled } = reconcileInterruptedSessions(
+          raw,
+          Date.now(),
+        );
+        useSubagentRunStore.setState({ bySession });
+        if (settled > 0) {
+          // Write the settled state back, so the repair is not redone on every
+          // start and the file stops claiming those runs are live.
+          scheduleSave(bySession);
+        }
       }
     } catch {
       // No file yet, or the store plugin is unavailable (tests / non-Tauri):
