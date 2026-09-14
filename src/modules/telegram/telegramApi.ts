@@ -243,8 +243,19 @@ export function sleep(signal: AbortSignal, ms: number): Promise<void> {
   });
 }
 
-/** Split long messages on newline/word boundaries so nothing is truncated. */
-export function splitTelegramText(text: string, maxLen = 4000): string[] {
+export const chatFloodWaitUntil = new Map<number | string, number>();
+
+export function isChatRateLimited(chatId: number | string): boolean {
+  const until = chatFloodWaitUntil.get(chatId) ?? 0;
+  return Date.now() < until;
+}
+
+export function setChatRateLimited(chatId: number | string, waitSec: number): void {
+  chatFloodWaitUntil.set(chatId, Date.now() + Math.max(1, waitSec) * 1000);
+}
+
+/** Split long messages on newline/word boundaries so nothing is truncated. Default 3500 leaves headroom for HTML entity expansion. */
+export function splitTelegramText(text: string, maxLen = 3500): string[] {
   if (text.length <= maxLen) return [text];
   const chunks: string[] = [];
   let remaining = text;
@@ -267,31 +278,54 @@ export function splitTelegramText(text: string, maxLen = 4000): string[] {
   return chunks;
 }
 
-export async function sendTelegram(
+async function sendSingleChunk(
   chatId: number | string,
-  text: string,
+  chunk: string,
   signal: AbortSignal,
 ): Promise<void> {
-  const chunks = splitTelegramText(text);
-  for (const chunk of chunks) {
-    if (signal.aborted) break;
-    const html = markdownToTelegramHtml(chunk);
+  const html = markdownToTelegramHtml(chunk);
+  if (html.length <= TELEGRAM_MAX_MESSAGE_CHARS) {
     try {
       await apiPost(
         "sendMessage",
         { chat_id: chatId, text: html, parse_mode: "HTML" },
         signal,
       );
+      return;
     } catch {
-      await apiPost(
-        "sendMessage",
-        {
-          chat_id: chatId,
-          text: escapePlainTextToHtml(chunk),
-          parse_mode: "HTML",
-        },
-        signal,
-      );
+      // Fall through to plain text fallback below
+    }
+  }
+
+  await apiPost(
+    "sendMessage",
+    {
+      chat_id: chatId,
+      text: clampMessage(escapePlainTextToHtml(chunk)),
+      parse_mode: "HTML",
+    },
+    signal,
+  );
+}
+
+export async function sendTelegram(
+  chatId: number | string,
+  text: string,
+  signal: AbortSignal,
+): Promise<void> {
+  const chunks = splitTelegramText(text, 3500);
+  for (const chunk of chunks) {
+    if (signal.aborted) break;
+    // If the converted HTML will definitely exceed Telegram's limit, subdivide
+    const estimatedHtml = markdownToTelegramHtml(chunk);
+    if (estimatedHtml.length > TELEGRAM_MAX_MESSAGE_CHARS) {
+      const subChunks = splitTelegramText(chunk, 1800);
+      for (const sub of subChunks) {
+        if (signal.aborted) break;
+        await sendSingleChunk(chatId, sub, signal);
+      }
+    } else {
+      await sendSingleChunk(chatId, chunk, signal);
     }
   }
 }
@@ -329,6 +363,9 @@ export async function editProgressMessage(
   text: string,
   signal: AbortSignal,
 ): Promise<boolean> {
+  if (isChatRateLimited(chatId)) {
+    return false;
+  }
   const html = markdownToTelegramHtml(text);
   const tryPost = async (body: { text: string; parse_mode?: string }) => {
     return (await apiPost(
@@ -353,9 +390,10 @@ export async function editProgressMessage(
       if (desc.includes("message is not modified")) {
         return true;
       }
-      // Rate limited: if retry_after is small (<=3s), back off briefly, else skip intermediate progress
+      // Rate limited: record flood wait for chat, retry if short, else back off
       if (err.status === 429) {
-        const waitSec = err.retryAfter ?? 2;
+        const waitSec = err.retryAfter ?? 5;
+        setChatRateLimited(chatId, waitSec);
         if (waitSec <= 3 && !signal.aborted) {
           await sleep(signal, waitSec * 1000);
           try {

@@ -367,11 +367,23 @@ export function formatMarkdownTable(markdownTable: string): string {
 export function markdownToTelegramHtml(markdown: string): string {
   if (!markdown) return "";
 
+  let input = markdown;
+  // Ensure unclosed code fences at the end of the message are closed
+  const fenceMatches = input.match(/```/g);
+  if (fenceMatches && fenceMatches.length % 2 !== 0) {
+    input += "\n```";
+  }
+  // Ensure unclosed single backticks outside code fences are closed
+  const backtickMatches = input.replace(/```[\s\S]*?```/g, "").match(/`/g);
+  if (backtickMatches && backtickMatches.length % 2 !== 0) {
+    input += "`";
+  }
+
   const codeBlocks: string[] = [];
   const inlineCodes: string[] = [];
 
   // 1. Extract fenced code blocks: ```lang\ncode\n```
-  let text = markdown.replace(
+  let text = input.replace(
     /```([a-zA-Z0-9_-]*)\r?\n([\s\S]*?)\r?\n```/g,
     (_, lang, code) => {
       const idx = codeBlocks.length;
@@ -648,7 +660,30 @@ export function renderAnswerSnippet(text: string, max = 700): string {
   if (body.length === 0) return "";
   if (body.length <= max) return body;
   const half = Math.floor((max - 5) / 2);
-  return `${body.slice(0, half)}\n…\n${body.slice(-half)}`;
+  let head = body.slice(0, half);
+  let tail = body.slice(-half);
+
+  // Avoid breaking in the middle of fenced code blocks
+  const headFences = (head.match(/```/g) || []).length;
+  if (headFences % 2 !== 0) {
+    head += "\n```";
+  }
+  const tailFences = (tail.match(/```/g) || []).length;
+  if (tailFences % 2 !== 0) {
+    tail = "```\n" + tail;
+  }
+
+  // Avoid breaking in the middle of inline backticks
+  const headBackticks = (head.replace(/```[\s\S]*?```/g, "").match(/`/g) || []).length;
+  if (headBackticks % 2 !== 0) {
+    head += "`";
+  }
+  const tailBackticks = (tail.replace(/```[\s\S]*?```/g, "").match(/`/g) || []).length;
+  if (tailBackticks % 2 !== 0) {
+    tail = "`" + tail;
+  }
+
+  return `${head}\n…\n${tail}`;
 }
 
 export function formatLiveProgress(opts: FormatLiveProgressOptions): string {

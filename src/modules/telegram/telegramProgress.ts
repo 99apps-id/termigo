@@ -59,6 +59,7 @@ export async function publishProgress(
     await import("./progressFormat");
   let progressMessageId: number | null = null;
   let lastLiveText = "";
+  let lastSubstantiveKey = "";
   let lastSentAt = 0;
   let lastTypingAt = 0;
   let lastLiveTextPokeAt = 0;
@@ -159,6 +160,17 @@ export async function publishProgress(
         ),
       });
 
+      const substantiveKey = JSON.stringify({
+        liveStatus,
+        round: meta.round,
+        step,
+        tools: toolSummaries.map((t) => `${t.toolName}:${t.state}:${t.input}`),
+        todosCount: todos.length,
+        todosDone: todos.filter((t) => t.status === "completed").length,
+        answerLen: answerText.length,
+      });
+      const hasSubstantiveChange = substantiveKey !== lastSubstantiveKey;
+
       if (!progressMessageId) {
         const sentId = await sendProgressMessage(chatId, liveText, signal);
         if (sentId == null) {
@@ -168,24 +180,33 @@ export async function publishProgress(
           progressSendFailures = 0;
           progressMessageId = sentId;
           lastLiveText = liveText;
+          lastSubstantiveKey = substantiveKey;
           lastSentAt = now;
           lastTypingAt = now;
           // Telegram client clears typing indicator when a message is received; re-send typing immediately.
           await sendTyping(chatId, signal).catch(() => {});
         }
-      } else if (liveText !== lastLiveText && now - lastSentAt >= 1500) {
+      } else if (hasSubstantiveChange && now - lastSentAt >= 1500) {
         lastLiveText = liveText;
-        await editProgressMessage(chatId, progressMessageId, liveText, signal);
-        lastSentAt = now;
-      } else if (busy && now - lastLiveTextPokeAt >= 5000) {
+        lastSubstantiveKey = substantiveKey;
+        const ok = await editProgressMessage(chatId, progressMessageId, liveText, signal);
+        if (ok) {
+          lastSentAt = now;
+        }
+      } else if (busy && now - lastLiveTextPokeAt >= 6000 && liveText !== lastLiveText) {
+        // Ticking elapsed timer or keepalive: poke at relaxed interval (6s) to avoid 429 Flood Control
         lastLiveTextPokeAt = now;
         await sendTyping(chatId, signal).catch(() => {});
-        await editProgressMessage(
+        const ok = await editProgressMessage(
           chatId,
           progressMessageId,
           liveText,
           signal,
-        ).catch(() => {});
+        ).catch(() => false);
+        if (ok) {
+          lastLiveText = liveText;
+          lastSentAt = now;
+        }
       }
 
       // Surface pending approvals as interactive inline buttons in Telegram

@@ -43,6 +43,9 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
     // Pentest & network recon tooling supported by Termigo
     "nmap", "masscan", "rustscan", "nikto", "nuclei", "httpx", "wpscan",
     "sqlmap", "ffuf", "gobuster", "dirsearch", "subfinder",
+    "dnsx", "katana", "amass", "cmseek", "arjun", "testssl.sh", "testssl",
+    "lynis", "gitleaks", "trufflehog", "weasyprint", "whois", "dig", "nslookup", "traceroute",
+    "whatweb", "hydra", "wafw00f", "searchsploit", "feroxbuster", "enum4linux", "smbclient", "showmount",
     //
     // Project toolchains. An agent that cannot run the project's own checks
     // cannot verify its work, and these are the binaries a repository's scripts
@@ -289,6 +292,7 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
 /// command, so the shell still performs these redirections.
 fn strip_dev_null_redirections(command: &str) -> Result<String, String> {
     const DEV_NULL_LEN: usize = "/dev/null".len();
+    const DOLLAR_NULL_LEN: usize = "$null".len();
     let chars: Vec<char> = command.chars().collect();
     let mut out = String::with_capacity(command.len());
     let mut in_quote = false;
@@ -327,11 +331,11 @@ fn strip_dev_null_redirections(command: &str) -> Result<String, String> {
                 i += 4;
                 continue;
             }
-            // `>` or `N>` followed by `/dev/null`. A second `>` means append, so
-            // `>>` is not matched and stays refused.
+            // `>` or `N>` or `*>` followed by `/dev/null` or `$null` (Windows PowerShell).
+            // A second `>` means append, so `>>` is not matched and stays refused.
             let gt = if c == '>' {
                 Some(i)
-            } else if c.is_ascii_digit() && chars.get(i + 1) == Some(&'>') {
+            } else if (c.is_ascii_digit() || c == '*') && chars.get(i + 1) == Some(&'>') {
                 Some(i + 1)
             } else {
                 None
@@ -342,21 +346,29 @@ fn strip_dev_null_redirections(command: &str) -> Result<String, String> {
                     while chars.get(j) == Some(&' ') {
                         j += 1;
                     }
-                    let is_dev_null = chars.len() >= j + DEV_NULL_LEN
+                    let matched_len = if chars.len() >= j + DEV_NULL_LEN
                         && chars[j..j + DEV_NULL_LEN].iter().collect::<String>() == "/dev/null"
-                        // The name must END there. `/dev/null.txt` and
-                        // `/dev/null-backup` are ordinary files, and accepting
-                        // them would let a redirection write to disk under a
-                        // name that merely starts like the null device.
-                        && chars.get(j + DEV_NULL_LEN).is_none_or(|a| {
+                    {
+                        Some(DEV_NULL_LEN)
+                    } else if chars.len() >= j + DOLLAR_NULL_LEN
+                        && chars[j..j + DOLLAR_NULL_LEN].iter().collect::<String>() == "$null"
+                    {
+                        Some(DOLLAR_NULL_LEN)
+                    } else {
+                        None
+                    };
+
+                    if let Some(target_len) = matched_len {
+                        let is_null_target = chars.get(j + target_len).is_none_or(|a| {
                             a.is_whitespace()
                                 || matches!(a, ';' | '|' | '&' | '<' | '>' | ')' | '"' | '\'')
                         });
-                    if is_dev_null {
-                        out.push(' ');
-                        prev = ' ';
-                        i = j + DEV_NULL_LEN;
-                        continue;
+                        if is_null_target {
+                            out.push(' ');
+                            prev = ' ';
+                            i = j + target_len;
+                            continue;
+                        }
                     }
                 }
             }
@@ -965,17 +977,51 @@ mod tests_sandbox {
         assert!(err.contains("'rm'"), "{err}");
     }
 
-    /// Two redirections cannot name a file, so they are removed before the scan:
-    /// `N>&M` joins the process's own streams and `/dev/null` discards. They were
-    /// among the most common refusals (`['>', '&']`).
+    /// Redirections that cannot name a file are removed before the scan:
+    /// `N>&M` joins the process's own streams, `/dev/null` discards on POSIX,
+    /// and `$null` discards on Windows PowerShell (e.g. `2>$null`, `>$null`, `*>$null`).
     #[test]
     fn validate_shell_command_allows_stream_joins_and_dev_null() {
         assert!(validate_shell_command("pnpm test 2>&1").is_ok());
         assert!(validate_shell_command("pnpm test 1>&2").is_ok());
         assert!(validate_shell_command("pnpm test > /dev/null").is_ok());
         assert!(validate_shell_command("pnpm test 2>/dev/null").is_ok());
+        assert!(validate_shell_command("cargo check 2>$null").is_ok());
+        assert!(validate_shell_command("cargo test >$null").is_ok());
+        assert!(validate_shell_command("git status *>$null").is_ok());
         assert!(validate_shell_command("git status 2>&1 | head -5").is_ok());
         assert!(validate_shell_command("git log 2>&1 | head -3 | wc -l").is_ok());
+    }
+
+    #[test]
+    fn validate_shell_command_allows_pentest_and_recon_tools() {
+        for cmd in [
+            "dnsx -d example.com",
+            "katana -u https://example.com",
+            "amass enum -d example.com",
+            "cmseek -u https://example.com",
+            "arjun -u https://example.com",
+            "testssl.sh https://example.com",
+            "testssl https://example.com",
+            "lynis audit system",
+            "gitleaks detect",
+            "trufflehog git file://.",
+            "weasyprint report.html report.pdf",
+            "whois example.com",
+            "dig example.com",
+            "nslookup example.com",
+            "traceroute example.com",
+            "whatweb https://example.com",
+            "hydra -l user -p pass ssh://example.com",
+            "wafw00f https://example.com",
+            "searchsploit apache",
+            "feroxbuster -u https://example.com",
+            "enum4linux 192.168.1.1",
+            "smbclient -L //192.168.1.1",
+            "showmount -e 192.168.1.1",
+        ] {
+            assert!(validate_shell_command(cmd).is_ok(), "blocked: {cmd}");
+        }
     }
 
     /// The exemption is narrow on purpose: anything that names a file, or that
