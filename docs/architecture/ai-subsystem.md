@@ -199,7 +199,7 @@ Captures are shown as JSON rather than reformatted prose: a debug view that resh
 
 ### When a request fails
 
-`formatAiError` (`lib/errors.ts`) turns a provider rejection into the text shown in the chat, stripping bearer tokens and API keys on the way. `transport.ts` wraps it so the same text is also written to the app log — `%LOCALAPPDATA%\<identifier>\logs\Termigo.log` on Windows, the platform log directory elsewhere, via `tauri-plugin-log`. AI requests are made from the webview, so before this nothing about them reached that file, which records only the Rust side: a run that died mid-stream left no trace, and diagnosing one meant catching the message on screen before it scrolled away. The formatted text is logged rather than the raw error, because the raw value still carries the request headers.
+`formatAiError` (`lib/errors.ts`) turns a provider rejection into the text shown in the chat, stripping bearer tokens and API keys on the way. `transport.ts` wraps it so the same text is also written to the app log — `%LOCALAPPDATA%\<identifier>\logs\Termigo.log` on Windows, the platform log directory elsewhere, via `tauri-plugin-log`. AI requests are made from the webview, so before this nothing about them reached that file, which records only the Rust side: a run that died mid-stream left no trace, and diagnosing one meant catching the message on screen before it scrolled away. The formatted text is logged rather than the raw error, because the raw value still carries the request headers. Timestamps are written in **local time** (`TimezoneStrategy::UseLocal` in `lib.rs`): the plugin's default is UTC, and a log whose clock disagrees with `date`/`journalctl` reads as a stale file.
 
 ## Edit diffs
 

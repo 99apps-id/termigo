@@ -232,11 +232,21 @@ Owner pairing is separate state. Sending `/pair` from the chat locks the bot to 
 To check that the relay is actually talking to Telegram, do not ask `status`: it reports the app, agent and workspace, and carries no Telegram fields. Use the socket and the relay log:
 
 ```bash
-# One established connection to Telegram (IPv4 and/or IPv6) while the bot is up
-ss -tnp | grep -i telegram || ss -tnp | grep 149.154
+# One established connection to Telegram (IPv4 and/or IPv6) while the bot is up.
+# Match BOTH families. On some hosts the webview reaches Telegram over IPv6, and
+# a check that only greps the IPv4 ranges reports "no connection" for a perfectly
+# healthy relay. `grep -i telegram` does not work either: the socket belongs to
+# WebKitNetworkProcess, not to a process named termigo.
+ss -tnp | grep -E '149\.154\.|91\.108\.|2001:67c:4e8|2001:b28:f23d'
 # The relay logs each update, run, stall and poll failure
 grep -i telegram ~/.local/share/id.99apps.termigo/logs/Termigo.log | tail -20
 ```
+
+Log timestamps are **local time**, so they line up with `date` and with the
+`journalctl` prefixes in the same output. Older builds logged UTC, which made a
+live log look like a stale file — a line stamped `01:02` sitting in a file written
+at `08:02` on a WIB host. If you are reading a log from an older build, add the
+offset before concluding that nothing has been logged recently.
 
 > **Note:** Without an owner configured, `/pair` from your Telegram chat locks the bot to that account. Run it once; afterwards only that account may start runs or answer approvals.
 
