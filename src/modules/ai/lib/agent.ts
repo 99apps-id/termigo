@@ -82,6 +82,7 @@ import { repairToolCall } from "./repairToolCall";
 import { isRepetitionDominated } from "./repetitionGuard";
 import { sanitizeUiMessages } from "./sanitizeMessages";
 import { type Skill, skillsBlock } from "./skills";
+import { watchdogDirective } from "./streamWatchdog";
 import { formatTodoStatusBlock } from "./todos";
 import { modelRejectsForcedToolChoice } from "./toolChoiceLearning";
 import { measureToolPayload } from "./toolPayload";
@@ -1100,45 +1101,18 @@ export async function runAgentStream(opts: RunAgentOptions) {
     });
   }
   const resumingApproval = isResumingApproval(opts.uiMessages ?? []);
-  // When resuming approval, step 0 executes the approved tool (which may take up
-  // to a few minutes for builds or tests). We keep a generous 180s watchdog so
-  // a deadlocked or wedged tool never freezes the agent run indefinitely.
-  let firstStepTimer: ReturnType<typeof setTimeout> | null = setTimeout(
-    () => {
-      const elapsed = Math.round((Date.now() - runStart) / 1000);
-      fireAndForget(
-        logWarn(
-          `[ai] agent run timed out before completing first step (elapsed=${elapsed}s, resumingApproval=${resumingApproval}, model=${modelId}, provider=${provider})`,
-        ),
-        "first-token-timeout",
-      );
-      abortController.abort(
-        new Error(
-          resumingApproval
-            ? `Approved tool execution timed out after ${elapsed}s without completing.`
-            : "model did not respond within 90s",
-        ),
-      );
-    },
-    resumingApproval ? 180_000 : 90_000,
-  );
+  // Silence budget before the run is declared wedged. When resuming approval,
+  // step 0 executes the approved tool (which may take minutes for a build or a
+  // test run), so it gets a longer one - and that arm is disarmed anyway once the
+  // tool call arrives.
+  const stallTimeoutMs = resumingApproval ? 180_000 : 90_000;
+  const stallNoticeMs = resumingApproval ? 20_000 : 30_000;
+  let firstStepTimer: ReturnType<typeof setTimeout> | null = null;
   // A provider that accepts the connection and then goes silent looked exactly
-  // like one that is merely slow: 90 seconds of dead air with a bare spinner.
-  // At 30s without a first token (or 20s for an approved tool execution), name
-  // the wait in the step label (the HUD reads "Round N · <step>"), so the pause
-  // is an explained stall rather than a suspected hang. "Model", not "provider":
-  // that is the word users pick in Settings and see in the header; "provider" is
-  // our internal plumbing.
-  let stallNotice: ReturnType<typeof setTimeout> | null = setTimeout(
-    () => {
-      opts.onStep?.(
-        resumingApproval
-          ? "The approved tool is still executing — waiting for completion…"
-          : "The model is taking a while to respond — still waiting…",
-      );
-    },
-    resumingApproval ? 20_000 : 30_000,
-  );
+  // like one that is merely slow: dead air with a bare spinner. At 30s without a
+  // chunk, name the wait in the step label (the HUD reads "Round N · <step>"), so
+  // the pause is an explained stall rather than a suspected hang.
+  let stallNotice: ReturnType<typeof setTimeout> | null = null;
   const clearFirstStepTimer = (): void => {
     if (firstStepTimer) {
       clearTimeout(firstStepTimer);
@@ -1149,6 +1123,43 @@ export async function runAgentStream(opts: RunAgentOptions) {
       stallNotice = null;
     }
   };
+  /**
+   * (Re)start the silence clock for a wait on the model.
+   *
+   * Named for what it measures — silence from NOW. The previous version answered
+   * a different question ("has anything arrived since the run began?"), and that
+   * framing hid a real bug: it was armed once and cleared by the first chunk, so
+   * nothing watched the rest of the run. A reasoning model made it concrete - a
+   * `reasoning-delta` cleared it before the model had answered anything, and when
+   * the provider then stalled the run hung with no watchdog at all.
+   */
+  const armModelWatchdog = (): void => {
+    clearFirstStepTimer();
+    firstStepTimer = setTimeout(() => {
+      const elapsed = Math.round((Date.now() - runStart) / 1000);
+      fireAndForget(
+        logWarn(
+          `[ai] no stream progress for ${Math.round(stallTimeoutMs / 1000)}s, aborting the run (elapsed=${elapsed}s, resumingApproval=${resumingApproval}, model=${modelId}, provider=${provider})`,
+        ),
+        "first-token-timeout",
+      );
+      abortController.abort(
+        new Error(
+          resumingApproval
+            ? `Approved tool execution timed out after ${elapsed}s without completing.`
+            : `The model stopped responding (no output for ${Math.round(stallTimeoutMs / 1000)}s).`,
+        ),
+      );
+    }, stallTimeoutMs);
+    stallNotice = setTimeout(() => {
+      opts.onStep?.(
+        resumingApproval
+          ? "The approved tool is still executing — waiting for completion…"
+          : "The model is taking a while to respond — still waiting…",
+      );
+    }, stallNoticeMs);
+  };
+  armModelWatchdog();
   abortController.signal.addEventListener("abort", clearFirstStepTimer, {
     once: true,
   });
@@ -1604,33 +1615,29 @@ export async function runAgentStream(opts: RunAgentOptions) {
       return { toolChoice, system, ...(activeTools ? { activeTools } : {}) };
     },
     abortSignal: abortController.signal,
-    // Clear the "no first response" timer on the first model chunk (a text
-    // delta or a tool-call decision), NOT on step finish. A step that starts
-    // with a long tool (e.g. a 90s nmap scan) keeps the run alive for the
-    // whole tool execution; the timer only exists to catch a provider that
-    // never produces a first token.
-    onChunk: () => {
-      clearFirstStepTimer();
+    // Silence is measured from the LAST chunk, not from the run's first one.
+    //
+    // The previous version cleared the watchdog here on any chunk and never
+    // re-armed it, so it watched only the opening of a run. A `reasoning-delta`
+    // cleared it before the model had answered anything, and when the provider
+    // then stalled the run hung indefinitely with nothing watching.
+    //
+    // `tool-call` disarms instead: the tool now runs and sends no chunks by
+    // design, and a long build or scan is normal rather than a stall. The next
+    // step re-arms once the tool is done.
+    onChunk: ({ chunk }) => {
+      const directive = watchdogDirective(chunk.type);
+      if (directive === "rearm") armModelWatchdog();
+      else if (directive === "disarm") clearFirstStepTimer();
     },
     onStepFinish: (step) => {
       clearFirstStepTimer();
       logInfo(`[ai] runAgentStream: step finished (#${stepsSeen})`);
       stepsSeen++;
-      if (resumingApproval && stepsSeen === 1) {
-        // Step 0 executed the approved tool. Step 1 now prompts the model with
-        // the tool result; arm the watchdog for the model's first token.
-        firstStepTimer = setTimeout(() => {
-          void logWarn(
-            `[ai] model did not produce first token after approval within 90s (model=${modelId}, provider=${provider})`,
-          ).catch(() => {});
-          abortController.abort(new Error("model did not respond within 90s"));
-        }, 90_000);
-        stallNotice = setTimeout(() => {
-          opts.onStep?.(
-            "The model is taking a while to respond — still waiting…",
-          );
-        }, 30_000);
-      }
+      // The step is over, so the next thing expected is another model response -
+      // which is what the watchdog is for. Previously this only re-armed on an
+      // approval resume, leaving every other step of a multi-step run unguarded.
+      armModelWatchdog();
       if (opts.onStep) {
         const last = step.toolCalls?.[step.toolCalls.length - 1];
         if (last) {
