@@ -112,7 +112,7 @@ export function isProviderAvailable(providerId: string, now = Date.now()): boole
  */
 export function getRemainingCooldownMs(providerId: string, now = Date.now()): number {
   const record = providerRegistry.get(providerId);
-  if (!record || !record.rateLimitedUntil) return 0;
+  if (!record?.rateLimitedUntil) return 0;
   return Math.max(0, record.rateLimitedUntil - now);
 }
 

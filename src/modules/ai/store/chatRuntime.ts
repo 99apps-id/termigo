@@ -36,6 +36,11 @@ import {
 } from "../lib/errors";
 import { fireHooksForEvent, makeRunId } from "../lib/hooksRunner";
 import { sweepSessionMemory } from "../lib/memorySweep";
+import {
+  getRemainingCooldownMs,
+  recordProviderError,
+  recordProviderSuccess,
+} from "../lib/providerFailover";
 import { pruneStale } from "../lib/pruneStale";
 import {
   flushOne,
@@ -498,6 +503,12 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       if (fr && fr !== "error") {
         overflowAutoResumeCount.delete(sessionId);
         transientRetryCount.delete(sessionId);
+        // The provider answered, so clear any cooldown recorded against it. Only
+        // a finished run counts: an overflow or a rejected tool_choice is a
+        // request-shape problem, not evidence that the provider is unhealthy.
+        recordProviderSuccess(
+          providerForModel(useChatStore.getState().selectedModelId),
+        );
       }
       // Remember what this run cost. The estimate only exists for priced
       // models, so unknown ones record nothing rather than a false zero.
@@ -762,6 +773,12 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       if (isConnectivityError(raw)) {
         const modelId = useChatStore.getState().selectedModelId;
         const provider = providerForModel(modelId);
+        // A provider that cannot be reached is an unhealthy provider, so its
+        // cooldown starts here. An abort, a context overflow and a rejected
+        // tool_choice are all deliberately excluded: those are the user's choice
+        // or the request's shape, and counting them would blame the provider for
+        // something it did not do.
+        recordProviderError(provider, raw);
         const isLocalProvider =
           provider === "ollama" ||
           provider === "lmstudio" ||
@@ -793,15 +810,36 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       // Quota / credits exhausted or a rate limit: recoverable once the user
       // tops up or waits. The run stays resumable via "Try again".
       if (isQuotaError(raw) || isRateLimitError(raw)) {
+        const provider = providerForModel(
+          useChatStore.getState().selectedModelId,
+        );
+        // Record the outcome, then tell the user HOW LONG to wait. The module
+        // already knew the cooldown; nothing surfaced it, so the advice was a
+        // vague "wait a moment" when the real answer is a number of seconds.
+        //
+        // Deliberately NOT a reroute. Switching provider here would send the
+        // user's prompt - and their repository context - to a provider they did
+        // not choose, silently, on the strength of a string match. Retrying on
+        // the same provider when its cooldown expires is the honest behaviour.
+        recordProviderError(provider, raw);
+        const cooldownMs = getRemainingCooldownMs(provider);
+        const waitHint =
+          cooldownMs > 1000
+            ? ` It should answer again in about ${Math.ceil(cooldownMs / 1000)}s.`
+            : "";
         useChatStore.getState().patchAgentMeta({
           status: "error",
           error: isQuotaError(raw)
             ? "The provider reports your API quota or credits are exhausted. Top up and click Try again - your work is preserved."
-            : "Rate limit reached. Wait a moment and click Try again - your work is preserved.",
+            : `Rate limit reached.${waitHint} Then click Try again - your work is preserved.`,
         });
         useChatStore.getState().syncRunMeta();
         return;
       }
+      recordProviderError(
+        providerForModel(useChatStore.getState().selectedModelId),
+        raw,
+      );
       useChatStore.getState().patchAgentMeta({
         status: "error",
         error: humanizeModelError(raw),
