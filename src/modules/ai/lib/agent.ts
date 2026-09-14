@@ -1120,6 +1120,11 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // in "streaming" forever.
   const MAX_TOOL_EXECUTION_MS = 120_000;
   let toolExecutionTimer: ReturnType<typeof setTimeout> | null = null;
+  // After a tool result is fed back to the model, the model may still go silent
+  // while processing it. Track that delivery gap so a hung model turn after
+  // tool completion still aborts instead of leaving the run in "streaming".
+  const MAX_TOOL_RESULT_DELIVERY_MS = 60_000;
+  let toolResultDeliveryTimer: ReturnType<typeof setTimeout> | null = null;
   const clearFirstStepTimer = (): void => {
     if (firstStepTimer) {
       clearTimeout(firstStepTimer);
@@ -1132,6 +1137,10 @@ export async function runAgentStream(opts: RunAgentOptions) {
     if (toolExecutionTimer) {
       clearTimeout(toolExecutionTimer);
       toolExecutionTimer = null;
+    }
+    if (toolResultDeliveryTimer) {
+      clearTimeout(toolResultDeliveryTimer);
+      toolResultDeliveryTimer = null;
     }
   };
   /**
@@ -1664,6 +1673,23 @@ export async function runAgentStream(opts: RunAgentOptions) {
         // model silence watchdog for the next model turn.
         clearFirstStepTimer();
         armModelWatchdog();
+        // Some providers accept the tool result but then stall before sending
+        // the next model chunk. Start a delivery watchdog so that gap does
+        // not leave the run in "streaming" forever.
+        toolResultDeliveryTimer = setTimeout(() => {
+          const elapsed = Math.round((Date.now() - runStart) / 1000);
+          fireAndForget(
+            logWarn(
+              `[ai] no model output after tool-result for ${Math.round(MAX_TOOL_RESULT_DELIVERY_MS / 1000)}s, aborting the run (elapsed=${elapsed}s, model=${modelId}, provider=${provider})`,
+            ),
+            "tool-result-delivery-timeout",
+          );
+          abortController.abort(
+            new Error(
+              `The model did not respond within ${Math.round(MAX_TOOL_RESULT_DELIVERY_MS / 1000)}s after a tool finished. The run was stopped to avoid hanging forever.`,
+            ),
+          );
+        }, MAX_TOOL_RESULT_DELIVERY_MS);
       }
     },
     onStepFinish: (step) => {
