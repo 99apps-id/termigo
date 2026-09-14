@@ -44,6 +44,14 @@ type BatchResult = {
   durationMs?: number;
   /** Finished, but the review did not look at anything (subagentEvidence). */
   inconclusive?: boolean;
+  /**
+   * Where an ISOLATED task worked, when isolation was requested and honoured.
+   *
+   * Absent means the task shared the workspace - which is worth stating rather
+   * than leaving the caller to assume, because the two cases need different
+   * follow-up (merge the worktree, or look at the workspace).
+   */
+  worktreePath?: string;
 };
 
 /** Parse a value that may be a JSON string, returning it unchanged if not. */
@@ -93,9 +101,15 @@ Approval works exactly as it does for you: read-only tools auto-run, and every m
             .string()
             .optional()
             .describe("Short label shown in the chat UI for the spawn card."),
+          isolate: z
+            .boolean()
+            .optional()
+            .describe(
+              "Run this subagent in its OWN git worktree under .termigo/worktrees/ instead of your working tree. Use it when the subagent will edit files you are also editing, or when you want its changes kept apart until you accept them. Ignored for read-only subagent types, for SSH sessions, and when the workspace is not a git repo (the subagent then shares the workspace and the result says so). Nothing is merged back automatically: the result reports the worktree path, and worktree_diff / worktree_discard act on it.",
+            ),
         }),
       ),
-      execute: async ({ type, prompt, description }, opts) => {
+      execute: async ({ type, prompt, description, isolate }, opts) => {
         // Defensive belt: a subagent at the nesting cap must never spawn. The
         // toolset already drops these tools, but if one slips through, refuse
         // rather than loop.
@@ -129,6 +143,7 @@ Approval works exactly as it does for you: read-only tools auto-run, and every m
             toolContext: ctx,
             depth: childDepth,
             requester: description ?? resolved,
+            isolate,
             abortSignal: opts?.abortSignal,
             onStep: (label) => {
               patchAgentMeta({ step: label });
@@ -146,6 +161,9 @@ Approval works exactly as it does for you: read-only tools auto-run, and every m
               description,
               stepCount: r.stepCount,
               durationMs: r.durationMs,
+              // Kept on abort: an isolated worktree still holds the subagent's
+              // work, so the caller can say where it is instead of stranding it.
+              ...(r.worktreePath ? { worktreePath: r.worktreePath } : {}),
             };
           }
           useSubagentRunStore.getState().finish(sid, runId, {
@@ -161,6 +179,7 @@ Approval works exactly as it does for you: read-only tools auto-run, and every m
             stepCount: r.stepCount,
             durationMs: r.durationMs,
             ...(r.inconclusive ? { inconclusive: true } : {}),
+            ...(r.worktreePath ? { worktreePath: r.worktreePath } : {}),
           };
         } catch (e) {
           useSubagentRunStore.getState().fail(sid, runId, String(e));
@@ -224,9 +243,15 @@ Each task's subagent has the same toolset you do and may itself spawn further su
             .describe(
               `How many may run at once. Defaults to ${MAX_CONCURRENCY}, which is also the cap.`,
             ),
+          isolate: z
+            .boolean()
+            .optional()
+            .describe(
+              "Give each WRITING task its own git worktree under .termigo/worktrees/, so concurrent tasks cannot read each other's half-finished edits. Read-only tasks are unaffected (a worktree would only be a stale copy for them), and so are SSH sessions, non-git workspaces, and tasks that fail to branch - those share the workspace and the result says which. Nothing merges back automatically; each result reports its worktree path.",
+            ),
         }),
       ),
-      execute: async ({ tasks, max_concurrency }, opts) => {
+      execute: async ({ tasks, max_concurrency, isolate }, opts) => {
         if (childDepth > effectiveSubagentMaxDepth()) {
           return {
             error:
@@ -342,6 +367,7 @@ Each task's subagent has the same toolset you do and may itself spawn further su
               // Numbered, because several run at once and the approval queue
               // is unreadable if every row says "builder".
               requester: `${task.description ?? resolvedType} #${i + 1}`,
+              isolate,
               abortSignal: batchSignal,
               onStep: (label) => {
                 patchAgentMeta({
@@ -357,6 +383,7 @@ Each task's subagent has the same toolset you do and may itself spawn further su
               results[i].error = r.summary;
               results[i].stepCount = r.stepCount;
               results[i].durationMs = r.durationMs;
+              if (r.worktreePath) results[i].worktreePath = r.worktreePath;
               state[i] = { settled: true, bad: true, running: false };
               useSubagentRunStore.getState().fail(sid, runId, r.summary);
               for (const s of cascadeSkip(plan.deps, state, i)) {
@@ -368,6 +395,7 @@ Each task's subagent has the same toolset you do and may itself spawn further su
             results[i].stepCount = r.stepCount;
             results[i].durationMs = r.durationMs;
             if (r.inconclusive) results[i].inconclusive = true;
+            if (r.worktreePath) results[i].worktreePath = r.worktreePath;
             state[i] = { settled: true, bad: false, running: false };
             useSubagentRunStore.getState().finish(sid, runId, {
               stepCount: r.stepCount,

@@ -14,6 +14,11 @@ import { activeProfileIdFor } from "../lib/harnessProfileStore";
 import type { ProviderKeys } from "../lib/keyring";
 import { repairToolCall } from "../lib/repairToolCall";
 import { judgeSubagentEvidence } from "../lib/subagentEvidence";
+import {
+  createIsolatedWorktree,
+  planSubagentIsolation,
+  rerootToolContext,
+} from "../lib/subagentIsolation";
 import { subagentMadeProgress } from "../lib/subagentProgress";
 import { useChatStore } from "../store/chatStore";
 import type { ToolContext } from "../tools/context";
@@ -73,6 +78,15 @@ type Args = {
   onStep?: (label: string) => void;
   /** Label shown in the approval queue: "builder #2". */
   requester?: string;
+  /**
+   * Run this subagent in its own git worktree instead of the shared workspace.
+   *
+   * Opt-in, and only honoured for a writing subagent in a local git workspace:
+   * see `lib/subagentIsolation.ts` for the policy and every refusal reason. A
+   * refusal or a failed `git worktree add` falls back to the shared workspace
+   * rather than failing the task.
+   */
+  isolate?: boolean;
   abortSignal?: AbortSignal;
 };
 
@@ -84,6 +98,14 @@ type RunResult = {
   /** The review did not inspect the repository (see lib/subagentEvidence.ts).
    *  The summary carries the same warning; this is for the store and the UI. */
   inconclusive?: boolean;
+  /**
+   * Where this subagent worked, when it was isolated. Absent otherwise.
+   *
+   * Reported because isolated work is invisible by definition: without the path
+   * the caller cannot tell the user where the changes are, and the work would
+   * look like it vanished.
+   */
+  worktreePath?: string;
 };
 
 export async function runSubagent({
@@ -95,6 +117,7 @@ export async function runSubagent({
   depth = 0,
   onStep,
   requester,
+  isolate = false,
   abortSignal,
 }: Args): Promise<RunResult> {
   const def = SUBAGENTS[type];
@@ -103,14 +126,53 @@ export async function runSubagent({
   // Its own read history. The invariant `edit` enforces - read this file before
   // changing it - is meaningless if it can be satisfied by a read some other
   // agent did, which is what sharing the parent's cache amounted to.
-  const ctx: ToolContext = { ...toolContext, readCache: new Map() };
+  const baseCtx: ToolContext = { ...toolContext, readCache: new Map() };
 
   // Centralized spec: the roster def resolved against the active harness
   // profile, so a sub-agent carries the same profile guidance as the main run
   // (prelude, budget, capabilities) instead of a bare prompt.
-  const workspaceRoot = ctx.getWorkspaceRoot();
+  const workspaceRoot = baseCtx.getWorkspaceRoot();
+  // Resolved from the ORIGINAL workspace root, BEFORE any isolation reroot: the
+  // harness profile is a workspace-level setting, so looking it up against a
+  // worktree path would find none and silently drop the profile's guidance.
   const profile = getProfile(activeProfileIdFor(workspaceRoot));
   const spec = buildSubagentSpec(type, profile);
+
+  // Optional worktree isolation. Only entered when the caller asked, so the
+  // default path stays exactly as it was and logs nothing new.
+  let ctx = baseCtx;
+  let worktreePath: string | undefined;
+  if (isolate) {
+    const plan = planSubagentIsolation({
+      requested: true,
+      isReadOnly: subagentIsReadOnly(type),
+      hasRemoteSession: Boolean(baseCtx.getRemoteSession()),
+      workspaceRoot,
+    });
+    if (plan.isolate) {
+      const made = await createIsolatedWorktree({
+        ctx: baseCtx,
+        label: `${type}-${requester ?? Math.random().toString(36).slice(2, 7)}`,
+      });
+      if (made.ok) {
+        ctx = rerootToolContext(baseCtx, made.worktreePath);
+        worktreePath = made.worktreePath;
+        void logInfo(
+          `[ai] subagent ${type} isolated in ${made.worktreePath} (branch ${made.branchName})`,
+        ).catch(() => {});
+      } else {
+        // Degrade to the shared workspace. This is the pre-existing behaviour,
+        // so nothing about the task breaks - the isolation simply did not happen.
+        void logInfo(
+          `[ai] subagent ${type} NOT isolated: ${made.reason}`,
+        ).catch(() => {});
+      }
+    } else {
+      void logInfo(
+        `[ai] subagent ${type} NOT isolated: ${plan.reason}`,
+      ).catch(() => {});
+    }
+  }
 
   // The full main-agent toolset plus extension tools - a sub-agent is a peer of
   // the main agent, not a read-only subset. `buildTools` is the same builder the
@@ -337,6 +399,7 @@ export async function runSubagent({
       stepCount: steps,
       durationMs: Date.now() - start,
       ...(verdict.inconclusive ? { inconclusive: true } : {}),
+      ...(worktreePath ? { worktreePath } : {}),
     };
   } catch (e) {
     // The denial breaker trips by aborting the run, and a user stop of the
@@ -357,6 +420,9 @@ export async function runSubagent({
         stepCount: 0,
         durationMs: Date.now() - start,
         aborted: true,
+        // Kept on abort: the worktree still exists and may hold work the user
+        // wants, so the caller must be able to say where it is.
+        ...(worktreePath ? { worktreePath } : {}),
       };
     }
     if (firstStepTimer) {
