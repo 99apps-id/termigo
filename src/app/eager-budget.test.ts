@@ -15,11 +15,18 @@ function heavyEagerHits(entry: string): string[] {
 }
 
 describe("startup bundle budget", () => {
+  // These trace the WHOLE eager import graph, which is synchronous file I/O over
+  // ~900 files. That is ~0.7s idle but well past the 5s default when the rest of
+  // the suite runs in parallel on a loaded machine - it timed out at 8s in a full
+  // run and passed on every isolated run, turning a correct assertion into an
+  // intermittent red. The budget is the assertion; the timeout was just too tight.
+  const TRACE_TIMEOUT_MS = 30_000;
+
   it("main window does not eagerly pull editor/AI/markdown stacks", () => {
     expect(heavyEagerHits("src/main.tsx")).toEqual([]);
-  });
+  }, TRACE_TIMEOUT_MS);
 
   it("settings window does not eagerly pull editor/AI/markdown stacks", () => {
     expect(heavyEagerHits("src/settings/main.tsx")).toEqual([]);
-  });
+  }, TRACE_TIMEOUT_MS);
 });
