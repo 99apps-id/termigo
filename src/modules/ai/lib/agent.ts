@@ -1113,6 +1113,13 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // chunk, name the wait in the step label (the HUD reads "Round N · <step>"), so
   // the pause is an explained stall rather than a suspected hang.
   let stallNotice: ReturnType<typeof setTimeout> | null = null;
+  // Tool execution can outlive the model's silence clock: a tool-call hands
+  // control to the harness and the provider sends nothing until the tool
+  // returns. Track that gap separately so a stuck tool (hung bash, blocked
+  // browser fetch, runaway subagent) still aborts instead of leaving the run
+  // in "streaming" forever.
+  const MAX_TOOL_EXECUTION_MS = 120_000;
+  let toolExecutionTimer: ReturnType<typeof setTimeout> | null = null;
   const clearFirstStepTimer = (): void => {
     if (firstStepTimer) {
       clearTimeout(firstStepTimer);
@@ -1121,6 +1128,10 @@ export async function runAgentStream(opts: RunAgentOptions) {
     if (stallNotice) {
       clearTimeout(stallNotice);
       stallNotice = null;
+    }
+    if (toolExecutionTimer) {
+      clearTimeout(toolExecutionTimer);
+      toolExecutionTimer = null;
     }
   };
   /**
@@ -1627,8 +1638,33 @@ export async function runAgentStream(opts: RunAgentOptions) {
     // step re-arms once the tool is done.
     onChunk: ({ chunk }) => {
       const directive = watchdogDirective(chunk.type);
-      if (directive === "rearm") armModelWatchdog();
-      else if (directive === "disarm") clearFirstStepTimer();
+      if (directive === "rearm") {
+        armModelWatchdog();
+      } else if (directive === "disarm") {
+        clearFirstStepTimer();
+        // A tool-call hands control to the harness; arm a separate timer so a
+        // stuck tool does not leave the run in "streaming" forever while the
+        // provider waits silently for the result.
+        toolExecutionTimer = setTimeout(() => {
+          const elapsed = Math.round((Date.now() - runStart) / 1000);
+          fireAndForget(
+            logWarn(
+              `[ai] tool execution exceeded ${Math.round(MAX_TOOL_EXECUTION_MS / 1000)}s, aborting the run (elapsed=${elapsed}s, model=${modelId}, provider=${provider})`,
+            ),
+            "tool-execution-timeout",
+          );
+          abortController.abort(
+            new Error(
+              `A tool did not complete within ${Math.round(MAX_TOOL_EXECUTION_MS / 1000)}s. The run was stopped to avoid hanging forever.`,
+            ),
+          );
+        }, MAX_TOOL_EXECUTION_MS);
+      } else if (chunk.type === "tool-result") {
+        // The tool finished; clear the execution watchdog and re-arm the
+        // model silence watchdog for the next model turn.
+        clearFirstStepTimer();
+        armModelWatchdog();
+      }
     },
     onStepFinish: (step) => {
       clearFirstStepTimer();
