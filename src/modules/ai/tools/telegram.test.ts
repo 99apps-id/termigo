@@ -86,4 +86,40 @@ describe("telegram AI tools", () => {
       expect.any(AbortSignal)
     );
   });
+
+  // The recipient is deliberately not a parameter. This schema is the first
+  // place a caller could name another chat, and the tool reads files the user
+  // can read, so an arbitrary target turned it into an exfiltration path.
+  it("offers no way for the caller to name a target chat", () => {
+    const tools = buildTelegramTools(mockCtx);
+    for (const t of [
+      tools.telegram_send_document,
+      tools.telegram_send_message,
+    ]) {
+      const shape =
+        (t.inputSchema as { shape?: Record<string, unknown> }).shape ?? {};
+      expect(Object.keys(shape)).not.toContain("chatId");
+    }
+  });
+
+  // Belt and braces: a smuggled `chatId` must not redirect the send either, so
+  // the guarantee does not rest on the schema alone.
+  it("ignores a smuggled chatId and still sends to the paired chat", async () => {
+    useTelegramStore.getState().setChatId("111111111");
+    const { sendTelegram } = await import("@/modules/telegram/telegramApi");
+
+    const tools = buildTelegramTools(mockCtx);
+    const msgExec = tools.telegram_send_message.execute;
+    if (!msgExec) throw new Error("telegram_send_message execute missing");
+
+    // biome-ignore lint/suspicious/noExplicitAny: passing an extra field on purpose
+    const res = await msgExec({ text: "hi", chatId: "999999999" } as any, {} as any);
+    expect(res.ok).toBe(true);
+    expect(res.chatId).toBe("111111111");
+    expect(sendTelegram).toHaveBeenCalledWith(
+      "111111111",
+      "hi",
+      expect.any(AbortSignal)
+    );
+  });
 });
