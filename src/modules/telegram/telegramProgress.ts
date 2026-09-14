@@ -329,12 +329,16 @@ export async function publishProgress(
     }
   } finally {
     activeProgressMessageIds.delete(chatId);
-    if (progressMessageId) {
-      if (finalizedProgressMessages.has(progressMessageId)) {
-        finalizedProgressMessages.delete(progressMessageId);
-        return;
-      }
-
+    // A `return` used to short-circuit here when this message was already
+    // finalized (by the stop or approval path). That is a real bug, not lint
+    // noise: a `return` inside `finally` SWALLOWS an exception thrown by the
+    // progress loop above, so a run that failed would finish as a clean
+    // "done", the error gone and nothing in the log to say why. Conjoining the
+    // condition keeps the same skip without taking the failure with it.
+    if (
+      progressMessageId &&
+      !finalizedProgressMessages.has(progressMessageId)
+    ) {
       // State the outcome rather than a bare "Completed.". `stoppedByUser` and
       // `stopReason` are what the desktop app uses to tell a finished run from
       // one the user stopped, one that hit the step limit and one that failed;
@@ -382,6 +386,9 @@ export async function publishProgress(
       if (!answerText || outcome !== "done") {
         lastFinishedProgressMessageIds.set(chatId, progressMessageId);
       }
+    } else if (progressMessageId) {
+      // Already finalized by the stop / approval path - only the marker is left.
+      finalizedProgressMessages.delete(progressMessageId);
     }
   }
 }
