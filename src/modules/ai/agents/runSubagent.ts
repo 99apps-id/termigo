@@ -324,6 +324,13 @@ export async function runSubagent({
       },
     });
 
+  const clearTimers = () => {
+    if (firstStepTimer) {
+      clearTimeout(firstStepTimer);
+      firstStepTimer = null;
+    }
+  };
+
   const start = Date.now();
   try {
     armTimer();
@@ -343,6 +350,7 @@ export async function runSubagent({
         `${prompt}\n\n(Your previous attempt returned nothing at all - no text and no tool call. Do the work now: call the tools you need, then finish with a short text answer. Never reply with an empty message.)`,
       );
       if (!result.text?.trim() && !subagentMadeProgress(result)) {
+        clearTimers();
         throw new Error(
           `sub-agent model returned an empty completion twice (no text, no tool calls) - the task did not run; retry it, or switch the sub-agent model in Settings > Agents`,
         );
@@ -379,6 +387,7 @@ export async function runSubagent({
         clearTimeout(summaryTimer);
       }
     }
+    clearTimers();
     const steps = result.steps?.length ?? 0;
     const toolCalls = (result.steps ?? []).reduce(
       (n, s) => n + (s.toolCalls?.length ?? 0),
@@ -407,10 +416,7 @@ export async function runSubagent({
     // them into a clean result so the caller sees what happened instead of a
     // raw error string.
     if (controller.signal.aborted) {
-      if (firstStepTimer) {
-        clearTimeout(firstStepTimer);
-        firstStepTimer = null;
-      }
+      clearTimers();
       return {
         summary: breaker.tripped
           ? "Stopped: the user denied the same write three times in a row. Nothing was written; report the change as not done."
@@ -425,10 +431,7 @@ export async function runSubagent({
         ...(worktreePath ? { worktreePath } : {}),
       };
     }
-    if (firstStepTimer) {
-      clearTimeout(firstStepTimer);
-      firstStepTimer = null;
-    }
+    clearTimers();
     throw e;
   }
 }

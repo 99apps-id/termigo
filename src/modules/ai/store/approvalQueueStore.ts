@@ -24,6 +24,7 @@ export function isApprovedDecision(d: ApprovalDecision): boolean {
 }
 
 const MAX_APPROVAL_AGE_MS = 30 * 60 * 1000;
+const STALE_CLEANUP_INTERVAL_MS = 60 * 1000;
 
 function cleanStaleApprovalsNow(): PendingApproval[] {
   const cutoff = Date.now() - MAX_APPROVAL_AGE_MS;
@@ -44,6 +45,16 @@ function cleanStaleApprovalsNow(): PendingApproval[] {
 /** Clean stale approvals: older than 30 minutes are auto-denied on startup. */
 export async function cleanupStaleApprovals(): Promise<number> {
   return cleanStaleApprovalsNow().length;
+}
+
+/** Start periodic stale-approval cleanup so runtime approvals cannot hang
+ * forever if the app stays open without a restart. */
+export function startPeriodicStaleApprovalCleanup(): (() => void) | void {
+  if (typeof window === "undefined") return;
+  const id = window.setInterval(() => {
+    cleanStaleApprovalsNow();
+  }, STALE_CLEANUP_INTERVAL_MS);
+  return () => window.clearInterval(id);
 }
 
 /**

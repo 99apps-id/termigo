@@ -632,7 +632,6 @@ export async function runAgentAndStream(
           stopReasonSnapshot =
             store.useChatStore.getState().agentMeta.stopReason;
           stopReasonAtEnd = stopReasonSnapshot;
-          settleStart = Date.now();
 
           // Surface a status fallback at most once per run. It must NOT skip
           // the settle check below: `continue` used to jump straight back into
@@ -725,6 +724,11 @@ export async function runAgentAndStream(
             const runtime = await import("../ai/store/chatRuntime");
             await runtime.flushSteer();
           }
+
+          // Advance settle clock only after the work above. If the run is still
+          // busy after a flush, the next iteration must still age toward the
+          // timeout instead of resetting it forever.
+          settleStart = Date.now();
         }
 
         // If run stopped due to step-cap, offer one-click continuation button.

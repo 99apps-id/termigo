@@ -138,7 +138,8 @@ function requestAutoContinue(sessionId: string): boolean {
   if (useChatStore.getState().steerQueue.pending.length > 0) return false;
   const used = autoContinueCount.get(sessionId) ?? 0;
   if (!autoContinueSlot(used)) return false;
-  autoContinueCount.set(sessionId, used + 1);
+  const next = used + 1;
+  autoContinueCount.set(sessionId, next);
   useChatStore.getState().patchAgentMeta({
     status: "thinking",
     stopReason: null,
@@ -146,10 +147,16 @@ function requestAutoContinue(sessionId: string): boolean {
   });
   setTimeout(() => {
     if (!canResumeDeferred(sessionId)) {
+      // The run was stopped or superseded before this timer fired. Roll the
+      // counter back so a later legitimate auto-continue is not penalised by
+      // an attempt that never actually started.
+      autoContinueCount.set(sessionId, next - 1);
       releaseFabricatedBusy(sessionId);
       return;
     }
     void resumeRun().catch(() => {
+      // Same rollback on a failed resume attempt.
+      autoContinueCount.set(sessionId, next - 1);
       useChatStore.getState().patchAgentMeta({
         status: "error",
         error:
