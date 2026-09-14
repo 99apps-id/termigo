@@ -1016,7 +1016,24 @@ export async function flushSteer(bypassBusyCheck = false): Promise<boolean> {
       // that no longer auto-continues - nothing is stranded.
       await new Promise((resolve) => setTimeout(resolve, 0));
       const live = chats.get(sessionId);
-      if (flushShouldHold(live?.status ?? null)) return false;
+      // Logged because this decision was invisible, and that made a real
+      // incident undiagnosable: the log showed `run: start` twice with nothing
+      // between, and there was no way to tell whether the flush held and retried
+      // or sent into a live run. `live` distinguishes "no chat object" (the guard
+      // assumes nothing is in flight) from "chat reports ready", which are
+      // different states that used to look identical.
+      const held = flushShouldHold(live?.status ?? null);
+      logInfo(
+        `[ai] flushSteer: sdk=${live?.status ?? "(no chat)"} app=${useChatStore.getState().agentMeta.status} action=${held ? "hold" : "send"}`,
+      );
+      if (held) return false;
+    } else {
+      // The stop path skips the guard on purpose (an aborted round never
+      // auto-continues, and the abort may take a tick to settle). Logged so a
+      // send that bypassed every check is never mistaken for a guarded one.
+      logInfo(
+        `[ai] flushSteer: bypassed the busy guard (stop path), sdk=${chats.get(sessionId)?.status ?? "(no chat)"}`,
+      );
     }
     const store = useChatStore.getState();
     const out = flushOne(store.steerQueue);
