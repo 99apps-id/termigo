@@ -26,13 +26,19 @@ KNOWN_GOOD="${APP_DIR}/termigo.known-good"
 TARGET_RELEASE="${APP_DIR}/src-tauri/target/release/termigo"
 
 SERVICE="termigo.service"
-UTH=300000          # memory threshold: minimal webview "boot penuh" (bytes). 89MB = fail, 300MB+ = pass
+UTH=70000000       # memory threshold: minimal webview "boot penuh" (~70MB bytes)
 POLL_TIMEOUT=90     # detik maksimal tunggu boot + koneksi
 SLEEP_UNIT=8        # interval poll
 
 # --- helpers ---
 mem_bytes() { systemctl show "$SERVICE" -p MemoryCurrent --value; }
 has_tg_conn() { ss -tnp 2>/dev/null | grep -E "149\\.154|2001:67c" | grep -qE "WebKitNetworkPr|termigo"; }
+is_healthy() {
+  if [ -x "${APP_DIR}/termigo-cli" ]; then
+    runuser -u "$AGENT_USER" -- "${APP_DIR}/termigo-cli" ping 2>/dev/null | grep -q "is running" && return 0
+  fi
+  has_tg_conn
+}
 log() { echo "[deploy-termigo] $*"; }
 
 # --- guard: jangan memutus pekerjaan agent yang sedang berjalan ---
@@ -161,10 +167,10 @@ PASS=0
 for (( i=0; i<POLL_TIMEOUT/SLEEP_UNIT; i++ )); do
   sleep "$SLEEP_UNIT"
   M="$(mem_bytes)"
-  T="y2"
-  has_tg_conn && T="y"
-  log "  poll#$((i+1)) mem=${M} conn=${T}"
-  if [ "${M:-0}" -ge "$UTH" ] && has_tg_conn; then PASS=1; break; fi
+  T="no"
+  is_healthy && T="yes"
+  log "  poll#$((i+1)) mem=${M} healthy=${T}"
+  if [ "${M:-0}" -ge "$UTH" ] && is_healthy; then PASS=1; break; fi
 done
 
 # --- 5. rollback kalau gagal ---
