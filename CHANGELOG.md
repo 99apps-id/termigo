@@ -23,6 +23,29 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **A worktree sandbox from a previous run is visible again, and removable.**
+  The sandbox registry is in memory only, so after a restart `worktree_list`
+  reported nothing while `.termigo/worktrees/<id>` directories and
+  `termigo-sandbox/<id>` branches were still on disk. They could not be removed
+  either, because `worktree_discard` looks the sandbox up by id. Listing now merges
+  the registry with what git reports, marking the ones this process did not create
+  as `orphaned`, and discard falls back to the discovered entry. A user's own
+  worktrees are never reported as sandboxes - the report is what discard acts on.
+- **A stalled model no longer hangs the run forever.** The silence watchdog was
+  armed once per run, cleared by the first chunk of any kind, and never re-armed,
+  so it guarded only the opening moment of a run - and because a reasoning model
+  emits chunks before it answers, it could be cleared before anything was
+  answered. Observed in the field as a run sitting at `sdk=streaming` for 20
+  minutes while messages typed meanwhile queued behind it. Silence is now measured
+  from the last chunk, and `tool-call` explicitly disarms it rather than re-arming
+  blindly, so a long build or scan is not mistaken for a stall.
+- **The plain-text fallback no longer cuts an HTML entity in half.** When the
+  formatted HTML was too long, the fallback escaped the text and then truncated
+  it with a plain slice - and escaping expands text, so the cut could land inside
+  an entity and leave a fragment like `&am`. Telegram rejects the whole message
+  for an invalid entity, and this is the last resort in the send path, so the
+  message was lost rather than degraded. The truncation now backs off to the
+  entity boundary.
 - **Log timestamps are local time.** `tauri-plugin-log` defaults to
   `TimezoneStrategy::UseUtc`, so a line stamped `[01:02:24]` sat in a file last
   written `08:02:24` on a UTC+7 machine: the same moment, seven hours apart. A log
