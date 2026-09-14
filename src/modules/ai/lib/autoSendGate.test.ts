@@ -7,6 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  autoSendAskIsDuplicate,
   autoSendGate,
   INITIAL_AUTO_SEND_STATE,
   MAX_STALLED_AUTO_SENDS,
@@ -107,5 +108,75 @@ describe("autoSendGate", () => {
     expect(decisions.every((d) => d.allow)).toBe(true);
     // Each growth step also clears the stall streak.
     expect(decisions.at(-1)?.state.stalled).toBe(0);
+  });
+});
+
+/**
+ * The gate is only as good as what the caller feeds it, and the first version
+ * of that caller fed it nothing in the case that matters. These tests drive the
+ * gate the way the runtime does, including the duplicate asks inside one cycle.
+ */
+describe("the caller's once-per-send rule", () => {
+  /** Mirrors `sendAutomaticallyWhen`: asks are deduped, a round clears pending. */
+  function simulate(progressPerCycle: number[]): boolean[] {
+    let state = INITIAL_AUTO_SEND_STATE;
+    let decidedAt = -1;
+    let allowed = true;
+    let pending = false;
+    const perCycle: boolean[] = [];
+    for (const progress of progressPerCycle) {
+      let verdict = false;
+      // The SDK may ask more than once before the round starts.
+      for (let ask = 0; ask < 2; ask += 1) {
+        if (autoSendAskIsDuplicate({ pending, decidedAt, progress })) {
+          verdict = allowed;
+          continue;
+        }
+        const decision = autoSendGate(state, progress);
+        state = decision.state;
+        decidedAt = progress;
+        allowed = decision.allow;
+        pending = decision.allow;
+        verdict = allowed;
+      }
+      perCycle.push(verdict);
+      // The authorised send became a round (`onRoundStart`).
+      pending = false;
+    }
+    return perCycle;
+  }
+
+  it("counts one stalled resume per real send, not one per ask", () => {
+    // THE regression, 2026-09-15. Fifteen resumes, ~3 minutes apart, all
+    // aborted: the transcript stayed at the same part count because a killed
+    // resume appends nothing. The old rule returned the cached verdict for an
+    // unchanged progress value, so `stalled` never incremented and the bound
+    // never engaged - the run repeated for half an hour with the app looking
+    // frozen. The first cycle is progress (from an empty transcript), then
+    // `MAX_STALLED_AUTO_SENDS` unproductive resumes are tolerated.
+    const cycles = MAX_STALLED_AUTO_SENDS + 3;
+    const verdicts = simulate(Array.from({ length: cycles }, () => 170));
+    expect(verdicts.filter(Boolean)).toHaveLength(MAX_STALLED_AUTO_SENDS + 1);
+    expect(verdicts.at(-1)).toBe(false);
+  });
+
+  it("still allows every cycle that grows the transcript", () => {
+    const verdicts = simulate([10, 14, 18, 22, 26, 30, 34]);
+    expect(verdicts.every(Boolean)).toBe(true);
+  });
+
+  it("only treats a repeated ask as duplicate once a send is pending", () => {
+    // Without the pending flag the same progress would be free forever, which is
+    // the bug this replaced; with it, the second ask of the SAME cycle is free
+    // and the next cycle is counted.
+    expect(
+      autoSendAskIsDuplicate({ pending: true, decidedAt: 170, progress: 170 }),
+    ).toBe(true);
+    expect(
+      autoSendAskIsDuplicate({ pending: false, decidedAt: 170, progress: 170 }),
+    ).toBe(false);
+    expect(
+      autoSendAskIsDuplicate({ pending: true, decidedAt: 170, progress: 174 }),
+    ).toBe(false);
   });
 });

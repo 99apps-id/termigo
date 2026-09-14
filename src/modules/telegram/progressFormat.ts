@@ -443,13 +443,22 @@ export function markdownToTelegramHtml(markdown: string): string {
   // 9. Underline: __text__
   text = text.replace(/__(.+?)__/g, "<u>$1</u>");
 
-  // 10. Italic: *text* (avoiding remaining single asterisks)
-  text = text.replace(/(?<!\*)\*([^*\r\n]+?)\*(?!\*)/g, "<i>$1</i>");
+  // 10. Italic: *text* (avoiding remaining single asterisks). The boundary is
+  // matched as a CONSUMING group and re-emitted (`$1`) rather than as a
+  // lookbehind: lookbehind is ES2018 and is absent from older WebKitGTK builds,
+  // where it is a parse-time SyntaxError - the whole renderer would throw on
+  // every message instead of mis-formatting one. A capture group is supported
+  // everywhere and has identical semantics here, because the boundary character
+  // is put straight back. Same reasoning for step 11.
+  text = text.replace(/(^|[^*])\*([^*\r\n]+?)\*(?!\*)/g, "$1<i>$2</i>");
 
-  // 11. Italic: _text_ (only when surrounded by whitespace or punctuation, to avoid snake_case)
+  // 11. Italic: _text_ (only when surrounded by whitespace or punctuation, to
+  // avoid snake_case). The trailing boundary may stay a lookahead: look-ahead
+  // has been in the language since ES3, and a zero-width assertion there is what
+  // keeps the trailing delimiter available to the next match.
   text = text.replace(
-    /(?<=^|[\s([{])_([^_ \r\n][^_\r\n]*?[^_ \r\n]|\S)_(?=[)\]}\s.,:;!?]|$)/gm,
-    "<i>$1</i>",
+    /(^|[\s([{])_([^_ \r\n][^_\r\n]*?[^_ \r\n]|\S)_(?=[)\]}\s.,:;!?]|$)/gm,
+    "$1<i>$2</i>",
   );
 
   // 12. Strikethrough: ~~text~~

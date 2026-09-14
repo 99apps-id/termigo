@@ -372,6 +372,36 @@ describe("progressFormat", () => {
       const result = markdownToTelegramHtml(input);
       expect(result).toBe("normaltext");
     });
+
+    it("italic boundaries survive a single delimiter pair", () => {
+      // The underscore rule exists to keep snake_case out of it, so the cases
+      // that must NOT change are as important as the ones that must. Verified
+      // against the previous lookbehind patterns over the same inputs: output
+      // is identical, including the `)` case, which was never a boundary.
+      expect(markdownToTelegramHtml("a _b_ c")).toBe("a <i>b</i> c");
+      expect(markdownToTelegramHtml("(halo) _x_ .")).toBe("(halo) <i>x</i> .");
+      expect(markdownToTelegramHtml("a*b*c")).toBe("a<i>b</i>c");
+      expect(markdownToTelegramHtml("(halo)_x_.")).toBe("(halo)_x_.");
+      expect(markdownToTelegramHtml("snake_case_name")).toBe("snake_case_name");
+    });
+
+    // Portability guard, not a formatting rule. Lookbehind is ES2018 and is
+    // absent from older WebKitGTK builds (the Linux webview), where the regex
+    // LITERAL is a parse-time SyntaxError: the module would fail to load and
+    // take the whole bundle with it, so every Telegram message would break
+    // rather than one markdown span being wrong. This file used to carry two
+    // lookbehinds; the boundary is now a captured group re-emitted as `$1`,
+    // which behaves identically and parses everywhere. Look-AHEAD is fine
+    // (ES3), which is why step 11 keeps one at the end.
+    it("uses no lookbehind anywhere in the renderer or the composer", async () => {
+      const { readFileSync } = await import("node:fs");
+      const files = ["./progressFormat.ts", "../ai/lib/composerHighlights.ts"];
+      for (const file of files) {
+        const source = readFileSync(new URL(file, import.meta.url), "utf8");
+        expect(source).not.toMatch(/\(\?<=/);
+        expect(source).not.toMatch(/\(\?<!/);
+      }
+    });
   });
 
   describe("formatMarkdownTable", () => {

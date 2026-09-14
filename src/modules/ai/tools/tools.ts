@@ -7,6 +7,7 @@ import {
 } from "../lib/postExecuteConfirm";
 import { KNOWN_TOOL_ALIASES } from "../lib/repairToolCall";
 import { buildSkillRegistryTools } from "../lib/skillRegistry";
+import { markRunActivity, startActivityHeartbeat } from "../lib/streamWatchdog";
 import { useApprovalQueue } from "../store/approvalQueueStore";
 import { buildManagedAgentTools } from "./agent";
 import { buildBrowserTools } from "./browser";
@@ -61,8 +62,19 @@ export { resolvePath, type ToolContext } from "./context";
  *
  * PreToolUse fires before the real execute; PostToolUse fires after. Both
  * are fire-and-forget: a hook failure must not change the tool result.
+ *
+ * Also the one place where the run's activity clock is fed while a tool works.
+ * The watchdog watches the MODEL's stream, and a tool is silent by design - a
+ * build, a scan, a subagent fan-out produces no parent chunks for minutes. The
+ * resume case is the one that broke: step 0 executed an approved `cargo test`
+ * with the watchdog still armed from the previous round, so the tool was killed
+ * at the silence budget, its own timeout result never reached the model, and the
+ * whole request was re-sent every few minutes. Because every tool goes through
+ * here, the clock now means "the run is doing something" rather than "the model
+ * is talking", and a long tool cannot be mistaken for a stall. The heartbeat is
+ * bounded (see `startActivityHeartbeat`) so a hung tool still trips it.
  */
-function withHooks<
+export function withToolLifecycle<
   T extends {
     execute: (
       args: Record<string, unknown>,
@@ -94,11 +106,17 @@ function withHooks<
       if (ctx.firePreToolHook) {
         await ctx.firePreToolHook(name, args).catch(() => {});
       }
-      const result = await original(args, options);
-      if (ctx.firePostToolHook) {
-        await ctx.firePostToolHook(name, args, result).catch(() => {});
+      const stopHeartbeat = startActivityHeartbeat();
+      try {
+        const result = await original(args, options);
+        if (ctx.firePostToolHook) {
+          await ctx.firePostToolHook(name, args, result).catch(() => {});
+        }
+        return result;
+      } finally {
+        stopHeartbeat();
+        markRunActivity();
       }
-      return result;
     },
   };
 }
@@ -289,7 +307,7 @@ export function buildTools(
   // type-checking.
   const wrapped: Record<string, unknown> = {};
   for (const [name, tool] of Object.entries(base)) {
-    let wrappedTool = withHooks(
+    let wrappedTool = withToolLifecycle(
       name,
       tool as unknown as {
         execute: (

@@ -19,6 +19,7 @@ import { isResumingApproval } from "../lib/approvalResume";
 import { AUTO_CONTINUE_DELAY_MS, autoContinueSlot } from "../lib/autoContinue";
 import {
   type AutoSendGateState,
+  autoSendAskIsDuplicate,
   autoSendGate,
   INITIAL_AUTO_SEND_STATE,
 } from "../lib/autoSendGate";
@@ -356,6 +357,10 @@ function makeChat(sessionId: string): Chat<UIMessage> {
   let autoSendState: AutoSendGateState = INITIAL_AUTO_SEND_STATE;
   let autoSendDecidedAt = -1;
   let autoSendAllowed = true;
+  // True while an authorised automatic send has not actually started yet, so a
+  // repeated ask inside the same cycle is not counted twice (and, above all, so
+  // the NEXT cycle is counted even when the transcript did not grow).
+  let autoSendPending = false;
   const readCache = new Map<string, { size: number; hash: number }>();
   const toolContext: ToolContext = {
     getCwd: () =>
@@ -458,6 +463,11 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     onRoundStart: () => {
       // Fires once per agentic-loop round (each sendMessages) so the UI can
       // show "Round N · step X" and a user can tell the run is still going.
+      //
+      // Also marks the authorised automatic send as started: the loop breaker in
+      // `sendAutomaticallyWhen` counts one stall per REAL resume, and this is the
+      // only signal that a resume left the predicate and became a run.
+      autoSendPending = false;
       const next = useChatStore.getState().agentMeta.round + 1;
       useChatStore.getState().patchAgentMeta({ round: next });
     },
@@ -626,18 +636,36 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       // the message count constant for many rounds, and counting messages would
       // stop it as if it were stuck.
       //
-      // Decided once per progress value: the SDK may ask more than once in a
-      // cycle, and counting each ask would tighten the bound silently.
+      // Decided once per SEND, not once per progress value. The SDK may ask
+      // more than once in a cycle, and counting each ask would tighten the bound
+      // silently; the previous fix cached the verdict by progress instead - and
+      // that cache is exactly what made the counter dead in the case it exists
+      // for. An aborted resume adds nothing, so `progress` is unchanged, the
+      // cached `true` is returned, and `autoSendGate` is never called to
+      // increment `stalled`. Observed in the field as 15 consecutive aborted
+      // resumes, 3 minutes apart, with the transcript frozen at 2 messages.
+      // `autoSendPending` is cleared by the round actually starting
+      // (`onRoundStart`), so a duplicate ask inside one cycle is still free
+      // while the next real resume is counted.
       const transcript = messages.messages;
       const progress = transcript.reduce(
         (total, message) => total + (message.parts?.length ?? 0),
         0,
       );
-      if (progress === autoSendDecidedAt) return autoSendAllowed;
+      if (
+        autoSendAskIsDuplicate({
+          pending: autoSendPending,
+          decidedAt: autoSendDecidedAt,
+          progress,
+        })
+      ) {
+        return autoSendAllowed;
+      }
       const decision = autoSendGate(autoSendState, progress);
       autoSendState = decision.state;
       autoSendDecidedAt = progress;
       autoSendAllowed = decision.allow;
+      autoSendPending = decision.allow;
       if (decision.stoppedLoop) {
         logWarn(
           `[ai] stopped an automatic resume loop after ${decision.state.stalled} unproductive resumes`,

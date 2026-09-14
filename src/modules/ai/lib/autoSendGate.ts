@@ -82,3 +82,34 @@ export function autoSendGate(
     stoppedLoop: false,
   };
 }
+
+/**
+ * Whether this ask is the same authorised send being asked about again.
+ *
+ * The SDK may call the predicate more than once inside one cycle, and counting
+ * each ask would tighten the bound silently - but the first fix for that cached
+ * the verdict by PROGRESS VALUE, and that is what made this gate inert in the
+ * one case it exists for:
+ *
+ *     if (progress === autoSendDecidedAt) return autoSendAllowed;   // bug
+ *
+ * An aborted resume adds nothing to the transcript, so `progress` is unchanged,
+ * the cached `true` is returned, and `autoSendGate` is never called - the
+ * `stalled` counter cannot move exactly when a run is repeating without
+ * progress. Observed in the field as fifteen consecutive aborted resumes, one
+ * every ~3 minutes, with the transcript frozen.
+ *
+ * So the duplicate question is "has the send I authorised actually started?"
+ * rather than "has the progress value changed?". The caller clears `pending`
+ * when a round really begins, which makes one cycle equal one count.
+ */
+export function autoSendAskIsDuplicate(input: {
+  /** An authorised automatic send that has not become a round yet. */
+  pending: boolean;
+  /** The progress value the last decision was made at. */
+  decidedAt: number;
+  /** Progress of the transcript being asked about. */
+  progress: number;
+}): boolean {
+  return input.pending && input.progress === input.decidedAt;
+}

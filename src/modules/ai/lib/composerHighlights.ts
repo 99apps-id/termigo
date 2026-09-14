@@ -27,27 +27,36 @@ type Span = { start: number; end: number };
 
 // A `/command` or `#snippet` trigger: at the start of input or after
 // whitespace, followed by the typed word (possibly empty — the user just
-// pressed the key). Paths like `/usr/local` or `a/b` never match: the
-// lookbehind requires a boundary and the token stops at the first non-word
-// character.
-const wordTokenRe = () => /(?<=^|\s)([/#])([\w-]*)/g;
+// pressed the key). Paths like `/usr/local` or `a/b` never match: the boundary
+// group is required and the token stops at the first non-word character.
+//
+// The boundary is a consuming group rather than a lookbehind. Lookbehind is
+// ES2018 and is missing from older WebKitGTK builds, where the regex LITERAL is
+// a parse-time SyntaxError - the module would fail to load, taking the whole
+// bundle with it, instead of merely highlighting nothing. The group is captured
+// and subtracted from the match index below, so the spans are identical.
+const wordTokenRe = () => /(^|\s)([/#])([\w-]*)/g;
 
 // An `@file` ref runs to the next whitespace — paths contain `/` and `.`, and
 // the file picker's own trigger detection scans back to whitespace, so the
 // highlight must cover the same span the picker would.
-const atTokenRe = () => /(?<=^|\s)@\S*/g;
+const atTokenRe = () => /(^|\s)@(\S*)/g;
+
+/** Where a match really starts, excluding the captured boundary character. */
+const boundaryOffset = (lead: string | undefined): number => lead?.length ?? 0;
 
 const matchSpans = (text: string, vocab: HighlightVocab): Span[] => {
   const spans: Span[] = [];
   for (const m of text.matchAll(atTokenRe())) {
     // `@file` refs light up as soon as the `@` is typed: any token is a
     // candidate path and the picker is already open on it.
-    spans.push({ start: m.index ?? 0, end: (m.index ?? 0) + m[0].length });
+    const start = (m.index ?? 0) + boundaryOffset(m[1]);
+    spans.push({ start, end: start + 1 + (m[2] ?? "").length });
   }
   for (const m of text.matchAll(wordTokenRe())) {
-    const kind = m[1];
-    const word = m[2] ?? "";
-    const start = m.index ?? 0;
+    const kind = m[2];
+    const word = m[3] ?? "";
+    const start = (m.index ?? 0) + boundaryOffset(m[1]);
     const known = kind === "/" ? vocab.commands : vocab.snippets;
     // A completed name lights up; so does a prefix of one — that is the user
     // mid-typing with the picker open, and the highlight is the feedback that
@@ -56,7 +65,7 @@ const matchSpans = (text: string, vocab: HighlightVocab): Span[] => {
       word.length > 0 &&
       (known.has(word.toLowerCase()) ||
         [...known].some((k) => k.startsWith(word.toLowerCase())));
-    if (lit) spans.push({ start, end: start + m[0].length });
+    if (lit) spans.push({ start, end: start + 1 + word.length });
   }
   return spans;
 };

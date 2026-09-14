@@ -82,7 +82,13 @@ import { repairToolCall } from "./repairToolCall";
 import { isRepetitionDominated } from "./repetitionGuard";
 import { sanitizeUiMessages } from "./sanitizeMessages";
 import { type Skill, skillsBlock } from "./skills";
-import { watchdogDirective } from "./streamWatchdog";
+import {
+  markRunActivity,
+  remainingSilenceMs,
+  resetRunActivity,
+  stallBudgetMs,
+  watchdogDirective,
+} from "./streamWatchdog";
 import { formatTodoStatusBlock } from "./todos";
 import { modelRejectsForcedToolChoice } from "./toolChoiceLearning";
 import { measureToolPayload } from "./toolPayload";
@@ -1102,10 +1108,15 @@ export async function runAgentStream(opts: RunAgentOptions) {
   }
   const resumingApproval = isResumingApproval(opts.uiMessages ?? []);
   // Silence budget before the run is declared wedged. When resuming approval,
-  // step 0 executes the approved tool (which may take minutes for a build or a
-  // test run), so it gets a longer one - and that arm is disarmed anyway once the
-  // tool call arrives.
-  const stallTimeoutMs = resumingApproval ? 180_000 : 90_000;
+  // step 0 executes the approved tool BEFORE the model is called, so the budget
+  // is derived from that tool's own `timeout_secs` - never shorter than the work
+  // it is watching (see `stallBudgetMs`). A fixed 180s budget against a tool the
+  // model gave 300s was a guaranteed false abort: the tool was killed mid-run,
+  // its own timeout result never reached the model, and the run was re-sent.
+  const stallTimeoutMs = stallBudgetMs(
+    opts.uiMessages ?? [],
+    resumingApproval,
+  );
   const stallNoticeMs = resumingApproval ? 20_000 : 30_000;
   let firstStepTimer: ReturnType<typeof setTimeout> | null = null;
   // A provider that accepts the connection and then goes silent looked exactly
@@ -1155,7 +1166,19 @@ export async function runAgentStream(opts: RunAgentOptions) {
    */
   const armModelWatchdog = (): void => {
     clearFirstStepTimer();
-    firstStepTimer = setTimeout(() => {
+    // The timer only asks the question; the shared clock answers it. A run that
+    // made progress since the arm (a chunk, a tool's heartbeat) gets the rest of
+    // its budget instead of being aborted, so no path that re-arms the timer
+    // without a matching disarm can kill live work. That exact path was the
+    // field bug: on an approval resume the `tool-call` chunk that disarms the
+    // watchdog arrived in the PREVIOUS run, so the whole (silent by design) tool
+    // execution ran with the watchdog armed and was aborted at the budget.
+    const check = (): void => {
+      const remaining = remainingSilenceMs(Date.now(), stallTimeoutMs);
+      if (remaining > 0) {
+        firstStepTimer = setTimeout(check, remaining);
+        return;
+      }
       const elapsed = Math.round((Date.now() - runStart) / 1000);
       fireAndForget(
         logWarn(
@@ -1170,7 +1193,8 @@ export async function runAgentStream(opts: RunAgentOptions) {
             : `The model stopped responding (no output for ${Math.round(stallTimeoutMs / 1000)}s).`,
         ),
       );
-    }, stallTimeoutMs);
+    };
+    firstStepTimer = setTimeout(check, stallTimeoutMs);
     stallNotice = setTimeout(() => {
       opts.onStep?.(
         resumingApproval
@@ -1179,6 +1203,8 @@ export async function runAgentStream(opts: RunAgentOptions) {
       );
     }, stallNoticeMs);
   };
+  // A previous run's activity must not excuse a stalled one.
+  resetRunActivity();
   armModelWatchdog();
   abortController.signal.addEventListener("abort", clearFirstStepTimer, {
     once: true,
@@ -1646,28 +1672,39 @@ export async function runAgentStream(opts: RunAgentOptions) {
     // design, and a long build or scan is normal rather than a stall. The next
     // step re-arms once the tool is done.
     onChunk: ({ chunk }) => {
+      // ANY chunk is the stream being alive, including the ones the directive
+      // has no opinion about, so the shared clock is fed before the policy runs.
+      markRunActivity();
       const directive = watchdogDirective(chunk.type);
       if (directive === "rearm") {
         armModelWatchdog();
       } else if (directive === "disarm") {
-        clearFirstStepTimer();
-        // A tool-call hands control to the harness; arm a separate timer so a
-        // stuck tool does not leave the run in "streaming" forever while the
-        // provider waits silently for the result.
-        toolExecutionTimer = setTimeout(() => {
+        const checkToolExecution = (): void => {
+          const remaining = remainingSilenceMs(
+            Date.now(),
+            MAX_TOOL_EXECUTION_MS,
+          );
+          if (remaining > 0) {
+            toolExecutionTimer = setTimeout(checkToolExecution, remaining);
+            return;
+          }
           const elapsed = Math.round((Date.now() - runStart) / 1000);
           fireAndForget(
             logWarn(
-              `[ai] tool execution exceeded ${Math.round(MAX_TOOL_EXECUTION_MS / 1000)}s, aborting the run (elapsed=${elapsed}s, model=${modelId}, provider=${provider})`,
+              `[ai] tool execution exceeded ${Math.round(MAX_TOOL_EXECUTION_MS / 1000)}s without activity, aborting the run (elapsed=${elapsed}s, model=${modelId}, provider=${provider})`,
             ),
             "tool-execution-timeout",
           );
           abortController.abort(
             new Error(
-              `A tool did not complete within ${Math.round(MAX_TOOL_EXECUTION_MS / 1000)}s. The run was stopped to avoid hanging forever.`,
+              `A tool did not complete or show activity within ${Math.round(MAX_TOOL_EXECUTION_MS / 1000)}s. The run was stopped to avoid hanging forever.`,
             ),
           );
-        }, MAX_TOOL_EXECUTION_MS);
+        };
+        toolExecutionTimer = setTimeout(
+          checkToolExecution,
+          MAX_TOOL_EXECUTION_MS,
+        );
       } else if (chunk.type === "tool-result") {
         // The tool finished; clear the execution watchdog and re-arm the
         // model silence watchdog for the next model turn.
@@ -1694,6 +1731,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
     },
     onStepFinish: (step) => {
       clearFirstStepTimer();
+      markRunActivity();
       logInfo(`[ai] runAgentStream: step finished (#${stepsSeen})`);
       stepsSeen++;
       // The step is over, so the next thing expected is another model response -

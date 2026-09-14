@@ -132,27 +132,29 @@ fn allows_program(program: &str) -> bool {
 /// `$` and the backtick are not negotiable: they expand to text chosen at run
 /// time, so a program name could be assembled AFTER this check and never appear
 /// in it (`CMD=rm` then `$CMD -rf /`). `(` and `)` build subshells, which are
-/// another command list the segment check does not see. `<` and `>` read or
-/// write arbitrary files. Separators are deliberately NOT in this list: they
-/// only need each segment's program checked, which is done below.
+/// Characters refused outright because a shell turns them into something other
+/// than the command we validated.
 ///
-/// A newline used to be missing from this list *and* from the separator set, so
-/// `git status\nrm -rf /` passed validation (the first whitespace token is
-/// `git`) and then ran both lines through `sh -c`. That was a hole in the
-/// allowlist, not a policy choice.
-const SHELL_METACHARACTERS: &[char] = &['$', '(', ')', '<', '>', '`'];
+/// `$` and the backtick are not negotiable: they expand to text chosen at run
+/// time, so a program name could be assembled AFTER this check and never appear
+/// in it (`CMD=rm` then `$CMD -rf /`). `(` and `)` build subshells, which are
+/// another command list the segment check does not see. `<` and `>` read or
+/// write arbitrary files. Newlines and carriage returns (`\n`, `\r`) are refused
+/// outright outside quotes to prevent command injection, multi-line command
+/// smuggling, and shell truncation quirks across POSIX and Windows.
+const SHELL_METACHARACTERS: &[char] = &['$', '(', ')', '<', '>', '`', '\n', '\r'];
 
 /// Characters that split a command into segments. Each segment's program is
-/// checked against the allowlist, so accepting them adds no reach: `;` and a
-/// newline are separators exactly like `&&`, and a `|` pipeline still runs only
-/// programs that are already allowed.
+/// checked against the allowlist, so accepting them adds no reach: `;` is a
+/// separator exactly like `&&`, and a `|` pipeline still runs only programs
+/// that are already allowed.
 ///
 /// This is the friction that mattered in practice. One install logged **325**
 /// refusals for metacharacters, the common ones being `|`, `2>&1` and `;`
 /// between two allowlisted programs. The agent's most ordinary request -
 /// `find /home/admin/peraturan_pdf -maxdepth 1 -type f | head -30` - failed on
 /// the pipe alone, even though `find` and `head` are both allowlisted.
-const SHELL_SEPARATORS: &[char] = &[';', '\n', '\r'];
+const SHELL_SEPARATORS: &[char] = &[';'];
 
 /// Validate a shell command for agent execution:
 /// - refuse expansion, subshells and redirection (`$`, backtick, `(`, `)`, `<`, `>`)
@@ -946,21 +948,21 @@ mod tests_sandbox {
         assert!(validate_shell_command("git status & git log").is_err());
     }
 
-    /// A newline used to be neither a metacharacter nor a separator, so it
-    /// passed the whole check and then ran as a second command through `sh -c`.
-    /// `git` is allowlisted and is the first whitespace token, so
-    /// `git status\nrm -rf /` was accepted and did both. That was a hole in the
-    /// allowlist, not a policy choice.
+    /// Newlines and carriage returns outside quotes are refused as metacharacters
+    /// to prevent injection or smuggling commands across lines. Inside quotes,
+    /// they are preserved as data.
     #[test]
-    fn validate_shell_command_refuses_a_second_command_on_a_new_line() {
-        let err = validate_shell_command("git status\nrm -rf /")
-            .expect_err("a newline must not smuggle an unlisted program");
-        assert!(err.contains("'rm'"), "{err}");
+    fn validate_shell_command_refuses_newlines_outside_quotes() {
+        assert!(validate_shell_command("git status\nrm -rf /").is_err());
         assert!(validate_shell_command("git status\r\nshred -u f").is_err());
         assert!(validate_shell_command("pnpm test\nsudo rm -rf /").is_err());
-        // A real second command on its own line is still checked and allowed
-        // when its program is fine.
-        assert!(validate_shell_command("git status\ngit log").is_ok());
+        assert!(validate_shell_command("git status\ngit log").is_err());
+        assert!(validate_shell_command("git status\rrm -rf /").is_err());
+        assert!(validate_shell_command("git status &&\nsudo rm -rf /").is_err());
+        assert!(validate_shell_command("git status &&\nrm -rf /").is_err());
+        // Newlines inside quotes are preserved as literal data.
+        assert!(validate_shell_command("echo \"a\nb\"").is_ok());
+        assert!(validate_shell_command("git commit -m 'subject\n\nbody'").is_ok());
     }
 
     /// The friction that mattered: a pipe between two allowlisted programs was
