@@ -19,7 +19,8 @@
 /** Named up front in the tool description, so most patterns never fail. */
 export const SEARCH_PATTERN_HINT =
   "RE2/ripgrep syntax: no look-around ((?=) (?!) (?<=) (?<!)) and no " +
-  "backreferences (\\1). Alternation (a|b), anchoring (^ $ \\b), character " +
+  "backreferences (\\1). Every match is confined to ONE line, so a pattern " +
+  "cannot span a newline. Alternation (a|b), anchoring (^ $ \\b), character " +
   "classes and {n,m} repeats all work.";
 
 type EngineLimit = {
@@ -64,16 +65,32 @@ const LIMITS: readonly EngineLimit[] = [
     match: "repetition quantifier expects a valid decimal",
     advice: "A {n,m} repeat has a malformed number inside the braces.",
   },
+  {
+    // The engine's own text is `the literal "\n" is not allowed in a regex`,
+    // so the marker has to carry the escaped form, not a real newline.
+    match: 'the literal "\\n" is not allowed',
+    // The example names the code rather than embedding an escaped pattern:
+    // writing `\\.then\\(` in a string literal is easy to over-escape, and the
+    // model knows which characters in `.then(` need escaping.
+    advice:
+      "grep reads the workspace one line at a time, so a pattern cannot cross " +
+      "a newline - and there is no multiline mode to switch on, despite what " +
+      "the engine's own hint suggests. Match the part that lives on one line, " +
+      "such as the `.then(` call, and read the lines around each hit; or run " +
+      "one grep per line and compare where the results meet.",
+  },
 ];
 
 /**
  * Turn an engine rejection into something the model can act on.
  *
- * Appends the specific rewrite for a known limit, and always names the dialect
- * so a retry cannot repeat the same construct. An unrecognised error is passed
- * through with the dialect note rather than swallowed - the engine's own
- * message (with its caret pointing at the offending column) is the best clue
- * available for a shape not covered here.
+ * A known limit gets its own rewrite and NOTHING else: naming the whole dialect
+ * as well would bury the relevant sentence under advice about constructs that
+ * are not the problem, which is how a newline error ends up being answered with
+ * a lecture about look-around. An unrecognised error is passed through with the
+ * dialect note rather than swallowed - the engine's own message (with its caret
+ * pointing at the offending column) is the best clue available for a shape not
+ * covered here.
  */
 export function explainSearchEngineError(rawError: string): string {
   const raw = String(rawError ?? "").trim();
