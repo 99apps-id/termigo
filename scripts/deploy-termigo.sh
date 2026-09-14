@@ -13,9 +13,12 @@
 #      build lama di atas data bentuk-baru dan kehilangan settings.
 #   2. salin binary baru ke /opt/termigo/termigo (pinned)
 #   3. restart service
-#   4. smoke-test: tunggu webview boot penuh (memory >= THRESH) + ada ESTAB/SYN ke api.telegram.org
+#   4. smoke-test: tunggu FRONTEND benar-benar terdaftar (`status` melaporkan
+#      "ui":{...}) DAN memory di atas ambang. Ping saja TIDAK cukup: aplikasi
+#      yang webview-nya gagal mount tetap menjawab ping sambil tidak melayani
+#      apa pun - itu cara build rusak lolos ke produksi dan Telegram mati.
 #   5. kalau GAGAL -> restore binary + data prev -> restart -> exit 1
-#   6. kalau OK -> hapus binary rusak yg tersisa, simpan known-good copy, exit 0
+#   6. kalau OK -> simpan known-good copy (hanya setelah terbukti boot), exit 0
 
 set -euo pipefail
 
@@ -26,19 +29,36 @@ KNOWN_GOOD="${APP_DIR}/termigo.known-good"
 TARGET_RELEASE="${APP_DIR}/src-tauri/target/release/termigo"
 
 SERVICE="termigo.service"
-UTH=70000000       # memory threshold: minimal webview "boot penuh" (~70MB bytes)
-POLL_TIMEOUT=90     # detik maksimal tunggu boot + koneksi
+# Memory floor. A webview that mounted sits in the hundreds of MB; one that never
+# loaded sits near 90 MB. This is the SECOND opinion, not the gate - the gate is
+# `frontend_ready` below. The previous value (70 MB) was below a dead webview and
+# so filtered nothing.
+UTH=200000000
+POLL_TIMEOUT=120    # detik maksimal tunggu boot + koneksi
 SLEEP_UNIT=8        # interval poll
+STATUS_TIMEOUT=25   # batas satu panggilan status
 
 # --- helpers ---
 mem_bytes() { systemctl show "$SERVICE" -p MemoryCurrent --value; }
-has_tg_conn() { ss -tnp 2>/dev/null | grep -E "149\\.154|2001:67c" | grep -qE "WebKitNetworkPr|termigo"; }
-is_healthy() {
-  if [ -x "${APP_DIR}/termigo-cli" ]; then
-    runuser -u "$AGENT_USER" -- "${APP_DIR}/termigo-cli" ping 2>/dev/null | grep -q "is running" && return 0
-  fi
-  has_tg_conn
+
+# Readiness = the FRONTEND answered.
+#
+# `termigo-cli ping` only proves the Rust side is alive, and that is precisely
+# how a broken build got promoted here: the app whose webview never mounted still
+# answered ping while serving nothing at all. The smoke test was asking the one
+# process that was working, and Telegram stayed dead through a "successful"
+# deploy.
+#
+# `status --json` carries `"ui":{...}` only once the frontend has registered, so
+# a null `ui` is the failure this test exists to catch. A bare `"ui":null` is
+# not a timeout and must not be mistaken for one.
+frontend_ready() {
+  local out
+  out=$(timeout "$STATUS_TIMEOUT" runuser -u "${AGENT_USER:-admin}" -- \
+        "${APP_DIR}/termigo-cli" status --json 2>/dev/null) || return 1
+  printf '%s' "$out" | grep -q '"ui":{'
 }
+
 log() { echo "[deploy-termigo] $*"; }
 
 # --- guard: jangan memutus pekerjaan agent yang sedang berjalan ---
@@ -162,16 +182,23 @@ log "Start $SERVICE ..."
 sudo systemctl start "$SERVICE"
 
 # --- 4. smoke-test ---
-log "Smoke-test: tunggu webview boot penuh (mem>=${UTH}) + koneksi Telegram (max ${POLL_TIMEOUT}s)"
+# Requires the frontend to have REGISTERED, not merely the process to be up. See
+# `frontend_ready` for why that distinction is the whole point of this step.
+log "Smoke-test: tunggu webview benar-benar siap (ui terdaftar + mem>=${UTH}) (max ${POLL_TIMEOUT}s)"
 PASS=0
 for (( i=0; i<POLL_TIMEOUT/SLEEP_UNIT; i++ )); do
   sleep "$SLEEP_UNIT"
   M="$(mem_bytes)"
-  T="no"
-  is_healthy && T="yes"
-  log "  poll#$((i+1)) mem=${M} healthy=${T}"
-  if [ "${M:-0}" -ge "$UTH" ] && is_healthy; then PASS=1; break; fi
+  if frontend_ready; then F="ui-ok"; else F="ui-null"; fi
+  log "  poll#$((i+1)) mem=${M} ${F}"
+  if [ "${M:-0}" -ge "$UTH" ] && [ "$F" = "ui-ok" ]; then PASS=1; break; fi
 done
+if [ "$PASS" -ne 1 ]; then
+  # Named explicitly because it looks like success from every other angle: the
+  # service is active, the control plane answers, and the process is alive.
+  log "  DIAGNOSA: proses hidup dan ping menjawab, tetapi frontend tidak pernah mendaftar"
+  log "  DIAGNOSA: build ini TIDAK bisa dipakai di headless - webview tidak mount"
+fi
 
 # --- 5. rollback kalau gagal ---
 if [ "$PASS" -ne 1 ]; then
@@ -199,8 +226,16 @@ if [ "$PASS" -ne 1 ]; then
 fi
 
 # --- 6. sukses: update known-good & bersihkan ---
-cp -p "$PINNED" "$KNOWN_GOOD"
-log "Smoke-test LULUS. known-good diperbarui."
+# Only reached when the frontend actually registered, so known-good is never
+# overwritten with a build whose webview does not mount. That mattered: this slot
+# was previously poisoned by a build that passed the weak test, and the watchdog's
+# rollback then restored the same broken binary forever with no way out.
+if cmp -s "$PINNED" "$KNOWN_GOOD"; then
+  log "Smoke-test LULUS. known-good sudah sama, tidak diubah."
+else
+  cp -p "$PINNED" "$KNOWN_GOOD"
+  log "Smoke-test LULUS. known-good diperbarui."
+fi
 log "Sisa binary backup (lihat di $APP_DIR/termigo.prev-*):"
 ls -1 "${APP_DIR}"/termigo.prev-* 2>/dev/null | tail -5 || true
 # Snapshot data sengaja DISIMPAN setelah sukses: itu satu-satunya salinan
