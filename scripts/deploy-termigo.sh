@@ -8,10 +8,13 @@
 #
 # Alur:
 #   1. backup binary yang sedang dipakai -> termigo.prev-<ts>
+#      plus snapshot data dir -> termigo.prev-data-<ts>.tgz. Store aplikasi hidup
+#      di luar binary, jadi rollback yang hanya memulihkan binary menjalankan
+#      build lama di atas data bentuk-baru dan kehilangan settings.
 #   2. salin binary baru ke /opt/termigo/termigo (pinned)
 #   3. restart service
 #   4. smoke-test: tunggu webview boot penuh (memory >= THRESH) + ada ESTAB/SYN ke api.telegram.org
-#   5. kalau GAGAL -> restore binary prev -> restart -> exit 1
+#   5. kalau GAGAL -> restore binary + data prev -> restart -> exit 1
 #   6. kalau OK -> hapus binary rusak yg tersisa, simpan known-good copy, exit 0
 
 set -euo pipefail
@@ -99,6 +102,20 @@ fi
 [ -x "$SRC" ] || { log "ERROR: sumber tidak executable: $SRC" >&2; exit 2; }
 log "Sumber binary: $SRC"
 
+# --- data dir yang harus ikut di-backup ---
+# Store aplikasi (settings, sessions, trajectory, secrets, local storage webview)
+# hidup DI SINI, bukan di sebelah binary. Rollback yang hanya memulihkan binary
+# menjalankan build lama di atas data yang sudah ditulis ulang build baru dalam
+# bentuk yang tidak dikenali build lama - hasilnya settings hilang, bukan
+# kembali. Karena itu snapshot diambil bersama binary dan dipulihkan bersamanya.
+# Alamat diambil dari home user pemilik app; bisa dioverride lewat DATA_DIR.
+DATA_DIR="${DATA_DIR:-}"
+if [ -z "$DATA_DIR" ]; then
+  U_HOME="$(getent passwd "$AGENT_USER" 2>/dev/null | cut -d: -f6)"
+  DATA_DIR="${U_HOME:-/home/$AGENT_USER}/.local/share/id.99apps.termigo"
+fi
+log "Data dir: $DATA_DIR"
+
 # --- 1. backup pinned yang sedang dipakai ---
 TS="$(date +%Y%m%d-%H%M%S)"
 BACKUP="${APP_DIR}/termigo.prev-${TS}"
@@ -111,6 +128,25 @@ fi
 log "Stop $SERVICE (agar binary tidak Text-file-busy) ..."
 sudo systemctl stop "$SERVICE" || true
 sleep 2
+
+# Snapshot data dir SETELAH service berhenti. Itu satu-satunya saat yang
+# konsisten (tidak ada penulis di tengah flush) sekaligus saat terakhir data
+# masih berbentuk seperti yang ditulis build lama - tepat yang dibutuhkan
+# rollback. Ditaruh sebelum binary baru disalin, jadi build baru belum sempat
+# menyentuh apa pun.
+DATA_BACKUP=""
+if [ -d "$DATA_DIR" ]; then
+  DATA_BACKUP="${APP_DIR}/termigo.prev-data-${TS}.tgz"
+  if tar czf "$DATA_BACKUP" -C "$(dirname "$DATA_DIR")" "$(basename "$DATA_DIR")" 2>/dev/null; then
+    log "Backup data dir -> $DATA_BACKUP ($(stat -c %s "$DATA_BACKUP") bytes)"
+  else
+    rm -f "$DATA_BACKUP"; DATA_BACKUP=""
+    log "WARN: backup data dir GAGAL - rollback nanti hanya memulihkan binary"
+  fi
+else
+  log "Data dir belum ada - tidak ada data untuk di-backup"
+fi
+
 cp -p "$SRC" "$PINNED"
 chmod +x "$PINNED"
 log "Salin binary baru -> $PINNED ($(stat -c %s "$PINNED") bytes)"
@@ -133,13 +169,23 @@ done
 
 # --- 5. rollback kalau gagal ---
 if [ "$PASS" -ne 1 ]; then
-  log "!!! Smoke-test GAGAL - rollback ke binary sebelumnya"
+  log "!!! Smoke-test GAGAL - rollback ke binary + data sebelumnya"
   if [ -f "$BACKUP" ]; then
     cp -p "$BACKUP" "$PINNED"
     log "Restore $PINNED dari $BACKUP"
   else
     # ya tidak ada backup? fallback ke known-good
     [ -f "$KNOWN_GOOD" ] && { cp -p "$KNOWN_GOOD" "$PINNED"; log "Restore dari $KNOWN_GOOD"; }
+  fi
+  # Store dipulihkan SEBELUM build lama dijalankan, supaya build lama tidak
+  # pernah membaca data bentuk-baru. Diekstrak menimpa isi yang ada (bukan
+  # mengganti direktori), jadi berkas yang tidak ada di snapshot tetap bertahan.
+  if [ -n "$DATA_BACKUP" ] && [ -f "$DATA_BACKUP" ]; then
+    if tar xzf "$DATA_BACKUP" -C "$(dirname "$DATA_DIR")" 2>/dev/null; then
+      log "Restore data dir dari $DATA_BACKUP"
+    else
+      log "WARN: restore data dir GAGAL - pulihkan manual dari $DATA_BACKUP"
+    fi
   fi
   sudo systemctl restart "$SERVICE"
   log "Rollback selesai. Service sedang reloading."
@@ -151,4 +197,7 @@ cp -p "$PINNED" "$KNOWN_GOOD"
 log "Smoke-test LULUS. known-good diperbarui."
 log "Sisa binary backup (lihat di $APP_DIR/termigo.prev-*):"
 ls -1 "${APP_DIR}"/termigo.prev-* 2>/dev/null | tail -5 || true
+# Snapshot data sengaja DISIMPAN setelah sukses: itu satu-satunya salinan
+# bentuk-lama. Hapus manual setelah versi baru terbukti stabil.
+[ -n "$DATA_BACKUP" ] && log "Snapshot data (simpan sampai versi baru terbukti): $DATA_BACKUP"
 log "DONE."
