@@ -2,6 +2,8 @@ import { Shimmer } from "@/components/ai-elements/shimmer";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { artifactOpener } from "@/modules/ai/lib/artifactOpen";
+import { formatDiffFeedbackPrompt } from "@/modules/ai/lib/diffComments";
+import { useDiffCommentStore } from "@/modules/ai/store/diffCommentStore";
 import {
   ArrowRight01Icon,
   Cancel01Icon,
@@ -216,6 +218,17 @@ export const ToolDiffCard = memo(function ToolDiffCard({
   const [open, setOpen] = useState(true);
   const [showAllLines, setShowAllLines] = useState(false);
   const [copied, setCopied] = useState(false);
+  // The line being annotated, plus its draft. One at a time: two open inputs in
+  // one card is a way to lose track of which note belongs to which line.
+  const [commentLine, setCommentLine] = useState<number | null>(null);
+  const [draft, setDraft] = useState("");
+  // `batch.comments` is read as a whole and filtered below rather than selected
+  // per file: a selector that builds an array returns a NEW reference every
+  // render, which zustand reads as a change and turns into a render loop.
+  const allComments = useDiffCommentStore((s) => s.batch.comments);
+  const addComment = useDiffCommentStore((s) => s.add);
+  const removeComment = useDiffCommentStore((s) => s.remove);
+  const clearComments = useDiffCommentStore((s) => s.clear);
 
   const input = part.input;
   const output = "output" in part ? part.output : undefined;
@@ -236,6 +249,48 @@ export const ToolDiffCard = memo(function ToolDiffCard({
   const { dir, base } = filePath
     ? splitPath(filePath)
     : { dir: "", base: "unknown file" };
+
+  // Paths are normalised the same way `diffComments` normalises them, or a
+  // comment added on Windows would not resolve to the same file.
+  const normalizedPath = filePath
+    ? filePath.replace(/\\/g, "/").trim()
+    : null;
+  const fileComments = useMemo(
+    () =>
+      normalizedPath
+        ? allComments.filter((c) => c.filePath === normalizedPath)
+        : [],
+    [allComments, normalizedPath],
+  );
+
+  const commitComment = useCallback(
+    (lineNumber: number, originalLine: string) => {
+      const text = draft.trim();
+      if (!normalizedPath || !text) return;
+      addComment(normalizedPath, lineNumber, text, originalLine);
+      setDraft("");
+      setCommentLine(null);
+    },
+    [addComment, draft, normalizedPath],
+  );
+
+  /**
+   * Hand every pending note to the agent as ONE message.
+   *
+   * A dynamic import for the same reason `CanvasView` uses one: a static import
+   * of the chat runtime here would pull the whole runtime into this card's module
+   * graph just to reach one function.
+   */
+  const sendComments = useCallback(() => {
+    const prompt = formatDiffFeedbackPrompt(
+      useDiffCommentStore.getState().batch,
+    );
+    if (!prompt) return;
+    clearComments();
+    void import("@/modules/ai/store/chatRuntime").then(({ sendMessage }) =>
+      sendMessage(prompt),
+    );
+  }, [clearComments]);
 
   const isWriting = toolName === "write_file";
   const inProgress =
@@ -457,30 +512,108 @@ export const ToolDiffCard = memo(function ToolDiffCard({
                 {displayedLines.map((line, idx) => {
                   const isAdd = line.type === "add";
                   const isDel = line.type === "del";
+                  // Comments are keyed by the line number the user sees, so a
+                  // note stays attached to the same line if the diff is
+                  // recomputed with different surrounding context.
+                  const lineNo = line.newLineNumber ?? line.oldLineNumber ?? 0;
+                  const lineComments = fileComments.filter(
+                    (c) => c.lineNumber === lineNo,
+                  );
+                  const isComposing = commentLine === lineNo;
                   return (
                     <div
                       // biome-ignore lint/suspicious/noArrayIndexKey: diff rows are positional
                       key={idx}
-                      className={cn(
-                        "flex items-baseline whitespace-pre px-2 hover:bg-muted/40",
-                        isAdd &&
-                          "bg-emerald-500/15 text-emerald-950 font-medium dark:bg-emerald-500/20 dark:text-emerald-200",
-                        isDel &&
-                          "bg-destructive/15 text-red-950 font-medium dark:bg-destructive/20 dark:text-red-200",
-                        !isAdd && !isDel && "text-foreground",
-                      )}
+                      className="group/line"
                     >
-                      <span className="w-4 shrink-0 select-none text-center font-bold opacity-80">
-                        {isAdd ? "+" : isDel ? "-" : " "}
-                      </span>
+                      <div
+                        className={cn(
+                          "flex items-baseline whitespace-pre px-2 hover:bg-muted/40",
+                          isAdd &&
+                            "bg-emerald-500/15 text-emerald-950 font-medium dark:bg-emerald-500/20 dark:text-emerald-200",
+                          isDel &&
+                            "bg-destructive/15 text-red-950 font-medium dark:bg-destructive/20 dark:text-red-200",
+                          !isAdd && !isDel && "text-foreground",
+                        )}
+                      >
+                        <span className="w-4 shrink-0 select-none text-center font-bold opacity-80">
+                          {isAdd ? "+" : isDel ? "-" : " "}
+                        </span>
 
-                      <span className="w-8 shrink-0 select-none text-right font-mono text-[10px] text-muted-foreground opacity-75 pr-2">
-                        {line.newLineNumber ?? line.oldLineNumber ?? ""}
-                      </span>
+                        <span className="w-8 shrink-0 select-none text-right font-mono text-[10px] text-muted-foreground opacity-75 pr-2">
+                          {line.newLineNumber ?? line.oldLineNumber ?? ""}
+                        </span>
 
-                      <span className="min-w-0 flex-1 overflow-x-auto">
-                        {line.text || " "}
-                      </span>
+                        <span className="min-w-0 flex-1 overflow-x-auto">
+                          {line.text || " "}
+                        </span>
+
+                        {/* Revealed on hover so the code stays the focus; kept
+                            visible while composing so it is clickable to cancel. */}
+                        <button
+                          type="button"
+                          title="Comment on this line"
+                          onClick={() => {
+                            setCommentLine(isComposing ? null : lineNo);
+                            setDraft("");
+                          }}
+                          className={cn(
+                            "ml-1 shrink-0 rounded px-1 font-sans text-[10px] font-semibold text-primary opacity-0 transition-opacity group-hover/line:opacity-100 focus-visible:opacity-100",
+                            isComposing && "opacity-100",
+                          )}
+                        >
+                          {isComposing ? "cancel" : "+ note"}
+                        </button>
+                      </div>
+
+                      {lineComments.map((c) => (
+                        <div
+                          key={c.id}
+                          className="flex items-start gap-1.5 bg-primary/5 px-2 py-0.5 font-sans text-[10.5px] text-foreground"
+                        >
+                          <span className="shrink-0 font-semibold text-primary">
+                            note
+                          </span>
+                          <span className="min-w-0 flex-1 break-words">
+                            {c.comment}
+                          </span>
+                          <button
+                            type="button"
+                            title="Remove this note"
+                            onClick={() => removeComment(c.id)}
+                            className="shrink-0 text-muted-foreground hover:text-destructive"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+
+                      {isComposing && (
+                        <div className="flex items-center gap-1 bg-muted/50 px-2 py-1 font-sans">
+                          <input
+                            value={draft}
+                            onChange={(e) => setDraft(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                commitComment(lineNo, line.text);
+                              } else if (e.key === "Escape") {
+                                setCommentLine(null);
+                                setDraft("");
+                              }
+                            }}
+                            placeholder="What should change on this line?"
+                            className="min-w-0 flex-1 rounded border border-border bg-background px-1.5 py-0.5 text-[10.5px] text-foreground outline-none focus:border-primary"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => commitComment(lineNo, line.text)}
+                            className="rounded bg-primary px-2 py-0.5 text-[10.5px] font-medium text-primary-foreground"
+                          >
+                            Add
+                          </button>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -498,6 +631,35 @@ export const ToolDiffCard = memo(function ToolDiffCard({
                   </div>
                 )}
               </div>
+
+              {/* Only present when there is something to send, so a normal run
+                  shows no extra chrome. Sending is one message for the whole
+                  batch: per-comment messages would arrive as a dozen turns the
+                  agent has to reconcile. */}
+              {fileComments.length > 0 && (
+                <div className="flex items-center justify-between border-t border-border/40 bg-muted/30 px-2.5 py-1 font-sans text-[10.5px]">
+                  <span className="text-muted-foreground">
+                    {fileComments.length} note
+                    {fileComments.length === 1 ? "" : "s"} on this file
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => clearComments()}
+                      className="text-muted-foreground hover:text-foreground"
+                    >
+                      Clear all
+                    </button>
+                    <button
+                      type="button"
+                      onClick={sendComments}
+                      className="rounded bg-primary px-2 py-0.5 font-medium text-primary-foreground"
+                    >
+                      Send to agent
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           ) : !errorMessage ? (
             <div className="px-3 py-2 text-[11px] italic text-muted-foreground">
