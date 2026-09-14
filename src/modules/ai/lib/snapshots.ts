@@ -3,8 +3,8 @@ import { homeDir } from "@tauri-apps/api/path";
 import { type GitLogEntry, native } from "./native";
 
 /** Whether `path` is the user's home directory (normalised). Checkpointing the
- *  home dir — a repo of tens of thousands of unrelated files, which is where a
- *  workspace can land after an environment switch falls back — would stage the
+ *  home dir - a repo of tens of thousands of unrelated files, which is where a
+ *  workspace can land after an environment switch falls back - would stage the
  *  whole tree and hang, so it is refused. */
 async function isHomeDir(path: string): Promise<boolean> {
   try {
@@ -18,7 +18,7 @@ async function isHomeDir(path: string): Promise<boolean> {
 /**
  * Workspace snapshots, built on ordinary git commits.
  *
- * A checkpoint is a normal commit whose subject starts with `checkpoint:` —
+ * A checkpoint is a normal commit whose subject starts with `checkpoint:` -
  * the same shape the `git_checkpoint` agent tool creates. Keeping it a commit
  * means the snapshot shows up in the existing git history, needs no extra
  * storage, and rolls back with a plain `git reset --hard`.
@@ -109,6 +109,15 @@ export async function createCheckpoint(
   repoRoot: string,
   label: string,
 ): Promise<CreateCheckpointResult> {
+  try {
+    const status = await native.gitStatus(repoRoot);
+    if (status.changedFiles.length === 0) {
+      return { created: false };
+    }
+  } catch {
+    // If git status fails, proceed with normal add and commit fallback.
+  }
+
   const add = await native.runCommand(checkpointAddCommand(), repoRoot, 60);
   if (add.exit_code !== 0) {
     return { created: false, error: add.stderr.trim() || "git add failed" };

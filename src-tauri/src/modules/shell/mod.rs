@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{mpsc, Arc, RwLock};
+use std::sync::{mpsc, Arc, Mutex, RwLock};
 use std::thread;
 use std::time::Duration;
 
@@ -494,8 +494,13 @@ fn run_blocking(
         "no stderr pipe".to_string()
     })?;
 
-    let stdout_handle = thread::spawn(move || drain(&mut stdout_pipe));
-    let stderr_handle = thread::spawn(move || drain(&mut stderr_pipe));
+    let stdout_target = Arc::new(Mutex::new((Vec::new(), false)));
+    let stderr_target = Arc::new(Mutex::new((Vec::new(), false)));
+    let stdout_target_drain = Arc::clone(&stdout_target);
+    let stderr_target_drain = Arc::clone(&stderr_target);
+
+    let stdout_handle = thread::spawn(move || drain(&mut stdout_pipe, &stdout_target_drain));
+    let stderr_handle = thread::spawn(move || drain(&mut stderr_pipe, &stderr_target_drain));
 
     let (tx, rx) = mpsc::channel();
     // Cleared however this returns - normal exit, timeout or error - so a
@@ -532,19 +537,23 @@ fn run_blocking(
 
     let (pipe_tx, pipe_rx) = mpsc::channel();
     thread::spawn(move || {
-        let stdout_res = stdout_handle.join().unwrap_or((Vec::new(), false));
-        let stderr_res = stderr_handle.join().unwrap_or((Vec::new(), false));
-        let _ = pipe_tx.send((stdout_res, stderr_res));
+        let _ = stdout_handle.join();
+        let _ = stderr_handle.join();
+        let _ = pipe_tx.send(());
     });
 
-    let ((stdout_bytes, stdout_truncated), (stderr_bytes, stderr_truncated)) =
-        match pipe_rx.recv_timeout(Duration::from_millis(2000)) {
-            Ok(res) => res,
-            Err(_) => {
-                log::warn!("shell_run_command: pipe readers timed out after process exit/kill");
-                ((Vec::new(), false), (Vec::new(), false))
-            }
-        };
+    if pipe_rx.recv_timeout(Duration::from_millis(2000)).is_err() {
+        log::warn!("shell_run_command: pipe readers timed out after process exit/kill");
+    }
+
+    let take_output = |target: &Arc<Mutex<(Vec<u8>, bool)>>| {
+        match target.lock() {
+            Ok(mut g) => std::mem::take(&mut *g),
+            Err(p) => std::mem::take(&mut *p.into_inner()),
+        }
+    };
+    let (stdout_bytes, stdout_truncated) = take_output(&stdout_target);
+    let (stderr_bytes, stderr_truncated) = take_output(&stderr_target);
 
     Ok(CommandOutput {
         stdout: String::from_utf8_lossy(&stdout_bytes).into_owned(),
@@ -784,28 +793,29 @@ pub(crate) fn build_oneshot_command(
     }
 }
 
-fn drain<R: Read>(reader: &mut R) -> (Vec<u8>, bool) {
-    let mut out = Vec::new();
+fn drain<R: Read>(reader: &mut R, target: &Arc<Mutex<(Vec<u8>, bool)>>) {
     let mut buf = [0u8; 8192];
-    let mut truncated = false;
     loop {
         match reader.read(&mut buf) {
             Ok(0) => break,
             Ok(n) => {
-                if out.len() >= MAX_OUTPUT_BYTES {
-                    truncated = true;
+                let mut guard = match target.lock() {
+                    Ok(g) => g,
+                    Err(poisoned) => poisoned.into_inner(),
+                };
+                if guard.0.len() >= MAX_OUTPUT_BYTES {
+                    guard.1 = true;
                     continue;
                 }
-                let take = (MAX_OUTPUT_BYTES - out.len()).min(n);
-                out.extend_from_slice(&buf[..take]);
+                let take = (MAX_OUTPUT_BYTES - guard.0.len()).min(n);
+                guard.0.extend_from_slice(&buf[..take]);
                 if take < n {
-                    truncated = true;
+                    guard.1 = true;
                 }
             }
             Err(_) => break,
         }
     }
-    (out, truncated)
 }
 
 #[cfg(all(test, unix))]
@@ -1126,5 +1136,26 @@ mod tests_sandbox {
         assert!(validate_shell_command(r#"node -e "console.log(1+1)""#).is_ok());
         assert!(validate_shell_command(r#"echo "hello > world""#).is_ok());
         assert!(validate_shell_command(r#"echo 'hello | world'"#).is_ok());
+    }
+
+    #[test]
+    fn drain_reads_pipe_data_into_target() {
+        let mut source = std::io::Cursor::new(b"hello world from pipe");
+        let target = Arc::new(Mutex::new((Vec::new(), false)));
+        drain(&mut source, &target);
+        let guard = target.lock().unwrap();
+        assert_eq!(guard.0, b"hello world from pipe");
+        assert!(!guard.1);
+    }
+
+    #[test]
+    fn drain_truncates_pipe_data_exceeding_max_bytes() {
+        let big = vec![b'a'; MAX_OUTPUT_BYTES + 1024];
+        let mut source = std::io::Cursor::new(big);
+        let target = Arc::new(Mutex::new((Vec::new(), false)));
+        drain(&mut source, &target);
+        let guard = target.lock().unwrap();
+        assert_eq!(guard.0.len(), MAX_OUTPUT_BYTES);
+        assert!(guard.1);
     }
 }

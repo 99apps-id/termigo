@@ -263,6 +263,8 @@ where
     crate::modules::proc::hide_console(&mut cmd);
 
     let child = Arc::new(SharedChild::spawn(&mut cmd).map_err(|e| GitError::Spawn(e.to_string()))?);
+    #[cfg(windows)]
+    let _job = crate::modules::proc::job::ProcessJob::create_for(child.id()).ok();
     let mut stdout_pipe = child
         .take_stdout()
         .ok_or_else(|| GitError::Spawn("no stdout pipe".into()))?;
@@ -270,8 +272,19 @@ where
         .take_stderr()
         .ok_or_else(|| GitError::Spawn("no stderr pipe".into()))?;
 
-    let stdout_handle = thread::spawn(move || drain(&mut stdout_pipe, 64 * 1024));
-    let stderr_handle = thread::spawn(move || drain(&mut stderr_pipe, 4 * 1024));
+    let stdout_target = Arc::new(Mutex::new((
+        Vec::with_capacity((64 * 1024).min(MAX_OUTPUT_BYTES)),
+        false,
+    )));
+    let stderr_target = Arc::new(Mutex::new((
+        Vec::with_capacity((4 * 1024).min(MAX_OUTPUT_BYTES)),
+        false,
+    )));
+    let stdout_target_drain = Arc::clone(&stdout_target);
+    let stderr_target_drain = Arc::clone(&stderr_target);
+
+    let stdout_handle = thread::spawn(move || drain(&mut stdout_pipe, &stdout_target_drain));
+    let stderr_handle = thread::spawn(move || drain(&mut stderr_pipe, &stderr_target_drain));
 
     let (tx, rx) = mpsc::channel();
     let waiter = Arc::clone(&child);
@@ -283,8 +296,8 @@ where
         Ok(Ok(status)) => (status.code(), false),
         Ok(Err(e)) => return Err(GitError::Io(e)),
         Err(mpsc::RecvTimeoutError::Timeout) => {
+            crate::modules::proc::kill_tree(child.id());
             let _ = child.kill();
-            let _ = child.wait();
             (None, true)
         }
         Err(mpsc::RecvTimeoutError::Disconnected) => {
@@ -292,8 +305,25 @@ where
         }
     };
 
-    let (stdout, stdout_truncated) = stdout_handle.join().unwrap_or((Vec::new(), false));
-    let (stderr, _stderr_truncated) = stderr_handle.join().unwrap_or((Vec::new(), false));
+    let (pipe_tx, pipe_rx) = mpsc::channel();
+    thread::spawn(move || {
+        let _ = stdout_handle.join();
+        let _ = stderr_handle.join();
+        let _ = pipe_tx.send(());
+    });
+
+    if pipe_rx.recv_timeout(Duration::from_millis(2000)).is_err() {
+        log::warn!("git process: pipe readers timed out after process exit/kill");
+    }
+
+    let take_output = |target: &Arc<Mutex<(Vec<u8>, bool)>>| {
+        match target.lock() {
+            Ok(mut g) => std::mem::take(&mut *g),
+            Err(p) => std::mem::take(&mut *p.into_inner()),
+        }
+    };
+    let (stdout, stdout_truncated) = take_output(&stdout_target);
+    let (stderr, _stderr_truncated) = take_output(&stderr_target);
 
     Ok(GitOutput {
         stdout,
@@ -382,28 +412,29 @@ fn decode_text(bytes: Vec<u8>) -> TextSource {
     }
 }
 
-fn drain<R: Read>(reader: &mut R, prealloc: usize) -> (Vec<u8>, bool) {
-    let mut out: Vec<u8> = Vec::with_capacity(prealloc.min(MAX_OUTPUT_BYTES));
+fn drain<R: Read>(reader: &mut R, target: &Arc<Mutex<(Vec<u8>, bool)>>) {
     let mut buf = [0u8; 16 * 1024];
-    let mut truncated = false;
     loop {
         match reader.read(&mut buf) {
             Ok(0) => break,
             Ok(n) => {
-                if out.len() >= MAX_OUTPUT_BYTES {
-                    truncated = true;
+                let mut guard = match target.lock() {
+                    Ok(g) => g,
+                    Err(poisoned) => poisoned.into_inner(),
+                };
+                if guard.0.len() >= MAX_OUTPUT_BYTES {
+                    guard.1 = true;
                     continue;
                 }
-                let take = (MAX_OUTPUT_BYTES - out.len()).min(n);
-                out.extend_from_slice(&buf[..take]);
+                let take = (MAX_OUTPUT_BYTES - guard.0.len()).min(n);
+                guard.0.extend_from_slice(&buf[..take]);
                 if take < n {
-                    truncated = true;
+                    guard.1 = true;
                 }
             }
             Err(_) => break,
         }
     }
-    (out, truncated)
 }
 
 #[cfg(test)]

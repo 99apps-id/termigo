@@ -28,6 +28,7 @@ pub fn output_with_timeout(mut cmd: Command, timeout: Duration) -> io::Result<Ou
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    hide_console(&mut cmd);
     let child = cmd.spawn()?;
     let pid = child.id();
     let (tx, rx) = mpsc::channel();

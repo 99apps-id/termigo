@@ -23,6 +23,8 @@ pub struct BackgroundProc {
     pub cwd: Option<String>,
     pub started_at_ms: u64,
     pub child: Arc<SharedChild>,
+    #[cfg(windows)]
+    pub _job: Option<crate::modules::proc::job::ProcessJob>,
     pub buffer: Mutex<BoundedRingBuffer>,
     pub exited: AtomicBool,
     pub exit_code: AtomicI32,
@@ -75,6 +77,7 @@ impl BackgroundProc {
     }
 
     pub fn kill(&self) -> bool {
+        crate::modules::proc::kill_tree(self.child.id());
         self.child.kill().is_ok()
     }
 
@@ -135,7 +138,10 @@ pub fn spawn(
     crate::modules::proc::hide_console(&mut cmd);
 
     let shared = Arc::new(SharedChild::spawn(&mut cmd).map_err(|e| e.to_string())?);
+    #[cfg(windows)]
+    let job = crate::modules::proc::job::ProcessJob::create_for(shared.id()).ok();
     let kill_on_fail = || {
+        crate::modules::proc::kill_tree(shared.id());
         let _ = shared.kill();
     };
     let stdout_pipe = shared.take_stdout().ok_or_else(|| {
@@ -212,6 +218,8 @@ pub fn spawn(
         cwd,
         started_at_ms,
         child,
+        #[cfg(windows)]
+        _job: job,
         buffer: Mutex::new(BoundedRingBuffer::new(RING_CAP)),
         exited: AtomicBool::new(false),
         exit_code: AtomicI32::new(0),
