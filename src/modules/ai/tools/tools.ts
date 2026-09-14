@@ -48,6 +48,7 @@ import {
   buildUnknownToolFallback,
   UNKNOWN_TOOL_NAME,
 } from "./toolFallback";
+import { buildTelegramTools } from "./telegram";
 import { buildVerifyTools } from "./verify";
 import { buildWebSearchTools } from "./webSearch";
 import { buildWorkflowTools } from "./workflow";
@@ -253,6 +254,7 @@ export function buildTools(
     ...buildMcpOAuthTools(),
     ...buildSystemTools(),
     ...buildProcessTools(ctx),
+    ...buildTelegramTools(ctx),
   } as const;
 
   // The unknown-tool fallback is added last and reads its own toolset, so its

@@ -77,6 +77,7 @@ impl ShellSession {
         };
         match guard.as_ref() {
             Some(child) => {
+                crate::modules::proc::kill_tree(child.id());
                 let _ = child.kill();
                 true
             }

@@ -65,10 +65,7 @@ describe("renderAnswerSnippet", () => {
 });
 
 describe("formatLiveProgress with answer text", () => {
-  it("separates the header, the answer and the tool lines with blank lines", () => {
-    // Run together, the card reads as a wall where the agent's prose and the
-    // tool lines are indistinguishable at a glance. The blank lines are what
-    // let the eye split "what it is saying" from "what it is doing".
+  it("places the agent answer first at the top before the task and tool lines", () => {
     const card = formatLiveProgress({
       status: "streaming",
       round: 2,
@@ -82,21 +79,23 @@ describe("formatLiveProgress with answer text", () => {
       ],
     });
     const lines = card.split("\n");
-    expect(lines[0]).toContain("**[Termigo Agent]**");
-    expect(lines[0]).toContain("Writing response");
-    expect(lines[0]).toContain("step 3");
-    expect(lines[1]).toBe("");
-    expect(lines[2]).toBe(
+    // Answer text comes first at the top
+    expect(lines[0]).toBe(
       "Mulai dengan mencari apakah repo sudah ada di mesin ini.",
     );
+    expect(lines[1]).toBe("");
+    // Task header comes below the answer
+    expect(lines[2]).toContain("**[Termigo Agent]**");
+    expect(lines[2]).toContain("Writing response");
+    expect(lines[2]).toContain("step 3");
     expect(lines[3]).toBe("");
-    // The tool lines stay adjacent: a list of related facts, not four messages.
+    // The tool lines stay below task
     expect(lines[4]).toContain("✓ Listed");
     expect(lines[5]).toContain("✓ Read");
     expect(lines[6]).toContain("⚡");
   });
 
-  it("keeps the step line in its own block", () => {
+  it("places answer text at the top and step line below the task header", () => {
     const card = formatLiveProgress({
       status: "streaming",
       round: 2,
@@ -105,11 +104,26 @@ describe("formatLiveProgress with answer text", () => {
       answerText: "Mulai dari mencari repo.",
     });
     const lines = card.split("\n");
-    expect(lines[0]).toContain("Writing response");
+    expect(lines[0]).toBe("Mulai dari mencari repo.");
     expect(lines[1]).toBe("");
-    expect(lines[2]).toBe("*Audit fs/control/secrets guards*");
+    expect(lines[2]).toContain("Writing response");
     expect(lines[3]).toBe("");
-    expect(lines[4]).toBe("Mulai dari mencari repo.");
+    expect(lines[4]).toBe("*Audit fs/control/secrets guards*");
+  });
+
+  it("drops backend process and keeps AI answer clean when task is completed", () => {
+    const card = formatLiveProgress({
+      status: "idle",
+      completed: true,
+      outcome: "done",
+      answerText: "Berikut adalah hasil pemeriksaan server: semua port aktif.",
+      tools: [
+        { toolName: "bash_run", state: "done", input: "netstat -tuln" },
+      ],
+    });
+    expect(card).toBe("Berikut adalah hasil pemeriksaan server: semua port aktif.");
+    expect(card).not.toContain("Termigo Agent");
+    expect(card).not.toContain("bash_run");
   });
 
   it("preserves paragraph breaks inside the agent's own text", () => {

@@ -58,7 +58,9 @@ export const TOOL_SEARCH_ALWAYS_ON: ReadonlySet<string> = new Set([
   "revert_changes",
   "env_get",
   "remember",
+  "telegram_send_document",
 ]);
+
 
 /** One searchable tool, reduced to what a keyword search needs. */
 export type ToolIndexEntry = {

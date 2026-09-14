@@ -688,6 +688,9 @@ export function renderAnswerSnippet(text: string, max = 700): string {
 
 export function formatLiveProgress(opts: FormatLiveProgressOptions): string {
   if (opts.completed) {
+    if (opts.answerText && opts.answerText.trim().length > 0) {
+      return opts.answerText.trim();
+    }
     return formatCompletionCard(opts);
   }
 
@@ -696,10 +699,15 @@ export function formatLiveProgress(opts: FormatLiveProgressOptions): string {
   }
 
   // Built as sections rather than one flat list, then joined with a blank line.
-  // Run together, a card reads as a wall where the agent's own prose and the
-  // tool lines are indistinguishable at a glance; separated, the eye can tell
-  // "what it is saying" from "what it is doing" without reading either.
+  // The agent's own prose is placed first at the top, so the user sees what the
+  // agent is saying immediately, followed by the active task and tools below it.
   const sections: string[][] = [];
+
+  // The agent's own words at the very top, before the task and tool lines.
+  const answer = renderAnswerSnippet(opts.answerText ?? "");
+  if (answer) {
+    sections.push(answer.split("\n"));
+  }
 
   const statusLabel =
     opts.status === "awaiting-approval"
@@ -730,13 +738,6 @@ export function formatLiveProgress(opts: FormatLiveProgressOptions): string {
   // changes every step and is what a reader scans for first.
   if (opts.step) {
     sections.push([`*${truncate(opts.step, 120)}*`]);
-  }
-
-  // The agent's own words, above the tool lines, so the chat shows what it is
-  // saying while it says it.
-  const answer = renderAnswerSnippet(opts.answerText ?? "");
-  if (answer) {
-    sections.push(answer.split("\n"));
   }
 
   const pendingTodos = (opts.todos ?? []).filter(

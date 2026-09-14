@@ -15,6 +15,8 @@ import { getPendingApprovals, messageText, runBusy } from "./telegramHelpers";
 
 export const progressCtrls = new Map<number, AbortController>();
 export const lastFinishedProgressMessageIds = new Map<number, number>();
+export const activeProgressMessageIds = new Map<number, number>();
+export const finalizedProgressMessages = new Set<number>();
 export const sentApprovalIds = new Set<string>();
 
 /** Approval ids are remembered so a prompt is only ever posted once, but they
@@ -86,6 +88,9 @@ export async function publishProgress(
 
   if (initialText) {
     progressMessageId = await sendProgressMessage(chatId, initialText, signal);
+    if (progressMessageId != null) {
+      activeProgressMessageIds.set(chatId, progressMessageId);
+    }
     lastLiveText = initialText;
     lastSentAt = Date.now();
     lastTypingAt = Date.now();
@@ -179,6 +184,7 @@ export async function publishProgress(
         } else {
           progressSendFailures = 0;
           progressMessageId = sentId;
+          activeProgressMessageIds.set(chatId, sentId);
           lastLiveText = liveText;
           lastSubstantiveKey = substantiveKey;
           lastSentAt = now;
@@ -322,7 +328,13 @@ export async function publishProgress(
       await sleep(signal, 1000);
     }
   } finally {
+    activeProgressMessageIds.delete(chatId);
     if (progressMessageId) {
+      if (finalizedProgressMessages.has(progressMessageId)) {
+        finalizedProgressMessages.delete(progressMessageId);
+        return;
+      }
+
       // State the outcome rather than a bare "Completed.". `stoppedByUser` and
       // `stopReason` are what the desktop app uses to tell a finished run from
       // one the user stopped, one that hit the step limit and one that failed;
@@ -335,11 +347,29 @@ export async function publishProgress(
           : finalMeta.stopReason === "step-cap"
             ? "step-cap"
             : "done";
+
+      // If the run completed cleanly and an assistant answer is already present,
+      // preserve that answer text and drop backend process lines.
+      const chat = store.getChat(sessionId);
+      const messages = chat?.messages ?? [];
+      const lastAssistant = [...messages]
+        .reverse()
+        .find((m) => m.role === "assistant");
+      const answerText = lastAssistant
+        ? messageText(
+            lastAssistant as {
+              role: string;
+              parts?: Array<{ type?: string; text?: string }>;
+            },
+          )
+        : "";
+
       const doneText = formatLiveProgress({
         status: "idle",
         completed: true,
         outcome,
         elapsedMs: Date.now() - started,
+        answerText: outcome === "done" && answerText ? answerText : undefined,
         todos:
           todosStore.useTodosStore.getState().bySession[sessionId]?.items ?? [],
       });
@@ -349,7 +379,9 @@ export async function publishProgress(
         doneText,
         AbortSignal.timeout(4000),
       ).catch(() => {});
-      lastFinishedProgressMessageIds.set(chatId, progressMessageId);
+      if (!answerText || outcome !== "done") {
+        lastFinishedProgressMessageIds.set(chatId, progressMessageId);
+      }
     }
   }
 }

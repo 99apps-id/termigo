@@ -44,7 +44,7 @@ pub fn output_with_timeout(mut cmd: Command, timeout: Duration) -> io::Result<Ou
 }
 
 #[cfg(windows)]
-fn kill_tree(pid: u32) {
+pub fn kill_tree(pid: u32) {
     let mut k = Command::new("taskkill");
     k.args(["/PID", &pid.to_string(), "/T", "/F"]);
     hide_console(&mut k);
@@ -52,7 +52,7 @@ fn kill_tree(pid: u32) {
 }
 
 #[cfg(not(windows))]
-fn kill_tree(pid: u32) {
+pub fn kill_tree(pid: u32) {
     let mut k = Command::new("kill");
     k.args(["-9", &pid.to_string()]);
     let _ = k.output();

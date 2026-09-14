@@ -158,6 +158,7 @@ export const HELP = [
   "/query <text> - run query without live progress updates",
   "/run <text> - run instruction with live progress",
   "/continue - continue the current run if it stopped",
+  "/diff - view git status & changed files",
   "/approve - approve all pending actions",
   "/deny - deny all pending actions",
   "/mode [all|edits|ask] - view or set autonomy approval mode",
@@ -168,6 +169,44 @@ export const HELP = [
   "/model <id> - set the model directly",
   "/cost - today's & total spend",
 ].join("\n");
+
+/**
+ * Summary of modified and changed files in the active git workspace.
+ */
+export async function buildGitDiffSummary(): Promise<string> {
+  try {
+    const { native } = await import("../ai/lib/native");
+    const snap = await native.gitPanelSnapshot(".").catch(() => null);
+    if (!snap || !snap.status) {
+      return "No active git repository found or working tree is clean.";
+    }
+    const changed = snap.status.changedFiles ?? [];
+    const branch = snap.status.branch ?? "HEAD";
+    if (changed.length === 0) {
+      return `Branch: ${branch}\nWorking tree is completely clean. No pending changes.`;
+    }
+
+
+    const lines: string[] = [
+      `Branch: ${branch}`,
+      `Changed files (${changed.length}):`,
+    ];
+
+    for (const f of changed.slice(0, 15)) {
+      const tag = f.staged ? "[staged]" : f.untracked ? "[untracked]" : "[modified]";
+      lines.push(`• ${tag} ${f.path}`);
+    }
+
+    if (changed.length > 15) {
+      lines.push(`… and ${changed.length - 15} more files.`);
+    }
+
+    return lines.join("\n");
+  } catch (err) {
+    return `Failed to fetch diff summary: ${err instanceof Error ? err.message : String(err)}`;
+  }
+}
+
 
 /**
  * Resolve what the user typed to a registry model id.
@@ -458,6 +497,13 @@ export async function handleCallback(
     return;
   }
 
+  if (data === "diff:summary") {
+    const summary = await buildGitDiffSummary();
+    await answerCallback(cb.id, "Diff summary loaded.", signal);
+    await sendTelegram(chatId, summary, signal);
+    return;
+  }
+
   await answerCallback(cb.id, null, signal);
 }
 
@@ -481,6 +527,13 @@ export async function handleUpdate(u: Update, signal: AbortSignal): Promise<void
     case "/status":
       await sendTelegram(chatId, await buildStatus(), signal);
       return;
+    case "/diff": {
+      if (!isOwnerUser(msg.from)) return;
+      const summary = await buildGitDiffSummary();
+      await sendTelegram(chatId, summary, signal);
+      return;
+    }
+
     case "/pair": {
       const curOwner = useTelegramStore.getState().chatId;
       if (curOwner && String(curOwner) !== String(chatId)) {

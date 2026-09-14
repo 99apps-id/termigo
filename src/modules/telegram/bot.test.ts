@@ -276,6 +276,90 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
 
       globalThis.fetch = origFetch;
     });
+
+    it("edits active progress message with final clean AI answer and suppresses duplicate send", async () => {
+      const chatStore = await import("../ai/store/chatStore");
+      const sessionId = chatStore.useChatStore.getState().newSession();
+      chatStore.useChatStore.getState().switchSession(sessionId);
+      chatStore.useChatStore.getState().patchAgentMeta({ status: "idle", stopReason: null });
+
+      const activeChatId = 77777;
+      _testOnly.activeProgressMessageIds.set(activeChatId, 4321);
+
+      const editedPayloads: Array<{ message_id: number; text: string }> = [];
+      const sentTexts: string[] = [];
+      const origFetch = globalThis.fetch;
+      const controller = new AbortController();
+
+      globalThis.fetch = vi.fn(async (url, init) => {
+        const urlStr = String(url);
+        if (urlStr.includes("editMessageText")) {
+          try {
+            const body = JSON.parse(String(init?.body));
+            editedPayloads.push({ message_id: body.message_id, text: body.text });
+          } catch {}
+          return {
+            ok: true,
+            json: async () => ({ ok: true, result: { message_id: 4321 } }),
+            text: async () => JSON.stringify({ ok: true }),
+          } as unknown as Response;
+        }
+        if (urlStr.includes("sendMessage")) {
+          try {
+            const body = JSON.parse(String(init?.body));
+            sentTexts.push(body.text);
+          } catch {}
+          return {
+            ok: true,
+            json: async () => ({ ok: true, result: { message_id: 5555 } }),
+            text: async () => JSON.stringify({ ok: true }),
+          } as unknown as Response;
+        }
+        return {
+          ok: true,
+          json: async () => ({ ok: true, result: {} }),
+          text: async () => JSON.stringify({ ok: true }),
+        } as unknown as Response;
+      });
+
+      const mockMessages: any[] = [];
+      chatStore.chats.set(sessionId, {
+        messages: mockMessages,
+        status: "idle",
+      } as any);
+
+      // Dispatch a task with successful accepted action
+      const runPromise = _testOnly.runAgentAndStream(
+        async () => true,
+        activeChatId,
+        controller.signal,
+        "Started working on your request.",
+      );
+
+      // Simulate agent answering
+      await new Promise((r) => setTimeout(r, 50));
+      mockMessages.push({
+        id: "msg-assistant-final-1",
+        role: "assistant",
+        parts: [{ type: "text", text: "Semua layanan berjalan dengan lancar tanpa error." }],
+      });
+      chatStore.useChatStore.getState().patchAgentMeta({ status: "idle" });
+
+      await new Promise((r) => setTimeout(r, 1600));
+      controller.abort();
+      await runPromise.catch(() => {});
+
+      // Verify that the active progress message was edited directly with the AI answer
+      expect(
+        editedPayloads.some(
+          (p) => p.message_id === 5555 && p.text.includes("Semua layanan berjalan"),
+        ),
+      ).toBe(true);
+      // Verify that the AI answer was NOT repeated in a separate sendMessage call
+      expect(sentTexts.some((t) => t.includes("Semua layanan berjalan"))).toBe(false);
+
+      globalThis.fetch = origFetch;
+    });
   });
 
   describe("Hermes stability patterns", () => {

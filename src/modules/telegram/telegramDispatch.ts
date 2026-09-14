@@ -51,6 +51,8 @@ import {
   runOutcomeLine,
 } from "./telegramLog";
 import {
+  activeProgressMessageIds,
+  finalizedProgressMessages,
   lastFinishedProgressMessageIds,
   progressCtrls,
   publishProgress,
@@ -168,16 +170,12 @@ async function finalizeStreamedMessage(
       await sendTelegram(chatId, chunk, signal).catch(() => {});
     }
   } else {
-    // The edit failed even after its own retries, so the streamed message could
-    // not be completed. Sending the whole answer again would duplicate it, so
-    // mark this as a failure by leaving it at one message and letting the
-    // caller's retry bound decide. Logged because a half-broken answer in the
-    // chat is exactly the kind of thing that needs a cause on record.
     logRelayWarn(
-      `could not finalize streamed message ${messageId}; it may show a partial answer`,
+      `could not finalize streamed message ${messageId}; falling back to send`,
     );
+    await sendTelegram(chatId, text, signal).catch(() => {});
   }
-  await sendDiagrams(chatId, first, signal);
+  await sendDiagrams(chatId, text, signal);
 }
 
 /** Local report/document files the agent previewed via `preview_file` since the
@@ -646,14 +644,35 @@ export async function runAgentAndStream(
             // an actually-idle run can end this handler.
           } else {
             if (isFallback) fallbackSent = true;
-            // The answer is sent once, whole. Interim text is not duplicated
-            // here: the live progress card already shows the agent's own words
-            // as it writes them, so sending them again would post the same
-            // prose twice in one chat.
-            await sendReplyWithDiagrams(chatId, reply, signal);
-            replies += 1;
-            sentChars += reply.length;
-            if (isFallback) seenFallback = true;
+            const activeProgId = activeProgressMessageIds.get(chatId);
+            if (
+              !isFallback &&
+              activeProgId &&
+              !finalizedProgressMessages.has(activeProgId)
+            ) {
+              // Task selesai: hentikan loop live progress, hilangkan backend task
+              // dari pesan progress dan gantikan langsung dengan jawaban AI,
+              // sehingga jawaban tidak perlu dikirim ulang secara terpisah.
+              progressCtl.abort();
+              activeProgressMessageIds.delete(chatId);
+              finalizedProgressMessages.add(activeProgId);
+              await finalizeStreamedMessage(chatId, activeProgId, reply, signal);
+              replies += 1;
+              sentChars += reply.length;
+            } else if (
+              !isFallback &&
+              activeProgId &&
+              finalizedProgressMessages.has(activeProgId)
+            ) {
+              // Sudah difinalisasikan ke pesan progress; tidak perlu kirim dobel.
+              replies += 1;
+              sentChars += reply.length;
+            } else {
+              await sendReplyWithDiagrams(chatId, reply, signal);
+              replies += 1;
+              sentChars += reply.length;
+              if (isFallback) seenFallback = true;
+            }
           }
 
           // Immediately mark fresh assistant message(s) as seen and Telegram-origin.

@@ -472,6 +472,9 @@ fn run_blocking(
         log::warn!("shell_run_command spawn failed: {e}");
         e.to_string()
     })?);
+    #[cfg(windows)]
+    let _job = crate::modules::proc::job::ProcessJob::create_for(child.id()).ok();
+
     // Visible to `shell_session_interrupt` for as long as this runs. Cleared
     // below so a later interrupt cannot kill an unrelated process that has
     // since taken the same slot.
@@ -516,6 +519,7 @@ fn run_blocking(
         Ok(Ok(status)) => (status.code(), false),
         Ok(Err(e)) => return Err(e.to_string()),
         Err(mpsc::RecvTimeoutError::Timeout) => {
+            crate::modules::proc::kill_tree(child.id());
             let _ = child.kill();
             (None, true)
         }
@@ -524,8 +528,21 @@ fn run_blocking(
         }
     };
 
-    let (stdout_bytes, stdout_truncated) = stdout_handle.join().unwrap_or((Vec::new(), false));
-    let (stderr_bytes, stderr_truncated) = stderr_handle.join().unwrap_or((Vec::new(), false));
+    let (pipe_tx, pipe_rx) = mpsc::channel();
+    thread::spawn(move || {
+        let stdout_res = stdout_handle.join().unwrap_or((Vec::new(), false));
+        let stderr_res = stderr_handle.join().unwrap_or((Vec::new(), false));
+        let _ = pipe_tx.send((stdout_res, stderr_res));
+    });
+
+    let ((stdout_bytes, stdout_truncated), (stderr_bytes, stderr_truncated)) =
+        match pipe_rx.recv_timeout(Duration::from_millis(2000)) {
+            Ok(res) => res,
+            Err(_) => {
+                log::warn!("shell_run_command: pipe readers timed out after process exit/kill");
+                ((Vec::new(), false), (Vec::new(), false))
+            }
+        };
 
     Ok(CommandOutput {
         stdout: String::from_utf8_lossy(&stdout_bytes).into_owned(),

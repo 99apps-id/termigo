@@ -1086,6 +1086,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
     provider,
   );
 
+  const runStart = Date.now();
   let stepsSeen = 0;
   let runCost = 0;
   // A hung provider (no first token) used to leave the run on "thinking"
@@ -1099,30 +1100,45 @@ export async function runAgentStream(opts: RunAgentOptions) {
     });
   }
   const resumingApproval = isResumingApproval(opts.uiMessages ?? []);
-  let firstStepTimer: ReturnType<typeof setTimeout> | null = resumingApproval
-    ? null
-    : setTimeout(() => {
-        fireAndForget(
-          logWarn(
-            `[ai] model did not produce first token within 90s (model=${modelId}, provider=${provider})`,
-          ),
-          "first-token-timeout",
-        );
-        abortController.abort(new Error("model did not respond within 90s"));
-      }, 90_000);
+  // When resuming approval, step 0 executes the approved tool (which may take up
+  // to a few minutes for builds or tests). We keep a generous 180s watchdog so
+  // a deadlocked or wedged tool never freezes the agent run indefinitely.
+  let firstStepTimer: ReturnType<typeof setTimeout> | null = setTimeout(
+    () => {
+      const elapsed = Math.round((Date.now() - runStart) / 1000);
+      fireAndForget(
+        logWarn(
+          `[ai] agent run timed out before completing first step (elapsed=${elapsed}s, resumingApproval=${resumingApproval}, model=${modelId}, provider=${provider})`,
+        ),
+        "first-token-timeout",
+      );
+      abortController.abort(
+        new Error(
+          resumingApproval
+            ? `Approved tool execution timed out after ${elapsed}s without completing.`
+            : "model did not respond within 90s",
+        ),
+      );
+    },
+    resumingApproval ? 180_000 : 90_000,
+  );
   // A provider that accepts the connection and then goes silent looked exactly
   // like one that is merely slow: 90 seconds of dead air with a bare spinner.
-  // At 30s without a first token, name the wait in the step label (the HUD
-  // reads "Round N · <step>"), so the pause is an explained stall rather than
-  // a suspected hang. "Model", not "provider": that is the word users pick in
-  // Settings and see in the header; "provider" is our internal plumbing.
-  let stallNotice: ReturnType<typeof setTimeout> | null = resumingApproval
-    ? null
-    : setTimeout(() => {
-        opts.onStep?.(
-          "The model is taking a while to respond — still waiting…",
-        );
-      }, 30_000);
+  // At 30s without a first token (or 20s for an approved tool execution), name
+  // the wait in the step label (the HUD reads "Round N · <step>"), so the pause
+  // is an explained stall rather than a suspected hang. "Model", not "provider":
+  // that is the word users pick in Settings and see in the header; "provider" is
+  // our internal plumbing.
+  let stallNotice: ReturnType<typeof setTimeout> | null = setTimeout(
+    () => {
+      opts.onStep?.(
+        resumingApproval
+          ? "The approved tool is still executing — waiting for completion…"
+          : "The model is taking a while to respond — still waiting…",
+      );
+    },
+    resumingApproval ? 20_000 : 30_000,
+  );
   const clearFirstStepTimer = (): void => {
     if (firstStepTimer) {
       clearTimeout(firstStepTimer);

@@ -12,7 +12,8 @@ export type WorktreeSandbox = {
   branchName: string;
   worktreePath: string;
   createdAt: number;
-  status: "active" | "applied" | "discarded";
+  status: "active" | "applied" | "discarded" | "merged";
+  description?: string;
 };
 
 const activeSandboxes = new Map<string, WorktreeSandbox>();
@@ -63,6 +64,30 @@ export function worktreeDeleteBranchCommand(branchName: string): string {
 }
 
 /**
+ * Shell command to inspect the diff between the worktree and the base commit.
+ */
+export function worktreeDiffCommand(worktreePath: string, baseRef = "HEAD"): string {
+  return `git -C ${quoteShellArg(worktreePath)} diff ${quoteShellArg(baseRef)}`;
+}
+
+/**
+ * Shell command to inspect a concise diffstat of changes in the worktree.
+ */
+export function worktreeDiffStatCommand(worktreePath: string, baseRef = "HEAD"): string {
+  return `git -C ${quoteShellArg(worktreePath)} diff --stat ${quoteShellArg(baseRef)}`;
+}
+
+/**
+ * Shell command to merge the isolated sandbox branch back into current working branch.
+ */
+export function worktreeMergeCommand(branchName: string, squash = false): string {
+  if (squash) {
+    return `git merge --squash ${quoteShellArg(branchName)}`;
+  }
+  return `git merge ${quoteShellArg(branchName)}`;
+}
+
+/**
  * Register an active sandbox in runtime memory.
  */
 export function registerSandbox(sandbox: WorktreeSandbox): void {
@@ -86,10 +111,18 @@ export function listSandboxes(): WorktreeSandbox[] {
 /**
  * Unregister or mark a sandbox as finished.
  */
-export function unregisterSandbox(id: string, status: "applied" | "discarded"): void {
+export function unregisterSandbox(id: string, status: "applied" | "discarded" | "merged"): void {
   const existing = activeSandboxes.get(id);
   if (existing) {
     existing.status = status;
     activeSandboxes.delete(id);
   }
 }
+
+/**
+ * Clears all active sandboxes in memory (primarily for test teardown).
+ */
+export function clearSandboxes(): void {
+  activeSandboxes.clear();
+}
+

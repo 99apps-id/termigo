@@ -34,10 +34,13 @@ import {
   clampTelegramText,
 } from "./telegramHelpers";
 import {
+  activeProgressMessageIds,
+  finalizedProgressMessages,
   lastFinishedProgressMessageIds,
 } from "./telegramProgress";
 import {
   startTelegramDispatch,
+  runAgentAndStream,
 } from "./telegramDispatch";
 import {
   handleCallback,
@@ -56,6 +59,7 @@ export {
   startTelegramResume,
   startTelegramDispatch,
   dispatchAndStream,
+  runAgentAndStream,
 } from "./telegramDispatch";
 
 // --- Commands ---
@@ -66,6 +70,8 @@ export {
   publishProgress,
   progressCtrls,
   lastFinishedProgressMessageIds,
+  activeProgressMessageIds,
+  finalizedProgressMessages,
   sentApprovalIds,
 } from "./telegramProgress";
 
@@ -124,9 +130,12 @@ export const _testOnly = {
   runBusy,
   getPendingApprovals,
   startTelegramDispatch,
+  runAgentAndStream,
   sendTelegram,
   deleteTelegramMessage,
   lastFinishedProgressMessageIds,
+  activeProgressMessageIds,
+  finalizedProgressMessages,
   checkPollingStall,
   getLastPollProgressTime: () => lastPollProgressTime,
   setLastPollProgressTime,
