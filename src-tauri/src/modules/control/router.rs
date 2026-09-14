@@ -5,13 +5,13 @@ use std::time::Duration;
 use serde_json::{json, Value};
 use tauri::Emitter;
 use termigo_control_protocol::{
-    AgentRunParams, ConfigSetParams, ControlRequest, ControlResponse, FocusParams, FrontendRequest,
-    FrontendResponse, OpenParams, PentestReportParams, PentestRunParams, QueryParams,
-    RunCommandParams, SecretSetParams, METHODS, METHOD_AGENT_RUN, METHOD_CAPABILITIES,
-    METHOD_CONFIG_GET, METHOD_CONFIG_SET, METHOD_FOCUS, METHOD_IDENTIFY, METHOD_MODELS_LIST,
-    METHOD_OPEN, METHOD_PENTEST_REPORT, METHOD_PENTEST_RUN, METHOD_PENTEST_STATUS, METHOD_PING,
-    METHOD_QUERY, METHOD_RUN_COMMAND, METHOD_SECRET_SET, METHOD_STATUS, PROTOCOL_VERSION,
-    SERVER_RESPONSE_ID,
+    protocol_is_supported, AgentRunParams, ConfigSetParams, ControlRequest, ControlResponse,
+    FocusParams, FrontendRequest, FrontendResponse, OpenParams, PentestReportParams,
+    PentestRunParams, QueryParams, RunCommandParams, SecretSetParams, METHODS, METHOD_AGENT_RUN,
+    METHOD_CAPABILITIES, METHOD_CONFIG_GET, METHOD_CONFIG_SET, METHOD_FOCUS, METHOD_IDENTIFY,
+    METHOD_MODELS_LIST, METHOD_OPEN, METHOD_PENTEST_REPORT, METHOD_PENTEST_RUN,
+    METHOD_PENTEST_STATUS, METHOD_PING, METHOD_QUERY, METHOD_RUN_COMMAND, METHOD_SECRET_SET,
+    METHOD_STATUS, MIN_SUPPORTED_PROTOCOL, PROTOCOL_VERSION, SERVER_RESPONSE_ID,
 };
 
 use super::validation::{
@@ -40,13 +40,19 @@ pub fn route_request(
             "request id must be 1-128 safe ASCII characters",
         );
     }
-    if request.protocol != PROTOCOL_VERSION {
+    // A range, not equality. The app and the Go CLI ship as separate release
+    // assets, so a half-upgraded install is normal and must keep working; only a
+    // client NEWER than this build is refused, because this build cannot know
+    // what it needs. The message says what to do, because "expected 1" leaves the
+    // reader with nothing to act on.
+    if !protocol_is_supported(request.protocol) {
         return ControlResponse::failure(
             request.id,
             "unsupported_protocol",
             format!(
-                "protocol {} is unsupported; expected {PROTOCOL_VERSION}",
-                request.protocol
+                "control protocol {} is unsupported; this build speaks {}..={}, so update \
+                 the client and the app together",
+                request.protocol, MIN_SUPPORTED_PROTOCOL, PROTOCOL_VERSION
             ),
         );
     }

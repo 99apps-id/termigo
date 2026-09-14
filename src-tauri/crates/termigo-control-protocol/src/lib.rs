@@ -1,7 +1,30 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// The newest protocol this build speaks. A wire change a peer could not
+/// understand is what bumps this.
 pub const PROTOCOL_VERSION: u16 = 1;
+
+/// The oldest protocol this build can still serve.
+///
+/// Separate from `PROTOCOL_VERSION` because the two ends of this socket are
+/// published as SEPARATE release assets: the app and the Go CLI are downloaded
+/// independently, so a half-upgraded install (new app, older CLI) is a normal
+/// state rather than a mistake, and refusing it on inequality turns a version
+/// skew into a dead control channel. A client older than this build sends a
+/// subset of what it understands, so serving it is safe. A client NEWER than
+/// this build is still refused: this build cannot know what that client needs,
+/// and guessing is how a wire mismatch ships.
+pub const MIN_SUPPORTED_PROTOCOL: u16 = 1;
+
+/// Whether `version` can be served: anything from `MIN_SUPPORTED_PROTOCOL` up to
+/// the newest this build speaks.
+///
+/// Pure, so the boundary is pinned by a test rather than only being exercised by
+/// a peer that happens to be the wrong version.
+pub const fn protocol_is_supported(version: u16) -> bool {
+    version >= MIN_SUPPORTED_PROTOCOL && version <= PROTOCOL_VERSION
+}
 pub const MAX_MESSAGE_BYTES: usize = 64 * 1024;
 pub const METHOD_PING: &str = "ping";
 pub const METHOD_CAPABILITIES: &str = "capabilities";
@@ -243,6 +266,30 @@ fn default_focus() -> bool {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// The support boundary is a range, and pinning it here is the point: the
+    /// only other thing that would exercise it is a real half-upgraded install,
+    /// which is exactly the case nobody tests by hand.
+    #[test]
+    fn protocol_support_is_a_range_not_equality() {
+        assert!(
+            protocol_is_supported(PROTOCOL_VERSION),
+            "this build must accept its own version"
+        );
+        assert!(
+            protocol_is_supported(MIN_SUPPORTED_PROTOCOL),
+            "the floor must be accepted, or an older client breaks on a bump"
+        );
+        assert!(
+            !protocol_is_supported(PROTOCOL_VERSION + 1),
+            "a newer client is unknowable and must stay refused"
+        );
+        assert!(!protocol_is_supported(0), "0 is not a protocol version");
+        assert!(
+            !protocol_is_supported(u16::MAX),
+            "no unknown version can be assumed compatible"
+        );
+    }
 
     #[test]
     fn request_round_trips_without_caller_context() {

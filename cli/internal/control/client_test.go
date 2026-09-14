@@ -55,6 +55,44 @@ func TestLoadDescriptorValidation(t *testing.T) {
 		}
 	})
 
+	// An app NEWER than this CLI cannot be served: this CLI cannot know what the
+	// newer protocol expects, so it must refuse rather than guess. The message has
+	// to say what to do, because the wrong version and a dead process otherwise
+	// read the same to the user.
+	t.Run("newer app is refused with guidance", func(t *testing.T) {
+		path := writeDescriptor(t, t.TempDir(), &Descriptor{
+			Protocol: ProtocolVersion + 1,
+			Address:  "127.0.0.1:1",
+			Token:    "x",
+			PID:      os.Getpid(),
+		})
+		_, err := LoadDescriptorFrom(path)
+		if err == nil {
+			t.Fatal("expected the newer protocol to be refused")
+		}
+		if !strings.Contains(err.Error(), "update the CLI and the app together") {
+			t.Fatalf("expected actionable guidance, got: %v", err)
+		}
+	})
+
+	// The floor must be accepted, or bumping the protocol would break every
+	// client that had not been updated yet - which is the exact failure the range
+	// exists to prevent.
+	t.Run("the oldest supported protocol is accepted", func(t *testing.T) {
+		path := writeDescriptor(t, t.TempDir(), &Descriptor{
+			Protocol: MinProtocolVersion,
+			Address:  "127.0.0.1:1",
+			Token:    "x",
+			PID:      os.Getpid(),
+		})
+		_, err := LoadDescriptorFrom(path)
+		// Any later failure is fine (the liveness probe may reject the fake
+		// address); a protocol rejection is not.
+		if err != nil && strings.Contains(err.Error(), "protocol") {
+			t.Fatalf("the floor must not be rejected as a protocol error: %v", err)
+		}
+	})
+
 	t.Run("incomplete descriptor", func(t *testing.T) {
 		path := writeDescriptor(t, t.TempDir(), &Descriptor{
 			Protocol: ProtocolVersion,
@@ -67,6 +105,24 @@ func TestLoadDescriptorValidation(t *testing.T) {
 			t.Fatalf("expected incomplete error, got: %v", err)
 		}
 	})
+}
+
+// TestProtocolSupportedIsARange pins the version boundary directly. The only
+// other thing that would exercise it is a real half-upgraded install, where the
+// app and this CLI are different releases.
+func TestProtocolSupportedIsARange(t *testing.T) {
+	if !protocolSupported(ProtocolVersion) {
+		t.Fatal("this CLI must accept its own protocol version")
+	}
+	if !protocolSupported(MinProtocolVersion) {
+		t.Fatal("the floor must be accepted, or an app bump breaks every older CLI")
+	}
+	if protocolSupported(ProtocolVersion + 1) {
+		t.Fatal("an app newer than this CLI is unknowable and must stay refused")
+	}
+	if protocolSupported(0) {
+		t.Fatal("0 is not a protocol version")
+	}
 }
 
 func TestLoadDescriptorStaleProcess(t *testing.T) {

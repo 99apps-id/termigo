@@ -26,7 +26,15 @@ import (
 const (
 	// ProtocolVersion must match termigo_control_protocol::PROTOCOL_VERSION.
 	ProtocolVersion = 1
-	ConnectTimeout  = 2 * time.Second
+	// MinProtocolVersion must match
+	// termigo_control_protocol::MIN_SUPPORTED_PROTOCOL. The app and this CLI ship
+	// as separate release assets, so the two can legitimately differ after a
+	// half-upgrade: the app serves anything from its floor up to its own version,
+	// and this CLI reads a descriptor for the same span. Rejecting on inequality
+	// turned a version skew into "Termigo is not running", which sends the reader
+	// looking for a dead process instead of an out-of-date binary.
+	MinProtocolVersion = 1
+	ConnectTimeout     = 2 * time.Second
 	// ReadTimeout bounds a one-shot action (focus/open/status); those answer in
 	// milliseconds.
 	ReadTimeout = 15 * time.Second
@@ -79,6 +87,14 @@ func DescriptorPath() (string, error) {
 	return filepath.Join(cache, "termigo", "control.json"), nil
 }
 
+// protocolSupported reports whether a descriptor's protocol version can be
+// served by this CLI. Separate from the caller so the boundary is pinned by a
+// test: the only other thing that would exercise it is a real half-upgraded
+// install, which is the case nobody tests by hand.
+func protocolSupported(version uint16) bool {
+	return version >= MinProtocolVersion && version <= ProtocolVersion
+}
+
 // LoadDescriptor reads the descriptor from its well-known path.
 func LoadDescriptor() (*Descriptor, error) {
 	path, err := DescriptorPath()
@@ -99,8 +115,11 @@ func LoadDescriptorFrom(path string) (*Descriptor, error) {
 	if err := json.Unmarshal(raw, &desc); err != nil {
 		return nil, fmt.Errorf("invalid Termigo control descriptor: %w", err)
 	}
-	if desc.Protocol != ProtocolVersion {
-		return nil, fmt.Errorf("unsupported Termigo control protocol %d", desc.Protocol)
+	if !protocolSupported(desc.Protocol) {
+		return nil, fmt.Errorf(
+			"Termigo control protocol %d is not supported by this CLI, which speaks %d..%d; "+
+				"update the CLI and the app together",
+			desc.Protocol, MinProtocolVersion, ProtocolVersion)
 	}
 	if desc.Address == "" || desc.Token == "" {
 		return nil, fmt.Errorf("Termigo control descriptor is incomplete")
