@@ -31,6 +31,26 @@ export const POLLING_STALL_TIMEOUT_MS = 75_000;
 export let watchdogTimer: ReturnType<typeof setInterval> | null = null;
 
 /**
+ * When the loop is deliberately waiting, and the watchdog must stay out of the
+ * way. Zero means "not waiting".
+ *
+ * This is the fix for a real failure. The poll loop backs off 60s after a 409,
+ * but that backoff updated nothing the watchdog reads, and the last successful
+ * poll was one 30s long-poll earlier - so `elapsed` was already ~30s when the
+ * backoff began and crossed the 75s window before the backoff ended. The
+ * watchdog therefore fired in the middle of EVERY conflict backoff, recycled
+ * the poller, and its replacement re-acquired the bot immediately: the exact
+ * churn the backoff exists to prevent, because the backoff's whole purpose is
+ * to give the other client room. Seen in the field as
+ *   409 -> stalled 89s -> recycle -> 409 -> stalled 90s -> recycle
+ * repeating for as long as the competing client was around.
+ *
+ * Declared rather than inferred: the loop knows it is waiting on purpose, so
+ * it says so instead of the watchdog trying to guess from a timer.
+ */
+let deliberateWaitUntil = 0;
+
+/**
  * The loop currently polling, so the watchdog can wait for it to finish before
  * starting its replacement.
  *
@@ -88,37 +108,67 @@ function sleep(signal: AbortSignal, ms: number): Promise<void> {
   });
 }
 
+/**
+ * Whether the loop looks hung rather than deliberately waiting.
+ *
+ * Pure, so the policy is asserted rather than buried in the interval callback -
+ * the same reason `pollBackoffMs` is pure. No clock, no network, no chat.
+ *
+ * The order matters: a declared wait wins outright. Measuring `lastProgressAt`
+ * first is what produced the bug, because a backoff is by definition a period
+ * with no progress to measure.
+ */
+export function isPollingStalled(input: {
+  now: number;
+  lastProgressAt: number;
+  deliberateWaitUntil: number;
+}): boolean {
+  if (input.now < input.deliberateWaitUntil) return false;
+  return input.now - input.lastProgressAt > POLLING_STALL_TIMEOUT_MS;
+}
+
 export function checkPollingStall(): void {
   if (!useTelegramStore.getState().enabled || !loopController) return;
-  const elapsed = Date.now() - lastPollProgressTime;
-  if (elapsed > POLLING_STALL_TIMEOUT_MS) {
-    // In the file log as well as the console: on a headless install nobody is
-    // watching the console, and a recycled poller is otherwise invisible.
-    const seconds = Math.round(elapsed / 1000);
-    logRelayWarn(
-      `polling stalled: no getUpdates progress for ${seconds}s, recycling poller`,
-    );
-    console.warn(
-      `[Telegram] Polling stall detected: no getUpdates progress for ${seconds}s. Reconnecting poller...`,
-    );
-    const oldCtrl = loopController;
-    const oldLoop = loopPromise;
-    const next = new AbortController();
-    loopController = next;
-    lastPollProgressTime = Date.now();
-    // Abort so the hanging fetch terminates cleanly.
-    oldCtrl.abort(new Error("Polling stall watchdog timeout"));
-    // Start the replacement only after the old loop has exited (or the grace
-    // period lapses), so the two never poll at the same time. Racing the wait
-    // against a timer keeps recovery possible when the abort does not land.
-    void Promise.race([
-      oldLoop ?? Promise.resolve(),
-      sleep(new AbortController().signal, STALL_RECYCLE_GRACE_MS),
-    ]).then(() => {
-      if (loopController !== next || next.signal.aborted) return;
-      launchLoop(next);
-    });
+  const now = Date.now();
+  if (
+    !isPollingStalled({
+      now,
+      lastProgressAt: lastPollProgressTime,
+      deliberateWaitUntil,
+    })
+  ) {
+    return;
   }
+  // In the file log as well as the console: on a headless install nobody is
+  // watching the console, and a recycled poller is otherwise invisible.
+  const elapsed = now - lastPollProgressTime;
+  const seconds = Math.round(elapsed / 1000);
+  logRelayWarn(
+    `polling stalled: no getUpdates progress for ${seconds}s, recycling poller`,
+  );
+  console.warn(
+    `[Telegram] Polling stall detected: no getUpdates progress for ${seconds}s. Reconnecting poller...`,
+  );
+  const oldCtrl = loopController;
+  const oldLoop = loopPromise;
+  const next = new AbortController();
+  loopController = next;
+  lastPollProgressTime = now;
+  // A recycle is not a wait, and leaving a stale deadline behind would suppress
+  // the next genuine stall for as long as it lasted.
+  deliberateWaitUntil = 0;
+  // Abort so the hanging fetch terminates cleanly.
+  oldCtrl.abort(new Error("Polling stall watchdog timeout"));
+  // Start the replacement only after the old loop has exited (or the grace
+  // period lapses), so the two never poll at the same time. Racing the wait
+  // against a timer keeps recovery possible when the abort does not land.
+  void Promise.race([
+    oldLoop ?? Promise.resolve(),
+    sleep(new AbortController().signal, STALL_RECYCLE_GRACE_MS),
+  ]).then(() => {
+    if (loopController !== next || next.signal.aborted) return;
+    launchLoop(next);
+  });
 }
 
 /** Run `runLoop`, recording the promise so the watchdog can await it. */
@@ -201,7 +251,16 @@ async function runLoop(signal: AbortSignal): Promise<void> {
           "409 Conflict: another client holds this bot token - check for a second Termigo instance, or another app configured with the same token",
         );
       }
+      // Declare the wait BEFORE sleeping, so the watchdog never sees a stall
+      // during it. See `deliberateWaitUntil` for the failure this fixes.
+      deliberateWaitUntil = Date.now() + backoffMs;
       await sleep(signal, backoffMs);
+      // The wait is over and the loop is attempting again, so the stall clock
+      // restarts from here rather than from the last success. Without this the
+      // window between the wait ending and the next failure would read as
+      // elapsed time with nothing happening.
+      deliberateWaitUntil = 0;
+      lastPollProgressTime = Date.now();
     }
   }
   if (loopController?.signal === signal) {
@@ -219,6 +278,7 @@ export async function startTelegramBot(): Promise<void> {
   mirrorController = mirror;
   relayController = new AbortController();
   lastPollProgressTime = Date.now();
+  deliberateWaitUntil = 0;
   if (watchdogTimer) clearInterval(watchdogTimer);
   watchdogTimer = setInterval(checkPollingStall, 15_000);
   // Start polling BEFORE any awaiting setup. The bot used to report itself
@@ -260,6 +320,7 @@ export function stopTelegramBot(): void {
   mirrorController = null;
   relayController?.abort();
   relayController = null;
+  deliberateWaitUntil = 0;
   useTelegramStore.getState().setOnline(false);
   if (wasRunning) logRelayInfo("relay stopped");
 }
