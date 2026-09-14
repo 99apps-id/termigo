@@ -126,3 +126,62 @@ export function clearSandboxes(): void {
   activeSandboxes.clear();
 }
 
+/** Where sandboxes live, relative to the workspace root. */
+export const WORKTREE_SUBPATH_PREFIX = ".termigo/worktrees/";
+
+/** A sandbox that exists on disk, whether or not this process created it. */
+export type DiscoveredWorktree = {
+  /** Sandbox id, taken from the directory name that `generateSandboxInfo` built. */
+  id: string;
+  worktreePath: string;
+  branchName: string;
+};
+
+/**
+ * Find Termigo sandboxes by looking at GIT rather than at memory.
+ *
+ * The registry above is a plain in-memory Map, so it knows only about the
+ * sandboxes THIS process created. The worktrees themselves live on disk and
+ * survive a restart, which means after any restart `worktree_list` reported
+ * nothing while `.termigo/worktrees/<id>` directories and
+ * `termigo-sandbox/<id>` branches were still there. Those became invisible:
+ * nothing could list them and `worktree_discard` could not remove them, because
+ * it looks the sandbox up by id. Subagent isolation makes that more likely, since
+ * a subagent creates a worktree on request.
+ *
+ * Git is the authority on which worktrees exist, so this reads them from there.
+ * Pure and taking plain entries, so it is tested without a repository.
+ *
+ * The prefix filter is load-bearing: a user may have their own worktrees, and
+ * treating one of those as a Termigo sandbox would offer to delete it.
+ */
+export function discoveredWorktrees(
+  branches: readonly {
+    name: string;
+    kind: string;
+    worktreePath: string | null;
+  }[],
+): DiscoveredWorktree[] {
+  const out: DiscoveredWorktree[] = [];
+  const seen = new Set<string>();
+  for (const branch of branches) {
+    if (branch.kind !== "worktree" || !branch.worktreePath) continue;
+    // Git reports native separators, so match on both.
+    const normalised = branch.worktreePath.replace(/\\/g, "/");
+    const at = normalised.lastIndexOf(`/${WORKTREE_SUBPATH_PREFIX}`);
+    // Require the marker to be a whole path segment, not a prefix of a longer
+    // directory name (`.../x.termigo/worktrees/`).
+    if (at < 0) continue;
+    const id = normalised.slice(at + WORKTREE_SUBPATH_PREFIX.length + 1);
+    // A nested path is not a sandbox root; `generateSandboxInfo` makes one level.
+    if (!id || id.includes("/") || seen.has(id)) continue;
+    seen.add(id);
+    out.push({
+      id,
+      worktreePath: branch.worktreePath,
+      branchName: branch.name,
+    });
+  }
+  return out;
+}
+

@@ -6,15 +6,38 @@ import { remoteUnsupported } from "../lib/remoteFs";
 import { getSessionShell, sessionShellKey } from "../lib/sessionShell";
 import type { ToolContext } from "./context";
 import {
+  discoveredWorktrees,
   generateSandboxInfo,
-  registerSandbox,
   getSandbox,
   listSandboxes,
+  registerSandbox,
   unregisterSandbox,
   worktreeAddCommand,
   worktreeRemoveCommand,
   worktreeDeleteBranchCommand,
 } from "../lib/worktree";
+
+/**
+ * Sandboxes that exist on disk but were not created by this process.
+ *
+ * Non-throwing on purpose. It runs inside `worktree_list`, which is read-only and
+ * must keep working when the workspace is not a repo, the git command fails, or
+ * the control plane is busy - an error there would turn "what worktrees do I
+ * have?" into a failure instead of a shorter list.
+ */
+async function discoverSandboxes(
+  ctx: ToolContext,
+): Promise<ReturnType<typeof discoveredWorktrees>> {
+  const root = ctx.getWorkspaceRoot() ?? ctx.getCwd();
+  if (!root) return [];
+  try {
+    const { branches } = await native.gitListBranches(root);
+    const known = new Set(listSandboxes().map((s) => s.id));
+    return discoveredWorktrees(branches).filter((d) => !known.has(d.id));
+  } catch {
+    return [];
+  }
+}
 
 /**
  * Build Git Worktree Sandbox tools for AI Agent.
@@ -83,18 +106,36 @@ export function buildWorktreeTools(ctx: ToolContext) {
     }),
 
     worktree_list: tool({
-      description: "List all active git worktree sandboxes in the current workspace. Read-only, auto-executes.",
+      description:
+        "List all git worktree sandboxes in the current workspace, including any left behind by a previous app run. Read-only, auto-executes.",
       inputSchema: z.object({}),
       execute: async () => {
         const sandboxes = listSandboxes();
+        // Git is the authority on what exists; the registry is only what THIS
+        // process created. Merging the two is what makes a sandbox from a
+        // previous run visible at all - see `discoveredWorktrees`.
+        const orphans = await discoverSandboxes(ctx);
         return {
-          sandboxes: sandboxes.map((s) => ({
-            id: s.id,
-            branch: s.branchName,
-            path: s.worktreePath,
-            status: s.status,
-          })),
-          count: sandboxes.length,
+          sandboxes: [
+            ...sandboxes.map((s) => ({
+              id: s.id,
+              branch: s.branchName,
+              path: s.worktreePath,
+              status: s.status,
+            })),
+            ...orphans.map((o) => ({
+              id: o.id,
+              branch: o.branchName,
+              path: o.worktreePath,
+              // Not "active": nothing in this process is using it. Named so the
+              // agent can tell it apart from a sandbox it just created, and so
+              // discarding it is an informed choice rather than a guess.
+              status: "orphaned" as const,
+              note: "From a previous run. Its work is still on disk; worktree_discard removes it.",
+            })),
+          ],
+          count: sandboxes.length + orphans.length,
+          ...(orphans.length > 0 ? { orphaned: orphans.length } : {}),
         };
       },
     }),
@@ -117,12 +158,22 @@ export function buildWorktreeTools(ctx: ToolContext) {
         const cwd = ctx.getWorkspaceRoot() ?? ctx.getCwd() ?? ".";
 
         const sandbox = getSandbox(sandbox_id);
-        if (!sandbox) {
+        // A sandbox from a previous run is not in the registry, so fall back to
+        // what git reports. Without this, the orphans that `worktree_list` now
+        // shows could be listed but never removed - visible and still stuck.
+        const discovered = sandbox
+          ? undefined
+          : (await discoverSandboxes(ctx)).find((d) => d.id === sandbox_id);
+        if (!sandbox && !discovered) {
           return { error: `Sandbox with ID ${sandbox_id} not found.` };
         }
+        const target = sandbox ?? {
+          worktreePath: discovered?.worktreePath ?? "",
+          branchName: discovered?.branchName ?? "",
+        };
 
-        const removeCommand = worktreeRemoveCommand(sandbox.worktreePath);
-        const branchCommand = worktreeDeleteBranchCommand(sandbox.branchName);
+        const removeCommand = worktreeRemoveCommand(target.worktreePath);
+        const branchCommand = worktreeDeleteBranchCommand(target.branchName);
 
         for (const command of [removeCommand, branchCommand]) {
           const safety = checkShellCommand(command);
@@ -142,7 +193,7 @@ export function buildWorktreeTools(ctx: ToolContext) {
           unregisterSandbox(sandbox_id, "discarded");
           return {
             sandbox_id,
-            branch: sandbox.branchName,
+            branch: target.branchName,
             status: "discarded",
             worktree_exit_code: removeResult.exit_code,
             branch_exit_code: branchResult.exit_code,
