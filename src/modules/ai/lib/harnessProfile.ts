@@ -81,7 +81,7 @@ export const BUILTIN_PROFILES: Record<string, HarnessProfile> = {
     label: "No todo overhead",
     description:
       "Hide the todo tools for lighter tasks, so short asks do not carry plan overhead.",
-    hideTools: ["todo_write"],
+    hideTools: ["todo_write", "todo_update", "todo_read"],
   },
   autonomous: {
     id: "autonomous",

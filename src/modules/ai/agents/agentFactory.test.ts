@@ -102,16 +102,22 @@ describe("buildAgentTools", () => {
     expect(tools.run_subagents).toBeDefined();
   });
 
-  it("withholds todo_write from subagents but keeps it for the main agent", () => {
+  it("withholds todo tools from subagents but keeps them for the main agent", () => {
     const fixture = {
       todo_write: { execute: () => undefined },
+      todo_update: { execute: () => undefined },
+      todo_read: { execute: () => undefined },
       read_file: { execute: () => undefined },
     };
     const mainTools = buildAgentTools(fixture);
     expect(mainTools.todo_write).toBeDefined();
+    expect(mainTools.todo_update).toBeDefined();
+    expect(mainTools.todo_read).toBeDefined();
 
     const subTools = buildAgentTools(fixture, { depth: 1 });
     expect(subTools.todo_write).toBeUndefined();
+    expect(subTools.todo_update).toBeUndefined();
+    expect(subTools.todo_read).toBeUndefined();
     expect(subTools.read_file).toBeDefined();
   });
 

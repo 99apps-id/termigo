@@ -130,6 +130,12 @@ const TOOL_LABELS: Record<string, (input: Record<string, unknown>) => string> =
       `Suggesting ${ellipsize(String(i.command ?? ""), 60)}`,
     todo_write: (i) =>
       `Updating plan (${Array.isArray(i.todos) ? i.todos.length : 0} items)`,
+    todo_update: (i) =>
+      `Updating task ${ellipsize(String(i.title ?? i.id ?? ""), 40)}`,
+    todo_read: () => "Reading plan",
+    think: () => "Thinking",
+    git_conflicts: (i) =>
+      `Checking git conflicts${i.path ? ` in ${shortPath(i.path)}` : ""}`,
     run_subagent: (i) => `Spawning ${String(i.type ?? "subagent")} subagent`,
     // Named rather than left to the "Calling remember" fallback: what is being
     // written outlives the run, so it is the one tool whose argument matters

@@ -71,6 +71,14 @@ const TOOL_META: Record<string, ToolMeta> = {
   render_view: { present: "Rendering", past: "Rendered", icon: EyeIcon },
   run_subagent: { present: "Delegating", past: "Finished", icon: RobotIcon },
   todo_write: { present: "Updating plan", past: "Updated plan", icon: CheckListIcon },
+  todo_update: { present: "Updating task", past: "Updated task", icon: CheckListIcon },
+  todo_read: { present: "Reading plan", past: "Read plan", icon: CheckListIcon },
+  think: { present: "Thinking", past: "Thought", icon: SparklesIcon },
+  git_conflicts: {
+    present: "Checking conflicts",
+    past: "Checked conflicts",
+    icon: ToolsIcon,
+  },
   run_sql: { present: "Running SQL", past: "Ran SQL", icon: TerminalIcon },
   list_sql_connections: {
     present: "Listing DBs",
@@ -148,6 +156,16 @@ function deriveSummary(toolName: string, input: unknown): string | null {
         ? `${items.length} item${items.length === 1 ? "" : "s"}`
         : null;
     }
+    case "todo_update":
+      return str("title") ?? str("id") ?? str("status");
+    case "todo_read":
+      return str("status") ? `filter: ${str("status")}` : "All items";
+    case "think": {
+      const t = str("thoughts");
+      return t ? (t.length > 60 ? `${t.slice(0, 59)}...` : t) : null;
+    }
+    case "git_conflicts":
+      return str("path") ?? "All files";
     case "run_sql":
       return str("query") ?? str("connection");
     case "list_sql_connections":
@@ -267,6 +285,7 @@ const HEAVY_CONTENT_TOOLS = new Set([
   "multi_edit",
   "run_subagent",
   "todo_write",
+  "think",
 ]);
 
 const ToolImpl = ({

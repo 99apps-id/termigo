@@ -44,6 +44,7 @@ import { buildSubagentTools } from "./subagent";
 import { buildSystemTools } from "./system";
 import { buildTerminalTools } from "./terminal";
 import { buildTestLoopTools } from "./testLoopTools";
+import { buildThinkTools } from "./think";
 import { buildTodoTools } from "./todo";
 import {
   buildUnknownToolFallback,
@@ -243,6 +244,7 @@ export function buildTools(
     ...buildShellTools(ctx),
     ...buildSubagentTools(ctx, subagentDepth),
     ...buildTerminalTools(ctx),
+    ...buildThinkTools(),
     ...buildTodoTools(ctx),
     ...buildMemoryTools(ctx),
     ...buildElicitationTools(),

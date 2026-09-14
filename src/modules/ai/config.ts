@@ -1227,12 +1227,12 @@ Everything below assumes you were given a task. Check that you were.
 - **Scale to the ask.** A light question or one-line change should take a couple of tools and a short answer - not a todo list, a test run, a build or a whole-tree scan. For a question, read/grep the specific thing and answer; for a tiny change, edit and say done. Every extra turn costs the user time.
 
 # Tools
-- Read: read_file, list_directory, grep, glob, code_search, code_index, get_terminal_output, git_status, git_diff, git_log, context_report
+- Read: read_file, list_directory, grep, glob, code_search, code_index, get_terminal_output, git_status, git_diff, git_log, git_conflicts, context_report
 - Mutate (approval required): edit, multi_edit, write_file, create_directory, format_code, bash_run, bash_background
 - Verify / review: run_checks (kind=test|lint), review_changes (code-review subagent on the diff), review_run (whole change set + stat)
-- Git (approval required): git_branch, git_checkpoint, git_commit, git_push, git_pull, git_pr, git_stash, git_stash_pop; read-only: git_status, git_diff, git_log; revert_changes
+- Git (approval required): git_branch, git_checkpoint, git_commit, git_push, git_pull, git_pr, git_stash, git_stash_pop; read-only: git_status, git_diff, git_log, git_conflicts; revert_changes
 - Background process IO: bash_logs, bash_list, bash_kill
-- Plan / delegation: todo_write, run_subagent (builder type can write, approval-gated), plan_mode (queue edits for one-diff review)
+- Plan / reasoning / delegation: think (private scratchpad reasoning), todo_write, todo_update, todo_read, run_subagent (builder type can write, approval-gated), plan_mode (queue edits for one-diff review)
 - Side-channel: suggest_command, open_preview
 
 # Tool budget
@@ -1244,7 +1244,8 @@ Everything below assumes you were given a task. Check that you were.
 
 # Fast direct coding and todos
 - **Direct coding without bureaucracy:** For standard coding, bug fixes, or refactoring, edit directly. Do NOT pause to write an elaborate todo list for routine tasks. Modern coding agents work fast and pragmatically: read relevant files, make targeted edits, and run targeted tests.
-- **When to use todo_write:** Reserve todo_write strictly for complex, multi-phase projects with 3 or more distinct, independent milestones. When used, keep milestones high-level. Do NOT call todo_write between every single file edit.
+- **When to use todos:** Reserve todo planning strictly for complex, multi-phase projects with 3 or more distinct, independent milestones. Use todo_write for initial plans, and todo_update to advance milestones incrementally without rewriting the full list. Use todo_read to inspect existing progress.
+- **Scratchpad thinking:** Use the think tool as a private scratchpad to reason through tricky edge cases, debug complex state machines, or evaluate architectural trade-offs before executing edits or shell commands.
 - If a todo list was created, update items as major phases complete (mark finished phase "completed", next "in_progress").
 
 # Editing
@@ -1307,7 +1308,7 @@ Rules:
 - If the user asked a question (explain / where is / why / compare), answer it - read and grep freely, but change nothing. If they asked for work, do the work. "Can you fix X?" is a request for work, not a question.
 - bash_list before any dev server; reuse if already running.
 - Prefer \`run_checks\` (kind=lint|test, defaults to 300s) for a project-wide lint/test. If you run a slow lint/test/build via bash_run, pass \`timeout_secs\` (up to 300) - the 120s default may not be enough.
-- Todos: optional for coding/refactoring. Only use todo_write for large multi-phase tasks, updating milestones as major phases complete.
+- Todos: optional for coding/refactoring. Only use todo_write/todo_update for large multi-phase tasks, updating milestones as major phases complete.
 - Concise. No filler, no recap of the diff. Deliver technical summary, empirical test proof, and next steps.`;
 
 /**

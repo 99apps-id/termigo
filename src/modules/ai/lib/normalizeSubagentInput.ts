@@ -119,7 +119,7 @@ export function normalizeBatchInput(input: unknown): unknown {
   });
 
   obj.tasks = taskList.map((t, idx) => {
-    let parsed = parseJsonIfString(t);
+    const parsed = parseJsonIfString(t);
     if (typeof parsed === "string") {
       return {
         type: "general",

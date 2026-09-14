@@ -1,6 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { native } from "../lib/native";
 import { checkShellCommand } from "../lib/security";
 import {
+  buildGitTools,
   gitBlameCommand,
   gitCommitMessageArgs,
   gitDiffCommand,
@@ -153,6 +155,53 @@ describe("git command builders", () => {
     expect(gitCommitMessageArgs("fix: quick fix")).toBe("-m 'fix: quick fix'");
     expect(gitCommitMessageArgs("")).toBe("-m 'update'");
     expect(gitCommitMessageArgs("   ")).toBe("-m 'update'");
+  });
+
+  it("git_conflicts parses conflict blocks from specified file", async () => {
+    vi.spyOn(native, "readFile").mockResolvedValueOnce({
+      kind: "text",
+      content: "<<<<<<< HEAD\nleft\n=======\nright\n>>>>>>> branch\n",
+      size: 40,
+    });
+
+    const ctx = {
+      getCwd: () => "/workspace",
+      getWorkspaceRoot: () => "/workspace",
+      getRemoteSession: () => null,
+      getTerminalContext: () => null,
+      isActiveTerminalPrivate: () => false,
+      injectIntoActivePty: () => false,
+      openPreview: () => true,
+      openCanvas: () => true,
+      browserOpen: vi.fn(),
+      browserNavigate: vi.fn(),
+      browserBack: vi.fn(),
+      browserForward: vi.fn(),
+      browserReload: vi.fn(),
+      browserExtract: vi.fn(),
+      browserEval: vi.fn(),
+      browserScreenshot: vi.fn(),
+      browserConsole: vi.fn(),
+      browserUrl: vi.fn(),
+      browserClose: vi.fn(),
+      browserList: vi.fn(),
+      spawnAgent: () => null,
+      readAgentOutput: () => null,
+      readCache: new Map(),
+      getSessionId: () => "sess-git",
+    };
+
+    const tools = buildGitTools(ctx as any);
+    const exec = tools.git_conflicts.execute as any;
+    const res = await exec({ path: "conflicted.ts" }, { toolCallId: "t1" });
+
+    expect(res.count).toBe(1);
+    expect(res.file).toBe("conflicted.ts");
+    expect(res.conflicts).toHaveLength(1);
+    expect(res.conflicts[0].startLine).toBe(1);
+    expect(res.conflicts[0].endLine).toBe(5);
+    expect(res.conflicts[0].oursLabel).toBe("HEAD");
+    expect(res.conflicts[0].theirsLabel).toBe("branch");
   });
 });
 

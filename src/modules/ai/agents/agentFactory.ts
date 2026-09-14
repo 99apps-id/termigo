@@ -127,7 +127,10 @@ export const CORE_TOOL_NAMES = new Set([
   "bash_list",
   "bash_kill",
   "run_checks",
+  "think",
   "todo_write",
+  "todo_update",
+  "todo_read",
   "review_changes",
   "review_run",
   "get_terminal_output",
@@ -136,6 +139,7 @@ export const CORE_TOOL_NAMES = new Set([
   "git_log",
   "git_checkpoint",
   "git_commit",
+  "git_conflicts",
   "run_subagent",
   "run_subagents",
 ]);
@@ -173,7 +177,11 @@ export const RECOVERY_TOOL_NAMES: ReadonlySet<string> = new Set([
  * stays pure and testable; the runner supplies `effectiveSubagentMaxDepth()`.
  */
 /** Tools that only the main session agent may access; withheld from all subagents. */
-export const SUBAGENT_FORBIDDEN_TOOLS = new Set(["todo_write"]);
+export const SUBAGENT_FORBIDDEN_TOOLS = new Set([
+  "todo_write",
+  "todo_update",
+  "todo_read",
+]);
 
 export function buildAgentTools<T>(
   tools: Record<string, T>,

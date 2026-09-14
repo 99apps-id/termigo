@@ -1,16 +1,17 @@
 import { quoteShellArg } from "@/lib/shellQuote";
 import { tool } from "ai";
 import { z } from "zod";
+import { scanTextForConflicts, summarizeConflicts } from "../lib/conflicts";
 import { native } from "../lib/native";
 import { enforcePolicy } from "../lib/policyEngine";
 import { remoteUnsupported } from "../lib/remoteFs";
 import { checkShellCommand } from "../lib/security";
 import { getSessionShell, sessionShellKey } from "../lib/sessionShell";
-import type { ToolContext } from "./context";
+import { resolvePath, type ToolContext } from "./context";
 
 // A git branch name may use letters, digits, and `- _ . /`, but must not
 // begin with `-` (option) or contain a space or control character. Anything
-// else refuses rather than guessing — the model can pick a simpler name.
+// else refuses rather than guessing - the model can pick a simpler name.
 const BRANCH_RE = /^(?!-)[^\s~^:?*[\]\\]+$/;
 
 function validBranch(name: string): boolean {
@@ -838,6 +839,102 @@ export function buildGitTools(ctx: ToolContext) {
             stdout: r.stdout,
             stderr: r.stderr,
             exit_code: r.exit_code,
+          };
+        } catch (e) {
+          return { error: String(e) };
+        }
+      },
+    }),
+
+    git_conflicts: tool({
+      description:
+        "Inspect and parse unresolved git merge conflicts (<<<<<<<, =======, >>>>>>>). Pass `path` to scan a specific file, or omit it to automatically detect and scan all unmerged files in the repository. Returns conflict line numbers, labels, and code previews.",
+      inputSchema: z.object({
+        path: z
+          .string()
+          .optional()
+          .describe(
+            "Optional file path to inspect. If omitted, all unmerged files in the repository are scanned.",
+          ),
+      }),
+      execute: async ({ path: targetPath }) => {
+        if (ctx.getRemoteSession()) {
+          return remoteUnsupported(
+            "git_conflicts",
+            "Use bash_run with git diff or grep on the remote host.",
+          );
+        }
+        const sid = ctx.getSessionId();
+        if (!sid) return { error: "no active chat session" };
+        const cwd = repoRootFor(ctx.getWorkspaceRoot(), ctx.getCwd());
+
+        try {
+          if (targetPath) {
+            const resolved = resolvePath(targetPath, cwd);
+            const r = await native.readFile(resolved);
+            if (r.kind === "binary") return { error: "file is binary", path: targetPath };
+            if (r.kind === "toolarge") return { error: "file too large", path: targetPath };
+            const blocks = scanTextForConflicts(r.content);
+            return {
+              file: targetPath,
+              count: blocks.length,
+              conflicts: summarizeConflicts(blocks),
+            };
+          }
+
+          const shellId = await getSessionShell(
+            sessionShellKey("git", sid, ctx.getWorkspaceRoot()),
+            cwd,
+          );
+          const r = await native.shellSessionRun(
+            shellId,
+            "git diff --name-only --diff-filter=U",
+            cwd,
+            30,
+          );
+
+          const unmergedFiles = r.stdout
+            .split(/\r?\n/)
+            .map((s) => s.trim())
+            .filter(Boolean);
+
+          if (unmergedFiles.length === 0) {
+            return {
+              count: 0,
+              files: [],
+              message: "No unresolved git merge conflicts found in the repository.",
+            };
+          }
+
+          const fileResults: Array<{
+            file: string;
+            count: number;
+            conflicts: ReturnType<typeof summarizeConflicts>;
+          }> = [];
+
+          for (const relFile of unmergedFiles) {
+            try {
+              const fullPath = resolvePath(relFile, cwd);
+              const fileData = await native.readFile(fullPath);
+              if (fileData.kind === "text") {
+                const blocks = scanTextForConflicts(fileData.content);
+                fileResults.push({
+                  file: relFile,
+                  count: blocks.length,
+                  conflicts: summarizeConflicts(blocks),
+                });
+              }
+            } catch {
+              // Ignore unreadable individual files.
+            }
+          }
+
+          const totalConflicts = fileResults.reduce((acc, f) => acc + f.count, 0);
+
+          return {
+            unmergedFileCount: unmergedFiles.length,
+            totalConflicts,
+            files: fileResults,
           };
         } catch (e) {
           return { error: String(e) };

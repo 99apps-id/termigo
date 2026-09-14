@@ -7,6 +7,7 @@ import {
 import { tool } from "ai";
 import { z } from "zod";
 import { modelSupportsVision } from "../config";
+import { scanTextForConflicts, summarizeConflicts } from "../lib/conflicts";
 import { native } from "../lib/native";
 import { fileCacheKey, routePath } from "../lib/remoteFs";
 import {
@@ -156,6 +157,9 @@ async function readRemoteFile(
     }
     readCache.set(key, { size, hash });
     const sliced = sliceLines(content, offset, limit);
+    const conflicts = summarizeConflicts(
+      scanTextForConflicts(sliced.content, (sliced.start_line ?? 0) + 1),
+    );
     return {
       path: remotePath,
       content: sliced.content,
@@ -163,6 +167,12 @@ async function readRemoteFile(
       total_lines: sliced.total_lines,
       ...(sliced.start_line !== undefined
         ? { start_line: sliced.start_line, end_line: sliced.end_line }
+        : {}),
+      ...(conflicts.length > 0
+        ? {
+            conflicts,
+            conflictWarning: `This file contains ${conflicts.length} unresolved git merge conflict block(s).`,
+          }
         : {}),
       ...(sliced.truncated
         ? {
@@ -321,6 +331,9 @@ export function buildFsTools(ctx: ToolContext) {
           ctx.readCache.set(abs, { size: r.size, hash });
 
           const sliced = sliceLines(r.content, offset, limit);
+          const conflicts = summarizeConflicts(
+            scanTextForConflicts(sliced.content, (sliced.start_line ?? 0) + 1),
+          );
           return {
             path: abs,
             content: sliced.content,
@@ -328,6 +341,12 @@ export function buildFsTools(ctx: ToolContext) {
             total_lines: sliced.total_lines,
             ...(sliced.start_line !== undefined
               ? { start_line: sliced.start_line, end_line: sliced.end_line }
+              : {}),
+            ...(conflicts.length > 0
+              ? {
+                  conflicts,
+                  conflictWarning: `This file contains ${conflicts.length} unresolved git merge conflict block(s).`,
+                }
               : {}),
             ...(sliced.truncated
               ? {

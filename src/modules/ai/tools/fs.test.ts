@@ -163,6 +163,36 @@ describe("sliceLines and read_file windowing", () => {
     expect(res.ok).toBe(true);
     expect(res.already_exists).toBe(true);
   });
+
+  it("read_file detects and reports git merge conflicts", async () => {
+    const ctx = makeCtx();
+    const tools = buildFsTools(ctx);
+    vi.mocked(native.readFile).mockResolvedValueOnce({
+      kind: "text",
+      content: "<<<<<<< HEAD\nlocal\n=======\nincoming\n>>>>>>> feature\n",
+      size: 50,
+    });
+
+    const exec = tools.read_file.execute as (
+      args: unknown,
+      opts: unknown,
+    ) => Promise<{
+      content?: string;
+      conflicts?: { startLine: number; endLine: number }[];
+      conflictWarning?: string;
+    }>;
+
+    const res = await exec(
+      { path: "conflict.txt" },
+      { toolCallId: "t4", messages: [] },
+    );
+
+    expect(res.conflicts).toBeDefined();
+    expect(res.conflicts).toHaveLength(1);
+    expect(res.conflicts![0].startLine).toBe(1);
+    expect(res.conflicts![0].endLine).toBe(5);
+    expect(res.conflictWarning).toContain("unresolved git merge conflict");
+  });
 });
 
 

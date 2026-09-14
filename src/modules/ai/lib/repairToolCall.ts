@@ -319,6 +319,52 @@ export const KNOWN_TOOL_ALIASES: Record<
       };
     },
   },
+
+  // Thinking aliases
+  thinking: {
+    canonical: "think",
+    adaptArgs: (a) => ({
+      thoughts: a.thoughts ?? a.thought ?? a.text ?? a.reasoning ?? "",
+    }),
+  },
+  scratchpad: {
+    canonical: "think",
+    adaptArgs: (a) => ({
+      thoughts: a.thoughts ?? a.thought ?? a.text ?? a.notes ?? "",
+    }),
+  },
+
+  // Todo aliases
+  todo_list: {
+    canonical: "todo_read",
+    adaptArgs: (a) => ({ status: a.status }),
+  },
+  todo_get: {
+    canonical: "todo_read",
+    adaptArgs: (a) => ({ status: a.status }),
+  },
+  todo_add: {
+    canonical: "todo_update",
+    adaptArgs: (a) => ({ ...a, action: "add" }),
+  },
+  todo_remove: {
+    canonical: "todo_update",
+    adaptArgs: (a) => ({ ...a, action: "remove" }),
+  },
+  todo_delete: {
+    canonical: "todo_update",
+    adaptArgs: (a) => ({ ...a, action: "remove" }),
+  },
+
+  // Git conflict aliases
+  git_conflict: {
+    canonical: "git_conflicts",
+    adaptArgs: (a) => ({ path: a.path ?? a.file ?? a.filepath }),
+  },
+  merge_conflicts: {
+    canonical: "git_conflicts",
+    adaptArgs: (a) => ({ path: a.path ?? a.file ?? a.filepath }),
+  },
 };
 
 /**
