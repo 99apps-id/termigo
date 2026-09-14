@@ -6,6 +6,37 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Log timestamps are local time.** `tauri-plugin-log` defaults to
+  `TimezoneStrategy::UseUtc`, so a line stamped `[01:02:24]` sat in a file last
+  written `08:02:24` on a UTC+7 machine: the same moment, seven hours apart. A log
+  whose clock disagrees with `date` and `journalctl` reads as a stale file, so a
+  running instance looks dead and "nothing logged for seven hours" looks like a
+  fact. It is not cosmetic - it sent a diagnosis of the Telegram relay down the
+  wrong path on both the desktop and the headless server. One consequence to
+  expect: the level now precedes the target on each line (`[INFO][webview:…]`
+  rather than `[webview:…][INFO]`), because that is the format the plugin installs
+  when the timezone is set. Nothing parses these lines; they are read by people,
+  and grepping `[WARN]` or `webview` still works.
+- **A 409 backoff is no longer cancelled by the stall watchdog.** The polling loop
+  waits 60s after Telegram answers `409 Conflict`, but that wait was invisible to
+  the watchdog, which measures time since the last successful
+  `getUpdates`. The last success was one 30s long-poll earlier, so the clock
+  crossed the 75s stall window in the middle of every backoff: the watchdog
+  recycled the poller, and the replacement re-acquired the bot immediately - the
+  exact churn the backoff exists to prevent, since its whole purpose is to leave
+  room for the other client holding the token. Observed as
+  `409 → stalled 89s → recycle → 409 → stalled 90s → recycle`, repeating for as long
+  as the competing client was present. The loop now declares how long it is
+  deliberately waiting, and the watchdog honours that over its own timer.
+- **`grep` guidance for a pattern containing a newline.** A pattern with `\n` is
+  rejected outright (`the literal "\n" is not allowed`), but the explanation fell
+  through to the generic note about look-around and backreferences, and suggested
+  `--multiline`, which the engine does not have. It now says the real thing: grep
+  is line-oriented, every match is confined to one line, so a pattern cannot span
+  a newline. Searching across lines is a different tool's job.
+
 ## [0.9.14] - 2026-09-13
 
 ### Added
