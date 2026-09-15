@@ -1748,6 +1748,8 @@ export async function runAgentStream(opts: RunAgentOptions) {
             ),
           );
         }, MAX_TOOL_RESULT_DELIVERY_MS);
+      } else if (directive === "rearm") {
+        armModelWatchdog();
       }
     },
     onStepFinish: (step) => {
