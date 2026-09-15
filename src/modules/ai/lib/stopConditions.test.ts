@@ -57,6 +57,20 @@ describe("noToolRepetition", () => {
     expect(stop(steps([read("a")], [read("a")], [read("a")]))).toBe(true);
   });
 
+  it("logs the repeating tool when the guard fires", () => {
+    const logs: string[] = [];
+    const original = console.log;
+    console.log = (...args: unknown[]) => {
+      logs.push(args.map(String).join(" "));
+    };
+    try {
+      expect(stop(steps([read("a")], [read("a")], [read("a")]))).toBe(true);
+    } finally {
+      console.log = original;
+    }
+    expect(logs.some((line) => line.includes("[tool-repetition]") && line.includes("tool=read_file"))).toBe(true);
+  });
+
   it("ignores a differing argument", () => {
     expect(stop(steps([read("a")], [read("a")], [read("b")]))).toBe(false);
   });

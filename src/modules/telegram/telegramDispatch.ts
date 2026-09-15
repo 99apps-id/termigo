@@ -78,6 +78,15 @@ function sleep(signal: AbortSignal, ms: number): Promise<void> {
  *  message cannot be re-sent every two seconds for the life of the session. */
 const MAX_MIRROR_SEND_ATTEMPTS = 3;
 /** Consecutive mirror-send failures, keyed by session + message. */
+const RESUME_COOLDOWN_MS = 2_000;
+const resumeCooldowns = new Map<number, number>();
+
+function isResumeOnCooldown(chatId: number): boolean {
+  const last = resumeCooldowns.get(chatId) ?? 0;
+  if (Date.now() - last < RESUME_COOLDOWN_MS) return true;
+  resumeCooldowns.set(chatId, Date.now());
+  return false;
+}
 const mirrorSendFailures = new Map<string, number>();
 
 /**
@@ -839,6 +848,14 @@ export function startTelegramResume(chatId: number, signal: AbortSignal): void {
   // silently disabled Termigo -> Telegram mirroring for the rest of the session.
   void (async () => {
     try {
+      if (isResumeOnCooldown(chatId)) {
+        await sendTelegram(
+          chatId,
+          "Please wait a moment before continuing again.",
+          signal,
+        ).catch(() => {});
+        return;
+      }
       const store = await import("../ai/store/chatStore");
       const runtime = await import("../ai/store/chatRuntime");
       const sessionId = store.useChatStore.getState().activeSessionId;

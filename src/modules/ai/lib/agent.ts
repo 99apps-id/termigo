@@ -2,7 +2,9 @@ import { info as logInfo, warn as logWarn } from "@tauri-apps/plugin-log";
 
 function fireAndForget(promise: Promise<unknown>, label: string) {
   promise.catch((error) => {
-    logWarn(`[ai] fire-and-forget failed: ${label}: ${error instanceof Error ? error.message : String(error)}`);
+    logWarn(
+      `[ai] fire-and-forget failed: ${label}: ${error instanceof Error ? error.message : String(error)}`,
+    );
   });
 }
 
@@ -92,10 +94,7 @@ import {
 import { formatTodoStatusBlock } from "./todos";
 import { modelRejectsForcedToolChoice } from "./toolChoiceLearning";
 import { measureToolPayload } from "./toolPayload";
-import {
-  formatUserModelBlock,
-  type UserModel,
-} from "./userModel";
+import { formatUserModelBlock, type UserModel } from "./userModel";
 import {
   newVerifyLedger,
   recordToolResult,
@@ -186,13 +185,21 @@ export type BuildModelOptions = {
 };
 
 const MAX_MODEL_CACHE = 64;
+// Hard fallback when token-based compaction is not enough: a long-running
+// session can still grow past a healthy message count even when every
+// individual message fits the budget. Capping prevents the context-assembly
+// and request-body costs from climbing without bound.
+const MAX_HISTORY_MESSAGES = 500;
+const HISTORY_TAIL_KEEP = 50;
 
 type CacheEntry = { built: LanguageModel; touched: number };
 const modelCache = new Map<string, CacheEntry>();
 
 function pruneModelCache() {
   if (modelCache.size <= MAX_MODEL_CACHE) return;
-  const entries = Array.from(modelCache.entries()).sort((a, b) => a[1].touched - b[1].touched);
+  const entries = Array.from(modelCache.entries()).sort(
+    (a, b) => a[1].touched - b[1].touched,
+  );
   for (let i = 0; i < entries.length - MAX_MODEL_CACHE; i++) {
     modelCache.delete(entries[i][0]);
   }
@@ -1065,8 +1072,8 @@ export async function runAgentStream(opts: RunAgentOptions) {
     // so the line names it and the limit it built against.
     fireAndForget(
       logInfo(
-        `[ai] context compact: dropped ${compact.droppedCount} message(s) ` +
-          `(${prunedHistory.length} -> ${compactedHistory.length}), ` +
+        `[ai] context compact: elided/truncated content in ${compact.droppedCount} message(s) ` +
+          `(count unchanged at ${compactedHistory.length}), ` +
           `target ${compactionLimit} tok (configured ${configuredLimit})`,
       ),
       "context-compact-log",
@@ -1107,10 +1114,29 @@ export async function runAgentStream(opts: RunAgentOptions) {
     opts.onPrune?.({ prunedMessages: prune.cutAt });
   }
 
+  // Fallback message-count cap. Token compaction, eviction, and verified
+  // pruning can all leave a session with hundreds of messages that each fit
+  // the budget but still make context assembly and the HTTP body expensive.
+  // Trim from the front, preserving system messages and the most recent
+  // HISTORY_TAIL_KEEP messages so the current task stays intact.
+  const cappedHistory = capHistoryMessageCount(finalHistory);
+  if (cappedHistory.capped) {
+    fireAndForget(
+      logInfo(
+        `[ai] context cap: trimmed ${cappedHistory.removed} oldest message(s) ` +
+          `(${finalHistory.length} -> ${cappedHistory.messages.length}), ` +
+          `limit ${MAX_HISTORY_MESSAGES}`,
+      ),
+      "context-cap-log",
+    );
+  }
+
+  const promptHistory = cappedHistory.messages;
+
   const prompt = prepareAgentPrompt(
     stableSystem,
     opts.planMode ? PLAN_MODE_PROMPT : null,
-    finalHistory,
+    promptHistory,
     provider,
   );
 
@@ -1134,10 +1160,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // it is watching (see `stallBudgetMs`). A fixed 180s budget against a tool the
   // model gave 300s was a guaranteed false abort: the tool was killed mid-run,
   // its own timeout result never reached the model, and the run was re-sent.
-  const stallTimeoutMs = stallBudgetMs(
-    opts.uiMessages ?? [],
-    resumingApproval,
-  );
+  const stallTimeoutMs = stallBudgetMs(opts.uiMessages ?? [], resumingApproval);
   const stallNoticeMs = resumingApproval ? 20_000 : 30_000;
   let firstStepTimer: ReturnType<typeof setTimeout> | null = null;
   // A provider that accepts the connection and then goes silent looked exactly
@@ -1347,8 +1370,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
     // the same single forced-synthesis chance the other stuck guards get, in
     // case the loop was confined to one step and a real summary is possible.
     (args) => {
-      const steps =
-        (args as { steps?: Array<{ text?: string }> }).steps ?? [];
+      const steps = (args as { steps?: Array<{ text?: string }> }).steps ?? [];
       const last = steps[steps.length - 1];
       return last && isRepetitionDominated(last.text)
         ? requestSynthesisOrStop("text-repetition")
@@ -1389,14 +1411,10 @@ export async function runAgentStream(opts: RunAgentOptions) {
           .steps ?? [];
       const last = steps[steps.length - 1];
       return (
-        synthesisStepOutcome(
-          steps.length,
-          synthesisRequestedAtStepCount,
-          {
-            toolCalls: last?.toolCalls?.length ?? 0,
-            hasText: Boolean(last?.text?.trim()),
-          },
-        ) === "summary"
+        synthesisStepOutcome(steps.length, synthesisRequestedAtStepCount, {
+          toolCalls: last?.toolCalls?.length ?? 0,
+          hasText: Boolean(last?.text?.trim()),
+        }) === "summary"
       );
     },
   ];
@@ -1409,45 +1427,49 @@ export async function runAgentStream(opts: RunAgentOptions) {
     ...(opts.mcpTools ?? {}),
     ...(opts.extensionTools ?? {}),
     ...(opts.customTools ?? {}),
-    ...buildTools({
-      ...opts.toolContext,
-      firePreToolHook: hooksConfig
-        ? async (toolName, args) => {
-            await fireHooksForEvent(
-              hooksConfig,
-              "PreToolUse",
-              toolName,
-              { args },
-              {
-                getWorkspaceRoot: opts.toolContext.getWorkspaceRoot,
-                getCwd: opts.toolContext.getCwd,
-                makeRunId: () =>
-                  opts.runId ?? makeRunId(opts.toolContext.getSessionId()),
-              },
-            );
-          }
-        : undefined,
-      firePostToolHook: hooksConfig
-        ? async (toolName, args, result) => {
-            await fireHooksForEvent(
-              hooksConfig,
-              "PostToolUse",
-              toolName,
-              { args, result },
-              {
-                getWorkspaceRoot: opts.toolContext.getWorkspaceRoot,
-                getCwd: opts.toolContext.getCwd,
-                makeRunId: () =>
-                  opts.runId ?? makeRunId(opts.toolContext.getSessionId()),
-              },
-            );
-          }
-        : undefined,
-    }, 0, {
-      // Only advertised when the run actually defers tools, so a normal run
-      // never tells the model about a discovery tool it does not have.
-      findToolsName: toolSearchOn ? FIND_TOOLS_NAME : undefined,
-    }),
+    ...buildTools(
+      {
+        ...opts.toolContext,
+        firePreToolHook: hooksConfig
+          ? async (toolName, args) => {
+              await fireHooksForEvent(
+                hooksConfig,
+                "PreToolUse",
+                toolName,
+                { args },
+                {
+                  getWorkspaceRoot: opts.toolContext.getWorkspaceRoot,
+                  getCwd: opts.toolContext.getCwd,
+                  makeRunId: () =>
+                    opts.runId ?? makeRunId(opts.toolContext.getSessionId()),
+                },
+              );
+            }
+          : undefined,
+        firePostToolHook: hooksConfig
+          ? async (toolName, args, result) => {
+              await fireHooksForEvent(
+                hooksConfig,
+                "PostToolUse",
+                toolName,
+                { args, result },
+                {
+                  getWorkspaceRoot: opts.toolContext.getWorkspaceRoot,
+                  getCwd: opts.toolContext.getCwd,
+                  makeRunId: () =>
+                    opts.runId ?? makeRunId(opts.toolContext.getSessionId()),
+                },
+              );
+            }
+          : undefined,
+      },
+      0,
+      {
+        // Only advertised when the run actually defers tools, so a normal run
+        // never tells the model about a discovery tool it does not have.
+        findToolsName: toolSearchOn ? FIND_TOOLS_NAME : undefined,
+      },
+    ),
   };
   // Drop the schema blocks of any domain the user turned off. Applied before
   // the profile rules so a hidden group costs nothing to process, and before
@@ -1931,9 +1953,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
         contextMs: Math.round(opts.contextMs ?? 0),
         promptBytes,
         toolCount,
-        ...(toolsAdvertised > toolCount
-          ? { toolsAdvertised }
-          : {}),
+        ...(toolsAdvertised > toolCount ? { toolsAdvertised } : {}),
         tokens: {
           input: runInput,
           output: runOutput,
@@ -2051,6 +2071,26 @@ export async function runAgentStream(opts: RunAgentOptions) {
       });
     },
   });
+}
+
+function capHistoryMessageCount(messages: ModelMessage[]): {
+  messages: ModelMessage[];
+  capped: boolean;
+  removed: number;
+} {
+  if (messages.length <= MAX_HISTORY_MESSAGES) {
+    return { messages, capped: false, removed: 0 };
+  }
+
+  const excess = messages.length - MAX_HISTORY_MESSAGES;
+  const tailStart = Math.max(0, messages.length - HISTORY_TAIL_KEEP);
+  const prefixToDrop = Math.min(excess, tailStart);
+
+  return {
+    messages: messages.slice(prefixToDrop),
+    capped: true,
+    removed: prefixToDrop,
+  };
 }
 
 export { EMPTY_USAGE };

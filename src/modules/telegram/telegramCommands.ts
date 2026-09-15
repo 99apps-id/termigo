@@ -611,6 +611,9 @@ export async function handleUpdate(u: Update, signal: AbortSignal): Promise<void
     case "/next": {
       if (!isOwnerUser(msg.from)) return;
       await ensureChatSession(chatId, msg.message_thread_id ?? null);
+      console.log(
+        `[telegram] /continue chat=${chatId} text=${(msg.text ?? "").slice(0, 64)}`,
+      );
       startTelegramResume(chatId, signal);
       return;
     }
