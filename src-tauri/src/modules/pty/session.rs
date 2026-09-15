@@ -52,6 +52,7 @@ pub struct Session {
     // Set by the waiter once the child exits, so pty_open can reap a shell
     // that died before it was registered.
     pub(crate) exited: Arc<AtomicBool>,
+    pub(crate) output: super::output::OutputCredit,
 }
 
 impl Drop for Session {
@@ -175,6 +176,7 @@ pub fn spawn(
         writer: writer.clone(),
         master: Mutex::new(pair.master),
         exited: exited.clone(),
+        output: Default::default(),
     });
 
     let pending: Arc<(Mutex<Vec<u8>>, Condvar)> =
@@ -361,6 +363,7 @@ mod tests {
             writer,
             master: Mutex::new(pair.master),
             exited: Arc::new(AtomicBool::new(false)),
+            output: Default::default(),
         });
 
         assert!(
@@ -410,6 +413,7 @@ mod tests {
             writer,
             master: Mutex::new(pair.master),
             exited: Arc::new(AtomicBool::new(false)),
+            output: Default::default(),
         });
 
         drop_session(session);

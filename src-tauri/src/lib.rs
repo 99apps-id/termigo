@@ -107,6 +107,23 @@ pub fn run() {
                 // way. Nothing parses these lines — they are read by people — and
                 // grepping `[WARN]` or `webview` still works either way.
                 .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
+                // Keep dated archives instead of the plugin's defaults.
+                //
+                // The defaults are `max_file_size(40_000)` with
+                // `RotationStrategy::KeepOne`, and KeepOne's `rotate()` is
+                // literally `fs::remove_file(&self.path)` followed by a reopen.
+                // So the first overflow DELETES the whole history and leaves a
+                // 0-byte file. Two separate investigations on this project lost
+                // their evidence to it: one lost the 24 minutes in which its
+                // incident began, and a 0-byte log with a recent mtime also
+                // reads as "the app is stalled" when it is only the rotation.
+                //
+                // `KeepSome(5)` renames each archive to `Termigo_<date>.log`
+                // before reopening, and 5 MB holds hours of normal use, so the
+                // history survives long enough to be read. Never pass 0: the
+                // rotate path computes `keep_count - 1` on a `usize`.
+                .max_file_size(5_000_000)
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(5))
                 .build(),
         )
         .plugin(tauri_plugin_opener::init())
@@ -177,6 +194,7 @@ pub fn run() {
             pty::pty_shell_name,
             pty::pty_list_shells,
             pty::pty_persist_available,
+            pty::pty_ack_output,
             fs::tree::list_subdirs,
             fs::tree::fs_read_dir,
             fs::file::fs_read_file,

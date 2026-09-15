@@ -8,6 +8,8 @@ use portable_pty::PtySize;
 use tauri::ipc::{Channel, Response};
 use tokio::time::timeout;
 
+use super::output;
+use super::output;
 use super::session::{self, Session};
 use super::shell_init;
 use super::PtyState;
@@ -308,4 +310,26 @@ pub fn pty_list_shells() -> Vec<shell_init::ShellInfo> {
 #[tauri::command]
 pub fn pty_persist_available() -> bool {
     shell_init::persist_available()
+}
+
+/// Records how many output bytes the frontend has already consumed for a session.
+///
+/// The frontend must acknowledge chunks in order; chunks never go away if a reply is
+/// dropped. After the ack the session's back-pressure window may re-open and the
+/// stream will push more bytes.
+#[tauri::command]
+pub async fn pty_ack_output(
+    id: u32,
+    bytes: u64,
+    state: tauri::State<'_, PtyState>,
+) -> Result<(), String> {
+    let session = state.sessions.read().unwrap().get(&id).cloned();
+    let Some(session) = session else {
+        return Ok(());
+    };
+    session
+        .output
+        .acknowledge(bytes)
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }

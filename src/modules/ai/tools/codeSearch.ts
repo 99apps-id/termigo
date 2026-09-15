@@ -6,9 +6,21 @@ import {
   getIndexStats,
   getIndexedRoot,
 } from "../lib/codeIndex";
-import type { ToolContext } from "./context";
+import { resolvePath, type ToolContext } from "./context";
 
-let indexingPromise: Promise<{ files: number; chunks: number }> | null = null;
+/**
+ * The index build in flight, with the root it belongs to.
+ *
+ * Tracking the root matters: this used to be a bare promise, so a build
+ * started for repo A was handed back to a caller asking about repo B. That
+ * caller then searched A while believing it had indexed B - the wrong tree,
+ * silently. Tools are called one at a time today, but "you were answered from
+ * another repo's index" is not a failure mode worth leaving reachable.
+ */
+let indexingPromise: {
+  root: string;
+  promise: Promise<{ files: number; chunks: number }>;
+} | null = null;
 
 async function ensureIndexed(
   root: string,
@@ -18,12 +30,29 @@ async function ensureIndexed(
   if (stats.chunks > 0 && currentIndexed === root) {
     return stats;
   }
-  if (!indexingPromise) {
-    indexingPromise = indexWorkspace(root).finally(() => {
-      indexingPromise = null;
-    });
+  if (indexingPromise && indexingPromise.root === root) {
+    return indexingPromise.promise;
   }
-  return indexingPromise;
+  const promise = indexWorkspace(root).finally(() => {
+    if (indexingPromise?.promise === promise) indexingPromise = null;
+  });
+  indexingPromise = { root, promise };
+  return promise;
+}
+
+/**
+ * Which directory a call operates on.
+ *
+ * `root` is optional and resolved like any other tool path, so an audit of a
+ * repo that is NOT the workspace root (another checkout, a vendored copy, the
+ * upstream being compared against) can be indexed and searched. Without it the
+ * only reachable tree was the workspace, which is why a cross-repo comparison
+ * ended up enumerating the other repo one directory at a time with `ls`.
+ */
+function targetRoot(ctx: ToolContext, explicit?: string): string | null {
+  const asked = explicit?.trim();
+  if (asked) return resolvePath(asked, ctx.getCwd());
+  return ctx.getWorkspaceRoot() ?? ctx.getCwd();
 }
 
 export function buildCodeSearchTools(ctx: ToolContext) {
@@ -48,17 +77,32 @@ export function buildCodeSearchTools(ctx: ToolContext) {
           .describe(
             "Optional subdirectory or path filter to narrow results (e.g. 'src/modules/ai').",
           ),
+        root: z
+          .string()
+          .optional()
+          .describe(
+            "Directory to search instead of the workspace root. Pass this to search another checkout, e.g. 'C:/project/other-repo'.",
+          ),
       }),
-      execute: async ({ query, max_results, path_filter }) => {
-        const root = ctx.getWorkspaceRoot() ?? ctx.getCwd();
+      execute: async ({ query, max_results, path_filter, root: askedRoot }) => {
+        const root = targetRoot(ctx, askedRoot);
         if (!root) return { error: "no workspace root or cwd available" };
 
-        await ensureIndexed(root);
+        const stats = await ensureIndexed(root);
+        if (stats.chunks === 0) {
+          return {
+            error: `no indexable files found under ${root}. Check that the path is a directory that exists, then retry.`,
+          };
+        }
 
         const results = searchCode(query, max_results ?? 10, path_filter);
         return {
           query,
-          stats: getIndexStats(),
+          // Reported so a cross-repo audit can see WHICH tree answered, instead
+          // of assuming the workspace answered and silently reading the wrong
+          // repo's hits as the other one's.
+          searched: getIndexedRoot(),
+          stats,
           results,
         };
       },
@@ -66,20 +110,28 @@ export function buildCodeSearchTools(ctx: ToolContext) {
 
     code_index: tool({
       description:
-        "Index the workspace for codebase search. Rebuilds the local BM25 index over code and configuration files. Use this when files have changed or you want to ensure fresh results.",
-      inputSchema: z.object({}),
-      execute: async () => {
-        const root = ctx.getWorkspaceRoot() ?? ctx.getCwd();
+        "Index a workspace for codebase search. Rebuilds the local BM25 index over code and configuration files. Use this once before asking `code_search` about an unfamiliar codebase, or when files have changed. Defaults to the workspace root; pass `root` to index another checkout (a large tree takes a while to build once, then searches are instant).",
+      inputSchema: z.object({
+        root: z
+          .string()
+          .optional()
+          .describe(
+            "Directory to index instead of the workspace root. Pass this to index another checkout, e.g. 'C:/project/other-repo'.",
+          ),
+      }),
+      execute: async ({ root: askedRoot }) => {
+        const root = targetRoot(ctx, askedRoot);
         if (!root) return { error: "no workspace root or cwd available" };
-        if (indexingPromise) {
-          const stats = await indexingPromise;
-          return { status: "ok", ...stats };
+        if (indexingPromise && indexingPromise.root === root) {
+          const stats = await indexingPromise.promise;
+          return { status: "ok", root, ...stats };
         }
-        indexingPromise = indexWorkspace(root, true).finally(() => {
-          indexingPromise = null;
+        const promise = indexWorkspace(root, true).finally(() => {
+          if (indexingPromise?.promise === promise) indexingPromise = null;
         });
-        const stats = await indexingPromise;
-        return { status: "ok", ...stats };
+        indexingPromise = { root, promise };
+        const stats = await promise;
+        return { status: "ok", root, ...stats };
       },
     }),
   };

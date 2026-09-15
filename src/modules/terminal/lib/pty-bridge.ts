@@ -1,5 +1,6 @@
 import { invoke, Channel } from "@tauri-apps/api/core";
 import { currentWorkspaceEnv } from "@/modules/workspace";
+import { PtyOutputReceiver } from "./PtyOutputReceiver";
 
 const textEncoder = new TextEncoder();
 
@@ -39,7 +40,15 @@ export async function openPty(
     onExit.onmessage = noop;
   };
 
-  onData.onmessage = (buf) => handlers.onData(new Uint8Array(buf));
+  const receiver = new PtyOutputReceiver();
+
+  onData.onmessage = (buf) => {
+    const bytes = new Uint8Array(buf);
+    receiver.recordSent(bytes.length);
+    handlers.onData(bytes);
+    receiver.acknowledge(bytes.length);
+    void invoke("pty_ack_output", { id, bytes: bytes.length });
+  };
   onExit.onmessage = (code) => {
     handlers.onExit?.(code);
     releaseHandlers();

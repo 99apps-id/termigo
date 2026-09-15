@@ -1,6 +1,7 @@
 mod agent_detect;
 pub mod commands;
 mod da_filter;
+mod output;
 mod session;
 pub(crate) mod shell_init;
 
