@@ -1748,9 +1748,13 @@ export async function runAgentStream(opts: RunAgentOptions) {
             ),
           );
         }, MAX_TOOL_RESULT_DELIVERY_MS);
-      } else if (directive === "rearm") {
-        armModelWatchdog();
       }
+      // No `else if (directive === "rearm")` here. `rearm` is handled by the
+      // first branch, and this one could never run: by the time control reached
+      // it, `directive` was narrowed to `"ignore"`, so the comparison had no
+      // overlap and `tsc` refused it. The `tool-result` branch above already
+      // re-arms the model watchdog explicitly, which is what the dead branch
+      // was reaching for.
     },
     onStepFinish: (step) => {
       clearFirstStepTimer();

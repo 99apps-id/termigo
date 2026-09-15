@@ -8,8 +8,6 @@ use portable_pty::PtySize;
 use tauri::ipc::{Channel, Response};
 use tokio::time::timeout;
 
-use super::output;
-use super::output;
 use super::session::{self, Session};
 use super::shell_init;
 use super::PtyState;
@@ -327,9 +325,9 @@ pub async fn pty_ack_output(
     let Some(session) = session else {
         return Ok(());
     };
-    session
-        .output
-        .acknowledge(bytes)
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+    let res = {
+        let mut credit = session.output.lock().map_err(|e| e.to_string())?;
+        credit.acknowledge(bytes).map(|_| ()).map_err(|e| e.to_string())
+    };
+    res
 }

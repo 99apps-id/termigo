@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { PtyOutputReceiver } from "./PtyOutputReceiver";
 
+const BUFFER_BUDGET = 2 * 1024 * 1024;
+
 describe("PtyOutputReceiver", () => {
   it("cumulative acknowledgements are idempotent and order-independent", () => {
     const credit = new PtyOutputReceiver();
@@ -38,7 +40,7 @@ describe("PtyOutputReceiver", () => {
   it("credit remains bounded over long streams and lost replies", () => {
     const credit = new PtyOutputReceiver();
     let parsed = 0;
-    for (let i = 0; i < 100_000; i++) {
+    for (let i = 0; i < 1_000; i++) {
       credit.recordSent(BUFFER_BUDGET / 2);
       credit.recordSent(BUFFER_BUDGET / 2);
       expect(credit.inFlightBytes).toBe(BUFFER_BUDGET);

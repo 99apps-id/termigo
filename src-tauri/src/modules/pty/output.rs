@@ -1,15 +1,18 @@
 use std::collections::VecDeque;
 
-pub(super) const MAX_IN_FLIGHT_CHUNKS: usize = 2;
-pub(super) const MAX_BUFFERED_BYTES: usize = 2 * 1024 * 1024;
+#[allow(dead_code)]
+pub(crate) const MAX_IN_FLIGHT_CHUNKS: usize = 2;
+#[allow(dead_code)]
+pub(crate) const MAX_BUFFERED_BYTES: usize = 2 * 1024 * 1024;
 
 #[derive(Default)]
-pub(super) struct OutputCredit {
+pub(crate) struct OutputCredit {
     sent: u64,
     acknowledged: u64,
     boundaries: VecDeque<u64>,
 }
 
+#[allow(dead_code)]
 impl OutputCredit {
     pub fn sent_bytes(&self) -> u64 {
         self.sent
