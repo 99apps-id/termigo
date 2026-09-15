@@ -75,7 +75,7 @@ describe("code_index / code_search root targeting", () => {
   });
 
   it("resolves a relative root against the active terminal cwd", async () => {
-    await run(tools("C:/fake/project/src"))({ root: "../other-repo" });
+    await run(tools("C:/fake/project/src").code_index)({ root: "../other-repo" });
 
     expect(m.indexWorkspace).toHaveBeenCalledWith(
       "C:/fake/project/src/../other-repo",
@@ -110,11 +110,9 @@ describe("code_index / code_search root targeting", () => {
       root: "C:/project/other-repo",
     });
 
-    // ...but a search of a DIFFERENT root must not accept it.
-    expect(m.indexWorkspace).toHaveBeenCalledWith(
-      "C:/project/other-repo",
-      false,
-    );
+    // ...but a search of a DIFFERENT root must not accept it. `ensureIndexed`
+    // passes no force flag, so a cached index for that root is reused.
+    expect(m.indexWorkspace).toHaveBeenCalledWith("C:/project/other-repo");
   });
 
   it("does not hand an in-flight build for one root to a caller asking about another", async () => {

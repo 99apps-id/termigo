@@ -8,7 +8,8 @@ export class PtyResizeScheduler {
 
   schedule(cols: number, rows: number): void {
     if (this.pending) {
-      clearTimeout(this.timer);
+      // `timer` is nullable, so it needs the same guard `cancel()` uses.
+      if (this.timer) clearTimeout(this.timer);
       this.timer = setTimeout(() => {
         this.pending = false;
         this.resize(cols, rows);
