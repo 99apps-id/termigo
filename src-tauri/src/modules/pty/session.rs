@@ -10,6 +10,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use super::agent_detect::AgentDetector;
 use super::da_filter::DaFilter;
+use super::output::MAX_CHUNK_BYTES;
 use super::shell_init;
 use crate::modules::workspace::WorkspaceEnv;
 
@@ -53,6 +54,9 @@ pub struct Session {
     // that died before it was registered.
     pub(crate) exited: Arc<AtomicBool>,
     pub(crate) output: Mutex<super::output::OutputCredit>,
+    // Signalled by pty_ack_output so a flusher parked on a full credit window
+    // wakes as soon as the frontend has drained a chunk.
+    pub(crate) output_cv: Condvar,
 }
 
 impl Drop for Session {
@@ -177,6 +181,7 @@ pub fn spawn(
         master: Mutex::new(pair.master),
         exited: exited.clone(),
         output: Mutex::new(Default::default()),
+        output_cv: Condvar::new(),
     });
 
     let pending: Arc<(Mutex<Vec<u8>>, Condvar)> =
@@ -250,6 +255,7 @@ pub fn spawn(
     let on_data_flush = on_data.clone();
     let pending_f = pending.clone();
     let done_f = done.clone();
+    let session_flush = session.clone();
     thread::Builder::new()
         .name("termigo-pty-flusher".into())
         .spawn(move || {
@@ -267,10 +273,43 @@ pub fn spawn(
                 }
                 // Coalesce a short window so a burst flushes as one chunk.
                 thread::sleep(FLUSH_COALESCE);
-                let chunk = std::mem::take(&mut *lock.lock().unwrap());
+                // Hold back while the frontend is behind. Anything still
+                // unflushed stays in `pending`, so the waiter's final snapshot
+                // picks it up even if the window never reopens.
+                {
+                    let mut credit = session_flush.output.lock().unwrap();
+                    while !credit.has_room() {
+                        if done_f.load(Ordering::Acquire) {
+                            return;
+                        }
+                        let (next, _) = session_flush
+                            .output_cv
+                            .wait_timeout(credit, FLUSH_MAX_IDLE)
+                            .unwrap();
+                        credit = next;
+                    }
+                }
+                // Cap the chunk so a window of maximum-size chunks can never
+                // outgrow the credit byte budget.
+                let chunk = {
+                    let mut g = lock.lock().unwrap();
+                    if g.len() > MAX_CHUNK_BYTES {
+                        let rest = g.split_off(MAX_CHUNK_BYTES);
+                        std::mem::replace(&mut *g, rest)
+                    } else {
+                        std::mem::take(&mut *g)
+                    }
+                };
                 if chunk.is_empty() {
                     continue;
                 }
+                // Record before the send: the ack can only arrive after the
+                // frontend holds the chunk, so the boundary must already exist.
+                session_flush
+                    .output
+                    .lock()
+                    .unwrap()
+                    .record_sent(chunk.len());
                 if let Err(e) = on_data_flush.send(Response::new(chunk)) {
                     log::debug!("pty flusher exiting, channel closed: {e}");
                     break;
@@ -364,6 +403,7 @@ mod tests {
             master: Mutex::new(pair.master),
             exited: Arc::new(AtomicBool::new(false)),
             output: Mutex::new(Default::default()),
+            output_cv: Condvar::new(),
         });
 
         assert!(
@@ -414,6 +454,7 @@ mod tests {
             master: Mutex::new(pair.master),
             exited: Arc::new(AtomicBool::new(false)),
             output: Mutex::new(Default::default()),
+            output_cv: Condvar::new(),
         });
 
         drop_session(session);

@@ -40,21 +40,31 @@ export async function openPty(
     onExit.onmessage = noop;
   };
 
+  // Output credit. The backend holds back once a window of chunks is
+  // unacknowledged, so each consumed chunk is acknowledged by its cumulative
+  // byte mark, which releases the window. `id` is only known once `pty_open`
+  // resolves; a chunk that beats it is still counted, so the mark catches up.
   const receiver = new PtyOutputReceiver();
+  let id = 0;
+  const acknowledge = () => {
+    if (id === 0) return;
+    void invoke("pty_ack_output", { id, bytes: receiver.bytesConsumed }).catch(
+      () => {},
+    );
+  };
 
   onData.onmessage = (buf) => {
     const bytes = new Uint8Array(buf);
-    receiver.recordSent(bytes.length);
+    receiver.consume(bytes.length);
     handlers.onData(bytes);
-    receiver.acknowledge(bytes.length);
-    void invoke("pty_ack_output", { id, bytes: bytes.length });
+    acknowledge();
   };
   onExit.onmessage = (code) => {
     handlers.onExit?.(code);
     releaseHandlers();
   };
 
-  const id = await invoke<number>("pty_open", {
+  id = await invoke<number>("pty_open", {
     cols,
     rows,
     cwd: cwd ?? null,
@@ -67,6 +77,10 @@ export async function openPty(
     onData,
     onExit,
   });
+
+  // Chunks that arrived before `id` resolved are already counted; acknowledge
+  // once so the backend's window re-opens without waiting for the next chunk.
+  acknowledge();
 
   let closed = false;
   const headers = { "x-pty-id": String(id) };

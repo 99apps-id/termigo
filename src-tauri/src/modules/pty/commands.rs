@@ -310,11 +310,13 @@ pub fn pty_persist_available() -> bool {
     shell_init::persist_available()
 }
 
-/// Records how many output bytes the frontend has already consumed for a session.
+/// Releases output-credit for a session up to the cumulative byte mark the
+/// frontend reports it has consumed.
 ///
-/// The frontend must acknowledge chunks in order; chunks never go away if a reply is
-/// dropped. After the ack the session's back-pressure window may re-open and the
-/// stream will push more bytes.
+/// The mark is cumulative and monotonic, so a repeat or an overtaken ack is a
+/// no-op rather than an error. An ack for an unknown session is also a no-op:
+/// the session may have closed between the frontend sending the ack and this
+/// running. Releasing wakes any flusher parked on a full window.
 #[tauri::command]
 pub async fn pty_ack_output(
     id: u32,
@@ -325,9 +327,7 @@ pub async fn pty_ack_output(
     let Some(session) = session else {
         return Ok(());
     };
-    let res = {
-        let mut credit = session.output.lock().map_err(|e| e.to_string())?;
-        credit.acknowledge(bytes).map(|_| ()).map_err(|e| e.to_string())
-    };
-    res
+    session.output.lock().map_err(|e| e.to_string())?.acknowledge(bytes);
+    session.output_cv.notify_all();
+    Ok(())
 }
