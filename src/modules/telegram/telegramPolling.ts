@@ -8,6 +8,12 @@ import { apiGet, TelegramApiError } from "./telegramApi";
 import { handleUpdate, type Update } from "./telegramCommands";
 import { runMirror } from "./telegramDispatch";
 import {
+  botIdFromToken,
+  loadUpdateOffset,
+  saveUpdateOffset,
+} from "./telegramUpdateOffset";
+import { getTelegramToken } from "./keyring";
+import {
   logRelayInfo,
   logRelayWarn,
   relayErrorLine,
@@ -26,6 +32,12 @@ export let mirrorController: AbortController | null = null;
 export let relayController: AbortController | null = null;
 
 export let currentUpdateOffset = 0;
+/**
+ * Bot id (the token prefix) that `currentUpdateOffset` belongs to. Keeps the
+ * durable copy under the right key and stops a token change from carrying a
+ * stale offset onto a different bot.
+ */
+let currentBotId: string | null = null;
 export let lastPollProgressTime = Date.now();
 export const POLLING_STALL_TIMEOUT_MS = 75_000;
 export let watchdogTimer: ReturnType<typeof setInterval> | null = null;
@@ -232,6 +244,7 @@ async function runLoop(signal: AbortSignal): Promise<void> {
           );
         }
         currentUpdateOffset = Math.max(currentUpdateOffset, u.update_id + 1);
+        saveUpdateOffset(currentBotId, currentUpdateOffset);
       }
     } catch (e) {
       if (signal.aborted) break;
@@ -280,6 +293,11 @@ export async function startTelegramBot(): Promise<void> {
   relayController = new AbortController();
   lastPollProgressTime = Date.now();
   deliberateWaitUntil = 0;
+  // Restore the offset Telegram had already confirmed before the first poll.
+  // Without it the loop starts at 0 and Telegram replays the last unconfirmed
+  // batch, running its commands a second time.
+  currentBotId = botIdFromToken(await getTelegramToken());
+  currentUpdateOffset = loadUpdateOffset(currentBotId);
   if (watchdogTimer) clearInterval(watchdogTimer);
   watchdogTimer = setInterval(checkPollingStall, 15_000);
   // Start polling BEFORE any awaiting setup. The bot used to report itself

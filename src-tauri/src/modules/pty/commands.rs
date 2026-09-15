@@ -100,6 +100,23 @@ pub async fn pty_open(
     Ok(id)
 }
 
+const MAX_INPUT_BYTES: usize = 4 * 1024 * 1024;
+
+/// Reject oversized input before it reaches the PTY writer.
+///
+/// Terminal input is keystrokes and paste, so a few MiB covers any realistic
+/// paste while refusing a runaway frontend before it can push megabytes at a
+/// PTY whose child is not draining. Split out so the limit is asserted
+/// directly, without an IPC round trip.
+fn check_input_size(len: usize) -> Result<(), String> {
+    if len > MAX_INPUT_BYTES {
+        return Err(format!(
+            "pty_write: {len} bytes exceeds the {MAX_INPUT_BYTES}-byte limit"
+        ));
+    }
+    Ok(())
+}
+
 // Input is the latency-critical path: raw body + id header skips JSON
 // serialization of every keystroke on both sides of the IPC boundary.
 #[tauri::command]
@@ -116,6 +133,10 @@ pub fn pty_write(
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
         return Err("pty_write: expected raw body".to_string());
     };
+    if let Err(e) = check_input_size(bytes.len()) {
+        log::warn!("pty_write id={id}: {e}");
+        return Err(e);
+    }
     let session = state
         .sessions
         .read()
@@ -327,7 +348,32 @@ pub async fn pty_ack_output(
     let Some(session) = session else {
         return Ok(());
     };
-    session.output.lock().map_err(|e| e.to_string())?.acknowledge(bytes);
+    session
+        .output
+        .lock()
+        .map_err(|e| e.to_string())?
+        .acknowledge(bytes);
     session.output_cv.notify_all();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{check_input_size, MAX_INPUT_BYTES};
+
+    #[test]
+    fn accepts_input_at_the_limit() {
+        assert!(check_input_size(MAX_INPUT_BYTES).is_ok());
+    }
+
+    #[test]
+    fn rejects_input_past_the_limit() {
+        assert!(check_input_size(MAX_INPUT_BYTES + 1).is_err());
+    }
+
+    #[test]
+    fn accepts_keystrokes_and_ordinary_paste() {
+        assert!(check_input_size(0).is_ok());
+        assert!(check_input_size(64 * 1024).is_ok());
+    }
 }
