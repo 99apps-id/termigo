@@ -203,6 +203,22 @@ fi
 # --- 5. rollback kalau gagal ---
 if [ "$PASS" -ne 1 ]; then
   log "!!! Smoke-test GAGAL - rollback ke binary + data sebelumnya"
+  # Stop FIRST, or the restore cannot write.
+  #
+  # Step 3 starts the service to run the smoke test and nothing stops it again,
+  # so at this point the process is executing the new binary. Overwriting the
+  # pinned file then fails with `cp: cannot create regular file ...: Text file
+  # busy`, and because that `cp` is not checked the block carries on and prints
+  # "Rollback selesai" - leaving the box running the build that just failed the
+  # test. That is precisely the outcome this block exists to prevent, so the
+  # safety net was absent exactly when it was needed.
+  #
+  # Hit for real on 2026-09-15: smoke test failed, restore died with Text file
+  # busy, and the service had to be recovered by hand. `systemctl restart` at the
+  # end of this block starts it again, so stopping here is enough.
+  log "Stop $SERVICE sebelum restore (agar binary tidak Text-file-busy) ..."
+  sudo systemctl stop "$SERVICE" || true
+  sleep 2
   if [ -f "$BACKUP" ]; then
     cp -p "$BACKUP" "$PINNED"
     log "Restore $PINNED dari $BACKUP"
