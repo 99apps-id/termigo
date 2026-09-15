@@ -29,6 +29,7 @@ export let currentUpdateOffset = 0;
 export let lastPollProgressTime = Date.now();
 export const POLLING_STALL_TIMEOUT_MS = 75_000;
 export let watchdogTimer: ReturnType<typeof setInterval> | null = null;
+const cleanupStoppers = new Map<string, () => void>();
 
 /**
  * When the loop is deliberately waiting, and the watchdog must stay out of the
@@ -289,15 +290,18 @@ export async function startTelegramBot(): Promise<void> {
   void runMirror(mirror.signal);
   logRelayInfo("relay started");
   try {
-    const { cleanupStaleApprovals } = await import(
-      "../ai/store/approvalQueueStore"
-    );
+    const { cleanupStaleApprovals, startPeriodicStaleApprovalCleanup } =
+      await import("../ai/store/approvalQueueStore");
     const cleaned = await cleanupStaleApprovals();
     if (cleaned > 0) {
       // Stale approvals are the residue of runs killed mid-approval; counting
       // them is how a recurrence of that bug becomes visible.
       logRelayInfo(`cleaned ${cleaned} stale approval(s) on start`);
       console.warn(`[ai] cleaned ${cleaned} stale approvals on startup`);
+    }
+    const stopPeriodicCleanup = startPeriodicStaleApprovalCleanup();
+    if (typeof stopPeriodicCleanup === "function") {
+      cleanupStoppers.set("staleApproval", stopPeriodicCleanup);
     }
   } catch {
     // best-effort cleanup; if the store isn't ready yet, the next cycle will catch it.
@@ -314,6 +318,14 @@ export function stopTelegramBot(): void {
     clearInterval(watchdogTimer);
     watchdogTimer = null;
   }
+  for (const stop of cleanupStoppers.values()) {
+    try {
+      stop();
+    } catch {
+      // best-effort teardown
+    }
+  }
+  cleanupStoppers.clear();
   loopController?.abort();
   loopController = null;
   mirrorController?.abort();
