@@ -1056,6 +1056,21 @@ export async function runAgentStream(opts: RunAgentOptions) {
   );
   const compactedHistory = compact.messages;
   if (compact.compacted) {
+    // Logged, because this is the one way the request silently shrinks and the
+    // symptom misleads. The next run's input-token count drops by tens of
+    // thousands while the prompt breakdown (sys/proj/mem/tools) is byte for
+    // byte identical, and the cache hit rate collapses from ~99% to ~20%.
+    // Observed in the field as an unexplained 106495 -> 85314 drop that was
+    // investigated as transcript data loss for a while. The cause is this call,
+    // so the line names it and the limit it built against.
+    fireAndForget(
+      logInfo(
+        `[ai] context compact: dropped ${compact.droppedCount} message(s) ` +
+          `(${prunedHistory.length} -> ${compactedHistory.length}), ` +
+          `target ${compactionLimit} tok (configured ${configuredLimit})`,
+      ),
+      "context-compact-log",
+    );
     opts.onCompact?.({ droppedCount: compact.droppedCount });
   }
 
@@ -2009,7 +2024,11 @@ export async function runAgentStream(opts: RunAgentOptions) {
             // an inexact total says so instead of looking precise.
             `${toolPayload.unmeasured > 0 ? ` (${toolPayload.unmeasured} unmeasured)` : ""}) | ` +
             `tokens ${runInput}in ${runOutput}out, cache ${cachePct}% | ` +
-            `steps ${stepsSeen}/${stepBudget} | stop ${settledStop ?? (finishReason || "done")} | ` +
+            // "this round" is explicit because the budget is per round: every
+            // auto-sent round is its own runAgentStream with its own counter. A
+            // bare `1/50` reads as if the whole task had used one step of
+            // fifty, which is how a long serial run was misread as a stalled one.
+            `steps ${stepsSeen}/${stepBudget} this round | stop ${settledStop ?? (finishReason || "done")} | ` +
             `${modelId}`,
         ),
         "run-summary-log",
