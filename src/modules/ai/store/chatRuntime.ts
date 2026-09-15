@@ -1133,15 +1133,13 @@ export async function flushSteer(bypassBusyCheck = false): Promise<boolean> {
           .map((t) => t.title);
 
         const chatMessages = chats.get(sessionId)?.messages ?? [];
-        // A `UIMessage` carries `parts`, not `content`. Reading `.content` was a
-        // type error AND a silent one: it always produced `undefined`, so the
-        // steered continuation prompt never received the original task it was
-        // built to carry. Text lives in the text parts, which is what
-        // `editableTextOf` already joins for the neighbouring steer path.
-        const firstUserMessage = chatMessages.find((m) => m.role === "user");
-        const originalTask = firstUserMessage
-          ? editableTextOf(firstUserMessage.parts).trim() || undefined
-          : undefined;
+        const userMessages = chatMessages.filter((m) => m.role === "user");
+        const originalTask =
+          userMessages.length > 0
+            ? editableTextOf(
+                (userMessages[0].parts as readonly SteerPart[]) ?? [],
+              )
+            : undefined;
 
         const steeredPrompt = buildSteeredContinuationPrompt({
           originalTask,

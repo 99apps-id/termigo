@@ -1693,8 +1693,6 @@ export async function runAgentStream(opts: RunAgentOptions) {
     // design, and a long build or scan is normal rather than a stall. The next
     // step re-arms once the tool is done.
     onChunk: ({ chunk }) => {
-      // ANY chunk is the stream being alive, including the ones the directive
-      // has no opinion about, so the shared clock is fed before the policy runs.
       markRunActivity();
       const directive = watchdogDirective(chunk.type);
       if (directive === "rearm") {
@@ -1727,13 +1725,8 @@ export async function runAgentStream(opts: RunAgentOptions) {
           MAX_TOOL_EXECUTION_MS,
         );
       } else if (chunk.type === "tool-result") {
-        // The tool finished; clear the execution watchdog and re-arm the
-        // model silence watchdog for the next model turn.
         clearFirstStepTimer();
         armModelWatchdog();
-        // Some providers accept the tool result but then stall before sending
-        // the next model chunk. Start a delivery watchdog so that gap does
-        // not leave the run in "streaming" forever.
         toolResultDeliveryTimer = setTimeout(() => {
           const elapsed = Math.round((Date.now() - runStart) / 1000);
           fireAndForget(
