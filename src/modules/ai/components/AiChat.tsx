@@ -53,7 +53,7 @@ import {
 } from "./ChatNotices";
 import { PartAppear, ReadGroup, ReadRow } from "./ChatReadGroup";
 import { ConfirmationCarousel } from "./ConfirmationCarousel";
-import { type AnyPart, buildPartGroups, partType } from "./chatPartGrouping";
+import { type AnyPart, buildPartGroups, isThinkingLive, lastReasoningGroupIndex, partType } from "./chatPartGrouping";
 import { ElicitationCarousel } from "./ElicitationCarousel";
 import { RollbackSuggestion } from "./RollbackSuggestion";
 import { RunProgressHUD } from "./RunProgressHUD";
@@ -307,6 +307,15 @@ const RenderedMessage = memo(function RenderedMessage({
     () => buildPartGroups(message.parts as AnyPart[]),
     [message.parts],
   );
+  // Only the block the model is writing into right now opens on its own. What
+  // identifies it is that the NEWEST PART is reasoning - not its position among
+  // the groups, which is what the previous rule used and which never held in a
+  // tool-using run (a tool card always trails the thinking).
+  const thinkingLive = isThinkingLive(message.parts as AnyPart[], streaming);
+  const liveReasoningIdx = useMemo(
+    () => lastReasoningGroupIndex(groups),
+    [groups],
+  );
   const focusInput = useChatStore((s) => s.focusInput);
   if (message.role === "user") {
     const rawText = message.parts
@@ -413,12 +422,16 @@ const RenderedMessage = memo(function RenderedMessage({
         <div className="flex flex-col gap-3">
           {groups.map((g, gi) => {
             if (g.kind === "reasoning") {
-              // The reasoning is "live" while the message is still streaming and
-              // this reasoning block is the last thing emitted - that is when the
-              // model is thinking. Passing isStreaming auto-opens it so the user
-              // watches the thinking unfold, then it collapses once (still
-              // openable by clicking the header).
-              const reasoningLive = streaming && gi === groups.length - 1;
+              // "Live" means the model is writing into THIS block right now, so
+              // passing isStreaming auto-opens it and the user watches the
+              // thinking unfold. It closes itself once the step ends and stays
+              // openable by clicking the header.
+              //
+              // One block per step is what makes this useful: the open block is
+              // always the step being worked on, rather than a single folded
+              // block parked at the top of the message while the live edge of
+              // the run moved further down the transcript.
+              const reasoningLive = thinkingLive && gi === liveReasoningIdx;
               return showReasoning ? (
                 <PartAppear key={`${message.id}-${g.key}`}>
                   <Reasoning

@@ -78,6 +78,8 @@ export const Reasoning = memo(
     });
 
     const hasEverStreamedRef = useRef(isStreaming);
+    // Whether this block has already opened itself for the current stream.
+    const autoOpenedRef = useRef(false);
     const [hasAutoClosed, setHasAutoClosed] = useState(false);
     const startTimeRef = useRef<number | null>(null);
 
@@ -94,12 +96,22 @@ export const Reasoning = memo(
       }
     }, [isStreaming, setDuration]);
 
-    // Auto-open when streaming starts (unless explicitly closed)
+    // Auto-open when streaming starts (unless explicitly closed).
+    //
+    // Edge-triggered, once per stream. `isOpen` is deliberately NOT a dependency:
+    // with it in the list, collapsing the block while the model was still
+    // thinking re-opened it on the very next chunk, so the live thinking could
+    // not be closed at all and the transcript underneath it could not be read
+    // while a run was in flight.
     useEffect(() => {
-      if (isStreaming && !isOpen && !isExplicitlyClosed) {
-        setIsOpen(true);
+      if (!isStreaming) {
+        autoOpenedRef.current = false;
+        return;
       }
-    }, [isStreaming, isOpen, setIsOpen, isExplicitlyClosed]);
+      if (autoOpenedRef.current || isExplicitlyClosed) return;
+      autoOpenedRef.current = true;
+      setIsOpen(true);
+    }, [isStreaming, isExplicitlyClosed, setIsOpen]);
 
     // Auto-close when streaming ends (once only, and only if it ever streamed)
     useEffect(() => {
