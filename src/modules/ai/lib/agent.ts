@@ -576,7 +576,7 @@ export function noToolRepetition<T extends ToolSet>(
     if (steps.length < maxRepeats) return false;
     const window = Math.max(maxRepeats * 2 - 1, maxRepeats);
     const recent = steps.slice(-window);
-    const counts = new Map<string, number>();
+    const counts = new Map<string, { n: number; toolName: string }>();
     for (const s of recent) {
       const calls = s.toolCalls;
       if (!calls || calls.length === 0) continue;
@@ -597,9 +597,15 @@ export function noToolRepetition<T extends ToolSet>(
             resultDigest(results.get(c.toolCallId)),
         )
         .join("\n");
-      const n = (counts.get(fp) ?? 0) + 1;
-      if (n >= maxRepeats) return true;
-      counts.set(fp, n);
+      const entry = counts.get(fp) ?? { n: 0, toolName: calls[0]?.toolName ?? "" };
+      entry.n += 1;
+      counts.set(fp, entry);
+      if (entry.n >= maxRepeats) {
+        console.log(
+          `[tool-repetition] stop triggered tool=${entry.toolName} count=${entry.n} window=${window}`,
+        );
+        return true;
+      }
     }
     return false;
   };
