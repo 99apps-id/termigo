@@ -109,6 +109,45 @@ describe("autoSendGate", () => {
     // Each growth step also clears the stall streak.
     expect(decisions.at(-1)?.state.stalled).toBe(0);
   });
+
+  it("stops a tool-error loop where parts grow but the signature repeats", () => {
+    let state = INITIAL_AUTO_SEND_STATE;
+    const decisions: ReturnType<typeof autoSendGate>[] = [];
+    const sameSignature = "bash_run:cat missing:err:file not found";
+
+    // 6 consecutive auto-sends where transcript grows (+2 parts each time)
+    // but the exact same failing tool call repeats
+    for (let i = 0; i < MAX_STALLED_AUTO_SENDS + 2; i++) {
+      const decision = autoSendGate(state, 10 + i * 2, MAX_STALLED_AUTO_SENDS, sameSignature);
+      state = decision.state;
+      decisions.push(decision);
+    }
+
+    // First call is allowed as initial progress
+    expect(decisions[0].allow).toBe(true);
+    expect(decisions[0].state.stalled).toBe(0);
+
+    // Subsequent repeating signatures increment stalled
+    expect(decisions[1].state.stalled).toBe(1);
+    expect(decisions[MAX_STALLED_AUTO_SENDS].state.stalled).toBe(MAX_STALLED_AUTO_SENDS);
+
+    // After MAX_STALLED_AUTO_SENDS, loop is stopped
+    const last = decisions.at(-1)!;
+    expect(last.allow).toBe(false);
+    expect(last.stoppedLoop).toBe(true);
+  });
+
+  it("resets stalled counter when a different tool signature arrives", () => {
+    let state = INITIAL_AUTO_SEND_STATE;
+    state = autoSendGate(state, 10, 5, "read:a.ts:data").state;
+    state = autoSendGate(state, 12, 5, "read:a.ts:data").state;
+    expect(state.stalled).toBe(1);
+
+    // Different tool call arrives
+    const third = autoSendGate(state, 14, 5, "read:b.ts:data");
+    expect(third.allow).toBe(true);
+    expect(third.state.stalled).toBe(0);
+  });
 });
 
 /**

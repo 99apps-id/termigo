@@ -44,6 +44,7 @@ import {
 } from "../lib/providerFailover";
 import { pruneStale } from "../lib/pruneStale";
 import {
+  editableTextOf,
   flushOne,
   flushShouldHold,
   isResumeParts,
@@ -52,6 +53,7 @@ import {
   type SteerPart,
   submissionAction,
 } from "../lib/steer";
+import { buildSteeredContinuationPrompt } from "../lib/steerContinuation";
 import {
   isToolChoiceRejectionError,
   recordToolChoiceRejection,
@@ -610,6 +612,30 @@ function makeChat(sessionId: string): Chat<UIMessage> {
   const initialMessages = seedMessages.get(sessionId);
   seedMessages.delete(sessionId);
 
+  function extractLatestToolSignature(msgs: readonly UIMessage[]): string | null {
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i];
+      if (m.role !== "assistant") continue;
+      const parts = m.parts ?? [];
+      for (let j = parts.length - 1; j >= 0; j--) {
+        const p = parts[j] as Record<string, unknown>;
+        const type = typeof p?.type === "string" ? p.type : "";
+        if (type.startsWith("tool-") || type === "dynamic-tool") {
+          const toolName = (p.toolName as string) ?? type;
+          const inputStr = JSON.stringify(p.input ?? p.args ?? "");
+          const state = (p.state as string) ?? "";
+          const err =
+            p.errorText ?? p.error ?? (state === "output-error" ? "error" : "");
+          const outStr = err
+            ? `err:${JSON.stringify(err)}`
+            : JSON.stringify(p.output ?? "");
+          return `${toolName}:${inputStr}:${outStr}`;
+        }
+      }
+    }
+    return null;
+  }
+
   return new Chat<UIMessage>({
     id: sessionId,
     transport,
@@ -661,7 +687,13 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       ) {
         return autoSendAllowed;
       }
-      const decision = autoSendGate(autoSendState, progress);
+      const signature = extractLatestToolSignature(transcript);
+      const decision = autoSendGate(
+        autoSendState,
+        progress,
+        undefined,
+        signature,
+      );
       autoSendState = decision.state;
       autoSendDecidedAt = progress;
       autoSendAllowed = decision.allow;
@@ -1088,10 +1120,37 @@ export async function flushSteer(bypassBusyCheck = false): Promise<boolean> {
     }
     // A fresh user turn resets the loop-round counter (see sendParts).
     store.patchAgentMeta({ round: 0 });
-    // A queued task is a new task, not a resume: clear the previous task's list
-    // so the strip does not carry stale work into it (see sendParts).
+    // A steer message continues the in-flight run with user guidance: preserve
+    // the existing todos rather than wiping them, and weave the steer prompt.
+    let steerParts = out.parts;
     if (!isResumeParts(out.parts) && !isVerifyNudgeParts(out.parts)) {
-      void useTodosStore.getState().clearSession(sessionId);
+      const steerText = editableTextOf(out.parts);
+      if (steerText.trim()) {
+        const activeTodos =
+          useTodosStore.getState().bySession[sessionId]?.items ?? [];
+        const completedSteps = activeTodos
+          .filter((t) => t.status === "completed")
+          .map((t) => t.title);
+
+        const chatMessages = chats.get(sessionId)?.messages ?? [];
+        const userMessages = chatMessages.filter((m) => m.role === "user");
+        const originalTask =
+          userMessages.length > 0
+            ? typeof userMessages[0].content === "string"
+              ? userMessages[0].content
+              : undefined
+            : undefined;
+
+        const steeredPrompt = buildSteeredContinuationPrompt({
+          originalTask,
+          completedSteps:
+            completedSteps.length > 0 ? completedSteps : undefined,
+          steerInput: steerText,
+        });
+
+        const nonTextParts = out.parts.filter((p) => p.type !== "text");
+        steerParts = [{ type: "text", text: steeredPrompt }, ...nonTextParts];
+      }
     }
     // A run that yielded to this queued task set stopReason "steered"; clear it
     // so no stale "Continue" prompt lingers as the queued task takes over.
@@ -1101,7 +1160,7 @@ export async function flushSteer(bypassBusyCheck = false): Promise<boolean> {
     store.markRunStarted();
     try {
       const c = getOrCreateChat(sessionId);
-      await c.sendMessage({ role: "user", parts: out.parts } as Parameters<
+      await c.sendMessage({ role: "user", parts: steerParts } as Parameters<
         typeof c.sendMessage
       >[0]);
     } catch (e) {

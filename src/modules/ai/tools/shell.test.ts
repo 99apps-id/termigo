@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { truncateCommandOutput, unwrapPowershellCommand } from "./shell";
+import {
+  truncateCommandOutput,
+  unwrapPowershellCommand,
+  workspaceSessionKey,
+} from "./shell";
 
 describe("truncateCommandOutput", () => {
   it("keeps output untouched when within maxChars", () => {
@@ -63,3 +67,22 @@ describe("unwrapPowershellCommand", () => {
     expect(unwrapPowershellCommand("Get-Content file.txt")).toBe("Get-Content file.txt");
   });
 });
+
+describe("workspaceSessionKey", () => {
+  it("isolates shells for different working directories within the same session", () => {
+    const rootKey = workspaceSessionKey("sess-1", "/workspace/repo");
+    const worktreeKey = workspaceSessionKey(
+      "sess-1",
+      "/workspace/repo/.termigo/worktrees/subagent-1",
+    );
+    expect(rootKey).not.toBe(worktreeKey);
+    expect(worktreeKey).toContain(".termigo/worktrees/subagent-1");
+  });
+
+  it("reuses shell key for matching working directory", () => {
+    const key1 = workspaceSessionKey("sess-1", "/workspace/repo");
+    const key2 = workspaceSessionKey("sess-1", "/workspace/repo");
+    expect(key1).toBe(key2);
+  });
+});
+

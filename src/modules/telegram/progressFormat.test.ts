@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  balanceTelegramHtml,
   extractToolSummaries,
   formatCompletionCard,
   formatDuration,
@@ -401,6 +402,24 @@ describe("progressFormat", () => {
         expect(source).not.toMatch(/\(\?<=/);
         expect(source).not.toMatch(/\(\?<!/);
       }
+    });
+
+    it("balances unclosed tags and escapes orphaned tags safely", () => {
+      // Unclosed tags are auto-closed in reverse order
+      expect(markdownToTelegramHtml("Teks <b>tebal tanpa tutup")).toBe(
+        "Teks <b>tebal tanpa tutup</b>",
+      );
+      expect(markdownToTelegramHtml("<b><i>bold italic")).toBe(
+        "<b><i>bold italic</i></b>",
+      );
+      // Orphaned closing tags are escaped
+      expect(markdownToTelegramHtml("halo</b> dunia")).toBe(
+        "halo&lt;/b&gt; dunia",
+      );
+      // Mis-nested tags close properly
+      expect(balanceTelegramHtml("<b><i>teks</b> lanjutan")).toBe(
+        "<b><i>teks</i></b> lanjutan",
+      );
     });
   });
 

@@ -16,7 +16,15 @@ vi.mock("../lib/native", () => ({
   },
 }));
 
+vi.mock("@/modules/ssh/sftp", () => ({
+  sftpReadFile: vi.fn(async (_sid: number, path: string) => `remote:${path}`),
+  sftpWriteFile: vi.fn(async () => undefined),
+  sftpReadDir: vi.fn(async () => []),
+  sftpCreateDir: vi.fn(async () => undefined),
+}));
+
 import { native } from "../lib/native";
+import { sftpReadFile } from "@/modules/ssh/sftp";
 
 function makeCtx(): ToolContext {
   return {
@@ -192,6 +200,33 @@ describe("sliceLines and read_file windowing", () => {
     expect(res.conflicts![0].startLine).toBe(1);
     expect(res.conflicts![0].endLine).toBe(5);
     expect(res.conflictWarning).toContain("unresolved git merge conflict");
+  });
+
+  it("routes read_file to remote SFTP when remote SSH session is active", async () => {
+    const ctx = makeCtx();
+    ctx.getRemoteSession = () => ({
+      sessionId: 42,
+      cwd: "/home/user/project",
+    });
+    vi.clearAllMocks();
+    const tools = buildFsTools(ctx);
+
+    const exec = tools.read_file.execute as (
+      args: unknown,
+      opts: unknown,
+    ) => Promise<{ content?: string; path?: string }>;
+
+    const res = await exec(
+      { path: "config.json" },
+      { toolCallId: "t5", messages: [] },
+    );
+
+    expect(sftpReadFile).toHaveBeenCalledWith(
+      42,
+      "/home/user/project/config.json",
+    );
+    expect(res.content).toBe("remote:/home/user/project/config.json");
+    expect(native.readFile).not.toHaveBeenCalled();
   });
 });
 

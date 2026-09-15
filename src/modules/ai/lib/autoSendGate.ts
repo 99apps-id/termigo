@@ -25,6 +25,8 @@ export type AutoSendGateState = {
   lastProgress: number;
   /** How many automatic sends in a row have added nothing. */
   stalled: number;
+  /** Latest tool call or error signature seen. */
+  lastSignature?: string | null;
 };
 
 export const INITIAL_AUTO_SEND_STATE: AutoSendGateState = {
@@ -42,27 +44,39 @@ export type AutoSendDecision = {
 };
 
 /**
- * Decide whether an automatic resume may happen, given a progress measure and
- * how many consecutive resumes have already added nothing.
+ * Decide whether an automatic resume may happen, given a progress measure,
+ * how many consecutive resumes have already added nothing, and an optional
+ * signature of the latest tool call / result.
  *
  * `progress` must be something that changes whenever the transcript gains ANY
  * content. The number of messages is too coarse for that: a tool round appends
  * its results as parts of the SAME assistant message, so a run doing real work
- * can loop through many rounds with a constant message count. Measured in the
- * field: 19 consecutive runs, all `steps 1/25 | stop tool-calls`, while the UI
- * message count stayed at 14. Counting parts catches both that real work and the
- * spinning case, without stopping a legitimate tool loop after five rounds.
+ * can loop through many rounds with a constant message count.
+ *
+ * When `signature` is provided, repeating the exact same tool call/error signature
+ * across resumes is treated as a stall even if part counts grew, breaking
+ * infinite repeating tool loops.
  */
 export function autoSendGate(
   previous: AutoSendGateState,
   progress: number,
   maxStalled: number = MAX_STALLED_AUTO_SENDS,
+  signature?: string | null,
 ): AutoSendDecision {
-  // Progress since the last automatic send: the resume did something.
-  if (progress > previous.lastProgress) {
+  const isRepeatingSignature =
+    Boolean(signature) &&
+    Boolean(previous.lastSignature) &&
+    signature === previous.lastSignature;
+
+  // Real progress: transcript grew AND it is not an identical repeating signature.
+  if (progress > previous.lastProgress && !isRepeatingSignature) {
     return {
       allow: true,
-      state: { lastProgress: progress, stalled: 0 },
+      state: {
+        lastProgress: progress,
+        stalled: 0,
+        lastSignature: signature ?? null,
+      },
       stoppedLoop: false,
     };
   }
@@ -72,13 +86,21 @@ export function autoSendGate(
     // lastProgress is kept, so a later real message still resets the streak.
     return {
       allow: false,
-      state: { lastProgress: previous.lastProgress, stalled },
+      state: {
+        lastProgress: previous.lastProgress,
+        stalled,
+        lastSignature: signature ?? previous.lastSignature ?? null,
+      },
       stoppedLoop: true,
     };
   }
   return {
     allow: true,
-    state: { lastProgress: previous.lastProgress, stalled },
+    state: {
+      lastProgress: previous.lastProgress,
+      stalled,
+      lastSignature: signature ?? previous.lastSignature ?? null,
+    },
     stoppedLoop: false,
   };
 }

@@ -17,4 +17,16 @@ describe("steerContinuation", () => {
     expect(prompt).toContain("Files modified so far: src/auth.ts, src/auth.test.ts");
     expect(prompt).toContain("adapt your approach accordingly");
   });
+
+  it("handles steer with only original goal and input without crashing", () => {
+    const prompt = buildSteeredContinuationPrompt({
+      originalTask: "Fix layout bug",
+      steerInput: "Also check dark mode",
+    });
+
+    expect(prompt).toContain("<user_steer_interrupt>\nAlso check dark mode\n</user_steer_interrupt>");
+    expect(prompt).toContain("Original Goal: Fix layout bug");
+    expect(prompt).not.toContain("Progress completed");
+    expect(prompt).toContain("Instructions:");
+  });
 });

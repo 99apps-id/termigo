@@ -287,6 +287,65 @@ export function escapePlainTextToHtml(text: string): string {
 }
 
 /**
+ * Ensures HTML tags are properly balanced and well-nested for Telegram's
+ * strict HTML parser. Unclosed tags are automatically closed in LIFO order
+ * at the end of the text, and orphaned closing tags are safely escaped.
+ */
+export function balanceTelegramHtml(html: string): string {
+  if (!html) return "";
+
+  const TAG_REGEX = /<(\/)?([a-zA-Z0-9_-]+)(?:\s+[^>]*)?(\/)?>/g;
+  const openStack: string[] = [];
+  let result = "";
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = TAG_REGEX.exec(html)) !== null) {
+    result += html.slice(lastIndex, match.index);
+    lastIndex = TAG_REGEX.lastIndex;
+
+    const fullTag = match[0];
+    const isClosing = Boolean(match[1]);
+    const tagName = match[2].toLowerCase();
+    const isSelfClosing = Boolean(match[3]) || fullTag.endsWith("/>");
+
+    if (isSelfClosing) {
+      result += fullTag;
+      continue;
+    }
+
+    if (isClosing) {
+      const pos = openStack.lastIndexOf(tagName);
+      if (pos === -1) {
+        // Orphaned closing tag without a match: escape to prevent Telegram 400
+        result += `&lt;/${tagName}&gt;`;
+      } else {
+        // Close any tags opened after this one in LIFO order
+        while (openStack.length > pos + 1) {
+          const unclosed = openStack.pop()!;
+          result += `</${unclosed}>`;
+        }
+        openStack.pop();
+        result += `</${tagName}>`;
+      }
+    } else {
+      openStack.push(tagName);
+      result += fullTag;
+    }
+  }
+
+  result += html.slice(lastIndex);
+
+  // Close any unclosed tags at the end of the string in LIFO order
+  while (openStack.length > 0) {
+    const unclosed = openStack.pop()!;
+    result += `</${unclosed}>`;
+  }
+
+  return result;
+}
+
+/**
  * Formats a Markdown table into an aligned, monospace text table suitable
  * for Telegram's <pre> blocks.
  */
@@ -488,6 +547,9 @@ export function markdownToTelegramHtml(markdown: string): string {
 
   // Final sanitization: Telegram HTML parse_mode rejects some characters/tags.
   text = sanitizeForTelegramHtml(text);
+
+  // Balance and close any unclosed tags to prevent Telegram HTTP 400 Bad Request
+  text = balanceTelegramHtml(text);
 
   return text;
 }

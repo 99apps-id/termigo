@@ -70,9 +70,17 @@ impl Drop for Session {
 #[cfg(windows)]
 static CONPTY_LIFECYCLE_LOCK: Mutex<()> = Mutex::new(());
 
+#[cfg(windows)]
+fn acquire_conpty_lifecycle_lock() -> std::sync::MutexGuard<'static, ()> {
+    match CONPTY_LIFECYCLE_LOCK.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}
+
 pub(crate) fn drop_session(session: Arc<Session>) {
     #[cfg(windows)]
-    let _guard = CONPTY_LIFECYCLE_LOCK.lock().unwrap();
+    let _guard = acquire_conpty_lifecycle_lock();
     drop(session);
 }
 
@@ -117,7 +125,7 @@ pub fn spawn(
     on_exit: Channel<i32>,
 ) -> Result<(Arc<Session>, PtySize), String> {
     #[cfg(windows)]
-    let _spawn_guard = CONPTY_LIFECYCLE_LOCK.lock().unwrap();
+    let _spawn_guard = acquire_conpty_lifecycle_lock();
 
     let pty_system = native_pty_system();
     let size = PtySize {

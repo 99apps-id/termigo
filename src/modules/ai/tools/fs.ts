@@ -22,7 +22,6 @@ import { newQueuedEditId, usePlanStore } from "../store/planStore";
 import {
   type RemoteFsSession,
   resolvePath,
-  resolveRemotePath,
   type ToolContext,
 } from "./context";
 
@@ -52,33 +51,6 @@ type ImageReadOutput = {
   size: number;
 };
 
-/**
- * True when a read should go to the active SSH host rather than the local
- * filesystem. Routed to remote only when the path does NOT resolve to a real
- * local file. Without this, merely having an (unrelated) SSH terminal tab
- * active would hijack every relative / POSIX-absolute read to the remote host
- * — so a subagent analysing a local repo could not read its (local) files.
- * A path that exists locally stays local; a path that only exists on the
- * server is what actually goes over SFTP.
- */
-async function isRemoteReadPath(
-  ctx: ToolContext,
-  path: string,
-): Promise<boolean> {
-  let local: string;
-  try {
-    local = resolvePath(path, ctx.getCwd());
-  } catch {
-    // No local cwd to resolve against → cannot be a local read; let remote try.
-    return true;
-  }
-  try {
-    await native.canonicalize(local);
-    return false;
-  } catch {
-    return true;
-  }
-}
 
 function isImageReadOutput(o: unknown): o is ImageReadOutput {
   return (
@@ -255,24 +227,23 @@ export function buildFsTools(ctx: ToolContext) {
           .describe("Max lines to return. Default 2000."),
       }),
       execute: async ({ path, offset, limit }) => {
-        // Active SSH terminal: reads go to the remote host over SFTP, but only
-        // for a path that is not a real local file. A path that exists locally
-        // (e.g. the repo being analysed) stays local even when an unrelated SSH
-        // tab is active.
-        const remote = ctx.getRemoteSession();
-        if (remote && (await isRemoteReadPath(ctx, path))) {
-          const remotePath = resolveRemotePath(path, remote.cwd);
-          if (remotePath !== null) {
-            return readRemoteFile(
-              remote,
-              remotePath,
-              offset,
-              limit,
-              ctx.readCache,
-            );
-          }
+        const target = routePath(ctx.getRemoteSession(), path, (p) =>
+          resolvePath(p, ctx.getCwd()),
+        );
+        if (target.kind === "error") return { error: target.reason, path };
+        if (target.kind === "remote") {
+          return readRemoteFile(
+            {
+              sessionId: target.sessionId,
+              cwd: ctx.getRemoteSession()?.cwd ?? null,
+            },
+            target.path,
+            offset,
+            limit,
+            ctx.readCache,
+          );
         }
-        const reqPath = resolvePath(path, ctx.getCwd());
+        const reqPath = target.path;
         const safety = await checkReadableCanonical(
           reqPath,
           native.canonicalize,
@@ -394,30 +365,28 @@ export function buildFsTools(ctx: ToolContext) {
           .describe("Absolute path, or relative to the active terminal cwd."),
       }),
       execute: async ({ path }) => {
-        // Active SSH terminal: list the remote host over SFTP (see read_file),
-        // but only for a path that is not a real local directory.
-        const remote = ctx.getRemoteSession();
-        if (remote && (await isRemoteReadPath(ctx, path))) {
-          const remotePath = resolveRemotePath(path, remote.cwd);
-          if (remotePath !== null) {
-            const safety = checkReadable(remotePath);
-            if (!safety.ok) return { error: safety.reason, path: remotePath };
-            try {
-              const entries = await sftpReadDir(
-                remote.sessionId,
-                remotePath,
-                false,
-              );
-              return {
-                path: remotePath,
-                entries: entries.map((e) => ({ name: e.name, kind: e.kind })),
-              };
-            } catch (e) {
-              return { error: String(e), path: remotePath };
-            }
+        const target = routePath(ctx.getRemoteSession(), path, (p) =>
+          resolvePath(p, ctx.getCwd()),
+        );
+        if (target.kind === "error") return { error: target.reason, path };
+        if (target.kind === "remote") {
+          const safety = checkReadable(target.path);
+          if (!safety.ok) return { error: safety.reason, path: target.path };
+          try {
+            const entries = await sftpReadDir(
+              target.sessionId,
+              target.path,
+              false,
+            );
+            return {
+              path: target.path,
+              entries: entries.map((e) => ({ name: e.name, kind: e.kind })),
+            };
+          } catch (e) {
+            return { error: String(e), path: target.path };
           }
         }
-        const reqPath = resolvePath(path, ctx.getCwd());
+        const reqPath = target.path;
         const safety = await checkReadableCanonical(
           reqPath,
           native.canonicalize,

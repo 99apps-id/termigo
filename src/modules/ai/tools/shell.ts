@@ -46,8 +46,11 @@ async function getSessionShell(
   return p;
 }
 
-function workspaceSessionKey(sessionId: string): string {
-  return `${sessionId}:${workspaceScopeKey(currentWorkspaceEnv())}`;
+export function workspaceSessionKey(
+  sessionId: string,
+  cwd?: string | null,
+): string {
+  return `${sessionId}:${workspaceScopeKey(currentWorkspaceEnv())}:${cwd ?? "default"}`;
 }
 
 /**
@@ -202,7 +205,10 @@ export function buildShellTools(ctx: ToolContext) {
           // subdir, an unrelated repo). The persistent shell still lets a
           // command `cd` and keep that directory for the next call.
           const cwd = ctx.getWorkspaceRoot() ?? ctx.getCwd();
-          const shellId = await getSessionShell(workspaceSessionKey(sid), cwd);
+          const shellId = await getSessionShell(
+            workspaceSessionKey(sid, cwd),
+            cwd,
+          );
 
           // Stop has to reach the command, not just the model stream. Without
           // this the run was marked stopped while the shell kept going, and
