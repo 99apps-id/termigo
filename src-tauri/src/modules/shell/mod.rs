@@ -394,7 +394,7 @@ pub struct CommandOutput {
 
 /// Runs a one-shot command via the user's login shell. Output is capped and
 /// the process is force-killed on timeout. We deliberately do NOT pipe into
-/// the user's interactive PTY — that would fight their input. AI tool calls
+/// the user's interactive PTY: that would fight their input. AI tool calls
 /// are presented in chat as their own structured result.
 #[tauri::command]
 pub async fn shell_run_command(
@@ -437,6 +437,65 @@ pub async fn shell_run_command(
     });
 
     rx.recv().map_err(|e| e.to_string())?
+}
+
+/// Detect common interactive prompts and alternate screen buffer escape sequences
+/// that cause non-interactive background agent processes to hang indefinitely.
+pub(crate) fn detect_interactive_prompt(tail: &str) -> Option<&'static str> {
+    let trimmed = tail.trim_end();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    // Alternate screen buffer switch used by pagers and editors (less, vim, nano, top)
+    if trimmed.contains("\x1b[?1049h")
+        || trimmed.contains("\x1b[?47h")
+        || trimmed.contains("\x1b[?1047h")
+    {
+        return Some("alternate screen buffer (less/vim/nano/pager)");
+    }
+
+    let last_line = trimmed.lines().last().unwrap_or(trimmed).trim();
+    let lower = last_line.to_ascii_lowercase();
+
+    let ends_with_prompt_char = lower.ends_with('?')
+        || lower.ends_with(':')
+        || lower.ends_with(']')
+        || lower.ends_with(')');
+
+    if ends_with_prompt_char
+        && (lower.contains("[y/n")
+            || lower.contains("(y/n")
+            || lower.contains("[yes/no")
+            || lower.contains("(yes/no")
+            || lower.contains("[y/n/c")
+            || lower.ends_with("y/n")
+            || lower.ends_with("y/n?")
+            || lower.ends_with("y/n:")
+            || lower.ends_with("yes/no?")
+            || lower.ends_with("yes/no:"))
+    {
+        return Some("confirmation prompt [Y/N]");
+    }
+
+    if (lower.ends_with(':') || lower.ends_with('?'))
+        && (lower.contains("password")
+            || lower.contains("passphrase")
+            || lower.contains("token")
+            || lower.contains("pin"))
+    {
+        return Some("credential prompt (password/token)");
+    }
+
+    if lower.ends_with("press any key to continue . . .")
+        || lower.ends_with("press any key to continue...")
+        || lower.ends_with("press enter to continue")
+        || lower.ends_with("press [enter] to continue")
+    {
+        return Some("pause prompt (press key to continue)");
+    }
+
+    None
 }
 
 /// Somewhere the caller can see the child while it runs, so a command can be
@@ -523,16 +582,61 @@ fn run_blocking(
         let _ = tx.send(waiter.wait());
     });
 
-    let (exit_code, timed_out) = match rx.recv_timeout(dur) {
-        Ok(Ok(status)) => (status.code(), false),
-        Ok(Err(e)) => return Err(e.to_string()),
-        Err(mpsc::RecvTimeoutError::Timeout) => {
+    let start = std::time::Instant::now();
+    let poll_interval = Duration::from_millis(250);
+    let mut last_stdout_len = 0usize;
+    let mut frozen_count = 0u32;
+    let mut interactive_prompt: Option<&'static str> = None;
+
+    let (exit_code, timed_out) = loop {
+        let elapsed = start.elapsed();
+        if elapsed >= dur {
             crate::modules::proc::kill_tree(child.id());
             let _ = child.kill();
-            (None, true)
+            break (None, true);
         }
-        Err(mpsc::RecvTimeoutError::Disconnected) => {
-            return Err("shell wait thread disconnected".into());
+
+        let slice = (dur - elapsed).min(poll_interval);
+        match rx.recv_timeout(slice) {
+            Ok(Ok(status)) => break (status.code(), false),
+            Ok(Err(e)) => return Err(e.to_string()),
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                // Check stdout tail for interactive prompts if output has frozen
+                let current_len = {
+                    let guard = match stdout_target.lock() {
+                        Ok(g) => g,
+                        Err(p) => p.into_inner(),
+                    };
+                    guard.0.len()
+                };
+
+                if current_len > 0 {
+                    if current_len == last_stdout_len {
+                        frozen_count = frozen_count.saturating_add(1);
+                        // 8 * 250ms = 2.0 seconds of silence with unchanged output
+                        if frozen_count >= 8 {
+                            let guard = match stdout_target.lock() {
+                                Ok(g) => g,
+                                Err(p) => p.into_inner(),
+                            };
+                            let tail_start = guard.0.len().saturating_sub(512);
+                            let tail_str = String::from_utf8_lossy(&guard.0[tail_start..]);
+                            if let Some(prompt) = detect_interactive_prompt(&tail_str) {
+                                interactive_prompt = Some(prompt);
+                                crate::modules::proc::kill_tree(child.id());
+                                let _ = child.kill();
+                                break (None, false);
+                            }
+                        }
+                    } else {
+                        last_stdout_len = current_len;
+                        frozen_count = 0;
+                    }
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err("shell wait thread disconnected".into());
+            }
         }
     };
 
@@ -556,9 +660,19 @@ fn run_blocking(
     let (stdout_bytes, stdout_truncated) = take_output(&stdout_target);
     let (stderr_bytes, stderr_truncated) = take_output(&stderr_target);
 
+    let mut stderr = String::from_utf8_lossy(&stderr_bytes).into_owned();
+    if let Some(prompt) = interactive_prompt {
+        if !stderr.is_empty() && !stderr.ends_with('\n') {
+            stderr.push('\n');
+        }
+        stderr.push_str(&format!(
+            "[termigo: command paused waiting for interactive user input ({prompt}). Foreground agent execution is non-interactive: please re-run with non-interactive flags such as -y, --yes, --batch, or DEBIAN_FRONTEND=noninteractive.]\n"
+        ));
+    }
+
     Ok(CommandOutput {
         stdout: String::from_utf8_lossy(&stdout_bytes).into_owned(),
-        stderr: String::from_utf8_lossy(&stderr_bytes).into_owned(),
+        stderr,
         exit_code,
         timed_out,
         truncated: stdout_truncated || stderr_truncated,
@@ -1170,4 +1284,23 @@ mod tests_sandbox {
         assert_eq!(guard.0.len(), MAX_OUTPUT_BYTES);
         assert!(guard.1);
     }
+
+    #[test]
+    fn detect_interactive_prompt_recognizes_prompts_and_pagers() {
+        assert!(detect_interactive_prompt("Do you want to continue? [y/N]").is_some());
+        assert!(detect_interactive_prompt("Apply changes? (y/n): ").is_some());
+        assert!(detect_interactive_prompt("Delete existing directory? [yes/no]").is_some());
+        assert!(detect_interactive_prompt("[sudo] password for user: ").is_some());
+        assert!(detect_interactive_prompt("Enter passphrase:").is_some());
+        assert!(detect_interactive_prompt("Enter PIN:").is_some());
+        assert!(detect_interactive_prompt("Press any key to continue . . .").is_some());
+        assert!(detect_interactive_prompt("\x1b[?1049h").is_some());
+
+        // Negative cases (normal outputs should not trigger prompt guard)
+        assert!(detect_interactive_prompt("").is_none());
+        assert!(detect_interactive_prompt("   \n\r  ").is_none());
+        assert!(detect_interactive_prompt("Compiling termigo v0.1.0\nFinished dev target(s)").is_none());
+        assert!(detect_interactive_prompt("npm install completed successfully").is_none());
+    }
 }
+

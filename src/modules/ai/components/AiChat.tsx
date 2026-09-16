@@ -552,7 +552,17 @@ const RenderedTool = memo(function RenderedTool({
       <AiToolApproval
         part={part as Extract<ToolUIPart, { state: "approval-requested" }>}
         toolName={toolName}
-        onRespond={(approved) => onApproval(part.approval.id, approved)}
+        onRespond={(approved, editedCommand) => {
+          if (
+            approved &&
+            editedCommand !== undefined &&
+            typeof part.input === "object" &&
+            part.input !== null
+          ) {
+            (part.input as Record<string, unknown>).command = editedCommand;
+          }
+          onApproval(part.approval.id, approved);
+        }}
       />
     );
   }

@@ -10,13 +10,14 @@ import {
   FilePlusIcon,
   FolderAddIcon,
   Infinity01Icon,
+  Refresh01Icon,
   TerminalIcon,
   Tick02Icon,
   ToolsIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ToolUIPart } from "ai";
-import { memo } from "react";
+import { memo, useState } from "react";
 import { ruleFromApproval } from "../lib/approvalRules";
 import { rememberSessionAllowed } from "../store/approvalQueueStore";
 import { useApprovalRulesStore } from "../store/approvalRulesStore";
@@ -24,7 +25,7 @@ import { useApprovalRulesStore } from "../store/approvalRulesStore";
 type Props = {
   part: Extract<ToolUIPart, { state: "approval-requested" }>;
   toolName: string;
-  onRespond: (approved: boolean) => void;
+  onRespond: (approved: boolean, editedCommand?: string) => void;
 };
 
 const TOOL_META: Record<string, { label: string; icon: typeof FilePlusIcon }> =
@@ -43,6 +44,18 @@ function AiToolApprovalImpl({ part, toolName, onRespond }: Props) {
   const Icon = meta?.icon ?? ToolsIcon;
   const input = part.input as Record<string, unknown>;
 
+  const isBash = toolName === "bash_run" || toolName === "bash_background";
+  const initialCommand = isBash ? String(input.command ?? "") : "";
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedCommand, setEditedCommand] = useState(initialCommand);
+
+  const getApprovedCommand = () => {
+    if (isBash && editedCommand !== initialCommand) {
+      return editedCommand;
+    }
+    return undefined;
+  };
+
   // Persist an "always allow" rule scoped to this call into the project's
   // `.termigo/approvals.json`, then approve. Only offered when there is a
   // workspace to write to and the call is specific enough to generalise.
@@ -50,15 +63,30 @@ function AiToolApprovalImpl({ part, toolName, onRespond }: Props) {
   const projectRule = ruleFromApproval(
     toolName,
     {
-      command: typeof input.command === "string" ? input.command : null,
+      command:
+        getApprovedCommand() ??
+        (typeof input.command === "string" ? input.command : null),
       path: typeof input.path === "string" ? input.path : null,
     },
     "allow",
   );
+
   const allowInProject = () => {
-    if (projectRule) void useApprovalRulesStore.getState().addRule(projectRule);
+    const cmd = getApprovedCommand();
+    const effectiveRule = ruleFromApproval(
+      toolName,
+      {
+        command:
+          cmd ?? (typeof input.command === "string" ? input.command : null),
+        path: typeof input.path === "string" ? input.path : null,
+      },
+      "allow",
+    );
+    if (effectiveRule) {
+      void useApprovalRulesStore.getState().addRule(effectiveRule);
+    }
     rememberSessionAllowed(toolName);
-    onRespond(true);
+    onRespond(true, cmd);
   };
 
   return (
@@ -78,7 +106,16 @@ function AiToolApprovalImpl({ part, toolName, onRespond }: Props) {
       </div>
 
       <div className="px-3 py-2.5">
-        <PreviewBlock toolName={toolName} input={input} />
+        <PreviewBlock
+          toolName={toolName}
+          input={input}
+          isEditing={isEditing}
+          setIsEditing={setIsEditing}
+          editedCommand={editedCommand}
+          setEditedCommand={setEditedCommand}
+          initialCommand={initialCommand}
+          onReset={() => setEditedCommand(initialCommand)}
+        />
       </div>
 
       <div className="flex items-center justify-end gap-1.5 border-t border-border/60 px-3 py-2">
@@ -96,7 +133,7 @@ function AiToolApprovalImpl({ part, toolName, onRespond }: Props) {
           variant="ghost"
           onClick={() => {
             rememberSessionAllowed(toolName);
-            onRespond(true);
+            onRespond(true, getApprovedCommand());
           }}
           className="h-7 gap-1.5 text-[11px]"
           title="Approve, and don't ask again for this tool this session"
@@ -113,7 +150,7 @@ function AiToolApprovalImpl({ part, toolName, onRespond }: Props) {
             if (!list.includes(toolName)) {
               void setAgentAlwaysAllowedTools([...list, toolName]);
             }
-            onRespond(true);
+            onRespond(true, getApprovedCommand());
           }}
           className="h-7 gap-1.5 text-[11px]"
           title="Approve, and never ask again for this tool"
@@ -136,7 +173,7 @@ function AiToolApprovalImpl({ part, toolName, onRespond }: Props) {
         <Button
           size="sm"
           variant="default"
-          onClick={() => onRespond(true)}
+          onClick={() => onRespond(true, getApprovedCommand())}
           className="h-7 gap-1.5 text-[11px]"
         >
           <HugeiconsIcon icon={Tick02Icon} size={12} strokeWidth={2} />
@@ -148,7 +185,7 @@ function AiToolApprovalImpl({ part, toolName, onRespond }: Props) {
 }
 
 export const AiToolApproval = memo(AiToolApprovalImpl, (a, b) => {
-  // The approval card never changes content for a given approvalId — once
+  // The approval card never changes content for a given approvalId: once
   // the model has emitted the approval-requested part with its input, we
   // don't want to re-render on every downstream token.
   return (
@@ -158,33 +195,94 @@ export const AiToolApproval = memo(AiToolApprovalImpl, (a, b) => {
   );
 });
 
-function PreviewBlock({
+export function PreviewBlock({
   toolName,
   input,
+  isEditing,
+  setIsEditing,
+  editedCommand,
+  setEditedCommand,
+  initialCommand,
+  onReset,
 }: {
   toolName: string;
   input: Record<string, unknown>;
+  isEditing: boolean;
+  setIsEditing: (editing: boolean) => void;
+  editedCommand: string;
+  setEditedCommand: (cmd: string) => void;
+  initialCommand: string;
+  onReset: () => void;
 }) {
   if (toolName === "bash_run" || toolName === "bash_background") {
     const cwd = typeof input.cwd === "string" ? input.cwd : null;
+    const isModified = editedCommand !== initialCommand;
     return (
       <div className="space-y-1.5">
-        {cwd && (
-          <div className="font-mono text-[10.5px] text-muted-foreground">
-            {cwd}
-          </div>
-        )}
-        <pre
-          className={cn(
-            "max-h-40 overflow-auto rounded-md bg-muted/60 p-2 font-mono text-[11px] leading-relaxed",
+        <div className="flex items-center justify-between gap-2">
+          {cwd ? (
+            <div className="truncate font-mono text-[10.5px] text-muted-foreground">
+              {cwd}
+            </div>
+          ) : (
+            <div />
           )}
-        >
-          {String(input.command ?? "")}
-        </pre>
+          <div className="flex items-center gap-1 shrink-0">
+            {isModified && (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={onReset}
+                className="h-5 px-1.5 text-[10px] text-muted-foreground hover:text-foreground gap-1"
+                title="Reset command to original"
+              >
+                <HugeiconsIcon icon={Refresh01Icon} size={10} strokeWidth={2} />
+                Reset
+              </Button>
+            )}
+            <Button
+              type="button"
+              size="sm"
+              variant={isEditing ? "secondary" : "ghost"}
+              onClick={() => setIsEditing(!isEditing)}
+              className="h-5 px-1.5 text-[10px] text-muted-foreground hover:text-foreground gap-1"
+              title={
+                isEditing ? "Done editing" : "Edit command before approving"
+              }
+            >
+              <HugeiconsIcon icon={Edit02Icon} size={10} strokeWidth={2} />
+              {isEditing ? "Done" : isModified ? "Edited" : "Edit"}
+            </Button>
+          </div>
+        </div>
+
+        {isEditing ? (
+          <textarea
+            value={editedCommand}
+            onChange={(e) => setEditedCommand(e.target.value)}
+            rows={Math.min(
+              10,
+              Math.max(3, editedCommand.split("\n").length + 1),
+            )}
+            className="w-full rounded-md border border-border/80 bg-background/80 p-2 font-mono text-[11px] leading-relaxed text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
+            placeholder="Command to run..."
+            spellCheck={false}
+          />
+        ) : (
+          <pre
+            className={cn(
+              "max-h-40 overflow-auto rounded-md bg-muted/60 p-2 font-mono text-[11px] leading-relaxed",
+              isModified && "border border-amber-500/30 bg-amber-500/5",
+            )}
+          >
+            {editedCommand}
+          </pre>
+        )}
       </div>
     );
   }
-  // For file mutations we deliberately do NOT preview content here —
+  // For file mutations we deliberately do NOT preview content here:
   // streamed write/edit content thrashes the UI and the AI diff tab is the
   // authoritative place to review the change. Show just the path + a
   // one-line size hint so the user knows what's being touched.
