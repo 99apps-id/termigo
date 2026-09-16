@@ -156,6 +156,25 @@ export function useAiLiveBridge(params: Params) {
         const buf = terminalRefs.current.get(t.activeLeafId)?.getBuffer(300);
         return buf ? redactSensitive(buf) : null;
       },
+      listTerminals: () => {
+        const { activeId, tabs } = ref.current;
+        return tabs
+          .filter((t) => t.kind === "terminal")
+          .map((t) => ({
+            tabId: t.id,
+            title: t.customTitle ?? t.title,
+            cwd: t.cwd ?? null,
+            isActive: t.id === activeId,
+            private: t.private === true,
+          }));
+      },
+      getTerminalContextFor: (tabId) => {
+        const t = ref.current.tabs.find((x) => x.id === tabId);
+        if (t?.kind !== "terminal") return null;
+        if (t.private) return null;
+        const buf = terminalRefs.current.get(t.activeLeafId)?.getBuffer(300);
+        return buf ? redactSensitive(buf) : null;
+      },
       isActiveTerminalPrivate: () => {
         const { activeId, tabs } = ref.current;
         const t = tabs.find((x) => x.id === activeId);

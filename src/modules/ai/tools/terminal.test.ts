@@ -13,6 +13,8 @@ import { buildTerminalTools } from "./terminal";
 type Overrides = Partial<{
   isActiveTerminalPrivate: () => boolean;
   getTerminalContext: () => string | null;
+  listTerminals: () => import("../store/chatStore").TerminalSummary[];
+  getTerminalContextFor: (tabId: number) => string | null;
   openPreview: (url: string) => boolean;
   openCanvas: (html: string, title?: string) => boolean;
 }>;
@@ -24,6 +26,8 @@ function makeContext(o: Overrides = {}): ToolContext {
     getRemoteSession: () => null,
     getTerminalContext: o.getTerminalContext ?? (() => "line one\nline two"),
     isActiveTerminalPrivate: o.isActiveTerminalPrivate ?? (() => false),
+    listTerminals: o.listTerminals ?? (() => []),
+    getTerminalContextFor: o.getTerminalContextFor ?? (() => null),
     injectIntoActivePty: () => false,
     openPreview: o.openPreview ?? (() => true),
     openCanvas: o.openCanvas ?? (() => true),
@@ -337,5 +341,117 @@ describe("preview_file", () => {
     expect(r.path).toBe("/workspace/budget.xlsx");
     expect(native.readFile).not.toHaveBeenCalled();
     expect(openCanvas).not.toHaveBeenCalled();
+  });
+});
+
+type Term = import("../store/chatStore").TerminalSummary;
+
+const term = (over: Partial<Term> = {}): Term => ({
+  tabId: 1,
+  title: "bash",
+  cwd: "/workspace",
+  isActive: false,
+  private: false,
+  ...over,
+});
+
+async function listTerminals(ctx: ToolContext) {
+  const execute = buildTerminalTools(ctx).list_terminals.execute;
+  if (!execute) throw new Error("list_terminals has no execute");
+  return (await execute({} as never, OPTS)) as {
+    count: number;
+    terminals: { tab_id: number; title: string; private?: boolean }[];
+  };
+}
+
+// The agent could see only the focused terminal, so a dev server running in
+// another tab did not exist as far as it was concerned - it would offer to
+// start one that was already up.
+describe("the agent can see terminals it is not looking at", () => {
+  it("lists them with the id needed to read one", async () => {
+    const r = await listTerminals(
+      makeContext({
+        listTerminals: () => [
+          term({ tabId: 1, title: "dev server", isActive: true }),
+          term({ tabId: 2, title: "tests" }),
+        ],
+      }),
+    );
+    expect(r.count).toBe(2);
+    expect(r.terminals.map((t) => t.tab_id)).toEqual([1, 2]);
+    expect(r.terminals[0].title).toBe("dev server");
+  });
+
+  it("says plainly when there are none", async () => {
+    expect((await listTerminals(makeContext())).count).toBe(0);
+  });
+
+  it("reads the terminal it was asked for, not the active one", async () => {
+    const r = await readTerminal(
+      makeContext({
+        getTerminalContext: () => "ACTIVE BUFFER",
+        listTerminals: () => [term({ tabId: 7, title: "tests" })],
+        getTerminalContextFor: (id) => (id === 7 ? "TEST OUTPUT" : null),
+      }),
+      { tab_id: 7 },
+    );
+    expect(r.output).toContain("TEST OUTPUT");
+    expect(r.output).not.toContain("ACTIVE BUFFER");
+  });
+
+  it("refuses an id that is not there rather than falling back", async () => {
+    const r = await readTerminal(
+      makeContext({
+        getTerminalContext: () => "ACTIVE BUFFER",
+        listTerminals: () => [term({ tabId: 1 })],
+      }),
+      { tab_id: 99 },
+    );
+    expect(r.error).toMatch(/no terminal with tab_id 99/);
+    expect(r.output).toBeUndefined();
+  });
+});
+
+// Privacy mode is enforced per terminal, not just for the focused one -
+// otherwise naming a private tab by id would have walked straight around it.
+describe("Privacy mode holds on the new path too", () => {
+  it("refuses a private terminal named by id", async () => {
+    const getTerminalContextFor = vi.fn(() => "secret token abc123");
+    const r = await readTerminal(
+      makeContext({
+        listTerminals: () => [
+          term({ tabId: 3, title: "vault", private: true }),
+        ],
+        getTerminalContextFor,
+      }),
+      { tab_id: 3 },
+    );
+    expect(r.error).toMatch(/privacy mode/i);
+    expect(getTerminalContextFor).not.toHaveBeenCalled();
+  });
+
+  it("never leaks the buffer into the refusal", async () => {
+    const r = await readTerminal(
+      makeContext({
+        listTerminals: () => [term({ tabId: 3, private: true })],
+        getTerminalContextFor: () => "secret token abc123",
+      }),
+      { tab_id: 3 },
+    );
+    expect(JSON.stringify(r)).not.toContain("abc123");
+  });
+
+  // Hidden entirely, the agent reads the gap as "no terminal" and asks the
+  // user where they are. Listed but withheld is the honest shape.
+  it("still lists a private terminal, marked as such", async () => {
+    const r = await listTerminals(
+      makeContext({
+        listTerminals: () => [
+          term({ tabId: 3, title: "vault", private: true }),
+        ],
+      }),
+    );
+    expect(r.count).toBe(1);
+    expect(r.terminals[0].private).toBe(true);
   });
 });

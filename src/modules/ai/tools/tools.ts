@@ -33,6 +33,7 @@ import { buildPdfTools } from "./pdf";
 import { buildPolicyTools } from "./policyTools";
 import { buildProcessTools } from "./process";
 import { buildPtyDriverTools } from "./ptyDriver";
+import { buildReplTools } from "./repl";
 import { buildReplaceTools } from "./replace";
 import { buildReviewTools } from "./review";
 import { buildSearchTools } from "./search";
@@ -43,15 +44,12 @@ import { buildSkillTools } from "./skills";
 import { buildSqlTools } from "./sql";
 import { buildSubagentTools } from "./subagent";
 import { buildSystemTools } from "./system";
+import { buildTelegramTools } from "./telegram";
 import { buildTerminalTools } from "./terminal";
 import { buildTestLoopTools } from "./testLoopTools";
 import { buildThinkTools } from "./think";
 import { buildTodoTools } from "./todo";
-import {
-  buildUnknownToolFallback,
-  UNKNOWN_TOOL_NAME,
-} from "./toolFallback";
-import { buildTelegramTools } from "./telegram";
+import { buildUnknownToolFallback, UNKNOWN_TOOL_NAME } from "./toolFallback";
 import { buildVerifyTools } from "./verify";
 import { buildWebSearchTools } from "./webSearch";
 import { buildWorkflowTools } from "./workflow";
@@ -244,6 +242,7 @@ export function buildTools(
     ...buildSearchHistoryTools(),
     ...buildSelfImprovementTools(),
     ...buildShellTools(ctx),
+    ...buildReplTools(ctx),
     ...buildSubagentTools(ctx, subagentDepth),
     ...buildTerminalTools(ctx),
     ...buildThinkTools(),

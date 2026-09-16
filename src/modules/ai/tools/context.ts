@@ -20,8 +20,12 @@ export type ToolContext = {
   /** Last N lines of the active terminal buffer (or null if not a terminal tab). */
   getTerminalContext: () => string | null;
   isActiveTerminalPrivate: () => boolean;
+  /** Every open terminal, so the agent is not blind to all but the focused one. */
+  listTerminals: () => import("../store/chatStore").TerminalSummary[];
+  /** Buffer of a named terminal. Null when it is gone or marked private. */
+  getTerminalContextFor: (tabId: number) => string | null;
   /**
-   * Type a string into the active terminal at the prompt — without executing.
+   * Type a string into the active terminal at the prompt - without executing.
    * Returns false if there is no active terminal tab to inject into.
    */
   injectIntoActivePty: (text: string) => boolean;

@@ -121,6 +121,7 @@ describe("tool group definitions", () => {
       "bash_list",
       "bash_kill",
       "get_terminal_output",
+      "list_terminals",
       "run_checks",
       "test_file",
       "format_code",

@@ -148,7 +148,7 @@ export function buildTerminalTools(ctx: ToolContext) {
   return {
     suggest_command: tool({
       description:
-        "Propose a single shell command. Renders a card in chat with an 'Insert' button — the command is NOT written to any terminal automatically; only the user's click inserts it at the prompt without executing. Use this when the answer IS a command.",
+        "Propose a single shell command. Renders a card in chat with an 'Insert' button - the command is NOT written to any terminal automatically; only the user's click inserts it at the prompt without executing. Use this when the answer IS a command.",
       inputSchema: z.object({
         command: z
           .string()
@@ -161,7 +161,7 @@ export function buildTerminalTools(ctx: ToolContext) {
       execute: async ({ command, explanation }) => {
         const safety = checkShellCommand(command);
         if (!safety.ok) return { error: safety.reason };
-        // Reject control bytes — the user inserts via click, but the rendered
+        // Reject control bytes - the user inserts via click, but the rendered
         // command must reflect exactly what will land at the prompt.
         if (/[\n\r\x00\x1b\x07]/.test(command)) {
           return {
@@ -174,7 +174,7 @@ export function buildTerminalTools(ctx: ToolContext) {
 
     get_terminal_output: tool({
       description:
-        "Return the tail of the active terminal's scrollback. Use this when the user references 'this error', 'the last command', or you need to interpret recent terminal output. Default is 80 lines; raise it only when you genuinely need more. Returns an empty string if there is no active terminal; refuses if the terminal is in Privacy mode.",
+        "Return the tail of a terminal's scrollback. Defaults to the active terminal; pass `tab_id` from `list_terminals` to read another one - a dev server left running in a different tab, for instance. Use this when the user references 'this error', 'the last command', or you need to interpret recent output. Default is 80 lines; raise it only when you genuinely need more. Refuses if that terminal is in Privacy mode.",
       inputSchema: z.object({
         lines: z
           .number()
@@ -183,16 +183,40 @@ export function buildTerminalTools(ctx: ToolContext) {
           .max(2000)
           .optional()
           .describe("Number of trailing lines to return. Default 80."),
+        tab_id: z
+          .number()
+          .int()
+          .optional()
+          .describe("From `list_terminals`. Omit for the active terminal."),
       }),
-      execute: async ({ lines }) => {
-        if (ctx.isActiveTerminalPrivate()) {
-          return {
-            error:
-              "active terminal is in Privacy mode; its buffer is withheld. Ask the user to switch to a regular tab if they want you to see it.",
-          };
+      execute: async ({ lines, tab_id }) => {
+        let buffer: string | null;
+        if (tab_id === undefined) {
+          if (ctx.isActiveTerminalPrivate()) {
+            return {
+              error:
+                "active terminal is in Privacy mode; its buffer is withheld. Ask the user to switch to a regular tab if they want you to see it.",
+            };
+          }
+          buffer = ctx.getTerminalContext();
+          if (!buffer) return { output: "", note: "no active terminal" };
+        } else {
+          const found = ctx.listTerminals().find((t) => t.tabId === tab_id);
+          if (!found) {
+            return {
+              error: `no terminal with tab_id ${tab_id}; call list_terminals`,
+            };
+          }
+          if (found.private) {
+            return {
+              error: `"${found.title}" is in Privacy mode; its buffer is withheld.`,
+            };
+          }
+          buffer = ctx.getTerminalContextFor(tab_id);
+          if (!buffer) {
+            return { output: "", note: `"${found.title}" has no output yet` };
+          }
         }
-        const buffer = ctx.getTerminalContext();
-        if (!buffer) return { output: "", note: "no active terminal" };
         const n = lines ?? 80;
         const parts = buffer.split("\n");
         const sliced =
@@ -203,6 +227,29 @@ export function buildTerminalTools(ctx: ToolContext) {
             ? `…[truncated]…\n${sliced.slice(sliced.length - MAX)}`
             : sliced;
         return { output: capped, lines_returned: Math.min(parts.length, n) };
+      },
+    }),
+
+    list_terminals: tool({
+      description:
+        "List every open terminal: its `tab_id`, title, working directory, which one is active, and whether it is in Privacy mode. Use this before assuming what is running - a dev server or a watcher may already be up in another tab. Pass a `tab_id` to `get_terminal_output` to read one. Read-only: this cannot switch, close, or type into a terminal. Auto-executes.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        const terminals = ctx.listTerminals();
+        if (terminals.length === 0) return { count: 0, terminals: [] };
+        return {
+          count: terminals.length,
+          terminals: terminals.map((t) => ({
+            tab_id: t.tabId,
+            title: t.title,
+            cwd: t.cwd,
+            active: t.isActive,
+            // Listed rather than hidden: the agent should know a terminal
+            // exists and is off limits, or it reads the gap as "no terminal"
+            // and asks the user where they are.
+            ...(t.private ? { private: true } : {}),
+          })),
+        };
       },
     }),
 

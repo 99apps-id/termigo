@@ -109,6 +109,7 @@ The themes below frame every scope decision.
 - [x] Hybrid RAG codebase search: BM25-ranked retrieval across repository symbols and files with grounding anti-hallucination verification
 - [x] Agent autonomy controls: loop circuit breaker, automatic output truncation for verbose logs, and configurable autonomous harness profiles
 - [x] WSL path translation across pentest tools, pipeline context piping, and guardrail policies interface
+- [x] Interactive processes the agent can hold a conversation with (`repl_start` / `repl_send`), so a CLI debugger (pdb, dlv, gdb) or language REPL can be driven turn by turn
 
 ### SSH and remote
 
@@ -117,6 +118,8 @@ The themes below frame every scope decision.
 - [x] Port forwarding, so a service on the remote host is reachable locally
 - [x] Agent file tools follow the session onto the remote host, with `grep` and `glob` running server-side
 - [x] Remote commands gated by what they do rather than by being remote
+- [x] Automatic session reconnection for dropped SSH connections, with exponential backoff and tab lifecycle guards
+- [x] Staged SFTP writes through temporary files and backups to prevent file truncation on drop
 
 ### Previews
 
@@ -130,7 +133,7 @@ The themes below frame every scope decision.
 - [x] macOS, Linux (.deb / .rpm / AppImage), Windows (NSIS), WSL
 - [x] AUR (Arch)
 - [x] Windows Explorer context-menu integration
-- [x] Auto-updater
+- [~] Auto-updater (wired, but `latest.json` is only produced when a signing key is configured; releases currently ship without it)
 - [x] OS keychain for API keys
 - [x] No telemetry
 
@@ -213,7 +216,9 @@ See `good-first-issue` and `help-wanted` labels on GitHub Issues for concrete ta
 
 Categories that will not be built into Termigo. Individual feature requests in these categories will be closed.
 
-- **Heavyweight IDE infrastructure.** Integrated debugger and profiler suites, unbounded background indexing, and always-resident extension hosts are out of scope. Focused LSP, autocomplete, formatting, and editor workflows remain in scope when they are opt-in, lazy, and resource-bounded.
+- **Heavyweight IDE infrastructure.** Debugger and profiler *suites* - a debug adapter protocol client with breakpoint gutters, variable trees, watch panes and launch configurations - are out of scope, along with unbounded background indexing and always-resident extension hosts. Focused LSP, autocomplete, formatting, and editor workflows remain in scope when they are opt-in, lazy, and resource-bounded.
+
+  Debugging itself is not out of scope, only that shape of it. The agent can drive `pdb`, `dlv`, `gdb` or a language REPL turn by turn through `repl_start` / `repl_send`, which fits a terminal-first product and costs no panels. If a step debugger is central to how you work, Termigo expects to sit beside your IDE rather than replace it.
 - **Notebook and document workspaces.** Anything that turns Termigo into a document host rather than a terminal.
 - **Package manager and toolchain UIs.** Use `npm`, `pip`, `cargo` and friends in the terminal directly.
 - **Full web browser features.** Preview pane stays scoped to local dev servers and lightweight doc viewing. No navigation history, no bookmarks, no dev tools.

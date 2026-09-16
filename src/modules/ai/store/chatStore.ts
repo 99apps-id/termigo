@@ -49,11 +49,30 @@ import { useArtifactsStore } from "./artifactsStore";
 import { useSubagentRunStore } from "./subagentRunStore";
 import { useTodosStore } from "./todoStore";
 
+export type TerminalSummary = {
+  tabId: number;
+  title: string;
+  cwd: string | null;
+  isActive: boolean;
+  /** Listed, but its buffer is withheld. Knowing it exists is not a leak. */
+  private: boolean;
+};
+
 export type Live = {
   getCwd: () => string | null;
   getRemoteSession: () => import("../tools/context").RemoteFsSession | null;
   getTerminalContext: () => string | null;
   isActiveTerminalPrivate: () => boolean;
+  /**
+   * Every open terminal, not just the focused one.
+   *
+   * The agent could previously see only the active terminal, so a dev server
+   * running in the second tab did not exist as far as it was concerned - it
+   * would offer to start one that was already running.
+   */
+  listTerminals: () => TerminalSummary[];
+  /** Buffer of a named terminal. Null if it is gone or marked private. */
+  getTerminalContextFor: (tabId: number) => string | null;
   injectIntoActivePty: (text: string) => boolean;
   getWorkspaceRoot: () => string | null;
   getActiveFile: () => string | null;
@@ -280,6 +299,8 @@ const NOOP_LIVE: Live = {
   getRemoteSession: () => null,
   getTerminalContext: () => null,
   isActiveTerminalPrivate: () => false,
+  listTerminals: () => [],
+  getTerminalContextFor: () => null,
   injectIntoActivePty: () => false,
   getWorkspaceRoot: () => null,
   getActiveFile: () => null,
@@ -711,11 +732,16 @@ export const useChatStore = create<StoreState>((set, get) => ({
 
 export function resolveChatSession(chatId: number, threadId?: number | null) {
   const key = sessionKey(chatId, threadId);
-  const session = useChatStore.getState().sessions.find((s) => sessionKey(s.chatId ?? 0, s.threadId) === key);
+  const session = useChatStore
+    .getState()
+    .sessions.find((s) => sessionKey(s.chatId ?? 0, s.threadId) === key);
   return session?.id ?? null;
 }
 
-export async function ensureChatSession(chatId: number, threadId?: number | null) {
+export async function ensureChatSession(
+  chatId: number,
+  threadId?: number | null,
+) {
   const existing = resolveChatSession(chatId, threadId);
   if (existing) return existing;
   return useChatStore.getState().newSession(chatId, threadId);

@@ -28,6 +28,8 @@ function makeContext(): ToolContext {
     getRemoteSession: () => null,
     getTerminalContext: () => null,
     isActiveTerminalPrivate: () => false,
+    listTerminals: () => [],
+    getTerminalContextFor: () => null,
     injectIntoActivePty: () => false,
     openPreview: () => false,
     openCanvas: () => false,

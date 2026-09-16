@@ -276,6 +276,47 @@ export const native = {
     invoke<boolean>("shell_session_interrupt", { id }),
   shellSessionClose: (id: number) =>
     invoke<void>("shell_session_close", { id }),
+  // Interactive processes the agent talks to rather than runs: debuggers and
+  // REPLs, which never "finish" and so cannot go through shellSessionRun.
+  replOpen: (command: string, cwd?: string | null) =>
+    invoke<number>("repl_open", {
+      command,
+      cwd: cwd ?? null,
+      workspace: currentWorkspaceEnv(),
+    }),
+  replSend: (args: {
+    handle: number;
+    input?: string | null;
+    until?: string | null;
+    sinceOffset?: number;
+    timeoutSecs?: number;
+  }) =>
+    invoke<{
+      output: string;
+      matched: boolean;
+      next_offset: number;
+      dropped: number;
+      exited: boolean;
+      exit_code: number | null;
+    }>("repl_send", {
+      handle: args.handle,
+      input: args.input ?? null,
+      until: args.until ?? null,
+      sinceOffset: args.sinceOffset ?? 0,
+      timeoutSecs: args.timeoutSecs ?? null,
+    }),
+  replClose: (handle: number) => invoke<void>("repl_close", { handle }),
+  replList: () =>
+    invoke<
+      {
+        handle: number;
+        command: string;
+        cwd: string | null;
+        started_at_ms: number;
+        exited: boolean;
+        exit_code: number | null;
+      }[]
+    >("repl_list"),
   shellBgSpawn: (command: string, cwd?: string | null) =>
     invoke<number>("shell_bg_spawn", {
       command,

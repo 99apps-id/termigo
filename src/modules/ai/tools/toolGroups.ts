@@ -188,6 +188,13 @@ export const TOOL_GROUPS: readonly ToolGroup[] = [
       "Send a file or a message to your paired Telegram chat, so a long run can report to you while you are away from the desk.",
     tools: ["telegram_send_document", "telegram_send_message"],
   },
+  {
+    id: "repl",
+    label: "Interactive REPL processes",
+    description:
+      "Drive interactive command-line debuggers (pdb, gdb, dlv, node inspect) through a persistent stdio session.",
+    tools: ["repl_start", "repl_send", "repl_stop", "repl_list"],
+  },
 ];
 
 /** Every tool name that appears in some group. */

@@ -279,23 +279,96 @@ pub async fn ssh_sftp_write_file(
 ) -> Result<(), String> {
     let path = validate_remote_path(&path)?;
     on_sftp(&state, id, move |sftp| async move {
-        // CREATE | TRUNCATE | WRITE matches local fs_write_file's "rewrite
-        // in place" contract. The file is replaced atomically from the
-        // editor's view even when the server lacks atomic rename-into-place.
-        let mut file = sftp
-            .open_with_flags(
-                path,
-                OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE,
-            )
-            .await
-            .map_err(humanize)?;
-        use tokio::io::AsyncWriteExt;
-        file.write_all(contents.as_bytes())
-            .await
-            .map_err(|e| format!("sftp write: {e}"))?;
-        file.shutdown()
-            .await
-            .map_err(|e| format!("sftp close: {e}"))?;
+        // Staged through a sibling temp file, the same shape `fs::atomic` uses
+        // locally. Writing straight into the target with TRUNCATE meant a
+        // connection that dropped mid-write left the file truncated or empty -
+        // and over SSH, dropping mid-write is the normal failure, not a rare
+        // one. Staging moves the risk to a rename, which either happened or
+        // did not.
+        //
+        // Not fully atomic: SFTP v3 rename fails when the target exists, so an
+        // existing file is removed first and there is a short window with no
+        // file at that path. That window is microseconds and contains no
+        // half-written content, which is the failure worth preventing.
+        let tmp = format!("{path}.termigo-tmp");
+
+        // Keep the mode. Replacing a file with a fresh one would otherwise
+        // drop its executable bit, which turns a working script into a file
+        // the shell refuses to run.
+        let prior = sftp.metadata(path.clone()).await.ok();
+
+        let write_staged = async {
+            let mut file = sftp
+                .open_with_flags(
+                    tmp.clone(),
+                    OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE,
+                )
+                .await
+                .map_err(humanize)?;
+            use tokio::io::AsyncWriteExt;
+            file.write_all(contents.as_bytes())
+                .await
+                .map_err(|e| format!("sftp write: {e}"))?;
+            file.shutdown()
+                .await
+                .map_err(|e| format!("sftp close: {e}"))?;
+            Ok::<(), String>(())
+        };
+        if let Err(e) = write_staged.await {
+            // Best effort: a stray .termigo-tmp is confusing to find later.
+            let _ = sftp.remove_file(tmp).await;
+            return Err(e);
+        }
+
+        // The original is moved aside rather than deleted, so the content
+        // always exists under some name. Deleting it first and then failing
+        // the rename would destroy the file outright - worse than the torn
+        // write this staging exists to prevent.
+        let bak = format!("{path}.termigo-bak");
+        let moved_aside = if prior.is_some() {
+            // A leftover from an earlier crash would make the rename fail.
+            let _ = sftp.remove_file(bak.clone()).await;
+            match sftp.rename(path.clone(), bak.clone()).await {
+                Ok(()) => true,
+                Err(e) => {
+                    let _ = sftp.remove_file(tmp).await;
+                    return Err(humanize(e));
+                }
+            }
+        } else {
+            false
+        };
+
+        if let Err(e) = sftp.rename(tmp.clone(), path.clone()).await {
+            let msg = humanize(e);
+            if moved_aside {
+                // Put it back. If even this fails the content is still at
+                // `bak`, so say where rather than leaving the user guessing.
+                if sftp.rename(bak.clone(), path.clone()).await.is_err() {
+                    let _ = sftp.remove_file(tmp).await;
+                    return Err(format!(
+                        "{msg}; the original file is at {bak} - rename it back by hand"
+                    ));
+                }
+            }
+            let _ = sftp.remove_file(tmp).await;
+            return Err(msg);
+        }
+
+        if moved_aside {
+            let _ = sftp.remove_file(bak).await;
+        }
+
+        if let Some(perms) = prior.and_then(|m| m.permissions) {
+            // Only the mode. Carrying the whole prior Metadata would re-assert
+            // the old size and timestamps, describing the file that was just
+            // replaced rather than the one now there.
+            let only_mode = russh_sftp::protocol::FileAttributes {
+                permissions: Some(perms),
+                ..Default::default()
+            };
+            let _ = sftp.set_metadata(path, only_mode).await;
+        }
         Ok(())
     })
     .await

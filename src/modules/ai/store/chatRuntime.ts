@@ -376,6 +376,9 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     getTerminalContext: () => useChatStore.getState().live.getTerminalContext(),
     isActiveTerminalPrivate: () =>
       useChatStore.getState().live.isActiveTerminalPrivate(),
+    listTerminals: () => useChatStore.getState().live.listTerminals(),
+    getTerminalContextFor: (tabId) =>
+      useChatStore.getState().live.getTerminalContextFor(tabId),
     injectIntoActivePty: (text) =>
       useChatStore.getState().live.injectIntoActivePty(text),
     openPreview: (url, browserInstance) =>
@@ -612,7 +615,9 @@ function makeChat(sessionId: string): Chat<UIMessage> {
   const initialMessages = seedMessages.get(sessionId);
   seedMessages.delete(sessionId);
 
-  function extractLatestToolSignature(msgs: readonly UIMessage[]): string | null {
+  function extractLatestToolSignature(
+    msgs: readonly UIMessage[],
+  ): string | null {
     for (let i = msgs.length - 1; i >= 0; i--) {
       const m = msgs[i];
       if (m.role !== "assistant") continue;

@@ -134,6 +134,7 @@ export const CORE_TOOL_NAMES = new Set([
   "review_changes",
   "review_run",
   "get_terminal_output",
+  "list_terminals",
   "git_status",
   "git_diff",
   "git_log",
@@ -207,7 +208,8 @@ export function buildAgentTools<T>(
   const withholdSpawn = isSubagent && spawnToolsWithheld(depth, maxDepth);
   const compactTier = opts.compactToolTier === true;
 
-  if (!disallowed && !withholdSpawn && !isSubagent && !compactTier) return profiled;
+  if (!disallowed && !withholdSpawn && !isSubagent && !compactTier)
+    return profiled;
 
   const out: Record<string, T> = {};
   for (const [name, tool] of Object.entries(profiled)) {

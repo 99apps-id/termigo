@@ -58,6 +58,11 @@ const EXEC_TOOLS = new Set([
   "forward_remote_port",
   "bash_run",
   "bash_background",
+  // Starting an interactive process and feeding it lines is running code, not
+  // editing files, so it sits with the other exec tools rather than riding
+  // along with "auto-approve edits".
+  "repl_start",
+  "repl_send",
   "spawn_coding_agent",
   "send_to_agent",
   // Spawning a dev server runs a long-lived process and opens a page - an

@@ -1,4 +1,5 @@
 pub mod background;
+pub mod repl;
 pub mod ringbuffer;
 pub mod session;
 
@@ -362,8 +363,10 @@ fn run_blocking(
 pub struct ShellState {
     sessions: RwLock<HashMap<u32, Arc<ShellSession>>>,
     bg: RwLock<HashMap<u32, Arc<BackgroundProc>>>,
+    repls: RwLock<HashMap<u32, Arc<repl::ReplProc>>>,
     next_session_id: AtomicU32,
     next_bg_id: AtomicU32,
+    next_repl_id: AtomicU32,
 }
 
 impl Default for ShellState {
@@ -371,8 +374,10 @@ impl Default for ShellState {
         Self {
             sessions: RwLock::new(HashMap::new()),
             bg: RwLock::new(HashMap::new()),
+            repls: RwLock::new(HashMap::new()),
             next_session_id: AtomicU32::new(1),
             next_bg_id: AtomicU32::new(1),
+            next_repl_id: AtomicU32::new(1),
         }
     }
 }
@@ -528,6 +533,105 @@ pub fn shell_bg_list(state: tauri::State<ShellState>) -> Result<Vec<BackgroundPr
     let mut out = Vec::with_capacity(map.len());
     for (id, p) in map.iter() {
         out.push(p.info((*id).into()));
+    }
+    out.sort_by_key(|i| i.handle);
+    Ok(out)
+}
+
+/// Start an interactive process the agent can hold a conversation with.
+///
+/// Separate from `shell_bg_spawn` because of one line in the spawn: this one
+/// keeps stdin. A daemon should not inherit stdin; a debugger is useless
+/// without it.
+#[tauri::command]
+pub fn repl_open(
+    state: tauri::State<ShellState>,
+    registry: tauri::State<WorkspaceRegistry>,
+    command: String,
+    cwd: Option<String>,
+    workspace: Option<WorkspaceEnv>,
+) -> Result<u32, String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    authorize_spawn_cwd(&registry, cwd.as_deref(), &workspace)?;
+
+    // Reap first: an agent that finishes a debugging session rarely remembers
+    // to call `repl_close`, so most of what accumulates here has already
+    // exited and is holding nothing but a map entry.
+    {
+        let mut map = state.repls.write().unwrap();
+        map.retain(|_, p| !p.exited.load(Ordering::Acquire));
+        // Then a hard cap on what is genuinely still running. Each live REPL
+        // holds a process, two reader threads and its pipes; an agent in a
+        // retry loop would otherwise spawn them without limit. Same shape as
+        // the LSP session cap, and for the same reason.
+        if map.len() >= repl::MAX_LIVE {
+            return Err(format!(
+                "too many interactive processes are running ({}); close one with repl_stop first",
+                map.len()
+            ));
+        }
+    }
+
+    let proc = repl::spawn(command, cwd, workspace)?;
+    let id = state.next_repl_id.fetch_add(1, Ordering::Relaxed);
+    state.repls.write().unwrap().insert(id, proc);
+    Ok(id)
+}
+
+/// Read from a running process, optionally sending a line first.
+///
+/// One command rather than a send and a read, because every use is both: you
+/// write `next` and you want what came back. Sending nothing is how you wait
+/// again after a timeout, or read what the process printed on startup.
+#[tauri::command]
+pub async fn repl_send(
+    state: tauri::State<'_, ShellState>,
+    handle: u32,
+    input: Option<String>,
+    until: Option<String>,
+    since_offset: Option<u64>,
+    timeout_secs: Option<u64>,
+) -> Result<repl::ReplTurn, String> {
+    let proc = state
+        .repls
+        .read()
+        .unwrap()
+        .get(&handle)
+        .cloned()
+        .ok_or_else(|| "no repl handle".to_string())?;
+    if let Some(line) = input {
+        proc.send_line(&line)?;
+    }
+    let dur = Duration::from_secs(
+        timeout_secs
+            .unwrap_or(repl::DEFAULT_WAIT_SECS)
+            .clamp(1, repl::MAX_WAIT_SECS),
+    );
+    let since = since_offset.unwrap_or(0);
+    // The wait blocks, so it runs off the main thread rather than holding the
+    // async runtime for up to ten minutes.
+    let (tx, rx) = mpsc::channel();
+    let needle = until;
+    thread::spawn(move || {
+        let _ = tx.send(proc.wait_for(since, needle.as_deref(), dur));
+    });
+    rx.recv().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn repl_close(state: tauri::State<ShellState>, handle: u32) -> Result<(), String> {
+    if let Some(proc) = state.repls.write().unwrap().remove(&handle) {
+        proc.kill();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn repl_list(state: tauri::State<ShellState>) -> Result<Vec<repl::ReplInfo>, String> {
+    let map = state.repls.read().unwrap();
+    let mut out = Vec::with_capacity(map.len());
+    for (id, p) in map.iter() {
+        out.push(p.info(*id));
     }
     out.sort_by_key(|i| i.handle);
     Ok(out)
