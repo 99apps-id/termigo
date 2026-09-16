@@ -26,7 +26,9 @@ export function generateSandboxInfo(taskId?: string): {
   branchName: string;
   subpath: string;
 } {
-  const cleanId = (taskId ?? Math.random().toString(36).slice(2, 9)).replace(/[^a-zA-Z0-9_-]/g, "_");
+  const raw = taskId?.trim() ? taskId.trim() : Math.random().toString(36).slice(2, 9);
+  const sanitized = raw.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const cleanId = sanitized || Math.random().toString(36).slice(2, 9);
   const branchName = `termigo-sandbox/${cleanId}`;
   const subpath = `.termigo/worktrees/${cleanId}`;
   return { id: cleanId, branchName, subpath };
@@ -168,12 +170,17 @@ export function discoveredWorktrees(
     if (branch.kind !== "worktree" || !branch.worktreePath) continue;
     // Git reports native separators, so match on both.
     const normalised = branch.worktreePath.replace(/\\/g, "/");
-    const at = normalised.lastIndexOf(`/${WORKTREE_SUBPATH_PREFIX}`);
-    // Require the marker to be a whole path segment, not a prefix of a longer
-    // directory name (`.../x.termigo/worktrees/`).
-    if (at < 0) continue;
-    const id = normalised.slice(at + WORKTREE_SUBPATH_PREFIX.length + 1);
-    // A nested path is not a sandbox root; `generateSandboxInfo` makes one level.
+    let id: string | null = null;
+    if (normalised.startsWith(WORKTREE_SUBPATH_PREFIX)) {
+      id = normalised.slice(WORKTREE_SUBPATH_PREFIX.length);
+    } else {
+      const at = normalised.lastIndexOf(`/${WORKTREE_SUBPATH_PREFIX}`);
+      // Require the marker to be a whole path segment, not a prefix of a longer
+      // directory name (`.../x.termigo/worktrees/`).
+      if (at >= 0) {
+        id = normalised.slice(at + WORKTREE_SUBPATH_PREFIX.length + 1);
+      }
+    }
     if (!id || id.includes("/") || seen.has(id)) continue;
     seen.add(id);
     out.push({

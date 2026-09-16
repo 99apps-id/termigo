@@ -186,6 +186,13 @@ export function buildWorktreeTools(ctx: ToolContext) {
             cwd,
           );
           const removeResult = await native.shellSessionRun(shellId, removeCommand, cwd, 120);
+          if (removeResult.exit_code !== 0) {
+            return {
+              error: `git worktree remove failed (exit ${removeResult.exit_code})`,
+              stderr: removeResult.stderr,
+              stdout: removeResult.stdout,
+            };
+          }
           // Removing the branch is best-effort; the worktree removal is the
           // authoritative cleanup, so a stale branch is not fatal.
           const branchResult = await native.shellSessionRun(shellId, branchCommand, cwd, 60);

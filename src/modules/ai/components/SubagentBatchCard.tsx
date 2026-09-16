@@ -111,7 +111,7 @@ export function extractWorkerData(
         ? (task.depends_on as number[])
         : undefined;
 
-      const matchedRun = runs.find(
+      const matchedRun = [...runs].reverse().find(
         (r) =>
           r.type === rawType && (r.label === label || r.label === task.prompt),
       );

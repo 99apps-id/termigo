@@ -26,6 +26,16 @@ describe("worktree isolation library", () => {
     expect(info.subpath).toBe(".termigo/worktrees/task_123_risky");
   });
 
+  it("handles empty or special character taskIds gracefully", () => {
+    const emptyInfo = generateSandboxInfo("");
+    expect(emptyInfo.id.length).toBeGreaterThan(0);
+    expect(emptyInfo.branchName).toMatch(/^termigo-sandbox\/[a-zA-Z0-9_-]+$/);
+
+    const specialInfo = generateSandboxInfo("///");
+    expect(specialInfo.id.length).toBeGreaterThan(0);
+    expect(specialInfo.branchName).toMatch(/^termigo-sandbox\/[a-zA-Z0-9_-]+$/);
+  });
+
   it("constructs safely quoted shell commands", () => {
     const path = ".termigo/worktrees/run-1";
     const branch = "termigo-sandbox/run-1";

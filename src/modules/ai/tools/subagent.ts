@@ -457,6 +457,17 @@ Each task's subagent has the same toolset you do and may itself spawn further su
           await Promise.race(inFlight.values());
         }
 
+        // Defensive sweep: ensure any task not settled by the loop is marked
+        // skipped rather than returning with undefined summary and status.
+        for (let idx = 0; idx < state.length; idx++) {
+          if (!state[idx].settled) {
+            state[idx] = { settled: true, bad: true, running: false };
+            results[idx].skipped ??= batchSignal?.aborted
+              ? "Batch aborted"
+              : "Dependency never completed or task was unreached";
+          }
+        }
+
         const failedOrSkipped = results.filter(
           (r) => r.error || r.skipped,
         ).length;

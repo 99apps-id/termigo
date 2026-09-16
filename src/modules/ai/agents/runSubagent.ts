@@ -150,9 +150,13 @@ export async function runSubagent({
       workspaceRoot,
     });
     if (plan.isolate) {
+      const suffix = Math.random().toString(36).slice(2, 7);
+      const label = requester
+        ? `${type}-${requester}-${suffix}`
+        : `${type}-${suffix}`;
       const made = await createIsolatedWorktree({
         ctx: baseCtx,
-        label: `${type}-${requester ?? Math.random().toString(36).slice(2, 7)}`,
+        label,
       });
       if (made.ok) {
         ctx = rerootToolContext(baseCtx, made.worktreePath);

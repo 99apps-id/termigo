@@ -355,10 +355,16 @@ export function buildTools(
     wrapped[name] = wrappedTool;
   }
   const wrappedBase = wrapped as typeof base;
-  currentToolRegistry = wrappedBase as unknown as Record<string, unknown>;
+  const skillTools = buildSkillTools(ctx, Object.keys(wrappedBase));
+  const full = {
+    ...wrappedBase,
+    ...skillTools,
+  } as const;
+
+  currentToolRegistry = full as unknown as Record<string, unknown>;
   dispatchForThisRun = (name, args) =>
     dispatchRegisteredTool(
-      wrappedBase as unknown as Record<string, unknown>,
+      full as unknown as Record<string, unknown>,
       name,
       args,
     );
@@ -366,10 +372,7 @@ export function buildTools(
   // Skill tools last, and told what the others are called: the dependency
   // checker compares a skill against the real registry rather than a list kept
   // by hand, so adding or renaming a tool later cannot leave the check stale.
-  return {
-    ...wrappedBase,
-    ...buildSkillTools(ctx, Object.keys(wrappedBase)),
-  } as const;
+  return full;
 }
 
 export type ChatTools = ReturnType<typeof buildTools>;
