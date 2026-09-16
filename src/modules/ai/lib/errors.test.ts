@@ -145,6 +145,7 @@ describe("transient/recoverable error classifiers", () => {
       isRateLimitError("rate_limit_exceeded: Please retry after 10s"),
     ).toBe(true);
     expect(isRateLimitError("429 Too Many Requests")).toBe(true);
+    expect(isRateLimitError("concurrency reached, current: 9, limit: 8")).toBe(true);
     expect(isRateLimitError("Invalid API key.")).toBe(false);
   });
 

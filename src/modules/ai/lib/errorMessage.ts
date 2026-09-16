@@ -17,7 +17,7 @@ export function humanizeModelError(raw: string | null | undefined): string {
     l.includes("too many tokens") ||
     (l.includes("token") && l.includes("exceed"))
   ) {
-    return "This conversation is too long for the model's context window. History has been trimmed — press Continue to retry, switch to a larger-context model, or start a new chat.";
+    return "This conversation is too long for the model's context window. History has been trimmed. Press Continue to retry, switch to a larger-context model, or start a new chat.";
   }
 
   // Quota / billing / credits exhausted.
@@ -35,22 +35,23 @@ export function humanizeModelError(raw: string | null | undefined): string {
   }
 
   // A "thinking mode" endpoint refused a forced tool choice (the fan-out pin
-  // or a synthesis pin). Deterministic for the pin, but the pin is optional —
+  // or a synthesis pin). Deterministic for the pin, but the pin is optional:
   // the run learns to drop it (toolChoiceLearning), so pressing Try again /
   // Continue after the auto-retry normally just works.
   if (l.includes("tool_choice") || l.includes("tool choice")) {
-    return "This model doesn't support forcing a specific tool call. Termigo stopped forcing it automatically — press Continue or Try again to carry on.";
+    return "This model doesn't support forcing a specific tool call. Termigo stopped forcing it automatically - press Continue or Try again to carry on.";
   }
 
-  // Rate limited.
+  // Rate limited or concurrency limit reached.
   if (
     l.includes("rate limit") ||
     l.includes("rate_limit") ||
     l.includes("too many requests") ||
     l.includes("status 429") ||
-    l.includes("429")
+    l.includes("429") ||
+    l.includes("concurrency")
   ) {
-    return "The provider rate-limited this request. Wait a few seconds and press Continue, or switch to another model.";
+    return "The provider rate-limited this request (or reached concurrency limits). Wait a few seconds and press Continue, or switch to another model.";
   }
 
   // Provider-side content moderation. DashScope / Qwen-compatible endpoints
@@ -97,6 +98,21 @@ export function humanizeModelError(raw: string | null | undefined): string {
   // No first token within the watchdog window.
   if (l.includes("did not respond within")) {
     return "The model stopped responding before producing anything. Press Continue to retry, or switch models.";
+  }
+
+  // Retry wrappers: "Failed after 3 attempts. Last error: ..."
+  const retryMatch = msg.match(
+    /^(?:[A-Za-z0-9_]+Error:\s*)?Failed after \d+ attempts\. Last error:\s*(.*)$/i,
+  );
+  if (retryMatch) {
+    const inner = retryMatch[1].trim();
+    if (!inner) {
+      return "The provider request failed after multiple retry attempts. Check your connection or provider settings, then press Continue to retry.";
+    }
+    const innerHumanized = humanizeModelError(inner);
+    if (innerHumanized !== inner) {
+      return innerHumanized;
+    }
   }
 
   return (

@@ -120,9 +120,10 @@ Approval works exactly as it does for you: read-only tools auto-run, and every m
               "subagent nesting depth cap reached; this agent cannot spawn further subagents",
           };
         }
-        // Resolve loose / synonym names to a real roster id so an approximate
-        // 'type' from the model never fails the call.
-        const resolved = resolveSubagentType(type || "general");
+        const runTask = async () => {
+          // Resolve loose / synonym names to a real roster id so an approximate
+          // 'type' from the model never fails the call.
+          const resolved = resolveSubagentType(type || "general");
         const { apiKeys, selectedModelId, patchAgentMeta, activeSessionId } =
           useChatStore.getState();
         // Register a live run so the tool card can show its progress + result.
@@ -186,8 +187,14 @@ Approval works exactly as it does for you: read-only tools auto-run, and every m
           useSubagentRunStore.getState().fail(sid, runId, String(e));
           return { error: String(e), type: resolved };
         }
-      },
-    }),
+      };
+
+      if (ctx.yieldSlot) {
+        return await ctx.yieldSlot(runTask);
+      }
+      return await runTask();
+    },
+  }),
 
     run_subagents: tool({
       description: `Spawn SEVERAL isolated subagents in one call and get all their summaries back together. Prefer this over repeating run_subagent: independent tasks run at the same time instead of one after another.
@@ -259,19 +266,21 @@ Each task's subagent has the same toolset you do and may itself spawn further su
               "subagent nesting depth cap reached; this agent cannot spawn further subagents",
           };
         }
-        const batchSignal = opts?.abortSignal;
-        const notes: string[] = [];
-        let batch = tasks;
-        if (batch.length > MAX_TASKS) {
-          notes.push(
-            `${batch.length - MAX_TASKS} task(s) past the cap of ${MAX_TASKS} were dropped.`,
+        const runBatch = async () => {
+          const batchSignal = opts?.abortSignal;
+          const notes: string[] = [];
+          let batch = tasks;
+          if (batch.length > MAX_TASKS) {
+            notes.push(
+              `${batch.length - MAX_TASKS} task(s) past the cap of ${MAX_TASKS} were dropped.`,
+            );
+            batch = batch.slice(0, MAX_TASKS);
+          }
+          const effectiveCap = childDepth > 1 ? 2 : MAX_CONCURRENCY;
+          const concurrency = Math.min(
+            max_concurrency ?? effectiveCap,
+            effectiveCap,
           );
-          batch = batch.slice(0, MAX_TASKS);
-        }
-        const concurrency = Math.min(
-          max_concurrency ?? MAX_CONCURRENCY,
-          MAX_CONCURRENCY,
-        );
 
         const plan = planSubagentBatch(batch);
         for (const e of plan.droppedEdges) {
@@ -480,14 +489,20 @@ Each task's subagent has the same toolset you do and may itself spawn further su
             `${inconclusive} of ${results.length} subagent(s) reported an incomplete review - their conclusions are unverified; re-run those with a narrower scope or do that part yourself.`,
           );
         }
-        return {
-          count: results.length,
-          maxConcurrency: concurrency,
-          ...(failedOrSkipped ? { failedOrSkipped } : {}),
-          ...(inconclusive ? { inconclusive } : {}),
-          ...(notes.length ? { note: notes.join(" ") } : {}),
-          results,
+          return {
+            count: results.length,
+            maxConcurrency: concurrency,
+            ...(failedOrSkipped ? { failedOrSkipped } : {}),
+            ...(inconclusive ? { inconclusive } : {}),
+            ...(notes.length ? { note: notes.join(" ") } : {}),
+            results,
+          };
         };
+
+        if (ctx.yieldSlot) {
+          return await ctx.yieldSlot(runBatch);
+        }
+        return await runBatch();
       },
     }),
   } as const;

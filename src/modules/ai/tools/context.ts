@@ -94,6 +94,10 @@ export type ToolContext = {
     args: Record<string, unknown>,
     result: unknown,
   ) => Promise<void>;
+  /**
+   * Yield subagent concurrency slot during nested tool execution to avoid deadlock.
+   */
+  yieldSlot?: <T>(work: () => Promise<T>) => Promise<T>;
 };
 
 export function resolvePath(rawPath: string, cwd: string | null): string {

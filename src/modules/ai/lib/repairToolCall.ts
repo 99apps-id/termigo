@@ -445,20 +445,61 @@ export async function repairToolCall({
   const raw = stripCodeFence(String(toolCall.input ?? toolCall.args ?? ""));
   if (raw.length === 0) return null;
 
-  // Already valid JSON - check if semantic repair is needed (e.g. run_subagents with todos)
+  // Already valid JSON - check if semantic repair is needed
   try {
     const parsed = JSON.parse(raw);
-    if (toolCall.toolName === "run_subagents" && parsed && typeof parsed === "object") {
-      const origTasks = (parsed as Record<string, unknown>).tasks;
-      if (!Array.isArray(origTasks) || typeof origTasks === "string") {
-        const normalized = normalizeBatchInput(parsed);
-        if (
-          normalized &&
-          typeof normalized === "object" &&
-          Array.isArray((normalized as Record<string, unknown>).tasks)
-        ) {
-          return { ...toolCall, input: JSON.stringify(normalized) };
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const p = { ...(parsed as Record<string, unknown>) };
+      let modified = false;
+
+      if (toolCall.toolName === "run_subagents") {
+        const origTasks = p.tasks;
+        if (!Array.isArray(origTasks) || typeof origTasks === "string") {
+          const normalized = normalizeBatchInput(parsed);
+          if (
+            normalized &&
+            typeof normalized === "object" &&
+            Array.isArray((normalized as Record<string, unknown>).tasks)
+          ) {
+            return { ...toolCall, input: JSON.stringify(normalized) };
+          }
         }
+      } else if (toolCall.toolName === "grep") {
+        if (!p.pattern && typeof p.query === "string") {
+          p.pattern = p.query;
+          modified = true;
+        }
+        if (!p.pattern && typeof p.search === "string") {
+          p.pattern = p.search;
+          modified = true;
+        }
+        if (!p.root && typeof p.path === "string") {
+          p.root = p.path;
+          modified = true;
+        }
+      } else if (toolCall.toolName === "glob") {
+        if (!p.pattern && typeof p.query === "string") {
+          p.pattern = p.query;
+          modified = true;
+        }
+        if (!p.root && typeof p.path === "string") {
+          p.root = p.path;
+          modified = true;
+        }
+      } else if (toolCall.toolName === "code_search") {
+        if (typeof p.max_results === "number" && p.max_results > 20) {
+          p.max_results = Math.min(Math.floor(p.max_results), 100);
+          modified = true;
+        }
+      } else if (toolCall.toolName === "replace_in_files") {
+        if (typeof p.glob === "string") {
+          p.glob = [p.glob];
+          modified = true;
+        }
+      }
+
+      if (modified) {
+        return { ...toolCall, input: JSON.stringify(p) };
       }
     }
     return null;

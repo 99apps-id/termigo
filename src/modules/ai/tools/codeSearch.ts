@@ -65,12 +65,20 @@ export function buildCodeSearchTools(ctx: ToolContext) {
           .string()
           .describe("Natural language query or code symbol to search for."),
         max_results: z
-          .number()
-          .int()
-          .min(1)
-          .max(20)
+          .preprocess(
+            (v) =>
+              typeof v === "number"
+                ? Math.min(Math.max(1, Math.floor(v)), 100)
+                : v,
+            z
+              .number()
+              .int()
+              .min(1)
+              .max(100)
+              .optional(),
+          )
           .optional()
-          .describe("Maximum results to return. Defaults to 10."),
+          .describe("Maximum results to return. Defaults to 10, capped at 100."),
         path_filter: z
           .string()
           .optional()

@@ -114,7 +114,13 @@ export function useUpdater({ autoCheck = true }: HookOptions = {}) {
         setStatus({ kind: "idle" });
       } else {
         const msg = String(err);
-        if (msg.includes("disabled") || msg.includes("not active") || msg.includes("inactive")) {
+        if (
+          msg.includes("disabled") ||
+          msg.includes("not active") ||
+          msg.includes("inactive") ||
+          msg.includes("404") ||
+          msg.includes("Not Found")
+        ) {
           setStatus({ kind: "uptodate" });
         } else {
           setStatus({ kind: "error", message: msg });

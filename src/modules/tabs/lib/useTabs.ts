@@ -44,7 +44,7 @@ import {
   useState,
 } from "react";
 
-// Matches the renderer slot pool size — over this we'd evict an active leaf.
+// Matches the renderer slot pool size: over this we'd evict an active leaf.
 export const MAX_PANES_PER_TAB = 4;
 
 type TabBase = {
@@ -78,7 +78,7 @@ export type EditorTab = TabBase & {
   path: string;
   dirty: boolean;
   /**
-   * True while the tab is in the transient "preview" state — opened by a
+   * True while the tab is in the transient "preview" state - opened by a
    * single-click in the explorer and not yet pinned by the user. A preview tab
    * is replaced by the next single-click rather than accumulating.
    */
@@ -786,6 +786,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
   const removeTabsForSpace = useCallback(
     (spaceId: string, fallbackSpaceId: string, fallbackCwd?: string) => {
       let toDispose: number[] = [];
+      let nextActiveId: number | null = null;
       setTabs((curr) => {
         const plan = planSpaceRemoval(
           curr,
@@ -797,9 +798,12 @@ export function useTabs(initial?: Partial<TerminalTab>) {
         );
         if (!plan) return curr;
         toDispose = plan.disposeLeafIds;
-        setActiveId(plan.activeId);
+        nextActiveId = plan.activeId;
         return plan.tabs;
       });
+      if (nextActiveId !== null) {
+        setActiveId(nextActiveId);
+      }
       for (const lid of toDispose) disposeSession(lid);
     },
     [],
@@ -928,10 +932,10 @@ export function useTabs(initial?: Partial<TerminalTab>) {
   /**
    * Opens a file in an editor tab.
    *
-   * - `pin = true` (default) — opens or activates a **persistent** tab.
+   * - `pin = true` (default): opens or activates a **persistent** tab.
    *   If the path is currently in the preview slot it is promoted in-place.
    *   Use this for programmatic opens (AI diff, New File dialog, etc.).
-   * - `pin = false` — VSCode-style **preview** tab. A single shared slot is
+   * - `pin = false`: VSCode-style **preview** tab. A single shared slot is
    *   reused: if a persistent tab for the path already exists it is activated;
    *   otherwise the current preview slot is replaced with the new path.
    */
@@ -1279,17 +1283,20 @@ export function useTabs(initial?: Partial<TerminalTab>) {
 
   const closeTab = useCallback((id: number) => {
     let toDispose: number[] = [];
+    let fallback: number | null = null;
     setTabs((curr) => {
-      const fallback = nextActiveInSpace(curr, id);
+      fallback = nextActiveInSpace(curr, id);
       if (fallback === null) return curr;
       const target = curr.find((t) => t.id === id);
       if (target?.kind === "terminal") {
         toDispose = leafIds(target.paneTree);
       }
-      const next = curr.filter((t) => t.id !== id);
-      setActiveId((active) => (id === active ? fallback : active));
-      return next;
+      return curr.filter((t) => t.id !== id);
     });
+    if (fallback !== null) {
+      const nextActive: number = fallback;
+      setActiveId((active) => (id === active ? nextActive : active));
+    }
     for (const lid of toDispose) disposeSession(lid);
   }, []);
 
@@ -1366,7 +1373,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
   );
 
   /** Update a leaf's cwd; mirror to the tab's `cwd` when the leaf is active.
-   * Bails out without setTabs when nothing actually changed — shell integration
+   * Bails out without setTabs when nothing actually changed - shell integration
    * re-emits OSC 7 on every prompt, including empty Enters, so this fires at
    * keystroke rate. Always-setTabs there cascades a paneTree re-render across
    * every open tab. */
@@ -1481,6 +1488,8 @@ export function useTabs(initial?: Partial<TerminalTab>) {
 
   const closePaneByLeaf = useCallback((leafId: number): void => {
     let didRemove = false;
+    let fallbackTabId: number | null = null;
+    let removedTabId: number | null = null;
     setTabs((curr) => {
       const tab = curr.find(
         (t) => t.kind === "terminal" && hasLeaf(t.paneTree, leafId),
@@ -1488,10 +1497,10 @@ export function useTabs(initial?: Partial<TerminalTab>) {
       if (tab?.kind !== "terminal") return curr;
       const newTree = removeLeaf(tab.paneTree, leafId);
       if (newTree === null) {
-        const fallback = nextActiveInSpace(curr, tab.id);
-        if (fallback === null) return curr;
+        fallbackTabId = nextActiveInSpace(curr, tab.id);
+        if (fallbackTabId === null) return curr;
         const next = curr.filter((x) => x.id !== tab.id);
-        setActiveId((active) => (active === tab.id ? fallback : active));
+        removedTabId = tab.id;
         didRemove = true;
         return next;
       }
@@ -1508,22 +1517,29 @@ export function useTabs(initial?: Partial<TerminalTab>) {
           : x,
       );
     });
+    if (fallbackTabId !== null && removedTabId !== null) {
+      const nextActive: number = fallbackTabId;
+      const targetRemoved: number = removedTabId;
+      setActiveId((active) =>
+        active === targetRemoved ? nextActive : active,
+      );
+    }
     if (didRemove) disposeSession(leafId);
   }, []);
 
   const closeActivePane = useCallback((tabId: number): boolean => {
     let closedTab = false;
     let removedLeaf: number | null = null;
+    let fallback: number | null = null;
     setTabs((curr) => {
       const t = curr.find((x) => x.id === tabId);
       if (t?.kind !== "terminal") return curr;
       const target = t.activeLeafId;
       const newTree = removeLeaf(t.paneTree, target);
       if (newTree === null) {
-        const fallback = nextActiveInSpace(curr, tabId);
+        fallback = nextActiveInSpace(curr, tabId);
         if (fallback === null) return curr;
         const next = curr.filter((x) => x.id !== tabId);
-        setActiveId((active) => (active === tabId ? fallback : active));
         closedTab = true;
         removedLeaf = target;
         return next;
@@ -1538,6 +1554,10 @@ export function useTabs(initial?: Partial<TerminalTab>) {
           : x,
       );
     });
+    if (fallback !== null) {
+      const nextActive: number = fallback;
+      setActiveId((active) => (active === tabId ? nextActive : active));
+    }
     if (removedLeaf !== null) disposeSession(removedLeaf);
     return closedTab;
   }, []);

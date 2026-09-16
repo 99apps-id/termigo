@@ -65,6 +65,24 @@ describe("humanizeModelError", () => {
     );
   });
 
+  it("explains concurrency throttling", () => {
+    expect(
+      humanizeModelError("concurrency reached, current: 9, limit: 8").toLowerCase(),
+    ).toContain("rate-limit");
+  });
+
+  it("handles empty retry error wrappers gracefully", () => {
+    const out = humanizeModelError("AI_RetryError: Failed after 3 attempts. Last error:");
+    expect(out.toLowerCase()).toContain("failed after multiple retry attempts");
+  });
+
+  it("unwraps and humanizes inner errors inside retry wrappers", () => {
+    const out = humanizeModelError(
+      "AI_RetryError: Failed after 3 attempts. Last error: concurrency reached, current: 9, limit: 8",
+    );
+    expect(out.toLowerCase()).toContain("rate-limit");
+  });
+
   it("never returns empty", () => {
     expect(humanizeModelError("").length).toBeGreaterThan(0);
     expect(humanizeModelError(null).length).toBeGreaterThan(0);

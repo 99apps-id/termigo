@@ -8,10 +8,12 @@ import {
   noProgressStop,
   noToolRepetition,
 } from "../lib/agent";
+import { isRateLimitError } from "../lib/errors";
 import { buildExtensionTools } from "../lib/extensionTools";
 import { getProfile } from "../lib/harnessProfile";
 import { activeProfileIdFor } from "../lib/harnessProfileStore";
 import type { ProviderKeys } from "../lib/keyring";
+import { isWindowsPath } from "../lib/remoteFs";
 import { repairToolCall } from "../lib/repairToolCall";
 import { judgeSubagentEvidence } from "../lib/subagentEvidence";
 import {
@@ -19,6 +21,7 @@ import {
   planSubagentIsolation,
   rerootToolContext,
 } from "../lib/subagentIsolation";
+import { globalSubagentPool } from "../lib/subagentPool";
 import { subagentMadeProgress } from "../lib/subagentProgress";
 import { useChatStore } from "../store/chatStore";
 import type { ToolContext } from "../tools/context";
@@ -123,18 +126,31 @@ export async function runSubagent({
   const def = SUBAGENTS[type];
   if (!def) throw new Error(`unknown subagent type: ${type}`);
 
+  const workspaceRoot = toolContext.getWorkspaceRoot();
+  // When auditing or operating on a local workspace, subagents must not inherit
+  // an unrelated SSH session from an active terminal tab, and must resolve relative
+  // paths against the workspaceRoot. Only pentest agents retain the remote SSH session.
+  const isLocalWorkspace =
+    !type.startsWith("pentest") &&
+    (!workspaceRoot || isWindowsPath(workspaceRoot) || !toolContext.getRemoteSession());
+
   // Its own read history. The invariant `edit` enforces - read this file before
   // changing it - is meaningless if it can be satisfied by a read some other
   // agent did, which is what sharing the parent's cache amounted to.
-  const baseCtx: ToolContext = { ...toolContext, readCache: new Map() };
+  const baseCtx: ToolContext = {
+    ...toolContext,
+    readCache: new Map(),
+    ...(isLocalWorkspace
+      ? {
+          getCwd: () => workspaceRoot ?? toolContext.getCwd(),
+          getRemoteSession: () => null,
+        }
+      : {}),
+  };
 
   // Centralized spec: the roster def resolved against the active harness
   // profile, so a sub-agent carries the same profile guidance as the main run
   // (prelude, budget, capabilities) instead of a bare prompt.
-  const workspaceRoot = baseCtx.getWorkspaceRoot();
-  // Resolved from the ORIGINAL workspace root, BEFORE any isolation reroot: the
-  // harness profile is a workspace-level setting, so looking it up against a
-  // worktree path would find none and silently drop the profile's guidance.
   const profile = getProfile(activeProfileIdFor(workspaceRoot));
   const spec = buildSubagentSpec(type, profile);
 
@@ -196,6 +212,24 @@ export async function runSubagent({
     maxDepth: effectiveSubagentMaxDepth(),
     subagentType: type,
   });
+
+  const releaseSlot = await globalSubagentPool.acquire(abortSignal);
+  let currentRelease = releaseSlot;
+  ctx = {
+    ...ctx,
+    yieldSlot: async <T>(work: () => Promise<T>): Promise<T> => {
+      currentRelease();
+      try {
+        return await work();
+      } finally {
+        try {
+          currentRelease = await globalSubagentPool.acquire(abortSignal);
+        } catch {
+          // If aborted while yielding, do not mask abort
+        }
+      }
+    },
+  };
 
   // One breaker per run. When the user denies enough times in a row, tripping
   // it aborts the whole generateText call - a tool-level error alone would
@@ -337,8 +371,29 @@ export async function runSubagent({
 
   const start = Date.now();
   try {
-    armTimer();
-    let result = await runAttempt(prompt);
+    let result: Awaited<ReturnType<typeof runAttempt>>;
+    let attempts = 0;
+    while (true) {
+      try {
+        armTimer();
+        result = await runAttempt(prompt);
+        break;
+      } catch (err) {
+        clearTimers();
+        if (controller.signal.aborted) throw err;
+        const errMsg = err instanceof Error ? err.message : String(err);
+        if (isRateLimitError(errMsg) && attempts < 2) {
+          attempts++;
+          const delayMs = attempts * 2000 + Math.floor(Math.random() * 500);
+          void logInfo(
+            `[ai] subagent ${type} throttled (${errMsg}); waiting ${delayMs}ms before retry ${attempts}/2`,
+          ).catch(() => {});
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          continue;
+        }
+        throw err;
+      }
+    }
     // The empty-completion failure mode: some routed / small compat models
     // answer "no text, no tool call" in a few seconds, and the run used to
     // report that as "(no output)" - indistinguishable from a task that ran
@@ -437,5 +492,7 @@ export async function runSubagent({
     }
     clearTimers();
     throw e;
+  } finally {
+    currentRelease();
   }
 }

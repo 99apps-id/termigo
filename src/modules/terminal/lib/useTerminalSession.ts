@@ -787,11 +787,7 @@ async function openPtyForSession(
       if (s.disposed) return;
       // Fast non-zero exit during init: surface as a spawn failure (retry
       // banner) rather than closing/respawning. Skip for SSH (its own flow).
-      if (
-        !s.opener &&
-        code !== 0 &&
-        Date.now() - spawnedAt < SPAWN_GRACE_MS
-      ) {
+      if (!s.opener && code !== 0 && Date.now() - spawnedAt < SPAWN_GRACE_MS) {
         s.pty = null;
         s.pendingInput = "";
         s.commandRunning = false;
@@ -1173,6 +1169,11 @@ export function useTerminalSession({
   const persistKeyRef = useRef(persistKey);
   persistKeyRef.current = persistKey;
 
+  // openSession can change identity (e.g. switching between local and SSH),
+  // so track the latest value through a ref instead of adding it to the deps.
+  const openSessionRef = useRef(openSession);
+  openSessionRef.current = openSession;
+
   useEffect(() => {
     let cancelled = false;
     const s = ensureSession(
@@ -1181,7 +1182,7 @@ export function useTerminalSession({
       blocks,
       persistKeyRef.current,
     );
-    s.opener = openSession ?? null;
+    s.opener = openSessionRef.current ?? null;
     s.ready.then(() => {
       if (cancelled || s.disposed) return;
       const node = container.current;
@@ -1209,7 +1210,7 @@ export function useTerminalSession({
       blocks,
       persistKeyRef.current,
     );
-    s.opener = openSession ?? null;
+    s.opener = openSessionRef.current ?? null;
     setBlockMode(s.blockMode);
     const cb = () => setBlockMode(sessions.get(leafId)?.blockMode ?? "prompt");
     s.blockListeners.add(cb);

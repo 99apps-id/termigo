@@ -81,6 +81,7 @@ function errorPrefix(code: string | null, message: string): string | null {
       return "Quota exceeded";
     case "rate_limit_exceeded":
     case "rate_limit_error":
+    case "concurrency_limit_exceeded":
       return "Rate limit reached";
   }
   return /\bmodel\b.*\b(?:limited preview|not available|not found)\b/i.test(
@@ -130,7 +131,7 @@ export function isQuotaError(message: string): boolean {
  *  short wait. */
 export function isRateLimitError(message: string): boolean {
   const m = String(message ?? "").toLowerCase();
-  return /rate[-_]?limit|429|too many requests|throttl/i.test(m);
+  return /rate[-_]?limit|429|too many requests|throttl|concurrency/i.test(m);
 }
 
 /** The provider's content-moderation filter rejected the request outright

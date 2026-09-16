@@ -164,7 +164,7 @@ describe("repairToolCall", () => {
       },
     });
     expect(r1?.toolName).toBe("read_file");
-    expect(JSON.parse(r1!.input).path).toBe("/home/user/test.txt");
+    expect(JSON.parse(r1?.input ?? "{}").path).toBe("/home/user/test.txt");
 
     // run_command -> bash_run
     const r2 = await repairToolCall({
@@ -176,7 +176,7 @@ describe("repairToolCall", () => {
       },
     });
     expect(r2?.toolName).toBe("bash_run");
-    expect(JSON.parse(r2!.input).command).toBe("pnpm test");
+    expect(JSON.parse(r2?.input ?? "{}").command).toBe("pnpm test");
 
     // replace_file_content -> edit
     const r3 = await repairToolCall({
@@ -189,9 +189,9 @@ describe("repairToolCall", () => {
       },
     });
     expect(r3?.toolName).toBe("edit");
-    expect(JSON.parse(r3!.input).old_string).toBe("old");
-    expect(JSON.parse(r3!.input).new_string).toBe("new");
-    expect(JSON.parse(r3!.input).path).toBe("a.ts");
+    expect(JSON.parse(r3?.input ?? "{}").old_string).toBe("old");
+    expect(JSON.parse(r3?.input ?? "{}").new_string).toBe("new");
+    expect(JSON.parse(r3?.input ?? "{}").path).toBe("a.ts");
   });
 
   it("redirects unmapped tools to unknown_tool_fallback when registered", async () => {
@@ -275,5 +275,62 @@ describe("repairToolCall", () => {
       "Petakan struktur kode Rust + TypeScript",
     );
     expect(parsed.max_concurrency).toBe(4);
+  });
+
+  it("repairs grep arguments when query or path are used", async () => {
+    const tools = { grep: {} };
+    const result = await repairToolCall({
+      tools,
+      toolCall: {
+        toolCallId: "grep-1",
+        toolName: "grep",
+        input: JSON.stringify({
+          query: "setActiveId",
+          path: "C:/project/termigo/src/modules/tabs/lib/useTabs.ts",
+        }),
+      },
+    });
+    expect(result).not.toBeNull();
+    const parsed = JSON.parse(result!.input);
+    expect(parsed.pattern).toBe("setActiveId");
+    expect(parsed.root).toBe("C:/project/termigo/src/modules/tabs/lib/useTabs.ts");
+  });
+
+  it("repairs code_search arguments when max_results exceeds 20", async () => {
+    const tools = { code_search: {} };
+    const result = await repairToolCall({
+      tools,
+      toolCall: {
+        toolCallId: "cs-1",
+        toolName: "code_search",
+        input: JSON.stringify({
+          query: "setActiveId",
+          max_results: 30,
+        }),
+      },
+    });
+    expect(result).not.toBeNull();
+    const parsed = JSON.parse(result!.input);
+    expect(parsed.max_results).toBe(30);
+  });
+
+  it("repairs replace_in_files when glob is a string", async () => {
+    const tools = { replace_in_files: {} };
+    const result = await repairToolCall({
+      tools,
+      toolCall: {
+        toolCallId: "rif-1",
+        toolName: "replace_in_files",
+        input: JSON.stringify({
+          path: "C:/project/termigo",
+          glob: "src-tauri/src/modules/pty/mod.rs",
+          search: "AtomicU32",
+          replace: "AtomicU64",
+        }),
+      },
+    });
+    expect(result).not.toBeNull();
+    const parsed = JSON.parse(result!.input);
+    expect(parsed.glob).toEqual(["src-tauri/src/modules/pty/mod.rs"]);
   });
 });

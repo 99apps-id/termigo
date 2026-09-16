@@ -40,7 +40,8 @@ export function isRateLimitError(error: unknown): boolean {
     errStr.includes("insufficient_quota") ||
     errStr.includes("resource_exhausted") ||
     errStr.includes("tokens per min") ||
-    errStr.includes("too many requests")
+    errStr.includes("too many requests") ||
+    errStr.includes("concurrency")
   );
 }
 
