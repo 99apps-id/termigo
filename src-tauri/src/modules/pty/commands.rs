@@ -32,7 +32,7 @@ pub async fn pty_open(
     persist_key: Option<String>,
     on_data: Channel<Response>,
     on_exit: Channel<i32>,
-) -> Result<u32, String> {
+) -> Result<u64, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     let blocks = blocks.unwrap_or(false);
     let persist = persist.unwrap_or(false);
@@ -124,7 +124,7 @@ pub fn pty_write(
     state: tauri::State<PtyState>,
     request: tauri::ipc::Request,
 ) -> Result<(), String> {
-    let id: u32 = request
+    let id: u64 = request
         .headers()
         .get("x-pty-id")
         .and_then(|v| v.to_str().ok())
@@ -162,7 +162,7 @@ pub fn pty_write(
 #[tauri::command]
 pub fn pty_resize(
     state: tauri::State<PtyState>,
-    id: u32,
+    id: u64,
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
@@ -194,7 +194,7 @@ pub fn pty_resize(
 }
 
 #[tauri::command]
-pub fn pty_close(state: tauri::State<PtyState>, id: u32) -> Result<(), String> {
+pub fn pty_close(state: tauri::State<PtyState>, id: u64) -> Result<(), String> {
     let session = state.sessions.write().unwrap().remove(&id);
     if let Some(s) = session {
         if let Err(e) = s.killer.lock().unwrap().kill() {
@@ -219,7 +219,7 @@ pub fn pty_close(state: tauri::State<PtyState>, id: u32) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn pty_has_foreground_process(state: tauri::State<PtyState>, id: u32) -> Result<bool, String> {
+pub fn pty_has_foreground_process(state: tauri::State<PtyState>, id: u64) -> Result<bool, String> {
     let sessions = state.sessions.read().unwrap();
     let session = sessions.get(&id).ok_or_else(|| {
         log::warn!("pty_has_foreground_process: unknown session id={id}");
@@ -233,7 +233,7 @@ pub fn pty_has_foreground_process(state: tauri::State<PtyState>, id: u32) -> Res
 }
 
 #[tauri::command]
-pub fn pty_has_foreground_job(state: tauri::State<PtyState>, id: u32) -> Result<bool, String> {
+pub fn pty_has_foreground_job(state: tauri::State<PtyState>, id: u64) -> Result<bool, String> {
     let sessions = state.sessions.read().unwrap();
     let session = sessions.get(&id).ok_or_else(|| {
         log::warn!("pty_has_foreground_job: unknown session id={id}");
@@ -255,7 +255,7 @@ pub fn pty_has_foreground_job(state: tauri::State<PtyState>, id: u32) -> Result<
 }
 
 #[cfg(unix)]
-fn shell_has_children(shell_pid: u32) -> bool {
+fn shell_has_children(shell_pid: u64) -> bool {
     std::process::Command::new("pgrep")
         .args(["-P", &shell_pid.to_string()])
         .output()
@@ -264,7 +264,7 @@ fn shell_has_children(shell_pid: u32) -> bool {
 }
 
 #[cfg(windows)]
-fn shell_has_children(shell_pid: u32) -> bool {
+fn shell_has_children(shell_pid: u64) -> bool {
     use std::mem::{size_of, zeroed};
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
@@ -280,7 +280,7 @@ fn shell_has_children(shell_pid: u32) -> bool {
         let mut found = false;
         if Process32First(snapshot, &mut entry) != 0 {
             loop {
-                if entry.th32ParentProcessID == shell_pid {
+                if entry.th32ParentProcessID == shell_pid as u32 {
                     found = true;
                     break;
                 }
@@ -296,7 +296,7 @@ fn shell_has_children(shell_pid: u32) -> bool {
 
 #[tauri::command]
 pub fn pty_close_all(state: tauri::State<PtyState>) -> Result<usize, String> {
-    let drained: Vec<(u32, Arc<Session>)> = {
+    let drained: Vec<(u64, Arc<Session>)> = {
         let mut sessions = state.sessions.write().unwrap();
         sessions.drain().collect()
     };
@@ -340,7 +340,7 @@ pub fn pty_persist_available() -> bool {
 /// running. Releasing wakes any flusher parked on a full window.
 #[tauri::command]
 pub async fn pty_ack_output(
-    id: u32,
+    id: u64,
     bytes: u64,
     state: tauri::State<'_, PtyState>,
 ) -> Result<(), String> {

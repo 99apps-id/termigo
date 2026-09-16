@@ -46,7 +46,7 @@ pub struct Session {
     #[cfg(windows)]
     _job: Option<crate::modules::proc::job::ProcessJob>,
     /// PID of the shell process. 0 means unknown; callers must skip checks when 0.
-    pub shell_pid: u32,
+    pub shell_pid: u64,
     pub killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
     pub writer: Arc<Mutex<Box<dyn Write + Send>>>,
     pub master: Mutex<Box<dyn MasterPty + Send>>,
@@ -115,7 +115,7 @@ impl Drop for ChildKillGuard {
 
 #[allow(clippy::too_many_arguments)]
 pub fn spawn(
-    id: u32,
+    id: u64,
     app: AppHandle,
     cols: u16,
     rows: u16,
@@ -175,7 +175,7 @@ pub fn spawn(
     let session = Arc::new(Session {
         #[cfg(windows)]
         _job: job,
-        shell_pid,
+        shell_pid: shell_pid.into(),
         killer: Mutex::new(killer),
         writer: writer.clone(),
         master: Mutex::new(pair.master),

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ToolContext } from "../tools/context";
 import {
   defaultBatchIsolation,
+  extractGitErrorDetail,
   planSubagentIsolation,
   rerootToolContext,
   worktreeRelativePath,
@@ -112,3 +113,32 @@ describe("worktreeRelativePath", () => {
     expect(worktreeRelativePath("abc123")).toBe(".termigo/worktrees/abc123");
   });
 });
+
+describe("extractGitErrorDetail", () => {
+  it("extracts fatal error line when git progress output is in stderr", () => {
+    const stderr = `Preparing worktree (new branch 'termigo-sandbox/explore_1')
+fatal: 'termigo-sandbox/explore_1' already exists`;
+    expect(extractGitErrorDetail(stderr)).toBe(
+      "fatal: 'termigo-sandbox/explore_1' already exists",
+    );
+  });
+
+  it("extracts error line when git prints multiple lines", () => {
+    const stderr = `Preparing worktree (new branch 'termigo-sandbox/explore_2')
+error: cannot lock ref 'refs/heads/termigo-sandbox/explore_2'`;
+    expect(extractGitErrorDetail(stderr)).toBe(
+      "error: cannot lock ref 'refs/heads/termigo-sandbox/explore_2'",
+    );
+  });
+
+  it("falls back to last non-empty line if no explicit fatal/error prefix", () => {
+    const stderr = `Preparing worktree
+something unexpected occurred`;
+    expect(extractGitErrorDetail(stderr)).toBe("something unexpected occurred");
+  });
+
+  it("handles empty stderr gracefully", () => {
+    expect(extractGitErrorDetail("")).toBe("");
+  });
+});
+

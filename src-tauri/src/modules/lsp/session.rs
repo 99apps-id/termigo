@@ -72,7 +72,7 @@ impl Drop for LspSession {
 
 #[allow(clippy::too_many_arguments)]
 pub fn spawn(
-    id: u32,
+    id: u64,
     app: tauri::AppHandle,
     binary: &std::path::Path,
     args: &[String],

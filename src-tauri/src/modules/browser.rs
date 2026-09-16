@@ -64,6 +64,12 @@ pub fn normalize_ipv4(host: &str) -> Option<String> {
             if !is_decimal(p) {
                 return None;
             }
+            // Reject leading-zero octets: standard dotted-decimal does not
+            // use octal notation, and accepting it lets an attacker bypass
+            // the loopback guard with e.g. `0127.0.0.1` -> `177.0.0.1`.
+            if p.len() > 1 && p.starts_with('0') {
+                return None;
+            }
             let n: u32 = p.parse().ok()?;
             if n > 255 {
                 return None;
@@ -120,6 +126,18 @@ pub fn unsafe_url(url: &str) -> Option<String> {
         }
         if ip.starts_with("169.254.") {
             return Some("link-local addresses are blocked".to_string());
+        }
+        if ip.starts_with("10.") {
+            return Some("private network addresses are blocked".to_string());
+        }
+        if ip.starts_with("172.") {
+            let second = ip.split('.').nth(1).and_then(|s| s.parse::<u8>().ok());
+            if matches!(second, Some(16..=31)) {
+                return Some("private network addresses are blocked".to_string());
+            }
+        }
+        if ip.starts_with("192.168.") {
+            return Some("private network addresses are blocked".to_string());
         }
     }
     // Block non-loopback IPv6 (fe80::, fd00::, ...); only ::1 is allowed.

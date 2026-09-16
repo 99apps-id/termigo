@@ -20,6 +20,10 @@ export function normalizeIpv4(host: string): string | null {
     const out: number[] = [];
     for (const p of parts) {
       if (!isDecimal(p)) return null;
+      // Reject leading-zero octets: standard dotted-decimal does not
+      // use octal notation, and accepting it lets an attacker bypass
+      // the loopback guard with e.g. `0127.0.0.1` -> `177.0.0.1`.
+      if (p.length > 1 && p.startsWith("0")) return null;
       const n = Number.parseInt(p, 10);
       if (!Number.isFinite(n) || n < 0 || n > 255) return null;
       out.push(n);
@@ -110,6 +114,14 @@ export function unsafeBrowserUrl(url: string): string | null {
   }
   if (ipv4?.startsWith("169.254.")) {
     return "Refused: link-local addresses are blocked";
+  }
+  if (
+    ipv4 &&
+    (ipv4.startsWith("10.") ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(ipv4) ||
+      ipv4.startsWith("192.168."))
+  ) {
+    return "Refused: private network addresses are blocked";
   }
   if (isBlockedIpv6(host)) {
     return "Refused: non-loopback IPv6 addresses are blocked";

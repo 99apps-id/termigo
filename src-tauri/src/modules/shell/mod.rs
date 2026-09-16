@@ -5,7 +5,7 @@ pub mod session;
 use std::collections::HashMap;
 use std::io::Read;
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex, RwLock};
 use std::thread;
 use std::time::Duration;
@@ -569,10 +569,10 @@ fn run_blocking(
 // ──────────────────────────────────────────────────────────────────────────
 
 pub struct ShellState {
-    sessions: RwLock<HashMap<u32, Arc<ShellSession>>>,
-    bg: RwLock<HashMap<u32, Arc<BackgroundProc>>>,
-    next_session_id: AtomicU32,
-    next_bg_id: AtomicU32,
+    sessions: RwLock<HashMap<u64, Arc<ShellSession>>>,
+    bg: RwLock<HashMap<u64, Arc<BackgroundProc>>>,
+    next_session_id: AtomicU64,
+    next_bg_id: AtomicU64,
 }
 
 impl Default for ShellState {
@@ -580,8 +580,8 @@ impl Default for ShellState {
         Self {
             sessions: RwLock::new(HashMap::new()),
             bg: RwLock::new(HashMap::new()),
-            next_session_id: AtomicU32::new(1),
-            next_bg_id: AtomicU32::new(1),
+            next_session_id: AtomicU64::new(1),
+            next_bg_id: AtomicU64::new(1),
         }
     }
 }
@@ -592,7 +592,7 @@ pub fn shell_session_open(
     registry: tauri::State<WorkspaceRegistry>,
     cwd: Option<String>,
     workspace: Option<WorkspaceEnv>,
-) -> Result<u32, String> {
+) -> Result<u64, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     authorize_spawn_cwd(&registry, cwd.as_deref(), &workspace)?;
     let initial = match cwd.as_deref().filter(|s| !s.is_empty()) {
@@ -618,7 +618,7 @@ pub fn shell_session_open(
 /// command already executing: the shell kept running and the user watched a
 /// "stopped" agent stay busy. This is what makes stop reach the work.
 #[tauri::command]
-pub fn shell_session_interrupt(state: tauri::State<ShellState>, id: u32) -> Result<bool, String> {
+pub fn shell_session_interrupt(state: tauri::State<ShellState>, id: u64) -> Result<bool, String> {
     let session = state
         .sessions
         .read()
@@ -633,7 +633,7 @@ pub fn shell_session_interrupt(state: tauri::State<ShellState>, id: u32) -> Resu
 pub async fn shell_session_run(
     state: tauri::State<'_, ShellState>,
     registry: tauri::State<'_, WorkspaceRegistry>,
-    id: u32,
+    id: u64,
     command: String,
     cwd: Option<String>,
     timeout_secs: Option<u64>,
@@ -676,7 +676,7 @@ pub async fn shell_session_run(
 }
 
 #[tauri::command]
-pub fn shell_session_close(state: tauri::State<ShellState>, id: u32) -> Result<(), String> {
+pub fn shell_session_close(state: tauri::State<ShellState>, id: u64) -> Result<(), String> {
     state.sessions.write().unwrap().remove(&id);
     Ok(())
 }
@@ -689,7 +689,7 @@ pub fn shell_bg_spawn(
     cwd: Option<String>,
     workspace: Option<WorkspaceEnv>,
     log_path: Option<String>,
-) -> Result<u32, String> {
+) -> Result<u64, String> {
     let trimmed = command.trim().to_string();
     if trimmed.is_empty() {
         return Err("empty command".into());
@@ -709,7 +709,7 @@ pub fn shell_bg_spawn(
 #[tauri::command]
 pub fn shell_bg_logs(
     state: tauri::State<ShellState>,
-    handle: u32,
+    handle: u64,
     since_offset: Option<u64>,
 ) -> Result<BackgroundLogResponse, String> {
     let proc = state
@@ -723,7 +723,7 @@ pub fn shell_bg_logs(
 }
 
 #[tauri::command]
-pub fn shell_bg_kill(state: tauri::State<ShellState>, handle: u32) -> Result<bool, String> {
+pub fn shell_bg_kill(state: tauri::State<ShellState>, handle: u64) -> Result<bool, String> {
     if let Some(proc) = state.bg.read().unwrap().get(&handle).cloned() {
         Ok(proc.kill())
     } else {

@@ -17,7 +17,7 @@ mod session;
 pub mod sftp;
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use serde::{Deserialize, Serialize};
@@ -47,15 +47,15 @@ pub struct SshState {
     /// session by id to issue file-system commands. `Arc`-wrapped so the
     /// janitor task spawned per session can hold a handle for eviction
     /// after the pump task exits on remote disconnect.
-    pub(crate) sessions: Arc<tokio::sync::RwLock<HashMap<u32, Arc<SshSession>>>>,
-    next_id: AtomicU32,
+    pub(crate) sessions: Arc<tokio::sync::RwLock<HashMap<u64, Arc<SshSession>>>>,
+    next_id: AtomicU64,
 }
 
 impl Default for SshState {
     fn default() -> Self {
         Self {
             sessions: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
-            next_id: AtomicU32::new(1),
+            next_id: AtomicU64::new(1),
         }
     }
 }
@@ -154,7 +154,7 @@ pub async fn ssh_open(
     state: tauri::State<'_, SshState>,
     input: SshOpenInput,
     on_event: Channel<SshEvent>,
-) -> Result<u32, String> {
+) -> Result<u64, String> {
     let rt = ssh_runtime();
     let session = rt
         .spawn(session::connect(input, on_event))
@@ -188,7 +188,7 @@ pub async fn ssh_open(
 #[tauri::command]
 pub async fn ssh_write(
     state: tauri::State<'_, SshState>,
-    id: u32,
+    id: u64,
     data: String,
 ) -> Result<(), String> {
     let session = state
@@ -207,7 +207,7 @@ pub async fn ssh_write(
 #[tauri::command]
 pub async fn ssh_resize(
     state: tauri::State<'_, SshState>,
-    id: u32,
+    id: u64,
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
@@ -225,7 +225,7 @@ pub async fn ssh_resize(
 }
 
 #[tauri::command]
-pub async fn ssh_close(state: tauri::State<'_, SshState>, id: u32) -> Result<(), String> {
+pub async fn ssh_close(state: tauri::State<'_, SshState>, id: u64) -> Result<(), String> {
     let session = state.sessions.write().await.remove(&id);
     if let Some(s) = session {
         s.close().await;
@@ -247,7 +247,7 @@ pub async fn ssh_close(state: tauri::State<'_, SshState>, id: u32) -> Result<(),
 #[tauri::command]
 pub async fn ssh_forward_open(
     state: tauri::State<'_, SshState>,
-    id: u32,
+    id: u64,
     local_port: u16,
     remote_host: String,
     remote_port: u16,
@@ -304,7 +304,7 @@ pub fn ssh_confirm_host_key(prompt_id: String, accept: bool) -> Result<(), Strin
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SshSessionInfo {
-    pub id: u32,
+    pub id: u64,
     pub host: String,
     pub user: String,
     pub cols: u16,
@@ -340,7 +340,7 @@ pub async fn ssh_list_sessions(
 #[tauri::command]
 pub async fn ssh_attach(
     state: tauri::State<'_, SshState>,
-    id: u32,
+    id: u64,
     on_event: Channel<SshEvent>,
 ) -> Result<bool, String> {
     let session = state
@@ -383,7 +383,7 @@ const EXEC_OUTPUT_CAP: usize = 256 * 1024;
 #[tauri::command]
 pub async fn ssh_exec(
     state: tauri::State<'_, SshState>,
-    id: u32,
+    id: u64,
     command: String,
     timeout_secs: Option<u64>,
 ) -> Result<SshExecOutput, String> {

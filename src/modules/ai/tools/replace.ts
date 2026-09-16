@@ -26,16 +26,18 @@ export function buildReplaceTools(ctx: ToolContext) {
           .optional()
           .describe("Directory to search under. Defaults to the terminal cwd."),
         glob: z
-          .array(z.string())
+          .union([z.string(), z.array(z.string())])
           .optional()
-          .describe('File globs to limit the sweep, e.g. ["**/*.ts"].'),
+          .describe(
+            "File globs to limit the sweep, e.g. '**/*.ts' or ['**/*.ts', 'src/**/*.tsx'].",
+          ),
         dry_run: z
           .boolean()
           .optional()
           .describe("Report what would change without writing anything."),
       }),
       needsApproval: true,
-      execute: async ({ search, replace, path, glob, dry_run }) => {
+      execute: async ({ search, replace, path, glob: globInput, dry_run }) => {
         // This is grep plus a write, and grep has no remote backend. Sweeping
         // the local tree while the user is working on a server would rewrite
         // the wrong machine's files wholesale.
@@ -46,6 +48,8 @@ export function buildReplaceTools(ctx: ToolContext) {
           );
         }
         const root = resolvePath(path ?? ".", ctx.getCwd());
+        const glob =
+          typeof globInput === "string" ? [globInput] : globInput;
 
         let hits: Awaited<ReturnType<typeof native.grep>>;
         try {

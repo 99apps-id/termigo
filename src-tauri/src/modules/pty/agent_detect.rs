@@ -36,13 +36,13 @@ pub enum Transition {
 
 #[derive(Clone, serde::Serialize)]
 pub struct AgentSignal {
-    pub id: u32,
+    pub id: u64,
     pub kind: &'static str,
     pub agent: Option<String>,
 }
 
 impl Transition {
-    pub fn into_signal(self, id: u32) -> AgentSignal {
+    pub fn into_signal(self, id: u64) -> AgentSignal {
         match self {
             Transition::Started { agent } => AgentSignal {
                 id,

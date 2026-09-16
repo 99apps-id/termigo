@@ -41,7 +41,7 @@ pub struct SftpEntry {
 /// command starts with this prelude.
 async fn get_session(
     state: &tauri::State<'_, SshState>,
-    id: u32,
+    id: u64,
 ) -> Result<Arc<SshSession>, String> {
     state
         .sessions
@@ -57,7 +57,7 @@ async fn get_session(
 
 /// Shared SFTP command scaffolding: resolve the session, open the sftp
 /// subsystem, and run `f` on the daemon runtime, mapping the join error.
-async fn on_sftp<F, Fut, T>(state: &tauri::State<'_, SshState>, id: u32, f: F) -> Result<T, String>
+async fn on_sftp<F, Fut, T>(state: &tauri::State<'_, SshState>, id: u64, f: F) -> Result<T, String>
 where
     F: FnOnce(Arc<SftpSession>) -> Fut + Send + 'static,
     Fut: std::future::Future<Output = Result<T, String>> + Send,
@@ -191,7 +191,7 @@ fn validate_remote_path(path: &str) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub async fn ssh_sftp_home(state: tauri::State<'_, SshState>, id: u32) -> Result<String, String> {
+pub async fn ssh_sftp_home(state: tauri::State<'_, SshState>, id: u64) -> Result<String, String> {
     on_sftp(&state, id, |sftp| async move {
         sftp.canonicalize(".").await.map_err(humanize)
     })
@@ -201,7 +201,7 @@ pub async fn ssh_sftp_home(state: tauri::State<'_, SshState>, id: u32) -> Result
 #[tauri::command]
 pub async fn ssh_sftp_read_dir(
     state: tauri::State<'_, SshState>,
-    id: u32,
+    id: u64,
     path: String,
     include_hidden: bool,
 ) -> Result<Vec<SftpEntry>, String> {
@@ -243,7 +243,7 @@ pub async fn ssh_sftp_read_dir(
 #[tauri::command]
 pub async fn ssh_sftp_read_file(
     state: tauri::State<'_, SshState>,
-    id: u32,
+    id: u64,
     path: String,
 ) -> Result<String, String> {
     let path = validate_remote_path(&path)?;
@@ -273,7 +273,7 @@ pub async fn ssh_sftp_read_file(
 #[tauri::command]
 pub async fn ssh_sftp_write_file(
     state: tauri::State<'_, SshState>,
-    id: u32,
+    id: u64,
     path: String,
     contents: String,
 ) -> Result<(), String> {
@@ -311,7 +311,7 @@ pub async fn ssh_sftp_write_file(
 #[tauri::command]
 pub async fn ssh_sftp_upload(
     state: tauri::State<'_, SshState>,
-    id: u32,
+    id: u64,
     local_path: String,
     remote_path: String,
     on_progress: Channel<UploadProgress>,
@@ -382,7 +382,7 @@ pub async fn ssh_sftp_upload(
 #[tauri::command]
 pub async fn ssh_sftp_create_file(
     state: tauri::State<'_, SshState>,
-    id: u32,
+    id: u64,
     path: String,
 ) -> Result<(), String> {
     let path = validate_remote_path(&path)?;
@@ -408,7 +408,7 @@ pub async fn ssh_sftp_create_file(
 #[tauri::command]
 pub async fn ssh_sftp_create_dir(
     state: tauri::State<'_, SshState>,
-    id: u32,
+    id: u64,
     path: String,
 ) -> Result<(), String> {
     let path = validate_remote_path(&path)?;
@@ -421,7 +421,7 @@ pub async fn ssh_sftp_create_dir(
 #[tauri::command]
 pub async fn ssh_sftp_rename(
     state: tauri::State<'_, SshState>,
-    id: u32,
+    id: u64,
     from: String,
     to: String,
 ) -> Result<(), String> {
@@ -436,7 +436,7 @@ pub async fn ssh_sftp_rename(
 #[tauri::command]
 pub async fn ssh_sftp_delete(
     state: tauri::State<'_, SshState>,
-    id: u32,
+    id: u64,
     path: String,
 ) -> Result<(), String> {
     let path = validate_remote_path(&path)?;

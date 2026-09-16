@@ -257,6 +257,12 @@ impl Handler for HostKeyVerifier {
     }
 }
 
+impl Drop for HostKeyVerifier {
+    fn drop(&mut self) {
+        let _ = take_pending_host_key(&self.prompt_id);
+    }
+}
+
 pub struct SshSession {
     /// Write half of the SSH channel. Methods take `&self`, so writes from
     /// concurrent commands proceed without locking against the read pump.

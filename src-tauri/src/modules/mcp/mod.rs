@@ -299,6 +299,7 @@ fn is_transport_failure(error: &str) -> bool {
 /// function that produced it.
 struct Session {
     guard: tokio::sync::OwnedMutexGuard<Option<McpClient>>,
+    name: String,
 }
 
 impl Session {
@@ -308,11 +309,18 @@ impl Session {
 
     /// Pass the call's result through, dropping the server first if the pipe
     /// is what broke. Dropping kills the child, so the next call gets a fresh
-    /// one instead of talking to a corpse forever.
+    /// one instead of talking to a corpse forever. On transport failure the
+    /// slot is also removed from the pool so a permanently-dead server does
+    /// not accumulate empty slots forever.
     fn finish<T>(mut self, result: Result<T, String>) -> Result<T, String> {
         if let Err(e) = &result {
             if is_transport_failure(e) {
                 *self.guard = None;
+                if let Some(pool) = POOL.get() {
+                    if let Ok(mut map) = pool.lock() {
+                        map.remove(&self.name);
+                    }
+                }
             }
         }
         result
@@ -344,9 +352,22 @@ async fn session(workspace: Option<String>, name: &str) -> Result<Session, Strin
 
     let mut guard = slot.lock_owned().await;
     if guard.is_none() {
-        *guard = Some(McpClient::connect(&config).await?);
+        match McpClient::connect(&config).await {
+            Ok(client) => {
+                *guard = Some(client);
+            }
+            Err(e) => {
+                // A permanently-broken config (bad command, missing binary,
+                // etc.) would otherwise leave an empty slot in the pool
+                // forever. Remove it so the pool does not grow without bound.
+                if let Ok(mut map) = pool.lock() {
+                    map.remove(name);
+                }
+                return Err(e);
+            }
+        }
     }
-    Ok(Session { guard })
+    Ok(Session { guard, name: name.to_string() })
 }
 
 /// Stop every pooled server. Called when the registry changes, so an edited or

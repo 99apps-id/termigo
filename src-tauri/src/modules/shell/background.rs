@@ -47,7 +47,7 @@ pub struct BackgroundLogResponse {
 
 #[derive(Serialize)]
 pub struct BackgroundProcInfo {
-    pub handle: u32,
+    pub handle: u64,
     pub pid: u32,
     pub command: String,
     pub cwd: Option<String>,
@@ -81,7 +81,7 @@ impl BackgroundProc {
         self.child.kill().is_ok()
     }
 
-    pub fn info(&self, handle: u32) -> BackgroundProcInfo {
+    pub fn info(&self, handle: u64) -> BackgroundProcInfo {
         let exited = self.exited.load(Ordering::Acquire);
         let exit_code = if exited && !self.exit_unknown.load(Ordering::Acquire) {
             Some(self.exit_code.load(Ordering::Acquire))

@@ -27,6 +27,8 @@ import {
   generateSandboxInfo,
   registerSandbox,
   worktreeAddCommand,
+  worktreeDeleteBranchCommand,
+  worktreeRemoveCommand,
 } from "./worktree";
 
 export type IsolationInput = {
@@ -140,6 +142,23 @@ export type IsolationRefused = { ok: false; reason: string };
  * `worktree_list` shows them and `worktree_discard` can remove them, but nothing
  * here deletes a directory that may hold the subagent's only copy of its work.
  */
+/**
+ * Extract the fatal or error line from git output, avoiding progress markers
+ * like "Preparing worktree..." that git emits to stderr first.
+ */
+export function extractGitErrorDetail(stderr: string): string {
+  const lines = (stderr || "")
+    .trim()
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  return (
+    lines.find((l) => /^fatal:|^error:/i.test(l)) ??
+    lines[lines.length - 1] ??
+    ""
+  );
+}
+
 export async function createIsolatedWorktree(args: {
   ctx: ToolContext;
   /** Names the branch and directory, so a leftover one is identifiable. */
@@ -163,14 +182,32 @@ export async function createIsolatedWorktree(args: {
       sessionShellKey("git", sessionId, root),
       root,
     );
+
     const result = await native.shellSessionRun(shellId, command, root, 120);
     if (result.exit_code !== 0) {
-      // The message carries git's own stderr: "not a git repository" and a
-      // permission failure need different responses, and both arrive here.
-      const detail = (result.stderr || "").trim().split("\n")[0] ?? "";
+      const detail = extractGitErrorDetail(result.stderr);
+      try {
+        await native.shellSessionRun(
+          shellId,
+          worktreeRemoveCommand(worktreePath),
+          root,
+          30,
+        );
+        await native.shellSessionRun(
+          shellId,
+          worktreeDeleteBranchCommand(info.branchName),
+          root,
+          30,
+        );
+      } catch {
+        // cleanup failure is ignored
+      }
+      const exitDesc = result.timed_out
+        ? "timed out"
+        : `exit ${result.exit_code}`;
       return {
         ok: false,
-        reason: `git worktree add failed (exit ${result.exit_code})${detail ? `: ${detail}` : ""}`,
+        reason: `git worktree add failed (${exitDesc})${detail ? `: ${detail}` : ""}`,
       };
     }
     registerSandbox({

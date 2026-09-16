@@ -4,7 +4,7 @@ mod rss;
 mod session;
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
 use tauri::ipc::{Channel, Response};
@@ -13,21 +13,21 @@ use crate::modules::workspace::{authorize_spawn_cwd, WorkspaceEnv, WorkspaceRegi
 use session::LspSession;
 
 pub struct LspState {
-    sessions: RwLock<HashMap<u32, Arc<LspSession>>>,
-    next_id: AtomicU32,
+    sessions: RwLock<HashMap<u64, Arc<LspSession>>>,
+    next_id: AtomicU64,
 }
 
 impl Default for LspState {
     fn default() -> Self {
         Self {
             sessions: RwLock::new(HashMap::new()),
-            next_id: AtomicU32::new(1),
+            next_id: AtomicU64::new(1),
         }
     }
 }
 
 impl LspState {
-    pub(super) fn take(&self, id: u32) -> Option<Arc<LspSession>> {
+    pub(super) fn take(&self, id: u64) -> Option<Arc<LspSession>> {
         self.sessions.write().unwrap().remove(&id)
     }
 
@@ -74,7 +74,7 @@ pub async fn lsp_spawn(
     workspace: Option<WorkspaceEnv>,
     on_message: Channel<Response>,
     on_exit: Channel<session::LspExit>,
-) -> Result<u32, String> {
+) -> Result<u64, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     if workspace.is_wsl() {
         return Err("lsp: WSL workspaces are not supported yet".into());
@@ -146,7 +146,7 @@ fn resolve_root(path: &str, markers: &[String]) -> Option<String> {
 #[tauri::command]
 pub async fn lsp_send(
     state: tauri::State<'_, LspState>,
-    id: u32,
+    id: u64,
     message: String,
 ) -> Result<(), String> {
     let session = state
@@ -162,7 +162,7 @@ pub async fn lsp_send(
 }
 
 #[tauri::command]
-pub fn lsp_kill(state: tauri::State<'_, LspState>, id: u32) {
+pub fn lsp_kill(state: tauri::State<'_, LspState>, id: u64) {
     if let Some(session) = state.take(id) {
         session.kill();
         log::info!("lsp killed id={id}");
