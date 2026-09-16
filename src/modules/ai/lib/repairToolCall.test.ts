@@ -130,6 +130,30 @@ describe("repairToolCall", () => {
     expect(result?.input).toBe('{"target":"example.test"}');
   });
 
+  // The near-miss branch rewrote the name but handed the model's raw args
+  // straight back, so a typo'd name paired with near-JSON arguments still died
+  // in the SDK's strict parse - the one case this hook exists to fix.
+  it("repairs the arguments when it rewrites a near-miss tool name", async () => {
+    const tools = {
+      "ext_termigo-pentest-kit_run_pentest_tool": {},
+      "ext_termigo-pentest-kit_recon": {},
+    };
+    const result = await repairToolCall({
+      tools,
+      toolCall: {
+        toolCallId: "1",
+        toolName: "ext_termigo-pentest-kool_run_pentest_tool",
+        input: '{"target":"example.test", "note":"audit "route.ts""}',
+      },
+    });
+    expect(result?.toolName).toBe("ext_termigo-pentest-kit_run_pentest_tool");
+    if (!result) return;
+    // The SDK re-parses `input`, so it must be valid JSON text.
+    expect(() => JSON.parse(result.input)).not.toThrow();
+    expect(JSON.parse(result.input).target).toBe("example.test");
+    expect(JSON.parse(result.input).note).toContain("route.ts");
+  });
+
   it("does not rewrite one real tool into a different one", async () => {
     const tools = {
       read_file: {},

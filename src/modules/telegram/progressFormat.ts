@@ -24,20 +24,8 @@ export type FormatLiveProgressOptions = {
    *  waits instead of freezing. */
   elapsedMs?: number;
   completed?: boolean;
-  /** Why the run ended. The closing card used to read "Completed." whatever
-   *  had happened, so a run the user stopped, one that hit the step limit and
-   *  one that failed all closed with the same word as a clean finish. */
-  outcome?: RunOutcome;
   mode?: "question" | "task";
   modelLabel?: string;
-  /**
-   * The agent's visible answer text so far, shown inside the card while it
-   * works. The card used to carry only status, tools and step, so the chat was
-   * silent about WHAT the agent was saying until the run ended - the assistant's
-   * own prose never appeared, which reads as an agent that ignores the request.
-   * Sourced from the assistant message's text parts, not from reasoning.
-   */
-  answerText?: string;
   subagents?: Array<{ label?: string; status: string; currentStep?: string }>;
 };
 
@@ -172,6 +160,11 @@ export function summarizeToolOutput(
     const info =
       typeof obj.info === "string" ? collapseWhitespace(obj.info) : "";
 
+    // A command killed by the timeout has no exit code, so the `exit 0`
+    // default below reported a timeout as a clean success.
+    if (obj.timed_out === true) {
+      return truncate(stderr ? `timed out: ${stderr}` : "timed out", maxLen);
+    }
     if (exitCode !== 0 && stderr) {
       return truncate(`exit ${exitCode}: ${stderr}`, maxLen);
     }
@@ -218,6 +211,22 @@ export function summarizeToolOutput(
   return "";
 }
 
+/**
+ * Whether a tool result should read as a failure.
+ *
+ * `output-available` with no `error` string was treated as success, so a shell
+ * command that exited non-zero (or was killed by its timeout) rendered as a
+ * green "✓ Ran" in the progress trail and in the mirrored message. The result
+ * carries the real verdict, so read it instead of assuming success.
+ */
+function isErrorOutput(output: unknown): boolean {
+  if (!output || typeof output !== "object") return false;
+  const out = output as Record<string, unknown>;
+  if (typeof out.error === "string") return true;
+  if (out.timed_out === true) return true;
+  return typeof out.exit_code === "number" && out.exit_code !== 0;
+}
+
 export function extractToolSummaries(parts: unknown[]): ToolCallSummary[] {
   const summaries: ToolCallSummary[] = [];
 
@@ -245,8 +254,7 @@ export function extractToolSummaries(parts: unknown[]): ToolCallSummary[] {
       // failed call rendered as "⚡ Running ..." for the rest of the run.
       state = "error";
     } else if (rawState === "output-available") {
-      const out = part.output as Record<string, unknown> | undefined;
-      state = out && typeof out.error === "string" ? "error" : "done";
+      state = isErrorOutput(part.output) ? "error" : "done";
     }
 
     const input = summarizeToolInput(toolName, part.input);
@@ -267,7 +275,7 @@ export function escapeHtml(text: string): string {
   return text
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+    .replace(/>/g, "&gt;")
 }
 
 /** Strip characters Telegram HTML parse_mode does not accept. */
@@ -284,65 +292,6 @@ export function sanitizeForTelegramHtml(text: string): string {
 /** Convert plain text for Telegram HTML parse_mode without interpreting markdown. */
 export function escapePlainTextToHtml(text: string): string {
   return sanitizeForTelegramHtml(escapeHtml(text)).replace(/\n/g, "\n");
-}
-
-/**
- * Ensures HTML tags are properly balanced and well-nested for Telegram's
- * strict HTML parser. Unclosed tags are automatically closed in LIFO order
- * at the end of the text, and orphaned closing tags are safely escaped.
- */
-export function balanceTelegramHtml(html: string): string {
-  if (!html) return "";
-
-  const TAG_REGEX = /<(\/)?([a-zA-Z0-9_-]+)(?:\s+[^>]*)?(\/)?>/g;
-  const openStack: string[] = [];
-  let result = "";
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = TAG_REGEX.exec(html)) !== null) {
-    result += html.slice(lastIndex, match.index);
-    lastIndex = TAG_REGEX.lastIndex;
-
-    const fullTag = match[0];
-    const isClosing = Boolean(match[1]);
-    const tagName = match[2].toLowerCase();
-    const isSelfClosing = Boolean(match[3]) || fullTag.endsWith("/>");
-
-    if (isSelfClosing) {
-      result += fullTag;
-      continue;
-    }
-
-    if (isClosing) {
-      const pos = openStack.lastIndexOf(tagName);
-      if (pos === -1) {
-        // Orphaned closing tag without a match: escape to prevent Telegram 400
-        result += `&lt;/${tagName}&gt;`;
-      } else {
-        // Close any tags opened after this one in LIFO order
-        while (openStack.length > pos + 1) {
-          const unclosed = openStack.pop()!;
-          result += `</${unclosed}>`;
-        }
-        openStack.pop();
-        result += `</${tagName}>`;
-      }
-    } else {
-      openStack.push(tagName);
-      result += fullTag;
-    }
-  }
-
-  result += html.slice(lastIndex);
-
-  // Close any unclosed tags at the end of the string in LIFO order
-  while (openStack.length > 0) {
-    const unclosed = openStack.pop()!;
-    result += `</${unclosed}>`;
-  }
-
-  return result;
 }
 
 /**
@@ -426,23 +375,11 @@ export function formatMarkdownTable(markdownTable: string): string {
 export function markdownToTelegramHtml(markdown: string): string {
   if (!markdown) return "";
 
-  let input = markdown;
-  // Ensure unclosed code fences at the end of the message are closed
-  const fenceMatches = input.match(/```/g);
-  if (fenceMatches && fenceMatches.length % 2 !== 0) {
-    input += "\n```";
-  }
-  // Ensure unclosed single backticks outside code fences are closed
-  const backtickMatches = input.replace(/```[\s\S]*?```/g, "").match(/`/g);
-  if (backtickMatches && backtickMatches.length % 2 !== 0) {
-    input += "`";
-  }
-
   const codeBlocks: string[] = [];
   const inlineCodes: string[] = [];
 
   // 1. Extract fenced code blocks: ```lang\ncode\n```
-  let text = input.replace(
+  let text = markdown.replace(
     /```([a-zA-Z0-9_-]*)\r?\n([\s\S]*?)\r?\n```/g,
     (_, lang, code) => {
       const idx = codeBlocks.length;
@@ -502,19 +439,14 @@ export function markdownToTelegramHtml(markdown: string): string {
   // 9. Underline: __text__
   text = text.replace(/__(.+?)__/g, "<u>$1</u>");
 
-  // 10. Italic: *text* (avoiding remaining single asterisks). The boundary is
-  // matched as a CONSUMING group and re-emitted (`$1`) rather than as a
-  // lookbehind: lookbehind is ES2018 and is absent from older WebKitGTK builds,
-  // where it is a parse-time SyntaxError - the whole renderer would throw on
-  // every message instead of mis-formatting one. A capture group is supported
-  // everywhere and has identical semantics here, because the boundary character
-  // is put straight back. Same reasoning for step 11.
-  text = text.replace(/(^|[^*])\*([^*\r\n]+?)\*(?!\*)/g, "$1<i>$2</i>");
+  // 10. Italic: *text* (avoiding remaining single asterisks)
+  text = text.replace(/(?<!\*)\*([^*\r\n]+?)\*(?!\*)/g, "<i>$1</i>");
 
   // 11. Italic: _text_ (only when surrounded by whitespace or punctuation, to
-  // avoid snake_case). The trailing boundary may stay a lookahead: look-ahead
-  // has been in the language since ES3, and a zero-width assertion there is what
-  // keeps the trailing delimiter available to the next match.
+  // avoid snake_case). The leading delimiter is captured and re-emitted instead
+  // of matched with a variable-length lookbehind, which not every webview engine
+  // Tauri ships supports (WebKitGTK on Linux, WKWebView on macOS). Output is
+  // identical to the previous lookbehind form.
   text = text.replace(
     /(^|[\s([{])_([^_ \r\n][^_\r\n]*?[^_ \r\n]|\S)_(?=[)\]}\s.,:;!?]|$)/gm,
     "$1<i>$2</i>",
@@ -547,9 +479,6 @@ export function markdownToTelegramHtml(markdown: string): string {
 
   // Final sanitization: Telegram HTML parse_mode rejects some characters/tags.
   text = sanitizeForTelegramHtml(text);
-
-  // Balance and close any unclosed tags to prevent Telegram HTTP 400 Bad Request
-  text = balanceTelegramHtml(text);
 
   return text;
 }
@@ -658,142 +587,16 @@ export function formatToolActivity(t: ToolCallSummary): string {
   return `✓ ${verb}${inputSnippet}${outSnippet}`;
 }
 
-/**
- * Why a run ended, in the terms the desktop app already shows. The closing card
- * used to read "Completed." whatever had happened, so a run the user stopped, a
- * run that hit the step limit and a run that failed all closed with the same
- * word as a clean finish.
- */
-export type RunOutcome = "done" | "stopped" | "step-cap" | "error";
-
-const OUTCOME_LABELS: Record<RunOutcome, string> = {
-  done: "✓ Done",
-  stopped: "⏹ Stopped",
-  "step-cap": "⏸ Step limit reached",
-  error: "✗ Ended with error",
-};
-
-/** `4m 12s`, or `0m 08s` under a minute. Empty when the duration is unknown. */
-export function formatDuration(elapsedMs?: number): string {
-  if (
-    typeof elapsedMs !== "number" ||
-    !Number.isFinite(elapsedMs) ||
-    elapsedMs < 0
-  ) {
-    return "";
-  }
-  const totalSeconds = Math.floor(elapsedMs / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
-}
-
-/**
- * How many of the run's steps the agent marked done, so the closing card can say
- * what was actually finished. The desktop app hides its todo strip once every
- * item is complete; a chat message cannot hide, so it states the count instead.
- * Empty when the run kept no list.
- */
-export function formatTodoProgress(todos?: { status: string }[]): string {
-  if (!todos || todos.length === 0) return "";
-  const done = todos.filter((t) => t.status === "completed").length;
-  return `${done}/${todos.length} steps done`;
-}
-
-/**
- * The card's final state.
- *
- * It used to be replaced by a bare "Completed.", which threw away the record of
- * the status, the tool lines and the step, and left the least informative line
- * in the chat as the last thing the user saw. The closing card now states the
- * outcome, how long the run took and how many steps finished, while the agent's
- * own summary and recommendations follow as their own message.
- */
-export function formatCompletionCard(opts: FormatLiveProgressOptions): string {
-  const label = OUTCOME_LABELS[opts.outcome ?? "done"] ?? OUTCOME_LABELS.done;
-  const duration = formatDuration(opts.elapsedMs);
-  const header = `**[Termigo Agent]** ${label}${duration ? ` · ${duration}` : ""}`;
-  const progress = formatTodoProgress(opts.todos);
-  return progress ? `${header}\n${progress}` : header;
-}
-
-/**
- * Fit the agent's answer into the card.
- *
- * Keeps the OPENING and the most recent text when it does not fit, because the
- * opening states what the agent decided to do and the tail is what it is saying
- * now; the middle is the part a reader can do without. The card is edited in
- * place, so a bounded snippet keeps every edit inside Telegram's 4096 limit
- * instead of failing the whole message once the answer grows.
- */
-export function renderAnswerSnippet(text: string, max = 700): string {
-  const body = text.trim();
-  if (body.length === 0) return "";
-  if (body.length <= max) return body;
-  const half = Math.floor((max - 5) / 2);
-  let head = body.slice(0, half);
-  let tail = body.slice(-half);
-
-  // If head ends with an unmatched high surrogate, trim it
-  if (/[\uD800-\uDBFF]$/.test(head)) {
-    head = head.slice(0, -1);
-  }
-  // If tail starts with an unmatched low surrogate, trim it
-  if (/^[\uDC00-\uDFFF]/.test(tail)) {
-    tail = tail.slice(1);
-  }
-
-  // Avoid breaking in the middle of fenced code blocks
-  const headFences = (head.match(/```/g) || []).length;
-  if (headFences % 2 !== 0) {
-    head += "\n```";
-  }
-  const tailFences = (tail.match(/```/g) || []).length;
-  if (tailFences % 2 !== 0) {
-    tail = `\`\`\`\n${tail}`;
-  }
-
-  // Avoid breaking in the middle of inline backticks
-  const headBackticks = (head.replace(/```[\s\S]*?```/g, "").match(/`/g) || [])
-    .length;
-  if (headBackticks % 2 !== 0) {
-    head += "`";
-  }
-  const tailBackticks = (tail.replace(/```[\s\S]*?```/g, "").match(/`/g) || [])
-    .length;
-  if (tailBackticks % 2 !== 0) {
-    tail = `\`${tail}`;
-  }
-
-  return `${head}\n…\n${tail}`;
-}
-
 export function formatLiveProgress(opts: FormatLiveProgressOptions): string {
   if (opts.completed) {
-    if (opts.answerText && opts.answerText.trim().length > 0) {
-      const trimmed = opts.answerText.trim();
-      return trimmed.length > 3500
-        ? renderAnswerSnippet(trimmed, 3500)
-        : trimmed;
-    }
-    return formatCompletionCard(opts);
+    return "**[Termigo Agent]** Completed.";
   }
 
   if (opts.mode === "question") {
     return "";
   }
 
-  // Built as sections rather than one flat list, then joined with a blank line.
-  // The agent's own prose is placed first at the top, so the user sees what the
-  // agent is saying immediately, followed by the active task and tools below it.
-  const sections: string[][] = [];
-
-  // The agent's own words at the very top, before the task and tool lines.
-  const answer = renderAnswerSnippet(opts.answerText ?? "");
-  if (answer) {
-    sections.push(answer.split("\n"));
-  }
-
+  const lines: string[] = [];
   const statusLabel =
     opts.status === "awaiting-approval"
       ? "Waiting for approval..."
@@ -805,9 +608,7 @@ export function formatLiveProgress(opts: FormatLiveProgressOptions): string {
 
   const elapsedPart =
     typeof opts.elapsedMs === "number"
-      ? opts.elapsedMs >= 60_000
-        ? ` · ${formatDuration(opts.elapsedMs)}`
-        : ` · ${Math.floor(opts.elapsedMs / 1000)}s`
+      ? ` · ${Math.floor(opts.elapsedMs / 1000)}s`
       : "";
 
   const stepPart =
@@ -817,14 +618,12 @@ export function formatLiveProgress(opts: FormatLiveProgressOptions): string {
 
   const modelPart = opts.modelLabel ? ` • ${opts.modelLabel}` : "";
 
-  sections.push([
+  lines.push(
     `**[Termigo Agent]** *${statusLabel}*${stepPart}${modelPart}${elapsedPart}`,
-  ]);
+  );
 
-  // What the agent is working on, in its own words. Its own block because it
-  // changes every step and is what a reader scans for first.
   if (opts.step) {
-    sections.push([`*${truncate(opts.step, 120)}*`]);
+    lines.push(`*${truncate(opts.step, 120)}*`);
   }
 
   const pendingTodos = (opts.todos ?? []).filter(
@@ -836,14 +635,11 @@ export function formatLiveProgress(opts: FormatLiveProgressOptions): string {
   const visibleTodos = pendingTodos.length > 0 ? pendingTodos : completedTodos;
   const inProgressTodo = visibleTodos.find((t) => t.status === "in_progress");
   if (inProgressTodo) {
-    sections.push([`🔹 ${truncate(inProgressTodo.title, 100)}`]);
+    lines.push(`🔹 ${truncate(inProgressTodo.title, 100)}`);
   }
 
   const tools = opts.tools ?? [];
   if (tools.length > 0) {
-    // One block: these are a list of related facts, and blank lines between
-    // them would make four tool calls look like four separate messages.
-    const toolLines: string[] = [];
     const active = tools.filter(
       (t) => t.state === "running" || t.state === "awaiting-approval",
     );
@@ -855,67 +651,41 @@ export function formatLiveProgress(opts: FormatLiveProgressOptions): string {
       const verb = getToolDoneVerb(t.toolName);
       const snippet = t.input ? ` \`${truncate(t.input, 40)}\`` : "";
       const out = t.output ? ` → _${truncate(t.output, 50)}_` : "";
-      toolLines.push(`✓ ${verb}${snippet}${out}`);
+      lines.push(`✓ ${verb}${snippet}${out}`);
     }
 
     for (const t of active.slice(-2)) {
       if (t.state === "awaiting-approval") {
         const snippet = t.input ? ` \`${truncate(t.input, 40)}\`` : "";
-        toolLines.push(`🔒 Approval required: \`${t.toolName}\`${snippet}`);
+        lines.push(`🔒 Approval required: \`${t.toolName}\`${snippet}`);
       } else {
         const verb = getToolRunningVerb(t.toolName);
         const snippet = t.input ? ` \`${truncate(t.input, 40)}\`` : "";
-        toolLines.push(`⚡ ${verb}${snippet}`);
+        lines.push(`⚡ ${verb}${snippet}`);
       }
     }
-
-    if (toolLines.length > 0) sections.push(toolLines);
   }
 
   const subagents = opts.subagents ?? [];
   const liveSubagents = subagents.filter((s) => s.status !== "done");
   const visibleSubagents =
     liveSubagents.length > 0 ? liveSubagents.slice(-2) : subagents.slice(-2);
-  if (visibleSubagents.length > 0) {
-    const subLines: string[] = [];
-    for (const sub of visibleSubagents) {
-      const label = sub.label ?? "subagent";
-      const status =
-        sub.status === "running"
-          ? "Running"
-          : sub.status === "error"
-            ? "Failed"
-            : sub.status === "done"
-              ? "Done"
-              : sub.status;
-      const step = sub.currentStep ? `: ${truncate(sub.currentStep, 60)}` : "";
-      subLines.push(`↳ ${label}: *${status}*${step}`);
-    }
-    sections.push(subLines);
+  for (const sub of visibleSubagents) {
+    const label = sub.label ?? "subagent";
+    const status =
+      sub.status === "running"
+        ? "Running"
+        : sub.status === "error"
+          ? "Failed"
+          : sub.status === "done"
+            ? "Done"
+            : sub.status;
+    const step = sub.currentStep ? `: ${truncate(sub.currentStep, 60)}` : "";
+    lines.push(`↳ ${label}: *${status}*${step}`);
   }
 
-  const nonEmpty = sections
-    .map(trimBlankEdges)
-    .filter((block) => block.length > 0);
-
-  return nonEmpty.length > 0
-    ? nonEmpty.map((block) => block.join("\n")).join("\n\n")
+  const trimmed = lines.filter((line) => line.trim() !== "");
+  return trimmed.length > 0
+    ? trimmed.join("\n")
     : "**[Termigo Agent]** Working...";
-}
-
-/**
- * Drop blank lines from the START and END of a block, keeping the ones inside.
- *
- * The distinction matters for the agent's text: a blank line between two of its
- * paragraphs is content and has to reach the chat, while a blank line at the
- * edge would stack with the section separator and produce two empty lines.
- * Filtering every blank line - the obvious version - silently reflowed the
- * agent's paragraphs into one block.
- */
-function trimBlankEdges(lines: string[]): string[] {
-  let start = 0;
-  let end = lines.length;
-  while (start < end && lines[start].trim() === "") start++;
-  while (end > start && lines[end - 1].trim() === "") end--;
-  return lines.slice(start, end);
 }

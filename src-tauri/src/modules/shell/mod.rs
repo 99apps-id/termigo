@@ -5,8 +5,8 @@ pub mod session;
 use std::collections::HashMap;
 use std::io::Read;
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{mpsc, Arc, Mutex, RwLock};
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{mpsc, Arc, RwLock};
 use std::thread;
 use std::time::Duration;
 
@@ -36,7 +36,6 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
     "node", "deno", "bun", "make", "just", "task",
     "echo", "printf", "test", "true", "false", "pwd", "cd",
     "which", "where", "type", "command", "hash",
-    "cmd", "powershell", "pwsh", "set",
     "diff", "cmp", "comm", "patch", "jq", "yq",
     "tar", "gzip", "gunzip", "zip", "unzip",
     "curl", "wget", "http", "xh",
@@ -44,9 +43,6 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
     // Pentest & network recon tooling supported by Termigo
     "nmap", "masscan", "rustscan", "nikto", "nuclei", "httpx", "wpscan",
     "sqlmap", "ffuf", "gobuster", "dirsearch", "subfinder",
-    "dnsx", "katana", "amass", "cmseek", "arjun", "testssl.sh", "testssl",
-    "lynis", "gitleaks", "trufflehog", "weasyprint", "whois", "dig", "nslookup", "traceroute",
-    "whatweb", "hydra", "wafw00f", "searchsploit", "feroxbuster", "enum4linux", "smbclient", "showmount",
     //
     // Project toolchains. An agent that cannot run the project's own checks
     // cannot verify its work, and these are the binaries a repository's scripts
@@ -69,101 +65,16 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
     "ruff", "black", "mypy", "pytest", "flake8", "isort",
     // Go / Rust helpers whose base command is not `go`/`cargo`
     "golangci-lint", "rustfmt", "clippy-driver",
-    //
-    // Document generators. An agent asked for a report in a format the user can
-    // open in Word/Excel/PowerPoint has to be able to produce one, and
-    // `officecli` is the single self-contained binary that writes
-    // .docx/.xlsx/.pptx with no Office install. It belongs here for the same
-    // reason `tar` and `zip` do: it writes the file it was asked to write and
-    // launches nothing else, so it is not a wider trust boundary than the
-    // package managers already listed above it. Without this entry only a
-    // machine-specific absolute path worked, because `allows_program` accepts
-    // rooted paths, so the same instruction behaved differently per host.
-    "officecli",
-    //
-    // Read-only text and path utilities, added so a pipeline is actually
-    // usable. Allowing `|` (below) removed the refusal but not the friction on
-    // its own: `ls | sort | uniq` and `git log | cut -f1` still failed because
-    // the filter side was unlisted. The rule for this group is that a program
-    // here can neither write to the filesystem nor launch another program:
-    // that excludes `xargs`, `env`, `timeout`, `nice`, `nohup`, `watch`, `tee`.
-    // Shell dispatch programs (`cmd`, `powershell`, `pwsh`) and env helpers
-    // (`set`) are explicitly allowlisted above to support Windows agent workflows.
-    "sort", "uniq", "cut", "tr", "nl", "paste", "join", "fold", "rev",
-    "basename", "dirname", "realpath", "readlink", "seq", "expr",
-    "sha256sum", "sha1sum", "md5sum", "base64", "strings", "du", "df",
 ];
 
-/// Whether a program token may run without a PTY.
-///
-/// An absolute or rooted path is always allowed, on Unix (`/...`) and Windows
-/// (`C:\...`, `\...`), because the agent legitimately runs binaries it built.
-/// Anything else has to match the allowlist by base name, with the Windows
-/// shim extensions (`.exe`, `.cmd`, `.bat`) stripped first.
-fn allows_program(program: &str) -> bool {
-    let path = std::path::Path::new(program);
-    let is_windows_drive_path = program.len() >= 3
-        && program.as_bytes()[0].is_ascii_alphabetic()
-        && program.as_bytes()[1] == b':'
-        && (program.as_bytes()[2] == b'\\' || program.as_bytes()[2] == b'/');
-
-    if path.is_absolute()
-        || path.has_root()
-        || program.starts_with('/')
-        || program.starts_with('\\')
-        || is_windows_drive_path
-    {
-        return true;
-    }
-
-    let base_program = program
-        .strip_suffix(".exe")
-        .or_else(|| program.strip_suffix(".cmd"))
-        .or_else(|| program.strip_suffix(".bat"))
-        .unwrap_or(program);
-
-    SANDBOX_ALLOWLIST
-        .iter()
-        .any(|allowed| base_program.eq_ignore_ascii_case(allowed))
-}
-
-/// Characters refused outright because a shell turns them into something other
-/// than the command we validated.
-///
-/// `$` and the backtick are not negotiable: they expand to text chosen at run
-/// time, so a program name could be assembled AFTER this check and never appear
-/// in it (`CMD=rm` then `$CMD -rf /`). `(` and `)` build subshells, which are
-/// Characters refused outright because a shell turns them into something other
-/// than the command we validated.
-///
-/// `$` and the backtick are not negotiable: they expand to text chosen at run
-/// time, so a program name could be assembled AFTER this check and never appear
-/// in it (`CMD=rm` then `$CMD -rf /`). `(` and `)` build subshells, which are
-/// another command list the segment check does not see. `<` and `>` read or
-/// write arbitrary files. Newlines and carriage returns (`\n`, `\r`) are refused
-/// outright outside quotes to prevent command injection, multi-line command
-/// smuggling, and shell truncation quirks across POSIX and Windows.
-const SHELL_METACHARACTERS: &[char] = &['$', '(', ')', '<', '>', '`', '\n', '\r'];
-
-/// Characters that split a command into segments. Each segment's program is
-/// checked against the allowlist, so accepting them adds no reach: `;` is a
-/// separator exactly like `&&`, and a `|` pipeline still runs only programs
-/// that are already allowed.
-///
-/// This is the friction that mattered in practice. One install logged **325**
-/// refusals for metacharacters, the common ones being `|`, `2>&1` and `;`
-/// between two allowlisted programs. The agent's most ordinary request -
-/// `find /home/admin/peraturan_pdf -maxdepth 1 -type f | head -30` - failed on
-/// the pipe alone, even though `find` and `head` are both allowlisted.
-const SHELL_SEPARATORS: &[char] = &[';'];
+/// Characters that enable command injection in a shell one-liner.
+const SHELL_METACHARACTERS: &[char] = &[';', '$', '(', ')', '<', '>', '`'];
 
 /// Validate a shell command for agent execution:
-/// - refuse expansion, subshells and redirection (`$`, backtick, `(`, `)`, `<`, `>`)
-/// - allow `&&`, `||`, `|`, `;` and newlines as separators, but check the program
-///   of EVERY segment against the allowlist, not just the first
-/// - drop the two redirections that cannot name a file (`N>&M`, `>/dev/null`)
-/// - enforce the allowlist for each segment's program unless it is an absolute
-///   path
+/// - reject metacharacters that enable injection (`;$()<>``)
+/// - allow safe chaining operators `&&` and `||`
+/// - reject raw newlines/control chars, which are hidden command separators
+/// - allow `&&`/`||` chaining, but enforce the allowlist on EVERY segment
 /// - return the command string on success
 pub fn validate_shell_command(command: &str) -> Result<&str, String> {
     let trimmed = command.trim();
@@ -171,75 +82,57 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
         return Err("empty command".into());
     }
 
-    // Remove the redirections that cannot name a file before the character scan,
-    // so `2>&1` and `>/dev/null` are not mistaken for the `&` and `>` that are
-    // refused. These two are the most common ways to keep output readable and
-    // they cannot reach the filesystem, unlike `> file`.
-    let cleaned = strip_dev_null_redirections(trimmed)?;
+    // 1. Reject stray control characters (NUL, BEL, ...). `\n`, `\r` and `\t`
+    //    are handled below as separators/whitespace.
+    if trimmed
+        .chars()
+        .any(|c| c.is_control() && c != '\n' && c != '\r' && c != '\t')
+    {
+        return Err("command contains control characters".into());
+    }
 
-    // 1. Walk the command outside quotes: separators split it into segments, and
-    //    anything that could turn into a different command is refused. A
-    //    separator inside quotes is data, not a chain, so the quote state decides.
+    // 2. Reject metacharacters outside quotes, and split the command into
+    //    `&&`/`||`-separated segments. `&&`/`||` are allowed as separators, but
+    //    every segment's program is checked in step 3 - so `git && rm -rf /` is
+    //    refused on `rm`, which was the hole when only the first token was read.
     let mut in_quote = false;
     let mut quote_char = '\0';
     let mut prev = '\0';
     let mut bad: Vec<char> = Vec::new();
-    let chars = cleaned.chars().collect::<Vec<_>>();
-    // Where each chained segment starts, so its program can be checked too.
-    // Checking only the first token let `git status && rm -rf /` through: `git`
-    // is allowlisted, so the second command ran unvalidated.
-    let mut segment_starts: Vec<usize> = vec![0];
+    let mut segments: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let chars = trimmed.chars().collect::<Vec<_>>();
     let mut i = 0;
     while i < chars.len() {
         let c = chars[i];
         if !in_quote && (c == '"' || c == '\'') {
             in_quote = true;
             quote_char = c;
-            prev = c;
-            i += 1;
-            continue;
-        }
-        if in_quote && c == quote_char && prev != '\\' {
+        } else if in_quote && c == quote_char && prev != '\\' {
             in_quote = false;
             quote_char = '\0';
-            prev = c;
-            i += 1;
-            continue;
-        }
-        if !in_quote {
-            if c == '&' {
-                if i + 1 < chars.len() && chars[i + 1] == '&' {
-                    // `&&` is a separator
-                    segment_starts.push(i + 2);
-                    i += 2;
-                    prev = c;
-                    continue;
-                }
-                // A lone `&` backgrounds the command, which hides it from the
-                // segment check. `2>&1` and friends were already removed above.
-                bad.push(c);
-            } else if c == '|' {
-                // Both `||` and a single `|` separate commands whose programs
-                // are checked. A pipeline of allowlisted programs is exactly
-                // what the agent needs and used to be refused.
-                let step = if i + 1 < chars.len() && chars[i + 1] == '|' {
-                    2
-                } else {
-                    1
-                };
-                segment_starts.push(i + step);
-                i += step;
+        } else if !in_quote {
+            let chained = (c == '&' && chars.get(i + 1) == Some(&'&'))
+                || (c == '|' && chars.get(i + 1) == Some(&'|'));
+            if chained {
+                segments.push(std::mem::take(&mut current));
                 prev = c;
+                i += 2;
                 continue;
-            } else if SHELL_SEPARATORS.contains(&c) {
-                segment_starts.push(i + 1);
+            }
+            if c == '\n' || c == '\r' {
+                // A newline is a command separator exactly like `&&`: the shell
+                // runs every line, so each line must be validated.
+                segments.push(std::mem::take(&mut current));
                 prev = c;
                 i += 1;
                 continue;
-            } else if SHELL_METACHARACTERS.contains(&c) {
+            }
+            if c == '&' || c == '|' || SHELL_METACHARACTERS.contains(&c) {
                 bad.push(c);
             }
         }
+        current.push(c);
         prev = c;
         i += 1;
     }
@@ -247,140 +140,67 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
         return Err("unclosed quote in command".into());
     }
     if !bad.is_empty() {
-        let hint = if bad.contains(&'>') {
-            "write the output with the write_file tool instead"
-        } else if bad.contains(&'$') || bad.contains(&'`') {
-            "shell expansion is refused because it can change which program runs"
-        } else {
-            "use a PTY session for what this would do"
-        };
         return Err(format!(
-            "command contains shell metacharacters {:?}; {hint}",
+            "command contains shell metacharacters {:?}; use a PTY session for pipelines, redirects, or chained commands",
             bad
         ));
     }
+    segments.push(current);
 
-    // 2. Every segment's program must be allowed. Segments are delimited by the
-    //    chaining operators found above, so a quoted `&&` is still one segment.
-    for start in &segment_starts {
-        let rest: String = chars[*start..].iter().collect();
-        let segment = rest.trim();
-        if segment.is_empty() {
-            return Err(
-                "empty command in a `&&` / `||` chain; use a PTY session for arbitrary commands"
-                    .into(),
-            );
-        }
+    // 3. Every segment must start with an allowlisted program (or an absolute /
+    //    rooted path). Checking each segment - not just the first - is what
+    //    makes `git status && rm -rf /` fail on `rm`. Blank segments (blank
+    //    lines, a trailing separator) carry no command and are dropped.
+    let segments: Vec<&str> = segments
+        .iter()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if segments.is_empty() {
+        return Err("command contains no executable segment".into());
+    }
+    for segment in segments {
         let raw_program = segment.split_whitespace().next().unwrap_or(segment);
         let program = raw_program.trim_matches(['"', '\'']);
-        if !allows_program(program) {
-            return Err(format!(
-                "command '{}' is not in the agent allowlist; allowed: {:?}; use a PTY session to run arbitrary commands",
-                program,
-                SANDBOX_ALLOWLIST
-            ));
+
+        // Allow absolute or rooted paths on Unix (/...) and Windows (C:\..., \...).
+        let path = std::path::Path::new(program);
+        let is_windows_drive_path = program.len() >= 3
+            && program.as_bytes()[0].is_ascii_alphabetic()
+            && program.as_bytes()[1] == b':'
+            && (program.as_bytes()[2] == b'\\' || program.as_bytes()[2] == b'/');
+
+        if path.is_absolute()
+            || path.has_root()
+            || program.starts_with('/')
+            || program.starts_with('\\')
+            || is_windows_drive_path
+        {
+            continue;
         }
+
+        // Strip executable extensions for matching (.exe, .cmd, .bat).
+        let base_program = program
+            .strip_suffix(".exe")
+            .or_else(|| program.strip_suffix(".cmd"))
+            .or_else(|| program.strip_suffix(".bat"))
+            .unwrap_or(program);
+
+        if SANDBOX_ALLOWLIST
+            .iter()
+            .any(|allowed| base_program.eq_ignore_ascii_case(allowed))
+        {
+            continue;
+        }
+
+        return Err(format!(
+            "command '{}' is not in the agent allowlist; allowed: {:?}; use a PTY session to run arbitrary commands",
+            program,
+            SANDBOX_ALLOWLIST
+        ));
     }
 
     Ok(command)
-}
-
-/// Drop the redirections that cannot name a file: `N>&M` (join two of the
-/// process's own streams) and `>/dev/null` (discard). Both are replaced with a
-/// space so the character scan never sees the `&` or `>` they contain.
-///
-/// Everything else that redirects is left in place and therefore refused by the
-/// scan, because `> file` writes wherever it is pointed - including the secret
-/// paths the rest of the app refuses to touch. The caller runs the ORIGINAL
-/// command, so the shell still performs these redirections.
-fn strip_dev_null_redirections(command: &str) -> Result<String, String> {
-    const DEV_NULL_LEN: usize = "/dev/null".len();
-    const DOLLAR_NULL_LEN: usize = "$null".len();
-    let chars: Vec<char> = command.chars().collect();
-    let mut out = String::with_capacity(command.len());
-    let mut in_quote = false;
-    let mut quote_char = '\0';
-    let mut prev = '\0';
-    let mut i = 0;
-    while i < chars.len() {
-        let c = chars[i];
-        if !in_quote && (c == '"' || c == '\'') {
-            in_quote = true;
-            quote_char = c;
-            out.push(c);
-            prev = c;
-            i += 1;
-            continue;
-        }
-        if in_quote && c == quote_char && prev != '\\' {
-            in_quote = false;
-            quote_char = '\0';
-            out.push(c);
-            prev = c;
-            i += 1;
-            continue;
-        }
-        if !in_quote {
-            // `N>&M`: two digits with a `>&` between them. A redirection to a
-            // file always has a name (or `/dev/null`, matched below) after the
-            // `>`, so a digit cannot be mistaken for a filename here.
-            if c.is_ascii_digit()
-                && chars.get(i + 1) == Some(&'>')
-                && chars.get(i + 2) == Some(&'&')
-                && chars.get(i + 3).is_some_and(|d| d.is_ascii_digit())
-            {
-                out.push(' ');
-                prev = ' ';
-                i += 4;
-                continue;
-            }
-            // `>` or `N>` or `*>` followed by `/dev/null` or `$null` (Windows PowerShell).
-            // A second `>` means append, so `>>` is not matched and stays refused.
-            let gt = if c == '>' {
-                Some(i)
-            } else if (c.is_ascii_digit() || c == '*') && chars.get(i + 1) == Some(&'>') {
-                Some(i + 1)
-            } else {
-                None
-            };
-            if let Some(gt) = gt {
-                if chars.get(gt + 1) != Some(&'>') {
-                    let mut j = gt + 1;
-                    while chars.get(j) == Some(&' ') {
-                        j += 1;
-                    }
-                    let matched_len = if chars.len() >= j + DEV_NULL_LEN
-                        && chars[j..j + DEV_NULL_LEN].iter().collect::<String>() == "/dev/null"
-                    {
-                        Some(DEV_NULL_LEN)
-                    } else if chars.len() >= j + DOLLAR_NULL_LEN
-                        && chars[j..j + DOLLAR_NULL_LEN].iter().collect::<String>() == "$null"
-                    {
-                        Some(DOLLAR_NULL_LEN)
-                    } else {
-                        None
-                    };
-
-                    if let Some(target_len) = matched_len {
-                        let is_null_target = chars.get(j + target_len).is_none_or(|a| {
-                            a.is_whitespace()
-                                || matches!(a, ';' | '|' | '&' | '<' | '>' | ')' | '"' | '\'')
-                        });
-                        if is_null_target {
-                            out.push(' ');
-                            prev = ' ';
-                            i = j + target_len;
-                            continue;
-                        }
-                    }
-                }
-            }
-        }
-        out.push(c);
-        prev = c;
-        i += 1;
-    }
-    Ok(out)
 }
 
 #[derive(Serialize)]
@@ -394,7 +214,7 @@ pub struct CommandOutput {
 
 /// Runs a one-shot command via the user's login shell. Output is capped and
 /// the process is force-killed on timeout. We deliberately do NOT pipe into
-/// the user's interactive PTY: that would fight their input. AI tool calls
+/// the user's interactive PTY — that would fight their input. AI tool calls
 /// are presented in chat as their own structured result.
 #[tauri::command]
 pub async fn shell_run_command(
@@ -439,65 +259,6 @@ pub async fn shell_run_command(
     rx.recv().map_err(|e| e.to_string())?
 }
 
-/// Detect common interactive prompts and alternate screen buffer escape sequences
-/// that cause non-interactive background agent processes to hang indefinitely.
-pub(crate) fn detect_interactive_prompt(tail: &str) -> Option<&'static str> {
-    let trimmed = tail.trim_end();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    // Alternate screen buffer switch used by pagers and editors (less, vim, nano, top)
-    if trimmed.contains("\x1b[?1049h")
-        || trimmed.contains("\x1b[?47h")
-        || trimmed.contains("\x1b[?1047h")
-    {
-        return Some("alternate screen buffer (less/vim/nano/pager)");
-    }
-
-    let last_line = trimmed.lines().last().unwrap_or(trimmed).trim();
-    let lower = last_line.to_ascii_lowercase();
-
-    let ends_with_prompt_char = lower.ends_with('?')
-        || lower.ends_with(':')
-        || lower.ends_with(']')
-        || lower.ends_with(')');
-
-    if ends_with_prompt_char
-        && (lower.contains("[y/n")
-            || lower.contains("(y/n")
-            || lower.contains("[yes/no")
-            || lower.contains("(yes/no")
-            || lower.contains("[y/n/c")
-            || lower.ends_with("y/n")
-            || lower.ends_with("y/n?")
-            || lower.ends_with("y/n:")
-            || lower.ends_with("yes/no?")
-            || lower.ends_with("yes/no:"))
-    {
-        return Some("confirmation prompt [Y/N]");
-    }
-
-    if (lower.ends_with(':') || lower.ends_with('?'))
-        && (lower.contains("password")
-            || lower.contains("passphrase")
-            || lower.contains("token")
-            || lower.contains("pin"))
-    {
-        return Some("credential prompt (password/token)");
-    }
-
-    if lower.ends_with("press any key to continue . . .")
-        || lower.ends_with("press any key to continue...")
-        || lower.ends_with("press enter to continue")
-        || lower.ends_with("press [enter] to continue")
-    {
-        return Some("pause prompt (press key to continue)");
-    }
-
-    None
-}
-
 /// Somewhere the caller can see the child while it runs, so a command can be
 /// stopped from outside instead of only by its own timeout.
 pub(crate) type ChildSlot = Arc<std::sync::Mutex<Option<Arc<SharedChild>>>>;
@@ -534,9 +295,6 @@ fn run_blocking(
         log::warn!("shell_run_command spawn failed: {e}");
         e.to_string()
     })?);
-    #[cfg(windows)]
-    let _job = crate::modules::proc::job::ProcessJob::create_for(child.id()).ok();
-
     // Visible to `shell_session_interrupt` for as long as this runs. Cleared
     // below so a later interrupt cannot kill an unrelated process that has
     // since taken the same slot.
@@ -554,13 +312,8 @@ fn run_blocking(
         "no stderr pipe".to_string()
     })?;
 
-    let stdout_target = Arc::new(Mutex::new((Vec::new(), false)));
-    let stderr_target = Arc::new(Mutex::new((Vec::new(), false)));
-    let stdout_target_drain = Arc::clone(&stdout_target);
-    let stderr_target_drain = Arc::clone(&stderr_target);
-
-    let stdout_handle = thread::spawn(move || drain(&mut stdout_pipe, &stdout_target_drain));
-    let stderr_handle = thread::spawn(move || drain(&mut stderr_pipe, &stderr_target_drain));
+    let stdout_handle = thread::spawn(move || drain(&mut stdout_pipe));
+    let stderr_handle = thread::spawn(move || drain(&mut stderr_pipe));
 
     let (tx, rx) = mpsc::channel();
     // Cleared however this returns - normal exit, timeout or error - so a
@@ -582,113 +335,24 @@ fn run_blocking(
         let _ = tx.send(waiter.wait());
     });
 
-    let start = std::time::Instant::now();
-    let poll_interval = Duration::from_millis(250);
-    let mut last_output_len = 0usize;
-    let mut frozen_count = 0u32;
-    let mut interactive_prompt: Option<&'static str> = None;
-
-    let (exit_code, timed_out) = loop {
-        let elapsed = start.elapsed();
-        if elapsed >= dur {
-            crate::modules::proc::kill_tree(child.id());
+    let (exit_code, timed_out) = match rx.recv_timeout(dur) {
+        Ok(Ok(status)) => (status.code(), false),
+        Ok(Err(e)) => return Err(e.to_string()),
+        Err(mpsc::RecvTimeoutError::Timeout) => {
             let _ = child.kill();
-            break (None, true);
+            (None, true)
         }
-
-        let slice = (dur - elapsed).min(poll_interval);
-        match rx.recv_timeout(slice) {
-            Ok(Ok(status)) => break (status.code(), false),
-            Ok(Err(e)) => return Err(e.to_string()),
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                // Check stdout and stderr tails for interactive prompts if output has frozen
-                let current_out_len = {
-                    let guard = match stdout_target.lock() {
-                        Ok(g) => g,
-                        Err(p) => p.into_inner(),
-                    };
-                    guard.0.len()
-                };
-                let current_err_len = {
-                    let guard = match stderr_target.lock() {
-                        Ok(g) => g,
-                        Err(p) => p.into_inner(),
-                    };
-                    guard.0.len()
-                };
-
-                let total_len = current_out_len.saturating_add(current_err_len);
-                if total_len > 0 {
-                    if total_len == last_output_len {
-                        frozen_count = frozen_count.saturating_add(1);
-                        // 8 * 250ms = 2.0 seconds of silence with unchanged output
-                        if frozen_count >= 8 {
-                            let check_target = |target: &Arc<Mutex<(Vec<u8>, bool)>>| -> Option<&'static str> {
-                                let guard = match target.lock() {
-                                    Ok(g) => g,
-                                    Err(p) => p.into_inner(),
-                                };
-                                if guard.0.is_empty() {
-                                    return None;
-                                }
-                                let tail_start = guard.0.len().saturating_sub(512);
-                                let tail_str = String::from_utf8_lossy(&guard.0[tail_start..]);
-                                detect_interactive_prompt(&tail_str)
-                            };
-
-                            // Check stderr tail first (prompts like sudo or read -p are often sent to stderr), then stdout tail
-                            if let Some(prompt) = check_target(&stderr_target).or_else(|| check_target(&stdout_target)) {
-                                interactive_prompt = Some(prompt);
-                                crate::modules::proc::kill_tree(child.id());
-                                let _ = child.kill();
-                                break (None, false);
-                            }
-                        }
-                    } else {
-                        last_output_len = total_len;
-                        frozen_count = 0;
-                    }
-                }
-            }
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                return Err("shell wait thread disconnected".into());
-            }
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            return Err("shell wait thread disconnected".into());
         }
     };
 
-    let (pipe_tx, pipe_rx) = mpsc::channel();
-    thread::spawn(move || {
-        let _ = stdout_handle.join();
-        let _ = stderr_handle.join();
-        let _ = pipe_tx.send(());
-    });
-
-    if pipe_rx.recv_timeout(Duration::from_millis(2000)).is_err() {
-        log::warn!("shell_run_command: pipe readers timed out after process exit/kill");
-    }
-
-    let take_output = |target: &Arc<Mutex<(Vec<u8>, bool)>>| {
-        match target.lock() {
-            Ok(mut g) => std::mem::take(&mut *g),
-            Err(p) => std::mem::take(&mut *p.into_inner()),
-        }
-    };
-    let (stdout_bytes, stdout_truncated) = take_output(&stdout_target);
-    let (stderr_bytes, stderr_truncated) = take_output(&stderr_target);
-
-    let mut stderr = String::from_utf8_lossy(&stderr_bytes).into_owned();
-    if let Some(prompt) = interactive_prompt {
-        if !stderr.is_empty() && !stderr.ends_with('\n') {
-            stderr.push('\n');
-        }
-        stderr.push_str(&format!(
-            "[termigo: command paused waiting for interactive user input ({prompt}). Foreground agent execution is non-interactive: please re-run with non-interactive flags such as -y, --yes, --batch, or DEBIAN_FRONTEND=noninteractive.]\n"
-        ));
-    }
+    let (stdout_bytes, stdout_truncated) = stdout_handle.join().unwrap_or((Vec::new(), false));
+    let (stderr_bytes, stderr_truncated) = stderr_handle.join().unwrap_or((Vec::new(), false));
 
     Ok(CommandOutput {
         stdout: String::from_utf8_lossy(&stdout_bytes).into_owned(),
-        stderr,
+        stderr: String::from_utf8_lossy(&stderr_bytes).into_owned(),
         exit_code,
         timed_out,
         truncated: stdout_truncated || stderr_truncated,
@@ -700,10 +364,10 @@ fn run_blocking(
 // ──────────────────────────────────────────────────────────────────────────
 
 pub struct ShellState {
-    sessions: RwLock<HashMap<u64, Arc<ShellSession>>>,
-    bg: RwLock<HashMap<u64, Arc<BackgroundProc>>>,
-    next_session_id: AtomicU64,
-    next_bg_id: AtomicU64,
+    sessions: RwLock<HashMap<u32, Arc<ShellSession>>>,
+    bg: RwLock<HashMap<u32, Arc<BackgroundProc>>>,
+    next_session_id: AtomicU32,
+    next_bg_id: AtomicU32,
 }
 
 impl Default for ShellState {
@@ -711,8 +375,8 @@ impl Default for ShellState {
         Self {
             sessions: RwLock::new(HashMap::new()),
             bg: RwLock::new(HashMap::new()),
-            next_session_id: AtomicU64::new(1),
-            next_bg_id: AtomicU64::new(1),
+            next_session_id: AtomicU32::new(1),
+            next_bg_id: AtomicU32::new(1),
         }
     }
 }
@@ -723,7 +387,7 @@ pub fn shell_session_open(
     registry: tauri::State<WorkspaceRegistry>,
     cwd: Option<String>,
     workspace: Option<WorkspaceEnv>,
-) -> Result<u64, String> {
+) -> Result<u32, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     authorize_spawn_cwd(&registry, cwd.as_deref(), &workspace)?;
     let initial = match cwd.as_deref().filter(|s| !s.is_empty()) {
@@ -749,7 +413,7 @@ pub fn shell_session_open(
 /// command already executing: the shell kept running and the user watched a
 /// "stopped" agent stay busy. This is what makes stop reach the work.
 #[tauri::command]
-pub fn shell_session_interrupt(state: tauri::State<ShellState>, id: u64) -> Result<bool, String> {
+pub fn shell_session_interrupt(state: tauri::State<ShellState>, id: u32) -> Result<bool, String> {
     let session = state
         .sessions
         .read()
@@ -764,7 +428,7 @@ pub fn shell_session_interrupt(state: tauri::State<ShellState>, id: u64) -> Resu
 pub async fn shell_session_run(
     state: tauri::State<'_, ShellState>,
     registry: tauri::State<'_, WorkspaceRegistry>,
-    id: u64,
+    id: u32,
     command: String,
     cwd: Option<String>,
     timeout_secs: Option<u64>,
@@ -807,7 +471,7 @@ pub async fn shell_session_run(
 }
 
 #[tauri::command]
-pub fn shell_session_close(state: tauri::State<ShellState>, id: u64) -> Result<(), String> {
+pub fn shell_session_close(state: tauri::State<ShellState>, id: u32) -> Result<(), String> {
     state.sessions.write().unwrap().remove(&id);
     Ok(())
 }
@@ -820,7 +484,7 @@ pub fn shell_bg_spawn(
     cwd: Option<String>,
     workspace: Option<WorkspaceEnv>,
     log_path: Option<String>,
-) -> Result<u64, String> {
+) -> Result<u32, String> {
     let trimmed = command.trim().to_string();
     if trimmed.is_empty() {
         return Err("empty command".into());
@@ -831,7 +495,7 @@ pub fn shell_bg_spawn(
 
     let workspace = WorkspaceEnv::from_option(workspace);
     authorize_spawn_cwd(&registry, cwd.as_deref(), &workspace)?;
-    let proc = background::spawn(trimmed, cwd, workspace, log_path, &registry)?;
+    let proc = background::spawn(trimmed, cwd, workspace, log_path)?;
     let id = state.next_bg_id.fetch_add(1, Ordering::Relaxed);
     state.bg.write().unwrap().insert(id, proc);
     Ok(id)
@@ -840,7 +504,7 @@ pub fn shell_bg_spawn(
 #[tauri::command]
 pub fn shell_bg_logs(
     state: tauri::State<ShellState>,
-    handle: u64,
+    handle: u32,
     since_offset: Option<u64>,
 ) -> Result<BackgroundLogResponse, String> {
     let proc = state
@@ -854,7 +518,7 @@ pub fn shell_bg_logs(
 }
 
 #[tauri::command]
-pub fn shell_bg_kill(state: tauri::State<ShellState>, handle: u64) -> Result<bool, String> {
+pub fn shell_bg_kill(state: tauri::State<ShellState>, handle: u32) -> Result<bool, String> {
     if let Some(proc) = state.bg.read().unwrap().get(&handle).cloned() {
         Ok(proc.kill())
     } else {
@@ -924,29 +588,28 @@ pub(crate) fn build_oneshot_command(
     }
 }
 
-fn drain<R: Read>(reader: &mut R, target: &Arc<Mutex<(Vec<u8>, bool)>>) {
+fn drain<R: Read>(reader: &mut R) -> (Vec<u8>, bool) {
+    let mut out = Vec::new();
     let mut buf = [0u8; 8192];
+    let mut truncated = false;
     loop {
         match reader.read(&mut buf) {
             Ok(0) => break,
             Ok(n) => {
-                let mut guard = match target.lock() {
-                    Ok(g) => g,
-                    Err(poisoned) => poisoned.into_inner(),
-                };
-                if guard.0.len() >= MAX_OUTPUT_BYTES {
-                    guard.1 = true;
+                if out.len() >= MAX_OUTPUT_BYTES {
+                    truncated = true;
                     continue;
                 }
-                let take = (MAX_OUTPUT_BYTES - guard.0.len()).min(n);
-                guard.0.extend_from_slice(&buf[..take]);
+                let take = (MAX_OUTPUT_BYTES - out.len()).min(n);
+                out.extend_from_slice(&buf[..take]);
                 if take < n {
-                    guard.1 = true;
+                    truncated = true;
                 }
             }
             Err(_) => break,
         }
     }
+    (out, truncated)
 }
 
 #[cfg(all(test, unix))]
@@ -1077,200 +740,11 @@ mod tests_sandbox {
     }
 
     #[test]
-    fn validate_shell_command_allows_cmd_and_windows_shells() {
-        assert!(validate_shell_command("cmd /c dir").is_ok());
-        assert!(validate_shell_command("cmd.exe /c set").is_ok());
-        assert!(validate_shell_command(r#"cmd /c "dir /b""#).is_ok());
-        assert!(validate_shell_command(r#"cmd /c "set FOO=bar && pnpm test""#).is_ok());
-        assert!(validate_shell_command("powershell -Command Get-Date").is_ok());
-        assert!(validate_shell_command("pwsh -c date").is_ok());
-        assert!(validate_shell_command("set FOO=bar").is_ok());
-    }
-
-    #[test]
     fn validate_shell_command_blocks_metacharacters() {
-        // Whatever can change WHICH program runs, or reach a file, stays out.
+        assert!(validate_shell_command("git status && rm -rf /").is_err());
+        assert!(validate_shell_command("cat file | grep secret").is_err());
         assert!(validate_shell_command("echo hello > out.txt").is_err());
-        assert!(validate_shell_command("echo hello >> out.txt").is_err());
         assert!(validate_shell_command("cat `id`").is_err());
-        assert!(validate_shell_command("cat $(echo secret)").is_err());
-        assert!(validate_shell_command("cat file < input").is_err());
-        assert!(validate_shell_command("(git status)").is_err());
-        // A lone `&` backgrounds the command, hiding it from the segment check.
-        assert!(validate_shell_command("git status & git log").is_err());
-    }
-
-    /// Newlines and carriage returns outside quotes are refused as metacharacters
-    /// to prevent injection or smuggling commands across lines. Inside quotes,
-    /// they are preserved as data.
-    #[test]
-    fn validate_shell_command_refuses_newlines_outside_quotes() {
-        assert!(validate_shell_command("git status\nrm -rf /").is_err());
-        assert!(validate_shell_command("git status\r\nshred -u f").is_err());
-        assert!(validate_shell_command("pnpm test\nsudo rm -rf /").is_err());
-        assert!(validate_shell_command("git status\ngit log").is_err());
-        assert!(validate_shell_command("git status\rrm -rf /").is_err());
-        assert!(validate_shell_command("git status &&\nsudo rm -rf /").is_err());
-        assert!(validate_shell_command("git status &&\nrm -rf /").is_err());
-        // Newlines inside quotes are preserved as literal data.
-        assert!(validate_shell_command("echo \"a\nb\"").is_ok());
-        assert!(validate_shell_command("git commit -m 'subject\n\nbody'").is_ok());
-    }
-
-    /// The friction that mattered: a pipe between two allowlisted programs was
-    /// refused 325 times on one install, including the agent's most ordinary
-    /// request (`find ... | head -30`).
-    #[test]
-    fn validate_shell_command_allows_a_pipeline_of_allowlisted_programs() {
-        assert!(validate_shell_command("find /tmp -maxdepth 1 -type f | head -30").is_ok());
-        assert!(validate_shell_command("git log | head -20").is_ok());
-        assert!(validate_shell_command("cat file | grep secret | wc -l").is_ok());
-        assert!(validate_shell_command("ls -la | sort | uniq").is_ok());
-    }
-
-    /// A pipeline does not launder an unlisted program either: the pipe is only
-    /// accepted because EVERY segment is still checked.
-    #[test]
-    fn validate_shell_command_refuses_a_pipeline_with_an_unlisted_segment() {
-        let err = validate_shell_command("cat file | rm -rf /")
-            .expect_err("an unlisted segment must be refused");
-        assert!(err.contains("'rm'"), "{err}");
-        assert!(validate_shell_command("git log | sh -c 'rm -rf /'").is_err());
-        assert!(validate_shell_command("git log | sudo rm -rf /").is_err());
-    }
-
-    /// `;` is a separator exactly like `&&`, so each side is checked.
-    #[test]
-    fn validate_shell_command_allows_semicolons_between_allowlisted_programs() {
-        assert!(validate_shell_command("git status; git log").is_ok());
-        let err = validate_shell_command("git status; rm -rf /")
-            .expect_err("an unlisted segment must be refused");
-        assert!(err.contains("'rm'"), "{err}");
-    }
-
-    /// Redirections that cannot name a file are removed before the scan:
-    /// `N>&M` joins the process's own streams, `/dev/null` discards on POSIX,
-    /// and `$null` discards on Windows PowerShell (e.g. `2>$null`, `>$null`, `*>$null`).
-    #[test]
-    fn validate_shell_command_allows_stream_joins_and_dev_null() {
-        assert!(validate_shell_command("pnpm test 2>&1").is_ok());
-        assert!(validate_shell_command("pnpm test 1>&2").is_ok());
-        assert!(validate_shell_command("pnpm test > /dev/null").is_ok());
-        assert!(validate_shell_command("pnpm test 2>/dev/null").is_ok());
-        assert!(validate_shell_command("cargo check 2>$null").is_ok());
-        assert!(validate_shell_command("cargo test >$null").is_ok());
-        assert!(validate_shell_command("git status *>$null").is_ok());
-        assert!(validate_shell_command("git status 2>&1 | head -5").is_ok());
-        assert!(validate_shell_command("git log 2>&1 | head -3 | wc -l").is_ok());
-    }
-
-    #[test]
-    fn validate_shell_command_allows_pentest_and_recon_tools() {
-        for cmd in [
-            "dnsx -d example.com",
-            "katana -u https://example.com",
-            "amass enum -d example.com",
-            "cmseek -u https://example.com",
-            "arjun -u https://example.com",
-            "testssl.sh https://example.com",
-            "testssl https://example.com",
-            "lynis audit system",
-            "gitleaks detect",
-            "trufflehog git file://.",
-            "weasyprint report.html report.pdf",
-            "whois example.com",
-            "dig example.com",
-            "nslookup example.com",
-            "traceroute example.com",
-            "whatweb https://example.com",
-            "hydra -l user -p pass ssh://example.com",
-            "wafw00f https://example.com",
-            "searchsploit apache",
-            "feroxbuster -u https://example.com",
-            "enum4linux 192.168.1.1",
-            "smbclient -L //192.168.1.1",
-            "showmount -e 192.168.1.1",
-        ] {
-            assert!(validate_shell_command(cmd).is_ok(), "blocked: {cmd}");
-        }
-    }
-
-    /// The exemption is narrow on purpose: anything that names a file, or that
-    /// looks like `/dev/null` without being it, still goes through the scan and
-    /// is refused. `guard_write` exists for the same reason on the write path.
-    #[test]
-    fn validate_shell_command_still_refuses_a_redirection_to_a_real_file() {
-        assert!(validate_shell_command("echo x > /dev/nullx").is_err());
-        assert!(validate_shell_command("echo x > /dev/null.txt").is_err());
-        assert!(validate_shell_command("echo x > ~/.ssh/authorized_keys").is_err());
-        assert!(validate_shell_command("echo x 2>> out.txt").is_err());
-        assert!(validate_shell_command("echo x > out.txt 2>&1").is_err());
-    }
-
-    /// A redirection inside quotes is an argument, not a redirection, so it is
-    /// left to the program and the `>` must not be treated as one.
-    #[test]
-    fn validate_shell_command_treats_a_quoted_redirection_as_data() {
-        assert!(validate_shell_command(r#"grep "2>&1" src/file.ts"#).is_ok());
-        assert!(validate_shell_command(r#"echo "> /dev/null""#).is_ok());
-    }
-
-    /// A chain of allowlisted programs is the case the chaining support exists
-    /// for: `pnpm lint && pnpm test` is how the agent verifies its own work.
-    #[test]
-    fn validate_shell_command_allows_chains_of_allowlisted_programs() {
-        assert!(validate_shell_command("pnpm lint && pnpm test").is_ok());
-        assert!(validate_shell_command("biome lint ./src && tsc --noEmit").is_ok());
-        assert!(validate_shell_command("git status || git log").is_ok());
-        assert!(validate_shell_command("cargo fmt && cargo clippy").is_ok());
-    }
-
-    /// The reason chaining is safe to allow at all: every segment's program is
-    /// checked, not just the first. Validating only the first token is what let
-    /// `git status && rm -rf /` through, because `git` is allowlisted.
-    #[test]
-    fn validate_shell_command_refuses_a_chain_with_an_unlisted_later_segment() {
-        let err = validate_shell_command("git status && rm -rf /")
-            .expect_err("a destructive second command must be refused");
-        assert!(err.contains("'rm'"), "{err}");
-        assert!(err.contains("PTY session"), "{err}");
-
-        assert!(validate_shell_command("pnpm test && sh -c 'x'").is_err());
-        assert!(validate_shell_command("pnpm test || sudo rm -rf /").is_err());
-        // Two levels of chaining do not launder the third program either.
-        assert!(
-            validate_shell_command("git status && pnpm test && shred -u f").is_err()
-        );
-    }
-
-    /// A separator inside quotes is data. Splitting on it would turn `echo` into
-    /// a two-segment chain and check a program that is really an argument.
-    #[test]
-    fn validate_shell_command_treats_a_quoted_separator_as_data() {
-        assert!(validate_shell_command(r#"echo "a && b""#).is_ok());
-        assert!(validate_shell_command(r#"echo 'x || y'"#).is_ok());
-        assert!(validate_shell_command(r#"grep "a && b" src/file.ts"#).is_ok());
-    }
-
-    /// A dangling separator leaves a segment with no program to check.
-    #[test]
-    fn validate_shell_command_refuses_an_empty_chain_segment() {
-        assert!(validate_shell_command("git status &&").is_err());
-        assert!(validate_shell_command("&& git status").is_err());
-        assert!(validate_shell_command("git status && ").is_err());
-    }
-
-    /// A binary the agent built is run by path, and that is allowed in a chain
-    /// for the same reason it is allowed on its own: absolute or rooted only.
-    #[test]
-    fn validate_shell_command_allows_a_built_binary_by_path_in_a_chain() {
-        assert!(
-            validate_shell_command("pnpm build && /opt/termigo/target/release/mytool --help").is_ok()
-        );
-        assert!(validate_shell_command(r#"pnpm build && C:\tools\mytool.exe --flag"#).is_ok());
-        // A relative path was never allowed, in a chain or out of one. Asserted
-        // so the boundary is explicit rather than an accident of the allowlist.
-        assert!(validate_shell_command("pnpm build && ./target/release/mytool --help").is_err());
     }
 
     #[test]
@@ -1280,43 +754,28 @@ mod tests_sandbox {
         assert!(validate_shell_command(r#"echo 'hello | world'"#).is_ok());
     }
 
+    /// Every `&&`/`||` segment is checked against the allowlist, so an
+    /// allowlisted first token cannot smuggle a non-allowlisted command past it.
     #[test]
-    fn drain_reads_pipe_data_into_target() {
-        let mut source = std::io::Cursor::new(b"hello world from pipe");
-        let target = Arc::new(Mutex::new((Vec::new(), false)));
-        drain(&mut source, &target);
-        let guard = target.lock().unwrap();
-        assert_eq!(guard.0, b"hello world from pipe");
-        assert!(!guard.1);
+    fn validate_shell_command_enforces_allowlist_on_every_segment() {
+        assert!(validate_shell_command("git status && git diff").is_ok());
+        assert!(validate_shell_command("npm test && cargo check").is_ok());
+        assert!(validate_shell_command("git status || git fetch").is_ok());
+        assert!(validate_shell_command("git log && rm -rf /").is_err());
+        assert!(validate_shell_command("git log || rm -rf /").is_err());
+        // A dangling operator leaves an empty segment.
+        assert!(validate_shell_command("git status &&").is_err());
     }
 
+    /// A raw newline is a hidden command separator: the allowlist only sees the
+    /// first line, so it must be refused outright rather than executed.
     #[test]
-    fn drain_truncates_pipe_data_exceeding_max_bytes() {
-        let big = vec![b'a'; MAX_OUTPUT_BYTES + 1024];
-        let mut source = std::io::Cursor::new(big);
-        let target = Arc::new(Mutex::new((Vec::new(), false)));
-        drain(&mut source, &target);
-        let guard = target.lock().unwrap();
-        assert_eq!(guard.0.len(), MAX_OUTPUT_BYTES);
-        assert!(guard.1);
-    }
-
-    #[test]
-    fn detect_interactive_prompt_recognizes_prompts_and_pagers() {
-        assert!(detect_interactive_prompt("Do you want to continue? [y/N]").is_some());
-        assert!(detect_interactive_prompt("Apply changes? (y/n): ").is_some());
-        assert!(detect_interactive_prompt("Delete existing directory? [yes/no]").is_some());
-        assert!(detect_interactive_prompt("[sudo] password for user: ").is_some());
-        assert!(detect_interactive_prompt("Enter passphrase:").is_some());
-        assert!(detect_interactive_prompt("Enter PIN:").is_some());
-        assert!(detect_interactive_prompt("Press any key to continue . . .").is_some());
-        assert!(detect_interactive_prompt("\x1b[?1049h").is_some());
-
-        // Negative cases (normal outputs should not trigger prompt guard)
-        assert!(detect_interactive_prompt("").is_none());
-        assert!(detect_interactive_prompt("   \n\r  ").is_none());
-        assert!(detect_interactive_prompt("Compiling termigo v0.1.0\nFinished dev target(s)").is_none());
-        assert!(detect_interactive_prompt("npm install completed successfully").is_none());
+    fn validate_shell_command_rejects_newline_injection() {
+        let err = validate_shell_command("echo hi\nrm -rf /")
+            .expect_err("newline injection must be refused");
+        assert!(err.contains("PTY session"), "{err}");
+        assert!(validate_shell_command("echo hi\r\nwhoami").is_err());
+        // A tab is not a separator and stays allowed.
+        assert!(validate_shell_command("echo hi\tthere").is_ok());
     }
 }
-

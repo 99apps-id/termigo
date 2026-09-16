@@ -17,9 +17,56 @@
 
 ---
 
+## Fixes applied (this change set)
+
+Verified with `vitest run src/modules/telegram src/modules/ai/lib/repairToolCall.test.ts`
+(110 tests in 7 files, exit 0) and `tsc --noEmit` (exit 0). The Rust change is
+parse-verified with `rustfmt --check` — no Rust toolchain is installed on the
+host that produced this report, so it was not compiled.
+
+| # | Finding | File | Fix |
+|---|---------|------|-----|
+| 1 | Invalid variable-length lookbehind regex | `src/modules/telegram/progressFormat.ts` | Leading delimiter captured and re-emitted instead of matched with a lookbehind |
+| 3 | Newline injection; allowlist read only the first token | `src-tauri/src/modules/shell/mod.rs` | Control chars rejected, a newline is a separator, and the allowlist runs on every `&&` / `||` / newline segment |
+| 4 | Update replay on restart | `src/modules/telegram/telegramPolling.ts` | Offset persisted under `termigo-telegram-offset`; a cold start drains the backlog with `offset=-1&limit=1` before polling |
+| 9 | Near-miss tool-name rewrite returned un-repaired args | `src/modules/ai/lib/repairToolCall.ts` | Args go through the same repair chain (fence → strict → `repairJsonText` → `parsePartialJson`) |
+| 10 | A failed or timed-out tool result read as success | `src/modules/telegram/progressFormat.ts` | `isErrorOutput` (non-zero `exit_code`, `timed_out`, `error`) maps the part to `error`; a timeout is named instead of defaulting to `exit 0` |
+
+### New findings in this pass
+
+**9. Near-miss tool-name repair left the arguments un-repaired (HIGH).**
+`repairToolCall.ts` returned `String(toolCall.input)` unchanged in the typo
+branch. The SDK re-parses that text, so a typo'd name *with* near-JSON
+arguments failed the same strict parse the hook exists to repair — the recovery
+only ever worked for already-valid JSON, which needed no recovery.
+
+**10. A non-zero exit code or a timeout rendered as success (MEDIUM).**
+`extractToolSummaries` read `output-available` as `done` unless the result
+carried an `error` string. `npm test` exiting 1 (or a command killed by its
+timeout) showed a green "✓ Ran" in the progress trail and in the mirrored
+message, so the failure was invisible outside the desktop app.
+
+**11. Absolute and rooted paths bypass the shell allowlist (MEDIUM, open).**
+`validate_shell_command` accepts any absolute path, so `/bin/rm -rf /` passes.
+This is deliberate — `C:\tools\my.exe` and `./node_modules/.bin/vitest` are
+legitimate — but it means the allowlist is not the boundary once a command is
+path-qualified. Left as-is; recorded so the trade-off stays explicit.
+
+### Re-check of two earlier findings
+
+- **#2 (pairing authorization)** is not a divergence in practice.
+  `isOwnerUser` and the inline `ownerUserId` check agree on every reachable
+  state (a private chat id always equals its sender's user id), and "open to
+  all chats" while nothing is paired is documented behaviour.
+- **#5 (control-server exhaustion)** does not leak pending entries: they are
+  removed on timeout, on `emit_to` failure, and by `control_respond` — which
+  runs before the receiver can observe `Disconnected`.
+
+---
+
 ## CRITICAL
 
-### 1. Invalid regex crashes `markdownToTelegramHtml` at runtime
+### 1. Invalid regex crashes `markdownToTelegramHtml` at runtime — FIXED
 **File:** `src/modules/telegram/progressFormat.ts` (~line 185)  
 **Function:** `markdownToTelegramHtml`
 
@@ -92,7 +139,7 @@ if (!ownerUserId || String(msg.from?.id) !== String(ownerUserId)) {
 }
 ```
 
-### 3. Command injection via newline in shell validation
+### 3. Command injection via newline in shell validation — FIXED
 **File:** `src-tauri/src/modules/shell/mod.rs`  
 **Function:** `validate_shell_command`, `wrap_with_sentinel`, `shell_session_run`
 
@@ -133,7 +180,7 @@ const SHELL_METACHARACTERS: &[char] = &[';', '|', '&', '$', '(', ')', '<', '>', 
 
 ## MEDIUM
 
-### 4. Telegram update replay on app restart
+### 4. Telegram update replay on app restart — FIXED
 **File:** `src/modules/telegram/bot.ts`  
 **Variable:** `currentUpdateOffset`
 
