@@ -40,7 +40,11 @@ async function getSessionShell(
 ): Promise<number> {
   let p = sessionShells.get(sessionId);
   if (!p) {
-    p = native.shellSessionOpen(cwd);
+    // Clean up only failed opens so the map doesn't accumulate stale rejects.
+    p = native.shellSessionOpen(cwd).catch((err) => {
+      sessionShells.delete(sessionId);
+      throw err;
+    });
     sessionShells.set(sessionId, p);
   }
   return p;

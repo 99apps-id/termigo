@@ -44,10 +44,11 @@ function withFetchTimeout<T>(
   ms: number,
   url: string,
 ): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   return Promise.race([
-    promise,
-    new Promise<T>((_, reject) =>
-      setTimeout(
+    promise.finally(() => clearTimeout(timer)),
+    new Promise<T>((_, reject) => {
+      timer = setTimeout(
         () =>
           reject(
             new Error(
@@ -55,8 +56,8 @@ function withFetchTimeout<T>(
             ),
           ),
         ms,
-      ),
-    ),
+      );
+    }),
   ]);
 }
 

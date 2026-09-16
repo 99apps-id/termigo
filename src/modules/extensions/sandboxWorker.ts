@@ -254,11 +254,15 @@ async function handle(msg: HostMessage): Promise<void> {
           // Guard against an activate() that never resolves (e.g. a hung RPC),
           // which would otherwise wedge the panel on "Loading panel..." with no
           // error surfaced.
+          let timer: ReturnType<typeof setTimeout> | undefined;
           await Promise.race([
-            activateFn(ctx),
-            new Promise((_, reject) =>
-              setTimeout(() => reject(new Error("activation timed out after 15s")), 15000),
-            ),
+            Promise.resolve(activateFn(ctx)).finally(() => clearTimeout(timer)),
+            new Promise((_, reject) => {
+              timer = setTimeout(
+                () => reject(new Error("activation timed out after 15s")),
+                15000,
+              );
+            }),
           ]);
         }
         send({ type: "ready", id: msg.id });
