@@ -757,6 +757,62 @@ export function renderAnswerSnippet(text: string, max = 700): string {
   return `${head}\n…\n${tail}`;
 }
 
+/**
+ * Name the phase the run is actually in, rather than a fixed word per status.
+ *
+ * The card used to say exactly one of "Thinking...", "Writing response..." or
+ * "Working..." - derived from `status` alone. But `status` is coarse: it stays
+ * "thinking" while the model deliberates AND while a tool runs, and a run spends
+ * most of its wall clock in tools, so the user read "Thinking..." for minutes
+ * with nothing to distinguish a build from a wedge.
+ *
+ * The evidence for a finer label is already in the card's own inputs: a tool in
+ * flight means the agent is executing, not thinking; prose means it has started
+ * answering. Pure so the precedence can be asserted - and the order is the whole
+ * design:
+ *
+ * 1. An approval blocks the run on the USER, so it outranks everything; saying
+ *    "Running command" while a prompt is waiting would hide the only thing the
+ *    reader can act on.
+ * 2. A RUNNING tool outranks existing prose. `answerText` joins every text part
+ *    of the assistant message, so by step 5 of a run it is usually non-empty
+ *    from prose written minutes ago while a tool is executing now - labelling
+ *    that "Writing response" reports a phase the run has already left. The
+ *    prose is on the card anyway (rendered above the status line), so nothing is
+ *    lost by naming the current activity instead.
+ * 3. Only with no tool in flight does prose mean the model is writing.
+ *
+ * Returns the label WITHOUT its trailing ellipsis; the caller adds it, so the
+ * string stays comparable in tests.
+ */
+export function describeRunPhase(input: {
+  status: string;
+  tools?: ToolCallSummary[];
+  hasAnswerText?: boolean;
+}): string {
+  if (input.status === "awaiting-approval") return "Waiting for approval";
+  const tools = input.tools ?? [];
+  if (tools.some((t) => t.state === "awaiting-approval")) {
+    return "Waiting for approval";
+  }
+  const running = tools.filter((t) => t.state === "running");
+  if (running.length > 0) {
+    // Naming the tool is what makes the line informative: "Running" beside the
+    // `⚡ Running \`cmd\`` line below tells the user the agent is doing
+    // something concrete. `getToolRunningVerb` already capitalises and already
+    // falls back to "Running <tool>" for an unknown name.
+    return getToolRunningVerb(running[running.length - 1].toolName);
+  }
+  if (input.hasAnswerText) return "Writing response";
+  if (tools.some((t) => t.state === "done" || t.state === "error")) {
+    // Tools have finished and the model has been handed the results, so it is
+    // deciding what to do next - not writing prose yet.
+    return "Deciding next step";
+  }
+  if (input.status === "streaming") return "Writing response";
+  return "Thinking";
+}
+
 export function formatLiveProgress(opts: FormatLiveProgressOptions): string {
   if (opts.completed) {
     if (opts.answerText && opts.answerText.trim().length > 0) {

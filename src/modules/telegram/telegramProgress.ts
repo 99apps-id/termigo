@@ -11,7 +11,12 @@ import {
   sendProgressMessage,
   sendTyping,
 } from "./telegramApi";
-import { getPendingApprovals, messageText, runBusy } from "./telegramHelpers";
+import {
+  getPendingApprovals,
+  latestReasoningTail,
+  messageText,
+  runBusy,
+} from "./telegramHelpers";
 
 export const progressCtrls = new Map<number, AbortController>();
 export const lastFinishedProgressMessageIds = new Map<number, number>();
@@ -134,7 +139,8 @@ export async function publishProgress(
         : [];
       // The assistant's own prose, so the card shows what it is saying as it
       // says it. Taken from text parts only: reasoning is the agent thinking
-      // aloud, and publishing it would show raw scratchpad in the chat.
+      // aloud, and publishing it as the ANSWER would show raw scratchpad in the
+      // chat and could be contradicted by the reply that follows.
       const answerText = lastAssistant
         ? messageText(
             lastAssistant as {
@@ -143,6 +149,20 @@ export async function publishProgress(
             },
           )
         : "";
+      // ...but the thinking IS worth showing as a status line while there is no
+      // answer yet, because "Thinking..." alone cannot distinguish an agent
+      // working through a long task from one that has wedged. `formatLiveProgress`
+      // drops it the moment `answerText` is non-empty, so scratchpad never
+      // competes with the reply.
+      const thinkingText =
+        answerText.length === 0
+          ? latestReasoningTail(
+              lastAssistant as {
+                role: string;
+                parts?: Array<{ type?: string; text?: string }>;
+              } | null,
+            )
+          : "";
 
       // Format compact live progress
       const liveStatus =
@@ -160,6 +180,7 @@ export async function publishProgress(
         elapsedMs: now - started,
         mode,
         answerText,
+        thinkingText,
         modelLabel: await resolveModelLabel(
           store.useChatStore.getState().selectedModelId,
         ),
@@ -173,6 +194,13 @@ export async function publishProgress(
         todosCount: todos.length,
         todosDone: todos.filter((t) => t.status === "completed").length,
         answerLen: answerText.length,
+        // The thinking TEXT, not its length. The excerpt is a fixed-width tail,
+        // so its length saturates at the cap almost immediately and would then
+        // report "no change" forever while the content kept moving - a key on
+        // length would freeze the very line this exists to animate. Bounded by
+        // the excerpt cap, and the 1500ms edit throttle below still bounds the
+        // request rate.
+        thinkingText,
       });
       const hasSubstantiveChange = substantiveKey !== lastSubstantiveKey;
 
