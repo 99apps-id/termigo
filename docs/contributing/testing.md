@@ -21,7 +21,7 @@ If you do not have `cargo-nextest` installed, `cargo test --locked` is the local
 
 `pnpm check:commands` (`scripts/check-invoke-commands.mjs`) cross-checks every
 string-literal `invoke("cmd")` in `src/` against the commands registered in
-`src-tauri/src/lib.rs`'s `generate_handler!`, and fails on any that is missing —
+`src-tauri/src/lib.rs`'s `generate_handler!`, and fails on any that is missing -
 the "referenced from the UI but never registered" bug that shipped SSH backup
 broken. If a command is genuinely dynamic or handled outside `generate_handler!`,
 add it to the `ALLOWLIST` in that script with a comment saying why.
@@ -80,7 +80,7 @@ When testing `src/modules/ai/lib/security.ts` or the Rust equivalents, cover:
 ## End-to-end (smoke)
 
 Unit tests (Vitest / `cargo nextest`) cover logic in isolation; they cannot see
-the integration path — the moment the real app boots, the webview mounts, and
+the integration path - the moment the real app boots, the webview mounts, and
 the frontend talks to the Rust backend over IPC. That path is where a whole
 class of bug hides: a boot crash, a blank window, a terminal that never spawns
 because a Rust command was referenced but never registered.
@@ -88,7 +88,7 @@ because a Rust command was referenced but never registered.
 `e2e/` is a standalone WebdriverIO + [`tauri-driver`](https://v2.tauri.app/develop/tests/webdriver/)
 package that boots the built binary and drives its webview. It runs in CI on
 Linux (the `e2e` job in `ci.yml`, advisory until proven stable) and can be run
-locally on Linux/Windows — see [`e2e/README.md`](../../e2e/README.md). Keep smoke
+locally on Linux/Windows - see [`e2e/README.md`](../../e2e/README.md). Keep smoke
 specs shallow and resilient (they guard the boot/integration path, not fine UI
 detail) and select on the app's stable `data-*` hooks.
 

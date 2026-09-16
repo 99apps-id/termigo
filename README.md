@@ -80,13 +80,13 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   levers: switch off whole optional domains (browser, GitHub, LSP, web, skills,
   SQL, PDF, images, worktrees, …), and turn on **load tools on demand**, which
   sends the coding loop plus a `find_tools` search and adds a domain when the
-  agent asks for it — measured at 8.0k tokens per request instead of 20.5k, with
+  agent asks for it - measured at 8.0k tokens per request instead of 20.5k, with
   full capability kept. A tool call for a name that does not exist is answered
   with the real toolset, a "did you mean" list, and the discovery hint, so the
   agent corrects itself instead of reporting the capability as missing.
 - **Skills.** The agent writes reusable procedures for itself in
-  `.termigo/skills/<name>/SKILL.md` — a deploy sequence, a debugging route that
-  worked, a release checklist — and reads them back in later sessions. This is
+  `.termigo/skills/<name>/SKILL.md` - a deploy sequence, a debugging route that
+  worked, a release checklist - and reads them back in later sessions. This is
   what makes it better over time rather than merely better informed: memory
   stops a session starting from zero, a skill means a procedure worked out once
   never has to be worked out again. Re-saving a name replaces it, so a skill
@@ -94,8 +94,8 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   bodies load on demand through `use_skill`, so a shelf of skills costs almost
   nothing until one is needed. Plain Markdown with frontmatter, so you can read,
   edit or delete any of them by hand. `find_skill` searches every skill library
-  on the machine on demand — your own, and those installed by other agent tools
-  — so a large collection stays reachable without any of it sitting in the
+  on the machine on demand - your own, and those installed by other agent tools
+  - so a large collection stays reachable without any of it sitting in the
   prompt. Skills written for another agent still parse, and `use_skill` says so
   when one calls tools Termigo does not have.
 - **Self-maintaining and global memory.** The agent records durable project facts in
@@ -114,8 +114,8 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   count and total size, because everything in it costs context on every request.
   The sweep only runs in the auto-approve modes: in `Ask every time`, nothing is
   written without a click.
-- **Sub-agents read in parallel.** Work that means covering a lot of ground —
-  auditing a project, exploring an unfamiliar codebase, reviewing four modules —
+- **Sub-agents read in parallel with concurrency bounds.** Work that means covering a lot of ground:
+  auditing a project, exploring an unfamiliar codebase, reviewing four modules:
   is split into tasks that run at the same time, each with its own fresh
   context, and their findings come back together. Tasks can be chained: one
   that declares `depends_on` waits for the others and receives what they found,
@@ -124,11 +124,14 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   asked politely in a prompt to parallelise will ignore it; a narrow request is
   left alone, and telling it not to use sub-agents is respected.
 
-  **Full toolset, held by approval — not read-only.** A sub-agent gets the same
+  **Full toolset, held by approval - not read-only.** A sub-agent gets the same
   tools as the main agent (read, search, edit, shell, git, extensions), so it
   can actually do the job it was given; what keeps that safe is that every
   mutating, exec or third-party call routes through the same approval queue, so
-  nothing runs without your click. Spawn tools are withheld only at the
+  nothing runs without your click. A global concurrency pool (`SubagentConcurrencyPool`,
+  default limit 4) prevents provider throttling, while hierarchical slot yielding (`yieldSlot`)
+  prevents parent/child deadlocks. Local subagents isolate their workspace from remote SSH tabs,
+  and transient rate limits retry with exponential backoff. Spawn tools are withheld only at the
   nesting-depth cap (`subagentMaxDepth`, default 3), so a sub-agent can
   delegate to its own sub-agents up to that bound and no further. Alongside
   the general roster there are focused **pentest specialists**
@@ -142,21 +145,21 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   how long context assembly took, the prompt size broken down by what
   contributed it, the cache hit rate, how many steps were used against the
   budget, why the run stopped, and the model. When the agent feels slow, that
-  line says which part was slow — an MCP server starting, a large project
-  memory, a cold cache — instead of leaving you to guess. Most of the fixes in
+  line says which part was slow - an MCP server starting, a large project
+  memory, a cold cache - instead of leaving you to guess. Most of the fixes in
   recent releases were found by reading it.
 - **Searchable chat history.** Sessions persist across launches; the session
   picker filters them by title as you type and, on demand, by what was actually
   said in the messages.
 - **Steer, stop and resume a run.** Typing while the agent works queues the
   message and delivers it when the current run settles, so a correction reaches
-  it instead of being dropped — attachments included. Queued messages are shown
+  it instead of being dropped - attachments included. Queued messages are shown
   with a way to take them back. Stop reaches the work, not just the reply: it
   kills the command the agent is running rather than leaving a shell going
   behind a stopped agent, and the transcript then offers to continue. An
   interrupted tool call is closed out as interrupted rather than erased, so the
   model can see its work was cut short instead of being shown a past in which it
-  never made the call — and repeating it.
+  never made the call - and repeating it.
 - **The run says why it stopped, and goes deeper when you ask.** One request
   gets 25 steps, the same default as VS Code's agent mode, and each Continue
   moves up a ladder to 50 then 100. A light task never pays for a heavy one,
@@ -164,16 +167,16 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   task was. Two guards sit alongside the budget: the same tool called three
   times with identical input, and two turns in a row that call no tool at all.
   The transcript names which one fired, because "it repeated itself" and "it ran
-  out of budget" call for different responses — one is worth a click, the other
+  out of budget" call for different responses - one is worth a click, the other
   is worth a sentence of extra detail.
 - **It does not die when it outgrows the window.** If a request exceeds the
   model's context window, Termigo learns the real limit from the provider's
   rejection, compacts the transcript harder, and resumes the SAME run
-  automatically — so a long task keeps going instead of stopping mid-way. A
+  automatically - so a long task keeps going instead of stopping mid-way. A
   per-session throttle stops it looping when compaction can never fit, and a
   Try again button stays as the manual fallback.
-- **Finished work stops costing tokens.** Once a span of history is verified —
-  its changes are saved to git by a checkpoint or commit — the next turn
+- **Finished work stops costing tokens.** Once a span of history is verified -
+  its changes are saved to git by a checkpoint or commit - the next turn
   replaces that whole span with a short checkpoint summary (files changed,
   commands and checks run, a compact diff note) instead of resending the full
   chat. The model keeps knowing the current state without re-paying for the
@@ -186,8 +189,8 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
 - **Provider quirks heal themselves.** A custom endpoint whose "thinking mode"
   rejects a pinned tool call gets the pin dropped and the same request resent
   automatically (broad "audit this repo" prompts no longer die on a red card);
-  a long, bursty generation — a report from a thinking-mode model can pause
-  over half a minute between chunks — is given a generous idle bound instead of
+  a long, bursty generation - a report from a thinking-mode model can pause
+  over half a minute between chunks - is given a generous idle bound instead of
   being killed as stalled, and a genuine mid-stream stall routes to the same
   auto-retry rather than a dead error card.
 - **A run cut off by a restart is recoverable.** The transcript is persisted,
@@ -211,7 +214,7 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   (Settings → Agents → Diagnostics) and an inspector appears in the AI bar
   holding each request as assembled: the system prompt, the message history
   after pruning and compaction, and **the exact tool set attached on that
-  step** — which is usually the answer when the agent ignores a tool you
+  step** - which is usually the answer when the agent ignores a tool you
   expected it to use, or reaches for one you did not. A rejection names a
   symptom and the transcript shows the reply; neither shows the three things
   that decide what actually happens. Captures are kept in memory only, never
@@ -219,7 +222,7 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   before the provider SDK attaches credentials.
 - **The agent can define its own tools.** A command worth repeating is saved as
   a named tool with `{{placeholders}}` in `.termigo/tools.json` and called by
-  name afterwards. It is a command template, not code — running one goes
+  name afterwards. It is a command template, not code - running one goes
   through the same shell safety check, approval tier and remote routing as
   `bash_run`, so a custom tool can do nothing the agent could not already do.
   Arguments are shell-quoted with no raw mode.
@@ -229,6 +232,14 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   background processes (`bash_background` spawn, `bash_wait` to block until
   a build or install finishes, `bash_logs` to tail, `bash_kill` to stop), and
   SSH port forwarding so a service on a remote host becomes reachable locally
+- **Tool call auto-repair and parameter normalization.** Parameter aliases
+  (`query`/`path` on `grep`/`glob`, `max_results` clamping on `code_search`,
+  string-to-array on `replace_in_files`) and equivalent tool names (`view_file` -> `read_file`,
+  `run_command` -> `bash_run`, `replace_file_content` -> `edit`) are automatically
+  repaired before validation.
+- **Windows shell execution support.** The command execution sandbox allowlists
+  `cmd`, `cmd.exe`, `powershell`, `pwsh`, and `set`, allowing agents to run `cmd /c`
+  for batch scripts and environment tools while maintaining strict path authorization.
 - Tool calls are **approval-gated**; approvals resume the run (including
   OpenAI-compatible providers such as DeepSeek)
 - **Graduated auto-approval.** Choose how much the agent may do without
@@ -272,8 +283,8 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   [`docs/headless-vps.md`](docs/headless-vps.md).
 - **Deleting is never delegated.** No mode speaks for you here, including
   `Auto-approve all`: `delete_file` always asks, and so does any command that
-  removes files — `rm`, `rmdir`, `git clean`, `find -delete`, PowerShell's
-  `Remove-Item` and its aliases — wherever it sits in the line, so
+  removes files - `rm`, `rmdir`, `git clean`, `find -delete`, PowerShell's
+  `Remove-Item` and its aliases - wherever it sits in the line, so
   `pnpm build && rm -rf dist` is not read as a build. The gate follows the
   command rather than the tool name, so a custom tool cannot route around it.
   Every other change an agent makes can be recovered by reading the file again
@@ -286,7 +297,7 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   `move_file` and `delete_file` all go over SFTP. Windows drive paths (`C:\...`)
   still mean this machine, since they cannot mean anything on a POSIX host.
   `grep` and `glob` search the server too, using its own `grep` and `find` over
-  a dedicated exec channel rather than walking the tree over SFTP — one command
+  a dedicated exec channel rather than walking the tree over SFTP - one command
   instead of thousands of round trips. Every value interpolated into those
   commands is single-quoted, so a pattern cannot become a second command.
   `bash_run` runs on the server too, from the remote shell's working directory,
@@ -294,15 +305,15 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   without you relaying commands. Remote commands are gated by what they do rather than by
   being remote: under `Auto-approve edits`, one that only inspects (`ls`,
   `docker ps`, `git status`) runs, and anything that could change the server
-  stops for a click — as does anything the classifier does not recognise. Under
+  stops for a click - as does anything the classifier does not recognise. Under
   `Ask every time` all of them ask; under `Auto-approve all` none do, except one
-  that deletes — that asks on any host, in any mode. `replace_in_files`, `copy_file` and `bash_background` still
+  that deletes - that asks on any host, in any mode. `replace_in_files`, `copy_file` and `bash_background` still
   have no remote form and refuse while a session is open, saying what to use
   instead rather than quietly acting on your own disk.
 - **Tools the agent defines for itself.** After running something worth
   repeating, the agent can save it as a named tool with `create_tool`, and call
   it by name from then on. A tool is a shell command template with
-  `{{placeholders}}`, stored in `.termigo/tools.json` — not code. Running one
+  `{{placeholders}}`, stored in `.termigo/tools.json` - not code. Running one
   goes through the same path `bash_run` takes, so the shell safety check, the
   approval tiers and the remote/local routing all apply unchanged: a custom
   tool can do nothing the agent could not already do. Every argument is
@@ -347,7 +358,7 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   blocks and head-preserved row outputs.
 - **Web search, documents, images, clipboard, environment.** `web_search`
   queries DuckDuckGo through the same SSRF-guarded HTTP path as `fetch` (no API
-  key needed) and returns the top results — title, URL, snippet — so the agent
+  key needed) and returns the top results - title, URL, snippet - so the agent
   can answer questions that live outside the workspace. `read_pdf` extracts the
   text of a PDF (handles compressed streams, page-by-page, capped) so a report
   or spec can be read straight into context; scanned/image-only PDFs report
@@ -355,23 +366,23 @@ This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
   visual part, so a screenshot, mockup or diagram on disk can be seen (requires
   a vision-capable model). `clipboard_get` / `clipboard_set` read and replace
   the clipboard (write asks for approval), and `env_get` / `env_list` inspect
-  the process environment read-only — enough to answer "what is PATH?" without
+  the process environment read-only - enough to answer "what is PATH?" without
   a shell round-trip.
 - **Artifacts the agent produced stay reachable.** Canvases (`render_view`),
   previews (`open_preview`) and files (`write_file`) land in an **Artifacts**
-  panel (the layers button in the AI status bar), and each can be reopened —
-  files in the editor, previews and canvases in a preview tab — so something
+  panel (the layers button in the AI status bar), and each can be reopened -
+  files in the editor, previews and canvases in a preview tab - so something
   the agent drew or wrote is one click away instead of buried in the
   transcript.
 - **The agent can ask you a question mid-run.** `ask_user` renders a clickable
-  chooser in the chat (2–6 options) and the agent waits for your pick — useful
-  for choosing between approaches or confirming a risky call — instead of
+  chooser in the chat (2–6 options) and the agent waits for your pick - useful
+  for choosing between approaches or confirming a risky call - instead of
   guessing and having to redo work.
 - **Opt-in post-execution confirmation.** When enabled (Settings → Agents →
   Confirm after mutations), a mutating tool that succeeds pauses the run and
   asks **Keep / Revert** before the agent continues; Revert restores the
   touched paths from git. Off by default so everyday runs stay uninterrupted.
-- **Sub-agents can nest — up to a depth you choose.** A sub-agent may spawn its
+- **Sub-agents can nest - up to a depth you choose.** A sub-agent may spawn its
   own sub-agents (each with the full toolset), capped by the `subagentMaxDepth`
   preference (1–5, default 3); at the cap the spawn tools are withheld so
   recursion cannot loop. A configured sub-agent model that would cost more than
@@ -450,7 +461,7 @@ it would do, `--format` picks a different artifact (`npm/termigo/README.md` has
 the full list).
 
 > **Servers:** a release install is safe on a headless VPS, but it is not a
-> replacement for the Xvfb setup in [`docs/headless-vps.md`](docs/headless-vps.md) —
+> replacement for the Xvfb setup in [`docs/headless-vps.md`](docs/headless-vps.md) -
 > `xvfb` and `dbus` still have to be present, and two Termigo instances must
 > never share one data directory.
 
@@ -598,8 +609,8 @@ See [`docs/`](docs/) for the MCP, skills, agents, and architecture guides.
   <img src="docs/termigo-running-antigravity-cli.png" alt="A terminal running the Antigravity coding agent" width="900" />
   <br/>
   <sub>
-    A terminal is a full terminal: run any CLI in it — here the Antigravity
-    coding agent in accept-edits mode — interactive and full-colour, beside the
+    A terminal is a full terminal: run any CLI in it - here the Antigravity
+    coding agent in accept-edits mode - interactive and full-colour, beside the
     local project tree
   </sub>
 </p>
@@ -618,7 +629,7 @@ See [`docs/`](docs/) for the MCP, skills, agents, and architecture guides.
   <img src="docs/termigo-settings-extensions.png" alt="The Extensions manager in Settings" width="900" />
   <br/>
   <sub>
-    Settings → Extensions: install, enable and update packages — here the
+    Settings → Extensions: install, enable and update packages - here the
     Termigo Pentest &amp; RE Kit from a GitHub repo or local zip
   </sub>
 </p>
@@ -627,7 +638,7 @@ See [`docs/`](docs/) for the MCP, skills, agents, and architecture guides.
   <img src="docs/termigo-settings-harness.png" alt="Agent harness profiles in Settings" width="900" />
   <br/>
   <sub>
-    Settings → Harness: pick how the agent is driven — Balanced, Plan first,
+    Settings → Harness: pick how the agent is driven - Balanced, Plan first,
     Verify before finish, Terminal-first, Shorter loop
   </sub>
 </p>
@@ -645,7 +656,7 @@ See [`docs/`](docs/) for the MCP, skills, agents, and architecture guides.
   <img src="docs/termigo-telegram.png" alt="Telegram relay with a model menu" width="900" />
   <br/>
   <sub>
-    Telegram relay: message the agent from your phone — just type a question (no
+    Telegram relay: message the agent from your phone - just type a question (no
     /query needed), and /model opens a provider + model picker
   </sub>
 </p>

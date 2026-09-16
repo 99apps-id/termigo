@@ -1,4 +1,4 @@
-# Termigo — Security & Bug Audit Report
+# Termigo - Security & Bug Audit Report
 **Repo:** github.com/99apps-id/termigo  
 **Date:** 2025-09-10  
 **Auditor:** Termigo Agent (automated + manual review)  
@@ -24,7 +24,7 @@
 **Function:** `markdownToTelegramHtml`
 
 ```typescript
-// Step 11 — THIS REGEX IS INVALID IN JAVASCRIPT
+// Step 11 - THIS REGEX IS INVALID IN JAVASCRIPT
 text = text.replace(
   /(?<=^|[\s([{])_([^_ \r\n][^_\r\n]*?[^_ \r\n]|\S)_(?=[)\]}'\s.,:;!?]|$)/gm,
   "<i>$1</i>",
@@ -56,7 +56,7 @@ Or use a two-pass approach: first match the surrounding context, then replace.
 
 ## HIGH
 
-### 2. Telegram authorization bypass — sensitive commands work without pairing
+### 2. Telegram authorization bypass - sensitive commands work without pairing
 **File:** `src/modules/telegram/bot.ts`  
 **Functions:** `handleUpdate` (cases `/approve`, `/deny`, `/mode`, `/scope`)
 
@@ -75,10 +75,10 @@ case "/approve": {
 **Bug:** The authorization check uses `if (ownerUserId && ...)`. When the bot is **unpaired** (`ownerUserId === null`), the condition short-circuits and the command executes for any user in any chat.
 
 **Affected commands:**
-- `/approve` — approve ALL pending tool actions
-- `/deny` — deny ALL pending tool actions  
-- `/mode` — change agent approval mode (e.g., to "all" = autonomous execution)
-- `/scope` — add/remove/toggle pentest scope
+- `/approve` - approve ALL pending tool actions
+- `/deny` - deny ALL pending tool actions  
+- `/mode` - change agent approval mode (e.g., to "all" = autonomous execution)
+- `/scope` - add/remove/toggle pentest scope
 
 **Impact:** If the bot is unpaired (or the pairing state is lost), any Telegram user can:
 - Approve dangerous tool executions (file writes, shell commands, network scans)
@@ -235,8 +235,8 @@ let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
 7. **Telegram pairing** uses both chat-level and user-level checks for sensitive operations (when paired).
 
 ### Recommendations
-1. Fix the regex crash immediately — it makes the entire Telegram feature unusable.
-2. Add `'\n'`/`'\r'` to shell metacharacters — this is a critical gap.
+1. Fix the regex crash immediately - it makes the entire Telegram feature unusable.
+2. Add `'\n'`/`'\r'` to shell metacharacters - this is a critical gap.
 3. Require pairing for sensitive Telegram commands, or at least reject when unpaired.
 4. Persist the Telegram update offset to prevent replay.
 5. Add PTY write payload size limit as defense-in-depth.

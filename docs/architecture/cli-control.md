@@ -24,9 +24,9 @@ termigo pentest-report [target] [--json]
 
 The app must already be running. A command launched inside a Termigo pane targets that pane's space, even if another space or tab has UI focus. An external client without pane context falls back to the active UI context.
 
-`run "<task>"` starts a plain agent task in the app's in-app agent — the generalization of the pentest commands, with no scope fencing: the prompt is sent to the active chat session and every tool call still surfaces in the approval queue.
+`run "<task>"` starts a plain agent task in the app's in-app agent - the generalization of the pentest commands, with no scope fencing: the prompt is sent to the active chat session and every tool call still surfaces in the approval queue.
 
-`query "<question>"` is the headless read-only Q&A: the prompt is wrapped with a read-only directive, sent to the agent, and the final answer text is printed (the server uses a long timeout — default 300s, tune with `--timeout <secs>`). Ideal for scripting: `termigo query "what does the README say?"`.
+`query "<question>"` is the headless read-only Q&A: the prompt is wrapped with a read-only directive, sent to the agent, and the final answer text is printed (the server uses a long timeout - default 300s, tune with `--timeout <secs>`). Ideal for scripting: `termigo query "what does the README say?"`.
 
 `run-command <id>` invokes a command-palette command by id (e.g. `settings.open`, `spaces.overview`) in the running app, so an external script can drive UI actions that have no agent equivalent.
 
@@ -34,7 +34,7 @@ The Go companion in `cli/` carries the terminal-facing group on top of the same 
 
 `status` reports platform info (version/os/arch/methods) and, when the UI is ready, enriches it with the live agent state (status, current step, stop reason, run round), the active model, the workspace root, the active session and today's spend (from the cost ledger). When the webview is still restoring, it falls back to the platform fields alone so the command still answers a health check.
 
-`pentest-run` starts an approval-gated penetration test in the app's in-app agent. `target` (host, IP or URL) is added to the app's pentest scope and the optional `category` (`recon`, `web`, `network`, `subdomains`, `tls`, `headers`, `full`, …; default `recon`) selects the workflow. Every command the run performs still surfaces in the approval queue — this only starts the run, it never auto-approves. The frontend builds the agent prompt from `src/modules/control/lib/pentestPrompt.ts`.
+`pentest-run` starts an approval-gated penetration test in the app's in-app agent. `target` (host, IP or URL) is added to the app's pentest scope and the optional `category` (`recon`, `web`, `network`, `subdomains`, `tls`, `headers`, `full`, …; default `recon`) selects the workflow. Every command the run performs still surfaces in the approval queue - this only starts the run, it never auto-approves. The frontend builds the agent prompt from `src/modules/control/lib/pentestPrompt.ts`.
 
 `pentest-status` reports the latest pentest run (target, category, started-at, run status) plus the agent's live state, so a script can tell whether a run is still in flight. `pentest-report [target]` asks the app to generate and open the pentest report; the target is optional and defaults to the last `pentest-run` target. The pentest commands are also available inside the app as `/pentest <target> [category]`, and orchestration pipelines (`.termigo/pipelines/*.json`, run through the `orchestrate` tool) as `/pipeline <name> | list`.
 

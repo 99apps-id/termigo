@@ -86,8 +86,8 @@ The themes below frame every scope decision.
 - [x] Document and image tools: `read_pdf` (text extraction from compressed PDFs) and `read_image` (vision-capable image reading)
 - [x] Clipboard and environment tools: `clipboard_get` / `clipboard_set` and `env_get` / `env_list`
 - [x] Git history tools: `git_blame` and `git_show` (inspect any commit)
-- [x] Artifacts panel — canvases, previews and files the agent produced, reopened in one click
-- [x] Dev-server orchestration (`dev_server`) — detects the project's dev command
+- [x] Artifacts panel - canvases, previews and files the agent produced, reopened in one click
+- [x] Dev-server orchestration (`dev_server`) - detects the project's dev command
   (package.json scripts), spawns it in the background (deduping a running
   instance), reads the server's own log for the real URL (ported `findLocalUrl`
   from TEDI, ANSI-safe, `0.0.0.0` → `127.0.0.1`), health-probes the loopback
@@ -95,7 +95,7 @@ The themes below frame every scope decision.
   the browser pane. Watch/stop via `bash_logs`/`bash_kill`, block on a
   background build/install with `bash_wait`, and control the page via the
   `browser_*` tools.
-- [x] In-chat elicitation (`ask_user`) — the agent pauses for a clickable choice
+- [x] In-chat elicitation (`ask_user`) - the agent pauses for a clickable choice
 - [x] Opt-in post-execution confirmation (Keep / Revert after a mutating tool, with git-based revert)
 - [x] Sub-agent nesting depth (1–5), cost-tier guard, and sub-agent runs persisted to disk
 - [x] Extension-contributed AI tools
@@ -151,22 +151,22 @@ The themes below frame every scope decision.
 ### Coming next
 
 - [ ] AI-powered inline terminal suggestions, opt-in (history-based suggestions have shipped)
-- [x] AI agent reliability and workflow improvements — tool execution, context
+- [x] AI agent reliability and workflow improvements - tool execution, context
   management, recovery, and long-running tasks. Shipped: context-window
   auto-recovery, transient-provider-error recovery, interrupted-run recovery
   after a restart, loop round-cap, no-progress / tool-error guards, the
   per-run workspace anchor, rotating thinking-phrase status (no step spam),
-  context pruning — a verified span of history (saved to git via a
+  context pruning - a verified span of history (saved to git via a
   checkpoint) is collapsed into a checkpoint summary each turn to save
-  tokens — forced tool-choice recovery for thinking-mode endpoints (the pin
+  tokens - forced tool-choice recovery for thinking-mode endpoints (the pin
   is learned away and the request auto-resumes), a burst-tolerant mid-stream
   idle bound (120s) with stall routing to the transient auto-retry,
   dropped-path repair for edit/multi_edit, and plain-language status/error
   copy.
-- [x] Expand external coding-agent orchestration beyond Claude Code — built-in
+- [x] Expand external coding-agent orchestration beyond Claude Code - built-in
   launchers for Codex, Gemini, Pi, OpenCode, Grok, Aider, Qwen and Cursor, plus
   user-defined custom coding-agent CLIs in Settings.
-- [x] Agent UX parity with BatikCode-style host agents — sub-agent nesting
+- [x] Agent UX parity with BatikCode-style host agents - sub-agent nesting
   depth, cost-tier guard, persisted sub-agent runs, editable/resendable user
   messages, live background-command output, modified-file chips in tool
   cards, a centralized agent registry/factory (`buildSubagentSpec`,
@@ -176,18 +176,18 @@ The themes below frame every scope decision.
 - [x] Telegram relay polish - typing indicator while the agent works, an
   echo fix so messages the bot injects are never mirrored back, synchronous
   dispatch locking, and prompt fingerprinting.
-- [x] Extensible slash commands — a fixed set ships (`/init`, `/plan`, `/goal`,
+- [x] Extensible slash commands - a fixed set ships (`/init`, `/plan`, `/goal`,
   `/model`, …), and user-authored commands live in `.termigo/commands/*.md`
   (frontmatter `description:` + a prompt body, `$ARGUMENTS` placeholder),
   listed by the `/` picker and re-scanned on open.
-- [x] Project-scoped approval policies and per-tool trust — `.termigo/approvals.json`
+- [x] Project-scoped approval policies and per-tool trust - `.termigo/approvals.json`
   rules (per tool / path glob / command pattern) refine the global approval
   mode per project: `allow` auto-runs, `deny` auto-refuses, `ask` forces a
   prompt. Applied to the main agent and, since the latest pass, to sub-agents
   too, so a rule set for the agent holds for its workers. Managed from the
   approval-mode control and the per-approval "always allow in this project"
   affordance.
-- [x] Persistent terminal processes across app restarts — Unix via a named tmux
+- [x] Persistent terminal processes across app restarts - Unix via a named tmux
   session per leaf; the setting is now surfaced honestly where tmux isn't
   available (Windows remains a guarded no-op, pending a detached PTY host).
 

@@ -16,7 +16,7 @@ checksum GitHub publishes for that file, installs it, and starts it.
 
 Termigo is a Tauri application, not a library. Installing the repository as a
 dependency only reproduces a source tree that then needs a Rust toolchain and
-about twelve minutes to compile — and it gives you no command to run
+about twelve minutes to compile - and it gives you no command to run
 afterwards, because the package declares no `bin`. This package is an installer
 instead, and the second thing it does is make itself unnecessary: once the app
 is installed, running `termigo` again just opens it.
@@ -57,7 +57,7 @@ Installing is safe on a headless VPS; nothing here needs a window to run. Two
 things are worth knowing before you do it.
 
 **It will not start the app, and it will say so.** Termigo is a Tauri
-application, so launching it with no display fails immediately and silently —
+application, so launching it with no display fails immediately and silently -
 which is why the missing display is detected and the install stops there instead
 of spawning a process that dies without a word. You get the exact command that
 does work on a server:
@@ -82,7 +82,7 @@ needs no root, but on a server the deb is the better tool: it installs
 `/usr/bin/termigo`, records the package for upgrades and removal, and declares
 `libwebkit2gtk-4.1-0` and `libgtk-3-0` as dependencies so your package manager
 installs them. The AppImage declares none of that, and neither format brings
-`xvfb` or `dbus` — those are the wrapper's job.
+`xvfb` or `dbus` - those are the wrapper's job.
 
 ```bash
 npx termigo --format deb --no-launch
@@ -131,7 +131,7 @@ not carry it, the app still installs and the reason is printed.
 The checksum is read from the `digest` field GitHub publishes for every release
 asset, and a download that does not match is deleted without being installed. If
 a release publishes no digest, the command **refuses to install** unless you pass
-`--no-verify` — the step where a hijacked DNS answer turns into an installed
+`--no-verify` - the step where a hijacked DNS answer turns into an installed
 application is not one to be relaxed by default.
 
 ## Where it installs

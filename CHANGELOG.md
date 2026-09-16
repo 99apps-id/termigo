@@ -8,6 +8,17 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Global subagent concurrency pool and hierarchical slot yielding.** `SubagentConcurrencyPool`
+  (`src/modules/ai/lib/subagentPool.ts`) caps active concurrent subagents across the app (limit 4).
+  Parents yield their concurrency slot via `ctx.yieldSlot()` while waiting on child tasks,
+  preventing hierarchical deadlocks. Nested batch subagents are bounded to 2 concurrent workers.
+- **Windows shell sandbox execution allowlist.** `cmd`, `cmd.exe`, `powershell`, `pwsh`, and `set`
+  are explicitly allowlisted on Windows in `src-tauri/src/modules/shell/mod.rs`, enabling agent tools
+  to execute `cmd /c` batch commands and environment inspection while enforcing path and risk filtering.
+- **Resilient tool call auto-repair and parameter normalization.** `repairToolCall.ts` automatically
+  repairs common model parameter aliases (`query` / `path` for `grep` and `glob`, `max_results`
+  clamped up to 100 for `code_search`, and string-to-array coercion for `replace_in_files`), and maps
+  equivalent tool signatures (`view_file` -> `read_file`, `run_command` -> `bash_run`, `replace_file_content` -> `edit`).
 - **Subagents can run in their own git worktree.** `run_subagent` and
   `run_subagents` take an `isolate` flag, which gives each writing subagent a
   private worktree under `.termigo/worktrees/`. Parallel subagents otherwise edit
@@ -22,6 +33,16 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   to be assumed. No subagent is ever failed because isolation could not be set up.
 
 ### Fixed
+
+- **React 19 concurrent mode tabs state race.** Decoupled `setActiveId` from `setTabs` updaters in
+  `src/modules/tabs/lib/useTabs.ts`, preventing React 19 concurrent-mode state race conditions during
+  tab close and workspace cleanup.
+- **Stale closure in terminal session initialization.** `useTerminalSession.ts` tracks `openSession`
+  through a ref to avoid stale closures when switching between local PTYs and SSH sessions.
+- **Subagent workspace isolation from remote SSH sessions.** Local workspace subagents isolate
+  their workspace root from remote SSH tabs, preventing local commands from executing against remote terminals.
+- **Humanized rate limit and retry error messages.** Unwrapped confusing wrappers like `Failed after 3 attempts`
+  in `errorMessage.ts`, presenting clear and actionable notifications for concurrency and rate limits.
 
 - **A worktree sandbox from a previous run is visible again, and removable.**
   The sandbox registry is in memory only, so after a restart `worktree_list`
@@ -76,7 +97,7 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a newline. Searching across lines is a different tool's job.
 - **A dropped SSH connection is no longer reported as a successful exit.** When
   the link to a remote host ended without the remote sending an exit status, the
-  session emitted `exit 0` — indistinguishable from a command that finished
+  session emitted `exit 0` - indistinguishable from a command that finished
   cleanly, so a connection that died mid-command read as success. A real exit
   status could also be overwritten: the close path ran *after* the status arrived
   and replaced the true code with a hardcoded zero, so `exit 3` reached the UI as
@@ -85,7 +106,7 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the session cleanly rather than as a failure.
 - **The control protocol accepts a compatible range instead of exact equality.**
   The app and the Go CLI are published as separate release assets, so a
-  half-upgraded install — new app, older CLI — is a normal state, and the old
+  half-upgraded install - new app, older CLI - is a normal state, and the old
   check (`protocol != PROTOCOL_VERSION`) turned it into a dead control channel
   with the message "unsupported". A client older than the app is now served, since
   it speaks a subset of the protocol; only a client *newer* than the app is still
@@ -95,7 +116,7 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`scripts/deploy-termigo.sh` snapshots the data directory with the binary.**
   The stores (settings, sessions, trajectory, secrets, webview local storage) live
   in the app's data directory, not next to the binary, and a rollback restored only
-  the binary — so the previous build started against data the new build had already
+  the binary - so the previous build started against data the new build had already
   rewritten, and settings were lost instead of recovered. The script now takes a
   timestamped `termigo.prev-data-*.tgz` while the service is stopped (the last
   consistent moment, before the new build can touch anything) and restores it

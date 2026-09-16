@@ -63,6 +63,15 @@ That test exists because the invariant previously lived only in prose: 20 of
 21 `fs::*` commands had no registry check while this document claimed they
 did, and `sql_run` was missed by the audit that fixed them.
 
+## Shell command sandbox and allowlist
+
+Shell command execution from agent tools (`bash_run`, `bash_background`) passes through the command sandbox (`src-tauri/src/modules/shell/mod.rs`):
+
+- **Command allowlist**: `validate_shell_command` checks the binary or utility being invoked against `SANDBOX_ALLOWLIST`.
+- **Windows shell support**: on Windows, `cmd`, `cmd.exe`, `powershell`, `pwsh`, and `set` are explicitly allowlisted, enabling agent workflows such as `cmd /c` for batch commands and environment inspection while retaining path and argument validation.
+- **Risk classification**: command segments separated by `&&`, `|`, or `;` are parsed and evaluated. Destructive operations (such as `rm`, `del`, `Remove-Item`) are never delegated without manual approval.
+- **CWD authorization**: the execution working directory must reside within an authorized workspace root from `WorkspaceRegistry`.
+
 ## AI tool approval flow
 
 In `src/modules/ai/tools/tools.ts`:
@@ -80,7 +89,7 @@ every other branch, including the `all` shortcut and the remote-command path:
 
 - `delete_file` always asks, in every mode.
 - So does any tool carrying a `command` that `deletesFiles`
-  (`src/modules/ai/lib/commandRisk.ts`) recognises — `rm`, `rmdir`, `unlink`,
+  (`src/modules/ai/lib/commandRisk.ts`) recognises - `rm`, `rmdir`, `unlink`,
   `shred`, `git clean`, `find -delete` / `-exec`, and the Windows and
   PowerShell spellings (`del`, `erase`, `rd`, `Remove-Item`, `ri`). The
   classifier reads each `&&` / `;` / `|` segment, so `pnpm build && rm -rf dist`
@@ -96,9 +105,9 @@ git, while a delete of something untracked leaves nothing to read.
 
 Before the history reaches the model, `src/modules/ai/lib/sanitizeMessages.ts`
 resolves every tool call that never produced a result. Without this, an
-OpenAI-compatible provider rejects the whole request — "An assistant message
+OpenAI-compatible provider rejects the whole request - "An assistant message
 with 'tool_calls' must be followed by tool messages responding to each
-'tool_call_id'" — and the session stays broken for every later message, not
+'tool_call_id'" - and the session stays broken for every later message, not
 just the one that was interrupted.
 
 Such a call is marked interrupted rather than deleted. Deleting it satisfies
@@ -110,7 +119,7 @@ arguments were half-transmitted and there is no complete call to resolve.
 `approval-responded` is the subtle case. While a run is being continued the
 user has answered and the SDK is about to execute the call, so it must be left
 alone; once the conversation has moved past that turn nothing will ever execute
-it. The two are told apart by position — the part is preserved only when it
+it. The two are told apart by position - the part is preserved only when it
 sits in the final message and that message is the assistant turn being
 continued.
 
@@ -130,7 +139,7 @@ rules:
   different key aborts with a host-key-mismatch error (MITM protection).
   Pinning uses the vetted host-key algorithm set (ed25519 / ecdsa / rsa-sha2);
   bare `ssh-rsa` (SHA-1) is refused.
-- **SFTP operations run as the remote SSH user** — the remote kernel enforces
+- **SFTP operations run as the remote SSH user** - the remote kernel enforces
   permissions, and `permission denied` bubbles up into the explorer tree.
 - **Upload path safety** mirrors the local drop rules: only absolute local
   paths the user explicitly dragged are uploaded.

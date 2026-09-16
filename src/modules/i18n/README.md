@@ -1,6 +1,6 @@
 # i18n
 
-A minimal, dependency-free localization layer. No react-i18next / lingui — the
+A minimal, dependency-free localization layer. No react-i18next / lingui - the
 app keeps a lean dependency tree and this is all it needs: a keyed catalog per
 language, `{var}` interpolation, and a hook that re-renders when the language
 changes.
@@ -21,7 +21,7 @@ function Thing() {
   store via zustand).
 - Off the React render path, use `translate(lang, key, vars)` directly.
 - Interpolate with `{var}`: `t("settings.backup.restored", { count })`.
-- A missing key falls back to English, then to the key itself — an untranslated
+- A missing key falls back to English, then to the key itself - an untranslated
   string shows up visibly but never crashes.
 
 The language preference lives in the settings store (`AppLanguage` = `"en" |

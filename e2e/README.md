@@ -4,7 +4,7 @@ Smoke tests that boot the **real** Termigo binary and drive its webview through
 [`tauri-driver`](https://v2.tauri.app/develop/tests/webdriver/) +
 [WebdriverIO](https://webdriver.io). Unlike the unit tests (Vitest / `cargo
 nextest`), these exercise the Rust backend, the IPC surface and the UI together
-— the integration layer where the nastiest bugs hide (a boot crash, a blank
+- the integration layer where the nastiest bugs hide (a boot crash, a blank
 window, a terminal that never spawns because a Rust command wasn't registered).
 
 Kept as a **standalone package** (its own `package.json`, outside the pnpm
@@ -35,8 +35,8 @@ pnpm test      # wdio run ./wdio.conf.ts
 
 Environment overrides:
 
-- `TERMIGO_E2E_BINARY` — absolute path to the app binary to launch.
-- `TAURI_DRIVER_NATIVE` — path to the native driver (Windows `msedgedriver`).
+- `TERMIGO_E2E_BINARY` - absolute path to the app binary to launch.
+- `TAURI_DRIVER_NATIVE` - path to the native driver (Windows `msedgedriver`).
 
 ## Adding tests
 

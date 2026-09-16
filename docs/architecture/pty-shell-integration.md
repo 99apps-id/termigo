@@ -35,7 +35,7 @@ The pending buffer is capped at 4 MiB; on overflow it is discarded and replaced 
 
 When the user enables "Persist terminal processes" (`persistTerminals`), a leaf's shell is hosted inside a **named tmux session** so it survives an app restart; on the next open `tmux new-session -A -s <key>` reattaches to a still-running session, else creates one. Each leaf carries a stable `persistKey` (serialized into Spaces) so the same session is reattached across restarts.
 
-This is **Unix-only** by design: Windows has no tmux, and a ConPTY child is bound to a Job Object that kills it on app exit, so process persistence there would need a separate host process. `shell_init::persist_available()` (exposed as the `pty_persist_available` command) reports whether tmux is usable, and the frontend uses it to keep the setting from being a silent no-op — the settings row shows a hint when it isn't supported, and the tab "tmux" badge is hidden.
+This is **Unix-only** by design: Windows has no tmux, and a ConPTY child is bound to a Job Object that kills it on app exit, so process persistence there would need a separate host process. `shell_init::persist_available()` (exposed as the `pty_persist_available` command) reports whether tmux is usable, and the frontend uses it to keep the setting from being a silent no-op - the settings row shows a hint when it isn't supported, and the tab "tmux" badge is hidden.
 
 ### Unix
 
