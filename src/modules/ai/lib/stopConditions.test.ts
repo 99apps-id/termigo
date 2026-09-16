@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   type CircuitBreakerState,
   evaluateCircuitBreaker,
+  isErrorResult,
   noErrorProgress,
   noProgressStop,
   noToolRepetition,
@@ -483,5 +484,26 @@ describe("a prose-free run of successful, varied tools is not a loop", () => {
         steps([read("a", "v")], [read("a", "v")], [read("a", "v")]),
       ),
     ).toBe(true);
+  });
+});
+
+describe("isErrorResult", () => {
+  it("flags structured failures from tools", () => {
+    expect(isErrorResult({ error: "boom" })).toBe(true);
+    expect(isErrorResult({ isOffline: true })).toBe(true);
+    expect(isErrorResult({ exit_code: 1 })).toBe(true);
+    expect(isErrorResult({ timed_out: true })).toBe(true);
+    // The browser tool marks an unreadable page with a structured flag, so the
+    // loop detects it by field rather than by matching the message text.
+    expect(isErrorResult({ text: "anything", noReadableText: true })).toBe(
+      true,
+    );
+  });
+
+  it("does not flag successful results", () => {
+    expect(isErrorResult(null)).toBe(false);
+    expect(isErrorResult("plain")).toBe(false);
+    expect(isErrorResult({ exit_code: 0 })).toBe(false);
+    expect(isErrorResult({ text: "page content" })).toBe(false);
   });
 });

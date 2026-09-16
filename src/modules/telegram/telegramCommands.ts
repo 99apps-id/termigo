@@ -555,13 +555,7 @@ export async function handleUpdate(u: Update, signal: AbortSignal): Promise<void
       if (curOwner && String(curOwner) !== String(chatId)) {
         return;
       }
-      const ownerUserId = useTelegramStore.getState().ownerUserId;
-      if (
-        ownerUserId &&
-        (!msg.from || String(msg.from.id) !== String(ownerUserId))
-      ) {
-        return;
-      }
+      if (!isOwnerUser(msg.from)) return;
       useTelegramStore.getState().setChatId(null);
       useTelegramStore.getState().setOwnerUserId(null);
       await sendTelegram(
@@ -712,13 +706,7 @@ export async function handleUpdate(u: Update, signal: AbortSignal): Promise<void
       return;
     }
     case "/approve": {
-      const ownerUserId = useTelegramStore.getState().ownerUserId;
-      if (
-        ownerUserId &&
-        (!msg.from || String(msg.from.id) !== String(ownerUserId))
-      ) {
-        return;
-      }
+      if (!isOwnerUser(msg.from)) return;
       const state = await import("../ai/store/chatStore");
       const aq = await import("../ai/store/approvalQueueStore");
       const sessionId = state.useChatStore.getState().activeSessionId;
@@ -739,13 +727,7 @@ export async function handleUpdate(u: Update, signal: AbortSignal): Promise<void
       return;
     }
     case "/deny": {
-      const ownerUserId = useTelegramStore.getState().ownerUserId;
-      if (
-        ownerUserId &&
-        (!msg.from || String(msg.from.id) !== String(ownerUserId))
-      ) {
-        return;
-      }
+      if (!isOwnerUser(msg.from)) return;
       const state = await import("../ai/store/chatStore");
       const aq = await import("../ai/store/approvalQueueStore");
       const sessionId = state.useChatStore.getState().activeSessionId;
@@ -762,13 +744,7 @@ export async function handleUpdate(u: Update, signal: AbortSignal): Promise<void
       return;
     }
     case "/mode": {
-      const ownerUserId = useTelegramStore.getState().ownerUserId;
-      if (
-        ownerUserId &&
-        (!msg.from || String(msg.from.id) !== String(ownerUserId))
-      ) {
-        return;
-      }
+      if (!isOwnerUser(msg.from)) return;
       const { setAgentApprovalMode } = await import(
         "@/modules/settings/store"
       );
@@ -819,13 +795,7 @@ export async function handleUpdate(u: Update, signal: AbortSignal): Promise<void
       return;
     }
     case "/scope": {
-      const ownerUserId = useTelegramStore.getState().ownerUserId;
-      if (
-        ownerUserId &&
-        (!msg.from || String(msg.from.id) !== String(ownerUserId))
-      ) {
-        return;
-      }
+      if (!isOwnerUser(msg.from)) return;
       const { setPentestScope, setEnforcePentestScope } = await import(
         "@/modules/settings/store"
       );

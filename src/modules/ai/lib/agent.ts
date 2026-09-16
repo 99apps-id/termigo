@@ -677,12 +677,7 @@ export function isErrorResult(output: unknown): boolean {
   // A tool surfaced its failure as an { error: "..." } object or offline signal.
   if (record.error) return true;
   if (record.isOffline === true) return true;
-  if (
-    typeof record.text === "string" &&
-    record.text.startsWith("(no readable text returned from the page")
-  ) {
-    return true;
-  }
+  if (record.noReadableText === true) return true;
   // Command tools (bash_run, git_*, run_checks, test_loop) report failure as a
   // non-zero exit_code or a timed_out flag, not an { error } object. Missing
   // them here meant a command that kept failing was invisible to noErrorProgress

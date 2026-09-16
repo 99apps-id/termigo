@@ -10,6 +10,7 @@ import { buildSkillRegistryTools } from "../lib/skillRegistry";
 import { markRunActivity, startActivityHeartbeat } from "../lib/streamWatchdog";
 import { useApprovalQueue } from "../store/approvalQueueStore";
 import { buildManagedAgentTools } from "./agent";
+import { buildArtifactTools } from "./artifacts";
 import { buildBrowserTools } from "./browser";
 import { buildCodeSearchTools } from "./codeSearch";
 import { buildDevServerTools } from "./devServer";
@@ -233,6 +234,7 @@ export function buildTools(
   );
   const partial = {
     ...buildFsTools(ctx),
+    ...buildArtifactTools(),
     ...buildFileOpsTools(ctx),
     ...buildFetchTools(),
     ...buildForwardTools(ctx),

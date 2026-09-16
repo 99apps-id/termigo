@@ -132,6 +132,11 @@ describe("tool group definitions", () => {
       "run_subagent",
       "run_subagents",
       "unknown_tool_fallback",
+      // Context offloading. The artifact broker is always available and
+      // auto-executes, so it sits with the core loop rather than in a group.
+      "artifact_write",
+      "artifact_read",
+      "artifact_list",
       // File operations that belong to the same loop as write_file.
       "copy_file",
       "move_file",
