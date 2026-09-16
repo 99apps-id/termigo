@@ -17,8 +17,8 @@ function sanitize(html: string): string {
     .replace(/\son\w+\s*=\s*[^\s>]+/gi, "");
 }
 
-// The agent's HTML paints its own <body>. When it omits a background — or leans
-// on the OS being in dark mode — the report renders dark-on-dark inside the
+// The agent's HTML paints its own <body>. When it omits a background - or leans
+// on the OS being in dark mode - the report renders dark-on-dark inside the
 // canvas. Prepend a LIGHT base: a `color-scheme: light` hint (so the iframe's UA
 // colors and form controls are light) plus low-specificity white/near-black
 // defaults. These come first in source order, so any explicit theme the agent
@@ -55,7 +55,7 @@ export function CanvasView({ html }: { html: string }) {
         if (!action) return;
         // Lazy-import the chat runtime so the preview surface (eagerly reachable
         // from the main window) does not pull the AI/markdown/editor stack into
-        // the startup bundle — see src/app/eager-budget.test.ts.
+        // the startup bundle: see src/app/eager-budget.test.ts.
         void import("@/modules/ai/store/chatRuntime").then(({ sendMessage }) =>
           sendMessage(action),
         );

@@ -66,7 +66,7 @@ export function MarkdownPreviewPane({ path, visible, onSetView }: Props) {
       <div className="flex-1 overflow-auto">
         <div className="px-8 py-6">
           {status.kind === "loading" && (
-            <p className="text-[12px] text-muted-foreground">Loading…</p>
+            <p className="text-[12px] text-muted-foreground">Loading...</p>
           )}
           {status.kind === "error" && (
             <p className="text-[12px] text-destructive">
@@ -75,7 +75,7 @@ export function MarkdownPreviewPane({ path, visible, onSetView }: Props) {
           )}
           {status.kind === "binary" && (
             <p className="text-[12px] text-muted-foreground">
-              Binary file — cannot render as markdown.
+              Binary file: cannot render as markdown.
             </p>
           )}
           {status.kind === "toolarge" && (

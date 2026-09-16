@@ -82,7 +82,7 @@ export function truncateCommandOutput(
   const tail = lines.slice(-tailLines).join("\n");
   const omittedLines = lines.length - (headLines + tailLines);
   return {
-    text: `${head}\n\n... [Output truncated: ${omittedLines} lines omitted (${text.length} chars total). Use grep, head/tail, or more specific filters] ...\n\n${tail}`,
+    text: `${head}\n\n... [Output truncated: ${omittedLines} lines omitted (${text.length} chars total). Use specific filters, line ranges, or search queries] ...\n\n${tail}`,
     truncated: true,
   };
 }

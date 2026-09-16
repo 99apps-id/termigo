@@ -14,21 +14,26 @@ export function MarkdownLink({
   onSettled,
   ...props
 }: MarkdownLinkProps) {
+  const isExternal = Boolean(href && isExternalUrl(href));
+  const safeHref = isExternal ? href : undefined;
+
   const handleClick: MouseEventHandler<HTMLAnchorElement> = (event) => {
     onClick?.(event);
-    if (event.defaultPrevented || !href || !isExternalUrl(href)) return;
+    if (event.defaultPrevented) return;
 
     event.preventDefault();
-    void openExternalUrl(href, onSettled);
+    if (!safeHref) return;
+
+    void openExternalUrl(safeHref, onSettled);
   };
 
   return (
     <a
       {...props}
-      href={href}
+      href={safeHref}
       onClick={handleClick}
-      rel="noreferrer"
-      target="_blank"
+      rel={safeHref ? "noreferrer" : undefined}
+      target={safeHref ? "_blank" : undefined}
     >
       {children}
     </a>
