@@ -108,7 +108,10 @@ describe("webSearch (DuckDuckGo)", () => {
     expect(tools.web_search).toBeDefined();
     expect(tools.web_fetch).toBeDefined();
 
-    const parsed = tools.web_fetch.inputSchema.parse({
+    const schema = tools.web_fetch.inputSchema as unknown as {
+      parse: (input: unknown) => { url: string; use_reader?: boolean };
+    };
+    const parsed = schema.parse({
       url: "https://example.com/article",
       use_reader: true,
     });

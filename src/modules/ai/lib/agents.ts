@@ -90,36 +90,88 @@ export type LoadedAgents = {
   activeId: string;
 };
 
+function isValidCustomAgent(val: unknown): val is Agent {
+  if (!val || typeof val !== "object") return false;
+  const a = val as Record<string, unknown>;
+  return (
+    typeof a.id === "string" &&
+    a.id.length > 0 &&
+    !a.id.startsWith("builtin:") &&
+    !BUILTIN_AGENTS.some((b) => b.id === a.id) &&
+    typeof a.name === "string" &&
+    typeof a.instructions === "string"
+  );
+}
+
 export async function loadAgents(): Promise<LoadedAgents> {
-  // One IPC roundtrip via entries() instead of two sequential get()s.
-  const entries = await store.entries();
-  let custom: Agent[] | undefined;
-  let activeId: string | undefined;
-  for (const [k, v] of entries) {
-    if (k === KEY_CUSTOM) custom = v as Agent[];
-    else if (k === KEY_ACTIVE) activeId = v as string;
+  let custom: Agent[] = [];
+  let activeId: string = BUILTIN_AGENTS[0].id;
+
+  try {
+    // One IPC roundtrip via entries() instead of two sequential get()s.
+    const entries = await store.entries();
+    for (const [k, v] of entries) {
+      if (k === KEY_CUSTOM && Array.isArray(v)) {
+        custom = v.filter(isValidCustomAgent).map((a) => ({
+          ...a,
+          builtIn: false,
+        }));
+      } else if (k === KEY_ACTIVE && typeof v === "string" && v.trim()) {
+        activeId = v.trim();
+      }
+    }
+  } catch (err) {
+    console.error("[agents] Failed to load agents from store:", err);
+    return { custom: [], activeId: BUILTIN_AGENTS[0].id };
   }
-  return { custom: custom ?? [], activeId: activeId ?? BUILTIN_AGENTS[0].id };
+
+  // Ensure activeId actually exists, otherwise fallback to first builtin agent.
+  const allIds = new Set([
+    ...BUILTIN_AGENTS.map((b) => b.id),
+    ...custom.map((c) => c.id),
+  ]);
+  if (!allIds.has(activeId)) {
+    activeId = BUILTIN_AGENTS[0].id;
+  }
+
+  return { custom, activeId };
 }
 
 export async function saveCustomAgents(custom: Agent[]): Promise<void> {
-  await store.set(KEY_CUSTOM, custom);
-  await store.save();
+  try {
+    const sanitized = Array.isArray(custom)
+      ? custom.filter(isValidCustomAgent).map((a) => ({ ...a, builtIn: false }))
+      : [];
+    await store.set(KEY_CUSTOM, sanitized);
+    await store.save();
+  } catch (err) {
+    console.error("[agents] Failed to save custom agents to store:", err);
+  }
 }
 
 export async function saveActiveAgentId(id: string): Promise<void> {
-  await store.set(KEY_ACTIVE, id);
-  await store.save();
+  try {
+    await store.set(KEY_ACTIVE, id);
+    await store.save();
+  } catch (err) {
+    console.error("[agents] Failed to save active agent ID to store:", err);
+  }
 }
 
 export function newAgentId(): string {
-  return `a-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.randomUUID === "function"
+  ) {
+    return `a-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
+  }
+  return `a-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 export function findAgent(
-  agents: readonly Agent[],
+  agents: readonly Agent[] | null | undefined,
   id: string | null | undefined,
 ): Agent {
-  if (!id) return BUILTIN_AGENTS[0];
-  return agents.find((a) => a.id === id) ?? BUILTIN_AGENTS[0];
+  if (!Array.isArray(agents) || !id) return BUILTIN_AGENTS[0];
+  return agents.find((a) => a && a.id === id) ?? BUILTIN_AGENTS[0];
 }

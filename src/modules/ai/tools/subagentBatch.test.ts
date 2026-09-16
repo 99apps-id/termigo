@@ -235,8 +235,11 @@ describe("run_subagents", () => {
     };
 
     const tools = buildSubagentTools(ctx());
+    const schema = tools.run_subagents.inputSchema as unknown as {
+      parse: (v: unknown) => unknown;
+    };
     // Test schema validation
-    const parsed = tools.run_subagents.inputSchema.parse(rawInput) as {
+    const parsed = schema.parse(rawInput) as {
       tasks: Array<{ prompt: string; type?: string; description?: string }>;
       max_concurrency?: number;
     };
@@ -267,7 +270,10 @@ describe("run_subagents", () => {
     };
 
     const tools = buildSubagentTools(ctx());
-    const parsed = tools.run_subagents.inputSchema.parse(rawInput) as {
+    const schema = tools.run_subagents.inputSchema as unknown as {
+      parse: (v: unknown) => unknown;
+    };
+    const parsed = schema.parse(rawInput) as {
       tasks: Array<{ depends_on?: number[] }>;
     };
     expect(parsed.tasks[1].depends_on).toEqual([0]);

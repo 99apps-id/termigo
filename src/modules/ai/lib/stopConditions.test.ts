@@ -69,7 +69,12 @@ describe("noToolRepetition", () => {
     } finally {
       console.log = original;
     }
-    expect(logs.some((line) => line.includes("[tool-repetition]") && line.includes("tool=read_file"))).toBe(true);
+    expect(
+      logs.some(
+        (line) =>
+          line.includes("[tool-repetition]") && line.includes("tool=read_file"),
+      ),
+    ).toBe(true);
   });
 
   it("ignores a differing argument", () => {
@@ -348,7 +353,13 @@ describe("evaluateCircuitBreaker", () => {
   };
 
   it("does not trip on a single failure", () => {
-    const calls = [{ toolName: "bash_run", input: { command: "curl foo" }, toolCallId: "c1" }];
+    const calls = [
+      {
+        toolName: "bash_run",
+        input: { command: "curl foo" },
+        toolCallId: "c1",
+      },
+    ];
     const results = new Map<string, unknown>([
       ["c1", { exit_code: 1, stderr: "connection refused" }],
     ]);
@@ -358,7 +369,13 @@ describe("evaluateCircuitBreaker", () => {
   });
 
   it("trips circuit breaker on repeated failure with the same input", () => {
-    const calls = [{ toolName: "bash_run", input: { command: "curl foo" }, toolCallId: "c1" }];
+    const calls = [
+      {
+        toolName: "bash_run",
+        input: { command: "curl foo" },
+        toolCallId: "c1",
+      },
+    ];
     const results = new Map<string, unknown>([
       ["c1", { exit_code: 1, stderr: "connection refused" }],
     ]);
@@ -366,11 +383,19 @@ describe("evaluateCircuitBreaker", () => {
     const second = evaluateCircuitBreaker(calls, results, first);
     expect(second.consecutiveFailureCount).toBe(2);
     expect(second.activeNudge).toContain("REPEATED FAILURE DETECTED");
-    expect(second.activeNudge).toContain("DO NOT retry the exact same arguments");
+    expect(second.activeNudge).toContain(
+      "DO NOT retry the exact same arguments",
+    );
   });
 
   it("trips immediately on command timeout", () => {
-    const calls = [{ toolName: "bash_run", input: { command: "npm run dev" }, toolCallId: "c1" }];
+    const calls = [
+      {
+        toolName: "bash_run",
+        input: { command: "npm run dev" },
+        toolCallId: "c1",
+      },
+    ];
     const results = new Map<string, unknown>([
       ["c1", { timed_out: true, exit_code: null }],
     ]);
@@ -380,28 +405,52 @@ describe("evaluateCircuitBreaker", () => {
   });
 
   it("trips immediately when tool reports environment is offline", () => {
-    const calls = [{ toolName: "web_search", input: { query: "vitest docs" }, toolCallId: "c1" }];
+    const calls = [
+      {
+        toolName: "web_search",
+        input: { query: "vitest docs" },
+        toolCallId: "c1",
+      },
+    ];
     const results = new Map<string, unknown>([
       ["c1", { error: "Network connection unavailable", isOffline: true }],
     ]);
     const next = evaluateCircuitBreaker(calls, results, initState);
     expect(next.activeNudge).toContain("ENVIRONMENT IS OFFLINE");
-    expect(next.activeNudge).toContain("DO NOT attempt any further web searches");
+    expect(next.activeNudge).toContain(
+      "DO NOT attempt any further web searches",
+    );
   });
 
   it("clears circuit breaker when a step succeeds", () => {
-    const calls = [{ toolName: "bash_run", input: { command: "npm run dev" }, toolCallId: "c1" }];
+    const calls = [
+      {
+        toolName: "bash_run",
+        input: { command: "npm run dev" },
+        toolCallId: "c1",
+      },
+    ];
     const timeoutResults = new Map<string, unknown>([
       ["c1", { timed_out: true }],
     ]);
     const timedOut = evaluateCircuitBreaker(calls, timeoutResults, initState);
     expect(timedOut.activeNudge).not.toBeNull();
 
-    const successCalls = [{ toolName: "read_file", input: { path: "package.json" }, toolCallId: "c2" }];
+    const successCalls = [
+      {
+        toolName: "read_file",
+        input: { path: "package.json" },
+        toolCallId: "c2",
+      },
+    ];
     const successResults = new Map<string, unknown>([
-      ["c2", "{\"name\": \"termigo\"}"],
+      ["c2", '{"name": "termigo"}'],
     ]);
-    const cleared = evaluateCircuitBreaker(successCalls, successResults, timedOut);
+    const cleared = evaluateCircuitBreaker(
+      successCalls,
+      successResults,
+      timedOut,
+    );
     expect(cleared.activeNudge).toBeNull();
     expect(cleared.consecutiveFailureCount).toBe(0);
   });
@@ -490,6 +539,7 @@ describe("a prose-free run of successful, varied tools is not a loop", () => {
 describe("isErrorResult", () => {
   it("flags structured failures from tools", () => {
     expect(isErrorResult({ error: "boom" })).toBe(true);
+    expect(isErrorResult({ isError: true })).toBe(true);
     expect(isErrorResult({ isOffline: true })).toBe(true);
     expect(isErrorResult({ exit_code: 1 })).toBe(true);
     expect(isErrorResult({ timed_out: true })).toBe(true);

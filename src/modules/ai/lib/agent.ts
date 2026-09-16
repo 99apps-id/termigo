@@ -597,7 +597,10 @@ export function noToolRepetition<T extends ToolSet>(
             resultDigest(results.get(c.toolCallId)),
         )
         .join("\n");
-      const entry = counts.get(fp) ?? { n: 0, toolName: calls[0]?.toolName ?? "" };
+      const entry = counts.get(fp) ?? {
+        n: 0,
+        toolName: calls[0]?.toolName ?? "",
+      };
       entry.n += 1;
       counts.set(fp, entry);
       if (entry.n >= maxRepeats) {
@@ -676,6 +679,7 @@ export function isErrorResult(output: unknown): boolean {
   const record = output as Record<string, unknown>;
   // A tool surfaced its failure as an { error: "..." } object or offline signal.
   if (record.error) return true;
+  if (record.isError === true) return true;
   if (record.isOffline === true) return true;
   if (record.noReadableText === true) return true;
   // Command tools (bash_run, git_*, run_checks, test_loop) report failure as a

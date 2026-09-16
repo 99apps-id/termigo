@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildImageGenerationTools } from "./imageGeneration";
 import type { ToolContext } from "./context";
+import { buildImageGenerationTools } from "./imageGeneration";
 
 vi.mock("../store/chatStore", () => ({
   useChatStore: {
@@ -19,7 +19,10 @@ vi.mock("../lib/native", () => ({
 }));
 
 vi.mock("../lib/security", () => ({
-  checkWritableCanonical: vi.fn(async (p: string) => ({ ok: true, canonical: p })),
+  checkWritableCanonical: vi.fn(async (p: string) => ({
+    ok: true,
+    canonical: p,
+  })),
 }));
 
 function mockCtx(): ToolContext {
@@ -43,7 +46,10 @@ describe("imageGeneration tool", () => {
     const tools = buildImageGenerationTools(mockCtx());
     expect(tools.generate_image).toBeDefined();
 
-    const parsed = tools.generate_image.inputSchema.parse({
+    const schema = tools.generate_image.inputSchema as unknown as {
+      parse: (input: unknown) => { prompt: string; aspect_ratio?: string };
+    };
+    const parsed = schema.parse({
       prompt: "A beautiful sunset over mountains",
       aspect_ratio: "16:9",
     });
