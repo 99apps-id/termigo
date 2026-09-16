@@ -36,6 +36,7 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
     "node", "deno", "bun", "make", "just", "task",
     "echo", "printf", "test", "true", "false", "pwd", "cd",
     "which", "where", "type", "command", "hash",
+    "cmd", "powershell", "pwsh", "set",
     "diff", "cmp", "comm", "patch", "jq", "yq",
     "tar", "gzip", "gunzip", "zip", "unzip",
     "curl", "wget", "http", "xh",
@@ -85,9 +86,9 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
     // its own: `ls | sort | uniq` and `git log | cut -f1` still failed because
     // the filter side was unlisted. The rule for this group is that a program
     // here can neither write to the filesystem nor launch another program:
-    // that excludes `xargs`, `env`, `timeout`, `nice`, `nohup`, `watch`, `tee`
-    // and the shells, each of which would let an unlisted program run behind a
-    // listed name.
+    // that excludes `xargs`, `env`, `timeout`, `nice`, `nohup`, `watch`, `tee`.
+    // Shell dispatch programs (`cmd`, `powershell`, `pwsh`) and env helpers
+    // (`set`) are explicitly allowlisted above to support Windows agent workflows.
     "sort", "uniq", "cut", "tr", "nl", "paste", "join", "fold", "rev",
     "basename", "dirname", "realpath", "readlink", "seq", "expr",
     "sha256sum", "sha1sum", "md5sum", "base64", "strings", "du", "df",
@@ -943,6 +944,17 @@ mod tests_sandbox {
         assert!(validate_shell_command(r#"C:\tools\mytool.exe --flag"#).is_ok());
         assert!(validate_shell_command(r#""C:\Program Files\tool.exe" arg"#).is_ok());
         assert!(validate_shell_command("git.exe status").is_ok());
+    }
+
+    #[test]
+    fn validate_shell_command_allows_cmd_and_windows_shells() {
+        assert!(validate_shell_command("cmd /c dir").is_ok());
+        assert!(validate_shell_command("cmd.exe /c set").is_ok());
+        assert!(validate_shell_command(r#"cmd /c "dir /b""#).is_ok());
+        assert!(validate_shell_command(r#"cmd /c "set FOO=bar && pnpm test""#).is_ok());
+        assert!(validate_shell_command("powershell -Command Get-Date").is_ok());
+        assert!(validate_shell_command("pwsh -c date").is_ok());
+        assert!(validate_shell_command("set FOO=bar").is_ok());
     }
 
     #[test]
