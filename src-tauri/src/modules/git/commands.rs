@@ -1,5 +1,6 @@
 use tauri::{AppHandle, Manager};
 
+use crate::modules::git::diff_comments;
 use crate::modules::git::operations;
 use crate::modules::git::types::{
     DiscardEntry, GitBranchListResult, GitCommitFileChange, GitCommitResult, GitDiffContentResult,
@@ -305,6 +306,81 @@ pub async fn git_checkout_branch(
     let workspace = WorkspaceEnv::from_option(workspace);
     blocking(app, move |r| {
         operations::checkout_branch(r, &repo_root, &branch, &workspace).map_err(Into::into)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn git_diff_comments_list(
+    cwd: String,
+    workspace: Option<WorkspaceEnv>,
+    _registry: tauri::State<'_, WorkspaceRegistry>,
+    app: AppHandle,
+) -> Result<Vec<crate::modules::git::types::GitDiffComment>, String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    blocking(app, move |r| {
+        diff_comments::list_comments(r, &cwd, &workspace).map_err(Into::into)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn git_diff_comments_add(
+    cwd: String,
+    comment: crate::modules::git::types::GitDiffComment,
+    workspace: Option<WorkspaceEnv>,
+    _registry: tauri::State<'_, WorkspaceRegistry>,
+    app: AppHandle,
+) -> Result<crate::modules::git::types::GitDiffComment, String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    blocking(app, move |r| {
+        diff_comments::add_comment(r, &cwd, &workspace, comment).map_err(Into::into)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn git_diff_comments_update(
+    cwd: String,
+    id: String,
+    patch: serde_json::Value,
+    workspace: Option<WorkspaceEnv>,
+    _registry: tauri::State<'_, WorkspaceRegistry>,
+    app: AppHandle,
+) -> Result<Option<crate::modules::git::types::GitDiffComment>, String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    blocking(app, move |r| {
+        diff_comments::update_comment(r, &cwd, &workspace, &id, patch).map_err(Into::into)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn git_diff_comments_remove(
+    cwd: String,
+    id: String,
+    workspace: Option<WorkspaceEnv>,
+    _registry: tauri::State<'_, WorkspaceRegistry>,
+    app: AppHandle,
+) -> Result<bool, String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    blocking(app, move |r| {
+        diff_comments::remove_comment(r, &cwd, &workspace, &id).map_err(Into::into)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn git_diff_comments_list_for_file(
+    cwd: String,
+    file_path: String,
+    workspace: Option<WorkspaceEnv>,
+    _registry: tauri::State<'_, WorkspaceRegistry>,
+    app: AppHandle,
+) -> Result<Vec<crate::modules::git::types::GitDiffComment>, String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    blocking(app, move |r| {
+        diff_comments::list_for_file(r, &cwd, &workspace, &file_path).map_err(Into::into)
     })
     .await
 }

@@ -1,10 +1,13 @@
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Spinner } from "@/components/ui/spinner";
 import { unifiedMergeView } from "@codemirror/merge";
 import { EditorState, type Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
+import { PlusSignIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   commitDiffKey,
@@ -20,6 +23,9 @@ import {
 } from "./lib/extensions";
 import { resolveLanguage, resolveLanguageSync } from "./lib/languageResolver";
 import { useEditorThemeExt } from "./lib/useEditorThemeExt";
+import { GitDiffCommentCard } from "@/modules/source-control/components/GitDiffCommentCard";
+import { GitDiffCommentPopover } from "@/modules/source-control/components/GitDiffCommentPopover";
+import { useDiffCommentStore } from "@/modules/source-control/store/diffCommentStore";
 
 type WorkingSource = {
   kind: "working";
@@ -41,6 +47,7 @@ type Props = {
   source: WorkingSource | CommitSource;
   chipLabel?: string;
   active: boolean;
+  repoRoot: string;
 };
 
 const LARGE_FILE_THRESHOLD = 256 * 1024;
@@ -236,9 +243,7 @@ export function GitDiffPane({ source, chipLabel, active }: Props) {
     let cancelled = false;
     resolveLanguage(path).then((res) => {
       if (cancelled || !res) return;
-      setState((s) =>
-        s.kind === "loaded" ? { ...s, langExt: res.ext } : s,
-      );
+      setState((s) => (s.kind === "loaded" ? { ...s, langExt: res.ext } : s));
     });
     return () => {
       cancelled = true;
@@ -250,6 +255,28 @@ export function GitDiffPane({ source, chipLabel, active }: Props) {
       useFallback ? countDiffLines(fallbackPatch) : { added: 0, removed: 0 },
     [useFallback, fallbackPatch],
   );
+
+  const comments = useDiffCommentStore((s) => s.comments);
+  const fileComments = useMemo(
+    () =>
+      comments.filter(
+        (c) => c.filePath === path.replace(/\\/g, "/") || c.filePath === path,
+      ),
+    [comments, path],
+  );
+
+  const [addTarget, setAddTarget] = useState<{ line: number } | null>(null);
+
+  const addComment = useDiffCommentStore((s) => s.add);
+  const removeComment = useDiffCommentStore((s) => s.remove);
+
+  const handleAdd = async (lineNumber: number, body: string) => {
+    await addComment(source.repoRoot, path, lineNumber, body, { side: "new" });
+  };
+
+  const handleDelete = (id: string) => {
+    removeComment(source.repoRoot, id);
+  };
 
   return (
     <div className="flex h-full min-h-0 flex-col rounded-md border border-border/60 bg-background">
@@ -327,6 +354,70 @@ export function GitDiffPane({ source, chipLabel, active }: Props) {
           />
         )}
       </div>
+
+      {fileComments.length > 0 || addTarget != null ? (
+        <div className="shrink-0 border-t border-border/60">
+          <div className="flex items-center justify-between px-3 py-1.5">
+            <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              Notes ({fileComments.length})
+            </span>
+            {addTarget == null ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-6 gap-1 text-[10px]"
+                onClick={() => setAddTarget({ line: 1 })}
+              >
+                <HugeiconsIcon
+                  icon={PlusSignIcon}
+                  size={12}
+                  strokeWidth={1.75}
+                />
+                Add note
+              </Button>
+            ) : null}
+          </div>
+          <ScrollArea className="max-h-56">
+            <div className="space-y-1.5 px-3 pb-2">
+              {addTarget != null ? (
+                <GitDiffCommentPopover
+                  anchorLine={addTarget.line}
+                  onSubmit={async (body) => {
+                    await handleAdd(addTarget.line, body);
+                    setAddTarget(null);
+                  }}
+                  onClose={() => setAddTarget(null)}
+                />
+              ) : null}
+              {fileComments.map((c) => (
+                <GitDiffCommentCard
+                  key={c.id}
+                  comment={c}
+                  onEdit={() => {}}
+                  onDelete={() => handleDelete(c.id)}
+                />
+              ))}
+              {fileComments.length === 0 && addTarget == null ? (
+                <div className="text-[10px] italic text-muted-foreground">
+                  No notes yet.
+                </div>
+              ) : null}
+            </div>
+          </ScrollArea>
+        </div>
+      ) : (
+        <div className="shrink-0 border-t border-border/60 px-3 py-1.5">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 gap-1 text-[10px]"
+            onClick={() => setAddTarget({ line: 1 })}
+          >
+            <HugeiconsIcon icon={PlusSignIcon} size={12} strokeWidth={1.75} />
+            Add note
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

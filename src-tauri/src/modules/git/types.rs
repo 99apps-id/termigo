@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 pub(crate) const DEFAULT_TIMEOUT_SECS: u64 = 30;
 pub(crate) const NETWORK_TIMEOUT_SECS: u64 = 120;
@@ -137,6 +137,26 @@ pub(crate) struct GitOutput {
     pub(crate) exit_code: Option<i32>,
     pub(crate) timed_out: bool,
     pub(crate) truncated: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct GitDiffComment {
+    pub id: String,
+    pub file_path: String,
+    pub line_number: u32,
+    pub body: String,
+    pub selected_text: Option<String>,
+    pub side: String,
+    pub created_at: i64,
+    pub updated_at: Option<i64>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct GitDiffCommentBatch {
+    pub comments: Vec<GitDiffComment>,
+    pub updated_at: i64,
 }
 
 pub(crate) enum TextSource {

@@ -19,6 +19,7 @@ export function GitDiffStack({ tabs, activeId }: Props) {
         <GitDiffPane
           key={active.id}
           active
+          repoRoot={active.repoRoot}
           source={{
             kind: "working",
             repoRoot: active.repoRoot,
@@ -35,6 +36,7 @@ export function GitDiffStack({ tabs, activeId }: Props) {
       <GitDiffPane
         key={active.id}
         active
+        repoRoot={active.repoRoot}
         source={{
           kind: "commit",
           repoRoot: active.repoRoot,

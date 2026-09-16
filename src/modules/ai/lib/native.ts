@@ -136,6 +136,17 @@ export type GitBranchListResult = {
   branches: GitBranchEntry[];
 };
 
+export type GitDiffComment = {
+  id: string;
+  filePath: string;
+  lineNumber: number;
+  body: string;
+  selectedText?: string;
+  side: string;
+  createdAt: number;
+  updatedAt?: number;
+};
+
 export const native = {
   workspaceCurrentDir: () => invoke<string>("workspace_current_dir"),
   workspaceAuthorize: (path: string) =>
@@ -426,6 +437,40 @@ export const native = {
     invoke<void>("git_checkout_branch", {
       repoRoot,
       branch,
+      workspace: currentWorkspaceEnv(),
+    }),
+  gitDiffCommentsList: (cwd: string) =>
+    invoke<GitDiffComment[]>("git_diff_comments_list", {
+      cwd,
+      workspace: currentWorkspaceEnv(),
+    }),
+  gitDiffCommentsListForFile: (cwd: string, filePath: string) =>
+    invoke<GitDiffComment[]>("git_diff_comments_list_for_file", {
+      cwd,
+      filePath,
+      workspace: currentWorkspaceEnv(),
+    }),
+  gitDiffCommentsAdd: (cwd: string, comment: GitDiffComment) =>
+    invoke<GitDiffComment>("git_diff_comments_add", {
+      cwd,
+      comment,
+      workspace: currentWorkspaceEnv(),
+    }),
+  gitDiffCommentsUpdate: (
+    cwd: string,
+    id: string,
+    patch: Record<string, unknown>,
+  ) =>
+    invoke<GitDiffComment | null>("git_diff_comments_update", {
+      cwd,
+      id,
+      patch,
+      workspace: currentWorkspaceEnv(),
+    }),
+  gitDiffCommentsRemove: (cwd: string, id: string) =>
+    invoke<boolean>("git_diff_comments_remove", {
+      cwd,
+      id,
       workspace: currentWorkspaceEnv(),
     }),
 
