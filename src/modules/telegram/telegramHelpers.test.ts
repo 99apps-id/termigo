@@ -6,7 +6,7 @@
 // live install, including the one that regressed.
 
 import { describe, expect, it } from "vitest";
-import { latestReasoningTail, type ChatLike, lastAssistantText } from "./telegramHelpers";
+import { type ChatLike, lastAssistantText } from "./telegramHelpers";
 
 const text = (value: string) => ({ type: "text", text: value });
 const tool = (name: string) => ({
@@ -123,84 +123,5 @@ describe("lastAssistantText", () => {
 
   it("returns null for an unknown session", () => {
     expect(lastAssistantText(getter(undefined), "missing", 0)).toBeNull();
-  });
-});
-
-describe("latestReasoningTail", () => {
-  // The live progress card's "what is it thinking" line. The invariant that
-  // matters most is the one `lastAssistantText` already guards: reasoning is a
-  // STATUS line, never an answer. These pin the extraction itself.
-
-  it("returns the tail of the newest reasoning part", () => {
-    const m = {
-      role: "assistant",
-      parts: [
-        { type: "reasoning", text: "first thought" },
-        { type: "tool-bash_run", state: "output-available" },
-        { type: "reasoning", text: "the newest thought" },
-      ],
-    };
-    expect(latestReasoningTail(m)).toBe("the newest thought");
-  });
-
-  it("takes the END of a long thought, not its opening", () => {
-    // A live card answers "what is it doing right now", and the newest words are
-    // the current thought; the opening is framing that stopped being true.
-    const long = `${"framing ".repeat(40)}the current thought`;
-    const out = latestReasoningTail(
-      { role: "assistant", parts: [{ type: "reasoning", text: long }] },
-      60,
-    );
-    expect(out.length).toBeLessThanOrEqual(61); // 60 + the leading ellipsis
-    expect(out.startsWith("…")).toBe(true);
-    expect(out.endsWith("the current thought")).toBe(true);
-    expect(out).not.toBe(long);
-  });
-
-  it("collapses the hard line breaks reasoning streams with", () => {
-    const m = {
-      role: "assistant",
-      parts: [{ type: "reasoning", text: "line one\nline two\n\nline three" }],
-    };
-    expect(latestReasoningTail(m)).toBe("line one line two line three");
-  });
-
-  it("skips an empty reasoning part and falls back to an older one", () => {
-    const m = {
-      role: "assistant",
-      parts: [
-        { type: "reasoning", text: "an earlier thought" },
-        { type: "reasoning", text: "   \n  " },
-      ],
-    };
-    expect(latestReasoningTail(m)).toBe("an earlier thought");
-  });
-
-  it("returns empty when there is no reasoning at all", () => {
-    expect(
-      latestReasoningTail({
-        role: "assistant",
-        parts: [text("just an answer"), tool("bash_run")],
-      }),
-    ).toBe("");
-    expect(latestReasoningTail({ role: "assistant", parts: [] })).toBe("");
-    expect(latestReasoningTail(null)).toBe("");
-  });
-
-  it("never returns reasoning as an answer", () => {
-    // The pairing that matters: a message with reasoning and no prose has an
-    // answer of null and a thinking excerpt of the scratchpad. The card shows
-    // the excerpt as a status line; the relay's ANSWER stays null, so the run
-    // still reads as "no output" rather than publishing deliberation as a reply.
-    const chat = chatWith([
-      { role: "assistant", parts: [reasoning, tool("read_file")] },
-    ]);
-    expect(lastAssistantText(getter(chat), "s1", 0)).toBeNull();
-    expect(
-      latestReasoningTail({
-        role: "assistant",
-        parts: [reasoning, tool("read_file")],
-      }),
-    ).toBe("scratchpad");
   });
 });

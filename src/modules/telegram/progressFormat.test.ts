@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   balanceTelegramHtml,
-  describeRunPhase,
   extractToolSummaries,
   formatCompletionCard,
   formatDuration,
@@ -238,11 +237,9 @@ describe("progressFormat", () => {
         ],
       });
 
-      // NOT "Writing response": a tool is executing right now, and that is the
-      // phase the run is actually in. `status` alone said "streaming" here and
-      // the old label followed it, which reported a phase the run had left -
-      // the model is not writing prose while `Get-ChildItem` runs.
-      expect(text).toContain("**[Termigo Agent]** *Running...* (step 1)");
+      expect(text).toContain(
+        "**[Termigo Agent]** *Writing response...* (step 1)",
+      );
       expect(text).toContain("*Organizing files*");
       expect(text).toContain("🔹 Clean duplicate files");
       expect(text).toContain(
@@ -466,148 +463,5 @@ describe("progressFormat", () => {
     it("returns original text for non-table strings", () => {
       expect(formatMarkdownTable("just plain text")).toBe("just plain text");
     });
-  });
-});
-
-describe("describeRunPhase", () => {
-  // The label the card used to carry was a fixed word per `status`, and
-  // `status` stays "thinking" while a tool runs - so a user read "Thinking..."
-  // for the minutes a build took, with nothing to distinguish work from a
-  // wedge. These pin the precedence that replaces it.
-
-  it("names the running tool, which is the phase the run is actually in", () => {
-    expect(
-      describeRunPhase({
-        status: "thinking",
-        tools: [{ toolName: "bash_run", state: "running", input: "pnpm test" }],
-      }),
-    ).toBe("Running");
-    expect(
-      describeRunPhase({
-        status: "thinking",
-        tools: [
-          { toolName: "read_file", state: "running", input: "src/a.ts" },
-        ],
-      }),
-    ).toBe("Reading");
-  });
-
-  it("a running tool outranks existing prose", () => {
-    // answerText accumulates every text part of the message, so by step 5 it is
-    // usually non-empty from prose written minutes ago while a tool executes
-    // NOW. Labelling that "Writing response" reports a phase the run has left.
-    expect(
-      describeRunPhase({
-        status: "streaming",
-        hasAnswerText: true,
-        tools: [{ toolName: "edit", state: "running", input: "src/a.ts" }],
-      }),
-    ).toBe("Editing");
-  });
-
-  it("names the newest running tool when several are in flight", () => {
-    expect(
-      describeRunPhase({
-        status: "thinking",
-        tools: [
-          { toolName: "read_file", state: "running", input: "a" },
-          { toolName: "grep", state: "running", input: "b" },
-        ],
-      }),
-    ).toBe("Searching");
-  });
-
-  it("approval outranks everything, because the run is blocked on the user", () => {
-    expect(
-      describeRunPhase({
-        status: "awaiting-approval",
-        tools: [{ toolName: "bash_run", state: "running", input: "x" }],
-      }),
-    ).toBe("Waiting for approval");
-    expect(
-      describeRunPhase({
-        status: "thinking",
-        tools: [
-          { toolName: "delete_file", state: "awaiting-approval", input: "x" },
-        ],
-      }),
-    ).toBe("Waiting for approval");
-  });
-
-  it("says writing when prose is flowing and no tool is in flight", () => {
-    expect(
-      describeRunPhase({
-        status: "streaming",
-        hasAnswerText: true,
-        tools: [{ toolName: "read_file", state: "done", input: "a" }],
-      }),
-    ).toBe("Writing response");
-  });
-
-  it("distinguishes deliberation after tools from the opening think", () => {
-    // Results are in and the model is deciding what to do with them - not the
-    // same silence as the very first think, which is all the old label had.
-    expect(
-      describeRunPhase({
-        status: "thinking",
-        tools: [{ toolName: "bash_run", state: "done", input: "x" }],
-      }),
-    ).toBe("Deciding next step");
-    expect(
-      describeRunPhase({
-        status: "thinking",
-        tools: [{ toolName: "bash_run", state: "error", input: "x" }],
-      }),
-    ).toBe("Deciding next step");
-    expect(describeRunPhase({ status: "thinking" })).toBe("Thinking");
-  });
-
-  it("falls back to the status-derived label with no tools at all", () => {
-    expect(describeRunPhase({ status: "streaming" })).toBe("Writing response");
-    expect(describeRunPhase({ status: "idle" })).toBe("Thinking");
-  });
-
-  it("names an unknown tool rather than dropping to a generic word", () => {
-    expect(
-      describeRunPhase({
-        status: "thinking",
-        tools: [{ toolName: "mcp_custom", state: "running", input: "" }],
-      }),
-    ).toBe("Running mcp_custom");
-  });
-});
-
-describe("formatLiveProgress thinking preview", () => {
-  it("shows the thinking line while there is no answer yet", () => {
-    const card = formatLiveProgress({
-      status: "thinking",
-      mode: "task",
-      thinkingText: "The PTY pool lives in session.rs; reading how it is keyed",
-    });
-    expect(card).toContain("🧠");
-    expect(card).toContain("The PTY pool lives in session.rs");
-  });
-
-  it("drops the thinking line once the agent is answering", () => {
-    // Scratchpad must never sit next to - or worse, instead of - the reply.
-    const card = formatLiveProgress({
-      status: "streaming",
-      mode: "task",
-      answerText: "Here is the answer.",
-      thinkingText: "still deliberating internally",
-    });
-    expect(card).toContain("Here is the answer.");
-    expect(card).not.toContain("🧠");
-    expect(card).not.toContain("still deliberating");
-  });
-
-  it("stays inside the message limit with a long thinking excerpt", () => {
-    const card = formatLiveProgress({
-      status: "thinking",
-      mode: "task",
-      thinkingText: "x".repeat(5000),
-      answerText: "",
-    });
-    expect(card.length).toBeLessThan(4096);
   });
 });

@@ -60,11 +60,7 @@ describe("renderAnswerSnippet", () => {
       answerText: "z".repeat(20000),
     });
     expect(card.length).toBeLessThan(4096);
-    // The label names the RUNNING tool, not the prose: `bash_run` is executing,
-    // and `answerText` accumulates every text part of the message, so by this
-    // point in a run it says nothing about what is happening now. The answer is
-    // still on the card (that is what this test bounds), just not in the label.
-    expect(card).toContain("Running");
+    expect(card).toContain("Writing response");
   });
 });
 
@@ -90,11 +86,7 @@ describe("formatLiveProgress with answer text", () => {
     expect(lines[1]).toBe("");
     // Task header comes below the answer
     expect(lines[2]).toContain("**[Termigo Agent]**");
-    // The label names the running tool (`run_subagents` is in flight), not the
-    // prose. This test's subject is the ORDER of the card - answer first, then
-    // header, then tools - so the exact label is incidental here; it is pinned
-    // by the describeRunPhase tests instead.
-    expect(lines[2]).toContain("Delegating to subagent");
+    expect(lines[2]).toContain("Writing response");
     expect(lines[2]).toContain("step 3");
     expect(lines[3]).toBe("");
     // The tool lines stay below task
