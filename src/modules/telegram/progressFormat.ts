@@ -20,7 +20,7 @@ export type FormatLiveProgressOptions = {
   todos?: { title: string; status: string }[];
   /** Elapsed time in ms since the run started. Rendered as a ticking "· Xs"
    *  counter so the progress text always changes even when no new tool/step
-   *  has appeared — this keeps the Telegram message visibly alive during long
+   *  has appeared - this keeps the Telegram message visibly alive during long
    *  waits instead of freezing. */
   elapsedMs?: number;
   completed?: boolean;
@@ -252,7 +252,9 @@ export function extractToolSummaries(parts: unknown[]): ToolCallSummary[] {
       const hasError =
         Boolean(out && typeof out.error === "string") ||
         Boolean(out && out.timed_out === true) ||
-        Boolean(out && typeof out.exit_code === "number" && out.exit_code !== 0);
+        Boolean(
+          out && typeof out.exit_code === "number" && out.exit_code !== 0,
+        );
       state = hasError ? "error" : "done";
     }
 
@@ -305,9 +307,9 @@ export function balanceTelegramHtml(html: string): string {
   const openStack: string[] = [];
   let result = "";
   let lastIndex = 0;
-  let match: RegExpExecArray | null;
+  let match = TAG_REGEX.exec(html);
 
-  while ((match = TAG_REGEX.exec(html)) !== null) {
+  while (match !== null) {
     result += html.slice(lastIndex, match.index);
     lastIndex = TAG_REGEX.lastIndex;
 
@@ -318,6 +320,7 @@ export function balanceTelegramHtml(html: string): string {
 
     if (isSelfClosing) {
       result += fullTag;
+      match = TAG_REGEX.exec(html);
       continue;
     }
 
@@ -329,8 +332,10 @@ export function balanceTelegramHtml(html: string): string {
       } else {
         // Close any tags opened after this one in LIFO order
         while (openStack.length > pos + 1) {
-          const unclosed = openStack.pop()!;
-          result += `</${unclosed}>`;
+          const unclosed = openStack.pop();
+          if (unclosed) {
+            result += `</${unclosed}>`;
+          }
         }
         openStack.pop();
         result += `</${tagName}>`;
@@ -339,14 +344,18 @@ export function balanceTelegramHtml(html: string): string {
       openStack.push(tagName);
       result += fullTag;
     }
+
+    match = TAG_REGEX.exec(html);
   }
 
   result += html.slice(lastIndex);
 
   // Close any unclosed tags at the end of the string in LIFO order
   while (openStack.length > 0) {
-    const unclosed = openStack.pop()!;
-    result += `</${unclosed}>`;
+    const unclosed = openStack.pop();
+    if (unclosed) {
+      result += `</${unclosed}>`;
+    }
   }
 
   return result;
