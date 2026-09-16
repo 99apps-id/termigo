@@ -7,10 +7,13 @@
  * each writing subagent its own git worktree, so their work is independent until
  * it is deliberately brought back.
  *
- * Opt-in on purpose. Turning it on by default would change where every existing
- * subagent writes, and the failure mode of getting that wrong - work landing in a
- * directory nobody looks at - is worse than the collision it prevents. The caller
- * asks for it; nothing here decides to isolate on its own.
+ * Opt-in for a single writer on purpose. Turning it on by default there would
+ * change where an existing subagent writes, and the failure mode of getting
+ * that wrong - work landing in a directory nobody looks at - is worse than the
+ * collision it prevents. The caller asks for it; nothing here decides to isolate
+ * on its own. The one defaulted case is a BATCH with two or more writers, where
+ * the collision is certain rather than hypothetical: `defaultBatchIsolation`
+ * says when, and `run_subagents` is the caller that acts on it.
  *
  * Read-only subagents are never isolated: they do not write, so a worktree would
  * only give them a copy to read stale content from.
@@ -40,6 +43,21 @@ export type IsolationInput = {
 export type IsolationPlan =
   | { isolate: true }
   | { isolate: false; reason: string };
+
+/**
+ * Whether a batch of subagents should isolate when the caller gave no explicit
+ * choice.
+ *
+ * Zero or one writer stays opt-in: a lone subagent writing in the shared tree is
+ * the long-standing behaviour, and auto-isolating it would strand its work in a
+ * worktree the caller never asked for. Two or more writers is where the
+ * collision this module exists to prevent becomes certain - both branch from the
+ * same baseline and the later write wins - so it defaults on. Pure, so the
+ * threshold is asserted directly.
+ */
+export function defaultBatchIsolation(writingTaskCount: number): boolean {
+  return writingTaskCount >= 2;
+}
 
 /**
  * Whether this subagent should get its own worktree.

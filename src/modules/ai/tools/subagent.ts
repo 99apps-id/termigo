@@ -6,6 +6,7 @@ import {
   routeSubagentType,
 } from "../agents/resolveSubagent";
 import { effectiveSubagentMaxDepth, runSubagent } from "../agents/runSubagent";
+import { defaultBatchIsolation } from "../lib/subagentIsolation";
 import {
   cascadeSkip,
   detectBatchConflicts,
@@ -247,7 +248,7 @@ Each task's subagent has the same toolset you do and may itself spawn further su
             .boolean()
             .optional()
             .describe(
-              "Give each WRITING task its own git worktree under .termigo/worktrees/, so concurrent tasks cannot read each other's half-finished edits. Read-only tasks are unaffected (a worktree would only be a stale copy for them), and so are SSH sessions, non-git workspaces, and tasks that fail to branch - those share the workspace and the result says which. Nothing merges back automatically; each result reports its worktree path.",
+              "Give each WRITING task its own git worktree under .termigo/worktrees/, so concurrent tasks cannot read each other's half-finished edits. Defaults to ON when the batch has two or more writers - that is when they overwrite each other - and stays off for a lone writer; pass false to force sharing. Read-only tasks are unaffected (a worktree would only be a stale copy for them), and so are SSH sessions, non-git workspaces, and tasks that fail to branch - those share the workspace and the result says which. Nothing merges back automatically; each result reports its worktree path.",
             ),
         }),
       ),
@@ -299,6 +300,19 @@ Each task's subagent has the same toolset you do and may itself spawn further su
         // edits from the same baseline, both write, the second overwrites the
         // first. Reported before anything runs so the orchestrator (or the user
         // reading the card) can decide - the safest default is to note it.
+        // A batch of writers is where isolation must default on: two tasks
+        // editing from the same baseline overwrite each other. A lone writer
+        // stays opt-in so its work is not stranded in an unrequested worktree.
+        const writingCount = results.filter(
+          (r) => !subagentIsReadOnly(r.type),
+        ).length;
+        const isolateEffective = isolate ?? defaultBatchIsolation(writingCount);
+        if (isolate === undefined && isolateEffective) {
+          notes.push(
+            `Isolation is on by default for this batch (${writingCount} writers): each writing task works in its own git worktree. Nothing merges back automatically - read worktreePath on each result, then worktree_diff / worktree_discard as needed.`,
+          );
+        }
+
         const conflicts = detectBatchConflicts(
           batch.map((t, i) => ({
             paths: pathsInPrompt(t.prompt),
@@ -367,7 +381,7 @@ Each task's subagent has the same toolset you do and may itself spawn further su
               // Numbered, because several run at once and the approval queue
               // is unreadable if every row says "builder".
               requester: `${task.description ?? resolvedType} #${i + 1}`,
-              isolate,
+              isolate: isolateEffective,
               abortSignal: batchSignal,
               onStep: (label) => {
                 patchAgentMeta({

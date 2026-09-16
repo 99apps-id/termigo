@@ -590,6 +590,40 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
       }
     });
 
+    it("enforces the paired chat when only chatId is known (no owner user id)", async () => {
+      // Settings-pairing writes the chat id but never a user id. A different
+      // sender must not be able to approve pending actions in the paired chat.
+      useTelegramStore.getState().setChatId("111");
+      useTelegramStore.getState().setOwnerUserId(null);
+      const sentBodies: Array<{ text?: string }> = [];
+      const origFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn(async (_url, init) => {
+        if (init?.body) {
+          try {
+            sentBodies.push(JSON.parse(String(init.body)));
+          } catch {}
+        }
+        return {
+          ok: true,
+          json: async () => ({ ok: true, result: { message_id: 1 } }),
+          text: async () => JSON.stringify({ ok: true }),
+        } as unknown as Response;
+      });
+      const controller = new AbortController();
+      try {
+        await _testOnly.handleUpdate(
+          {
+            update_id: 1,
+            message: { chat: { id: 111 }, from: { id: 333 }, text: "/approve" },
+          },
+          controller.signal,
+        );
+        expect(sentBodies).toEqual([]);
+      } finally {
+        globalThis.fetch = origFetch;
+      }
+    });
+
     it("/pair records the pairing user id", async () => {
       useTelegramStore.getState().setChatId(null);
       useTelegramStore.getState().setOwnerUserId(null);

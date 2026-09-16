@@ -59,6 +59,22 @@ export const TOOL_SEARCH_ALWAYS_ON: ReadonlySet<string> = new Set([
   "env_get",
   "remember",
   "telegram_send_document",
+  // The rest of the git area. The core loop already keeps git_status/diff/log/
+  // commit/checkpoint/conflicts; a session that can commit but must discover
+  // how to push, branch or stash pays a discovery round trip for the second
+  // half of the same workflow, so they stay visible together.
+  "git_branch",
+  "git_push",
+  "git_pull",
+  "git_stash",
+  "git_stash_pop",
+  // Shell is core, and bash_wait is the other half of bash_background.
+  "bash_wait",
+  // Context offloading. The artifact broker is the escape hatch for a large
+  // payload mid-run; routing it through discovery would let the run blow its
+  // budget before the model learns the escape hatch exists.
+  "artifact_write",
+  "artifact_read",
 ]);
 
 

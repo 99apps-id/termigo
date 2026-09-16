@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ToolContext } from "../tools/context";
 import {
+  defaultBatchIsolation,
   planSubagentIsolation,
   rerootToolContext,
   worktreeRelativePath,
@@ -58,6 +59,22 @@ describe("planSubagentIsolation", () => {
       expect(plan.isolate).toBe(false);
       if (!plan.isolate) expect(plan.reason.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("defaultBatchIsolation", () => {
+  // A lone writer keeps the long-standing shared-tree behaviour: auto-isolating
+  // it would strand its work in a worktree the caller never asked for.
+  it("stays off for zero or one writer", () => {
+    expect(defaultBatchIsolation(0)).toBe(false);
+    expect(defaultBatchIsolation(1)).toBe(false);
+  });
+
+  // Two writers branching from the same baseline is exactly the collision this
+  // module exists to prevent, so it turns on by itself.
+  it("turns on at two or more writers", () => {
+    expect(defaultBatchIsolation(2)).toBe(true);
+    expect(defaultBatchIsolation(8)).toBe(true);
   });
 });
 

@@ -35,6 +35,9 @@ async function embedRead(instance: string) {
       }
       return {
         text: "(no readable text returned from the page. It may block scripts, be offline, or render without DOM text. Do not retry browser_extract in a loop.)",
+        // Structured marker so the agent loop detects the failure by field, not
+        // by matching this human-readable string.
+        noReadableText: true as const,
       };
     }
 
