@@ -154,12 +154,26 @@ export function extractGitErrorDetail(stderr: string): string {
     .filter(Boolean);
   return (
     lines.find((l) => /^fatal:|^error:/i.test(l)) ??
+    lines.find((l) => !/^preparing worktree/i.test(l)) ??
     lines[lines.length - 1] ??
     ""
   );
 }
 
-export async function createIsolatedWorktree(args: {
+let isolationMutex: Promise<unknown> = Promise.resolve();
+
+export function createIsolatedWorktree(args: {
+  ctx: ToolContext;
+  /** Names the branch and directory, so a leftover one is identifiable. */
+  label: string;
+}): Promise<IsolationCreated | IsolationRefused> {
+  const run = () => executeCreateIsolatedWorktree(args);
+  const next = isolationMutex.then(run, run);
+  isolationMutex = next;
+  return next;
+}
+
+async function executeCreateIsolatedWorktree(args: {
   ctx: ToolContext;
   /** Names the branch and directory, so a leftover one is identifiable. */
   label: string;
@@ -218,9 +232,13 @@ export async function createIsolatedWorktree(args: {
       status: "active",
       description: `isolated subagent: ${label}`,
     });
-    return { ok: true, worktreePath, sandboxId: info.id, branchName: info.branchName };
+    return {
+      ok: true,
+      worktreePath,
+      sandboxId: info.id,
+      branchName: info.branchName,
+    };
   } catch (e) {
     return { ok: false, reason: e instanceof Error ? e.message : String(e) };
   }
 }
-

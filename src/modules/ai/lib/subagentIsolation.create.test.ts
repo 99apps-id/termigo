@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ToolContext } from "../tools/context";
-import { listSandboxes } from "./worktree";
 import { createIsolatedWorktree } from "./subagentIsolation";
+import { listSandboxes } from "./worktree";
 
 vi.mock("./native", () => ({
   native: { shellSessionRun: vi.fn() },
@@ -53,7 +53,8 @@ describe("createIsolatedWorktree", () => {
     shellSessionRun.mockResolvedValue({
       exit_code: 128,
       stdout: "",
-      stderr: "fatal: not a git repository (or any of the parent directories)\n",
+      stderr:
+        "fatal: not a git repository (or any of the parent directories)\n",
     });
     const r = await createIsolatedWorktree({
       ctx: ctxWith("s1", "/repo"),
@@ -114,5 +115,26 @@ describe("createIsolatedWorktree", () => {
     });
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.worktreePath).not.toContain("//");
+  });
+
+  it("serializes concurrent worktree creation calls", async () => {
+    let running = 0;
+    let maxRunning = 0;
+    shellSessionRun.mockImplementation(async () => {
+      running++;
+      maxRunning = Math.max(maxRunning, running);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      running--;
+      return { exit_code: 0, stdout: "", stderr: "" };
+    });
+
+    const [r1, r2] = await Promise.all([
+      createIsolatedWorktree({ ctx: ctxWith("s1", "/repo"), label: "w1" }),
+      createIsolatedWorktree({ ctx: ctxWith("s1", "/repo"), label: "w2" }),
+    ]);
+
+    expect(r1.ok).toBe(true);
+    expect(r2.ok).toBe(true);
+    expect(maxRunning).toBe(1);
   });
 });

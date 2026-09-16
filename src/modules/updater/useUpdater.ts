@@ -1,8 +1,8 @@
+import { IS_LINUX } from "@/lib/platform";
 import { getVersion } from "@tauri-apps/api/app";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { useCallback, useEffect, useState } from "react";
-import { IS_LINUX } from "@/lib/platform";
 
 const LAST_CHECK_KEY = "termigo:updater:last-check";
 const CHECK_INTERVAL_MS = 30 * 60 * 1000;
@@ -81,7 +81,7 @@ interface HookOptions {
   autoCheck?: boolean;
 }
 
-export function useUpdater({ autoCheck = true }: HookOptions = {}) {
+export function useUpdater({ autoCheck = false }: HookOptions = {}) {
   const [status, setStatus] = useState<UpdaterStatus>({ kind: "idle" });
 
   const runCheck = useCallback(async ({ manual }: Options = {}) => {

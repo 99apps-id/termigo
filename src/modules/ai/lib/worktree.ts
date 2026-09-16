@@ -26,9 +26,15 @@ export function generateSandboxInfo(taskId?: string): {
   branchName: string;
   subpath: string;
 } {
-  const raw = taskId?.trim() ? taskId.trim() : Math.random().toString(36).slice(2, 9);
+  const raw = taskId?.trim()
+    ? taskId.trim()
+    : Math.random().toString(36).slice(2, 9);
   const sanitized = raw.replace(/[^a-zA-Z0-9_-]/g, "_");
-  const cleanId = sanitized || Math.random().toString(36).slice(2, 9);
+  const bounded =
+    sanitized.length > 40
+      ? sanitized.slice(0, 40).replace(/_+$/, "")
+      : sanitized;
+  const cleanId = bounded || Math.random().toString(36).slice(2, 9);
   const branchName = `termigo-sandbox/${cleanId}`;
   const subpath = `.termigo/worktrees/${cleanId}`;
   return { id: cleanId, branchName, subpath };
@@ -53,7 +59,10 @@ export function buildWorktreeCommands(opts: {
  * Shell command builders (quoted) for executing worktree operations through a
  * session shell. Exported so the constructed shell line is testable.
  */
-export function worktreeAddCommand(worktreePath: string, branchName: string): string {
+export function worktreeAddCommand(
+  worktreePath: string,
+  branchName: string,
+): string {
   return `git worktree add -b ${quoteShellArg(branchName)} ${quoteShellArg(worktreePath)} HEAD`;
 }
 
@@ -68,21 +77,30 @@ export function worktreeDeleteBranchCommand(branchName: string): string {
 /**
  * Shell command to inspect the diff between the worktree and the base commit.
  */
-export function worktreeDiffCommand(worktreePath: string, baseRef = "HEAD"): string {
+export function worktreeDiffCommand(
+  worktreePath: string,
+  baseRef = "HEAD",
+): string {
   return `git -C ${quoteShellArg(worktreePath)} diff ${quoteShellArg(baseRef)}`;
 }
 
 /**
  * Shell command to inspect a concise diffstat of changes in the worktree.
  */
-export function worktreeDiffStatCommand(worktreePath: string, baseRef = "HEAD"): string {
+export function worktreeDiffStatCommand(
+  worktreePath: string,
+  baseRef = "HEAD",
+): string {
   return `git -C ${quoteShellArg(worktreePath)} diff --stat ${quoteShellArg(baseRef)}`;
 }
 
 /**
  * Shell command to merge the isolated sandbox branch back into current working branch.
  */
-export function worktreeMergeCommand(branchName: string, squash = false): string {
+export function worktreeMergeCommand(
+  branchName: string,
+  squash = false,
+): string {
   if (squash) {
     return `git merge --squash ${quoteShellArg(branchName)}`;
   }
@@ -113,7 +131,10 @@ export function listSandboxes(): WorktreeSandbox[] {
 /**
  * Unregister or mark a sandbox as finished.
  */
-export function unregisterSandbox(id: string, status: "applied" | "discarded" | "merged"): void {
+export function unregisterSandbox(
+  id: string,
+  status: "applied" | "discarded" | "merged",
+): void {
   const existing = activeSandboxes.get(id);
   if (existing) {
     existing.status = status;
@@ -191,4 +212,3 @@ export function discoveredWorktrees(
   }
   return out;
 }
-

@@ -1,7 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { native } from "../lib/native";
-import { checkWritableCanonical } from "../lib/security";
+import { remoteUnsupported } from "../lib/remoteFs";
 import {
   escapeRegex,
   isSelfReferential,
@@ -9,7 +9,7 @@ import {
   replaceAllCount,
   uniquePaths,
 } from "../lib/replaceText";
-import { remoteUnsupported } from "../lib/remoteFs";
+import { checkWritableCanonical } from "../lib/security";
 import { resolvePath, type ToolContext } from "./context";
 
 export function buildReplaceTools(ctx: ToolContext) {
@@ -17,10 +17,15 @@ export function buildReplaceTools(ctx: ToolContext) {
     replace_in_files: tool({
       description:
         "Replace a literal string across every matching file under a directory. The search is literal text, not a regex. Use it for renames and sweeping updates that would otherwise be many `edit` calls. Returns the per-file replacement counts so you can check the result. Refuses if more than " +
-        `${MAX_REPLACE_FILES} files would change — narrow with \`glob\` or a deeper \`path\` instead. Asks for approval.`,
+        `${MAX_REPLACE_FILES} files would change - narrow with \`glob\` or a deeper \`path\` instead. Asks for approval.`,
       inputSchema: z.object({
-        search: z.string().min(1).describe("Literal text to find. Not a regex."),
-        replace: z.string().describe("Literal replacement. May be empty to delete the text."),
+        search: z
+          .string()
+          .min(1)
+          .describe("Literal text to find. Not a regex."),
+        replace: z
+          .string()
+          .describe("Literal replacement. May be empty to delete the text."),
         path: z
           .string()
           .optional()
@@ -48,8 +53,7 @@ export function buildReplaceTools(ctx: ToolContext) {
           );
         }
         const root = resolvePath(path ?? ".", ctx.getCwd());
-        const glob =
-          typeof globInput === "string" ? [globInput] : globInput;
+        const glob = typeof globInput === "string" ? [globInput] : globInput;
 
         let hits: Awaited<ReturnType<typeof native.grep>>;
         try {
@@ -84,7 +88,10 @@ export function buildReplaceTools(ctx: ToolContext) {
         let total = 0;
 
         for (const file of files) {
-          const safety = await checkWritableCanonical(file, native.canonicalize);
+          const safety = await checkWritableCanonical(
+            file,
+            native.canonicalize,
+          );
           if (!safety.ok) {
             failed.push({ path: file, error: safety.reason });
             continue;
@@ -114,7 +121,10 @@ export function buildReplaceTools(ctx: ToolContext) {
           files: changed,
           ...(failed.length > 0 ? { skipped: failed } : {}),
           ...(hits.truncated
-            ? { warning: "the search hit its result cap; some files may be missed" }
+            ? {
+                warning:
+                  "the search hit its result cap; some files may be missed",
+              }
             : {}),
           ...(isSelfReferential(search, replace)
             ? {
