@@ -559,7 +559,14 @@ const RenderedTool = memo(function RenderedTool({
             typeof part.input === "object" &&
             part.input !== null
           ) {
-            (part.input as Record<string, unknown>).command = editedCommand;
+            try {
+              (part.input as Record<string, unknown>).command = editedCommand;
+            } catch {
+              part.input = {
+                ...(part.input as Record<string, unknown>),
+                command: editedCommand,
+              };
+            }
           }
           onApproval(part.approval.id, approved);
         }}

@@ -33,15 +33,70 @@ describe("PreviewBlock", () => {
     });
 
     expect(el).toBeDefined();
-    // Children contain the header bar and the textarea
+    // Children contain the header bar and the textarea container
     const children = el.props.children;
-    const textarea = children[1];
+    const textareaContainer = children[1];
+    const textarea = textareaContainer.props.children[0];
     expect(textarea.type).toBe("textarea");
     expect(textarea.props.value).toBe("npm test -- --run");
 
     // Simulate typing into textarea
     textarea.props.onChange({ target: { value: "npm test -- --watch" } });
     expect(setEditedCommand).toHaveBeenCalledWith("npm test -- --watch");
+  });
+
+  it("triggers onApprove on Ctrl+Enter in textarea when command is not empty", () => {
+    const onApprove = vi.fn();
+    const el = PreviewBlock({
+      toolName: "bash_run",
+      input: { command: "git diff" },
+      isEditing: true,
+      setIsEditing: vi.fn(),
+      editedCommand: "git diff --staged",
+      setEditedCommand: vi.fn(),
+      initialCommand: "git diff",
+      onReset: vi.fn(),
+      onApprove,
+    });
+
+    const textarea = el.props.children[1].props.children[0];
+    const preventDefault = vi.fn();
+    textarea.props.onKeyDown({
+      key: "Enter",
+      ctrlKey: true,
+      metaKey: false,
+      preventDefault,
+    });
+
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(onApprove).toHaveBeenCalledOnce();
+  });
+
+  it("does not trigger onApprove on Ctrl+Enter when command is empty", () => {
+    const onApprove = vi.fn();
+    const el = PreviewBlock({
+      toolName: "bash_run",
+      input: { command: "git diff" },
+      isEditing: true,
+      setIsEditing: vi.fn(),
+      editedCommand: "   ",
+      setEditedCommand: vi.fn(),
+      initialCommand: "git diff",
+      onReset: vi.fn(),
+      onApprove,
+    });
+
+    const textarea = el.props.children[1].props.children[0];
+    const preventDefault = vi.fn();
+    textarea.props.onKeyDown({
+      key: "Enter",
+      ctrlKey: true,
+      metaKey: false,
+      preventDefault,
+    });
+
+    expect(preventDefault).not.toHaveBeenCalled();
+    expect(onApprove).not.toHaveBeenCalled();
   });
 
   it("shows Reset button when command is modified", () => {
@@ -179,5 +234,38 @@ describe("Edited command application in tool approval responder", () => {
     onRespond(true);
     expect(part.input.command).toBe("git status");
     expect(onApproval).toHaveBeenCalledWith("app-456", true);
+  });
+
+  it("safely updates command even when part.input is frozen", () => {
+    const part = {
+      type: "tool-bash_run",
+      state: "approval-requested" as const,
+      approval: { id: "app-789" },
+      input: Object.freeze({ command: "pnpm build" }) as { command: string },
+    };
+    const onApproval = vi.fn();
+
+    const onRespond = (approved: boolean, editedCommand?: string) => {
+      if (
+        approved &&
+        editedCommand !== undefined &&
+        typeof part.input === "object" &&
+        part.input !== null
+      ) {
+        try {
+          (part.input as Record<string, unknown>).command = editedCommand;
+        } catch {
+          part.input = {
+            ...(part.input as Record<string, unknown>),
+            command: editedCommand,
+          };
+        }
+      }
+      onApproval(part.approval.id, approved);
+    };
+
+    onRespond(true, "pnpm build:cli");
+    expect(part.input.command).toBe("pnpm build:cli");
+    expect(onApproval).toHaveBeenCalledWith("app-789", true);
   });
 });

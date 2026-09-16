@@ -49,11 +49,21 @@ function AiToolApprovalImpl({ part, toolName, onRespond }: Props) {
   const [isEditing, setIsEditing] = useState(false);
   const [editedCommand, setEditedCommand] = useState(initialCommand);
 
+  const isCommandEmpty = isBash && editedCommand.trim().length === 0;
+
   const getApprovedCommand = () => {
-    if (isBash && editedCommand !== initialCommand) {
-      return editedCommand;
+    if (isBash) {
+      const trimmed = editedCommand.trim();
+      if (trimmed !== initialCommand.trim()) {
+        return trimmed;
+      }
     }
     return undefined;
+  };
+
+  const handleApprove = () => {
+    if (isCommandEmpty) return;
+    onRespond(true, getApprovedCommand());
   };
 
   // Persist an "always allow" rule scoped to this call into the project's
@@ -72,6 +82,7 @@ function AiToolApprovalImpl({ part, toolName, onRespond }: Props) {
   );
 
   const allowInProject = () => {
+    if (isCommandEmpty) return;
     const cmd = getApprovedCommand();
     const effectiveRule = ruleFromApproval(
       toolName,
@@ -115,6 +126,7 @@ function AiToolApprovalImpl({ part, toolName, onRespond }: Props) {
           setEditedCommand={setEditedCommand}
           initialCommand={initialCommand}
           onReset={() => setEditedCommand(initialCommand)}
+          onApprove={handleApprove}
         />
       </div>
 
@@ -131,7 +143,9 @@ function AiToolApprovalImpl({ part, toolName, onRespond }: Props) {
         <Button
           size="sm"
           variant="ghost"
+          disabled={isCommandEmpty}
           onClick={() => {
+            if (isCommandEmpty) return;
             rememberSessionAllowed(toolName);
             onRespond(true, getApprovedCommand());
           }}
@@ -144,7 +158,9 @@ function AiToolApprovalImpl({ part, toolName, onRespond }: Props) {
         <Button
           size="sm"
           variant="ghost"
+          disabled={isCommandEmpty}
           onClick={() => {
+            if (isCommandEmpty) return;
             rememberSessionAllowed(toolName);
             const list = usePreferencesStore.getState().agentAlwaysAllowedTools;
             if (!list.includes(toolName)) {
@@ -162,6 +178,7 @@ function AiToolApprovalImpl({ part, toolName, onRespond }: Props) {
           <Button
             size="sm"
             variant="ghost"
+            disabled={isCommandEmpty}
             onClick={allowInProject}
             className="h-7 gap-1.5 text-[11px]"
             title={`Approve, and save an allow rule to this project's .termigo/approvals.json${projectRule.command ? ` (${projectRule.command})` : projectRule.path ? ` (${projectRule.path})` : ""}`}
@@ -173,7 +190,8 @@ function AiToolApprovalImpl({ part, toolName, onRespond }: Props) {
         <Button
           size="sm"
           variant="default"
-          onClick={() => onRespond(true, getApprovedCommand())}
+          disabled={isCommandEmpty}
+          onClick={handleApprove}
           className="h-7 gap-1.5 text-[11px]"
         >
           <HugeiconsIcon icon={Tick02Icon} size={12} strokeWidth={2} />
@@ -204,6 +222,7 @@ export function PreviewBlock({
   setEditedCommand,
   initialCommand,
   onReset,
+  onApprove,
 }: {
   toolName: string;
   input: Record<string, unknown>;
@@ -213,10 +232,12 @@ export function PreviewBlock({
   setEditedCommand: (cmd: string) => void;
   initialCommand: string;
   onReset: () => void;
+  onApprove?: () => void;
 }) {
   if (toolName === "bash_run" || toolName === "bash_background") {
     const cwd = typeof input.cwd === "string" ? input.cwd : null;
     const isModified = editedCommand !== initialCommand;
+    const isCommandEmpty = editedCommand.trim().length === 0;
     return (
       <div className="space-y-1.5">
         <div className="flex items-center justify-between gap-2">
@@ -258,17 +279,32 @@ export function PreviewBlock({
         </div>
 
         {isEditing ? (
-          <textarea
-            value={editedCommand}
-            onChange={(e) => setEditedCommand(e.target.value)}
-            rows={Math.min(
-              10,
-              Math.max(3, editedCommand.split("\n").length + 1),
-            )}
-            className="w-full rounded-md border border-border/80 bg-background/80 p-2 font-mono text-[11px] leading-relaxed text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
-            placeholder="Command to run..."
-            spellCheck={false}
-          />
+          <div className="space-y-1">
+            <textarea
+              value={editedCommand}
+              onChange={(e) => setEditedCommand(e.target.value)}
+              onKeyDown={(e) => {
+                if (
+                  (e.ctrlKey || e.metaKey) &&
+                  e.key === "Enter" &&
+                  !isCommandEmpty
+                ) {
+                  e.preventDefault();
+                  onApprove?.();
+                }
+              }}
+              rows={Math.min(
+                10,
+                Math.max(3, editedCommand.split("\n").length + 1),
+              )}
+              className="w-full rounded-md border border-border/80 bg-background/80 p-2 font-mono text-[11px] leading-relaxed text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
+              placeholder="Command to run..."
+              spellCheck={false}
+            />
+            <div className="text-[10px] text-muted-foreground/80">
+              Press Ctrl+Enter to approve
+            </div>
+          </div>
         ) : (
           <pre
             className={cn(

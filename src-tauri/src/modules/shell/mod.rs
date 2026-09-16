@@ -584,7 +584,7 @@ fn run_blocking(
 
     let start = std::time::Instant::now();
     let poll_interval = Duration::from_millis(250);
-    let mut last_stdout_len = 0usize;
+    let mut last_output_len = 0usize;
     let mut frozen_count = 0u32;
     let mut interactive_prompt: Option<&'static str> = None;
 
@@ -601,27 +601,43 @@ fn run_blocking(
             Ok(Ok(status)) => break (status.code(), false),
             Ok(Err(e)) => return Err(e.to_string()),
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                // Check stdout tail for interactive prompts if output has frozen
-                let current_len = {
+                // Check stdout and stderr tails for interactive prompts if output has frozen
+                let current_out_len = {
                     let guard = match stdout_target.lock() {
                         Ok(g) => g,
                         Err(p) => p.into_inner(),
                     };
                     guard.0.len()
                 };
+                let current_err_len = {
+                    let guard = match stderr_target.lock() {
+                        Ok(g) => g,
+                        Err(p) => p.into_inner(),
+                    };
+                    guard.0.len()
+                };
 
-                if current_len > 0 {
-                    if current_len == last_stdout_len {
+                let total_len = current_out_len.saturating_add(current_err_len);
+                if total_len > 0 {
+                    if total_len == last_output_len {
                         frozen_count = frozen_count.saturating_add(1);
                         // 8 * 250ms = 2.0 seconds of silence with unchanged output
                         if frozen_count >= 8 {
-                            let guard = match stdout_target.lock() {
-                                Ok(g) => g,
-                                Err(p) => p.into_inner(),
+                            let check_target = |target: &Arc<Mutex<(Vec<u8>, bool)>>| -> Option<&'static str> {
+                                let guard = match target.lock() {
+                                    Ok(g) => g,
+                                    Err(p) => p.into_inner(),
+                                };
+                                if guard.0.is_empty() {
+                                    return None;
+                                }
+                                let tail_start = guard.0.len().saturating_sub(512);
+                                let tail_str = String::from_utf8_lossy(&guard.0[tail_start..]);
+                                detect_interactive_prompt(&tail_str)
                             };
-                            let tail_start = guard.0.len().saturating_sub(512);
-                            let tail_str = String::from_utf8_lossy(&guard.0[tail_start..]);
-                            if let Some(prompt) = detect_interactive_prompt(&tail_str) {
+
+                            // Check stderr tail first (prompts like sudo or read -p are often sent to stderr), then stdout tail
+                            if let Some(prompt) = check_target(&stderr_target).or_else(|| check_target(&stdout_target)) {
                                 interactive_prompt = Some(prompt);
                                 crate::modules::proc::kill_tree(child.id());
                                 let _ = child.kill();
@@ -629,7 +645,7 @@ fn run_blocking(
                             }
                         }
                     } else {
-                        last_stdout_len = current_len;
+                        last_output_len = total_len;
                         frozen_count = 0;
                     }
                 }
