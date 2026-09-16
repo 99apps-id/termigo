@@ -115,20 +115,15 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
             let chained = (c == '&' && chars.get(i + 1) == Some(&'&'))
                 || (c == '|' && chars.get(i + 1) == Some(&'|'));
             if chained {
+                if current.trim().is_empty() {
+                    return Err("command contains an empty or dangling segment".into());
+                }
                 segments.push(std::mem::take(&mut current));
                 prev = c;
                 i += 2;
                 continue;
             }
-            if c == '\n' || c == '\r' {
-                // A newline is a command separator exactly like `&&`: the shell
-                // runs every line, so each line must be validated.
-                segments.push(std::mem::take(&mut current));
-                prev = c;
-                i += 1;
-                continue;
-            }
-            if c == '&' || c == '|' || SHELL_METACHARACTERS.contains(&c) {
+            if c == '\n' || c == '\r' || c == '&' || c == '|' || SHELL_METACHARACTERS.contains(&c) {
                 bad.push(c);
             }
         }
@@ -145,18 +140,19 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
             bad
         ));
     }
+    if current.trim().is_empty() {
+        return Err("command contains an empty or dangling segment".into());
+    }
     segments.push(current);
 
     // 3. Every segment must start with an allowlisted program (or an absolute /
     //    rooted path). Checking each segment - not just the first - is what
-    //    makes `git status && rm -rf /` fail on `rm`. Blank segments (blank
-    //    lines, a trailing separator) carry no command and are dropped.
+    //    makes `git status && rm -rf /` fail on `rm`.
     let segments: Vec<&str> = segments
         .iter()
         .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
         .collect();
-    if segments.is_empty() {
+    if segments.is_empty() || segments.iter().any(|s| s.is_empty()) {
         return Err("command contains no executable segment".into());
     }
     for segment in segments {
@@ -495,7 +491,7 @@ pub fn shell_bg_spawn(
 
     let workspace = WorkspaceEnv::from_option(workspace);
     authorize_spawn_cwd(&registry, cwd.as_deref(), &workspace)?;
-    let proc = background::spawn(trimmed, cwd, workspace, log_path)?;
+    let proc = background::spawn(trimmed, cwd, workspace, log_path, &registry)?;
     let id = state.next_bg_id.fetch_add(1, Ordering::Relaxed);
     state.bg.write().unwrap().insert(id, proc);
     Ok(id)
@@ -531,7 +527,7 @@ pub fn shell_bg_list(state: tauri::State<ShellState>) -> Result<Vec<BackgroundPr
     let map = state.bg.read().unwrap();
     let mut out = Vec::with_capacity(map.len());
     for (id, p) in map.iter() {
-        out.push(p.info(*id));
+        out.push(p.info((*id).into()));
     }
     out.sort_by_key(|i| i.handle);
     Ok(out)

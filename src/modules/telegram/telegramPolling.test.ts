@@ -19,7 +19,7 @@
 // The timing policy is now a pure function so it can be asserted without a
 // network, a chat, or a fake clock.
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { TelegramApiError } from "./telegramApi";
 import {
   isPollingStalled,
@@ -170,8 +170,6 @@ describe("isPollingStalled", () => {
 // `getUpdates`, so a module-level offset that reset to 0 on every restart
 // replayed the backlog: an old `/run`, `/approve` or `/mode all` ran a second
 // time. These pin the persistence that stops it.
-
-import { afterEach, describe, expect, it, vi } from "vitest";
 
 function fakeLocalStorage(initial: Record<string, string> = {}) {
   const store = new Map(Object.entries(initial));

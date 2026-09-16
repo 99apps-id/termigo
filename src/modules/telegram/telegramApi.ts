@@ -5,8 +5,8 @@
 
 import { getTelegramToken } from "./keyring";
 import {
-  markdownToTelegramHtml,
   escapePlainTextToHtml,
+  markdownToTelegramHtml,
 } from "./progressFormat";
 
 export type InlineButton = { text: string; callback_data: string };
@@ -89,6 +89,38 @@ function clampMessage(text: string): string {
   return clampText(text, TELEGRAM_MAX_MESSAGE_CHARS);
 }
 
+/**
+ * Truncate HTML-escaped text WITHOUT splitting an entity.
+ *
+ * Escaping expands text - `&` becomes `&amp;`, up to six characters - so the
+ * escaped form can exceed Telegram's limit and has to be cut. A plain slice can
+ * land inside an entity and leave a fragment like `&am`, and Telegram rejects the
+ * WHOLE message for an invalid entity, so the cut backs off to the last complete
+ * one instead.
+ *
+ * This matters because the send below it is the last resort: it runs when the
+ * formatted HTML was too long, so a rejection here loses the message outright
+ * rather than degrading. `2>&1` in a long shell transcript is enough to reach it.
+ *
+ * The other callers clamp BEFORE escaping (`clampMessage(text)` then
+ * `markdownToTelegramHtml`), which cannot split anything - entities do not exist
+ * yet. Only the escaped path needs this.
+ */
+export function clampEscapedHtml(text: string, max: number): string {
+  if (text.length <= max) return text;
+  let cut = Math.max(0, max - 1);
+  const searchStart = Math.max(0, cut - 10);
+  const amp = text.lastIndexOf("&", cut);
+  if (amp !== -1 && amp >= searchStart) {
+    const semi = text.indexOf(";", amp);
+    // A `;` at or beyond the cut means that entity was left incomplete, so the
+    // cut moves back to its `&`. Escaping only ever emits whole entities, so
+    // they do not overlap and the last one is the only one that can be broken.
+    if (semi === -1 || semi >= cut) cut = amp;
+  }
+  return text.slice(0, cut);
+}
+
 export class TelegramApiError extends Error {
   readonly status: number;
   readonly description: string;
@@ -156,10 +188,14 @@ export async function apiGet(
   signal: AbortSignal,
   timeoutMs = 15_000,
 ): Promise<unknown> {
-  const token = await getTelegramToken();
-  if (!token) throw new Error("No Telegram token configured");
+  // The deadline is created BEFORE the token read, deliberately. The read is a
+  // Tauri IPC call into the OS keychain; when it ran first, a slow keychain made
+  // the whole request hang with no timeout to fail it, so the poll went silent
+  // and the stall watchdog recycled it instead of reporting an error.
   const { signal: reqSignal, cleanup } = mergeSignals(signal, timeoutMs);
   try {
+    const token = await getTelegramToken();
+    if (!token) throw new Error("No Telegram token configured");
     const res = await fetch(`${API}/bot${token}/${path}`, {
       signal: reqSignal,
     });
@@ -178,10 +214,11 @@ export async function apiPost(
   signal: AbortSignal,
   timeoutMs = 15_000,
 ): Promise<unknown> {
-  const token = await getTelegramToken();
-  if (!token) throw new Error("No Telegram token configured");
+  // Deadline first; see apiGet.
   const { signal: reqSignal, cleanup } = mergeSignals(signal, timeoutMs);
   try {
+    const token = await getTelegramToken();
+    if (!token) throw new Error("No Telegram token configured");
     const res = await fetch(`${API}/bot${token}/${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -238,8 +275,22 @@ export function sleep(signal: AbortSignal, ms: number): Promise<void> {
   });
 }
 
-/** Split long messages on newline/word boundaries so nothing is truncated. */
-export function splitTelegramText(text: string, maxLen = 4000): string[] {
+export const chatFloodWaitUntil = new Map<number | string, number>();
+
+export function isChatRateLimited(chatId: number | string): boolean {
+  const until = chatFloodWaitUntil.get(chatId) ?? 0;
+  return Date.now() < until;
+}
+
+export function setChatRateLimited(
+  chatId: number | string,
+  waitSec: number,
+): void {
+  chatFloodWaitUntil.set(chatId, Date.now() + Math.max(1, waitSec) * 1000);
+}
+
+/** Split long messages on newline/word boundaries so nothing is truncated. Default 3500 leaves headroom for HTML entity expansion. */
+export function splitTelegramText(text: string, maxLen = 3500): string[] {
   if (text.length <= maxLen) return [text];
   const chunks: string[] = [];
   let remaining = text;
@@ -263,16 +314,10 @@ export function splitTelegramText(text: string, maxLen = 4000): string[] {
 }
 
 /**
- * Send `text` as escaped plain text, split so no single send exceeds the cap.
+ * Deliver a text that failed HTML formatting by escaping it as plain text.
  *
- * The escaped form is LONGER than its source (each `<`, `>` and `&` grows to an
- * entity), so a chunk that fit the 4000-char markdown budget can still be
- * rejected as HTML: a 4000-char block of `<` becomes a 16 KB body, Telegram
- * answers 400, and the old verbatim retry failed the same way. The failure
- * propagated out of `sendTelegram`, so the caller's reply was never delivered
- * and `/status`, `/help` or an agent answer vanished silently.
- *
- * Splitting by the ESCAPED length fixes it without ever cutting an entity in
+ * If the escaped text STILL exceeds the Telegram limit (escaping expands
+ * `<` to `&lt;`, so 1500 `<` fits as markdown but escapes to 6000 chars), split in
  * half: the split points are chosen on the raw text and each piece is escaped
  * afterwards. Halving on a line, then a space, guarantees progress (a cut of 0
  * would not), so it terminates.
@@ -332,25 +377,37 @@ export async function sendProgressMessage(
   text: string,
   signal: AbortSignal,
 ): Promise<number | null> {
-  const html = markdownToTelegramHtml(text);
-  try {
-    const res = (await apiPost(
-      "sendMessage",
-      { chat_id: chatId, text: html, parse_mode: "HTML" },
-      signal,
-    )) as { ok?: boolean; result?: { message_id?: number } };
-    return res?.result?.message_id ?? null;
-  } catch {
+  const clampedText = clampMessage(text);
+  const html = markdownToTelegramHtml(clampedText);
+  if (html.length <= TELEGRAM_MAX_MESSAGE_CHARS) {
     try {
       const res = (await apiPost(
         "sendMessage",
-        { chat_id: chatId, text },
+        { chat_id: chatId, text: html, parse_mode: "HTML" },
         signal,
       )) as { ok?: boolean; result?: { message_id?: number } };
       return res?.result?.message_id ?? null;
     } catch {
-      return null;
+      // Fall through to plain text fallback below
     }
+  }
+
+  try {
+    const res = (await apiPost(
+      "sendMessage",
+      {
+        chat_id: chatId,
+        text: clampEscapedHtml(
+          escapePlainTextToHtml(clampedText),
+          TELEGRAM_MAX_MESSAGE_CHARS,
+        ),
+        parse_mode: "HTML",
+      },
+      signal,
+    )) as { ok?: boolean; result?: { message_id?: number } };
+    return res?.result?.message_id ?? null;
+  } catch {
+    return null;
   }
 }
 
@@ -360,7 +417,11 @@ export async function editProgressMessage(
   text: string,
   signal: AbortSignal,
 ): Promise<boolean> {
-  const html = markdownToTelegramHtml(text);
+  if (isChatRateLimited(chatId)) {
+    return false;
+  }
+  const clampedText = clampMessage(text);
+  const html = markdownToTelegramHtml(clampedText);
   const tryPost = async (body: { text: string; parse_mode?: string }) => {
     return (await apiPost(
       "editMessageText",
@@ -374,54 +435,62 @@ export async function editProgressMessage(
     )) as { ok?: boolean };
   };
 
-  try {
-    await tryPost({ text: html, parse_mode: "HTML" });
-    return true;
-  } catch (err) {
-    if (err instanceof TelegramApiError) {
-      const desc = err.description.toLowerCase();
-      // Exact message already displayed on Telegram: treat as success (Hermes pattern)
-      if (desc.includes("message is not modified")) {
-        return true;
-      }
-      // Rate limited: if retry_after is small (<=3s), back off briefly, else skip intermediate progress
-      if (err.status === 429) {
-        const waitSec = err.retryAfter ?? 2;
-        if (waitSec <= 3 && !signal.aborted) {
-          await sleep(signal, waitSec * 1000);
-          try {
-            await tryPost({ text: html, parse_mode: "HTML" });
-            return true;
-          } catch (retryErr) {
-            if (
-              retryErr instanceof TelegramApiError &&
-              retryErr.description
-                .toLowerCase()
-                .includes("message is not modified")
-            ) {
-              return true;
-            }
-            return false;
-          }
-        }
-        return false;
-      }
-    }
-    // Fallback to plain text if HTML entity parsing fails
+  if (html.length <= TELEGRAM_MAX_MESSAGE_CHARS) {
     try {
-      await tryPost({ text });
+      await tryPost({ text: html, parse_mode: "HTML" });
       return true;
-    } catch (fallbackErr) {
-      if (
-        fallbackErr instanceof TelegramApiError &&
-        fallbackErr.description
-          .toLowerCase()
-          .includes("message is not modified")
-      ) {
-        return true;
+    } catch (err) {
+      if (err instanceof TelegramApiError) {
+        const desc = err.description.toLowerCase();
+        // Exact message already displayed on Telegram: treat as success (Hermes pattern)
+        if (desc.includes("message is not modified")) {
+          return true;
+        }
+        // Rate limited: record flood wait for chat, retry if short, else back off
+        if (err.status === 429) {
+          const waitSec = err.retryAfter ?? 5;
+          setChatRateLimited(chatId, waitSec);
+          if (waitSec <= 3 && !signal.aborted) {
+            await sleep(signal, waitSec * 1000);
+            try {
+              await tryPost({ text: html, parse_mode: "HTML" });
+              return true;
+            } catch (retryErr) {
+              if (
+                retryErr instanceof TelegramApiError &&
+                retryErr.description
+                  .toLowerCase()
+                  .includes("message is not modified")
+              ) {
+                return true;
+              }
+              return false;
+            }
+          }
+          return false;
+        }
       }
-      return false;
     }
+  }
+
+  // Fallback to safely clamped escaped plain text
+  try {
+    await tryPost({
+      text: clampEscapedHtml(
+        escapePlainTextToHtml(clampedText),
+        TELEGRAM_MAX_MESSAGE_CHARS,
+      ),
+      parse_mode: "HTML",
+    });
+    return true;
+  } catch (fallbackErr) {
+    if (
+      fallbackErr instanceof TelegramApiError &&
+      fallbackErr.description.toLowerCase().includes("message is not modified")
+    ) {
+      return true;
+    }
+    return false;
   }
 }
 

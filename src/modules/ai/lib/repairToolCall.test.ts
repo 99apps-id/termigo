@@ -357,4 +357,40 @@ describe("repairToolCall", () => {
     const parsed = JSON.parse(result!.input);
     expect(parsed.glob).toEqual(["src-tauri/src/modules/pty/mod.rs"]);
   });
+
+  it("repairs code_search arguments when pattern or path are used", async () => {
+    const tools = { code_search: {} };
+    const result = await repairToolCall({
+      tools,
+      toolCall: {
+        toolCallId: "cs-2",
+        toolName: "code_search",
+        input: JSON.stringify({
+          pattern: "setActiveId",
+          path: "src/modules/ai",
+        }),
+      },
+    });
+    expect(result).not.toBeNull();
+    const parsed = JSON.parse(result!.input);
+    expect(parsed.query).toBe("setActiveId");
+    expect(parsed.root).toBe("src/modules/ai");
+  });
+
+  it("applies semantic repairs on malformed near-JSON tool inputs", async () => {
+    const tools = { replace_in_files: {} };
+    const malformed =
+      '{"path":"C:/project","glob":"*.ts","search":"fn \\"hello\\"()","replace":"fn \\"world\\"()",}';
+    const result = await repairToolCall({
+      tools,
+      toolCall: {
+        toolCallId: "rif-2",
+        toolName: "replace_in_files",
+        input: malformed,
+      },
+    });
+    expect(result).not.toBeNull();
+    const parsed = JSON.parse(result!.input);
+    expect(parsed.glob).toEqual(["*.ts"]);
+  });
 });

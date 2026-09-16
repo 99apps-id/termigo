@@ -163,6 +163,7 @@ export function useUpdater({ autoCheck = true }: HookOptions = {}) {
 
   useEffect(() => {
     if (!autoCheck) return;
+    if (import.meta.env.DEV) return;
     void runCheck();
   }, [autoCheck, runCheck]);
 

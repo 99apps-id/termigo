@@ -401,6 +401,81 @@ async function repairArgsText(raw: string): Promise<string> {
   return repaired;
 }
 
+function applySemanticRepairs(
+  toolName: string,
+  parsed: unknown,
+): { modified: boolean; result: unknown } {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { modified: false, result: parsed };
+  }
+
+  const p = { ...(parsed as Record<string, unknown>) };
+  let modified = false;
+
+  if (toolName === "run_subagents") {
+    const origTasks = p.tasks;
+    if (!Array.isArray(origTasks) || typeof origTasks === "string") {
+      const normalized = normalizeBatchInput(parsed);
+      if (
+        normalized &&
+        typeof normalized === "object" &&
+        Array.isArray((normalized as Record<string, unknown>).tasks)
+      ) {
+        return { modified: true, result: normalized };
+      }
+    }
+  } else if (toolName === "grep") {
+    if (!p.pattern && typeof p.query === "string") {
+      p.pattern = p.query;
+      modified = true;
+    }
+    if (!p.pattern && typeof p.search === "string") {
+      p.pattern = p.search;
+      modified = true;
+    }
+    if (!p.root && typeof p.path === "string") {
+      p.root = p.path;
+      modified = true;
+    }
+  } else if (toolName === "glob") {
+    if (!p.pattern && typeof p.query === "string") {
+      p.pattern = p.query;
+      modified = true;
+    }
+    if (!p.root && typeof p.path === "string") {
+      p.root = p.path;
+      modified = true;
+    }
+  } else if (toolName === "code_search") {
+    if (!p.query && typeof p.pattern === "string") {
+      p.query = p.pattern;
+      modified = true;
+    }
+    if (!p.query && typeof p.search === "string") {
+      p.query = p.search;
+      modified = true;
+    }
+    if (!p.root && typeof p.path === "string") {
+      p.root = p.path;
+      modified = true;
+    }
+    if (typeof p.max_results === "number") {
+      const clamped = Math.min(Math.max(1, Math.floor(p.max_results)), 100);
+      if (p.max_results > 20 || clamped !== p.max_results) {
+        p.max_results = clamped;
+        modified = true;
+      }
+    }
+  } else if (toolName === "replace_in_files") {
+    if (typeof p.glob === "string") {
+      p.glob = [p.glob];
+      modified = true;
+    }
+  }
+
+  return { modified, result: p };
+}
+
 /**
  * The `experimental_repairToolCall` hook. Returns a repaired tool call whose
  * name is a real tool and whose `input` is clean JSON, or `null` to let the
@@ -484,59 +559,9 @@ export async function repairToolCall({
   // Already valid JSON - check if semantic repair is needed
   try {
     const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      const p = { ...(parsed as Record<string, unknown>) };
-      let modified = false;
-
-      if (toolCall.toolName === "run_subagents") {
-        const origTasks = p.tasks;
-        if (!Array.isArray(origTasks) || typeof origTasks === "string") {
-          const normalized = normalizeBatchInput(parsed);
-          if (
-            normalized &&
-            typeof normalized === "object" &&
-            Array.isArray((normalized as Record<string, unknown>).tasks)
-          ) {
-            return { ...toolCall, input: JSON.stringify(normalized) };
-          }
-        }
-      } else if (toolCall.toolName === "grep") {
-        if (!p.pattern && typeof p.query === "string") {
-          p.pattern = p.query;
-          modified = true;
-        }
-        if (!p.pattern && typeof p.search === "string") {
-          p.pattern = p.search;
-          modified = true;
-        }
-        if (!p.root && typeof p.path === "string") {
-          p.root = p.path;
-          modified = true;
-        }
-      } else if (toolCall.toolName === "glob") {
-        if (!p.pattern && typeof p.query === "string") {
-          p.pattern = p.query;
-          modified = true;
-        }
-        if (!p.root && typeof p.path === "string") {
-          p.root = p.path;
-          modified = true;
-        }
-      } else if (toolCall.toolName === "code_search") {
-        if (typeof p.max_results === "number" && p.max_results > 20) {
-          p.max_results = Math.min(Math.floor(p.max_results), 100);
-          modified = true;
-        }
-      } else if (toolCall.toolName === "replace_in_files") {
-        if (typeof p.glob === "string") {
-          p.glob = [p.glob];
-          modified = true;
-        }
-      }
-
-      if (modified) {
-        return { ...toolCall, input: JSON.stringify(p) };
-      }
+    const { modified, result } = applySemanticRepairs(toolCall.toolName, parsed);
+    if (modified) {
+      return { ...toolCall, input: JSON.stringify(result) };
     }
     return null;
   } catch {
@@ -548,32 +573,14 @@ export async function repairToolCall({
   // always return `input` as a JSON *string* because the SDK re-parses it.
   try {
     const parsed = JSON.parse(repaired);
-    if (toolCall.toolName === "run_subagents" && parsed && typeof parsed === "object") {
-      const normalized = normalizeBatchInput(parsed);
-      if (
-        normalized &&
-        typeof normalized === "object" &&
-        Array.isArray((normalized as Record<string, unknown>).tasks)
-      ) {
-        return { ...toolCall, input: JSON.stringify(normalized) };
-      }
-    }
-    return { ...toolCall, input: repaired };
+    const { result } = applySemanticRepairs(toolCall.toolName, parsed);
+    return { ...toolCall, input: JSON.stringify(result) };
   } catch {
     try {
       const { value } = await parsePartialJson(repaired);
       if (value !== undefined) {
-        if (toolCall.toolName === "run_subagents" && value && typeof value === "object") {
-          const normalized = normalizeBatchInput(value);
-          if (
-            normalized &&
-            typeof normalized === "object" &&
-            Array.isArray((normalized as Record<string, unknown>).tasks)
-          ) {
-            return { ...toolCall, input: JSON.stringify(normalized) };
-          }
-        }
-        return { ...toolCall, input: JSON.stringify(value) };
+        const { result } = applySemanticRepairs(toolCall.toolName, value);
+        return { ...toolCall, input: JSON.stringify(result) };
       }
     } catch {
       // ignore
