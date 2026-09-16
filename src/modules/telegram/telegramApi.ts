@@ -109,8 +109,9 @@ function clampMessage(text: string): string {
 export function clampEscapedHtml(text: string, max: number): string {
   if (text.length <= max) return text;
   let cut = Math.max(0, max - 1);
+  const searchStart = Math.max(0, cut - 10);
   const amp = text.lastIndexOf("&", cut);
-  if (amp !== -1) {
+  if (amp !== -1 && amp >= searchStart) {
     const semi = text.indexOf(";", amp);
     // A `;` at or beyond the cut means that entity was left incomplete, so the
     // cut moves back to its `&`. Escaping only ever emits whole entities, so
@@ -281,7 +282,10 @@ export function isChatRateLimited(chatId: number | string): boolean {
   return Date.now() < until;
 }
 
-export function setChatRateLimited(chatId: number | string, waitSec: number): void {
+export function setChatRateLimited(
+  chatId: number | string,
+  waitSec: number,
+): void {
   chatFloodWaitUntil.set(chatId, Date.now() + Math.max(1, waitSec) * 1000);
 }
 
@@ -372,25 +376,37 @@ export async function sendProgressMessage(
   text: string,
   signal: AbortSignal,
 ): Promise<number | null> {
-  const html = markdownToTelegramHtml(text);
-  try {
-    const res = (await apiPost(
-      "sendMessage",
-      { chat_id: chatId, text: html, parse_mode: "HTML" },
-      signal,
-    )) as { ok?: boolean; result?: { message_id?: number } };
-    return res?.result?.message_id ?? null;
-  } catch {
+  const clampedText = clampMessage(text);
+  const html = markdownToTelegramHtml(clampedText);
+  if (html.length <= TELEGRAM_MAX_MESSAGE_CHARS) {
     try {
       const res = (await apiPost(
         "sendMessage",
-        { chat_id: chatId, text },
+        { chat_id: chatId, text: html, parse_mode: "HTML" },
         signal,
       )) as { ok?: boolean; result?: { message_id?: number } };
       return res?.result?.message_id ?? null;
     } catch {
-      return null;
+      // Fall through to plain text fallback below
     }
+  }
+
+  try {
+    const res = (await apiPost(
+      "sendMessage",
+      {
+        chat_id: chatId,
+        text: clampEscapedHtml(
+          escapePlainTextToHtml(clampedText),
+          TELEGRAM_MAX_MESSAGE_CHARS,
+        ),
+        parse_mode: "HTML",
+      },
+      signal,
+    )) as { ok?: boolean; result?: { message_id?: number } };
+    return res?.result?.message_id ?? null;
+  } catch {
+    return null;
   }
 }
 
@@ -403,7 +419,8 @@ export async function editProgressMessage(
   if (isChatRateLimited(chatId)) {
     return false;
   }
-  const html = markdownToTelegramHtml(text);
+  const clampedText = clampMessage(text);
+  const html = markdownToTelegramHtml(clampedText);
   const tryPost = async (body: { text: string; parse_mode?: string }) => {
     return (await apiPost(
       "editMessageText",
@@ -417,55 +434,62 @@ export async function editProgressMessage(
     )) as { ok?: boolean };
   };
 
-  try {
-    await tryPost({ text: html, parse_mode: "HTML" });
-    return true;
-  } catch (err) {
-    if (err instanceof TelegramApiError) {
-      const desc = err.description.toLowerCase();
-      // Exact message already displayed on Telegram: treat as success (Hermes pattern)
-      if (desc.includes("message is not modified")) {
-        return true;
-      }
-      // Rate limited: record flood wait for chat, retry if short, else back off
-      if (err.status === 429) {
-        const waitSec = err.retryAfter ?? 5;
-        setChatRateLimited(chatId, waitSec);
-        if (waitSec <= 3 && !signal.aborted) {
-          await sleep(signal, waitSec * 1000);
-          try {
-            await tryPost({ text: html, parse_mode: "HTML" });
-            return true;
-          } catch (retryErr) {
-            if (
-              retryErr instanceof TelegramApiError &&
-              retryErr.description
-                .toLowerCase()
-                .includes("message is not modified")
-            ) {
-              return true;
-            }
-            return false;
-          }
-        }
-        return false;
-      }
-    }
-    // Fallback to plain text if HTML entity parsing fails
+  if (html.length <= TELEGRAM_MAX_MESSAGE_CHARS) {
     try {
-      await tryPost({ text });
+      await tryPost({ text: html, parse_mode: "HTML" });
       return true;
-    } catch (fallbackErr) {
-      if (
-        fallbackErr instanceof TelegramApiError &&
-        fallbackErr.description
-          .toLowerCase()
-          .includes("message is not modified")
-      ) {
-        return true;
+    } catch (err) {
+      if (err instanceof TelegramApiError) {
+        const desc = err.description.toLowerCase();
+        // Exact message already displayed on Telegram: treat as success (Hermes pattern)
+        if (desc.includes("message is not modified")) {
+          return true;
+        }
+        // Rate limited: record flood wait for chat, retry if short, else back off
+        if (err.status === 429) {
+          const waitSec = err.retryAfter ?? 5;
+          setChatRateLimited(chatId, waitSec);
+          if (waitSec <= 3 && !signal.aborted) {
+            await sleep(signal, waitSec * 1000);
+            try {
+              await tryPost({ text: html, parse_mode: "HTML" });
+              return true;
+            } catch (retryErr) {
+              if (
+                retryErr instanceof TelegramApiError &&
+                retryErr.description
+                  .toLowerCase()
+                  .includes("message is not modified")
+              ) {
+                return true;
+              }
+              return false;
+            }
+          }
+          return false;
+        }
       }
-      return false;
     }
+  }
+
+  // Fallback to safely clamped escaped plain text
+  try {
+    await tryPost({
+      text: clampEscapedHtml(
+        escapePlainTextToHtml(clampedText),
+        TELEGRAM_MAX_MESSAGE_CHARS,
+      ),
+      parse_mode: "HTML",
+    });
+    return true;
+  } catch (fallbackErr) {
+    if (
+      fallbackErr instanceof TelegramApiError &&
+      fallbackErr.description.toLowerCase().includes("message is not modified")
+    ) {
+      return true;
+    }
+    return false;
   }
 }
 

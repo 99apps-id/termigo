@@ -57,6 +57,7 @@ export async function publishProgress(
 ): Promise<void> {
   const store = await import("../ai/store/chatStore");
   const todosStore = await import("../ai/store/todoStore");
+  const subagentStore = await import("../ai/store/subagentRunStore");
   const { extractToolSummaries, formatLiveProgress, resolveModelLabel } =
     await import("./progressFormat");
   let progressMessageId: number | null = null;
@@ -145,6 +146,14 @@ export async function publishProgress(
         : "";
 
       // Format compact live progress
+      const rawSubagents =
+        subagentStore.useSubagentRunStore.getState().bySession[sessionId] ?? [];
+      const subagents = rawSubagents.map((s) => ({
+        label: s.label || s.type,
+        status: s.status,
+        currentStep: s.currentStep,
+      }));
+
       const liveStatus =
         pendingApprovals.length > 0
           ? "awaiting-approval"
@@ -157,6 +166,7 @@ export async function publishProgress(
         step,
         tools: toolSummaries,
         todos,
+        subagents,
         elapsedMs: now - started,
         mode,
         answerText,
@@ -172,6 +182,9 @@ export async function publishProgress(
         tools: toolSummaries.map((t) => `${t.toolName}:${t.state}:${t.input}`),
         todosCount: todos.length,
         todosDone: todos.filter((t) => t.status === "completed").length,
+        subagents: subagents.map(
+          (s) => `${s.label}:${s.status}:${s.currentStep}`,
+        ),
         answerLen: answerText.length,
       });
       const hasSubstantiveChange = substantiveKey !== lastSubstantiveKey;
@@ -195,11 +208,20 @@ export async function publishProgress(
       } else if (hasSubstantiveChange && now - lastSentAt >= 1500) {
         lastLiveText = liveText;
         lastSubstantiveKey = substantiveKey;
-        const ok = await editProgressMessage(chatId, progressMessageId, liveText, signal);
+        const ok = await editProgressMessage(
+          chatId,
+          progressMessageId,
+          liveText,
+          signal,
+        );
         if (ok) {
           lastSentAt = now;
         }
-      } else if (busy && now - lastLiveTextPokeAt >= 6000 && liveText !== lastLiveText) {
+      } else if (
+        busy &&
+        now - lastLiveTextPokeAt >= 6000 &&
+        liveText !== lastLiveText
+      ) {
         // Ticking elapsed timer or keepalive: poke at relaxed interval (6s) to avoid 429 Flood Control
         lastLiveTextPokeAt = now;
         await sendTyping(chatId, signal).catch(() => {});

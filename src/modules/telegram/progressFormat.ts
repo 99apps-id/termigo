@@ -734,6 +734,15 @@ export function renderAnswerSnippet(text: string, max = 700): string {
   let head = body.slice(0, half);
   let tail = body.slice(-half);
 
+  // If head ends with an unmatched high surrogate, trim it
+  if (/[\uD800-\uDBFF]$/.test(head)) {
+    head = head.slice(0, -1);
+  }
+  // If tail starts with an unmatched low surrogate, trim it
+  if (/^[\uDC00-\uDFFF]/.test(tail)) {
+    tail = tail.slice(1);
+  }
+
   // Avoid breaking in the middle of fenced code blocks
   const headFences = (head.match(/```/g) || []).length;
   if (headFences % 2 !== 0) {
@@ -741,17 +750,19 @@ export function renderAnswerSnippet(text: string, max = 700): string {
   }
   const tailFences = (tail.match(/```/g) || []).length;
   if (tailFences % 2 !== 0) {
-    tail = "```\n" + tail;
+    tail = `\`\`\`\n${tail}`;
   }
 
   // Avoid breaking in the middle of inline backticks
-  const headBackticks = (head.replace(/```[\s\S]*?```/g, "").match(/`/g) || []).length;
+  const headBackticks = (head.replace(/```[\s\S]*?```/g, "").match(/`/g) || [])
+    .length;
   if (headBackticks % 2 !== 0) {
     head += "`";
   }
-  const tailBackticks = (tail.replace(/```[\s\S]*?```/g, "").match(/`/g) || []).length;
+  const tailBackticks = (tail.replace(/```[\s\S]*?```/g, "").match(/`/g) || [])
+    .length;
   if (tailBackticks % 2 !== 0) {
-    tail = "`" + tail;
+    tail = `\`${tail}`;
   }
 
   return `${head}\n…\n${tail}`;
@@ -760,7 +771,10 @@ export function renderAnswerSnippet(text: string, max = 700): string {
 export function formatLiveProgress(opts: FormatLiveProgressOptions): string {
   if (opts.completed) {
     if (opts.answerText && opts.answerText.trim().length > 0) {
-      return opts.answerText.trim();
+      const trimmed = opts.answerText.trim();
+      return trimmed.length > 3500
+        ? renderAnswerSnippet(trimmed, 3500)
+        : trimmed;
     }
     return formatCompletionCard(opts);
   }
@@ -791,7 +805,9 @@ export function formatLiveProgress(opts: FormatLiveProgressOptions): string {
 
   const elapsedPart =
     typeof opts.elapsedMs === "number"
-      ? ` · ${Math.floor(opts.elapsedMs / 1000)}s`
+      ? opts.elapsedMs >= 60_000
+        ? ` · ${formatDuration(opts.elapsedMs)}`
+        : ` · ${Math.floor(opts.elapsedMs / 1000)}s`
       : "";
 
   const stepPart =
