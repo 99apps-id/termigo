@@ -161,5 +161,5 @@ npm publish
 
 The version in `package.json` is this installer's own version and can run ahead
 of the app: the download resolves the newest *release* rather than this file's
-version, so the two drift safely. 0.9.15 is a patch on top of 0.9.14, which was
+version, so the two drift safely. 0.9.16 is a patch on top of 0.9.15, which was
 published with a syntax error in `bin/termigo.mjs` and never ran.
