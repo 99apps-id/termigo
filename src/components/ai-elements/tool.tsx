@@ -85,6 +85,7 @@ const TOOL_META: Record<string, ToolMeta> = {
     past: "Listed DBs",
     icon: FolderOpenIcon,
   },
+  pty_session: { present: "PTY Session", past: "Ran PTY", icon: TerminalIcon },
 };
 
 /** Title-cased tool name as a last-resort present-tense label (MCP / extension /
@@ -507,8 +508,12 @@ function renderInputPreview(
   const str = (k: string) =>
     typeof i[k] === "string" ? (i[k] as string) : null;
 
-  if (toolName === "bash_run" || toolName === "bash_background") {
-    const cmd = str("command");
+  if (
+    toolName === "bash_run" ||
+    toolName === "bash_background" ||
+    toolName === "pty_session"
+  ) {
+    const cmd = str("command") || str("input");
     const cwd = str("cwd");
     if (!cmd) return null;
     return (

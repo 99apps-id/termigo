@@ -38,6 +38,7 @@ import {
   type ChatLike,
   countAssistantMessages,
   getPendingApprovals,
+  hasActiveToolCalls,
   lastAssistantText,
   matchElicitationAnswer,
   messageText,
@@ -442,7 +443,16 @@ export async function runMirror(signal: AbortSignal): Promise<void> {
           const pending = sessionId
             ? getPendingApprovals(sessionId, store, aqStore.useApprovalQueue)
             : [];
-          if (runBusy(chatStatus, state.agentMeta.status, pending.length > 0)) {
+          const activeTools = hasActiveToolCalls(chat);
+          if (
+            runBusy(
+              chatStatus,
+              state.agentMeta.status,
+              pending.length > 0,
+              activeTools,
+            ) ||
+            activeTools
+          ) {
             await sendTyping(chatId, signal).catch(() => {});
           }
         }
@@ -474,14 +484,18 @@ async function waitForReply(
   let everBusy = false;
   const aqStore = await import("../ai/store/approvalQueueStore");
   while (!signal.aborted && Date.now() - started < MAX_WAIT) {
+    const chat = store.getChat(sessionId);
     const appStatus = store.useChatStore.getState().agentMeta.status;
-    const chatStatus = store.getChat(sessionId)?.status ?? "";
+    const chatStatus = chat?.status ?? "";
     const pending = getPendingApprovals(
       sessionId,
       store,
       aqStore.useApprovalQueue,
     );
-    const busy = runBusy(chatStatus, appStatus, pending.length > 0);
+    const activeTools = hasActiveToolCalls(chat);
+    const busy =
+      runBusy(chatStatus, appStatus, pending.length > 0, activeTools) ||
+      activeTools;
     if (busy) everBusy = true;
     const count = countAssistantMessages(store.getChat, sessionId);
 
@@ -601,6 +615,39 @@ export async function runAgentAndStream(
         mode,
       ).catch(() => {});
 
+      // Dedicated continuous typing heartbeat: ensures Telegram client consistently
+      // displays "...typing" while the agent is busy (thinking, streaming, or running tools).
+      let typingTimer: ReturnType<typeof setInterval> | null = setInterval(
+        async () => {
+          if (signal.aborted) {
+            if (typingTimer) clearInterval(typingTimer);
+            return;
+          }
+          const currentChat = store.getChat(sessionId);
+          const currentAppStatus =
+            store.useChatStore.getState().agentMeta.status;
+          const currentChatStatus = currentChat?.status ?? "";
+          const aqStore = await import("../ai/store/approvalQueueStore");
+          const pending = getPendingApprovals(
+            sessionId,
+            store,
+            aqStore.useApprovalQueue,
+          );
+          const activeTools = hasActiveToolCalls(currentChat);
+          const busy =
+            runBusy(
+              currentChatStatus,
+              currentAppStatus,
+              pending.length > 0,
+              activeTools,
+            ) || activeTools;
+          if (busy) {
+            await sendTyping(chatId, signal).catch(() => {});
+          }
+        },
+        3000,
+      );
+
       try {
         const accepted = await action();
         if (!accepted) {
@@ -704,11 +751,14 @@ export async function runAgentAndStream(
             store,
             aqStore.useApprovalQueue,
           );
-          const busy = runBusy(
-            chatStatus,
-            appStatus,
-            pendingApprovals.length > 0,
-          );
+          const activeTools = hasActiveToolCalls(store.getChat(sessionId));
+          const busy =
+            runBusy(
+              chatStatus,
+              appStatus,
+              pendingApprovals.length > 0,
+              activeTools,
+            ) || activeTools;
           // An approval nobody answers is the one state that never resolves on
           // its own, and the agent log is silent throughout it. Logged once per
           // run rather than per tick.
@@ -785,6 +835,10 @@ export async function runAgentAndStream(
           signal,
         );
       } finally {
+        if (typingTimer) {
+          clearInterval(typingTimer);
+          typingTimer = null;
+        }
         progressCtl.abort();
         if (progressCtrls.get(chatId) === progressCtl) {
           progressCtrls.delete(chatId);
@@ -883,7 +937,10 @@ export function startTelegramResume(chatId: number, signal: AbortSignal): void {
         store,
         aqStore.useApprovalQueue,
       );
-      const busy = runBusy(chatStatus, appStatus, pendingApprovals.length > 0);
+      const activeTools = hasActiveToolCalls(store.getChat(sessionId));
+      const busy =
+        runBusy(chatStatus, appStatus, pendingApprovals.length > 0, activeTools) ||
+        activeTools;
       if (busy) {
         await sendTelegram(
           chatId,
@@ -924,10 +981,11 @@ export async function startTelegramDispatch(
     const runtime = await import("../ai/store/chatRuntime");
     const sessionId = store.useChatStore.getState().activeSessionId;
     const appStatus = store.useChatStore.getState().agentMeta.status;
-    const chatStatus = sessionId
-      ? (store.getChat(sessionId)?.status ?? "")
-      : "";
-    const busy = runBusy(chatStatus, appStatus);
+    const chat = sessionId ? store.getChat(sessionId) : null;
+    const chatStatus = chat?.status ?? "";
+    const activeTools = hasActiveToolCalls(chat);
+    const busy =
+      runBusy(chatStatus, appStatus, false, activeTools) || activeTools;
 
     // A pending `ask_user` question is the one "busy" state where the user's
     // reply IS the answer. It is checked BEFORE the busy branch, because the

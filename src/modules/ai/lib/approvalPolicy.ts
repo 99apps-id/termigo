@@ -71,6 +71,8 @@ const EXEC_TOOLS = new Set([
   "process",
   // Executing arbitrary SQL queries against a live database CLI.
   "run_sql",
+  "pty_session",
+  "pty_send_input",
 ]);
 
 export type ApprovalMode =

@@ -147,7 +147,12 @@ export const TOOL_GROUPS: readonly ToolGroup[] = [
     label: "Interactive terminal driving",
     description:
       "Drive a full-screen TUI programmatically: read the screen, send keys, wait for a pattern.",
-    tools: ["pty_read_screen", "pty_send_input", "pty_wait_for_pattern"],
+    tools: [
+      "pty_session",
+      "pty_read_screen",
+      "pty_send_input",
+      "pty_wait_for_pattern",
+    ],
   },
   {
     id: "worktree",

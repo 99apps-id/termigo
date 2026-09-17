@@ -11,7 +11,12 @@ import {
   sendProgressMessage,
   sendTyping,
 } from "./telegramApi";
-import { getPendingApprovals, messageText, runBusy } from "./telegramHelpers";
+import {
+  getPendingApprovals,
+  hasActiveToolCalls,
+  messageText,
+  runBusy,
+} from "./telegramHelpers";
 
 export const progressCtrls = new Map<number, AbortController>();
 export const lastFinishedProgressMessageIds = new Map<number, number>();
@@ -113,11 +118,13 @@ export async function publishProgress(
       const chatStatus = chat?.status ?? "";
       const aqStore = await import("../ai/store/approvalQueueStore");
       const pendingApprovals = getPendingApprovals(sessionId, store, aqStore);
+      const activeTools = hasActiveToolCalls(chat);
       const busy =
-        runBusy(chatStatus, status, pendingApprovals.length > 0) ||
+        runBusy(chatStatus, status, pendingApprovals.length > 0, activeTools) ||
         status === "thinking" ||
         status === "streaming" ||
         status === "awaiting-approval" ||
+        activeTools ||
         progressMessageId === null;
 
       if (busy && now - lastTypingAt >= 3000) {

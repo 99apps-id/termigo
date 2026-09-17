@@ -35,7 +35,7 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
     "find", "ls", "stat", "file", "xxd", "hexdump", "od",
     "git", "npm", "pnpm", "yarn", "cargo", "go", "python", "python3",
     "node", "deno", "bun", "make", "just", "task",
-    "echo", "printf", "test", "true", "false", "pwd", "cd",
+    "echo", "printf", "test", "true", "false", "pwd", "cd", "sleep",
     "which", "where", "type", "command", "hash",
     "diff", "cmp", "comm", "patch", "jq", "yq",
     "tar", "gzip", "gunzip", "zip", "unzip",
@@ -57,7 +57,7 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
     "cmd", "powershell", "pwsh", "set", "wsl", "wslpath", "winget", "choco", "scoop",
     // Linux/WSL and Unix system administration & root utilities (user-approved)
     "systemctl", "service", "journalctl", "dmesg",
-    "chown", "chmod", "mkdir", "cp", "mv", "touch", "ln", "tee",
+    "chown", "chmod", "mkdir", "rm", "rmdir", "cp", "mv", "touch", "ln", "tee",
     "ip", "ifconfig", "netstat", "ss", "lsof", "ps", "kill", "pkill", "killall",
     "free", "df", "du", "ufw", "iptables",
     "useradd", "usermod", "userdel", "groupadd", "groupmod", "groupdel",
@@ -272,7 +272,16 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
                 i += 2;
                 continue;
             }
-            if c == '\n' || c == '\r' || c == '&' || c == '|' || SHELL_METACHARACTERS.contains(&c) {
+            if c == '|' {
+                if current.trim().is_empty() {
+                    return Err("command contains an empty or dangling segment".into());
+                }
+                segments.push(std::mem::take(&mut current));
+                prev = c;
+                i += 1;
+                continue;
+            }
+            if c == '\n' || c == '\r' || c == '&' || SHELL_METACHARACTERS.contains(&c) {
                 bad.push(c);
             }
         }
@@ -285,7 +294,7 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
     }
     if !bad.is_empty() {
         return Err(format!(
-            "command contains shell metacharacters {:?}; use a PTY session for pipelines, redirects, or chained commands",
+            "command contains shell metacharacters {:?}; use a PTY session for redirects or chained commands",
             bad
         ));
     }
@@ -989,10 +998,28 @@ mod tests_sandbox {
 
     #[test]
     fn validate_shell_command_blocks_metacharacters() {
-        assert!(validate_shell_command("git status && rm -rf /").is_err());
-        assert!(validate_shell_command("cat file | grep secret").is_err());
         assert!(validate_shell_command("echo hello > out.txt").is_err());
         assert!(validate_shell_command("cat `id`").is_err());
+        assert!(validate_shell_command("echo $HOME").is_err());
+    }
+
+    #[test]
+    fn validate_shell_command_allows_pipelines_and_sleep() {
+        assert!(validate_shell_command("cat file | grep secret").is_ok());
+        assert!(validate_shell_command("cat file | grep secret | wc -l").is_ok());
+        assert!(validate_shell_command("ps aux | grep node").is_ok());
+        assert!(validate_shell_command("sleep 5").is_ok());
+        assert!(validate_shell_command("cat file | definitely-not-a-tool").is_err());
+        assert!(validate_shell_command("cat file |").is_err());
+        assert!(validate_shell_command("| grep secret").is_err());
+    }
+
+    #[test]
+    fn validate_shell_command_allows_mkdir_and_rm() {
+        assert!(validate_shell_command("mkdir -p /tmp/test").is_ok());
+        assert!(validate_shell_command("rm -f /tmp/test/foo").is_ok());
+        assert!(validate_shell_command("mkdir -p /tmp/test && rm -f /tmp/test/foo").is_ok());
+        assert!(validate_shell_command("rmdir /tmp/test").is_ok());
     }
 
     #[test]
@@ -1009,8 +1036,8 @@ mod tests_sandbox {
         assert!(validate_shell_command("git status && git diff").is_ok());
         assert!(validate_shell_command("npm test && cargo check").is_ok());
         assert!(validate_shell_command("git status || git fetch").is_ok());
-        assert!(validate_shell_command("git log && rm -rf /").is_err());
-        assert!(validate_shell_command("git log || rm -rf /").is_err());
+        assert!(validate_shell_command("git log && definitely-not-a-tool").is_err());
+        assert!(validate_shell_command("git log || definitely-not-a-tool").is_err());
         // A dangling operator leaves an empty segment.
         assert!(validate_shell_command("git status &&").is_err());
     }
@@ -1080,10 +1107,10 @@ mod tests_sandbox {
 
     #[test]
     fn validate_shell_command_refuses_sudo_with_unallowlisted_tools() {
-        assert!(validate_shell_command("sudo rm -rf /").is_err());
-        assert!(validate_shell_command("sudo -u root rm -f /etc/hosts").is_err());
         assert!(validate_shell_command("sudo evil-binary --flag").is_err());
-        assert!(validate_shell_command("doas rm -rf /").is_err());
+        assert!(validate_shell_command("sudo -u root definitely-not-a-tool").is_err());
+        assert!(validate_shell_command("doas definitely-not-a-tool").is_err());
+        assert!(validate_shell_command("sudo rm -f /tmp/test").is_ok());
     }
 
     #[test]
@@ -1096,11 +1123,12 @@ mod tests_sandbox {
             "wsl --status",
             "wsl -l -v",
             "wslpath -w /etc",
+            "wsl rm -f /tmp/test",
         ] {
             assert!(validate_shell_command(cmd).is_ok(), "blocked: {cmd}");
         }
-        assert!(validate_shell_command("wsl rm -rf /").is_err());
-        assert!(validate_shell_command("wsl -d Kali rm -rf /").is_err());
-        assert!(validate_shell_command("wsl sudo rm -rf /").is_err());
+        assert!(validate_shell_command("wsl definitely-not-a-tool").is_err());
+        assert!(validate_shell_command("wsl -d Kali definitely-not-a-tool").is_err());
+        assert!(validate_shell_command("wsl sudo definitely-not-a-tool").is_err());
     }
 }

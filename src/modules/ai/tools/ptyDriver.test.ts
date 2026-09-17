@@ -73,4 +73,88 @@ describe("ptyDriver tools", () => {
     expect(result.found).toBe(false);
     expect(result.error).toMatch(/invalid regex/i);
   });
+
+  it("pty_session executes read action and returns buffer", async () => {
+    const ctx = makeContext("first line\nsecond line\nthird line");
+    const tools = buildPtyDriverTools(ctx);
+    const exec = tools.pty_session.execute;
+    if (!exec) throw new Error("pty_session execute missing");
+
+    // biome-ignore lint/suspicious/noExplicitAny: tool ctx and result are harness-typed, empty exec ctx is enough
+    const res = (await exec({ action: "read", max_lines: 2 }, {} as any)) as any;
+    expect(res.action).toBe("read");
+    expect(res.lines_returned).toBe(2);
+    expect(res.buffer).toBe("second line\nthird line");
+  });
+
+  it("pty_session sends ctrl_c interrupt", async () => {
+    let sentInput = "";
+    const ctx = {
+      ...makeContext("active process running"),
+      injectIntoActivePty: (text: string) => {
+        sentInput = text;
+        return true;
+      },
+    };
+    const tools = buildPtyDriverTools(ctx);
+    const exec = tools.pty_session.execute;
+    if (!exec) throw new Error("pty_session execute missing");
+
+    // biome-ignore lint/suspicious/noExplicitAny: tool ctx and result are harness-typed, empty exec ctx is enough
+    const res = (await exec({ action: "ctrl_c" }, {} as any)) as any;
+    expect(res.action).toBe("ctrl_c");
+    expect(res.sent).toBe(true);
+    expect(sentInput).toBe("\x03");
+  });
+
+  it("pty_session injects write input", async () => {
+    let sentInput = "";
+    const ctx = {
+      ...makeContext("prompt: "),
+      injectIntoActivePty: (text: string) => {
+        sentInput = text;
+        return true;
+      },
+    };
+    const tools = buildPtyDriverTools(ctx);
+    const exec = tools.pty_session.execute;
+    if (!exec) throw new Error("pty_session execute missing");
+
+    // biome-ignore lint/suspicious/noExplicitAny: tool ctx and result are harness-typed, empty exec ctx is enough
+    const res = (await exec({ action: "write", input: "yes\r" }, {} as any)) as any;
+    expect(res.action).toBe("write");
+    expect(res.sent).toBe(true);
+    expect(sentInput).toBe("yes\r");
+  });
+
+  it("pty_session refuses destructive commands on run action", async () => {
+    const tools = buildPtyDriverTools(makeContext());
+    const exec = tools.pty_session.execute;
+    if (!exec) throw new Error("pty_session execute missing");
+
+    // biome-ignore lint/suspicious/noExplicitAny: tool ctx and result are harness-typed, empty exec ctx is enough
+    const res = (await exec({ action: "run", command: "rm -rf /" }, {} as any)) as any;
+    expect(res.error).toMatch(/Refused/i);
+  });
+
+  it("pty_session runs command and returns output", async () => {
+    let injected = "";
+    const ctx = {
+      ...makeContext("$ initial prompt\n"),
+      injectIntoActivePty: (text: string) => {
+        injected = text;
+        return true;
+      },
+    };
+    const tools = buildPtyDriverTools(ctx);
+    const exec = tools.pty_session.execute;
+    if (!exec) throw new Error("pty_session execute missing");
+
+    // biome-ignore lint/suspicious/noExplicitAny: tool ctx and result are harness-typed, empty exec ctx is enough
+    const res = (await exec({ action: "run", command: "echo hello", timeout_secs: 1 }, {} as any)) as any;
+    expect(res.action).toBe("run");
+    expect(res.command).toBe("echo hello");
+    expect(injected).toBe("echo hello\r");
+  });
 });
+

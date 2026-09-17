@@ -14,6 +14,7 @@ import {
   type InlineButton,
   sendKeyboard,
   sendTelegram,
+  sendTyping,
 } from "./telegramApi";
 import {
   startTelegramDispatch,
@@ -414,6 +415,9 @@ export async function handleCallback(
       signal,
     );
     await deleteTelegramMessage(chatId, messageId, signal);
+    if (approved) {
+      await sendTyping(chatId, signal).catch(() => {});
+    }
     return;
   }
 
@@ -442,6 +446,9 @@ export async function handleCallback(
       signal,
     );
     await deleteTelegramMessage(chatId, messageId, signal);
+    if (approved) {
+      await sendTyping(chatId, signal).catch(() => {});
+    }
     return;
   }
 
@@ -476,6 +483,7 @@ export async function handleCallback(
       el.useElicitationStore.getState().answer(id, choice);
       await answerCallback(cb.id, `Selected: ${choice}`, signal);
       await editKeyboard(chatId, messageId, `Selected: ${choice}`, [], signal);
+      await sendTyping(chatId, signal).catch(() => {});
       return;
     }
     await answerCallback(cb.id, "Question no longer pending.", signal);
@@ -493,6 +501,7 @@ export async function handleCallback(
         signal,
       ).catch(() => {});
     }
+    await sendTyping(chatId, signal).catch(() => {});
     startTelegramResume(chatId, signal);
     return;
   }
@@ -724,6 +733,9 @@ export async function handleUpdate(u: Update, signal: AbortSignal): Promise<void
         `Approved ${count} pending action(s).`,
         signal,
       );
+      if (count > 0) {
+        await sendTyping(chatId, signal).catch(() => {});
+      }
       return;
     }
     case "/deny": {
