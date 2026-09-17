@@ -277,7 +277,7 @@ export async function publishProgress(
         // (never rejects) so the result is the delivery signal.
         const ok = await sendKeyboard(
           chatId,
-          `Action Approval Required:\nTool: ${p.toolName}\nTarget: ${p.summary || p.toolName}\n(Reply /approve or /deny)`,
+          `Action Approval Required:\nTool: ${p.toolName}\nTarget: ${p.summary || p.toolName}\n(Tap button below or reply /approve /deny)`,
           keyboard,
           signal,
         );
@@ -311,7 +311,7 @@ export async function publishProgress(
         // end, and a dead end is what makes someone abandon the bot.
         keyboard.push([
           {
-            text: "⏭ Tidak dulu (lewati)",
+            text: ">> Tidak dulu (lewati)",
             callback_data: `el:${el.id}:decline`,
           },
         ]);

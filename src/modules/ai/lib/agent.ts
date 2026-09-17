@@ -1678,7 +1678,14 @@ export async function runAgentStream(opts: RunAgentOptions) {
     // model is reminded at every tool decision what is done / in progress —
     // the mechanical nudge that gets items checked off as they finish instead
     // of being left stale until the end.
-    prepareStep: ({ stepNumber }: { stepNumber: number }) => {
+    prepareStep: ({
+      stepNumber,
+      messages: stepMessages,
+    }: {
+      stepNumber: number;
+      messages?: Array<ModelMessage>;
+      [key: string]: unknown;
+    }) => {
       const toolChoice = synthesisRequested
         ? ("none" as const)
         : forceFanout && stepNumber === 0
@@ -1706,7 +1713,46 @@ export async function runAgentStream(opts: RunAgentOptions) {
             (name) => alwaysActive.has(name) || discoveredTools.has(name),
           )
         : undefined;
-      return { toolChoice, system, ...(activeTools ? { activeTools } : {}) };
+
+      let nextMessages: Array<ModelMessage> | undefined;
+      if (
+        stepNumber > 0 &&
+        Array.isArray(stepMessages) &&
+        stepMessages.length > 0
+      ) {
+        const eviction = evictObsoleteToolOutputs(stepMessages);
+        const compacted = compactModelMessagesDetailed(
+          eviction.messages,
+          compactionLimit,
+          reservedTokens,
+        );
+        if (eviction.summary.evictedToolCalls > 0 || compacted.compacted) {
+          nextMessages = compacted.messages;
+          if (eviction.summary.evictedToolCalls > 0) {
+            fireAndForget(
+              logInfo(
+                `[ai] step ${stepNumber} eviction: collapsed ${eviction.summary.evictedToolCalls} stale output(s), ~${eviction.summary.estimatedTokensSaved} tokens saved`,
+              ),
+              "step-eviction-log",
+            );
+          }
+          if (compacted.compacted) {
+            fireAndForget(
+              logInfo(
+                `[ai] step ${stepNumber} compact: elided content in ${compacted.droppedCount} message(s), target ${compactionLimit} tok`,
+              ),
+              "step-compact-log",
+            );
+          }
+        }
+      }
+
+      return {
+        toolChoice,
+        system,
+        ...(activeTools ? { activeTools } : {}),
+        ...(nextMessages ? { messages: nextMessages } : {}),
+      };
     },
     abortSignal: abortController.signal,
     // Silence is measured from the LAST chunk, not from the run's first one.

@@ -718,5 +718,220 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
       expect(approvals[2].id).toBe("appr-3");
     });
   });
+
+  describe("interactive approval and continue cards", () => {
+    it("parses colon-separated approval ids in ap: callback correctly", async () => {
+      const state = await import("../ai/store/chatStore");
+      const spy = vi.spyOn(state.useChatStore.getState(), "respondToApproval");
+      const origFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ ok: true, result: {} }),
+        text: async () => JSON.stringify({ ok: true }),
+      } as unknown as Response);
+      try {
+        await _testOnly.handleCallback(
+          {
+            id: "cb-colon",
+            from: { id: 222 },
+            message: { chat: { id: 111 }, message_id: 9 },
+            data: "ap:approve:session-1:call-abc:sub-2",
+          },
+          new AbortController().signal,
+        );
+        expect(spy).toHaveBeenCalledWith("session-1:call-abc:sub-2", true);
+      } finally {
+        spy.mockRestore();
+        globalThis.fetch = origFetch;
+      }
+    });
+
+    it("sends approval card instead of 'still working' when approvals are pending on resume", async () => {
+      const state = await import("../ai/store/chatStore");
+      state.useChatStore.getState().newSession();
+      state.useChatStore.getState().patchAgentMeta({
+        status: "awaiting-approval",
+        pendingApprovals: [
+          { id: "appr-pending-1", toolName: "bash_run", summary: "rm -rf tmp" },
+        ],
+      });
+      const sentBodies: Array<{ text?: string; reply_markup?: unknown }> = [];
+      const origFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn(async (_url, init) => {
+        if (init?.body) {
+          try {
+            sentBodies.push(JSON.parse(String(init.body)));
+          } catch {}
+        }
+        return {
+          ok: true,
+          json: async () => ({ ok: true, result: { message_id: 10 } }),
+          text: async () => JSON.stringify({ ok: true }),
+        } as unknown as Response;
+      });
+      try {
+        _testOnly.startTelegramResume(111, new AbortController().signal);
+        await new Promise((r) => setTimeout(r, 80));
+        expect(
+          sentBodies.some(
+            (b) =>
+              b.text?.includes("Action Approval Required") &&
+              b.text?.includes("bash_run") &&
+              JSON.stringify(b.reply_markup).includes("ap:approve:appr-pending-1"),
+          ),
+        ).toBe(true);
+        expect(
+          sentBodies.some((b) => b.text?.includes("Agent is still working")),
+        ).toBe(false);
+      } finally {
+        state.useChatStore
+          .getState()
+          .patchAgentMeta({ status: "idle", pendingApprovals: [] });
+        globalThis.fetch = origFetch;
+      }
+    });
+
+    it("approves pending action directly when user replies with 'approve'", async () => {
+      const state = await import("../ai/store/chatStore");
+      state.useChatStore.getState().newSession();
+      state.useChatStore.getState().patchAgentMeta({
+        status: "awaiting-approval",
+        pendingApprovals: [
+          { id: "appr-text-1", toolName: "write_file", summary: "write main.go" },
+        ],
+      });
+      const sentBodies: Array<{ text?: string }> = [];
+      const origFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn(async (_url, init) => {
+        if (init?.body) {
+          try {
+            sentBodies.push(JSON.parse(String(init.body)));
+          } catch {}
+        }
+        return {
+          ok: true,
+          json: async () => ({ ok: true, result: { message_id: 11 } }),
+          text: async () => JSON.stringify({ ok: true }),
+        } as unknown as Response;
+      });
+      try {
+        await _testOnly.startTelegramDispatch(
+          "approve",
+          111,
+          new AbortController().signal,
+          "Task received",
+        );
+        expect(
+          sentBodies.some((b) =>
+            b.text?.includes("Approved 1 pending action"),
+          ),
+        ).toBe(true);
+      } finally {
+        state.useChatStore
+          .getState()
+          .patchAgentMeta({ status: "idle", pendingApprovals: [] });
+        globalThis.fetch = origFetch;
+      }
+    });
+
+    it("runMirror dispatches continue button when agent pauses on step-cap", async () => {
+      useTelegramStore.getState().setChatId("111");
+      useTelegramStore.getState().setEnabled(true);
+      const state = await import("../ai/store/chatStore");
+      state.useChatStore.getState().newSession();
+      state.useChatStore.getState().patchAgentMeta({
+        status: "idle",
+        stopReason: "step-cap",
+        runRound: 1,
+        stoppedByUser: false,
+      });
+      const sentBodies: Array<{ text?: string; reply_markup?: unknown }> = [];
+      const origFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn(async (_url, init) => {
+        if (init?.body) {
+          try {
+            sentBodies.push(JSON.parse(String(init.body)));
+          } catch {}
+        }
+        return {
+          ok: true,
+          json: async () => ({ ok: true, result: { message_id: 12 } }),
+          text: async () => JSON.stringify({ ok: true }),
+        } as unknown as Response;
+      });
+      const controller = new AbortController();
+      try {
+        void _testOnly.runMirror(controller.signal);
+        await new Promise((r) => setTimeout(r, 80));
+        controller.abort();
+        expect(
+          sentBodies.some(
+            (b) =>
+              b.text?.includes("Step limit reached") &&
+              JSON.stringify(b.reply_markup).includes("resume:run"),
+          ),
+        ).toBe(true);
+      } finally {
+        controller.abort();
+        state.useChatStore
+          .getState()
+          .patchAgentMeta({ status: "idle", stopReason: null });
+        globalThis.fetch = origFetch;
+      }
+    });
+
+    it("runMirror dispatches approval keyboard when desktop agent needs approval", async () => {
+      useTelegramStore.getState().setChatId("111");
+      useTelegramStore.getState().setEnabled(true);
+      const state = await import("../ai/store/chatStore");
+      state.useChatStore.getState().newSession();
+      state.useChatStore.getState().patchAgentMeta({
+        status: "awaiting-approval",
+        pendingApprovals: [
+          {
+            id: "mirror-appr-1",
+            toolName: "bash_run",
+            summary: "git push origin",
+          },
+        ],
+      });
+      const sentBodies: Array<{ text?: string; reply_markup?: unknown }> = [];
+      const origFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn(async (_url, init) => {
+        if (init?.body) {
+          try {
+            sentBodies.push(JSON.parse(String(init.body)));
+          } catch {}
+        }
+        return {
+          ok: true,
+          json: async () => ({ ok: true, result: { message_id: 13 } }),
+          text: async () => JSON.stringify({ ok: true }),
+        } as unknown as Response;
+      });
+      const controller = new AbortController();
+      try {
+        void _testOnly.runMirror(controller.signal);
+        await new Promise((r) => setTimeout(r, 80));
+        controller.abort();
+        expect(
+          sentBodies.some(
+            (b) =>
+              b.text?.includes("Action Approval Required") &&
+              b.text?.includes("bash_run") &&
+              JSON.stringify(b.reply_markup).includes(
+                "ap:approve:mirror-appr-1",
+              ),
+          ),
+        ).toBe(true);
+      } finally {
+        controller.abort();
+        state.useChatStore
+          .getState()
+          .patchAgentMeta({ status: "idle", pendingApprovals: [] });
+        globalThis.fetch = origFetch;
+      }
+    });
+  });
 });
 

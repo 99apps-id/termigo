@@ -10,6 +10,7 @@ vi.mock("../lib/native", () => ({
     browserEmbedRead: vi.fn(async () => "body text"),
     browserEmbedEval: vi.fn(async () => undefined),
     browserEmbedClose: vi.fn(async () => undefined),
+    browserEmbedScreenshot: vi.fn(async () => "data:image/png;base64,mockBase64"),
   },
 }));
 
@@ -250,4 +251,59 @@ describe("browser tools", () => {
     expect(r.isOffline).toBe(true);
     expect(r.hint).toContain("network is offline");
   });
+
+  it("reads captured console output via browser_console", async () => {
+    const ctx = makeCtx();
+    const tools = buildBrowserTools(ctx);
+    const r = (await execOf(tools.browser_console)(
+      { instance: "docs" },
+      OPTS,
+    )) as { console?: string };
+    expect(r.console).toBe("warn: hi");
+    expect(ctx.browserConsole).toHaveBeenCalledWith("docs");
+  });
+
+  it("captures screenshot and guards against repetitive loops without intervening actions", async () => {
+    const ctx = makeCtx();
+    const tools = buildBrowserTools(ctx);
+
+    // 1st screenshot succeeds
+    const first = (await execOf(tools.browser_screenshot)(
+      { instance: "app-loop" },
+      OPTS,
+    )) as { kind?: string; data?: string; hint?: string; error?: string };
+    expect(first.kind).toBe("screenshot");
+    expect(first.data).toBe("data:image/png;base64,mockBase64");
+    expect(first.hint).toBeUndefined();
+
+    // 2nd consecutive screenshot succeeds with hint warning
+    const second = (await execOf(tools.browser_screenshot)(
+      { instance: "app-loop" },
+      OPTS,
+    )) as { kind?: string; data?: string; hint?: string; error?: string };
+    expect(second.kind).toBe("screenshot");
+    expect(second.hint).toContain("dark background");
+
+    // 3rd consecutive screenshot returns error to break the loop
+    const third = (await execOf(tools.browser_screenshot)(
+      { instance: "app-loop" },
+      OPTS,
+    )) as { error?: string };
+    expect(third.error).toContain("Consecutive browser_screenshot limit reached");
+
+    // Intervening action resets the counter
+    await execOf(tools.browser_navigate)(
+      { instance: "app-loop", url: "https://example.com" },
+      OPTS,
+    );
+
+    // Screenshot succeeds again after intervening action
+    const fourth = (await execOf(tools.browser_screenshot)(
+      { instance: "app-loop" },
+      OPTS,
+    )) as { kind?: string; data?: string; error?: string };
+    expect(fourth.kind).toBe("screenshot");
+    expect(fourth.error).toBeUndefined();
+  });
 });
+

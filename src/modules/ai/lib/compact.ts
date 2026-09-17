@@ -6,7 +6,7 @@ const KEEP_TAIL = 24;
 // results - the whole turn can be two messages. The tail-elision pass below
 // (TAIL_RESULTS_KEEP) is what reaches the stale results inside it.
 const ELISION_TEXT =
-  "[elided to save context — see prior tool call in history]";
+  "[elided to save context -- see prior tool call in history]";
 
 type ToolPart = {
   type: string;
@@ -37,11 +37,11 @@ function messageBytes(m: ModelMessage): number {
   return n;
 }
 
-/** Shrink the string payloads of a tool-call input — a `write_file`'s content,
+/** Shrink the string payloads of a tool-call input -- a `write_file`'s content,
  *  an `edit`'s old/new strings. A call whose result has already been elided is
  *  dead weight just like the result, and a transcript that builds many files
  *  (an app scaffold) is dominated by these payloads, which the result-only
- *  passes never touched — so a request kept arriving over the provider's body
+ *  passes never touched -- so a request kept arriving over the provider's body
  *  size cap. Keeps the part's type/toolCallId/toolName, so the tool-call/result
  *  pairing the provider validates is untouched; only oversized string fields
  *  are truncated. */
@@ -76,8 +76,8 @@ function shrinkToolCallInput(
 // 2.6 (not the old 3.5): the provider's own reported token counts in prod ran
 // ~1.5× our estimate on tool-heavy transcripts, so a request the compactor
 // judged "plenty of room" still arrived over the window after a few rounds.
-// A more conservative estimate only compacts a little earlier — the safe
-// direction — and is what stops a short-but-dense transcript from overflowing.
+// A more conservative estimate only compacts a little earlier -- the safe
+// direction -- and is what stops a short-but-dense transcript from overflowing.
 const CHARS_PER_TOKEN = 2.6;
 
 /** Rough upward-biased token estimate for a run of characters. */
@@ -224,14 +224,14 @@ const KEEP_MIN_TAIL = 2;
 /** Absolute ceiling on the serialized transcript, in characters. A provider
  *  gateway may cap the HTTP BODY independently of the token window (HTTP 413
  *  "Request body size exceeds maximum allowed size"), and our token estimate
- *  is not a byte count — a build transcript of many write_file payloads fit
+ *  is not a byte count -- a build transcript of many write_file payloads fit
  *  the learned token budget and still crossed the wire cap. 1.2 MB is far
  *  above any healthy request yet small enough that the estimate's slop cannot
  *  carry a compacted transcript over a real gateway limit. */
 const MAX_TRANSCRIPT_BYTES = 1_200_000;
 
 /** Every oversized string in a tool-call input is capped at this on EVERY
- *  request, tail included — not just when the transcript is over budget. An
+ *  request, tail included -- not just when the transcript is over budget. An
  *  agent that builds an app writes whole files through `write_file`; without
  *  a standing cap a single round of large writes can cross the body limit
  *  before compaction ever engages. A file genuinely bigger than this is
@@ -281,7 +281,7 @@ export function compactModelMessagesDetailed(
     if (any) working = capped;
   }
   // Running byte total. The previous code re-measured the WHOLE transcript
-  // (JSON.stringify over every message) inside each trim step's break check —
+  // (JSON.stringify over every message) inside each trim step's break check --
   // O(N^2) in transcript size, which froze a 959-message session for eight
   // minutes between "runAgentStream: enter" and the model call. Sizes are
   // measured once per message and updated by delta on every rewrite instead.
@@ -323,11 +323,11 @@ export function compactModelMessagesDetailed(
 
   // Aggressive pass 1: elide every tool result before the tail. Tool outputs
   // (file bodies, command output) are the bulk of a long transcript and the
-  // safest thing to drop — the tool call itself stays, so the structure the
+  // safest thing to drop -- the tool call itself stays, so the structure the
   // provider validates is untouched. A pre-tail call's INPUT is shrunk in the
   // same breath: a `write_file` argument carries the whole file body, and
   // leaving it while eliding its result keeps the wire payload almost as large
-  // — which is how a "compacted" transcript still arrived over the provider's
+  // -- which is how a "compacted" transcript still arrived over the provider's
   // request-body size cap (HTTP 413).
   const out = working.slice();
   const stopIdx = Math.max(0, out.length - KEEP_TAIL);
@@ -359,8 +359,8 @@ export function compactModelMessagesDetailed(
     }
   }
 
-  // Aggressive pass 2 (hard cap): if eliding tool results was not enough — a
-  // transcript dominated by huge text parts (a giant paste, long model prose) —
+  // Aggressive pass 2 (hard cap): if eliding tool results was not enough -- a
+  // transcript dominated by huge text parts (a giant paste, long model prose) --
   // truncate the over-long text of pre-tail messages too. Text parts keep the
   // message shape, so this also never breaks tool-call/result pairing.
   if (approxTokens >= 0.6 * tokenBudget || totalBytes >= MAX_TRANSCRIPT_BYTES) {
@@ -438,7 +438,7 @@ export function compactModelMessagesDetailed(
   }
 
   // Final hard cap: if the transcript STILL exceeds the budget, the bulk is in
-  // the tail we normally protect (a run of huge tool outputs — a brute-force
+  // the tail we normally protect (a run of huge tool outputs -- a brute-force
   // sweep, a giant scan). Break into the tail too, keeping only the last few
   // messages intact, so the request cannot exceed the window even when our
   // estimate ran low on dense content. This is the floor that makes an
@@ -482,11 +482,11 @@ export function compactModelMessagesDetailed(
   }
 
   // Absolute floor: the transcript STILL exceeds the budget. This happens when
-  // a single message we protected above is itself larger than the window — one
+  // a single message we protected above is itself larger than the window -- one
   // giant tool result in the tail, or a huge string-content paste anywhere that
   // the earlier array-only passes never touched. Left alone, no budget
   // reduction can ever make the request fit, so every overflow retry fails
-  // again — the loop the user hits. Trim EVERYTHING (tail included, both
+  // again -- the loop the user hits. Trim EVERYTHING (tail included, both
   // content shapes); eliding a tool result or truncating text keeps each
   // message's role and tool-call pairing intact, so the request is always
   // brought under the window even if the last turn ends up heavily elided.
@@ -497,7 +497,7 @@ export function compactModelMessagesDetailed(
       // Only force-trim a message that ALONE meets or exceeds the whole budget:
       // it can never fit beside anything else, so it must be cut wherever it
       // sits, tail included. Smaller messages are left to the passes above so
-      // their choices (e.g. keeping the latest file read intact) stand — and a
+      // their choices (e.g. keeping the latest file read intact) stand -- and a
       // transcript that is merely the sum of many mid-size messages converges
       // instead as the learned budget shrinks on retry.
       if (

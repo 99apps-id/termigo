@@ -47,6 +47,7 @@ export function evictObsoleteToolOutputs(messages: readonly ModelMessage[]): {
   let estimatedTokens = 0;
 
   const seenReadPaths = new Set<string>();
+  let seenScreenshots = 0;
   // Copy-on-write: only a message whose output is actually rewritten is
   // rebuilt. This used to deep-clone the whole transcript through
   // `JSON.parse(JSON.stringify(...))`, which serialized every message on every
@@ -75,6 +76,40 @@ export function evictObsoleteToolOutputs(messages: readonly ModelMessage[]): {
       let nextParts: typeof parts | null = null;
       for (let p = parts.length - 1; p >= 0; p--) {
         const part = parts[p];
+        const isScreenshotResult =
+          part.type === "tool-result" &&
+          (part.toolName === "browser_screenshot" ||
+            (part.output != null &&
+              typeof part.output === "object" &&
+              ((part.output as { kind?: unknown }).kind === "screenshot" ||
+                ((part.output as { type?: unknown }).type === "content" &&
+                  Array.isArray((part.output as { value?: unknown }).value) &&
+                  (part.output as { value: Array<{ type?: unknown }> }).value.some(
+                    (v) => v?.type === "image-data",
+                  )))));
+
+        if (isScreenshotResult) {
+          seenScreenshots++;
+          if (seenScreenshots > 1) {
+            const prevOutput =
+              typeof part.output === "string"
+                ? part.output
+                : JSON.stringify(part.output ?? "");
+            estimatedTokens += Math.ceil(prevOutput.length / 4);
+            if (!nextParts) nextParts = parts.slice();
+            nextParts[p] = {
+              ...part,
+              output: {
+                type: "text",
+                value:
+                  "[Prior browser_screenshot omitted to save context - latest screenshot preserved]",
+              },
+            };
+            evictedCount++;
+            continue;
+          }
+        }
+
         if (part.type === "tool-result" && part.toolName === "read_file") {
           const path = readPath(part);
           if (path) {

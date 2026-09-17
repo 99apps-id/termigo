@@ -36,6 +36,7 @@ export const TOOL_GROUPS: readonly ToolGroup[] = [
       "browser_click",
       "browser_close",
       "browser_connect",
+      "browser_console",
       "browser_extract",
       "browser_forward",
       "browser_navigate",

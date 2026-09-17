@@ -255,15 +255,21 @@ export function buildTerminalTools(ctx: ToolContext) {
 
     open_preview: tool({
       description:
-        "Open a preview tab at the given URL, next to the terminal. A localhost/loopback dev server (e.g. http://localhost:5173) loads in a lightweight iframe; an external http(s) site loads in a real embedded browser (so pages that refuse to be framed still render). Use it to surface a dev server, or to browse a site the user asked about.",
+        "Open a preview tab at the given URL, next to the terminal. A localhost/loopback dev server (e.g. http://localhost:5173) or external site loads in an in-app browser tab. Pass `instance` if you want to inspect or drive it with browser tools (browser_screenshot, browser_extract, browser_snapshot, browser_console). Default instance is 'preview'.",
       inputSchema: z.object({
         url: z
           .url()
           .describe(
             "Full http(s) URL to load (e.g. http://localhost:5173 or https://example.com). Must include scheme.",
           ),
+        instance: z
+          .string()
+          .optional()
+          .describe(
+            "Short browser instance name for browser tools to drive or inspect this tab (e.g. 'preview'). Defaults to 'preview'.",
+          ),
       }),
-      execute: async ({ url }) => {
+      execute: async ({ url, instance }) => {
         let parsed: URL;
         try {
           parsed = new URL(url);
@@ -294,7 +300,8 @@ export function buildTerminalTools(ctx: ToolContext) {
             url,
           };
         }
-        const ok = ctx.openPreview(url);
+        const targetInstance = (instance ?? "preview").trim() || "preview";
+        const ok = ctx.openPreview(url, targetInstance);
         if (!ok) return { error: "preview surface unavailable", url };
         // Surface in the Artifacts panel so the user can jump back to it.
         useArtifactsStore.getState().add(ctx.getSessionId() ?? "", {
@@ -302,7 +309,7 @@ export function buildTerminalTools(ctx: ToolContext) {
           title: url,
           payload: url,
         });
-        return { url, ok: true };
+        return { url, instance: targetInstance, ok: true };
       },
     }),
 

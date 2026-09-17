@@ -100,6 +100,20 @@ export async function buildStatus(): Promise<string> {
     const model = chat.useChatStore.getState().selectedModelId;
     lines.push(`Model: ${await modelLabel(model)}`);
     lines.push(`Agent: ${meta.status}`);
+    if (
+      meta.status === "awaiting-approval" ||
+      (meta.pendingApprovals && meta.pendingApprovals.length > 0)
+    ) {
+      const tools =
+        meta.pendingApprovals?.map((p) => p.toolName).join(", ") || "action";
+      lines.push(
+        `Action approval required: ${tools} (tap buttons on approval card or reply /approve)`,
+      );
+    } else if (meta.stopReason) {
+      lines.push(
+        `Stop reason: ${meta.stopReason} (reply /continue or tap button to proceed)`,
+      );
+    }
   } catch {
     lines.push("Agent: unavailable (the AI subsystem is not loaded)");
   }
@@ -471,7 +485,7 @@ export async function handleCallback(
       await editKeyboard(
         chatId,
         messageId,
-        "⏭ Dilewati. Lanjutkan tanpa jawaban.",
+        ">> Dilewati. Lanjutkan tanpa jawaban.",
         [],
         signal,
       );

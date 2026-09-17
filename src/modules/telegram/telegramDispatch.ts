@@ -57,6 +57,7 @@ import {
   lastFinishedProgressMessageIds,
   progressCtrls,
   publishProgress,
+  sentApprovalIds,
 } from "./telegramProgress";
 
 function sleep(signal: AbortSignal, ms: number): Promise<void> {
@@ -72,6 +73,19 @@ function sleep(signal: AbortSignal, ms: number): Promise<void> {
     };
     signal.addEventListener("abort", onAbort, { once: true });
   });
+}
+
+/** Track stop reasons already notified by the mirror loop to prevent spamming buttons. */
+let mirrorLastNotifiedStopKey = "";
+const mirrorSentElicitationIds = new Set<string>();
+const MIRROR_SENT_ELICITATION_IDS_MAX = 200;
+function rememberMirrorElicitation(id: string): void {
+  mirrorSentElicitationIds.add(id);
+  while (mirrorSentElicitationIds.size > MIRROR_SENT_ELICITATION_IDS_MAX) {
+    const first = mirrorSentElicitationIds.values().next();
+    if (first.done) break;
+    mirrorSentElicitationIds.delete(first.value);
+  }
 }
 
 /** How many times the mirror re-attempts a Termigo -> Telegram send before it
@@ -124,7 +138,13 @@ function base64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
 export const NO_OUTPUT_REPLY = "Run produced no text output.";
 export const STILL_RUNNING_REPLY =
   "Run is still in progress or waiting for approval. Use Telegram inline buttons or /status to check.";
-const FALLBACK_REPLIES = new Set([NO_OUTPUT_REPLY, STILL_RUNNING_REPLY]);
+export const STEP_LIMIT_REPLY =
+  "Step limit reached. Use /continue or the Continue button to proceed.";
+const FALLBACK_REPLIES = new Set([
+  NO_OUTPUT_REPLY,
+  STILL_RUNNING_REPLY,
+  STEP_LIMIT_REPLY,
+]);
 
 /**
  * Send a reply plus any Mermaid blocks rendered to PNG, so a diagram the agent
@@ -291,6 +311,7 @@ export async function runMirror(signal: AbortSignal): Promise<void> {
         const messages = chat?.messages ?? [];
         if (sessionId !== seenSession) {
           seenSession = sessionId;
+          mirrorLastNotifiedStopKey = "";
           // Seed so pre-existing history is not replayed to Telegram - only
           // messages added from now on are mirrored.
           for (const m of messages) {
@@ -443,6 +464,123 @@ export async function runMirror(signal: AbortSignal): Promise<void> {
           const pending = sessionId
             ? getPendingApprovals(sessionId, store, aqStore.useApprovalQueue)
             : [];
+
+          // Surface pending approvals as interactive cards in Telegram
+          for (const p of pending) {
+            if (sentApprovalIds.has(p.id)) continue;
+            const prefix = p.source === "queue" ? "aq" : "ap";
+            const keyboard = [
+              [
+                {
+                  text: "Approve",
+                  callback_data: `${prefix}:approve:${p.id}`,
+                },
+                {
+                  text: "Deny",
+                  callback_data: `${prefix}:deny:${p.id}`,
+                },
+              ],
+              [
+                {
+                  text: "Allow session",
+                  callback_data: `${prefix}:session:${p.id}`,
+                },
+                {
+                  text: "Allow always",
+                  callback_data: `${prefix}:always:${p.id}`,
+                },
+              ],
+            ];
+            const ok = await sendKeyboard(
+              chatId,
+              `Action Approval Required:\nTool: ${p.toolName}\nTarget: ${p.summary || p.toolName}\n(Tap button below or reply /approve /deny)`,
+              keyboard,
+              signal,
+            );
+            if (ok) {
+              sentApprovalIds.add(p.id);
+            }
+          }
+
+          // Surface pending questions from ask_user (elicitation)
+          const elStore = await import("../ai/store/elicitationStore");
+          const elPending = elStore.useElicitationStore.getState().pending;
+          for (const el of elPending) {
+            if (mirrorSentElicitationIds.has(el.id)) continue;
+            const keyboard = el.options.slice(0, 6).map((opt, i) => [
+              { text: opt.slice(0, 40), callback_data: `el:${el.id}:${i}` },
+            ]);
+            keyboard.push([
+              {
+                text: ">> Tidak dulu (lewati)",
+                callback_data: `el:${el.id}:decline`,
+              },
+            ]);
+            const ok = await sendKeyboard(
+              chatId,
+              `Agent Question:\n${el.question}`,
+              keyboard,
+              signal,
+            );
+            if (ok) {
+              rememberMirrorElicitation(el.id);
+            }
+          }
+
+          // Surface continue button if agent stopped at step budget cap or guard pause
+          if (
+            settled &&
+            state.agentMeta.status === "idle" &&
+            pending.length === 0 &&
+            !state.agentMeta.stoppedByUser
+          ) {
+            const stopReason = state.agentMeta.stopReason;
+            const currentRound = state.agentMeta.runRound ?? 0;
+            const stopKey = `${sessionId}:${currentRound}:${stopReason ?? ""}`;
+            if (
+              stopReason === "step-cap" &&
+              mirrorLastNotifiedStopKey !== stopKey
+            ) {
+              mirrorLastNotifiedStopKey = stopKey;
+              const { stepBudgetForRound } = await import("../ai/config");
+              const nextBudget = stepBudgetForRound(currentRound + 1);
+              await sendKeyboard(
+                chatId,
+                `Step limit reached (round ${currentRound + 1}). Continue to next round (${nextBudget} steps)?`,
+                [
+                  [
+                    {
+                      text: `>> Continue (${nextBudget} steps)`,
+                      callback_data: "resume:run",
+                    },
+                  ],
+                ],
+                signal,
+              ).catch(() => {});
+            } else if (
+              stopReason &&
+              stopReason !== "step-cap" &&
+              mirrorLastNotifiedStopKey !== stopKey
+            ) {
+              mirrorLastNotifiedStopKey = stopKey;
+              await sendKeyboard(
+                chatId,
+                `Agent paused (${stopReason}). Choose an action below or send your next instruction:`,
+                [
+                  [
+                    {
+                      text: ">> Continue anyway",
+                      callback_data: "resume:run",
+                    },
+                  ],
+                ],
+                signal,
+              ).catch(() => {});
+            }
+          } else if (state.agentMeta.status !== "idle") {
+            mirrorLastNotifiedStopKey = "";
+          }
+
           const activeTools = hasActiveToolCalls(chat);
           if (
             runBusy(
@@ -552,7 +690,7 @@ async function waitForReply(
             afterWait.stopReason === "step-cap" &&
             afterWait.status === "idle"
           ) {
-            return "Step limit reached. Use /continue or the Continue button to proceed.";
+            return STEP_LIMIT_REPLY;
           }
         }
         return NO_OUTPUT_REPLY;
@@ -797,13 +935,20 @@ export async function runAgentAndStream(
           store.useChatStore.getState().agentMeta.stopReason;
         stopReasonAtEnd = stopReason;
         const statusAfterWait = store.useChatStore.getState().agentMeta.status;
-        if (stopReason === "step-cap" && statusAfterWait === "idle") {
-          const currentRound = store.useChatStore.getState().agentMeta.runRound;
+        const stoppedByUser =
+          store.useChatStore.getState().agentMeta.stoppedByUser;
+        if (
+          stopReason === "step-cap" &&
+          statusAfterWait === "idle" &&
+          !stoppedByUser
+        ) {
+          const currentRound =
+            store.useChatStore.getState().agentMeta.runRound ?? 0;
           const { stepBudgetForRound } = await import("../ai/config");
-          const nextBudget = stepBudgetForRound((currentRound ?? 0) + 1);
+          const nextBudget = stepBudgetForRound(currentRound + 1);
           await sendKeyboard(
             chatId,
-            `Step limit reached (round ${currentRound ?? 1}). Continue to next round (${nextBudget} steps)?`,
+            `Step limit reached (round ${currentRound + 1}). Continue to next round (${nextBudget} steps)?`,
             [
               [
                 {
@@ -817,11 +962,20 @@ export async function runAgentAndStream(
         } else if (
           stopReason &&
           stopReason !== "step-cap" &&
-          statusAfterWait === "idle"
+          statusAfterWait === "idle" &&
+          !stoppedByUser
         ) {
-          await sendTelegram(
+          await sendKeyboard(
             chatId,
-            `Agent paused (${stopReason}). Reply with /continue or your next instruction to proceed.`,
+            `Agent paused (${stopReason}). Choose an action below or send your next instruction:`,
+            [
+              [
+                {
+                  text: ">> Continue anyway",
+                  callback_data: "resume:run",
+                },
+              ],
+            ],
             signal,
           ).catch(() => {});
         }
@@ -937,9 +1091,39 @@ export function startTelegramResume(chatId: number, signal: AbortSignal): void {
         store,
         aqStore.useApprovalQueue,
       );
+      if (pendingApprovals.length > 0) {
+        const p = pendingApprovals[0];
+        const prefix = p.source === "queue" ? "aq" : "ap";
+        const countNotice =
+          pendingApprovals.length > 1
+            ? ` (1 of ${pendingApprovals.length})`
+            : "";
+        await sendKeyboard(
+          chatId,
+          `Action Approval Required${countNotice}:\nTool: ${p.toolName}\nTarget: ${p.summary || p.toolName}\n(Tap button below or reply /approve /deny)`,
+          [
+            [
+              { text: "Approve", callback_data: `${prefix}:approve:${p.id}` },
+              { text: "Deny", callback_data: `${prefix}:deny:${p.id}` },
+            ],
+            [
+              {
+                text: "Allow session",
+                callback_data: `${prefix}:session:${p.id}`,
+              },
+              {
+                text: "Allow always",
+                callback_data: `${prefix}:always:${p.id}`,
+              },
+            ],
+          ],
+          signal,
+        ).catch(() => {});
+        return;
+      }
       const activeTools = hasActiveToolCalls(store.getChat(sessionId));
       const busy =
-        runBusy(chatStatus, appStatus, pendingApprovals.length > 0, activeTools) ||
+        runBusy(chatStatus, appStatus, false, activeTools) ||
         activeTools;
       if (busy) {
         await sendTelegram(
@@ -1006,6 +1190,55 @@ export async function startTelegramDispatch(
       );
       await sendTelegram(chatId, `▸ ${answer}`, signal).catch(() => {});
       return;
+    }
+
+    const aqStore = await import("../ai/store/approvalQueueStore");
+    const pendingApprovals = sessionId
+      ? getPendingApprovals(sessionId, store, aqStore.useApprovalQueue)
+      : [];
+    if (pendingApprovals.length > 0) {
+      const lower = text.trim().toLowerCase();
+      if (
+        lower === "approve" ||
+        lower === "yes" ||
+        lower === "ya" ||
+        lower === "ok" ||
+        lower === "lanjut" ||
+        lower === "setuju" ||
+        lower === "izinkan"
+      ) {
+        recordTelegramText(text);
+        for (const p of pendingApprovals) {
+          store.useChatStore.getState().respondToApproval(p.id, true);
+          aqStore.useApprovalQueue.getState().respond([p.id], true);
+        }
+        await sendTelegram(
+          chatId,
+          `Approved ${pendingApprovals.length} pending action(s).`,
+          signal,
+        ).catch(() => {});
+        await sendTyping(chatId, signal).catch(() => {});
+        return;
+      }
+      if (
+        lower === "deny" ||
+        lower === "tolak" ||
+        lower === "jangan" ||
+        lower === "no" ||
+        lower === "tidak"
+      ) {
+        recordTelegramText(text);
+        for (const p of pendingApprovals) {
+          store.useChatStore.getState().respondToApproval(p.id, false);
+          aqStore.useApprovalQueue.getState().respond([p.id], false);
+        }
+        await sendTelegram(
+          chatId,
+          `Denied ${pendingApprovals.length} pending action(s).`,
+          signal,
+        ).catch(() => {});
+        return;
+      }
     }
 
     if (busy) {

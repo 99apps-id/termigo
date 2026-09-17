@@ -1,10 +1,18 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "browser-remote",
-  "description": "Agent-driven browser windows (browser-*) send page text and console output back to the host through the event channel. Scoped to emit ONLY: a visited page can post a value event to Termigo, but cannot listen to app events or call any other command.",
-  "windows": ["browser-*"],
+  "description": "Agent-driven browser windows (browser-*) and embedded webviews (browser-embed-*) send page text and console output back to the host through the event channel. Scoped to emit ONLY: a visited page can post a value event to Termigo, but cannot listen to app events or call any other command.",
+  "windows": ["browser-*", "main"],
+  "webviews": ["browser-*", "browser-embed-*"],
   "remote": {
-    "urls": ["http://*", "https://*"]
+    "urls": [
+      "http://*",
+      "http://*/*",
+      "http://*:*/*",
+      "https://*",
+      "https://*/*",
+      "https://*:*/*"
+    ]
   },
   "permissions": ["core:event:allow-emit"]
 }

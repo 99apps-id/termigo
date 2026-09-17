@@ -142,7 +142,7 @@ describe("compactModelMessagesDetailed hard cap", () => {
   };
 
   it("trims a huge tail down to fit the budget", () => {
-    // 40 turns of big tool output — the bulk sits in the last 24 (the tail the
+    // 40 turns of big tool output -- the bulk sits in the last 24 (the tail the
     // normal passes protect), so only the final hard cap can bring it under.
     const messages: ModelMessage[] = [];
     for (let i = 0; i < 40; i++) {
@@ -236,7 +236,7 @@ describe("compactModelMessagesDetailed floor", () => {
       { role: "tool", content: results },
     ] as unknown as ModelMessage[];
     // 10x300 chars ≈ 1150 est-tokens against a 1000-token budget: over the
-    // 0.6 trigger, but small enough that eliding 4 of the 10 clears it — the
+    // 0.6 trigger, but small enough that eliding 4 of the 10 clears it -- the
     // pass must stop at the floor of 6 kept and not eat the working set.
     const result = compactModelMessagesDetailed(messages, 1000);
     expect(result.compacted).toBe(true);
@@ -282,7 +282,7 @@ describe("compactModelMessagesDetailed floor", () => {
 describe("compactModelMessagesDetailed tool-call inputs", () => {
   // A build transcript (an app scaffold: many write_file calls) is dominated by
   // the file bodies carried in the CALL input, not the results. Eliding the
-  // result alone leaves the whole body on the wire — which is how a "compacted"
+  // result alone leaves the whole body on the wire -- which is how a "compacted"
   // request still arrived over the provider's body-size cap (HTTP 413).
   it("shrinks a superseded write_file's content input, keeping its shape", () => {
     const messages: ModelMessage[] = [];
@@ -340,7 +340,7 @@ describe("compactModelMessagesDetailed tool-call inputs", () => {
 
 describe("compactModelMessagesDetailed performance", () => {
   // Regression: the passes used to re-measure the WHOLE transcript
-  // (JSON.stringify over every message) inside each trim step's break check —
+  // (JSON.stringify over every message) inside each trim step's break check --
   // O(N^2). A 959-message session froze the app for eight minutes between
   // "runAgentStream: enter" and the model call. Sizes are now measured once
   // per message and updated by delta, so a large transcript compacts in ms.
@@ -368,7 +368,7 @@ describe("compactModelMessagesDetailed body-size cap", () => {
   // crossed the wire cap, so the compactor now enforces a byte ceiling too.
   it("shrinks a transcript that fits the token budget but not the body cap", () => {
     const messages: ModelMessage[] = [];
-    // ~2 MB of tool results — under any real token budget's eye at a huge
+    // ~2 MB of tool results -- under any real token budget's eye at a huge
     // limit, but over the 1.2 MB body ceiling.
     for (let i = 0; i < 100; i++) {
       messages.push(readCall(`c${i}`, `/f${i}.txt`));
@@ -386,7 +386,7 @@ describe("compactModelMessagesDetailed body-size cap", () => {
   });
 
   // The standing per-call cap: an oversized write_file body is truncated on
-  // EVERY request, even a small transcript well inside its budget — this is
+  // EVERY request, even a small transcript well inside its budget -- this is
   // the payload a gateway 413s, and waiting for the budget to trip is too
   // late. The newest message stays intact so work in progress is safe.
   it("caps oversized tool-call inputs even when the transcript fits", () => {

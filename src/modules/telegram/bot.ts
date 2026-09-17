@@ -41,6 +41,8 @@ import {
 import {
   startTelegramDispatch,
   runAgentAndStream,
+  runMirror,
+  startTelegramResume,
 } from "./telegramDispatch";
 import {
   handleCallback,
@@ -145,6 +147,8 @@ export const _testOnly = {
   editProgressMessage,
   apiGet,
   apiPost,
+  runMirror,
+  startTelegramResume,
   handleCallback,
   handleUpdate,
 } as const;

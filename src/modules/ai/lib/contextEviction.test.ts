@@ -260,4 +260,85 @@ describe("contextEviction", () => {
     }>;
     expect(kept[0].output.value.bytes).toBe(bytes);
   });
+
+  it("evicts older browser_screenshot calls while preserving the latest screenshot", () => {
+    const messages = [
+      {
+        role: "user",
+        content: "Take a look at the web app",
+      },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "call-shot-1",
+            toolName: "browser_screenshot",
+            output: {
+              kind: "screenshot",
+              base64: "data:image/png;base64,veryLargeBase64Data1...",
+            },
+          },
+        ],
+      },
+      {
+        role: "assistant",
+        content: "I will click a button and take another screenshot.",
+      },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "call-shot-2",
+            toolName: "browser_screenshot",
+            output: {
+              kind: "screenshot",
+              base64: "data:image/png;base64,latestBase64Data2...",
+            },
+          },
+        ],
+      },
+    ] as unknown as ModelMessage[];
+
+    const result = evictObsoleteToolOutputs(messages);
+    expect(result.summary.evictedToolCalls).toBe(1);
+    expect(result.summary.estimatedTokensSaved).toBeGreaterThan(0);
+
+    // biome-ignore lint/suspicious/noExplicitAny: tool content shape is SDK-typed
+    const firstToolPart = (result.messages[1].content as any)[0];
+    // biome-ignore lint/suspicious/noExplicitAny: tool content shape is SDK-typed
+    const secondToolPart = (result.messages[3].content as any)[0];
+
+    expect(firstToolPart.output.value).toContain(
+      "Prior browser_screenshot omitted to save context",
+    );
+    expect(secondToolPart.output.base64).toBe(
+      "data:image/png;base64,latestBase64Data2...",
+    );
+  });
+
+  it("keeps a single browser_screenshot intact without eviction", () => {
+    const messages = [
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "call-shot-1",
+            toolName: "browser_screenshot",
+            output: {
+              kind: "screenshot",
+              base64: "data:image/png;base64,singleScreenshotData...",
+            },
+          },
+        ],
+      },
+    ] as unknown as ModelMessage[];
+
+    const result = evictObsoleteToolOutputs(messages);
+    expect(result.summary.evictedToolCalls).toBe(0);
+    expect(result.messages).toBe(messages);
+  });
 });
+

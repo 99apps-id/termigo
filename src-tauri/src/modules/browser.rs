@@ -445,7 +445,10 @@ pub fn browser_console(
     // Console output is captured live by the window's initialization script,
     // which forwards each console.* call over the value channel. This just
     // returns what has accumulated for the instance.
-    let _ = webview(&app, &instance).ok_or("browser instance not open")?;
+    let is_open = webview(&app, &instance).is_some() || app.get_webview(&embed_label(&instance)).is_some();
+    if !is_open {
+        return Err("browser instance not open".into());
+    }
     let e = state.entry(&instance).ok_or("browser instance not open")?;
     if e.console.is_empty() {
         return Ok("(no console output captured for this page)".to_string());
@@ -627,6 +630,7 @@ pub async fn browser_embed_update(
         log::error!("browser_embed_update: bad url '{url}': {e}");
         e.to_string()
     })?;
+    let nav_url = parsed.clone();
     let builder = WebviewBuilder::new(&label, WebviewUrl::External(parsed))
         .initialization_script(embed_init_script(&instance))
         // Keep the pane rendering even when occluded / in the background - the
@@ -646,6 +650,30 @@ pub async fn browser_embed_update(
         size.height
     );
     state.record(&instance, Some(url));
+
+    if let Some(wv) = app.get_webview(&label) {
+        let _ = wv.navigate(nav_url);
+        let _ = wv.show();
+        let wvc = wv.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            let _ = wvc.set_bounds(Rect {
+                position: Position::Physical(PhysicalPosition::new(
+                    position.x,
+                    position.y,
+                )),
+                size: Size::Physical(PhysicalSize::new(
+                    size.width.saturating_add(1),
+                    size.height,
+                )),
+            });
+            let _ = wvc.set_bounds(Rect {
+                position: Position::Physical(position),
+                size: Size::Physical(size),
+            });
+            let _ = wvc.set_focus();
+        });
+    }
     Ok(())
 }
 

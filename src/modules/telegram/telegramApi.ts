@@ -581,7 +581,7 @@ export async function sendDocument(
  * and no explanation. Callers check the result and fall back to text.
  */
 export async function sendKeyboard(
-  chatId: number,
+  chatId: number | string,
   text: string,
   keyboard: InlineButton[][],
   signal: AbortSignal,
@@ -629,7 +629,7 @@ export async function sendKeyboard(
  * throws down into the handler would drop the user's action silently.
  */
 export async function editKeyboard(
-  chatId: number,
+  chatId: number | string,
   messageId: number,
   text: string,
   keyboard: InlineButton[][],

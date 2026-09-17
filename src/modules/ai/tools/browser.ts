@@ -14,6 +14,8 @@ import type { ToolContext } from "./context";
 // child instead. `instance` is the same short name passed to `browser_open`.
 // Tracks consecutive unreadable extracts per instance to prevent infinite wait and extract loops.
 const emptyExtractCounts = new Map<string, number>();
+// Tracks consecutive screenshot calls per instance to prevent infinite screenshot loops.
+const consecutiveScreenshotCounts = new Map<string, number>();
 
 async function embedRead(instance: string) {
   try {
@@ -142,6 +144,9 @@ export function buildBrowserTools(ctx: ToolContext) {
         // WebviewWindow build hangs on some Windows/WebView2 setups, and a docked
         // child shares the main window's environment and renders reliably.
         const ok = ctx.openPreview(url, instance);
+        if (ok) {
+          consecutiveScreenshotCounts.delete(instance);
+        }
         return ok
           ? {
               ok: true,
@@ -172,6 +177,7 @@ export function buildBrowserTools(ctx: ToolContext) {
         try {
           await native.browserEmbedNavigate(instance, url);
           emptyExtractCounts.delete(instance);
+          consecutiveScreenshotCounts.delete(instance);
           return { ok: true as const, url };
         } catch (e) {
           const errStr = String(e);
@@ -227,6 +233,31 @@ export function buildBrowserTools(ctx: ToolContext) {
         instance: z.string().describe("Instance name."),
       }),
       execute: async ({ instance }) => await embedRead(instance),
+    }),
+
+    browser_console: tool({
+      description:
+        "Return the captured console logs and JavaScript errors for a browser instance. Use this to diagnose hydration errors, script exceptions, or warnings when a page fails to load or render properly. Auto-executes.",
+      inputSchema: z.object({
+        instance: z.string().describe("Instance name."),
+      }),
+      execute: async ({ instance }) => {
+        try {
+          const res = await ctx.browserConsole(instance);
+          if (res && typeof res === "object" && "error" in res && res.error) {
+            return { error: String(res.error) };
+          }
+          const logs =
+            res && typeof res === "object" && "console" in res
+              ? String(res.console)
+              : String(res);
+          return {
+            console: logs || "(no console output captured for this page)",
+          };
+        } catch (e) {
+          return { error: String(e) };
+        }
+      },
     }),
 
     browser_snapshot: tool({
@@ -305,6 +336,7 @@ export function buildBrowserTools(ctx: ToolContext) {
         )});if(!el){throw new Error('No element matched selector: '+${cssJson(
           targetSelector,
         )});}el.click();})();`;
+        consecutiveScreenshotCounts.delete(instance);
         return await embedEval(instance, js);
       },
     }),
@@ -333,6 +365,7 @@ export function buildBrowserTools(ctx: ToolContext) {
         )});if(!el){throw new Error('No element matched selector: '+${cssJson(
           targetSelector,
         )});}if('value' in el){el.focus();el.value=${cssJson(text)};el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));}else if(el.isContentEditable){el.focus();el.innerText=${cssJson(text)};el.dispatchEvent(new Event('input',{bubbles:true}));}else{throw new Error('Selector does not match an input-like element: '+${cssJson(targetSelector)});}})();`;
+        consecutiveScreenshotCounts.delete(instance);
         return await embedEval(instance, js);
       },
     }),
@@ -451,6 +484,16 @@ export function buildBrowserTools(ctx: ToolContext) {
               "the selected model has no vision capability, so it cannot see a screenshot - switch to a vision-capable model, or use browser_extract for the page text.",
           };
         }
+        const count = (consecutiveScreenshotCounts.get(instance) ?? 0) + 1;
+        consecutiveScreenshotCounts.set(instance, count);
+        if (count >= 3) {
+          return {
+            error:
+              "Consecutive browser_screenshot limit reached for instance '" +
+              instance +
+              "'. Do not repeatedly take screenshots in a loop. If the page appears dark or blank, it may have a dark theme (such as bg-black or #0a0a0a) or still be starting. Verify page content using curl.exe http://localhost:<port> or browser_extract / browser_console instead.",
+          };
+        }
         try {
           const data = await native.browserEmbedScreenshot(instance);
           return {
@@ -458,6 +501,11 @@ export function buildBrowserTools(ctx: ToolContext) {
             instance,
             mediaType: "image/png",
             data,
+            ...(count === 2
+              ? {
+                  hint: "Note: Consecutive screenshot taken. If the captured image appears dark or blank, the web page may have a dark background (such as bg-black or #0a0a0a), or may still be hydrating. Verify content using browser_extract, browser_console, or curl.exe instead of looping on browser_screenshot.",
+                }
+              : {}),
           };
         } catch (e) {
           return { error: String(e) };
@@ -469,12 +517,18 @@ export function buildBrowserTools(ctx: ToolContext) {
           kind?: string;
           data?: string;
           mediaType?: string;
+          hint?: string;
         };
         if (o && o.kind === "screenshot" && typeof o.data === "string") {
           return {
             type: "content",
             value: [
-              { type: "text", text: "Screenshot of the browser page:" },
+              {
+                type: "text",
+                text: o.hint
+                  ? `Screenshot of the browser page (${o.hint}):`
+                  : "Screenshot of the browser page:",
+              },
               {
                 type: "image-data",
                 data: o.data,
