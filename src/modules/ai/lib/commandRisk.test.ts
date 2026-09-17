@@ -48,6 +48,87 @@ describe("inspection commands", () => {
     }
   });
 
+  it("recognises web development inspection commands", () => {
+    for (const c of [
+      "yarn list",
+      "yarn why react",
+      "yarn outdated",
+      "yarn --version",
+      "bun pm ls",
+      "bun pm outdated",
+      "bun --version",
+      "deno check main.ts",
+      "deno lint",
+      "deno info",
+      "npm audit",
+      "pnpm licenses",
+      "tsc --noEmit",
+      "tsc -p tsconfig.json --noEmit",
+      "tsc -v",
+      "node -v",
+      "node --version",
+      "prettier --check src/",
+      "prettier -c .",
+      "biome lint src/",
+      "http https://example.com/api",
+    ]) {
+      expect(isReadOnlyCommand(c)).toBe(true);
+    }
+  });
+
+  it("recognises mobile and cross-platform app inspection commands", () => {
+    for (const c of [
+      "flutter doctor",
+      "flutter devices",
+      "flutter analyze",
+      "flutter channel",
+      "dart analyze",
+      "dart pub deps",
+      "adb devices",
+      "adb get-state",
+      "emulator -list-avds",
+      "react-native doctor",
+      "xcrun simctl list",
+      "xcodebuild -showsdks",
+    ]) {
+      expect(isReadOnlyCommand(c)).toBe(true);
+    }
+  });
+
+  it("recognises backend and native systems app inspection commands", () => {
+    for (const c of [
+      "cargo check",
+      "cargo check --workspace",
+      "cargo tree",
+      "cargo metadata",
+      "cargo.exe check",
+      "rustc --version",
+      "rustup show",
+      "go version",
+      "go list ./...",
+      "go env",
+      "go vet",
+      "uv pip list",
+      "uv tree",
+      "poetry show",
+      "poetry env info",
+      "dotnet --info",
+      "dotnet list package",
+      "gradle tasks",
+      ".\\gradlew tasks",
+      "./gradlew tasks",
+      "mvn dependency:tree",
+      "docker compose ps",
+      "docker compose logs",
+      "docker-compose ps",
+      "gh pr list",
+      "gh issue view 123",
+      "gh repo view",
+    ]) {
+      expect(isReadOnlyCommand(c)).toBe(true);
+    }
+  });
+
   it("allows a pipeline of inspection commands", () => {
     expect(isReadOnlyCommand("ps aux | grep nginx | head -5")).toBe(true);
     expect(isReadOnlyCommand("cat access.log | wc -l")).toBe(true);
@@ -75,6 +156,22 @@ describe("commands that change something", () => {
       "pip install requests",
       "git push",
       "git commit -m x",
+      "yarn add lodash",
+      "bun run dev",
+      "bun add react",
+      "deno run main.ts",
+      "tsc",
+      "tsc -p tsconfig.json",
+      "flutter run",
+      "flutter create my_app",
+      "adb install test.apk",
+      "cargo build",
+      "cargo test",
+      "go run main.go",
+      "go build",
+      "prettier --write src/",
+      "prettier --check src/ --write",
+      "biome check --apply",
     ]) {
       expect(isReadOnlyCommand(c)).toBe(false);
     }
@@ -113,11 +210,19 @@ describe("commands that change something", () => {
 
   it("allows sudo inspection when allowSudo option is enabled", () => {
     expect(isReadOnlyCommand("sudo ls -la", { allowSudo: true })).toBe(true);
-    expect(isReadOnlyCommand("sudo -u root cat /etc/shadow", { allowSudo: true })).toBe(true);
-    expect(isReadOnlyCommand("sudo apt list --installed", { allowSudo: true })).toBe(true);
+    expect(
+      isReadOnlyCommand("sudo -u root cat /etc/shadow", { allowSudo: true }),
+    ).toBe(true);
+    expect(
+      isReadOnlyCommand("sudo apt list --installed", { allowSudo: true }),
+    ).toBe(true);
     expect(isReadOnlyCommand("sudo rm -rf /", { allowSudo: true })).toBe(false);
-    expect(isReadOnlyCommand("sudo systemctl restart nginx", { allowSudo: true })).toBe(false);
-    expect(isReadOnlyCommand("sudo apt install nginx", { allowSudo: true })).toBe(false);
+    expect(
+      isReadOnlyCommand("sudo systemctl restart nginx", { allowSudo: true }),
+    ).toBe(false);
+    expect(
+      isReadOnlyCommand("sudo apt install nginx", { allowSudo: true }),
+    ).toBe(false);
   });
 
   // Fail-closed is the whole design: being wrong in the permissive direction

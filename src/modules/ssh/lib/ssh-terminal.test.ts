@@ -142,6 +142,40 @@ describe("openSshTerminalSession", () => {
     expect(onExit).toHaveBeenCalledWith(-1, false);
     expect(clearSession).not.toHaveBeenCalled();
   });
+
+  it("clears the session when closed directly", async () => {
+    clearSession.mockClear();
+    openSsh.mockImplementation(async () => ({
+      id: 12,
+      write: vi.fn(),
+      resize: vi.fn(),
+      close: vi.fn(),
+    }));
+
+    const session = await openSshTerminalSession(conn, 80, 24, {
+      onData: vi.fn(),
+    });
+    await session.close();
+
+    expect(clearSession).toHaveBeenCalledWith(12);
+  });
+});
+
+describe("openSshTerminalFromSpec", () => {
+  it("clears active session store when closed by user", async () => {
+    clearSession.mockClear();
+    openSsh.mockImplementation(backendThatEmitsDuringConnect(15));
+
+    const session = await openSshTerminalFromSpec(
+      { connectionId: conn.id },
+      80,
+      24,
+      { onData: vi.fn() },
+    );
+
+    await session.close();
+    expect(clearSession).toHaveBeenCalledWith(15);
+  });
 });
 
 // Found by auditing rather than by anything failing. `closedByUser` was checked

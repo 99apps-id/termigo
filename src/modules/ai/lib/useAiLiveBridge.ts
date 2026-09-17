@@ -13,7 +13,6 @@ import {
 } from "@/modules/terminal";
 import { invoke } from "@tauri-apps/api/core";
 import { type RefObject, useEffect, useRef } from "react";
-import { useSshActiveSessionStore } from "@/modules/ssh/sshActiveSession";
 import {
   browserBack,
   browserClose,
@@ -142,34 +141,13 @@ export function useAiLiveBridge(params: Params) {
       getRemoteSession: () => {
         const { activeId, tabs } = ref.current;
         const t = tabs.find((x) => x.id === activeId);
-        if (t?.kind === "terminal") {
-          const leafId = t.activeLeafId;
-          if (isSshLeaf(t.paneTree, leafId)) {
-            const sessionId = leafSessionId(leafId);
-            if (sessionId !== null) {
-              const cwd = findLeafRemoteCwd(t.paneTree, leafId) ?? null;
-              return { sessionId, cwd };
-            }
-          }
-        }
-        // Fallback: If foreground tab is not an SSH leaf, check open tabs
-        for (let i = tabs.length - 1; i >= 0; i--) {
-          const tab = tabs[i];
-          if (tab.kind !== "terminal") continue;
-          if (isSshLeaf(tab.paneTree, tab.activeLeafId)) {
-            const sid = leafSessionId(tab.activeLeafId);
-            if (sid !== null) {
-              const cwd = findLeafRemoteCwd(tab.paneTree, tab.activeLeafId) ?? null;
-              return { sessionId: sid, cwd };
-            }
-          }
-        }
-        // Fallback: Check active SSH session store
-        const activeSsh = useSshActiveSessionStore.getState().session;
-        if (activeSsh) {
-          return { sessionId: activeSsh.sessionId, cwd: null };
-        }
-        return null;
+        if (t?.kind !== "terminal") return null;
+        const leafId = t.activeLeafId;
+        if (!isSshLeaf(t.paneTree, leafId)) return null;
+        const sessionId = leafSessionId(leafId);
+        if (sessionId === null) return null;
+        const cwd = findLeafRemoteCwd(t.paneTree, leafId) ?? null;
+        return { sessionId, cwd };
       },
       getTerminalContext: () => {
         const { activeId, tabs } = ref.current;

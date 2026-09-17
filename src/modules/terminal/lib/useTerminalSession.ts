@@ -201,7 +201,9 @@ export function leafCwd(leafId: number): string | null {
  *  leaves, or the russh session id for SSH leaves (the id the `ssh_sftp_*`
  *  commands accept). Null until the session is open. */
 export function leafSessionId(leafId: number): number | null {
-  return sessions.get(leafId)?.pty?.id ?? null;
+  const s = sessions.get(leafId);
+  if (!s || s.shellExited) return null;
+  return s.pty?.id ?? null;
 }
 
 export function navigateFocusedBlocks(dir: -1 | 1): boolean {
@@ -354,6 +356,7 @@ async function releaseIfIdle(leafId: number, s: Session): Promise<void> {
 async function leafHasForegroundJob(leafId: number): Promise<boolean> {
   const s = sessions.get(leafId);
   if (!s?.pty || s.shellExited) return false;
+  if (s.opener !== null) return s.commandRunning;
   try {
     return await invoke<boolean>("pty_has_foreground_job", { id: s.pty.id });
   } catch (e) {
@@ -1073,6 +1076,7 @@ export async function leafHasForegroundProcess(
 ): Promise<boolean> {
   const s = sessions.get(leafId);
   if (!s?.pty || s.shellExited) return false;
+  if (s.opener !== null) return s.commandRunning;
   try {
     const result = await invoke<boolean>("pty_has_foreground_process", {
       id: s.pty.id,

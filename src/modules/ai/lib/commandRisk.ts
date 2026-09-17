@@ -15,34 +15,309 @@
 
 /** Commands that only report. Anything absent from this list is not trusted. */
 const READ_ONLY = new Set([
-  "ls", "pwd", "cat", "head", "tail", "less", "wc", "stat", "file", "readlink",
-  "grep", "egrep", "fgrep", "rg", "awk", "sed", "cut", "sort", "uniq", "tr",
-  "echo", "printf", "date", "whoami", "id", "hostname", "uname", "uptime",
-  "df", "du", "free", "ps", "top", "env", "printenv", "which", "type", "command",
-  "dirname", "basename", "realpath", "test", "true", "false", "sleep",
-  "curl", "wget", "dig", "nslookup", "host", "ping", "ss", "netstat", "lsof",
-  "md5sum", "sha256sum", "diff", "tree", "jq", "yq", "column", "tee",
+  "ls",
+  "pwd",
+  "cat",
+  "head",
+  "tail",
+  "less",
+  "wc",
+  "stat",
+  "file",
+  "readlink",
+  "grep",
+  "egrep",
+  "fgrep",
+  "rg",
+  "awk",
+  "sed",
+  "cut",
+  "sort",
+  "uniq",
+  "tr",
+  "echo",
+  "printf",
+  "date",
+  "whoami",
+  "id",
+  "hostname",
+  "uname",
+  "uptime",
+  "df",
+  "du",
+  "free",
+  "ps",
+  "top",
+  "env",
+  "printenv",
+  "which",
+  "type",
+  "command",
+  "dirname",
+  "basename",
+  "realpath",
+  "test",
+  "true",
+  "false",
+  "sleep",
+  "curl",
+  "wget",
+  "dig",
+  "nslookup",
+  "host",
+  "ping",
+  "ss",
+  "netstat",
+  "lsof",
+  "md5sum",
+  "sha256sum",
+  "diff",
+  "tree",
+  "jq",
+  "yq",
+  "column",
+  "tee",
   // Reconnaissance, audit, and system inspection tools
-  "find", "nmap", "whois", "traceroute", "tracepath", "ip", "ifconfig", "arp",
-  "route", "lsblk", "blkid", "pgrep",
-  "apt-cache", "dpkg-query",
+  "find",
+  "nmap",
+  "whois",
+  "traceroute",
+  "tracepath",
+  "ip",
+  "ifconfig",
+  "arp",
+  "route",
+  "lsblk",
+  "blkid",
+  "pgrep",
+  "apt-cache",
+  "dpkg-query",
+  // HTTP inspection clients
+  "http",
+  "https",
 ]);
 
 /** Subcommands that only report, for tools where the verb decides. */
 const READ_ONLY_SUBCOMMANDS: Record<string, Set<string>> = {
   git: new Set([
-    "status", "log", "diff", "show", "branch", "remote", "config", "blame",
-    "describe", "rev-parse", "ls-files", "ls-remote", "shortlog", "tag",
+    "status",
+    "log",
+    "diff",
+    "show",
+    "branch",
+    "remote",
+    "config",
+    "blame",
+    "describe",
+    "rev-parse",
+    "ls-files",
+    "ls-remote",
+    "shortlog",
+    "tag",
+    "--version",
+    "-v",
+    "version",
   ]),
-  docker: new Set(["ps", "images", "logs", "inspect", "version", "info", "port", "top", "stats"]),
-  systemctl: new Set(["status", "is-active", "is-enabled", "list-units", "list-unit-files", "show", "cat"]),
+  docker: new Set([
+    "ps",
+    "images",
+    "logs",
+    "inspect",
+    "version",
+    "info",
+    "port",
+    "top",
+    "stats",
+    "--version",
+    "-v",
+    // Compound subcommands for docker compose inspection
+    "compose ps",
+    "compose logs",
+    "compose config",
+    "compose top",
+    "compose port",
+    "compose version",
+  ]),
+  "docker-compose": new Set([
+    "ps",
+    "logs",
+    "config",
+    "top",
+    "port",
+    "version",
+    "--version",
+    "-v",
+  ]),
+  systemctl: new Set([
+    "status",
+    "is-active",
+    "is-enabled",
+    "list-units",
+    "list-unit-files",
+    "show",
+    "cat",
+  ]),
   journalctl: new Set(["--no-pager"]),
-  npm: new Set(["ls", "list", "view", "outdated", "config"]),
-  pnpm: new Set(["ls", "list", "why", "outdated"]),
+  npm: new Set([
+    "ls",
+    "list",
+    "view",
+    "outdated",
+    "config",
+    "audit",
+    "explain",
+    "why",
+    "doctor",
+    "--version",
+    "-v",
+  ]),
+  pnpm: new Set([
+    "ls",
+    "list",
+    "why",
+    "outdated",
+    "audit",
+    "licenses",
+    "--version",
+    "-v",
+  ]),
+  yarn: new Set([
+    "list",
+    "info",
+    "why",
+    "outdated",
+    "versions",
+    "audit",
+    "config",
+    "--version",
+    "-v",
+  ]),
+  bun: new Set(["pm ls", "pm outdated", "pm bin", "pm why", "--version", "-v"]),
+  deno: new Set(["info", "check", "lint", "doc", "--version", "-v"]),
+  nvm: new Set(["ls", "list", "current", "--version", "-v", "which"]),
+  corepack: new Set(["--version", "-v"]),
+  node: new Set(["--version", "-v", "--help", "-h"]),
+  python: new Set(["--version", "-V", "--help", "-h"]),
+  python3: new Set(["--version", "-V", "--help", "-h"]),
+  ruby: new Set(["--version", "-v", "--help", "-h"]),
+  php: new Set(["--version", "-v", "--help", "-h"]),
+  perl: new Set(["--version", "-v", "--help", "-h"]),
+  tsc: new Set(["--noEmit", "--version", "-v", "--help", "-h"]),
+  prettier: new Set(["--check", "-c", "--version", "-v", "--help", "-h"]),
+  biome: new Set(["lint", "ci", "--version", "-v", "--help", "-h"]),
+  flutter: new Set([
+    "doctor",
+    "devices",
+    "emulators",
+    "analyze",
+    "channel",
+    "--version",
+    "-v",
+    "--help",
+    "-h",
+  ]),
+  dart: new Set([
+    "analyze",
+    "info",
+    "--version",
+    "-v",
+    "--help",
+    "-h",
+    "pub deps",
+    "pub outdated",
+  ]),
+  adb: new Set([
+    "devices",
+    "version",
+    "--version",
+    "get-state",
+    "get-serialno",
+    "shell getprop",
+  ]),
+  emulator: new Set(["-list-avds", "-version", "--version"]),
+  "react-native": new Set(["doctor", "--version", "-v"]),
+  xcrun: new Set(["simctl list", "--version", "-v"]),
+  xcodebuild: new Set(["-showsdks", "-version", "--version", "-list"]),
+  cargo: new Set([
+    "check",
+    "tree",
+    "metadata",
+    "verify-project",
+    "--version",
+    "-v",
+    "-V",
+    "--help",
+    "-h",
+  ]),
+  rustc: new Set(["--version", "-v", "-V", "--help", "-h", "--print"]),
+  rustup: new Set([
+    "show",
+    "check",
+    "--version",
+    "-v",
+    "toolchain list",
+    "target list",
+    "component list",
+  ]),
+  go: new Set(["version", "env", "list", "vet", "doc"]),
+  uv: new Set(["version", "--version", "-v", "pip list", "pip tree", "tree"]),
+  poetry: new Set(["show", "check", "version", "--version", "-v", "env info"]),
+  dotnet: new Set([
+    "--version",
+    "--info",
+    "-v",
+    "--help",
+    "-h",
+    "list package",
+  ]),
+  gradle: new Set([
+    "tasks",
+    "dependencies",
+    "properties",
+    "-v",
+    "--version",
+    "-version",
+  ]),
+  gradlew: new Set([
+    "tasks",
+    "dependencies",
+    "properties",
+    "-v",
+    "--version",
+    "-version",
+  ]),
+  mvn: new Set(["dependency:tree", "-v", "--version", "-version", "--help"]),
+  gh: new Set([
+    "status",
+    "version",
+    "--version",
+    "-v",
+    "pr list",
+    "pr view",
+    "pr status",
+    "issue list",
+    "issue view",
+    "issue status",
+    "repo view",
+    "run list",
+    "run view",
+    "release list",
+    "release view",
+  ]),
   kubectl: new Set(["get", "describe", "logs", "top", "version"]),
   apt: new Set(["list", "show", "search", "policy"]),
   "apt-get": new Set([]),
-  brew: new Set(["list", "ls", "info", "search", "leaves", "deps", "outdated", "doctor", "config"]),
+  brew: new Set([
+    "list",
+    "ls",
+    "info",
+    "search",
+    "leaves",
+    "deps",
+    "outdated",
+    "doctor",
+    "config",
+  ]),
   dpkg: new Set(["-l", "-s", "-L", "-S", "--list", "--status", "--contents"]),
   pacman: new Set(["-Q", "-Qi", "-Qs", "-Si", "-Ss"]),
   dnf: new Set(["list", "info", "search", "check-update"]),
@@ -57,7 +332,22 @@ const READ_ONLY_SUBCOMMANDS: Record<string, Set<string>> = {
  * `find` is the reason this exists: it reads until `-delete` or `-exec`, at
  * which point it runs anything at all.
  */
-const DESTRUCTIVE_FLAGS = ["-delete", "-exec", "-execdir", "-ok", "-okdir", "--delete"];
+const DESTRUCTIVE_FLAGS = [
+  "-delete",
+  "-exec",
+  "-execdir",
+  "-ok",
+  "-okdir",
+  "--delete",
+];
+
+/** Flags that mutate files or formatting in linters/checkers. */
+const MUTATING_FLAGS = new Set([
+  "--write",
+  "--apply",
+  "--apply-unsafe",
+  "--fix",
+]);
 
 /** Strip quoting so the first word can be read, without interpreting it. */
 function firstWord(segment: string): string {
@@ -66,12 +356,24 @@ function firstWord(segment: string): string {
   // being one.
   const withoutEnv = trimmed.replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)+/, "");
   const word = withoutEnv.split(/\s+/)[0] ?? "";
-  return word.replace(/^["']|["']$/g, "").split("/").pop() ?? "";
+  const cleaned =
+    word
+      .replace(/^["']|["']$/g, "")
+      .split(/[/\\]/)
+      .pop() ?? "";
+  return cleaned.replace(/\.(exe|cmd|bat)$/i, "");
+}
+
+function commandArgs(segment: string): string[] {
+  const trimmed = segment.trim().replace(/^[({\s]+/, "");
+  const withoutEnv = trimmed.replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)+/, "");
+  const parts = withoutEnv.split(/\s+/);
+  return parts.slice(1).map((p) => p.replace(/^["']|["']$/g, ""));
 }
 
 function secondWord(segment: string): string {
-  const parts = segment.trim().split(/\s+/);
-  return (parts[1] ?? "").replace(/^["']|["']$/g, "");
+  const args = commandArgs(segment);
+  return args[0] ?? "";
 }
 
 /**
@@ -108,7 +410,10 @@ export function isReadOnlyCommand(
       let idx = 1;
       while (idx < parts.length && parts[idx]?.startsWith("-")) {
         // Skip flags with arguments like -u user or -g group
-        if ((parts[idx] === "-u" || parts[idx] === "-g" || parts[idx] === "-C") && idx + 1 < parts.length) {
+        if (
+          (parts[idx] === "-u" || parts[idx] === "-g" || parts[idx] === "-C") &&
+          idx + 1 < parts.length
+        ) {
           idx += 2;
         } else {
           idx += 1;
@@ -122,14 +427,35 @@ export function isReadOnlyCommand(
     // su is always refused as it opens interactive shell or executes arbitrary commands
     if (cmd === "su") return false;
 
-    if (DESTRUCTIVE_FLAGS.some((f) => new RegExp(`(^|\\s)${f}(\\s|$)`).test(segment))) {
+    if (
+      DESTRUCTIVE_FLAGS.some((f) =>
+        new RegExp(`(^|\\s)${f}(\\s|$)`).test(segment),
+      )
+    ) {
       return false;
     }
 
     const subcommands = READ_ONLY_SUBCOMMANDS[cmd];
     if (subcommands) {
-      if (!subcommands.has(secondWord(segment))) return false;
-      continue;
+      const args = commandArgs(segment);
+      if (args.some((a) => MUTATING_FLAGS.has(a))) {
+        return false;
+      }
+      if (cmd === "tsc") {
+        if (
+          args.includes("--noEmit") ||
+          (args[0] && subcommands.has(args[0]))
+        ) {
+          continue;
+        }
+        return false;
+      }
+      const arg0 = args[0] ?? "";
+      const compound = args.length >= 2 ? `${args[0]} ${args[1]}` : "";
+      if (subcommands.has(arg0) || (compound && subcommands.has(compound))) {
+        continue;
+      }
+      return false;
     }
     if (!READ_ONLY.has(cmd)) return false;
   }

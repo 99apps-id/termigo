@@ -143,7 +143,10 @@ export async function openSshTerminalSession(
     id: session.id,
     write: session.write,
     resize: session.resize,
-    close: session.close,
+    close: async () => {
+      forgetSession();
+      await session.close();
+    },
   };
 }
 
@@ -185,6 +188,7 @@ export async function openSshTerminalFromSpec(
         if (!clean && !closedByUser && attempts >= MAX_ATTEMPTS) {
           handlers.onData(notice(gaveUpNotice()));
         }
+        useSshActiveSessionStore.getState().clearSession(current.id);
         handlers.onExit?.(code);
         return;
       }
@@ -211,6 +215,7 @@ export async function openSshTerminalFromSpec(
       // mid-connect otherwise stranded this session: `close()` had already run
       // against the dead one, and nothing knew about the live one.
       if (closedByUser) {
+        useSshActiveSessionStore.getState().clearSession(revived.id);
         await revived.close().catch(() => {});
         return;
       }
@@ -219,6 +224,7 @@ export async function openSshTerminalFromSpec(
       handlers.onData(notice(reconnectedNotice()));
     } catch {
       if (attempts >= MAX_ATTEMPTS) {
+        useSshActiveSessionStore.getState().clearSession(current.id);
         handlers.onData(notice(gaveUpNotice()));
         handlers.onExit?.(-1);
         return;
@@ -240,6 +246,7 @@ export async function openSshTerminalFromSpec(
     },
     close: async () => {
       closedByUser = true;
+      useSshActiveSessionStore.getState().clearSession(current.id);
       await current.close();
     },
   };
