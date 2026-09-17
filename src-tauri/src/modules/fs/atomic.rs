@@ -20,7 +20,6 @@
 //! mechanics, never the encoding.
 
 use std::fs;
-use std::ffi::OsStr;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
@@ -58,7 +57,7 @@ pub fn atomic_write_mode(path: &Path, bytes: &[u8], mode: u32) -> io::Result<()>
 /// monotonic-ish clock and a process-wide counter, so the name is not
 /// predictable enough to plant a symlink at; combined with the `create_new`
 /// open it also fails closed if the name does happen to exist.
-fn staging_path(parent: &Path, file_name: &OsStr) -> PathBuf {
+fn staging_path(parent: &Path) -> PathBuf {
     use std::sync::atomic::{AtomicU64, Ordering};
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -66,9 +65,8 @@ fn staging_path(parent: &Path, file_name: &OsStr) -> PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    let mut name = std::ffi::OsString::from(".");
-    name.push(file_name);
-    name.push(format!(".{}.{}.{}.termigo.tmp", std::process::id(), nanos, n));
+    let name = format!(".{}.{}.{}.termigo.tmp", std::process::id(), nanos, n);
+    debug_assert!(name.len() <= 255);
     parent.join(name)
 }
 
@@ -81,12 +79,11 @@ where
     let parent = path.parent().ok_or_else(|| {
         io::Error::new(io::ErrorKind::InvalidInput, "path has no parent directory")
     })?;
-    let file_name = path
-        .file_name()
+    path.file_name()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no file name"))?;
 
     // Temp lives beside the target so `rename` stays on one filesystem.
-    let tmp = staging_path(parent, file_name);
+    let tmp = staging_path(parent);
 
     // Wrap the body so a single `?` short-circuit funnels through the cleanup
     // below; we must not leave the staged temp behind on failure.
@@ -117,6 +114,19 @@ mod tests {
         std::fs::write(&target, b"old").unwrap();
         atomic_write(&target, b"new").unwrap();
         assert_eq!(std::fs::read(&target).unwrap(), b"new");
+    }
+
+    #[test]
+    fn writes_and_overwrites_long_target_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join(format!("{}.txt", "a".repeat(236)));
+        std::fs::write(&target, b"old").unwrap();
+        atomic_write(&target, b"new").unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"new");
+        std::fs::remove_file(&target).unwrap();
+        atomic_write(&target, b"created").unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"created");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
     }
 
     // A symlink pre-planted at the legacy deterministic staging name must not be
