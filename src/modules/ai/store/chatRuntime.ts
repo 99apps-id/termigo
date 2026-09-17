@@ -70,6 +70,7 @@ import {
   chats,
   getActiveProviderKey,
   seedMessages,
+  setApprovalRespondedHandler,
   setSessionLeftHandler,
   touchChat,
   useChatStore,
@@ -175,8 +176,8 @@ function requestAutoContinue(sessionId: string): boolean {
 /**
  * Verification-on-stop gate (Hermes parity, policy only).
  *
- * A run that ended CLEANLY right after editing code — with no fresh passing
- * verification evidence since the last edit — gets one bounded synthetic
+ * A run that ended CLEANLY right after editing code -- with no fresh passing
+ * verification evidence since the last edit -- gets one bounded synthetic
  * follow-up asking the agent to run the checks, repair failures, and
  * summarise what passed (or name the concrete blocker). The gate never runs
  * checks itself; it only reads the ledger the agent loop kept.
@@ -252,6 +253,11 @@ const stopLatch = new Set<string>();
 
 // Tracks failed / aborted approval resumes per session to prevent infinite auto-send retry storms.
 const approvalResumeFailureCount = new Map<string, number>();
+
+export function clearApprovalLatches(sessionId: string): void {
+  stopLatch.delete(sessionId);
+  approvalResumeFailureCount.delete(sessionId);
+}
 
 // Connectivity recovery: when the provider is unreachable, keep the run
 // resumable and resume it automatically once the network is back, so an
@@ -588,7 +594,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       if (stopReason === "step-cap") requestAutoContinue(sessionId);
       // Verification-on-stop: a CLEAN finish right after unverified code edits
       // gets one bounded follow-up (preference-gated; see requestVerifyNudge).
-      // Runs after the step-cap branch so a budget pause continues as before —
+      // Runs after the step-cap branch so a budget pause continues as before --
       // the gate only applies when the model believed it was done.
       if (stopReason === null) {
         requestVerifyNudge(sessionId, info.verify);
@@ -1021,7 +1027,7 @@ export async function sendParts(
       // only when every item is completed, so a list the agent abandoned
       // mid-plan (leftover pending items) would otherwise sit on top of the
       // chat while the user has already moved on. A resume is the same task,
-      // so it keeps the list — and so does a verification nudge.
+      // so it keeps the list -- and so does a verification nudge.
       if (!isResumeParts(parts) && !isVerifyNudgeParts(parts)) {
         void useTodosStore.getState().clearSession(sessionId);
       }
@@ -1267,3 +1273,14 @@ setSessionLeftHandler((_sessionId, messages) => {
     }
   })();
 });
+
+// Clear stop and failure latches when an approval response arrives, so the SDK's
+// sendAutomaticallyWhen can resume the run without being blocked by prior aborts.
+setApprovalRespondedHandler((sessionId) => {
+  clearApprovalLatches(sessionId);
+  useChatStore.getState().patchAgentMeta({
+    error: null,
+    stoppedByUser: false,
+  });
+});
+

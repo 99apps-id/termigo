@@ -1,5 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import type { AiDiffStatus } from "@/modules/tabs";
 import { presentableDiff, unifiedMergeView } from "@codemirror/merge";
 import { EditorState, type Extension } from "@codemirror/state";
@@ -7,7 +8,7 @@ import { EditorView } from "@codemirror/view";
 import { Cancel01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   buildSharedExtensions,
   DEFAULT_INDENT,
@@ -96,6 +97,23 @@ export function AiDiffPane({
 }: Props) {
   const cmRef = useRef<ReactCodeMirrorRef>(null);
   const themeExt = useEditorThemeExt();
+  const [submitting, setSubmitting] = useState<"accept" | "reject" | null>(null);
+
+  useEffect(() => {
+    if (status !== "pending") {
+      setSubmitting(null);
+    }
+  }, [status]);
+
+  const handleAccept = useCallback(() => {
+    setSubmitting("accept");
+    onAccept();
+  }, [onAccept]);
+
+  const handleReject = useCallback(() => {
+    setSubmitting("reject");
+    onReject();
+  }, [onReject]);
 
   // Language resolves before mount; reconfiguring after would leave the
   // merge view's deleted-chunk widgets unhighlighted.
@@ -142,9 +160,16 @@ export function AiDiffPane({
       <div className="flex h-9 shrink-0 items-center justify-between gap-2 border-b border-border/60 px-3">
         <div className="flex min-w-0 items-center gap-2">
           <Badge
-            className="text-[11px] px-2.5 py-2.5"
+            className={cn(
+              "text-[11px] px-2.5 py-1 gap-1 inline-flex items-center font-medium",
+              status === "approved" &&
+                "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+            )}
             variant={STATUS_BADGE[status]}
           >
+            {status === "approved" ? (
+              <HugeiconsIcon icon={Tick02Icon} size={12} strokeWidth={2.5} />
+            ) : null}
             {STATUS_LABEL[status]}
           </Badge>
           {isNewFile ? (
@@ -172,20 +197,22 @@ export function AiDiffPane({
             <Button
               size="sm"
               variant="default"
-              onClick={onAccept}
+              disabled={submitting !== null}
+              onClick={handleAccept}
               className="h-7 gap-1.5"
             >
               <HugeiconsIcon icon={Tick02Icon} size={13} strokeWidth={2} />
-              Accept
+              {submitting === "accept" ? "Accepting..." : "Accept"}
             </Button>
             <Button
               size="sm"
               variant="ghost"
-              onClick={onReject}
+              disabled={submitting !== null}
+              onClick={handleReject}
               className="h-7 gap-1.5"
             >
               <HugeiconsIcon icon={Cancel01Icon} size={13} strokeWidth={2} />
-              Reject
+              {submitting === "reject" ? "Rejecting..." : "Reject"}
             </Button>
           </div>
         ) : null}
@@ -231,7 +258,7 @@ function countLines(doc: string, from: number, to: number): number {
   if (from === to) return 0;
   const slice = doc.slice(from, to);
   // A change spanning N newlines touches N+1 lines, but a trailing newline
-  // means the final segment is empty — don't count that as a touched line.
+  // means the final segment is empty -- don't count that as a touched line.
   let n = 1;
   for (let i = 0; i < slice.length; i++) {
     if (slice.charCodeAt(i) === 10) n++;

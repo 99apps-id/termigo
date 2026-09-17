@@ -148,6 +148,7 @@ export default function App() {
     setMarkdownView,
     setOverrideLanguage,
     openAiDiffTab,
+    setAiDiffStatus,
     closeAiDiffTab,
     openGitDiffTab,
     openCommitHistoryTab,
@@ -1267,8 +1268,14 @@ export default function App() {
                       onEditorCloseTab={disposeTab}
                       registerPreviewHandle={registerPreviewHandle}
                       onPreviewUrlChange={handlePreviewUrl}
-                      onAiDiffAccept={(id) => respondToApproval(id, true)}
-                      onAiDiffReject={(id) => respondToApproval(id, false)}
+                      onAiDiffAccept={(id) => {
+                        setAiDiffStatus(id, "approved");
+                        respondToApproval(id, true);
+                      }}
+                      onAiDiffReject={(id) => {
+                        setAiDiffStatus(id, "rejected");
+                        respondToApproval(id, false);
+                      }}
                       onOpenCommitFile={openCommitFileDiffTab}
                       onGitHistorySearchHandle={setGitHistoryHandle}
                       onSetMarkdownView={setMarkdownView}
@@ -1366,6 +1373,7 @@ export default function App() {
               <AgentRunBridge
                 openAiDiffTab={openAiDiffTab}
                 closeAiDiffTab={closeAiDiffTab}
+                setAiDiffStatus={setAiDiffStatus}
               />
               <LocalAgentNotificationsBridge />
             </>

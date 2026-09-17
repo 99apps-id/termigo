@@ -1,4 +1,5 @@
 import { usePreferencesStore } from "@/modules/settings/preferences";
+import type { AiDiffStatus } from "@/modules/tabs";
 import { type UIMessage, useChat } from "@ai-sdk/react";
 import type { ToolUIPart, UIMessagePart } from "ai";
 import { useEffect, useMemo, useRef } from "react";
@@ -21,7 +22,7 @@ import { resolvePath } from "../tools/tools";
  *
  * Side effects:
  *  - Patches `agentMeta` on every status / approvals change.
- *  - Auto-opens the mini-window when an approval is pending — the user has
+ *  - Auto-opens the mini-window when an approval is pending -- the user has
  *    to act on it; hiding it would be hostile.
  *  - For pending `write_file` calls, opens an AI diff tab in the editor area
  *    so the user can review the proposed change before approving.
@@ -39,6 +40,7 @@ export type DiffOpenInput = {
 export type AgentRunBridgeProps = {
   openAiDiffTab: (input: DiffOpenInput) => number | null;
   closeAiDiffTab: (approvalId: string) => void;
+  setAiDiffStatus?: (approvalId: string, status: AiDiffStatus) => void;
 };
 
 export function AgentRunBridge(props: AgentRunBridgeProps) {
@@ -58,7 +60,12 @@ type ToolPartLike = ToolUIPart & {
 
 type AnyPart = UIMessagePart<Record<string, never>, Record<string, never>>;
 
-function Bridge({ sessionId, openAiDiffTab, closeAiDiffTab }: BridgeProps) {
+function Bridge({
+  sessionId,
+  openAiDiffTab,
+  closeAiDiffTab,
+  setAiDiffStatus,
+}: BridgeProps) {
   const chat = useMemo(() => getOrCreateChat(sessionId), [sessionId]);
   const { status, messages, addToolApprovalResponse } = useChat<UIMessage>({
     chat,
@@ -288,6 +295,11 @@ function Bridge({ sessionId, openAiDiffTab, closeAiDiffTab }: BridgeProps) {
             // Failed write, or review-after-apply off: close immediately.
             toClose.add(approvalId);
             runOpenRef.current.delete(approvalId);
+          } else if (
+            state === "output-available" ||
+            state === "approval-responded"
+          ) {
+            setAiDiffStatus?.(approvalId, "approved");
           }
           // Else keep the tab open; runOpenRef holds it for the settle effect.
         }
@@ -348,6 +360,7 @@ function Bridge({ sessionId, openAiDiffTab, closeAiDiffTab }: BridgeProps) {
     fileMutationFingerprint,
     openAiDiffTab,
     closeAiDiffTab,
+    setAiDiffStatus,
     reviewAfterApply,
   ]);
 
@@ -462,7 +475,7 @@ async function readOriginal(
   try {
     const r = await native.readFile(abs);
     if (r.kind === "text") return { content: r.content, isNewFile: false };
-    // Binary or oversized — we can't render the original sensibly. Show the
+    // Binary or oversized -- we can't render the original sensibly. Show the
     // proposed content as a "new" view; the user can still cancel.
     return { content: "", isNewFile: false };
   } catch (e) {

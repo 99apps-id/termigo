@@ -144,15 +144,29 @@ export function AiChatView({
       ? "stopped"
       : (stopReason ?? "step-cap");
 
+  const respondToApproval = useChatStore((s) => s.respondToApproval);
   const onApproval = useCallback(
-    (id: string, approved: boolean) =>
-      addToolApprovalResponse({ id, approved }),
-    [addToolApprovalResponse],
+    (id: string, approved: boolean) => {
+      respondToApproval(id, approved);
+      if (!useChatStore.getState().approvalResponder) {
+        addToolApprovalResponse({ id, approved });
+      }
+    },
+    [respondToApproval, addToolApprovalResponse],
   );
 
   // Answer the prompts the current approval mode delegates. Runs after the
   // parts render, so an auto-approved call still appears in the transcript.
-  useAutoApproval(messages, addToolApprovalResponse);
+  const handleAutoApproval = useCallback(
+    ({ id, approved }: { id: string; approved: boolean }) => {
+      respondToApproval(id, approved);
+      if (!useChatStore.getState().approvalResponder) {
+        addToolApprovalResponse({ id, approved });
+      }
+    },
+    [respondToApproval, addToolApprovalResponse],
+  );
+  useAutoApproval(messages, handleAutoApproval);
 
   if (messages.length === 0) {
     return (

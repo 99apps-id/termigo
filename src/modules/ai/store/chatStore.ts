@@ -424,12 +424,15 @@ export const useChatStore = create<StoreState>((set, get) => ({
   approvalResponder: null,
   setApprovalResponder: (fn) => set({ approvalResponder: fn }),
   respondToApproval: (approvalId, approved) => {
+    const sessionId = get().activeSessionId;
+    if (sessionId) {
+      notifyApprovalResponded(sessionId, approvalId, approved);
+    }
     const fn = get().approvalResponder;
     if (fn) {
       fn(approvalId, approved);
       return;
     }
-    const sessionId = get().activeSessionId;
     if (sessionId) {
       const chat = getChat(sessionId);
       if (
@@ -537,7 +540,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
     const { activeSessionId, agentMeta } = get();
     const id = activeSessionId;
     if (!id) return;
-    // A settled run is no longer "in flight" — whether it finished, stopped, or
+    // A settled run is no longer "in flight" -- whether it finished, stopped, or
     // errored. Clearing the marker here means a restart no longer reads it as
     // an interrupted run.
     void deleteRunInFlight(id);
@@ -578,7 +581,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
 
     // Always start on a fresh, empty session so the AI chat window does not
     // reopen with the previous task's history (or an interrupted run to
-    // resume) — that reads as "the old chat came back". Prior sessions stay in
+    // resume) -- that reads as "the old chat came back". Prior sessions stay in
     // the list and can still be opened from history; they just are not the
     // active one on launch. Reuse the most recent genuine "New chat"
     // placeholder (one with no messages) so an empty session is not stacked
@@ -715,7 +718,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
     pendingPersist.set(id, { latest: messages, timer });
 
     // Update zustand session list only when the derived title actually
-    // changes — otherwise we'd rewrite the sessions array (and trigger
+    // changes -- otherwise we'd rewrite the sessions array (and trigger
     // re-renders + a store write) on every token.
     const sessions = get().sessions;
     const meta = sessions.find((s) => s.id === id);
@@ -791,6 +794,31 @@ function notifySessionLeft(sessionId: string | null): void {
   const messages = chats.get(sessionId)?.messages;
   if (!messages || messages.length === 0) return;
   onSessionLeft(sessionId, [...messages]);
+}
+
+/**
+ * Called when an approval is responded to (approved or rejected).
+ * Registered by chatRuntime to reset stop and failure latches without circular imports.
+ */
+let onApprovalResponded:
+  | ((sessionId: string, approvalId: string, approved: boolean) => void)
+  | null = null;
+
+export function setApprovalRespondedHandler(
+  fn:
+    | ((sessionId: string, approvalId: string, approved: boolean) => void)
+    | null,
+): void {
+  onApprovalResponded = fn;
+}
+
+function notifyApprovalResponded(
+  sessionId: string | null,
+  approvalId: string,
+  approved: boolean,
+): void {
+  if (!sessionId || !onApprovalResponded) return;
+  onApprovalResponded(sessionId, approvalId, approved);
 }
 
 export function getChat(sessionId?: string): Chat<UIMessage> | undefined {
