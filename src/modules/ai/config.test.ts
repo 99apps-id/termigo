@@ -23,6 +23,8 @@ import {
   resolveModelLabel,
   stepBudgetForRound,
   subagentModelExceedsBudget,
+  SYSTEM_PROMPT,
+  SYSTEM_PROMPT_LITE,
 } from "./config";
 
 const endpoint: CustomEndpoint = {
@@ -539,5 +541,25 @@ describe("compact tier detection", () => {
         "deepseek-v4-pro": "deepseek-flash",
       }),
     ).toBe("deepseek-flash");
+  });
+});
+
+describe("system prompts substantive output guidelines", () => {
+  it("SYSTEM_PROMPT instructs substantive chat answers and completion summary", () => {
+    expect(SYSTEM_PROMPT).toContain("Always provide substantive text answers in the assistant chat output");
+    expect(SYSTEM_PROMPT).toContain("Never leave explanations or answers trapped inside reasoning");
+    expect(SYSTEM_PROMPT).toContain("Comprehensive completion summary");
+    expect(SYSTEM_PROMPT).toContain("Narrate progress as you work");
+    // Ensure anti-narrative phrasing that suppressed chat output is removed
+    expect(SYSTEM_PROMPT).not.toContain("your job is to *do* the work, not narrate it");
+  });
+
+  it("SYSTEM_PROMPT contains zero em-dashes", () => {
+    expect(SYSTEM_PROMPT.includes("\u2014")).toBe(false);
+  });
+
+  it("SYSTEM_PROMPT_LITE contains substantive output guidelines and zero em-dashes", () => {
+    expect(SYSTEM_PROMPT_LITE).toContain("Substantive output (CRITICAL)");
+    expect(SYSTEM_PROMPT_LITE.includes("\u2014")).toBe(false);
   });
 });

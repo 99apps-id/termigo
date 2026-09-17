@@ -317,6 +317,28 @@ const RenderedMessage = memo(function RenderedMessage({
     [groups],
   );
   const focusInput = useChatStore((s) => s.focusInput);
+
+  const hasTextPart = useMemo(
+    () =>
+      message.parts.some(
+        (p) =>
+          p.type === "text" &&
+          typeof (p as { text?: unknown }).text === "string" &&
+          (p as { text: string }).text.trim().length > 0,
+      ),
+    [message.parts],
+  );
+
+  const hasAnyToolParts = useMemo(
+    () =>
+      message.parts.some(
+        (p) =>
+          p.type === "dynamic-tool" ||
+          (typeof p.type === "string" && p.type.startsWith("tool-")),
+      ),
+    [message.parts],
+  );
+
   if (message.role === "user") {
     const rawText = message.parts
       .filter((p): p is { type: "text"; text: string } => p.type === "text")
@@ -427,16 +449,16 @@ const RenderedMessage = memo(function RenderedMessage({
               // thinking unfold. It closes itself once the step ends and stays
               // openable by clicking the header.
               //
-              // One block per step is what makes this useful: the open block is
-              // always the step being worked on, rather than a single folded
-              // block parked at the top of the message while the live edge of
-              // the run moved further down the transcript.
+              // If the model produced no text response at all, keep reasoning
+              // open by default so the user is not left with an empty transcript.
               const reasoningLive = thinkingLive && gi === liveReasoningIdx;
               return showReasoning ? (
                 <PartAppear key={`${message.id}-${g.key}`}>
                   <Reasoning
                     isStreaming={reasoningLive}
                     showReasoning={showReasoning}
+                    autoClose={hasTextPart}
+                    defaultOpen={!hasTextPart || reasoningLive}
                   >
                     <ReasoningTrigger />
                     <ReasoningContent>{g.text}</ReasoningContent>
@@ -473,6 +495,11 @@ const RenderedMessage = memo(function RenderedMessage({
               </PartAppear>
             );
           })}
+          {!hasTextPart && !streaming && !hasAnyToolParts && !showReasoning ? (
+            <p className="text-xs text-muted-foreground italic">
+              (Model completed with reasoning output only. You can enable reasoning visibility in chat settings to inspect details.)
+            </p>
+          ) : null}
         </div>
       </MessageContent>
     </Message>
