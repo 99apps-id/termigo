@@ -166,12 +166,41 @@ describe("buildSshTools", () => {
       { command: "uname -a" },
       { toolCallId: "4" },
     )) as { stdout: string; exit_code: number; remote: boolean; session_id: number };
-
-    expect(sshExecMock).toHaveBeenCalledWith(42, "uname -a", 60);
+    expect(sshExecMock).toHaveBeenCalledWith(42, "cd '/root' && uname -a", 60);
     expect(result.remote).toBe(true);
     expect(result.session_id).toBe(42);
     expect(result.stdout).toContain("Linux vps");
     expect(result.exit_code).toBe(0);
+  });
+
+  it("runs remote command without cd if remote cwd is null or empty", async () => {
+    mockActiveSession = {
+      sessionId: 42,
+      connectionId: "conn-1",
+      hostLabel: "root@192.168.1.100",
+    };
+
+    sshExecMock.mockResolvedValueOnce({
+      stdout: "",
+      stderr: "",
+      exitCode: 0,
+      truncated: false,
+    });
+
+    const ctx = makeCtx({
+      getRemoteSession: () => ({ sessionId: 42, cwd: null }),
+    });
+    const tools = buildSshTools(ctx);
+
+    const result = (await tools.ssh_run_command.execute(
+      { command: "true" },
+      { toolCallId: "4b" },
+    )) as { stdout: string; exit_code: number; remote: boolean; info?: string };
+
+    expect(sshExecMock).toHaveBeenCalledWith(42, "true", 60);
+    expect(result.info).toBe(
+      "Command completed successfully with no output (exit code 0).",
+    );
   });
 
   it("returns an error when running command without active SSH session", async () => {

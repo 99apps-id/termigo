@@ -27,11 +27,14 @@ export type AutoSendGateState = {
   stalled: number;
   /** Latest tool call or error signature seen. */
   lastSignature?: string | null;
+  /** Sliding window of recent tool signatures seen in this session. */
+  recentSignatures?: string[];
 };
 
 export const INITIAL_AUTO_SEND_STATE: AutoSendGateState = {
   lastProgress: 0,
   stalled: 0,
+  recentSignatures: [],
 };
 
 export type AutoSendDecision = {
@@ -57,18 +60,60 @@ export type AutoSendDecision = {
  * across resumes is treated as a stall even if part counts grew, breaking
  * infinite repeating tool loops.
  */
+export const SIGNATURE_WINDOW_SIZE = 8;
+
+export function isRepetitiveSignature(
+  history: readonly string[],
+  current: string | null | undefined,
+): boolean {
+  if (!current) return false;
+  const len = history.length;
+  if (len === 0) return false;
+
+  // 1. Direct immediate repetition: A -> A
+  if (history[len - 1] === current) return true;
+
+  // 2. Frequency threshold: already appears >= 2 times in recent window (current makes 3)
+  const count = history.filter((s) => s === current).length;
+  if (count >= 2) return true;
+
+  // 3. Period-2 oscillation: [..., A, B, A] + current B -> A-B-A-B
+  if (len >= 3) {
+    if (history[len - 1] === history[len - 3] && history[len - 2] === current) {
+      return true;
+    }
+  }
+
+  // 4. Period-3 cycle: [..., A, B, C, A, B] + current C -> A-B-C-A-B-C
+  if (len >= 5) {
+    if (
+      history[len - 1] === history[len - 4] &&
+      history[len - 2] === history[len - 5] &&
+      history[len - 3] === current
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 export function autoSendGate(
   previous: AutoSendGateState,
   progress: number,
   maxStalled: number = MAX_STALLED_AUTO_SENDS,
   signature?: string | null,
 ): AutoSendDecision {
-  const isRepeatingSignature =
-    Boolean(signature) &&
-    Boolean(previous.lastSignature) &&
-    signature === previous.lastSignature;
+  const history =
+    previous.recentSignatures ??
+    (previous.lastSignature ? [previous.lastSignature] : []);
+  const isRepeatingSignature = isRepetitiveSignature(history, signature);
 
-  // Real progress: transcript grew AND it is not an identical repeating signature.
+  const updatedHistory = signature
+    ? [...history.slice(-(SIGNATURE_WINDOW_SIZE - 1)), signature]
+    : history;
+
+  // Real progress: transcript grew AND it is not an identical or cyclic repeating signature.
   if (progress > previous.lastProgress && !isRepeatingSignature) {
     return {
       allow: true,
@@ -76,6 +121,7 @@ export function autoSendGate(
         lastProgress: progress,
         stalled: 0,
         lastSignature: signature ?? null,
+        recentSignatures: updatedHistory,
       },
       stoppedLoop: false,
     };
@@ -90,6 +136,7 @@ export function autoSendGate(
         lastProgress: previous.lastProgress,
         stalled,
         lastSignature: signature ?? previous.lastSignature ?? null,
+        recentSignatures: updatedHistory,
       },
       stoppedLoop: true,
     };
@@ -100,6 +147,7 @@ export function autoSendGate(
       lastProgress: previous.lastProgress,
       stalled,
       lastSignature: signature ?? previous.lastSignature ?? null,
+      recentSignatures: updatedHistory,
     },
     stoppedLoop: false,
   };

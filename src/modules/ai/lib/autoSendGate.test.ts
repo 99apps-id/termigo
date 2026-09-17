@@ -92,7 +92,11 @@ describe("autoSendGate", () => {
   });
 
   it("starts from the initial state without allowing anything twice for free", () => {
-    expect(INITIAL_AUTO_SEND_STATE).toEqual({ lastProgress: 0, stalled: 0 });
+    expect(INITIAL_AUTO_SEND_STATE).toEqual({
+      lastProgress: 0,
+      stalled: 0,
+      recentSignatures: [],
+    });
     // The very first assessment is progress from an empty transcript.
     expect(autoSendGate(INITIAL_AUTO_SEND_STATE, 1).allow).toBe(true);
   });
@@ -147,6 +151,43 @@ describe("autoSendGate", () => {
     const third = autoSendGate(state, 14, 5, "read:b.ts:data");
     expect(third.allow).toBe(true);
     expect(third.state.stalled).toBe(0);
+  });
+
+  it("stops an oscillating period-2 tool loop (A -> B -> A -> B)", () => {
+    let state = INITIAL_AUTO_SEND_STATE;
+    const sigA = "bash_run:node scripts/check_vps_proce:out";
+    const sigB = "bash_run:node scripts/check_vps_stats:out";
+    const decisions: ReturnType<typeof autoSendGate>[] = [];
+
+    // Simulate alternating tool calls (A -> B -> A -> B...)
+    for (let i = 0; i < 14; i++) {
+      const sig = i % 2 === 0 ? sigA : sigB;
+      const decision = autoSendGate(state, 10 + i * 2, 5, sig);
+      state = decision.state;
+      decisions.push(decision);
+    }
+
+    // First few calls proceed as initial progress / alternation
+    expect(decisions[0].allow).toBe(true);
+    expect(decisions[1].allow).toBe(true);
+    expect(decisions[2].allow).toBe(true);
+
+    // Once the A-B-A-B oscillation is recognized, stalled counter increases
+    expect(decisions.some((d) => d.stoppedLoop)).toBe(true);
+    expect(decisions.at(-1)?.allow).toBe(false);
+  });
+
+  it("stops a tool that repeats 3+ times within the recent window", () => {
+    let state = INITIAL_AUTO_SEND_STATE;
+    const sigRepeated = "bash_run:sleep 30:out";
+
+    state = autoSendGate(state, 10, 5, sigRepeated).state;
+    state = autoSendGate(state, 12, 5, "read:file1:out").state;
+    state = autoSendGate(state, 14, 5, sigRepeated).state;
+    state = autoSendGate(state, 16, 5, "read:file2:out").state;
+    // 3rd occurrence of sigRepeated in recent window triggers repeat detection
+    const fifth = autoSendGate(state, 18, 5, sigRepeated);
+    expect(fifth.state.stalled).toBe(1);
   });
 });
 

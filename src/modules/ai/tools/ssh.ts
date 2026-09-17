@@ -8,7 +8,8 @@ import {
   type SshConnection,
 } from "@/modules/ssh/connections";
 import { useSshActiveSessionStore } from "@/modules/ssh/sshActiveSession";
-import { screenCommand } from "./shell";
+import { screenCommand, truncateCommandOutput } from "./shell";
+import { shellQuote } from "../lib/remoteSearch";
 import type { ToolContext } from "./context";
 
 /** Safe summary of a saved SSH connection with secrets withheld. */
@@ -258,6 +259,12 @@ export function buildSshTools(ctx: ToolContext) {
         command: z
           .string()
           .describe("The shell command to execute on the remote VPS/server."),
+        cwd: z
+          .string()
+          .optional()
+          .describe(
+            "Working directory on remote host. If provided or if remote session has a known cwd, executes after cd to that directory.",
+          ),
         session_id: z
           .union([z.number(), z.string()])
           .optional()
@@ -278,6 +285,7 @@ export function buildSshTools(ctx: ToolContext) {
       needsApproval: true,
       execute: async ({
         command,
+        cwd,
         session_id,
         connection_id,
         timeout_secs = 60,
@@ -291,13 +299,13 @@ export function buildSshTools(ctx: ToolContext) {
             : Number(timeout_secs) || 60;
 
         let targetSessionId: number | null = null;
+        const remote = ctx.getRemoteSession();
         if (session_id !== undefined) {
           targetSessionId =
             typeof session_id === "string"
               ? parseInt(session_id, 10)
               : Number(session_id);
         } else {
-          const remote = ctx.getRemoteSession();
           if (remote) {
             targetSessionId = remote.sessionId;
           } else {
@@ -332,16 +340,43 @@ export function buildSshTools(ctx: ToolContext) {
         }
 
         try {
-          const out = await sshExec(targetSessionId, command, timeout);
-          return {
+          const effectiveCwd = cwd?.trim() || remote?.cwd;
+          const fullCommand = effectiveCwd
+            ? `cd ${shellQuote(effectiveCwd)} && ${command}`
+            : command;
+
+          const out = await sshExec(targetSessionId, fullCommand, timeout);
+          const stdoutTrunc = truncateCommandOutput(out.stdout ?? "");
+          const stderrTrunc = truncateCommandOutput(out.stderr ?? "");
+          const truncated =
+            Boolean(out.truncated) ||
+            stdoutTrunc.truncated ||
+            stderrTrunc.truncated;
+
+          const result: Record<string, unknown> = {
             command,
             remote: true,
             session_id: targetSessionId,
-            stdout: out.stdout ?? "",
-            stderr: out.stderr ?? "",
+            stdout: stdoutTrunc.text,
+            stderr: stderrTrunc.text,
             exit_code: out.exitCode ?? 0,
-            truncated: out.truncated ?? false,
+            truncated,
           };
+
+          if (effectiveCwd) {
+            result.cwd = effectiveCwd;
+          }
+
+          if (
+            (out.exitCode ?? 0) === 0 &&
+            !stdoutTrunc.text.trim() &&
+            !stderrTrunc.text.trim()
+          ) {
+            result.info =
+              "Command completed successfully with no output (exit code 0).";
+          }
+
+          return result;
         } catch (err) {
           return {
             error: `SSH execution error: ${String(err)}`,

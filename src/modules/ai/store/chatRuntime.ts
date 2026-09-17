@@ -103,8 +103,9 @@ const TOOLCHOICE_AUTO_RESUME_MS = 5_000;
 const toolChoiceAutoResumeAt = new Map<string, number>();
 
 // Cap the agentic loop in ROUNDS, not per-round steps. Generously sized so
-// complex autonomous tasks continue without artificial interruption.
-const MAX_LOOP_ROUNDS = 100;
+// complex autonomous tasks continue without artificial interruption, but capped
+// to prevent runaway unattended token spending.
+const MAX_LOOP_ROUNDS = 40;
 
 // How many times one task may resume itself after pausing on its step budget
 // (see autoContinue.ts). Reaching the budget is a pause, not trouble - but each

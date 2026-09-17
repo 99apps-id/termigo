@@ -143,7 +143,9 @@ export function useAutoApproval(
       // Read at answer time, not render time: the user can focus an SSH tab
       // between the request and this effect, and the machine the command would
       // land on is what decides whether a mode may speak for them.
-      const onRemoteHost = !!useChatStore.getState().live.getRemoteSession();
+      const onRemoteHost =
+        tool === "ssh_run_command" ||
+        !!useChatStore.getState().live.getRemoteSession();
       if (!isAutoApproved(tool, mode, { onRemoteHost, command, action }))
         continue;
 

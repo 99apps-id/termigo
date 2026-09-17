@@ -163,7 +163,10 @@ export function isAutoApproved(
   // of prompts to set up one server, most of them for `ls` and `docker ps`,
   // and a prompt that always appears is a prompt nobody reads. The gate now
   // sits on what carries the risk rather than on the fact of being remote.
-  if (ctx.onRemoteHost && REMOTE_COMMAND_TOOLS.has(toolName)) {
+  const isRemoteCommand =
+    (ctx.onRemoteHost && REMOTE_COMMAND_TOOLS.has(toolName)) ||
+    toolName === "ssh_run_command";
+  if (isRemoteCommand) {
     if (mode === "all") return true;
     if (mode === "ask") return false;
     // `Auto-approve edits` delegates changes inside the workspace. A remote
