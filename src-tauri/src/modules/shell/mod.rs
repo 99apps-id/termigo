@@ -447,10 +447,11 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
             .or_else(|| program.strip_suffix(".bat"))
             .unwrap_or(program);
 
-        // For relative paths (e.g. `./node_modules/.bin/vitest` or `.\bin\npx`), extract the file name.
-        let file_name = std::path::Path::new(base_program)
-            .file_name()
-            .and_then(|n| n.to_str())
+        // For relative paths (e.g. `./node_modules/.bin/vitest` or `.\bin\npx`), extract the file name
+        // using cross-platform separators ('/' and '\\') so Windows-style paths validate on Unix.
+        let file_name = base_program
+            .rsplit(['/', '\\'])
+            .next()
             .unwrap_or(base_program);
 
         if SANDBOX_ALLOWLIST
