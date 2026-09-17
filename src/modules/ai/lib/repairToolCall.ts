@@ -179,6 +179,32 @@ export const KNOWN_TOOL_ALIASES: Record<
   },
 
   // Shell command aliases
+  pty: {
+    canonical: "pty_session",
+    adaptArgs: (a) => ({ ...a, command: a.command ?? a.cmd }),
+  },
+  pty_run: {
+    canonical: "pty_session",
+    adaptArgs: (a) => ({
+      action: "run",
+      command: a.command ?? a.cmd ?? a.CommandLine,
+    }),
+  },
+  terminal_run: {
+    canonical: "pty_session",
+    adaptArgs: (a) => ({ action: "run", command: a.command ?? a.cmd }),
+  },
+  terminal_execute: {
+    canonical: "pty_session",
+    adaptArgs: (a) => ({ action: "run", command: a.command ?? a.cmd }),
+  },
+  terminal_input: {
+    canonical: "pty_session",
+    adaptArgs: (a) => ({
+      action: "write",
+      input: a.input ?? a.text ?? a.keystrokes,
+    }),
+  },
   run_command: {
     canonical: "bash_run",
     adaptArgs: (a) => ({
@@ -412,7 +438,99 @@ function applySemanticRepairs(
   const p = { ...(parsed as Record<string, unknown>) };
   let modified = false;
 
-  if (toolName === "run_subagents") {
+  // Universal numeric string coercion for common integer/number arguments
+  const numericKeys = [
+    "timeout_secs",
+    "max_lines",
+    "max_results",
+    "handle",
+    "limit",
+    "line",
+    "character",
+    "since_offset",
+    "number",
+    "port",
+    "pid",
+    "delay",
+  ];
+  for (const key of numericKeys) {
+    if (
+      typeof p[key] === "string" &&
+      /^\s*-?\d+(?:\.\d+)?\s*$/.test(p[key] as string)
+    ) {
+      const num = Number(p[key]);
+      if (!Number.isNaN(num)) {
+        p[key] = num;
+        modified = true;
+      }
+    }
+  }
+
+  if (toolName === "pty_session") {
+    if (!p.command && typeof p.cmd === "string") {
+      p.command = p.cmd;
+      modified = true;
+    }
+    if (!p.command && typeof p.script === "string") {
+      p.command = p.script;
+      modified = true;
+    }
+    if (!p.input && typeof p.text === "string") {
+      p.input = p.text;
+      modified = true;
+    }
+    if (!p.input && typeof p.keystrokes === "string") {
+      p.input = p.keystrokes;
+      modified = true;
+    }
+    if (
+      p.action === "exec" ||
+      p.action === "execute" ||
+      p.action === "shell"
+    ) {
+      p.action = "run";
+      modified = true;
+    }
+    if (!p.wait_for && typeof p.pattern === "string") {
+      p.wait_for = p.pattern;
+      modified = true;
+    }
+  } else if (toolName === "todo_write") {
+    if (typeof p.todos === "string") {
+      try {
+        const decoded = JSON.parse(p.todos as string);
+        if (Array.isArray(decoded)) {
+          p.todos = decoded;
+          modified = true;
+        } else if (decoded && typeof decoded === "object") {
+          const obj = decoded as Record<string, unknown>;
+          p.todos = Array.isArray(obj.todos)
+            ? obj.todos
+            : Array.isArray(obj.items)
+              ? obj.items
+              : Object.values(obj);
+          modified = true;
+        }
+      } catch {
+        // ignore
+      }
+    } else if (p.todos && typeof p.todos === "object" && !Array.isArray(p.todos)) {
+      const obj = p.todos as Record<string, unknown>;
+      if (Array.isArray(obj.todos)) {
+        p.todos = obj.todos;
+        modified = true;
+      } else if (Array.isArray(obj.items)) {
+        p.todos = obj.items;
+        modified = true;
+      } else {
+        p.todos = Object.values(obj);
+        modified = true;
+      }
+    } else if (!p.todos && Array.isArray(p.items)) {
+      p.todos = p.items;
+      modified = true;
+    }
+  } else if (toolName === "run_subagents") {
     const origTasks = p.tasks;
     if (!Array.isArray(origTasks) || typeof origTasks === "string") {
       const normalized = normalizeBatchInput(parsed);

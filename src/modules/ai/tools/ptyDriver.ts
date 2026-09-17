@@ -28,12 +28,14 @@ export function buildPtyDriverTools(ctx: ToolContext) {
           .describe(
             "Shell command to execute in the PTY session (used when action is 'run').",
           ),
+        cmd: z.string().optional().describe("Alias for command."),
         input: z
           .string()
           .optional()
           .describe(
             "Text or keystrokes to inject into the terminal (used when action is 'write').",
           ),
+        text: z.string().optional().describe("Alias for input."),
         wait_for: z
           .string()
           .optional()
@@ -41,34 +43,49 @@ export function buildPtyDriverTools(ctx: ToolContext) {
             "Substring or regex to wait for in the terminal output before returning.",
           ),
         timeout_secs: z
-          .number()
-          .int()
-          .min(1)
-          .max(300)
+          .union([z.number(), z.string()])
           .optional()
           .default(30)
           .describe(
             "Maximum seconds to wait for output or completion. Default 30s.",
           ),
         max_lines: z
-          .number()
-          .int()
-          .min(1)
-          .max(500)
+          .union([z.number(), z.string()])
           .optional()
           .default(80)
           .describe("Maximum lines from the screen buffer to return."),
       }),
       needsApproval: true,
       execute: async ({
-        action = "run",
-        command,
-        input,
+        action: rawAction = "run",
+        command: rawCommand,
+        cmd,
+        input: rawInput,
+        text,
         wait_for,
         timeout_secs = 30,
         max_lines = 80,
       }) => {
-        const timeoutMs = timeout_secs * 1000;
+        let action = rawAction;
+        if (
+          action === ("exec" as string) ||
+          action === ("execute" as string) ||
+          action === ("shell" as string)
+        ) {
+          action = "run";
+        }
+        const command = rawCommand ?? cmd;
+        const input = rawInput ?? text;
+        const parsedTimeout =
+          typeof timeout_secs === "string"
+            ? parseInt(timeout_secs, 10) || 30
+            : Number(timeout_secs) || 30;
+        const parsedMaxLines =
+          typeof max_lines === "string"
+            ? parseInt(max_lines, 10) || 80
+            : Number(max_lines) || 80;
+        const timeoutMs = Math.min(Math.max(1, parsedTimeout), 300) * 1000;
+        const maxLines = Math.min(Math.max(1, parsedMaxLines), 500);
 
         if (action === "read") {
           const raw = ctx.getTerminalContext();
@@ -79,10 +96,10 @@ export function buildPtyDriverTools(ctx: ToolContext) {
             };
           }
           const lines = raw.split("\n");
-          const tail = lines.slice(-max_lines).join("\n");
+          const tail = lines.slice(-maxLines).join("\n");
           return {
             action: "read",
-            lines_returned: Math.min(lines.length, max_lines),
+            lines_returned: Math.min(lines.length, maxLines),
             total_lines: lines.length,
             buffer: tail,
           };
@@ -99,7 +116,7 @@ export function buildPtyDriverTools(ctx: ToolContext) {
           await new Promise((r) => setTimeout(r, 200));
           const raw = ctx.getTerminalContext() ?? "";
           const lines = raw.split("\n");
-          const tail = lines.slice(-max_lines).join("\n");
+          const tail = lines.slice(-maxLines).join("\n");
           return {
             action: "ctrl_c",
             sent: true,
@@ -130,7 +147,7 @@ export function buildPtyDriverTools(ctx: ToolContext) {
           }
           const raw = ctx.getTerminalContext() ?? "";
           const lines = raw.split("\n");
-          const tail = lines.slice(-max_lines).join("\n");
+          const tail = lines.slice(-maxLines).join("\n");
           return {
             action: "wait",
             found: matched,
@@ -170,7 +187,7 @@ export function buildPtyDriverTools(ctx: ToolContext) {
             }
             const raw = ctx.getTerminalContext() ?? "";
             const lines = raw.split("\n");
-            const tail = lines.slice(-max_lines).join("\n");
+            const tail = lines.slice(-maxLines).join("\n");
             return {
               action: "write",
               sent: true,
@@ -184,7 +201,7 @@ export function buildPtyDriverTools(ctx: ToolContext) {
           await new Promise((r) => setTimeout(r, 300));
           const raw = ctx.getTerminalContext() ?? "";
           const lines = raw.split("\n");
-          const tail = lines.slice(-max_lines).join("\n");
+          const tail = lines.slice(-maxLines).join("\n");
           return {
             action: "write",
             sent: true,
@@ -258,7 +275,7 @@ export function buildPtyDriverTools(ctx: ToolContext) {
 
         const finalBuf = ctx.getTerminalContext() ?? "";
         const lines = finalBuf.split("\n");
-        const tail = lines.slice(-max_lines).join("\n");
+        const tail = lines.slice(-maxLines).join("\n");
         return {
           action: "run",
           command,
@@ -274,15 +291,17 @@ export function buildPtyDriverTools(ctx: ToolContext) {
         "Read the active terminal's screen buffer / scrollback output. Read-only, auto-executes.",
       inputSchema: z.object({
         max_lines: z
-          .number()
-          .int()
-          .min(1)
-          .max(200)
+          .union([z.number(), z.string()])
           .optional()
           .default(50)
           .describe("Maximum lines from the bottom of the buffer to return."),
       }),
-      execute: async ({ max_lines }) => {
+      execute: async ({ max_lines = 50 }) => {
+        const parsedMax =
+          typeof max_lines === "string"
+            ? parseInt(max_lines, 10) || 50
+            : Number(max_lines) || 50;
+        const clamped = Math.min(Math.max(1, parsedMax), 500);
         const raw = ctx.getTerminalContext();
         if (!raw) {
           return {
@@ -292,9 +311,9 @@ export function buildPtyDriverTools(ctx: ToolContext) {
         }
 
         const lines = raw.split("\n");
-        const tail = lines.slice(-max_lines).join("\n");
+        const tail = lines.slice(-clamped).join("\n");
         return {
-          lines_returned: Math.min(lines.length, max_lines),
+          lines_returned: Math.min(lines.length, clamped),
           total_lines: lines.length,
           buffer: tail,
         };

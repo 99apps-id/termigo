@@ -246,7 +246,7 @@ pub fn pty_has_foreground_job(state: tauri::State<PtyState>, id: u64) -> Result<
     #[cfg(unix)]
     {
         let leader = session.master.lock().unwrap().process_group_leader();
-        Ok(matches!(leader, Some(pid) if pid > 0 && pid as u32 != shell_pid))
+        Ok(matches!(leader, Some(pid) if pid > 0 && (pid as u64) != shell_pid))
     }
     #[cfg(windows)]
     {

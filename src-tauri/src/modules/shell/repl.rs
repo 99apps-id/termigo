@@ -159,7 +159,11 @@ impl ReplProc {
                 let (tail, last_offset, _) = self.buffer.lock().unwrap().read_from(offset);
                 collected.extend_from_slice(&tail);
                 let text = String::from_utf8_lossy(&collected).into_owned();
-                return self.turn(text, until.is_none(), last_offset, dropped_total);
+                let matched = match until {
+                    Some(needle) => !needle.is_empty() && text.contains(needle),
+                    None => true,
+                };
+                return self.turn(text, matched, last_offset, dropped_total);
             }
             if Instant::now() >= deadline {
                 return self.turn(text.into_owned(), until.is_none(), offset, dropped_total);
@@ -253,13 +257,14 @@ pub fn spawn(
     // stdout and stderr share one buffer on purpose: a debugger writes its
     // prompt to one and its errors to the other, and reading them apart would
     // put them out of order for the reader who has to make sense of both.
+    let mut reader_handles = Vec::new();
     for pipe in [
         Box::new(stdout_pipe) as Box<dyn Read + Send>,
         Box::new(stderr_pipe) as Box<dyn Read + Send>,
     ] {
         let proc_ref = proc.clone();
         let mut pipe = pipe;
-        thread::spawn(move || {
+        reader_handles.push(thread::spawn(move || {
             let mut buf = [0u8; 8192];
             loop {
                 match pipe.read(&mut buf) {
@@ -268,7 +273,7 @@ pub fn spawn(
                     Err(_) => break,
                 }
             }
-        });
+        }));
     }
     {
         let proc_ref = proc.clone();
@@ -280,6 +285,9 @@ pub fn spawn(
                     None => proc_ref.exit_unknown.store(true, Ordering::Release),
                 },
                 Err(_) => proc_ref.exit_unknown.store(true, Ordering::Release),
+            }
+            for handle in reader_handles {
+                let _ = handle.join();
             }
             proc_ref.exited.store(true, Ordering::Release);
         });

@@ -393,4 +393,66 @@ describe("repairToolCall", () => {
     const parsed = JSON.parse(result!.input);
     expect(parsed.glob).toEqual(["*.ts"]);
   });
+
+  it("coerces string numbers and repairs pty_session aliases", async () => {
+    const tools = { pty_session: {} };
+    const result = await repairToolCall({
+      tools,
+      toolCall: {
+        toolCallId: "pty-1",
+        toolName: "pty_session",
+        input: JSON.stringify({
+          action: "exec",
+          cmd: "cargo test --lib",
+          timeout_secs: "180",
+          max_lines: "80",
+        }),
+      },
+    });
+    expect(result).not.toBeNull();
+    const parsed = JSON.parse(result!.input);
+    expect(parsed.action).toBe("run");
+    expect(parsed.command).toBe("cargo test --lib");
+    expect(parsed.timeout_secs).toBe(180);
+    expect(parsed.max_lines).toBe(80);
+  });
+
+  it("repairs JSON-stringified todos for todo_write", async () => {
+    const tools = { todo_write: {} };
+    const result = await repairToolCall({
+      tools,
+      toolCall: {
+        toolCallId: "todo-1",
+        toolName: "todo_write",
+        input: JSON.stringify({
+          todos: JSON.stringify([
+            { id: "1", title: "Task 1", status: "pending" },
+          ]),
+        }),
+      },
+    });
+    expect(result).not.toBeNull();
+    const parsed = JSON.parse(result!.input);
+    expect(Array.isArray(parsed.todos)).toBe(true);
+    expect(parsed.todos[0].title).toBe("Task 1");
+  });
+
+  it("maps pty alias tools to pty_session", async () => {
+    const tools = { pty_session: {} };
+    const result = await repairToolCall({
+      tools,
+      toolCall: {
+        toolCallId: "pty-2",
+        toolName: "pty_run",
+        input: JSON.stringify({
+          cmd: "ls -la",
+        }),
+      },
+    });
+    expect(result).not.toBeNull();
+    expect(result!.toolName).toBe("pty_session");
+    const parsed = JSON.parse(result!.input);
+    expect(parsed.action).toBe("run");
+    expect(parsed.command).toBe("ls -la");
+  });
 });

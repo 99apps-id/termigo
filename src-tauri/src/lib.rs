@@ -160,6 +160,10 @@ pub fn run() {
                     }
                 });
             }
+            #[cfg(target_os = "linux")]
+            if let Some(main) = _app.get_webview_window("main") {
+                let _ = main.set_decorations(false);
+            }
             Ok(())
         })
         .manage(pty::PtyState::default())

@@ -156,5 +156,31 @@ describe("ptyDriver tools", () => {
     expect(res.command).toBe("echo hello");
     expect(injected).toBe("echo hello\r");
   });
+
+  it("pty_session handles string timeout_secs and cmd alias", async () => {
+    let injected = "";
+    let calls = 0;
+    const ctx = {
+      ...makeContext("$ initial prompt\n"),
+      getTerminalContext: () => {
+        calls++;
+        return calls > 2 ? "$ initial prompt\ncargo test output\n$ " : "$ initial prompt\n";
+      },
+      injectIntoActivePty: (text: string) => {
+        injected = text;
+        return true;
+      },
+    };
+    const tools = buildPtyDriverTools(ctx);
+    const exec = tools.pty_session.execute;
+    if (!exec) throw new Error("pty_session execute missing");
+
+    // biome-ignore lint/suspicious/noExplicitAny: test harness
+    const res = (await exec({ cmd: "cargo test", timeout_secs: "5", max_lines: "80" }, {} as any)) as any;
+    expect(res.action).toBe("run");
+    expect(res.command).toBe("cargo test");
+    expect(injected).toBe("cargo test\r");
+    expect(res.output).toContain("cargo test output");
+  });
 });
 

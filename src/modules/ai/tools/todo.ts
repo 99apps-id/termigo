@@ -39,35 +39,67 @@ export function buildTodoTools(ctx: ToolContext) {
         "Manage a structured todo list to track major milestones on complex multi-phase tasks. Optional for straightforward coding or refactoring tasks.\n\nWhen to use:\n- Complex multi-phase work with 3+ distinct milestones\n- Multi-module migrations or large features\n\nStates: pending, in_progress, completed. Replaces the previous list with updated statuses.",
       inputSchema: z.object({
         todos: z
-          .array(
-            z.object({
-              id: z
-                .string()
-                .optional()
-                .describe(
-                  "Stable id; generated if omitted. Reuse ids across calls to keep UI stable.",
-                ),
-              // Optional and coerced below: some models send only `description`
-              // (or `text`) and no `title`. Rejecting the whole call over that
-              // was a hard failure on otherwise-valid todos, so accept either.
-              title: z.string().optional(),
-              description: z.string().optional(),
-              text: z.string().optional(),
-              status: TodoStatus,
-              parent: z
-                .string()
-                .optional()
-                .describe(
-                  "Optional id of the parent todo, to nest this item as a subtask. Omit for top-level items.",
-                ),
-            }),
-          )
+          .union([
+            z.array(
+              z.object({
+                id: z
+                  .string()
+                  .optional()
+                  .describe(
+                    "Stable id; generated if omitted. Reuse ids across calls to keep UI stable.",
+                  ),
+                // Optional and coerced below: some models send only `description`
+                // (or `text`) and no `title`. Rejecting the whole call over that
+                // was a hard failure on otherwise-valid todos, so accept either.
+                title: z.string().optional(),
+                description: z.string().optional(),
+                text: z.string().optional(),
+                status: TodoStatus,
+                parent: z
+                  .string()
+                  .optional()
+                  .describe(
+                    "Optional id of the parent todo, to nest this item as a subtask. Omit for top-level items.",
+                  ),
+              }),
+            ),
+            z.string().describe("JSON-stringified todos array."),
+          ])
           .describe("The complete list of todos for this task."),
       }),
-      execute: async ({ todos }) => {
+      execute: async ({ todos: rawTodos }) => {
         const sessionId = ctx.getSessionId();
         if (!sessionId)
           return { error: "no active session; cannot persist todos" };
+
+        let todos: Array<{
+          id?: string;
+          title?: string;
+          description?: string;
+          text?: string;
+          status: "pending" | "in_progress" | "completed";
+          parent?: string;
+        }> = [];
+
+        if (typeof rawTodos === "string") {
+          try {
+            const parsed = JSON.parse(rawTodos);
+            if (Array.isArray(parsed)) {
+              todos = parsed;
+            } else if (parsed && typeof parsed === "object") {
+              const obj = parsed as Record<string, unknown>;
+              todos = (Array.isArray(obj.todos)
+                ? obj.todos
+                : Array.isArray(obj.items)
+                  ? obj.items
+                  : Object.values(obj)) as typeof todos;
+            }
+          } catch {
+            return { error: "Failed to parse todos JSON string" };
+          }
+        } else if (Array.isArray(rawTodos)) {
+          todos = rawTodos;
+        }
 
         const normalized: Todo[] = todos.map((t) => {
           // Prefer an explicit title; fall back to description / text so a model

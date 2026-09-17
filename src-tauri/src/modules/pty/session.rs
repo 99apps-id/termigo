@@ -397,7 +397,7 @@ mod tests {
             Arc::new(Mutex::new(pair.master.take_writer().expect("writer")));
 
         let session = Arc::new(Session {
-            shell_pid: child.process_id().unwrap_or(0),
+            shell_pid: child.process_id().unwrap_or(0).into(),
             killer: Mutex::new(killer),
             writer,
             master: Mutex::new(pair.master),

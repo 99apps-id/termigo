@@ -65,18 +65,17 @@ export function buildCodeSearchTools(ctx: ToolContext) {
           .string()
           .describe("Natural language query or code symbol to search for."),
         max_results: z
-          .preprocess(
-            (v) =>
-              typeof v === "number"
-                ? Math.min(Math.max(1, Math.floor(v)), 100)
-                : v,
-            z
-              .number()
-              .int()
-              .min(1)
-              .max(100)
-              .optional(),
-          )
+          .preprocess((v) => {
+            const num =
+              typeof v === "string"
+                ? parseInt(v, 10)
+                : typeof v === "number"
+                  ? v
+                  : undefined;
+            return typeof num === "number" && !Number.isNaN(num)
+              ? Math.min(Math.max(1, Math.floor(num)), 100)
+              : v;
+          }, z.number().int().min(1).max(100).optional())
           .optional()
           .describe("Maximum results to return. Defaults to 10, capped at 100."),
         path_filter: z

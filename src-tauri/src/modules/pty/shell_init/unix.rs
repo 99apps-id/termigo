@@ -32,10 +32,25 @@ impl Shell {
     }
 
     pub fn detect() -> (Shell, String) {
-        let path = login_shell()
+        let candidate = login_shell()
             .or_else(|| std::env::var("SHELL").ok())
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| "/bin/zsh".into());
+            .filter(|s| !s.is_empty() && Path::new(s).is_file());
+        let path = candidate.unwrap_or_else(|| {
+            let fallbacks = [
+                "/bin/bash",
+                "/usr/bin/bash",
+                "/bin/zsh",
+                "/usr/bin/zsh",
+                "/bin/sh",
+                "/usr/bin/sh",
+            ];
+            for fb in fallbacks {
+                if Path::new(fb).is_file() {
+                    return fb.to_string();
+                }
+            }
+            "/bin/sh".into()
+        });
         (Self::classify(&path), path)
     }
 
@@ -85,6 +100,17 @@ pub fn list_shells() -> Vec<ShellInfo> {
             }
             candidates.push(line.to_string());
         }
+    }
+    for standard in &[
+        "/bin/bash",
+        "/usr/bin/bash",
+        "/bin/zsh",
+        "/usr/bin/zsh",
+        "/bin/sh",
+        "/usr/bin/sh",
+        "/usr/bin/fish",
+    ] {
+        candidates.push((*standard).to_string());
     }
     for path in candidates {
         if !seen.insert(path.clone()) || !Path::new(&path).is_file() {

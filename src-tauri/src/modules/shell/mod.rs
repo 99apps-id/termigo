@@ -190,20 +190,27 @@ fn extract_effective_program(segment: &str) -> &str {
             }
             if w.starts_with('-') {
                 if is_wsl {
-                    if matches!(
-                        w,
-                        "-d" | "--distribution" | "-u" | "--user" | "--cd" | "-e" | "--exec"
-                            | "--shell-type"
-                    ) {
+                    if w == "-e" || w == "--exec" {
+                        // -e / --exec directly precedes the target command (e.g. `wsl -e cargo test`).
+                        continue;
+                    }
+                    if !w.contains('=')
+                        && matches!(
+                            w,
+                            "-d" | "--distribution" | "-u" | "--user" | "--cd" | "--shell-type"
+                        )
+                    {
                         skip_next = true;
                     }
-                } else if matches!(
-                    w,
-                    "-u" | "-g" | "-p" | "-C" | "-c" | "-r" | "-t" | "-T" | "-D" | "-h" | "-U"
-                        | "--user" | "--group" | "--prompt" | "--close-from"
-                        | "--login-class" | "--role" | "--type" | "--command-timeout"
-                        | "--chdir" | "--host" | "--other-user"
-                ) {
+                } else if !w.contains('=')
+                    && matches!(
+                        w,
+                        "-u" | "-g" | "-p" | "-C" | "-c" | "-r" | "-t" | "-T" | "-D" | "-h" | "-U"
+                            | "--user" | "--group" | "--prompt" | "--close-from"
+                            | "--login-class" | "--role" | "--type" | "--command-timeout"
+                            | "--chdir" | "--host" | "--other-user"
+                    )
+                {
                     skip_next = true;
                 }
                 continue;
@@ -1120,6 +1127,11 @@ mod tests_sandbox {
             "wsl sudo apt update",
             "wsl -d Kali sudo apt-get install -y nmap",
             "wsl -u root apt install -y curl",
+            "wsl --distribution=Kali apt update",
+            "wsl -e git status",
+            "wsl -e cargo test",
+            "wsl --exec ls -la",
+            "wsl -d Ubuntu -e pnpm test",
             "wsl --status",
             "wsl -l -v",
             "wslpath -w /etc",
@@ -1130,5 +1142,6 @@ mod tests_sandbox {
         assert!(validate_shell_command("wsl definitely-not-a-tool").is_err());
         assert!(validate_shell_command("wsl -d Kali definitely-not-a-tool").is_err());
         assert!(validate_shell_command("wsl sudo definitely-not-a-tool").is_err());
+        assert!(validate_shell_command("wsl -e definitely-not-a-tool").is_err());
     }
 }
