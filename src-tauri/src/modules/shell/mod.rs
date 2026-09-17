@@ -54,7 +54,14 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
     // Python packaging & tool runners
     "pip", "pip3", "pipx", "uv",
     // Windows shell & package managers (parity with TERMIGO.md / security-model.md)
-    "cmd", "powershell", "pwsh", "set", "winget", "choco", "scoop",
+    "cmd", "powershell", "pwsh", "set", "wsl", "wslpath", "winget", "choco", "scoop",
+    // Linux/WSL and Unix system administration & root utilities (user-approved)
+    "systemctl", "service", "journalctl", "dmesg",
+    "chown", "chmod", "mkdir", "cp", "mv", "touch", "ln", "tee",
+    "ip", "ifconfig", "netstat", "ss", "lsof", "ps", "kill", "pkill", "killall",
+    "free", "df", "du", "ufw", "iptables",
+    "useradd", "usermod", "userdel", "groupadd", "groupmod", "groupdel",
+    "apt-key", "gpg", "update-alternatives", "su",
     //
     // Project toolchains. An agent that cannot run the project's own checks
     // cannot verify its work, and these are the binaries a repository's scripts
@@ -101,48 +108,62 @@ fn is_env_var_assignment(token: &str) -> bool {
 /// Skips leading environment variable prefixes (e.g. `LC_ALL=C ls`,
 /// `DEBIAN_FRONTEND=noninteractive apt-get install`).
 ///
-/// For privilege elevation wrappers (`sudo`, `doas`), unpacks flags and options
-/// (including those taking arguments like `-u <user>` or `-g <group>`) to find the
-/// target program being executed. If a target program is present, that target is
-/// returned so that `sudo rm -rf /` fails on `rm`, while `sudo apt update` succeeds
-/// on `apt`. If no subcommand follows (e.g. `sudo -l`, `sudo --version`), the wrapper
-/// itself (`sudo`) is checked.
+/// For wrappers (`wsl`, `sudo`, `doas`), unpacks flags and options (including
+/// those taking arguments like `-u <user>`, `-g <group>`, `-d <distro>`) to find the
+/// target program being executed. Chained wrappers (e.g. `wsl sudo apt update`)
+/// are unwrapped sequentially so that `wsl sudo rm -rf /` fails on `rm`, while
+/// `wsl sudo apt update` succeeds on `apt`. If no subcommand follows (e.g. `sudo -l`,
+/// `wsl --status`), the wrapper itself is checked.
 fn extract_effective_program(segment: &str) -> &str {
     let mut words = segment.split_whitespace();
 
-    let mut first_word = None;
+    let mut current_word = None;
     for word in words.by_ref() {
         let w = word.trim_matches(['"', '\'']);
         if !is_env_var_assignment(w) {
-            first_word = Some(w);
+            current_word = Some(w);
             break;
         }
     }
 
-    let first = match first_word {
+    let mut current = match current_word {
         Some(w) => w,
         None => return segment,
     };
 
-    let base_first = first
-        .strip_suffix(".exe")
-        .or_else(|| first.strip_suffix(".cmd"))
-        .or_else(|| first.strip_suffix(".bat"))
-        .unwrap_or(first);
+    loop {
+        let base = current
+            .strip_suffix(".exe")
+            .or_else(|| current.strip_suffix(".cmd"))
+            .or_else(|| current.strip_suffix(".bat"))
+            .unwrap_or(current);
 
-    let prog_name = base_first
-        .rsplit(['/', '\\'])
-        .next()
-        .unwrap_or(base_first);
+        let prog_name = base
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or(base);
 
-    if prog_name.eq_ignore_ascii_case("sudo") || prog_name.eq_ignore_ascii_case("doas") {
+        let is_wsl = prog_name.eq_ignore_ascii_case("wsl");
+        let is_sudo = prog_name.eq_ignore_ascii_case("sudo") || prog_name.eq_ignore_ascii_case("doas");
+        let is_su = prog_name.eq_ignore_ascii_case("su");
+
+        if !is_wsl && !is_sudo && !is_su {
+            return current;
+        }
+
         let mut target = None;
         let mut skip_next = false;
-        for word in words {
+        let mut expect_su_cmd = false;
+        for word in words.by_ref() {
             let w = word.trim_matches(['"', '\'']);
             if skip_next {
                 skip_next = false;
                 continue;
+            }
+            if expect_su_cmd {
+                let sub_cmd = w.split_whitespace().next().unwrap_or(w).trim_matches(['"', '\'']);
+                target = Some(sub_cmd);
+                break;
             }
             if w == "--" {
                 continue;
@@ -150,8 +171,33 @@ fn extract_effective_program(segment: &str) -> &str {
             if is_env_var_assignment(w) {
                 continue;
             }
+            if is_su {
+                if w == "-c" || w == "--command" {
+                    expect_su_cmd = true;
+                    continue;
+                }
+                if let Some(cmd_part) = w.strip_prefix("--command=") {
+                    let clean = cmd_part.trim_matches(['"', '\'']);
+                    let sub_cmd = clean.split_whitespace().next().unwrap_or(clean).trim_matches(['"', '\'']);
+                    target = Some(sub_cmd);
+                    break;
+                }
+                if w.starts_with('-') {
+                    continue;
+                }
+                // Bare user parameter like `root` in `su root -c ...`
+                continue;
+            }
             if w.starts_with('-') {
-                if matches!(
+                if is_wsl {
+                    if matches!(
+                        w,
+                        "-d" | "--distribution" | "-u" | "--user" | "--cd" | "-e" | "--exec"
+                            | "--shell-type"
+                    ) {
+                        skip_next = true;
+                    }
+                } else if matches!(
                     w,
                     "-u" | "-g" | "-p" | "-C" | "-c" | "-r" | "-t" | "-T" | "-D" | "-h" | "-U"
                         | "--user" | "--group" | "--prompt" | "--close-from"
@@ -165,12 +211,12 @@ fn extract_effective_program(segment: &str) -> &str {
             target = Some(w);
             break;
         }
-        if let Some(t) = target {
-            return t;
+
+        match target {
+            Some(t) => current = t,
+            None => return current,
         }
     }
-
-    first
 }
 
 /// Validate a shell command for agent execution:
@@ -1038,5 +1084,23 @@ mod tests_sandbox {
         assert!(validate_shell_command("sudo -u root rm -f /etc/hosts").is_err());
         assert!(validate_shell_command("sudo evil-binary --flag").is_err());
         assert!(validate_shell_command("doas rm -rf /").is_err());
+    }
+
+    #[test]
+    fn validate_shell_command_allows_wsl_with_allowlisted_tools() {
+        for cmd in [
+            "wsl apt update",
+            "wsl sudo apt update",
+            "wsl -d Kali sudo apt-get install -y nmap",
+            "wsl -u root apt install -y curl",
+            "wsl --status",
+            "wsl -l -v",
+            "wslpath -w /etc",
+        ] {
+            assert!(validate_shell_command(cmd).is_ok(), "blocked: {cmd}");
+        }
+        assert!(validate_shell_command("wsl rm -rf /").is_err());
+        assert!(validate_shell_command("wsl -d Kali rm -rf /").is_err());
+        assert!(validate_shell_command("wsl sudo rm -rf /").is_err());
     }
 }
