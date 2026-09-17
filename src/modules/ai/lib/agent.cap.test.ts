@@ -1,58 +1,95 @@
+import type { ModelMessage } from "ai";
 import { describe, expect, it } from "vitest";
+import { capHistoryMessageCount } from "./agent";
+import { repairModelMessageSequence } from "./validateModelSequence";
 
-// Import the private-ish helper via module import. Since it's not exported,
-// test through the public surface: build a long history and verify the cap
-// notice fires and the prompt payload stays under the message limit.
-
-function makeMessage(role: string, index: number) {
+function makeMessage(role: string, index: number): ModelMessage {
+  if (role === "user") {
+    return { role: "user", content: `user request ${index}` };
+  }
+  if (role === "assistant") {
+    return {
+      role: "assistant",
+      content: [
+        {
+          type: "tool-call" as const,
+          toolCallId: `call_${index}`,
+          toolName: "read_file",
+          input: { path: `src/f${index}.ts` },
+        },
+      ],
+    };
+  }
   return {
-    role,
-    content:
-      role === "user"
-        ? `message ${index}`
-        : [
-            {
-              type: "tool-call" as const,
-              toolCallId: `c${index}`,
-              toolName: "read_file",
-              input: { path: `src/f${index}.ts` },
-            },
-          ],
+    role: "tool",
+    content: [
+      {
+        type: "tool-result" as const,
+        toolCallId: `call_${index - 1}`,
+        toolName: "read_file",
+        output: { content: `file ${index - 1}` },
+      },
+    ],
   };
 }
 
 describe("runAgentStream message-count cap", () => {
-  it("does not trim when history is under the limit", async () => {
-    // The cap is internal to runAgentStream, so we verify behavior through
-    // the public contract: a normal-length session should not see a cap log.
+  it("does not trim when history is under the limit", () => {
     const messages = Array.from({ length: 100 }, (_, i) =>
       makeMessage(i % 2 === 0 ? "user" : "assistant", i),
     );
 
-    // Sanity: the messages themselves don't exceed the cap.
-    expect(messages.length).toBeLessThanOrEqual(500);
+    const result = capHistoryMessageCount(messages);
+    expect(result.capped).toBe(false);
+    expect(result.removed).toBe(0);
+    expect(result.messages.length).toBe(100);
   });
 
-  it("conceptually trims from the front when over the limit", () => {
-    const limit = 500;
-    const tailKeep = 50;
-    const total = 600;
+  it("trims cleanly and never starts kept history on a tool message", () => {
+    // Build 508 messages matching the field scenario where excess is 8
+    // Pattern: User, Assistant (call), Tool (result), Assistant (call), Tool (result)...
+    const messages: ModelMessage[] = [];
+    let idx = 0;
+    while (messages.length < 508) {
+      messages.push({ role: "user", content: `prompt ${idx}` });
+      if (messages.length >= 508) break;
+      messages.push({
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: `c_${idx}`,
+            toolName: "read_file",
+            input: { path: `f${idx}.ts` },
+          },
+        ],
+      });
+      if (messages.length >= 508) break;
+      messages.push({
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: `c_${idx}`,
+            toolName: "read_file",
+            output: "ok",
+          },
+        ],
+      });
+      idx++;
+    }
 
-    const messages = Array.from({ length: total }, (_, i) =>
-      makeMessage(i % 2 === 0 ? "user" : "assistant", i),
-    );
+    const capped = capHistoryMessageCount(messages, 500, 50);
+    expect(capped.capped).toBe(true);
+    expect(capped.messages.length).toBeLessThanOrEqual(500);
+    // Crucial check: kept history must NEVER start with a tool message
+    expect(capped.messages[0].role).not.toBe("tool");
+    expect(capped.messages[0].role).toBe("user");
 
-    // Simulate the cap logic (mirrors capHistoryMessageCount).
-    const excess = messages.length - limit;
-    const tailStart = Math.max(0, messages.length - tailKeep);
-    const prefixToDrop = Math.min(excess, tailStart);
-    const kept = messages.slice(prefixToDrop);
-
-    expect(kept.length).toBe(limit);
-    expect(kept.length).toBe(500);
-    expect(kept[0].role).toBe("user"); // first non-system kept
-    expect(kept[kept.length - 1]).toBe(messages[messages.length - 1]); // tail preserved
-    expect(prefixToDrop).toBe(100);
+    // Sequence repair pass preserves valid provider invariants
+    const repaired = repairModelMessageSequence(capped.messages);
+    expect(repaired[0].role).toBe("user");
+    expect(repaired.length).toBeGreaterThan(0);
   });
 
   it("never drops the tail even when the history is huge", () => {
@@ -64,13 +101,12 @@ describe("runAgentStream message-count cap", () => {
       makeMessage(i % 2 === 0 ? "user" : "assistant", i),
     );
 
-    const excess = messages.length - limit;
-    const tailStart = Math.max(0, messages.length - tailKeep);
-    const prefixToDrop = Math.min(excess, tailStart);
-    const kept = messages.slice(prefixToDrop);
-
-    expect(kept.length).toBe(limit);
-    expect(kept[kept.length - tailKeep]).toBe(messages[total - tailKeep]);
-    expect(kept[kept.length - 1]).toBe(messages[total - 1]);
+    const result = capHistoryMessageCount(messages, limit, tailKeep);
+    expect(result.capped).toBe(true);
+    expect(result.messages.length).toBeLessThanOrEqual(limit);
+    // Verify tail preserved
+    expect(result.messages[result.messages.length - 1]).toBe(
+      messages[messages.length - 1],
+    );
   });
 });

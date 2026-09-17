@@ -95,6 +95,7 @@ import { formatTodoStatusBlock } from "./todos";
 import { modelRejectsForcedToolChoice } from "./toolChoiceLearning";
 import { measureToolPayload } from "./toolPayload";
 import { formatUserModelBlock, type UserModel } from "./userModel";
+import { repairModelMessageSequence } from "./validateModelSequence";
 import {
   newVerifyLedger,
   recordToolResult,
@@ -1136,7 +1137,12 @@ export async function runAgentStream(opts: RunAgentOptions) {
     );
   }
 
-  const promptHistory = cappedHistory.messages;
+  // Universal sequence validator and repairer:
+  // Guarantees invariants required by all LLM providers (OpenAI, Anthropic, Gemini):
+  // - No orphaned 'tool' messages without preceding 'tool-call's
+  // - Synthetic tool results for interrupted turns
+  // - Sequence never starts with 'tool' or 'assistant'
+  const promptHistory = repairModelMessageSequence(cappedHistory.messages);
 
   const prompt = prepareAgentPrompt(
     stableSystem,
@@ -1727,7 +1733,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
           reservedTokens,
         );
         if (eviction.summary.evictedToolCalls > 0 || compacted.compacted) {
-          nextMessages = compacted.messages;
+          nextMessages = repairModelMessageSequence(compacted.messages);
           if (eviction.summary.evictedToolCalls > 0) {
             fireAndForget(
               logInfo(
@@ -2124,23 +2130,60 @@ export async function runAgentStream(opts: RunAgentOptions) {
   });
 }
 
-function capHistoryMessageCount(messages: ModelMessage[]): {
+export function capHistoryMessageCount(
+  messages: ModelMessage[],
+  limit = MAX_HISTORY_MESSAGES,
+  tailKeep = HISTORY_TAIL_KEEP,
+): {
   messages: ModelMessage[];
   capped: boolean;
   removed: number;
 } {
-  if (messages.length <= MAX_HISTORY_MESSAGES) {
+  if (messages.length <= limit) {
     return { messages, capped: false, removed: 0 };
   }
 
-  const excess = messages.length - MAX_HISTORY_MESSAGES;
-  const tailStart = Math.max(0, messages.length - HISTORY_TAIL_KEEP);
-  const prefixToDrop = Math.min(excess, tailStart);
+  const excess = messages.length - limit;
+  const tailStart = Math.max(0, messages.length - tailKeep);
+
+  // Slicing blindly into the middle of a tool turn leaves an orphaned 'tool'
+  // message or severed 'tool-call', causing LLM providers (e.g. OpenAI) to
+  // reject with HTTP 400 ("Messages with role 'tool' must be a response to a preceding message with 'tool_calls'").
+  //
+  // Find a clean cut point starting with a 'user' message:
+  // 1. Search forward from `excess` up to `tailStart` for a 'user' message.
+  //    This keeps <= limit messages without touching the protected tail.
+  // 2. If no user message forward, search backward from `excess - 1` down to 1.
+  // 3. Fallback: slice at Math.min(excess, tailStart).
+  let cutIdx = -1;
+  for (let i = excess; i < tailStart; i++) {
+    if (messages[i].role === "user") {
+      cutIdx = i;
+      break;
+    }
+  }
+
+  if (cutIdx === -1) {
+    for (let i = excess - 1; i >= 1; i--) {
+      if (messages[i].role === "user") {
+        cutIdx = i;
+        break;
+      }
+    }
+  }
+
+  const prefixToDrop = cutIdx !== -1 ? cutIdx : Math.min(excess, tailStart);
+  let sliced = messages.slice(prefixToDrop);
+
+  // If the slice still begins on a tool message, skip leading tool messages.
+  while (sliced.length > 0 && sliced[0].role === "tool") {
+    sliced = sliced.slice(1);
+  }
 
   return {
-    messages: messages.slice(prefixToDrop),
+    messages: sliced,
     capped: true,
-    removed: prefixToDrop,
+    removed: messages.length - sliced.length,
   };
 }
 
