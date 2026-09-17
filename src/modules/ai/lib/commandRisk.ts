@@ -25,6 +25,7 @@ const READ_ONLY = new Set([
   // Reconnaissance, audit, and system inspection tools
   "find", "nmap", "whois", "traceroute", "tracepath", "ip", "ifconfig", "arp",
   "route", "lsblk", "blkid", "pgrep",
+  "apt-cache", "dpkg-query",
 ]);
 
 /** Subcommands that only report, for tools where the verb decides. */
@@ -41,6 +42,13 @@ const READ_ONLY_SUBCOMMANDS: Record<string, Set<string>> = {
   kubectl: new Set(["get", "describe", "logs", "top", "version"]),
   apt: new Set(["list", "show", "search", "policy"]),
   "apt-get": new Set([]),
+  brew: new Set(["list", "ls", "info", "search", "leaves", "deps", "outdated", "doctor", "config"]),
+  dpkg: new Set(["-l", "-s", "-L", "-S", "--list", "--status", "--contents"]),
+  pacman: new Set(["-Q", "-Qi", "-Qs", "-Si", "-Ss"]),
+  dnf: new Set(["list", "info", "search", "check-update"]),
+  yum: new Set(["list", "info", "search", "check-update"]),
+  pip: new Set(["list", "show", "check", "inspect"]),
+  pip3: new Set(["list", "show", "check", "inspect"]),
 };
 
 /**

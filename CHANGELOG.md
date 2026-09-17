@@ -12,6 +12,13 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`src/modules/ai/lib/subagentPool.ts`) caps active concurrent subagents across the app (limit 4).
   Parents yield their concurrency slot via `ctx.yieldSlot()` while waiting on child tasks,
   preventing hierarchical deadlocks. Nested batch subagents are bounded to 2 concurrent workers.
+- **Cross-platform package managers and privilege elevation in shell sandbox.** `apt`, `apt-get`,
+  `apt-cache`, `dpkg`, `dpkg-query`, `pacman`, `dnf`, `yum`, `rpm`, `apk`, `zypper`, `snap`, `flatpak`,
+  `pip`, `pip3`, `pipx`, `uv` (Linux/WSL) and `brew`, `port`, `mas`, `softwareupdate`, `pkgutil`, `installer`
+  (macOS) are added to `SANDBOX_ALLOWLIST` in `src-tauri/src/modules/shell/mod.rs`. Privilege elevation wrappers
+  (`sudo`, `doas`) unwrap options and flags (including `-u <user>`, `-g <group>`, `-E`) to validate the target
+  command against the allowlist, preventing unallowlisted commands (like `sudo rm -rf /`) while allowing package
+  installations (`sudo apt update`, `sudo apt-get install`, `brew install`).
 - **Windows shell sandbox execution allowlist.** `cmd`, `cmd.exe`, `powershell`, `pwsh`, and `set`
   are explicitly allowlisted on Windows in `src-tauri/src/modules/shell/mod.rs`, enabling agent tools
   to execute `cmd /c` batch commands and environment inspection while enforcing path and risk filtering.

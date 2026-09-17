@@ -68,6 +68,7 @@ did, and `sql_run` was missed by the audit that fixed them.
 Shell command execution from agent tools (`bash_run`, `bash_background`) passes through the command sandbox (`src-tauri/src/modules/shell/mod.rs`):
 
 - **Command allowlist**: `validate_shell_command` checks the binary or utility being invoked against `SANDBOX_ALLOWLIST`.
+- **Package management and elevation**: package managers across platforms (`apt`, `apt-get`, `dpkg`, `pacman`, `dnf`, `yum`, `apk`, `zypper`, `pip`, `pip3`, `uv` on Linux/WSL; `brew`, `port`, `softwareupdate` on macOS; `winget`, `choco`, `scoop` on Windows) and elevation wrappers (`sudo`, `doas`) are allowlisted. Privilege elevation wrappers unwrap flags to validate the target program against the allowlist so that `sudo rm -rf /` is rejected while `sudo apt update` succeeds.
 - **Windows shell support**: on Windows, `cmd`, `cmd.exe`, `powershell`, `pwsh`, and `set` are explicitly allowlisted, enabling agent workflows such as `cmd /c` for batch commands and environment inspection while retaining path and argument validation.
 - **Risk classification**: command segments separated by `&&`, `|`, or `;` are parsed and evaluated. Destructive operations (such as `rm`, `del`, `Remove-Item`) are never delegated without manual approval.
 - **CWD authorization**: the execution working directory must reside within an authorized workspace root from `WorkspaceRegistry`.

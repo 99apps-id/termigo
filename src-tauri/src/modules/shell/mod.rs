@@ -44,6 +44,17 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
     // Pentest & network recon tooling supported by Termigo
     "nmap", "masscan", "rustscan", "nikto", "nuclei", "httpx", "wpscan",
     "sqlmap", "ffuf", "gobuster", "dirsearch", "subfinder",
+    // Privilege elevation & package management (Linux/WSL, macOS, Windows)
+    "sudo", "doas",
+    // Linux / WSL package managers (Debian/Ubuntu/Kali, Arch, RedHat/Fedora, Alpine, openSUSE)
+    "apt", "apt-get", "apt-cache", "dpkg", "dpkg-query",
+    "pacman", "dnf", "yum", "rpm", "apk", "zypper", "snap", "flatpak",
+    // macOS package management
+    "brew", "port", "mas", "softwareupdate", "pkgutil", "installer",
+    // Python packaging & tool runners
+    "pip", "pip3", "pipx", "uv",
+    // Windows shell & package managers (parity with TERMIGO.md / security-model.md)
+    "cmd", "powershell", "pwsh", "set", "winget", "choco", "scoop",
     //
     // Project toolchains. An agent that cannot run the project's own checks
     // cannot verify its work, and these are the binaries a repository's scripts
@@ -70,6 +81,97 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
 
 /// Characters that enable command injection in a shell one-liner.
 const SHELL_METACHARACTERS: &[char] = &[';', '$', '(', ')', '<', '>', '`'];
+
+/// Check whether a token is an environment variable assignment like `FOO=bar` or
+/// `DEBIAN_FRONTEND=noninteractive`.
+fn is_env_var_assignment(token: &str) -> bool {
+    let clean = token.trim_matches(['"', '\'']);
+    if let Some((name, _)) = clean.split_once('=') {
+        let mut chars = name.chars();
+        if let Some(first) = chars.next() {
+            return (first.is_ascii_alphabetic() || first == '_')
+                && chars.all(|c| c.is_ascii_alphanumeric() || c == '_');
+        }
+    }
+    false
+}
+
+/// Extract the effective program to validate against the sandbox allowlist.
+///
+/// Skips leading environment variable prefixes (e.g. `LC_ALL=C ls`,
+/// `DEBIAN_FRONTEND=noninteractive apt-get install`).
+///
+/// For privilege elevation wrappers (`sudo`, `doas`), unpacks flags and options
+/// (including those taking arguments like `-u <user>` or `-g <group>`) to find the
+/// target program being executed. If a target program is present, that target is
+/// returned so that `sudo rm -rf /` fails on `rm`, while `sudo apt update` succeeds
+/// on `apt`. If no subcommand follows (e.g. `sudo -l`, `sudo --version`), the wrapper
+/// itself (`sudo`) is checked.
+fn extract_effective_program(segment: &str) -> &str {
+    let mut words = segment.split_whitespace();
+
+    let mut first_word = None;
+    for word in words.by_ref() {
+        let w = word.trim_matches(['"', '\'']);
+        if !is_env_var_assignment(w) {
+            first_word = Some(w);
+            break;
+        }
+    }
+
+    let first = match first_word {
+        Some(w) => w,
+        None => return segment,
+    };
+
+    let base_first = first
+        .strip_suffix(".exe")
+        .or_else(|| first.strip_suffix(".cmd"))
+        .or_else(|| first.strip_suffix(".bat"))
+        .unwrap_or(first);
+
+    let prog_name = base_first
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(base_first);
+
+    if prog_name.eq_ignore_ascii_case("sudo") || prog_name.eq_ignore_ascii_case("doas") {
+        let mut target = None;
+        let mut skip_next = false;
+        for word in words {
+            let w = word.trim_matches(['"', '\'']);
+            if skip_next {
+                skip_next = false;
+                continue;
+            }
+            if w == "--" {
+                continue;
+            }
+            if is_env_var_assignment(w) {
+                continue;
+            }
+            if w.starts_with('-') {
+                if matches!(
+                    w,
+                    "-u" | "-g" | "-p" | "-C" | "-c" | "-r" | "-t" | "-T" | "-D" | "-h" | "-U"
+                        | "--user" | "--group" | "--prompt" | "--close-from"
+                        | "--login-class" | "--role" | "--type" | "--command-timeout"
+                        | "--chdir" | "--host" | "--other-user"
+                ) {
+                    skip_next = true;
+                }
+                continue;
+            }
+            target = Some(w);
+            break;
+        }
+        if let Some(t) = target {
+            return t;
+        }
+    }
+
+    first
+}
 
 /// Validate a shell command for agent execution:
 /// - reject metacharacters that enable injection (`;$()<>``)
@@ -157,7 +259,7 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
         return Err("command contains no executable segment".into());
     }
     for segment in segments {
-        let raw_program = segment.split_whitespace().next().unwrap_or(segment);
+        let raw_program = extract_effective_program(segment);
         let program = raw_program.trim_matches(['"', '\'']);
 
         // Allow absolute or rooted paths on Unix (/...) and Windows (C:\..., \...).
@@ -877,5 +979,64 @@ mod tests_sandbox {
         assert!(validate_shell_command("echo hi\r\nwhoami").is_err());
         // A tab is not a separator and stays allowed.
         assert!(validate_shell_command("echo hi\tthere").is_ok());
+    }
+
+    #[test]
+    fn validate_shell_command_allows_linux_wsl_and_macos_package_managers() {
+        for cmd in [
+            "apt update",
+            "apt install -y nmap",
+            "apt-get update",
+            "apt-get install -y curl",
+            "apt-cache search sqlmap",
+            "dpkg -l",
+            "dpkg -i tool.deb",
+            "pacman -Syu",
+            "dnf install -y nginx",
+            "yum check-update",
+            "apk add --no-cache git",
+            "zypper refresh",
+            "brew install ripgrep",
+            "brew update",
+            "brew search python",
+            "port install htop",
+            "softwareupdate -l",
+            "pip install requests",
+            "pip3 install termcolor",
+            "pipx install impacket",
+            "uv pip install ruff",
+        ] {
+            assert!(validate_shell_command(cmd).is_ok(), "blocked: {cmd}");
+        }
+    }
+
+    #[test]
+    fn validate_shell_command_allows_sudo_with_allowlisted_tools() {
+        for cmd in [
+            "sudo apt update",
+            "sudo apt-get install -y nmap",
+            "sudo -u root apt install -y curl",
+            "sudo -E apt update",
+            "sudo -S apt update",
+            "sudo -- apt update",
+            "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y nmap",
+            "DEBIAN_FRONTEND=noninteractive apt-get install -y nmap",
+            "sudo brew update",
+            "sudo pacman -Syu",
+            "sudo -l",
+            "sudo --version",
+            "doas apt update",
+            "doas -u root apt install -y htop",
+        ] {
+            assert!(validate_shell_command(cmd).is_ok(), "blocked: {cmd}");
+        }
+    }
+
+    #[test]
+    fn validate_shell_command_refuses_sudo_with_unallowlisted_tools() {
+        assert!(validate_shell_command("sudo rm -rf /").is_err());
+        assert!(validate_shell_command("sudo -u root rm -f /etc/hosts").is_err());
+        assert!(validate_shell_command("sudo evil-binary --flag").is_err());
+        assert!(validate_shell_command("doas rm -rf /").is_err());
     }
 }

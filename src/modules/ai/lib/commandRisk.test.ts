@@ -36,6 +36,13 @@ describe("inspection commands", () => {
       "docker logs myapp",
       "systemctl status nginx",
       "kubectl get pods",
+      "apt list --installed",
+      "apt-cache search sqlmap",
+      "brew search python",
+      "brew info ripgrep",
+      "dpkg -l",
+      "pacman -Ss nmap",
+      "pip list",
     ]) {
       expect(isReadOnlyCommand(c)).toBe(true);
     }
@@ -62,6 +69,10 @@ describe("commands that change something", () => {
       "mv a b",
       "chmod 777 /etc",
       "npm install",
+      "brew install ripgrep",
+      "apt-get install nginx",
+      "pacman -Syu",
+      "pip install requests",
       "git push",
       "git commit -m x",
     ]) {
@@ -103,8 +114,10 @@ describe("commands that change something", () => {
   it("allows sudo inspection when allowSudo option is enabled", () => {
     expect(isReadOnlyCommand("sudo ls -la", { allowSudo: true })).toBe(true);
     expect(isReadOnlyCommand("sudo -u root cat /etc/shadow", { allowSudo: true })).toBe(true);
+    expect(isReadOnlyCommand("sudo apt list --installed", { allowSudo: true })).toBe(true);
     expect(isReadOnlyCommand("sudo rm -rf /", { allowSudo: true })).toBe(false);
     expect(isReadOnlyCommand("sudo systemctl restart nginx", { allowSudo: true })).toBe(false);
+    expect(isReadOnlyCommand("sudo apt install nginx", { allowSudo: true })).toBe(false);
   });
 
   // Fail-closed is the whole design: being wrong in the permissive direction
