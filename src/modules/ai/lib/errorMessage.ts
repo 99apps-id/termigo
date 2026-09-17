@@ -100,6 +100,26 @@ export function humanizeModelError(raw: string | null | undefined): string {
     return "The model stopped responding before producing anything. Press Continue to retry, or switch models.";
   }
 
+  // Raw HTML error responses from proxies, misconfigured URLs, or 404s.
+  if (
+    /^\s*<!doctype\s+html/i.test(msg) ||
+    /^\s*<html/i.test(msg) ||
+    (l.includes("<html") && l.includes("</html>"))
+  ) {
+    return "The provider returned an HTML web page instead of an API response (e.g. 404 Not Found or proxy error). Check the endpoint URL and model configuration in Settings.";
+  }
+
+  // Missing or unavailable endpoint / model (HTTP 404 / 410).
+  if (
+    l.includes("status 404") ||
+    l.includes("404 not found") ||
+    l.includes("status 410") ||
+    l.includes("model is unavailable") ||
+    l.includes("endpoint not found")
+  ) {
+    return "The selected model or endpoint was not found (404/410) or is unavailable. Check the endpoint URL and model configuration in Settings.";
+  }
+
   // Retry wrappers: "Failed after 3 attempts. Last error: ..."
   const retryMatch = msg.match(
     /^(?:[A-Za-z0-9_]+Error:\s*)?Failed after \d+ attempts\. Last error:\s*(.*)$/i,

@@ -83,6 +83,21 @@ describe("humanizeModelError", () => {
     expect(out.toLowerCase()).toContain("rate-limit");
   });
 
+  it("sanitizes raw HTML error responses from proxies", () => {
+    const html = "<!DOCTYPE html><html lang=\"en\"><head><title>404 Not Found</title></head><body>Error</body></html>";
+    const out = humanizeModelError(html);
+    expect(out.toLowerCase()).toContain("html web page");
+    expect(out.toLowerCase()).not.toContain("<!doctype");
+  });
+
+  it("explains unavailable or missing models (404/410)", () => {
+    const out404 = humanizeModelError("The provider returned status 404");
+    expect(out404.toLowerCase()).toContain("not found");
+
+    const out410 = humanizeModelError("Request failed with status 410");
+    expect(out410.toLowerCase()).toContain("not found");
+  });
+
   it("never returns empty", () => {
     expect(humanizeModelError("").length).toBeGreaterThan(0);
     expect(humanizeModelError(null).length).toBeGreaterThan(0);
