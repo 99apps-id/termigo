@@ -42,6 +42,7 @@ import { buildSelfImprovementTools } from "./selfImprovement";
 import { buildShellTools } from "./shell";
 import { buildSkillTools } from "./skills";
 import { buildSqlTools } from "./sql";
+import { buildSshTools } from "./ssh";
 import { buildSubagentTools } from "./subagent";
 import { buildSystemTools } from "./system";
 import { buildTelegramTools } from "./telegram";
@@ -243,6 +244,7 @@ export function buildTools(
     ...buildSelfImprovementTools(),
     ...buildShellTools(ctx),
     ...buildReplTools(ctx),
+    ...buildSshTools(ctx),
     ...buildSubagentTools(ctx, subagentDepth),
     ...buildTerminalTools(ctx),
     ...buildThinkTools(),

@@ -1116,6 +1116,7 @@ export default function App() {
     openPreviewTab,
     openCanvasTab,
     newAgentTab,
+    newSshTab,
     terminalRefs,
   });
 

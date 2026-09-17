@@ -241,6 +241,56 @@ export const KNOWN_TOOL_ALIASES: Record<
     }),
   },
 
+  // SSH aliases
+  ssh: {
+    canonical: "ssh_run_command",
+    adaptArgs: (a) => ({
+      command: a.command ?? a.cmd ?? a.CommandLine ?? "",
+      session_id: a.session_id ?? a.sessionId,
+      connection_id: a.connection_id ?? a.connectionId,
+    }),
+  },
+  ssh_run: {
+    canonical: "ssh_run_command",
+    adaptArgs: (a) => ({
+      command: a.command ?? a.cmd ?? "",
+      session_id: a.session_id ?? a.sessionId,
+      connection_id: a.connection_id ?? a.connectionId,
+    }),
+  },
+  ssh_exec: {
+    canonical: "ssh_run_command",
+    adaptArgs: (a) => ({
+      command: a.command ?? a.cmd ?? "",
+      session_id: a.session_id ?? a.sessionId,
+      connection_id: a.connection_id ?? a.connectionId,
+    }),
+  },
+  ssh_command: {
+    canonical: "ssh_run_command",
+    adaptArgs: (a) => ({
+      command: a.command ?? a.cmd ?? "",
+      session_id: a.session_id ?? a.sessionId,
+      connection_id: a.connection_id ?? a.connectionId,
+    }),
+  },
+  remote_exec: {
+    canonical: "ssh_run_command",
+    adaptArgs: (a) => ({
+      command: a.command ?? a.cmd ?? "",
+      session_id: a.session_id ?? a.sessionId,
+      connection_id: a.connection_id ?? a.connectionId,
+    }),
+  },
+  ssh_list: {
+    canonical: "ssh_list_connections",
+    adaptArgs: (a) => ({ filter: a.filter ?? a.query }),
+  },
+  list_ssh: {
+    canonical: "ssh_list_connections",
+    adaptArgs: (a) => ({ filter: a.filter ?? a.query }),
+  },
+
   // Directory listing aliases
   list_dir: {
     canonical: "list_directory",

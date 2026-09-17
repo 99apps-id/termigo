@@ -76,6 +76,8 @@ export type ToolContext = {
     prompt: string,
     agent?: string,
   ) => { tabId: number; leafId: number } | null;
+  /** Open an SSH terminal tab connected to a saved SSH connection. */
+  openSshTab?: (connectionId: string, title?: string) => number | null;
   /** Read the terminal scrollback tail of a managed agent's leaf. */
   readAgentOutput: (leafId: number) => string | null;
   readCache: Map<string, { size: number; hash: number }>;

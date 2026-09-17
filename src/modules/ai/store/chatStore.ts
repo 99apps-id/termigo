@@ -116,6 +116,7 @@ export type Live = {
     sessionId: string,
     agent?: string,
   ) => { tabId: number; leafId: number } | null;
+  openSshTab?: (connectionId: string, title?: string) => number | null;
   readLeafBuffer: (leafId: number) => string | null;
 };
 
@@ -319,6 +320,7 @@ const NOOP_LIVE: Live = {
   browserClose: async () => ({ error: "browser bridge unavailable" }),
   browserList: async () => [],
   spawnManagedAgent: () => null,
+  openSshTab: () => null,
   readLeafBuffer: () => null,
 };
 

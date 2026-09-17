@@ -16,7 +16,7 @@ import type { ToolContext } from "./context";
  * authorized scope is refused, and denial-of-service tooling is refused
  * outright. Ordinary commands pass untouched.
  */
-function screenCommand(
+export function screenCommand(
   command: string,
 ): { ok: true } | { ok: false; reason: string } {
   const safety = checkShellCommand(command);

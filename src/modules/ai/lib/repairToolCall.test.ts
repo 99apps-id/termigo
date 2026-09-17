@@ -455,4 +455,39 @@ describe("repairToolCall", () => {
     expect(parsed.action).toBe("run");
     expect(parsed.command).toBe("ls -la");
   });
+
+  it("maps ssh alias tools to ssh_run_command and ssh_list_connections", async () => {
+    const tools = { ssh_run_command: {}, ssh_list_connections: {} };
+    const resultRun = await repairToolCall({
+      tools,
+      toolCall: {
+        toolCallId: "ssh-1",
+        toolName: "ssh_exec",
+        input: JSON.stringify({
+          cmd: "docker ps",
+          sessionId: 5,
+        }),
+      },
+    });
+    expect(resultRun).not.toBeNull();
+    expect(resultRun!.toolName).toBe("ssh_run_command");
+    const parsedRun = JSON.parse(resultRun!.input);
+    expect(parsedRun.command).toBe("docker ps");
+    expect(parsedRun.session_id).toBe(5);
+
+    const resultList = await repairToolCall({
+      tools,
+      toolCall: {
+        toolCallId: "ssh-2",
+        toolName: "list_ssh",
+        input: JSON.stringify({
+          query: "vps",
+        }),
+      },
+    });
+    expect(resultList).not.toBeNull();
+    expect(resultList!.toolName).toBe("ssh_list_connections");
+    const parsedList = JSON.parse(resultList!.input);
+    expect(parsedList.filter).toBe("vps");
+  });
 });

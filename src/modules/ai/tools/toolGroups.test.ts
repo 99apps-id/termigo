@@ -320,7 +320,7 @@ describe("tool payload measurement", () => {
     // Measured at ~79 KB when this guard was written. The ceiling is the point
     // of the test: a feature that adds schemas has to either fit or raise it
     // deliberately, in a diff a reviewer sees.
-    expect(kb).toBeLessThan(95);
+    expect(kb).toBeLessThan(105);
     // And it must be exact: an unmeasured schema would silently under-report.
     expect(payload.unmeasured).toBe(0);
   });

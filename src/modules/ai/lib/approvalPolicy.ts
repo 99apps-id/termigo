@@ -73,6 +73,8 @@ const EXEC_TOOLS = new Set([
   "run_sql",
   "pty_session",
   "pty_send_input",
+  "ssh_connect",
+  "ssh_run_command",
 ]);
 
 export type ApprovalMode =
@@ -116,7 +118,11 @@ export const APPROVAL_MODE_HINTS: Record<ApprovalMode, string> = {
  * server - so this is the one place a mode is not allowed to speak for the
  * user.
  */
-const REMOTE_COMMAND_TOOLS = new Set(["bash_run", "bash_background"]);
+const REMOTE_COMMAND_TOOLS = new Set([
+  "bash_run",
+  "bash_background",
+  "ssh_run_command",
+]);
 
 export type ApprovalContext = {
   /** The call would run against the host of an open SSH session. */

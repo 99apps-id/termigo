@@ -62,6 +62,8 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
     "free", "df", "du", "ufw", "iptables",
     "useradd", "usermod", "userdel", "groupadd", "groupmod", "groupdel",
     "apt-key", "gpg", "update-alternatives", "su",
+    // SSH & remote transfer utilities
+    "ssh", "scp", "sftp", "rsync",
     //
     // Project toolchains. An agent that cannot run the project's own checks
     // cannot verify its work, and these are the binaries a repository's scripts
@@ -1143,5 +1145,21 @@ mod tests_sandbox {
         assert!(validate_shell_command("wsl -d Kali definitely-not-a-tool").is_err());
         assert!(validate_shell_command("wsl sudo definitely-not-a-tool").is_err());
         assert!(validate_shell_command("wsl -e definitely-not-a-tool").is_err());
+    }
+
+    #[test]
+    fn validate_shell_command_allows_ssh_and_remote_transfer() {
+        for cmd in [
+            "ssh user@vps-server uptime",
+            "ssh -p 2222 root@192.168.1.100 uname -a",
+            "ssh -i /path/to/key.pem ubuntu@ec2-host df -h",
+            "scp local.txt user@vps:/tmp/local.txt",
+            "sftp user@vps",
+            "rsync -avz ./dist user@vps:/var/www/html",
+            "wsl ssh user@vps uptime",
+            "sudo ssh user@vps",
+        ] {
+            assert!(validate_shell_command(cmd).is_ok(), "blocked: {cmd}");
+        }
     }
 }

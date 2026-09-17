@@ -409,6 +409,8 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     browserList: () => useChatStore.getState().live.browserList(),
     spawnAgent: (prompt, agent) =>
       useChatStore.getState().live.spawnManagedAgent(prompt, sessionId, agent),
+    openSshTab: (connectionId, title) =>
+      useChatStore.getState().live.openSshTab?.(connectionId, title) ?? null,
     readAgentOutput: (leafId) =>
       useChatStore.getState().live.readLeafBuffer(leafId),
     readCache,

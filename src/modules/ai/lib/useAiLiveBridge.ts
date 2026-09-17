@@ -13,6 +13,7 @@ import {
 } from "@/modules/terminal";
 import { invoke } from "@tauri-apps/api/core";
 import { type RefObject, useEffect, useRef } from "react";
+import { useSshActiveSessionStore } from "@/modules/ssh/sshActiveSession";
 import {
   browserBack,
   browserClose,
@@ -90,6 +91,7 @@ type Params = {
     cwd: string | undefined,
     title: string,
   ) => { tabId: number; leafId: number };
+  newSshTab?: (connectionId: string, title: string) => number;
   terminalRefs: RefObject<Map<number, TerminalPaneHandle>>;
 };
 
@@ -99,7 +101,7 @@ type Params = {
  * act on the foreground state.
  *
  * The live object's getters read the latest state through a ref, so the bridge
- * is published once instead of re-running on every tab/cwd change — cwd updates
+ * is published once instead of re-running on every tab/cwd change -- cwd updates
  * arrive from terminal OSC on shell output and would otherwise churn constantly.
  */
 export function useAiLiveBridge(params: Params) {
@@ -133,20 +135,41 @@ export function useAiLiveBridge(params: Params) {
 
     setLive({
       getCwd: findCwd,
+      openSshTab: (connectionId: string, title?: string) => {
+        if (!ref.current.newSshTab) return null;
+        return ref.current.newSshTab(connectionId, title ?? "SSH");
+      },
       getRemoteSession: () => {
         const { activeId, tabs } = ref.current;
         const t = tabs.find((x) => x.id === activeId);
-        if (t?.kind !== "terminal") return null;
-        const leafId = t.activeLeafId;
-        // Only the active SSH leaf counts: a remote read against a stale
-        // session (e.g. a second SSH tab that connected earlier) would hit
-        // the wrong host. The leaf carries its own session id, so this is
-        // exact even with several SSH tabs open.
-        if (!isSshLeaf(t.paneTree, leafId)) return null;
-        const sessionId = leafSessionId(leafId);
-        if (sessionId === null) return null;
-        const cwd = findLeafRemoteCwd(t.paneTree, leafId) ?? null;
-        return { sessionId, cwd };
+        if (t?.kind === "terminal") {
+          const leafId = t.activeLeafId;
+          if (isSshLeaf(t.paneTree, leafId)) {
+            const sessionId = leafSessionId(leafId);
+            if (sessionId !== null) {
+              const cwd = findLeafRemoteCwd(t.paneTree, leafId) ?? null;
+              return { sessionId, cwd };
+            }
+          }
+        }
+        // Fallback: If foreground tab is not an SSH leaf, check open tabs
+        for (let i = tabs.length - 1; i >= 0; i--) {
+          const tab = tabs[i];
+          if (tab.kind !== "terminal") continue;
+          if (isSshLeaf(tab.paneTree, tab.activeLeafId)) {
+            const sid = leafSessionId(tab.activeLeafId);
+            if (sid !== null) {
+              const cwd = findLeafRemoteCwd(tab.paneTree, tab.activeLeafId) ?? null;
+              return { sessionId: sid, cwd };
+            }
+          }
+        }
+        // Fallback: Check active SSH session store
+        const activeSsh = useSshActiveSessionStore.getState().session;
+        if (activeSsh) {
+          return { sessionId: activeSsh.sessionId, cwd: null };
+        }
+        return null;
       },
       getTerminalContext: () => {
         const { activeId, tabs } = ref.current;

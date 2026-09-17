@@ -200,6 +200,18 @@ export const TOOL_GROUPS: readonly ToolGroup[] = [
       "Drive interactive command-line debuggers (pdb, gdb, dlv, node inspect) through a persistent stdio session.",
     tools: ["repl_start", "repl_send", "repl_stop", "repl_list"],
   },
+  {
+    id: "ssh",
+    label: "Remote SSH & VPS management",
+    description:
+      "Connect to remote servers, list saved SSH connections, and execute remote commands via SSH.",
+    tools: [
+      "ssh_list_connections",
+      "ssh_connect",
+      "ssh_run_command",
+      "ssh_active_session",
+    ],
+  },
 ];
 
 /** Every tool name that appears in some group. */
