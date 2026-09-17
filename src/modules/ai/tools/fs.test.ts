@@ -228,6 +228,43 @@ describe("sliceLines and read_file windowing", () => {
     expect(res.content).toBe("remote:/home/user/project/config.json");
     expect(native.readFile).not.toHaveBeenCalled();
   });
+
+  it("returns unchanged hint on duplicate read and re-reads when force: true", async () => {
+    const ctx = makeCtx();
+    const tools = buildFsTools(ctx);
+    vi.mocked(native.readFile).mockResolvedValue({
+      kind: "text",
+      content: "const hello = 'world';",
+      size: 22,
+    });
+
+    const exec = tools.read_file.execute as (
+      args: unknown,
+      opts: unknown,
+    ) => Promise<{ content?: string; unchanged?: boolean; hint?: string }>;
+
+    const first = await exec(
+      { path: "app.ts" },
+      { toolCallId: "r1", messages: [] },
+    );
+    expect(first.content).toBe("const hello = 'world';");
+    expect(first.unchanged).toBeUndefined();
+
+    const second = await exec(
+      { path: "app.ts" },
+      { toolCallId: "r2", messages: [] },
+    );
+    expect(second.unchanged).toBe(true);
+    expect(second.content).toBeUndefined();
+    expect(second.hint).toContain("force: true");
+
+    const forced = await exec(
+      { path: "app.ts", force: true },
+      { toolCallId: "r3", messages: [] },
+    );
+    expect(forced.content).toBe("const hello = 'world';");
+    expect(forced.unchanged).toBeUndefined();
+  });
 });
 
 

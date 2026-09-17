@@ -44,6 +44,9 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
     // Pentest & network recon tooling supported by Termigo
     "nmap", "masscan", "rustscan", "nikto", "nuclei", "httpx", "wpscan",
     "sqlmap", "ffuf", "gobuster", "dirsearch", "subfinder",
+    "dig", "host", "nslookup", "ping", "traceroute", "tracepath", "mtr",
+    "dnsx", "cmseek", "arjun",
+    "tshark", "responder", "bettercap", "ettercap", "enum4linux", "smbclient",
     // Privilege elevation & package management (Linux/WSL, macOS, Windows)
     "sudo", "doas",
     // Linux / WSL package managers (Debian/Ubuntu/Kali, Arch, RedHat/Fedora, Alpine, openSUSE)
@@ -52,9 +55,23 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
     // macOS package management
     "brew", "port", "mas", "softwareupdate", "pkgutil", "installer",
     // Python packaging & tool runners
-    "pip", "pip3", "pipx", "uv",
+    "pip", "pip3", "pipx", "uv", "pipenv", "poetry", "conda", "pdm", "flit", "tox", "nox",
+    // Node package runners & companion tools
+    "npx", "bunx", "yarnpkg", "corepack",
+    // Containers & virtualization
+    "docker", "docker-compose", "podman",
     // Windows shell & package managers (parity with TERMIGO.md / security-model.md)
     "cmd", "powershell", "pwsh", "set", "wsl", "wslpath", "winget", "choco", "scoop",
+    // Windows PowerShell cmdlets & shell utilities
+    "Get-ChildItem", "Get-Content", "Get-Item", "Get-ItemProperty", "Get-Location", "Set-Location",
+    "Test-Path", "Select-Object", "Select-String", "Where-Object", "ForEach-Object",
+    "Measure-Object", "Sort-Object", "Group-Object", "Out-String", "Out-Null", "Out-File",
+    "Write-Output", "Write-Host", "Remove-Item", "New-Item", "Copy-Item", "Move-Item", "Clear-Content",
+    "Set-Content", "Add-Content", "Start-Process", "Stop-Process", "Get-Process",
+    "Get-Command", "Resolve-Path", "Split-Path", "Join-Path", "Expand-Archive", "Compress-Archive",
+    "Invoke-WebRequest", "Invoke-RestMethod",
+    "dir", "del", "cls", "ver", "copy", "move", "ren", "rename", "md", "rd", "tree",
+    "findstr", "tasklist", "taskkill", "wmic", "fc", "attrib", "systeminfo", "net", "route", "arp",
     // Linux/WSL and Unix system administration & root utilities (user-approved)
     "systemctl", "service", "journalctl", "dmesg",
     "chown", "chmod", "mkdir", "rm", "rmdir", "cp", "mv", "touch", "ln", "tee",
@@ -62,34 +79,29 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
     "free", "df", "du", "ufw", "iptables",
     "useradd", "usermod", "userdel", "groupadd", "groupmod", "groupdel",
     "apt-key", "gpg", "update-alternatives", "su",
+    "xargs", "env", "printenv", "basename", "dirname", "realpath", "readlink",
+    "cut", "sort", "uniq", "tr", "fold", "paste", "split", "nl",
     // SSH & remote transfer utilities
     "ssh", "scp", "sftp", "rsync",
-    //
-    // Project toolchains. An agent that cannot run the project's own checks
-    // cannot verify its work, and these are the binaries a repository's scripts
-    // invoke. `pnpm lint` worked (the base command is `pnpm`) while `biome`,
-    // `tsc` and `vitest` did not, so the moment a caller wanted one file
-    // (`biome lint src/x.ts`, `vitest run src/x.test.ts`) or a raw flag it hit
-    // "not in the agent allowlist" and had to route through a PTY for a
-    // read-only check.
-    //
-    // This does not widen the trust boundary: `node`, `python`, `bun`, `deno`
-    // and `pnpm` are already allowed, and each of them can execute arbitrary
-    // code. A linter, a type checker and a test runner are strictly less
-    // powerful than the interpreters beside them, so the boundary is unchanged
-    // while the friction is gone.
-    //
-    // JS/TS (`biome`, `tsc`, `vitest`, `knip`, `vite` are this repo's own)
+    // JS/TS project toolchains & web frameworks
     "biome", "tsc", "vitest", "knip", "vite", "eslint", "prettier",
     "jest", "mocha", "playwright", "size-limit",
-    // Python
+    "prisma", "tsx", "ts-node", "next", "turbo", "tailwindcss", "postcss",
+    "webpack", "rollup", "esbuild", "svelte-check", "astro", "remix", "nuxt",
+    "drizzle-kit", "typeorm", "knex", "sass", "less", "oxlint", "cypress",
+    "rimraf", "cross-env", "concurrently", "nodemon", "pm2", "serve", "http-server", "live-server",
+    "terser", "swc", "babel",
+    // Databases & query engines
+    "sqlite3", "duckdb", "psql", "mysql", "mongosh", "redis-cli",
+    // Python toolchains
     "ruff", "black", "mypy", "pytest", "flake8", "isort",
-    // Go / Rust helpers whose base command is not `go`/`cargo`
-    "golangci-lint", "rustfmt", "clippy-driver",
+    // Go / Rust helpers and compilers
+    "rustc", "rustup", "cargo-nextest", "cargo-clippy", "cargo-machete",
+    "golangci-lint", "rustfmt", "clippy-driver", "gofmt", "govulncheck", "dlv",
 ];
 
 /// Characters that enable command injection in a shell one-liner.
-const SHELL_METACHARACTERS: &[char] = &[';', '$', '(', ')', '<', '>', '`'];
+const SHELL_METACHARACTERS: &[char] = &['$', '(', ')', '<', '>', '`'];
 
 /// Check whether a token is an environment variable assignment like `FOO=bar` or
 /// `DEBIAN_FRONTEND=noninteractive`.
@@ -228,6 +240,59 @@ fn extract_effective_program(segment: &str) -> &str {
     }
 }
 
+/// Check if the slice at `chars[i..]` matches a safe stdout/stderr discard redirection.
+/// Matches: `> /dev/null`, `>/dev/null`, `> nul`, `>nul`, `2> /dev/null`, `2>/dev/null`,
+/// `2> nul`, `2>nul`, `1> /dev/null`, `1>/dev/null`, `1> nul`, `1>nul`, `&> /dev/null`,
+/// `&>/dev/null`, `&> nul`, `&>nul` (case-insensitive for `nul`).
+/// Returns the number of characters consumed if matched.
+fn match_discard_redirection(chars: &[char], i: usize) -> Option<usize> {
+    let rem = &chars[i..];
+    // Check optional prefix: '1', '2', or '&'
+    let (has_prefix, after_prefix) = match rem.first() {
+        Some(&p) if p == '1' || p == '2' || p == '&' => (true, &rem[1..]),
+        _ => (false, rem),
+    };
+
+    if after_prefix.first() != Some(&'>') {
+        return None;
+    }
+
+    let mut idx = if has_prefix { 2 } else { 1 };
+    // Skip whitespace after '>'
+    while idx < rem.len() && (rem[idx] == ' ' || rem[idx] == '\t') {
+        idx += 1;
+    }
+
+    // Check target: "/dev/null" or "nul" (case-insensitive)
+    let target_chars = &rem[idx..];
+    if target_chars.len() >= 9 {
+        let candidate: String = target_chars[..9].iter().collect();
+        if candidate == "/dev/null" {
+            let next = target_chars.get(9);
+            if next.is_none()
+                || next.unwrap().is_whitespace()
+                || matches!(next.unwrap(), ';' | '&' | '|' | '\n' | '\r')
+            {
+                return Some(idx + 9);
+            }
+        }
+    }
+    if target_chars.len() >= 3 {
+        let candidate: String = target_chars[..3].iter().collect();
+        if candidate.eq_ignore_ascii_case("nul") {
+            let next = target_chars.get(3);
+            if next.is_none()
+                || next.unwrap().is_whitespace()
+                || matches!(next.unwrap(), ';' | '&' | '|' | '\n' | '\r')
+            {
+                return Some(idx + 3);
+            }
+        }
+    }
+
+    None
+}
+
 /// Validate a shell command for agent execution:
 /// - reject metacharacters that enable injection (`;$()<>``)
 /// - allow safe chaining operators `&&` and `||`
@@ -250,8 +315,8 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
     }
 
     // 2. Reject metacharacters outside quotes, and split the command into
-    //    `&&`/`||`-separated segments. `&&`/`||` are allowed as separators, but
-    //    every segment's program is checked in step 3 - so `git && rm -rf /` is
+    //    `&&`/`||`/`|`/`;`-separated segments. `&&`/`||`/`|`/`;` are allowed as separators,
+    //    but every segment's program is checked in step 3 - so `git && rm -rf /` is
     //    refused on `rm`, which was the hole when only the first token was read.
     let mut in_quote = false;
     let mut quote_char = '\0';
@@ -270,6 +335,29 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
             in_quote = false;
             quote_char = '\0';
         } else if !in_quote {
+            // Stderr redirection `2>&1` merges streams rather than writing files or chaining commands.
+            // Preserve it intact without adding `>` or `&` to the metacharacter reject list.
+            if c == '2'
+                && chars.get(i + 1) == Some(&'>')
+                && chars.get(i + 2) == Some(&'&')
+                && chars.get(i + 3) == Some(&'1')
+            {
+                current.push_str("2>&1");
+                prev = '1';
+                i += 4;
+                continue;
+            }
+            // Standard output/error discard redirections like `> /dev/null`, `>/dev/null`,
+            // `> nul`, `>nul`, `2> /dev/null`, `2>/dev/null`, `2> nul`, `2>nul`, `1> /dev/null`,
+            // `1> nul`, `&> /dev/null`, `&> nul`.
+            if let Some(len) = match_discard_redirection(&chars, i) {
+                for &ch in &chars[i..i + len] {
+                    current.push(ch);
+                }
+                prev = chars[i + len - 1];
+                i += len;
+                continue;
+            }
             let chained = (c == '&' && chars.get(i + 1) == Some(&'&'))
                 || (c == '|' && chars.get(i + 1) == Some(&'|'));
             if chained {
@@ -282,6 +370,15 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
                 continue;
             }
             if c == '|' {
+                if current.trim().is_empty() {
+                    return Err("command contains an empty or dangling segment".into());
+                }
+                segments.push(std::mem::take(&mut current));
+                prev = c;
+                i += 1;
+                continue;
+            }
+            if c == ';' {
                 if current.trim().is_empty() {
                     return Err("command contains an empty or dangling segment".into());
                 }
@@ -307,10 +404,11 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
             bad
         ));
     }
-    if current.trim().is_empty() {
+    if !current.trim().is_empty() {
+        segments.push(current);
+    } else if segments.is_empty() || (prev != ';' && prev != '\0') {
         return Err("command contains an empty or dangling segment".into());
     }
-    segments.push(current);
 
     // 3. Every segment must start with an allowlisted program (or an absolute /
     //    rooted path). Checking each segment - not just the first - is what
@@ -349,9 +447,15 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
             .or_else(|| program.strip_suffix(".bat"))
             .unwrap_or(program);
 
+        // For relative paths (e.g. `./node_modules/.bin/vitest` or `.\bin\npx`), extract the file name.
+        let file_name = std::path::Path::new(base_program)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(base_program);
+
         if SANDBOX_ALLOWLIST
             .iter()
-            .any(|allowed| base_program.eq_ignore_ascii_case(allowed))
+            .any(|allowed| base_program.eq_ignore_ascii_case(allowed) || file_name.eq_ignore_ascii_case(allowed))
         {
             continue;
         }
@@ -1162,4 +1266,103 @@ mod tests_sandbox {
             assert!(validate_shell_command(cmd).is_ok(), "blocked: {cmd}");
         }
     }
+
+    #[test]
+    fn validate_shell_command_allows_expanded_developer_and_system_tools() {
+        for cmd in [
+            "npx create-next-app@latest my-app",
+            "npx tsc --noEmit",
+            "npx tsx prisma/seed.ts",
+            "bunx prettier --check .",
+            "prisma generate",
+            "next build",
+            "docker ps",
+            "docker-compose up -d",
+            "podman images",
+            "rustc --version",
+            "rustup show",
+            "cargo-nextest run",
+            "cargo-clippy --all-targets",
+            "pipenv install",
+            "poetry run pytest",
+            "conda list",
+            "dig example.com",
+            "host example.com",
+            "nslookup example.com",
+            "ping -c 4 127.0.0.1",
+            "xargs -n 1 echo",
+            "tshark -r capture.pcap",
+        ] {
+            assert!(validate_shell_command(cmd).is_ok(), "blocked: {cmd}");
+        }
+    }
+
+    #[test]
+    fn validate_shell_command_allows_powershell_and_windows_tools() {
+        for cmd in [
+            "Get-ChildItem -Path ./src",
+            "Get-Content package.json",
+            "Get-Item C:\\project",
+            "Get-Location",
+            "Set-Location C:\\project",
+            "Test-Path ./package.json",
+            "Select-Object -First 10",
+            "Select-String -Pattern \"fn\" mod.rs",
+            "Remove-Item -Recurse ./dist",
+            "findstr /i \"hello\" test.txt",
+            "tasklist",
+        ] {
+            assert!(validate_shell_command(cmd).is_ok(), "blocked: {cmd}");
+        }
+    }
+
+    #[test]
+    fn validate_shell_command_allows_semicolons_and_stderr_redirect() {
+        assert!(validate_shell_command("cd dir; npx create-next-app").is_ok());
+        assert!(validate_shell_command(r#"cd C:\project\sampel; npx create-next-app@latest masjid-raya-pro 2>&1"#).is_ok());
+        assert!(validate_shell_command("git status; git branch;").is_ok());
+        assert!(validate_shell_command("npm test 2>&1").is_ok());
+        assert!(validate_shell_command("Get-Content file.txt; Select-String pattern").is_ok());
+        assert!(validate_shell_command("; git status").is_err());
+        assert!(validate_shell_command("git status; definitely-not-a-tool").is_err());
+    }
+
+    #[test]
+    fn validate_shell_command_allows_relative_path_tools() {
+        assert!(validate_shell_command("./node_modules/.bin/vitest run").is_ok());
+        assert!(validate_shell_command(r#".\node_modules\.bin\tsc.cmd --noEmit"#).is_ok());
+        assert!(validate_shell_command("./node_modules/.bin/prisma migrate").is_ok());
+        assert!(validate_shell_command("./bin/npx --version").is_ok());
+        assert!(validate_shell_command("./node_modules/.bin/definitely-not-allowed").is_err());
+    }
+
+    #[test]
+    fn validate_shell_command_allows_full_stack_tools_and_discard_redirects() {
+        for cmd in [
+            "sqlite3 database.db \".tables\"",
+            "duckdb -c \"SELECT 1\"",
+            "psql -U postgres -d mydb",
+            "drizzle-kit generate",
+            "nuxt build",
+            "cross-env NODE_ENV=production next build",
+            "rimraf dist",
+            "cypress run",
+            "tree src",
+            "Get-Command npx",
+            "Resolve-Path ./src",
+            "Start-Process node",
+        ] {
+            assert!(validate_shell_command(cmd).is_ok(), "blocked: {cmd}");
+        }
+
+        assert!(validate_shell_command("npm run build > /dev/null 2>&1").is_ok());
+        assert!(validate_shell_command("cargo check > /dev/null").is_ok());
+        assert!(validate_shell_command("npm test > nul 2>&1").is_ok());
+        assert!(validate_shell_command("npm test 2>nul").is_ok());
+        assert!(validate_shell_command("npm test 2> /dev/null").is_ok());
+        assert!(validate_shell_command("npm test 1> nul").is_ok());
+        assert!(validate_shell_command("npm test &> /dev/null").is_ok());
+        assert!(validate_shell_command("npm test > arbitrary_file.txt").is_err());
+    }
 }
+

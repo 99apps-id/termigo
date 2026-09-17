@@ -208,6 +208,8 @@ async function applyEdits(
         i = found + targetOld.length;
       }
       if (n === 0) {
+        const cacheEntry = readCache.get(io.cacheKey(abs));
+        if (cacheEntry) cacheEntry.hash = -1;
         return {
           error: diagnoseMismatch(content, e.old_string),
           path: abs,
@@ -218,6 +220,8 @@ async function applyEdits(
     } else {
       const first = content.indexOf(targetOld);
       if (first === -1) {
+        const cacheEntry = readCache.get(io.cacheKey(abs));
+        if (cacheEntry) cacheEntry.hash = -1;
         return {
           error: diagnoseMismatch(content, e.old_string),
           path: abs,

@@ -114,6 +114,7 @@ async function readRemoteFile(
   offset: number | undefined,
   limit: number | undefined,
   readCache: Map<string, { size: number; hash: number }>,
+  force?: boolean,
 ) {
   const safety = checkReadable(remotePath);
   if (!safety.ok) return { error: safety.reason, path: remotePath };
@@ -124,8 +125,13 @@ async function readRemoteFile(
     const isFullRead = offset === undefined && limit === undefined;
     const key = fileCacheKey(remotePath, remote.sessionId);
     const prior = readCache.get(key);
-    if (isFullRead && prior && prior.size === size && prior.hash === hash) {
-      return { path: remotePath, unchanged: true, size };
+    if (!force && isFullRead && prior && prior.size === size && prior.hash === hash) {
+      return {
+        path: remotePath,
+        unchanged: true,
+        size,
+        hint: "File content unchanged from prior read. Pass force: true or offset: 0 to re-read full content.",
+      };
     }
     readCache.set(key, { size, hash });
     const sliced = sliceLines(content, offset, limit);
@@ -225,8 +231,14 @@ export function buildFsTools(ctx: ToolContext) {
           .max(10000)
           .optional()
           .describe("Max lines to return. Default 2000."),
+        force: z
+          .boolean()
+          .optional()
+          .describe(
+            "Set true to force re-reading the full content even if unchanged since last read.",
+          ),
       }),
-      execute: async ({ path, offset, limit }) => {
+      execute: async ({ path, offset, limit, force }) => {
         const target = routePath(ctx.getRemoteSession(), path, (p) =>
           resolvePath(p, ctx.getCwd()),
         );
@@ -241,6 +253,7 @@ export function buildFsTools(ctx: ToolContext) {
             offset,
             limit,
             ctx.readCache,
+            force,
           );
         }
         const reqPath = target.path;
@@ -292,12 +305,18 @@ export function buildFsTools(ctx: ToolContext) {
           const isFullRead = offset === undefined && limit === undefined;
           const prior = ctx.readCache.get(abs);
           if (
+            !force &&
             isFullRead &&
             prior &&
             prior.size === r.size &&
             prior.hash === hash
           ) {
-            return { path: abs, unchanged: true, size: r.size };
+            return {
+              path: abs,
+              unchanged: true,
+              size: r.size,
+              hint: "File content unchanged from prior read. Pass force: true or offset: 0 to re-read full content.",
+            };
           }
           ctx.readCache.set(abs, { size: r.size, hash });
 

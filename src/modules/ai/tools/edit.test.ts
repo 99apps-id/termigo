@@ -303,6 +303,25 @@ describe("edit path normalisation", () => {
       "line 1 modified\r\nline 2 modified\r\nline 3",
     );
   });
+
+  it("resets cache entry hash on mismatch to ensure grounding read returns fresh content", async () => {
+    setFile("const a = 1;");
+    const readCache = new Map([[FILE, { size: 12, hash: 9999 }]]);
+    const ctx = makeContext(readCache);
+    const tools = buildEditTools(ctx);
+
+    const exec = tools.edit.execute as (
+      args: unknown,
+      opts: unknown,
+    ) => Promise<{ error?: string }>;
+
+    const result = await exec(
+      { path: FILE, old_string: "not found", new_string: "bar" },
+      toolOptions,
+    );
+    expect(result.error).toBeDefined();
+    expect(readCache.get(FILE)?.hash).toBe(-1);
+  });
 });
 
 describe("diagnoseMismatch grounding hints", () => {
