@@ -107,5 +107,4 @@ Per-platform window styling, the capability allowlist and bundle / updater confi
 
 ## Further reading
 
-Contributor guides live under `docs/`. If anything conflicts, `TERMIGO.md` wins.
-`docs/README.md` indexes them: `docs/architecture/` (module-layout, two-process-model, pty-shell-integration, ai-subsystem, security-model, platform-and-bundle, terminal-renderer-pool, cli-control, agent-failure-recovery) and `docs/contributing/` (testing).
+Contributor guides live in `docs/` (`README.md` indexes `docs/architecture/` and `docs/contributing/`). If anything conflicts, `TERMIGO.md` wins.

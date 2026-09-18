@@ -57,7 +57,11 @@ export type AgentSpec = {
 
 /** Whether spawn tools should be withheld at a nesting depth. */
 export function spawnToolsWithheld(depth: number, maxDepth: number): boolean {
-  return depth >= maxDepth;
+  // The main agent passes no depth (undefined) and must always keep the spawn
+  // tools. `undefined >= n` happens to be false, but that is JS coercion doing
+  // the work: rewriting this as a negated comparison would silently withhold
+  // subagents from the main agent. Make the intent explicit.
+  return typeof depth === "number" && depth >= maxDepth;
 }
 
 /** Tools withheld from specific subagent specializations (Hermes capability-gated toolsets). */
