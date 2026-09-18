@@ -3,9 +3,15 @@
 // host can toggle sub-agent tools consistently.
 export const SUBAGENT_TOOL_NAMES = ["run_subagent", "run_subagents"] as const;
 
-/** True when sub-agent tools are not disabled for this turn. */
+/**
+ * True when sub-agent tools are not disabled for this turn.
+ *
+ * Mirrors `withSubagentsDisabled`, which off-lists BOTH spawn tool names: asking
+ * only about the plural left the singular still advertised when a caller disabled
+ * the pair by its singular name.
+ */
 export function subagentsAvailable(disabled: ReadonlySet<string>): boolean {
-  return !disabled.has("run_subagents");
+  return SUBAGENT_TOOL_NAMES.every((name) => !disabled.has(name));
 }
 
 /** The off-list that switching sub-agents off implies (order-stable). */
