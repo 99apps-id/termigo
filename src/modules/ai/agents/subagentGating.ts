@@ -187,7 +187,7 @@ export function gate<T extends AnyTool>(
         breaker.trip();
         return {
           error:
-            "denied by the user three times in a row. This sub-agent is stopping; report the write as not done.",
+            `denied by the user ${MAX_CONSECUTIVE_DENIALS} times in a row. This sub-agent is stopping; report the write as not done.`,
         };
       }
       return {
@@ -196,6 +196,31 @@ export function gate<T extends AnyTool>(
       };
     },
   };
+}
+
+/**
+ * Normalizes file paths so that different representations (e.g. `./src/a.ts`
+ * vs `src\\a.ts`) map to the same key.
+ */
+export function normalizeTargetKey(path: string): string {
+  let norm = path.trim().replace(/\\/g, "/");
+  const isUnc = norm.startsWith("//");
+  norm = norm.replace(/\/+/g, "/");
+  if (isUnc && !norm.startsWith("//")) {
+    norm = `/${norm}`;
+  }
+  norm = norm.replace(/^[a-zA-Z]:/, (m) => m.toLowerCase());
+  norm = norm.replace(/^(\.\/)+/, "");
+  while (norm.includes("/./")) {
+    norm = norm.replace(/\/\.\//g, "/");
+  }
+  if (!norm) {
+    return ".";
+  }
+  if (norm.length > 1 && norm.endsWith("/") && !/^[a-zA-Z]:\/$/.test(norm)) {
+    norm = norm.slice(0, -1);
+  }
+  return norm;
 }
 
 function isReportDocument(path: string): boolean {
@@ -250,10 +275,11 @@ export function newFilesOnly<T extends AnyTool>(tool: T): T {
 
       if (typeof rawPath === "string" && rawPath.trim()) {
         const path = rawPath.trim();
+        const targetKey = normalizeTargetKey(path);
         const canOverwrite =
           typed.overwrite === true ||
-          isReportDocument(path) ||
-          selfCreated.has(path);
+          isReportDocument(targetKey) ||
+          selfCreated.has(targetKey);
 
         if (!canOverwrite) {
           const existing = await native.readFile(path).catch(() => null);
@@ -263,7 +289,7 @@ export function newFilesOnly<T extends AnyTool>(tool: T): T {
             };
           }
         }
-        selfCreated.add(path);
+        selfCreated.add(targetKey);
       }
       return inner(input, opts);
     },

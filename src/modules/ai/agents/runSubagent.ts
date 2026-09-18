@@ -36,6 +36,7 @@ import {
   type AnyTool,
   type DenialBreaker,
   gate,
+  MAX_CONSECUTIVE_DENIALS,
   newFilesOnly,
   subagentToolNeedsGate,
   WRITE_FILE,
@@ -478,7 +479,7 @@ export async function runSubagent({
       clearTimers();
       return {
         summary: breaker.tripped
-          ? "Stopped: the user denied the same write three times in a row. Nothing was written; report the change as not done."
+          ? `Stopped: the user denied the same write ${MAX_CONSECUTIVE_DENIALS} times in a row. Nothing was written; report the change as not done.`
           : timedOut
             ? "Stopped: the sub-agent model did not respond within 90s."
             : "Stopped: the run was aborted.",

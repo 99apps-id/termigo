@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { native } from "../lib/native";
 import {
   gate,
+  MAX_CONSECUTIVE_DENIALS,
   newFilesOnly,
+  normalizeTargetKey,
   subagentToolNeedsGate,
   type DenialBreaker,
 } from "./subagentGating";
@@ -68,6 +70,7 @@ vi.mock("../store/planStore", () => ({
 describe("newFilesOnly", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(native.readFile).mockReset();
   });
 
   it("blocks writing when file already exists", async () => {
@@ -138,7 +141,7 @@ describe("newFilesOnly", () => {
     );
 
     // Step 2: updates same file later in the run even though file now exists
-    vi.mocked(native.readFile).mockResolvedValueOnce("step 1 content");
+    vi.mocked(native.readFile).mockResolvedValue("step 1 content");
     const step2 = await guarded.execute(
       { path: "/workspace/generated.code" } as never,
       {} as never,
@@ -146,6 +149,40 @@ describe("newFilesOnly", () => {
 
     expect(step2).toEqual({ success: true });
     expect(inner).toHaveBeenCalledTimes(2);
+  });
+
+  it("allows subagents to update self-created files when path spelling differs", async () => {
+    vi.mocked(native.readFile).mockRejectedValueOnce(new Error("not found"));
+    const inner = vi.fn().mockResolvedValue({ success: true });
+    const guarded = newFilesOnly({ execute: inner });
+
+    // Step 1: creates file using relative dot-slash path
+    await guarded.execute(
+      { path: "./src/feature.ts" } as never,
+      {} as never,
+    );
+
+    // Step 2: updates same file using Windows backslashes without leading dot-slash
+    vi.mocked(native.readFile).mockResolvedValue("file content");
+    const step2 = await guarded.execute(
+      { path: "src\\feature.ts" } as never,
+      {} as never,
+    );
+
+    expect(step2).toEqual({ success: true });
+    expect(inner).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("normalizeTargetKey", () => {
+  it("normalizes path variants to a canonical key", () => {
+    expect(normalizeTargetKey("./src/a.ts")).toBe("src/a.ts");
+    expect(normalizeTargetKey("src\\a.ts")).toBe("src/a.ts");
+    expect(normalizeTargetKey(".\\src\\a.ts")).toBe("src/a.ts");
+    expect(normalizeTargetKey("././src/./a.ts")).toBe("src/a.ts");
+    expect(normalizeTargetKey("src//a.ts")).toBe("src/a.ts");
+    expect(normalizeTargetKey("C:\\project\\foo.ts")).toBe("c:/project/foo.ts");
+    expect(normalizeTargetKey("c:/project/foo.ts")).toBe("c:/project/foo.ts");
   });
 });
 
@@ -155,7 +192,7 @@ describe("gate & breaker", () => {
     expect(subagentToolNeedsGate("read_file", { needsApproval: false })).toBe(false);
   });
 
-  it("increments denials and trips breaker on three denials", async () => {
+  it(`increments denials and trips breaker on ${MAX_CONSECUTIVE_DENIALS} denials`, async () => {
     const breaker: DenialBreaker = {
       denials: 0,
       tripped: false,
@@ -184,7 +221,7 @@ describe("gate & breaker", () => {
 
     // Deny 3 -> trips breaker
     const res3 = (await tool.execute({} as never, {} as never)) as { error?: string };
-    expect(res3.error).toContain("denied by the user three times");
+    expect(res3.error).toContain(`denied by the user ${MAX_CONSECUTIVE_DENIALS} times in a row`);
     expect(breaker.denials).toBe(3);
     expect(breaker.tripped).toBe(true);
     expect(breaker.trip).toHaveBeenCalled();
