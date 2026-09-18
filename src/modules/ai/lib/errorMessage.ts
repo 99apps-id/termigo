@@ -35,7 +35,7 @@ export function humanizeModelError(raw: string | null | undefined): string {
     l.includes("payment required") ||
     l.includes("status 402")
   ) {
-    return "Your API key is out of quota or credits. Add credits with your provider, or switch provider/model in Settings -> Providers.";
+    return "Your API key is out of quota or credits. Add credits with your provider, or switch provider/model in Settings → Providers.";
   }
 
   // Tool input validation failures.

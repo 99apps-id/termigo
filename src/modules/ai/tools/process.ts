@@ -4,6 +4,7 @@ import { z } from "zod";
 import { native } from "../lib/native";
 import { remoteUnsupported } from "../lib/remoteFs";
 import { checkShellCommand } from "../lib/security";
+import { clampedInt } from "./clampedNumber";
 import type { ToolContext } from "./context";
 
 /**
@@ -70,21 +71,15 @@ export function buildProcessTools(ctx: ToolContext) {
           .number()
           .int()
           .optional()
-          .describe("Byte offset to read logs from incrementally. Used with 'logs'."),
-        timeout_secs: z
-          .number()
-          .int()
-          .min(1)
-          .max(600)
-          .optional()
-          .describe("Timeout in seconds for 'wait' (default 120)."),
-        port: z
-          .number()
-          .int()
-          .min(1)
-          .max(65535)
-          .optional()
-          .describe("Port number to inspect. Required for 'find_port'."),
+          .describe(
+            "Byte offset to read logs from incrementally. Used with 'logs'.",
+          ),
+        timeout_secs: clampedInt(1, 600).describe(
+          "Timeout in seconds for 'wait' (default 120, clamped between 1 and 600).",
+        ),
+        port: clampedInt(1, 65535).describe(
+          "Port number to inspect. Required for 'find_port' (clamped between 1 and 65535).",
+        ),
       }),
       needsApproval: true,
       execute: async (
@@ -106,7 +101,10 @@ export function buildProcessTools(ctx: ToolContext) {
                 pid: p.pid,
                 command: p.command,
                 cwd: p.cwd,
-                uptime_secs: Math.max(0, Math.round((now - p.started_at_ms) / 1000)),
+                uptime_secs: Math.max(
+                  0,
+                  Math.round((now - p.started_at_ms) / 1000),
+                ),
                 exited: p.exited,
                 exit_code: p.exit_code,
               })),
@@ -277,14 +275,12 @@ export function buildProcessTools(ctx: ToolContext) {
       description:
         "Check which process or command is currently listening on a specific TCP port (e.g. 3000, 5173, 8080). Useful when a dev server or test service fails with EADDRINUSE (port already in use). Auto-executes.",
       inputSchema: z.object({
-        port: z
-          .number()
-          .int()
-          .min(1)
-          .max(65535)
-          .describe("The TCP port number to inspect, e.g. 3000 or 5173."),
+        port: clampedInt(1, 65535).describe(
+          "The TCP port number to inspect, e.g. 3000 or 5173 (clamped between 1 and 65535).",
+        ),
       }),
       execute: async ({ port }) => {
+        if (port === undefined) return { error: "port is required" };
         return inspectPort(port);
       },
     }),
