@@ -1,8 +1,12 @@
 import type { ProviderId } from "@/modules/ai/config";
 import {
+  AiBrain01Icon,
+  AiBrain02Icon,
+  AiCloud01Icon,
   AppleIcon,
   ChatGptIcon,
   ClaudeIcon,
+  CodeSquareIcon,
   ComputerIcon,
   CpuIcon,
   DeepseekIcon,
@@ -12,6 +16,7 @@ import {
   Grok02Icon,
   MistralIcon,
   PlugIcon,
+  Rocket02Icon,
   ServerStack01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -24,6 +29,11 @@ const ICON_BY_PROVIDER = {
   cerebras: CpuIcon,
   groq: FlashIcon,
   deepseek: DeepseekIcon,
+  stepfun: AiBrain01Icon,
+  qwen: AiCloud01Icon,
+  zhipu: AiBrain02Icon,
+  "opencode-zen": CodeSquareIcon,
+  "opencode-go": Rocket02Icon,
   mistral: MistralIcon,
   openrouter: GlobeIcon,
   "openai-compatible": PlugIcon,
