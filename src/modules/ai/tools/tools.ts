@@ -123,35 +123,12 @@ export function withToolLifecycle<
 }
 
 /**
- * The currently-registered tool map, set by `buildTools` each time the agent
- * builds its tool set. The workflow and orchestrator engines use this to
- * dispatch JSON-defined steps to the actual tool implementations.
- */
-let currentToolRegistry: Record<string, unknown> = {};
-
-/**
- * Reset the registry to empty. Used by tests so one suite's `buildTools`
- * call cannot leak into the next.
- */
-export function resetToolRegistry(): void {
-  currentToolRegistry = {};
-}
-
-/**
- * Look up and invoke a registered tool by name. This is the bridge that lets
- * JSON-defined workflow steps and orchestration pipelines call any tool the
- * agent can call.
+ * Look up and invoke a registered tool by name against a specific registry.
  *
- * The registry is set by `buildTools` at the start of each agent run, so a
- * step always dispatches to the tool set the current run was built with.
+ * This is the bridge that lets JSON-defined workflow steps and orchestration
+ * pipelines call any tool the agent can call. The registry is passed in
+ * explicitly so each agent run dispatches only into its own tool set.
  */
-export async function dispatchTool(
-  name: string,
-  args: Record<string, unknown>,
-): Promise<unknown> {
-  return dispatchRegisteredTool(currentToolRegistry, name, args);
-}
-
 async function dispatchRegisteredTool(
   registry: Record<string, unknown>,
   name: string,
@@ -362,7 +339,6 @@ export function buildTools(
   } as const;
 
   runTools.registry = full as unknown as Record<string, unknown>;
-  currentToolRegistry = full as unknown as Record<string, unknown>;
 
   // Skill tools last, and told what the others are called: the dependency
   // checker compares a skill against the real registry rather than a list kept
