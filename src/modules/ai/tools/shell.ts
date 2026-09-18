@@ -130,6 +130,70 @@ export function unwrapPowershellCommand(command: string): string {
   return script;
 }
 
+/**
+ * Normalizes multi-line and indented commands so standard scripts or copy-pasted
+ * statements can pass the single-line shell validator safely without being rejected
+ * for C0 control characters. Tabs outside quotes are replaced with spaces, and
+ * newlines outside quotes are converted to `; `.
+ */
+export function normalizeShellCommand(command: string): string {
+  let inDouble = false;
+  let inSingle = false;
+  let escaped = false;
+  let out = "";
+  const trimmed = command.trim();
+
+  for (let i = 0; i < trimmed.length; i++) {
+    const ch = trimmed[i];
+    if (escaped) {
+      out += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      escaped = true;
+      out += ch;
+      continue;
+    }
+    if (ch === '"' && !inSingle) {
+      inDouble = !inDouble;
+      out += ch;
+      continue;
+    }
+    if (ch === "'" && !inDouble) {
+      inSingle = !inSingle;
+      out += ch;
+      continue;
+    }
+    if (!inDouble && !inSingle) {
+      if (ch === "\t") {
+        out += " ";
+        continue;
+      }
+      if (ch === "\r") {
+        continue;
+      }
+      if (ch === "\n") {
+        const trimmedOut = out.trimEnd();
+        if (
+          trimmedOut.length > 0 &&
+          !trimmedOut.endsWith(";") &&
+          !trimmedOut.endsWith("&&") &&
+          !trimmedOut.endsWith("||") &&
+          !trimmedOut.endsWith("|")
+        ) {
+          out = trimmedOut + " ; ";
+        } else {
+          out = trimmedOut + " ";
+        }
+        continue;
+      }
+    }
+    out += ch;
+  }
+  return out.trim();
+}
+
 export function buildShellTools(ctx: ToolContext) {
   return {
     bash_run: tool({
@@ -149,20 +213,22 @@ export function buildShellTools(ctx: ToolContext) {
       }),
       needsApproval: true,
       execute: async ({ command, timeout_secs }, { abortSignal }) => {
+        const normalized = normalizeShellCommand(command);
         // With an SSH terminal focused the model means the server, so the
         // command runs there. This one always asks, in every approval mode:
         // see REMOTE_ALWAYS_ASK in approvalPolicy. The safety check above ran
         // first and applies to both machines.
         const remote = ctx.getRemoteSession();
-        if (remote) {
+        const hasWindowsDrive = /[a-zA-Z]:[/\\]/.test(normalized);
+        if (remote && !hasWindowsDrive) {
           // Run from the shell's own directory. The exec channel starts in the
           // SSH user's home, so `docker compose up` would otherwise run
           // somewhere other than the project the user is looking at.
-          const safety = screenCommand(command);
+          const safety = screenCommand(normalized);
           if (!safety.ok) return { error: safety.reason };
           const full = remote.cwd
-            ? `cd ${shellQuote(remote.cwd)} && ${command}`
-            : command;
+            ? `cd ${shellQuote(remote.cwd)} && ${normalized}`
+            : normalized;
           try {
             const out = await sshExec(remote.sessionId, full, timeout_secs);
             const isSilentSuccess = !out.stdout && !out.stderr && out.exitCode === 0;
@@ -190,11 +256,18 @@ export function buildShellTools(ctx: ToolContext) {
                   }),
             };
           } catch (e) {
-            return { error: String(e), command, remote: true };
+            const errStr = String(e);
+            if (/no ssh session|session.*closed|not found/i.test(errStr)) {
+              // Remote SSH session is disconnected or closed; drop stale remote anchor
+              // and fall through to local shell execution.
+              ctx.clearRemoteSession?.();
+            } else {
+              return { error: errStr, command, remote: true };
+            }
           }
         }
 
-        const effectiveCommand = unwrapPowershellCommand(command);
+        const effectiveCommand = unwrapPowershellCommand(normalized);
         const safety = screenCommand(effectiveCommand);
         if (!safety.ok) return { error: safety.reason };
 

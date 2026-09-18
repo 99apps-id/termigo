@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  normalizeShellCommand,
   truncateCommandOutput,
   unwrapPowershellCommand,
   workspaceSessionKey,
@@ -86,3 +87,26 @@ describe("workspaceSessionKey", () => {
   });
 });
 
+describe("normalizeShellCommand", () => {
+  it("converts newlines to semicolons outside quotes", () => {
+    const input = "cd /project/dir\npnpm test";
+    expect(normalizeShellCommand(input)).toBe("cd /project/dir ; pnpm test");
+  });
+
+  it("handles CRLF newlines", () => {
+    const input = "git add .\r\ngit commit -m 'feat: something'\r\ngit push";
+    expect(normalizeShellCommand(input)).toBe(
+      "git add . ; git commit -m 'feat: something' ; git push",
+    );
+  });
+
+  it("converts tabs to spaces outside quotes", () => {
+    const input = "echo\thello\tworld";
+    expect(normalizeShellCommand(input)).toBe("echo hello world");
+  });
+
+  it("does not insert extra semicolons when lines end with && or ;", () => {
+    const input = "cd /dir &&\npnpm build";
+    expect(normalizeShellCommand(input)).toBe("cd /dir && pnpm build");
+  });
+});

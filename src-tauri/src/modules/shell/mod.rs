@@ -390,7 +390,27 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
                 i += 1;
                 continue;
             }
-            if c == '\n' || c == '\r' || c == '&' || SHELL_METACHARACTERS.contains(&c) {
+            if c == '\n' || (c == '\r' && chars.get(i + 1) == Some(&'\n')) {
+                if !current.trim().is_empty() {
+                    segments.push(std::mem::take(&mut current));
+                }
+                if c == '\r' {
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+                prev = '\n';
+                continue;
+            }
+            if c == '\r' {
+                if !current.trim().is_empty() {
+                    segments.push(std::mem::take(&mut current));
+                }
+                prev = '\r';
+                i += 1;
+                continue;
+            }
+            if c == '&' || SHELL_METACHARACTERS.contains(&c) {
                 bad.push(c);
             }
         }
@@ -409,7 +429,7 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
     }
     if !current.trim().is_empty() {
         segments.push(current);
-    } else if segments.is_empty() || (prev != ';' && prev != '\0') {
+    } else if segments.is_empty() || (prev != ';' && prev != '\0' && prev != '\n' && prev != '\r') {
         return Err("command contains an empty or dangling segment".into());
     }
 

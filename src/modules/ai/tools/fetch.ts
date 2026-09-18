@@ -21,6 +21,7 @@ import {
   isTextual,
   looksLikeHtml,
 } from "../lib/htmlText";
+import { isLoopbackIpv4 } from "../lib/browserGuard";
 
 type HttpResponse = {
   status: number;
@@ -61,6 +62,21 @@ function withFetchTimeout<T>(
   ]);
 }
 
+function isLoopbackTarget(rawUrl: string): boolean {
+  try {
+    const u = new URL(rawUrl);
+    const host = u.hostname.toLowerCase();
+    return (
+      host === "localhost" ||
+      isLoopbackIpv4(host) ||
+      host === "[::1]" ||
+      host === "::1"
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function buildFetchTools() {
   return {
     fetch: tool({
@@ -85,8 +101,9 @@ export function buildFetchTools() {
               method: "GET",
               headers: null,
               body: null,
-              // Never model-controlled. See the note at the top of this file.
-              allowPrivateNetwork: false,
+              // User-approved dev server verification allows loopback addresses (localhost, 127.0.0.1, ::1).
+              // Non-loopback private networks and cloud metadata (169.254.169.254) are strictly disallowed.
+              allowPrivateNetwork: isLoopbackTarget(url),
             }),
             FETCH_TIMEOUT_MS,
             url,

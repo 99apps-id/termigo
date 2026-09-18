@@ -377,6 +377,10 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     getRemoteSession: () =>
       runAnchor.get(sessionId)?.remote ??
       useChatStore.getState().live.getRemoteSession(),
+    clearRemoteSession: () => {
+      const anchor = runAnchor.get(sessionId);
+      if (anchor) anchor.remote = null;
+    },
     getWorkspaceRoot: () =>
       runAnchor.get(sessionId)?.root ??
       useChatStore.getState().live.getWorkspaceRoot(),
@@ -1169,6 +1173,19 @@ export async function flushSteer(bypassBusyCheck = false): Promise<boolean> {
     // A run that yielded to this queued task set stopReason "steered"; clear it
     // so no stale "Continue" prompt lingers as the queued task takes over.
     store.patchAgentMeta({ stopReason: null, stoppedByUser: false });
+    // Pin/refresh the workspace anchor to reflect the current active workspace/terminal
+    // when the steer message is flushed.
+    {
+      const live = useChatStore.getState().live;
+      const at = Date.now();
+      pruneStale(runAnchor, (anchor) => anchor.at, at, RUN_ANCHOR_TTL_MS);
+      runAnchor.set(sessionId, {
+        cwd: live.getCwd(),
+        root: live.getWorkspaceRoot(),
+        remote: live.getRemoteSession(),
+        at,
+      });
+    }
     // A queued task starts a fresh run, so mark it in flight for restart
     // recovery.
     store.markRunStarted();

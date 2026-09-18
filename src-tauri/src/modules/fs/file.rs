@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 use std::{fs, io::Write};
 
@@ -211,12 +211,76 @@ pub async fn fs_read_file(
     read_file_sync(&resolved, force.unwrap_or(false))
 }
 
-fn read_file_sync(p: &Path, force: bool) -> Result<ReadResult, String> {
-    let meta = std::fs::metadata(p).map_err(|e| {
-        log::debug!("fs_read_file stat({}) failed: {e}", p.display());
-        e.to_string()
-    })?;
+#[allow(dead_code)]
+fn normalize_lexical(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for comp in path.components() {
+        match comp {
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            std::path::Component::CurDir => {}
+            c => {
+                out.push(c.as_os_str());
+            }
+        }
+    }
+    out
+}
 
+#[cfg(windows)]
+fn resolve_symlink_components(path: &Path) -> Option<PathBuf> {
+    let mut acc = PathBuf::new();
+    for comp in path.components() {
+        match comp {
+            std::path::Component::ParentDir => {
+                acc.pop();
+            }
+            std::path::Component::CurDir => {}
+            c => {
+                acc.push(c.as_os_str());
+                if let Ok(m) = std::fs::symlink_metadata(&acc) {
+                    if m.file_type().is_symlink() {
+                        if let Ok(target) = std::fs::read_link(&acc) {
+                            if target.is_relative() {
+                                let mut parent = acc
+                                    .parent()
+                                    .map(|p| p.to_path_buf())
+                                    .unwrap_or_default();
+                                parent.push(target);
+                                acc = normalize_lexical(&parent);
+                            } else {
+                                acc = normalize_lexical(&target);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Some(acc)
+}
+
+fn read_file_sync(p: &Path, force: bool) -> Result<ReadResult, String> {
+    let (meta, resolved_path) = match std::fs::metadata(p) {
+        Ok(m) => (m, p.to_path_buf()),
+        Err(e) => {
+            #[cfg(windows)]
+            if e.raw_os_error() == Some(448) {
+                if let Some(resolved) = resolve_symlink_components(p) {
+                    if let Ok(m) = std::fs::metadata(&resolved) {
+                        return read_file_sync_inner(&resolved, &m, force);
+                    }
+                }
+            }
+            log::debug!("fs_read_file stat({}) failed: {e}", p.display());
+            return Err(e.to_string());
+        }
+    };
+    read_file_sync_inner(&resolved_path, &meta, force)
+}
+
+fn read_file_sync_inner(p: &Path, meta: &std::fs::Metadata, force: bool) -> Result<ReadResult, String> {
     if meta.is_dir() {
         return Err(format!("'{}' is a directory, not a file", p.display()));
     }
@@ -513,7 +577,21 @@ pub async fn fs_canonicalize(
     let workspace = WorkspaceEnv::from_option(workspace);
     let p = guard_read(&resolve_path(&path, &workspace))?;
     require_authorized(&registry, &p)?;
-    let canon = std::fs::canonicalize(&p).map_err(|e| e.to_string())?;
+    let canon = match std::fs::canonicalize(&p) {
+        Ok(c) => c,
+        Err(e) => {
+            #[cfg(windows)]
+            if e.raw_os_error() == Some(448) {
+                if let Some(resolved) = resolve_symlink_components(&p) {
+                    if let Ok(c) = std::fs::canonicalize(&resolved) {
+                        return Ok(super::to_canon(&c));
+                    }
+                    return Ok(super::to_canon(&resolved));
+                }
+            }
+            return Err(e.to_string());
+        }
+    };
     Ok(super::to_canon(&canon))
 }
 

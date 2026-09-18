@@ -15,6 +15,8 @@ export type ToolContext = {
    * the remote host over SFTP in that case.
    */
   getRemoteSession: () => RemoteFsSession | null;
+  /** Clear stale remote session anchor if the SSH session was closed or disconnected. */
+  clearRemoteSession?: () => void;
   /** Workspace root (explorer root). Used by tools that operate over the project. */
   getWorkspaceRoot: () => string | null;
   /** Last N lines of the active terminal buffer (or null if not a terminal tab). */
