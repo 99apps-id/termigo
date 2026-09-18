@@ -39,25 +39,40 @@ if (-not (Test-Path $DistWin)) {
     New-Item -ItemType Directory -Path $DistWin -Force | Out-Null
 }
 
+function Safe-CopyFile {
+    param([string]$Path, [string]$Destination)
+    $retries = 5
+    while ($retries -gt 0) {
+        try {
+            Copy-Item -Path $Path -Destination $Destination -Force -ErrorAction Stop
+            return
+        } catch {
+            $retries--
+            if ($retries -le 0) { throw $_ }
+            Start-Sleep -Milliseconds 800
+        }
+    }
+}
+
 if (Test-Path (Join-Path $TargetRelease "termigo.exe")) {
-    Copy-Item -Path (Join-Path $TargetRelease "termigo.exe") -Destination $DistWin -Force
+    Safe-CopyFile -Path (Join-Path $TargetRelease "termigo.exe") -Destination $DistWin
     Write-Host "==> Copied termigo.exe to dist-win/" -ForegroundColor Green
 }
 
 if (Test-Path (Join-Path $TargetRelease "termigo-cli.exe")) {
-    Copy-Item -Path (Join-Path $TargetRelease "termigo-cli.exe") -Destination $DistWin -Force
+    Safe-CopyFile -Path (Join-Path $TargetRelease "termigo-cli.exe") -Destination $DistWin
     Write-Host "==> Copied termigo-cli.exe to dist-win/" -ForegroundColor Green
 }
 
 $BundleNsis = Join-Path $TargetRelease "bundle\nsis"
 if (Test-Path $BundleNsis) {
-    Copy-Item -Path "$BundleNsis\*.exe" -Destination $DistWin -Force
+    Safe-CopyFile -Path "$BundleNsis\*.exe" -Destination $DistWin
     Write-Host "==> Copied NSIS installer to dist-win/" -ForegroundColor Green
 }
 
 $BundleMsi = Join-Path $TargetRelease "bundle\msi"
 if (Test-Path $BundleMsi) {
-    Copy-Item -Path "$BundleMsi\*.msi" -Destination $DistWin -Force
+    Safe-CopyFile -Path "$BundleMsi\*.msi" -Destination $DistWin
     Write-Host "==> Copied MSI installer to dist-win/" -ForegroundColor Green
 }
 
