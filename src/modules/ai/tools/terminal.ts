@@ -5,6 +5,7 @@ import { native } from "../lib/native";
 import { checkShellCommand } from "../lib/security";
 import { useArtifactsStore } from "../store/artifactsStore";
 import { resolvePath, type ToolContext } from "./context";
+import { clampedInt } from "./clampedNumber";
 
 function escHtml(s: string): string {
   return s.replace(
@@ -176,13 +177,9 @@ export function buildTerminalTools(ctx: ToolContext) {
       description:
         "Return the tail of a terminal's scrollback. Defaults to the active terminal; pass `tab_id` from `list_terminals` to read another one - a dev server left running in a different tab, for instance. Use this when the user references 'this error', 'the last command', or you need to interpret recent output. Default is 80 lines; raise it only when you genuinely need more. Refuses if that terminal is in Privacy mode.",
       inputSchema: z.object({
-        lines: z
-          .number()
-          .int()
-          .min(1)
-          .max(2000)
-          .optional()
-          .describe("Number of trailing lines to return. Default 80."),
+        lines: clampedInt(1, 2000, 80).describe(
+          "Number of trailing lines to return. Default 80, clamped between 1 and 2000.",
+        ),
         tab_id: z
           .number()
           .int()

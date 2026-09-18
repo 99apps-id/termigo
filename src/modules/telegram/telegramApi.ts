@@ -208,6 +208,11 @@ export async function apiGet(
       throw await parseTelegramError(res);
     }
     return await res.json();
+  } catch (err) {
+    if (!signal.aborted && reqSignal.aborted && reqSignal.reason instanceof Error) {
+      throw reqSignal.reason;
+    }
+    throw err;
   } finally {
     cleanup();
   }
@@ -234,6 +239,11 @@ export async function apiPost(
       throw await parseTelegramError(res);
     }
     return await res.json();
+  } catch (err) {
+    if (!signal.aborted && reqSignal.aborted && reqSignal.reason instanceof Error) {
+      throw reqSignal.reason;
+    }
+    throw err;
   } finally {
     cleanup();
   }
@@ -258,6 +268,11 @@ export async function apiPostForm(
       throw await parseTelegramError(res);
     }
     return await res.json();
+  } catch (err) {
+    if (!signal.aborted && reqSignal.aborted && reqSignal.reason instanceof Error) {
+      throw reqSignal.reason;
+    }
+    throw err;
   } finally {
     cleanup();
   }

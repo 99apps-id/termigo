@@ -8,6 +8,7 @@ import { checkPentestCommand } from "../lib/pentestScope";
 import { remoteUnsupported } from "../lib/remoteFs";
 import { shellQuote } from "../lib/remoteSearch";
 import { checkShellCommand } from "../lib/security";
+import { clampedInt } from "./clampedNumber";
 import type { ToolContext } from "./context";
 
 /**
@@ -201,15 +202,9 @@ export function buildShellTools(ctx: ToolContext) {
         "Run a foreground shell command. When the active terminal is an SSH session the command runs ON THE REMOTE HOST, from the remote shell's working directory, and always asks for approval regardless of the approval mode. Otherwise it runs in this session's persistent local shell, where cwd persists across calls. Use for short-lived commands (build, install, service restarts, a quick grep). Package managers (`apt`, `apt-get`, `dpkg`, `pacman`, `dnf`, `yum`, `apk`, `zypper`, `brew`, `pip`, `pip3`, `pipx`, `uv`, `winget`, `choco`), package runners (`npx`, `bunx`, `yarnpkg`, `corepack`), container engines (`docker`, `podman`), database CLIs (`sqlite3`, `duckdb`, `psql`, `mysql`, `mongosh`, `redis-cli`), project toolchains (`prisma`, `next`, `vite`, `nuxt`, `drizzle-kit`, `tsx`, `rustc`), build/dev utilities (`rimraf`, `cross-env`, `concurrently`, `tree`), PowerShell cmdlets (`Get-ChildItem`, `Get-Content`, `Set-Content`, `Get-Command`, `Resolve-Path`, `Test-Path`, `Select-Object`, `Select-String`, `Where-Object`, `ForEach-Object`, `Get-NetTCPConnection`, `Get-NetIPAddress`, `Get-CimInstance`, `Get-WmiObject`, `Get-Service`, `Start-Service`, `Stop-Service`, `Test-NetConnection`, `Format-Table`, `Format-List`, `Out-File`, `netsh`), and privilege elevation / root access (`sudo`, `doas`, `su`, `wsl`) are allowlisted and supported with user approval. Commands may be chained with `;`, `&&`, `||`, or pipelines (`|`); each segment is validated against the allowlist. Stderr redirection (`2>&1`) and output discard redirections (`> /dev/null`, `> nul`, `2>nul`, `2> /dev/null`) are supported. To save output to a file, pipe to `Out-File <file>` (PowerShell) or `tee <file>` (Unix). For project-wide lint/test use `run_checks` instead (it defaults to 300s). For long-running local daemons use `bash_background`. NEVER invoke interactive tools (vim, less, top) - they will hang. To FIND files, use the `glob` tool (fast, ignores node_modules/.git, capped) - a recursive shell scan (`Get-ChildItem -Recurse`, `find`, `dir /s`) from a large or home directory can time out. If cmd is specifically required for batch scripts or DOS commands, invoke it explicitly via `cmd /c ...`. Use `;` or `&&` to chain commands (e.g. `cd dir; npx create-next-app`). You are ALREADY inside a persistent PowerShell session on Windows: do NOT prefix commands with `powershell -Command \"...\"` or `powershell -NoProfile -Command \"...\". Run PowerShell commands directly (e.g. `Get-Content ...`).",
       inputSchema: z.object({
         command: z.string(),
-        timeout_secs: z
-          .number()
-          .int()
-          .min(1)
-          .max(300)
-          .optional()
-          .describe(
-            "Timeout in seconds. Default 120. A project-wide build/install may need more - pass up to 300.",
-          ),
+        timeout_secs: clampedInt(1, 900).describe(
+          "Timeout in seconds. Default 120. Clamped up to 900.",
+        ),
       }),
       needsApproval: true,
       execute: async ({ command, timeout_secs }, { abortSignal }) => {
@@ -397,15 +392,9 @@ export function buildShellTools(ctx: ToolContext) {
         "Wait for a `bash_background` process to exit (a build, an install, a test run), polling its log. Returns the final `exit_code` and the last log tail, or `timed_out: true` while it is still running - call again to keep waiting, or `bash_logs` to read progress meanwhile. Auto-executes.",
       inputSchema: z.object({
         handle: z.number().int(),
-        timeout_secs: z
-          .number()
-          .int()
-          .min(1)
-          .max(600)
-          .optional()
-          .describe(
-            "How long to wait for exit before returning timed_out (default 120).",
-          ),
+        timeout_secs: clampedInt(1, 900).describe(
+          "How long to wait for exit before returning timed_out (default 120, clamped up to 900).",
+        ),
       }),
       execute: async (
         { handle, timeout_secs },

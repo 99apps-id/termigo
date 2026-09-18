@@ -23,9 +23,9 @@ use session::{SessionRunOutput, ShellSession};
 
 // 30s was too short: a project-wide lint/test/build (`eslint .`, `pnpm test`,
 // `cargo build`) easily exceeds it and times out, so the agent re-runs it. 120s
-// covers a normal one; pass `timeout_secs` (up to 300) for a genuinely slow job.
+// covers a normal one; pass `timeout_secs` (up to 900) for a genuinely slow job.
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
-const MAX_TIMEOUT_SECS: u64 = 300;
+const MAX_TIMEOUT_SECS: u64 = 900;
 const MAX_OUTPUT_BYTES: usize = 256 * 1024;
 
 /// Allowlisted read-only / inspection commands for agent-triggered execution.

@@ -5,6 +5,7 @@ import { checkShellCommand } from "../lib/security";
 import { remoteUnsupported } from "../lib/remoteFs";
 import { getSessionShell, sessionShellKey } from "../lib/sessionShell";
 import { quoteShellArg } from "@/lib/shellQuote";
+import { clampedInt } from "./clampedNumber";
 import type { ToolContext } from "./context";
 
 type CheckKind = "test" | "lint";
@@ -149,7 +150,7 @@ export function buildVerifyTools(ctx: ToolContext) {
           .describe(
             "Override the detected command, e.g. `pnpm test ui` or `cargo test --lib`.",
           ),
-        timeout_secs: z.number().int().min(1).max(600).optional(),
+        timeout_secs: clampedInt(1, 900).describe("Timeout in seconds (default 300, clamped up to 900)."),
       }),
       needsApproval: true,
       execute: async ({ kind, command, timeout_secs }, { abortSignal }) => {

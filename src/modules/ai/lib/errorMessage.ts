@@ -25,13 +25,25 @@ export function humanizeModelError(raw: string | null | undefined): string {
     l.includes("insufficient_quota") ||
     l.includes("insufficient quota") ||
     l.includes("exceeded your current quota") ||
+    l.includes("quota has been exhausted") ||
+    l.includes("quota is exhausted") ||
+    l.includes("quota exhausted") ||
+    (l.includes("quota") && l.includes("exhaust")) ||
     l.includes("out of credit") ||
     l.includes("no credit") ||
     l.includes("billing") ||
     l.includes("payment required") ||
     l.includes("status 402")
   ) {
-    return "Your API key is out of quota or credits. Add credits with your provider, or switch provider/model in Settings → Providers.";
+    return "Your API key is out of quota or credits. Add credits with your provider, or switch provider/model in Settings -> Providers.";
+  }
+
+  // Tool input validation failures.
+  if (
+    l.includes("type validation failed") ||
+    l.includes("invalid input for tool")
+  ) {
+    return "A tool received invalid input parameters. Press Continue or Try again to allow the model to adjust its tool parameters.";
   }
 
   // A "thinking mode" endpoint refused a forced tool choice (the fan-out pin

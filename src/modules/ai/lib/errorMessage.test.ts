@@ -16,6 +16,20 @@ describe("humanizeModelError", () => {
         "429 insufficient_quota: You exceeded your current quota",
       ).toLowerCase(),
     ).toContain("quota");
+
+    expect(
+      humanizeModelError(
+        "Failed after 3 attempts. Last error: Your token-plan 1-week quota has been exhausted. The quota will reset at 09-22 11:19:00 UTC.",
+      ).toLowerCase(),
+    ).toContain("quota");
+  });
+
+  it("explains tool input validation failure", () => {
+    expect(
+      humanizeModelError(
+        'Invalid input for tool bash_run: Type validation failed: Value: {"command":"node scripts/test.js","timeout_secs":900}.',
+      ).toLowerCase(),
+    ).toContain("tool received invalid input");
   });
 
   it("explains rate limiting", () => {
