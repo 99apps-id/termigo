@@ -12,6 +12,24 @@ import { remoteUnsupported } from "../lib/remoteFs";
 import { checkShellCommand } from "../lib/security";
 import type { ToolContext } from "./context";
 
+function sleepWithSignal(
+  ms: number,
+  abortSignal?: AbortSignal,
+): Promise<void> {
+  return new Promise((r) => {
+    if (abortSignal?.aborted) return r(undefined);
+    const t = setTimeout(r, ms);
+    abortSignal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(t);
+        r(undefined);
+      },
+      { once: true },
+    );
+  });
+}
+
 /**
  * Wait for a background process to print a local URL AND for that URL to start
  * answering, reading the process's log ring so the ACTUAL url the server chose
@@ -32,27 +50,13 @@ async function waitForDevServer(
   let logsTail = "";
   let exited = false;
 
-  const sleep = (ms: number) =>
-    new Promise((r) => {
-      if (abortSignal?.aborted) return r(undefined);
-      const t = setTimeout(r, ms);
-      abortSignal?.addEventListener(
-        "abort",
-        () => {
-          clearTimeout(t);
-          r(undefined);
-        },
-        { once: true },
-      );
-    });
-
   while (Date.now() < deadline) {
     if (abortSignal?.aborted) break;
     let logs: Awaited<ReturnType<typeof native.shellBgLogs>> | null = null;
     try {
       logs = await native.shellBgLogs(handle, offset);
     } catch {
-      // Log read failed (process gone?) — keep polling until the deadline.
+      // Log read failed (process gone?) -- keep polling until the deadline.
     }
     if (logs) {
       offset = logs.next_offset;
@@ -71,11 +75,11 @@ async function waitForDevServer(
         const probe = await native.httpProbe(candidate, 1500).catch(() => null);
         if (probe?.ok) return { url: candidate, ready: true, logsTail };
       }
-      // The process exited and its URL never answered — waiting out the whole
+      // The process exited and its URL never answered -- waiting out the whole
       // deadline would burn 60s on a dead server.
       if (exited) break;
     } else if (portHint > 0) {
-      // No URL printed yet — probe the hinted port directly so a server that
+      // No URL printed yet -- probe the hinted port directly so a server that
       // logs to stderr (not captured) is still caught.
       for (const candidate of candidateUrls(portHint)) {
         const probe = await native.httpProbe(candidate, 1500).catch(() => null);
@@ -88,7 +92,7 @@ async function waitForDevServer(
     } else if (exited) {
       break;
     }
-    await sleep(500);
+    await sleepWithSignal(500, abortSignal);
   }
   return { url, ready: false, logsTail };
 }
@@ -118,16 +122,22 @@ export function buildDevServerTools(ctx: ToolContext) {
           .max(120)
           .optional()
           .describe("How long to wait for the server to start. Default 60."),
+        restart: z
+          .boolean()
+          .optional()
+          .describe(
+            "If an existing dev server is running for this command, kill it and start a fresh instance. Default false.",
+          ),
       }),
       needsApproval: true,
       execute: async (
-        { command, open, timeout_secs },
+        { command, open, timeout_secs, restart },
         { abortSignal }: { abortSignal?: AbortSignal } = {},
       ) => {
         if (ctx.getRemoteSession()) {
           return remoteUnsupported(
             "dev_server",
-            "Start the server on the remote host with bash_run (nohup … &) and use forward_remote_port + open_preview for its URL.",
+            "Start the server on the remote host with bash_run (nohup ... &) and use forward_remote_port + open_preview for its URL.",
           );
         }
         if (abortSignal?.aborted) {
@@ -148,7 +158,7 @@ export function buildDevServerTools(ctx: ToolContext) {
             const r = await native.readFile(`${root}/package.json`);
             if (r.kind === "text") pkgJson = r.content;
           } catch {
-            // No manifest — fall through to the explicit-command error.
+            // No manifest -- fall through to the explicit-command error.
           }
           const detected = detectDevCommand({ pkgJson });
           if (detected) {
@@ -167,37 +177,48 @@ export function buildDevServerTools(ctx: ToolContext) {
         const safety = checkShellCommand(resolved);
         if (!safety.ok) return { error: safety.reason };
 
-        // Dedupe: an identical dev server already running is reused, and its
-        // URL is re-opened, instead of stacking a second process.
+        // Dedupe: an identical dev server already running is reused (unless restart=true),
+        // and its URL is re-opened, instead of stacking a second process.
+        let killedPreviousHandle: number | null = null;
         try {
           const list = await native.shellBgList();
           const existing = list.find(
             (p) => !p.exited && sameDevCommand(resolved, p.command),
           );
           if (existing) {
-            const waited = await waitForDevServer(
-              existing.handle,
-              portHint,
-              Math.min(timeout_secs ?? 60, 30),
-              abortSignal,
-            );
-            const opened =
-              open !== false && waited.url
-                ? ctx.openPreview(waited.url, `dev-${existing.handle}`)
-                : false;
-            return {
-              handle: existing.handle,
-              command: existing.command,
-              url: waited.url,
-              ready: waited.ready,
-              reused: true,
-              opened,
-              note: "reused an already-running dev server",
-              logs_tail: waited.logsTail,
-            };
+            if (restart) {
+              try {
+                await native.shellBgKill(existing.handle);
+                killedPreviousHandle = existing.handle;
+                await sleepWithSignal(500, abortSignal);
+              } catch {
+                // Kill failed or already dead; continue to spawn.
+              }
+            } else {
+              const waited = await waitForDevServer(
+                existing.handle,
+                portHint,
+                Math.min(timeout_secs ?? 60, 30),
+                abortSignal,
+              );
+              const opened =
+                open !== false && waited.url
+                  ? ctx.openPreview(waited.url, `dev-${existing.handle}`)
+                  : false;
+              return {
+                handle: existing.handle,
+                command: existing.command,
+                url: waited.url,
+                ready: waited.ready,
+                reused: true,
+                opened,
+                note: "reused an already-running dev server",
+                logs_tail: waited.logsTail,
+              };
+            }
           }
         } catch {
-          // List failed — proceed to spawn; dedupe is best-effort.
+          // List failed -- proceed to spawn; dedupe is best-effort.
         }
 
         let handle: number;
@@ -205,6 +226,10 @@ export function buildDevServerTools(ctx: ToolContext) {
           handle = await native.shellBgSpawn(resolved, root);
         } catch (e) {
           return { error: `could not spawn dev server: ${String(e)}` };
+        }
+
+        if (killedPreviousHandle !== null) {
+          note = `${note} (restarted previous server #${killedPreviousHandle})`;
         }
 
         const waited = await waitForDevServer(

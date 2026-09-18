@@ -172,9 +172,12 @@ export function pendingApprovalToolTimeoutMs(
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const parts = (messages[i] as { parts?: unknown })?.parts;
     if (!Array.isArray(parts)) continue;
+    let foundApproval = false;
+    let maxMs: number | null = null;
     for (let j = parts.length - 1; j >= 0; j -= 1) {
       const part = parts[j] as { state?: string; input?: unknown };
       if (part?.state !== "approval-responded") continue;
+      foundApproval = true;
       let input = part.input;
       if (typeof input === "string") {
         try {
@@ -186,10 +189,15 @@ export function pendingApprovalToolTimeoutMs(
       if (!input || typeof input !== "object") continue;
       const raw = input as Record<string, unknown>;
       const secs = raw.timeout_secs ?? raw.timeoutSecs ?? raw.timeout;
-      if (typeof secs !== "number" || !Number.isFinite(secs) || secs <= 0) {
-        return null;
+      if (typeof secs === "number" && Number.isFinite(secs) && secs > 0) {
+        const ms = secs * 1000;
+        if (maxMs === null || ms > maxMs) {
+          maxMs = ms;
+        }
       }
-      return secs * 1000;
+    }
+    if (foundApproval) {
+      return maxMs;
     }
   }
   return null;

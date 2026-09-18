@@ -33,9 +33,21 @@ export function WindowControls({ closeOnly = false }: Props) {
     return () => unlisten?.();
   }, [closeOnly]);
 
-  if (IS_MAC) return null;
-
   const w = getCurrentWindow();
+
+  if (IS_MAC) {
+    if (!closeOnly) return null;
+    return (
+      <div className="flex h-full shrink-0 items-center pr-1">
+        <CtlButton
+          ariaLabel="Close (Esc)"
+          onClick={() => void w.close()}
+        >
+          <HugeiconsIcon icon={Cancel01Icon} size={13} strokeWidth={2} />
+        </CtlButton>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full shrink-0 items-center gap-0.5 pr-1">

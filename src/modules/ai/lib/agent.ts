@@ -1137,12 +1137,16 @@ export async function runAgentStream(opts: RunAgentOptions) {
     );
   }
 
+  const resumingApproval = isResumingApproval(opts.uiMessages ?? []);
   // Universal sequence validator and repairer:
   // Guarantees invariants required by all LLM providers (OpenAI, Anthropic, Gemini):
   // - No orphaned 'tool' messages without preceding 'tool-call's
   // - Synthetic tool results for interrupted turns
   // - Sequence never starts with 'tool' or 'assistant'
-  const promptHistory = repairModelMessageSequence(cappedHistory.messages);
+  // - Trailing approval responses preserved only when actively resuming approval
+  const promptHistory = repairModelMessageSequence(cappedHistory.messages, {
+    preserveTrailingApproval: resumingApproval,
+  });
 
   const prompt = prepareAgentPrompt(
     stableSystem,
@@ -1164,7 +1168,6 @@ export async function runAgentStream(opts: RunAgentOptions) {
       once: true,
     });
   }
-  const resumingApproval = isResumingApproval(opts.uiMessages ?? []);
   // Silence budget before the run is declared wedged. When resuming approval,
   // step 0 executes the approved tool BEFORE the model is called, so the budget
   // is derived from that tool's own `timeout_secs` - never shorter than the work
@@ -1733,7 +1736,9 @@ export async function runAgentStream(opts: RunAgentOptions) {
           reservedTokens,
         );
         if (eviction.summary.evictedToolCalls > 0 || compacted.compacted) {
-          nextMessages = repairModelMessageSequence(compacted.messages);
+          nextMessages = repairModelMessageSequence(compacted.messages, {
+            preserveTrailingApproval: false,
+          });
           if (eviction.summary.evictedToolCalls > 0) {
             fireAndForget(
               logInfo(

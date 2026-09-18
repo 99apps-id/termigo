@@ -70,8 +70,11 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
     "Set-Content", "Add-Content", "Start-Process", "Stop-Process", "Get-Process",
     "Get-Command", "Resolve-Path", "Split-Path", "Join-Path", "Expand-Archive", "Compress-Archive",
     "Invoke-WebRequest", "Invoke-RestMethod",
+    "Get-NetTCPConnection", "Get-NetIPAddress", "Get-NetRoute", "Test-NetConnection",
+    "Get-CimInstance", "Get-WmiObject", "Get-Service", "Start-Service", "Stop-Service", "Restart-Service",
+    "Format-Table", "Format-List", "ft", "fl",
     "dir", "del", "cls", "ver", "copy", "move", "ren", "rename", "md", "rd", "tree",
-    "findstr", "tasklist", "taskkill", "wmic", "fc", "attrib", "systeminfo", "net", "route", "arp",
+    "findstr", "tasklist", "taskkill", "wmic", "fc", "attrib", "systeminfo", "net", "route", "arp", "netsh",
     // Linux/WSL and Unix system administration & root utilities (user-approved)
     "systemctl", "service", "journalctl", "dmesg",
     "chown", "chmod", "mkdir", "rm", "rmdir", "cp", "mv", "touch", "ln", "tee",

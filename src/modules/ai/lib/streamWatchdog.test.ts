@@ -162,10 +162,25 @@ describe("stallBudgetMs", () => {
     expect(pendingApprovalToolTimeoutMs(stored)).toBe(240_000);
   });
 
-  it("ignores a part that is not an answered approval", () => {
-    const other = [{ parts: [{ state: "output-available", input: {} }] }];
-    expect(pendingApprovalToolTimeoutMs(other)).toBeNull();
-    expect(stallBudgetMs(other, true)).toBe(STALL_TIMEOUT_ON_RESUME_MS);
+  it("finds the tool timeout even when another responded tool has no timeout", () => {
+    const multi = [
+      {
+        parts: [
+          {
+            type: "tool-bash_run",
+            state: "approval-responded",
+            input: { command: "npm test", timeout_secs: 250 },
+          },
+          {
+            type: "tool-write_file",
+            state: "approval-responded",
+            input: { path: "foo.txt", content: "hi" },
+          },
+        ],
+      },
+    ];
+    expect(pendingApprovalToolTimeoutMs(multi)).toBe(250_000);
+    expect(stallBudgetMs(multi, true)).toBe(250_000 + TOOL_TIMEOUT_SLACK_MS);
   });
 });
 

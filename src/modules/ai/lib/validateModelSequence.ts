@@ -25,14 +25,21 @@ function partsOf(m: ModelMessage): ContentPart[] {
  *    before the next non-tool message or end of history.
  * 3. The conversation must not start with a 'tool' message or an 'assistant' message.
  */
+export type RepairSequenceOptions = {
+  /** If true and the sequence ends with a trailing tool-approval-response, keep it intact for SDK execution. */
+  preserveTrailingApproval?: boolean;
+};
+
 export function repairModelMessageSequence(
   messages: readonly ModelMessage[],
+  options?: RepairSequenceOptions,
 ): ModelMessage[] {
   if (messages.length === 0) return [];
 
   const out: ModelMessage[] = [];
   let pendingToolCallIds = new Set<string>();
   let pendingToolCalls: Array<{ id: string; name: string }> = [];
+  let pendingApprovalMap = new Map<string, string>();
 
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];
@@ -57,6 +64,7 @@ export function repairModelMessageSequence(
         });
         pendingToolCallIds.clear();
         pendingToolCalls = [];
+        pendingApprovalMap.clear();
       }
       out.push(msg);
       continue;
@@ -82,16 +90,30 @@ export function repairModelMessageSequence(
         });
         pendingToolCallIds.clear();
         pendingToolCalls = [];
+        pendingApprovalMap.clear();
       }
 
       const parts = partsOf(msg);
       const calls: Array<{ id: string; name: string }> = [];
+      const approvalMap = new Map<string, string>();
       for (const p of parts) {
         if (p.type === "tool-call" && typeof p.toolCallId === "string") {
           calls.push({
             id: p.toolCallId,
             name: (p.toolName as string) ?? "tool",
           });
+        } else if (
+          p.type === "tool-approval-request" &&
+          typeof p.approvalId === "string" &&
+          typeof p.toolCallId === "string"
+        ) {
+          approvalMap.set(p.approvalId, p.toolCallId);
+          if (!calls.some((c) => c.id === p.toolCallId)) {
+            calls.push({
+              id: p.toolCallId,
+              name: (p.toolName as string) ?? "tool",
+            });
+          }
         }
       }
 
@@ -100,6 +122,7 @@ export function repairModelMessageSequence(
       if (calls.length > 0) {
         pendingToolCallIds = new Set(calls.map((c) => c.id));
         pendingToolCalls = calls;
+        pendingApprovalMap = approvalMap;
       }
       continue;
     }
@@ -107,33 +130,75 @@ export function repairModelMessageSequence(
     if (msg.role === "tool") {
       // If there are no pending tool calls from the immediately preceding assistant message,
       // this tool message is an ORPHAN (e.g. from history truncation, capping, or eviction).
-      // Sending it would cause: "Messages with role 'tool' must be a response to a preceding message with 'tool_calls'".
       if (pendingToolCallIds.size === 0) {
-        // Drop orphaned tool message
         continue;
       }
+
+      const isLastMessage = i === messages.length - 1;
+      const preserveApprovals =
+        isLastMessage && options?.preserveTrailingApproval !== false;
 
       const parts = partsOf(msg);
-      // Keep only parts that answer a known pending tool call
-      const validParts = parts.filter((p) => {
-        if (p.type !== "tool-result" || typeof p.toolCallId !== "string") {
-          return false;
-        }
-        return pendingToolCallIds.has(p.toolCallId);
-      });
+      const validParts: ContentPart[] = [];
 
-      if (validParts.length === 0) {
-        // None of the parts answer a known pending tool call from this turn
-        continue;
+      for (const p of parts) {
+        if (p.type === "tool-result" && typeof p.toolCallId === "string") {
+          if (pendingToolCallIds.has(p.toolCallId)) {
+            validParts.push(p);
+            pendingToolCallIds.delete(p.toolCallId);
+            pendingToolCalls = pendingToolCalls.filter(
+              (c) => c.id !== p.toolCallId,
+            );
+          }
+        } else if (p.type === "tool-approval-response") {
+          const callId =
+            (typeof p.toolCallId === "string" ? p.toolCallId : undefined) ??
+            (typeof p.approvalId === "string"
+              ? pendingApprovalMap.get(p.approvalId)
+              : undefined) ??
+            (pendingToolCalls.length > 0 ? pendingToolCalls[0].id : undefined);
+
+          if (callId && pendingToolCallIds.has(callId)) {
+            const matchingCall = pendingToolCalls.find((c) => c.id === callId) ?? {
+              id: callId,
+              name: "tool",
+            };
+
+            if (preserveApprovals) {
+              // Trailing approval resumption for SDK step 0
+              validParts.push(p);
+            } else {
+              // Convert non-trailing or past tool-approval-response into a valid tool-result
+              // so LLM providers (OpenAI/Anthropic/Gemini) that reject missing tool responses
+              // receive a valid tool-result response.
+              const syntheticResult: ToolResultPart = {
+                type: "tool-result",
+                toolCallId: callId,
+                toolName: matchingCall.name,
+                output:
+                  p.approved === false
+                    ? {
+                        type: "error-text",
+                        value:
+                          (p.reason as string) ?? "Tool execution denied by user.",
+                      }
+                    : {
+                        type: "error-text",
+                        value:
+                          "Interrupted: call was approved but interrupted before execution.",
+                      },
+              };
+              validParts.push(syntheticResult as unknown as ContentPart);
+            }
+
+            pendingToolCallIds.delete(callId);
+            pendingToolCalls = pendingToolCalls.filter((c) => c.id !== callId);
+          }
+        }
       }
 
-      for (const vp of validParts) {
-        if (typeof vp.toolCallId === "string") {
-          pendingToolCallIds.delete(vp.toolCallId);
-          pendingToolCalls = pendingToolCalls.filter(
-            (c) => c.id !== vp.toolCallId,
-          );
-        }
+      if (validParts.length === 0) {
+        continue;
       }
 
       out.push({
@@ -166,6 +231,7 @@ export function repairModelMessageSequence(
     });
     pendingToolCallIds.clear();
     pendingToolCalls = [];
+    pendingApprovalMap.clear();
   }
 
   // Ensure first message is not 'tool' (fail-closed safety check)

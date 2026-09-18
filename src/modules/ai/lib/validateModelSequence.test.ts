@@ -193,4 +193,87 @@ describe("repairModelMessageSequence", () => {
     expect(res[1].role).toBe("assistant");
     expect(res[2].role).toBe("tool");
   });
+
+  it("converts non-trailing tool-approval-response into valid tool-result so provider receives all tool responses", () => {
+    const input: ModelMessage[] = [
+      userMsg("write file"),
+      assistantToolCallsMsg([{ id: "call_write", name: "write_file" }]),
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-approval-response",
+            approvalId: "app_1",
+            toolCallId: "call_write",
+            approved: true,
+          } as unknown as ToolResultPart,
+        ],
+      } as ModelMessage,
+      userMsg("Continue from where you stopped"),
+    ];
+
+    const res = repairModelMessageSequence(input);
+    expect(res).toHaveLength(4);
+    expect(res[0].role).toBe("user");
+    expect(res[1].role).toBe("assistant");
+    expect(res[2].role).toBe("tool");
+    const toolMsg = res[2];
+    expect(Array.isArray(toolMsg.content)).toBe(true);
+    const parts = toolMsg.content as any[];
+    expect(parts).toHaveLength(1);
+    expect(parts[0].type).toBe("tool-result");
+    expect(parts[0].toolCallId).toBe("call_write");
+    expect(res[3].role).toBe("user");
+  });
+
+  it("preserves trailing tool-approval-response when preserveTrailingApproval is true", () => {
+    const input: ModelMessage[] = [
+      userMsg("write file"),
+      assistantToolCallsMsg([{ id: "call_write", name: "write_file" }]),
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-approval-response",
+            approvalId: "app_1",
+            toolCallId: "call_write",
+            approved: true,
+          } as unknown as ToolResultPart,
+        ],
+      } as ModelMessage,
+    ];
+
+    const res = repairModelMessageSequence(input, { preserveTrailingApproval: true });
+    expect(res).toHaveLength(3);
+    const toolMsg = res[2];
+    const parts = toolMsg.content as any[];
+    expect(parts).toHaveLength(1);
+    expect(parts[0].type).toBe("tool-approval-response");
+  });
+
+  it("converts trailing tool-approval-response when preserveTrailingApproval is false", () => {
+    const input: ModelMessage[] = [
+      userMsg("write file"),
+      assistantToolCallsMsg([{ id: "call_write", name: "write_file" }]),
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-approval-response",
+            approvalId: "app_1",
+            toolCallId: "call_write",
+            approved: true,
+          } as unknown as ToolResultPart,
+        ],
+      } as ModelMessage,
+    ];
+
+    const res = repairModelMessageSequence(input, { preserveTrailingApproval: false });
+    expect(res).toHaveLength(3);
+    const toolMsg = res[2];
+    const parts = toolMsg.content as any[];
+    expect(parts).toHaveLength(1);
+    expect(parts[0].type).toBe("tool-result");
+    expect(parts[0].toolCallId).toBe("call_write");
+  });
 });

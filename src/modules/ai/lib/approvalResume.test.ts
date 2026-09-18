@@ -23,6 +23,7 @@ import { convertToModelMessages, type ModelMessage, type UIMessage } from "ai";
 import { prepareOutgoingMessages } from "./transport";
 import { sanitizeUiMessages } from "./sanitizeMessages";
 import { isResumingApproval } from "./approvalResume";
+import { repairModelMessageSequence } from "./validateModelSequence";
 
 const ENV = "<env>\nworkspace_root: /w\n</env>";
 
@@ -110,6 +111,10 @@ describe("an approved call still reaches streamText as an approval", () => {
     const last = out[out.length - 1];
     expect(last.role).toBe("tool");
     expect(partTypes(last)).toContain("tool-approval-response");
+    const repaired = repairModelMessageSequence(out);
+    const repairedLast = repaired[repaired.length - 1];
+    expect(repairedLast.role).toBe("tool");
+    expect(partTypes(repairedLast)).toContain("tool-approval-response");
   });
 
   it("does not append the environment turn over it", async () => {

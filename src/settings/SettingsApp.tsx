@@ -18,7 +18,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { type ComponentType, lazy, Suspense, useEffect, useState } from "react";
+import { type ComponentType, lazy, Suspense, useEffect, useRef, useState } from "react";
 import { AboutSection } from "./sections/AboutSection";
 import { AgentsSection } from "./sections/AgentsSection";
 import { EditorSection } from "./sections/EditorSection";
@@ -133,10 +133,38 @@ export function SettingsApp() {
   const [active, setActive] = useState<SettingsTab>(readInitialTab);
   const init = usePreferencesStore((s) => s.init);
   const ActiveSection = TABS.find((t) => t.id === active)?.component;
+  const tabsListRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     void init();
   }, [init]);
+
+  // Press Escape to cleanly close the settings modal on all platforms.
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        void getCurrentWebviewWindow().close();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  // Ensure the selected tab is always scrolled into view if viewport is narrowed.
+  useEffect(() => {
+    if (!tabsListRef.current) return;
+    const activeEl = tabsListRef.current.querySelector<HTMLElement>(
+      `[data-state="active"], [value="${active}"]`,
+    );
+    if (activeEl) {
+      activeEl.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+        inline: "nearest",
+      });
+    }
+  }, [active]);
 
   useEffect(() => {
     const apply = (detail: string) => {
@@ -161,34 +189,46 @@ export function SettingsApp() {
     <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground select-none">
       <header
         data-tauri-drag-region
-        className={`flex h-11 shrink-0 items-center border-b border-border/60 bg-card/60 ${
-          IS_MAC ? "pr-3 pl-22" : "pr-0 pl-3"
+        className={`flex h-11 shrink-0 items-center justify-between border-b border-border/60 bg-card/60 ${
+          IS_MAC ? "pr-2 pl-20" : "pr-2 pl-3"
         }`}
       >
         <Tabs
           value={active}
           onValueChange={(v) => setActive(v as SettingsTab)}
           orientation="horizontal"
-          className="flex-1 items-center"
+          className="min-w-0 flex-1 overflow-hidden"
           data-tauri-drag-region
         >
-          <TabsList className="mx-auto h-7 max-w-full overflow-x-auto bg-muted/40 px-2">
-            {TABS.map((t) => (
-              <TabsTrigger
-                key={t.id}
-                value={t.id}
-                className="h-6 gap-1.5 px-2.5 text-[11.5px]"
-              >
-                <HugeiconsIcon icon={t.icon} size={12} strokeWidth={1.75} />
-                <span>{t.label}</span>
-              </TabsTrigger>
-            ))}
-          </TabsList>
+          <div
+            ref={tabsListRef}
+            className="flex w-full items-center overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            onWheel={(e) => {
+              if (e.deltaY !== 0 && e.deltaX === 0) {
+                e.currentTarget.scrollLeft += e.deltaY;
+              }
+            }}
+          >
+            <TabsList className="mx-auto flex h-7 shrink-0 items-center gap-0.5 bg-muted/40 px-1.5">
+              {TABS.map((t) => (
+                <TabsTrigger
+                  key={t.id}
+                  value={t.id}
+                  className="h-6 shrink-0 gap-1 px-2 text-[11px] font-medium transition-all sm:gap-1.5 sm:px-2.5 sm:text-[11.5px]"
+                >
+                  <HugeiconsIcon icon={t.icon} size={12} strokeWidth={1.75} />
+                  <span>{t.label}</span>
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </div>
         </Tabs>
-        {!IS_MAC && <WindowControls closeOnly />}
+        <div className="shrink-0 pl-1">
+          <WindowControls closeOnly />
+        </div>
       </header>
 
-      <main className="min-h-0 flex-1 overflow-y-auto px-8 pt-6 pb-7 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <main className="min-h-0 flex-1 overflow-y-auto px-6 pt-6 pb-7 sm:px-8 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <div className="mx-auto w-full max-w-160">
           {ActiveSection ? (
             <Suspense
