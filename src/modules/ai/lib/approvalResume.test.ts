@@ -287,6 +287,20 @@ describe("isResumingApproval", () => {
     expect(isResumingApproval([])).toBe(false);
   });
 
+  it("returns false when approval-responded was in an earlier step of the last assistant message", () => {
+    const history = [
+      user("u1"),
+      assistant("a1", [
+        { type: "step-start" },
+        call("approval-responded", "c1", { id: "ap1", approved: true }),
+        { type: "step-start" },
+        { ...call("output-available", "c1"), output: { ok: true } },
+        { type: "text", text: "Finished successfully." },
+      ]),
+    ];
+    expect(isResumingApproval(history)).toBe(false);
+  });
+
   it("does not treat a restored session with approval in the middle as resuming", async () => {
     // Simulates: user approves, the run continues with more turns, then the
     // app restarts. The restored history has approval-responded buried in the

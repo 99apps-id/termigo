@@ -102,34 +102,43 @@ export type ChatLike = {
   }>;
 };
 
-/** Check if any assistant message in the chat has an active or unfinished tool call */
+/** Check if the latest assistant turn in the chat has an active or unfinished tool call */
 export function hasActiveToolCalls(chat: ChatLike | null | undefined): boolean {
-  if (!chat?.messages) return false;
-  for (let i = chat.messages.length - 1; i >= 0; i--) {
-    const m = chat.messages[i];
-    if (m.role !== "assistant") continue;
-    for (const p of m.parts ?? []) {
-      const part = p as {
-        state?: string;
-        type?: string;
-        output?: unknown;
-      };
+  if (!chat?.messages || chat.messages.length === 0) return false;
+  const lastMsg = chat.messages[chat.messages.length - 1];
+  if (!lastMsg || lastMsg.role !== "assistant") return false;
+  const parts = lastMsg.parts ?? [];
+  const lastStepStartIndex = parts.reduce(
+    (lastIndex, part: { type?: string }, index) =>
+      part.type === "step-start" ? index : lastIndex,
+    -1,
+  );
+  const candidateParts =
+    lastStepStartIndex >= 0
+      ? parts.slice(lastStepStartIndex + 1)
+      : parts;
+  for (const p of candidateParts) {
+    const part = p as {
+      state?: string;
+      type?: string;
+      output?: unknown;
+    };
+    if (
+      typeof part.type === "string" &&
+      (part.type.startsWith("tool-") || part.type === "dynamic-tool")
+    ) {
       if (
-        typeof part.type === "string" &&
-        (part.type.startsWith("tool-") || part.type === "dynamic-tool")
+        part.state === "input-available" ||
+        part.state === "approval-responded" ||
+        part.state === "input-streaming" ||
+        part.state === "call" ||
+        (part.state !== "output-available" &&
+          part.state !== "output-error" &&
+          part.state !== "result" &&
+          part.output === undefined &&
+          part.state !== "approval-requested")
       ) {
-        if (
-          part.state === "input-available" ||
-          part.state === "approval-responded" ||
-          part.state === "input-streaming" ||
-          part.state === "call" ||
-          (part.state !== "output-available" &&
-            part.state !== "output-error" &&
-            part.state !== "result" &&
-            part.output === undefined)
-        ) {
-          return true;
-        }
+        return true;
       }
     }
   }

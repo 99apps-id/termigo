@@ -16,7 +16,16 @@ import type { UIMessage } from "ai";
 export function isResumingApproval(messages: readonly UIMessage[]): boolean {
   const last = messages[messages.length - 1];
   if (last?.role !== "assistant") return false;
-  return last.parts.some(
+  const lastStepStartIndex = last.parts.reduce(
+    (lastIndex, part: { type?: string }, index) =>
+      part.type === "step-start" ? index : lastIndex,
+    -1,
+  );
+  const candidateParts =
+    lastStepStartIndex >= 0
+      ? last.parts.slice(lastStepStartIndex + 1)
+      : last.parts;
+  return candidateParts.some(
     (part: unknown) =>
       (part as { state?: string }).state === "approval-responded",
   );

@@ -130,31 +130,40 @@ function Bridge({
   const approvalsPending = pendingApprovals.length;
 
   const hasActiveTools = useMemo(() => {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const m = messages[i];
-      if (m.role !== "assistant") continue;
-      for (const p of m.parts) {
-        const part = p as {
-          state?: string;
-          type?: string;
-          output?: unknown;
-        };
+    if (messages.length === 0) return false;
+    const m = messages[messages.length - 1];
+    if (m?.role !== "assistant") return false;
+    const lastStepStartIndex = m.parts.reduce(
+      (lastIndex, part: { type?: string }, index) =>
+        part.type === "step-start" ? index : lastIndex,
+      -1,
+    );
+    const candidateParts =
+      lastStepStartIndex >= 0
+        ? m.parts.slice(lastStepStartIndex + 1)
+        : m.parts;
+    for (const p of candidateParts) {
+      const part = p as {
+        state?: string;
+        type?: string;
+        output?: unknown;
+      };
+      if (
+        part.type?.startsWith("tool-") ||
+        part.type === "dynamic-tool"
+      ) {
         if (
-          part.type?.startsWith("tool-") ||
-          part.type === "dynamic-tool"
+          part.state === "input-available" ||
+          part.state === "approval-responded" ||
+          part.state === "input-streaming" ||
+          part.state === "call" ||
+          (part.state !== "output-available" &&
+            part.state !== "output-error" &&
+            part.state !== "result" &&
+            part.output === undefined &&
+            part.state !== "approval-requested")
         ) {
-          if (
-            part.state === "input-available" ||
-            part.state === "approval-responded" ||
-            part.state === "input-streaming" ||
-            part.state === "call" ||
-            (part.state !== "output-available" &&
-              part.state !== "output-error" &&
-              part.state !== "result" &&
-              part.output === undefined)
-          ) {
-            return true;
-          }
+          return true;
         }
       }
     }
@@ -166,7 +175,7 @@ function Bridge({
     if (approvalsPending > 0) runStatus = "awaiting-approval";
     else if (status === "submitted") runStatus = "thinking";
     else if (status === "streaming") runStatus = "streaming";
-    else if (hasActiveTools) runStatus = "thinking";
+    else if (isResumingApproval(messages) || hasActiveTools) runStatus = "thinking";
     else if (status === "error") runStatus = "error";
     else runStatus = "idle";
     patch({
@@ -176,7 +185,7 @@ function Bridge({
       ...(runStatus === "idle" || runStatus === "error" ? { step: null } : {}),
       ...(runStatus === "idle" ? { error: null } : {}),
     });
-  }, [status, approvalsPending, pendingApprovals, hasActiveTools, patch]);
+  }, [status, approvalsPending, pendingApprovals, hasActiveTools, messages, patch]);
 
   // A run that stopped leaves its `in_progress` todo saying work is under way,
   // and nothing ever revisits it - this app's own store had five frozen that

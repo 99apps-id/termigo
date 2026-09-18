@@ -176,6 +176,36 @@ describe("hasActiveToolCalls", () => {
     ]);
     expect(hasActiveToolCalls(chat)).toBe(true);
   });
+
+  it("returns false when unfinished tool was in a previous message", () => {
+    const chat = chatWith([
+      {
+        role: "assistant",
+        parts: [{ type: "tool-bash_run", state: "approval-responded" }],
+      },
+      {
+        role: "user",
+        parts: [{ type: "text", text: "next question" }],
+      },
+    ]);
+    expect(hasActiveToolCalls(chat)).toBe(false);
+  });
+
+  it("returns false when approval-responded was in an earlier step and latest step completed", () => {
+    const chat = chatWith([
+      {
+        role: "assistant",
+        parts: [
+          { type: "step-start" },
+          { type: "tool-bash_run", state: "approval-responded" },
+          { type: "step-start" },
+          { type: "tool-read_file", state: "output-available", output: "ok" },
+          { type: "text", text: "All done." },
+        ],
+      },
+    ]);
+    expect(hasActiveToolCalls(chat)).toBe(false);
+  });
 });
 
 describe("runBusy", () => {
