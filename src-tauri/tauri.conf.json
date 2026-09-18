@@ -40,7 +40,7 @@
     ],
     "targets": "all",
     "createUpdaterArtifacts": false,
-    "copyright": "Copyright 2026 99apps-id (fork of Terax by Crynta)",
+    "copyright": "Copyright 2026 99apps-id",
     "license": "Apache-2.0",
     "publisher": "99apps-id",
     "icon": [

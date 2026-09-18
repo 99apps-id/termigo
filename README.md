@@ -34,9 +34,9 @@ fully local models, a code editor, file explorer, source control with a git
 graph, and a web preview pane, all in one window. **No telemetry. No account.**
 Your API keys stay in the OS keychain or with the provider's own CLI.
 
-This project is a **fork of [Terax](https://github.com/crynta/terax-ai)**
-(by Crynta, Apache-2.0), extended with a **Go command-line companion**
-(`termi-go`) for automation: agent runs, MCP, skills, and project scaffolding.
+Termigo is an independent, standalone AI-native development environment maintained
+by **99apps-id**, extended with a **Go command-line companion** (`termi-go`) for
+automation: agent runs, MCP, skills, and project scaffolding.
 
 ## Features
 
@@ -696,17 +696,16 @@ headlessly lives in `cli/internal/` first.
 
 ## Credits
 
-Termigo is a **fork of [Terax](https://github.com/crynta/terax-ai)** by
-[Crynta](https://github.com/crynta) (Apache-2.0). The Tauri/Rust backend, the
-xterm.js terminal, the CodeMirror editor, and the AI agent pipeline are the
-work of Crynta and the Terax contributors. If Termigo is useful, please star
-upstream [Terax](https://github.com/crynta/terax-ai).
+Termigo was originally founded upon core components from [Terax](https://github.com/crynta/terax-ai)
+by [Crynta](https://github.com/crynta) (Apache-2.0). The initial Tauri/Rust backend,
+xterm.js terminal integration, CodeMirror editor, and AI pipeline foundations originated
+in the work of Crynta and the Terax contributors.
 
 The design also draws inspiration from
-[TEDI](https://github.com/IlhamriSKY/TEDI) (a Terax fork by Ilham Riski
-Wibowo) for its "one window, many tools" direction. No TEDI source code is
+[TEDI](https://github.com/IlhamriSKY/TEDI) (by Ilham Riski Wibowo)
+for its "one window, many tools" direction. No TEDI source code is
 included in this repository.
 
 ## License
 
-[Apache-2.0](LICENSE), the same license as the upstream Terax project.
+[Apache-2.0](LICENSE).

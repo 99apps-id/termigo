@@ -26,9 +26,7 @@ For the architecture and how to contribute safely, see [TERMIGO.md](TERMIGO.md) 
 
 ## Where to discuss
 
-Discord: [Crynta OS](https://discord.gg/tyveTUyEp7)
-
-Use Discord for design discussion, scope questions, "should I work on X?", quick feedback. Use GitHub Issues for tracking concrete bugs and features.
+Use [GitHub Issues and Discussions](https://github.com/99apps-id/termigo) for design discussion, scope questions, "should I work on X?", quick feedback, and tracking concrete bugs and features.
 
 ## What makes a good contribution
 
@@ -36,7 +34,7 @@ These get merged fast:
 
 - **Bug fixes** with clear reproduction steps.
 - **Docs / typos / small UX fixes** - open a PR directly.
-- **Pre-discussed features** - alignment in an issue or Discord first.
+- **Pre-discussed features** - alignment in an issue or discussion first.
 - **Small, focused changes** - easy to review, low risk.
 
 If your change is small and obvious (typo, narrow bugfix, small docs change), open a PR directly. No issue required.
