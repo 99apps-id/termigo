@@ -18,7 +18,13 @@ export type ApprovalDecision =
   | "allow-always"
   | "deny";
 
-/** True when the decision approves the call (as opposed to denying it). */
+/**
+ * True when the decision approves the call (as opposed to denying it).
+ *
+ * Deliberately fail-open: `deny` is the only denying member of
+ * `ApprovalDecision`, so every allow-variant counts as approval. Do not invert
+ * this into a fail-closed check, that would start refusing valid allow-* values.
+ */
 export function isApprovedDecision(d: ApprovalDecision): boolean {
   return d !== "deny";
 }
@@ -49,12 +55,22 @@ export async function cleanupStaleApprovals(): Promise<number> {
 
 /** Start periodic stale-approval cleanup so runtime approvals cannot hang
  * forever if the app stays open without a restart. */
+let periodicStaleCleanupId: number | null = null;
+
 export function startPeriodicStaleApprovalCleanup(): (() => void) | void {
   if (typeof window === "undefined") return;
-  const id = window.setInterval(() => {
+  // Idempotent on purpose: the caller keeps only the latest stopper, so a second
+  // start would leave the previous interval running with no way to clear it.
+  if (periodicStaleCleanupId !== null) return;
+  periodicStaleCleanupId = window.setInterval(() => {
     cleanStaleApprovalsNow();
   }, STALE_CLEANUP_INTERVAL_MS);
-  return () => window.clearInterval(id);
+  return () => {
+    if (periodicStaleCleanupId !== null) {
+      window.clearInterval(periodicStaleCleanupId);
+    }
+    periodicStaleCleanupId = null;
+  };
 }
 
 /**
