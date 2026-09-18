@@ -209,12 +209,14 @@ describe("progressFormat", () => {
     });
 
     it("names each way a run can end", () => {
-      const card = (outcome: "done" | "stopped" | "step-cap" | "error") =>
-        formatCompletionCard({ status: "idle", completed: true, outcome });
+      const card = (
+        outcome: "done" | "stopped" | "step-cap" | "error" | "still-running",
+      ) => formatCompletionCard({ status: "idle", completed: true, outcome });
       expect(card("done")).toContain("✓ Done");
       expect(card("stopped")).toContain("⏹ Stopped");
       expect(card("step-cap")).toContain("⏸ Step limit reached");
       expect(card("error")).toContain("✗ Ended with error");
+      expect(card("still-running")).toContain("Working in background");
     });
 
     it("states how much was finished and how long it took", () => {

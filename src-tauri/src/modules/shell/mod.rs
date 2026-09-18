@@ -35,7 +35,7 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
     "find", "ls", "stat", "file", "xxd", "hexdump", "od",
     "git", "npm", "pnpm", "yarn", "cargo", "go", "python", "python3",
     "node", "deno", "bun", "make", "just", "task",
-    "echo", "printf", "test", "true", "false", "pwd", "cd", "sleep",
+    "echo", "printf", "test", "true", "false", "pwd", "cd", "sleep", "rm", "cp", "mv", "del",
     "which", "where", "type", "command", "hash",
     "diff", "cmp", "comm", "patch", "jq", "yq",
     "tar", "gzip", "gunzip", "zip", "unzip",
@@ -67,7 +67,7 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
     "Test-Path", "Select-Object", "Select-String", "Where-Object", "ForEach-Object",
     "Measure-Object", "Sort-Object", "Group-Object", "Out-String", "Out-Null", "Out-File",
     "Write-Output", "Write-Host", "Remove-Item", "New-Item", "Copy-Item", "Move-Item", "Clear-Content",
-    "Set-Content", "Add-Content", "Start-Process", "Stop-Process", "Get-Process",
+    "Set-Content", "Add-Content", "Start-Process", "Stop-Process", "Get-Process", "Start-Sleep",
     "Get-Command", "Resolve-Path", "Split-Path", "Join-Path", "Expand-Archive", "Compress-Archive",
     "Invoke-WebRequest", "Invoke-RestMethod", "ConvertFrom-Json", "ConvertTo-Json",
     "Get-NetTCPConnection", "Get-NetIPAddress", "Get-NetRoute", "Test-NetConnection",
@@ -128,7 +128,7 @@ fn is_env_var_assignment(token: &str) -> bool {
 /// For wrappers (`wsl`, `sudo`, `doas`), unpacks flags and options (including
 /// those taking arguments like `-u <user>`, `-g <group>`, `-d <distro>`) to find the
 /// target program being executed. Chained wrappers (e.g. `wsl sudo apt update`)
-/// are unwrapped sequentially so that `wsl sudo rm -rf /` fails on `rm`, while
+/// are unwrapped sequentially so that `wsl sudo unallowed_binary --flag` fails on `unallowed_binary`, while
 /// `wsl sudo apt update` succeeds on `apt`. If no subcommand follows (e.g. `sudo -l`,
 /// `wsl --status`), the wrapper itself is checked.
 fn extract_effective_program(segment: &str) -> &str {
@@ -333,8 +333,8 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
 
     // 2. Reject metacharacters outside quotes, and split the command into
     //    `&&`/`||`/`|`/`;`-separated segments. `&&`/`||`/`|`/`;` are allowed as separators,
-    //    but every segment's program is checked in step 3 - so `git && rm -rf /` is
-    //    refused on `rm`, which was the hole when only the first token was read.
+    //    but every segment's program is checked in step 3 - so `git && unallowed_binary` is
+    //    refused on `unallowed_binary`, which was the hole when only the first token was read.
     let mut in_quote = false;
     let mut quote_char = '\0';
     let mut prev = '\0';
@@ -346,11 +346,27 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
     while i < chars.len() {
         let c = chars[i];
         if !in_quote && (c == '"' || c == '\'') {
-            in_quote = true;
-            quote_char = c;
-        } else if in_quote && c == quote_char && prev != '\\' {
-            in_quote = false;
-            quote_char = '\0';
+            let mut backslashes = 0;
+            let mut j = i;
+            while j > 0 && chars[j - 1] == '\\' {
+                backslashes += 1;
+                j -= 1;
+            }
+            if backslashes % 2 == 0 {
+                in_quote = true;
+                quote_char = c;
+            }
+        } else if in_quote && c == quote_char {
+            let mut backslashes = 0;
+            let mut j = i;
+            while j > 0 && chars[j - 1] == '\\' {
+                backslashes += 1;
+                j -= 1;
+            }
+            if backslashes % 2 == 0 {
+                in_quote = false;
+                quote_char = '\0';
+            }
         } else if !in_quote {
             // Stderr redirection `2>&1` merges streams rather than writing files or chaining commands.
             // Preserve it intact without adding `>` or `&` to the metacharacter reject list.
@@ -431,7 +447,7 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
 
     // 3. Every segment must start with an allowlisted program (or an absolute /
     //    rooted path). Checking each segment - not just the first - is what
-    //    makes `git status && rm -rf /` fail on `rm`.
+    //    makes `git status && unallowed_binary` fail on `unallowed_binary`.
     let segments: Vec<&str> = segments
         .iter()
         .map(|s| s.trim())
@@ -1153,6 +1169,9 @@ mod tests_sandbox {
         assert!(validate_shell_command("rm -f /tmp/test/foo").is_ok());
         assert!(validate_shell_command("mkdir -p /tmp/test && rm -f /tmp/test/foo").is_ok());
         assert!(validate_shell_command("rmdir /tmp/test").is_ok());
+        assert!(validate_shell_command("cp src.txt dst.txt").is_ok());
+        assert!(validate_shell_command("mv src.txt dst.txt").is_ok());
+        assert!(validate_shell_command("del file.txt").is_ok());
     }
 
     #[test]
@@ -1329,6 +1348,7 @@ mod tests_sandbox {
             "Select-Object -First 10",
             "Select-String -Pattern \"fn\" mod.rs",
             "Remove-Item -Recurse ./dist",
+            "Start-Sleep -Seconds 2",
             "findstr /i \"hello\" test.txt",
             "tasklist",
         ] {
@@ -1408,6 +1428,28 @@ mod tests_sandbox {
                 assert!(e.contains("PTY session"), "{e}");
             }
         }
+    }
+
+    /// An escaped quote (odd number of backslashes before it) keeps the quote open,
+    /// while an even number of backslashes before a quote closes it, so any
+    /// subsequent semicolon is recognized as a segment boundary.
+    #[test]
+    fn validate_shell_command_counts_backslashes_before_quotes() {
+        // Even number of backslashes before a quote closes the quote,
+        // so a subsequent semicolon starts a new segment that must be allowlisted.
+        assert!(validate_shell_command(r#"cat "file.txt\\"; definitely-not-a-tool"#).is_err());
+        assert!(validate_shell_command(r#"cat "file.txt\\"; git status"#).is_ok());
+
+        // Odd number of backslashes before a quote means the quote is escaped
+        // and stays open, so semicolons inside remain part of the argument.
+        assert!(validate_shell_command(r#"cat "file.txt\"; echo safe""#).is_ok());
+
+        // Escaped quote left unclosed at EOF must be rejected.
+        assert!(validate_shell_command(r#"echo foo\"bar""#).is_err());
+        assert!(validate_shell_command(r#"echo "foo\"bar"#).is_err());
+
+        // A normal quote pair is still accepted when followed by safe text.
+        assert!(validate_shell_command(r#"echo "hello world""#).is_ok());
     }
 }
 

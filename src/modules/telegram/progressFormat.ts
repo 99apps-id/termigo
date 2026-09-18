@@ -682,13 +682,14 @@ export function formatToolActivity(t: ToolCallSummary): string {
  * run that hit the step limit and a run that failed all closed with the same
  * word as a clean finish.
  */
-export type RunOutcome = "done" | "stopped" | "step-cap" | "error";
+export type RunOutcome = "done" | "stopped" | "step-cap" | "error" | "still-running";
 
 const OUTCOME_LABELS: Record<RunOutcome, string> = {
   done: "✓ Done",
   stopped: "⏹ Stopped",
   "step-cap": "⏸ Step limit reached",
   error: "✗ Ended with error",
+  "still-running": "Working in background",
 };
 
 /** `4m 12s`, or `0m 08s` under a minute. Empty when the duration is unknown. */

@@ -618,10 +618,16 @@ async function waitForReply(
   onPartial?: (text: string) => Promise<void>,
 ): Promise<string> {
   const started = Date.now();
-  const MAX_WAIT = 30 * 60 * 1000;
+  let lastActiveAt = Date.now();
+  const INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000;
+  const MAX_TOTAL_WAIT_MS = 3 * 60 * 60 * 1000;
   let everBusy = false;
   const aqStore = await import("../ai/store/approvalQueueStore");
-  while (!signal.aborted && Date.now() - started < MAX_WAIT) {
+  while (
+    !signal.aborted &&
+    Date.now() - lastActiveAt < INACTIVITY_TIMEOUT_MS &&
+    Date.now() - started < MAX_TOTAL_WAIT_MS
+  ) {
     const chat = store.getChat(sessionId);
     const appStatus = store.useChatStore.getState().agentMeta.status;
     const chatStatus = chat?.status ?? "";
@@ -634,8 +640,14 @@ async function waitForReply(
     const busy =
       runBusy(chatStatus, appStatus, pending.length > 0, activeTools) ||
       activeTools;
-    if (busy) everBusy = true;
+    if (busy) {
+      everBusy = true;
+      lastActiveAt = Date.now();
+    }
     const count = countAssistantMessages(store.getChat, sessionId);
+    if (count > baseline) {
+      lastActiveAt = Date.now();
+    }
 
     if (count > baseline) {
       // Show what the agent has written so far. Sent BEFORE the settle check on
@@ -823,6 +835,7 @@ export async function runAgentAndStream(
             sessionId,
             currentBaseline,
           );
+          settleStart = Date.now();
           stopReasonSnapshot =
             store.useChatStore.getState().agentMeta.stopReason;
           stopReasonAtEnd = stopReasonSnapshot;
@@ -1121,10 +1134,15 @@ export function startTelegramResume(chatId: number, signal: AbortSignal): void {
         ).catch(() => {});
         return;
       }
+      const meta = store.useChatStore.getState().agentMeta;
+      const isPausedOnStepCap =
+        meta.stopReason === "step-cap" &&
+        !meta.stoppedByUser &&
+        meta.status === "idle";
       const activeTools = hasActiveToolCalls(store.getChat(sessionId));
       const busy =
-        runBusy(chatStatus, appStatus, false, activeTools) ||
-        activeTools;
+        !isPausedOnStepCap &&
+        (runBusy(chatStatus, appStatus, false, activeTools) || activeTools);
       if (busy) {
         await sendTelegram(
           chatId,

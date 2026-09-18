@@ -246,7 +246,7 @@ async function runLoop(signal: AbortSignal): Promise<void> {
       const data = (await apiGet(
         `getUpdates?offset=${currentUpdateOffset}&timeout=30`,
         signal,
-        45_000,
+        50_000,
       )) as { ok: boolean; result: Update[] };
       lastPollProgressTime = Date.now();
       useTelegramStore.getState().setOnline(true);
@@ -277,6 +277,14 @@ async function runLoop(signal: AbortSignal): Promise<void> {
       }
     } catch (e) {
       if (signal.aborted) break;
+      const isTimeout =
+        e instanceof Error &&
+        (e.message.includes("Timeout after") || e.name === "TimeoutError");
+      if (isTimeout) {
+        lastPollProgressTime = Date.now();
+        useTelegramStore.getState().setOnline(true);
+        continue;
+      }
       useTelegramStore.getState().setOnline(false);
       const errMsg = e instanceof Error ? e.message : String(e);
       useTelegramStore.getState().setLastError(errMsg);

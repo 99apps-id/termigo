@@ -8,11 +8,11 @@ describe("detectCheckCommand", () => {
       scripts: { test: "vitest run", lint: "biome lint ./src" },
     });
     expect(detectCheckCommand("test", { pkgJson, cargo: null, goMod: null, pyproject: null })).toEqual({
-      command: "vitest run",
+      command: "pnpm run test",
       note: "package.json script (pnpm)",
     });
     expect(detectCheckCommand("lint", { pkgJson, cargo: null, goMod: null, pyproject: null })).toEqual({
-      command: "biome lint ./src",
+      command: "pnpm run lint",
       note: "package.json script (pnpm)",
     });
   });

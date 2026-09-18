@@ -106,10 +106,12 @@ export function detectCheckCommand(
   if (pkgJson) {
     const script = scriptCommand(pkgJson, kind);
     if (script) {
-      // A script like `"test": "vitest run"` already carries the runner, so
-      // run it directly. `"test": "run test:unit"` style also runs as-is.
       const pm = packageManager(pkgJson);
-      return { command: script, note: `package.json script (${pm})` };
+      const command =
+        script.startsWith(`${pm} `) || script.startsWith("npx ") || script.startsWith("bunx ")
+          ? script
+          : `${pm} run ${kind}`;
+      return { command, note: `package.json script (${pm})` };
     }
   }
   if (cargo) {
