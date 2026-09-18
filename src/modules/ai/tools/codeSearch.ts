@@ -90,9 +90,29 @@ export function buildCodeSearchTools(ctx: ToolContext) {
           .describe(
             "Directory to search instead of the workspace root. Pass this to search another checkout, e.g. 'C:/project/other-repo'.",
           ),
+        path: z
+          .string()
+          .optional()
+          .describe(
+            "Optional path alias. Treated as path_filter if relative, or root if absolute.",
+          ),
       }),
-      execute: async ({ query, max_results, path_filter, root: askedRoot }) => {
-        const root = targetRoot(ctx, askedRoot);
+      execute: async ({
+        query,
+        max_results,
+        path_filter: rawFilter,
+        root: askedRoot,
+        path: rawPath,
+      }) => {
+        const isAbs =
+          typeof rawPath === "string" &&
+          (rawPath.startsWith("/") ||
+            rawPath.startsWith("\\") ||
+            /^[a-zA-Z]:[/\\]/.test(rawPath));
+        const effectiveRoot = askedRoot ?? (isAbs ? rawPath : undefined);
+        const effectiveFilter = rawFilter ?? (!isAbs ? rawPath : undefined);
+
+        const root = targetRoot(ctx, effectiveRoot);
         if (!root) return { error: "no workspace root or cwd available" };
 
         const stats = await ensureIndexed(root);
@@ -102,7 +122,7 @@ export function buildCodeSearchTools(ctx: ToolContext) {
           };
         }
 
-        const results = searchCode(query, max_results ?? 10, path_filter);
+        const results = searchCode(query, max_results ?? 10, effectiveFilter);
         return {
           query,
           // Reported so a cross-repo audit can see WHICH tree answered, instead

@@ -53,12 +53,19 @@ export function repairJsonText(text: string): string {
           next === "f" ||
           next === "n" ||
           next === "r" ||
-          next === "t" ||
-          next === "u"
+          next === "t"
         ) {
           out += ch;
           escaped = true;
           continue;
+        }
+        if (next === "u") {
+          const hex = text.slice(i + 2, i + 6);
+          if (/^[0-9a-fA-F]{4}$/.test(hex)) {
+            out += ch;
+            escaped = true;
+            continue;
+          }
         }
         out += "\\\\";
         continue;
@@ -69,7 +76,7 @@ export function repairJsonText(text: string): string {
         // followed by ordinary text, it is an unescaped quote in prose and must
         // be escaped.
         let j = i + 1;
-        while (j < text.length && /[ \t]/.test(text[j])) j++;
+        while (j < text.length && /\s/.test(text[j])) j++;
         const next = text[j];
         const isStructural =
           next === undefined ||
@@ -85,7 +92,14 @@ export function repairJsonText(text: string): string {
         }
         continue;
       }
-      if (ch === "\n" || ch === "\r") {
+      if (ch === "\r") {
+        if (text[i + 1] === "\n") {
+          i++;
+        }
+        out += "\\n";
+        continue;
+      }
+      if (ch === "\n") {
         out += "\\n";
         continue;
       }
@@ -207,80 +221,120 @@ export const KNOWN_TOOL_ALIASES: Record<
   },
   run_command: {
     canonical: "bash_run",
-    adaptArgs: (a) => ({
-      command: a.command ?? a.CommandLine ?? a.cmd ?? "",
-      cwd: a.cwd ?? a.Cwd,
-    }),
+    adaptArgs: (a) => {
+      const { CommandLine, cmd, Cwd, ...rest } = a;
+      return {
+        ...rest,
+        command: a.command ?? CommandLine ?? cmd ?? "",
+        cwd: a.cwd ?? Cwd,
+      };
+    },
   },
   execute_command: {
     canonical: "bash_run",
-    adaptArgs: (a) => ({
-      command: a.command ?? a.cmd ?? "",
-      cwd: a.cwd,
-    }),
+    adaptArgs: (a) => {
+      const { cmd, ...rest } = a;
+      return {
+        ...rest,
+        command: a.command ?? cmd ?? "",
+        cwd: a.cwd,
+      };
+    },
   },
   exec: {
     canonical: "bash_run",
-    adaptArgs: (a) => ({
-      command: a.command ?? a.cmd ?? "",
-      cwd: a.cwd,
-    }),
+    adaptArgs: (a) => {
+      const { cmd, ...rest } = a;
+      return {
+        ...rest,
+        command: a.command ?? cmd ?? "",
+        cwd: a.cwd,
+      };
+    },
   },
   terminal: {
     canonical: "bash_run",
-    adaptArgs: (a) => ({
-      command: a.command ?? a.cmd ?? "",
-      cwd: a.cwd,
-    }),
+    adaptArgs: (a) => {
+      const { cmd, ...rest } = a;
+      return {
+        ...rest,
+        command: a.command ?? cmd ?? "",
+        cwd: a.cwd,
+      };
+    },
   },
   bash: {
     canonical: "bash_run",
-    adaptArgs: (a) => ({
-      command: a.command ?? a.cmd ?? "",
-      cwd: a.cwd,
-    }),
+    adaptArgs: (a) => {
+      const { cmd, ...rest } = a;
+      return {
+        ...rest,
+        command: a.command ?? cmd ?? "",
+        cwd: a.cwd,
+      };
+    },
   },
 
   // SSH aliases
   ssh: {
     canonical: "ssh_run_command",
-    adaptArgs: (a) => ({
-      command: a.command ?? a.cmd ?? a.CommandLine ?? "",
-      session_id: a.session_id ?? a.sessionId,
-      connection_id: a.connection_id ?? a.connectionId,
-    }),
+    adaptArgs: (a) => {
+      const { cmd, CommandLine, sessionId, connectionId, ...rest } = a;
+      return {
+        ...rest,
+        command: a.command ?? cmd ?? CommandLine ?? "",
+        session_id: a.session_id ?? sessionId,
+        connection_id: a.connection_id ?? connectionId,
+      };
+    },
   },
   ssh_run: {
     canonical: "ssh_run_command",
-    adaptArgs: (a) => ({
-      command: a.command ?? a.cmd ?? "",
-      session_id: a.session_id ?? a.sessionId,
-      connection_id: a.connection_id ?? a.connectionId,
-    }),
+    adaptArgs: (a) => {
+      const { cmd, sessionId, connectionId, ...rest } = a;
+      return {
+        ...rest,
+        command: a.command ?? cmd ?? "",
+        session_id: a.session_id ?? sessionId,
+        connection_id: a.connection_id ?? connectionId,
+      };
+    },
   },
   ssh_exec: {
     canonical: "ssh_run_command",
-    adaptArgs: (a) => ({
-      command: a.command ?? a.cmd ?? "",
-      session_id: a.session_id ?? a.sessionId,
-      connection_id: a.connection_id ?? a.connectionId,
-    }),
+    adaptArgs: (a) => {
+      const { cmd, sessionId, connectionId, ...rest } = a;
+      return {
+        ...rest,
+        command: a.command ?? cmd ?? "",
+        session_id: a.session_id ?? sessionId,
+        connection_id: a.connection_id ?? connectionId,
+      };
+    },
   },
   ssh_command: {
     canonical: "ssh_run_command",
-    adaptArgs: (a) => ({
-      command: a.command ?? a.cmd ?? "",
-      session_id: a.session_id ?? a.sessionId,
-      connection_id: a.connection_id ?? a.connectionId,
-    }),
+    adaptArgs: (a) => {
+      const { cmd, sessionId, connectionId, ...rest } = a;
+      return {
+        ...rest,
+        command: a.command ?? cmd ?? "",
+        session_id: a.session_id ?? sessionId,
+        connection_id: a.connection_id ?? connectionId,
+      };
+    },
   },
   remote_exec: {
     canonical: "ssh_run_command",
-    adaptArgs: (a) => ({
-      command: a.command ?? a.cmd ?? "",
-      session_id: a.session_id ?? a.sessionId,
-      connection_id: a.connection_id ?? a.connectionId,
-    }),
+    adaptArgs: (a) => {
+      const { cmd, sessionId, connectionId, ...rest } = a;
+      return {
+        ...rest,
+        command: a.command ?? cmd ?? "",
+        session_id: a.session_id ?? sessionId,
+        connection_id: a.connection_id ?? connectionId,
+      };
+    },
   },
   ssh_list: {
     canonical: "ssh_list_connections",
@@ -502,6 +556,10 @@ function applySemanticRepairs(
     "port",
     "pid",
     "delay",
+    "offset",
+    "count",
+    "index",
+    "step",
   ];
   for (const key of numericKeys) {
     if (
@@ -538,6 +596,10 @@ function applySemanticRepairs(
       p.action === "execute" ||
       p.action === "shell"
     ) {
+      p.action = "run";
+      modified = true;
+    }
+    if (!p.action && (p.command || p.cmd)) {
       p.action = "run";
       modified = true;
     }
@@ -617,14 +679,31 @@ function applySemanticRepairs(
   } else if (toolName === "code_search") {
     if (!p.query && typeof p.pattern === "string") {
       p.query = p.pattern;
+      delete p.pattern;
       modified = true;
     }
     if (!p.query && typeof p.search === "string") {
       p.query = p.search;
+      delete p.search;
       modified = true;
     }
-    if (!p.root && typeof p.path === "string") {
-      p.root = p.path;
+    if (typeof p.path === "string") {
+      const isAbs =
+        p.path.startsWith("/") ||
+        p.path.startsWith("\\") ||
+        /^[a-zA-Z]:[/\\]/.test(p.path);
+      if (isAbs) {
+        if (!p.root) {
+          p.root = p.path;
+          modified = true;
+        }
+      } else {
+        if (!p.path_filter) {
+          p.path_filter = p.path;
+          modified = true;
+        }
+      }
+      delete p.path;
       modified = true;
     }
     if (typeof p.max_results === "number") {
@@ -682,14 +761,22 @@ export async function repairToolCall({
         try {
           parsed = JSON.parse(repairJsonText(raw));
         } catch {
-          parsed = {};
+          try {
+            const { value } = await parsePartialJson(repairJsonText(raw));
+            if (value && typeof value === "object" && !Array.isArray(value)) {
+              parsed = value as Record<string, unknown>;
+            }
+          } catch {
+            parsed = {};
+          }
         }
       }
       const adapted = alias.adaptArgs ? alias.adaptArgs(parsed) : parsed;
+      const { result } = applySemanticRepairs(alias.canonical, adapted);
       return {
         toolCallId: toolCall.toolCallId,
         toolName: alias.canonical,
-        input: JSON.stringify(adapted),
+        input: JSON.stringify(result),
       };
     }
 

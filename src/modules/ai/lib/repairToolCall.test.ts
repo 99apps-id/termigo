@@ -57,6 +57,28 @@ describe("repairJsonText", () => {
     );
   });
 
+  it("doubles backslashes before non-hex u in Windows paths", () => {
+    // \users is not a valid \uXXXX unicode escape, so the backslash must be doubled
+    const input = '{"path":"C:\\users\\alice\\doc.txt"}';
+    const repaired = repairJsonText(input);
+    expect(() => JSON.parse(repaired)).not.toThrow();
+    expect(JSON.parse(repaired).path).toBe("C:\\users\\alice\\doc.txt");
+  });
+
+  it("handles multi-line formatted JSON with newlines after closing quotes", () => {
+    const input = '{\n  "query": "hello",\n  "note": "audit "route.ts""\n}';
+    const repaired = repairJsonText(input);
+    expect(() => JSON.parse(repaired)).not.toThrow();
+    expect(JSON.parse(repaired).query).toBe("hello");
+  });
+
+  it("does not duplicate newlines on CRLF", () => {
+    const input = '{"text":"line1\r\nline2"}';
+    const repaired = repairJsonText(input);
+    expect(() => JSON.parse(repaired)).not.toThrow();
+    expect(JSON.parse(repaired).text).toBe("line1\nline2");
+  });
+
   it("leaves valid JSON escapes untouched", () => {
     const input = '{"text":"line\\nquote \\" slash \\/ done"}';
     expect(repairJsonText(input)).toBe(input);
@@ -358,9 +380,10 @@ describe("repairToolCall", () => {
     expect(parsed.glob).toEqual(["src-tauri/src/modules/pty/mod.rs"]);
   });
 
-  it("repairs code_search arguments when pattern or path are used", async () => {
+  it("repairs code_search arguments when pattern or relative/absolute path are used", async () => {
     const tools = { code_search: {} };
-    const result = await repairToolCall({
+    // Relative path should map to path_filter
+    const resultRel = await repairToolCall({
       tools,
       toolCall: {
         toolCallId: "cs-2",
@@ -371,10 +394,29 @@ describe("repairToolCall", () => {
         }),
       },
     });
-    expect(result).not.toBeNull();
-    const parsed = JSON.parse(result!.input);
-    expect(parsed.query).toBe("setActiveId");
-    expect(parsed.root).toBe("src/modules/ai");
+    expect(resultRel).not.toBeNull();
+    const parsedRel = JSON.parse(resultRel!.input);
+    expect(parsedRel.query).toBe("setActiveId");
+    expect(parsedRel.path_filter).toBe("src/modules/ai");
+    expect(parsedRel.path).toBeUndefined();
+
+    // Absolute path should map to root
+    const resultAbs = await repairToolCall({
+      tools,
+      toolCall: {
+        toolCallId: "cs-3",
+        toolName: "code_search",
+        input: JSON.stringify({
+          query: "setActiveId",
+          path: "C:/project/other-repo",
+        }),
+      },
+    });
+    expect(resultAbs).not.toBeNull();
+    const parsedAbs = JSON.parse(resultAbs!.input);
+    expect(parsedAbs.root).toBe("C:/project/other-repo");
+    expect(parsedAbs.path_filter).toBeUndefined();
+    expect(parsedAbs.path).toBeUndefined();
   });
 
   it("applies semantic repairs on malformed near-JSON tool inputs", async () => {
