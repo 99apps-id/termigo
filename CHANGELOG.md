@@ -41,6 +41,17 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **A workflow step can no longer dispatch into another run's tool set.**
+  `buildTools` published its completed tool map to a module-level
+  `currentToolRegistry`, and `runWorkflow` defaulted its `dispatch` parameter to
+  a reader of that global. A workflow that spawned a subagent therefore let the
+  subagent's `buildTools` overwrite the parent's registry, so the parent's
+  remaining steps dispatched into the child's tool set - the same leak the
+  in-run snapshot was added to prevent, still reachable through the default
+  argument. The dispatcher is now required, and each `buildTools` call binds its
+  workflow steps to a run-scoped cell that no other run can reach.
+  `currentToolRegistry`, `dispatchTool` and `resetToolRegistry` are gone.
+
 - **React 19 concurrent mode tabs state race.** Decoupled `setActiveId` from `setTabs` updaters in
   `src/modules/tabs/lib/useTabs.ts`, preventing React 19 concurrent-mode state race conditions during
   tab close and workspace cleanup.

@@ -3,7 +3,6 @@ import { z } from "zod";
 import { native } from "../lib/native";
 import { useChatStore } from "../store/chatStore";
 import type { ToolContext } from "./context";
-import { dispatchTool } from "./tools";
 
 /**
  * Agentic Workflow Engine
@@ -123,9 +122,9 @@ function isErrorOutput(output: unknown): output is { error: string } {
 }
 
 /**
- * Execute a single workflow step by dispatching to the live tool registry.
+ * Execute a single workflow step through the caller's dispatcher.
  *
- * Steps with a `tool` field are forwarded to `dispatchTool`, which looks up
+ * Steps with a `tool` field are forwarded to the dispatcher, which looks up
  * the tool by name and runs its `execute` function. Steps without a tool
  * fall through to a seeded result (used by the orchestrator's depends_on
  * plumbing).
@@ -163,7 +162,7 @@ async function executeStep(
 export async function runWorkflow(
   workflow: WorkflowDefinition,
   initialContext: Record<string, unknown> = {},
-  dispatch: ToolDispatcher = dispatchTool,
+  dispatch: ToolDispatcher,
   abortSignal?: AbortSignal,
 ): Promise<WorkflowRunResult> {
   const completed = new Set<string>();
@@ -259,7 +258,7 @@ export async function runWorkflow(
 
 export function buildWorkflowTools(
   _ctx: ToolContext,
-  dispatch?: ToolDispatcher,
+  dispatch: ToolDispatcher,
 ) {
   return {
     list_workflows: tool({

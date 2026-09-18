@@ -1,18 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { dispatchTool } = vi.hoisted(() => ({
-  dispatchTool:
-    vi.fn<(name: string, args: Record<string, unknown>) => Promise<unknown>>(),
-}));
-
-vi.mock("./tools", () => ({ dispatchTool }));
-
 import {
   listWorkflowNames,
   loadWorkflow,
   runWorkflow,
   type WorkflowDefinition,
 } from "./workflow";
+
+type Dispatch = (
+  name: string,
+  args: Record<string, unknown>,
+) => Promise<unknown>;
+
+const makeDispatch = () => vi.fn<Dispatch>().mockResolvedValue({ ok: true });
+
+let dispatch = makeDispatch();
 
 function def(overrides: Partial<WorkflowDefinition> = {}): WorkflowDefinition {
   return {
@@ -24,7 +26,7 @@ function def(overrides: Partial<WorkflowDefinition> = {}): WorkflowDefinition {
 }
 
 beforeEach(() => {
-  dispatchTool.mockReset().mockResolvedValue({ ok: true });
+  dispatch = makeDispatch();
 });
 
 describe("runWorkflow", () => {
@@ -36,7 +38,7 @@ describe("runWorkflow", () => {
       ],
     });
 
-    const result = await runWorkflow(workflow);
+    const result = await runWorkflow(workflow, {}, dispatch);
     expect(result.workflowName).toBe("demo");
     expect(result.completed).toEqual(["a", "b"]);
     expect(result.failed).toEqual([]);
@@ -54,7 +56,7 @@ describe("runWorkflow", () => {
       ],
     });
 
-    const result = await runWorkflow(workflow);
+    const result = await runWorkflow(workflow, {}, dispatch);
     expect(result.completed).toEqual(["a", "b", "c"]);
   });
 
@@ -67,9 +69,11 @@ describe("runWorkflow", () => {
       ],
     });
 
-    const result = await runWorkflow(workflow, {
-      a: { ok: false, error: "boom" },
-    });
+    const result = await runWorkflow(
+      workflow,
+      { a: { ok: false, error: "boom" } },
+      dispatch,
+    );
     expect(result.completed).toEqual([]);
     expect(result.failed).toEqual(["a"]);
     expect(result.skipped).toEqual(["b", "c"]);
@@ -84,9 +88,11 @@ describe("runWorkflow", () => {
       ],
     });
 
-    const result = await runWorkflow(workflow, {
-      a: { ok: false, error: "soft" },
-    });
+    const result = await runWorkflow(
+      workflow,
+      { a: { ok: false, error: "soft" } },
+      dispatch,
+    );
     expect(result.completed).toEqual(["b"]);
     expect(result.failed).toEqual(["a"]);
     expect(result.skipped).toEqual([]);
@@ -94,7 +100,7 @@ describe("runWorkflow", () => {
   });
 
   it("stops and skips dependents when a dispatched tool returns an error", async () => {
-    dispatchTool.mockResolvedValueOnce({ error: "approval denied" });
+    dispatch.mockResolvedValueOnce({ error: "approval denied" });
     const result = await runWorkflow(
       def({
         steps: [
@@ -102,11 +108,27 @@ describe("runWorkflow", () => {
           { id: "verify", tool: "run_checks", depends_on: ["write"] },
         ],
       }),
+      {},
+      dispatch,
     );
 
     expect(result.failed).toEqual(["write"]);
     expect(result.skipped).toEqual(["verify"]);
-    expect(dispatchTool).toHaveBeenCalledTimes(1);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+  });
+
+  it("never leaks one run's dispatcher into another", async () => {
+    const other = makeDispatch();
+    const workflow = def({ steps: [{ id: "a", tool: "noop" }] });
+
+    await Promise.all([
+      runWorkflow(workflow, {}, dispatch),
+      runWorkflow(workflow, {}, other),
+    ]);
+
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(other).toHaveBeenCalledTimes(1);
+    expect(other).toHaveBeenCalledWith("noop", expect.anything());
   });
 });
 

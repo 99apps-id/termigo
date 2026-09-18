@@ -225,11 +225,14 @@ export function buildTools(
   opts: { findToolsName?: string } = {},
 ) {
   // A workflow can spawn a subagent, and that subagent builds another toolset.
-  // Keep workflow steps bound to this run's completed snapshot so they cannot
-  // fall through the mutable module-level registry into the child's context.
-  let dispatchForThisRun = dispatchTool;
+  // Keep workflow steps bound to this run's completed snapshot: the set is only
+  // complete after wrapping, so the dispatcher reads a run-scoped cell that is
+  // filled in at the end of this function. A shared registry would let the
+  // child's `buildTools` overwrite the parent's, and a step would silently
+  // dispatch into the child's tool set.
+  const runTools: { registry?: Record<string, unknown> } = {};
   const workflowTools = buildWorkflowTools(ctx, (name, args) =>
-    dispatchForThisRun(name, args),
+    dispatchRegisteredTool(runTools.registry ?? {}, name, args),
   );
   const partial = {
     ...buildFsTools(ctx),
@@ -299,10 +302,6 @@ export function buildTools(
     }),
   };
 
-  // Store a reference so the workflow / orchestrator engines can dispatch
-  // JSON-defined steps to the real tool implementations.
-  currentToolRegistry = base as unknown as Record<string, unknown>;
-
   // Wrap every tool with lifecycle hooks. The wrapper is transparent: it
   // fires PreToolUse before the real execute and PostToolUse after, and
   // swallows any hook failure so a broken hook never changes the result.
@@ -362,13 +361,8 @@ export function buildTools(
     ...skillTools,
   } as const;
 
+  runTools.registry = full as unknown as Record<string, unknown>;
   currentToolRegistry = full as unknown as Record<string, unknown>;
-  dispatchForThisRun = (name, args) =>
-    dispatchRegisteredTool(
-      full as unknown as Record<string, unknown>,
-      name,
-      args,
-    );
 
   // Skill tools last, and told what the others are called: the dependency
   // checker compares a skill against the real registry rather than a list kept
