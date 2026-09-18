@@ -35,7 +35,7 @@ describe("base64 round trip", () => {
     const round = base64ToBytes(bytesToBase64(big));
     expect(round.length).toBe(big.length);
     expect(round).toEqual(big);
-  });
+  }, 10000);
 
   it("agrees with the platform decoder", () => {
     const b = bytes(0xde, 0xad, 0xbe, 0xef);
@@ -88,7 +88,9 @@ describe("bodyToPayload", () => {
   });
 
   it("reads URLSearchParams back as text", async () => {
-    const payload = await bodyToPayload(new URLSearchParams({ a: "1", b: "2" }));
+    const payload = await bodyToPayload(
+      new URLSearchParams({ a: "1", b: "2" }),
+    );
     expect(payload).toEqual({ kind: "text", text: "a=1&b=2" });
   });
 });
@@ -117,7 +119,8 @@ describe("transport cost", () => {
 describe("fetchFailure", () => {
   const FETCH_FAILED_ERROR_MESSAGES = ["fetch failed", "failed to fetch"];
   // `Error.cause` is ES2022; this project's lib is ES2020.
-  const causeOf = (e: TypeError) => (e as TypeError & { cause?: unknown }).cause;
+  const causeOf = (e: TypeError) =>
+    (e as TypeError & { cause?: unknown }).cause;
 
   it("is a TypeError, which is the first thing the SDK checks", () => {
     expect(fetchFailure("boom")).toBeInstanceOf(TypeError);

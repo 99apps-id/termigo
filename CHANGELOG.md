@@ -8,6 +8,17 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Release automation via GitHub Actions (`release.yml`).
+- Bersihkan berkas log build yang tidak perlu dari direktori proyek.
+
+### Changed
+
+- Bump versi aplikasi ke 0.9.18 di `package.json`, `Cargo.toml`, dan `tauri.conf.json`.
+
+## [0.9.18] - 2026-01-16
+
+### Added
+
 - **Global subagent concurrency pool and hierarchical slot yielding.** `SubagentConcurrencyPool`
   (`src/modules/ai/lib/subagentPool.ts`) caps active concurrent subagents across the app (limit 4).
   Parents yield their concurrency slot via `ctx.yieldSlot()` while waiting on child tasks,
