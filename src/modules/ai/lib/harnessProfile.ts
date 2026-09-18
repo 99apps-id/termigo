@@ -161,7 +161,11 @@ export function applyProfileToStepBudget(
 ): number {
   let budget = base;
   if (profile.stepBudgetDelta) budget += profile.stepBudgetDelta;
-  if (profile.stepBudgetDelta && budget < 1) budget = 1;
+  // The floor must not depend on a delta being present. A base of 0, a negative
+  // base, or NaN all defeat stepCountIs (NaN never compares true), and the step
+  // budget is the only guard on a deliberately non-self-terminating tool-only
+  // run, so an unbounded loop is the failure mode to avoid here.
+  if (!Number.isFinite(budget) || budget < 1) budget = 1;
   if (profile.stepBudgetCap && profile.stepBudgetCap > 0) {
     budget = Math.min(budget, profile.stepBudgetCap);
   }

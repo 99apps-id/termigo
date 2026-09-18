@@ -292,7 +292,9 @@ export function sanitizeForTelegramHtml(text: string): string {
 
 /** Convert plain text for Telegram HTML parse_mode without interpreting markdown. */
 export function escapePlainTextToHtml(text: string): string {
-  return sanitizeForTelegramHtml(escapeHtml(text)).replace(/\n/g, "\n");
+  // Normalise CRLF first: escapeHtml leaves CR alone and the sanitizer keeps it,
+  // so without this a Windows line ending reached Telegram verbatim.
+  return sanitizeForTelegramHtml(escapeHtml(text.replace(/\r\n?/g, "\n")));
 }
 
 /**
@@ -746,7 +748,11 @@ export function renderAnswerSnippet(text: string, max = 700): string {
   const body = text.trim();
   if (body.length === 0) return "";
   if (body.length <= max) return body;
-  const half = Math.floor((max - 5) / 2);
+  // The ellipsis separator plus the worst-case fence and stray-backtick padding
+  // is added AFTER the split, so reserve it up front or the result overshoots
+  // `max` (and the 4096 budget this helper exists to protect).
+  const PADDING = 3 + 4 + 4 + 1 + 1;
+  const half = Math.max(0, Math.floor((max - PADDING) / 2));
   let head = body.slice(0, half);
   let tail = body.slice(-half);
 

@@ -306,7 +306,7 @@ fn read_file_sync_inner(p: &Path, meta: &std::fs::Metadata, force: bool) -> Resu
             return Ok(ReadResult::Text {
                 content,
                 size,
-                mtime: mtime_millis(&meta),
+                mtime: mtime_millis(meta),
             });
         }
     }
@@ -326,7 +326,7 @@ fn read_file_sync_inner(p: &Path, meta: &std::fs::Metadata, force: bool) -> Resu
         Ok(content) => Ok(ReadResult::Text {
             content,
             size,
-            mtime: mtime_millis(&meta),
+            mtime: mtime_millis(meta),
         }),
         Err(e) => {
             let raw = e.into_bytes();
@@ -335,7 +335,7 @@ fn read_file_sync_inner(p: &Path, meta: &std::fs::Metadata, force: bool) -> Resu
                 Ok(ReadResult::Text {
                     content,
                     size,
-                    mtime: mtime_millis(&meta),
+                    mtime: mtime_millis(meta),
                 })
             } else {
                 Ok(ReadResult::Binary { size })

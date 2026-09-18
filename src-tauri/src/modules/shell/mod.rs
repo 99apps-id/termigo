@@ -69,7 +69,7 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
     "Write-Output", "Write-Host", "Remove-Item", "New-Item", "Copy-Item", "Move-Item", "Clear-Content",
     "Set-Content", "Add-Content", "Start-Process", "Stop-Process", "Get-Process",
     "Get-Command", "Resolve-Path", "Split-Path", "Join-Path", "Expand-Archive", "Compress-Archive",
-    "Invoke-WebRequest", "Invoke-RestMethod",
+    "Invoke-WebRequest", "Invoke-RestMethod", "ConvertFrom-Json", "ConvertTo-Json",
     "Get-NetTCPConnection", "Get-NetIPAddress", "Get-NetRoute", "Test-NetConnection",
     "Get-CimInstance", "Get-WmiObject", "Get-Service", "Start-Service", "Stop-Service", "Restart-Service",
     "Format-Table", "Format-List", "ft", "fl",
@@ -246,7 +246,7 @@ fn extract_effective_program(segment: &str) -> &str {
 /// Check if the slice at `chars[i..]` matches a safe stdout/stderr discard redirection.
 /// Matches: `> /dev/null`, `>/dev/null`, `> nul`, `>nul`, `2> /dev/null`, `2>/dev/null`,
 /// `2> nul`, `2>nul`, `1> /dev/null`, `1>/dev/null`, `1> nul`, `1>nul`, `&> /dev/null`,
-/// `&>/dev/null`, `&> nul`, `&>nul` (case-insensitive for `nul`).
+/// `&>/dev/null`, `&> nul`, `&>nul` (case-insensitive), and PowerShell's `$null`.
 /// Returns the number of characters consumed if matched.
 fn match_discard_redirection(chars: &[char], i: usize) -> Option<usize> {
     let rem = &chars[i..];
@@ -292,6 +292,20 @@ fn match_discard_redirection(chars: &[char], i: usize) -> Option<usize> {
             }
         }
     }
+    // PowerShell's `$null` is the idiomatic discard target, equivalent to `nul`.
+    // It is only ever matched after a `>`, so it cannot act as a substitution.
+    if target_chars.len() >= 5 {
+        let candidate: String = target_chars[..5].iter().collect();
+        if candidate.eq_ignore_ascii_case("$null") {
+            let next = target_chars.get(5);
+            if next.is_none()
+                || next.unwrap().is_whitespace()
+                || matches!(next.unwrap(), ';' | '&' | '|' | '\n' | '\r')
+            {
+                return Some(idx + 5);
+            }
+        }
+    }
 
     None
 }
@@ -308,8 +322,8 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
         return Err("empty command".into());
     }
 
-    // 1. Reject stray control characters (NUL, BEL, ...). `\n`, `\r` and `\t`
-    //    are handled below as separators/whitespace.
+    // 1. Reject stray control characters (NUL, BEL, ...). `\t` is treated as
+    //    whitespace; `\n` and `\r` are refused below as hidden separators.
     if trimmed
         .chars()
         .any(|c| c.is_control() && c != '\n' && c != '\r' && c != '\t')
@@ -390,27 +404,9 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
                 i += 1;
                 continue;
             }
-            if c == '\n' || (c == '\r' && chars.get(i + 1) == Some(&'\n')) {
-                if !current.trim().is_empty() {
-                    segments.push(std::mem::take(&mut current));
-                }
-                if c == '\r' {
-                    i += 2;
-                } else {
-                    i += 1;
-                }
-                prev = '\n';
-                continue;
-            }
-            if c == '\r' {
-                if !current.trim().is_empty() {
-                    segments.push(std::mem::take(&mut current));
-                }
-                prev = '\r';
-                i += 1;
-                continue;
-            }
-            if c == '&' || SHELL_METACHARACTERS.contains(&c) {
+            // A raw newline or carriage return is a hidden command separator the
+            // allowlist cannot reason about, so refuse it instead of splitting.
+            if c == '\n' || c == '\r' || c == '&' || SHELL_METACHARACTERS.contains(&c) {
                 bad.push(c);
             }
         }
@@ -423,13 +419,13 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
     }
     if !bad.is_empty() {
         return Err(format!(
-            "command contains shell metacharacters {:?}; use a PTY session for redirects or chained commands",
+            "command contains shell metacharacters {:?}; chain with `;` / `&&` / `||`, discard output with `> nul` or `2>$null`, and use a PTY session for grouping, variables or substitution",
             bad
         ));
     }
     if !current.trim().is_empty() {
         segments.push(current);
-    } else if segments.is_empty() || (prev != ';' && prev != '\0' && prev != '\n' && prev != '\r') {
+    } else if segments.is_empty() || (prev != ';' && prev != '\0') {
         return Err("command contains an empty or dangling segment".into());
     }
 
@@ -1386,7 +1382,32 @@ mod tests_sandbox {
         assert!(validate_shell_command("npm test 2> /dev/null").is_ok());
         assert!(validate_shell_command("npm test 1> nul").is_ok());
         assert!(validate_shell_command("npm test &> /dev/null").is_ok());
+        assert!(validate_shell_command("npm test 2>$null").is_ok());
+        assert!(validate_shell_command("npm test >$null").is_ok());
+        assert!(validate_shell_command("npm test 2> $null").is_ok());
+        assert!(validate_shell_command("npm audit --json | ConvertFrom-Json").is_ok());
         assert!(validate_shell_command("npm test > arbitrary_file.txt").is_err());
+    }
+
+    #[test]
+    fn validate_shell_command_allows_powershell_null_discard_target() {
+        assert!(validate_shell_command("npm test 2>$null").is_ok());
+        assert!(validate_shell_command("npm test >$null").is_ok());
+        assert!(validate_shell_command("npm test 2> $null").is_ok());
+        // `$` stays blocked everywhere except as a discard target.
+        assert!(validate_shell_command("npm test $null").is_err());
+        assert!(validate_shell_command("npm test $(whoami)").is_err());
+    }
+
+    #[test]
+    fn metacharacter_error_names_a_supported_alternative() {
+        match validate_shell_command("if (Test-Path x) { echo y }") {
+            Ok(_) => panic!("grouping with parentheses must be rejected"),
+            Err(e) => {
+                assert!(e.contains("2>$null"), "{e}");
+                assert!(e.contains("PTY session"), "{e}");
+            }
+        }
     }
 }
 

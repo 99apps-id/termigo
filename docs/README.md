@@ -23,6 +23,7 @@ If a guide conflicts with `TERMIGO.md`, `TERMIGO.md` wins.
 - [Module layout](architecture/module-layout.md) - every frontend module, what it owns, and the invariants that are easy to break. Moved out of `TERMIGO.md` so that file fits the project memory the agent receives.
 - [Platform and bundle](architecture/platform-and-bundle.md) - window styling per platform, the Tauri capability allowlist, cross-platform conventions, bundle and updater config.
 - [AI subsystem](architecture/ai-subsystem.md) - providers, agent, sub-agents, sessions, composer, tools, edit diffs, live context bridge. Includes a walkthrough for adding a new provider.
+- [Agent failure recovery](architecture/agent-failure-recovery.md) - what the agent does when the MCP server, an HTTP request, find_tools, an LLM call, or a subagent spawn fails.
 - [Terminal renderer pool](architecture/terminal-renderer-pool.md) - slot pooling, the DormantRing, and the never-serialize-mid-command invariant.
 - [CLI control plane](architecture/cli-control.md) - bundled CLI, authenticated local protocol, caller targeting, the Go companion's terminal commands, packaging, and current platform limits.
 - [Extensions and the sandbox](architecture/extensions.md) - the extension manifest, the contribution registries, and the Web Worker sandbox model that keeps untrusted code off the main UI thread.

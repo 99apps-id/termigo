@@ -51,7 +51,10 @@ export function parseUnifiedDiff(diffText: string): FileDiff[] {
       currentHunk.lines.push({ type: "add", content: line.slice(1) });
     } else if (line.startsWith("-")) {
       currentHunk.lines.push({ type: "del", content: line.slice(1) });
-    } else if (line.startsWith(" ") || line === "") {
+    } else if (line.startsWith(" ")) {
+      // Only a space-prefixed line is context. A bare "" is what split("\n")
+      // leaves behind when the diff ends with a newline, so treating it as
+      // context appended a phantom empty line to the last hunk.
       currentHunk.lines.push({ type: "context", content: line.slice(1) });
     }
     // "\ No newline at end of file" and anything else: ignored.
@@ -81,7 +84,11 @@ export function reverseApplyHunk(
     .map((l) => l.content);
   if (forward.length === 0) return null;
 
-  const lines = content.split("\n");
+  // The file may use CRLF while the parsed diff had its CR stripped, and it may
+  // or may not end with a newline. Normalise both sides before matching, then
+  // restore the file's own line ending on the way out.
+  const eol = content.includes("\r\n") ? "\r\n" : "\n";
+  const lines = content.split(/\r?\n/);
   outer: for (let i = 0; i + forward.length <= lines.length; i++) {
     for (let j = 0; j < forward.length; j++) {
       if (lines[i + j] !== forward[j]) continue outer;
@@ -90,7 +97,7 @@ export function reverseApplyHunk(
       ...lines.slice(0, i),
       ...backward,
       ...lines.slice(i + forward.length),
-    ].join("\n");
+    ].join(eol);
   }
   return null;
 }

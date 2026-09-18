@@ -1330,7 +1330,18 @@ Everything below assumes you were given a task. Check that you were.
 - NEVER ask the user for their Bot Token or Chat ID / User ID. Termigo automatically uses the configured Telegram Bot Token and paired chat ID registered in the system.
 - When an action is destructive, irreversible, or might surprise the user (e.g. killing processes, dropping uncommitted work), ask first.
 - When reporting an error, include the error text and next steps.
-- At the end of a multi-turn task, state what was accomplished and how it was verified.`;
+- At the end of a multi-turn task, state what was accomplished and how it was verified.
+
+# Failure recovery (CRITICAL: never give up silently)
+
+When one of these fails, the run is not over: diagnose, take the fallback, then report. A failure is information, not a dead end.
+
+- MCP server fails (spawn, handshake, or a tool call returns a transport error): the tools that server exposed are gone for this run. Read the server output via bash_logs or get_terminal_output, retry the connector once, and otherwise continue with the built-in equivalents (file, shell, git, code_search) instead of calling the dead tool again. Tell the user which server is down.
+- HTTP request fails (a fetch or request tool returns non-2xx, a timeout, or a DNS error): read the status code and body before concluding. 401/403 means credentials or a missing token, 404/410 means the endpoint moved or is gone, 429 means back off, 5xx means retry with backoff. Fall back to another source (a different endpoint, a local cached file, the CLI equivalent) rather than repeating the same call. Do not retry the same request more than twice without changing something.
+- find_tools fails or returns nothing (an unknown keyword, or the discovery call itself errors): do not conclude the capability does not exist. Retry with one simpler keyword, then try the tool name verbatim. If discovery is still down, say the search is unavailable and continue with the tools already loaded, naming the capability you could not reach.
+- LLM request fails (rate limit, context overflow, provider 4xx/5xx, stream abort): a context overflow needs a different fix than a rate limit. On overflow, save progress to a file, summarize, and restart with a smaller slice. On rate limit, wait and retry with backoff. On a provider error, retry once, then name the provider and model that failed. Never silently drop part of the user's request to make it fit.
+- Spawn subagent fails (concurrency limit, missing worktree, or provider error): the pool is bounded (default 4 concurrent, 2 nested). Wait for a running task, run the work yourself in this turn, or shrink the batch. A failed spawn is not a failed task: surface the subagent error and finish the work directly.
+- In every case: state which capability failed, quote the error, and say what you did instead. Record a durable lesson with remember when the failure will recur, and only ask the user when the fallback genuinely cannot be chosen without their input.`;
 
 /**
  * Lite system prompt for smaller, tool-sensitive models (e.g. Gemini Flash Lite, Haiku).

@@ -201,10 +201,14 @@ export function checkPollingStall(): void {
   // Start the replacement only after the old loop has exited (or the grace
   // period lapses), so the two never poll at the same time. Racing the wait
   // against a timer keeps recovery possible when the abort does not land.
+  const graceCtrl = new AbortController();
   void Promise.race([
     oldLoop ?? Promise.resolve(),
-    sleep(new AbortController().signal, STALL_RECYCLE_GRACE_MS),
+    sleep(graceCtrl.signal, STALL_RECYCLE_GRACE_MS),
   ]).then(() => {
+    // Whichever side won, disarm the grace timer instead of leaving it armed for
+    // the rest of its window once the old loop has already exited.
+    graceCtrl.abort();
     if (loopController !== next || next.signal.aborted) return;
     launchLoop(next);
   });
@@ -322,6 +326,10 @@ export async function startTelegramBot(): Promise<void> {
   // Without it the loop starts at 0 and Telegram replays the last unconfirmed
   // batch, running its commands a second time.
   currentBotId = botIdFromToken(await getTelegramToken());
+  // stopTelegramBot() may have run while we awaited the token. Without this
+  // guard the watchdog is installed just after stop cleared it, so it ticks on
+  // for a bot that is already stopped and nothing ever clears it again.
+  if (loopController !== controller || controller.signal.aborted) return;
   currentUpdateOffset = loadUpdateOffset(currentBotId);
   if (watchdogTimer) clearInterval(watchdogTimer);
   watchdogTimer = setInterval(checkPollingStall, 15_000);
@@ -344,6 +352,13 @@ export async function startTelegramBot(): Promise<void> {
     }
     const stopPeriodicCleanup = startPeriodicStaleApprovalCleanup();
     if (typeof stopPeriodicCleanup === "function") {
+      // We may have been stopped while importing the store. Registering it now
+      // would leak an interval into a map stopTelegramBot() already cleared, so
+      // stop it immediately instead.
+      if (loopController !== controller) {
+        stopPeriodicCleanup();
+        return;
+      }
       cleanupStoppers.set("staleApproval", stopPeriodicCleanup);
     }
   } catch {

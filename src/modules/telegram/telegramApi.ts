@@ -118,6 +118,11 @@ export function clampEscapedHtml(text: string, max: number): string {
     // they do not overlap and the last one is the only one that can be broken.
     if (semi === -1 || semi >= cut) cut = amp;
   }
+  // A tag split in half is as fatal as a broken entity, and the escaped text
+  // carries real tags (<code>, <a href=...>), so back off to the last `<` that
+  // was never closed before the cut.
+  const lt = text.lastIndexOf("<", cut);
+  if (lt !== -1 && lt > text.lastIndexOf(">", cut - 1)) cut = lt;
   return text.slice(0, cut);
 }
 

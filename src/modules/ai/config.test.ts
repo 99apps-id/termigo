@@ -558,6 +558,19 @@ describe("system prompts substantive output guidelines", () => {
     expect(SYSTEM_PROMPT.includes("\u2014")).toBe(false);
   });
 
+  it("SYSTEM_PROMPT documents failure recovery for every brittle capability", () => {
+    for (const phrase of [
+      "Failure recovery",
+      "MCP server fails",
+      "HTTP request fails",
+      "find_tools fails",
+      "LLM request fails",
+      "Spawn subagent fails",
+    ]) {
+      expect(SYSTEM_PROMPT).toContain(phrase);
+    }
+  });
+
   it("SYSTEM_PROMPT_LITE contains substantive output guidelines and zero em-dashes", () => {
     expect(SYSTEM_PROMPT_LITE).toContain("Substantive output (CRITICAL)");
     expect(SYSTEM_PROMPT_LITE.includes("\u2014")).toBe(false);
