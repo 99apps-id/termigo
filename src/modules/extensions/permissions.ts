@@ -8,7 +8,7 @@
  *   `invoke:my_command_*` (glob), `invoke:fs_read_file` (exact)
  *   `events:emit`, `events:listen`
  *   `ui:toast`, `tabs:open`
- *   `panels:register`
+ *   `panels:register`, `aiTools:register`
  *
  * Anything undeclared is denied; the host throws `PermissionDeniedError`.
  */
@@ -183,5 +183,8 @@ export function permissionRiskTier(p: string): "low" | "medium" | "high" {
   // turns on the user's behalf. Both spend the user's API credit and steer an
   // agent that can write files, so neither is a "medium" the dialog should mute.
   if (p.startsWith("ai:")) return "high";
+  // Registering an agent tool hands the model an executable capability under
+  // the extension's code: same trust class as `ai:prompt`.
+  if (p === "aiTools:register" || p.startsWith("aiTools:")) return "high";
   return "medium";
 }

@@ -43,6 +43,22 @@ type ConfirmationState = {
 
 let seq = 0;
 
+/**
+ * Abort listeners by confirmation id. A listener that is never removed keeps
+ * its closure (and the whole awaiting tool call) alive until the run's signal
+ * fires - which, for a completed run, may be never. Every settle path below
+ * disarms its listener first; promise settlement itself stays first-wins.
+ */
+const abortCleanups = new Map<string, () => void>();
+
+function disarmAbort(id: string): void {
+  const cleanup = abortCleanups.get(id);
+  if (cleanup) {
+    abortCleanups.delete(id);
+    cleanup();
+  }
+}
+
 export const useConfirmationStore = create<ConfirmationState>((set, get) => ({
   pending: [],
 
@@ -55,6 +71,7 @@ export const useConfirmationStore = create<ConfirmationState>((set, get) => ({
       const cancel = () => {
         const item = get().pending.find((p) => p.id === id);
         if (!item) return;
+        disarmAbort(id);
         item.resolve(null);
         set((s) => ({
           pending: s.pending.filter((p) => p.id !== id),
@@ -65,6 +82,9 @@ export const useConfirmationStore = create<ConfirmationState>((set, get) => ({
           queueMicrotask(cancel);
         } else {
           abortSignal.addEventListener("abort", cancel, { once: true });
+          abortCleanups.set(id, () =>
+            abortSignal.removeEventListener("abort", cancel),
+          );
         }
       }
     });
@@ -73,6 +93,7 @@ export const useConfirmationStore = create<ConfirmationState>((set, get) => ({
   resolve(id, keep) {
     const item = get().pending.find((p) => p.id === id);
     if (!item) return;
+    disarmAbort(id);
     item.resolve(keep);
     set((s) => ({ pending: s.pending.filter((p) => p.id !== id) }));
   },
@@ -80,6 +101,7 @@ export const useConfirmationStore = create<ConfirmationState>((set, get) => ({
   cancel(id) {
     const item = get().pending.find((p) => p.id === id);
     if (!item) return;
+    disarmAbort(id);
     item.resolve(null);
     set((s) => ({ pending: s.pending.filter((p) => p.id !== id) }));
   },

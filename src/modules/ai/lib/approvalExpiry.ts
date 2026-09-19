@@ -45,19 +45,33 @@ export function reconcileApprovalTimers(
   return { arm, clear };
 }
 
-/** The approval ids still awaiting a response in the newest assistant message. */
+/**
+ * The approval ids still awaiting a response.
+ *
+ * Every assistant message is scanned, not just the newest: when the user
+ * steers mid-approval the last message is a user turn, and looking only at
+ * it would clear the live timer and park the run forever. Parts the user
+ * already answered flip to `approval-responded`, so answered ids drop out
+ * on their own.
+ */
 export function pendingApprovalIds(messages: readonly unknown[]): string[] {
-  const last = messages[messages.length - 1] as
-    | { role?: string; parts?: Array<Record<string, unknown>> }
-    | undefined;
-  if (!last || last.role !== "assistant" || !Array.isArray(last.parts)) {
-    return [];
-  }
   const ids: string[] = [];
-  for (const part of last.parts) {
-    if (part.state !== "approval-requested") continue;
-    const id = (part.approval as { id?: string } | undefined)?.id;
-    if (id) ids.push(id);
+  const seen = new Set<string>();
+  for (const message of messages) {
+    const turn = message as
+      | { role?: string; parts?: Array<Record<string, unknown>> }
+      | undefined;
+    if (!turn || turn.role !== "assistant" || !Array.isArray(turn.parts)) {
+      continue;
+    }
+    for (const part of turn.parts) {
+      if (part.state !== "approval-requested") continue;
+      const id = (part.approval as { id?: string } | undefined)?.id;
+      if (id && !seen.has(id)) {
+        seen.add(id);
+        ids.push(id);
+      }
+    }
   }
   return ids;
 }

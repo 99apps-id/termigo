@@ -19,7 +19,10 @@ export async function getSessionShell(
 ): Promise<number> {
   let p = sessionShells.get(key);
   if (!p) {
-    p = native.shellSessionOpen(cwd);
+    p = native.shellSessionOpen(cwd).catch((e) => {
+      sessionShells.delete(key);
+      throw e;
+    });
     sessionShells.set(key, p);
   }
   return p;

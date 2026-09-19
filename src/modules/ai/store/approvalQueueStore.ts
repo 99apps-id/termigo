@@ -78,7 +78,8 @@ export function startPeriodicStaleApprovalCleanup(): (() => void) | void {
  *
  * Kept outside the store for the same reason as `waiting`: it is a plain
  * lookup, not UI state, and no component should re-render when it changes.
- * A fresh process starts empty, which is exactly what "this session" means.
+ * "This session" is the active chat: `chatStore.newSession`/`switchSession`
+ * clear it, and a fresh process starts empty.
  */
 const sessionAllowed = new Set<string>();
 

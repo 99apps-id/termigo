@@ -184,6 +184,14 @@ describe("normalizeTargetKey", () => {
     expect(normalizeTargetKey("C:\\project\\foo.ts")).toBe("c:/project/foo.ts");
     expect(normalizeTargetKey("c:/project/foo.ts")).toBe("c:/project/foo.ts");
   });
+
+  it("resolves dot-dot segments so aliases share one key", () => {
+    expect(normalizeTargetKey("src/../src/a.ts")).toBe("src/a.ts");
+    expect(normalizeTargetKey("./src/b/../b/c.ts")).toBe("src/b/c.ts");
+    // Leading .. escapes the root and is preserved, never collapsed away.
+    expect(normalizeTargetKey("../shared/a.ts")).toBe("../shared/a.ts");
+    expect(normalizeTargetKey("c:/project/../other/a.ts")).toBe("c:/other/a.ts");
+  });
 });
 
 describe("gate & breaker", () => {

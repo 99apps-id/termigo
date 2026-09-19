@@ -22,9 +22,9 @@ use background::{BackgroundLogResponse, BackgroundProc, BackgroundProcInfo};
 use session::{SessionRunOutput, ShellSession};
 
 // 30s was too short: a project-wide lint/test/build (`eslint .`, `pnpm test`,
-// `cargo build`) easily exceeds it and times out, so the agent re-runs it. 120s
-// covers a normal one; pass `timeout_secs` (up to 900) for a genuinely slow job.
-const DEFAULT_TIMEOUT_SECS: u64 = 120;
+// `cargo build`) easily exceeds it and times out, so the agent re-runs it. 300s
+// covers long test/build suites; pass `timeout_secs` (up to 900) for slower jobs.
+const DEFAULT_TIMEOUT_SECS: u64 = 300;
 const MAX_TIMEOUT_SECS: u64 = 900;
 const MAX_OUTPUT_BYTES: usize = 256 * 1024;
 
@@ -598,6 +598,12 @@ fn run_blocking(
         log::warn!("shell_run_command spawn failed: {e}");
         e.to_string()
     })?);
+    #[cfg(windows)]
+    let _job = crate::modules::proc::job::ProcessJob::create_for(child.id()).ok();
+    let kill_child = |c: &SharedChild| {
+        crate::modules::proc::kill_tree(c.id());
+        let _ = c.kill();
+    };
     // Visible to `shell_session_interrupt` for as long as this runs. Cleared
     // below so a later interrupt cannot kill an unrelated process that has
     // since taken the same slot.
@@ -607,11 +613,11 @@ fn run_blocking(
         }
     }
     let mut stdout_pipe = child.take_stdout().ok_or_else(|| {
-        let _ = child.kill();
+        kill_child(&child);
         "no stdout pipe".to_string()
     })?;
     let mut stderr_pipe = child.take_stderr().ok_or_else(|| {
-        let _ = child.kill();
+        kill_child(&child);
         "no stderr pipe".to_string()
     })?;
 
@@ -642,7 +648,7 @@ fn run_blocking(
         Ok(Ok(status)) => (status.code(), false),
         Ok(Err(e)) => return Err(e.to_string()),
         Err(mpsc::RecvTimeoutError::Timeout) => {
-            let _ = child.kill();
+            kill_child(&child);
             (None, true)
         }
         Err(mpsc::RecvTimeoutError::Disconnected) => {

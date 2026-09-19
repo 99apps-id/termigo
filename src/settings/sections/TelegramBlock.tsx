@@ -29,6 +29,11 @@ export function TelegramBlock() {
   const setChatId = useTelegramStore((s) => s.setChatId);
   const setHasToken = useTelegramStore((s) => s.setHasToken);
   const bumpTokenVersion = useTelegramStore((s) => s.bumpTokenVersion);
+  const pairingCode = useTelegramStore((s) => s.pairingCode);
+  const ensurePairingCode = useTelegramStore((s) => s.ensurePairingCode);
+  const regeneratePairingCode = useTelegramStore(
+    (s) => s.regeneratePairingCode,
+  );
   const refresh = useTelegramStore((s) => s.refresh);
 
   const [token, setToken] = useState("");
@@ -53,6 +58,12 @@ export function TelegramBlock() {
   useEffect(() => {
     setChatIdDraft(chatId ?? "");
   }, [chatId]);
+
+  // An unpaired bot needs a pairing code waiting: the main window verifies
+  // /pair against it, so generate one as soon as this panel shows no owner.
+  useEffect(() => {
+    if (!chatId) ensurePairingCode();
+  }, [chatId, ensurePairingCode]);
 
   const saveToken = async () => {
     if (!token.trim()) {
@@ -124,6 +135,20 @@ export function TelegramBlock() {
           )}
         </div>
       </SettingRow>
+
+      {!chatId && (
+        <SettingRow
+          title="Pairing code"
+          description="A new bot pairs only with this code: send /pair <code> from your chat. Anyone who finds the bot username cannot claim it without the code."
+        >
+          <div className="flex items-center gap-2">
+            <Badge variant="secondary">{pairingCode ?? "…"}</Badge>
+            <Button size="sm" variant="ghost" onClick={regeneratePairingCode}>
+              New code
+            </Button>
+          </div>
+        </SettingRow>
+      )}
 
       <SettingRow
         title="Owner chat id (optional)"

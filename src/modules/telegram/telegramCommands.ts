@@ -325,7 +325,10 @@ export async function handleCallback(
     data.startsWith("el:") ||
     data.startsWith("resume:") ||
     data.startsWith("mp:") ||
-    data.startsWith("ms:");
+    data.startsWith("ms:") ||
+    // Same rule as the /diff command below: the working-tree summary is
+    // owner-only, so any group member must not pull it via the button.
+    data.startsWith("diff:");
   if (sensitiveCallback && !isOwnerUser(cb.from)) {
     await answerCallback(cb.id, "Unauthorized.", signal);
     return;
@@ -396,12 +399,20 @@ export async function handleCallback(
     const approved =
       action === "approve" || action === "session" || action === "always";
     const state = await import("../ai/store/chatStore");
+    // Answer only a live approval. A replayed or already-settled callback
+    // must say so instead of reporting "Approved." for an id the run has
+    // moved past (and deleting its message).
+    const pending = state.useChatStore
+      .getState()
+      .agentMeta.pendingApprovals?.find((p) => p.id === id);
+    if (!pending) {
+      await answerCallback(cb.id, "Already answered or expired.", signal);
+      return;
+    }
     state.useChatStore.getState().respondToApproval(id, approved);
     if (action === "session" || action === "always") {
       const aqStore = await import("../ai/store/approvalQueueStore");
-      const tool = (await import("../ai/store/chatStore")).useChatStore
-        .getState()
-        .agentMeta.pendingApprovals?.find((p) => p.id === id)?.toolName;
+      const tool = pending.toolName;
       if (tool) {
         if (action === "session") {
           aqStore.rememberSessionAllowed(tool);
@@ -439,6 +450,11 @@ export async function handleCallback(
     const [, action, ...rest] = data.split(":");
     const id = rest.join(":");
     const aq = await import("../ai/store/approvalQueueStore");
+    // Same liveness gate as `ap:` above: never answer a settled id.
+    if (!aq.useApprovalQueue.getState().pending.some((p) => p.id === id)) {
+      await answerCallback(cb.id, "Already answered or expired.", signal);
+      return;
+    }
     const approved =
       action === "approve" || action === "session" || action === "always";
     if (action === "session") {
@@ -548,6 +564,9 @@ export async function handleUpdate(u: Update, signal: AbortSignal): Promise<void
 
   switch (head) {
     case "/status":
+      // Owner-only like /diff and /run: the reply carries model, agent state
+      // and the last error, which group members must not be able to pull.
+      if (!isOwnerUser(msg.from)) return;
       await sendTelegram(chatId, await buildStatus(), signal);
       return;
     case "/diff": {
@@ -558,9 +577,27 @@ export async function handleUpdate(u: Update, signal: AbortSignal): Promise<void
     }
 
     case "/pair": {
-      const curOwner = useTelegramStore.getState().chatId;
+      const tgState = useTelegramStore.getState();
+      const curOwner = tgState.chatId;
       if (curOwner && String(curOwner) !== String(chatId)) {
         return;
+      }
+      if (!curOwner) {
+        // Unpaired bot: anyone who finds the username could claim it with a
+        // bare /pair, so pairing requires the code shown in Termigo Settings.
+        // The code itself is never sent over Telegram.
+        const code = tgState.ensurePairingCode();
+        if (tail !== code) {
+          await sendTelegram(
+            chatId,
+            tail
+              ? "Wrong pairing code. Open Termigo → Settings → Telegram to see the current code, then send /pair <code>."
+              : "This bot is not paired yet. Open Termigo → Settings → Telegram to see the pairing code, then send /pair <code>.",
+            signal,
+          );
+          return;
+        }
+        tgState.clearPairingCode();
       }
       useTelegramStore.getState().setChatId(String(chatId));
       if (msg.from?.id != null) {

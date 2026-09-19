@@ -44,7 +44,7 @@ import {
   type SteerMessage,
   type SteerQueue,
 } from "../lib/steer";
-import { useApprovalQueue } from "./approvalQueueStore";
+import { clearSessionAllowed, useApprovalQueue } from "./approvalQueueStore";
 import { useArtifactsStore } from "./artifactsStore";
 import { useSubagentRunStore } from "./subagentRunStore";
 import { useTodosStore } from "./todoStore";
@@ -618,6 +618,10 @@ export const useChatStore = create<StoreState>((set, get) => ({
 
   newSession: (chatId?: number, threadId?: number | null) => {
     notifySessionLeft(get().activeSessionId);
+    // "Allow this session" grants belong to the chat they were given in.
+    // Without this a grant in one chat silently auto-approves the same tool
+    // in every later chat, which is not what the button promises.
+    clearSessionAllowed();
     const id = newSessionId();
     const meta: SessionMeta = {
       id,
@@ -638,6 +642,8 @@ export const useChatStore = create<StoreState>((set, get) => ({
     if (get().activeSessionId === id) return;
     if (!get().sessions.some((s) => s.id === id)) return;
     notifySessionLeft(get().activeSessionId);
+    // Same scoping as newSession: grants do not travel between chats.
+    clearSessionAllowed();
 
     // Lazily seed the chat with persisted messages the first time we open
     // this session. Subsequent switches reuse the cached Chat instance.

@@ -39,6 +39,18 @@ export type TelegramBotState = {
   setChatId: (id: string | null) => void;
   setOwnerUserId: (id: string | null) => void;
   setHasToken: (v: boolean) => void;
+  /**
+   * One-time pairing code shown in Settings. Whoever finds the bot username
+   * could otherwise claim an unpaired bot with a bare `/pair`, so pairing
+   * requires this code. Single-use: cleared on a successful pair.
+   */
+  pairingCode: string | null;
+  /** Generate (if absent) and return the pairing code. */
+  ensurePairingCode: () => string;
+  /** Replace the pairing code with a fresh one. */
+  regeneratePairingCode: () => string;
+  /** Drop the pairing code (after a successful pair). */
+  clearPairingCode: () => void;
   /** Signal a token save/remove so the relay restarts even when `hasToken` is unchanged. */
   bumpTokenVersion: () => void;
   /** Re-read hasToken from the keychain (called on app start / after token save). */
@@ -61,6 +73,22 @@ export const useTelegramStore = create<TelegramBotState>()(
       setChatId: (id) => set({ chatId: id }),
       setOwnerUserId: (id) => set({ ownerUserId: id }),
       setHasToken: (v) => set({ hasToken: v }),
+      pairingCode: null,
+      ensurePairingCode: () => {
+        const cur = get().pairingCode;
+        if (cur) return cur;
+        return get().regeneratePairingCode();
+      },
+      regeneratePairingCode: () => {
+        const bytes = new Uint32Array(1);
+        crypto.getRandomValues(bytes);
+        const code = String(bytes[0] % 1_000_000).padStart(6, "0");
+        set({ pairingCode: code });
+        return code;
+      },
+      clearPairingCode: () => {
+        if (get().pairingCode !== null) set({ pairingCode: null });
+      },
       bumpTokenVersion: () =>
         set((s) => ({ tokenVersion: (s.tokenVersion ?? 0) + 1 })),
       refresh: async () => {
@@ -89,6 +117,7 @@ export const useTelegramStore = create<TelegramBotState>()(
         ownerUserId: s.ownerUserId,
         hasToken: s.hasToken,
         tokenVersion: s.tokenVersion,
+        pairingCode: s.pairingCode,
         online: s.online,
         lastError: s.lastError,
       }),
@@ -138,6 +167,15 @@ export async function syncTelegramFromStorage(): Promise<void> {
           state.tokenVersion !== cur.tokenVersion
         )
           useTelegramStore.setState({ tokenVersion: state.tokenVersion });
+        // The pairing code is generated in Settings but verified in the main
+        // window; propagate it the same way so both sides agree.
+        if (
+          typeof state.pairingCode === "string" &&
+          state.pairingCode !== cur.pairingCode
+        )
+          useTelegramStore.setState({ pairingCode: state.pairingCode });
+        if (state.pairingCode === null && cur.pairingCode !== null)
+          useTelegramStore.setState({ pairingCode: null });
       }
     }
   } catch {

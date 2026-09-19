@@ -532,4 +532,27 @@ describe("repairToolCall", () => {
     const parsedList = JSON.parse(resultList!.input);
     expect(parsedList.filter).toBe("vps");
   });
+
+  it("redirects invoke_subagent with multiple subagents to run_subagents", async () => {
+    const tools = { run_subagent: {}, run_subagents: {} };
+    const result = await repairToolCall({
+      tools,
+      toolCall: {
+        toolCallId: "sub-multi",
+        toolName: "invoke_subagent",
+        input: JSON.stringify({
+          Subagents: [
+            { TypeName: "researcher", Prompt: "search docs", Role: "doc reader" },
+            { TypeName: "coder", Prompt: "write code", Role: "dev" },
+          ],
+        }),
+      },
+    });
+    expect(result).not.toBeNull();
+    expect(result!.toolName).toBe("run_subagents");
+    const parsed = JSON.parse(result!.input);
+    expect(parsed.tasks).toHaveLength(2);
+    expect(parsed.tasks[0].type).toBe("researcher");
+    expect(parsed.tasks[1].type).toBe("coder");
+  });
 });

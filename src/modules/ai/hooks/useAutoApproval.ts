@@ -65,6 +65,13 @@ export function useAutoApproval(
     };
   }, []);
 
+  // Latest transcript for the expiry callbacks below. A five-minute timer
+  // outlives the render that armed it; without this the callback would judge
+  // "still pending?" against a stale snapshot and deny an approval the user
+  // already answered (deny-after-approve double response).
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+
   useEffect(() => {
     const last = messages[messages.length - 1];
     if (last?.role !== "assistant") return;
@@ -77,15 +84,6 @@ export function useAutoApproval(
       const tool = toolNameOf(part);
       if (!tool) continue;
 
-      // An explicit allowance answers the question whatever the mode says:
-      // "allow this session" and "always allow" were chosen by the user, so
-      // they hold even while the global mode is still "ask".
-      if (isSessionAllowed(tool) || alwaysAllowed.includes(tool)) {
-        answered.current.add(id);
-        void respond({ id, approved: true });
-        continue;
-      }
-
       // The command decides whether a remote call is inspection or a change,
       // so it has to reach the policy rather than being inferred from the name.
       const input = part.input as
@@ -97,19 +95,34 @@ export function useAutoApproval(
       const action =
         typeof input?.action === "string" ? input.action : undefined;
 
-      // Project-scoped approval rules (.termigo/approvals.json) refine the
-      // global mode per project: `deny` auto-refuses, `allow` auto-approves
-      // regardless of mode, and `ask` forces a manual prompt. First match wins;
-      // no match falls through to the mode logic below.
+      // A project deny rule is decided before any allowance: an explicit
+      // deny holds against "allow this session"/"always allow", so approving
+      // one call never blesses a call the project forbids. Other rule actions
+      // are handled after the allowances below.
       const ruleDecision = useApprovalRulesStore
         .getState()
         .evaluate({ tool, command, path });
+      if (ruleDecision?.action === "deny") {
+        answered.current.add(id);
+        void respond({ id, approved: false, reason: ruleDecision.reason });
+        continue;
+      }
+
+      // An explicit allowance answers the question whatever the mode says:
+      // "allow this session" and "always allow" were chosen by the user, so
+      // they hold even while the global mode is still "ask" - but never
+      // against a project deny, which was already decided above.
+      if (isSessionAllowed(tool) || alwaysAllowed.includes(tool)) {
+        answered.current.add(id);
+        void respond({ id, approved: true });
+        continue;
+      }
+
+      // Project-scoped approval rules (.termigo/approvals.json) refine the
+      // global mode per project: `allow` auto-approves regardless of mode,
+      // and `ask` forces a manual prompt. First match wins; no match falls
+      // through to the mode logic below.
       if (ruleDecision) {
-        if (ruleDecision.action === "deny") {
-          answered.current.add(id);
-          void respond({ id, approved: false, reason: ruleDecision.reason });
-          continue;
-        }
         if (ruleDecision.action === "allow") {
           answered.current.add(id);
           void respond({ id, approved: true });
@@ -184,6 +197,11 @@ export function useAutoApproval(
         setTimeout(() => {
           timers.delete(id);
           if (answered.current.has(id)) return;
+          // Re-check against the live transcript: a manual approve/deny (card
+          // click, /approve, Telegram) flips the part out of
+          // `approval-requested`, and expiring it anyway would answer a
+          // question nobody asked anymore.
+          if (!pendingApprovalIds(messagesRef.current).includes(id)) return;
           answered.current.add(id);
           console.warn(`[ai] approval expired unanswered id=${id}`);
           void respond({

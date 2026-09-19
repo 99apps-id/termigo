@@ -786,10 +786,22 @@ export async function repairToolCall({
         }
       }
       const adapted = alias.adaptArgs ? alias.adaptArgs(parsed) : parsed;
-      const { result } = applySemanticRepairs(alias.canonical, adapted);
+      let canonical = alias.canonical;
+      if (
+        adapted &&
+        typeof adapted === "object" &&
+        "_redirectCanonical" in adapted
+      ) {
+        const redir = (adapted as Record<string, unknown>)._redirectCanonical;
+        if (typeof redir === "string" && toolKeys.includes(redir)) {
+          canonical = redir;
+        }
+        delete (adapted as Record<string, unknown>)._redirectCanonical;
+      }
+      const { result } = applySemanticRepairs(canonical, adapted);
       return {
         toolCallId: toolCall.toolCallId,
-        toolName: alias.canonical,
+        toolName: canonical,
         input: JSON.stringify(result),
       };
     }

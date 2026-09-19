@@ -93,13 +93,15 @@ describe("pendingApprovalIds", () => {
     ).toEqual([]);
   });
 
-  it("looks only at the last message", () => {
-    // An old turn's approval belongs to a run that is over.
+  it("keeps an approval that is still requested in an earlier turn", () => {
+    // Steering (a new user message) does not answer the approval: the part
+    // stays `approval-requested` and the run stays blocked on it. Dropping it
+    // here clears its timer and parks the run past its deadline forever.
     const messages = [
       { role: "assistant", parts: [{ state: "approval-requested", approval: { id: "old" } }] },
       { role: "user", parts: [{ type: "text", text: "next" }] },
     ];
-    expect(pendingApprovalIds(messages)).toEqual([]);
+    expect(pendingApprovalIds(messages)).toEqual(["old"]);
   });
 
   it("returns nothing when the last message is not from the assistant", () => {
@@ -114,18 +116,15 @@ describe("pendingApprovalIds", () => {
     );
   });
 
-  it("clears an armed timer once the turn moves on", () => {
-    // The leak this pair exists to prevent. A timer is armed for an approval
-    // awaiting an answer; the user then answers it in the app or resumes past
-    // it, so the transcript's last message is no longer that assistant turn.
-    // The driver effect originally returned early on exactly that shape, so the
-    // timer stayed armed and fired minutes later against an id the run had left
-    // behind - answering a question nobody asked.
+  it("drops an approval the user already answered, wherever it sits", () => {
+    // Answering flips the part to `approval-responded`, which is what drops
+    // it out - not the turn moving on. A timer left armed for an answered id
+    // would fire minutes later against a question nobody asked.
     const armed = new Set(["q1"]);
     const conversationMovedOn = [
       {
         role: "assistant",
-        parts: [{ state: "approval-requested", approval: { id: "q1" } }],
+        parts: [{ state: "approval-responded", approval: { id: "q1" } }],
       },
       { role: "user", parts: [{ type: "text", text: "actually, do this" }] },
     ];

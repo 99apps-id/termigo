@@ -14,6 +14,7 @@ import { LazyStore } from "@tauri-apps/plugin-store";
 import { toast } from "@/components/ui/toast";
 import * as chatMod from "@/modules/ai/store/chatStore";
 import { aiToolsRegistry, commandsRegistry, headerItemsRegistry, panelRenderersRegistry, sidebarSectionsRegistry, statusItemsRegistry } from "./registries";
+import { requirePermission } from "./permissions";
 import { useRightPanelStore } from "./rightPanelStore";
 import type { ExtensionRuntime } from "./host";
 import {
@@ -138,6 +139,9 @@ async function buildExecutor(
       await mod.setPentestScope(scope);
     },
     onToolRegister: (name) => {
+      // Same gate as the non-sandboxed path: a worker must declare
+      // `aiTools:register` to hand the agent an executable tool.
+      requirePermission(ext.id, ext.manifest.permissions, "aiTools:register");
       aiToolsRegistry.setRuntime(ext.id, name, (args: unknown) => hooks.invokeTool(name, args));
     },
     onCommandRegister: (id) => {

@@ -83,7 +83,9 @@ async function resolveCheckCommand(
   }
   const manifests = {
     pkgJson: await tryRead(root, "package.json"),
-    cargo: await tryRead(root, "Cargo.toml"),
+    cargo:
+      (await tryRead(root, "Cargo.toml")) ??
+      (await tryRead(root, "src-tauri/Cargo.toml")),
     goMod: await tryRead(root, "go.mod"),
     pyproject: await tryRead(root, "pyproject.toml"),
   };
@@ -116,7 +118,7 @@ export function detectCheckCommand(
   }
   if (cargo) {
     return kind === "test"
-      ? { command: "cargo test", note: "Cargo.toml" }
+      ? { command: "cargo test --lib", note: "Cargo.toml" }
       : {
           command: "cargo clippy --all-targets -- -D warnings",
           note: "Cargo.toml (clippy)",

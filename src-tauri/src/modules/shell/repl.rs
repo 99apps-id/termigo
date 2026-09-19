@@ -43,6 +43,8 @@ pub struct ReplProc {
     pub cwd: Option<String>,
     pub started_at_ms: u64,
     pub child: Arc<SharedChild>,
+    #[cfg(windows)]
+    pub(crate) _job: Option<crate::modules::proc::job::ProcessJob>,
     /// Taken once at spawn and held for the life of the process.
     stdin: Mutex<Option<ChildStdin>>,
     pub buffer: Mutex<BoundedRingBuffer>,
@@ -103,6 +105,10 @@ impl ReplProc {
     /// already sent, which reads as a hang.
     pub fn send_line(&self, line: &str) -> Result<(), String> {
         if self.exited.load(Ordering::Acquire) {
+            return Err("process has exited".into());
+        }
+        if let Ok(Some(_)) = self.child.try_wait() {
+            self.exited.store(true, Ordering::Release);
             return Err("process has exited".into());
         }
         let mut guard = self.stdin.lock().unwrap();
@@ -185,6 +191,7 @@ impl ReplProc {
 
     pub fn kill(&self) {
         self.close_stdin();
+        crate::modules::proc::kill_tree(self.child.id());
         let _ = self.child.kill();
     }
 }
@@ -221,7 +228,10 @@ pub fn spawn(
     crate::modules::proc::hide_console(&mut cmd);
 
     let shared = Arc::new(SharedChild::spawn(&mut cmd).map_err(|e| e.to_string())?);
+    #[cfg(windows)]
+    let job = crate::modules::proc::job::ProcessJob::create_for(shared.id()).ok();
     let kill_on_fail = || {
+        crate::modules::proc::kill_tree(shared.id());
         let _ = shared.kill();
     };
     let stdin_pipe = shared.take_stdin().ok_or_else(|| {
@@ -247,6 +257,8 @@ pub fn spawn(
         cwd,
         started_at_ms,
         child: shared,
+        #[cfg(windows)]
+        _job: job,
         stdin: Mutex::new(Some(stdin_pipe)),
         buffer: Mutex::new(BoundedRingBuffer::new(RING_CAP)),
         exited: AtomicBool::new(false),
@@ -376,7 +388,7 @@ mod tests {
     #[test]
     fn writing_to_a_finished_process_says_so_instead_of_failing_silently() {
         let proc = start("echo bye");
-        let _ = proc.wait_for(0, None, Duration::from_secs(5));
+        let _ = proc.wait_for(0, None, Duration::from_secs(10));
         let err = proc.send_line("anything").unwrap_err();
         assert!(err.contains("exited"), "unexpected error: {err}");
     }

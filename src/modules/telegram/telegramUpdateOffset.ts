@@ -53,6 +53,26 @@ function resolveStorage(
   return native ?? null;
 }
 
+/**
+ * Whether this bot has a confirmed offset at all. A missing key means the bot
+ * is fresh (first run or a token rotation) - note it is tri-state, because a
+ * STORED 0 is a real answer ("nothing confirmed yet, replay the tail") while
+ * a missing key means "never polled".
+ */
+export function hasStoredUpdateOffset(
+  botId: string | null,
+  storage?: OffsetStorage | null,
+): boolean {
+  if (!botId) return false;
+  const store = resolveStorage(storage);
+  if (!store) return false;
+  try {
+    return store.getItem(offsetStorageKey(botId)) !== null;
+  } catch {
+    return false;
+  }
+}
+
 export function loadUpdateOffset(
   botId: string | null,
   storage?: OffsetStorage | null,

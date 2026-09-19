@@ -455,32 +455,33 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
     });
   });
 
-  describe("owner user gating for sensitive callbacks and commands", () => {
-    function captureAnswerCallbacks() {
-      const texts: Array<string | null> = [];
-      const origFetch = globalThis.fetch;
-      globalThis.fetch = vi.fn(async (url, init) => {
-        if (String(url).includes("answerCallbackQuery") && init?.body) {
-          try {
-            const body = JSON.parse(String(init.body));
-            if (typeof body.callback_query_id === "string") {
-              texts.push(body.text ?? null);
-            }
-          } catch {}
-        }
-        return {
-          ok: true,
-          json: async () => ({ ok: true, result: {} }),
-          text: async () => JSON.stringify({ ok: true }),
-        } as unknown as Response;
-      });
+  function captureAnswerCallbacks() {
+    const texts: Array<string | null> = [];
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (url, init) => {
+      if (String(url).includes("answerCallbackQuery") && init?.body) {
+        try {
+          const body = JSON.parse(String(init.body));
+          if (typeof body.callback_query_id === "string") {
+            texts.push(body.text ?? null);
+          }
+        } catch {}
+      }
       return {
-        texts,
-        restore: () => {
-          globalThis.fetch = origFetch;
-        },
-      };
-    }
+        ok: true,
+        json: async () => ({ ok: true, result: {} }),
+        text: async () => JSON.stringify({ ok: true }),
+      } as unknown as Response;
+    });
+    return {
+      texts,
+      restore: () => {
+        globalThis.fetch = origFetch;
+      },
+    };
+  }
+
+  describe("owner user gating for sensitive callbacks and commands", () => {
 
     beforeEach(() => {
       useTelegramStore.getState().setChatId("111");
@@ -512,6 +513,17 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
     });
 
     it("allows an aq: approval callback from the owner user", async () => {
+      const aq = await import("../ai/store/approvalQueueStore");
+      aq.useApprovalQueue.setState({
+        pending: [
+          {
+            id: "q-def",
+            toolName: "bash_run",
+            summary: "echo test",
+            requestedAt: Date.now(),
+          },
+        ],
+      });
       const cap = captureAnswerCallbacks();
       const controller = new AbortController();
       try {
@@ -525,6 +537,26 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
           controller.signal,
         );
         expect(cap.texts).toContain("Approved.");
+      } finally {
+        cap.restore();
+        aq.useApprovalQueue.setState({ pending: [] });
+      }
+    });
+
+    it("rejects an aq: approval callback for a missing or expired id", async () => {
+      const cap = captureAnswerCallbacks();
+      const controller = new AbortController();
+      try {
+        await _testOnly.handleCallback(
+          {
+            id: "cb-expired",
+            from: { id: 222 },
+            message: { chat: { id: 111 }, message_id: 8 },
+            data: "aq:approve:missing-id",
+          },
+          controller.signal,
+        );
+        expect(cap.texts).toContain("Already answered or expired.");
       } finally {
         cap.restore();
       }
@@ -624,15 +656,65 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
       }
     });
 
-    it("/pair records the pairing user id", async () => {
+    it("/pair with the code pairs and records the pairing user id", async () => {
       useTelegramStore.getState().setChatId(null);
       useTelegramStore.getState().setOwnerUserId(null);
+      const code = useTelegramStore.getState().ensurePairingCode();
+      const sentBodies: Array<{ text?: string }> = [];
       const origFetch = globalThis.fetch;
-      globalThis.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({ ok: true, result: { message_id: 1 } }),
-        text: async () => JSON.stringify({ ok: true }),
-      } as unknown as Response);
+      globalThis.fetch = vi.fn(async (_url, init) => {
+        if (init?.body) {
+          try {
+            sentBodies.push(JSON.parse(String(init.body)));
+          } catch {}
+        }
+        return {
+          ok: true,
+          json: async () => ({ ok: true, result: { message_id: 1 } }),
+          text: async () => JSON.stringify({ ok: true }),
+        } as unknown as Response;
+      });
+      const controller = new AbortController();
+      try {
+        await _testOnly.handleUpdate(
+          {
+            update_id: 1,
+            message: {
+              chat: { id: 999 },
+              from: { id: 555 },
+              text: `/pair ${code}`,
+            },
+          },
+          controller.signal,
+        );
+        expect(useTelegramStore.getState().chatId).toBe("999");
+        expect(useTelegramStore.getState().ownerUserId).toBe("555");
+        // Single-use: the code dies with the pairing.
+        expect(useTelegramStore.getState().pairingCode).toBeNull();
+        expect(sentBodies.some((b) => b.text?.includes("Paired"))).toBe(true);
+      } finally {
+        globalThis.fetch = origFetch;
+      }
+    });
+
+    it("/pair without the code does not pair and never reveals it", async () => {
+      useTelegramStore.getState().setChatId(null);
+      useTelegramStore.getState().setOwnerUserId(null);
+      const code = useTelegramStore.getState().ensurePairingCode();
+      const sentBodies: Array<{ text?: string }> = [];
+      const origFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn(async (_url, init) => {
+        if (init?.body) {
+          try {
+            sentBodies.push(JSON.parse(String(init.body)));
+          } catch {}
+        }
+        return {
+          ok: true,
+          json: async () => ({ ok: true, result: { message_id: 1 } }),
+          text: async () => JSON.stringify({ ok: true }),
+        } as unknown as Response;
+      });
       const controller = new AbortController();
       try {
         await _testOnly.handleUpdate(
@@ -642,8 +724,9 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
           },
           controller.signal,
         );
-        expect(useTelegramStore.getState().chatId).toBe("999");
-        expect(useTelegramStore.getState().ownerUserId).toBe("555");
+        expect(useTelegramStore.getState().chatId).toBeNull();
+        expect(sentBodies.length).toBeGreaterThan(0);
+        expect(sentBodies.every((b) => !b.text?.includes(code))).toBe(true);
       } finally {
         globalThis.fetch = origFetch;
       }
@@ -722,6 +805,15 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
   describe("interactive approval and continue cards", () => {
     it("parses colon-separated approval ids in ap: callback correctly", async () => {
       const state = await import("../ai/store/chatStore");
+      state.useChatStore.getState().patchAgentMeta({
+        pendingApprovals: [
+          {
+            id: "session-1:call-abc:sub-2",
+            toolName: "bash_run",
+            summary: "echo test",
+          },
+        ],
+      });
       const spy = vi.spyOn(state.useChatStore.getState(), "respondToApproval");
       const origFetch = globalThis.fetch;
       globalThis.fetch = vi.fn().mockResolvedValue({
@@ -742,7 +834,26 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
         expect(spy).toHaveBeenCalledWith("session-1:call-abc:sub-2", true);
       } finally {
         spy.mockRestore();
+        state.useChatStore.getState().patchAgentMeta({ pendingApprovals: [] });
         globalThis.fetch = origFetch;
+      }
+    });
+
+    it("rejects an ap: callback when the approval is not in pendingApprovals", async () => {
+      const cap = captureAnswerCallbacks();
+      try {
+        await _testOnly.handleCallback(
+          {
+            id: "cb-ap-expired",
+            from: { id: 222 },
+            message: { chat: { id: 111 }, message_id: 9 },
+            data: "ap:approve:non-existent-id",
+          },
+          new AbortController().signal,
+        );
+        expect(cap.texts).toContain("Already answered or expired.");
+      } finally {
+        cap.restore();
       }
     });
 

@@ -9,6 +9,7 @@ import { handleUpdate, type Update } from "./telegramCommands";
 import { runMirror } from "./telegramDispatch";
 import {
   botIdFromToken,
+  hasStoredUpdateOffset,
   loadUpdateOffset,
   saveUpdateOffset,
 } from "./telegramUpdateOffset";
@@ -343,6 +344,38 @@ export async function startTelegramBot(): Promise<void> {
   // for a bot that is already stopped and nothing ever clears it again.
   if (loopController !== controller || controller.signal.aborted) return;
   currentUpdateOffset = loadUpdateOffset(currentBotId);
+  if (currentBotId && !hasStoredUpdateOffset(currentBotId)) {
+    // Fresh bot (first run or token rotation): starting at 0 would replay the
+    // whole unconfirmed backlog and re-run its commands. Seeding from the old
+    // bot's offset is worse (update ids are per-bot; a stale high offset
+    // silently SKIPS the new bot's early updates). Instead take one immediate
+    // (timeout=0) poll and start past whatever is already waiting: the backlog
+    // is explicitly dropped, nothing replays and nothing is skipped.
+    // Best-effort - on any failure the loop starts at 0, today's behavior.
+    try {
+      const backlog = (await apiGet(
+        "getUpdates?timeout=0",
+        controller.signal,
+        15_000,
+      )) as { ok: boolean; result: Update[] };
+      if (loopController !== controller || controller.signal.aborted) return;
+      let maxId = -1;
+      for (const u of backlog.result ?? []) {
+        if (typeof u.update_id === "number" && u.update_id > maxId) {
+          maxId = u.update_id;
+        }
+      }
+      if (maxId >= 0) {
+        const dropped = backlog.result?.length ?? 0;
+        setCurrentUpdateOffset(maxId + 1);
+        logRelayInfo(
+          `fresh bot: acknowledged-and-dropped ${dropped} backlog update(s), starting at offset ${currentUpdateOffset}`,
+        );
+      }
+    } catch {
+      // Fall through with offset 0; the long-poll loop reports the cause.
+    }
+  }
   if (watchdogTimer) clearInterval(watchdogTimer);
   watchdogTimer = setInterval(checkPollingStall, 15_000);
   // Start polling BEFORE any awaiting setup. The bot used to report itself

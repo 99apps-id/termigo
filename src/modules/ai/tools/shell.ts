@@ -4,6 +4,7 @@ import { currentWorkspaceEnv, workspaceScopeKey } from "@/modules/workspace";
 import { tool } from "ai";
 import { z } from "zod";
 import { native } from "../lib/native";
+import { getSessionShell } from "../lib/sessionShell";
 import { checkPentestCommand } from "../lib/pentestScope";
 import { remoteUnsupported } from "../lib/remoteFs";
 import { shellQuote } from "../lib/remoteSearch";
@@ -43,28 +44,6 @@ export function screenCommand(
   // refuses denial-of-service tooling and lets every target through.
   const scope = prefs.enforcePentestScope ? prefs.pentestScope : [];
   return checkPentestCommand(command, scope);
-}
-
-/**
- * Per-session lazy shell-session id. The agent gets one persistent shell per
- * chat session, so cwd survives across tool calls (cd, mkdir+cd, etc).
- */
-const sessionShells = new Map<string, Promise<number>>();
-
-async function getSessionShell(
-  sessionId: string,
-  cwd: string | null,
-): Promise<number> {
-  let p = sessionShells.get(sessionId);
-  if (!p) {
-    // Clean up only failed opens so the map doesn't accumulate stale rejects.
-    p = native.shellSessionOpen(cwd).catch((err) => {
-      sessionShells.delete(sessionId);
-      throw err;
-    });
-    sessionShells.set(sessionId, p);
-  }
-  return p;
 }
 
 export function workspaceSessionKey(
@@ -230,6 +209,11 @@ export function buildShellTools(ctx: ToolContext) {
       }),
       needsApproval: true,
       execute: async ({ command, timeout_secs }, { abortSignal }) => {
+        const effectiveTimeout =
+          timeout_secs ??
+          (/^\s*(cargo|pnpm\s+install|npm\s+install|yarn\s+install|git\s+clone|rustc)\b/i.test(command)
+            ? 300
+            : 120);
         const normalized = normalizeShellCommand(command);
         // Unwrap BEFORE screening on every path: screening the wrapper only
         // sees `powershell`/`bash` (never offensive) while the inner script
@@ -326,7 +310,7 @@ export function buildShellTools(ctx: ToolContext) {
               shellId,
               effectiveCommand,
               cwd,
-              timeout_secs,
+              effectiveTimeout,
             );
           } finally {
             abortSignal?.removeEventListener("abort", onAbort);
@@ -347,7 +331,7 @@ export function buildShellTools(ctx: ToolContext) {
               : {}),
             ...(r.timed_out
               ? {
-                  hint: `Command timed out after ${timeout_secs ?? 120}s. If this is a long-running process (like a server, watcher, or interactive script), use bash_background instead of bash_run.`,
+                  hint: `Command timed out after ${effectiveTimeout}s. If this is a long-running process (like a server, watcher, or interactive script), use bash_background instead of bash_run.`,
                 }
               : {}),
           };

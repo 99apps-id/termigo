@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   botIdFromToken,
+  hasStoredUpdateOffset,
   loadUpdateOffset,
   offsetStorageKey,
   parseStoredOffset,
@@ -94,6 +95,17 @@ describe("telegramUpdateOffset", () => {
 
     it("keys by bot id", () => {
       expect(offsetStorageKey("123")).toBe("termigo-telegram-offset:123");
+    });
+
+    it("distinguishes a missing key from a stored zero", () => {
+      const store = fakeStorage();
+      // Missing: fresh bot, the caller ack-drops the backlog instead.
+      expect(hasStoredUpdateOffset("123", store)).toBe(false);
+      // Stored 0 is a real answer ("nothing confirmed, replay the tail").
+      saveUpdateOffset("123", 0, store);
+      expect(hasStoredUpdateOffset("123", store)).toBe(true);
+      expect(hasStoredUpdateOffset(null, store)).toBe(false);
+      expect(hasStoredUpdateOffset("123", null)).toBe(false);
     });
   });
 });

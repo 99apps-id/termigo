@@ -86,24 +86,12 @@ export function gate<T extends AnyTool>(
   return {
     ...tool,
     execute: async (input: never, opts: never) => {
-      // A session or permanent allowance answers the question before it is
-      // asked. Checked first so an allowed tool never touches the queue,
-      // whatever the approval mode says.
-      if (isSessionAllowed(toolName)) return inner(input, opts);
-      if (
-        usePreferencesStore
-          .getState()
-          .agentAlwaysAllowedTools.includes(toolName)
-      ) {
-        return inner(input, opts);
-      }
-
-      // Project-scoped approval rules (.termigo/approvals.json) hold for
-      // sub-agents too - a rule the user set for their own agent must not be
-      // bypassed by a worker. deny auto-refuses, allow auto-runs, and ask (or
-      // no match) falls through to the queue below. Same precedence as the
-      // main agent's auto-approval path: an explicit session/global allowance
-      // wins, then the rules, then the scoped-scan opt-in.
+      // Project deny rules (.termigo/approvals.json) are evaluated FIRST, so
+      // an explicit deny holds against every other allowance: approving
+      // `bash_run` once for `ls` must not permanently bless `rm -rf` that a
+      // deny rule forbids. Same precedence as the main agent's auto-approval
+      // path. Only deny is decided here; allow/ask flow into the checks below
+      // so a session/global grant keeps its meaning.
       const ruleInput = input as { command?: unknown; path?: unknown };
       const ruleGate = subagentRuleGate(
         useApprovalRulesStore.getState().rules,
@@ -119,6 +107,18 @@ export function gate<T extends AnyTool>(
           error:
             "denied by a project approval rule (.termigo/approvals.json). Do not retry this call; report it as not done.",
         };
+      }
+
+      // A session or permanent allowance answers the question before it is
+      // asked. Checked after the project deny above, so an allowed tool never
+      // touches the queue - unless a deny rule forbids it.
+      if (isSessionAllowed(toolName)) return inner(input, opts);
+      if (
+        usePreferencesStore
+          .getState()
+          .agentAlwaysAllowedTools.includes(toolName)
+      ) {
+        return inner(input, opts);
       }
       if (ruleGate === "allow") return inner(input, opts);
 
@@ -200,7 +200,11 @@ export function gate<T extends AnyTool>(
 
 /**
  * Normalizes file paths so that different representations (e.g. `./src/a.ts`
- * vs `src\\a.ts`) map to the same key.
+ * vs `src\\a.ts` vs `src/../src/a.ts`) map to the same key. Dot segments are
+ * resolved lexically: without this `src/../src/a.ts` and `src/a.ts` are
+ * different keys and the new-files-only guard below is trivially bypassed.
+ * Leading `..` is preserved (it escapes whatever root the caller compares
+ * against, which the caller must handle).
  */
 export function normalizeTargetKey(path: string): string {
   let norm = path.trim().replace(/\\/g, "/");
@@ -214,6 +218,30 @@ export function normalizeTargetKey(path: string): string {
   while (norm.includes("/./")) {
     norm = norm.replace(/\/\.\//g, "/");
   }
+  // Resolve interior `a/../` pairs from left to right. Anchored so a drive
+  // (`c:/..`) or UNC root (`//srv/..`) never collapses past its root.
+  const anchored =
+    norm.startsWith("//") || /^[a-zA-Z]:\//.test(norm) || norm.startsWith("/");
+  const parts = norm.split("/");
+  const stack: string[] = [];
+  for (const part of parts) {
+    if (part === "" || part === ".") continue;
+    if (part === "..") {
+      const top = stack[stack.length - 1];
+      if (
+        stack.length > 0 &&
+        top !== ".." &&
+        top !== "" &&
+        !/^[a-zA-Z]:$/.test(top)
+      ) {
+        stack.pop();
+        continue;
+      }
+      if (anchored) continue;
+    }
+    stack.push(part);
+  }
+  norm = (anchored && norm.startsWith("/") ? "/" : "") + stack.join("/");
   if (!norm) {
     return ".";
   }
@@ -289,7 +317,19 @@ export function newFilesOnly<T extends AnyTool>(tool: T): T {
             };
           }
         }
-        selfCreated.add(targetKey);
+        const out = await inner(input, opts);
+        // Whitelist only on success: a failed first write must not bless a
+        // later overwrite of a pre-existing file. Failure is a tool-result
+        // `{ error }`, the same shape the queue reports back to the model.
+        if (
+          !out ||
+          typeof out !== "object" ||
+          !("error" in out) ||
+          !(out as { error?: unknown }).error
+        ) {
+          selfCreated.add(targetKey);
+        }
+        return out;
       }
       return inner(input, opts);
     },

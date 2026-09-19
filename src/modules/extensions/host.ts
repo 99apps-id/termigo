@@ -580,7 +580,20 @@ export async function buildContext(ext: ExtensionRuntime): Promise<{
         cached: c.agentMeta.tokens.cachedInputTokens,
       },
       activeSessionId: c.activeSessionId,
-      approvalMode: "ask",
+      // Real posture, not the hardcoded "ask" this used to report: an
+      // extension branching on this gate must see the mode the user runs.
+      // Vocabulary differs (ask/semi/yolo vs ask/edits/all) by design; the
+      // mapping is positional, least to most autonomous.
+      approvalMode:
+        prefsMod.usePreferencesStore.getState().agentApprovalMode === "all"
+          ? "yolo"
+          : prefsMod.usePreferencesStore.getState().agentApprovalMode ===
+              "edits"
+            ? "semi"
+            : "ask",
+      // run_subagent(s) are CORE tools the tool picker cannot disable, so
+      // delegation is always available. Reported honestly rather than derived
+      // from a preference that no longer exists.
       subagentsEnabled: true,
       hasKey: chatMod.hasKeyForModel(c.selectedModelId),
     };
@@ -1003,6 +1016,11 @@ export async function buildContext(ext: ExtensionRuntime): Promise<{
         panelsRegistry.set(ext.id, items);
       },
       aiTools(items) {
+        // Registering agent tools needs an explicit grant like panels do:
+        // an undeclared tool would otherwise reach the agent (and run with
+        // the user's API credit and file access) without ever appearing in
+        // the install review.
+        requirePermission(ext.id, declared, "aiTools:register");
         aiToolsRegistry.set(ext.id, items);
       },
     },
@@ -1010,6 +1028,7 @@ export async function buildContext(ext: ExtensionRuntime): Promise<{
       commandsRegistry.setRuntime(ext.id, commandId, handler);
     },
     registerAiToolHandler(toolName, handler) {
+      requirePermission(ext.id, declared, "aiTools:register");
       aiToolsRegistry.setRuntime(ext.id, toolName, handler);
     },
     logger: {

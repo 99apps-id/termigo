@@ -20,7 +20,7 @@ describe("detectCheckCommand", () => {
   it("falls back to cargo for a Rust project without package.json", () => {
     const cargo = "[package]\nname = 'x'\n";
     expect(detectCheckCommand("test", { pkgJson: null, cargo, goMod: null, pyproject: null })).toEqual({
-      command: "cargo test",
+      command: "cargo test --lib",
       note: "Cargo.toml",
     });
     expect(detectCheckCommand("lint", { pkgJson: null, cargo, goMod: null, pyproject: null })).toEqual({
