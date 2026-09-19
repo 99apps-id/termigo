@@ -164,10 +164,11 @@ function basename(p: string): string {
 function comparisonForm(p: string): string {
   let s = p.replace(/\\/g, "/");
   // UNC / extended-length prefix: \\?\C:\... or //?/C:/... or //?/UNC\server\share\...
-  // Strip the prefix AND the drive/UNC segment it wraps, so \\?\C:\Windows\x and
-  // //?/UNC/server/share/path both compare as /windows/x and /server/share/path
-  // like the Rust mirror. Stripping only the prefix left the drive/UNC sitting
-  // behind a leading slash where the `^[a-zA-Z]:` pass could not match it.
+  // Strip the prefix AND the drive/UNC-server-share segment it wraps, so
+  // \\?\C:\Windows\x compares as /windows/x and //?/UNC/server/share/path
+  // compares as /path, like the Rust mirror (fs/security.rs). Stripping only
+  // the prefix left the drive/UNC sitting behind a leading slash where the
+  // `^[a-zA-Z]:` pass could not match it.
   s = s.replace(/^\/\/\?\/(?:[a-zA-Z]:|UNC\/[^/]+\/[^/]+)?/, "/");
   // Drive prefix: C:/foo → /foo. Important: do this BEFORE lowercasing so we
   // don't have to special-case "c:" vs "C:".
@@ -360,7 +361,7 @@ const RM_HOME_TARGET =
   "(['\"]?(~(?:/[^\\s'\"]*)?|\\$\\{?HOME\\}?(?:/[^\\s'\"]*)?)['\"]?(?:/\\*?)?(?:\\s|$|;|&|\\|))";
 /** Detect `cd ~` / `cd $HOME` / `cd ${HOME}` followed by destructive rm on `.` or `*` */
 const CD_HOME_RM_RE = new RegExp(
-  `\\bcd\\s+(['\"]?(~(?:/[^\\s'\"]*)?|\\$\\{?HOME\\}?(?:/[^\\s'\"]*)?)['\"]?)\\s*[;&|]\\s*rm\\s+${RM_RECURSIVE_FORCE}\\s+${RM_END_OF_OPTIONS}(['\"]?[.*]['\"]?)`,
+  `\\bcd\\s+(['"]?(~(?:/[^\\s'"]*)?|\\$\\{?HOME\\}?(?:/[^\\s'"]*)?)['"]?)\\s*[;&|]\\s*rm\\s+${RM_RECURSIVE_FORCE}\\s+${RM_END_OF_OPTIONS}(['"]?[.*]['"]?)`,
 );
 const RM_ROOT_RE = new RegExp(
   `\\brm\\s+${RM_RECURSIVE_FORCE}\\s+${RM_END_OF_OPTIONS}${RM_ROOT_TARGET}`,
