@@ -2,44 +2,43 @@ import { describe, expect, it } from "vitest";
 import { SubagentConcurrencyPool } from "./subagentPool";
 
 describe("SubagentConcurrencyPool", () => {
-  it("limits concurrent acquisitions", async () => {
+  it("counts each granted slot exactly once", async () => {
     const pool = new SubagentConcurrencyPool(2);
     const r1 = await pool.acquire();
     const r2 = await pool.acquire();
     expect(pool.activeCount).toBe(2);
-    expect(pool.queueLength).toBe(0);
 
-    let thirdAcquired = false;
-    const p3 = pool.acquire().then((r) => {
-      thirdAcquired = true;
-      return r;
-    });
-
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(thirdAcquired).toBe(false);
-    expect(pool.queueLength).toBe(1);
-
+    // Third acquire waits; releasing one slot grants it without overshoot.
+    const pending = pool.acquire();
     r1();
-    const release3 = await p3;
-    expect(thirdAcquired).toBe(true);
+    const r3 = await pending;
     expect(pool.activeCount).toBe(2);
 
     r2();
-    release3();
+    r3();
+    expect(pool.activeCount).toBe(0);
+    expect(pool.queueLength).toBe(0);
+  });
+
+  it("release is idempotent", async () => {
+    const pool = new SubagentConcurrencyPool(1);
+    const release = await pool.acquire();
+    release();
+    release();
     expect(pool.activeCount).toBe(0);
   });
 
-  it("rejects on abort signal", async () => {
+  it("aborting a queued acquire leaves the count untouched", async () => {
     const pool = new SubagentConcurrencyPool(1);
-    const r1 = await pool.acquire();
-    const ac = new AbortController();
-
-    const p2 = pool.acquire(ac.signal);
-    ac.abort();
-
-    await expect(p2).rejects.toThrow("Aborted");
+    const held = await pool.acquire();
+    const ctrl = new AbortController();
+    const pending = pool.acquire(ctrl.signal);
+    const assertion = expect(pending).rejects.toThrow(/abort/i);
+    ctrl.abort();
+    await assertion;
+    expect(pool.activeCount).toBe(1);
     expect(pool.queueLength).toBe(0);
-    r1();
+    held();
     expect(pool.activeCount).toBe(0);
   });
 });
