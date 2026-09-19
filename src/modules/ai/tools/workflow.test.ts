@@ -136,6 +136,31 @@ describe("loadWorkflow", () => {
   it("returns null when no workspace root is available", async () => {
     expect(await loadWorkflow("anything")).toBeNull();
   });
+
+  it("refuses traversal names without touching the disk", async () => {
+    const { native } = await import("../lib/native");
+    const read = vi.spyOn(native, "readFile");
+    try {
+      for (const name of ["../../approvals", "../x", "/abs", "", ".", "a/b"]) {
+        expect(await loadWorkflow(name)).toBeNull();
+      }
+      expect(read).not.toHaveBeenCalled();
+    } finally {
+      read.mockRestore();
+    }
+  });
+
+  it("refuses valid JSON with the wrong shape", async () => {
+    const { native } = await import("../lib/native");
+    const read = vi
+      .spyOn(native, "readFile")
+      .mockResolvedValue({ kind: "text", content: `{"name":"x"}` });
+    try {
+      expect(await loadWorkflow("demo")).toBeNull();
+    } finally {
+      read.mockRestore();
+    }
+  });
 });
 
 describe("listWorkflowNames", () => {

@@ -68,16 +68,42 @@ async function workflowRoot(): Promise<string | null> {
 
 /**
  * Load a workflow definition by name from `.termigo/workflows/<name>.json`.
+ *
+ * The name comes from the model, so it is confined to a safe alphabet:
+ * without this `../../approvals` would resolve outside the workflows
+ * directory and any workspace JSON could be executed as a tool pipeline.
  */
+export function isSafeWorkflowName(name: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(name);
+}
+
 export async function loadWorkflow(
   name: string,
 ): Promise<WorkflowDefinition | null> {
+  if (!isSafeWorkflowName(name)) return null;
   const root = await workflowRoot();
   if (!root) return null;
   try {
     const r = await native.readFile(`${root}/${name}.json`);
     if (r.kind !== "text" || !r.content) return null;
-    return JSON.parse(r.content) as WorkflowDefinition;
+    const parsed = JSON.parse(r.content) as Partial<WorkflowDefinition>;
+    // Shape-check before execution: a valid-JSON file with the wrong shape
+    // would otherwise throw deep inside the runner instead of failing clean.
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      !Array.isArray(parsed.steps) ||
+      !parsed.steps.every(
+        (s) =>
+          s &&
+          typeof s === "object" &&
+          typeof (s as WorkflowStep).id === "string" &&
+          typeof (s as WorkflowStep).tool === "string",
+      )
+    ) {
+      return null;
+    }
+    return parsed as WorkflowDefinition;
   } catch {
     return null;
   }

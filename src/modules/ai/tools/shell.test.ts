@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
+  buildShellTools,
   normalizeShellCommand,
   screenCommand,
   truncateCommandOutput,
@@ -7,6 +8,32 @@ import {
   unwrapPowershellCommand,
   workspaceSessionKey,
 } from "./shell";
+import type { ToolContext } from "./context";
+
+vi.mock("@/modules/ssh/bridge", () => ({
+  sshExec: vi.fn(),
+}));
+
+vi.mock("@/modules/settings/preferences", () => ({
+  usePreferencesStore: {
+    getState: () => ({
+      enforcePentestScope: false,
+      pentestScope: [],
+      autoApproveInScopeScans: false,
+    }),
+  },
+}));
+
+function sshCtx(overrides: Partial<ToolContext> = {}): ToolContext {
+  return {
+    getCwd: () => "/workspace",
+    getWorkspaceRoot: () => "/workspace",
+    getSessionId: () => "session",
+    getRemoteSession: () => ({ sessionId: 7, cwd: "/srv/app" }),
+    clearRemoteSession: () => {},
+    ...overrides,
+  } as unknown as ToolContext;
+}
 
 describe("truncateCommandOutput", () => {
   it("keeps output untouched when within maxChars", () => {
@@ -135,6 +162,64 @@ describe("screenCommand", () => {
   it("does not refuse a balanced command that merely mentions the sentinel", () => {
     const res = screenCommand('echo "[termigo: unclosed quote in command]"');
     expect(res.ok).toBe(true);
+  });
+});
+
+describe("bash_run ssh fallback", () => {
+  it("does not run a mutating command locally when ssh drops", async () => {
+    const { sshExec } = await import("@/modules/ssh/bridge");
+    vi.mocked(sshExec).mockRejectedValueOnce(new Error("no ssh session"));
+    const { native } = await import("../lib/native");
+    const run = vi
+      .spyOn(native, "shellSessionRun")
+      .mockResolvedValue({ stdout: "", stderr: "", exit_code: 0 });
+    try {
+      let cleared = false;
+      const tools = buildShellTools(
+        sshCtx({ clearRemoteSession: () => { cleared = true; } }),
+      );
+      const exec = tools.bash_run.execute;
+      if (!exec) throw new Error("bash_run execute missing");
+      // biome-ignore lint/suspicious/noExplicitAny: tool ctx and result are harness-typed, empty exec ctx is enough
+      const res = (await exec(
+        { command: "rm -rf build", timeout_secs: 5 },
+        {} as any,
+      )) as any;
+      expect(cleared).toBe(true);
+      expect(res.error).toMatch(/not run locally/);
+      expect(run).not.toHaveBeenCalled();
+    } finally {
+      run.mockRestore();
+    }
+  });
+
+  it("still falls through for inspect-only commands", async () => {
+    const { sshExec } = await import("@/modules/ssh/bridge");
+    vi.mocked(sshExec).mockRejectedValueOnce(new Error("no ssh session"));
+    const { native } = await import("../lib/native");
+    const open = vi
+      .spyOn(native, "shellSessionOpen")
+      .mockResolvedValue(41);
+    const run = vi.spyOn(native, "shellSessionRun").mockResolvedValue({
+      stdout: "a\n",
+      stderr: "",
+      exit_code: 0,
+    });
+    try {
+      const tools = buildShellTools(sshCtx());
+      const exec = tools.bash_run.execute;
+      if (!exec) throw new Error("bash_run execute missing");
+      // biome-ignore lint/suspicious/noExplicitAny: tool ctx and result are harness-typed, empty exec ctx is enough
+      const res = (await exec(
+        { command: "ls", timeout_secs: 5 },
+        {} as any,
+      )) as any;
+      expect(run).toHaveBeenCalled();
+      expect(res.stdout).toBe("a\n");
+    } finally {
+      open.mockRestore();
+      run.mockRestore();
+    }
   });
 });
 

@@ -43,9 +43,9 @@ vi.mock("../store/approvalQueueStore", () => ({
 
 vi.mock("../store/approvalRulesStore", () => ({
   useApprovalRulesStore: {
-    getState: () => ({
+    getState: vi.fn(() => ({
       rules: [],
-    }),
+    })),
   },
 }));
 
@@ -233,5 +233,29 @@ describe("gate & breaker", () => {
     expect(breaker.denials).toBe(3);
     expect(breaker.tripped).toBe(true);
     expect(breaker.trip).toHaveBeenCalled();
+  });
+
+  it("a project deny beats a session allowance", async () => {
+    const { useApprovalRulesStore } = await import(
+      "../store/approvalRulesStore"
+    );
+    vi.mocked(useApprovalRulesStore.getState).mockReturnValueOnce({
+      rules: [{ tools: ["bash_run"], action: "deny" }],
+    });
+    const { isSessionAllowed } = await import("../store/approvalQueueStore");
+    vi.mocked(isSessionAllowed).mockReturnValueOnce(true);
+    const inner = vi.fn();
+    const breaker: DenialBreaker = {
+      denials: 0,
+      tripped: false,
+      trip: vi.fn(),
+    };
+    const tool = gate({ execute: inner }, "bash_run", "builder #1", breaker);
+    const res = (await tool.execute(
+      { command: "rm -rf /tmp/x" } as never,
+      {} as never,
+    )) as { error?: string };
+    expect(res.error).toContain("project approval rule");
+    expect(inner).not.toHaveBeenCalled();
   });
 });

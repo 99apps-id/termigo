@@ -1354,9 +1354,11 @@ mod tests_sandbox {
 
     #[test]
     fn validate_shell_command_refuses_powershell_command_hiding_tools() {
+        // (nmap would NOT qualify: scanners are deliberately allowlisted for
+        // the pentest kit; the scope fence, not this list, constrains them.)
         assert!(validate_shell_command("powershell -Command \"evil-binary --flag\"").is_err());
         assert!(validate_shell_command("pwsh -c \"definitely-not-a-tool\"").is_err());
-        assert!(validate_shell_command("powershell -NoProfile -Command \"nmap 8.8.8.8\"").is_err());
+        assert!(validate_shell_command("powershell -NoProfile -Command \"evil-binary\"").is_err());
     }
 
     #[test]

@@ -5,6 +5,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { native } from "../lib/native";
 import { getSessionShell } from "../lib/sessionShell";
+import { commandRisk, deletesFiles } from "../lib/commandRisk";
 import { checkPentestCommand } from "../lib/pentestScope";
 import { remoteUnsupported } from "../lib/remoteFs";
 import { shellQuote } from "../lib/remoteSearch";
@@ -263,9 +264,23 @@ export function buildShellTools(ctx: ToolContext) {
           } catch (e) {
             const errStr = String(e);
             if (/no ssh session|session.*closed|not found/i.test(errStr)) {
-              // Remote SSH session is disconnected or closed; drop stale remote anchor
-              // and fall through to local shell execution.
+              // Remote SSH session is disconnected or closed; drop the stale
+              // remote anchor. Fall through to local execution ONLY for
+              // inspect-only commands: re-running a mutating command meant
+              // for the server (`rm -rf build`, a deploy, a restart) against
+              // the local workspace would hit the wrong machine. Anything
+              // else returns the SSH error so the model retries remotely.
               ctx.clearRemoteSession?.();
+              if (
+                deletesFiles(normalized) ||
+                commandRisk(normalized) !== "inspect"
+              ) {
+                return {
+                  error: `${errStr} (not run locally: the command may change files and was meant for the remote host)`,
+                  command,
+                  remote: true,
+                };
+              }
             } else {
               return { error: errStr, command, remote: true };
             }

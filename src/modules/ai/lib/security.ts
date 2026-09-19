@@ -210,12 +210,20 @@ const SYSTEM_ROOT_DIRS = new Set([
 ]);
 
 function stripWslHostPrefix(cmp: string): string {
-  // `//wsl$/ubuntu/etc/passwd` -> `/etc/passwd`, mirroring the Rust side.
-  if (!cmp.startsWith("//")) return cmp;
-  const afterSlashes = cmp.slice(2);
-  const hostEnd = afterSlashes.indexOf("/");
+  // `//wsl$/ubuntu/etc/passwd` (or `/wsl$/...` after the duplicate-slash
+  // collapse in `comparisonForm`) -> `/etc/passwd`, mirroring the Rust side.
+  // The host must be a WSL host; anything else is an ordinary absolute path.
+  const rest = cmp.startsWith("//")
+    ? cmp.slice(2)
+    : cmp.startsWith("/")
+      ? cmp.slice(1)
+      : null;
+  if (rest === null) return cmp;
+  const hostEnd = rest.indexOf("/");
   if (hostEnd === -1) return cmp;
-  const afterHost = afterSlashes.slice(hostEnd + 1);
+  const host = rest.slice(0, hostEnd);
+  if (host !== "wsl$" && host !== "wsl.localhost") return cmp;
+  const afterHost = rest.slice(hostEnd + 1);
   const distroEnd = afterHost.indexOf("/");
   if (distroEnd === -1) return cmp;
   return afterHost.slice(distroEnd);

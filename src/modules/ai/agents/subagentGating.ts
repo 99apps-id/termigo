@@ -80,6 +80,14 @@ export function gate<T extends AnyTool>(
   requester: string,
   breaker: DenialBreaker,
   abortSignal?: AbortSignal,
+  /**
+   * Release the pool slot while blocked on the user. Without this a worker
+   * parked on an approval holds one of four global slots for minutes, and
+   * four parked workers starve every further spawn (an apparent hang).
+   * runSubagent passes its `yieldSlot`; other callers omit it and keep the
+   * previous hold-while-waiting behavior.
+   */
+  yieldForApproval?: <R>(work: () => Promise<R>) => Promise<R>,
 ): T {
   const inner = tool.execute;
   if (!inner) return tool;
@@ -150,12 +158,16 @@ export function gate<T extends AnyTool>(
       );
       if (!mustAsk) return inner(input, opts);
 
-      const decision = await useApprovalQueue
-        .getState()
-        .request(
-          { requester, toolName, summary: summarizeInput(input) },
-          abortSignal,
-        );
+      const askUser = () =>
+        useApprovalQueue
+          .getState()
+          .request(
+            { requester, toolName, summary: summarizeInput(input) },
+            abortSignal,
+          );
+      const decision = yieldForApproval
+        ? await yieldForApproval(askUser)
+        : await askUser();
 
       if (decision === "allow-session") {
         rememberSessionAllowed(toolName);

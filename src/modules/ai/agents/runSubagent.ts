@@ -265,6 +265,11 @@ export async function runSubagent({
       requester ?? type,
       breaker,
       controller.signal,
+      // runSubagent holds a pool slot for the whole generateText: yield it
+      // while the approval queue waits on the user so parked workers cannot
+      // starve the pool.
+      <R>(work: () => Promise<R>) =>
+        ctx.yieldSlot ? ctx.yieldSlot(work) : work(),
     );
   }
 

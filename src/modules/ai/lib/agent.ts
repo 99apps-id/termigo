@@ -1814,6 +1814,29 @@ export async function runAgentStream(opts: RunAgentOptions) {
     // step re-arms once the tool is done.
     onChunk: ({ chunk }) => {
       markRunActivity();
+      // `tool-result` first: `watchdogDirective` maps it to "rearm", so a
+      // directive-first chain never reaches the delivery timer below and a
+      // model that goes silent after a tool result hangs on the generic
+      // watchdog instead of the dedicated 60s delivery timeout.
+      if (chunk.type === "tool-result") {
+        clearFirstStepTimer();
+        armModelWatchdog();
+        toolResultDeliveryTimer = setTimeout(() => {
+          const elapsed = Math.round((Date.now() - runStart) / 1000);
+          fireAndForget(
+            logWarn(
+              `[ai] no model output after tool-result for ${Math.round(MAX_TOOL_RESULT_DELIVERY_MS / 1000)}s, aborting the run (elapsed=${elapsed}s, model=${modelId}, provider=${provider})`,
+            ),
+            "tool-result-delivery-timeout",
+          );
+          abortController.abort(
+            new Error(
+              `The model did not respond within ${Math.round(MAX_TOOL_RESULT_DELIVERY_MS / 1000)}s after a tool finished. The run was stopped to avoid hanging forever.`,
+            ),
+          );
+        }, MAX_TOOL_RESULT_DELIVERY_MS);
+        return;
+      }
       const directive = watchdogDirective(chunk.type);
       if (directive === "rearm") {
         armModelWatchdog();
@@ -1849,31 +1872,8 @@ export async function runAgentStream(opts: RunAgentOptions) {
             ),
           );
         };
-        toolExecutionTimer = setTimeout(checkToolExecution, toolBudgetMs);
-      } else if (chunk.type === "tool-result") {
-        clearFirstStepTimer();
-        armModelWatchdog();
-        toolResultDeliveryTimer = setTimeout(() => {
-          const elapsed = Math.round((Date.now() - runStart) / 1000);
-          fireAndForget(
-            logWarn(
-              `[ai] no model output after tool-result for ${Math.round(MAX_TOOL_RESULT_DELIVERY_MS / 1000)}s, aborting the run (elapsed=${elapsed}s, model=${modelId}, provider=${provider})`,
-            ),
-            "tool-result-delivery-timeout",
-          );
-          abortController.abort(
-            new Error(
-              `The model did not respond within ${Math.round(MAX_TOOL_RESULT_DELIVERY_MS / 1000)}s after a tool finished. The run was stopped to avoid hanging forever.`,
-            ),
-          );
-        }, MAX_TOOL_RESULT_DELIVERY_MS);
+          toolExecutionTimer = setTimeout(checkToolExecution, toolBudgetMs);
       }
-      // No `else if (directive === "rearm")` here. `rearm` is handled by the
-      // first branch, and this one could never run: by the time control reached
-      // it, `directive` was narrowed to `"ignore"`, so the comparison had no
-      // overlap and `tsc` refused it. The `tool-result` branch above already
-      // re-arms the model watchdog explicitly, which is what the dead branch
-      // was reaching for.
     },
     onStepFinish: (step) => {
       clearFirstStepTimer();

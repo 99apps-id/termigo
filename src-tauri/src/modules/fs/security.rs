@@ -220,18 +220,25 @@ fn is_system_root(dir: &str) -> bool {
 }
 
 fn strip_wsl_host_prefix(cmp: &str) -> &str {
-    // `//wsl$/ubuntu/etc/passwd` -> `/etc/passwd`: drop the `//host/distro`
-    // head so the root comparison below sees a plain absolute path. Anything
-    // that does not have both segments is not a WSL path; return it unchanged.
-    let after_slashes = match cmp.strip_prefix("//") {
-        Some(rest) => rest,
+    // `//wsl$/ubuntu/etc/passwd` (or `/wsl$/ubuntu/etc/passwd` after the
+    // duplicate-slash collapse in `comparison_form`) -> `/etc/passwd`: drop
+    // the host/distro head so the root comparison below sees a plain absolute
+    // path. The host MUST be a WSL host (`wsl$`, `wsl.localhost`); anything
+    // else (`/users/...`, `/etc/...`) is an ordinary path and is returned
+    // unchanged.
+    let rest = match cmp.strip_prefix("//").or_else(|| cmp.strip_prefix('/')) {
+        Some(r) => r,
         None => return cmp,
     };
-    let host_end = match after_slashes.find('/') {
+    let host_end = match rest.find('/') {
         Some(i) => i,
         None => return cmp,
     };
-    let after_host = &after_slashes[host_end + 1..];
+    let host = &rest[..host_end];
+    if host != "wsl$" && host != "wsl.localhost" {
+        return cmp;
+    }
+    let after_host = &rest[host_end + 1..];
     let distro_end = match after_host.find('/') {
         Some(i) => i,
         None => return cmp,
