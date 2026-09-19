@@ -1,11 +1,12 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Termigo",
-  "version": "0.9.18",
+  "version": "0.9.19",
   "identifier": "id.99apps.termigo",
   "build": {
     "beforeDevCommand": "pnpm build:cli:dev && pnpm dev",
     "devUrl": "http://localhost:1420",
+
     "beforeBuildCommand": "pnpm build:cli && pnpm build",
     "frontendDist": "../dist",
     "removeUnusedCommands": true
