@@ -6,7 +6,6 @@ use std::time::Duration;
 
 use portable_pty::PtySize;
 use tauri::ipc::{Channel, Response};
-use tokio::time::timeout;
 
 use super::session::{self, Session};
 use super::shell_init;
@@ -46,7 +45,7 @@ pub async fn pty_open(
     };
     let id = state.next_id.fetch_add(1, Ordering::Relaxed);
     const SPAWN_TIMEOUT: Duration = Duration::from_secs(15);
-    let join_handle = tauri::async_runtime::spawn_blocking(move || {
+    let mut join_handle = tauri::async_runtime::spawn_blocking(move || {
         session::spawn(
             id,
             app,
@@ -64,11 +63,29 @@ pub async fn pty_open(
         )
         .map(|(s, _)| s)
     });
-    let timeout_result = timeout(SPAWN_TIMEOUT, join_handle).await;
-    let join_output = match timeout_result {
-        Ok(inner) => inner,
-        Err(_) => {
+    // select!, not timeout(): on expiry the blocking spawn keeps running, and
+    // a bare timeout() would drop the handle - if the spawn later succeeds its
+    // session (child + reader/waiter threads) lands nowhere, with no id any
+    // pty_close can ever reap. Keep the handle and park a reaper that drops
+    // whatever comes back late.
+    let join_output = tokio::select! {
+        biased;
+        completed = &mut join_handle => Some(completed),
+        _ = tokio::time::sleep(SPAWN_TIMEOUT) => None,
+    };
+    let join_output = match join_output {
+        Some(inner) => inner,
+        None => {
             log::error!("pty_open timed out after 15s");
+            tauri::async_runtime::spawn(async move {
+                match join_handle.await {
+                    Ok(Ok(session)) => {
+                        log::warn!("pty_open id={id}: late spawn succeeded after timeout; dropping orphaned session");
+                        session::drop_session(session);
+                    }
+                    _ => {}
+                }
+            });
             return Err(
                 "pty_open timed out after 15s - shell may be misconfigured or profile corrupt"
                     .to_string(),

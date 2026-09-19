@@ -163,21 +163,23 @@ fn extract_effective_program(segment: &str) -> &str {
         let is_wsl = prog_name.eq_ignore_ascii_case("wsl");
         let is_sudo = prog_name.eq_ignore_ascii_case("sudo") || prog_name.eq_ignore_ascii_case("doas");
         let is_su = prog_name.eq_ignore_ascii_case("su");
+        let is_ps =
+            prog_name.eq_ignore_ascii_case("powershell") || prog_name.eq_ignore_ascii_case("pwsh");
 
-        if !is_wsl && !is_sudo && !is_su {
+        if !is_wsl && !is_sudo && !is_su && !is_ps {
             return current;
         }
 
         let mut target = None;
         let mut skip_next = false;
-        let mut expect_su_cmd = false;
+        let mut expect_cmd = false;
         for word in words.by_ref() {
             let w = word.trim_matches(['"', '\'']);
             if skip_next {
                 skip_next = false;
                 continue;
             }
-            if expect_su_cmd {
+            if expect_cmd {
                 let sub_cmd = w.split_whitespace().next().unwrap_or(w).trim_matches(['"', '\'']);
                 target = Some(sub_cmd);
                 break;
@@ -188,9 +190,33 @@ fn extract_effective_program(segment: &str) -> &str {
             if is_env_var_assignment(w) {
                 continue;
             }
+            // `powershell -Command "<script>"` executes the inner script (the
+            // persistent shell unwraps exactly this form), so the allowlist
+            // must see the script's program, not `powershell`. Flags are
+            // case-insensitive in PowerShell; value-taking display flags are
+            // skipped like their wsl/sudo counterparts.
+            if is_ps {
+                if w.eq_ignore_ascii_case("-c") || w.eq_ignore_ascii_case("-command") {
+                    expect_cmd = true;
+                    continue;
+                }
+                if w.starts_with('-') {
+                    if !w.contains('=')
+                        && matches!(
+                            w.to_ascii_lowercase().as_str(),
+                            "-executionpolicy" | "-windowstyle" | "-outputformat" | "-inputformat" | "-file"
+                        )
+                    {
+                        skip_next = true;
+                    }
+                    continue;
+                }
+                target = Some(w);
+                break;
+            }
             if is_su {
                 if w == "-c" || w == "--command" {
-                    expect_su_cmd = true;
+                    expect_cmd = true;
                     continue;
                 }
                 if let Some(cmd_part) = w.strip_prefix("--command=") {
@@ -550,7 +576,9 @@ pub async fn shell_run_command(
     );
 
     // The blocking spawn + wait runs on a worker thread so the Tauri async
-    // runtime stays unblocked.
+    // runtime stays unblocked. The wait below must too: a bare `rx.recv()`
+    // here would park an async worker for up to the whole timeout, starving
+    // concurrent agent calls of runtime threads.
     let (tx, rx) = mpsc::channel::<Result<CommandOutput, String>>();
     thread::spawn(move || {
         let result = run_blocking(trimmed, cwd_path, workspace, dur, None);
@@ -559,7 +587,10 @@ pub async fn shell_run_command(
         }
     });
 
-    rx.recv().map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || rx.recv())
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?
 }
 
 /// Somewhere the caller can see the child while it runs, so a command can be
@@ -780,7 +811,12 @@ pub async fn shell_session_run(
             log::warn!("shell_session_run: receiver dropped before result could be sent");
         }
     });
-    rx.recv().map_err(|e| e.to_string())?
+    // Off the async worker: `session.run` blocks up to the whole timeout, and
+    // a bare recv here would park the executor thread with it.
+    tauri::async_runtime::spawn_blocking(move || rx.recv())
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -863,6 +899,10 @@ pub fn repl_open(
     cwd: Option<String>,
     workspace: Option<WorkspaceEnv>,
 ) -> Result<u32, String> {
+    // Agent-triggered interactive processes run through the same restricted
+    // sandbox as one-shot and background commands. Without this any binary
+    // spawns here while the other entry points refuse it.
+    validate_shell_command(command.trim())?;
     let workspace = WorkspaceEnv::from_option(workspace);
     authorize_spawn_cwd(&registry, cwd.as_deref(), &workspace)?;
 
@@ -920,14 +960,18 @@ pub async fn repl_send(
             .clamp(1, repl::MAX_WAIT_SECS),
     );
     let since = since_offset.unwrap_or(0);
-    // The wait blocks, so it runs off the main thread rather than holding the
-    // async runtime for up to ten minutes.
+    // The wait itself runs off-thread, but the `rx.recv()` below must not run
+    // on the async worker either: it blocks for up to ten minutes, starving
+    // the runtime threads every concurrent agent call shares.
     let (tx, rx) = mpsc::channel();
     let needle = until;
     thread::spawn(move || {
         let _ = tx.send(proc.wait_for(since, needle.as_deref(), dur));
     });
-    rx.recv().map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || rx.recv())
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1292,6 +1336,27 @@ mod tests_sandbox {
         assert!(validate_shell_command("su -c \"evil-binary --flag\"").is_err());
         assert!(validate_shell_command("su root -c \"definitely-not-a-tool\"").is_err());
         assert!(validate_shell_command("su --command=\"evil-binary\"").is_err());
+    }
+
+    #[test]
+    fn validate_shell_command_sees_through_powershell_command() {
+        // The persistent shell unwraps exactly this form before executing, so
+        // the allowlist must judge the inner script, not `powershell`.
+        for cmd in [
+            "powershell -Command \"Get-ChildItem -Path .\"",
+            "powershell -NoProfile -Command \"Get-Content file.txt\"",
+            "pwsh -c \"git status\"",
+            "powershell -ExecutionPolicy Bypass -Command \"Get-Process\"",
+        ] {
+            assert!(validate_shell_command(cmd).is_ok(), "blocked: {cmd}");
+        }
+    }
+
+    #[test]
+    fn validate_shell_command_refuses_powershell_command_hiding_tools() {
+        assert!(validate_shell_command("powershell -Command \"evil-binary --flag\"").is_err());
+        assert!(validate_shell_command("pwsh -c \"definitely-not-a-tool\"").is_err());
+        assert!(validate_shell_command("powershell -NoProfile -Command \"nmap 8.8.8.8\"").is_err());
     }
 
     #[test]

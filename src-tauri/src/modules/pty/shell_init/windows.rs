@@ -63,8 +63,14 @@ pub fn build(
     _persist_key: Option<String>,
 ) -> Result<CommandBuilder, String> {
     if let WorkspaceEnv::Wsl { distro } = workspace {
-        let _ = (blocks, shell, control);
-        return build_wsl(cwd, distro);
+        let _ = shell;
+        // NOTE: `control` (TERMIGO_CONTROL_*) is intentionally NOT forwarded
+        // into WSL shells: the control address is a Windows-loopback socket,
+        // which is a different 127.0.0.1 from inside the distro, so the agent
+        // control channel cannot work there without mirrored networking. The
+        // `blocks` output mode has no such dependency and passes through.
+        let _ = control;
+        return build_wsl(cwd, distro, blocks);
     }
     let shell_path = shell
         .map(|s| s.trim().to_string())
@@ -121,7 +127,7 @@ pub fn build(
     Ok(cmd)
 }
 
-fn build_wsl(cwd: Option<String>, distro: String) -> Result<CommandBuilder, String> {
+fn build_wsl(cwd: Option<String>, distro: String, blocks: bool) -> Result<CommandBuilder, String> {
     crate::modules::workspace::validate_wsl_distro_name(&distro)?;
     let shell_path = crate::modules::workspace::wsl_login_shell(distro.clone())?;
     let shell_kind = ShellKind::from_path(&shell_path);
@@ -182,6 +188,21 @@ fn build_wsl(cwd: Option<String>, distro: String) -> Result<CommandBuilder, Stri
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     cmd.env("TERMIGO_TERMINAL", "1");
+    if blocks {
+        // wsl.exe only carries listed variables across the boundary, so the
+        // flag rides with a WSLENV entry (append, never replace: the parent
+        // environment may already carry one).
+        cmd.env("TERMIGO_BLOCKS", "1");
+        let wsl_env = std::env::var("WSLENV").unwrap_or_default();
+        let merged = if wsl_env.is_empty() {
+            "TERMIGO_BLOCKS".to_string()
+        } else if wsl_env.split(':').any(|v| v == "TERMIGO_BLOCKS") {
+            wsl_env
+        } else {
+            format!("{wsl_env}:TERMIGO_BLOCKS")
+        };
+        cmd.env("WSLENV", merged);
+    }
     ensure_utf8_locale(&mut cmd);
     log::info!("spawning WSL shell: {distro} ({shell_path})");
     Ok(cmd)

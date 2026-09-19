@@ -352,7 +352,12 @@ pub fn spawn(
             // `pending`, so the last line of output never races the Exit event.
             #[cfg(windows)]
             {
-                let deadline = Instant::now() + Duration::from_millis(50);
+                // Poll, never join: a ConPTY reader can stay blocked in ReadFile
+                // after the child exits, and joining would wedge the waiter.
+                // 500ms (not 50): on a loaded machine the reader routinely
+                // needs longer than a few scheduler quanta to drain, and every
+                // push after the snapshot below lands in a vec nobody reads.
+                let deadline = Instant::now() + Duration::from_millis(500);
                 while Instant::now() < deadline && !reader_thread.is_finished() {
                     thread::sleep(Duration::from_millis(5));
                 }

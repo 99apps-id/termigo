@@ -90,6 +90,13 @@ fn rename_inner(
         return Err(format!("already exists: {}", to_p.display()));
     }
     if let Err(e) = std::fs::rename(&from_p, &to_p) {
+        // Re-check before the copy fallback below: the target may have
+        // appeared since the pre-check (on Windows the rename itself refuses
+        // an existing target, which is exactly this case). Copying blindly
+        // would truncate it despite the documented never-overwrites promise.
+        if to_p.exists() {
+            return Err(format!("already exists: {}", to_p.display()));
+        }
         if from_p.is_file() {
             std::fs::copy(&from_p, &to_p)
                 .and_then(|_| std::fs::remove_file(&from_p))

@@ -251,6 +251,11 @@ pub async fn ssh_sftp_read_file(
         // Cap the read so a huge (or maliciously oversized) remote file can't
         // OOM the app by being slurped whole into memory + an IPC string.
         // Mirrors the local fs_read_file size guard.
+        //
+        // The metadata pre-check alone is a TOCTOU: the remote side is
+        // untrusted and can grow the file between stat and read. The bounded
+        // stream below is the real enforcement - it never holds more than
+        // cap+1 bytes no matter what the server reports or streams.
         const MAX_SFTP_READ_BYTES: u64 = 16 * 1024 * 1024;
         if let Ok(meta) = sftp.metadata(path.clone()).await {
             if meta.len() > MAX_SFTP_READ_BYTES {
@@ -261,7 +266,23 @@ pub async fn ssh_sftp_read_file(
                 ));
             }
         }
-        let bytes = sftp.read(path).await.map_err(humanize)?;
+        use tokio::io::AsyncReadExt;
+        let file = sftp
+            .open_with_flags(path, OpenFlags::READ)
+            .await
+            .map_err(humanize)?;
+        let mut bytes = Vec::new();
+        file.take(MAX_SFTP_READ_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .await
+            .map_err(|e| format!("sftp read: {e}"))?;
+        if bytes.len() as u64 > MAX_SFTP_READ_BYTES {
+            return Err(format!(
+                "file too large to open: over {} bytes (cap {} bytes)",
+                bytes.len(),
+                MAX_SFTP_READ_BYTES
+            ));
+        }
         // Mirror fs::file::fs_read_file: return UTF-8 text. Binary files
         // explode any editor pane anyway; rejecting up front with a clear
         // message beats handing junk to CodeMirror.
@@ -416,7 +437,18 @@ pub async fn ssh_sftp_upload(
                 MAX_UPLOAD_BYTES
             ));
         }
-        std::fs::read(&read_path).map_err(|e| format!("read local file: {e}"))
+        let bytes =
+            std::fs::read(&read_path).map_err(|e| format!("read local file: {e}"))?;
+        // Re-check after the read: a file that grows between stat and read
+        // would otherwise sail past the cap above into memory.
+        if bytes.len() as u64 > MAX_UPLOAD_BYTES {
+            return Err(format!(
+                "file too large to upload: {} bytes (cap {} bytes)",
+                bytes.len(),
+                MAX_UPLOAD_BYTES
+            ));
+        }
+        Ok(bytes)
     })
     .await
     .map_err(|e| format!("read task join failed: {e}"))??;

@@ -87,14 +87,23 @@ pub async fn fs_read_image_base64(
     let workspace = WorkspaceEnv::from_option(workspace);
     let p = guard_read(&resolve_path(&path, &workspace))?;
     require_authorized(&registry, &p)?;
-    let meta = std::fs::metadata(&p).map_err(|e| e.to_string())?;
-    let size = meta.len();
-    if size > MAX_IMAGE_BYTES {
-        return Err(format!(
-            "image too large ({size} bytes, limit {MAX_IMAGE_BYTES})"
-        ));
-    }
-    let bytes = std::fs::read(&p).map_err(|e| e.to_string())?;
+    // Blocking disk I/O must not run on the async executor: a slow (network,
+    // WSL) mount would stall every other async command for up to 8 MiB of
+    // reads. Tree/grep/search already use spawn_blocking; these catch up.
+    let q = p.clone();
+    let (size, bytes) = tauri::async_runtime::spawn_blocking(move || {
+        let meta = std::fs::metadata(&q).map_err(|e| e.to_string())?;
+        let size = meta.len();
+        if size > MAX_IMAGE_BYTES {
+            return Err(format!(
+                "image too large ({size} bytes, limit {MAX_IMAGE_BYTES})"
+            ));
+        }
+        let bytes = std::fs::read(&q).map_err(|e| e.to_string())?;
+        Ok::<_, String>((size, bytes))
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     let media_type = image_media_type(&bytes, &p)
         .ok_or("not a supported image (expected png, jpeg, gif or webp)")?;
     use base64::Engine as _;
@@ -152,14 +161,21 @@ pub async fn fs_read_file_base64(
     let workspace = WorkspaceEnv::from_option(workspace);
     let p = guard_read(&resolve_path(&path, &workspace))?;
     require_authorized(&registry, &p)?;
-    let meta = std::fs::metadata(&p).map_err(|e| e.to_string())?;
-    let size = meta.len();
-    if size > MAX_FILE_BASE64_BYTES {
-        return Err(format!(
-            "file too large ({size} bytes, limit {MAX_FILE_BASE64_BYTES})"
-        ));
-    }
-    let bytes = std::fs::read(&p).map_err(|e| e.to_string())?;
+    // Same off-executor discipline as fs_read_image_base64 above (25 MiB).
+    let q = p.clone();
+    let (size, bytes) = tauri::async_runtime::spawn_blocking(move || {
+        let meta = std::fs::metadata(&q).map_err(|e| e.to_string())?;
+        let size = meta.len();
+        if size > MAX_FILE_BASE64_BYTES {
+            return Err(format!(
+                "file too large ({size} bytes, limit {MAX_FILE_BASE64_BYTES})"
+            ));
+        }
+        let bytes = std::fs::read(&q).map_err(|e| e.to_string())?;
+        Ok::<_, String>((size, bytes))
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     use base64::Engine as _;
     let data = base64::engine::general_purpose::STANDARD.encode(&bytes);
     let file_name = p
@@ -208,7 +224,12 @@ pub async fn fs_read_file(
     let workspace = WorkspaceEnv::from_option(workspace);
     let resolved = guard_read(&resolve_path(&path, &workspace))?;
     require_authorized(&registry, &resolved)?;
-    read_file_sync(&resolved, force.unwrap_or(false))
+    // The hottest read path in the app (every agent file read lands here):
+    // keep its blocking metadata+read off the async executor.
+    let force = force.unwrap_or(false);
+    tauri::async_runtime::spawn_blocking(move || read_file_sync(&resolved, force))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[allow(dead_code)]
@@ -567,6 +588,11 @@ pub async fn fs_write_file_base64(
     let workspace = WorkspaceEnv::from_option(workspace);
     let target = guard_write(&resolve_path(&path, &workspace))?;
     require_authorized(&registry, &target)?;
+    // The rename-replace drops the previous mode (notably the exec bit), so
+    // the original permissions are restored afterwards, mirroring
+    // fs_write_file. Without this a script written via base64 silently stops
+    // being executable.
+    let original_permissions = fs::metadata(&target).ok().map(|m| m.permissions());
     use base64::Engine as _;
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(&data)
@@ -575,6 +601,11 @@ pub async fn fs_write_file_base64(
         log::warn!("fs_write_file_base64({}) failed: {e}", target.display());
         friendly_write_error(&target, "fs_write_file_base64", &e)
     })?;
+    if let Some(perms) = original_permissions {
+        if let Err(e) = fs::set_permissions(&target, perms) {
+            log::warn!("fs_write_file_base64({}) failed to restore permissions: {e}", target.display());
+        }
+    }
     let mtime = fs::metadata(&target).map(|m| mtime_millis(&m)).unwrap_or(0);
     let _ = app.emit(
         "fs:file-written",

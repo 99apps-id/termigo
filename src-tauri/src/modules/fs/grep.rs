@@ -462,7 +462,9 @@ pub fn fs_glob_blocking(
             continue;
         }
         let path = dent.path();
-        if security::is_protected(path) {
+        // Same pair as the tree and the search walkers: secret basenames
+        // stay undisclosed here too.
+        if security::is_protected(path) || security::is_secret_path(path) {
             continue;
         }
         let rel = match path.strip_prefix(&root_path) {

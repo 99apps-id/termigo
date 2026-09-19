@@ -127,7 +127,10 @@ pub fn fs_search_blocking(
         if path == root_path {
             continue;
         }
-        if security::is_protected(path) {
+        // is_secret_path alongside is_protected: the tree hides secret
+        // basenames (`id_rsa`, `*.pem`, ...) and the walkers must not
+        // re-advertise them by name.
+        if security::is_protected(path) || security::is_secret_path(path) {
             continue;
         }
         let rel = match path.strip_prefix(&root_path) {
@@ -254,7 +257,10 @@ pub fn list_files_blocking(
             continue;
         }
         let path = dent.path();
-        if security::is_protected(path) {
+        // is_secret_path alongside is_protected: the tree hides secret
+        // basenames (`id_rsa`, `*.pem`, ...) and the walkers must not
+        // re-advertise them by name.
+        if security::is_protected(path) || security::is_secret_path(path) {
             continue;
         }
         let rel = match path.strip_prefix(&root_path) {

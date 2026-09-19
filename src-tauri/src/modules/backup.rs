@@ -34,6 +34,13 @@ use std::num::NonZeroU32;
 /// PBKDF2-HMAC-SHA256 is 600k. Stored in the envelope rather than hardcoded on
 /// the read path so raising it later still opens older backups.
 const PBKDF2_ITERATIONS: u32 = 600_000;
+/// Upper bound accepted on open: the envelope stores the count so it can be
+/// raised later, but an uncapped `u32` from an untrusted file turns one open
+/// call into hours of PBKDF2 (unauthenticated local DoS). 10x headroom covers
+/// any sane future raise; beyond that the file is treated as corrupt.
+const MAX_OPEN_ITERATIONS: u32 = 10 * PBKDF2_ITERATIONS;
+/// SSH backups are kilobytes of JSON; anything near this is not one.
+const MAX_BLOB_BYTES: usize = 10 * 1024 * 1024;
 const SALT_LEN: usize = 16;
 
 #[derive(Serialize, Deserialize)]
@@ -61,8 +68,9 @@ impl NonceSequence for OneNonce {
 }
 
 fn derive_key(passphrase: &str, salt: &[u8], iterations: u32) -> Result<[u8; 32], String> {
-    let iters =
-        NonZeroU32::new(iterations).ok_or_else(|| "backup: iteration count is zero".to_string())?;
+    let iters = NonZeroU32::new(iterations)
+        .filter(|n| n.get() <= MAX_OPEN_ITERATIONS)
+        .ok_or_else(|| "backup: bad iteration count".to_string())?;
     let mut key = [0u8; 32];
     pbkdf2::derive(
         pbkdf2::PBKDF2_HMAC_SHA256,
@@ -121,6 +129,14 @@ pub async fn backup_open(blob: SealedBlob, passphrase: String) -> Result<String,
             "backup: unsupported key derivation \"{}\"",
             blob.kdf
         ));
+    }
+    // Cap the envelope before decoding: base64 expands ~4/3, so an
+    // unbounded `ciphertext` string is a direct heap-allocation primitive.
+    if blob.salt.len() > 1024
+        || blob.nonce.len() > 1024
+        || blob.ciphertext.len() > MAX_BLOB_BYTES * 4 / 3 + 8
+    {
+        return Err("backup: blob too large".to_string());
     }
     let salt = B64
         .decode(&blob.salt)
@@ -187,6 +203,27 @@ mod tests {
     #[test]
     fn empty_passphrase_is_refused() {
         assert!(tauri::async_runtime::block_on(backup_seal("x".into(), String::new())).is_err());
+    }
+
+    #[test]
+    fn absurd_iteration_count_is_refused_fast() {
+        // An uncapped count turns one open call into hours of PBKDF2. This
+        // must fail before any key derivation runs.
+        let mut b = seal("secret", "pw");
+        b.iterations = u32::MAX;
+        let t0 = std::time::Instant::now();
+        assert!(open(b, "pw").is_err());
+        assert!(
+            t0.elapsed() < std::time::Duration::from_secs(5),
+            "took too long - KDF ran uncapped"
+        );
+    }
+
+    #[test]
+    fn oversize_blob_is_refused_before_decode() {
+        let mut b = seal("secret", "pw");
+        b.ciphertext = "A".repeat(MAX_BLOB_BYTES * 4 / 3 + 9);
+        assert!(open(b, "pw").is_err());
     }
 
     #[test]

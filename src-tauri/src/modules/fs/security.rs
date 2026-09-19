@@ -199,7 +199,59 @@ fn comparison_form(p: &str) -> String {
     s
 }
 
+/// System roots match at the filesystem root only. They must NOT float like
+/// the dot-directories below: a workspace legitimately contains `etc/` or
+/// `proc/` (infra repos do), while nothing legitimate is named `.ssh`.
+/// A leading `//wsl$/<distro>` (or `//wsl.localhost/...`) prefix is stripped
+/// first so WSL system paths (`\\wsl$\Ubuntu\etc\passwd`) still match.
+fn is_system_root(dir: &str) -> bool {
+    matches!(
+        dir,
+        "/etc"
+            | "/private/etc"
+            | "/proc"
+            | "/sys"
+            | "/var/db"
+            | "/var/root"
+            | "/private/var/db"
+            | "/private/var/root"
+            | "/system"
+    )
+}
+
+fn strip_wsl_host_prefix(cmp: &str) -> &str {
+    // `//wsl$/ubuntu/etc/passwd` -> `/etc/passwd`: drop the `//host/distro`
+    // head so the root comparison below sees a plain absolute path. Anything
+    // that does not have both segments is not a WSL path; return it unchanged.
+    let after_slashes = match cmp.strip_prefix("//") {
+        Some(rest) => rest,
+        None => return cmp,
+    };
+    let host_end = match after_slashes.find('/') {
+        Some(i) => i,
+        None => return cmp,
+    };
+    let after_host = &after_slashes[host_end + 1..];
+    let distro_end = match after_host.find('/') {
+        Some(i) => i,
+        None => return cmp,
+    };
+    &after_host[distro_end..]
+}
+
 fn is_under_protected(cmp: &str, dir: &str) -> bool {
+    if is_system_root(dir) {
+        let root = strip_wsl_host_prefix(cmp);
+        let root = if root.starts_with('/') {
+            root.to_string()
+        } else {
+            format!("/{root}")
+        };
+        return root == dir || root.starts_with(&format!("{dir}/"));
+    }
+    // Dot-directories, library and appdata entries live under a home
+    // directory (or any depth), so they float: `/.ssh/` matches anywhere as
+    // long as the slashes around it are real segment boundaries.
     format!("{cmp}/").contains(&format!("{dir}/"))
 }
 
@@ -405,6 +457,22 @@ mod tests {
         assert!(check_readable("/proc/self/environ").is_err());
         // Not a raw-substring false positive: `.sshx` is fine.
         assert!(check_readable("/home/me/.sshx/notes").is_ok());
+    }
+
+    #[test]
+    fn system_roots_anchor_at_the_filesystem_root() {
+        // Real system paths stay blocked, including through a WSL prefix.
+        assert!(check_readable("/etc/passwd").is_err());
+        assert!(check_readable("/proc/self/environ").is_err());
+        assert!(check_readable("/sys/class/dmi").is_err());
+        assert!(check_readable("//wsl$/Ubuntu/etc/passwd").is_err());
+        // But a workspace directory merely NAMED etc/proc is ordinary content.
+        assert!(check_readable("/home/me/project/etc/config.yaml").is_ok());
+        assert!(check_readable("C:\\project\\termigo\\etc\\app.conf").is_ok());
+        assert!(check_readable("/home/me/project/proc/notes.md").is_ok());
+        // Dot-directories keep floating: home can sit at any depth.
+        assert!(check_readable("/home/me/.ssh/config").is_err());
+        assert!(check_readable("/data/other/.aws/credentials").is_err());
     }
 
     #[test]

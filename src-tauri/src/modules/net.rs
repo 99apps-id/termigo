@@ -375,7 +375,14 @@ fn build_safe_client(
                 if !allow_private && matches!(k, IpKind::Loopback | IpKind::Private) {
                     return attempt.stop();
                 }
-            } else if !allow_private {
+            } else {
+                // Same-host only, in BOTH modes. The closure runs synchronously
+                // so it cannot re-classify or re-pin the new hostname; with
+                // `allow_private` set, a cross-host hop used to be followed
+                // blind - no DNS pinning, no metadata/private re-check - which
+                // re-opens the DNS-rebinding SSRF the initial classification
+                // closed. A local server has no legitimate reason to bounce
+                // the request to a different host.
                 if let Some(prev) = attempt.previous().last() {
                     if prev.host_str() != Some(host) {
                         return attempt.stop();

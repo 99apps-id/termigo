@@ -197,10 +197,43 @@ function comparisonForm(p: string): string {
   return s;
 }
 
+const SYSTEM_ROOT_DIRS = new Set([
+  "/etc",
+  "/private/etc",
+  "/proc",
+  "/sys",
+  "/var/db",
+  "/var/root",
+  "/private/var/db",
+  "/private/var/root",
+  "/system",
+]);
+
+function stripWslHostPrefix(cmp: string): string {
+  // `//wsl$/ubuntu/etc/passwd` -> `/etc/passwd`, mirroring the Rust side.
+  if (!cmp.startsWith("//")) return cmp;
+  const afterSlashes = cmp.slice(2);
+  const hostEnd = afterSlashes.indexOf("/");
+  if (hostEnd === -1) return cmp;
+  const afterHost = afterSlashes.slice(hostEnd + 1);
+  const distroEnd = afterHost.indexOf("/");
+  if (distroEnd === -1) return cmp;
+  return afterHost.slice(distroEnd);
+}
+
 function isUnderProtected(cmp: string, dir: string): boolean {
-  // Protected dirs (`/.ssh`, `/.config/gh`, …) live under the user's home or
-  // somewhere else in the tree — they are NOT root-anchored. Match the dir as
-  // a path-segment substring: append `/` to both sides so we don't match
+  // System roots match at the filesystem root only: a workspace legitimately
+  // contains `etc/` (infra repos do), while nothing legitimate is floating
+  // system configuration. Dot-directories, library and appdata entries keep
+  // floating below - they live under a home directory at an unknown depth.
+  if (SYSTEM_ROOT_DIRS.has(dir)) {
+    const root = stripWslHostPrefix(cmp);
+    const anchored = root.startsWith("/") ? root : `/${root}`;
+    return anchored === dir || anchored.startsWith(`${dir}/`);
+  }
+  // Protected dot-dirs (`/.ssh`, `/.config/gh`, ...) live under the user's home
+  // or somewhere else in the tree: they are NOT root-anchored. Match the dir
+  // as a path-segment substring: append `/` to both sides so we don't match
   // false positives like `/.sshx` against `/.ssh`.
   //
   //   "/users/me/.ssh/config" + "/" → contains "/.ssh/" ✓

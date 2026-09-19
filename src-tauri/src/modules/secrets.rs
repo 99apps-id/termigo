@@ -75,22 +75,26 @@ pub(crate) fn write_store_at(
     map: &HashMap<String, String>,
 ) -> Result<(), String> {
     use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
+    use std::os::unix::fs::PermissionsExt;
 
-    let tmp = path.with_extension("json.tmp");
     let bytes = serde_json::to_vec(map).map_err(|e| e.to_string())?;
-
+    let parent = path
+        .parent()
+        .ok_or_else(|| "secrets: store path has no parent".to_string())?;
+    // Randomised temp name, never a fixed sibling: a pre-planted symlink at a
+    // predictable `secrets.json.tmp` would otherwise redirect this plaintext
+    // write into an attacker-chosen file (and truncate its target).
+    let mut tmp = tempfile::NamedTempFile::new_in(parent)
+        .map_err(|e| format!("secrets: create temp file: {e}"))?;
     // 0600: only the owning user can read or write the secrets file.
-    let mut f = fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(&tmp)
+    std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o600))
+        .map_err(|e| format!("secrets: secure temp file: {e}"))?;
+    tmp.write_all(&bytes).map_err(|e| e.to_string())?;
+    tmp.as_file()
+        .sync_all()
         .map_err(|e| e.to_string())?;
-    f.write_all(&bytes).map_err(|e| e.to_string())?;
-    f.sync_all().map_err(|e| e.to_string())?;
-    fs::rename(&tmp, path).map_err(|e| e.to_string())?;
+    tmp.persist(path)
+        .map_err(|e| format!("secrets: publish store: {}", e.error))?;
     Ok(())
 }
 
@@ -477,10 +481,16 @@ mod tests {
         let p = tmp.path().join("secrets.json");
         write_store_at(&p, &HashMap::new()).unwrap();
 
-        let tmp_path = p.with_extension("json.tmp");
-        assert!(
-            !tmp_path.exists(),
-            "tmp file must be renamed away on success"
+        // No fixed sibling name exists to pre-plant a symlink at, and the
+        // randomised temp must be persisted away: only the store remains.
+        let entries: Vec<_> = fs::read_dir(tmp.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(
+            entries,
+            vec![std::ffi::OsString::from("secrets.json")],
+            "unexpected leftovers: {entries:?}"
         );
     }
 

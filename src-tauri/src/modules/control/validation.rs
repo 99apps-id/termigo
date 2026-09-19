@@ -160,6 +160,13 @@ pub fn normalize_open_target(
             format!("path is not a regular file: {}", canonical.display()),
         ));
     }
+    // Same secret deny-list as `fs_read_file`: workspace auth covers $HOME,
+    // so without this the CLI opens `~/.ssh/id_rsa`, `.env` and credential
+    // stores the editor path refuses. Refusals stay silent on the reason -
+    // confirming "this exact file holds secrets" is itself a leak.
+    if crate::modules::fs::security::validate_read(&canonical).is_err() {
+        return Err(("path_not_accessible", "path is not accessible".to_string()));
+    }
     Ok((params, canonical))
 }
 

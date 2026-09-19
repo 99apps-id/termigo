@@ -126,6 +126,23 @@ describe("checkReadable — protected directories", () => {
     });
   });
 
+  it("anchors system roots but lets workspace dirs named etc/proc through", () => {
+    expect(checkReadable("/etc/passwd")).toMatchObject({ ok: false });
+    expect(checkReadable("//wsl$/Ubuntu/etc/passwd")).toMatchObject({
+      ok: false,
+    });
+    expect(checkReadable("/home/me/project/etc/config.yaml")).toMatchObject({
+      ok: true,
+    });
+    expect(checkReadable("C:\\project\\termigo\\etc\\app.conf")).toMatchObject(
+      { ok: true },
+    );
+    // Home dot-directories keep floating at any depth.
+    expect(checkReadable("/data/other/.aws/credentials")).toMatchObject({
+      ok: false,
+    });
+  });
+
   it("rejects writes under Windows system dirs (case-insensitive)", () => {
     expect(checkWritable("C:\\Windows\\System32\\file")).toMatchObject({
       ok: false,
