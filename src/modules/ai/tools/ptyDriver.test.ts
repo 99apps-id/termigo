@@ -1,16 +1,18 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ToolContext } from "./context";
 import { buildPtyDriverTools } from "./ptyDriver";
 
 function makeContext(
   buffer: string | null = "Ready on http://localhost:3000\n",
+  opts?: { private?: boolean },
 ): ToolContext {
+  const getTerminalContext = vi.fn(() => buffer);
   return {
     getCwd: () => "/workspace",
     getWorkspaceRoot: () => "/workspace",
     getRemoteSession: () => null,
-    getTerminalContext: () => buffer,
-    isActiveTerminalPrivate: () => false,
+    getTerminalContext,
+    isActiveTerminalPrivate: () => opts?.private ?? false,
     injectIntoActivePty: () => true,
     openPreview: () => false,
     openCanvas: () => false,
@@ -181,6 +183,68 @@ describe("ptyDriver tools", () => {
     expect(res.command).toBe("cargo test");
     expect(injected).toBe("cargo test\r");
     expect(res.output).toContain("cargo test output");
+  });
+});
+
+describe("ptyDriver privacy mode", () => {
+  it("pty_read_screen refuses without reading the buffer", async () => {
+    const getTerminalContext = vi.fn(() => "secret token abc123");
+    const tools = buildPtyDriverTools({
+      ...makeContext("secret token abc123", { private: true }),
+      getTerminalContext,
+    });
+    const exec = tools.pty_read_screen.execute;
+    if (!exec) throw new Error("pty_read_screen execute missing");
+
+    // biome-ignore lint/suspicious/noExplicitAny: tool ctx and result are harness-typed, empty exec ctx is enough
+    const res = (await exec({ max_lines: 50 }, {} as any)) as any;
+    expect(res.error).toMatch(/privacy mode/i);
+    expect(res.buffer ?? "").not.toContain("secret");
+    expect(getTerminalContext).not.toHaveBeenCalled();
+  });
+
+  it("pty_wait_for_pattern refuses in privacy mode", async () => {
+    const tools = buildPtyDriverTools(
+      makeContext("secret token abc123", { private: true }),
+    );
+    const exec = tools.pty_wait_for_pattern.execute;
+    if (!exec) throw new Error("pty_wait_for_pattern execute missing");
+
+    // biome-ignore lint/suspicious/noExplicitAny: tool ctx and result are harness-typed, empty exec ctx is enough
+    const res = (await exec({ pattern: "secret" }, {} as any)) as any;
+    expect(res.found).toBe(false);
+    expect(res.error).toMatch(/privacy mode/i);
+  });
+
+  it("pty_session read refuses in privacy mode", async () => {
+    const tools = buildPtyDriverTools(
+      makeContext("secret token abc123", { private: true }),
+    );
+    const exec = tools.pty_session.execute;
+    if (!exec) throw new Error("pty_session execute missing");
+
+    // biome-ignore lint/suspicious/noExplicitAny: tool ctx and result are harness-typed, empty exec ctx is enough
+    const res = (await exec({ action: "read" }, {} as any)) as any;
+    expect(res.error).toMatch(/privacy mode/i);
+  });
+
+  it("pty_session ctrl_c still signals but withholds the buffer", async () => {
+    let injected = "";
+    const tools = buildPtyDriverTools({
+      ...makeContext("secret token abc123", { private: true }),
+      injectIntoActivePty: (text: string) => {
+        injected = text;
+        return true;
+      },
+    });
+    const exec = tools.pty_session.execute;
+    if (!exec) throw new Error("pty_session execute missing");
+
+    // biome-ignore lint/suspicious/noExplicitAny: tool ctx and result are harness-typed, empty exec ctx is enough
+    const res = (await exec({ action: "ctrl_c" }, {} as any)) as any;
+    expect(injected).toBe("");
+    expect(res.sent).toBe(true);
+    expect(res.buffer ?? "").not.toContain("secret");
   });
 });
 

@@ -314,30 +314,6 @@ export async function buildLanguageModel(
       })(resolvedModelId);
       break;
     }
-    case "opencode-zen": {
-      const { createOpenAICompatible } = await import(
-        "@ai-sdk/openai-compatible"
-      );
-      built = createOpenAICompatible({
-        name: "opencode-zen",
-        baseURL: "https://opencode.ai/zen/v1",
-        apiKey: key,
-        fetch: apiFetch,
-      })(resolvedModelId);
-      break;
-    }
-    case "opencode-go": {
-      const { createOpenAICompatible } = await import(
-        "@ai-sdk/openai-compatible"
-      );
-      built = createOpenAICompatible({
-        name: "opencode-go",
-        baseURL: "https://opencode.ai/zen/go/v1",
-        apiKey: key,
-        fetch: apiFetch,
-      })(resolvedModelId);
-      break;
-    }
     case "mistral": {
       // The dedicated provider rather than the OpenAI-compatible adapter.
       // Mistral's API is close enough that the generic one connects, but its

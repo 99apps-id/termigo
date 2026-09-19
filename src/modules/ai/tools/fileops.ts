@@ -94,10 +94,13 @@ export function buildFileOpsTools(ctx: ToolContext) {
         }
 
         try {
-          await native.rename(src.canonical, toPath);
-          return { moved: true, from: src.canonical, to: toPath };
+          // Act on the canonical destination, not the raw input: a symlinked
+          // parent would otherwise land the file somewhere other than the
+          // path that was checked and reported (copy/delete use theirs).
+          await native.rename(src.canonical, dest.canonical);
+          return { moved: true, from: src.canonical, to: dest.canonical };
         } catch (e) {
-          return { error: String(e), from: src.canonical, to: toPath };
+          return { error: String(e), from: src.canonical, to: dest.canonical };
         }
       },
     }),

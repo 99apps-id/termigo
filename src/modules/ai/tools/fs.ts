@@ -448,7 +448,17 @@ export function buildFsTools(ctx: ToolContext) {
           overwrite?: boolean;
         };
         const path = input.path;
-        const content = typeof input.content === "string" ? input.content : "";
+        // Fail closed on a missing content field: defaulting it to "" lets a
+        // model slip (or an alias miss) silently wipe a file. Pass an explicit
+        // empty string to create/truncate one on purpose.
+        if (typeof input.content !== "string") {
+          return {
+            error:
+              "missing content - provide the file content to write (pass an empty string to create an empty file).",
+            path: path ?? "",
+          };
+        }
+        const content = input.content;
         if (!path || !path.trim()) {
           return { error: "missing path - name the file to write.", path: "" };
         }

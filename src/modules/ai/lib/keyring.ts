@@ -22,8 +22,6 @@ export const EMPTY_PROVIDER_KEYS: ProviderKeys = {
   stepfun: null,
   qwen: null,
   zhipu: null,
-  "opencode-zen": null,
-  "opencode-go": null,
   mistral: null,
   openrouter: null,
   "openai-compatible": null,

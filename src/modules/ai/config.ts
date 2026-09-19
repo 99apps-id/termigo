@@ -11,8 +11,6 @@ export type ProviderId =
   | "stepfun"
   | "qwen"
   | "zhipu"
-  | "opencode-zen"
-  | "opencode-go"
   | "mistral"
   | "openrouter"
   | "openai-compatible"
@@ -101,20 +99,6 @@ export const PROVIDERS: readonly ProviderInfo[] = [
     keyringAccount: "zhipu-api-key",
     keyPrefix: null,
     consoleUrl: "https://z.ai/model-api",
-  },
-  {
-    id: "opencode-zen",
-    label: "OpenCode Zen",
-    keyringAccount: "opencode-zen-api-key",
-    keyPrefix: null,
-    consoleUrl: "https://opencode.ai/zen",
-  },
-  {
-    id: "opencode-go",
-    label: "OpenCode Go",
-    keyringAccount: "opencode-go-api-key",
-    keyPrefix: null,
-    consoleUrl: "https://opencode.ai/go",
   },
   {
     id: "mistral",
@@ -861,134 +845,6 @@ export const MODELS = [
     tags: ["tools", "coding"],
   },
 
-  // ── OpenCode Zen (Pay-as-you-go Gateway) ──────────────────────────────────
-  {
-    id: "opencode/claude-3-7-sonnet",
-    provider: "opencode-zen",
-    label: "Claude 3.7 Sonnet (Zen)",
-    hint: "Hybrid",
-    description: "Claude 3.7 Sonnet with hybrid reasoning via OpenCode Zen.",
-    capabilities: { intelligence: 5, speed: 4, cost: 3 },
-    tags: ["vision", "reasoning", "tools", "coding"],
-    supportsTemperature: false,
-    apiModelId: "claude-3-7-sonnet",
-  },
-  {
-    id: "opencode/claude-3-5-sonnet",
-    provider: "opencode-zen",
-    label: "Claude 3.5 Sonnet (Zen)",
-    hint: "Proven",
-    description: "Claude 3.5 Sonnet via OpenCode Zen gateway.",
-    capabilities: { intelligence: 4, speed: 4, cost: 3 },
-    tags: ["vision", "tools", "coding"],
-    apiModelId: "claude-3-5-sonnet",
-  },
-  {
-    id: "opencode/gpt-5.6-sol",
-    provider: "opencode-zen",
-    label: "GPT-5.6 Sol (Zen)",
-    hint: "Flagship",
-    description: "Frontier GPT-5.6 Sol via OpenCode Zen gateway.",
-    capabilities: { intelligence: 5, speed: 4, cost: 2 },
-    tags: ["vision", "reasoning", "tools", "coding"],
-    supportsTemperature: false,
-    apiModelId: "gpt-5.6-sol",
-  },
-  {
-    id: "opencode/gpt-4o",
-    provider: "opencode-zen",
-    label: "GPT-4o (Zen)",
-    hint: "Omni",
-    description: "OpenAI GPT-4o via OpenCode Zen gateway.",
-    capabilities: { intelligence: 4, speed: 4, cost: 3 },
-    tags: ["vision", "tools", "coding"],
-    apiModelId: "gpt-4o",
-  },
-  {
-    id: "opencode/deepseek-v4-pro",
-    provider: "opencode-zen",
-    label: "DeepSeek V4 Pro (Zen)",
-    hint: "Best",
-    description: "DeepSeek V4 Pro via OpenCode Zen gateway.",
-    capabilities: { intelligence: 5, speed: 3, cost: 5 },
-    tags: ["reasoning", "tools", "coding"],
-    apiModelId: "deepseek-v4-pro",
-  },
-  {
-    id: "opencode/deepseek-r1",
-    provider: "opencode-zen",
-    label: "DeepSeek R1 (Zen)",
-    hint: "Thinking",
-    description: "DeepSeek R1 reasoning model via OpenCode Zen gateway.",
-    capabilities: { intelligence: 5, speed: 3, cost: 5 },
-    tags: ["reasoning", "tools", "coding"],
-    supportsTemperature: false,
-    apiModelId: "deepseek-r1",
-  },
-  {
-    id: "opencode/big-pickle",
-    provider: "opencode-zen",
-    label: "Big Pickle (Zen Free)",
-    hint: "Free",
-    description: "Free community coding model hosted on OpenCode Zen.",
-    capabilities: { intelligence: 3, speed: 5, cost: 5 },
-    tags: ["tools", "coding"],
-    apiModelId: "big-pickle",
-  },
-
-  // ── OpenCode Go (Subscription Gateway) ────────────────────────────────────
-  {
-    id: "opencode-go/deepseek-v4-pro",
-    provider: "opencode-go",
-    label: "DeepSeek V4 Pro (Go)",
-    hint: "Best",
-    description: "DeepSeek V4 Pro under OpenCode Go flat-rate subscription.",
-    capabilities: { intelligence: 5, speed: 3, cost: 5 },
-    tags: ["reasoning", "tools", "coding"],
-    apiModelId: "deepseek-v4-pro",
-  },
-  {
-    id: "opencode-go/deepseek-r1",
-    provider: "opencode-go",
-    label: "DeepSeek R1 (Go)",
-    hint: "Thinking",
-    description: "DeepSeek R1 reasoning under OpenCode Go flat-rate subscription.",
-    capabilities: { intelligence: 5, speed: 3, cost: 5 },
-    tags: ["reasoning", "tools", "coding"],
-    supportsTemperature: false,
-    apiModelId: "deepseek-r1",
-  },
-  {
-    id: "opencode-go/qwen-2.5-coder-32b",
-    provider: "opencode-go",
-    label: "Qwen 2.5 Coder 32B (Go)",
-    hint: "Coding",
-    description: "Qwen 2.5 Coder 32B under OpenCode Go subscription.",
-    capabilities: { intelligence: 5, speed: 4, cost: 5 },
-    tags: ["tools", "coding"],
-    apiModelId: "qwen-2.5-coder-32b",
-  },
-  {
-    id: "opencode-go/glm-5",
-    provider: "opencode-go",
-    label: "GLM-5 (Go)",
-    hint: "Flagship",
-    description: "GLM-5 model under OpenCode Go flat-rate subscription.",
-    capabilities: { intelligence: 5, speed: 3, cost: 5 },
-    tags: ["vision", "reasoning", "tools", "coding"],
-    apiModelId: "glm-5",
-  },
-  {
-    id: "opencode-go/kimi-k2",
-    provider: "opencode-go",
-    label: "Kimi K2 (Go)",
-    hint: "Long Context",
-    description: "Kimi K2 model under OpenCode Go flat-rate subscription.",
-    capabilities: { intelligence: 5, speed: 3, cost: 5 },
-    tags: ["tools", "coding"],
-    apiModelId: "kimi-k2",
-  },
-
   // ── Mistral ────────────────────────────────────────────────────────────────
   {
     id: "mistral-large-latest",
@@ -1435,8 +1291,6 @@ export function modelUsesReasoningTokens(
     (provider === "stepfun" && /thinking/i.test(modelId)) ||
     (provider === "deepseek" && (/r1/i.test(modelId) || /reasoner/i.test(modelId))) ||
     (provider === "zhipu" && /glm-5/i.test(modelId)) ||
-    (provider === "opencode-zen" && /reasoning|r1|sonnet-3-7/i.test(modelId)) ||
-    (provider === "opencode-go" && /r1/i.test(modelId)) ||
     /\bgpt-oss\b/i.test(modelId)
   );
 }
@@ -1521,18 +1375,6 @@ export const MODEL_CONTEXT_LIMITS: Record<string, number> = {
   "glm-4-air": 128_000,
   "glm-4-flash": 128_000,
   "codegeex-4": 128_000,
-  "opencode/claude-3-7-sonnet": 1_000_000,
-  "opencode/claude-3-5-sonnet": 1_000_000,
-  "opencode/gpt-5.6-sol": 1_050_000,
-  "opencode/gpt-4o": 128_000,
-  "opencode/deepseek-v4-pro": 1_000_000,
-  "opencode/deepseek-r1": 1_000_000,
-  "opencode/big-pickle": 128_000,
-  "opencode-go/deepseek-v4-pro": 1_000_000,
-  "opencode-go/deepseek-r1": 1_000_000,
-  "opencode-go/qwen-2.5-coder-32b": 128_000,
-  "opencode-go/glm-5": 128_000,
-  "opencode-go/kimi-k2": 200_000,
   "gpt-oss-120b": 128_000,
   "llama3.3-70b": 128_000,
   "qwen-3-32b": 32_000,
@@ -1652,13 +1494,6 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
   "glm-4-air": { input: 0.14, output: 0.28, cacheRead: 0.028 },
   "glm-4-flash": { input: 0.01, output: 0.02, cacheRead: 0.002 },
   "codegeex-4": { input: 0.1, output: 0.1, cacheRead: 0.02 },
-  "opencode/claude-3-7-sonnet": { input: 3, output: 15, cacheRead: 0.3 },
-  "opencode/claude-3-5-sonnet": { input: 3, output: 15, cacheRead: 0.3 },
-  "opencode/gpt-5.6-sol": { input: 5, output: 30, cacheRead: 0.5 },
-  "opencode/gpt-4o": { input: 2.5, output: 10, cacheRead: 1.25 },
-  "opencode/deepseek-v4-pro": { input: 0.28, output: 1.1, cacheRead: 0.028 },
-  "opencode/deepseek-r1": { input: 0.55, output: 2.19, cacheRead: 0.14 },
-  "opencode/big-pickle": { input: 0, output: 0 },
 };
 
 export function estimateCost(
@@ -1713,7 +1548,6 @@ export const KEYLESS_PROVIDERS: readonly ProviderId[] = [
   "mlx",
   "ollama",
   "chatgpt",
-  "opencode-go",
   "openai-compatible",
 ] as const;
 
@@ -1746,8 +1580,6 @@ export const DEFAULT_AUTOCOMPLETE_MODEL: Partial<Record<ProviderId, string>> = {
   stepfun: "step-1-flash",
   qwen: "qwen-turbo-latest",
   zhipu: "glm-4-flash",
-  "opencode-zen": "opencode/big-pickle",
-  "opencode-go": "opencode-go/qwen-2.5-coder-32b",
   openrouter: "openai/gpt-5.4-mini",
   "openai-compatible": "",
 };
@@ -1976,7 +1808,6 @@ const LITE_SYSTEM_PROMPT_MODEL_IDS = new Set<string>([
   "step-1-flash",
   "qwen-turbo-latest",
   "glm-4-flash",
-  "opencode/big-pickle",
   "gpt-oss-120b",
   "openai/gpt-oss-20b",
   "llama3.3-70b",

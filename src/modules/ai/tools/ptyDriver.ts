@@ -9,6 +9,14 @@ import type { ToolContext } from "./context";
  * Enables AI Agent to interact with interactive CLI wizards, REPLs, TUI apps,
  * and running dev servers by reading rendered screen buffers and sending keystrokes.
  */
+/**
+ * Refusal returned instead of a screen buffer when the active terminal is in
+ * Privacy mode. Mirrors `get_terminal_output`: the buffer is not even read,
+ * so secrets on screen never reach the model.
+ */
+export const PRIVATE_TERMINAL_REFUSAL =
+  "Active terminal is in Privacy mode; its buffer is withheld.";
+
 export function buildPtyDriverTools(ctx: ToolContext) {
   return {
     pty_session: tool({
@@ -88,6 +96,9 @@ export function buildPtyDriverTools(ctx: ToolContext) {
         const maxLines = Math.min(Math.max(1, parsedMaxLines), 500);
 
         if (action === "read") {
+          if (ctx.isActiveTerminalPrivate()) {
+            return { error: PRIVATE_TERMINAL_REFUSAL };
+          }
           const raw = ctx.getTerminalContext();
           if (!raw) {
             return {
@@ -114,6 +125,15 @@ export function buildPtyDriverTools(ctx: ToolContext) {
             };
           }
           await new Promise((r) => setTimeout(r, 200));
+          // The signal is operational, not a read: it stays available in
+          // Privacy mode, but the trailing buffer (the secret) is withheld.
+          if (ctx.isActiveTerminalPrivate()) {
+            return {
+              action: "ctrl_c",
+              sent: true,
+              note: "Sent Ctrl+C to active terminal PTY. Buffer withheld: terminal is in Privacy mode.",
+            };
+          }
           const raw = ctx.getTerminalContext() ?? "";
           const lines = raw.split("\n");
           const tail = lines.slice(-maxLines).join("\n");
@@ -126,6 +146,9 @@ export function buildPtyDriverTools(ctx: ToolContext) {
         }
 
         if (action === "wait") {
+          if (ctx.isActiveTerminalPrivate()) {
+            return { error: PRIVATE_TERMINAL_REFUSAL };
+          }
           if (!wait_for) {
             return { error: "wait_for parameter is required for action='wait'" };
           }
@@ -185,6 +208,17 @@ export function buildPtyDriverTools(ctx: ToolContext) {
               }
               await new Promise((r) => setTimeout(r, 150));
             }
+            if (ctx.isActiveTerminalPrivate()) {
+              return {
+                action: "write",
+                sent: true,
+                input,
+                matched,
+                pattern: wait_for,
+                timed_out: !matched,
+                note: "Input injected. Buffer withheld: terminal is in Privacy mode.",
+              };
+            }
             const raw = ctx.getTerminalContext() ?? "";
             const lines = raw.split("\n");
             const tail = lines.slice(-maxLines).join("\n");
@@ -199,6 +233,15 @@ export function buildPtyDriverTools(ctx: ToolContext) {
             };
           }
           await new Promise((r) => setTimeout(r, 300));
+          // Keystrokes are operational; the echoed-back buffer is a read.
+          if (ctx.isActiveTerminalPrivate()) {
+            return {
+              action: "write",
+              sent: true,
+              input,
+              note: "Input injected. Buffer withheld: terminal is in Privacy mode.",
+            };
+          }
           const raw = ctx.getTerminalContext() ?? "";
           const lines = raw.split("\n");
           const tail = lines.slice(-maxLines).join("\n");
@@ -213,6 +256,9 @@ export function buildPtyDriverTools(ctx: ToolContext) {
         // Default: action === "run"
         if (!command || !command.trim()) {
           return { error: "command parameter is required for action='run'" };
+        }
+        if (ctx.isActiveTerminalPrivate()) {
+          return { error: PRIVATE_TERMINAL_REFUSAL };
         }
 
         const safety = checkShellCommand(command);
@@ -297,6 +343,11 @@ export function buildPtyDriverTools(ctx: ToolContext) {
           .describe("Maximum lines from the bottom of the buffer to return."),
       }),
       execute: async ({ max_lines = 50 }) => {
+        // Read-only AND auto-executing: without this check a private screen
+        // is one silent tool call away from the model.
+        if (ctx.isActiveTerminalPrivate()) {
+          return { error: PRIVATE_TERMINAL_REFUSAL, buffer: "" };
+        }
         const parsedMax =
           typeof max_lines === "string"
             ? parseInt(max_lines, 10) || 50
@@ -357,6 +408,9 @@ export function buildPtyDriverTools(ctx: ToolContext) {
           ),
       }),
       execute: async ({ pattern }) => {
+        if (ctx.isActiveTerminalPrivate()) {
+          return { found: false, error: PRIVATE_TERMINAL_REFUSAL };
+        }
         const raw = ctx.getTerminalContext();
         if (!raw) {
           return {

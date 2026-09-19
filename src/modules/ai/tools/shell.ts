@@ -27,7 +27,10 @@ export const UNCLOSED_QUOTE_SENTINEL = "[termigo: unclosed quote in command]";
 export function screenCommand(
   command: string,
 ): { ok: true } | { ok: false; reason: string } {
-  if (command.includes(UNCLOSED_QUOTE_SENTINEL)) {
+  // Trailing-comment anchor, not a substring: the normalizer appends the
+  // sentinel as ` # <sentinel>`, while a balanced command that merely
+  // mentions the text (e.g. echoing it) must keep working.
+  if (command.trimEnd().endsWith(`# ${UNCLOSED_QUOTE_SENTINEL}`)) {
     return {
       ok: false,
       reason: "Refused: the command has an unclosed quote. Close the quote and try again.",
@@ -228,6 +231,10 @@ export function buildShellTools(ctx: ToolContext) {
       needsApproval: true,
       execute: async ({ command, timeout_secs }, { abortSignal }) => {
         const normalized = normalizeShellCommand(command);
+        // Unwrap BEFORE screening on every path: screening the wrapper only
+        // sees `powershell`/`bash` (never offensive) while the inner script
+        // runs unchecked. The wrapper is kept for execution below.
+        const effectiveCommand = unwrapPowershellCommand(normalized);
         // With an SSH terminal focused the model means the server, so the
         // command runs there. This one always asks, in every approval mode:
         // see REMOTE_ALWAYS_ASK in approvalPolicy. The safety check above ran
@@ -238,7 +245,7 @@ export function buildShellTools(ctx: ToolContext) {
           // Run from the shell's own directory. The exec channel starts in the
           // SSH user's home, so `docker compose up` would otherwise run
           // somewhere other than the project the user is looking at.
-          const safety = screenCommand(normalized);
+          const safety = screenCommand(effectiveCommand);
           if (!safety.ok) return { error: safety.reason };
           const full = remote.cwd
             ? `cd ${shellQuote(remote.cwd)} && ${normalized}`
@@ -281,7 +288,6 @@ export function buildShellTools(ctx: ToolContext) {
           }
         }
 
-        const effectiveCommand = unwrapPowershellCommand(normalized);
         const safety = screenCommand(effectiveCommand);
         if (!safety.ok) return { error: safety.reason };
 

@@ -131,4 +131,22 @@ describe("screenCommand", () => {
     const res = screenCommand(normalizeShellCommand('echo "hello'));
     expect(res.ok).toBe(false);
   });
+
+  it("does not refuse a balanced command that merely mentions the sentinel", () => {
+    const res = screenCommand('echo "[termigo: unclosed quote in command]"');
+    expect(res.ok).toBe(true);
+  });
+});
+
+describe("checkShellCommand root wipes", () => {
+  it.each(["/", "/*", "//", "///", "/*/*", "///*"])(
+    "refuses rm -rf %s",
+    (target) => {
+      expect(screenCommand(`rm -rf ${target}`).ok).toBe(false);
+    },
+  );
+
+  it("still allows rm -rf on an ordinary path", () => {
+    expect(screenCommand("rm -rf /tmp/scratch").ok).toBe(true);
+  });
 });

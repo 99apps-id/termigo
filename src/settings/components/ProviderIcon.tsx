@@ -6,7 +6,6 @@ import {
   AppleIcon,
   ChatGptIcon,
   ClaudeIcon,
-  CodeSquareIcon,
   ComputerIcon,
   CpuIcon,
   DeepseekIcon,
@@ -16,7 +15,6 @@ import {
   Grok02Icon,
   MistralIcon,
   PlugIcon,
-  Rocket02Icon,
   ServerStack01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -32,8 +30,6 @@ const ICON_BY_PROVIDER = {
   stepfun: AiBrain01Icon,
   qwen: AiCloud01Icon,
   zhipu: AiBrain02Icon,
-  "opencode-zen": CodeSquareIcon,
-  "opencode-go": Rocket02Icon,
   mistral: MistralIcon,
   openrouter: GlobeIcon,
   "openai-compatible": PlugIcon,

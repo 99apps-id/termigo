@@ -352,8 +352,11 @@ const RM_RECURSIVE_FORCE =
   "(?:-[a-zA-Z]*(?:rf|fr)[a-zA-Z]*|-[a-zA-Z]*r[a-zA-Z]*\\s+-[a-zA-Z]*f[a-zA-Z]*|-[a-zA-Z]*f[a-zA-Z]*\\s+-[a-zA-Z]*r[a-zA-Z]*|--recursive\\s+--force|--force\\s+--recursive)";
 /** `--` ends option parsing; every shell accepts it before the operand. */
 const RM_END_OF_OPTIONS = "(?:--\\s+)?";
-/** The filesystem root, with or without a trailing glob (`/*`). */
-const RM_ROOT_TARGET = "(['\"]?/\\*?['\"]?\\s*(?:$|;|&|\\|))";
+/** The filesystem root in any slash spelling (`/`, `//`, `///`, `/ *`, `/ * / *`:
+ *  POSIX treats repeated slashes as one, so every one of these wipes the
+ *  machine exactly like `/` does).
+ */
+const RM_ROOT_TARGET = "(['\"]?(?:/+\\*?(?:/\\*?)?)['\"]?\\s*(?:$|;|&|\\|))";
 /** `~`, `$HOME`, `${HOME}` and any path under them, quoted or bare. The glob
  *  allowed after the closing quote is what covers `"$HOME"/*`, which a
  *  boundary anchored straight after the quote missed. */
