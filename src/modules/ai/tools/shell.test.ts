@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   normalizeShellCommand,
+  screenCommand,
   truncateCommandOutput,
+  UNCLOSED_QUOTE_SENTINEL,
   unwrapPowershellCommand,
   workspaceSessionKey,
 } from "./shell";
@@ -108,5 +110,25 @@ describe("normalizeShellCommand", () => {
   it("does not insert extra semicolons when lines end with && or ;", () => {
     const input = "cd /dir &&\npnpm build";
     expect(normalizeShellCommand(input)).toBe("cd /dir && pnpm build");
+  });
+
+  it("marks an unclosed quote with the sentinel", () => {
+    expect(normalizeShellCommand('echo "hello')).toContain(
+      UNCLOSED_QUOTE_SENTINEL,
+    );
+    expect(normalizeShellCommand("echo 'hello")).toContain(
+      UNCLOSED_QUOTE_SENTINEL,
+    );
+  });
+
+  it("leaves balanced quotes alone", () => {
+    expect(normalizeShellCommand('echo "hello"')).toBe('echo "hello"');
+  });
+});
+
+describe("screenCommand", () => {
+  it("refuses a command carrying the unclosed-quote sentinel", () => {
+    const res = screenCommand(normalizeShellCommand('echo "hello'));
+    expect(res.ok).toBe(false);
   });
 });

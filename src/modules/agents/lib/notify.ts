@@ -25,7 +25,7 @@ export async function osNotify(
 ): Promise<OsNotificationResult> {
   try {
     if (!(await ensurePermission())) return "denied";
-    sendNotification({ title, body });
+    await sendNotification({ title, body });
     return "requested";
   } catch (e) {
     console.warn("[termigo] os notification failed:", e);

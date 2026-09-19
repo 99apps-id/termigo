@@ -198,8 +198,12 @@ pub async fn ssh_write(
         .get(&id)
         .cloned()
         .ok_or_else(|| {
-            log::warn!("ssh_write: unknown id={id}");
-            "no session".to_string()
+            // The janitor evicts the id as soon as the pump exits, so an
+            // in-flight call with a cached id after a disconnect is expected,
+            // not a warning. Message keeps the "no ssh session" prefix the
+            // frontend matches on to fall back (see shell.ts).
+            log::debug!("ssh_write: unknown id={id} (closed or expired)");
+            "no ssh session (closed or expired)".to_string()
         })?;
     session.write(data.as_bytes()).await
 }
@@ -218,8 +222,8 @@ pub async fn ssh_resize(
         .get(&id)
         .cloned()
         .ok_or_else(|| {
-            log::warn!("ssh_resize: unknown id={id}");
-            "no session".to_string()
+            log::debug!("ssh_resize: unknown id={id} (closed or expired)");
+            "no ssh session (closed or expired)".to_string()
         })?;
     session.resize(cols, rows).await
 }
@@ -266,8 +270,8 @@ pub async fn ssh_forward_open(
         .get(&id)
         .cloned()
         .ok_or_else(|| {
-            log::warn!("ssh_forward_open: unknown id={id}");
-            "no session".to_string()
+            log::debug!("ssh_forward_open: unknown id={id} (closed or expired)");
+            "no ssh session (closed or expired)".to_string()
         })?;
     // Bind and accept on the SSH runtime, not tauri's: the listener and the
     // russh channels it feeds must be driven by the same reactor.
@@ -350,8 +354,8 @@ pub async fn ssh_attach(
         .get(&id)
         .cloned()
         .ok_or_else(|| {
-            log::warn!("ssh_attach: unknown id={id}");
-            "no session".to_string()
+            log::debug!("ssh_attach: unknown id={id} (closed or expired)");
+            "no ssh session (closed or expired)".to_string()
         })?;
     Ok(session.add_mirror_sink(on_event))
 }
@@ -396,8 +400,8 @@ pub async fn ssh_exec(
         .get(&id)
         .cloned()
         .ok_or_else(|| {
-            log::warn!("ssh_exec: unknown id={id}");
-            "no ssh session".to_string()
+            log::debug!("ssh_exec: unknown id={id} (closed or expired)");
+            "no ssh session (closed or expired)".to_string()
         })?;
 
     let timeout = std::time::Duration::from_secs(timeout_secs.unwrap_or(30).clamp(1, 300));

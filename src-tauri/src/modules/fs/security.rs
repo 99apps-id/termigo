@@ -129,8 +129,37 @@ fn basename(p: &str) -> &str {
 fn comparison_form(p: &str) -> String {
     let mut s = p.replace('\\', "/");
     if let Some(rest) = s.strip_prefix("//?/") {
-        // `//?/C:/x` -> `C:/x`, so the drive-strip below then yields `/x`.
-        s = rest.to_string();
+        // `//?/C:/x` -> `/x`, `//?/UNC/server/share/x` -> `/x`: strip the
+        // machine-specific head (drive letter or UNC server/share) so the
+        // remainder compares against the protected prefixes exactly like a
+        // plain absolute path. Mirrors the TypeScript comparisonForm, which
+        // replaces the same head with a single `/`.
+        //
+        // Written as nested `if let` rather than a let-chain: this crate is
+        // edition 2021, where let-chains do not compile.
+        let bytes = rest.as_bytes();
+        let head_end = if bytes.len() >= 2
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+        {
+            // Drive letter: skip `C:`.
+            2
+        } else if let Some(unc) = rest.strip_prefix("UNC/") {
+            // UNC: skip `UNC/server/share`, keep the remainder. A head
+            // without both segments is not a valid UNC path; fall back to
+            // stripping only `//?/` so the shape stays comparable.
+            let mut end = 0;
+            if let Some(first) = unc.find('/') {
+                if let Some(second) = unc[first + 1..].find('/') {
+                    end = "UNC/".len() + first + 1 + second;
+                }
+            }
+            end
+        } else {
+            0
+        };
+        let tail = &rest[head_end.min(rest.len())..];
+        s = format!("/{tail}");
     }
     let b = s.as_bytes();
     let is_windows_style = b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':';

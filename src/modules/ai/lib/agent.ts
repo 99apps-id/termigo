@@ -1842,11 +1842,20 @@ export async function runAgentStream(opts: RunAgentOptions) {
       if (directive === "rearm") {
         armModelWatchdog();
       } else if (directive === "disarm") {
+        const rawChunk = chunk as Record<string, unknown>;
+        const args = (rawChunk.args ?? rawChunk.input) as
+          | Record<string, unknown>
+          | undefined;
+        const secs = args?.timeout_secs ?? args?.timeoutSecs ?? args?.timeout;
+        const toolBudgetMs =
+          typeof secs === "number" && Number.isFinite(secs) && secs > 0
+            ? Math.min(
+                Math.max(MAX_TOOL_EXECUTION_MS, secs * 1000 + 30_000),
+                30 * 60_000,
+              )
+            : MAX_TOOL_EXECUTION_MS;
         const checkToolExecution = (): void => {
-          const remaining = remainingSilenceMs(
-            Date.now(),
-            MAX_TOOL_EXECUTION_MS,
-          );
+          const remaining = remainingSilenceMs(Date.now(), toolBudgetMs);
           if (remaining > 0) {
             toolExecutionTimer = setTimeout(checkToolExecution, remaining);
             return;
@@ -1854,20 +1863,17 @@ export async function runAgentStream(opts: RunAgentOptions) {
           const elapsed = Math.round((Date.now() - runStart) / 1000);
           fireAndForget(
             logWarn(
-              `[ai] tool execution exceeded ${Math.round(MAX_TOOL_EXECUTION_MS / 1000)}s without activity, aborting the run (elapsed=${elapsed}s, model=${modelId}, provider=${provider})`,
+              `[ai] tool execution exceeded ${Math.round(toolBudgetMs / 1000)}s without activity, aborting the run (elapsed=${elapsed}s, model=${modelId}, provider=${provider})`,
             ),
             "tool-execution-timeout",
           );
           abortController.abort(
             new Error(
-              `A tool did not complete or show activity within ${Math.round(MAX_TOOL_EXECUTION_MS / 1000)}s. The run was stopped to avoid hanging forever.`,
+              `A tool did not complete or show activity within ${Math.round(toolBudgetMs / 1000)}s. The run was stopped to avoid hanging forever.`,
             ),
           );
         };
-        toolExecutionTimer = setTimeout(
-          checkToolExecution,
-          MAX_TOOL_EXECUTION_MS,
-        );
+        toolExecutionTimer = setTimeout(checkToolExecution, toolBudgetMs);
       } else if (chunk.type === "tool-result") {
         clearFirstStepTimer();
         armModelWatchdog();

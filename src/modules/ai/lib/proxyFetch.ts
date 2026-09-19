@@ -8,12 +8,7 @@ const PRIVATE_NET_RE =
 function isPrivateUrl(url: string): boolean {
   try {
     const u = new URL(url);
-    // hostname without port
-    const host = u.hostname;
-    if (PRIVATE_NET_RE.test(host)) return true;
-    // bracketed IPv6
-    if (host.startsWith("[") && PRIVATE_NET_RE.test(host)) return true;
-    return false;
+    return PRIVATE_NET_RE.test(u.hostname);
   } catch {
     return false;
   }
@@ -225,8 +220,18 @@ async function proxyFetchImpl(
       allowPrivateNetwork,
       onEvent: channel,
     }).catch((e) => {
-      if (resolved) return; // headers already arrived; chunk-side error wins
-      reject(e instanceof Error ? e : new Error(String(e)));
+      const err = e instanceof Error ? e : new Error(String(e));
+      if (resolved) {
+        // Headers already arrived; close the stream with an error so the reader
+        // does not hang open waiting for chunks that will never come.
+        try {
+          streamController?.error(err);
+        } catch {
+          /* already closed */
+        }
+        return;
+      }
+      reject(err);
     });
   });
 }

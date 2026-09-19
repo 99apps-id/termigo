@@ -163,14 +163,12 @@ function basename(p: string): string {
  */
 function comparisonForm(p: string): string {
   let s = p.replace(/\\/g, "/");
-  // UNC / extended-length prefix: \\?\C:\... or //?/C:/... → strip the prefix
-  // AND the drive it wraps, in one step, so \\?\C:\Windows\x compares as
-  // /windows/x exactly like the Rust mirror (fs/security.rs). Stripping only the
-  // prefix left the drive sitting behind a leading slash, where the
-  // `^[a-zA-Z]:` pass below could not match it, so every root-anchored
-  // WRITE_DENY_PREFIXES entry (/windows/, /program files/, ...) silently missed
-  // extended-length paths.
-  s = s.replace(/^\/\/\?\/(?:[a-zA-Z]:)?/, "/");
+  // UNC / extended-length prefix: \\?\C:\... or //?/C:/... or //?/UNC\server\share\...
+  // Strip the prefix AND the drive/UNC segment it wraps, so \\?\C:\Windows\x and
+  // //?/UNC/server/share/path both compare as /windows/x and /server/share/path
+  // like the Rust mirror. Stripping only the prefix left the drive/UNC sitting
+  // behind a leading slash where the `^[a-zA-Z]:` pass could not match it.
+  s = s.replace(/^\/\/\?\/(?:[a-zA-Z]:|UNC\/[^/]+\/[^/]+)?/, "/");
   // Drive prefix: C:/foo → /foo. Important: do this BEFORE lowercasing so we
   // don't have to special-case "c:" vs "C:".
   s = s.replace(/^[a-zA-Z]:/, "");
@@ -360,6 +358,10 @@ const RM_ROOT_TARGET = "(['\"]?/\\*?['\"]?\\s*(?:$|;|&|\\|))";
  *  boundary anchored straight after the quote missed. */
 const RM_HOME_TARGET =
   "(['\"]?(~(?:/[^\\s'\"]*)?|\\$\\{?HOME\\}?(?:/[^\\s'\"]*)?)['\"]?(?:/\\*?)?(?:\\s|$|;|&|\\|))";
+/** Detect `cd ~` / `cd $HOME` / `cd ${HOME}` followed by destructive rm on `.` or `*` */
+const CD_HOME_RM_RE = new RegExp(
+  `\\bcd\\s+(['\"]?(~(?:/[^\\s'\"]*)?|\\$\\{?HOME\\}?(?:/[^\\s'\"]*)?)['\"]?)\\s*[;&|]\\s*rm\\s+${RM_RECURSIVE_FORCE}\\s+${RM_END_OF_OPTIONS}(['\"]?[.*]['\"]?)`,
+);
 const RM_ROOT_RE = new RegExp(
   `\\brm\\s+${RM_RECURSIVE_FORCE}\\s+${RM_END_OF_OPTIONS}${RM_ROOT_TARGET}`,
 );
@@ -413,9 +415,10 @@ export function checkShellCommand(cmd: string): SafetyResult {
   // straight through, while the filesystem-root guard above already handled
   // both orders. This was a copy that lost half its pattern.
   //
-  // It stays a deny-list and stays leaky by nature: `cd ~ && rm -rf .` reaches
-  // the same files and no pattern here will catch it. This exists to stop
-  // accidents, not a determined path; the approval gate is the real control.
+  // It stays a deny-list and stays leaky by nature: `cd ~ && rm -rf .` is now caught
+  // by CD_HOME_RM_RE above, but more complex paths (e.g. via variables) may still
+  // slip through. This exists to stop accidents, not a determined path; the approval
+  // gate is the real control.
   if (
     RM_HOME_RE.test(
       c,
@@ -425,6 +428,14 @@ export function checkShellCommand(cmd: string): SafetyResult {
       ok: false,
       reason:
         "Refused: command attempts to recursively delete the home directory.",
+    };
+  }
+  // Detect `cd ~ && rm -rf .` / `cd $HOME; rm -rf *` patterns
+  if (CD_HOME_RM_RE.test(c)) {
+    return {
+      ok: false,
+      reason:
+        "Refused: command changes to home directory then attempts recursive delete.",
     };
   }
   if (/--no-preserve-root/.test(c)) {

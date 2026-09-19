@@ -29,29 +29,33 @@ export class SubagentConcurrencyPool {
     if (this.active < this.maxConcurrent) {
       this.active++;
       let released = false;
-      return () => {
+      const release = () => {
         if (!released) {
           released = true;
           this.active--;
           this.dequeue();
         }
       };
+      return release;
     }
 
     return new Promise<() => void>((resolve, reject) => {
       let aborted = false;
+      let released = false;
+      let release: (() => void) | null = null;
 
       const run = () => {
         if (aborted) return;
         signal?.removeEventListener("abort", onAbort);
-        let released = false;
-        resolve(() => {
+        this.active++;
+        release = () => {
           if (!released) {
             released = true;
             this.active--;
             this.dequeue();
           }
-        });
+        };
+        resolve(release);
       };
 
       const onAbort = () => {
@@ -72,7 +76,9 @@ export class SubagentConcurrencyPool {
     if (this.active < this.maxConcurrent && this.queue.length > 0) {
       const next = this.queue.shift();
       if (next) {
-        this.active++;
+        // No increment here: the waiter counts its own slot in `run()`.
+        // Incrementing in both places double-counts every queued grant,
+        // halving the effective pool and letting `active` exceed the max.
         next();
       }
     }

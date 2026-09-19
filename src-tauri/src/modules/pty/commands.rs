@@ -221,10 +221,15 @@ pub fn pty_close(state: tauri::State<PtyState>, id: u64) -> Result<(), String> {
 #[tauri::command]
 pub fn pty_has_foreground_process(state: tauri::State<PtyState>, id: u64) -> Result<bool, String> {
     let sessions = state.sessions.read().unwrap();
-    let session = sessions.get(&id).ok_or_else(|| {
-        log::warn!("pty_has_foreground_process: unknown session id={id}");
-        "no session".to_string()
-    })?;
+    // An unknown session means "no foreground job": the waiter thread reaps the
+    // id as soon as the shell exits, so a frontend idle-probe that passed its
+    // `shellExited` guard can still lose the race. Same no-op convention as
+    // `pty_ack_output` - returning Err here only produced warn spam plus a
+    // console.error for a close that already happened.
+    let Some(session) = sessions.get(&id) else {
+        log::debug!("pty_has_foreground_process: unknown session id={id}");
+        return Ok(false);
+    };
     let shell_pid = session.shell_pid;
     if shell_pid == 0 {
         return Ok(false);
@@ -235,10 +240,11 @@ pub fn pty_has_foreground_process(state: tauri::State<PtyState>, id: u64) -> Res
 #[tauri::command]
 pub fn pty_has_foreground_job(state: tauri::State<PtyState>, id: u64) -> Result<bool, String> {
     let sessions = state.sessions.read().unwrap();
-    let session = sessions.get(&id).ok_or_else(|| {
-        log::warn!("pty_has_foreground_job: unknown session id={id}");
-        "no session".to_string()
-    })?;
+    // See `pty_has_foreground_process`: unknown == already reaped == idle.
+    let Some(session) = sessions.get(&id) else {
+        log::debug!("pty_has_foreground_job: unknown session id={id}");
+        return Ok(false);
+    };
     let shell_pid = session.shell_pid;
     if shell_pid == 0 {
         return Ok(false);

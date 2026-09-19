@@ -484,6 +484,24 @@ fn write_atomic(target: &Path, content: &[u8]) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Translate a raw write failure into something actionable.
+///
+/// The common Windows case is `Access is denied (os error 5)`: the target is
+/// locked (e.g. writing next to or into a running `.exe` under `dist-win`),
+/// read-only, or the ACL refuses us. The raw OS string says none of that, so
+/// map permission failures to a hint and pass everything else through.
+fn friendly_write_error(target: &Path, op: &str, error: &std::io::Error) -> String {
+    if error.kind() == std::io::ErrorKind::PermissionDenied
+        || error.raw_os_error() == Some(5)
+    {
+        return format!(
+            "{op}({}) access denied: the file may be locked by a running process or read-only ({error})",
+            target.display()
+        );
+    }
+    error.to_string()
+}
+
 /// Returns the new mtime so the editor can track disk state for conflict
 /// detection without a follow-up stat.
 #[tauri::command]
@@ -509,7 +527,7 @@ pub async fn fs_write_file(
     let original_permissions = fs::metadata(&target).ok().map(|m| m.permissions());
     write_atomic(&target, content.as_bytes()).map_err(|e| {
         log::warn!("fs_write_file({}) failed: {e}", target.display());
-        e.to_string()
+        friendly_write_error(&target, "fs_write_file", &e)
     })?;
 
     if let Some(perms) = original_permissions {
@@ -555,7 +573,7 @@ pub async fn fs_write_file_base64(
         .map_err(|e| format!("invalid base64: {e}"))?;
     write_atomic(&target, &bytes).map_err(|e| {
         log::warn!("fs_write_file_base64({}) failed: {e}", target.display());
-        e.to_string()
+        friendly_write_error(&target, "fs_write_file_base64", &e)
     })?;
     let mtime = fs::metadata(&target).map(|m| mtime_millis(&m)).unwrap_or(0);
     let _ = app.emit(

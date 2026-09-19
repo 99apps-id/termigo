@@ -200,7 +200,7 @@ export function normalizeBatchInput(input: unknown): unknown {
             if (/^\d+$/.test(trimmed)) {
               resolvedDeps.push(parseInt(trimmed, 10));
             } else if (idToIndex.has(trimmed)) {
-              resolvedDeps.push(idToIndex.get(trimmed)!);
+              resolvedDeps.push(idToIndex.get(trimmed) ?? 0);
             }
           }
         }

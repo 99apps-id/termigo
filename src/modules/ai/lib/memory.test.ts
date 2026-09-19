@@ -168,7 +168,7 @@ describe("rememberFact and forgetFact with scopes", () => {
     vi.spyOn(native, "writeFile").mockImplementation(async (p, content) => {
       writtenFiles.set(p, content);
     });
-    vi.spyOn(native, "createDir").mockResolvedValue(undefined as unknown as void);
+    vi.spyOn(native, "createDir").mockResolvedValue(undefined as unknown as undefined);
 
     const outcome = await rememberFact(
       "/workspace",
@@ -215,7 +215,7 @@ describe("rememberFact and forgetFact with scopes", () => {
     vi.spyOn(native, "writeFile").mockImplementation(async (p, content) => {
       writtenFiles.set(p, content);
     });
-    vi.spyOn(native, "createDir").mockResolvedValue(undefined as unknown as void);
+    vi.spyOn(native, "createDir").mockResolvedValue(undefined as unknown as undefined);
 
     const outcome = await rememberFact(
       null,

@@ -28,6 +28,7 @@ export function TelegramBlock() {
   const setEnabled = useTelegramStore((s) => s.setEnabled);
   const setChatId = useTelegramStore((s) => s.setChatId);
   const setHasToken = useTelegramStore((s) => s.setHasToken);
+  const bumpTokenVersion = useTelegramStore((s) => s.bumpTokenVersion);
   const refresh = useTelegramStore((s) => s.refresh);
 
   const [token, setToken] = useState("");
@@ -62,6 +63,7 @@ export function TelegramBlock() {
     try {
       await setTelegramToken(token);
       setHasToken(true);
+      bumpTokenVersion();
       setToken("");
       toast.success("Telegram token saved.");
       void refresh();
@@ -75,6 +77,7 @@ export function TelegramBlock() {
   const removeToken = async () => {
     await clearTelegramToken();
     setHasToken(false);
+    bumpTokenVersion();
     toast.info("Telegram token removed.");
     void refresh();
   };

@@ -288,47 +288,56 @@ export function buildTools(
   // type-checking.
   const wrapped: Record<string, unknown> = {};
   for (const [name, tool] of Object.entries(base)) {
-    let wrappedTool = withToolLifecycle(
-      name,
-      tool as unknown as {
-        execute: (
-          args: Record<string, unknown>,
-          options: { toolCallId?: string },
-        ) => Promise<unknown>;
-      },
-      {
-        firePreToolHook: ctx.firePreToolHook,
-        firePostToolHook: ctx.firePostToolHook,
-      },
-    ) as unknown;
+    let wrappedTool = tool as unknown as {
+      execute: (
+        args: Record<string, unknown>,
+        options: { toolCallId?: string; abortSignal?: AbortSignal },
+      ) => Promise<unknown>;
+    };
     // Post-execution confirmation (BatikCode parity): when the preference is
     // on, mutating tools pause after a successful run and ask the user to
     // Keep or Revert the change before the agent continues.
     if (POST_EXECUTE_CONFIRM_TOOLS.has(name)) {
       wrappedTool = withPostExecuteConfirm(
         name,
-        wrappedTool as {
-          execute: (
-            args: Record<string, unknown>,
-            options: { toolCallId?: string; abortSignal?: AbortSignal },
-          ) => Promise<unknown>;
-        },
+        wrappedTool,
         ctx,
-      ) as unknown;
+      ) as unknown as {
+        execute: (
+          args: Record<string, unknown>,
+          options: { toolCallId?: string; abortSignal?: AbortSignal },
+        ) => Promise<unknown>;
+      };
     }
     // Automatic verification (full-agentic loop): when the preference is on, a
     // successful edit folds a best-effort format + lint outcome into the tool
     // result so the model sees whether the change is valid.
     wrappedTool = withAutoVerify(
       name,
-      wrappedTool as {
-        execute: (
-          args: Record<string, unknown>,
-          options: { toolCallId?: string; abortSignal?: AbortSignal },
-        ) => Promise<unknown>;
-      },
+      wrappedTool,
       ctx,
-    ) as unknown;
+    ) as unknown as {
+      execute: (
+        args: Record<string, unknown>,
+        options: { toolCallId?: string; abortSignal?: AbortSignal },
+      ) => Promise<unknown>;
+    };
+    // Wrap with lifecycle hooks on the OUTSIDE so the heartbeat is maintained
+    // while post-execution confirmation or verification is awaiting, preventing
+    // the silence/tool watchdog from prematurely aborting live user review.
+    wrappedTool = withToolLifecycle(
+      name,
+      wrappedTool,
+      {
+        firePreToolHook: ctx.firePreToolHook,
+        firePostToolHook: ctx.firePostToolHook,
+      },
+    ) as unknown as {
+      execute: (
+        args: Record<string, unknown>,
+        options: { toolCallId?: string; abortSignal?: AbortSignal },
+      ) => Promise<unknown>;
+    };
     wrapped[name] = wrappedTool;
   }
   const wrappedBase = wrapped as typeof base;

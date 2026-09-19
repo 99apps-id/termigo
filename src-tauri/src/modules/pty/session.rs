@@ -53,6 +53,9 @@ pub struct Session {
     // Set by the waiter once the child exits, so pty_open can reap a shell
     // that died before it was registered.
     pub(crate) exited: Arc<AtomicBool>,
+    // Set when drop_session has been scheduled, to prevent double-drop race
+    // between pty_open's early-exit check and the waiter thread.
+    pub(crate) drop_scheduled: Arc<AtomicBool>,
     pub(crate) output: Mutex<super::output::OutputCredit>,
     // Signalled by pty_ack_output so a flusher parked on a full credit window
     // wakes as soon as the frontend has drained a chunk.
@@ -84,6 +87,15 @@ fn acquire_conpty_lifecycle_lock() -> std::sync::MutexGuard<'static, ()> {
 }
 
 pub(crate) fn drop_session(session: Arc<Session>) {
+    // Prevent double-drop race between pty_open's early-exit check and the waiter thread.
+    // Only the first caller schedules the actual drop.
+    if session
+        .drop_scheduled
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return;
+    }
     #[cfg(windows)]
     let _guard = acquire_conpty_lifecycle_lock();
     drop(session);
@@ -171,6 +183,7 @@ pub fn spawn(
     };
 
     let exited = Arc::new(AtomicBool::new(false));
+    let drop_scheduled = Arc::new(AtomicBool::new(false));
 
     let session = Arc::new(Session {
         #[cfg(windows)]
@@ -180,6 +193,7 @@ pub fn spawn(
         writer: writer.clone(),
         master: Mutex::new(pair.master),
         exited: exited.clone(),
+        drop_scheduled: drop_scheduled.clone(),
         output: Mutex::new(Default::default()),
         output_cv: Condvar::new(),
     });
@@ -402,6 +416,7 @@ mod tests {
             writer,
             master: Mutex::new(pair.master),
             exited: Arc::new(AtomicBool::new(false)),
+            drop_scheduled: Arc::new(AtomicBool::new(false)),
             output: Mutex::new(Default::default()),
             output_cv: Condvar::new(),
         });
@@ -453,6 +468,7 @@ mod tests {
             writer,
             master: Mutex::new(pair.master),
             exited: Arc::new(AtomicBool::new(false)),
+            drop_scheduled: Arc::new(AtomicBool::new(false)),
             output: Mutex::new(Default::default()),
             output_cv: Condvar::new(),
         });

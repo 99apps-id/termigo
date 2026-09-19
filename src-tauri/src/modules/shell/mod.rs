@@ -1266,6 +1266,29 @@ mod tests_sandbox {
     }
 
     #[test]
+    fn validate_shell_command_allows_su_with_allowlisted_tools() {
+        for cmd in [
+            "su -c \"apt update\"",
+            "su -c 'apt update'",
+            "su --command=\"apt update\"",
+            "su root -c \"apt update\"",
+            "su - root -c \"apt update\"",
+            "su -l root -c \"apt update\"",
+            "su -c \"ls -la\"",
+            "su -c \"git status\"",
+        ] {
+            assert!(validate_shell_command(cmd).is_ok(), "blocked: {cmd}");
+        }
+    }
+
+    #[test]
+    fn validate_shell_command_refuses_su_with_unallowlisted_tools() {
+        assert!(validate_shell_command("su -c \"evil-binary --flag\"").is_err());
+        assert!(validate_shell_command("su root -c \"definitely-not-a-tool\"").is_err());
+        assert!(validate_shell_command("su --command=\"evil-binary\"").is_err());
+    }
+
+    #[test]
     fn validate_shell_command_allows_wsl_with_allowlisted_tools() {
         for cmd in [
             "wsl apt update",

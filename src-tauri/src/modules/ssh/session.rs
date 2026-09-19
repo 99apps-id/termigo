@@ -618,18 +618,17 @@ where
     } else {
         CONNECT_TIMEOUT
     };
-    let result = tokio::time::timeout(overall_timeout, connect_fut)
-        .await
-        .map_err(|_| format!("ssh: connect to {host}:{port} timed out"))?;
-    // Drop any unconsumed prompt (handshake failed before/around the check).
+    let result = tokio::time::timeout(overall_timeout, connect_fut).await;
+    // Always drop any unconsumed prompt on timeout or error.
     if needs_confirm {
         if let Ok(mut m) = pending_host_keys().lock() {
             m.remove(prompt_id);
         }
     }
     match result {
-        Ok(h) => Ok(h),
-        Err(e) => Err(handshake_error(report, e).await),
+        Err(_) => Err(format!("ssh: connect to {host}:{port} timed out")),
+        Ok(Err(e)) => Err(handshake_error(report, e).await),
+        Ok(Ok(h)) => Ok(h),
     }
 }
 

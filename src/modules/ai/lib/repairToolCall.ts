@@ -416,6 +416,20 @@ export const KNOWN_TOOL_ALIASES: Record<
   invoke_subagent: {
     canonical: "run_subagent",
     adaptArgs: (a) => {
+      if (Array.isArray(a.Subagents) && a.Subagents.length > 1) {
+        // Multiple subagents: the model meant invoke_subagents (plural).
+        // Map to the run_subagents canonical shape so nothing is dropped.
+        const list = a.Subagents as Array<Record<string, unknown>>;
+        return {
+          _redirectCanonical: "run_subagents",
+          tasks: list.map((item) => ({
+            type: item.TypeName ?? item.type ?? "general",
+            prompt: item.Prompt ?? item.prompt ?? "",
+            description: item.Role ?? item.description,
+            depends_on: item.depends_on,
+          })),
+        };
+      }
       if (Array.isArray(a.Subagents) && a.Subagents.length > 0) {
         const first = a.Subagents[0] as Record<string, unknown>;
         return {
@@ -644,7 +658,7 @@ function applySemanticRepairs(
     }
   } else if (toolName === "run_subagents") {
     const origTasks = p.tasks;
-    if (!Array.isArray(origTasks) || typeof origTasks === "string") {
+    if (!Array.isArray(origTasks)) {
       const normalized = normalizeBatchInput(parsed);
       if (
         normalized &&

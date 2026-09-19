@@ -182,6 +182,34 @@ describe("stallBudgetMs", () => {
     expect(pendingApprovalToolTimeoutMs(multi)).toBe(250_000);
     expect(stallBudgetMs(multi, true)).toBe(250_000 + TOOL_TIMEOUT_SLACK_MS);
   });
+
+  it("finds the timeout when stored on part.args or part.toolInvocation", () => {
+    const onArgs = [
+      {
+        parts: [
+          {
+            state: "approval-responded",
+            args: { timeout_secs: 150 },
+          },
+        ],
+      },
+    ];
+    expect(pendingApprovalToolTimeoutMs(onArgs)).toBe(150_000);
+
+    const onInvocation = [
+      {
+        parts: [
+          {
+            state: "approval-responded",
+            toolInvocation: {
+              args: { timeout_secs: 220 },
+            },
+          },
+        ],
+      },
+    ];
+    expect(pendingApprovalToolTimeoutMs(onInvocation)).toBe(220_000);
+  });
 });
 
 describe("startActivityHeartbeat", () => {

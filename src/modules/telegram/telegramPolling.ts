@@ -283,6 +283,10 @@ async function runLoop(signal: AbortSignal): Promise<void> {
       if (isTimeout) {
         lastPollProgressTime = Date.now();
         useTelegramStore.getState().setOnline(true);
+        // Brief pause after client-side timeout so Telegram's server closes
+        // the previous aborted connection before opening a new long-poll request,
+        // preventing transient 409 Conflict responses.
+        await sleep(signal, 1000);
         continue;
       }
       useTelegramStore.getState().setOnline(false);

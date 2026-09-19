@@ -196,6 +196,14 @@ export function buildTerminalTools(ctx: ToolContext) {
             };
           }
           buffer = ctx.getTerminalContext();
+          // Re-check privacy after getting buffer to minimize TOCTOU window
+          // (privacy mode is a user setting that rarely changes mid-session)
+          if (buffer && ctx.isActiveTerminalPrivate()) {
+            return {
+              error:
+                "active terminal entered Privacy mode; its buffer is withheld.",
+            };
+          }
           if (!buffer) return { output: "", note: "no active terminal" };
         } else {
           const found = ctx.listTerminals().find((t) => t.tabId === tab_id);
@@ -210,6 +218,15 @@ export function buildTerminalTools(ctx: ToolContext) {
             };
           }
           buffer = ctx.getTerminalContextFor(tab_id);
+          // Re-check privacy after getting buffer
+          if (buffer) {
+            const recheck = ctx.listTerminals().find((t) => t.tabId === tab_id);
+            if (recheck?.private) {
+              return {
+                error: `"${found.title}" entered Privacy mode; its buffer is withheld.`,
+              };
+            }
+          }
           if (!buffer) {
             return { output: "", note: `"${found.title}" has no output yet` };
           }

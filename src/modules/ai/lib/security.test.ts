@@ -261,10 +261,14 @@ describe("checkShellCommand — control-character / newline injection", () => {
 });
 
 describe("checkShellCommand — home directory rm guard", () => {
-  it("blocks rm -rf with ${HOME} (braces variant)", () => {
-    expect(checkShellCommand("rm -rf ${HOME}")).toMatchObject({ ok: false });
-    expect(checkShellCommand('rm -rf "${HOME}"')).toMatchObject({ ok: false });
-    expect(checkShellCommand("rm -rf ${HOME}/")).toMatchObject({ ok: false });
+  // The "$" + "{HOME}" concatenation avoids a false-positive lint warning about
+  // template placeholder syntax in a plain string: these are shell commands
+  // being tested, not template literals.
+  const HOME_VAR = "$" + "{HOME}";
+  it(`blocks rm -rf with ${HOME_VAR} (braces variant)`, () => {
+    expect(checkShellCommand(`rm -rf ${HOME_VAR}`)).toMatchObject({ ok: false });
+    expect(checkShellCommand(`rm -rf "${HOME_VAR}"`)).toMatchObject({ ok: false });
+    expect(checkShellCommand(`rm -rf ${HOME_VAR}/`)).toMatchObject({ ok: false });
   });
 
   it("blocks rm -rf on home subdirectories", () => {

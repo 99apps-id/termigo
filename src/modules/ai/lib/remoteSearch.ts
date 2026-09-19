@@ -136,7 +136,7 @@ export function resolveRemoteRoot(
   cwd: string | null,
 ): { ok: true; path: string } | { ok: false; error: string } {
   const raw = root?.trim();
-  if (raw && raw.startsWith("/")) return { ok: true, path: raw };
+  if (raw?.startsWith("/")) return { ok: true, path: raw };
   if (!cwd) {
     return {
       ok: false,

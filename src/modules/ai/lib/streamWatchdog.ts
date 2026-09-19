@@ -175,10 +175,19 @@ export function pendingApprovalToolTimeoutMs(
     let foundApproval = false;
     let maxMs: number | null = null;
     for (let j = parts.length - 1; j >= 0; j -= 1) {
-      const part = parts[j] as { state?: string; input?: unknown };
+      const part = parts[j] as {
+        state?: string;
+        input?: unknown;
+        args?: unknown;
+        toolInvocation?: { args?: unknown; input?: unknown };
+      };
       if (part?.state !== "approval-responded") continue;
       foundApproval = true;
-      let input = part.input;
+      let input =
+        part.input ??
+        part.args ??
+        part.toolInvocation?.args ??
+        part.toolInvocation?.input;
       if (typeof input === "string") {
         try {
           input = JSON.parse(input);

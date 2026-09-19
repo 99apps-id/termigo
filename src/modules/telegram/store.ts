@@ -6,12 +6,26 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { getTelegramOwner, getTelegramToken } from "./keyring";
+import {
+  getTelegramOwner,
+  getTelegramToken,
+  resetTelegramTokenCache,
+} from "./keyring";
 
 export type TelegramBotState = {
   enabled: boolean;
   online: boolean;
   hasToken: boolean;
+  /**
+   * Bumped every time the token is saved or removed (see `bumpTokenVersion`).
+   * Persisted so a change made in the settings window reaches the main window
+   * through the shared localStorage: the relay effect depends on the boolean
+   * `hasToken` only, so a token *rotation* (`true -> true`) otherwise never
+   * restarts the poller and the main window keeps polling with its stale
+   * in-memory cached token - a second client on the same bot from Telegram's
+   * point of view, i.e. a 409 factory.
+   */
+  tokenVersion: number;
   lastError: string | null;
   /** Optional owner chat id the bot only answers. */
   chatId: string | null;
@@ -25,6 +39,8 @@ export type TelegramBotState = {
   setChatId: (id: string | null) => void;
   setOwnerUserId: (id: string | null) => void;
   setHasToken: (v: boolean) => void;
+  /** Signal a token save/remove so the relay restarts even when `hasToken` is unchanged. */
+  bumpTokenVersion: () => void;
   /** Re-read hasToken from the keychain (called on app start / after token save). */
   refresh: () => Promise<void>;
 };
@@ -35,6 +51,7 @@ export const useTelegramStore = create<TelegramBotState>()(
       enabled: false,
       online: false,
       hasToken: false,
+      tokenVersion: 0,
       lastError: null,
       chatId: null,
       ownerUserId: null,
@@ -44,6 +61,8 @@ export const useTelegramStore = create<TelegramBotState>()(
       setChatId: (id) => set({ chatId: id }),
       setOwnerUserId: (id) => set({ ownerUserId: id }),
       setHasToken: (v) => set({ hasToken: v }),
+      bumpTokenVersion: () =>
+        set((s) => ({ tokenVersion: (s.tokenVersion ?? 0) + 1 })),
       refresh: async () => {
         const token = await getTelegramToken();
         const owner = await getTelegramOwner();
@@ -69,6 +88,7 @@ export const useTelegramStore = create<TelegramBotState>()(
         chatId: s.chatId,
         ownerUserId: s.ownerUserId,
         hasToken: s.hasToken,
+        tokenVersion: s.tokenVersion,
         online: s.online,
         lastError: s.lastError,
       }),
@@ -113,11 +133,20 @@ export async function syncTelegramFromStorage(): Promise<void> {
           useTelegramStore.getState().setLastError(state.lastError);
         if (state.lastError === null && cur.lastError !== null)
           useTelegramStore.getState().setLastError(null);
+        if (
+          typeof state.tokenVersion === "number" &&
+          state.tokenVersion !== cur.tokenVersion
+        )
+          useTelegramStore.setState({ tokenVersion: state.tokenVersion });
       }
     }
   } catch {
     // ignore malformed storage
   }
-  // The keychain is the source of truth for the token.
+  // The keychain is the source of truth for the token. Drop this window's
+  // in-memory cache first: after a rotation the settings window already caches
+  // the new token while this window still holds the old one, and polling with
+  // a stale token is a second client on the same bot (Telegram 409).
+  resetTelegramTokenCache();
   await useTelegramStore.getState().refresh();
 }

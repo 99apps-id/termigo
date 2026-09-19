@@ -25,6 +25,7 @@ const TOKEN_RETRY_DELAY_MS = 3_000;
 export function useTelegramBot(): void {
   const enabled = useTelegramStore((s) => s.enabled);
   const hasToken = useTelegramStore((s) => s.hasToken);
+  const tokenVersion = useTelegramStore((s) => s.tokenVersion);
 
   // Re-read BOTH sources on mount.
   //
@@ -82,8 +83,10 @@ export function useTelegramBot(): void {
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies(tokenVersion): rotation is true -> true, so the body reads no new value - tokenVersion only re-triggers the effect so the poller restarts with the fresh keychain token instead of polling stale alongside the new one (Telegram 409).
   useEffect(() => {
     if (enabled && hasToken) {
+      void stopTelegramBot();
       void startTelegramBot();
       return () => stopTelegramBot();
     }
@@ -98,5 +101,5 @@ export function useTelegramBot(): void {
       );
     }
     stopTelegramBot();
-  }, [enabled, hasToken]);
+  }, [enabled, hasToken, tokenVersion]);
 }

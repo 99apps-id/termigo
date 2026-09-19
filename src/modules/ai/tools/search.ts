@@ -117,6 +117,12 @@ export function buildSearchTools(ctx: ToolContext) {
         max_results,
       }) => {
         const pattern = (rawPattern ?? query ?? "").trim();
+        if (!pattern) {
+          return {
+            error:
+              "grep pattern cannot be empty. Please provide a regex or search query.",
+          };
+        }
         const root = rawRoot ?? path;
         const glob =
           typeof globInput === "string" ? [globInput] : globInput;

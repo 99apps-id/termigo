@@ -9,8 +9,6 @@ import {
   findScopeHeader,
   clearIndex,
   CODE_INDEX_CACHE_REL_PATH,
-  saveIndexCache,
-  loadIndexCache,
 } from "./codeIndex";
 
 describe("tokenize", () => {
@@ -112,7 +110,7 @@ describe("code index persistence and cache", () => {
       writtenFiles.set(p, content);
     });
     vi.spyOn(native, "createDir").mockResolvedValue(
-      undefined as unknown as void,
+      undefined as unknown as undefined,
     );
     vi.spyOn(native, "glob").mockResolvedValue({
       hits: [{ path: "/workspace/src/auth.ts", rel: "src/auth.ts" }],

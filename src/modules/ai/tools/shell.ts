@@ -17,9 +17,22 @@ import type { ToolContext } from "./context";
  * authorized scope is refused, and denial-of-service tooling is refused
  * outright. Ordinary commands pass untouched.
  */
+/**
+ * Marker `normalizeShellCommand` appends when a quote is never closed.
+ * Checked here so the refusal names the cause instead of letting the shell
+ * report a bare syntax error for scrambled text.
+ */
+export const UNCLOSED_QUOTE_SENTINEL = "[termigo: unclosed quote in command]";
+
 export function screenCommand(
   command: string,
 ): { ok: true } | { ok: false; reason: string } {
+  if (command.includes(UNCLOSED_QUOTE_SENTINEL)) {
+    return {
+      ok: false,
+      reason: "Refused: the command has an unclosed quote. Close the quote and try again.",
+    };
+  }
   const safety = checkShellCommand(command);
   if (!safety.ok) return safety;
   const prefs = usePreferencesStore.getState();
@@ -183,14 +196,20 @@ export function normalizeShellCommand(command: string): string {
           !trimmedOut.endsWith("||") &&
           !trimmedOut.endsWith("|")
         ) {
-          out = trimmedOut + " ; ";
+          out = `${trimmedOut} ; `;
         } else {
-          out = trimmedOut + " ";
+          out = `${trimmedOut} `;
         }
         continue;
       }
     }
     out += ch;
+  }
+  // If a quote was opened but never closed the output is garbled. Return a
+  // sentinel value `screenCommand` detects rather than silently passing
+  // scrambled text to the shell.
+  if (inDouble || inSingle) {
+    return `${out.trim()} # ${UNCLOSED_QUOTE_SENTINEL}`;
   }
   return out.trim();
 }

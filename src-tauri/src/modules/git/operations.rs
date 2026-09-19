@@ -1,5 +1,6 @@
 use std::ffi::{OsStr, OsString};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use crate::modules::git::errors::{GitError, Result};
 use crate::modules::git::parser::parse_porcelain_v2;
@@ -1154,10 +1155,15 @@ pub fn checkout_branch(
 }
 
 fn is_unintended_home_repo(canonical_root: &Path, cwd: &Path) -> bool {
-    let Some(home) = dirs::home_dir() else {
+    fn canonical_home() -> Option<&'static Path> {
+        static CACHE: OnceLock<Option<PathBuf>> = OnceLock::new();
+        CACHE
+            .get_or_init(|| dirs::home_dir().and_then(|h| std::fs::canonicalize(h).ok()))
+            .as_deref()
+    }
+    let Some(home) = canonical_home() else {
         return false;
     };
-    let home = std::fs::canonicalize(home).unwrap_or_else(|_| dirs::home_dir().unwrap());
     canonical_root == home && cwd != home
 }
 
