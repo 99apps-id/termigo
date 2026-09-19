@@ -652,6 +652,64 @@ export function noToolRepetition<T extends ToolSet>(
 }
 
 /**
+ * Read-only idle-loop guard.
+ *
+ * `noToolRepetition` compares tool calls by (input + result digest), which is
+ * intentional: a `read_file` on the same path after an edit returns new content
+ * and should not be flagged as repetition. But context eviction replaces old
+ * read results with a placeholder string, which changes the result digest and
+ * makes every re-read look like "new" progress to `noToolRepetition`. The net
+ * effect is that an agent stuck reading the same file offsets forever is never
+ * detected.
+ *
+ * This guard catches that by looking at **input-only** fingerprints for a
+ * fixed set of read-only tools (`read_file`, `list_directory`, `glob`,
+ * `grep`). If the same (tool + args) combination appears `maxRepeats` or more
+ * times in the recent window it is a stuck loop regardless of what the results
+ * look like.
+ *
+ * Only read-only tools are included. Write tools (`edit`, `bash_run`, …)
+ * legitimately operate on the same path repeatedly, so they stay under the
+ * result-aware guard.
+ */
+const IDLE_READ_TOOLS = new Set([
+  "read_file",
+  "list_directory",
+  "glob",
+  "grep",
+  "find_files",
+]);
+
+export function noIdleReadLoop<T extends ToolSet>(
+  maxRepeats = 5,
+): StopCondition<T> {
+  return ({ steps }) => {
+    if (steps.length < maxRepeats) return false;
+    const window = maxRepeats * 3;
+    const recent = steps.slice(-window);
+    const counts = new Map<string, { n: number; toolName: string }>();
+    for (const s of recent) {
+      const calls = s.toolCalls;
+      if (!calls || calls.length === 0) continue;
+      for (const c of calls) {
+        if (!IDLE_READ_TOOLS.has(c.toolName)) continue;
+        const fp = toolCallFingerprint(c.toolName, c.input);
+        const entry = counts.get(fp) ?? { n: 0, toolName: c.toolName };
+        entry.n += 1;
+        counts.set(fp, entry);
+        if (entry.n >= maxRepeats) {
+          console.log(
+            `[idle-read-loop] stop triggered tool=${entry.toolName} count=${entry.n} window=${window}`,
+          );
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+}
+
+/**
  * Decides, when a guard would stop a stuck run, whether to stop now or hold for
  * one final tool-less "synthesis" step so the model can summarise instead of
  * ending on a silent repeated tool call.
@@ -871,6 +929,7 @@ export function noErrorProgress<T extends ToolSet>(
 export type AgentStopReason =
   | "step-cap"
   | "tool-repetition"
+  | "idle-read-loop"
   | "text-repetition"
   | "no-progress"
   | "tool-error"
@@ -1319,6 +1378,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
   const costBudget = opts.costBudgetUsd ?? 0;
   const capPred = stepCountIs(stepBudget);
   const repeatPred = noToolRepetition<ToolSet>(3);
+  const idleReadPred = noIdleReadLoop<ToolSet>(5);
   const idlePred = noProgressStop<ToolSet>(2);
   const errorPred = noErrorProgress<ToolSet>(3);
 
@@ -1413,6 +1473,15 @@ export async function runAgentStream(opts: RunAgentOptions) {
     (args) =>
       (repeatPred(args) as boolean)
         ? requestSynthesisOrStop("tool-repetition")
+        : false,
+    // Idle-read-loop guard: detects read-only tools (`read_file`, etc.) called
+    // with the same args `maxRepeats` times. Unlike `noToolRepetition`, this
+    // uses input-only fingerprints and is not confused when context eviction
+    // replaces old results with a placeholder (which changes the result digest
+    // and makes each re-read look like new progress to the result-aware guard).
+    (args) =>
+      (idleReadPred(args) as boolean)
+        ? requestSynthesisOrStop("idle-read-loop")
         : false,
     // Text repetition loop: a step whose prose is mostly one repeated 60+
     // char window is degenerate output (the model echoing itself). Continuing

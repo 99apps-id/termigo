@@ -138,6 +138,13 @@ export function stopCopy(
         hint: "Another round would likely repeat it. Adding a detail usually helps more.",
         action: "Continue anyway",
       };
+    case "idle-read-loop":
+      return {
+        text: "Stopped: the agent kept reading the same file sections without making changes.",
+        hint: "The agent was stuck in a read loop. Try being more specific about what to write or edit next.",
+        action: "Continue anyway",
+      };
+
     case "text-repetition":
       return {
         text: "Stopped: the response degenerated into repeating the same text.",

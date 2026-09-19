@@ -180,11 +180,12 @@ describe("bash_run ssh fallback", () => {
       );
       const exec = tools.bash_run.execute;
       if (!exec) throw new Error("bash_run execute missing");
-      // biome-ignore lint/suspicious/noExplicitAny: tool ctx and result are harness-typed, empty exec ctx is enough
+      // biome-ignore lint/suspicious/noExplicitAny: empty exec ctx is enough for the harness
+      const emptyOpts = {} as any;
       const res = (await exec(
         { command: "rm -rf build", timeout_secs: 5 },
-        {} as any,
-      )) as any;
+        emptyOpts,
+      )) as { error?: string };
       expect(cleared).toBe(true);
       expect(res.error).toMatch(/not run locally/);
       expect(run).not.toHaveBeenCalled();
@@ -209,11 +210,12 @@ describe("bash_run ssh fallback", () => {
       const tools = buildShellTools(sshCtx());
       const exec = tools.bash_run.execute;
       if (!exec) throw new Error("bash_run execute missing");
-      // biome-ignore lint/suspicious/noExplicitAny: tool ctx and result are harness-typed, empty exec ctx is enough
+      // biome-ignore lint/suspicious/noExplicitAny: empty exec ctx is enough for the harness
+      const emptyOpts = {} as any;
       const res = (await exec(
         { command: "ls", timeout_secs: 5 },
-        {} as any,
-      )) as any;
+        emptyOpts,
+      )) as { stdout?: string };
       expect(run).toHaveBeenCalled();
       expect(res.stdout).toBe("a\n");
     } finally {

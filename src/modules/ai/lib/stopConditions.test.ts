@@ -6,11 +6,13 @@ import {
   evaluateCircuitBreaker,
   isErrorResult,
   noErrorProgress,
+  noIdleReadLoop,
   noProgressStop,
   noToolRepetition,
   synthesisStepOutcome,
   synthesisStopDecision,
 } from "./agent";
+
 
 type Call = {
   toolName: string;
@@ -163,8 +165,126 @@ describe("noToolRepetition", () => {
   });
 });
 
+describe("noIdleReadLoop", () => {
+  // maxRepeats=5 with window=15
+  const stop = noIdleReadLoop<ToolSet>(5);
+
+  // Helper: a read_file call where result changes each time (simulates eviction)
+  const readEvicted = (path: string, offset: number, result: string): Call => ({
+    toolName: "read_file",
+    toolCallId: `read-${path}-${offset}-${result}`,
+    input: { path, offset },
+    output: result,
+  });
+
+  it("does not fire before enough steps", () => {
+    const st = steps(
+      [readEvicted("f.js", 1, "A")],
+      [readEvicted("f.js", 1, "evicted")],
+      [readEvicted("f.js", 1, "A")],
+    );
+    expect(stop(st)).toBe(false);
+  });
+
+  it("fires when same read_file input repeats 5+ times even with different results", () => {
+    // Simulates the eviction bug: result digest changes, but actual args are the same
+    expect(
+      stop(
+        steps(
+          [readEvicted("f.js", 1, "content1")],
+          [readEvicted("f.js", 1, "evicted")],
+          [readEvicted("f.js", 1, "content1")],
+          [readEvicted("f.js", 1, "evicted2")],
+          [readEvicted("f.js", 1, "content1")],
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not fire for write tools even if repeated", () => {
+    const edit = (path: string): Call => ({
+      toolName: "edit",
+      toolCallId: `edit-${path}`,
+      input: { path, new_string: "x", old_string: "y" },
+    });
+    // 5 edits on the same file - should NOT trigger (edit is a write tool)
+    expect(
+      stop(
+        steps(
+          [edit("f.js")],
+          [edit("f.js")],
+          [edit("f.js")],
+          [edit("f.js")],
+          [edit("f.js")],
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  it("fires on alternating reads of different offsets if same offset repeats 5x", () => {
+    // Offset 1 and offset 2 alternate, but offset 1 still hits 5 times
+    expect(
+      stop(
+        steps(
+          [readEvicted("f.js", 1, "a")],
+          [readEvicted("f.js", 2, "b")],
+          [readEvicted("f.js", 1, "ev")],
+          [readEvicted("f.js", 2, "b")],
+          [readEvicted("f.js", 1, "a")],
+          [readEvicted("f.js", 2, "b")],
+          [readEvicted("f.js", 1, "ev2")],
+          [readEvicted("f.js", 2, "b")],
+          [readEvicted("f.js", 1, "a")],
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not fire when different offsets are read (genuine exploration)", () => {
+    expect(
+      stop(
+        steps(
+          [readEvicted("f.js", 1, "a")],
+          [readEvicted("f.js", 60, "b")],
+          [readEvicted("f.js", 120, "c")],
+          [readEvicted("f.js", 180, "d")],
+          [readEvicted("f.js", 240, "e")],
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  it("logs when guard fires", () => {
+    const logs: string[] = [];
+    const orig = console.log;
+    console.log = (...args: unknown[]) => {
+      logs.push(args.map(String).join(" "));
+    };
+    try {
+      stop(
+        steps(
+          [readEvicted("f.js", 1, "a")],
+          [readEvicted("f.js", 1, "ev")],
+          [readEvicted("f.js", 1, "a")],
+          [readEvicted("f.js", 1, "ev2")],
+          [readEvicted("f.js", 1, "a")],
+        ),
+      );
+    } finally {
+      console.log = orig;
+    }
+    expect(
+      logs.some(
+        (l) =>
+          l.includes("[idle-read-loop]") && l.includes("tool=read_file"),
+      ),
+    ).toBe(true);
+  });
+});
+
 describe("noProgressStop", () => {
   const stop = noProgressStop<ToolSet>(2);
+
 
   it("fires after two consecutive text-only steps", () => {
     expect(stop(steps(null, null))).toBe(true);

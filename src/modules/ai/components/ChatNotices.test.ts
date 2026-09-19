@@ -16,6 +16,14 @@ describe("stopCopy", () => {
     expect(copy.hint).toBeDefined();
   });
 
+  it("returns idle-read-loop copy", () => {
+    const copy = stopCopy("idle-read-loop", 1);
+    expect(copy.text).toContain("reading the same file sections");
+    expect(copy.action).toBe("Continue anyway");
+    expect(copy.hint).toBeDefined();
+  });
+
+
   it("returns user stopped copy for stopped, steered, and aborted", () => {
     expect(stopCopy("stopped", 1).text).toBe("You stopped this run.");
     expect(stopCopy("steered", 1).text).toBe("You stopped this run.");
