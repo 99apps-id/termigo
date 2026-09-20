@@ -399,12 +399,21 @@ export async function handleCallback(
     const approved =
       action === "approve" || action === "session" || action === "always";
     const state = await import("../ai/store/chatStore");
+    const aqStore = await import("../ai/store/approvalQueueStore");
     // Answer only a live approval. A replayed or already-settled callback
     // must say so instead of reporting "Approved." for an id the run has
     // moved past (and deleting its message).
-    const pending = state.useChatStore
+    //
+    // Some live approvals live only in message parts as `approval-requested`
+    // and are not yet reflected in `agentMeta.pendingApprovals`, so fall back
+    // to scanning chat messages before declaring the approval gone.
+    let pending = state.useChatStore
       .getState()
       .agentMeta.pendingApprovals?.find((p) => p.id === id);
+    if (!pending) {
+      const found = getPendingApprovals(chatId, state.useChatStore, aqStore);
+      pending = found.find((p) => p.id === id) ?? null;
+    }
     if (!pending) {
       await answerCallback(cb.id, "Already answered or expired.", signal);
       return;
