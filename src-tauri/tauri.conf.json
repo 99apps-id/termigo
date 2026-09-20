@@ -85,6 +85,13 @@
         "displayLanguageSelector": false,
         "installerIcon": "icons/icon.ico",
         "installerHooks": "./installer-hooks.nsh"
+      },
+      "wix": {
+        "upgradeCode": "d24faf2f-ff82-494d-89c1-98771dcdefe8",
+        "language": [
+          "en-US"
+        ],
+        "fipsCompliant": false
       }
     },
     "category": "DeveloperTool",
