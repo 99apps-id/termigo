@@ -115,6 +115,7 @@ import { WorkspaceInputBar } from "./components/WorkspaceInputBar";
 import { WorkspaceSurface } from "./components/WorkspaceSurface";
 import { useAppCloseGuard } from "./hooks/useAppCloseGuard";
 import { useGlobalActions } from "./hooks/useGlobalActions";
+import { useIdleTabReaper } from "./hooks/useIdleTabReaper";
 import { useTabCloseGuards } from "./hooks/useTabCloseGuards";
 import { useTerminalLifecycle } from "./hooks/useTerminalLifecycle";
 import { useWorkspaceBoot } from "./hooks/useWorkspaceBoot";
@@ -430,6 +431,8 @@ export default function App() {
     disposeTab,
     disposeTabs,
   });
+
+  useIdleTabReaper({ tabs, activeId, disposeTab });
 
   const { pendingAppClose, confirmAppClose, cancelAppClose } =
     useAppCloseGuard(tabsRef);

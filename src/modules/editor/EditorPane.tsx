@@ -89,6 +89,8 @@ export type EditorPaneHandle = {
 type Props = {
   path: string;
   overrideLanguage?: string | null;
+  /** The tab holding this pane is the visible one. Gates opt-in LSP idle shutdown. */
+  active?: boolean;
   onDirtyChange?: (dirty: boolean) => void;
   onSaved?: () => void;
   onClose?: () => void;
@@ -108,7 +110,14 @@ function formatBytes(n: number): string {
 // skip re-rendering entirely when App re-renders (terminal events, tab churn).
 export const EditorPane = memo(
   forwardRef<EditorPaneHandle, Props>(function EditorPane(props, ref) {
-    const { path, overrideLanguage, onDirtyChange, onSaved, onClose } = props;
+    const {
+      path,
+      overrideLanguage,
+      active = true,
+      onDirtyChange,
+      onSaved,
+      onClose,
+    } = props;
 
     const { doc, onChange, save, reload, adoptDiskText, openAnyway } =
       useDocument({
@@ -460,7 +469,12 @@ export const EditorPane = memo(
       });
     }, [doc]);
 
-    const lspExt = useLspExtension(path, langId, doc.status === "ready");
+    const lspExt = useLspExtension(
+      path,
+      langId,
+      doc.status === "ready",
+      active,
+    );
     useEffect(() => {
       lspActiveRef.current = lspExt !== null;
       const view = cmRef.current?.view;

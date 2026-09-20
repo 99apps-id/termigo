@@ -22,6 +22,7 @@ import {
   type LspCustomServer,
   setLspActivation,
   setLspCustomServers,
+  setLspIdleShutdown,
 } from "@/modules/settings/store";
 import { Delete02Icon, Refresh01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -33,6 +34,7 @@ import { SettingRow } from "./SettingRow";
 export function LspServersGroup() {
   const activation = usePreferencesStore((s) => s.lspActivation);
   const customServers = usePreferencesStore((s) => s.lspCustomServers);
+  const idleShutdown = usePreferencesStore((s) => s.lspIdleShutdown);
   const [installTarget, setInstallTarget] = useState<LspPreset | null>(null);
   const servers = allServers(customServers);
 
@@ -52,6 +54,15 @@ export function LspServersGroup() {
           onInstall={() => setInstallTarget(server)}
         />
       ))}
+      <SettingRow
+        title="Shut down idle servers"
+        description="Stop a language server once every tab using it is hidden, then start it again when you come back. Frees the server's memory while it is unused."
+      >
+        <Switch
+          checked={idleShutdown}
+          onCheckedChange={(v) => void setLspIdleShutdown(v)}
+        />
+      </SettingRow>
       <LspInstallDialog
         key={installTarget?.id ?? "closed"}
         server={installTarget}

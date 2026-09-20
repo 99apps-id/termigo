@@ -26,6 +26,7 @@ import {
   exportSettingsJson,
   importSettingsJson,
   setAgentNotifications,
+  setAutoCloseIdleTabsMinutes,
   setAutostart,
   setDefaultWorkspaceEnv,
   setExplorerGitDecorations,
@@ -44,6 +45,7 @@ import {
   setTerminalShell,
   setTerminalWebglEnabled,
   setZoomLevel,
+  AUTO_CLOSE_IDLE_TABS_PRESETS,
   TERMINAL_FONT_SIZES,
   TERMINAL_SCROLLBACK_PRESETS,
 } from "@/modules/settings/store";
@@ -132,6 +134,9 @@ export function GeneralSection() {
   );
   const terminalFontSize = usePreferencesStore((s) => s.terminalFontSize);
   const terminalScrollback = usePreferencesStore((s) => s.terminalScrollback);
+  const autoCloseIdleMinutes = usePreferencesStore(
+    (s) => s.autoCloseIdleTabsMinutes,
+  );
   const zoomLevel = usePreferencesStore((s) => s.zoomLevel);
   const agentNotifications = usePreferencesStore((s) => s.agentNotifications);
   // Whether "persist terminal processes" can work on this host (tmux present;
@@ -587,6 +592,30 @@ export function GeneralSection() {
                   className="text-[12px]"
                 >
                   {lines.toLocaleString()} lines
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </SettingRow>
+        <SettingRow
+          title="Close idle tabs"
+          description="Close tabs left unused for this long. Never the active tab, a tab you are still editing, or a terminal running a process. Off by default."
+        >
+          <Select
+            value={String(autoCloseIdleMinutes)}
+            onValueChange={(v) => void setAutoCloseIdleTabsMinutes(Number(v))}
+          >
+            <SelectTrigger size="sm" className="h-8 w-36 text-[12px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {AUTO_CLOSE_IDLE_TABS_PRESETS.map((minutes) => (
+                <SelectItem
+                  key={minutes}
+                  value={String(minutes)}
+                  className="text-[12px]"
+                >
+                  {minutes === 0 ? "Never" : `${minutes} min`}
                 </SelectItem>
               ))}
             </SelectContent>
