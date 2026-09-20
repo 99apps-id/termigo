@@ -763,6 +763,35 @@ function makeChat(sessionId: string): Chat<UIMessage> {
           useChatStore.getState().syncRunMeta();
           return;
         }
+        // WHO stopped the run decides what the user sees.
+        //
+        // `stopLatch` is set by `stopRun()` before the abort, so it is the
+        // reliable witness of a user-pressed Stop. A watchdog abort (model
+        // silent, tool over budget) never sets it - and used to land in the
+        // same quiet branch, so the run ended with NO message at all and the
+        // UI read exactly like the user had pressed Stop. The watchdogs abort
+        // with a descriptive reason (preserved end-to-end by proxyFetch's
+        // `makeAbortError(signal.reason)`), so surface it as an error card:
+        // the user learns WHY it stopped and gets Continue.
+        //
+        // The discriminator is "did humanizeModelError RECOGNISE the reason":
+        // a known stall/watchdog phrase is rewritten into actionable guidance
+        // (so `humanized !== raw`), while a generic abort with no reason
+        // ("This operation was aborted", "aborted") passes through unchanged
+        // and stays a quiet stop. That keeps a real user Stop silent without
+        // enumerating every watchdog string here.
+        if (!stopLatch.has(sessionId) && raw.trim()) {
+          const humanized = humanizeModelError(raw);
+          if (humanized !== raw) {
+            useChatStore.getState().patchAgentMeta({
+              status: "error",
+              error: humanized,
+              stoppedByUser: false,
+            });
+            useChatStore.getState().syncRunMeta();
+            return;
+          }
+        }
         useChatStore.getState().patchAgentMeta({
           status: "idle",
           error: null,

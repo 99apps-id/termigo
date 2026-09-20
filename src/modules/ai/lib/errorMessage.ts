@@ -95,6 +95,28 @@ export function humanizeModelError(raw: string | null | undefined): string {
     return "The provider rejected the API key. Check it in Settings → Providers.";
   }
 
+  // Watchdog stalls: the model or a tool went quiet and the run was stopped.
+  //
+  // This branch MUST sit above the network branch. The approved-tool abort
+  // reads "Approved tool execution timed out after 464s without completing",
+  // which contains "timed out" - so it used to fall into the network branch and
+  // tell the user to "check your internet connection" when the connection was
+  // fine and a long tool (cargo test, a build, a scan) had simply outlived the
+  // watchdog. That is the exact misdirection that makes a healthy setup look
+  // broken. Match the watchdog's own phrasing, not the generic "timed out".
+  if (
+    l.includes("without completing") ||
+    l.includes("did not complete or show activity") ||
+    l.includes("stopped to avoid hanging") ||
+    l.includes("stopped responding") ||
+    l.includes("did not respond within")
+  ) {
+    if (l.includes("without completing") || l.includes("did not complete or show activity")) {
+      return "A tool ran longer than the watchdog allows, so the run was stopped - this is not a network problem. Press Continue to retry. For a genuinely long command (build, test, scan) run it with bash_background, or raise its timeout_secs so it can report its own result.";
+    }
+    return "The model stopped responding before producing anything. Press Continue to retry, or switch models.";
+  }
+
   // Network reachability.
   if (
     l.includes("failed to fetch") ||
@@ -105,11 +127,6 @@ export function humanizeModelError(raw: string | null | undefined): string {
     l.includes("timeout")
   ) {
     return "Couldn't reach the provider. Check your internet connection and try again.";
-  }
-
-  // No first token within the watchdog window.
-  if (l.includes("did not respond within")) {
-    return "The model stopped responding before producing anything. Press Continue to retry, or switch models.";
   }
 
   // Raw HTML error responses from proxies, misconfigured URLs, or 404s.

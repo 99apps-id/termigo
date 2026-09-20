@@ -50,6 +50,44 @@ describe("humanizeModelError", () => {
     ).toContain("stopped responding");
   });
 
+  // The ordering bug this pins: every watchdog abort message contains
+  // "timed out", and the network branch also matches "timed out". When the
+  // network branch ran first, a healthy machine was told to "check your
+  // internet connection" after an approved `cargo test` outlived the watchdog
+  // (field log 2026-09-19: `tool execution exceeded 120s ... elapsed=464s`).
+  it("explains an approved-tool watchdog abort as a tool stall, not a network fault", () => {
+    const out = humanizeModelError(
+      "Approved tool execution timed out after 464s without completing.",
+    ).toLowerCase();
+    expect(out).toContain("watchdog");
+    expect(out).toContain("not a network problem");
+    expect(out).not.toContain("internet connection");
+  });
+
+  it("explains a silent-tool watchdog abort as a tool stall, not a network fault", () => {
+    const out = humanizeModelError(
+      "A tool did not complete or show activity within 120s. The run was stopped to avoid hanging forever.",
+    ).toLowerCase();
+    expect(out).toContain("not a network problem");
+    expect(out).not.toContain("internet connection");
+  });
+
+  it("explains a silent-model watchdog abort without blaming the network", () => {
+    const out = humanizeModelError(
+      "The model stopped responding (no output for 90s).",
+    ).toLowerCase();
+    expect(out).toContain("stopped responding");
+    expect(out).not.toContain("internet connection");
+  });
+
+  it("still reports a genuine network timeout as a network fault", () => {
+    // The stall branch must not swallow real connectivity failures: they carry
+    // no watchdog phrasing, so the network branch still owns them.
+    expect(
+      humanizeModelError("The operation timed out.").toLowerCase(),
+    ).toContain("internet connection");
+  });
+
   it("explains a thinking-mode rejection of a forced tool choice", () => {
     const out = humanizeModelError(
       'data: {"error":{"code":"invalid_parameter_error","param":null,"message":"The tool_choice parameter does not support being set to required or object in thinking mode","type":"invalid_request_error"}}',

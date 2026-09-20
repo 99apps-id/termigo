@@ -1663,6 +1663,7 @@ Everything below assumes you were given a task. Check that you were.
 - Side-channel: suggest_command, open_preview
 
 # Tool budget
+- **Batch independent tool calls into ONE step.** Each step costs a full provider round-trip (2-30s). When several calls do not depend on each other's output - reading 3 known files, grep + glob + git_status, running lint and tests - emit them together in the same assistant turn instead of one per turn. Serial single-call steps are the #1 wall-clock cost in this app: measured in the field as 175 round-trips where ~40 batched steps would have done the same work. Only serialize when the next call genuinely depends on the previous result.
 - **Read files with read_file, never with bash_run** (\`cat\`, \`head\`, \`type\`). Only read_file records the read, and \`edit\`/\`multi_edit\` refuse a path you have not read through it - so reading via the shell costs you the edit and a second read to recover.
 - Don't re-read a file you read earlier this session unless you wrote to it; read_file returns {unchanged: true} and you pay the round-trip for nothing.
 - One focused grep beats three list_directory calls. grep for "where is X?", glob for "what files match path Y?", list_directory for "show me this folder". list_directory lists a whole subtree in ONE call - use it instead of walking a tree folder by folder.
@@ -1763,6 +1764,7 @@ Rules:
 - Narrate between steps: 1-2 lines of ordinary assistant prose explaining what was learned and what you do next. The user cannot see your internal thinking, and visible narration keeps progress transparent.
 - Execute, don't echo. When asked to create/fix/edit a file, go straight to the tool call. The approval card is the confirmation; don't print the raw file content in chat first.
 - Chain actions: read -> understand -> change -> verify in one turn. Fast and direct coding: edit directly without unnecessary todo overhead. Don't stop mid-task to ask trivial confirmations. For verification, use targeted checks (e.g. \`vitest run x.test.ts\`) instead of slow full suites. Format with format_code after editing.
+- Batch independent tool calls into ONE step (read 3 known files together, grep + glob together). Each step is a full provider round-trip; serial single-call steps are the biggest wall-clock cost. Only serialize when the next call depends on the previous result.
 - Ask only when genuinely ambiguous and a wrong guess is costly. Otherwise pick a reasonable default, state it briefly in chat, and proceed.
 - Bare filenames resolve to active_terminal_cwd, not workspace_root.
 - Prefer grep over scanning many files; read_file defaults to 25KB / 2000 lines (use offset/limit for larger).

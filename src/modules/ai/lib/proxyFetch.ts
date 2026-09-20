@@ -139,7 +139,7 @@ async function proxyFetchImpl(
 
   const signal = init?.signal;
   if (signal?.aborted) {
-    throw makeAbortError();
+    throw makeAbortError(signal.reason);
   }
 
   const started = performance.now();
@@ -152,10 +152,10 @@ async function proxyFetchImpl(
     const onAbort = () => {
       cancelled = true;
       if (!resolved) {
-        reject(makeAbortError());
+        reject(makeAbortError(signal?.reason));
       } else if (streamController) {
         try {
-          streamController.error(makeAbortError());
+          streamController.error(makeAbortError(signal?.reason));
         } catch {
           /* already closed */
         }
@@ -236,8 +236,19 @@ async function proxyFetchImpl(
   });
 }
 
-function makeAbortError(): DOMException {
-  return new DOMException("Request aborted", "AbortError");
+function makeAbortError(reason?: unknown): DOMException {
+  // Preserve the abort reason: the watchdogs abort with a descriptive Error
+  // ("The model stopped responding...", "A tool did not complete...") and the
+  // UI humanizes THAT message. A generic "Request aborted" made every watchdog
+  // kill indistinguishable from a user-pressed Stop, so the user saw a silent
+  // stop with no explanation and no retry hint.
+  const message =
+    reason instanceof Error && reason.message
+      ? reason.message
+      : typeof reason === "string" && reason
+        ? reason
+        : "Request aborted";
+  return new DOMException(message, "AbortError");
 }
 
 /**
