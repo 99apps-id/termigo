@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { GitLogEntry } from "./native";
 import {
   checkpointAddCommand,
+  checkpointAddTrackedCommand,
   checkpointCommitCommand,
   checkpointLabel,
   checkpointsFromLog,
@@ -63,6 +64,15 @@ describe("checkpoint subject helpers", () => {
 describe("command builders", () => {
   it("stages everything including untracked files", () => {
     expect(checkpointAddCommand()).toBe("git add -A");
+  });
+
+  // The auto-checkpoint hazard: `git add -A` in an unattended snapshot once
+  // committed a 325 MB `.cargo/registry` (24,620 untracked files) into real
+  // history, which then made every `git worktree add` time out. Tracked-only
+  // is the structural fix - untracked scratch can never be swept in again.
+  it("stages tracked modifications only for unattended snapshots", () => {
+    expect(checkpointAddTrackedCommand()).toBe("git add -u");
+    expect(checkpointAddTrackedCommand()).not.toBe(checkpointAddCommand());
   });
 
   it("builds the commit command with the checkpoint prefix", () => {
