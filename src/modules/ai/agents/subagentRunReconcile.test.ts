@@ -1,19 +1,27 @@
 import { describe, expect, it } from "vitest";
 import {
   INTERRUPTED_MESSAGE,
+  type PersistedRunLike,
   reconcileInterruptedRuns,
   reconcileInterruptedSessions,
 } from "./subagentRunReconcile";
 
 const NOW = 1_700_000_000_000;
 
-const running = (id: number, startedAt = NOW - 60_000) => ({
+// Annotated as PersistedRunLike on purpose: `reconcileInterruptedRuns` is
+// generic over the row type, so a bare literal like `{ id, status, startedAt }`
+// infers a T WITHOUT `error`/`endedAt`/`durationMs` and the assertions below
+// do not type-check - even though the function fills those fields in at
+// runtime. The annotation is what the real persisted rows satisfy.
+type TestRun = PersistedRunLike & { id: number };
+
+const running = (id: number, startedAt = NOW - 60_000): TestRun => ({
   id,
   status: "running",
   startedAt,
 });
-const done = (id: number) => ({ id, status: "done", endedAt: NOW - 1000 });
-const errored = (id: number, error = "boom") => ({
+const done = (id: number): TestRun => ({ id, status: "done", endedAt: NOW - 1000 });
+const errored = (id: number, error = "boom"): TestRun => ({
   id,
   status: "error",
   endedAt: NOW - 1000,
@@ -47,7 +55,7 @@ describe("reconcileInterruptedRuns", () => {
   });
 
   it("copes with a row that has no start time", () => {
-    const { runs } = reconcileInterruptedRuns(
+    const { runs } = reconcileInterruptedRuns<TestRun>(
       [{ id: 1, status: "running" }],
       NOW,
     );

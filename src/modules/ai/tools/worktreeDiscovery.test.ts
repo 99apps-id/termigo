@@ -34,6 +34,32 @@ function makeContext(): ToolContext {
 /** Type-narrowing helper: these tool result shapes are unions. */
 const asRecord = (v: unknown) => v as Record<string, unknown>;
 
+/**
+ * A complete `CommandOutput`. The native contract has six fields; a partial
+ * literal does not type-check against `vi.mocked`, and `*.test.ts` is excluded
+ * from `pnpm check-types` so the gap would otherwise never be caught.
+ */
+function cmdOut(
+  overrides: Partial<{
+    stdout: string;
+    stderr: string;
+    exit_code: number | null;
+    timed_out: boolean;
+    truncated: boolean;
+    cwd_after: string;
+  }> = {},
+) {
+  return {
+    stdout: "",
+    stderr: "",
+    exit_code: 0,
+    timed_out: false,
+    truncated: false,
+    cwd_after: "/workspace",
+    ...overrides,
+  };
+}
+
 describe("worktree_list sees sandboxes this process did not create", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -142,7 +168,7 @@ describe("worktree_discard can remove an orphan", () => {
         },
       ],
     });
-    shellSessionRun.mockResolvedValue({ exit_code: 0, stdout: "", stderr: "" });
+    shellSessionRun.mockResolvedValue(cmdOut());
 
     const res = asRecord(
       await buildWorktreeTools(makeContext()).worktree_discard.execute?.(
