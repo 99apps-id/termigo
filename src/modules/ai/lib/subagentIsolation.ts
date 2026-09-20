@@ -7,10 +7,13 @@
  * each writing subagent its own git worktree, so their work is independent until
  * it is deliberately brought back.
  *
- * Opt-in on purpose. Turning it on by default would change where every existing
- * subagent writes, and the failure mode of getting that wrong - work landing in a
- * directory nobody looks at - is worse than the collision it prevents. The caller
- * asks for it; nothing here decides to isolate on its own.
+ * Opt-in for a single writer on purpose. Turning it on by default there would
+ * change where an existing subagent writes, and the failure mode of getting
+ * that wrong - work landing in a directory nobody looks at - is worse than the
+ * collision it prevents. The caller asks for it; nothing here decides to isolate
+ * on its own. The one defaulted case is a BATCH with two or more writers, where
+ * the collision is certain rather than hypothetical: `defaultBatchIsolation`
+ * says when, and `run_subagents` is the caller that acts on it.
  *
  * Read-only subagents are never isolated: they do not write, so a worktree would
  * only give them a copy to read stale content from.
@@ -24,6 +27,8 @@ import {
   generateSandboxInfo,
   registerSandbox,
   worktreeAddCommand,
+  worktreeDeleteBranchCommand,
+  worktreeRemoveCommand,
 } from "./worktree";
 
 export type IsolationInput = {
@@ -40,6 +45,21 @@ export type IsolationInput = {
 export type IsolationPlan =
   | { isolate: true }
   | { isolate: false; reason: string };
+
+/**
+ * Whether a batch of subagents should isolate when the caller gave no explicit
+ * choice.
+ *
+ * Zero or one writer stays opt-in: a lone subagent writing in the shared tree is
+ * the long-standing behaviour, and auto-isolating it would strand its work in a
+ * worktree the caller never asked for. Two or more writers is where the
+ * collision this module exists to prevent becomes certain - both branch from the
+ * same baseline and the later write wins - so it defaults on. Pure, so the
+ * threshold is asserted directly.
+ */
+export function defaultBatchIsolation(writingTaskCount: number): boolean {
+  return writingTaskCount >= 2;
+}
 
 /**
  * Whether this subagent should get its own worktree.
@@ -122,7 +142,38 @@ export type IsolationRefused = { ok: false; reason: string };
  * `worktree_list` shows them and `worktree_discard` can remove them, but nothing
  * here deletes a directory that may hold the subagent's only copy of its work.
  */
-export async function createIsolatedWorktree(args: {
+/**
+ * Extract the fatal or error line from git output, avoiding progress markers
+ * like "Preparing worktree..." that git emits to stderr first.
+ */
+export function extractGitErrorDetail(stderr: string): string {
+  const lines = (stderr || "")
+    .trim()
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  return (
+    lines.find((l) => /^fatal:|^error:/i.test(l)) ??
+    lines.find((l) => !/^preparing worktree/i.test(l)) ??
+    lines[lines.length - 1] ??
+    ""
+  );
+}
+
+let isolationMutex: Promise<unknown> = Promise.resolve();
+
+export function createIsolatedWorktree(args: {
+  ctx: ToolContext;
+  /** Names the branch and directory, so a leftover one is identifiable. */
+  label: string;
+}): Promise<IsolationCreated | IsolationRefused> {
+  const run = () => executeCreateIsolatedWorktree(args);
+  const next = isolationMutex.then(run, run);
+  isolationMutex = next;
+  return next;
+}
+
+async function executeCreateIsolatedWorktree(args: {
   ctx: ToolContext;
   /** Names the branch and directory, so a leftover one is identifiable. */
   label: string;
@@ -145,21 +196,40 @@ export async function createIsolatedWorktree(args: {
       sessionShellKey("git", sessionId, root),
       root,
     );
+
     // 300s, not 120s: `git worktree add` checks out the WHOLE tree, and a large
     // repo (or one bloated by an accidental commit - this repo once carried a
     // 325 MB `.cargo/registry`, 24,620 files, committed by autoCheckpoint) can
     // take minutes on a cold filesystem cache. At 120s every isolated subagent
     // in the field fell back to "NOT isolated" with `git worktree add failed
-    // (timed out)`, silently defeating the isolation feature. The command is
-    // idempotent-ish and cleaned up below on failure, so a longer budget is safe.
+    // (timed out)` (log 2026-09-20 13:01-13:09), silently defeating the
+    // isolation feature. The failure path below cleans up the partial worktree,
+    // so a longer budget is safe.
     const result = await native.shellSessionRun(shellId, command, root, 300);
     if (result.exit_code !== 0) {
-      // The message carries git's own stderr: "not a git repository" and a
-      // permission failure need different responses, and both arrive here.
-      const detail = (result.stderr || "").trim().split("\n")[0] ?? "";
+      const detail = extractGitErrorDetail(result.stderr);
+      try {
+        await native.shellSessionRun(
+          shellId,
+          worktreeRemoveCommand(worktreePath),
+          root,
+          30,
+        );
+        await native.shellSessionRun(
+          shellId,
+          worktreeDeleteBranchCommand(info.branchName),
+          root,
+          30,
+        );
+      } catch {
+        // cleanup failure is ignored
+      }
+      const exitDesc = result.timed_out
+        ? "timed out"
+        : `exit ${result.exit_code}`;
       return {
         ok: false,
-        reason: `git worktree add failed (exit ${result.exit_code})${detail ? `: ${detail}` : ""}`,
+        reason: `git worktree add failed (${exitDesc})${detail ? `: ${detail}` : ""}`,
       };
     }
     registerSandbox({
@@ -170,9 +240,13 @@ export async function createIsolatedWorktree(args: {
       status: "active",
       description: `isolated subagent: ${label}`,
     });
-    return { ok: true, worktreePath, sandboxId: info.id, branchName: info.branchName };
+    return {
+      ok: true,
+      worktreePath,
+      sandboxId: info.id,
+      branchName: info.branchName,
+    };
   } catch (e) {
     return { ok: false, reason: e instanceof Error ? e.message : String(e) };
   }
 }
-
