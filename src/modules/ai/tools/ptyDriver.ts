@@ -17,6 +17,63 @@ import type { ToolContext } from "./context";
 export const PRIVATE_TERMINAL_REFUSAL =
   "Active terminal is in Privacy mode; its buffer is withheld.";
 
+/** The actions `pty_session` implements, after alias normalization. */
+export type PtyAction = "run" | "write" | "read" | "wait" | "ctrl_c";
+
+/**
+ * Map the action names models actually emit onto the five implemented ones.
+ *
+ * The schema used to be a strict `z.enum`, so any plausible synonym -
+ * `send_input`, `type`, `key`, `interrupt`, `screen` - failed validation
+ * BEFORE `execute` ran and the AI SDK turned it into a fatal
+ * `Invalid input for tool pty_session` that killed the run. Aliases that
+ * `repairToolCall` already maps at the TOOL level (`pty_run`, `terminal_input`)
+ * proved models reach for these shapes; the same tolerance belongs on the
+ * action parameter. Unknown actions degrade to `run` (with the command intact)
+ * rather than failing: a wrong-but-executed action is recoverable, a dead run
+ * is not.
+ */
+export function normalizePtyAction(raw: unknown): PtyAction {
+  const a = String(raw ?? "run").trim().toLowerCase().replace(/[-\s]/g, "_");
+  switch (a) {
+    case "write":
+    case "send_input":
+    case "sendinput":
+    case "send":
+    case "input":
+    case "type":
+    case "key":
+    case "keys":
+    case "keystroke":
+    case "keystrokes":
+    case "stdin":
+    case "inject":
+      return "write";
+    case "read":
+    case "screen":
+    case "read_screen":
+    case "output":
+    case "get_output":
+    case "cat_screen":
+      return "read";
+    case "wait":
+    case "wait_for":
+    case "wait_for_pattern":
+    case "expect":
+      return "wait";
+    case "ctrl_c":
+    case "ctrlc":
+    case "interrupt":
+    case "sigint":
+    case "cancel":
+      return "ctrl_c";
+    // "run" plus every execute-flavoured synonym, and anything unrecognised:
+    // the command (if any) still runs, which is the least destructive default.
+    default:
+      return "run";
+  }
+}
+
 export function buildPtyDriverTools(ctx: ToolContext) {
   return {
     pty_session: tool({
@@ -24,7 +81,14 @@ export function buildPtyDriverTools(ctx: ToolContext) {
         "Execute a shell command or interact with an active interactive PTY (pseudo-terminal) session. Use this tool when a command needs a full interactive terminal environment, when bash_run cannot run an interactive tool or complex pipeline, or to drive terminal prompts and REPLs directly in the user's terminal. Actions: 'run' (default) executes a command in the PTY and captures output; 'write' sends keystrokes/input; 'read' inspects the screen buffer; 'wait' waits for a pattern/prompt; 'ctrl_c' sends Ctrl+C interrupt. Requires approval.",
       inputSchema: z.object({
         action: z
-          .enum(["run", "write", "read", "wait", "ctrl_c"])
+          // Deliberately a free string, not an enum: a strict enum turns every
+          // plausible alias a model emits (`send_input`, `type`, `execute`,
+          // `interrupt`...) into a FATAL zod validation error that kills the
+          // whole run - seen in the field as `Invalid input for tool
+          // pty_session ... "action":"send_input"`. `normalizePtyAction` below
+          // maps the aliases; an unknown one degrades to "run" with the command
+          // intact instead of failing the run.
+          .string()
           .optional()
           .default("run")
           .describe(
@@ -34,7 +98,7 @@ export function buildPtyDriverTools(ctx: ToolContext) {
           .string()
           .optional()
           .describe(
-            "Shell command to execute in the PTY session (used when action is 'run').",
+            "Shell command to execute in the PTY session (used when action is 'run'). For action 'write' this is also accepted as the input text.",
           ),
         cmd: z.string().optional().describe("Alias for command."),
         input: z
@@ -74,16 +138,11 @@ export function buildPtyDriverTools(ctx: ToolContext) {
         timeout_secs = 30,
         max_lines = 80,
       }) => {
-        let action = rawAction;
-        if (
-          action === ("exec" as string) ||
-          action === ("execute" as string) ||
-          action === ("shell" as string)
-        ) {
-          action = "run";
-        }
+        const action = normalizePtyAction(rawAction);
         const command = rawCommand ?? cmd;
-        const input = rawInput ?? text;
+        // `write`/`wait` models routinely put the payload in `command` (e.g.
+        // `{"action":"send_input","command":"exit"}`), so accept it there too.
+        const input = rawInput ?? text ?? (action === "run" ? undefined : command);
         const parsedTimeout =
           typeof timeout_secs === "string"
             ? parseInt(timeout_secs, 10) || 30

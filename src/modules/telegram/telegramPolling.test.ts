@@ -19,12 +19,14 @@
 // The timing policy is now a pure function so it can be asserted without a
 // network, a chat, or a fake clock.
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { TelegramApiError } from "./telegramApi";
 import {
+  conflictBackoffMs,
   isPollingStalled,
   POLLING_STALL_TIMEOUT_MS,
   pollBackoffMs,
+  TELEGRAM_CONFLICT_BACKOFF_MAX_MS,
   TELEGRAM_CONFLICT_BACKOFF_MS,
 } from "./telegramPolling";
 
@@ -56,6 +58,28 @@ describe("pollBackoffMs", () => {
     );
     expect(backoff).toBe(TELEGRAM_CONFLICT_BACKOFF_MS);
     expect(backoff).toBeGreaterThan(30_000);
+  });
+
+  // The field failure: a competitor held the bot token for HOURS and the flat
+  // 60s backoff re-probed it 261 times in one night (log 2026-09-19). The
+  // streak now doubles the wait up to a 15-minute ceiling.
+  it("grows the 409 backoff exponentially with the conflict streak", () => {
+    const conflict = new TelegramApiError(409, "Conflict");
+    expect(pollBackoffMs(conflict, 1)).toBe(60_000);
+    expect(pollBackoffMs(conflict, 2)).toBe(120_000);
+    expect(pollBackoffMs(conflict, 3)).toBe(240_000);
+    expect(pollBackoffMs(conflict, 4)).toBe(480_000);
+    expect(pollBackoffMs(conflict, 5)).toBe(TELEGRAM_CONFLICT_BACKOFF_MAX_MS);
+    // The ceiling holds no matter how long the competitor stays up.
+    expect(pollBackoffMs(conflict, 50)).toBe(TELEGRAM_CONFLICT_BACKOFF_MAX_MS);
+    expect(conflictBackoffMs(0)).toBe(60_000); // streak 0 is treated as 1
+  });
+
+  it("does not let the streak change non-409 backoffs", () => {
+    expect(pollBackoffMs(new Error("fetch failed"), 9)).toBe(5_000);
+    expect(
+      pollBackoffMs(new TelegramApiError(429, "Too Many Requests", 7), 9),
+    ).toBe(7_000);
   });
 
   it("uses a short retry for an ordinary transport failure", () => {
@@ -161,73 +185,5 @@ describe("isPollingStalled", () => {
         deliberateWaitUntil: waitUntil,
       }),
     ).toBe(true);
-  });
-});
-
-// The update offset is the bot's only record of what it has already handled.
-//
-// Telegram keeps an unconfirmed update for ~24h and redelivers it on the next
-// `getUpdates`, so a module-level offset that reset to 0 on every restart
-// replayed the backlog: an old `/run`, `/approve` or `/mode all` ran a second
-// time. These pin the persistence that stops it.
-
-function fakeLocalStorage(initial: Record<string, string> = {}) {
-  const store = new Map(Object.entries(initial));
-  return {
-    store,
-    api: {
-      getItem: (k: string) => store.get(k) ?? null,
-      setItem: (k: string, v: string) => {
-        store.set(k, v);
-      },
-      removeItem: (k: string) => {
-        store.delete(k);
-      },
-    },
-  };
-}
-
-describe("telegram update offset persistence", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    vi.resetModules();
-  });
-
-  it("restores the stored offset instead of starting from 0", async () => {
-    vi.stubGlobal(
-      "localStorage",
-      fakeLocalStorage({ "termigo-telegram-offset": "777" }).api,
-    );
-    vi.resetModules();
-    const mod = await import("./telegramPolling");
-    expect(mod.currentUpdateOffset).toBe(777);
-  });
-
-  it("ignores a missing or malformed stored offset", async () => {
-    vi.stubGlobal(
-      "localStorage",
-      fakeLocalStorage({ "termigo-telegram-offset": "not-a-number" }).api,
-    );
-    vi.resetModules();
-    const mod = await import("./telegramPolling");
-    expect(mod.currentUpdateOffset).toBe(0);
-  });
-
-  it("persists each advance of the offset", async () => {
-    const { api, store } = fakeLocalStorage();
-    vi.stubGlobal("localStorage", api);
-    vi.resetModules();
-    const mod = await import("./telegramPolling");
-    mod.setCurrentUpdateOffset(500);
-    expect(mod.currentUpdateOffset).toBe(500);
-    expect(store.get("termigo-telegram-offset")).toBe("500");
-  });
-
-  it("still advances when localStorage is unavailable", async () => {
-    vi.unstubAllGlobals();
-    vi.resetModules();
-    const mod = await import("./telegramPolling");
-    expect(() => mod.setCurrentUpdateOffset(9)).not.toThrow();
-    expect(mod.currentUpdateOffset).toBe(9);
   });
 });

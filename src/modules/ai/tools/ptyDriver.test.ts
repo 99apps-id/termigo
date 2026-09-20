@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ToolContext } from "./context";
-import { buildPtyDriverTools } from "./ptyDriver";
+import { buildPtyDriverTools, normalizePtyAction } from "./ptyDriver";
 
 function makeContext(
   buffer: string | null = "Ready on http://localhost:3000\n",
@@ -247,4 +247,76 @@ describe("ptyDriver privacy mode", () => {
     expect(res.buffer ?? "").not.toContain("secret");
   });
 });
+// The field failure this pins: the model sent
+//   {"action":"send_input","command":"exit","pty_handle":"0"}
+// and the strict z.enum rejected it BEFORE execute ran, so the AI SDK raised a
+// fatal "Invalid input for tool pty_session" that killed the run (log
+// 2026-09-20 02:08:56). Aliases must normalize, and an unknown action must
+// degrade to "run" rather than fail validation.
+describe("normalizePtyAction", () => {
+  it("maps the write aliases models actually emit", () => {
+    expect(normalizePtyAction("send_input")).toBe("write");
+    expect(normalizePtyAction("sendInput")).toBe("write");
+    expect(normalizePtyAction("type")).toBe("write");
+    expect(normalizePtyAction("keystrokes")).toBe("write");
+    expect(normalizePtyAction("stdin")).toBe("write");
+  });
 
+  it("maps read/wait/ctrl_c aliases", () => {
+    expect(normalizePtyAction("read_screen")).toBe("read");
+    expect(normalizePtyAction("get_output")).toBe("read");
+    expect(normalizePtyAction("wait_for")).toBe("wait");
+    expect(normalizePtyAction("expect")).toBe("wait");
+    expect(normalizePtyAction("interrupt")).toBe("ctrl_c");
+    expect(normalizePtyAction("ctrl-c")).toBe("ctrl_c");
+  });
+
+  it("keeps the canonical actions and the old exec aliases", () => {
+    expect(normalizePtyAction("run")).toBe("run");
+    expect(normalizePtyAction("write")).toBe("write");
+    expect(normalizePtyAction("read")).toBe("read");
+    expect(normalizePtyAction("wait")).toBe("wait");
+    expect(normalizePtyAction("ctrl_c")).toBe("ctrl_c");
+    expect(normalizePtyAction("exec")).toBe("run");
+    expect(normalizePtyAction("execute")).toBe("run");
+    expect(normalizePtyAction("shell")).toBe("run");
+  });
+
+  it("degrades an unknown or missing action to run instead of failing", () => {
+    expect(normalizePtyAction("launch-the-missiles")).toBe("run");
+    expect(normalizePtyAction(undefined)).toBe("run");
+    expect(normalizePtyAction("")).toBe("run");
+  });
+
+  it("pty_session executes send_input as a write (the exact field payload)", async () => {
+    let sentInput = "";
+    const ctx = {
+      ...makeContext("prompt: "),
+      injectIntoActivePty: (text: string) => {
+        sentInput = text;
+        return true;
+      },
+    };
+    const tools = buildPtyDriverTools(ctx);
+    const exec = tools.pty_session.execute;
+    if (!exec) throw new Error("pty_session execute missing");
+
+    // The payload from the log, minus the unknown `pty_handle` key (zod strips
+    // unknown keys by default, so it never reaches execute).
+    // biome-ignore lint/suspicious/noExplicitAny: tool ctx and result are harness-typed, empty exec ctx is enough
+    const res = (await exec({ action: "send_input", command: "exit" }, {} as any)) as any;
+    expect(res.action).toBe("write");
+    expect(res.sent).toBe(true);
+    expect(sentInput).toBe("exit");
+  });
+
+  it("the schema itself accepts an alias action (validation must not reject it)", () => {
+    // The bug was in the SCHEMA, not in execute: z.enum threw before the
+    // handler ever saw the args. A string schema must parse these.
+    const tools = buildPtyDriverTools(makeContext());
+    const schema = tools.pty_session.inputSchema;
+    expect(schema.safeParse({ action: "send_input", command: "exit" }).success).toBe(true);
+    expect(schema.safeParse({ action: "anything-new" }).success).toBe(true);
+    expect(schema.safeParse({}).success).toBe(true);
+  });
+});

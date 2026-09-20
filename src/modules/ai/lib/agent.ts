@@ -1284,11 +1284,6 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // in "streaming" forever.
   const MAX_TOOL_EXECUTION_MS = 120_000;
   let toolExecutionTimer: ReturnType<typeof setTimeout> | null = null;
-  // After a tool result is fed back to the model, the model may still go silent
-  // while processing it. Track that delivery gap so a hung model turn after
-  // tool completion still aborts instead of leaving the run in "streaming".
-  const MAX_TOOL_RESULT_DELIVERY_MS = 60_000;
-  let toolResultDeliveryTimer: ReturnType<typeof setTimeout> | null = null;
   const clearFirstStepTimer = (): void => {
     if (firstStepTimer) {
       clearTimeout(firstStepTimer);
@@ -1301,10 +1296,6 @@ export async function runAgentStream(opts: RunAgentOptions) {
     if (toolExecutionTimer) {
       clearTimeout(toolExecutionTimer);
       toolExecutionTimer = null;
-    }
-    if (toolResultDeliveryTimer) {
-      clearTimeout(toolResultDeliveryTimer);
-      toolResultDeliveryTimer = null;
     }
   };
   /**
@@ -1888,22 +1879,20 @@ export async function runAgentStream(opts: RunAgentOptions) {
       // model that goes silent after a tool result hangs on the generic
       // watchdog instead of the dedicated 60s delivery timeout.
       if (chunk.type === "tool-result") {
+        // The generic watchdog armed here already covers post-tool-result
+        // silence: it is activity-aware (consults `remainingSilenceMs`) and uses
+        // the run's `stallTimeoutMs` budget. A dedicated 60s delivery timer used
+        // to sit alongside it, but it was both SHORTER and dumber - a raw
+        // `setTimeout` that aborted unconditionally without consulting the
+        // activity clock. A reasoning model re-reading a large context after a
+        // tool result can legitimately take longer than 60s to emit its first
+        // token; the old timer killed six healthy runs in a row and the
+        // auto-resume loop never converged (log 2026-09-20 12:16-12:26,
+        // `compat-dd2eb85f`, 134k-token context, prior step answered in 6.5s).
+        // Removing it keeps full silence coverage via the activity-aware
+        // watchdog without the false aborts.
         clearFirstStepTimer();
         armModelWatchdog();
-        toolResultDeliveryTimer = setTimeout(() => {
-          const elapsed = Math.round((Date.now() - runStart) / 1000);
-          fireAndForget(
-            logWarn(
-              `[ai] no model output after tool-result for ${Math.round(MAX_TOOL_RESULT_DELIVERY_MS / 1000)}s, aborting the run (elapsed=${elapsed}s, model=${modelId}, provider=${provider})`,
-            ),
-            "tool-result-delivery-timeout",
-          );
-          abortController.abort(
-            new Error(
-              `The model did not respond within ${Math.round(MAX_TOOL_RESULT_DELIVERY_MS / 1000)}s after a tool finished. The run was stopped to avoid hanging forever.`,
-            ),
-          );
-        }, MAX_TOOL_RESULT_DELIVERY_MS);
         return;
       }
       const directive = watchdogDirective(chunk.type);

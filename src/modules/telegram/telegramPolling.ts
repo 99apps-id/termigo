@@ -8,13 +8,6 @@ import { apiGet, TelegramApiError } from "./telegramApi";
 import { handleUpdate, type Update } from "./telegramCommands";
 import { runMirror } from "./telegramDispatch";
 import {
-  botIdFromToken,
-  hasStoredUpdateOffset,
-  loadUpdateOffset,
-  saveUpdateOffset,
-} from "./telegramUpdateOffset";
-import { getTelegramToken } from "./keyring";
-import {
   logRelayInfo,
   logRelayWarn,
   relayErrorLine,
@@ -32,39 +25,10 @@ export let mirrorController: AbortController | null = null;
  */
 export let relayController: AbortController | null = null;
 
-const OFFSET_STORAGE_KEY = "termigo-telegram-offset";
-
-function readStoredOffset(): number {
-  if (typeof localStorage === "undefined") return 0;
-  try {
-    const raw = localStorage.getItem(OFFSET_STORAGE_KEY);
-    const n = raw === null ? Number.NaN : Number(raw);
-    return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
-  } catch {
-    return 0;
-  }
-}
-
-function persistOffset(offset: number): void {
-  if (typeof localStorage === "undefined") return;
-  try {
-    localStorage.setItem(OFFSET_STORAGE_KEY, String(offset));
-  } catch {
-    // A full or unavailable localStorage must not stop the poll loop.
-  }
-}
-
-export let currentUpdateOffset = readStoredOffset();
-/**
- * Bot id (the token prefix) that `currentUpdateOffset` belongs to. Keeps the
- * durable copy under the right key and stops a token change from carrying a
- * stale offset onto a different bot.
- */
-let currentBotId: string | null = null;
+export let currentUpdateOffset = 0;
 export let lastPollProgressTime = Date.now();
 export const POLLING_STALL_TIMEOUT_MS = 75_000;
 export let watchdogTimer: ReturnType<typeof setInterval> | null = null;
-const cleanupStoppers = new Map<string, () => void>();
 
 /**
  * When the loop is deliberately waiting, and the watchdog must stay out of the
@@ -118,15 +82,40 @@ const STALL_RECYCLE_GRACE_MS = 10_000;
  * terminating each other. Standing down gives the other one room, and a real
  * competing client is a configuration problem the operator has to fix - not
  * something to hammer at five-second intervals.
+ *
+ * This is the base of an exponential schedule, not a flat delay: a competitor
+ * that stays up for hours (a forgotten VPS instance, another app on the same
+ * token) used to be re-probed every 60s forever - 261 conflict cycles in one
+ * night's log. Each consecutive conflict doubles the wait up to
+ * `TELEGRAM_CONFLICT_BACKOFF_MAX_MS`; the first success resets the streak.
  */
 export const TELEGRAM_CONFLICT_BACKOFF_MS = 60_000;
 
+/** Ceiling for the exponential conflict backoff (15 minutes). */
+export const TELEGRAM_CONFLICT_BACKOFF_MAX_MS = 15 * 60_000;
+
+/**
+ * Consecutive 409s seen by the current loop. Reset on any successful poll and
+ * on start/stop, so the schedule never carries over into a healthy session.
+ */
+let conflictStreak = 0;
+
+/**
+ * Exponential conflict backoff: 60s, 120s, 240s, ... capped at 15 min.
+ *
+ * `streak` is 1-based (the first conflict waits the base), pure so the
+ * schedule is asserted rather than observed over hours.
+ */
+export function conflictBackoffMs(streak: number): number {
+  const n = Math.max(1, Math.floor(streak));
+  return Math.min(
+    TELEGRAM_CONFLICT_BACKOFF_MS * 2 ** (n - 1),
+    TELEGRAM_CONFLICT_BACKOFF_MAX_MS,
+  );
+}
+
 export function setCurrentUpdateOffset(offset: number): void {
   currentUpdateOffset = offset;
-  persistOffset(offset);
-  if (currentBotId) {
-    saveUpdateOffset(currentBotId, offset);
-  }
 }
 
 export function setLastPollProgressTime(t: number): void {
@@ -202,14 +191,10 @@ export function checkPollingStall(): void {
   // Start the replacement only after the old loop has exited (or the grace
   // period lapses), so the two never poll at the same time. Racing the wait
   // against a timer keeps recovery possible when the abort does not land.
-  const graceCtrl = new AbortController();
   void Promise.race([
     oldLoop ?? Promise.resolve(),
-    sleep(graceCtrl.signal, STALL_RECYCLE_GRACE_MS),
+    sleep(new AbortController().signal, STALL_RECYCLE_GRACE_MS),
   ]).then(() => {
-    // Whichever side won, disarm the grace timer instead of leaving it armed for
-    // the rest of its window once the old loop has already exited.
-    graceCtrl.abort();
     if (loopController !== next || next.signal.aborted) return;
     launchLoop(next);
   });
@@ -229,14 +214,16 @@ function launchLoop(controller: AbortController): void {
  *
  * Exported and pure so the policy is asserted rather than buried in the catch:
  * a 429 carries its own retry hint, a 409 means another client holds the bot
- * and must not be retried quickly, and anything else gets a short retry.
+ * and must not be retried quickly (and grows exponentially with the streak, so
+ * an hours-long competitor is probed at most every 15 min instead of every
+ * minute), and anything else gets a short retry.
  */
-export function pollBackoffMs(error: unknown): number {
+export function pollBackoffMs(error: unknown, conflictStreak = 1): number {
   if (error instanceof TelegramApiError) {
     if (error.status === 429) {
       return Math.max(1000, (error.retryAfter ?? 5) * 1000);
     }
-    if (error.status === 409) return TELEGRAM_CONFLICT_BACKOFF_MS;
+    if (error.status === 409) return conflictBackoffMs(conflictStreak);
   }
   return 5000;
 }
@@ -247,9 +234,12 @@ async function runLoop(signal: AbortSignal): Promise<void> {
       const data = (await apiGet(
         `getUpdates?offset=${currentUpdateOffset}&timeout=30`,
         signal,
-        50_000,
+        45_000,
       )) as { ok: boolean; result: Update[] };
       lastPollProgressTime = Date.now();
+      // A success ends the conflict streak, so the next 409 (if ever) starts
+      // back at the base delay instead of resuming a doubled schedule.
+      conflictStreak = 0;
       useTelegramStore.getState().setOnline(true);
       useTelegramStore.getState().setLastError(null);
       // Handlers run under the relay signal, not the poll signal, so a watchdog
@@ -274,26 +264,15 @@ async function runLoop(signal: AbortSignal): Promise<void> {
             }`,
           );
         }
-        setCurrentUpdateOffset(Math.max(currentUpdateOffset, u.update_id + 1));
+        currentUpdateOffset = Math.max(currentUpdateOffset, u.update_id + 1);
       }
     } catch (e) {
       if (signal.aborted) break;
-      const isTimeout =
-        e instanceof Error &&
-        (e.message.includes("Timeout after") || e.name === "TimeoutError");
-      if (isTimeout) {
-        lastPollProgressTime = Date.now();
-        useTelegramStore.getState().setOnline(true);
-        // Brief pause after client-side timeout so Telegram's server closes
-        // the previous aborted connection before opening a new long-poll request,
-        // preventing transient 409 Conflict responses.
-        await sleep(signal, 1000);
-        continue;
-      }
       useTelegramStore.getState().setOnline(false);
       const errMsg = e instanceof Error ? e.message : String(e);
       useTelegramStore.getState().setLastError(errMsg);
-      const backoffMs = pollBackoffMs(e);
+      if (e instanceof TelegramApiError && e.status === 409) conflictStreak += 1;
+      const backoffMs = pollBackoffMs(e, conflictStreak);
       // The store keeps lastError for the UI, but the UI is a webview on a
       // server nobody is looking at. A poll that keeps failing has to reach the
       // file, or "the bot went quiet" has no cause attached to it.
@@ -303,8 +282,10 @@ async function runLoop(signal: AbortSignal): Promise<void> {
       if (e instanceof TelegramApiError && e.status === 409) {
         // Named explicitly because it is actionable and otherwise looks like a
         // network fault: a 409 means a SECOND client is polling this bot token.
+        // The streak and the next wait are in the line so an operator reading
+        // the log can tell "one hiccup" from "six hours of a competitor".
         logRelayWarn(
-          "409 Conflict: another client holds this bot token - check for a second Termigo instance, or another app configured with the same token",
+          `409 Conflict: another client holds this bot token - check for a second Termigo instance, or another app configured with the same token (conflict #${conflictStreak}, next retry in ${Math.round(backoffMs / 1000)}s)`,
         );
       }
       // Declare the wait BEFORE sleeping, so the watchdog never sees a stall
@@ -335,47 +316,7 @@ export async function startTelegramBot(): Promise<void> {
   relayController = new AbortController();
   lastPollProgressTime = Date.now();
   deliberateWaitUntil = 0;
-  // Restore the offset Telegram had already confirmed before the first poll.
-  // Without it the loop starts at 0 and Telegram replays the last unconfirmed
-  // batch, running its commands a second time.
-  currentBotId = botIdFromToken(await getTelegramToken());
-  // stopTelegramBot() may have run while we awaited the token. Without this
-  // guard the watchdog is installed just after stop cleared it, so it ticks on
-  // for a bot that is already stopped and nothing ever clears it again.
-  if (loopController !== controller || controller.signal.aborted) return;
-  currentUpdateOffset = loadUpdateOffset(currentBotId);
-  if (currentBotId && !hasStoredUpdateOffset(currentBotId)) {
-    // Fresh bot (first run or token rotation): starting at 0 would replay the
-    // whole unconfirmed backlog and re-run its commands. Seeding from the old
-    // bot's offset is worse (update ids are per-bot; a stale high offset
-    // silently SKIPS the new bot's early updates). Instead take one immediate
-    // (timeout=0) poll and start past whatever is already waiting: the backlog
-    // is explicitly dropped, nothing replays and nothing is skipped.
-    // Best-effort - on any failure the loop starts at 0, today's behavior.
-    try {
-      const backlog = (await apiGet(
-        "getUpdates?timeout=0",
-        controller.signal,
-        15_000,
-      )) as { ok: boolean; result: Update[] };
-      if (loopController !== controller || controller.signal.aborted) return;
-      let maxId = -1;
-      for (const u of backlog.result ?? []) {
-        if (typeof u.update_id === "number" && u.update_id > maxId) {
-          maxId = u.update_id;
-        }
-      }
-      if (maxId >= 0) {
-        const dropped = backlog.result?.length ?? 0;
-        setCurrentUpdateOffset(maxId + 1);
-        logRelayInfo(
-          `fresh bot: acknowledged-and-dropped ${dropped} backlog update(s), starting at offset ${currentUpdateOffset}`,
-        );
-      }
-    } catch {
-      // Fall through with offset 0; the long-poll loop reports the cause.
-    }
-  }
+  conflictStreak = 0;
   if (watchdogTimer) clearInterval(watchdogTimer);
   watchdogTimer = setInterval(checkPollingStall, 15_000);
   // Start polling BEFORE any awaiting setup. The bot used to report itself
@@ -386,25 +327,15 @@ export async function startTelegramBot(): Promise<void> {
   void runMirror(mirror.signal);
   logRelayInfo("relay started");
   try {
-    const { cleanupStaleApprovals, startPeriodicStaleApprovalCleanup } =
-      await import("../ai/store/approvalQueueStore");
+    const { cleanupStaleApprovals } = await import(
+      "../ai/store/approvalQueueStore"
+    );
     const cleaned = await cleanupStaleApprovals();
     if (cleaned > 0) {
       // Stale approvals are the residue of runs killed mid-approval; counting
       // them is how a recurrence of that bug becomes visible.
       logRelayInfo(`cleaned ${cleaned} stale approval(s) on start`);
       console.warn(`[ai] cleaned ${cleaned} stale approvals on startup`);
-    }
-    const stopPeriodicCleanup = startPeriodicStaleApprovalCleanup();
-    if (typeof stopPeriodicCleanup === "function") {
-      // We may have been stopped while importing the store. Registering it now
-      // would leak an interval into a map stopTelegramBot() already cleared, so
-      // stop it immediately instead.
-      if (loopController !== controller) {
-        stopPeriodicCleanup();
-        return;
-      }
-      cleanupStoppers.set("staleApproval", stopPeriodicCleanup);
     }
   } catch {
     // best-effort cleanup; if the store isn't ready yet, the next cycle will catch it.
@@ -421,14 +352,6 @@ export function stopTelegramBot(): void {
     clearInterval(watchdogTimer);
     watchdogTimer = null;
   }
-  for (const stop of cleanupStoppers.values()) {
-    try {
-      stop();
-    } catch {
-      // best-effort teardown
-    }
-  }
-  cleanupStoppers.clear();
   loopController?.abort();
   loopController = null;
   mirrorController?.abort();
@@ -436,6 +359,7 @@ export function stopTelegramBot(): void {
   relayController?.abort();
   relayController = null;
   deliberateWaitUntil = 0;
+  conflictStreak = 0;
   useTelegramStore.getState().setOnline(false);
   if (wasRunning) logRelayInfo("relay stopped");
 }
