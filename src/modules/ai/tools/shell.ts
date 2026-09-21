@@ -1,7 +1,7 @@
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { sshExec } from "@/modules/ssh/bridge";
 import { currentWorkspaceEnv, workspaceScopeKey } from "@/modules/workspace";
-import { tool } from "ai";
+import { tool } from "./toolShim";
 import { z } from "zod";
 import { native } from "../lib/native";
 import { getSessionShell } from "../lib/sessionShell";
