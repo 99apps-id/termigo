@@ -160,8 +160,9 @@ function buildGoCompanion() {
   // -X stamps the real version in, because `var version = "dev"` in main.go is
   // otherwise what `termigo version` reports forever.
   const ldflags = ["-s", "-w", `-X main.version=${version}`].join(" ");
-  run("go", ["build", "-trimpath", "-ldflags", ldflags, "-o", out, "./cmd/termigo"], {
+  run("go", ["build", "-buildvcs=false", "-trimpath", "-ldflags", ldflags, "-o", out, "./cmd/termigo"], {
     // `go build` must run inside the module, and CGO has to be off or
+
     // cross-compiling to another OS fails with a confusing linker error.
     cwd: join(root, "cli"),
     env: { ...process.env, GOOS: goTarget.goos, GOARCH: goTarget.goarch, CGO_ENABLED: "0" },
