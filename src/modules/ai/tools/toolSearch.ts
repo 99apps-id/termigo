@@ -69,6 +69,7 @@ export const TOOL_SEARCH_ALWAYS_ON: ReadonlySet<string> = new Set([
   "git_stash",
   "git_stash_pop",
   // Shell is core, and bash_wait is the other half of bash_background.
+  "bash_run",
   "bash_wait",
   // Context offloading. The artifact broker is the escape hatch for a large
   // payload mid-run; routing it through discovery would let the run blow its

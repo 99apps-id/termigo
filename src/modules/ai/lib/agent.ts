@@ -57,7 +57,6 @@ import {
   type ToolIndexEntry,
 } from "../tools/toolSearch";
 import { buildTools, type ToolContext } from "../tools/tools";
-import { isResumingApproval } from "./approvalResume";
 import { getChatGptAccess } from "./chatgptAuth";
 import { compactModelMessagesDetailed, estimateTokens } from "./compact";
 import { evictObsoleteToolOutputs } from "./contextEviction";
@@ -1195,7 +1194,6 @@ export async function runAgentStream(opts: RunAgentOptions) {
       once: true,
     });
   }
-  const resumingApproval = isResumingApproval(opts.uiMessages ?? []);
   // Silence budget before the run is declared wedged. When resuming approval,
   // step 0 executes the approved tool BEFORE the model is called, so the budget
   // is derived from that tool's own `timeout_secs` - never shorter than the work
@@ -1723,6 +1721,9 @@ export async function runAgentStream(opts: RunAgentOptions) {
       if (circuitBreakerState.activeNudge) {
         system = appendSystemHint(system, circuitBreakerState.activeNudge);
       }
+      // Keep the harness profile's prompt prelude available on every step so a
+      // profile change mid-run does not silently drop its guidance.
+      system = applyProfileToSystem(system, profile);
       // Search mode: only the always-on set, plus whatever the model has asked
       // for. The SDK filters the serialised tool list by this, so a deferred
       // tool costs nothing until it is discovered.

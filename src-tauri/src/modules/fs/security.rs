@@ -65,6 +65,7 @@ fn secret_basename_patterns() -> &'static [Regex] {
 /// Matched as exact path or descendant (never raw substring).
 const PROTECTED_DIRS: &[&str] = &[
     "/.ssh",
+    "/.shh",
     "/.gnupg",
     "/.aws",
     "/.azure",
