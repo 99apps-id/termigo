@@ -57,6 +57,7 @@ import {
   type ToolIndexEntry,
 } from "../tools/toolSearch";
 import { buildTools, type ToolContext } from "../tools/tools";
+import { isResumingApproval } from "./approvalResume";
 import { getChatGptAccess } from "./chatgptAuth";
 import { compactModelMessagesDetailed, estimateTokens } from "./compact";
 import { evictObsoleteToolOutputs } from "./contextEviction";
@@ -1200,6 +1201,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // it is watching (see `stallBudgetMs`). A fixed 180s budget against a tool the
   // model gave 300s was a guaranteed false abort: the tool was killed mid-run,
   // its own timeout result never reached the model, and the run was re-sent.
+  const resumingApproval = isResumingApproval(opts.uiMessages ?? []);
   const stallTimeoutMs = stallBudgetMs(opts.uiMessages ?? [], resumingApproval);
   const stallNoticeMs = resumingApproval ? 20_000 : 30_000;
   let firstStepTimer: ReturnType<typeof setTimeout> | null = null;
