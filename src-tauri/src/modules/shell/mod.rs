@@ -41,6 +41,13 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
     "curl", "wget", "http", "xh",
     "date", "uptime", "whoami", "id", "uname", "hostname",
     "sleep", "Start-Sleep", "cp", "mv", "del", "rmdir", "mkdir", "touch", "chmod", "chown",
+    // PowerShell file removal cmdlet. `del` is already allowed as an alias;
+    // `Remove-Item` is the canonical name and is explicitly permitted for
+    // scripts that call it without relying on alias resolution.
+    "Remove-Item",
+    // Windows command interpreter. Allowing `cmd` lets the agent run
+    // `.bat`/`.cmd` batch files directly without escaping to a PTY.
+    "cmd",
     // Windows shells / shell builtins used by the agent on Windows.
     // `powershell` / `pwsh` widen the trust boundary: the outer command is
     // still validated, but the script body passed to `-Command` is not
