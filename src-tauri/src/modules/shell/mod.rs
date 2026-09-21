@@ -31,7 +31,7 @@ const MAX_OUTPUT_BYTES: usize = 256 * 1024;
 /// Commands outside this set must be run through an interactive PTY session.
 const SANDBOX_ALLOWLIST: &[&str] = &[
     "cat", "head", "tail", "wc", "grep", "rg", "sed", "awk",
-    "find", "ls", "Get-ChildItem", "stat", "file", "xxd", "hexdump", "od",
+    "find", "ls", "Get-ChildItem", "dir", "stat", "file", "xxd", "hexdump", "od",
     "git", "npm", "pnpm", "yarn", "cargo", "go", "python", "python3",
     "node", "deno", "bun", "make", "just", "task", "cmake", "npx",
     "echo", "printf", "test", "true", "false", "pwd", "cd",
@@ -45,6 +45,8 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
     // `Remove-Item` is the canonical name and is explicitly permitted for
     // scripts that call it without relying on alias resolution.
     "Remove-Item",
+    "Out-File",
+    "Get-ItemProperty", "Invoke-WebRequest",
     // Windows command interpreter. Allowing `cmd` lets the agent run
     // `.bat`/`.cmd` batch files directly without escaping to a PTY.
     "cmd",
