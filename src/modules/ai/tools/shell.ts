@@ -265,25 +265,18 @@ export function buildShellTools(ctx: ToolContext) {
             const errStr = String(e);
             if (/no ssh session|session.*closed|not found/i.test(errStr)) {
               // Remote SSH session is disconnected or closed; drop the stale
-              // remote anchor. Fall through to local execution ONLY for
-              // inspect-only commands: re-running a mutating command meant
-              // for the server (`rm -rf build`, a deploy, a restart) against
-              // the local workspace would hit the wrong machine. Anything
-              // else returns the SSH error so the model retries remotely.
+              // remote anchor and return the error. A command that the agent
+              // issued while an SSH terminal was focused was meant for the
+              // server, and silently running it on this machine is exactly
+              // the failure the remote routing exists to prevent.
               ctx.clearRemoteSession?.();
-              if (
-                deletesFiles(normalized) ||
-                commandRisk(normalized) !== "inspect"
-              ) {
-                return {
-                  error: `${errStr} (not run locally: the command may change files and was meant for the remote host)`,
-                  command,
-                  remote: true,
-                };
-              }
-            } else {
-              return { error: errStr, command, remote: true };
+              return {
+                error: `${errStr} (not run locally: the command was meant for the remote host)`,
+                command,
+                remote: true,
+              };
             }
+            return { error: errStr, command, remote: true };
           }
         }
 

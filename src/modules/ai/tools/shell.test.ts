@@ -194,7 +194,7 @@ describe("bash_run ssh fallback", () => {
     }
   });
 
-  it("still falls through for inspect-only commands", async () => {
+  it("returns an error instead of falling through for inspect-only commands", async () => {
     const { sshExec } = await import("@/modules/ssh/bridge");
     vi.mocked(sshExec).mockRejectedValueOnce(new Error("no ssh session"));
     const { native } = await import("../lib/native");
@@ -215,9 +215,9 @@ describe("bash_run ssh fallback", () => {
       const res = (await exec(
         { command: "ls", timeout_secs: 5 },
         emptyOpts,
-      )) as { stdout?: string };
-      expect(run).toHaveBeenCalled();
-      expect(res.stdout).toBe("a\n");
+      )) as { error?: string };
+      expect(run).not.toHaveBeenCalled();
+      expect(res.error).toMatch(/not run locally/);
     } finally {
       open.mockRestore();
       run.mockRestore();
