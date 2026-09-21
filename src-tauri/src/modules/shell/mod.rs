@@ -31,7 +31,7 @@ const MAX_OUTPUT_BYTES: usize = 256 * 1024;
 /// Commands outside this set must be run through an interactive PTY session.
 const SANDBOX_ALLOWLIST: &[&str] = &[
     "cat", "head", "tail", "wc", "grep", "rg", "sed", "awk",
-    "find", "ls", "stat", "file", "xxd", "hexdump", "od",
+    "find", "ls", "Get-ChildItem", "stat", "file", "xxd", "hexdump", "od",
     "git", "npm", "pnpm", "yarn", "cargo", "go", "python", "python3",
     "node", "deno", "bun", "make", "just", "task", "cmake", "npx",
     "echo", "printf", "test", "true", "false", "pwd", "cd",
