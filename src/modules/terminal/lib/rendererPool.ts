@@ -576,6 +576,7 @@ function bindSlot(slot: Slot, p: AcquireParams): void {
   }
 
   slot.term.options.disableStdin = p.shellExited;
+  if (slot.term.textarea) slot.term.textarea.disabled = false;
 
   if (!fast) {
     slot.term.clear();
@@ -793,6 +794,9 @@ function detachSlotFromLeaf(slot: Slot, retain: boolean): void {
 
   cancelPendingUnhide(slot);
   slot.host.style.visibility = "";
+
+  slot.term.options.disableStdin = false;
+  if (slot.term.textarea) slot.term.textarea.disabled = false;
 
   slot.currentLeafId = null;
   slot.lastUsedAt = performance.now();
@@ -1125,7 +1129,21 @@ export function applyTheme(): void {
 
 export function focusSlot(leafId: number): void {
   const slot = slots.find((s) => s.currentLeafId === leafId);
-  slot?.term.focus();
+  if (!slot) return;
+  const host = slot.host;
+  if (!host.isConnected) return;
+  const style = host.style;
+  if (style.visibility === "hidden" || style.display === "none") {
+    const id =
+      slot.unhideRaf ??
+      requestAnimationFrame(() => {
+        slot.unhideRaf = null;
+        if (slot.currentLeafId === leafId) slot.term.focus();
+      });
+    slot.unhideRaf = id;
+    return;
+  }
+  slot.term.focus();
 }
 
 export function setSlotFocused(leafId: number, focused: boolean): void {

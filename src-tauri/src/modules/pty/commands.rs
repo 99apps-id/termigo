@@ -91,7 +91,7 @@ pub async fn pty_open(
     };
     let spawn_result = join_output.map_err(|e| e.to_string())?;
     let inner = spawn_result.map_err(|e| e.to_string())?;
-    state.sessions.write().unwrap().insert(id, inner);
+    state.sessions.write().unwrap_or_else(|e| e.into_inner()).insert(id, inner);
     // The shell can exit before this insert (instant failure, `exit` in an rc
     // file); the waiter's reap then ran with the id absent. Re-check and reap
     // so the pseudoconsole isn't stranded.
@@ -209,9 +209,9 @@ pub fn pty_resize(
 
 #[tauri::command]
 pub fn pty_close(state: tauri::State<PtyState>, id: u64) -> Result<(), String> {
-    let session = state.sessions.write().unwrap().remove(&id);
+    let session = state.sessions.write().unwrap_or_else(|e| e.into_inner()).remove(&id);
     if let Some(s) = session {
-        if let Err(e) = s.killer.lock().unwrap().kill() {
+        if let Err(e) = s.killer.lock().unwrap_or_else(|e| e.into_inner()).kill() {
             log::debug!("pty_close: kill id={id} returned {e}");
         }
         log::info!("pty closed id={id}");
@@ -234,7 +234,7 @@ pub fn pty_close(state: tauri::State<PtyState>, id: u64) -> Result<(), String> {
 
 #[tauri::command]
 pub fn pty_has_foreground_process(state: tauri::State<PtyState>, id: u64) -> Result<bool, String> {
-    let sessions = state.sessions.read().unwrap();
+    let sessions = state.sessions.read().unwrap_or_else(|e| e.into_inner());
     // An unknown session means "no foreground job": the waiter thread reaps the
     // id as soon as the shell exits, so a frontend idle-probe that passed its
     // `shellExited` guard can still lose the race. Same no-op convention as
@@ -253,7 +253,7 @@ pub fn pty_has_foreground_process(state: tauri::State<PtyState>, id: u64) -> Res
 
 #[tauri::command]
 pub fn pty_has_foreground_job(state: tauri::State<PtyState>, id: u64) -> Result<bool, String> {
-    let sessions = state.sessions.read().unwrap();
+    let sessions = state.sessions.read().unwrap_or_else(|e| e.into_inner());
     // See `pty_has_foreground_process`: unknown == already reaped == idle.
     let Some(session) = sessions.get(&id) else {
         log::debug!("pty_has_foreground_job: unknown session id={id}");
@@ -265,7 +265,7 @@ pub fn pty_has_foreground_job(state: tauri::State<PtyState>, id: u64) -> Result<
     }
     #[cfg(unix)]
     {
-        let leader = session.master.lock().unwrap().process_group_leader();
+        let leader = session.master.lock().unwrap_or_else(|e| e.into_inner()).process_group_leader();
         Ok(matches!(leader, Some(pid) if pid > 0 && (pid as u64) != shell_pid))
     }
     #[cfg(windows)]
@@ -317,12 +317,12 @@ fn shell_has_children(shell_pid: u64) -> bool {
 #[tauri::command]
 pub fn pty_close_all(state: tauri::State<PtyState>) -> Result<usize, String> {
     let drained: Vec<(u64, Arc<Session>)> = {
-        let mut sessions = state.sessions.write().unwrap();
+        let mut sessions = state.sessions.write().unwrap_or_else(|e| e.into_inner());
         sessions.drain().collect()
     };
     let count = drained.len();
     for (id, s) in drained {
-        if let Err(e) = s.killer.lock().unwrap().kill() {
+        if let Err(e) = s.killer.lock().unwrap_or_else(|e| e.into_inner()).kill() {
             log::debug!("pty_close_all: kill id={id} returned {e}");
         }
         thread::Builder::new()
@@ -364,7 +364,7 @@ pub async fn pty_ack_output(
     bytes: u64,
     state: tauri::State<'_, PtyState>,
 ) -> Result<(), String> {
-    let session = state.sessions.read().unwrap().get(&id).cloned();
+    let session = state.sessions.read().unwrap_or_else(|e| e.into_inner()).get(&id).cloned();
     let Some(session) = session else {
         return Ok(());
     };

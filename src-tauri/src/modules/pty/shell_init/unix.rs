@@ -1,6 +1,7 @@
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
+use tempfile::NamedTempFile;
 
 use portable_pty::CommandBuilder;
 
@@ -144,9 +145,7 @@ pub fn build(
             if tmux_available() {
                 return Ok(wrap_in_tmux(&cmd, &key));
             }
-            log::info!(
-                "terminal persistence requested but tmux not found; using a normal shell"
-            );
+            log::info!("terminal persistence requested but tmux not found; using a normal shell");
         }
     }
     Ok(cmd)
@@ -252,14 +251,17 @@ fn write_if_changed(path: &Path, content: &str) -> Result<(), String> {
         }
     }
     // Atomic replace: a parallel shell startup must never source a half-written file.
-    let mut tmp: OsString = path.as_os_str().to_owned();
-    tmp.push(".__termigo_tmp__");
-    let tmp = PathBuf::from(tmp);
-    fs::write(&tmp, content).map_err(|e| format!("write {}: {e}", tmp.display()))?;
-    fs::rename(&tmp, path).map_err(|e| {
-        let _ = fs::remove_file(&tmp);
-        format!("rename {} -> {}: {e}", tmp.display(), path.display())
-    })
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("write_if_changed: no parent for {}", path.display()))?;
+    let mut tmp = NamedTempFile::new_in(parent)
+        .map_err(|e| format!("tempfile in {}: {e}", parent.display()))?;
+    tmp.write_all(content.as_bytes())
+        .map_err(|e| format!("write temp: {e}"))?;
+    tmp.flush().map_err(|e| format!("flush temp: {e}"))?;
+    tmp.persist(path)
+        .map_err(|e| format!("persist {}: {e}", path.display()))?;
+    Ok(())
 }
 
 #[cfg(test)]

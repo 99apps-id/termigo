@@ -141,7 +141,7 @@ export function resetToolRegistry(): void {
  * The registry is set by `buildTools` at the start of each agent run, so a
  * step always dispatches to the tool set the current run was built with.
  */
-export async function dispatchTool(
+async function dispatchTool(
   name: string,
   args: Record<string, unknown>,
 ): Promise<unknown> {

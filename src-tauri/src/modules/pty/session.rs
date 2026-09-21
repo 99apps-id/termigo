@@ -241,7 +241,7 @@ pub fn spawn(
                             continue;
                         }
                         let (lock, cv) = &*pending_r;
-                        let mut g = lock.lock().unwrap();
+                        let mut g = lock.lock().unwrap_or_else(|e| e.into_inner());
                         if g.len() + filtered.len() > MAX_PENDING {
                             dropped_bytes += g.len() as u64;
                             g.clear();
@@ -276,12 +276,14 @@ pub fn spawn(
             let (lock, cv) = &*pending_f;
             loop {
                 {
-                    let mut g = lock.lock().unwrap();
+                    let mut g = lock.lock().unwrap_or_else(|e| e.into_inner());
                     while g.is_empty() {
                         if done_f.load(Ordering::Acquire) {
                             return;
                         }
-                        let (next, _) = cv.wait_timeout(g, FLUSH_MAX_IDLE).unwrap();
+                        let (next, _) = cv
+                            .wait_timeout(g, FLUSH_MAX_IDLE)
+                            .unwrap_or_else(|e| e.into_inner());
                         g = next;
                     }
                 }
@@ -291,7 +293,10 @@ pub fn spawn(
                 // unflushed stays in `pending`, so the waiter's final snapshot
                 // picks it up even if the window never reopens.
                 {
-                    let mut credit = session_flush.output.lock().unwrap();
+                    let mut credit = session_flush
+                        .output
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
                     while !credit.has_room() {
                         if done_f.load(Ordering::Acquire) {
                             return;
@@ -299,14 +304,14 @@ pub fn spawn(
                         let (next, _) = session_flush
                             .output_cv
                             .wait_timeout(credit, FLUSH_MAX_IDLE)
-                            .unwrap();
+                            .unwrap_or_else(|e| e.into_inner());
                         credit = next;
                     }
                 }
                 // Cap the chunk so a window of maximum-size chunks can never
                 // outgrow the credit byte budget.
                 let chunk = {
-                    let mut g = lock.lock().unwrap();
+                    let mut g = lock.lock().unwrap_or_else(|e| e.into_inner());
                     if g.len() > MAX_CHUNK_BYTES {
                         let rest = g.split_off(MAX_CHUNK_BYTES);
                         std::mem::replace(&mut *g, rest)
@@ -322,7 +327,7 @@ pub fn spawn(
                 session_flush
                     .output
                     .lock()
-                    .unwrap()
+                    .unwrap_or_else(|e| e.into_inner())
                     .record_sent(chunk.len());
                 if let Err(e) = on_data_flush.send(Response::new(chunk)) {
                     log::debug!("pty flusher exiting, channel closed: {e}");
@@ -367,7 +372,7 @@ pub fn spawn(
                 log::error!("pty reader thread panicked: {e:?}");
             }
             let (lock, cv) = &*pending_e;
-            let tail = std::mem::take(&mut *lock.lock().unwrap());
+            let tail = std::mem::take(&mut *lock.lock().unwrap_or_else(|e| e.into_inner()));
             if !tail.is_empty() {
                 if let Err(e) = on_data_exit.send(Response::new(tail)) {
                     log::debug!("pty final-data send failed (channel closed): {e}");

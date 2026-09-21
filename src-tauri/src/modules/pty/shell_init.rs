@@ -107,13 +107,21 @@ pub fn build_command(
 
 // Honor the override only if it matches an enumerated shell, so a tampered
 // setting can't spawn an arbitrary binary across the IPC boundary.
+// Canonicalize the candidate once and compare against a precomputed set of
+// allowed canonical paths to avoid a TOCTOU between the candidate check and
+// each listed shell's check.
 fn sanitize_shell_override(shell: Option<String>) -> Option<String> {
     let candidate = shell
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())?;
-    let target = std::fs::canonicalize(&candidate).ok();
-    let allowed = list_shells().into_iter().any(|s| {
-        s.path == candidate || (target.is_some() && std::fs::canonicalize(&s.path).ok() == target)
+    let candidate_target = std::fs::canonicalize(&candidate).ok();
+    let allowed_shells: Vec<_> = list_shells()
+        .into_iter()
+        .map(|s| (s.path.clone(), std::fs::canonicalize(&s.path).ok()))
+        .collect();
+    let allowed = allowed_shells.iter().any(|(path, target)| {
+        *path == candidate
+            || (candidate_target.is_some() && target.is_some() && candidate_target == *target)
     });
     if allowed {
         Some(candidate)
