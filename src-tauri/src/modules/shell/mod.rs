@@ -111,6 +111,24 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
     "sort", "uniq", "cut", "tr", "nl", "paste", "join", "fold", "rev",
     "basename", "dirname", "realpath", "readlink", "seq", "expr",
     "sha256sum", "sha1sum", "md5sum", "base64", "strings", "du", "df",
+    // Process and job control. `ps` is read-only; `kill`/`killall`/`pkill`
+    // let the agent clean up hung shells or background jobs it started, which
+    // is already possible through a PTY. `top`/`htop` are interactive viewers.
+    "ps", "kill", "killall", "pkill", "top", "htop",
+    // Pagers and editors. The agent legitimately needs to inspect long output
+    // or edit config files; these are narrower than spawning a full shell.
+    "less", "more", "most", "vim", "nano", "vi",
+    // File transfer and remote sync. Common in devops and deployment flows;
+    // equivalent power exists through an SSH PTY session.
+    "scp", "rsync", "sftp",
+    // Cloud and infrastructure CLIs. Widely used in modern workflows; the
+    // agent already has equivalent reach through an interactive shell.
+    "kubectl", "helm", "terraform", "ansible", "aws", "gcloud", "az",
+    // Editor CLIs. Useful for headless automation and file inspection.
+    "code", "cursor", "windsurf", "subl", "notepad++",
+    // OS-level file and URL openers. Let the agent open files/URLs in the
+    // user's default application without widening the trust boundary.
+    "explorer", "xdg-open", "open",
 ];
 
 /// Whether a program token may run without a PTY.
