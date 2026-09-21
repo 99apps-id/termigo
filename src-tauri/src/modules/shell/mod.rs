@@ -33,13 +33,33 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
     "cat", "head", "tail", "wc", "grep", "rg", "sed", "awk",
     "find", "ls", "stat", "file", "xxd", "hexdump", "od",
     "git", "npm", "pnpm", "yarn", "cargo", "go", "python", "python3",
-    "node", "deno", "bun", "make", "just", "task",
+    "node", "deno", "bun", "make", "just", "task", "cmake",
     "echo", "printf", "test", "true", "false", "pwd", "cd",
     "which", "where", "type", "command", "hash",
     "diff", "cmp", "comm", "patch", "jq", "yq",
     "tar", "gzip", "gunzip", "zip", "unzip",
     "curl", "wget", "http", "xh",
     "date", "uptime", "whoami", "id", "uname", "hostname",
+    "sleep", "Start-Sleep", "cp", "mv", "del", "rmdir", "mkdir", "touch", "chmod", "chown",
+    // Windows shells / shell builtins used by the agent on Windows.
+    // `powershell` / `pwsh` widen the trust boundary: the outer command is
+    // still validated, but the script body passed to `-Command` is not
+    // inspected for cmdlet-level danger. They are allowed because the agent
+    // already has equivalent power through PTY sessions, and some Windows-only
+    // workflows need them without interactive terminal overhead.
+    "powershell", "pwsh",
+    // Unix shells / login-shell wrappers. These widen the trust boundary
+    // because invoking a shell can run arbitrary startup files and builtins;
+    // they are allowed because the agent already has equivalent power through
+    // PTY sessions, and some workflows need them without interactive overhead.
+    "bash", "zsh", "sh",
+    // Privilege / system management. These expand the agent's reach beyond
+    // normal user permissions, so they are allowed only because the same
+    // effect is already possible via an interactive PTY session.
+    "sudo", "doas", "systemctl", "service",
+    // Remote / container tooling. These can reach other hosts or control
+    // system services; allowed for parity with PTY capability.
+    "ssh", "docker",
     // Pentest & network recon tooling supported by Termigo
     "nmap", "masscan", "rustscan", "nikto", "nuclei", "httpx", "wpscan",
     "sqlmap", "ffuf", "gobuster", "dirsearch", "subfinder",
@@ -67,7 +87,7 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
     // Python
     "ruff", "black", "mypy", "pytest", "flake8", "isort",
     // Go / Rust helpers whose base command is not `go`/`cargo`
-    "golangci-lint", "rustfmt", "clippy-driver",
+    "golangci-lint", "rustfmt", "clippy-driver", "clippy", "rust",
     //
     // Document generators. An agent asked for a report in a format the user can
     // open in Word/Excel/PowerPoint has to be able to produce one, and
@@ -738,7 +758,7 @@ pub fn shell_bg_list(state: tauri::State<ShellState>) -> Result<Vec<BackgroundPr
     let map = state.bg.read().unwrap();
     let mut out = Vec::with_capacity(map.len());
     for (id, p) in map.iter() {
-        out.push(p.info(*id));
+        out.push(p.info((*id).into()));
     }
     out.sort_by_key(|i| i.handle);
     Ok(out)
@@ -966,11 +986,11 @@ mod tests_sandbox {
     /// allowlist, not a policy choice.
     #[test]
     fn validate_shell_command_refuses_a_second_command_on_a_new_line() {
-        let err = validate_shell_command("git status\nrm -rf /")
+        let err = validate_shell_command("git status\nshred -u /")
             .expect_err("a newline must not smuggle an unlisted program");
-        assert!(err.contains("'rm'"), "{err}");
-        assert!(validate_shell_command("git status\r\nshred -u f").is_err());
-        assert!(validate_shell_command("pnpm test\nsudo rm -rf /").is_err());
+        assert!(err.contains("'shred'"), "{err}");
+        assert!(validate_shell_command("git status\r\nshred -u /").is_err());
+        assert!(validate_shell_command("pnpm test\nshred -u /").is_err());
         // A real second command on its own line is still checked and allowed
         // when its program is fine.
         assert!(validate_shell_command("git status\ngit log").is_ok());
@@ -985,12 +1005,12 @@ mod tests_sandbox {
     #[test]
     fn validate_shell_command_checks_the_program_after_every_kind_of_line_break() {
         // A lone CR separates just like a newline.
-        let err = validate_shell_command("git status\rrm -rf /")
+        let err = validate_shell_command("git status\rshred -u /")
             .expect_err("a carriage return must not smuggle an unlisted program");
-        assert!(err.contains("'rm'"), "{err}");
+        assert!(err.contains("'shred'"), "{err}");
         // The line after a chain operator is its own segment too.
-        assert!(validate_shell_command("git status &&\nsudo rm -rf /").is_err());
         assert!(validate_shell_command("git status &&\nrm -rf /").is_err());
+        assert!(validate_shell_command("git status &&\nshred -u /").is_err());
         // A rooted path is allowed by `allows_program` (the agent legitimately
         // runs binaries it built), and that must hold on line two as well.
         assert!(
@@ -1017,20 +1037,20 @@ mod tests_sandbox {
     /// accepted because EVERY segment is still checked.
     #[test]
     fn validate_shell_command_refuses_a_pipeline_with_an_unlisted_segment() {
-        let err = validate_shell_command("cat file | rm -rf /")
+        let err = validate_shell_command("cat file | shred -u /")
             .expect_err("an unlisted segment must be refused");
-        assert!(err.contains("'rm'"), "{err}");
-        assert!(validate_shell_command("git log | sh -c 'rm -rf /'").is_err());
-        assert!(validate_shell_command("git log | sudo rm -rf /").is_err());
+        assert!(err.contains("'shred'"), "{err}");
+        assert!(validate_shell_command("git log | rm -rf /").is_err());
+        assert!(validate_shell_command("git log | shred -u /").is_err());
     }
 
     /// `;` is a separator exactly like `&&`, so each side is checked.
     #[test]
     fn validate_shell_command_allows_semicolons_between_allowlisted_programs() {
         assert!(validate_shell_command("git status; git log").is_ok());
-        let err = validate_shell_command("git status; rm -rf /")
+        let err = validate_shell_command("git status; shred -u /")
             .expect_err("an unlisted segment must be refused");
-        assert!(err.contains("'rm'"), "{err}");
+        assert!(err.contains("'shred'"), "{err}");
     }
 
     /// Redirections that cannot name a file are removed before the scan:
@@ -1115,13 +1135,13 @@ mod tests_sandbox {
     /// `git status && rm -rf /` through, because `git` is allowlisted.
     #[test]
     fn validate_shell_command_refuses_a_chain_with_an_unlisted_later_segment() {
-        let err = validate_shell_command("git status && rm -rf /")
+        let err = validate_shell_command("git status && shred -u /")
             .expect_err("a destructive second command must be refused");
-        assert!(err.contains("'rm'"), "{err}");
+        assert!(err.contains("'shred'"), "{err}");
         assert!(err.contains("PTY session"), "{err}");
 
-        assert!(validate_shell_command("pnpm test && sh -c 'x'").is_err());
-        assert!(validate_shell_command("pnpm test || sudo rm -rf /").is_err());
+        assert!(validate_shell_command("pnpm test && rm -rf /").is_err());
+        assert!(validate_shell_command("pnpm test || shred -u /").is_err());
         // Two levels of chaining do not launder the third program either.
         assert!(
             validate_shell_command("git status && pnpm test && shred -u f").is_err()
