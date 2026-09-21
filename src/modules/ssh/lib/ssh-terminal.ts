@@ -16,23 +16,6 @@ import {
 } from "../connections";
 import { useHostKeyPrompt } from "../hostKeyPrompt";
 import { useSshActiveSessionStore } from "../sshActiveSession";
-import {
-  backoffMs,
-  gaveUpNotice,
-  MAX_ATTEMPTS,
-  reconnectedNotice,
-  reconnectNotice,
-  shouldReconnect,
-} from "./reconnectPolicy";
-
-/**
- * Like `PtyHandlers`, but `onExit` also says whether the remote reported an
- * exit status. Kept separate rather than widening `PtyHandlers`: a local PTY
- * has no such distinction to make, and the terminal never needs it.
- */
-export type SshTerminalHandlers = Omit<PtyHandlers, "onExit"> & {
-  onExit?: (code: number, clean: boolean) => void;
-};
 
 /** What a terminal leaf needs to open an SSH session instead of a local PTY. */
 export type SshLeafSpec = { connectionId: string };
@@ -71,7 +54,7 @@ export async function openSshTerminalSession(
   conn: SshConnection,
   cols: number,
   rows: number,
-  handlers: SshTerminalHandlers,
+  handlers: PtyHandlers,
 ): Promise<PtySession> {
   const input = await resolveSshOpenInput(conn);
   const hostLabel = `${conn.user}@${conn.host}`;
@@ -104,7 +87,7 @@ export async function openSshTerminalSession(
       onData: (bytes) => handlers.onData(bytes),
       onExit: (code) => {
         forgetSession();
-        handlers.onExit?.(code, true);
+        handlers.onExit?.(code);
       },
       // The link dropped without an exit status, so there is no code to report.
       // Print why into the pane and then end the session as abnormal (-1), the
@@ -118,7 +101,7 @@ export async function openSshTerminalSession(
           ),
         );
         forgetSession();
-        handlers.onExit?.(-1, false);
+        handlers.onExit?.(-1);
       },
       onConnected: () => {
         connectedEarly = true;
@@ -131,7 +114,7 @@ export async function openSshTerminalSession(
       },
       onError: () => {
         forgetSession();
-        handlers.onExit?.(-1, false);
+        handlers.onExit?.(-1);
       },
     },
   );
@@ -143,32 +126,11 @@ export async function openSshTerminalSession(
     id: session.id,
     write: session.write,
     resize: session.resize,
-    close: async () => {
-      forgetSession();
-      await session.close();
-    },
+    close: session.close,
   };
 }
 
-const notice = (text: string) => new TextEncoder().encode(text);
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-/**
- * Open an SSH terminal from a leaf spec, reconnecting if the link drops.
- *
- * A dropped connection used to leave a dead tab that the user had to notice
- * and reopen by hand - and until they did, the agent had no remote session at
- * all, so every remote tool call fell over.
- *
- * What comes back is a proxy, not the session. `id` is a getter, because
- * reconnecting produces a new backend session and `leafSessionId` reads the id
- * at call time - so the SFTP commands and the agent's remote routing follow
- * the new session without anything having to be told.
- *
- * The shell itself is genuinely new: working directory, environment and
- * anything that was running are gone. The terminal says so rather than
- * pretending the session resumed.
- */
+/** Open an SSH terminal from a leaf spec (looks the connection up by id). */
 export async function openSshTerminalFromSpec(
   spec: SshLeafSpec,
   cols: number,
@@ -176,78 +138,5 @@ export async function openSshTerminalFromSpec(
   handlers: PtyHandlers,
 ): Promise<PtySession> {
   const conn = await resolveSshConnection(spec.connectionId);
-
-  let closedByUser = false;
-  let attempts = 0;
-  let size = { cols, rows };
-
-  const inner = (): SshTerminalHandlers => ({
-    onData: handlers.onData,
-    onExit: (code: number, clean: boolean) => {
-      if (!shouldReconnect({ code, clean }, { closedByUser, attempts })) {
-        if (!clean && !closedByUser && attempts >= MAX_ATTEMPTS) {
-          handlers.onData(notice(gaveUpNotice()));
-        }
-        useSshActiveSessionStore.getState().clearSession(current.id);
-        handlers.onExit?.(code);
-        return;
-      }
-      void reconnect();
-    },
-  });
-
-  let current = await openSshTerminalSession(conn, cols, rows, inner());
-
-  const reconnect = async (): Promise<void> => {
-    attempts += 1;
-    const delay = backoffMs(attempts);
-    handlers.onData(notice(reconnectNotice(attempts, delay)));
-    await sleep(delay);
-    if (closedByUser) return;
-    try {
-      const revived = await openSshTerminalSession(
-        conn,
-        size.cols,
-        size.rows,
-        inner(),
-      );
-      // Checked again after the await, not just before it. Closing the tab
-      // mid-connect otherwise stranded this session: `close()` had already run
-      // against the dead one, and nothing knew about the live one.
-      if (closedByUser) {
-        useSshActiveSessionStore.getState().clearSession(revived.id);
-        await revived.close().catch(() => {});
-        return;
-      }
-      current = revived;
-      attempts = 0;
-      handlers.onData(notice(reconnectedNotice()));
-    } catch {
-      if (attempts >= MAX_ATTEMPTS) {
-        useSshActiveSessionStore.getState().clearSession(current.id);
-        handlers.onData(notice(gaveUpNotice()));
-        handlers.onExit?.(-1);
-        return;
-      }
-      await reconnect();
-    }
-  };
-
-  return {
-    get id() {
-      return current.id;
-    },
-    write: (data) => current.write(data),
-    resize: (c, r) => {
-      // Remembered so a reconnect opens at the size the pane is now, not the
-      // size it happened to be when the tab was first created.
-      size = { cols: c, rows: r };
-      return current.resize(c, r);
-    },
-    close: async () => {
-      closedByUser = true;
-      useSshActiveSessionStore.getState().clearSession(current.id);
-      await current.close();
-    },
-  };
+  return openSshTerminalSession(conn, cols, rows, handlers);
 }

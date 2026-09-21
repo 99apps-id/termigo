@@ -138,7 +138,7 @@ export const useSubagentRunStore = create<SubagentRunState>((set) => ({
   bySession: {},
 
   start(sessionId, info) {
-    const id = `sa-${Date.now().toString(36)}-${(++seq).toString(36)}`;
+    const id = `sa-${++seq}`;
     set((s) => {
       const list = s.bySession[sessionId] ?? [];
       const run: SubagentRun = {
@@ -198,17 +198,17 @@ export const useSubagentRunStore = create<SubagentRunState>((set) => ({
       const endedAt = Date.now();
       const bySession: Record<string, SubagentRun[]> = {
         ...s.bySession,
-        [sessionId]: list.map((r) => {
-          if (r.id !== id) return r;
-          const startedAt = typeof r.startedAt === "number" ? r.startedAt : endedAt;
-          return {
-            ...r,
-            status: "error",
-            endedAt,
-            durationMs: Math.max(0, endedAt - startedAt),
-            error,
-          };
-        }) as SubagentRun[],
+        [sessionId]: list.map((r) =>
+          r.id === id
+            ? {
+                ...r,
+                status: "error",
+                endedAt,
+                durationMs: endedAt - r.startedAt,
+                error,
+              }
+            : r,
+        ) as SubagentRun[],
       };
       scheduleSave(bySession);
       return { bySession };

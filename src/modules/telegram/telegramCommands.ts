@@ -411,8 +411,11 @@ export async function handleCallback(
       .getState()
       .agentMeta.pendingApprovals?.find((p) => p.id === id);
     if (!pending) {
-      const found = getPendingApprovals(chatId, state.useChatStore, aqStore);
-      pending = found.find((p) => p.id === id) ?? null;
+      const sessionId = state.useChatStore.getState().activeSessionId;
+      if (sessionId) {
+        const found = getPendingApprovals(sessionId, state.useChatStore, aqStore);
+        pending = found.find((p) => p.id === id);
+      }
     }
     if (!pending) {
       await answerCallback(cb.id, "Already answered or expired.", signal);

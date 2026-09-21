@@ -20,7 +20,7 @@ export type FormatLiveProgressOptions = {
   todos?: { title: string; status: string }[];
   /** Elapsed time in ms since the run started. Rendered as a ticking "· Xs"
    *  counter so the progress text always changes even when no new tool/step
-   *  has appeared - this keeps the Telegram message visibly alive during long
+   *  has appeared — this keeps the Telegram message visibly alive during long
    *  waits instead of freezing. */
   elapsedMs?: number;
   completed?: boolean;
@@ -164,9 +164,6 @@ export function summarizeToolOutput(
   }
 
   if (toolName === "bash_run" || toolName === "bash_background") {
-    if (obj.timed_out === true) {
-      return "timed out";
-    }
     const exitCode = typeof obj.exit_code === "number" ? obj.exit_code : 0;
     const stderr =
       typeof obj.stderr === "string" ? collapseWhitespace(obj.stderr) : "";
@@ -249,13 +246,7 @@ export function extractToolSummaries(parts: unknown[]): ToolCallSummary[] {
       state = "error";
     } else if (rawState === "output-available") {
       const out = part.output as Record<string, unknown> | undefined;
-      const hasError =
-        Boolean(out && typeof out.error === "string") ||
-        Boolean(out && out.timed_out === true) ||
-        Boolean(
-          out && typeof out.exit_code === "number" && out.exit_code !== 0,
-        );
-      state = hasError ? "error" : "done";
+      state = out && typeof out.error === "string" ? "error" : "done";
     }
 
     const input = summarizeToolInput(toolName, part.input);
@@ -292,75 +283,7 @@ export function sanitizeForTelegramHtml(text: string): string {
 
 /** Convert plain text for Telegram HTML parse_mode without interpreting markdown. */
 export function escapePlainTextToHtml(text: string): string {
-  // Normalise CRLF first: escapeHtml leaves CR alone and the sanitizer keeps it,
-  // so without this a Windows line ending reached Telegram verbatim.
-  return sanitizeForTelegramHtml(escapeHtml(text.replace(/\r\n?/g, "\n")));
-}
-
-/**
- * Ensures HTML tags are properly balanced and well-nested for Telegram's
- * strict HTML parser. Unclosed tags are automatically closed in LIFO order
- * at the end of the text, and orphaned closing tags are safely escaped.
- */
-export function balanceTelegramHtml(html: string): string {
-  if (!html) return "";
-
-  const TAG_REGEX = /<(\/)?([a-zA-Z0-9_-]+)(?:\s+[^>]*)?(\/)?>/g;
-  const openStack: string[] = [];
-  let result = "";
-  let lastIndex = 0;
-  let match = TAG_REGEX.exec(html);
-
-  while (match !== null) {
-    result += html.slice(lastIndex, match.index);
-    lastIndex = TAG_REGEX.lastIndex;
-
-    const fullTag = match[0];
-    const isClosing = Boolean(match[1]);
-    const tagName = match[2].toLowerCase();
-    const isSelfClosing = Boolean(match[3]) || fullTag.endsWith("/>");
-
-    if (isSelfClosing) {
-      result += fullTag;
-      match = TAG_REGEX.exec(html);
-      continue;
-    }
-
-    if (isClosing) {
-      const pos = openStack.lastIndexOf(tagName);
-      if (pos === -1) {
-        // Orphaned closing tag without a match: escape to prevent Telegram 400
-        result += `&lt;/${tagName}&gt;`;
-      } else {
-        // Close any tags opened after this one in LIFO order
-        while (openStack.length > pos + 1) {
-          const unclosed = openStack.pop();
-          if (unclosed) {
-            result += `</${unclosed}>`;
-          }
-        }
-        openStack.pop();
-        result += `</${tagName}>`;
-      }
-    } else {
-      openStack.push(tagName);
-      result += fullTag;
-    }
-
-    match = TAG_REGEX.exec(html);
-  }
-
-  result += html.slice(lastIndex);
-
-  // Close any unclosed tags at the end of the string in LIFO order
-  while (openStack.length > 0) {
-    const unclosed = openStack.pop();
-    if (unclosed) {
-      result += `</${unclosed}>`;
-    }
-  }
-
-  return result;
+  return sanitizeForTelegramHtml(escapeHtml(text)).replace(/\n/g, "\n");
 }
 
 /**
@@ -566,9 +489,6 @@ export function markdownToTelegramHtml(markdown: string): string {
   // Final sanitization: Telegram HTML parse_mode rejects some characters/tags.
   text = sanitizeForTelegramHtml(text);
 
-  // Balance and close any unclosed tags to prevent Telegram HTTP 400 Bad Request
-  text = balanceTelegramHtml(text);
-
   return text;
 }
 
@@ -682,14 +602,13 @@ export function formatToolActivity(t: ToolCallSummary): string {
  * run that hit the step limit and a run that failed all closed with the same
  * word as a clean finish.
  */
-export type RunOutcome = "done" | "stopped" | "step-cap" | "error" | "still-running";
+export type RunOutcome = "done" | "stopped" | "step-cap" | "error";
 
 const OUTCOME_LABELS: Record<RunOutcome, string> = {
   done: "✓ Done",
   stopped: "⏹ Stopped",
   "step-cap": "⏸ Step limit reached",
   error: "✗ Ended with error",
-  "still-running": "Working in background",
 };
 
 /** `4m 12s`, or `0m 08s` under a minute. Empty when the duration is unknown. */
@@ -749,22 +668,9 @@ export function renderAnswerSnippet(text: string, max = 700): string {
   const body = text.trim();
   if (body.length === 0) return "";
   if (body.length <= max) return body;
-  // The ellipsis separator plus the worst-case fence and stray-backtick padding
-  // is added AFTER the split, so reserve it up front or the result overshoots
-  // `max` (and the 4096 budget this helper exists to protect).
-  const PADDING = 3 + 4 + 4 + 1 + 1;
-  const half = Math.max(0, Math.floor((max - PADDING) / 2));
+  const half = Math.floor((max - 5) / 2);
   let head = body.slice(0, half);
   let tail = body.slice(-half);
-
-  // If head ends with an unmatched high surrogate, trim it
-  if (/[\uD800-\uDBFF]$/.test(head)) {
-    head = head.slice(0, -1);
-  }
-  // If tail starts with an unmatched low surrogate, trim it
-  if (/^[\uDC00-\uDFFF]/.test(tail)) {
-    tail = tail.slice(1);
-  }
 
   // Avoid breaking in the middle of fenced code blocks
   const headFences = (head.match(/```/g) || []).length;
@@ -794,10 +700,7 @@ export function renderAnswerSnippet(text: string, max = 700): string {
 export function formatLiveProgress(opts: FormatLiveProgressOptions): string {
   if (opts.completed) {
     if (opts.answerText && opts.answerText.trim().length > 0) {
-      const trimmed = opts.answerText.trim();
-      return trimmed.length > 3500
-        ? renderAnswerSnippet(trimmed, 3500)
-        : trimmed;
+      return opts.answerText.trim();
     }
     return formatCompletionCard(opts);
   }
@@ -828,9 +731,7 @@ export function formatLiveProgress(opts: FormatLiveProgressOptions): string {
 
   const elapsedPart =
     typeof opts.elapsedMs === "number"
-      ? opts.elapsedMs >= 60_000
-        ? ` · ${formatDuration(opts.elapsedMs)}`
-        : ` · ${Math.floor(opts.elapsedMs / 1000)}s`
+      ? ` · ${Math.floor(opts.elapsedMs / 1000)}s`
       : "";
 
   const stepPart =

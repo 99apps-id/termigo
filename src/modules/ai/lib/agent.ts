@@ -95,7 +95,6 @@ import { formatTodoStatusBlock } from "./todos";
 import { modelRejectsForcedToolChoice } from "./toolChoiceLearning";
 import { measureToolPayload } from "./toolPayload";
 import { formatUserModelBlock, type UserModel } from "./userModel";
-import { repairModelMessageSequence } from "./validateModelSequence";
 import {
   newVerifyLedger,
   recordToolResult,
@@ -130,12 +129,6 @@ const TOOL_LABELS: Record<string, (input: Record<string, unknown>) => string> =
       `Suggesting ${ellipsize(String(i.command ?? ""), 60)}`,
     todo_write: (i) =>
       `Updating plan (${Array.isArray(i.todos) ? i.todos.length : 0} items)`,
-    todo_update: (i) =>
-      `Updating task ${ellipsize(String(i.title ?? i.id ?? ""), 40)}`,
-    todo_read: () => "Reading plan",
-    think: () => "Thinking",
-    git_conflicts: (i) =>
-      `Checking git conflicts${i.path ? ` in ${shortPath(i.path)}` : ""}`,
     run_subagent: (i) => `Spawning ${String(i.type ?? "subagent")} subagent`,
     // Named rather than left to the "Calling remember" fallback: what is being
     // written outlives the run, so it is the one tool whose argument matters
@@ -186,12 +179,6 @@ export type BuildModelOptions = {
 };
 
 const MAX_MODEL_CACHE = 64;
-// Hard fallback when token-based compaction is not enough: a long-running
-// session can still grow past a healthy message count even when every
-// individual message fits the budget. Capping prevents the context-assembly
-// and request-body costs from climbing without bound.
-const MAX_HISTORY_MESSAGES = 500;
-const HISTORY_TAIL_KEEP = 50;
 
 type CacheEntry = { built: LanguageModel; touched: number };
 const modelCache = new Map<string, CacheEntry>();
@@ -278,42 +265,6 @@ export async function buildLanguageModel(
       })(resolvedModelId);
       break;
     }
-    case "stepfun": {
-      const { createOpenAICompatible } = await import(
-        "@ai-sdk/openai-compatible"
-      );
-      built = createOpenAICompatible({
-        name: "stepfun",
-        baseURL: "https://api.stepfun.com/v1",
-        apiKey: key,
-        fetch: apiFetch,
-      })(resolvedModelId);
-      break;
-    }
-    case "qwen": {
-      const { createOpenAICompatible } = await import(
-        "@ai-sdk/openai-compatible"
-      );
-      built = createOpenAICompatible({
-        name: "qwen",
-        baseURL: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-        apiKey: key,
-        fetch: apiFetch,
-      })(resolvedModelId);
-      break;
-    }
-    case "zhipu": {
-      const { createOpenAICompatible } = await import(
-        "@ai-sdk/openai-compatible"
-      );
-      built = createOpenAICompatible({
-        name: "zhipu",
-        baseURL: "https://api.z.ai/api/paas/v4",
-        apiKey: key,
-        fetch: apiFetch,
-      })(resolvedModelId);
-      break;
-    }
     case "mistral": {
       // The dedicated provider rather than the OpenAI-compatible adapter.
       // Mistral's API is close enough that the generic one connects, but its
@@ -356,6 +307,20 @@ export async function buildLanguageModel(
       );
       built = createOpenAICompatible({
         name: "openai-compatible",
+        baseURL: compatURL,
+        apiKey: epKey || key || undefined,
+        fetch: apiFetch,
+      })(resolvedModelId);
+      break;
+    }
+    case "stepfun":
+    case "qwen":
+    case "zhipu": {
+      const { createOpenAICompatible } = await import(
+        "@ai-sdk/openai-compatible"
+      );
+      built = createOpenAICompatible({
+        name: provider,
         baseURL: compatURL,
         apiKey: epKey || key || undefined,
         fetch: apiFetch,
@@ -519,6 +484,7 @@ export function buildConfiguredLanguageModel(
 const PLAN_MODE_PROMPT = `## PLAN MODE -- ACTIVE
 Mutating tools (write_file, edit, multi_edit, create_directory) will queue their changes for the user to review as a single diff. Do NOT execute bash_run or bash_background while plan mode is active -- restrict yourself to reads (read_file, grep, glob, list_directory) and the queued mutations. After queueing the full set of edits, stop and return a brief summary; do not continue acting until the user has accepted/rejected.`;
 
+
 function buildStableSystem(
   /** The model name to pick the prompt tier with (see `effectiveModelName`). */
   modelNameForTier: string,
@@ -651,6 +617,7 @@ export function noToolRepetition<T extends ToolSet>(
   };
 }
 
+
 /**
  * Read-only idle-loop guard.
  *
@@ -659,16 +626,16 @@ export function noToolRepetition<T extends ToolSet>(
  * and should not be flagged as repetition. But context eviction replaces old
  * read results with a placeholder string, which changes the result digest and
  * makes every re-read look like "new" progress to `noToolRepetition`. The net
- * effect is that an agent stuck reading the same file offsets forever is never
- * detected.
+ * effect is that an agent stuck reading the same file offsets dozens of times
+ * is never detected.
  *
- * This guard catches that by looking at **input-only** fingerprints for a
- * fixed set of read-only tools (`read_file`, `list_directory`, `glob`,
- * `grep`). If the same (tool + args) combination appears `maxRepeats` or more
- * times in the recent window it is a stuck loop regardless of what the results
- * look like.
+ * This guard catches that by looking at input-only fingerprints for a fixed
+ * set of read-only tools (`read_file`, `list_directory`, `glob`, `grep`). If
+ * the same (tool + args) combination appears `maxRepeats` or more times in
+ * the recent window it is a stuck loop regardless of what the results look
+ * like.
  *
- * Only read-only tools are included. Write tools (`edit`, `bash_run`, …)
+ * Only read-only tools are included. Write tools (`edit`, `bash_run`, etc.)
  * legitimately operate on the same path repeatedly, so they stay under the
  * result-aware guard.
  */
@@ -714,10 +681,11 @@ export function noIdleReadLoop<T extends ToolSet>(
  * one final tool-less "synthesis" step so the model can summarise instead of
  * ending on a silent repeated tool call.
  *
- * - Model can't take a forced tool choice → stop immediately (no synthesis).
- * - First trip on a synthesis-capable model → don't stop; mark it requested.
- * - The synthesis step already ran (requested) → stop now.
+ * - Model can't take a forced tool choice -> stop immediately (no synthesis).
+ * - First trip on a synthesis-capable model -> don't stop; mark it requested.
+ * - The synthesis step already ran (requested) -> stop now.
  */
+
 export function synthesisStopDecision(
   allowSynthesis: boolean,
   alreadyRequested: boolean,
@@ -775,8 +743,15 @@ export function isErrorResult(output: unknown): boolean {
   // A tool surfaced its failure as an { error: "..." } object or offline signal.
   if (record.error) return true;
   if (record.isError === true) return true;
-  if (record.isOffline === true) return true;
   if (record.noReadableText === true) return true;
+  if (record.isOffline === true) return true;
+  if (
+
+    typeof record.text === "string" &&
+    record.text.startsWith("(no readable text returned from the page")
+  ) {
+    return true;
+  }
   // Command tools (bash_run, git_*, run_checks, test_loop) report failure as a
   // non-zero exit_code or a timed_out flag, not an { error } object. Missing
   // them here meant a command that kept failing was invisible to noErrorProgress
@@ -929,7 +904,6 @@ export function noErrorProgress<T extends ToolSet>(
 export type AgentStopReason =
   | "step-cap"
   | "tool-repetition"
-  | "idle-read-loop"
   | "text-repetition"
   | "no-progress"
   | "tool-error"
@@ -937,7 +911,8 @@ export type AgentStopReason =
   | "steered"
   | "aborted"
   | "interrupted"
-  | "tool-only-loop";
+  | "tool-only-loop"
+  | "idle-read-loop";
 
 export type AgentUsage = {
   inputTokens: number;
@@ -1164,21 +1139,6 @@ export async function runAgentStream(opts: RunAgentOptions) {
   );
   const compactedHistory = compact.messages;
   if (compact.compacted) {
-    // Logged, because this is the one way the request silently shrinks and the
-    // symptom misleads. The next run's input-token count drops by tens of
-    // thousands while the prompt breakdown (sys/proj/mem/tools) is byte for
-    // byte identical, and the cache hit rate collapses from ~99% to ~20%.
-    // Observed in the field as an unexplained 106495 -> 85314 drop that was
-    // investigated as transcript data loss for a while. The cause is this call,
-    // so the line names it and the limit it built against.
-    fireAndForget(
-      logInfo(
-        `[ai] context compact: elided/truncated content in ${compact.droppedCount} message(s) ` +
-          `(count unchanged at ${compactedHistory.length}), ` +
-          `target ${compactionLimit} tok (configured ${configuredLimit})`,
-      ),
-      "context-compact-log",
-    );
     opts.onCompact?.({ droppedCount: compact.droppedCount });
   }
 
@@ -1215,38 +1175,10 @@ export async function runAgentStream(opts: RunAgentOptions) {
     opts.onPrune?.({ prunedMessages: prune.cutAt });
   }
 
-  // Fallback message-count cap. Token compaction, eviction, and verified
-  // pruning can all leave a session with hundreds of messages that each fit
-  // the budget but still make context assembly and the HTTP body expensive.
-  // Trim from the front, preserving system messages and the most recent
-  // HISTORY_TAIL_KEEP messages so the current task stays intact.
-  const cappedHistory = capHistoryMessageCount(finalHistory);
-  if (cappedHistory.capped) {
-    fireAndForget(
-      logInfo(
-        `[ai] context cap: trimmed ${cappedHistory.removed} oldest message(s) ` +
-          `(${finalHistory.length} -> ${cappedHistory.messages.length}), ` +
-          `limit ${MAX_HISTORY_MESSAGES}`,
-      ),
-      "context-cap-log",
-    );
-  }
-
-  const resumingApproval = isResumingApproval(opts.uiMessages ?? []);
-  // Universal sequence validator and repairer:
-  // Guarantees invariants required by all LLM providers (OpenAI, Anthropic, Gemini):
-  // - No orphaned 'tool' messages without preceding 'tool-call's
-  // - Synthetic tool results for interrupted turns
-  // - Sequence never starts with 'tool' or 'assistant'
-  // - Trailing approval responses preserved only when actively resuming approval
-  const promptHistory = repairModelMessageSequence(cappedHistory.messages, {
-    preserveTrailingApproval: resumingApproval,
-  });
-
   const prompt = prepareAgentPrompt(
     stableSystem,
     opts.planMode ? PLAN_MODE_PROMPT : null,
-    promptHistory,
+    finalHistory,
     provider,
   );
 
@@ -1263,6 +1195,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
       once: true,
     });
   }
+  const resumingApproval = isResumingApproval(opts.uiMessages ?? []);
   // Silence budget before the run is declared wedged. When resuming approval,
   // step 0 executes the approved tool BEFORE the model is called, so the budget
   // is derived from that tool's own `timeout_secs` - never shorter than the work
@@ -1277,13 +1210,6 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // chunk, name the wait in the step label (the HUD reads "Round N · <step>"), so
   // the pause is an explained stall rather than a suspected hang.
   let stallNotice: ReturnType<typeof setTimeout> | null = null;
-  // Tool execution can outlive the model's silence clock: a tool-call hands
-  // control to the harness and the provider sends nothing until the tool
-  // returns. Track that gap separately so a stuck tool (hung bash, blocked
-  // browser fetch, runaway subagent) still aborts instead of leaving the run
-  // in "streaming" forever.
-  const MAX_TOOL_EXECUTION_MS = 120_000;
-  let toolExecutionTimer: ReturnType<typeof setTimeout> | null = null;
   const clearFirstStepTimer = (): void => {
     if (firstStepTimer) {
       clearTimeout(firstStepTimer);
@@ -1292,10 +1218,6 @@ export async function runAgentStream(opts: RunAgentOptions) {
     if (stallNotice) {
       clearTimeout(stallNotice);
       stallNotice = null;
-    }
-    if (toolExecutionTimer) {
-      clearTimeout(toolExecutionTimer);
-      toolExecutionTimer = null;
     }
   };
   /**
@@ -1465,11 +1387,9 @@ export async function runAgentStream(opts: RunAgentOptions) {
       (repeatPred(args) as boolean)
         ? requestSynthesisOrStop("tool-repetition")
         : false,
-    // Idle-read-loop guard: detects read-only tools (`read_file`, etc.) called
-    // with the same args `maxRepeats` times. Unlike `noToolRepetition`, this
-    // uses input-only fingerprints and is not confused when context eviction
-    // replaces old results with a placeholder (which changes the result digest
-    // and makes each re-read look like new progress to the result-aware guard).
+    // Idle-read-loop guard: detects read-only tools called with the same args
+    // 5+ times. Unlike noToolRepetition, this uses input-only fingerprints so
+    // context eviction replacing old results does not fool it.
     (args) =>
       (idleReadPred(args) as boolean)
         ? requestSynthesisOrStop("idle-read-loop")
@@ -1783,14 +1703,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
     // model is reminded at every tool decision what is done / in progress —
     // the mechanical nudge that gets items checked off as they finish instead
     // of being left stale until the end.
-    prepareStep: ({
-      stepNumber,
-      messages: stepMessages,
-    }: {
-      stepNumber: number;
-      messages?: Array<ModelMessage>;
-      [key: string]: unknown;
-    }) => {
+    prepareStep: ({ stepNumber }: { stepNumber: number }) => {
       const toolChoice = synthesisRequested
         ? ("none" as const)
         : forceFanout && stepNumber === 0
@@ -1818,48 +1731,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
             (name) => alwaysActive.has(name) || discoveredTools.has(name),
           )
         : undefined;
-
-      let nextMessages: Array<ModelMessage> | undefined;
-      if (
-        stepNumber > 0 &&
-        Array.isArray(stepMessages) &&
-        stepMessages.length > 0
-      ) {
-        const eviction = evictObsoleteToolOutputs(stepMessages);
-        const compacted = compactModelMessagesDetailed(
-          eviction.messages,
-          compactionLimit,
-          reservedTokens,
-        );
-        if (eviction.summary.evictedToolCalls > 0 || compacted.compacted) {
-          nextMessages = repairModelMessageSequence(compacted.messages, {
-            preserveTrailingApproval: false,
-          });
-          if (eviction.summary.evictedToolCalls > 0) {
-            fireAndForget(
-              logInfo(
-                `[ai] step ${stepNumber} eviction: collapsed ${eviction.summary.evictedToolCalls} stale output(s), ~${eviction.summary.estimatedTokensSaved} tokens saved`,
-              ),
-              "step-eviction-log",
-            );
-          }
-          if (compacted.compacted) {
-            fireAndForget(
-              logInfo(
-                `[ai] step ${stepNumber} compact: elided content in ${compacted.droppedCount} message(s), target ${compactionLimit} tok`,
-              ),
-              "step-compact-log",
-            );
-          }
-        }
-      }
-
-      return {
-        toolChoice,
-        system,
-        ...(activeTools ? { activeTools } : {}),
-        ...(nextMessages ? { messages: nextMessages } : {}),
-      };
+      return { toolChoice, system, ...(activeTools ? { activeTools } : {}) };
     },
     abortSignal: abortController.signal,
     // Silence is measured from the LAST chunk, not from the run's first one.
@@ -1873,65 +1745,12 @@ export async function runAgentStream(opts: RunAgentOptions) {
     // design, and a long build or scan is normal rather than a stall. The next
     // step re-arms once the tool is done.
     onChunk: ({ chunk }) => {
+      // ANY chunk is the stream being alive, including the ones the directive
+      // has no opinion about, so the shared clock is fed before the policy runs.
       markRunActivity();
-      // `tool-result` first: `watchdogDirective` maps it to "rearm", so a
-      // directive-first chain never reaches the delivery timer below and a
-      // model that goes silent after a tool result hangs on the generic
-      // watchdog instead of the dedicated 60s delivery timeout.
-      if (chunk.type === "tool-result") {
-        // The generic watchdog armed here already covers post-tool-result
-        // silence: it is activity-aware (consults `remainingSilenceMs`) and uses
-        // the run's `stallTimeoutMs` budget. A dedicated 60s delivery timer used
-        // to sit alongside it, but it was both SHORTER and dumber - a raw
-        // `setTimeout` that aborted unconditionally without consulting the
-        // activity clock. A reasoning model re-reading a large context after a
-        // tool result can legitimately take longer than 60s to emit its first
-        // token; the old timer killed six healthy runs in a row and the
-        // auto-resume loop never converged (log 2026-09-20 12:16-12:26,
-        // `compat-dd2eb85f`, 134k-token context, prior step answered in 6.5s).
-        // Removing it keeps full silence coverage via the activity-aware
-        // watchdog without the false aborts.
-        clearFirstStepTimer();
-        armModelWatchdog();
-        return;
-      }
       const directive = watchdogDirective(chunk.type);
-      if (directive === "rearm") {
-        armModelWatchdog();
-      } else if (directive === "disarm") {
-        const rawChunk = chunk as Record<string, unknown>;
-        const args = (rawChunk.args ?? rawChunk.input) as
-          | Record<string, unknown>
-          | undefined;
-        const secs = args?.timeout_secs ?? args?.timeoutSecs ?? args?.timeout;
-        const toolBudgetMs =
-          typeof secs === "number" && Number.isFinite(secs) && secs > 0
-            ? Math.min(
-                Math.max(MAX_TOOL_EXECUTION_MS, secs * 1000 + 30_000),
-                30 * 60_000,
-              )
-            : MAX_TOOL_EXECUTION_MS;
-        const checkToolExecution = (): void => {
-          const remaining = remainingSilenceMs(Date.now(), toolBudgetMs);
-          if (remaining > 0) {
-            toolExecutionTimer = setTimeout(checkToolExecution, remaining);
-            return;
-          }
-          const elapsed = Math.round((Date.now() - runStart) / 1000);
-          fireAndForget(
-            logWarn(
-              `[ai] tool execution exceeded ${Math.round(toolBudgetMs / 1000)}s without activity, aborting the run (elapsed=${elapsed}s, model=${modelId}, provider=${provider})`,
-            ),
-            "tool-execution-timeout",
-          );
-          abortController.abort(
-            new Error(
-              `A tool did not complete or show activity within ${Math.round(toolBudgetMs / 1000)}s. The run was stopped to avoid hanging forever.`,
-            ),
-          );
-        };
-          toolExecutionTimer = setTimeout(checkToolExecution, toolBudgetMs);
-      }
+      if (directive === "rearm") armModelWatchdog();
+      else if (directive === "disarm") clearFirstStepTimer();
     },
     onStepFinish: (step) => {
       clearFirstStepTimer();
@@ -2205,11 +2024,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
             // an inexact total says so instead of looking precise.
             `${toolPayload.unmeasured > 0 ? ` (${toolPayload.unmeasured} unmeasured)` : ""}) | ` +
             `tokens ${runInput}in ${runOutput}out, cache ${cachePct}% | ` +
-            // "this round" is explicit because the budget is per round: every
-            // auto-sent round is its own runAgentStream with its own counter. A
-            // bare `1/50` reads as if the whole task had used one step of
-            // fifty, which is how a long serial run was misread as a stalled one.
-            `steps ${stepsSeen}/${stepBudget} this round | stop ${settledStop ?? (finishReason || "done")} | ` +
+            `steps ${stepsSeen}/${stepBudget} | stop ${settledStop ?? (finishReason || "done")} | ` +
             `${modelId}`,
         ),
         "run-summary-log",
@@ -2233,63 +2048,6 @@ export async function runAgentStream(opts: RunAgentOptions) {
       });
     },
   });
-}
-
-export function capHistoryMessageCount(
-  messages: ModelMessage[],
-  limit = MAX_HISTORY_MESSAGES,
-  tailKeep = HISTORY_TAIL_KEEP,
-): {
-  messages: ModelMessage[];
-  capped: boolean;
-  removed: number;
-} {
-  if (messages.length <= limit) {
-    return { messages, capped: false, removed: 0 };
-  }
-
-  const excess = messages.length - limit;
-  const tailStart = Math.max(0, messages.length - tailKeep);
-
-  // Slicing blindly into the middle of a tool turn leaves an orphaned 'tool'
-  // message or severed 'tool-call', causing LLM providers (e.g. OpenAI) to
-  // reject with HTTP 400 ("Messages with role 'tool' must be a response to a preceding message with 'tool_calls'").
-  //
-  // Find a clean cut point starting with a 'user' message:
-  // 1. Search forward from `excess` up to `tailStart` for a 'user' message.
-  //    This keeps <= limit messages without touching the protected tail.
-  // 2. If no user message forward, search backward from `excess - 1` down to 1.
-  // 3. Fallback: slice at Math.min(excess, tailStart).
-  let cutIdx = -1;
-  for (let i = excess; i < tailStart; i++) {
-    if (messages[i].role === "user") {
-      cutIdx = i;
-      break;
-    }
-  }
-
-  if (cutIdx === -1) {
-    for (let i = excess - 1; i >= 1; i--) {
-      if (messages[i].role === "user") {
-        cutIdx = i;
-        break;
-      }
-    }
-  }
-
-  const prefixToDrop = cutIdx !== -1 ? cutIdx : Math.min(excess, tailStart);
-  let sliced = messages.slice(prefixToDrop);
-
-  // If the slice still begins on a tool message, skip leading tool messages.
-  while (sliced.length > 0 && sliced[0].role === "tool") {
-    sliced = sliced.slice(1);
-  }
-
-  return {
-    messages: sliced,
-    capped: true,
-    removed: messages.length - sliced.length,
-  };
 }
 
 export { EMPTY_USAGE };

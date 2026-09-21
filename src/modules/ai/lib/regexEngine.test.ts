@@ -12,7 +12,8 @@ const LOOK_AHEAD_ERROR =
 //   rg: the literal "\n" is not allowed in a regex
 //   Consider enabling multiline mode with the --multiline flag (or -U for short).
 // The engine's advice is unactionable here: this tool has no multiline mode.
-const NEWLINE_ERROR = 'regex parse error: the literal "\\n" is not allowed in a regex';
+const NEWLINE_ERROR =
+  'regex parse error: the literal "\\n" is not allowed in a regex';
 
 describe("explainSearchEngineError", () => {
   it("keeps the engine's message and adds the rewrite for look-around", () => {

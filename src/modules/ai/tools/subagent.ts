@@ -1,12 +1,15 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { SUBAGENTS, subagentIsReadOnly, type SubagentType } from "../agents/registry";
+import {
+  SUBAGENTS,
+  type SubagentType,
+  subagentIsReadOnly,
+} from "../agents/registry";
 import {
   resolveSubagentType,
   routeSubagentType,
 } from "../agents/resolveSubagent";
 import { effectiveSubagentMaxDepth, runSubagent } from "../agents/runSubagent";
-import { defaultBatchIsolation } from "../lib/subagentIsolation";
 import {
   cascadeSkip,
   detectBatchConflicts,
@@ -120,10 +123,9 @@ Approval works exactly as it does for you: read-only tools auto-run, and every m
               "subagent nesting depth cap reached; this agent cannot spawn further subagents",
           };
         }
-        const runTask = async () => {
-          // Resolve loose / synonym names to a real roster id so an approximate
-          // 'type' from the model never fails the call.
-          const resolved = resolveSubagentType(type || "general");
+        // Resolve loose / synonym names to a real roster id so an approximate
+        // 'type' from the model never fails the call.
+        const resolved = resolveSubagentType(type || "general");
         const { apiKeys, selectedModelId, patchAgentMeta, activeSessionId } =
           useChatStore.getState();
         // Register a live run so the tool card can show its progress + result.
@@ -187,14 +189,8 @@ Approval works exactly as it does for you: read-only tools auto-run, and every m
           useSubagentRunStore.getState().fail(sid, runId, String(e));
           return { error: String(e), type: resolved };
         }
-      };
-
-      if (ctx.yieldSlot) {
-        return await ctx.yieldSlot(runTask);
-      }
-      return await runTask();
-    },
-  }),
+      },
+    }),
 
     run_subagents: tool({
       description: `Spawn SEVERAL isolated subagents in one call and get all their summaries back together. Prefer this over repeating run_subagent: independent tasks run at the same time instead of one after another.
@@ -255,7 +251,7 @@ Each task's subagent has the same toolset you do and may itself spawn further su
             .boolean()
             .optional()
             .describe(
-              "Give each WRITING task its own git worktree under .termigo/worktrees/, so concurrent tasks cannot read each other's half-finished edits. Defaults to ON when the batch has two or more writers - that is when they overwrite each other - and stays off for a lone writer; pass false to force sharing. Read-only tasks are unaffected (a worktree would only be a stale copy for them), and so are SSH sessions, non-git workspaces, and tasks that fail to branch - those share the workspace and the result says which. Nothing merges back automatically; each result reports its worktree path.",
+              "Give each WRITING task its own git worktree under .termigo/worktrees/, so concurrent tasks cannot read each other's half-finished edits. Read-only tasks are unaffected (a worktree would only be a stale copy for them), and so are SSH sessions, non-git workspaces, and tasks that fail to branch - those share the workspace and the result says which. Nothing merges back automatically; each result reports its worktree path.",
             ),
         }),
       ),
@@ -266,21 +262,19 @@ Each task's subagent has the same toolset you do and may itself spawn further su
               "subagent nesting depth cap reached; this agent cannot spawn further subagents",
           };
         }
-        const runBatch = async () => {
-          const batchSignal = opts?.abortSignal;
-          const notes: string[] = [];
-          let batch = tasks;
-          if (batch.length > MAX_TASKS) {
-            notes.push(
-              `${batch.length - MAX_TASKS} task(s) past the cap of ${MAX_TASKS} were dropped.`,
-            );
-            batch = batch.slice(0, MAX_TASKS);
-          }
-          const effectiveCap = childDepth > 1 ? 2 : MAX_CONCURRENCY;
-          const concurrency = Math.min(
-            max_concurrency ?? effectiveCap,
-            effectiveCap,
+        const batchSignal = opts?.abortSignal;
+        const notes: string[] = [];
+        let batch = tasks;
+        if (batch.length > MAX_TASKS) {
+          notes.push(
+            `${batch.length - MAX_TASKS} task(s) past the cap of ${MAX_TASKS} were dropped.`,
           );
+          batch = batch.slice(0, MAX_TASKS);
+        }
+        const concurrency = Math.min(
+          max_concurrency ?? MAX_CONCURRENCY,
+          MAX_CONCURRENCY,
+        );
 
         const plan = planSubagentBatch(batch);
         for (const e of plan.droppedEdges) {
@@ -309,19 +303,6 @@ Each task's subagent has the same toolset you do and may itself spawn further su
         // edits from the same baseline, both write, the second overwrites the
         // first. Reported before anything runs so the orchestrator (or the user
         // reading the card) can decide - the safest default is to note it.
-        // A batch of writers is where isolation must default on: two tasks
-        // editing from the same baseline overwrite each other. A lone writer
-        // stays opt-in so its work is not stranded in an unrequested worktree.
-        const writingCount = results.filter(
-          (r) => !subagentIsReadOnly(r.type),
-        ).length;
-        const isolateEffective = isolate ?? defaultBatchIsolation(writingCount);
-        if (isolate === undefined && isolateEffective) {
-          notes.push(
-            `Isolation is on by default for this batch (${writingCount} writers): each writing task works in its own git worktree. Nothing merges back automatically - read worktreePath on each result, then worktree_diff / worktree_discard as needed.`,
-          );
-        }
-
         const conflicts = detectBatchConflicts(
           batch.map((t, i) => ({
             paths: pathsInPrompt(t.prompt),
@@ -390,7 +371,7 @@ Each task's subagent has the same toolset you do and may itself spawn further su
               // Numbered, because several run at once and the approval queue
               // is unreadable if every row says "builder".
               requester: `${task.description ?? resolvedType} #${i + 1}`,
-              isolate: isolateEffective,
+              isolate,
               abortSignal: batchSignal,
               onStep: (label) => {
                 patchAgentMeta({
@@ -466,17 +447,6 @@ Each task's subagent has the same toolset you do and may itself spawn further su
           await Promise.race(inFlight.values());
         }
 
-        // Defensive sweep: ensure any task not settled by the loop is marked
-        // skipped rather than returning with undefined summary and status.
-        for (let idx = 0; idx < state.length; idx++) {
-          if (!state[idx].settled) {
-            state[idx] = { settled: true, bad: true, running: false };
-            results[idx].skipped ??= batchSignal?.aborted
-              ? "Batch aborted"
-              : "Dependency never completed or task was unreached";
-          }
-        }
-
         const failedOrSkipped = results.filter(
           (r) => r.error || r.skipped,
         ).length;
@@ -489,20 +459,14 @@ Each task's subagent has the same toolset you do and may itself spawn further su
             `${inconclusive} of ${results.length} subagent(s) reported an incomplete review - their conclusions are unverified; re-run those with a narrower scope or do that part yourself.`,
           );
         }
-          return {
-            count: results.length,
-            maxConcurrency: concurrency,
-            ...(failedOrSkipped ? { failedOrSkipped } : {}),
-            ...(inconclusive ? { inconclusive } : {}),
-            ...(notes.length ? { note: notes.join(" ") } : {}),
-            results,
-          };
+        return {
+          count: results.length,
+          maxConcurrency: concurrency,
+          ...(failedOrSkipped ? { failedOrSkipped } : {}),
+          ...(inconclusive ? { inconclusive } : {}),
+          ...(notes.length ? { note: notes.join(" ") } : {}),
+          results,
         };
-
-        if (ctx.yieldSlot) {
-          return await ctx.yieldSlot(runBatch);
-        }
-        return await runBatch();
       },
     }),
   } as const;

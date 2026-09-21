@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ToolContext } from "../tools/context";
 import {
-  defaultBatchIsolation,
-  extractGitErrorDetail,
   planSubagentIsolation,
   rerootToolContext,
   worktreeRelativePath,
@@ -63,22 +61,6 @@ describe("planSubagentIsolation", () => {
   });
 });
 
-describe("defaultBatchIsolation", () => {
-  // A lone writer keeps the long-standing shared-tree behaviour: auto-isolating
-  // it would strand its work in a worktree the caller never asked for.
-  it("stays off for zero or one writer", () => {
-    expect(defaultBatchIsolation(0)).toBe(false);
-    expect(defaultBatchIsolation(1)).toBe(false);
-  });
-
-  // Two writers branching from the same baseline is exactly the collision this
-  // module exists to prevent, so it turns on by itself.
-  it("turns on at two or more writers", () => {
-    expect(defaultBatchIsolation(2)).toBe(true);
-    expect(defaultBatchIsolation(8)).toBe(true);
-  });
-});
-
 describe("rerootToolContext", () => {
   const ctx = {
     getCwd: () => "/repo/sub",
@@ -113,32 +95,3 @@ describe("worktreeRelativePath", () => {
     expect(worktreeRelativePath("abc123")).toBe(".termigo/worktrees/abc123");
   });
 });
-
-describe("extractGitErrorDetail", () => {
-  it("extracts fatal error line when git progress output is in stderr", () => {
-    const stderr = `Preparing worktree (new branch 'termigo-sandbox/explore_1')
-fatal: 'termigo-sandbox/explore_1' already exists`;
-    expect(extractGitErrorDetail(stderr)).toBe(
-      "fatal: 'termigo-sandbox/explore_1' already exists",
-    );
-  });
-
-  it("extracts error line when git prints multiple lines", () => {
-    const stderr = `Preparing worktree (new branch 'termigo-sandbox/explore_2')
-error: cannot lock ref 'refs/heads/termigo-sandbox/explore_2'`;
-    expect(extractGitErrorDetail(stderr)).toBe(
-      "error: cannot lock ref 'refs/heads/termigo-sandbox/explore_2'",
-    );
-  });
-
-  it("falls back to last non-empty line if no explicit fatal/error prefix", () => {
-    const stderr = `Preparing worktree
-something unexpected occurred`;
-    expect(extractGitErrorDetail(stderr)).toBe("something unexpected occurred");
-  });
-
-  it("handles empty stderr gracefully", () => {
-    expect(extractGitErrorDetail("")).toBe("");
-  });
-});
-

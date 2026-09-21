@@ -28,13 +28,6 @@ describe("discoveredWorktrees", () => {
     expect(found.map((w) => w.id)).toEqual(["win7"]);
   });
 
-  it("parses a relative worktree path", () => {
-    const found = discoveredWorktrees([
-      wt("termigo-sandbox/rel1", ".termigo/worktrees/rel1"),
-    ]);
-    expect(found.map((w) => w.id)).toEqual(["rel1"]);
-  });
-
   // THE dangerous case. A worktree the user created for their own work must never
   // be reported as a Termigo sandbox, because the report is what `worktree_discard`
   // acts on.

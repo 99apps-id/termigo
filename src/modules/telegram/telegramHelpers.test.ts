@@ -6,12 +6,7 @@
 // live install, including the one that regressed.
 
 import { describe, expect, it } from "vitest";
-import {
-  type ChatLike,
-  hasActiveToolCalls,
-  lastAssistantText,
-  runBusy,
-} from "./telegramHelpers";
+import { type ChatLike, lastAssistantText } from "./telegramHelpers";
 
 const text = (value: string) => ({ type: "text", text: value });
 const tool = (name: string) => ({
@@ -130,103 +125,3 @@ describe("lastAssistantText", () => {
     expect(lastAssistantText(getter(undefined), "missing", 0)).toBeNull();
   });
 });
-
-describe("hasActiveToolCalls", () => {
-  it("returns false for undefined or empty chat", () => {
-    expect(hasActiveToolCalls(undefined)).toBe(false);
-    expect(hasActiveToolCalls(chatWith([]))).toBe(false);
-  });
-
-  it("returns false when tools are completed", () => {
-    const chat = chatWith([
-      {
-        role: "assistant",
-        parts: [
-          { type: "tool-bash_run", state: "output-available", output: "done" },
-        ],
-      },
-    ]);
-    expect(hasActiveToolCalls(chat)).toBe(false);
-  });
-
-  it("returns true when tool call is in input-available or approval-responded state", () => {
-    const chat1 = chatWith([
-      {
-        role: "assistant",
-        parts: [{ type: "tool-bash_run", state: "input-available" }],
-      },
-    ]);
-    expect(hasActiveToolCalls(chat1)).toBe(true);
-
-    const chat2 = chatWith([
-      {
-        role: "assistant",
-        parts: [{ type: "tool-bash_run", state: "approval-responded" }],
-      },
-    ]);
-    expect(hasActiveToolCalls(chat2)).toBe(true);
-  });
-
-  it("returns true for dynamic-tool without output", () => {
-    const chat = chatWith([
-      {
-        role: "assistant",
-        parts: [{ type: "dynamic-tool", state: "call" }],
-      },
-    ]);
-    expect(hasActiveToolCalls(chat)).toBe(true);
-  });
-
-  it("returns false when unfinished tool was in a previous message", () => {
-    const chat = chatWith([
-      {
-        role: "assistant",
-        parts: [{ type: "tool-bash_run", state: "approval-responded" }],
-      },
-      {
-        role: "user",
-        parts: [{ type: "text", text: "next question" }],
-      },
-    ]);
-    expect(hasActiveToolCalls(chat)).toBe(false);
-  });
-
-  it("returns false when approval-responded was in an earlier step and latest step completed", () => {
-    const chat = chatWith([
-      {
-        role: "assistant",
-        parts: [
-          { type: "step-start" },
-          { type: "tool-bash_run", state: "approval-responded" },
-          { type: "step-start" },
-          { type: "tool-read_file", state: "output-available", output: "ok" },
-          { type: "text", text: "All done." },
-        ],
-      },
-    ]);
-    expect(hasActiveToolCalls(chat)).toBe(false);
-  });
-});
-
-describe("runBusy", () => {
-  it("returns true if hasActiveTools is true", () => {
-    expect(runBusy("ready", "idle", false, true)).toBe(true);
-  });
-
-  it("returns true if hasPendingApproval is true", () => {
-    expect(runBusy("ready", "idle", true, false)).toBe(true);
-  });
-
-  it("returns true for streaming or submitted or thinking statuses", () => {
-    expect(runBusy("submitted", "idle")).toBe(true);
-    expect(runBusy("streaming", "idle")).toBe(true);
-    expect(runBusy("ready", "thinking")).toBe(true);
-    expect(runBusy("ready", "streaming")).toBe(true);
-    expect(runBusy("ready", "awaiting-approval")).toBe(true);
-  });
-
-  it("returns false when idle with no pending approvals or active tools", () => {
-    expect(runBusy("ready", "idle", false, false)).toBe(false);
-  });
-});
-

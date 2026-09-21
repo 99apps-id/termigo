@@ -117,7 +117,7 @@ export const PruneNotice = memo(function PruneNotice({
   );
 });
 
-export type StopKind = AgentStopReason | "stopped";
+export type StopKind = AgentStopReason | "idle-read-loop" | "stopped";
 
 export function stopCopy(
   kind: StopKind,
@@ -144,7 +144,6 @@ export function stopCopy(
         hint: "The agent was stuck in a read loop. Try being more specific about what to write or edit next.",
         action: "Continue anyway",
       };
-
     case "text-repetition":
       return {
         text: "Stopped: the response degenerated into repeating the same text.",
@@ -163,6 +162,7 @@ export function stopCopy(
         hint: "The agent kept hitting a failing tool. Check the command/path it was trying, then continue.",
         action: "Continue anyway",
       };
+
     case "tool-only-loop":
       return {
         text: "Stopped: the model asked for tools repeatedly without producing a final answer.",

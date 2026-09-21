@@ -44,7 +44,6 @@ import {
 } from "../lib/providerFailover";
 import { pruneStale } from "../lib/pruneStale";
 import {
-  editableTextOf,
   flushOne,
   flushShouldHold,
   isResumeParts,
@@ -53,7 +52,6 @@ import {
   type SteerPart,
   submissionAction,
 } from "../lib/steer";
-import { buildSteeredContinuationPrompt } from "../lib/steerContinuation";
 import {
   isToolChoiceRejectionError,
   recordToolChoiceRejection,
@@ -70,7 +68,6 @@ import {
   chats,
   getActiveProviderKey,
   seedMessages,
-  setApprovalRespondedHandler,
   setSessionLeftHandler,
   touchChat,
   useChatStore,
@@ -104,9 +101,8 @@ const TOOLCHOICE_AUTO_RESUME_MS = 5_000;
 const toolChoiceAutoResumeAt = new Map<string, number>();
 
 // Cap the agentic loop in ROUNDS, not per-round steps. Generously sized so
-// complex autonomous tasks continue without artificial interruption, but capped
-// to prevent runaway unattended token spending.
-const MAX_LOOP_ROUNDS = 40;
+// complex autonomous tasks continue without artificial interruption.
+const MAX_LOOP_ROUNDS = 100;
 
 // How many times one task may resume itself after pausing on its step budget
 // (see autoContinue.ts). Reaching the budget is a pause, not trouble - but each
@@ -143,8 +139,7 @@ function requestAutoContinue(sessionId: string): boolean {
   if (useChatStore.getState().steerQueue.pending.length > 0) return false;
   const used = autoContinueCount.get(sessionId) ?? 0;
   if (!autoContinueSlot(used)) return false;
-  const next = used + 1;
-  autoContinueCount.set(sessionId, next);
+  autoContinueCount.set(sessionId, used + 1);
   useChatStore.getState().patchAgentMeta({
     status: "thinking",
     stopReason: null,
@@ -152,16 +147,10 @@ function requestAutoContinue(sessionId: string): boolean {
   });
   setTimeout(() => {
     if (!canResumeDeferred(sessionId)) {
-      // The run was stopped or superseded before this timer fired. Roll the
-      // counter back so a later legitimate auto-continue is not penalised by
-      // an attempt that never actually started.
-      autoContinueCount.set(sessionId, next - 1);
       releaseFabricatedBusy(sessionId);
       return;
     }
     void resumeRun().catch(() => {
-      // Same rollback on a failed resume attempt.
-      autoContinueCount.set(sessionId, next - 1);
       useChatStore.getState().patchAgentMeta({
         status: "error",
         error:
@@ -176,8 +165,8 @@ function requestAutoContinue(sessionId: string): boolean {
 /**
  * Verification-on-stop gate (Hermes parity, policy only).
  *
- * A run that ended CLEANLY right after editing code -- with no fresh passing
- * verification evidence since the last edit -- gets one bounded synthetic
+ * A run that ended CLEANLY right after editing code — with no fresh passing
+ * verification evidence since the last edit — gets one bounded synthetic
  * follow-up asking the agent to run the checks, repair failures, and
  * summarise what passed (or name the concrete blocker). The gate never runs
  * checks itself; it only reads the ledger the agent loop kept.
@@ -253,11 +242,6 @@ const stopLatch = new Set<string>();
 
 // Tracks failed / aborted approval resumes per session to prevent infinite auto-send retry storms.
 const approvalResumeFailureCount = new Map<string, number>();
-
-export function clearApprovalLatches(sessionId: string): void {
-  stopLatch.delete(sessionId);
-  approvalResumeFailureCount.delete(sessionId);
-}
 
 // Connectivity recovery: when the provider is unreachable, keep the run
 // resumable and resume it automatically once the network is back, so an
@@ -377,10 +361,6 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     getRemoteSession: () =>
       runAnchor.get(sessionId)?.remote ??
       useChatStore.getState().live.getRemoteSession(),
-    clearRemoteSession: () => {
-      const anchor = runAnchor.get(sessionId);
-      if (anchor) anchor.remote = null;
-    },
     getWorkspaceRoot: () =>
       runAnchor.get(sessionId)?.root ??
       useChatStore.getState().live.getWorkspaceRoot(),
@@ -420,8 +400,6 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     browserList: () => useChatStore.getState().live.browserList(),
     spawnAgent: (prompt, agent) =>
       useChatStore.getState().live.spawnManagedAgent(prompt, sessionId, agent),
-    openSshTab: (connectionId, title) =>
-      useChatStore.getState().live.openSshTab?.(connectionId, title) ?? null,
     readAgentOutput: (leafId) =>
       useChatStore.getState().live.readLeafBuffer(leafId),
     readCache,
@@ -598,7 +576,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       if (stopReason === "step-cap") requestAutoContinue(sessionId);
       // Verification-on-stop: a CLEAN finish right after unverified code edits
       // gets one bounded follow-up (preference-gated; see requestVerifyNudge).
-      // Runs after the step-cap branch so a budget pause continues as before --
+      // Runs after the step-cap branch so a budget pause continues as before —
       // the gate only applies when the model believed it was done.
       if (stopReason === null) {
         requestVerifyNudge(sessionId, info.verify);
@@ -627,32 +605,6 @@ function makeChat(sessionId: string): Chat<UIMessage> {
 
   const initialMessages = seedMessages.get(sessionId);
   seedMessages.delete(sessionId);
-
-  function extractLatestToolSignature(
-    msgs: readonly UIMessage[],
-  ): string | null {
-    for (let i = msgs.length - 1; i >= 0; i--) {
-      const m = msgs[i];
-      if (m.role !== "assistant") continue;
-      const parts = m.parts ?? [];
-      for (let j = parts.length - 1; j >= 0; j--) {
-        const p = parts[j] as Record<string, unknown>;
-        const type = typeof p?.type === "string" ? p.type : "";
-        if (type.startsWith("tool-") || type === "dynamic-tool") {
-          const toolName = (p.toolName as string) ?? type;
-          const inputStr = JSON.stringify(p.input ?? p.args ?? "");
-          const state = (p.state as string) ?? "";
-          const err =
-            p.errorText ?? p.error ?? (state === "output-error" ? "error" : "");
-          const outStr = err
-            ? `err:${JSON.stringify(err)}`
-            : JSON.stringify(p.output ?? "");
-          return `${toolName}:${inputStr}:${outStr}`;
-        }
-      }
-    }
-    return null;
-  }
 
   return new Chat<UIMessage>({
     id: sessionId,
@@ -705,13 +657,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       ) {
         return autoSendAllowed;
       }
-      const signature = extractLatestToolSignature(transcript);
-      const decision = autoSendGate(
-        autoSendState,
-        progress,
-        undefined,
-        signature,
-      );
+      const decision = autoSendGate(autoSendState, progress);
       autoSendState = decision.state;
       autoSendDecidedAt = progress;
       autoSendAllowed = decision.allow;
@@ -762,35 +708,6 @@ function makeChat(sessionId: string): Chat<UIMessage> {
           });
           useChatStore.getState().syncRunMeta();
           return;
-        }
-        // WHO stopped the run decides what the user sees.
-        //
-        // `stopLatch` is set by `stopRun()` before the abort, so it is the
-        // reliable witness of a user-pressed Stop. A watchdog abort (model
-        // silent, tool over budget) never sets it - and used to land in the
-        // same quiet branch, so the run ended with NO message at all and the
-        // UI read exactly like the user had pressed Stop. The watchdogs abort
-        // with a descriptive reason (preserved end-to-end by proxyFetch's
-        // `makeAbortError(signal.reason)`), so surface it as an error card:
-        // the user learns WHY it stopped and gets Continue.
-        //
-        // The discriminator is "did humanizeModelError RECOGNISE the reason":
-        // a known stall/watchdog phrase is rewritten into actionable guidance
-        // (so `humanized !== raw`), while a generic abort with no reason
-        // ("This operation was aborted", "aborted") passes through unchanged
-        // and stays a quiet stop. That keeps a real user Stop silent without
-        // enumerating every watchdog string here.
-        if (!stopLatch.has(sessionId) && raw.trim()) {
-          const humanized = humanizeModelError(raw);
-          if (humanized !== raw) {
-            useChatStore.getState().patchAgentMeta({
-              status: "error",
-              error: humanized,
-              stoppedByUser: false,
-            });
-            useChatStore.getState().syncRunMeta();
-            return;
-          }
         }
         useChatStore.getState().patchAgentMeta({
           status: "idle",
@@ -1060,7 +977,7 @@ export async function sendParts(
       // only when every item is completed, so a list the agent abandoned
       // mid-plan (leftover pending items) would otherwise sit on top of the
       // chat while the user has already moved on. A resume is the same task,
-      // so it keeps the list -- and so does a verification nudge.
+      // so it keeps the list — and so does a verification nudge.
       if (!isResumeParts(parts) && !isVerifyNudgeParts(parts)) {
         void useTodosStore.getState().clearSession(sessionId);
       }
@@ -1167,60 +1084,20 @@ export async function flushSteer(bypassBusyCheck = false): Promise<boolean> {
     }
     // A fresh user turn resets the loop-round counter (see sendParts).
     store.patchAgentMeta({ round: 0 });
-    // A steer message continues the in-flight run with user guidance: preserve
-    // the existing todos rather than wiping them, and weave the steer prompt.
-    let steerParts = out.parts;
+    // A queued task is a new task, not a resume: clear the previous task's list
+    // so the strip does not carry stale work into it (see sendParts).
     if (!isResumeParts(out.parts) && !isVerifyNudgeParts(out.parts)) {
-      const steerText = editableTextOf(out.parts);
-      if (steerText.trim()) {
-        const activeTodos =
-          useTodosStore.getState().bySession[sessionId]?.items ?? [];
-        const completedSteps = activeTodos
-          .filter((t) => t.status === "completed")
-          .map((t) => t.title);
-
-        const chatMessages = chats.get(sessionId)?.messages ?? [];
-        const userMessages = chatMessages.filter((m) => m.role === "user");
-        const originalTask =
-          userMessages.length > 0
-            ? editableTextOf(
-                (userMessages[0].parts as readonly SteerPart[]) ?? [],
-              )
-            : undefined;
-
-        const steeredPrompt = buildSteeredContinuationPrompt({
-          originalTask,
-          completedSteps:
-            completedSteps.length > 0 ? completedSteps : undefined,
-          steerInput: steerText,
-        });
-
-        const nonTextParts = out.parts.filter((p) => p.type !== "text");
-        steerParts = [{ type: "text", text: steeredPrompt }, ...nonTextParts];
-      }
+      void useTodosStore.getState().clearSession(sessionId);
     }
     // A run that yielded to this queued task set stopReason "steered"; clear it
     // so no stale "Continue" prompt lingers as the queued task takes over.
     store.patchAgentMeta({ stopReason: null, stoppedByUser: false });
-    // Pin/refresh the workspace anchor to reflect the current active workspace/terminal
-    // when the steer message is flushed.
-    {
-      const live = useChatStore.getState().live;
-      const at = Date.now();
-      pruneStale(runAnchor, (anchor) => anchor.at, at, RUN_ANCHOR_TTL_MS);
-      runAnchor.set(sessionId, {
-        cwd: live.getCwd(),
-        root: live.getWorkspaceRoot(),
-        remote: live.getRemoteSession(),
-        at,
-      });
-    }
     // A queued task starts a fresh run, so mark it in flight for restart
     // recovery.
     store.markRunStarted();
     try {
       const c = getOrCreateChat(sessionId);
-      await c.sendMessage({ role: "user", parts: steerParts } as Parameters<
+      await c.sendMessage({ role: "user", parts: out.parts } as Parameters<
         typeof c.sendMessage
       >[0]);
     } catch (e) {
@@ -1319,14 +1196,3 @@ setSessionLeftHandler((_sessionId, messages) => {
     }
   })();
 });
-
-// Clear stop and failure latches when an approval response arrives, so the SDK's
-// sendAutomaticallyWhen can resume the run without being blocked by prior aborts.
-setApprovalRespondedHandler((sessionId) => {
-  clearApprovalLatches(sessionId);
-  useChatStore.getState().patchAgentMeta({
-    error: null,
-    stoppedByUser: false,
-  });
-});
-

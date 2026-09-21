@@ -1,13 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
-  balanceTelegramHtml,
   extractToolSummaries,
   formatCompletionCard,
   formatDuration,
   formatLiveProgress,
   formatMarkdownTable,
   formatTodoProgress,
-  formatToolActivity,
   markdownToTelegramHtml,
   summarizeToolInput,
   summarizeToolOutput,
@@ -120,12 +118,6 @@ describe("progressFormat", () => {
         summarizeToolOutput("read_file", { error: "file not found" }),
       ).toBe("error: file not found");
     });
-
-    it("names a timeout instead of reporting the default exit 0", () => {
-      expect(
-        summarizeToolOutput("bash_run", { timed_out: true, exit_code: null }),
-      ).toBe("timed out");
-    });
   });
 
   describe("extractToolSummaries", () => {
@@ -173,30 +165,6 @@ describe("progressFormat", () => {
         input: "C:/temp/junk.exe",
       });
     });
-
-    // From the field: `npm test` exited 1 and the progress trail (and the
-    // mirrored message) still showed a green "Ran", so the failure was
-    // invisible unless you opened the desktop app.
-    it("reads a non-zero exit code or a timeout as a failure", () => {
-      const summaries = extractToolSummaries([
-        {
-          type: "tool-bash_run",
-          state: "output-available",
-          input: { command: "npm test" },
-          output: { exit_code: 1, stderr: "2 tests failed" },
-        },
-        {
-          type: "tool-bash_run",
-          state: "output-available",
-          input: { command: "sleep 300" },
-          output: { timed_out: true, exit_code: null },
-        },
-      ]);
-
-      expect(summaries[0].state).toBe("error");
-      expect(summaries[1].state).toBe("error");
-      expect(formatToolActivity(summaries[0])).toContain("Failed");
-    });
   });
 
   describe("formatLiveProgress", () => {
@@ -209,14 +177,12 @@ describe("progressFormat", () => {
     });
 
     it("names each way a run can end", () => {
-      const card = (
-        outcome: "done" | "stopped" | "step-cap" | "error" | "still-running",
-      ) => formatCompletionCard({ status: "idle", completed: true, outcome });
+      const card = (outcome: "done" | "stopped" | "step-cap" | "error") =>
+        formatCompletionCard({ status: "idle", completed: true, outcome });
       expect(card("done")).toContain("✓ Done");
       expect(card("stopped")).toContain("⏹ Stopped");
       expect(card("step-cap")).toContain("⏸ Step limit reached");
       expect(card("error")).toContain("✗ Ended with error");
-      expect(card("still-running")).toContain("Working in background");
     });
 
     it("states how much was finished and how long it took", () => {
@@ -435,24 +401,6 @@ describe("progressFormat", () => {
         expect(source).not.toMatch(/\(\?<=/);
         expect(source).not.toMatch(/\(\?<!/);
       }
-    });
-
-    it("balances unclosed tags and escapes orphaned tags safely", () => {
-      // Unclosed tags are auto-closed in reverse order
-      expect(markdownToTelegramHtml("Teks <b>tebal tanpa tutup")).toBe(
-        "Teks <b>tebal tanpa tutup</b>",
-      );
-      expect(markdownToTelegramHtml("<b><i>bold italic")).toBe(
-        "<b><i>bold italic</i></b>",
-      );
-      // Orphaned closing tags are escaped
-      expect(markdownToTelegramHtml("halo</b> dunia")).toBe(
-        "halo&lt;/b&gt; dunia",
-      );
-      // Mis-nested tags close properly
-      expect(balanceTelegramHtml("<b><i>teks</b> lanjutan")).toBe(
-        "<b><i>teks</i></b> lanjutan",
-      );
     });
   });
 

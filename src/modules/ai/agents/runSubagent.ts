@@ -8,12 +8,10 @@ import {
   noProgressStop,
   noToolRepetition,
 } from "../lib/agent";
-import { isRateLimitError } from "../lib/errors";
 import { buildExtensionTools } from "../lib/extensionTools";
 import { getProfile } from "../lib/harnessProfile";
 import { activeProfileIdFor } from "../lib/harnessProfileStore";
 import type { ProviderKeys } from "../lib/keyring";
-import { isWindowsPath } from "../lib/remoteFs";
 import { repairToolCall } from "../lib/repairToolCall";
 import { judgeSubagentEvidence } from "../lib/subagentEvidence";
 import {
@@ -21,22 +19,16 @@ import {
   planSubagentIsolation,
   rerootToolContext,
 } from "../lib/subagentIsolation";
-import { globalSubagentPool } from "../lib/subagentPool";
 import { subagentMadeProgress } from "../lib/subagentProgress";
 import { useChatStore } from "../store/chatStore";
 import type { ToolContext } from "../tools/context";
 import { buildTools } from "../tools/tools";
 import { buildAgentTools, buildSubagentSpec } from "./agentFactory";
-import {
-  SUBAGENTS,
-  type SubagentType,
-  subagentIsReadOnly,
-} from "./registry";
+import { SUBAGENTS, type SubagentType, subagentIsReadOnly } from "./registry";
 import {
   type AnyTool,
   type DenialBreaker,
   gate,
-  MAX_CONSECUTIVE_DENIALS,
   newFilesOnly,
   subagentToolNeedsGate,
   WRITE_FILE,
@@ -127,31 +119,18 @@ export async function runSubagent({
   const def = SUBAGENTS[type];
   if (!def) throw new Error(`unknown subagent type: ${type}`);
 
-  const workspaceRoot = toolContext.getWorkspaceRoot();
-  // When auditing or operating on a local workspace, subagents must not inherit
-  // an unrelated SSH session from an active terminal tab, and must resolve relative
-  // paths against the workspaceRoot. Only pentest agents retain the remote SSH session.
-  const isLocalWorkspace =
-    !type.startsWith("pentest") &&
-    (!workspaceRoot || isWindowsPath(workspaceRoot) || !toolContext.getRemoteSession());
-
   // Its own read history. The invariant `edit` enforces - read this file before
   // changing it - is meaningless if it can be satisfied by a read some other
   // agent did, which is what sharing the parent's cache amounted to.
-  const baseCtx: ToolContext = {
-    ...toolContext,
-    readCache: new Map(),
-    ...(isLocalWorkspace
-      ? {
-          getCwd: () => workspaceRoot ?? toolContext.getCwd(),
-          getRemoteSession: () => null,
-        }
-      : {}),
-  };
+  const baseCtx: ToolContext = { ...toolContext, readCache: new Map() };
 
   // Centralized spec: the roster def resolved against the active harness
   // profile, so a sub-agent carries the same profile guidance as the main run
   // (prelude, budget, capabilities) instead of a bare prompt.
+  const workspaceRoot = baseCtx.getWorkspaceRoot();
+  // Resolved from the ORIGINAL workspace root, BEFORE any isolation reroot: the
+  // harness profile is a workspace-level setting, so looking it up against a
+  // worktree path would find none and silently drop the profile's guidance.
   const profile = getProfile(activeProfileIdFor(workspaceRoot));
   const spec = buildSubagentSpec(type, profile);
 
@@ -167,13 +146,9 @@ export async function runSubagent({
       workspaceRoot,
     });
     if (plan.isolate) {
-      const suffix = Math.random().toString(36).slice(2, 7);
-      const label = requester
-        ? `${type}-${requester}-${suffix}`
-        : `${type}-${suffix}`;
       const made = await createIsolatedWorktree({
         ctx: baseCtx,
-        label,
+        label: `${type}-${requester ?? Math.random().toString(36).slice(2, 7)}`,
       });
       if (made.ok) {
         ctx = rerootToolContext(baseCtx, made.worktreePath);
@@ -189,9 +164,9 @@ export async function runSubagent({
         ).catch(() => {});
       }
     } else {
-      void logInfo(
-        `[ai] subagent ${type} NOT isolated: ${plan.reason}`,
-      ).catch(() => {});
+      void logInfo(`[ai] subagent ${type} NOT isolated: ${plan.reason}`).catch(
+        () => {},
+      );
     }
   }
 
@@ -213,24 +188,6 @@ export async function runSubagent({
     maxDepth: effectiveSubagentMaxDepth(),
     subagentType: type,
   });
-
-  const releaseSlot = await globalSubagentPool.acquire(abortSignal);
-  let currentRelease = releaseSlot;
-  ctx = {
-    ...ctx,
-    yieldSlot: async <T>(work: () => Promise<T>): Promise<T> => {
-      currentRelease();
-      try {
-        return await work();
-      } finally {
-        try {
-          currentRelease = await globalSubagentPool.acquire(abortSignal);
-        } catch {
-          // If aborted while yielding, do not mask abort
-        }
-      }
-    },
-  };
 
   // One breaker per run. When the user denies enough times in a row, tripping
   // it aborts the whole generateText call - a tool-level error alone would
@@ -265,11 +222,6 @@ export async function runSubagent({
       requester ?? type,
       breaker,
       controller.signal,
-      // runSubagent holds a pool slot for the whole generateText: yield it
-      // while the approval queue waits on the user so parked workers cannot
-      // starve the pool.
-      <R>(work: () => Promise<R>) =>
-        ctx.yieldSlot ? ctx.yieldSlot(work) : work(),
     );
   }
 
@@ -368,38 +320,10 @@ export async function runSubagent({
       },
     });
 
-  const clearTimers = () => {
-    if (firstStepTimer) {
-      clearTimeout(firstStepTimer);
-      firstStepTimer = null;
-    }
-  };
-
   const start = Date.now();
   try {
-    let result: Awaited<ReturnType<typeof runAttempt>>;
-    let attempts = 0;
-    while (true) {
-      try {
-        armTimer();
-        result = await runAttempt(prompt);
-        break;
-      } catch (err) {
-        clearTimers();
-        if (controller.signal.aborted) throw err;
-        const errMsg = err instanceof Error ? err.message : String(err);
-        if (isRateLimitError(errMsg) && attempts < 2) {
-          attempts++;
-          const delayMs = attempts * 2000 + Math.floor(Math.random() * 500);
-          void logInfo(
-            `[ai] subagent ${type} throttled (${errMsg}); waiting ${delayMs}ms before retry ${attempts}/2`,
-          ).catch(() => {});
-          await new Promise((resolve) => setTimeout(resolve, delayMs));
-          continue;
-        }
-        throw err;
-      }
-    }
+    armTimer();
+    let result = await runAttempt(prompt);
     // The empty-completion failure mode: some routed / small compat models
     // answer "no text, no tool call" in a few seconds, and the run used to
     // report that as "(no output)" - indistinguishable from a task that ran
@@ -415,7 +339,6 @@ export async function runSubagent({
         `${prompt}\n\n(Your previous attempt returned nothing at all - no text and no tool call. Do the work now: call the tools you need, then finish with a short text answer. Never reply with an empty message.)`,
       );
       if (!result.text?.trim() && !subagentMadeProgress(result)) {
-        clearTimers();
         throw new Error(
           `sub-agent model returned an empty completion twice (no text, no tool calls) - the task did not run; retry it, or switch the sub-agent model in Settings > Agents`,
         );
@@ -428,7 +351,10 @@ export async function runSubagent({
     // "(no output)" even though it did the work. Recover by reconstructing what
     // it gathered and asking once more, with NO tools, for a prose summary.
     let summary = result.text?.trim();
-    if (!summary || isUnfinishedOrGarbledSummary(summary, result, spec.maxSteps)) {
+    if (
+      !summary ||
+      isUnfinishedOrGarbledSummary(summary, result, spec.maxSteps)
+    ) {
       const summaryTimer = setTimeout(() => {
         timedOut = true;
         controller.abort(
@@ -452,7 +378,6 @@ export async function runSubagent({
         clearTimeout(summaryTimer);
       }
     }
-    clearTimers();
     const steps = result.steps?.length ?? 0;
     const toolCalls = (result.steps ?? []).reduce(
       (n, s) => n + (s.toolCalls?.length ?? 0),
@@ -481,10 +406,13 @@ export async function runSubagent({
     // them into a clean result so the caller sees what happened instead of a
     // raw error string.
     if (controller.signal.aborted) {
-      clearTimers();
+      if (firstStepTimer) {
+        clearTimeout(firstStepTimer);
+        firstStepTimer = null;
+      }
       return {
         summary: breaker.tripped
-          ? `Stopped: the user denied the same write ${MAX_CONSECUTIVE_DENIALS} times in a row. Nothing was written; report the change as not done.`
+          ? "Stopped: the user denied the same write three times in a row. Nothing was written; report the change as not done."
           : timedOut
             ? "Stopped: the sub-agent model did not respond within 90s."
             : "Stopped: the run was aborted.",
@@ -496,9 +424,10 @@ export async function runSubagent({
         ...(worktreePath ? { worktreePath } : {}),
       };
     }
-    clearTimers();
+    if (firstStepTimer) {
+      clearTimeout(firstStepTimer);
+      firstStepTimer = null;
+    }
     throw e;
-  } finally {
-    currentRelease();
   }
 }

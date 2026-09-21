@@ -1,9 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 
-// `openSshTerminalFromSpec` looks the connection up, so the mock has to be
-// able to return it. Hoisted because vi.mock runs before the const below.
-const saved = vi.hoisted(() => ({ list: [] as unknown[] }));
-
 const setSession = vi.fn();
 const clearSession = vi.fn();
 
@@ -18,7 +14,7 @@ vi.mock("../hostKeyPrompt", () => ({
 vi.mock("../connections", () => ({
   authFields: () => ({}),
   getConnectionSecrets: async () => ({}),
-  listConnections: async () => saved.list,
+  listConnections: async () => [],
   pinFingerprint: async () => {},
   resolveJumpHops: async () => [],
 }));
@@ -28,10 +24,7 @@ vi.mock("../bridge", () => ({ openSsh: (...a: unknown[]) => openSsh(...a) }));
 
 import type { SshHandlers } from "../bridge";
 import type { SshConnection } from "../connections";
-import {
-  openSshTerminalFromSpec,
-  openSshTerminalSession,
-} from "./ssh-terminal";
+import { openSshTerminalSession } from "./ssh-terminal";
 
 const conn = {
   id: "c1",
@@ -41,7 +34,6 @@ const conn = {
   user: "root",
   authMode: "key",
 } as unknown as SshConnection;
-saved.list = [conn];
 
 /**
  * The backend emits `connected` and the first shell bytes from inside the
@@ -95,7 +87,7 @@ describe("openSshTerminalSession", () => {
     exit?.(0);
 
     expect(clearSession).toHaveBeenCalledWith(9);
-    expect(onExit).toHaveBeenCalledWith(0, true);
+    expect(onExit).toHaveBeenCalledWith(0);
   });
 
   // The backend used to report a dropped link as `exit 0`, so the pane showed a
@@ -114,8 +106,8 @@ describe("openSshTerminalSession", () => {
     await openSshTerminalSession(conn, 80, 24, { onData, onExit });
     dropped?.("connection closed without reporting an exit status");
 
-    expect(onExit).toHaveBeenCalledWith(-1, false);
-    expect(onExit).not.toHaveBeenCalledWith(0, true);
+    expect(onExit).toHaveBeenCalledWith(-1);
+    expect(onExit).not.toHaveBeenCalledWith(0);
     expect(clearSession).toHaveBeenCalledWith(11);
     // The reason has to reach the pane, or the user is left guessing why a
     // session they did not close disappeared.
@@ -139,86 +131,7 @@ describe("openSshTerminalSession", () => {
     const onExit = vi.fn();
     await openSshTerminalSession(conn, 80, 24, { onData: vi.fn(), onExit });
 
-    expect(onExit).toHaveBeenCalledWith(-1, false);
+    expect(onExit).toHaveBeenCalledWith(-1);
     expect(clearSession).not.toHaveBeenCalled();
   });
-
-  it("clears the session when closed directly", async () => {
-    clearSession.mockClear();
-    openSsh.mockImplementation(async () => ({
-      id: 12,
-      write: vi.fn(),
-      resize: vi.fn(),
-      close: vi.fn(),
-    }));
-
-    const session = await openSshTerminalSession(conn, 80, 24, {
-      onData: vi.fn(),
-    });
-    await session.close();
-
-    expect(clearSession).toHaveBeenCalledWith(12);
-  });
-});
-
-describe("openSshTerminalFromSpec", () => {
-  it("clears active session store when closed by user", async () => {
-    clearSession.mockClear();
-    openSsh.mockImplementation(backendThatEmitsDuringConnect(15));
-
-    const session = await openSshTerminalFromSpec(
-      { connectionId: conn.id },
-      80,
-      24,
-      { onData: vi.fn() },
-    );
-
-    await session.close();
-    expect(clearSession).toHaveBeenCalledWith(15);
-  });
-});
-
-// Found by auditing rather than by anything failing. `closedByUser` was checked
-// only before the connect, so closing the tab *while the connect was in
-// flight* left the freshly-opened session with no owner: `close()` had already
-// run against the dead one. An orphan shell on the server until the app exits.
-describe("a reconnect that lands after the tab closed", () => {
-  it("closes the session it just opened instead of stranding it", async () => {
-    const revivedClose = vi.fn().mockResolvedValue(undefined);
-    let deadDrop: ((reason: string) => void) | undefined;
-    let releaseConnect: (() => void) | undefined;
-    const connecting = new Promise<void>((r) => {
-      releaseConnect = r;
-    });
-    let call = 0;
-
-    openSsh.mockImplementation(async (_i: unknown, h: SshHandlers) => {
-      call += 1;
-      if (call === 1) {
-        deadDrop = h.onDisconnected;
-        return { id: 1, write: vi.fn(), resize: vi.fn(), close: vi.fn() };
-      }
-      // Hold the second connect open so the close below lands mid-flight,
-      // which is the only window the bug lived in.
-      await connecting;
-      return { id: 2, write: vi.fn(), resize: vi.fn(), close: revivedClose };
-    });
-
-    const session = await openSshTerminalFromSpec(
-      { connectionId: conn.id },
-      80,
-      24,
-      { onData: vi.fn() },
-    );
-
-    deadDrop?.("dropped");
-    await vi.waitFor(() => expect(call).toBe(2), { timeout: 8000 });
-
-    await session.close();
-    releaseConnect?.();
-
-    await vi.waitFor(() => expect(revivedClose).toHaveBeenCalled(), {
-      timeout: 8000,
-    });
-  }, 20_000);
 });

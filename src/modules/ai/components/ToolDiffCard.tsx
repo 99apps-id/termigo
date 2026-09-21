@@ -252,9 +252,7 @@ export const ToolDiffCard = memo(function ToolDiffCard({
 
   // Paths are normalised the same way `diffComments` normalises them, or a
   // comment added on Windows would not resolve to the same file.
-  const normalizedPath = filePath
-    ? filePath.replace(/\\/g, "/").trim()
-    : null;
+  const normalizedPath = filePath ? filePath.replace(/\\/g, "/").trim() : null;
   const fileComments = useMemo(
     () =>
       normalizedPath
@@ -378,7 +376,8 @@ export const ToolDiffCard = memo(function ToolDiffCard({
     <div
       className={cn(
         "my-1.5 overflow-hidden rounded-md border border-border/80 bg-card text-[12px] shadow-xs transition-all dark:bg-muted/20 dark:border-border/60",
-        inProgress && "border-primary/50 bg-primary/5 shadow-xs dark:bg-muted/30",
+        inProgress &&
+          "border-primary/50 bg-primary/5 shadow-xs dark:bg-muted/30",
         isFailed && "border-destructive/50 bg-destructive/5",
         className,
       )}
