@@ -131,10 +131,14 @@ async function proxyFetchImpl(
   const body = await bodyToPayload(init?.body);
 
   // Audit log: record private-network requests so the user can inspect them
-  // in the AI inspector. This is informational only; it does not block.
+  // in the AI inspector.
   if (isPrivateUrl(url)) {
-    const label = allowPrivateNetwork ? "allow" : "block";
-    logWarn(`[ai] private-network fetch ${label}: ${method} ${url}`);
+    if (!allowPrivateNetwork) {
+      throw new TypeError(
+        `Private network requests are blocked by policy: ${method} ${url}`,
+      );
+    }
+    logWarn(`[ai] private-network fetch allow: ${method} ${url}`);
   }
 
   const signal = init?.signal;

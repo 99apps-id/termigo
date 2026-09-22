@@ -107,13 +107,28 @@ pub fn build_command(
 
 // Honor the override only if it matches an enumerated shell, so a tampered
 // setting can't spawn an arbitrary binary across the IPC boundary.
+//
+// On Unix we compare both the literal path and the canonical path: a shell
+// reachable through a symlink is still the same binary. On Windows
+// canonicalization follows junctions, which would let a crafted junction
+// named `shell_link` point at an allowed shell and pass the check; we only
+// compare the literal path there.
 fn sanitize_shell_override(shell: Option<String>) -> Option<String> {
     let candidate = shell
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())?;
-    let target = std::fs::canonicalize(&candidate).ok();
     let allowed = list_shells().into_iter().any(|s| {
-        s.path == candidate || (target.is_some() && std::fs::canonicalize(&s.path).ok() == target)
+        if s.path == candidate {
+            return true;
+        }
+        #[cfg(unix)]
+        {
+            let target = std::fs::canonicalize(&candidate).ok();
+            if target.is_some() && std::fs::canonicalize(&s.path).ok() == target {
+                return true;
+            }
+        }
+        false
     });
     if allowed {
         Some(candidate)

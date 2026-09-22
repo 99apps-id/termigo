@@ -144,9 +144,7 @@ pub fn build(
             if tmux_available() {
                 return Ok(wrap_in_tmux(&cmd, &key));
             }
-            log::info!(
-                "terminal persistence requested but tmux not found; using a normal shell"
-            );
+            log::info!("terminal persistence requested but tmux not found; using a normal shell");
         }
     }
     Ok(cmd)
