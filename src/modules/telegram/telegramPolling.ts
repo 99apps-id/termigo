@@ -121,6 +121,18 @@ const STALL_RECYCLE_GRACE_MS = 10_000;
  */
 export const TELEGRAM_CONFLICT_BACKOFF_MS = 60_000;
 
+/**
+ * Base wait after an ordinary `getUpdates` failure, and the ceiling the wait
+ * grows to while failures repeat.
+ *
+ * A box that loses its network used to log `getUpdates failed ... retrying in
+ * 5s` every five seconds for hours: the wait never grew, so an offline machine
+ * hammered DNS and drowned the file log. The wait now doubles per consecutive
+ * failure and caps at a minute; one success resets it to the base.
+ */
+export const TELEGRAM_GENERIC_BACKOFF_BASE_MS = 5_000;
+export const TELEGRAM_GENERIC_BACKOFF_CAP_MS = 60_000;
+
 export function setCurrentUpdateOffset(offset: number): void {
   currentUpdateOffset = offset;
   persistOffset(offset);
@@ -229,19 +241,29 @@ function launchLoop(controller: AbortController): void {
  *
  * Exported and pure so the policy is asserted rather than buried in the catch:
  * a 429 carries its own retry hint, a 409 means another client holds the bot
- * and must not be retried quickly, and anything else gets a short retry.
+ * and must not be retried quickly, and anything else starts short and doubles while failures repeat.
  */
-export function pollBackoffMs(error: unknown): number {
+export function pollBackoffMs(error: unknown, consecutiveFailures = 1): number {
   if (error instanceof TelegramApiError) {
     if (error.status === 429) {
       return Math.max(1000, (error.retryAfter ?? 5) * 1000);
     }
     if (error.status === 409) return TELEGRAM_CONFLICT_BACKOFF_MS;
   }
-  return 5000;
+  const n = Number.isFinite(consecutiveFailures)
+    ? Math.max(1, Math.floor(consecutiveFailures))
+    : 1;
+  return Math.min(
+    TELEGRAM_GENERIC_BACKOFF_BASE_MS * 2 ** (n - 1),
+    TELEGRAM_GENERIC_BACKOFF_CAP_MS,
+  );
 }
 
 async function runLoop(signal: AbortSignal): Promise<void> {
+  // Ordinary failures back off harder while they repeat (see pollBackoffMs);
+  // any success resets the streak. Timeouts below keep their own 1s pause and
+  // leave the streak alone.
+  let consecutiveFailures = 0;
   while (!signal.aborted && useTelegramStore.getState().enabled) {
     try {
       const data = (await apiGet(
@@ -252,6 +274,7 @@ async function runLoop(signal: AbortSignal): Promise<void> {
       lastPollProgressTime = Date.now();
       useTelegramStore.getState().setOnline(true);
       useTelegramStore.getState().setLastError(null);
+      consecutiveFailures = 0;
       // Handlers run under the relay signal, not the poll signal, so a watchdog
       // recycle of the poller never cancels an in-flight agent run.
       const relaySignal = relayController?.signal ?? signal;
@@ -293,7 +316,8 @@ async function runLoop(signal: AbortSignal): Promise<void> {
       useTelegramStore.getState().setOnline(false);
       const errMsg = e instanceof Error ? e.message : String(e);
       useTelegramStore.getState().setLastError(errMsg);
-      const backoffMs = pollBackoffMs(e);
+      consecutiveFailures += 1;
+      const backoffMs = pollBackoffMs(e, consecutiveFailures);
       // The store keeps lastError for the UI, but the UI is a webview on a
       // server nobody is looking at. A poll that keeps failing has to reach the
       // file, or "the bot went quiet" has no cause attached to it.

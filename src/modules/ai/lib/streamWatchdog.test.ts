@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  deliveryCheckDecision,
   markRunActivity,
   msSinceActivity,
   pendingApprovalToolTimeoutMs,
@@ -11,6 +12,7 @@ import {
   STALL_TIMEOUT_ON_RESUME_MS,
   stallBudgetMs,
   startActivityHeartbeat,
+  TOOL_RESULT_DELIVERY_MS,
   TOOL_TIMEOUT_SLACK_MS,
   watchdogDirective,
 } from "./streamWatchdog";
@@ -257,6 +259,57 @@ describe("startActivityHeartbeat", () => {
     stop();
   });
 
+});
+
+describe("deliveryCheckDecision", () => {
+  // The field bug: the delivery timer aborted unconditionally 60s after a
+  // tool result, killing runs whose sibling tools were still executing (and
+  // heartbeating). Only a genuinely stale clock may abort now.
+  it("aborts when the clock has been stale for the whole budget", () => {
+    expect(deliveryCheckDecision(61_000, { sinceActivityMs: 61_000 })).toEqual(
+      { abort: true, recheckInMs: 0 },
+    );
+    expect(deliveryCheckDecision(60_000, { sinceActivityMs: 60_000 })).toEqual(
+      { abort: true, recheckInMs: 0 },
+    );
+  });
+
+  it("moves the check out instead of aborting live work", () => {
+    // A heartbeat 1s ago: the run is alive, recheck when the budget ends.
+    expect(deliveryCheckDecision(61_000, { sinceActivityMs: 1_000 })).toEqual({
+      abort: false,
+      recheckInMs: TOOL_RESULT_DELIVERY_MS - 1_000,
+    });
+  });
+
+  it("honours an explicit budget", () => {
+    expect(
+      deliveryCheckDecision(10_000, {
+        deliveryBudgetMs: 5_000,
+        sinceActivityMs: 4_000,
+      }),
+    ).toEqual({ abort: false, recheckInMs: 1_000 });
+    expect(
+      deliveryCheckDecision(10_000, {
+        deliveryBudgetMs: 5_000,
+        sinceActivityMs: 5_000,
+      }),
+    ).toEqual({ abort: true, recheckInMs: 0 });
+  });
+
+  it("reads the shared activity clock by default", () => {
+    resetRunActivity();
+    markRunActivity(1_000);
+    // 500ms of silence against the 60s default: alive, full budget minus 500ms.
+    expect(deliveryCheckDecision(1_500)).toEqual({
+      abort: false,
+      recheckInMs: TOOL_RESULT_DELIVERY_MS - 500,
+    });
+    resetRunActivity();
+  });
+});
+
+describe("heartbeat stop", () => {
   it("can be stopped twice without complaint", () => {
     const stop = startActivityHeartbeat();
     stop();

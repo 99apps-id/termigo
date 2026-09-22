@@ -26,6 +26,8 @@ import {
   POLLING_STALL_TIMEOUT_MS,
   pollBackoffMs,
   TELEGRAM_CONFLICT_BACKOFF_MS,
+  TELEGRAM_GENERIC_BACKOFF_BASE_MS,
+  TELEGRAM_GENERIC_BACKOFF_CAP_MS,
 } from "./telegramPolling";
 
 describe("pollBackoffMs", () => {
@@ -56,6 +58,38 @@ describe("pollBackoffMs", () => {
     );
     expect(backoff).toBe(TELEGRAM_CONFLICT_BACKOFF_MS);
     expect(backoff).toBeGreaterThan(30_000);
+  });
+
+  it("doubles the wait while ordinary failures repeat, capped at a minute", () => {
+    // The field log showed `retrying in 5s` every 5s for hours while offline.
+    const err = new Error("Failed to fetch");
+    expect(pollBackoffMs(err)).toBe(TELEGRAM_GENERIC_BACKOFF_BASE_MS);
+    expect(pollBackoffMs(err, 2)).toBe(10_000);
+    expect(pollBackoffMs(err, 3)).toBe(20_000);
+    expect(pollBackoffMs(err, 4)).toBe(40_000);
+    expect(pollBackoffMs(err, 5)).toBe(TELEGRAM_GENERIC_BACKOFF_CAP_MS);
+    expect(pollBackoffMs(err, 100)).toBe(TELEGRAM_GENERIC_BACKOFF_CAP_MS);
+  });
+
+  it("sanitises a nonsense streak length back to the base wait", () => {
+    const err = new Error("Failed to fetch");
+    expect(pollBackoffMs(err, 0)).toBe(TELEGRAM_GENERIC_BACKOFF_BASE_MS);
+    expect(pollBackoffMs(err, -3)).toBe(TELEGRAM_GENERIC_BACKOFF_BASE_MS);
+    expect(pollBackoffMs(err, Number.NaN)).toBe(
+      TELEGRAM_GENERIC_BACKOFF_BASE_MS,
+    );
+  });
+
+  it("keeps server-directed waits independent of the streak", () => {
+    expect(
+      pollBackoffMs(new TelegramApiError(429, "Too Many Requests", 30), 9),
+    ).toBe(30_000);
+    expect(
+      pollBackoffMs(
+        new TelegramApiError(409, "Conflict: terminated by other getUpdates"),
+        9,
+      ),
+    ).toBe(TELEGRAM_CONFLICT_BACKOFF_MS);
   });
 
   it("uses a short retry for an ordinary transport failure", () => {

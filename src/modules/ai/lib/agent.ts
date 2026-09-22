@@ -85,6 +85,7 @@ import { isRepetitionDominated } from "./repetitionGuard";
 import { sanitizeUiMessages } from "./sanitizeMessages";
 import { type Skill, skillsBlock } from "./skills";
 import {
+  deliveryCheckDecision,
   markRunActivity,
   remainingSilenceMs,
   resetRunActivity,
@@ -1896,7 +1897,21 @@ export async function runAgentStream(opts: RunAgentOptions) {
       if (chunk.type === "tool-result") {
         clearFirstStepTimer();
         armModelWatchdog();
-        toolResultDeliveryTimer = setTimeout(() => {
+        const checkToolResultDelivery = (): void => {
+          // Activity-aware, not unconditional: a sibling tool from the same
+          // step can still be executing (its heartbeat keeps the run's
+          // activity clock fresh). Only a genuinely stale clock aborts;
+          // anything fresher moves the check to the end of the budget.
+          const decision = deliveryCheckDecision(Date.now(), {
+            deliveryBudgetMs: MAX_TOOL_RESULT_DELIVERY_MS,
+          });
+          if (!decision.abort) {
+            toolResultDeliveryTimer = setTimeout(
+              checkToolResultDelivery,
+              decision.recheckInMs,
+            );
+            return;
+          }
           const elapsed = Math.round((Date.now() - runStart) / 1000);
           fireAndForget(
             logWarn(
@@ -1909,13 +1924,25 @@ export async function runAgentStream(opts: RunAgentOptions) {
               `The model did not respond within ${Math.round(MAX_TOOL_RESULT_DELIVERY_MS / 1000)}s after a tool finished. The run was stopped to avoid hanging forever.`,
             ),
           );
-        }, MAX_TOOL_RESULT_DELIVERY_MS);
+        };
+        toolResultDeliveryTimer = setTimeout(
+          checkToolResultDelivery,
+          MAX_TOOL_RESULT_DELIVERY_MS,
+        );
         return;
       }
       const directive = watchdogDirective(chunk.type);
       if (directive === "rearm") {
         armModelWatchdog();
       } else if (directive === "disarm") {
+        // The model answered with a tool call, so the delivery gap is over
+        // and the execution guard below owns the wait from here. Without this
+        // a tool that legitimately runs past the delivery budget is aborted
+        // with "no model output", even though the model did respond.
+        if (toolResultDeliveryTimer) {
+          clearTimeout(toolResultDeliveryTimer);
+          toolResultDeliveryTimer = null;
+        }
         const rawChunk = chunk as Record<string, unknown>;
         const args = (rawChunk.args ?? rawChunk.input) as
           | Record<string, unknown>
@@ -1947,7 +1974,11 @@ export async function runAgentStream(opts: RunAgentOptions) {
             ),
           );
         };
-          toolExecutionTimer = setTimeout(checkToolExecution, toolBudgetMs);
+        if (toolExecutionTimer) {
+          clearTimeout(toolExecutionTimer);
+          toolExecutionTimer = null;
+        }
+        toolExecutionTimer = setTimeout(checkToolExecution, toolBudgetMs);
       }
     },
     onStepFinish: (step) => {

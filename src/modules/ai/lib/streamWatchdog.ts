@@ -280,3 +280,36 @@ export function startActivityHeartbeat(options?: {
   return stop;
 }
 
+/** Budget for the model to answer after a tool result is fed back. */
+export const TOOL_RESULT_DELIVERY_MS = 60_000;
+
+/**
+ * What the tool-result delivery guard should do when its timer fires.
+ *
+ * Pure so the policy is asserted by a test: only a stalled provider in the
+ * field can exercise it otherwise.
+ *
+ * After a tool result is fed back, the model owes the next output - but "no
+ * chunk for 60s" is not the same as "nothing is happening". A sibling tool
+ * from the same step can still be executing (its heartbeat keeps the activity
+ * clock fresh), or a chunk can land just before the timer fires. Aborting
+ * unconditionally killed runs that were making progress: observed in the field
+ * as `no model output after tool-result ... aborting` on a run whose tools
+ * were still heartbeating. So a stale clock is the only firing condition;
+ * anything fresher just moves the check to the end of the budget.
+ */
+export function deliveryCheckDecision(
+  now: number,
+  options?: {
+    deliveryBudgetMs?: number;
+    sinceActivityMs?: number;
+  },
+): { abort: boolean; recheckInMs: number } {
+  const budget = options?.deliveryBudgetMs ?? TOOL_RESULT_DELIVERY_MS;
+  const sinceActivity = options?.sinceActivityMs ?? msSinceActivity(now);
+  if (sinceActivity < budget) {
+    return { abort: false, recheckInMs: budget - sinceActivity };
+  }
+  return { abort: true, recheckInMs: 0 };
+}
+
