@@ -678,9 +678,95 @@ function ToolOutput({
   return body;
 }
 
+export type TodoResultSummary = {
+  /** Items present in this snapshot (fewer than total when filtered). */
+  shown: number;
+  /** Whole-list size when known. */
+  total: number;
+  /** Completed items inside the snapshot; null when the shape carries none. */
+  done: number | null;
+  /** Title of the in-progress item, from the snapshot or the result fields. */
+  working: string | null;
+  /** True when the snapshot holds fewer items than the whole list. */
+  filtered: boolean;
+};
+
+/**
+ * Compact numbers for a todo tool result.
+ *
+ * The live list lives in the TodoStrip; transcript cards must not render a
+ * second copy. A full list here goes stale the moment a later call changes
+ * it, and the old card then disagrees with the strip. So cards show only this
+ * call's outcome: how many are done and what is running now.
+ */
+export function todoResultSummary(output: unknown): TodoResultSummary | null {
+  if (!output || typeof output !== "object") return null;
+  const o = output as Record<string, unknown>;
+  const list = Array.isArray(o.todos)
+    ? (o.todos as Array<{ title?: unknown; status?: unknown }>)
+    : null;
+  const totalField =
+    typeof o.total === "number" && Number.isFinite(o.total) ? o.total : null;
+  const countField =
+    typeof o.count === "number" && Number.isFinite(o.count) ? o.count : null;
+  const fieldWorking =
+    typeof o.inProgress === "string" && o.inProgress ? o.inProgress : null;
+
+  if (!list) {
+    const total = totalField ?? countField;
+    if (total === null) return null;
+    return { shown: 0, total, done: null, working: fieldWorking, filtered: false };
+  }
+
+  const total = totalField ?? list.length;
+  const snapshotWorking = list.find((t) => t.status === "in_progress");
+  const working =
+    (typeof snapshotWorking?.title === "string" && snapshotWorking.title) ||
+    fieldWorking;
+  return {
+    shown: list.length,
+    total,
+    done: list.filter((t) => t.status === "completed").length,
+    working: working || null,
+    filtered: total > list.length,
+  };
+}
+
+function TodoResultLine({ summary }: { summary: TodoResultSummary }) {
+  const { shown, total, done, working, filtered } = summary;
+  if (total === 0) {
+    return (
+      <div className="font-mono text-[11px] text-muted-foreground">No items</div>
+    );
+  }
+  const progress = filtered
+    ? `${shown} of ${total} shown`
+    : done !== null
+      ? `${done}/${total} done`
+      : `${total} item${total === 1 ? "" : "s"}`;
+  return (
+    <div className="flex items-center gap-1.5 font-mono text-[11px]">
+      <span className="text-emerald-600 dark:text-emerald-400">✓</span>
+      <span className="text-foreground">{progress}</span>
+      {working ? (
+        <span className="truncate text-muted-foreground">· {working}</span>
+      ) : null}
+    </div>
+  );
+}
+
 function renderToolOutput(toolName: string, output: unknown): ReactNode | null {
   if (!output || typeof output !== "object") return null;
   const o = output as Record<string, unknown>;
+
+  if (
+    toolName === "todo_write" ||
+    toolName === "todo_update" ||
+    toolName === "todo_read"
+  ) {
+    const summary = todoResultSummary(output);
+    if (summary) return <TodoResultLine summary={summary} />;
+  }
 
   if (toolName === "run_sql" && typeof o.output === "string") {
     return <CodeBlockMini code={o.output} language="sql" />;

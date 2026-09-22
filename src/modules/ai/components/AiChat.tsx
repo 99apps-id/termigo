@@ -460,19 +460,19 @@ const RenderedMessage = memo(function RenderedMessage({
             if (g.kind === "reasoning") {
               // "Live" means the model is writing into THIS block right now, so
               // passing isStreaming auto-opens it and the user watches the
-              // thinking unfold. It closes itself once the step ends and stays
-              // openable by clicking the header.
+              // thinking unfold. It stays open once finished, so the transcript reads
+              // thinking, reasoned, work, answer per step - and collapses by clicking
               //
-              // If the model produced no text response at all, keep reasoning
-              // open by default so the user is not left with an empty transcript.
+              // the header. The finished "Reasoned" label keeps a long run scannable
+              // without losing the thinking behind each step.
               const reasoningLive = thinkingLive && gi === liveReasoningIdx;
               return showReasoning ? (
                 <PartAppear key={`${message.id}-${g.key}`}>
                   <Reasoning
                     isStreaming={reasoningLive}
                     showReasoning={showReasoning}
-                    autoClose={hasTextPart}
-                    defaultOpen={!hasTextPart || reasoningLive}
+                    autoClose={false}
+                    defaultOpen
                   >
                     <ReasoningTrigger />
                     <ReasoningContent>{g.text}</ReasoningContent>
@@ -552,7 +552,7 @@ const RenderedPart = memo(function RenderedPart({
 
   if (part.type === "reasoning") {
     return showReasoning ? (
-      <Reasoning showReasoning={showReasoning}>
+      <Reasoning showReasoning={showReasoning} defaultOpen>
         <ReasoningTrigger />
         <ReasoningContent>
           {(part as unknown as { text: string }).text}

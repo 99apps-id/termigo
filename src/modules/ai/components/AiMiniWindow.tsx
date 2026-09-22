@@ -223,7 +223,8 @@ export function AiChatBody({
       </div>
 
       <ApprovalQueueStrip />
-      <TodoStrip sessionId={sessionId} />
+      {/* Fresh mount per session so minimise state never leaks across chats. */}
+      <TodoStrip key={sessionId} sessionId={sessionId} />
     </>
   );
 }

@@ -104,6 +104,33 @@ describe("chatPartGrouping", () => {
     expect(first.key).not.toBe(second.key);
   });
 
+  it("keeps whole think-work-answer cycles in order across steps", () => {
+    // The transcript contract: thinking, then the work it explains, then the
+    // answer - repeated per step, never folded into one block at the top.
+    const parts = [
+      { type: "reasoning", text: "Thinking step 1" },
+      {
+        type: "tool-read_file",
+        toolCallId: "rf-1",
+        state: "output-available",
+      },
+      { type: "tool-bash_run", toolCallId: "sh-1", state: "output-available" },
+      { type: "reasoning", text: "Thinking step 2" },
+      { type: "tool-grep", toolCallId: "gr-1", state: "output-available" },
+      { type: "text", text: "Here is the answer" },
+    ] as unknown as AnyPart[];
+
+    const groups = buildPartGroups(parts);
+    expect(groups.map((g) => g.kind)).toEqual([
+      "reasoning",
+      "single",
+      "single",
+      "reasoning",
+      "single",
+      "single",
+    ]);
+  });
+
   it("merges only the reasoning parts belonging to one step", () => {
     const parts = [
       { type: "reasoning", text: "part one" },
