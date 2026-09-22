@@ -69,7 +69,7 @@ describe("worktree_list sees sandboxes this process did not create", () => {
     registerSandbox({
       id: "mine",
       branchName: "termigo-sandbox/mine",
-      worktreePath: "/workspace/.termigo/worktrees/mine",
+      worktreePath: "/workspace/.wt/mine",
       createdAt: Date.now(),
       status: "active",
     });
