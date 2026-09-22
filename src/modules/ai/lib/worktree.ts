@@ -36,7 +36,7 @@ export function generateSandboxInfo(taskId?: string): {
       : sanitized;
   const cleanId = bounded || Math.random().toString(36).slice(2, 9);
   const branchName = `termigo-sandbox/${cleanId}`;
-  const subpath = `.termigo/worktrees/${cleanId}`;
+  const subpath = `.wt/${cleanId}`;
   return { id: cleanId, branchName, subpath };
 }
 
@@ -150,7 +150,7 @@ export function clearSandboxes(): void {
 }
 
 /** Where sandboxes live, relative to the workspace root. */
-export const WORKTREE_SUBPATH_PREFIX = ".termigo/worktrees/";
+export const WORKTREE_SUBPATH_PREFIX = ".wt/";
 
 /** A sandbox that exists on disk, whether or not this process created it. */
 export type DiscoveredWorktree = {

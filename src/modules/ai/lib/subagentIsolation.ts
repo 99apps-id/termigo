@@ -113,7 +113,7 @@ export function rerootToolContext(ctx: ToolContext, dir: string): ToolContext {
 
 /** Where a subagent's isolated worktree lives, relative to the workspace root. */
 export function worktreeRelativePath(sandboxId: string): string {
-  return `.termigo/worktrees/${sandboxId}`;
+  return `.wt/${sandboxId}`;
 }
 
 export type IsolationCreated = {
