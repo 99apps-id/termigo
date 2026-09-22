@@ -27,14 +27,19 @@ const SettingSchema = z
   .object({
     id: z.string().min(1),
     type: z.enum(["string", "number", "boolean", "select", "note"]),
-    label: z.string().min(1),
+    label: z.string().min(1).optional(),
+    title: z.string().min(1).optional(),
     description: z.string().optional(),
     default: z.union([z.string(), z.number(), z.boolean(), z.null()]).optional(),
     options: z.array(z.object({ value: z.string(), label: z.string() })).optional(),
     section: z.string().optional(),
     secret: z.boolean().optional(),
   })
-  .passthrough();
+  .passthrough()
+  .transform((v) => ({
+    ...v,
+    label: v.label ?? v.title,
+  }));
 
 const CommandSchema = z
   .object({
@@ -144,13 +149,36 @@ export const ManifestSchema = z
      *  of the main webview. Only "worker" is supported today. `.nullish()` so an
      *  absent field (Rust serialises `Option::None` as JSON `null`) still parses. */
     sandbox: z.literal("worker").nullish(),
-    permissions: z.array(z.string()).default([]),
+    permissions: z
+      .union([z.array(z.string()), z.record(z.string(), z.string())])
+      .default([])
+      .transform((v) => (Array.isArray(v) ? v : Object.keys(v))),
+    raw_top_level_settings: z.record(z.string(), z.unknown()).optional(),
     // Rust emits JSON `null` when `contributes` is omitted. `.default({})`
     // only fires on `undefined`, so coerce `null` to `undefined` first.
     contributes: z.preprocess((v) => (v == null ? undefined : v), ContributesSchema.default({})),
     engines: EnginesSchema.nullish(),
   })
-  .passthrough();
+  .passthrough()
+  .transform((v) => {
+    // Merge top-level `settings` (map of id -> definition) into
+    // `contributes.settings` so every extension's settings live in one place.
+    if (v.raw_top_level_settings && typeof v.raw_top_level_settings === "object") {
+      const settings_map = v.raw_top_level_settings as Record<string, unknown>;
+      const contributes = v.contributes ?? {};
+      const settingsArray = Array.isArray((contributes as any).settings)
+        ? ([...((contributes as any).settings)] as any[])
+        : [];
+      for (const [id, def] of Object.entries(settings_map)) {
+        if (def && typeof def === "object") {
+          settingsArray.push({ id, ...(def as any) });
+        }
+      }
+      (contributes as any).settings = settingsArray;
+      v.contributes = contributes;
+    }
+    return v;
+  });
 
 export type Manifest = z.infer<typeof ManifestSchema>;
 export type ContributedSetting = z.infer<typeof SettingSchema>;
@@ -163,7 +191,10 @@ export function safeParseManifest(
   input: unknown,
 ): { ok: true; manifest: Manifest } | { ok: false; error: string } {
   const result = ManifestSchema.safeParse(input);
-  if (result.success) return { ok: true, manifest: result.data };
+  if (result.success) {
+    const { raw_top_level_settings: _, ...rest } = result.data as any;
+    return { ok: true, manifest: rest as Manifest };
+  }
   const first = result.error.issues[0];
   const path = first?.path?.join(".") || "manifest";
   return { ok: false, error: `${path}: ${first?.message ?? "invalid"}` };

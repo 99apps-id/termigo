@@ -31,6 +31,33 @@ pub fn validate_id(id: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn deserialize_permissions<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    match value {
+        serde_json::Value::Array(arr) => {
+            let mut out = Vec::with_capacity(arr.len());
+            for v in arr {
+                match v.as_str() {
+                    Some(s) => out.push(s.to_string()),
+                    None => {
+                        return Err(serde::de::Error::custom(
+                            "permissions array must contain strings",
+                        ));
+                    }
+                }
+            }
+            Ok(out)
+        }
+        serde_json::Value::Object(map) => Ok(map.keys().map(|s| s.to_string()).collect()),
+        _ => Err(serde::de::Error::custom(
+            "permissions must be an array of strings or an object",
+        )),
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
     pub id: String,
@@ -53,7 +80,7 @@ pub struct Manifest {
     #[serde(default)]
     pub sandbox: Option<String>,
     /// Glob-style permission strings; validated at runtime by the host API.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_permissions")]
     pub permissions: Vec<String>,
     /// Free-form JSON. Frontend zod schema validates the inner shape.
     #[serde(default)]
@@ -62,6 +89,11 @@ pub struct Manifest {
     pub engines: Option<Engines>,
     #[serde(default)]
     pub icon: Option<String>,
+    /// Top-level settings block accepted by some community extensions.
+    /// Merged into `contributes.settings` during parsing so the rest of the
+    /// host can treat every extension uniformly.
+    #[serde(default, rename = "settings")]
+    pub raw_top_level_settings: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,7 +107,7 @@ pub struct Engines {
 
 impl Manifest {
     pub fn parse(text: &str) -> Result<Self, String> {
-        let m: Manifest =
+        let mut m: Manifest =
             serde_json::from_str(text).map_err(|e| format!("manifest parse error: {e}"))?;
         validate_id(&m.id)?;
         if m.name.trim().is_empty() {
@@ -84,6 +116,36 @@ impl Manifest {
         if m.version.trim().is_empty() {
             return Err("manifest.version is required".into());
         }
+
+        // Merge top-level `settings` (map of id -> definition) into
+        // `contributes.settings` (array of objects with `id`). Some community
+        // extensions ship settings at the top level; the host only reads
+        // `contributes.settings`, so we normalize here.
+        if let Some(raw_settings) = m.raw_top_level_settings.take() {
+            let settings_map = match raw_settings.as_object() {
+                Some(map) if !map.is_empty() => map,
+                _ => {
+                    return Err("manifest.settings must be a non-empty object".into());
+                }
+            };
+            let mut contributes = std::mem::take(&mut m.contributes);
+            let mut empty_map = serde_json::Map::new();
+            let contributes_obj = contributes.as_object_mut().unwrap_or(&mut empty_map);
+            let settings_array = contributes_obj
+                .entry("settings")
+                .or_insert_with(|| serde_json::Value::Array(Vec::new()))
+                .as_array_mut()
+                .ok_or_else(|| "contributes.settings must be an array".to_string())?;
+            for (id, def) in settings_map.iter() {
+                if let Some(obj) = def.as_object().cloned() {
+                    let mut entry = obj;
+                    entry.insert("id".to_string(), serde_json::Value::String(id.clone()));
+                    settings_array.push(serde_json::Value::Object(entry));
+                }
+            }
+            m.contributes = serde_json::Value::Object(contributes_obj.clone());
+        }
+
         Ok(m)
     }
 }
@@ -130,5 +192,46 @@ mod tests {
         let m = Manifest::parse(text).expect("parse");
         assert_eq!(m.sandbox.as_deref(), None);
         assert_eq!(m.engines.as_ref().and_then(|e| e.tedi.as_deref()), None);
+    }
+
+    #[test]
+    fn accepts_permissions_as_object_and_flattens_keys() {
+        let text = r#"{
+            "id": "security-kit",
+            "name": "Security Kit",
+            "version": "1.0.0",
+            "permissions": {
+                "shell_run_command": { "reason": "needed" },
+                "fs_write_file": { "reason": "needed" }
+            }
+        }"#;
+        let m = Manifest::parse(text).expect("parse");
+        let mut perms = m.permissions.clone();
+        perms.sort();
+        assert_eq!(perms, vec!["fs_write_file", "shell_run_command"]);
+    }
+
+    #[test]
+    fn merges_top_level_settings_into_contributes() {
+        let text = r#"{
+            "id": "security-kit",
+            "name": "Security Kit",
+            "version": "1.0.0",
+            "settings": {
+                "security.timeout": {
+                    "type": "number",
+                    "title": "Timeout",
+                    "default": 300
+                }
+            }
+        }"#;
+        let m = Manifest::parse(text).expect("parse");
+        let contributes = m.contributes.as_object().expect("contributes is object");
+        let settings = contributes.get("settings").expect("settings exists").as_array().expect("settings is array");
+        assert_eq!(settings.len(), 1);
+        let first = settings[0].as_object().expect("setting is object");
+        assert_eq!(first.get("id").expect("id").as_str(), Some("security.timeout"));
+        assert_eq!(first.get("type").expect("type").as_str(), Some("number"));
+        assert_eq!(first.get("title").expect("title").as_str(), Some("Timeout"));
     }
 }

@@ -92,7 +92,7 @@ import {
   watchdogDirective,
 } from "./streamWatchdog";
 import { formatTodoStatusBlock } from "./todos";
-import { modelRejectsForcedToolChoice } from "./toolChoiceLearning";
+import { modelIgnoresSynthesis, modelRejectsForcedToolChoice, recordIgnoredSynthesis } from "./toolChoiceLearning";
 import { measureToolPayload } from "./toolPayload";
 import { formatUserModelBlock, type UserModel } from "./userModel";
 import { repairModelMessageSequence } from "./validateModelSequence";
@@ -1409,6 +1409,11 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // condition honours it.
   let forcedStop = false;
   const requestSynthesisOrStop = (reason: AgentStopReason): boolean => {
+    if (modelIgnoresSynthesis(modelId)) {
+      stopReason ??= reason;
+      forcedStop = true;
+      return true;
+    }
     const d = synthesisStopDecision(allowSynthesis, synthesisRequested);
     if (d.requested && synthesisRequestedAtStepCount < 0) {
       synthesisRequestedAtStepCount = stepsSeen;
@@ -1465,6 +1470,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
         },
       );
       if (outcome !== "ignored") return false;
+      recordIgnoredSynthesis(modelId);
       stopReason = "tool-only-loop";
       return true;
     },
