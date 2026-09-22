@@ -1,6 +1,13 @@
 import type { ModelMessage } from "ai";
 import { describe, expect, it } from "vitest";
-import { compactModelMessages, compactModelMessagesDetailed } from "./compact";
+import {
+  compactModelMessages,
+  compactModelMessagesDetailed,
+  estimateMessagesSize,
+  historyTokenBudget,
+  shouldTrimStepMessages,
+  STEP_TRIM_ENGAGE_RATIO,
+} from "./compact";
 
 const BIG = "x".repeat(2000);
 

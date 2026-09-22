@@ -92,3 +92,37 @@ describe("applyProfileToStepBudget", () => {  it("applies a delta", () => {
     );
   });
 });
+
+describe("buildStepSystem", () => {
+  // The provider matches the request prefix byte-for-byte and the system is
+  // position zero of it: any instability here reprocesses the whole request.
+  it("returns the base untouched when there are no hints", () => {
+    const base = "base";
+    expect(buildStepSystem(base, null, null)).toBe(base);
+  });
+
+  it("appends the todo block, then the nudge, in order", () => {
+    const out = buildStepSystem("base", "todos", "nudge") as Array<{
+      role: string;
+      content: string;
+    }>;
+    expect(out).toEqual([
+      { role: "system", content: "base" },
+      { role: "system", content: "todos" },
+      { role: "system", content: "nudge" },
+    ]);
+  });
+
+  it("is byte-identical across calls with unchanged hints", () => {
+    const a = JSON.stringify(buildStepSystem("base", "todos", null));
+    const b = JSON.stringify(buildStepSystem("base", "todos", null));
+    expect(a).toBe(b);
+  });
+
+  it("reflects a changed todo block", () => {
+    const a = JSON.stringify(buildStepSystem("base", "todos v1", null));
+    const b = JSON.stringify(buildStepSystem("base", "todos v2", null));
+    expect(a).not.toBe(b);
+    expect(b).toContain("todos v2");
+  });
+});
