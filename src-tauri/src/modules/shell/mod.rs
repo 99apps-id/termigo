@@ -78,8 +78,9 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
     // Linux/WSL and Unix system administration & root utilities (user-approved)
     "systemctl", "service", "journalctl", "dmesg",
     "chown", "chmod", "mkdir", "rm", "rmdir", "cp", "mv", "touch", "ln", "tee",
-    "ip", "ifconfig", "netstat", "ss", "lsof", "ps", "kill", "pkill", "killall",
+    "ip", "ifconfig", "netstat", "ss", "lsof", "ps", "pidof", "pgrep", "kill", "pkill", "killall",
     "free", "df", "du", "ufw", "iptables",
+    "timeout",
     "useradd", "usermod", "userdel", "groupadd", "groupmod", "groupdel",
     "apt-key", "gpg", "update-alternatives", "su",
     "xargs", "env", "printenv", "basename", "dirname", "realpath", "readlink",

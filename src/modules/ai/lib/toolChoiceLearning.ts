@@ -34,6 +34,7 @@ export function isToolChoiceRejectionError(message: string): boolean {
 }
 
 const rejected = new Set<string>();
+const ignoredSynthesis = new Set<string>();
 
 /** Remember that this model's endpoint refused a pinned tool choice. */
 export function recordToolChoiceRejection(modelId: string): void {
@@ -45,7 +46,18 @@ export function modelRejectsForcedToolChoice(modelId: string): boolean {
   return rejected.has(modelId);
 }
 
+/** Remember that this model ignores synthesis requests (toolChoice: "none"). */
+export function recordIgnoredSynthesis(modelId: string): void {
+  if (modelId) ignoredSynthesis.add(modelId);
+}
+
+/** Whether we have seen this model ignore synthesis. */
+export function modelIgnoresSynthesis(modelId: string): boolean {
+  return ignoredSynthesis.has(modelId);
+}
+
 /** Test hook: forget everything learned. */
 export function resetToolChoiceLearning(): void {
   rejected.clear();
+  ignoredSynthesis.clear();
 }
