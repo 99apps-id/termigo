@@ -69,7 +69,9 @@ fn check_writable_blocks_system_prefixes_on_unix() {
 #[cfg(windows)]
 fn check_writable_blocks_system_prefixes_on_windows() {
     let err = check_writable("C:\\Windows\\System32\\evil.exe").unwrap_err();
-    assert!(err.contains("writes under"));
+    // On Windows, system paths like C:\Windows\... are now protected by the
+    // read guard as well as the write guard, so either message is correct.
+    assert!(err.contains("protected directory") || err.contains("writes under"));
 }
 
 #[test]

@@ -101,6 +101,7 @@
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "codemirror-languageserver": "^1.22.1",
+    "dompurify": "^3.4.13",
     "lucide-react": "^1.31.0",
     "mermaid": "^11.16.1",
     "radix-ui": "^1.6.7",

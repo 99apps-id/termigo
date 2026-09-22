@@ -419,3 +419,50 @@ describe("compactModelMessages", () => {
     expect(compactModelMessages(messages, 1000)).toBe(messages);
   });
 });
+
+describe("historyTokenBudget", () => {
+  it("subtracts the reserve from the window", () => {
+    expect(historyTokenBudget(100_000, 32_000)).toBe(68_000);
+  });
+
+  it("floors at 30% so a huge reserve never zeroes the budget", () => {
+    expect(historyTokenBudget(100_000, 95_000)).toBe(30_000);
+  });
+
+  it("caps at the body-size ceiling on a huge window", () => {
+    // 1_200_000 bytes / 2.6 chars-per-token.
+    const cap = Math.ceil(1_200_000 / 2.6);
+    expect(historyTokenBudget(10_000_000, 0)).toBe(cap);
+  });
+});
+
+describe("estimateMessagesSize", () => {
+  it("sizes text and tool parts in one pass", () => {
+    const messages = [
+      { role: "user", content: "hello" } as ModelMessage,
+      readCall("c1", "/a.txt"),
+      readResult("c1", "file-bytes-here"),
+    ];
+    const { tokens, bytes } = estimateMessagesSize(messages);
+    expect(bytes).toBeGreaterThan(0);
+    expect(tokens).toBe(Math.ceil(bytes / 2.6));
+  });
+});
+
+describe("shouldTrimStepMessages", () => {
+  const budget = 100_000;
+
+  it("skips the trim pass well under budget", () => {
+    expect(shouldTrimStepMessages(10_000, budget, 50_000)).toBe(false);
+  });
+
+  it("engages at the same line as the compactor's first rewrite", () => {
+    const line = budget * STEP_TRIM_ENGAGE_RATIO;
+    expect(shouldTrimStepMessages(line - 1, budget, 0)).toBe(false);
+    expect(shouldTrimStepMessages(line, budget, 0)).toBe(true);
+  });
+
+  it("engages on body size even when tokens look fine", () => {
+    expect(shouldTrimStepMessages(1_000, budget, 600_001)).toBe(true);
+  });
+});

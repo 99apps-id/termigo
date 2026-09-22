@@ -219,6 +219,9 @@ importers:
       codemirror-languageserver:
         specifier: ^1.22.1
         version: 1.22.1(@codemirror/autocomplete@6.20.3)(@codemirror/lint@6.9.7)(@codemirror/state@6.7.1)(@codemirror/view@6.43.8)
+      dompurify:
+        specifier: ^3.4.13
+        version: 3.4.13
       lucide-react:
         specifier: ^1.31.0
         version: 1.31.0(react@19.2.8)
