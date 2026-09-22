@@ -76,12 +76,9 @@ pub async fn pty_open(
     let Some(inner) = join_output else {
         log::error!("pty_open timed out after 15s");
         tauri::async_runtime::spawn(async move {
-            match join_handle.await {
-                Ok(Ok(session)) => {
-                    log::warn!("pty_open id={id}: late spawn succeeded after timeout; dropping orphaned session");
-                    session::drop_session(session);
-                }
-                _ => {}
+            if let Ok(Ok(session)) = join_handle.await {
+                log::warn!("pty_open id={id}: late spawn succeeded after timeout; dropping orphaned session");
+                session::drop_session(session);
             }
         });
         return Err(

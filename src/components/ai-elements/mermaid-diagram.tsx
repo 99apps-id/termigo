@@ -5,8 +5,6 @@ import { useEffect, useId, useState } from "react";
 import { Shimmer } from "./shimmer";
 import { useIsStreaming } from "./chat-code";
 
-import DOMPurify from "dompurify";
-
 /**
  * Lazily-loaded, cached mermaid module. Mermaid is heavy (pulls in dagre,
  * cytoscape, …), so keep it out of the initial bundle and load the chunk only
@@ -21,10 +19,9 @@ function loadMermaid() {
 }
 
 function sanitizeSvg(svg: string): string {
-  const clean = DOMPurify.sanitize(svg, {
-    USE_PROFILES: { svg: true, svgFilters: true },
-    ADD_ATTR: ["href", "target"],
-  });
+  let clean = svg.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "");
+  clean = clean.replace(/\s+on\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "");
+  clean = clean.replace(/\s+href\s*=\s*(?:"javascript:[^"]*"|'javascript:[^']*')/gi, "");
   return clean;
 }
 
