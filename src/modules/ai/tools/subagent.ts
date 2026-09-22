@@ -106,7 +106,7 @@ Approval works exactly as it does for you: read-only tools auto-run, and every m
             .boolean()
             .optional()
             .describe(
-              "Run this subagent in its OWN git worktree under .termigo/worktrees/ instead of your working tree. Use it when the subagent will edit files you are also editing, or when you want its changes kept apart until you accept them. Ignored for read-only subagent types, for SSH sessions, and when the workspace is not a git repo (the subagent then shares the workspace and the result says so). Nothing is merged back automatically: the result reports the worktree path, and worktree_diff / worktree_discard act on it.",
+               "Run this subagent in its OWN git worktree under .wt/ instead of your working tree. Use it when the subagent will edit files you are also editing, or when you want its changes kept apart until you accept them. Ignored for read-only subagent types, for SSH sessions, and when the workspace is not a git repo (the subagent then shares the workspace and the result says so). Nothing is merged back automatically: the result reports the worktree path, and worktree_diff / worktree_discard act on it.",
             ),
         }),
       ),
@@ -255,7 +255,7 @@ Each task's subagent has the same toolset you do and may itself spawn further su
             .boolean()
             .optional()
             .describe(
-              "Give each WRITING task its own git worktree under .termigo/worktrees/, so concurrent tasks cannot read each other's half-finished edits. Defaults to ON when the batch has two or more writers - that is when they overwrite each other - and stays off for a lone writer; pass false to force sharing. Read-only tasks are unaffected (a worktree would only be a stale copy for them), and so are SSH sessions, non-git workspaces, and tasks that fail to branch - those share the workspace and the result says which. Nothing merges back automatically; each result reports its worktree path.",
+              "Give each WRITING task its own git worktree under .wt/, so concurrent tasks cannot read each other's half-finished edits. Defaults to ON when the batch has two or more writers - that is when they overwrite each other - and stays off for a lone writer; pass false to force sharing. Read-only tasks are unaffected (a worktree would only be a stale copy for them), and so are SSH sessions, non-git workspaces, and tasks that fail to branch - those share the workspace and the result says which. Nothing merges back automatically; each result reports its worktree path.",
             ),
         }),
       ),

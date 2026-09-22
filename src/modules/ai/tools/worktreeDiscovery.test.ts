@@ -46,7 +46,7 @@ describe("worktree_list sees sandboxes this process did not create", () => {
         {
           name: "termigo-sandbox/old1",
           kind: "worktree",
-          worktreePath: "/workspace/.termigo/worktrees/old1",
+          worktreePath: "/workspace/.wt/old1",
           isHead: false,
           isDetached: false,
         },
@@ -79,14 +79,14 @@ describe("worktree_list sees sandboxes this process did not create", () => {
         {
           name: "termigo-sandbox/mine",
           kind: "worktree",
-          worktreePath: "/workspace/.termigo/worktrees/mine",
+      worktreePath: "/workspace/.wt/mine",
           isHead: false,
           isDetached: false,
         },
         {
           name: "termigo-sandbox/old2",
           kind: "worktree",
-          worktreePath: "/workspace/.termigo/worktrees/old2",
+          worktreePath: "/workspace/.wt/old2",
           isHead: false,
           isDetached: false,
         },
@@ -107,7 +107,7 @@ describe("worktree_list sees sandboxes this process did not create", () => {
     registerSandbox({
       id: "mine",
       branchName: "termigo-sandbox/mine",
-      worktreePath: "/workspace/.termigo/worktrees/mine",
+      worktreePath: "/workspace/.wt/mine",
       createdAt: Date.now(),
       status: "active",
     });
@@ -136,7 +136,7 @@ describe("worktree_discard can remove an orphan", () => {
         {
           name: "termigo-sandbox/old3",
           kind: "worktree",
-          worktreePath: "/workspace/.termigo/worktrees/old3",
+          worktreePath: "/workspace/.wt/old3",
           isHead: false,
           isDetached: false,
         },
@@ -156,7 +156,7 @@ describe("worktree_discard can remove an orphan", () => {
     // It used the DISCOVERED path, not an empty one.
     const commands = shellSessionRun.mock.calls.map((c) => c[1]);
     expect(commands[0]).toContain("worktree remove");
-    expect(commands[0]).toContain("/workspace/.termigo/worktrees/old3");
+    expect(commands[0]).toContain("/workspace/.wt/old3");
   });
 
   it("still refuses an id that is nowhere", async () => {

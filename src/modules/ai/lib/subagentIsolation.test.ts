@@ -88,29 +88,29 @@ describe("rerootToolContext", () => {
   } as unknown as ToolContext;
 
   it("moves both filesystem roots into the worktree", () => {
-    const rooted = rerootToolContext(ctx, "/repo/.termigo/worktrees/abc");
-    expect(rooted.getCwd()).toBe("/repo/.termigo/worktrees/abc");
-    expect(rooted.getWorkspaceRoot()).toBe("/repo/.termigo/worktrees/abc");
+    const rooted = rerootToolContext(ctx, "/repo/.wt/abc");
+    expect(rooted.getCwd()).toBe("/repo/.wt/abc");
+    expect(rooted.getWorkspaceRoot()).toBe("/repo/.wt/abc");
   });
 
   // Only the roots move. The subagent is the same process in the same session,
   // so the terminal, browser and control plane must keep working as before.
   it("leaves everything that is not a filesystem root alone", () => {
-    const rooted = rerootToolContext(ctx, "/repo/.termigo/worktrees/abc");
+    const rooted = rerootToolContext(ctx, "/repo/.wt/abc");
     expect(rooted.getTerminalContext()).toBe("terminal output");
     expect(rooted.isActiveTerminalPrivate()).toBe(false);
   });
 
   it("does not mutate the context it was given", () => {
-    rerootToolContext(ctx, "/repo/.termigo/worktrees/abc");
+    rerootToolContext(ctx, "/repo/.wt/abc");
     expect(ctx.getCwd()).toBe("/repo/sub");
     expect(ctx.getWorkspaceRoot()).toBe("/repo");
   });
 });
 
 describe("worktreeRelativePath", () => {
-  it("places the worktree under the workspace, where .termigo is ignored", () => {
-    expect(worktreeRelativePath("abc123")).toBe(".termigo/worktrees/abc123");
+  it("places the worktree under the workspace, where .wt is ignored", () => {
+    expect(worktreeRelativePath("abc123")).toBe(".wt/abc123");
   });
 });
 

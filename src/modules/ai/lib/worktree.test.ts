@@ -23,7 +23,7 @@ describe("worktree isolation library", () => {
     const info = generateSandboxInfo("task/123:risky");
     expect(info.id).toBe("task_123_risky");
     expect(info.branchName).toBe("termigo-sandbox/task_123_risky");
-    expect(info.subpath).toBe(".termigo/worktrees/task_123_risky");
+    expect(info.subpath).toBe(".wt/task_123_risky");
   });
 
   it("handles empty or special character taskIds gracefully", () => {
@@ -37,7 +37,7 @@ describe("worktree isolation library", () => {
   });
 
   it("constructs safely quoted shell commands", () => {
-    const path = ".termigo/worktrees/run-1";
+    const path = ".wt/run-1";
     const branch = "termigo-sandbox/run-1";
 
     const addCmd = worktreeAddCommand(path, branch);
@@ -68,7 +68,7 @@ describe("worktree isolation library", () => {
     const s1 = {
       id: "run-1",
       branchName: "termigo-sandbox/run-1",
-      worktreePath: ".termigo/worktrees/run-1",
+      worktreePath: ".wt/run-1",
       createdAt: Date.now(),
       status: "active" as const,
       description: "Experimenting with refactor",

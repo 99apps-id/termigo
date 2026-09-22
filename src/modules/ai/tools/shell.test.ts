@@ -103,10 +103,10 @@ describe("workspaceSessionKey", () => {
     const rootKey = workspaceSessionKey("sess-1", "/workspace/repo");
     const worktreeKey = workspaceSessionKey(
       "sess-1",
-      "/workspace/repo/.termigo/worktrees/subagent-1",
+      "/workspace/repo/.wt/subagent-1",
     );
     expect(rootKey).not.toBe(worktreeKey);
-    expect(worktreeKey).toContain(".termigo/worktrees/subagent-1");
+    expect(worktreeKey).toContain(".wt/subagent-1");
   });
 
   it("reuses shell key for matching working directory", () => {

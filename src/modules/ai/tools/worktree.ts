@@ -47,7 +47,7 @@ export function buildWorktreeTools(ctx: ToolContext) {
   return {
     worktree_create: tool({
       description:
-        "Create an isolated git worktree sandbox under `.termigo/worktrees/` for multi-file edits and experimental changes. Auto-executes.",
+        "Create an isolated git worktree sandbox under `.wt/` for multi-file edits and experimental changes. Auto-executes.",
       inputSchema: z.object({
         task_id: z.string().optional().describe("Optional identifier for the task or experiment."),
       }),

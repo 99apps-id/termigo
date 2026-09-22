@@ -43,28 +43,28 @@ describe("worktree isolation", () => {
     const info = generateSandboxInfo("fix/bug-123");
     expect(info.id).toBe("fix_bug-123");
     expect(info.branchName).toBe("termigo-sandbox/fix_bug-123");
-    expect(info.subpath).toBe(".termigo/worktrees/fix_bug-123");
+    expect(info.subpath).toBe(".wt/fix_bug-123");
   });
 
   it("builds correct git worktree commands", () => {
     const cmds = buildWorktreeCommands({
-      worktreePath: ".termigo/worktrees/task-1",
+      worktreePath: ".wt/task-1",
       branchName: "termigo-sandbox/task-1",
     });
 
-    expect(cmds.add).toEqual(["worktree", "add", "-b", "termigo-sandbox/task-1", ".termigo/worktrees/task-1", "HEAD"]);
-    expect(cmds.remove).toEqual(["worktree", "remove", "--force", ".termigo/worktrees/task-1"]);
+    expect(cmds.add).toEqual(["worktree", "add", "-b", "termigo-sandbox/task-1", ".wt/task-1", "HEAD"]);
+    expect(cmds.remove).toEqual(["worktree", "remove", "--force", ".wt/task-1"]);
     expect(cmds.deleteBranch).toEqual(["branch", "-D", "termigo-sandbox/task-1"]);
   });
 
   it("builds quoted shell commands for worktree operations", () => {
-    const add = worktreeAddCommand(".termigo/worktrees/task 1", "termigo-sandbox/task 1");
+    const add = worktreeAddCommand(".wt/task 1", "termigo-sandbox/task 1");
     expect(add).toBe(
-      "git worktree add -b 'termigo-sandbox/task 1' '.termigo/worktrees/task 1' HEAD",
+      "git worktree add -b 'termigo-sandbox/task 1' '.wt/task 1' HEAD",
     );
 
-    const remove = worktreeRemoveCommand(".termigo/worktrees/task-1");
-    expect(remove).toBe("git worktree remove --force '.termigo/worktrees/task-1'");
+    const remove = worktreeRemoveCommand(".wt/task-1");
+    expect(remove).toBe("git worktree remove --force '.wt/task-1'");
 
     const del = worktreeDeleteBranchCommand("termigo-sandbox/task-1");
     expect(del).toBe("git branch -D 'termigo-sandbox/task-1'");

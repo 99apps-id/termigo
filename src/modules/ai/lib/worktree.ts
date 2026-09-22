@@ -166,7 +166,7 @@ export type DiscoveredWorktree = {
  * The registry above is a plain in-memory Map, so it knows only about the
  * sandboxes THIS process created. The worktrees themselves live on disk and
  * survive a restart, which means after any restart `worktree_list` reported
- * nothing while `.termigo/worktrees/<id>` directories and
+ * nothing while `.wt/<id>` directories and
  * `termigo-sandbox/<id>` branches were still there. Those became invisible:
  * nothing could list them and `worktree_discard` could not remove them, because
  * it looks the sandbox up by id. Subagent isolation makes that more likely, since

@@ -92,7 +92,7 @@ describe("createIsolatedWorktree", () => {
     if (r.ok) {
       // Path is inside the workspace's ignored .termigo dir, and the branch is
       // namespaced, so a leftover one is identifiable.
-      expect(r.worktreePath).toContain("/repo/.termigo/worktrees/");
+       expect(r.worktreePath).toContain("/repo/.wt/");
       expect(r.worktreePath).toContain(r.sandboxId);
       expect(r.branchName).toBe(`termigo-sandbox/${r.sandboxId}`);
       // Registered, so the existing discard path can clean it up.
