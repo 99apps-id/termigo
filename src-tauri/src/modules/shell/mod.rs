@@ -101,6 +101,8 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
     "ruff", "black", "mypy", "pytest", "flake8", "isort",
     // GitHub CLI and companion tools
     "gh",
+    // Extension introspection (safe read-only inspection of installed extensions)
+    "ext_read_manifest", "ext_read_asset", "ext_read_asset_bytes", "ext_list",
     // Go / Rust helpers and compilers
     "rustc", "rustup", "cargo-nextest", "cargo-clippy", "cargo-machete",
     "golangci-lint", "rustfmt", "clippy-driver", "gofmt", "govulncheck", "dlv",

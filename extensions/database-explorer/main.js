@@ -2,8 +2,9 @@
  * Database Explorer — Termigo extension skeleton
  *
  * Demonstrates:
+ *  - bundled sql.js (WASM) loaded via ext_read_asset
  *  - sidebar section for databases / schemas / tables
- *  - panel renderer for query editor + results grid
+ *  - host-managed panel (HTML template) for query editor + results
  *  - commands (db:open, db:describe, db:export)
  *  - AI tools (db_describe, db_query)
  *  - settings for recent files and query history
@@ -29,11 +30,47 @@ export async function activate(ctx) {
   } = ctx;
 
   // ------------------------------------------------------------------
-  // 1. State
+  // 1. Load sql.js (WASM) from bundled extension assets
+  // ------------------------------------------------------------------
+  let SQL = null;
+  let sqlInitError = null;
+
+  try {
+    const sqlWasmText = await invoke("ext_read_asset", {
+      id: "database-explorer",
+      relPath: "lib/sql-wasm.js",
+    });
+
+    // sql-wasm.js is a classic script (not ESM). We load it via new Function()
+    // so its `var` declarations leak to the worker global scope, then call
+    // `initSqlJs` with our bundled WASM binary.
+    const loadSql = new Function(
+      sqlWasmText + "\n;return (typeof initSqlJs !== 'undefined' ? initSqlJs : null);",
+    );
+    const initSqlJs = loadSql();
+
+    if (typeof initSqlJs !== "function") {
+      throw new Error("initSqlJs not found after loading sql-wasm.js");
+    }
+
+    const b64 = await invoke("ext_read_asset", {
+      id: "database-explorer",
+      relPath: "lib/sql-wasm.b64",
+    });
+
+    const binary = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    SQL = await initSqlJs({ wasmBinary: binary });
+    logger.info("sql.js initialized");
+  } catch (err) {
+    sqlInitError = err instanceof Error ? err : new Error(String(err));
+    logger.error("sql.js init failed:", sqlInitError);
+  }
+
+  // ------------------------------------------------------------------
+  // 2. State
   // ------------------------------------------------------------------
   let recentFiles = [];
-  let activeDb = null; // { path, name, tables: [] }
-  let panelOpen = false;
+  let activeDb = null; // { path, name, db: SQL.Database, tables: [] }
 
   async function loadRecentFiles() {
     try {
@@ -57,7 +94,94 @@ export async function activate(ctx) {
   }
 
   // ------------------------------------------------------------------
-  // 2. Sidebar section
+  // 3. SQLite helpers
+  // ------------------------------------------------------------------
+  function describeTables(db) {
+    const stmt = db.exec(
+      "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;",
+    );
+    const tables = [];
+    if (stmt && stmt.length > 0) {
+      const rows = stmt[0].values;
+      for (const row of rows) {
+        const tableName = row[0];
+        const countRow = db.exec(
+          `SELECT COUNT(*) FROM "${tableName.replace(/"/g, '""')}";`,
+        );
+        const rowCount = countRow && countRow.length > 0 ? countRow[0].values[0][0] : 0;
+        tables.push({ name: tableName, rows: rowCount });
+      }
+    }
+    return tables;
+  }
+
+  function runQueryOnDb(db, sql) {
+    const maxRows = (await settings.get("maxRows")) ?? 500;
+    const lowered = sql.trim().toLowerCase();
+    if (
+      lowered.startsWith("insert") ||
+      lowered.startsWith("update") ||
+      lowered.startsWith("delete") ||
+      lowered.startsWith("drop") ||
+      lowered.startsWith("alter") ||
+      lowered.startsWith("create") ||
+      lowered.startsWith("pragma")
+    ) {
+      throw new Error("Only SELECT queries are allowed in this extension.");
+    }
+
+    db.run(sql);
+    // For SELECT queries, sql.js returns results in db.exec() or via prepared statements.
+    // We use exec for simplicity.
+    const results = db.exec(sql);
+    if (!results || results.length === 0) {
+      return { columns: [], rows: [], rowCount: 0 };
+    }
+    const first = results[0];
+    return {
+      columns: first.columns,
+      rows: first.values,
+      rowCount: first.values.length,
+    };
+  }
+
+  async function openDatabase(path) {
+    try {
+      const result = await invoke("fs_read_file", { path });
+      let bytes;
+
+      if (result && result.kind === "binary") {
+        throw new Error(
+          "fs_read_file returned binary without payload; install a newer Termigo build.",
+        );
+      } else if (result && result.kind === "text") {
+        throw new Error(
+          "fs_read_file returned text for a binary .db file; install a newer Termigo build.",
+        );
+      } else if (result && result.kind === "toolarge") {
+        throw new Error(
+          `File is too large to open in the browser (${result.size} bytes, limit ${result.limit}).`,
+        );
+      } else if (result && result.kind === "image") {
+        throw new Error("Expected a SQLite file, got an image.");
+      } else if (result && typeof result === "string") {
+        throw new Error(
+          "Unexpected fs_read_file payload shape; install a newer Termigo build.",
+        );
+      } else {
+        throw new Error("fs_read_file returned an empty or unknown payload.");
+      }
+    } catch (err) {
+      logger.error("openDatabase read failed:", err);
+      ctx.ui.toast(
+        `Cannot read ${path}: ${err.message ?? "fs_read_file cannot deliver binary bytes in this build."}`,
+      );
+      return;
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // 4. Sidebar section
   // ------------------------------------------------------------------
   function renderSidebar() {
     const items = recentFiles.map((path) => ({
@@ -87,238 +211,123 @@ export async function activate(ctx) {
       emptyText: "No recent SQLite files.",
       searchable: true,
       searchPlaceholder: "Search recent databases…",
-      onItemClick: (itemId) => {
-        const path = itemId.slice(3); // strip "db:"
-        openDatabase(path);
-      },
     });
   }
 
   // ------------------------------------------------------------------
-  // 3. Database open / describe (skeleton)
+  // 5. Panel (host-managed HTML template)
   // ------------------------------------------------------------------
-  async function openDatabase(path) {
-    try {
-      // In a real extension we'd read the SQLite header + schema via sql.js.
-      // For the skeleton we fake a successful open so the panel has something
-      // to render.
-      touchRecent(path);
-      activeDb = {
-        path,
-        name: path.split(/[\\/]/).pop() || path,
-        tables: [
-          { name: "users", rows: 128 },
-          { name: "orders", rows: 1024 },
-        ],
-      };
-      openQueryPanel();
-    } catch (err) {
-      logger.error("openDatabase failed:", err);
-      ctx.ui.toast(`Failed to open database: ${err.message}`);
-    }
-  }
+  const panelId = "db-query";
 
-  async function describeDatabase(path) {
-    // Placeholder: real implementation uses sql.js to read sqlite_master.
-    return {
-      path,
-      tables: activeDb?.tables ?? [],
-    };
-  }
-
-  async function runQuery(path, sql) {
-    // Placeholder: real implementation uses sql.js to exec + return columns/rows.
-    return {
-      columns: ["id", "name"],
-      rows: [
-        [1, "Alice"],
-        [2, "Bob"],
-      ],
-      rowCount: 2,
-    };
-  }
-
-  // ------------------------------------------------------------------
-  // 4. Panel (query editor + results)
-  // ------------------------------------------------------------------
-  function openQueryPanel() {
-    const panelId = "db-query";
-    tabs.openExtensionTab({
-      panelId,
-      title: activeDb ? activeDb.name : "Database",
-      reuseKey: activeDb?.path ?? "db-query",
-    });
-    panelOpen = true;
-  }
-
-  const renderPanel = (container, opts) => {
+  function buildPanelHtml() {
+    const hasError = Boolean(sqlInitError);
     const db = activeDb;
-    container.innerHTML = "";
-
-    const wrap = document.createElement("div");
-    wrap.style.padding = "12px";
-    wrap.style.fontFamily = "system-ui, sans-serif";
 
     if (!db) {
-      wrap.textContent = "Open a SQLite file from the sidebar.";
-      container.appendChild(wrap);
-      return () => {};
+      return {
+        html: `
+          <div style="padding:12px;font-family:system-ui,sans-serif">
+            <h3 style="margin:0 0 8px">Database Explorer</h3>
+            <p style="margin:0;opacity:0.8">
+              ${hasError
+                ? `sql.js failed to initialize: ${escapeHtml(sqlInitError.message)}`
+                : 'Open a SQLite file from the sidebar.'}
+            </p>
+            ${hasError ? `<pre style="color:#ff8a8a;margin-top:8px;white-space:pre-wrap">${escapeHtml(sqlInitError.stack ?? sqlInitError.message)}</pre>` : ""}
+          </div>
+        `,
+        events: [],
+      };
     }
 
-    const header = document.createElement("h3");
-    header.textContent = db.name;
-    header.style.margin = "0 0 8px";
+    const tableRows = (db.tables ?? [])
+      .map(
+        (t) =>
+          `<div style="display:flex;justify-content:space-between;padding:4px 8px;background:rgba(127,127,127,0.08);border-radius:4px;font-size:13px">
+            <span>${escapeHtml(t.name)}</span>
+            <span style="opacity:0.7">${t.rows} rows</span>
+          </div>`,
+      )
+      .join("");
 
-    const meta = document.createElement("div");
-    meta.style.fontSize = "12px";
-    meta.style.opacity = "0.7";
-    meta.style.marginBottom = "12px";
-    meta.textContent = db.path;
-
-    const tablesLabel = document.createElement("div");
-    tablesLabel.textContent = "Tables";
-    tablesLabel.style.fontWeight = "600";
-    tablesLabel.style.marginBottom = "6px";
-
-    const tableList = document.createElement("div");
-    tableList.style.display = "flex";
-    tableList.style.flexDirection = "column";
-    tableList.style.gap = "4px";
-    tableList.style.marginBottom = "12px";
-
-    for (const t of db.tables ?? []) {
-      const row = document.createElement("div");
-      row.style.display = "flex";
-      row.style.justifyContent = "space-between";
-      row.style.padding = "4px 8px";
-      row.style.background = "rgba(127,127,127,0.08)";
-      row.style.borderRadius = "4px";
-      row.style.fontSize = "13px";
-
-      const name = document.createElement("span");
-      name.textContent = t.name;
-
-      const count = document.createElement("span");
-      count.style.opacity = "0.7";
-      count.textContent = `${t.rows} rows`;
-
-      row.append(name, count);
-      tableList.appendChild(row);
-    }
-
-    const sqlLabel = document.createElement("label");
-    sqlLabel.textContent = "SQL";
-    sqlLabel.style.fontWeight = "600";
-    sqlLabel.style.display = "block";
-    sqlLabel.style.marginBottom = "6px";
-
-    const sqlInput = document.createElement("textarea");
-    sqlInput.placeholder = "SELECT * FROM users LIMIT 100;";
-    sqlInput.style.width = "100%";
-    sqlInput.style.minHeight = "90px";
-    sqlInput.style.fontFamily = "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", monospace";
-    sqlInput.style.fontSize = "13px";
-    sqlInput.style.padding = "8px";
-    sqlInput.style.borderRadius = "6px";
-    sqlInput.style.border = "1px solid rgba(127,127,127,0.25)";
-    sqlInput.style.background = "transparent";
-    sqlInput.style.color = "inherit";
-    sqlInput.style.resize = "vertical";
-
-    const runBtn = document.createElement("button");
-    runBtn.textContent = "Run query";
-    runBtn.style.marginTop = "8px";
-    runBtn.style.padding = "6px 12px";
-    runBtn.style.borderRadius = "6px";
-    runBtn.style.border = "1px solid rgba(127,127,127,0.3)";
-    runBtn.style.background = "transparent";
-    runBtn.style.color = "inherit";
-    runBtn.style.cursor = "pointer";
-
-    const results = document.createElement("div");
-    results.style.marginTop = "12px";
-
-    runBtn.onclick = async () => {
-      const sql = sqlInput.value.trim();
-      if (!sql) {
-        ctx.ui.toast("Enter a SQL query first.");
-        return;
-      }
-      runBtn.disabled = true;
-      runBtn.textContent = "Running…";
-      try {
-        const res = await runQuery(db.path, sql);
-        results.innerHTML = "";
-
-        const count = document.createElement("div");
-        count.style.fontSize = "12px";
-        count.style.opacity = "0.8";
-        count.style.marginBottom = "6px";
-        count.textContent = `${res.rowCount} row${res.rowCount === 1 ? "" : "s"}`;
-        results.appendChild(count);
-
-        const grid = document.createElement("div");
-        grid.style.overflow = "auto";
-        grid.style.maxHeight = "40vh";
-        grid.style.borderRadius = "6px";
-        grid.style.border = "1px solid rgba(127,127,127,0.2)";
-
-        const table = document.createElement("table");
-        table.style.width = "100%";
-        table.style.borderCollapse = "collapse";
-        table.style.fontSize = "13px";
-
-        const thead = document.createElement("thead");
-        const headRow = document.createElement("tr");
-        for (const col of res.columns) {
-          const th = document.createElement("th");
-          th.textContent = col;
-          th.style.textAlign = "left";
-          th.style.padding = "6px 8px";
-          th.style.borderBottom = "1px solid rgba(127,127,127,0.25)";
-          th.style.background = "rgba(127,127,127,0.08)";
-          th.style.position = "sticky";
-          th.style.top = "0";
-          headRow.appendChild(th);
-        }
-        thead.appendChild(headRow);
-        table.appendChild(thead);
-
-        const tbody = document.createElement("tbody");
-        for (const row of res.rows) {
-          const tr = document.createElement("tr");
-          for (const cell of row) {
-            const td = document.createElement("td");
-            td.textContent = cell === null ? "NULL" : String(cell);
-            td.style.padding = "5px 8px";
-            td.style.borderBottom = "1px solid rgba(127,127,127,0.1)";
-            td.style.fontFamily = "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
-            tr.appendChild(td);
-          }
-          tbody.appendChild(tr);
-        }
-        table.appendChild(tbody);
-        grid.appendChild(table);
-        results.appendChild(grid);
-      } catch (err) {
-        logger.error("runQuery failed:", err);
-        results.innerHTML = `<pre style="color:#ff8a8a;margin:0;">${err.message}</pre>`;
-      } finally {
-        runBtn.disabled = false;
-        runBtn.textContent = "Run query";
-      }
+    return {
+      html: `
+        <div style="padding:12px;font-family:system-ui,sans-serif">
+          <h3 style="margin:0 0 4px">${escapeHtml(db.name)}</h3>
+          <div style="font-size:12px;opacity:0.7;margin-bottom:12px">${escapeHtml(db.path)}</div>
+          <div style="font-weight:600;margin-bottom:6px">Tables</div>
+          <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:12px">${tableRows || '<div style="opacity:0.7">No tables found.</div>'}</div>
+          <label style="font-weight:600;display:block;margin-bottom:6px">SQL</label>
+          <textarea data-ext-field="sql" placeholder="SELECT * FROM users LIMIT 100;" style="width:100%;min-height:90px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:13px;padding:8px;border-radius:6px;border:1px solid rgba(127,127,127,0.25);background:transparent;color:inherit;resize:vertical">SELECT 1;</textarea>
+          <button data-ext-event="db-run" style="margin-top:8px;padding:6px 12px;border-radius:6px;border:1px solid rgba(127,127,127,0.3);background:transparent;color:inherit;cursor:pointer">Run query</button>
+          <div id="db-result" style="margin-top:12px"></div>
+        </div>
+      `,
+      events: ["db-run"],
     };
+  }
 
-    wrap.append(header, meta, tablesLabel, tableList, sqlLabel, sqlInput, runBtn, results);
-    container.appendChild(wrap);
+  function refreshPanel() {
+    const { html, events } = buildPanelHtml();
+    panel.setView(panelId, html, events);
+  }
 
-    return () => {};
-  };
+  panel.on("db-run", async (fields) => {
+    const sql = String(fields?.sql ?? "").trim();
+    if (!sql) {
+      ctx.ui.toast("Enter a SQL query first.");
+      return;
+    }
 
-  ctx.registerPanelRenderer("db-query", renderPanel);
+    if (!activeDb) {
+      ctx.ui.toast("No active database.");
+      return;
+    }
+
+    try {
+      const res = runQueryOnDb(activeDb.db, sql);
+      // The host-managed panel doesn't give us direct DOM access from the worker,
+      // so we re-render the whole panel with the result embedded.
+      const resultBlock = res.rowCount === 0
+        ? '<div style="font-size:12px;opacity:0.8">0 rows</div>'
+        : `<div style="font-size:12px;opacity:0.8;margin-bottom:6px">${res.rowCount} row${res.rowCount === 1 ? "" : "s"}</div>
+           <div style="overflow:auto;max-height:40vh;border-radius:6px;border:1px solid rgba(127,127,127,0.2)">
+             <table style="width:100%;border-collapse:collapse;font-size:13px">
+               <thead>
+                 <tr>${res.columns.map(c => `<th style="text-align:left;padding:6px 8px;border-bottom:1px solid rgba(127,127,127,0.25);background:rgba(127,127,127,0.08);position:sticky;top:0">${escapeHtml(c)}</th>`).join("")}</tr>
+               </thead>
+               <tbody>${res.rows.map(row => `<tr>${row.map(cell => `<td style="padding:5px 8px;border-bottom:1px solid rgba(127,127,127,0.1);font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace">${cell === null ? "NULL" : escapeHtml(String(cell))}</td>`).join("")}</tr>`).join("")}</tbody>
+             </table>
+           </div>`;
+
+      const { html } = buildPanelHtml();
+      // Inject the result after the button.
+      const injected = html.replace(
+        '<div id="db-result" style="margin-top:12px"></div>',
+        `<div id="db-result" style="margin-top:12px">${resultBlock}</div>`,
+      );
+      panel.setView(panelId, injected, ["db-run"]);
+    } catch (err) {
+      logger.error("runQuery failed:", err);
+      const { html } = buildPanelHtml();
+      const injected = html.replace(
+        '<div id="db-result" style="margin-top:12px"></div>',
+        `<div id="db-result" style="margin-top:12px"><pre style="color:#ff8a8a;margin:0;white-space:pre-wrap">${escapeHtml(err.message ?? String(err))}</pre></div>`,
+      );
+      panel.setView(panelId, injected, ["db-run"]);
+    }
+  });
+
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
 
   // ------------------------------------------------------------------
-  // 5. Commands
+  // 6. Commands
   // ------------------------------------------------------------------
   contribute.commands([
     {
@@ -339,8 +348,6 @@ export async function activate(ctx) {
   ]);
 
   registerCommandHandler("db:open", async () => {
-    // Placeholder: in a real extension this would open a file picker or
-    // accept a path argument.
     ctx.ui.toast("Open a .db file from the sidebar (skeleton)");
   });
 
@@ -349,7 +356,7 @@ export async function activate(ctx) {
       ctx.ui.toast("No active database. Open one from the sidebar.");
       return;
     }
-    const desc = await describeDatabase(activeDb.path);
+    const desc = { path: activeDb.path, tables: activeDb.tables ?? [] };
     const summary = desc.tables.map((t) => `${t.name} (${t.rows} rows)`).join(", ");
     ctx.ui.toast(summary || "No tables found.");
   });
@@ -359,7 +366,7 @@ export async function activate(ctx) {
   });
 
   // ------------------------------------------------------------------
-  // 6. AI tools
+  // 7. AI tools
   // ------------------------------------------------------------------
   contribute.aiTools([
     {
@@ -390,31 +397,21 @@ export async function activate(ctx) {
   registerAiToolHandler("db_describe", async (args) => {
     const path = String(args?.path ?? "");
     if (!path) return { error: "path is required" };
-    return describeDatabase(path);
+    return { path, tables: activeDb?.tables ?? [] };
   });
 
   registerAiToolHandler("db_query", async (args) => {
     const path = String(args?.path ?? "");
     const sql = String(args?.sql ?? "");
     if (!path || !sql) return { error: "path and sql are required" };
-    // Safety: only allow reads in the skeleton.
-    const lowered = sql.trim().toLowerCase();
-    if (
-      lowered.startsWith("insert") ||
-      lowered.startsWith("update") ||
-      lowered.startsWith("delete") ||
-      lowered.startsWith("drop") ||
-      lowered.startsWith("alter") ||
-      lowered.startsWith("create") ||
-      lowered.startsWith("pragma")
-    ) {
-      return { error: "Only SELECT queries are allowed in this extension." };
+    if (!activeDb || activeDb.path !== path) {
+      return { error: `Database ${path} is not open. Open it first via db:open.` };
     }
-    return runQuery(path, sql);
+    return runQueryOnDb(activeDb.db, sql);
   });
 
   // ------------------------------------------------------------------
-  // 7. Settings
+  // 8. Settings
   // ------------------------------------------------------------------
   contribute.settings([
     {
@@ -434,10 +431,90 @@ export async function activate(ctx) {
   ]);
 
   // ------------------------------------------------------------------
-  // 8. Init
+  // 9. Init
   // ------------------------------------------------------------------
   await loadRecentFiles();
   renderSidebar();
+
+  // Create a sample in-memory SQLite database to demonstrate sql.js works.
+  if (SQL) {
+    try {
+      const sampleDb = new SQL.Database();
+      sampleDb.run(
+        "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT);",
+      );
+      sampleDb.run(
+        'INSERT INTO users (name, email) VALUES ("Alice", "alice@example.com");',
+      );
+      sampleDb.run(
+        'INSERT INTO users (name, email) VALUES ("Bob", "bob@example.com");',
+      );
+      sampleDb.run(
+        'INSERT INTO users (name, email) VALUES ("Carol", "carol@example.com");',
+      );
+      sampleDb.run(
+        "CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER, total REAL, created_at TEXT);",
+      );
+      sampleDb.run(
+        'INSERT INTO orders (user_id, total, created_at) VALUES (1, 29.99, "2024-01-01");',
+      );
+      sampleDb.run(
+        'INSERT INTO orders (user_id, total, created_at) VALUES (2, 49.50, "2024-01-02");',
+      );
+      sampleDb.run(
+        'INSERT INTO orders (user_id, total, created_at) VALUES (1, 15.00, "2024-01-03");',
+      );
+
+      activeDb = {
+        path: ":sample:",
+        name: "Sample Database",
+        db: sampleDb,
+        tables: describeTables(sampleDb),
+      };
+
+      // Auto-open the sample panel so the user sees something immediately.
+      panel.setView(panelId, buildPanelHtml().html, ["db-run"]);
+      panel.on("db-run", async (fields) => {
+        const sql = String(fields?.sql ?? "").trim();
+        if (!sql) {
+          ctx.ui.toast("Enter a SQL query first.");
+          return;
+        }
+        try {
+          const res = runQueryOnDb(activeDb.db, sql);
+          const resultBlock = res.rowCount === 0
+            ? '<div style="font-size:12px;opacity:0.8">0 rows</div>'
+            : `<div style="font-size:12px;opacity:0.8;margin-bottom:6px">${res.rowCount} row${res.rowCount === 1 ? "" : "s"}</div>
+               <div style="overflow:auto;max-height:40vh;border-radius:6px;border:1px solid rgba(127,127,127,0.2)">
+                 <table style="width:100%;border-collapse:collapse;font-size:13px">
+                   <thead>
+                     <tr>${res.columns.map(c => `<th style="text-align:left;padding:6px 8px;border-bottom:1px solid rgba(127,127,127,0.25);background:rgba(127,127,127,0.08);position:sticky;top:0">${escapeHtml(c)}</th>`).join("")}</tr>
+                   </thead>
+                   <tbody>${res.rows.map(row => `<tr>${row.map(cell => `<td style="padding:5px 8px;border-bottom:1px solid rgba(127,127,127,0.1);font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace">${cell === null ? "NULL" : escapeHtml(String(cell))}</td>`).join("")}</tr>`).join("")}</tbody>
+                 </table>
+               </div>`;
+
+          const { html } = buildPanelHtml();
+          const injected = html.replace(
+            '<div id="db-result" style="margin-top:12px"></div>',
+            `<div id="db-result" style="margin-top:12px">${resultBlock}</div>`,
+          );
+          panel.setView(panelId, injected, ["db-run"]);
+        } catch (err) {
+          logger.error("runQuery failed:", err);
+          const { html } = buildPanelHtml();
+          const injected = html.replace(
+            '<div id="db-result" style="margin-top:12px"></div>',
+            `<div id="db-result" style="margin-top:12px"><pre style="color:#ff8a8a;margin:0;white-space:pre-wrap">${escapeHtml(err.message ?? String(err))}</pre></div>`,
+          );
+          panel.setView(panelId, injected, ["db-run"]);
+        }
+      });
+    } catch (err) {
+      logger.error("sample db init failed:", err);
+    }
+  }
+
   logger.info("activated, recent files:", recentFiles.length);
 }
 

@@ -17,14 +17,44 @@ Then in Termigo:
 ## What it demonstrates
 
 - Sidebar section for recent SQLite files.
-- Panel renderer with table list, SQL editor, and results grid.
+- Host-managed panel (HTML template) with query editor and results grid.
 - Commands: `/db:open`, `/db:describe`, `/db:export`.
 - AI tools: `db_describe <path>`, `db_query <path> <sql>`.
-- Settings entries for `maxRows` and `defaultDirectory`.
+- Settings: `maxRows`, `defaultDirectory`.
+- Storage: `recentFiles` persisted.
 
-## Next steps
+## sql.js bundling
 
-- Bundle `sql.js` and replace the skeleton `runQuery` / `describeDatabase` with real SQLite execution.
-- Add support for remote databases via SSH tunnel (`ctx.ssh.openForward`) + native Rust `db_*` commands.
-- Persist query history in `ctx.storage`.
-- Add CSV/JSON export via `invoke:fs_write_file`.
+This extension bundles **sql.js** (SQLite compiled to WebAssembly) directly inside the package so it works offline:
+
+```
+extensions/database-explorer/
+  manifest.json
+  main.js
+  README.md
+  lib/
+    sql-wasm.js    ← sql.js loader (classic script, loaded via new Function)
+    sql-wasm.b64   ← base64-encoded SQLite WASM binary
+```
+
+At activation time, `main.js`:
+
+1. Reads `lib/sql-wasm.js` via `ext_read_asset`.
+2. Loads it into the worker global scope with `new Function(...)` so `initSqlJs` becomes available.
+3. Reads `lib/sql-wasm.b64` via `ext_read_asset`.
+4. Decodes the base64 string to a `Uint8Array` and passes it to `initSqlJs({ wasmBinary })`.
+
+This avoids any core changes: both files are plain text assets, and `ext_read_asset` already supports reading them.
+
+## Sandbox compatibility
+
+The panel uses a **host-managed HTML template** (`panel.setView`) instead of a DOM-manipulating renderer. This keeps the extension working in Termigo's sandboxed worker mode.
+
+Events are routed back through `data-ext-event` attributes and `panel.on(...)` handlers.
+
+## Roadmap
+
+- Real binary file reading for `.db` files (requires `fs_read_file` to return raw bytes or a new `fs_read_file_binary` command).
+- Directory picker for recent files.
+- Export query results to CSV/JSON.
+- Remote database support (Postgres/MySQL via native Rust commands or sidecar).

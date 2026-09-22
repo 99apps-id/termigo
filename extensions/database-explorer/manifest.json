@@ -8,7 +8,8 @@
   "main": "main.js",
   "permissions": [
     "invoke:fs_read_file",
-    "invoke:fs_write_file",
+    "invoke:ext_read_asset",
+    "invoke:shell_run_command",
     "settings:read",
     "settings:write",
     "aiTools:register",
