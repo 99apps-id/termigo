@@ -99,6 +99,8 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
     "sqlite3", "duckdb", "psql", "mysql", "mongosh", "redis-cli",
     // Python toolchains
     "ruff", "black", "mypy", "pytest", "flake8", "isort",
+    // GitHub CLI and companion tools
+    "gh",
     // Go / Rust helpers and compilers
     "rustc", "rustup", "cargo-nextest", "cargo-clippy", "cargo-machete",
     "golangci-lint", "rustfmt", "clippy-driver", "gofmt", "govulncheck", "dlv",

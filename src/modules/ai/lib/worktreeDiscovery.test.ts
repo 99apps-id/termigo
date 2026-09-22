@@ -23,7 +23,7 @@ describe("discoveredWorktrees", () => {
   // Git reports native separators, so a Windows path has to parse too.
   it("parses a Windows path", () => {
     const found = discoveredWorktrees([
-      wt("termigo-sandbox/win7", "C:\\repo\\.termigo\\worktrees\\win7"),
+      wt("termigo-sandbox/win7", "C:\\repo\\.wt\\win7"),
     ]);
     expect(found.map((w) => w.id)).toEqual(["win7"]);
   });
