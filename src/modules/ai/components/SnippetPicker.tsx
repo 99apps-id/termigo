@@ -1,12 +1,25 @@
 import { PopoverContent } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import { Star02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { SlashCommandMeta } from "../lib/slashCommands";
 import type { Snippet } from "../lib/snippets";
+import { useCustomCommandStatsStore } from "../store/customCommandStatsStore";
 
 export type PickerItem =
-  | { kind: "snippet"; snippet: Snippet }
-  | { kind: "command"; command: SlashCommandMeta };
+  | {
+      kind: "snippet";
+      snippet: Snippet;
+    }
+  | {
+      kind: "command";
+      command: SlashCommandMeta & {
+        tags?: string[];
+        favorite?: boolean;
+        usageCount?: number;
+      };
+      onToggleFavorite?: (name: string) => void;
+    };
 
 type Props = {
   items: readonly PickerItem[];
@@ -50,6 +63,9 @@ export function SnippetPickerContent({
                   const i = cursor;
                   if (it.kind !== "command") return null;
                   const c = it.command;
+                  const stats = useCustomCommandStatsStore.getState().get(c.name);
+                  const isFav = c.favorite ?? stats?.favorite ?? false;
+                  const count = c.usageCount ?? stats?.count ?? 0;
                   return (
                     <li key={`cmd-${c.name}`}>
                       <button
@@ -57,7 +73,7 @@ export function SnippetPickerContent({
                         onMouseEnter={() => onHover(i)}
                         onClick={() => onPick(it)}
                         className={cn(
-                          "flex w-full items-center gap-2 px-2 py-1.5 text-left text-[12px]",
+                          "flex w-full items-start gap-2 px-2 py-1.5 text-left text-[12px]",
                           i === activeIndex
                             ? "bg-accent"
                             : "hover:bg-accent/60",
@@ -67,15 +83,54 @@ export function SnippetPickerContent({
                           icon={c.icon}
                           size={13}
                           strokeWidth={1.75}
-                          className="text-muted-foreground"
+                          className="text-muted-foreground mt-0.5"
                         />
-                        <span className="flex min-w-0 flex-1 flex-col">
+                        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                           <span className="flex items-center gap-1.5">
                             <span className="font-mono text-muted-foreground">
                               #{c.name}
                             </span>
-                            <span className="font-medium">{c.label}</span>
+                            {c.tags?.length ? (
+                              <span className="flex gap-1">
+                                {c.tags.slice(0, 3).map((tag) => (
+                                  <span
+                                    key={tag}
+                                    className="rounded-[3px] bg-muted px-1 py-px text-[9px] text-muted-foreground"
+                                  >
+                                    {tag}
+                                  </span>
+                                ))}
+                              </span>
+                            ) : null}
                           </span>
+                          <span className="font-medium">{c.label}</span>
+                        </span>
+                        <span className="flex shrink-0 items-center gap-1 pt-0.5">
+                          {count > 0 ? (
+                            <span className="text-[10px] text-muted-foreground/70">
+                              {count}
+                            </span>
+                          ) : null}
+                          {it.onToggleFavorite ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                it.onToggleFavorite?.(c.name);
+                              }}
+                              className="rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
+                              aria-label={
+                                isFav ? "Remove from favorites" : "Add to favorites"
+                              }
+                            >
+                              <HugeiconsIcon
+                                icon={Star02Icon}
+                                size={12}
+                                strokeWidth={2}
+                                className={isFav ? "fill-amber-500 text-amber-500" : ""}
+                              />
+                            </button>
+                          ) : null}
                         </span>
                       </button>
                     </li>

@@ -32,6 +32,8 @@ export type CustomCommand = {
   description: string;
   /** The prompt template. */
   body: string;
+  /** Optional tags from frontmatter for filtering/grouping. */
+  tags: string[];
 };
 
 /**
@@ -50,13 +52,20 @@ export function commandPath(workspaceRoot: string, name: string): string {
 export function parseCommand(name: string, content: string): CustomCommand {
   const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(content);
   if (!match) {
-    return { name, description: "", body: content.trim() };
+    return { name, description: "", body: content.trim(), tags: [] };
   }
   const front = match[1];
   const body = match[2].trim();
-  const m = /^description:\s*(.*)$/im.exec(front);
-  const description = m ? m[1].trim().replace(/^["']|["']$/g, "") : "";
-  return { name, description, body };
+  const descM = /^description:\s*(.*)$/im.exec(front);
+  const description = descM ? descM[1].trim().replace(/^["']|["']$/g, "") : "";
+  const tagsM = /^tags:\s*\[([^\]]*)\]$/im.exec(front);
+  const tags = tagsM
+    ? tagsM[1]
+        .split(",")
+        .map((t) => t.trim().replace(/^["']|["']$/g, ""))
+        .filter((t) => /^[a-z0-9-]+$/.test(t))
+    : [];
+  return { name, description, body, tags };
 }
 
 /** Substitute the user's arguments into a command body. */

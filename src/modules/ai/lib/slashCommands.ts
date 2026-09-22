@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import { compatModelIdForEndpoint, MODELS } from "../config";
 import { useApprovalQueue } from "../store/approvalQueueStore";
 import { getChat, useChatStore } from "../store/chatStore";
+import { useCustomCommandStatsStore } from "../store/customCommandStatsStore";
 import { useCustomCommandsStore } from "../store/customCommandsStore";
 import { usePlanStore } from "../store/planStore";
 import { useSessionDirectiveStore } from "../store/sessionDirectiveStore";
@@ -325,6 +326,7 @@ export function tryRunSlashCommand(input: string): SlashOutcome {
     }
     default:
       if (custom) {
+        useCustomCommandStatsStore.getState().recordUse(custom.name);
         return {
           kind: "send-prompt",
           prompt: expandCommand(custom, tail),

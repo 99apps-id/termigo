@@ -11,16 +11,27 @@ import { splitComposerHighlights } from "../lib/composerHighlights";
 import type { CustomCommand } from "../lib/customCommands";
 import { SLASH_COMMANDS, type SlashCommandMeta } from "../lib/slashCommands";
 import { useChatStore } from "../store/chatStore";
+import { useCustomCommandStatsStore } from "../store/customCommandStatsStore";
 import { useCustomCommandsStore } from "../store/customCommandsStore";
 import { useSnippetsStore } from "../store/snippetsStore";
 
 /** Present a user-defined command as a picker entry, like a built-in one. */
-function customCommandMeta(cmd: CustomCommand): SlashCommandMeta {
+function customCommandMeta(cmd: CustomCommand): SlashCommandMeta & {
+  tags: string[];
+  onToggleFavorite?: (name: string) => void;
+} {
+  const stats = useCustomCommandStatsStore.getState().get(cmd.name);
   return {
     name: cmd.name,
     invocation: `/${cmd.name}`,
     label: cmd.description || cmd.name,
     icon: CommandIcon,
+    tags: cmd.tags,
+    favorite: stats?.favorite,
+    usageCount: stats?.count,
+    onToggleFavorite: (name: string) => {
+      useCustomCommandStatsStore.getState().toggleFavorite(name);
+    },
   };
 }
 

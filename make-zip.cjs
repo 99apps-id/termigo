@@ -36,11 +36,16 @@ async function createZip() {
   const entries = [];
   let totalSize = 0;
 
+  console.log('Creating zip with files:', files.join(', '));
+
   for (const file of files) {
     const fullPath = path.join(baseDir, file);
+    console.log('Processing:', file, '->', name);
     const data = fs.readFileSync(fullPath);
     const name = file.replace(/\\/g, '/');
+    console.log('  size:', data.length, 'crc:', crc32(data).toString(16));
     const compressed = await deflate(data);
+    console.log('  compressed:', compressed.length);
 
     const header = Buffer.alloc(30);
     header.writeUInt32LE(0x04034b50, 0);
