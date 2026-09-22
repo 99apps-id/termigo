@@ -5,6 +5,8 @@ import { useEffect, useId, useState } from "react";
 import { Shimmer } from "./shimmer";
 import { useIsStreaming } from "./chat-code";
 
+import DOMPurify from "dompurify";
+
 /**
  * Lazily-loaded, cached mermaid module. Mermaid is heavy (pulls in dagre,
  * cytoscape, …), so keep it out of the initial bundle and load the chunk only
@@ -16,6 +18,14 @@ function loadMermaid() {
     mermaidPromise = import("mermaid").then((m) => m.default);
   }
   return mermaidPromise;
+}
+
+function sanitizeSvg(svg: string): string {
+  const clean = DOMPurify.sanitize(svg, {
+    USE_PROFILES: { svg: true, svgFilters: true },
+    ADD_ATTR: ["href", "target"],
+  });
+  return clean;
 }
 
 function Notice({ children }: { children: string }) {
@@ -108,8 +118,7 @@ export function MermaidDiagram({ code }: { code: string }) {
         title="Click to enlarge"
         onClick={() => setZoomed(true)}
         className="not-prose my-2 flex w-full cursor-zoom-in justify-center overflow-x-auto rounded-lg border border-black/10 bg-white p-3 [&_svg]:h-auto [&_svg]:max-w-full"
-        // Safe: SVG is produced by mermaid in strict mode (sanitized, no scripts).
-        dangerouslySetInnerHTML={{ __html: svg }}
+        dangerouslySetInnerHTML={{ __html: sanitizeSvg(svg!) }}
       />
       {zoomed ? (
         <div
@@ -121,7 +130,7 @@ export function MermaidDiagram({ code }: { code: string }) {
           <div
             onClick={(e) => e.stopPropagation()}
             className="relative max-h-[90vh] max-w-[92vw] overflow-auto rounded-xl bg-white p-6 shadow-2xl [&_svg]:h-auto [&_svg]:w-auto"
-            dangerouslySetInnerHTML={{ __html: svg }}
+            dangerouslySetInnerHTML={{ __html: sanitizeSvg(svg!) }}
           />
           <button
             type="button"

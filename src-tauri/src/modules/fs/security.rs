@@ -89,6 +89,11 @@ const PROTECTED_DIRS: &[&str] = &[
     "/appdata/roaming/microsoft/credentials",
     "/appdata/local/microsoft/credentials",
     "/appdata/roaming/gcloud",
+    // Windows system directories — anchored at filesystem root, not floating.
+    "/windows",
+    "/program files",
+    "/program files (x86)",
+    "/programdata",
 ];
 
 /// Write-only deny prefixes. Read access is not universally blocked, writing to
@@ -216,6 +221,10 @@ fn is_system_root(dir: &str) -> bool {
             | "/private/var/db"
             | "/private/var/root"
             | "/system"
+            | "/windows"
+            | "/program files"
+            | "/program files (x86)"
+            | "/programdata"
     )
 }
 

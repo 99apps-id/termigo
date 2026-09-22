@@ -73,25 +73,23 @@ pub async fn pty_open(
         completed = &mut join_handle => Some(completed),
         _ = tokio::time::sleep(SPAWN_TIMEOUT) => None,
     };
-    let join_output = match join_output {
-        Some(inner) => inner,
-        None => {
-            log::error!("pty_open timed out after 15s");
-            tauri::async_runtime::spawn(async move {
-                match join_handle.await {
-                    Ok(Ok(session)) => {
-                        log::warn!("pty_open id={id}: late spawn succeeded after timeout; dropping orphaned session");
-                        session::drop_session(session);
-                    }
-                    _ => {}
+    let Some(inner) = join_output else {
+        log::error!("pty_open timed out after 15s");
+        tauri::async_runtime::spawn(async move {
+            match join_handle.await {
+                Ok(Ok(session)) => {
+                    log::warn!("pty_open id={id}: late spawn succeeded after timeout; dropping orphaned session");
+                    session::drop_session(session);
                 }
-            });
-            return Err(
-                "pty_open timed out after 15s - shell may be misconfigured or profile corrupt"
-                    .to_string(),
-            );
-        }
+                _ => {}
+            }
+        });
+        return Err(
+            "pty_open timed out after 15s - shell may be misconfigured or profile corrupt"
+                .to_string(),
+        );
     };
+    let join_output = inner;
     let spawn_result = join_output.map_err(|e| e.to_string())?;
     let inner = spawn_result.map_err(|e| e.to_string())?;
     state.sessions.write().unwrap().insert(id, inner);

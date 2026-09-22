@@ -59,7 +59,13 @@ import {
 import { buildTools, type ToolContext } from "../tools/tools";
 import { isResumingApproval } from "./approvalResume";
 import { getChatGptAccess } from "./chatgptAuth";
-import { compactModelMessagesDetailed, estimateTokens } from "./compact";
+import {
+  compactModelMessagesDetailed,
+  estimateMessagesSize,
+  estimateTokens,
+  historyTokenBudget,
+  shouldTrimStepMessages,
+} from "./compact";
 import { evictObsoleteToolOutputs } from "./contextEviction";
 import { effectiveContextLimit } from "./contextLimitLearning";
 import { pruneVerifiedPrefix } from "./contextPrune";
@@ -70,7 +76,9 @@ import {
   appendSystemHint,
   applyProfileToStepBudget,
   applyProfileToSystem,
+  buildStepSystem,
   getProfile,
+  type SystemLike,
 } from "./harnessProfile";
 import { activeProfileIdFor } from "./harnessProfileStore";
 import { fireHooksForEvent, makeRunId } from "./hooksRunner";
@@ -1768,6 +1776,14 @@ export async function runAgentStream(opts: RunAgentOptions) {
     consecutiveFailureCount: 0,
     activeNudge: null,
   };
+  // Per-step system memo: the system prompt is position zero of the provider's
+  // cached prefix, so resending a byte-identical system keeps the whole request
+  // cached while any change reprocesses it from the start. The hints only
+  // change when the todo list or the breaker nudge changes, so reuse the
+  // previous array while both are equal (see buildStepSystem).
+  let lastStepTodoBlock: string | null | undefined;
+  let lastStepNudge: string | null | undefined;
+  let lastStepSystem: SystemLike | null = null;
   // Verification-on-stop ledger: tracks code edits and fresh passing evidence
   // across the whole run. Reported via onFinishMeta so the runtime can fire a
   // bounded nudge when the model ends cleanly right after unverified edits.
@@ -1817,14 +1833,22 @@ export async function runAgentStream(opts: RunAgentOptions) {
           ? (useTodosStore.getState().bySession[sessionId]?.items ?? [])
           : [];
       const todoBlock = formatTodoStatusBlock(todos);
-      // When there is a live todo list the system gets the todo block appended
-      // as a system message so the model sees live progress every step;
-      // otherwise the (profile-applied) system is used untouched.
-      let system = todoBlock
-        ? appendSystemHint(baseSystem, todoBlock)
-        : baseSystem;
-      if (circuitBreakerState.activeNudge) {
-        system = appendSystemHint(system, circuitBreakerState.activeNudge);
+      // Memoized: an unchanged hint set resends the identical system array so
+      // the provider's prefix cache stays hot. A new/changed hint rebuilds
+      // once — that single reprocess is the price of delivering new content.
+      const activeNudge = circuitBreakerState.activeNudge;
+      let system: SystemLike;
+      if (
+        lastStepSystem !== null &&
+        todoBlock === lastStepTodoBlock &&
+        activeNudge === lastStepNudge
+      ) {
+        system = lastStepSystem;
+      } else {
+        system = buildStepSystem(baseSystem, todoBlock, activeNudge);
+        lastStepSystem = system;
+        lastStepTodoBlock = todoBlock;
+        lastStepNudge = activeNudge;
       }
       // Search mode: only the always-on set, plus whatever the model has asked
       // for. The SDK filters the serialised tool list by this, so a deferred
@@ -1841,31 +1865,42 @@ export async function runAgentStream(opts: RunAgentOptions) {
         Array.isArray(stepMessages) &&
         stepMessages.length > 0
       ) {
-        const eviction = evictObsoleteToolOutputs(stepMessages);
-        const compacted = compactModelMessagesDetailed(
-          eviction.messages,
-          compactionLimit,
-          reservedTokens,
-        );
-        if (eviction.summary.evictedToolCalls > 0 || compacted.compacted) {
-          nextMessages = repairModelMessageSequence(compacted.messages, {
-            preserveTrailingApproval: false,
-          });
-          if (eviction.summary.evictedToolCalls > 0) {
-            fireAndForget(
-              logInfo(
-                `[ai] step ${stepNumber} eviction: collapsed ${eviction.summary.evictedToolCalls} stale output(s), ~${eviction.summary.estimatedTokensSaved} tokens saved`,
-              ),
-              "step-eviction-log",
-            );
-          }
-          if (compacted.compacted) {
-            fireAndForget(
-              logInfo(
-                `[ai] step ${stepNumber} compact: elided content in ${compacted.droppedCount} message(s), target ${compactionLimit} tok`,
-              ),
-              "step-compact-log",
-            );
+        // Gated by size, not run blind: rewriting history breaks the
+        // provider's cached prefix from the rewrite point, while resending
+        // cached tokens is cheap. Below half the history budget the full pass
+        // below is a no-op anyway (the compactor's first rewrite engages at
+        // 0.5 x budget), so skipping it keeps the prefix hot AND saves the
+        // per-step serialization cost. The pre-run pipeline already trimmed
+        // once; this only re-engages under real pressure.
+        const size = estimateMessagesSize(stepMessages);
+        const trimBudget = historyTokenBudget(compactionLimit, reservedTokens);
+        if (shouldTrimStepMessages(size.tokens, trimBudget, size.bytes)) {
+          const eviction = evictObsoleteToolOutputs(stepMessages);
+          const compacted = compactModelMessagesDetailed(
+            eviction.messages,
+            compactionLimit,
+            reservedTokens,
+          );
+          if (eviction.summary.evictedToolCalls > 0 || compacted.compacted) {
+            nextMessages = repairModelMessageSequence(compacted.messages, {
+              preserveTrailingApproval: false,
+            });
+            if (eviction.summary.evictedToolCalls > 0) {
+              fireAndForget(
+                logInfo(
+                  `[ai] step ${stepNumber} eviction: collapsed ${eviction.summary.evictedToolCalls} stale output(s), ~${eviction.summary.estimatedTokensSaved} tokens saved`,
+                ),
+                "step-eviction-log",
+              );
+            }
+            if (compacted.compacted) {
+              fireAndForget(
+                logInfo(
+                  `[ai] step ${stepNumber} compact: elided content in ${compacted.droppedCount} message(s), target ${compactionLimit} tok`,
+                ),
+                "step-compact-log",
+              );
+            }
           }
         }
       }

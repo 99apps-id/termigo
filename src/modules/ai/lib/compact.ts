@@ -85,6 +85,55 @@ export function estimateTokens(chars: number): number {
   return Math.ceil(chars / CHARS_PER_TOKEN);
 }
 
+/** Size of a message list without rewriting it: one linear pass. */
+export function estimateMessagesSize(messages: readonly ModelMessage[]): {
+  tokens: number;
+  bytes: number;
+} {
+  let bytes = 0;
+  for (const m of messages) bytes += messageBytes(m);
+  return { tokens: estimateTokens(bytes), bytes };
+}
+
+/**
+ * What the transcript may spend: the window minus the system/tools/answer
+ * reserve, floored at 30% so a huge reserve never zeroes the budget, and
+ * capped by the body-size ceiling. Single source of truth for the trim gate
+ * (shouldTrimStepMessages) and the compactor below.
+ */
+export function historyTokenBudget(
+  contextLimit: number,
+  reservedTokens = 0,
+): number {
+  const budget = Math.max(
+    contextLimit - reservedTokens,
+    Math.floor(contextLimit * 0.3),
+  );
+  return Math.min(budget, estimateTokens(MAX_TRANSCRIPT_BYTES));
+}
+
+/**
+ * Fraction of the history budget at which the per-step trim may run.
+ *
+ * The compactor's first content rewrite (dropSupersededReads) engages at
+ * 0.5 x budget, so gating here at the same line preserves every trim it would
+ * perform: below the line the full pass is either a no-op or a standing-cap
+ * shrink, and skipping it keeps the provider's cached prefix byte-identical
+ * instead of breaking it for no token saving. With prefix caching, resending
+ * cached tokens is cheap; rewriting history is what costs.
+ */
+export const STEP_TRIM_ENGAGE_RATIO = 0.5;
+
+/** Whether the per-step eviction/compaction pass is worth running at all. */
+export function shouldTrimStepMessages(
+  estimatedTokens: number,
+  tokenBudget: number,
+  totalBytes: number,
+): boolean {
+  if (totalBytes >= MAX_TRANSCRIPT_BYTES * STEP_TRIM_ENGAGE_RATIO) return true;
+  return estimatedTokens >= tokenBudget * STEP_TRIM_ENGAGE_RATIO;
+}
+
 /** Truncate an over-long text part, leaving a marker so the model knows why. */
 function truncateTextPart(part: ToolPart, keepChars: number): ToolPart {
   const text = part.text;
@@ -249,10 +298,7 @@ export function compactModelMessagesDetailed(
   // window. `reservedTokens` carves those out so compaction targets what is
   // actually left for the transcript, never the raw model limit. Floor at 30%
   // so a huge reserve can never drive the budget to zero.
-  const budget = Math.max(
-    contextLimit - reservedTokens,
-    Math.floor(contextLimit * 0.3),
-  );
+  const budget = historyTokenBudget(contextLimit, reservedTokens);
 
   let dropped = 0;
   let working = messages;

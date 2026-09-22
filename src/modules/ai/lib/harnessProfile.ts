@@ -131,6 +131,27 @@ export function appendSystemHint(
   return [...arr, { role: "system" as const, content: hint }];
 }
 
+/**
+ * The per-step system prompt: base plus the live hints (todo list,
+ * circuit-breaker nudge), if any.
+ *
+ * Pure so the composition is pinned by a test. The cache reason it exists:
+ * providers match the request prefix byte-for-byte, and the system prompt is
+ * position zero of that prefix — so every byte that changes here invalidates
+ * the WHOLE cached request behind it. Callers memoize on (todoBlock, nudge)
+ * and reuse the previous array while both are unchanged, keeping the prefix
+ * hot across steps; a genuinely new hint still costs exactly one reprocess.
+ */
+export function buildStepSystem(
+  base: SystemLike,
+  todoBlock: string | null,
+  activeNudge: string | null,
+): SystemLike {
+  let system = todoBlock ? appendSystemHint(base, todoBlock) : base;
+  if (activeNudge) system = appendSystemHint(system, activeNudge);
+  return system;
+}
+
 /** Reorder and/or hide tools according to the profile. Preserves other tools. */
 export function applyProfileToTools<T>(
   tools: Record<string, T>,

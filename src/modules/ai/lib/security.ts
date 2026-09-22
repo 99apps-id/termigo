@@ -48,14 +48,14 @@ const SECRET_BASENAME_PATTERNS: RegExp[] = [
   // streams via `name:stream`, both of which would otherwise slip past a `$`
   // anchored pattern (`.env.`, `.env::$DATA`).
   /^\.env(\..+)?(?:[.\s:]|$)/i,
-  /^.*\.pem(?:[.\s:]|$)/i,
-  /^.*\.key(?:[.\s:]|$)/i, // private keys
-  /^.*\.p12(?:[.\s:]|$)/i,
-  /^.*\.pfx(?:[.\s:]|$)/i,
-  /^.*\.asc(?:[.\s:]|$)/i, // PGP armored keys
-  /^.*\.gpg(?:[.\s:]|$)/i,
-  /^.*\.keystore(?:[.\s:]|$)/i,
-  /^.*\.jks(?:[.\s:]|$)/i,
+  /^[^\\/]*\.pem(?:[.\s:]|$)/i,
+  /^[^\\/]*\.key(?:[.\s:]|$)/i,
+  /^[^\\/]*\.p12(?:[.\s:]|$)/i,
+  /^[^\\/]*\.pfx(?:[.\s:]|$)/i,
+  /^[^\\/]*\.asc(?:[.\s:]|$)/i,
+  /^[^\\/]*\.gpg(?:[.\s:]|$)/i,
+  /^[^\\/]*\.keystore(?:[.\s:]|$)/i,
+  /^[^\\/]*\.jks(?:[.\s:]|$)/i,
   // Match `id_rsa`, `id_rsa.pub`, and common backup/copy patterns like
   // `id_rsa.bak`, `id_rsa_old`, `id_rsa-backup`.
   /^id_(rsa|dsa|ecdsa|ed25519)([._-].*)?(?:[.\s:]|$)/i,
@@ -63,13 +63,13 @@ const SECRET_BASENAME_PATTERNS: RegExp[] = [
   /^authorized_keys(?:[.\s:]|$)/i,
   /^htpasswd(?:[.\s:]|$)/i,
   /^\.netrc(?:[.\s:]|$)/i,
-  /^_netrc(?:[.\s:]|$)/i, // Windows variant
-  /^credentials(?:[.\s:]|$)/i, // .aws/credentials, gcloud, etc.
+  /^_netrc(?:[.\s:]|$)/i,
+  /^credentials(?:[.\s:]|$)/i,
   /^\.pgpass(?:[.\s:]|$)/i,
   /^\.npmrc(?:[.\s:]|$)/i,
   /^\.pypirc(?:[.\s:]|$)/i,
   /^secrets?\.(json|ya?ml|toml|env)(?:[.\s:]|$)/i,
-  /^service[-_]?account.*\.json(?:[.\s:]|$)/i, // GCP service account keys
+  /^service[-_]?account[^\\/]*\.json(?:[.\s:]|$)/i,
 ];
 
 /**

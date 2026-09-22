@@ -3,6 +3,7 @@ import {
   applyProfileToStepBudget,
   applyProfileToSystem,
   applyProfileToTools,
+  buildStepSystem,
   DEFAULT_PROFILE_ID,
   getProfile,
   type HarnessProfile,
@@ -70,8 +71,7 @@ describe("applyProfileToTools", () => {
   });
 });
 
-describe("applyProfileToStepBudget", () => {
-  it("applies a delta", () => {
+describe("applyProfileToStepBudget", () => {  it("applies a delta", () => {
     expect(applyProfileToStepBudget(24, profile({ stepBudgetDelta: -6 }))).toBe(
       18,
     );

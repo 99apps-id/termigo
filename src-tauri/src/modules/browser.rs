@@ -399,7 +399,14 @@ pub fn browser_wait(instance: String, ms: u64) -> String {
 
 #[tauri::command]
 pub fn browser_eval(app: AppHandle, instance: String, js: String) -> Result<(), String> {
+    if js.trim().is_empty() {
+        return Err("browser_eval: empty script".into());
+    }
+    if js.contains("<script") || js.contains("</script>") {
+        return Err("browser_eval: script tags are not allowed".into());
+    }
     let w = webview(&app, &instance).ok_or("browser instance not open")?;
+    log::debug!("browser_eval instance={instance} len={}", js.len());
     w.eval(&js).map_err(|e| e.to_string())
 }
 
