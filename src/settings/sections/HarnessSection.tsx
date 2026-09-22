@@ -25,12 +25,19 @@ type FrontierGroup = {
   runs: number;
   successes: number;
   totalSteps: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalCachedTokens: number;
+  totalCostUsd: number;
+  lastAt: number;
   rate: number;
+  avgCost: number;
+  avgCache: number;
 };
 
 type FrontierSummary = {
   groups: FrontierGroup[];
-  best: FrontierGroup | null;
+  best: { id: string; stats: FrontierGroup; score: number } | null;
 };
 
 function summarizeFrontier(
@@ -44,19 +51,45 @@ function summarizeFrontier(
       runs: 0,
       successes: 0,
       totalSteps: 0,
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+      totalCachedTokens: 0,
+      totalCostUsd: 0,
+      lastAt: 0,
       rate: 0,
+      avgCost: 0,
+      avgCache: 0,
     };
     prev.runs += stats.runs;
     prev.successes += stats.successes;
     prev.totalSteps += stats.totalSteps;
+    prev.totalInputTokens += stats.totalInputTokens;
+    prev.totalOutputTokens += stats.totalOutputTokens;
+    prev.totalCachedTokens += stats.totalCachedTokens;
+    prev.totalCostUsd += stats.totalCostUsd;
+    prev.lastAt = Math.max(prev.lastAt, stats.lastAt);
     map.set(id, prev);
   }
   const groups = [...map.values()].map((g) => ({
     ...g,
     rate: g.runs ? g.successes / g.runs : 0,
+    avgCost: g.runs ? g.totalCostUsd / g.runs : 0,
+    avgCache: g.runs ? (g.totalCachedTokens / (g.totalInputTokens + g.totalCachedTokens)) * 100 : 0,
   }));
-  groups.sort((a, b) => b.rate - a.rate || b.runs - a.runs);
-  return { groups, best: groups[0] ?? null };
+  groups.sort((a, b) => {
+    const scoreA = a.rate / (1 + a.avgCost);
+    const scoreB = b.rate / (1 + b.avgCost);
+    if (scoreB !== scoreA) return scoreB - scoreA;
+    return b.runs - a.runs;
+  });
+  const best = groups[0] ?? null;
+  return {
+    groups,
+    best:
+      best !== null
+        ? { id: best.id, stats: best, score: best.rate / (1 + best.avgCost) }
+        : null,
+  };
 }
 
 export function HarnessSection() {
@@ -163,7 +196,9 @@ export function HarnessSection() {
                 <span className="font-medium">{getProfile(g.id).label}</span>
                 <span className="text-muted-foreground">
                   {g.runs} run{g.runs === 1 ? "" : "s"} ·{" "}
-                  {Math.round(g.rate * 100)}% clean
+                  {Math.round(g.rate * 100)}% clean ·{" "}
+                  ${g.avgCost.toFixed(4)}/run ·{" "}
+                  {Math.round(g.avgCache)}% cache
                 </span>
               </div>
             ))}
@@ -172,6 +207,9 @@ export function HarnessSection() {
                 Suggested:{" "}
                 <span className="font-medium text-foreground">
                   {getProfile(frontier.best.id).label}
+                </span>
+                <span className="text-muted-foreground ml-1">
+                  (score {frontier.best.score.toFixed(3)}, ${frontier.best.stats.avgCost.toFixed(4)}/run, {Math.round(frontier.best.stats.avgCache)}% cache)
                 </span>
               </p>
             )}

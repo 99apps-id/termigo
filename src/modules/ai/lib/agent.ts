@@ -2257,6 +2257,10 @@ export async function runAgentStream(opts: RunAgentOptions) {
           recordRun(workspaceRoot, profile.id, {
             success: !settledStop,
             steps: stepsSeen,
+            inputTokens: runInput,
+            outputTokens: runOutput,
+            cachedTokens: runCached,
+            costUsd: runCost ?? undefined,
           }),
           "record-run",
         );

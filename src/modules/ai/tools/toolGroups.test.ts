@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { CORE_TOOL_NAMES } from "../agents/agentFactory";
+import { TOOL_SEARCH_ALWAYS_ON } from "./toolSearch";
 import { measureToolPayload, toolPayloadBytes } from "../lib/toolPayload";
 import {
   applyDisabledToolGroups,
@@ -323,5 +324,39 @@ describe("tool payload measurement", () => {
     expect(kb).toBeLessThan(105);
     // And it must be exact: an unmeasured schema would silently under-report.
     expect(payload.unmeasured).toBe(0);
+  });
+
+  // The always-on set (TOOL_SEARCH_ALWAYS_ON) is what EVERY request sends when
+  // search mode is active. This is the budget that directly determines prefix
+  // cache hit rate on compat endpoints. If this grows, every step on every run
+  // pays the tax. Keep it tight.
+  it("always-on payload stays under its own ceiling", () => {
+    const built = buildTools(stubContext()) as unknown as Record<string, unknown>;
+    const active = Object.fromEntries(
+      Object.entries(built).filter(([n]) => TOOL_SEARCH_ALWAYS_ON.has(n)),
+    );
+    const payload = measureToolPayload(active);
+    const kb = payload.bytes / 1024;
+    expect(kb).toBeLessThan(60);
+    expect(payload.unmeasured).toBe(0);
+  });
+
+  // Tool order MUST be deterministic across runs for prefix caching to work.
+  // The provider matches the request prefix byte-for-byte; any key-order churn
+  // in the tool object invalidates the cache. This test freezes the sort.
+  it("tool keys are ordered deterministically", () => {
+    const built1 = buildTools(stubContext()) as unknown as Record<
+      string,
+      unknown
+    >;
+    const keys1 = Object.keys(built1);
+    // Build a second time in a fresh context (simulating a new process).
+    const built2 = buildTools(stubContext()) as unknown as Record<
+      string,
+      unknown
+    >;
+    const keys2 = Object.keys(built2);
+    // The order must be identical across builds.
+    expect(keys2).toEqual(keys1);
   });
 });
