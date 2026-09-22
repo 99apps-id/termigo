@@ -337,8 +337,12 @@ export function AiComposerProvider({ children }: ProviderProps) {
     if (commandSource.startsWith("/") || commandSource.startsWith("#")) {
       const outcome = tryRunSlashCommand(commandSource);
       if (outcome.kind === "handled") {
-        setValue("");
-        if (outcome.toast) toast.info(outcome.toast);
+        if (outcome.insert) {
+          setValue(outcome.insert);
+        } else {
+          setValue("");
+          if (outcome.toast) toast.info(outcome.toast);
+        }
         return;
       }
       if (outcome.kind === "send-prompt") {

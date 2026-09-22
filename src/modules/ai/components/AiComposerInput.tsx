@@ -16,9 +16,13 @@ import { useCustomCommandsStore } from "../store/customCommandsStore";
 import { useSnippetsStore } from "../store/snippetsStore";
 
 /** Present a user-defined command as a picker entry, like a built-in one. */
-function customCommandMeta(cmd: CustomCommand): SlashCommandMeta & {
+function customCommandMeta(
+  cmd: CustomCommand,
+): SlashCommandMeta & {
   tags: string[];
-  onToggleFavorite?: (name: string) => void;
+  favorite?: boolean;
+  usageCount?: number;
+  onToggleFavorite: (name: string) => void;
 } {
   const stats = useCustomCommandStatsStore.getState().get(cmd.name);
   return {
@@ -93,6 +97,7 @@ export function AiComposerInput() {
   const [trigger, setTrigger] = useState<SnippetTrigger | null>(null);
   const [fileTrigger, setFileTrigger] = useState<FileTrigger | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [tagFilter, setTagFilter] = useState<string | null>(null);
   const workspaceFiles = useWorkspaceFiles(workspaceRoot, fileTrigger !== null);
 
   const [fileQuery, setFileQuery] = useState("");
@@ -197,6 +202,7 @@ export function AiComposerInput() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset the highlight whenever the picker opens/closes or its query changes.
   useEffect(() => {
     setActiveIndex(0);
+    setTagFilter(null);
   }, [snippetTriggerOpen, fileTriggerOpen, fileQuery]);
 
   // Rescan `.termigo/commands` when the slash picker opens, so a command file
@@ -582,6 +588,8 @@ export function AiComposerInput() {
             activeIndex={activeIndex}
             onPick={onPickItem}
             onHover={setActiveIndex}
+            tagFilter={tagFilter}
+            onTagFilterChange={setTagFilter}
           />
         )}
       </Popover>

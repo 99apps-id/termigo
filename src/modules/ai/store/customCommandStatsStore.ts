@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { CustomCommand } from "../lib/customCommands";
+import { useCustomCommandsStore } from "./customCommandsStore";
 
 export type CommandStats = {
   /** How many times this command was executed. */
@@ -58,19 +59,22 @@ export const useCustomCommandStatsStore = create<State>()(
           },
         }));
       },
-      get: (name) => getState().stats[name] ?? null,
+      get: (name: string) => getState().stats[name] ?? null,
       getRecent: (limit = MAX_RECENT) => {
         const all = useCustomCommandsStore.getState().commands;
         const stats = getState().stats;
         return all
-          .filter((c) => stats[c.name]?.lastUsed != null)
-          .sort((a, b) => (stats[b.name].lastUsed ?? 0) - (stats[a.name].lastUsed ?? 0))
+          .filter((c: CustomCommand) => stats[c.name]?.lastUsed != null)
+          .sort(
+            (a: CustomCommand, b: CustomCommand) =>
+              (stats[b.name].lastUsed ?? 0) - (stats[a.name].lastUsed ?? 0),
+          )
           .slice(0, limit);
       },
       getFavorites: () => {
         const all = useCustomCommandsStore.getState().commands;
         const stats = getState().stats;
-        return all.filter((c) => stats[c.name]?.favorite);
+        return all.filter((c: CustomCommand) => stats[c.name]?.favorite);
       },
       touchMany: (names) => {
         const now = Date.now();

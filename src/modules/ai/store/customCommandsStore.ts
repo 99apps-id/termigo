@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { type CustomCommand, listCustomCommands } from "../lib/customCommands";
 import { useCustomCommandStatsStore } from "./customCommandStatsStore";
+import { usePreferencesStore } from "@/modules/settings/preferences";
 
 type State = {
   /** Custom commands loaded from the active workspace's `.termigo/commands`. */
@@ -16,7 +17,8 @@ type State = {
 export const useCustomCommandsStore = create<State>((set, getState) => ({
   commands: [],
   loadFor: async (workspaceRoot) => {
-    const commands = await listCustomCommands(workspaceRoot);
+    const extraDirs = usePreferencesStore.getState().customCommandDirs ?? [];
+    const commands = await listCustomCommands(workspaceRoot, extraDirs);
     const names = commands.map((c) => c.name);
     useCustomCommandStatsStore.getState().touchMany(names);
     set({ commands });

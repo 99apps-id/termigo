@@ -83,31 +83,46 @@ export function expandCommand(cmd: CustomCommand, args: string): string {
  */
 export async function listCustomCommands(
   workspaceRoot: string | null,
+  extraDirs: string[] = [],
 ): Promise<CustomCommand[]> {
   if (!workspaceRoot) return [];
-  const root = `${workspaceRoot.replace(/[\\/]$/, "")}/${COMMANDS_REL_DIR}`;
-  let entries: Awaited<ReturnType<typeof native.readDir>>;
-  try {
-    entries = await native.readDir(root);
-  } catch {
-    return [];
-  }
+  const roots: string[] = [
+    `${workspaceRoot.replace(/[\\/]$/, "")}/${COMMANDS_REL_DIR}`,
+    ...extraDirs.map((d) => {
+      const trimmed = d.trim();
+      if (!trimmed) return "";
+      if (/^[a-zA-Z]:[\\/]/.test(trimmed)) return trimmed.replace(/[\\/]$/, "");
+      return `${workspaceRoot.replace(/[\\/]$/, "")}/${trimmed.replace(/^[\\/]/, "")}`;
+    }),
+  ].filter(Boolean);
 
   const out: CustomCommand[] = [];
-  for (const entry of entries) {
-    if (entry.kind === "dir") continue;
-    if (!entry.name.toLowerCase().endsWith(".md")) continue;
-    const name = entry.name.slice(0, -3);
-    if (!isValidCommandName(name)) continue;
+  const seen = new Set<string>();
+  for (const root of roots) {
+    let entries: Awaited<ReturnType<typeof native.readDir>>;
     try {
-      const read = await native.readFile(commandPath(workspaceRoot, name));
-      if (read.kind !== "text") continue;
-      if (read.size > MAX_COMMAND_BYTES) continue;
-      const cmd = parseCommand(name, read.content);
-      if (!cmd.body) continue;
-      out.push(cmd);
+      entries = await native.readDir(root);
     } catch {
-      // Missing or unreadable: skip this one, keep the rest.
+      continue;
+    }
+
+    for (const entry of entries) {
+      if (entry.kind === "dir") continue;
+      if (!entry.name.toLowerCase().endsWith(".md")) continue;
+      const name = entry.name.slice(0, -3);
+      if (!isValidCommandName(name)) continue;
+      if (seen.has(name)) continue;
+      seen.add(name);
+      try {
+        const read = await native.readFile(commandPath(workspaceRoot, name));
+        if (read.kind !== "text") continue;
+        if (read.size > MAX_COMMAND_BYTES) continue;
+        const cmd = parseCommand(name, read.content);
+        if (!cmd.body) continue;
+        out.push(cmd);
+      } catch {
+        // Missing or unreadable: skip this one, keep the rest.
+      }
     }
   }
   return out.sort((a, b) => a.name.localeCompare(b.name));

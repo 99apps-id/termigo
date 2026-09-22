@@ -1,6 +1,7 @@
 import { PopoverContent } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import { Star02Icon } from "@hugeicons/core-free-icons";
+import { useMemo } from "react";
+import { FavouriteIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { SlashCommandMeta } from "../lib/slashCommands";
 import type { Snippet } from "../lib/snippets";
@@ -26,6 +27,8 @@ type Props = {
   activeIndex: number;
   onPick: (item: PickerItem) => void;
   onHover: (index: number) => void;
+  tagFilter?: string | null;
+  onTagFilterChange?: (tag: string | null) => void;
 };
 
 export function SnippetPickerContent({
@@ -33,9 +36,28 @@ export function SnippetPickerContent({
   activeIndex,
   onPick,
   onHover,
+  tagFilter,
+  onTagFilterChange,
 }: Props) {
   const commands = items.filter((it) => it.kind === "command");
   const snippets = items.filter((it) => it.kind === "snippet");
+  const allTags = useMemo(() => {
+    const tagSet = new Set<string>();
+    for (const it of commands) {
+      if (it.kind === "command" && it.command.tags) {
+        for (const t of it.command.tags) tagSet.add(t);
+      }
+    }
+    return Array.from(tagSet).sort();
+  }, [commands]);
+
+  const filteredCommands = useMemo(() => {
+    if (!tagFilter) return commands;
+    return commands.filter(
+      (it) => it.kind === "command" && it.command.tags?.includes(tagFilter),
+    );
+  }, [commands, tagFilter]);
+
   let cursor = -1;
 
   return (
@@ -54,11 +76,44 @@ export function SnippetPickerContent({
         </div>
       ) : (
         <div className="max-h-64 overflow-y-auto py-1">
-          {commands.length > 0 && (
+          {allTags.length > 0 && onTagFilterChange ? (
+            <div className="flex gap-1 px-2 pb-1 pt-1.5">
+              <button
+                type="button"
+                onClick={() => onTagFilterChange(null)}
+                className={cn(
+                  "rounded-[3px] px-1.5 py-px text-[10px] transition-colors",
+                  !tagFilter
+                    ? "bg-accent text-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                All
+              </button>
+              {allTags.map((tag) => (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() =>
+                    onTagFilterChange(tagFilter === tag ? null : tag)
+                  }
+                  className={cn(
+                    "rounded-[3px] px-1.5 py-px text-[10px] transition-colors",
+                    tagFilter === tag
+                      ? "bg-accent text-foreground"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {tag}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {filteredCommands.length > 0 && (
             <>
               <SectionHeader label="Pre-built snippets" />
               <ul>
-                {commands.map((it) => {
+                {filteredCommands.map((it) => {
                   cursor += 1;
                   const i = cursor;
                   if (it.kind !== "command") return null;
@@ -124,7 +179,7 @@ export function SnippetPickerContent({
                               }
                             >
                               <HugeiconsIcon
-                                icon={Star02Icon}
+                                icon={FavouriteIcon}
                                 size={12}
                                 strokeWidth={2}
                                 className={isFav ? "fill-amber-500 text-amber-500" : ""}

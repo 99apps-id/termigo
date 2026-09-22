@@ -15,6 +15,7 @@ describe("parseCommand", () => {
       name: "review-pr",
       description: "Review the current PR",
       body: "Review the diff for $ARGUMENTS and report issues.",
+      tags: [],
     });
   });
 

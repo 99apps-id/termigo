@@ -39,7 +39,7 @@ import {
  * - `"none"`: not a slash command; let the composer behave as usual.
  */
 export type SlashOutcome =
-  | { kind: "handled"; toast?: string }
+  | { kind: "handled"; toast?: string; insert?: string }
   | { kind: "send-prompt"; prompt: string; commandName?: string }
   | { kind: "none" };
 
@@ -261,7 +261,7 @@ export function tryRunSlashCommand(input: string): SlashOutcome {
       if (!tail) {
         return {
           kind: "handled",
-          toast: `Current model: ${store.selectedModelId}`,
+          insert: `Current model: ${store.selectedModelId}`,
         };
       }
       const found = resolveModel(tail);
@@ -322,7 +322,7 @@ export function tryRunSlashCommand(input: string): SlashOutcome {
       const list = Object.values(SLASH_COMMANDS)
         .map((c) => `${c.invocation} — ${c.label}`)
         .join("\n");
-      return { kind: "handled", toast: `Slash commands\n${list}` };
+      return { kind: "handled", insert: `Slash commands\n${list}` };
     }
     default:
       if (custom) {
@@ -348,7 +348,7 @@ function respondToGoal(tail: string): SlashOutcome {
     const goal = store.getGoal(sessionId);
     return {
       kind: "handled",
-      toast: goal ? `Goal: ${goal}` : "No goal set. Usage: /goal <goal>",
+      insert: goal ? `Goal: ${goal}` : "No goal set. Usage: /goal <goal>",
     };
   }
   store.setGoal(sessionId, tail);
@@ -367,13 +367,13 @@ function respondToSchedule(tail: string): SlashOutcome {
   if (tail === "list") {
     const schedules = store.getSchedules(sessionId);
     if (schedules.length === 0) {
-      return { kind: "handled", toast: "No scheduled tasks." };
+      return { kind: "handled", insert: "No scheduled tasks." };
     }
     const lines = schedules.map(
       (s, i) =>
         `${i + 1}. ${s.enabled ? "" : "(paused) "}${s.when}: ${s.prompt}`,
     );
-    return { kind: "handled", toast: lines.join("\n") };
+    return { kind: "handled", insert: lines.join("\n") };
   }
   if (tail.startsWith("remove ")) {
     const n = Number(tail.slice(7).trim());
@@ -509,7 +509,7 @@ function respondToWaiting(arg: string, approved: boolean): SlashOutcome {
   const queue = waitingQueue();
 
   if (arg.trim().toLowerCase() === "list" || arg.trim() === "?") {
-    return { kind: "handled", toast: formatQueue(queue) };
+    return { kind: "handled", insert: formatQueue(queue) };
   }
 
   const target = parseApprovalTarget(arg);
@@ -527,7 +527,7 @@ function respondToWaiting(arg: string, approved: boolean): SlashOutcome {
         ? `
 ${formatQueue(queue)}`
         : "";
-    return { kind: "handled", toast: `${picked.error}${detail}` };
+    return { kind: "handled", insert: `${picked.error}${detail}` };
   }
 
   const ids = new Set(picked.ids);

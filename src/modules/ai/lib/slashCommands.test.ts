@@ -39,7 +39,7 @@ describe("slash commands", () => {
   it("reports usage when /goal has no argument", () => {
     const out = tryRunSlashCommand("/goal");
     expect(out.kind).toBe("handled");
-    expect((out as { toast?: string }).toast).toMatch(/No goal set/);
+    expect((out as { insert?: string }).insert).toMatch(/No goal set/);
   });
 
   it("starts a new chat session on /new", () => {
@@ -63,7 +63,7 @@ describe("slash commands", () => {
 
     const list = tryRunSlashCommand("/schedule list");
     expect(list.kind).toBe("handled");
-    expect((list as { toast?: string }).toast).toContain("daily-at-9");
+    expect((list as { insert?: string }).insert).toContain("daily-at-9");
 
     const rm = tryRunSlashCommand("/schedule remove 1");
     expect(rm.kind).toBe("handled");
@@ -154,13 +154,13 @@ describe("slash commands", () => {
   it("reports the current model when /model has no argument", () => {
     const out = tryRunSlashCommand("/model");
     expect(out.kind).toBe("handled");
-    expect((out as { toast?: string }).toast).toMatch(/Current model/);
+    expect((out as { insert?: string }).insert).toMatch(/Current model/);
   });
 
   it("lists the slash commands on /help", () => {
     const out = tryRunSlashCommand("/help");
     expect(out.kind).toBe("handled");
-    expect((out as { toast?: string }).toast).toContain("/new");
-    expect((out as { toast?: string }).toast).toContain("/stop");
+    expect((out as { insert?: string }).insert).toContain("/new");
+    expect((out as { insert?: string }).insert).toContain("/stop");
   });
 });
