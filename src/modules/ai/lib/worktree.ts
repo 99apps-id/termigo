@@ -197,7 +197,7 @@ export function discoveredWorktrees(
     } else {
       const at = normalised.lastIndexOf(`/${WORKTREE_SUBPATH_PREFIX}`);
       // Require the marker to be a whole path segment, not a prefix of a longer
-      // directory name (`.../x.termigo/worktrees/`).
+      // directory name (`.../x.termigo/wt/`).
       if (at >= 0) {
         id = normalised.slice(at + WORKTREE_SUBPATH_PREFIX.length + 1);
       }
