@@ -78,11 +78,14 @@ const EXEC_TOOLS = new Set([
 ]);
 
 export type ApprovalMode =
-  /** Every mutating tool waits for a click. The default. */
+  /** Every mutating tool waits for a click. */
   | "ask"
   /** File edits inside the workspace proceed; commands still wait. */
   | "edits"
-  /** Nothing waits. The safety checks still run. */
+  /** Nothing waits except deletes. The safety checks still run. The default
+   *  (operator decision, AUDIT-2026-10 SEC-4: approval friction stays at zero;
+   *  the guards that remain in this mode are ALWAYS_ASK_TOOLS, deletesFiles,
+   *  the deny-lists and the prompt's filesystem-safety rules). */
   | "all";
 
 export const APPROVAL_MODES: readonly ApprovalMode[] = ["ask", "edits", "all"];

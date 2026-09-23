@@ -65,10 +65,11 @@ async function modelLabel(modelId: string): Promise<string> {
  * A chat id is shared by every member of a group, so the chat-level check is
  * not enough: any member could otherwise send /run, drive the default prompt
  * path, or /stop and /new the owner's session. `ownerUserId` is pinned at
- * /pair; when it is unset, a private chat id IS the user id (group ids are
- * negative), which covers bots paired from Settings - that path writes the chat
- * id but never a user id. When neither is known the bot is open, matching the
- * documented "open to all chats" state.
+ * /pair; when it is unset, a PRIVATE chat id IS the user id, which covers bots
+ * paired from Settings - that path writes the chat id but never a user id. A
+ * GROUP chat id without an owner id identifies nobody and fails closed. When
+ * no chat is paired at all the bot is open, matching the documented "open to
+ * all chats" state.
  *
  * `snapshot` pins the identity fields for callers that already captured them
  * (the callback handler): re-reading the store mid-handler could race with an
@@ -84,7 +85,14 @@ function isOwnerUser(
   const ownerUserId = store.ownerUserId;
   if (ownerUserId) return !!from && String(from.id) === String(ownerUserId);
   const chatId = store.chatId;
-  if (!chatId || chatId.startsWith("-")) return true;
+  // Unpaired bot: open to all chats (the documented state).
+  if (!chatId) return true;
+  // A GROUP chatId with no ownerUserId cannot identify anybody — every member
+  // shares the chat id, so the old `return true` here handed owner actions to
+  // the whole group (NIT-1, AUDIT-2026-10). /pair always records the user id;
+  // a group without one is stale or half-configured, and fails closed.
+  if (chatId.startsWith("-")) return false;
+  // Private chat: the chat id IS the user id (bots paired from Settings).
   return !!from && String(from.id) === chatId;
 }
 

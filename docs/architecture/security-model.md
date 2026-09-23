@@ -21,8 +21,11 @@ The main trust boundaries are:
 Blocked categories include:
 
 - Files: `.env*`, `*.pem`, `*.key`, `*.p12`, `id_rsa*`, `known_hosts`, `credentials`, `service-account*.json`, and similar.
-- Directories: `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.kube`, `~/.config/gh`, `~/.git`, system dirs (`/etc`, `/proc`, `/sys`), and Windows credential stores.
-- System write prefixes: `/etc/`, `/var/db/`, `/usr/bin/`, `/windows/`, `/program files/`, etc.
+- Directories: `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.kube`, `~/.config/gh`, `~/.git`, Unix system dirs (`/etc`, `/proc`, `/sys`), and Windows credential stores.
+- System write prefixes (Unix only): `/etc/`, `/var/db/`, `/usr/bin/`, `/bin/`, `/boot/`, etc.
+- **Windows system directories are deliberately OPEN** (`Windows`, `Program Files`, `ProgramData` — reads and writes): operator decision 2026-09-23 after the denials blocked legitimate agent work (tool installs, inspecting installed software). The compensating controls are the system prompt's *Filesystem safety* section, the approval layer (deletes always ask), and the destructive-command refusals below. Credential stores stay hard-denied regardless.
+- `.termigo/hooks.json` and `.termigo/approvals.json` are agent-immutable on BOTH paths (fs tools and shell write verbs): they are silent-exec/approval-bypass persistence, so the agent may read but never write them.
+- The deny-list also covers the SHELL route: `validate_shell_command` refuses a write/delete verb (`Set-Content`, `Out-File`, `cp`, `mv`, `tee`, `del`, `sed -i`, …) whose target matches a secret basename, a protected directory, or the immutable config files (F-2 fix). Reads through the shell stay allowed by the same operator decision.
 
 The comparison surface normalizes paths: backslashes to forward slashes, strips Windows drive letters, strips NTFS alternate data streams, strips trailing dots/spaces, lowercases, and collapses duplicate slashes. Protected directories are matched as exact path or descendant, not raw substring.
 
@@ -65,12 +68,16 @@ did, and `sql_run` was missed by the audit that fixed them.
 
 ## Shell command sandbox and allowlist
 
-Shell command execution from agent tools (`bash_run`, `bash_background`) passes through the command sandbox (`src-tauri/src/modules/shell/mod.rs`):
+Shell command execution from agent tools (`bash_run`, `bash_background`, `run_checks`, custom tools) passes through the command sandbox (`src-tauri/src/modules/shell/mod.rs`):
 
-- **Command allowlist**: `validate_shell_command` checks the binary or utility being invoked against `SANDBOX_ALLOWLIST`.
-- **Package management and elevation**: package managers across platforms (`apt`, `apt-get`, `dpkg`, `pacman`, `dnf`, `yum`, `apk`, `zypper`, `pip`, `pip3`, `uv` on Linux/WSL; `brew`, `port`, `softwareupdate` on macOS; `winget`, `choco`, `scoop` on Windows) and elevation wrappers (`sudo`, `doas`) are allowlisted. Privilege elevation wrappers unwrap flags to validate the target program against the allowlist so that `sudo rm -rf /` is rejected while `sudo apt update` succeeds.
-- **Windows shell support**: on Windows, `cmd`, `cmd.exe`, `powershell`, `pwsh`, and `set` are explicitly allowlisted, enabling agent workflows such as `cmd /c` for batch commands and environment inspection while retaining path and argument validation.
-- **Risk classification**: command segments separated by `&&`, `|`, or `;` are parsed and evaluated. Destructive operations (such as `rm`, `del`, `Remove-Item`) are never delegated without manual approval.
+- **Command allowlist (bare names)**: `validate_shell_command` checks the program of EVERY segment (`;`, `&&`, `||`, `|`, and newlines all split) against `SANDBOX_ALLOWLIST`. **Rooted/absolute paths are allowed by design** — the agent legitimately runs binaries it built (`./target/debug/mytool`) — so the allowlist is a friction control for bare names, not a hard boundary (F-1 of the 2026-09-23 deep audit, kept as an operator decision). The hard guards are the approval flow, the delete gate below, the secret write-target refusal, and the deny-lists.
+- **`rm` is NOT allowlisted** (operator policy from main, pinned by tests): Unix deletes go through a PTY; Windows `del`/`Remove-Item`/`rd` are allowlisted but still hit the delete-approval gate below.
+- **Package management and elevation**: package managers across platforms and elevation wrappers (`sudo`, `doas`, `su`) are allowlisted; elevation wrappers unwrap flags to validate the target program, so `sudo rm -rf /` is rejected while `sudo apt update` succeeds.
+- **Environment/variables**: PowerShell variables (`$x`, `$env:VAR`, `${VAR}`) are allowed as data; command substitution `$(...)` is refused (parens are metacharacters). POSIX env prefixes (`CI=true pnpm test`) are skipped and the real program is checked — but assignments to variables that choose the program or loaded code (`PATH`, `LD_PRELOAD`, `NODE_OPTIONS=--require`, `GIT_*`, `$env:` forms…) are refused (SEC-5). A refused `(` names the pipeline rewrite in its error message.
+- **Quote parity with the executing shell** (F-4): single quotes never honor backslash; double quotes honor an ODD backslash run on Unix only — on Windows the backslash is literal (PowerShell/cmd escape with backtick or doubling). The scanner agreeing with the shell is what keeps `echo "a\" ; rm …"` from validating as one harmless segment.
+- **Windows shell support**: `cmd`, `powershell`, `pwsh` are allowlisted (documented trust-boundary widening — PTY parity); the frontend additionally unwraps `powershell -Command "…"` and screens the INNER script.
+- **Secret write targets** (F-2): a write/delete verb aimed at a deny-listed target (`Set-Content .env`, `cp x id_rsa`, `Out-File …hooks.json`) is refused exactly like the fs tools refuse it. Reads through the shell stay allowed by operator policy.
+- **PATH for project tooling**: the spawned shell's PATH is prepended with the `node_modules/.bin` chain from the cwd upward (npm-run semantics), so `biome`/`vitest`/`tsc` resolve by bare name; package-manager MUTATIONS get a 300s timeout floor because a killed install corrupts the tree.
 - **CWD authorization**: the execution working directory must reside within an authorized workspace root from `WorkspaceRegistry`.
 
 ## AI tool approval flow

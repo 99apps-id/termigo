@@ -28,8 +28,21 @@ const DEFAULT_TIMEOUT_SECS: u64 = 120;
 const MAX_TIMEOUT_SECS: u64 = 300;
 const MAX_OUTPUT_BYTES: usize = 256 * 1024;
 
-/// Allowlisted read-only / inspection commands for agent-triggered execution.
-/// Commands outside this set must be run through an interactive PTY session.
+/// Program names allowed for agent-triggered execution WITHOUT a PTY.
+///
+/// Be honest about what this is: a friction control for BARE names, not a hard
+/// boundary. A rooted or absolute path (`./target/debug/mytool`,
+/// `C:\Windows\System32\chcp.com`) is allowed by design — the agent legitimately
+/// runs binaries it just built — so a determined command can always name a full
+/// path (F-1 of the 2026-09-23 deep audit; kept as an operator decision, same
+/// rationale as the open Windows system directories). The effective guards
+/// around execution are the approval layer (deletes always ask), the frontend
+/// destructive-command refusals, the secret write-target check below, the
+/// hijack-env-var refusals, and the system prompt's Filesystem safety rules.
+/// What this list still buys: a bare `rm`, `shred`, or unknown binary in a
+/// chained command is refused outright, so the ordinary accident and the
+/// ordinary injection do not ride through, and every refusal names the PTY
+/// escape hatch where a human types the command themselves.
 const SANDBOX_ALLOWLIST: &[&str] = &[
     "cat", "head", "tail", "wc", "grep", "rg", "sed", "awk",
     "find", "ls", "Get-ChildItem", "dir", "stat", "file", "xxd", "hexdump", "od",
@@ -279,6 +292,90 @@ const SHELL_METACHARACTERS: &[char] = &['(', ')', '<', '>', '`'];
 /// the pipe alone, even though `find` and `head` are both allowlisted.
 const SHELL_SEPARATORS: &[char] = &[';', '\n', '\r'];
 
+/// Write/delete verbs whose arguments can carry a target path. Used to extend
+/// the fs secret deny-list across the SHELL route (F-2, 2026-09-23 deep audit):
+/// `write_file` refused `.env` while `Set-Content .env` sailed through, and the
+/// same gap bypassed the `.termigo/hooks.json` immutability — a hook file is
+/// silent-exec persistence, so the shell route must not be a door around it.
+///
+/// Deliberately a heuristic: a token scan gated on a write verb, not an
+/// argument parser. Reads stay allowed by operator policy (an agent debugging
+/// config legitimately reads `.env` through a terminal); only writes/deletes to
+/// deny-listed targets are refused, and a genuinely intended one goes through
+/// a PTY session like every other escape hatch here.
+const SHELL_WRITE_VERBS: &[&str] = &[
+    "set-content", "add-content", "out-file", "tee-object", "tee",
+    "cp", "copy", "copy-item", "mv", "move", "move-item",
+    "ren", "rename", "rename-item", "new-item", "ni", "sc", "ac",
+    "del", "erase", "remove-item", "ri", "rm", "rmdir", "rd",
+];
+
+/// When a write verb is present, the target the command would hit, if that
+/// target matches the fs deny-list (secret basename, protected directory, or
+/// the agent-immutable config files). None means "nothing to refuse".
+fn shell_write_hits_protected_target(command: &str) -> Option<String> {
+    let tokens: Vec<&str> = command.split_whitespace().collect();
+    let has_in_place_flag = tokens.iter().any(|t| *t == "-i" || t.starts_with("-i"));
+    let has_write_verb = tokens.iter().any(|t| {
+        let bare = t.trim_matches(|c| c == '"' || c == '\'').to_lowercase();
+        if bare == "sed" {
+            // sed only writes with -i; without it, it reads and prints.
+            has_in_place_flag
+        } else {
+            SHELL_WRITE_VERBS.contains(&bare.as_str())
+        }
+    });
+    if !has_write_verb {
+        return None;
+    }
+    for t in &tokens {
+        let trimmed = t.trim_matches(|c| c == '"' || c == '\'');
+        if trimmed.is_empty() || trimmed.starts_with('-') {
+            continue;
+        }
+        let path = std::path::Path::new(trimmed);
+        if crate::modules::fs::security::is_secret_path(path)
+            || crate::modules::fs::security::is_protected(path)
+        {
+            return Some(trimmed.to_string());
+        }
+        // The agent-immutable config, mirrored from fs::security (the shell
+        // route is exactly where a prompt-injected `Set-Content hooks.json`
+        // would try to go). Suffix match because the token may be relative or
+        // absolute, either spelling.
+        let norm = trimmed.replace('\\', "/").to_lowercase();
+        if norm.ends_with(".termigo/hooks.json") || norm.ends_with(".termigo/approvals.json") {
+            return Some(trimmed.to_string());
+        }
+    }
+    None
+}
+
+/// Whether the quote character at `chars[i]` is escaped, per the shell that
+/// will ACTUALLY execute the command (F-4, 2026-09-23 deep audit).
+///
+/// Single quotes are never backslash-escaped: POSIX ends the string at the
+/// next `'`, and PowerShell escapes by doubling (`''`), which the
+/// close-then-reopen toggle of the scanners already reproduces. Double
+/// quotes: POSIX escapes with an ODD run of backslashes (an even run is
+/// paired data and the quote really closes); PowerShell/cmd treat the
+/// backslash as a literal — their escapes are a backtick (refused globally
+/// as a metacharacter) or `""` (the toggle again). Honoring `\"` on Windows
+/// let `echo "a\" ; rm -rf C:\x "` validate as one echo segment while
+/// PowerShell closed the string and ran the rm.
+fn quote_is_escaped(chars: &[char], i: usize, quote_char: char) -> bool {
+    if cfg!(windows) || quote_char == '\'' {
+        return false;
+    }
+    let mut backslashes = 0usize;
+    let mut j = i;
+    while j > 0 && chars[j - 1] == '\\' {
+        backslashes += 1;
+        j -= 1;
+    }
+    backslashes % 2 == 1
+}
+
 /// Validate a shell command for agent execution:
 /// - refuse expansion, subshells and redirection (`$`, backtick, `(`, `)`, `<`, `>`)
 /// - allow `&&`, `||`, `|`, `;` and newlines as separators, but check the program
@@ -304,7 +401,6 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
     //    separator inside quotes is data, not a chain, so the quote state decides.
     let mut in_quote = false;
     let mut quote_char = '\0';
-    let mut prev = '\0';
     let mut bad: Vec<char> = Vec::new();
     let chars = cleaned.chars().collect::<Vec<_>>();
     // Where each chained segment starts, so its program can be checked too.
@@ -317,14 +413,12 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
         if !in_quote && (c == '"' || c == '\'') {
             in_quote = true;
             quote_char = c;
-            prev = c;
             i += 1;
             continue;
         }
-        if in_quote && c == quote_char && prev != '\\' {
+        if in_quote && c == quote_char && !quote_is_escaped(&chars, i, quote_char) {
             in_quote = false;
             quote_char = '\0';
-            prev = c;
             i += 1;
             continue;
         }
@@ -334,7 +428,6 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
                     // `&&` is a separator
                     segment_starts.push(i + 2);
                     i += 2;
-                    prev = c;
                     continue;
                 }
                 // A lone `&` backgrounds the command, which hides it from the
@@ -351,11 +444,9 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
                 };
                 segment_starts.push(i + step);
                 i += step;
-                prev = c;
                 continue;
             } else if SHELL_SEPARATORS.contains(&c) {
                 segment_starts.push(i + 1);
-                prev = c;
                 i += 1;
                 continue;
             } else if c == '$' {
@@ -372,7 +463,6 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
                                 .all(|ch| ch.is_alphanumeric() || ch == '_' || ch == ':')
                         {
                             i += 2 + close_pos + 1;
-                            prev = '}';
                             continue;
                         }
                     }
@@ -392,7 +482,6 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
                     {
                         i += 1;
                     }
-                    prev = chars[i - 1];
                     continue;
                 } else {
                     bad.push(c);
@@ -401,7 +490,6 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
                 bad.push(c);
             }
         }
-        prev = c;
         i += 1;
     }
     if in_quote {
@@ -485,6 +573,15 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
                 SANDBOX_ALLOWLIST
             ));
         }
+    }
+
+    // 3. The fs secret deny-list must hold on the shell route too: a write or
+    //    delete whose target matches it is refused here exactly as `write_file`
+    //    refuses it (F-2). Reads stay allowed by operator policy.
+    if let Some(target) = shell_write_hits_protected_target(trimmed) {
+        return Err(format!(
+            "Refused: this command writes or deletes \"{target}\", which the sensitive-file deny-list protects (the same list the file tools enforce). Reading it is fine; if changing it is genuinely intended, use a PTY session so the user types it."
+        ));
     }
 
     Ok(command)
@@ -650,7 +747,6 @@ fn strip_dev_null_redirections(command: &str) -> Result<String, String> {
     let mut out = String::with_capacity(command.len());
     let mut in_quote = false;
     let mut quote_char = '\0';
-    let mut prev = '\0';
     let mut i = 0;
     while i < chars.len() {
         let c = chars[i];
@@ -658,15 +754,13 @@ fn strip_dev_null_redirections(command: &str) -> Result<String, String> {
             in_quote = true;
             quote_char = c;
             out.push(c);
-            prev = c;
             i += 1;
             continue;
         }
-        if in_quote && c == quote_char && prev != '\\' {
+        if in_quote && c == quote_char && !quote_is_escaped(&chars, i, quote_char) {
             in_quote = false;
             quote_char = '\0';
             out.push(c);
-            prev = c;
             i += 1;
             continue;
         }
@@ -680,7 +774,6 @@ fn strip_dev_null_redirections(command: &str) -> Result<String, String> {
                 && chars.get(i + 3).is_some_and(|d| d.is_ascii_digit())
             {
                 out.push(' ');
-                prev = ' ';
                 i += 4;
                 continue;
             }
@@ -718,7 +811,6 @@ fn strip_dev_null_redirections(command: &str) -> Result<String, String> {
                         });
                         if is_null_target {
                             out.push(' ');
-                            prev = ' ';
                             i = j + target_len;
                             continue;
                         }
@@ -727,7 +819,6 @@ fn strip_dev_null_redirections(command: &str) -> Result<String, String> {
             }
         }
         out.push(c);
-        prev = c;
         i += 1;
     }
     Ok(out)
@@ -1804,6 +1895,92 @@ mod tests_sandbox {
         assert!(validate_shell_command("$CMD -rf /").is_err());
         // Subcommand execution is refused
         assert!(validate_shell_command("Get-ChildItem $(echo secret)").is_err());
+    }
+
+    /// The scanner must agree with the shell that ACTUALLY executes the command
+    /// about where a quoted string ends (F-4, 2026-09-23 deep audit). Both
+    /// directions matter: a string the shell closes but the scanner keeps open
+    /// hides a real segment (the bypass), and a string the shell keeps open but
+    /// the scanner closes fabricates refusals on valid commands (the friction
+    /// that sent an agent debugging Windows itself).
+    #[test]
+    fn validate_shell_command_quote_parity_matches_the_executing_shell() {
+        // Single quotes: backslash is literal in every shell, so both of these
+        // are balanced and run exactly what they say.
+        assert!(validate_shell_command(r"echo 'a\' ; git status").is_ok());
+        // PowerShell '' doubling reads as close-then-reopen: still balanced.
+        assert!(validate_shell_command("echo 'a''b'; git status").is_ok());
+
+        #[cfg(windows)]
+        {
+            // Backslash is literal for PowerShell/cmd, so the string CLOSES at
+            // \" and the tail is a real segment that must be allowlisted.
+            let err = validate_shell_command(r#"echo "a\" ; definitely-not-a-tool"#)
+                .expect_err("the segment after a Windows-closed quote must be checked");
+            assert!(err.contains("definitely-not-a-tool"), "{err}");
+            // The exact bypass shape from the audit: with \" honored as an
+            // escape this validated as one echo segment while PowerShell ran
+            // the rm. (rm is not allowlisted at all any more, so this refuses
+            // twice over.)
+            assert!(validate_shell_command(r#"echo "a\" ; rm -rf C:\somewhere"#).is_err());
+            // A trailing lone quote is genuinely unclosed for PowerShell too.
+            assert!(validate_shell_command(r#"cat "file.txt\"; echo safe""#).is_err());
+        }
+        #[cfg(unix)]
+        {
+            // Odd backslash run: \" escapes, the ; is string data, one segment.
+            assert!(validate_shell_command(r#"cat "file.txt\"; echo safe""#).is_ok());
+            // EVEN backslash run: the pair is data and the quote really closes,
+            // so the tail is a segment — miscounting here would let sh run an
+            // unchecked program after an "escaped" quote.
+            assert!(validate_shell_command(r#"cat "file.txt\\"; definitely-not-a-tool"#).is_err());
+            assert!(validate_shell_command(r#"cat "file.txt\\"; git status"#).is_ok());
+        }
+    }
+
+    /// The fs secret deny-list must hold on the shell route too (F-2):
+    /// `write_file` refuses `.env`, so `Set-Content .env` may not be the open
+    /// door around it — and `.termigo/hooks.json` is silent-exec persistence
+    /// that the fs layer deliberately makes agent-immutable.
+    #[test]
+    fn validate_shell_command_refuses_writes_to_deny_listed_targets() {
+        for cmd in [
+            "Set-Content .termigo/hooks.json '{}'",
+            "Set-Content C:\\proj\\.termigo\\hooks.json '{}'",
+            "Out-File -FilePath .termigo/approvals.json",
+            "cp notes.txt .env",
+            "copy notes.txt .env.production",
+            "Out-File C:\\Users\\me\\.ssh\\authorized_keys",
+            "Remove-Item id_rsa",
+            "del known_hosts",
+            "mv backup.pem /tmp/x.pem",
+            "sed -i s/a/b/ .env",
+            "tee id_ed25519",
+        ] {
+            let err = validate_shell_command(cmd)
+                .expect_err(&format!("must be refused: {cmd}"));
+            assert!(
+                err.contains("sensitive-file deny-list"),
+                "wrong refusal reason for {cmd}: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_shell_command_still_allows_reads_and_ordinary_writes() {
+        // Reading a secret through the shell stays allowed by operator policy
+        // (debugging config is legitimate work; the fs tools keep their guard).
+        assert!(validate_shell_command("cat .env").is_ok());
+        assert!(validate_shell_command("Get-Content .env.production").is_ok());
+        assert!(validate_shell_command("sed -n 1,10p .env").is_ok());
+        // Ordinary writes are untouched.
+        assert!(validate_shell_command("Set-Content notes.md hello").is_ok());
+        assert!(validate_shell_command("cp config.example.json config.json").is_ok());
+        assert!(validate_shell_command("git add .env.example").is_ok());
+        assert!(validate_shell_command("Out-File -FilePath report.md").is_ok());
+        // A secret-looking word that is not a path target still passes when no
+        // write verb is present.
+        assert!(validate_shell_command("grep -r id_rsa src").is_ok());
     }
 }
 

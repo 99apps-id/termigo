@@ -96,7 +96,7 @@ pub async fn pty_open(
     let exited = state
         .sessions
         .read()
-        .unwrap()
+        .unwrap_or_else(|e| e.into_inner())
         .get(&id)
         .map(|s| s.exited.load(Ordering::Acquire))
         .unwrap_or(false);
@@ -152,7 +152,7 @@ pub fn pty_write(
     let session = state
         .sessions
         .read()
-        .unwrap()
+        .unwrap_or_else(|e| e.into_inner())
         .get(&id)
         .cloned()
         .ok_or_else(|| {
@@ -162,7 +162,7 @@ pub fn pty_write(
     let result = session
         .writer
         .lock()
-        .unwrap()
+        .unwrap_or_else(|e| e.into_inner())
         .write_all(bytes)
         .map_err(|e| {
             log::debug!("pty_write id={id} failed: {e}");
@@ -181,7 +181,7 @@ pub fn pty_resize(
     let session = state
         .sessions
         .read()
-        .unwrap()
+        .unwrap_or_else(|e| e.into_inner())
         .get(&id)
         .cloned()
         .ok_or_else(|| {
@@ -191,7 +191,7 @@ pub fn pty_resize(
     let result = session
         .master
         .lock()
-        .unwrap()
+        .unwrap_or_else(|e| e.into_inner())
         .resize(PtySize {
             rows,
             cols,
