@@ -4,6 +4,7 @@ import {
   normalizeShellCommand,
   resolveCommandTimeout,
   screenCommand,
+  staleNodeModulesHint,
   truncateCommandOutput,
   UNCLOSED_QUOTE_SENTINEL,
   unwrapPowershellCommand,
@@ -289,5 +290,58 @@ describe("resolveCommandTimeout", () => {
     expect(resolveCommandTimeout("pnpm exec biome lint", 20)).toBe(20);
     expect(resolveCommandTimeout("pnpm run test", 60)).toBe(60);
     expect(resolveCommandTimeout("npm ls", 15)).toBe(15);
+  });
+});
+
+describe("staleNodeModulesHint", () => {
+  // The field failure: a session memorised `node node_modules/.pnpm/
+  // typescript@5.9.3/.../tsc.js` while the tree was broken; a reinstall
+  // renamed the directory and the session replayed the dead path forever,
+  // concluding "biome is not installed" from a pre-repair memory.
+  it("flags a failed version-pinned .pnpm invocation", () => {
+    const hint = staleNodeModulesHint({
+      command:
+        "node node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/tsc.js --noEmit",
+      exitCode: 1,
+      output: "Error: Cannot find module 'node_modules/.pnpm/typescript@5.9.3/...'",
+    });
+    expect(hint).toContain("STALE view of node_modules");
+    expect(hint).toContain("pnpm exec");
+  });
+
+  it("flags a node_modules command whose output says the module is missing", () => {
+    const hint = staleNodeModulesHint({
+      command: "node_modules/.bin/biome lint src",
+      exitCode: 1,
+      output: "The system cannot find the path specified",
+    });
+    expect(hint).not.toBeNull();
+  });
+
+  it("stays silent on success", () => {
+    expect(
+      staleNodeModulesHint({
+        command: "node node_modules/.pnpm/typescript@6.0.3/lib/tsc.js",
+        exitCode: 0,
+        output: "",
+      }),
+    ).toBeNull();
+  });
+
+  it("stays silent for failures unrelated to node_modules", () => {
+    expect(
+      staleNodeModulesHint({
+        command: "cargo test --lib",
+        exitCode: 101,
+        output: "test result: FAILED. 0 passed; 1 failed",
+      }),
+    ).toBeNull();
+    expect(
+      staleNodeModulesHint({
+        command: "git push origin main",
+        exitCode: 1,
+        output: "error: failed to push some refs",
+      }),
+    ).toBeNull();
   });
 });

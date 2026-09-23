@@ -59,6 +59,41 @@ export function resolveCommandTimeout(
   return requested ?? (SLOW_START_RE.test(command) ? 300 : 120);
 }
 
+/**
+ * Error shapes that mean "the dependency tree moved", NOT "the package was
+ * never installed".
+ *
+ * The field failure this answers: a session memorised a
+ * `node node_modules/.pnpm/typescript@5.9.3/.../tsc.js` workaround while the
+ * tree was broken; a later reinstall renamed every version-pinned directory,
+ * and the session kept replaying the dead path — and kept concluding "biome is
+ * not installed" from a memory that predated the repair. Compaction preserves
+ * conclusions and discards raw evidence, so nothing in the model's context
+ * tells it the tree changed under it. The tool result has to.
+ */
+const STALE_NODE_MODULES_RE =
+  /Cannot find module|ERR_MODULE_NOT_FOUND|MODULE_NOT_FOUND|is not recognized as the name of a cmdlet|cannot find the path|No such file or directory/i;
+
+/** The hint appended to a failed command that looks like a stale node_modules
+ *  view. Pure so the trigger conditions are asserted, not discovered. */
+export function staleNodeModulesHint(input: {
+  command: string;
+  exitCode: number | null;
+  output: string;
+}): string | null {
+  if (input.exitCode === 0) return null;
+  // A version-pinned .pnpm path in the command is stale-prone by construction:
+  // those directories are renamed by every install that moves a version.
+  const pinnedPath = /node_modules[\\/]\.pnpm[\\/][^\s"']+@\d/i.test(
+    input.command,
+  );
+  const mentionsNodeModules = /node_modules/i.test(input.command);
+  if (!pinnedPath && !(mentionsNodeModules && STALE_NODE_MODULES_RE.test(input.output))) {
+    return null;
+  }
+  return "This failure looks like a STALE view of node_modules, not a missing package: version-pinned .pnpm paths are renamed by every (re)install, and a tree repaired earlier in this session invalidates older findings. Re-check from scratch before concluding anything — run the tool by its bare name (the shell PATH already includes node_modules/.bin) or via `pnpm exec <tool> --version`. Do not retry the same memorised path, and do not reinstall packages that a fresh check shows present.";
+}
+
 export function screenCommand(
   command: string,
 ): { ok: true } | { ok: false; reason: string } {
@@ -355,6 +390,15 @@ export function buildShellTools(ctx: ToolContext) {
           const isSilentSuccess = !r.stdout && !r.stderr && r.exit_code === 0;
           const stdoutTrunc = truncateCommandOutput(r.stdout ?? "");
           const stderrTrunc = truncateCommandOutput(r.stderr ?? "");
+          const hint = r.timed_out
+            ? PACKAGE_MUTATION_RE.test(effectiveCommand)
+              ? `Package install timed out after ${effectiveTimeout}s and was KILLED mid-run — the dependency tree may now be half-removed (bins present but packages missing). Do NOT conclude packages are uninstalled. Re-run the same install to completion (it resumes), or run it via bash_background and bash_wait. If the tree is already broken, remove node_modules/.modules-state by reinstalling: pnpm install after deleting node_modules.`
+              : `Command timed out after ${effectiveTimeout}s. If this is a long-running process (like a server, watcher, or interactive script), use bash_background instead of bash_run.`
+            : staleNodeModulesHint({
+                command: effectiveCommand,
+                exitCode: r.exit_code,
+                output: `${r.stdout ?? ""}\n${r.stderr ?? ""}`,
+              });
           return {
             command: effectiveCommand,
             stdout: stdoutTrunc.text,
@@ -366,13 +410,7 @@ export function buildShellTools(ctx: ToolContext) {
             ...(isSilentSuccess
               ? { info: "Command completed successfully with no output (exit code 0)." }
               : {}),
-            ...(r.timed_out
-              ? {
-                  hint: PACKAGE_MUTATION_RE.test(effectiveCommand)
-                    ? `Package install timed out after ${effectiveTimeout}s and was KILLED mid-run — the dependency tree may now be half-removed (bins present but packages missing). Do NOT conclude packages are uninstalled. Re-run the same install to completion (it resumes), or run it via bash_background and bash_wait. If the tree is already broken, remove node_modules/.modules-state by reinstalling: pnpm install after deleting node_modules.`
-                    : `Command timed out after ${effectiveTimeout}s. If this is a long-running process (like a server, watcher, or interactive script), use bash_background instead of bash_run.`,
-                }
-              : {}),
+            ...(hint ? { hint } : {}),
           };
         } catch (e) {
           return { error: String(e) };
