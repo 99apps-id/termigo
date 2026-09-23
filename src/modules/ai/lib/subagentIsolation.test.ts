@@ -83,8 +83,18 @@ describe("rerootToolContext", () => {
   const ctx = {
     getCwd: () => "/repo/sub",
     getWorkspaceRoot: () => "/repo",
+    getRemoteSession: () => ({ sessionId: 7, cwd: "/remote" }),
     getTerminalContext: () => "terminal output",
     isActiveTerminalPrivate: () => false,
+    listTerminals: () => [{ tabId: 1 }],
+    getTerminalContextFor: () => "other terminal",
+    injectIntoActivePty: () => true,
+    openPreview: () => true,
+    openCanvas: () => true,
+    browserExtract: async () => ({ text: "parent page" }),
+    browserScreenshot: async () => ({ screenshot: "png-bytes" }),
+    browserList: async () => ["main"],
+    readAgentOutput: () => "parent agent output",
   } as unknown as ToolContext;
 
   it("moves both filesystem roots into the worktree", () => {
@@ -93,18 +103,43 @@ describe("rerootToolContext", () => {
     expect(rooted.getWorkspaceRoot()).toBe("/repo/.wt/abc");
   });
 
-  // Only the roots move. The subagent is the same process in the same session,
-  // so the terminal, browser and control plane must keep working as before.
-  it("leaves everything that is not a filesystem root alone", () => {
+  // Isolation is more than a filesystem boundary. The subagent must not be able
+  // to observe or steer the parent's live session: its terminal buffer, its
+  // browser pages, or another agent's output are all context the worktree says
+  // nothing about, and leaking them defeats the point of isolating the run.
+  it("blinds the terminal surface", () => {
     const rooted = rerootToolContext(ctx, "/repo/.wt/abc");
-    expect(rooted.getTerminalContext()).toBe("terminal output");
-    expect(rooted.isActiveTerminalPrivate()).toBe(false);
+    expect(rooted.getTerminalContext()).toBeNull();
+    expect(rooted.isActiveTerminalPrivate()).toBe(true);
+    expect(rooted.listTerminals()).toEqual([]);
+    expect(rooted.getTerminalContextFor(1)).toBeNull();
+    expect(rooted.injectIntoActivePty("ls")).toBe(false);
+  });
+
+  it("blinds the browser and preview surface", async () => {
+    const rooted = rerootToolContext(ctx, "/repo/.wt/abc");
+    expect(rooted.openPreview("http://x")).toBe(false);
+    expect(rooted.openCanvas("<p>x</p>")).toBe(false);
+    expect(await rooted.browserExtract("main")).toEqual({
+      error: "not available in isolated subagent",
+    });
+    expect(await rooted.browserScreenshot("main")).toEqual({
+      error: "not available in isolated subagent",
+    });
+    expect(await rooted.browserList()).toEqual([]);
+  });
+
+  it("blinds agent-output reads and the remote session", () => {
+    const rooted = rerootToolContext(ctx, "/repo/.wt/abc");
+    expect(rooted.readAgentOutput(1)).toBeNull();
+    expect(rooted.getRemoteSession()).toBeNull();
   });
 
   it("does not mutate the context it was given", () => {
     rerootToolContext(ctx, "/repo/.wt/abc");
     expect(ctx.getCwd()).toBe("/repo/sub");
     expect(ctx.getWorkspaceRoot()).toBe("/repo");
+    expect(ctx.getTerminalContext()).toBe("terminal output");
   });
 });
 

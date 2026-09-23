@@ -7,7 +7,6 @@
 
 import { quoteShellArg } from "@/lib/shellQuote";
 import { native } from "./native";
-import { getSessionShell, sessionShellKey } from "./sessionShell";
 
 export type WorktreeSandbox = {
   id: string;
@@ -155,9 +154,25 @@ export function clearSandboxes(): void {
 const STALE_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
+ * The main repository root a sandbox worktree hangs off, derived from the
+ * `.wt/<id>` layout. `git worktree remove` refuses to run from inside the
+ * worktree being removed, so cleanup commands run from here.
+ */
+export function repoRootOfWorktree(worktreePath: string): string | null {
+  const norm = worktreePath.replace(/\\/g, "/").replace(/\/+$/, "");
+  const at = norm.lastIndexOf("/.wt/");
+  if (at <= 0) return null;
+  return norm.slice(0, at);
+}
+
+/**
  * Remove sandboxes older than `STALE_AGE_MS` from the registry and attempt to
  * delete their worktrees and branches from disk. Intentionally fire-and-forget:
  * a failed cleanup is logged but never blocks the caller.
+ *
+ * Only sees sandboxes THIS process registered — after a restart the registry is
+ * empty and leftovers are surfaced by `worktree_list` (git is the authority)
+ * for the user or agent to discard.
  */
 export async function cleanupStaleSandboxes(): Promise<void> {
   const now = Date.now();
@@ -171,21 +186,18 @@ export async function cleanupStaleSandboxes(): Promise<void> {
 
   for (const sb of stale) {
     activeSandboxes.delete(sb.id);
+    const root = repoRootOfWorktree(sb.worktreePath);
+    if (!root) {
+      console.warn(
+        `[worktree] stale sandbox ${sb.id}: cannot derive repo root from ${sb.worktreePath}`,
+      );
+      continue;
+    }
     try {
-      const shellId = await getSessionShell(
-        sessionShellKey("git", sb.id, sb.worktreePath),
-        sb.worktreePath,
-      );
-      await native.shellSessionRun(
-        shellId,
-        worktreeRemoveCommand(sb.worktreePath),
-        sb.worktreePath,
-        30,
-      );
-      await native.shellSessionRun(
-        shellId,
+      await native.runCommand(worktreeRemoveCommand(sb.worktreePath), root, 30);
+      await native.runCommand(
         worktreeDeleteBranchCommand(sb.branchName),
-        sb.worktreePath,
+        root,
         30,
       );
     } catch (e) {

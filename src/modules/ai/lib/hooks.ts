@@ -76,7 +76,7 @@ export function validateHooksConfig(config: HooksConfig): HookParseResult {
   ][]) {
     if (!rules) continue;
     if (
-      !["PreToolUse", "PostToolUse", "Stop", "RunStart", "RunStop", "FileSave"].includes(
+      !["PreToolUse", "PostToolUse", "RunStart", "RunStop", "FileSave"].includes(
         event,
       )
     ) {
@@ -91,6 +91,25 @@ export function validateHooksConfig(config: HooksConfig): HookParseResult {
     }
   }
   return { ok: true, config };
+}
+
+/**
+ * Fold the retired `Stop` event into `RunStop`.
+ *
+ * Hooks files written before the rename still say `Stop`; silently dropping
+ * those rules would disable a user's completion hook with no explanation, and
+ * rejecting the file would disable ALL their hooks. Renaming on parse keeps old
+ * configs firing at the moment they always did.
+ */
+function normalizeLegacyStop(parsed: Record<string, unknown>): void {
+  const legacy = parsed.Stop;
+  if (!Array.isArray(legacy)) {
+    delete parsed.Stop;
+    return;
+  }
+  const existing = Array.isArray(parsed.RunStop) ? parsed.RunStop : [];
+  parsed.RunStop = [...existing, ...legacy];
+  delete parsed.Stop;
 }
 
 /**
@@ -119,6 +138,7 @@ export function parseHooksFile(content: string): HookParseResult {
     return { ok: false, reason: "hooks.json must be a JSON object" };
   }
 
+  normalizeLegacyStop(parsed as Record<string, unknown>);
   const config = parsed as HooksConfig;
   return validateHooksConfig(config);
 }
@@ -127,7 +147,7 @@ export function parseHooksFile(content: string): HookParseResult {
  * Return the hook rules that should run for a given event and tool name.
  *
  * `toolName` is the name of the tool being called. Pass `null` for events
- * that have no tool context (Stop).
+ * that have no tool context (RunStart, RunStop, FileSave).
  */
 export function matchingHooks(
   config: HooksConfig,

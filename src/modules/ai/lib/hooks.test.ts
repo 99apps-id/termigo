@@ -30,14 +30,14 @@ describe("parseHooksFile", () => {
       JSON.stringify({
         PreToolUse: [{ command: "echo pre" }],
         PostToolUse: [{ command: "echo post", tool: "bash_run" }],
-        Stop: [{ command: "echo done" }],
+        RunStop: [{ command: "echo done" }],
       }),
     );
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.config.PreToolUse).toHaveLength(1);
       expect(r.config.PostToolUse?.[0]?.tool).toBe("bash_run");
-      expect(r.config.Stop).toHaveLength(1);
+      expect(r.config.RunStop).toHaveLength(1);
     }
   });
 
@@ -46,7 +46,8 @@ describe("parseHooksFile", () => {
       parseHooksFile(JSON.stringify({ Foo: [{ command: "echo" }] })),
     ).toEqual({
       ok: false,
-      reason: 'unknown hook event "Foo". Allowed: PreToolUse, PostToolUse, Stop',
+      reason:
+        'unknown hook event "Foo". Allowed: PreToolUse, PostToolUse, RunStart, RunStop, FileSave',
     });
   });
 
@@ -83,7 +84,7 @@ describe("matchingHooks", () => {
       { command: "echo bash-pre", tool: "bash_run" },
     ],
     PostToolUse: [{ command: "echo post", tool: "bash_run" }],
-    Stop: [{ command: "echo stop" }],
+    RunStop: [{ command: "echo stop" }],
   };
 
   it("returns all PreToolUse hooks when no tool filter", () => {
@@ -95,12 +96,41 @@ describe("matchingHooks", () => {
     expect(matchingHooks(config, "PostToolUse", "read_file")).toHaveLength(0);
   });
 
-  it("returns Stop hooks regardless of tool name", () => {
-    expect(matchingHooks(config, "Stop", null)).toHaveLength(1);
-    expect(matchingHooks(config, "Stop", "anything")).toHaveLength(1);
+  it("returns RunStop hooks regardless of tool name", () => {
+    expect(matchingHooks(config, "RunStop", null)).toHaveLength(1);
+    expect(matchingHooks(config, "RunStop", "anything")).toHaveLength(1);
   });
 
   it("returns empty for events with no rules", () => {
     expect(matchingHooks({}, "PreToolUse", "bash_run")).toHaveLength(0);
+  });
+});
+
+describe("legacy Stop normalization", () => {
+  it("renames a legacy Stop hook to RunStop on parse", () => {
+    const result = parseHooksFile(
+      JSON.stringify({ Stop: [{ command: "echo done" }] }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.config.RunStop).toEqual([{ command: "echo done" }]);
+    expect(
+      (result.config as Record<string, unknown>).Stop,
+    ).toBeUndefined();
+  });
+
+  it("appends legacy Stop rules after existing RunStop rules", () => {
+    const result = parseHooksFile(
+      JSON.stringify({
+        RunStop: [{ command: "echo new" }],
+        Stop: [{ command: "echo old" }],
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.config.RunStop).toEqual([
+      { command: "echo new" },
+      { command: "echo old" },
+    ]);
   });
 });

@@ -1,10 +1,26 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("./native", () => ({
+  native: {
+    runCommand: vi.fn(async () => ({
+      stdout: "",
+      stderr: "",
+      exit_code: 0,
+      timed_out: false,
+      truncated: false,
+    })),
+  },
+}));
+
+import { native } from "./native";
 import {
   clearSandboxes,
+  cleanupStaleSandboxes,
   generateSandboxInfo,
   getSandbox,
   listSandboxes,
   registerSandbox,
+  repoRootOfWorktree,
   unregisterSandbox,
   worktreeAddCommand,
   worktreeDeleteBranchCommand,
@@ -81,5 +97,76 @@ describe("worktree isolation library", () => {
     unregisterSandbox("run-1", "merged");
     expect(listSandboxes()).toHaveLength(0);
     expect(s1.status).toBe("merged");
+  });
+});
+
+describe("repoRootOfWorktree", () => {
+  it("derives the repo root from the .wt layout (posix)", () => {
+    expect(repoRootOfWorktree("/repo/.wt/abc123")).toBe("/repo");
+    expect(repoRootOfWorktree("/home/u/proj/.wt/x/y")).toBe("/home/u/proj");
+  });
+
+  it("derives the repo root from windows separators", () => {
+    expect(repoRootOfWorktree("C:\\project\\app\\.wt\\abc123")).toBe(
+      "C:/project/app",
+    );
+  });
+
+  it("returns null when the path is not a .wt worktree", () => {
+    expect(repoRootOfWorktree("/repo/src")).toBeNull();
+    expect(repoRootOfWorktree("/.wt/orphan")).toBeNull();
+  });
+});
+
+describe("cleanupStaleSandboxes", () => {
+  beforeEach(() => {
+    clearSandboxes();
+    vi.mocked(native.runCommand).mockClear();
+  });
+
+  const DAY = 24 * 60 * 60 * 1000;
+
+  it("removes only sandboxes older than seven days", async () => {
+    registerSandbox({
+      id: "old",
+      branchName: "termigo-sandbox/old",
+      worktreePath: "/repo/.wt/old",
+      createdAt: Date.now() - 8 * DAY,
+      status: "active",
+    });
+    registerSandbox({
+      id: "fresh",
+      branchName: "termigo-sandbox/fresh",
+      worktreePath: "/repo/.wt/fresh",
+      createdAt: Date.now(),
+      status: "active",
+    });
+
+    await cleanupStaleSandboxes();
+
+    expect(getSandbox("old")).toBeUndefined();
+    expect(getSandbox("fresh")).toBeDefined();
+
+    // Worktree removal and branch deletion, both run from the main repo root
+    // (git refuses to remove the worktree you are standing in).
+    const calls = vi.mocked(native.runCommand).mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(calls[0][0]).toContain("worktree remove --force");
+    expect(calls[0][1]).toBe("/repo");
+    expect(calls[1][0]).toContain("branch -D");
+    expect(calls[1][1]).toBe("/repo");
+  });
+
+  it("is a no-op when nothing is stale", async () => {
+    registerSandbox({
+      id: "fresh",
+      branchName: "termigo-sandbox/fresh",
+      worktreePath: "/repo/.wt/fresh",
+      createdAt: Date.now(),
+      status: "active",
+    });
+    await cleanupStaleSandboxes();
+    expect(native.runCommand).not.toHaveBeenCalled();
+    expect(getSandbox("fresh")).toBeDefined();
   });
 });

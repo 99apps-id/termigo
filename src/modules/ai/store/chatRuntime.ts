@@ -1085,30 +1085,32 @@ export async function sendParts(
       // Persist that the run is now in flight, so a restart mid-run can offer
       // "Resume" rather than silently losing it.
       useChatStore.getState().markRunStarted();
-      const hooksConfigStart = (
-        useChatStore.getState().agentMeta as {
-          hooksConfig?: import("../lib/hooks").HooksConfig;
+      {
+        const hooksConfigStart = (
+          useChatStore.getState().agentMeta as {
+            hooksConfig?: import("../lib/hooks").HooksConfig;
+          }
+        ).hooksConfig;
+        if (hooksConfigStart) {
+          void fireHooksForEvent(
+            hooksConfigStart,
+            "RunStart",
+            null,
+            {
+              sessionId,
+              runId: (useChatStore.getState().agentMeta as { runId?: string })
+                .runId,
+            },
+            {
+              getWorkspaceRoot: () =>
+                useChatStore.getState().live.getWorkspaceRoot(),
+              getCwd: () => useChatStore.getState().live.getCwd(),
+              makeRunId: () =>
+                (useChatStore.getState().agentMeta as { runId?: string }).runId ??
+                makeRunId(sessionId),
+            },
+          ).catch(() => {});
         }
-      ).hooksConfig;
-      if (hooksConfigStart) {
-        void fireHooksForEvent(
-          hooksConfigStart,
-          "RunStart",
-          null,
-          {
-            sessionId,
-            runId: (useChatStore.getState().agentMeta as { runId?: string })
-              .runId,
-          },
-          {
-            getWorkspaceRoot: () =>
-              useChatStore.getState().live.getWorkspaceRoot(),
-            getCwd: () => useChatStore.getState().live.getCwd(),
-            makeRunId: () =>
-              (useChatStore.getState().agentMeta as { runId?: string }).runId ??
-              makeRunId(sessionId),
-          },
-        ).catch(() => {});
       }
       await c.sendMessage({ role: "user", parts } as Parameters<
         typeof c.sendMessage

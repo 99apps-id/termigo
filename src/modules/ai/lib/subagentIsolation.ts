@@ -24,6 +24,7 @@ import { native } from "./native";
 import { checkShellCommand } from "./security";
 import { getSessionShell, sessionShellKey } from "./sessionShell";
 import {
+  cleanupStaleSandboxes,
   generateSandboxInfo,
   registerSandbox,
   worktreeAddCommand,
@@ -256,6 +257,11 @@ async function executeCreateIsolatedWorktree(args: {
       status: "active",
       description: `isolated subagent: ${label}`,
     });
+    // Opportunistic hygiene: a long-lived app accumulates one worktree per
+    // isolated subagent run, and nothing else ever removes them. Piggyback on
+    // the moment a new one is born to drop any that are days old. Fire and
+    // forget — cleanup must never delay or fail the subagent it rides along with.
+    void cleanupStaleSandboxes().catch(() => {});
     return {
       ok: true,
       worktreePath,
