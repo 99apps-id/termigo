@@ -1,5 +1,6 @@
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { resolveModelContextLimit } from "../config";
+import { effectiveContextLimit } from "../lib/contextLimitLearning";
 import { useChatStore } from "../store/chatStore";
 
 /** Compact live context meter shown next to the agent controls. Shows how full
@@ -21,7 +22,15 @@ export function ContextMeter() {
   const used = lastInput;
   if (used <= 0) return null;
 
-  const limit = resolveModelContextLimit(modelId, endpoints, compatCtx);
+  // The learned limit, not the brochure number: after an overflow the runtime
+  // shrinks the budget it actually targets (contextLimitLearning), and a meter
+  // still showing the configured window would claim headroom the next request
+  // does not have. Re-renders track lastInputTokens, which updates right after
+  // the request that feeds the learner — so the meter converges with it.
+  const limit = effectiveContextLimit(
+    modelId,
+    resolveModelContextLimit(modelId, endpoints, compatCtx),
+  );
   const pct = Math.min(100, Math.round((used / limit) * 100));
   const left = Math.max(0, 100 - pct);
   // Three tiers, like Claude's context indicator: comfortable (accent), getting

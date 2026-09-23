@@ -1,4 +1,5 @@
 import type { Chat, UIMessage } from "@ai-sdk/react";
+import { toast } from "sonner";
 import { create } from "zustand";
 import {
   DEFAULT_MODEL_ID,
@@ -659,11 +660,15 @@ export const useChatStore = create<StoreState>((set, get) => ({
       });
     };
     if (chats.has(id) || seedMessages.has(id)) {
+      const cached =
+        chats.get(id)?.messages.length ?? seedMessages.get(id)?.length ?? 0;
+      warnIfLargeSession(cached);
       flip();
       return;
     }
     void loadMessages(id).then((m) => {
       if (m && m.length > 0 && !chats.has(id)) seedMessages.set(id, m);
+      if (m) warnIfLargeSession(m.length);
       flip();
     });
   },
@@ -800,6 +805,19 @@ function notifySessionLeft(sessionId: string | null): void {
   const messages = chats.get(sessionId)?.messages;
   if (!messages || messages.length === 0) return;
   onSessionLeft(sessionId, [...messages]);
+}
+
+/** Past this many messages, opening a session says so: a huge transcript costs
+ *  real tokens on every step even after compaction, and the user deserves a
+ *  nudge that /new is cheaper than scrolling. */
+export const LARGE_SESSION_MESSAGES = 400;
+
+function warnIfLargeSession(count: number): void {
+  if (count < LARGE_SESSION_MESSAGES) return;
+  toast.info(
+    `This session holds ${count.toLocaleString()} messages — every run re-sends a compacted slice of it. Consider /new for a fresh context window.`,
+    { id: "large-session-warning" },
+  );
 }
 
 /**

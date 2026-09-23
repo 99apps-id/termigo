@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { saveTrajectoryRun } from "../lib/trajectoryIo";
+import { MAX_RUNS, saveTrajectoryRun } from "../lib/trajectoryIo";
 
 export type TrajectoryStep = {
   id: string;
@@ -24,6 +24,30 @@ export type TrajectoryRun = {
   totalCostUsd?: number;
   status: "running" | "completed" | "failed" | "aborted";
 };
+
+/**
+ * In-memory bounds, mirroring the persistence bound in trajectoryIo.
+ *
+ * The store used to keep every run of the app session with every step and its
+ * FULL tool output — a long agentic day leaked hundreds of MB of heap that the
+ * 50-run disk cap never touched, because that cap only applied at save time.
+ * A replay timeline does not need megabyte blobs: the head and tail of an
+ * output are what a human reads.
+ */
+const MAX_STEPS_PER_RUN = 1000;
+const MAX_OUTPUT_CHARS = 128_000;
+const OUTPUT_HEAD_CHARS = 96_000;
+const OUTPUT_TAIL_CHARS = 8_000;
+
+/** Truncate an oversized output for retention. Non-strings and small strings
+ *  pass through untouched (the common case, allocation-free). */
+export function capStepOutput(output: unknown): unknown {
+  if (typeof output !== "string" || output.length <= MAX_OUTPUT_CHARS) {
+    return output;
+  }
+  const omitted = output.length - OUTPUT_HEAD_CHARS - OUTPUT_TAIL_CHARS;
+  return `${output.slice(0, OUTPUT_HEAD_CHARS)}\n\n… [${omitted.toLocaleString()} chars truncated for trajectory retention] …\n\n${output.slice(-OUTPUT_TAIL_CHARS)}`;
+}
 
 type TrajectoryState = {
   runs: TrajectoryRun[];
@@ -76,6 +100,8 @@ export const useTrajectoryStore = create<TrajectoryState>((set) => ({
       });
       return {
         activeRunId: runId,
+        // Bounded like the persisted copy: the newest MAX_RUNS, which always
+        // includes the run just started (it is last).
         runs: [
           ...reconciled,
           {
@@ -87,7 +113,7 @@ export const useTrajectoryStore = create<TrajectoryState>((set) => ({
             totalTokens: 0,
             status: "running" as const,
           },
-        ],
+        ].slice(-MAX_RUNS),
       };
     }),
 
@@ -98,13 +124,14 @@ export const useTrajectoryStore = create<TrajectoryState>((set) => ({
 
       const newStep: TrajectoryStep = {
         ...step,
+        output: capStepOutput(step.output),
         timestamp: Date.now(),
       };
 
       return {
         runs: state.runs.map((r) =>
           r.runId === state.activeRunId
-            ? { ...r, steps: [...r.steps, newStep] }
+            ? { ...r, steps: [...r.steps, newStep].slice(-MAX_STEPS_PER_RUN) }
             : r,
         ),
       };
@@ -114,7 +141,17 @@ export const useTrajectoryStore = create<TrajectoryState>((set) => ({
     set((state) => ({
       runs: state.runs.map((r) => ({
         ...r,
-        steps: r.steps.map((s) => (s.id === stepId ? { ...s, ...patch } : s)),
+        steps: r.steps.map((s) =>
+          s.id === stepId
+            ? {
+                ...s,
+                ...patch,
+                ...("output" in patch
+                  ? { output: capStepOutput(patch.output) }
+                  : {}),
+              }
+            : s,
+        ),
       })),
     })),
 

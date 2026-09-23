@@ -33,7 +33,7 @@ vi.mock("@tauri-apps/plugin-store", () => ({
   LazyStore: harness.FakeLazyStore,
 }));
 
-import { extractMessageText, loadAll } from "./sessions";
+import { extractMessageText, loadAll, capPersistedMessages, saveMessages, MAX_PERSISTED_OUTPUT_CHARS } from "./sessions";
 
 const msg = (role: "user" | "assistant", ...texts: string[]): UIMessage =>
   ({
@@ -127,5 +127,71 @@ describe("loadAll", () => {
       "get:activeId",
       "get:sessions",
     ]);
+  });
+});
+
+describe("capPersistedMessages", () => {
+  const toolMsg = (output: unknown): UIMessage =>
+    ({
+      id: "m-tool",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool-read_file",
+          toolCallId: "t1",
+          state: "output-available",
+          output,
+        },
+      ],
+    }) as unknown as UIMessage;
+
+  it("passes small transcripts through by reference", () => {
+    const messages = [msg("user", "hello"), toolMsg({ content: "small" })];
+    expect(capPersistedMessages(messages)).toBe(messages);
+  });
+
+  it("truncates an oversized string output, keeping head and tail", () => {
+    const big = "H".repeat(40_000) + "M".repeat(100_000) + "T".repeat(40_000);
+    const [capped] = capPersistedMessages([toolMsg(big)]);
+    const out = (capped.parts[0] as { output: string }).output;
+    expect(out.length).toBeLessThan(big.length);
+    expect(out.startsWith("H")).toBe(true);
+    expect(out.endsWith("T")).toBe(true);
+    expect(out).toContain("truncated for session storage");
+  });
+
+  it("truncates oversized top-level string fields of an object output", () => {
+    const big = "x".repeat(MAX_PERSISTED_OUTPUT_CHARS + 10);
+    const [capped] = capPersistedMessages([
+      toolMsg({ stdout: big, stderr: "ok", exit_code: 0 }),
+    ]);
+    const out = (capped.parts[0] as { output: Record<string, unknown> }).output;
+    expect((out.stdout as string).length).toBeLessThan(big.length);
+    expect(out.stderr).toBe("ok");
+    expect(out.exit_code).toBe(0);
+  });
+
+  it("leaves text parts — the user's and model's words — untouched", () => {
+    const hugeText = "word ".repeat(50_000);
+    const messages = [msg("user", hugeText)];
+    expect(capPersistedMessages(messages)).toBe(messages);
+  });
+
+  it("does not mutate the input messages", () => {
+    const big = "x".repeat(MAX_PERSISTED_OUTPUT_CHARS + 10);
+    const original = toolMsg(big);
+    capPersistedMessages([original]);
+    const out = (original.parts[0] as { output: string }).output;
+    expect(out).toBe(big);
+  });
+
+  it("saveMessages persists the capped copy", async () => {
+    harness.data.clear();
+    const big = "x".repeat(MAX_PERSISTED_OUTPUT_CHARS + 10);
+    await saveMessages("s-cap", [toolMsg(big)]);
+    const stored = harness.data.get("messages:s-cap") as UIMessage[];
+    const out = (stored[0].parts[0] as { output: string }).output;
+    expect(out.length).toBeLessThan(big.length);
+    expect(out).toContain("truncated for session storage");
   });
 });

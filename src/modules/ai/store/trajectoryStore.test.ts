@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { useTrajectoryStore } from "./trajectoryStore";
+import { MAX_RUNS } from "../lib/trajectoryIo";
+import { capStepOutput, useTrajectoryStore } from "./trajectoryStore";
 
 describe("trajectoryStore", () => {
   beforeEach(() => {
@@ -110,5 +111,57 @@ describe("trajectoryStore", () => {
     expect(old?.steps[0].status).toBe("success");
     // The new run is untouched; a genuinely running pause is never rewritten.
     expect(useTrajectoryStore.getState().activeRunId).toBe("run-new");
+  });
+
+  it("keeps the in-memory run list bounded like the persisted one", () => {
+    const store = useTrajectoryStore.getState();
+    for (let i = 0; i < MAX_RUNS + 20; i++) {
+      store.startRun({ runId: `run-${i}`, modelId: "m" });
+      store.finishRun({ status: "completed" });
+    }
+    const { runs } = useTrajectoryStore.getState();
+    expect(runs.length).toBeLessThanOrEqual(MAX_RUNS);
+    // The NEWEST runs survive — the replay timeline is read top-down in time.
+    expect(runs[runs.length - 1].runId).toBe(`run-${MAX_RUNS + 19}`);
+  });
+});
+
+describe("capStepOutput", () => {
+  it("passes non-strings and small strings through by reference", () => {
+    const obj = { stdout: "ok" };
+    expect(capStepOutput(obj)).toBe(obj);
+    expect(capStepOutput("small")).toBe("small");
+    expect(capStepOutput(undefined)).toBeUndefined();
+  });
+
+  it("truncates an oversized string, keeping head and tail", () => {
+    const big = "A".repeat(100_000) + "B".repeat(100_000) + "C".repeat(100_000);
+    const capped = capStepOutput(big) as string;
+    expect(capped.length).toBeLessThan(big.length);
+    expect(capped.startsWith("A")).toBe(true);
+    expect(capped.endsWith("C")).toBe(true);
+    expect(capped).toContain("truncated for trajectory retention");
+  });
+
+  it("caps the output a step is updated with", () => {
+    const store = useTrajectoryStore.getState();
+    store.startRun({ runId: "run-cap", modelId: "m" });
+    store.appendStep({
+      id: "step-cap",
+      stepIndex: 0,
+      toolName: "read_file",
+      args: {},
+      status: "running",
+    });
+    store.updateStep("step-cap", {
+      status: "success",
+      output: "z".repeat(500_000),
+    });
+    const run = useTrajectoryStore
+      .getState()
+      .runs.find((r) => r.runId === "run-cap");
+    const out = run?.steps[0].output as string;
+    expect(out.length).toBeLessThan(200_000);
+    expect(out).toContain("truncated for trajectory retention");
   });
 });

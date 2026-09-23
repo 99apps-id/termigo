@@ -57,6 +57,76 @@ export async function loadMessages(id: string): Promise<UIMessage[] | null> {
   return (await store.get<UIMessage[]>(messagesKey(id))) ?? null;
 }
 
+/**
+ * Storage cap for one tool-output string inside a persisted transcript.
+ *
+ * The disk copy used to keep every tool result verbatim forever: a single
+ * `read_file` of a large source or a build log left a multi-megabyte blob in
+ * `termigo-ai-sessions.json`, and the store file only ever grew. The SEND path
+ * already compacts these away (compact.ts elides pre-tail tool results), so the
+ * full text is only ever re-read by the history UI — where the head and tail of
+ * a huge output are what a human actually scrolls to.
+ */
+export const MAX_PERSISTED_OUTPUT_CHARS = 64_000;
+const PERSIST_HEAD_CHARS = 48_000;
+const PERSIST_TAIL_CHARS = 8_000;
+
+function capBigString(s: string): string {
+  const omitted = s.length - PERSIST_HEAD_CHARS - PERSIST_TAIL_CHARS;
+  return `${s.slice(0, PERSIST_HEAD_CHARS)}\n\n… [${omitted.toLocaleString()} chars truncated for session storage] …\n\n${s.slice(-PERSIST_TAIL_CHARS)}`;
+}
+
+/** Cap oversized strings in a tool output: the output itself, or its top-level
+ *  string fields ({stdout, stderr}, {content}, {text}). Shallow on purpose —
+ *  deeply nested blobs are rare and a deep walk on every debounced save would
+ *  cost more than it protects. Returns the input reference when nothing
+ *  changed, so callers can skip copying. */
+function capOutput(output: unknown): unknown {
+  if (typeof output === "string") {
+    return output.length > MAX_PERSISTED_OUTPUT_CHARS ? capBigString(output) : output;
+  }
+  if (output && typeof output === "object" && !Array.isArray(output)) {
+    const rec = output as Record<string, unknown>;
+    let changed = false;
+    const next: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(rec)) {
+      const capped =
+        typeof v === "string" && v.length > MAX_PERSISTED_OUTPUT_CHARS
+          ? capBigString(v)
+          : v;
+      if (capped !== v) changed = true;
+      next[k] = capped;
+    }
+    return changed ? next : output;
+  }
+  return output;
+}
+
+/**
+ * The transcript as it should hit disk: identical to the input except that
+ * oversized tool outputs are truncated. Never mutates the input (the live chat
+ * still renders the full result until the session is reloaded). Text, reasoning
+ * and file parts are left alone — those are the user's and the model's words.
+ */
+export function capPersistedMessages(messages: UIMessage[]): UIMessage[] {
+  let changed = false;
+  const out = messages.map((m) => {
+    let partsChanged = false;
+    const parts = m.parts.map((p) => {
+      const part = p as unknown as Record<string, unknown>;
+      if (!part || typeof part !== "object" || !("output" in part)) return p;
+      const capped = capOutput(part.output);
+      if (capped === part.output) return p;
+      partsChanged = true;
+      return { ...(p as object), output: capped } as typeof p;
+    });
+    if (!partsChanged) return m;
+    changed = true;
+    return { ...m, parts };
+  });
+  return changed ? out : messages;
+}
+
 export async function saveSessionsList(sessions: SessionMeta[]): Promise<void> {
   await store.set(KEY_SESSIONS, sessions);
 }
@@ -69,7 +139,7 @@ export async function saveMessages(
   id: string,
   messages: UIMessage[],
 ): Promise<void> {
-  await store.set(messagesKey(id), messages);
+  await store.set(messagesKey(id), capPersistedMessages(messages));
   try {
     const { indexMessagesBatch } = await import("./fts5");
     const items: Array<{ messageId: string; text: string }> = [];
