@@ -121,6 +121,16 @@ const WRITE_DENY_PREFIXES: &[&str] = &[
     "/programdata/",
 ];
 
+/// The Rust mirror of `AGENT_IMMUTABLE_CONFIG` in `security.ts`, limited to
+/// `hooks.json`. A hook command is read back and run on every matching tool
+/// event with no prompt, so letting the agent write the file is persistence it
+/// never asked the user for. `approvals.json` is in the same class, but the
+/// approval dialog's own "allow for this project" button writes it through this
+/// same `fs_write_file` path and this layer cannot tell that click from an agent
+/// call; denying it here would break the one control a user has to stop an agent.
+/// That half is refused in the webview guard instead.
+const AGENT_IMMUTABLE_CONFIG: &[&str] = &["/.termigo/hooks.json"];
+
 fn basename(p: &str) -> &str {
     match p.rfind(['/', '\\']) {
         Some(i) => &p[i + 1..],
@@ -144,10 +154,7 @@ fn comparison_form(p: &str) -> String {
         // Written as nested `if let` rather than a let-chain: this crate is
         // edition 2021, where let-chains do not compile.
         let bytes = rest.as_bytes();
-        let head_end = if bytes.len() >= 2
-            && bytes[0].is_ascii_alphabetic()
-            && bytes[1] == b':'
-        {
+        let head_end = if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
             // Drive letter: skip `C:`.
             2
         } else if let Some(unc) = rest.strip_prefix("UNC/") {
@@ -177,7 +184,8 @@ fn comparison_form(p: &str) -> String {
         .map(|seg| {
             if is_windows_style {
                 let colon = seg.find(':').unwrap_or(seg.len());
-                let trimmed = seg[..colon].trim_end_matches(|c: char| c == '.' || c.is_whitespace());
+                let trimmed =
+                    seg[..colon].trim_end_matches(|c: char| c == '.' || c.is_whitespace());
                 trimmed.to_string()
             } else {
                 seg.to_string()
@@ -297,7 +305,9 @@ pub fn is_secret_path(path: &Path) -> bool {
     if name.is_empty() || safe_env_template().is_match(&name) {
         return false;
     }
-    secret_basename_patterns().iter().any(|re| re.is_match(&name))
+    secret_basename_patterns()
+        .iter()
+        .any(|re| re.is_match(&name))
 }
 
 fn describe_protected(dir: &str) -> &str {
@@ -344,6 +354,14 @@ pub fn check_writable(path: &str) -> Result<(), String> {
     } else {
         format!("/{cmp}")
     };
+    for rel in AGENT_IMMUTABLE_CONFIG {
+        if cmp_for_prefix.ends_with(rel) {
+            return Err(format!(
+                "Refused: \"{}\" is read back and executed automatically, so it cannot be changed from inside the agent.",
+                rel.trim_start_matches('/')
+            ));
+        }
+    }
     for prefix in WRITE_DENY_PREFIXES {
         if cmp_for_prefix.starts_with(prefix) || format!("{cmp_for_prefix}/").starts_with(prefix) {
             return Err(format!(
@@ -523,6 +541,29 @@ mod tests {
 
         // A new file in an ordinary directory is still allowed.
         assert!(validate_write(&dir.path().join("new.txt")).is_ok());
+    }
+
+    // A hook file is executed on every matching tool event without a prompt, so
+    // the agent must not be able to plant one and have it fire on the next ten
+    // runs. Reads stay open; the agent has to see what it is subject to.
+    #[test]
+    fn hooks_config_cannot_be_written_but_stays_readable() {
+        assert!(check_writable("/proj/.termigo/hooks.json").is_err());
+        assert!(check_readable("/proj/.termigo/hooks.json").is_ok());
+        // Other spellings of the same file, once the comparison form collapses
+        // drive, case, trailing dot and stream suffix. Those last two strips are
+        // Windows-shaped only, because on POSIX `hooks.json.` genuinely is a
+        // second file and denying it would deny the wrong path.
+        assert!(check_writable("C:\\proj\\.TERMIGO\\hooks.json").is_err());
+        assert!(check_writable("C:\\proj\\.termigo\\hooks.json.").is_err());
+        assert!(check_writable("C:\\proj\\.termigo\\hooks.json::$DATA").is_err());
+        assert!(check_writable(".termigo/hooks.json").is_err());
+
+        // Everything else under .termigo stays writable, and a file that merely
+        // shares the basename is untouched.
+        assert!(check_writable("/proj/.termigo/memory.md").is_ok());
+        assert!(check_writable("/proj/.termigo/hooks/run-1/stop.json").is_ok());
+        assert!(check_writable("/proj/config/hooks.json").is_ok());
     }
 
     #[test]

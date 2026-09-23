@@ -17,6 +17,22 @@ function loadMermaid(): Promise<MermaidModule> {
   return mermaidPromise;
 }
 
+// `securityLevel: "strict"` is the load-bearing field: mermaid's default lets a
+// diagram label carry a click handler or raw HTML, and that SVG is rendered
+// inside this app's webview. Same setting as the chat renderer uses.
+export const MERMAID_INIT: Record<string, unknown> = {
+  startOnLoad: false,
+  securityLevel: "strict",
+  theme: "base",
+  themeVariables: {
+    background: "#ffffff",
+    primaryColor: "#f7f7f7",
+    primaryTextColor: "#111111",
+    primaryBorderColor: "#c9c9c9",
+    lineColor: "#666666",
+  },
+};
+
 /** Extract the code of every fenced ```mermaid block in a reply. */
 export function extractMermaidBlocks(text: string): string[] {
   const out: string[] = [];
@@ -38,17 +54,7 @@ export function extractMermaidBlocks(text: string): string[] {
 export async function renderMermaidToPng(code: string): Promise<string | null> {
   try {
     const mermaid = await loadMermaid();
-    mermaid.initialize({
-      startOnLoad: false,
-      theme: "base",
-      themeVariables: {
-        background: "#ffffff",
-        primaryColor: "#f7f7f7",
-        primaryTextColor: "#111111",
-        primaryBorderColor: "#c9c9c9",
-        lineColor: "#666666",
-      },
-    });
+    mermaid.initialize(MERMAID_INIT);
     const id = `tg-mermaid-${Math.random().toString(36).slice(2, 10)}`;
     const { svg } = await mermaid.render(id, code);
     const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });

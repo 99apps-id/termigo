@@ -141,6 +141,19 @@ const WRITE_DENY_PREFIXES = [
   "/programdata/",
 ];
 
+/**
+ * Config the app acts on by itself, with no prompt in the way: a hook command
+ * runs on every matching tool event, and an approval rule answers a prompt
+ * without a click. Either one written by the agent is a foothold that outlives
+ * the run that planted it, which is exactly what a prompt injection wants. The
+ * agent still reads both (it has to know what it is subject to) and keeps
+ * writing every other file under `.termigo` - memory, skills, workflows.
+ */
+const AGENT_IMMUTABLE_CONFIG = [
+  "/.termigo/hooks.json",
+  "/.termigo/approvals.json",
+];
+
 export type SafetyResult = { ok: true } | { ok: false; reason: string };
 
 function basename(p: string): string {
@@ -299,6 +312,14 @@ export function checkWritable(path: string): SafetyResult {
   const cmp = comparisonForm(path);
   // Ensure the comparison surface has a leading separator for prefix matching.
   const cmpForPrefix = cmp.startsWith("/") ? cmp : `/${cmp}`;
+  for (const rel of AGENT_IMMUTABLE_CONFIG) {
+    if (cmpForPrefix.endsWith(rel)) {
+      return {
+        ok: false,
+        reason: `Refused: "${rel.slice(1)}" is read back and acted on automatically, so the agent cannot change it. Edit the file yourself, or use the approval controls in the UI.`,
+      };
+    }
+  }
   for (const prefix of WRITE_DENY_PREFIXES) {
     if (
       cmpForPrefix.startsWith(prefix) ||

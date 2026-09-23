@@ -386,3 +386,37 @@ describe("recursive delete of the filesystem root", () => {
     }
   });
 });
+
+// Hooks are read back and run on every matching tool event with no prompt, and
+// an approval rule answers a prompt without a click. Writing either from inside
+// a run is a foothold that outlives it, which is what prompt injection aims at.
+describe("agent-immutable config under .termigo", () => {
+  it("refuses writes to hooks.json and approvals.json", () => {
+    for (const p of [
+      "/proj/.termigo/hooks.json",
+      ".termigo/hooks.json",
+      "C:\\Users\\me\\proj\\.termigo\\approvals.json",
+      // Same files, other spellings the comparison form must collapse.
+      "/PROJ/.TERMIGO/HOOKS.JSON",
+      "/proj/.termigo/hooks.json.",
+      "/proj/.termigo/hooks.json::$DATA",
+    ]) {
+      expect(checkWritable(p).ok, p).toBe(false);
+    }
+  });
+
+  it("keeps reading that config and writing the rest of .termigo", () => {
+    expect(checkReadable("/proj/.termigo/hooks.json").ok).toBe(true);
+    expect(checkReadable("/proj/.termigo/approvals.json").ok).toBe(true);
+    // Memory, skills and hook payloads stay writable: they are data the agent
+    // is meant to maintain, not config the app executes on its own.
+    for (const p of [
+      "/proj/.termigo/memory.md",
+      "/proj/.termigo/skills/scan/SKILL.md",
+      "/proj/.termigo/hooks/run-1/stop.json",
+      "/proj/config/hooks.json",
+    ]) {
+      expect(checkWritable(p).ok, p).toBe(true);
+    }
+  });
+});

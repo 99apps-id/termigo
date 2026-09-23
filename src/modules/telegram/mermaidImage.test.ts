@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractMermaidBlocks } from "./mermaidImage";
+import { extractMermaidBlocks, MERMAID_INIT } from "./mermaidImage";
 
 describe("extractMermaidBlocks", () => {
   it("returns no blocks when there is no mermaid fence", () => {
@@ -29,5 +29,16 @@ describe("extractMermaidBlocks", () => {
   it("tolerates a code fence without a trailing newline", () => {
     const text = "```mermaid\ngraph TD\n  A --> B```";
     expect(extractMermaidBlocks(text).length).toBeGreaterThan(0);
+  });
+});
+
+describe("MERMAID_INIT", () => {
+  // The rasteriser runs in the app's own webview, so a diagram label that can
+  // carry a click handler or raw HTML is script execution, not a rendering
+  // defect. Mermaid's default is not strict; nothing else sets it either, since
+  // initialize() is per-call here. Losing this key silently reopens SEC-2.
+  it("renders at strict security level", () => {
+    expect(MERMAID_INIT.securityLevel).toBe("strict");
+    expect(MERMAID_INIT.startOnLoad).toBe(false);
   });
 });

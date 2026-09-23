@@ -435,6 +435,13 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
             );
         }
         if is_variable_assignment(segment) {
+            // `$env:PATH = 'C:\evil'; git status` lands the next command on a
+            // binary the caller picked, the same trick as the POSIX prefix below.
+            if let Some((name, value)) = assignment_target(segment) {
+                if is_hijack_env_var(&name, &value) {
+                    return Err(hijack_env_error(&name));
+                }
+            }
             if let Some(rhs_prog) = rhs_program_if_any(segment) {
                 if !allows_program(&rhs_prog) {
                     return Err(format!(
@@ -445,18 +452,24 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
             }
             continue;
         }
-        // POSIX-style env prefixes (`CI=true pnpm test`, `NODE_OPTIONS=...
-        // vitest run`): skip every `NAME=value` token and validate the program
-        // that follows, the same way the frontend's commandRisk classifier
-        // reads them. PowerShell `$x = ...` assignments are handled above; a
-        // token starting with `$` is never a POSIX env prefix. Skipping cannot
-        // launder a program: the FIRST non-assignment token is still checked
-        // against the allowlist, and unquoted metacharacters in any value were
-        // already refused by the scan.
+        // POSIX-style env prefixes (`CI=true pnpm test`): skip every
+        // `NAME=value` token and validate the program that follows, the same way
+        // the frontend's commandRisk classifier reads them. PowerShell `$x = ...`
+        // assignments are handled above; a token starting with `$` is never a
+        // POSIX env prefix. Skipping cannot launder a program: the FIRST
+        // non-assignment token is still checked against the allowlist, and
+        // unquoted metacharacters in any value were already refused by the scan.
+        // What skipping COULD do is change which binary the allowlisted name
+        // resolves to, or hand one a loader hook, so those names are refused by
+        // `is_hijack_env_var` rather than skipped.
         let mut after_env = segment;
         while let Some(first) = after_env.split_whitespace().next() {
             if !is_posix_env_assignment(first) {
                 break;
+            }
+            let (name, value) = first.split_once('=').unwrap_or((first, ""));
+            if is_hijack_env_var(name, value) {
+                return Err(hijack_env_error(name));
             }
             let n = first.len();
             after_env = after_env[n..].trim_start();
@@ -515,6 +528,89 @@ fn rhs_program_if_any(segment: &str) -> Option<String> {
     } else {
         Some(prog.to_string())
     }
+}
+
+/// Names that decide which binary an allowlisted command is, or what code it
+/// loads before it runs. `PATH=/tmp/x git status` does not run the `git` the
+/// command names, and `LD_PRELOAD` / `NODE_OPTIONS=--require` put code inside a
+/// program the allowlist approved by name. Both read as ordinary environment
+/// setup, which is what makes them worth refusing by name rather than leaving
+/// to the program check. Environment configuration is a PTY's job; a command
+/// that really needs a different binary can still name its absolute path, which
+/// is at least visible in the transcript.
+fn is_hijack_env_var(name: &str, value: &str) -> bool {
+    const EXACT: &[&str] = &[
+        "BASH_ENV",
+        "CLASSPATH",
+        "EDITOR",
+        "ENV",
+        "GIT_CONFIG",
+        "GIT_CONFIG_GLOBAL",
+        "GIT_CONFIG_SYSTEM",
+        "GIT_EXEC_PATH",
+        "GIT_EXTERNAL_DIFF",
+        "GIT_PAGER",
+        "GIT_SSH_COMMAND",
+        "JAVA_TOOL_OPTIONS",
+        "JDK_JAVA_OPTIONS",
+        "PATH",
+        "PERL5OPT",
+        "PROMPT_COMMAND",
+        "PYTHONPATH",
+        "PYTHONSTARTUP",
+        "RUBYOPT",
+        "RUSTC_WRAPPER",
+        "VISUAL",
+        "_JAVA_OPTIONS",
+    ];
+    const PREFIXES: &[&str] = &["DYLD_", "LD_", "NPM_CONFIG_"];
+    let upper = name.to_ascii_uppercase();
+    if upper == "NODE_OPTIONS" {
+        // The flag a build tooling needs is a heap size; the ones that load code
+        // or open a debugger are the problem, so this name is judged by value.
+        // Quotes are punctuation around the value, not part of the flag: both
+        // `$env:NODE_OPTIONS='--require x.js'` and `NODE_OPTIONS='--require
+        // x.js' node` reach here with the quote still attached to the token.
+        let unquoted: String = value
+            .chars()
+            .filter(|c| *c != '\'' && *c != '"')
+            .collect();
+        return unquoted.split_whitespace().any(|flag| {
+            flag == "-r"
+                || flag.starts_with("--require")
+                || flag.starts_with("--import")
+                || flag.starts_with("--experimental-loader")
+                || flag.starts_with("--inspect")
+        });
+    }
+    EXACT.contains(&upper.as_str()) || PREFIXES.iter().any(|p| upper.starts_with(p))
+}
+
+fn hijack_env_error(name: &str) -> String {
+    format!(
+        "assignment to '{name}' is refused because it can change which program runs or what code a program loads; use a PTY session for environment setup"
+    )
+}
+
+/// The variable a PowerShell assignment targets and the value handed it, for
+/// `$env:PATH = 'x'`, `${env:PATH} = 'x'` and `$PATH = 'x'`. Names come back
+/// upper-cased because Windows environment variables are case-insensitive.
+fn assignment_target(segment: &str) -> Option<(String, String)> {
+    let trimmed = segment.trim();
+    let eq = trimmed.find('=')?;
+    let lhs = trimmed[..eq]
+        .trim()
+        .trim_start_matches('$')
+        .trim_matches(['{', '}']);
+    let name = lhs.strip_prefix("env:").unwrap_or(lhs).trim();
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|c| c.is_ascii_alphabetic() || c == '_')
+    {
+        return None;
+    }
+    Some((name.to_ascii_uppercase(), trimmed[eq + 1..].to_string()))
 }
 
 /// A POSIX-style environment-assignment token: `NAME=value` where NAME is a
@@ -1438,7 +1534,6 @@ mod tests_sandbox {
     fn validate_shell_command_allows_simple_env_var_assignments() {
         assert!(validate_shell_command("DEBIAN_FRONTEND=noninteractive apt-get install -y nmap").is_ok());
         assert!(validate_shell_command("FOO=bar echo hello").is_ok());
-        assert!(validate_shell_command("PATH=/usr/bin git status").is_ok());
         // Several prefixes in a row are all skipped before the program check.
         assert!(validate_shell_command("CI=true NODE_OPTIONS=--max-old-space-size=4096 pnpm test").is_ok());
         // The skip cannot launder an unlisted program behind an assignment.
@@ -1447,6 +1542,45 @@ mod tests_sandbox {
         // PowerShell-style assignments are is_variable_assignment's job, not
         // the POSIX prefix skip: `$x = ...` must not read `$x` as a program.
         assert!(validate_shell_command("$files = Get-ChildItem; echo $files").is_ok());
+    }
+
+    /// `PATH=/tmp/x git status` does not run the `git` the command names, and a
+    /// loader hook hands code to a program the allowlist approved by name. Both
+    /// read as ordinary environment setup, so they are refused by name. The list
+    /// has to stay surgical: `CI=true` and a heap size are how build tooling is
+    /// normally driven, and refusing those is what made the sandbox a wall.
+    #[test]
+    fn validate_shell_command_refuses_env_that_hijacks_the_program() {
+        for cmd in [
+            "PATH=/tmp/evil git status",
+            "LD_PRELOAD=./hook.so pnpm test",
+            "DYLD_INSERT_LIBRARIES=./hook.dylib node app.js",
+            "NODE_OPTIONS=--require ./evil.js node app.js",
+            "NODE_OPTIONS='--require ./evil.js' node app.js",
+            "NODE_OPTIONS=--inspect=0.0.0.0 node app.js",
+            "BASH_ENV=./evil.sh echo hi",
+            "GIT_SSH_COMMAND=./evil git fetch",
+            "PYTHONPATH=./evil python3 tool.py",
+            "NPM_CONFIG_PREFIX=/tmp/x pnpm install",
+            "$env:PATH = 'C:\\evil'; git status",
+            "${env:NODE_OPTIONS}='--require C:\\evil.js'; node app.js",
+        ] {
+            assert!(
+                validate_shell_command(cmd).is_err(),
+                "accepted a hijackable assignment: {cmd}"
+            );
+        }
+        // Still allowed, because none of these change what runs.
+        for cmd in [
+            "NODE_OPTIONS=--max-old-space-size=8192 pnpm test",
+            "GIT_TERMINAL_PROMPT=0 git clone https://example.invalid/r.git",
+            "COLUMNS=80 cat file",
+        ] {
+            assert!(
+                validate_shell_command(cmd).is_ok(),
+                "refused an ordinary assignment: {cmd}"
+            );
+        }
     }
 
     /// A newline used to be neither a metacharacter nor a separator, so it
