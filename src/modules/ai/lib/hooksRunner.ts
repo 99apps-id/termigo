@@ -134,7 +134,12 @@ export async function fireHooksForEvent(
   // Clean up the payload directory after terminal run-stop events so `.termigo/hooks`
   // does not grow without bound. Pre/Post/RunStart/FileSave hooks leave payloads in
   // place so the user can inspect them while the run is in flight.
-  if ((event === "RunStop" || event === "Stop") && payloadPath) {
+  //
+  // No `|| event === "Stop"` here: legacy `Stop` rules are folded into `RunStop`
+  // at PARSE time (normalizeLegacyStop in hooks.ts), and no caller ever fires a
+  // "Stop" event, so a runtime comparison against it is dead code — and "Stop"
+  // is not a member of HookEvent, so it does not typecheck either.
+  if (event === "RunStop" && payloadPath) {
     try {
       await native.deletePath(hooksRunDir(workspaceRoot ?? "", runId));
     } catch {
