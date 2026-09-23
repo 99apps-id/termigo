@@ -181,7 +181,7 @@ func cliArgs(providerID string, options RunOptions) ([]string, error) {
 		}
 		return append(args, "-"), nil
 	case "claude":
-		permission := "default"
+		permission := "plan"
 		if options.Access == "workspace-write" {
 			permission = "acceptEdits"
 		}

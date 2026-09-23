@@ -499,8 +499,15 @@ func runMCP(args []string, stdout io.Writer) error {
 	}
 }
 
+var cliCtx context.Context
+var cliCancel context.CancelFunc
+
+func init() {
+	cliCtx, cliCancel = context.WithTimeout(context.Background(), 30*time.Second)
+}
+
 func ctxForCLI() context.Context {
-	return context.Background()
+	return cliCtx
 }
 
 func listMCPServers(ctx context.Context, workspace, filter string, jsonOutput bool, stdout io.Writer) error {
@@ -1087,4 +1094,3 @@ func runMCPServer(args []string, stdout io.Writer) error {
 	server := mcpserver.New(workspace)
 	return server.Serve(context.Background(), os.Stdin, os.Stdout)
 }
-

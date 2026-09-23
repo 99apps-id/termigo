@@ -1146,9 +1146,7 @@ mod tests {
             Default::default(),
         )
         .expect("run")
-    }
-
-    #[test]
+    }    #[test]
     fn run_blocking_captures_stdout_and_zero_exit() {
         let out = run("printf 'hello\\n'", 5);
         assert_eq!(out.stdout, "hello\n");
@@ -1185,6 +1183,92 @@ mod tests {
         assert_eq!(cmd.get_program(), "/bin/sh");
         let args: Vec<_> = cmd.get_args().collect();
         assert_eq!(args, vec!["-c", "echo hi"]);
+    }
+}
+
+/// End-to-end spawn test for the `node_modules/.bin` PATH prepend — the string
+/// helpers are unit-tested in `tests_node_path`, but the part that actually
+/// broke in the field is the SPAWN: whether the child shell's environment ends
+/// up with the bin dir (Windows env keys are case-insensitive — `PATH` vs
+/// `Path` — and a botched merge there silently loses the prepend) and whether
+/// a pnpm-style `.cmd` shim resolves by bare name.
+#[cfg(all(test, windows))]
+mod tests_windows_node_path_e2e {
+    use super::*;
+
+    #[test]
+    fn spawned_shell_resolves_a_local_bin_shim_by_bare_name() {
+        let root = tempfile::tempdir().unwrap();
+        let bin = root.path().join("node_modules").join(".bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        // Same shape pnpm/npm create on Windows: a .cmd shim next to the
+        // extensionless sh script.
+        std::fs::write(bin.join("faketool.cmd"), "@echo FAKETOOL_OK\r\n").unwrap();
+
+        let out = run_blocking_interruptible(
+            "faketool".into(),
+            Some(root.path().to_string_lossy().to_string()),
+            WorkspaceEnv::Local,
+            Duration::from_secs(30),
+            Default::default(),
+        )
+        .expect("spawn");
+
+        assert_eq!(
+            out.exit_code,
+            Some(0),
+            "shim did not resolve; stderr: {}",
+            out.stderr
+        );
+        assert!(
+            out.stdout.contains("FAKETOOL_OK"),
+            "unexpected stdout: {}",
+            out.stdout
+        );
+    }
+
+    #[test]
+    fn spawned_shell_path_starts_with_the_project_bin() {
+        let root = tempfile::tempdir().unwrap();
+        let bin = root.path().join("node_modules").join(".bin");
+        std::fs::create_dir_all(&bin).unwrap();
+
+        let cwd = root.path().to_string_lossy().to_string();
+        // Whatever the configured Windows shell is, it can echo its own PATH.
+        let shell = crate::modules::pty::shell_init::windows_shell_path();
+        let is_cmd = shell
+            .file_name()
+            .and_then(|s| s.to_str())
+            .map(|s| s.eq_ignore_ascii_case("cmd.exe"))
+            .unwrap_or(false);
+        let probe = if is_cmd {
+            "echo %PATH%"
+        } else {
+            "Write-Output $env:PATH"
+        };
+
+        let out = run_blocking_interruptible(
+            probe.into(),
+            Some(cwd.clone()),
+            WorkspaceEnv::Local,
+            Duration::from_secs(30),
+            Default::default(),
+        )
+        .expect("spawn");
+
+        let printed = out.stdout.trim();
+        let expected_first = bin.to_string_lossy().to_string();
+        assert!(
+            printed.to_lowercase().starts_with(&expected_first.to_lowercase()),
+            "child PATH does not start with the project bin dir.\nPATH={printed}"
+        );
+        // The system PATH must survive the prepend, or the shell loses every
+        // other tool. Check a directory that is essentially always present.
+        let windir = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+        assert!(
+            printed.to_lowercase().contains(&windir.to_lowercase()),
+            "system PATH was lost in the prepend: {printed}"
+        );
     }
 }
 
