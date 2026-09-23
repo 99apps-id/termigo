@@ -348,7 +348,7 @@ impl McpClient {
             .await?;
         let list = result.get("resources").ok_or("missing resources")?;
         list.as_array()
-            .map(|arr| arr.clone())
+            .cloned()
             .ok_or_else(|| "resources.list did not return an array".to_string())
     }
 
@@ -402,7 +402,7 @@ impl McpClient {
             .await?;
         let list = result.get("prompts").ok_or("missing prompts")?;
         list.as_array()
-            .map(|arr| arr.clone())
+            .cloned()
             .ok_or_else(|| "prompts.list did not return an array".to_string())
     }
 
