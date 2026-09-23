@@ -474,33 +474,33 @@ export function AiComposerProvider({ children }: ProviderProps) {
       })();
     } else {
       if (editTarget) store.cancelEdit();
-    // A typed message starts a new task, so the escalation ladder resets to
-    // its first rung. Continue is the only thing that climbs it.
-    store.patchAgentMeta({
-      stopReason: null,
-      runRound: 0,
-      stoppedByUser: false,
-      compactionNotice: null,
-      pruneNotice: null,
-      memoryNotice: null,
-    });
-    // A fresh task has nothing to resume, so drop the persisted run marker.
-    store.syncRunMeta();
-    if (!store.mini.open) store.openMini();
-    void (async () => {
-      try {
-        const { sendParts } = await import("../store/chatRuntime");
-        await sendParts(targetSessionId, parts as unknown as SteerPart[]);
-      } catch (e) {
-        // A silent failure here is why a typed message "doesn't show up": make
-        // it visible so it is never a mystery again.
-        console.error("[composer] send failed", e);
-        toast.error(
-          `Could not send your message${e instanceof Error ? `: ${e.message}` : ""}`,
-          { id: "composer-send-failed" },
-        );
-      }
-    })();
+      // A typed message starts a new task, so the escalation ladder resets to
+      // its first rung. Continue is the only thing that climbs it.
+      store.patchAgentMeta({
+        stopReason: null,
+        runRound: 0,
+        stoppedByUser: false,
+        compactionNotice: null,
+        pruneNotice: null,
+        memoryNotice: null,
+      });
+      // A fresh task has nothing to resume, so drop the persisted run marker.
+      store.syncRunMeta();
+      if (!store.mini.open) store.openMini();
+      void (async () => {
+        try {
+          const { sendParts } = await import("../store/chatRuntime");
+          await sendParts(targetSessionId, parts as unknown as SteerPart[]);
+        } catch (e) {
+          // A silent failure here is why a typed message "doesn't show up": make
+          // it visible so it is never a mystery again.
+          console.error("[composer] send failed", e);
+          toast.error(
+            `Could not send your message${e instanceof Error ? `: ${e.message}` : ""}`,
+            { id: "composer-send-failed" },
+          );
+        }
+      })();
     }
     setValue("");
     setFiles([]);

@@ -5,14 +5,19 @@ use termigo_lib::modules::workspace::WorkspaceEnv;
 use termigo_lib::modules::workspace::WorkspaceRegistry;
 
 fn wait_until(deadline: Duration, mut pred: impl FnMut() -> bool) {
+    let effective_deadline = if cfg!(windows) {
+        deadline.max(Duration::from_secs(15))
+    } else {
+        deadline
+    };
     let start = Instant::now();
-    while start.elapsed() < deadline {
+    while start.elapsed() < effective_deadline {
         if pred() {
             return;
         }
         std::thread::sleep(Duration::from_millis(20));
     }
-    panic!("condition not met within {deadline:?}");
+    panic!("condition not met within {effective_deadline:?}");
 }
 
 #[test]

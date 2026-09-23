@@ -215,7 +215,8 @@ const READ_ONLY_SUBCOMMANDS: Record<string, Set<string>> = {
   perl: new Set(["--version", "-v", "--help", "-h"]),
   tsc: new Set(["--noEmit", "--version", "-v", "--help", "-h"]),
   prettier: new Set(["--check", "-c", "--version", "-v", "--help", "-h"]),
-  biome: new Set(["lint", "ci", "--version", "-v", "--help", "-h"]),
+  biome: new Set(["lint", "check", "ci", "--version", "-v", "--help", "-h"]),
+  lint: new Set(["--version", "-v", "--help", "-h"]),
   // Introspection only. Actually RUNNING tests executes arbitrary project code
   // (and can write snapshots), so `vitest run` stays "change" — the same call
   // the file already makes for pytest, cargo test and go test.

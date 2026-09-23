@@ -150,7 +150,7 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
     //
     // JS/TS (`biome`, `tsc`, `vitest`, `knip`, `vite` are this repo's own)
     "biome", "tsc", "vitest", "knip", "vite", "eslint", "prettier",
-    "jest", "mocha", "playwright", "size-limit",
+    "jest", "mocha", "playwright", "size-limit", "lint",
     // Python
     "ruff", "black", "mypy", "pytest", "flake8", "isort",
     // GitHub CLI and companion tools
@@ -230,7 +230,23 @@ fn allows_program(program: &str) -> bool {
         .strip_suffix(".exe")
         .or_else(|| program.strip_suffix(".cmd"))
         .or_else(|| program.strip_suffix(".bat"))
+        .or_else(|| program.strip_suffix(".ps1"))
+        .or_else(|| program.strip_suffix(".js"))
+        .or_else(|| program.strip_suffix(".mjs"))
+        .or_else(|| program.strip_suffix(".cjs"))
         .unwrap_or(program);
+
+    // Allow traversing and invoking any executable/script under node_modules (including .pnpm virtual store)
+    let norm = program.replace('\\', "/").to_lowercase();
+    if norm.starts_with("node_modules/")
+        || norm.starts_with("./node_modules/")
+        || norm.contains("/node_modules/")
+        || norm.starts_with(".pnpm/")
+        || norm.starts_with("./.pnpm/")
+        || norm.contains("/.pnpm/")
+    {
+        return true;
+    }
 
     // For relative paths (e.g. `./node_modules/.bin/vitest` or `.\bin\biome.cmd`)
     // match on the file name, across both separators so Windows-style paths
@@ -331,6 +347,14 @@ fn shell_write_hits_protected_target(command: &str) -> Option<String> {
     for t in &tokens {
         let trimmed = t.trim_matches(|c| c == '"' || c == '\'');
         if trimmed.is_empty() || trimmed.starts_with('-') {
+            continue;
+        }
+        let norm = trimmed.replace('\\', "/").to_lowercase();
+        if norm.contains("/node_modules/")
+            || norm.starts_with("node_modules/")
+            || norm.contains("/.pnpm/")
+            || norm.starts_with(".pnpm/")
+        {
             continue;
         }
         let path = std::path::Path::new(trimmed);
@@ -1362,7 +1386,11 @@ pub(crate) fn build_oneshot_command(
         if is_cmd {
             cmd.arg("/C").arg(command);
         } else {
-            cmd.arg("-NoProfile").arg("-Command").arg(command);
+            cmd.arg("-NoProfile")
+                .arg("-ExecutionPolicy")
+                .arg("Bypass")
+                .arg("-Command")
+                .arg(command);
         }
         Ok(cmd)
     }
@@ -1564,6 +1592,12 @@ mod tests_sandbox {
             "ruff check src",
             "mypy src",
             "golangci-lint run",
+            "lint",
+            "pnpm lint",
+            "pnpm test",
+            "./node_modules/.bin/vitest run",
+            "node_modules/vitest/vitest.mjs run",
+            "./node_modules/.pnpm/vitest@4.1.10/node_modules/vitest/vitest.mjs run",
         ] {
             assert!(validate_shell_command(cmd).is_ok(), "blocked: {cmd}");
         }
@@ -1576,6 +1610,8 @@ mod tests_sandbox {
         assert!(validate_shell_command("biome.exe lint ./src").is_ok());
         assert!(validate_shell_command("tsc.cmd --noEmit").is_ok());
         assert!(validate_shell_command("vitest.bat run").is_ok());
+        assert!(validate_shell_command("node_modules/.bin/vitest.ps1 run").is_ok());
+        assert!(validate_shell_command("node_modules/.bin/biome.ps1 check .").is_ok());
     }
 
     /// The allowlist is matched case-insensitively, so a differently-cased shim

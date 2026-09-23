@@ -69,7 +69,23 @@ impl WorkspaceRegistry {
 
     pub fn is_authorized(&self, target: &Path) -> bool {
         let set = self.roots.lock().expect("workspace registry poisoned");
-        set.iter().any(|root| target.starts_with(root))
+        if set.iter().any(|root| target.starts_with(root)) {
+            return true;
+        }
+        #[cfg(windows)]
+        {
+            let target_str = target.to_string_lossy().to_lowercase().replace('\\', "/");
+            let norm_target = target_str.strip_prefix("//?/").unwrap_or(&target_str);
+            set.iter().any(|root| {
+                let root_str = root.to_string_lossy().to_lowercase().replace('\\', "/");
+                let norm_root = root_str.strip_prefix("//?/").unwrap_or(&root_str);
+                norm_target == norm_root || norm_target.starts_with(&format!("{norm_root}/"))
+            })
+        }
+        #[cfg(not(windows))]
+        {
+            false
+        }
     }
 
     /// Like [`Self::is_authorized`] but canonicalizes first, so a `..` segment
@@ -80,7 +96,17 @@ impl WorkspaceRegistry {
     /// ancestor, is refused.
     pub fn is_authorized_canonical(&self, target: &Path) -> bool {
         if let Ok(canon) = std::fs::canonicalize(target) {
-            return self.is_authorized(&canon);
+            if self.is_authorized(&canon) {
+                return true;
+            }
+            // Allow traversing/reading node_modules symlinks (including .pnpm virtual store and pnpm global store)
+            // as long as the link origin is within an authorized workspace root.
+            let norm_target = target.to_string_lossy().replace('\\', "/").to_lowercase();
+            if (norm_target.contains("/node_modules/") || norm_target.contains("/.pnpm/"))
+                && self.is_authorized(target)
+            {
+                return true;
+            }
         }
         let mut current = target;
         let mut tail: Vec<&std::ffi::OsStr> = Vec::new();
@@ -100,7 +126,16 @@ impl WorkspaceRegistry {
                 for part in tail.iter().rev() {
                     joined.push(*part);
                 }
-                return self.is_authorized(&joined);
+                if self.is_authorized(&joined) {
+                    return true;
+                }
+                let norm_target = target.to_string_lossy().replace('\\', "/").to_lowercase();
+                if (norm_target.contains("/node_modules/") || norm_target.contains("/.pnpm/"))
+                    && self.is_authorized(target)
+                {
+                    return true;
+                }
+                return false;
             }
             current = parent;
         }
@@ -173,6 +208,12 @@ pub fn authorize_spawn_cwd(
         return Err(format!("cwd is not a directory: {}", canonical.display()));
     }
     if !registry.is_authorized(&canonical) {
+        let norm_resolved = resolved.to_string_lossy().replace('\\', "/").to_lowercase();
+        if (norm_resolved.contains("/node_modules/") || norm_resolved.contains("/.pnpm/"))
+            && registry.is_authorized(&resolved)
+        {
+            return Ok(Some(canonical));
+        }
         return Err(format!(
             "cwd is outside the authorized workspace: {}",
             canonical.display()
