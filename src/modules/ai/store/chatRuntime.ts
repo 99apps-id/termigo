@@ -1027,6 +1027,7 @@ export async function sendParts(
   if (!isResumeParts(parts) && !isVerifyNudgeParts(parts)) {
     autoContinueCount.delete(sessionId);
     verifyNudgeCount.delete(sessionId);
+    toolChoiceAutoResumeAt.delete(sessionId);
   }
   const c = getOrCreateChat(sessionId);
   // After an error the run is not busy, but the SDK status can look stale
@@ -1164,6 +1165,7 @@ export async function flushSteer(bypassBusyCheck = false): Promise<boolean> {
     if (!isResumeParts(out.parts) && !isVerifyNudgeParts(out.parts)) {
       autoContinueCount.delete(sessionId);
       verifyNudgeCount.delete(sessionId);
+      toolChoiceAutoResumeAt.delete(sessionId);
     }
     // A fresh user turn resets the loop-round counter (see sendParts).
     store.patchAgentMeta({ round: 0 });
@@ -1253,6 +1255,7 @@ export async function resumeRun(): Promise<boolean> {
     pendingReconnectSessions.delete(sessionId);
     stopLatch.delete(sessionId);
     approvalResumeFailureCount.delete(sessionId);
+    toolChoiceAutoResumeAt.delete(sessionId);
   }
   // Clear approval-gate state so the run can actually continue after /approve.
   //

@@ -7,6 +7,8 @@ import { expandSnippetTokens, type Snippet } from "../lib/snippets";
 import { useChatStore } from "../store/chatStore";
 import { useSnippetsStore } from "../store/snippetsStore";
 import { type SlashCommandMeta, tryRunSlashCommand } from "./slashCommands";
+import { effectiveContextLimit } from "./contextLimitLearning";
+import { getModelContextLimit } from "../config";
 import {
   editableTextOf,
   previewOf,
@@ -31,6 +33,12 @@ type MessagePart =
   | { type: "file"; mediaType: string; url: string; filename?: string };
 
 export const MAX_TEXT_INLINE = 200_000;
+/** Hard cap on total composed text (all parts combined) before send. */
+export const MAX_COMPOSED_CHARS = 500_000;
+/** Rough chars-per-token estimate for preflight budget check. */
+const CHARS_PER_TOKEN = 2.6;
+/** Reserve for system prompt + tool schemas + response headroom. */
+const CONTEXT_RESERVE_TOKENS = 60_000;
 export const ACCEPTED_FILES =
   "image/*,application/pdf,.pdf,.txt,.md,.markdown,.json,.yaml,.yml,.toml,.sh,.zsh,.bash,.py,.js,.jsx,.ts,.tsx,.rs,.go,.java,.c,.cpp,.h,.hpp,.cs,.php,.rb,.swift,.kt,.html,.css,.scss,.sql,.csv,.tsv,.log,.env,.config,.conf,.ini,.xml,Dockerfile,.dockerfile";
 
@@ -410,6 +418,32 @@ export function AiComposerProvider({ children }: ProviderProps) {
         type: "text",
         text: "Please inspect the attached file(s).",
       });
+    }
+
+    const totalText = parts
+      .filter((p) => p.type === "text")
+      .reduce((sum, p) => sum + (p as { type: "text"; text: string }).text.length, 0);
+    if (totalText > MAX_COMPOSED_CHARS) {
+      toast.error(
+        `Message is too large (${totalText.toLocaleString()} chars). Max is ${MAX_COMPOSED_CHARS.toLocaleString()} chars. Split it into smaller parts.`,
+        { id: "composer-payload-too-large" },
+      );
+      return;
+    }
+
+    const modelId = useChatStore.getState().selectedModelId;
+    if (modelId) {
+      const configured = getModelContextLimit(modelId);
+      const effective = effectiveContextLimit(modelId, configured);
+      const estimatedTokens = Math.ceil(totalText / CHARS_PER_TOKEN);
+      const available = effective - CONTEXT_RESERVE_TOKENS;
+      if (estimatedTokens > available) {
+        toast.error(
+          `Estimated ${estimatedTokens.toLocaleString()} tokens exceeds available context (${available.toLocaleString()} tokens). Shorten your message or attachments, or use /new to start fresh.`,
+          { id: "composer-context-preflight" },
+        );
+        return;
+      }
     }
 
     let targetSessionId = sessionId;

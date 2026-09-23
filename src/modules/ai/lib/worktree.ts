@@ -6,6 +6,8 @@
  */
 
 import { quoteShellArg } from "@/lib/shellQuote";
+import { native } from "./native";
+import { getSessionShell, sessionShellKey } from "./sessionShell";
 
 export type WorktreeSandbox = {
   id: string;
@@ -147,6 +149,49 @@ export function unregisterSandbox(
  */
 export function clearSandboxes(): void {
   activeSandboxes.clear();
+}
+
+/** How long a sandbox may sit untouched before it is considered stale. */
+const STALE_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Remove sandboxes older than `STALE_AGE_MS` from the registry and attempt to
+ * delete their worktrees and branches from disk. Intentionally fire-and-forget:
+ * a failed cleanup is logged but never blocks the caller.
+ */
+export async function cleanupStaleSandboxes(): Promise<void> {
+  const now = Date.now();
+  const stale: WorktreeSandbox[] = [];
+  for (const sb of activeSandboxes.values()) {
+    if (now - sb.createdAt > STALE_AGE_MS) {
+      stale.push(sb);
+    }
+  }
+  if (stale.length === 0) return;
+
+  for (const sb of stale) {
+    activeSandboxes.delete(sb.id);
+    try {
+      const shellId = await getSessionShell(
+        sessionShellKey("git", sb.id, sb.worktreePath),
+        sb.worktreePath,
+      );
+      await native.shellSessionRun(
+        shellId,
+        worktreeRemoveCommand(sb.worktreePath),
+        sb.worktreePath,
+        30,
+      );
+      await native.shellSessionRun(
+        shellId,
+        worktreeDeleteBranchCommand(sb.branchName),
+        sb.worktreePath,
+        30,
+      );
+    } catch (e) {
+      console.warn(`[worktree] failed to clean stale sandbox ${sb.id}:`, e);
+    }
+  }
 }
 
 /** Where sandboxes live, relative to the workspace root. */

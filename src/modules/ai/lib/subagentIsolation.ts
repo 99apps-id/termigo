@@ -95,9 +95,11 @@ export function planSubagentIsolation(input: IsolationInput): IsolationPlan {
 /**
  * A ToolContext that reads and writes inside `dir` instead of the workspace.
  *
- * Only the filesystem roots move. Everything else - the terminal, the browser,
- * the control plane - still refers to the one running app, because the subagent
- * is the same process in the same session; it is the FILES that are isolated.
+ * Only the filesystem roots move. For isolated subagents, terminal, browser,
+ * and control-plane access are also removed so the subagent cannot observe or
+ * influence the parent's live session. The subagent is the same process in the
+ * same session; what isolation means here is that it can only touch its own
+ * worktree and nothing else.
  *
  * Pointing `getWorkspaceRoot` at the worktree also confines the path checks: a
  * write resolved against it cannot escape back into the main tree, which is what
@@ -108,6 +110,28 @@ export function rerootToolContext(ctx: ToolContext, dir: string): ToolContext {
     ...ctx,
     getCwd: () => dir,
     getWorkspaceRoot: () => dir,
+    getRemoteSession: () => null,
+    clearRemoteSession: () => {},
+    getTerminalContext: () => null,
+    isActiveTerminalPrivate: () => true,
+    listTerminals: () => [],
+    getTerminalContextFor: () => null,
+    injectIntoActivePty: () => false,
+    openPreview: () => false,
+    openCanvas: () => false,
+    browserOpen: async () => ({ error: "not available in isolated subagent" }),
+    browserNavigate: async () => ({ error: "not available in isolated subagent" }),
+    browserBack: async () => ({ error: "not available in isolated subagent" }),
+    browserForward: async () => ({ error: "not available in isolated subagent" }),
+    browserReload: async () => ({ error: "not available in isolated subagent" }),
+    browserExtract: async () => ({ error: "not available in isolated subagent" }),
+    browserEval: async () => ({ error: "not available in isolated subagent" }),
+    browserScreenshot: async () => ({ error: "not available in isolated subagent" }),
+    browserConsole: async () => ({ error: "not available in isolated subagent" }),
+    browserUrl: async () => ({ error: "not available in isolated subagent" }),
+    browserClose: async () => ({ error: "not available in isolated subagent" }),
+    browserList: async () => [],
+    readAgentOutput: () => null,
   };
 }
 

@@ -9,7 +9,7 @@
 export const HOOKS_REL_PATH = ".termigo/hooks.json";
 
 /** Events the agent can fire. */
-export type HookEvent = "PreToolUse" | "PostToolUse" | "Stop";
+export type HookEvent = "PreToolUse" | "PostToolUse" | "RunStart" | "RunStop" | "FileSave";
 
 /** One configured hook command for a specific event. */
 export type HookRule = {
@@ -26,7 +26,9 @@ export type HookRule = {
 export type HookEventRules = {
   PreToolUse?: HookRule[];
   PostToolUse?: HookRule[];
-  Stop?: HookRule[];
+  RunStart?: HookRule[];
+  RunStop?: HookRule[];
+  FileSave?: HookRule[];
 };
 
 /** Top-level hooks config. */
@@ -73,10 +75,14 @@ export function validateHooksConfig(config: HooksConfig): HookParseResult {
     HookRule[] | undefined,
   ][]) {
     if (!rules) continue;
-    if (!["PreToolUse", "PostToolUse", "Stop"].includes(event)) {
+    if (
+      !["PreToolUse", "PostToolUse", "Stop", "RunStart", "RunStop", "FileSave"].includes(
+        event,
+      )
+    ) {
       return {
         ok: false,
-        reason: `unknown hook event "${event}". Allowed: PreToolUse, PostToolUse, Stop`,
+        reason: `unknown hook event "${event}". Allowed: PreToolUse, PostToolUse, RunStart, RunStop, FileSave`,
       };
     }
     for (const rule of rules) {
