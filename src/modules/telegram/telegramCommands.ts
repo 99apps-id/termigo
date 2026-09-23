@@ -69,9 +69,18 @@ async function modelLabel(modelId: string): Promise<string> {
  * negative), which covers bots paired from Settings - that path writes the chat
  * id but never a user id. When neither is known the bot is open, matching the
  * documented "open to all chats" state.
+ *
+ * `snapshot` pins the identity fields for callers that already captured them
+ * (the callback handler): re-reading the store mid-handler could race with an
+ * async pairing update and flip the verdict between the chat-level and the
+ * user-level check. Omitted, the live store is read - correct for the message
+ * paths, where the check is a single synchronous read anyway.
  */
-function isOwnerUser(from?: { id: number }): boolean {
-  const store = useTelegramStore.getState();
+function isOwnerUser(
+  from?: { id: number },
+  snapshot?: { ownerUserId: string | null; chatId: string | null },
+): boolean {
+  const store = snapshot ?? useTelegramStore.getState();
   const ownerUserId = store.ownerUserId;
   if (ownerUserId) return !!from && String(from.id) === String(ownerUserId);
   const chatId = store.chatId;
@@ -335,7 +344,10 @@ export async function handleCallback(
     // Same rule as the /diff command below: the working-tree summary is
     // owner-only, so any group member must not pull it via the button.
     data.startsWith("diff:");
-  if (sensitiveCallback && !isOwnerUser(cb.from)) {
+  if (
+    sensitiveCallback &&
+    !isOwnerUser(cb.from, { ownerUserId, chatId: ownerChatId })
+  ) {
     await answerCallback(cb.id, "Unauthorized.", signal);
     return;
   }
