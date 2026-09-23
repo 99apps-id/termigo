@@ -22,11 +22,19 @@ describe("startup bundle budget", () => {
   // intermittent red. The budget is the assertion; the timeout was just too tight.
   const TRACE_TIMEOUT_MS = 30_000;
 
-  it("main window does not eagerly pull editor/AI/markdown stacks", () => {
-    expect(heavyEagerHits("src/main.tsx")).toEqual([]);
-  }, TRACE_TIMEOUT_MS);
+  it(
+    "main window does not eagerly pull editor/AI/markdown stacks",
+    () => {
+      expect(heavyEagerHits("src/main.tsx")).toEqual([]);
+    },
+    TRACE_TIMEOUT_MS,
+  );
 
-  it("settings window does not eagerly pull editor/AI/markdown stacks", () => {
-    expect(heavyEagerHits("src/settings/main.tsx")).toEqual([]);
-  }, TRACE_TIMEOUT_MS);
+  it(
+    "settings window does not eagerly pull editor/AI/markdown stacks",
+    () => {
+      expect(heavyEagerHits("src/settings/main.tsx")).toEqual([]);
+    },
+    TRACE_TIMEOUT_MS,
+  );
 });

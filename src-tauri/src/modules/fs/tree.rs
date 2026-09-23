@@ -198,20 +198,18 @@ pub fn fs_read_dir_blocking(
         .filter_map(|entry| {
             let name = entry.file_name().into_string().ok()?;
 
-            // `metadata()` follows symlinks → it returns the target's stat in
-            // one syscall (file_type + size + mtime all derived from it). We
-            // fall back to `symlink_metadata` for broken symlinks so we don't
-            // silently drop them from the listing.
-            let (meta, was_symlink) = match std::fs::metadata(entry.path()) {
-                Ok(m) => (Some(m), false),
-                // A failed follow means a broken symlink, a permission error, or
-                // a transient I/O error. Only the first is a symlink; labelling
-                // every failure one hides the real cause and reports the link's
-                // own size for a file we simply could not stat.
-                Err(_) => match entry.metadata() {
-                    Ok(m) if m.file_type().is_symlink() => (Some(m), true),
-                    other => (other.ok(), false),
-                },
+            // Use `symlink_metadata` (does not follow symlinks) so a symlink
+            // inside an allowed directory cannot leak the target's size/mtime
+            // if that target lives under a protected path. For regular files
+            // this is identical to `metadata`; for symlinks it shows the link's
+            // own stat, not the target's.
+            let (meta, was_symlink) = match entry.metadata() {
+                Ok(m) => {
+                    let is_symlink =
+                        entry.file_type().map(|t| t.is_symlink()).unwrap_or(false);
+                    (Some(m), is_symlink)
+                }
+                Err(_) => (None, false),
             };
             let meta = meta?;
 

@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from "vitest";
-
 import { dispatchSshEvent, type SshEvent, type SshHandlers } from "./bridge";
 
 function b64(s: string): string {
@@ -23,7 +22,9 @@ describe("dispatchSshEvent", () => {
     dispatchSshEvent({ type: "error", message: "boom" }, handlers);
 
     expect(handlers.onConnected).toHaveBeenCalledWith("SHA256:aa");
-    expect(handlers.onData).toHaveBeenCalledWith(new TextEncoder().encode("hi"));
+    expect(handlers.onData).toHaveBeenCalledWith(
+      new TextEncoder().encode("hi"),
+    );
     expect(handlers.onExit).toHaveBeenCalledWith(0);
     expect(handlers.onError).toHaveBeenCalledWith("boom");
   });
@@ -58,7 +59,10 @@ describe("dispatchSshEvent", () => {
 
   it("ignores events the caller did not subscribe to", () => {
     expect(() =>
-      dispatchSshEvent({ type: "connected", fingerprint: "x" }, { onData: vi.fn() }),
+      dispatchSshEvent(
+        { type: "connected", fingerprint: "x" },
+        { onData: vi.fn() },
+      ),
     ).not.toThrow();
   });
 });
@@ -88,7 +92,9 @@ describe("channel error boundary", () => {
       },
     });
 
-    expect(() => onmessage({ type: "connected", fingerprint: "x" })).not.toThrow();
+    expect(() =>
+      onmessage({ type: "connected", fingerprint: "x" }),
+    ).not.toThrow();
     onmessage({ type: "data", data: b64("prompt$ ") });
 
     expect(onData).toHaveBeenCalledWith(new TextEncoder().encode("prompt$ "));

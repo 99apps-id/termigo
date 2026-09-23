@@ -74,7 +74,10 @@ export function buildWorktreeTools(ctx: ToolContext) {
             sessionShellKey("git", sid, ctx.getWorkspaceRoot()),
             cwd,
           );
-          const r = await native.shellSessionRun(shellId, command, cwd, 120);
+          // 300s: a worktree add checks out the whole tree, and large repos can
+          // take minutes on a cold cache. 120s made big repos fail with a
+          // timeout that reads like a git error. See subagentIsolation.ts.
+          const r = await native.shellSessionRun(shellId, command, cwd, 300);
           if (r.exit_code !== 0) {
             return {
               error: `git worktree add failed (exit ${r.exit_code})`,
@@ -186,13 +189,6 @@ export function buildWorktreeTools(ctx: ToolContext) {
             cwd,
           );
           const removeResult = await native.shellSessionRun(shellId, removeCommand, cwd, 120);
-          if (removeResult.exit_code !== 0) {
-            return {
-              error: `git worktree remove failed (exit ${removeResult.exit_code})`,
-              stderr: removeResult.stderr,
-              stdout: removeResult.stdout,
-            };
-          }
           // Removing the branch is best-effort; the worktree removal is the
           // authoritative cleanup, so a stale branch is not fatal.
           const branchResult = await native.shellSessionRun(shellId, branchCommand, cwd, 60);

@@ -40,8 +40,7 @@ export function isRateLimitError(error: unknown): boolean {
     errStr.includes("insufficient_quota") ||
     errStr.includes("resource_exhausted") ||
     errStr.includes("tokens per min") ||
-    errStr.includes("too many requests") ||
-    errStr.includes("concurrency")
+    errStr.includes("too many requests")
   );
 }
 
@@ -63,7 +62,7 @@ export function recordProviderSuccess(providerId: string): void {
 export function recordProviderError(
   providerId: string,
   error: unknown,
-  customCooldownMs?: number
+  customCooldownMs?: number,
 ): ProviderHealth {
   let record = providerRegistry.get(providerId);
   if (!record) {
@@ -90,7 +89,10 @@ export function recordProviderError(
 /**
  * Checks whether a given provider is currently healthy and not rate-limited.
  */
-export function isProviderAvailable(providerId: string, now = Date.now()): boolean {
+export function isProviderAvailable(
+  providerId: string,
+  now = Date.now(),
+): boolean {
   const record = providerRegistry.get(providerId);
   if (!record) return true;
 
@@ -111,7 +113,10 @@ export function isProviderAvailable(providerId: string, now = Date.now()): boole
  * Returns the remaining cooldown in milliseconds for a rate-limited provider.
  * Returns 0 if the provider is currently available.
  */
-export function getRemainingCooldownMs(providerId: string, now = Date.now()): number {
+export function getRemainingCooldownMs(
+  providerId: string,
+  now = Date.now(),
+): number {
   const record = providerRegistry.get(providerId);
   if (!record?.rateLimitedUntil) return 0;
   return Math.max(0, record.rateLimitedUntil - now);
@@ -124,7 +129,7 @@ export function getRemainingCooldownMs(providerId: string, now = Date.now()): nu
 export function selectActiveProvider(
   primaryCandidates: string[],
   fallbackCandidates: string[] = [],
-  now = Date.now()
+  now = Date.now(),
 ): {
   selectedProvider: string;
   isFallback: boolean;

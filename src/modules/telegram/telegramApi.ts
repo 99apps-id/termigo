@@ -109,20 +109,14 @@ function clampMessage(text: string): string {
 export function clampEscapedHtml(text: string, max: number): string {
   if (text.length <= max) return text;
   let cut = Math.max(0, max - 1);
-  const searchStart = Math.max(0, cut - 10);
   const amp = text.lastIndexOf("&", cut);
-  if (amp !== -1 && amp >= searchStart) {
+  if (amp !== -1) {
     const semi = text.indexOf(";", amp);
     // A `;` at or beyond the cut means that entity was left incomplete, so the
     // cut moves back to its `&`. Escaping only ever emits whole entities, so
     // they do not overlap and the last one is the only one that can be broken.
     if (semi === -1 || semi >= cut) cut = amp;
   }
-  // A tag split in half is as fatal as a broken entity, and the escaped text
-  // carries real tags (<code>, <a href=...>), so back off to the last `<` that
-  // was never closed before the cut.
-  const lt = text.lastIndexOf("<", cut);
-  if (lt !== -1 && lt > text.lastIndexOf(">", cut - 1)) cut = lt;
   return text.slice(0, cut);
 }
 
@@ -208,11 +202,6 @@ export async function apiGet(
       throw await parseTelegramError(res);
     }
     return await res.json();
-  } catch (err) {
-    if (!signal.aborted && reqSignal.aborted && reqSignal.reason instanceof Error) {
-      throw reqSignal.reason;
-    }
-    throw err;
   } finally {
     cleanup();
   }
@@ -239,11 +228,6 @@ export async function apiPost(
       throw await parseTelegramError(res);
     }
     return await res.json();
-  } catch (err) {
-    if (!signal.aborted && reqSignal.aborted && reqSignal.reason instanceof Error) {
-      throw reqSignal.reason;
-    }
-    throw err;
   } finally {
     cleanup();
   }
@@ -268,11 +252,6 @@ export async function apiPostForm(
       throw await parseTelegramError(res);
     }
     return await res.json();
-  } catch (err) {
-    if (!signal.aborted && reqSignal.aborted && reqSignal.reason instanceof Error) {
-      throw reqSignal.reason;
-    }
-    throw err;
   } finally {
     cleanup();
   }
@@ -333,40 +312,40 @@ export function splitTelegramText(text: string, maxLen = 3500): string[] {
   return chunks;
 }
 
-/**
- * Deliver a text that failed HTML formatting by escaping it as plain text.
- *
- * If the escaped text STILL exceeds the Telegram limit (escaping expands
- * `<` to `&lt;`, so 1500 `<` fits as markdown but escapes to 6000 chars), split in
- * half: the split points are chosen on the raw text and each piece is escaped
- * afterwards. Halving on a line, then a space, guarantees progress (a cut of 0
- * would not), so it terminates.
- */
-async function sendEscapedChunk(
+async function sendSingleChunk(
   chatId: number | string,
-  raw: string,
+  chunk: string,
   signal: AbortSignal,
 ): Promise<void> {
-  if (signal.aborted) return;
-  const escaped = escapePlainTextToHtml(raw);
-  if (escaped.length <= TELEGRAM_MAX_MESSAGE_CHARS) {
+  const html = markdownToTelegramHtml(chunk);
+  if (html.length <= TELEGRAM_MAX_MESSAGE_CHARS) {
     try {
       await apiPost(
         "sendMessage",
-        { chat_id: chatId, text: escaped, parse_mode: "HTML" },
+        { chat_id: chatId, text: html, parse_mode: "HTML" },
         signal,
       );
+      return;
     } catch {
-      // Give up on this piece; the caller's remaining chunks still go out.
+      // Fall through to plain text fallback below
     }
-    return;
   }
-  const half = Math.max(1, Math.floor(raw.length / 2));
-  let cut = raw.lastIndexOf("\n", half);
-  if (cut <= 0) cut = raw.lastIndexOf(" ", half);
-  if (cut <= 0) cut = half;
-  await sendEscapedChunk(chatId, raw.slice(0, cut), signal);
-  await sendEscapedChunk(chatId, raw.slice(cut), signal);
+
+  await apiPost(
+    "sendMessage",
+    {
+      chat_id: chatId,
+      // Clamped AFTER escaping, so it must be entity-aware: a slice here could
+      // leave a half-written entity and Telegram would reject the message that
+      // this fallback exists to deliver.
+      text: clampEscapedHtml(
+        escapePlainTextToHtml(chunk),
+        TELEGRAM_MAX_MESSAGE_CHARS,
+      ),
+      parse_mode: "HTML",
+    },
+    signal,
+  );
 }
 
 export async function sendTelegram(
@@ -374,20 +353,24 @@ export async function sendTelegram(
   text: string,
   signal: AbortSignal,
 ): Promise<void> {
-  const chunks = splitTelegramText(text);
+  const chunks = splitTelegramText(text, 3500);
   for (const chunk of chunks) {
     if (signal.aborted) break;
-    const html = markdownToTelegramHtml(chunk);
-    try {
-      await apiPost(
-        "sendMessage",
-        { chat_id: chatId, text: html, parse_mode: "HTML" },
-        signal,
+    // If the converted HTML will definitely exceed Telegram's limit, subdivide
+    const estimatedHtml = markdownToTelegramHtml(chunk);
+    if (estimatedHtml.length > TELEGRAM_MAX_MESSAGE_CHARS) {
+      const ratio = estimatedHtml.length / Math.max(1, chunk.length);
+      const targetLen = Math.floor(
+        (TELEGRAM_MAX_MESSAGE_CHARS - 100) / Math.max(1, ratio),
       );
-    } catch {
-      // The HTML was rejected (often because escaping pushed it past the cap).
-      // Fall back to escaped plain text, split to fit.
-      await sendEscapedChunk(chatId, chunk, signal);
+      const subChunkSize = Math.max(100, Math.min(1800, targetLen));
+      const subChunks = splitTelegramText(chunk, subChunkSize);
+      for (const sub of subChunks) {
+        if (signal.aborted) break;
+        await sendSingleChunk(chatId, sub, signal);
+      }
+    } else {
+      await sendSingleChunk(chatId, chunk, signal);
     }
   }
 }
@@ -397,37 +380,25 @@ export async function sendProgressMessage(
   text: string,
   signal: AbortSignal,
 ): Promise<number | null> {
-  const clampedText = clampMessage(text);
-  const html = markdownToTelegramHtml(clampedText);
-  if (html.length <= TELEGRAM_MAX_MESSAGE_CHARS) {
-    try {
-      const res = (await apiPost(
-        "sendMessage",
-        { chat_id: chatId, text: html, parse_mode: "HTML" },
-        signal,
-      )) as { ok?: boolean; result?: { message_id?: number } };
-      return res?.result?.message_id ?? null;
-    } catch {
-      // Fall through to plain text fallback below
-    }
-  }
-
+  const html = markdownToTelegramHtml(text);
   try {
     const res = (await apiPost(
       "sendMessage",
-      {
-        chat_id: chatId,
-        text: clampEscapedHtml(
-          escapePlainTextToHtml(clampedText),
-          TELEGRAM_MAX_MESSAGE_CHARS,
-        ),
-        parse_mode: "HTML",
-      },
+      { chat_id: chatId, text: html, parse_mode: "HTML" },
       signal,
     )) as { ok?: boolean; result?: { message_id?: number } };
     return res?.result?.message_id ?? null;
   } catch {
-    return null;
+    try {
+      const res = (await apiPost(
+        "sendMessage",
+        { chat_id: chatId, text },
+        signal,
+      )) as { ok?: boolean; result?: { message_id?: number } };
+      return res?.result?.message_id ?? null;
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -440,8 +411,7 @@ export async function editProgressMessage(
   if (isChatRateLimited(chatId)) {
     return false;
   }
-  const clampedText = clampMessage(text);
-  const html = markdownToTelegramHtml(clampedText);
+  const html = markdownToTelegramHtml(text);
   const tryPost = async (body: { text: string; parse_mode?: string }) => {
     return (await apiPost(
       "editMessageText",
@@ -455,62 +425,55 @@ export async function editProgressMessage(
     )) as { ok?: boolean };
   };
 
-  if (html.length <= TELEGRAM_MAX_MESSAGE_CHARS) {
-    try {
-      await tryPost({ text: html, parse_mode: "HTML" });
-      return true;
-    } catch (err) {
-      if (err instanceof TelegramApiError) {
-        const desc = err.description.toLowerCase();
-        // Exact message already displayed on Telegram: treat as success (Hermes pattern)
-        if (desc.includes("message is not modified")) {
-          return true;
-        }
-        // Rate limited: record flood wait for chat, retry if short, else back off
-        if (err.status === 429) {
-          const waitSec = err.retryAfter ?? 5;
-          setChatRateLimited(chatId, waitSec);
-          if (waitSec <= 3 && !signal.aborted) {
-            await sleep(signal, waitSec * 1000);
-            try {
-              await tryPost({ text: html, parse_mode: "HTML" });
+  try {
+    await tryPost({ text: html, parse_mode: "HTML" });
+    return true;
+  } catch (err) {
+    if (err instanceof TelegramApiError) {
+      const desc = err.description.toLowerCase();
+      // Exact message already displayed on Telegram: treat as success (Hermes pattern)
+      if (desc.includes("message is not modified")) {
+        return true;
+      }
+      // Rate limited: record flood wait for chat, retry if short, else back off
+      if (err.status === 429) {
+        const waitSec = err.retryAfter ?? 5;
+        setChatRateLimited(chatId, waitSec);
+        if (waitSec <= 3 && !signal.aborted) {
+          await sleep(signal, waitSec * 1000);
+          try {
+            await tryPost({ text: html, parse_mode: "HTML" });
+            return true;
+          } catch (retryErr) {
+            if (
+              retryErr instanceof TelegramApiError &&
+              retryErr.description
+                .toLowerCase()
+                .includes("message is not modified")
+            ) {
               return true;
-            } catch (retryErr) {
-              if (
-                retryErr instanceof TelegramApiError &&
-                retryErr.description
-                  .toLowerCase()
-                  .includes("message is not modified")
-              ) {
-                return true;
-              }
-              return false;
             }
+            return false;
           }
-          return false;
         }
+        return false;
       }
     }
-  }
-
-  // Fallback to safely clamped escaped plain text
-  try {
-    await tryPost({
-      text: clampEscapedHtml(
-        escapePlainTextToHtml(clampedText),
-        TELEGRAM_MAX_MESSAGE_CHARS,
-      ),
-      parse_mode: "HTML",
-    });
-    return true;
-  } catch (fallbackErr) {
-    if (
-      fallbackErr instanceof TelegramApiError &&
-      fallbackErr.description.toLowerCase().includes("message is not modified")
-    ) {
+    // Fallback to plain text if HTML entity parsing fails
+    try {
+      await tryPost({ text });
       return true;
+    } catch (fallbackErr) {
+      if (
+        fallbackErr instanceof TelegramApiError &&
+        fallbackErr.description
+          .toLowerCase()
+          .includes("message is not modified")
+      ) {
+        return true;
+      }
+      return false;
     }
-    return false;
   }
 }
 
@@ -649,7 +612,7 @@ export async function sendKeyboard(
  * throws down into the handler would drop the user's action silently.
  */
 export async function editKeyboard(
-  chatId: number | string,
+  chatId: number,
   messageId: number,
   text: string,
   keyboard: InlineButton[][],

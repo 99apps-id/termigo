@@ -256,6 +256,20 @@ export type Preferences = {
   editorCustomFormatCommand: string;
   lspActivation: Record<string, LspActivation>;
   lspCustomServers: LspCustomServer[];
+  /**
+   * Shut an idle language server down once every editor tab using it is hidden.
+   * A hidden editor releases its LSP document, so the existing idle shutdown
+   * reclaims the server process and re-acquires it when the tab is shown again.
+   * Off by default: a hidden tab keeps its server warm.
+   */
+  lspIdleShutdown: boolean;
+  /**
+   * Close tabs left inactive for this many minutes (0 = never). Opt-in by
+   * construction. Never closes the active tab, a tab that is the last in its
+   * space, a dirty editor, an AI diff awaiting a decision, or a terminal with a
+   * live foreground process.
+   */
+  autoCloseIdleTabsMinutes: number;
   /** Extension-contributed keybindings overrides, keyed by command id. */
   extensionShortcuts: Record<string, KeyBinding[]>;
   /** Maximum cost in USD allowed per agent session (0 = unlimited) */
@@ -439,6 +453,8 @@ const KEY_EDITOR_FORMATTER_BY_LANG = "editorFormatterByLang";
 const KEY_EDITOR_CUSTOM_FORMAT_COMMAND = "editorCustomFormatCommand";
 const KEY_LSP_ACTIVATION = "lspActivation";
 const KEY_LSP_CUSTOM_SERVERS = "lspCustomServers";
+const KEY_LSP_IDLE_SHUTDOWN = "lspIdleShutdown";
+const KEY_AUTO_CLOSE_IDLE_TABS_MINUTES = "autoCloseIdleTabsMinutes";
 const KEY_EXTENSION_SHORTCUTS = "extensionShortcuts";
 const KEY_COST_BUDGET_USD = "costBudgetUsd";
 const KEY_COST_DAILY_BUDGET_USD = "costDailyBudgetUsd";
@@ -554,6 +570,8 @@ export const DEFAULT_PREFERENCES: Preferences = {
   editorCustomFormatCommand: "",
   lspActivation: {},
   lspCustomServers: [],
+  lspIdleShutdown: false,
+  autoCloseIdleTabsMinutes: 0,
   extensionShortcuts: {},
   costBudgetUsd: 0,
   costDailyBudgetUsd: 0,
@@ -853,6 +871,13 @@ export async function loadPreferences(): Promise<Preferences> {
     agentReviewAfterApply:
       get<boolean>(KEY_AGENT_REVIEW_AFTER_APPLY) ??
       DEFAULT_PREFERENCES.agentReviewAfterApply,
+    lspIdleShutdown:
+      get<boolean>(KEY_LSP_IDLE_SHUTDOWN) ??
+      DEFAULT_PREFERENCES.lspIdleShutdown,
+    autoCloseIdleTabsMinutes: clampAutoCloseIdleTabs(
+      get<number>(KEY_AUTO_CLOSE_IDLE_TABS_MINUTES) ??
+        DEFAULT_PREFERENCES.autoCloseIdleTabsMinutes,
+    ),
     costBudgetUsd:
       get<number>(KEY_COST_BUDGET_USD) ?? DEFAULT_PREFERENCES.costBudgetUsd,
     costDailyBudgetUsd:
@@ -1263,6 +1288,29 @@ export async function setTerminalScrollback(value: number): Promise<void> {
   await writePref(KEY_TERMINAL_SCROLLBACK, clampScrollback(value));
 }
 
+export const AUTO_CLOSE_IDLE_TABS_MAX_MINUTES = 24 * 60;
+/** Off (0), then a spread from a coffee break to an afternoon. */
+export const AUTO_CLOSE_IDLE_TABS_PRESETS = [0, 15, 30, 60, 120];
+
+/** 0 means "never"; anything else is clamped to a whole number of minutes. */
+export function clampAutoCloseIdleTabs(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return Math.min(AUTO_CLOSE_IDLE_TABS_MAX_MINUTES, Math.round(value));
+}
+
+export async function setAutoCloseIdleTabsMinutes(
+  value: number,
+): Promise<void> {
+  await writePref(
+    KEY_AUTO_CLOSE_IDLE_TABS_MINUTES,
+    clampAutoCloseIdleTabs(value),
+  );
+}
+
+export async function setLspIdleShutdown(value: boolean): Promise<void> {
+  await writePref(KEY_LSP_IDLE_SHUTDOWN, value);
+}
+
 export async function setLastWslDistro(value: string | null): Promise<void> {
   await writePref(KEY_LAST_WSL_DISTRO, value);
 }
@@ -1508,6 +1556,8 @@ export async function onPreferencesChange(
     [KEY_EDITOR_CUSTOM_FORMAT_COMMAND]: "editorCustomFormatCommand",
     [KEY_LSP_ACTIVATION]: "lspActivation",
     [KEY_LSP_CUSTOM_SERVERS]: "lspCustomServers",
+    [KEY_LSP_IDLE_SHUTDOWN]: "lspIdleShutdown",
+    [KEY_AUTO_CLOSE_IDLE_TABS_MINUTES]: "autoCloseIdleTabsMinutes",
     [KEY_EXTENSION_SHORTCUTS]: "extensionShortcuts",
     [KEY_SHOW_REASONING]: "showReasoning",
     [KEY_COST_BUDGET_USD]: "costBudgetUsd",

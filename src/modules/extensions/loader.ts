@@ -218,6 +218,9 @@ export async function activate(ext: InstalledExtension): Promise<void> {
     }
 
     logInfo(`[ext:${ext.id}] activate: non-sandboxed path`);
+    toast(`Extension "${ext.id}" is running without sandbox. This is less safe; consider enabling sandbox if the extension supports it.`, {
+      variant: "warning",
+    });
     const blob = new Blob([text], { type: "text/javascript" });
     try {
       scriptUrl = URL.createObjectURL(blob);

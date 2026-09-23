@@ -22,31 +22,64 @@ use background::{BackgroundLogResponse, BackgroundProc, BackgroundProcInfo};
 use session::{SessionRunOutput, ShellSession};
 
 // 30s was too short: a project-wide lint/test/build (`eslint .`, `pnpm test`,
-// `cargo build`) easily exceeds it and times out, so the agent re-runs it. 300s
-// covers long test/build suites; pass `timeout_secs` (up to 900) for slower jobs.
-const DEFAULT_TIMEOUT_SECS: u64 = 300;
-const MAX_TIMEOUT_SECS: u64 = 900;
+// `cargo build`) easily exceeds it and times out, so the agent re-runs it. 120s
+// covers a normal one; pass `timeout_secs` (up to 300) for a genuinely slow job.
+const DEFAULT_TIMEOUT_SECS: u64 = 120;
+const MAX_TIMEOUT_SECS: u64 = 300;
 const MAX_OUTPUT_BYTES: usize = 256 * 1024;
 
 /// Allowlisted read-only / inspection commands for agent-triggered execution.
 /// Commands outside this set must be run through an interactive PTY session.
 const SANDBOX_ALLOWLIST: &[&str] = &[
     "cat", "head", "tail", "wc", "grep", "rg", "sed", "awk",
-    "find", "ls", "stat", "file", "xxd", "hexdump", "od",
+    "find", "ls", "Get-ChildItem", "dir", "stat", "file", "xxd", "hexdump", "od",
     "git", "npm", "pnpm", "yarn", "cargo", "go", "python", "python3",
-    "node", "deno", "bun", "make", "just", "task",
-    "echo", "printf", "test", "true", "false", "pwd", "cd", "sleep", "rm", "cp", "mv", "del",
+    "node", "deno", "bun", "make", "just", "task", "cmake", "npx",
+    "echo", "printf", "test", "true", "false", "pwd", "cd",
     "which", "where", "type", "command", "hash",
     "diff", "cmp", "comm", "patch", "jq", "yq",
     "tar", "gzip", "gunzip", "zip", "unzip",
     "curl", "wget", "http", "xh",
     "date", "uptime", "whoami", "id", "uname", "hostname",
+    "sleep", "Start-Sleep", "cp", "mv", "del", "rmdir", "mkdir", "touch", "chmod", "chown",
+    // PowerShell file removal cmdlet. `del` is already allowed as an alias;
+    // `Remove-Item` is the canonical name and is explicitly permitted for
+    // scripts that call it without relying on alias resolution.
+    "Remove-Item",
+    "Out-File",
+    "Get-ItemProperty", "Invoke-WebRequest",
+    // Windows command interpreter. Allowing `cmd` lets the agent run
+    // `.bat`/`.cmd` batch files directly without escaping to a PTY.
+    "cmd",
+    // Windows shells / shell builtins used by the agent on Windows.
+    // `powershell` / `pwsh` widen the trust boundary: the outer command is
+    // still validated, but the script body passed to `-Command` is not
+    // inspected for cmdlet-level danger. They are allowed because the agent
+    // already has equivalent power through PTY sessions, and some Windows-only
+    // workflows need them without interactive terminal overhead.
+    "powershell", "pwsh",
+    // Unix shells / login-shell wrappers. These widen the trust boundary
+    // because invoking a shell can run arbitrary startup files and builtins;
+    // they are allowed because the agent already has equivalent power through
+    // PTY sessions, and some workflows need them without interactive overhead.
+    "bash", "zsh", "sh",
+    // Privilege / system management. These expand the agent's reach beyond
+    // normal user permissions, so they are allowed only because the same
+    // effect is already possible via an interactive PTY session.
+    "sudo", "doas", "systemctl", "service",
+    // Remote / container tooling. These can reach other hosts or control
+    // system services; allowed for parity with PTY capability.
+    "ssh", "docker",
     // Pentest & network recon tooling supported by Termigo
     "nmap", "masscan", "rustscan", "nikto", "nuclei", "httpx", "wpscan",
     "sqlmap", "ffuf", "gobuster", "dirsearch", "subfinder",
     "dig", "host", "nslookup", "ping", "traceroute", "tracepath", "mtr",
     "dnsx", "cmseek", "arjun",
     "tshark", "responder", "bettercap", "ettercap", "enum4linux", "smbclient",
+    // Extended recon, TLS and secret scanners (parity with the pentest kits)
+    "katana", "amass", "testssl.sh", "testssl",
+    "lynis", "gitleaks", "trufflehog", "weasyprint", "whois",
+    "whatweb", "hydra", "wafw00f", "searchsploit", "feroxbuster", "showmount",
     // Privilege elevation & package management (Linux/WSL, macOS, Windows)
     "sudo", "doas",
     // Linux / WSL package managers (Debian/Ubuntu/Kali, Arch, RedHat/Fedora, Alpine, openSUSE)
@@ -77,7 +110,7 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
     "findstr", "tasklist", "taskkill", "wmic", "fc", "attrib", "systeminfo", "net", "route", "arp", "netsh",
     // Linux/WSL and Unix system administration & root utilities (user-approved)
     "systemctl", "service", "journalctl", "dmesg",
-    "chown", "chmod", "mkdir", "rm", "rmdir", "cp", "mv", "touch", "ln", "tee",
+    "chown", "chmod", "mkdir", "rmdir", "cp", "mv", "touch", "ln", "tee",
     "ip", "ifconfig", "netstat", "ss", "lsof", "ps", "pidof", "pgrep", "kill", "pkill", "killall",
     "free", "df", "du", "ufw", "iptables",
     "timeout",
@@ -87,265 +120,172 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
     "cut", "sort", "uniq", "tr", "fold", "paste", "split", "nl",
     // SSH & remote transfer utilities
     "ssh", "scp", "sftp", "rsync",
-    // JS/TS project toolchains & web frameworks
+    //
+    // Project toolchains. An agent that cannot run the project's own checks
+    // cannot verify its work, and these are the binaries a repository's scripts
+    // invoke. `pnpm lint` worked (the base command is `pnpm`) while `biome`,
+    // `tsc` and `vitest` did not, so the moment a caller wanted one file
+    // (`biome lint src/x.ts`, `vitest run src/x.test.ts`) or a raw flag it hit
+    // "not in the agent allowlist" and had to route through a PTY for a
+    // read-only check.
+    //
+    // This does not widen the trust boundary: `node`, `python`, `bun`, `deno`
+    // and `pnpm` are already allowed, and each of them can execute arbitrary
+    // code. A linter, a type checker and a test runner are strictly less
+    // powerful than the interpreters beside them, so the boundary is unchanged
+    // while the friction is gone.
+    //
+    // JS/TS (`biome`, `tsc`, `vitest`, `knip`, `vite` are this repo's own)
     "biome", "tsc", "vitest", "knip", "vite", "eslint", "prettier",
     "jest", "mocha", "playwright", "size-limit",
-    "prisma", "tsx", "ts-node", "next", "turbo", "tailwindcss", "postcss",
-    "webpack", "rollup", "esbuild", "svelte-check", "astro", "remix", "nuxt",
-    "drizzle-kit", "typeorm", "knex", "sass", "less", "oxlint", "cypress",
-    "rimraf", "cross-env", "concurrently", "nodemon", "pm2", "serve", "http-server", "live-server",
-    "terser", "swc", "babel",
-    // Databases & query engines
-    "sqlite3", "duckdb", "psql", "mysql", "mongosh", "redis-cli",
-    // Python toolchains
+    // Python
     "ruff", "black", "mypy", "pytest", "flake8", "isort",
     // GitHub CLI and companion tools
     "gh",
     // Extension introspection (safe read-only inspection of installed extensions)
     "ext_read_manifest", "ext_read_asset", "ext_read_asset_bytes", "ext_list",
-    // Go / Rust helpers and compilers
+    // Go / Rust helpers whose base command is not `go`/`cargo`
     "rustc", "rustup", "cargo-nextest", "cargo-clippy", "cargo-machete",
-    "golangci-lint", "rustfmt", "clippy-driver", "gofmt", "govulncheck", "dlv",
+    "golangci-lint", "rustfmt", "clippy-driver", "clippy", "rust",
+    "gofmt", "govulncheck", "dlv",
+    //
+    // Document generators. An agent asked for a report in a format the user can
+    // open in Word/Excel/PowerPoint has to be able to produce one, and
+    // `officecli` is the single self-contained binary that writes
+    // .docx/.xlsx/.pptx with no Office install. It belongs here for the same
+    // reason `tar` and `zip` do: it writes the file it was asked to write and
+    // launches nothing else, so it is not a wider trust boundary than the
+    // package managers already listed above it. Without this entry only a
+    // machine-specific absolute path worked, because `allows_program` accepts
+    // rooted paths, so the same instruction behaved differently per host.
+    "officecli",
+    //
+    // Read-only text and path utilities, added so a pipeline is actually
+    // usable. Allowing `|` (below) removed the refusal but not the friction on
+    // its own: `ls | sort | uniq` and `git log | cut -f1` still failed because
+    // the filter side was unlisted. The rule for this group is that a program
+    // here can neither write to the filesystem nor launch another program:
+    // that excludes `xargs`, `env`, `timeout`, `nice`, `nohup`, `watch`, `tee`
+    // and the shells, each of which would let an unlisted program run behind a
+    // listed name.
+    "sort", "uniq", "cut", "tr", "nl", "paste", "join", "fold", "rev",
+    "basename", "dirname", "realpath", "readlink", "seq", "expr",
+    "sha256sum", "sha1sum", "md5sum", "base64", "strings", "du", "df",
+    // Process and job control. `ps` is read-only; `kill`/`killall`/`pkill`
+    // let the agent clean up hung shells or background jobs it started, which
+    // is already possible through a PTY. `top`/`htop` are interactive viewers.
+    "ps", "kill", "killall", "pkill", "top", "htop",
+    // Pagers and editors. The agent legitimately needs to inspect long output
+    // or edit config files; these are narrower than spawning a full shell.
+    "less", "more", "most", "vim", "nano", "vi",
+    // File transfer and remote sync. Common in devops and deployment flows;
+    // equivalent power exists through an SSH PTY session.
+    "scp", "rsync", "sftp",
+    // Cloud and infrastructure CLIs. Widely used in modern workflows; the
+    // agent already has equivalent reach through an interactive shell.
+    "kubectl", "helm", "terraform", "ansible", "aws", "gcloud", "az",
+    // Editor CLIs. Useful for headless automation and file inspection.
+    "code", "cursor", "windsurf", "subl", "notepad++",
+    // OS-level file and URL openers. Let the agent open files/URLs in the
+    // user's default application without widening the trust boundary.
+    "explorer", "xdg-open", "open",
 ];
 
-/// Characters that enable command injection in a shell one-liner.
-const SHELL_METACHARACTERS: &[char] = &['$', '(', ')', '<', '>', '`'];
-
-/// Check whether a token is an environment variable assignment like `FOO=bar` or
-/// `DEBIAN_FRONTEND=noninteractive`.
-fn is_env_var_assignment(token: &str) -> bool {
-    let clean = token.trim_matches(['"', '\'']);
-    if let Some((name, _)) = clean.split_once('=') {
-        let mut chars = name.chars();
-        if let Some(first) = chars.next() {
-            return (first.is_ascii_alphabetic() || first == '_')
-                && chars.all(|c| c.is_ascii_alphanumeric() || c == '_');
-        }
-    }
-    false
-}
-
-/// Extract the effective program to validate against the sandbox allowlist.
+/// Whether a program token may run without a PTY.
 ///
-/// Skips leading environment variable prefixes (e.g. `LC_ALL=C ls`,
-/// `DEBIAN_FRONTEND=noninteractive apt-get install`).
+/// An absolute or rooted path is always allowed, on Unix (`/...`) and Windows
+/// (`C:\...`, `\...`), because the agent legitimately runs binaries it built.
+/// Anything else has to match the allowlist by base name, with the Windows
+/// shim extensions (`.exe`, `.cmd`, `.bat`) stripped first.
+fn allows_program(program: &str) -> bool {
+    let path = std::path::Path::new(program);
+    let is_windows_drive_path = program.len() >= 3
+        && program.as_bytes()[0].is_ascii_alphabetic()
+        && program.as_bytes()[1] == b':'
+        && (program.as_bytes()[2] == b'\\' || program.as_bytes()[2] == b'/');
+
+    if path.is_absolute()
+        || path.has_root()
+        || program.starts_with('/')
+        || program.starts_with('\\')
+        || is_windows_drive_path
+    {
+        return true;
+    }
+
+    let base_program = program
+        .strip_suffix(".exe")
+        .or_else(|| program.strip_suffix(".cmd"))
+        .or_else(|| program.strip_suffix(".bat"))
+        .unwrap_or(program);
+
+    // For relative paths (e.g. `./node_modules/.bin/vitest` or `.\bin\biome.cmd`)
+    // match on the file name, across both separators so Windows-style paths
+    // validate on Unix and vice versa. Without this the agent cannot invoke a
+    // project-local shim by path — exactly what a model reaches for when a bare
+    // name did not resolve — and falls back to reinstalling the package.
+    let file_name = base_program
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(base_program);
+
+    SANDBOX_ALLOWLIST
+        .iter()
+        .any(|allowed| base_program.eq_ignore_ascii_case(allowed) || file_name.eq_ignore_ascii_case(allowed))
+}
+
+/// Characters refused outright because a shell turns them into something other
+/// than the command we validated.
 ///
-/// For wrappers (`wsl`, `sudo`, `doas`), unpacks flags and options (including
-/// those taking arguments like `-u <user>`, `-g <group>`, `-d <distro>`) to find the
-/// target program being executed. Chained wrappers (e.g. `wsl sudo apt update`)
-/// are unwrapped sequentially so that `wsl sudo unallowed_binary --flag` fails on `unallowed_binary`, while
-/// `wsl sudo apt update` succeeds on `apt`. If no subcommand follows (e.g. `sudo -l`,
-/// `wsl --status`), the wrapper itself is checked.
-fn extract_effective_program(segment: &str) -> &str {
-    let mut words = segment.split_whitespace();
+/// `$` and the backtick are not negotiable: they expand to text chosen at run
+/// time, so a program name could be assembled AFTER this check and never appear
+/// in it (`CMD=rm` then `$CMD -rf /`). `(` and `)` build subshells, which are
+/// another command list the segment check does not see. `<` and `>` read or
+/// write arbitrary files. Separators are deliberately NOT in this list: they
+/// only need each segment's program checked, which is done below.
+///
+/// A newline used to be missing from this list *and* from the separator set, so
+/// `git status\nrm -rf /` passed validation (the first whitespace token is
+/// `git`) and then ran both lines through `sh -c`. That was a hole in the
+/// allowlist, not a policy choice.
+/// `$` is handled specifically: variable expansions ($var, $env:VAR, ${VAR})
+/// are allowed as data/arguments, while command substitution ($(cmd)) is refused.
+/// Backticks are refused outright. `(` and `)` build subshells. `<` and `>`
+/// read or write arbitrary files.
+const SHELL_METACHARACTERS: &[char] = &['(', ')', '<', '>', '`'];
 
-    let mut current_word = None;
-    for word in words.by_ref() {
-        let w = word.trim_matches(['"', '\'']);
-        if !is_env_var_assignment(w) {
-            current_word = Some(w);
-            break;
-        }
-    }
-
-    let mut current = match current_word {
-        Some(w) => w,
-        None => return segment,
-    };
-
-    loop {
-        let base = current
-            .strip_suffix(".exe")
-            .or_else(|| current.strip_suffix(".cmd"))
-            .or_else(|| current.strip_suffix(".bat"))
-            .unwrap_or(current);
-
-        let prog_name = base
-            .rsplit(['/', '\\'])
-            .next()
-            .unwrap_or(base);
-
-        let is_wsl = prog_name.eq_ignore_ascii_case("wsl");
-        let is_sudo = prog_name.eq_ignore_ascii_case("sudo") || prog_name.eq_ignore_ascii_case("doas");
-        let is_su = prog_name.eq_ignore_ascii_case("su");
-        let is_ps =
-            prog_name.eq_ignore_ascii_case("powershell") || prog_name.eq_ignore_ascii_case("pwsh");
-
-        if !is_wsl && !is_sudo && !is_su && !is_ps {
-            return current;
-        }
-
-        let mut target = None;
-        let mut skip_next = false;
-        let mut expect_cmd = false;
-        for word in words.by_ref() {
-            let w = word.trim_matches(['"', '\'']);
-            if skip_next {
-                skip_next = false;
-                continue;
-            }
-            if expect_cmd {
-                let sub_cmd = w.split_whitespace().next().unwrap_or(w).trim_matches(['"', '\'']);
-                target = Some(sub_cmd);
-                break;
-            }
-            if w == "--" {
-                continue;
-            }
-            if is_env_var_assignment(w) {
-                continue;
-            }
-            // `powershell -Command "<script>"` executes the inner script (the
-            // persistent shell unwraps exactly this form), so the allowlist
-            // must see the script's program, not `powershell`. Flags are
-            // case-insensitive in PowerShell; value-taking display flags are
-            // skipped like their wsl/sudo counterparts.
-            if is_ps {
-                if w.eq_ignore_ascii_case("-c") || w.eq_ignore_ascii_case("-command") {
-                    expect_cmd = true;
-                    continue;
-                }
-                if w.starts_with('-') {
-                    if !w.contains('=')
-                        && matches!(
-                            w.to_ascii_lowercase().as_str(),
-                            "-executionpolicy" | "-windowstyle" | "-outputformat" | "-inputformat" | "-file"
-                        )
-                    {
-                        skip_next = true;
-                    }
-                    continue;
-                }
-                target = Some(w);
-                break;
-            }
-            if is_su {
-                if w == "-c" || w == "--command" {
-                    expect_cmd = true;
-                    continue;
-                }
-                if let Some(cmd_part) = w.strip_prefix("--command=") {
-                    let clean = cmd_part.trim_matches(['"', '\'']);
-                    let sub_cmd = clean.split_whitespace().next().unwrap_or(clean).trim_matches(['"', '\'']);
-                    target = Some(sub_cmd);
-                    break;
-                }
-                if w.starts_with('-') {
-                    continue;
-                }
-                // Bare user parameter like `root` in `su root -c ...`
-                continue;
-            }
-            if w.starts_with('-') {
-                if is_wsl {
-                    if w == "-e" || w == "--exec" {
-                        // -e / --exec directly precedes the target command (e.g. `wsl -e cargo test`).
-                        continue;
-                    }
-                    if !w.contains('=')
-                        && matches!(
-                            w,
-                            "-d" | "--distribution" | "-u" | "--user" | "--cd" | "--shell-type"
-                        )
-                    {
-                        skip_next = true;
-                    }
-                } else if !w.contains('=')
-                    && matches!(
-                        w,
-                        "-u" | "-g" | "-p" | "-C" | "-c" | "-r" | "-t" | "-T" | "-D" | "-h" | "-U"
-                            | "--user" | "--group" | "--prompt" | "--close-from"
-                            | "--login-class" | "--role" | "--type" | "--command-timeout"
-                            | "--chdir" | "--host" | "--other-user"
-                    )
-                {
-                    skip_next = true;
-                }
-                continue;
-            }
-            target = Some(w);
-            break;
-        }
-
-        match target {
-            Some(t) => current = t,
-            None => return current,
-        }
-    }
-}
-
-/// Check if the slice at `chars[i..]` matches a safe stdout/stderr discard redirection.
-/// Matches: `> /dev/null`, `>/dev/null`, `> nul`, `>nul`, `2> /dev/null`, `2>/dev/null`,
-/// `2> nul`, `2>nul`, `1> /dev/null`, `1>/dev/null`, `1> nul`, `1>nul`, `&> /dev/null`,
-/// `&>/dev/null`, `&> nul`, `&>nul` (case-insensitive), and PowerShell's `$null`.
-/// Returns the number of characters consumed if matched.
-fn match_discard_redirection(chars: &[char], i: usize) -> Option<usize> {
-    let rem = &chars[i..];
-    // Check optional prefix: '1', '2', or '&'
-    let (has_prefix, after_prefix) = match rem.first() {
-        Some(&p) if p == '1' || p == '2' || p == '&' => (true, &rem[1..]),
-        _ => (false, rem),
-    };
-
-    if after_prefix.first() != Some(&'>') {
-        return None;
-    }
-
-    let mut idx = if has_prefix { 2 } else { 1 };
-    // Skip whitespace after '>'
-    while idx < rem.len() && (rem[idx] == ' ' || rem[idx] == '\t') {
-        idx += 1;
-    }
-
-    // Check target: "/dev/null" or "nul" (case-insensitive)
-    let target_chars = &rem[idx..];
-    if target_chars.len() >= 9 {
-        let candidate: String = target_chars[..9].iter().collect();
-        if candidate == "/dev/null" {
-            let next = target_chars.get(9);
-            if next.is_none()
-                || next.unwrap().is_whitespace()
-                || matches!(next.unwrap(), ';' | '&' | '|' | '\n' | '\r')
-            {
-                return Some(idx + 9);
-            }
-        }
-    }
-    if target_chars.len() >= 3 {
-        let candidate: String = target_chars[..3].iter().collect();
-        if candidate.eq_ignore_ascii_case("nul") {
-            let next = target_chars.get(3);
-            if next.is_none()
-                || next.unwrap().is_whitespace()
-                || matches!(next.unwrap(), ';' | '&' | '|' | '\n' | '\r')
-            {
-                return Some(idx + 3);
-            }
-        }
-    }
-    // PowerShell's `$null` is the idiomatic discard target, equivalent to `nul`.
-    // It is only ever matched after a `>`, so it cannot act as a substitution.
-    if target_chars.len() >= 5 {
-        let candidate: String = target_chars[..5].iter().collect();
-        if candidate.eq_ignore_ascii_case("$null") {
-            let next = target_chars.get(5);
-            if next.is_none()
-                || next.unwrap().is_whitespace()
-                || matches!(next.unwrap(), ';' | '&' | '|' | '\n' | '\r')
-            {
-                return Some(idx + 5);
-            }
-        }
-    }
-
-    None
-}
+/// Characters that split a command into segments. Each segment's program is
+/// checked against the allowlist, so accepting them adds no reach: `;` and a
+/// newline are separators exactly like `&&`, and a `|` pipeline still runs only
+/// programs that are already allowed.
+///
+/// `\n` and `\r` belong HERE and deliberately NOT in `SHELL_METACHARACTERS`, even
+/// though the two lists look interchangeable from the outside. They are not. A
+/// newline is refused by being a separator: the command is split at it and the
+/// program of every line is checked, so `git status\nrm -rf /` is refused for
+/// `rm`. Listing it as a metacharacter instead would refuse the whole command
+/// whenever it contained a line break - which is a routine way to run several
+/// allowlisted programs (`git status\ngit log`) and the exact shape a caller uses
+/// for a multi-step read-only inspection. That is a refusal storm, not a
+/// hardening, and the ledger that reported this as an open hole was reading the
+/// constant instead of the separator walk. `validate_shell_command_*new_line*`
+/// below pins both directions: an unlisted program on the next line is refused,
+/// an allowlisted one is not.
+///
+/// This is the friction that mattered in practice. One install logged **325**
+/// refusals for metacharacters, the common ones being `|`, `2>&1` and `;`
+/// between two allowlisted programs. The agent's most ordinary request -
+/// `find /home/admin/peraturan_pdf -maxdepth 1 -type f | head -30` - failed on
+/// the pipe alone, even though `find` and `head` are both allowlisted.
+const SHELL_SEPARATORS: &[char] = &[';', '\n', '\r'];
 
 /// Validate a shell command for agent execution:
-/// - reject metacharacters that enable injection (`;$()<>``)
-/// - allow safe chaining operators `&&` and `||`
-/// - reject raw newlines/control chars, which are hidden command separators
-/// - allow `&&`/`||` chaining, but enforce the allowlist on EVERY segment
+/// - refuse expansion, subshells and redirection (`$`, backtick, `(`, `)`, `<`, `>`)
+/// - allow `&&`, `||`, `|`, `;` and newlines as separators, but check the program
+///   of EVERY segment against the allowlist, not just the first
+/// - drop the two redirections that cannot name a file (`N>&M`, `>/dev/null`)
+/// - enforce the allowlist for each segment's program unless it is an absolute
+///   path
 /// - return the command string on success
 pub fn validate_shell_command(command: &str) -> Result<&str, String> {
     let trimmed = command.trim();
@@ -353,111 +293,114 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
         return Err("empty command".into());
     }
 
-    // 1. Reject stray control characters (NUL, BEL, ...). `\t` is treated as
-    //    whitespace; `\n` and `\r` are refused below as hidden separators.
-    if trimmed
-        .chars()
-        .any(|c| c.is_control() && c != '\n' && c != '\r' && c != '\t')
-    {
-        return Err("command contains control characters".into());
-    }
+    // Remove the redirections that cannot name a file before the character scan,
+    // so `2>&1` and `>/dev/null` are not mistaken for the `&` and `>` that are
+    // refused. These two are the most common ways to keep output readable and
+    // they cannot reach the filesystem, unlike `> file`.
+    let cleaned = strip_dev_null_redirections(trimmed)?;
 
-    // 2. Reject metacharacters outside quotes, and split the command into
-    //    `&&`/`||`/`|`/`;`-separated segments. `&&`/`||`/`|`/`;` are allowed as separators,
-    //    but every segment's program is checked in step 3 - so `git && unallowed_binary` is
-    //    refused on `unallowed_binary`, which was the hole when only the first token was read.
+    // 1. Walk the command outside quotes: separators split it into segments, and
+    //    anything that could turn into a different command is refused. A
+    //    separator inside quotes is data, not a chain, so the quote state decides.
     let mut in_quote = false;
     let mut quote_char = '\0';
     let mut prev = '\0';
     let mut bad: Vec<char> = Vec::new();
-    let mut segments: Vec<String> = Vec::new();
-    let mut current = String::new();
-    let chars = trimmed.chars().collect::<Vec<_>>();
+    let chars = cleaned.chars().collect::<Vec<_>>();
+    // Where each chained segment starts, so its program can be checked too.
+    // Checking only the first token let `git status && rm -rf /` through: `git`
+    // is allowlisted, so the second command ran unvalidated.
+    let mut segment_starts: Vec<usize> = vec![0];
     let mut i = 0;
     while i < chars.len() {
         let c = chars[i];
         if !in_quote && (c == '"' || c == '\'') {
-            let mut backslashes = 0;
-            let mut j = i;
-            while j > 0 && chars[j - 1] == '\\' {
-                backslashes += 1;
-                j -= 1;
-            }
-            if backslashes % 2 == 0 {
-                in_quote = true;
-                quote_char = c;
-            }
-        } else if in_quote && c == quote_char {
-            let mut backslashes = 0;
-            let mut j = i;
-            while j > 0 && chars[j - 1] == '\\' {
-                backslashes += 1;
-                j -= 1;
-            }
-            if backslashes % 2 == 0 {
-                in_quote = false;
-                quote_char = '\0';
-            }
-        } else if !in_quote {
-            // Stderr redirection `2>&1` merges streams rather than writing files or chaining commands.
-            // Preserve it intact without adding `>` or `&` to the metacharacter reject list.
-            if c == '2'
-                && chars.get(i + 1) == Some(&'>')
-                && chars.get(i + 2) == Some(&'&')
-                && chars.get(i + 3) == Some(&'1')
-            {
-                current.push_str("2>&1");
-                prev = '1';
-                i += 4;
-                continue;
-            }
-            // Standard output/error discard redirections like `> /dev/null`, `>/dev/null`,
-            // `> nul`, `>nul`, `2> /dev/null`, `2>/dev/null`, `2> nul`, `2>nul`, `1> /dev/null`,
-            // `1> nul`, `&> /dev/null`, `&> nul`.
-            if let Some(len) = match_discard_redirection(&chars, i) {
-                for &ch in &chars[i..i + len] {
-                    current.push(ch);
+            in_quote = true;
+            quote_char = c;
+            prev = c;
+            i += 1;
+            continue;
+        }
+        if in_quote && c == quote_char && prev != '\\' {
+            in_quote = false;
+            quote_char = '\0';
+            prev = c;
+            i += 1;
+            continue;
+        }
+        if !in_quote {
+            if c == '&' {
+                if i + 1 < chars.len() && chars[i + 1] == '&' {
+                    // `&&` is a separator
+                    segment_starts.push(i + 2);
+                    i += 2;
+                    prev = c;
+                    continue;
                 }
-                prev = chars[i + len - 1];
-                i += len;
-                continue;
-            }
-            let chained = (c == '&' && chars.get(i + 1) == Some(&'&'))
-                || (c == '|' && chars.get(i + 1) == Some(&'|'));
-            if chained {
-                if current.trim().is_empty() {
-                    return Err("command contains an empty or dangling segment".into());
-                }
-                segments.push(std::mem::take(&mut current));
+                // A lone `&` backgrounds the command, which hides it from the
+                // segment check. `2>&1` and friends were already removed above.
+                bad.push(c);
+            } else if c == '|' {
+                // Both `||` and a single `|` separate commands whose programs
+                // are checked. A pipeline of allowlisted programs is exactly
+                // what the agent needs and used to be refused.
+                let step = if i + 1 < chars.len() && chars[i + 1] == '|' {
+                    2
+                } else {
+                    1
+                };
+                segment_starts.push(i + step);
+                i += step;
                 prev = c;
-                i += 2;
                 continue;
-            }
-            if c == '|' {
-                if current.trim().is_empty() {
-                    return Err("command contains an empty or dangling segment".into());
-                }
-                segments.push(std::mem::take(&mut current));
+            } else if SHELL_SEPARATORS.contains(&c) {
+                segment_starts.push(i + 1);
                 prev = c;
                 i += 1;
                 continue;
-            }
-            if c == ';' {
-                if current.trim().is_empty() {
-                    return Err("command contains an empty or dangling segment".into());
+            } else if c == '$' {
+                // Allow shell/PowerShell variables: $var, $env:VAR, ${VAR}, $?, $0..$9
+                // Reject command substitution $(...) or lone $ or other metacharacter combos
+                if i + 1 < chars.len() && chars[i + 1] == '(' {
+                    bad.push('$');
+                } else if i + 1 < chars.len() && chars[i + 1] == '{' {
+                    if let Some(close_pos) = chars[i + 2..].iter().position(|&x| x == '}') {
+                        let inner: String = chars[i + 2..i + 2 + close_pos].iter().collect();
+                        if !inner.is_empty()
+                            && inner
+                                .chars()
+                                .all(|ch| ch.is_alphanumeric() || ch == '_' || ch == ':')
+                        {
+                            i += 2 + close_pos + 1;
+                            prev = '}';
+                            continue;
+                        }
+                    }
+                    bad.push('$');
+                } else if i + 1 < chars.len()
+                    && (chars[i + 1].is_ascii_alphabetic()
+                        || chars[i + 1] == '_'
+                        || chars[i + 1] == '?'
+                        || chars[i + 1].is_ascii_digit()
+                        || chars[i + 1] == ':')
+                {
+                    i += 1;
+                    while i < chars.len()
+                        && (chars[i].is_ascii_alphanumeric()
+                            || chars[i] == '_'
+                            || chars[i] == ':')
+                    {
+                        i += 1;
+                    }
+                    prev = chars[i - 1];
+                    continue;
+                } else {
+                    bad.push(c);
                 }
-                segments.push(std::mem::take(&mut current));
-                prev = c;
-                i += 1;
-                continue;
-            }
-            // A raw newline or carriage return is a hidden command separator the
-            // allowlist cannot reason about, so refuse it instead of splitting.
-            if c == '\n' || c == '\r' || c == '&' || SHELL_METACHARACTERS.contains(&c) {
+            } else if SHELL_METACHARACTERS.contains(&c) {
                 bad.push(c);
             }
         }
-        current.push(c);
         prev = c;
         i += 1;
     }
@@ -465,94 +408,231 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
         return Err("unclosed quote in command".into());
     }
     if !bad.is_empty() {
+        let hint = if bad.contains(&'>') {
+            "write the output with the write_file tool instead"
+        } else if bad.contains(&'$') || bad.contains(&'`') {
+            "shell expansion is refused because it can change which program runs"
+        } else {
+            "use a PTY session for what this would do"
+        };
         return Err(format!(
-            "command contains shell metacharacters {:?}; chain with `;` / `&&` / `||`, discard output with `> nul` or `2>$null`, and use a PTY session for grouping, variables or substitution",
+            "command contains shell metacharacters {:?}; {hint}",
             bad
         ));
     }
-    if !current.trim().is_empty() {
-        segments.push(current);
-    } else if segments.is_empty() || (prev != ';' && prev != '\0') {
-        return Err("command contains an empty or dangling segment".into());
-    }
 
-    // 3. Every segment must start with an allowlisted program (or an absolute /
-    //    rooted path). Checking each segment - not just the first - is what
-    //    makes `git status && unallowed_binary` fail on `unallowed_binary`.
-    let segments: Vec<&str> = segments
-        .iter()
-        .map(|s| s.trim())
-        .collect();
-    if segments.is_empty() || segments.iter().any(|s| s.is_empty()) {
-        return Err("command contains no executable segment".into());
-    }
-    for segment in segments {
-        // Reject shell metacharacters inside env-var values. A segment like
-        // `FOO="$HOME" command` would otherwise pass the allowlist because
-        // `$HOME` is inside quotes, but the shell still expands it.
-        for token in segment.split_whitespace() {
-            if is_env_var_assignment(token) {
-                if let Some((_, value)) = token.split_once('=') {
-                    let trimmed = value.trim_matches(['"', '\'']);
-                    if trimmed.chars().any(|c| SHELL_METACHARACTERS.contains(&c)) {
-                        return Err(format!(
-                            "env var value contains shell metacharacters {:?}; use a PTY session for variables or substitution",
-                            trimmed
-                        ));
-                    }
+    // 2. Every segment's program must be allowed. Segments are delimited by the
+    //    chaining operators found above, so a quoted `&&` is still one segment.
+    for (idx, &start) in segment_starts.iter().enumerate() {
+        let end = segment_starts.get(idx + 1).copied().unwrap_or(chars.len());
+        let segment_chars = &chars[start..end];
+        let rest: String = segment_chars.iter().collect();
+        let segment = rest.trim_matches([';', '\n', '\r', '&', '|', ' ']);
+        if segment.is_empty() {
+            return Err(
+                "empty command in a `&&` / `||` chain; use a PTY session for arbitrary commands"
+                    .into(),
+            );
+        }
+        if is_variable_assignment(segment) {
+            if let Some(rhs_prog) = rhs_program_if_any(segment) {
+                if !allows_program(&rhs_prog) {
+                    return Err(format!(
+                        "command '{rhs_prog}' in assignment is not in the agent allowlist; allowed: {:?}; use a PTY session to run arbitrary commands",
+                        SANDBOX_ALLOWLIST
+                    ));
                 }
-            } else {
+            }
+            continue;
+        }
+        // POSIX-style env prefixes (`CI=true pnpm test`, `NODE_OPTIONS=...
+        // vitest run`): skip every `NAME=value` token and validate the program
+        // that follows, the same way the frontend's commandRisk classifier
+        // reads them. PowerShell `$x = ...` assignments are handled above; a
+        // token starting with `$` is never a POSIX env prefix. Skipping cannot
+        // launder a program: the FIRST non-assignment token is still checked
+        // against the allowlist, and unquoted metacharacters in any value were
+        // already refused by the scan.
+        let mut after_env = segment;
+        while let Some(first) = after_env.split_whitespace().next() {
+            if !is_posix_env_assignment(first) {
                 break;
             }
+            let n = first.len();
+            after_env = after_env[n..].trim_start();
         }
-        let raw_program = extract_effective_program(segment);
-        let program = raw_program.trim_matches(['"', '\'']);
-
-        // Allow absolute or rooted paths on Unix (/...) and Windows (C:\..., \...).
-        let path = std::path::Path::new(program);
-        let is_windows_drive_path = program.len() >= 3
-            && program.as_bytes()[0].is_ascii_alphabetic()
-            && program.as_bytes()[1] == b':'
-            && (program.as_bytes()[2] == b'\\' || program.as_bytes()[2] == b'/');
-
-        if path.is_absolute()
-            || path.has_root()
-            || program.starts_with('/')
-            || program.starts_with('\\')
-            || is_windows_drive_path
-        {
-            continue;
+        let raw_program = after_env.split_whitespace().next().unwrap_or(after_env);
+        let program = raw_program.trim_matches(['"', '\'', ';', '&', '|']);
+        if !allows_program(program) {
+            return Err(format!(
+                "command '{}' is not in the agent allowlist; allowed: {:?}; use a PTY session to run arbitrary commands",
+                program,
+                SANDBOX_ALLOWLIST
+            ));
         }
-
-        // Strip executable extensions for matching (.exe, .cmd, .bat).
-        let base_program = program
-            .strip_suffix(".exe")
-            .or_else(|| program.strip_suffix(".cmd"))
-            .or_else(|| program.strip_suffix(".bat"))
-            .unwrap_or(program);
-
-        // For relative paths (e.g. `./node_modules/.bin/vitest` or `.\bin\npx`), extract the file name
-        // using cross-platform separators ('/' and '\\') so Windows-style paths validate on Unix.
-        let file_name = base_program
-            .rsplit(['/', '\\'])
-            .next()
-            .unwrap_or(base_program);
-
-        if SANDBOX_ALLOWLIST
-            .iter()
-            .any(|allowed| base_program.eq_ignore_ascii_case(allowed) || file_name.eq_ignore_ascii_case(allowed))
-        {
-            continue;
-        }
-
-        return Err(format!(
-            "command '{}' is not in the agent allowlist; allowed: {:?}; use a PTY session to run arbitrary commands",
-            program,
-            SANDBOX_ALLOWLIST
-        ));
     }
 
     Ok(command)
+}
+
+fn is_variable_assignment(segment: &str) -> bool {
+    let trimmed = segment.trim();
+    if !trimmed.starts_with('$') {
+        return false;
+    }
+    if let Some(eq_idx) = trimmed.find('=') {
+        let lhs = trimmed[1..eq_idx].trim_end();
+        let after_eq = &trimmed[eq_idx + 1..];
+        if !after_eq.starts_with('=') && !lhs.is_empty() {
+            let is_valid_lhs = if lhs.starts_with('{') && lhs.ends_with('}') {
+                lhs[1..lhs.len() - 1]
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || c == '_' || c == ':')
+            } else {
+                lhs.chars()
+                    .all(|c| c.is_alphanumeric() || c == '_' || c == ':')
+            };
+            return is_valid_lhs;
+        }
+    }
+    false
+}
+
+fn rhs_program_if_any(segment: &str) -> Option<String> {
+    let trimmed = segment.trim();
+    let eq_idx = trimmed.find('=')?;
+    let rhs = trimmed[eq_idx + 1..].trim();
+    if rhs.is_empty() {
+        return None;
+    }
+    let first_char = rhs.chars().next()?;
+    if first_char == '"' || first_char == '\'' || first_char == '$' || first_char.is_ascii_digit() {
+        return None;
+    }
+    let prog = rhs.split_whitespace().next()?.trim_matches(['"', '\'', ';', '&', '|']);
+    if prog.is_empty() {
+        None
+    } else {
+        Some(prog.to_string())
+    }
+}
+
+/// A POSIX-style environment-assignment token: `NAME=value` where NAME is a
+/// shell identifier (`[A-Za-z_][A-Za-z0-9_.]*`). PowerShell's `$x = ...` is
+/// NOT this (it starts with `$` and is handled by `is_variable_assignment`),
+/// and neither is a bare `=value` or a `==` comparison.
+fn is_posix_env_assignment(token: &str) -> bool {
+    let Some(eq) = token.find('=') else {
+        return false;
+    };
+    if eq == 0 {
+        return false;
+    }
+    let name = &token[..eq];
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.')
+}
+
+/// Drop the redirections that cannot name a file: `N>&M` (join two of the
+/// process's own streams) and `>/dev/null` (discard). Both are replaced with a
+/// space so the character scan never sees the `&` or `>` they contain.
+///
+/// Everything else that redirects is left in place and therefore refused by the
+/// scan, because `> file` writes wherever it is pointed - including the secret
+/// paths the rest of the app refuses to touch. The caller runs the ORIGINAL
+/// command, so the shell still performs these redirections.
+fn strip_dev_null_redirections(command: &str) -> Result<String, String> {
+    const DEV_NULL_LEN: usize = "/dev/null".len();
+    const DOLLAR_NULL_LEN: usize = "$null".len();
+    let chars: Vec<char> = command.chars().collect();
+    let mut out = String::with_capacity(command.len());
+    let mut in_quote = false;
+    let mut quote_char = '\0';
+    let mut prev = '\0';
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if !in_quote && (c == '"' || c == '\'') {
+            in_quote = true;
+            quote_char = c;
+            out.push(c);
+            prev = c;
+            i += 1;
+            continue;
+        }
+        if in_quote && c == quote_char && prev != '\\' {
+            in_quote = false;
+            quote_char = '\0';
+            out.push(c);
+            prev = c;
+            i += 1;
+            continue;
+        }
+        if !in_quote {
+            // `N>&M`: two digits with a `>&` between them. A redirection to a
+            // file always has a name (or `/dev/null`, matched below) after the
+            // `>`, so a digit cannot be mistaken for a filename here.
+            if c.is_ascii_digit()
+                && chars.get(i + 1) == Some(&'>')
+                && chars.get(i + 2) == Some(&'&')
+                && chars.get(i + 3).is_some_and(|d| d.is_ascii_digit())
+            {
+                out.push(' ');
+                prev = ' ';
+                i += 4;
+                continue;
+            }
+            // `>` or `N>` or `*>` followed by `/dev/null` or `$null` (Windows PowerShell).
+            // A second `>` means append, so `>>` is not matched and stays refused.
+            let gt = if c == '>' {
+                Some(i)
+            } else if (c.is_ascii_digit() || c == '*') && chars.get(i + 1) == Some(&'>') {
+                Some(i + 1)
+            } else {
+                None
+            };
+            if let Some(gt) = gt {
+                if chars.get(gt + 1) != Some(&'>') {
+                    let mut j = gt + 1;
+                    while chars.get(j) == Some(&' ') {
+                        j += 1;
+                    }
+                    let matched_len = if chars.len() >= j + DEV_NULL_LEN
+                        && chars[j..j + DEV_NULL_LEN].iter().collect::<String>() == "/dev/null"
+                    {
+                        Some(DEV_NULL_LEN)
+                    } else if chars.len() >= j + DOLLAR_NULL_LEN
+                        && chars[j..j + DOLLAR_NULL_LEN].iter().collect::<String>() == "$null"
+                    {
+                        Some(DOLLAR_NULL_LEN)
+                    } else {
+                        None
+                    };
+
+                    if let Some(target_len) = matched_len {
+                        let is_null_target = chars.get(j + target_len).is_none_or(|a| {
+                            a.is_whitespace()
+                                || matches!(a, ';' | '|' | '&' | '<' | '>' | ')' | '"' | '\'')
+                        });
+                        if is_null_target {
+                            out.push(' ');
+                            prev = ' ';
+                            i = j + target_len;
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+        out.push(c);
+        prev = c;
+        i += 1;
+    }
+    Ok(out)
 }
 
 #[derive(Serialize)]
@@ -599,9 +679,7 @@ pub async fn shell_run_command(
     );
 
     // The blocking spawn + wait runs on a worker thread so the Tauri async
-    // runtime stays unblocked. The wait below must too: a bare `rx.recv()`
-    // here would park an async worker for up to the whole timeout, starving
-    // concurrent agent calls of runtime threads.
+    // runtime stays unblocked.
     let (tx, rx) = mpsc::channel::<Result<CommandOutput, String>>();
     thread::spawn(move || {
         let result = run_blocking(trimmed, cwd_path, workspace, dur, None);
@@ -610,10 +688,7 @@ pub async fn shell_run_command(
         }
     });
 
-    tauri::async_runtime::spawn_blocking(move || rx.recv())
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())?
+    rx.recv().map_err(|e| e.to_string())?
 }
 
 /// Somewhere the caller can see the child while it runs, so a command can be
@@ -654,10 +729,7 @@ fn run_blocking(
     })?);
     #[cfg(windows)]
     let _job = crate::modules::proc::job::ProcessJob::create_for(child.id()).ok();
-    let kill_child = |c: &SharedChild| {
-        crate::modules::proc::kill_tree(c.id());
-        let _ = c.kill();
-    };
+
     // Visible to `shell_session_interrupt` for as long as this runs. Cleared
     // below so a later interrupt cannot kill an unrelated process that has
     // since taken the same slot.
@@ -667,11 +739,11 @@ fn run_blocking(
         }
     }
     let mut stdout_pipe = child.take_stdout().ok_or_else(|| {
-        kill_child(&child);
+        let _ = child.kill();
         "no stdout pipe".to_string()
     })?;
     let mut stderr_pipe = child.take_stderr().ok_or_else(|| {
-        kill_child(&child);
+        let _ = child.kill();
         "no stderr pipe".to_string()
     })?;
 
@@ -702,7 +774,8 @@ fn run_blocking(
         Ok(Ok(status)) => (status.code(), false),
         Ok(Err(e)) => return Err(e.to_string()),
         Err(mpsc::RecvTimeoutError::Timeout) => {
-            kill_child(&child);
+            crate::modules::proc::kill_tree(child.id());
+            let _ = child.kill();
             (None, true)
         }
         Err(mpsc::RecvTimeoutError::Disconnected) => {
@@ -710,8 +783,21 @@ fn run_blocking(
         }
     };
 
-    let (stdout_bytes, stdout_truncated) = stdout_handle.join().unwrap_or((Vec::new(), false));
-    let (stderr_bytes, stderr_truncated) = stderr_handle.join().unwrap_or((Vec::new(), false));
+    let (pipe_tx, pipe_rx) = mpsc::channel();
+    thread::spawn(move || {
+        let stdout_res = stdout_handle.join().unwrap_or((Vec::new(), false));
+        let stderr_res = stderr_handle.join().unwrap_or((Vec::new(), false));
+        let _ = pipe_tx.send((stdout_res, stderr_res));
+    });
+
+    let ((stdout_bytes, stdout_truncated), (stderr_bytes, stderr_truncated)) =
+        match pipe_rx.recv_timeout(Duration::from_millis(2000)) {
+            Ok(res) => res,
+            Err(_) => {
+                log::warn!("shell_run_command: pipe readers timed out after process exit/kill");
+                ((Vec::new(), false), (Vec::new(), false))
+            }
+        };
 
     Ok(CommandOutput {
         stdout: String::from_utf8_lossy(&stdout_bytes).into_owned(),
@@ -729,7 +815,7 @@ fn run_blocking(
 pub struct ShellState {
     sessions: RwLock<HashMap<u32, Arc<ShellSession>>>,
     bg: RwLock<HashMap<u32, Arc<BackgroundProc>>>,
-    repls: RwLock<HashMap<u32, Arc<repl::ReplProc>>>,
+    pub(crate) repls: RwLock<HashMap<u32, Arc<repl::ReplProc>>>,
     next_session_id: AtomicU32,
     next_bg_id: AtomicU32,
     next_repl_id: AtomicU32,
@@ -834,12 +920,7 @@ pub async fn shell_session_run(
             log::warn!("shell_session_run: receiver dropped before result could be sent");
         }
     });
-    // Off the async worker: `session.run` blocks up to the whole timeout, and
-    // a bare recv here would park the executor thread with it.
-    tauri::async_runtime::spawn_blocking(move || rx.recv())
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())?
+    rx.recv().map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -909,11 +990,6 @@ pub fn shell_bg_list(state: tauri::State<ShellState>) -> Result<Vec<BackgroundPr
     Ok(out)
 }
 
-/// Start an interactive process the agent can hold a conversation with.
-///
-/// Separate from `shell_bg_spawn` because of one line in the spawn: this one
-/// keeps stdin. A daemon should not inherit stdin; a debugger is useless
-/// without it.
 #[tauri::command]
 pub fn repl_open(
     state: tauri::State<ShellState>,
@@ -922,42 +998,25 @@ pub fn repl_open(
     cwd: Option<String>,
     workspace: Option<WorkspaceEnv>,
 ) -> Result<u32, String> {
-    // Agent-triggered interactive processes run through the same restricted
-    // sandbox as one-shot and background commands. Without this any binary
-    // spawns here while the other entry points refuse it.
-    validate_shell_command(command.trim())?;
     let workspace = WorkspaceEnv::from_option(workspace);
     authorize_spawn_cwd(&registry, cwd.as_deref(), &workspace)?;
-
-    // Reap first: an agent that finishes a debugging session rarely remembers
-    // to call `repl_close`, so most of what accumulates here has already
-    // exited and is holding nothing but a map entry.
-    {
-        let mut map = state.repls.write().unwrap();
-        map.retain(|_, p| !p.exited.load(Ordering::Acquire));
-        // Then a hard cap on what is genuinely still running. Each live REPL
-        // holds a process, two reader threads and its pipes; an agent in a
-        // retry loop would otherwise spawn them without limit. Same shape as
-        // the LSP session cap, and for the same reason.
-        if map.len() >= repl::MAX_LIVE {
-            return Err(format!(
-                "too many interactive processes are running ({}); close one with repl_stop first",
-                map.len()
-            ));
-        }
+    let trimmed = command.trim();
+    if trimmed.is_empty() {
+        return Err("empty command".into());
     }
+    validate_shell_command(trimmed)?;
 
-    let proc = repl::spawn(command, cwd, workspace)?;
+    let mut map = state.repls.write().unwrap();
+    map.retain(|_, p| !p.exited.load(std::sync::atomic::Ordering::Acquire));
+    if map.len() >= repl::MAX_LIVE {
+        return Err(format!("too many live REPL processes (max {})", repl::MAX_LIVE));
+    }
+    let proc = repl::spawn(trimmed.to_string(), cwd, workspace)?;
     let id = state.next_repl_id.fetch_add(1, Ordering::Relaxed);
-    state.repls.write().unwrap().insert(id, proc);
+    map.insert(id, proc);
     Ok(id)
 }
 
-/// Read from a running process, optionally sending a line first.
-///
-/// One command rather than a send and a read, because every use is both: you
-/// write `next` and you want what came back. Sending nothing is how you wait
-/// again after a timeout, or read what the process printed on startup.
 #[tauri::command]
 pub async fn repl_send(
     state: tauri::State<'_, ShellState>,
@@ -973,28 +1032,26 @@ pub async fn repl_send(
         .unwrap()
         .get(&handle)
         .cloned()
-        .ok_or_else(|| "no repl handle".to_string())?;
-    if let Some(line) = input {
-        proc.send_line(&line)?;
+        .ok_or_else(|| "no such REPL process".to_string())?;
+
+    if let Some(ref text) = input {
+        proc.send_line(text)?;
     }
-    let dur = Duration::from_secs(
+
+    let timeout = Duration::from_secs(
         timeout_secs
             .unwrap_or(repl::DEFAULT_WAIT_SECS)
             .clamp(1, repl::MAX_WAIT_SECS),
     );
-    let since = since_offset.unwrap_or(0);
-    // The wait itself runs off-thread, but the `rx.recv()` below must not run
-    // on the async worker either: it blocks for up to ten minutes, starving
-    // the runtime threads every concurrent agent call shares.
-    let (tx, rx) = mpsc::channel();
-    let needle = until;
-    thread::spawn(move || {
-        let _ = tx.send(proc.wait_for(since, needle.as_deref(), dur));
-    });
-    tauri::async_runtime::spawn_blocking(move || rx.recv())
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())
+    let offset = since_offset.unwrap_or(0);
+
+    let turn = tauri::async_runtime::spawn_blocking(move || {
+        proc.wait_for(offset, until.as_deref(), timeout)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    Ok(turn)
 }
 
 #[tauri::command]
@@ -1008,12 +1065,9 @@ pub fn repl_close(state: tauri::State<ShellState>, handle: u32) -> Result<(), St
 #[tauri::command]
 pub fn repl_list(state: tauri::State<ShellState>) -> Result<Vec<repl::ReplInfo>, String> {
     let map = state.repls.read().unwrap();
-    let mut out = Vec::with_capacity(map.len());
-    for (id, p) in map.iter() {
-        out.push(p.info(*id));
-    }
-    out.sort_by_key(|i| i.handle);
-    Ok(out)
+    let mut list: Vec<_> = map.iter().map(|(&handle, p)| p.info(handle)).collect();
+    list.sort_by_key(|i| i.started_at_ms);
+    Ok(list)
 }
 
 /// Collect `node_modules/.bin` directories from `cwd` upward (nearest first),
@@ -1362,49 +1416,236 @@ mod tests_sandbox {
 
     #[test]
     fn validate_shell_command_blocks_metacharacters() {
+        // Whatever can change WHICH program runs, or reach a file, stays out.
         assert!(validate_shell_command("echo hello > out.txt").is_err());
+        assert!(validate_shell_command("echo hello >> out.txt").is_err());
         assert!(validate_shell_command("cat `id`").is_err());
-        assert!(validate_shell_command("echo $HOME").is_err());
+        assert!(validate_shell_command("cat $(echo secret)").is_err());
+        assert!(validate_shell_command("cat file < input").is_err());
+        assert!(validate_shell_command("(git status)").is_err());
+        // A lone `&` backgrounds the command, hiding it from the segment check.
+        assert!(validate_shell_command("git status & git log").is_err());
     }
 
-    /// Env-var values must not carry shell metacharacters. `FOO="$HOME"
-    /// command` would otherwise pass the allowlist because `$HOME` is inside
-    /// quotes, but the shell still expands it.
-    #[test]
-    fn validate_shell_command_blocks_metacharacters_in_env_var_values() {
-        assert!(validate_shell_command(r#"FOO="$HOME" command"#).is_err());
-        assert!(validate_shell_command(r#"FOO='$(whoami)' command"#).is_err());
-        assert!(validate_shell_command(r#"FOO="hello > world" command"#).is_err());
-    }
-
-    /// Simple env-var assignments without metacharacters stay allowed.
+    /// Simple env-var assignments stay allowed, and the program AFTER the
+    /// assignment is still checked (see `allows_simple_env_var_assignments`
+    /// and the assignment tests below). Values carrying `$var` expansions are
+    /// allowed as data per the documented `$` policy above; command
+    /// substitution `$(...)` is refused by the paren metacharacters when
+    /// unquoted, and quoted substitution adds no reach the agent does not
+    /// already have (it may read files and curl them directly).
     #[test]
     fn validate_shell_command_allows_simple_env_var_assignments() {
         assert!(validate_shell_command("DEBIAN_FRONTEND=noninteractive apt-get install -y nmap").is_ok());
         assert!(validate_shell_command("FOO=bar echo hello").is_ok());
         assert!(validate_shell_command("PATH=/usr/bin git status").is_ok());
+        // Several prefixes in a row are all skipped before the program check.
+        assert!(validate_shell_command("CI=true NODE_OPTIONS=--max-old-space-size=4096 pnpm test").is_ok());
+        // The skip cannot launder an unlisted program behind an assignment.
+        assert!(validate_shell_command("FOO=bar shred -u /").is_err());
+        assert!(validate_shell_command("CI=true definitely-not-a-tool --go").is_err());
+        // PowerShell-style assignments are is_variable_assignment's job, not
+        // the POSIX prefix skip: `$x = ...` must not read `$x` as a program.
+        assert!(validate_shell_command("$files = Get-ChildItem; echo $files").is_ok());
     }
 
+    /// A newline used to be neither a metacharacter nor a separator, so it
+    /// passed the whole check and then ran as a second command through `sh -c`.
+    /// `git` is allowlisted and is the first whitespace token, so
+    /// `git status\nrm -rf /` was accepted and did both. That was a hole in the
+    /// allowlist, not a policy choice.
     #[test]
-    fn validate_shell_command_allows_pipelines_and_sleep() {
-        assert!(validate_shell_command("cat file | grep secret").is_ok());
+    fn validate_shell_command_refuses_a_second_command_on_a_new_line() {
+        let err = validate_shell_command("git status\nshred -u /")
+            .expect_err("a newline must not smuggle an unlisted program");
+        assert!(err.contains("'shred'"), "{err}");
+        assert!(validate_shell_command("git status\r\nshred -u /").is_err());
+        assert!(validate_shell_command("pnpm test\nshred -u /").is_err());
+        // A real second command on its own line is still checked and allowed
+        // when its program is fine.
+        assert!(validate_shell_command("git status\ngit log").is_ok());
+    }
+
+    /// The other half of the pair above: a line break is a SEPARATOR, so every
+    /// way a line can start has to be checked the same way. A bare `\r` (an old
+    /// Mac line ending, and what a CRLF file looks like when only half of it is
+    /// stripped), a line continuing a `&&` chain, and an absolute path - which
+    /// `allows_program` accepts without consulting the allowlist - each get a
+    /// case, so the walk cannot be "fixed" into ignoring any of them.
+    #[test]
+    fn validate_shell_command_checks_the_program_after_every_kind_of_line_break() {
+        // A lone CR separates just like a newline.
+        let err = validate_shell_command("git status\rshred -u /")
+            .expect_err("a carriage return must not smuggle an unlisted program");
+        assert!(err.contains("'shred'"), "{err}");
+        // The line after a chain operator is its own segment too.
+        assert!(validate_shell_command("git status &&\nrm -rf /").is_err());
+        assert!(validate_shell_command("git status &&\nshred -u /").is_err());
+        // A rooted path is allowed by `allows_program` (the agent legitimately
+        // runs binaries it built), and that must hold on line two as well.
+        assert!(
+            validate_shell_command("git status\n/opt/termigo/bin/mytool --help").is_ok()
+        );
+        // A newline INSIDE quotes is data for the executing shell, so it is not
+        // a segment boundary and must not be treated as one.
+        assert!(validate_shell_command("echo \"a\nb\"").is_ok());
+        assert!(validate_shell_command("git commit -m 'subject\n\nbody'").is_ok());
+    }
+
+    /// The friction that mattered: a pipe between two allowlisted programs was
+    /// refused 325 times on one install, including the agent's most ordinary
+    /// request (`find ... | head -30`).
+    #[test]
+    fn validate_shell_command_allows_a_pipeline_of_allowlisted_programs() {
+        assert!(validate_shell_command("find /tmp -maxdepth 1 -type f | head -30").is_ok());
+        assert!(validate_shell_command("git log | head -20").is_ok());
         assert!(validate_shell_command("cat file | grep secret | wc -l").is_ok());
-        assert!(validate_shell_command("ps aux | grep node").is_ok());
-        assert!(validate_shell_command("sleep 5").is_ok());
-        assert!(validate_shell_command("cat file | definitely-not-a-tool").is_err());
-        assert!(validate_shell_command("cat file |").is_err());
-        assert!(validate_shell_command("| grep secret").is_err());
+        assert!(validate_shell_command("ls -la | sort | uniq").is_ok());
+    }
+
+    /// A pipeline does not launder an unlisted program either: the pipe is only
+    /// accepted because EVERY segment is still checked.
+    #[test]
+    fn validate_shell_command_refuses_a_pipeline_with_an_unlisted_segment() {
+        let err = validate_shell_command("cat file | shred -u /")
+            .expect_err("an unlisted segment must be refused");
+        assert!(err.contains("'shred'"), "{err}");
+        assert!(validate_shell_command("git log | rm -rf /").is_err());
+        assert!(validate_shell_command("git log | shred -u /").is_err());
+    }
+
+    /// `;` is a separator exactly like `&&`, so each side is checked.
+    #[test]
+    fn validate_shell_command_allows_semicolons_between_allowlisted_programs() {
+        assert!(validate_shell_command("git status; git log").is_ok());
+        let err = validate_shell_command("git status; shred -u /")
+            .expect_err("an unlisted segment must be refused");
+        assert!(err.contains("'shred'"), "{err}");
+    }
+
+    /// Redirections that cannot name a file are removed before the scan:
+    /// `N>&M` joins the process's own streams, `/dev/null` discards on POSIX,
+    /// and `$null` discards on Windows PowerShell (e.g. `2>$null`, `>$null`, `*>$null`).
+    #[test]
+    fn validate_shell_command_allows_stream_joins_and_dev_null() {
+        assert!(validate_shell_command("pnpm test 2>&1").is_ok());
+        assert!(validate_shell_command("pnpm test 1>&2").is_ok());
+        assert!(validate_shell_command("pnpm test > /dev/null").is_ok());
+        assert!(validate_shell_command("pnpm test 2>/dev/null").is_ok());
+        assert!(validate_shell_command("cargo check 2>$null").is_ok());
+        assert!(validate_shell_command("cargo test >$null").is_ok());
+        assert!(validate_shell_command("git status *>$null").is_ok());
+        assert!(validate_shell_command("git status 2>&1 | head -5").is_ok());
+        assert!(validate_shell_command("git log 2>&1 | head -3 | wc -l").is_ok());
     }
 
     #[test]
-    fn validate_shell_command_allows_mkdir_and_rm() {
-        assert!(validate_shell_command("mkdir -p /tmp/test").is_ok());
-        assert!(validate_shell_command("rm -f /tmp/test/foo").is_ok());
-        assert!(validate_shell_command("mkdir -p /tmp/test && rm -f /tmp/test/foo").is_ok());
-        assert!(validate_shell_command("rmdir /tmp/test").is_ok());
-        assert!(validate_shell_command("cp src.txt dst.txt").is_ok());
-        assert!(validate_shell_command("mv src.txt dst.txt").is_ok());
-        assert!(validate_shell_command("del file.txt").is_ok());
+    fn validate_shell_command_allows_pentest_and_recon_tools() {
+        for cmd in [
+            "dnsx -d example.com",
+            "katana -u https://example.com",
+            "amass enum -d example.com",
+            "cmseek -u https://example.com",
+            "arjun -u https://example.com",
+            "testssl.sh https://example.com",
+            "testssl https://example.com",
+            "lynis audit system",
+            "gitleaks detect",
+            "trufflehog git file://.",
+            "weasyprint report.html report.pdf",
+            "whois example.com",
+            "dig example.com",
+            "nslookup example.com",
+            "traceroute example.com",
+            "whatweb https://example.com",
+            "hydra -l user -p pass ssh://example.com",
+            "wafw00f https://example.com",
+            "searchsploit apache",
+            "feroxbuster -u https://example.com",
+            "enum4linux 192.168.1.1",
+            "smbclient -L //192.168.1.1",
+            "showmount -e 192.168.1.1",
+        ] {
+            assert!(validate_shell_command(cmd).is_ok(), "blocked: {cmd}");
+        }
+    }
+
+    /// The exemption is narrow on purpose: anything that names a file, or that
+    /// looks like `/dev/null` without being it, still goes through the scan and
+    /// is refused. `guard_write` exists for the same reason on the write path.
+    #[test]
+    fn validate_shell_command_still_refuses_a_redirection_to_a_real_file() {
+        assert!(validate_shell_command("echo x > /dev/nullx").is_err());
+        assert!(validate_shell_command("echo x > /dev/null.txt").is_err());
+        assert!(validate_shell_command("echo x > ~/.ssh/authorized_keys").is_err());
+        assert!(validate_shell_command("echo x 2>> out.txt").is_err());
+        assert!(validate_shell_command("echo x > out.txt 2>&1").is_err());
+    }
+
+    /// A redirection inside quotes is an argument, not a redirection, so it is
+    /// left to the program and the `>` must not be treated as one.
+    #[test]
+    fn validate_shell_command_treats_a_quoted_redirection_as_data() {
+        assert!(validate_shell_command(r#"grep "2>&1" src/file.ts"#).is_ok());
+        assert!(validate_shell_command(r#"echo "> /dev/null""#).is_ok());
+    }
+
+    /// A chain of allowlisted programs is the case the chaining support exists
+    /// for: `pnpm lint && pnpm test` is how the agent verifies its own work.
+    #[test]
+    fn validate_shell_command_allows_chains_of_allowlisted_programs() {
+        assert!(validate_shell_command("pnpm lint && pnpm test").is_ok());
+        assert!(validate_shell_command("biome lint ./src && tsc --noEmit").is_ok());
+        assert!(validate_shell_command("git status || git log").is_ok());
+        assert!(validate_shell_command("cargo fmt && cargo clippy").is_ok());
+    }
+
+    /// The reason chaining is safe to allow at all: every segment's program is
+    /// checked, not just the first. Validating only the first token is what let
+    /// `git status && rm -rf /` through, because `git` is allowlisted.
+    #[test]
+    fn validate_shell_command_refuses_a_chain_with_an_unlisted_later_segment() {
+        let err = validate_shell_command("git status && shred -u /")
+            .expect_err("a destructive second command must be refused");
+        assert!(err.contains("'shred'"), "{err}");
+        assert!(err.contains("PTY session"), "{err}");
+
+        assert!(validate_shell_command("pnpm test && rm -rf /").is_err());
+        assert!(validate_shell_command("pnpm test || shred -u /").is_err());
+        // Two levels of chaining do not launder the third program either.
+        assert!(
+            validate_shell_command("git status && pnpm test && shred -u f").is_err()
+        );
+    }
+
+    /// A separator inside quotes is data. Splitting on it would turn `echo` into
+    /// a two-segment chain and check a program that is really an argument.
+    #[test]
+    fn validate_shell_command_treats_a_quoted_separator_as_data() {
+        assert!(validate_shell_command(r#"echo "a && b""#).is_ok());
+        assert!(validate_shell_command(r#"echo 'x || y'"#).is_ok());
+        assert!(validate_shell_command(r#"grep "a && b" src/file.ts"#).is_ok());
+    }
+
+    /// A dangling separator leaves a segment with no program to check.
+    #[test]
+    fn validate_shell_command_refuses_an_empty_chain_segment() {
+        assert!(validate_shell_command("git status &&").is_err());
+        assert!(validate_shell_command("&& git status").is_err());
+        assert!(validate_shell_command("git status && ").is_err());
+    }
+
+    /// A binary the agent built is run by path, and that is allowed in a chain
+    /// for the same reason it is allowed on its own: absolute or rooted only.
+    #[test]
+    fn validate_shell_command_allows_a_built_binary_by_path_in_a_chain() {
+        assert!(
+            validate_shell_command("pnpm build && /opt/termigo/target/release/mytool --help").is_ok()
+        );
+        assert!(validate_shell_command(r#"pnpm build && C:\tools\mytool.exe --flag"#).is_ok());
+        // A relative path was never allowed, in a chain or out of one. Asserted
+        // so the boundary is explicit rather than an accident of the allowlist.
+        assert!(validate_shell_command("pnpm build && ./target/release/mytool --help").is_err());
     }
 
     #[test]
@@ -1414,321 +1655,19 @@ mod tests_sandbox {
         assert!(validate_shell_command(r#"echo 'hello | world'"#).is_ok());
     }
 
-    /// Every `&&`/`||` segment is checked against the allowlist, so an
-    /// allowlisted first token cannot smuggle a non-allowlisted command past it.
     #[test]
-    fn validate_shell_command_enforces_allowlist_on_every_segment() {
-        assert!(validate_shell_command("git status && git diff").is_ok());
-        assert!(validate_shell_command("npm test && cargo check").is_ok());
-        assert!(validate_shell_command("git status || git fetch").is_ok());
-        assert!(validate_shell_command("git log && definitely-not-a-tool").is_err());
-        assert!(validate_shell_command("git log || definitely-not-a-tool").is_err());
-        // A dangling operator leaves an empty segment.
-        assert!(validate_shell_command("git status &&").is_err());
-    }
-
-    /// A raw newline is a hidden command separator: the allowlist only sees the
-    /// first line, so it must be refused outright rather than executed.
-    #[test]
-    fn validate_shell_command_rejects_newline_injection() {
-        let err = validate_shell_command("echo hi\nrm -rf /")
-            .expect_err("newline injection must be refused");
-        assert!(err.contains("PTY session"), "{err}");
-        assert!(validate_shell_command("echo hi\r\nwhoami").is_err());
-        // A tab is not a separator and stays allowed.
-        assert!(validate_shell_command("echo hi\tthere").is_ok());
-    }
-
-    #[test]
-    fn validate_shell_command_allows_linux_wsl_and_macos_package_managers() {
-        for cmd in [
-            "apt update",
-            "apt install -y nmap",
-            "apt-get update",
-            "apt-get install -y curl",
-            "apt-cache search sqlmap",
-            "dpkg -l",
-            "dpkg -i tool.deb",
-            "pacman -Syu",
-            "dnf install -y nginx",
-            "yum check-update",
-            "apk add --no-cache git",
-            "zypper refresh",
-            "brew install ripgrep",
-            "brew update",
-            "brew search python",
-            "port install htop",
-            "softwareupdate -l",
-            "pip install requests",
-            "pip3 install termcolor",
-            "pipx install impacket",
-            "uv pip install ruff",
-        ] {
-            assert!(validate_shell_command(cmd).is_ok(), "blocked: {cmd}");
-        }
-    }
-
-    #[test]
-    fn validate_shell_command_allows_sudo_with_allowlisted_tools() {
-        for cmd in [
-            "sudo apt update",
-            "sudo apt-get install -y nmap",
-            "sudo -u root apt install -y curl",
-            "sudo -E apt update",
-            "sudo -S apt update",
-            "sudo -- apt update",
-            "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y nmap",
-            "DEBIAN_FRONTEND=noninteractive apt-get install -y nmap",
-            "sudo brew update",
-            "sudo pacman -Syu",
-            "sudo -l",
-            "sudo --version",
-            "doas apt update",
-            "doas -u root apt install -y htop",
-        ] {
-            assert!(validate_shell_command(cmd).is_ok(), "blocked: {cmd}");
-        }
-    }
-
-    #[test]
-    fn validate_shell_command_refuses_sudo_with_unallowlisted_tools() {
-        assert!(validate_shell_command("sudo evil-binary --flag").is_err());
-        assert!(validate_shell_command("sudo -u root definitely-not-a-tool").is_err());
-        assert!(validate_shell_command("doas definitely-not-a-tool").is_err());
-        assert!(validate_shell_command("sudo rm -f /tmp/test").is_ok());
-    }
-
-    #[test]
-    fn validate_shell_command_allows_su_with_allowlisted_tools() {
-        for cmd in [
-            "su -c \"apt update\"",
-            "su -c 'apt update'",
-            "su --command=\"apt update\"",
-            "su root -c \"apt update\"",
-            "su - root -c \"apt update\"",
-            "su -l root -c \"apt update\"",
-            "su -c \"ls -la\"",
-            "su -c \"git status\"",
-        ] {
-            assert!(validate_shell_command(cmd).is_ok(), "blocked: {cmd}");
-        }
-    }
-
-    #[test]
-    fn validate_shell_command_refuses_su_with_unallowlisted_tools() {
-        assert!(validate_shell_command("su -c \"evil-binary --flag\"").is_err());
-        assert!(validate_shell_command("su root -c \"definitely-not-a-tool\"").is_err());
-        assert!(validate_shell_command("su --command=\"evil-binary\"").is_err());
-    }
-
-    #[test]
-    fn validate_shell_command_sees_through_powershell_command() {
-        // The persistent shell unwraps exactly this form before executing, so
-        // the allowlist must judge the inner script, not `powershell`.
-        for cmd in [
-            "powershell -Command \"Get-ChildItem -Path .\"",
-            "powershell -NoProfile -Command \"Get-Content file.txt\"",
-            "pwsh -c \"git status\"",
-            "powershell -ExecutionPolicy Bypass -Command \"Get-Process\"",
-        ] {
-            assert!(validate_shell_command(cmd).is_ok(), "blocked: {cmd}");
-        }
-    }
-
-    #[test]
-    fn validate_shell_command_refuses_powershell_command_hiding_tools() {
-        // (nmap would NOT qualify: scanners are deliberately allowlisted for
-        // the pentest kit; the scope fence, not this list, constrains them.)
-        assert!(validate_shell_command("powershell -Command \"evil-binary --flag\"").is_err());
-        assert!(validate_shell_command("pwsh -c \"definitely-not-a-tool\"").is_err());
-        assert!(validate_shell_command("powershell -NoProfile -Command \"evil-binary\"").is_err());
-    }
-
-    #[test]
-    fn validate_shell_command_allows_wsl_with_allowlisted_tools() {
-        for cmd in [
-            "wsl apt update",
-            "wsl sudo apt update",
-            "wsl -d Kali sudo apt-get install -y nmap",
-            "wsl -u root apt install -y curl",
-            "wsl --distribution=Kali apt update",
-            "wsl -e git status",
-            "wsl -e cargo test",
-            "wsl --exec ls -la",
-            "wsl -d Ubuntu -e pnpm test",
-            "wsl --status",
-            "wsl -l -v",
-            "wslpath -w /etc",
-            "wsl rm -f /tmp/test",
-        ] {
-            assert!(validate_shell_command(cmd).is_ok(), "blocked: {cmd}");
-        }
-        assert!(validate_shell_command("wsl definitely-not-a-tool").is_err());
-        assert!(validate_shell_command("wsl -d Kali definitely-not-a-tool").is_err());
-        assert!(validate_shell_command("wsl sudo definitely-not-a-tool").is_err());
-        assert!(validate_shell_command("wsl -e definitely-not-a-tool").is_err());
-    }
-
-    #[test]
-    fn validate_shell_command_allows_ssh_and_remote_transfer() {
-        for cmd in [
-            "ssh user@vps-server uptime",
-            "ssh -p 2222 root@192.168.1.100 uname -a",
-            "ssh -i /path/to/key.pem ubuntu@ec2-host df -h",
-            "scp local.txt user@vps:/tmp/local.txt",
-            "sftp user@vps",
-            "rsync -avz ./dist user@vps:/var/www/html",
-            "wsl ssh user@vps uptime",
-            "sudo ssh user@vps",
-        ] {
-            assert!(validate_shell_command(cmd).is_ok(), "blocked: {cmd}");
-        }
-    }
-
-    #[test]
-    fn validate_shell_command_allows_expanded_developer_and_system_tools() {
-        for cmd in [
-            "npx create-next-app@latest my-app",
-            "npx tsc --noEmit",
-            "npx tsx prisma/seed.ts",
-            "bunx prettier --check .",
-            "prisma generate",
-            "next build",
-            "docker ps",
-            "docker-compose up -d",
-            "podman images",
-            "rustc --version",
-            "rustup show",
-            "cargo-nextest run",
-            "cargo-clippy --all-targets",
-            "pipenv install",
-            "poetry run pytest",
-            "conda list",
-            "dig example.com",
-            "host example.com",
-            "nslookup example.com",
-            "ping -c 4 127.0.0.1",
-            "xargs -n 1 echo",
-            "tshark -r capture.pcap",
-        ] {
-            assert!(validate_shell_command(cmd).is_ok(), "blocked: {cmd}");
-        }
-    }
-
-    #[test]
-    fn validate_shell_command_allows_powershell_and_windows_tools() {
-        for cmd in [
-            "Get-ChildItem -Path ./src",
-            "Get-Content package.json",
-            "Get-Item C:\\project",
-            "Get-Location",
-            "Set-Location C:\\project",
-            "Test-Path ./package.json",
-            "Select-Object -First 10",
-            "Select-String -Pattern \"fn\" mod.rs",
-            "Remove-Item -Recurse ./dist",
-            "Start-Sleep -Seconds 2",
-            "findstr /i \"hello\" test.txt",
-            "tasklist",
-        ] {
-            assert!(validate_shell_command(cmd).is_ok(), "blocked: {cmd}");
-        }
-    }
-
-    #[test]
-    fn validate_shell_command_allows_semicolons_and_stderr_redirect() {
-        assert!(validate_shell_command("cd dir; npx create-next-app").is_ok());
-        assert!(validate_shell_command(r#"cd C:\project\sampel; npx create-next-app@latest masjid-raya-pro 2>&1"#).is_ok());
-        assert!(validate_shell_command("git status; git branch;").is_ok());
-        assert!(validate_shell_command("npm test 2>&1").is_ok());
-        assert!(validate_shell_command("Get-Content file.txt; Select-String pattern").is_ok());
-        assert!(validate_shell_command("; git status").is_err());
-        assert!(validate_shell_command("git status; definitely-not-a-tool").is_err());
-    }
-
-    #[test]
-    fn validate_shell_command_allows_relative_path_tools() {
-        assert!(validate_shell_command("./node_modules/.bin/vitest run").is_ok());
-        assert!(validate_shell_command(r#".\node_modules\.bin\tsc.cmd --noEmit"#).is_ok());
-        assert!(validate_shell_command("./node_modules/.bin/prisma migrate").is_ok());
-        assert!(validate_shell_command("./bin/npx --version").is_ok());
-        assert!(validate_shell_command("./node_modules/.bin/definitely-not-allowed").is_err());
-    }
-
-    #[test]
-    fn validate_shell_command_allows_full_stack_tools_and_discard_redirects() {
-        for cmd in [
-            "sqlite3 database.db \".tables\"",
-            "duckdb -c \"SELECT 1\"",
-            "psql -U postgres -d mydb",
-            "drizzle-kit generate",
-            "nuxt build",
-            "cross-env NODE_ENV=production next build",
-            "rimraf dist",
-            "cypress run",
-            "tree src",
-            "Get-Command npx",
-            "Resolve-Path ./src",
-            "Start-Process node",
-        ] {
-            assert!(validate_shell_command(cmd).is_ok(), "blocked: {cmd}");
-        }
-
-        assert!(validate_shell_command("npm run build > /dev/null 2>&1").is_ok());
-        assert!(validate_shell_command("cargo check > /dev/null").is_ok());
-        assert!(validate_shell_command("npm test > nul 2>&1").is_ok());
-        assert!(validate_shell_command("npm test 2>nul").is_ok());
-        assert!(validate_shell_command("npm test 2> /dev/null").is_ok());
-        assert!(validate_shell_command("npm test 1> nul").is_ok());
-        assert!(validate_shell_command("npm test &> /dev/null").is_ok());
-        assert!(validate_shell_command("npm test 2>$null").is_ok());
-        assert!(validate_shell_command("npm test >$null").is_ok());
-        assert!(validate_shell_command("npm test 2> $null").is_ok());
-        assert!(validate_shell_command("npm audit --json | ConvertFrom-Json").is_ok());
-        assert!(validate_shell_command("npm test > arbitrary_file.txt").is_err());
-    }
-
-    #[test]
-    fn validate_shell_command_allows_powershell_null_discard_target() {
-        assert!(validate_shell_command("npm test 2>$null").is_ok());
-        assert!(validate_shell_command("npm test >$null").is_ok());
-        assert!(validate_shell_command("npm test 2> $null").is_ok());
-        // `$` stays blocked everywhere except as a discard target.
-        assert!(validate_shell_command("npm test $null").is_err());
-        assert!(validate_shell_command("npm test $(whoami)").is_err());
-    }
-
-    #[test]
-    fn metacharacter_error_names_a_supported_alternative() {
-        match validate_shell_command("if (Test-Path x) { echo y }") {
-            Ok(_) => panic!("grouping with parentheses must be rejected"),
-            Err(e) => {
-                assert!(e.contains("2>$null"), "{e}");
-                assert!(e.contains("PTY session"), "{e}");
-            }
-        }
-    }
-
-    /// An escaped quote (odd number of backslashes before it) keeps the quote open,
-    /// while an even number of backslashes before a quote closes it, so any
-    /// subsequent semicolon is recognized as a segment boundary.
-    #[test]
-    fn validate_shell_command_counts_backslashes_before_quotes() {
-        // Even number of backslashes before a quote closes the quote,
-        // so a subsequent semicolon starts a new segment that must be allowlisted.
-        assert!(validate_shell_command(r#"cat "file.txt\\"; definitely-not-a-tool"#).is_err());
-        assert!(validate_shell_command(r#"cat "file.txt\\"; git status"#).is_ok());
-
-        // Odd number of backslashes before a quote means the quote is escaped
-        // and stays open, so semicolons inside remain part of the argument.
-        assert!(validate_shell_command(r#"cat "file.txt\"; echo safe""#).is_ok());
-
-        // Escaped quote left unclosed at EOF must be rejected.
-        assert!(validate_shell_command(r#"echo foo\"bar""#).is_err());
-        assert!(validate_shell_command(r#"echo "foo\"bar"#).is_err());
-
-        // A normal quote pair is still accepted when followed by safe text.
-        assert!(validate_shell_command(r#"echo "hello world""#).is_ok());
+    fn validate_shell_command_allows_powershell_variables() {
+        assert!(validate_shell_command("Get-ChildItem $env:USERPROFILE").is_ok());
+        assert!(validate_shell_command("Get-ChildItem -Path $path").is_ok());
+        assert!(validate_shell_command("echo ${env:PATH}").is_ok());
+        assert!(validate_shell_command("echo $true").is_ok());
+        assert!(validate_shell_command("echo $null").is_ok());
+        assert!(validate_shell_command(r#"$dir = "C:\temp"; Get-ChildItem $dir"#).is_ok());
+        assert!(validate_shell_command("$files = Get-ChildItem; echo $files").is_ok());
+        // Dynamic command execution through variables as program name is refused
+        assert!(validate_shell_command("$CMD -rf /").is_err());
+        // Subcommand execution is refused
+        assert!(validate_shell_command("Get-ChildItem $(echo secret)").is_err());
     }
 }
 

@@ -6,37 +6,10 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Added
-
-- Release automation via GitHub Actions (`release.yml`).
-- Bersihkan berkas log build yang tidak perlu dari direktori proyek.
-
-### Changed
-
-- Bump versi aplikasi ke 0.9.18 di `package.json`, `Cargo.toml`, dan `tauri.conf.json`.
-
-## [0.9.18] - 2026-01-16
+## [0.9.15] - 2026-09-16
 
 ### Added
 
-- **Global subagent concurrency pool and hierarchical slot yielding.** `SubagentConcurrencyPool`
-  (`src/modules/ai/lib/subagentPool.ts`) caps active concurrent subagents across the app (limit 4).
-  Parents yield their concurrency slot via `ctx.yieldSlot()` while waiting on child tasks,
-  preventing hierarchical deadlocks. Nested batch subagents are bounded to 2 concurrent workers.
-- **Cross-platform package managers and privilege elevation in shell sandbox.** `apt`, `apt-get`,
-  `apt-cache`, `dpkg`, `dpkg-query`, `pacman`, `dnf`, `yum`, `rpm`, `apk`, `zypper`, `snap`, `flatpak`,
-  `pip`, `pip3`, `pipx`, `uv` (Linux/WSL) and `brew`, `port`, `mas`, `softwareupdate`, `pkgutil`, `installer`
-  (macOS) are added to `SANDBOX_ALLOWLIST` in `src-tauri/src/modules/shell/mod.rs`. Privilege elevation wrappers
-  (`sudo`, `doas`) unwrap options and flags (including `-u <user>`, `-g <group>`, `-E`) to validate the target
-  command against the allowlist, preventing unallowlisted commands (like `sudo rm -rf /`) while allowing package
-  installations (`sudo apt update`, `sudo apt-get install`, `brew install`).
-- **Windows shell sandbox execution allowlist.** `cmd`, `cmd.exe`, `powershell`, `pwsh`, and `set`
-  are explicitly allowlisted on Windows in `src-tauri/src/modules/shell/mod.rs`, enabling agent tools
-  to execute `cmd /c` batch commands and environment inspection while enforcing path and risk filtering.
-- **Resilient tool call auto-repair and parameter normalization.** `repairToolCall.ts` automatically
-  repairs common model parameter aliases (`query` / `path` for `grep` and `glob`, `max_results`
-  clamped up to 100 for `code_search`, and string-to-array coercion for `replace_in_files`), and maps
-  equivalent tool signatures (`view_file` -> `read_file`, `run_command` -> `bash_run`, `replace_file_content` -> `edit`).
 - **Subagents can run in their own git worktree.** `run_subagent` and
   `run_subagents` take an `isolate` flag, which gives each writing subagent a
   private worktree under `.termigo/worktrees/`. Parallel subagents otherwise edit
@@ -52,28 +25,103 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- **A workflow step can no longer dispatch into another run's tool set.**
-  `buildTools` published its completed tool map to a module-level
-  `currentToolRegistry`, and `runWorkflow` defaulted its `dispatch` parameter to
-  a reader of that global. A workflow that spawned a subagent therefore let the
-  subagent's `buildTools` overwrite the parent's registry, so the parent's
-  remaining steps dispatched into the child's tool set - the same leak the
-  in-run snapshot was added to prevent, still reachable through the default
-  argument. The dispatcher is now required, and each `buildTools` call binds its
-  workflow steps to a run-scoped cell that no other run can reach.
-  `currentToolRegistry`, `dispatchTool` and `resetToolRegistry` are gone.
-
-- **React 19 concurrent mode tabs state race.** Decoupled `setActiveId` from `setTabs` updaters in
-  `src/modules/tabs/lib/useTabs.ts`, preventing React 19 concurrent-mode state race conditions during
-  tab close and workspace cleanup.
-- **Stale closure in terminal session initialization.** `useTerminalSession.ts` tracks `openSession`
-  through a ref to avoid stale closures when switching between local PTYs and SSH sessions.
-- **Subagent workspace isolation from remote SSH sessions.** Local workspace subagents isolate
-  their workspace root from remote SSH tabs, preventing local commands from executing against remote terminals.
-- **Humanized rate limit and retry error messages.** Unwrapped confusing wrappers like `Failed after 3 attempts`
-  in `errorMessage.ts`, presenting clear and actionable notifications for concurrency and rate limits.
-
 - **A worktree sandbox from a previous run is visible again, and removable.**
+  The sandbox registry is in memory only, so after a restart `worktree_list`
+  reported nothing while `.termigo/worktrees/<id>` directories and
+  `termigo-sandbox/<id>` branches were still on disk. They could not be removed
+  either, because `worktree_discard` looks the sandbox up by id. Listing now merges
+  the registry with what git reports, marking the ones this process did not create
+  as `orphaned`, and discard falls back to the discovered entry. A user's own
+  worktrees are never reported as sandboxes - the report is what discard acts on.
+- **Four agent guards that looked live were not.** Reading the packaged app's
+  log next to the code turned up guards that were declared, wired into the
+  cleanup path, and never armed - so each failure mode they existed for was
+  unwatched while the surrounding code read as though it was covered.
+  - The *tool-result delivery* guard never ran at all. `onChunk` tested the
+    watchdog directive first, and a `tool-result` maps to "rearm" (correct - the
+    tool is done and the model is being asked again), so the generic branch
+    consumed the chunk and the `tool-result` branch below it was unreachable.
+    The 60s "tool answered, then the model went quiet" timeout was dead code.
+    Chunk handling now derives all three clocks from one pure function, so the
+    ordering mistake is no longer expressible; a `tool-result` arms both the
+    model and the delivery clocks.
+  - *Parallel tool calls leaked the execution timer.* A step that fans out
+    several calls emits one `tool-call` chunk each, and the handler assigned
+    straight into the timer variable, so the second overwrote the first handle
+    while that timer was still pending. The orphan was unreachable from the
+    cleanup path and kept re-arming itself off the shared activity clock, so an
+    already-finished run could still be aborted with a spurious warning. Arming
+    now clears first, so N parallel calls cost exactly one timer.
+  - The delivery guard also *aborted unconditionally on expiry*, unlike every
+    other guard here, which asks the shared activity clock first. That is not
+    pedantry: a subagent's model calls and a long tool's heartbeat both mark
+    activity without producing a chunk on the parent's stream, so a bare timer
+    would have killed a run that was demonstrably alive.
+  - The *message-count cap could corrupt the request.* It trimmed the oldest
+    messages with a plain slice, and when the cut fell between an assistant
+    message carrying a `tool-call` and the `tool` message carrying its result,
+    the surviving half was a result with no call to answer. Providers reject
+    that outright, so a cap that exists to bound cost would instead turn a long
+    session into a hard 400 on every subsequent run. The cut now moves to a
+    boundary where the call/result balance is zero - the same invariant the
+    verified-prefix pruning has always enforced - and leaves the history alone
+    when no safe boundary exists, because an over-long but well-formed request
+    still succeeds.
+- **The repetition guard's diagnostic never reached the log file.** It logged
+  with `console.log`, which in a packaged app goes nowhere: nothing attaches the
+  webview console to the log plugin. The guard fired 19 times in one session -
+  including a run that burned 1.2M input tokens - and not one line named the
+  repeating tool, which is the only actionable part of it. The run line said
+  `stop tool-repetition` and nothing said *what* repeated. Now mirrored to the
+  file log.
+- **The auto-update check logged an error on every start.** The updater endpoint
+  answers 404, because releases are built with `createUpdaterArtifacts: false`
+  and so have never carried the `latest.json` manifest the plugin fetches. The
+  plugin also ignores `"active": false` in `tauri.conf.json` - v2 has no such
+  field - so the check ran regardless, and the resulting error is logged from
+  Rust where the frontend cannot suppress it. The app now asks the GitHub API
+  first on every platform and only invokes the plugin when the release actually
+  carries the manifest; otherwise it offers the release page. This also unifies
+  a version comparison that Linux used to do through the API and Windows/macOS
+  through the plugin, and the manual-update dialog no longer shows Linux distro
+  commands on other platforms.
+- **A failing fire-and-forget could take the process down while reporting
+  itself.** Its error handler called the log plugin, which rejects when there is
+  no host to talk to - a unit test, or a webview before the IPC bridge is up. An
+  error handler that itself rejects produces an *unhandled* rejection, which in
+  Node is a process-level crash risk, and it masked the original failure it was
+  trying to report. The reporter can no longer throw.
+- **`pnpm format:check` was red on Windows and green in CI.** The repository's
+  blobs are LF-only and CI runs on Linux, but `core.autocrlf=true` rewrites every
+  Windows checkout to CRLF while the formatter defaults to LF - so all 917 source
+  files were reported unformatted on a Windows machine and none in CI. Nobody
+  could distinguish a real formatting problem from the artifact, and "fixing" it
+  rewrote every line of every file touched. `.gitattributes` now pins `eol=lf`
+  for the source extensions, which overrides `core.autocrlf` and holds without
+  asking each contributor to change their git config. The vendored crate tree is
+  explicitly excluded, since some upstream blobs contain CR as real content.
+- **Formatting drift, and the gate that should have caught it.** `biome.json`
+  configures the formatter and `package.json` has the script, but no CI job ever
+  ran it, so 338 files drifted from the project's own configured style. CI now
+  runs `format:check`. Rewrapping those files also detached six `biome-ignore`
+  suppressions from the lines they covered - a suppression only applies to the
+  *next* line, and wrapping moved the offending construct two lines down - which
+  brought the warnings back and, in one file, turned two comments into *unused*
+  suppressions that biome reports as errors. All six are re-anchored.
+
+### Changed
+
+- **The repository no longer tracks 24,620 vendored crate files.** They were
+  95% of everything tracked here and had grown `.git` to 180 MB, and no build
+  path ever read them: there is no `.cargo/config.toml`, nothing sets
+  `CARGO_HOME` to the project, and the VPS scripts that mention `.cargo` all
+  mean the user's own `~/.cargo`. They arrived via the agent's auto-checkpoint,
+  which commits the whole working tree - the same mechanism that had previously
+  swept two ~10 MB binaries and 55 unrelated files into junk commits. A 13.5 MB
+  Linux build artifact and a scratch reference directory from the same sweep are
+  untracked too. Nothing was deleted from disk.
+
+
   The sandbox registry is in memory only, so after a restart `worktree_list`
   reported nothing while `.termigo/worktrees/<id>` directories and
   `termigo-sandbox/<id>` branches were still on disk. They could not be removed
@@ -126,7 +174,7 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a newline. Searching across lines is a different tool's job.
 - **A dropped SSH connection is no longer reported as a successful exit.** When
   the link to a remote host ended without the remote sending an exit status, the
-  session emitted `exit 0` - indistinguishable from a command that finished
+  session emitted `exit 0` — indistinguishable from a command that finished
   cleanly, so a connection that died mid-command read as success. A real exit
   status could also be overwritten: the close path ran *after* the status arrived
   and replaced the true code with a hardcoded zero, so `exit 3` reached the UI as
@@ -135,7 +183,7 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the session cleanly rather than as a failure.
 - **The control protocol accepts a compatible range instead of exact equality.**
   The app and the Go CLI are published as separate release assets, so a
-  half-upgraded install - new app, older CLI - is a normal state, and the old
+  half-upgraded install — new app, older CLI — is a normal state, and the old
   check (`protocol != PROTOCOL_VERSION`) turned it into a dead control channel
   with the message "unsupported". A client older than the app is now served, since
   it speaks a subset of the protocol; only a client *newer* than the app is still
@@ -145,7 +193,7 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`scripts/deploy-termigo.sh` snapshots the data directory with the binary.**
   The stores (settings, sessions, trajectory, secrets, webview local storage) live
   in the app's data directory, not next to the binary, and a rollback restored only
-  the binary - so the previous build started against data the new build had already
+  the binary — so the previous build started against data the new build had already
   rewritten, and settings were lost instead of recovered. The script now takes a
   timestamped `termigo.prev-data-*.tgz` while the service is stopped (the last
   consistent moment, before the new build can touch anything) and restores it

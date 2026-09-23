@@ -10,7 +10,6 @@ import { buildSkillRegistryTools } from "../lib/skillRegistry";
 import { markRunActivity, startActivityHeartbeat } from "../lib/streamWatchdog";
 import { useApprovalQueue } from "../store/approvalQueueStore";
 import { buildManagedAgentTools } from "./agent";
-import { buildArtifactTools } from "./artifacts";
 import { buildBrowserTools } from "./browser";
 import { buildCodeSearchTools } from "./codeSearch";
 import { buildDevServerTools } from "./devServer";
@@ -33,7 +32,6 @@ import { buildPdfTools } from "./pdf";
 import { buildPolicyTools } from "./policyTools";
 import { buildProcessTools } from "./process";
 import { buildPtyDriverTools } from "./ptyDriver";
-import { buildReplTools } from "./repl";
 import { buildReplaceTools } from "./replace";
 import { buildReviewTools } from "./review";
 import { buildSearchTools } from "./search";
@@ -42,13 +40,11 @@ import { buildSelfImprovementTools } from "./selfImprovement";
 import { buildShellTools } from "./shell";
 import { buildSkillTools } from "./skills";
 import { buildSqlTools } from "./sql";
-import { buildSshTools } from "./ssh";
 import { buildSubagentTools } from "./subagent";
 import { buildSystemTools } from "./system";
 import { buildTelegramTools } from "./telegram";
 import { buildTerminalTools } from "./terminal";
 import { buildTestLoopTools } from "./testLoopTools";
-import { buildThinkTools } from "./think";
 import { buildTodoTools } from "./todo";
 import { buildUnknownToolFallback, UNKNOWN_TOOL_NAME } from "./toolFallback";
 import { buildVerifyTools } from "./verify";
@@ -123,12 +119,35 @@ export function withToolLifecycle<
 }
 
 /**
- * Look up and invoke a registered tool by name against a specific registry.
- *
- * This is the bridge that lets JSON-defined workflow steps and orchestration
- * pipelines call any tool the agent can call. The registry is passed in
- * explicitly so each agent run dispatches only into its own tool set.
+ * The currently-registered tool map, set by `buildTools` each time the agent
+ * builds its tool set. The workflow and orchestrator engines use this to
+ * dispatch JSON-defined steps to the actual tool implementations.
  */
+let currentToolRegistry: Record<string, unknown> = {};
+
+/**
+ * Reset the registry to empty. Used by tests so one suite's `buildTools`
+ * call cannot leak into the next.
+ */
+export function resetToolRegistry(): void {
+  currentToolRegistry = {};
+}
+
+/**
+ * Look up and invoke a registered tool by name. This is the bridge that lets
+ * JSON-defined workflow steps and orchestration pipelines call any tool the
+ * agent can call.
+ *
+ * The registry is set by `buildTools` at the start of each agent run, so a
+ * step always dispatches to the tool set the current run was built with.
+ */
+async function dispatchTool(
+  name: string,
+  args: Record<string, unknown>,
+): Promise<unknown> {
+  return dispatchRegisteredTool(currentToolRegistry, name, args);
+}
+
 async function dispatchRegisteredTool(
   registry: Record<string, unknown>,
   name: string,
@@ -202,18 +221,14 @@ export function buildTools(
   opts: { findToolsName?: string } = {},
 ) {
   // A workflow can spawn a subagent, and that subagent builds another toolset.
-  // Keep workflow steps bound to this run's completed snapshot: the set is only
-  // complete after wrapping, so the dispatcher reads a run-scoped cell that is
-  // filled in at the end of this function. A shared registry would let the
-  // child's `buildTools` overwrite the parent's, and a step would silently
-  // dispatch into the child's tool set.
-  const runTools: { registry?: Record<string, unknown> } = {};
+  // Keep workflow steps bound to this run's completed snapshot so they cannot
+  // fall through the mutable module-level registry into the child's context.
+  let dispatchForThisRun = dispatchTool;
   const workflowTools = buildWorkflowTools(ctx, (name, args) =>
-    dispatchRegisteredTool(runTools.registry ?? {}, name, args),
+    dispatchForThisRun(name, args),
   );
   const partial = {
     ...buildFsTools(ctx),
-    ...buildArtifactTools(),
     ...buildFileOpsTools(ctx),
     ...buildFetchTools(),
     ...buildForwardTools(ctx),
@@ -223,11 +238,8 @@ export function buildTools(
     ...buildSearchHistoryTools(),
     ...buildSelfImprovementTools(),
     ...buildShellTools(ctx),
-    ...buildReplTools(ctx),
-    ...buildSshTools(ctx),
     ...buildSubagentTools(ctx, subagentDepth),
     ...buildTerminalTools(ctx),
-    ...buildThinkTools(),
     ...buildTodoTools(ctx),
     ...buildMemoryTools(ctx),
     ...buildElicitationTools(),
@@ -279,6 +291,10 @@ export function buildTools(
     }),
   };
 
+  // Store a reference so the workflow / orchestrator engines can dispatch
+  // JSON-defined steps to the real tool implementations.
+  currentToolRegistry = base as unknown as Record<string, unknown>;
+
   // Wrap every tool with lifecycle hooks. The wrapper is transparent: it
   // fires PreToolUse before the real execute and PostToolUse after, and
   // swallows any hook failure so a broken hook never changes the result.
@@ -288,71 +304,65 @@ export function buildTools(
   // type-checking.
   const wrapped: Record<string, unknown> = {};
   for (const [name, tool] of Object.entries(base)) {
-    let wrappedTool = tool as unknown as {
-      execute: (
-        args: Record<string, unknown>,
-        options: { toolCallId?: string; abortSignal?: AbortSignal },
-      ) => Promise<unknown>;
-    };
+    let wrappedTool = withToolLifecycle(
+      name,
+      tool as unknown as {
+        execute: (
+          args: Record<string, unknown>,
+          options: { toolCallId?: string },
+        ) => Promise<unknown>;
+      },
+      {
+        firePreToolHook: ctx.firePreToolHook,
+        firePostToolHook: ctx.firePostToolHook,
+      },
+    ) as unknown;
     // Post-execution confirmation (BatikCode parity): when the preference is
     // on, mutating tools pause after a successful run and ask the user to
     // Keep or Revert the change before the agent continues.
     if (POST_EXECUTE_CONFIRM_TOOLS.has(name)) {
       wrappedTool = withPostExecuteConfirm(
         name,
-        wrappedTool,
+        wrappedTool as {
+          execute: (
+            args: Record<string, unknown>,
+            options: { toolCallId?: string; abortSignal?: AbortSignal },
+          ) => Promise<unknown>;
+        },
         ctx,
-      ) as unknown as {
-        execute: (
-          args: Record<string, unknown>,
-          options: { toolCallId?: string; abortSignal?: AbortSignal },
-        ) => Promise<unknown>;
-      };
+      ) as unknown;
     }
     // Automatic verification (full-agentic loop): when the preference is on, a
     // successful edit folds a best-effort format + lint outcome into the tool
     // result so the model sees whether the change is valid.
     wrappedTool = withAutoVerify(
       name,
-      wrappedTool,
-      ctx,
-    ) as unknown as {
-      execute: (
-        args: Record<string, unknown>,
-        options: { toolCallId?: string; abortSignal?: AbortSignal },
-      ) => Promise<unknown>;
-    };
-    // Wrap with lifecycle hooks on the OUTSIDE so the heartbeat is maintained
-    // while post-execution confirmation or verification is awaiting, preventing
-    // the silence/tool watchdog from prematurely aborting live user review.
-    wrappedTool = withToolLifecycle(
-      name,
-      wrappedTool,
-      {
-        firePreToolHook: ctx.firePreToolHook,
-        firePostToolHook: ctx.firePostToolHook,
+      wrappedTool as {
+        execute: (
+          args: Record<string, unknown>,
+          options: { toolCallId?: string; abortSignal?: AbortSignal },
+        ) => Promise<unknown>;
       },
-    ) as unknown as {
-      execute: (
-        args: Record<string, unknown>,
-        options: { toolCallId?: string; abortSignal?: AbortSignal },
-      ) => Promise<unknown>;
-    };
+      ctx,
+    ) as unknown;
     wrapped[name] = wrappedTool;
   }
   const wrappedBase = wrapped as typeof base;
-  const skillTools = buildSkillTools(ctx, Object.keys(wrappedBase));
-  const full = {
-    ...wrappedBase,
-    ...skillTools,
-  } as const;
-
-  runTools.registry = full as unknown as Record<string, unknown>;
+  currentToolRegistry = wrappedBase as unknown as Record<string, unknown>;
+  dispatchForThisRun = (name, args) =>
+    dispatchRegisteredTool(
+      wrappedBase as unknown as Record<string, unknown>,
+      name,
+      args,
+    );
 
   // Skill tools last, and told what the others are called: the dependency
   // checker compares a skill against the real registry rather than a list kept
   // by hand, so adding or renaming a tool later cannot leave the check stale.
-  return full;
+  return {
+    ...wrappedBase,
+    ...buildSkillTools(ctx, Object.keys(wrappedBase)),
+  } as const;
 }
 
 export type ChatTools = ReturnType<typeof buildTools>;

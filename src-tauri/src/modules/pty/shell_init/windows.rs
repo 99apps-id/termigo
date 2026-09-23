@@ -1,6 +1,7 @@
-use std::ffi::OsString;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use tempfile::NamedTempFile;
 
 use portable_pty::CommandBuilder;
 
@@ -386,7 +387,9 @@ pub fn list_shells() -> Vec<ShellInfo> {
             .join("powershell.exe"),
         true,
     );
-    add(&mut out, "Command Prompt", system32.join("cmd.exe"), false);
+    // `cmd.exe` is intentionally omitted: it does not emit OSC 7/133 so it
+    // cannot report cwd, and `sanitize_shell_override` would otherwise accept
+    // it as an override, breaking tab cwd tracking silently.
     if let Some(p) = git_bash_path() {
         add(&mut out, "Git Bash", p, true);
     }
@@ -457,14 +460,17 @@ fn write_if_changed(path: &Path, content: &str) -> Result<(), String> {
             return Ok(());
         }
     }
-    let mut tmp: OsString = path.as_os_str().to_owned();
-    tmp.push(".__termigo_tmp__");
-    let tmp = PathBuf::from(tmp);
-    fs::write(&tmp, content).map_err(|e| format!("write {}: {e}", tmp.display()))?;
-    fs::rename(&tmp, path).map_err(|e| {
-        let _ = fs::remove_file(&tmp);
-        format!("rename {} -> {}: {e}", tmp.display(), path.display())
-    })
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("write_if_changed: no parent for {}", path.display()))?;
+    let mut tmp = NamedTempFile::new_in(parent)
+        .map_err(|e| format!("tempfile in {}: {e}", parent.display()))?;
+    tmp.write_all(content.as_bytes())
+        .map_err(|e| format!("write temp: {e}"))?;
+    tmp.flush().map_err(|e| format!("flush temp: {e}"))?;
+    tmp.persist(path)
+        .map_err(|e| format!("persist {}: {e}", path.display()))?;
+    Ok(())
 }
 
 #[cfg(test)]

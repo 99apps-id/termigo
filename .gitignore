@@ -65,6 +65,13 @@ cli/bin/
 # Agent session memory and workspace-local agent state
 .termigo/
 
+# Local Cargo registry/cache. This is CARGO_HOME scratch, never source: it was
+# committed once by autoCheckpoint (commit c1393dfd "checkpoint: auto before
+# run") and added 24,620 files / 325 MB, which made every `git worktree add`
+# time out at 120s and broke subagent isolation. The nix package fetches release
+# tarballs, not this directory, so nothing depends on tracking it.
+.cargo/
+
 # Local security audit reports (not for public repo)
 SECURITY-AUDIT-*.md
 

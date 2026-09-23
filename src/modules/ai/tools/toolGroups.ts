@@ -149,9 +149,9 @@ export const TOOL_GROUPS: readonly ToolGroup[] = [
     description:
       "Drive a full-screen TUI programmatically: read the screen, send keys, wait for a pattern.",
     tools: [
-      "pty_session",
       "pty_read_screen",
       "pty_send_input",
+      "pty_session",
       "pty_wait_for_pattern",
     ],
   },
@@ -193,25 +193,6 @@ export const TOOL_GROUPS: readonly ToolGroup[] = [
     description:
       "Send a file or a message to your paired Telegram chat, so a long run can report to you while you are away from the desk.",
     tools: ["telegram_send_document", "telegram_send_message"],
-  },
-  {
-    id: "repl",
-    label: "Interactive REPL processes",
-    description:
-      "Drive interactive command-line debuggers (pdb, gdb, dlv, node inspect) through a persistent stdio session.",
-    tools: ["repl_start", "repl_send", "repl_stop", "repl_list"],
-  },
-  {
-    id: "ssh",
-    label: "Remote SSH & VPS management",
-    description:
-      "Connect to remote servers, list saved SSH connections, and execute remote commands via SSH.",
-    tools: [
-      "ssh_list_connections",
-      "ssh_connect",
-      "ssh_run_command",
-      "ssh_active_session",
-    ],
   },
 ];
 

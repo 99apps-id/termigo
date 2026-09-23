@@ -46,8 +46,7 @@ export const useDiffCommentStore = create<DiffCommentState>((set) => ({
         createDiffComment(filePath, lineNumber, comment, originalLine),
       ),
     })),
-  remove: (id) =>
-    set((s) => ({ batch: removeCommentFromBatch(s.batch, id) })),
+  remove: (id) => set((s) => ({ batch: removeCommentFromBatch(s.batch, id) })),
   clearFile: (filePath) =>
     set((s) => ({ batch: clearCommentsForFile(s.batch, filePath) })),
   clear: () => set({ batch: createEmptyDiffBatch() }),

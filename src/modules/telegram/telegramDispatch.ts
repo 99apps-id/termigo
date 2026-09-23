@@ -587,7 +587,6 @@ export async function runMirror(signal: AbortSignal): Promise<void> {
               chatStatus,
               state.agentMeta.status,
               pending.length > 0,
-              activeTools,
             ) ||
             activeTools
           ) {
@@ -638,7 +637,7 @@ async function waitForReply(
     );
     const activeTools = hasActiveToolCalls(chat);
     const busy =
-      runBusy(chatStatus, appStatus, pending.length > 0, activeTools) ||
+      runBusy(chatStatus, appStatus, pending.length > 0) ||
       activeTools;
     if (busy) {
       everBusy = true;
@@ -785,12 +784,8 @@ export async function runAgentAndStream(
           );
           const activeTools = hasActiveToolCalls(currentChat);
           const busy =
-            runBusy(
-              currentChatStatus,
-              currentAppStatus,
-              pending.length > 0,
-              activeTools,
-            ) || activeTools;
+            runBusy(currentChatStatus, currentAppStatus, pending.length > 0) ||
+            activeTools;
           if (busy) {
             await sendTyping(chatId, signal).catch(() => {});
           }
@@ -904,12 +899,8 @@ export async function runAgentAndStream(
           );
           const activeTools = hasActiveToolCalls(store.getChat(sessionId));
           const busy =
-            runBusy(
-              chatStatus,
-              appStatus,
-              pendingApprovals.length > 0,
-              activeTools,
-            ) || activeTools;
+            runBusy(chatStatus, appStatus, pendingApprovals.length > 0) ||
+            activeTools;
           // An approval nobody answers is the one state that never resolves on
           // its own, and the agent log is silent throughout it. Logged once per
           // run rather than per tick.
@@ -1142,7 +1133,7 @@ export function startTelegramResume(chatId: number, signal: AbortSignal): void {
       const activeTools = hasActiveToolCalls(store.getChat(sessionId));
       const busy =
         !isPausedOnStepCap &&
-        (runBusy(chatStatus, appStatus, false, activeTools) || activeTools);
+        (runBusy(chatStatus, appStatus, false) || activeTools);
       if (busy) {
         await sendTelegram(
           chatId,
@@ -1187,7 +1178,7 @@ export async function startTelegramDispatch(
     const chatStatus = chat?.status ?? "";
     const activeTools = hasActiveToolCalls(chat);
     const busy =
-      runBusy(chatStatus, appStatus, false, activeTools) || activeTools;
+      runBusy(chatStatus, appStatus, false) || activeTools;
 
     // A pending `ask_user` question is the one "busy" state where the user's
     // reply IS the answer. It is checked BEFORE the busy branch, because the

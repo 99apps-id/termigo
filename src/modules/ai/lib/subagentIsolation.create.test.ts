@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ToolContext } from "../tools/context";
-import { createIsolatedWorktree } from "./subagentIsolation";
 import { listSandboxes } from "./worktree";
+import { createIsolatedWorktree } from "./subagentIsolation";
 
 vi.mock("./native", () => ({
   native: { shellSessionRun: vi.fn() },
@@ -13,6 +13,32 @@ vi.mock("./sessionShell", () => ({
 
 const { native } = await import("./native");
 const shellSessionRun = vi.mocked(native.shellSessionRun);
+
+/**
+ * A complete `CommandOutput`. The native contract has six fields; a partial
+ * literal does not type-check against `vi.mocked`, and `*.test.ts` is excluded
+ * from `pnpm check-types` so the gap would otherwise never be caught.
+ */
+function cmdOut(
+  overrides: Partial<{
+    stdout: string;
+    stderr: string;
+    exit_code: number | null;
+    timed_out: boolean;
+    truncated: boolean;
+    cwd_after: string;
+  }> = {},
+) {
+  return {
+    stdout: "",
+    stderr: "",
+    exit_code: 0,
+    timed_out: false,
+    truncated: false,
+    cwd_after: "/repo",
+    ...overrides,
+  };
+}
 
 function ctxWith(sessionId: string | null, root: string | null): ToolContext {
   return {
@@ -50,12 +76,12 @@ describe("createIsolatedWorktree", () => {
   // git's own message is what tells "not a git repo" apart from a permissions
   // problem, so it has to survive into the reason.
   it("surfaces git's stderr when the branch cannot be created", async () => {
-    shellSessionRun.mockResolvedValue({
-      exit_code: 128,
-      stdout: "",
-      stderr:
-        "fatal: not a git repository (or any of the parent directories)\n",
-    });
+    shellSessionRun.mockResolvedValue(
+      cmdOut({
+        exit_code: 128,
+        stderr: "fatal: not a git repository (or any of the parent directories)\n",
+      }),
+    );
     const r = await createIsolatedWorktree({
       ctx: ctxWith("s1", "/repo"),
       label: "builder",
@@ -80,7 +106,7 @@ describe("createIsolatedWorktree", () => {
   });
 
   it("creates the worktree and registers it for worktree_list / discard", async () => {
-    shellSessionRun.mockResolvedValue({ exit_code: 0, stdout: "", stderr: "" });
+    shellSessionRun.mockResolvedValue(cmdOut());
     const before = listSandboxes().length;
 
     const r = await createIsolatedWorktree({
@@ -108,7 +134,7 @@ describe("createIsolatedWorktree", () => {
   // Trailing separators are common from Explorer roots and would otherwise
   // produce a double slash in the path.
   it("does not double the separator when the root ends with one", async () => {
-    shellSessionRun.mockResolvedValue({ exit_code: 0, stdout: "", stderr: "" });
+    shellSessionRun.mockResolvedValue(cmdOut());
     const r = await createIsolatedWorktree({
       ctx: ctxWith("s1", "/repo/"),
       label: "builder",
@@ -125,7 +151,7 @@ describe("createIsolatedWorktree", () => {
       maxRunning = Math.max(maxRunning, running);
       await new Promise((resolve) => setTimeout(resolve, 20));
       running--;
-      return { exit_code: 0, stdout: "", stderr: "" };
+      return cmdOut();
     });
 
     const [r1, r2] = await Promise.all([

@@ -79,6 +79,7 @@ const SECRET_BASENAME_PATTERNS: RegExp[] = [
  */
 const PROTECTED_DIRS = [
   "/.ssh",
+  "/.shh",
   "/.gnupg",
   "/.aws",
   "/.azure",

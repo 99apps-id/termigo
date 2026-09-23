@@ -27,12 +27,14 @@ export function generateSandboxInfo(taskId?: string): {
   branchName: string;
   subpath: string;
 } {
-  const raw = taskId?.trim()
-    ? taskId.trim()
-    : Math.random().toString(36).slice(2, 9);
-  const sanitized = raw.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const sanitized = taskId
+    ?.replace(/[^a-zA-Z0-9_-]/g, "_")
+    .replace(/^_+|_+$/g, "");
+  // 40-char bound: the id becomes a directory segment under .wt/ AND a branch
+  // name, and an unbounded subagent label walks the whole path back into the
+  // Windows MAX_PATH wall the short .wt/ prefix exists to avoid.
   const bounded =
-    sanitized.length > 40
+    sanitized && sanitized.length > 40
       ? sanitized.slice(0, 40).replace(/_+$/, "")
       : sanitized;
   const cleanId = bounded || Math.random().toString(36).slice(2, 9);
@@ -250,6 +252,7 @@ export function discoveredWorktrees(
     const normalised = branch.worktreePath.replace(/\\/g, "/");
     let id: string | null = null;
     if (normalised.startsWith(WORKTREE_SUBPATH_PREFIX)) {
+      // A relative worktree path (`.wt/xyz`) has no leading slash to find.
       id = normalised.slice(WORKTREE_SUBPATH_PREFIX.length);
     } else {
       const at = normalised.lastIndexOf(`/${WORKTREE_SUBPATH_PREFIX}`);
@@ -259,6 +262,7 @@ export function discoveredWorktrees(
         id = normalised.slice(at + WORKTREE_SUBPATH_PREFIX.length + 1);
       }
     }
+    // A nested path is not a sandbox root; `generateSandboxInfo` makes one level.
     if (!id || id.includes("/") || seen.has(id)) continue;
     seen.add(id);
     out.push({

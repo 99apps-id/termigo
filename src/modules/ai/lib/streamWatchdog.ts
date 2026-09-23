@@ -61,7 +61,6 @@ export function watchdogDirective(chunkType: string): WatchdogDirective {
   return "ignore";
 }
 
-
 /**
  * When the run last did anything at all.
  *
@@ -172,22 +171,10 @@ export function pendingApprovalToolTimeoutMs(
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const parts = (messages[i] as { parts?: unknown })?.parts;
     if (!Array.isArray(parts)) continue;
-    let foundApproval = false;
-    let maxMs: number | null = null;
     for (let j = parts.length - 1; j >= 0; j -= 1) {
-      const part = parts[j] as {
-        state?: string;
-        input?: unknown;
-        args?: unknown;
-        toolInvocation?: { args?: unknown; input?: unknown };
-      };
+      const part = parts[j] as { state?: string; input?: unknown };
       if (part?.state !== "approval-responded") continue;
-      foundApproval = true;
-      let input =
-        part.input ??
-        part.args ??
-        part.toolInvocation?.args ??
-        part.toolInvocation?.input;
+      let input = part.input;
       if (typeof input === "string") {
         try {
           input = JSON.parse(input);
@@ -198,15 +185,10 @@ export function pendingApprovalToolTimeoutMs(
       if (!input || typeof input !== "object") continue;
       const raw = input as Record<string, unknown>;
       const secs = raw.timeout_secs ?? raw.timeoutSecs ?? raw.timeout;
-      if (typeof secs === "number" && Number.isFinite(secs) && secs > 0) {
-        const ms = secs * 1000;
-        if (maxMs === null || ms > maxMs) {
-          maxMs = ms;
-        }
+      if (typeof secs !== "number" || !Number.isFinite(secs) || secs <= 0) {
+        return null;
       }
-    }
-    if (foundApproval) {
-      return maxMs;
+      return secs * 1000;
     }
   }
   return null;

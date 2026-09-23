@@ -11,12 +11,7 @@ import {
   sendProgressMessage,
   sendTyping,
 } from "./telegramApi";
-import {
-  getPendingApprovals,
-  hasActiveToolCalls,
-  messageText,
-  runBusy,
-} from "./telegramHelpers";
+import { getPendingApprovals, messageText, runBusy } from "./telegramHelpers";
 
 export const progressCtrls = new Map<number, AbortController>();
 export const lastFinishedProgressMessageIds = new Map<number, number>();
@@ -83,9 +78,7 @@ export async function publishProgress(
   const elicitationSendAttempts = new Map<string, number>();
   const sentElicitationIds = new Set<string>();
   const started = Date.now();
-  let lastActiveAt = Date.now();
-  const INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000;
-  const MAX_TOTAL_WAIT_MS = 3 * 60 * 60 * 1000;
+  const MAX_WAIT = 30 * 60 * 1000;
   const MAX_PROMPT_SEND_ATTEMPTS = 3;
   // Tracks step-cap detection so the auto-continue re-check runs at most once.
   let stepCapNotified = false;
@@ -106,11 +99,7 @@ export async function publishProgress(
   }
 
   try {
-    while (
-      !signal.aborted &&
-      Date.now() - lastActiveAt < INACTIVITY_TIMEOUT_MS &&
-      Date.now() - started < MAX_TOTAL_WAIT_MS
-    ) {
+    while (!signal.aborted && Date.now() - started < MAX_WAIT) {
       const meta = store.useChatStore.getState().agentMeta;
       const status = meta.status;
       const step = meta.step ?? "";
@@ -124,13 +113,11 @@ export async function publishProgress(
       const chatStatus = chat?.status ?? "";
       const aqStore = await import("../ai/store/approvalQueueStore");
       const pendingApprovals = getPendingApprovals(sessionId, store, aqStore);
-      const activeTools = hasActiveToolCalls(chat);
       const busy =
-        runBusy(chatStatus, status, pendingApprovals.length > 0, activeTools) ||
+        runBusy(chatStatus, status, pendingApprovals.length > 0) ||
         status === "thinking" ||
         status === "streaming" ||
         status === "awaiting-approval" ||
-        activeTools ||
         progressMessageId === null;
 
       if (busy && now - lastTypingAt >= 3000) {
@@ -201,9 +188,6 @@ export async function publishProgress(
         answerLen: answerText.length,
       });
       const hasSubstantiveChange = substantiveKey !== lastSubstantiveKey;
-      if (hasSubstantiveChange || busy) {
-        lastActiveAt = now;
-      }
 
       if (!progressMessageId) {
         const sentId = await sendProgressMessage(chatId, liveText, signal);
@@ -286,7 +270,7 @@ export async function publishProgress(
         // (never rejects) so the result is the delivery signal.
         const ok = await sendKeyboard(
           chatId,
-          `Action Approval Required:\nTool: ${p.toolName}\nTarget: ${p.summary || p.toolName}\n(Tap button below or reply /approve /deny)`,
+          `Action Approval Required:\nTool: ${p.toolName}\nTarget: ${p.summary || p.toolName}\n(Reply /approve or /deny)`,
           keyboard,
           signal,
         );
@@ -320,7 +304,7 @@ export async function publishProgress(
         // end, and a dead end is what makes someone abandon the bot.
         keyboard.push([
           {
-            text: ">> Tidak dulu (lewati)",
+            text: "⏭ Tidak dulu (lewati)",
             callback_data: `el:${el.id}:decline`,
           },
         ]);
@@ -382,38 +366,17 @@ export async function publishProgress(
       // one the user stopped, one that hit the step limit and one that failed;
       // without them every ending read the same in the chat.
       const finalMeta = store.useChatStore.getState().agentMeta;
-      const chat = store.getChat(sessionId);
-      const aqStore = await import("../ai/store/approvalQueueStore");
-      const pendingApprovals = getPendingApprovals(
-        sessionId,
-        store,
-        aqStore.useApprovalQueue,
-      );
-      const activeTools = hasActiveToolCalls(chat);
-      const isStillBusy =
-        runBusy(
-          chat?.status ?? "",
-          finalMeta.status,
-          pendingApprovals.length > 0,
-          activeTools,
-        ) ||
-        finalMeta.status === "thinking" ||
-        finalMeta.status === "streaming" ||
-        finalMeta.status === "awaiting-approval" ||
-        activeTools;
-
-      const outcome: import("./progressFormat").RunOutcome = finalMeta.stoppedByUser
+      const outcome = finalMeta.stoppedByUser
         ? "stopped"
         : finalMeta.error
           ? "error"
           : finalMeta.stopReason === "step-cap"
             ? "step-cap"
-            : isStillBusy
-              ? "still-running"
-              : "done";
+            : "done";
 
       // If the run completed cleanly and an assistant answer is already present,
       // preserve that answer text and drop backend process lines.
+      const chat = store.getChat(sessionId);
       const messages = chat?.messages ?? [];
       const lastAssistant = [...messages]
         .reverse()
@@ -428,8 +391,8 @@ export async function publishProgress(
         : "";
 
       const doneText = formatLiveProgress({
-        status: isStillBusy ? "thinking" : "idle",
-        completed: !isStillBusy,
+        status: "idle",
+        completed: true,
         outcome,
         elapsedMs: Date.now() - started,
         answerText: outcome === "done" && answerText ? answerText : undefined,
@@ -442,7 +405,7 @@ export async function publishProgress(
         doneText,
         AbortSignal.timeout(4000),
       ).catch(() => {});
-      if (!isStillBusy && (!answerText || outcome !== "done")) {
+      if (!answerText || outcome !== "done") {
         lastFinishedProgressMessageIds.set(chatId, progressMessageId);
       }
     } else if (progressMessageId) {

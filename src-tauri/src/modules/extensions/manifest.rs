@@ -58,6 +58,10 @@ where
     }
 }
 
+fn default_sandbox() -> Option<String> {
+    Some("worker".to_string())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
     pub id: String,
@@ -73,11 +77,10 @@ pub struct Manifest {
     /// theme/snippet packs are pure-declarative.
     #[serde(default)]
     pub main: Option<String>,
-    /// Opt-in worker sandbox: run the extension module in a Web Worker instead
-    /// of the main webview. Only "worker" is supported today. Preserved so the
-    /// frontend can pick the worker path - without it the host would import the
-    /// module in the main webview, where DOM / Tauri APIs are unavailable.
-    #[serde(default)]
+    /// Worker sandbox for the extension module. Defaults to `"worker"` so
+    /// extensions run in a Web Worker by default; set to `None` only when the
+    /// extension explicitly opts out of sandboxing.
+    #[serde(default = "default_sandbox")]
     pub sandbox: Option<String>,
     /// Glob-style permission strings; validated at runtime by the host API.
     #[serde(default, deserialize_with = "deserialize_permissions")]
@@ -187,10 +190,10 @@ mod tests {
     }
 
     #[test]
-    fn sandbox_is_null_when_absent_but_still_parses() {
+    fn sandbox_defaults_to_worker_when_absent() {
         let text = r#"{ "id": "test-ext", "name": "X", "version": "1.0.0" }"#;
         let m = Manifest::parse(text).expect("parse");
-        assert_eq!(m.sandbox.as_deref(), None);
+        assert_eq!(m.sandbox.as_deref(), Some("worker"));
         assert_eq!(m.engines.as_ref().and_then(|e| e.tedi.as_deref()), None);
     }
 

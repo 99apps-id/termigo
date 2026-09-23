@@ -25,16 +25,11 @@ export type AutoSendGateState = {
   lastProgress: number;
   /** How many automatic sends in a row have added nothing. */
   stalled: number;
-  /** Latest tool call or error signature seen. */
-  lastSignature?: string | null;
-  /** Sliding window of recent tool signatures seen in this session. */
-  recentSignatures?: string[];
 };
 
 export const INITIAL_AUTO_SEND_STATE: AutoSendGateState = {
   lastProgress: 0,
   stalled: 0,
-  recentSignatures: [],
 };
 
 export type AutoSendDecision = {
@@ -47,82 +42,27 @@ export type AutoSendDecision = {
 };
 
 /**
- * Decide whether an automatic resume may happen, given a progress measure,
- * how many consecutive resumes have already added nothing, and an optional
- * signature of the latest tool call / result.
+ * Decide whether an automatic resume may happen, given a progress measure and
+ * how many consecutive resumes have already added nothing.
  *
  * `progress` must be something that changes whenever the transcript gains ANY
  * content. The number of messages is too coarse for that: a tool round appends
  * its results as parts of the SAME assistant message, so a run doing real work
- * can loop through many rounds with a constant message count.
- *
- * When `signature` is provided, repeating the exact same tool call/error signature
- * across resumes is treated as a stall even if part counts grew, breaking
- * infinite repeating tool loops.
+ * can loop through many rounds with a constant message count. Measured in the
+ * field: 19 consecutive runs, all `steps 1/25 | stop tool-calls`, while the UI
+ * message count stayed at 14. Counting parts catches both that real work and the
+ * spinning case, without stopping a legitimate tool loop after five rounds.
  */
-export const SIGNATURE_WINDOW_SIZE = 8;
-
-export function isRepetitiveSignature(
-  history: readonly string[],
-  current: string | null | undefined,
-): boolean {
-  if (!current) return false;
-  const len = history.length;
-  if (len === 0) return false;
-
-  // 1. Direct immediate repetition: A -> A
-  if (history[len - 1] === current) return true;
-
-  // 2. Frequency threshold: already appears >= 2 times in recent window (current makes 3)
-  const count = history.filter((s) => s === current).length;
-  if (count >= 2) return true;
-
-  // 3. Period-2 oscillation: [..., A, B, A] + current B -> A-B-A-B
-  if (len >= 3) {
-    if (history[len - 1] === history[len - 3] && history[len - 2] === current) {
-      return true;
-    }
-  }
-
-  // 4. Period-3 cycle: [..., A, B, C, A, B] + current C -> A-B-C-A-B-C
-  if (len >= 5) {
-    if (
-      history[len - 1] === history[len - 4] &&
-      history[len - 2] === history[len - 5] &&
-      history[len - 3] === current
-    ) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
 export function autoSendGate(
   previous: AutoSendGateState,
   progress: number,
   maxStalled: number = MAX_STALLED_AUTO_SENDS,
-  signature?: string | null,
 ): AutoSendDecision {
-  const history =
-    previous.recentSignatures ??
-    (previous.lastSignature ? [previous.lastSignature] : []);
-  const isRepeatingSignature = isRepetitiveSignature(history, signature);
-
-  const updatedHistory = signature
-    ? [...history.slice(-(SIGNATURE_WINDOW_SIZE - 1)), signature]
-    : history;
-
-  // Real progress: transcript grew AND it is not an identical or cyclic repeating signature.
-  if (progress > previous.lastProgress && !isRepeatingSignature) {
+  // Progress since the last automatic send: the resume did something.
+  if (progress > previous.lastProgress) {
     return {
       allow: true,
-      state: {
-        lastProgress: progress,
-        stalled: 0,
-        lastSignature: signature ?? null,
-        recentSignatures: updatedHistory,
-      },
+      state: { lastProgress: progress, stalled: 0 },
       stoppedLoop: false,
     };
   }
@@ -132,23 +72,13 @@ export function autoSendGate(
     // lastProgress is kept, so a later real message still resets the streak.
     return {
       allow: false,
-      state: {
-        lastProgress: previous.lastProgress,
-        stalled,
-        lastSignature: signature ?? previous.lastSignature ?? null,
-        recentSignatures: updatedHistory,
-      },
+      state: { lastProgress: previous.lastProgress, stalled },
       stoppedLoop: true,
     };
   }
   return {
     allow: true,
-    state: {
-      lastProgress: previous.lastProgress,
-      stalled,
-      lastSignature: signature ?? previous.lastSignature ?? null,
-      recentSignatures: updatedHistory,
-    },
+    state: { lastProgress: previous.lastProgress, stalled },
     stoppedLoop: false,
   };
 }

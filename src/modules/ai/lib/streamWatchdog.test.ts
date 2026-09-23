@@ -6,10 +6,10 @@ import {
   pendingApprovalToolTimeoutMs,
   remainingSilenceMs,
   resetRunActivity,
-  silenceIsFatal,
   STALL_BUDGET_CAP_MS,
   STALL_TIMEOUT_MS,
   STALL_TIMEOUT_ON_RESUME_MS,
+  silenceIsFatal,
   stallBudgetMs,
   startActivityHeartbeat,
   TOOL_RESULT_DELIVERY_MS,
@@ -164,53 +164,10 @@ describe("stallBudgetMs", () => {
     expect(pendingApprovalToolTimeoutMs(stored)).toBe(240_000);
   });
 
-  it("finds the tool timeout even when another responded tool has no timeout", () => {
-    const multi = [
-      {
-        parts: [
-          {
-            type: "tool-bash_run",
-            state: "approval-responded",
-            input: { command: "npm test", timeout_secs: 250 },
-          },
-          {
-            type: "tool-write_file",
-            state: "approval-responded",
-            input: { path: "foo.txt", content: "hi" },
-          },
-        ],
-      },
-    ];
-    expect(pendingApprovalToolTimeoutMs(multi)).toBe(250_000);
-    expect(stallBudgetMs(multi, true)).toBe(250_000 + TOOL_TIMEOUT_SLACK_MS);
-  });
-
-  it("finds the timeout when stored on part.args or part.toolInvocation", () => {
-    const onArgs = [
-      {
-        parts: [
-          {
-            state: "approval-responded",
-            args: { timeout_secs: 150 },
-          },
-        ],
-      },
-    ];
-    expect(pendingApprovalToolTimeoutMs(onArgs)).toBe(150_000);
-
-    const onInvocation = [
-      {
-        parts: [
-          {
-            state: "approval-responded",
-            toolInvocation: {
-              args: { timeout_secs: 220 },
-            },
-          },
-        ],
-      },
-    ];
-    expect(pendingApprovalToolTimeoutMs(onInvocation)).toBe(220_000);
+  it("ignores a part that is not an answered approval", () => {
+    const other = [{ parts: [{ state: "output-available", input: {} }] }];
+    expect(pendingApprovalToolTimeoutMs(other)).toBeNull();
+    expect(stallBudgetMs(other, true)).toBe(STALL_TIMEOUT_ON_RESUME_MS);
   });
 });
 

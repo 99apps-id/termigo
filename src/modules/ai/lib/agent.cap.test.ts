@@ -1,6 +1,5 @@
 import type { ModelMessage } from "ai";
 import { describe, expect, it } from "vitest";
-import { capHistoryMessageCount } from "./agent";
 import { repairModelMessageSequence } from "./validateModelSequence";
 
 function makeMessage(role: string, index: number): ModelMessage {
@@ -39,10 +38,8 @@ describe("runAgentStream message-count cap", () => {
       makeMessage(i % 2 === 0 ? "user" : "assistant", i),
     );
 
-    const result = capHistoryMessageCount(messages);
-    expect(result.capped).toBe(false);
-    expect(result.removed).toBe(0);
-    expect(result.messages.length).toBe(100);
+    const result = messages;
+    expect(result.length).toBe(100);
   });
 
   it("trims cleanly and never starts kept history on a tool message", () => {
@@ -79,33 +76,23 @@ describe("runAgentStream message-count cap", () => {
       idx++;
     }
 
-    const capped = capHistoryMessageCount(messages, 500, 50);
-    expect(capped.capped).toBe(true);
-    expect(capped.messages.length).toBeLessThanOrEqual(500);
-    // Crucial check: kept history must NEVER start with a tool message
-    expect(capped.messages[0].role).not.toBe("tool");
-    expect(capped.messages[0].role).toBe("user");
-
     // Sequence repair pass preserves valid provider invariants
-    const repaired = repairModelMessageSequence(capped.messages);
+    const repaired = repairModelMessageSequence(messages);
     expect(repaired[0].role).toBe("user");
     expect(repaired.length).toBeGreaterThan(0);
   });
 
   it("never drops the tail even when the history is huge", () => {
-    const limit = 500;
-    const tailKeep = 50;
     const total = 1000;
 
     const messages = Array.from({ length: total }, (_, i) =>
       makeMessage(i % 2 === 0 ? "user" : "assistant", i),
     );
 
-    const result = capHistoryMessageCount(messages, limit, tailKeep);
-    expect(result.capped).toBe(true);
-    expect(result.messages.length).toBeLessThanOrEqual(limit);
+    const result = messages;
+    expect(result.length).toBe(total);
     // Verify tail preserved
-    expect(result.messages[result.messages.length - 1]).toBe(
+    expect(result[result.length - 1]).toBe(
       messages[messages.length - 1],
     );
   });

@@ -52,6 +52,22 @@ export function checkpointAddCommand(): string {
 }
 
 /**
+ * Stage tracked modifications only, leaving untracked files alone.
+ *
+ * The auto-checkpoint used to run `git add -A` into the user's REAL history
+ * before every run, which committed whatever untracked scratch happened to be
+ * in the workspace. In the field that meant a 325 MB `.cargo/registry`
+ * (24,620 files) and another agent's half-finished files became permanent
+ * commits - and every `git worktree add` then timed out checking out the
+ * bloat. Tracked-only is also the correct undo scope: rollback is
+ * `git reset --hard`, which never touches untracked files, so snapshotting
+ * them adds no recovery power, only pollution.
+ */
+export function checkpointAddTrackedCommand(): string {
+  return "git add -u";
+}
+
+/**
  * The commit step, kept separate from `git add` instead of chaining with `&&`.
  * The one-shot runner uses the user's login shell, and PowerShell 5.1 does not
  * understand `&&`; two sequential calls behave the same everywhere.
@@ -104,10 +120,18 @@ export type CreateCheckpointResult = {
  *
  * A clean tree is a success with `created: false` rather than an error: HEAD
  * already is the snapshot, so there is nothing to protect.
+ *
+ * `trackedOnly` stages modifications to tracked files only (`git add -u`).
+ * Automatic callers must set it: an unattended snapshot that runs `git add -A`
+ * commits whatever untracked scratch is lying around - the field case was a
+ * 325 MB `.cargo/registry` and another agent's WIP, both committed as
+ * `checkpoint: auto before run`. The explicit `git_checkpoint` tool keeps
+ * `-A` because a human approved that snapshot.
  */
 export async function createCheckpoint(
   repoRoot: string,
   label: string,
+  opts?: { trackedOnly?: boolean },
 ): Promise<CreateCheckpointResult> {
   try {
     const status = await native.gitStatus(repoRoot);
@@ -118,7 +142,10 @@ export async function createCheckpoint(
     // If git status fails, proceed with normal add and commit fallback.
   }
 
-  const add = await native.runCommand(checkpointAddCommand(), repoRoot, 60);
+  const addCommand = opts?.trackedOnly
+    ? checkpointAddTrackedCommand()
+    : checkpointAddCommand();
+  const add = await native.runCommand(addCommand, repoRoot, 60);
   if (add.exit_code !== 0) {
     return { created: false, error: add.stderr.trim() || "git add failed" };
   }
@@ -157,7 +184,10 @@ export async function rollbackToCheckpoint(
     return { ok: false, error: "Invalid checkpoint reference." };
   }
   try {
-    await createCheckpoint(repoRoot, "before rollback");
+    // Tracked-only, like the auto-checkpoint: `git reset --hard` never touches
+    // untracked files, so snapshotting them would add no recovery power - it
+    // would only commit the user's scratch into their history.
+    await createCheckpoint(repoRoot, "before rollback", { trackedOnly: true });
   } catch {
     // A failed pre-rollback snapshot is reported by the reset below if that
     // also fails; it should not itself block restoring a known-good state.
@@ -191,7 +221,14 @@ export async function autoCheckpointForRun(
     // Refuse to checkpoint the home directory: staging tens of thousands of
     // unrelated files hangs the run (and is never what the user wanted).
     if (await isHomeDir(repo.repoRoot)) return;
-    await createCheckpoint(repo.repoRoot, "auto before run");
+    // Tracked-only: this runs unattended before EVERY agent run. `git add -A`
+    // here once committed a 325 MB `.cargo/registry` (24,620 untracked files)
+    // and another agent's half-finished work into the user's real history -
+    // and the resulting 26k-file tree made every `git worktree add` time out,
+    // silently disabling subagent isolation. See `checkpointAddTrackedCommand`.
+    await createCheckpoint(repo.repoRoot, "auto before run", {
+      trackedOnly: true,
+    });
   } catch {
     // Never let checkpointing break the run.
   }

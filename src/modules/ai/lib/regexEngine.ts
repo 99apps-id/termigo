@@ -54,7 +54,8 @@ const LIMITS: readonly EngineLimit[] = [
   },
   {
     match: "unclosed group",
-    advice: "A group is missing its closing ) - or use \\( to match a literal parenthesis.",
+    advice:
+      "A group is missing its closing ) - or use \\( to match a literal parenthesis.",
   },
   {
     match: "unclosed character class",
@@ -94,7 +95,8 @@ const LIMITS: readonly EngineLimit[] = [
  */
 export function explainSearchEngineError(rawError: string): string {
   const raw = String(rawError ?? "").trim();
-  if (!raw) return `pattern rejected by the search engine (${SEARCH_PATTERN_HINT})`;
+  if (!raw)
+    return `pattern rejected by the search engine (${SEARCH_PATTERN_HINT})`;
   const limit = LIMITS.find((l) => raw.includes(l.match));
   if (limit) return `${raw}\n${limit.advice}`;
   return `${raw}\nNote: ${SEARCH_PATTERN_HINT}`;

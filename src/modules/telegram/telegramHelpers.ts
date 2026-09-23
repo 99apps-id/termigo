@@ -102,65 +102,38 @@ export type ChatLike = {
   }>;
 };
 
-/** Check if the latest assistant turn in the chat has an active or unfinished tool call */
-export function hasActiveToolCalls(chat: ChatLike | null | undefined): boolean {
-  if (!chat?.messages || chat.messages.length === 0) return false;
-  const lastMsg = chat.messages[chat.messages.length - 1];
-  if (!lastMsg || lastMsg.role !== "assistant") return false;
-  const parts = lastMsg.parts ?? [];
-  const lastStepStartIndex = parts.reduce(
-    (lastIndex, part: { type?: string }, index) =>
-      part.type === "step-start" ? index : lastIndex,
-    -1,
-  );
-  const candidateParts =
-    lastStepStartIndex >= 0
-      ? parts.slice(lastStepStartIndex + 1)
-      : parts;
-  for (const p of candidateParts) {
-    const part = p as {
-      state?: string;
-      type?: string;
-      output?: unknown;
-    };
-    if (
-      typeof part.type === "string" &&
-      (part.type.startsWith("tool-") || part.type === "dynamic-tool")
-    ) {
-      if (
-        part.state === "input-available" ||
-        part.state === "approval-responded" ||
-        part.state === "input-streaming" ||
-        part.state === "call" ||
-        (part.state !== "output-available" &&
-          part.state !== "output-error" &&
-          part.state !== "result" &&
-          part.output === undefined &&
-          part.state !== "approval-requested")
-      ) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-/** Approximate busy state: thinking/streaming/awaiting-approval, active tools, or pending approvals > 0 */
+/** Approximate busy state: thinking/streaming/awaiting-approval or pending approvals > 0 */
 export function runBusy(
   chatStatus: string,
   appStatus: string,
   hasPendingApproval = false,
-  hasActiveTools = false,
 ): boolean {
   return (
     hasPendingApproval ||
-    hasActiveTools ||
     chatStatus === "submitted" ||
     chatStatus === "streaming" ||
     appStatus === "thinking" ||
     appStatus === "streaming" ||
     appStatus === "awaiting-approval"
   );
+}
+
+export function hasActiveToolCalls(chat: ChatLike | null | undefined): boolean {
+  if (!chat?.messages?.length) return false;
+  for (let i = chat.messages.length - 1; i >= 0; i -= 1) {
+    const message = chat.messages[i];
+    if (message.role !== "assistant") continue;
+    const parts = message.parts ?? [];
+    for (let j = parts.length - 1; j >= 0; j -= 1) {
+      const part = parts[j] as { type?: string; state?: string } | undefined;
+      const type = typeof part?.type === "string" ? part.type : "";
+      if (type.startsWith("tool-")) {
+        const state = typeof part?.state === "string" ? part.state : "";
+        if (state !== "output-error" && state !== "error") return true;
+      }
+    }
+  }
+  return false;
 }
 
 /**

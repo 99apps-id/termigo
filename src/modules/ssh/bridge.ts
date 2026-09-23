@@ -1,12 +1,21 @@
-import { invoke, Channel } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 
 /** First-connect host-key confirmation request from the backend. */
-export type SshHostKeyPrompt = { promptId: string; fingerprint: string; host: string };
+export type SshHostKeyPrompt = {
+  promptId: string;
+  fingerprint: string;
+  host: string;
+};
 
 export type SshEvent =
   | { type: "connected"; fingerprint: string }
   | { type: "jumpConnected"; connectionId: string; fingerprint: string }
-  | { type: "hostKeyPrompt"; promptId: string; fingerprint: string; host: string }
+  | {
+      type: "hostKeyPrompt";
+      promptId: string;
+      fingerprint: string;
+      host: string;
+    }
   | { type: "data"; data: string }
   | { type: "stderr"; data: string }
   | { type: "exit"; code: number }
@@ -92,7 +101,10 @@ export function isHostKeyMismatchError(err: unknown): boolean {
 /** Answer a first-connect host-key prompt. `accept = true` lets the paused
  *  handshake proceed (and pins the fingerprint on success); `false` aborts the
  *  connect before any credential is sent. */
-export function confirmHostKey(promptId: string, accept: boolean): Promise<void> {
+export function confirmHostKey(
+  promptId: string,
+  accept: boolean,
+): Promise<void> {
   return invoke("ssh_confirm_host_key", { promptId, accept });
 }
 
@@ -108,7 +120,12 @@ export function openSshForward(
   remoteHost: string,
   remotePort: number,
 ): Promise<number> {
-  return invoke<number>("ssh_forward_open", { id, localPort, remoteHost, remotePort });
+  return invoke<number>("ssh_forward_open", {
+    id,
+    localPort,
+    remoteHost,
+    remotePort,
+  });
 }
 
 export type SshSession = {
@@ -132,40 +149,43 @@ function decodeBase64(b64: string): Uint8Array {
  * Tauri runtime, and so the error boundary below has something to wrap.
  */
 export function dispatchSshEvent(event: SshEvent, handlers: SshHandlers): void {
-    switch (event.type) {
-      case "connected":
-        handlers.onConnected?.(event.fingerprint);
-        break;
-      case "jumpConnected":
-        handlers.onJumpConnected?.(event.connectionId, event.fingerprint);
-        break;
-      case "hostKeyPrompt":
-        handlers.onHostKeyPrompt?.({
-          promptId: event.promptId,
-          fingerprint: event.fingerprint,
-          host: event.host,
-        });
-        break;
-      case "data":
-        handlers.onData(decodeBase64(event.data));
-        break;
-      case "stderr":
-        // Surface stderr inline. The server PTY usually merges both streams already.
-        handlers.onData(decodeBase64(event.data));
-        break;
-      case "exit":
-        handlers.onExit?.(event.code);
-        break;
-      case "disconnected":
-        handlers.onDisconnected?.(event.reason);
-        break;
-      case "error":
-        handlers.onError?.(event.message);
-        break;
-    }
+  switch (event.type) {
+    case "connected":
+      handlers.onConnected?.(event.fingerprint);
+      break;
+    case "jumpConnected":
+      handlers.onJumpConnected?.(event.connectionId, event.fingerprint);
+      break;
+    case "hostKeyPrompt":
+      handlers.onHostKeyPrompt?.({
+        promptId: event.promptId,
+        fingerprint: event.fingerprint,
+        host: event.host,
+      });
+      break;
+    case "data":
+      handlers.onData(decodeBase64(event.data));
+      break;
+    case "stderr":
+      // Surface stderr inline. The server PTY usually merges both streams already.
+      handlers.onData(decodeBase64(event.data));
+      break;
+    case "exit":
+      handlers.onExit?.(event.code);
+      break;
+    case "disconnected":
+      handlers.onDisconnected?.(event.reason);
+      break;
+    case "error":
+      handlers.onError?.(event.message);
+      break;
+  }
 }
 
-export async function openSsh(input: SshOpenInput, handlers: SshHandlers): Promise<SshSession> {
+export async function openSsh(
+  input: SshOpenInput,
+  handlers: SshHandlers,
+): Promise<SshSession> {
   const channel = new Channel<SshEvent>();
   channel.onmessage = (event) => {
     // Tauri advances its ordered-delivery cursor only after onmessage

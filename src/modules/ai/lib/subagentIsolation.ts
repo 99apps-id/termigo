@@ -222,7 +222,15 @@ async function executeCreateIsolatedWorktree(args: {
       root,
     );
 
-    const result = await native.shellSessionRun(shellId, command, root, 120);
+    // 300s, not 120s: `git worktree add` checks out the WHOLE tree, and a large
+    // repo (or one bloated by an accidental commit - this repo once carried a
+    // 325 MB `.cargo/registry`, 24,620 files, committed by autoCheckpoint) can
+    // take minutes on a cold filesystem cache. At 120s every isolated subagent
+    // in the field fell back to "NOT isolated" with `git worktree add failed
+    // (timed out)` (log 2026-09-20 13:01-13:09), silently defeating the
+    // isolation feature. The failure path below cleans up the partial worktree,
+    // so a longer budget is safe.
+    const result = await native.shellSessionRun(shellId, command, root, 300);
     if (result.exit_code !== 0) {
       const detail = extractGitErrorDetail(result.stderr);
       try {

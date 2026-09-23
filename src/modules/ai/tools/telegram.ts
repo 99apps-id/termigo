@@ -1,7 +1,7 @@
-import { tool } from "ai";
-import { z } from "zod";
 import { useTelegramStore } from "@/modules/telegram/store";
 import { sendDocument, sendTelegram } from "@/modules/telegram/telegramApi";
+import { tool } from "ai";
+import { z } from "zod";
 import { native } from "../lib/native";
 import { base64ToBytes } from "../lib/proxyFetch";
 import { checkReadableCanonical } from "../lib/security";
@@ -15,11 +15,15 @@ export function buildTelegramTools(ctx: ToolContext) {
       inputSchema: z.object({
         path: z
           .string()
-          .describe("Relative or absolute path of the file to send (e.g. 'report.pdf', 'scan-results.json', 'export.csv')."),
+          .describe(
+            "Relative or absolute path of the file to send (e.g. 'report.pdf', 'scan-results.json', 'export.csv').",
+          ),
         caption: z
           .string()
           .optional()
-          .describe("Optional caption or brief summary accompanying the document."),
+          .describe(
+            "Optional caption or brief summary accompanying the document.",
+          ),
       }),
       execute: async ({ path, caption }) => {
         const store = useTelegramStore.getState();
@@ -43,17 +47,29 @@ export function buildTelegramTools(ctx: ToolContext) {
         }
 
         const reqPath = resolvePath(path, ctx.getCwd());
-        const safety = await checkReadableCanonical(reqPath, native.canonicalize);
+        const safety = await checkReadableCanonical(
+          reqPath,
+          native.canonicalize,
+        );
         if (!safety.ok) {
           return { ok: false, error: safety.reason, path: reqPath };
         }
 
         const abs = safety.canonical;
-        let base64Data: { data: string; size: number; media_type: string; file_name?: string };
+        let base64Data: {
+          data: string;
+          size: number;
+          media_type: string;
+          file_name?: string;
+        };
         try {
           base64Data = await native.readFileBase64(abs);
         } catch (e) {
-          return { ok: false, error: `Failed to read file: ${String(e)}`, path: abs };
+          return {
+            ok: false,
+            error: `Failed to read file: ${String(e)}`,
+            path: abs,
+          };
         }
 
         const bytes = base64ToBytes(base64Data.data);
@@ -68,7 +84,7 @@ export function buildTelegramTools(ctx: ToolContext) {
             bytes,
             filename,
             caption ?? "",
-            controller.signal
+            controller.signal,
           );
           clearTimeout(timeout);
 
@@ -92,7 +108,9 @@ export function buildTelegramTools(ctx: ToolContext) {
       description:
         "Send a message or notification directly to the user's paired Telegram chat. Automatically uses the bot's configured Telegram token and paired chat ID. NEVER ask the user for their bot token or user ID.",
       inputSchema: z.object({
-        text: z.string().describe("Text message to send to the user's Telegram chat."),
+        text: z
+          .string()
+          .describe("Text message to send to the user's Telegram chat."),
       }),
       // Same reasoning as `telegram_send_document`: the recipient is the paired
       // chat and cannot be named by the caller.

@@ -1,6 +1,6 @@
 [package]
 name = "termigo"
-version = "0.9.18"
+version = "0.9.15"
 description = "Termigo - an open-source AI-native terminal emulator"
 authors = ["99apps-id"]
 license = "Apache-2.0"
@@ -13,7 +13,7 @@ default-members = [".", "crates/termigo-cli", "crates/termigo-control-protocol"]
 resolver = "2"
 
 [workspace.package]
-version = "0.9.18"
+version = "0.9.15"
 edition = "2021"
 license = "Apache-2.0"
 
@@ -126,10 +126,6 @@ tauri-plugin-updater = "2"
 tauri-plugin-window-state = "2"
 
 [profile.dev]
-incremental = true
-
-[profile.test]
-debug = 1
 incremental = true
 
 [profile.release]

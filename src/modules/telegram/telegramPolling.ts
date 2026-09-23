@@ -118,21 +118,37 @@ const STALL_RECYCLE_GRACE_MS = 10_000;
  * terminating each other. Standing down gives the other one room, and a real
  * competing client is a configuration problem the operator has to fix - not
  * something to hammer at five-second intervals.
+ *
+ * This is the base of an exponential schedule, not a flat delay: a competitor
+ * that stays up for hours (a forgotten VPS instance, another app on the same
+ * token) used to be re-probed every 60s forever - 261 conflict cycles in one
+ * night's log. Each consecutive conflict doubles the wait up to
+ * `TELEGRAM_CONFLICT_BACKOFF_MAX_MS`; the first success resets the streak.
  */
 export const TELEGRAM_CONFLICT_BACKOFF_MS = 60_000;
 
+/** Ceiling for the exponential conflict backoff (15 minutes). */
+export const TELEGRAM_CONFLICT_BACKOFF_MAX_MS = 15 * 60_000;
+
 /**
- * After this many consecutive 409s the wait grows to
- * `TELEGRAM_CONFLICT_BACKOFF_ESCALATED_MS`.
- *
- * The competing client is not leaving on its own - field logs showed the 60s
- * cycle repeating for HOURS (two warning lines a minute, forever). The first
- * conflicts stay at 60s so a transient double-start heals quickly; a persistent
- * one is a configuration problem already surfaced in the UI's lastError, and
- * the poller only needs to re-check often enough to notice when it is fixed.
+ * Consecutive 409s seen by the current loop. Reset on any successful poll and
+ * on start/stop, so the schedule never carries over into a healthy session.
  */
-export const TELEGRAM_CONFLICT_ESCALATE_AFTER = 10;
-export const TELEGRAM_CONFLICT_BACKOFF_ESCALATED_MS = 5 * 60_000;
+let conflictStreak = 0;
+
+/**
+ * Exponential conflict backoff: 60s, 120s, 240s, ... capped at 15 min.
+ *
+ * `streak` is 1-based (the first conflict waits the base), pure so the
+ * schedule is asserted rather than observed over hours.
+ */
+export function conflictBackoffMs(streak: number): number {
+  const n = Math.max(1, Math.floor(streak));
+  return Math.min(
+    TELEGRAM_CONFLICT_BACKOFF_MS * 2 ** (n - 1),
+    TELEGRAM_CONFLICT_BACKOFF_MAX_MS,
+  );
+}
 
 /**
  * Base wait after an ordinary `getUpdates` failure, and the ceiling the wait
@@ -140,7 +156,7 @@ export const TELEGRAM_CONFLICT_BACKOFF_ESCALATED_MS = 5 * 60_000;
  *
  * A box that loses its network used to log `getUpdates failed ... retrying in
  * 5s` every five seconds for hours: the wait never grew, so an offline machine
- * hammered DNS and drowned the file log. The wait now doubles per consecutive
+ * hammered DNS and drowned the file log. The wait doubles per consecutive
  * failure and caps at a minute; one success resets it to the base.
  */
 export const TELEGRAM_GENERIC_BACKOFF_BASE_MS = 5_000;
@@ -227,14 +243,10 @@ export function checkPollingStall(): void {
   // Start the replacement only after the old loop has exited (or the grace
   // period lapses), so the two never poll at the same time. Racing the wait
   // against a timer keeps recovery possible when the abort does not land.
-  const graceCtrl = new AbortController();
   void Promise.race([
     oldLoop ?? Promise.resolve(),
-    sleep(graceCtrl.signal, STALL_RECYCLE_GRACE_MS),
+    sleep(new AbortController().signal, STALL_RECYCLE_GRACE_MS),
   ]).then(() => {
-    // Whichever side won, disarm the grace timer instead of leaving it armed for
-    // the rest of its window once the old loop has already exited.
-    graceCtrl.abort();
     if (loopController !== next || next.signal.aborted) return;
     launchLoop(next);
   });
@@ -254,22 +266,27 @@ function launchLoop(controller: AbortController): void {
  *
  * Exported and pure so the policy is asserted rather than buried in the catch:
  * a 429 carries its own retry hint, a 409 means another client holds the bot
- * and must not be retried quickly, and anything else starts short and doubles while failures repeat.
+ * and must not be retried quickly (and grows exponentially with the conflict
+ * streak, so an hours-long competitor is probed at most every 15 min instead
+ * of every minute), and anything else doubles with its OWN streak from a 5s
+ * base to a 60s cap — an offline machine must not hammer DNS every five
+ * seconds for hours. Two streaks, because a network flap must not inflate the
+ * conflict schedule and a competitor must not look like an outage.
  */
-export function pollBackoffMs(error: unknown, consecutiveFailures = 1): number {
-  const n = Number.isFinite(consecutiveFailures)
-    ? Math.max(1, Math.floor(consecutiveFailures))
-    : 1;
+export function pollBackoffMs(
+  error: unknown,
+  conflictStreak = 1,
+  genericStreak = 1,
+): number {
   if (error instanceof TelegramApiError) {
     if (error.status === 429) {
       return Math.max(1000, (error.retryAfter ?? 5) * 1000);
     }
-    if (error.status === 409) {
-      return n >= TELEGRAM_CONFLICT_ESCALATE_AFTER
-        ? TELEGRAM_CONFLICT_BACKOFF_ESCALATED_MS
-        : TELEGRAM_CONFLICT_BACKOFF_MS;
-    }
+    if (error.status === 409) return conflictBackoffMs(conflictStreak);
   }
+  const n = Number.isFinite(genericStreak)
+    ? Math.max(1, Math.floor(genericStreak))
+    : 1;
   return Math.min(
     TELEGRAM_GENERIC_BACKOFF_BASE_MS * 2 ** (n - 1),
     TELEGRAM_GENERIC_BACKOFF_CAP_MS,
@@ -308,9 +325,12 @@ async function runLoop(signal: AbortSignal): Promise<void> {
       const data = (await apiGet(
         `getUpdates?offset=${currentUpdateOffset}&timeout=30`,
         signal,
-        50_000,
+        45_000,
       )) as { ok: boolean; result: Update[] };
       lastPollProgressTime = Date.now();
+      // A success ends the conflict streak, so the next 409 (if ever) starts
+      // back at the base delay instead of resuming a doubled schedule.
+      conflictStreak = 0;
       useTelegramStore.getState().setOnline(true);
       useTelegramStore.getState().setLastError(null);
       consecutiveFailures = 0;
@@ -340,21 +360,23 @@ async function runLoop(signal: AbortSignal): Promise<void> {
       }
     } catch (e) {
       if (signal.aborted) break;
-      const isTimeout = isPollTimeoutError(e);
-      if (isTimeout) {
+      // A client-side deadline (slow long-poll) is not an outage: stay online,
+      // pause briefly so Telegram's server can close the previous aborted
+      // connection, and poll again. Classified via isPollTimeoutError because
+      // some webview builds surface the deadline as a generic AbortError
+      // ("The user aborted a request.") instead of the abort reason.
+      if (isPollTimeoutError(e)) {
         lastPollProgressTime = Date.now();
         useTelegramStore.getState().setOnline(true);
-        // Brief pause after client-side timeout so Telegram's server closes
-        // the previous aborted connection before opening a new long-poll request,
-        // preventing transient 409 Conflict responses.
         await sleep(signal, 1000);
         continue;
       }
       useTelegramStore.getState().setOnline(false);
       const errMsg = e instanceof Error ? e.message : String(e);
       useTelegramStore.getState().setLastError(errMsg);
+      if (e instanceof TelegramApiError && e.status === 409) conflictStreak += 1;
       consecutiveFailures += 1;
-      const backoffMs = pollBackoffMs(e, consecutiveFailures);
+      const backoffMs = pollBackoffMs(e, conflictStreak, consecutiveFailures);
       // The store keeps lastError for the UI, but the UI is a webview on a
       // server nobody is looking at. A poll that keeps failing has to reach the
       // file, or "the bot went quiet" has no cause attached to it.
@@ -364,8 +386,10 @@ async function runLoop(signal: AbortSignal): Promise<void> {
       if (e instanceof TelegramApiError && e.status === 409) {
         // Named explicitly because it is actionable and otherwise looks like a
         // network fault: a 409 means a SECOND client is polling this bot token.
+        // The streak and the next wait are in the line so an operator reading
+        // the log can tell "one hiccup" from "six hours of a competitor".
         logRelayWarn(
-          "409 Conflict: another client holds this bot token - check for a second Termigo instance, or another app configured with the same token",
+          `409 Conflict: another client holds this bot token - check for a second Termigo instance, or another app configured with the same token (conflict #${conflictStreak}, next retry in ${Math.round(backoffMs / 1000)}s)`,
         );
       }
       // Declare the wait BEFORE sleeping, so the watchdog never sees a stall
@@ -396,9 +420,12 @@ export async function startTelegramBot(): Promise<void> {
   relayController = new AbortController();
   lastPollProgressTime = Date.now();
   deliberateWaitUntil = 0;
-  // Restore the offset Telegram had already confirmed before the first poll.
-  // Without it the loop starts at 0 and Telegram replays the last unconfirmed
-  // batch, running its commands a second time.
+  conflictStreak = 0;
+  // Restore the offset Telegram had already confirmed before the first poll —
+  // this MUST happen before launchLoop: without it the loop starts at 0 and
+  // Telegram replays the last unconfirmed batch, running its commands (an old
+  // /run, /approve, /mode all) a second time. The token read and offset load
+  // are fast; the slow AI-store import stays after launchLoop below.
   currentBotId = botIdFromToken(await getTelegramToken());
   // stopTelegramBot() may have run while we awaited the token. Without this
   // guard the watchdog is installed just after stop cleared it, so it ticks on
@@ -497,6 +524,7 @@ export function stopTelegramBot(): void {
   relayController?.abort();
   relayController = null;
   deliberateWaitUntil = 0;
+  conflictStreak = 0;
   useTelegramStore.getState().setOnline(false);
   if (wasRunning) logRelayInfo("relay stopped");
 }

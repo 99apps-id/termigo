@@ -145,10 +145,11 @@ export const ManifestSchema = z
     homepage: z.string().nullish(),
     icon: z.string().nullish(),
     main: z.string().nullish(),
-    /** Opt-in worker sandbox: run the extension module in a Web Worker instead
-     *  of the main webview. Only "worker" is supported today. `.nullish()` so an
-     *  absent field (Rust serialises `Option::None` as JSON `null`) still parses. */
-    sandbox: z.literal("worker").nullish(),
+    /** Worker sandbox for the extension module. Defaults to `"worker"` so
+     *  extensions run in a Web Worker by default; an explicit `null` opts out
+     *  of sandboxing. `.nullish()` also accepts an absent field (Rust
+     *  serialises `Option::None` as JSON `null`), which the default then fills. */
+    sandbox: z.literal("worker").nullish().default("worker"),
     permissions: z
       .union([z.array(z.string()), z.record(z.string(), z.string())])
       .default([])
