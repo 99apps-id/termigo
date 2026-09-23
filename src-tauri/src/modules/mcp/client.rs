@@ -19,6 +19,8 @@ use tokio::process::{Child, ChildStdin, Command};
 use tokio::time::timeout;
 
 use super::ServerConfig;
+#[cfg(windows)]
+use crate::modules::proc::job::ProcessJob;
 
 /// The MCP revision this client implements.
 const PROTOCOL_VERSION: &str = "2024-11-05";
@@ -65,6 +67,8 @@ pub struct McpClient {
     stdin: ChildStdin,
     reader: BufReader<tokio::process::ChildStdout>,
     next_id: u64,
+    #[cfg(windows)]
+    job: Option<ProcessJob>,
 }
 
 impl McpClient {
@@ -131,6 +135,8 @@ impl McpClient {
             stdin,
             reader: BufReader::new(stdout),
             next_id: 0,
+            #[cfg(windows)]
+            job: ProcessJob::create_for(child.id()).ok(),
         };
 
         let handshake = client.request(
@@ -295,6 +301,10 @@ impl McpClient {
 
     pub async fn shutdown(mut self) {
         let _ = self.child.kill().await;
+        #[cfg(windows)]
+        {
+            self.job.take();
+        }
     }
 }
 

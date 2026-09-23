@@ -257,6 +257,11 @@ const approvalResumeFailureCount = new Map<string, number>();
 export function clearApprovalLatches(sessionId: string): void {
   stopLatch.delete(sessionId);
   approvalResumeFailureCount.delete(sessionId);
+  toolChoiceAutoResumeAt.delete(sessionId);
+  transientRetryCount.delete(sessionId);
+  overflowAutoResumeCount.delete(sessionId);
+  autoContinueCount.delete(sessionId);
+  verifyNudgeCount.delete(sessionId);
 }
 
 // Connectivity recovery: when the provider is unreachable, keep the run
