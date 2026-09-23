@@ -143,27 +143,38 @@ describe("checkReadable — protected directories", () => {
     });
   });
 
-  it("rejects writes under Windows system dirs (case-insensitive)", () => {
-    expect(checkWritable("C:\\Windows\\System32\\file")).toMatchObject({
-      ok: false,
+  // Operator policy (2026-09-23): Windows system directories are open to the
+  // agent — installs and tooling writes there are legitimate work. The
+  // guardrail against destruction lives in the system prompt's filesystem
+  // safety rules and the approval layer, not in a hard path deny. Unix system
+  // prefixes (/usr/bin, /etc, ...) stay denied; see the parity tests below.
+  it("allows writes under Windows system dirs (prompt-hardened, not path-denied)", () => {
+    expect(checkWritable("C:\\Windows\\Temp\\agent-work.txt")).toMatchObject({
+      ok: true,
     });
-    expect(checkWritable("c:/PROGRAM FILES/x")).toMatchObject({ ok: false });
+    expect(checkWritable("c:/PROGRAM FILES/mytool/config.json")).toMatchObject({
+      ok: true,
+    });
+    expect(checkWritable("C:/ProgramData/mytool/state.json")).toMatchObject({
+      ok: true,
+    });
   });
 
   // An extended-length (`\\?\`) path is the same file to the OS, but it used to
-  // compare as `/c:/windows/...`, so no root-anchored write prefix matched it
-  // and the guard waved the write through. The Rust mirror already normalized
-  // the prefix away; this pins the two in sync.
-  it("rejects writes under extended-length Windows paths", () => {
+  // compare as `/c:/...`, so no anchored prefix matched it and the guard waved
+  // the write through. The Rust mirror normalizes the prefix away; this pins
+  // the two in sync — now asserted on a prefix that is still denied.
+  it("normalizes extended-length Windows paths into the deny comparison", () => {
+    // Credential stores stay protected through every spelling.
     expect(
-      checkWritable("\\\\?\\C:\\Windows\\System32\\drivers\\x.sys"),
+      checkReadable(
+        "\\\\?\\C:\\Users\\me\\AppData\\Roaming\\Microsoft\\Credentials\\x",
+      ),
     ).toMatchObject({ ok: false });
-    expect(checkWritable("\\\\?\\C:\\Program Files\\app\\x.dll")).toMatchObject({
-      ok: false,
-    });
-    expect(checkWritable("//?/C:/Windows/System32/x.dll")).toMatchObject({
-      ok: false,
-    });
+    // An ordinary file through the same extended-length spelling stays allowed.
+    expect(
+      checkWritable("\\\\?\\C:\\Program Files\\app\\x.dll"),
+    ).toMatchObject({ ok: true });
   });
 
   it("allows reads in user directories not under any protected dir", () => {

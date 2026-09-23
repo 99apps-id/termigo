@@ -90,15 +90,20 @@ const PROTECTED_DIRS: &[&str] = &[
     "/appdata/roaming/microsoft/credentials",
     "/appdata/local/microsoft/credentials",
     "/appdata/roaming/gcloud",
-    // Windows system directories — anchored at filesystem root, not floating.
-    "/windows",
-    "/program files",
-    "/program files (x86)",
-    "/programdata",
+    // NOTE: Windows system directories (/windows, /program files, /programdata)
+    // are deliberately NOT protected. They blocked legitimate agent work
+    // (inspecting installed tooling, writing install targets) and the operator
+    // chose prompt-level guardrails over a hard deny here — see the filesystem
+    // safety rules in the system prompt. Credential stores stay protected.
 ];
 
 /// Write-only deny prefixes. Read access is not universally blocked, writing to
-/// system locations always is.
+/// these Unix system locations always is. Windows system directories are NOT
+/// listed: the operator allows installs/writes there (guarded at the prompt and
+/// by the approval layer instead), while the Unix set stays denied because
+/// nothing in an agent's legitimate workflow writes to /usr/bin or /etc via the
+/// fs tools — package managers do that through the shell, which has its own
+/// approval path.
 const WRITE_DENY_PREFIXES: &[&str] = &[
     "/etc/",
     "/var/db/",
@@ -115,10 +120,6 @@ const WRITE_DENY_PREFIXES: &[&str] = &[
     "/bin/",
     "/sbin/",
     "/boot/",
-    "/windows/",
-    "/program files/",
-    "/program files (x86)/",
-    "/programdata/",
 ];
 
 /// The Rust mirror of `AGENT_IMMUTABLE_CONFIG` in `security.ts`, limited to
@@ -230,10 +231,6 @@ fn is_system_root(dir: &str) -> bool {
             | "/private/var/db"
             | "/private/var/root"
             | "/system"
-            | "/windows"
-            | "/program files"
-            | "/program files (x86)"
-            | "/programdata"
     )
 }
 
@@ -514,7 +511,13 @@ mod tests {
     fn write_blocks_system_prefixes_but_not_plain_reads() {
         assert!(check_writable("/etc/hosts").is_err());
         assert!(check_writable("/usr/bin/thing").is_err());
-        assert!(check_writable(r"C:\Windows\System32\x").is_err());
+        // Operator policy (2026-09-23): Windows system directories are open to
+        // the agent (installs, tooling inspection); the guardrail is the system
+        // prompt's filesystem-safety rules plus the approval layer. The Unix
+        // set above stays denied — nothing legitimate writes /usr/bin through
+        // the fs tools.
+        assert!(check_writable(r"C:\Windows\Temp\agent-work.txt").is_ok());
+        assert!(check_writable(r"C:\Program Files\mytool\config.json").is_ok());
         assert!(check_writable("/home/me/project/out.txt").is_ok());
         // Reading a system path is not universally blocked; writing is.
         assert!(check_readable("/usr/bin/ls").is_ok());

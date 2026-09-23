@@ -132,13 +132,14 @@ const WRITE_DENY_PREFIXES = [
   "/bin/",
   "/sbin/",
   "/boot/",
-  // Windows (post drive-strip + lowercase). Note: these block writes to the
-  // system drive's Windows / Program Files. Drives are stripped, so any
-  // /windows/... etc. matches regardless of drive letter.
-  "/windows/",
-  "/program files/",
-  "/program files (x86)/",
-  "/programdata/",
+  // NOTE: Windows system directories (/windows, /program files, /programdata)
+  // are deliberately NOT denied. They blocked legitimate agent work (tooling
+  // installs, inspecting/writing install targets) and the operator chose
+  // prompt-level guardrails (filesystem safety rules in the system prompt)
+  // plus the approval layer over a hard deny. The Unix set stays denied:
+  // nothing in an agent's legitimate workflow writes /usr/bin or /etc through
+  // the fs tools — package managers reach those via the shell's own approval
+  // path. Credential stores remain in PROTECTED_DIRS above.
 ];
 
 /**

@@ -37,8 +37,14 @@ fn check_readable_blocks_protected_dirs_on_unix() {
 
 #[test]
 #[cfg(windows)]
-fn check_readable_blocks_protected_dirs_on_windows() {
-    let err = check_readable("C:\\Windows\\System32\\drivers\\etc\\hosts").unwrap_err();
+fn windows_system_dirs_are_open_but_credential_stores_are_not() {
+    // Operator policy (2026-09-23): Windows system directories must not block
+    // agent work — inspecting installed tooling and writing install targets is
+    // legitimate. The guardrail moved to the system prompt's filesystem-safety
+    // rules plus the approval layer. Credential stores stay hard-denied.
+    assert!(check_readable("C:\\Windows\\System32\\drivers\\etc\\hosts").is_ok());
+    let err = check_readable("C:\\Users\\test\\AppData\\Roaming\\Microsoft\\Credentials\\x")
+        .unwrap_err();
     assert!(err.contains("protected directory"));
 }
 
@@ -67,11 +73,13 @@ fn check_writable_blocks_system_prefixes_on_unix() {
 
 #[test]
 #[cfg(windows)]
-fn check_writable_blocks_system_prefixes_on_windows() {
-    let err = check_writable("C:\\Windows\\System32\\evil.exe").unwrap_err();
-    // On Windows, system paths like C:\Windows\... are now protected by the
-    // read guard as well as the write guard, so either message is correct.
-    assert!(err.contains("protected directory") || err.contains("writes under"));
+fn windows_system_dirs_are_writable_per_operator_policy() {
+    // Installs and tooling writes under Windows system directories are allowed
+    // by operator decision; destruction is deterred at the prompt level and by
+    // the approval layer (deletes always ask), not by a hard path deny.
+    assert!(check_writable("C:\\Windows\\Temp\\agent-work.txt").is_ok());
+    assert!(check_writable("C:\\Program Files\\mytool\\config.json").is_ok());
+    assert!(check_writable("C:\\ProgramData\\mytool\\state.json").is_ok());
 }
 
 #[test]
@@ -129,7 +137,8 @@ fn is_protected_blocks_ssh_and_git_on_unix() {
 #[cfg(windows)]
 fn is_protected_blocks_windows_credential_dirs() {
     // /appdata/... paths are in PROTECTED_DIRS after comparison_form strips the
-    // drive letter. /windows/ and /program files/ are only in WRITE_DENY_PREFIXES.
+    // drive letter. Windows system directories (/windows, /program files,
+    // /programdata) are open by operator policy — see the writable test above.
     assert!(is_protected(&PathBuf::from(
         "C:\\Users\\test\\AppData\\Roaming\\Microsoft\\Credentials\\test"
     )));

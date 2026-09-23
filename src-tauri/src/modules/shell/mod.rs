@@ -412,6 +412,8 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
             "write the output with the write_file tool instead"
         } else if bad.contains(&'$') || bad.contains(&'`') {
             "shell expansion is refused because it can change which program runs"
+        } else if bad.contains(&'(') {
+            "parentheses can hide a second command list, so they are refused; a PowerShell sub-expression like (Get-X).Prop must be rewritten as a pipeline: Get-X | Select-Object -ExpandProperty Prop — or use a PTY session"
         } else {
             "use a PTY session for what this would do"
         };
