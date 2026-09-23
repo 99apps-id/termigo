@@ -77,6 +77,11 @@ export function checkpointCommitCommand(label: string): string {
   return `git commit -m ${quoteShellArg(`${CHECKPOINT_PREFIX} ${clean}`)}`;
 }
 
+/** HEAD lookup, kept beside the other builders so the exact line is testable. */
+export function headShaCommand(): string {
+  return "git rev-parse HEAD";
+}
+
 export function rollbackResetCommand(sha: string): string {
   return `git reset --hard ${quoteShellArg(sha.trim())}`;
 }
@@ -210,26 +215,47 @@ export async function rollbackToCheckpoint(
  * the workspace root. Every failure is swallowed on purpose: a snapshot is a
  * safety net, and a net that can block the run it is meant to protect would be
  * worse than none.
+ *
+ * Returns the HEAD sha after the snapshot, so a per-turn checkpoint can
+ * point at it for rewind - or null when there is no repo or it was skipped.
  */
 export async function autoCheckpointForRun(
   workspaceRoot: string | null,
-): Promise<void> {
-  if (!workspaceRoot) return;
+  label = "auto before run",
+): Promise<string | null> {
+  if (!workspaceRoot) return null;
   try {
     const repo = await native.gitResolveRepo(workspaceRoot);
-    if (!repo) return;
+    if (!repo) return null;
     // Refuse to checkpoint the home directory: staging tens of thousands of
     // unrelated files hangs the run (and is never what the user wanted).
-    if (await isHomeDir(repo.repoRoot)) return;
+    if (await isHomeDir(repo.repoRoot)) return null;
     // Tracked-only: this runs unattended before EVERY agent run. `git add -A`
     // here once committed a 325 MB `.cargo/registry` (24,620 untracked files)
     // and another agent's half-finished work into the user's real history -
     // and the resulting 26k-file tree made every `git worktree add` time out,
     // silently disabling subagent isolation. See `checkpointAddTrackedCommand`.
-    await createCheckpoint(repo.repoRoot, "auto before run", {
+    await createCheckpoint(repo.repoRoot, label, {
       trackedOnly: true,
     });
+    return await readHeadSha(repo.repoRoot);
   } catch {
     // Never let checkpointing break the run.
+    return null;
+  }
+}
+
+/**
+ * HEAD after the snapshot, so a per-turn checkpoint can point at it for
+ * rewind. Null when there is no commit yet or git fails.
+ */
+export async function readHeadSha(repoRoot: string): Promise<string | null> {
+  try {
+    const r = await native.runCommand(headShaCommand(), repoRoot, 30);
+    if (r.exit_code !== 0) return null;
+    const sha = r.stdout.trim();
+    return isValidSha(sha) ? sha : null;
+  } catch {
+    return null;
   }
 }

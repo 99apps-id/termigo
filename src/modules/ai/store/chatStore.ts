@@ -49,6 +49,8 @@ import { clearSessionAllowed, useApprovalQueue } from "./approvalQueueStore";
 import { useArtifactsStore } from "./artifactsStore";
 import { useSubagentRunStore } from "./subagentRunStore";
 import { useTodosStore } from "./todoStore";
+import { turnLabelFor } from "../lib/turnCheckpoints";
+import { useTurnCheckpointStore } from "./turnCheckpointStore";
 
 export type TerminalSummary = {
   tabId: number;
@@ -210,6 +212,8 @@ export type PendingSelection = {
 
 export type ApprovalResponder = (approvalId: string, approved: boolean) => void;
 
+export type PendingEditTarget = { sessionId: string; messageId: string };
+
 type StoreState = {
   live: Live;
   setLive: (live: Live) => void;
@@ -245,6 +249,10 @@ type StoreState = {
 
   focusSignal: number;
   pendingPrefill: string | null;
+  /** Edit-and-resend target: submitting replaces this turn and all after it. */
+  pendingEditTarget: PendingEditTarget | null;
+  beginEdit: (target: PendingEditTarget) => void;
+  cancelEdit: () => void;
   focusInput: (prefill?: string | null) => void;
   consumePrefill: () => string | null;
 
@@ -289,6 +297,9 @@ type StoreState = {
   activeSessionId: string | null;
   hydrateSessions: () => Promise<void>;
   newSession: (chatId?: number, threadId?: number | null) => string;
+  /** Branch a NEW session off the transcript up to and including `messageId`.
+   *  Files are untouched — only the conversation forks. Returns the new id. */
+  forkSession: (messageId: string) => string | null;
   switchSession: (id: string) => void;
   deleteSession: (id: string) => void;
   renameSession: (id: string, title: string) => void;
@@ -486,6 +497,9 @@ export const useChatStore = create<StoreState>((set, get) => ({
 
   focusSignal: 0,
   pendingPrefill: null,
+  pendingEditTarget: null,
+  beginEdit: (target) => set({ pendingEditTarget: target, panelOpen: true }),
+  cancelEdit: () => set({ pendingEditTarget: null }),
   focusInput: (prefill = null) =>
     set((s) => ({
       panelOpen: true,
@@ -633,9 +647,50 @@ export const useChatStore = create<StoreState>((set, get) => ({
       threadId,
     };
     const next = [meta, ...get().sessions];
-    set({ sessions: next, activeSessionId: id, agentMeta: IDLE_META });
+    set({
+      sessions: next,
+      activeSessionId: id,
+      agentMeta: IDLE_META,
+      pendingEditTarget: null,
+    });
     void saveSessionsList(next);
     void saveActiveId(id);
+    return id;
+  },
+
+  forkSession: (messageId) => {
+    const srcId = get().activeSessionId;
+    if (!srcId) return null;
+    const messages = chats.get(srcId)?.messages ?? seedMessages.get(srcId) ?? [];
+    const idx = messages.findIndex((m) => m.id === messageId);
+    if (idx < 0) return null;
+    // The fork keeps the chosen turn as its last message: the user branches
+    // the CONVERSATION to try a different approach, files untouched.
+    const prefix = messages.slice(0, idx + 1);
+    const target = messages[idx];
+    const text = target.parts
+      .filter((p): p is { type: "text"; text: string } => p.type === "text")
+      .map((p) => p.text)
+      .join("\n");
+    const label = turnLabelFor(text) ?? deriveTitle(prefix);
+    const id = newSessionId();
+    const meta: SessionMeta = {
+      id,
+      title: `Fork · ${label}`,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    seedMessages.set(id, prefix);
+    const next = [meta, ...get().sessions];
+    set({
+      sessions: next,
+      activeSessionId: id,
+      agentMeta: IDLE_META,
+      pendingEditTarget: null,
+    });
+    void saveSessionsList(next);
+    void saveActiveId(id);
+    void saveMessages(id, prefix);
     return id;
   },
 
@@ -649,7 +704,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
     // Lazily seed the chat with persisted messages the first time we open
     // this session. Subsequent switches reuse the cached Chat instance.
     const flip = () => {
-      set({ activeSessionId: id, agentMeta: IDLE_META });
+      set({ activeSessionId: id, agentMeta: IDLE_META, pendingEditTarget: null });
       void saveActiveId(id);
       // Restore an interrupted run for the switched-to session so it can offer
       // "Continue"/"Resume". Guard on still-active so a fast double switch
@@ -684,7 +739,9 @@ export const useChatStore = create<StoreState>((set, get) => ({
       pendingPersist.delete(id);
     }
     void deleteSessionData(id);
+    if (get().pendingEditTarget?.sessionId === id) set({ pendingEditTarget: null });
     void useTodosStore.getState().clearSession(id);
+    void useTurnCheckpointStore.getState().clearSession(id);
     void useSubagentRunStore.getState().clearSession(id);
     void useArtifactsStore.getState().clearSession(id);
 

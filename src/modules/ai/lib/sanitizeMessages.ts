@@ -93,6 +93,7 @@ function lastMeaningfulIndex(messages: readonly UIMessage[]): number {
 
 export function sanitizeUiMessages(
   messages: readonly UIMessage[],
+  opts?: { keepLiveApproval?: boolean },
 ): UIMessage[] {
   // A run continued straight after an approval ends on the assistant turn that
   // holds it. Anything earlier - or any history that has since moved on to a
@@ -106,6 +107,10 @@ export function sanitizeUiMessages(
   // stranded in `approval-responded` here, 37 of them `bash_run`.
   const liveIdx = lastMeaningfulIndex(messages);
   const continuingRun = liveIdx >= 0 && messages[liveIdx].role === "assistant";
+  // Edit and resend truncates to a prefix whose newest turn can never
+  // execute, so even a live approval there is closed out. The default
+  // keeps it: a run continuing straight after an approval must run it.
+  const keepLiveApproval = opts?.keepLiveApproval ?? true;
 
   const out: UIMessage[] = [];
   for (let i = 0; i < messages.length; i++) {
@@ -122,7 +127,12 @@ export function sanitizeUiMessages(
       // resolve - anything we emitted would carry truncated input.
       if (state === "input-streaming") return [];
       if (!UNFINISHED.has(state)) return [part];
-      if (state === "approval-responded" && continuingRun && i === liveIdx) {
+      if (
+        state === "approval-responded" &&
+        continuingRun &&
+        keepLiveApproval &&
+        i === liveIdx
+      ) {
         return [part];
       }
       return [closeAsInterrupted(part)];

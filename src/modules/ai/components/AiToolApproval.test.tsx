@@ -163,7 +163,8 @@ describe("PreviewBlock", () => {
     expect(el).toBeDefined();
     const textChildren = el.props.children;
     expect(textChildren[0].props.children).toBe("src/app.ts");
-    expect(textChildren[1].props.children.join("")).toContain("2 lines");
+    expect(textChildren[1]).toBeDefined();
+    expect(textChildren[2].props.children.join("")).toContain("2 lines");
   });
 
   it("renders create_directory preview with target path", () => {

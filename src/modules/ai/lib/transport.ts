@@ -24,6 +24,7 @@ import { native } from "./native";
 import { listSkills } from "./skills";
 import { autoCheckpointForRun } from "./snapshots";
 import { formatTodoStatusBlock } from "./todos";
+import { turnCheckpointInfo, type TurnCheckpoint } from "./turnCheckpoints";
 import { getOrCreateUserModel } from "./userModel";
 
 /**
@@ -197,6 +198,8 @@ type Deps = {
   getCostDailyBudgetUsd?: () => number;
   getCaptureDebug?: () => boolean;
   getAutoCheckpoint?: () => boolean;
+  /** Index the pre-run snapshot against the turn that caused it, for rewind. */
+  onCheckpoint?: (info: TurnCheckpoint) => void;
   getHooksConfig?: () => HooksConfig;
   getRunId?: () => string;
   /** How many messages are queued for the active session right now. The run
@@ -322,8 +325,9 @@ export function createContextAwareTransport(deps: Deps) {
       // Bounded + abortable + non-fatal: a slow/huge repo (or the home directory
       // after a workspace fallback) must not hang the run or ignore Stop. A
       // timeout or git error just skips the checkpoint; only an abort stops.
+      let checkpointSha: string | null = null;
       try {
-        await raceAbort(
+        checkpointSha = await raceAbort(
           withTimeout(
             autoCheckpointForRun(live.workspaceRoot),
             CHECKPOINT_TIMEOUT_MS,
@@ -334,6 +338,16 @@ export function createContextAwareTransport(deps: Deps) {
       } catch (e) {
         if (isAbort(e)) throw e;
         logInfo(`[ai] run: checkpoint skipped (${String(e)})`);
+      }
+      if (checkpointSha) {
+        const info = turnCheckpointInfo(options.messages, checkpointSha);
+        if (info) {
+          try {
+            deps.onCheckpoint?.(info);
+          } catch {
+            // Indexing must never break the run it describes.
+          }
+        }
       }
     }
     // Timed because "the first message is slow" has had four plausible causes

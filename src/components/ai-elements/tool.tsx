@@ -40,6 +40,7 @@ import type { DynamicToolUIPart, ToolUIPart } from "ai";
 import type { ComponentProps, ReactNode } from "react";
 import { isValidElement, memo, useEffect, useMemo, useRef, useState } from "react";
 import { isMcpTool, parseMcpToolName } from "@/modules/ai/lib/mcpToolNames";
+import { AnsiOutput } from "./AnsiOutput";
 import { Shimmer } from "./shimmer";
 
 export type ToolPart = ToolUIPart | DynamicToolUIPart;
@@ -434,6 +435,7 @@ const ToolImpl = ({
                       toolName={toolName}
                       output={showOutputBody ? output : undefined}
                       errorText={errorText}
+                      input={input}
                     />
                   </GutterRow>
                 ) : null}
@@ -647,10 +649,12 @@ function ToolOutput({
   toolName,
   output,
   errorText,
+  input,
 }: {
   toolName: string;
   output: unknown;
   errorText?: string;
+  input?: unknown;
 }) {
   if (errorText) {
     return (
@@ -661,7 +665,7 @@ function ToolOutput({
   }
   if (output === undefined || output === null) return null;
 
-  const custom = renderToolOutput(toolName, output);
+  const custom = renderToolOutput(toolName, output, input);
   if (custom) return custom;
 
   let body: ReactNode;
@@ -755,7 +759,11 @@ function TodoResultLine({ summary }: { summary: TodoResultSummary }) {
   );
 }
 
-function renderToolOutput(toolName: string, output: unknown): ReactNode | null {
+function renderToolOutput(
+  toolName: string,
+  output: unknown,
+  input?: unknown,
+): ReactNode | null {
   if (!output || typeof output !== "object") return null;
   const o = output as Record<string, unknown>;
 
@@ -893,7 +901,13 @@ function renderToolOutput(toolName: string, output: unknown): ReactNode | null {
   }
 
   if (toolName === "bash_run") {
-    return <BashRunOutput data={o} />;
+    const cmd =
+      input &&
+      typeof input === "object" &&
+      typeof (input as Record<string, unknown>).command === "string"
+        ? ((input as Record<string, unknown>).command as string)
+        : undefined;
+    return <BashRunOutput data={o} command={cmd} />;
   }
 
   if (toolName === "suggest_command") {
@@ -1041,6 +1055,42 @@ function renderToolOutput(toolName: string, output: unknown): ReactNode | null {
   return null;
 }
 
+function PeekToTerminalButton({
+  command,
+  className,
+}: {
+  command: string;
+  className?: string;
+}) {
+  const [sent, setSent] = useState(false);
+  const onPeek = () => {
+    const ok = useChatStore.getState().live.injectIntoActivePty(command);
+    if (ok) {
+      setSent(true);
+      setTimeout(() => setSent(false), 1600);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={onPeek}
+      className={cn(
+        "inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[10px] font-medium transition-colors",
+        sent
+          ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+          : "text-muted-foreground hover:bg-muted hover:text-foreground",
+        className,
+      )}
+      title="Peek to terminal: injects command into active terminal PTY and focuses it"
+      aria-label="Peek command to active terminal"
+    >
+      <HugeiconsIcon icon={TerminalIcon} size={11} strokeWidth={1.75} />
+      <span>{sent ? "Sent to terminal" : "Peek to terminal"}</span>
+    </button>
+  );
+}
+
 /**
  * Live view of a `bash_background` process. Polls the Rust ring-buffer
  * (`shell_bg_logs`) on a short interval and appends the new bytes, so a long
@@ -1151,7 +1201,10 @@ function BashBackgroundLiveOutput({
         ) : null}
       </div>
       {command ? (
-        <div className="truncate text-muted-foreground">{command}</div>
+        <div className="flex items-center justify-between gap-1.5">
+          <div className="truncate text-muted-foreground">{command}</div>
+          <PeekToTerminalButton command={command} />
+        </div>
       ) : null}
       {error ? (
         <div className="font-mono text-[11px] text-destructive">{error}</div>
@@ -1160,13 +1213,19 @@ function BashBackgroundLiveOutput({
         ref={scrollRef}
         className="max-h-56 overflow-auto rounded bg-muted/40 p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap"
       >
-        {log || " "}
+        <AnsiOutput text={log || " "} />
       </pre>
     </div>
   );
 }
 
-function BashRunOutput({ data }: { data: Record<string, unknown> }) {
+function BashRunOutput({
+  data,
+  command,
+}: {
+  data: Record<string, unknown>;
+  command?: string;
+}) {
   const stdout = typeof data.stdout === "string" ? data.stdout : "";
   const stderr = typeof data.stderr === "string" ? data.stderr : "";
   const exit = typeof data.exit_code === "number" ? data.exit_code : null;
@@ -1213,6 +1272,9 @@ function BashRunOutput({ data }: { data: Record<string, unknown> }) {
             ) : null}
           </button>
         ))}
+        {command ? (
+          <PeekToTerminalButton command={command} className="ml-1" />
+        ) : null}
         <span className="flex-1" />
         {exit != null ? (
           <span
@@ -1238,7 +1300,13 @@ function BashRunOutput({ data }: { data: Record<string, unknown> }) {
         ) : null}
       </div>
       <pre className="max-h-72 overflow-auto rounded bg-muted/40 p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap">
-        {tab === "stdout" ? tailForDisplay(stdout) || " " : tailForDisplay(stderr) || " "}
+        <AnsiOutput
+          text={
+            tab === "stdout"
+              ? tailForDisplay(stdout) || " "
+              : tailForDisplay(stderr) || " "
+          }
+        />
       </pre>
       {cwdAfter ? (
         <div className="font-mono text-[10px] text-muted-foreground">

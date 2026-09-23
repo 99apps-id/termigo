@@ -14,6 +14,10 @@ import {
   stepBudgetForRound,
 } from "../config";
 import { buildLanguageModel } from "../lib/agent";
+import { splitForEdit } from "../lib/messageEdit";
+import { native } from "../lib/native";
+import { sanitizeUiMessages } from "../lib/sanitizeMessages";
+import { rollbackToCheckpoint } from "../lib/snapshots";
 import { BUILTIN_AGENTS } from "../lib/agents";
 import { isResumingApproval } from "../lib/approvalResume";
 import { AUTO_CONTINUE_DELAY_MS, autoContinueSlot } from "../lib/autoContinue";
@@ -64,8 +68,10 @@ import {
 } from "../lib/verifyOnStop";
 import type { ToolContext } from "../tools/tools";
 import { useAgentsStore } from "./agentsStore";
+import { useApprovalQueue } from "./approvalQueueStore";
 import {
   chats,
+  flushPersist,
   getActiveProviderKey,
   seedMessages,
   setApprovalRespondedHandler,
@@ -76,6 +82,7 @@ import {
 import { usePlanStore } from "./planStore";
 import { useSessionDirectiveStore } from "./sessionDirectiveStore";
 import { useTodosStore } from "./todoStore";
+import { useTurnCheckpointStore } from "./turnCheckpointStore";
 
 // How close a context-overflow auto-resume may follow the previous one, per
 // session, and how many it may attempt before giving up. A run that cannot
@@ -451,6 +458,13 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       usePreferencesStore.getState().costDailyBudgetUsd,
     getCaptureDebug: () => usePreferencesStore.getState().debugCaptureEnabled,
     getAutoCheckpoint: () => usePreferencesStore.getState().autoCheckpoint,
+    onCheckpoint: (info) => {
+      try {
+        useTurnCheckpointStore.getState().record(sessionId, info);
+      } catch {
+        // Indexing must never break the run it describes.
+      }
+    },
     getOpenaiCompatibleModelId: () =>
       usePreferencesStore.getState().openaiCompatibleModelId,
     getOpenaiCompatibleContextLimit: () =>
@@ -1240,6 +1254,152 @@ export async function stopRun(): Promise<void> {
   // check because an aborted round never auto-continues, and the abort may take
   // more than one tick to settle the status - waiting would strand the task.
   await flushSteer(true);
+}
+
+/**
+ * Start editing a user message for edit and resend.
+ *
+ * Validates here so the composer only prefills text that can actually be
+ * resent. The truncation itself waits for submit: abandoning the composer
+ * leaves the transcript untouched.
+ */
+export function beginEditUserMessage(messageId: string): boolean {
+  const sessionId = useChatStore.getState().activeSessionId;
+  if (!sessionId) return false;
+  const messages =
+    chats.get(sessionId)?.messages ?? seedMessages.get(sessionId) ?? [];
+  const target = messages.find((m) => m.id === messageId);
+  if (!target || target.role !== "user") return false;
+  useChatStore.getState().beginEdit({ sessionId, messageId });
+  return true;
+}
+
+export function cancelEditUserMessage(): void {
+  useChatStore.getState().cancelEdit();
+}
+
+/**
+ * Resend an edited user message, replacing its run.
+ *
+ * Everything from the edited turn onward is dropped and the edited text
+ * sends as a fresh turn, so a correction restarts from that point instead
+ * of piling on after a run that already went wrong. The stop is quiet: the
+ * steer queue is left alone, because queued tasks still belong after the
+ * edited turn rather than ahead of it.
+ */
+export async function resendEditedMessage(
+  sessionId: string,
+  targetId: string,
+  parts: readonly SteerPart[],
+): Promise<boolean> {
+  const chat = getOrCreateChat(sessionId);
+  const split = splitForEdit(chat.messages, targetId);
+  if (!split) {
+    // Edited away while the composer was open: the text is still the
+    // user's, so send it as an ordinary turn.
+    useChatStore.getState().cancelEdit();
+    return sendParts(sessionId, parts);
+  }
+  stopLatch.add(sessionId);
+  approvalResumeFailureCount.set(sessionId, 1);
+  useApprovalQueue.getState().cancelAll();
+  try {
+    await chat.stop();
+  } catch {
+    // An idle chat has nothing to stop; truncating is still correct.
+  }
+  // The prefix can end on an approved call that will never execute now.
+  // The send path may resume such a call, but this prefix never will, so
+  // close it out too.
+  const prefix = sanitizeUiMessages(split.prefix, { keepLiveApproval: false });
+  chat.messages = prefix;
+  useTurnCheckpointStore.getState().pruneAfter(sessionId, targetId);
+  useChatStore.getState().persistMessages(sessionId, prefix);
+  flushPersist(sessionId);
+  useChatStore.getState().cancelEdit();
+  // A resend starts a new task, like a typed message: reset the ladder and
+  // settle as idle so the send below goes out instead of queueing.
+  useChatStore.getState().patchAgentMeta({
+    status: "idle",
+    stopReason: null,
+    runRound: 0,
+    stoppedByUser: false,
+    error: null,
+    compactionNotice: null,
+    pruneNotice: null,
+    memoryNotice: null,
+  });
+  useChatStore.getState().syncRunMeta();
+  return sendParts(sessionId, parts);
+}
+
+/**
+ * Rewind files AND chat to the state before a user turn.
+ *
+ * The turn's checkpoint sha is the HEAD the auto-checkpoint left BEFORE the
+ * run started, so rolling the tree back to it undoes everything that turn
+ * produced; dropping the turn and every message after it from the transcript
+ * keeps the chat telling the same story as the files. `rollbackToCheckpoint`
+ * takes a "before rollback" snapshot first, so even this is undoable from the
+ * git side. Turn-checkpoint rows from the rewound turn onward are pruned —
+ * their shas still exist in history, but the messages they index are gone.
+ */
+export async function rewindToTurn(
+  sessionId: string,
+  messageId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const entry = useTurnCheckpointStore.getState().entryFor(sessionId, messageId);
+  if (!entry) {
+    return { ok: false, error: "This turn has no checkpoint to rewind to." };
+  }
+  const chat = getOrCreateChat(sessionId);
+  const idx = chat.messages.findIndex((m) => m.id === messageId);
+  if (idx < 0) {
+    return { ok: false, error: "That message is no longer in the transcript." };
+  }
+  const workspaceRoot = useChatStore.getState().live.getWorkspaceRoot();
+  if (!workspaceRoot) {
+    return { ok: false, error: "No workspace root to roll back." };
+  }
+  // A run in flight is invalid the moment the tree moves under it. The stop is
+  // latched so its own completion cannot auto-continue into the rewound state.
+  stopLatch.add(sessionId);
+  useApprovalQueue.getState().cancelAll();
+  try {
+    await chat.stop();
+  } catch {
+    // Idle chat: nothing to stop.
+  }
+  const repo = await native.gitResolveRepo(workspaceRoot).catch(() => null);
+  if (!repo) {
+    return {
+      ok: false,
+      error: "Not a git repository — there is nothing to rewind files to.",
+    };
+  }
+  const res = await rollbackToCheckpoint(repo.repoRoot, entry.sha);
+  if (!res.ok) {
+    return { ok: false, error: res.error || "Rollback failed." };
+  }
+  const prefix = sanitizeUiMessages(chat.messages.slice(0, idx), {
+    keepLiveApproval: false,
+  });
+  chat.messages = prefix;
+  useTurnCheckpointStore.getState().pruneAfter(sessionId, messageId);
+  useChatStore.getState().persistMessages(sessionId, prefix);
+  flushPersist(sessionId);
+  useChatStore.getState().patchAgentMeta({
+    status: "idle",
+    error: null,
+    stopReason: null,
+    stoppedByUser: false,
+    runRound: 0,
+    compactionNotice: null,
+    pruneNotice: null,
+    memoryNotice: null,
+  });
+  useChatStore.getState().syncRunMeta();
+  return { ok: true };
 }
 
 // Summarise a session the user has left and append anything durable to

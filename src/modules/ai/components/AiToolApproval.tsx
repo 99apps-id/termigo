@@ -21,6 +21,7 @@ import { memo, useState } from "react";
 import { ruleFromApproval } from "../lib/approvalRules";
 import { rememberSessionAllowed } from "../store/approvalQueueStore";
 import { useApprovalRulesStore } from "../store/approvalRulesStore";
+import { useChatStore } from "../store/chatStore";
 
 type Props = {
   part: Extract<ToolUIPart, { state: "approval-requested" }>;
@@ -275,6 +276,19 @@ export function PreviewBlock({
               <HugeiconsIcon icon={Edit02Icon} size={10} strokeWidth={2} />
               {isEditing ? "Done" : isModified ? "Edited" : "Edit"}
             </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                useChatStore.getState().live.injectIntoActivePty(editedCommand);
+              }}
+              className="h-5 px-1.5 text-[10px] text-muted-foreground hover:text-foreground gap-1"
+              title="Peek/test command in active terminal before approving"
+            >
+              <HugeiconsIcon icon={TerminalIcon} size={10} strokeWidth={2} />
+              Peek in terminal
+            </Button>
           </div>
         </div>
 
@@ -326,10 +340,11 @@ export function PreviewBlock({
     const content = typeof input.content === "string" ? input.content : "";
     const lines = content ? content.split("\n").length : 0;
     return (
-      <div className="space-y-0.5 font-mono text-[11px]">
+      <div className="space-y-1.5 font-mono text-[11px]">
         <div className="text-muted-foreground">{String(input.path ?? "")}</div>
+        {content ? <InlineDiff oldStr="" newStr={content} /> : null}
         <div className="text-[10.5px] text-muted-foreground/80">
-          {lines} line{lines === 1 ? "" : "s"} · review in the diff tab
+          +{lines} line{lines === 1 ? "" : "s"} · review in the diff tab
         </div>
       </div>
     );
@@ -401,42 +416,59 @@ export function PreviewBlock({
 // capped so a huge paste does not flood the card.
 function InlineDiff({ oldStr, newStr }: { oldStr: string; newStr: string }) {
   const CAP = 24;
+  const [expanded, setExpanded] = useState(false);
   const oldLines = oldStr ? oldStr.split("\n") : [];
   const newLines = newStr ? newStr.split("\n") : [];
-  const oldShown = oldLines.length > CAP ? oldLines.slice(0, CAP) : oldLines;
-  const newShown = newLines.length > CAP ? newLines.slice(0, CAP) : newLines;
+  const oldShown =
+    expanded || oldLines.length <= CAP ? oldLines : oldLines.slice(0, CAP);
+  const newShown =
+    expanded || newLines.length <= CAP ? newLines : newLines.slice(0, CAP);
+  const hasMore = oldLines.length > CAP || newLines.length > CAP;
 
   return (
-    <div className="max-h-52 overflow-auto rounded-md bg-muted/40 font-mono text-[11px] leading-relaxed">
-      {oldShown.map((l, i) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: static diff lines, order never changes
-        <div
-          key={`o${i}`}
-          className="whitespace-pre-wrap bg-red-500/10 px-2 text-red-500"
+    <div className="space-y-1">
+      <div className="max-h-60 overflow-auto rounded-md bg-muted/40 font-mono text-[11px] leading-relaxed">
+        {oldShown.map((l, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: static diff lines, order never changes
+          <div
+            key={`o${i}`}
+            className="whitespace-pre-wrap bg-red-500/10 px-2 text-red-500"
+          >
+            <span className="mr-1 select-none text-muted-foreground">−</span>
+            {l || " "}
+          </div>
+        ))}
+        {!expanded && oldLines.length > oldShown.length && (
+          <div className="px-2 text-[10px] text-muted-foreground">
+            … {oldLines.length - oldShown.length} more removed lines
+          </div>
+        )}
+        {newShown.map((l, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: static diff lines, order never changes
+          <div
+            key={`n${i}`}
+            className="whitespace-pre-wrap bg-green-500/10 px-2 text-green-600 dark:text-green-400"
+          >
+            <span className="mr-1 select-none text-muted-foreground">+</span>
+            {l || " "}
+          </div>
+        ))}
+        {!expanded && newLines.length > newShown.length && (
+          <div className="px-2 text-[10px] text-muted-foreground">
+            … {newLines.length - newShown.length} more added lines
+          </div>
+        )}
+      </div>
+      {hasMore && (
+        <button
+          type="button"
+          onClick={() => setExpanded(!expanded)}
+          className="text-[10px] font-medium text-primary hover:underline"
         >
-          <span className="mr-1 select-none text-muted-foreground">−</span>
-          {l || " "}
-        </div>
-      ))}
-      {oldLines.length > oldShown.length && (
-        <div className="px-2 text-[10px] text-muted-foreground">
-          … {oldLines.length - oldShown.length} more removed lines
-        </div>
-      )}
-      {newShown.map((l, i) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: static diff lines, order never changes
-        <div
-          key={`n${i}`}
-          className="whitespace-pre-wrap bg-green-500/10 px-2 text-green-600"
-        >
-          <span className="mr-1 select-none text-muted-foreground">+</span>
-          {l || " "}
-        </div>
-      ))}
-      {newLines.length > newShown.length && (
-        <div className="px-2 text-[10px] text-muted-foreground">
-          … {newLines.length - newShown.length} more added lines
-        </div>
+          {expanded
+            ? "Show less"
+            : `Show all (${oldLines.length + newLines.length} lines)`}
+        </button>
       )}
     </div>
   );

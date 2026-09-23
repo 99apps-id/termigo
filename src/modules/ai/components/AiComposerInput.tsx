@@ -2,9 +2,11 @@ import { Popover, PopoverAnchor } from "@/components/ui/popover";
 import { Spinner } from "@/components/ui/spinner";
 import { usePresence } from "@/lib/usePresence";
 import { cn } from "@/lib/utils";
-import { Add01Icon, CommandIcon } from "@hugeicons/core-free-icons";
+import { Add01Icon, CommandIcon, Edit02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { usePreferencesStore } from "@/modules/settings/preferences";
+import { setAgentApprovalMode } from "@/modules/settings/store";
 import { useWorkspaceFiles } from "../hooks/useWorkspaceFiles";
 import { ACCEPTED_FILES, useComposer } from "../lib/composer";
 import { splitComposerHighlights } from "../lib/composerHighlights";
@@ -93,6 +95,8 @@ export function AiComposerInput() {
   const c = useComposer();
   const snippets = useSnippetsStore((s) => s.snippets);
   const workspaceRoot = useChatStore((s) => s.live.getWorkspaceRoot());
+  const editTarget = useChatStore((s) => s.pendingEditTarget);
+  const approvalMode = usePreferencesStore((s) => s.agentApprovalMode);
 
   const [trigger, setTrigger] = useState<SnippetTrigger | null>(null);
   const [fileTrigger, setFileTrigger] = useState<FileTrigger | null>(null);
@@ -393,6 +397,48 @@ export function AiComposerInput() {
 
   return (
     <>
+      {editTarget ? (
+        <div className="flex items-center gap-1.5 rounded-md border border-primary/30 bg-primary/5 px-2 py-1 text-[11px] text-muted-foreground">
+          <HugeiconsIcon
+            icon={Edit02Icon}
+            size={12}
+            strokeWidth={2}
+            className="shrink-0 text-primary"
+          />
+          <span className="min-w-0 flex-1 truncate">
+            Editing an earlier message — sending replaces that turn and
+            everything after it.
+          </span>
+          <button
+            type="button"
+            onClick={() =>
+              void import("../store/chatRuntime").then((m) =>
+                m.cancelEditUserMessage(),
+              )
+            }
+            className="shrink-0 rounded px-1.5 py-0.5 font-medium text-foreground/80 transition-colors hover:bg-muted hover:text-foreground"
+          >
+            Cancel (Esc)
+          </button>
+        </div>
+      ) : null}
+      {approvalMode === "all" && !editTarget ? (
+        <div className="flex items-center justify-between gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-700 dark:text-amber-400">
+          <div className="flex items-center gap-1.5 min-w-0 flex-1 truncate">
+            <span className="size-1.5 shrink-0 rounded-full bg-amber-500 animate-pulse" />
+            <span className="truncate font-medium">
+              Auto-all active: tools execute without confirmation.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => void setAgentApprovalMode("ask")}
+            className="shrink-0 rounded px-1.5 py-0.5 text-[10.5px] font-semibold text-foreground/80 hover:bg-muted hover:text-foreground transition-colors"
+          >
+            Switch to Ask
+          </button>
+        </div>
+      ) : null}
       <Popover open={pickerOpen}>
         <PopoverAnchor asChild>
           <div
@@ -518,6 +564,15 @@ export function AiComposerInput() {
                     }
                     return;
                   }
+                }
+                // Cancelling an edit-and-resend keeps the text in the box: the
+                // correction is still worth sending, just as an ordinary turn.
+                if (e.key === "Escape" && editTarget) {
+                  e.preventDefault();
+                  void import("../store/chatRuntime").then((m) =>
+                    m.cancelEditUserMessage(),
+                  );
+                  return;
                 }
                 // Stopping a run had no keyboard path at all: the only way was
                 // to reach the far corner of the bar with the mouse. Inside the

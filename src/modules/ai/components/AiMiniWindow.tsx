@@ -16,7 +16,13 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type { PresenceState } from "@/lib/usePresence";
 import { cn } from "@/lib/utils";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { usePreferencesStore } from "@/modules/settings/preferences";
+import { setAgentApprovalMode } from "@/modules/settings/store";
 import { type UIMessage, useChat } from "@ai-sdk/react";
 import {
   Add01Icon,
@@ -276,6 +282,44 @@ function EmptyShell({
   );
 }
 
+function ApprovalModeBadge() {
+  const mode = usePreferencesStore((s) => s.agentApprovalMode);
+  if (mode !== "all") return null;
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="flex items-center gap-1 rounded bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 text-[10px] font-semibold text-amber-500 transition-colors hover:bg-amber-500/25"
+          title="Tool approval is set to Auto All: commands and file mutations run without asking!"
+        >
+          <span className="size-1.5 rounded-full bg-amber-500 animate-pulse" />
+          <span>Auto all</span>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-64 p-2.5 text-xs">
+        <div className="flex items-center justify-between">
+          <span className="font-semibold text-amber-500">Auto-all Mode</span>
+          <span className="rounded bg-amber-500/20 px-1 py-0.5 text-[9px] font-bold uppercase text-amber-600 dark:text-amber-400">
+            Active
+          </span>
+        </div>
+        <p className="mt-1 text-[10.5px] leading-snug text-muted-foreground">
+          Tools execute automatically without asking for approval.
+        </p>
+        <button
+          type="button"
+          onClick={() => void setAgentApprovalMode("ask")}
+          className="mt-2.5 w-full rounded bg-primary py-1 text-center text-[10.5px] font-medium text-primary-foreground transition-opacity hover:opacity-90"
+        >
+          Switch back to Ask mode
+        </button>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 function Header({
   onClose,
   messages,
@@ -302,6 +346,7 @@ function Header({
       </div>
       <div className="min-w-0 flex-1" />
       <div className="flex min-w-0 shrink items-center gap-1">
+        <ApprovalModeBadge />
         <SessionPicker />
         <Button
           type="button"

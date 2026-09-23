@@ -6,6 +6,7 @@ import {
   checkpointCommitCommand,
   checkpointLabel,
   checkpointsFromLog,
+  headShaCommand,
   isCheckpointSubject,
   isValidSha,
   rollbackResetCommand,
@@ -70,6 +71,10 @@ describe("command builders", () => {
   // committed a 325 MB `.cargo/registry` (24,620 untracked files) into real
   // history, which then made every `git worktree add` time out. Tracked-only
   // is the structural fix - untracked scratch can never be swept in again.
+  it("reads HEAD with rev-parse", () => {
+    expect(headShaCommand()).toBe("git rev-parse HEAD");
+  });
+
   it("stages tracked modifications only for unattended snapshots", () => {
     expect(checkpointAddTrackedCommand()).toBe("git add -u");
     expect(checkpointAddTrackedCommand()).not.toBe(checkpointAddCommand());

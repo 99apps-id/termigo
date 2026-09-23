@@ -323,3 +323,29 @@ describe("sanitizeUiMessages: the approval field", () => {
     expect(tool.input).toEqual({ command: "which openclaw" });
   });
 });
+describe("sanitizeUiMessages: edit and resend", () => {
+  it("closes a live approval when truncating for edit and resend", () => {
+    const messages = [
+      userMessage("u1"),
+      assistantMessage("a1", [
+        toolPart("approval-responded", "call_1"),
+        { type: "text", text: "decided" },
+      ]),
+    ];
+    const out = sanitizeUiMessages(messages, { keepLiveApproval: false });
+    expect(out).toHaveLength(2);
+    const parts = partsOf(out[1]);
+    expect(parts.find((p) => p.state === "approval-responded")).toBeUndefined();
+    expect(parts[0].state).toBe("output-error");
+  });
+
+  it("keeps the live approval by default", () => {
+    const messages = [
+      userMessage("u1"),
+      assistantMessage("a1", [toolPart("approval-responded", "call_1")]),
+    ];
+    const out = sanitizeUiMessages(messages, {});
+    const tool = partsOf(out[1]).find((p) => p.state === "approval-responded");
+    expect(tool).toBeDefined();
+  });
+});

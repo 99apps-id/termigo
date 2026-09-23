@@ -451,6 +451,29 @@ export function AiComposerProvider({ children }: ProviderProps) {
       targetSessionId = useChatStore.getState().newSession();
     }
     const store = useChatStore.getState();
+    const editTarget = store.pendingEditTarget;
+    if (!store.mini.open) store.openMini();
+    if (editTarget && editTarget.sessionId === targetSessionId) {
+      // Edit and resend: this submit replaces the edited turn and every
+      // turn after it, then sends as a fresh task.
+      void (async () => {
+        try {
+          const { resendEditedMessage } = await import("../store/chatRuntime");
+          await resendEditedMessage(
+            targetSessionId,
+            editTarget.messageId,
+            parts as unknown as SteerPart[],
+          );
+        } catch (e) {
+          console.error("[composer] resend failed", e);
+          toast.error(
+            `Could not resend your message${e instanceof Error ? `: ${e.message}` : ""}`,
+            { id: "composer-resend-failed" },
+          );
+        }
+      })();
+    } else {
+      if (editTarget) store.cancelEdit();
     // A typed message starts a new task, so the escalation ladder resets to
     // its first rung. Continue is the only thing that climbs it.
     store.patchAgentMeta({
@@ -478,6 +501,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
         );
       }
     })();
+    }
     setValue("");
     setFiles([]);
     setPickedSnippets([]);

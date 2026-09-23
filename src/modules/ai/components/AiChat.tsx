@@ -27,7 +27,12 @@ import {
   type MarkdownLinkProps,
 } from "@/modules/markdown/MarkdownLink";
 import { usePreferencesStore } from "@/modules/settings/preferences";
-import { Edit02Icon } from "@hugeicons/core-free-icons";
+import { toast } from "@/components/ui/toast";
+import {
+  ArrowTurnBackwardIcon,
+  Edit02Icon,
+  ForkIcon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ChatStatus, DynamicToolUIPart, ToolUIPart, UIMessage } from "ai";
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
@@ -35,8 +40,13 @@ import { useAutoApproval } from "../hooks/useAutoApproval";
 import { humanizeModelError } from "../lib/errorMessage";
 import { isContentFilterError } from "../lib/errors";
 import { TERMIGO_CMD_RE } from "../lib/slashCommands";
-import { resumeRun } from "../store/chatRuntime";
+import {
+  beginEditUserMessage,
+  resumeRun,
+  rewindToTurn,
+} from "../store/chatRuntime";
 import { useChatStore } from "../store/chatStore";
+import { useTurnCheckpointStore } from "../store/turnCheckpointStore";
 import { AiToolApproval } from "./AiToolApproval";
 import {
   CommandSnippet,
@@ -55,6 +65,7 @@ import { PartAppear, ReadGroup, ReadRow } from "./ChatReadGroup";
 import { ConfirmationCarousel } from "./ConfirmationCarousel";
 import { type AnyPart, buildPartGroups, isThinkingLive, lastReasoningGroupIndex, partType } from "./chatPartGrouping";
 import { ElicitationCarousel } from "./ElicitationCarousel";
+import { ChatTimelineNavigator } from "./ChatTimelineNavigator";
 import { RollbackSuggestion } from "./RollbackSuggestion";
 import { RunProgressHUD } from "./RunProgressHUD";
 import { TrajectoryThinkingHUD } from "./TrajectoryThinkingHUD";
@@ -117,6 +128,7 @@ export function AiChatView({
     status === "streaming" && lastMessage?.role === "assistant"
       ? lastMessage.id
       : null;
+  const sessionId = useChatStore((s) => s.activeSessionId);
   const step = useChatStore((s) => s.agentMeta.step);
   const stopReason = useChatStore((s) => s.agentMeta.stopReason);
   const runRound = useChatStore((s) => s.agentMeta.runRound);
@@ -183,6 +195,7 @@ export function AiChatView({
 
   return (
     <Conversation>
+      <ChatTimelineNavigator messages={messages} sessionId={sessionId} />
       <ConversationContent className="gap-5 p-3">
         {messages.map((m) => (
           <RenderedMessage
@@ -331,6 +344,13 @@ const RenderedMessage = memo(function RenderedMessage({
     [groups],
   );
   const focusInput = useChatStore((s) => s.focusInput);
+  const sessionId = useChatStore((s) => s.activeSessionId);
+  // Rewind is offered only on turns that actually have a pre-run snapshot.
+  const hasTurnCheckpoint = useTurnCheckpointStore((s) =>
+    sessionId
+      ? (s.bySession[sessionId] ?? []).some((r) => r.messageId === message.id)
+      : false,
+  );
 
   const hasTextPart = useMemo(
     () =>
@@ -375,8 +395,43 @@ const RenderedMessage = memo(function RenderedMessage({
     const withoutCmd = cmdMatch ? rawText.slice(cmdMatch[0].length) : rawText;
     const stripped = stripUserContextBlocks(withoutCmd);
 
+    // Edit-and-resend: prefill the composer AND arm pendingEditTarget, so
+    // submitting truncates the transcript from this turn instead of stacking
+    // a correction on top of a run that already went the wrong way.
+    const onEdit = () => {
+      if (beginEditUserMessage(message.id)) focusInput(rawText);
+    };
+    const onRewind = async () => {
+      const ok = window.confirm(
+        "Rewind to before this turn?\n\n" +
+          "The working tree rolls back to the snapshot taken before this turn ran " +
+          "(your current changes are checkpointed first, so the rollback itself is " +
+          "undoable from git), and this message plus everything after it is removed " +
+          "from the chat.",
+      );
+      if (!ok || !sessionId) return;
+      const res = await rewindToTurn(sessionId, message.id);
+      if (res.ok) {
+        toast("Rewound files and chat to before this turn", {
+          variant: "success",
+        });
+      } else {
+        toast(res.error, { variant: "error" });
+      }
+    };
+    const onFork = () => {
+      const id = useChatStore.getState().forkSession(message.id);
+      if (id) {
+        toast("Forked a new session from this message", { variant: "success" });
+      }
+    };
+
     return (
-      <Message from="user">
+      <Message
+        from="user"
+        id={`msg-${message.id}`}
+        data-message-id={message.id}
+      >
         <MessageContent>
           {commandName ? <CommandSnippet name={commandName} /> : null}
           {stripped.chips.length > 0 ? (
@@ -437,23 +492,47 @@ const RenderedMessage = memo(function RenderedMessage({
             </p>
           ) : null}
         </MessageContent>
-        {rawText.trim() ? (
-          <MessageActions>
+        <MessageActions>
+          {rawText.trim() ? (
             <MessageAction
-              tooltip="Edit and resend"
+              tooltip="Edit and resend — replaces this turn and everything after it"
               label="Edit message"
-              onClick={() => focusInput(rawText)}
+              onClick={onEdit}
             >
               <HugeiconsIcon icon={Edit02Icon} size={13} strokeWidth={1.75} />
             </MessageAction>
-          </MessageActions>
-        ) : null}
+          ) : null}
+          {hasTurnCheckpoint ? (
+            <MessageAction
+              tooltip="Rewind files and chat to before this turn"
+              label="Rewind to here"
+              onClick={() => void onRewind()}
+            >
+              <HugeiconsIcon
+                icon={ArrowTurnBackwardIcon}
+                size={13}
+                strokeWidth={1.75}
+              />
+            </MessageAction>
+          ) : null}
+          <MessageAction
+            tooltip="Fork a new session branching from this message"
+            label="Fork from here"
+            onClick={onFork}
+          >
+            <HugeiconsIcon icon={ForkIcon} size={13} strokeWidth={1.75} />
+          </MessageAction>
+        </MessageActions>
       </Message>
     );
   }
 
   return (
-    <Message from={message.role}>
+    <Message
+      from={message.role}
+      id={`msg-${message.id}`}
+      data-message-id={message.id}
+    >
       <MessageContent>
         <div className="flex flex-col gap-3">
           {groups.map((g, gi) => {
@@ -516,6 +595,24 @@ const RenderedMessage = memo(function RenderedMessage({
           ) : null}
         </div>
       </MessageContent>
+      {!streaming ? (
+        <MessageActions>
+          <MessageAction
+            tooltip="Fork a new session branching from this message"
+            label="Fork from here"
+            onClick={() => {
+              const id = useChatStore.getState().forkSession(message.id);
+              if (id) {
+                toast("Forked a new session from this message", {
+                  variant: "success",
+                });
+              }
+            }}
+          >
+            <HugeiconsIcon icon={ForkIcon} size={13} strokeWidth={1.75} />
+          </MessageAction>
+        </MessageActions>
+      ) : null}
     </Message>
   );
 });
