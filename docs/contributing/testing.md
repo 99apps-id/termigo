@@ -26,6 +26,18 @@ the "referenced from the UI but never registered" bug that shipped SSH backup
 broken. If a command is genuinely dynamic or handled outside `generate_handler!`,
 add it to the `ALLOWLIST` in that script with a comment saying why.
 
+### Agent in-sandbox verification
+
+AI coding agents operating within Termigo can run verification suites directly inside the shell sandbox:
+- `pnpm lint` / `biome check .`
+- `pnpm check-types`
+- `pnpm check:commands`
+- `pnpm test` / `vitest run`
+- `cargo clippy --all-targets --locked -- -D warnings`
+- `cargo test --tests --locked`
+
+The sandbox allowlist (`SANDBOX_ALLOWLIST`), script extension normalization (`.ps1`, `.js`, `.mjs`, `.cjs`), Windows `-ExecutionPolicy Bypass`, and `node_modules`/`.pnpm` symlink traversal authorization ensure local test runners execute without friction while strictly maintaining deletion and secret-protection boundaries.
+
 ## What must have a test
 
 `CONTRIBUTING.md` requires a test for any change that touches behavior in these load-bearing paths:
