@@ -310,8 +310,14 @@ export async function handleCallback(
     return;
   }
   const chatId = msg.chat.id;
-  const owner = useTelegramStore.getState().chatId;
-  if (owner && String(owner) !== String(chatId)) {
+  const state = useTelegramStore.getState();
+  const ownerChatId = state.chatId;
+  const ownerUserId = state.ownerUserId;
+  // Reject callbacks from a different chat immediately. Capture both
+  // `chatId` and `ownerUserId` once at the top so the checks below use a
+  // consistent snapshot; a re-read in the middle could race with another
+  // async store update and flip the result.
+  if (ownerChatId && String(ownerChatId) !== String(chatId)) {
     await answerCallback(cb.id, "Unauthorized.", signal);
     return;
   }

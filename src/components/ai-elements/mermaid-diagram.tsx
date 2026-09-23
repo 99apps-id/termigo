@@ -4,6 +4,7 @@ import { useEffect, useId, useState } from "react";
 
 import { Shimmer } from "./shimmer";
 import { useIsStreaming } from "./chat-code";
+import DOMPurify from "dompurify";
 
 /**
  * Lazily-loaded, cached mermaid module. Mermaid is heavy (pulls in dagre,
@@ -19,13 +20,29 @@ function loadMermaid() {
 }
 
 function sanitizeSvg(svg: string): string {
-  let clean = svg.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "");
-  clean = clean.replace(/\s+on\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "");
-  clean = clean.replace(/\s+href\s*=\s*(?:"javascript:[^"]*"|'javascript:[^']*')/gi, "");
-  clean = clean.replace(/<foreignobject\b[^>]*>[\s\S]*?<\/foreignobject>/gi, "");
-  clean = clean.replace(/\s+on\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "");
-  clean = clean.replace(/\s+xlink:href\s*=\s*(?:"javascript:[^"]*"|'javascript:[^']*')/gi, "");
-  return clean;
+  return DOMPurify.sanitize(svg, {
+    ALLOWED_TAGS: [
+      "svg", "g", "path", "rect", "circle", "ellipse", "line", "polyline", "polygon",
+      "text", "tspan", "textPath", "defs", "linearGradient", "radialGradient", "stop",
+      "clipPath", "use", "image", "filter", "feGaussianBlur", "feOffset", "feBlend",
+      "feMerge", "feMergeNode", "feColorMatrix", "feComponentTransfer", "feFunc",
+      "marker", "view", "title", "desc",
+    ],
+    ALLOWED_ATTR: [
+      "id", "class", "style", "transform", "d", "x", "y", "width", "height",
+      "cx", "cy", "r", "rx", "ry", "x1", "y1", "x2", "y2", "points",
+      "fill", "stroke", "stroke-width", "stroke-linecap", "stroke-linejoin",
+      "stroke-dasharray", "stroke-dashoffset", "opacity", "fill-opacity",
+      "stroke-opacity", "font-family", "font-size", "font-weight", "text-anchor",
+      "dominant-baseline", "clip-path", "mask", "filter", "href", "xlink:href",
+      "xmlns", "xmlns:xlink", "viewBox", "preserveAspectRatio", "gradientUnits",
+      "gradientTransform", "offset", "stop-color", "stop-opacity", "spreadMethod",
+      "fx", "fy", "flood-color", "flood-opacity", "in", "result", "mode",
+      "stdDeviation", "dx", "dy", "dx1", "dy1", "dx2", "dy2",
+    ],
+    FORBID_TAGS: ["foreignObject", "script", "iframe", "object", "embed", "form"],
+    FORBID_ATTR: ["on*", "style*"],
+  });
 }
 
 function Notice({ children }: { children: string }) {

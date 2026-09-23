@@ -17,6 +17,7 @@ import { aiToolsRegistry, commandsRegistry, headerItemsRegistry, panelRenderersR
 import { requirePermission } from "./permissions";
 import { useRightPanelStore } from "./rightPanelStore";
 import type { ExtensionRuntime } from "./host";
+import DOMPurify from "dompurify";
 import {
   createSandboxDispatcher,
   type SandboxExecutor,
@@ -164,7 +165,23 @@ async function buildExecutor(
       // extension keeps its interactive handlers without running DOM code in
       // the main webview.
       panelRenderersRegistry.set(ext.id, panelId, (container) => {
-        container.innerHTML = html;
+        const clean = DOMPurify.sanitize(html, {
+          ALLOWED_TAGS: [
+            "div", "span", "p", "pre", "code", "blockquote",
+            "ul", "ol", "li", "strong", "em", "a", "img",
+            "h1", "h2", "h3", "h4", "h5", "h6",
+            "table", "thead", "tbody", "tr", "td", "th",
+            "br", "hr", "input", "button", "label",
+          ],
+          ALLOWED_ATTR: [
+            "href", "src", "alt", "title", "target", "rel",
+            "class", "id", "style",
+            "data-ext-event", "data-ext-field", "data-ext-arg",
+            "type", "name", "value", "placeholder", "disabled", "readonly",
+          ],
+          ALLOW_DATA_ATTR: false,
+        });
+        container.innerHTML = clean;
         const handler = (e: Event): void => {
           const target = e.target as HTMLElement | null;
           const ev = target?.getAttribute?.("data-ext-event");

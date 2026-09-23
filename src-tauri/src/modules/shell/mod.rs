@@ -487,6 +487,24 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
         return Err("command contains no executable segment".into());
     }
     for segment in segments {
+        // Reject shell metacharacters inside env-var values. A segment like
+        // `FOO="$HOME" command` would otherwise pass the allowlist because
+        // `$HOME` is inside quotes, but the shell still expands it.
+        for token in segment.split_whitespace() {
+            if is_env_var_assignment(token) {
+                if let Some((_, value)) = token.split_once('=') {
+                    let trimmed = value.trim_matches(['"', '\'']);
+                    if trimmed.chars().any(|c| SHELL_METACHARACTERS.contains(&c)) {
+                        return Err(format!(
+                            "env var value contains shell metacharacters {:?}; use a PTY session for variables or substitution",
+                            trimmed
+                        ));
+                    }
+                }
+            } else {
+                break;
+            }
+        }
         let raw_program = extract_effective_program(segment);
         let program = raw_program.trim_matches(['"', '\'']);
 
@@ -1347,6 +1365,24 @@ mod tests_sandbox {
         assert!(validate_shell_command("echo hello > out.txt").is_err());
         assert!(validate_shell_command("cat `id`").is_err());
         assert!(validate_shell_command("echo $HOME").is_err());
+    }
+
+    /// Env-var values must not carry shell metacharacters. `FOO="$HOME"
+    /// command` would otherwise pass the allowlist because `$HOME` is inside
+    /// quotes, but the shell still expands it.
+    #[test]
+    fn validate_shell_command_blocks_metacharacters_in_env_var_values() {
+        assert!(validate_shell_command(r#"FOO="$HOME" command"#).is_err());
+        assert!(validate_shell_command(r#"FOO='$(whoami)' command"#).is_err());
+        assert!(validate_shell_command(r#"FOO="hello > world" command"#).is_err());
+    }
+
+    /// Simple env-var assignments without metacharacters stay allowed.
+    #[test]
+    fn validate_shell_command_allows_simple_env_var_assignments() {
+        assert!(validate_shell_command("DEBIAN_FRONTEND=noninteractive apt-get install -y nmap").is_ok());
+        assert!(validate_shell_command("FOO=bar echo hello").is_ok());
+        assert!(validate_shell_command("PATH=/usr/bin git status").is_ok());
     }
 
     #[test]
