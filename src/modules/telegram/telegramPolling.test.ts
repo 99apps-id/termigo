@@ -23,9 +23,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { TelegramApiError } from "./telegramApi";
 import {
   isPollingStalled,
+  isPollTimeoutError,
   POLLING_STALL_TIMEOUT_MS,
   pollBackoffMs,
+  TELEGRAM_CONFLICT_BACKOFF_ESCALATED_MS,
   TELEGRAM_CONFLICT_BACKOFF_MS,
+  TELEGRAM_CONFLICT_ESCALATE_AFTER,
   TELEGRAM_GENERIC_BACKOFF_BASE_MS,
   TELEGRAM_GENERIC_BACKOFF_CAP_MS,
 } from "./telegramPolling";
@@ -263,5 +266,61 @@ describe("telegram update offset persistence", () => {
     const mod = await import("./telegramPolling");
     expect(() => mod.setCurrentUpdateOffset(9)).not.toThrow();
     expect(mod.currentUpdateOffset).toBe(9);
+  });
+});
+
+describe("persistent 409 escalation", () => {
+  const conflict = () =>
+    new TelegramApiError(409, "Conflict: terminated by other getUpdates");
+
+  it("holds the one-minute stand-down for the first conflicts", () => {
+    // A transient double-start (two windows, a restart race) should heal fast,
+    // so early conflicts keep the short cycle.
+    for (let n = 1; n < TELEGRAM_CONFLICT_ESCALATE_AFTER; n++) {
+      expect(pollBackoffMs(conflict(), n)).toBe(TELEGRAM_CONFLICT_BACKOFF_MS);
+    }
+  });
+
+  it("grows the wait once the competitor is clearly not leaving", () => {
+    // The field log showed the 60s cycle repeating for HOURS: two warning
+    // lines a minute forever. Past the threshold the poller backs way off -
+    // still recovering when the conflict ends, no longer drowning the log.
+    expect(pollBackoffMs(conflict(), TELEGRAM_CONFLICT_ESCALATE_AFTER)).toBe(
+      TELEGRAM_CONFLICT_BACKOFF_ESCALATED_MS,
+    );
+    expect(pollBackoffMs(conflict(), 500)).toBe(
+      TELEGRAM_CONFLICT_BACKOFF_ESCALATED_MS,
+    );
+  });
+});
+
+describe("isPollTimeoutError", () => {
+  it("recognises the apiGet deadline reason", () => {
+    expect(isPollTimeoutError(new Error("Timeout after 50000ms"))).toBe(true);
+    const dom = new Error("deadline");
+    dom.name = "TimeoutError";
+    expect(isPollTimeoutError(dom)).toBe(true);
+  });
+
+  it("recognises the generic AbortError some webviews surface instead", () => {
+    // The field failure: "The user aborted a request." is the client timeout's
+    // AbortError on webview builds that do not propagate the abort reason.
+    // Classified as a network fault, it marked the bot OFFLINE and escalated
+    // the failure streak over what was one slow long-poll.
+    const abort = new Error("The user aborted a request.");
+    abort.name = "AbortError";
+    expect(isPollTimeoutError(abort)).toBe(true);
+    expect(isPollTimeoutError(new Error("The user aborted a request."))).toBe(
+      true,
+    );
+  });
+
+  it("leaves real network and API failures alone", () => {
+    expect(isPollTimeoutError(new Error("Failed to fetch"))).toBe(false);
+    expect(
+      isPollTimeoutError(new TelegramApiError(409, "Conflict")),
+    ).toBe(false);
+    expect(isPollTimeoutError("a string throw")).toBe(false);
+    expect(isPollTimeoutError(undefined)).toBe(false);
   });
 });

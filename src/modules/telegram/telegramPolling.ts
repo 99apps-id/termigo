@@ -122,6 +122,19 @@ const STALL_RECYCLE_GRACE_MS = 10_000;
 export const TELEGRAM_CONFLICT_BACKOFF_MS = 60_000;
 
 /**
+ * After this many consecutive 409s the wait grows to
+ * `TELEGRAM_CONFLICT_BACKOFF_ESCALATED_MS`.
+ *
+ * The competing client is not leaving on its own - field logs showed the 60s
+ * cycle repeating for HOURS (two warning lines a minute, forever). The first
+ * conflicts stay at 60s so a transient double-start heals quickly; a persistent
+ * one is a configuration problem already surfaced in the UI's lastError, and
+ * the poller only needs to re-check often enough to notice when it is fixed.
+ */
+export const TELEGRAM_CONFLICT_ESCALATE_AFTER = 10;
+export const TELEGRAM_CONFLICT_BACKOFF_ESCALATED_MS = 5 * 60_000;
+
+/**
  * Base wait after an ordinary `getUpdates` failure, and the ceiling the wait
  * grows to while failures repeat.
  *
@@ -244,19 +257,45 @@ function launchLoop(controller: AbortController): void {
  * and must not be retried quickly, and anything else starts short and doubles while failures repeat.
  */
 export function pollBackoffMs(error: unknown, consecutiveFailures = 1): number {
+  const n = Number.isFinite(consecutiveFailures)
+    ? Math.max(1, Math.floor(consecutiveFailures))
+    : 1;
   if (error instanceof TelegramApiError) {
     if (error.status === 429) {
       return Math.max(1000, (error.retryAfter ?? 5) * 1000);
     }
-    if (error.status === 409) return TELEGRAM_CONFLICT_BACKOFF_MS;
+    if (error.status === 409) {
+      return n >= TELEGRAM_CONFLICT_ESCALATE_AFTER
+        ? TELEGRAM_CONFLICT_BACKOFF_ESCALATED_MS
+        : TELEGRAM_CONFLICT_BACKOFF_MS;
+    }
   }
-  const n = Number.isFinite(consecutiveFailures)
-    ? Math.max(1, Math.floor(consecutiveFailures))
-    : 1;
   return Math.min(
     TELEGRAM_GENERIC_BACKOFF_BASE_MS * 2 ** (n - 1),
     TELEGRAM_GENERIC_BACKOFF_CAP_MS,
   );
+}
+
+/**
+ * Whether a `getUpdates` failure is the client-side deadline firing rather than
+ * a network/API fault.
+ *
+ * The request timeout aborts the fetch, and how that surfaces is
+ * implementation-defined: modern fetch rejects with the abort REASON
+ * ("Timeout after 50000ms"), but some webview builds reject with the generic
+ * AbortError ("The user aborted a request."). Field logs showed the latter
+ * landing in the generic-failure branch: the bot was marked offline, the
+ * failure streak escalated the backoff, and the log filled with
+ * "retrying in 5s" — all because one long-poll was slow. Callers only consult
+ * this AFTER ruling out an abort of the loop's own signal, so an AbortError
+ * reaching here can only be the request deadline.
+ */
+export function isPollTimeoutError(e: unknown): boolean {
+  if (!(e instanceof Error)) return false;
+  if (e.message.includes("Timeout after")) return true;
+  if (e.name === "TimeoutError") return true;
+  if (e.name === "AbortError") return true;
+  return /aborted a request/i.test(e.message);
 }
 
 async function runLoop(signal: AbortSignal): Promise<void> {
@@ -301,9 +340,7 @@ async function runLoop(signal: AbortSignal): Promise<void> {
       }
     } catch (e) {
       if (signal.aborted) break;
-      const isTimeout =
-        e instanceof Error &&
-        (e.message.includes("Timeout after") || e.name === "TimeoutError");
+      const isTimeout = isPollTimeoutError(e);
       if (isTimeout) {
         lastPollProgressTime = Date.now();
         useTelegramStore.getState().setOnline(true);
