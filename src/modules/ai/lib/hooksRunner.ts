@@ -131,10 +131,10 @@ export async function fireHooksForEvent(
     await fireHook(rule, payloadPath, cwd);
   }
 
-  // Clean up the payload directory after RunStop hooks so `.termigo/hooks` does
-  // not grow without bound. Pre/Post/RunStart hooks leave payloads in place so the
-  // user can inspect them while the run is in flight.
-  if (event === "RunStop" && payloadPath) {
+  // Clean up the payload directory after terminal run-stop events so `.termigo/hooks`
+  // does not grow without bound. Pre/Post/RunStart/FileSave hooks leave payloads in
+  // place so the user can inspect them while the run is in flight.
+  if ((event === "RunStop" || event === "Stop") && payloadPath) {
     try {
       await native.deletePath(hooksRunDir(workspaceRoot ?? "", runId));
     } catch {
