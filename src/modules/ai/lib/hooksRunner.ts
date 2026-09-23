@@ -97,7 +97,7 @@ async function fireHook(
  * Fire all matching hooks for an event.
  *
  * `toolName` is the name of the tool being called. Pass `null` for events
- * that have no tool context (Stop).
+ * that have no tool context (RunStart, RunStop).
  */
 export async function fireHooksForEvent(
   config: HooksConfig,
@@ -131,10 +131,10 @@ export async function fireHooksForEvent(
     await fireHook(rule, payloadPath, cwd);
   }
 
-  // Clean up the payload directory after Stop hooks so `.termigo/hooks` does
-  // not grow without bound. Pre/Post hooks leave payloads in place so the
+  // Clean up the payload directory after RunStop hooks so `.termigo/hooks` does
+  // not grow without bound. Pre/Post/RunStart hooks leave payloads in place so the
   // user can inspect them while the run is in flight.
-  if (event === "Stop" && payloadPath) {
+  if (event === "RunStop" && payloadPath) {
     try {
       await native.deletePath(hooksRunDir(workspaceRoot ?? "", runId));
     } catch {

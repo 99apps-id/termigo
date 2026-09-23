@@ -561,7 +561,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
           cachedTokens: m.tokens.cached,
         }).catch(() => {});
       }
-      // Fire Stop hooks after the run finishes. This is the only place the
+      // Fire RunStop hooks after the run finishes. This is the only place the
       // agent knows the run is truly over, so it is the only reliable place
       // to signal completion to external tooling.
       const hooksConfig = (
@@ -572,7 +572,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       if (hooksConfig) {
         void fireHooksForEvent(
           hooksConfig,
-          "Stop",
+          "RunStop",
           null,
           {
             stopReason: info.stopReason,
@@ -1085,6 +1085,31 @@ export async function sendParts(
       // Persist that the run is now in flight, so a restart mid-run can offer
       // "Resume" rather than silently losing it.
       useChatStore.getState().markRunStarted();
+      const hooksConfigStart = (
+        useChatStore.getState().agentMeta as {
+          hooksConfig?: import("../lib/hooks").HooksConfig;
+        }
+      ).hooksConfig;
+      if (hooksConfigStart) {
+        void fireHooksForEvent(
+          hooksConfigStart,
+          "RunStart",
+          null,
+          {
+            sessionId,
+            runId: (useChatStore.getState().agentMeta as { runId?: string })
+              .runId,
+          },
+          {
+            getWorkspaceRoot: () =>
+              useChatStore.getState().live.getWorkspaceRoot(),
+            getCwd: () => useChatStore.getState().live.getCwd(),
+            makeRunId: () =>
+              (useChatStore.getState().agentMeta as { runId?: string }).runId ??
+              makeRunId(sessionId),
+          },
+        ).catch(() => {});
+      }
       await c.sendMessage({ role: "user", parts } as Parameters<
         typeof c.sendMessage
       >[0]);
