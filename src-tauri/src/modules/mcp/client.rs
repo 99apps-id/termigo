@@ -149,9 +149,15 @@ impl McpClient {
             "initialize",
             json!({
                 "protocolVersion": PROTOCOL_VERSION,
+                // Only notification-style capabilities are declared. Request-
+                // style ones (`roots`, `sampling`) are deliberately absent:
+                // they promise the client ANSWERS server->client requests
+                // (roots/list, sampling/createMessage), and a client that
+                // skips those messages instead leaves the server waiting
+                // forever. read_response refuses them politely as a safety
+                // net, but claiming support we do not have is what turns a
+                // skipped message into a hung server.
                 "capabilities": {
-                    "roots": { "listChanged": false },
-                    "sampling": {},
                     "prompts": { "listChanged": true },
                     "resources": { "subscribe": true, "listChanged": true },
                     "tools": { "listChanged": true },
@@ -295,6 +301,17 @@ impl McpClient {
                 _ => false,
             };
             if !matches_id {
+                // A message carrying BOTH an id and a method is a
+                // server->client REQUEST (ping, roots/list,
+                // sampling/createMessage, ...). Skipping it silently leaves
+                // the server waiting on a reply that never comes - some
+                // servers block their whole session on it. Answer instead.
+                if let Some(refusal) = server_request_refusal(&message) {
+                    // Best-effort: a broken pipe must not abort the read loop
+                    // that is still waiting for our own response.
+                    let _ = self.write_line(&refusal).await;
+                    continue;
+                }
                 // Handle progress notifications ($/progress)
                 if message.get("method").and_then(Value::as_str) == Some("$/progress") {
                     if let (Some(token), Some(handler), Some(params)) = (
@@ -435,6 +452,33 @@ impl McpClient {
 }
 
 /// Merge configured env over the inherited one, matching the Go CLI.
+/// The reply a server->client REQUEST deserves, or None when the message is
+/// not one.
+///
+/// A JSON-RPC message with both `id` and `method` is a request directed at us
+/// (servers may `ping`, ask for `roots/list`, or request `sampling/
+/// createMessage`). This client implements none of them, but silence is the
+/// worst answer - the server waits on a reply that never comes. `ping` gets
+/// the empty result the MCP spec requires; everything else gets an honest
+/// MethodNotFound so the server can degrade instead of hang. Pure, so the
+/// policy is asserted rather than discovered against a live server.
+fn server_request_refusal(message: &Value) -> Option<Value> {
+    if message.get("method").is_none() || message.get("id").is_none() {
+        return None;
+    }
+    let method = message.get("method").and_then(Value::as_str).unwrap_or("");
+    let req_id = message.get("id").cloned().unwrap_or(Value::Null);
+    Some(if method == "ping" {
+        json!({ "jsonrpc": "2.0", "id": req_id, "result": {} })
+    } else {
+        json!({
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "error": { "code": -32601, "message": "Method not found" },
+        })
+    })
+}
+
 pub fn env_for(overrides: &HashMap<String, String>) -> HashMap<String, String> {
     let mut env: HashMap<String, String> = std::env::vars().collect();
     for (key, value) in overrides {
@@ -587,5 +631,50 @@ impl McpSseClient {
 impl Default for McpSseClient {
     fn default() -> Self {
         Self::new("", "")
+    }
+}
+
+#[cfg(test)]
+mod refusal_tests {
+    use super::server_request_refusal;
+    use serde_json::json;
+
+    #[test]
+    fn answers_a_server_ping_with_the_specs_empty_result() {
+        let reply = server_request_refusal(&json!({
+            "jsonrpc": "2.0", "id": 7, "method": "ping"
+        }))
+        .expect("ping is a request");
+        assert_eq!(reply["id"], json!(7));
+        assert_eq!(reply["result"], json!({}));
+        assert!(reply.get("error").is_none());
+    }
+
+    #[test]
+    fn refuses_an_unimplemented_request_instead_of_going_silent() {
+        // The hang this prevents: a server that believed our old `roots`
+        // capability claim sends roots/list and blocks on a reply forever.
+        for method in ["roots/list", "sampling/createMessage", "elicit/create"] {
+            let reply = server_request_refusal(&json!({
+                "jsonrpc": "2.0", "id": "req-1", "method": method, "params": {}
+            }))
+            .expect("a request deserves an answer");
+            assert_eq!(reply["id"], json!("req-1"));
+            assert_eq!(reply["error"]["code"], json!(-32601), "{method}");
+        }
+    }
+
+    #[test]
+    fn leaves_notifications_and_foreign_responses_alone() {
+        // No id: a notification (including $/progress) — nothing to answer.
+        assert!(server_request_refusal(&json!({
+            "jsonrpc": "2.0", "method": "notifications/message", "params": {}
+        }))
+        .is_none());
+        // No method: a response to some other request id — not ours to answer.
+        assert!(server_request_refusal(&json!({
+            "jsonrpc": "2.0", "id": 42, "result": {}
+        }))
+        .is_none());
     }
 }

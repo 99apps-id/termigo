@@ -10,6 +10,12 @@
 
 pub mod client;
 
+// Named `client_tests` because `mod.rs` already has an inline `mod tests`
+// below; two modules cannot share the name. `#[path]` keeps the file name.
+#[cfg(test)]
+#[path = "tests.rs"]
+mod client_tests;
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex, OnceLock};
