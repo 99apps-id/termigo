@@ -178,6 +178,17 @@ const READ_ONLY_SUBCOMMANDS: Record<string, Set<string>> = {
     "outdated",
     "audit",
     "licenses",
+    // `pnpm exec <tool>` resolves to the project's own local binary, so the
+    // risk is the tool's, and these are the check-only ones (same set the
+    // bare-tool entries above trust; test runners stay "change" there too).
+    // A mutating flag anywhere on the line (`--write`, `--fix`) still
+    // disqualifies it above.
+    "exec biome",
+    "exec tsc",
+    "exec eslint",
+    "exec prettier",
+    "exec ruff",
+    "exec mypy",
     "--version",
     "-v",
   ]),
@@ -205,6 +216,18 @@ const READ_ONLY_SUBCOMMANDS: Record<string, Set<string>> = {
   tsc: new Set(["--noEmit", "--version", "-v", "--help", "-h"]),
   prettier: new Set(["--check", "-c", "--version", "-v", "--help", "-h"]),
   biome: new Set(["lint", "ci", "--version", "-v", "--help", "-h"]),
+  // Introspection only. Actually RUNNING tests executes arbitrary project code
+  // (and can write snapshots), so `vitest run` stays "change" — the same call
+  // the file already makes for pytest, cargo test and go test.
+  vitest: new Set(["list", "--version", "-v", "--help", "-h"]),
+  jest: new Set([
+    "--listTests",
+    "--showConfig",
+    "--version",
+    "-v",
+    "--help",
+    "-h",
+  ]),
   flutter: new Set([
     "doctor",
     "devices",

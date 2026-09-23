@@ -998,10 +998,58 @@ pub fn repl_list(state: tauri::State<ShellState>) -> Result<Vec<repl::ReplInfo>,
     Ok(out)
 }
 
+/// Collect `node_modules/.bin` directories from `cwd` upward (nearest first),
+/// the same resolution `npm run` / `pnpm run` give a package script.
+///
+/// The agent's one-shot shell inherits the system PATH, where a project's own
+/// dev binaries do not exist: `vitest run` fails with "not recognized" on a
+/// machine that has vitest installed locally, and a model that sees that
+/// failure "fixes" it by reinstalling the package. Prepending the project's
+/// bin dirs makes the local install the one that runs.
+fn node_bin_dirs(cwd: &str) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    let mut dir = std::path::Path::new(cwd);
+    loop {
+        let bin = dir.join("node_modules").join(".bin");
+        if bin.is_dir() {
+            out.push(bin);
+        }
+        match dir.parent() {
+            Some(parent) if parent != dir => dir = parent,
+            _ => break,
+        }
+    }
+    out
+}
+
+/// PATH with `cwd`'s `node_modules/.bin` chain prepended, or None when there
+/// is nothing to prepend.
+fn path_with_node_bins(cwd: Option<&str>) -> Option<String> {
+    let cwd = cwd.filter(|s| !s.is_empty())?;
+    let bins = node_bin_dirs(cwd);
+    if bins.is_empty() {
+        return None;
+    }
+    let sep = if cfg!(windows) { ";" } else { ":" };
+    let current = std::env::var("PATH")
+        .or_else(|_| std::env::var("Path"))
+        .unwrap_or_default();
+    let joined = bins
+        .iter()
+        .map(|p| p.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join(sep);
+    Some(if current.is_empty() {
+        joined
+    } else {
+        format!("{joined}{sep}{current}")
+    })
+}
+
 pub(crate) fn build_oneshot_command(
     command: &str,
     #[cfg_attr(not(windows), allow(unused_variables))] workspace: &WorkspaceEnv,
-    #[cfg_attr(not(windows), allow(unused_variables))] cwd: Option<&str>,
+    cwd: Option<&str>,
 ) -> Result<Command, String> {
     #[cfg(windows)]
     if let WorkspaceEnv::Wsl { distro } = workspace {
@@ -1019,6 +1067,9 @@ pub(crate) fn build_oneshot_command(
     {
         let mut cmd = Command::new("/bin/sh");
         cmd.arg("-c").arg(command);
+        if let Some(path) = path_with_node_bins(cwd) {
+            cmd.env("PATH", path);
+        }
         for (key, value) in crate::modules::workspace::appimage_env_overrides() {
             match value {
                 Some(v) => {
@@ -1035,6 +1086,13 @@ pub(crate) fn build_oneshot_command(
     {
         let shell = crate::modules::pty::shell_init::windows_shell_path();
         let mut cmd = Command::new(&shell);
+        // Only a local workspace has a Windows-side node_modules to resolve;
+        // the WSL branch returned above.
+        if matches!(workspace, WorkspaceEnv::Local) {
+            if let Some(path) = path_with_node_bins(cwd) {
+                cmd.env("PATH", path);
+            }
+        }
         let is_cmd = shell
             .file_name()
             .and_then(|s| s.to_str())
@@ -1551,6 +1609,60 @@ mod tests_sandbox {
 
         // A normal quote pair is still accepted when followed by safe text.
         assert!(validate_shell_command(r#"echo "hello world""#).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod tests_node_path {
+    use super::*;
+
+    /// The failure this covers: `vitest run` / `biome lint` are allowlisted, but
+    /// the one-shot shell inherits the system PATH where a project's local dev
+    /// binaries do not exist. Without the `node_modules/.bin` prepend the command
+    /// dies with "not recognized" and the model responds by reinstalling a
+    /// package that is already on the machine.
+    #[test]
+    fn node_bin_dirs_finds_the_project_bin_and_ancestor_bins() {
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("app");
+        let nested = project.join("packages").join("web");
+        std::fs::create_dir_all(project.join("node_modules").join(".bin")).unwrap();
+        std::fs::create_dir_all(nested.join("node_modules").join(".bin")).unwrap();
+
+        let dirs = node_bin_dirs(nested.to_str().unwrap());
+        // Nearest first: the nested package's own bin shadows the root's.
+        assert_eq!(dirs.len(), 2, "{dirs:?}");
+        assert_eq!(dirs[0], nested.join("node_modules").join(".bin"));
+        assert_eq!(dirs[1], project.join("node_modules").join(".bin"));
+    }
+
+    #[test]
+    fn node_bin_dirs_is_empty_without_node_modules() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(node_bin_dirs(root.path().to_str().unwrap()).is_empty());
+    }
+
+    #[test]
+    fn path_with_node_bins_prepends_and_keeps_the_existing_path() {
+        let root = tempfile::tempdir().unwrap();
+        let bin = root.path().join("node_modules").join(".bin");
+        std::fs::create_dir_all(&bin).unwrap();
+
+        // No cwd or no node_modules: nothing to prepend.
+        assert!(path_with_node_bins(None).is_none());
+        assert!(path_with_node_bins(Some("")).is_none());
+
+        let joined = path_with_node_bins(Some(root.path().to_str().unwrap()))
+            .expect("bin dir exists");
+        assert!(joined.starts_with(&bin.to_string_lossy().to_string()), "{joined}");
+        // The original PATH survives after the separator, or the shell loses
+        // every system tool.
+        let original = std::env::var("PATH")
+            .or_else(|_| std::env::var("Path"))
+            .unwrap_or_default();
+        if !original.is_empty() {
+            assert!(joined.ends_with(&original), "{joined}");
+        }
     }
 }
 
