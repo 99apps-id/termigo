@@ -45,6 +45,7 @@ export function AiDockPanel() {
     <div className="flex h-full min-h-0 flex-col border-l border-border/60 bg-card text-[12px]">
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <AiChatBody
+          key={sessionId}
           sessionId={sessionId}
           onClose={closePanel}
           onExpand={popOut}

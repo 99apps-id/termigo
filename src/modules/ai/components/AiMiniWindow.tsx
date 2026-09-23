@@ -125,6 +125,7 @@ export function AiMiniWindow({ state }: { state: PresenceState }) {
       ))}
       {sessionId ? (
         <AiChatBody
+          key={sessionId}
           sessionId={sessionId}
           onClose={closeMini}
           onExpand={expandToPanel}

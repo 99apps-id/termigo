@@ -9,7 +9,7 @@ import { ArrowTurnBackwardIcon, Compass01Icon } from "@hugeicons/core-free-icons
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { UIMessage } from "ai";
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
-import { turnLabelFor } from "../lib/turnCheckpoints";
+import { type TurnCheckpoint, turnLabelFor } from "../lib/turnCheckpoints";
 import { useTurnCheckpointStore } from "../store/turnCheckpointStore";
 
 export type UserTurnMarker = {
@@ -25,6 +25,8 @@ export type ChatTimelineNavigatorProps = {
   sessionId: string | null;
   className?: string;
 };
+
+const EMPTY_CHECKPOINTS: TurnCheckpoint[] = [];
 
 /**
  * Timeline navigator (mini-map for user turns).
@@ -42,9 +44,9 @@ export const ChatTimelineNavigator = memo(function ChatTimelineNavigator({
   const [activeMessageId, setActiveMessageId] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
 
-  // Checkpoints for this session
+  // Checkpoints for this session - use stable fallback reference to prevent re-render thrashing
   const checkpoints = useTurnCheckpointStore((s) =>
-    sessionId ? s.bySession[sessionId] ?? [] : [],
+    sessionId ? s.bySession[sessionId] ?? EMPTY_CHECKPOINTS : EMPTY_CHECKPOINTS,
   );
 
   const checkpointMap = useMemo(() => {
@@ -93,9 +95,16 @@ export const ChatTimelineNavigator = memo(function ChatTimelineNavigator({
     [messages],
   );
 
+  // Stable string signature of turn message IDs so observer only reconnects on structural turn changes
+  const turnIds = useMemo(
+    () => turns.map((t) => t.messageId).join(","),
+    [turns],
+  );
+
   // Track active turn in viewport using IntersectionObserver
   useEffect(() => {
-    if (turns.length === 0) return;
+    if (turns.length < 2) return;
+    if (typeof IntersectionObserver === "undefined") return;
 
     const observer = new IntersectionObserver(
       (entries) => {
@@ -103,7 +112,7 @@ export const ChatTimelineNavigator = memo(function ChatTimelineNavigator({
           if (entry.isIntersecting) {
             const id = entry.target.getAttribute("data-message-id");
             if (id) {
-              setActiveMessageId(id);
+              setActiveMessageId((prev) => (prev === id ? prev : id));
               break;
             }
           }
@@ -121,7 +130,7 @@ export const ChatTimelineNavigator = memo(function ChatTimelineNavigator({
     }
 
     return () => observer.disconnect();
-  }, [turns]);
+  }, [turnIds, turns.length]);
 
   const scrollToTurn = useCallback((messageId: string) => {
     const el =

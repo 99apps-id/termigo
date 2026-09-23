@@ -347,9 +347,10 @@ const RenderedMessage = memo(function RenderedMessage({
   const sessionId = useChatStore((s) => s.activeSessionId);
   // Rewind is offered only on turns that actually have a pre-run snapshot.
   const hasTurnCheckpoint = useTurnCheckpointStore((s) =>
-    sessionId
-      ? (s.bySession[sessionId] ?? []).some((r) => r.messageId === message.id)
-      : false,
+    Boolean(
+      sessionId &&
+        s.bySession[sessionId]?.some((r) => r.messageId === message.id),
+    ),
   );
 
   const hasTextPart = useMemo(

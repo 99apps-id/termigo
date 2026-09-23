@@ -49,6 +49,7 @@ import { clearSessionAllowed, useApprovalQueue } from "./approvalQueueStore";
 import { useArtifactsStore } from "./artifactsStore";
 import { useSubagentRunStore } from "./subagentRunStore";
 import { useTodosStore } from "./todoStore";
+import { sanitizeUiMessages } from "../lib/sanitizeMessages";
 import { turnLabelFor } from "../lib/turnCheckpoints";
 import { useTurnCheckpointStore } from "./turnCheckpointStore";
 
@@ -664,9 +665,12 @@ export const useChatStore = create<StoreState>((set, get) => ({
     const messages = chats.get(srcId)?.messages ?? seedMessages.get(srcId) ?? [];
     const idx = messages.findIndex((m) => m.id === messageId);
     if (idx < 0) return null;
+    notifySessionLeft(srcId);
+    clearSessionAllowed();
     // The fork keeps the chosen turn as its last message: the user branches
     // the CONVERSATION to try a different approach, files untouched.
-    const prefix = messages.slice(0, idx + 1);
+    const rawPrefix = messages.slice(0, idx + 1);
+    const prefix = sanitizeUiMessages(rawPrefix, { keepLiveApproval: false });
     const target = messages[idx];
     const text = target.parts
       .filter((p): p is { type: "text"; text: string } => p.type === "text")
@@ -681,6 +685,15 @@ export const useChatStore = create<StoreState>((set, get) => ({
       updatedAt: Date.now(),
     };
     seedMessages.set(id, prefix);
+    const srcCheckpoints = useTurnCheckpointStore.getState().bySession[srcId];
+    if (srcCheckpoints && srcCheckpoints.length > 0) {
+      const allowedIds = new Set(prefix.map((m) => m.id));
+      for (const cp of srcCheckpoints) {
+        if (allowedIds.has(cp.messageId)) {
+          useTurnCheckpointStore.getState().record(id, cp);
+        }
+      }
+    }
     const next = [meta, ...get().sessions];
     set({
       sessions: next,
