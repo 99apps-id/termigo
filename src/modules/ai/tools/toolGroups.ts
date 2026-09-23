@@ -36,6 +36,7 @@ export const TOOL_GROUPS: readonly ToolGroup[] = [
       "browser_click",
       "browser_close",
       "browser_connect",
+      "browser_console",
       "browser_extract",
       "browser_forward",
       "browser_navigate",
@@ -147,7 +148,12 @@ export const TOOL_GROUPS: readonly ToolGroup[] = [
     label: "Interactive terminal driving",
     description:
       "Drive a full-screen TUI programmatically: read the screen, send keys, wait for a pattern.",
-    tools: ["pty_read_screen", "pty_send_input", "pty_wait_for_pattern"],
+    tools: [
+      "pty_read_screen",
+      "pty_send_input",
+      "pty_session",
+      "pty_wait_for_pattern",
+    ],
   },
   {
     id: "worktree",

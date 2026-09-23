@@ -26,10 +26,8 @@ export function generateSandboxInfo(taskId?: string): {
   branchName: string;
   subpath: string;
 } {
-  const cleanId = (taskId ?? Math.random().toString(36).slice(2, 9)).replace(
-    /[^a-zA-Z0-9_-]/g,
-    "_",
-  );
+  const sanitized = taskId?.replace(/[^a-zA-Z0-9_-]/g, "_").replace(/^_+|_+$/g, "");
+  const cleanId = sanitized || Math.random().toString(36).slice(2, 9);
   const branchName = `termigo-sandbox/${cleanId}`;
   const subpath = `.termigo/worktrees/${cleanId}`;
   return { id: cleanId, branchName, subpath };

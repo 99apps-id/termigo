@@ -359,7 +359,12 @@ export async function sendTelegram(
     // If the converted HTML will definitely exceed Telegram's limit, subdivide
     const estimatedHtml = markdownToTelegramHtml(chunk);
     if (estimatedHtml.length > TELEGRAM_MAX_MESSAGE_CHARS) {
-      const subChunks = splitTelegramText(chunk, 1800);
+      const ratio = estimatedHtml.length / Math.max(1, chunk.length);
+      const targetLen = Math.floor(
+        (TELEGRAM_MAX_MESSAGE_CHARS - 100) / Math.max(1, ratio),
+      );
+      const subChunkSize = Math.max(100, Math.min(1800, targetLen));
+      const subChunks = splitTelegramText(chunk, subChunkSize);
       for (const sub of subChunks) {
         if (signal.aborted) break;
         await sendSingleChunk(chatId, sub, signal);

@@ -1,4 +1,5 @@
 pub mod background;
+pub mod repl;
 pub mod ringbuffer;
 pub mod session;
 
@@ -187,7 +188,11 @@ fn allows_program(program: &str) -> bool {
 /// `git status\nrm -rf /` passed validation (the first whitespace token is
 /// `git`) and then ran both lines through `sh -c`. That was a hole in the
 /// allowlist, not a policy choice.
-const SHELL_METACHARACTERS: &[char] = &['$', '(', ')', '<', '>', '`'];
+/// `$` is handled specifically: variable expansions ($var, $env:VAR, ${VAR})
+/// are allowed as data/arguments, while command substitution ($(cmd)) is refused.
+/// Backticks are refused outright. `(` and `)` build subshells. `<` and `>`
+/// read or write arbitrary files.
+const SHELL_METACHARACTERS: &[char] = &['(', ')', '<', '>', '`'];
 
 /// Characters that split a command into segments. Each segment's program is
 /// checked against the allowlist, so accepting them adds no reach: `;` and a
@@ -293,6 +298,45 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
                 prev = c;
                 i += 1;
                 continue;
+            } else if c == '$' {
+                // Allow shell/PowerShell variables: $var, $env:VAR, ${VAR}, $?, $0..$9
+                // Reject command substitution $(...) or lone $ or other metacharacter combos
+                if i + 1 < chars.len() && chars[i + 1] == '(' {
+                    bad.push('$');
+                } else if i + 1 < chars.len() && chars[i + 1] == '{' {
+                    if let Some(close_pos) = chars[i + 2..].iter().position(|&x| x == '}') {
+                        let inner: String = chars[i + 2..i + 2 + close_pos].iter().collect();
+                        if !inner.is_empty()
+                            && inner
+                                .chars()
+                                .all(|ch| ch.is_alphanumeric() || ch == '_' || ch == ':')
+                        {
+                            i += 2 + close_pos + 1;
+                            prev = '}';
+                            continue;
+                        }
+                    }
+                    bad.push('$');
+                } else if i + 1 < chars.len()
+                    && (chars[i + 1].is_ascii_alphabetic()
+                        || chars[i + 1] == '_'
+                        || chars[i + 1] == '?'
+                        || chars[i + 1].is_ascii_digit()
+                        || chars[i + 1] == ':')
+                {
+                    i += 1;
+                    while i < chars.len()
+                        && (chars[i].is_ascii_alphanumeric()
+                            || chars[i] == '_'
+                            || chars[i] == ':')
+                    {
+                        i += 1;
+                    }
+                    prev = chars[i - 1];
+                    continue;
+                } else {
+                    bad.push(c);
+                }
             } else if SHELL_METACHARACTERS.contains(&c) {
                 bad.push(c);
             }
@@ -319,17 +363,30 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
 
     // 2. Every segment's program must be allowed. Segments are delimited by the
     //    chaining operators found above, so a quoted `&&` is still one segment.
-    for start in &segment_starts {
-        let rest: String = chars[*start..].iter().collect();
-        let segment = rest.trim();
+    for (idx, &start) in segment_starts.iter().enumerate() {
+        let end = segment_starts.get(idx + 1).copied().unwrap_or(chars.len());
+        let segment_chars = &chars[start..end];
+        let rest: String = segment_chars.iter().collect();
+        let segment = rest.trim_matches([';', '\n', '\r', '&', '|', ' ']);
         if segment.is_empty() {
             return Err(
                 "empty command in a `&&` / `||` chain; use a PTY session for arbitrary commands"
                     .into(),
             );
         }
+        if is_variable_assignment(segment) {
+            if let Some(rhs_prog) = rhs_program_if_any(segment) {
+                if !allows_program(&rhs_prog) {
+                    return Err(format!(
+                        "command '{rhs_prog}' in assignment is not in the agent allowlist; allowed: {:?}; use a PTY session to run arbitrary commands",
+                        SANDBOX_ALLOWLIST
+                    ));
+                }
+            }
+            continue;
+        }
         let raw_program = segment.split_whitespace().next().unwrap_or(segment);
-        let program = raw_program.trim_matches(['"', '\'']);
+        let program = raw_program.trim_matches(['"', '\'', ';', '&', '|']);
         if !allows_program(program) {
             return Err(format!(
                 "command '{}' is not in the agent allowlist; allowed: {:?}; use a PTY session to run arbitrary commands",
@@ -340,6 +397,48 @@ pub fn validate_shell_command(command: &str) -> Result<&str, String> {
     }
 
     Ok(command)
+}
+
+fn is_variable_assignment(segment: &str) -> bool {
+    let trimmed = segment.trim();
+    if !trimmed.starts_with('$') {
+        return false;
+    }
+    if let Some(eq_idx) = trimmed.find('=') {
+        let lhs = trimmed[1..eq_idx].trim_end();
+        let after_eq = &trimmed[eq_idx + 1..];
+        if !after_eq.starts_with('=') && !lhs.is_empty() {
+            let is_valid_lhs = if lhs.starts_with('{') && lhs.ends_with('}') {
+                lhs[1..lhs.len() - 1]
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || c == '_' || c == ':')
+            } else {
+                lhs.chars()
+                    .all(|c| c.is_alphanumeric() || c == '_' || c == ':')
+            };
+            return is_valid_lhs;
+        }
+    }
+    false
+}
+
+fn rhs_program_if_any(segment: &str) -> Option<String> {
+    let trimmed = segment.trim();
+    let eq_idx = trimmed.find('=')?;
+    let rhs = trimmed[eq_idx + 1..].trim();
+    if rhs.is_empty() {
+        return None;
+    }
+    let first_char = rhs.chars().next()?;
+    if first_char == '"' || first_char == '\'' || first_char == '$' || first_char.is_ascii_digit() {
+        return None;
+    }
+    let prog = rhs.split_whitespace().next()?.trim_matches(['"', '\'', ';', '&', '|']);
+    if prog.is_empty() {
+        None
+    } else {
+        Some(prog.to_string())
+    }
 }
 
 /// Drop the redirections that cannot name a file: `N>&M` (join two of the
@@ -620,8 +719,10 @@ fn run_blocking(
 pub struct ShellState {
     sessions: RwLock<HashMap<u32, Arc<ShellSession>>>,
     bg: RwLock<HashMap<u32, Arc<BackgroundProc>>>,
+    pub(crate) repls: RwLock<HashMap<u32, Arc<repl::ReplProc>>>,
     next_session_id: AtomicU32,
     next_bg_id: AtomicU32,
+    next_repl_id: AtomicU32,
 }
 
 impl Default for ShellState {
@@ -629,8 +730,10 @@ impl Default for ShellState {
         Self {
             sessions: RwLock::new(HashMap::new()),
             bg: RwLock::new(HashMap::new()),
+            repls: RwLock::new(HashMap::new()),
             next_session_id: AtomicU32::new(1),
             next_bg_id: AtomicU32::new(1),
+            next_repl_id: AtomicU32::new(1),
         }
     }
 }
@@ -789,6 +892,86 @@ pub fn shell_bg_list(state: tauri::State<ShellState>) -> Result<Vec<BackgroundPr
     }
     out.sort_by_key(|i| i.handle);
     Ok(out)
+}
+
+#[tauri::command]
+pub fn repl_open(
+    state: tauri::State<ShellState>,
+    registry: tauri::State<WorkspaceRegistry>,
+    command: String,
+    cwd: Option<String>,
+    workspace: Option<WorkspaceEnv>,
+) -> Result<u32, String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    authorize_spawn_cwd(&registry, cwd.as_deref(), &workspace)?;
+    let trimmed = command.trim();
+    if trimmed.is_empty() {
+        return Err("empty command".into());
+    }
+    validate_shell_command(trimmed)?;
+
+    let mut map = state.repls.write().unwrap();
+    map.retain(|_, p| !p.exited.load(std::sync::atomic::Ordering::Acquire));
+    if map.len() >= repl::MAX_LIVE {
+        return Err(format!("too many live REPL processes (max {})", repl::MAX_LIVE));
+    }
+    let proc = repl::spawn(trimmed.to_string(), cwd, workspace)?;
+    let id = state.next_repl_id.fetch_add(1, Ordering::Relaxed);
+    map.insert(id, proc);
+    Ok(id)
+}
+
+#[tauri::command]
+pub async fn repl_send(
+    state: tauri::State<'_, ShellState>,
+    handle: u32,
+    input: Option<String>,
+    until: Option<String>,
+    since_offset: Option<u64>,
+    timeout_secs: Option<u64>,
+) -> Result<repl::ReplTurn, String> {
+    let proc = state
+        .repls
+        .read()
+        .unwrap()
+        .get(&handle)
+        .cloned()
+        .ok_or_else(|| "no such REPL process".to_string())?;
+
+    if let Some(ref text) = input {
+        proc.send_line(text)?;
+    }
+
+    let timeout = Duration::from_secs(
+        timeout_secs
+            .unwrap_or(repl::DEFAULT_WAIT_SECS)
+            .clamp(1, repl::MAX_WAIT_SECS),
+    );
+    let offset = since_offset.unwrap_or(0);
+
+    let turn = tauri::async_runtime::spawn_blocking(move || {
+        proc.wait_for(offset, until.as_deref(), timeout)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    Ok(turn)
+}
+
+#[tauri::command]
+pub fn repl_close(state: tauri::State<ShellState>, handle: u32) -> Result<(), String> {
+    if let Some(proc) = state.repls.write().unwrap().remove(&handle) {
+        proc.kill();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn repl_list(state: tauri::State<ShellState>) -> Result<Vec<repl::ReplInfo>, String> {
+    let map = state.repls.read().unwrap();
+    let mut list: Vec<_> = map.iter().map(|(&handle, p)| p.info(handle)).collect();
+    list.sort_by_key(|i| i.started_at_ms);
+    Ok(list)
 }
 
 pub(crate) fn build_oneshot_command(
@@ -1210,5 +1393,20 @@ mod tests_sandbox {
         assert!(validate_shell_command(r#"node -e "console.log(1+1)""#).is_ok());
         assert!(validate_shell_command(r#"echo "hello > world""#).is_ok());
         assert!(validate_shell_command(r#"echo 'hello | world'"#).is_ok());
+    }
+
+    #[test]
+    fn validate_shell_command_allows_powershell_variables() {
+        assert!(validate_shell_command("Get-ChildItem $env:USERPROFILE").is_ok());
+        assert!(validate_shell_command("Get-ChildItem -Path $path").is_ok());
+        assert!(validate_shell_command("echo ${env:PATH}").is_ok());
+        assert!(validate_shell_command("echo $true").is_ok());
+        assert!(validate_shell_command("echo $null").is_ok());
+        assert!(validate_shell_command(r#"$dir = "C:\temp"; Get-ChildItem $dir"#).is_ok());
+        assert!(validate_shell_command("$files = Get-ChildItem; echo $files").is_ok());
+        // Dynamic command execution through variables as program name is refused
+        assert!(validate_shell_command("$CMD -rf /").is_err());
+        // Subcommand execution is refused
+        assert!(validate_shell_command("Get-ChildItem $(echo secret)").is_err());
     }
 }

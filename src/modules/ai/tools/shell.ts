@@ -5,7 +5,6 @@ import { tool } from "./toolShim";
 import { z } from "zod";
 import { native } from "../lib/native";
 import { getSessionShell } from "../lib/sessionShell";
-import { commandRisk, deletesFiles } from "../lib/commandRisk";
 import { checkPentestCommand } from "../lib/pentestScope";
 import { remoteUnsupported } from "../lib/remoteFs";
 import { shellQuote } from "../lib/remoteSearch";
