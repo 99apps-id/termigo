@@ -14,6 +14,10 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+
+/// Callback for progress notifications (`$/progress`).
+/// Receives `(progress_token, progress_params)`.
+pub type ProgressHandler = Box<dyn Fn(String, Value) + Send + Sync>;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::time::timeout;
@@ -129,6 +133,8 @@ impl McpClient {
             .stdout
             .take()
             .ok_or_else(|| "MCP server stdout unavailable".to_string())?;
+        #[cfg(windows)]
+        let pid = child.id().unwrap_or(0);
 
         let mut client = Self {
             child,
@@ -136,17 +142,25 @@ impl McpClient {
             reader: BufReader::new(stdout),
             next_id: 0,
             #[cfg(windows)]
-            job: ProcessJob::create_for(child.id()).ok(),
+            job: ProcessJob::create_for(pid).ok(),
         };
 
         let handshake = client.request(
             "initialize",
             json!({
                 "protocolVersion": PROTOCOL_VERSION,
-                "capabilities": {},
+                "capabilities": {
+                    "roots": { "listChanged": false },
+                    "sampling": {},
+                    "prompts": { "listChanged": true },
+                    "resources": { "subscribe": true, "listChanged": true },
+                    "tools": { "listChanged": true },
+                },
                 "clientInfo": { "name": "Termigo", "version": env!("CARGO_PKG_VERSION") },
             }),
             HANDSHAKE_TIMEOUT,
+            None,
+            None,
         );
         match handshake.await {
             Ok(_) => {}
@@ -177,7 +191,7 @@ impl McpClient {
 
     pub async fn list_tools(&mut self) -> Result<Vec<McpTool>, String> {
         let result = self
-            .request("tools/list", json!({}), REQUEST_TIMEOUT)
+            .request("tools/list", json!({}), REQUEST_TIMEOUT, None, None)
             .await?;
         let tools = result.get("tools").cloned().unwrap_or_else(|| json!([]));
         serde_json::from_value(tools).map_err(|e| format!("bad tools/list response: {e}"))
@@ -188,12 +202,14 @@ impl McpClient {
             "tools/call",
             json!({ "name": name, "arguments": arguments }),
             REQUEST_TIMEOUT,
+            None,
+            None,
         )
         .await
     }
 
     pub async fn ping(&mut self) -> Result<(), String> {
-        self.request("ping", json!({}), REQUEST_TIMEOUT)
+        self.request("ping", json!({}), REQUEST_TIMEOUT, None, None)
             .await
             .map(|_| ())
     }
@@ -203,18 +219,25 @@ impl McpClient {
         method: &str,
         params: Value,
         limit: Duration,
+        progress_token: Option<String>,
+        progress_handler: Option<ProgressHandler>,
     ) -> Result<Value, String> {
         self.next_id += 1;
         let id = self.next_id;
-        let message = json!({
+        let mut message = json!({
             "jsonrpc": "2.0",
             "id": id,
             "method": method,
             "params": params,
         });
+        if let Some(token) = progress_token {
+            if let Some(params) = message.get_mut("params").and_then(Value::as_object_mut) {
+                params.insert("progressToken".to_string(), Value::String(token));
+            }
+        }
         self.write_line(&message).await?;
 
-        match timeout(limit, self.read_response(id)).await {
+        match timeout(limit, self.read_response(id, progress_handler)).await {
             Ok(result) => result,
             Err(_) => Err(format!(
                 "MCP server did not answer '{method}' within {}s",
@@ -245,7 +268,11 @@ impl McpClient {
     ///
     /// Servers interleave notifications and log lines with responses, so
     /// anything that is not our reply is skipped rather than treated as one.
-    async fn read_response(&mut self, id: u64) -> Result<Value, String> {
+    async fn read_response(
+        &mut self,
+        id: u64,
+        progress_handler: Option<ProgressHandler>,
+    ) -> Result<Value, String> {
         loop {
             let mut line = String::new();
             let read = self
@@ -268,7 +295,19 @@ impl McpClient {
                 _ => false,
             };
             if !matches_id {
-                continue; // a notification, or an answer to something else
+                // Handle progress notifications ($/progress)
+                if message.get("method").and_then(Value::as_str) == Some("$/progress") {
+                    if let (Some(token), Some(handler), Some(params)) = (
+                        message.get("params").and_then(|p| p.get("progressToken")),
+                        &progress_handler,
+                        message.get("params"),
+                    ) {
+                        if let Some(token_str) = token.as_str() {
+                            handler(token_str.to_string(), params.clone());
+                        }
+                    }
+                }
+                continue;
             }
             if let Some(error) = message.get("error") {
                 let text = error
@@ -299,6 +338,93 @@ impl McpClient {
         text.trim().chars().take(500).collect()
     }
 
+    // -----------------------------------------------------------------
+    // Resource helpers
+    // -----------------------------------------------------------------
+
+    pub async fn resources_list(&mut self) -> Result<Vec<Value>, String> {
+        let result = self
+            .request("resources/list", json!({}), REQUEST_TIMEOUT, None, None)
+            .await?;
+        let list = result.get("resources").ok_or("missing resources")?;
+        list.as_array()
+            .map(|arr| arr.clone())
+            .ok_or_else(|| "resources.list did not return an array".to_string())
+    }
+
+    pub async fn resources_read(
+        &mut self,
+        uri: &str,
+    ) -> Result<String, String> {
+        let result = self
+            .request(
+                "resources/read",
+                json!({ "uri": uri }),
+                REQUEST_TIMEOUT,
+                None,
+                None,
+            )
+            .await?;
+        let contents = result.get("contents").ok_or("missing contents")?;
+        let first = contents
+            .as_array()
+            .and_then(|arr| arr.first())
+            .ok_or_else(|| "contents is empty".to_string())?;
+        let text = first
+            .get("text")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "resource content has no text".to_string())?;
+        Ok(text.to_string())
+    }
+
+    pub async fn resources_subscribe(
+        &mut self,
+        uri: &str,
+    ) -> Result<(), String> {
+        self.request(
+            "resources/subscribe",
+            json!({ "uri": uri }),
+            REQUEST_TIMEOUT,
+            None,
+            None,
+        )
+        .await
+        .map(|_| ())
+    }
+
+    // -----------------------------------------------------------------
+    // Prompt helpers
+    // -----------------------------------------------------------------
+
+    pub async fn prompts_list(&mut self) -> Result<Vec<Value>, String> {
+        let result = self
+            .request("prompts/list", json!({}), REQUEST_TIMEOUT, None, None)
+            .await?;
+        let list = result.get("prompts").ok_or("missing prompts")?;
+        list.as_array()
+            .map(|arr| arr.clone())
+            .ok_or_else(|| "prompts.list did not return an array".to_string())
+    }
+
+    pub async fn prompts_get(
+        &mut self,
+        name: &str,
+        arguments: Value,
+    ) -> Result<Value, String> {
+        self.request(
+            "prompts/get",
+            json!({ "name": name, "arguments": arguments }),
+            REQUEST_TIMEOUT,
+            None,
+            None,
+        )
+        .await
+    }
+
+    // -----------------------------------------------------------------
+    // Lifecycle
+    // -----------------------------------------------------------------
+
     pub async fn shutdown(mut self) {
         let _ = self.child.kill().await;
         #[cfg(windows)]
@@ -315,4 +441,151 @@ pub fn env_for(overrides: &HashMap<String, String>) -> HashMap<String, String> {
         env.insert(key.clone(), value.clone());
     }
     env
+}
+
+// ---------------------------------------------------------------------------
+// SSE / WebSocket transport for remote MCP servers
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug)]
+pub struct ServerHealth {
+    pub name: String,
+    pub connected: bool,
+    pub last_error: Option<String>,
+    pub latency_ms: Option<u64>,
+}
+
+#[derive(Clone)]
+pub struct McpSseClient {
+    pub url: String,
+    pub name: String,
+    pub session_id: Option<String>,
+    pub health: ServerHealth,
+}
+
+impl McpSseClient {
+    pub fn new(name: &str, url: &str) -> Self {
+        Self {
+            url: url.to_string(),
+            name: name.to_string(),
+            session_id: None,
+            health: ServerHealth {
+                name: name.to_string(),
+                connected: false,
+                last_error: None,
+                latency_ms: None,
+            },
+        }
+    }
+
+    /// Connect to the SSE endpoint and return the client.
+    pub async fn connect(&mut self) -> Result<(), String> {
+        let start = std::time::Instant::now();
+        let response = reqwest::Client::new()
+            .get(&self.url)
+            .header("Accept", "text/event-stream")
+            .timeout(Duration::from_secs(10))
+            .send()
+            .await
+            .map_err(|e| format!("failed to connect to {}: {e}", self.url))?;
+
+        if !response.status().is_success() {
+            return Err(format!(
+                "server returned status {}: {}",
+                response.status(),
+                response.text().await.unwrap_or_default()
+            ));
+        }
+
+        self.session_id = response
+            .headers()
+            .get("X-Session-Id")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+        self.health.connected = true;
+        self.health.last_error = None;
+        self.health.latency_ms = Some(start.elapsed().as_millis() as u64);
+        Ok(())
+    }
+
+    /// Send an initialized notification.
+    pub async fn send_initialized(&self) -> Result<(), String> {
+        let client = reqwest::Client::new();
+        let url = format!("{}/messages?session_id={}", self.url, self.session_id.as_deref().unwrap_or(""));
+        client
+            .post(&url)
+            .json(&json!({
+                "jsonrpc": "2.0",
+                "method": "notifications/initialized",
+                "params": {}
+            }))
+            .send()
+            .await
+            .map_err(|e| format!("failed to send initialized: {e}"))?;
+        Ok(())
+    }
+
+    /// Send a request over the SSE transport.
+    pub async fn send_request(
+        &self,
+        method: &str,
+        params: Value,
+        timeout: Duration,
+    ) -> Result<Value, String> {
+        let client = reqwest::Client::new();
+        let session_id = self.session_id.as_deref().unwrap_or("");
+        let url = format!("{}/messages?session_id={}", self.url, session_id);
+
+        let response = client
+            .post(&url)
+            .json(&json!({
+                "jsonrpc": "2.0",
+                "method": method,
+                "params": params,
+            }))
+            .timeout(timeout)
+            .send()
+            .await
+            .map_err(|e| format!("request failed: {e}"))?;
+
+        if !response.status().is_success() {
+            return Err(format!("server returned status {}", response.status()));
+        }
+
+        let text = response
+            .text()
+            .await
+            .map_err(|e| format!("failed to read response: {e}"))?;
+
+        let value: Value = serde_json::from_str(&text)
+            .map_err(|e| format!("invalid JSON response: {e}"))?;
+
+        if let Some(error) = value.get("error") {
+            let message = error
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown error");
+            return Err(format!("MCP error: {}", message));
+        }
+
+        Ok(value.get("result").cloned().unwrap_or(Value::Null))
+    }
+
+    /// Close the SSE session.
+    pub async fn close(&mut self) {
+        self.health.connected = false;
+        self.session_id = None;
+    }
+
+    /// Update health metrics.
+    pub fn update_health(&mut self, connected: bool, error: Option<String>) {
+        self.health.connected = connected;
+        self.health.last_error = error;
+    }
+}
+
+impl Default for McpSseClient {
+    fn default() -> Self {
+        Self::new("", "")
+    }
 }
