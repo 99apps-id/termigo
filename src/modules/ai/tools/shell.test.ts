@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildShellTools,
   normalizeShellCommand,
+  resolveCommandTimeout,
   screenCommand,
   truncateCommandOutput,
   UNCLOSED_QUOTE_SENTINEL,
@@ -235,5 +236,58 @@ describe("checkShellCommand root wipes", () => {
 
   it("still allows rm -rf on an ordinary path", () => {
     expect(screenCommand("rm -rf /tmp/scratch").ok).toBe(true);
+  });
+});
+
+describe("resolveCommandTimeout", () => {
+  // The field failure: a model-chosen `timeout_secs: 10` on `pnpm install`
+  // killed pnpm mid-mutation and left node_modules half-removed — after which
+  // every "is biome installed?" check answered no, truthfully, until a full
+  // reinstall. An install cannot finish in 10s, so the request is always a
+  // mistake; the floor makes the mistake impossible.
+  it("floors package-manager mutations at 300s regardless of the request", () => {
+    expect(resolveCommandTimeout("pnpm install", 10)).toBe(300);
+    expect(resolveCommandTimeout("pnpm i", 5)).toBe(300);
+    expect(resolveCommandTimeout("npm install", 10)).toBe(300);
+    expect(resolveCommandTimeout("npm ci", 60)).toBe(300);
+    expect(resolveCommandTimeout("yarn add lodash", 15)).toBe(300);
+    expect(resolveCommandTimeout("bun install", 1)).toBe(300);
+    expect(resolveCommandTimeout("pip install requests", 20)).toBe(300);
+    expect(resolveCommandTimeout("uv sync", 30)).toBe(300);
+    expect(resolveCommandTimeout("poetry install", 30)).toBe(300);
+    // A bare `pnpm`/`yarn` IS an install.
+    expect(resolveCommandTimeout("pnpm", 10)).toBe(300);
+    expect(resolveCommandTimeout("yarn", 10)).toBe(300);
+  });
+
+  it("keeps a longer explicit request for installs", () => {
+    expect(resolveCommandTimeout("pnpm install", 600)).toBe(600);
+  });
+
+  it("defaults installs to 300s when nothing is requested", () => {
+    expect(resolveCommandTimeout("pnpm install")).toBe(300);
+    expect(resolveCommandTimeout("pnpm add -D vitest")).toBe(300);
+  });
+
+  it("leaves ordinary commands on the requested or default timeout", () => {
+    expect(resolveCommandTimeout("git status", 10)).toBe(10);
+    expect(resolveCommandTimeout("vitest run", 45)).toBe(45);
+    expect(resolveCommandTimeout("biome lint src")).toBe(120);
+    expect(resolveCommandTimeout("ls -la")).toBe(120);
+  });
+
+  it("keeps the slow-start defaults for cargo/clone/rustc", () => {
+    expect(resolveCommandTimeout("cargo build")).toBe(300);
+    expect(resolveCommandTimeout("git clone https://x/y")).toBe(300);
+    expect(resolveCommandTimeout("rustc main.rs")).toBe(300);
+    // Explicit requests still win for these - killing a build is harmless.
+    expect(resolveCommandTimeout("cargo build", 60)).toBe(60);
+  });
+
+  it("does not mistake read-only pnpm subcommands for mutations", () => {
+    expect(resolveCommandTimeout("pnpm list", 10)).toBe(10);
+    expect(resolveCommandTimeout("pnpm exec biome lint", 20)).toBe(20);
+    expect(resolveCommandTimeout("pnpm run test", 60)).toBe(60);
+    expect(resolveCommandTimeout("npm ls", 15)).toBe(15);
   });
 });

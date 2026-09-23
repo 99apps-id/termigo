@@ -26,6 +26,40 @@ import type { ToolContext } from "./context";
  */
 export const UNCLOSED_QUOTE_SENTINEL = "[termigo: unclosed quote in command]";
 
+/**
+ * Package-manager MUTATIONS: commands that rewrite node_modules / site-packages
+ * while they run. Killing one mid-flight is not a neutral "try again" — pnpm
+ * prunes before it links, so a timeout-killed `pnpm install` leaves the tree
+ * half-removed with dangling `.bin` shims, and every later check ("biome is not
+ * installed") is then true until a full reinstall. Observed in the field: a
+ * model-chosen `timeout_secs: 10` on `pnpm install` corrupted the workspace's
+ * node_modules and every verification after it failed.
+ */
+const PACKAGE_MUTATION_RE =
+  /^\s*(?:(?:pnpm|npm|yarn|bun)\s+(?:install|i|ci|add|remove|uninstall|update|upgrade|prune|rebuild|dedupe|link|unlink)\b|pnpm\s*$|yarn\s*$|pip3?\s+install\b|uv\s+(?:sync|add|remove|pip\s+install)\b|poetry\s+(?:install|add|remove|update)\b)/i;
+
+/** Commands that are merely SLOW to start; a short kill is harmless. */
+const SLOW_START_RE = /^\s*(?:cargo|git\s+clone|rustc)\b/i;
+
+/**
+ * The timeout a command actually gets.
+ *
+ * Package-manager mutations carry a FLOOR the model cannot go under: no install
+ * finishes in 10s, so a short request is always a mistake, and its only outcome
+ * is a corrupted dependency tree. Everything else honours the requested value
+ * (clamped by the schema) or falls back to the old defaults. Pure, so the
+ * policy is asserted rather than discovered in the field again.
+ */
+export function resolveCommandTimeout(
+  command: string,
+  requested?: number,
+): number {
+  if (PACKAGE_MUTATION_RE.test(command)) {
+    return Math.max(requested ?? 0, 300);
+  }
+  return requested ?? (SLOW_START_RE.test(command) ? 300 : 120);
+}
+
 export function screenCommand(
   command: string,
 ): { ok: true } | { ok: false; reason: string } {
@@ -205,16 +239,12 @@ export function buildShellTools(ctx: ToolContext) {
       inputSchema: z.object({
         command: z.string(),
         timeout_secs: clampedInt(1, 900).describe(
-          "Timeout in seconds. Default 120. Clamped up to 900.",
+          "Timeout in seconds. Default 120. Clamped up to 900. Package-manager installs (pnpm/npm/yarn install, add, ...) are floored at 300s: killing one mid-run corrupts the dependency tree. For a from-scratch install on a slow network use bash_background + bash_wait instead.",
         ),
       }),
       needsApproval: true,
       execute: async ({ command, timeout_secs }, { abortSignal }) => {
-        const effectiveTimeout =
-          timeout_secs ??
-          (/^\s*(cargo|pnpm\s+install|npm\s+install|yarn\s+install|git\s+clone|rustc)\b/i.test(command)
-            ? 300
-            : 120);
+        const effectiveTimeout = resolveCommandTimeout(command, timeout_secs);
         const normalized = normalizeShellCommand(command);
         // Unwrap BEFORE screening on every path: screening the wrapper only
         // sees `powershell`/`bash` (never offensive) while the inner script
@@ -346,7 +376,9 @@ export function buildShellTools(ctx: ToolContext) {
               : {}),
             ...(r.timed_out
               ? {
-                  hint: `Command timed out after ${effectiveTimeout}s. If this is a long-running process (like a server, watcher, or interactive script), use bash_background instead of bash_run.`,
+                  hint: PACKAGE_MUTATION_RE.test(effectiveCommand)
+                    ? `Package install timed out after ${effectiveTimeout}s and was KILLED mid-run — the dependency tree may now be half-removed (bins present but packages missing). Do NOT conclude packages are uninstalled. Re-run the same install to completion (it resumes), or run it via bash_background and bash_wait. If the tree is already broken, remove node_modules/.modules-state by reinstalling: pnpm install after deleting node_modules.`
+                    : `Command timed out after ${effectiveTimeout}s. If this is a long-running process (like a server, watcher, or interactive script), use bash_background instead of bash_run.`,
                 }
               : {}),
           };
