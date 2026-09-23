@@ -200,24 +200,28 @@ export const ChatTimelineNavigator = memo(function ChatTimelineNavigator({
                       )}
                     </button>
                   </TooltipTrigger>
-                  <TooltipContent side="left" className="max-w-64 text-left p-2">
-                    <div className="flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground">
-                      <span className="font-semibold text-foreground">
+                  <TooltipContent
+                    side="left"
+                    sideOffset={8}
+                    className="flex max-w-72 flex-col items-start gap-1 rounded-xl border border-border/80 bg-popover p-2.5 text-left text-popover-foreground shadow-xl backdrop-blur-md dark:border-border/60 dark:bg-zinc-900 dark:text-zinc-100"
+                  >
+                    <div className="flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground dark:text-zinc-400">
+                      <span className="font-semibold text-foreground dark:text-zinc-100">
                         Turn #{t.turnIndex}
                       </span>
                       <span>· {t.partCount} parts</span>
                       {t.hasCheckpoint && (
-                        <span className="inline-flex items-center gap-0.5 text-sky-600 dark:text-sky-400">
+                        <span className="inline-flex items-center gap-1 font-medium text-sky-600 dark:text-sky-400">
                           <HugeiconsIcon
                             icon={ArrowTurnBackwardIcon}
-                            size={9}
+                            size={10}
                             strokeWidth={2}
                           />
                           checkpoint
                         </span>
                       )}
                     </div>
-                    <div className="mt-1 line-clamp-2 text-[11px] leading-snug text-foreground/90">
+                    <div className="line-clamp-3 text-[11px] leading-snug text-foreground/90 dark:text-zinc-200">
                       {t.label}
                     </div>
                   </TooltipContent>
