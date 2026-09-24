@@ -368,7 +368,7 @@ pub fn forward_to_frontend_with_timeout(
     let id = request.id.clone();
     let (sender, receiver) = mpsc::sync_channel(1);
     {
-        let mut pending = state.0.pending.lock().expect("control pending poisoned");
+        let mut pending = state.0.pending.lock().unwrap_or_else(|e| e.into_inner());
         if pending.len() >= MAX_PENDING_REQUESTS {
             return ControlResponse::failure(
                 id,

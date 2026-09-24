@@ -234,6 +234,25 @@ export function computeTranscriptProductiveProgress(
   let progress = 0;
   const seenReadFingerprints = new Set<string>();
 
+  const resultsByCallId = new Map<
+    string,
+    { output: unknown; error: unknown; isError: boolean }
+  >();
+
+  for (const m of messages) {
+    for (const p of (m.parts ?? []) as Record<string, unknown>[]) {
+      if (p.type === "tool-result" && typeof p.toolCallId === "string") {
+        const isErr =
+          isToolCallError(p.output) || Boolean(p.error) || p.isError === true;
+        resultsByCallId.set(p.toolCallId, {
+          output: p.output,
+          error: p.error,
+          isError: isErr,
+        });
+      }
+    }
+  }
+
   for (const m of messages) {
     if (m.role !== "assistant") continue;
     for (const p of (m.parts ?? []) as Record<string, unknown>[]) {
@@ -252,16 +271,23 @@ export function computeTranscriptProductiveProgress(
       let input: unknown;
       let output: unknown;
       let error: unknown;
+      let isError = false;
       let hasResult = false;
 
       if (type === "tool-call") {
         toolName = typeof p.toolName === "string" ? p.toolName : "";
         input = p.input ?? p.args;
-        output = p.output;
-        error = p.error;
+        const callId = typeof p.toolCallId === "string" ? p.toolCallId : "";
+        const standaloneRes = callId ? resultsByCallId.get(callId) : undefined;
+        output = p.output ?? standaloneRes?.output;
+        error = p.error ?? standaloneRes?.error;
+        isError =
+          standaloneRes?.isError ??
+          (isToolCallError(output) || Boolean(error) || p.isError === true);
         hasResult =
           output !== undefined ||
           error !== undefined ||
+          standaloneRes !== undefined ||
           p.state === "output-available";
       } else if (
         type.startsWith("tool-") &&
@@ -273,6 +299,8 @@ export function computeTranscriptProductiveProgress(
         input = p.input ?? p.args;
         output = p.output;
         error = p.error;
+        isError =
+          isToolCallError(output) || Boolean(error) || p.isError === true;
         hasResult =
           output !== undefined ||
           error !== undefined ||
@@ -280,8 +308,6 @@ export function computeTranscriptProductiveProgress(
       }
 
       if (toolName && hasResult) {
-        const isError =
-          isToolCallError(output) || Boolean(error) || p.isError === true;
         if (isError) {
           // Errored tool calls do not count as productive progress
           continue;
@@ -342,6 +368,17 @@ export function autoSendGate(
     >();
 
     for (const call of window) {
+      const isMutating = MUTATING_TOOLS.has(call.toolName);
+      if (isMutating && !call.isError) {
+        // A successful mutation occurred: prior read tool repeat counts reset
+        // because the workspace state changed and re-reading is productive.
+        for (const entry of counts.values()) {
+          if (!MUTATING_TOOLS.has(entry.toolName)) {
+            entry.count = 0;
+          }
+        }
+      }
+
       const fp = canonicalToolFingerprint(call.toolName, call.input);
       const cur = counts.get(fp) ?? {
         count: 0,
@@ -371,7 +408,7 @@ export function autoSendGate(
         };
       }
 
-      // If the exact same tool call repeated 3 or more times
+      // If the exact same tool call repeated 3 or more times without intervening mutations
       if (info.count >= maxRepeats) {
         return {
           allow: false,

@@ -14,14 +14,35 @@ use serde::{Deserialize, Serialize};
 
 use crate::modules::git::errors::{GitError, Result};
 use crate::modules::git::types::GitDiffComment;
-use crate::modules::git::utils::{canonical_dir, ResolvedGitDirectory};
+use crate::modules::git::utils::{authorized_repo_root, ResolvedGitDirectory};
 use crate::modules::workspace::{WorkspaceEnv, WorkspaceRegistry};
 
 #[derive(Default)]
 pub struct GitDiffCommentState;
 
 fn comments_path(repo_root: &Path) -> PathBuf {
-    repo_root.join(".git").join("termigo-diff-comments.json")
+    let dot_git = repo_root.join(".git");
+    if dot_git.is_file() {
+        if let Ok(content) = fs::read_to_string(&dot_git) {
+            if let Some(first_line) = content.lines().next() {
+                if let Some(raw_gitdir) = first_line.strip_prefix("gitdir:") {
+                    let gitdir_str = raw_gitdir.trim();
+                    if !gitdir_str.is_empty() {
+                        let gitdir_path = Path::new(gitdir_str);
+                        let resolved = if gitdir_path.is_relative() {
+                            repo_root.join(gitdir_path)
+                        } else {
+                            gitdir_path.to_path_buf()
+                        };
+                        if let Ok(canon) = fs::canonicalize(&resolved) {
+                            return canon.join("termigo-diff-comments.json");
+                        }
+                    }
+                }
+            }
+        }
+    }
+    dot_git.join("termigo-diff-comments.json")
 }
 
 fn now_millis() -> i64 {
@@ -68,11 +89,7 @@ fn resolve_repo(
     cwd: &str,
     workspace: &WorkspaceEnv,
 ) -> Result<ResolvedGitDirectory> {
-    let cwd = canonical_dir(registry, cwd, workspace)?;
-    if !registry.is_authorized(&cwd.local_path) {
-        return Err(GitError::PathOutsideWorkspace(cwd.local_path));
-    }
-    Ok(cwd)
+    authorized_repo_root(registry, cwd, workspace)
 }
 
 pub fn list_comments(

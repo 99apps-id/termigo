@@ -23,10 +23,7 @@ pub fn resolve_repo(
     cwd: &str,
     workspace: &WorkspaceEnv,
 ) -> Result<Option<GitRepoInfo>> {
-    let cwd = canonical_dir(registry, cwd, workspace)?;
-    if !registry.is_authorized(&cwd.local_path) {
-        return Err(GitError::PathOutsideWorkspace(cwd.local_path));
-    }
+    let cwd = authorized_repo_root(registry, cwd, workspace)?;
     ensure_git_available(&cwd.workspace)?;
     resolve_repo_in_authorized(registry, &cwd)
 }
@@ -88,14 +85,7 @@ pub fn panel_snapshot(
     cwd: &str,
     workspace: &WorkspaceEnv,
 ) -> Result<GitPanelSnapshot> {
-    let cwd = canonical_dir(registry, cwd, workspace)?;
-    if !registry.is_authorized(&cwd.local_path) {
-        if crate::modules::workspace::is_git_worktree_of_authorized(registry, &cwd.local_path) {
-            let _ = registry.authorize(&cwd.local_path);
-        } else {
-            return Err(GitError::PathOutsideWorkspace(cwd.local_path));
-        }
-    }
+    let cwd = authorized_repo_root(registry, cwd, workspace)?;
     ensure_git_available(&cwd.workspace)?;
     let Some(root_line) = git_stdout_line_opt(
         &cwd.workspace,

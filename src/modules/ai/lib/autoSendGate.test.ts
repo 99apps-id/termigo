@@ -501,4 +501,73 @@ describe("autoSendGate tool repetition and failure breakers", () => {
     expect(decision.allow).toBe(true);
     expect(decision.stoppedLoop).toBe(false);
   });
+
+  it("allows repeated reads of the same file when intervened by successful mutations", () => {
+    const readFileCall = {
+      toolName: "read_file",
+      input: { path: "main.ts" },
+      output: { content: "code" },
+      isError: false,
+      hasResult: true,
+    };
+    const successfulEdit1 = {
+      toolName: "edit",
+      input: { path: "main.ts", old_string: "a", new_string: "b" },
+      output: { success: true },
+      isError: false,
+      hasResult: true,
+    };
+    const successfulEdit2 = {
+      toolName: "edit",
+      input: { path: "main.ts", old_string: "b", new_string: "c" },
+      output: { success: true },
+      isError: false,
+      hasResult: true,
+    };
+
+    const recentToolCalls = [
+      readFileCall,
+      successfulEdit1,
+      readFileCall,
+      successfulEdit2,
+      readFileCall,
+    ];
+
+    const decision = autoSendGate(INITIAL_AUTO_SEND_STATE, 50, {
+      recentToolCalls,
+    });
+
+    expect(decision.allow).toBe(true);
+    expect(decision.stoppedLoop).toBe(false);
+  });
+
+  it("resolves standalone tool-result messages for productive progress calculation", () => {
+    const messages = [
+      {
+        role: "assistant",
+        parts: [
+          {
+            type: "tool-call",
+            toolCallId: "call_abc",
+            toolName: "edit",
+            input: { path: "auth.ts" },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        parts: [
+          {
+            type: "tool-result",
+            toolCallId: "call_abc",
+            output: { success: true },
+          },
+        ],
+      },
+    ];
+
+    const progress = computeTranscriptProductiveProgress(messages);
+    expect(progress).toBe(10);
+  });
 });
+

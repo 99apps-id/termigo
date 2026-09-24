@@ -569,3 +569,34 @@ fn list_branches_keeps_current_branch_local_and_surfaces_worktrees() {
     assert!(!feature[0].is_head);
     assert!(feature[0].worktree_path.is_some());
 }
+
+#[test]
+fn resolve_repo_authorizes_and_resolves_git_worktree() {
+    if skip_if_no_git() {
+        return;
+    }
+    let fx = GitRepoFixture::new();
+    fx.write_file("a.txt", "a\n");
+    fx.run_git(&["add", "."]);
+    fx.run_git(&["commit", "-q", "-m", "init"]);
+    fx.run_git(&["branch", "feature-wt"]);
+
+    let wt = TempDir::new().unwrap();
+    let wt_path = wt.path().join("linked_wt");
+    fx.run_git(&[
+        "worktree",
+        "add",
+        "-q",
+        wt_path.to_str().unwrap(),
+        "feature-wt",
+    ]);
+
+    let info = operations::resolve_repo(&fx.registry, wt_path.to_str().unwrap(), &fx.workspace)
+        .expect("resolve_repo in worktree")
+        .expect("worktree repo info present");
+
+    assert_eq!(info.branch, "feature-wt");
+    assert!(!info.is_detached);
+    assert!(fx.registry.is_authorized(&wt_path));
+}
+

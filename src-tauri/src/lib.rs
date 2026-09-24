@@ -369,11 +369,11 @@ pub fn run() {
                             let _ = registry.authorize(dir);
                         }
                         if let Some(state) = app.try_state::<LaunchDir>() {
-                            *state.0.lock().expect("LaunchDir mutex poisoned") = Some(dir.clone());
+                            *state.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(dir.clone());
                         }
                     }
                     if let Some(state) = app.try_state::<LaunchFiles>() {
-                        *state.0.lock().expect("LaunchFiles mutex poisoned") = target.files.clone();
+                        *state.0.lock().unwrap_or_else(|e| e.into_inner()) = target.files.clone();
                     }
                     let _ = app.emit("termigo:open-file", target.files);
                 }

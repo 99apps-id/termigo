@@ -14,12 +14,12 @@ pub struct LaunchFiles(pub Mutex<Vec<String>>);
 
 #[tauri::command]
 pub fn get_launch_dir(state: State<'_, LaunchDir>) -> Option<String> {
-    state.0.lock().expect("LaunchDir mutex poisoned").take()
+    state.0.lock().unwrap_or_else(|e| e.into_inner()).take()
 }
 
 #[tauri::command]
 pub fn get_launch_files(state: State<'_, LaunchFiles>) -> Vec<String> {
-    std::mem::take(&mut *state.0.lock().expect("LaunchFiles mutex poisoned"))
+    std::mem::take(&mut *state.0.lock().unwrap_or_else(|e| e.into_inner()))
 }
 
 pub enum LaunchEntry {

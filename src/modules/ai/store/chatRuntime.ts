@@ -996,6 +996,7 @@ export async function sendParts(
   stopLatch.delete(sessionId);
   approvalResumeFailureCount.delete(sessionId);
   transientRetryCount.delete(sessionId);
+  autoSendStates.delete(sessionId);
   // A genuinely new task earns a fresh automatic-continue budget. A resume
   // (the injected continuation prompt, from Continue or an auto-continue) is
   // the same task and must NOT reset it, or the budget would never be spent.
@@ -1220,6 +1221,7 @@ export async function resumeRun(): Promise<boolean> {
     stopLatch.delete(sessionId);
     approvalResumeFailureCount.delete(sessionId);
     toolChoiceAutoResumeAt.delete(sessionId);
+    autoSendStates.delete(sessionId);
   }
   // Clear approval-gate state so the run can actually continue after /approve.
   //

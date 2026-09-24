@@ -38,7 +38,7 @@ impl WorkspaceRegistry {
             return; // already attached
         }
         let roots: Vec<PathBuf> = {
-            let set = self.roots.lock().expect("workspace registry poisoned");
+            let set = self.roots.lock().unwrap_or_else(|e| e.into_inner());
             set.iter().cloned().collect()
         };
         for root in roots {
@@ -58,7 +58,7 @@ impl WorkspaceRegistry {
     pub fn authorize<P: AsRef<Path>>(&self, path: P) -> std::io::Result<PathBuf> {
         let canonical = std::fs::canonicalize(path.as_ref())?;
         {
-            let mut set = self.roots.lock().expect("workspace registry poisoned");
+            let mut set = self.roots.lock().unwrap_or_else(|e| e.into_inner());
             set.insert(canonical.clone());
         }
         // Every authorization widens the asset scope by the same root, so the
@@ -68,7 +68,7 @@ impl WorkspaceRegistry {
     }
 
     pub fn is_authorized(&self, target: &Path) -> bool {
-        let set = self.roots.lock().expect("workspace registry poisoned");
+        let set = self.roots.lock().unwrap_or_else(|e| e.into_inner());
         if set.iter().any(|root| target.starts_with(root)) {
             return true;
         }
@@ -99,8 +99,8 @@ impl WorkspaceRegistry {
             if self.is_authorized(&canon) {
                 return true;
             }
-            if is_git_worktree_of_authorized(self, &canon) {
-                let _ = self.authorize(&canon);
+            if let Some(wt_root) = find_git_worktree_root_of_authorized(self, &canon) {
+                let _ = self.authorize(&wt_root);
                 return true;
             }
             // Allow traversing/reading node_modules symlinks (including .pnpm virtual store and pnpm global store)
@@ -133,8 +133,8 @@ impl WorkspaceRegistry {
                 if self.is_authorized(&joined) {
                     return true;
                 }
-                if is_git_worktree_of_authorized(self, &joined) {
-                    let _ = self.authorize(&joined);
+                if let Some(wt_root) = find_git_worktree_root_of_authorized(self, &joined) {
+                    let _ = self.authorize(&wt_root);
                     return true;
                 }
                 let norm_target = target.to_string_lossy().replace('\\', "/").to_lowercase();
@@ -216,8 +216,8 @@ pub fn authorize_spawn_cwd(
         return Err(format!("cwd is not a directory: {}", canonical.display()));
     }
     if !registry.is_authorized(&canonical) {
-        if is_git_worktree_of_authorized(registry, &canonical) {
-            let _ = registry.authorize(&canonical);
+        if let Some(wt_root) = find_git_worktree_root_of_authorized(registry, &canonical) {
+            let _ = registry.authorize(&wt_root);
             return Ok(Some(canonical));
         }
         let norm_resolved = resolved.to_string_lossy().replace('\\', "/").to_lowercase();
@@ -250,8 +250,10 @@ pub fn authorize_user_spawn_cwd(
     if !canonical.is_dir() {
         return Err(format!("cwd is not a directory: {}", canonical.display()));
     }
-    if !registry.is_authorized(&canonical) && is_git_worktree_of_authorized(registry, &canonical) {
-        let _ = registry.authorize(&canonical);
+    if !registry.is_authorized(&canonical) {
+        if let Some(wt_root) = find_git_worktree_root_of_authorized(registry, &canonical) {
+            let _ = registry.authorize(&wt_root);
+        }
     }
     registry.authorize(&canonical).map_err(|e| e.to_string())?;
     Ok(Some(canonical))
@@ -302,14 +304,15 @@ pub async fn workspace_current_dir(
     Ok(crate::modules::fs::to_canon(&canonical))
 }
 
-/// Check if a path belongs to a git worktree of an already authorized workspace root.
+/// Find the canonical root directory of a git worktree if `path` belongs to a linked
+/// worktree of an already authorized workspace root.
 ///
 /// In Git, a linked worktree contains a `.git` file with `gitdir: <path>`, pointing to
 /// `<main_repo>/.git/worktrees/<name>`. Inside that directory, Git places a `gitdir` file
 /// with a backlink pointing back to the worktree's `.git` file.
 /// We verify this bidirectional link and check that the target gitdir or main repo
 /// resides within an authorized workspace root.
-pub fn is_git_worktree_of_authorized(registry: &WorkspaceRegistry, path: &Path) -> bool {
+pub fn find_git_worktree_root_of_authorized(registry: &WorkspaceRegistry, path: &Path) -> Option<PathBuf> {
     let mut candidate = path.to_path_buf();
     loop {
         let git_file = candidate.join(".git");
@@ -328,11 +331,9 @@ pub fn is_git_worktree_of_authorized(registry: &WorkspaceRegistry, path: &Path) 
                             if let Ok(canon_gitdir) = std::fs::canonicalize(&resolved) {
                                 let is_authorized_repo = registry.is_authorized(&canon_gitdir)
                                     || canon_gitdir
-                                        .parent()
-                                        .and_then(|p| p.parent())
-                                        .and_then(|p| p.parent())
-                                        .map(|repo| registry.is_authorized(repo))
-                                        .unwrap_or(false);
+                                        .ancestors()
+                                        .take(4)
+                                        .any(|p| registry.is_authorized(p));
 
                                 if is_authorized_repo {
                                     let backlink_path = canon_gitdir.join("gitdir");
@@ -348,7 +349,9 @@ pub fn is_git_worktree_of_authorized(registry: &WorkspaceRegistry, path: &Path) 
                                             std::fs::canonicalize(&git_file),
                                         ) {
                                             if canon_bl == canon_gf {
-                                                return true;
+                                                let canon_root = std::fs::canonicalize(&candidate)
+                                                    .unwrap_or(candidate);
+                                                return Some(canon_root);
                                             }
                                         }
                                     }
@@ -367,7 +370,12 @@ pub fn is_git_worktree_of_authorized(registry: &WorkspaceRegistry, path: &Path) 
         }
         candidate = parent.to_path_buf();
     }
-    false
+    None
+}
+
+/// Check if a path belongs to a git worktree of an already authorized workspace root.
+pub fn is_git_worktree_of_authorized(registry: &WorkspaceRegistry, path: &Path) -> bool {
+    find_git_worktree_root_of_authorized(registry, path).is_some()
 }
 
 // Snapshotted once at app startup so the live `current_dir()` drifting later
@@ -1309,12 +1317,19 @@ mod auth_tests {
         reg.authorize(&main_repo).expect("authorize main repo");
 
         assert!(is_git_worktree_of_authorized(&reg, &wt_dir));
+        let nested_file = wt_dir.join("src").join("main.rs");
+        assert_eq!(
+            find_git_worktree_root_of_authorized(&reg, &nested_file),
+            Some(wt_dir.clone())
+        );
+
         let s = wt_dir.to_string_lossy().into_owned();
         let resolved = authorize_spawn_cwd(&reg, Some(&s), &WorkspaceEnv::Local)
             .expect("worktree authorized")
             .expect("returned canonical");
         assert_eq!(resolved, wt_dir);
         assert!(reg.is_authorized(&wt_dir));
+        assert!(reg.is_authorized(&nested_file));
     }
 }
 
