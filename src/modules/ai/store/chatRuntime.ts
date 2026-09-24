@@ -25,6 +25,8 @@ import {
   type AutoSendGateState,
   autoSendAskIsDuplicate,
   autoSendGate,
+  computeTranscriptProductiveProgress,
+  extractRecentTranscriptToolCalls,
   INITIAL_AUTO_SEND_STATE,
 } from "../lib/autoSendGate";
 import {
@@ -251,6 +253,9 @@ const stopLatch = new Set<string>();
 // Tracks failed / aborted approval resumes per session to prevent infinite auto-send retry storms.
 const approvalResumeFailureCount = new Map<string, number>();
 
+// Tracks automatic resume loop breaker state per session.
+const autoSendStates = new Map<string, AutoSendGateState>();
+
 export function clearApprovalLatches(sessionId: string): void {
   stopLatch.delete(sessionId);
   approvalResumeFailureCount.delete(sessionId);
@@ -259,6 +264,7 @@ export function clearApprovalLatches(sessionId: string): void {
   overflowAutoResumeCount.delete(sessionId);
   autoContinueCount.delete(sessionId);
   verifyNudgeCount.delete(sessionId);
+  autoSendStates.delete(sessionId);
 }
 
 // Connectivity recovery: when the provider is unreachable, keep the run
@@ -364,8 +370,6 @@ function makeChat(sessionId: string): Chat<UIMessage> {
   // Set when the loop cap (not the user) refuses a round, so the AbortError it
   // surfaces is settled as an automatic stop rather than a "user stopped".
   let loopCapRefused = false;
-  // Loop breaker state for sendAutomaticallyWhen (see the gate there).
-  let autoSendState: AutoSendGateState = INITIAL_AUTO_SEND_STATE;
   let autoSendDecidedAt = -1;
   let autoSendAllowed = true;
   // True while an authorised automatic send has not actually started yet, so a
@@ -669,10 +673,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       // (`onRoundStart`), so a duplicate ask inside one cycle is still free
       // while the next real resume is counted.
       const transcript = messages.messages;
-      const progress = transcript.reduce(
-        (total, message) => total + (message.parts?.length ?? 0),
-        0,
-      );
+      const progress = computeTranscriptProductiveProgress(transcript);
       if (
         autoSendAskIsDuplicate({
           pending: autoSendPending,
@@ -682,19 +683,24 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       ) {
         return autoSendAllowed;
       }
-      const decision = autoSendGate(autoSendState, progress);
-      autoSendState = decision.state;
+      const recentToolCalls = extractRecentTranscriptToolCalls(transcript);
+      const autoSendState =
+        autoSendStates.get(sessionId) ?? INITIAL_AUTO_SEND_STATE;
+      const decision = autoSendGate(autoSendState, progress, {
+        recentToolCalls,
+      });
+      autoSendStates.set(sessionId, decision.state);
       autoSendDecidedAt = progress;
       autoSendAllowed = decision.allow;
       autoSendPending = decision.allow;
       if (decision.stoppedLoop) {
-        logWarn(
-          `[ai] stopped an automatic resume loop after ${decision.state.stalled} unproductive resumes`,
-        );
+        const loopExplanation =
+          decision.reason ??
+          `it kept re-sending the same request without making progress (after ${decision.state.stalled} unproductive resumes)`;
+        logWarn(`[ai] stopped an automatic resume loop: ${loopExplanation}`);
         useChatStore.getState().patchAgentMeta({
           status: "idle",
-          error:
-            "Termigo stopped the run: it kept re-sending the same request without making progress. Send a message to continue.",
+          error: `Termigo stopped the run: ${loopExplanation}. Send a message to continue.`,
           stopReason: null,
           stoppedByUser: false,
         });

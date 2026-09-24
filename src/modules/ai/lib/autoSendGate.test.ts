@@ -9,8 +9,13 @@ import { describe, expect, it } from "vitest";
 import {
   autoSendAskIsDuplicate,
   autoSendGate,
+  canonicalToolFingerprint,
+  computeTranscriptProductiveProgress,
+  extractRecentTranscriptToolCalls,
   INITIAL_AUTO_SEND_STATE,
+  isToolCallError,
   MAX_STALLED_AUTO_SENDS,
+  summarizeInput,
 } from "./autoSendGate";
 
 /** Feed a sequence of transcript sizes through the gate. */
@@ -178,5 +183,322 @@ describe("the caller's once-per-send rule", () => {
     expect(
       autoSendAskIsDuplicate({ pending: true, decidedAt: 170, progress: 174 }),
     ).toBe(false);
+  });
+});
+
+describe("helpers", () => {
+  it("detects tool call errors", () => {
+    expect(isToolCallError({ error: "failed" })).toBe(true);
+    expect(isToolCallError({ exit_code: 1 })).toBe(true);
+    expect(isToolCallError({ exit_code: 0 })).toBe(false);
+    expect(isToolCallError({ content: "ok" })).toBe(false);
+  });
+
+  it("produces deterministic canonical fingerprints regardless of key ordering", () => {
+    const fp1 = canonicalToolFingerprint("edit", { a: 1, b: 2 });
+    const fp2 = canonicalToolFingerprint("edit", { b: 2, a: 1 });
+    expect(fp1).toBe(fp2);
+  });
+
+  it("summarizes input cleanly for UI diagnostics", () => {
+    expect(summarizeInput("edit", { path: "src/core/flow.ts" })).toBe("flow.ts");
+    expect(summarizeInput("bash_run", { command: "cargo test" })).toBe('"cargo test"');
+  });
+});
+
+describe("computeTranscriptProductiveProgress", () => {
+  it("rewards non-empty assistant text parts", () => {
+    const messages = [
+      { role: "user", parts: [{ type: "text", text: "hello" }] },
+      {
+        role: "assistant",
+        parts: [{ type: "text", text: "Here is the plan for refactoring." }],
+      },
+    ];
+    const progress = computeTranscriptProductiveProgress(messages);
+    expect(progress).toBeGreaterThan(0);
+  });
+
+  it("does not count errored tool calls or approval metadata", () => {
+    const messages = [
+      {
+        role: "assistant",
+        parts: [
+          { type: "step-start" },
+          { type: "reasoning", text: "Trying edit..." },
+          {
+            type: "tool-edit",
+            state: "output-available",
+            input: { path: "flow.ts", old_string: "a", new_string: "b" },
+            output: { error: "old_string not found" },
+          },
+          { type: "tool-approval-request" },
+          { type: "tool-approval-response" },
+        ],
+      },
+    ];
+    const progress = computeTranscriptProductiveProgress(messages);
+    expect(progress).toBe(0);
+  });
+
+  it("rewards successful tool executions", () => {
+    const messages = [
+      {
+        role: "assistant",
+        parts: [
+          {
+            type: "tool-edit",
+            state: "output-available",
+            input: { path: "flow.ts", old_string: "a", new_string: "b" },
+            output: { success: true },
+          },
+        ],
+      },
+    ];
+    const progress = computeTranscriptProductiveProgress(messages);
+    expect(progress).toBe(10);
+  });
+
+  it("deduplicates identical read operations when no mutation occurs", () => {
+    const messages = [
+      {
+        role: "assistant",
+        parts: [
+          {
+            type: "tool-read_file",
+            state: "output-available",
+            input: { path: "flow.ts", offset: 100, limit: 30 },
+            output: { content: "line 100..." },
+          },
+          {
+            type: "tool-read_file",
+            state: "output-available",
+            input: { path: "flow.ts", offset: 100, limit: 30 },
+            output: { content: "line 100..." },
+          },
+        ],
+      },
+    ];
+    const progress = computeTranscriptProductiveProgress(messages);
+    // Only the first read adds progress; duplicate read does not
+    expect(progress).toBe(10);
+  });
+
+  it("resets read deduplication after a successful mutating tool", () => {
+    const messages = [
+      {
+        role: "assistant",
+        parts: [
+          {
+            type: "tool-read_file",
+            state: "output-available",
+            input: { path: "flow.ts", offset: 100, limit: 30 },
+            output: { content: "old content" },
+          },
+          {
+            type: "tool-edit",
+            state: "output-available",
+            input: { path: "flow.ts", old_string: "old", new_string: "new" },
+            output: { success: true },
+          },
+          {
+            type: "tool-read_file",
+            state: "output-available",
+            input: { path: "flow.ts", offset: 100, limit: 30 },
+            output: { content: "new content" },
+          },
+        ],
+      },
+    ];
+    const progress = computeTranscriptProductiveProgress(messages);
+    // read (10) + edit (10) + re-read after edit (10) = 30
+    expect(progress).toBe(30);
+  });
+});
+
+describe("extractRecentTranscriptToolCalls", () => {
+  it("extracts tool calls from the latest user message onward", () => {
+    const messages = [
+      {
+        role: "user",
+        parts: [{ type: "text", text: "first question" }],
+      },
+      {
+        role: "assistant",
+        parts: [
+          {
+            type: "tool-read_file",
+            input: { path: "old.ts" },
+            state: "output-available",
+          },
+        ],
+      },
+      {
+        role: "user",
+        parts: [{ type: "text", text: "second question" }],
+      },
+      {
+        role: "assistant",
+        parts: [
+          {
+            type: "tool-edit",
+            input: { path: "new.ts" },
+            output: { error: "failed" },
+            state: "output-available",
+          },
+        ],
+      },
+    ];
+
+    const calls = extractRecentTranscriptToolCalls(messages);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].toolName).toBe("edit");
+    expect(calls[0].isError).toBe(true);
+  });
+});
+
+describe("autoSendGate tool repetition and failure breakers", () => {
+  it("stops a run when the exact same tool call repeats 3 times", () => {
+    const repeatingCall = {
+      toolName: "edit",
+      input: { path: "provider.ts", old_string: "x", new_string: "y" },
+      output: { error: "old_string not found" },
+      isError: true,
+      hasResult: true,
+    };
+
+    const recentToolCalls = [repeatingCall, repeatingCall, repeatingCall];
+    const decision = autoSendGate(INITIAL_AUTO_SEND_STATE, 10, {
+      recentToolCalls,
+    });
+
+    expect(decision.allow).toBe(false);
+    expect(decision.stoppedLoop).toBe(true);
+    expect(decision.reason).toContain("provider.ts");
+    expect(decision.reason).toContain("failed repeatedly");
+  });
+
+  it("stops when the same tool call fails 2 times with identical arguments", () => {
+    const failedCall = {
+      toolName: "edit",
+      input: { path: "auth.ts", old_string: "bad", new_string: "fixed" },
+      output: { error: "old_string not found" },
+      isError: true,
+      hasResult: true,
+    };
+
+    const recentToolCalls = [failedCall, failedCall];
+    const decision = autoSendGate(INITIAL_AUTO_SEND_STATE, 10, {
+      recentToolCalls,
+    });
+
+    expect(decision.allow).toBe(false);
+    expect(decision.stoppedLoop).toBe(true);
+    expect(decision.reason).toContain("failed repeatedly with identical arguments");
+  });
+
+  it("catches alternating read and failed edit loops", () => {
+    const readFileCall = {
+      toolName: "read_file",
+      input: { path: "auth.ts", offset: 100, limit: 30 },
+      output: { content: "verbatim" },
+      isError: false,
+      hasResult: true,
+    };
+    const failedEditCall = {
+      toolName: "edit",
+      input: { path: "auth.ts", old_string: "bad", new_string: "fixed" },
+      output: { error: "old_string not found" },
+      isError: true,
+      hasResult: true,
+    };
+
+    const recentToolCalls = [
+      readFileCall,
+      failedEditCall,
+      readFileCall,
+      failedEditCall,
+    ];
+
+    const decision = autoSendGate(INITIAL_AUTO_SEND_STATE, 10, {
+      recentToolCalls,
+    });
+
+    expect(decision.allow).toBe(false);
+    expect(decision.stoppedLoop).toBe(true);
+  });
+
+  it("stops after 3 consecutive failures across different tools", () => {
+    const recentToolCalls = [
+      {
+        toolName: "edit",
+        input: { path: "a.ts" },
+        output: { error: "not found" },
+        isError: true,
+        hasResult: true,
+      },
+      {
+        toolName: "edit",
+        input: { path: "b.ts" },
+        output: { error: "not found" },
+        isError: true,
+        hasResult: true,
+      },
+      {
+        toolName: "bash_run",
+        input: { command: "npm test" },
+        output: { exit_code: 1 },
+        isError: true,
+        hasResult: true,
+      },
+    ];
+
+    const decision = autoSendGate(INITIAL_AUTO_SEND_STATE, 10, {
+      recentToolCalls,
+    });
+
+    expect(decision.allow).toBe(false);
+    expect(decision.stoppedLoop).toBe(true);
+    expect(decision.reason).toContain("consecutive tool calls failed");
+  });
+
+  it("allows diverse successful operations to continue", () => {
+    const recentToolCalls = [
+      {
+        toolName: "read_file",
+        input: { path: "a.ts" },
+        output: { content: "..." },
+        isError: false,
+        hasResult: true,
+      },
+      {
+        toolName: "edit",
+        input: { path: "a.ts", old_string: "1", new_string: "2" },
+        output: { success: true },
+        isError: false,
+        hasResult: true,
+      },
+      {
+        toolName: "read_file",
+        input: { path: "b.ts" },
+        output: { content: "..." },
+        isError: false,
+        hasResult: true,
+      },
+      {
+        toolName: "edit",
+        input: { path: "b.ts", old_string: "3", new_string: "4" },
+        output: { success: true },
+        isError: false,
+        hasResult: true,
+      },
+    ];
+
+    const decision = autoSendGate(INITIAL_AUTO_SEND_STATE, 40, {
+      recentToolCalls,
+    });
+
+    expect(decision.allow).toBe(true);
+    expect(decision.stoppedLoop).toBe(false);
   });
 });
