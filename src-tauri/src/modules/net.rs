@@ -975,7 +975,7 @@ mod tests {
         let first = client_for(host, false).await.expect("builds");
         let second = client_for(host, false).await.expect("reuses");
 
-        let map = CLIENT_CACHE.get().expect("initialised").lock().unwrap();
+        let map = CLIENT_CACHE.get().expect("initialised").lock().unwrap_or_else(|e| e.into_inner());
         assert_eq!(
             map.keys().filter(|(h, _)| h == host).count(),
             1,
@@ -1032,7 +1032,7 @@ mod tests {
         assert!(client_for(host, false).await.is_err());
         assert!(client_for(host, true).await.is_ok());
 
-        let map = CLIENT_CACHE.get().expect("initialised").lock().unwrap();
+        let map = CLIENT_CACHE.get().expect("initialised").lock().unwrap_or_else(|e| e.into_inner());
         assert!(map.contains_key(&(host.to_string(), true)));
         assert!(
             !map.contains_key(&(host.to_string(), false)),

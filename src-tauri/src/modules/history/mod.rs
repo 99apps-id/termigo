@@ -116,7 +116,7 @@ fn is_executable(entry: &std::fs::DirEntry) -> bool {
 }
 
 fn ensure(state: &HistoryState) -> std::sync::MutexGuard<'_, Option<Index>> {
-    let mut guard = state.inner.lock().unwrap();
+    let mut guard = state.inner.lock().unwrap_or_else(|e| e.into_inner());
     if guard.is_none() {
         *guard = Some(Index {
             entries: build_index(read_histories()),

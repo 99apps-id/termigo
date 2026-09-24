@@ -1069,7 +1069,7 @@ pub fn shell_session_open(
     };
     let session = Arc::new(ShellSession::new(initial, workspace));
     let id = state.next_session_id.fetch_add(1, Ordering::Relaxed);
-    state.sessions.write().unwrap().insert(id, session);
+    state.sessions.write().unwrap_or_else(|e| e.into_inner()).insert(id, session);
     Ok(id)
 }
 
@@ -1083,7 +1083,7 @@ pub fn shell_session_interrupt(state: tauri::State<ShellState>, id: u32) -> Resu
     let session = state
         .sessions
         .read()
-        .unwrap()
+        .unwrap_or_else(|e| e.into_inner())
         .get(&id)
         .cloned()
         .ok_or_else(|| "no shell session".to_string())?;
@@ -1103,7 +1103,7 @@ pub async fn shell_session_run(
     let session = state
         .sessions
         .read()
-        .unwrap()
+        .unwrap_or_else(|e| e.into_inner())
         .get(&id)
         .cloned()
         .ok_or_else(|| "no shell session".to_string())?;
@@ -1138,7 +1138,7 @@ pub async fn shell_session_run(
 
 #[tauri::command]
 pub fn shell_session_close(state: tauri::State<ShellState>, id: u32) -> Result<(), String> {
-    state.sessions.write().unwrap().remove(&id);
+    state.sessions.write().unwrap_or_else(|e| e.into_inner()).remove(&id);
     Ok(())
 }
 
@@ -1163,7 +1163,7 @@ pub fn shell_bg_spawn(
     authorize_spawn_cwd(&registry, cwd.as_deref(), &workspace)?;
     let proc = background::spawn(trimmed, cwd, workspace, log_path, &registry)?;
     let id = state.next_bg_id.fetch_add(1, Ordering::Relaxed);
-    state.bg.write().unwrap().insert(id, proc);
+    state.bg.write().unwrap_or_else(|e| e.into_inner()).insert(id, proc);
     Ok(id)
 }
 
@@ -1176,7 +1176,7 @@ pub fn shell_bg_logs(
     let proc = state
         .bg
         .read()
-        .unwrap()
+        .unwrap_or_else(|e| e.into_inner())
         .get(&handle)
         .cloned()
         .ok_or_else(|| "no background handle".to_string())?;
@@ -1185,7 +1185,7 @@ pub fn shell_bg_logs(
 
 #[tauri::command]
 pub fn shell_bg_kill(state: tauri::State<ShellState>, handle: u32) -> Result<bool, String> {
-    if let Some(proc) = state.bg.read().unwrap().get(&handle).cloned() {
+    if let Some(proc) = state.bg.read().unwrap_or_else(|e| e.into_inner()).get(&handle).cloned() {
         Ok(proc.kill())
     } else {
         Ok(false)
@@ -1194,7 +1194,7 @@ pub fn shell_bg_kill(state: tauri::State<ShellState>, handle: u32) -> Result<boo
 
 #[tauri::command]
 pub fn shell_bg_list(state: tauri::State<ShellState>) -> Result<Vec<BackgroundProcInfo>, String> {
-    let map = state.bg.read().unwrap();
+    let map = state.bg.read().unwrap_or_else(|e| e.into_inner());
     let mut out = Vec::with_capacity(map.len());
     for (id, p) in map.iter() {
         out.push(p.info((*id).into()));
@@ -1219,7 +1219,7 @@ pub fn repl_open(
     }
     validate_shell_command(trimmed)?;
 
-    let mut map = state.repls.write().unwrap();
+    let mut map = state.repls.write().unwrap_or_else(|e| e.into_inner());
     map.retain(|_, p| !p.exited.load(std::sync::atomic::Ordering::Acquire));
     if map.len() >= repl::MAX_LIVE {
         return Err(format!("too many live REPL processes (max {})", repl::MAX_LIVE));
@@ -1242,7 +1242,7 @@ pub async fn repl_send(
     let proc = state
         .repls
         .read()
-        .unwrap()
+        .unwrap_or_else(|e| e.into_inner())
         .get(&handle)
         .cloned()
         .ok_or_else(|| "no such REPL process".to_string())?;
@@ -1269,7 +1269,7 @@ pub async fn repl_send(
 
 #[tauri::command]
 pub fn repl_close(state: tauri::State<ShellState>, handle: u32) -> Result<(), String> {
-    if let Some(proc) = state.repls.write().unwrap().remove(&handle) {
+    if let Some(proc) = state.repls.write().unwrap_or_else(|e| e.into_inner()).remove(&handle) {
         proc.kill();
     }
     Ok(())
@@ -1277,7 +1277,7 @@ pub fn repl_close(state: tauri::State<ShellState>, handle: u32) -> Result<(), St
 
 #[tauri::command]
 pub fn repl_list(state: tauri::State<ShellState>) -> Result<Vec<repl::ReplInfo>, String> {
-    let map = state.repls.read().unwrap();
+    let map = state.repls.read().unwrap_or_else(|e| e.into_inner());
     let mut list: Vec<_> = map.iter().map(|(&handle, p)| p.info(handle)).collect();
     list.sort_by_key(|i| i.started_at_ms);
     Ok(list)

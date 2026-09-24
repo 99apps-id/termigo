@@ -63,7 +63,7 @@ impl ShellSession {
     }
 
     pub fn current_cwd(&self) -> String {
-        self.cwd.lock().unwrap().clone()
+        self.cwd.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Kill the command running right now, if there is one.
@@ -101,7 +101,7 @@ impl ShellSession {
                 let effective_workspace = workspace_hint.as_ref().unwrap_or(&self.workspace);
                 let p = resolve_path(&hint, effective_workspace);
                 if p.is_dir() {
-                    *self.cwd.lock().unwrap() = hint;
+                    *self.cwd.lock().unwrap_or_else(|e| e.into_inner()) = hint;
                 }
             }
         }
@@ -136,7 +136,7 @@ impl ShellSession {
         if let Some(ref new_cwd) = cwd_after {
             let p = resolve_path(new_cwd, &self.workspace);
             if p.is_dir() {
-                *self.cwd.lock().unwrap() = new_cwd.clone();
+                *self.cwd.lock().unwrap_or_else(|e| e.into_inner()) = new_cwd.clone();
             }
         }
         let resolved_cwd = to_canon(self.current_cwd());

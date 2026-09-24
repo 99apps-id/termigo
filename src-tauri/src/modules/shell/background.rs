@@ -59,7 +59,7 @@ pub struct BackgroundProcInfo {
 
 impl BackgroundProc {
     pub fn read_logs(&self, since: u64) -> BackgroundLogResponse {
-        let (bytes, next_offset, dropped) = self.buffer.lock().unwrap().read_from(since);
+        let (bytes, next_offset, dropped) = self.buffer.lock().unwrap_or_else(|e| e.into_inner()).read_from(since);
         let exited = self.exited.load(Ordering::Acquire);
         let exit_code = if exited && !self.exit_unknown.load(Ordering::Acquire) {
             Some(self.exit_code.load(Ordering::Acquire))
@@ -237,7 +237,7 @@ pub fn spawn(
                 match pipe.read(&mut buf) {
                     Ok(0) => break,
                     Ok(n) => {
-                        proc_ref.buffer.lock().unwrap().push(&buf[..n]);
+                        proc_ref.buffer.lock().unwrap_or_else(|e| e.into_inner()).push(&buf[..n]);
                         if let Some(ref lf) = proc_ref.log_file {
                             if let Ok(mut f) = lf.lock() {
                                 let _ = f.write_all(&buf[..n]);
@@ -258,7 +258,7 @@ pub fn spawn(
                 match pipe.read(&mut buf) {
                     Ok(0) => break,
                     Ok(n) => {
-                        proc_ref.buffer.lock().unwrap().push(&buf[..n]);
+                        proc_ref.buffer.lock().unwrap_or_else(|e| e.into_inner()).push(&buf[..n]);
                         if let Some(ref lf) = proc_ref.log_file {
                             if let Ok(mut f) = lf.lock() {
                                 let _ = f.write_all(&buf[..n]);

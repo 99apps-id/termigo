@@ -111,7 +111,7 @@ impl ReplProc {
             self.exited.store(true, Ordering::Release);
             return Err("process has exited".into());
         }
-        let mut guard = self.stdin.lock().unwrap();
+        let mut guard = self.stdin.lock().unwrap_or_else(|e| e.into_inner());
         let stdin = guard.as_mut().ok_or("stdin is closed")?;
         stdin
             .write_all(line.as_bytes())
@@ -122,7 +122,7 @@ impl ReplProc {
 
     /// Close stdin, which is how a REPL is asked to exit politely.
     pub fn close_stdin(&self) {
-        *self.stdin.lock().unwrap() = None;
+        *self.stdin.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
 
     /// Read from `since` until `until` appears, the process exits, or time runs
@@ -144,7 +144,7 @@ impl ReplProc {
 
         loop {
             let (bytes, next_offset, dropped) = {
-                let buf = self.buffer.lock().unwrap();
+                let buf = self.buffer.lock().unwrap_or_else(|e| e.into_inner());
                 buf.read_from(offset)
             };
             if !bytes.is_empty() {
@@ -162,7 +162,7 @@ impl ReplProc {
             if self.exited.load(Ordering::Acquire) {
                 // One last drain: the reader threads may still have been
                 // flushing when the child ended.
-                let (tail, last_offset, _) = self.buffer.lock().unwrap().read_from(offset);
+                let (tail, last_offset, _) = self.buffer.lock().unwrap_or_else(|e| e.into_inner()).read_from(offset);
                 collected.extend_from_slice(&tail);
                 let text = String::from_utf8_lossy(&collected).into_owned();
                 let matched = match until {
@@ -281,7 +281,7 @@ pub fn spawn(
             loop {
                 match pipe.read(&mut buf) {
                     Ok(0) => break,
-                    Ok(n) => proc_ref.buffer.lock().unwrap().push(&buf[..n]),
+                    Ok(n) => proc_ref.buffer.lock().unwrap_or_else(|e| e.into_inner()).push(&buf[..n]),
                     Err(_) => break,
                 }
             }

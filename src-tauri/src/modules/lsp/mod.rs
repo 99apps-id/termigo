@@ -28,14 +28,14 @@ impl Default for LspState {
 
 impl LspState {
     pub(super) fn take(&self, id: u64) -> Option<Arc<LspSession>> {
-        self.sessions.write().unwrap().remove(&id)
+        self.sessions.write().unwrap_or_else(|e| e.into_inner()).remove(&id)
     }
 
     pub fn kill_all(&self) {
         let drained: Vec<Arc<LspSession>> = self
             .sessions
             .write()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .drain()
             .map(|(_, s)| s)
             .collect();
@@ -95,13 +95,13 @@ pub async fn lsp_spawn(
     .await
     .map_err(|e| e.to_string())??;
 
-    state.sessions.write().unwrap().insert(id, session);
+    state.sessions.write().unwrap_or_else(|e| e.into_inner()).insert(id, session);
     // The server can die before this insert; the waiter's reap then ran with
     // the id absent. Re-check so a dead session isn't stranded in the map.
     let exited = state
         .sessions
         .read()
-        .unwrap()
+        .unwrap_or_else(|e| e.into_inner())
         .get(&id)
         .map(|s| s.exited.load(Ordering::Acquire))
         .unwrap_or(false);
@@ -152,7 +152,7 @@ pub async fn lsp_send(
     let session = state
         .sessions
         .read()
-        .unwrap()
+        .unwrap_or_else(|e| e.into_inner())
         .get(&id)
         .cloned()
         .ok_or_else(|| format!("lsp_send: unknown id={id}"))?;

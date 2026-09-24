@@ -154,7 +154,7 @@ fn search_tree(
                 path,
                 UTF8(|line_num, text| {
                     let line_text = text.trim_end_matches('\n').to_string();
-                    let mut guard = hits.lock().unwrap();
+                    let mut guard = hits.lock().unwrap_or_else(|e| e.into_inner());
                     if guard.len() >= cap {
                         truncated.store(true, Ordering::Relaxed);
                         return Ok(false);
