@@ -113,6 +113,19 @@ A third shell surface, between `shell_run_command` and `shell_bg_*`. An interact
 
 Open sessions are reaped before the cap is enforced, so processes that already exited do not consume slots against sessions an agent forgot to stop.
 
+### LSP host (`src-tauri/src/modules/lsp/`)
+
+A process host, not a protocol implementation: Rust owns Content-Length framing and process lifecycle, the frontend owns the language-server intelligence. `lsp/framing.rs` is pure and tested.
+
+- `lsp_host_pid` - pid of the hosting Termigo process, so the frontend can tell a live host from one that restarted
+- `lsp_detect` - resolve a server binary to an absolute path through the captured login-shell env, which a GUI-launched app does not otherwise have
+- `lsp_spawn` - start a server against an authorized workspace root with an optional RSS cap, streaming over two `Channel`s, and return its session id
+- `lsp_resolve_root` - walk up from a path to the first project marker
+- `lsp_send` - write one already-framed message to a session
+- `lsp_destroy` - take a session out of the registry and terminate it
+
+The spawn cwd goes through the same workspace authorization registry as every other process-spawning command, and WSL workspaces are rejected rather than silently run on the host. Root detection stops at `$HOME`, because a stray `package.json` in the home directory would otherwise let a server index the whole home tree. Servers die with their host: their own process group on Unix, a Job Object on Windows, and every session is killed on `RunEvent::Exit`.
+
 ### Workspace (`src-tauri/src/modules/workspace.rs`)
 
 - `workspace_authorize` / `workspace_current_dir` - the spawn/git/AI cwd authorization registry
