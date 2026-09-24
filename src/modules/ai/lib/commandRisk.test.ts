@@ -32,6 +32,7 @@ describe("inspection commands", () => {
     for (const c of [
       "git status",
       "git log --oneline -20",
+      "git worktree list",
       "docker ps -a",
       "docker logs myapp",
       "systemctl status nginx",
@@ -43,6 +44,10 @@ describe("inspection commands", () => {
       "dpkg -l",
       "pacman -Ss nmap",
       "pip list",
+      "semgrep scan --config auto",
+      "trivy fs .",
+      "shellcheck script.sh",
+      "cargo-audit",
     ]) {
       expect(isReadOnlyCommand(c)).toBe(true);
     }

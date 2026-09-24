@@ -2,7 +2,9 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use crate::modules::git::errors::{GitError, Result};
-use crate::modules::workspace::{resolve_path, WorkspaceEnv, WorkspaceRegistry};
+use crate::modules::workspace::{
+    is_git_worktree_of_authorized, resolve_path, WorkspaceEnv, WorkspaceRegistry,
+};
 
 #[derive(Clone, Debug)]
 pub struct ResolvedGitDirectory {
@@ -57,7 +59,11 @@ pub fn authorized_repo_root(
 ) -> Result<ResolvedGitDirectory> {
     let canonical = canonical_dir(registry, path, workspace)?;
     if !registry.is_authorized(&canonical.local_path) {
-        return Err(GitError::PathOutsideWorkspace(canonical.local_path.clone()));
+        if is_git_worktree_of_authorized(registry, &canonical.local_path) {
+            let _ = registry.authorize(&canonical.local_path);
+        } else {
+            return Err(GitError::PathOutsideWorkspace(canonical.local_path.clone()));
+        }
     }
     Ok(canonical)
 }

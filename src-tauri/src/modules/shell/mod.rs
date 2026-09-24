@@ -202,6 +202,31 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
     // OS-level file and URL openers. Let the agent open files/URLs in the
     // user's default application without widening the trust boundary.
     "explorer", "xdg-open", "open",
+    //
+    // Additional project, language & framework toolchains (coding & refactoring)
+    "tsx", "ts-node", "turbo", "prisma", "drizzle-kit",
+    "next", "nuxt", "astro", "svelte-kit", "remix",
+    "esbuild", "rollup", "webpack", "swc",
+    "cross-env", "concurrently", "rimraf", "tree-sitter",
+    "zig", "dotnet",
+    "java", "javac", "mvn", "gradle", "gradlew",
+    "php", "composer",
+    "ruby", "gem", "bundle", "rake",
+    "elixir", "mix",
+    "clang", "clang++", "gcc", "g++", "cc", "c++", "ld", "lld",
+    // Database CLIs & query utilities
+    "sqlite3", "duckdb", "psql", "mysql", "mariadb", "mongosh", "mongo", "redis-cli",
+    // Code audit, linting, formatting & refactoring tools
+    "oxlint", "jscodeshift", "ast-grep", "sg", "comby",
+    "radon", "pylint", "shellcheck", "shfmt", "sqlfluff",
+    "markdownlint", "markdownlint-cli2", "actionlint", "yamllint", "hadolint", "dotenv-linter",
+    "cargo-audit", "cargo-deny", "cargo-outdated", "npm-audit", "pnpm-audit",
+    // Security audit, vulnerability scanners & pentest tooling
+    "semgrep", "bandit", "trivy", "snyk", "osv-scanner", "checkov",
+    "grype", "syft", "retire", "auditjs", "checksec",
+    "kiterunner", "gau", "waybackurls", "paramspider",
+    "dalfox", "commix", "cve-bin-tool", "whispers", "detect-secrets",
+    "netcat", "nc", "socat", "tcpdump",
 ];
 
 /// Whether a program token may run without a PTY.
@@ -1601,6 +1626,14 @@ mod tests_sandbox {
             "source venv/bin/activate",
             "pnpm lint",
             "pnpm test",
+            "tsx src/index.ts",
+            "prisma generate",
+            "sqlite3 test.db .tables",
+            "semgrep scan --config auto",
+            "trivy fs .",
+            "ast-grep scan",
+            "shellcheck script.sh",
+            "cargo-audit audit",
             "./node_modules/.bin/vitest run",
             "node_modules/vitest/vitest.mjs run",
             "./node_modules/.pnpm/vitest@4.1.10/node_modules/vitest/vitest.mjs run",

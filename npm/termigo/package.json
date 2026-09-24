@@ -1,6 +1,6 @@
 {
   "name": "termigo",
-  "version": "0.9.19",
+  "version": "0.9.20",
   "description": "Install or start the Termigo desktop app from the terminal.",
   "license": "Apache-2.0",
   "type": "module",

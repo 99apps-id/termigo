@@ -28,11 +28,7 @@ Verify: `pnpm lint`/`check-types`/`test`; Rust `cargo clippy --all-targets --loc
 - **No em-dash** anywhere: code, comments, commits, docs.
 - **No emojis** anywhere.
 - **Imports**: always `@/...` on the frontend, never relative across modules.
-- **Package manager & pnpm fallbacks**: pnpm is the canonical package manager (junctions/symlinks on Windows; do not force `node-linker=hoisted`). If an agent fails to install or run global `pnpm`, use these alternatives so tasks run without disruption:
-  1. `corepack pnpm <cmd>` (or `corepack enable && corepack pnpm <cmd>`), bundled with Node 22+.
-  2. `npx -y pnpm@latest <cmd>` or `npx pnpm <cmd>` to invoke pnpm on demand without global install.
-  3. Direct local tool execution from `node_modules/.bin/` (e.g. `vitest run`, `biome lint ./src`, `tsc --noEmit`), which is also prepended to the agent shell PATH automatically.
-  4. Script runner fallback: `npm run <script>` / `npm test` as a last resort to run verification scripts, but never commit a `package-lock.json` or mutate `pnpm-lock.yaml`.
+- **Package manager**: pnpm only (junctions/symlinks on Windows; do not force `node-linker=hoisted`). If global `pnpm` is unavailable, use `corepack pnpm`, `npx -y pnpm@latest`, or invoke project binaries in `node_modules/.bin/` directly (already prepended to the agent shell PATH). Never commit `package-lock.json`. Details: [tooling](docs/contributing/tooling.md).
 - **Branding**: `termigo.png` at repo root is master logo. After changing it run `node scripts/generate-logo.mjs` to regenerate `public/logo.png` and `src-tauri/icons`; never hand-edit those. Render `/logo.png` in UI, not a CSS lookalike.
 
 ## Architecture
@@ -63,11 +59,11 @@ Single-window React app, path alias `@/*` -> `src/*`. Tabs are a tagged union on
 
 Details in [module layout](docs/architecture/module-layout.md):
 
-- **terminal/** xterm panes, renderer pool, splits. **editor/** CodeMirror 6, LSP client, diffs. **explorer/** file tree. **preview/**, **markdown/** preview surfaces.
-- **tabs/** tab list and active id (source of truth). **spaces/** projects with own root, env, tabs. **workspace/** Local and WSL.
-- **header/**, **statusbar/**, **sidebar/**, **command-palette/**, **shortcuts/** app chrome and keymap registry. **theme/**, **settings/**, **updater/**.
+- **terminal/** xterm panes, renderer pool, splits. **editor/** CodeMirror 6, LSP client, diffs. **explorer/** file tree. **preview/**, **markdown/** previews.
+- **tabs/** tab list and active id. **spaces/** projects with own root, env, tabs. **workspace/** Local and WSL.
+- **header/**, **statusbar/**, **sidebar/**, **command-palette/**, **shortcuts/** chrome and keymaps. **theme/**, **settings/**, **updater/**.
 - **source-control/**, **git-history/** staging, commits, diffs, commit graph. **lsp/** opt-in language servers.
-- **ssh/** remote tabs, host-key TOFU, SFTP explorer. **extensions/** manifest + worker sandbox. **agents/** agent lifecycle. **ai/** agentic subsystem. **telegram/** companion bot (pairing, polling, remote approvals, commands).
+- **ssh/** remote tabs, host-key TOFU, SFTP explorer. **extensions/** manifest + worker sandbox. **agents/** agent lifecycle. **ai/** agentic subsystem. **telegram/** companion bot.
 
 ### Go CLI (`cli/`)
 
@@ -81,19 +77,18 @@ The parts that are invariants rather than description:
 
 - **Keys** live in the OS keychain via `secrets_*` (on Linux, a `0600` `secrets.json` in the app data dir). Never persist a key to disk, settings, or `localStorage`.
 - **Agent** (`lib/agent.ts`): keep `Agent` / `DirectChatTransport` shape adhering to AI SDK v6 semantics. Stop reasons report by name. Budgets escalate per Continue: `[25, 50, 100]`.
-- **Subagents** (`lib/subagentPool.ts`, `agents/runSubagent.ts`): active concurrent subagents are managed by a global pool (`SubagentConcurrencyPool`, default 4). Parents yield their slot to child tasks via `ctx.yieldSlot()` to prevent deadlock. Batch subagents are concurrency-bounded (max 2 nested). Local subagents isolate workspace root from remote SSH tabs. Transient concurrency/rate limits retry with backoff.
-- **Tools & Repair** (`tools/tools.ts`, `lib/repairToolCall.ts`): inspection tools auto-execute; mutating tools require approval. `lib/security.ts` denies secret paths (`.env*`, `.ssh/`, credentials) on read and write, mirrored by `fs/security.rs` (parity pinned); `hooks.json` + `approvals.json` are agent-immutable. Windows system dirs are OPEN by operator decision; credential stores stay denied. Parameter aliases and near-miss tool names auto-repair.
-- **Shell sandbox allowlist** (`src-tauri/src/modules/shell/mod.rs`): bare program names must match `SANDBOX_ALLOWLIST` (includes `lint`, `biome`, `pnpm`, `vitest`); rooted and `node_modules`/.pnpm paths are allowed. Hard guards: approval flow, delete gate, secret write refusal, hijack-env-var refusal. `rm` is not allowlisted. Agent-shell PATH includes `node_modules/.bin`; package-manager mutations get a 300s floor. Details: [security model](docs/architecture/security-model.md).
-- **Approval resume - trailing message is load-bearing**: `streamText` finds approvals only in `messages.at(-1)`. Nothing may be appended after an answered approval.
-- **Chat UX & Timeline**: edit & resend previous turns (`messageEdit.ts`), turn checkpoints and timeline navigator (`turnCheckpoints.ts`, `ChatTimelineNavigator.tsx`), session fork from checkpoint (`forkSession`), auto-all tool approval toggle, inline ANSI output rendering (`AnsiOutput.tsx`), and stream stall recovery (`streamWatchdog.ts`).
+- **Subagents** (`lib/subagentPool.ts`, `agents/runSubagent.ts`): managed by `SubagentConcurrencyPool` (default 4). Parents yield slots via `ctx.yieldSlot()` to prevent deadlock. Batch subagents bounded (max 2 nested). Local subagents isolate root from remote SSH tabs. Rate limits retry with backoff.
+- **Tools & Repair** (`tools/tools.ts`, `lib/repairToolCall.ts`): inspection auto-executes; mutating requires approval. Secret paths (`.env*`, `.ssh/`, credentials) are denied on read and write in `lib/security.ts` and `fs/security.rs` (parity pinned); `hooks.json` + `approvals.json` are agent-immutable. Windows system dirs open by operator decision; credential stores denied. Parameter aliases auto-repair.
+- **Shell sandbox allowlist** (`src-tauri/src/modules/shell/mod.rs`): bare names must match `SANDBOX_ALLOWLIST`; rooted, worktree, and `node_modules`/.pnpm paths are allowed. Hard guards: approval flow, delete gate, secret write refusal, hijack-env-var refusal. `rm` is not allowlisted. Agent PATH includes `node_modules/.bin`; package-manager mutations get 300s floor. Details: [security model](docs/architecture/security-model.md).
+- **Approval resume trailing message is load-bearing**: `streamText` finds approvals only in `messages.at(-1)`. Nothing may be appended after an answered approval.
+- **Chat UX & Timeline**: edit/resend turns (`messageEdit.ts`), turn checkpoints and navigator (`turnCheckpoints.ts`, `ChatTimelineNavigator.tsx`), session fork (`forkSession`), auto-approval toggle, ANSI rendering (`AnsiOutput.tsx`), stream watchdog (`streamWatchdog.ts`).
 - **Telegram companion**: remote tool approvals, interactive commands, and Mermaid image previews (`src/modules/telegram/`).
-- **Memory path**: learned memory loads from `.termigo/memory.md` in the workspace root (project scope). A global fallback at `~/.termigo/memory.md` is also loaded when the project file is absent. Keys never persist to disk, settings, or `localStorage`; they live in the OS keychain via `secrets_*`.
+- **Memory path**: learned memory loads from `.termigo/memory.md` in workspace root (project scope), falling back to `~/.termigo/memory.md` when absent.
 
 ### UI conventions
 
 - **shadcn/ui** primitives (`src/components/ui/`, style `radix-luma`, icons **hugeicons**) and **AI Elements** (`src/components/ai-elements/`) are generated: regenerate with `pnpm dlx shadcn add`, never hand-edit. Composition wrappers belong in `modules/<area>/components/`.
 - **Tailwind v4**: no `tailwind.config.*`; config is `src/App.css` via `@theme`. Use `cn()` from `@/lib/utils`. Animation `motion`, layout `react-resizable-panels`.
-- **Imports**: path imports are always `@/...`, never relative across modules.
 - **Canonical paths**: forward-slash form on the frontend. `homeDir()` returns backslashes on Windows: convert at the boundary. Split anything from OSC 7, explorer, or OS on both separators (`/` and `\`), never `/` alone: equal canonical strings prevent `useFileTree` from clearing its tree on `tab.cwd` updates.
 
 ### Platform, capabilities and bundle
@@ -103,13 +98,13 @@ Per-platform window styling, the capability allowlist and bundle / updater confi
 - A plugin API the webview may call must be in `src-tauri/capabilities/default.json`, or it does not exist.
 - HOME / cache dirs come from the `dirs` crate, never raw `$HOME` / `%USERPROFILE%`.
 - Gate Unix-only shell logic behind `#[cfg(unix)]`; the Windows arm lives in `pty::shell_init::windows`.
-- Terminal input sends `\r` (CR) for Enter, never `\n` - PowerShell on Windows requires CR.
+- Terminal input sends `\r` (CR) for Enter, never `\n`: PowerShell on Windows requires CR.
 
 ### Known gotchas
 
-- **React 19 state and dev mode**: `setActiveId` is called outside `setTabs` updaters in `useTabs.ts` to preserve concurrent-mode consistency. `useTerminalSession` tracks `openSession` via ref to avoid stale closures. In dev, `useEffect` double-mounts; `SPAWN_LOCK` serializes early PTY cleanup (don't be alarmed by `pty opened` followed by `pty closed` in dev logs).
-- **Windows PowerShell process lifecycle**: `killer.kill()` from `portable-pty` only kills the immediate child. Descendants (e.g. `npm run dev` started inside pwsh) survive unless something else takes them down. The Job Object in `pty/job.rs` handles this for the Termigo-process-death case; an explicit `pty_close` from JS also kills only the immediate child + relies on the Job to take the rest. Don't disable the Job without a replacement.
-- **Tab `cwd` storage**: comes from OSC 7 with forward slashes (after `parseOsc7` strips `/C:` -> `C:`). Anything consuming `tab.cwd` for Rust fs commands on Windows must normalize separators or accept both: `apply_common` in `pty::shell_init` handles this for PTY spawn.
+- **React 19 state and dev mode**: `setActiveId` is called outside `setTabs` updaters for concurrent-mode safety. `useTerminalSession` tracks `openSession` via ref. In dev, `useEffect` double-mounts; `SPAWN_LOCK` serializes early PTY cleanup (`pty opened` then `pty closed` in dev logs is normal).
+- **Windows PowerShell process lifecycle**: `killer.kill()` from `portable-pty` kills only the immediate child. The Job Object in `pty/job.rs` terminates descendant process trees on exit; explicit `pty_close` relies on the Job Object. Do not disable without replacement.
+- **Tab `cwd` storage**: OSC 7 emits forward slashes (after `parseOsc7` strips `/C:` to `C:`). Consumers on Windows must normalize separators: `apply_common` in `pty::shell_init` handles PTY spawn.
 
 ## Further reading
 

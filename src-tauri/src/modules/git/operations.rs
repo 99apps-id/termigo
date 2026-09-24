@@ -90,7 +90,11 @@ pub fn panel_snapshot(
 ) -> Result<GitPanelSnapshot> {
     let cwd = canonical_dir(registry, cwd, workspace)?;
     if !registry.is_authorized(&cwd.local_path) {
-        return Err(GitError::PathOutsideWorkspace(cwd.local_path));
+        if crate::modules::workspace::is_git_worktree_of_authorized(registry, &cwd.local_path) {
+            let _ = registry.authorize(&cwd.local_path);
+        } else {
+            return Err(GitError::PathOutsideWorkspace(cwd.local_path));
+        }
     }
     ensure_git_available(&cwd.workspace)?;
     let Some(root_line) = git_stdout_line_opt(
@@ -1038,6 +1042,7 @@ pub fn list_branches(
             if let Some(rest) = line.strip_prefix("worktree ") {
                 if let Some(wt_path) = current_worktree.take() {
                     if !worktree_bare {
+                        let _ = registry.authorize(&wt_path);
                         push_worktree(
                             &mut branches,
                             wt_path,
@@ -1061,6 +1066,7 @@ pub fn list_branches(
         }
         if let Some(wt_path) = current_worktree.take() {
             if !worktree_bare {
+                let _ = registry.authorize(&wt_path);
                 push_worktree(
                     &mut branches,
                     wt_path,

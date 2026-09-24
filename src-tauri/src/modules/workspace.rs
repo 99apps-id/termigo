@@ -99,6 +99,10 @@ impl WorkspaceRegistry {
             if self.is_authorized(&canon) {
                 return true;
             }
+            if is_git_worktree_of_authorized(self, &canon) {
+                let _ = self.authorize(&canon);
+                return true;
+            }
             // Allow traversing/reading node_modules symlinks (including .pnpm virtual store and pnpm global store)
             // as long as the link origin is within an authorized workspace root.
             let norm_target = target.to_string_lossy().replace('\\', "/").to_lowercase();
@@ -127,6 +131,10 @@ impl WorkspaceRegistry {
                     joined.push(*part);
                 }
                 if self.is_authorized(&joined) {
+                    return true;
+                }
+                if is_git_worktree_of_authorized(self, &joined) {
+                    let _ = self.authorize(&joined);
                     return true;
                 }
                 let norm_target = target.to_string_lossy().replace('\\', "/").to_lowercase();
@@ -208,6 +216,10 @@ pub fn authorize_spawn_cwd(
         return Err(format!("cwd is not a directory: {}", canonical.display()));
     }
     if !registry.is_authorized(&canonical) {
+        if is_git_worktree_of_authorized(registry, &canonical) {
+            let _ = registry.authorize(&canonical);
+            return Ok(Some(canonical));
+        }
         let norm_resolved = resolved.to_string_lossy().replace('\\', "/").to_lowercase();
         if (norm_resolved.contains("/node_modules/") || norm_resolved.contains("/.pnpm/"))
             && registry.is_authorized(&resolved)
@@ -237,6 +249,9 @@ pub fn authorize_user_spawn_cwd(
         std::fs::canonicalize(&resolved).map_err(|e| format!("cwd not accessible: {e}"))?;
     if !canonical.is_dir() {
         return Err(format!("cwd is not a directory: {}", canonical.display()));
+    }
+    if !registry.is_authorized(&canonical) && is_git_worktree_of_authorized(registry, &canonical) {
+        let _ = registry.authorize(&canonical);
     }
     registry.authorize(&canonical).map_err(|e| e.to_string())?;
     Ok(Some(canonical))
@@ -285,6 +300,74 @@ pub async fn workspace_current_dir(
     let launch = resolve_launch_dir();
     let canonical = registry.authorize(&launch).map_err(|e| e.to_string())?;
     Ok(crate::modules::fs::to_canon(&canonical))
+}
+
+/// Check if a path belongs to a git worktree of an already authorized workspace root.
+///
+/// In Git, a linked worktree contains a `.git` file with `gitdir: <path>`, pointing to
+/// `<main_repo>/.git/worktrees/<name>`. Inside that directory, Git places a `gitdir` file
+/// with a backlink pointing back to the worktree's `.git` file.
+/// We verify this bidirectional link and check that the target gitdir or main repo
+/// resides within an authorized workspace root.
+pub fn is_git_worktree_of_authorized(registry: &WorkspaceRegistry, path: &Path) -> bool {
+    let mut candidate = path.to_path_buf();
+    loop {
+        let git_file = candidate.join(".git");
+        if git_file.is_file() {
+            if let Ok(content) = std::fs::read_to_string(&git_file) {
+                if let Some(first_line) = content.lines().next() {
+                    if let Some(raw_gitdir) = first_line.strip_prefix("gitdir:") {
+                        let gitdir_str = raw_gitdir.trim();
+                        if !gitdir_str.is_empty() {
+                            let gitdir_path = Path::new(gitdir_str);
+                            let resolved = if gitdir_path.is_relative() {
+                                candidate.join(gitdir_path)
+                            } else {
+                                gitdir_path.to_path_buf()
+                            };
+                            if let Ok(canon_gitdir) = std::fs::canonicalize(&resolved) {
+                                let is_authorized_repo = registry.is_authorized(&canon_gitdir)
+                                    || canon_gitdir
+                                        .parent()
+                                        .and_then(|p| p.parent())
+                                        .and_then(|p| p.parent())
+                                        .map(|repo| registry.is_authorized(repo))
+                                        .unwrap_or(false);
+
+                                if is_authorized_repo {
+                                    let backlink_path = canon_gitdir.join("gitdir");
+                                    if let Ok(backlink) = std::fs::read_to_string(&backlink_path) {
+                                        let trimmed_backlink = backlink.trim();
+                                        let resolved_bl = if Path::new(trimmed_backlink).is_relative() {
+                                            canon_gitdir.join(trimmed_backlink)
+                                        } else {
+                                            PathBuf::from(trimmed_backlink)
+                                        };
+                                        if let (Ok(canon_bl), Ok(canon_gf)) = (
+                                            std::fs::canonicalize(&resolved_bl),
+                                            std::fs::canonicalize(&git_file),
+                                        ) {
+                                            if canon_bl == canon_gf {
+                                                return true;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let Some(parent) = candidate.parent() else {
+            break;
+        };
+        if registry.is_authorized(parent) {
+            break;
+        }
+        candidate = parent.to_path_buf();
+    }
+    false
 }
 
 // Snapshotted once at app startup so the live `current_dir()` drifting later
@@ -1200,6 +1283,38 @@ mod auth_tests {
         let env = tempdir("envfb");
         let resolved = resolve_launch_cwd(Some("/no/such/termigo/dir"), Some(env.clone()));
         assert_eq!(resolved, Some(env));
+    }
+
+    #[test]
+    fn authorize_spawn_cwd_accepts_git_worktree_of_authorized_repo() {
+        let main_repo = tempdir("main_repo");
+        let wt_meta = main_repo.join(".git").join("worktrees").join("feature_wt");
+        fs::create_dir_all(&wt_meta).expect("create wt metadata");
+
+        let wt_dir = tempdir("feature_wt_workdir");
+        let wt_git_file = wt_dir.join(".git");
+        fs::write(
+            &wt_git_file,
+            format!("gitdir: {}", wt_meta.display()),
+        )
+        .expect("write wt .git file");
+
+        fs::write(
+            wt_meta.join("gitdir"),
+            format!("{}", wt_git_file.display()),
+        )
+        .expect("write backlink in repo");
+
+        let reg = WorkspaceRegistry::default();
+        reg.authorize(&main_repo).expect("authorize main repo");
+
+        assert!(is_git_worktree_of_authorized(&reg, &wt_dir));
+        let s = wt_dir.to_string_lossy().into_owned();
+        let resolved = authorize_spawn_cwd(&reg, Some(&s), &WorkspaceEnv::Local)
+            .expect("worktree authorized")
+            .expect("returned canonical");
+        assert_eq!(resolved, wt_dir);
+        assert!(reg.is_authorized(&wt_dir));
     }
 }
 
