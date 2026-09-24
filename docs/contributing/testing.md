@@ -36,7 +36,7 @@ AI coding agents operating within Termigo can run verification suites directly i
 - `cargo clippy --all-targets --locked -- -D warnings`
 - `cargo test --tests --locked`
 
-The sandbox allowlist (`SANDBOX_ALLOWLIST`), script extension normalization (`.ps1`, `.js`, `.mjs`, `.cjs`), Windows `-ExecutionPolicy Bypass`, and `node_modules`/`.pnpm` symlink traversal authorization ensure local test runners execute without friction while strictly maintaining deletion and secret-protection boundaries.
+The sandbox allowlist (`SANDBOX_ALLOWLIST`), script extension normalization (`.ps1`, `.js`, `.mjs`, `.cjs`), Windows `-ExecutionPolicy Bypass`, and `node_modules`/`.pnpm` symlink and Git worktree traversal authorization ensure local test runners execute without friction while strictly maintaining deletion and secret-protection boundaries.
 
 ## What must have a test
 

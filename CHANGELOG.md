@@ -6,6 +6,33 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.20] - 2026-09-24
+
+### Added
+
+- **Bidirectional Git worktree authorization.** `WorkspaceRegistry` in `workspace.rs`
+  now automatically authorizes Git worktrees linked to an authorized repository root
+  via `is_git_worktree_of_authorized`. The Rust backend checks `.git` gitdir links and
+  validates that `<gitdir>/gitdir` references the worktree path before permitting spawn
+  cwd and git operations (`panel_snapshot`, `list_branches`). Subagents running in
+  isolated worktrees (`.termigo/worktrees/*`) no longer require manual authorization prompts.
+- **Comprehensive developer and security tooling allowlist.** Expanded `SANDBOX_ALLOWLIST`
+  in `src-tauri/src/modules/shell/mod.rs` to allow language runtimes and compilers (`node`,
+  `deno`, `bun`, `python`, `python3`, `ruby`, `perl`, `php`, `rustc`, `cargo`, `go`),
+  package managers (`pnpm`, `npm`, `yarn`, `pip`, `pip3`, `gem`, `composer`), build tools
+  (`tsc`, `tsx`, `vite`, `next`, `astro`, `turbo`, `esbuild`, `webpack`, `rollup`, `make`,
+  `cmake`, `ninja`, `gcc`, `g++`, `clang`, `clang++`, `prisma`, `drizzle-kit`), database
+  CLIs (`sqlite3`, `duckdb`, `psql`, `mysql`, `mongosh`, `redis-cli`), formatters and
+  refactoring tools (`biome`, `lint`, `eslint`, `prettier`, `black`, `ruff`, `flake8`,
+  `isort`, `rubocop`, `golangci-lint`, `ast-grep`, `comby`, `sed`, `awk`, `patch`),
+  security and pentest scanners (`semgrep`, `bandit`, `trivy`, `osv-scanner`, `gosec`,
+  `safety`, `auditjs`, `pip-audit`, `snyk`, `grype`, `syft`, `checkov`, `nmap`), and shell
+  builtins (`source`, `.`).
+- **Read-only classification for security scanners.** Classified security audit tools
+  (`semgrep`, `bandit`, `trivy`, `osv-scanner`, `gosec`, `safety`, `pip-audit`, `auditjs`,
+  `snyk test`, `grype`, `checkov`) and `git worktree list` as read-only introspection
+  in `commandRisk.ts` so security audits run without unnecessary confirmation cards.
+
 ## [0.9.15] - 2026-09-16
 
 ### Added
@@ -174,7 +201,7 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a newline. Searching across lines is a different tool's job.
 - **A dropped SSH connection is no longer reported as a successful exit.** When
   the link to a remote host ended without the remote sending an exit status, the
-  session emitted `exit 0` — indistinguishable from a command that finished
+  session emitted `exit 0` - indistinguishable from a command that finished
   cleanly, so a connection that died mid-command read as success. A real exit
   status could also be overwritten: the close path ran *after* the status arrived
   and replaced the true code with a hardcoded zero, so `exit 3` reached the UI as
@@ -183,7 +210,7 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the session cleanly rather than as a failure.
 - **The control protocol accepts a compatible range instead of exact equality.**
   The app and the Go CLI are published as separate release assets, so a
-  half-upgraded install — new app, older CLI — is a normal state, and the old
+  half-upgraded install - new app, older CLI - is a normal state, and the old
   check (`protocol != PROTOCOL_VERSION`) turned it into a dead control channel
   with the message "unsupported". A client older than the app is now served, since
   it speaks a subset of the protocol; only a client *newer* than the app is still
@@ -193,7 +220,7 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`scripts/deploy-termigo.sh` snapshots the data directory with the binary.**
   The stores (settings, sessions, trajectory, secrets, webview local storage) live
   in the app's data directory, not next to the binary, and a rollback restored only
-  the binary — so the previous build started against data the new build had already
+  the binary - so the previous build started against data the new build had already
   rewritten, and settings were lost instead of recovered. The script now takes a
   timestamped `termigo.prev-data-*.tgz` while the service is stopped (the last
   consistent moment, before the new build can touch anything) and restores it

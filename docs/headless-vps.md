@@ -244,7 +244,7 @@ grep -i telegram ~/.local/share/id.99apps.termigo/logs/Termigo.log | tail -20
 
 Log timestamps are **local time**, so they line up with `date` and with the
 `journalctl` prefixes in the same output. Older builds logged UTC, which made a
-live log look like a stale file — a line stamped `01:02` sitting in a file written
+live log look like a stale file: a line stamped `01:02` sitting in a file written
 at `08:02` on a WIB host. If you are reading a log from an older build, add the
 offset before concluding that nothing has been logged recently.
 
