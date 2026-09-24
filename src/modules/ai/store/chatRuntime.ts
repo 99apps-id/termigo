@@ -262,9 +262,6 @@ export function clearApprovalLatches(sessionId: string): void {
   toolChoiceAutoResumeAt.delete(sessionId);
   transientRetryCount.delete(sessionId);
   overflowAutoResumeCount.delete(sessionId);
-  autoContinueCount.delete(sessionId);
-  verifyNudgeCount.delete(sessionId);
-  autoSendStates.delete(sessionId);
 }
 
 // Connectivity recovery: when the provider is unreachable, keep the run

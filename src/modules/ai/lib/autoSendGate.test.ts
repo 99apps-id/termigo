@@ -12,14 +12,18 @@ import {
   canonicalToolFingerprint,
   computeTranscriptProductiveProgress,
   extractRecentTranscriptToolCalls,
+  hasFileRedirection,
   INITIAL_AUTO_SEND_STATE,
+  isMutatingToolCall,
   isToolCallError,
   MAX_STALLED_AUTO_SENDS,
+  MAX_TOTAL_AUTO_SENDS,
   summarizeInput,
+  type AutoSendGateOptions,
 } from "./autoSendGate";
 
 /** Feed a sequence of transcript sizes through the gate. */
-function run(counts: number[], maxStalled?: number) {
+function run(counts: number[], maxStalled?: number | AutoSendGateOptions) {
   let state = INITIAL_AUTO_SEND_STATE;
   return counts.map((count) => {
     const decision = autoSendGate(state, count, maxStalled);
@@ -81,7 +85,7 @@ describe("autoSendGate", () => {
     // gets its own full budget instead of being cut short by the first.
     const first = Array.from({ length: MAX_STALLED_AUTO_SENDS + 1 }, () => 10);
     const second = Array.from({ length: MAX_STALLED_AUTO_SENDS + 1 }, () => 20);
-    const decisions = run([...first, 20, ...second]);
+    const decisions = run([...first, 20, ...second], { maxTotalAutoSends: 50 });
     const [growth, ...burst] = decisions.slice(first.length);
     expect(growth.allow).toBe(true);
     expect(growth.state.stalled).toBe(0);
@@ -97,7 +101,11 @@ describe("autoSendGate", () => {
   });
 
   it("starts from the initial state without allowing anything twice for free", () => {
-    expect(INITIAL_AUTO_SEND_STATE).toEqual({ lastProgress: 0, stalled: 0 });
+    expect(INITIAL_AUTO_SEND_STATE).toEqual({
+      lastProgress: 0,
+      stalled: 0,
+      totalAutoSends: 0,
+    });
     // The very first assessment is progress from an empty transcript.
     expect(autoSendGate(INITIAL_AUTO_SEND_STATE, 1).allow).toBe(true);
   });
@@ -568,6 +576,104 @@ describe("autoSendGate tool repetition and failure breakers", () => {
 
     const progress = computeTranscriptProductiveProgress(messages);
     expect(progress).toBe(10);
+  });
+
+  it("stops a runaway loop when reaching MAX_TOTAL_AUTO_SENDS even if progress grows each cycle", () => {
+    let state = INITIAL_AUTO_SEND_STATE;
+    const decisions = [];
+    for (let i = 1; i <= MAX_TOTAL_AUTO_SENDS + 2; i++) {
+      const decision = autoSendGate(state, i * 10);
+      state = decision.state;
+      decisions.push(decision);
+    }
+    const allowed = decisions.filter((d) => d.allow);
+    expect(allowed).toHaveLength(MAX_TOTAL_AUTO_SENDS);
+    expect(decisions.at(-1)?.allow).toBe(false);
+    expect(decisions.at(-1)?.stoppedLoop).toBe(true);
+    expect(decisions.at(-1)?.reason).toContain("maximum limit of 10 automatic sends");
+  });
+});
+
+describe("isMutatingToolCall", () => {
+  it("treats file editing tools as mutating", () => {
+    expect(isMutatingToolCall("edit", { path: "a.ts" })).toBe(true);
+    expect(isMutatingToolCall("write_file", { path: "a.ts" })).toBe(true);
+    expect(isMutatingToolCall("multi_edit", { path: "a.ts" })).toBe(true);
+    expect(isMutatingToolCall("replace_file_content", { path: "a.ts" })).toBe(true);
+  });
+
+  it("treats read-only shell commands and probes as non-mutating", () => {
+    expect(isMutatingToolCall("bash_run", { command: "cat file.txt" })).toBe(false);
+    expect(isMutatingToolCall("bash_run", { command: "git status" })).toBe(false);
+    expect(isMutatingToolCall("bash_run", { command: "git diff HEAD~1" })).toBe(false);
+    expect(isMutatingToolCall("bash_run", { command: "npx tsc --noEmit" })).toBe(false);
+    expect(isMutatingToolCall("bash_run", { command: "node -e 'console.log(process.version)'" })).toBe(false);
+    expect(isMutatingToolCall("bash_run", { command: "Get-Content -Path file.txt" })).toBe(false);
+    expect(isMutatingToolCall("bash_run", { command: "ls -la" })).toBe(false);
+    expect(isMutatingToolCall("bash_run", { command: "grep -rn 'foo' src/" })).toBe(false);
+  });
+
+  it("treats mutating shell commands as mutating", () => {
+    expect(isMutatingToolCall("bash_run", { command: "pnpm install" })).toBe(true);
+    expect(isMutatingToolCall("bash_run", { command: "npm i -D vitest" })).toBe(true);
+    expect(isMutatingToolCall("bash_run", { command: "rm -rf dist/" })).toBe(true);
+    expect(isMutatingToolCall("bash_run", { command: "mkdir -p newdir" })).toBe(true);
+    expect(isMutatingToolCall("bash_run", { command: "touch newfile.ts" })).toBe(true);
+    expect(isMutatingToolCall("bash_run", { command: "git commit -m 'feat: update'" })).toBe(true);
+    expect(isMutatingToolCall("bash_run", { command: "git checkout -b feature" })).toBe(true);
+    expect(isMutatingToolCall("bash_run", { command: "echo 'line' > file.txt" })).toBe(true);
+    expect(isMutatingToolCall("bash_run", { command: "echo 'line' >> file.txt" })).toBe(true);
+    expect(isMutatingToolCall("bash_run", { command: "cargo build --release" })).toBe(true);
+  });
+
+  it("treats null device redirection as non-mutating", () => {
+    expect(isMutatingToolCall("bash_run", { command: "node -e 'console.log(1)' > /dev/null 2>&1" })).toBe(false);
+    expect(isMutatingToolCall("bash_run", { command: "git status > nul 2>&1" })).toBe(false);
+  });
+
+  it("prevents read-only bash probes from resetting tool repeat counters", () => {
+    const probeCall = {
+      toolName: "bash_run",
+      input: { command: "node -e 'console.log(1)'" },
+      output: { stdout: "1", exit_code: 0 },
+      isError: false,
+      hasResult: true,
+    };
+    const readFileCall = {
+      toolName: "read_file",
+      input: { path: "main.ts" },
+      output: { content: "code" },
+      isError: false,
+      hasResult: true,
+    };
+
+    // 3 identical reads separated by read-only bash probes must still trigger repeat breaker
+    const recentToolCalls = [
+      readFileCall,
+      probeCall,
+      readFileCall,
+      probeCall,
+      readFileCall,
+    ];
+
+    const decision = autoSendGate(INITIAL_AUTO_SEND_STATE, 50, {
+      recentToolCalls,
+    });
+
+    expect(decision.allow).toBe(false);
+    expect(decision.stoppedLoop).toBe(true);
+    expect(decision.reason).toContain("repeated 3 times");
+  });
+});
+
+describe("hasFileRedirection", () => {
+  it("detects output file redirection while ignoring null devices and stderr merges", () => {
+    expect(hasFileRedirection("echo hi > file.txt")).toBe(true);
+    expect(hasFileRedirection("echo hi >> file.txt")).toBe(true);
+    expect(hasFileRedirection("echo hi > /dev/null")).toBe(false);
+    expect(hasFileRedirection("echo hi > nul")).toBe(false);
+    expect(hasFileRedirection("node -e '...' 2>&1")).toBe(false);
+    expect(hasFileRedirection("node -e '...' > /dev/null 2>&1")).toBe(false);
   });
 });
 

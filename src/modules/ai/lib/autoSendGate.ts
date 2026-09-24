@@ -27,6 +27,9 @@ export const MAX_AUTO_SEND_TOOL_REPEATS = 3;
 /** Maximum consecutive tool execution errors allowed before stopping. */
 export const MAX_CONSECUTIVE_AUTO_SEND_ERRORS = 3;
 
+/** Maximum total automatic sends allowed in a single task turn before stopping. */
+export const MAX_TOTAL_AUTO_SENDS = 10;
+
 export type ExtractedToolCall = {
   toolName: string;
   input: unknown;
@@ -44,17 +47,21 @@ export type AutoSendGateState = {
   stalled: number;
   /** Fingerprint of the last repeating tool call if detected. */
   lastToolFingerprint?: string | null;
+  /** Total number of automatic sends allowed during this task turn. */
+  totalAutoSends?: number;
 };
 
 export const INITIAL_AUTO_SEND_STATE: AutoSendGateState = {
   lastProgress: 0,
   stalled: 0,
+  totalAutoSends: 0,
 };
 
 export type AutoSendGateOptions = {
   maxStalled?: number;
   maxToolRepeats?: number;
   maxConsecutiveErrors?: number;
+  maxTotalAutoSends?: number;
   recentToolCalls?: ExtractedToolCall[];
 };
 
@@ -123,12 +130,11 @@ export function summarizeInput(toolName: string, input: unknown): string {
   return toolName;
 }
 
-const MUTATING_TOOLS = new Set([
+export const ALWAYS_MUTATING_TOOLS = new Set([
   "edit",
   "write_file",
   "multi_edit",
   "replace_file_content",
-  "bash_run",
   "terminal_write",
   "git_commit",
   "git_push",
@@ -136,6 +142,41 @@ const MUTATING_TOOLS = new Set([
   "git_reset",
   "git_stash",
 ]);
+
+const SHELL_MUTATION_RE =
+  /\b(?:(?:pnpm|npm|yarn|bun)\s+(?:install|i|ci|add|remove|uninstall|update|upgrade|prune|rebuild|dedupe|link|unlink)\b|pnpm\s*$|yarn\s*$|pip3?\s+install\b|uv\s+(?:sync|add|remove|pip\s+install)\b|poetry\s+(?:install|add|remove|update)\b|cargo\s+(?:add|install|remove|build)\b|go\s+build\b|make\b|cmake\b|rm|del|erase|rmdir|mkdir|md|touch|cp|copy|mv|move|rename|ren|truncate|Set-Content|Add-Content|New-Item|Remove-Item|Copy-Item|Move-Item|Rename-Item|Clear-Content|git\s+(?:commit|push|revert|reset|stash|merge|rebase|checkout|switch|clean|cherry-pick|pull)\b|sed\s+-i\b|Out-File|tee\b)/i;
+
+/** Redirection to a file: > or >> not targeting null/nul devices */
+export function hasFileRedirection(cmd: string): boolean {
+  const sanitized = cmd
+    .replace(/>\s*(?:\/dev\/null|nul)\b/gi, "")
+    .replace(/2>&1/g, "")
+    .replace(/2>\s*(?:\/dev\/null|nul)\b/gi, "");
+  return />|>>/.test(sanitized);
+}
+
+/**
+ * Determine whether a tool call mutates workspace files or environment state.
+ * Read-only inspections (cat, grep, git status/diff, tsc, node -e reads) return false.
+ */
+export function isMutatingToolCall(toolName: string, input: unknown): boolean {
+  if (ALWAYS_MUTATING_TOOLS.has(toolName)) return true;
+  if (toolName === "bash_run" || toolName === "bash_background") {
+    let cmd = "";
+    if (typeof input === "string") {
+      cmd = input;
+    } else if (input && typeof input === "object") {
+      const o = input as Record<string, unknown>;
+      if (typeof o.command === "string") {
+        cmd = o.command;
+      }
+    }
+    if (!cmd.trim()) return false;
+    if (hasFileRedirection(cmd)) return true;
+    return SHELL_MUTATION_RE.test(cmd);
+  }
+  return false;
+}
 
 /**
  * Extract recent tool calls from the transcript, focusing on the current task turn
@@ -313,7 +354,7 @@ export function computeTranscriptProductiveProgress(
           continue;
         }
 
-        const isMutating = MUTATING_TOOLS.has(toolName);
+        const isMutating = isMutatingToolCall(toolName, input);
         if (isMutating) {
           seenReadFingerprints.clear();
           progress += 10;
@@ -350,7 +391,25 @@ export function autoSendGate(
   const maxRepeats = options.maxToolRepeats ?? MAX_AUTO_SEND_TOOL_REPEATS;
   const maxConsecutiveErrors =
     options.maxConsecutiveErrors ?? MAX_CONSECUTIVE_AUTO_SEND_ERRORS;
+  const maxTotalAutoSends =
+    options.maxTotalAutoSends ?? MAX_TOTAL_AUTO_SENDS;
   const recentToolCalls = options.recentToolCalls ?? [];
+  const currentTotal = previous.totalAutoSends ?? 0;
+
+  // Guard 0: Maximum total automatic sends per task turn
+  if (currentTotal >= maxTotalAutoSends) {
+    return {
+      allow: false,
+      state: {
+        lastProgress: previous.lastProgress,
+        stalled: previous.stalled,
+        totalAutoSends: currentTotal,
+        lastToolFingerprint: previous.lastToolFingerprint,
+      },
+      stoppedLoop: true,
+      reason: `task reached the maximum limit of ${maxTotalAutoSends} automatic sends. Press Continue to go on.`,
+    };
+  }
 
   // Guard 1: Tool repetition and repeated error loop detection
   if (recentToolCalls.length >= 2) {
@@ -363,17 +422,18 @@ export function autoSendGate(
         count: number;
         errorCount: number;
         toolName: string;
+        input: unknown;
         inputDesc: string;
       }
     >();
 
     for (const call of window) {
-      const isMutating = MUTATING_TOOLS.has(call.toolName);
+      const isMutating = isMutatingToolCall(call.toolName, call.input);
       if (isMutating && !call.isError) {
         // A successful mutation occurred: prior read tool repeat counts reset
         // because the workspace state changed and re-reading is productive.
         for (const entry of counts.values()) {
-          if (!MUTATING_TOOLS.has(entry.toolName)) {
+          if (!isMutatingToolCall(entry.toolName, entry.input)) {
             entry.count = 0;
           }
         }
@@ -384,6 +444,7 @@ export function autoSendGate(
         count: 0,
         errorCount: 0,
         toolName: call.toolName,
+        input: call.input,
         inputDesc: summarizeInput(call.toolName, call.input),
       };
       cur.count += 1;
@@ -401,6 +462,7 @@ export function autoSendGate(
           state: {
             lastProgress: previous.lastProgress,
             stalled: previous.stalled + 1,
+            totalAutoSends: currentTotal,
             lastToolFingerprint: info.toolName,
           },
           stoppedLoop: true,
@@ -415,6 +477,7 @@ export function autoSendGate(
           state: {
             lastProgress: previous.lastProgress,
             stalled: previous.stalled + 1,
+            totalAutoSends: currentTotal,
             lastToolFingerprint: info.toolName,
           },
           stoppedLoop: true,
@@ -438,6 +501,7 @@ export function autoSendGate(
         state: {
           lastProgress: previous.lastProgress,
           stalled: previous.stalled + 1,
+          totalAutoSends: currentTotal,
         },
         stoppedLoop: true,
         reason: `${trailingErrors} consecutive tool calls failed without making progress`,
@@ -449,7 +513,11 @@ export function autoSendGate(
   if (progress > previous.lastProgress) {
     return {
       allow: true,
-      state: { lastProgress: progress, stalled: 0 },
+      state: {
+        lastProgress: progress,
+        stalled: 0,
+        totalAutoSends: currentTotal + 1,
+      },
       stoppedLoop: false,
     };
   }
@@ -458,7 +526,11 @@ export function autoSendGate(
   if (stalled > maxStalled) {
     return {
       allow: false,
-      state: { lastProgress: previous.lastProgress, stalled },
+      state: {
+        lastProgress: previous.lastProgress,
+        stalled,
+        totalAutoSends: currentTotal,
+      },
       stoppedLoop: true,
       reason: `run made no progress after ${stalled} automatic sends`,
     };
@@ -466,7 +538,11 @@ export function autoSendGate(
 
   return {
     allow: true,
-    state: { lastProgress: previous.lastProgress, stalled },
+    state: {
+      lastProgress: previous.lastProgress,
+      stalled,
+      totalAutoSends: currentTotal + 1,
+    },
     stoppedLoop: false,
   };
 }
