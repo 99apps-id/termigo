@@ -671,18 +671,74 @@ See [`docs/`](docs/) for the MCP, skills, agents, and architecture guides.
 
 ## Architecture
 
-```text
-Termigo
-|-- Desktop application        Rust + Tauri 2 + React 19 + TypeScript
-|   |-- src-tauri/             PTY, shell, git, agents, workspace, control
-|   `-- src/                   React UI (terminal, editor, AI, git, explorer)
-`-- termigo CLI                Go
-    `-- cli/                   agent, mcp, skill, config, doctor, init
+Two processes. The webview renders and thinks, Rust touches the machine, and
+the only path between them is `invoke()` over a command list that CI validates.
+
+```mermaid
+graph TD
+  classDef ui fill:#e8f0fe,stroke:#3b6fd4,color:#1a2b4a
+  classDef ipc fill:#fff4e0,stroke:#d98b00,color:#5a3a00
+  classDef rs fill:#e6f4ea,stroke:#2f855a,color:#1c3d28
+  classDef os fill:#fce8e8,stroke:#b32d2d,color:#5a1414
+
+  subgraph FE["src/ - React 19 + TypeScript webview"]
+    UI["terminal - xterm panes, renderer pool, splits"]
+    ED["editor - CodeMirror 6, diffs, LSP client"]
+    SCM["explorer, preview, markdown, source control"]
+    RMT["ssh tabs and SFTP browser"]
+    AI["ai - agent loop, tools, subagents, sessions"]
+  end
+
+  IPC{{"IPC boundary - invoke plus streaming Channels, allowlisted in src-tauri/src/lib.rs"}}
+
+  subgraph BE["src-tauri/ - Rust backend"]
+    PTY["pty - portable-pty, ConPTY, OSC 7 and 133 shell integration"]
+    FSG["fs, git, shell, history"]
+    NET["net, browser, sql"]
+    REM["ssh, lsp, workspace"]
+    SEC["secrets, backup"]
+    EXT["mcp, extensions, agent, control"]
+  end
+
+  subgraph OS["The machine"]
+    SH[("shells and PTYs, local or WSL")]
+    FS[("filesystem, git repositories, OS keychain")]
+    API[("provider APIs and local LLMs")]
+    SRV[("remote hosts over SSH")]
+  end
+
+  GO["Go CLI in cli/ - doctor, init, agent run, skill, mcp, config"]
+
+  UI & ED & SCM & RMT & AI --> IPC
+  IPC --> PTY & FSG & NET & REM & SEC & EXT
+  PTY --> SH
+  FSG --> FS
+  NET --> API
+  REM --> SRV
+  GO -->|"control_respond"| EXT
+
+  class UI,ED,SCM,RMT,AI ui
+  class IPC ipc
+  class PTY,FSG,NET,REM,SEC,EXT rs
+  class SH,FS,API,SRV os
 ```
 
-A Tauri 2 app: a React 19 webview talks to a Rust backend via `invoke()` and
-streaming `Channel`s. The Go CLI is the automation layer: anything useful
-headlessly lives in `cli/internal/` first.
+Three things hold that boundary in place rather than a convention:
+
+- `scripts/check-invoke-commands.mjs` fails the build if any `invoke("cmd")` in
+  `src/` has no matching entry in the `generate_handler!` list. An unregistered
+  command does not exist, and a typo in one surfaces at check time instead of at
+  runtime.
+- `src/modules/ai/lib/security.ts` keeps its deny-list of secret paths on both
+  reads and writes, and `src-tauri/src/modules/shell/mod.rs` runs shell commands
+  through an allowlist plus a risk check before anything reaches a shell.
+- Capability permissions in `src-tauri/capabilities/default.json` cover the
+  window, so plugin APIs still need an explicit grant even when a command is
+  registered. Custom commands do not each need an entry there.
+
+The Go CLI is the automation layer: anything useful headlessly lives in
+`cli/internal/` first. The full command catalog, grouped by module, is in
+[docs/architecture/two-process-model.md](docs/architecture/two-process-model.md).
 
 ## Privacy and safety
 
