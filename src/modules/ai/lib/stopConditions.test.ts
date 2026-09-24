@@ -1,14 +1,15 @@
 import type { ToolSet } from "ai";
-import { stepCountIs } from "ai";
 import { describe, expect, it } from "vitest";
 import {
   type CircuitBreakerState,
   evaluateCircuitBreaker,
   isErrorResult,
+  isStepCount,
   noErrorProgress,
   noIdleReadLoop,
   noProgressStop,
   noToolRepetition,
+  stepCountIs,
   synthesisStepOutcome,
   synthesisStopDecision,
 } from "./agent";
@@ -635,12 +636,15 @@ describe("a prose-free run of successful, varied tools is not a loop", () => {
   });
 
   it("does not stop before the step budget", () => {
+    expect(isStepCount(25)(variedWork())).toBe(false);
     expect(stepCountIs(25)(variedWork())).toBe(false);
   });
 
   it("stops only at the step budget, well past the recorded runs", () => {
     // The recorded runs died at 6 and 8 steps. The cap is what should end a
     // long run, and it must not be reached at 8.
+    expect(isStepCount(8)(variedWork())).toBe(true);
+    expect(isStepCount(12)(variedWork())).toBe(false);
     expect(stepCountIs(8)(variedWork())).toBe(true);
     expect(stepCountIs(12)(variedWork())).toBe(false);
   });

@@ -1,9 +1,10 @@
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { info as logInfo } from "@tauri-apps/plugin-log";
-import { generateText, stepCountIs } from "ai";
+import { generateText } from "ai";
 import { subagentModelExceedsBudget } from "../config";
 import {
   buildConfiguredLanguageModel,
+  isStepCount,
   noErrorProgress,
   noProgressStop,
   noToolRepetition,
@@ -302,7 +303,7 @@ export async function runSubagent({
       // call or stalls without progress burns all twelve steps doing nothing.
       // The same guards the main run uses close that loop here too.
       stopWhen: [
-        stepCountIs(spec.maxSteps),
+        isStepCount(spec.maxSteps),
         noToolRepetition(3),
         noProgressStop(2),
         noErrorProgress(3),

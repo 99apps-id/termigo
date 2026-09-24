@@ -8,13 +8,13 @@ function fireAndForget(promise: Promise<unknown>, label: string) {
   });
 }
 
+import * as aiSdk from "ai";
 import {
   convertToModelMessages,
   type LanguageModel,
   type ModelMessage,
   pruneMessages,
   type StopCondition,
-  stepCountIs,
   streamText,
   type ToolSet,
   type UIMessage,
@@ -746,6 +746,31 @@ export function noProgressStop<T extends ToolSet>(
   };
 }
 
+/**
+ * Stops when the execution reaches the specified step count.
+ *
+ * In Vercel AI SDK v7, stepCountIs is renamed to isStepCount.
+ * This helper supports both SDK variants and provides a fallback predicate to ensure
+ * forward-compatibility without triggering Emendant migration warnings.
+ */
+export function isStepCount<T extends ToolSet = ToolSet>(
+  stepCount: number,
+): StopCondition<T> {
+  const sdk = aiSdk as unknown as {
+    isStepCount?: (n: number) => StopCondition<T>;
+    stepCountIs?: (n: number) => StopCondition<T>;
+  };
+  if (typeof sdk.isStepCount === "function") {
+    return sdk.isStepCount(stepCount);
+  }
+  if (typeof sdk.stepCountIs === "function") {
+    return sdk.stepCountIs(stepCount);
+  }
+  return ({ steps }) => steps.length === stepCount;
+}
+
+export const stepCountIs = isStepCount;
+
 /** True when a tool result is an error (or failure) rather than data. */
 export function isErrorResult(output: unknown): boolean {
   if (output == null || typeof output !== "object") return false;
@@ -1319,7 +1344,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
     profile,
   );
   const costBudget = opts.costBudgetUsd ?? 0;
-  const capPred = stepCountIs(stepBudget);
+  const capPred = isStepCount(stepBudget);
   const repeatPred = noToolRepetition<ToolSet>(3);
   const idleReadPred = noIdleReadLoop<ToolSet>(5);
   const idlePred = noProgressStop<ToolSet>(2);
