@@ -599,7 +599,13 @@ const PREFS_CHANGED_EVENT = "termigo://prefs-changed";
 async function writePref<T>(key: string, value: T): Promise<void> {
   await store.set(key, value);
   await store.save();
-  await emit(PREFS_CHANGED_EVENT, { key, value });
+  if (typeof window !== "undefined") {
+    try {
+      await emit(PREFS_CHANGED_EVENT, { key, value });
+    } catch {
+      // Event emission is best-effort when IPC is detached
+    }
+  }
 }
 
 /** Marker fields on a settings backup file so an import can reject a file that

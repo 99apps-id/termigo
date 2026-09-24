@@ -437,9 +437,41 @@ export const useChatStore = create<StoreState>((set, get) => ({
   approvalResponder: null,
   setApprovalResponder: (fn) => set({ approvalResponder: fn }),
   respondToApproval: (approvalId, approved) => {
-    const sessionId = get().activeSessionId;
+    let sessionId = get().activeSessionId;
+    if (!sessionId) {
+      for (const [id, c] of chats.entries()) {
+        for (const m of c.messages) {
+          if (m.role !== "assistant") continue;
+          for (const p of m.parts ?? []) {
+            const part = p as {
+              state?: string;
+              approval?: { id?: string };
+              approvalId?: string;
+              id?: string;
+            };
+            if (part.state === "approval-requested") {
+              const partId = part.approval?.id || part.approvalId || part.id;
+              if (partId === approvalId) {
+                sessionId = id;
+                break;
+              }
+            }
+          }
+          if (sessionId) break;
+        }
+        if (sessionId) break;
+      }
+    }
     if (sessionId) {
       notifyApprovalResponded(sessionId, approvalId, approved);
+    }
+    const currentMeta = get().agentMeta;
+    if (currentMeta?.pendingApprovals?.some((p) => p.id === approvalId)) {
+      get().patchAgentMeta({
+        pendingApprovals: currentMeta.pendingApprovals.filter(
+          (p) => p.id !== approvalId,
+        ),
+      });
     }
     const fn = get().approvalResponder;
     if (fn) {

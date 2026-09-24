@@ -12,6 +12,11 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn().mockResolvedValue(null),
 }));
 
+vi.mock("@tauri-apps/api/event", () => ({
+  emit: vi.fn().mockResolvedValue(undefined),
+  listen: vi.fn().mockResolvedValue(() => {}),
+}));
+
 vi.mock("@tauri-apps/plugin-store", () => ({
   LazyStore: class {
     async get() {
@@ -457,15 +462,20 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
 
   function captureAnswerCallbacks() {
     const texts: Array<string | null> = [];
+    const calls: Array<{ url: string; body?: any }> = [];
     const origFetch = globalThis.fetch;
     globalThis.fetch = vi.fn(async (url, init) => {
-      if (String(url).includes("answerCallbackQuery") && init?.body) {
+      let body: any = null;
+      if (init?.body) {
         try {
-          const body = JSON.parse(String(init.body));
-          if (typeof body.callback_query_id === "string") {
-            texts.push(body.text ?? null);
-          }
+          body = JSON.parse(String(init.body));
         } catch {}
+      }
+      calls.push({ url: String(url), body });
+      if (String(url).includes("answerCallbackQuery") && body) {
+        if (typeof body.callback_query_id === "string") {
+          texts.push(body.text ?? null);
+        }
       }
       return {
         ok: true,
@@ -475,6 +485,7 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
     });
     return {
       texts,
+      calls,
       restore: () => {
         globalThis.fetch = origFetch;
       },
@@ -543,7 +554,7 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
       }
     });
 
-    it("rejects an aq: approval callback for a missing or expired id", async () => {
+    it("rejects an aq: approval callback for a missing or expired id and clears keyboard", async () => {
       const cap = captureAnswerCallbacks();
       const controller = new AbortController();
       try {
@@ -557,8 +568,123 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
           controller.signal,
         );
         expect(cap.texts).toContain("Already answered or expired.");
+        // Must edit keyboard to empty so the card does not hang in chat
+        const editCall = cap.calls.find(
+          (c) =>
+            c.url.includes("editMessageText") &&
+            c.body?.message_id === 8 &&
+            typeof c.body?.text === "string" &&
+            c.body?.text.includes("expired or already answered"),
+        );
+        expect(editCall).toBeDefined();
+        expect(editCall?.body?.reply_markup?.inline_keyboard).toEqual([]);
       } finally {
         cap.restore();
+      }
+    });
+
+    it("resolves useApprovalQueue from an ap: callback (cross-queue routing)", async () => {
+      const aq = await import("../ai/store/approvalQueueStore");
+      let settledDecision: string | null = null;
+      // Start a request in approvalQueueStore
+      const reqPromise = aq.useApprovalQueue.getState().request({
+        toolName: "run_command",
+        summary: "git status",
+        requester: "workflow",
+      }).then((d) => {
+        settledDecision = d;
+      });
+
+      const pending = aq.useApprovalQueue.getState().pending[0];
+      expect(pending).toBeDefined();
+
+      const cap = captureAnswerCallbacks();
+      try {
+        await _testOnly.handleCallback(
+          {
+            id: "cb-cross-ap",
+            from: { id: 222 },
+            message: { chat: { id: 111 }, message_id: 12 },
+            data: `ap:approve:${pending.id}`,
+          },
+          new AbortController().signal,
+        );
+        await reqPromise;
+        expect(settledDecision).toBe("approve");
+        expect(cap.texts).toContain("Approved.");
+      } finally {
+        cap.restore();
+        aq.useApprovalQueue.setState({ pending: [] });
+      }
+    });
+
+    it("resolves chatStore from an aq: callback (cross-queue routing)", async () => {
+      const state = await import("../ai/store/chatStore");
+      const spy = vi
+        .spyOn(state.useChatStore.getState(), "respondToApproval")
+        .mockImplementation(() => {});
+      state.useChatStore.getState().patchAgentMeta({
+        pendingApprovals: [
+          {
+            id: "sdk-tool-1",
+            toolName: "write_file",
+            summary: "write test.txt",
+          },
+        ],
+      });
+      const cap = captureAnswerCallbacks();
+      try {
+        await _testOnly.handleCallback(
+          {
+            id: "cb-cross-aq",
+            from: { id: 222 },
+            message: { chat: { id: 111 }, message_id: 14 },
+            data: "aq:approve:sdk-tool-1",
+          },
+          new AbortController().signal,
+        );
+        expect(spy).toHaveBeenCalledWith("sdk-tool-1", true);
+        expect(cap.texts).toContain("Approved.");
+      } finally {
+        spy.mockRestore();
+        state.useChatStore.getState().patchAgentMeta({ pendingApprovals: [] });
+        cap.restore();
+      }
+    });
+
+    it("records always-allowed preference and unblocks both queues on always callback", async () => {
+      const aq = await import("../ai/store/approvalQueueStore");
+      const prefs = await import("../settings/preferences");
+      aq.useApprovalQueue.setState({
+        pending: [
+          {
+            id: "q-always-test",
+            toolName: "shell_exec",
+            summary: "ls -la",
+            requestedAt: Date.now(),
+          },
+        ],
+      });
+      const cap = captureAnswerCallbacks();
+      try {
+        await _testOnly.handleCallback(
+          {
+            id: "cb-always",
+            from: { id: 222 },
+            message: { chat: { id: 111 }, message_id: 15 },
+            data: "aq:always:q-always-test",
+          },
+          new AbortController().signal,
+        );
+        expect(cap.texts).toContain("Always allowed.");
+        expect(aq.isSessionAllowed("shell_exec")).toBe(true);
+        expect(
+          prefs.usePreferencesStore.getState().agentAlwaysAllowedTools,
+        ).toContain("shell_exec");
+      } finally {
+        cap.restore();
+        aq.useApprovalQueue.setState({ pending: [] });
+        aq.clearSessionAllowed();
       }
     });
 

@@ -417,7 +417,7 @@ export async function handleCallback(
     return;
   }
 
-  if (data.startsWith("ap:")) {
+  if (data.startsWith("ap:") || data.startsWith("aq:")) {
     const [, action, ...rest] = data.split(":");
     // Rejoin so an approval id containing a colon is not silently truncated
     // (which reported "Approved." while answering nothing).
@@ -426,94 +426,111 @@ export async function handleCallback(
       action === "approve" || action === "session" || action === "always";
     const state = await import("../ai/store/chatStore");
     const aqStore = await import("../ai/store/approvalQueueStore");
-    // Answer only a live approval. A replayed or already-settled callback
-    // must say so instead of reporting "Approved." for an id the run has
-    // moved past (and deleting its message).
-    //
-    // Some live approvals live only in message parts as `approval-requested`
-    // and are not yet reflected in `agentMeta.pendingApprovals`, so fall back
-    // to scanning chat messages before declaring the approval gone.
-    let pending = state.useChatStore
+    const { sentApprovalIds } = await import("./telegramProgress");
+    sentApprovalIds.delete(id);
+
+    // Answer only a live approval. Check both queues and all active sessions
+    // before concluding the approval is gone.
+    let pending:
+      | {
+          id: string;
+          toolName: string;
+          summary?: string;
+          source?: "sdk" | "queue";
+        }
+      | undefined = aqStore.useApprovalQueue
       .getState()
-      .agentMeta.pendingApprovals?.find((p) => p.id === id);
+      .pending.find((p) => p.id === id);
+
     if (!pending) {
-      const sessionId = state.useChatStore.getState().activeSessionId;
-      if (sessionId) {
-        const found = getPendingApprovals(sessionId, state.useChatStore, aqStore);
+      pending = state.useChatStore
+        .getState()
+        .agentMeta.pendingApprovals?.find((p) => p.id === id);
+    }
+
+    const sessionId = state.useChatStore.getState().activeSessionId ?? "";
+    if (!pending && sessionId) {
+      const found = getPendingApprovals(sessionId, state.useChatStore, aqStore);
+      pending = found.find((p) => p.id === id);
+    }
+
+    if (!pending && state.chats) {
+      for (const [sessId] of state.chats.entries()) {
+        if (sessId === sessionId) continue;
+        const found = getPendingApprovals(sessId, state.useChatStore, aqStore);
         pending = found.find((p) => p.id === id);
+        if (pending) break;
       }
     }
+
     if (!pending) {
       await answerCallback(cb.id, "Already answered or expired.", signal);
+      await editKeyboard(
+        chatId,
+        messageId,
+        "Approval request expired or already answered.",
+        [],
+        signal,
+      ).catch(() => {});
+      await deleteTelegramMessage(chatId, messageId, signal).catch(() => {});
       return;
     }
-    state.useChatStore.getState().respondToApproval(id, approved);
-    if (action === "session" || action === "always") {
-      const aqStore = await import("../ai/store/approvalQueueStore");
-      const tool = pending.toolName;
-      if (tool) {
-        if (action === "session") {
-          aqStore.rememberSessionAllowed(tool);
-        } else {
-          aqStore.rememberSessionAllowed(tool);
-          const settingsStore = await import("../settings/store");
-          const prefs = await import("../settings/preferences");
-          const list =
-            prefs.usePreferencesStore.getState().agentAlwaysAllowedTools;
-          if (!list.includes(tool)) {
-            settingsStore.setAgentAlwaysAllowedTools([...list, tool]);
-          }
+
+    const tool = pending.toolName;
+    if (tool && (action === "session" || action === "always")) {
+      aqStore.rememberSessionAllowed(tool);
+      if (action === "always") {
+        const settingsStore = await import("../settings/store");
+        const prefs = await import("../settings/preferences");
+        const list =
+          prefs.usePreferencesStore.getState().agentAlwaysAllowedTools;
+        if (!list.includes(tool)) {
+          const updated = [...list, tool];
+          prefs.usePreferencesStore.setState({
+            agentAlwaysAllowedTools: updated,
+          });
+          await settingsStore
+            .setAgentAlwaysAllowedTools(updated)
+            .catch(() => {});
         }
       }
     }
-    await answerCallback(
-      cb.id,
-      approved
-        ? action === "session"
-          ? "Allowed for this session."
-          : action === "always"
-            ? "Always allowed."
-            : "Approved."
-        : "Denied.",
-      signal,
-    );
-    await deleteTelegramMessage(chatId, messageId, signal);
-    if (approved) {
-      await sendTyping(chatId, signal).catch(() => {});
-    }
-    return;
-  }
 
-  if (data.startsWith("aq:")) {
-    const [, action, ...rest] = data.split(":");
-    const id = rest.join(":");
-    const aq = await import("../ai/store/approvalQueueStore");
-    // Same liveness gate as `ap:` above: never answer a settled id.
-    if (!aq.useApprovalQueue.getState().pending.some((p) => p.id === id)) {
-      await answerCallback(cb.id, "Already answered or expired.", signal);
-      return;
-    }
-    const approved =
-      action === "approve" || action === "session" || action === "always";
-    if (action === "session") {
-      aq.useApprovalQueue.getState().respondWith([id], "allow-session");
-    } else if (action === "always") {
-      aq.useApprovalQueue.getState().respondWith([id], "allow-always");
-    } else {
-      aq.useApprovalQueue.getState().respond([id], approved);
-    }
-    await answerCallback(
-      cb.id,
+    // Resolve both stores so that whichever queue holds the waiting promise
+    // is unblocked immediately and agent execution resumes without hanging.
+    const decision: import("../ai/store/approvalQueueStore").ApprovalDecision =
+      action === "session"
+        ? "allow-session"
+        : action === "always"
+          ? "allow-always"
+          : approved
+            ? "approve"
+            : "deny";
+    aqStore.useApprovalQueue.getState().respondWith([id], decision);
+    state.useChatStore.getState().respondToApproval(id, approved);
+
+    const toast =
       action === "session"
         ? "Allowed for this session."
         : action === "always"
           ? "Always allowed."
           : approved
             ? "Approved."
-            : "Denied.",
+            : "Denied.";
+    await answerCallback(cb.id, toast, signal);
+
+    // Edit out buttons immediately so the interactive card never hangs,
+    // then attempt to delete the message.
+    const suffix = tool ? ` (${tool})` : "";
+    await editKeyboard(
+      chatId,
+      messageId,
+      `${toast}${suffix}`,
+      [],
       signal,
-    );
-    await deleteTelegramMessage(chatId, messageId, signal);
+    ).catch(() => {});
+    await deleteTelegramMessage(chatId, messageId, signal).catch(() => {});
+
     if (approved) {
       await sendTyping(chatId, signal).catch(() => {});
     }
@@ -555,6 +572,14 @@ export async function handleCallback(
       return;
     }
     await answerCallback(cb.id, "Question no longer pending.", signal);
+    await editKeyboard(
+      chatId,
+      messageId,
+      "Question no longer pending.",
+      [],
+      signal,
+    ).catch(() => {});
+    await deleteTelegramMessage(chatId, messageId, signal).catch(() => {});
     return;
   }
 
@@ -807,10 +832,18 @@ export async function handleUpdate(u: Update, signal: AbortSignal): Promise<void
       if (!isOwnerUser(msg.from)) return;
       const state = await import("../ai/store/chatStore");
       const aq = await import("../ai/store/approvalQueueStore");
-      const sessionId = state.useChatStore.getState().activeSessionId;
-      const pending = sessionId
-        ? getPendingApprovals(sessionId, state, aq.useApprovalQueue)
-        : [];
+      const sessionId = state.useChatStore.getState().activeSessionId ?? "";
+      let pending = getPendingApprovals(sessionId, state, aq.useApprovalQueue);
+      if (pending.length === 0 && state.chats) {
+        for (const [sessId] of state.chats.entries()) {
+          if (sessId === sessionId) continue;
+          const found = getPendingApprovals(sessId, state, aq.useApprovalQueue);
+          if (found.length > 0) {
+            pending = found;
+            break;
+          }
+        }
+      }
       let count = 0;
       for (const p of pending) {
         state.useChatStore.getState().respondToApproval(p.id, true);
@@ -831,10 +864,18 @@ export async function handleUpdate(u: Update, signal: AbortSignal): Promise<void
       if (!isOwnerUser(msg.from)) return;
       const state = await import("../ai/store/chatStore");
       const aq = await import("../ai/store/approvalQueueStore");
-      const sessionId = state.useChatStore.getState().activeSessionId;
-      const pending = sessionId
-        ? getPendingApprovals(sessionId, state, aq.useApprovalQueue)
-        : [];
+      const sessionId = state.useChatStore.getState().activeSessionId ?? "";
+      let pending = getPendingApprovals(sessionId, state, aq.useApprovalQueue);
+      if (pending.length === 0 && state.chats) {
+        for (const [sessId] of state.chats.entries()) {
+          if (sessId === sessionId) continue;
+          const found = getPendingApprovals(sessId, state, aq.useApprovalQueue);
+          if (found.length > 0) {
+            pending = found;
+            break;
+          }
+        }
+      }
       let count = 0;
       for (const p of pending) {
         state.useChatStore.getState().respondToApproval(p.id, false);

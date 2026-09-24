@@ -461,9 +461,11 @@ export async function runMirror(signal: AbortSignal): Promise<void> {
         if (getMirrorPauseCount() === 0) {
           const chatStatus = chat?.status ?? "";
           const aqStore = await import("../ai/store/approvalQueueStore");
-          const pending = sessionId
-            ? getPendingApprovals(sessionId, store, aqStore.useApprovalQueue)
-            : [];
+          const pending = getPendingApprovals(
+            sessionId ?? "",
+            store,
+            aqStore.useApprovalQueue,
+          );
 
           // Surface pending approvals as interactive cards in Telegram
           for (const p of pending) {
@@ -1202,9 +1204,11 @@ export async function startTelegramDispatch(
     }
 
     const aqStore = await import("../ai/store/approvalQueueStore");
-    const pendingApprovals = sessionId
-      ? getPendingApprovals(sessionId, store, aqStore.useApprovalQueue)
-      : [];
+    const pendingApprovals = getPendingApprovals(
+      sessionId ?? "",
+      store,
+      aqStore.useApprovalQueue,
+    );
     if (pendingApprovals.length > 0) {
       const lower = text.trim().toLowerCase();
       if (
