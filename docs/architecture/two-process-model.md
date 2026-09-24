@@ -122,7 +122,7 @@ A process host, not a protocol implementation: Rust owns Content-Length framing 
 - `lsp_spawn` - start a server against an authorized workspace root with an optional RSS cap, streaming over two `Channel`s, and return its session id
 - `lsp_resolve_root` - walk up from a path to the first project marker
 - `lsp_send` - write one already-framed message to a session
-- `lsp_destroy` - take a session out of the registry and terminate it
+- `lsp_kill` - take a session out of the registry and terminate it
 
 The spawn cwd goes through the same workspace authorization registry as every other process-spawning command, and WSL workspaces are rejected rather than silently run on the host. Root detection stops at `$HOME`, because a stray `package.json` in the home directory would otherwise let a server index the whole home tree. Servers die with their host: their own process group on Unix, a Job Object on Windows, and every session is killed on `RunEvent::Exit`.
 

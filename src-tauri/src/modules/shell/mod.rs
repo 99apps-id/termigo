@@ -48,7 +48,7 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
     "find", "ls", "Get-ChildItem", "dir", "stat", "file", "xxd", "hexdump", "od",
     "git", "npm", "pnpm", "yarn", "cargo", "go", "python", "python3",
     "node", "deno", "bun", "make", "just", "task", "cmake", "npx",
-    "echo", "printf", "test", "true", "false", "pwd", "cd",
+    "echo", "printf", "test", "true", "false", "pwd", "cd", "source",
     "which", "where", "type", "command", "hash",
     "diff", "cmp", "comm", "patch", "jq", "yq",
     "tar", "gzip", "gunzip", "zip", "unzip",
@@ -1292,9 +1292,13 @@ pub fn repl_list(state: tauri::State<ShellState>) -> Result<Vec<repl::ReplInfo>,
 /// failure "fixes" it by reinstalling the package. Prepending the project's
 /// bin dirs makes the local install the one that runs.
 fn node_bin_dirs(cwd: &str) -> Vec<std::path::PathBuf> {
+    let home = dirs::home_dir();
     let mut out = Vec::new();
     let mut dir = std::path::Path::new(cwd);
     loop {
+        if home.as_deref() == Some(dir) {
+            break;
+        }
         let bin = dir.join("node_modules").join(".bin");
         if bin.is_dir() {
             out.push(bin);
@@ -1593,6 +1597,8 @@ mod tests_sandbox {
             "mypy src",
             "golangci-lint run",
             "lint",
+            "source ~/.bashrc",
+            "source venv/bin/activate",
             "pnpm lint",
             "pnpm test",
             "./node_modules/.bin/vitest run",

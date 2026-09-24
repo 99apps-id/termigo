@@ -29,6 +29,22 @@ pub struct DirEntry {
     pub gitignored: bool,
 }
 
+#[inline]
+fn is_same_fs_path(a: &Path, b: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        let a_s = a.to_string_lossy().replace('\\', "/");
+        let b_s = b.to_string_lossy().replace('\\', "/");
+        let a_norm = a_s.strip_prefix("//?/").unwrap_or(&a_s);
+        let b_norm = b_s.strip_prefix("//?/").unwrap_or(&b_s);
+        a_norm.eq_ignore_ascii_case(b_norm)
+    }
+    #[cfg(not(windows))]
+    {
+        a == b
+    }
+}
+
 // Whether `dir` is inside a git repo. Walks up only; never descends into
 // siblings, so it does not touch protected macOS folders (Desktop, ...).
 fn in_git_repo(dir: &Path) -> bool {
@@ -43,21 +59,27 @@ fn in_git_repo(dir: &Path) -> bool {
     let mut cur = dir;
     loop {
         if let Some(home) = &home {
-            if cur == *home && dir != *home {
+            if is_same_fs_path(cur, home) && !is_same_fs_path(dir, home) {
                 return false;
             }
         }
-        // Ignore a `.git` marker at the filesystem root: it is not a project
-        // boundary (and can be a stray folder, e.g. C:\.git holding only info).
-        if cur.parent().is_none() {
+        // Ignore a `.git` marker at the filesystem root (e.g. C:\ or / or \\?\C:\)
+        let is_root = cur.parent().is_none()
+            || cur.components().all(|c| {
+                matches!(
+                    c,
+                    std::path::Component::Prefix(_) | std::path::Component::RootDir
+                )
+            });
+        if is_root {
             return false;
         }
         if cur.join(".git").exists() {
             return true;
         }
         match cur.parent() {
-            Some(p) => cur = p,
-            None => return false,
+            Some(p) if p != cur => cur = p,
+            _ => return false,
         }
     }
 }

@@ -8,7 +8,7 @@ Termigo loads `TERMIGO.md` from the workspace root as agent memory (like AGENTS.
 
 Bundle id `id.99apps.termigo`, package manager **pnpm**, platforms macOS / Linux / Windows.
 
-Checks: `pnpm lint`, `pnpm check-types`, `pnpm test`; and in `src-tauri/`, `cargo clippy --all-targets --locked -- -D warnings` and `cargo nextest run --locked` (fallback `cargo test --locked`).
+Checks: `pnpm lint`, `pnpm check-types`, `pnpm check:commands`, `pnpm test`; and in `src-tauri/`, `cargo clippy --all-targets --locked -- -D warnings` and `cargo nextest run --locked` (fallback `cargo test --locked`).
 
 ## Quality bar
 
@@ -28,7 +28,11 @@ Verify: `pnpm lint`/`check-types`/`test`; Rust `cargo clippy --all-targets --loc
 - **No em-dash** anywhere: code, comments, commits, docs.
 - **No emojis** anywhere.
 - **Imports**: always `@/...` on the frontend, never relative across modules.
-- **pnpm only**, never npm/npx/yarn. Modern pnpm uses junctions/symlinks on Windows; do not force `node-linker=hoisted`.
+- **Package manager & pnpm fallbacks**: pnpm is the canonical package manager (junctions/symlinks on Windows; do not force `node-linker=hoisted`). If an agent fails to install or run global `pnpm`, use these alternatives so tasks run without disruption:
+  1. `corepack pnpm <cmd>` (or `corepack enable && corepack pnpm <cmd>`), bundled with Node 22+.
+  2. `npx -y pnpm@latest <cmd>` or `npx pnpm <cmd>` to invoke pnpm on demand without global install.
+  3. Direct local tool execution from `node_modules/.bin/` (e.g. `vitest run`, `biome lint ./src`, `tsc --noEmit`), which is also prepended to the agent shell PATH automatically.
+  4. Script runner fallback: `npm run <script>` / `npm test` as a last resort to run verification scripts, but never commit a `package-lock.json` or mutate `pnpm-lock.yaml`.
 - **Branding**: `termigo.png` at repo root is master logo. After changing it run `node scripts/generate-logo.mjs` to regenerate `public/logo.png` and `src-tauri/icons`; never hand-edit those. Render `/logo.png` in UI, not a CSS lookalike.
 
 ## Architecture
@@ -63,7 +67,7 @@ Details in [module layout](docs/architecture/module-layout.md):
 - **tabs/** tab list and active id (source of truth). **spaces/** projects with own root, env, tabs. **workspace/** Local and WSL.
 - **header/**, **statusbar/**, **sidebar/**, **command-palette/**, **shortcuts/** app chrome and keymap registry. **theme/**, **settings/**, **updater/**.
 - **source-control/**, **git-history/** staging, commits, diffs, commit graph. **lsp/** opt-in language servers.
-- **ssh/** remote tabs, host-key TOFU, SFTP explorer. **extensions/** manifest + worker sandbox. **agents/** agent lifecycle. **ai/** agentic subsystem.
+- **ssh/** remote tabs, host-key TOFU, SFTP explorer. **extensions/** manifest + worker sandbox. **agents/** agent lifecycle. **ai/** agentic subsystem. **telegram/** companion bot (pairing, polling, remote approvals, commands).
 
 ### Go CLI (`cli/`)
 
@@ -81,6 +85,8 @@ The parts that are invariants rather than description:
 - **Tools & Repair** (`tools/tools.ts`, `lib/repairToolCall.ts`): inspection tools auto-execute; mutating tools require approval. `lib/security.ts` denies secret paths (`.env*`, `.ssh/`, credentials) on read and write, mirrored by `fs/security.rs` (parity pinned); `hooks.json` + `approvals.json` are agent-immutable. Windows system dirs are OPEN by operator decision; credential stores stay denied. Parameter aliases and near-miss tool names auto-repair.
 - **Shell sandbox allowlist** (`src-tauri/src/modules/shell/mod.rs`): bare program names must match `SANDBOX_ALLOWLIST` (includes `lint`, `biome`, `pnpm`, `vitest`); rooted and `node_modules`/.pnpm paths are allowed. Hard guards: approval flow, delete gate, secret write refusal, hijack-env-var refusal. `rm` is not allowlisted. Agent-shell PATH includes `node_modules/.bin`; package-manager mutations get a 300s floor. Details: [security model](docs/architecture/security-model.md).
 - **Approval resume - trailing message is load-bearing**: `streamText` finds approvals only in `messages.at(-1)`. Nothing may be appended after an answered approval.
+- **Chat UX & Timeline**: edit & resend previous turns (`messageEdit.ts`), turn checkpoints and timeline navigator (`turnCheckpoints.ts`, `ChatTimelineNavigator.tsx`), session fork from checkpoint (`forkSession`), auto-all tool approval toggle, inline ANSI output rendering (`AnsiOutput.tsx`), and stream stall recovery (`streamWatchdog.ts`).
+- **Telegram companion**: remote tool approvals, interactive commands, and Mermaid image previews (`src/modules/telegram/`).
 - **Memory path**: learned memory loads from `.termigo/memory.md` in the workspace root (project scope). A global fallback at `~/.termigo/memory.md` is also loaded when the project file is absent. Keys never persist to disk, settings, or `localStorage`; they live in the OS keychain via `secrets_*`.
 
 ### UI conventions

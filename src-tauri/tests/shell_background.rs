@@ -46,8 +46,13 @@ fn spawn_invalid_cwd_errors() {
 
 #[test]
 fn spawn_captures_stdout_and_exits_zero() {
+    let command = if cfg!(windows) {
+        "Write-Output hello"
+    } else {
+        "printf 'hello\\n'"
+    };
     let proc = background::spawn(
-        "printf 'hello\\n'".into(),
+        command.into(),
         None,
         WorkspaceEnv::Local,
         None,
@@ -58,6 +63,9 @@ fn spawn_captures_stdout_and_exits_zero() {
     wait_until(Duration::from_secs(5), || proc.read_logs(0).exited);
 
     let first = proc.read_logs(0);
+    #[cfg(windows)]
+    assert!(first.bytes == "hello\r\n" || first.bytes == "hello\n");
+    #[cfg(not(windows))]
     assert_eq!(first.bytes, "hello\n");
     assert!(first.exited);
     assert_eq!(first.exit_code, Some(0));
@@ -65,11 +73,13 @@ fn spawn_captures_stdout_and_exits_zero() {
 
 #[test]
 fn spawn_captures_nonzero_exit() {
+    let command = if cfg!(windows) {
+        "cmd /c exit 1"
+    } else {
+        "false"
+    };
     let proc = background::spawn(
-        // `false` is on the allowlist and exits 1. The old command here was
-        // `exit 42`, which is a shell builtin rather than a program and would be
-        // refused before it ran.
-        "false".into(),
+        command.into(),
         None,
         WorkspaceEnv::Local,
         None,
@@ -193,10 +203,13 @@ fn spawn_writes_full_log_file() {
     let registry = WorkspaceRegistry::default();
     let _ = registry.authorize(dir.path());
     let log_path = dir.path().join("scan.log").to_string_lossy().into_owned();
+    let command = if cfg!(windows) {
+        "Write-Output line1; Write-Output line2"
+    } else {
+        "printf 'line1\\nline2\\n'"
+    };
     let proc = background::spawn(
-        // One `printf` for both lines. A `;` chain is refused by the command
-        // guard, which this test predates.
-        "printf 'line1\\nline2\\n'".into(),
+        command.into(),
         None,
         WorkspaceEnv::Local,
         Some(log_path.clone()),
@@ -207,5 +220,8 @@ fn spawn_writes_full_log_file() {
     wait_until(Duration::from_secs(5), || proc.read_logs(0).exited);
 
     let written = std::fs::read(log_path).expect("log file exists");
+    #[cfg(windows)]
+    assert!(written == b"line1\r\nline2\r\n" || written == b"line1\nline2\n");
+    #[cfg(not(windows))]
     assert_eq!(written, b"line1\nline2\n");
 }

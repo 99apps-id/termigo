@@ -265,6 +265,9 @@ importers:
       '@biomejs/biome':
         specifier: ^2.5.7
         version: 2.5.7
+      '@biomejs/cli-win32-x64':
+        specifier: 2.5.7
+        version: 2.5.7
       '@rolldown/plugin-babel':
         specifier: ^0.2.3
         version: 0.2.3(@babel/core@7.29.7)(@babel/runtime@7.29.2)(rolldown@1.2.3)(vite@8.2.1(@types/node@25.9.3)(jiti@2.7.0)(yaml@2.9.0))
@@ -6469,8 +6472,7 @@ snapshots:
   '@biomejs/cli-win32-arm64@2.5.7':
     optional: true
 
-  '@biomejs/cli-win32-x64@2.5.7':
-    optional: true
+  '@biomejs/cli-win32-x64@2.5.7': {}
 
   '@braintree/sanitize-url@7.1.2': {}
 
