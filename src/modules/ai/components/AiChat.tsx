@@ -141,6 +141,8 @@ export function AiChatView({
   const patchAgentMeta = useChatStore((s) => s.patchAgentMeta);
   const stoppedByUser = useChatStore((s) => s.agentMeta.stoppedByUser);
   const showReasoning = usePreferencesStore((s) => s.showReasoning);
+  const agentMetaError = useChatStore((s) => s.agentMeta.error);
+  const activeErrorMessage = error?.message ?? agentMetaError;
   // Offer to resume after a stop as well as after the step cap. A stop used to
   // be a dead end: the only way on was to retype the request.
   // "steered" is not a dead end to offer Continue for: the run yielded to a
@@ -251,11 +253,11 @@ export function AiChatView({
             }}
           />
         )}
-        {error && (
+        {activeErrorMessage && (
           <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
             <div className="font-medium">Request failed.</div>
             <div className="mt-0.5 leading-relaxed opacity-90">
-              {humanizeModelError(error.message)}
+              {error ? humanizeModelError(error.message) : activeErrorMessage}
             </div>
             <div className="mt-1.5 flex flex-wrap items-center gap-3">
               {/* Retry re-runs the turn. After a context overflow the model's
@@ -265,7 +267,7 @@ export function AiChatView({
                 type="button"
                 onClick={() => {
                   clearError();
-                  patchAgentMeta({ stopReason: null, stoppedByUser: false });
+                  patchAgentMeta({ error: null, stopReason: null, stoppedByUser: false });
                   void resumeRun();
                 }}
                 className="rounded bg-destructive/20 px-2 py-0.5 font-medium hover:bg-destructive/30"
@@ -276,11 +278,12 @@ export function AiChatView({
                   history, so "Try again" can never clear it. The one action
                   that does is a fresh chat (empty history) - offer it only
                   for that error class, where retry is provably futile. */}
-              {isContentFilterError(error.message) ? (
+              {error && isContentFilterError(error.message) ? (
                 <button
                   type="button"
                   onClick={() => {
                     clearError();
+                    patchAgentMeta({ error: null });
                     useChatStore.getState().newSession();
                   }}
                   className="rounded bg-destructive/20 px-2 py-0.5 font-medium hover:bg-destructive/30"
@@ -293,7 +296,10 @@ export function AiChatView({
               <RollbackSuggestion />
               <button
                 type="button"
-                onClick={clearError}
+                onClick={() => {
+                  clearError();
+                  patchAgentMeta({ error: null });
+                }}
                 className="underline opacity-80 hover:opacity-100"
               >
                 Dismiss

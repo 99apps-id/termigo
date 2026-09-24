@@ -13,7 +13,7 @@ import {
   providerNeedsKey,
   stepBudgetForRound,
 } from "../config";
-import { buildLanguageModel } from "../lib/agent";
+import { buildLanguageModel, type AgentStopReason } from "../lib/agent";
 import { splitForEdit } from "../lib/messageEdit";
 import { native } from "../lib/native";
 import { sanitizeUiMessages } from "../lib/sanitizeMessages";
@@ -695,10 +695,16 @@ function makeChat(sessionId: string): Chat<UIMessage> {
           decision.reason ??
           `it kept re-sending the same request without making progress (after ${decision.state.stalled} unproductive resumes)`;
         logWarn(`[ai] stopped an automatic resume loop: ${loopExplanation}`);
+        const stopReason: AgentStopReason =
+          decision.reason?.includes("repeated")
+            ? "tool-repetition"
+            : decision.reason?.includes("failed")
+              ? "tool-error"
+              : "tool-only-loop";
         useChatStore.getState().patchAgentMeta({
           status: "idle",
-          error: `Termigo stopped the run: ${loopExplanation}. Send a message to continue.`,
-          stopReason: null,
+          error: `Termigo stopped the run: ${loopExplanation}. Click Continue or send a message to proceed.`,
+          stopReason,
           stoppedByUser: false,
         });
         useChatStore.getState().syncRunMeta();
