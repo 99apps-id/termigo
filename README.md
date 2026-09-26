@@ -237,9 +237,9 @@ automation: agent runs, MCP, skills, and project scaffolding.
   string-to-array on `replace_in_files`) and equivalent tool names (`view_file` -> `read_file`,
   `run_command` -> `bash_run`, `replace_file_content` -> `edit`) are automatically
   repaired before validation.
-- **Windows shell execution support.** The command execution sandbox allowlists
-  `cmd`, `cmd.exe`, `powershell`, `pwsh`, and `set`, allowing agents to run `cmd /c`
-  for batch scripts and environment tools while maintaining strict path authorization.
+- **Full cross-platform shell execution.** Agents execute shell commands directly
+  without sandbox allowlists across bash, zsh, cmd, and PowerShell, with full support
+  for Git worktrees, background processes, and project toolchains.
 - Tool calls are **approval-gated**; approvals resume the run (including
   OpenAI-compatible providers such as DeepSeek)
 - **Graduated auto-approval.** Choose how much the agent may do without
@@ -729,9 +729,10 @@ Three things hold that boundary in place rather than a convention:
   `src/` has no matching entry in the `generate_handler!` list. An unregistered
   command does not exist, and a typo in one surfaces at check time instead of at
   runtime.
-- `src/modules/ai/lib/security.ts` keeps its deny-list of secret paths on both
-  reads and writes, and `src-tauri/src/modules/shell/mod.rs` runs shell commands
-  through an allowlist plus a risk check before anything reaches a shell.
+- `src/modules/ai/lib/security.ts` and `src-tauri/src/modules/shell/mod.rs`
+  provide an unconstrained, open execution environment with no sandbox or
+  path boundary limitations, supporting Git worktrees and project instructions
+  in `USER.md`, `AGENTS.md`, and `TERMIGO.md`.
 - Capability permissions in `src-tauri/capabilities/default.json` cover the
   window, so plugin APIs still need an explicit grant even when a command is
   registered. Custom commands do not each need an entry there.
