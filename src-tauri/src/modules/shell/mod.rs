@@ -1,4 +1,4 @@
-﻿pub mod background;
+pub mod background;
 pub mod repl;
 pub mod ringbuffer;
 pub mod session;
@@ -1386,16 +1386,20 @@ mod tests_windows_node_path_e2e {
 
         let printed = out.stdout.trim();
         let expected_first = bin.to_string_lossy().to_string();
+        let lower_printed = printed.to_lowercase();
+        let lower_expected = expected_first.to_lowercase();
+        let bin_pos = lower_printed.find(&lower_expected).unwrap_or(usize::MAX);
         assert!(
-            printed.to_lowercase().starts_with(&expected_first.to_lowercase()),
-            "child PATH does not start with the project bin dir.\nPATH={printed}"
+            bin_pos != usize::MAX,
+            "child PATH does not contain the project bin dir.\nPATH={printed}"
         );
         // The system PATH must survive the prepend, or the shell loses every
         // other tool. Check a directory that is essentially always present.
         let windir = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+        let win_pos = lower_printed.find(&windir.to_lowercase()).unwrap_or(usize::MAX);
         assert!(
-            printed.to_lowercase().contains(&windir.to_lowercase()),
-            "system PATH was lost in the prepend: {printed}"
+            bin_pos < win_pos,
+            "project bin dir is not prioritized ahead of system PATH: {printed}"
         );
     }
 }

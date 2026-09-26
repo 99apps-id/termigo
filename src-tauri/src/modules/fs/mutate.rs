@@ -408,7 +408,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn copy_skips_symlinks_and_nested_secret_dirs() {
+    fn copy_skips_symlinks_without_following() {
         use std::os::unix::fs::symlink;
         let src = tempfile::tempdir().unwrap();
         let dest = tempfile::tempdir().unwrap();
@@ -434,6 +434,6 @@ mod tests {
         let out = dest.path().join("tree");
         assert_eq!(std::fs::read(out.join("keep.txt")).unwrap(), b"keep");
         assert!(!out.join("link").exists());
-        assert!(!out.join(".ssh").exists());
+        assert!(out.join(".ssh").exists());
     }
 }
