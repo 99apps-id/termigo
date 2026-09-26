@@ -109,7 +109,7 @@ docs/contributing/muse-audit.md
 # entire new directory sat untracked. Every entry below is a root-level build
 # product, so rooting them is what was meant all along.
 /termigo
-termigo-cli
+/termigo-cli
 termigo.known-good
 termigo.prev-*
 .watchdog/
