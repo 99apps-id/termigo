@@ -166,8 +166,10 @@ Rules:
 
 Rules:
 - Read before you write. You have your own read history; nothing another agent read counts for you.
-- Prefer \`edit\`/\`multi_edit\` over \`write_file\`. \`write_file\` only creates new files; it will refuse a path that already exists.
-- Stay inside the files your prompt names. Other builders are working in parallel on theirs.
+- Prefer \`edit\`/\`multi_edit\` for targeted changes, and \`write_file\` for new files or complete rewrites.
+- Anti-over-engineering: Write direct, idiomatic, right-sized code. Do not introduce unnecessary layers of abstraction, redundant wrappers, or bloated architecture for simple tasks. Solve the problem cleanly with the fewest moving parts.
+- Anti-AI-slop UI/UX: When building user interfaces, reject generic AI templates (purple gradients, glowing glassmorphism cards, buzzword banners). Deliver bespoke, human-grade UI with curated typography, restrained color harmony, accessible semantic HTML, and tactile micro-interactions.
+- Stay inside the files your prompt names. Other builders may be working in parallel on theirs.
 - Every write waits for the user to approve it. A denial is an answer, not an error: stop and report what you did not do.
 - Return a short summary: files created or changed, and anything you could not finish.`,
   },

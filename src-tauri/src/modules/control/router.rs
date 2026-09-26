@@ -393,7 +393,7 @@ pub fn forward_to_frontend_with_timeout(
             .0
             .pending
             .lock()
-            .expect("control pending poisoned")
+            .unwrap_or_else(|e| e.into_inner())
             .remove(&id);
         return ControlResponse::failure(
             id,
@@ -420,7 +420,7 @@ pub fn forward_to_frontend_with_timeout(
                 .0
                 .pending
                 .lock()
-                .expect("control pending poisoned")
+                .unwrap_or_else(|e| e.into_inner())
                 .remove(&id);
             ControlResponse::failure(id, "frontend_timeout", "Termigo UI did not respond in time")
         }
@@ -447,7 +447,7 @@ pub fn control_respond(
         .0
         .pending
         .lock()
-        .expect("control pending poisoned")
+        .unwrap_or_else(|e| e.into_inner())
         .remove(&request_id);
     sender.is_some_and(|sender| sender.send(response).is_ok())
 }

@@ -71,7 +71,9 @@ export function LocalAgentNotificationsBridge() {
       stopReason === "tool-only-loop" ||
       stopReason === "tool-repetition" ||
       stopReason === "idle-read-loop" ||
-      stopReason === "tool-error";
+      stopReason === "tool-error" ||
+      stopReason === "text-repetition" ||
+      stopReason === "no-progress";
 
     if (isLoopStop && stopReason !== prevReason && !stoppedByUser) {
       fire(
@@ -89,13 +91,25 @@ export function LocalAgentNotificationsBridge() {
     } else if (status === "error") {
       fire("error", "Termigo run failed", error ?? undefined);
     } else if (status === "idle" && isBusy(was)) {
-      if (stoppedByUser) {
+      if (stoppedByUser || stopReason === "steered" || stopReason === "aborted") {
         // User stopped intentionally; no notification needed.
       } else if (isLoopStop) {
         fire(
           "attention",
           "Termigo: Run paused",
           "Run paused due to repetition without progress. Click to continue.",
+        );
+      } else if (stopReason === "step-cap") {
+        fire(
+          "attention",
+          "Termigo: Step limit reached",
+          "Run paused at step budget. Click to continue.",
+        );
+      } else if (stopReason !== null) {
+        fire(
+          "attention",
+          "Termigo: Run stopped",
+          "Run stopped before completion. Click to review.",
         );
       } else {
         fire("finished", "Termigo finished", "Your task is ready");

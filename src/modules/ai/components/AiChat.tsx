@@ -248,7 +248,8 @@ export function AiChatView({
             kind={continueKind}
             round={runRound}
             onContinue={() => {
-              patchAgentMeta({ stopReason: null, stoppedByUser: false });
+              clearError();
+              patchAgentMeta({ error: null, stopReason: null, stoppedByUser: false });
               void resumeRun();
             }}
           />

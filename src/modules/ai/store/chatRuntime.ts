@@ -1037,7 +1037,12 @@ export async function sendParts(
     case "send":
       // A fresh user turn resets the loop-round counter; the first model call
       // of this turn will bump it to 1.
-      useChatStore.getState().patchAgentMeta({ round: 0 });
+      useChatStore.getState().patchAgentMeta({
+        round: 0,
+        error: null,
+        stopReason: null,
+        stoppedByUser: false,
+      });
       // A new task supersedes the previous task's todo list: the strip hides
       // only when every item is completed, so a list the agent abandoned
       // mid-plan (leftover pending items) would otherwise sit on top of the
@@ -1184,7 +1189,11 @@ export async function flushSteer(bypassBusyCheck = false): Promise<boolean> {
     }
     // A run that yielded to this queued task set stopReason "steered"; clear it
     // so no stale "Continue" prompt lingers as the queued task takes over.
-    store.patchAgentMeta({ stopReason: null, stoppedByUser: false });
+    store.patchAgentMeta({
+      error: null,
+      stopReason: null,
+      stoppedByUser: false,
+    });
     // A queued task starts a fresh run, so mark it in flight for restart
     // recovery.
     store.markRunStarted();
@@ -1235,6 +1244,9 @@ export async function resumeRun(): Promise<boolean> {
   // "thinking" from the SDK's own `submitted` status as soon as the run really
   // starts, so the UI signal is not lost.
   useChatStore.getState().patchAgentMeta({
+    error: null,
+    stopReason: null,
+    stoppedByUser: false,
     pendingApprovals: undefined,
   });
   // Continuing is the signal that the task is heavier than one round, so the

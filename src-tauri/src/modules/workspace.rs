@@ -157,7 +157,7 @@ impl WorkspaceRegistry {
             let cache = self
                 .canonical_cache
                 .lock()
-                .expect("canonical cache poisoned");
+                .unwrap_or_else(|e| e.into_inner());
             if let Some(entry) = cache.get(&key) {
                 if entry.inserted_at.elapsed() < CANONICAL_TTL {
                     return Ok(entry.canonical.clone());
@@ -168,7 +168,7 @@ impl WorkspaceRegistry {
         let mut cache = self
             .canonical_cache
             .lock()
-            .expect("canonical cache poisoned");
+            .unwrap_or_else(|e| e.into_inner());
         if cache.len() >= CANONICAL_CACHE_CAP {
             cache.retain(|_, entry| entry.inserted_at.elapsed() < CANONICAL_TTL);
             if cache.len() >= CANONICAL_CACHE_CAP {

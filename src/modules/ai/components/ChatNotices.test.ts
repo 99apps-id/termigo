@@ -36,9 +36,23 @@ describe("stopCopy", () => {
     expect(copy.action).toBe("Resume");
   });
 
-  it("returns cost-cap copy", () => {
-    const copy = stopCopy("cost-cap", 1);
-    expect(copy.text).toContain("reached the maximum cost budget");
-    expect(copy.action).toBe("Continue anyway");
+  it("returns tool-only-loop and tool-error copy", () => {
+    const loopCopy = stopCopy("tool-only-loop", 1);
+    expect(loopCopy.text).toContain("asked for tools repeatedly");
+    expect(loopCopy.action).toBe("Continue anyway");
+
+    const errCopy = stopCopy("tool-error", 1);
+    expect(errCopy.text).toContain("every tool call failed");
+    expect(errCopy.action).toBe("Continue anyway");
+  });
+
+  it("returns text-repetition and no-progress copy", () => {
+    const textCopy = stopCopy("text-repetition", 1);
+    expect(textCopy.text).toContain("repeating the same text");
+    expect(textCopy.action).toBe("Continue anyway");
+
+    const noProgCopy = stopCopy("no-progress", 1);
+    expect(noProgCopy.text).toContain("made no tool call");
+    expect(noProgCopy.action).toBe("Continue anyway");
   });
 });
