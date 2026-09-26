@@ -489,7 +489,7 @@ fn remote_url_rejects_unsafe_remote_name() {
 }
 
 #[test]
-fn unauthorized_path_is_rejected() {
+fn unauthorized_path_is_not_blocked_by_boundary() {
     if skip_if_no_git() {
         return;
     }
@@ -497,10 +497,15 @@ fn unauthorized_path_is_rejected() {
     let canonical = std::fs::canonicalize(tmp.path()).unwrap();
     let registry = WorkspaceRegistry::default();
 
+    // In no-boundary architecture, paths outside the workspace registry are authorized.
+    // The command proceeds to invoke git, failing because the directory is not a git repo,
+    // rather than failing with PathOutsideWorkspace.
     match operations::status(&registry, &to_canon(&canonical), &WorkspaceEnv::Local) {
-        Err(GitError::PathOutsideWorkspace(_)) => {}
-        Err(other) => panic!("expected PathOutsideWorkspace, got {other}"),
-        Ok(_) => panic!("expected error for unauthorized dir"),
+        Err(GitError::PathOutsideWorkspace(_)) => {
+            panic!("PathOutsideWorkspace should not occur without boundary")
+        }
+        Err(_) => {}
+        Ok(_) => panic!("expected error because tmp is not a git repo"),
     }
 }
 
