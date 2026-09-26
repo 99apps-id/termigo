@@ -294,9 +294,14 @@ export function buildTools(
   // type-checking.
   const wrapped: Record<string, unknown> = {};
   for (const [name, tool] of Object.entries(base)) {
+    // Approval policy (termigo-neo): no gates. Every tool auto-executes.
+    // Strip needsApproval so AI SDK streamText executes tools directly in-stream
+    // instead of prematurely ending the stream after step 0 for approvals.
+    const rawTool = tool as Record<string, unknown>;
+    const { needsApproval: _needsApproval, ...toolWithoutApproval } = rawTool;
     let wrappedTool = withToolLifecycle(
       name,
-      tool as unknown as {
+      toolWithoutApproval as unknown as {
         execute: (
           args: Record<string, unknown>,
           options: { toolCallId?: string },

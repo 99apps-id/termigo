@@ -143,6 +143,14 @@ export async function createCheckpoint(
     if (status.changedFiles.length === 0) {
       return { created: false };
     }
+    if (opts?.trackedOnly) {
+      const hasTrackedChanges = status.changedFiles.some(
+        (f) => f.staged || f.unstaged,
+      );
+      if (!hasTrackedChanges) {
+        return { created: false };
+      }
+    }
   } catch {
     // If git status fails, proceed with normal add and commit fallback.
   }
@@ -208,6 +216,20 @@ export async function rollbackToCheckpoint(
   return { ok: true };
 }
 
+const repoResolveCache = new Map<
+  string,
+  { repo: { repoRoot: string } | null; at: number }
+>();
+const checkpointCooldown = new Map<
+  string,
+  { sha: string | null; at: number }
+>();
+
+export function clearCheckpointCache(): void {
+  repoResolveCache.clear();
+  checkpointCooldown.clear();
+}
+
 /**
  * Auto-checkpoint used before an agent run.
  *
@@ -224,12 +246,25 @@ export async function autoCheckpointForRun(
   label = "auto before run",
 ): Promise<string | null> {
   if (!workspaceRoot) return null;
+  const now = Date.now();
   try {
-    const repo = await native.gitResolveRepo(workspaceRoot);
+    const cachedRepo = repoResolveCache.get(workspaceRoot);
+    let repo =
+      cachedRepo && now - cachedRepo.at < 30_000 ? cachedRepo.repo : null;
+    if (!cachedRepo || now - cachedRepo.at >= 30_000) {
+      repo = await native.gitResolveRepo(workspaceRoot);
+      repoResolveCache.set(workspaceRoot, { repo, at: now });
+    }
     if (!repo) return null;
     // Refuse to checkpoint the home directory: staging tens of thousands of
     // unrelated files hangs the run (and is never what the user wanted).
     if (await isHomeDir(repo.repoRoot)) return null;
+
+    const cooldown = checkpointCooldown.get(repo.repoRoot);
+    if (cooldown && now - cooldown.at < 15_000) {
+      return cooldown.sha;
+    }
+
     // Tracked-only: this runs unattended before EVERY agent run. `git add -A`
     // here once committed a 325 MB `.cargo/registry` (24,620 untracked files)
     // and another agent's half-finished work into the user's real history -
@@ -238,7 +273,9 @@ export async function autoCheckpointForRun(
     await createCheckpoint(repo.repoRoot, label, {
       trackedOnly: true,
     });
-    return await readHeadSha(repo.repoRoot);
+    const headSha = await readHeadSha(repo.repoRoot);
+    checkpointCooldown.set(repo.repoRoot, { sha: headSha, at: now });
+    return headSha;
   } catch {
     // Never let checkpointing break the run.
     return null;

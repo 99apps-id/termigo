@@ -23,6 +23,12 @@ export type VerifyOutcome = {
   } | null;
 };
 
+const lastLintRunAt = new Map<string, number>();
+
+export function clearVerifyThrottle(): void {
+  lastLintRunAt.clear();
+}
+
 /**
  * Run a best-effort verify for an edited file: format the touched file, then
  * lint when the project declares a lint script. Returns null when skipped (pref
@@ -46,7 +52,7 @@ export async function autoVerifyEditedFile(
       cwd,
     );
 
-    // 1) Format the touched file — fast, local, safe.
+    // 1) Format the touched file: fast, local, safe.
     const { command: fmtCommand, note } = formatCommand([path]);
     const fmtSafety = checkShellCommand(fmtCommand);
     let formatted = false;
@@ -62,33 +68,41 @@ export async function autoVerifyEditedFile(
     }
 
     // 2) Lint, when the project declares a lint script. Best-effort.
+    // Throttled: heavy full-project linter runs (e.g. Next.js, ESLint, tsc)
+    // take 15-60s. During a multi-file refactor loop, consecutive edits within
+    // 25s skip re-running full-project lint to avoid stalling the agent.
     let lint: VerifyOutcome["lint"] = null;
-    try {
-      const resolved = await detectCheckCommand("lint", {
-        pkgJson: await readManifest(root, "package.json"),
-        cargo: await readManifest(root, "Cargo.toml"),
-        goMod: await readManifest(root, "go.mod"),
-        pyproject: await readManifest(root, "pyproject.toml"),
-      });
-      if (resolved.command) {
-        const lintSafety = checkShellCommand(resolved.command);
-        if (lintSafety.ok) {
-          const r = await native.shellSessionRun(
-            shellId,
-            resolved.command,
-            cwd,
-            60,
-          );
-          lint = {
-            ran: true,
-            passed: r.exit_code === 0,
-            command: resolved.command,
-            output: `${r.stdout}\n${r.stderr}`.trim().slice(0, 2000),
-          };
+    const now = Date.now();
+    const lastRun = lastLintRunAt.get(sid) ?? 0;
+    if (now - lastRun >= 25_000) {
+      try {
+        const resolved = await detectCheckCommand("lint", {
+          pkgJson: await readManifest(root, "package.json"),
+          cargo: await readManifest(root, "Cargo.toml"),
+          goMod: await readManifest(root, "go.mod"),
+          pyproject: await readManifest(root, "pyproject.toml"),
+        });
+        if (resolved.command) {
+          const lintSafety = checkShellCommand(resolved.command);
+          if (lintSafety.ok) {
+            lastLintRunAt.set(sid, now);
+            const r = await native.shellSessionRun(
+              shellId,
+              resolved.command,
+              cwd,
+              60,
+            );
+            lint = {
+              ran: true,
+              passed: r.exit_code === 0,
+              command: resolved.command,
+              output: `${r.stdout}\n${r.stderr}`.trim().slice(0, 2000),
+            };
+          }
         }
+      } catch {
+        lint = null;
       }
-    } catch {
-      lint = null;
     }
 
     if (!formatted && !lint) return null;

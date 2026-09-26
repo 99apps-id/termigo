@@ -9,6 +9,16 @@ function hooksPath(workspaceRoot: string): string {
   return `${workspaceRoot.replace(/[\\/]$/, "")}/${HOOKS_REL_PATH}`;
 }
 
+type HooksOutcome =
+  | { ok: true; config: HooksConfig }
+  | { ok: false; reason: string };
+
+const hooksCache = new Map<string, { result: HooksOutcome; at: number }>();
+
+export function clearHooksCache(): void {
+  hooksCache.clear();
+}
+
 /**
  * Load and parse `.termigo/hooks.json` for a workspace.
  *
@@ -18,13 +28,26 @@ function hooksPath(workspaceRoot: string): string {
  */
 export async function loadHooks(
   workspaceRoot: string | null,
-): Promise<{ ok: true; config: HooksConfig } | { ok: false; reason: string }> {
+): Promise<HooksOutcome> {
   if (!workspaceRoot) return { ok: true, config: {} };
+  const now = Date.now();
+  const cached = hooksCache.get(workspaceRoot);
+  if (cached && now - cached.at < 30_000) {
+    return cached.result;
+  }
   try {
     const read = await native.readFile(hooksPath(workspaceRoot));
-    if (read.kind !== "text") return { ok: true, config: {} };
-    return parseHooksFile(read.content);
+    if (read.kind !== "text") {
+      const res: HooksOutcome = { ok: true, config: {} };
+      hooksCache.set(workspaceRoot, { result: res, at: now });
+      return res;
+    }
+    const res = parseHooksFile(read.content);
+    hooksCache.set(workspaceRoot, { result: res, at: now });
+    return res;
   } catch {
-    return { ok: true, config: {} };
+    const res: HooksOutcome = { ok: true, config: {} };
+    hooksCache.set(workspaceRoot, { result: res, at: now });
+    return res;
   }
 }

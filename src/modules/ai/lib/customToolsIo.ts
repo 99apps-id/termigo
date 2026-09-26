@@ -23,14 +23,30 @@ function toolsPath(workspaceRoot: string): string {
   return `${workspaceRoot.replace(/[\\/]$/, "")}/${TOOLS_REL_PATH}`;
 }
 
+const customToolsCache = new Map<
+  string,
+  { tools: CustomTool[]; at: number }
+>();
+
+export function clearCustomToolsCache(): void {
+  customToolsCache.clear();
+}
+
 export async function loadCustomTools(
   workspaceRoot: string | null,
 ): Promise<CustomTool[]> {
   if (!workspaceRoot) return [];
+  const now = Date.now();
+  const cached = customToolsCache.get(workspaceRoot);
+  if (cached && now - cached.at < 30_000) {
+    return cached.tools;
+  }
   try {
     const read = await native.readFile(toolsPath(workspaceRoot));
     if (read.kind !== "text") return [];
-    return parseToolsFile(read.content);
+    const parsed = parseToolsFile(read.content);
+    customToolsCache.set(workspaceRoot, { tools: parsed, at: now });
+    return parsed;
   } catch {
     return []; // no tools file is the normal case
   }
@@ -60,6 +76,7 @@ export async function saveCustomTool(
     // Already there, or the write reports a clearer failure.
   }
   await native.writeFile(toolsPath(workspaceRoot), formatToolsFile(next));
+  clearCustomToolsCache();
   return { saved: true, replaced, total: next.length };
 }
 

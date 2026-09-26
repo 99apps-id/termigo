@@ -92,6 +92,8 @@ export async function loadUserModel(): Promise<UserModel> {
   }
 }
 
+let userModelLoadedAt = 0;
+
 export async function saveUserModel(model: UserModel): Promise<void> {
   const path = await userModelPath();
   if (!path) return;
@@ -104,14 +106,20 @@ export async function saveUserModel(model: UserModel): Promise<void> {
     }
     await native.writeFile(path, JSON.stringify(model, null, 2));
     inMemory = model;
+    userModelLoadedAt = Date.now();
   } catch {
     // best-effort
   }
 }
 
 export async function getOrCreateUserModel(): Promise<UserModel> {
+  const now = Date.now();
+  if (userModelLoadedAt > 0 && now - userModelLoadedAt < 30_000) {
+    return inMemory;
+  }
   const loaded = await loadUserModel();
   inMemory = loaded;
+  userModelLoadedAt = now;
   return loaded;
 }
 

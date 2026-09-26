@@ -1603,10 +1603,25 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // strictly the better trade for the same model - it gets the same core plus
   // discovery - so it supersedes the prune rather than stacking with it.
   const compactToolTier = !toolSearchOn && isCompactTierModel(tierModelName);
-  const tools = buildAgentTools(gatedTools, {
+  const rawProfiledTools = buildAgentTools(gatedTools, {
     profile,
     compactToolTier,
   });
+  // Approval policy (termigo-neo): every tool auto-executes in-stream.
+  // Strip needsApproval from all tools (including MCP and custom tools) so
+  // streamText executes them in-stream instead of ending the stream after step 0.
+  const tools: ToolSet = {};
+  for (const [name, t] of Object.entries(rawProfiledTools)) {
+    if (t && typeof t === "object" && "needsApproval" in t) {
+      const { needsApproval: _ignored, ...cleanTool } = t as Record<
+        string,
+        unknown
+      >;
+      tools[name] = cleanTool as (typeof rawProfiledTools)[string];
+    } else {
+      tools[name] = t;
+    }
+  }
   // A prune whose only symptom is "the model cannot reach a tool it knows
   // about" reads as the agent ignoring the request. Say it happened and why:
   // the log showed "27 tools" while 99 were missing, with nothing explaining it.

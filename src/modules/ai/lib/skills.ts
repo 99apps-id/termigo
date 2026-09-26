@@ -107,6 +107,12 @@ export function formatSkill(skill: Skill): string {
   ].join("\n");
 }
 
+const skillsCache = new Map<string, { skills: Skill[]; at: number }>();
+
+export function invalidateSkillsCache(): void {
+  skillsCache.clear();
+}
+
 /**
  * Every skill in the workspace, without bodies.
  *
@@ -117,6 +123,11 @@ export async function listSkills(
   workspaceRoot: string | null,
 ): Promise<Skill[]> {
   if (!workspaceRoot) return [];
+  const now = Date.now();
+  const cached = skillsCache.get(workspaceRoot);
+  if (cached && now - cached.at < 30_000) {
+    return cached.skills;
+  }
   const root = `${workspaceRoot.replace(/[\\/]$/, "")}/${SKILLS_REL_DIR}`;
   let entries: Awaited<ReturnType<typeof native.readDir>>;
   try {
@@ -140,7 +151,9 @@ export async function listSkills(
       // Missing or unreadable SKILL.md: skip this one, keep the rest.
     }
   }
-  return out.sort((a, b) => a.name.localeCompare(b.name));
+  const sorted = out.sort((a, b) => a.name.localeCompare(b.name));
+  skillsCache.set(workspaceRoot, { skills: sorted, at: now });
+  return sorted;
 }
 
 /** Load one skill's full text. */
@@ -199,10 +212,11 @@ export async function saveSkill(
     // Already there, or the write below fails with a clearer message.
   }
   await native.writeFile(skillPath(workspaceRoot, skill.name), content);
+  invalidateSkillsCache();
   return { saved: true, path: skillPath(workspaceRoot, skill.name), replaced };
 }
 
-/** Update or refine an existing skill. */
+/** Update or refine an existing skill (Hermes-style evolution). */
 export async function updateSkill(
   workspaceRoot: string | null,
   name: string,

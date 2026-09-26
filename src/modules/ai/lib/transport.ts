@@ -103,17 +103,23 @@ export async function readProjectRules(
 
   const root = workspaceRoot.replace(/\/$/, "");
   const foundFiles: Array<{ name: string; content: string }> = [];
-
-  for (const filename of PROJECT_RULE_FILES) {
-    const path = `${root}/${filename}`;
-    try {
-      const r = await native.readFile(path);
-      if (r.kind === "text" && r.content.trim()) {
-        foundFiles.push({ name: filename, content: r.content.trim() });
+  const results = await Promise.all(
+    PROJECT_RULE_FILES.map(async (filename) => {
+      const path = `${root}/${filename}`;
+      try {
+        const r = await native.readFile(path);
+        if (r.kind === "text" && r.content.trim()) {
+          return { name: filename, content: r.content.trim() };
+        }
+      } catch {
+        // Ignore missing or unreadable rule files
       }
-    } catch {
-      // Ignore missing or unreadable rule files
-    }
+      return null;
+    }),
+  );
+
+  for (const item of results) {
+    if (item) foundFiles.push(item);
   }
 
   if (foundFiles.length === 0) {

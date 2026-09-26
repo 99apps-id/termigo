@@ -102,26 +102,47 @@ export function prune(entries: readonly MemoryEntry[]): MemoryEntry[] {
   return kept;
 }
 
+const memoryCache = new Map<string, { entries: MemoryEntry[]; at: number }>();
+let globalMemoryCache: { entries: MemoryEntry[]; at: number } | null = null;
+
+export function clearMemoryCache(): void {
+  memoryCache.clear();
+  globalMemoryCache = null;
+}
+
 export async function readMemory(
   workspaceRoot: string | null,
 ): Promise<MemoryEntry[]> {
   if (!workspaceRoot) return [];
+  const now = Date.now();
+  const cached = memoryCache.get(workspaceRoot);
+  if (cached && now - cached.at < 30_000) {
+    return cached.entries;
+  }
   try {
     const result = await native.readFile(memoryPath(workspaceRoot));
     if (result.kind !== "text") return [];
-    return parseMemory(result.content);
+    const entries = parseMemory(result.content);
+    memoryCache.set(workspaceRoot, { entries, at: now });
+    return entries;
   } catch {
     return []; // absent file is the normal case
   }
 }
 
 export async function readGlobalMemory(): Promise<MemoryEntry[]> {
+  const now = Date.now();
+  if (globalMemoryCache && now - globalMemoryCache.at < 30_000) {
+    return globalMemoryCache.entries;
+  }
   const p = await globalMemoryPath();
   if (!p) return [];
   try {
     const result = await native.readFile(p);
     if (result.kind !== "text") return [];
-    return parseMemory(result.content);
+    const entries = parseMemory(result.content);
+    globalMemoryCache = { entries, at: now };
+    return entries;
   } catch {
     return [];
   }
@@ -163,6 +184,7 @@ export async function rememberFact(
       // already exists
     }
     await native.writeFile(p, formatMemory(next));
+    clearMemoryCache();
     return { stored: true, total: next.length, scope: "global" };
   }
 
@@ -184,6 +206,7 @@ export async function rememberFact(
     // already exists
   }
   await native.writeFile(memoryPath(workspaceRoot), formatMemory(next));
+  clearMemoryCache();
   return { stored: true, total: next.length, scope: "project" };
 }
 
@@ -302,6 +325,7 @@ export async function forgetFact(
       return { removed: false, total: existing.length };
     }
     await native.writeFile(p, formatMemory(next));
+    clearMemoryCache();
     return { removed: true, total: next.length };
   }
 
@@ -312,5 +336,6 @@ export async function forgetFact(
     return { removed: false, total: existing.length };
   }
   await native.writeFile(memoryPath(workspaceRoot), formatMemory(next));
+  clearMemoryCache();
   return { removed: true, total: next.length };
 }
