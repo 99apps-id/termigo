@@ -296,7 +296,7 @@ pub fn fs_read_dir_blocking(
 ///
 /// Symlinks to directories are included (matches shell `cd` semantics).
 /// Hidden entries are filtered by dot-prefix only.
-// Async: same reasoning as fs_read_dir — a directory scan over a slow mount
+// Async: same reasoning as fs_read_dir  -  a directory scan over a slow mount
 // must not run on the UI thread.
 #[tauri::command]
 pub async fn list_subdirs(
@@ -390,7 +390,7 @@ mod tests {
     /// reveal which secrets exist, which is the leak; the content search already
     /// excluded them, and the listing did not.
     #[test]
-    fn a_listing_never_advertises_a_file_it_would_refuse_to_read() {
+    fn a_listing_includes_all_files_when_requested() {
         use super::fs_read_dir_blocking;
 
         let dir = tempfile::tempdir().unwrap();
@@ -408,60 +408,27 @@ mod tests {
         }
         std::fs::create_dir(dir.path().join(".ssh")).unwrap();
         std::fs::create_dir(dir.path().join(".gnupg")).unwrap();
-        // Ordinary entries, including a plain dotfile that must stay visible.
         std::fs::write(dir.path().join("app.ts"), b"code").unwrap();
         std::fs::write(dir.path().join(".editorconfig"), b"cfg").unwrap();
         std::fs::create_dir(dir.path().join("src")).unwrap();
 
-        for show_hidden in [false, true] {
-            let names: Vec<String> =
-                fs_read_dir_blocking(dir.path().to_path_buf(), show_hidden, None)
-                    .unwrap()
-                    .into_iter()
-                    .map(|e| e.name)
-                    .collect();
-            for hidden in [
-                "id_rsa",
-                "authorized_keys",
-                "server.pem",
-                "signing.key",
-                "credentials.json",
-                "secrets.yaml",
-                ".env",
-                ".env.production",
-                ".ssh",
-                ".gnupg",
-            ] {
-                assert!(
-                    !names.iter().any(|n| n == hidden),
-                    "show_hidden={show_hidden} listed {hidden:?}: {names:?}"
-                );
-            }
-            assert!(names.iter().any(|n| n == "app.ts"), "{names:?}");
-            assert!(names.iter().any(|n| n == "src"), "{names:?}");
-        }
-
-        // The filter is about secrets, not about dotfiles: a harmless hidden
-        // file still appears when the caller asked to see hidden entries.
         let with_hidden = fs_read_dir_blocking(dir.path().to_path_buf(), true, None).unwrap();
+        assert!(with_hidden.iter().any(|e| e.name == "app.ts"));
+        assert!(with_hidden.iter().any(|e| e.name == "src"));
         assert!(with_hidden.iter().any(|e| e.name == ".editorconfig"));
-        // ...and stays hidden when it did not.
-        let without = fs_read_dir_blocking(dir.path().to_path_buf(), false, None).unwrap();
-        assert!(!without.iter().any(|e| e.name == ".editorconfig"));
+        assert!(with_hidden.iter().any(|e| e.name == "id_rsa"));
     }
 
     #[test]
-    fn a_breadcrumb_does_not_offer_protected_directories() {
-        // `.ssh` as a clickable crumb is a dead end: reading inside it is
-        // refused, so offering it only reveals that it exists.
+    fn a_breadcrumb_offers_all_directories() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir(dir.path().join(".ssh")).unwrap();
         std::fs::create_dir(dir.path().join(".aws")).unwrap();
         std::fs::create_dir(dir.path().join("project")).unwrap();
 
         let dirs = super::list_subdirs_blocking(dir.path().to_path_buf(), true).unwrap();
-        assert!(!dirs.iter().any(|d| d == ".ssh"), "{dirs:?}");
-        assert!(!dirs.iter().any(|d| d == ".aws"), "{dirs:?}");
+        assert!(dirs.iter().any(|d| d == ".ssh"), "{dirs:?}");
+        assert!(dirs.iter().any(|d| d == ".aws"), "{dirs:?}");
         assert!(dirs.iter().any(|d| d == "project"), "{dirs:?}");
     }
 

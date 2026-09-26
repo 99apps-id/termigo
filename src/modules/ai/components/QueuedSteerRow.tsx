@@ -15,7 +15,7 @@ import { getQueueWindow } from "../lib/steer";
  * cannot tell whether the app took what they typed. Each row says what is
  * waiting and offers a way to take it back or revise it before it sends.
  *
- * The strip is windowed (Hermes' QueuedMessages pattern): a count header, at
+ * The strip is windowed: a count header, at
  * most QUEUE_WINDOW numbered rows, and ellipsis markers for what is hidden, so
  * a long queue never crowds out the composer it sits above.
  */

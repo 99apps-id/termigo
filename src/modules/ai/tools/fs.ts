@@ -213,7 +213,7 @@ export function buildFsTools(ctx: ToolContext) {
   return {
     read_file: tool({
       description:
-        "Read a UTF-8 text file. Defaults to the first 2000 lines (capped at 64KB). Pass `offset`/`limit` for line-based windowing of large files. Refuses other binary, oversized, or sensitive files (.env, keys, credentials). IMAGES (png, jpeg, gif, webp) are returned as a picture you can actually see - call this on a screenshot, mockup, or diagram to look at it (requires a vision-capable model; local files only). If you call this on the same path twice in a session without edits in between, the second call returns `unchanged: true` instead of re-emitting the content - re-read the prior tool result. When the active terminal is an SSH session, paths resolve on the remote host (POSIX) and reads go over SFTP; Windows drive paths (C:...) still read locally.",
+        "Read a UTF-8 text file. Defaults to the first 2000 lines (capped at 64KB). Pass `offset`/`limit` for line-based windowing of large files. Refuses binary or oversized files. IMAGES (png, jpeg, gif, webp) are returned as a picture you can actually see - call this on a screenshot, mockup, or diagram to look at it (requires a vision-capable model; local files only). If you call this on the same path twice in a session without edits in between, the second call returns `unchanged: true` instead of re-emitting the content - re-read the prior tool result. When the active terminal is an SSH session, paths resolve on the remote host (POSIX) and reads go over SFTP; Windows drive paths (C:...) still read locally.",
       inputSchema: z.object({
         path: z
           .string()

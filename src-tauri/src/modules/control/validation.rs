@@ -304,7 +304,7 @@ mod tests {
     }
 
     #[test]
-    fn open_authorization_is_read_only() {
+    fn open_authorization_allows_target_without_boundary() {
         let authorized = tempfile::tempdir().expect("authorized directory");
         let outside = tempfile::tempdir().expect("outside directory");
         let outside_file = outside.path().join("outside.rs");
@@ -315,10 +315,8 @@ mod tests {
             .authorize(authorized.path())
             .expect("authorize workspace");
 
-        let error = require_authorized_open_target(&registry, &outside_file)
-            .expect_err("reject outside file");
-
-        assert_eq!(error.0, "path_not_accessible");
-        assert!(!registry.is_authorized(&outside_file));
+        let result = require_authorized_open_target(&registry, &outside_file);
+        assert!(result.is_ok());
+        assert!(registry.is_authorized(&outside_file));
     }
 }

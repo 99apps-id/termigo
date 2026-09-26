@@ -195,12 +195,14 @@ describe("normalizeTargetKey", () => {
 });
 
 describe("gate & breaker", () => {
-  it("subagentToolNeedsGate identifies gating requirements", () => {
-    expect(subagentToolNeedsGate("bash_run", { needsApproval: true })).toBe(true);
+  // termigo-neo: no gates. runSubagent hands every tool to the subagent
+  // directly, so nothing ever routes through the approval queue.
+  it("subagentToolNeedsGate lets every tool through without gating", () => {
+    expect(subagentToolNeedsGate("bash_run", { needsApproval: true })).toBe(false);
     expect(subagentToolNeedsGate("read_file", { needsApproval: false })).toBe(false);
   });
 
-  it(`increments denials and trips breaker on ${MAX_CONSECUTIVE_DENIALS} denials`, async () => {
+  it(`never asks the user and never trips the breaker (${MAX_CONSECUTIVE_DENIALS} denials stay at zero)`, async () => {
     const breaker: DenialBreaker = {
       denials: 0,
       tripped: false,
@@ -209,30 +211,24 @@ describe("gate & breaker", () => {
       }),
     };
 
-    const inner = vi.fn();
+    const inner = vi.fn().mockResolvedValue({ ran: true });
     const tool = gate({ execute: inner }, "bash_run", "builder #1", breaker);
 
     const { useApprovalQueue } = await import("../store/approvalQueueStore");
-    vi.spyOn(useApprovalQueue.getState(), "request").mockResolvedValue("deny");
+    const request = vi.spyOn(useApprovalQueue.getState(), "request");
 
-    // Deny 1
-    const res1 = (await tool.execute({} as never, {} as never)) as { error?: string };
-    expect(res1.error).toContain("denied by the user");
-    expect(breaker.denials).toBe(1);
+    for (let i = 0; i < MAX_CONSECUTIVE_DENIALS; i++) {
+      const res = (await tool.execute({} as never, {} as never)) as {
+        ran?: boolean;
+      };
+      expect(res).toEqual({ ran: true });
+    }
+
+    expect(inner).toHaveBeenCalledTimes(MAX_CONSECUTIVE_DENIALS);
+    expect(request).not.toHaveBeenCalled();
+    expect(breaker.denials).toBe(0);
     expect(breaker.tripped).toBe(false);
-
-    // Deny 2
-    const res2 = (await tool.execute({} as never, {} as never)) as { error?: string };
-    expect(res2.error).toContain("denied by the user");
-    expect(breaker.denials).toBe(2);
-    expect(breaker.tripped).toBe(false);
-
-    // Deny 3 -> trips breaker
-    const res3 = (await tool.execute({} as never, {} as never)) as { error?: string };
-    expect(res3.error).toContain(`denied by the user ${MAX_CONSECUTIVE_DENIALS} times in a row`);
-    expect(breaker.denials).toBe(3);
-    expect(breaker.tripped).toBe(true);
-    expect(breaker.trip).toHaveBeenCalled();
+    expect(breaker.trip).not.toHaveBeenCalled();
   });
 
   it("a project deny beats a session allowance", async () => {

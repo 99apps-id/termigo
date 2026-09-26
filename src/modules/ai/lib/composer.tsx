@@ -530,7 +530,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
   const cancelQueued = useChatStore((st) => st.cancelSteer);
 
   // Pull a queued message back into the composer so it can be revised before
-  // it sends (Hermes' queue-edit, adapted: Hermes edits in place inside the
+  // it sends (edits in place inside the
   // strip; here the composer IS the editor, so the text moves back into it).
   // Attachments cannot be edited as text — they stay queued at the same
   // position so nothing is silently dropped and the send order is unchanged.

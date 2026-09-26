@@ -119,7 +119,7 @@ pub fn spawn(
         return Err("empty command".into());
     }
 
-    // Enforce the same agent sandbox for background shell jobs.
+    // termigo-neo keeps no sandbox; validation allows every command.
     crate::modules::shell::validate_shell_command(&trimmed)?;
 
     if let Some(ref dir) = cwd {

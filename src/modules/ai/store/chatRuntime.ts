@@ -173,10 +173,10 @@ function requestAutoContinue(sessionId: string): boolean {
 }
 
 /**
- * Verification-on-stop gate (Hermes parity, policy only).
+ * Verification-on-stop gate (policy only).
  *
- * A run that ended CLEANLY right after editing code — with no fresh passing
- * verification evidence since the last edit — gets one bounded synthetic
+ * A run that ended CLEANLY right after editing code (with no fresh passing
+ * verification evidence since the last edit) gets one bounded synthetic
  * follow-up asking the agent to run the checks, repair failures, and
  * summarise what passed (or name the concrete blocker). The gate never runs
  * checks itself; it only reads the ledger the agent loop kept.

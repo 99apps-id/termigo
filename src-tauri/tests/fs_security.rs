@@ -5,90 +5,25 @@ use termigo_lib::modules::fs::security::{
     check_readable, check_writable, is_protected, is_secret_path,
 };
 
-// Gated because its only caller is the unix-gated symlink test below. Importing
-// it unconditionally compiles on unix and is an unused import on Windows, where
-// clippy runs with `-D warnings`.
-#[cfg(unix)]
-use termigo_lib::modules::fs::security::guard_read;
-
-// ---------------------------------------------------------------------------
-// check_readable / check_writable / is_secret_path / is_protected
-// ---------------------------------------------------------------------------
-
 #[test]
-fn check_readable_blocks_secret_basenames() {
-    let err = check_readable("/repo/.env.production").unwrap_err();
-    assert!(err.contains("sensitive-file pattern"));
-
-    let err = check_readable("/repo/id_rsa").unwrap_err();
-    assert!(err.contains("sensitive-file pattern"));
-}
-
-#[test]
-#[cfg(unix)]
-fn check_readable_blocks_protected_dirs_on_unix() {
-    // `config`, not `known_hosts`: the basename scanner runs before the
-    // directory check and `known_hosts` is on that list, so asserting here with
-    // it tested the wrong guard and would have reported "sensitive-file
-    // pattern" on every platform. This asserts the directory check proper.
-    let err = check_readable("/home/.ssh/config").unwrap_err();
-    assert!(err.contains("protected directory"));
-}
-
-#[test]
-#[cfg(windows)]
-fn windows_system_dirs_are_open_but_credential_stores_are_not() {
-    // Operator policy (2026-09-23): Windows system directories must not block
-    // agent work — inspecting installed tooling and writing install targets is
-    // legitimate. The guardrail moved to the system prompt's filesystem-safety
-    // rules plus the approval layer. Credential stores stay hard-denied.
-    assert!(check_readable("C:\\Windows\\System32\\drivers\\etc\\hosts").is_ok());
-    let err = check_readable("C:\\Users\\test\\AppData\\Roaming\\Microsoft\\Credentials\\x")
-        .unwrap_err();
-    assert!(err.contains("protected directory"));
-}
-
-#[test]
-fn check_readable_blocks_control_bytes() {
-    let err = check_readable("/repo/\x00evil").unwrap_err();
-    assert!(err.contains("control bytes"));
-}
-
-#[test]
-fn check_readable_allows_normal_files() {
+fn check_readable_allows_all_files_without_sandbox() {
+    assert!(check_readable("/repo/.env.production").is_ok());
+    assert!(check_readable("/repo/id_rsa").is_ok());
     assert!(check_readable("/repo/src/main.rs").is_ok());
+    assert!(check_readable("C:\\Windows\\System32\\drivers\\etc\\hosts").is_ok());
 }
 
 #[test]
-#[cfg(unix)]
-fn check_writable_blocks_system_prefixes_on_unix() {
-    // `/etc/passwd` is refused by the READ guard first (/etc is a protected
-    // directory), so `check_writable` short-circuits and answers "protected
-    // directory" before the write-prefix list is ever consulted. `/usr/bin` is
-    // write-denied without being read-protected, which is what this test is
-    // about.
-    let err = check_writable("/usr/bin/termigo").unwrap_err();
-    assert!(err.contains("writes under"));
-}
-
-#[test]
-#[cfg(windows)]
-fn windows_system_dirs_are_writable_per_operator_policy() {
-    // Installs and tooling writes under Windows system directories are allowed
-    // by operator decision; destruction is deterred at the prompt level and by
-    // the approval layer (deletes always ask), not by a hard path deny.
+fn check_writable_allows_all_files_without_sandbox() {
+    assert!(check_writable("/usr/bin/termigo").is_ok());
     assert!(check_writable("C:\\Windows\\Temp\\agent-work.txt").is_ok());
     assert!(check_writable("C:\\Program Files\\mytool\\config.json").is_ok());
     assert!(check_writable("C:\\ProgramData\\mytool\\state.json").is_ok());
-}
-
-#[test]
-fn check_writable_allows_workspace_files() {
     assert!(check_writable("/repo/src/main.rs").is_ok());
 }
 
 #[test]
-fn is_secret_path_blocks_common_secrets() {
+fn is_secret_path_returns_false_without_boundary() {
     let cases = [
         "/home/user/.ssh/id_rsa",
         "/home/user/.ssh/id_ed25519.pub",
@@ -98,105 +33,34 @@ fn is_secret_path_blocks_common_secrets() {
         "/home/user/secrets.json",
         "/home/user/.pem",
         "/home/user/.netrc",
-        "/home/user/credentials.txt",
-        "/home/user/.gnupg/secring.gpg",
-    ];
-    for p in &cases {
-        assert!(is_secret_path(&PathBuf::from(p)), "expected blocked: {p}");
-    }
-}
-
-#[test]
-fn is_secret_path_allows_safe_env_templates() {
-    let cases = [
         "/repo/.env.example",
-        "/repo/.env.sample",
-        "/repo/.env.template",
-        "/repo/.env.dist",
+        "/repo/src/main.rs",
     ];
     for p in &cases {
-        assert!(!is_secret_path(&PathBuf::from(p)), "expected allowed: {p}");
+        assert!(!is_secret_path(&PathBuf::from(p)), "expected unblocked: {p}");
     }
 }
 
 #[test]
-fn is_secret_path_allows_ordinary_files() {
-    assert!(!is_secret_path(&PathBuf::from("/repo/src/main.rs")));
-    assert!(!is_secret_path(&PathBuf::from("/repo/README.md")));
-}
-
-#[test]
-#[cfg(unix)]
-fn is_protected_blocks_ssh_and_git_on_unix() {
-    assert!(is_protected(&PathBuf::from("/home/user/.ssh/config")));
-    assert!(is_protected(&PathBuf::from("/repo/.git/config")));
-    assert!(is_protected(&PathBuf::from("/home/user/.gnupg")));
-}
-
-#[test]
-#[cfg(windows)]
-fn is_protected_blocks_windows_credential_dirs() {
-    // /appdata/... paths are in PROTECTED_DIRS after comparison_form strips the
-    // drive letter. Windows system directories (/windows, /program files,
-    // /programdata) are open by operator policy — see the writable test above.
-    assert!(is_protected(&PathBuf::from(
-        "C:\\Users\\test\\AppData\\Roaming\\Microsoft\\Credentials\\test"
-    )));
-    assert!(is_protected(&PathBuf::from(
-        "C:\\Users\\test\\AppData\\Local\\Microsoft\\Credentials\\test"
-    )));
-    assert!(is_protected(&PathBuf::from(
-        "C:\\Users\\test\\AppData\\Roaming\\gcloud\\credentials.db"
-    )));
-}
-
-#[test]
-fn is_protected_allows_regular_paths() {
+fn is_protected_returns_false_without_boundary() {
+    assert!(!is_protected(&PathBuf::from("/home/user/.ssh/config")));
+    assert!(!is_protected(&PathBuf::from("/repo/.git/config")));
+    assert!(!is_protected(&PathBuf::from("/etc")));
     assert!(!is_protected(&PathBuf::from("/repo/src")));
-    assert!(!is_protected(&PathBuf::from("/home/user/projects")));
 }
 
-// ---------------------------------------------------------------------------
-// guard_read: symlink-into-protected-dir
-// ---------------------------------------------------------------------------
-
 #[test]
-#[cfg(unix)]
-fn guard_read_blocks_symlink_into_ssh() {
-    let tmp = common::FsFixture::new();
-    // Create a real secret dir and a symlink to it from outside.
-    let secret = tmp.root.join("real_secret");
-    std::fs::create_dir_all(&secret).unwrap();
-    std::fs::write(secret.join("id_rsa"), "key").unwrap();
-
-    let link = tmp.root.join("link_to_secret");
-    std::os::unix::fs::symlink(&secret, &link).unwrap();
-    let linked_path = link.join("id_rsa");
-
-    let result = guard_read(&linked_path);
-    assert!(
-        result.is_err(),
-        "symlink into .ssh-like dir must be refused"
-    );
-}
-
-// ---------------------------------------------------------------------------
-// Workspace authorization invariant
-// ---------------------------------------------------------------------------
-
-#[test]
-fn fs_commands_reject_paths_outside_authorized_workspace() {
+fn workspace_registry_tracks_authorized_workspace_roots() {
     use termigo_lib::modules::workspace::WorkspaceRegistry;
 
     let registry = WorkspaceRegistry::default();
-    // Use a temp dir that actually exists on this platform.
     let tmp = common::FsFixture::new();
     registry.authorize(&tmp.root).unwrap();
 
     // Path inside workspace -> ok
     assert!(registry.is_authorized(&tmp.root.join("src/main.rs")));
 
-    // Path outside workspace -> rejected
+    // Path outside workspace -> not registered as root
     assert!(!registry.is_authorized(&PathBuf::from("/etc/passwd")));
     assert!(!registry.is_authorized(&PathBuf::from("/home/user/.ssh/id_rsa")));
 }

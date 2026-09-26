@@ -332,8 +332,8 @@ export type Preferences = {
    * Verification-on-stop gate: when a run ends cleanly right after editing
    * code with no fresh passing verification evidence (run_checks / a passing
    * test-lint-build command / auto-verify lint), send ONE bounded follow-up
-   * asking the agent to verify, repair, and summarise — or name the concrete
-   * blocker. Off by default (opt-in, like Hermes); prose-only edits never
+   * asking the agent to verify, repair, and summarise: or name the concrete
+   * blocker. Off by default (opt-in); prose-only edits never
    * trigger it.
    */
   verifyOnStop: boolean;

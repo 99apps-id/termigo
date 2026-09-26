@@ -84,10 +84,14 @@ export function truncateProjectMemory(content: string): string {
 }
 
 export const PROJECT_RULE_FILES = [
+  "USER.md",
+  "user.md",
+  "AGENTS.md",
+  "agents.md",
   "TERMIGO.md",
+  "termigo.md",
   ".termigorules",
   "CLAUDE.md",
-  "AGENTS.md",
 ] as const;
 
 export async function readProjectRules(

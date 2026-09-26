@@ -12,6 +12,7 @@ dist
 dist-ssr
 *.local
 stats.html
+.pnpm-store/
 
 # Environment/secret files (never commit API keys or tokens)
 .env
@@ -56,6 +57,7 @@ pentest-reports/
 
 # Go companion CLI build output (build it at release time, not in tracking)
 cli/bin/
+.tmp-go/
 
 .antigravitycli/
 
@@ -72,8 +74,32 @@ cli/bin/
 # tarballs, not this directory, so nothing depends on tracking it.
 .cargo/
 
-# Local security audit reports (not for public repo)
+# Audit and bug reports
+AUDIT-*.md
+AUDIT-REPORT.md
+BUG-REPORT-*.md
 SECURITY-AUDIT-*.md
+audit-*.log
+audit-*.txt
+*.audit.log
+
+# Test execution scratch and coverage artifacts
+test-*.log
+test-*.txt
+testing-*.md
+test-results/
+coverage/
+*.lcov
+*.coverage
+
+# Reference analysis (Hermes, Crush, Muse)
+CRUSH-ANALYSIS.md
+OPR-ANALYSIS.md
+docs/contributing/muse-audit.md
+*hermes-analysis*
+*crush-analysis*
+*muse-audit*
+.hermes/
 
 # Built binaries & headless-safeguard artifacts (build/ops output, not source)
 #

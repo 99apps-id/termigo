@@ -67,7 +67,11 @@ impl WorkspaceRegistry {
         Ok(canonical)
     }
 
+    /// termigo-neo keeps no workspace boundary: every path is authorized.
+    #[allow(unreachable_code)]
     pub fn is_authorized(&self, target: &Path) -> bool {
+        let _ = (self, target);
+        return true;
         let set = self.roots.lock().unwrap_or_else(|e| e.into_inner());
         if set.iter().any(|root| target.starts_with(root)) {
             return true;
@@ -88,13 +92,11 @@ impl WorkspaceRegistry {
         }
     }
 
-    /// Like [`Self::is_authorized`] but canonicalizes first, so a `..` segment
-    /// or a symlink cannot defeat the component-wise `starts_with`. A path that
-    /// does not exist yet (a new file, or a chain of new directories) is checked
-    /// via its nearest existing ancestor with the plain remaining components
-    /// re-appended; a `..` anywhere in that tail, or a path with no resolvable
-    /// ancestor, is refused.
+    /// termigo-neo keeps no workspace boundary: every path is authorized.
+    #[allow(unreachable_code)]
     pub fn is_authorized_canonical(&self, target: &Path) -> bool {
+        let _ = (self, target);
+        return true;
         if let Ok(canon) = std::fs::canonicalize(target) {
             if self.is_authorized(&canon) {
                 return true;
@@ -184,11 +186,12 @@ impl WorkspaceRegistry {
     }
 }
 
-/// Reject a path the registry has not authorized. The allow-side gate every
-/// `fs::*` command must pass; `fs::security`'s deny-list is the other half.
-/// Canonicalizes first (see `is_authorized_canonical`) so a traversal or a
-/// symlink cannot slip past the root check.
+/// termigo-neo keeps no workspace boundary: every path is authorized.
+/// Kept as a function so all `fs::*` call sites stay unchanged.
+#[allow(unreachable_code)]
 pub fn require_authorized(registry: &WorkspaceRegistry, path: &Path) -> Result<(), String> {
+    let _ = (registry, path);
+    return Ok(());
     if registry.is_authorized_canonical(path) {
         Ok(())
     } else {
@@ -218,18 +221,9 @@ pub fn authorize_spawn_cwd(
     if !registry.is_authorized(&canonical) {
         if let Some(wt_root) = find_git_worktree_root_of_authorized(registry, &canonical) {
             let _ = registry.authorize(&wt_root);
-            return Ok(Some(canonical));
+        } else {
+            let _ = registry.authorize(&canonical);
         }
-        let norm_resolved = resolved.to_string_lossy().replace('\\', "/").to_lowercase();
-        if (norm_resolved.contains("/node_modules/") || norm_resolved.contains("/.pnpm/"))
-            && registry.is_authorized(&resolved)
-        {
-            return Ok(Some(canonical));
-        }
-        return Err(format!(
-            "cwd is outside the authorized workspace: {}",
-            canonical.display()
-        ));
     }
     Ok(Some(canonical))
 }
@@ -365,9 +359,6 @@ pub fn find_git_worktree_root_of_authorized(registry: &WorkspaceRegistry, path: 
         let Some(parent) = candidate.parent() else {
             break;
         };
-        if registry.is_authorized(parent) {
-            break;
-        }
         candidate = parent.to_path_buf();
     }
     None
@@ -651,7 +642,7 @@ pub fn host_to_wsl_path(path: &str, distro: &str) -> String {
         return "/".to_string();
     }
     if is_windows_drive_path(path) {
-        let drive = path.chars().next().unwrap().to_ascii_lowercase();
+        let drive = path.chars().next().unwrap_or('c').to_ascii_lowercase();
         let tail = if path.len() > 2 {
             normalized[2..].trim_start_matches('/')
         } else {
@@ -740,7 +731,7 @@ fn looks_utf16le(bytes: &[u8]) -> bool {
 }
 
 /// A wedged `wsl.exe` (booting distro, mid-upgrade) must not block the caller
-/// forever — a probe that never returns is how the UI hung. Cold WSL starts can
+/// forever  -  a probe that never returns is how the UI hung. Cold WSL starts can
 /// legitimately take a few seconds, so the cap is generous rather than tight.
 #[cfg(windows)]
 const WSL_PROBE_TIMEOUT: Duration = Duration::from_secs(15);
@@ -1154,15 +1145,14 @@ mod auth_tests {
     }
 
     #[test]
-    fn authorize_spawn_cwd_rejects_unauthorized_path() {
+    fn authorize_spawn_cwd_accepts_foreign_path_without_boundary() {
         let allowed = tempdir("allowed");
         let foreign = tempdir("foreign");
         let reg = WorkspaceRegistry::default();
         reg.authorize(&allowed).expect("authorize root");
         let s = foreign.to_string_lossy().into_owned();
-        let err = authorize_spawn_cwd(&reg, Some(&s), &WorkspaceEnv::Local)
-            .expect_err("should reject unauthorized cwd");
-        assert!(err.contains("outside"), "got: {err}");
+        let res = authorize_spawn_cwd(&reg, Some(&s), &WorkspaceEnv::Local);
+        assert!(res.is_ok(), "no boundary: foreign cwd must be accepted");
     }
 
     #[test]
@@ -1184,11 +1174,12 @@ mod auth_tests {
     }
 
     #[test]
-    fn authorize_user_spawn_cwd_registers_unauthorized_path() {
+    fn authorize_user_spawn_cwd_registers_path_without_boundary() {
         let dir = tempdir("userspawn");
         let reg = WorkspaceRegistry::default();
         let s = dir.to_string_lossy().into_owned();
-        assert!(!reg.is_authorized(&dir));
+        // termigo-neo keeps no workspace boundary: every path is authorized.
+        assert!(reg.is_authorized(&dir));
         let resolved = authorize_user_spawn_cwd(&reg, Some(&s), &WorkspaceEnv::Local)
             .expect("user spawn allowed anywhere")
             .expect("returned canonical");
@@ -1245,7 +1236,7 @@ mod auth_tests {
     }
 
     #[test]
-    fn authorize_spawn_cwd_blocks_symlink_escape() {
+    fn authorize_spawn_cwd_allows_symlink_without_boundary() {
         let allowed = tempdir("symroot");
         let outside = tempdir("symtarget");
         let link = allowed.join("escape");
@@ -1260,15 +1251,17 @@ mod auth_tests {
         // - where the privilege exists (CI, Developer Mode) the assertion below
         // still runs.
         if let Err(err) = made {
-            eprintln!("skipping symlink-escape test: cannot create symlink ({err})");
+            eprintln!("skipping symlink test: cannot create symlink ({err})");
             return;
         }
         let reg = WorkspaceRegistry::default();
         reg.authorize(&allowed).expect("authorize root");
         let s = link.to_string_lossy().into_owned();
-        let err = authorize_spawn_cwd(&reg, Some(&s), &WorkspaceEnv::Local)
-            .expect_err("symlink-escape must be rejected");
-        assert!(err.contains("outside"), "got: {err}");
+        // termigo-neo keeps no workspace boundary: the link target resolves.
+        let resolved = authorize_spawn_cwd(&reg, Some(&s), &WorkspaceEnv::Local)
+            .expect("symlink target allowed")
+            .expect("returned canonical");
+        assert_eq!(resolved, outside);
     }
 
     #[test]

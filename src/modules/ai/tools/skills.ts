@@ -198,7 +198,7 @@ ${skill.body}`,
 
     update_skill: tool({
       description:
-        "Update or refine an existing skill in .termigo/skills/ based on new learnings, troubleshooting, or changed steps (Hermes Agent self-improving loop). Allows updating the description, replacing content, or appending new troubleshooting notes. Asks for approval.",
+        "Update or refine an existing skill in .termigo/skills/ based on new learnings, troubleshooting, or changed steps (self-improving loop). Allows updating the description, replacing content, or appending new troubleshooting notes. Asks for approval.",
       inputSchema: z.object({
         name: z
           .string()

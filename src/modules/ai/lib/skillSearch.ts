@@ -22,8 +22,7 @@ export type SkillSource =
   | "user"
   | "codex"
   | "openclaw"
-  | "claude"
-  | "hermes";
+  | "claude";
 
 export type SkillCandidate = {
   /** Directory name, which is also the skill's name. */
@@ -51,16 +50,6 @@ export const FOREIGN_ROOTS: { rel: string; source: SkillSource }[] = [
   { rel: ".openclaw/plugin-skills", source: "openclaw" },
   { rel: ".codex", source: "codex" },
   { rel: ".agents/skills", source: "claude" },
-  // Hermes keeps a real, hand-written shelf - productivity/docx, xlsx,
-  // powerpoint, pdf, email, devops - rather than a plugin cache, and it nests
-  // them one category deep. `**/SKILL.md` already walks that, and the skill's
-  // directory is still the name, so nothing else has to know the layout.
-  //
-  // Reading these in place is the point: a skill that is copied into this
-  // workspace splits into two versions that drift, while one read from its own
-  // shelf keeps improving wherever it is maintained. Reusing another agent's
-  // procedure is cheaper than rewriting it and always will be.
-  { rel: ".hermes/skills", source: "hermes" },
 ];
 
 /** Split a query into lowercase words worth matching on. */
@@ -142,7 +131,6 @@ export function shortlist(
   const order: SkillSource[] = [
     "workspace",
     "user",
-    "hermes",
     "claude",
     "openclaw",
     "codex",

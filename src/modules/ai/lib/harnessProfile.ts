@@ -2,7 +2,7 @@
 // (the "harness": system prompt, tool ordering, loop budget).
 //
 // Inspired by DeepSeek Harness's "everything is a plugin" profiles and the
-// Meta-Harness search (hermes-agent-metaharness) mutations: instead of hand
+// Meta-Harness search mutations: instead of hand
 // tuning one prompt, ship a set of named profiles that shift how the agent is
 // run, let a user pick one, and over time pick the one that works best for this
 // workspace (see harnessFrontier).

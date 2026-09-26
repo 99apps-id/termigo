@@ -4,7 +4,7 @@ import { useChatStore } from "../store/chatStore";
 import { buildConfiguredLanguageModel } from "./agent";
 
 /**
- * Context-aware side questions (`/btw`) — Hermes parity, one-shot path.
+ * Context-aware side questions (`/btw`): one-shot path.
  *
  * Answers a question ABOUT the conversation without touching it: no synthetic
  * turns are appended, the transcript stays byte-identical, and the prompt
@@ -19,7 +19,7 @@ import { buildConfiguredLanguageModel } from "./agent";
  * the AI SDK never lands in the eager startup bundle.
  */
 
-// Per-message and total character budgets (Hermes: side_question.py).
+// Per-message and total character budgets.
 const PER_MESSAGE_CHAR_CAP = 2000;
 const TRANSCRIPT_CHAR_BUDGET = 24000;
 
@@ -60,7 +60,7 @@ function stringifyOutput(output: unknown): string {
 /**
  * Render the transcript as plain text: newest-biased fit to `charBudget`,
  * tool calls summarised by name, tool results truncated, system messages
- * skipped. Port of Hermes' `render_history_for_side_question`.
+ * skipped.
  */
 export function renderTranscript(
   messages: readonly SideQuestionMessage[],

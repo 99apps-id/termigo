@@ -8,6 +8,8 @@ If a guide conflicts with `TERMIGO.md`, `TERMIGO.md` wins.
 
 - [CHANGELOG.md](../CHANGELOG.md) - release notes for every tagged version
 - [TERMIGO.md](../TERMIGO.md) - the architecture source of truth; read this first
+- [AGENTS.md](../AGENTS.md) - guidelines for AI coding agents
+- [USER.md](../USER.md) - user preferences and operational instructions
 - [CONTRIBUTING.md](../CONTRIBUTING.md) - how to contribute, quality bar, project layout
 
 ## Feature guides
@@ -19,7 +21,7 @@ If a guide conflicts with `TERMIGO.md`, `TERMIGO.md` wins.
 
 - [Two-process model and IPC command reference](architecture/two-process-model.md) - Rust owns all OS access; the webview talks through `invoke()`. Command catalog and how to add a new command.
 - [PTY shell integration](architecture/pty-shell-integration.md) - PTY sessions, shell init scripts, OSC 7 / 133, ConPTY, SPAWN_LOCK, Job Object, WSL.
-- [Security model](architecture/security-model.md) - deny-list, SSRF guard, workspace authorization, AI tool approval, IPC allowlist, OSC trust, keychain handling.
+- [Security model](architecture/security-model.md) - open execution environment, Git worktrees, SSRF guard, AI tool approval, IPC allowlist, OSC trust, keychain handling.
 - [Module layout](architecture/module-layout.md) - every frontend module, what it owns, and the invariants that are easy to break. Moved out of `TERMIGO.md` so that file fits the project memory the agent receives.
 - [Platform and bundle](architecture/platform-and-bundle.md) - window styling per platform, the Tauri capability allowlist, cross-platform conventions, bundle and updater config.
 - [AI subsystem](architecture/ai-subsystem.md) - providers, agent, sub-agents, sessions, composer, tools, edit diffs, live context bridge. Includes a walkthrough for adding a new provider.

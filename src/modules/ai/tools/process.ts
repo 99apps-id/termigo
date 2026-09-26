@@ -38,7 +38,7 @@ export function buildProcessTools(ctx: ToolContext) {
   return {
     process: tool({
       description:
-        "Unified process management tool (Hermes Agent style). Manage long-running background tasks, dev servers, crawlers, watchers, and listeners. Actions: 'spawn' (launch command in background), 'list' (list all managed background processes), 'status' (inspect specific process status, uptime, exit code and latest log snippet), 'logs' (stream logs from offset), 'wait' (block until process exits or timeout), 'kill' (terminate process by handle), 'find_port' (detect which process is listening on a local port).",
+        "Unified process management tool. Manage long-running background tasks, dev servers, crawlers, watchers, and listeners. Actions: 'spawn' (launch command in background), 'list' (list all managed background processes), 'status' (inspect specific process status, uptime, exit code and latest log snippet), 'logs' (stream logs from offset), 'wait' (block until process exits or timeout), 'kill' (terminate process by handle), 'find_port' (detect which process is listening on a local port).",
       inputSchema: z.object({
         action: z
           .enum([

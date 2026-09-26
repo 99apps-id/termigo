@@ -1,15 +1,13 @@
 /**
- * Subagent fan-out aggregation, ported from Hermes' subagent tree helpers.
+ * Subagent fan-out aggregation helpers.
  *
- * Hermes reconstructs a full spawn tree from `parentId` links; Termigo's
- * `SubagentRun` records carry only a nesting `depth` (no parent pointer), so
- * the port keeps what is still meaningful without one: per-depth widths (which
- * drive the unicode sparkline — the "shape" of the fan-out at a glance) and
+ * Termigo's `SubagentRun` records carry a nesting `depth`: per-depth widths (which
+ * drive the sparkline: the "shape" of the fan-out at a glance) and
  * flat totals for the summary line. Both are pure functions over run-like
  * records so the live HUD and any future replay view share them.
  */
 
-/** Minimal shape the helpers need — satisfied by `SubagentRun`. */
+/** Minimal shape the helpers need (satisfied by `SubagentRun`). */
 export type SubagentRunLike = {
   depth?: number;
   status: string;

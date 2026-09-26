@@ -367,7 +367,7 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
     });
   });
 
-  describe("Hermes stability patterns", () => {
+  describe("Stability patterns", () => {
     it("parses TelegramApiError with retry_after correctly", () => {
       const err = new TelegramApiError(
         429,
@@ -380,7 +380,7 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
       expect(err.message).toContain("Telegram API 429: Too Many Requests");
     });
 
-    it("treats 'message is not modified' as a successful edit (Hermes pattern)", async () => {
+    it("treats 'message is not modified' as a successful edit", async () => {
       const origFetch = globalThis.fetch;
       const controller = new AbortController();
       globalThis.fetch = vi.fn().mockResolvedValue({

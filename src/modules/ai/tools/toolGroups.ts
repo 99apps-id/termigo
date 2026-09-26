@@ -176,12 +176,6 @@ export const TOOL_GROUPS: readonly ToolGroup[] = [
     tools: ["read_pdf"],
   },
   {
-    id: "image_generation",
-    label: "Image generation",
-    description: "Generate images from a prompt.",
-    tools: ["generate_image"],
-  },
-  {
     id: "history",
     label: "Command history search",
     description: "Search and clear the shell history index.",

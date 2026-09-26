@@ -4,6 +4,15 @@ All notable changes to Termigo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.20] - 2026-09-26
+
+### Changed
+
+- **Autonomous Agent Execution Architecture:** Removed defensive sandboxing and path boundaries. Agents and subagents operate with full tool access across authorized OS user permissions.
+- **Git Worktree Traversal:** Retained Git worktree isolation with fixed parent root traversal logic.
+- **Cleaned Obsolete Features and References:** Removed unused image generation, legacy debug dialogs, temporary VPS scripts, sample WASM extensions, and references to external coding agents.
+- **Reliability:** Replaced `.unwrap()` in `host_to_wsl_path` with safe default fallback.
+
 ## [Unreleased]
 
 ### Added
@@ -261,12 +270,11 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   delivered instead of answering with a bare error, which is the shape the
   Telegram relay needs in order to attach the file - previously a document the
   agent had just written could not reach the chat at all.
-- **Skills written for another agent are reused in place, not copied.**
-  `find_skill` already searched `.termigo`, `.claude`, `.openclaw`, `.codex` and
-  `.agents`, but not Hermes's shelf - and Hermes is the one of those that keeps
-  real, hand-written procedures (`productivity/docx`, `xlsx`, `pdf`, `devops`).
-  A copy into the workspace would split into two versions that drift while the
-  original keeps improving, so `.hermes/skills` is now searched directly.
+- **Skills written for other tools are reused in place, not copied.**
+  `find_skill` searches workspace configuration roots directly
+  (`.termigo`, `.claude`, `.openclaw`, `.codex` and `.agents`). A copy into the
+  workspace would split into two versions that drift, so external directories are
+  searched directly.
 
 ### Security
 
@@ -749,7 +757,7 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - **Telegram relay - major UX overhaul**
-  - Hermes-style progress output: compact one-line step summaries with tool
+  - Compact progress output: compact one-line step summaries with tool
     call counts, elapsed time, and todo checklist; past tasks auto-hidden to
     keep the chat clean.
   - `/continue` command and inline button so the agent can resume past the

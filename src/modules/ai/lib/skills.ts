@@ -202,7 +202,7 @@ export async function saveSkill(
   return { saved: true, path: skillPath(workspaceRoot, skill.name), replaced };
 }
 
-/** Update or refine an existing skill (Hermes-style evolution). */
+/** Update or refine an existing skill. */
 export async function updateSkill(
   workspaceRoot: string | null,
   name: string,

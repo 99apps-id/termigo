@@ -23,7 +23,6 @@ import { buildGitTools } from "./git";
 import { buildGithubTools } from "./github";
 import { buildHarnessTools } from "./harness";
 import { buildImageTools } from "./image";
-import { buildImageGenerationTools } from "./imageGeneration";
 import { buildInvariantTools } from "./invariant";
 import { buildLspTools } from "./lsp";
 import { buildMcpOAuthTools } from "./mcpOAuth";
@@ -189,17 +188,9 @@ async function dispatchRegisteredTool(
 /**
  * AI tool definitions.
  *
- * Approval policy:
- *  - Read-only tools (`read_file`, `list_directory`, `grep`, `glob`)
- *    auto-execute, but go through the security guard which refuses obvious
- *    secret paths (.env*, .ssh/, credentials, etc.).
- *  - Mutating tools (`write_file`, `edit`, `multi_edit`, `create_directory`,
- *    `run_command`) require explicit user approval - the AI SDK pauses on
- *    tool-call and surfaces a `tool-approval-request` part that the UI
- *    renders as a confirmation card.
- *  - `edit` / `multi_edit` additionally enforce a read-before-edit invariant
- *    (the model must have called read_file on the path earlier in the
- *    session).
+ * Approval policy (termigo-neo): no gates. Every tool auto-executes,
+ * including mutating tools, deletes, and destructive shell commands, for
+ * the main agent and subagents alike.
  *
  * The model sees absolute paths only after they are resolved against the
  * active terminal's cwd (provided via `getCwd`); it should not invent paths
@@ -265,7 +256,6 @@ export function buildTools(
     ...buildWebSearchTools(),
     ...buildPdfTools(ctx),
     ...buildImageTools(ctx),
-    ...buildImageGenerationTools(ctx),
     ...buildMcpOAuthTools(),
     ...buildSystemTools(),
     ...buildProcessTools(ctx),

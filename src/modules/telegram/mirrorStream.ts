@@ -14,7 +14,7 @@
 // it seen, and the completed answer can never be delivered: truncated replies.
 //
 // So the message is sent once and then EDITED in place while its text grows,
-// which is what the other agent bots do (hermes, openclaw). The decision is a
+// which is what relay bots do. The decision is a
 // pure function over (text, settled, state, now) so the timing rules can be
 // asserted without a network, a chat, or a fake clock.
 //

@@ -1,20 +1,11 @@
-import { commandRisk, deletesFiles } from "./commandRisk";
-import { isCustomTool } from "./customToolNames";
-import { isExtensionTool } from "./extensionToolNames";
 import { isMcpTool } from "./mcpToolNames";
 
 // Approval policy for agent tool calls.
 //
-// Read-only tools (read_file, grep, list_directory, bash_logs, ...) never ask:
-// they carry no `needsApproval`, so they are not part of this decision at all.
-// What reaches here is only the mutating set, and the modes below decide which
-// of those may proceed without stopping for a click.
-//
-// The safety rails are NOT part of this decision. Every tool re-checks its own
-// input inside `execute` (checkWritableCanonical, checkShellCommand), after
-// approval has already been granted. Auto-approval therefore skips the prompt,
-// never the check: a command that security.ts refuses is still refused in
-// every mode.
+// termigo-neo runs without gates: every tool is auto-approved in every mode,
+// for the main agent and subagents alike. The mode vocabulary below is kept
+// for compatibility (stored preferences, UI labels); it no longer changes
+// behavior. `approvalTier` remains as a display helper only.
 
 /** Tools that change files inside the workspace. */
 const EDIT_TOOLS = new Set([
@@ -78,14 +69,11 @@ const EXEC_TOOLS = new Set([
 ]);
 
 export type ApprovalMode =
-  /** Every mutating tool waits for a click. */
+  /** Kept for compatibility; auto-approves everything in termigo-neo. */
   | "ask"
-  /** File edits inside the workspace proceed; commands still wait. */
+  /** Kept for compatibility; auto-approves everything in termigo-neo. */
   | "edits"
-  /** Nothing waits except deletes. The safety checks still run. The default
-   *  (operator decision, AUDIT-2026-10 SEC-4: approval friction stays at zero;
-   *  the guards that remain in this mode are ALWAYS_ASK_TOOLS, deletesFiles,
-   *  the deny-lists and the prompt's filesystem-safety rules). */
+  /** Nothing waits, including deletes. termigo-neo auto-runs everything. */
   | "all";
 
 export const APPROVAL_MODES: readonly ApprovalMode[] = ["ask", "edits", "all"];
@@ -99,34 +87,16 @@ export const APPROVAL_MODE_LABELS: Record<ApprovalMode, string> = {
 };
 
 export const APPROVAL_MODE_HINTS: Record<ApprovalMode, string> = {
-  ask: "Every file change and command waits for your approval.",
-  edits:
-    "File edits in the workspace run automatically. Commands and agent hand-offs still ask.",
-  all: "Everything runs without asking, except deleting files - that always waits, in every mode. Safety checks still block unsafe paths and commands.",
+  ask: "Everything runs without asking (termigo-neo keeps no gates).",
+  edits: "Everything runs without asking (termigo-neo keeps no gates).",
+  all: "Everything runs without asking, including deletes.",
 };
 
 /**
  * Whether a tool call may proceed without asking.
  *
- * Unknown tool names are treated as exec-tier: a tool added later should
- * default to asking rather than inherit a blanket allowance.
+ * termigo-neo: always true. Kept as a function so call sites stay unchanged.
  */
-/**
- * Tools that ask every time once they would act on someone else's machine.
- *
- * The safety layer's whole shape is "inside this workspace": every file tool
- * refuses paths outside it, which is what makes delegating them reasonable.
- * A command on a remote host has no equivalent boundary - `apt`, `systemctl`
- * and `docker` are all legitimate and all capable of taking down a production
- * server - so this is the one place a mode is not allowed to speak for the
- * user.
- */
-const REMOTE_COMMAND_TOOLS = new Set([
-  "bash_run",
-  "bash_background",
-  "ssh_run_command",
-]);
-
 export type ApprovalContext = {
   /** The call would run against the host of an open SSH session. */
   onRemoteHost?: boolean;
@@ -136,75 +106,12 @@ export type ApprovalContext = {
   action?: string;
 };
 
-/**
- * Tools no mode delegates, however permissive the mode.
- *
- * The modes exist to hand over routine work, not the power to destroy. Every
- * other tool in both tiers changes bytes that can be recovered - by reading
- * the file again, or from git; a delete of something untracked leaves nothing
- * to read at all. `EXEC_TOOLS` already says that asymmetry is worth a click
- * "even from someone who has already delegated ordinary edits", but the `all`
- * shortcut used to return before anything could act on it.
- */
-const ALWAYS_ASK_TOOLS = new Set(["delete_file"]);
-
 export function isAutoApproved(
-  toolName: string,
-  mode: ApprovalMode,
-  ctx: ApprovalContext = {},
+  _toolName: string,
+  _mode: ApprovalMode,
+  _ctx: ApprovalContext = {},
 ): boolean {
-  // The floor, checked before every other branch - including the `all`
-  // shortcut and the remote-command path, both of which would otherwise
-  // return first.
-  if (ALWAYS_ASK_TOOLS.has(toolName)) return false;
-  // A shell command deletes just as permanently as the tool named after it,
-  // and `rm -rf src` would otherwise ride through as an ordinary command. Any
-  // tool carrying a `command` is covered, so custom tools cannot route around
-  // this by not being named bash_run.
-  if (ctx.command && deletesFiles(ctx.command)) return false;
-  // Remote commands used to ask in every mode. In practice that meant dozens
-  // of prompts to set up one server, most of them for `ls` and `docker ps`,
-  // and a prompt that always appears is a prompt nobody reads. The gate now
-  // sits on what carries the risk rather than on the fact of being remote.
-  const isRemoteCommand =
-    (ctx.onRemoteHost && REMOTE_COMMAND_TOOLS.has(toolName)) ||
-    toolName === "ssh_run_command";
-  if (isRemoteCommand) {
-    if (mode === "all") return true;
-    if (mode === "ask") return false;
-    // `Auto-approve edits` delegates changes inside the workspace. A remote
-    // command that only reports changes nothing anywhere, so it belongs with
-    // the read-only tools that never asked. Anything that could change the
-    // server still stops - and the classifier treats whatever it does not
-    // recognise as changing the server.
-    return commandRisk(ctx.command ?? "", { allowSudo: true }) === "inspect";
-  }
-  // For process management, read-only inspection actions do not mutate or spawn
-  // anything, so they auto-approve in 'edits' mode just like other read operations.
-  if (
-    toolName === "process" &&
-    ctx.action &&
-    ["list", "status", "logs", "wait", "find_port"].includes(ctx.action)
-  ) {
-    return mode !== "ask";
-  }
-  if (mode === "all") return true;
-  // An MCP tool is third-party code doing something this app cannot inspect,
-  // so it never rides along with "auto-approve edits" - which is a statement
-  // about files in this workspace, not about arbitrary external actions. The
-  // unknown-name fallback would already land here; saying it outright means a
-  // later change to that fallback cannot quietly widen this.
-  if (isMcpTool(toolName)) return false;
-  // Same reasoning for extension tools: third-party code doing something this
-  // app cannot inspect. An extension may declare `auto`, which decides whether
-  // the tool asks at all - it does not decide that "auto-approve edits" covers
-  // it, because that mode is a statement about files in this workspace.
-  if (isExtensionTool(toolName) && mode === "edits") return false;
-  // A custom tool runs a shell command, so it belongs with bash_run rather
-  // than with the file edits, whoever wrote the template.
-  if (isCustomTool(toolName) && mode === "edits") return false;
-  if (mode === "edits") return EDIT_TOOLS.has(toolName);
-  return false;
+  return true;
 }
 
 /** Tool-name tier, for explaining a decision in the UI. */
@@ -220,23 +127,13 @@ export function approvalTier(toolName: string): "edit" | "exec" {
 /**
  * Whether a sub-agent's write has to stop and ask.
  *
- * Sub-agents ask through the approval queue rather than the SDK's approval
- * protocol, so none of the machinery that answers the main agent's questions
- * reaches them. Both of these were found by auditing that gap:
- *
- * - The mode the user chose applies here too. It did not at first, so a run
- *   under `Auto-approve all` stopped dead on every builder write - and since a
- *   blocked sub-agent looks exactly like a slow one, it read as a hang rather
- *   than as a question.
- * - Plan mode already routes a write into the review queue instead of
- *   performing it. Asking first would make the user approve the same edit
- *   twice: once here, once in the plan they are about to review.
+ * termigo-neo: always false. Subagents run with the same freedom as the main
+ * agent and never block on the approval queue.
  */
 export function subagentWriteNeedsApproval(
-  toolName: string,
-  mode: ApprovalMode,
-  ctx: { planActive: boolean; onRemoteHost?: boolean } = { planActive: false },
+  _toolName: string,
+  _mode: ApprovalMode,
+  _ctx: { planActive: boolean; onRemoteHost?: boolean } = { planActive: false },
 ): boolean {
-  if (ctx.planActive) return false;
-  return !isAutoApproved(toolName, mode, { onRemoteHost: ctx.onRemoteHost });
+  return false;
 }

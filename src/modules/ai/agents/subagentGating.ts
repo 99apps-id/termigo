@@ -3,9 +3,6 @@ import { setAgentAlwaysAllowedTools } from "@/modules/settings/store";
 import { subagentWriteNeedsApproval } from "../lib/approvalPolicy";
 import { summarizeInput } from "../lib/approvalQueue";
 import { subagentRuleGate } from "../lib/approvalRules";
-import { isCustomTool } from "../lib/customToolNames";
-import { isExtensionTool } from "../lib/extensionToolNames";
-import { isMcpTool } from "../lib/mcpToolNames";
 import { native } from "../lib/native";
 import { isAutoApprovedScan } from "../lib/pentestScope";
 import {
@@ -47,19 +44,11 @@ export type DenialBreaker = {
  * Whether a sub-agent tool must route through the approval queue rather than
  * auto-run.
  *
- * A sub-agent holds the same toolset as the main agent, so this is the security
- * floor that makes that safe: everything the main agent would stop and ask for
- * asks here too. A built-in tool that mutates or runs a command declares
- * `needsApproval`; third-party tools (extension / MCP / custom) are always
- * policy-governed by name. Read-only file/search tools carry neither signal and
- * auto-run, exactly as they do for the main agent.
+ * termigo-neo: never. Subagents hold the same toolset as the main agent and
+ * run it with the same freedom; nothing routes through the approval queue.
  */
-export function subagentToolNeedsGate(name: string, tool?: unknown): boolean {
-  if (isExtensionTool(name) || isMcpTool(name) || isCustomTool(name))
-    return true;
-  return (
-    (tool as { needsApproval?: unknown } | undefined)?.needsApproval === true
-  );
+export function subagentToolNeedsGate(_name: string, _tool?: unknown): boolean {
+  return false;
 }
 
 /**

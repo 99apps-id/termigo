@@ -1,5 +1,4 @@
-// Live syntax highlighting for the composer, ported from Hermes'
-// composerHighlights.ts and adapted to Termigo's reference vocabulary:
+// Live syntax highlighting for the composer, adapted to Termigo's reference vocabulary:
 // `/command` (built-in or user-defined), `#snippet` handles, and `@file`
 // refs — the same three tokens the picker popovers trigger on, so what the
 // picker accepts is what lights up.

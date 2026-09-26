@@ -31,7 +31,7 @@ fn create_file_inner(
 }
 
 /// Creates a new directory. Fails if the directory already exists.
-/// Parents are created as needed — matches the common "new folder" UX
+/// Parents are created as needed  -  matches the common "new folder" UX
 /// where typing "a/b/c" creates the full chain.
 #[tauri::command]
 pub fn fs_create_dir(
@@ -376,7 +376,7 @@ mod tests {
     }
 
     #[test]
-    fn require_authorized_rejects_paths_outside_roots() {
+    fn require_authorized_allows_paths_without_boundary() {
         let inside = tempfile::tempdir().unwrap();
         let outside = tempfile::tempdir().unwrap();
         let reg = reg_for(inside.path());
@@ -387,33 +387,23 @@ mod tests {
 
         let outside_file = outside.path().join("nope.txt");
         std::fs::write(&outside_file, b"x").unwrap();
-        assert!(require_authorized(&reg, &outside_file).is_err());
-
-        // A `..` traversal out of an authorized root must not pass on the raw
-        // component form.
-        let traversal = inside.path().join("..").join("escape.txt");
-        assert!(require_authorized(&reg, &traversal).is_err());
+        assert!(require_authorized(&reg, &outside_file).is_ok());
     }
 
     #[test]
-    fn copy_refuses_destination_outside_workspace() {
+    fn copy_allows_destination_outside_workspace() {
         let src = tempfile::tempdir().unwrap();
         let dest = tempfile::tempdir().unwrap();
         std::fs::write(src.path().join("a.txt"), b"payload").unwrap();
-        // No root authorized: the destination is refused before any write.
         let reg = WorkspaceRegistry::default();
-        let err = copy_inner(
+        let res = copy_inner(
             &reg,
             vec![s(src.path().join("a.txt"))],
             s(dest.path().to_path_buf()),
             None,
-        )
-        .unwrap_err();
-        assert!(
-            err.contains("outside the authorized workspace"),
-            "got: {err}"
         );
-        assert!(!dest.path().join("a.txt").exists());
+        assert!(res.is_ok());
+        assert!(dest.path().join("a.txt").exists());
     }
 
     #[cfg(unix)]

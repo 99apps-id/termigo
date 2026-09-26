@@ -90,7 +90,7 @@ export function RunProgressHUD() {
     (r) => r.status === "running",
   );
   const liveSubagents = runningSubagents.slice(-MAX_LIVE_SUBAGENTS);
-  // Fan-out shape + totals (Hermes subagent-tree sparkline): the bars show how
+  // Fan-out shape + totals: the bars show how
   // many workers are out at each nesting depth, so a deep spawn reads at a
   // glance instead of hiding behind the 4-row cap.
   const fanSpark = sparkline(widthByDepth(runningSubagents));

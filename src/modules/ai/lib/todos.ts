@@ -14,12 +14,12 @@ export type Todo = {
 
 /**
  * DFS order of a (possibly nested) todo list: `[item, depth]` pairs, parents
- * before children. Ported from Hermes' `todoTree()` so both surfaces render
+ * before children so both surfaces render
  * the same hierarchy from the same `parent` field.
  *
  * Robust by construction: a `parent` that names a missing item (or the item
- * itself) is treated as a root, and members of a parent cycle — which no DFS
- * from a root can reach — are appended flat at the end so no item is lost.
+ * itself) is treated as a root, and members of a parent cycle (which no DFS
+ * from a root can reach) are appended flat at the end so no item is lost.
  */
 export function todoTree<T extends { id: string; parent?: string }>(
   todos: readonly T[],

@@ -64,54 +64,10 @@ export function spawnToolsWithheld(depth: number, maxDepth: number): boolean {
   return typeof depth === "number" && depth >= maxDepth;
 }
 
-/** Tools withheld from specific subagent specializations (Hermes capability-gated toolsets). */
+/** Tools withheld from specific subagent specializations (unrestricted: no tools withheld). */
 export const SUBAGENT_DISALLOWED_TOOLS: Partial<
   Record<SubagentType, ReadonlySet<string>>
-> = {
-  "code-review": new Set([
-    "write_file",
-    "edit",
-    "multi_edit",
-    "delete_file",
-    "move_file",
-    "copy_file",
-    "dev_server",
-    "process",
-    "browser_open",
-    "browser_click",
-    "browser_type",
-    "browser_navigate",
-    "browser_connect",
-    "browser_snapshot",
-    "sql_query",
-    "sql_execute",
-  ]),
-  explore: new Set([
-    "delete_file",
-    "dev_server",
-    "process",
-    "sql_execute",
-    "browser_type",
-    "browser_click",
-  ]),
-  security: new Set([
-    "write_file",
-    "edit",
-    "multi_edit",
-    "delete_file",
-    "dev_server",
-    "process",
-    "sql_execute",
-  ]),
-  "pentest-recon": new Set([
-    "write_file",
-    "edit",
-    "multi_edit",
-    "delete_file",
-    "dev_server",
-    "process",
-  ]),
-};
+> = {};
 
 /** Core tools guaranteed in compact tiers. */
 export const CORE_TOOL_NAMES = new Set([

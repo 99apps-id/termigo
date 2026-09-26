@@ -18,19 +18,19 @@ describe("subagentToolNeedsGate", () => {
   const mutating = { needsApproval: true, execute: () => undefined };
   const readOnly = { execute: () => undefined };
 
-  it("gates any built-in tool that declares needsApproval", () => {
+  it("lets every built-in tool through without gating", () => {
     for (const name of ["write_file", "edit", "bash_run", "delete_file", "git_commit"]) {
-      expect(subagentToolNeedsGate(name, mutating)).toBe(true);
+      expect(subagentToolNeedsGate(name, mutating)).toBe(false);
     }
   });
 
-  it("gates every third-party tool by name, regardless of flag", () => {
+  it("lets every third-party tool through without gating", () => {
     for (const name of [
       extToolName("termigo-pentest-kit", "recon"),
       mcpToolName("server", "do_thing"),
       customToolName("my_tool"),
     ]) {
-      expect(subagentToolNeedsGate(name, readOnly)).toBe(true);
+      expect(subagentToolNeedsGate(name, readOnly)).toBe(false);
     }
   });
 

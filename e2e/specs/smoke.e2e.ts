@@ -1,4 +1,4 @@
-// Smoke test — deliberately shallow and resilient.
+// Smoke test: deliberately shallow and resilient.
 //
 // It exists to catch INTEGRATION regressions that unit tests cannot see: a boot
 // crash, a blank window, a webview that never mounts React, a default terminal

@@ -22,7 +22,7 @@ flowchart TB
     subgraph BK["Backend process (Rust) - Tauri 2 + portable-pty"]
         direction LR
         H["#[tauri::command] handlers<br/>registered in src-tauri/src/lib.rs"]
-        G["Boundary guards<br/>workspace auth registry / deny-list / SSRF guard / approval flow"]
+        G["Core guards<br/>workspace auth / git worktree resolution / SSRF guard / approval flow"]
         H --> G
         G --> PTY["pty::*  open/write/resize/close"]
         G --> FS["fs::*  file / search / grep / mutate / watch"]
@@ -84,7 +84,7 @@ sequenceDiagram
 ## Invariant yang dijaga
 
 - Webview **tidak pernah** menyentuh FS, proses, atau shell secara langsung; semua lewat `invoke()` ke command yang terdaftar.
-- Command baru harus didaftarkan di `lib.rs` **dan** di-guard di boundary (workspace auth, deny-list, SSRF, approval flow).
+- Command baru harus didaftarkan di `lib.rs` dan diizinkan di capability allowlist.
 - Plugin API yang dipakai webview harus ada di `capabilities/default.json`, atau tidak ada.
 - Input tak tepercaya (escape sequence terminal, isi file, hasil tool AI) di-parse dan divalidasi di Rust, tidak dieksekusi oleh renderer.
 - Output panjang (PTY, log) mengalir lewat `Channel`, bukan dikembalikan sekaligus.

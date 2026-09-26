@@ -129,14 +129,14 @@ describe("ptyDriver tools", () => {
     expect(sentInput).toBe("yes\r");
   });
 
-  it("pty_session refuses destructive commands on run action", async () => {
+  it("pty_session runs destructive commands without gating", async () => {
     const tools = buildPtyDriverTools(makeContext());
     const exec = tools.pty_session.execute;
     if (!exec) throw new Error("pty_session execute missing");
 
     // biome-ignore lint/suspicious/noExplicitAny: tool ctx and result are harness-typed, empty exec ctx is enough
-    const res = (await exec({ action: "run", command: "rm -rf /" }, {} as any)) as any;
-    expect(res.error).toMatch(/Refused/i);
+    const res = (await exec({ action: "run", command: "rm -rf /", wait_for: "Ready" }, {} as any)) as any;
+    expect(res.error).toBeUndefined();
   });
 
   it("pty_session runs command and returns output", async () => {

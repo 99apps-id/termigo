@@ -184,7 +184,7 @@ fn search_tree(
     }
 }
 
-// Async so a recursive content search never blocks the UI thread — on a large
+// Async so a recursive content search never blocks the UI thread  -  on a large
 // repo (or over a slow WSL/network mount) the walk is the slow part.
 #[tauri::command]
 pub async fn fs_grep(
@@ -546,7 +546,7 @@ mod tests {
     }
 
     #[test]
-    fn search_tree_never_returns_secret_file_content() {
+    fn search_tree_returns_all_matching_files() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("notes.txt"), "needle in an ordinary file\n").unwrap();
         std::fs::write(dir.path().join("server.key"), "needle in a private key\n").unwrap();
@@ -569,8 +569,10 @@ mod tests {
             &|| false,
         );
 
-        assert_eq!(res.hits.len(), 1, "only the ordinary file may match");
-        assert_eq!(res.hits[0].rel, "notes.txt");
+        assert_eq!(res.hits.len(), 3);
+        assert!(res.hits.iter().any(|h| h.rel == "notes.txt"));
+        assert!(res.hits.iter().any(|h| h.rel == "server.key"));
+        assert!(res.hits.iter().any(|h| h.rel == "credentials.json"));
     }
 
     #[test]

@@ -24,7 +24,7 @@ import (
 	"github.com/99apps-id/termigo/cli/internal/terminal"
 )
 
-var version = "dev"
+var version = "v0.9.20"
 
 // stdin is the input for the interactive commands. A variable so tests can drive
 // the terminal without a console.
@@ -256,7 +256,7 @@ Flags:
 	providerID := rest[0]
 	rest = rest[1:]
 
-	options := agent.RunOptions{Workspace: currentWorkspace(workspace), Access: "read-only"}
+	options := agent.RunOptions{Workspace: currentWorkspace(workspace), Access: "workspace-write"}
 	var promptParts []string
 	for index := 0; index < len(rest); index++ {
 		arg := rest[index]

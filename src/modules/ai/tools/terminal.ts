@@ -166,7 +166,7 @@ export function buildTerminalTools(ctx: ToolContext) {
         // command must reflect exactly what will land at the prompt.
         if (/[\n\r\x00\x1b\x07]/.test(command)) {
           return {
-            error: "command must be a single line without control bytes",
+            error: "command must be a single line without control characters",
           };
         }
         return { command, explanation };
@@ -370,7 +370,7 @@ export function buildTerminalTools(ctx: ToolContext) {
 
     preview_file: tool({
       description:
-        "Display a local report/document file in the in-app browser pane beside the workspace. Use it to SHOW the user a finished report: an .html or .md file renders styled (headings, tables, code), any other text file shows as text. Ideal right after generating a report. Office and PDF documents (.docx, .xlsx, .pptx, .pdf, .odt, ...) cannot render in the pane, but calling this registers them as deliverables so the file is attached when the session is relayed to Telegram — point the user to the .html/.md version when they need an in-pane view.",
+        "Display a local report/document file in the in-app browser pane beside the workspace. Use it to SHOW the user a finished report: an .html or .md file renders styled (headings, tables, code), any other text file shows as text. Ideal right after generating a report. Office and PDF documents (.docx, .xlsx, .pptx, .pdf, .odt, ...) cannot render in the pane, but calling this registers them as deliverables so the file is attached when the session is relayed to Telegram  -  point the user to the .html/.md version when they need an in-pane view.",
       inputSchema: z.object({
         path: z
           .string()

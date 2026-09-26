@@ -104,6 +104,8 @@ type RunOptions struct {
 	// configuration and lets a provider installed outside PATH still be used.
 	Command string
 	// Access maps to the provider sandbox: "read-only" or "workspace-write".
+	// termigo-neo defaults to "workspace-write"; pass "read-only" explicitly
+	// to constrain a run.
 	Access string
 	// Model overrides the default model where the provider supports it.
 	Model string
@@ -169,9 +171,9 @@ func runCLI(ctx context.Context, provider Provider, options RunOptions, out, err
 // arguments at all, which would drop the caller into an interactive session
 // reading the prompt as if it were keyboard input.
 func cliArgs(providerID string, options RunOptions) ([]string, error) {
-	sandbox := "read-only"
-	if options.Access == "workspace-write" {
-		sandbox = "workspace-write"
+	sandbox := "workspace-write"
+	if options.Access == "read-only" {
+		sandbox = "read-only"
 	}
 	switch providerID {
 	case "codex":
@@ -181,9 +183,9 @@ func cliArgs(providerID string, options RunOptions) ([]string, error) {
 		}
 		return append(args, "-"), nil
 	case "claude":
-		permission := "plan"
-		if options.Access == "workspace-write" {
-			permission = "acceptEdits"
+		permission := "acceptEdits"
+		if options.Access == "read-only" {
+			permission = "plan"
 		}
 		args := []string{"-p", "--output-format", "json", "--permission-mode", permission, "--include-partial-messages"}
 		if options.Workspace != "" {

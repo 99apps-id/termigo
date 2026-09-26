@@ -16,7 +16,7 @@ Production-grade or it does not ship. Every change is judged against all of thes
 
 - **Correctness**: edge cases, failure modes, concurrent access. No "works for now".
 - **Performance**: ultra-lightweight (~7-8 MB bundle, high-performance terminal). Minimize RAM, avoid redundant IPC round-trips, extra re-renders, or heavy dependencies. Unused features consume zero resources.
-- **Security**: validate at every boundary (IPC, fs, network, AI tool surface). The secret-path deny-list applies on both read and write and is never bypassed.
+- **Security**: no sandbox and no path boundaries for agent work; every tool runs for agent and subagents alike. Keep secrets (API keys, tokens) out of disk, settings, and `localStorage`.
 - **UI/UX**: polished, professional, premium. Every state and detail considered.
 - **Architecture**: functional core, thin imperative shell. Pure testable functions for logic; thin Tauri commands and React components.
 
@@ -78,8 +78,8 @@ The parts that are invariants rather than description:
 - **Keys** live in the OS keychain via `secrets_*` (on Linux, a `0600` `secrets.json` in the app data dir). Never persist a key to disk, settings, or `localStorage`.
 - **Agent** (`lib/agent.ts`): keep `Agent` / `DirectChatTransport` shape adhering to AI SDK v6 semantics. Stop reasons report by name. Budgets escalate per Continue: `[25, 50, 100]`.
 - **Subagents** (`lib/subagentPool.ts`, `agents/runSubagent.ts`): managed by `SubagentConcurrencyPool` (default 4). Parents yield slots via `ctx.yieldSlot()` to prevent deadlock. Batch subagents bounded (max 2 nested). Local subagents isolate root from remote SSH tabs. Rate limits retry with backoff.
-- **Tools & Repair** (`tools/tools.ts`, `lib/repairToolCall.ts`): inspection auto-executes; mutating requires approval. Secret paths (`.env*`, `.ssh/`, credentials) are denied on read and write in `lib/security.ts` and `fs/security.rs` (parity pinned); `hooks.json` + `approvals.json` are agent-immutable. Windows system dirs open by operator decision; credential stores denied. Parameter aliases auto-repair.
-- **Shell sandbox allowlist** (`src-tauri/src/modules/shell/mod.rs`): bare names must match `SANDBOX_ALLOWLIST`; rooted, worktree, and `node_modules`/.pnpm paths are allowed. Hard guards: approval flow, delete gate, secret write refusal, hijack-env-var refusal. `rm` is not allowlisted. Agent PATH includes `node_modules/.bin`; package-manager mutations get 300s floor. Details: [security model](docs/architecture/security-model.md).
+- **Tools & Environment** (`tools/tools.ts`, `lib/repairToolCall.ts`): no sandbox or artificial path boundary limitations for agents and subagents; all tools are available. Instructions are governed by `USER.md`, `AGENTS.md`, and `TERMIGO.md`. Parameter aliases auto-repair.
+- **Shell execution & worktree** (`src-tauri/src/modules/shell/mod.rs`): unrestricted command execution without artificial sandbox allowlists. Full support for git worktrees, background shells, and subagent concurrency.
 - **Approval resume trailing message is load-bearing**: `streamText` finds approvals only in `messages.at(-1)`. Nothing may be appended after an answered approval.
 - **Chat UX & Timeline**: edit/resend turns (`messageEdit.ts`), turn checkpoints and navigator (`turnCheckpoints.ts`, `ChatTimelineNavigator.tsx`), session fork (`forkSession`), auto-approval toggle, ANSI rendering (`AnsiOutput.tsx`), stream watchdog (`streamWatchdog.ts`).
 - **Telegram companion**: remote tool approvals, interactive commands, and Mermaid image previews (`src/modules/telegram/`).

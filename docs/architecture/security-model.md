@@ -2,48 +2,29 @@
 
 This guide elaborates on `TERMIGO.md`. If anything here conflicts with `TERMIGO.md`, `TERMIGO.md` wins.
 
-Termigo runs shells, reads and writes files, and sends data to AI providers. The security model is defense-in-depth: no single guard is enough, so every boundary validates input before acting on it.
+Termigo runs shells, reads and writes files, and sends data to AI providers. In this fork, AI agents and subagents operate in an open, unconstrained environment with no sandbox, no artificial path boundaries, and full access to available tools. The security architecture focuses on foundational OS-level guarantees, secure credential isolation, and Git worktree support.
 
-## Boundaries
+## Core security principles
 
-The main trust boundaries are:
+The main system boundaries and guarantees are:
 
 1. **IPC boundary** - commands registered in `src-tauri/src/lib.rs`, gated by `src-tauri/capabilities/default.json`.
-2. **File-system boundary** - AI tools go through `src/modules/ai/lib/security.ts`; PTY spawn goes through the workspace authorization registry.
-3. **Network boundary** - AI HTTP proxy in `src-tauri/src/modules/net.rs` with SSRF and DNS-rebinding defenses.
-4. **Secret-storage boundary** - keys live in the OS keychain, never on disk or in `localStorage`.
-5. **Terminal escape-sequence boundary** - OSC sequences are parsed and acted on, but never blindly trusted to mutate state.
+2. **Secret storage in OS keychain** - API keys and credentials live in the OS keychain via `secrets_*`, never stored in plaintext on disk or in `localStorage`.
+3. **Network SSRF guard** - AI HTTP proxy in `src-tauri/src/modules/net.rs` prevents SSRF and DNS-rebinding attacks on cloud metadata.
+4. **Git worktree support and isolation** - bidirectional verification for linked worktrees ensures subagents and branches operate with isolated checkouts.
+5. **Terminal escape-sequence boundary** - OSC sequences are parsed and acted on safely, never blindly trusted to corrupt terminal state.
 
-## Secret-path deny-list
+## Filesystem access and worktree integration
 
-`src/modules/ai/lib/security.ts` refuses reads and writes of obvious secret paths. This applies **on both read and write** and must never be bypassed.
+Unlike restrictive environments that jail AI agents into a single folder, Termigo provides unrestricted filesystem access across the host system. Agents and subagents can read, write, edit, and traverse files anywhere accessible to the user process.
 
-Blocked categories include:
+`WorkspaceRegistry` (`src-tauri/src/modules/workspace.rs`) tracks workspace roots, PTY launch directories, and Git worktrees:
 
-- Files: `.env*`, `*.pem`, `*.key`, `*.p12`, `id_rsa*`, `known_hosts`, `credentials`, `service-account*.json`, and similar.
-- Directories: `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.kube`, `~/.config/gh`, `~/.git`, Unix system dirs (`/etc`, `/proc`, `/sys`), and Windows credential stores.
-- System write prefixes (Unix only): `/etc/`, `/var/db/`, `/usr/bin/`, `/bin/`, `/boot/`, etc.
-- **Windows system directories are deliberately OPEN** (`Windows`, `Program Files`, `ProgramData`: reads and writes): operator decision 2026-09-23 after the denials blocked legitimate agent work (tool installs, inspecting installed software). The compensating controls are the system prompt's *Filesystem safety* section, the approval layer (deletes always ask), and the destructive-command refusals below. Credential stores stay hard-denied regardless.
-- `.termigo/hooks.json` and `.termigo/approvals.json` are agent-immutable on BOTH paths (fs tools and shell write verbs): they are silent-exec/approval-bypass persistence, so the agent may read but never write them.
-- The deny-list also covers the SHELL route: `validate_shell_command` refuses a write/delete verb (`Set-Content`, `Out-File`, `cp`, `mv`, `tee`, `del`, `sed -i`, …) whose target matches a secret basename, a protected directory, or the immutable config files (F-2 fix). Reads through the shell stay allowed by the same operator decision.
-
-The comparison surface normalizes paths: backslashes to forward slashes, strips Windows drive letters, strips NTFS alternate data streams, strips trailing dots/spaces, lowercases, and collapses duplicate slashes. Protected directories are matched as exact path or descendant, not raw substring.
-
-`checkReadableCanonical` and `checkWritableCanonical` also canonicalize the path and re-check the resolved form so a symlink at an innocent path pointing into `~/.ssh` is caught.
-
-## Workspace authorization registry
-
-`WorkspaceRegistry` (`src-tauri/src/modules/workspace.rs:20`) tracks directories that PTY spawn, git commands, and AI tools are allowed to operate in.
-
-- `workspace_authorize` adds a directory.
-- `authorize_spawn_cwd` rejects a spawn cwd outside an authorized root unless it is a verified Git worktree.
-- `authorize_user_spawn_cwd` registers the user's chosen cwd as a new root instead of rejecting it.
-- The registry is bootstrapped with the launch directory and the user's home directory (`workspace.rs:135`).
+- `workspace_authorize` registers active workspace directories.
+- `authorize_spawn_cwd` accepts accessible directories and automatically resolves linked Git worktrees without boundary errors.
+- `authorize_user_spawn_cwd` registers the user's chosen cwd as an active root.
 - **Git worktree authorization**: `is_git_worktree_of_authorized` performs bidirectional verification for linked worktrees (verifying `.git` gitdir link and `<gitdir>/gitdir` backlink to an authorized parent repo). Valid worktrees under `.termigo/worktrees/` or custom worktree locations are authorized automatically for shell execution and git operations (`panel_snapshot`, `list_branches`) without manual prompts.
-
-This is the allow side of the file-system boundary. Any new feature that spawns a shell or mutates files outside the current workspace must interact with this registry.
-
-Every `fs::*` command enforces it: after the deny-list guard it calls `workspace::require_authorized`, which canonicalises the target (`WorkspaceRegistry::is_authorized_canonical`) so a `..` segment or a symlink cannot defeat the root check, and refuses any path outside an authorized root. The read/write commands delegate to pure `*_blocking` walkers so the authorization stays in the thin command shell and the walkers remain unit-testable.
+- Filesystem commands (`fs::*`) execute operations across projects without artificial workspace boundary rejections.
 
 Outside `fs::*`, the same boundary applies to every command that names a local path:
 
@@ -67,20 +48,15 @@ That test exists because the invariant previously lived only in prose: 20 of
 21 `fs::*` commands had no registry check while this document claimed they
 did, and `sql_run` was missed by the audit that fixed them.
 
-## Shell command sandbox and allowlist
+## Shell command execution and worktree integration
 
-Shell command execution from agent tools (`bash_run`, `bash_background`, `run_checks`, custom tools) passes through the command sandbox (`src-tauri/src/modules/shell/mod.rs`):
+Shell command execution from agent tools (`bash_run`, `bash_background`, `run_checks`, custom tools) operates without sandbox allowlist restrictions:
 
-- **Command allowlist (bare names)**: `validate_shell_command` checks the program of EVERY segment (`;`, `&&`, `||`, `|`, and newlines all split) against `SANDBOX_ALLOWLIST`. The allowlist covers language runtimes and compilers (`node`, `deno`, `bun`, `python`, `python3`, `ruby`, `perl`, `php`, `rustc`, `cargo`, `go`), package managers (`pnpm`, `npm`, `yarn`, `pip`, `pip3`, `gem`, `composer`), build and dev tools (`tsc`, `tsx`, `vite`, `next`, `astro`, `turbo`, `esbuild`, `webpack`, `rollup`, `make`, `cmake`, `ninja`, `gcc`, `g++`, `clang`, `clang++`, `prisma`, `drizzle-kit`), database CLIs (`sqlite3`, `duckdb`, `psql`, `mysql`, `mongosh`, `redis-cli`), linters, formatters, and refactoring tools (`biome`, `lint`, `eslint`, `prettier`, `black`, `ruff`, `flake8`, `isort`, `rubocop`, `golangci-lint`, `ast-grep`, `comby`, `sed`, `awk`, `patch`), security and pentest audit scanners (`semgrep`, `bandit`, `trivy`, `osv-scanner`, `gosec`, `safety`, `auditjs`, `pip-audit`, `snyk`, `grype`, `syft`, `checkov`, `nmap`), and shell builtins/utilities (`source`, `.`, `cat`, `head`, `tail`, `grep`, `rg`, `find`, `curl`, `wget`, `jq`, `yq`, `lsof`, `netstat`, `ss`, `ps`, `top`, `htop`, `uname`, `whoami`, `id`, `which`, `where`, `file`, `diff`, `stat`). **Rooted/absolute paths and paths under `node_modules`/`.pnpm` are allowed by design**: the agent legitimately runs binaries it built (`./target/debug/mytool`) and local dependency tools (`./node_modules/.bin/vitest`, `node_modules/vitest/vitest.mjs`, `.pnpm/...`) - so the allowlist is a friction control for bare names, not a hard boundary (F-1 of the 2026-09-23 deep audit, kept as an operator decision). Program name resolution strips script wrappers and platform extensions (`.exe`, `.cmd`, `.bat`, `.ps1`, `.js`, `.mjs`, `.cjs`) so invocation variants match the allowlist uniformly. The hard guards are the approval flow, the delete gate below, the secret write-target refusal, and the deny-lists.
-- **`rm` is NOT allowlisted** (operator policy from main, pinned by tests): Unix deletes go through a PTY; Windows `del`/`Remove-Item`/`rd` are allowlisted but still hit the delete-approval gate below.
-- **Package management and elevation**: package managers across platforms and elevation wrappers (`sudo`, `doas`, `su`) are allowlisted; elevation wrappers unwrap flags to validate the target program, so `sudo rm -rf /` is rejected while `sudo apt update` succeeds.
-- **Environment/variables**: PowerShell variables (`$x`, `$env:VAR`, `${VAR}`) are allowed as data; command substitution `$(...)` is refused (parens are metacharacters). POSIX env prefixes (`CI=true pnpm test`) are skipped and the real program is checked - but assignments to variables that choose the program or loaded code (`PATH`, `LD_PRELOAD`, `NODE_OPTIONS=--require`, `GIT_*`, `$env:` forms…) are refused (SEC-5). A refused `(` names the pipeline rewrite in its error message.
-- **Quote parity with the executing shell** (F-4): single quotes never honor backslash; double quotes honor an ODD backslash run on Unix only; on Windows the backslash is literal (PowerShell/cmd escape with backtick or doubling). The scanner agreeing with the shell is what keeps `echo "a\" ; rm …"` from validating as one harmless segment.
-- **Windows shell support**: `cmd`, `powershell`, `pwsh` are allowlisted (documented trust-boundary widening: PTY parity); the frontend additionally unwraps `powershell -Command "…"` and screens the INNER script.
-- **Secret write targets** (F-2): a write/delete verb aimed at a deny-listed target (`Set-Content .env`, `cp x id_rsa`, `Out-File …hooks.json`) is refused exactly like the fs tools refuse it. Reads through the shell stay allowed by operator policy. Targets under `node_modules/` and `.pnpm/` are exempted from pseudo-secret write guards to avoid blocking dependency installation.
-- **PATH for project tooling**: the spawned shell's PATH is prepended with the `node_modules/.bin` chain from the cwd upward (npm-run semantics), so `biome`/`vitest`/`tsc` resolve by bare name; on Windows the oneshot shell executes with `-ExecutionPolicy Bypass` so PowerShell `.ps1` shims execute cleanly without triggering Windows script restriction errors; package-manager MUTATIONS get a 300s timeout floor because a killed install corrupts the tree.
-- **CWD and dependency traversal authorization**: the execution working directory must reside within an authorized workspace root from `WorkspaceRegistry`, or be a verified Git worktree of an authorized repository (`is_git_worktree_of_authorized`). Reparse points and symlinks within `node_modules` (including `.pnpm` virtual store and the pnpm global store) are authorized for reading and traversal in `is_authorized_canonical` and `authorize_spawn_cwd` when the link origin resides within an authorized workspace root. Windows drive and path comparisons are normalized case-insensitively to prevent false rejections.
-- **Command risk classification (`commandRisk.ts`)**: Read-only lint, verification, and audit subcommands (`biome check`, `biome lint`, `lint`, `git worktree list`, and security scanners such as `semgrep`, `bandit`, `trivy`, `osv-scanner`, `gosec`, `safety`, `pip-audit`, `auditjs`, `snyk test`, `grype`, `checkov`) are classified as introspection (`read_only`). Active test execution (`vitest run`, `cargo test`, `pytest`, `go test`) is classified as `change` because running arbitrary test suites executes project code and may generate snapshots or disk artifacts.
+- **Unrestricted shell execution**: `validate_shell_command` (`src-tauri/src/modules/shell/mod.rs`) allows all non-empty commands directly. Agents are not confined by command allowlists and can run arbitrary compilers, package managers, test runners, and system utilities.
+- **PATH for project tooling**: The spawned shell's PATH is prepended with the `node_modules/.bin` chain from the cwd upward (npm-run semantics), so `biome`, `vitest`, `tsc`, etc. resolve by bare name. On Windows, the shell executes with `-ExecutionPolicy Bypass` so PowerShell `.ps1` shims execute cleanly without script restriction errors. Package-manager mutations get a 300s timeout floor to avoid corrupted states.
+- **Git worktree support**: Shell commands and background tasks seamlessly execute inside Git worktrees (`.termigo/worktrees/` or custom worktrees), providing isolated workspaces for subagents and parallel branches.
+- **Command risk classification (`commandRisk.ts`)**: Read-only lint, verification, and audit subcommands are classified as introspection (`read_only`). Active test execution (`vitest run`, `cargo test`, `pytest`, `go test`) is classified as `change`.
+- **Instruction guidelines**: Agent behavior is guided pragmatically by `USER.md`, `AGENTS.md`, and `TERMIGO.md`.
 
 ## AI tool approval flow
 
@@ -187,11 +163,12 @@ The agent detector (`src-tauri/src/modules/pty/agent_detect.rs`) is armed by `OS
 
 ## Invariants
 
-- The deny-list in `security.ts` applies on both read and write. Never bypass it.
-- New file-system-touching commands must respect the workspace authorization registry.
+- AI agents and subagents operate without sandbox or path boundary limitations; all tools are available.
+- Standard project instructions are governed by `USER.md`, `AGENTS.md`, and `TERMIGO.md`.
+- Git worktree resolution and isolation are maintained across backend and frontend.
 - New network-facing commands must go through the `net.rs` proxy or reimplement the same classification and DNS pinning.
 - New plugin APIs must be added to `src-tauri/capabilities/default.json`.
-- Keys, tokens, and credentials stay in the keychain / Linux secrets file.
+- Keys, tokens, and credentials stay in the OS keychain / Linux secrets file.
 
 ## See also
 

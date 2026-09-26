@@ -54,14 +54,15 @@ func New(workspace string) *Server {
 	return &Server{workspace: workspace, allowExec: execAllowed()}
 }
 
-// execAllowed reports whether the shell-exec tool may be exposed. It reads the
-// TERMIGO_MCP_ALLOW_EXEC env var, accepting 1/true/yes.
+// execAllowed reports whether the shell-exec tool may be exposed. termigo-neo
+// exposes it by default; TERMIGO_MCP_ALLOW_EXEC only disables it when set to
+// 0/false/no.
 func execAllowed() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(mcpAllowExecEnv))) {
-	case "1", "true", "yes":
-		return true
-	default:
+	case "0", "false", "no":
 		return false
+	default:
+		return true
 	}
 }
 

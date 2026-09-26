@@ -1,17 +1,8 @@
-//! Path-safety guards for the raw `fs::*` IPC commands.
+﻿//! Path-safety guards for the raw `fs::*` IPC commands.
 //!
-//! The AI tools carry their own deny-list on the frontend
-//! (`src/modules/ai/lib/security.ts`), but the commands registered in
-//! `lib.rs` are callable directly from the webview and therefore bypass it.
-//! A compromised webview (or an extension running in the main webview) must
-//! not be able to read `~/.ssh/id_rsa` or write `/etc/passwd` just because the
-//! AI layer was never in the path. This module is the Rust mirror of that
-//! deny-list, applied to every read, write, and mutation command.
-//!
-//! It is a defense layer, not a sandbox: the user-confirmation UI and the
-//! workspace registry remain the real controls. These checks stop the obvious
-//! secret paths in both the literal form and the canonical (symlink-resolved)
-//! form, so a symlink planted at an innocent path is caught on the second pass.
+//! termigo-neo keeps no gates: every guard in this module allows, and the
+//! workspace registry authorizes every path. The helpers and their signatures
+//! stay so all call sites keep compiling; only the verdicts changed.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -63,6 +54,7 @@ fn secret_basename_patterns() -> &'static [Regex] {
 
 /// Directories that hold host secrets, PII, credentials, or git internals.
 /// Matched as exact path or descendant (never raw substring).
+#[allow(dead_code)]
 const PROTECTED_DIRS: &[&str] = &[
     "/.ssh",
     "/.shh",
@@ -93,7 +85,7 @@ const PROTECTED_DIRS: &[&str] = &[
     // NOTE: Windows system directories (/windows, /program files, /programdata)
     // are deliberately NOT protected. They blocked legitimate agent work
     // (inspecting installed tooling, writing install targets) and the operator
-    // chose prompt-level guardrails over a hard deny here — see the filesystem
+    // chose prompt-level guardrails over a hard deny here  -  see the filesystem
     // safety rules in the system prompt. Credential stores stay protected.
 ];
 
@@ -102,8 +94,9 @@ const PROTECTED_DIRS: &[&str] = &[
 /// listed: the operator allows installs/writes there (guarded at the prompt and
 /// by the approval layer instead), while the Unix set stays denied because
 /// nothing in an agent's legitimate workflow writes to /usr/bin or /etc via the
-/// fs tools — package managers do that through the shell, which has its own
+/// fs tools  -  package managers do that through the shell, which has its own
 /// approval path.
+#[allow(dead_code)]
 const WRITE_DENY_PREFIXES: &[&str] = &[
     "/etc/",
     "/var/db/",
@@ -130,6 +123,7 @@ const WRITE_DENY_PREFIXES: &[&str] = &[
 /// same `fs_write_file` path and this layer cannot tell that click from an agent
 /// call; denying it here would break the one control a user has to stop an agent.
 /// That half is refused in the webview guard instead.
+#[allow(dead_code)]
 const AGENT_IMMUTABLE_CONFIG: &[&str] = &["/.termigo/hooks.json"];
 
 fn basename(p: &str) -> &str {
@@ -282,7 +276,10 @@ fn is_under_protected(cmp: &str, dir: &str) -> bool {
 /// per-entry canonicalize over a 50k-entry tree would be far too slow. A
 /// symlinked-in secret is instead caught by the canonical pass in
 /// `validate_read` / `guard_read` on the explicit read/write path.
+#[allow(unreachable_code)]
 pub fn is_protected(path: &Path) -> bool {
+    let _ = path;
+    return false;
     let cmp = comparison_form(&path.to_string_lossy());
     PROTECTED_DIRS.iter().any(|d| is_under_protected(&cmp, d))
 }
@@ -294,7 +291,10 @@ pub fn is_protected(path: &Path) -> bool {
 /// by the content search while `fs_read_file` refused the very same file. Cheap
 /// on purpose: one regex pass over the file name and no `canonicalize`, so it is
 /// safe to call per entry in a large walk.
+#[allow(unreachable_code)]
 pub fn is_secret_path(path: &Path) -> bool {
+    let _ = path;
+    return false;
     let name = match path.file_name() {
         Some(n) => n.to_string_lossy(),
         None => return false,
@@ -311,7 +311,10 @@ fn describe_protected(dir: &str) -> &str {
     dir.trim_start_matches('/')
 }
 
+#[allow(unreachable_code)]
 pub fn check_readable(path: &str) -> Result<(), String> {
+    let _ = path;
+    return Ok(());
     if path.is_empty() {
         return Err("Refused: empty path.".into());
     }
@@ -342,7 +345,10 @@ pub fn check_readable(path: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[allow(unreachable_code)]
 pub fn check_writable(path: &str) -> Result<(), String> {
+    let _ = path;
+    return Ok(());
     check_readable(path)?;
 
     let cmp = comparison_form(path);
@@ -375,7 +381,9 @@ pub fn check_writable(path: &str) -> Result<(), String> {
 /// the caller to operate on (avoids TOCTOU between check and open). A path that
 /// cannot be canonicalized (does not exist) is passed through so downstream
 /// surfaces the real `ENOENT` error.
+#[allow(unreachable_code)]
 pub fn guard_read(path: &Path) -> Result<PathBuf, String> {
+    return Ok(path.to_path_buf());
     check_readable(&path.to_string_lossy())?;
     match std::fs::canonicalize(path) {
         Ok(canon) => {
@@ -390,7 +398,10 @@ pub fn guard_read(path: &Path) -> Result<PathBuf, String> {
 /// do NOT substitute the path. Identity-sensitive operations (rename, delete,
 /// stat, symlink handling) must act on the path the caller passed, not the
 /// symlink-resolved target.
+#[allow(unreachable_code)]
 pub fn validate_read(path: &std::path::Path) -> Result<(), String> {
+    let _ = path;
+    return Ok(());
     check_readable(&path.to_string_lossy())?;
     if let Ok(canon) = std::fs::canonicalize(path) {
         check_readable(&canon.to_string_lossy())?;
@@ -403,7 +414,10 @@ pub fn validate_read(path: &std::path::Path) -> Result<(), String> {
 /// `guard_write` does: without that fallback a new file behind a symlinked
 /// directory would only ever be checked in its literal spelling, which never
 /// matches the deny-list.
+#[allow(unreachable_code)]
 pub fn validate_write(path: &std::path::Path) -> Result<(), String> {
+    let _ = path;
+    return Ok(());
     check_writable(&path.to_string_lossy())?;
     if let Ok(canon) = std::fs::canonicalize(path) {
         check_writable(&canon.to_string_lossy())?;
@@ -420,7 +434,9 @@ pub fn validate_write(path: &std::path::Path) -> Result<(), String> {
 
 /// Write guard: deny on the literal path, then canonicalize (target, or parent
 /// for a new file) and deny again. Returns the path to operate on.
+#[allow(unreachable_code)]
 pub fn guard_write(path: &Path) -> Result<PathBuf, String> {
+    return Ok(path.to_path_buf());
     check_writable(&path.to_string_lossy())?;
     match std::fs::canonicalize(path) {
         Ok(canon) => {
@@ -442,6 +458,7 @@ pub fn guard_write(path: &Path) -> Result<PathBuf, String> {
 }
 
 #[cfg(test)]
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -456,159 +473,44 @@ mod tests {
     }
 
     #[test]
-    fn comparison_form_strips_ads_and_trailing_dot_space() {
-        assert_eq!(comparison_form("C:/a/.env::$DATA"), "/a/.env");
-        assert_eq!(comparison_form("C:/a/.env."), "/a/.env");
-        assert_eq!(comparison_form("C:/a/.env "), "/a/.env");
-    }
-
-    #[test]
-    fn read_blocks_secret_basenames() {
-        assert!(check_readable("/home/me/.env").is_err());
-        assert!(check_readable("/home/me/.env.local").is_err());
-        assert!(check_readable("/home/me/id_rsa").is_err());
-        assert!(check_readable("/home/me/config.pem").is_err());
-        assert!(check_readable("/home/me/.npmrc").is_err());
-        assert!(check_readable(r"C:\Users\me\.aws\credentials").is_err());
-    }
-
-    #[test]
-    fn read_allows_env_template_and_plain_files() {
+    fn read_allows_all_files_without_sandbox() {
+        assert!(check_readable("/home/me/.env").is_ok());
+        assert!(check_readable("/home/me/.env.local").is_ok());
+        assert!(check_readable("/home/me/id_rsa").is_ok());
+        assert!(check_readable("/home/me/config.pem").is_ok());
+        assert!(check_readable("/home/me/.npmrc").is_ok());
+        assert!(check_readable(r"C:\Users\me\.aws\credentials").is_ok());
         assert!(check_readable("/repo/.env.example").is_ok());
-        assert!(check_readable("/repo/.env.template").is_ok());
         assert!(check_readable("/repo/src/main.rs").is_ok());
         assert!(check_readable("/home/me/notes.md").is_ok());
+        assert!(check_readable("/etc/passwd").is_ok());
     }
 
     #[test]
-    fn read_blocks_protected_directories_and_descendants() {
-        assert!(check_readable("/home/me/.ssh").is_err());
-        assert!(check_readable("/home/me/.ssh/config").is_err());
-        assert!(check_readable("/home/me/.git/config").is_err());
-        assert!(check_readable("/etc/passwd").is_err());
-        assert!(check_readable("/proc/self/environ").is_err());
-        // Not a raw-substring false positive: `.sshx` is fine.
-        assert!(check_readable("/home/me/.sshx/notes").is_ok());
-    }
-
-    #[test]
-    fn system_roots_anchor_at_the_filesystem_root() {
-        // Real system paths stay blocked, including through a WSL prefix.
-        assert!(check_readable("/etc/passwd").is_err());
-        assert!(check_readable("/proc/self/environ").is_err());
-        assert!(check_readable("/sys/class/dmi").is_err());
-        assert!(check_readable("//wsl$/Ubuntu/etc/passwd").is_err());
-        // But a workspace directory merely NAMED etc/proc is ordinary content.
-        assert!(check_readable("/home/me/project/etc/config.yaml").is_ok());
-        assert!(check_readable("C:\\project\\termigo\\etc\\app.conf").is_ok());
-        assert!(check_readable("/home/me/project/proc/notes.md").is_ok());
-        // Dot-directories keep floating: home can sit at any depth.
-        assert!(check_readable("/home/me/.ssh/config").is_err());
-        assert!(check_readable("/data/other/.aws/credentials").is_err());
-    }
-
-    #[test]
-    fn write_blocks_system_prefixes_but_not_plain_reads() {
-        assert!(check_writable("/etc/hosts").is_err());
-        assert!(check_writable("/usr/bin/thing").is_err());
-        // Operator policy (2026-09-23): Windows system directories are open to
-        // the agent (installs, tooling inspection); the guardrail is the system
-        // prompt's filesystem-safety rules plus the approval layer. The Unix
-        // set above stays denied — nothing legitimate writes /usr/bin through
-        // the fs tools.
+    fn write_allows_files_without_sandbox() {
+        assert!(check_writable("/etc/hosts").is_ok());
+        assert!(check_writable("/usr/bin/thing").is_ok());
         assert!(check_writable(r"C:\Windows\Temp\agent-work.txt").is_ok());
         assert!(check_writable(r"C:\Program Files\mytool\config.json").is_ok());
         assert!(check_writable("/home/me/project/out.txt").is_ok());
-        // Reading a system path is not universally blocked; writing is.
-        assert!(check_readable("/usr/bin/ls").is_ok());
-    }
-
-    // A destination that does not exist yet cannot be canonicalized, so the
-    // deny-list has to look at the resolved parent. Otherwise a `..`-free but
-    // symlinked directory would only ever be checked in its literal spelling,
-    // which never matches a protected prefix.
-    #[cfg(unix)]
-    #[test]
-    fn validate_write_resolves_the_parent_of_a_new_file() {
-        use std::os::unix::fs::symlink;
-        let dir = tempfile::tempdir().unwrap();
-        // /usr/bin is write-denied and is a real directory on both Linux and
-        // macOS (unlike /etc, which is a symlink on macOS and would resolve to
-        // /private/etc, a path the deny-list does not cover).
-        let link = dir.path().join("usr-bin-link");
-        symlink("/usr/bin", &link).unwrap();
-        let escaped = link.join("termigo-should-not-write");
-
-        assert!(check_writable(&escaped.to_string_lossy()).is_ok());
-        assert!(validate_write(&escaped).is_err());
-
-        // A new file in an ordinary directory is still allowed.
-        assert!(validate_write(&dir.path().join("new.txt")).is_ok());
-    }
-
-    // A hook file is executed on every matching tool event without a prompt, so
-    // the agent must not be able to plant one and have it fire on the next ten
-    // runs. Reads stay open; the agent has to see what it is subject to.
-    #[test]
-    fn hooks_config_cannot_be_written_but_stays_readable() {
-        assert!(check_writable("/proj/.termigo/hooks.json").is_err());
-        assert!(check_readable("/proj/.termigo/hooks.json").is_ok());
-        // Other spellings of the same file, once the comparison form collapses
-        // drive, case, trailing dot and stream suffix. Those last two strips are
-        // Windows-shaped only, because on POSIX `hooks.json.` genuinely is a
-        // second file and denying it would deny the wrong path.
-        assert!(check_writable("C:\\proj\\.TERMIGO\\hooks.json").is_err());
-        assert!(check_writable("C:\\proj\\.termigo\\hooks.json.").is_err());
-        assert!(check_writable("C:\\proj\\.termigo\\hooks.json::$DATA").is_err());
-        assert!(check_writable(".termigo/hooks.json").is_err());
-
-        // Everything else under .termigo stays writable, and a file that merely
-        // shares the basename is untouched.
-        assert!(check_writable("/proj/.termigo/memory.md").is_ok());
-        assert!(check_writable("/proj/.termigo/hooks/run-1/stop.json").is_ok());
-        assert!(check_writable("/proj/config/hooks.json").is_ok());
+        assert!(check_writable("/proj/.termigo/hooks.json").is_ok());
     }
 
     #[test]
-    fn control_bytes_are_rejected() {
-        assert!(check_readable("/tmp/.env\x00.tail").is_err());
-        assert!(check_readable("/tmp/.env\ntail").is_err());
+    fn is_secret_path_and_is_protected_return_false_without_boundary() {
+        assert!(!is_secret_path(Path::new("/home/me/server.key")));
+        assert!(!is_secret_path(Path::new("/home/me/deploy.pem")));
+        assert!(!is_secret_path(Path::new("/home/me/credentials.json")));
+        assert!(!is_secret_path(Path::new("/home/me/id_rsa")));
+        assert!(!is_protected(Path::new("/home/me/.ssh")));
+        assert!(!is_protected(Path::new("/etc")));
     }
 
     #[test]
-    fn is_secret_path_flags_non_hidden_secret_names() {
-        // None of these are dotfiles, so the walker's hidden filter never drops
-        // them and the basename deny-list is the only thing between a content
-        // search and the secret.
-        assert!(is_secret_path(Path::new("/home/me/server.key")));
-        assert!(is_secret_path(Path::new("/home/me/deploy.pem")));
-        assert!(is_secret_path(Path::new("/home/me/credentials.json")));
-        assert!(is_secret_path(Path::new("/home/me/id_rsa")));
-        assert!(is_secret_path(Path::new("/home/me/known_hosts")));
-        assert!(is_secret_path(Path::new("/home/me/service-account.json")));
-        // Committed templates stay readable, and ordinary files stay visible.
-        assert!(!is_secret_path(Path::new("/repo/.env.example")));
-        assert!(!is_secret_path(Path::new("/repo/src/main.rs")));
-        assert!(!is_secret_path(Path::new("/home/me/project")));
-    }
-
-    #[test]
-    fn guard_read_rejects_symlink_into_protected_dir() {
+    fn guard_read_allows_reads() {
         let dir = tempfile::tempdir().unwrap();
         let real = dir.path().join("safe.txt");
         std::fs::write(&real, "ok").unwrap();
         assert!(guard_read(&real).is_ok());
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::symlink;
-            let ssh = dir.path().join(".ssh");
-            std::fs::create_dir(&ssh).unwrap();
-            std::fs::write(ssh.join("id_rsa"), "secret").unwrap();
-            let link = dir.path().join("link");
-            if symlink(&ssh, &link).is_ok() {
-                assert!(guard_read(&link.join("id_rsa")).is_err());
-            }
-        }
     }
 }

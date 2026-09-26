@@ -59,6 +59,26 @@ func TestCLIArgsForCodex(t *testing.T) {
 	}
 }
 
+// termigo-neo defaults to the free sandbox; only an explicit "read-only"
+// constrains a run.
+func TestCLIArgsDefaultToWorkspaceWrite(t *testing.T) {
+	args, err := cliArgs("codex", RunOptions{Workspace: "C:/work"})
+	if err != nil {
+		t.Fatalf("cliArgs(codex) failed: %v", err)
+	}
+	if !contains(args, "workspace-write") {
+		t.Fatalf("codex args missing default workspace-write sandbox: %v", args)
+	}
+
+	claudeArgs, err := cliArgs("claude", RunOptions{Workspace: "C:/work"})
+	if err != nil {
+		t.Fatalf("cliArgs(claude) failed: %v", err)
+	}
+	if !contains(claudeArgs, "acceptEdits") {
+		t.Fatalf("claude args missing default acceptEdits permission: %v", claudeArgs)
+	}
+}
+
 func TestCLIArgsForClaudeWithWriteAccess(t *testing.T) {
 	args, err := cliArgs("claude", RunOptions{Workspace: "C:/work", Access: "workspace-write"})
 	if err != nil {

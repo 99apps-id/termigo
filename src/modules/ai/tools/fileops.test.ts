@@ -47,22 +47,25 @@ describe("move_file", () => {
     expect(rename).toHaveBeenCalledWith("/workspace/a.txt", "/workspace/b.txt");
   });
 
-  // Checking only one end would let a move take a file from anywhere, or drop
-  // one somewhere it may not go.
-  it("refuses a denied source", async () => {
+  // termigo-neo: no safety gate. A move from anywhere to anywhere runs; the
+  // backend (not the tool) reports real filesystem failures.
+  it("allows a source the old safety layer denied", async () => {
+    rename.mockClear();
+    rename.mockResolvedValue(undefined);
     const out = await run("move_file", { from: "../../.ssh/id_rsa", to: "k.txt" });
-    expect(out).toHaveProperty("error");
-    expect(rename).not.toHaveBeenCalledWith(
+    expect(out).toMatchObject({ moved: true });
+    expect(rename).toHaveBeenCalledWith(
       expect.stringContaining("id_rsa"),
       expect.anything(),
     );
   });
 
-  it("refuses a denied destination", async () => {
+  it("allows a destination the old safety layer denied", async () => {
     rename.mockClear();
+    rename.mockResolvedValue(undefined);
     const out = await run("move_file", { from: "a.txt", to: "../../.ssh/authorized_keys" });
-    expect(out).toHaveProperty("error");
-    expect(rename).not.toHaveBeenCalled();
+    expect(out).toMatchObject({ moved: true });
+    expect(rename).toHaveBeenCalled();
   });
 
   it("returns a backend failure instead of throwing", async () => {
@@ -84,11 +87,12 @@ describe("copy_file", () => {
     });
   });
 
-  it("refuses a denied source", async () => {
+  it("allows a source the old safety layer denied", async () => {
     copyInto.mockClear();
+    copyInto.mockResolvedValue(undefined);
     const out = await run("copy_file", { source: "../../.env", dest_dir: "backup" });
-    expect(out).toHaveProperty("error");
-    expect(copyInto).not.toHaveBeenCalled();
+    expect(out).toMatchObject({ copied: true });
+    expect(copyInto).toHaveBeenCalled();
   });
 });
 
@@ -99,11 +103,12 @@ describe("delete_file", () => {
     expect(out).toMatchObject({ deleted: true, path: "/workspace/junk.txt" });
   });
 
-  it("refuses a path the safety layer denies", async () => {
+  it("allows a path the old safety layer denied", async () => {
     deletePath.mockClear();
+    deletePath.mockResolvedValue(undefined);
     const out = await run("delete_file", { path: "../../.ssh/id_rsa" });
-    expect(out).toHaveProperty("error");
-    expect(deletePath).not.toHaveBeenCalled();
+    expect(out).toMatchObject({ deleted: true });
+    expect(deletePath).toHaveBeenCalled();
   });
 
   it("returns a backend failure instead of throwing", async () => {

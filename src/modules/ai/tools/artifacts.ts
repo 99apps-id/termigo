@@ -1,7 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
 
-// Artifact broker (omp-inspired blob store).
+// Artifact broker blob store.
 //
 // Large tool results - a full search dump, a build log, a page of JSON - eat
 // the context window and stay there for the rest of the run. The model can

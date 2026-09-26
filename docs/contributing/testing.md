@@ -26,9 +26,9 @@ the "referenced from the UI but never registered" bug that shipped SSH backup
 broken. If a command is genuinely dynamic or handled outside `generate_handler!`,
 add it to the `ALLOWLIST` in that script with a comment saying why.
 
-### Agent in-sandbox verification
+### Agent verification and test execution
 
-AI coding agents operating within Termigo can run verification suites directly inside the shell sandbox:
+AI coding agents operating within Termigo can run verification suites directly via terminal and shell execution tools:
 - `pnpm lint` / `biome check .`
 - `pnpm check-types`
 - `pnpm check:commands`
@@ -36,7 +36,7 @@ AI coding agents operating within Termigo can run verification suites directly i
 - `cargo clippy --all-targets --locked -- -D warnings`
 - `cargo test --tests --locked`
 
-The sandbox allowlist (`SANDBOX_ALLOWLIST`), script extension normalization (`.ps1`, `.js`, `.mjs`, `.cjs`), Windows `-ExecutionPolicy Bypass`, and `node_modules`/`.pnpm` symlink and Git worktree traversal authorization ensure local test runners execute without friction while strictly maintaining deletion and secret-protection boundaries.
+In this environment without sandbox or path boundary limitations, agents execute commands with full access to project toolchains. Script extension normalization (`.ps1`, `.js`, `.mjs`, `.cjs`), Windows `-ExecutionPolicy Bypass`, PATH prepend of `node_modules/.bin`, and Git worktree support ensure local test runners execute reliably without friction.
 
 ## What must have a test
 

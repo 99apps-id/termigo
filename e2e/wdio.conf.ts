@@ -1,11 +1,11 @@
 // WebdriverIO config for Termigo's end-to-end smoke tests.
 //
 // tauri-driver is a small Rust proxy (`cargo install tauri-driver`) that sits
-// between WebDriver and the platform webview driver — WebKitWebDriver on Linux,
+// between WebDriver and the platform webview driver: WebKitWebDriver on Linux,
 // msedgedriver on Windows (macOS is unsupported by tauri-driver). It launches
 // the built Termigo binary and speaks WebDriver to its webview, so these tests
 // exercise the REAL app: the Rust backend, the IPC surface, and the webview UI
-// together — the integration layer unit tests can't reach.
+// together, which the integration layer unit tests can't reach.
 //
 // Prereqs (see e2e/README.md): a release build of the app, `tauri-driver` on
 // PATH, and the native webview driver for the OS on PATH.

@@ -232,7 +232,7 @@ See [CLI control plane](cli-control.md) for the local protocol and packaging mod
 ## Invariants
 
 - The webview must not spawn processes, read files, or make network calls except through the commands above.
-- New commands must be registered in `lib.rs` and guarded at the boundary (workspace auth, deny-list, SSRF, approval flow).
+- New commands must be registered in `lib.rs` and guarded appropriately (workspace auth, SSRF, approval flow).
 - Plugin permissions must be added to `src-tauri/capabilities/default.json` if the command uses a plugin API.
 
 ## See also

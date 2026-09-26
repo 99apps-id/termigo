@@ -113,7 +113,7 @@ describe("shortlist", () => {
   it("ranks a listed foreign shelf behind the workspace, not ahead of it", () => {
     const picked = shortlist(
       [
-        candidate("deploy-hermes", "hermes"),
+        candidate("deploy-claude", "claude"),
         candidate("deploy-mine", "workspace"),
       ],
       queryTerms("kubernetes"),
@@ -121,12 +121,10 @@ describe("shortlist", () => {
     expect(picked[0].source).toBe("workspace");
   });
 
-  // Hermes' shelf is where another agent's working procedures live, and a
-  // missing root is invisible: find_skill just never returns them.
-  it("searches hermes' own skill shelf", () => {
+  it("searches foreign skill shelves", () => {
     expect(FOREIGN_ROOTS).toContainEqual({
-      rel: ".hermes/skills",
-      source: "hermes",
+      rel: ".claude/skills",
+      source: "claude",
     });
   });
 });

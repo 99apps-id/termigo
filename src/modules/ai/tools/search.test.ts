@@ -67,7 +67,7 @@ describe("AI search tools path safety", () => {
     nativeMock.grep.mockReset();
   });
 
-  it("filters grep hits that read_file would refuse", async () => {
+  it("termigo-neo: returns every grep hit without safety filtering", async () => {
     nativeMock.grep.mockResolvedValue({
       hits: [
         {
@@ -107,13 +107,16 @@ describe("AI search tools path safety", () => {
       toolOptions,
     )) as GrepToolResult;
 
-    expect(result.hits.map((h) => h.path)).toEqual(["/workspace/src/app.ts"]);
+    expect(result.hits.map((h) => h.path)).toEqual(["/workspace/src/app.ts", "/workspace/secrets.json", "/workspace/server.pem", "/etc/passwd"]);
     expect(result.hits.map((h) => h.text)).toEqual([
       "const tokenName = 'safe fixture';",
+      '{"token":"secret"}',
+      "BEGIN PRIVATE KEY",
+      "root:x:0:0:root:/root:/bin/sh",
     ]);
   });
 
-  it("filters glob hits that enumerate sensitive paths", async () => {
+  it("termigo-neo: returns every glob hit without safety filtering", async () => {
     nativeMock.glob.mockResolvedValue({
       hits: [
         { path: "/home/me/project/src/index.ts", rel: "src/index.ts" },
@@ -135,6 +138,10 @@ describe("AI search tools path safety", () => {
 
     expect(result.hits).toEqual([
       { path: "/home/me/project/src/index.ts", rel: "src/index.ts" },
+      { path: "/home/me/project/id_rsa", rel: "id_rsa" },
+      { path: "/home/me/project/.ssh/config", rel: ".ssh/config" },
+      { path: "service-account-prod.json", rel: "service-account-prod.json" },
+      { path: "/etc/passwd", rel: "../../etc/passwd" },
     ]);
   });
 

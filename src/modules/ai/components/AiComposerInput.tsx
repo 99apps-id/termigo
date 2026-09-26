@@ -136,7 +136,7 @@ export function AiComposerInput() {
 
   const customCommands = useCustomCommandsStore((s) => s.commands);
 
-  // Live syntax highlighting (Hermes' composerHighlights, adapted): the
+  // Live syntax highlighting: the
   // tokens the pickers trigger on — /commands, #snippets, @files — light up
   // as they are recognised, so the user sees the composer parse what they
   // type instead of trusting an invisible trigger detector.

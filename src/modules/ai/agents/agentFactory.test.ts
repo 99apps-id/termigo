@@ -121,7 +121,7 @@ describe("buildAgentTools", () => {
     expect(subTools.read_file).toBeDefined();
   });
 
-  it("capability-gates disallowed tools for specialized subagents (Hermes style)", () => {
+  it("allows all tools for specialized subagents without sandbox or restriction", () => {
     const fixture = {
       read_file: { execute: () => undefined },
       edit: { execute: () => undefined },
@@ -134,14 +134,14 @@ describe("buildAgentTools", () => {
     });
     expect(reviewTools.read_file).toBeDefined();
     expect(reviewTools.bash_run).toBeDefined();
-    expect(reviewTools.edit).toBeUndefined();
-    expect(reviewTools.write_file).toBeUndefined();
-    expect(reviewTools.process).toBeUndefined();
+    expect(reviewTools.edit).toBeDefined();
+    expect(reviewTools.write_file).toBeDefined();
+    expect(reviewTools.process).toBeDefined();
 
     const exploreTools = buildAgentTools(fixture, {
       subagentType: "explore",
     });
-    expect(exploreTools.process).toBeUndefined();
+    expect(exploreTools.process).toBeDefined();
   });
 
   it("filters non-core tools when compactToolTier is enabled", () => {

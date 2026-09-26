@@ -1,12 +1,12 @@
 // Verification-on-stop gate (policy only).
 //
-// Ported from the Hermes TUI's `verification_stop.py`: the agent loop never
-// runs checks itself — it keeps a passive ledger of which CODE files a run
+// The agent loop never
+// runs checks itself: it keeps a passive ledger of which CODE files a run
 // edited and whether fresh passing verification evidence exists since the
 // last edit. When the model tries to end a run cleanly right after editing
 // code with no such evidence, the runtime sends ONE bounded synthetic
 // follow-up (max `MAX_VERIFY_NUDGES` per task) asking it to verify, repair,
-// and summarise — or to name the concrete blocker instead of claiming the
+// and summarise: or to name the concrete blocker instead of claiming the
 // work is verified.
 //
 // Evidence sources (all observed from tool results, never executed here):
@@ -49,7 +49,7 @@ const NON_CODE_VERIFY_FILENAMES = new Set([
 /** How many changed paths the nudge lists before collapsing the rest. */
 export const MAX_CHANGED_PATHS_IN_NUDGE = 8;
 
-/** How many verification follow-ups one task may receive. Hermes' bound. */
+/** How many verification follow-ups one task may receive. */
 export const MAX_VERIFY_NUDGES = 2;
 
 /** Marker the runtime uses to recognise a nudge as a continuation (not a

@@ -81,8 +81,8 @@ export function replaceAt(
 
 /**
  * How many queued rows the strip shows before collapsing the rest into an
- * "…and N more" tail. A long queue must not eat the composer: the strip is a
- * status line, not a document. Ported from Hermes' QUEUE_WINDOW.
+ * "...and N more" tail. A long queue must not eat the composer: the strip is a
+ * status line, not a document.
  */
 export const QUEUE_WINDOW = 3;
 
@@ -101,8 +101,8 @@ export type QueueWindow = {
  * Which slice of the queue the strip renders.
  *
  * Normally the OLDEST rows (they send first). When a row is being edited the
- * window slides so that row stays visible — the user must never watch the row
- * they are working on scroll out of view. Ported from Hermes' getQueueWindow.
+ * window slides so that row stays visible: the user must never watch the row
+ * they are working on scroll out of view.
  */
 export function getQueueWindow(
   queueLen: number,

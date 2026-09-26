@@ -35,7 +35,7 @@ type TuiWaitResult = "ready" | "gone" | "timeout";
 
 // Markers that mean a coding-agent TUI has finished booting and is showing its
 // prompt. Claude's "shortcuts"/"? for" plus generic prompt glyphs and phrases
-// the other CLIs (codex, gemini, opencode, …) draw, so one detector serves them
+// the other CLIs (codex, gemini) draw, so one detector serves them
 // all. When none appear, `waitForTuiReady` falls back to buffer-stability.
 const TUI_READY_MARKERS = [
   "shortcuts",

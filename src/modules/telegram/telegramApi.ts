@@ -431,7 +431,7 @@ export async function editProgressMessage(
   } catch (err) {
     if (err instanceof TelegramApiError) {
       const desc = err.description.toLowerCase();
-      // Exact message already displayed on Telegram: treat as success (Hermes pattern)
+      // Exact message already displayed on Telegram: treat as success
       if (desc.includes("message is not modified")) {
         return true;
       }

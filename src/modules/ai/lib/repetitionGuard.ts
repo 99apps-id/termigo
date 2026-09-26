@@ -1,16 +1,13 @@
 /**
  * Cheap content-sanity check for a model stuck in a repetition loop.
  *
- * Ported from Hermes' `repetition_guard.py`. A degenerate model can spend an
- * entire output budget echoing one fragment. Termigo has no `finish_reason =
- * length` continuation nudge (the shape Hermes guarded), but the same loop
- * shows up at step boundaries: a step whose text is mostly one repeated
- * window. Detecting it lets the run stop with a clear reason instead of
+ * A degenerate model can spend an entire output budget echoing one fragment.
+ * Detecting it lets the run stop with a clear reason instead of
  * burning more steps (and tokens) on noise.
  *
  * Deliberately conservative: only LONG verbatim repeats (60+ chars) covering a
- * majority of the fragment trip it. Ordinary reuse — citations, headings,
- * similar code blocks, a table with repeated separators — never reaches the
+ * majority of the fragment trip it. Ordinary reuse (citations, headings,
+ * similar code blocks, a table with repeated separators) never reaches the
  * threshold.
  */
 
