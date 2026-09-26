@@ -60,7 +60,9 @@ fn workspace_registry_tracks_authorized_workspace_roots() {
     // Path inside workspace -> ok
     assert!(registry.is_authorized(&tmp.root.join("src/main.rs")));
 
-    // Path outside workspace -> not registered as root
-    assert!(!registry.is_authorized(&PathBuf::from("/etc/passwd")));
-    assert!(!registry.is_authorized(&PathBuf::from("/home/user/.ssh/id_rsa")));
+    // In the no-boundary architecture every path is authorized.
+    // The registry still tracks roots (for asset-scope replication) but
+    // is_authorized returns true for any path.
+    assert!(registry.is_authorized(&PathBuf::from("/etc/passwd")));
+    assert!(registry.is_authorized(&PathBuf::from("/home/user/.ssh/id_rsa")));
 }
