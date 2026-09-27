@@ -83,6 +83,42 @@ export function truncateProjectMemory(content: string): string {
   return `${body}\n\n[TERMIGO.md truncated here; read the file for the rest]`;
 }
 
+/**
+ * The rule files as one document, with duplicates dropped.
+ *
+ * `PROJECT_RULE_FILES` lists both spellings of each name, because on a
+ * case-sensitive filesystem `USER.md` and `user.md` are two files and both
+ * count. On Windows and macOS the second spelling resolves to the SAME file and
+ * reads back identical content, so the join carried every rule twice: measured
+ * in this repo, 4738 characters of the 10240-character budget spent on
+ * duplicates. That pushed the truncation cut from 7871 characters into
+ * TERMIGO.md down to 5502, dropped 2369 characters of architecture notes the
+ * model would otherwise have received, and kept CLAUDE.md out of the prompt
+ * entirely - paid on every request, since project memory is part of the system
+ * prompt.
+ *
+ * Deduplicating by CONTENT rather than by name is what keeps both filesystems
+ * correct: identical bytes are the duplicate whatever name they were read as,
+ * while two genuinely different files in the same name family still both
+ * survive.
+ */
+export function mergeRuleFiles(
+  found: ReadonlyArray<{ name: string; content: string }>,
+): string | null {
+  const seen = new Set<string>();
+  const unique: Array<{ name: string; content: string }> = [];
+  for (const file of found) {
+    if (seen.has(file.content)) continue;
+    seen.add(file.content);
+    unique.push(file);
+  }
+  if (unique.length === 0) return null;
+  if (unique.length === 1) return unique[0].content;
+  return unique
+    .map((f) => `<!-- Rules from ${f.name} -->\n${f.content}`)
+    .join("\n\n");
+}
+
 export const PROJECT_RULE_FILES = [
   "USER.md",
   "user.md",
@@ -102,7 +138,6 @@ export async function readProjectRules(
   if (cached && Date.now() - cached.mtime < 30_000) return cached.content;
 
   const root = workspaceRoot.replace(/\/$/, "");
-  const foundFiles: Array<{ name: string; content: string }> = [];
   const results = await Promise.all(
     PROJECT_RULE_FILES.map(async (filename) => {
       const path = `${root}/${filename}`;
@@ -118,22 +153,14 @@ export async function readProjectRules(
     }),
   );
 
-  for (const item of results) {
-    if (item) foundFiles.push(item);
+  const foundFiles: Array<{ name: string; content: string }> = [];
+  for (const found of results) {
+    if (found) foundFiles.push({ name: found.name, content: found.content });
   }
-
-  if (foundFiles.length === 0) {
+  const combined = mergeRuleFiles(foundFiles);
+  if (combined === null) {
     projectMemoryCache.set(workspaceRoot, { content: null, mtime: Date.now() });
     return null;
-  }
-
-  let combined = "";
-  if (foundFiles.length === 1) {
-    combined = foundFiles[0].content;
-  } else {
-    combined = foundFiles
-      .map((f) => `<!-- Rules from ${f.name} -->\n${f.content}`)
-      .join("\n\n");
   }
 
   const content = truncateProjectMemory(combined);

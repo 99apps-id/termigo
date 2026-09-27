@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import {
   appendEnvTurn,
   isResumingApproval,
+  mergeRuleFiles,
   PROJECT_RULE_FILES,
   TERMIGO_MD_MAX_CHARS,
   truncateProjectMemory,
@@ -53,6 +54,77 @@ describe("truncateProjectMemory", () => {
     expect(PROJECT_RULE_FILES).toContain(".termigorules");
     expect(PROJECT_RULE_FILES).toContain("CLAUDE.md");
     expect(PROJECT_RULE_FILES).toContain("AGENTS.md");
+  });
+});
+
+// The list carries both spellings of each name on purpose: on a case-sensitive
+// filesystem `USER.md` and `user.md` are two files and both count. On Windows
+// and macOS the second spelling resolves to the SAME file, so the join carried
+// every rule twice - 4738 characters of the 10240 the agent receives, which cut
+// TERMIGO.md's tail off and dropped CLAUDE.md entirely, on every request.
+describe("mergeRuleFiles", () => {
+  it("drops a rule file that was read twice under its other spelling", () => {
+    const user = "# USER.md\nrules\n";
+    const agents = "# AGENTS.md\nmore\n";
+    const out = mergeRuleFiles([
+      { name: "USER.md", content: user },
+      { name: "user.md", content: user },
+      { name: "AGENTS.md", content: agents },
+      { name: "agents.md", content: agents },
+    ]);
+    expect(out?.match(/rules/g)).toHaveLength(1);
+    expect(out?.match(/more/g)).toHaveLength(1);
+  });
+
+  it("keeps two genuinely different files in the same name family", () => {
+    const out = mergeRuleFiles([
+      { name: "USER.md", content: "# USER.md\nupper\n" },
+      { name: "user.md", content: "# user.md\nlower\n" },
+    ]);
+    expect(out).toContain("upper");
+    expect(out).toContain("lower");
+    expect(out).toContain("<!-- Rules from USER.md -->");
+    expect(out).toContain("<!-- Rules from user.md -->");
+  });
+
+  it("returns a single file unlabelled, and null for none", () => {
+    expect(mergeRuleFiles([{ name: "TERMIGO.md", content: "# T\n" }])).toBe(
+      "# T\n",
+    );
+    expect(mergeRuleFiles([])).toBeNull();
+  });
+
+  // The duplicates were eating the budget the model actually reads: the cut
+  // landed inside TERMIGO.md instead of past the end of the rule set.
+  it("spends the budget on unique rules, not on the same file twice", () => {
+    const filler = (title: string) =>
+      `${title}\n${"a rule line that explains something\n".repeat(50)}`;
+    const files = [
+      { name: "USER.md", content: filler("# USER.md") },
+      { name: "user.md", content: filler("# USER.md") },
+      { name: "AGENTS.md", content: filler("# AGENTS.md") },
+      { name: "agents.md", content: filler("# AGENTS.md") },
+      { name: "TERMIGO.md", content: filler("# TERMIGO.md") },
+      { name: "termigo.md", content: filler("# TERMIGO.md") },
+      { name: "CLAUDE.md", content: filler("# CLAUDE.md") },
+      { name: "claude.md", content: filler("# CLAUDE.md") },
+    ];
+    const merged = mergeRuleFiles(files) ?? "";
+    expect(merged.length).toBeLessThan(
+      files.reduce((n, f) => n + f.content.length, 0),
+    );
+
+    // With the duplicates gone the whole rule set fits, so the last file is
+    // read at all.
+    const kept = truncateProjectMemory(merged);
+    expect(kept).not.toMatch(/truncated here/);
+    expect(kept).toContain("# CLAUDE.md");
+
+    // The naive join is the pre-fix behaviour, and it loses CLAUDE.md.
+    const naive = files.map((f) => f.content).join("\n\n");
+    const cutNaive = truncateProjectMemory(naive);
+    expect(cutNaive).toMatch(/truncated here/);
+    expect(cutNaive).not.toContain("# CLAUDE.md");
   });
 });
 
