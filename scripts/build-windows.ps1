@@ -29,7 +29,12 @@ pnpm build
 if ($LASTEXITCODE -ne 0) { throw "frontend build failed" }
 
 Write-Host "==> Building Tauri Windows application..." -ForegroundColor Cyan
-pnpm exec tauri build --bundles nsis msi
+if (-not $env:TAURI_SIGNING_PRIVATE_KEY) {
+    Write-Host "    Note: TAURI_SIGNING_PRIVATE_KEY is not set. Building local installers without updater signature artifacts." -ForegroundColor Yellow
+    pnpm exec tauri build --bundles nsis msi -c '{\"bundle\":{\"createUpdaterArtifacts\":false}}'
+} else {
+    pnpm exec tauri build --bundles nsis msi
+}
 if ($LASTEXITCODE -ne 0) { throw "tauri build failed" }
 
 $TargetRelease = Join-Path $RootDir "src-tauri\target\release"
