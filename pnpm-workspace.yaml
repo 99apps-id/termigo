@@ -29,5 +29,6 @@ allowBuilds:
 # no override: pnpm dedupes streamdown's mermaid to that single instance, and
 # pnpm >= 11 rejects an override that conflicts with a direct dependency.
 overrides:
+  '@ai-sdk/provider-utils': '>=4.0.33'
   dompurify: '>=3.4.9'
   nanoid: '>=3.3.18'
