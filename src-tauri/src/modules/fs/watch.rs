@@ -98,7 +98,46 @@ struct WatchInner {
     watcher: RecommendedWatcher,
     // Explorer (expanded dirs) and editor (dirs of open files) can request the
     // same dir; unwatch only when the last requester releases it.
-    refcounts: HashMap<PathBuf, usize>,
+    refcounts: HashMap<PathBuf, Watched>,
+}
+
+/// One watched directory: the spelling handed to the watcher, and how many
+/// requesters hold it.
+struct Watched {
+    path: PathBuf,
+    refs: usize,
+}
+
+/// The bookkeeping key for a directory, so add and remove agree on one entry
+/// however the path was spelled.
+///
+/// They did not, and a directory that was renamed or deleted could never be
+/// released: add stores the canonical spelling (`\\?\C:\proj\src` on Windows),
+/// while remove falls back to the plain resolved one when `canonicalize` fails
+/// on a path that no longer exists, and the two never matched. The entry stayed
+/// in the map for the life of the process, and re-adding the same path
+/// incremented the stale count instead of starting a fresh one, so the last
+/// legitimate release only decremented it and the watch was never dropped.
+fn watch_key(path: &Path) -> PathBuf {
+    // `to_canon` is the single place that strips the Windows verbatim prefix and
+    // normalizes separators.
+    let canon = crate::modules::fs::to_canon(path);
+    let trimmed = canon.trim_end_matches('/');
+    let key = if trimmed.is_empty() {
+        canon.as_str()
+    } else {
+        trimmed
+    };
+    #[cfg(windows)]
+    {
+        // Windows compares paths case-insensitively, so a key must too.
+        PathBuf::from(key.to_lowercase())
+    }
+    #[cfg(not(windows))]
+    {
+        // Case and separators are significant on Unix.
+        PathBuf::from(key)
+    }
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -181,28 +220,40 @@ fn collect(set: &mut HashSet<String>, ev: notify::Result<Event>) {
 
 fn add_paths(inner: &mut WatchInner, paths: Vec<PathBuf>) {
     for canonical in paths {
-        let current = inner.refcounts.get(&canonical).copied().unwrap_or(0);
-        if current == 0 {
-            match inner.watcher.watch(&canonical, RecursiveMode::NonRecursive) {
-                Ok(()) => {
-                    inner.refcounts.insert(canonical, 1);
-                }
-                Err(e) => log::debug!("fs_watch add {} failed: {e}", canonical.display()),
+        let key = watch_key(&canonical);
+        if let Some(entry) = inner.refcounts.get_mut(&key) {
+            entry.refs += 1;
+            continue;
+        }
+        match inner.watcher.watch(&canonical, RecursiveMode::NonRecursive) {
+            Ok(()) => {
+                inner.refcounts.insert(
+                    key,
+                    Watched {
+                        path: canonical,
+                        refs: 1,
+                    },
+                );
             }
-        } else {
-            inner.refcounts.insert(canonical, current + 1);
+            Err(e) => log::debug!("fs_watch add {} failed: {e}", canonical.display()),
         }
     }
 }
 
 fn remove_paths(inner: &mut WatchInner, paths: Vec<PathBuf>) {
-    for key in paths {
-        let current = inner.refcounts.get(&key).copied().unwrap_or(0);
-        if current <= 1 {
-            inner.refcounts.remove(&key);
-            let _ = inner.watcher.unwatch(&key);
-        } else {
-            inner.refcounts.insert(key, current - 1);
+    for path in paths {
+        let key = watch_key(&path);
+        let Some(refs) = inner.refcounts.get(&key).map(|entry| entry.refs) else {
+            continue;
+        };
+        if refs > 1 {
+            if let Some(entry) = inner.refcounts.get_mut(&key) {
+                entry.refs -= 1;
+            }
+            continue;
+        }
+        if let Some(entry) = inner.refcounts.remove(&key) {
+            let _ = inner.watcher.unwatch(&entry.path);
         }
     }
 }
@@ -307,5 +358,55 @@ mod tests {
         collect(&mut set, modify());
         collect(&mut set, modify());
         assert_eq!(set.len(), 1);
+    }
+
+    /// The two spellings the add and remove paths actually produce have to land
+    /// on one key, or the release is lost. On Windows add stores what
+    /// `canonicalize` returned (`\\?\C:\...`, and case-preserved) while remove
+    /// falls back to the plain resolved path when the directory is gone.
+    #[test]
+    fn watch_keys_agree_across_spellings() {
+        assert_eq!(watch_key(Path::new("/a/b/")), watch_key(Path::new("/a/b")));
+        #[cfg(windows)]
+        {
+            assert_eq!(
+                watch_key(Path::new(r"\\?\C:\Proj\Src")),
+                watch_key(Path::new("C:/proj/src"))
+            );
+            assert_eq!(
+                watch_key(Path::new(r"C:\proj\src")),
+                watch_key(Path::new("C:/proj/src"))
+            );
+        }
+        #[cfg(not(windows))]
+        {
+            // Case is significant on Unix: the keys must stay distinct.
+            assert_ne!(watch_key(Path::new("/a/B")), watch_key(Path::new("/a/b")));
+        }
+    }
+
+    /// The regression itself: a directory released with a different spelling
+    /// than it was added with must still be unwatched. Before the key existed,
+    /// the entry outlived its release and the final consumer of a renamed
+    /// directory could never drop the watch.
+    #[test]
+    fn a_released_directory_leaves_no_watch_behind() {
+        let dir = tempfile::tempdir().expect("temp directory");
+        let real = std::fs::canonicalize(dir.path()).expect("canonicalize");
+        let mut inner = WatchInner {
+            watcher: RecommendedWatcher::new(|_| {}, Config::default()).expect("watcher"),
+            refcounts: HashMap::new(),
+        };
+
+        add_paths(&mut inner, vec![real.clone()]);
+        assert_eq!(inner.refcounts.len(), 1, "the watch was not registered");
+
+        let other_spelling = PathBuf::from(format!("{}/", real.display()));
+        remove_paths(&mut inner, vec![other_spelling]);
+
+        assert!(
+            inner.refcounts.is_empty(),
+            "the watch entry outlived its release"
+        );
     }
 }
