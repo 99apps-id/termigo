@@ -263,7 +263,7 @@ export function startActivityHeartbeat(options?: {
 }
 
 /** Budget for the model to answer after a tool result is fed back. */
-export const TOOL_RESULT_DELIVERY_MS = 60_000;
+export const TOOL_RESULT_DELIVERY_MS = 120_000;
 
 /**
  * What the tool-result delivery guard should do when its timer fires.

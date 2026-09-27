@@ -1,3 +1,4 @@
+import { canonicalDirPath } from "@/lib/path";
 import { native } from "./native";
 
 // ─── Types ────────────────────────────────────────────────────────────────
@@ -227,6 +228,11 @@ const docFrequencies = new Map<string, number>();
 let totalChunksCount = 0;
 let totalTokensCount = 0;
 
+/** Path -> mtime/size as of the moment the file was indexed. A saved index is
+ *  checked against this before it is reused, so an index that describes a tree
+ *  that no longer exists cannot answer a search. */
+const fileFingerprints = new Map<string, { mtime: number; size: number }>();
+
 let indexedRoot: string | null = null;
 
 export function getIndexedRoot(): string | null {
@@ -236,6 +242,7 @@ export function getIndexedRoot(): string | null {
 export function clearIndex(): void {
   index.clear();
   docFrequencies.clear();
+  fileFingerprints.clear();
   totalChunksCount = 0;
   totalTokensCount = 0;
   indexedRoot = null;
@@ -262,6 +269,15 @@ export const INDEXABLE_EXTENSIONS = [
   ".html",
   ".css",
 ];
+
+/** One walk for every extension instead of one walk per extension.
+ *  `INDEXABLE_EXTENSIONS` had 19 entries and each got its own full-tree glob. */
+export const INDEXABLE_GLOB = `**/*.{${INDEXABLE_EXTENSIONS.map((e) => e.slice(1)).join(",")}}`;
+
+/** Rust caps a glob at 2000 hits. Passing the cap explicitly matters: the old
+ *  per-extension calls took the 500 default, so a repository with more than 500
+ *  files of one extension was indexed only in part, silently. */
+export const MAX_INDEXED_FILES = 2000;
 
 const IGNORED_DIR_NAMES = new Set([
   "node_modules",
@@ -298,7 +314,7 @@ function shouldSkipPath(path: string): boolean {
 export const CODE_INDEX_CACHE_REL_PATH = ".termigo/code-index.json";
 
 function codeIndexCachePath(root: string): string {
-  return `${root.replace(/[\\/]$/, "")}/${CODE_INDEX_CACHE_REL_PATH}`;
+  return `${canonicalDirPath(root)}/${CODE_INDEX_CACHE_REL_PATH}`;
 }
 
 export type SerializedCodeChunk = {
@@ -310,32 +326,68 @@ export type SerializedCodeChunk = {
   scopeHeader?: string;
 };
 
+export type SerializedCodeFile = {
+  path: string;
+  mtime: number;
+  size: number;
+  chunks: SerializedCodeChunk[];
+};
+
+/** `version: 2` carries a per-file fingerprint (mtime + size). A version 1 entry
+ *  was written without one, so it cannot be checked and is treated as stale. */
 export type SerializedCodeIndex = {
-  version: 1;
+  version: 2;
   root: string;
   savedAt: number;
   totalChunksCount: number;
   totalTokensCount: number;
   docFrequencies: [string, number][];
-  files: {
-    path: string;
-    chunks: SerializedCodeChunk[];
-  }[];
+  files: SerializedCodeFile[];
 };
+
+/** The files an index build may read, from a single glob.
+ *
+ *  The build and the cache check both go through here, and that is load
+ *  bearing: if the two filtered differently, every load would compare a
+ *  manifest against a differently shaped one and invalidate a good cache. */
+async function collectIndexableFiles(
+  root: string,
+): Promise<{ path: string; mtime: number; size: number }[]> {
+  const result = await native.glob({
+    pattern: INDEXABLE_GLOB,
+    root,
+    maxResults: MAX_INDEXED_FILES,
+  });
+  const files: { path: string; mtime: number; size: number }[] = [];
+  const seen = new Set<string>();
+  for (const hit of result.hits) {
+    if (seen.has(hit.path)) continue;
+    seen.add(hit.path);
+    if (shouldSkipPath(hit.path)) continue;
+    files.push({ path: hit.path, mtime: hit.mtime ?? 0, size: hit.size ?? 0 });
+  }
+  return files;
+}
 
 export async function saveIndexCache(root: string | null): Promise<boolean> {
   if (!root || index.size === 0) return false;
   try {
-    const dir = `${root.replace(/[\\/]$/, "")}/.termigo`;
+    const dir = `${canonicalDirPath(root)}/.termigo`;
     try {
       await native.createDir(dir);
     } catch {
       // already exists
     }
-    const filesList: Array<{ path: string; chunks: SerializedCodeChunk[] }> = [];
+    const filesList: SerializedCodeFile[] = [];
     for (const [path, chunks] of index.entries()) {
+      const fingerprint = fileFingerprints.get(path);
+      // No fingerprint means the entry did not come from a file walk; the cache
+      // check would reject it on the next load anyway.
+      if (!fingerprint) continue;
       filesList.push({
         path,
+        mtime: fingerprint.mtime,
+        size: fingerprint.size,
         chunks: chunks.map((c) => ({
           path: c.path,
           startLine: c.startLine,
@@ -347,8 +399,8 @@ export async function saveIndexCache(root: string | null): Promise<boolean> {
       });
     }
     const payload: SerializedCodeIndex = {
-      version: 1,
-      root,
+      version: 2,
+      root: canonicalDirPath(root),
       savedAt: Date.now(),
       totalChunksCount,
       totalTokensCount,
@@ -370,7 +422,31 @@ export async function loadIndexCache(
     const res = await native.readFile(codeIndexCachePath(root));
     if (res.kind !== "text" || !res.content) return null;
     const data = JSON.parse(res.content) as SerializedCodeIndex;
-    if (data.version !== 1 || data.root !== root) return null;
+    // Canonical compare: the same tree spelled with a trailing slash or with
+    // Windows backslashes is the same cache. A raw compare dropped a valid
+    // index and then overwrote it under the other spelling, so every call paid
+    // a full rebuild and neither spelling ever hit.
+    if (
+      data.version !== 2 ||
+      canonicalDirPath(data.root) !== canonicalDirPath(root)
+    ) {
+      return null;
+    }
+
+    // Freshness check. Version and root alone are not enough: that combination
+    // was reused forever, so `code_search` kept answering from a tree that had
+    // since changed, across restarts and after every edit, with no signal to
+    // the caller. One glob of path+mtime+size decides it.
+    const onDisk = new Map(
+      (await collectIndexableFiles(root)).map((f) => [f.path, f]),
+    );
+    if (onDisk.size !== data.files.length) return null;
+    for (const f of data.files) {
+      const current = onDisk.get(f.path);
+      if (!current || current.mtime !== f.mtime || current.size !== f.size) {
+        return null;
+      }
+    }
 
     clearIndex();
     indexedRoot = root;
@@ -395,6 +471,7 @@ export async function loadIndexCache(
           scopeHeader: c.scopeHeader,
         };
       });
+      fileFingerprints.set(f.path, { mtime: f.mtime, size: f.size });
       index.set(f.path, chunks);
     }
     return { files: data.files.length, chunks: totalChunksCount };
@@ -406,6 +483,7 @@ export async function loadIndexCache(
 export async function indexWorkspace(
   root: string | null,
   forceReindex = false,
+  persist = false,
 ): Promise<{ files: number; chunks: number }> {
   if (!root) {
     clearIndex();
@@ -421,68 +499,63 @@ export async function indexWorkspace(
 
   index.clear();
   docFrequencies.clear();
+  fileFingerprints.clear();
   totalChunksCount = 0;
   totalTokensCount = 0;
   indexedRoot = root;
 
   let files = 0;
-  const seenFiles = new Set<string>();
 
-  for (const ext of INDEXABLE_EXTENSIONS) {
+  for (const hit of await collectIndexableFiles(root)) {
     try {
-      const result = await native.glob({ pattern: `**/*${ext}`, root });
-      for (const hit of result.hits) {
-        if (seenFiles.has(hit.path)) continue;
-        seenFiles.add(hit.path);
-        if (shouldSkipPath(hit.path)) continue;
-        try {
-          const read = await native.readFile(hit.path);
-          if (read.kind !== "text" || !read.content) continue;
-          if (read.size > 500_000) continue; // Skip huge generated files
+      const read = await native.readFile(hit.path);
+      if (read.kind !== "text" || !read.content) continue;
+      if (read.size > 500_000) continue; // Skip huge generated files
 
-          const lines = read.content.replace(/\r\n/g, "\n").split("\n");
-          const pieces = chunkLines(lines);
-          const indexed: CodeChunk[] = [];
+      const lines = read.content.replace(/\r\n/g, "\n").split("\n");
+      const pieces = chunkLines(lines);
+      const indexed: CodeChunk[] = [];
 
-          for (const p of pieces) {
-            const tokens = tokenize(p.text);
-            const counts = new Map<string, number>();
-            const seenInChunk = new Set<string>();
+      for (const p of pieces) {
+        const tokens = tokenize(p.text);
+        const counts = new Map<string, number>();
+        const seenInChunk = new Set<string>();
 
-            for (const t of tokens) {
-              counts.set(t, (counts.get(t) ?? 0) + 1);
-              if (!seenInChunk.has(t)) {
-                seenInChunk.add(t);
-                docFrequencies.set(t, (docFrequencies.get(t) ?? 0) + 1);
-              }
-            }
-
-            totalChunksCount++;
-            totalTokensCount += tokens.length;
-
-            indexed.push({
-              path: hit.path,
-              startLine: p.start + 1,
-              endLine: p.end,
-              text: p.text,
-              tokens,
-              tokenCounts: counts,
-              scopeHeader: p.scopeHeader,
-            });
+        for (const t of tokens) {
+          counts.set(t, (counts.get(t) ?? 0) + 1);
+          if (!seenInChunk.has(t)) {
+            seenInChunk.add(t);
+            docFrequencies.set(t, (docFrequencies.get(t) ?? 0) + 1);
           }
-
-          index.set(hit.path, indexed);
-          files++;
-        } catch {
-          // skip unreadable files
         }
+
+        totalChunksCount++;
+        totalTokensCount += tokens.length;
+
+        indexed.push({
+          path: hit.path,
+          startLine: p.start + 1,
+          endLine: p.end,
+          text: p.text,
+          tokens,
+          tokenCounts: counts,
+          scopeHeader: p.scopeHeader,
+        });
       }
+
+      index.set(hit.path, indexed);
+      fileFingerprints.set(hit.path, { mtime: hit.mtime, size: hit.size });
+      files++;
     } catch {
-      // ignore glob errors
+      // skip unreadable files
     }
   }
 
-  if (files > 0) {
+  // Only the workspace root keeps a cache file. Caching any `root` put a
+  // multi-megabyte `.termigo/code-index.json` into whatever directory was
+  // searched, so indexing a subdirectory or a third-party checkout planted an
+  // index inside that tree (13 such directories, 58 MB, in this repository).
+  if (files > 0 && persist) {
     await saveIndexCache(root);
   }
 

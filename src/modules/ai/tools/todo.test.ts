@@ -4,6 +4,7 @@ import type { ToolContext } from "./context";
 
 const storeMock = vi.hoisted(() => ({
   setTodos: vi.fn(),
+  // biome-ignore lint/suspicious/noExplicitAny: empty todo list for a partial ctx
   currentTodos: [] as any[],
 }));
 
@@ -216,7 +217,9 @@ describe("todo_update", () => {
     });
     expect(r.ok).toBe(true);
     const persisted = storeMock.setTodos.mock.calls[0][1];
+    // biome-ignore lint/suspicious/noExplicitAny: persisted todos are read as a dynamic shape here
     expect(persisted.find((t: any) => t.id === "a").status).toBe("completed");
+    // biome-ignore lint/suspicious/noExplicitAny: persisted todos are read as a dynamic shape here
     expect(persisted.find((t: any) => t.id === "b").status).toBe("in_progress");
   });
 

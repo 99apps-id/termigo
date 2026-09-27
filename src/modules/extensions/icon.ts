@@ -72,7 +72,7 @@ export function useResolvedExtensionIcon(
   icon: string | null | undefined,
 ): string | null {
   const [url, setUrl] = useState<string | null>(() =>
-    icon && icon.startsWith("data:") ? icon : null,
+    icon?.startsWith("data:") ? icon : null,
   );
   useEffect(() => {
     if (!icon) {

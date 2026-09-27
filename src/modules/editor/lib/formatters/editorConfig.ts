@@ -106,7 +106,7 @@ function globToRegex(glob: string): RegExp {
 
   let re = "";
   for (let i = 0; i < g.length; i++) {
-    const ch = g[i]!;
+    const ch = g[i];
     if (ch === "*") {
       if (g[i + 1] === "*") {
         re += ".*";
@@ -123,7 +123,7 @@ function globToRegex(glob: string): RegExp {
         re += "\\[";
       } else {
         let body = g.slice(i + 1, close);
-        if (body.startsWith("!")) body = "^" + body.slice(1);
+        if (body.startsWith("!")) body = `^${body.slice(1)}`;
         re += `[${body}]`;
         i = close;
       }
@@ -188,7 +188,7 @@ export async function resolveEditorConfig(filepath: string): Promise<PartialPret
   // Apply outer (rootmost) → inner (file-closest) so closer overrides win.
   const out: PartialPrettierOptions = {};
   for (let i = stack.length - 1; i >= 0; i--) {
-    const parsed = stack[i]!;
+    const parsed = stack[i];
     const rel = relPath(filepath, parsed.baseDir);
     if (rel === null) continue;
     for (const section of parsed.sections) {

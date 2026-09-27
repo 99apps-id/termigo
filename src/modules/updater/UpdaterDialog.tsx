@@ -38,7 +38,7 @@ function formatBytes(n: number): string {
 }
 
 export function UpdaterDialog() {
-  const { status, install, dismiss } = useUpdater();
+  const { status, install, dismiss } = useUpdater({ autoCheck: true });
   const [copied, setCopied] = useState(false);
   const [distro, setDistro] = useState<DistroKey>("arch");
   const manualVersion =

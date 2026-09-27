@@ -382,6 +382,7 @@ export const ToolDiffCard = memo(function ToolDiffCard({
         className,
       )}
     >
+      {/* biome-ignore lint/a11y/useSemanticElements: the header holds block-level layout children, so a real <button> would have an invalid content model */}
       <div
         role="button"
         tabIndex={0}

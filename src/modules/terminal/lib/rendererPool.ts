@@ -27,6 +27,7 @@ import {
 } from "./terminalClipboard";
 import { createTerminalLinkHandler } from "./terminalLinks";
 import { pasteIntoTerminal } from "./terminalPaste";
+import { shouldRepaintOnUnpark } from "./unparkRepaint";
 import { shouldRecoverWebgl } from "./webglRecovery";
 
 export const POOL_MAX_SIZE = 5;
@@ -84,6 +85,8 @@ export type Slot = {
   webglReapTimer: ReturnType<typeof setTimeout> | null;
   slotReapTimer: ReturnType<typeof setTimeout> | null;
   unhideRaf: number | null;
+  /** Pending un-park repaint; see `scheduleUnparkRepaint`. */
+  unparkRaf: number | null;
   lastCols: number;
   lastRows: number;
   lastW: number;
@@ -250,12 +253,28 @@ function armAltExitRepaint(slot: Slot): void {
     if (isAlt) return; // a TUI re-entered the alt screen during the delay
     try {
       slot.term.write("\x1b7\x1b[r\x1b8");
-      slot.webglAddon?.clearTextureAtlas();
-      slot.term.refresh(0, slot.term.rows - 1);
+      repaintSlot(slot);
     } catch {
       // A disposed term or a mid-write race: the next real output repaints.
     }
   }, ALT_EXIT_REPAINT_DELAY_MS);
+}
+
+/**
+ * Drop the WebGL glyph atlas (when one is attached) and repaint every row.
+ *
+ * The atlas is dropped first on purpose: a texture built while the surface had
+ * the wrong size renders nothing useful even after a refresh, which is the same
+ * class of staleness the terminal-renderer pool already clears on alt-screen
+ * exit (`armAltExitRepaint`).
+ */
+function repaintSlot(slot: Slot): void {
+  try {
+    slot.webglAddon?.clearTextureAtlas();
+    slot.term.refresh(0, slot.term.rows - 1);
+  } catch {
+    // A disposed term or a mid-write race: the next real output repaints.
+  }
 }
 
 function createSlot(): Slot {
@@ -303,6 +322,7 @@ function createSlot(): Slot {
     webglReapTimer: null,
     slotReapTimer: null,
     unhideRaf: null,
+    unparkRaf: null,
     lastCols: term.cols,
     lastRows: term.rows,
     lastW: 0,
@@ -793,6 +813,7 @@ function detachSlotFromLeaf(slot: Slot, retain: boolean): void {
   slot.ptyTimer = null;
 
   cancelPendingUnhide(slot);
+  cancelUnparkRepaint(slot);
   slot.host.style.visibility = "";
 
   slot.term.options.disableStdin = false;
@@ -817,6 +838,52 @@ function unparkSlotHost(slot: Slot): void {
   if (!slot.parked) return;
   slot.parked = false;
   slot.host.style.display = "";
+  scheduleUnparkRepaint(slot);
+}
+
+/**
+ * Repaint a slot that has just come back from `display:none`.
+ *
+ * A parked host cannot be measured, so xterm's renderer stops updating while
+ * the buffer keeps parsing writes. Un-parking generally leaves the container at
+ * the size it already had, and every geometry guard in this file compares
+ * against `lastW`/`lastH` - so no fit runs, no resize reaches the renderer, and
+ * it keeps the viewport and glyph atlas it had while hidden. The buffer is then
+ * correct while the screen paints stale or partially: observed in the field as
+ * a PowerShell prompt showing only its final character, with the whole prompt
+ * present in a select-all copy, until an unrelated repaint restored it (which
+ * is why pressing Enter appeared to fix it).
+ *
+ * Deferred one frame so the host has been laid out again. Deliberately does not
+ * `fit()`: re-measuring is what `rewireSlot` and `refreshLeafSlot` already do on
+ * their own paths, and doing it here as well would resize the PTY - a SIGWINCH
+ * per tab switch - for no gain.
+ */
+function scheduleUnparkRepaint(slot: Slot): void {
+  if (
+    !shouldRepaintOnUnpark({
+      wasParked: true,
+      currentLeafId: slot.currentLeafId,
+      rows: slot.term.rows,
+    })
+  ) {
+    return;
+  }
+  if (slot.unparkRaf !== null) cancelAnimationFrame(slot.unparkRaf);
+  slot.unparkRaf = requestAnimationFrame(() => {
+    slot.unparkRaf = null;
+    // Parked again before the frame landed, or a mid-write race: the next
+    // un-park schedules its own repaint.
+    if (slot.parked) return;
+    repaintSlot(slot);
+  });
+}
+
+/** Cancel a pending un-park repaint, so a disposed slot cannot paint. */
+function cancelUnparkRepaint(slot: Slot): void {
+  if (slot.unparkRaf === null) return;
+  cancelAnimationFrame(slot.unparkRaf);
+  slot.unparkRaf = null;
 }
 
 function scheduleWebglReap(slot: Slot): void {
@@ -867,6 +934,7 @@ function disposeSlot(slot: Slot): void {
   cancelSlotReap(slot);
   cancelWebglReap(slot);
   cancelPendingUnhide(slot);
+  cancelUnparkRepaint(slot);
   if (slot.fitTimer) clearTimeout(slot.fitTimer);
   if (slot.ptyTimer) clearTimeout(slot.ptyTimer);
   slot.fitTimer = null;

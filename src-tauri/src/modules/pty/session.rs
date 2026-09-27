@@ -125,6 +125,36 @@ impl Drop for ChildKillGuard {
     }
 }
 
+/// Spawn a named PTY worker thread. Thread creation can be refused, and a PTY
+/// without its reader is not a working PTY, so a refused spawn has to reach the
+/// caller instead of panicking the whole app the way `.expect` would. Callers
+/// pass literal names; `Builder::name` itself panics on an interior NUL.
+fn spawn_worker(
+    name: &str,
+    body: impl FnOnce() + Send + 'static,
+) -> Result<thread::JoinHandle<()>, String> {
+    thread::Builder::new()
+        .name(name.to_string())
+        .spawn(body)
+        .map_err(|e| refused_spawn_message(name, &e))
+}
+
+/// The message a refused spawn turns into. Split out because a thread-limit
+/// refusal cannot be provoked in a test, and this text is what the user reads
+/// once `pty_open` has prefixed it.
+fn refused_spawn_message(name: &str, error: &std::io::Error) -> String {
+    format!("{name}: {error}")
+}
+
+/// Stop the PTY workers already running after a later spawn was refused.
+/// Setting `done` unwedges the flusher, which parks on that flag waiting for
+/// data or for output credit. Dropping the last `Arc<Session>` then kills the
+/// child (`Session::drop`), and the reader ends on the resulting EOF.
+fn stop_workers(done: &AtomicBool, pending: &(Mutex<Vec<u8>>, Condvar)) {
+    done.store(true, Ordering::Release);
+    pending.1.notify_all();
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn spawn(
     id: u64,
@@ -209,187 +239,193 @@ pub fn spawn(
     let writer_for_da = writer.clone();
     let app_reader = app.clone();
     let first_byte_r = first_byte;
-    let reader_thread = thread::Builder::new()
-        .name("termigo-pty-reader".into())
-        .spawn(move || {
-            let mut buf = [0u8; READ_BUF];
-            let mut filtered: Vec<u8> = Vec::with_capacity(READ_BUF);
-            let mut da_filter = DaFilter::new();
-            let mut agent_detect = AgentDetector::new();
-            let mut dropped_bytes: u64 = 0;
-            loop {
-                match reader.read(&mut buf) {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        if !first_byte_r.load(Ordering::Relaxed) {
-                            first_byte_r.store(true, Ordering::Release);
-                            log::debug!(
-                                "pty first byte after {}ms",
-                                spawn_at.elapsed().as_millis()
-                            );
-                        }
-                        agent_detect.process(&buf[..n], |t| {
-                            let _ = app_reader.emit(AGENT_EVENT, t.into_signal(id));
-                        });
-                        filtered.clear();
-                        da_filter.process(&buf[..n], &mut filtered, |reply| {
-                            if let Ok(mut w) = writer_for_da.lock() {
-                                let _ = w.write_all(reply);
-                            }
-                        });
-                        if filtered.is_empty() {
-                            continue;
-                        }
-                        let (lock, cv) = &*pending_r;
-                        let mut g = lock.lock().unwrap_or_else(|e| e.into_inner());
-                        if g.len() + filtered.len() > MAX_PENDING {
-                            dropped_bytes += g.len() as u64;
-                            g.clear();
-                            g.extend_from_slice(OVERFLOW_NOTICE);
-                        }
-                        g.extend_from_slice(&filtered);
-                        cv.notify_one();
+    let reader_thread = match spawn_worker("termigo-pty-reader", move || {
+        let mut buf = [0u8; READ_BUF];
+        let mut filtered: Vec<u8> = Vec::with_capacity(READ_BUF);
+        let mut da_filter = DaFilter::new();
+        let mut agent_detect = AgentDetector::new();
+        let mut dropped_bytes: u64 = 0;
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    if !first_byte_r.load(Ordering::Relaxed) {
+                        first_byte_r.store(true, Ordering::Release);
+                        log::debug!("pty first byte after {}ms", spawn_at.elapsed().as_millis());
                     }
-                    Err(e) => {
-                        log::debug!("pty reader ended: {e}");
-                        break;
+                    agent_detect.process(&buf[..n], |t| {
+                        let _ = app_reader.emit(AGENT_EVENT, t.into_signal(id));
+                    });
+                    filtered.clear();
+                    da_filter.process(&buf[..n], &mut filtered, |reply| {
+                        if let Ok(mut w) = writer_for_da.lock() {
+                            let _ = w.write_all(reply);
+                        }
+                    });
+                    if filtered.is_empty() {
+                        continue;
                     }
+                    let (lock, cv) = &*pending_r;
+                    let mut g = lock.lock().unwrap_or_else(|e| e.into_inner());
+                    if g.len() + filtered.len() > MAX_PENDING {
+                        dropped_bytes += g.len() as u64;
+                        g.clear();
+                        g.extend_from_slice(OVERFLOW_NOTICE);
+                    }
+                    g.extend_from_slice(&filtered);
+                    cv.notify_one();
+                }
+                Err(e) => {
+                    log::debug!("pty reader ended: {e}");
+                    break;
                 }
             }
-            agent_detect.finish(|t| {
-                let _ = app_reader.emit(AGENT_EVENT, t.into_signal(id));
-            });
-            pending_r.1.notify_one();
-            if dropped_bytes > 0 {
-                log::warn!("pty backpressure: dropped {dropped_bytes} bytes (cap {MAX_PENDING})");
-            }
-        })
-        .expect("spawn pty reader thread");
+        }
+        agent_detect.finish(|t| {
+            let _ = app_reader.emit(AGENT_EVENT, t.into_signal(id));
+        });
+        pending_r.1.notify_one();
+        if dropped_bytes > 0 {
+            log::warn!("pty backpressure: dropped {dropped_bytes} bytes (cap {MAX_PENDING})");
+        }
+    }) {
+        Ok(handle) => handle,
+        Err(e) => {
+            log::error!("pty id={id}: reader thread spawn failed: {e}");
+            return Err(format!("pty_open: {e}"));
+        }
+    };
 
     let on_data_flush = on_data.clone();
     let pending_f = pending.clone();
     let done_f = done.clone();
     let session_flush = session.clone();
-    thread::Builder::new()
-        .name("termigo-pty-flusher".into())
-        .spawn(move || {
-            let (lock, cv) = &*pending_f;
-            loop {
-                {
-                    let mut g = lock.lock().unwrap_or_else(|e| e.into_inner());
-                    while g.is_empty() {
-                        if done_f.load(Ordering::Acquire) {
-                            return;
-                        }
-                        let (next, _) = cv
-                            .wait_timeout(g, FLUSH_MAX_IDLE)
-                            .unwrap_or_else(|e| e.into_inner());
-                        g = next;
+    if let Err(e) = spawn_worker("termigo-pty-flusher", move || {
+        let (lock, cv) = &*pending_f;
+        loop {
+            {
+                let mut g = lock.lock().unwrap_or_else(|e| e.into_inner());
+                while g.is_empty() {
+                    if done_f.load(Ordering::Acquire) {
+                        return;
                     }
-                }
-                // Coalesce a short window so a burst flushes as one chunk.
-                thread::sleep(FLUSH_COALESCE);
-                // Hold back while the frontend is behind. Anything still
-                // unflushed stays in `pending`, so the waiter's final snapshot
-                // picks it up even if the window never reopens.
-                {
-                    let mut credit = session_flush
-                        .output
-                        .lock()
+                    let (next, _) = cv
+                        .wait_timeout(g, FLUSH_MAX_IDLE)
                         .unwrap_or_else(|e| e.into_inner());
-                    while !credit.has_room() {
-                        if done_f.load(Ordering::Acquire) {
-                            return;
-                        }
-                        let (next, _) = session_flush
-                            .output_cv
-                            .wait_timeout(credit, FLUSH_MAX_IDLE)
-                            .unwrap_or_else(|e| e.into_inner());
-                        credit = next;
-                    }
-                }
-                // Cap the chunk so a window of maximum-size chunks can never
-                // outgrow the credit byte budget.
-                let chunk = {
-                    let mut g = lock.lock().unwrap_or_else(|e| e.into_inner());
-                    if g.len() > MAX_CHUNK_BYTES {
-                        let rest = g.split_off(MAX_CHUNK_BYTES);
-                        std::mem::replace(&mut *g, rest)
-                    } else {
-                        std::mem::take(&mut *g)
-                    }
-                };
-                if chunk.is_empty() {
-                    continue;
-                }
-                // Record before the send: the ack can only arrive after the
-                // frontend holds the chunk, so the boundary must already exist.
-                session_flush
-                    .output
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .record_sent(chunk.len());
-                if let Err(e) = on_data_flush.send(Response::new(chunk)) {
-                    log::debug!("pty flusher exiting, channel closed: {e}");
-                    break;
+                    g = next;
                 }
             }
-        })
-        .expect("spawn pty flusher thread");
+            // Coalesce a short window so a burst flushes as one chunk.
+            thread::sleep(FLUSH_COALESCE);
+            // Hold back while the frontend is behind. Anything still
+            // unflushed stays in `pending`, so the waiter's final snapshot
+            // picks it up even if the window never reopens.
+            {
+                let mut credit = session_flush
+                    .output
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                while !credit.has_room() {
+                    if done_f.load(Ordering::Acquire) {
+                        return;
+                    }
+                    let (next, _) = session_flush
+                        .output_cv
+                        .wait_timeout(credit, FLUSH_MAX_IDLE)
+                        .unwrap_or_else(|e| e.into_inner());
+                    credit = next;
+                }
+            }
+            // Cap the chunk so a window of maximum-size chunks can never
+            // outgrow the credit byte budget.
+            let chunk = {
+                let mut g = lock.lock().unwrap_or_else(|e| e.into_inner());
+                if g.len() > MAX_CHUNK_BYTES {
+                    let rest = g.split_off(MAX_CHUNK_BYTES);
+                    std::mem::replace(&mut *g, rest)
+                } else {
+                    std::mem::take(&mut *g)
+                }
+            };
+            if chunk.is_empty() {
+                continue;
+            }
+            // Record before the send: the ack can only arrive after the
+            // frontend holds the chunk, so the boundary must already exist.
+            session_flush
+                .output
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .record_sent(chunk.len());
+            if let Err(e) = on_data_flush.send(Response::new(chunk)) {
+                log::debug!("pty flusher exiting, channel closed: {e}");
+                break;
+            }
+        }
+    }) {
+        log::error!("pty id={id}: flusher thread spawn failed: {e}");
+        stop_workers(&done, &pending);
+        return Err(format!("pty_open: {e}"));
+    }
 
     let on_data_exit = on_data;
     let pending_e = pending;
     let done_e = done;
     let app_waiter = app;
     let exited_w = exited;
-    thread::Builder::new()
-        .name("termigo-pty-waiter".into())
-        .spawn(move || {
-            let code = match child.wait() {
-                Ok(status) => status.exit_code() as i32,
-                Err(e) => {
-                    log::warn!("pty child wait failed: {e}");
-                    -1
-                }
-            };
-            exited_w.store(true, Ordering::Release);
-            // Wait for the reader to hit EOF before taking a final snapshot of
-            // `pending`, so the last line of output never races the Exit event.
-            #[cfg(windows)]
-            {
-                // Poll, never join: a ConPTY reader can stay blocked in ReadFile
-                // after the child exits, and joining would wedge the waiter.
-                // 500ms (not 50): on a loaded machine the reader routinely
-                // needs longer than a few scheduler quanta to drain, and every
-                // push after the snapshot below lands in a vec nobody reads.
-                let deadline = Instant::now() + Duration::from_millis(500);
-                while Instant::now() < deadline && !reader_thread.is_finished() {
-                    thread::sleep(Duration::from_millis(5));
-                }
+    // Cloned for the failure path: a refused spawn drops the closure, so the
+    // originals moved into it cannot be signalled afterwards.
+    let pending_fail = pending_e.clone();
+    let done_fail = done_e.clone();
+    if let Err(e) = spawn_worker("termigo-pty-waiter", move || {
+        let code = match child.wait() {
+            Ok(status) => status.exit_code() as i32,
+            Err(e) => {
+                log::warn!("pty child wait failed: {e}");
+                -1
             }
-            #[cfg(not(windows))]
-            if let Err(e) = reader_thread.join() {
-                log::error!("pty reader thread panicked: {e:?}");
+        };
+        exited_w.store(true, Ordering::Release);
+        // Wait for the reader to hit EOF before taking a final snapshot of
+        // `pending`, so the last line of output never races the Exit event.
+        #[cfg(windows)]
+        {
+            // Poll, never join: a ConPTY reader can stay blocked in ReadFile
+            // after the child exits, and joining would wedge the waiter.
+            // 500ms (not 50): on a loaded machine the reader routinely
+            // needs longer than a few scheduler quanta to drain, and every
+            // push after the snapshot below lands in a vec nobody reads.
+            let deadline = Instant::now() + Duration::from_millis(500);
+            while Instant::now() < deadline && !reader_thread.is_finished() {
+                thread::sleep(Duration::from_millis(5));
             }
-            let (lock, cv) = &*pending_e;
-            let tail = std::mem::take(&mut *lock.lock().unwrap_or_else(|e| e.into_inner()));
-            if !tail.is_empty() {
-                if let Err(e) = on_data_exit.send(Response::new(tail)) {
-                    log::debug!("pty final-data send failed (channel closed): {e}");
-                }
+        }
+        #[cfg(not(windows))]
+        if let Err(e) = reader_thread.join() {
+            log::error!("pty reader thread panicked: {e:?}");
+        }
+        let (lock, cv) = &*pending_e;
+        let tail = std::mem::take(&mut *lock.lock().unwrap_or_else(|e| e.into_inner()));
+        if !tail.is_empty() {
+            if let Err(e) = on_data_exit.send(Response::new(tail)) {
+                log::debug!("pty final-data send failed (channel closed): {e}");
             }
-            done_e.store(true, Ordering::Release);
-            cv.notify_all();
-            if let Err(e) = on_exit.send(code) {
-                log::debug!("pty exit send failed (channel closed): {e}");
+        }
+        done_e.store(true, Ordering::Release);
+        cv.notify_all();
+        if let Err(e) = on_exit.send(code) {
+            log::debug!("pty exit send failed (channel closed): {e}");
+        }
+        if let Some(state) = app_waiter.try_state::<super::PtyState>() {
+            if let Some(s) = state.take(id) {
+                drop_session(s);
             }
-            if let Some(state) = app_waiter.try_state::<super::PtyState>() {
-                if let Some(s) = state.take(id) {
-                    drop_session(s);
-                }
-            }
-        })
-        .expect("spawn pty waiter thread");
+        }
+    }) {
+        log::error!("pty id={id}: waiter thread spawn failed: {e}");
+        stop_workers(&done_fail, &pending_fail);
+        return Err(format!("pty_open: {e}"));
+    }
 
     Ok((session, size))
 }
@@ -484,5 +520,54 @@ mod tests {
         });
 
         drop_session(session);
+    }
+}
+
+#[cfg(test)]
+mod worker_spawn_tests {
+    use super::*;
+
+    /// A refused spawn has to become the error `pty_open` reports instead of a
+    /// panic. A real thread-limit refusal cannot be provoked here, so this locks
+    /// the message the refusal path produces.
+    #[test]
+    fn a_refused_spawn_is_reported_as_an_error_the_caller_can_show() {
+        let refused = std::io::Error::other("resource temporarily unavailable");
+        assert_eq!(
+            refused_spawn_message("termigo-pty-reader", &refused),
+            "termigo-pty-reader: resource temporarily unavailable"
+        );
+    }
+
+    #[test]
+    fn stop_workers_releases_a_parked_flusher() {
+        let done = Arc::new(AtomicBool::new(false));
+        let pending: Arc<(Mutex<Vec<u8>>, Condvar)> =
+            Arc::new((Mutex::new(Vec::new()), Condvar::new()));
+
+        let done_worker = done.clone();
+        let pending_worker = pending.clone();
+        let parked = Arc::new(AtomicBool::new(false));
+        let parked_worker = parked.clone();
+        let flusher = thread::spawn(move || {
+            let (lock, cv) = &*pending_worker;
+            let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+            parked_worker.store(true, Ordering::Release);
+            let (guard, _) = cv
+                .wait_timeout_while(guard, Duration::from_secs(30), |_| {
+                    !done_worker.load(Ordering::Acquire)
+                })
+                .unwrap_or_else(|e| e.into_inner());
+            drop(guard);
+            done_worker.load(Ordering::Acquire)
+        });
+
+        while !parked.load(Ordering::Acquire) {
+            thread::yield_now();
+        }
+        stop_workers(&done, &pending);
+
+        let saw_done = flusher.join().expect("the flusher thread joins");
+        assert!(saw_done, "stop_workers released the parked flusher");
     }
 }

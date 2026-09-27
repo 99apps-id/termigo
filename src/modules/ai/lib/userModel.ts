@@ -147,13 +147,13 @@ export function formatUserModelBlock(model: UserModel | undefined): string {
 
   if (preferences.length > 0) {
     parts.push(
-      "### PREFERENCES\n" + preferences.map((p) => `- ${p.label}: ${p.value}`).join("\n") + "\n",
+      `### PREFERENCES\n${preferences.map((p) => `- ${p.label}: ${p.value}`).join("\n")}\n`,
     );
   }
 
   if (facts.length > 0) {
     parts.push(
-      "### LEARNED FACTS\n" + facts.map((f) => `- ${f.text}`).join("\n") + "\n",
+      `### LEARNED FACTS\n${facts.map((f) => `- ${f.text}`).join("\n")}\n`,
     );
   }
 

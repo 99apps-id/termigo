@@ -71,7 +71,7 @@ export function useSshFileDrop({
       const dpr = window.devicePixelRatio || 1;
       const under = document.elementFromPoint(physX / dpr, physY / dpr) as HTMLElement | null;
       const container = containerRef.current;
-      if (!under || !container || !container.contains(under)) return null;
+      if (!under || !container?.contains(under)) return null;
       const row = under.closest<HTMLElement>("[data-fs-path]");
       const p = row?.getAttribute("data-fs-path");
       if (!p) return rootPath; // over the panel but not a row -> root

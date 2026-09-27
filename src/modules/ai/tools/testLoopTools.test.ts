@@ -36,6 +36,25 @@ describe("focusTestFile", () => {
     expect(r.note).toContain("could not focus");
   });
 
+  it("scopes pnpm run test and pnpm test to the file", () => {
+    const r1 = focusTestFile("pnpm run test", "src/modules/terminal/lib/unparkRepaint.test.ts");
+    expect(r1.command).toBe("pnpm run test src/modules/terminal/lib/unparkRepaint.test.ts");
+    expect(r1.note).toContain("focused");
+
+    const r2 = focusTestFile("pnpm test", "src/a.test.ts");
+    expect(r2.command).toBe("pnpm test src/a.test.ts");
+  });
+
+  it("scopes npm test with double dash separator", () => {
+    const r = focusTestFile("npm test", "src/a.test.ts");
+    expect(r.command).toBe("npm test -- src/a.test.ts");
+  });
+
+  it("normalizes Windows backslashes in test file paths", () => {
+    const r = focusTestFile("pnpm test", "src\\modules\\terminal\\test.ts");
+    expect(r.command).toBe("pnpm test src/modules/terminal/test.ts");
+  });
+
   it("returns the empty base unchanged", () => {
     const r = focusTestFile("   ", "a.test.ts");
     expect(r.command).toBe("");

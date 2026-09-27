@@ -191,7 +191,9 @@ describe("git command builders", () => {
       getSessionId: () => "sess-git",
     };
 
+    // biome-ignore lint/suspicious/noExplicitAny: partial ctx and an untyped execute signature; the test reads only the fields it needs
     const tools = buildGitTools(ctx as any);
+    // biome-ignore lint/suspicious/noExplicitAny: the built tool's execute signature is untyped
     const exec = tools.git_conflicts.execute as any;
     const res = await exec({ path: "conflicted.ts" }, { toolCallId: "t1" });
 

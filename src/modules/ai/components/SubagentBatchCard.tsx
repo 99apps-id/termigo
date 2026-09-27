@@ -264,6 +264,7 @@ export const SubagentBatchCard = memo(function SubagentBatchCard({
       )}
     >
       {/* Header */}
+      {/* biome-ignore lint/a11y/useSemanticElements: the header holds block-level layout children, so a real <button> would have an invalid content model */}
       <div
         role="button"
         tabIndex={0}
@@ -421,6 +422,7 @@ const WorkerRow = memo(function WorkerRow({
         isSkipped && "border-border/40 opacity-75 dark:border-border/30",
       )}
     >
+      {/* biome-ignore lint/a11y/useSemanticElements: the header holds block-level layout children, so a real <button> would have an invalid content model */}
       <div
         role="button"
         tabIndex={0}

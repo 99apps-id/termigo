@@ -221,6 +221,7 @@ export function useDocument({ path, onDirtyChange }: Options) {
     [clearAutoSaveTimer, saveNow],
   );
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: path is the document lifecycle key; switching documents must cancel the pending autosave of the previous one
   useEffect(() => clearAutoSaveTimer, [path, clearAutoSaveTimer]);
 
   return { doc, dirty, onChange, save, reload, adoptDiskText, openAnyway };

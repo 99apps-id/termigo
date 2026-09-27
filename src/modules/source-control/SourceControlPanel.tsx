@@ -1264,6 +1264,7 @@ const EntryRow = memo(function EntryRow({
           data-selected={isSelected || undefined}
           role="option"
           aria-selected={isSelected}
+          tabIndex={-1}
           onMouseDown={() => onFocusRow(row.key)}
           className={cn(
             "group relative flex h-[30px] items-center gap-2 rounded-md pl-2 pr-2 transition-all duration-100",

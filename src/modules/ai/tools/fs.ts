@@ -459,7 +459,7 @@ export function buildFsTools(ctx: ToolContext) {
           };
         }
         const content = input.content;
-        if (!path || !path.trim()) {
+        if (!path?.trim()) {
           return { error: "missing path - name the file to write.", path: "" };
         }
         // Writes follow reads onto the remote host. Leaving them local was the

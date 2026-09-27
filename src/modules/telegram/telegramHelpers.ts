@@ -13,7 +13,9 @@ export type PendingApprovalInfo = {
 
 export function getPendingApprovals(
   sessionId: string,
+  // biome-ignore lint/suspicious/noExplicitAny: callers pass either the real zustand store or a partial mock, so the shape is duck-typed at runtime
   chatStore?: any,
+  // biome-ignore lint/suspicious/noExplicitAny: callers pass either the real zustand store or a partial mock, so the shape is duck-typed at runtime
   aqStore?: any,
 ): PendingApprovalInfo[] {
   const result: PendingApprovalInfo[] = [];
@@ -98,7 +100,7 @@ export function getPendingApprovals(
 export type ChatLike = {
   messages: Array<{
     role: string;
-    parts?: Array<{ type?: string; text?: string; [k: string]: any }>;
+    parts?: Array<{ type?: string; text?: string; [k: string]: unknown }>;
   }>;
 };
 

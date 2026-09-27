@@ -39,6 +39,7 @@ export function SshBackupDialog({ open, onOpenChange, mode }: Props) {
 
   // Reset per opening. The passphrase must never survive a closed dialog, and
   // a stale result line would otherwise read as if it applied to this run.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: switching export/import must not carry the previous passphrase, so open and mode are both deliberate triggers
   useEffect(() => {
     if (!open) return;
     setPassphrase("");

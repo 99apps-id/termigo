@@ -182,6 +182,13 @@ export const TOOL_GROUPS: readonly ToolGroup[] = [
     tools: ["search_history", "clear_history_index"],
   },
   {
+    id: "compare",
+    label: "Tree comparison",
+    description:
+      "Compare two checkouts by file manifest: what a fork adds, drops or changed against its reference. Off leaves you with git diff.",
+    tools: ["compare_trees"],
+  },
+  {
     id: "telegram",
     label: "Telegram relay",
     description:

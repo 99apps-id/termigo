@@ -5,6 +5,7 @@ import {
   formatTodoStatusBlock,
   isFinished,
   parseStoredTodos,
+  standDownApplies,
   standDownRunning,
   type Todo,
   todoTree,
@@ -305,5 +306,49 @@ describe("activeTodoIndex", () => {
 
   it("returns -1 for an empty list", () => {
     expect(activeTodoIndex([])).toBe(-1);
+  });
+});
+
+describe("standDownApplies", () => {
+  const idle = {
+    sdkActive: false,
+    approvalsPending: 0,
+    resumingApproval: false,
+    runBusy: false,
+  };
+
+  it("stands down a run that has genuinely stopped", () => {
+    expect(standDownApplies(idle)).toBe(true);
+  });
+
+  it("holds off while the SDK stream is live", () => {
+    expect(standDownApplies({ ...idle, sdkActive: true })).toBe(false);
+  });
+
+  it("holds off while a tool is waiting on the user", () => {
+    expect(standDownApplies({ ...idle, approvalsPending: 1 })).toBe(false);
+  });
+
+  it("holds off while an answered approval is being resumed", () => {
+    expect(standDownApplies({ ...idle, resumingApproval: true })).toBe(false);
+  });
+
+  // The field bug: an automatic continuation (step-cap continue, verify nudge,
+  // overflow resume) leaves the SDK idle between rounds while the store still
+  // holds the run busy. Without this witness the agent's own in_progress item
+  // was demoted at every round boundary, mid-task.
+  it("holds off while an automatic continuation is in flight", () => {
+    expect(standDownApplies({ ...idle, runBusy: true })).toBe(false);
+  });
+
+  it("stands down when every witness agrees the run is over", () => {
+    expect(
+      standDownApplies({
+        sdkActive: false,
+        approvalsPending: 0,
+        resumingApproval: false,
+        runBusy: false,
+      }),
+    ).toBe(true);
   });
 });

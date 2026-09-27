@@ -117,6 +117,7 @@ export function useSshFileTree(
 
   // Root or session change: reset state. A new sessionId from a reconnect
   // would otherwise replay stale tree state against a different handle.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: fetchChildren identity changes with includeHidden, and resetting the tree on a prefs toggle would collapse it
   useEffect(() => {
     fetchGen.current = new Map();
     if (!rootPath || sessionId === null) {
@@ -135,6 +136,7 @@ export function useSshFileTree(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rootPath, sessionId]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-lists only on hidden/root/session changes; depending on nodes would refetch in a loop
   useEffect(() => {
     if (!rootPath || sessionId === null) return;
     const loaded = Object.keys(nodes);

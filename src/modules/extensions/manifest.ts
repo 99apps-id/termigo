@@ -167,16 +167,16 @@ export const ManifestSchema = z
     if (v.raw_top_level_settings && typeof v.raw_top_level_settings === "object") {
       const settings_map = v.raw_top_level_settings as Record<string, unknown>;
       const contributes = v.contributes ?? {};
-      const settingsArray = Array.isArray((contributes as any).settings)
-        ? ([...((contributes as any).settings)] as any[])
-        : [];
+      const existing = "settings" in contributes ? contributes.settings : undefined;
+      const settingsArray = Array.isArray(existing) ? [...existing] : [];
       for (const [id, def] of Object.entries(settings_map)) {
         if (def && typeof def === "object") {
-          settingsArray.push({ id, ...(def as any) });
+          // Merged entries come from raw_top_level_settings, which the schema
+          // validates as unknown, so they enter the typed array as a cast.
+          settingsArray.push({ id, ...def } as ContributedSetting);
         }
       }
-      (contributes as any).settings = settingsArray;
-      v.contributes = contributes;
+      v.contributes = { ...contributes, settings: settingsArray };
     }
     return v;
   });
@@ -193,7 +193,7 @@ export function safeParseManifest(
 ): { ok: true; manifest: Manifest } | { ok: false; error: string } {
   const result = ManifestSchema.safeParse(input);
   if (result.success) {
-    const { raw_top_level_settings: _, ...rest } = result.data as any;
+    const { raw_top_level_settings: _, ...rest } = result.data;
     return { ok: true, manifest: rest as Manifest };
   }
   const first = result.error.issues[0];

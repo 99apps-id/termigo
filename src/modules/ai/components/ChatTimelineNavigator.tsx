@@ -102,6 +102,7 @@ export const ChatTimelineNavigator = memo(function ChatTimelineNavigator({
   );
 
   // Track active turn in viewport using IntersectionObserver
+  // biome-ignore lint/correctness/useExhaustiveDependencies: turnIds is the structural signature the memo above builds so the observer only reconnects when the turn set changes
   useEffect(() => {
     if (turns.length < 2) return;
     if (typeof IntersectionObserver === "undefined") return;

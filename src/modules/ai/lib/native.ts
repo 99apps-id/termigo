@@ -35,7 +35,16 @@ export type GrepResponse = {
   files_scanned: number;
 };
 
-export type GlobHit = { path: string; rel: string };
+/** `mtime` is Unix milliseconds and `size` is bytes; both are `0` when the
+ *  platform did not report them. They let a caller fingerprint a tree from a
+ *  single glob (cache freshness, tree-to-tree comparison) instead of stat-ing
+ *  every file over IPC. */
+export type GlobHit = {
+  path: string;
+  rel: string;
+  mtime: number;
+  size: number;
+};
 export type GlobResponse = { hits: GlobHit[]; truncated: boolean };
 
 export type GitRepoInfo = {
@@ -183,6 +192,10 @@ export const native = {
       data,
       workspace: currentWorkspaceEnv(),
     }),
+  /** Append one audit line. The host owns the file: its directory is in the Rust
+   *  write deny-list, so this is the only path into it. */
+  auditAppend: (entry: Record<string, unknown>, date: string) =>
+    invoke<void>("audit_append", { entry, date }),
   canonicalize: (path: string) =>
     invoke<string>("fs_canonicalize", {
       path,

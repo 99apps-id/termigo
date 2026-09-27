@@ -197,8 +197,8 @@ describe("sliceLines and read_file windowing", () => {
 
     expect(res.conflicts).toBeDefined();
     expect(res.conflicts).toHaveLength(1);
-    expect(res.conflicts![0].startLine).toBe(1);
-    expect(res.conflicts![0].endLine).toBe(5);
+    expect(res.conflicts[0].startLine).toBe(1);
+    expect(res.conflicts[0].endLine).toBe(5);
     expect(res.conflictWarning).toContain("unresolved git merge conflict");
   });
 

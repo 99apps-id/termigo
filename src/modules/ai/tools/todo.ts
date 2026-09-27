@@ -290,7 +290,7 @@ export function buildTodoTools(ctx: ToolContext) {
 
         const updatedItem: Todo = {
           ...existing,
-          ...(title !== undefined && title.trim()
+          ...(title?.trim()
             ? { title: title.trim() }
             : {}),
           ...(description !== undefined ? { description } : {}),

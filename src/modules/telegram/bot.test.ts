@@ -327,10 +327,12 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
         } as unknown as Response;
       });
 
+      // biome-ignore lint/suspicious/noExplicitAny: mock capture of dynamic Telegram message shapes
       const mockMessages: any[] = [];
       chatStore.chats.set(sessionId, {
         messages: mockMessages,
         status: "idle",
+      // biome-ignore lint/suspicious/noExplicitAny: partial mock of the fetch init object
       } as any);
 
       // Dispatch a task with successful accepted action
@@ -462,9 +464,11 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
 
   function captureAnswerCallbacks() {
     const texts: Array<string | null> = [];
+    // biome-ignore lint/suspicious/noExplicitAny: capture of arbitrary JSON request bodies
     const calls: Array<{ url: string; body?: any }> = [];
     const origFetch = globalThis.fetch;
     globalThis.fetch = vi.fn(async (url, init) => {
+      // biome-ignore lint/suspicious/noExplicitAny: capture of arbitrary JSON request bodies
       let body: any = null;
       if (init?.body) {
         try {

@@ -18,7 +18,7 @@ describe("turnCheckpointStore", () => {
     store.record("s1", entry("u1"));
     store.record("s1", entry("u2"));
     expect(
-      useTurnCheckpointStore.getState().bySession["s1"].map((r) => r.messageId),
+      useTurnCheckpointStore.getState().bySession.s1.map((r) => r.messageId),
     ).toEqual(["u1", "u2"]);
   });
 
@@ -27,7 +27,7 @@ describe("turnCheckpointStore", () => {
     store.record("s1", entry("u1"));
     store.record("s1", entry("u2"));
     store.record("s1", { ...entry("u1"), label: "edited" });
-    const rows = useTurnCheckpointStore.getState().bySession["s1"];
+    const rows = useTurnCheckpointStore.getState().bySession.s1;
     expect(rows.map((r) => r.messageId)).toEqual(["u1", "u2"]);
     expect(rows[0].label).toBe("edited");
   });
@@ -39,7 +39,7 @@ describe("turnCheckpointStore", () => {
     store.record("s1", entry("u3"));
     store.pruneAfter("s1", "u2");
     expect(
-      useTurnCheckpointStore.getState().bySession["s1"].map((r) => r.messageId),
+      useTurnCheckpointStore.getState().bySession.s1.map((r) => r.messageId),
     ).toEqual(["u1"]);
   });
 
@@ -47,13 +47,13 @@ describe("turnCheckpointStore", () => {
     const store = useTurnCheckpointStore.getState();
     store.record("s1", entry("u1"));
     store.pruneAfter("s1", "nope");
-    expect(useTurnCheckpointStore.getState().bySession["s1"]).toHaveLength(1);
+    expect(useTurnCheckpointStore.getState().bySession.s1).toHaveLength(1);
   });
 
   it("caps rows per session", () => {
     const store = useTurnCheckpointStore.getState();
     for (let i = 0; i < 60; i++) store.record("s1", entry(`u${i}`));
-    const rows = useTurnCheckpointStore.getState().bySession["s1"];
+    const rows = useTurnCheckpointStore.getState().bySession.s1;
     expect(rows).toHaveLength(50);
     expect(rows[0].messageId).toBe("u10");
   });
@@ -63,9 +63,9 @@ describe("turnCheckpointStore", () => {
     store.record("s1", entry("u1"));
     store.record("s2", entry("u9"));
     store.clearSession("s1");
-    expect(useTurnCheckpointStore.getState().bySession["s1"]).toBeUndefined();
+    expect(useTurnCheckpointStore.getState().bySession.s1).toBeUndefined();
     expect(
-      useTurnCheckpointStore.getState().bySession["s2"],
+      useTurnCheckpointStore.getState().bySession.s2,
     ).toHaveLength(1);
   });
 });

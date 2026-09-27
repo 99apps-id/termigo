@@ -148,7 +148,7 @@ export function TabBar({
 
   useLayoutEffect(() => {
     measurePill();
-  }, [measurePill, activeId, tabs]);
+  }, [measurePill]);
 
   useEffect(() => {
     const list = listRef.current;
@@ -229,7 +229,7 @@ export function TabBar({
   // scrollWidth without resizing the strip, so the ResizeObserver won't fire.
   useLayoutEffect(() => {
     measureOverflow();
-  }, [measureOverflow, tabs]);
+  }, [measureOverflow]);
 
   const nudge = useCallback((dir: -1 | 1) => {
     const el = scrollRef.current;
@@ -411,7 +411,7 @@ export function TabBar({
                           }}
                         >
                           <DropdownMenuTrigger asChild>
-                            {/* span, not button: a button nested in the TabsTrigger button is invalid DOM and breaks WebKit focus. */}
+                            {/* biome-ignore lint/a11y/useSemanticElements: span, not button: a button nested in the TabsTrigger button is invalid DOM and breaks WebKit focus. */}
                             <span
                               role="button"
                               tabIndex={-1}
@@ -514,14 +514,17 @@ export function TabBar({
                       <PersistBadge tab={t} />
                       {t.kind === "editor" && t.dirty ? (
                         <span
+                          role="img"
                           aria-label="Unsaved changes"
                           className="size-1.5 shrink-0 rounded-full bg-foreground/70"
                         />
                       ) : null}
                     </span>
                     {tabs.length > 1 && (
+                      // biome-ignore lint/a11y/useSemanticElements: a real <button> inside the TabsTrigger button is invalid DOM and breaks WebKit focus
                       <span
                         role="button"
+                        tabIndex={-1}
                         aria-label="Close tab"
                         data-no-drag
                         onPointerDown={(e) => {
@@ -535,6 +538,13 @@ export function TabBar({
                         onClick={(e) => {
                           e.stopPropagation();
                           onClose(t.id);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            onClose(t.id);
+                          }
                         }}
                         className="rounded p-0.5 opacity-0 transition-opacity hover:bg-accent hover:opacity-100 group-hover:opacity-75"
                       >
@@ -702,6 +712,7 @@ function PersistBadge({ tab }: { tab: Tab }) {
     return null;
   return (
     <span
+      role="img"
       aria-label="Persisted across app restarts (tmux)"
       className="shrink-0 rounded-sm border border-border/60 px-0.5 text-[8px] uppercase leading-3 tracking-wide text-muted-foreground/70"
       title="Persisted across app restarts via tmux"

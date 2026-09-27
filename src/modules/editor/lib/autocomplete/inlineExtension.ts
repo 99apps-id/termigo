@@ -523,7 +523,7 @@ export function trimSuggestion(
     /(?:[{[(]|=>)\s*$/.test(lineSoFar) &&
     (t.includes("\n") || /^\s/.test(t))
   ) {
-    t = "\n" + t;
+    t = `\n${t}`;
   }
 
   // Nothing legitimately continues a line after `;`: multi-line suggestions
@@ -534,7 +534,7 @@ export function trimSuggestion(
     /;\s*$/.test(lineSoFar) &&
     (t.includes("\n") || /^[}\])]/.test(t))
   ) {
-    t = "\n" + t;
+    t = `\n${t}`;
   }
 
   return t;

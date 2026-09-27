@@ -6,7 +6,7 @@ This file is updated as direction evolves. For day-to-day work, see [GitHub Issu
 
 ## What Termigo is
 
-Termigo is a fast, lightweight, terminal-first AI-native development environment (ADE). It pairs a native PTY backend with a modern UI: multi-tab terminals, an integrated code editor, a file explorer, source control, and a first-class AI agent system that works with your own API keys or fully local models. About 7-8 MB on disk. No telemetry. Keys stored in the OS keychain.
+Termigo is a fast, lightweight, terminal-first AI-native development environment (ADE). It pairs a native PTY backend with a modern UI: multi-tab terminals, an integrated code editor, a file explorer, source control, and a first-class AI agent system that works with your own API keys or fully local models. Under 20 MB to download and install. No telemetry. Keys stored in the OS keychain.
 
 The product is opinionated: terminal-first, AI as a primitive (not a sidebar), lightweight always, cross-platform without compromise.
 
@@ -22,7 +22,7 @@ The product is opinionated: terminal-first, AI as a primitive (not a sidebar), l
 The themes below frame every scope decision.
 
 1. **AI as a native primitive.** Agents, tools, autocomplete, voice - first-class, not a panel bolted onto a regular terminal.
-2. **Lightweight always.** 7-8 MB binary. Every dependency justified. Per-tab memory budget enforced.
+2. **Lightweight always.** Under 20 MB to download and install on every platform (measured on Windows: 10.1 MB NSIS, 13.2 MB MSI), and the web client inside the budgets `pnpm size` enforces in CI (540 kB eager startup JS, 4.25 MB total lazy JS, 4.6 MB whole client bundle, all gzipped). Every dependency justified. Per-tab memory budget enforced. The earlier 7-8 MB figure predated the editor, LSP, source control and AI subsystems, so it is recorded as a raise rather than treated as drift; the client budgets were re-based the same way, against a measured 391 kB eager and 3.63 MB of lazy JS.
 3. **Terminal-first.** xterm.js correctness, PTY fidelity, TUI app compatibility are non-negotiable.
 4. **Cross-platform parity.** macOS, Linux, Windows, WSL. No platform-specific exclusives.
 5. **Security by default.** Path guards, SSRF protection, OSC trust, IPC sandboxing. Defaults safe out of the box.

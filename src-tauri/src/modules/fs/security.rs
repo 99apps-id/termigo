@@ -1,4 +1,4 @@
-﻿//! Path-safety guards for the raw `fs::*` IPC commands.
+//! Path-safety guards for the raw `fs::*` IPC commands.
 //!
 //! termigo-neo keeps no gates: every guard in this module allows, and the
 //! workspace registry authorizes every path. The helpers and their signatures
@@ -115,16 +115,69 @@ const WRITE_DENY_PREFIXES: &[&str] = &[
     "/boot/",
 ];
 
-/// The Rust mirror of `AGENT_IMMUTABLE_CONFIG` in `security.ts`, limited to
-/// `hooks.json`. A hook command is read back and run on every matching tool
-/// event with no prompt, so letting the agent write the file is persistence it
-/// never asked the user for. `approvals.json` is in the same class, but the
+/// Files that decide what runs LATER: termigo's own hook and MCP registries,
+/// plus the workspace config of the agents termigo spawns. A hook is read back
+/// and run on every matching tool event with no prompt, and an MCP entry is a
+/// command termigo spawns, so an agent write here is persistence the operator
+/// never asked for. Matched as a path suffix, because the file may be spelled
+/// relatively or absolutely and the user-level `~/.termigo/*` registry shares
+/// the same tail.
+///
+/// `approvals.json` belongs to the same class and is deliberately absent: the
 /// approval dialog's own "allow for this project" button writes it through this
-/// same `fs_write_file` path and this layer cannot tell that click from an agent
-/// call; denying it here would break the one control a user has to stop an agent.
-/// That half is refused in the webview guard instead.
-#[allow(dead_code)]
-const AGENT_IMMUTABLE_CONFIG: &[&str] = &["/.termigo/hooks.json"];
+/// same `fs_write_file` path, and this layer cannot tell that click from an
+/// agent call. The shell route, which has no such caller, refuses it instead.
+const AGENT_IMMUTABLE_CONFIG: &[&str] = &[
+    "/.termigo/hooks.json",
+    "/.termigo/mcp.json",
+    "/.claude/settings.json",
+    "/.claude/settings.local.json",
+    "/.codex/config.toml",
+    "/.gemini/settings.json",
+];
+
+/// Directories that hold credentials, keys, or git internals. Writing inside one
+/// is not a normal edit: it hijacks the operator's own tooling, or plants
+/// something git runs later (`.git/hooks/pre-commit`, or `.git/config` carrying
+/// a `core.hooksPath`).
+///
+/// Deliberately narrower than the read-side `PROTECTED_DIRS`, which also lists
+/// system directories (`/etc`, `/proc`, `/sys`, `/usr`). Writing `/etc/hosts` or
+/// a keyring path is a real workflow on a host an operator is testing, and those
+/// paths need root anyway, so they stay a judgment call rather than a wall.
+const PROTECTED_WRITE_DIRS: &[&str] = &[
+    // The agent's own audit log. It is written by `audit_append` in Rust, and
+    // locked here so the record cannot be rewritten by the thing it records.
+    "/.termigo/audit",
+    "/.ssh",
+    "/.shh",
+    "/.gnupg",
+    "/.aws",
+    "/.azure",
+    "/.kube",
+    "/.docker",
+    "/.config/gh",
+    "/.config/git",
+    "/.config/gcloud",
+    "/.config/op",
+    "/.git",
+    "/.terraform.d",
+    "/library/keychains",
+    "/library/cookies",
+    "/appdata/roaming/microsoft/credentials",
+    "/appdata/local/microsoft/credentials",
+    "/appdata/roaming/gcloud",
+];
+
+/// Extension bundles live outside the workspace, and a bundle's manifest names
+/// the module the host loads, so an agent write there is code execution at the
+/// next activation. Only the write path consults this: installing an extension
+/// goes through its own implementation, not through `fs_write_file`.
+const EXTENSION_ROOT_NEEDLE: &str = "/id.99apps.termigo/extensions/";
+
+/// The audit log, written by `audit_append` in Rust. Locked here so the record of
+/// what an agent did cannot be edited by the agent that did it.
+const AUDIT_ROOT_NEEDLE: &str = "/id.99apps.termigo/audit/";
 
 fn basename(p: &str) -> &str {
     match p.rfind(['/', '\\']) {
@@ -345,11 +398,30 @@ pub fn check_readable(path: &str) -> Result<(), String> {
     Ok(())
 }
 
-#[allow(unreachable_code)]
-pub fn check_writable(path: &str) -> Result<(), String> {
-    let _ = path;
-    return Ok(());
-    check_readable(path)?;
+/// Appended to every write refusal. A refusal that only explains itself invites
+/// a retry with a tweaked path: naming the stop is what makes the model report
+/// instead, and it matches the wording the approval queue already uses
+/// (`subagentGating.ts`). `pub` so the shell route appends this exact string
+/// rather than inventing a second phrasing.
+pub const REFUSAL_HINT: &str = " Do not retry this write; report it as not done.";
+
+/// The write deny-list as one function, so the fs route and the shell route
+/// cannot drift apart. `None` means the write may proceed.
+///
+/// The refusals are, in order: a file that decides later execution, a
+/// credential or git-internal directory, and an extension bundle. Reads are not
+/// consulted: an agent debugging config legitimately reads what it may not write.
+pub fn write_refusal(path: &str) -> Option<String> {
+    write_refusal_reason(path).map(|reason| format!("{reason}{REFUSAL_HINT}"))
+}
+
+fn write_refusal_reason(path: &str) -> Option<String> {
+    if path.is_empty() {
+        return Some("Refused: empty path.".into());
+    }
+    if path.bytes().any(|b| b < 0x20) {
+        return Some("Refused: path contains control bytes.".into());
+    }
 
     let cmp = comparison_form(path);
     let cmp_for_prefix = if cmp.starts_with('/') {
@@ -357,23 +429,43 @@ pub fn check_writable(path: &str) -> Result<(), String> {
     } else {
         format!("/{cmp}")
     };
+
+    if cmp_for_prefix.contains(EXTENSION_ROOT_NEEDLE) {
+        return Some(
+            "Refused: extension bundles are loaded by the host, so they cannot be changed from inside the agent."
+                .into(),
+        );
+    }
+    if cmp_for_prefix.contains(AUDIT_ROOT_NEEDLE) {
+        return Some(
+            "Refused: the audit log is written by the host, so it cannot be changed from inside the agent."
+                .into(),
+        );
+    }
     for rel in AGENT_IMMUTABLE_CONFIG {
         if cmp_for_prefix.ends_with(rel) {
-            return Err(format!(
-                "Refused: \"{}\" is read back and executed automatically, so it cannot be changed from inside the agent.",
+            return Some(format!(
+                "Refused: \"{}\" decides what runs later, so it cannot be changed from inside the agent.",
                 rel.trim_start_matches('/')
             ));
         }
     }
-    for prefix in WRITE_DENY_PREFIXES {
-        if cmp_for_prefix.starts_with(prefix) || format!("{cmp_for_prefix}/").starts_with(prefix) {
-            return Err(format!(
+    for dir in PROTECTED_WRITE_DIRS {
+        if is_under_protected(&cmp_for_prefix, dir) {
+            return Some(format!(
                 "Refused: writes under \"{}\" are not allowed.",
-                prefix.trim_end_matches('/')
+                describe_protected(dir)
             ));
         }
     }
-    Ok(())
+    None
+}
+
+pub fn check_writable(path: &str) -> Result<(), String> {
+    match write_refusal(path) {
+        Some(reason) => Err(reason),
+        None => Ok(()),
+    }
 }
 
 /// Read guard: deny on the literal path, then canonicalize and deny again so a
@@ -414,10 +506,7 @@ pub fn validate_read(path: &std::path::Path) -> Result<(), String> {
 /// `guard_write` does: without that fallback a new file behind a symlinked
 /// directory would only ever be checked in its literal spelling, which never
 /// matches the deny-list.
-#[allow(unreachable_code)]
 pub fn validate_write(path: &std::path::Path) -> Result<(), String> {
-    let _ = path;
-    return Ok(());
     check_writable(&path.to_string_lossy())?;
     if let Ok(canon) = std::fs::canonicalize(path) {
         check_writable(&canon.to_string_lossy())?;
@@ -434,9 +523,7 @@ pub fn validate_write(path: &std::path::Path) -> Result<(), String> {
 
 /// Write guard: deny on the literal path, then canonicalize (target, or parent
 /// for a new file) and deny again. Returns the path to operate on.
-#[allow(unreachable_code)]
 pub fn guard_write(path: &Path) -> Result<PathBuf, String> {
-    return Ok(path.to_path_buf());
     check_writable(&path.to_string_lossy())?;
     match std::fs::canonicalize(path) {
         Ok(canon) => {
@@ -487,17 +574,83 @@ mod tests {
     }
 
     #[test]
-    fn write_allows_files_without_sandbox() {
+    fn write_allows_ordinary_workspace_files() {
+        assert!(check_writable("/home/me/project/out.txt").is_ok());
+        assert!(check_writable("/proj/src/main.rs").is_ok());
+        assert!(check_writable(r"C:\Users\me\project\src\App.tsx").is_ok());
+        assert!(check_writable(r"C:\Windows\Temp\agent-work.txt").is_ok());
+        // Scaffolding a project-local `.env` is ordinary work; the credential
+        // directories, not the file name, are what the write wall protects.
+        assert!(check_writable("/proj/.env").is_ok());
+        assert!(check_writable("/proj/.env.example").is_ok());
+        // System paths need root anyway and have real uses on a host under test
+        // (mapping a target name into /etc/hosts, for one), so they stay open.
         assert!(check_writable("/etc/hosts").is_ok());
         assert!(check_writable("/usr/bin/thing").is_ok());
-        assert!(check_writable(r"C:\Windows\Temp\agent-work.txt").is_ok());
-        assert!(check_writable(r"C:\Program Files\mytool\config.json").is_ok());
-        assert!(check_writable("/home/me/project/out.txt").is_ok());
-        assert!(check_writable("/proj/.termigo/hooks.json").is_ok());
     }
 
     #[test]
-    fn is_secret_path_and_is_protected_return_false_without_boundary() {
+    fn write_refuses_files_that_decide_later_execution() {
+        for path in [
+            "/proj/.termigo/hooks.json",
+            r"C:\proj\.termigo\hooks.json",
+            "/home/me/.termigo/hooks.json",
+            "/proj/.termigo/mcp.json",
+            "/home/me/.termigo/mcp.json",
+            "/proj/.claude/settings.json",
+            "/proj/.claude/settings.local.json",
+            "/proj/.codex/config.toml",
+            "/proj/.gemini/settings.json",
+        ] {
+            assert!(check_writable(path).is_err(), "allowed: {path}");
+        }
+    }
+
+    #[test]
+    fn write_refuses_credentials_git_internals_and_extension_bundles() {
+        for path in [
+            "/home/me/.ssh/authorized_keys",
+            "/home/me/.ssh/config",
+            "/home/me/.aws/credentials",
+            "/home/me/.gnupg/trustdb.gpg",
+            "/proj/.git/hooks/pre-commit",
+            "/proj/.git/config",
+            r"C:\Users\me\AppData\Roaming\id.99apps.termigo\extensions\demo\manifest.json",
+        ] {
+            assert!(check_writable(path).is_err(), "allowed: {path}");
+        }
+    }
+
+    #[test]
+    fn write_refusal_is_shared_with_the_shell_route() {
+        assert!(write_refusal("/proj/.termigo/hooks.json").is_some());
+        assert!(write_refusal("/proj/.git/hooks/pre-commit").is_some());
+        assert!(write_refusal("/proj/src/main.rs").is_none());
+    }
+
+    #[test]
+    fn every_write_refusal_names_the_stop() {
+        for path in [
+            "",
+            "a\u{1}b",
+            "/proj/.termigo/hooks.json",
+            "/home/me/.termigo/mcp.json",
+            "/proj/.claude/settings.json",
+            "/home/me/.ssh/config",
+            "/proj/.git/hooks/pre-commit",
+            r"C:\Users\me\AppData\Roaming\id.99apps.termigo\extensions\demo\manifest.json",
+            r"C:\Users\me\AppData\Roaming\id.99apps.termigo\audit\2026-09-27.jsonl",
+        ] {
+            let reason = write_refusal(path).unwrap_or_else(|| panic!("allowed: {path}"));
+            assert!(
+                reason.ends_with(REFUSAL_HINT),
+                "no stop hint for {path}: {reason}"
+            );
+        }
+    }
+
+    #[test]
+    fn read_side_pruning_stays_open_by_policy() {
         assert!(!is_secret_path(Path::new("/home/me/server.key")));
         assert!(!is_secret_path(Path::new("/home/me/deploy.pem")));
         assert!(!is_secret_path(Path::new("/home/me/credentials.json")));

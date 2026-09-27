@@ -98,12 +98,6 @@ const PROVIDER_ICON = {
 } as const satisfies Record<ProviderId, typeof ChatGptIcon>;
 
 /**
- * Live "Round N" chip shown while the agent is working. Sit next to the context
- * meter so the round number is visible even when the chat panel is minimized —
- * a climbing round means the run is progressing; a flat one means it is stuck
- * or looping.
- */
-/**
  * Live Telegram relay status chip. Shows whether the bot is online, or a subtle
  * dot when enabled but not yet polling (e.g. no connection). Hidden when the
  * relay is off or no token is set.

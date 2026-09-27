@@ -198,6 +198,9 @@ type Deps = {
   onFinishMeta?: (info: {
     stopReason: AgentStopReason | null;
     finishReason: string;
+    /** True when the run was torn down by an abort rather than ending on its
+     *  own (see RunAgentOptions.onFinishMeta). */
+    aborted: boolean;
     metrics: RunDiagnostics;
     /** Passive verification ledger for the verify-on-stop gate. */
     verify: { changedCodePaths: string[]; verifiedAfterLastEdit: boolean };
@@ -233,7 +236,7 @@ export function createContextAwareTransport(deps: Deps) {
   // The pre-run git checkpoint can hang on a huge or misconfigured repo - e.g.
   // when a workspace switch fell back to the home directory. Bound it hard so it
   // can never freeze the run before the model is even called.
-  const CHECKPOINT_TIMEOUT_MS = 12_000;
+  const CHECKPOINT_TIMEOUT_MS = 25_000;
   const withTimeout = <T>(
     promise: Promise<T>,
     ms: number,

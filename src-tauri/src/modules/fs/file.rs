@@ -282,6 +282,38 @@ fn resolve_symlink_components(path: &Path) -> Option<PathBuf> {
     Some(acc)
 }
 
+/// Canonicalize `path`, falling back to a manual symlink-component walk when
+/// Windows refuses to traverse it.
+///
+/// `os error 448` (`ERROR_UNTRUSTED_MOUNT_POINT`) is raised for a directory
+/// that is, or sits under, a symlink or junction the OS will not walk through:
+/// the target is perfectly readable, only `canonicalize` refuses. `fs_read_file`
+/// and `fs_canonicalize` already fall back; a terminal spawn used to hard-fail
+/// with "cwd not accessible" for the very same directory.
+#[cfg(windows)]
+pub(crate) fn canonicalize_with_reparse_fallback(path: &Path) -> std::io::Result<PathBuf> {
+    match std::fs::canonicalize(path) {
+        Ok(p) => Ok(p),
+        Err(err) => {
+            if err.raw_os_error() == Some(448) {
+                if let Some(resolved) = resolve_symlink_components(path) {
+                    return Ok(std::fs::canonicalize(&resolved).unwrap_or(resolved));
+                }
+            }
+            Err(err)
+        }
+    }
+}
+
+/// Everywhere else the fallback does not exist, so this stays a plain call.
+/// Keep the two definitions separate: a `#[cfg(windows)]` block inside one
+/// `match` would leave the other target with an identity match, which clippy
+/// rejects under `-D warnings`.
+#[cfg(not(windows))]
+pub(crate) fn canonicalize_with_reparse_fallback(path: &Path) -> std::io::Result<PathBuf> {
+    std::fs::canonicalize(path)
+}
+
 fn read_file_sync(p: &Path, force: bool) -> Result<ReadResult, String> {
     let (meta, resolved_path) = match std::fs::metadata(p) {
         Ok(m) => (m, p.to_path_buf()),

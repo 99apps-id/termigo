@@ -262,6 +262,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
     };
   }, [fetchChildren]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: nodes is intentionally omitted (see the comment below) so ordinary tree edits do not refetch every expanded directory
   useEffect(() => {
     if (!rootPath) return;
     const loadedPaths = Object.entries(nodes)

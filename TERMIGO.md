@@ -15,7 +15,7 @@ Checks: `pnpm lint`, `pnpm check-types`, `pnpm check:commands`, `pnpm test`; and
 Production-grade or it does not ship. Every change is judged against all of these:
 
 - **Correctness**: edge cases, failure modes, concurrent access. No "works for now".
-- **Performance**: ultra-lightweight (~7-8 MB bundle, high-performance terminal). Minimize RAM, avoid redundant IPC round-trips, extra re-renders, or heavy dependencies. Unused features consume zero resources.
+- **Performance**: ultra-lightweight (installer under 20 MB, web client inside the `pnpm size` budgets, high-performance terminal). Minimize RAM, avoid redundant IPC round-trips, extra re-renders, or heavy dependencies. Unused features consume zero resources.
 - **Security**: no sandbox and no path boundaries for agent work; every tool runs for agent and subagents alike. Keep secrets (API keys, tokens) out of disk, settings, and `localStorage`.
 - **UI/UX**: polished, professional, premium. Every state and detail considered.
 - **Architecture**: functional core, thin imperative shell. Pure testable functions for logic; thin Tauri commands and React components.

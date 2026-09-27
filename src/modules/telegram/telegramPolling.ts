@@ -162,6 +162,18 @@ export function conflictBackoffMs(streak: number): number {
 export const TELEGRAM_GENERIC_BACKOFF_BASE_MS = 5_000;
 export const TELEGRAM_GENERIC_BACKOFF_CAP_MS = 60_000;
 
+/**
+ * How many `getUpdates` client deadlines IN A ROW are read as "a slow
+ * long-poll" before the poll is treated as failing outright.
+ *
+ * Bounded on purpose. The timeout branch resets the stall clock (it is not an
+ * outage), so an unbounded run of them kept the watchdog silent and the bot
+ * reporting itself online while no update ever arrived - the "bot is dead but
+ * says online" case. Three deadlines is about two minutes of nothing, well past
+ * any idle long-poll.
+ */
+export const TELEGRAM_MAX_CONSECUTIVE_TIMEOUTS = 3;
+
 export function setCurrentUpdateOffset(offset: number): void {
   currentUpdateOffset = offset;
   persistOffset(offset);
@@ -254,7 +266,14 @@ export function checkPollingStall(): void {
 
 /** Run `runLoop`, recording the promise so the watchdog can await it. */
 function launchLoop(controller: AbortController): void {
-  const promise = runLoop(controller.signal);
+  // The loop catches its own per-poll failures, so anything that reaches here
+  // escaped that handler. It must not stay a rejection: `loopPromise` is
+  // awaited by the stall watchdog and by `startTelegramBot`, and an unhandled
+  // rejection in the webview is a worse outcome than a log line. The next
+  // start (or the watchdog) launches a replacement either way.
+  const promise = runLoop(controller.signal).catch((e) => {
+    logRelayWarn(relayErrorLine("poll loop", e));
+  });
   loopPromise = promise;
   void promise.finally(() => {
     if (loopPromise === promise) loopPromise = null;
@@ -318,8 +337,9 @@ export function isPollTimeoutError(e: unknown): boolean {
 async function runLoop(signal: AbortSignal): Promise<void> {
   // Ordinary failures back off harder while they repeat (see pollBackoffMs);
   // any success resets the streak. Timeouts below keep their own 1s pause and
-  // leave the streak alone.
+  // leave the streak alone, up to TELEGRAM_MAX_CONSECUTIVE_TIMEOUTS.
   let consecutiveFailures = 0;
+  let consecutiveTimeouts = 0;
   while (!signal.aborted && useTelegramStore.getState().enabled) {
     try {
       const data = (await apiGet(
@@ -334,6 +354,7 @@ async function runLoop(signal: AbortSignal): Promise<void> {
       useTelegramStore.getState().setOnline(true);
       useTelegramStore.getState().setLastError(null);
       consecutiveFailures = 0;
+      consecutiveTimeouts = 0;
       // Handlers run under the relay signal, not the poll signal, so a watchdog
       // recycle of the poller never cancels an in-flight agent run.
       const relaySignal = relayController?.signal ?? signal;
@@ -342,6 +363,15 @@ async function runLoop(signal: AbortSignal): Promise<void> {
         // One line per update, before it is handled: an update that arrives and
         // then fails is the case that used to leave no trace at all.
         logRelayInfo(updateLine(u));
+        // Handling an update is the loop making progress: a slow handler - a
+        // `git diff` summary on a large repo, a cost-ledger read - used to be
+        // measured as "no getUpdates progress", so the stall watchdog recycled
+        // a poller that was working and its replacement could poll the same bot
+        // at the same time (the 409 conflict this file exists to avoid). Marked
+        // on both sides of the await, so a handler of up to one stall window is
+        // covered; anything longer still counts as silence, which is the
+        // watchdog doing its job on a genuinely wedged loop.
+        lastPollProgressTime = Date.now();
         // One bad update (a malformed payload, a 400 from answerCallback on an
         // expired query) must not drop the rest of the batch. Catch per update
         // and still advance past it, or Telegram redelivers the poison update
@@ -356,6 +386,7 @@ async function runLoop(signal: AbortSignal): Promise<void> {
             }`,
           );
         }
+        lastPollProgressTime = Date.now();
         setCurrentUpdateOffset(Math.max(currentUpdateOffset, u.update_id + 1));
       }
     } catch (e) {
@@ -366,10 +397,19 @@ async function runLoop(signal: AbortSignal): Promise<void> {
       // some webview builds surface the deadline as a generic AbortError
       // ("The user aborted a request.") instead of the abort reason.
       if (isPollTimeoutError(e)) {
+        consecutiveTimeouts += 1;
         lastPollProgressTime = Date.now();
-        useTelegramStore.getState().setOnline(true);
-        await sleep(signal, 1000);
-        continue;
+        if (consecutiveTimeouts < TELEGRAM_MAX_CONSECUTIVE_TIMEOUTS) {
+          useTelegramStore.getState().setOnline(true);
+          await sleep(signal, 1000);
+          continue;
+        }
+        // ... but a poll that ONLY ever times out is not slow, it is dead. This
+        // branch resets the stall clock, so without a bound the watchdog could
+        // never fire and the bot would report itself online forever while
+        // delivering nothing. Fall through to the failure path instead.
+      } else {
+        consecutiveTimeouts = 0;
       }
       useTelegramStore.getState().setOnline(false);
       const errMsg = e instanceof Error ? e.message : String(e);
@@ -413,6 +453,10 @@ async function runLoop(signal: AbortSignal): Promise<void> {
 /** Start the long-polling loop (idempotent). */
 export async function startTelegramBot(): Promise<void> {
   if (loopController) return;
+  // Captured before any await: `stopTelegramBot` nulls `loopController`
+  // synchronously but does not wait for the in-flight `getUpdates` to close,
+  // and the effect that owns the bot calls stop-then-start back to back.
+  const previousLoop = loopPromise;
   const controller = new AbortController();
   loopController = controller;
   const mirror = new AbortController();
@@ -466,6 +510,18 @@ export async function startTelegramBot(): Promise<void> {
   }
   if (watchdogTimer) clearInterval(watchdogTimer);
   watchdogTimer = setInterval(checkPollingStall, 15_000);
+  // Let a previous loop finish tearing down first, bounded, for the same reason
+  // the stall watchdog races its replacement against a grace period: an abort
+  // does not guarantee the long-poll has closed, and two clients polling one
+  // bot token is what Telegram answers with 409 Conflict. The token read and
+  // the backlog poll above usually cover this already; this covers the rest.
+  if (previousLoop) {
+    await Promise.race([
+      previousLoop,
+      sleep(controller.signal, STALL_RECYCLE_GRACE_MS),
+    ]);
+    if (loopController !== controller || controller.signal.aborted) return;
+  }
   // Start polling BEFORE any awaiting setup. The bot used to report itself
   // online and only then await the stale-approval cleanup, so a slow or hung
   // AI-store import left it claiming to be online with nothing polling - which

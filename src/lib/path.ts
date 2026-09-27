@@ -15,6 +15,28 @@ export function pathSegments(path: string): string[] {
 }
 
 /**
+ * Normalize a directory path for identity comparison: backslashes become `/`
+ * (the canonical frontend form), repeated separators collapse, and trailing
+ * separators are dropped. A UNC root keeps its leading `//` so it cannot
+ * compare equal to a local `/server/share`.
+ *
+ * Case is deliberately preserved: `/Home/x` and `/home/x` are different
+ * directories on Linux and macOS, so folding case here would merge two trees.
+ * Callers that need Windows case-insensitivity fold it themselves.
+ *
+ * Used where two spellings of one directory must be recognized as one tree
+ * (an index root, a cache payload, a workspace root).
+ */
+export function canonicalDirPath(path: string): string {
+  const slashed = toForwardSlash(path);
+  const collapsed = slashed.startsWith("//")
+    ? `//${slashed.slice(2).replace(/\/{2,}/g, "/")}`
+    : slashed.replace(/\/{2,}/g, "/");
+  // A lone "/" has no preceding character to keep, so it survives as "/".
+  return collapsed.replace(/(.)\/+$/, "$1");
+}
+
+/**
  * Last path segment. Handles both separators and trailing separators
  * ("foo/bar/" -> "bar"); a string with no separator returns itself; "/" -> "/".
  */

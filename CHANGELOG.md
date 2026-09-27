@@ -40,6 +40,17 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `snyk test`, `grype`, `checkov`) and `git worktree list` as read-only introspection
   in `commandRisk.ts` so security audits run without unnecessary confirmation cards.
 
+### Removed
+
+- **The "Agent Execution & Reasoning (N steps)" panel above the composer.**
+  `TrajectoryThinkingHUD` / `ThinkingTreeHUD` listed every tool call of the live run as a
+  tree of `toolName` rows with a status pill and a Shimmer title. Each row restated what
+  the transcript already showed as a tool card and what `RunProgressHUD` already showed as
+  the active step line, so a long run displayed the same work three times and stole height
+  from the transcript. Progress now reads from `RunProgressHUD` (active step, todo list,
+  running sub-agents) and from the tool cards themselves. The two components were deleted
+  rather than left unused.
+
 ## [0.9.15] - 2026-09-16
 
 ### Added

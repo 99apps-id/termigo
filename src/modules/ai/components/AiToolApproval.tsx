@@ -429,8 +429,8 @@ function InlineDiff({ oldStr, newStr }: { oldStr: string; newStr: string }) {
     <div className="space-y-1">
       <div className="max-h-60 overflow-auto rounded-md bg-muted/40 font-mono text-[11px] leading-relaxed">
         {oldShown.map((l, i) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: static diff lines, order never changes
           <div
+            // biome-ignore lint/suspicious/noArrayIndexKey: static diff lines, order never changes
             key={`o${i}`}
             className="whitespace-pre-wrap bg-red-500/10 px-2 text-red-500"
           >
@@ -444,8 +444,8 @@ function InlineDiff({ oldStr, newStr }: { oldStr: string; newStr: string }) {
           </div>
         )}
         {newShown.map((l, i) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: static diff lines, order never changes
           <div
+            // biome-ignore lint/suspicious/noArrayIndexKey: static diff lines, order never changes
             key={`n${i}`}
             className="whitespace-pre-wrap bg-green-500/10 px-2 text-green-600 dark:text-green-400"
           >

@@ -90,16 +90,16 @@ function resolveTargetSelector(
   ref?: string,
   selector?: string,
 ): { targetSelector: string } | { error: string } {
-  if (ref && ref.trim()) {
+  if (ref?.trim()) {
     let clean = ref.trim();
     if (!clean.startsWith("@")) {
-      clean = clean.startsWith("e") ? "@" + clean : "@e" + clean;
+      clean = clean.startsWith("e") ? `@${clean}` : `@e${clean}`;
     } else if (
       clean.startsWith("@") &&
       !clean.startsWith("@e") &&
       /^\d+$/.test(clean.slice(1))
     ) {
-      clean = "@e" + clean.slice(1);
+      clean = `@e${clean.slice(1)}`;
     }
     if (!/^@e\d+$/.test(clean)) {
       return {
@@ -108,7 +108,7 @@ function resolveTargetSelector(
     }
     return { targetSelector: `[data-termigo-ref="${clean}"]` };
   }
-  if (selector && selector.trim()) {
+  if (selector?.trim()) {
     return { targetSelector: selector.trim() };
   }
   return { error: "Either selector or ref must be provided" };
@@ -447,14 +447,14 @@ export function buildBrowserTools(ctx: ToolContext) {
             return await res.json();
           }
           if (action === "activate_tab") {
-            if (!target_id || !target_id.trim()) {
+            if (!target_id?.trim()) {
               return { error: "action 'activate_tab' requires 'target_id'" };
             }
             const res = await fetch(`${base}/json/activate/${encodeURIComponent(target_id.trim())}`, { signal: AbortSignal.timeout(3000) });
             return { ok: res.ok, activated: target_id };
           }
           if (action === "close_tab") {
-            if (!target_id || !target_id.trim()) {
+            if (!target_id?.trim()) {
               return { error: "action 'close_tab' requires 'target_id'" };
             }
             const res = await fetch(`${base}/json/close/${encodeURIComponent(target_id.trim())}`, { signal: AbortSignal.timeout(3000) });

@@ -223,10 +223,10 @@ describe("deliveryCheckDecision", () => {
   // tool result, killing runs whose sibling tools were still executing (and
   // heartbeating). Only a genuinely stale clock may abort now.
   it("aborts when the clock has been stale for the whole budget", () => {
-    expect(deliveryCheckDecision(61_000, { sinceActivityMs: 61_000 })).toEqual(
+    expect(deliveryCheckDecision(121_000, { sinceActivityMs: 121_000 })).toEqual(
       { abort: true, recheckInMs: 0 },
     );
-    expect(deliveryCheckDecision(60_000, { sinceActivityMs: 60_000 })).toEqual(
+    expect(deliveryCheckDecision(120_000, { sinceActivityMs: 120_000 })).toEqual(
       { abort: true, recheckInMs: 0 },
     );
   });

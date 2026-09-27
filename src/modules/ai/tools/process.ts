@@ -18,7 +18,7 @@ async function inspectPort(
       ? `Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | Select-Object -Property OwningProcess, LocalAddress, LocalPort | Format-Table -AutoSize`
       : `lsof -n -P -iTCP:${port} -sTCP:LISTEN 2>/dev/null || (ss -tulpn 2>/dev/null | grep -E "(:|\\])${port}\\b")`;
     const r = await native.runCommand(cmd, null, 10);
-    const text = (r.stdout + (r.stderr ? "\n" + r.stderr : "")).trim();
+    const text = (r.stdout + (r.stderr ? `\n${r.stderr}` : "")).trim();
     const listening = text.length > 0 && r.exit_code === 0;
     return {
       port,
@@ -115,7 +115,7 @@ export function buildProcessTools(ctx: ToolContext) {
         }
 
         if (action === "spawn") {
-          if (!command || !command.trim()) {
+          if (!command?.trim()) {
             return { error: "action 'spawn' requires 'command'" };
           }
           if (ctx.getRemoteSession()) {

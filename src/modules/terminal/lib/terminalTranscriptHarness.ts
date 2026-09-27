@@ -22,9 +22,9 @@ export interface TerminalTranscript {
 
 const SENSITIVE_PATTERNS = [
   /ghp_[a-zA-Z0-9]{36}/g,
-  /sk-ant-[a-zA-Z0-9_\-]{40,}/g,
+  /sk-ant-[a-zA-Z0-9_-]{40,}/g,
   /sk-[a-zA-Z0-9]{40,}/g,
-  /Bearer\s+[a-zA-Z0-9_\-\.]{20,}/gi,
+  /Bearer\s+[a-zA-Z0-9_\-.]{20,}/gi,
   /password\s*[:=]\s*[^\s]+/gi,
 ];
 

@@ -1,6 +1,20 @@
 packages:
   - '.'
 
+# LOCAL ENVIRONMENT OVERRIDE, not a project convention. Remove on a machine
+# where reparse points resolve: TERMIGO.md asks for pnpm's default isolated
+# layout, and pnpm-workspace.yaml is the only place pnpm 11 still reads this
+# setting (it ignores `node-linker` in .npmrc).
+#
+# Why: this machine creates junctions and directory symlinks but cannot then
+# traverse them ("UNKNOWN" from Node, "File Not Found" from dir) anywhere on C:,
+# including the home directory. fsutil confirms a well-formed mount point
+# (tag 0xa0000003, correct substitute and print name) that simply cannot be
+# followed, and Developer Mode does not change it. Hardlinks work. With the
+# isolated layout every top-level dependency is such a link, so react,
+# typescript, vite, vitest and knip all fail to resolve and no check can run.
+nodeLinker: hoisted
+
 minimumReleaseAge: 0
 minimumReleaseAgeStrict: false
 allowBuilds:

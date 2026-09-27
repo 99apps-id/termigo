@@ -63,9 +63,9 @@ export function sanitizeDiff(input: string): SanitizeDiffResult {
   const hitPatterns = new Set<string>();
 
   for (const { name, re } of PATTERNS) {
-    let count = 0;
+    let _count = 0;
     text = text.replace(re, () => {
-      count++;
+      _count++;
       totalRedactions++;
       hitPatterns.add(name);
       if (totalRedactions > MAX_REDACTIONS) {

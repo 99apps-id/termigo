@@ -259,7 +259,7 @@ export async function updateSkill(
   }
   let newBody =
     updates.body !== undefined ? updates.body.trim() : existing.body;
-  if (updates.append && updates.append.trim()) {
+  if (updates.append?.trim()) {
     newBody = `${newBody}\n\n${updates.append.trim()}`;
   }
   const newDesc = updates.description?.trim() || existing.description;

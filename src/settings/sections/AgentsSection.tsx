@@ -87,7 +87,7 @@ import {
   SparklesIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { SectionHeader } from "../components/SectionHeader";
 import { SettingRow } from "../components/SettingRow";
 import { TelegramBlock } from "./TelegramBlock";
@@ -1116,18 +1116,18 @@ function WorkspacePoliciesBlock() {
   const [newTools, setNewTools] = useState("");
   const [isBlock, setIsBlock] = useState(true);
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     try {
       const rules = await loadCustomPolicies();
       setCustomRules(rules);
     } catch {
       setCustomRules([]);
     }
-  };
+  }, []);
 
   useEffect(() => {
     void refresh();
-  }, []);
+  }, [refresh]);
 
   const handleSave = async () => {
     const id = newId.trim().toLowerCase().replace(/\s+/g, "-");

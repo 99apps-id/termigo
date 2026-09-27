@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import { buildAgentTools } from "../agents/agentFactory";
 import { repairJsonText, repairToolCall } from "./repairToolCall";
 
@@ -108,7 +108,7 @@ describe("repairToolCall", () => {
         input: malformed,
       },
     });
-    expect(result).not.toBeNull();
+    assert(result);
     expect(result?.toolName).toBe("run_subagents");
     // The SDK re-parses `input`, so it must be valid JSON text.
     if (!result) return;
@@ -251,7 +251,8 @@ describe("repairToolCall", () => {
       },
     });
     expect(result?.toolName).toBe("unknown_tool_fallback");
-    expect(JSON.parse(result!.input).requested_tool).toBe(
+    assert(result);
+    expect(JSON.parse(result.input).requested_tool).toBe(
       "unrecognized_fancy_tool",
     );
   });
@@ -296,7 +297,8 @@ describe("repairToolCall", () => {
       },
     });
     expect(result?.toolName).toBe("unknown_tool_fallback");
-    expect(JSON.parse(result!.input).requested_tool).toBe("git_push");
+    assert(result);
+    expect(JSON.parse(result.input).requested_tool).toBe("git_push");
   });
 
   it("repairs run_subagents when tasks are passed as todos", async () => {
@@ -313,9 +315,9 @@ describe("repairToolCall", () => {
         }),
       },
     });
-    expect(result).not.toBeNull();
+    assert(result);
     expect(result?.toolName).toBe("run_subagents");
-    const parsed = JSON.parse(result!.input);
+    const parsed = JSON.parse(result.input);
     expect(parsed.tasks).toHaveLength(1);
     expect(parsed.tasks[0].prompt).toBe(
       "Petakan struktur kode Rust + TypeScript",
@@ -336,8 +338,8 @@ describe("repairToolCall", () => {
         }),
       },
     });
-    expect(result).not.toBeNull();
-    const parsed = JSON.parse(result!.input);
+    assert(result);
+    const parsed = JSON.parse(result.input);
     expect(parsed.pattern).toBe("setActiveId");
     expect(parsed.root).toBe("C:/project/termigo/src/modules/tabs/lib/useTabs.ts");
   });
@@ -355,8 +357,8 @@ describe("repairToolCall", () => {
         }),
       },
     });
-    expect(result).not.toBeNull();
-    const parsed = JSON.parse(result!.input);
+    assert(result);
+    const parsed = JSON.parse(result.input);
     expect(parsed.max_results).toBe(30);
   });
 
@@ -375,8 +377,8 @@ describe("repairToolCall", () => {
         }),
       },
     });
-    expect(result).not.toBeNull();
-    const parsed = JSON.parse(result!.input);
+    assert(result);
+    const parsed = JSON.parse(result.input);
     expect(parsed.glob).toEqual(["src-tauri/src/modules/pty/mod.rs"]);
   });
 
@@ -394,8 +396,8 @@ describe("repairToolCall", () => {
         }),
       },
     });
-    expect(resultRel).not.toBeNull();
-    const parsedRel = JSON.parse(resultRel!.input);
+    assert(resultRel);
+    const parsedRel = JSON.parse(resultRel.input);
     expect(parsedRel.query).toBe("setActiveId");
     expect(parsedRel.path_filter).toBe("src/modules/ai");
     expect(parsedRel.path).toBeUndefined();
@@ -412,8 +414,8 @@ describe("repairToolCall", () => {
         }),
       },
     });
-    expect(resultAbs).not.toBeNull();
-    const parsedAbs = JSON.parse(resultAbs!.input);
+    assert(resultAbs);
+    const parsedAbs = JSON.parse(resultAbs.input);
     expect(parsedAbs.root).toBe("C:/project/other-repo");
     expect(parsedAbs.path_filter).toBeUndefined();
     expect(parsedAbs.path).toBeUndefined();
@@ -431,8 +433,8 @@ describe("repairToolCall", () => {
         input: malformed,
       },
     });
-    expect(result).not.toBeNull();
-    const parsed = JSON.parse(result!.input);
+    assert(result);
+    const parsed = JSON.parse(result.input);
     expect(parsed.glob).toEqual(["*.ts"]);
   });
 
@@ -451,8 +453,8 @@ describe("repairToolCall", () => {
         }),
       },
     });
-    expect(result).not.toBeNull();
-    const parsed = JSON.parse(result!.input);
+    assert(result);
+    const parsed = JSON.parse(result.input);
     expect(parsed.action).toBe("run");
     expect(parsed.command).toBe("cargo test --lib");
     expect(parsed.timeout_secs).toBe(180);
@@ -473,8 +475,8 @@ describe("repairToolCall", () => {
         }),
       },
     });
-    expect(result).not.toBeNull();
-    const parsed = JSON.parse(result!.input);
+    assert(result);
+    const parsed = JSON.parse(result.input);
     expect(Array.isArray(parsed.todos)).toBe(true);
     expect(parsed.todos[0].title).toBe("Task 1");
   });
@@ -491,9 +493,9 @@ describe("repairToolCall", () => {
         }),
       },
     });
-    expect(result).not.toBeNull();
-    expect(result!.toolName).toBe("pty_session");
-    const parsed = JSON.parse(result!.input);
+    assert(result);
+    expect(result.toolName).toBe("pty_session");
+    const parsed = JSON.parse(result.input);
     expect(parsed.action).toBe("run");
     expect(parsed.command).toBe("ls -la");
   });
@@ -511,9 +513,9 @@ describe("repairToolCall", () => {
         }),
       },
     });
-    expect(resultRun).not.toBeNull();
-    expect(resultRun!.toolName).toBe("ssh_run_command");
-    const parsedRun = JSON.parse(resultRun!.input);
+    assert(resultRun);
+    expect(resultRun.toolName).toBe("ssh_run_command");
+    const parsedRun = JSON.parse(resultRun.input);
     expect(parsedRun.command).toBe("docker ps");
     expect(parsedRun.session_id).toBe(5);
 
@@ -527,9 +529,9 @@ describe("repairToolCall", () => {
         }),
       },
     });
-    expect(resultList).not.toBeNull();
-    expect(resultList!.toolName).toBe("ssh_list_connections");
-    const parsedList = JSON.parse(resultList!.input);
+    assert(resultList);
+    expect(resultList.toolName).toBe("ssh_list_connections");
+    const parsedList = JSON.parse(resultList.input);
     expect(parsedList.filter).toBe("vps");
   });
 
@@ -548,9 +550,9 @@ describe("repairToolCall", () => {
         }),
       },
     });
-    expect(result).not.toBeNull();
-    expect(result!.toolName).toBe("run_subagents");
-    const parsed = JSON.parse(result!.input);
+    assert(result);
+    expect(result.toolName).toBe("run_subagents");
+    const parsed = JSON.parse(result.input);
     expect(parsed.tasks).toHaveLength(2);
     expect(parsed.tasks[0].type).toBe("researcher");
     expect(parsed.tasks[1].type).toBe("coder");

@@ -336,12 +336,15 @@ const SHELL_SEPARATORS: &[char] = &[';', '\n', '\r'];
 /// same gap bypassed the `.termigo/hooks.json` immutability  -  a hook file is
 /// silent-exec persistence, so the shell route must not be a door around it.
 ///
-/// Deliberately a heuristic: a token scan gated on a write verb, not an
-/// argument parser. Reads stay allowed by operator policy (an agent debugging
-/// config legitimately reads `.env` through a terminal); only writes/deletes to
-/// deny-listed targets are refused, and a genuinely intended one goes through
-/// a PTY session like every other escape hatch here.
-#[allow(dead_code)]
+/// Deliberately a heuristic: a token scan gated on a write verb or a `>`
+/// token, not an argument parser. Reads stay allowed by operator policy (an
+/// agent debugging config legitimately reads `.env` through a terminal); only
+/// writes and deletes to deny-listed targets are refused, and a genuinely
+/// intended one goes through a PTY session like every other escape hatch here.
+///
+/// The deny-list itself is not repeated here: the verdict comes from
+/// `fs::security::write_refusal`, so the fs route and the shell route cannot
+/// drift apart the way they did when this heuristic was the only copy.
 const SHELL_WRITE_VERBS: &[&str] = &[
     "set-content", "add-content", "out-file", "tee-object", "tee",
     "cp", "copy", "copy-item", "mv", "move", "move-item",
@@ -349,12 +352,53 @@ const SHELL_WRITE_VERBS: &[&str] = &[
     "del", "erase", "remove-item", "ri", "rm", "rmdir", "rd",
 ];
 
-/// When a write verb is present, the target the command would hit, if that
-/// target matches the fs deny-list (secret basename, protected directory, or
-/// the agent-immutable config files). None means "nothing to refuse".
-#[allow(dead_code)]
+/// The path a shell command would write into, if that path is refused by the
+/// write deny-list. None means "nothing to refuse".
+///
+/// Two shapes reach a file: a write verb with the path as an argument, and a
+/// redirection (`>` / `>>`, or the file half of `2>path`). Both are scanned,
+/// because `>` alone is enough to plant a hook file and there is no verb in
+/// `echo '{}' > .termigo/hooks.json` to key off. The verdict for a candidate
+/// comes from `fs::security::write_refusal`, so this stays a finder of targets
+/// rather than a second copy of the policy.
 fn shell_write_hits_protected_target(command: &str) -> Option<String> {
     let tokens: Vec<&str> = command.split_whitespace().collect();
+
+    // `core.hooksPath` retargets git at a directory the agent can write into,
+    // which makes the whole git-hooks rule moot: plant a hook in `.githooks/`
+    // and point git at it. Refused on the token, since git performs the write
+    // inside its own process where no path token exists to inspect.
+    if tokens.iter().any(|t| {
+        t.trim_matches(|c| c == '"' || c == '\'')
+            .to_lowercase()
+            .contains("core.hookspath")
+    }) {
+        return Some("core.hooksPath".to_string());
+    }
+
+    for (i, t) in tokens.iter().enumerate() {
+        let bare = t.trim_matches(|c| c == '"' || c == '\'');
+        let target = if bare == ">" || bare == ">>" {
+            tokens.get(i + 1).copied()
+        } else if let Some(pos) = bare.rfind('>') {
+            let rest = bare[pos + 1..].trim();
+            // `2>&1` and `>&2` name a descriptor, not a file.
+            if rest.is_empty() || rest.starts_with('&') || rest.chars().all(|c| c.is_ascii_digit())
+            {
+                None
+            } else {
+                Some(rest)
+            }
+        } else {
+            None
+        };
+        if let Some(target) = target {
+            if let Some(hit) = shell_write_target_refusal(target) {
+                return Some(hit);
+            }
+        }
+    }
+
     let has_in_place_flag = tokens.iter().any(|t| *t == "-i" || t.starts_with("-i"));
     let has_write_verb = tokens.iter().any(|t| {
         let bare = t.trim_matches(|c| c == '"' || c == '\'').to_lowercase();
@@ -369,34 +413,34 @@ fn shell_write_hits_protected_target(command: &str) -> Option<String> {
         return None;
     }
     for t in &tokens {
-        let trimmed = t.trim_matches(|c| c == '"' || c == '\'');
-        if trimmed.is_empty() || trimmed.starts_with('-') {
-            continue;
-        }
-        let norm = trimmed.replace('\\', "/").to_lowercase();
-        if norm.contains("/node_modules/")
-            || norm.starts_with("node_modules/")
-            || norm.contains("/.pnpm/")
-            || norm.starts_with(".pnpm/")
-        {
-            continue;
-        }
-        let path = std::path::Path::new(trimmed);
-        if crate::modules::fs::security::is_secret_path(path)
-            || crate::modules::fs::security::is_protected(path)
-        {
-            return Some(trimmed.to_string());
-        }
-        // The agent-immutable config, mirrored from fs::security (the shell
-        // route is exactly where a prompt-injected `Set-Content hooks.json`
-        // would try to go). Suffix match because the token may be relative or
-        // absolute, either spelling.
-        let norm = trimmed.replace('\\', "/").to_lowercase();
-        if norm.ends_with(".termigo/hooks.json") || norm.ends_with(".termigo/approvals.json") {
-            return Some(trimmed.to_string());
+        if let Some(hit) = shell_write_target_refusal(t) {
+            return Some(hit);
         }
     }
     None
+}
+
+/// One candidate token against the write deny-list, plus the clause that only
+/// the shell route needs: `approvals.json` governs the approval gate, and this
+/// route has no legitimate writer for it. The fs route has one (the dialog's own
+/// "allow for this project" button), so it permits the file there.
+fn shell_write_target_refusal(raw: &str) -> Option<String> {
+    let trimmed = raw.trim_matches(|c| c == '"' || c == '\'');
+    if trimmed.is_empty() || trimmed.starts_with('-') {
+        return None;
+    }
+    let norm = trimmed.replace('\\', "/").to_lowercase();
+    if norm.contains("/node_modules/")
+        || norm.starts_with("node_modules/")
+        || norm.contains("/.pnpm/")
+        || norm.starts_with(".pnpm/")
+    {
+        return None;
+    }
+    if norm.ends_with(".termigo/approvals.json") {
+        return Some(trimmed.to_string());
+    }
+    crate::modules::fs::security::write_refusal(trimmed).map(|_| trimmed.to_string())
 }
 
 /// Whether the quote character at `chars[i]` is escaped, per the shell that
@@ -436,6 +480,12 @@ fn quote_is_escaped(chars: &[char], i: usize, quote_char: char) -> bool {
 pub fn validate_shell_command(command: &str) -> Result<&str, String> {
     if command.trim().is_empty() {
         return Err("empty command".into());
+    }
+    if let Some(target) = shell_write_hits_protected_target(command) {
+        return Err(format!(
+            "Refused: \"{target}\" decides what runs later, so the shell route cannot change it.{}",
+            crate::modules::fs::security::REFUSAL_HINT
+        ));
     }
     Ok(command)
 }
@@ -726,17 +776,16 @@ pub async fn shell_run_command(
             .clamp(1, MAX_TIMEOUT_SECS),
     );
 
-    // The blocking spawn + wait runs on a worker thread so the Tauri async
-    // runtime stays unblocked.
-    let (tx, rx) = mpsc::channel::<Result<CommandOutput, String>>();
-    thread::spawn(move || {
-        let result = run_blocking(trimmed, cwd_path, workspace, dur, None);
-        if tx.send(result).is_err() {
-            log::warn!("shell_run_command: receiver dropped before result could be sent");
-        }
-    });
-
-    rx.recv().map_err(|e| e.to_string())?
+    // The blocking spawn + wait runs on the blocking pool. A hand-rolled thread
+    // plus a blocking `recv` here left the Tauri async runtime no better off:
+    // the worker awaiting this command parks for the whole timeout, and a few
+    // concurrent agent commands then hold every worker the other commands
+    // (pty_write included) need.
+    tauri::async_runtime::spawn_blocking(move || {
+        run_blocking(trimmed, cwd_path, workspace, dur, None)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Somewhere the caller can see the child while it runs, so a command can be
@@ -961,14 +1010,12 @@ pub async fn shell_session_run(
             .unwrap_or(DEFAULT_TIMEOUT_SECS)
             .clamp(1, MAX_TIMEOUT_SECS),
     );
-    let (tx, rx) = mpsc::channel();
-    thread::spawn(move || {
-        let result = session.run(trimmed, cwd, workspace, dur);
-        if tx.send(result).is_err() {
-            log::warn!("shell_session_run: receiver dropped before result could be sent");
-        }
-    });
-    rx.recv().map_err(|e| e.to_string())?
+    // Same reasoning as `shell_run_command`: `session.run` blocks for up to the
+    // timeout, so it belongs on the blocking pool rather than on a runtime
+    // worker parked in a synchronous `recv`.
+    tauri::async_runtime::spawn_blocking(move || session.run(trimmed, cwd, workspace, dur))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -1507,11 +1554,23 @@ mod tests_sandbox {
     }
 
     #[test]
-    fn validate_shell_command_allows_stream_joins_and_redirections() {
+    fn validate_shell_command_allows_stream_joins_and_ordinary_redirections() {
         assert!(validate_shell_command("pnpm test 2>&1").is_ok());
         assert!(validate_shell_command("pnpm test > /dev/null").is_ok());
         assert!(validate_shell_command("echo x > /dev/nullx").is_ok());
-        assert!(validate_shell_command("echo x > ~/.ssh/authorized_keys").is_ok());
+        assert!(validate_shell_command("git diff > out.patch").is_ok());
+    }
+
+    /// Redirection writes a file with no verb in the command, so the target is
+    /// the only thing the scanner can key off. Before this, `echo '{}' >
+    /// .termigo/hooks.json` planted a hook that runs on every later tool event
+    /// without ever naming a write verb.
+    #[test]
+    fn validate_shell_command_refuses_redirection_into_execution_triggers() {
+        assert!(validate_shell_command("echo x > ~/.ssh/authorized_keys").is_err());
+        assert!(validate_shell_command("echo '{}' > .termigo/hooks.json").is_err());
+        assert!(validate_shell_command("echo '{}' >> C:\\proj\\.termigo\\hooks.json").is_err());
+        assert!(validate_shell_command("echo x > .git/hooks/pre-commit").is_err());
     }
 
     #[test]
@@ -1546,21 +1605,54 @@ mod tests_sandbox {
     }
 
     #[test]
-    fn validate_shell_command_allows_writes_to_any_targets() {
+    fn validate_shell_command_refuses_writes_to_execution_triggers() {
         for cmd in [
             "Set-Content .termigo/hooks.json '{}'",
             "Set-Content C:\\proj\\.termigo\\hooks.json '{}'",
             "Out-File -FilePath .termigo/approvals.json",
+            "Out-File C:\\Users\\me\\.ssh\\authorized_keys",
+            "Remove-Item C:\\Users\\me\\.aws\\credentials",
+            "rm .git/hooks/pre-commit",
+            "cp evil .git/hooks/pre-commit",
+            // git performs this write inside its own process, so the token is
+            // the only place the retarget is visible.
+            "git config core.hooksPath .githooks",
+        ] {
+            assert!(validate_shell_command(cmd).is_err(), "allowed: {cmd}");
+        }
+    }
+
+    /// Every refusal the model reads has to name the stop, and the shell one
+    /// must never point at the PTY: the wall does not inspect PTY keystrokes, so
+    /// naming that route would hand the model the way around the wall.
+    #[test]
+    fn validate_shell_command_refusal_names_the_stop() {
+        let refused = validate_shell_command("Set-Content .termigo/hooks.json '{}'").unwrap_err();
+        assert!(
+            refused.ends_with(crate::modules::fs::security::REFUSAL_HINT),
+            "no stop hint: {refused}"
+        );
+        assert!(!refused.contains("PTY"), "names a way around: {refused}");
+    }
+
+    /// The write wall is deliberately narrow: it protects the directories that
+    /// hold credentials and the files that decide later execution, not every
+    /// path that looks secret. Scaffolding a project-local `.env`, or removing a
+    /// key from a working tree, stays ordinary work.
+    #[test]
+    fn validate_shell_command_allows_ordinary_writes() {
+        for cmd in [
             "cp notes.txt .env",
             "copy notes.txt .env.production",
-            "Out-File C:\\Users\\me\\.ssh\\authorized_keys",
             "Remove-Item id_rsa",
             "del known_hosts",
             "mv backup.pem /tmp/x.pem",
             "sed -i s/a/b/ .env",
             "tee id_ed25519",
+            "Out-File notes.md",
+            "Set-Content src/App.tsx 'export {}'",
         ] {
-            assert!(validate_shell_command(cmd).is_ok());
+            assert!(validate_shell_command(cmd).is_ok(), "blocked: {cmd}");
         }
     }
 

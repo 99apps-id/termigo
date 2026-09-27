@@ -1,4 +1,10 @@
 import { summarizeInput } from "../lib/approvalQueue";
+import {
+  auditToolEvent,
+  detailOfResult,
+  isRefusal,
+  statusOfResult,
+} from "../lib/auditLog";
 import { withAutoVerify } from "../lib/autoVerify";
 import { buildOrchestratorTools } from "../lib/orchestrator";
 import {
@@ -12,6 +18,7 @@ import { useApprovalQueue } from "../store/approvalQueueStore";
 import { buildManagedAgentTools } from "./agent";
 import { buildBrowserTools } from "./browser";
 import { buildCodeSearchTools } from "./codeSearch";
+import { buildTreeCompareTools } from "./compareTrees";
 import { buildDevServerTools } from "./devServer";
 import { buildEditTools } from "./edit";
 import { buildElicitationTools } from "./elicitation";
@@ -105,16 +112,81 @@ export function withToolLifecycle<
       const stopHeartbeat = startActivityHeartbeat();
       try {
         const result = await original(args, options);
+        auditToolEvent({
+          tool: name,
+          args,
+          status: statusOfResult(result),
+          detail: detailOfResult(result),
+        });
         if (ctx.firePostToolHook) {
           await ctx.firePostToolHook(name, args, result).catch(() => {});
         }
         return result;
+      } catch (error) {
+        auditToolEvent({
+          tool: name,
+          args,
+          status: isRefusal(error) ? "refused" : "error",
+          detail: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
       } finally {
         stopHeartbeat();
         markRunActivity();
       }
     },
   };
+}
+
+/**
+ * Give tools that did not come from `buildTools` the same activity heartbeat.
+ *
+ * `withToolLifecycle` above is the one place the run's activity clock is fed
+ * while a tool works, but the tools it wraps are the ones `buildTools` created.
+ * MCP, extension and custom tools are supplied by the caller and spread into
+ * the toolset in `agent.ts` AHEAD of `buildTools`, so they never went through
+ * it. Nothing advanced the clock between their `tool-call` chunk and their
+ * `tool-result` chunk, so a call that legitimately ran longer than the
+ * execution guard's budget looked exactly like a hung one and the run was
+ * aborted with "A tool did not complete or show activity within Ns" - while a
+ * built-in tool doing the same work was allowed the full heartbeat ceiling.
+ *
+ * Only the heartbeat is added: these tools keep their schemas, their results and
+ * their current behaviour otherwise, and the PreToolUse/PostToolUse hooks stay
+ * attached to the built-in set as before. Bounded (see `startActivityHeartbeat`),
+ * so a genuinely dead tool still trips the guard.
+ */
+export function withToolHeartbeat<T extends Record<string, unknown>>(
+  tools: T,
+): T {
+  const out: Record<string, unknown> = {};
+  for (const [name, tool] of Object.entries(tools)) {
+    const candidate = tool as { execute?: unknown } | null;
+    if (!candidate || typeof candidate.execute !== "function") {
+      out[name] = tool;
+      continue;
+    }
+    const execute = candidate.execute as (
+      args: unknown,
+      options: unknown,
+    ) => Promise<unknown>;
+    out[name] = {
+      ...(tool as object),
+      execute: async (args: unknown, options: unknown) => {
+        const stopHeartbeat = startActivityHeartbeat();
+        try {
+          return await execute(args, options);
+        } finally {
+          stopHeartbeat();
+          markRunActivity();
+        }
+      },
+    };
+  }
+  // The shape is identical apart from the wrapper around `execute`, so this
+  // narrows back to the caller's own tool type - `streamText` infers a precise
+  // ToolSet from `tools`, and a widened record would lose that.
+  return out as T;
 }
 
 /**
@@ -244,6 +316,7 @@ export function buildTools(
     ...buildSkillRegistryTools(),
     ...buildGithubTools(ctx),
     ...buildCodeSearchTools(ctx),
+    ...buildTreeCompareTools(ctx),
     ...buildDevServerTools(ctx),
     ...buildLspTools(ctx),
     ...buildWorktreeTools(ctx),

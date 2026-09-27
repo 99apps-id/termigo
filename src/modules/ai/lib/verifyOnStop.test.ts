@@ -7,7 +7,27 @@ import {
   newVerifyLedger,
   recordToolResult,
   VERIFY_NUDGE_PREFIX,
+  verifyGateApplies,
 } from "./verifyOnStop";
+
+describe("verifyGateApplies", () => {
+  it("applies to a run that ended on its own", () => {
+    expect(verifyGateApplies({ stopReason: null, aborted: false })).toBe(true);
+  });
+
+  // The field case: a watchdog stall aborts the run without naming a stop
+  // reason, so `stopReason === null` alone read as a clean finish and started
+  // a verification run right after the abort.
+  it("never applies to an aborted run that named no stop reason", () => {
+    expect(verifyGateApplies({ stopReason: null, aborted: true })).toBe(false);
+  });
+
+  it("does not apply when a guard already named the stop", () => {
+    expect(verifyGateApplies({ stopReason: "step-cap", aborted: false })).toBe(
+      false,
+    );
+  });
+});
 
 describe("isNonCodePath", () => {
   it("treats docs and data files as non-code", () => {

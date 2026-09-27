@@ -43,6 +43,7 @@ export function PaneTreeView(props: Props) {
     const focused = node.id === activeLeafId;
     const b = getBundle(node.id);
     return (
+      // biome-ignore lint/a11y/noStaticElementInteractions: focus-tracking wrapper; its handlers keep activeLeafId in sync with DOM focus
       <div
         onMouseDownCapture={() => {
           if (!focused) onFocusLeaf(node.id);

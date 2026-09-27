@@ -313,7 +313,7 @@ export function buildPtyDriverTools(ctx: ToolContext) {
         }
 
         // Default: action === "run"
-        if (!command || !command.trim()) {
+        if (!command?.trim()) {
           return { error: "command parameter is required for action='run'" };
         }
         if (ctx.isActiveTerminalPrivate()) {
@@ -358,7 +358,7 @@ export function buildPtyDriverTools(ctx: ToolContext) {
         while (Date.now() - start < timeoutMs) {
           await new Promise((r) => setTimeout(r, 200));
           const currentBuf = ctx.getTerminalContext() ?? "";
-          if (re && re.test(currentBuf)) {
+          if (re?.test(currentBuf)) {
             matched = true;
             break;
           }

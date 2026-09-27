@@ -68,13 +68,14 @@ import { ElicitationCarousel } from "./ElicitationCarousel";
 import { ChatTimelineNavigator } from "./ChatTimelineNavigator";
 import { RollbackSuggestion } from "./RollbackSuggestion";
 import { RunProgressHUD } from "./RunProgressHUD";
-import { TrajectoryThinkingHUD } from "./TrajectoryThinkingHUD";
 
 /**
  * Rotating "working" phrases, in the style of VS Code's chat thinking part
  * (`chatThinkingContentPart`) - a calm status word that cycles while the model
  * is thinking (no tool step active yet) instead of a static "Thinking...". No
- * round labels: Termigo surfaces progress through the step HUD, not a counter.
+ * round labels: progress reads from `RunProgressHUD` (the live step, the todo
+ * list, any running sub-agents) and from the tool cards in the transcript, not
+ * from a counter or a second, parallel tree of the same steps.
  */
 const THINKING_PHRASES = [
   "Processing",
@@ -242,7 +243,6 @@ export function AiChatView({
             <span className="truncate">{step ?? `${thinkingPhrase}...`}</span>
           </div>
         )}
-        {isBusy && <TrajectoryThinkingHUD />}
         {showContinue && (
           <ContinueRow
             kind={continueKind}

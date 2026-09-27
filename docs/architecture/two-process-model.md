@@ -141,6 +141,12 @@ The spawn cwd goes through the same workspace authorization registry as every ot
 
 - `secrets_get` / `secrets_set` / `secrets_delete` / `secrets_get_all` - OS keychain access, service `termigo-ai`
 
+### Audit (`src-tauri/src/modules/audit.rs`)
+
+- `audit_append` - append one event to `<app_data_dir>/audit/<date>.jsonl`
+
+Written by the host, not by a tool, because the point is a record the agent cannot rewrite: the log directory is in the write deny-list, so `fs_write_file`, the shell route and every tool an agent can reach are locked out of it while this command writes with `std::fs` directly. App-scoped rather than workspace-scoped, so one file per day reads as a single timeline across every project a session touched. Entries are bounded at 64 KB and refused rather than truncated (half a JSON object is worse than a missing line when the log is what is read after an incident), the caller's date is validated as a bare `YYYY-MM-DD` so it cannot steer the write out of the audit directory, and lines are appended with `O_APPEND` so concurrent runs interleave instead of overwriting. Auditing is observation, so every failure is logged and swallowed: the caller always sees `Ok`.
+
 ### Agent hooks (`src-tauri/src/modules/agent.rs`)
 
 - `agent_enable_hooks` / `agent_hooks_status` - install/status terminal coding-agent hooks (Claude Code, Codex, Gemini CLI)

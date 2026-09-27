@@ -14,8 +14,8 @@ use launch::{get_launch_dir, get_launch_files, parse_launch_target, LaunchDir, L
 #[cfg(target_os = "macos")]
 use launch::{resolve_launch_target, LaunchEntry};
 use modules::{
-    agent, backup, browser, chatgpt_auth, control, extensions, fs, git, history, lsp, mcp, net,
-    pty, secrets, shell, sql, ssh, system, workspace,
+    agent, audit, backup, browser, chatgpt_auth, control, extensions, fs, git, history, lsp, mcp,
+    net, pty, secrets, shell, sql, ssh, system, workspace,
 };
 use settings_window::open_settings_window;
 
@@ -167,6 +167,7 @@ pub fn run() {
         .manage(LaunchDir(Mutex::new(cli_dir)))
         .manage(LaunchFiles(Mutex::new(launch.files)))
         .invoke_handler(tauri::generate_handler![
+            audit::audit_append,
             pty::pty_open,
             pty::pty_write,
             pty::pty_resize,

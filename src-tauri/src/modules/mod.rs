@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod audit;
 pub mod backup;
 pub mod browser;
 pub mod chatgpt_auth;

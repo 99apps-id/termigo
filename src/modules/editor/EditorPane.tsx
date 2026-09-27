@@ -496,6 +496,7 @@ export const EditorPane = memo(
       void resolveLanguage(resolvePath).catch(() => {});
     }, [path, overrideLanguage]);
 
+    // biome-ignore lint/correctness/useExhaustiveDependencies: depending on doc.size would re-resolve the language on every edit; doc.status flipping to ready is when the size is first meaningful
     useEffect(() => {
       const ext =
         overrideLanguage || (path.split(".").pop()?.toLowerCase() ?? null);

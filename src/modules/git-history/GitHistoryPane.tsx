@@ -447,7 +447,7 @@ export function GitHistoryPane({
         filesInflightRef.current.delete(sha);
       }
     },
-    [repoRoot],
+    [repoRoot, bumpFiles],
   );
 
   const handleRowClick = useCallback(
@@ -476,6 +476,7 @@ export function GitHistoryPane({
 
   const closePopover = useCallback(() => setOpenAnchor(null), []);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reads filesCacheRef, so filesTick is the re-render signal for cache updates
   const openFilesEntry = useMemo(() => {
     if (!openAnchor) return null;
     return filesCacheRef.current.get(openAnchor.sha) ?? null;

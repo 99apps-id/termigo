@@ -441,6 +441,7 @@ export function AiComposerInput() {
       ) : null}
       <Popover open={pickerOpen}>
         <PopoverAnchor asChild>
+          {/* biome-ignore lint/a11y/noStaticElementInteractions: pointer-only drop target; the keyboard path is the attach button in the toolbar */}
           <div
             role="presentation"
             onDragOver={(e) => {

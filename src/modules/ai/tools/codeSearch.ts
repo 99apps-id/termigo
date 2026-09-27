@@ -1,5 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
+import { canonicalDirPath } from "@/lib/path";
 import {
   indexWorkspace,
   searchCode,
@@ -23,21 +24,47 @@ let indexingPromise: {
 } | null = null;
 
 async function ensureIndexed(
-  root: string,
+  rawRoot: string,
+  persist: boolean,
 ): Promise<{ files: number; chunks: number }> {
+  // One canonical spelling per tree: the same directory arriving as "C:/x/",
+  // "C:\\x" or "C:/x" is ONE index. Comparing raw strings read those as
+  // different repos and rebuilt the whole index on every call, and the cache
+  // payload recorded whichever spelling asked first, so neither spelling ever
+  // hit the disk cache either. Case is left alone (see `canonicalDirPath`):
+  // merging two case-different directories would answer from the wrong tree.
+  const root = canonicalDirPath(rawRoot);
   const stats = getIndexStats();
   const currentIndexed = getIndexedRoot();
-  if (stats.chunks > 0 && currentIndexed === root) {
+  if (
+    stats.chunks > 0 &&
+    currentIndexed !== null &&
+    canonicalDirPath(currentIndexed) === root
+  ) {
     return stats;
   }
   if (indexingPromise && indexingPromise.root === root) {
     return indexingPromise.promise;
   }
-  const promise = indexWorkspace(root).finally(() => {
+  const promise = indexWorkspace(root, false, persist).finally(() => {
     if (indexingPromise?.promise === promise) indexingPromise = null;
   });
   indexingPromise = { root, promise };
   return promise;
+}
+
+/** Whether `root` IS the workspace root, which is the only tree that keeps a
+ *  cache file on disk. A search aimed at another checkout or a subdirectory
+ *  stays in memory: caching it wrote a `.termigo/code-index.json` into that
+ *  tree, including trees the user does not own. */
+function isWorkspaceRoot(root: string, workspaceRoot: string | null): boolean {
+  if (!workspaceRoot) return false;
+  // Case-folded as well: on Windows one directory arrives spelled with
+  // different casing, and a persist decision is not worth a rebuild.
+  return (
+    canonicalDirPath(root).toLowerCase() ===
+    canonicalDirPath(workspaceRoot).toLowerCase()
+  );
 }
 
 /**
@@ -77,7 +104,9 @@ export function buildCodeSearchTools(ctx: ToolContext) {
               : v;
           }, z.number().int().min(1).max(100).optional())
           .optional()
-          .describe("Maximum results to return. Defaults to 10, capped at 100."),
+          .describe(
+            "Maximum results to return. Defaults to 10, capped at 100.",
+          ),
         path_filter: z
           .string()
           .optional()
@@ -115,7 +144,10 @@ export function buildCodeSearchTools(ctx: ToolContext) {
         const root = targetRoot(ctx, effectiveRoot);
         if (!root) return { error: "no workspace root or cwd available" };
 
-        const stats = await ensureIndexed(root);
+        const stats = await ensureIndexed(
+          root,
+          isWorkspaceRoot(root, ctx.getWorkspaceRoot()),
+        );
         if (stats.chunks === 0) {
           return {
             error: `no indexable files found under ${root}. Check that the path is a directory that exists, then retry.`,
@@ -147,13 +179,23 @@ export function buildCodeSearchTools(ctx: ToolContext) {
           ),
       }),
       execute: async ({ root: askedRoot }) => {
-        const root = targetRoot(ctx, askedRoot);
+        // Canonical spelling reaches the indexer, the cache and the response:
+        // the same tree asked for as "C:/x/" and "C:/x" was a cache miss (and
+        // a full rebuild) on every call.
+        const root = canonicalDirPath(targetRoot(ctx, askedRoot) ?? "");
         if (!root) return { error: "no workspace root or cwd available" };
-        if (indexingPromise && indexingPromise.root === root) {
+        if (
+          indexingPromise &&
+          canonicalDirPath(indexingPromise.root) === root
+        ) {
           const stats = await indexingPromise.promise;
           return { status: "ok", root, ...stats };
         }
-        const promise = indexWorkspace(root, true).finally(() => {
+        const promise = indexWorkspace(
+          root,
+          true,
+          isWorkspaceRoot(root, ctx.getWorkspaceRoot()),
+        ).finally(() => {
           if (indexingPromise?.promise === promise) indexingPromise = null;
         });
         indexingPromise = { root, promise };

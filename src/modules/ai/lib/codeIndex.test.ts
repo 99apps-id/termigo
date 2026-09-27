@@ -9,6 +9,7 @@ import {
   findScopeHeader,
   clearIndex,
   CODE_INDEX_CACHE_REL_PATH,
+  INDEXABLE_GLOB,
 } from "./codeIndex";
 
 describe("tokenize", () => {
@@ -68,6 +69,17 @@ describe("searchCode with empty or null workspace", () => {
     expect(INDEXABLE_EXTENSIONS).toContain(".yaml");
     expect(INDEXABLE_EXTENSIONS).toContain(".sql");
   });
+
+  it("walks every indexable extension in a single glob", () => {
+    expect(INDEXABLE_GLOB.startsWith("**/*.{")).toBe(true);
+    expect(INDEXABLE_GLOB.endsWith("}")).toBe(true);
+    for (const ext of INDEXABLE_EXTENSIONS) {
+      expect(INDEXABLE_GLOB).toContain(ext.slice(1));
+    }
+    // One alternation set, not one pattern per extension: the walk is the
+    // expensive part and it used to run once per extension.
+    expect(INDEXABLE_GLOB.split("{")).toHaveLength(2);
+  });
 });
 
 describe("syntax-aware chunkLines and findScopeHeader", () => {
@@ -97,33 +109,44 @@ describe("syntax-aware chunkLines and findScopeHeader", () => {
   });
 });
 
+const FILE_CONTENT =
+  "export function authenticateUser(token: string) { return true; }";
+
+/** A native mock whose glob reports one file with a settable fingerprint. */
+async function mockNativeTree(writtenFiles: Map<string, string>) {
+  const { native } = await import("./native");
+  writtenFiles.set("/workspace/src/auth.ts", FILE_CONTENT);
+  vi.spyOn(native, "readFile").mockImplementation(async (p) => {
+    const c = writtenFiles.get(p);
+    if (c) return { kind: "text", content: c, size: c.length };
+    return { kind: "text", content: "", size: 0 };
+  });
+  vi.spyOn(native, "writeFile").mockImplementation(async (p, content) => {
+    writtenFiles.set(p, content);
+  });
+  vi.spyOn(native, "createDir").mockResolvedValue(
+    undefined as unknown as undefined,
+  );
+  vi.spyOn(native, "glob").mockResolvedValue({
+    hits: [
+      {
+        path: "/workspace/src/auth.ts",
+        rel: "src/auth.ts",
+        mtime: 1000,
+        size: FILE_CONTENT.length,
+      },
+    ],
+    truncated: false,
+  });
+  return native;
+}
+
 describe("code index persistence and cache", () => {
-  it("saves and loads index cache correctly", async () => {
-    const { native } = await import("./native");
+  it("saves the index and reuses it while the tree is unchanged", async () => {
     const writtenFiles = new Map<string, string>();
-    vi.spyOn(native, "readFile").mockImplementation(async (p) => {
-      const c = writtenFiles.get(p);
-      if (c) return { kind: "text", content: c, size: c.length };
-      return { kind: "text", content: "", size: 0 };
-    });
-    vi.spyOn(native, "writeFile").mockImplementation(async (p, content) => {
-      writtenFiles.set(p, content);
-    });
-    vi.spyOn(native, "createDir").mockResolvedValue(
-      undefined as unknown as undefined,
-    );
-    vi.spyOn(native, "glob").mockResolvedValue({
-      hits: [{ path: "/workspace/src/auth.ts", rel: "src/auth.ts" }],
-      truncated: false,
-    });
+    const native = await mockNativeTree(writtenFiles);
 
-    // Mock initial read of file
-    const fileContent =
-      "export function authenticateUser(token: string) { return true; }";
-    writtenFiles.set("/workspace/src/auth.ts", fileContent);
-
-    // Initial indexing builds and caches
-    const stats1 = await indexWorkspace("/workspace");
+    const stats1 = await indexWorkspace("/workspace", false, true);
     expect(stats1.files).toBe(1);
     expect(stats1.chunks).toBeGreaterThan(0);
 
@@ -133,28 +156,81 @@ describe("code index persistence and cache", () => {
     expect(cacheFile).toBeDefined();
     expect(cacheFile).toContain("authenticateUser");
 
-    // Clear memory index
     clearIndex();
     expect(getIndexStats().chunks).toBe(0);
 
-    // Second call loads from cache without calling glob
-    const globSpy = vi.spyOn(native, "glob");
-    globSpy.mockClear();
+    // An unchanged tree is served from the cache: the freshness check stats
+    // files, it does not re-read their contents.
+    const readSpy = vi.spyOn(native, "readFile");
+    readSpy.mockClear();
 
     const stats2 = await indexWorkspace("/workspace");
     expect(stats2.files).toBe(1);
     expect(stats2.chunks).toBe(stats1.chunks);
-    expect(globSpy).not.toHaveBeenCalled();
+    expect(readSpy).not.toHaveBeenCalledWith("/workspace/src/auth.ts");
 
-    // Forced reindex bypasses cache and calls glob
-    const stats3 = await indexWorkspace("/workspace", true);
-    expect(stats3.files).toBe(1);
-    expect(globSpy).toHaveBeenCalled();
-
-    // Verify search works on loaded index
     const results = searchCode("authenticateUser");
     expect(results.length).toBeGreaterThan(0);
     expect(results[0].path).toBe("/workspace/src/auth.ts");
   });
-});
 
+  it("rebuilds instead of trusting a cache whose files changed", async () => {
+    const writtenFiles = new Map<string, string>();
+    const native = await mockNativeTree(writtenFiles);
+
+    await indexWorkspace("/workspace", false, true);
+    expect(writtenFiles.has(`/workspace/${CODE_INDEX_CACHE_REL_PATH}`)).toBe(
+      true,
+    );
+
+    clearIndex();
+
+    // Same path, new mtime and size: the cached chunks describe a file that no
+    // longer exists in that shape, so they must not answer a search.
+    vi.mocked(native.glob).mockResolvedValue({
+      hits: [
+        {
+          path: "/workspace/src/auth.ts",
+          rel: "src/auth.ts",
+          mtime: 2000,
+          size: FILE_CONTENT.length + 10,
+        },
+      ],
+      truncated: false,
+    });
+
+    const readSpy = vi.spyOn(native, "readFile");
+    readSpy.mockClear();
+
+    const stats = await indexWorkspace("/workspace");
+    expect(stats.files).toBe(1);
+    expect(readSpy).toHaveBeenCalledWith("/workspace/src/auth.ts");
+  });
+
+  it("writes a cache only for the workspace root", async () => {
+    const writtenFiles = new Map<string, string>();
+    const native = await mockNativeTree(writtenFiles);
+    vi.mocked(native.glob).mockResolvedValue({
+      hits: [
+        {
+          path: "/other-checkout/src/auth.ts",
+          rel: "src/auth.ts",
+          mtime: 1000,
+          size: FILE_CONTENT.length,
+        },
+      ],
+      truncated: false,
+    });
+    writtenFiles.set("/other-checkout/src/auth.ts", FILE_CONTENT);
+
+    await indexWorkspace("/other-checkout");
+    expect(
+      writtenFiles.has(`/other-checkout/${CODE_INDEX_CACHE_REL_PATH}`),
+    ).toBe(false);
+
+    await indexWorkspace("/other-checkout", false, true);
+    expect(
+      writtenFiles.has(`/other-checkout/${CODE_INDEX_CACHE_REL_PATH}`),
+    ).toBe(true);
+  });
+});

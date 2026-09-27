@@ -219,6 +219,7 @@ describe("repairModelMessageSequence", () => {
     expect(res[2].role).toBe("tool");
     const toolMsg = res[2];
     expect(Array.isArray(toolMsg.content)).toBe(true);
+    // biome-ignore lint/suspicious/noExplicitAny: reading a dynamic tool-message part list in a test
     const parts = toolMsg.content as any[];
     expect(parts).toHaveLength(1);
     expect(parts[0].type).toBe("tool-result");
@@ -246,6 +247,7 @@ describe("repairModelMessageSequence", () => {
     const res = repairModelMessageSequence(input, { preserveTrailingApproval: true });
     expect(res).toHaveLength(3);
     const toolMsg = res[2];
+    // biome-ignore lint/suspicious/noExplicitAny: reading a dynamic tool-message part list in a test
     const parts = toolMsg.content as any[];
     expect(parts).toHaveLength(1);
     expect(parts[0].type).toBe("tool-approval-response");
@@ -271,6 +273,7 @@ describe("repairModelMessageSequence", () => {
     const res = repairModelMessageSequence(input, { preserveTrailingApproval: false });
     expect(res).toHaveLength(3);
     const toolMsg = res[2];
+    // biome-ignore lint/suspicious/noExplicitAny: reading a dynamic tool-message part list in a test
     const parts = toolMsg.content as any[];
     expect(parts).toHaveLength(1);
     expect(parts[0].type).toBe("tool-result");

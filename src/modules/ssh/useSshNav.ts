@@ -31,6 +31,7 @@ export function useSshNav(followRoot: string | null, sessionId: number | null) {
   const [nav, setNav] = useState<Nav>({ stack: [], i: -1 });
 
   // New session (or disconnect) drops manual history back to follow-terminal.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: sessionId is the reset trigger documented above; the body reads no session state
   useEffect(() => {
     setNav({ stack: [], i: -1 });
   }, [sessionId]);

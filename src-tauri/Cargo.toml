@@ -129,8 +129,8 @@ tauri-plugin-window-state = "2"
 incremental = true
 
 [profile.release]
-codegen-units = 16
+codegen-units = 1
 lto = "thin"
-opt-level = 1
+opt-level = 3
 panic = "unwind"
-strip = false
+strip = true

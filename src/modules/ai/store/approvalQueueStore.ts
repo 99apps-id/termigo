@@ -57,7 +57,7 @@ export async function cleanupStaleApprovals(): Promise<number> {
  * forever if the app stays open without a restart. */
 let periodicStaleCleanupId: number | null = null;
 
-export function startPeriodicStaleApprovalCleanup(): (() => void) | void {
+export function startPeriodicStaleApprovalCleanup(): (() => void) | undefined {
   if (typeof window === "undefined") return;
   // Idempotent on purpose: the caller keeps only the latest stopper, so a second
   // start would leave the previous interval running with no way to clear it.

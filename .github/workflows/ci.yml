@@ -140,11 +140,10 @@ jobs:
 
   # End-to-end smoke: boot the REAL app via tauri-driver + WebdriverIO and check
   # it starts, mounts the UI and spawns a terminal — the integration path unit
-  # tests can't reach. Advisory for now (continue-on-error) because the harness
-  # is new; promote it to a required check once it has proven stable.
+  # tests can't reach. Required: failing to boot is the one regression no unit
+  # test can catch, so this job has to be able to fail the workflow.
   e2e:
     runs-on: ubuntu-22.04
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v7
 

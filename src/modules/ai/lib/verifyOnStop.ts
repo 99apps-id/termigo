@@ -75,6 +75,25 @@ export function isNonCodePath(raw: string): boolean {
   return NON_CODE_VERIFY_FILENAMES.has(lower);
 }
 
+/**
+ * Whether a finished run ended cleanly enough for the verify-on-stop gate.
+ *
+ * Both halves are required. A watchdog stall (the model went silent, or a tool
+ * outlived its budget) aborts the run WITHOUT naming a stop reason, so reading
+ * a null `stopReason` as "the model believed it was done" started a
+ * verification run on top of the error card the abort had just raised, which is
+ * the opposite of stopping. The other gates (the preference, the evidence
+ * ledger, the nudge budget) stay in the runtime, where their state lives.
+ *
+ * Pure so the policy is asserted by a test rather than observed in the field.
+ */
+export function verifyGateApplies(info: {
+  stopReason: string | null;
+  aborted: boolean;
+}): boolean {
+  return info.stopReason === null && !info.aborted;
+}
+
 /** Per-run verification state. Immutable updates keep it testable. */
 export type VerifyLedger = {
   /** Code files edited this run, in first-touch order, deduplicated. */

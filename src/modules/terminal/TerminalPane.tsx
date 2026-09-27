@@ -79,6 +79,7 @@ export const TerminalPane = memo(
       onTitle: (t) => onTitle?.(leafId, t),
     });
 
+    // biome-ignore lint/correctness/useExhaustiveDependencies: the container theme class changes with mode/theme, so both are the re-apply triggers for the xterm theme
     useEffect(() => {
       // Defer one frame so CSS-variable token resolution sees the new class.
       const id = requestAnimationFrame(() => session.applyTheme());

@@ -174,7 +174,7 @@ fn search_tree(
     });
 
     let final_hits = Arc::try_unwrap(hits)
-        .map(|m| m.into_inner().unwrap())
+        .map(|m| m.into_inner().unwrap_or_else(|e| e.into_inner()))
         .unwrap_or_default();
 
     GrepResponse {
@@ -389,12 +389,31 @@ pub async fn fs_grep_interactive(
 pub struct GlobHit {
     pub path: String,
     pub rel: String,
+    /// Modification time in Unix milliseconds, `0` when the platform did not
+    /// report one. Carried so callers can fingerprint a tree without a second
+    /// stat round trip per file: the code index uses it to tell a reusable
+    /// index from a stale one, and `compare_trees` uses it to find the files
+    /// that actually differ between two checkouts.
+    pub mtime: u64,
+    /// File size in bytes, paired with `mtime` for the same fingerprint.
+    pub size: u64,
 }
 
 #[derive(Serialize)]
 pub struct GlobResponse {
     pub hits: Vec<GlobHit>,
     pub truncated: bool,
+}
+
+/// Unix milliseconds, `0` when the platform reports none. Same encoding as
+/// `fs::file::mtime_millis`, so a glob fingerprint compares byte for byte
+/// against the stat and read-dir surfaces.
+fn mtime_millis(meta: &std::fs::Metadata) -> u64 {
+    meta.modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 // Async: a recursive filename walk must not block the UI thread.
@@ -474,9 +493,15 @@ pub fn fs_glob_blocking(
         if !set.is_match(&rel) {
             continue;
         }
+        let meta = match dent.metadata() {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
         hits.push(GlobHit {
             path: display_path(path, &root_path, &root, &workspace),
             rel,
+            mtime: mtime_millis(&meta),
+            size: meta.len(),
         });
     }
 
@@ -593,5 +618,28 @@ mod tests {
         assert_eq!(res.hits[0].line, 1);
         assert_eq!(res.hits[1].line, 2);
         assert_eq!(res.files_scanned, 1);
+    }
+
+    #[test]
+    fn fs_glob_blocking_reports_size_and_mtime_for_fingerprinting() {
+        let dir = tempfile::tempdir().unwrap();
+        let body = "fn main() {}\n";
+        std::fs::write(dir.path().join("sample.rs"), body).unwrap();
+
+        let res = fs_glob_blocking(
+            "**/*.rs".into(),
+            dir.path().to_string_lossy().to_string(),
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(res.hits.len(), 1);
+        assert_eq!(res.hits[0].rel, "sample.rs");
+        assert_eq!(res.hits[0].size, body.len() as u64);
+        assert!(
+            res.hits[0].mtime > 0,
+            "a file written on disk carries a real mtime, so a cache keyed on it can be invalidated"
+        );
     }
 }

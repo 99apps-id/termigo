@@ -209,7 +209,7 @@ export async function buildGitDiffSummary(): Promise<string> {
   try {
     const { native } = await import("../ai/lib/native");
     const snap = await native.gitPanelSnapshot(".").catch(() => null);
-    if (!snap || !snap.status) {
+    if (!snap?.status) {
       return "No active git repository found or working tree is clean.";
     }
     const changed = snap.status.changedFiles ?? [];

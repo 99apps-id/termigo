@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { buildGitDiffSummary, HELP } from "./telegramCommands";
 
 describe("telegramCommands git diff integration", () => {

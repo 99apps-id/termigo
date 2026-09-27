@@ -186,6 +186,44 @@ export function standDownRunning(items: readonly Todo[]): Todo[] {
   );
 }
 
+/**
+ * Whether a run that no longer looks active should stand its `in_progress`
+ * todo down.
+ *
+ * "No longer looks active" is not the same as "stopped", and treating the two
+ * as one erased the agent's own marker mid-task. Every automatic continuation
+ * - a step-cap continue, a verification nudge, an overflow resume - holds the
+ * run busy in the store (`status: "thinking"`) while the SDK stream is briefly
+ * idle between rounds, and the old test looked only at the SDK. So at each
+ * round boundary the item the agent was actively working on was demoted to
+ * `pending`, after which the HUD derived the first pending line as "up next":
+ * a guess with the same visual weight as a real marker, on a run that was
+ * still going. It also fought the model's bookkeeping, because the per-step
+ * todo block it reads back then said `pending` for work in progress.
+ *
+ * All four inputs matter: the SDK can be idle while the store is not (the
+ * continuation window), the store can be idle while approvals are pending, and
+ * an approval resume is a run that has not stopped either.
+ *
+ * Pure so the policy is asserted by a test rather than observed in the field.
+ */
+export function standDownApplies(input: {
+  /** The SDK reports the chat as submitted or streaming. */
+  sdkActive: boolean;
+  /** Tool calls waiting on the user. */
+  approvalsPending: number;
+  /** The transcript's last message is an answered approval being resumed. */
+  resumingApproval: boolean;
+  /** The store reports the run as busy: thinking, streaming or awaiting. */
+  runBusy: boolean;
+}): boolean {
+  if (input.sdkActive) return false;
+  if (input.approvalsPending > 0) return false;
+  if (input.resumingApproval) return false;
+  if (input.runBusy) return false;
+  return true;
+}
+
 export async function loadTodos(sessionId: string): Promise<TodoRecord> {
   return parseStoredTodos(await store.get(todosKey(sessionId)));
 }

@@ -61,19 +61,24 @@ describe("step compaction sequence validity", () => {
     for (let i = 0; i < nextMessages.length; i++) {
       const m = nextMessages[i];
       if (m.role === "assistant" && Array.isArray(m.content)) {
+        // biome-ignore lint/suspicious/noExplicitAny: reading dynamic model-message parts in a repro test
         const calls = m.content.filter((p: any) => p.type === "tool-call");
         if (calls.length > 0) {
+          // biome-ignore lint/suspicious/noExplicitAny: reading dynamic model-message parts in a repro test
           const toolResults: any[] = [];
           let j = i + 1;
           while (j < nextMessages.length && nextMessages[j].role === "tool") {
             const tm = nextMessages[j];
             if (Array.isArray(tm.content)) {
+              // biome-ignore lint/suspicious/noExplicitAny: reading dynamic model-message parts in a repro test
               toolResults.push(...tm.content.filter((p: any) => p.type === "tool-result"));
             }
             j++;
           }
 
+          // biome-ignore lint/suspicious/noExplicitAny: reading dynamic model-message parts in a repro test
           const callIds = calls.map((c: any) => c.toolCallId);
+          // biome-ignore lint/suspicious/noExplicitAny: reading dynamic model-message parts in a repro test
           const resultCallIds = new Set(toolResults.map((r: any) => r.toolCallId));
           const missing = callIds.filter((id: string) => !resultCallIds.has(id));
 

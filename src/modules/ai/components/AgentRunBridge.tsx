@@ -7,6 +7,7 @@ import { summarizeInput } from "../lib/approvalQueue";
 import { native } from "../lib/native";
 import { checkReadable } from "../lib/security";
 import { isResumingApproval } from "../lib/transport";
+import { standDownApplies } from "../lib/todos";
 import { getOrCreateChat } from "../store/chatRuntime";
 import {
   type AgentRunStatus,
@@ -191,18 +192,33 @@ function Bridge({
   // and nothing ever revisits it - this app's own store had five frozen that
   // way. Stand them down once the run is genuinely over.
   //
-  // "Genuinely" is the hard part. The moment an approval is answered,
-  // `approvalsPending` drops to zero and the chat reads as ready, a beat before
-  // the auto-send resumes the run. Standing down there would fight the agent
-  // mid-task, so the same check the transport uses to decide whether a resume
-  // is in flight decides it here.
+  // "Genuinely" is the hard part, and the first two tests below were not
+  // enough for it. The moment an approval is answered, `approvalsPending`
+  // drops to zero and the chat reads as ready a beat before the auto-send
+  // resumes the run; that case is what `isResumingApproval` catches. An
+  // automatic continuation is the same shape without an approval: the SDK
+  // goes idle between rounds while the store still holds the run busy, so
+  // `runStatus` is the third witness. See `standDownApplies` for what went
+  // wrong without it - the agent's own marker was demoted at every round
+  // boundary.
   useEffect(() => {
     if (!sessionId) return;
-    if (status === "submitted" || status === "streaming") return;
-    if (approvalsPending > 0) return;
-    if (isResumingApproval(messages)) return;
+    const runBusy =
+      runStatus === "thinking" ||
+      runStatus === "streaming" ||
+      runStatus === "awaiting-approval";
+    if (
+      !standDownApplies({
+        sdkActive: status === "submitted" || status === "streaming",
+        approvalsPending,
+        resumingApproval: isResumingApproval(messages),
+        runBusy,
+      })
+    ) {
+      return;
+    }
     useTodosStore.getState().runStopped(sessionId);
-  }, [sessionId, status, approvalsPending, messages]);
+  }, [sessionId, status, approvalsPending, messages, runStatus]);
 
   useEffect(() => {
     if (approvalsPending > 0) openMini();

@@ -61,7 +61,7 @@ export function pendingApprovalIds(messages: readonly unknown[]): string[] {
     const turn = message as
       | { role?: string; parts?: Array<Record<string, unknown>> }
       | undefined;
-    if (!turn || turn.role !== "assistant" || !Array.isArray(turn.parts)) {
+    if (turn?.role !== "assistant" || !Array.isArray(turn.parts)) {
       continue;
     }
     for (const part of turn.parts) {

@@ -56,7 +56,7 @@ import {
   TOOL_SEARCH_HINT,
   type ToolIndexEntry,
 } from "../tools/toolSearch";
-import { buildTools, type ToolContext } from "../tools/tools";
+import { buildTools, withToolHeartbeat, type ToolContext } from "../tools/tools";
 import { isResumingApproval } from "./approvalResume";
 import { getChatGptAccess } from "./chatgptAuth";
 import {
@@ -98,6 +98,7 @@ import {
   remainingSilenceMs,
   resetRunActivity,
   stallBudgetMs,
+  TOOL_RESULT_DELIVERY_MS,
   watchdogDirective,
 } from "./streamWatchdog";
 import { formatTodoStatusBlock } from "./todos";
@@ -766,7 +767,7 @@ export function isStepCount<T extends ToolSet = ToolSet>(
   if (typeof sdk.stepCountIs === "function") {
     return sdk.stepCountIs(stepCount);
   }
-  return ({ steps }) => steps.length === stepCount;
+  return ({ steps }) => steps.length >= stepCount;
 }
 
 export const stepCountIs = isStepCount;
@@ -1019,6 +1020,14 @@ export type RunAgentOptions = {
   onFinishMeta?: (info: {
     stopReason: AgentStopReason | null;
     finishReason: string;
+    /**
+     * Whether the run was torn down by an abort signal rather than ending on
+     * its own. A watchdog stall (model silent, tool over budget) aborts the
+     * run without setting `stopReason`, so consumers that mean "the model
+     * finished" - the verify-on-stop nudge is one - need this to tell the two
+     * apart instead of reading a null `stopReason` as a clean finish.
+     */
+    aborted: boolean;
     /** Per-run performance summary for the on-screen diagnostics view. */
     metrics: RunDiagnostics;
     /** Passive verification ledger for the verify-on-stop gate (see
@@ -1226,9 +1235,19 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // legitimate run (e.g. a slow scan, a sub-agent fan-out) is not killed.
   const abortController = new AbortController();
   if (opts.abortSignal) {
-    opts.abortSignal.addEventListener("abort", () => abortController.abort(), {
-      once: true,
-    });
+    if (opts.abortSignal.aborted) {
+      // A stop that landed BEFORE this run was constructed. The listener below
+      // would never fire, so the internal signal would stay live and the run
+      // would dispatch one billable model call before the stop condition
+      // noticed at the first step boundary. (runSubagent already checks this.)
+      abortController.abort(opts.abortSignal.reason);
+    } else {
+      opts.abortSignal.addEventListener(
+        "abort",
+        () => abortController.abort(),
+        { once: true },
+      );
+    }
   }
   // Silence budget before the run is declared wedged. When resuming approval,
   // step 0 executes the approved tool BEFORE the model is called, so the budget
@@ -1255,9 +1274,21 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // After a tool result is fed back to the model, the model may still go silent
   // while processing it. Track that delivery gap so a hung model turn after
   // tool completion still aborts instead of leaving the run in "streaming".
-  const MAX_TOOL_RESULT_DELIVERY_MS = 60_000;
+  const MAX_TOOL_RESULT_DELIVERY_MS = TOOL_RESULT_DELIVERY_MS;
   let toolResultDeliveryTimer: ReturnType<typeof setTimeout> | null = null;
-  const clearFirstStepTimer = (): void => {
+  /**
+   * Stop the model-silence watchdog and its step notice, leaving the tool
+   * guards alone.
+   *
+   * Split out because the model watchdog is re-armed on EVERY `tool-result`,
+   * and in a step with parallel calls the other call is still executing under
+   * `toolExecutionTimer`. Clearing everything there killed that guard
+   * mid-flight and left the surviving call with only the 90s model budget, so
+   * a tool that had declared its own longer budget could still be aborted with
+   * `no stream progress for 90s`. Only a step boundary or the end of the run
+   * ends a tool guard.
+   */
+  const clearModelWatchdog = (): void => {
     if (firstStepTimer) {
       clearTimeout(firstStepTimer);
       firstStepTimer = null;
@@ -1266,6 +1297,10 @@ export async function runAgentStream(opts: RunAgentOptions) {
       clearTimeout(stallNotice);
       stallNotice = null;
     }
+  };
+  /** Stop every timer this run owns. */
+  const clearFirstStepTimer = (): void => {
+    clearModelWatchdog();
     if (toolExecutionTimer) {
       clearTimeout(toolExecutionTimer);
       toolExecutionTimer = null;
@@ -1286,7 +1321,12 @@ export async function runAgentStream(opts: RunAgentOptions) {
    * the provider then stalled the run hung with no watchdog at all.
    */
   const armModelWatchdog = (): void => {
-    clearFirstStepTimer();
+    // A chunk or step callback that lands AFTER the abort must not install a
+    // timer: the abort listener is `once`, so it has already fired and nothing
+    // would ever clear the new timer. It would then fire its abort (and log a
+    // stale `no stream progress`) against a run that is already finalized.
+    if (abortController.signal.aborted) return;
+    clearModelWatchdog();
     // The timer only asks the question; the shared clock answers it. A run that
     // made progress since the arm (a chunk, a tool's heartbeat) gets the rest of
     // its budget instead of being aborted, so no path that re-arms the timer
@@ -1514,10 +1554,17 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // Resolved before the toolset is built: the unknown-tool fallback advertises
   // the discovery tool only when this run actually defers schemas.
   const toolSearchOn = opts.toolSearchEnabled === true;
-  const rawTools = {
+  // MCP, extension and custom tools are built outside `buildTools`, so they
+  // missed the activity heartbeat that keeps a long tool from reading as a
+  // stall; wrapped once here rather than in three places (see
+  // withToolHeartbeat).
+  const externalTools = withToolHeartbeat({
     ...(opts.mcpTools ?? {}),
     ...(opts.extensionTools ?? {}),
     ...(opts.customTools ?? {}),
+  });
+  const rawTools = {
+    ...externalTools,
     ...buildTools(
       {
         ...opts.toolContext,
@@ -1907,7 +1954,13 @@ export async function runAgentStream(opts: RunAgentOptions) {
       // model that goes silent after a tool result hangs on the generic
       // watchdog instead of the dedicated 60s delivery timeout.
       if (chunk.type === "tool-result") {
-        clearFirstStepTimer();
+        // Replace the delivery timer rather than stack another one, and re-arm
+        // only the MODEL watchdog: a sibling tool from the same step may still
+        // be running under its own execution guard (see clearModelWatchdog).
+        if (toolResultDeliveryTimer) {
+          clearTimeout(toolResultDeliveryTimer);
+          toolResultDeliveryTimer = null;
+        }
         armModelWatchdog();
         const checkToolResultDelivery = (): void => {
           // Activity-aware, not unconditional: a sibling tool from the same
@@ -1946,11 +1999,17 @@ export async function runAgentStream(opts: RunAgentOptions) {
       const directive = watchdogDirective(chunk.type);
       if (directive === "rearm") {
         armModelWatchdog();
+        // The model is actively producing output, so the delivery wait is over.
+        if (toolResultDeliveryTimer) {
+          clearTimeout(toolResultDeliveryTimer);
+          toolResultDeliveryTimer = null;
+        }
       } else if (directive === "disarm") {
         // The model answered with a tool call, so the delivery gap is over
         // and the execution guard below owns the wait from here. Without this
         // a tool that legitimately runs past the delivery budget is aborted
         // with "no model output", even though the model did respond.
+        clearFirstStepTimer();
         if (toolResultDeliveryTimer) {
           clearTimeout(toolResultDeliveryTimer);
           toolResultDeliveryTimer = null;
@@ -2161,6 +2220,11 @@ export async function runAgentStream(opts: RunAgentOptions) {
     onFinish: (result) => {
       clearFirstStepTimer();
       opts.onStep?.(null);
+      // A watchdog abort reaches `onFinish` too (the SDK still reports the
+      // steps it saw), and it leaves `stopReason` null. Reading that null as
+      // "the model finished" is what let an aborted run trigger a
+      // verify-on-stop follow-up, so the abort state is carried explicitly.
+      const aborted = abortController.signal.aborted;
       const finishReason =
         (result as { finishReason?: string } | undefined)?.finishReason ?? "";
       // The predicates fire before the final step is counted in some SDK
@@ -2168,6 +2232,13 @@ export async function runAgentStream(opts: RunAgentOptions) {
       // for a run that plainly ran out of budget.
       const settledStop =
         stopReason ?? (stepsSeen >= stepBudget ? "step-cap" : null);
+      // A run is a CLEAN finish only when nothing else ended it. A guard that
+      // named a stop reason and an abort (watchdog stall, or a user stop) both
+      // mean somebody else stopped the run. Reading a null stopReason as a
+      // clean finish recorded every watchdog abort as a success: "completed"
+      // in the trajectory timeline, `success: true` on the harness frontier,
+      // and its started todos force-completed.
+      const cleanFinish = !settledStop && !aborted;
       const kb = (n: number) => (n / 1024).toFixed(1);
       const cachePct =
         runInput > 0 ? Math.round((runCached / runInput) * 100) : 0;
@@ -2197,6 +2268,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
       opts.onFinishMeta?.({
         stopReason: settledStop,
         finishReason,
+        aborted,
         metrics,
         verify: {
           changedCodePaths: verifyLedger.changedCodePaths,
@@ -2207,7 +2279,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
       // Close out the trajectory run. An early stop by a guard is a failed run in
       // the timeline's vocabulary; a clean finish is completed.
       useTrajectoryStore.getState().finishRun({
-        status: settledStop ? "failed" : "completed",
+        status: cleanFinish ? "completed" : "failed",
         totalTokens: runInput + runOutput,
         totalCostUsd: runCost > 0 ? runCost : undefined,
         finishReason,
@@ -2222,7 +2294,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
       // plan out of scope. This is the fallback BatikCode's todo tracking relies
       // on: the model is nudged every step, and when it still forgets, the clean
       // finish closes the gap rather than leaving a stale checklist.
-      if (!settledStop) {
+      if (cleanFinish) {
         const sessionId = opts.toolContext.getSessionId();
         if (sessionId) useTodosStore.getState().completeStarted(sessionId);
       }
@@ -2232,7 +2304,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
       if (workspaceRoot) {
         fireAndForget(
           recordRun(workspaceRoot, profile.id, {
-            success: !settledStop,
+            success: cleanFinish,
             steps: stepsSeen,
             inputTokens: runInput,
             outputTokens: runOutput,
@@ -2269,7 +2341,13 @@ export async function runAgentStream(opts: RunAgentOptions) {
             // an inexact total says so instead of looking precise.
             `${toolPayload.unmeasured > 0 ? ` (${toolPayload.unmeasured} unmeasured)` : ""}) | ` +
             `tokens ${runInput}in ${runOutput}out, cache ${cachePct}% | ` +
-            `steps ${stepsSeen}/${stepBudget} | stop ${settledStop ?? (finishReason || "done")} | ` +
+            // An aborted run reports the SDK's `finishReason` (usually
+            // "tool-calls", because the run died mid-tool-loop) when no guard
+            // named the stop. That reads like a normal tool round in the log,
+            // so name the abort instead.
+            `steps ${stepsSeen}/${stepBudget} | stop ${
+              settledStop ?? (aborted ? "aborted" : finishReason || "done")
+            } | ` +
             `${modelId}`,
         ),
         "run-summary-log",

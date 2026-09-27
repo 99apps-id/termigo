@@ -6,6 +6,8 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
+use crate::modules::fs::file::canonicalize_with_reparse_fallback;
+
 // Short TTL keeps the auth-check TOCTOU window tight while still coalescing the
 // burst of canonicalize calls within a single panel refresh (~100ms).
 const CANONICAL_TTL: Duration = Duration::from_secs(1);
@@ -214,7 +216,8 @@ pub fn authorize_spawn_cwd(
     };
     let resolved = resolve_path(cwd, workspace);
     let canonical =
-        std::fs::canonicalize(&resolved).map_err(|e| format!("cwd not accessible: {e}"))?;
+        canonicalize_with_reparse_fallback(&resolved)
+            .map_err(|e| format!("cwd not accessible: {e}"))?;
     if !canonical.is_dir() {
         return Err(format!("cwd is not a directory: {}", canonical.display()));
     }
@@ -240,7 +243,8 @@ pub fn authorize_user_spawn_cwd(
     };
     let resolved = resolve_path(cwd, workspace);
     let canonical =
-        std::fs::canonicalize(&resolved).map_err(|e| format!("cwd not accessible: {e}"))?;
+        canonicalize_with_reparse_fallback(&resolved)
+            .map_err(|e| format!("cwd not accessible: {e}"))?;
     if !canonical.is_dir() {
         return Err(format!("cwd is not a directory: {}", canonical.display()));
     }

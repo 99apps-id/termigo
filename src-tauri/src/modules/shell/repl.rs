@@ -162,7 +162,11 @@ impl ReplProc {
             if self.exited.load(Ordering::Acquire) {
                 // One last drain: the reader threads may still have been
                 // flushing when the child ended.
-                let (tail, last_offset, _) = self.buffer.lock().unwrap_or_else(|e| e.into_inner()).read_from(offset);
+                let (tail, last_offset, _) = self
+                    .buffer
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .read_from(offset);
                 collected.extend_from_slice(&tail);
                 let text = String::from_utf8_lossy(&collected).into_owned();
                 let matched = match until {
@@ -281,7 +285,11 @@ pub fn spawn(
             loop {
                 match pipe.read(&mut buf) {
                     Ok(0) => break,
-                    Ok(n) => proc_ref.buffer.lock().unwrap_or_else(|e| e.into_inner()).push(&buf[..n]),
+                    Ok(n) => proc_ref
+                        .buffer
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .push(&buf[..n]),
                     Err(_) => break,
                 }
             }
@@ -308,6 +316,17 @@ pub fn spawn(
     Ok(proc)
 }
 
+/// How long a test that drives a real process waits for its first output.
+///
+/// These tests assert behaviour (output arrives, an exit is noticed, a write
+/// after exit fails), never latency, but they spawn cmd/PowerShell, and a cold
+/// start on a machine already running other heavy jobs can take longer than the
+/// 10s that used to be enough here. When that happened the suite reported three
+/// unrelated failures and read as a regression. The 600ms case in `tests` is the
+/// one deliberately exercising the timeout path, so it keeps its own value.
+#[cfg(test)]
+const TEST_SPAWN_TIMEOUT: Duration = Duration::from_secs(30);
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -331,7 +350,7 @@ mod tests {
     #[test]
     fn captures_what_the_process_prints_before_any_input() {
         let proc = start("echo hello-from-repl");
-        let turn = proc.wait_for(0, Some("hello-from-repl"), Duration::from_secs(10));
+        let turn = proc.wait_for(0, Some("hello-from-repl"), TEST_SPAWN_TIMEOUT);
         assert!(turn.matched, "output was: {:?}", turn.output);
         assert!(turn.output.contains("hello-from-repl"));
     }
@@ -341,13 +360,17 @@ mod tests {
     #[test]
     fn a_line_gets_a_reply_and_the_process_stays_alive() {
         let proc = start(ECHO_LOOP);
-        let first = proc.wait_for(0, Some("ready> "), Duration::from_secs(10));
+        let first = proc.wait_for(0, Some("ready> "), TEST_SPAWN_TIMEOUT);
         assert!(first.matched, "no initial prompt: {:?}", first.output);
 
         proc.send_line("ping").expect("send");
-        let turn = proc.wait_for(first.next_offset, Some("ready> "), Duration::from_secs(10));
+        let turn = proc.wait_for(first.next_offset, Some("ready> "), TEST_SPAWN_TIMEOUT);
         assert!(turn.matched, "no prompt after input: {:?}", turn.output);
-        assert!(turn.output.contains("GOT:ping"), "output: {:?}", turn.output);
+        assert!(
+            turn.output.contains("GOT:ping"),
+            "output: {:?}",
+            turn.output
+        );
         assert!(!turn.exited, "the process should still be waiting for more");
     }
 
@@ -356,15 +379,18 @@ mod tests {
     #[test]
     fn a_later_turn_does_not_repeat_an_earlier_one() {
         let proc = start(ECHO_LOOP);
-        let first = proc.wait_for(0, Some("ready> "), Duration::from_secs(10));
+        let first = proc.wait_for(0, Some("ready> "), TEST_SPAWN_TIMEOUT);
         proc.send_line("one").expect("send");
-        let a = proc.wait_for(first.next_offset, Some("ready> "), Duration::from_secs(10));
+        let a = proc.wait_for(first.next_offset, Some("ready> "), TEST_SPAWN_TIMEOUT);
         proc.send_line("two").expect("send");
-        let b = proc.wait_for(a.next_offset, Some("ready> "), Duration::from_secs(10));
+        let b = proc.wait_for(a.next_offset, Some("ready> "), TEST_SPAWN_TIMEOUT);
 
         assert!(a.output.contains("GOT:one"));
         assert!(b.output.contains("GOT:two"));
-        assert!(!b.output.contains("GOT:one"), "second turn repeated the first");
+        assert!(
+            !b.output.contains("GOT:one"),
+            "second turn repeated the first"
+        );
     }
 
     // A timeout is an answer, not a failure: the process may simply still be
@@ -380,7 +406,7 @@ mod tests {
     #[test]
     fn an_exited_process_is_reported_rather_than_waited_on() {
         let proc = start("echo bye");
-        let turn = proc.wait_for(0, Some("NEVER-APPEARS"), Duration::from_secs(10));
+        let turn = proc.wait_for(0, Some("NEVER-APPEARS"), TEST_SPAWN_TIMEOUT);
         assert!(turn.exited, "should have noticed the exit");
         assert!(turn.output.contains("bye"));
     }
@@ -388,7 +414,7 @@ mod tests {
     #[test]
     fn writing_to_a_finished_process_says_so_instead_of_failing_silently() {
         let proc = start("echo bye");
-        let _ = proc.wait_for(0, None, Duration::from_secs(10));
+        let _ = proc.wait_for(0, None, TEST_SPAWN_TIMEOUT);
         let err = proc.send_line("anything").unwrap_err();
         assert!(err.contains("exited"), "unexpected error: {err}");
     }
@@ -419,7 +445,7 @@ mod cap_tests {
     fn finished() -> Arc<ReplProc> {
         let p = spawn("echo done".into(), None, WorkspaceEnv::Local).expect("spawn");
         // Wait for the exit watcher rather than sleeping a fixed time.
-        let _ = p.wait_for(0, None, Duration::from_secs(10));
+        let _ = p.wait_for(0, None, TEST_SPAWN_TIMEOUT);
         p
     }
 
@@ -441,7 +467,10 @@ mod cap_tests {
         #[cfg(windows)]
         const IDLE: &str = "Start-Sleep -Seconds 30";
         for i in 0..MAX_LIVE as u32 {
-            map.insert(i, spawn(IDLE.into(), None, WorkspaceEnv::Local).expect("spawn"));
+            map.insert(
+                i,
+                spawn(IDLE.into(), None, WorkspaceEnv::Local).expect("spawn"),
+            );
         }
         assert!(admit(&mut map).is_err(), "the cap should refuse a ninth");
         for p in map.values() {

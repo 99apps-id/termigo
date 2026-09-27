@@ -102,14 +102,33 @@ pub async fn pty_open(
         .unwrap_or(false);
     if exited {
         if let Some(s) = state.take(id) {
-            thread::Builder::new()
-                .name(format!("termigo-pty-drop-{id}"))
-                .spawn(move || session::drop_session(s))
-                .expect("spawn pty drop thread");
+            reap_session(id, s);
         }
     }
     log::info!("pty opened id={id} cols={cols} rows={rows}");
     Ok(id)
+}
+
+/// Drop a PTY session off the command thread: `drop_session` waits for the
+/// child to exit, and that wait must not block the caller. A failed thread
+/// spawn is no reason to panic in the cleanup path, so fall back to an inline
+/// drop (`drop_session` is idempotent, so a racing waiter stays harmless).
+fn reap_session(id: u64, session: Arc<Session>) {
+    let for_thread = Arc::clone(&session);
+    let spawned = thread::Builder::new()
+        .name(format!("termigo-pty-drop-{id}"))
+        .spawn(move || {
+            let t0 = std::time::Instant::now();
+            session::drop_session(for_thread);
+            log::info!(
+                "pty session id={id} dropped in {}ms",
+                t0.elapsed().as_millis()
+            );
+        });
+    if let Err(e) = spawned {
+        log::warn!("pty id={id}: drop thread spawn failed ({e}); dropping inline");
+        session::drop_session(session);
+    }
 }
 
 const MAX_INPUT_BYTES: usize = 4 * 1024 * 1024;
@@ -213,17 +232,7 @@ pub fn pty_close(state: tauri::State<PtyState>, id: u64) -> Result<(), String> {
             log::debug!("pty_close: kill id={id} returned {e}");
         }
         log::info!("pty closed id={id}");
-        thread::Builder::new()
-            .name(format!("termigo-pty-drop-{id}"))
-            .spawn(move || {
-                let t0 = std::time::Instant::now();
-                session::drop_session(s);
-                log::info!(
-                    "pty session id={id} dropped in {}ms",
-                    t0.elapsed().as_millis()
-                );
-            })
-            .expect("spawn pty drop thread");
+        reap_session(id, s);
     } else {
         log::debug!("pty_close: unknown id={id}");
     }
@@ -323,10 +332,7 @@ pub fn pty_close_all(state: tauri::State<PtyState>) -> Result<usize, String> {
         if let Err(e) = s.killer.lock().unwrap_or_else(|e| e.into_inner()).kill() {
             log::debug!("pty_close_all: kill id={id} returned {e}");
         }
-        thread::Builder::new()
-            .name(format!("termigo-pty-drop-{id}"))
-            .spawn(move || session::drop_session(s))
-            .expect("spawn pty drop thread");
+        reap_session(id, s);
     }
     if count > 0 {
         log::info!("pty_close_all: reaped {count} orphaned session(s)");

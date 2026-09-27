@@ -457,7 +457,7 @@ export async function acquireQuerySession(
       path,
       workspace: currentWorkspaceEnv(),
     }).catch(() => null);
-    if (!result || result.kind !== "text") return null;
+    if (result?.kind !== "text") return null;
     await managed.client.textDocumentDidOpen({
       textDocument: { uri, languageId, version: 1, text: result.content },
     });

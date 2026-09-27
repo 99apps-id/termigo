@@ -37,7 +37,7 @@ export function segmentsFromCwd(cwd: string, home: string | null): Segment[] {
     const driveMatch = WINDOWS_DRIVE.exec(normCwd);
     if (driveMatch) {
       const drive = driveMatch[1];
-      rootSegment = { label: drive, fullPath: drive + "/", isHome: false };
+      rootSegment = { label: drive, fullPath: `${drive}/`, isHome: false };
       tail = driveMatch[2].replace(/^\//, "");
     } else {
       rootSegment = { label: "/", fullPath: "/", isHome: false };
@@ -50,7 +50,7 @@ export function segmentsFromCwd(cwd: string, home: string | null): Segment[] {
 
   let acc = rootSegment.fullPath;
   for (const part of parts) {
-    acc = acc.endsWith("/") ? acc + part : acc + "/" + part;
+    acc = acc.endsWith("/") ? acc + part : `${acc}/${part}`;
     segments.push({ label: part, fullPath: acc, isHome: false });
   }
   return segments;

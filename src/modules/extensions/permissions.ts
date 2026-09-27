@@ -89,7 +89,7 @@ const GLOB_RE_CACHE = new Map<string, RegExp>();
 function globToRegExp(pattern: string): RegExp {
   let re = GLOB_RE_CACHE.get(pattern);
   if (!re) {
-    re = new RegExp("^" + pattern.replace(GLOB_ESCAPE_RE, "\\$&").replace(/\*/g, ".*") + "$");
+    re = new RegExp(`^${pattern.replace(GLOB_ESCAPE_RE, "\\$&").replace(/\*/g, ".*")}$`);
     GLOB_RE_CACHE.set(pattern, re);
   }
   return re;

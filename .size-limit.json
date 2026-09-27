@@ -14,7 +14,13 @@
   {
     "name": "total client JS (all lazy chunks, never loaded at once)",
     "path": ["dist/assets/*.js"],
-    "limit": "4000 KB",
+    "limit": "4.25 MB",
+    "gzip": true
+  },
+  {
+    "name": "total client bundle (JS, CSS, HTML and fonts shipped to the webview)",
+    "path": ["dist/**/*"],
+    "limit": "4.6 MB",
     "gzip": true
   }
 ]

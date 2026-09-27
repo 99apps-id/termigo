@@ -350,7 +350,7 @@ export function buildEditTools(ctx: ToolContext) {
       ),
       needsApproval: true,
       execute: async ({ path, old_string, new_string, replace_all }) => {
-        if (!path || !path.trim()) {
+        if (!path?.trim()) {
           return {
             error:
               "missing `path` - name the file to edit.",
@@ -404,7 +404,7 @@ export function buildEditTools(ctx: ToolContext) {
       ),
       needsApproval: true,
       execute: async ({ path, edits }) => {
-        if (!path || !path.trim()) {
+        if (!path?.trim()) {
           return {
             error:
               "missing `path` - name the file to edit.",

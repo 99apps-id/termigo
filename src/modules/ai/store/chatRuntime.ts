@@ -67,6 +67,7 @@ import {
   buildVerifyNudge,
   isVerifyNudgeParts,
   MAX_VERIFY_NUDGES,
+  verifyGateApplies,
 } from "../lib/verifyOnStop";
 import type { ToolContext } from "../tools/tools";
 import { useAgentsStore } from "./agentsStore";
@@ -539,7 +540,12 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       // A run that actually finished (not an overflow error) means the request
       // fit this time - allow the session to auto-resume on a future overflow
       // instead of exhausting its retry budget permanently.
-      if (fr && fr !== "error") {
+      //
+      // `!info.aborted` is part of "actually finished". A watchdog abort reaches
+      // here reporting the SDK's non-error `finishReason` (usually
+      // "tool-calls"), and crediting the provider as healthy then cleared the
+      // very cooldown that the stall is evidence for.
+      if (fr && fr !== "error" && !info.aborted) {
         overflowAutoResumeCount.delete(sessionId);
         transientRetryCount.delete(sessionId);
         // The provider answered, so clear any cooldown recorded against it. Only
@@ -604,7 +610,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       // gets one bounded follow-up (preference-gated; see requestVerifyNudge).
       // Runs after the step-cap branch so a budget pause continues as before —
       // the gate only applies when the model believed it was done.
-      if (stopReason === null) {
+      if (verifyGateApplies(info)) {
         requestVerifyNudge(sessionId, info.verify);
       }
     },
@@ -1292,7 +1298,7 @@ export function beginEditUserMessage(messageId: string): boolean {
   const messages =
     chats.get(sessionId)?.messages ?? seedMessages.get(sessionId) ?? [];
   const target = messages.find((m) => m.id === messageId);
-  if (!target || target.role !== "user") return false;
+  if (target?.role !== "user") return false;
   useChatStore.getState().beginEdit({ sessionId, messageId });
   return true;
 }

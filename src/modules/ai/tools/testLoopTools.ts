@@ -51,17 +51,28 @@ export function focusTestFile(
 ): { command: string; note: string } {
   const b = base.trim();
   if (!b) return { command: b, note: "no test command configured" };
+  const normalizedFile = file.replace(/\\/g, "/");
   const isVitest = /(^|\s)(vitest|(\S*)vitest)(\s|$)/.test(b);
   const isJest = /(^|\s)jest(\s|$)/.test(b) || /(^|\s)npx jest/.test(b);
   const isPytest = /pytest/.test(b);
 
   if (isVitest || isJest || isPytest) {
     const passWithNoTests = isJest ? " --passWithNoTests" : "";
-    return { command: `${b} ${file}${passWithNoTests}`, note: `focused ${file}` };
+    return { command: `${b} ${normalizedFile}${passWithNoTests}`, note: `focused ${normalizedFile}` };
+  }
+  const isPkgScript = /^(?:pnpm|bun|yarn)(\s+run)?\s+test(\s+--)?$/i.test(b);
+  if (isPkgScript) {
+    const prefix = b.endsWith("--") ? b : `${b}`;
+    return { command: `${prefix} ${normalizedFile}`, note: `focused ${normalizedFile}` };
+  }
+  const isNpmScript = /^npm(\s+run)?\s+test(\s+--)?$/i.test(b);
+  if (isNpmScript) {
+    const prefix = b.endsWith("--") ? b : `${b} --`;
+    return { command: `${prefix} ${normalizedFile}`, note: `focused ${normalizedFile}` };
   }
   if (/\bgo test\b/.test(b)) {
-    const slash = file.lastIndexOf("/");
-    const pkgDir = slash === -1 ? "." : file.slice(0, slash);
+    const slash = normalizedFile.lastIndexOf("/");
+    const pkgDir = slash === -1 ? "." : normalizedFile.slice(0, slash);
     return {
       command: `${b.replace(/(\.\/\.\.\.|\.\.\/\.\.\.|\.\/)/g, "").trim()} ${pkgDir}`,
       note: "scoped to the file's package; no file-level go test filter exists",

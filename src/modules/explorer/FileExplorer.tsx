@@ -120,7 +120,7 @@ function buildRows(
 
   const walk = (parent: string, depth: number, parentIgnored: boolean) => {
     const node = tree.nodes[parent];
-    if (!node || node.status !== "loaded") return;
+    if (node?.status !== "loaded") return;
     for (const entry of node.entries) {
       const path = tree.joinPath(parent, entry.name);
       const isDir = entry.kind === "dir";
@@ -223,6 +223,7 @@ export const FileExplorer = memo(
     const containerRef = useRef<HTMLDivElement>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
 
+    // biome-ignore lint/correctness/useExhaustiveDependencies: tree identity changes every render; the listed fields are the only inputs buildRows reads
     const { rows, entryIndexByPath } = useMemo(() => {
       if (!rootPath) return { rows: [] as Row[], entryIndexByPath: new Map<string, number>() };
       return buildRows(rootPath, tree, lookupGitStatus);
@@ -500,9 +501,11 @@ export const FileExplorer = memo(
     };
 
     return (
+      // biome-ignore lint/a11y/noStaticElementInteractions: the container owns row navigation for the virtualized tree
       <div
         ref={containerRef}
         className="flex h-full flex-col outline-none"
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: the container is the roving focus target for the rows
         tabIndex={0}
         onKeyDown={handleKeyDown}
       >

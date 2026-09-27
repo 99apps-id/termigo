@@ -247,6 +247,7 @@ export function ExtensionSidebarSection({
     const actionHoverPad = hasActions ? actionHoverPadding(item.actions?.length ?? 0) : undefined;
     const onContextMenu = section.onItemContextMenu;
     const rowContent = (
+      // biome-ignore lint/a11y/noStaticElementInteractions: row wrapper; its controls are real <button>s and the context menu is pointer-only
       <div
         // Depth indent is dynamic, so it must be inline.
         // eslint-disable-next-line react/forbid-dom-props
