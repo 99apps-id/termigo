@@ -372,10 +372,14 @@ pub async fn pty_ack_output(
     let Some(session) = session else {
         return Ok(());
     };
+    // Recover a poisoned lock the way every other site in this module does: a
+    // panic while the credit was held must not turn every ack into an error, or
+    // the window never reopens, the flusher parks on a full window for good, and
+    // the reader starts discarding at its own cap.
     session
         .output
         .lock()
-        .map_err(|e| e.to_string())?
+        .unwrap_or_else(|e| e.into_inner())
         .acknowledge(bytes);
     session.output_cv.notify_all();
     Ok(())
