@@ -130,6 +130,51 @@ export const PROJECT_RULE_FILES = [
   "CLAUDE.md",
 ] as const;
 
+/**
+ * Rule files worth reading beyond the exact spellings above, resolved from what
+ * the directory actually contains.
+ *
+ * The list above has to guess spellings, and a guess only works on a filesystem
+ * that resolves case for you. `AGENTS.md` and `agents.md` are both listed
+ * because on Linux they are two files; a third spelling (`Agents.md`, which a
+ * Windows-authored checkout or a hand-typed name produces) is listed by neither
+ * and was therefore invisible - silently, with no error anywhere, because a
+ * failed rule-file read is caught and skipped. Windows hides the whole class of
+ * bug by resolving `Agents.md` to `AGENTS.md` for the caller, which is why this
+ * shows up on Linux and macOS and not there.
+ *
+ * Asking the directory removes the guess. Two deliberate limits:
+ *
+ * - Dot-prefixed names are never returned by `native.readDir`, which hides them
+ *   so agent context cannot pick up `.env` or `.git`. `.termigorules` therefore
+ *   stays an exact-name read in the list above, untouched by this function.
+ * - Only one spelling per family is returned, so a root that has both
+ *   `AGENTS.md` and `agents.md` (two real files on Linux) still yields both,
+ *   while a root with one file yields it once instead of once per listed alias.
+ *   When several non-exact spellings exist the first in sort order wins, so the
+ *   choice does not depend on directory order.
+ */
+export function resolveRuleFiles(entries: readonly string[]): string[] {
+  const byLower = new Map<string, string[]>();
+  for (const entry of entries) {
+    const key = entry.toLowerCase();
+    const seen = byLower.get(key);
+    if (seen) seen.push(entry);
+    else byLower.set(key, [entry]);
+  }
+
+  const out: string[] = [];
+  for (const name of PROJECT_RULE_FILES) {
+    if (name.startsWith(".")) continue;
+    const candidates = byLower.get(name.toLowerCase());
+    if (!candidates || candidates.length === 0) continue;
+    const choice =
+      candidates.find((c) => c === name) ?? [...candidates].sort()[0];
+    if (!out.includes(choice)) out.push(choice);
+  }
+  return out;
+}
+
 export async function readProjectRules(
   workspaceRoot: string | null,
 ): Promise<string | null> {
@@ -138,8 +183,20 @@ export async function readProjectRules(
   if (cached && Date.now() - cached.mtime < 30_000) return cached.content;
 
   const root = workspaceRoot.replace(/\/$/, "");
+  // The exact spellings stay the baseline; a listing only ever adds to them, so
+  // a root whose directory cannot be read still gets the rules it always did.
+  const targets: string[] = [...PROJECT_RULE_FILES];
+  try {
+    const entries = await native.readDir(root);
+    for (const name of resolveRuleFiles(entries.map((e) => e.name))) {
+      if (!targets.includes(name)) targets.push(name);
+    }
+  } catch {
+    // Missing or unauthorized root: the baseline list is the answer.
+  }
+
   const results = await Promise.all(
-    PROJECT_RULE_FILES.map(async (filename) => {
+    targets.map(async (filename) => {
       const path = `${root}/${filename}`;
       try {
         const r = await native.readFile(path);

@@ -1,13 +1,34 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
+import type { DirEntry } from "./native";
+
+vi.mock("./native", () => ({
+  native: { readFile: vi.fn(), readDir: vi.fn() },
+}));
+
+import { native } from "./native";
 import {
   appendEnvTurn,
   isResumingApproval,
   mergeRuleFiles,
   PROJECT_RULE_FILES,
+  readProjectRules,
+  resolveRuleFiles,
   TERMIGO_MD_MAX_CHARS,
   truncateProjectMemory,
 } from "./transport";
+
+const readFile = vi.mocked(native.readFile);
+const readDir = vi.mocked(native.readDir);
+const textRead = (content: string) =>
+  ({ kind: "text", content }) as Awaited<ReturnType<typeof native.readFile>>;
+const fileEntry = (name: string): DirEntry => ({
+  name,
+  kind: "file",
+  size: 0,
+  mtime: 0,
+  gitignored: false,
+});
 
 const LIMIT = 10 * 1024;
 
@@ -125,6 +146,71 @@ describe("mergeRuleFiles", () => {
     const cutNaive = truncateProjectMemory(naive);
     expect(cutNaive).toMatch(/truncated here/);
     expect(cutNaive).not.toContain("# CLAUDE.md");
+  });
+});
+
+// The fixed list has to guess spellings, and a guess only works on a filesystem
+// that resolves case for you. Windows turns `Agents.md` into `AGENTS.md` by
+// itself, so this whole class of bug is invisible there and shows up on Linux
+// and macOS as "my project rules are ignored" with no error anywhere.
+describe("resolveRuleFiles", () => {
+  it("finds a spelling the fixed list cannot guess", () => {
+    expect(resolveRuleFiles(["Agents.md", "README.md"])).toEqual(["Agents.md"]);
+  });
+
+  it("returns each family once for a listing with one real file per family", () => {
+    expect(
+      resolveRuleFiles(["AGENTS.md", "USER.md", "TERMIGO.md", "CLAUDE.md"]),
+    ).toEqual(["USER.md", "AGENTS.md", "TERMIGO.md", "CLAUDE.md"]);
+  });
+
+  it("keeps both files when a case-sensitive root really has both", () => {
+    expect(resolveRuleFiles(["AGENTS.md", "agents.md"])).toEqual([
+      "AGENTS.md",
+      "agents.md",
+    ]);
+  });
+
+  it("picks deterministically when only non-exact spellings exist", () => {
+    expect(resolveRuleFiles(["Termigo.md", "TERMIGO.MD"])).toEqual([
+      "TERMIGO.MD",
+    ]);
+  });
+
+  it("never returns a dot-prefixed name, which a listing cannot show", () => {
+    expect(resolveRuleFiles([".termigorules"])).toEqual([]);
+    expect(resolveRuleFiles([])).toEqual([]);
+  });
+});
+
+describe("readProjectRules discovery", () => {
+  it("delivers a rule file whose casing the list does not carry", async () => {
+    readDir.mockResolvedValue([fileEntry("Agents.md")]);
+    readFile.mockImplementation(async (path) => {
+      if (path === "/case-sensitive/Agents.md") {
+        return textRead("# Agents.md\nhouse rules here\n");
+      }
+      throw new Error("ENOENT");
+    });
+
+    await expect(readProjectRules("/case-sensitive")).resolves.toContain(
+      "house rules here",
+    );
+    expect(readFile).toHaveBeenCalledWith("/case-sensitive/Agents.md");
+  });
+
+  it("falls back to the exact spellings when the root cannot be listed", async () => {
+    readDir.mockRejectedValue(new Error("path is not accessible"));
+    readFile.mockImplementation(async (path) => {
+      if (path === "/no-listing/AGENTS.md") {
+        return textRead("# AGENTS.md\nfallback rules here\n");
+      }
+      throw new Error("ENOENT");
+    });
+
+    await expect(readProjectRules("/no-listing")).resolves.toContain(
+      "fallback rules here",
+    );
   });
 });
 
