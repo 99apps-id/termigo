@@ -415,6 +415,47 @@ pub fn write_refusal(path: &str) -> Option<String> {
     write_refusal_reason(path).map(|reason| format!("{reason}{REFUSAL_HINT}"))
 }
 
+/// Normalized comparison surface with a leading `/`, so a relative and an
+/// absolute spelling of the same tail compare alike.
+fn prefix_form(path: &str) -> String {
+    let cmp = comparison_form(path);
+    if cmp.starts_with('/') {
+        cmp
+    } else {
+        format!("/{cmp}")
+    }
+}
+
+/// Which entry of `AGENT_IMMUTABLE_CONFIG` this already-normalized path ends
+/// with, if any.
+fn immutable_config_tail(cmp_for_prefix: &str) -> Option<&'static str> {
+    AGENT_IMMUTABLE_CONFIG
+        .iter()
+        .find(|rel| cmp_for_prefix.ends_with(**rel))
+        .copied()
+}
+
+/// A file that decides what runs LATER, checked on its own rather than as part
+/// of `write_refusal`.
+///
+/// The fs route refuses this class together with the credential directories,
+/// because either verdict is the same there: the write does not happen. The
+/// shell route needs the two apart. It refuses THIS class by name whatever verb
+/// the command used (`curl -o`, `wget -O`, `rsync`, `install` all write the
+/// path without a verb the shell scanner knows), while the credential
+/// directories stay gated on a write verb so ordinary reads through a terminal
+/// keep working. Sharing the list is what keeps the two routes from drifting.
+pub fn immutable_config_refusal(path: &str) -> Option<String> {
+    if path.is_empty() || path.bytes().any(|b| b < 0x20) {
+        return None;
+    }
+    let rel = immutable_config_tail(&prefix_form(path))?;
+    Some(format!(
+        "Refused: \"{}\" decides what runs later, so it cannot be changed from inside the agent.",
+        rel.trim_start_matches('/')
+    ))
+}
+
 fn write_refusal_reason(path: &str) -> Option<String> {
     if path.is_empty() {
         return Some("Refused: empty path.".into());
@@ -423,12 +464,7 @@ fn write_refusal_reason(path: &str) -> Option<String> {
         return Some("Refused: path contains control bytes.".into());
     }
 
-    let cmp = comparison_form(path);
-    let cmp_for_prefix = if cmp.starts_with('/') {
-        cmp
-    } else {
-        format!("/{cmp}")
-    };
+    let cmp_for_prefix = prefix_form(path);
 
     if cmp_for_prefix.contains(EXTENSION_ROOT_NEEDLE) {
         return Some(
@@ -442,13 +478,11 @@ fn write_refusal_reason(path: &str) -> Option<String> {
                 .into(),
         );
     }
-    for rel in AGENT_IMMUTABLE_CONFIG {
-        if cmp_for_prefix.ends_with(rel) {
-            return Some(format!(
-                "Refused: \"{}\" decides what runs later, so it cannot be changed from inside the agent.",
-                rel.trim_start_matches('/')
-            ));
-        }
+    if let Some(rel) = immutable_config_tail(&cmp_for_prefix) {
+        return Some(format!(
+            "Refused: \"{}\" decides what runs later, so it cannot be changed from inside the agent.",
+            rel.trim_start_matches('/')
+        ));
     }
     for dir in PROTECTED_WRITE_DIRS {
         if is_under_protected(&cmp_for_prefix, dir) {
@@ -626,6 +660,35 @@ mod tests {
         assert!(write_refusal("/proj/.termigo/hooks.json").is_some());
         assert!(write_refusal("/proj/.git/hooks/pre-commit").is_some());
         assert!(write_refusal("/proj/src/main.rs").is_none());
+    }
+
+    /// The shell route refuses this class whatever verb the command used, so it
+    /// asks for this predicate alone, and only for the files - the credential
+    /// directories must not come with it, or `cat ~/.ssh/config` stops working.
+    #[test]
+    fn immutable_config_predicate_covers_the_files_and_nothing_else() {
+        for path in [
+            "/proj/.termigo/hooks.json",
+            r"C:\proj\.termigo\hooks.json",
+            "/home/me/.termigo/mcp.json",
+            "/proj/.claude/settings.json",
+            "/proj/.claude/settings.local.json",
+            "/proj/.codex/config.toml",
+            "/proj/.gemini/settings.json",
+            ".termigo/hooks.json",
+        ] {
+            assert!(immutable_config_refusal(path).is_some(), "allowed: {path}");
+        }
+        for path in [
+            "/home/me/.ssh/config",
+            "/home/me/.aws/credentials",
+            "/proj/.git/hooks/pre-commit",
+            "/proj/.termigo/approvals.json",
+            "/proj/src/main.rs",
+            "",
+        ] {
+            assert!(immutable_config_refusal(path).is_none(), "refused: {path}");
+        }
     }
 
     #[test]

