@@ -120,6 +120,27 @@ export function runBusy(
   );
 }
 
+/**
+ * Tool states that mean the call has returned. `output-available` is the normal
+ * success state, and the whole app treats it as finished - `AgentRunBridge`
+ * answers this same question the same way.
+ *
+ * This was a two-entry deny-list (`output-error`, `error`) until now, so every
+ * COMPLETED call still counted as active: the relay read the transcript, saw a
+ * tool that had already returned, and called the session busy for the rest of
+ * its life. That is the stuck state reported from the field - the agent idle in
+ * the app while Telegram kept the typing indicator alive, answered each new
+ * message with "The agent is busy", and never flushed the text it queued,
+ * because the flush is gated on the same flag. `/stop` did not clear it either:
+ * stopping settles the run, not the transcript. The previous patch to this list
+ * added `output-error`, a FAILED tool, so it only ever fixed the rarer half.
+ */
+const FINISHED_TOOL_STATES = new Set([
+  "output-available",
+  "output-error",
+  "result",
+]);
+
 export function hasActiveToolCalls(chat: ChatLike | null | undefined): boolean {
   if (!chat?.messages?.length) return false;
   for (let i = chat.messages.length - 1; i >= 0; i -= 1) {
@@ -127,12 +148,19 @@ export function hasActiveToolCalls(chat: ChatLike | null | undefined): boolean {
     if (message.role !== "assistant") continue;
     const parts = message.parts ?? [];
     for (let j = parts.length - 1; j >= 0; j -= 1) {
-      const part = parts[j] as { type?: string; state?: string } | undefined;
+      const part = parts[j] as
+        | { type?: string; state?: string; output?: unknown }
+        | undefined;
       const type = typeof part?.type === "string" ? part.type : "";
-      if (type.startsWith("tool-")) {
-        const state = typeof part?.state === "string" ? part.state : "";
-        if (state !== "output-error" && state !== "error") return true;
+      if (!type.startsWith("tool-")) continue;
+      const state = typeof part?.state === "string" ? part.state : "";
+      // A finished state, or an output already in hand, means the call is over
+      // however the run is doing. Everything else (in flight, or a state this
+      // build does not know with nothing returned yet) stays active.
+      if (FINISHED_TOOL_STATES.has(state) || part?.output !== undefined) {
+        continue;
       }
+      return true;
     }
   }
   return false;

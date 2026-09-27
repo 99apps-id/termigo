@@ -6,7 +6,11 @@
 // live install, including the one that regressed.
 
 import { describe, expect, it } from "vitest";
-import { type ChatLike, lastAssistantText } from "./telegramHelpers";
+import {
+  type ChatLike,
+  hasActiveToolCalls,
+  lastAssistantText,
+} from "./telegramHelpers";
 
 const text = (value: string) => ({ type: "text", text: value });
 const tool = (name: string) => ({
@@ -123,5 +127,80 @@ describe("lastAssistantText", () => {
 
   it("returns null for an unknown session", () => {
     expect(lastAssistantText(getter(undefined), "missing", 0)).toBeNull();
+  });
+});
+
+// The relay's busy predicate. Getting this wrong crashes nothing: it makes the
+// relay believe a finished session is still working, so it keeps the typing
+// indicator alive, answers every new message with "The agent is busy", and never
+// flushes the text it queued behind that flag.
+describe("hasActiveToolCalls", () => {
+  const part = (type: string, state?: string, output?: unknown) => ({
+    type,
+    ...(state === undefined ? {} : { state }),
+    ...(output === undefined ? {} : { output }),
+  });
+  const chatWithParts = (
+    ...parts: Array<Record<string, unknown>>
+  ): ChatLike => ({
+    messages: [{ role: "assistant", parts }],
+  });
+
+  // THE regression: a returned call kept the session busy forever.
+  it("is false once every tool call has returned", () => {
+    expect(
+      hasActiveToolCalls(
+        chatWithParts(
+          part("tool-bash_run", "output-available", { stdout: "ok" }),
+          part("tool-edit", "output-available", { ok: true }),
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  it("is false for a failed or legacy-finished call", () => {
+    expect(
+      hasActiveToolCalls(chatWithParts(part("tool-bash_run", "output-error"))),
+    ).toBe(false);
+    expect(
+      hasActiveToolCalls(chatWithParts(part("tool-grep", "result", "done"))),
+    ).toBe(false);
+  });
+
+  it("is true while a call is in flight", () => {
+    expect(
+      hasActiveToolCalls(
+        chatWithParts(part("tool-bash_run", "input-available")),
+      ),
+    ).toBe(true);
+    expect(
+      hasActiveToolCalls(
+        chatWithParts(part("tool-bash_run", "input-streaming")),
+      ),
+    ).toBe(true);
+  });
+
+  it("is true for a part with no state and nothing returned", () => {
+    expect(hasActiveToolCalls(chatWithParts(part("tool-bash_run")))).toBe(true);
+  });
+
+  it("ignores non-tool parts and user messages", () => {
+    expect(
+      hasActiveToolCalls({
+        messages: [
+          { role: "user", parts: [part("tool-bash_run", "input-available")] },
+          {
+            role: "assistant",
+            parts: [part("text", "streaming"), part("reasoning", "streaming")],
+          },
+        ],
+      }),
+    ).toBe(false);
+  });
+
+  it("returns false for an empty or missing chat", () => {
+    expect(hasActiveToolCalls(null)).toBe(false);
+    expect(hasActiveToolCalls(undefined)).toBe(false);
+    expect(hasActiveToolCalls({ messages: [] })).toBe(false);
   });
 });
