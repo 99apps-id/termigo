@@ -6,6 +6,7 @@ import { remoteUnsupported } from "../lib/remoteFs";
 import { getSessionShell, sessionShellKey } from "../lib/sessionShell";
 import { quoteShellArg } from "@/lib/shellQuote";
 import { clampedInt } from "./clampedNumber";
+import { truncateCommandOutput } from "./shell";
 import type { ToolContext } from "./context";
 
 type CheckKind = "test" | "lint";
@@ -214,16 +215,19 @@ export function buildVerifyTools(ctx: ToolContext) {
             ? (await import("../lib/testLoop")).distillTestOutput(combined)
             : undefined;
 
+        const stdoutTrunc = truncateCommandOutput(r.stdout ?? "");
+        const stderrTrunc = truncateCommandOutput(r.stderr ?? "");
+
         return {
           command: actualCommand,
           kind,
           note,
           cwd,
-          stdout: r.stdout,
-          stderr: r.stderr,
+          stdout: stdoutTrunc.text,
+          stderr: stderrTrunc.text,
           exit_code: r.exit_code,
           timed_out: r.timed_out,
-          truncated: r.truncated,
+          truncated: r.truncated || stdoutTrunc.truncated || stderrTrunc.truncated,
           distilled_error: failureSummary,
         };
       },

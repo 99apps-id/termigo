@@ -1371,13 +1371,19 @@ pub(crate) fn build_oneshot_command(
             let wsl_cwd = crate::modules::workspace::host_to_wsl_path(cwd, distro);
             cmd.arg("--cd").arg(wsl_cwd);
         }
-        cmd.arg("--exec").arg("sh").arg("-lc").arg(command);
+        cmd.arg("--exec")
+            .arg("sh")
+            .arg("-lc")
+            .arg(format!("export CI=true PAGER=cat GIT_PAGER=cat; {command}"));
         return Ok(cmd);
     }
     #[cfg(unix)]
     {
         let mut cmd = Command::new("/bin/sh");
         cmd.arg("-c").arg(command);
+        cmd.env("CI", "true");
+        cmd.env("PAGER", "cat");
+        cmd.env("GIT_PAGER", "cat");
         if let Some(path) = path_with_node_bins(cwd) {
             cmd.env("PATH", path);
         }
@@ -1397,6 +1403,9 @@ pub(crate) fn build_oneshot_command(
     {
         let shell = crate::modules::pty::shell_init::windows_shell_path();
         let mut cmd = Command::new(&shell);
+        cmd.env("CI", "true");
+        cmd.env("PAGER", "cat");
+        cmd.env("GIT_PAGER", "cat");
         // Only a local workspace has a Windows-side node_modules to resolve;
         // the WSL branch returned above.
         if matches!(workspace, WorkspaceEnv::Local) {
@@ -1499,6 +1508,13 @@ mod tests {
         let args: Vec<_> = cmd.get_args().collect();
         assert_eq!(args, vec!["-c", "echo hi"]);
     }
+
+    #[test]
+    fn run_blocking_sets_ci_and_pager_env_on_unix() {
+        let out = run("printf 'CI=%s PAGER=%s GIT_PAGER=%s\\n' \"$CI\" \"$PAGER\" \"$GIT_PAGER\"", 5);
+        assert_eq!(out.stdout, "CI=true PAGER=cat GIT_PAGER=cat\n");
+        assert_eq!(out.exit_code, Some(0));
+    }
 }
 
 /// End-to-end spawn test for the `node_modules/.bin` PATH prepend  -  the string
@@ -1588,6 +1604,36 @@ mod tests_windows_node_path_e2e {
             bin_pos < win_pos,
             "project bin dir is not prioritized ahead of system PATH: {printed}"
         );
+    }
+
+    #[test]
+    fn spawned_shell_sets_ci_and_pager_env() {
+        let shell = crate::modules::pty::shell_init::windows_shell_path();
+        let is_cmd = shell
+            .file_name()
+            .and_then(|s| s.to_str())
+            .map(|s| s.eq_ignore_ascii_case("cmd.exe"))
+            .unwrap_or(false);
+        let probe = if is_cmd {
+            "echo CI=%CI% PAGER=%PAGER% GIT_PAGER=%GIT_PAGER%"
+        } else {
+            "Write-Output \"CI=$($env:CI) PAGER=$($env:PAGER) GIT_PAGER=$($env:GIT_PAGER)\""
+        };
+
+        let out = run_blocking_interruptible(
+            probe.into(),
+            None,
+            WorkspaceEnv::Local,
+            Duration::from_secs(30),
+            Default::default(),
+        )
+        .expect("spawn");
+
+        assert_eq!(out.exit_code, Some(0));
+        assert!(out.stdout.contains("CI=true"), "stdout: {}", out.stdout);
+        assert!(out.stdout.contains("PAGER=cat"), "stdout: {}", out.stdout);
+        assert!(out.stdout.contains("GIT_PAGER=cat"), "stdout: {}", out.stdout);
+
     }
 }
 

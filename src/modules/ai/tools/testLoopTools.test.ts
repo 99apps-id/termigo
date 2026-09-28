@@ -8,9 +8,17 @@ describe("focusTestFile", () => {
     expect(r.note).toContain("focused");
   });
 
-  it("adds --passWithNoTests for jest so an unmatched file is not a failure", () => {
+  it("adds --watchAll=false and --passWithNoTests for jest so an unmatched file is not a failure", () => {
     const r = focusTestFile("jest", "/repo/src/a.test.ts");
-    expect(r.command).toBe("jest /repo/src/a.test.ts --passWithNoTests");
+    expect(r.command).toBe("jest /repo/src/a.test.ts --watchAll=false --passWithNoTests");
+  });
+
+  it("adds --run for vitest when not already running in single-run mode", () => {
+    const r1 = focusTestFile("vitest", "src/foo.test.ts");
+    expect(r1.command).toBe("vitest src/foo.test.ts --run");
+
+    const r2 = focusTestFile("npx vitest", "src/foo.test.ts");
+    expect(r2.command).toBe("npx vitest src/foo.test.ts --run");
   });
 
   it("passes the file straight to pytest", () => {

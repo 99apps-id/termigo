@@ -7,6 +7,7 @@ import { getSessionShell, sessionShellKey } from "../lib/sessionShell";
 import { native } from "../lib/native";
 import { TestAttemptTracker, retryGuidance } from "../lib/testLoop";
 import { detectCheckCommand } from "./verify";
+import { truncateCommandOutput } from "./shell";
 
 /**
  * Bounded retry budget for the fix->re-run loop per (session, file). Every
@@ -57,8 +58,15 @@ export function focusTestFile(
   const isPytest = /pytest/.test(b);
 
   if (isVitest || isJest || isPytest) {
-    const passWithNoTests = isJest ? " --passWithNoTests" : "";
-    return { command: `${b} ${normalizedFile}${passWithNoTests}`, note: `focused ${normalizedFile}` };
+    let extra = "";
+    if (isJest) {
+      const noWatch = !b.includes("--watchAll") ? " --watchAll=false" : "";
+      const pass = !b.includes("--passWithNoTests") ? " --passWithNoTests" : "";
+      extra = `${noWatch}${pass}`;
+    } else if (isVitest && !/\b(run|--run)\b/.test(b)) {
+      extra = " --run";
+    }
+    return { command: `${b} ${normalizedFile}${extra}`, note: `focused ${normalizedFile}` };
   }
   const isPkgScript = /^(?:pnpm|bun|yarn)(\s+run)?\s+test(\s+--)?$/i.test(b);
   if (isPkgScript) {
@@ -166,16 +174,18 @@ export function buildTestLoopTools(ctx: ToolContext) {
           maxRetries: MAX_TEST_RETRIES,
           exitCode,
         });
+        const stdoutTrunc = truncateCommandOutput(r.stdout ?? "");
+        const stderrTrunc = truncateCommandOutput(r.stderr ?? "");
         return {
           file: filePath,
           command: focused.command,
           detected: note,
           focus: focused.note,
-          stdout: r.stdout,
-          stderr: r.stderr,
+          stdout: stdoutTrunc.text,
+          stderr: stderrTrunc.text,
           exit_code: r.exit_code,
           timed_out: r.timed_out,
-          truncated: r.truncated,
+          truncated: r.truncated || stdoutTrunc.truncated || stderrTrunc.truncated,
           passing: r.exit_code === 0,
           attempt,
           max_retries: MAX_TEST_RETRIES,
