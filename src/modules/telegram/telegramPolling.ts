@@ -288,7 +288,7 @@ function launchLoop(controller: AbortController): void {
  * and must not be retried quickly (and grows exponentially with the conflict
  * streak, so an hours-long competitor is probed at most every 15 min instead
  * of every minute), and anything else doubles with its OWN streak from a 5s
- * base to a 60s cap — an offline machine must not hammer DNS every five
+ * base to a 60s cap - an offline machine must not hammer DNS every five
  * seconds for hours. Two streaks, because a network flap must not inflate the
  * conflict schedule and a competitor must not look like an outage.
  */
@@ -322,7 +322,7 @@ export function pollBackoffMs(
  * AbortError ("The user aborted a request."). Field logs showed the latter
  * landing in the generic-failure branch: the bot was marked offline, the
  * failure streak escalated the backoff, and the log filled with
- * "retrying in 5s" — all because one long-poll was slow. Callers only consult
+ * "retrying in 5s" - all because one long-poll was slow. Callers only consult
  * this AFTER ruling out an abort of the loop's own signal, so an AbortError
  * reaching here can only be the request deadline.
  */
@@ -465,7 +465,7 @@ export async function startTelegramBot(): Promise<void> {
   lastPollProgressTime = Date.now();
   deliberateWaitUntil = 0;
   conflictStreak = 0;
-  // Restore the offset Telegram had already confirmed before the first poll —
+  // Restore the offset Telegram had already confirmed before the first poll -
   // this MUST happen before launchLoop: without it the loop starts at 0 and
   // Telegram replays the last unconfirmed batch, running its commands (an old
   // /run, /approve, /mode all) a second time. The token read and offset load

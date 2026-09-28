@@ -26,10 +26,12 @@ type ElicitationState = {
     options: string[],
     abortSignal?: AbortSignal,
   ) => Promise<string | null>;
-  /** The user clicked an option — resolve and drop the question. */
+  /** The user clicked an option - resolve and drop the question. */
   answer: (id: string, answer: string) => void;
   /** Dismiss without an answer (resolve null). */
   cancel: (id: string) => void;
+  /** Dismiss all pending questions without an answer (resolve null). */
+  cancelAll: () => void;
 };
 
 let seq = 0;
@@ -75,5 +77,13 @@ export const useElicitationStore = create<ElicitationState>((set, get) => ({
     if (!item) return;
     item.resolve(null);
     set((s) => ({ pending: s.pending.filter((p) => p.id !== id) }));
+  },
+
+  cancelAll() {
+    const list = [...get().pending];
+    for (const item of list) {
+      item.resolve(null);
+    }
+    set({ pending: [] });
   },
 }));

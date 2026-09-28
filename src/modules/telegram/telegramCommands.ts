@@ -87,7 +87,7 @@ function isOwnerUser(
   const chatId = store.chatId;
   // Unpaired bot: open to all chats (the documented state).
   if (!chatId) return true;
-  // A GROUP chatId with no ownerUserId cannot identify anybody — every member
+  // A GROUP chatId with no ownerUserId cannot identify anybody: every member
   // shares the chat id, so the old `return true` here handed owner actions to
   // the whole group (NIT-1, AUDIT-2026-10). /pair always records the user id;
   // a group without one is stale or half-configured, and fails closed.
@@ -738,6 +738,8 @@ export async function handleUpdate(u: Update, signal: AbortSignal): Promise<void
       if (!isOwnerUser(msg.from)) return;
       await ensureChatSession(chatId, msg.message_thread_id ?? null);
       const runtime = await import("../ai/store/chatRuntime");
+      const { progressCtrls } = await import("./telegramProgress");
+      progressCtrls.get(chatId)?.abort();
       await runtime.stopRun();
       await sendTelegram(
         chatId,

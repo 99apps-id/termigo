@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import {
   type ChatLike,
   hasActiveToolCalls,
+  isActivelyTyping,
   lastAssistantText,
 } from "./telegramHelpers";
 
@@ -198,9 +199,46 @@ describe("hasActiveToolCalls", () => {
     ).toBe(false);
   });
 
+  it("ignores active tool calls from older turns if latest assistant message has returned", () => {
+    expect(
+      hasActiveToolCalls({
+        messages: [
+          { role: "assistant", parts: [part("tool-bash_run", "calling")] },
+          { role: "user", parts: [part("text")] },
+          {
+            role: "assistant",
+            parts: [part("tool-bash_run", "output-available")],
+          },
+        ],
+      }),
+    ).toBe(false);
+  });
+
   it("returns false for an empty or missing chat", () => {
     expect(hasActiveToolCalls(null)).toBe(false);
     expect(hasActiveToolCalls(undefined)).toBe(false);
     expect(hasActiveToolCalls({ messages: [] })).toBe(false);
+  });
+});
+
+describe("isActivelyTyping", () => {
+  it("is false during awaiting-approval, idle, or error", () => {
+    expect(isActivelyTyping("streaming", "awaiting-approval", true)).toBe(false);
+    expect(isActivelyTyping("streaming", "idle", true)).toBe(false);
+    expect(isActivelyTyping("streaming", "error", true)).toBe(false);
+  });
+
+  it("is true when thinking or streaming in app", () => {
+    expect(isActivelyTyping("idle", "thinking", false)).toBe(true);
+    expect(isActivelyTyping("idle", "streaming", false)).toBe(true);
+  });
+
+  it("is true when active tool call is executing", () => {
+    expect(isActivelyTyping("idle", "running", true)).toBe(true);
+  });
+
+  it("is true when chat is submitted or streaming", () => {
+    expect(isActivelyTyping("submitted", "running", false)).toBe(true);
+    expect(isActivelyTyping("streaming", "running", false)).toBe(true);
   });
 });

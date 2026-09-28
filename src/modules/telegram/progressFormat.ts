@@ -20,7 +20,7 @@ export type FormatLiveProgressOptions = {
   todos?: { title: string; status: string }[];
   /** Elapsed time in ms since the run started. Rendered as a ticking "· Xs"
    *  counter so the progress text always changes even when no new tool/step
-   *  has appeared — this keeps the Telegram message visibly alive during long
+   *  has appeared - this keeps the Telegram message visibly alive during long
    *  waits instead of freezing. */
   elapsedMs?: number;
   completed?: boolean;

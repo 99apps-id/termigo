@@ -121,6 +121,35 @@ export function runBusy(
 }
 
 /**
+ * Whether the agent is actively writing/generating tokens or executing a tool.
+ *
+ * Distinct from runBusy: an agent in awaiting-approval or waiting for user confirmation
+ * is NOT actively typing. Sending Telegram typing actions while waiting for confirmation
+ * makes the user wait expecting text rather than reviewing and acting on the approval card.
+ */
+export function isActivelyTyping(
+  chatStatus: string,
+  appStatus: string,
+  activeTools = false,
+): boolean {
+  if (
+    appStatus === "awaiting-approval" ||
+    appStatus === "idle" ||
+    appStatus === "error"
+  ) {
+    return false;
+  }
+  return (
+    chatStatus === "submitted" ||
+    chatStatus === "streaming" ||
+    appStatus === "thinking" ||
+    appStatus === "streaming" ||
+    activeTools
+  );
+}
+
+
+/**
  * Tool states that mean the call has returned. `output-available` is the normal
  * success state, and the whole app treats it as finished - `AgentRunBridge`
  * answers this same question the same way.
@@ -143,25 +172,31 @@ const FINISHED_TOOL_STATES = new Set([
 
 export function hasActiveToolCalls(chat: ChatLike | null | undefined): boolean {
   if (!chat?.messages?.length) return false;
-  for (let i = chat.messages.length - 1; i >= 0; i -= 1) {
-    const message = chat.messages[i];
-    if (message.role !== "assistant") continue;
-    const parts = message.parts ?? [];
-    for (let j = parts.length - 1; j >= 0; j -= 1) {
-      const part = parts[j] as
-        | { type?: string; state?: string; output?: unknown }
-        | undefined;
-      const type = typeof part?.type === "string" ? part.type : "";
-      if (!type.startsWith("tool-")) continue;
-      const state = typeof part?.state === "string" ? part.state : "";
-      // A finished state, or an output already in hand, means the call is over
-      // however the run is doing. Everything else (in flight, or a state this
-      // build does not know with nothing returned yet) stays active.
-      if (FINISHED_TOOL_STATES.has(state) || part?.output !== undefined) {
-        continue;
-      }
-      return true;
+  // Only the most recent assistant message can have tool calls currently in flight.
+  // Past turns never keep a session busy.
+  const lastAssistant = [...chat.messages]
+    .reverse()
+    .find((m) => m.role === "assistant");
+  if (!lastAssistant) return false;
+
+  const parts = lastAssistant.parts ?? [];
+  for (let j = parts.length - 1; j >= 0; j -= 1) {
+    const part = parts[j] as
+      | { type?: string; state?: string; output?: unknown }
+      | undefined;
+    const type = typeof part?.type === "string" ? part.type : "";
+    if (
+      !type.startsWith("tool-") &&
+      type !== "tool-call" &&
+      type !== "dynamic-tool"
+    ) {
+      continue;
     }
+    const state = typeof part?.state === "string" ? part.state : "";
+    if (FINISHED_TOOL_STATES.has(state) || part?.output !== undefined) {
+      continue;
+    }
+    return true;
   }
   return false;
 }

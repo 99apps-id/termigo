@@ -11,7 +11,13 @@ import {
   sendProgressMessage,
   sendTyping,
 } from "./telegramApi";
-import { getPendingApprovals, messageText, runBusy } from "./telegramHelpers";
+import {
+  getPendingApprovals,
+  hasActiveToolCalls,
+  isActivelyTyping,
+  messageText,
+  runBusy,
+} from "./telegramHelpers";
 
 export const progressCtrls = new Map<number, AbortController>();
 export const lastFinishedProgressMessageIds = new Map<number, number>();
@@ -107,20 +113,22 @@ export async function publishProgress(
         todosStore.useTodosStore.getState().bySession[sessionId]?.items ?? [];
       const now = Date.now();
 
-      // Keep the "typing..." bubble alive while the run is busy (thinking,
-      // streaming, or awaiting approval).
+      // Keep the "typing..." bubble alive while the run is actively writing
+      // or executing tools (never when awaiting approval or idle).
       const chat = store.getChat(sessionId);
       const chatStatus = chat?.status ?? "";
       const aqStore = await import("../ai/store/approvalQueueStore");
       const pendingApprovals = getPendingApprovals(sessionId, store, aqStore);
+      const isAppRunning = status !== "idle" && status !== "error";
+      const activeTools = isAppRunning && hasActiveToolCalls(chat);
       const busy =
-        runBusy(chatStatus, status, pendingApprovals.length > 0) ||
-        status === "thinking" ||
-        status === "streaming" ||
-        status === "awaiting-approval" ||
-        progressMessageId === null;
+        isAppRunning &&
+        (runBusy(chatStatus, status, pendingApprovals.length > 0) || activeTools);
 
-      if (busy && now - lastTypingAt >= 3000) {
+      if (
+        isActivelyTyping(chatStatus, status, activeTools) &&
+        now - lastTypingAt >= 3000
+      ) {
         lastTypingAt = now;
         await sendTyping(chatId, signal).catch(() => {});
       }
@@ -304,7 +312,7 @@ export async function publishProgress(
         // end, and a dead end is what makes someone abandon the bot.
         keyboard.push([
           {
-            text: "⏭ Tidak dulu (lewati)",
+            text: "Tidak dulu (lewati)",
             callback_data: `el:${el.id}:decline`,
           },
         ]);
@@ -395,7 +403,10 @@ export async function publishProgress(
         completed: true,
         outcome,
         elapsedMs: Date.now() - started,
-        answerText: outcome === "done" && answerText ? answerText : undefined,
+        answerText:
+          (outcome === "done" || outcome === "stopped") && answerText
+            ? answerText
+            : undefined,
         todos:
           todosStore.useTodosStore.getState().bySession[sessionId]?.items ?? [],
       });
@@ -405,7 +416,7 @@ export async function publishProgress(
         doneText,
         AbortSignal.timeout(4000),
       ).catch(() => {});
-      if (!answerText || outcome !== "done") {
+      if (!answerText || (outcome !== "done" && outcome !== "stopped")) {
         lastFinishedProgressMessageIds.set(chatId, progressMessageId);
       }
     } else if (progressMessageId) {

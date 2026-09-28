@@ -72,6 +72,7 @@ import {
 import type { ToolContext } from "../tools/tools";
 import { useAgentsStore } from "./agentsStore";
 import { useApprovalQueue } from "./approvalQueueStore";
+import { useElicitationStore } from "./elicitationStore";
 import {
   chats,
   flushPersist,
@@ -608,7 +609,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       if (stopReason === "step-cap") requestAutoContinue(sessionId);
       // Verification-on-stop: a CLEAN finish right after unverified code edits
       // gets one bounded follow-up (preference-gated; see requestVerifyNudge).
-      // Runs after the step-cap branch so a budget pause continues as before —
+      // Runs after the step-cap branch so a budget pause continues as before -
       // the gate only applies when the model believed it was done.
       if (verifyGateApplies(info)) {
         requestVerifyNudge(sessionId, info.verify);
@@ -1053,7 +1054,7 @@ export async function sendParts(
       // only when every item is completed, so a list the agent abandoned
       // mid-plan (leftover pending items) would otherwise sit on top of the
       // chat while the user has already moved on. A resume is the same task,
-      // so it keeps the list — and so does a verification nudge.
+      // so it keeps the list - and so does a verification nudge.
       if (!isResumeParts(parts) && !isVerifyNudgeParts(parts)) {
         void useTodosStore.getState().clearSession(sessionId);
       }
@@ -1272,9 +1273,12 @@ export async function stopRun(): Promise<void> {
   // because it landed between rounds.
   stopLatch.add(sessionId);
   approvalResumeFailureCount.set(sessionId, 1);
+  useApprovalQueue.getState().cancelAll();
+  useElicitationStore.getState().cancelAll();
   useChatStore.getState().patchAgentMeta({
     status: "idle",
     stoppedByUser: true,
+    pendingApprovals: undefined,
   });
   useChatStore.getState().syncRunMeta();
   await chats.get(sessionId)?.stop();
@@ -1370,7 +1374,7 @@ export async function resendEditedMessage(
  * produced; dropping the turn and every message after it from the transcript
  * keeps the chat telling the same story as the files. `rollbackToCheckpoint`
  * takes a "before rollback" snapshot first, so even this is undoable from the
- * git side. Turn-checkpoint rows from the rewound turn onward are pruned —
+ * git side. Turn-checkpoint rows from the rewound turn onward are pruned:
  * their shas still exist in history, but the messages they index are gone.
  */
 export async function rewindToTurn(
@@ -1403,7 +1407,7 @@ export async function rewindToTurn(
   if (!repo) {
     return {
       ok: false,
-      error: "Not a git repository — there is nothing to rewind files to.",
+      error: "Not a git repository: there is nothing to rewind files to.",
     };
   }
   const res = await rollbackToCheckpoint(repo.repoRoot, entry.sha);

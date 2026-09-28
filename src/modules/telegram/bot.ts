@@ -32,6 +32,8 @@ import {
   getPendingApprovals,
   runBusy,
   clampTelegramText,
+  isActivelyTyping,
+  hasActiveToolCalls,
 } from "./telegramHelpers";
 import {
   activeProgressMessageIds,
@@ -85,6 +87,8 @@ export { apiGet, apiPost } from "./telegramApi";
 export {
   getPendingApprovals,
   runBusy,
+  isActivelyTyping,
+  hasActiveToolCalls,
   countAssistantMessages,
   lastAssistantText,
   messageText,
@@ -130,6 +134,8 @@ export const _testOnly = {
   splitTelegramText,
   clampTelegramText,
   runBusy,
+  isActivelyTyping,
+  hasActiveToolCalls,
   getPendingApprovals,
   startTelegramDispatch,
   runAgentAndStream,

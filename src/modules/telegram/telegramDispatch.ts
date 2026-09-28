@@ -39,6 +39,7 @@ import {
   countAssistantMessages,
   getPendingApprovals,
   hasActiveToolCalls,
+  isActivelyTyping,
   lastAssistantText,
   matchElicitationAnswer,
   messageText,
@@ -583,14 +584,16 @@ export async function runMirror(signal: AbortSignal): Promise<void> {
             mirrorLastNotifiedStopKey = "";
           }
 
-          const activeTools = hasActiveToolCalls(chat);
+          const isAppRunning =
+            state.agentMeta.status !== "idle" &&
+            state.agentMeta.status !== "error";
+          const activeTools = isAppRunning && hasActiveToolCalls(chat);
           if (
-            runBusy(
+            isActivelyTyping(
               chatStatus,
               state.agentMeta.status,
-              pending.length > 0,
-            ) ||
-            activeTools
+              activeTools,
+            )
           ) {
             await sendTyping(chatId, signal).catch(() => {});
           }
@@ -637,10 +640,11 @@ async function waitForReply(
       store,
       aqStore.useApprovalQueue,
     );
-    const activeTools = hasActiveToolCalls(chat);
+    const isAppRunning = appStatus !== "idle" && appStatus !== "error";
+    const activeTools = isAppRunning && hasActiveToolCalls(chat);
     const busy =
-      runBusy(chatStatus, appStatus, pending.length > 0) ||
-      activeTools;
+      isAppRunning &&
+      (runBusy(chatStatus, appStatus, pending.length > 0) || activeTools);
     if (busy) {
       everBusy = true;
       lastActiveAt = Date.now();
@@ -778,17 +782,16 @@ export async function runAgentAndStream(
           const currentAppStatus =
             store.useChatStore.getState().agentMeta.status;
           const currentChatStatus = currentChat?.status ?? "";
-          const aqStore = await import("../ai/store/approvalQueueStore");
-          const pending = getPendingApprovals(
-            sessionId,
-            store,
-            aqStore.useApprovalQueue,
-          );
-          const activeTools = hasActiveToolCalls(currentChat);
-          const busy =
-            runBusy(currentChatStatus, currentAppStatus, pending.length > 0) ||
-            activeTools;
-          if (busy) {
+          const isAppRunning =
+            currentAppStatus !== "idle" && currentAppStatus !== "error";
+          const activeTools = isAppRunning && hasActiveToolCalls(currentChat);
+          if (
+            isActivelyTyping(
+              currentChatStatus,
+              currentAppStatus,
+              activeTools,
+            )
+          ) {
             await sendTyping(chatId, signal).catch(() => {});
           }
         },
@@ -899,10 +902,12 @@ export async function runAgentAndStream(
             store,
             aqStore.useApprovalQueue,
           );
-          const activeTools = hasActiveToolCalls(store.getChat(sessionId));
+          const isAppRunning = appStatus !== "idle" && appStatus !== "error";
+          const activeTools = isAppRunning && hasActiveToolCalls(store.getChat(sessionId));
           const busy =
-            runBusy(chatStatus, appStatus, pendingApprovals.length > 0) ||
-            activeTools;
+            isAppRunning &&
+            (runBusy(chatStatus, appStatus, pendingApprovals.length > 0) ||
+              activeTools);
           // An approval nobody answers is the one state that never resolves on
           // its own, and the agent log is silent throughout it. Logged once per
           // run rather than per tick.
@@ -1132,9 +1137,12 @@ export function startTelegramResume(chatId: number, signal: AbortSignal): void {
         meta.stopReason === "step-cap" &&
         !meta.stoppedByUser &&
         meta.status === "idle";
-      const activeTools = hasActiveToolCalls(store.getChat(sessionId));
+      const isAppRunning = appStatus !== "idle" && appStatus !== "error";
+      const activeTools =
+        isAppRunning && hasActiveToolCalls(store.getChat(sessionId));
       const busy =
         !isPausedOnStepCap &&
+        isAppRunning &&
         (runBusy(chatStatus, appStatus, false) || activeTools);
       if (busy) {
         await sendTelegram(
@@ -1178,9 +1186,11 @@ export async function startTelegramDispatch(
     const appStatus = store.useChatStore.getState().agentMeta.status;
     const chat = sessionId ? store.getChat(sessionId) : null;
     const chatStatus = chat?.status ?? "";
-    const activeTools = hasActiveToolCalls(chat);
+    const isAppRunning = appStatus !== "idle" && appStatus !== "error";
+    const activeTools = isAppRunning && hasActiveToolCalls(chat);
     const busy =
-      runBusy(chatStatus, appStatus, false) || activeTools;
+      isAppRunning &&
+      (runBusy(chatStatus, appStatus, false) || activeTools);
 
     // A pending `ask_user` question is the one "busy" state where the user's
     // reply IS the answer. It is checked BEFORE the busy branch, because the
@@ -1209,8 +1219,40 @@ export async function startTelegramDispatch(
       store,
       aqStore.useApprovalQueue,
     );
+    const lower = text.trim().toLowerCase();
+    const stopKeywords = [
+      "stop",
+      "cukup",
+      "batal",
+      "cancel",
+      "berhenti",
+      "selesai",
+    ];
+    const isStopIntent = stopKeywords.some(
+      (kw) =>
+        lower === kw ||
+        lower.startsWith(`${kw} `) ||
+        lower.startsWith(`${kw},`) ||
+        lower.startsWith(`${kw}.`),
+    );
+
+    if (isStopIntent && (busy || pendingApprovals.length > 0)) {
+      recordTelegramText(text);
+      for (const p of pendingApprovals) {
+        store.useChatStore.getState().respondToApproval(p.id, false);
+        aqStore.useApprovalQueue.getState().respond([p.id], false);
+      }
+      progressCtrls.get(chatId)?.abort();
+      await runtime.stopRun();
+      await sendTelegram(
+        chatId,
+        "Run stopped on user request.",
+        signal,
+      ).catch(() => {});
+      return;
+    }
+
     if (pendingApprovals.length > 0) {
-      const lower = text.trim().toLowerCase();
       if (
         lower === "approve" ||
         lower === "yes" ||
@@ -1252,6 +1294,13 @@ export async function startTelegramDispatch(
         ).catch(() => {});
         return;
       }
+      recordTelegramText(text);
+      await sendTelegram(
+        chatId,
+        "Agent is waiting for approval. Reply /approve or /deny, or tap the buttons above. Send /stop to cancel.",
+        signal,
+      ).catch(() => {});
+      return;
     }
 
     if (busy) {
