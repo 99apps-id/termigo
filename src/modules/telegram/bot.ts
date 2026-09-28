@@ -45,14 +45,10 @@ import {
   runAgentAndStream,
   runMirror,
   startTelegramResume,
+  finalizeStreamedMessage,
 } from "./telegramDispatch";
-import {
-  handleCallback,
-  handleUpdate,
-} from "./telegramCommands";
-import {
-  checkPollingStall,
-} from "./telegramPolling";
+import { handleCallback, handleUpdate } from "./telegramCommands";
+import { checkPollingStall } from "./telegramPolling";
 
 // --- Core ---
 export { startTelegramBot, stopTelegramBot } from "./telegramPolling";
@@ -67,7 +63,13 @@ export {
 } from "./telegramDispatch";
 
 // --- Commands ---
-export { handleCallback, handleUpdate, buildProviderGroups, resolveModelInput, HELP } from "./telegramCommands";
+export {
+  handleCallback,
+  handleUpdate,
+  buildProviderGroups,
+  resolveModelInput,
+  HELP,
+} from "./telegramCommands";
 
 // --- Progress ---
 export {
@@ -80,7 +82,13 @@ export {
 } from "./telegramProgress";
 
 // --- API ---
-export { TelegramApiError, sendProgressMessage, editProgressMessage, sendKeyboard, splitTelegramText } from "./telegramApi";
+export {
+  TelegramApiError,
+  sendProgressMessage,
+  editProgressMessage,
+  sendKeyboard,
+  splitTelegramText,
+} from "./telegramApi";
 export { apiGet, apiPost } from "./telegramApi";
 
 // --- Helpers ---
@@ -151,6 +159,7 @@ export const _testOnly = {
   setCurrentUpdateOffset,
   POLLING_STALL_TIMEOUT_MS,
   editProgressMessage,
+  finalizeStreamedMessage,
   apiGet,
   apiPost,
   runMirror,

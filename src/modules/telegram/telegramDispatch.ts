@@ -186,27 +186,55 @@ async function sendDiagrams(
  * message has to follow as new messages, because an edit cannot be longer than
  * the limit. Reuses the shared splitter so a long answer keeps its line breaks.
  */
-async function finalizeStreamedMessage(
+/**
+ * Replace the live progress card with the final answer, and report whether it
+ * landed.
+ *
+ * The return value is what fixes the truncation seen in the field. This used to
+ * swallow every failure - `.catch(() => {})` on the fallback send, nothing at all
+ * on the follow-up chunks - and return nothing, so a caller could not tell a
+ * delivered answer from one that never left, and the message was marked seen
+ * either way. Marked seen means never retried, and what the user is left with is
+ * the last text the card was edited to, a prefix of the answer.
+ */
+export async function finalizeStreamedMessage(
   chatId: number | string,
   messageId: number,
   text: string,
   signal: AbortSignal,
-): Promise<void> {
+): Promise<boolean> {
   const chunks = splitTelegramText(text);
   const first = chunks[0] ?? "";
   const edited = await editProgressMessage(chatId, messageId, first, signal);
-  if (edited) {
-    for (const chunk of chunks.slice(1)) {
-      if (signal.aborted) break;
-      await sendTelegram(chatId, chunk, signal).catch(() => {});
-    }
-  } else {
+  if (!edited) {
     logRelayWarn(
       `could not finalize streamed message ${messageId}; falling back to send`,
     );
-    await sendTelegram(chatId, text, signal).catch(() => {});
+    // `sendTelegram` chunks internally, so this is the whole answer and not a
+    // prefix of it. The card could not carry it; this send has to, and it is the
+    // one that must not fail quietly.
+    const sent = await sendTelegram(chatId, text, signal)
+      .then(() => true)
+      .catch(() => false);
+    if (sent) await sendDiagrams(chatId, text, signal);
+    return sent;
+  }
+  for (const chunk of chunks.slice(1)) {
+    if (signal.aborted) return false;
+    const sent = await sendTelegram(chatId, chunk, signal)
+      .then(() => true)
+      .catch(() => false);
+    if (!sent) {
+      // The card holds the first chunk and the tail did not land. Report it so
+      // the caller retries instead of recording a half answer as delivered.
+      // Retrying costs nothing already shown: the first chunk went out as an
+      // edit, not as a message.
+      logRelayWarn(`finalize chunk for card ${messageId} did not send`);
+      return false;
+    }
   }
   await sendDiagrams(chatId, text, signal);
+  return true;
 }
 
 /** Local report/document files the agent previewed via `preview_file` since the
@@ -386,7 +414,7 @@ export async function runMirror(signal: AbortSignal): Promise<void> {
                 }
               } else if (plan.send?.kind === "finalize") {
                 if (previous) {
-                  await finalizeStreamedMessage(
+                  delivered = await finalizeStreamedMessage(
                     chatId,
                     previous.messageId,
                     plan.send.text,
@@ -417,9 +445,27 @@ export async function runMirror(signal: AbortSignal): Promise<void> {
             } else if (!delivered) {
               const attempts = (mirrorSendFailures.get(mirrorKey) ?? 0) + 1;
               if (attempts >= MAX_MIRROR_SEND_ATTEMPTS) {
+                // Last resort before the retry budget is spent: send the answer
+                // whole. That is the path the relay uses when no Telegram message
+                // exists yet, and the one `sendTelegram` chunks for long text, so
+                // it is a different transport route from the in-place edit that
+                // just failed three times. Marking the message seen without it is
+                // how an answer disappears while the chat still shows a prefix.
                 logRelayWarn(
-                  `mirror gave up on a ${m.role} message after ${attempts} attempts (session ${sessionId})`,
+                  `mirror retry budget spent on a ${m.role} message (${text.length}ch, session ${sessionId}); sending it whole`,
                 );
+                const rescued = await sendReplyWithDiagrams(
+                  chatId,
+                  text,
+                  signal,
+                )
+                  .then(() => true)
+                  .catch(() => false);
+                if (!rescued) {
+                  logRelayWarn(
+                    `mirror could not deliver a ${m.role} message after ${attempts} attempts and a whole send (session ${sessionId})`,
+                  );
+                }
                 mirrorSendFailures.delete(mirrorKey);
                 mirrorStreams.delete(mirrorKey);
                 markMessageSeen(m.id, sessionId, m.role, text);
@@ -510,9 +556,11 @@ export async function runMirror(signal: AbortSignal): Promise<void> {
           const elPending = elStore.useElicitationStore.getState().pending;
           for (const el of elPending) {
             if (mirrorSentElicitationIds.has(el.id)) continue;
-            const keyboard = el.options.slice(0, 6).map((opt, i) => [
-              { text: opt.slice(0, 40), callback_data: `el:${el.id}:${i}` },
-            ]);
+            const keyboard = el.options
+              .slice(0, 6)
+              .map((opt, i) => [
+                { text: opt.slice(0, 40), callback_data: `el:${el.id}:${i}` },
+              ]);
             keyboard.push([
               {
                 text: ">> Tidak dulu (lewati)",
@@ -589,11 +637,7 @@ export async function runMirror(signal: AbortSignal): Promise<void> {
             state.agentMeta.status !== "error";
           const activeTools = isAppRunning && hasActiveToolCalls(chat);
           if (
-            isActivelyTyping(
-              chatStatus,
-              state.agentMeta.status,
-              activeTools,
-            )
+            isActivelyTyping(chatStatus, state.agentMeta.status, activeTools)
           ) {
             await sendTyping(chatId, signal).catch(() => {});
           }
@@ -786,11 +830,7 @@ export async function runAgentAndStream(
             currentAppStatus !== "idle" && currentAppStatus !== "error";
           const activeTools = isAppRunning && hasActiveToolCalls(currentChat);
           if (
-            isActivelyTyping(
-              currentChatStatus,
-              currentAppStatus,
-              activeTools,
-            )
+            isActivelyTyping(currentChatStatus, currentAppStatus, activeTools)
           ) {
             await sendTyping(chatId, signal).catch(() => {});
           }
@@ -862,7 +902,12 @@ export async function runAgentAndStream(
               progressCtl.abort();
               activeProgressMessageIds.delete(chatId);
               finalizedProgressMessages.add(activeProgId);
-              await finalizeStreamedMessage(chatId, activeProgId, reply, signal);
+              await finalizeStreamedMessage(
+                chatId,
+                activeProgId,
+                reply,
+                signal,
+              );
               replies += 1;
               sentChars += reply.length;
             } else if (
@@ -903,7 +948,8 @@ export async function runAgentAndStream(
             aqStore.useApprovalQueue,
           );
           const isAppRunning = appStatus !== "idle" && appStatus !== "error";
-          const activeTools = isAppRunning && hasActiveToolCalls(store.getChat(sessionId));
+          const activeTools =
+            isAppRunning && hasActiveToolCalls(store.getChat(sessionId));
           const busy =
             isAppRunning &&
             (runBusy(chatStatus, appStatus, pendingApprovals.length > 0) ||
@@ -1189,8 +1235,7 @@ export async function startTelegramDispatch(
     const isAppRunning = appStatus !== "idle" && appStatus !== "error";
     const activeTools = isAppRunning && hasActiveToolCalls(chat);
     const busy =
-      isAppRunning &&
-      (runBusy(chatStatus, appStatus, false) || activeTools);
+      isAppRunning && (runBusy(chatStatus, appStatus, false) || activeTools);
 
     // A pending `ask_user` question is the one "busy" state where the user's
     // reply IS the answer. It is checked BEFORE the busy branch, because the
@@ -1244,11 +1289,9 @@ export async function startTelegramDispatch(
       }
       progressCtrls.get(chatId)?.abort();
       await runtime.stopRun();
-      await sendTelegram(
-        chatId,
-        "Run stopped on user request.",
-        signal,
-      ).catch(() => {});
+      await sendTelegram(chatId, "Run stopped on user request.", signal).catch(
+        () => {},
+      );
       return;
     }
 
