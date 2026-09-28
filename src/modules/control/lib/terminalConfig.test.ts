@@ -10,7 +10,9 @@
 import { describe, expect, it } from "vitest";
 import {
   WRITABLE_CONFIG_KEYS,
+  addCustomEndpointConfig,
   listModels,
+  removeCustomEndpointConfig,
   setProviderSecret,
   writeTerminalConfig,
 } from "./terminalConfig";
@@ -47,6 +49,21 @@ describe("listModels", () => {
     // showed only the registry id would mislead about what is on the wire.
     const flash = listModels().models.find((m) => m.id === "deepseek-v4-flash");
     expect(flash?.apiModelId).toBe("deepseek-flash");
+  });
+
+  it("includes custom endpoints in models list", () => {
+    const catalogue = listModels([
+      {
+        id: "ollama-vps",
+        name: "Ollama VPS",
+        baseURL: "http://127.0.0.1:11434/v1",
+        modelId: "qwen2.5-coder",
+      },
+    ]);
+    const custom = catalogue.models.find((m) => m.id === "compat-ollama-vps");
+    expect(custom).toBeDefined();
+    expect(custom?.label).toBe("Ollama VPS");
+    expect(custom?.provider).toBe("openai-compatible");
   });
 });
 
@@ -142,5 +159,33 @@ describe("setProviderSecret", () => {
     await expect(
       setProviderSecret(keyless?.id ?? "", "sk-x"),
     ).rejects.toThrow(/does not use an API key/);
+  });
+});
+
+describe("addCustomEndpointConfig", () => {
+  it("validates required fields", async () => {
+    await expect(
+      addCustomEndpointConfig({
+        name: "Test",
+        baseURL: "",
+        modelId: "m1",
+      }),
+    ).rejects.toThrow(/baseURL is required/);
+
+    await expect(
+      addCustomEndpointConfig({
+        name: "Test",
+        baseURL: "http://localhost:8000/v1",
+        modelId: "",
+      }),
+    ).rejects.toThrow(/modelId is required/);
+  });
+});
+
+describe("removeCustomEndpointConfig", () => {
+  it("validates non-empty target", async () => {
+    await expect(removeCustomEndpointConfig("   ")).rejects.toThrow(
+      /endpoint id or name is required/,
+    );
   });
 });

@@ -26,6 +26,9 @@ const (
 	MethodConfigGet    = "config-get"
 	MethodConfigSet    = "config-set"
 	MethodSecretSet    = "secret-set"
+	MethodEndpointAdd    = "endpoint-add"
+	MethodEndpointRemove = "endpoint-remove"
+	MethodEndpointList   = "endpoint-list"
 )
 
 // ApprovalModes mirrors APPROVAL_MODES in the app's approvalPolicy.ts. It is
@@ -358,3 +361,94 @@ func (c *Catalogue) ModelByID(id string) (Model, bool) {
 	}
 	return Model{}, false
 }
+
+// CustomEndpoint is one registered OpenAI-compatible custom endpoint.
+type CustomEndpoint struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	BaseURL      string `json:"baseUrl"`
+	ModelID      string `json:"modelId"`
+	ContextLimit int    `json:"contextLimit,omitempty"`
+	HasKey       bool   `json:"hasKey"`
+}
+
+type endpointAddReply struct {
+	Endpoint CustomEndpoint `json:"endpoint"`
+}
+
+type endpointListReply struct {
+	Endpoints []CustomEndpoint `json:"endpoints"`
+}
+
+// EndpointAddWith registers a custom endpoint with an injected caller.
+func EndpointAddWith(call Caller, name, baseURL, modelID, apiKey string, contextLimit int, setDefault bool) (*CustomEndpoint, error) {
+	if strings.TrimSpace(name) == "" {
+		return nil, fmt.Errorf("an endpoint name is required")
+	}
+	if strings.TrimSpace(baseURL) == "" {
+		return nil, fmt.Errorf("a base URL is required")
+	}
+	if strings.TrimSpace(modelID) == "" {
+		return nil, fmt.Errorf("a model id is required")
+	}
+	params := map[string]interface{}{
+		"name":       strings.TrimSpace(name),
+		"base_url":   strings.TrimSpace(baseURL),
+		"model_id":   strings.TrimSpace(modelID),
+		"setDefault": setDefault,
+	}
+	if strings.TrimSpace(apiKey) != "" {
+		params["apiKey"] = strings.TrimSpace(apiKey)
+	}
+	if contextLimit > 0 {
+		params["contextLimit"] = contextLimit
+	}
+	result, err := call(MethodEndpointAdd, params, ReadTimeout)
+	if err != nil {
+		return nil, err
+	}
+	var reply endpointAddReply
+	if err := decode(result, &reply); err != nil {
+		return nil, err
+	}
+	return &reply.Endpoint, nil
+}
+
+// EndpointAdd registers a custom endpoint through the running app.
+func EndpointAdd(name, baseURL, modelID, apiKey string, contextLimit int, setDefault bool) (*CustomEndpoint, error) {
+	return EndpointAddWith(Live(), name, baseURL, modelID, apiKey, contextLimit, setDefault)
+}
+
+// EndpointRemoveWith removes a custom endpoint by id or name with an injected caller.
+func EndpointRemoveWith(call Caller, idOrName string) error {
+	trimmed := strings.TrimSpace(idOrName)
+	if trimmed == "" {
+		return fmt.Errorf("an endpoint id or name is required")
+	}
+	_, err := call(MethodEndpointRemove, map[string]interface{}{"id": trimmed}, ReadTimeout)
+	return err
+}
+
+// EndpointRemove removes a custom endpoint by id or name through the running app.
+func EndpointRemove(idOrName string) error {
+	return EndpointRemoveWith(Live(), idOrName)
+}
+
+// EndpointListWith lists custom endpoints with an injected caller.
+func EndpointListWith(call Caller) ([]CustomEndpoint, error) {
+	result, err := call(MethodEndpointList, map[string]interface{}{}, ReadTimeout)
+	if err != nil {
+		return nil, err
+	}
+	var reply endpointListReply
+	if err := decode(result, &reply); err != nil {
+		return nil, err
+	}
+	return reply.Endpoints, nil
+}
+
+// EndpointList lists custom endpoints through the running app.
+func EndpointList() ([]CustomEndpoint, error) {
+	return EndpointListWith(Live())
+}
+

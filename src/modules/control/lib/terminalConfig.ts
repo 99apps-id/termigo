@@ -15,17 +15,27 @@
 // (clamping, normalisation, event emission) cannot diverge.
 
 import {
+  type CustomEndpoint,
+  DEFAULT_MODEL_ID,
   MODELS,
   type ModelInfo,
   PROVIDERS,
   type ProviderId,
+  compatModelIdForEndpoint,
+  normalizeModelId,
   providerSupportsKey,
 } from "@/modules/ai/config";
 import { APPROVAL_MODES, type ApprovalMode } from "@/modules/ai/lib/approvalPolicy";
-import { setKey } from "@/modules/ai/lib/keyring";
+import {
+  clearCustomEndpointKey,
+  getAllCustomEndpointKeys,
+  setCustomEndpointKey,
+  setKey,
+} from "@/modules/ai/lib/keyring";
 import {
   loadPreferences,
   setAgentApprovalMode,
+  setCustomEndpoints,
   setDefaultModel,
   setDisabledToolGroups,
   setToolSearchEnabled,
@@ -72,24 +82,42 @@ export type ModelsListResult = {
   };
 };
 
-export function listModels(): ModelsListResult {
+export function listModels(
+  customEndpoints: readonly CustomEndpoint[] = [],
+): ModelsListResult {
+  const models: TerminalModel[] = CATALOGUE.map((m) => ({
+    id: m.id,
+    provider: m.provider,
+    label: m.label,
+    hint: m.hint,
+    description: m.description,
+    apiModelId: m.apiModelId,
+    capabilities: m.capabilities,
+    tags: m.tags,
+  }));
+
+  for (const ep of customEndpoints) {
+    if (!ep.baseURL.trim() || !ep.modelId.trim()) continue;
+    models.push({
+      id: compatModelIdForEndpoint(ep.id),
+      provider: "openai-compatible",
+      label: ep.name || ep.modelId,
+      hint: ep.baseURL,
+      description: `${ep.baseURL} (${ep.modelId})`,
+      apiModelId: ep.modelId,
+    });
+  }
+
+  const providers: TerminalProvider[] = PROVIDERS.map((p) => ({
+    id: p.id,
+    label: p.label,
+    needsKey: providerSupportsKey(p.id),
+    consoleUrl: p.consoleUrl,
+  }));
+
   return {
-    providers: PROVIDERS.map((p) => ({
-      id: p.id,
-      label: p.label,
-      needsKey: providerSupportsKey(p.id),
-      consoleUrl: p.consoleUrl,
-    })),
-    models: CATALOGUE.map((m) => ({
-      id: m.id,
-      provider: m.provider,
-      label: m.label,
-      hint: m.hint,
-      description: m.description,
-      apiModelId: m.apiModelId,
-      capabilities: m.capabilities,
-      tags: m.tags,
-    })),
+    providers,
+    models,
     current: { defaultModelId: null, configuredProviders: [] },
   };
 }
@@ -104,6 +132,7 @@ export type TerminalConfig = {
   disabledToolGroups: readonly string[];
   agentApprovalMode: string;
   language: string;
+  customEndpoints: readonly CustomEndpoint[];
 };
 
 export async function readTerminalConfig(): Promise<TerminalConfig> {
@@ -114,6 +143,7 @@ export async function readTerminalConfig(): Promise<TerminalConfig> {
     disabledToolGroups: prefs.disabledToolGroups,
     agentApprovalMode: prefs.agentApprovalMode,
     language: prefs.language,
+    customEndpoints: prefs.customEndpoints,
   };
 }
 
@@ -130,10 +160,25 @@ const WRITERS: Record<string, (value: unknown) => Promise<void>> = {
   defaultModelId: async (value) => {
     const id = typeof value === "string" ? value.trim() : "";
     if (!id) throw new Error("defaultModelId must be a non-empty model id");
-    if (!CATALOGUE.some((m) => m.id === id)) {
+    if (CATALOGUE.some((m) => m.id === id)) {
+      await setDefaultModel(id);
+      return;
+    }
+    let resolved: string | null = null;
+    try {
+      const prefs = await loadPreferences();
+      resolved = normalizeModelId(
+        id,
+        prefs.customEndpoints,
+        prefs.modelIdOverrides,
+      );
+    } catch {
+      if (id.startsWith("compat-")) resolved = id;
+    }
+    if (!resolved) {
       throw new Error(`unknown model id '${id}'`);
     }
-    await setDefaultModel(id);
+    await setDefaultModel(resolved);
   },
   toolSearchEnabled: async (value) => {
     if (typeof value !== "boolean") {
@@ -182,6 +227,7 @@ export async function writeTerminalConfig(
  *
  * Goes through the app so the platform-correct path is used, and so a failed
  * store is reported instead of silently writing a file the app does not read.
+ * Accepts both built-in providers and custom OpenAI-compatible endpoints.
  * The key is never returned, logged or echoed.
  */
 export async function setProviderSecret(
@@ -191,10 +237,142 @@ export async function setProviderSecret(
   const key = value.trim();
   if (!key) throw new Error("API key is empty");
   const known = PROVIDERS.find((p) => p.id === provider);
-  if (!known) throw new Error(`unknown provider '${provider}'`);
-  if (!providerSupportsKey(provider as ProviderId)) {
-    throw new Error(`${known.label} does not use an API key`);
+  if (known) {
+    if (!providerSupportsKey(provider as ProviderId)) {
+      throw new Error(`${known.label} does not use an API key`);
+    }
+    await setKey(provider as ProviderId, key);
+    return { provider };
   }
-  await setKey(provider as ProviderId, key);
-  return { provider };
+  let ep: { id: string; name?: string } | null | undefined = null;
+  try {
+    const prefs = await loadPreferences();
+    ep =
+      prefs.customEndpoints.find((e) => e.id === provider) ??
+      prefs.customEndpoints.find(
+        (e) => compatModelIdForEndpoint(e.id) === provider,
+      ) ??
+      prefs.customEndpoints.find(
+        (e) => e.name.toLowerCase() === provider.toLowerCase(),
+      ) ??
+      prefs.customEndpoints.find(
+        (e) => e.modelId.toLowerCase() === provider.toLowerCase(),
+      );
+  } catch {
+    if (provider.startsWith("compat-")) {
+      ep = { id: provider.replace(/^compat-/, ""), name: provider };
+    }
+  }
+  if (ep) {
+    await setCustomEndpointKey(ep.id, key);
+    return { provider: ep.name || ep.id };
+  }
+  throw new Error(`unknown provider '${provider}'`);
+}
+
+export type CustomEndpointInput = {
+  id?: string;
+  name?: string;
+  baseURL: string;
+  modelId: string;
+  contextLimit?: number;
+  apiKey?: string;
+  setDefault?: boolean;
+};
+
+export async function addCustomEndpointConfig(
+  input: CustomEndpointInput,
+): Promise<{ endpoint: CustomEndpoint; defaultModelSet: boolean }> {
+  const name = typeof input.name === "string" ? input.name.trim() : "";
+  const baseURL = typeof input.baseURL === "string" ? input.baseURL.trim() : "";
+  const modelId = typeof input.modelId === "string" ? input.modelId.trim() : "";
+  if (!baseURL) throw new Error("baseURL is required");
+  if (!modelId) throw new Error("modelId is required");
+
+  const prefs = await loadPreferences();
+  const id =
+    typeof input.id === "string" && input.id.trim()
+      ? input.id.trim()
+      : crypto.randomUUID().slice(0, 8);
+  const contextLimit =
+    input.contextLimit &&
+    Number.isFinite(input.contextLimit) &&
+    input.contextLimit >= 1000
+      ? input.contextLimit
+      : 128_000;
+
+  const endpoint: CustomEndpoint = {
+    id,
+    name: name || modelId,
+    baseURL,
+    modelId,
+    contextLimit,
+  };
+
+  const filtered = prefs.customEndpoints.filter((e) => e.id !== id);
+  await setCustomEndpoints([...filtered, endpoint]);
+
+  if (typeof input.apiKey === "string" && input.apiKey.trim()) {
+    await setCustomEndpointKey(id, input.apiKey.trim());
+  }
+
+  let defaultModelSet = false;
+  if (input.setDefault) {
+    await setDefaultModel(compatModelIdForEndpoint(id));
+    defaultModelSet = true;
+  }
+
+  return { endpoint, defaultModelSet };
+}
+
+export async function removeCustomEndpointConfig(
+  idOrName: string,
+): Promise<{ removed: boolean; id: string }> {
+  const target = typeof idOrName === "string" ? idOrName.trim() : "";
+  if (!target) throw new Error("endpoint id or name is required");
+
+  const prefs = await loadPreferences();
+  const ep =
+    prefs.customEndpoints.find((e) => e.id === target) ??
+    prefs.customEndpoints.find(
+      (e) => compatModelIdForEndpoint(e.id) === target,
+    ) ??
+    prefs.customEndpoints.find(
+      (e) => e.name.toLowerCase() === target.toLowerCase(),
+    );
+  if (!ep) {
+    throw new Error(`endpoint '${target}' not found`);
+  }
+
+  await clearCustomEndpointKey(ep.id);
+  const remaining = prefs.customEndpoints.filter((e) => e.id !== ep.id);
+  await setCustomEndpoints(remaining);
+
+  if (prefs.defaultModelId === compatModelIdForEndpoint(ep.id)) {
+    const fallback = remaining[0]
+      ? compatModelIdForEndpoint(remaining[0].id)
+      : DEFAULT_MODEL_ID;
+    await setDefaultModel(fallback);
+  }
+
+  return { removed: true, id: ep.id };
+}
+
+export type CustomEndpointSummary = CustomEndpoint & {
+  hasKey: boolean;
+  isDefault: boolean;
+  compatModelId: string;
+};
+
+export async function listCustomEndpointsConfig(): Promise<
+  CustomEndpointSummary[]
+> {
+  const prefs = await loadPreferences();
+  const epKeys = await getAllCustomEndpointKeys(prefs.customEndpoints);
+  return prefs.customEndpoints.map((ep) => ({
+    ...ep,
+    hasKey: !!epKeys[ep.id],
+    isDefault: prefs.defaultModelId === compatModelIdForEndpoint(ep.id),
+    compatModelId: compatModelIdForEndpoint(ep.id),
+  }));
 }

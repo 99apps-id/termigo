@@ -199,6 +199,7 @@ export const HELP = [
   "/new - start a new agent session",
   "/model - pick a model (opens a provider -> model menu)",
   "/model <id> - set the model directly",
+  "/endpoint [list|add|remove] - manage custom endpoints",
   "/cost - today's & total spend",
 ].join("\n");
 
@@ -994,6 +995,116 @@ export async function handleUpdate(u: Update, signal: AbortSignal): Promise<void
       await sendTelegram(
         chatId,
         "Usage: /scope [list | add <host> | clear | toggle]",
+        signal,
+      );
+      return;
+    }
+    case "/endpoint": {
+      if (!isOwnerUser(msg.from)) return;
+      const {
+        addCustomEndpointConfig,
+        removeCustomEndpointConfig,
+        listCustomEndpointsConfig,
+      } = await import("@/modules/control/lib/terminalConfig");
+
+      const [sub, ...args] = tail.split(/\s+/);
+      if (!sub || sub === "list") {
+        const endpoints = await listCustomEndpointsConfig();
+        if (endpoints.length === 0) {
+          await sendTelegram(
+            chatId,
+            "No custom endpoints configured.\n\nAdd one with:\n/endpoint add <name> <base_url> <model_id> [api_key]",
+            signal,
+          );
+          return;
+        }
+        const lines = [
+          `Custom Endpoints (${endpoints.length}):`,
+          "",
+        ];
+        for (const ep of endpoints) {
+          const activeTag = ep.isDefault ? " [active default]" : "";
+          const keyTag = ep.hasKey ? "configured" : "none (unauthenticated)";
+          lines.push(
+            `• ${ep.name} (ID: ${ep.id})${activeTag}`,
+            `  URL: ${ep.baseURL}`,
+            `  Model: ${ep.modelId}`,
+            `  Key: ${keyTag}`,
+            `  Switch: /model ${ep.id}`,
+            "",
+          );
+        }
+        lines.push(
+          "Commands:",
+          "/endpoint add <name> <url> <model> [key]",
+          "/endpoint remove <id|name>",
+        );
+        await sendTelegram(chatId, lines.join("\n").trim(), signal);
+        return;
+      }
+      if (sub === "add") {
+        if (args.length < 3) {
+          await sendTelegram(
+            chatId,
+            "Usage: /endpoint add <name> <base_url> <model_id> [api_key]",
+            signal,
+          );
+          return;
+        }
+        const [name, baseURL, modelId, ...keyParts] = args;
+        const apiKey = keyParts.join(" ").trim() || undefined;
+        try {
+          const result = await addCustomEndpointConfig({
+            name,
+            baseURL,
+            modelId,
+            apiKey,
+            setDefault: false,
+          });
+          const keyStatus = apiKey ? "API key saved." : "No API key (unauthenticated).";
+          await sendTelegram(
+            chatId,
+            `Added custom endpoint '${result.endpoint.name}'.\nID: ${result.endpoint.id}\nURL: ${result.endpoint.baseURL}\nModel: ${result.endpoint.modelId}\n${keyStatus}\n\nSwitch to it with: /model ${result.endpoint.id}`,
+            signal,
+          );
+        } catch (err) {
+          await sendTelegram(
+            chatId,
+            `Failed to add endpoint: ${err instanceof Error ? err.message : String(err)}`,
+            signal,
+          );
+        }
+        return;
+      }
+      if (sub === "remove" || sub === "rm" || sub === "delete") {
+        const target = args.join(" ").trim();
+        if (!target) {
+          await sendTelegram(
+            chatId,
+            "Usage: /endpoint remove <id|name>",
+            signal,
+          );
+          return;
+        }
+        try {
+          const result = await removeCustomEndpointConfig(target);
+          await sendTelegram(
+            chatId,
+            `Removed custom endpoint (ID: ${result.id}).`,
+            signal,
+          );
+        } catch (err) {
+          await sendTelegram(
+            chatId,
+            `Failed to remove endpoint: ${err instanceof Error ? err.message : String(err)}`,
+            signal,
+          );
+        }
+        return;
+      }
+      await sendTelegram(
+        chatId,
+        "Usage: /endpoint [list | add <name> <url> <model> [key] | remove <id|name>]",
         signal,
       );
       return;

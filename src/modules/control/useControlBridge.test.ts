@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   parseAgentRunRequest,
+  parseEndpointAddRequest,
+  parseEndpointRemoveRequest,
   parseFocusRequest,
   parseOpenRequest,
   parsePentestReportRequest,
@@ -142,6 +144,70 @@ describe("parseRunCommandRequest", () => {
     );
     expect(() => parseRunCommandRequest(null)).toThrow(
       "run-command parameters are required",
+    );
+  });
+});
+
+describe("parseEndpointAddRequest", () => {
+  it("parses valid endpoint parameters", () => {
+    expect(
+      parseEndpointAddRequest({
+        name: "Ollama",
+        baseURL: "http://localhost:11434/v1",
+        modelId: "llama3",
+        apiKey: "sk-test",
+        setDefault: true,
+      }),
+    ).toEqual({
+      id: undefined,
+      name: "Ollama",
+      baseURL: "http://localhost:11434/v1",
+      modelId: "llama3",
+      contextLimit: undefined,
+      apiKey: "sk-test",
+      setDefault: true,
+    });
+  });
+
+  it("accepts snake_case parameters from CLI", () => {
+    expect(
+      parseEndpointAddRequest({
+        base_url: "http://127.0.0.1:8000/v1",
+        model_id: "vllm-model",
+        context_limit: 65536,
+        set_default: true,
+      }),
+    ).toEqual({
+      id: undefined,
+      name: "",
+      baseURL: "http://127.0.0.1:8000/v1",
+      modelId: "vllm-model",
+      contextLimit: 65536,
+      apiKey: undefined,
+      setDefault: true,
+    });
+  });
+
+  it("rejects missing baseURL or modelId", () => {
+    expect(() => parseEndpointAddRequest({ modelId: "m1" })).toThrow(
+      /endpoint-add needs a base_url/,
+    );
+    expect(() =>
+      parseEndpointAddRequest({ baseURL: "http://localhost" }),
+    ).toThrow(/endpoint-add needs a model_id/);
+  });
+});
+
+describe("parseEndpointRemoveRequest", () => {
+  it("parses valid id", () => {
+    expect(parseEndpointRemoveRequest({ id: "  ep-123  " })).toEqual({
+      id: "ep-123",
+    });
+  });
+
+  it("rejects missing or empty id", () => {
+    expect(() => parseEndpointRemoveRequest({})).toThrow(
+      /needs an endpoint id or name/,
     );
   });
 });

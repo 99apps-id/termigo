@@ -98,6 +98,23 @@ describe("buildModelGroups", () => {
     expect(groups.find((x) => x.key === "endpoint:zai")).toBeUndefined();
   });
 
+  it("shows a local unauthenticated custom endpoint without a key", () => {
+    const groups = buildModelGroups(
+      input({
+        customEndpointKeys: {},
+        customEndpoints: [
+          {
+            id: "ollama-vps",
+            name: "Ollama VPS",
+            baseURL: "http://127.0.0.1:11434/v1",
+            modelId: "qwen2.5-coder",
+          },
+        ],
+      }),
+    );
+    expect(groups.find((x) => x.key === "endpoint:ollama-vps")).toBeDefined();
+  });
+
   it("keeps a custom endpoint that hosts the current model", () => {
     const groups = buildModelGroups(
       input({

@@ -29,7 +29,7 @@ export type ProviderGroup = {
 };
 
 type BuiltinLike = { id: string; provider: string; label: string };
-type EndpointLike = { id: string; name: string; modelId: string };
+type EndpointLike = { id: string; name: string; modelId: string; baseURL?: string };
 
 export type ModelGroupsInput = {
   models: readonly BuiltinLike[];
@@ -95,7 +95,15 @@ export function buildModelGroups(input: ModelGroupsInput): ProviderGroup[] {
   for (const ep of customEndpoints) {
     const modelId = compatModelIdForEndpoint(ep.id);
     const isCurrent = current === modelId;
-    if (!isCurrent && !customEndpointKeys[ep.id]) continue;
+    const url = ep.baseURL ?? "";
+    const isLocalUrl =
+      url !== "" &&
+      (url.includes("localhost") ||
+        url.includes("127.0.0.1") ||
+        url.includes("0.0.0.0") ||
+        url.startsWith("http://192.168.") ||
+        url.startsWith("http://10."));
+    if (!isCurrent && !customEndpointKeys[ep.id] && !isLocalUrl) continue;
     groups.push({
       key: `endpoint:${ep.id}`,
       label: ep.name || ep.modelId || "Custom endpoint",

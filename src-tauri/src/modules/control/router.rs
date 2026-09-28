@@ -6,12 +6,13 @@ use serde_json::{json, Value};
 use tauri::Emitter;
 use termigo_control_protocol::{
     protocol_is_supported, AgentRunParams, ConfigSetParams, ControlRequest, ControlResponse,
-    FocusParams, FrontendRequest, FrontendResponse, OpenParams, PentestReportParams,
-    PentestRunParams, QueryParams, RunCommandParams, SecretSetParams, METHODS, METHOD_AGENT_RUN,
-    METHOD_CAPABILITIES, METHOD_CONFIG_GET, METHOD_CONFIG_SET, METHOD_FOCUS, METHOD_IDENTIFY,
-    METHOD_MODELS_LIST, METHOD_OPEN, METHOD_PENTEST_REPORT, METHOD_PENTEST_RUN,
-    METHOD_PENTEST_STATUS, METHOD_PING, METHOD_QUERY, METHOD_RUN_COMMAND, METHOD_SECRET_SET,
-    METHOD_STATUS, MIN_SUPPORTED_PROTOCOL, PROTOCOL_VERSION, SERVER_RESPONSE_ID,
+    EndpointAddParams, EndpointRemoveParams, FocusParams, FrontendRequest, FrontendResponse,
+    OpenParams, PentestReportParams, PentestRunParams, QueryParams, RunCommandParams,
+    SecretSetParams, METHODS, METHOD_AGENT_RUN, METHOD_CAPABILITIES, METHOD_CONFIG_GET,
+    METHOD_CONFIG_SET, METHOD_ENDPOINT_ADD, METHOD_ENDPOINT_LIST, METHOD_ENDPOINT_REMOVE,
+    METHOD_FOCUS, METHOD_IDENTIFY, METHOD_MODELS_LIST, METHOD_OPEN, METHOD_PENTEST_REPORT,
+    METHOD_PENTEST_RUN, METHOD_PENTEST_STATUS, METHOD_PING, METHOD_QUERY, METHOD_RUN_COMMAND,
+    METHOD_SECRET_SET, METHOD_STATUS, MIN_SUPPORTED_PROTOCOL, PROTOCOL_VERSION, SERVER_RESPONSE_ID,
 };
 
 use super::validation::{
@@ -24,7 +25,7 @@ use super::ControlState;
 pub const CONTROL_EVENT: &str = "termigo:control-request";
 pub const FRONTEND_TIMEOUT: Duration = Duration::from_secs(5);
 /// A query waits for the agent's full answer, which can take minutes of tool
-/// steps — far beyond the 5s budget of one-shot UI actions like focus/open.
+/// steps - far beyond the 5s budget of one-shot UI actions like focus/open.
 pub const QUERY_FRONTEND_TIMEOUT: Duration = Duration::from_secs(600);
 pub const MAX_PENDING_REQUESTS: usize = 32;
 
@@ -335,6 +336,54 @@ pub fn route_request(
                     request.id,
                     "invalid_params",
                     "secret-set needs a non-empty key",
+                );
+            }
+            forward_to_frontend(request, app, state)
+        }
+        METHOD_ENDPOINT_LIST => forward_to_frontend(request, app, state),
+        METHOD_ENDPOINT_ADD => {
+            let params: EndpointAddParams = match serde_json::from_value(request.params.clone()) {
+                Ok(params) => params,
+                Err(error) => {
+                    return ControlResponse::failure(
+                        request.id,
+                        "invalid_params",
+                        format!("invalid endpoint-add parameters: {error}"),
+                    );
+                }
+            };
+            if params.base_url.trim().is_empty() {
+                return ControlResponse::failure(
+                    request.id,
+                    "invalid_params",
+                    "endpoint-add needs a non-empty base_url",
+                );
+            }
+            if params.model_id.trim().is_empty() {
+                return ControlResponse::failure(
+                    request.id,
+                    "invalid_params",
+                    "endpoint-add needs a non-empty model_id",
+                );
+            }
+            forward_to_frontend(request, app, state)
+        }
+        METHOD_ENDPOINT_REMOVE => {
+            let params: EndpointRemoveParams = match serde_json::from_value(request.params.clone()) {
+                Ok(params) => params,
+                Err(error) => {
+                    return ControlResponse::failure(
+                        request.id,
+                        "invalid_params",
+                        format!("invalid endpoint-remove parameters: {error}"),
+                    );
+                }
+            };
+            if params.id.trim().is_empty() {
+                return ControlResponse::failure(
+                    request.id,
+                    "invalid_params",
+                    "endpoint-remove needs a non-empty endpoint id",
                 );
             }
             forward_to_frontend(request, app, state)

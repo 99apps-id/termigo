@@ -311,3 +311,85 @@ func TestSettingKeysForHelpIsSortedAndListsTheApprovalMode(t *testing.T) {
 		t.Fatalf("the approval mode must be advertised as writable: %+v", keys)
 	}
 }
+
+func TestEndpointAddWithValidationAndReply(t *testing.T) {
+	seen := []callRecord{}
+	reply := map[string]interface{}{
+		"endpoint": map[string]interface{}{
+			"id":           "ep-test",
+			"name":         "Local Ollama",
+			"baseUrl":      "http://localhost:11434/v1",
+			"modelId":      "llama3.3",
+			"contextLimit": 32768,
+			"hasKey":       true,
+		},
+	}
+	caller := fakeCaller(t, reply, nil, &seen)
+
+	if _, err := EndpointAddWith(caller, "", "http://localhost", "m1", "", 0, false); err == nil {
+		t.Error("expected error for empty name")
+	}
+	if _, err := EndpointAddWith(caller, "test", "", "m1", "", 0, false); err == nil {
+		t.Error("expected error for empty base URL")
+	}
+	if _, err := EndpointAddWith(caller, "test", "http://localhost", "", "", 0, false); err == nil {
+		t.Error("expected error for empty model ID")
+	}
+
+	ep, err := EndpointAddWith(caller, "Local Ollama", "http://localhost:11434/v1", "llama3.3", "secret-key", 32768, true)
+	if err != nil {
+		t.Fatalf("EndpointAddWith failed: %v", err)
+	}
+	if ep.ID != "ep-test" || ep.Name != "Local Ollama" || !ep.HasKey {
+		t.Fatalf("unexpected endpoint: %+v", ep)
+	}
+	if len(seen) != 1 || seen[0].method != MethodEndpointAdd {
+		t.Fatalf("expected 1 endpoint-add call, got: %+v", seen)
+	}
+	if seen[0].params["setDefault"] != true || seen[0].params["apiKey"] != "secret-key" {
+		t.Fatalf("unexpected call params: %+v", seen[0].params)
+	}
+}
+
+func TestEndpointRemoveWithValidationAndCall(t *testing.T) {
+	seen := []callRecord{}
+	caller := fakeCaller(t, map[string]interface{}{"removed": true, "id": "ep-1"}, nil, &seen)
+
+	if err := EndpointRemoveWith(caller, "   "); err == nil {
+		t.Error("expected error for empty id")
+	}
+
+	if err := EndpointRemoveWith(caller, "ep-1"); err != nil {
+		t.Fatalf("EndpointRemoveWith failed: %v", err)
+	}
+	if len(seen) != 1 || seen[0].method != MethodEndpointRemove || seen[0].params["id"] != "ep-1" {
+		t.Fatalf("unexpected call: %+v", seen)
+	}
+}
+
+func TestEndpointListWith(t *testing.T) {
+	seen := []callRecord{}
+	reply := map[string]interface{}{
+		"endpoints": []interface{}{
+			map[string]interface{}{
+				"id":      "ep-1",
+				"name":    "Ollama",
+				"baseUrl": "http://localhost:11434/v1",
+				"modelId": "qwen2.5-coder",
+				"hasKey":  false,
+			},
+		},
+	}
+	caller := fakeCaller(t, reply, nil, &seen)
+
+	list, err := EndpointListWith(caller)
+	if err != nil {
+		t.Fatalf("EndpointListWith failed: %v", err)
+	}
+	if len(list) != 1 || list[0].ID != "ep-1" || list[0].Name != "Ollama" {
+		t.Fatalf("unexpected list: %+v", list)
+	}
+	if len(seen) != 1 || seen[0].method != MethodEndpointList {
+		t.Fatalf("expected 1 endpoint-list call, got: %+v", seen)
+	}
+}

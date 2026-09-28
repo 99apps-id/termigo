@@ -75,6 +75,10 @@ func TestTerminalCommandArgumentValidation(t *testing.T) {
 		{"secret rejects an unknown option", []string{"secret", "-x"}, "unknown secret option"},
 		{"tui rejects an argument", []string{"tui", "--nope"}, "unknown tui option"},
 		{"setup rejects an argument", []string{"setup", "--nope"}, "unknown setup option"},
+		{"endpoint requires subcommand", []string{"endpoint"}, "usage: termigo endpoint"},
+		{"endpoint rejects unknown subcommand", []string{"endpoint", "unknown"}, "unknown endpoint subcommand"},
+		{"endpoint add requires three arguments", []string{"endpoint", "add", "my-ollama"}, "endpoint add requires"},
+		{"endpoint remove requires identifier", []string{"endpoint", "remove"}, "usage: termigo endpoint remove"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -91,7 +95,7 @@ func TestHelpListsTheTerminalCommands(t *testing.T) {
 	if err := run([]string{"help"}, &output, &bytes.Buffer{}); err != nil {
 		t.Fatalf("help failed: %v", err)
 	}
-	for _, want := range []string{"tui", "setup", "models", "model", "settings", "approval", "secret"} {
+	for _, want := range []string{"tui", "setup", "models", "model", "settings", "approval", "secret", "endpoint"} {
 		if !strings.Contains(output.String(), want) {
 			t.Fatalf("help should mention %q", want)
 		}

@@ -42,6 +42,9 @@ pub const METHOD_MODELS_LIST: &str = "models-list";
 pub const METHOD_CONFIG_GET: &str = "config-get";
 pub const METHOD_CONFIG_SET: &str = "config-set";
 pub const METHOD_SECRET_SET: &str = "secret-set";
+pub const METHOD_ENDPOINT_ADD: &str = "endpoint-add";
+pub const METHOD_ENDPOINT_REMOVE: &str = "endpoint-remove";
+pub const METHOD_ENDPOINT_LIST: &str = "endpoint-list";
 pub const SERVER_RESPONSE_ID: &str = "server";
 pub const METHODS: &[&str] = &[
     METHOD_PING,
@@ -60,6 +63,9 @@ pub const METHODS: &[&str] = &[
     METHOD_CONFIG_GET,
     METHOD_CONFIG_SET,
     METHOD_SECRET_SET,
+    METHOD_ENDPOINT_ADD,
+    METHOD_ENDPOINT_REMOVE,
+    METHOD_ENDPOINT_LIST,
 ];
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -179,7 +185,7 @@ pub struct FocusParams {
 /// Kick off a pentest against an authorized target through the running app's
 /// in-app agent. `target` is added to the app's pentest scope and `category`
 /// selects the workflow (recon, web, network, …; empty defaults to recon). The
-/// agent still surfaces every command for approval — this only starts the run.
+/// agent still surfaces every command for approval - this only starts the run.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct PentestRunParams {
     pub target: String,
@@ -196,7 +202,7 @@ pub struct PentestReportParams {
     pub target: String,
 }
 
-/// Start a plain agent task through the running app's in-app agent — the
+/// Start a plain agent task through the running app's in-app agent: the
 /// generalization of `pentest-run` (no scope fencing, just a prompt). The run
 /// still surfaces every tool call for approval.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -258,6 +264,33 @@ pub struct SecretSetParams {
     /// The key itself. Never echoed back or logged.
     pub value: String,
 }
+
+/// Parameters for registering a custom OpenAI-compatible endpoint.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct EndpointAddParams {
+    #[serde(default)]
+    pub id: String,
+    pub name: String,
+    pub base_url: String,
+    pub model_id: String,
+    #[serde(default)]
+    pub context_limit: Option<u32>,
+    #[serde(default)]
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub set_default: bool,
+}
+
+/// Parameters for removing a custom endpoint by id or name.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct EndpointRemoveParams {
+    pub id: String,
+}
+
+/// No parameters: lists all configured custom endpoints.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+pub struct EndpointListParams {}
+
 fn default_focus() -> bool {
     true
 }
@@ -368,6 +401,9 @@ mod tests {
             METHOD_CONFIG_GET,
             METHOD_CONFIG_SET,
             METHOD_SECRET_SET,
+            METHOD_ENDPOINT_ADD,
+            METHOD_ENDPOINT_REMOVE,
+            METHOD_ENDPOINT_LIST,
         ] {
             assert!(METHODS.contains(&method), "{method} must be advertised");
         }
@@ -460,5 +496,31 @@ mod tests {
         .expect("deserialize run-command");
         assert_eq!(params.command, "settings.open");
         assert!(METHODS.contains(&METHOD_RUN_COMMAND));
+    }
+
+    #[test]
+    fn endpoint_add_round_trips_fields() {
+        let params: EndpointAddParams = serde_json::from_value(json!({
+            "name": "Ollama VPS",
+            "base_url": "http://127.0.0.1:11434/v1",
+            "model_id": "qwen2.5-coder:32b",
+            "set_default": true
+        }))
+        .expect("deserialize endpoint-add");
+        assert_eq!(params.name, "Ollama VPS");
+        assert_eq!(params.base_url, "http://127.0.0.1:11434/v1");
+        assert_eq!(params.model_id, "qwen2.5-coder:32b");
+        assert!(params.set_default);
+        assert!(METHODS.contains(&METHOD_ENDPOINT_ADD));
+    }
+
+    #[test]
+    fn endpoint_remove_round_trips_id() {
+        let params: EndpointRemoveParams = serde_json::from_value(json!({
+            "id": "15292c18"
+        }))
+        .expect("deserialize endpoint-remove");
+        assert_eq!(params.id, "15292c18");
+        assert!(METHODS.contains(&METHOD_ENDPOINT_REMOVE));
     }
 }

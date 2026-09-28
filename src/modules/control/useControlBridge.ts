@@ -7,9 +7,13 @@ import { resolveControlContext } from "./lib/context";
 import { createReadinessQueue } from "./lib/readiness";
 import {
   WRITABLE_CONFIG_KEYS,
+  addCustomEndpointConfig,
+  listCustomEndpointsConfig,
   listModels,
   readTerminalConfig,
+  removeCustomEndpointConfig,
   setProviderSecret,
+  type CustomEndpointInput,
   writeTerminalConfig,
 } from "./lib/terminalConfig";
 import { getAllKeys } from "@/modules/ai/lib/keyring";
@@ -263,6 +267,75 @@ export function parseSecretSetRequest(params: unknown): SecretSetRequest {
   return { provider, value };
 }
 
+export function parseEndpointAddRequest(params: unknown): CustomEndpointInput {
+  if (typeof params !== "object" || params === null) {
+    throw new RequestError("invalid_params", "endpoint-add parameters are required");
+  }
+  const raw = params as Record<string, unknown>;
+  const baseURL =
+    typeof raw.baseURL === "string"
+      ? raw.baseURL.trim()
+      : typeof raw.base_url === "string"
+        ? raw.base_url.trim()
+        : "";
+  const modelId =
+    typeof raw.modelId === "string"
+      ? raw.modelId.trim()
+      : typeof raw.model_id === "string"
+        ? raw.model_id.trim()
+        : "";
+  const name = typeof raw.name === "string" ? raw.name.trim() : "";
+  const id = typeof raw.id === "string" ? raw.id.trim() : undefined;
+  const rawContext = raw.contextLimit ?? raw.context_limit;
+  const contextLimit =
+    typeof rawContext === "number" && Number.isFinite(rawContext)
+      ? rawContext
+      : typeof rawContext === "string"
+        ? parseInt(rawContext, 10)
+        : undefined;
+  const apiKey =
+    typeof raw.apiKey === "string"
+      ? raw.apiKey.trim()
+      : typeof raw.api_key === "string"
+        ? raw.api_key.trim()
+        : undefined;
+  const setDefault =
+    typeof raw.setDefault === "boolean"
+      ? raw.setDefault
+      : typeof raw.set_default === "boolean"
+        ? raw.set_default
+        : false;
+
+  if (!baseURL) {
+    throw new RequestError("invalid_params", "endpoint-add needs a base_url");
+  }
+  if (!modelId) {
+    throw new RequestError("invalid_params", "endpoint-add needs a model_id");
+  }
+  return {
+    id,
+    name,
+    baseURL,
+    modelId,
+    contextLimit:
+      contextLimit && Number.isFinite(contextLimit) ? contextLimit : undefined,
+    apiKey,
+    setDefault,
+  };
+}
+
+export function parseEndpointRemoveRequest(params: unknown): { id: string } {
+  if (typeof params !== "object" || params === null) {
+    throw new RequestError("invalid_params", "endpoint-remove parameters are required");
+  }
+  const raw = params as Record<string, unknown>;
+  const id = typeof raw.id === "string" ? raw.id.trim() : "";
+  if (!id) {
+    throw new RequestError("invalid_params", "endpoint-remove needs an endpoint id or name");
+  }
+  return { id };
+}
+
 const setFrontendReady = createReadinessQueue((ready) =>
   invoke("control_frontend_ready", { ready }),
 );
@@ -365,8 +438,8 @@ export function useControlBridge({
         // lib/terminalConfig.ts for why, and for the write allowlist that keeps
         // `config-set` from becoming an arbitrary write into settings.
         if (request.method === "models-list") {
-          const catalogue = listModels();
           const config = await readTerminalConfig();
+          const catalogue = listModels(config.customEndpoints);
           const keys = await getAllKeys();
           await respond(request.id, {
             ok: true,
@@ -380,6 +453,37 @@ export function useControlBridge({
               },
             },
           });
+          return;
+        }
+        if (request.method === "endpoint-list") {
+          const endpoints = await listCustomEndpointsConfig();
+          await respond(request.id, { ok: true, result: { endpoints } });
+          return;
+        }
+        if (request.method === "endpoint-add") {
+          const input = parseEndpointAddRequest(request.params);
+          try {
+            const added = await addCustomEndpointConfig(input);
+            await respond(request.id, { ok: true, result: added });
+          } catch (error) {
+            throw new RequestError(
+              "endpoint_add_failed",
+              error instanceof Error ? error.message : String(error),
+            );
+          }
+          return;
+        }
+        if (request.method === "endpoint-remove") {
+          const input = parseEndpointRemoveRequest(request.params);
+          try {
+            const removed = await removeCustomEndpointConfig(input.id);
+            await respond(request.id, { ok: true, result: removed });
+          } catch (error) {
+            throw new RequestError(
+              "endpoint_remove_failed",
+              error instanceof Error ? error.message : String(error),
+            );
+          }
           return;
         }
         if (request.method === "config-get") {

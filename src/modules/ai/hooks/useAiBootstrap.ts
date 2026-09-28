@@ -19,6 +19,7 @@ import {
 import { useAgentsStore } from "../store/agentsStore";
 import { useChatStore } from "../store/chatStore";
 import { useSnippetsStore } from "../store/snippetsStore";
+import { seedCustomEndpointsFromEnv } from "../lib/envEndpointSeed";
 
 /**
  * Startup wiring for the AI subsystem: loads provider keys (and keeps them in
@@ -104,7 +105,9 @@ export function useAiBootstrap(): {
   const initPrefs = usePreferencesStore((s) => s.init);
   const prefDefaultModel = usePreferencesStore((s) => s.defaultModelId);
   useEffect(() => {
-    void initPrefs();
+    void initPrefs().then(() => {
+      void seedCustomEndpointsFromEnv();
+    });
   }, [initPrefs]);
   useEffect(() => {
     if (!prefsHydrated) return;

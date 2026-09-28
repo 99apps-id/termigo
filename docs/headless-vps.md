@@ -289,21 +289,49 @@ There is no `label`, `provider` or `apiKey` field: the label is `name`, the prov
 }
 ```
 
-Set the endpoint's key in the keychain (Settings → Models, or `secrets_set`); the file above only names the model.
+Set the endpoint's key in the secret store (Settings -> Models, or `termigo secret openai-compatible --key ...`); the file above only names the model.
 
-**Editing settings without the window.** The Go companion in `cli/` can read and change the allowlisted settings over the running app's control socket, which is easier than editing JSON by hand:
+**Managing endpoints and settings without the window.**
+You have three ways to configure custom endpoints and app settings in headless environments:
+
+1. **CLI Commands (`termigo-cli` or Go companion `termigo`)**:
+Both the bundled Rust `termigo-cli` and the Go companion `termigo` support endpoint and configuration management over the app control socket:
 
 ```bash
-go build -o termigo ./cli/cmd/termigo      # not installed by the app; build it on the host
-./termigo settings                         # defaultModelId, agentApprovalMode, toolSearchEnabled, groups
-./termigo model deepseek-v4-pro            # set the default model
-./termigo approval ask                     # confirm every edit before it runs
-./termigo tui                              # the same, interactive
+# Manage custom OpenAI-compatible endpoints (Ollama, vLLM, DeepSeek, etc.)
+termigo endpoint list
+termigo endpoint add Ollama http://127.0.0.1:11434/v1 llama3.3 --default
+termigo endpoint add DeepSeek https://api.deepseek.com/v1 deepseek-chat --key sk-xxx --default
+termigo endpoint remove Ollama
+
+# View and update settings
+termigo settings                         # defaultModelId, agentApprovalMode, toolSearchEnabled, groups
+termigo model deepseek-v4-pro            # set the default model
+termigo approval ask                     # confirm every edit before it runs
+termigo secret deepseek --key sk-xxx     # store an API key in the platform store
 ```
 
-These go through the same setters the Settings window uses, so the value is validated and normalised in one place. Writable keys are exactly `defaultModelId`, `toolSearchEnabled`, `disabledToolGroups` and `agentApprovalMode`; anything else is refused by the app with the reason. The bundled `termigo-cli` (the Rust helper next to the app binary) does not have these commands.
+2. **Telegram Bot `/endpoint` command**:
+If the Telegram relay is paired, manage endpoints directly from chat:
+- `/endpoint list`: show configured endpoints and active status
+- `/endpoint add <name> <base_url> <model_id> [api_key]`: register a new endpoint and set it as active
+- `/endpoint remove <id|name>`: delete a custom endpoint
+- `/model`: switch between registered providers and custom endpoints
 
-**Renamed models.** If a provider renames a model, change `modelId` here (or Settings → Models → *Model IDs*) rather than the app. For a built-in provider such as DeepSeek, Settings exposes a per-model override for the same purpose.
+3. **Environment variable auto-seeding**:
+When starting Termigo in automated or containerized environments, export endpoint variables:
+```bash
+export OPENAI_BASE_URL="http://127.0.0.1:11434/v1"
+export OPENAI_MODEL_ID="llama3.3"
+export OPENAI_API_KEY="optional-api-key"
+# or explicitly for Termigo:
+export TERMIGO_CUSTOM_ENDPOINT_URL="http://127.0.0.1:11434/v1"
+export TERMIGO_CUSTOM_ENDPOINT_MODEL="llama3.3"
+export TERMIGO_CUSTOM_ENDPOINT_KEY="optional-api-key"
+```
+On startup, Termigo automatically seeds the custom endpoint and selects it as default if no valid model is configured.
+
+**Renamed models.** If a provider renames a model, change `modelId` here (or Settings -> Models -> Model IDs) rather than the app. For a built-in provider such as DeepSeek, Settings exposes a per-model override for the same purpose.
 
 Run `scripts/vps-setup-and-build.sh` after editing: it rewrites a legacy `defaultModelId` into the `compat-<id>` form and refuses to start the service when the id cannot be resolved, which is the usual cause of "the bot is up but never replies".
 

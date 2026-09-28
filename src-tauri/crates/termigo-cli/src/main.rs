@@ -9,11 +9,14 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 use termigo_control_protocol::{
-    AgentRunParams, CallerContext, ControlDescriptor, ControlRequest, ControlResponse, FocusParams,
+    AgentRunParams, CallerContext, ConfigGetParams, ConfigSetParams, ControlDescriptor,
+    ControlRequest, ControlResponse, EndpointAddParams, EndpointRemoveParams, FocusParams,
     OpenParams, PentestReportParams, PentestRunParams, QueryParams, RunCommandParams,
-    MAX_MESSAGE_BYTES, METHOD_AGENT_RUN, METHOD_CAPABILITIES, METHOD_FOCUS, METHOD_IDENTIFY,
-    METHOD_OPEN, METHOD_PENTEST_REPORT, METHOD_PENTEST_RUN, METHOD_PENTEST_STATUS, METHOD_PING,
-    METHOD_QUERY, METHOD_RUN_COMMAND, METHOD_STATUS, PROTOCOL_VERSION, SERVER_RESPONSE_ID,
+    SecretSetParams, MAX_MESSAGE_BYTES, METHOD_AGENT_RUN, METHOD_CAPABILITIES, METHOD_CONFIG_GET,
+    METHOD_CONFIG_SET, METHOD_ENDPOINT_ADD, METHOD_ENDPOINT_LIST, METHOD_ENDPOINT_REMOVE,
+    METHOD_FOCUS, METHOD_IDENTIFY, METHOD_MODELS_LIST, METHOD_OPEN, METHOD_PENTEST_REPORT,
+    METHOD_PENTEST_RUN, METHOD_PENTEST_STATUS, METHOD_PING, METHOD_QUERY, METHOD_RUN_COMMAND,
+    METHOD_SECRET_SET, METHOD_STATUS, PROTOCOL_VERSION, SERVER_RESPONSE_ID,
 };
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
@@ -158,6 +161,11 @@ fn parse_args(mut args: Vec<OsString>) -> Result<Config, CliError> {
         }
         Some("run-command") => parse_run_command(args)?,
         Some("open") => parse_open(args)?,
+        Some("endpoint") => parse_endpoint(args)?,
+        Some("models") => parse_models(args)?,
+        Some("model") => parse_model(args)?,
+        Some("settings") => parse_settings(args)?,
+        Some("secret") => parse_secret(args)?,
         Some("--") => {
             args.insert(0, command);
             parse_open(args)?
@@ -213,7 +221,8 @@ fn unknown_command_error(command: &OsString) -> CliError {
     let mut message = format!(
         "unknown command '{name}'\n\n\
          This is the Termigo control CLI. It supports: open, ping, capabilities, \
-         status, identify, focus, run, query, run-command, pentest-run, pentest-status, pentest-report, version, help.\n\
+         status, identify, focus, run, query, run-command, pentest-run, pentest-status, pentest-report, \
+         endpoint, models, model, settings, secret, version, help.\n\
          Run 'termigo help' for usage, or pass a file path to open it."
     );
     if COMPANION_COMMANDS.contains(&name.as_ref()) {
@@ -222,7 +231,8 @@ fn unknown_command_error(command: &OsString) -> CliError {
              Build it with:  cd cli && go build -o termi-go ./cmd/termigo\n\
              Then run:       termi-go {name} --help\n\n\
              This binary controls a running Termigo window: open, ping, capabilities, \
-             status, identify, focus, run, query, run-command, pentest-run, pentest-status, pentest-report, version, help."
+             status, identify, focus, run, query, run-command, pentest-run, pentest-status, pentest-report, \
+             endpoint, models, model, settings, secret, version, help."
         );
     }
     usage_error(message)
@@ -376,7 +386,7 @@ fn parse_focus(args: Vec<OsString>) -> Result<Action, CliError> {
     })
 }
 
-/// `pentest-run <target> [category]` — start a pentest against an authorized
+/// `pentest-run <target> [category]` - start a pentest against an authorized
 /// target in the running app's agent. `target` is the first positional, the
 /// optional `category` (recon, web, network, …) the second; empty defaults to
 /// recon on the agent side.
@@ -430,7 +440,7 @@ fn parse_pentest_run(args: Vec<OsString>) -> Result<Action, CliError> {
     })
 }
 
-/// `pentest-report [target]` — ask the running app to generate and open the
+/// `pentest-report [target]` - ask the running app to generate and open the
 /// pentest report. The target is optional: empty means "the last pentest-run
 /// target", so `termigo pentest-report` right after a `pentest-run` reuses it.
 fn parse_pentest_report(args: Vec<OsString>) -> Result<Action, CliError> {
@@ -477,7 +487,7 @@ fn parse_pentest_report(args: Vec<OsString>) -> Result<Action, CliError> {
     })
 }
 
-/// `run "<task>"` — start a plain agent task in the running app's in-app agent
+/// `run "<task>"` - start a plain agent task in the running app's in-app agent
 /// (the generalization of pentest-run: no scope fencing, just a prompt). The
 /// prompt is a single positional argument, so it is quoted on the shell side.
 fn parse_run(args: Vec<OsString>) -> Result<Action, CliError> {
@@ -522,7 +532,7 @@ fn parse_run(args: Vec<OsString>) -> Result<Action, CliError> {
     })
 }
 
-/// `query "<question>" [--timeout <secs>]` — headless single-shot Q&A for
+/// `query "<question>" [--timeout <secs>]` - headless single-shot Q&A for
 /// scripting: send the prompt, wait for the agent's final text answer, print
 /// it. `--timeout` bounds how long to wait (default 300s) and becomes the
 /// socket read timeout.
@@ -592,7 +602,7 @@ fn parse_query(args: Vec<OsString>) -> Result<(Action, Option<Duration>), CliErr
     ))
 }
 
-/// `run-command <id>` — invoke a command-palette command (e.g. `settings.open`)
+/// `run-command <id>` - invoke a command-palette command (e.g. `settings.open`)
 /// in the running app by its id.
 fn parse_run_command(args: Vec<OsString>) -> Result<Action, CliError> {
     let mut positional: Vec<OsString> = Vec::new();
@@ -630,6 +640,234 @@ fn parse_run_command(args: Vec<OsString>) -> Result<Action, CliError> {
     })?;
     Ok(Action::Request {
         method: METHOD_RUN_COMMAND,
+        params,
+    })
+}
+
+fn parse_endpoint(args: Vec<OsString>) -> Result<Action, CliError> {
+    if args.is_empty() {
+        return Err(usage_error("endpoint requires a subcommand: list, add, remove"));
+    }
+    let mut args = args;
+    let sub = args.remove(0);
+    let sub_str = sub.to_str();
+    match sub_str {
+        Some("list" | "ls") => {
+            no_extra_args(args, Action::Request {
+                method: METHOD_ENDPOINT_LIST,
+                params: json!({}),
+            })
+        }
+        Some("remove" | "rm") => {
+            if args.is_empty() {
+                return Err(usage_error("endpoint remove requires an endpoint id or name"));
+            }
+            if args.len() > 1 {
+                return Err(usage_error("endpoint remove accepts exactly one endpoint id or name"));
+            }
+            let id = args.remove(0).into_string().map_err(|_| {
+                CliError::new("non_utf8_argument", "Termigo cannot use a non-UTF-8 endpoint id", EXIT_USAGE)
+            })?;
+            let params = serde_json::to_value(EndpointRemoveParams { id }).map_err(|e| {
+                CliError::new("serialization_error", e.to_string(), EXIT_PROTOCOL)
+            })?;
+            Ok(Action::Request {
+                method: METHOD_ENDPOINT_REMOVE,
+                params,
+            })
+        }
+        Some("add") => {
+            let mut positional: Vec<String> = Vec::new();
+            let mut api_key: Option<String> = None;
+            let mut context_limit: Option<u32> = None;
+            let mut set_default = false;
+            let mut iter = args.into_iter();
+            while let Some(arg) = iter.next() {
+                let Some(s) = arg.to_str() else {
+                    return Err(usage_error("non-UTF-8 argument"));
+                };
+                match s {
+                    "--key" => {
+                        let val = iter.next().ok_or_else(|| usage_error("--key requires a value"))?;
+                        api_key = Some(val.to_string_lossy().to_string());
+                    }
+                    val if val.starts_with("--key=") => {
+                        api_key = Some(val["--key=".len()..].to_string());
+                    }
+                    "--context-limit" => {
+                        let val = iter.next().ok_or_else(|| usage_error("--context-limit requires an integer"))?;
+                        let n = val.to_string_lossy().parse::<u32>().map_err(|_| usage_error("--context-limit requires an integer"))?;
+                        context_limit = Some(n);
+                    }
+                    val if val.starts_with("--context-limit=") => {
+                        let n = val["--context-limit=".len()..].parse::<u32>().map_err(|_| usage_error("--context-limit requires an integer"))?;
+                        context_limit = Some(n);
+                    }
+                    "--default" => {
+                        set_default = true;
+                    }
+                    val if val.starts_with('-') => {
+                        return Err(usage_error(format!("unknown endpoint add option '{val}'")));
+                    }
+                    _ => positional.push(s.to_string()),
+                }
+            }
+            if positional.len() < 3 {
+                return Err(usage_error("endpoint add requires: <name> <base_url> <model_id>"));
+            }
+            if positional.len() > 3 {
+                return Err(usage_error("endpoint add accepts at most: <name> <base_url> <model_id>"));
+            }
+            let name = positional.remove(0);
+            let base_url = positional.remove(0);
+            let model_id = positional.remove(0);
+            let params = serde_json::to_value(EndpointAddParams {
+                id: String::new(),
+                name,
+                base_url,
+                model_id,
+                context_limit,
+                api_key,
+                set_default,
+            }).map_err(|e| CliError::new("serialization_error", e.to_string(), EXIT_PROTOCOL))?;
+            Ok(Action::Request {
+                method: METHOD_ENDPOINT_ADD,
+                params,
+            })
+        }
+        _ => Err(usage_error(format!("unknown endpoint subcommand '{}'", sub.to_string_lossy()))),
+    }
+}
+
+fn parse_models(args: Vec<OsString>) -> Result<Action, CliError> {
+    no_extra_args(args, Action::Request {
+        method: METHOD_MODELS_LIST,
+        params: json!({}),
+    })
+}
+
+fn parse_model(args: Vec<OsString>) -> Result<Action, CliError> {
+    if args.is_empty() {
+        let params = serde_json::to_value(ConfigGetParams {
+            key: "defaultModelId".to_string(),
+        }).map_err(|e| CliError::new("serialization_error", e.to_string(), EXIT_PROTOCOL))?;
+        return Ok(Action::Request {
+            method: METHOD_CONFIG_GET,
+            params,
+        });
+    }
+    if args.len() > 1 {
+        return Err(usage_error("model accepts at most one model id"));
+    }
+    let model_id = args[0].to_str().ok_or_else(|| usage_error("model id must be UTF-8"))?;
+    if model_id.starts_with('-') {
+        return Err(usage_error(format!("unknown model option '{model_id}'")));
+    }
+    let params = serde_json::to_value(ConfigSetParams {
+        key: "defaultModelId".to_string(),
+        value: json!(model_id),
+    }).map_err(|e| CliError::new("serialization_error", e.to_string(), EXIT_PROTOCOL))?;
+    Ok(Action::Request {
+        method: METHOD_CONFIG_SET,
+        params,
+    })
+}
+
+fn parse_settings(args: Vec<OsString>) -> Result<Action, CliError> {
+    if args.is_empty() {
+        return Ok(Action::Request {
+            method: METHOD_CONFIG_GET,
+            params: json!({}),
+        });
+    }
+    let mut args = args;
+    let first = args.remove(0);
+    let first_str = first.to_str().ok_or_else(|| usage_error("invalid argument"))?;
+    if first_str == "set" {
+        if args.len() < 2 {
+            return Err(usage_error("usage: termigo settings set <key> <value>"));
+        }
+        let key = args.remove(0).to_string_lossy().to_string();
+        let raw_val: Vec<String> = args.into_iter().map(|s| s.to_string_lossy().to_string()).collect();
+        let raw_val = raw_val.join(" ");
+        let value = parse_setting_value(&key, &raw_val)?;
+        let params = serde_json::to_value(ConfigSetParams { key, value }).map_err(|e| {
+            CliError::new("serialization_error", e.to_string(), EXIT_PROTOCOL)
+        })?;
+        return Ok(Action::Request {
+            method: METHOD_CONFIG_SET,
+            params,
+        });
+    }
+    if first_str.starts_with('-') {
+        return Err(usage_error(format!("unknown settings option '{first_str}'")));
+    }
+    if !args.is_empty() {
+        return Err(usage_error("usage: termigo settings [<key>]"));
+    }
+    let params = serde_json::to_value(ConfigGetParams {
+        key: first_str.to_string(),
+    }).map_err(|e| CliError::new("serialization_error", e.to_string(), EXIT_PROTOCOL))?;
+    Ok(Action::Request {
+        method: METHOD_CONFIG_GET,
+        params,
+    })
+}
+
+fn parse_setting_value(key: &str, raw: &str) -> Result<Value, CliError> {
+    let trimmed = raw.trim();
+    match key {
+        "toolSearchEnabled" => match trimmed.to_lowercase().as_str() {
+            "true" | "1" => Ok(json!(true)),
+            "false" | "0" => Ok(json!(false)),
+            _ => Err(usage_error("toolSearchEnabled must be true or false")),
+        },
+        "disabledToolGroups" => {
+            let groups: Vec<String> = trimmed
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            Ok(json!(groups))
+        }
+        _ => Ok(json!(trimmed)),
+    }
+}
+
+fn parse_secret(args: Vec<OsString>) -> Result<Action, CliError> {
+    let mut provider: Option<String> = None;
+    let mut key: Option<String> = None;
+    let mut iter = args.into_iter();
+    while let Some(arg) = iter.next() {
+        let Some(s) = arg.to_str() else {
+            return Err(usage_error("non-UTF-8 argument"));
+        };
+        match s {
+            "--key" => {
+                let val = iter.next().ok_or_else(|| usage_error("--key requires a value"))?;
+                key = Some(val.to_string_lossy().to_string());
+            }
+            val if val.starts_with("--key=") => {
+                key = Some(val["--key=".len()..].to_string());
+            }
+            val if val.starts_with('-') => {
+                return Err(usage_error(format!("unknown secret option '{val}'")));
+            }
+            _ => {
+                if provider.is_some() {
+                    return Err(usage_error("secret takes at most one provider id"));
+                }
+                provider = Some(s.to_string());
+            }
+        }
+    }
+    let provider = provider.ok_or_else(|| usage_error("usage: termigo secret <provider> [--key <value>]"))?;
+    let key = key.ok_or_else(|| usage_error("secret requires --key <value>"))?;
+    let params = serde_json::to_value(SecretSetParams { provider, value: key }).map_err(|e| {
+        CliError::new("serialization_error", e.to_string(), EXIT_PROTOCOL)
+    })?;
+    Ok(Action::Request {
+        method: METHOD_SECRET_SET,
         params,
     })
 }
@@ -910,7 +1148,7 @@ fn print_result(method: &str, result: Value, as_json: bool) {
                         .unwrap_or("idle");
                     let step = agent.get("step").and_then(Value::as_str).unwrap_or("");
                     if !step.is_empty() {
-                        println!("agent: {status} — {step}");
+                        println!("agent: {status} - {step}");
                     } else {
                         println!("agent: {status}");
                     }
@@ -1019,6 +1257,86 @@ fn print_result(method: &str, result: Value, as_json: bool) {
                 .unwrap_or("last run");
             println!("Pentest report requested for {target} in Termigo");
         }
+        METHOD_ENDPOINT_LIST => {
+            if let Some(endpoints) = result.get("endpoints").and_then(Value::as_array) {
+                if endpoints.is_empty() {
+                    println!("No custom endpoints configured.");
+                } else {
+                    println!("Custom endpoints:");
+                    for ep in endpoints {
+                        let id = ep.get("id").and_then(Value::as_str).unwrap_or("");
+                        let name = ep.get("name").and_then(Value::as_str).unwrap_or(id);
+                        let base_url = ep.get("baseUrl").and_then(Value::as_str).unwrap_or("");
+                        let model_id = ep.get("modelId").and_then(Value::as_str).unwrap_or("");
+                        let has_key = ep.get("hasKey").and_then(Value::as_bool).unwrap_or(false);
+                        let key_str = if has_key { "key: set" } else { "no key" };
+                        println!("  - {name} ({id}): {model_id} @ {base_url} [{key_str}]");
+                    }
+                }
+            }
+        }
+        METHOD_ENDPOINT_ADD => {
+            if let Some(ep) = result.get("endpoint") {
+                let name = ep.get("name").and_then(Value::as_str).unwrap_or("");
+                let id = ep.get("id").and_then(Value::as_str).unwrap_or("");
+                let model = ep.get("modelId").and_then(Value::as_str).unwrap_or("");
+                println!("Added custom endpoint '{name}' ({id}) for model '{model}'");
+            } else {
+                println!("Added custom endpoint");
+            }
+        }
+        METHOD_ENDPOINT_REMOVE => {
+            let id = result.get("id").and_then(Value::as_str).unwrap_or("");
+            println!("Removed custom endpoint '{id}'");
+        }
+        METHOD_MODELS_LIST => {
+            let default_model = result
+                .get("current")
+                .and_then(|c| c.get("defaultModelId"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            if let Some(providers) = result.get("providers").and_then(Value::as_array) {
+                let models = result.get("models").and_then(Value::as_array);
+                for prov in providers {
+                    let prov_id = prov.get("id").and_then(Value::as_str).unwrap_or("");
+                    let prov_label = prov.get("label").and_then(Value::as_str).unwrap_or(prov_id);
+                    println!("{prov_label}:");
+                    if let Some(models) = models {
+                        for m in models {
+                            if m.get("provider").and_then(Value::as_str) == Some(prov_id) {
+                                let m_id = m.get("id").and_then(Value::as_str).unwrap_or("");
+                                let m_label = m.get("label").and_then(Value::as_str).unwrap_or(m_id);
+                                let marker = if m_id == default_model { " [default]" } else { "" };
+                                println!("  - {m_id}: {m_label}{marker}");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        METHOD_CONFIG_GET => {
+            if let Some(val) = result.get("value") {
+                let key = result.get("key").and_then(Value::as_str).unwrap_or("value");
+                println!("{key} = {val}");
+            } else if let Some(cfg) = result.get("config") {
+                if let Some(obj) = cfg.as_object() {
+                    for (k, v) in obj {
+                        println!("{k:20} {v}");
+                    }
+                }
+            } else {
+                println!("{result}");
+            }
+        }
+        METHOD_CONFIG_SET => {
+            let key = result.get("key").and_then(Value::as_str).unwrap_or("");
+            let val = result.get("value").unwrap_or(&Value::Null);
+            println!("{key} is now {val}");
+        }
+        METHOD_SECRET_SET => {
+            let prov = result.get("provider").and_then(Value::as_str).unwrap_or("");
+            println!("Stored secret for {prov}");
+        }
         _ => println!("{result}"),
     }
 }
@@ -1026,13 +1344,37 @@ fn print_result(method: &str, result: Value, as_json: bool) {
 fn print_help() {
     println!(
         "Termigo command line interface\n\n\
-Usage:\n  termigo <file> [--line <n>] [--no-focus] [--json]\n  termigo open <file> [--line <n>] [--no-focus] [--json]\n  termigo ping [--json]\n  termigo capabilities [--json]\n  termigo status [--json]\n  termigo identify [--json]\n  termigo focus <query> [--json]\n  termigo run \"<task>\" [--json]\n  termigo query \"<question>\" [--timeout <secs>] [--json]\n  termigo run-command <id> [--json]\n  termigo pentest-run <target> [category] [--json]\n  termigo pentest-status [--json]\n  termigo pentest-report [target] [--json]\n  termigo --version\n\n\
+Usage:\n  \
+  termigo <file> [--line <n>] [--no-focus] [--json]\n  \
+  termigo open <file> [--line <n>] [--no-focus] [--json]\n  \
+  termigo ping [--json]\n  \
+  termigo capabilities [--json]\n  \
+  termigo status [--json]\n  \
+  termigo identify [--json]\n  \
+  termigo focus <query> [--json]\n  \
+  termigo run \"<task>\" [--json]\n  \
+  termigo query \"<question>\" [--timeout <secs>] [--json]\n  \
+  termigo run-command <id> [--json]\n  \
+  termigo pentest-run <target> [category] [--json]\n  \
+  termigo pentest-status [--json]\n  \
+  termigo pentest-report [target] [--json]\n  \
+  termigo endpoint list [--json]\n  \
+  termigo endpoint add <name> <base_url> <model_id> [--key <key>] [--default] [--json]\n  \
+  termigo endpoint remove <id_or_name> [--json]\n  \
+  termigo models [--json]\n  \
+  termigo model [<id>] [--json]\n  \
+  termigo settings [<key>] [--json]\n  \
+  termigo settings set <key> <value> [--json]\n  \
+  termigo secret <provider> [--key <value>] [--json]\n  \
+  termigo --version\n\n\
 The app must be running. Commands launched in a Termigo pane target that pane's space.\n\
 run starts a plain agent task in the app's in-app agent (approval-gated, no\
 scope fencing); query is the headless read-only Q&A that prints the answer;\n\
 run-command invokes a command-palette command by id (e.g. settings.open);\n\
 pentest-run is the scoped variant that also authorizes a target. pentest-status\n\
-reports the latest run and the agent's state; pentest-report asks the app to\ngenerate and open the report (target optional, defaults to the last pentest-run\ntarget)."
+reports the latest run and the agent's state; pentest-report asks the app to\
+generate and open the report.\n\
+endpoint, models, model, settings, secret manage AI endpoints, default models, and app preferences."
     );
 }
 
@@ -1454,5 +1796,132 @@ mod tests {
         bytes.push(b'\n');
         let response = read_response(&mut Cursor::new(bytes), &request).expect("read response");
         assert!(!response.ok);
+    }
+
+    #[test]
+    fn parses_endpoint_commands() {
+        let list = parse_args(args(&["endpoint", "list", "--json"])).expect("parse endpoint list");
+        assert!(list.json);
+        assert_eq!(
+            list.action,
+            Action::Request {
+                method: METHOD_ENDPOINT_LIST,
+                params: json!({}),
+            }
+        );
+
+        let add = parse_args(args(&[
+            "endpoint",
+            "add",
+            "my-ollama",
+            "http://127.0.0.1:11434/v1",
+            "llama3.3",
+            "--key",
+            "ollama-key",
+            "--context-limit",
+            "32768",
+            "--default",
+        ]))
+        .expect("parse endpoint add");
+        let Action::Request { method, params } = add.action else {
+            panic!("expected request action");
+        };
+        assert_eq!(method, METHOD_ENDPOINT_ADD);
+        assert_eq!(params["name"], "my-ollama");
+        assert_eq!(params["base_url"], "http://127.0.0.1:11434/v1");
+        assert_eq!(params["model_id"], "llama3.3");
+        assert_eq!(params["api_key"], "ollama-key");
+        assert_eq!(params["context_limit"], 32768);
+        assert_eq!(params["set_default"], true);
+
+        let remove = parse_args(args(&["endpoint", "remove", "my-ollama"])).expect("parse endpoint remove");
+        assert_eq!(
+            remove.action,
+            Action::Request {
+                method: METHOD_ENDPOINT_REMOVE,
+                params: json!({ "id": "my-ollama" }),
+            }
+        );
+    }
+
+    #[test]
+    fn endpoint_rejects_missing_subcommand_or_invalid_args() {
+        let err = parse_args(args(&["endpoint"])).expect_err("missing subcommand");
+        assert_eq!(err.code, "usage");
+
+        let err = parse_args(args(&["endpoint", "add", "only-one"])).expect_err("incomplete add");
+        assert_eq!(err.code, "usage");
+
+        let err = parse_args(args(&["endpoint", "remove", "a", "b"])).expect_err("too many remove args");
+        assert_eq!(err.code, "usage");
+    }
+
+    #[test]
+    fn parses_models_and_model_commands() {
+        let models = parse_args(args(&["models"])).expect("parse models");
+        assert_eq!(
+            models.action,
+            Action::Request {
+                method: METHOD_MODELS_LIST,
+                params: json!({}),
+            }
+        );
+
+        let get_model = parse_args(args(&["model"])).expect("parse model get");
+        assert_eq!(
+            get_model.action,
+            Action::Request {
+                method: METHOD_CONFIG_GET,
+                params: json!({ "key": "defaultModelId" }),
+            }
+        );
+
+        let set_model = parse_args(args(&["model", "deepseek-v4-pro"])).expect("parse model set");
+        assert_eq!(
+            set_model.action,
+            Action::Request {
+                method: METHOD_CONFIG_SET,
+                params: json!({ "key": "defaultModelId", "value": "deepseek-v4-pro" }),
+            }
+        );
+    }
+
+    #[test]
+    fn parses_settings_and_secret_commands() {
+        let all_settings = parse_args(args(&["settings"])).expect("parse settings");
+        assert_eq!(
+            all_settings.action,
+            Action::Request {
+                method: METHOD_CONFIG_GET,
+                params: json!({}),
+            }
+        );
+
+        let one_setting = parse_args(args(&["settings", "toolSearchEnabled"])).expect("parse one setting");
+        assert_eq!(
+            one_setting.action,
+            Action::Request {
+                method: METHOD_CONFIG_GET,
+                params: json!({ "key": "toolSearchEnabled" }),
+            }
+        );
+
+        let set_setting = parse_args(args(&["settings", "set", "toolSearchEnabled", "true"])).expect("parse set setting");
+        assert_eq!(
+            set_setting.action,
+            Action::Request {
+                method: METHOD_CONFIG_SET,
+                params: json!({ "key": "toolSearchEnabled", "value": true }),
+            }
+        );
+
+        let secret = parse_args(args(&["secret", "openai", "--key", "sk-secret123"])).expect("parse secret");
+        assert_eq!(
+            secret.action,
+            Action::Request {
+                method: METHOD_SECRET_SET,
+                params: json!({ "provider": "openai", "value": "sk-secret123" }),
+            }
+        );
     }
 }

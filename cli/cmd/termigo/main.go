@@ -77,6 +77,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return runApproval(args[1:], stdout)
 	case "secret":
 		return runSecret(args[1:], stdout)
+	case "endpoint":
+		return runEndpoint(args[1:], stdout)
 	default:
 		return fmt.Errorf("unknown command %q; run 'termigo help'", args[0])
 	}
@@ -148,6 +150,9 @@ Commands that drive a running Termigo:
   settings set <key> <value>       Change one allowlisted app setting
   approval [<mode>]                Show or set the agent approval mode
   secret <provider>                Store a provider API key (prompted, never echoed)
+  endpoint list [--json]           List custom OpenAI-compatible endpoints
+  endpoint add <name> <url> <model> [--key <k>] [--default] Add custom endpoint
+  endpoint remove <id|name>        Remove a custom endpoint
 
 Common options:
   -w, --workspace <dir>            Use a specific workspace (default: current dir)
@@ -1074,6 +1079,133 @@ func runSecret(args []string, stdout io.Writer) error {
 	}
 	_, err := fmt.Fprintf(stdout, "Stored a key for %s.\n", provider)
 	return err
+}
+
+func runEndpoint(args []string, stdout io.Writer) error {
+	jsonOutput := false
+	rest := []string{}
+	for _, arg := range args {
+		switch {
+		case arg == "--json":
+			jsonOutput = true
+		case arg == "--help", arg == "-h":
+			_, err := fmt.Fprintf(stdout, `Usage:
+  termigo endpoint list [--json]
+  termigo endpoint add <name> <base_url> <model_id> [--key <api_key>] [--context-limit <n>] [--default] [--json]
+  termigo endpoint remove <id|name> [--json]
+
+Registers, lists, and removes OpenAI-compatible custom endpoints (e.g. Ollama, vLLM).
+`)
+			return err
+		default:
+			rest = append(rest, arg)
+		}
+	}
+
+	if len(rest) == 0 {
+		return errors.New("usage: termigo endpoint [list|add|remove] [options]")
+	}
+
+	switch rest[0] {
+	case "list", "ls":
+		endpoints, err := control.EndpointList()
+		if err != nil {
+			return err
+		}
+		if jsonOutput {
+			return writeJSON(stdout, map[string]interface{}{"endpoints": endpoints})
+		}
+		if len(endpoints) == 0 {
+			_, err = fmt.Fprintln(stdout, "No custom endpoints configured.")
+			return err
+		}
+		_, _ = fmt.Fprintln(stdout, "Custom endpoints:")
+		for _, ep := range endpoints {
+			keyState := "no key"
+			if ep.HasKey {
+				keyState = "key: set"
+			}
+			_, _ = fmt.Fprintf(stdout, "  - %s (%s): %s @ %s [%s]\n", ep.Name, ep.ID, ep.ModelID, ep.BaseURL, keyState)
+		}
+		return nil
+
+	case "add":
+		var positional []string
+		var key string
+		var contextLimit int
+		setDefault := false
+		for i := 1; i < len(rest); i++ {
+			arg := rest[i]
+			switch {
+			case arg == "--key":
+				if i+1 >= len(rest) {
+					return errors.New("--key requires a value")
+				}
+				i++
+				key = rest[i]
+			case strings.HasPrefix(arg, "--key="):
+				key = strings.TrimPrefix(arg, "--key=")
+			case arg == "--context-limit":
+				if i+1 >= len(rest) {
+					return errors.New("--context-limit requires an integer")
+				}
+				i++
+				val, err := strconv.Atoi(rest[i])
+				if err != nil || val <= 0 {
+					return errors.New("--context-limit requires a positive integer")
+				}
+				contextLimit = val
+			case strings.HasPrefix(arg, "--context-limit="):
+				val, err := strconv.Atoi(strings.TrimPrefix(arg, "--context-limit="))
+				if err != nil || val <= 0 {
+					return errors.New("--context-limit requires a positive integer")
+				}
+				contextLimit = val
+			case arg == "--default":
+				setDefault = true
+			case strings.HasPrefix(arg, "-"):
+				return fmt.Errorf("unknown endpoint add option %q", arg)
+			default:
+				positional = append(positional, arg)
+			}
+		}
+		if len(positional) < 3 {
+			return errors.New("endpoint add requires: <name> <base_url> <model_id>")
+		}
+		if len(positional) > 3 {
+			return errors.New("endpoint add accepts at most: <name> <base_url> <model_id>")
+		}
+		name, baseURL, modelID := positional[0], positional[1], positional[2]
+		endpoint, err := control.EndpointAdd(name, baseURL, modelID, key, contextLimit, setDefault)
+		if err != nil {
+			return err
+		}
+		if jsonOutput {
+			return writeJSON(stdout, map[string]interface{}{"endpoint": endpoint})
+		}
+		_, err = fmt.Fprintf(stdout, "Added custom endpoint %q (%s) for model %q.\n", endpoint.Name, endpoint.ID, endpoint.ModelID)
+		return err
+
+	case "remove", "rm":
+		if len(rest) < 2 {
+			return errors.New("usage: termigo endpoint remove <id|name>")
+		}
+		if len(rest) > 2 {
+			return errors.New("endpoint remove accepts exactly one identifier")
+		}
+		id := rest[1]
+		if err := control.EndpointRemove(id); err != nil {
+			return err
+		}
+		if jsonOutput {
+			return writeJSON(stdout, map[string]interface{}{"removed": true, "id": id})
+		}
+		_, err := fmt.Fprintf(stdout, "Removed custom endpoint %q.\n", id)
+		return err
+
+	default:
+		return fmt.Errorf("unknown endpoint subcommand %q; supported: list, add, remove", rest[0])
+	}
 }
 
 // writeJSON prints a machine-readable result with the same indentation every
