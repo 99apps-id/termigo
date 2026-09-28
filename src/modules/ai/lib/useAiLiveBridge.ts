@@ -6,11 +6,14 @@ import {
   findLeafCwd,
   findLeafRemoteCwd,
   isSshLeaf,
+  leafIds,
   leafSessionId,
   type TerminalPaneHandle,
   whenSessionReady,
   writeToSession,
 } from "@/modules/terminal";
+import { useSshActiveSessionStore } from "@/modules/ssh/sshActiveSession";
+import { useSshRightPanelStore } from "@/modules/ssh/sshRightPanelStore";
 import { invoke } from "@tauri-apps/api/core";
 import { type RefObject, useEffect, useRef } from "react";
 import {
@@ -115,17 +118,42 @@ export function useAiLiveBridge(params: Params) {
 
     const findCwd = () => {
       const { activeId, tabs, explorerRoot, launchCwd, home } = ref.current;
+      const sshPanelOpen = useSshRightPanelStore.getState().open;
+      const activeSsh = useSshActiveSessionStore.getState().session;
       const active = tabs.find((x) => x.id === activeId);
+
+      // If SSH remote / SFTP panel is open and an SSH session exists, prioritize remote cwd
+      if (sshPanelOpen && activeSsh) {
+        for (const t of tabs) {
+          if (t.kind !== "terminal") continue;
+          for (const lid of leafIds(t.paneTree)) {
+            if (isSshLeaf(t.paneTree, lid) && leafSessionId(lid) === activeSsh.sessionId) {
+              const remoteCwd = findLeafRemoteCwd(t.paneTree, lid);
+              if (remoteCwd) return remoteCwd;
+            }
+          }
+        }
+      }
+
       if (active?.kind === "terminal") {
+        if (isSshLeaf(active.paneTree, active.activeLeafId)) {
+          const remoteCwd = findLeafRemoteCwd(active.paneTree, active.activeLeafId);
+          if (remoteCwd) return remoteCwd;
+        }
         return (
           findLeafCwd(active.paneTree, active.activeLeafId) ??
           active.cwd ??
           null
         );
       }
+
       for (let i = tabs.length - 1; i >= 0; i--) {
         const t = tabs[i];
         if (t.kind !== "terminal") continue;
+        if (isSshLeaf(t.paneTree, t.activeLeafId)) {
+          const remoteCwd = findLeafRemoteCwd(t.paneTree, t.activeLeafId);
+          if (remoteCwd) return remoteCwd;
+        }
         const cwd = findLeafCwd(t.paneTree, t.activeLeafId) ?? t.cwd;
         if (cwd) return cwd;
       }
@@ -140,34 +168,104 @@ export function useAiLiveBridge(params: Params) {
       },
       getRemoteSession: () => {
         const { activeId, tabs } = ref.current;
-        const t = tabs.find((x) => x.id === activeId);
-        if (t?.kind !== "terminal") return null;
-        const leafId = t.activeLeafId;
-        if (!isSshLeaf(t.paneTree, leafId)) return null;
-        const sessionId = leafSessionId(leafId);
-        if (sessionId === null) return null;
-        const cwd = findLeafRemoteCwd(t.paneTree, leafId) ?? null;
-        return { sessionId, cwd };
+        const active = tabs.find((x) => x.id === activeId);
+
+        // 1. If active tab is an SSH leaf, prioritize it
+        if (active?.kind === "terminal" && isSshLeaf(active.paneTree, active.activeLeafId)) {
+          const sessionId = leafSessionId(active.activeLeafId);
+          if (sessionId !== null) {
+            const cwd = findLeafRemoteCwd(active.paneTree, active.activeLeafId) ?? null;
+            return { sessionId, cwd };
+          }
+        }
+
+        const sshPanelOpen = useSshRightPanelStore.getState().open;
+        const activeSsh = useSshActiveSessionStore.getState().session;
+
+        // 2. If SSH remote / SFTP panel is open, or active tab is not a terminal while an SSH session exists
+        if (sshPanelOpen || (active?.kind !== "terminal" && activeSsh)) {
+          if (activeSsh) {
+            let remoteCwd: string | null = null;
+            for (const t of tabs) {
+              if (t.kind !== "terminal") continue;
+              for (const lid of leafIds(t.paneTree)) {
+                if (isSshLeaf(t.paneTree, lid) && leafSessionId(lid) === activeSsh.sessionId) {
+                  const found = findLeafRemoteCwd(t.paneTree, lid);
+                  if (found) {
+                    remoteCwd = found;
+                    break;
+                  }
+                }
+              }
+              if (remoteCwd) break;
+            }
+            return { sessionId: activeSsh.sessionId, cwd: remoteCwd };
+          }
+
+          // Fallback: look for any SSH leaf in tabs if panel is open but activeStore is unhydrated
+          for (let i = tabs.length - 1; i >= 0; i--) {
+            const t = tabs[i];
+            if (t.kind !== "terminal") continue;
+            for (const lid of leafIds(t.paneTree)) {
+              if (isSshLeaf(t.paneTree, lid)) {
+                const sessionId = leafSessionId(lid);
+                if (sessionId !== null) {
+                  const cwd = findLeafRemoteCwd(t.paneTree, lid) ?? null;
+                  return { sessionId, cwd };
+                }
+              }
+            }
+          }
+        }
+
+        return null;
       },
       getTerminalContext: () => {
         const { activeId, tabs } = ref.current;
-        const t = tabs.find((x) => x.id === activeId);
-        if (t?.kind !== "terminal") return null;
+        let t = tabs.find((x) => x.id === activeId);
+        let targetLeafId = t?.kind === "terminal" ? t.activeLeafId : null;
+
+        const sshPanelOpen = useSshRightPanelStore.getState().open;
+        const activeSsh = useSshActiveSessionStore.getState().session;
+
+        if ((sshPanelOpen || t?.kind !== "terminal") && activeSsh) {
+          for (const tab of tabs) {
+            if (tab.kind !== "terminal") continue;
+            for (const lid of leafIds(tab.paneTree)) {
+              if (isSshLeaf(tab.paneTree, lid) && leafSessionId(lid) === activeSsh.sessionId) {
+                t = tab;
+                targetLeafId = lid;
+                break;
+              }
+            }
+            if (targetLeafId !== null && t === tab) break;
+          }
+        }
+
+        if (t?.kind !== "terminal" || targetLeafId === null) return null;
         if (t.private) return null;
-        const buf = terminalRefs.current.get(t.activeLeafId)?.getBuffer(300);
+        const buf = terminalRefs.current.get(targetLeafId)?.getBuffer(300);
         return buf ? redactSensitive(buf) : null;
       },
       listTerminals: () => {
         const { activeId, tabs } = ref.current;
         return tabs
           .filter((t) => t.kind === "terminal")
-          .map((t) => ({
-            tabId: t.id,
-            title: t.customTitle ?? t.title,
-            cwd: t.cwd ?? null,
-            isActive: t.id === activeId,
-            private: t.private === true,
-          }));
+          .map((t) => {
+            const isRemote = isSshLeaf(t.paneTree, t.activeLeafId);
+            const remoteCwd = isRemote
+              ? findLeafRemoteCwd(t.paneTree, t.activeLeafId) ?? null
+              : null;
+            return {
+              tabId: t.id,
+              title: t.customTitle ?? t.title,
+              cwd: isRemote ? remoteCwd : (t.cwd ?? null),
+              isActive: t.id === activeId,
+              private: t.private === true,
+              isRemote,
+              remoteCwd,
+            };
+          });
       },
       getTerminalContextFor: (tabId) => {
         const t = ref.current.tabs.find((x) => x.id === tabId);
@@ -184,8 +282,26 @@ export function useAiLiveBridge(params: Params) {
       injectIntoActivePty: (text) => {
         const { activeId, tabs } = ref.current;
         const t = tabs.find((x) => x.id === activeId);
-        if (t?.kind !== "terminal") return false;
-        const term = terminalRefs.current.get(t.activeLeafId);
+        let targetLeafId = t?.kind === "terminal" ? t.activeLeafId : null;
+
+        const sshPanelOpen = useSshRightPanelStore.getState().open;
+        const activeSsh = useSshActiveSessionStore.getState().session;
+
+        if ((sshPanelOpen || t?.kind !== "terminal") && activeSsh) {
+          for (const tab of tabs) {
+            if (tab.kind !== "terminal") continue;
+            for (const lid of leafIds(tab.paneTree)) {
+              if (isSshLeaf(tab.paneTree, lid) && leafSessionId(lid) === activeSsh.sessionId) {
+                targetLeafId = lid;
+                break;
+              }
+            }
+            if (targetLeafId !== null) break;
+          }
+        }
+
+        if (targetLeafId === null) return false;
+        const term = terminalRefs.current.get(targetLeafId);
         if (!term) return false;
         term.write(text);
         term.focus();

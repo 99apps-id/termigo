@@ -9,6 +9,7 @@ vi.mock("./native", () => ({
 import { native } from "./native";
 import {
   appendEnvTurn,
+  formatEnvBlock,
   isResumingApproval,
   mergeRuleFiles,
   PROJECT_RULE_FILES,
@@ -325,6 +326,50 @@ describe("isResumingApproval", () => {
 
   it("lets an empty history have it", () => {
     expect(isResumingApproval([])).toBe(false);
+  });
+});
+
+describe("formatEnvBlock", () => {
+  it("formats remote SSH session when remoteSession is present", () => {
+    const block = formatEnvBlock({
+      cwd: "/srv/app",
+      terminalPrivate: false,
+      workspaceRoot: null,
+      activeFile: null,
+      goal: null,
+      schedules: [],
+      todos: [],
+      remoteSession: {
+        sessionId: 42,
+        cwd: "/srv/app",
+        hostLabel: "root@192.168.1.100",
+      },
+    });
+
+    expect(block).not.toBeNull();
+    expect(block).toContain("environment: remote SSH session");
+    expect(block).toContain("remote_host: root@192.168.1.100");
+    expect(block).toContain("os: Linux / POSIX remote host");
+    expect(block).toContain("shell: bash/sh - POSIX syntax, forward slashes");
+    expect(block).toContain("remote_cwd: /srv/app");
+    expect(block).not.toContain("PowerShell");
+  });
+
+  it("formats local os environment when remoteSession is null", () => {
+    const block = formatEnvBlock({
+      cwd: "C:\\local\\project",
+      terminalPrivate: false,
+      workspaceRoot: "C:\\local\\project",
+      activeFile: null,
+      goal: null,
+      schedules: [],
+      todos: [],
+      remoteSession: null,
+    });
+
+    expect(block).not.toBeNull();
+    expect(block).not.toContain("environment: remote SSH session");
+    expect(block).toContain("active_terminal_cwd: C:\\local\\project");
   });
 });
 

@@ -60,6 +60,8 @@ export type TerminalSummary = {
   isActive: boolean;
   /** Listed, but its buffer is withheld. Knowing it exists is not a leak. */
   private: boolean;
+  isRemote?: boolean;
+  remoteCwd?: string | null;
 };
 
 export type Live = {

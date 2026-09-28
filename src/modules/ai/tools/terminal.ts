@@ -258,6 +258,8 @@ export function buildTerminalTools(ctx: ToolContext) {
             title: t.title,
             cwd: t.cwd,
             active: t.isActive,
+            is_remote: t.isRemote ?? false,
+            ...(t.remoteCwd ? { remote_cwd: t.remoteCwd } : {}),
             // Listed rather than hidden: the agent should know a terminal
             // exists and is off limits, or it reads the gap as "no terminal"
             // and asks the user where they are.

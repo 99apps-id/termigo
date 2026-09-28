@@ -225,6 +225,40 @@ describe("bash_run ssh fallback", () => {
       run.mockRestore();
     }
   });
+  it("routes through sshExec when active SSH session exists even if getRemoteSession is null", async () => {
+    const { sshExec } = await import("@/modules/ssh/bridge");
+    vi.mocked(sshExec).mockResolvedValueOnce({
+      stdout: "remote output\n",
+      stderr: "",
+      exitCode: 0,
+      truncated: false,
+    });
+    const { useSshActiveSessionStore } = await import(
+      "@/modules/ssh/sshActiveSession"
+    );
+    useSshActiveSessionStore.getState().setSession({
+      sessionId: 88,
+      connectionId: "conn-88",
+      hostLabel: "root@server",
+    });
+
+    try {
+      const tools = buildShellTools(sshCtx({ getRemoteSession: () => null }));
+      const exec = tools.bash_run.execute;
+      if (!exec) throw new Error("bash_run execute missing");
+      // biome-ignore lint/suspicious/noExplicitAny: empty exec ctx is enough for the harness
+      const emptyOpts = {} as any;
+      const res = (await exec(
+        { command: "uptime", timeout_secs: 5 },
+        emptyOpts,
+      )) as { remote?: boolean; stdout?: string };
+      expect(res.remote).toBe(true);
+      expect(res.stdout).toBe("remote output\n");
+      expect(sshExec).toHaveBeenCalledWith(88, "uptime", 5);
+    } finally {
+      useSshActiveSessionStore.getState().clearSession(88);
+    }
+  });
 });
 
 describe("termigo-neo: no root-wipe gate", () => {
@@ -242,7 +276,7 @@ describe("termigo-neo: no root-wipe gate", () => {
 
 describe("resolveCommandTimeout", () => {
   // The field failure: a model-chosen `timeout_secs: 10` on `pnpm install`
-  // killed pnpm mid-mutation and left node_modules half-removed — after which
+  // killed pnpm mid-mutation and left node_modules half-removed -- after which
   // every "is biome installed?" check answered no, truthfully, until a full
   // reinstall. An install cannot finish in 10s, so the request is always a
   // mistake; the floor makes the mistake impossible.

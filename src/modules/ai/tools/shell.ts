@@ -1,5 +1,7 @@
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { sshExec } from "@/modules/ssh/bridge";
+import { useSshActiveSessionStore } from "@/modules/ssh/sshActiveSession";
+import { useSshRightPanelStore } from "@/modules/ssh/sshRightPanelStore";
 import { currentWorkspaceEnv, workspaceScopeKey } from "@/modules/workspace";
 import { tool } from "./toolShim";
 import { z } from "zod";
@@ -27,7 +29,7 @@ export const UNCLOSED_QUOTE_SENTINEL = "[termigo: unclosed quote in command]";
 
 /**
  * Package-manager MUTATIONS: commands that rewrite node_modules / site-packages
- * while they run. Killing one mid-flight is not a neutral "try again" — pnpm
+ * while they run. Killing one mid-flight is not a neutral "try again" -- pnpm
  * prunes before it links, so a timeout-killed `pnpm install` leaves the tree
  * half-removed with dangling `.bin` shims, and every later check ("biome is not
  * installed") is then true until a full reinstall. Observed in the field: a
@@ -288,7 +290,15 @@ export function buildShellTools(ctx: ToolContext) {
         // command runs there. This one always asks, in every approval mode:
         // see REMOTE_ALWAYS_ASK in approvalPolicy. The safety check above ran
         // first and applies to both machines.
-        const remote = ctx.getRemoteSession();
+        const remote =
+          ctx.getRemoteSession() ??
+          (useSshRightPanelStore.getState().open ||
+          useSshActiveSessionStore.getState().session
+            ? (() => {
+                const s = useSshActiveSessionStore.getState().session;
+                return s ? { sessionId: s.sessionId, cwd: null } : null;
+              })()
+            : null);
         const hasWindowsDrive = /[a-zA-Z]:[/\\]/.test(normalized);
         if (remote && !hasWindowsDrive) {
           // Run from the shell's own directory. The exec channel starts in the

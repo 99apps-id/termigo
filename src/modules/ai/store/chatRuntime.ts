@@ -1,4 +1,5 @@
 import { usePreferencesStore } from "@/modules/settings/preferences";
+import { useSshActiveSessionStore } from "@/modules/ssh/sshActiveSession";
 import { Chat, type UIMessage } from "@ai-sdk/react";
 import { info as logInfo, warn as logWarn } from "@tauri-apps/plugin-log";
 import {
@@ -443,6 +444,9 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       const live = useChatStore.getState().live;
       const directives = useSessionDirectiveStore.getState();
       const todos = useTodosStore.getState().bySession[sessionId]?.items ?? [];
+      const remote =
+        runAnchor.get(sessionId)?.remote ?? live.getRemoteSession();
+      const sshSession = useSshActiveSessionStore.getState().session;
       return {
         cwd: live.getCwd(),
         terminalPrivate: live.isActiveTerminalPrivate(),
@@ -451,6 +455,16 @@ function makeChat(sessionId: string): Chat<UIMessage> {
         goal: directives.getGoal(sessionId),
         schedules: directives.getSchedules(sessionId),
         todos: todos.map((t) => ({ title: t.title, status: t.status })),
+        remoteSession: remote
+          ? {
+              sessionId: remote.sessionId,
+              cwd: remote.cwd,
+              hostLabel:
+                remote.sessionId === sshSession?.sessionId
+                  ? sshSession.hostLabel
+                  : undefined,
+            }
+          : null,
       };
     },
     getPlanMode: () => usePlanStore.getState().active,
