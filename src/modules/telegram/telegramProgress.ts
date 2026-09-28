@@ -86,8 +86,6 @@ export async function publishProgress(
   const started = Date.now();
   const MAX_WAIT = 30 * 60 * 1000;
   const MAX_PROMPT_SEND_ATTEMPTS = 3;
-  // Tracks step-cap detection so the auto-continue re-check runs at most once.
-  let stepCapNotified = false;
 
   if (mode === "question") {
     return;
@@ -331,27 +329,27 @@ export async function publishProgress(
         lastSentAt = now;
       }
 
-      if (!busy && !stepCapNotified) {
+      // Exit when the run has settled: the agent is idle or errored and
+      // will not resume on its own. A 1.5s grace period confirms the state
+      // so an auto-continue that fires on step-cap is not mistaken for a
+      // final stop. Without this, the loop ran for up to MAX_WAIT (30 min)
+      // on every normal completion, keeping the Telegram typing indicator
+      // alive long after the desktop app showed the agent as idle.
+      if (!busy) {
         const latestMeta = store.useChatStore.getState().agentMeta;
         if (
-          latestMeta.status === "idle" &&
-          latestMeta.stopReason === "step-cap" &&
-          !latestMeta.stoppedByUser
+          latestMeta.status === "idle" ||
+          latestMeta.status === "error"
         ) {
           await sleep(signal, 1500);
           if (signal.aborted) break;
           const afterWait = store.useChatStore.getState().agentMeta;
           if (
-            afterWait.status === "idle" &&
-            afterWait.stopReason === "step-cap"
+            afterWait.status === "idle" ||
+            afterWait.status === "error"
           ) {
-            // The Continue keyboard is sent by runAgentAndStream, which owns
-            // the post-run prompts. Sending it here too produced two identical
-            // buttons (and two queued resumes if both were tapped).
-            stepCapNotified = true;
             break;
           }
-          stepCapNotified = false;
         }
       }
 

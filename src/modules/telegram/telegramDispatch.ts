@@ -1278,17 +1278,27 @@ export async function startTelegramDispatch(
         lower === kw ||
         lower.startsWith(`${kw} `) ||
         lower.startsWith(`${kw},`) ||
-        lower.startsWith(`${kw}.`),
+        lower.startsWith(`${kw}.`) ||
+        lower.endsWith(` ${kw}`) ||
+        lower.endsWith(` ${kw}.`) ||
+        lower.endsWith(` ${kw}!`),
     );
 
-    if (isStopIntent && (busy || pendingApprovals.length > 0)) {
+    // Stop intent is handled unconditionally: even when the agent is idle,
+    // acknowledge and return instead of dispatching the text as a new task.
+    // The old code gated on `busy || pendingApprovals.length > 0`, so an
+    // idle agent treated "cukup itu saja pekerjaan hari ini" as a fresh
+    // prompt, which spawned a new run and confused the user.
+    if (isStopIntent) {
       recordTelegramText(text);
       for (const p of pendingApprovals) {
         store.useChatStore.getState().respondToApproval(p.id, false);
         aqStore.useApprovalQueue.getState().respond([p.id], false);
       }
       progressCtrls.get(chatId)?.abort();
-      await runtime.stopRun();
+      if (busy) {
+        await runtime.stopRun();
+      }
       await sendTelegram(chatId, "Run stopped on user request.", signal).catch(
         () => {},
       );

@@ -168,6 +168,10 @@ const FINISHED_TOOL_STATES = new Set([
   "output-available",
   "output-error",
   "result",
+  // A tool pending approval is not actively running; the approval system
+  // surfaces it separately. Without this, `hasActiveToolCalls` reported
+  // busy for a session waiting on an approval the user had not yet seen.
+  "approval-requested",
 ]);
 
 export function hasActiveToolCalls(chat: ChatLike | null | undefined): boolean {

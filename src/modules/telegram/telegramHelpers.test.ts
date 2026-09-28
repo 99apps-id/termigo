@@ -168,6 +168,14 @@ describe("hasActiveToolCalls", () => {
     ).toBe(false);
   });
 
+  it("is false for a tool awaiting approval", () => {
+    expect(
+      hasActiveToolCalls(
+        chatWithParts(part("tool-bash_run", "approval-requested")),
+      ),
+    ).toBe(false);
+  });
+
   it("is true while a call is in flight", () => {
     expect(
       hasActiveToolCalls(
