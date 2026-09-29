@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { summarizeInput } from "../lib/approvalQueue";
 import { native } from "../lib/native";
 import { checkReadable } from "../lib/security";
+import { chatStreamOptions } from "../lib/streamUiThrottle";
 import { isResumingApproval } from "../lib/transport";
 import { standDownApplies } from "../lib/todos";
 import { getOrCreateChat } from "../store/chatRuntime";
@@ -68,9 +69,11 @@ function Bridge({
   setAiDiffStatus,
 }: BridgeProps) {
   const chat = useMemo(() => getOrCreateChat(sessionId), [sessionId]);
-  const { status, messages, addToolApprovalResponse } = useChat<UIMessage>({
-    chat,
-  });
+  // Throttled on purpose: this subscription, not just the visible transcript,
+  // is rendered per streamed token otherwise. See `chatStreamOptions`.
+  const { status, messages, addToolApprovalResponse } = useChat<UIMessage>(
+    chatStreamOptions(chat),
+  );
   const patch = useChatStore((s) => s.patchAgentMeta);
   const openMini = useChatStore((s) => s.openMini);
   const persistMessages = useChatStore((s) => s.persistMessages);

@@ -51,6 +51,32 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   running sub-agents) and from the tool cards themselves. The two components were deleted
   rather than left unused.
 
+### Fixed
+
+- **A streamed answer no longer starves the main thread it shares with the Telegram
+  relay.** The AI SDK notified its subscribers on every streamed token and handed React a
+  `structuredClone` of the whole assistant message as the new value, so each token
+  re-rendered the entire transcript: the answer markdown was re-lexed end to end (Streamdown
+  runs `remend` plus a `marked` lexer over the full text, quadratic in answer length), and
+  every tool card in the message re-rendered, because the clone gives each part a new object
+  identity and therefore defeats the identity guards already written into `Tool` (object
+  outputs re-`JSON.stringify`ed, ANSI re-parsed) and `ToolDiffCard` (a line diff recomputed
+  from an O(n*m) matrix). Measured on the packaged app: one streamed step grew from about
+  five seconds to five minutes as its tool output accumulated, while the provider answered
+  in about two seconds per step, and for the whole of such a step the Telegram long-poll
+  watchdog logged
+  `polling stalled: no getUpdates progress for 141s, recycling poller` every couple of
+  minutes, with no network failure and no 409 anywhere in the log. The poll loop and that
+  watchdog share the thread with this rendering, so what the watchdog measured was a starved
+  poller rather than a hung one - its own `setInterval` tick arrived 60s late, which happens
+  only when the thread cannot run anything. Recycling could not help, because the
+  replacement was starved with it, and it risked the duplicate-poller 409 that the recycle
+  path exists to avoid. Both `useChat` subscriptions (the headless bridge and the surface
+  that draws the transcript) now carry `experimental_throttle` through `chatStreamOptions`,
+  at 10 updates a second: leading and trailing, so the last token of a step still lands, and
+  nothing functional is affected because the runtime reads the answer from `chat.messages`,
+  which is never throttled.
+
 ## [0.9.15] - 2026-09-16
 
 ### Added

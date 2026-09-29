@@ -45,6 +45,7 @@ import {
 } from "../config";
 import type { ResizeDir } from "../lib/miniWindowGeometry";
 import { buildSessionSearchIndex, type SessionMeta } from "../lib/sessions";
+import { chatStreamOptions } from "../lib/streamUiThrottle";
 import { useMiniWindowGeometry } from "../lib/useMiniWindowGeometry";
 import { getOrCreateChat } from "../store/chatRuntime";
 import { useChatStore } from "../store/chatStore";
@@ -189,7 +190,9 @@ export function AiChatBody({
   const focusInput = useChatStore((s) => s.focusInput);
 
   const chat = useMemo(() => getOrCreateChat(sessionId), [sessionId]);
-  const helpers = useChat<UIMessage>({ chat });
+  // Throttled on purpose: this is the surface that draws the transcript, and
+  // per streamed token it re-lexes the whole answer. See `chatStreamOptions`.
+  const helpers = useChat<UIMessage>(chatStreamOptions(chat));
 
   return (
     <>
