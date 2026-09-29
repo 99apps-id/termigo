@@ -4,16 +4,7 @@ All notable changes to Termigo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.9.20] - 2026-09-26
-
-### Changed
-
-- **Autonomous Agent Execution Architecture:** Removed defensive sandboxing and path boundaries. Agents and subagents operate with full tool access across authorized OS user permissions.
-- **Git Worktree Traversal:** Retained Git worktree isolation with fixed parent root traversal logic.
-- **Cleaned Obsolete Features and References:** Removed unused image generation, legacy debug dialogs, temporary VPS scripts, sample WASM extensions, and references to external coding agents.
-- **Reliability:** Replaced `.unwrap()` in `host_to_wsl_path` with safe default fallback.
-
-## [Unreleased]
+## [0.9.21] - 2026-09-29
 
 ### Added
 
@@ -39,6 +30,19 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`semgrep`, `bandit`, `trivy`, `osv-scanner`, `gosec`, `safety`, `pip-audit`, `auditjs`,
   `snyk test`, `grype`, `checkov`) and `git worktree list` as read-only introspection
   in `commandRisk.ts` so security audits run without unnecessary confirmation cards.
+- **Critical and frugal harness profile.** Added `critical` harness profile
+  (`BUILTIN_PROFILES.critical`) enforcing adversarial self-review, explicit distinction
+  between verified facts and assumptions, token economy, and minimal verification checks.
+- **Verification on stop claim validation.** Added `claimsVerification` and
+  `shouldNudgeVerification` in `verifyOnStop.ts` ensuring that assistant replies claiming
+  tests or checks passed are held to recorded evidence, prompting the agent to run the
+  actual check if evidence is missing.
+- **Transcript compaction absolute floor.** Added fallback transcript compaction in
+  `compact.ts` that truncates oversized single messages when they alone exceed the context
+  budget, preventing loop failures.
+- **Automated spreadsheet and Excel launch documentation.** Added screenshot and
+  documentation for AI agent creating formatted spreadsheet tables and launching Excel
+  directly from terminal workflows.
 
 ### Removed
 
@@ -76,6 +80,18 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   at 10 updates a second: leading and trailing, so the last token of a step still lands, and
   nothing functional is affected because the runtime reads the answer from `chat.messages`,
   which is never throttled.
+- **Denial of service vulnerability in transitive dependency undici.** Patched transitive
+  `undici` vulnerability (GHSA-3wwx-pv8p-q78v) across AI SDK provider utilities by pinning
+  `undici >=7.29.1` in `package.json` and `pnpm-workspace.yaml`.
+
+## [0.9.20] - 2026-09-26
+
+### Changed
+
+- **Autonomous Agent Execution Architecture:** Removed defensive sandboxing and path boundaries. Agents and subagents operate with full tool access across authorized OS user permissions.
+- **Git Worktree Traversal:** Retained Git worktree isolation with fixed parent root traversal logic.
+- **Cleaned Obsolete Features and References:** Removed unused image generation, legacy debug dialogs, temporary VPS scripts, sample WASM extensions, and references to external coding agents.
+- **Reliability:** Replaced `.unwrap()` in `host_to_wsl_path` with safe default fallback.
 
 ## [0.9.15] - 2026-09-16
 
@@ -222,8 +238,8 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   running instance looks dead and "nothing logged for seven hours" looks like a
   fact. It is not cosmetic - it sent a diagnosis of the Telegram relay down the
   wrong path on both the desktop and the headless server. One consequence to
-  expect: the level now precedes the target on each line (`[INFO][webview:…]`
-  rather than `[webview:…][INFO]`), because that is the format the plugin installs
+  expect: the level now precedes the target on each line (`[INFO][webview:...]`
+  rather than `[webview:...][INFO]`), because that is the format the plugin installs
   when the timezone is set. Nothing parses these lines; they are read by people,
   and grepping `[WARN]` or `webview` still works.
 - **A 409 backoff is no longer cancelled by the stall watchdog.** The polling loop
@@ -234,7 +250,7 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   recycled the poller, and the replacement re-acquired the bot immediately - the
   exact churn the backoff exists to prevent, since its whole purpose is to leave
   room for the other client holding the token. Observed as
-  `409 → stalled 89s → recycle → 409 → stalled 90s → recycle`, repeating for as long
+  `409 -> stalled 89s -> recycle -> 409 -> stalled 90s -> recycle`, repeating for as long
   as the competing client was present. The loop now declares how long it is
   deliberately waiting, and the watchdog honours that over its own timer.
 - **`grep` guidance for a pattern containing a newline.** A pattern with `\n` is
@@ -653,7 +669,7 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - **On-demand tool loading.** The full toolset is ~80 KB of JSON Schema sent on
-  every request. With Settings â†’ Agents â†’ *Load tools on demand* on, a run
+  every request. With Settings -> Agents -> *Load tools on demand* on, a run
   starts with the coding loop (39 tools / 31.4 KB / ~8.0k tokens) plus a
   `find_tools` search, and a domain joins the request when the model asks for it
   by keyword. Measured saving: 61% (~12.5k tokens per request) against the full
@@ -661,7 +677,7 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `ask_user`, the file operations and the verification loop. `find_tools` costs
   1.1 KB and indexes the 87 deferred tools; a discovered tool stays active for
   the rest of the run, so re-use costs no extra step.
-- **Tool domains** (Settings â†’ Agents): switch off whole optional domains -
+- **Tool domains** (Settings -> Agents): switch off whole optional domains -
   browser, GitHub, LSP, web, skills, self-improvement, workflows, previews,
   agent handoff, PTY driving, worktrees, SQL, PDF, image generation, history -
   and their schemas leave the request. Every group off: 56 tools / 40.6 KB /
@@ -789,7 +805,7 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - **F-08 LOW**: Documented the intentionally `unsafe` macOS Objective-C
     block that disables press-and-hold in `main.rs`.
 
-## [Unreleased] - 0.9.11
+## [0.9.11] - 2026-09-11
 
 ### Added
 
@@ -958,7 +974,7 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - Forced tool-choice recovery: some custom OpenAI-compatible endpoints run a
     "thinking mode" that rejects a pinned tool call with HTTP 400. Termigo now
     recognises the rejection, drops the pin for that model and resumes the
-    request automatically â€” broad "audit/analyse this repo" prompts no longer
+    request automatically -- broad "audit/analyse this repo" prompts no longer
     die on a red card.
   - Mid-stream stall fix: long, bursty generations (e.g. a pentest report from
     a thinking-mode model) that legitimately pause over 30 s between chunks no
@@ -971,19 +987,19 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - Context pruning: a verified span of history (work saved to git by a
     checkpoint/commit) is collapsed into a short checkpoint summary each turn,
     so finished work stops costing tokens.
-  - Edit/multi_edit survive a model that drops or renames the `path` argument â€”
+  - Edit/multi_edit survive a model that drops or renames the `path` argument --
     the call self-corrects instead of hard-failing.
   - ask_user no longer loops when the model sends long options; .env.example
     templates are readable again; stuck "RUNNING" tool cards are closed as
     failed instead of hanging forever.
   - Plain-language status and error copy ("the model is taking a while to
-    respondâ€¦" instead of internal terms like "provider"/"pin").
+    respond..." instead of internal terms like "provider"/"pin").
 
 - **New agent tools**
-  - `bash_wait` â€” block on a background process until it exits (the tool the
+  - `bash_wait` -- block on a background process until it exits (the tool the
     model kept reaching for), completing the spawn trio with `bash_background`
     / `bash_logs` / `bash_kill`.
-  - `dev_server` â€” detect the project's dev command, spawn it in the
+  - `dev_server` -- detect the project's dev command, spawn it in the
     background, read its log for the real URL, health-probe the loopback port
     and open it in the browser pane.
   - `web_search` (DuckDuckGo-backed, no API key), `git_blame`, `git_show`,
@@ -1003,11 +1019,11 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Agent UX (BatikCode parity)**
   - Live run-progress HUD: current step, loop round, live todo list with a
     derived active item, and sub-agents running in a fan-out.
-  - Sub-agent nesting depth (1â€“5) with a cost-tier guard; sub-agent runs
+  - Sub-agent nesting depth (1-5) with a cost-tier guard; sub-agent runs
     persisted; parallel fan-out with `depends_on` chaining.
   - Centralised agent registry/factory; project-scoped approval rules
     (`.termigo/approvals.json`) now apply to sub-agents too.
-  - Auto-verify after edits (read â†’ change â†’ verify â†’ repair loop).
+  - Auto-verify after edits (read -> change -> verify -> repair loop).
   - Fresh "New chat" on every launch; searchable, persisted session history.
 
 - **Misc**
@@ -1034,7 +1050,7 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Agent "hang" on large multi-step builds (concurrent-request race doubling the
   transcript, quadratic compaction, and request bodies over the provider's
-  HTTP cap â€” compaction now also trims tool-call inputs and enforces a hard
+  HTTP cap -- compaction now also trims tool-call inputs and enforces a hard
   body ceiling).
 - Content-moderation rejections are explained (and a new chat offered when the
   flagged text poisons history) instead of showing an opaque error.

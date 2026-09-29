@@ -606,6 +606,14 @@ See [`docs/`](docs/) for the MCP, skills, agents, and architecture guides.
 </p>
 
 <p align="center">
+  <img src="docs/termigo-open-excel-create-table.png" alt="AI agent creating tables and opening Excel automatically" width="900" />
+  <br/>
+  <sub>
+    AI automation in action: the agent automating spreadsheet creation, structuring data tables, and launching Excel directly from terminal workflows
+  </sub>
+</p>
+
+<p align="center">
   <img src="docs/termigo-running-antigravity-cli.png" alt="A terminal running the Antigravity coding agent" width="900" />
   <br/>
   <sub>

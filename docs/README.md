@@ -17,6 +17,18 @@ If a guide conflicts with `TERMIGO.md`, `TERMIGO.md` wins.
 - [SSH & remote files](SSH.md) - SSH sessions as terminal tabs, host-key
   verification (TOFU), SFTP file explorer, port forwarding.
 
+## Visual tour
+
+- [Open Excel and create table](termigo-open-excel-create-table.png) - AI agent automating data analysis, spreadsheet creation, and opening Microsoft Excel directly from the terminal.
+- [Browser integration](termigo-browser-windows.png) - Terminal workspace with embedded browser tab.
+- [Remote VPS over SSH](termigo-remote-vps.png) - Remote filesystem exploration and terminal session over SSH.
+- [Antigravity CLI](termigo-running-antigravity-cli.png) - Running interactive AI coding agents inside Termigo.
+- [Extensions manager](termigo-settings-extensions.png) - Installing and configuring tools and extensions.
+- [Harness profiles](termigo-settings-harness.png) - Agent runtime execution and prompt configuration.
+- [Model picker](termigo-model-picker.png) - BYOK model and provider selection.
+- [Telegram companion](termigo-telegram.png) - Remote companion bot for approvals and queries.
+- [Themes](termigo-themes.png) - Theme and palette customization.
+
 ## Architecture guides
 
 - [Two-process model and IPC command reference](architecture/two-process-model.md) - Rust owns all OS access; the webview talks through `invoke()`. Command catalog and how to add a new command.

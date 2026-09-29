@@ -1,7 +1,7 @@
 //! One version, four manifests.
 //!
 //! F-5 of the 2026-09-23 deep audit: `Cargo.toml` said 0.9.15 while
-//! `tauri.conf.json` said 0.9.19 and `package.json` said 0.9.18 — the
+//! `tauri.conf.json` said 0.9.19 and `package.json` said 0.9.18 -- the
 //! installer advertised a version the shipped binary did not carry, and the
 //! updater compared against a number no manifest agreed on. Aligning them once
 //! is not enough; the same shape of guard as `command_authorization.rs` keeps
