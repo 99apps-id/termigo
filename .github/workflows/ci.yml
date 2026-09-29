@@ -15,13 +15,13 @@ jobs:
   frontend:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@v4
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 22
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
@@ -63,10 +63,32 @@ jobs:
         run: pnpm knip
         continue-on-error: true
 
+      - name: Version parity (package.json vs tauri.conf.json)
+        run: node -e "const pkg=require('./package.json'); const tauri=require('./src-tauri/tauri.conf.json'); if (pkg.version !== tauri.version) { console.error('version mismatch:', pkg.version, '!==', tauri.version); process.exit(1); }"
+
+  go-cli:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+          cache-dependency-path: cli/go.sum
+
+      - name: go vet
+        working-directory: cli
+        run: go vet ./...
+
+      - name: go test
+        working-directory: cli
+        run: go test ./...
+
   rust:
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
       - name: Install Linux build dependencies
         run: |
@@ -118,7 +140,7 @@ jobs:
         os: [windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -145,7 +167,7 @@ jobs:
   e2e:
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
       - name: Install Linux build + webdriver dependencies
         run: |
@@ -158,11 +180,11 @@ jobs:
             webkit2gtk-driver \
             xvfb
 
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@v4
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 22
           cache: pnpm
 
       - uses: dtolnay/rust-toolchain@stable
@@ -198,7 +220,7 @@ jobs:
     runs-on: ubuntu-22.04
     needs: rust
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
       - name: Install Linux build dependencies
         run: |
