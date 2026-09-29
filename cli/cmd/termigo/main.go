@@ -24,7 +24,7 @@ import (
 	"github.com/99apps-id/termigo/cli/internal/terminal"
 )
 
-var version = "v0.9.21"
+var version = "v0.9.22"
 
 // stdin is the input for the interactive commands. A variable so tests can drive
 // the terminal without a console.

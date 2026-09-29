@@ -146,14 +146,33 @@ jobs:
             echo __TERMIGO_EOF__
           } >> "$GITHUB_ENV"
 
+      # Export updater signing keys only when configured. Passing an empty
+      # string makes `tauri build` fail at `failed to decode secret key`
+      # instead of producing unsigned artifacts, which is what a repository
+      # without these secrets should do.
+      - name: Configure updater signing
+        if: env.HAS_UPDATER_KEY == 'true'
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          {
+            echo "TAURI_SIGNING_PRIVATE_KEY<<__TERMIGO_EOF__"
+            echo "${TAURI_SIGNING_PRIVATE_KEY}"
+            echo __TERMIGO_EOF__
+          } >> "$GITHUB_ENV"
+          {
+            echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD<<__TERMIGO_EOF__"
+            echo "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD}"
+            echo __TERMIGO_EOF__
+          } >> "$GITHUB_ENV"
+
       - id: tauri
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TERMIGO_CLI_TARGET: ${{ matrix.rust-target }}
-
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
         with:
           tagName: ${{ github.ref_name }}

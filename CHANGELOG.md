@@ -4,6 +4,20 @@ All notable changes to Termigo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.22] - 2026-09-29
+
+### Fixed
+
+- **Complete the 0.9.22 version bump across every manifest.** `src-tauri/Cargo.lock`,
+  `npm/termigo/package.json`, and the Go companion version in `cli/cmd/termigo/main.go`
+  now carry 0.9.22 alongside `package.json`, `src-tauri/Cargo.toml`, and
+  `src-tauri/tauri.conf.json`. The stale lockfile broke every `cargo ... --locked`
+  invocation in CI, e2e, and release builds.
+- **Release without an updater signing key ships unsigned instead of failing.**
+  `release.yml` no longer passes an empty `TAURI_SIGNING_PRIVATE_KEY` to
+  `tauri-action`, which Tauri rejected with `failed to decode secret key`.
+  The keys are exported only when `TAURI_SIGNING_PRIVATE_KEY` is configured.
+
 ## [0.9.21] - 2026-09-29
 
 ### Added
