@@ -292,7 +292,12 @@ type Deps = {
     aborted: boolean;
     metrics: RunDiagnostics;
     /** Passive verification ledger for the verify-on-stop gate. */
-    verify: { changedCodePaths: string[]; verifiedAfterLastEdit: boolean };
+    verify: {
+      changedCodePaths: string[];
+      verifiedAfterLastEdit: boolean;
+      /** The final prose claimed a verification result without ledger evidence. */
+      claimedVerification: boolean;
+    };
   }) => void;
   getPlanMode?: () => boolean;
   getStepBudget?: () => number;

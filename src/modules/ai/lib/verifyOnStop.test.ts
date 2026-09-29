@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   buildVerifyNudge,
+  claimsVerification,
   isNonCodePath,
   isVerifyNudgeParts,
   MAX_VERIFY_NUDGES,
   newVerifyLedger,
   recordToolResult,
+  shouldNudgeVerification,
   VERIFY_NUDGE_PREFIX,
   verifyGateApplies,
 } from "./verifyOnStop";
@@ -290,5 +292,82 @@ describe("isVerifyNudgeParts", () => {
     ).toBe(false);
     expect(isVerifyNudgeParts([{ type: "file", text: nudge }])).toBe(false);
     expect(isVerifyNudgeParts([{ type: "text" }])).toBe(false);
+  });
+});
+
+describe("claimsVerification", () => {
+  it("flags committed success claims", () => {
+    expect(claimsVerification("All tests pass.")).toBe(true);
+    expect(claimsVerification("The suite is green.")).toBe(true);
+    expect(claimsVerification("lint clean and build succeeded")).toBe(true);
+    expect(claimsVerification("Verified that the fix works.")).toBe(true);
+    expect(claimsVerification("No failures remain.")).toBe(true);
+  });
+
+  // A description of work done, a failure, or a hedge is not a claim of
+  // success, so none of these should pull a verification nudge.
+  it("ignores descriptions, failures and hedges", () => {
+    expect(claimsVerification("Let me run the tests now.")).toBe(false);
+    expect(claimsVerification("The tests fail on Windows.")).toBe(false);
+    expect(claimsVerification("The tests do not pass yet.")).toBe(false);
+    expect(claimsVerification("The build should pass once I fix X.")).toBe(
+      false,
+    );
+    expect(claimsVerification("I will run the linter next.")).toBe(false);
+    expect(claimsVerification("")).toBe(false);
+  });
+});
+
+describe("shouldNudgeVerification", () => {
+  it("fires on unverified code edits", () => {
+    expect(
+      shouldNudgeVerification({
+        changedCodePaths: ["src/a.ts"],
+        verifiedAfterLastEdit: false,
+        claimedVerification: false,
+      }),
+    ).toBe(true);
+  });
+
+  // The hole this closes: a "tests pass" finale with no ledger evidence and no
+  // code edit used to slip through the edit-only gate.
+  it("fires on a verification claim with no evidence", () => {
+    expect(
+      shouldNudgeVerification({
+        changedCodePaths: [],
+        verifiedAfterLastEdit: false,
+        claimedVerification: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("stays silent once fresh evidence exists", () => {
+    expect(
+      shouldNudgeVerification({
+        changedCodePaths: ["src/a.ts"],
+        verifiedAfterLastEdit: true,
+        claimedVerification: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("stays silent with nothing to verify", () => {
+    expect(
+      shouldNudgeVerification({
+        changedCodePaths: ["README.md"],
+        verifiedAfterLastEdit: false,
+        claimedVerification: false,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("buildVerifyNudge for a claim without edits", () => {
+  it("builds a claim nudge only when claimedVerification is set", () => {
+    expect(buildVerifyNudge([], 0, MAX_VERIFY_NUDGES, false)).toBeNull();
+    const nudge = buildVerifyNudge([], 0, MAX_VERIFY_NUDGES, true);
+    expect(nudge).not.toBeNull();
+    expect(nudge?.startsWith(VERIFY_NUDGE_PREFIX)).toBe(true);
+    expect(nudge).toContain("claims the work is verified");
   });
 });

@@ -1,15 +1,44 @@
 import type { ModelMessage } from "ai";
 import { describe, expect, it } from "vitest";
 import {
+  budgetBand,
   compactModelMessages,
   compactModelMessagesDetailed,
   estimateMessagesSize,
+  formatBudgetBlock,
   historyTokenBudget,
   shouldTrimStepMessages,
   STEP_TRIM_ENGAGE_RATIO,
 } from "./compact";
 
 const BIG = "x".repeat(2000);
+
+describe("budgetBand and formatBudgetBlock", () => {
+  it("reports no band below half the window", () => {
+    expect(budgetBand(400, 1000)).toBeNull();
+    expect(formatBudgetBlock(400, 1000)).toBeNull();
+  });
+
+  it("bands at half, most and critical", () => {
+    expect(budgetBand(500, 1000)).toBe("half");
+    expect(budgetBand(700, 1000)).toBe("most");
+    expect(budgetBand(850, 1000)).toBe("critical");
+  });
+
+  // The hint rides in the system prompt, which is position zero of the
+  // provider's cached prefix: two usages in the same band must produce the
+  // SAME text so the cache is not invalidated step after step.
+  it("is stable within a band so the cached prefix stays hot", () => {
+    expect(formatBudgetBlock(500, 1000)).toBe(formatBudgetBlock(690, 1000));
+    expect(formatBudgetBlock(700, 1000)).toBe(formatBudgetBlock(840, 1000));
+  });
+
+  it("returns null for a non-positive or non-finite budget", () => {
+    expect(budgetBand(10, 0)).toBeNull();
+    expect(budgetBand(Number.NaN, 1000)).toBeNull();
+    expect(formatBudgetBlock(10, 0)).toBeNull();
+  });
+});
 
 function readCall(id: string, path: string): ModelMessage {
   return {

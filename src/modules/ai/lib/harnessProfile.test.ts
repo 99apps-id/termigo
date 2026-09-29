@@ -4,6 +4,7 @@ import {
   applyProfileToSystem,
   applyProfileToTools,
   buildStepSystem,
+  BUILTIN_PROFILES,
   DEFAULT_PROFILE_ID,
   getProfile,
   type HarnessProfile,
@@ -71,7 +72,8 @@ describe("applyProfileToTools", () => {
   });
 });
 
-describe("applyProfileToStepBudget", () => {  it("applies a delta", () => {
+describe("applyProfileToStepBudget", () => {
+  it("applies a delta", () => {
     expect(applyProfileToStepBudget(24, profile({ stepBudgetDelta: -6 }))).toBe(
       18,
     );
@@ -124,5 +126,28 @@ describe("buildStepSystem", () => {
     const b = JSON.stringify(buildStepSystem("base", "todos v2", null));
     expect(a).not.toBe(b);
     expect(b).toContain("todos v2");
+  });
+});
+
+describe("builtin profiles", () => {
+  it("ships a critical profile that enforces rigor and token economy", () => {
+    const p = BUILTIN_PROFILES.critical;
+    expect(p).toBeDefined();
+    const prelude = p.promptPrelude ?? "";
+    // Evidence discipline: the model must separate verified from assumed.
+    expect(prelude).toContain("VERIFIED");
+    expect(prelude).toContain("ASSUMED");
+    // Token economy: no re-reading, no echoing what a tool call already carries.
+    expect(prelude.toLowerCase()).toContain("re-read");
+    expect(prelude).toContain("tokens");
+  });
+
+  it("gives every builtin profile a non-empty description and no em-dash", () => {
+    for (const profile of Object.values(BUILTIN_PROFILES)) {
+      expect(profile.id.length).toBeGreaterThan(0);
+      expect(profile.description.length).toBeGreaterThan(0);
+      const text = `${profile.label} ${profile.description} ${profile.promptPrelude ?? ""}`;
+      expect(text.includes("\u2014")).toBe(false);
+    }
   });
 });

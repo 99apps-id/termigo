@@ -113,6 +113,71 @@ export function historyTokenBudget(
 }
 
 /**
+ * Coarse bands of window usage for the per-step budget hint.
+ *
+ * Banded on purpose: the hint rides in the system prompt, which is position
+ * zero of the provider's cached prefix, so a live percentage would change the
+ * prefix on every step and invalidate the whole cache behind it. A band changes
+ * only when the run crosses a threshold, so the cached prefix stays hot between
+ * crossings while the model still learns when the window is filling up.
+ */
+export type BudgetBand = "half" | "most" | "critical";
+
+export function budgetBand(
+  usedTokens: number,
+  budgetTokens: number,
+): BudgetBand | null {
+  if (
+    !Number.isFinite(usedTokens) ||
+    !Number.isFinite(budgetTokens) ||
+    budgetTokens <= 0
+  ) {
+    return null;
+  }
+  const ratio = usedTokens / budgetTokens;
+  if (ratio >= 0.85) return "critical";
+  if (ratio >= 0.7) return "most";
+  if (ratio >= 0.5) return "half";
+  return null;
+}
+
+/**
+ * The per-step context-budget hint, or null below half the window.
+ *
+ * Gives the model the one number it cannot see: how much of its working window
+ * is spent, so it can summarise instead of reading more. Banded (see
+ * `budgetBand`) so it stays byte-identical between thresholds.
+ */
+export function formatBudgetBlock(
+  usedTokens: number,
+  budgetTokens: number,
+): string | null {
+  const band = budgetBand(usedTokens, budgetTokens);
+  if (band === "half") {
+    return (
+      "Context budget: about half of your working window is used. Prefer " +
+      "targeted reads (grep / code_search / offset+limit) and summarise what " +
+      "you learn instead of re-reading; keep replies tight."
+    );
+  }
+  if (band === "most") {
+    return (
+      "Context budget: most of your working window is used. Stop re-reading " +
+      "and do not echo file bodies; compact your findings into a short summary " +
+      "before reading anything new."
+    );
+  }
+  if (band === "critical") {
+    return (
+      "Context budget: you are near the window limit. Read new files only if " +
+      "strictly required, and write your final summary now so the run is not " +
+      "truncated."
+    );
+  }
+  return null;
+}
+
+/**
  * Fraction of the history budget at which the per-step trim may run.
  *
  * The compactor's first content rewrite (dropSupersededReads) engages at

@@ -27,7 +27,7 @@ export type HarnessProfile = {
   stepBudgetCap?: number;
 };
 
-export const DEFAULT_PROFILE_ID = "balanced";
+export const DEFAULT_PROFILE_ID = "critical";
 
 export const BUILTIN_PROFILES: Record<string, HarnessProfile> = {
   balanced: {
@@ -97,6 +97,28 @@ export const BUILTIN_PROFILES: Record<string, HarnessProfile> = {
     stepBudgetDelta: 25,
     stepBudgetCap: 50,
   },
+  critical: {
+    id: "critical",
+    label: "Critical + frugal",
+    description:
+      "Adversarial self-review plus strict token economy: state assumptions, falsify your own edits, verify with the smallest check, and never re-read or echo what you already have.",
+    promptPrelude:
+      "Work in a critical, evidence-first mode.\n" +
+      "- Treat your first idea and the user's framing as a hypothesis. Before editing or concluding, ask what falsifies it: which input, boundary value, error path or concurrency interleaving breaks it.\n" +
+      "- Separate what you VERIFIED (a line you read, a command you ran) from what you ASSUMED, and say which is which. Never present an assumption as fact.\n" +
+      "- After an edit, re-read the changed region and run the smallest check that proves it (one test file, one lint target, a compile). Never claim green without running it.\n" +
+      "- Spend tokens like they cost money: never re-read a file you have not changed, never echo file contents in chat when the tool call already carries them, and prefer grep / code_search / offset+limit over a whole-file read.\n" +
+      "- Be concise in prose and complete in substance: answer, name the evidence, stop.",
+    prioritizeTools: [
+      "read_file",
+      "grep",
+      "glob",
+      "code_search",
+      "edit",
+      "multi_edit",
+      "run_checks",
+    ],
+  },
 };
 
 /** Resolve a profile id, falling back to the balanced default. */
@@ -146,9 +168,11 @@ export function buildStepSystem(
   base: SystemLike,
   todoBlock: string | null,
   activeNudge: string | null,
+  budgetBlock: string | null = null,
 ): SystemLike {
   let system = todoBlock ? appendSystemHint(base, todoBlock) : base;
   if (activeNudge) system = appendSystemHint(system, activeNudge);
+  if (budgetBlock) system = appendSystemHint(system, budgetBlock);
   return system;
 }
 

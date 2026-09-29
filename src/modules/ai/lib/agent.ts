@@ -56,13 +56,18 @@ import {
   TOOL_SEARCH_HINT,
   type ToolIndexEntry,
 } from "../tools/toolSearch";
-import { buildTools, withToolHeartbeat, type ToolContext } from "../tools/tools";
+import {
+  buildTools,
+  withToolHeartbeat,
+  type ToolContext,
+} from "../tools/tools";
 import { isResumingApproval } from "./approvalResume";
 import { getChatGptAccess } from "./chatgptAuth";
 import {
   compactModelMessagesDetailed,
   estimateMessagesSize,
   estimateTokens,
+  formatBudgetBlock,
   historyTokenBudget,
   shouldTrimStepMessages,
 } from "./compact";
@@ -102,11 +107,16 @@ import {
   watchdogDirective,
 } from "./streamWatchdog";
 import { formatTodoStatusBlock } from "./todos";
-import { modelIgnoresSynthesis, modelRejectsForcedToolChoice, recordIgnoredSynthesis } from "./toolChoiceLearning";
+import {
+  modelIgnoresSynthesis,
+  modelRejectsForcedToolChoice,
+  recordIgnoredSynthesis,
+} from "./toolChoiceLearning";
 import { measureToolPayload } from "./toolPayload";
 import { formatUserModelBlock, type UserModel } from "./userModel";
 import { repairModelMessageSequence } from "./validateModelSequence";
 import {
+  claimsVerification,
   newVerifyLedger,
   recordToolResult,
   type VerifyLedger,
@@ -495,7 +505,6 @@ export function buildConfiguredLanguageModel(
 const PLAN_MODE_PROMPT = `## PLAN MODE -- ACTIVE
 Mutating tools (write_file, edit, multi_edit, create_directory) will queue their changes for the user to review as a single diff. Do NOT execute bash_run or bash_background while plan mode is active -- restrict yourself to reads (read_file, grep, glob, list_directory) and the queued mutations. After queueing the full set of edits, stop and return a brief summary; do not continue acting until the user has accepted/rejected.`;
 
-
 function buildStableSystem(
   /** The model name to pick the prompt tier with (see `effectiveModelName`). */
   modelNameForTier: string,
@@ -627,7 +636,6 @@ export function noToolRepetition<T extends ToolSet>(
     return false;
   };
 }
-
 
 /**
  * Read-only idle-loop guard.
@@ -782,7 +790,6 @@ export function isErrorResult(output: unknown): boolean {
   if (record.noReadableText === true) return true;
   if (record.isOffline === true) return true;
   if (
-
     typeof record.text === "string" &&
     record.text.startsWith("(no readable text returned from the page")
   ) {
@@ -1033,7 +1040,13 @@ export type RunAgentOptions = {
     /** Passive verification ledger for the verify-on-stop gate (see
      *  verifyOnStop.ts): which code files this run edited and whether fresh
      *  passing verification evidence landed after the last edit. */
-    verify: { changedCodePaths: string[]; verifiedAfterLastEdit: boolean };
+    verify: {
+      changedCodePaths: string[];
+      verifiedAfterLastEdit: boolean;
+      /** The final prose claimed a verification result the ledger cannot back
+       *  (see verifyOnStop.claimsVerification). */
+      claimedVerification: boolean;
+    };
   }) => void;
   /** Loop budget for this round. Defaults to the first tier; the caller raises
    *  it on each Continue so a long task deepens instead of stalling. */
@@ -1802,6 +1815,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // previous array while both are equal (see buildStepSystem).
   let lastStepTodoBlock: string | null | undefined;
   let lastStepNudge: string | null | undefined;
+  let lastStepBudgetBlock: string | null | undefined;
   let lastStepSystem: SystemLike | null = null;
   // Verification-on-stop ledger: tracks code edits and fresh passing evidence
   // across the whole run. Reported via onFinishMeta so the runtime can fire a
@@ -1852,6 +1866,15 @@ export async function runAgentStream(opts: RunAgentOptions) {
           ? (useTodosStore.getState().bySession[sessionId]?.items ?? [])
           : [];
       const todoBlock = formatTodoStatusBlock(todos);
+      // One number the model cannot see on its own: how full its working window
+      // already is. Banded (see formatBudgetBlock) so it stays byte-identical
+      // between thresholds, keeping the cached prefix hot.
+      const budgetBlock = formatBudgetBlock(
+        Array.isArray(stepMessages)
+          ? estimateMessagesSize(stepMessages).tokens
+          : 0,
+        historyTokenBudget(compactionLimit, reservedTokens),
+      );
       // Memoized: an unchanged hint set resends the identical system array so
       // the provider's prefix cache stays hot. A new/changed hint rebuilds
       // once — that single reprocess is the price of delivering new content.
@@ -1860,14 +1883,21 @@ export async function runAgentStream(opts: RunAgentOptions) {
       if (
         lastStepSystem !== null &&
         todoBlock === lastStepTodoBlock &&
-        activeNudge === lastStepNudge
+        activeNudge === lastStepNudge &&
+        budgetBlock === lastStepBudgetBlock
       ) {
         system = lastStepSystem;
       } else {
-        system = buildStepSystem(baseSystem, todoBlock, activeNudge);
+        system = buildStepSystem(
+          baseSystem,
+          todoBlock,
+          activeNudge,
+          budgetBlock,
+        );
         lastStepSystem = system;
         lastStepTodoBlock = todoBlock;
         lastStepNudge = activeNudge;
+        lastStepBudgetBlock = budgetBlock;
       }
       // Keep the harness profile's prompt prelude available on every step so a
       // profile change mid-run does not silently drop its guidance.
@@ -2265,6 +2295,16 @@ export async function runAgentStream(opts: RunAgentOptions) {
         costBudgetUsd: costBudget,
         at: Date.now(),
       };
+      // The final prose of the run, gathered from the last step plus every
+      // step so a claim made mid-run counts. Used to catch a verification
+      // CLAIM the ledger cannot back (see verifyOnStop.claimsVerification).
+      const finalText = [
+        (result as { text?: string } | undefined)?.text ?? "",
+        ...(
+          (result as { steps?: Array<{ text?: string }> } | undefined)?.steps ??
+          []
+        ).map((s) => s?.text ?? ""),
+      ].join("\n");
       opts.onFinishMeta?.({
         stopReason: settledStop,
         finishReason,
@@ -2273,6 +2313,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
         verify: {
           changedCodePaths: verifyLedger.changedCodePaths,
           verifiedAfterLastEdit: verifyLedger.verifiedAfterLastEdit,
+          claimedVerification: claimsVerification(finalText),
         },
       });
 

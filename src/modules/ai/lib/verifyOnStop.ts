@@ -94,6 +94,75 @@ export function verifyGateApplies(info: {
   return info.stopReason === null && !info.aborted;
 }
 
+/**
+ * Regexes that match a COMMITTED claim of a verification result.
+ *
+ * Deliberately narrow: they fire on success statements ("tests pass", "all
+ * checks green", "verified", "lint clean", "build succeeded", "no failures
+ * remain") and stay silent on a description of what the model DID run (that
+ * carries ledger evidence anyway), on a failure ("tests fail"), and on a hedge
+ * ("should pass", "let me run the tests"). Pure so a test pins the policy.
+ */
+const VERIFICATION_CLAIM_RES: readonly RegExp[] = [
+  /\b(tests?|suite|specs?|checks?|lint|build|type-?check|compilation)\b[^.\n]{0,40}\b(pass(?:ed|es|ing)?|green|clean|succeed(?:ed|s|ing)?|ok|successful|valid)\b/i,
+  /\b(all|every)\b[^.\n]{0,25}\b(tests?|checks?|specs?|suites?)\b[^.\n]{0,25}\b(pass|passed|passing|green|ok)\b/i,
+  /\b(pass(?:ed|es|ing)?|green|succeed(?:ed|s|ing)?|validated|verified)\b[^.\n]{0,30}\b(tests?|suite|specs?|checks?|lint|build|type-?check)\b/i,
+  /\b(verified|validated)\b[^.\n]{0,20}\b(that|the|it|everything|all|all of)\b/i,
+  /\beverything\b[^.\n]{0,15}\b(passes|passed|is green|works|checks out)\b/i,
+];
+
+/** A success claim phrased as an absence ("no failures remain"). It contains
+ *  the word "no", so it is matched BEFORE the negation guard rather than
+ *  through it, which would otherwise reject it as a negation. */
+const NEGATIVE_CLAIM_RE =
+  /\bno\b[^.\n]{0,20}\b(errors?|failures?|issues?|problems?)\b[^.\n]{0,15}\b(remain|left|found|reported)\b/i;
+
+/** Markers that turn a nearby match into a failed, hypothetical or pending
+ *  statement rather than a claim of success. */
+const CLAIM_NEGATION_RE =
+  /\b(not|no|never|cannot|can't|couldn't|didn't|doesn't|don't|won't|unable|without|unless|will|would|should|plan(?:ning)?|going to|let me|i'll|i will|try(?:ing)? to|needs? to|have to|has to)\b/i;
+
+/**
+ * Whether a finished run's prose CLAIMS a verification result it may not have.
+ *
+ * A match is re-checked against a small window for negation / future markers,
+ * so "the tests do not pass", "should pass once I fix X" and "let me run the
+ * tests" are not read as claims. Pure so the policy is pinned by a test.
+ */
+export function claimsVerification(text: string): boolean {
+  if (!text) return false;
+  // The absence claim is checked first: it contains "no", which the negation
+  // guard would otherwise reject.
+  if (NEGATIVE_CLAIM_RE.test(text)) return true;
+  for (const re of VERIFICATION_CLAIM_RES) {
+    const m = re.exec(text);
+    if (!m) continue;
+    const start = Math.max(0, m.index - 24);
+    const window = text.slice(start, m.index + m[0].length + 8);
+    if (CLAIM_NEGATION_RE.test(window)) continue;
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Whether the verify-on-stop gate should fire. True when the run has no fresh
+ * passing evidence AND either it edited code or its prose claims a verification
+ * result. The claim arm is what closes the "claimed but never ran" hole: a
+ * "tests pass" finale over an unverified tree slipped through the edit-only
+ * gate whenever the model did not touch a code file (or verified in prose
+ * alone).
+ */
+export function shouldNudgeVerification(v: {
+  changedCodePaths: readonly string[];
+  verifiedAfterLastEdit: boolean;
+  claimedVerification: boolean;
+}): boolean {
+  if (v.verifiedAfterLastEdit) return false;
+  const codeEdited = v.changedCodePaths.some((p) => p && !isNonCodePath(p));
+  return codeEdited || v.claimedVerification;
+}
+
 /** Per-run verification state. Immutable updates keep it testable. */
 export type VerifyLedger = {
   /** Code files edited this run, in first-touch order, deduplicated. */
@@ -168,17 +237,24 @@ export function recordToolResult(
 }
 
 /**
- * The synthetic follow-up when edited code lacks fresh verification, or null
- * when the gate should stay silent (no code edits, already verified, or the
- * task used its nudge budget).
+ * The synthetic follow-up when edited code lacks fresh verification (or the
+ * model claimed a verification it cannot back), or null when the gate should
+ * stay silent (nothing to verify, already verified, or the task used its nudge
+ * budget).
  */
 export function buildVerifyNudge(
   changedCodePaths: readonly string[],
   attempts: number,
   maxAttempts: number = MAX_VERIFY_NUDGES,
+  claimedVerification = false,
 ): string | null {
   const paths = changedCodePaths.filter((p) => p && !isNonCodePath(p));
-  if (paths.length === 0 || attempts >= maxAttempts) return null;
+  if (attempts >= maxAttempts) return null;
+  if (paths.length === 0) {
+    return claimedVerification
+      ? `${VERIFY_NUDGE_PREFIX} Your reply claims the work is verified, but this run recorded no passing verification evidence (no run_checks exit 0, and no test/lint/build command that exited 0). Run the relevant verification now and report the real result, or correct the claim and state plainly what you did NOT verify.`
+      : null;
+  }
   const lines = paths
     .slice(0, MAX_CHANGED_PATHS_IN_NUDGE)
     .map((p) => `- \`${p}\``);

@@ -68,6 +68,7 @@ import {
   buildVerifyNudge,
   isVerifyNudgeParts,
   MAX_VERIFY_NUDGES,
+  shouldNudgeVerification,
   verifyGateApplies,
 } from "../lib/verifyOnStop";
 import type { ToolContext } from "../tools/tools";
@@ -190,10 +191,14 @@ function requestAutoContinue(sessionId: string): boolean {
  */
 function requestVerifyNudge(
   sessionId: string,
-  verify: { changedCodePaths: string[]; verifiedAfterLastEdit: boolean },
+  verify: {
+    changedCodePaths: string[];
+    verifiedAfterLastEdit: boolean;
+    claimedVerification: boolean;
+  },
 ): boolean {
   if (!usePreferencesStore.getState().verifyOnStop) return false;
-  if (verify.verifiedAfterLastEdit) return false;
+  if (!shouldNudgeVerification(verify)) return false;
   if (stopLatch.has(sessionId)) return false;
   if (useChatStore.getState().activeSessionId !== sessionId) return false;
   if (useChatStore.getState().agentMeta.stoppedByUser) return false;
@@ -203,6 +208,7 @@ function requestVerifyNudge(
     verify.changedCodePaths,
     attempts,
     MAX_VERIFY_NUDGES,
+    verify.claimedVerification,
   );
   if (!nudge) return false;
   verifyNudgeCount.set(sessionId, attempts + 1);
@@ -716,12 +722,13 @@ function makeChat(sessionId: string): Chat<UIMessage> {
           decision.reason ??
           `it kept re-sending the same request without making progress (after ${decision.state.stalled} unproductive resumes)`;
         logWarn(`[ai] stopped an automatic resume loop: ${loopExplanation}`);
-        const stopReason: AgentStopReason =
-          decision.reason?.includes("repeated")
-            ? "tool-repetition"
-            : decision.reason?.includes("failed")
-              ? "tool-error"
-              : "tool-only-loop";
+        const stopReason: AgentStopReason = decision.reason?.includes(
+          "repeated",
+        )
+          ? "tool-repetition"
+          : decision.reason?.includes("failed")
+            ? "tool-error"
+            : "tool-only-loop";
         useChatStore.getState().patchAgentMeta({
           status: "idle",
           error: `Termigo stopped the run: ${loopExplanation}. Click Continue or send a message to proceed.`,
@@ -1113,8 +1120,8 @@ export async function sendParts(
                 useChatStore.getState().live.getWorkspaceRoot(),
               getCwd: () => useChatStore.getState().live.getCwd(),
               makeRunId: () =>
-                (useChatStore.getState().agentMeta as { runId?: string }).runId ??
-                makeRunId(sessionId),
+                (useChatStore.getState().agentMeta as { runId?: string })
+                  .runId ?? makeRunId(sessionId),
             },
           ).catch(() => {});
         }
@@ -1395,7 +1402,9 @@ export async function rewindToTurn(
   sessionId: string,
   messageId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const entry = useTurnCheckpointStore.getState().entryFor(sessionId, messageId);
+  const entry = useTurnCheckpointStore
+    .getState()
+    .entryFor(sessionId, messageId);
   if (!entry) {
     return { ok: false, error: "This turn has no checkpoint to rewind to." };
   }
