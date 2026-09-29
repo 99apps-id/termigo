@@ -17,9 +17,13 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   no longer passes an empty `TAURI_SIGNING_PRIVATE_KEY` to `tauri-action`,
   which Tauri rejected with `failed to decode secret key`. The keys are
   exported only when the secret exists, so a missing key now fails fast with
-  `no private key` instead of a cryptic decode error. Note: publishing a
-  signed release still requires the `TAURI_SIGNING_PRIVATE_KEY` secret that
-  matches the updater pubkey in `tauri.conf.json`.
+  `no private key` instead of a cryptic decode error.
+- **Updater signing key rotated.** The original private key for the updater
+  pubkey `3BABFD8AB60E3469` was lost, so a new keypair was generated and
+  `plugins.updater.pubkey` now carries `9B06E50DB113895B`. Installs released
+  before this version still embed the old pubkey and cannot verify signatures
+  from this key, so they must be reinstalled once, after which auto-update
+  resumes.
 
 ## [0.9.21] - 2026-09-29
 
