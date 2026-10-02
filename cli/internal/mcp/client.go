@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -30,6 +31,11 @@ type Client struct {
 	nextID    int64
 	waitErr   chan error
 	stderr    *stderrBuffer
+	// exited is set once the server process has terminated. The waitErr
+	// channel can only be read once, and only from inside a pending call, so
+	// a separate flag is what lets an outside observer ask "is the process
+	// still there" without stealing the error a call is waiting on.
+	exited atomic.Bool
 }
 
 // stderrBuffer keeps a bounded tail of the server's stderr so that startup
@@ -100,7 +106,11 @@ func Connect(ctx context.Context, server Server) (*Client, error) {
 	}
 	go client.readLoop(stdout)
 	go client.captureStderr(stderrPipe, stderr)
-	go func() { client.waitErr <- command.Wait() }()
+	go func() {
+		err := command.Wait()
+		client.exited.Store(true)
+		client.waitErr <- err
+	}()
 
 	// MCP handshake: initialize, then notify the server it can start.
 	initializeCtx, cancel := context.WithTimeout(ctx, defaultTimeout)
@@ -178,13 +188,26 @@ func (client *Client) Ping(ctx context.Context) error {
 	return err
 }
 
+// Dead reports whether the server process has exited. A caller that notices
+// this between calls knows a reconnect is needed: the pipes may still drain
+// buffered output, but no new request will ever be answered.
+func (client *Client) Dead() bool {
+	return client.exited.Load()
+}
+
 // Close terminates the server process. On Windows, Process.Kill() can race
-// with pipe cleanup inside Cmd.Wait(), so every wait is bounded.
+// with pipe cleanup inside Cmd.Wait(), so every wait is bounded. A process
+// that already exited is closed immediately: its waitErr may have been read
+// by a failing call, and waiting on an empty channel would only burn the
+// caller's time on a corpse.
 func (client *Client) Close() error {
 	if client.cmd == nil || client.cmd.Process == nil {
 		return nil
 	}
 	_ = client.stdin.Close()
+	if client.exited.Load() {
+		return nil
+	}
 	done := make(chan struct{})
 	go func() {
 		defer close(done)

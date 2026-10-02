@@ -14,6 +14,10 @@ func (s stubMCP) CallTool(context.Context, string, map[string]any) (mcp.Call, er
 	return s.out, nil
 }
 
+// Dead is false on the stub: the adapter's retry logic only reacts to a dead
+// caller, and a live stub is what the plain-forwarding test wants.
+func (s stubMCP) Dead() bool { return false }
+
 func TestMCPToolAdaptsACall(t *testing.T) {
 	tool := &mcpTool{
 		client: stubMCP{out: mcp.Call{Text: "result"}},
