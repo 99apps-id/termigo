@@ -67,7 +67,34 @@ Details in [module layout](docs/architecture/module-layout.md):
 
 ### Go CLI (`cli/`)
 
-Automation companion (`cli/cmd/termigo`): `doctor`, `init`, `agent run`, `skill`, `mcp`, `config`, and terminal control (`tui`, `setup`, `models`, `model`, `settings`, `approval`, `secret`) via `internal/control`. Keep dependency-light (stdlib + yaml.v3). Provider credentials stay with their CLIs; app API keys are stored only by the app.
+`cli/cmd/termigo` is a standalone terminal agent, not only an automation
+companion: it talks to the providers directly, so it runs on a headless VPS with
+no webview.
+
+- **Agent**: `ask` (one prompt), `code` (the file/shell/git loop), and `chat`, a
+  Bubble Tea TUI. `chat` persists a session: every turn is written to
+  `<state home>/sessions/*.json`, `--continue` resumes the last session for the
+  workspace and `--session <id>` a specific one. In the TUI: `/model` (provider
+  then model), `/providers`, `/settings`, `/status`, `/cost`, `/setup`,
+  `/key <provider> <key>`, `/login <provider>`, `/sessions`, `/new`, `/copy [n]`
+  (OSC 52 clipboard) and Ctrl+Y.
+- **Auth**: `login`/`logout` run the vendor OAuth flows (device or PKCE on a
+  loopback callback) and store tokens in the 0600 secret file. The Antigravity
+  client pair is stamped at build time by `scripts/build-cli.mjs` from a
+  repository secret or the git-ignored `.env.local`, never committed.
+- **Tools**: filesystem, search, shell, git and web search/fetch, plus every
+  configured MCP server: its tools are offered under a `server__tool` name and
+  go through the approval policy because they run in another process.
+- **Remote**: `telegram` runs the companion bot and `service install` sets it up
+  to run 24/7 (a systemd user unit with linger, launchd, or a Windows scheduled
+  task).
+- **Automation companion**: `doctor`, `init`, `agent run`, `skill`, `mcp`,
+  `config`, `models`, `model`, `settings`, `approval`, `secret`, `endpoint`, and
+  terminal control (`tui`, `setup`) via `internal/control` for the running app.
+
+Keep the module dependency-light (stdlib, yaml.v3, `golang.org/x/term` and the
+Bubble Tea stack). Provider credentials live in the CLI's own 0600 secret store
+under the state home; app API keys are stored only by the app.
 
 ### AI subsystem (`src/modules/ai/`)
 

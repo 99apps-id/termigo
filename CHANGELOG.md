@@ -4,6 +4,26 @@ All notable changes to Termigo are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Standalone agent in the Go companion (`cli/`).** The Go binary now talks to
+  the providers directly: `login`/`logout` (OAuth device or PKCE), `ask`, `code`
+  and `chat`, a Bubble Tea TUI with persisted sessions (`--continue`,
+  `--session <id>`, `/sessions`, `/new`), token usage and `/cost`, `/copy`
+  (OSC 52) with Ctrl+Y, `/key`/`/login`/`/setup`, and every configured MCP
+  server's tools offered under a `server__tool` name. `telegram` and
+  `service install` run the companion bot 24/7. It runs on a headless VPS with
+  no webview.
+
+### Security
+
+- **The Antigravity OAuth client pair is stamped at build time.**
+  `scripts/build-cli.mjs` injects it from a repository secret or the git-ignored
+  `.env.local`, so it is never committed and GitHub secret scanning has nothing
+  to flag.
+
 ## [0.9.22] - 2026-09-29
 
 ### Fixed

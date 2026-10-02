@@ -523,11 +523,12 @@ termigo help
 It does **not** know `agent`, `mcp`, `skill`, `doctor` or `init`. Those belong
 to the Go companion below, and asking this binary for them now says so.
 
-### 2. Go companion (automation)
+### 2. Go companion (agent and automation)
 
-Lives in [`cli/`](cli/) and is **not** installed by the app. It automates what
-the desktop surfaces interactively; most of it runs with the app closed, and
-the terminal group at the end of the list below drives a **running** Termigo.
+Lives in [`cli/`](cli/) and is **not** installed by the app. It is two things: a
+standalone terminal **agent** that talks to the providers directly, so it runs
+on a headless box with no webview, and an **automation** companion that drives a
+running Termigo over its control socket.
 
 ```bash
 cd cli
@@ -540,6 +541,16 @@ exactly what makes `termigo agent list` fail confusingly.
 
 ```bash
 ./termi-go help
+
+# standalone agent (no desktop app needed)
+./termi-go login muse                    # OAuth: xai-oauth, openai-codex, claude-oauth, antigravity, github-copilot, muse
+./termi-go ask "summarise this file"     # one prompt
+./termi-go code "fix the failing test" --yes   # file/shell/git loop
+./termi-go chat                          # Bubble Tea TUI; --continue resumes the last session
+./termi-go telegram                      # companion bot
+./termi-go service install               # run the bot 24/7 (systemd/launchd/schtasks)
+
+# automation and driving a running Termigo
 ./termi-go doctor --json                # inspect local tools
 ./termi-go init <dir>                   # scaffold .termigo/ + TERMIGO.md
 ./termi-go agent list                   # installed agent providers
@@ -559,6 +570,18 @@ exactly what makes `termigo agent list` fail confusingly.
 ./termi-go secret deepseek              # store a key (prompted, not echoed)
 ```
 
+TUI commands: `/model` (provider then model), `/providers`, `/settings`,
+`/status`, `/cost`, `/setup`, `/key <provider> <key>`, `/login <provider>`,
+`/sessions`, `/new`, `/copy [n]` (OSC 52), Ctrl+Y copies the last reply. Every
+turn is saved to `<state home>/sessions/*.json`, so `--continue` resumes the
+last conversation for the workspace and `--session <id>` a specific one.
+Configured MCP servers are connected at start and their tools offered under a
+`server__tool` name.
+
+- **Auth:** `login`/`logout` run the vendor OAuth device or PKCE flows and store
+  tokens in the CLI's own 0600 secret file. The Antigravity client pair is
+  stamped into the binary at build time from a repository secret or the
+  git-ignored `.env.local`, never committed.
 - **Providers:** Codex, Claude Code, Gemini, Antigravity, Ollama (local).
   `agent run` drives Codex, Claude and Gemini in print mode and Ollama over its
   local HTTP API; a provider with no headless mode is reported rather than

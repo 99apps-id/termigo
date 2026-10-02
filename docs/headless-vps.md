@@ -125,6 +125,28 @@ The releases do bundle the `termigo-cli` control companion
 app where `run-headless.sh` looks for it; a bare AppImage keeps it inside the
 bundle, so for a shell-visible `termigo-cli` prefer the deb or rpm.
 
+### Option C: run the Go agent without the app
+
+The Go binary is also a standalone agent, so a small VPS can skip the webview,
+Xvfb and GTK entirely:
+
+```bash
+termigo-go login muse            # device-code OAuth; also xai-oauth, openai-codex,
+                                 # claude-oauth, antigravity, github-copilot
+termigo-go model muse/muse-spark-1.3
+termigo-go chat                  # Bubble Tea TUI; --continue resumes the last session
+termigo-go telegram              # run the companion bot
+termigo-go service install       # systemd user unit + linger, so it runs 24/7
+```
+
+`chat` writes every turn to a session under the state home, so `--continue`
+resumes the last conversation for the workspace and `--session <id>` a specific
+one. The TUI keeps token usage per session (`/cost`), copies the last reply with
+`/copy` or Ctrl+Y, stores an API key with `/key <provider> <key>`, and offers
+every configured MCP server's tools. `login antigravity` needs no prompt on a
+release build: the public client pair is stamped into the binary at build time.
+This path needs no display and no `libwebkit2gtk`.
+
 > **Never run two Termigo instances against one data directory.** Termigo has no
 > single-instance guard. Both would use `~/.local/share/id.99apps.termigo/`
 > (`secrets.json`, the session store, the Telegram relay state) and both would
