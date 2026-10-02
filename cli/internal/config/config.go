@@ -49,9 +49,13 @@ type MCPServer struct {
 	Env     map[string]string `json:"env,omitempty"`
 }
 
+// EnvHome overrides the state directory, which is what keeps tests and
+// throwaway profiles off the real one.
+const EnvHome = "TERMIGO_HOME"
+
 // Home returns the Termigo home directory, honouring TERMIGO_HOME.
 func Home() (string, error) {
-	if override := os.Getenv("TERMIGO_HOME"); override != "" {
+	if override := os.Getenv(EnvHome); override != "" {
 		return override, nil
 	}
 	base, err := os.UserHomeDir()
@@ -61,13 +65,31 @@ func Home() (string, error) {
 	return filepath.Join(base, ".termigo"), nil
 }
 
-// Path returns the user config file path.
-func Path() (string, error) {
+// EnsureHome returns the state directory, creating it with private
+// permissions when missing.
+func EnsureHome() (string, error) {
 	home, err := Home()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, FileName), nil
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		return "", fmt.Errorf("create state directory: %w", err)
+	}
+	return home, nil
+}
+
+// HomePath returns the absolute path of a file inside the state directory.
+func HomePath(name string) (string, error) {
+	home, err := Home()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, name), nil
+}
+
+// Path returns the user config file path.
+func Path() (string, error) {
+	return HomePath(FileName)
 }
 
 // Load reads the user configuration. A missing file returns an empty config

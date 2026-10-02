@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"runtime"
 	"strconv"
 	"strings"
@@ -20,6 +21,8 @@ import (
 	"github.com/99apps-id/termigo/cli/internal/initcmd"
 	"github.com/99apps-id/termigo/cli/internal/mcp"
 	"github.com/99apps-id/termigo/cli/internal/mcpserver"
+	"github.com/99apps-id/termigo/cli/internal/oauth"
+	"github.com/99apps-id/termigo/cli/internal/secrets"
 	"github.com/99apps-id/termigo/cli/internal/skill"
 	"github.com/99apps-id/termigo/cli/internal/terminal"
 )
@@ -77,6 +80,10 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return runApproval(args[1:], stdout)
 	case "secret":
 		return runSecret(args[1:], stdout)
+	case "login":
+		return runLogin(args[1:], stdout)
+	case "logout":
+		return runLogout(args[1:], stdout)
 	case "endpoint":
 		return runEndpoint(args[1:], stdout)
 	default:
@@ -150,6 +157,8 @@ Commands that drive a running Termigo:
   settings set <key> <value>       Change one allowlisted app setting
   approval [<mode>]                Show or set the agent approval mode
   secret <provider>                Store a provider API key (prompted, never echoed)
+  login <provider>                 OAuth login: xai-oauth, openai-codex, claude-oauth, antigravity, github-copilot
+  logout <provider>                Drop a stored OAuth login
   endpoint list [--json]           List custom OpenAI-compatible endpoints
   endpoint add <name> <url> <model> [--key <k>] [--default] Add custom endpoint
   endpoint remove <id|name>        Remove a custom endpoint
@@ -161,8 +170,10 @@ Common options:
 Agent providers: codex, claude, gemini, antigravity, ollama (local).
 Skills live in .termigo/skills/<name>/SKILL.md; MCP servers in .termigo/mcp.json.
 The app must be running for the commands above that drive it.
-The CLI never stores an API key itself: 'termigo secret' hands it to the running
-app, which keeps it in the OS keychain (on Linux, secrets.json with mode 0600).
+'termigo secret' hands an API key to the running app, which keeps it in the OS
+keychain. 'termigo login' stores an OAuth token in the CLI's own secret file
+(secrets.json, mode 0600), the OS keychain's fallback, so the agent can talk to
+the provider directly.
 `)
 }
 
@@ -1033,6 +1044,37 @@ func runApproval(args []string, stdout io.Writer) error {
 	}
 	_, err = fmt.Fprintf(stdout, "Approval mode is now %s.\n", control.FormatSettingValue(change.Value))
 	return err
+}
+
+// runLogin performs an OAuth login and stores the token in the CLI's own
+// secret file, so the agent can talk to the provider directly.
+func runLogin(args []string, stdout io.Writer) error {
+	if len(args) != 1 {
+		return fmt.Errorf("usage: termigo login <%s>", strings.Join(oauth.Supported(), "|"))
+	}
+	store, err := secrets.Load()
+	if err != nil {
+		return err
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	return oauth.Login(ctx, oauth.NewStore(store), args[0], stdin, stdout)
+}
+
+// runLogout drops a stored OAuth login.
+func runLogout(args []string, stdout io.Writer) error {
+	if len(args) != 1 {
+		return errors.New("usage: termigo logout <provider>")
+	}
+	store, err := secrets.Load()
+	if err != nil {
+		return err
+	}
+	if err := oauth.NewStore(store).Delete(args[0]); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "Logged out of %s.\n", args[0])
+	return nil
 }
 
 func runSecret(args []string, stdout io.Writer) error {
