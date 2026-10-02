@@ -25,6 +25,8 @@ type Options struct {
 	Env      *Env
 	MaxSteps int
 	System   string
+	// Images attach to the first user message, for a vision model.
+	Images []provider.Image
 }
 
 // Run drives one coding turn: stream a completion, execute any tool calls, feed
@@ -50,7 +52,7 @@ func Run(ctx context.Context, opts Options, prompt string, emit func(provider.St
 	definitions := registry.Definitions()
 
 	guard := &loopGuard{}
-	messages := []provider.Message{{Role: provider.RoleUser, Content: prompt}}
+	messages := []provider.Message{{Role: provider.RoleUser, Content: prompt, Images: opts.Images}}
 	last := ""
 
 	for step := 0; step < maxSteps; step++ {

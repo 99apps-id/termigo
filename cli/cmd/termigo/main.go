@@ -27,6 +27,7 @@ import (
 	"github.com/99apps-id/termigo/cli/internal/secrets"
 	"github.com/99apps-id/termigo/cli/internal/skill"
 	"github.com/99apps-id/termigo/cli/internal/terminal"
+	"github.com/99apps-id/termigo/cli/internal/tgbridge"
 )
 
 var version = "v0.9.22"
@@ -86,6 +87,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return runAsk(args[1:], stdout)
 	case "code":
 		return runCode(args[1:], stdout)
+	case "telegram":
+		return runTelegram(args[1:], stdout)
 	case "login":
 		return runLogin(args[1:], stdout)
 	case "logout":
@@ -163,6 +166,9 @@ Commands that drive a running Termigo:
   settings set <key> <value>       Change one allowlisted app setting
   approval [<mode>]                Show or set the agent approval mode
   ask <provider> <model> "<prompt>" Stream one completion from the provider directly
+  code [--yes] <provider> <model> "<prompt>" Run the coding agent loop with tools
+  telegram <token>                 Store the Telegram bot token
+  telegram [status]                Run the companion bot, or show its status
   secret <provider>                Store a provider API key (prompted, never echoed)
   login <provider>                 OAuth login: xai-oauth, openai-codex, claude-oauth, antigravity, github-copilot
   logout <provider>                Drop a stored OAuth login
@@ -1092,6 +1098,39 @@ func runAsk(args []string, stdout io.Writer) error {
 	})
 	fmt.Fprintln(stdout)
 	return err
+}
+
+// runTelegram stores a bot token or runs the Telegram companion bot. With no
+// argument it starts the bot, picking the first provider that has a credential.
+func runTelegram(args []string, stdout io.Writer) error {
+	store, err := secrets.Load()
+	if err != nil {
+		return err
+	}
+	if len(args) > 0 {
+		switch strings.ToLower(strings.TrimSpace(args[0])) {
+		case "status":
+			fmt.Fprintln(stdout, tgbridge.Status(store))
+			return nil
+		default:
+			if err := tgbridge.SaveToken(store, args[0]); err != nil {
+				return err
+			}
+			fmt.Fprintln(stdout, "Bot token stored. Run 'termigo telegram' to start the bot.")
+			return nil
+		}
+	}
+	model, ok := tgbridge.FirstAvailableModel(store)
+	if !ok {
+		return errors.New("no provider credential; run 'termigo login <provider>' or set a key first")
+	}
+	workspace, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	return tgbridge.Run(ctx, store, workspace, model, stdout)
 }
 
 // runCode runs the agent loop against a provider: it can read and edit files,
