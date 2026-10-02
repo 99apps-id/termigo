@@ -44,17 +44,26 @@ func TestModelPickerSwitchesTheModel(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "test-key")
 	model := &Model{}
 	model.openModelPicker()
-	if !model.pickerActive || len(model.pickerItems) == 0 {
-		t.Fatalf("picker active=%v items=%d, want an open list", model.pickerActive, len(model.pickerItems))
+	if !model.pickerActive || len(model.pickerProviders) == 0 {
+		t.Fatalf("picker active=%v providers=%d, want an open provider list", model.pickerActive, len(model.pickerProviders))
 	}
-	want := model.pickerItems[0].ID
+
+	// First Enter picks the provider, opening its model list.
 	updated, _ := model.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	got := updated.(*Model)
-	if got.pickerActive {
+	if got.pickerStage != 1 || len(got.pickerModels) == 0 {
+		t.Fatalf("stage=%d models=%d, want the model list", got.pickerStage, len(got.pickerModels))
+	}
+	want := got.pickerModels[0].ID
+
+	// Second Enter picks the model.
+	updated2, _ := got.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	final := updated2.(*Model)
+	if final.pickerActive {
 		t.Errorf("the picker should close after a choice")
 	}
-	if got.model.ID != want {
-		t.Errorf("model = %q, want %q", got.model.ID, want)
+	if final.model.ID != want {
+		t.Errorf("model = %q, want %q", final.model.ID, want)
 	}
 }
 

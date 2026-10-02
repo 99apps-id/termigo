@@ -73,10 +73,12 @@ type Model struct {
 	pendingDetail string
 	pendingReply  chan bool
 
-	// picker selects a model from a list, opened by a bare /model.
-	pickerActive bool
-	pickerItems  []provider.Model
-	pickerCursor int
+	// picker selects a provider then a model, opened by a bare /model.
+	pickerActive    bool
+	pickerStage     int // 0 provider, 1 model
+	pickerProviders []provider.Provider
+	pickerModels    []provider.Model
+	pickerCursor    int
 }
 
 var (
@@ -163,29 +165,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// The model picker is modal: it owns the arrow keys and Enter.
 	if m.pickerActive {
-		switch key.String() {
-		case "up", "ctrl+p":
-			if len(m.pickerItems) > 0 {
-				m.pickerCursor = (m.pickerCursor - 1 + len(m.pickerItems)) % len(m.pickerItems)
-			}
-			return m, nil
-		case "down", "ctrl+n":
-			if len(m.pickerItems) > 0 {
-				m.pickerCursor = (m.pickerCursor + 1) % len(m.pickerItems)
-			}
-			return m, nil
-		case "enter":
-			if len(m.pickerItems) > 0 {
-				chosen := m.pickerItems[m.pickerCursor]
-				m.pickerActive = false
-				m.setModel(chosen)
-			}
-			return m, nil
-		case "esc":
-			m.pickerActive = false
-			return m, nil
-		}
-		return m, nil
+		return m.handlePickerKey(key), nil
 	}
 
 	// An approval prompt captures y/n/a first.
@@ -239,7 +219,7 @@ func (m *Model) handleSlash(value string) (tea.Model, tea.Cmd) {
 	case "/quit", "/exit":
 		return m, tea.Quit
 	case "/help":
-		m.appendBlock(blockNotice, "Commands: /model [query] pick or set the model, /settings [key value], /status, /new, /help, /quit. Enter sends, Ctrl+J newline, Esc denies an approval.")
+		m.appendBlock(blockNotice, "Commands: /model [query] pick provider then model, /providers, /settings [key value], /status, /new, /help, /quit. Enter sends, Ctrl+J newline, Esc denies an approval.")
 		return m, nil
 	case "/settings":
 		return m.handleSettings(fields), nil
@@ -257,6 +237,9 @@ func (m *Model) handleSlash(value string) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "/status":
 		m.appendBlock(blockNotice, fmt.Sprintf("model: %s\nworkspace: %s", m.model.ID, m.workspace))
+		return m, nil
+	case "/providers":
+		m.appendBlock(blockNotice, m.providersStatus())
 		return m, nil
 	case "/new":
 		m.blocks = nil
@@ -317,21 +300,93 @@ func (m *Model) handleSettings(fields []string) tea.Model {
 	return m
 }
 
-// openModelPicker lists the models whose provider has a credential.
+// openModelPicker lists the providers with a credential, then their models.
 func (m *Model) openModelPicker() {
-	items := make([]provider.Model, 0, 16)
-	for _, model := range provider.Models() {
-		if provider.ResolveKey(m.store, model.Provider) != "" {
-			items = append(items, model)
+	providers := make([]provider.Provider, 0, 16)
+	for _, info := range provider.Providers() {
+		if len(provider.ModelsFor(info.ID)) == 0 {
+			continue
 		}
+		if info.ID != m.model.Provider && provider.ResolveKey(m.store, info.ID) == "" {
+			continue
+		}
+		providers = append(providers, info)
 	}
-	if len(items) == 0 {
+	if len(providers) == 0 {
 		m.appendBlock(blockError, "No provider has a credential; run 'termigo login <provider>' or set a key.")
 		return
 	}
-	m.pickerItems = items
+	m.pickerProviders = providers
+	m.pickerStage = 0
 	m.pickerCursor = 0
 	m.pickerActive = true
+}
+
+func (m *Model) pickerCount() int {
+	if m.pickerStage == 0 {
+		return len(m.pickerProviders)
+	}
+	return len(m.pickerModels)
+}
+
+// handlePickerKey drives the two-step provider then model picker.
+func (m *Model) handlePickerKey(key tea.KeyMsg) tea.Model {
+	count := m.pickerCount()
+	switch key.String() {
+	case "up", "ctrl+p":
+		if count > 0 {
+			m.pickerCursor = (m.pickerCursor - 1 + count) % count
+		}
+	case "down", "ctrl+n":
+		if count > 0 {
+			m.pickerCursor = (m.pickerCursor + 1) % count
+		}
+	case "enter":
+		if count == 0 {
+			return m
+		}
+		if m.pickerStage == 0 {
+			chosen := m.pickerProviders[m.pickerCursor]
+			m.pickerModels = provider.ModelsFor(chosen.ID)
+			m.pickerStage = 1
+			m.pickerCursor = 0
+			return m
+		}
+		chosen := m.pickerModels[m.pickerCursor]
+		m.pickerActive = false
+		m.setModel(chosen)
+	case "esc":
+		if m.pickerStage == 1 {
+			m.pickerStage = 0
+			m.pickerCursor = 0
+			return m
+		}
+		m.pickerActive = false
+	}
+	return m
+}
+
+// providersStatus renders a one-line-per-provider credential summary.
+func (m *Model) providersStatus() string {
+	var builder strings.Builder
+	for _, info := range provider.Providers() {
+		if len(provider.ModelsFor(info.ID)) == 0 {
+			continue
+		}
+		status := "no credential"
+		switch {
+		case info.ID == m.model.Provider:
+			status = "current"
+		case provider.ResolveKey(m.store, info.ID) != "":
+			if info.OAuth {
+				status = "login"
+			} else {
+				status = "key"
+			}
+		}
+		fmt.Fprintf(&builder, "%-18s %-14s %s\n", info.ID, info.Label, status)
+	}
+	return strings.TrimRight(builder.String(), "\n")
 }
 
 // setModel switches the active model and rebuilds its client.
@@ -451,13 +506,24 @@ func (m *Model) View() string {
 	}
 
 	if m.pickerActive {
-		builder.WriteString("\n" + userStyle.Render("Choose a model (up/down, Enter, Esc):") + "\n")
-		for index, item := range m.pickerItems {
-			cursor := "  "
-			if index == m.pickerCursor {
-				cursor = "> "
+		if m.pickerStage == 0 {
+			builder.WriteString("\n" + userStyle.Render("Choose a provider (up/down, Enter, Esc):") + "\n")
+			for index, info := range m.pickerProviders {
+				cursor := "  "
+				if index == m.pickerCursor {
+					cursor = "> "
+				}
+				builder.WriteString(toolStyle.Render(cursor+info.Label) + statusStyle.Render(" ("+info.ID+")") + "\n")
 			}
-			builder.WriteString(toolStyle.Render(cursor+item.Label) + statusStyle.Render(" ("+item.Provider+")") + "\n")
+		} else {
+			builder.WriteString("\n" + userStyle.Render("Choose a model (up/down, Enter, Esc back):") + "\n")
+			for index, item := range m.pickerModels {
+				cursor := "  "
+				if index == m.pickerCursor {
+					cursor = "> "
+				}
+				builder.WriteString(toolStyle.Render(cursor+item.Label) + statusStyle.Render(" ("+item.ID+")") + "\n")
+			}
 		}
 	}
 	if m.pendingReply != nil {
