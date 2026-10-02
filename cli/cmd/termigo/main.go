@@ -22,6 +22,7 @@ import (
 	"github.com/99apps-id/termigo/cli/internal/mcp"
 	"github.com/99apps-id/termigo/cli/internal/mcpserver"
 	"github.com/99apps-id/termigo/cli/internal/oauth"
+	"github.com/99apps-id/termigo/cli/internal/provider"
 	"github.com/99apps-id/termigo/cli/internal/secrets"
 	"github.com/99apps-id/termigo/cli/internal/skill"
 	"github.com/99apps-id/termigo/cli/internal/terminal"
@@ -80,6 +81,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return runApproval(args[1:], stdout)
 	case "secret":
 		return runSecret(args[1:], stdout)
+	case "ask":
+		return runAsk(args[1:], stdout)
 	case "login":
 		return runLogin(args[1:], stdout)
 	case "logout":
@@ -156,6 +159,7 @@ Commands that drive a running Termigo:
   settings [<key>]                 Show the app settings a terminal may see
   settings set <key> <value>       Change one allowlisted app setting
   approval [<mode>]                Show or set the agent approval mode
+  ask <provider> <model> "<prompt>" Stream one completion from the provider directly
   secret <provider>                Store a provider API key (prompted, never echoed)
   login <provider>                 OAuth login: xai-oauth, openai-codex, claude-oauth, antigravity, github-copilot
   logout <provider>                Drop a stored OAuth login
@@ -1043,6 +1047,45 @@ func runApproval(args []string, stdout io.Writer) error {
 		return writeJSON(stdout, change)
 	}
 	_, err = fmt.Fprintf(stdout, "Approval mode is now %s.\n", control.FormatSettingValue(change.Value))
+	return err
+}
+
+// runAsk streams one completion straight from a provider, using the CLI's own
+// credential (an OAuth token or a stored/env API key). It is the first path
+// that does not need the desktop app running.
+func runAsk(args []string, stdout io.Writer) error {
+	if len(args) < 3 {
+		return errors.New("usage: termigo ask <provider> <model> \"<prompt>\"")
+	}
+	providerID := args[0]
+	model := args[1]
+	prompt := strings.Join(args[2:], " ")
+	if strings.TrimSpace(prompt) == "" {
+		return errors.New("the prompt is empty")
+	}
+	store, err := secrets.Load()
+	if err != nil {
+		return err
+	}
+	client, err := provider.NewClient(providerID, provider.DefaultBaseURL(providerID), provider.ResolverFor(store))
+	if err != nil {
+		return err
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	err = client.Stream(ctx, provider.ChatRequest{
+		Model:    model,
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: prompt}},
+	}, func(event provider.StreamEvent) error {
+		switch event.Type {
+		case provider.EventTextDelta:
+			fmt.Fprint(stdout, event.Text)
+		case provider.EventReasoningDelta:
+			fmt.Fprintf(stdout, "[thinking] %s", event.Text)
+		}
+		return nil
+	})
+	fmt.Fprintln(stdout)
 	return err
 }
 
