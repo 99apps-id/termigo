@@ -106,6 +106,12 @@ func (s *Server) handleRequest(out io.Writer, req RPCRequest) {
 			},
 		})
 
+	case "ping":
+		// A liveness probe the MCP spec requires both sides to answer. Our own
+		// client's Ping (the `termigo mcp ping` path) was rejected with "Method
+		// not found" until the self-test caught the drift.
+		s.sendResult(out, req.ID, map[string]interface{}{})
+
 	case "tools/list":
 		tools := []Tool{}
 		if s.allowExec {
