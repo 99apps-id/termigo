@@ -67,6 +67,11 @@ type Model struct {
 	pendingTool   string
 	pendingDetail string
 	pendingReply  chan bool
+
+	// picker selects a model from a list, opened by a bare /model.
+	pickerActive bool
+	pickerItems  []provider.Model
+	pickerCursor int
 }
 
 var (
@@ -147,6 +152,33 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// The model picker is modal: it owns the arrow keys and Enter.
+	if m.pickerActive {
+		switch key.String() {
+		case "up", "ctrl+p":
+			if len(m.pickerItems) > 0 {
+				m.pickerCursor = (m.pickerCursor - 1 + len(m.pickerItems)) % len(m.pickerItems)
+			}
+			return m, nil
+		case "down", "ctrl+n":
+			if len(m.pickerItems) > 0 {
+				m.pickerCursor = (m.pickerCursor + 1) % len(m.pickerItems)
+			}
+			return m, nil
+		case "enter":
+			if len(m.pickerItems) > 0 {
+				chosen := m.pickerItems[m.pickerCursor]
+				m.pickerActive = false
+				m.setModel(chosen)
+			}
+			return m, nil
+		case "esc":
+			m.pickerActive = false
+			return m, nil
+		}
+		return m, nil
+	}
+
 	// An approval prompt captures y/n/a first.
 	if m.pendingReply != nil {
 		switch strings.ToLower(key.String()) {
@@ -198,11 +230,11 @@ func (m *Model) handleSlash(value string) (tea.Model, tea.Cmd) {
 	case "/quit", "/exit":
 		return m, tea.Quit
 	case "/help":
-		m.appendBlock(blockNotice, "Commands: /model <query> switch model, /help, /quit. Enter sends, Ctrl+J newline, Esc denies an approval.")
+		m.appendBlock(blockNotice, "Commands: /model [query] pick or set the model, /status, /new, /help, /quit. Enter sends, Ctrl+J newline, Esc denies an approval.")
 		return m, nil
 	case "/model":
 		if len(fields) < 2 {
-			m.appendBlock(blockNotice, "Model is "+m.model.ID+".")
+			m.openModelPicker()
 			return m, nil
 		}
 		model, ok := provider.ModelFromQuery(strings.Join(fields[1:], " "))
@@ -210,20 +242,49 @@ func (m *Model) handleSlash(value string) (tea.Model, tea.Cmd) {
 			m.appendBlock(blockError, "Unknown model.")
 			return m, nil
 		}
-		client, err := provider.NewClient(model.Provider, provider.DefaultBaseURL(model.Provider), provider.ResolverFor(m.store))
-		if err != nil {
-			m.appendBlock(blockError, err.Error())
-			return m, nil
-		}
-		provider.SetForceResolver(client, m.store)
-		m.client = client
-		m.model = model
-		m.appendBlock(blockNotice, "Model is now "+model.ID+".")
+		m.setModel(model)
+		return m, nil
+	case "/status":
+		m.appendBlock(blockNotice, fmt.Sprintf("model: %s\nworkspace: %s", m.model.ID, m.workspace))
+		return m, nil
+	case "/new":
+		m.blocks = nil
+		m.appendBlock(blockNotice, "New session.")
 		return m, nil
 	default:
 		m.appendBlock(blockError, "Unknown command. Try /help.")
 		return m, nil
 	}
+}
+
+// openModelPicker lists the models whose provider has a credential.
+func (m *Model) openModelPicker() {
+	items := make([]provider.Model, 0, 16)
+	for _, model := range provider.Models() {
+		if provider.ResolveKey(m.store, model.Provider) != "" {
+			items = append(items, model)
+		}
+	}
+	if len(items) == 0 {
+		m.appendBlock(blockError, "No provider has a credential; run 'termigo login <provider>' or set a key.")
+		return
+	}
+	m.pickerItems = items
+	m.pickerCursor = 0
+	m.pickerActive = true
+}
+
+// setModel switches the active model and rebuilds its client.
+func (m *Model) setModel(model provider.Model) {
+	client, err := provider.NewClient(model.Provider, provider.DefaultBaseURL(model.Provider), provider.ResolverFor(m.store))
+	if err != nil {
+		m.appendBlock(blockError, err.Error())
+		return
+	}
+	provider.SetForceResolver(client, m.store)
+	m.client = client
+	m.model = model
+	m.appendBlock(blockNotice, "Model is now "+model.ID+".")
 }
 
 func (m *Model) startRun(prompt string) (tea.Model, tea.Cmd) {
@@ -324,6 +385,16 @@ func (m *Model) View() string {
 		}
 	}
 
+	if m.pickerActive {
+		builder.WriteString("\n" + userStyle.Render("Choose a model (up/down, Enter, Esc):") + "\n")
+		for index, item := range m.pickerItems {
+			cursor := "  "
+			if index == m.pickerCursor {
+				cursor = "> "
+			}
+			builder.WriteString(toolStyle.Render(cursor+item.Label) + statusStyle.Render(" ("+item.Provider+")") + "\n")
+		}
+	}
 	if m.pendingReply != nil {
 		builder.WriteString("\n" + toolStyle.Render(fmt.Sprintf("Approve %s? [y]es / [n]o  %s", m.pendingTool, m.pendingDetail)) + "\n")
 	}

@@ -1,6 +1,10 @@
 package tui
 
-import "testing"
+import (
+	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
 
 // TestAppendBlockMergesStreamedDeltas keeps streamed text in one block instead
 // of one block per token.
@@ -31,5 +35,34 @@ func TestHandleSlashUnknownReportsAnError(t *testing.T) {
 	_, _ = model.handleSlash("/nope")
 	if len(model.blocks) != 1 || model.blocks[0].kind != blockError {
 		t.Fatalf("blocks = %+v, want one error", model.blocks)
+	}
+}
+
+// TestModelPickerSwitchesTheModel proves a bare /model opens a list and Enter
+// selects from it, which is the menu-style model choice.
+func TestModelPickerSwitchesTheModel(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	model := &Model{}
+	model.openModelPicker()
+	if !model.pickerActive || len(model.pickerItems) == 0 {
+		t.Fatalf("picker active=%v items=%d, want an open list", model.pickerActive, len(model.pickerItems))
+	}
+	want := model.pickerItems[0].ID
+	updated, _ := model.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	got := updated.(*Model)
+	if got.pickerActive {
+		t.Errorf("the picker should close after a choice")
+	}
+	if got.model.ID != want {
+		t.Errorf("model = %q, want %q", got.model.ID, want)
+	}
+}
+
+// TestSlashNewClearsTheTranscript covers /new.
+func TestSlashNewClearsTheTranscript(t *testing.T) {
+	model := &Model{blocks: []block{{kind: blockAssistant, text: "old"}}}
+	_, _ = model.handleSlash("/new")
+	if len(model.blocks) != 1 || model.blocks[0].kind != blockNotice {
+		t.Fatalf("blocks = %+v, want a fresh session notice", model.blocks)
 	}
 }
