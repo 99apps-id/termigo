@@ -29,6 +29,46 @@ type Config struct {
 	DefaultAgent string `json:"defaultAgent,omitempty"`
 	// Workspaces remembers recently opened projects.
 	Workspaces []string `json:"workspaces,omitempty"`
+	// DefaultModel is the model the interactive chat starts with.
+	DefaultModel string `json:"defaultModel,omitempty"`
+	// ApprovalMode is "ask" (a mutating tool needs approval) or "all".
+	ApprovalMode string `json:"approvalMode,omitempty"`
+	// TrustedFolders lists folders where a mutating tool runs without asking.
+	TrustedFolders []string `json:"trustedFolders,omitempty"`
+	// Language is the preferred reply language.
+	Language string `json:"language,omitempty"`
+}
+
+// IsTrusted reports whether a folder is on the trusted list.
+func (c Config) IsTrusted(folder string) bool {
+	cleaned := filepath.Clean(folder)
+	for _, entry := range c.TrustedFolders {
+		if filepath.Clean(entry) == cleaned {
+			return true
+		}
+	}
+	return false
+}
+
+// WithTrust adds or removes a folder from the trusted list.
+func (c Config) WithTrust(folder string, trusted bool) Config {
+	cleaned := filepath.Clean(folder)
+	next := make([]string, 0, len(c.TrustedFolders)+1)
+	found := false
+	for _, entry := range c.TrustedFolders {
+		if filepath.Clean(entry) == cleaned {
+			found = true
+			if !trusted {
+				continue
+			}
+		}
+		next = append(next, entry)
+	}
+	if trusted && !found {
+		next = append(next, cleaned)
+	}
+	c.TrustedFolders = next
+	return c
 }
 
 // ProviderOptions configures one agent provider.

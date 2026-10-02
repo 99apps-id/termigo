@@ -58,6 +58,24 @@ func TestModelPickerSwitchesTheModel(t *testing.T) {
 	}
 }
 
+// TestSettingsShowsAndChangesApproval covers /settings.
+func TestSettingsShowsAndChangesApproval(t *testing.T) {
+	t.Setenv("TERMIGO_HOME", t.TempDir())
+	model := &Model{workspace: "/tmp/x"}
+	_, _ = model.handleSlash("/settings")
+	if len(model.blocks) == 0 || model.blocks[len(model.blocks)-1].kind != blockNotice {
+		t.Fatalf("settings should print a notice, got %+v", model.blocks)
+	}
+	_, _ = model.handleSlash("/settings approval all")
+	if model.approvalMode != "all" {
+		t.Errorf("approvalMode = %q, want all", model.approvalMode)
+	}
+	_, _ = model.handleSlash("/settings approval bogus")
+	if model.approvalMode != "all" {
+		t.Errorf("a bad value must not change the mode, got %q", model.approvalMode)
+	}
+}
+
 // TestSlashNewClearsTheTranscript covers /new.
 func TestSlashNewClearsTheTranscript(t *testing.T) {
 	model := &Model{blocks: []block{{kind: blockAssistant, text: "old"}}}

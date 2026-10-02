@@ -1112,11 +1112,14 @@ func runChat(args []string, stdout io.Writer) error {
 		return err
 	}
 	var model provider.Model
+	cfg, _ := config.Load()
 	if len(args) > 0 && strings.TrimSpace(args[0]) != "" {
 		found, ok := provider.ModelFromQuery(strings.Join(args, " "))
 		if !ok {
 			return fmt.Errorf("unknown model %q", strings.Join(args, " "))
 		}
+		model = found
+	} else if found, ok := provider.ModelFromQuery(cfg.DefaultModel); ok && provider.ResolveKey(store, found.Provider) != "" {
 		model = found
 	} else {
 		found, ok := tgbridge.FirstAvailableModel(store)

@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/99apps-id/termigo/cli/internal/coder"
+	"github.com/99apps-id/termigo/cli/internal/config"
 	"github.com/99apps-id/termigo/cli/internal/provider"
 	"github.com/99apps-id/termigo/cli/internal/secrets"
 )
@@ -54,6 +55,10 @@ type Model struct {
 	model     provider.Model
 	store     *secrets.Store
 	workspace string
+
+	cfg          config.Config
+	approvalMode string
+	trusted      bool
 
 	input   textarea.Model
 	blocks  []block
@@ -96,14 +101,18 @@ func Run(store *secrets.Store, workspace string, model provider.Model) error {
 	input.Placeholder = "Ask, or type /help. Enter to send, Ctrl+J for a newline."
 	input.Focus()
 
+	cfg, _ := config.Load()
 	m := &Model{
-		client:    client,
-		model:     model,
-		store:     store,
-		workspace: workspace,
-		input:     input,
-		events:    make(chan eventMsg, 256),
-		blocks:    []block{{kind: blockNotice, text: fmt.Sprintf("Termigo. Model %s. Workspace %s.", model.ID, workspace)}},
+		client:       client,
+		model:        model,
+		store:        store,
+		workspace:    workspace,
+		cfg:          cfg,
+		approvalMode: strings.ToLower(strings.TrimSpace(cfg.ApprovalMode)),
+		trusted:      cfg.IsTrusted(workspace),
+		input:        input,
+		events:       make(chan eventMsg, 256),
+		blocks:       []block{{kind: blockNotice, text: fmt.Sprintf("Termigo. Model %s. Workspace %s. /help for commands.", model.ID, workspace)}},
 	}
 	program := tea.NewProgram(m, tea.WithAltScreen())
 	m.program = program
@@ -230,8 +239,10 @@ func (m *Model) handleSlash(value string) (tea.Model, tea.Cmd) {
 	case "/quit", "/exit":
 		return m, tea.Quit
 	case "/help":
-		m.appendBlock(blockNotice, "Commands: /model [query] pick or set the model, /status, /new, /help, /quit. Enter sends, Ctrl+J newline, Esc denies an approval.")
+		m.appendBlock(blockNotice, "Commands: /model [query] pick or set the model, /settings [key value], /status, /new, /help, /quit. Enter sends, Ctrl+J newline, Esc denies an approval.")
 		return m, nil
+	case "/settings":
+		return m.handleSettings(fields), nil
 	case "/model":
 		if len(fields) < 2 {
 			m.openModelPicker()
@@ -255,6 +266,55 @@ func (m *Model) handleSlash(value string) (tea.Model, tea.Cmd) {
 		m.appendBlock(blockError, "Unknown command. Try /help.")
 		return m, nil
 	}
+}
+
+// handleSettings shows the CLI settings, or changes one with
+// "/settings <key> <value>".
+func (m *Model) handleSettings(fields []string) tea.Model {
+	if len(fields) == 1 {
+		approval := m.approvalMode
+		if approval == "" {
+			approval = "ask"
+		}
+		m.appendBlock(blockNotice, fmt.Sprintf(
+			"model: %s\nworkspace: %s\napproval: %s (ask|all)\ntrusted: %v (trust on|off)\nlanguage: %s",
+			m.model.ID, m.workspace, approval, m.trusted, m.cfg.Language))
+		return m
+	}
+	key := strings.ToLower(fields[1])
+	value := strings.Join(fields[2:], " ")
+	switch key {
+	case "approval":
+		if value != "ask" && value != "all" {
+			m.appendBlock(blockError, "approval must be ask or all")
+			return m
+		}
+		m.approvalMode = value
+		m.cfg.ApprovalMode = value
+	case "trust":
+		on := value == "on" || value == "yes" || value == "true"
+		m.trusted = on
+		m.cfg = m.cfg.WithTrust(m.workspace, on)
+	case "language":
+		m.cfg.Language = value
+	case "model":
+		if model, ok := provider.ModelFromQuery(value); ok {
+			m.setModel(model)
+			m.cfg.DefaultModel = model.ID
+		} else {
+			m.appendBlock(blockError, "Unknown model.")
+			return m
+		}
+	default:
+		m.appendBlock(blockError, "Unknown setting. Try approval, trust, language or model.")
+		return m
+	}
+	if err := config.Save(m.cfg); err != nil {
+		m.appendBlock(blockError, err.Error())
+		return m
+	}
+	m.appendBlock(blockNotice, "Setting saved.")
+	return m
 }
 
 // openModelPicker lists the models whose provider has a credential.
@@ -298,13 +358,18 @@ func (m *Model) startRun(prompt string) (tea.Model, tea.Cmd) {
 	workspace := m.workspace
 	store := m.store
 	events := m.events
+	trusted := m.trusted
+	approve := m.approve
+	if m.approvalMode == "all" {
+		approve = func(coder.ApprovalRequest) coder.Decision { return coder.DecisionAllowOnce }
+	}
 	go func() {
 		defer func() { events <- eventMsg{done: true} }()
 		env := &coder.Env{
 			Workspace: workspace,
-			Trusted:   true,
+			Trusted:   trusted,
 			Secrets:   store,
-			Approve:   m.approve,
+			Approve:   approve,
 		}
 		_, err := coder.Run(ctx, coder.Options{Client: client, Model: model.WireID(), Env: env}, prompt, func(event provider.StreamEvent) {
 			switch event.Type {
