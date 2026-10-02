@@ -12,17 +12,23 @@ type TestCase struct {
 }
 
 // TestResult holds the outcome of running one evaluation test case.
+//
+// Step, token and cost accounting fields were removed: they were never filled
+// by the runner, so a report carried four zero-valued numbers that read as
+// real measurements. When the harness grows a model-driven path, the fields
+// should come back filled rather than as placeholders.
 type TestResult struct {
-	CaseID     string        `json:"case_id"`
-	Passed     bool          `json:"passed"`
-	Duration   time.Duration `json:"duration"`
-	TotalSteps int           `json:"total_steps"`
-	TokensUsed int           `json:"tokens_used"`
-	CostUSD    float64       `json:"cost_usd"`
-	Error      string        `json:"error,omitempty"`
+	CaseID   string        `json:"case_id"`
+	Passed   bool          `json:"passed"`
+	Duration time.Duration `json:"duration"`
+	Error    string        `json:"error,omitempty"`
 }
 
 // EvalReport aggregates the entire benchmark run.
+//
+// ModelID is a label for which model the run targeted, not a driver: the
+// harness executes eval commands only, so the id is what the report carries to
+// compare two runs of the same dataset.
 type EvalReport struct {
 	DatasetPath string        `json:"dataset_path"`
 	ModelID     string        `json:"model_id"`
@@ -30,7 +36,5 @@ type EvalReport struct {
 	PassedCases int           `json:"passed_cases"`
 	PassRate    float64       `json:"pass_rate"`
 	TotalTime   time.Duration `json:"total_time"`
-	TotalTokens int           `json:"total_tokens"`
-	TotalCost   float64       `json:"total_cost_usd"`
 	Results     []TestResult  `json:"results"`
 }

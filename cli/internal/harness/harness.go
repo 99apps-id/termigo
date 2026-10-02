@@ -29,10 +29,10 @@ type Options struct {
 // reaches the network, or invokes a shell feature is rejected.
 var allowedEvalCommands = map[string]struct{}{
 	"grep": {}, "egrep": {}, "fgrep": {}, "rg": {},
-	"wc": {},
+	"wc":   {},
 	"diff": {}, "cmp": {}, "comm": {}, "diff3": {},
 	"find": {},
-	"sed": {}, "awk": {},
+	"sed":  {}, "awk": {},
 	"sort": {}, "uniq": {},
 	"head": {}, "tail": {}, "cut": {}, "tr": {}, "nl": {}, "tee": {},
 	"paste": {}, "expand": {}, "unexpand": {}, "fold": {},
