@@ -46,11 +46,24 @@ type eventMsg struct {
 
 type errMsg struct{ err error }
 
+// approvalMsg carries one tool call waiting on the operator. The reply is the
+// operator's answer class, because "allow for the rest of the session" has to
+// travel to the agent goroutine along with the plain yes.
 type approvalMsg struct {
 	tool   string
 	detail string
-	reply  chan bool
+	reply  chan decisionReply
 }
+
+// decisionReply is the operator's answer to an approval prompt: deny, allow
+// once, or allow for the rest of the session.
+type decisionReply int
+
+const (
+	decisionDeny decisionReply = iota
+	decisionAllowOnce
+	decisionAllowSession
+)
 
 // Model is the Bubble Tea model.
 type Model struct {
@@ -64,6 +77,11 @@ type Model struct {
 	cfg          config.Config
 	approvalMode string
 	trusted      bool
+	// sessionAllowed holds tools the operator approved for the rest of this
+	// session. Cleared by /new, because a fresh session is a fresh trust
+	// decision: carrying the allowance over would silently keep a tool the
+	// operator only meant to allow for the previous task.
+	sessionAllowed map[string]bool
 
 	input   textarea.Model
 	blocks  []block
@@ -76,7 +94,10 @@ type Model struct {
 
 	pendingTool   string
 	pendingDetail string
-	pendingReply  chan bool
+	// pendingReply carries the operator's answer class, not a bare bool,
+	// because "yes for the rest of the session" is a third answer the
+	// approval flow has to tell the agent goroutine about.
+	pendingReply chan decisionReply
 
 	// picker selects a provider then a model, opened by a bare /model.
 	pickerActive    bool
@@ -124,18 +145,19 @@ func Run(store *secrets.Store, workspace string, model provider.Model, session *
 	}
 	intro += " /help for commands."
 	m := &Model{
-		client:       client,
-		model:        model,
-		store:        store,
-		workspace:    workspace,
-		session:      session,
-		mcpTools:     mcpTools,
-		cfg:          cfg,
-		approvalMode: strings.ToLower(strings.TrimSpace(cfg.ApprovalMode)),
-		trusted:      cfg.IsTrusted(workspace),
-		input:        input,
-		events:       make(chan eventMsg, 256),
-		blocks:       []block{{kind: blockNotice, text: intro}},
+		client:         client,
+		model:          model,
+		store:          store,
+		workspace:      workspace,
+		session:        session,
+		mcpTools:       mcpTools,
+		cfg:            cfg,
+		approvalMode:   strings.ToLower(strings.TrimSpace(cfg.ApprovalMode)),
+		trusted:        cfg.IsTrusted(workspace),
+		sessionAllowed: map[string]bool{},
+		input:          input,
+		events:         make(chan eventMsg, 256),
+		blocks:         []block{{kind: blockNotice, text: intro}},
 	}
 	program := tea.NewProgram(m, tea.WithAltScreen())
 	m.program = program
@@ -183,24 +205,48 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// answerApproval records the operator's answer, remembering a session-wide
+// allowance so the next call to the same tool never prompts again this run.
+func (m *Model) answerApproval(answer decisionReply) {
+	if m.pendingReply == nil {
+		return
+	}
+	if answer == decisionAllowSession && m.pendingTool != "" {
+		if m.sessionAllowed == nil {
+			m.sessionAllowed = map[string]bool{}
+		}
+		m.sessionAllowed[m.pendingTool] = true
+		m.appendBlock(blockNotice, m.pendingTool+" approved for this session.")
+	}
+	m.pendingReply <- answer
+	m.pendingReply = nil
+	m.pendingTool = ""
+	m.pendingDetail = ""
+}
+
 func (m *Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// The model picker is modal: it owns the arrow keys and Enter.
 	if m.pickerActive {
 		return m.handlePickerKey(key), nil
 	}
 
-	// An approval prompt captures y/n/a first.
+	// An approval prompt captures y/s/n first: once, this-session, or deny.
 	if m.pendingReply != nil {
 		switch strings.ToLower(key.String()) {
-		case "y", "a":
-			m.pendingReply <- true
-			m.pendingReply = nil
-			m.pendingTool = ""
+		case "y":
+			m.answerApproval(decisionAllowOnce)
+			return m, nil
+		case "s":
+			m.answerApproval(decisionAllowSession)
+			return m, nil
+		case "a":
+			// "a" stays as an alias for once: it was the old key for a plain
+			// allow, and a muscle memory that used to mean "yes" must not
+			// silently widen into "yes for the whole session".
+			m.answerApproval(decisionAllowOnce)
 			return m, nil
 		case "n", "esc":
-			m.pendingReply <- false
-			m.pendingReply = nil
-			m.pendingTool = ""
+			m.answerApproval(decisionDeny)
 			return m, nil
 		}
 	}
@@ -243,7 +289,7 @@ func (m *Model) handleSlash(value string) (tea.Model, tea.Cmd) {
 	case "/quit", "/exit":
 		return m, tea.Quit
 	case "/help":
-		m.appendBlock(blockNotice, "Commands: /model [query] pick provider then model, /providers, /settings [key value], /status, /cost, /setup, /key <provider> <key>, /login <provider>, /sessions, /copy [n], /new, /help, /quit. Enter sends, Ctrl+J newline, Ctrl+Y copies the last reply, Esc denies an approval. Start with --continue to resume the last session.")
+		m.appendBlock(blockNotice, "Commands: /model [query] pick provider then model, /providers, /settings [key value], /status, /cost, /setup, /key <provider> <key>, /login <provider>, /sessions, /copy [n], /new, /help, /quit. Enter sends, Ctrl+J newline, Ctrl+Y copies the last reply. Approvals: y once, s for this session, Esc denies. Start with --continue to resume the last session.")
 		return m, nil
 	case "/settings":
 		return m.handleSettings(fields), nil
@@ -291,6 +337,9 @@ func (m *Model) handleSlash(value string) (tea.Model, tea.Cmd) {
 	case "/new":
 		m.blocks = nil
 		m.session = coder.NewSession(m.workspace, m.model.WireID())
+		// A new session is a new trust scope: the tools allowed for the previous
+		// task must not ride along unasked.
+		m.sessionAllowed = map[string]bool{}
 		if err := m.session.Save(); err != nil {
 			m.appendBlock(blockError, err.Error())
 			return m, nil
@@ -647,19 +696,28 @@ func (m *Model) waitForEvent() tea.Cmd {
 }
 
 // approve is called on the agent goroutine and blocks until the operator
-// answers in the UI.
+// answers in the UI. A tool already allowed for this session never prompts,
+// which is what keeps a long refactor from asking the same question thirty
+// times.
 func (m *Model) approve(request coder.ApprovalRequest) coder.Decision {
-	reply := make(chan bool, 1)
+	if m.sessionAllowed[request.Tool] {
+		return coder.DecisionAllowSession
+	}
+	reply := make(chan decisionReply, 1)
 	if m.program == nil {
 		return coder.DecisionDeny
 	}
 	m.program.Send(approvalMsg{tool: request.Tool, detail: request.Detail, reply: reply})
 	select {
-	case allowed := <-reply:
-		if allowed {
+	case answer := <-reply:
+		switch answer {
+		case decisionAllowSession:
+			return coder.DecisionAllowSession
+		case decisionAllowOnce:
 			return coder.DecisionAllowOnce
+		default:
+			return coder.DecisionDeny
 		}
-		return coder.DecisionDeny
 	case <-time.After(2 * time.Minute):
 		return coder.DecisionDeny
 	}
@@ -721,7 +779,7 @@ func (m *Model) View() string {
 		}
 	}
 	if m.pendingReply != nil {
-		builder.WriteString("\n" + toolStyle.Render(fmt.Sprintf("Approve %s? [y]es / [n]o  %s", m.pendingTool, m.pendingDetail)) + "\n")
+		builder.WriteString("\n" + toolStyle.Render(fmt.Sprintf("Approve %s? [y]es once / [s]ession / [n]o  %s", m.pendingTool, m.pendingDetail)) + "\n")
 	}
 	if m.running {
 		builder.WriteString(statusStyle.Render("working...") + "\n")

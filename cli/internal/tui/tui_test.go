@@ -4,7 +4,15 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/99apps-id/termigo/cli/internal/coder"
 )
+
+// coderApprovalRequest builds the request approve() receives, so the tests
+// speak the real type instead of a hand-rolled struct that could drift.
+func coderApprovalRequest(tool string) coder.ApprovalRequest {
+	return coder.ApprovalRequest{Tool: tool, Risk: "edit"}
+}
 
 // TestAppendBlockMergesStreamedDeltas keeps streamed text in one block instead
 // of one block per token.
@@ -91,5 +99,107 @@ func TestSlashNewClearsTheTranscript(t *testing.T) {
 	_, _ = model.handleSlash("/new")
 	if len(model.blocks) != 1 || model.blocks[0].kind != blockNotice {
 		t.Fatalf("blocks = %+v, want a fresh session notice", model.blocks)
+	}
+}
+
+// TestApprovalSessionKeyRecordsTheAllowance proves the s key answers the
+// pending prompt and remembers the tool for the rest of the session, so a
+// later approve() for the same tool no longer prompts.
+func TestApprovalSessionKeyRecordsTheAllowance(t *testing.T) {
+	model := &Model{sessionAllowed: map[string]bool{}}
+	reply := make(chan decisionReply, 1)
+	model.pendingReply = reply
+	model.pendingTool = "edit"
+
+	updated, _ := model.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	m := updated.(*Model)
+	if m.pendingReply != nil {
+		t.Fatal("the prompt should close after an answer")
+	}
+	select {
+	case answer := <-reply:
+		if answer != decisionAllowSession {
+			t.Fatalf("reply = %v, want decisionAllowSession", answer)
+		}
+	default:
+		t.Fatal("the reply never arrived")
+	}
+	if !m.sessionAllowed["edit"] {
+		t.Fatal("the tool should be remembered for the session")
+	}
+
+	// The remembered tool answers the next call without a prompt.
+	if decision := m.approve(coderApprovalRequest("edit")); decision != coder.DecisionAllowSession {
+		t.Fatalf("approve on a session-allowed tool = %v, want the session decision", decision)
+	}
+}
+
+// TestApprovalOnceKeyDoesNotWiden proves the y (and legacy a) key answers once
+// without recording a session allowance: the operator asked for one call, not
+// a standing permission.
+func TestApprovalOnceKeyDoesNotWiden(t *testing.T) {
+	for _, key := range []rune{'y', 'a'} {
+		model := &Model{sessionAllowed: map[string]bool{}}
+		reply := make(chan decisionReply, 1)
+		model.pendingReply = reply
+		model.pendingTool = "run_command"
+
+		updated, _ := model.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{key}})
+		m := updated.(*Model)
+		select {
+		case answer := <-reply:
+			if answer != decisionAllowOnce {
+				t.Fatalf("key %q replied %v, want decisionAllowOnce", key, answer)
+			}
+		default:
+			t.Fatalf("key %q never replied", key)
+		}
+		if len(m.sessionAllowed) != 0 {
+			t.Fatalf("key %q widened the session allowance to %v", key, m.sessionAllowed)
+		}
+	}
+}
+
+// TestApprovalDenyKeyClosesThePrompt proves n and Esc deny without any
+// allowance.
+func TestApprovalDenyKeyClosesThePrompt(t *testing.T) {
+	keys := []tea.KeyMsg{
+		{Type: tea.KeyRunes, Runes: []rune{'n'}},
+		{Type: tea.KeyEsc},
+	}
+	for _, key := range keys {
+		model := &Model{sessionAllowed: map[string]bool{}}
+		reply := make(chan decisionReply, 1)
+		model.pendingReply = reply
+		model.pendingTool = "delete_file"
+
+		updated, _ := model.handleKey(key)
+		m := updated.(*Model)
+		if m.pendingReply != nil {
+			t.Fatalf("key %q left the prompt open", key.String())
+		}
+		select {
+		case answer := <-reply:
+			if answer != decisionDeny {
+				t.Fatalf("key %q replied %v, want decisionDeny", key.String(), answer)
+			}
+		default:
+			t.Fatalf("key %q never replied", key.String())
+		}
+	}
+}
+
+// TestSlashNewDropsSessionAllowances proves /new clears the trust scope: a
+// tool allowed for the previous task must prompt again in a fresh session.
+func TestSlashNewDropsSessionAllowances(t *testing.T) {
+	t.Setenv("TERMIGO_HOME", t.TempDir())
+	model := &Model{
+		workspace:      t.TempDir(),
+		sessionAllowed: map[string]bool{"edit": true},
+		blocks:         []block{{kind: blockAssistant, text: "old"}},
+	}
+	_, _ = model.handleSlash("/new")
+	if len(model.sessionAllowed) != 0 {
+		t.Fatalf("/new kept the session allowances: %v", model.sessionAllowed)
 	}
 }
