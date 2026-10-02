@@ -5,7 +5,10 @@ package tui
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -196,6 +199,9 @@ func (m *Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cancel()
 		}
 		return m, tea.Quit
+	case "ctrl+y":
+		m.copyReply(1)
+		return m, nil
 	case "enter":
 		if m.running {
 			return m, nil
@@ -225,7 +231,7 @@ func (m *Model) handleSlash(value string) (tea.Model, tea.Cmd) {
 	case "/quit", "/exit":
 		return m, tea.Quit
 	case "/help":
-		m.appendBlock(blockNotice, "Commands: /model [query] pick provider then model, /providers, /settings [key value], /status, /sessions, /new, /help, /quit. Enter sends, Ctrl+J newline, Esc denies an approval. Start with --continue to resume the last session.")
+		m.appendBlock(blockNotice, "Commands: /model [query] pick provider then model, /providers, /settings [key value], /status, /sessions, /copy [n], /new, /help, /quit. Enter sends, Ctrl+J newline, Ctrl+Y copies the last reply, Esc denies an approval. Start with --continue to resume the last session.")
 		return m, nil
 	case "/settings":
 		return m.handleSettings(fields), nil
@@ -249,6 +255,15 @@ func (m *Model) handleSlash(value string) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "/sessions":
 		m.appendBlock(blockNotice, m.sessionsList())
+		return m, nil
+	case "/copy":
+		which := 1
+		if len(fields) > 1 {
+			if n, err := strconv.Atoi(fields[1]); err == nil && n > 0 {
+				which = n
+			}
+		}
+		m.copyReply(which)
 		return m, nil
 	case "/new":
 		m.blocks = nil
@@ -403,6 +418,43 @@ func (m *Model) sessionsList() string {
 		fmt.Fprintf(&builder, "%s%s  %s  %s\n", marker, session.ID, session.UpdatedAt.Format("2006-01-02 15:04"), session.Title)
 	}
 	return strings.TrimRight(builder.String(), "\n")
+}
+
+// copyReply copies the n-th most recent assistant reply (1 = last) to the
+// terminal clipboard with OSC 52.
+func (m *Model) copyReply(which int) {
+	text, ok := m.assistantText(which)
+	if !ok {
+		m.appendBlock(blockError, "Nothing to copy yet.")
+		return
+	}
+	_, _ = os.Stdout.WriteString(osc52(text))
+	m.appendBlock(blockNotice, fmt.Sprintf("Copied %d characters to the clipboard.", len(text)))
+}
+
+// assistantText returns the text of the n-th most recent assistant block.
+func (m *Model) assistantText(which int) (string, bool) {
+	if which <= 0 {
+		which = 1
+	}
+	count := 0
+	for index := len(m.blocks) - 1; index >= 0; index-- {
+		if m.blocks[index].kind != blockAssistant {
+			continue
+		}
+		count++
+		if count == which {
+			return m.blocks[index].text, true
+		}
+	}
+	return "", false
+}
+
+// osc52 is the escape sequence that sets the terminal's clipboard. It is the
+// one clipboard path that works over SSH, where there is no local clipboard,
+// and in a Windows Terminal. A terminal that ignores it just copies nothing.
+func osc52(text string) string {
+	return "\x1b]52;c;" + base64.StdEncoding.EncodeToString([]byte(text)) + "\a"
 }
 
 // providersStatus renders a one-line-per-provider credential summary.
