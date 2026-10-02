@@ -28,6 +28,7 @@ import (
 	"github.com/99apps-id/termigo/cli/internal/skill"
 	"github.com/99apps-id/termigo/cli/internal/terminal"
 	"github.com/99apps-id/termigo/cli/internal/tgbridge"
+	"github.com/99apps-id/termigo/cli/internal/tui"
 )
 
 var version = "v0.9.22"
@@ -89,6 +90,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return runCode(args[1:], stdout)
 	case "telegram":
 		return runTelegram(args[1:], stdout)
+	case "chat":
+		return runChat(args[1:], stdout)
 	case "login":
 		return runLogin(args[1:], stdout)
 	case "logout":
@@ -167,6 +170,7 @@ Commands that drive a running Termigo:
   approval [<mode>]                Show or set the agent approval mode
   ask <provider> <model> "<prompt>" Stream one completion from the provider directly
   code [--yes] <provider> <model> "<prompt>" Run the coding agent loop with tools
+  chat [model]                     Interactive Bubble Tea TUI for the agent
   telegram <token>                 Store the Telegram bot token
   telegram [status]                Run the companion bot, or show its status
   secret <provider>                Store a provider API key (prompted, never echoed)
@@ -1098,6 +1102,34 @@ func runAsk(args []string, stdout io.Writer) error {
 	})
 	fmt.Fprintln(stdout)
 	return err
+}
+
+// runChat starts the interactive Bubble Tea TUI, using a supplied model or the
+// first provider that has a credential.
+func runChat(args []string, stdout io.Writer) error {
+	store, err := secrets.Load()
+	if err != nil {
+		return err
+	}
+	var model provider.Model
+	if len(args) > 0 && strings.TrimSpace(args[0]) != "" {
+		found, ok := provider.ModelFromQuery(strings.Join(args, " "))
+		if !ok {
+			return fmt.Errorf("unknown model %q", strings.Join(args, " "))
+		}
+		model = found
+	} else {
+		found, ok := tgbridge.FirstAvailableModel(store)
+		if !ok {
+			return errors.New("no provider credential; run 'termigo login <provider>' or set a key first")
+		}
+		model = found
+	}
+	workspace, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	return tui.Run(store, workspace, model)
 }
 
 // runTelegram stores a bot token or runs the Telegram companion bot. With no
