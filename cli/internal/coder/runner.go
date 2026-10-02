@@ -31,6 +31,9 @@ type Options struct {
 	// messages this run produces, so a caller can persist them and a later run
 	// continues the conversation.
 	Session *Session
+	// Tools are extra tools offered alongside the built-ins, such as the ones
+	// an MCP server exposes.
+	Tools []Tool
 }
 
 // Run drives one coding turn: stream a completion, execute any tool calls, feed
@@ -45,6 +48,9 @@ func Run(ctx context.Context, opts Options, prompt string, emit func(provider.St
 		env = &Env{}
 	}
 	registry := DefaultRegistry()
+	if len(opts.Tools) > 0 {
+		registry = registry.With(opts.Tools...)
+	}
 	maxSteps := opts.MaxSteps
 	if maxSteps <= 0 {
 		maxSteps = defaultMaxSteps

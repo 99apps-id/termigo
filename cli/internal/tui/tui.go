@@ -59,6 +59,7 @@ type Model struct {
 	store     *secrets.Store
 	workspace string
 	session   *coder.Session
+	mcpTools  []coder.Tool
 
 	cfg          config.Config
 	approvalMode string
@@ -111,19 +112,30 @@ func Run(store *secrets.Store, workspace string, model provider.Model, session *
 	if session == nil {
 		session = coder.NewSession(workspace, model.WireID())
 	}
+	// Connect the configured MCP servers once for the session; their tools are
+	// offered on every turn and the processes are closed when the TUI exits.
+	mcpTools, closeMCP := coder.ConnectMCP(context.Background(), workspace)
+	defer closeMCP()
+
 	cfg, _ := config.Load()
+	intro := fmt.Sprintf("Termigo. Model %s. Workspace %s. Session %s.", model.ID, workspace, session.ID)
+	if len(mcpTools) > 0 {
+		intro += fmt.Sprintf(" %d MCP tool(s) connected.", len(mcpTools))
+	}
+	intro += " /help for commands."
 	m := &Model{
 		client:       client,
 		model:        model,
 		store:        store,
 		workspace:    workspace,
 		session:      session,
+		mcpTools:     mcpTools,
 		cfg:          cfg,
 		approvalMode: strings.ToLower(strings.TrimSpace(cfg.ApprovalMode)),
 		trusted:      cfg.IsTrusted(workspace),
 		input:        input,
 		events:       make(chan eventMsg, 256),
-		blocks:       []block{{kind: blockNotice, text: fmt.Sprintf("Termigo. Model %s. Workspace %s. Session %s. /help for commands.", model.ID, workspace, session.ID)}},
+		blocks:       []block{{kind: blockNotice, text: intro}},
 	}
 	program := tea.NewProgram(m, tea.WithAltScreen())
 	m.program = program
@@ -606,7 +618,8 @@ func (m *Model) startRun(prompt string) (tea.Model, tea.Cmd) {
 			Secrets:   store,
 			Approve:   approve,
 		}
-		_, err := coder.Run(ctx, coder.Options{Client: client, Model: model.WireID(), Env: env, Session: session}, prompt, func(event provider.StreamEvent) {
+		mcpTools := m.mcpTools
+		_, err := coder.Run(ctx, coder.Options{Client: client, Model: model.WireID(), Env: env, Session: session, Tools: mcpTools}, prompt, func(event provider.StreamEvent) {
 			switch event.Type {
 			case provider.EventTextDelta:
 				events <- eventMsg{kind: blockAssistant, text: event.Text}

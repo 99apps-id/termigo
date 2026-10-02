@@ -77,6 +77,9 @@ type Tool struct {
 	Server      string `json:"server"`
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
+	// InputSchema is the JSON Schema of the tool's arguments, sent to the model
+	// so it can call the tool correctly. A server may omit it.
+	InputSchema map[string]any `json:"inputSchema,omitempty"`
 }
 
 // Registry is the merged server list for a workspace.
