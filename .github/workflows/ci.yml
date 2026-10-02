@@ -39,6 +39,9 @@ jobs:
       - name: Invoke/command registration guard
         run: pnpm check:commands
 
+      - name: CLI version stamp guard
+        run: pnpm check:cli-version
+
       - name: Test
         run: pnpm test
 
@@ -76,6 +79,16 @@ jobs:
           go-version: '1.24'
           cache: true
           cache-dependency-path: cli/go.sum
+
+      - name: gofmt
+        working-directory: cli
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "gofmt needed on:"
+            echo "$unformatted"
+            exit 1
+          fi
 
       - name: go vet
         working-directory: cli
