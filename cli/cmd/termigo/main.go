@@ -1071,6 +1071,8 @@ func runAsk(args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
+	// OAuth clients recover from a 401 by forcing a token refresh.
+	provider.SetForceResolver(client, store)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	err = client.Stream(ctx, provider.ChatRequest{

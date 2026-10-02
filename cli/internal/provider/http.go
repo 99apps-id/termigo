@@ -95,9 +95,24 @@ func newHTTPClient(info Provider, baseURL, apiKey string) (Client, error) {
 		},
 	}
 	base := &httpClient{info: info, baseURL: strings.TrimRight(baseURL, "/"), apiKey: apiKey, http: shared}
-	// Only the OpenAI-compatible client is wired so far. The Anthropic, Google,
-	// Codex, Antigravity and Copilot clients are ported in a later step.
-	return &openAIClient{httpClient: base}, nil
+	// A Codex login targets the ChatGPT Responses backend, not chat-completions.
+	if info.ID == "openai-codex" {
+		return &codexClient{httpClient: base}, nil
+	}
+	if info.Kind == KindAntigravity {
+		return &antigravityClient{httpClient: base}, nil
+	}
+	if info.Kind == KindCopilot || info.ID == "github-copilot" {
+		return &copilotClient{httpClient: base}, nil
+	}
+	switch info.Kind {
+	case KindAnthropic:
+		return &anthropicClient{httpClient: base}, nil
+	case KindGoogle:
+		return &googleClient{httpClient: base}, nil
+	default:
+		return &openAIClient{httpClient: base}, nil
+	}
 }
 
 func (c *httpClient) ID() string { return c.info.ID }

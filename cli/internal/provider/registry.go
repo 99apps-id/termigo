@@ -111,11 +111,20 @@ func ByID(id string) (Provider, bool) {
 	return Provider{}, false
 }
 
-// DefaultBaseURL returns the registry endpoint for a provider, or "".
+// DefaultBaseURL returns the registry endpoint for a provider. The custom
+// endpoint provider has no fixed host, so it falls back to the OpenAI base: a
+// missing configuration then fails as a clear auth error instead of a
+// missing-endpoint error.
 func DefaultBaseURL(id string) string {
 	info, ok := ByID(id)
 	if !ok {
 		return ""
 	}
-	return info.DefaultBaseURL
+	if info.DefaultBaseURL != "" {
+		return info.DefaultBaseURL
+	}
+	if id == "openai-compatible" {
+		return "https://api.openai.com/v1"
+	}
+	return ""
 }

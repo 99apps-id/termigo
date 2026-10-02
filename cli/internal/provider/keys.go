@@ -51,3 +51,25 @@ func ResolveKey(store *secrets.Store, id string) string {
 func ResolverFor(store *secrets.Store) KeyResolver {
 	return func(id string) string { return ResolveKey(store, id) }
 }
+
+// ForceResolveKey forces a token renewal for OAuth providers, bypassing local
+// expiry timers. It is the resolver a client uses after a 401.
+func ForceResolveKey(store *secrets.Store, id string) string {
+	if UsesOAuth(id) {
+		return oauth.ForceRefreshToken(context.Background(), oauth.NewStore(store), id)
+	}
+	return ResolveKey(store, id)
+}
+
+// ForceResolverFor returns a KeyResolver that forces an OAuth token renewal.
+func ForceResolverFor(store *secrets.Store) KeyResolver {
+	return func(id string) string { return ForceResolveKey(store, id) }
+}
+
+// SetForceResolver wires a client's 401 recovery to a store, when the client
+// supports it.
+func SetForceResolver(client Client, store *secrets.Store) {
+	if setter, ok := client.(interface{ SetForceKeyResolver(KeyResolver) }); ok {
+		setter.SetForceKeyResolver(ForceResolverFor(store))
+	}
+}
