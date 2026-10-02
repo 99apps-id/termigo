@@ -26,7 +26,7 @@ func TestHelperProcess(t *testing.T) {
 			ID     json.RawMessage `json:"id"`
 			Method string          `json:"method"`
 			Params struct {
-				Name      string `json:"name"`
+				Name      string         `json:"name"`
 				Arguments map[string]any `json:"arguments"`
 			} `json:"params"`
 		}

@@ -13,19 +13,19 @@ import (
 // advertised by the running app comes back as an `unknown_method` error, so
 // these are names to try, not a guarantee of the app's build.
 const (
-	MethodPing         = "ping"
-	MethodCapabilities = "capabilities"
-	MethodStatus       = "status"
-	MethodIdentify     = "identify"
-	MethodOpen         = "open"
-	MethodFocus        = "focus"
-	MethodAgentRun     = "run"
-	MethodQuery        = "query"
-	MethodRunCommand   = "run-command"
-	MethodModelsList   = "models-list"
-	MethodConfigGet    = "config-get"
-	MethodConfigSet    = "config-set"
-	MethodSecretSet    = "secret-set"
+	MethodPing           = "ping"
+	MethodCapabilities   = "capabilities"
+	MethodStatus         = "status"
+	MethodIdentify       = "identify"
+	MethodOpen           = "open"
+	MethodFocus          = "focus"
+	MethodAgentRun       = "run"
+	MethodQuery          = "query"
+	MethodRunCommand     = "run-command"
+	MethodModelsList     = "models-list"
+	MethodConfigGet      = "config-get"
+	MethodConfigSet      = "config-set"
+	MethodSecretSet      = "secret-set"
 	MethodEndpointAdd    = "endpoint-add"
 	MethodEndpointRemove = "endpoint-remove"
 	MethodEndpointList   = "endpoint-list"
@@ -451,4 +451,3 @@ func EndpointListWith(call Caller) ([]CustomEndpoint, error) {
 func EndpointList() ([]CustomEndpoint, error) {
 	return EndpointListWith(Live())
 }
-
