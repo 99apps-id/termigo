@@ -55,6 +55,7 @@ type Model struct {
 	model     provider.Model
 	store     *secrets.Store
 	workspace string
+	session   *coder.Session
 
 	cfg          config.Config
 	approvalMode string
@@ -91,8 +92,9 @@ var (
 	statusStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 )
 
-// Run starts the TUI and blocks until the operator quits.
-func Run(store *secrets.Store, workspace string, model provider.Model) error {
+// Run starts the TUI and blocks until the operator quits. session may be nil,
+// in which case a fresh one is started for the workspace.
+func Run(store *secrets.Store, workspace string, model provider.Model, session *coder.Session) error {
 	client, err := provider.NewClient(model.Provider, provider.DefaultBaseURL(model.Provider), provider.ResolverFor(store))
 	if err != nil {
 		return err
@@ -103,18 +105,22 @@ func Run(store *secrets.Store, workspace string, model provider.Model) error {
 	input.Placeholder = "Ask, or type /help. Enter to send, Ctrl+J for a newline."
 	input.Focus()
 
+	if session == nil {
+		session = coder.NewSession(workspace, model.WireID())
+	}
 	cfg, _ := config.Load()
 	m := &Model{
 		client:       client,
 		model:        model,
 		store:        store,
 		workspace:    workspace,
+		session:      session,
 		cfg:          cfg,
 		approvalMode: strings.ToLower(strings.TrimSpace(cfg.ApprovalMode)),
 		trusted:      cfg.IsTrusted(workspace),
 		input:        input,
 		events:       make(chan eventMsg, 256),
-		blocks:       []block{{kind: blockNotice, text: fmt.Sprintf("Termigo. Model %s. Workspace %s. /help for commands.", model.ID, workspace)}},
+		blocks:       []block{{kind: blockNotice, text: fmt.Sprintf("Termigo. Model %s. Workspace %s. Session %s. /help for commands.", model.ID, workspace, session.ID)}},
 	}
 	program := tea.NewProgram(m, tea.WithAltScreen())
 	m.program = program
@@ -219,7 +225,7 @@ func (m *Model) handleSlash(value string) (tea.Model, tea.Cmd) {
 	case "/quit", "/exit":
 		return m, tea.Quit
 	case "/help":
-		m.appendBlock(blockNotice, "Commands: /model [query] pick provider then model, /providers, /settings [key value], /status, /new, /help, /quit. Enter sends, Ctrl+J newline, Esc denies an approval.")
+		m.appendBlock(blockNotice, "Commands: /model [query] pick provider then model, /providers, /settings [key value], /status, /sessions, /new, /help, /quit. Enter sends, Ctrl+J newline, Esc denies an approval. Start with --continue to resume the last session.")
 		return m, nil
 	case "/settings":
 		return m.handleSettings(fields), nil
@@ -236,14 +242,22 @@ func (m *Model) handleSlash(value string) (tea.Model, tea.Cmd) {
 		m.setModel(model)
 		return m, nil
 	case "/status":
-		m.appendBlock(blockNotice, fmt.Sprintf("model: %s\nworkspace: %s", m.model.ID, m.workspace))
+		m.appendBlock(blockNotice, fmt.Sprintf("model: %s\nworkspace: %s\nsession: %s\nturns: %d", m.model.ID, m.workspace, m.session.ID, len(m.session.Messages)/2))
 		return m, nil
 	case "/providers":
 		m.appendBlock(blockNotice, m.providersStatus())
 		return m, nil
+	case "/sessions":
+		m.appendBlock(blockNotice, m.sessionsList())
+		return m, nil
 	case "/new":
 		m.blocks = nil
-		m.appendBlock(blockNotice, "New session.")
+		m.session = coder.NewSession(m.workspace, m.model.WireID())
+		if err := m.session.Save(); err != nil {
+			m.appendBlock(blockError, err.Error())
+			return m, nil
+		}
+		m.appendBlock(blockNotice, "New session "+m.session.ID+".")
 		return m, nil
 	default:
 		m.appendBlock(blockError, "Unknown command. Try /help.")
@@ -366,6 +380,31 @@ func (m *Model) handlePickerKey(key tea.KeyMsg) tea.Model {
 	return m
 }
 
+// sessionsList renders this workspace's recent sessions, newest first, with the
+// current one marked. The id is what `termigo chat --session <id>` takes.
+func (m *Model) sessionsList() string {
+	sessions, err := coder.ListSessions(m.workspace)
+	if err != nil {
+		return "error: " + err.Error()
+	}
+	if len(sessions) == 0 {
+		return "No sessions for this workspace yet."
+	}
+	var builder strings.Builder
+	for index, session := range sessions {
+		if index == 15 {
+			fmt.Fprintf(&builder, "  ... %d more\n", len(sessions)-index)
+			break
+		}
+		marker := "  "
+		if m.session != nil && session.ID == m.session.ID {
+			marker = "* "
+		}
+		fmt.Fprintf(&builder, "%s%s  %s  %s\n", marker, session.ID, session.UpdatedAt.Format("2006-01-02 15:04"), session.Title)
+	}
+	return strings.TrimRight(builder.String(), "\n")
+}
+
 // providersStatus renders a one-line-per-provider credential summary.
 func (m *Model) providersStatus() string {
 	var builder strings.Builder
@@ -399,6 +438,10 @@ func (m *Model) setModel(model provider.Model) {
 	provider.SetForceResolver(client, m.store)
 	m.client = client
 	m.model = model
+	if m.session != nil {
+		m.session.Model = model.WireID()
+		_ = m.session.Save()
+	}
 	m.appendBlock(blockNotice, "Model is now "+model.ID+".")
 }
 
@@ -412,6 +455,7 @@ func (m *Model) startRun(prompt string) (tea.Model, tea.Cmd) {
 	model := m.model
 	workspace := m.workspace
 	store := m.store
+	session := m.session
 	events := m.events
 	trusted := m.trusted
 	approve := m.approve
@@ -426,7 +470,7 @@ func (m *Model) startRun(prompt string) (tea.Model, tea.Cmd) {
 			Secrets:   store,
 			Approve:   approve,
 		}
-		_, err := coder.Run(ctx, coder.Options{Client: client, Model: model.WireID(), Env: env}, prompt, func(event provider.StreamEvent) {
+		_, err := coder.Run(ctx, coder.Options{Client: client, Model: model.WireID(), Env: env, Session: session}, prompt, func(event provider.StreamEvent) {
 			switch event.Type {
 			case provider.EventTextDelta:
 				events <- eventMsg{kind: blockAssistant, text: event.Text}
@@ -441,6 +485,7 @@ func (m *Model) startRun(prompt string) (tea.Model, tea.Cmd) {
 		if err != nil {
 			events <- eventMsg{kind: blockError, text: err.Error()}
 		}
+		_ = session.Save()
 	}()
 	return m, m.waitForEvent()
 }

@@ -18,6 +18,13 @@ stats.html
 .env
 .env.*
 !.env.example
+# Build-time OAuth client credentials for the Go companion (see
+# scripts/build-cli.mjs). Same rule as .env: local only, never committed.
+.env.local
+
+# Local CLI state (secrets, sessions, search index)
+.termixgo/
+.termigo/
 
 # Editor directories and files
 .vscode/*

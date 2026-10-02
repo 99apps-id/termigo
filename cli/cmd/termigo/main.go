@@ -173,7 +173,7 @@ Commands that drive a running Termigo:
   approval [<mode>]                Show or set the agent approval mode
   ask <provider> <model> "<prompt>" Stream one completion from the provider directly
   code [--yes] <provider> <model> "<prompt>" Run the coding agent loop with tools
-  chat [model]                     Interactive Bubble Tea TUI for the agent
+  chat [--continue] [model]        Interactive Bubble Tea TUI for the agent (--continue resumes the last session)
   telegram <token>                 Store the Telegram bot token
   telegram [status]                Run the companion bot, or show its status
   service [install|uninstall|status] Run the Telegram assistant 24/7 via the OS
@@ -1132,28 +1132,80 @@ func runChat(args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	var model provider.Model
 	cfg, _ := config.Load()
-	if len(args) > 0 && strings.TrimSpace(args[0]) != "" {
-		found, ok := provider.ModelFromQuery(strings.Join(args, " "))
-		if !ok {
-			return fmt.Errorf("unknown model %q", strings.Join(args, " "))
+
+	continueLast := false
+	sessionID := ""
+	var modelArg []string
+	for index := 0; index < len(args); index++ {
+		switch args[index] {
+		case "--continue", "-c":
+			continueLast = true
+		case "--session":
+			if index+1 >= len(args) {
+				return errors.New("--session requires an id")
+			}
+			sessionID = args[index+1]
+			index++
+		case "--help", "-h":
+			fmt.Fprintln(stdout, "Usage: termigo chat [--continue] [--session <id>] [model]\n\nInteractive terminal UI. --continue resumes the last session for this workspace.")
+			return nil
+		default:
+			modelArg = append(modelArg, args[index])
 		}
-		model = found
-	} else if found, ok := provider.ModelFromQuery(cfg.DefaultModel); ok && provider.ResolveKey(store, found.Provider) != "" {
-		model = found
-	} else {
-		found, ok := tgbridge.FirstAvailableModel(store)
-		if !ok {
-			return errors.New("no provider credential; run 'termigo login <provider>' or set a key first")
-		}
-		model = found
 	}
+
 	workspace, err := os.Getwd()
 	if err != nil {
 		return err
 	}
-	return tui.Run(store, workspace, model)
+
+	var session *coder.Session
+	switch {
+	case sessionID != "":
+		loaded, loadErr := coder.LoadSession(sessionID)
+		if loadErr != nil {
+			return fmt.Errorf("session %q: %w", sessionID, loadErr)
+		}
+		session = loaded
+	case continueLast:
+		loaded, loadErr := coder.LatestSession(workspace)
+		if loadErr != nil {
+			return loadErr
+		}
+		session = loaded
+	}
+	if session == nil {
+		session = coder.NewSession(workspace, "")
+	}
+
+	// The model is chosen by an explicit argument, then the session, then the
+	// configured default, then the first provider with a credential.
+	var model provider.Model
+	if len(modelArg) > 0 {
+		found, ok := provider.ModelFromQuery(strings.Join(modelArg, " "))
+		if !ok {
+			return fmt.Errorf("unknown model %q", strings.Join(modelArg, " "))
+		}
+		model = found
+	} else if session.Model != "" {
+		if found, ok := provider.ModelFromQuery(session.Model); ok && provider.ResolveKey(store, found.Provider) != "" {
+			model = found
+		}
+	}
+	if model.ID == "" {
+		if found, ok := provider.ModelFromQuery(cfg.DefaultModel); ok && provider.ResolveKey(store, found.Provider) != "" {
+			model = found
+		} else if found, ok := tgbridge.FirstAvailableModel(store); ok {
+			model = found
+		} else {
+			return errors.New("no provider credential; run 'termigo login <provider>' or set a key first")
+		}
+	}
+	if session.Model == "" {
+		session.Model = model.WireID()
+	}
+	return tui.Run(store, workspace, model, session)
 }
 
 // runTelegram stores a bot token or runs the Telegram companion bot. With no

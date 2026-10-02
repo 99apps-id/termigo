@@ -105,13 +105,14 @@ var specs = map[string]Spec{
 	},
 	// Antigravity shares Google's OAuth. The client id and the public
 	// installed-app secret are read from the environment rather than committed,
-	// because GitHub secret scanning flags the Google pair. Its inference is a
-	// separate Cloud Code client and is not wired yet.
+	// because GitHub secret scanning flags the Google pair. A release build
+	// stamps them into the binary with -ldflags instead (see the vars below and
+	// scripts/build-cli.mjs), so a download needs no prompt.
 	"antigravity": {
 		Provider:        "antigravity",
 		Kind:            "pkce",
-		ClientIDEnv:     "TERMIXGO_ANTIGRAVITY_CLIENT_ID",
-		ClientSecretEnv: "TERMIXGO_ANTIGRAVITY_CLIENT_SECRET",
+		ClientIDEnv:     "TERMIGO_ANTIGRAVITY_CLIENT_ID",
+		ClientSecretEnv: "TERMIGO_ANTIGRAVITY_CLIENT_SECRET",
 		AuthorizeURL:    "https://accounts.google.com/o/oauth2/v2/auth",
 		TokenURL:        "https://oauth2.googleapis.com/token",
 		Scopes: []string{
@@ -142,11 +143,11 @@ var specs = map[string]Spec{
 // them here with -ldflags, sourced from an environment variable or the local
 // .env.local file, so the operator never types them:
 //
-//	-X internal/oauth.AntigravityClientID=...
-//	-X internal/oauth.AntigravityClientSecret=...
+//	-X github.com/99apps-id/termigo/cli/internal/oauth.AntigravityClientID=...
+//	-X github.com/99apps-id/termigo/cli/internal/oauth.AntigravityClientSecret=...
 //
-// A build with no stamp falls back to TERMIXGO_ANTIGRAVITY_CLIENT_ID and
-// TERMIXGO_ANTIGRAVITY_CLIENT_SECRET, then to a one-time prompt.
+// A build with no stamp falls back to TERMIGO_ANTIGRAVITY_CLIENT_ID and
+// TERMIGO_ANTIGRAVITY_CLIENT_SECRET, then to a one-time prompt.
 var (
 	AntigravityClientID     string
 	AntigravityClientSecret string
@@ -198,10 +199,19 @@ func readEnvLocalAntigravity() (string, string) {
 		var id, secret string
 		for _, line := range strings.Split(string(data), "\n") {
 			line = strings.TrimSpace(line)
-			if after, ok := strings.CutPrefix(line, "TERMIXGO_ANTIGRAVITY_CLIENT_ID="); ok {
-				id = strings.Trim(strings.TrimSpace(after), `"'`)
-			} else if after, ok := strings.CutPrefix(line, "TERMIXGO_ANTIGRAVITY_CLIENT_SECRET="); ok {
-				secret = strings.Trim(strings.TrimSpace(after), `"'`)
+			switch {
+			case strings.HasPrefix(line, "TERMIGO_ANTIGRAVITY_CLIENT_ID="):
+				id = strings.Trim(strings.TrimSpace(strings.TrimPrefix(line, "TERMIGO_ANTIGRAVITY_CLIENT_ID=")), `"'`)
+			case strings.HasPrefix(line, "TERMIXGO_ANTIGRAVITY_CLIENT_ID="):
+				if id == "" {
+					id = strings.Trim(strings.TrimSpace(strings.TrimPrefix(line, "TERMIXGO_ANTIGRAVITY_CLIENT_ID=")), `"'`)
+				}
+			case strings.HasPrefix(line, "TERMIGO_ANTIGRAVITY_CLIENT_SECRET="):
+				secret = strings.Trim(strings.TrimSpace(strings.TrimPrefix(line, "TERMIGO_ANTIGRAVITY_CLIENT_SECRET=")), `"'`)
+			case strings.HasPrefix(line, "TERMIXGO_ANTIGRAVITY_CLIENT_SECRET="):
+				if secret == "" {
+					secret = strings.Trim(strings.TrimSpace(strings.TrimPrefix(line, "TERMIXGO_ANTIGRAVITY_CLIENT_SECRET=")), `"'`)
+				}
 			}
 		}
 		if id != "" && secret != "" {

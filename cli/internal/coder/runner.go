@@ -27,6 +27,10 @@ type Options struct {
 	System   string
 	// Images attach to the first user message, for a vision model.
 	Images []provider.Image
+	// Session, when set, seeds the run with its prior messages and collects the
+	// messages this run produces, so a caller can persist them and a later run
+	// continues the conversation.
+	Session *Session
 }
 
 // Run drives one coding turn: stream a completion, execute any tool calls, feed
@@ -52,8 +56,28 @@ func Run(ctx context.Context, opts Options, prompt string, emit func(provider.St
 	definitions := registry.Definitions()
 
 	guard := &loopGuard{}
-	messages := []provider.Message{{Role: provider.RoleUser, Content: prompt, Images: opts.Images}}
+	var messages []provider.Message
+	if opts.Session != nil {
+		messages = append(messages, opts.Session.Messages...)
+	}
+	messages = append(messages, provider.Message{Role: provider.RoleUser, Content: prompt, Images: opts.Images})
 	last := ""
+
+	// Collect the conversation into the session before returning, from any
+	// path. Images are dropped: a base64 payload would bloat the session file
+	// and cannot be replayed to a later model turn anyway.
+	if opts.Session != nil {
+		session := opts.Session
+		defer func() {
+			for index := range messages {
+				messages[index].Images = nil
+			}
+			session.Messages = messages
+			if session.Title == "" {
+				session.Title = sessionTitle(prompt)
+			}
+		}()
+	}
 
 	for step := 0; step < maxSteps; step++ {
 		var text strings.Builder
@@ -90,6 +114,7 @@ func Run(ctx context.Context, opts Options, prompt string, emit func(provider.St
 				messages = append(messages, provider.Message{Role: provider.RoleUser, Content: "Reply with the answer."})
 				continue
 			}
+			messages = append(messages, provider.Message{Role: provider.RoleAssistant, Content: last})
 			return last, nil
 		}
 		guard.noteProgress()
@@ -136,6 +161,16 @@ func executeTool(ctx context.Context, env *Env, registry *Registry, call provide
 		return Result{Output: err.Error(), IsError: true}
 	}
 	return result
+}
+
+// sessionTitle is the first line of the first prompt, clipped, so the session
+// list is readable.
+func sessionTitle(prompt string) string {
+	line := strings.TrimSpace(strings.SplitN(prompt, "\n", 2)[0])
+	if len(line) > 60 {
+		line = line[:60]
+	}
+	return line
 }
 
 // decodeArgs parses a tool call's JSON arguments, tolerating an empty payload.

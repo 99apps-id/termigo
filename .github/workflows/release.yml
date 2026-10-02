@@ -18,6 +18,12 @@ jobs:
       HAS_UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
       HAS_SIGNPATH: ${{ secrets.SIGNPATH_API_TOKEN != '' }}
       HAS_APPLE: ${{ secrets.APPLE_CERTIFICATE != '' }}
+      # Public Google installed-app pair for Antigravity. Stamped into the Go
+      # companion by scripts/build-cli.mjs so a download logs in without a
+      # prompt; never committed because GitHub secret scanning flags it. An
+      # unset secret is empty, and the build then leaves the login prompt.
+      TERMIGO_ANTIGRAVITY_CLIENT_ID: ${{ secrets.TERMIGO_ANTIGRAVITY_CLIENT_ID }}
+      TERMIGO_ANTIGRAVITY_CLIENT_SECRET: ${{ secrets.TERMIGO_ANTIGRAVITY_CLIENT_SECRET }}
     strategy:
       fail-fast: false
       matrix:

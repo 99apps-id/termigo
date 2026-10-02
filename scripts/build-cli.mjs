@@ -1,4 +1,5 @@
 import { cpSync, chmodSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -43,6 +44,30 @@ function hostTriple() {
     process.exit(1);
   }
   return match[1].trim();
+}
+
+// readEnvLocal reads the given keys from a git-ignored .env.local, checked at
+// the repository root and next to the Go module. The OAuth client pair lives
+// there (or in a repository secret) so it is never committed: GitHub secret
+// scanning flags the Google pair, and a release build stamps it in with -ldflags
+// instead. Environment variables win over the file.
+function readEnvLocal(keys) {
+  const values = {};
+  const candidates = [join(root, ".env.local"), join(root, "cli", ".env.local")];
+  for (const path of candidates) {
+    if (!existsSync(path)) continue;
+    for (const line of readFileSync(path, "utf8").split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eq = trimmed.indexOf("=");
+      if (eq <= 0) continue;
+      const key = trimmed.slice(0, eq).trim();
+      if (!keys.includes(key) || key in values) continue;
+      const value = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
+      if (value) values[key] = value;
+    }
+  }
+  return values;
 }
 
 function requireArtifact(path, label) {
@@ -159,8 +184,29 @@ function buildGoCompanion() {
   // -s -w strip the symbol table and DWARF data (10.3 MB -> about 7 MB) and
   // -X stamps the real version in, because `var version = "dev"` in main.go is
   // otherwise what `termigo version` reports forever.
-  const ldflags = ["-s", "-w", `-X main.version=${version}`].join(" ");
-  run("go", ["build", "-buildvcs=false", "-trimpath", "-ldflags", ldflags, "-o", out, "./cmd/termigo"], {
+  const ldflags = ["-s", "-w", `-X main.version=${version}`];
+
+  // The public Google installed-app pair is stamped here so a release binary
+  // logs in to Antigravity without a prompt. It stays out of the tree: the
+  // value comes from the environment (a repository secret in CI) or the local,
+  // git-ignored .env.local, and an absent one just leaves the prompt in place.
+  const stamp = readEnvLocal([
+    "TERMIGO_ANTIGRAVITY_CLIENT_ID",
+    "TERMIGO_ANTIGRAVITY_CLIENT_SECRET",
+  ]);
+  for (const [key, symbol] of [
+    ["TERMIGO_ANTIGRAVITY_CLIENT_ID", "AntigravityClientID"],
+    ["TERMIGO_ANTIGRAVITY_CLIENT_SECRET", "AntigravityClientSecret"],
+  ]) {
+    const value = process.env[key]?.trim() || stamp[key];
+    if (value) {
+      ldflags.push(
+        `-X github.com/99apps-id/termigo/cli/internal/oauth.${symbol}=${value}`,
+      );
+    }
+  }
+
+  run("go", ["build", "-buildvcs=false", "-trimpath", "-ldflags", ldflags.join(" "), "-o", out, "./cmd/termigo"], {
     // `go build` must run inside the module, and CGO has to be off or
 
     // cross-compiling to another OS fails with a confusing linker error.
