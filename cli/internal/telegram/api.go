@@ -295,6 +295,8 @@ func (c *Client) SendDocument(ctx context.Context, chatID int64, filename string
 	}
 
 	url := fmt.Sprintf("%s/bot%s/sendDocument", c.baseURL, c.token)
+	ctx, cancel := context.WithTimeout(ctx, downloadUploadTimeout)
+	defer cancel()
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, url, &buf)
 	if err != nil {
 		return Message{}, err
@@ -385,6 +387,14 @@ func isParseError(err error) bool {
 // memory.
 const maxDownloadBytes = 12 * 1024 * 1024
 
+// downloadUploadTimeout bounds one file transfer (a download or a document
+// upload) that is not a long-poll. The shared client keeps Timeout 0 because
+// getUpdates legitimately runs for the whole poll window; a bounded request
+// context instead bounds each transfer, so a stalled connection fails in a
+// minute instead of hanging the update handler until the bot stops. It is a
+// variable so a test can shorten it rather than wait out the real minute.
+var downloadUploadTimeout = 60 * time.Second
+
 // GetFile resolves a file id to a downloadable path.
 func (c *Client) GetFile(ctx context.Context, fileID string) (File, error) {
 	var file File
@@ -398,6 +408,8 @@ func (c *Client) DownloadFile(ctx context.Context, filePath string) ([]byte, err
 		return nil, fmt.Errorf("telegram: empty file path")
 	}
 	url := fmt.Sprintf("%s/file/bot%s/%s", c.baseURL, c.token, filePath)
+	ctx, cancel := context.WithTimeout(ctx, downloadUploadTimeout)
+	defer cancel()
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
