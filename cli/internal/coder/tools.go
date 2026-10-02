@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/99apps-id/termigo/cli/internal/provider"
+	"github.com/99apps-id/termigo/cli/internal/secrets"
 )
 
 // Result is what a tool returns.
@@ -45,6 +46,9 @@ type Tool interface {
 type Env struct {
 	Workspace string
 	Trusted   bool
+	// Secrets holds provider keys and other stored values a tool may read
+	// (web_search uses a stored search key when one exists).
+	Secrets *secrets.Store
 	// Approve blocks until the operator answers. Nil means deny.
 	Approve func(ApprovalRequest) Decision
 }
@@ -87,6 +91,9 @@ func DefaultRegistry() *Registry {
 		&runCommandTool{},
 		&envGetTool{},
 		&probeURLTool{},
+		&webSearchTool{},
+		&webFetchTool{},
+		&lookupTool{},
 		&gitStatusTool{},
 		&gitDiffTool{},
 		&gitLogTool{},

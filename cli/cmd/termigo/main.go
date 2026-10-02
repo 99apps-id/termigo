@@ -1130,7 +1130,7 @@ func runCode(args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	env := &coder.Env{Workspace: workspace, Trusted: allow}
+	env := &coder.Env{Workspace: workspace, Trusted: allow, Secrets: store}
 	if allow {
 		env.Approve = func(coder.ApprovalRequest) coder.Decision { return coder.DecisionAllowOnce }
 	}
