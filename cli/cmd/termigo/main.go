@@ -25,6 +25,7 @@ import (
 	"github.com/99apps-id/termigo/cli/internal/oauth"
 	"github.com/99apps-id/termigo/cli/internal/provider"
 	"github.com/99apps-id/termigo/cli/internal/secrets"
+	"github.com/99apps-id/termigo/cli/internal/service"
 	"github.com/99apps-id/termigo/cli/internal/skill"
 	"github.com/99apps-id/termigo/cli/internal/terminal"
 	"github.com/99apps-id/termigo/cli/internal/tgbridge"
@@ -92,6 +93,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return runTelegram(args[1:], stdout)
 	case "chat":
 		return runChat(args[1:], stdout)
+	case "service":
+		return runService(args[1:], stdout)
 	case "login":
 		return runLogin(args[1:], stdout)
 	case "logout":
@@ -173,6 +176,7 @@ Commands that drive a running Termigo:
   chat [model]                     Interactive Bubble Tea TUI for the agent
   telegram <token>                 Store the Telegram bot token
   telegram [status]                Run the companion bot, or show its status
+  service [install|uninstall|status] Run the Telegram assistant 24/7 via the OS
   secret <provider>                Store a provider API key (prompted, never echoed)
   login <provider>                 OAuth login: xai-oauth, openai-codex, claude-oauth, antigravity, github-copilot
   logout <provider>                Drop a stored OAuth login
@@ -1102,6 +1106,23 @@ func runAsk(args []string, stdout io.Writer) error {
 	})
 	fmt.Fprintln(stdout)
 	return err
+}
+
+// runService registers the Telegram assistant with the OS so it runs 24/7.
+func runService(args []string, stdout io.Writer) error {
+	if len(args) == 0 {
+		return errors.New("usage: termigo service [install|uninstall|status]")
+	}
+	switch strings.ToLower(strings.TrimSpace(args[0])) {
+	case "install":
+		return service.Install(stdout)
+	case "uninstall":
+		return service.Uninstall(stdout)
+	case "status":
+		return service.Status(stdout)
+	default:
+		return fmt.Errorf("unknown service command %q; use install, uninstall, or status", args[0])
+	}
 }
 
 // runChat starts the interactive Bubble Tea TUI, using a supplied model or the
