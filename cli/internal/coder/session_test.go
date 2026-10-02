@@ -58,7 +58,10 @@ func (f *fakeClient) ID() string { return "fake" }
 
 func (f *fakeClient) Stream(_ context.Context, req provider.ChatRequest, emit func(provider.StreamEvent) error) error {
 	f.seen = append(f.seen, len(req.Messages))
-	return emit(provider.StreamEvent{Type: provider.EventTextDelta, Text: f.reply})
+	if err := emit(provider.StreamEvent{Type: provider.EventTextDelta, Text: f.reply}); err != nil {
+		return err
+	}
+	return emit(provider.StreamEvent{Type: provider.EventUsage, Usage: &provider.Usage{PromptTokens: 3, CompletionTokens: 2, TotalTokens: 5}})
 }
 
 func TestRunRecordsAndContinuesASession(t *testing.T) {
@@ -92,5 +95,8 @@ func TestRunRecordsAndContinuesASession(t *testing.T) {
 	}
 	if len(client.seen) != 2 || client.seen[0] != 1 || client.seen[1] != 3 {
 		t.Errorf("messages seen per request = %v, want [1 3]", client.seen)
+	}
+	if session.Usage.TotalTokens != 10 {
+		t.Errorf("session usage total = %d, want 10 (two turns of 5)", session.Usage.TotalTokens)
 	}
 }

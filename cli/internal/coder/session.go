@@ -25,6 +25,9 @@ type Session struct {
 	CreatedAt time.Time          `json:"createdAt"`
 	UpdatedAt time.Time          `json:"updatedAt"`
 	Messages  []provider.Message `json:"messages"`
+	// Usage is the token accounting accumulated across every turn, so /cost can
+	// report a session total without recomputing it from the transcript.
+	Usage provider.Usage `json:"usage,omitempty"`
 }
 
 // sessionsDir returns the directory that holds the session files, creating it

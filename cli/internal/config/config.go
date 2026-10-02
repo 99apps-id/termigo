@@ -37,6 +37,36 @@ type Config struct {
 	TrustedFolders []string `json:"trustedFolders,omitempty"`
 	// Language is the preferred reply language.
 	Language string `json:"language,omitempty"`
+	// ModelPrices is an optional table of USD per million tokens, keyed by model
+	// id or wire id. A model absent from it has an unknown price, which is shown
+	// as unknown rather than as zero, so a budget never silently assumes free.
+	ModelPrices map[string]ModelPrice `json:"modelPrices,omitempty"`
+}
+
+// ModelPrice is the list price of a model in USD per million tokens.
+type ModelPrice struct {
+	InputPerMillion  float64 `json:"inputPerMillion,omitempty"`
+	OutputPerMillion float64 `json:"outputPerMillion,omitempty"`
+}
+
+// Cost estimates the dollar cost of a token count. A zero price is legitimate
+// for a local model, so callers decide whether an absent entry means unknown.
+func (p ModelPrice) Cost(promptTokens, completionTokens int) float64 {
+	return float64(promptTokens)/1e6*p.InputPerMillion + float64(completionTokens)/1e6*p.OutputPerMillion
+}
+
+// Price returns the configured price for a model, checking the catalogue id and
+// the wire id.
+func (c Config) Price(id, wireID string) (ModelPrice, bool) {
+	if price, ok := c.ModelPrices[id]; ok {
+		return price, true
+	}
+	if wireID != "" && wireID != id {
+		if price, ok := c.ModelPrices[wireID]; ok {
+			return price, true
+		}
+	}
+	return ModelPrice{}, false
 }
 
 // IsTrusted reports whether a folder is on the trusted list.

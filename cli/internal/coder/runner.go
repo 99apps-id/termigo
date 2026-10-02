@@ -95,6 +95,10 @@ func Run(ctx context.Context, opts Options, prompt string, emit func(provider.St
 				if event.ToolCall != nil {
 					calls = append(calls, *event.ToolCall)
 				}
+			case provider.EventUsage:
+				if event.Usage != nil && opts.Session != nil {
+					opts.Session.Usage = opts.Session.Usage.Add(*event.Usage)
+				}
 			}
 			if emit != nil {
 				emit(event)

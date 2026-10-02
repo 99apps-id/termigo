@@ -231,7 +231,7 @@ func (m *Model) handleSlash(value string) (tea.Model, tea.Cmd) {
 	case "/quit", "/exit":
 		return m, tea.Quit
 	case "/help":
-		m.appendBlock(blockNotice, "Commands: /model [query] pick provider then model, /providers, /settings [key value], /status, /sessions, /copy [n], /new, /help, /quit. Enter sends, Ctrl+J newline, Ctrl+Y copies the last reply, Esc denies an approval. Start with --continue to resume the last session.")
+		m.appendBlock(blockNotice, "Commands: /model [query] pick provider then model, /providers, /settings [key value], /status, /cost, /sessions, /copy [n], /new, /help, /quit. Enter sends, Ctrl+J newline, Ctrl+Y copies the last reply, Esc denies an approval. Start with --continue to resume the last session.")
 		return m, nil
 	case "/settings":
 		return m.handleSettings(fields), nil
@@ -248,7 +248,11 @@ func (m *Model) handleSlash(value string) (tea.Model, tea.Cmd) {
 		m.setModel(model)
 		return m, nil
 	case "/status":
-		m.appendBlock(blockNotice, fmt.Sprintf("model: %s\nworkspace: %s\nsession: %s\nturns: %d", m.model.ID, m.workspace, m.session.ID, len(m.session.Messages)/2))
+		usage := m.session.Usage
+		m.appendBlock(blockNotice, fmt.Sprintf("model: %s\nworkspace: %s\nsession: %s\nturns: %d\ntokens: %d (prompt %d, completion %d)", m.model.ID, m.workspace, m.session.ID, len(m.session.Messages)/2, usage.TotalTokens, usage.PromptTokens, usage.CompletionTokens))
+		return m, nil
+	case "/cost":
+		m.appendBlock(blockNotice, m.costReport())
 		return m, nil
 	case "/providers":
 		m.appendBlock(blockNotice, m.providersStatus())
@@ -418,6 +422,25 @@ func (m *Model) sessionsList() string {
 		fmt.Fprintf(&builder, "%s%s  %s  %s\n", marker, session.ID, session.UpdatedAt.Format("2006-01-02 15:04"), session.Title)
 	}
 	return strings.TrimRight(builder.String(), "\n")
+}
+
+// costReport renders the session's token usage and, when a price is configured
+// for the model, a dollar estimate. A model with no configured price reports
+// the cost as unknown rather than as zero.
+func (m *Model) costReport() string {
+	usage := m.session.Usage
+	var builder strings.Builder
+	fmt.Fprintf(&builder, "tokens: prompt %d, completion %d, total %d", usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)
+	if usage.CacheReadTokens > 0 || usage.CacheWriteTokens > 0 {
+		fmt.Fprintf(&builder, "\ncache: read %d, write %d", usage.CacheReadTokens, usage.CacheWriteTokens)
+	}
+	price, ok := m.cfg.Price(m.model.ID, m.model.WireID())
+	if !ok {
+		builder.WriteString("\ncost: unknown; add a modelPrices entry for " + m.model.ID + " to the config")
+		return builder.String()
+	}
+	fmt.Fprintf(&builder, "\ncost: ~$%.4f ($%g/M in, $%g/M out)", price.Cost(usage.PromptTokens, usage.CompletionTokens), price.InputPerMillion, price.OutputPerMillion)
+	return builder.String()
 }
 
 // copyReply copies the n-th most recent assistant reply (1 = last) to the
