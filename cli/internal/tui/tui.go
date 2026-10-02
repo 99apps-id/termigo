@@ -231,7 +231,7 @@ func (m *Model) handleSlash(value string) (tea.Model, tea.Cmd) {
 	case "/quit", "/exit":
 		return m, tea.Quit
 	case "/help":
-		m.appendBlock(blockNotice, "Commands: /model [query] pick provider then model, /providers, /settings [key value], /status, /cost, /sessions, /copy [n], /new, /help, /quit. Enter sends, Ctrl+J newline, Ctrl+Y copies the last reply, Esc denies an approval. Start with --continue to resume the last session.")
+		m.appendBlock(blockNotice, "Commands: /model [query] pick provider then model, /providers, /settings [key value], /status, /cost, /setup, /key <provider> <key>, /login <provider>, /sessions, /copy [n], /new, /help, /quit. Enter sends, Ctrl+J newline, Ctrl+Y copies the last reply, Esc denies an approval. Start with --continue to resume the last session.")
 		return m, nil
 	case "/settings":
 		return m.handleSettings(fields), nil
@@ -259,6 +259,13 @@ func (m *Model) handleSlash(value string) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "/sessions":
 		m.appendBlock(blockNotice, m.sessionsList())
+		return m, nil
+	case "/key":
+		return m.handleKeyCommand(fields), nil
+	case "/login":
+		return m.handleLoginCommand(fields), nil
+	case "/setup":
+		m.appendBlock(blockNotice, m.setupReport())
 		return m, nil
 	case "/copy":
 		which := 1
@@ -422,6 +429,60 @@ func (m *Model) sessionsList() string {
 		fmt.Fprintf(&builder, "%s%s  %s  %s\n", marker, session.ID, session.UpdatedAt.Format("2006-01-02 15:04"), session.Title)
 	}
 	return strings.TrimRight(builder.String(), "\n")
+}
+
+// handleKeyCommand stores an API key for a key-based provider, so the operator
+// does not have to leave the TUI. An OAuth provider is pointed at /login
+// instead.
+func (m *Model) handleKeyCommand(fields []string) tea.Model {
+	if len(fields) < 3 {
+		m.appendBlock(blockNotice, "Usage: /key <provider> <api-key>. Providers:\n"+m.providersStatus())
+		return m
+	}
+	id := strings.ToLower(fields[1])
+	info, ok := provider.ByID(id)
+	if !ok {
+		m.appendBlock(blockError, "Unknown provider "+id+".")
+		return m
+	}
+	if info.OAuth {
+		m.appendBlock(blockError, info.Label+" uses a login, not an API key. Run 'termigo login "+info.ID+"' in another terminal.")
+		return m
+	}
+	if err := m.store.Set(secrets.ProviderKey(info.ID), strings.Join(fields[2:], " ")); err != nil {
+		m.appendBlock(blockError, err.Error())
+		return m
+	}
+	m.appendBlock(blockNotice, "Stored a key for "+info.Label+".")
+	return m
+}
+
+// handleLoginCommand explains the OAuth login: the device or browser flow
+// cannot run inside the alt-screen TUI, so it is done in another terminal.
+func (m *Model) handleLoginCommand(fields []string) tea.Model {
+	if len(fields) < 2 {
+		m.appendBlock(blockNotice, "Usage: /login <provider>. OAuth runs in the terminal outside the TUI.")
+		return m
+	}
+	id := strings.ToLower(fields[1])
+	if _, ok := provider.ByID(id); !ok {
+		m.appendBlock(blockError, "Unknown provider "+id+".")
+		return m
+	}
+	m.appendBlock(blockNotice, "Run this in another terminal, then /providers here:\n  termigo login "+id)
+	return m
+}
+
+// setupReport is a short onboarding summary: what has a credential, how to add
+// one, and how to pick a model.
+func (m *Model) setupReport() string {
+	var builder strings.Builder
+	builder.WriteString("Credentials:\n")
+	builder.WriteString(m.providersStatus())
+	builder.WriteString("\n\nAdd an API key: /key <provider> <key>")
+	builder.WriteString("\nOAuth login: run 'termigo login <provider>' in another terminal, then /providers")
+	builder.WriteString("\nPick a model: /model")
+	return builder.String()
 }
 
 // costReport renders the session's token usage and, when a price is configured
