@@ -275,7 +275,7 @@ func runAgent(args []string, stdout, stderr io.Writer) error {
   termigo agent <provider> [flags] "task"      (shorthand)
 
 Flags:
-  --access <read-only|workspace-write>  Sandbox for the run (default: read-only)
+  --access <read-only|workspace-write>  Sandbox for the run (default: workspace-write)
   --model <name>                        Override the provider model
   --endpoint <url>                      Override a local endpoint (ollama)
   --timeout <seconds>                   Limit the whole run
@@ -495,19 +495,25 @@ func runMCP(args []string, stdout io.Writer) error {
 				filter = arg
 			}
 		}
-		return listMCPServers(ctxForCLI(), workspace, filter, jsonOutput, stdout)
+		ctx, cancel := ctxForMCP()
+		defer cancel()
+		return listMCPServers(ctx, workspace, filter, jsonOutput, stdout)
 
 	case "ping":
 		if len(rest) < 2 {
 			return errors.New("usage: termigo mcp ping <server>")
 		}
-		return pingMCPServer(ctxForCLI(), workspace, rest[1], stdout)
+		ctx, cancel := ctxForMCP()
+		defer cancel()
+		return pingMCPServer(ctx, workspace, rest[1], stdout)
 
 	case "call":
 		if len(rest) < 3 {
 			return errors.New("usage: termigo mcp call <server> <tool> [key=value ...]")
 		}
-		return callMCPTool(ctxForCLI(), workspace, rest[1], rest[2], rest[3:], stdout)
+		ctx, cancel := ctxForMCP()
+		defer cancel()
+		return callMCPTool(ctx, workspace, rest[1], rest[2], rest[3:], stdout)
 
 	case "add":
 		if len(rest) < 3 {
@@ -536,15 +542,17 @@ func runMCP(args []string, stdout io.Writer) error {
 	}
 }
 
-var cliCtx context.Context
-var cliCancel context.CancelFunc
+// mcpCommandTimeout bounds one MCP subcommand. It is longer than the client's
+// own 60s handshake deadline because an npx-based server can spend most of a
+// minute cold-starting before the first reply; a 30s budget here cancelled
+// every such call while the client was still correctly waiting.
+const mcpCommandTimeout = 120 * time.Second
 
-func init() {
-	cliCtx, cliCancel = context.WithTimeout(context.Background(), 30*time.Second)
-}
-
-func ctxForCLI() context.Context {
-	return cliCtx
+// ctxForMCP builds a per-command context. A package-level context created in
+// init would start its countdown at process start, run for the whole CLI
+// invocation and leak its cancel; one context per command does none of that.
+func ctxForMCP() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), mcpCommandTimeout)
 }
 
 func listMCPServers(ctx context.Context, workspace, filter string, jsonOutput bool, stdout io.Writer) error {

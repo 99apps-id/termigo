@@ -718,6 +718,8 @@ function rewireSlot(slot: Slot, p: AcquireParams): void {
   }
   slot.lastCols = slot.term.cols;
   slot.lastRows = slot.term.rows;
+  slot.currentLeafId = p.leafId;
+  transitionImeBridgeOwner(slot.imeState, p.leafId);
   p.onSearchReady(slot.searchAddon);
 }
 

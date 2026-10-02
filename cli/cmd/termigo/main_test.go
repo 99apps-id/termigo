@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRunHelp(t *testing.T) {
@@ -156,3 +157,51 @@ func TestSkillCreateThenList(t *testing.T) {
 		t.Fatalf("skill show did not include the description: %q", output.String())
 	}
 }
+
+// The MCP commands share one budget per invocation. It has to cover the
+// client's own 60s handshake window with room to spare, because an npx-based
+// server can spend most of a minute cold-starting; the old 30s ceiling
+// cancelled every such call while the client was still correctly waiting.
+func TestMCPCommandTimeoutCoversTheHandshake(t *testing.T) {
+	if mcpCommandTimeout <= 60*time.Second {
+		t.Fatalf("mcpCommandTimeout = %v, which is not longer than the client's 60s handshake window", mcpCommandTimeout)
+	}
+}
+
+// A context built for one MCP command must start its countdown when the
+// command runs, not at process start: a package-level context created in
+// init would have burned part of its budget before the command began.
+func TestCtxForMCPStartsFreshPerCommand(t *testing.T) {
+	first, cancel := ctxForMCP()
+	if deadline, ok := first.Deadline(); !ok || time.Until(deadline) < 100*time.Second {
+		t.Fatalf("first context deadline = %v ok=%v, want a fresh full window", deadline, ok)
+	}
+	cancel()
+	time.Sleep(10 * time.Millisecond)
+	second, cancel := ctxForMCP()
+	defer cancel()
+	deadline, ok := second.Deadline()
+	if !ok {
+		t.Fatal("second context has no deadline")
+	}
+	if remaining := time.Until(deadline); remaining < 100*time.Second {
+		t.Fatalf("second context has only %v left, want a fresh window per command", remaining)
+	}
+}
+
+// The usage text must state the access mode the code actually applies: the
+// run defaults to workspace-write, and an operator reading "default:
+// read-only" would believe a bare run cannot edit files when it can.
+func TestAgentHelpStatesTheRealDefaultAccess(t *testing.T) {
+	var output bytes.Buffer
+	if err := run([]string{"agent", "help"}, &output, &bytes.Buffer{}); err != nil {
+		t.Fatalf("agent help failed: %v", err)
+	}
+	if !strings.Contains(output.String(), "default: workspace-write") {
+		t.Fatalf("agent help should state the workspace-write default: %q", output.String())
+	}
+	if strings.Contains(output.String(), "default: read-only") {
+		t.Fatalf("agent help still claims read-only is the default: %q", output.String())
+	}
+}
+
