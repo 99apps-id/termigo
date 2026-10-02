@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/99apps-id/termigo/cli/internal/agent"
+	"github.com/99apps-id/termigo/cli/internal/coder"
 	"github.com/99apps-id/termigo/cli/internal/config"
 	"github.com/99apps-id/termigo/cli/internal/control"
 	"github.com/99apps-id/termigo/cli/internal/doctor"
@@ -83,6 +84,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return runSecret(args[1:], stdout)
 	case "ask":
 		return runAsk(args[1:], stdout)
+	case "code":
+		return runCode(args[1:], stdout)
 	case "login":
 		return runLogin(args[1:], stdout)
 	case "logout":
@@ -1086,6 +1089,65 @@ func runAsk(args []string, stdout io.Writer) error {
 			fmt.Fprintf(stdout, "[thinking] %s", event.Text)
 		}
 		return nil
+	})
+	fmt.Fprintln(stdout)
+	return err
+}
+
+// runCode runs the agent loop against a provider: it can read and edit files,
+// search, run commands and use git. A mutating tool needs --yes, because the
+// CLI has no interactive approval dialog.
+func runCode(args []string, stdout io.Writer) error {
+	allow := false
+	rest := make([]string, 0, len(args))
+	for _, arg := range args {
+		switch arg {
+		case "--yes", "-y":
+			allow = true
+		default:
+			rest = append(rest, arg)
+		}
+	}
+	if len(rest) < 3 {
+		return errors.New("usage: termigo code [--yes] <provider> <model> \"<prompt>\"")
+	}
+	providerID, model := rest[0], rest[1]
+	prompt := strings.Join(rest[2:], " ")
+	if strings.TrimSpace(prompt) == "" {
+		return errors.New("the prompt is empty")
+	}
+	store, err := secrets.Load()
+	if err != nil {
+		return err
+	}
+	client, err := provider.NewClient(providerID, provider.DefaultBaseURL(providerID), provider.ResolverFor(store))
+	if err != nil {
+		return err
+	}
+	provider.SetForceResolver(client, store)
+
+	workspace, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	env := &coder.Env{Workspace: workspace, Trusted: allow}
+	if allow {
+		env.Approve = func(coder.ApprovalRequest) coder.Decision { return coder.DecisionAllowOnce }
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	_, err = coder.Run(ctx, coder.Options{Client: client, Model: model, Env: env}, prompt, func(event provider.StreamEvent) {
+		switch event.Type {
+		case provider.EventTextDelta:
+			fmt.Fprint(stdout, event.Text)
+		case provider.EventReasoningDelta:
+			fmt.Fprintf(stdout, "[thinking] %s", event.Text)
+		case provider.EventToolCall:
+			if event.ToolCall != nil {
+				fmt.Fprintf(stdout, "\n[tool] %s\n", event.ToolCall.Name)
+			}
+		}
 	})
 	fmt.Fprintln(stdout)
 	return err
