@@ -22,6 +22,7 @@
     "test:watch": "vitest",
     "check-types": "tsc --noEmit",
     "check:commands": "node scripts/check-invoke-commands.mjs",
+    "check:cli-version": "node scripts/check-cli-version.mjs",
     "check:doc-commands": "node scripts/check-doc-commands.mjs",
     "lint": "biome lint --error-on-warnings --max-diagnostics=none ./src",
     "lint:fix": "biome lint --write ./src",

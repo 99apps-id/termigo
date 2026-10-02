@@ -32,7 +32,22 @@ import (
 	"github.com/99apps-id/termigo/cli/internal/tui"
 )
 
-var version = "v0.9.22"
+// version is stamped at build time with -ldflags "-X main.version=v..."; the
+// value here is the fallback a `go build` without flags reports. The release
+// script stamps the package.json version in, and check:cli-version fails the
+// build when the two drift apart.
+var version = "dev"
+
+// fallbackVersion is what `termigo version` prints: the stamped value, or a
+// clearly-unreleased marker when the binary came from a bare `go build`, so a
+// bug report names the build it came from instead of a version that was never
+// released.
+func fallbackVersion() string {
+	if strings.TrimSpace(version) != "" && version != "dev" {
+		return version
+	}
+	return "dev (unreleased build; not stamped with -ldflags)"
+}
 
 // stdin is the input for the interactive commands. A variable so tests can drive
 // the terminal without a console.
@@ -53,7 +68,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 
 	switch args[0] {
 	case "version", "--version", "-v":
-		_, err := fmt.Fprintf(stdout, "termigo %s (%s/%s)\n", version, runtime.GOOS, runtime.GOARCH)
+		_, err := fmt.Fprintf(stdout, "termigo %s (%s/%s)\n", fallbackVersion(), runtime.GOOS, runtime.GOARCH)
 		return err
 	case "doctor":
 		return runDoctor(args[1:], stdout)
@@ -766,9 +781,11 @@ func runHarness(args []string, stdout io.Writer) error {
 
 	opts := harness.Options{
 		DatasetPath: datasetPath,
-		ModelID:     modelID,
-		Timeout:     timeout,
-		Workspace:   workspace,
+		// A label the report carries so two runs of one dataset can be compared;
+		// the harness itself runs eval commands only, never the model.
+		ModelID:   modelID,
+		Timeout:   timeout,
+		Workspace: workspace,
 	}
 
 	report, err := harness.Run(context.Background(), opts, stdout)

@@ -27,6 +27,43 @@ func TestRunVersion(t *testing.T) {
 	}
 }
 
+// A bare `go build` leaves the stamp at "dev"; the version command must say
+// so plainly instead of reporting a number that was never released, because a
+// bug report that names a fake version sends whoever reads it looking for a
+// tag that does not exist.
+func TestRunVersionMarksAnUnstampedBuild(t *testing.T) {
+	original := version
+	version = "dev"
+	t.Cleanup(func() { version = original })
+
+	var output bytes.Buffer
+	if err := run([]string{"version"}, &output, &bytes.Buffer{}); err != nil {
+		t.Fatalf("run returned an error: %v", err)
+	}
+	if !strings.Contains(output.String(), "unreleased") {
+		t.Fatalf("an unstamped build should be marked, got %q", output.String())
+	}
+}
+
+// A release build stamps the real version; the command must print it verbatim
+// without the dev marker.
+func TestRunVersionPrintsTheStampedValue(t *testing.T) {
+	original := version
+	version = "v9.9.9-test"
+	t.Cleanup(func() { version = original })
+
+	var output bytes.Buffer
+	if err := run([]string{"version"}, &output, &bytes.Buffer{}); err != nil {
+		t.Fatalf("run returned an error: %v", err)
+	}
+	if !strings.Contains(output.String(), "v9.9.9-test") {
+		t.Fatalf("the stamped version should print, got %q", output.String())
+	}
+	if strings.Contains(output.String(), "unreleased") {
+		t.Fatalf("a stamped build must not carry the dev marker: %q", output.String())
+	}
+}
+
 func TestRunRejectsUnknownCommand(t *testing.T) {
 	if err := run([]string{"unknown"}, &bytes.Buffer{}, &bytes.Buffer{}); err == nil {
 		t.Fatal("run accepted an unknown command")
@@ -204,4 +241,3 @@ func TestAgentHelpStatesTheRealDefaultAccess(t *testing.T) {
 		t.Fatalf("agent help still claims read-only is the default: %q", output.String())
 	}
 }
-
