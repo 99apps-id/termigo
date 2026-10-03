@@ -1,15 +1,65 @@
-# Keep shell scripts LF in the repository and in every checkout.
+# Line endings, pinned explicitly.
 #
-# These scripts are the deployment path for the headless VPS (service start,
-# build, watchdog). A CRLF shell script fails there with
-# "$'\r': command not found", which reads like a missing file rather than a line
-# ending problem, and the failure is silent enough to cost an evening.
-*.sh text eol=lf
+# Termigo is developed on Windows and released from Linux and macOS, and a
+# mismatch here is not cosmetic: a shell script with CRLF fails on the VPS with
+# "$'\r': command not found", and a Go or Rust source file with CRLF makes
+# gofmt or rustfmt rewrite every line. core.autocrlf is a per-machine setting,
+# so it is not a guarantee anyone else can rely on. These rules are.
 
-# Keep Go sources LF in the repository and in every checkout.
-#
-# gofmt compares the whole file, so a CRLF working copy makes `gofmt -l` list
-# the entire Go tree on Windows even though the repository (and CI, which
-# checks out LF) is clean. An agent verifying formatting then sees ~110 false
-# positives and cannot tell its own unformatted file from the pack.
-*.go text eol=lf
+# Normalise on commit and check out with LF for everything not listed below.
+* text=auto eol=lf
+
+# Source and build files are LF everywhere, in the repository and in the
+# working tree, so the two platforms see byte-identical files.
+*.go       text eol=lf
+*.rs       text eol=lf
+*.toml     text eol=lf
+*.ts       text eol=lf
+*.tsx      text eol=lf
+*.js       text eol=lf
+*.jsx      text eol=lf
+*.css      text eol=lf
+*.html     text eol=lf
+*.md       text eol=lf
+*.json     text eol=lf
+*.yml      text eol=lf
+*.yaml     text eol=lf
+*.sh       text eol=lf
+*.mod      text eol=lf
+*.sum      text eol=lf
+Makefile   text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+LICENSE    text eol=lf
+NOTICE     text eol=lf
+
+# PowerShell and the Windows command shell are the one exception. Their
+# here-strings and batch parsing are line-ending sensitive, and CRLF is what
+# those tools are built around, so these stay CRLF.
+*.ps1 text eol=crlf
+*.psm1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binaries: never touched by the text filters, or a "conversion" would corrupt
+# them. The logo and its generated icons are the release payload, not text.
+*.exe  binary
+*.dll  binary
+*.so   binary
+*.dylib binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.icns binary
+*.webp binary
+*.pdf  binary
+*.zip  binary
+*.gz   binary
+*.tgz  binary
+
+# Generated and vendored paths stay out of language statistics and diff noise.
+pnpm-lock.yaml linguist-generated=true
+cli/go.sum linguist-generated=true
+src-tauri/gen/schemas/** linguist-generated=true generated
