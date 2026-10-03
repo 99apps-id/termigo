@@ -9,8 +9,11 @@ import {
   type InlineButton,
   sendKeyboard,
   sendProgressMessage,
+  sendTelegram,
   sendTyping,
+  splitTelegramText,
 } from "./telegramApi";
+import { logRelayWarn } from "./telegramLog";
 import {
   getPendingApprovals,
   hasActiveToolCalls,
@@ -121,7 +124,8 @@ export async function publishProgress(
       const activeTools = isAppRunning && hasActiveToolCalls(chat);
       const busy =
         isAppRunning &&
-        (runBusy(chatStatus, status, pendingApprovals.length > 0) || activeTools);
+        (runBusy(chatStatus, status, pendingApprovals.length > 0) ||
+          activeTools);
 
       if (
         isActivelyTyping(chatStatus, status, activeTools) &&
@@ -337,17 +341,11 @@ export async function publishProgress(
       // alive long after the desktop app showed the agent as idle.
       if (!busy) {
         const latestMeta = store.useChatStore.getState().agentMeta;
-        if (
-          latestMeta.status === "idle" ||
-          latestMeta.status === "error"
-        ) {
+        if (latestMeta.status === "idle" || latestMeta.status === "error") {
           await sleep(signal, 1500);
           if (signal.aborted) break;
           const afterWait = store.useChatStore.getState().agentMeta;
-          if (
-            afterWait.status === "idle" ||
-            afterWait.status === "error"
-          ) {
+          if (afterWait.status === "idle" || afterWait.status === "error") {
             break;
           }
         }
@@ -408,12 +406,48 @@ export async function publishProgress(
         todos:
           todosStore.useTodosStore.getState().bySession[sessionId]?.items ?? [],
       });
-      await editProgressMessage(
+      // Telegram rejects any edit or send past 4096 characters, and the
+      // closing card carries the whole answer: one edit of a long answer
+      // failed quietly and left the card stuck on the last live snippet -
+      // a truncated output with no follow-up. Split instead, like the
+      // relay's finalize: the card takes the first chunk, the rest follow
+      // as their own messages. If the card cannot be edited at all, send
+      // the text whole through the chunked path rather than dropping it.
+      const chunks = splitTelegramText(doneText);
+      const edited = await editProgressMessage(
         chatId,
         progressMessageId,
-        doneText,
+        chunks[0] ?? doneText,
         AbortSignal.timeout(4000),
-      ).catch(() => {});
+      ).catch(() => false);
+      if (edited) {
+        for (const chunk of chunks.slice(1)) {
+          const sent = await sendTelegram(
+            chatId,
+            chunk,
+            AbortSignal.timeout(10_000),
+          ).then(
+            () => true,
+            () => false,
+          );
+          if (!sent) {
+            logRelayWarn(
+              `closing card ${progressMessageId} kept its first chunk but a follow-up did not send`,
+            );
+            break;
+          }
+        }
+      } else {
+        // The card could not be rewritten. Send the whole text through the
+        // chunked path - it splits internally - so the answer still arrives.
+        await sendTelegram(chatId, doneText, AbortSignal.timeout(10_000)).catch(
+          () => {
+            logRelayWarn(
+              `closing card ${progressMessageId} could not be edited and the whole-text fallback did not send either`,
+            );
+          },
+        );
+      }
       if (!answerText || (outcome !== "done" && outcome !== "stopped")) {
         lastFinishedProgressMessageIds.set(chatId, progressMessageId);
       }

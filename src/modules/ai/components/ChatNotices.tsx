@@ -123,14 +123,12 @@ export function stopCopy(
   kind: StopKind,
   round: number,
 ): { text: string; action: string; hint?: string } {
-  const spent = stepBudgetForRound(round);
-  const next = stepBudgetForRound(round + 1);
-  const deeper = next > spent ? ` (next round: ${next})` : "";
+  const budget = stepBudgetForRound(round);
   switch (kind) {
     case "step-cap":
       return {
-        text: `Paused after ${spent} steps - this round's budget.`,
-        action: `Continue${deeper}`,
+        text: `Paused after ${budget} steps - the cap for one reply.`,
+        action: `Continue (+${budget} steps)`,
       };
     case "tool-repetition":
       return {

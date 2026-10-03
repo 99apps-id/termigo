@@ -251,31 +251,23 @@ describe("migrateLegacyCompatEndpoint", () => {
 });
 
 describe("stepBudgetForRound", () => {
-  it("starts at VS Code's agent-mode default", () => {
+  it("is VS Code's agent-mode default", () => {
     expect(stepBudgetForRound(0)).toBe(25);
     expect(MAX_AGENT_STEPS).toBe(25);
   });
 
-  it("climbs one tier per Continue", () => {
-    expect(stepBudgetForRound(1)).toBe(50);
-    expect(stepBudgetForRound(2)).toBe(100);
-  });
-
-  it("holds at the top tier instead of growing without bound", () => {
-    expect(stepBudgetForRound(3)).toBe(100);
-    expect(stepBudgetForRound(99)).toBe(100);
-  });
-
-  it("clamps a negative round to the first tier", () => {
-    expect(stepBudgetForRound(-1)).toBe(25);
-  });
-
-  it("never lets a later round shrink the budget", () => {
-    for (let r = 1; r < 8; r++) {
-      expect(stepBudgetForRound(r)).toBeGreaterThanOrEqual(
-        stepBudgetForRound(r - 1),
-      );
+  it("is one explicit cap per reply, not a hidden multiplier", () => {
+    // The ceiling is the whole per-round budget: Continue resumes the task on
+    // the same history with the same cap, so no round may deepen the number
+    // behind the user's back (Termixgo's MaxSteps invariant).
+    for (let r = 0; r < 12; r++) {
+      expect(stepBudgetForRound(r)).toBe(MAX_AGENT_STEPS);
     }
+  });
+
+  it("ignores an out-of-range round instead of inventing a budget", () => {
+    expect(stepBudgetForRound(-1)).toBe(MAX_AGENT_STEPS);
+    expect(stepBudgetForRound(99)).toBe(MAX_AGENT_STEPS);
   });
 });
 
@@ -322,8 +314,9 @@ describe("resolveApiModelId", () => {
   });
 
   it("ignores a blank override so clearing the field restores the default", () => {
-    expect(resolveApiModelId("deepseek-v4-flash", { "deepseek-v4-flash": " " }))
-      .toBe("deepseek-flash");
+    expect(
+      resolveApiModelId("deepseek-v4-flash", { "deepseek-v4-flash": " " }),
+    ).toBe("deepseek-flash");
   });
 
   it("passes a compat model id through untouched", () => {
@@ -376,9 +369,7 @@ describe("resolveModelLabel", () => {
 
   it("keeps a compat endpoint's own name and model id as the label", () => {
     const mid = compatModelIdForEndpoint(endpoint.id);
-    expect(resolveModelLabel(mid, [endpoint], {})).toBe(
-      "My LLM llama-3.3-70b",
-    );
+    expect(resolveModelLabel(mid, [endpoint], {})).toBe("My LLM llama-3.3-70b");
   });
 });
 
@@ -546,12 +537,18 @@ describe("compact tier detection", () => {
 
 describe("system prompts substantive output guidelines", () => {
   it("SYSTEM_PROMPT instructs substantive chat answers and completion summary", () => {
-    expect(SYSTEM_PROMPT).toContain("Always provide substantive text answers in the assistant chat output");
-    expect(SYSTEM_PROMPT).toContain("Never leave explanations or answers trapped inside reasoning");
+    expect(SYSTEM_PROMPT).toContain(
+      "Always provide substantive text answers in the assistant chat output",
+    );
+    expect(SYSTEM_PROMPT).toContain(
+      "Never leave explanations or answers trapped inside reasoning",
+    );
     expect(SYSTEM_PROMPT).toContain("Comprehensive completion summary");
     expect(SYSTEM_PROMPT).toContain("Narrate progress as you work");
     // Ensure anti-narrative phrasing that suppressed chat output is removed
-    expect(SYSTEM_PROMPT).not.toContain("your job is to *do* the work, not narrate it");
+    expect(SYSTEM_PROMPT).not.toContain(
+      "your job is to *do* the work, not narrate it",
+    );
   });
 
   it("SYSTEM_PROMPT contains zero em-dashes", () => {

@@ -33,7 +33,8 @@ export function prepareAgentPrompt(
  * Anthropic prompt-cache breakpoint.
  *
  * `ttl: "1h"` (not the 5-minute default) so a long agent run keeps its cache
- * warm across steps. The budget ladder goes 25 -> 50 -> 100 steps; a run that
+ * warm across steps. A round is capped at `MAX_AGENT_STEPS` steps but a task
+ * spans many of them; a run that
  * crosses the 5-minute mark would otherwise drop its cache and pay full price
  * on the steps after the expiry, which is exactly the "why is it slow on step
  * 60" the run log exists to answer.

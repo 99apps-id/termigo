@@ -21,7 +21,7 @@ const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
 /**
  * Where the active session's run was left off, persisted so the app can offer
  * "Continue" after a restart. `stopReason` and `stoppedByUser` mirror
- * `agentMeta`; `runRound` keeps the budget ladder where a Continue left it.
+ * `agentMeta`; `runRound` keeps the round counter where a Continue left it.
  */
 export type RunMeta = {
   runRound: number;
@@ -83,7 +83,9 @@ function capBigString(s: string): string {
  *  changed, so callers can skip copying. */
 function capOutput(output: unknown): unknown {
   if (typeof output === "string") {
-    return output.length > MAX_PERSISTED_OUTPUT_CHARS ? capBigString(output) : output;
+    return output.length > MAX_PERSISTED_OUTPUT_CHARS
+      ? capBigString(output)
+      : output;
   }
   if (output && typeof output === "object" && !Array.isArray(output)) {
     const rec = output as Record<string, unknown>;

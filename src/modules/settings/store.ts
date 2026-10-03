@@ -340,7 +340,7 @@ export type Preferences = {
   /**
    * Keep a task running when it only paused on its step budget. Reaching the
    * round's budget is not a failure - the transcript is intact and the next
-   * round simply gets the next rung (25 -> 50 -> 100) - so the agent resumes
+   * round gets the same explicit cap again - so the agent resumes
    * itself instead of waiting for a "Continue" click per round. Guards that
    * fire on a STUCK agent (repetition, no progress, repeated tool errors,
    * cost caps) still stop for the user, and a bounded number of continues per

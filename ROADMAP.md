@@ -102,7 +102,7 @@ The themes below frame every scope decision.
 - [x] Agent-defined tools as shell templates in `.termigo/tools.json`
 - [x] Tools with per-action approval gating (file write / edit, bash, and filesystem mutations)
 - [x] Graduated auto-approval modes, with deletion never delegated in any mode
-- [x] Step budgets that escalate per Continue, with named stop reasons
+- [x] One explicit per-round step budget (pause, not fail), with named stop reasons
 - [x] Per-run diagnostics line and an opt-in request inspector
 - [x] Workspace file picker
 - [x] Auto-compact for long context

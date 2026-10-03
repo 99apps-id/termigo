@@ -242,7 +242,8 @@ export const PROVIDERS: readonly ProviderInfo[] = [
     label: "MiniMax",
     keyringAccount: "minimax-api-key",
     keyPrefix: null,
-    consoleUrl: "https://platform.minimax.io/user-center/basic-information/interface-key",
+    consoleUrl:
+      "https://platform.minimax.io/user-center/basic-information/interface-key",
   },
   {
     id: "together",
@@ -510,7 +511,8 @@ export const MODELS = [
     provider: "openai",
     label: "OpenAI o3",
     hint: "Reasoning",
-    description: "Frontier reasoning model for advanced coding and problem solving.",
+    description:
+      "Frontier reasoning model for advanced coding and problem solving.",
     capabilities: { intelligence: 5, speed: 3, cost: 2 },
     tags: ["vision", "reasoning", "tools", "coding"],
     supportsTemperature: false,
@@ -869,7 +871,8 @@ export const MODELS = [
     provider: "stepfun",
     label: "Step-2 16K",
     hint: "Flagship",
-    description: "Flagship 1T-parameter MoE model for complex reasoning and multimodal tasks.",
+    description:
+      "Flagship 1T-parameter MoE model for complex reasoning and multimodal tasks.",
     capabilities: { intelligence: 5, speed: 3, cost: 3 },
     tags: ["vision", "reasoning", "tools", "coding"],
   },
@@ -983,7 +986,8 @@ export const MODELS = [
     provider: "zhipu",
     label: "GLM-5.3",
     hint: "Frontier",
-    description: "Frontier high-intelligence model for demanding agentic tasks.",
+    description:
+      "Frontier high-intelligence model for demanding agentic tasks.",
     capabilities: { intelligence: 5, speed: 3, cost: 2 },
     tags: ["vision", "reasoning", "tools", "coding"],
   },
@@ -1019,7 +1023,8 @@ export const MODELS = [
     provider: "zhipu",
     label: "CodeGeeX-4",
     hint: "Coding",
-    description: "Specialized multi-language code generation and assistance model.",
+    description:
+      "Specialized multi-language code generation and assistance model.",
     capabilities: { intelligence: 4, speed: 4, cost: 4 },
     tags: ["tools", "coding"],
   },
@@ -1922,7 +1927,8 @@ export function modelUsesReasoningTokens(
     (provider === "openai" && /^o[134](?:[.-]|$)/.test(modelId)) ||
     (provider === "qwen" && /qwq/i.test(modelId)) ||
     (provider === "stepfun" && /thinking/i.test(modelId)) ||
-    (provider === "deepseek" && (/r1/i.test(modelId) || /reasoner/i.test(modelId))) ||
+    (provider === "deepseek" &&
+      (/r1/i.test(modelId) || /reasoner/i.test(modelId))) ||
     (provider === "zhipu" && /glm-5/i.test(modelId)) ||
     /\bgpt-oss\b/i.test(modelId)
   );
@@ -1952,7 +1958,7 @@ export const MODEL_CONTEXT_LIMITS: Record<string, number> = {
   "gpt-5.4-nano": 400_000,
   "gpt-5.3-codex": 1_000_000,
   "gpt-4.1-mini": 128_000,
-  "o3": 200_000,
+  o3: 200_000,
   "o3-mini": 200_000,
   "o4-mini": 256_000,
   "gpt-4o": 128_000,
@@ -2099,7 +2105,7 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
   "deepseek-v4-flash": { input: 0.07, output: 0.27, cacheRead: 0.007 },
   "deepseek-r1": { input: 0.55, output: 2.19, cacheRead: 0.14 },
   "deepseek-v3": { input: 0.14, output: 0.28, cacheRead: 0.014 },
-  "o3": { input: 5, output: 20, cacheRead: 1.25 },
+  o3: { input: 5, output: 20, cacheRead: 1.25 },
   "o3-mini": { input: 1.1, output: 4.4, cacheRead: 0.55 },
   "o4-mini": { input: 1, output: 4, cacheRead: 0.5 },
   "gpt-4o": { input: 2.5, output: 10, cacheRead: 1.25 },
@@ -2109,7 +2115,11 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
   "claude-haiku-5": { input: 1, output: 5, cacheRead: 0.1 },
   "gemini-3.8-pro": { input: 1.25, output: 10, cacheRead: 0.31 },
   "gemini-2.0-flash": { input: 0.1, output: 0.4, cacheRead: 0.025 },
-  "gemini-2.0-flash-thinking-exp": { input: 0.1, output: 0.4, cacheRead: 0.025 },
+  "gemini-2.0-flash-thinking-exp": {
+    input: 0.1,
+    output: 0.4,
+    cacheRead: 0.025,
+  },
   "step-2-16k": { input: 2.5, output: 10, cacheRead: 0.5 },
   "step-2-mini": { input: 0.5, output: 2, cacheRead: 0.1 },
   "step-1-8k": { input: 0.7, output: 2.8, cacheRead: 0.15 },
@@ -2244,29 +2254,30 @@ export const MLX_DEFAULT_BASE_URL = "http://127.0.0.1:8080/v1";
 export const OLLAMA_DEFAULT_BASE_URL = "http://localhost:11434/v1";
 export const OPENAI_COMPATIBLE_DEFAULT_BASE_URL = "";
 /**
- * Step budget per round of one task, escalating each time the user presses
- * Continue.
+ * Step budget: one explicit number, exactly how many steps one reply may run.
  *
- * A fixed cap has to guess: set it low and a refactor stalls repeatedly, set
- * it high and a one-line fix can burn a hundred steps on a model that charges
- * per token. Escalating sidesteps the guess. A light task finishes inside the
- * first round; a heavy one earns its depth because the user asked for it, and
- * the weight is read from what actually happened instead of predicted.
+ * This follows the Termixgo invariant: the per-turn ceiling is one explicit
+ * number, not a hidden multiple. A budget that escalates on every Continue
+ * (the old 25 -> 50 -> 100 ladder) is a multiplier the user never agreed to:
+ * a run paused at "25 steps" could resume and be allowed a hundred without
+ * anything being said. Each round now gets the same explicit cap; a heavy
+ * task earns depth by continuing, and every round honestly stops at 25. The
+ * loop guards and the cost cap stay the real stops for a run that goes
+ * nowhere, so the ceiling only bounds a productive one.
  *
- * Round one matches VS Code's agent mode default (`chat.agent.maxRequests`,
- * 25). The last tier repeats for every round after it.
+ * 25 matches VS Code's agent mode default (`chat.agent.maxRequests`). The
+ * harness profile may adjust it visibly (`stepBudgetDelta`), which is a
+ * choice the user made, not a hidden escalation.
  */
-export const AGENT_STEP_BUDGETS = [25, 50, 100] as const;
+export const MAX_AGENT_STEPS = 25;
 
-/** Budget for round `round` (0-based), clamped to the last tier. */
-export function stepBudgetForRound(round: number): number {
-  const i = Math.min(Math.max(round, 0), AGENT_STEP_BUDGETS.length - 1);
-  return AGENT_STEP_BUDGETS[i];
+/** Budget for round `round`. Flat by design: a round's cap is one explicit
+ *  number, not a ladder rung. Hitting it is a pause, not a failure - the
+ *  transcript is intact and Continue resumes on the same history with the
+ *  same budget. */
+export function stepBudgetForRound(_round: number): number {
+  return MAX_AGENT_STEPS;
 }
-
-/** First-round budget. Hitting it is a pause, not a failure: the transcript is
- *  intact and Continue resumes on the same history with a larger budget. */
-export const MAX_AGENT_STEPS = AGENT_STEP_BUDGETS[0];
 export const TERMINAL_BUFFER_LINES = 300;
 
 export const SYSTEM_PROMPT = `You are Termigo, an advanced AI software engineer and systems agent embedded in a developer terminal emulator. You deliver hands-on, high-velocity technical execution accompanied by clear, substantive, and informative explanations in the chat.

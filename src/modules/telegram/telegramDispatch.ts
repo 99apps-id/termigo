@@ -593,15 +593,14 @@ export async function runMirror(signal: AbortSignal): Promise<void> {
               mirrorLastNotifiedStopKey !== stopKey
             ) {
               mirrorLastNotifiedStopKey = stopKey;
-              const { stepBudgetForRound } = await import("../ai/config");
-              const nextBudget = stepBudgetForRound(currentRound + 1);
+              const { MAX_AGENT_STEPS } = await import("../ai/config");
               await sendKeyboard(
                 chatId,
-                `Step limit reached (round ${currentRound + 1}). Continue to next round (${nextBudget} steps)?`,
+                `Step limit reached (round ${currentRound + 1}). Continue with another ${MAX_AGENT_STEPS} steps?`,
                 [
                   [
                     {
-                      text: `>> Continue (${nextBudget} steps)`,
+                      text: `>> Continue (${MAX_AGENT_STEPS} steps)`,
                       callback_data: "resume:run",
                     },
                   ],
@@ -1001,15 +1000,14 @@ export async function runAgentAndStream(
         ) {
           const currentRound =
             store.useChatStore.getState().agentMeta.runRound ?? 0;
-          const { stepBudgetForRound } = await import("../ai/config");
-          const nextBudget = stepBudgetForRound(currentRound + 1);
+          const { MAX_AGENT_STEPS } = await import("../ai/config");
           await sendKeyboard(
             chatId,
-            `Step limit reached (round ${currentRound + 1}). Continue to next round (${nextBudget} steps)?`,
+            `Step limit reached (round ${currentRound + 1}). Continue with another ${MAX_AGENT_STEPS} steps?`,
             [
               [
                 {
-                  text: `>> Continue (${nextBudget} steps)`,
+                  text: `>> Continue (${MAX_AGENT_STEPS} steps)`,
                   callback_data: "resume:run",
                 },
               ],
@@ -1104,7 +1102,7 @@ export async function dispatchAndStream(
 }
 
 /**
- * Resume a paused/capped run, bumping to the next step budget tier (25 -> 50 -> 100).
+ * Resume a paused/capped run; the next round gets the same explicit step budget.
  */
 export function startTelegramResume(chatId: number, signal: AbortSignal): void {
   // No pauseMirror here: runAgentAndStream pauses the mirror for the whole run

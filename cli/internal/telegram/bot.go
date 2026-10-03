@@ -892,15 +892,18 @@ func (b *Bot) runWithCard(ctx context.Context, chatID int64, run func(context.Co
 	// agent's reply) instead of the backend steps behind it. When the answer is
 	// too long for one message the card carries its first part and the rest
 	// follow as new messages, because an edit past the limit is truncated.
-	first, rest := nextChunk(answer, telegramChunkLimit)
-	if err := b.client.EditMarkdown(ctx, chatID, statusMessage.MessageID, first, nil); err != nil {
+	// Chunks are measured on the converted body, so the part that lands in
+	// the card and every follow-up fit Telegram's cap before they are sent:
+	// a long answer arrives whole, not clamped with a "[truncated]" tail.
+	parts := markdownChunks(answer, messageLimit)
+	if err := b.client.EditMarkdown(ctx, chatID, statusMessage.MessageID, parts[0], nil); err != nil {
 		// The card could not be rewritten, so deliver the whole answer as its
 		// own message rather than lose it.
 		b.replyMarkdown(ctx, chatID, answer)
 		return
 	}
-	if rest != "" {
-		b.replyMarkdown(ctx, chatID, rest)
+	for _, part := range parts[1:] {
+		b.replyMarkdown(ctx, chatID, part)
 	}
 }
 
@@ -908,12 +911,13 @@ func (b *Bot) runWithCard(ctx context.Context, chatID int64, run func(context.Co
 // byte cap so a converted Markdown body never trips it.
 const telegramChunkLimit = 3800
 
-// replyMarkdown sends Markdown text, split into Telegram-sized messages so a
-// long answer arrives whole instead of being truncated at the cap.
+// replyMarkdown sends Markdown text, split into messages whose CONVERTED
+// bodies fit Telegram's cap, so a long answer arrives whole instead of being
+// truncated at the limit. Splitting on the conversion is what keeps an
+// entity-dense answer (code fences full of angle brackets) off the lossy
+// clampText path.
 func (b *Bot) replyMarkdown(ctx context.Context, chatID int64, text string) {
-	for len(text) > 0 {
-		part, rest := nextChunk(text, telegramChunkLimit)
-		text = rest
+	for _, part := range markdownChunks(text, messageLimit) {
 		if _, err := b.client.SendMarkdown(ctx, chatID, part, nil); err != nil {
 			b.logf("send failed: %v", err)
 		}

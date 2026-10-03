@@ -148,7 +148,6 @@ export function isActivelyTyping(
   );
 }
 
-
 /**
  * Tool states that mean the call has returned. `output-available` is the normal
  * success state, and the whole app treats it as finished - `AgentRunBridge`
@@ -288,9 +287,4 @@ export function messageText(m: {
     .map((p) => p.text)
     .join("\n");
   return text.trim();
-}
-
-/** Telegram caps a message at 4096 chars; chunking is preferred over lossy clamping. */
-export function clampTelegramText(text: string): string {
-  return text.length > 4000 ? `${text.slice(0, 4000)}...` : text;
 }

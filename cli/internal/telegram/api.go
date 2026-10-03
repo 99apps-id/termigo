@@ -473,6 +473,55 @@ func clipBytes(text string, limit int) string {
 	return text[:cut]
 }
 
+// markdownChunks splits raw Markdown into parts whose converted Telegram HTML
+// bodies fit within limit bytes.
+//
+// The Bot API refuses a body past its cap and clampText is a lossy last
+// resort, so the split is measured on the CONVERSION, not the raw text: an
+// entity-dense answer (a code block full of angle brackets and ampersands)
+// grows when converted and must be cut shorter than its raw size suggests.
+// Chunks rejoin into the original with no separator: a newline cut keeps the
+// newline with the part that follows it.
+func markdownChunks(markdown string, limit int) []string {
+	if len(markdown) == 0 {
+		return nil
+	}
+	var chunks []string
+	rest := markdown
+	for len(rest) > 0 {
+		converted := len(markdownToTelegramHTML(rest))
+		if converted <= limit {
+			chunks = append(chunks, rest)
+			break
+		}
+		target := len(rest) * limit / converted
+		if target > telegramChunkLimit {
+			target = telegramChunkLimit
+		}
+		// A stretch denser than the average needs a smaller cut than the
+		// whole-text ratio suggests: re-measure the part and shrink until it
+		// fits. The floor bounds the loop and always fits - 256 bytes cannot
+		// expand past the cap even at the worst escaping ratio.
+		for {
+			part, remainder := nextChunk(rest, target)
+			partHTML := len(markdownToTelegramHTML(part))
+			if partHTML <= limit || target <= 256 {
+				chunks = append(chunks, part)
+				rest = remainder
+				break
+			}
+			target = len(part) * limit / (partHTML + 1)
+			if target > telegramChunkLimit {
+				target = telegramChunkLimit
+			}
+			if target < 256 {
+				target = 256
+			}
+		}
+	}
+	return chunks
+}
+
 // IsPrivate reports whether a chat id is a one-to-one chat.
 func (chat Chat) IsPrivate() bool { return chat.Type == "private" }
 

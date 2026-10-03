@@ -19,7 +19,7 @@ describe("runInterruptedPatch (restart recovery)", () => {
     });
   });
 
-  it("restores a guard stop (step-cap) with its runRound ladder", () => {
+  it("restores a guard stop (step-cap) with its runRound", () => {
     expect(
       runInterruptedPatch(meta({ runRound: 2, stopReason: "step-cap" }), null),
     ).toEqual({

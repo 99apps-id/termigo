@@ -12,7 +12,7 @@ import {
   type ModelId,
   type ProviderId,
   providerNeedsKey,
-  stepBudgetForRound,
+  MAX_AGENT_STEPS,
 } from "../config";
 import { buildLanguageModel, type AgentStopReason } from "../lib/agent";
 import { splitForEdit } from "../lib/messageEdit";
@@ -135,8 +135,8 @@ const verifyNudgeCount = new Map<string, number>();
  * Continue a budget-paused run on the user's behalf.
  *
  * Only for pauses that are not a sign of trouble: the round simply ran out of
- * steps. The next round gets the next rung of the 25 -> 50 -> 100 ladder, so a
- * long task deepens instead of stalling on a click per round.
+ * steps. The next round gets the same explicit budget again, so a long task
+ * carries on instead of stalling on a click per round.
  *
  * Refuses when the user stopped, switched session, or queued a task that owns
  * the next turn; when the preference is off; or when the task has used its
@@ -474,8 +474,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       };
     },
     getPlanMode: () => usePlanStore.getState().active,
-    getStepBudget: () =>
-      stepBudgetForRound(useChatStore.getState().agentMeta.runRound),
+    getStepBudget: () => MAX_AGENT_STEPS,
     getCostBudgetUsd: () => usePreferencesStore.getState().costBudgetUsd,
     getCostDailyBudgetUsd: () =>
       usePreferencesStore.getState().costDailyBudgetUsd,
@@ -622,7 +621,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       }
       // Autonomous continuous execution: a run that paused strictly because it
       // reached this round's step budget is not trouble - the transcript is
-      // intact and the next round gets the next rung of the ladder. Continue it
+      // intact and the next round gets the same cap again. Continue it
       // without waiting for a click (bounded + preference-gated; see
       // requestAutoContinue). Runs LAST so the cost of this round is recorded
       // and Stop hooks fire before the next round begins.
@@ -676,7 +675,8 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       // re-requests the same approval every cycle therefore repeats forever.
       // Observed in the field as `run: start (14 messages)` every few seconds
       // with `steps 1/25` and `runRound` still 0: an SDK auto-send does not go
-      // through the step-budget ladder, so the run never accumulated anything.
+      // through the round-budget bookkeeping, so the run never accumulated
+      // anything.
       // The gate allows resumes that grow the transcript and stops the ones
       // that do not.
       //
@@ -1278,8 +1278,9 @@ export async function resumeRun(): Promise<boolean> {
     pendingApprovals: undefined,
   });
   // Continuing is the signal that the task is heavier than one round, so the
-  // next round gets the next budget tier. Raised before the send so the run
-  // reads the new value.
+  // round counter advances for the UI and diagnostics. The per-round budget is
+  // one explicit number and does not change between rounds. Advanced before
+  // the send so the run reads the new value.
   const round = useChatStore.getState().agentMeta.runRound;
   useChatStore.getState().patchAgentMeta({ runRound: round + 1 });
   return sendMessage(RESUME_PROMPT);
@@ -1371,7 +1372,7 @@ export async function resendEditedMessage(
   useChatStore.getState().persistMessages(sessionId, prefix);
   flushPersist(sessionId);
   useChatStore.getState().cancelEdit();
-  // A resend starts a new task, like a typed message: reset the ladder and
+  // A resend starts a new task, like a typed message: reset the round counter
   // settle as idle so the send below goes out instead of queueing.
   useChatStore.getState().patchAgentMeta({
     status: "idle",

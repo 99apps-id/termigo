@@ -82,7 +82,7 @@ Dependency-light: stdlib, yaml.v3, `golang.org/x/term`, Bubble Tea stack. Creden
 BYOK with `PROVIDERS` and model registry in `config.ts`. Full details in [AI subsystem](docs/architecture/ai-subsystem.md). Invariants:
 
 - **Keys**: stored in OS keychain via `secrets_*` (Linux: `0600` `secrets.json`). Never in settings or `localStorage`.
-- **Agent** (`lib/agent.ts`): AI SDK v6 semantics. Budgets escalate per Continue: `[25, 50, 100]`.
+- **Agent** (`lib/agent.ts`): AI SDK v6 semantics. One explicit step budget per round (`MAX_AGENT_STEPS` = 25); hitting it pauses the run, and Continue resumes with the same cap - never a hidden escalation ladder.
 - **Subagents** (`lib/subagentPool.ts`, `agents/runSubagent.ts`): managed by `SubagentConcurrencyPool` (default 4). Parents yield slots to prevent deadlock.
 - **Tools & Environment** (`tools/tools.ts`, `lib/repairToolCall.ts`): no sandbox or artificial path boundary limits; all tools available.
 - **Shell execution & worktree** (`src-tauri/src/modules/shell/mod.rs`): unrestricted execution, full git worktree and subagent concurrency support.

@@ -11,7 +11,7 @@
 // Observed in the field: repeated `run: start (14 messages)` with
 // `steps 1/25 | stop tool-calls` every few seconds. The message count never
 // moved and `runRound` stayed 0, because an SDK auto-send does not go through
-// the step-budget ladder - so the run was not making progress, it was repeating.
+// the round-budget bookkeeping - so the run was not making progress, it was repeating.
 //
 // The signal that separates the two is PROGRESS: a legitimate resume adds
 // productive work (successful mutations, new reads, user text) to the transcript.
@@ -108,7 +108,10 @@ function stableStringify(v: unknown): string {
 }
 
 /** Canonical fingerprint for a tool call. */
-export function canonicalToolFingerprint(toolName: string, input: unknown): string {
+export function canonicalToolFingerprint(
+  toolName: string,
+  input: unknown,
+): string {
   return `${toolName}::${stableStringify(input)}`;
 }
 
@@ -391,8 +394,7 @@ export function autoSendGate(
   const maxRepeats = options.maxToolRepeats ?? MAX_AUTO_SEND_TOOL_REPEATS;
   const maxConsecutiveErrors =
     options.maxConsecutiveErrors ?? MAX_CONSECUTIVE_AUTO_SEND_ERRORS;
-  const maxTotalAutoSends =
-    options.maxTotalAutoSends ?? MAX_TOTAL_AUTO_SENDS;
+  const maxTotalAutoSends = options.maxTotalAutoSends ?? MAX_TOTAL_AUTO_SENDS;
   const recentToolCalls = options.recentToolCalls ?? [];
   const currentTotal = previous.totalAutoSends ?? 0;
 
@@ -564,4 +566,3 @@ export function autoSendAskIsDuplicate(input: {
 }): boolean {
   return input.pending && input.progress === input.decidedAt;
 }
-

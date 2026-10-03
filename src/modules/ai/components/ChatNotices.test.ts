@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import { stopCopy } from "./ChatNotices";
 
 describe("stopCopy", () => {
-  it("returns step-cap copy with next round budget", () => {
+  it("caps every reply at the same explicit budget, not a ladder rung", () => {
     const copy = stopCopy("step-cap", 1);
     expect(copy.text).toContain("Paused after");
     expect(copy.text).toContain("steps");
-    expect(copy.action).toContain("Continue");
+    // Round 1 advertises the same number round 0 did: Continue repeats the
+    // cap, it never deepens the budget behind the click.
+    expect(copy.action).toBe("Continue (+25 steps)");
   });
 
   it("returns tool-repetition copy", () => {
@@ -22,7 +24,6 @@ describe("stopCopy", () => {
     expect(copy.action).toBe("Continue anyway");
     expect(copy.hint).toBeDefined();
   });
-
 
   it("returns user stopped copy for stopped, steered, and aborted", () => {
     expect(stopCopy("stopped", 1).text).toBe("You stopped this run.");

@@ -1179,8 +1179,9 @@ export type RunAgentOptions = {
       claimedVerification: boolean;
     };
   }) => void;
-  /** Loop budget for this round. Defaults to the first tier; the caller raises
-   *  it on each Continue so a long task deepens instead of stalling. */
+  /** Loop budget for this round: one explicit cap per reply, the same number
+   *  every round. Defaults to MAX_AGENT_STEPS; only the harness profile
+   *  adjusts it, which is a chosen setting rather than a hidden escalation. */
   stepBudget?: number;
   /** Maximum cost in USD allowed for this run. 0 = unlimited. */
   costBudgetUsd?: number;

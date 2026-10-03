@@ -154,14 +154,15 @@ export type AgentMeta = {
    *  Drives whether the transcript offers to continue, and what it says. */
   stopReason: AgentStopReason | null;
   /** Rounds spent on the current task (0-based). Reset by a new user message,
-   *  raised by Continue, and read to pick this round's step budget. */
+   *  raised by Continue, and shown as the round number; the per-round step
+   *  budget is one explicit constant that does not depend on it. */
   runRound: number;
   /**
    * The agentic-loop round, i.e. how many fresh model calls this run has made
    * (each `sendMessages`). Increments every time the agent starts a new round
    * and is reset when a new user turn begins. Lets the UI show "Round N · step
    * X" so a user can tell a long run is still progressing, rather than looking
-   * stuck. Distinct from `runRound` (the resume budget tier).
+   * stuck. Distinct from `runRound` (the resume round counter).
    */
   round: number;
   /** The user pressed stop, so the transcript can offer to resume. */
@@ -696,7 +697,8 @@ export const useChatStore = create<StoreState>((set, get) => ({
   forkSession: (messageId) => {
     const srcId = get().activeSessionId;
     if (!srcId) return null;
-    const messages = chats.get(srcId)?.messages ?? seedMessages.get(srcId) ?? [];
+    const messages =
+      chats.get(srcId)?.messages ?? seedMessages.get(srcId) ?? [];
     const idx = messages.findIndex((m) => m.id === messageId);
     if (idx < 0) return null;
     notifySessionLeft(srcId);
@@ -751,7 +753,11 @@ export const useChatStore = create<StoreState>((set, get) => ({
     // Lazily seed the chat with persisted messages the first time we open
     // this session. Subsequent switches reuse the cached Chat instance.
     const flip = () => {
-      set({ activeSessionId: id, agentMeta: IDLE_META, pendingEditTarget: null });
+      set({
+        activeSessionId: id,
+        agentMeta: IDLE_META,
+        pendingEditTarget: null,
+      });
       void saveActiveId(id);
       // Restore an interrupted run for the switched-to session so it can offer
       // "Continue"/"Resume". Guard on still-active so a fast double switch
@@ -786,7 +792,8 @@ export const useChatStore = create<StoreState>((set, get) => ({
       pendingPersist.delete(id);
     }
     void deleteSessionData(id);
-    if (get().pendingEditTarget?.sessionId === id) set({ pendingEditTarget: null });
+    if (get().pendingEditTarget?.sessionId === id)
+      set({ pendingEditTarget: null });
     void useTodosStore.getState().clearSession(id);
     void useTurnCheckpointStore.getState().clearSession(id);
     void useSubagentRunStore.getState().clearSession(id);

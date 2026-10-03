@@ -160,11 +160,12 @@ automation: agent runs, MCP, skills, and project scaffolding.
   interrupted tool call is closed out as interrupted rather than erased, so the
   model can see its work was cut short instead of being shown a past in which it
   never made the call - and repeating it.
-- **The run says why it stopped, and goes deeper when you ask.** One request
-  gets 25 steps, the same default as VS Code's agent mode, and each Continue
-  moves up a ladder to 50 then 100. A light task never pays for a heavy one,
-  and a refactor is not capped by a number picked before anyone knew what the
-  task was. Two guards sit alongside the budget: the same tool called three
+- **The run says why it stopped, and goes on when you ask.** One request
+  gets 25 steps - the same default as VS Code's agent mode - and it is one
+  explicit number every round: Continue resumes the task on the same cap,
+  never a hidden ladder that quietly lets a "25-step" pause run to a hundred.
+  A task that needs more depth earns it round by round, one informed click at
+  a time. Two guards sit alongside the budget: the same tool called three
   times with identical input, and two turns in a row that call no tool at all.
   The transcript names which one fired, because "it repeated itself" and "it ran
   out of budget" call for different responses - one is worth a click, the other
@@ -195,7 +196,7 @@ automation: agent runs, MCP, skills, and project scaffolding.
   auto-retry rather than a dead error card.
 - **A run cut off by a restart is recoverable.** The transcript is persisted,
   and when the app reopens the interrupted session is brought back with a
-  **Resume** row - the budget ladder is kept, so continuing does not restart
+  **Resume** row - the round counter is kept, so continuing does not restart
   the task from scratch. (A deliberate stop or a guard that tripped offers the
   same continue path.)
 - **Grounded RAG and persistent code index.** Codebase exploration combines

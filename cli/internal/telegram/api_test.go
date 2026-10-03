@@ -37,6 +37,73 @@ func stallServer() *httptest.Server {
 	}))
 }
 
+// TestMarkdownChunksFitsInOnePart proves a body whose converted HTML stays
+// under the cap is never split: chunking exists for the overflow, not as a
+// tax on every message.
+func TestMarkdownChunksFitsInOnePart(t *testing.T) {
+	text := "hello **world**\nsecond line\n"
+	chunks := markdownChunks(text, messageLimit)
+	if len(chunks) != 1 || chunks[0] != text {
+		t.Fatalf("a fitting body must pass through whole, got %d chunks", len(chunks))
+	}
+	if markdownChunks("", messageLimit) != nil {
+		t.Fatal("empty input must chunk to nil")
+	}
+}
+
+// TestMarkdownChunksEntityHeavyBody proves the split is measured on the
+// CONVERTED body, not the raw Markdown. Nine hundred "&<>" lines are 3.6 KB
+// raw - inside the 3800 target a raw splitter would have shipped in one
+// message - but every entity expands when escaped, and the converted body is
+// three times that. Telegram refuses the oversized body and clampText drops
+// the tail, which is the field truncation this splitter exists to prevent.
+func TestMarkdownChunksEntityHeavyBody(t *testing.T) {
+	text := strings.Repeat("&<>\n", 900)
+	if len(text) > telegramChunkLimit {
+		t.Fatalf("test premise: raw size %d should be inside the 3800-byte raw target", len(text))
+	}
+	if converted := len(markdownToTelegramHTML(text)); converted <= messageLimit {
+		t.Fatalf("test premise: converted size %d should exceed the cap", converted)
+	}
+	chunks := markdownChunks(text, messageLimit)
+	if len(chunks) < 2 {
+		t.Fatalf("an expanding body must split, got %d chunks", len(chunks))
+	}
+	total := 0
+	for i, part := range chunks {
+		if n := len(markdownToTelegramHTML(part)); n > messageLimit {
+			t.Fatalf("chunk %d converts to %d bytes, past the %d cap", i, n, messageLimit)
+		}
+		total += len(part)
+	}
+	if strings.Join(chunks, "") != text {
+		t.Fatalf("chunks must rejoin into the original exactly, lost %d of %d bytes",
+			len(text)-total, len(text))
+	}
+}
+
+// TestMarkdownChunksLargePlainBody proves a big but cheap body still arrives
+// whole: every chunk fits, and the parts rejoin without a gap.
+func TestMarkdownChunksLargePlainBody(t *testing.T) {
+	var b strings.Builder
+	for i := 0; b.Len() < 30_000; i++ {
+		fmt.Fprintf(&b, "line %d: plain prose\n", i)
+	}
+	text := b.String()
+	chunks := markdownChunks(text, messageLimit)
+	if len(chunks) < 2 {
+		t.Fatalf("30 KB must split into several messages, got %d", len(chunks))
+	}
+	for i, part := range chunks {
+		if n := len(markdownToTelegramHTML(part)); n > messageLimit {
+			t.Fatalf("chunk %d converts to %d bytes, past the %d cap", i, n, messageLimit)
+		}
+	}
+	if strings.Join(chunks, "") != text {
+		t.Fatal("chunks must rejoin into the original exactly")
+	}
+}
+
 // TestDownloadFileHasItsOwnDeadline proves a stalled file server fails within
 // the transfer timeout instead of hanging the update handler: the shared
 // client keeps Timeout 0 for the long-poll, so the per-request context is the

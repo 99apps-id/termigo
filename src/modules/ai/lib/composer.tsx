@@ -422,7 +422,10 @@ export function AiComposerProvider({ children }: ProviderProps) {
 
     const totalText = parts
       .filter((p) => p.type === "text")
-      .reduce((sum, p) => sum + (p as { type: "text"; text: string }).text.length, 0);
+      .reduce(
+        (sum, p) => sum + (p as { type: "text"; text: string }).text.length,
+        0,
+      );
     if (totalText > MAX_COMPOSED_CHARS) {
       toast.error(
         `Message is too large (${totalText.toLocaleString()} chars). Max is ${MAX_COMPOSED_CHARS.toLocaleString()} chars. Split it into smaller parts.`,
@@ -474,8 +477,8 @@ export function AiComposerProvider({ children }: ProviderProps) {
       })();
     } else {
       if (editTarget) store.cancelEdit();
-      // A typed message starts a new task, so the escalation ladder resets to
-      // its first rung. Continue is the only thing that climbs it.
+      // A typed message starts a new task, so the round counter resets.
+      // Continue is the only thing that advances it.
       store.patchAgentMeta({
         stopReason: null,
         runRound: 0,

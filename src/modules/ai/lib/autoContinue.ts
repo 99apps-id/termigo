@@ -1,11 +1,11 @@
 // Auto-continue policy for budget pauses.
 //
-// A run that exhausts its step budget (the 25 -> 50 -> 100 ladder) is paused,
-// not failed: the transcript is intact and the next round simply gets the next
-// rung. Historically every pause needed a manual "Continue" click, which for
+// A run that exhausts its step budget (one explicit cap per reply) is paused,
+// not failed: the transcript is intact and the next round gets that same cap.
+// Historically every pause needed a manual "Continue" click, which for
 // approval-gated work (one model call per tool round) meant clicking over and
 // over on a task that was progressing fine. When the preference is on, the run
-// resumes itself. The ladder is bounded per task so a model that keeps hitting
+// resumes itself. The chain is bounded per task so a model that keeps hitting
 // the cap without ever summarising eventually defers to the manual button
 // instead of burning tokens unattended.
 //

@@ -48,7 +48,6 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
     resumeMirror,
     getMirrorPauseCount,
     splitTelegramText,
-    clampTelegramText,
     runBusy,
   } = _testOnly;
 
@@ -127,12 +126,6 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
       expect(chunks.length).toBe(2);
       expect(chunks[0]).toBe(line1);
       expect(chunks[1]).toBe(line2);
-    });
-
-    it("clamps without throwing", () => {
-      const longText = "x".repeat(5000);
-      expect(clampTelegramText(longText).length).toBe(4003);
-      expect(clampTelegramText(longText).endsWith("...")).toBe(true);
     });
   });
 
@@ -286,7 +279,9 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
       const chatStore = await import("../ai/store/chatStore");
       const sessionId = chatStore.useChatStore.getState().newSession();
       chatStore.useChatStore.getState().switchSession(sessionId);
-      chatStore.useChatStore.getState().patchAgentMeta({ status: "idle", stopReason: null });
+      chatStore.useChatStore
+        .getState()
+        .patchAgentMeta({ status: "idle", stopReason: null });
 
       const activeChatId = 77777;
       _testOnly.activeProgressMessageIds.set(activeChatId, 4321);
@@ -301,7 +296,10 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
         if (urlStr.includes("editMessageText")) {
           try {
             const body = JSON.parse(String(init?.body));
-            editedPayloads.push({ message_id: body.message_id, text: body.text });
+            editedPayloads.push({
+              message_id: body.message_id,
+              text: body.text,
+            });
           } catch {}
           return {
             ok: true,
@@ -332,7 +330,7 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
       chatStore.chats.set(sessionId, {
         messages: mockMessages,
         status: "idle",
-      // biome-ignore lint/suspicious/noExplicitAny: partial mock of the fetch init object
+        // biome-ignore lint/suspicious/noExplicitAny: partial mock of the fetch init object
       } as any);
 
       // Dispatch a task with successful accepted action
@@ -348,7 +346,12 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
       mockMessages.push({
         id: "msg-assistant-final-1",
         role: "assistant",
-        parts: [{ type: "text", text: "Semua layanan berjalan dengan lancar tanpa error." }],
+        parts: [
+          {
+            type: "text",
+            text: "Semua layanan berjalan dengan lancar tanpa error.",
+          },
+        ],
       });
       chatStore.useChatStore.getState().patchAgentMeta({ status: "idle" });
 
@@ -359,11 +362,14 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
       // Verify that the active progress message was edited directly with the AI answer
       expect(
         editedPayloads.some(
-          (p) => p.message_id === 5555 && p.text.includes("Semua layanan berjalan"),
+          (p) =>
+            p.message_id === 5555 && p.text.includes("Semua layanan berjalan"),
         ),
       ).toBe(true);
       // Verify that the AI answer was NOT repeated in a separate sendMessage call
-      expect(sentTexts.some((t) => t.includes("Semua layanan berjalan"))).toBe(false);
+      expect(sentTexts.some((t) => t.includes("Semua layanan berjalan"))).toBe(
+        false,
+      );
 
       globalThis.fetch = origFetch;
     });
@@ -497,7 +503,6 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
   }
 
   describe("owner user gating for sensitive callbacks and commands", () => {
-
     beforeEach(() => {
       useTelegramStore.getState().setChatId("111");
       useTelegramStore.getState().setOwnerUserId("222");
@@ -591,13 +596,16 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
       const aq = await import("../ai/store/approvalQueueStore");
       let settledDecision: string | null = null;
       // Start a request in approvalQueueStore
-      const reqPromise = aq.useApprovalQueue.getState().request({
-        toolName: "run_command",
-        summary: "git status",
-        requester: "workflow",
-      }).then((d) => {
-        settledDecision = d;
-      });
+      const reqPromise = aq.useApprovalQueue
+        .getState()
+        .request({
+          toolName: "run_command",
+          summary: "git status",
+          requester: "workflow",
+        })
+        .then((d) => {
+          settledDecision = d;
+        });
 
       const pending = aq.useApprovalQueue.getState().pending[0];
       expect(pending).toBeDefined();
@@ -1018,7 +1026,9 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
             (b) =>
               b.text?.includes("Action Approval Required") &&
               b.text?.includes("bash_run") &&
-              JSON.stringify(b.reply_markup).includes("ap:approve:appr-pending-1"),
+              JSON.stringify(b.reply_markup).includes(
+                "ap:approve:appr-pending-1",
+              ),
           ),
         ).toBe(true);
         expect(
@@ -1038,7 +1048,11 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
       state.useChatStore.getState().patchAgentMeta({
         status: "awaiting-approval",
         pendingApprovals: [
-          { id: "appr-text-1", toolName: "write_file", summary: "write main.go" },
+          {
+            id: "appr-text-1",
+            toolName: "write_file",
+            summary: "write main.go",
+          },
         ],
       });
       const sentBodies: Array<{ text?: string }> = [];
@@ -1063,9 +1077,7 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
           "Task received",
         );
         expect(
-          sentBodies.some((b) =>
-            b.text?.includes("Approved 1 pending action"),
-          ),
+          sentBodies.some((b) => b.text?.includes("Approved 1 pending action")),
         ).toBe(true);
       } finally {
         state.useChatStore
@@ -1175,4 +1187,3 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
     });
   });
 });
-

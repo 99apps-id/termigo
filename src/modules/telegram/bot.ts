@@ -31,7 +31,6 @@ import {
 import {
   getPendingApprovals,
   runBusy,
-  clampTelegramText,
   isActivelyTyping,
   hasActiveToolCalls,
 } from "./telegramHelpers";
@@ -100,7 +99,6 @@ export {
   countAssistantMessages,
   lastAssistantText,
   messageText,
-  clampTelegramText,
 } from "./telegramHelpers";
 
 // --- Dedup (internal, exported for tests) ---
@@ -140,7 +138,6 @@ export const _testOnly = {
   resumeMirror,
   getMirrorPauseCount,
   splitTelegramText,
-  clampTelegramText,
   runBusy,
   isActivelyTyping,
   hasActiveToolCalls,
