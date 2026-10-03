@@ -119,6 +119,32 @@ export function repairJsonText(text: string): string {
 }
 
 /**
+ * Fold a near-name onto the spelling the registry actually uses.
+ *
+ * The table below was keyed by exact lower-snake names, so a model emitting
+ * `Grep` (case), `ReadFile` (camel) or `read-file` (hyphen) fell past every
+ * alias into the unknown-tool error path even though the tool is one keystroke
+ * away. Normalizing case, camel boundaries, hyphens, dots and spaces first
+ * turns that whole class into a self-correcting one-step retry.
+ */
+export function canonicalizeToolName(name: string): string {
+  return name
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .replace(/[\s.-]+/g, "_")
+    .toLowerCase();
+}
+
+/** The canonical tool an alias-style name means, or null if it is not one. */
+export function lookupToolAlias(name: string): string | null {
+  return (
+    KNOWN_TOOL_ALIASES[name.toLowerCase()]?.canonical ??
+    KNOWN_TOOL_ALIASES[canonicalizeToolName(name)]?.canonical ??
+    null
+  );
+}
+
+/**
  * Canonical tool aliasing: map common hallucinated or cross-ecosystem tool names
  * (Claude Code, Gemini/Antigravity, OpenAI Codex, SWE-agent) onto Termigo's real tools,
  * and adapt parameter keys to match the canonical schemas.
@@ -605,11 +631,7 @@ function applySemanticRepairs(
       p.input = p.keystrokes;
       modified = true;
     }
-    if (
-      p.action === "exec" ||
-      p.action === "execute" ||
-      p.action === "shell"
-    ) {
+    if (p.action === "exec" || p.action === "execute" || p.action === "shell") {
       p.action = "run";
       modified = true;
     }
@@ -640,7 +662,11 @@ function applySemanticRepairs(
       } catch {
         // ignore
       }
-    } else if (p.todos && typeof p.todos === "object" && !Array.isArray(p.todos)) {
+    } else if (
+      p.todos &&
+      typeof p.todos === "object" &&
+      !Array.isArray(p.todos)
+    ) {
       const obj = p.todos as Record<string, unknown>;
       if (Array.isArray(obj.todos)) {
         p.todos = obj.todos;
@@ -763,9 +789,30 @@ export async function repairToolCall({
   // the nearest real tool instead of killing the whole run.
   const toolKeys = tools ? Object.keys(tools) : [];
   if (toolKeys.length > 0 && !toolKeys.includes(toolCall.toolName)) {
-    // 1. Check known cross-ecosystem tool aliases
     const lowerName = toolCall.toolName.toLowerCase();
-    const alias = KNOWN_TOOL_ALIASES[lowerName];
+    const canonicalName = canonicalizeToolName(toolCall.toolName);
+
+    // 0. The same tool, spelled differently: "Grep", "ReadFile", "read-file".
+    // One keystroke away should run, not reach the alias table or the
+    // unknown-tool fallback at all.
+    const direct = [lowerName, canonicalName].find((n) => toolKeys.includes(n));
+    if (direct) {
+      return {
+        toolCallId: toolCall.toolCallId,
+        toolName: direct,
+        input: await repairArgsText(
+          String(toolCall.input ?? toolCall.args ?? ""),
+        ),
+      };
+    }
+
+    // 1. Check known cross-ecosystem tool aliases (exact, lowercase, and
+    // canonical spellings all resolve).
+    const alias =
+      KNOWN_TOOL_ALIASES[lowerName] ??
+      (canonicalName !== lowerName
+        ? KNOWN_TOOL_ALIASES[canonicalName]
+        : undefined);
     if (alias && toolKeys.includes(alias.canonical)) {
       const raw = stripCodeFence(String(toolCall.input ?? toolCall.args ?? ""));
       let parsed: Record<string, unknown> = {};
@@ -806,8 +853,12 @@ export async function repairToolCall({
       };
     }
 
-    // 2. Check near-miss edit distance typos
-    const match = bestToolMatch(toolCall.toolName, toolKeys);
+    // 2. Check near-miss edit distance typos, on the raw and canonical spellings
+    const match =
+      bestToolMatch(toolCall.toolName, toolKeys) ??
+      (canonicalName !== toolCall.toolName
+        ? bestToolMatch(canonicalName, toolKeys)
+        : null);
     if (match) {
       return {
         toolCallId: toolCall.toolCallId,
@@ -840,7 +891,10 @@ export async function repairToolCall({
   // Already valid JSON - check if semantic repair is needed
   try {
     const parsed = JSON.parse(raw);
-    const { modified, result } = applySemanticRepairs(toolCall.toolName, parsed);
+    const { modified, result } = applySemanticRepairs(
+      toolCall.toolName,
+      parsed,
+    );
     if (modified) {
       return { ...toolCall, input: JSON.stringify(result) };
     }

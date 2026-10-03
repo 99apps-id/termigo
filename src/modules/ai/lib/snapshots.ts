@@ -107,6 +107,29 @@ export function checkpointsFromLog(
     }));
 }
 
+/**
+ * The base a review must diff against to see the real change set.
+ *
+ * The auto-checkpoint commits the whole working tree as `checkpoint: ...`
+ * before a run starts, so after that commit a plain `git diff` shows only
+ * edits made since - the review silently loses everything the earlier run
+ * committed. When HEAD is one or more checkpoints deep, the honest base is
+ * the newest real commit: `git diff <that>` covers the swallowed work AND
+ * the post-checkpoint edits. With a normal commit on top, the plain diff is
+ * already complete and no override is needed (null).
+ */
+export function reviewBaseFromLog(
+  entries: readonly GitLogEntry[],
+): string | null {
+  if (entries.length === 0 || !isCheckpointSubject(entries[0].subject)) {
+    return null;
+  }
+  const firstReal = entries.find(
+    (entry) => !isCheckpointSubject(entry.subject),
+  );
+  return firstReal?.sha ?? null;
+}
+
 export async function listCheckpoints(
   repoRoot: string,
   limit = 200,

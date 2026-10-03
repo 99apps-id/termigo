@@ -48,7 +48,15 @@ export function normalizeEditInput(input: unknown): unknown {
 }
 
 type EditResult =
-  | { ok: true; replacements: number; bytesWritten: number; path: string }
+  | {
+      ok: true;
+      replacements: number;
+      bytesWritten: number;
+      path: string;
+      /** The exact match drifted and a unique whitespace-insensitive one was
+       *  used (typical after an auto-format reflowed the file). */
+      looseMatch?: true;
+    }
   | { error: string; path: string };
 
 function djb2(s: string): number {
@@ -82,6 +90,59 @@ function normalizeWhitespace(s: string): string {
     .replace(/\r\n/g, "\n")
     .replace(/[ \t]+/g, " ")
     .trim();
+}
+
+/**
+ * Whitespace-insensitive spans of `needle` inside `content`, mapped back to
+ * original offsets.
+ *
+ * The verification formatter reflows a file after each accepted edit - it
+ * joins a multi-line call onto one line, re-indents, breaks arguments - so an
+ * `old_string` copied from an earlier read can drift out of sync with the
+ * file even when the agent quoted it faithfully. Every miss pays a re-read
+ * round trip. As a fallback the matcher strips ALL whitespace (newlines too)
+ * from both sides and maps a hit back to its real span. The bar stays the
+ * exact matcher's: a lone unique hit may apply, several are refused as
+ * ambiguous, none falls through to the grounding diagnostic. Exact matching
+ * always runs first, so this path can never win against a real exact hit.
+ */
+export function findLooseSpans(
+  content: string,
+  needle: string,
+  limit = 60,
+): { start: number; end: number }[] {
+  const map: number[] = [];
+  const chars: string[] = [];
+  for (let i = 0; i < content.length; i++) {
+    if (!/\s/.test(content[i])) {
+      chars.push(content[i]);
+      map.push(i);
+    }
+  }
+  const strippedContent = chars.join("");
+  const strippedNeedle: string[] = [];
+  for (const ch of needle) {
+    if (!/\s/.test(ch)) strippedNeedle.push(ch);
+  }
+  const target = strippedNeedle.join("");
+  if (target.length === 0) return [];
+  const spans: { start: number; end: number }[] = [];
+  let from = 0;
+  while (spans.length <= limit) {
+    const at = strippedContent.indexOf(target, from);
+    if (at === -1) break;
+    spans.push({
+      start: map[at],
+      end: map[at + target.length - 1] + 1,
+    });
+    from = at + target.length;
+  }
+  return spans;
+}
+
+/** Re-line-break an inserted string to match the file's dominant EOL. */
+function toFileEol(text: string, content: string): string {
+  return content.includes("\r\n") ? text.replace(/\r?\n/g, "\r\n") : text;
 }
 
 /**
@@ -164,6 +225,7 @@ async function applyEdits(
   const original = r.content;
   let content = original;
   let totalReplacements = 0;
+  let usedLoose = false;
 
   for (const e of edits) {
     if (e.old_string === e.new_string) {
@@ -208,6 +270,30 @@ async function applyEdits(
         i = found + targetOld.length;
       }
       if (n === 0) {
+        const spans = findLooseSpans(content, targetOld);
+        if (spans.length > 60) {
+          // The scanner stops at limit+1, so more hits than that means it
+          // cannot promise to have found them all. Replacing a subset and
+          // reporting a partial count as success is the silent corruption
+          // this fallback exists to avoid; refuse and let the caller scope it.
+          return {
+            error:
+              "replace_all: the whitespace-loose fallback matched more than 60 places. Provide a more specific old_string.",
+            path: abs,
+          };
+        }
+        if (spans.length > 0) {
+          usedLoose = true;
+          const insert = toFileEol(targetNew, content);
+          for (let s = spans.length - 1; s >= 0; s--) {
+            content =
+              content.slice(0, spans[s].start) +
+              insert +
+              content.slice(spans[s].end);
+          }
+          totalReplacements += spans.length;
+          continue;
+        }
         const cacheEntry = readCache.get(io.cacheKey(abs));
         if (cacheEntry) cacheEntry.hash = -1;
         return {
@@ -220,6 +306,23 @@ async function applyEdits(
     } else {
       const first = content.indexOf(targetOld);
       if (first === -1) {
+        const spans = findLooseSpans(content, e.old_string);
+        if (spans.length > 1) {
+          return {
+            error:
+              "old_string is not unique. Provide more surrounding context, or set replace_all=true.",
+            path: abs,
+          };
+        }
+        if (spans.length === 1) {
+          usedLoose = true;
+          content =
+            content.slice(0, spans[0].start) +
+            toFileEol(targetNew, content) +
+            content.slice(spans[0].end);
+          totalReplacements += 1;
+          continue;
+        }
         const cacheEntry = readCache.get(io.cacheKey(abs));
         if (cacheEntry) cacheEntry.hash = -1;
         return {
@@ -257,6 +360,7 @@ async function applyEdits(
       replacements: totalReplacements,
       bytesWritten: content.length,
       path: abs,
+      ...(usedLoose ? { looseMatch: true as const } : {}),
     };
   }
 
@@ -271,6 +375,7 @@ async function applyEdits(
       replacements: totalReplacements,
       bytesWritten: content.length,
       path: abs,
+      ...(usedLoose ? { looseMatch: true as const } : {}),
     };
   } catch (err) {
     return { error: String(err), path: abs };
@@ -328,7 +433,7 @@ export function buildEditTools(ctx: ToolContext) {
   return {
     edit: tool({
       description:
-        "Replace an exact string in a file. `old_string` must be unique in the file unless `replace_all: true`. Asks for user approval before writing. Always include `path`.",
+        "Replace an exact string in a file. `old_string` must be unique in the file unless `replace_all: true`. If the exact text drifted (an auto-format reflowed the file since your last read), a unique whitespace-insensitive match is applied as a fallback and reported as `looseMatch`; an ambiguous or absent match still errors with the grounding diagnostic. Asks for user approval before writing. Always include `path`.",
       inputSchema: z.preprocess(
         normalizeEditInput,
         z.object({
@@ -352,8 +457,7 @@ export function buildEditTools(ctx: ToolContext) {
       execute: async ({ path, old_string, new_string, replace_all }) => {
         if (!path?.trim()) {
           return {
-            error:
-              "missing `path` - name the file to edit.",
+            error: "missing `path` - name the file to edit.",
             path: "",
           };
         }
@@ -386,7 +490,7 @@ export function buildEditTools(ctx: ToolContext) {
 
     multi_edit: tool({
       description:
-        "Apply several exact-string replacements to a single file atomically. Each edit is applied in order to the running buffer; if any edit's old_string is missing or non-unique, the whole batch aborts before writing. Asks for user approval before writing. Always include `path`.",
+        "Apply several exact-string replacements to a single file atomically. Each edit is applied in order to the running buffer; if any edit's old_string is missing or non-unique, the whole batch aborts before writing. Each edit accepts the same unique whitespace-insensitive fallback as `edit` after an auto-format drift. Asks for user approval before writing. Always include `path`.",
       inputSchema: z.preprocess(
         normalizeEditInput,
         z.object({
@@ -406,8 +510,7 @@ export function buildEditTools(ctx: ToolContext) {
       execute: async ({ path, edits }) => {
         if (!path?.trim()) {
           return {
-            error:
-              "missing `path` - name the file to edit.",
+            error: "missing `path` - name the file to edit.",
             path: "",
           };
         }

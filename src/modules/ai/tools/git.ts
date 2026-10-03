@@ -44,6 +44,19 @@ function truncate(s: string, cap = DIFF_CAP): string {
   return `${s.slice(0, cap)}\n… [truncated ${s.length - cap} chars]`;
 }
 
+// A git rev a caller may name: shas, branch/tag refs, `HEAD`, `@{u}`, `a..b`
+// ranges. The list is deliberately narrow - it must not start with `-` (an
+// option in disguise), must not contain whitespace or control bytes, and must
+// not quote its way out of the single argument it is quoted into.
+const REV_RE = /^(?!-)[A-Za-z0-9@][A-Za-z0-9._^~@{}/+-]*$/;
+
+export function isValidRev(rev: string): boolean {
+  const t = rev.trim();
+  return (
+    t.length > 0 && t.length <= 255 && REV_RE.test(t) && !/[\x00-\x1f]/.test(t)
+  );
+}
+
 /** Pure command builders, exported so the constructed shell line is testable. */
 export function gitStatusCommand(): string {
   return "git status --short --branch";
@@ -52,8 +65,11 @@ export function gitStatusCommand(): string {
 export function gitDiffCommand(opts: {
   staged?: boolean;
   path?: string;
+  base?: string;
 }): string {
-  const base = opts.staged ? "git diff --staged" : "git diff";
+  const rev = opts.base?.trim();
+  const suffix = rev ? ` ${quoteShellArg(rev)}` : "";
+  const base = opts.staged ? `git diff --staged${suffix}` : `git diff${suffix}`;
   return opts.path ? `${base} -- ${quoteShellArg(opts.path)}` : base;
 }
 
@@ -198,7 +214,7 @@ export function buildGitTools(ctx: ToolContext) {
 
     git_diff: tool({
       description:
-        "Show the working-tree or staged diff (optionally for one path). Read-only, auto-executes. Use to see exactly what changed before committing or before asking the user to review.",
+        "Show the working-tree, staged, or against-a-revision diff (optionally for one path). `base` diffs that commit/branch instead of HEAD - reach for it when an auto-checkpoint commit has swallowed earlier work into history. Read-only, auto-executes. Use to see exactly what changed before committing or before asking the user to review.",
       inputSchema: z.object({
         staged: z
           .boolean()
@@ -206,22 +222,34 @@ export function buildGitTools(ctx: ToolContext) {
           .describe(
             "Show the staged diff (git diff --staged) instead of unstaged.",
           ),
+        base: z
+          .string()
+          .optional()
+          .describe(
+            "Diff against this commit / branch / range (a sha or ref name) instead of HEAD.",
+          ),
         path: z
           .string()
           .optional()
           .describe("Limit the diff to one file or directory."),
       }),
-      execute: async ({ staged, path }) => {
+      execute: async ({ staged, base, path }) => {
         if (ctx.getRemoteSession()) {
           return remoteUnsupported(
             "git_diff",
             "Use bash_run with `git diff` on the remote host.",
           );
         }
+        if (base !== undefined && !isValidRev(base)) {
+          return {
+            error:
+              "invalid base revision: pass a commit sha, branch/tag name or range (no options, spaces, or control characters)",
+          };
+        }
         const sid = ctx.getSessionId();
         if (!sid) return { error: "no active chat session" };
         const cwd = repoRootFor(ctx.getWorkspaceRoot(), ctx.getCwd());
-        const command = gitDiffCommand({ staged, path });
+        const command = gitDiffCommand({ staged, path, base });
         const safety = checkShellCommand(command);
         if (!safety.ok) return { error: safety.reason };
         try {
@@ -321,7 +349,12 @@ export function buildGitTools(ctx: ToolContext) {
             sessionShellKey("git", sid, ctx.getWorkspaceRoot()),
             cwd,
           );
-          const addRes = await native.shellSessionRun(shellId, addCommand, cwd, 60);
+          const addRes = await native.shellSessionRun(
+            shellId,
+            addCommand,
+            cwd,
+            60,
+          );
           if (addRes.exit_code !== 0) {
             return {
               command: addCommand,
@@ -447,7 +480,12 @@ export function buildGitTools(ctx: ToolContext) {
             sessionShellKey("git", sid, ctx.getWorkspaceRoot()),
             cwd,
           );
-          const addRes = await native.shellSessionRun(shellId, addCommand, cwd, 60);
+          const addRes = await native.shellSessionRun(
+            shellId,
+            addCommand,
+            cwd,
+            60,
+          );
           if (addRes.exit_code !== 0) {
             return {
               command: addCommand,
@@ -633,7 +671,8 @@ export function buildGitTools(ctx: ToolContext) {
         lines: z
           .string()
           .refine((v) => validBlameLines(v), {
-            message: "Invalid line range format. Use e.g. '5', '5-20', or ':funcName'",
+            message:
+              "Invalid line range format. Use e.g. '5', '5-20', or ':funcName'",
           })
           .optional()
           .describe(
@@ -872,8 +911,10 @@ export function buildGitTools(ctx: ToolContext) {
           if (targetPath) {
             const resolved = resolvePath(targetPath, cwd);
             const r = await native.readFile(resolved);
-            if (r.kind === "binary") return { error: "file is binary", path: targetPath };
-            if (r.kind === "toolarge") return { error: "file too large", path: targetPath };
+            if (r.kind === "binary")
+              return { error: "file is binary", path: targetPath };
+            if (r.kind === "toolarge")
+              return { error: "file too large", path: targetPath };
             const blocks = scanTextForConflicts(r.content);
             return {
               file: targetPath,
@@ -902,7 +943,8 @@ export function buildGitTools(ctx: ToolContext) {
             return {
               count: 0,
               files: [],
-              message: "No unresolved git merge conflicts found in the repository.",
+              message:
+                "No unresolved git merge conflicts found in the repository.",
             };
           }
 
@@ -929,7 +971,10 @@ export function buildGitTools(ctx: ToolContext) {
             }
           }
 
-          const totalConflicts = fileResults.reduce((acc, f) => acc + f.count, 0);
+          const totalConflicts = fileResults.reduce(
+            (acc, f) => acc + f.count,
+            0,
+          );
 
           return {
             unmergedFileCount: unmergedFiles.length,

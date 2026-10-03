@@ -11,7 +11,7 @@ import {
   POST_EXECUTE_CONFIRM_TOOLS,
   withPostExecuteConfirm,
 } from "../lib/postExecuteConfirm";
-import { KNOWN_TOOL_ALIASES } from "../lib/repairToolCall";
+import { lookupToolAlias } from "../lib/repairToolCall";
 import { buildSkillRegistryTools } from "../lib/skillRegistry";
 import { markRunActivity, startActivityHeartbeat } from "../lib/streamWatchdog";
 import { useApprovalQueue } from "../store/approvalQueueStore";
@@ -348,8 +348,7 @@ export function buildTools(
     ...partial,
     [UNKNOWN_TOOL_NAME]: buildUnknownToolFallback({
       available: () => Object.keys(base),
-      aliasFor: (name) =>
-        KNOWN_TOOL_ALIASES[name.toLowerCase()]?.canonical ?? null,
+      aliasFor: lookupToolAlias,
       findToolsName: opts.findToolsName,
     }),
   };

@@ -9,6 +9,7 @@ import {
   headShaCommand,
   isCheckpointSubject,
   isValidSha,
+  reviewBaseFromLog,
   rollbackResetCommand,
 } from "./snapshots";
 
@@ -98,9 +99,21 @@ describe("command builders", () => {
 describe("checkpointsFromLog", () => {
   it("keeps only checkpoint commits and preserves order", () => {
     const entries = [
-      logEntry({ sha: "c".repeat(40), shortSha: "ccccccc", subject: "feat: something" }),
-      logEntry({ sha: "b".repeat(40), shortSha: "bbbbbbb", subject: "checkpoint: auto before run" }),
-      logEntry({ sha: "a".repeat(40), shortSha: "aaaaaaa", subject: "checkpoint: manual save" }),
+      logEntry({
+        sha: "c".repeat(40),
+        shortSha: "ccccccc",
+        subject: "feat: something",
+      }),
+      logEntry({
+        sha: "b".repeat(40),
+        shortSha: "bbbbbbb",
+        subject: "checkpoint: auto before run",
+      }),
+      logEntry({
+        sha: "a".repeat(40),
+        shortSha: "aaaaaaa",
+        subject: "checkpoint: manual save",
+      }),
     ];
     const checkpoints = checkpointsFromLog(entries);
     expect(checkpoints).toHaveLength(2);
@@ -112,5 +125,44 @@ describe("checkpointsFromLog", () => {
   it("returns an empty list when there are no checkpoints", () => {
     expect(checkpointsFromLog([logEntry({ subject: "feat: x" })])).toEqual([]);
     expect(checkpointsFromLog([])).toEqual([]);
+  });
+});
+
+describe("reviewBaseFromLog", () => {
+  it("needs no override when the newest commit is real work", () => {
+    expect(
+      reviewBaseFromLog([
+        logEntry({ sha: "c".repeat(40), subject: "fix: stop double mounting" }),
+        logEntry({
+          sha: "b".repeat(40),
+          subject: "checkpoint: auto before run",
+        }),
+      ]),
+    ).toBeNull();
+  });
+
+  it("returns the newest real commit when HEAD is checkpoint-deep", () => {
+    expect(
+      reviewBaseFromLog([
+        logEntry({
+          sha: "d".repeat(40),
+          subject: "checkpoint: auto before run",
+        }),
+        logEntry({ sha: "c".repeat(40), subject: "checkpoint: manual save" }),
+        logEntry({ sha: "b".repeat(40), subject: "feat: real work" }),
+      ]),
+    ).toBe("b".repeat(40));
+  });
+
+  it("refuses to invent a base on an all-checkpoint or empty history", () => {
+    expect(reviewBaseFromLog([])).toBeNull();
+    expect(
+      reviewBaseFromLog([
+        logEntry({
+          sha: "a".repeat(40),
+          subject: "checkpoint: auto before run",
+        }),
+      ]),
+    ).toBeNull();
   });
 });

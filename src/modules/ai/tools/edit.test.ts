@@ -61,7 +61,11 @@ function setFile(content: string) {
   });
 }
 
-type EditResult = { error?: string; replacements?: number };
+type EditResult = {
+  error?: string;
+  replacements?: number;
+  looseMatch?: true;
+};
 
 async function runEdit(
   ctx: ToolContext,
@@ -245,6 +249,78 @@ describe("multi_edit atomicity", () => {
     });
     expect(result.error).toContain("not unique");
     expect(nativeMock.writeFile).not.toHaveBeenCalled();
+  });
+});
+
+describe("edit whitespace-drift fallback", () => {
+  it("applies a unique loose match when the file reflowed after the read", async () => {
+    // The formatter joined the call onto one line while the agent quoted the
+    // multi-line shape it had read earlier.
+    setFile("const r = await send(chatId, text, opts);\nnext();\n");
+    const result = await runEdit(readContext(), {
+      path: FILE,
+      old_string: "const r = await send(\n  chatId,\n  text,\n  opts\n);",
+      new_string: "const r = await fire(chatId, text, opts);",
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.replacements).toBe(1);
+    expect(result.looseMatch).toBe(true);
+    expect(nativeMock.writeFile).toHaveBeenCalledWith(
+      FILE,
+      "const r = await fire(chatId, text, opts);\nnext();\n",
+    );
+  });
+
+  it("refuses an ambiguous loose match instead of guessing", async () => {
+    setFile("f(a) y f(a) y");
+    const result = await runEdit(readContext(), {
+      path: FILE,
+      old_string: "f (a)",
+      new_string: "g()",
+    });
+    expect(result.error).toContain("not unique");
+    expect(nativeMock.writeFile).not.toHaveBeenCalled();
+  });
+
+  it("prefers the exact match when a loose read would be ambiguous", async () => {
+    // "f(a)" exists exactly once; the loose view would see two hits. Exact
+    // matching runs first, so the single real hit wins and no flag is set.
+    setFile("f(a) plus f (a)");
+    const result = await runEdit(readContext(), {
+      path: FILE,
+      old_string: "f(a)",
+      new_string: "Z",
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.looseMatch).toBeUndefined();
+    expect(nativeMock.writeFile).toHaveBeenCalledWith(FILE, "Z plus f (a)");
+  });
+
+  it("replace_all accepts the loose fallback and counts every span", async () => {
+    setFile("a ( 1 ) x a ( 1 )");
+    const result = await runEdit(readContext(), {
+      path: FILE,
+      old_string: "a(1)",
+      new_string: "b",
+      replace_all: true,
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.replacements).toBe(2);
+    expect(result.looseMatch).toBe(true);
+    expect(nativeMock.writeFile).toHaveBeenCalledWith(FILE, "b x b");
+  });
+
+  it("re-line-breaks a loose insertion to the file's CRLF endings", async () => {
+    setFile("first\r\nsecond\r\n");
+    const result = await runEdit(readContext(), {
+      path: FILE,
+      // Two spaces: neither the exact nor the EOL-reconciled form matches.
+      old_string: "first  second",
+      new_string: "one\ntwo",
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.looseMatch).toBe(true);
+    expect(nativeMock.writeFile).toHaveBeenCalledWith(FILE, "one\r\ntwo\r\n");
   });
 });
 

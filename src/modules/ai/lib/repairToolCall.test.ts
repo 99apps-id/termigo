@@ -1,6 +1,11 @@
 import { assert, describe, expect, it } from "vitest";
 import { buildAgentTools } from "../agents/agentFactory";
-import { repairJsonText, repairToolCall } from "./repairToolCall";
+import {
+  canonicalizeToolName,
+  lookupToolAlias,
+  repairJsonText,
+  repairToolCall,
+} from "./repairToolCall";
 
 describe("repairJsonText", () => {
   it("leaves already-valid JSON untouched", () => {
@@ -83,6 +88,53 @@ describe("repairJsonText", () => {
     const input = '{"text":"line\\nquote \\" slash \\/ done"}';
     expect(repairJsonText(input)).toBe(input);
     expect(() => JSON.parse(input)).not.toThrow();
+  });
+});
+
+describe("tool name canonicalization", () => {
+  it("folds case, camel, hyphen and space spellings onto registry names", () => {
+    expect(canonicalizeToolName("Grep")).toBe("grep");
+    expect(canonicalizeToolName("ReadFile")).toBe("read_file");
+    expect(canonicalizeToolName("multi-edit")).toBe("multi_edit");
+    expect(canonicalizeToolName("read file")).toBe("read_file");
+    expect(canonicalizeToolName("GetTerminalOutput")).toBe(
+      "get_terminal_output",
+    );
+    expect(canonicalizeToolName("read_file")).toBe("read_file");
+  });
+
+  it("resolves aliases in any spelling, and real names to null", () => {
+    expect(lookupToolAlias("View-File")).toBe("read_file");
+    expect(lookupToolAlias("STR_REPLACE")).toBe("edit");
+    // A real tool name is not an alias; the direct-match path owns it.
+    expect(lookupToolAlias("grep")).toBeNull();
+  });
+
+  it("repairs Read/Grep/ReadFile spellings instead of the unknown-tool path", async () => {
+    const tools = { read_file: {}, grep: {}, edit: {} };
+    const capital = await repairToolCall({
+      tools,
+      toolCall: {
+        toolCallId: "1",
+        toolName: "Read",
+        input: '{"path":"/tmp/a.ts"}',
+      },
+    });
+    expect(capital?.toolName).toBe("read_file");
+    const caseOnly = await repairToolCall({
+      tools,
+      toolCall: { toolCallId: "2", toolName: "Grep", input: "{}" },
+    });
+    expect(caseOnly?.toolName).toBe("grep");
+    const camel = await repairToolCall({
+      tools,
+      toolCall: {
+        toolCallId: "3",
+        toolName: "ReadFile",
+        input: '{"path":"/tmp/a.ts"}',
+      },
+    });
+    expect(camel?.toolName).toBe("read_file");
   });
 });
 
@@ -341,7 +393,9 @@ describe("repairToolCall", () => {
     assert(result);
     const parsed = JSON.parse(result.input);
     expect(parsed.pattern).toBe("setActiveId");
-    expect(parsed.root).toBe("C:/project/termigo/src/modules/tabs/lib/useTabs.ts");
+    expect(parsed.root).toBe(
+      "C:/project/termigo/src/modules/tabs/lib/useTabs.ts",
+    );
   });
 
   it("repairs code_search arguments when max_results exceeds 20", async () => {
@@ -544,7 +598,11 @@ describe("repairToolCall", () => {
         toolName: "invoke_subagent",
         input: JSON.stringify({
           Subagents: [
-            { TypeName: "researcher", Prompt: "search docs", Role: "doc reader" },
+            {
+              TypeName: "researcher",
+              Prompt: "search docs",
+              Role: "doc reader",
+            },
             { TypeName: "coder", Prompt: "write code", Role: "dev" },
           ],
         }),

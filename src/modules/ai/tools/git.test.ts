@@ -13,6 +13,7 @@ import {
   gitStashCommand,
   gitStashPopCommand,
   gitStatusCommand,
+  isValidRev,
   repoRootFor,
   revertCommand,
   validBranch,
@@ -71,6 +72,43 @@ describe("git command builders", () => {
     expect(gitDiffCommand({ path: "src/App.tsx" })).toBe(
       "git diff -- 'src/App.tsx'",
     );
+  });
+
+  it("diffs against a base revision, staged or scoped", () => {
+    expect(gitDiffCommand({ base: "14eb149d" })).toBe("git diff '14eb149d'");
+    expect(gitDiffCommand({ staged: true, base: "HEAD~3" })).toBe(
+      "git diff --staged 'HEAD~3'",
+    );
+    const sha = "b".repeat(40);
+    expect(gitDiffCommand({ base: sha, path: "src" })).toBe(
+      `git diff '${sha}' -- 'src'`,
+    );
+  });
+
+  it("validates base revisions against option smuggling", () => {
+    for (const rev of [
+      "14eb149d",
+      "HEAD",
+      "HEAD~3",
+      "feature/x",
+      "a..b",
+      "@{u}",
+      "v0.9.22",
+    ]) {
+      expect(isValidRev(rev)).toBe(true);
+    }
+    // A leading dash would reach git as an option; whitespace and control
+    // bytes would break out of the quoted single argument.
+    for (const bad of [
+      "--staged",
+      "-b x",
+      "HEAD ; rm -rf /",
+      "",
+      "   ",
+      "a\nb",
+    ]) {
+      expect(isValidRev(bad)).toBe(false);
+    }
   });
 
   it("builds a revert command, scoped or global, with quoting", () => {
@@ -206,4 +244,3 @@ describe("git command builders", () => {
     expect(res.conflicts[0].theirsLabel).toBe("branch");
   });
 });
-

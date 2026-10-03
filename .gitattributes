@@ -5,3 +5,11 @@
 # "$'\r': command not found", which reads like a missing file rather than a line
 # ending problem, and the failure is silent enough to cost an evening.
 *.sh text eol=lf
+
+# Keep Go sources LF in the repository and in every checkout.
+#
+# gofmt compares the whole file, so a CRLF working copy makes `gofmt -l` list
+# the entire Go tree on Windows even though the repository (and CI, which
+# checks out LF) is clean. An agent verifying formatting then sees ~110 false
+# positives and cannot tell its own unformatted file from the pack.
+*.go text eol=lf
