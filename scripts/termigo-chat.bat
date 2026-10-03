@@ -8,6 +8,9 @@ rem   termigo-chat.bat --session <id>       resume a specific session
 rem   termigo-chat.bat muse-spark-1.3       pick a model for this session
 
 set "ROOT=%~dp0.."
+rem A double-click starts in the launcher's own folder; use the repository root
+rem instead, so the agent opens on a real project rather than on scripts/.
+if /I "%CD%\"=="%~dp0" cd /d "%ROOT%"
 set "BIN="
 if exist "%ROOT%\dist-win\termigo-go.exe" set "BIN=%ROOT%\dist-win\termigo-go.exe"
 if not defined BIN if exist "%ROOT%\src-tauri\binaries\termigo-go-win32-x64.exe" set "BIN=%ROOT%\src-tauri\binaries\termigo-go-win32-x64.exe"
