@@ -15,6 +15,22 @@ if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
 $RootDir = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $RootDir
 
+# The public Google installed-app pair for Antigravity is compiled into the app
+# (antigravity_client_id in src-tauri/src/modules/oauth.rs), so the OAuth card
+# never asks the operator to type it. It lives in the git-ignored .env.local or
+# a release secret, never in the tree; an absent value leaves the runtime
+# environment fallback in place.
+$envFile = Join-Path $RootDir ".env.local"
+if (Test-Path $envFile) {
+    Get-Content $envFile | ForEach-Object {
+        if ($_ -match '^\s*TERMIGO_ANTIGRAVITY_CLIENT_(ID|SECRET)\s*=\s*(.+?)\s*$') {
+            $name = "TERMIGO_ANTIGRAVITY_CLIENT_$($Matches[1])"
+            $value = $Matches[2].Trim('"', "'")
+            [Environment]::SetEnvironmentVariable($name, $value, "Process")
+        }
+    }
+}
+
 Write-Host "==> Ensuring dependencies..." -ForegroundColor Cyan
 if (-not (Test-Path "node_modules/.bin/tsc")) {
     $env:CI = "true"

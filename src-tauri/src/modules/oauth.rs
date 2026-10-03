@@ -20,6 +20,44 @@ use tokio::net::TcpListener;
 
 const TIMEOUT_SECS: u64 = 300;
 
+/// The Muse CLI identity its endpoints expect. Meta answers a device request
+/// with no User-Agent with a 302 to an HTML page, whose empty body then fails
+/// to parse as JSON ("expected value at line 1 column 1"), so the header is
+/// required rather than cosmetic.
+const MUSE_USER_AGENT: &str = "muse-code/1.0.2";
+
+/// The public Google installed-app pair for Antigravity, the same one Termixgo
+/// ships. A release build bakes it in with option_env! so the app never asks
+/// the operator to type it; a plain build falls back to the environment and the
+/// legacy TERMIXGO_ names.
+fn antigravity_client_id() -> String {
+    antigravity_value(
+        option_env!("TERMIGO_ANTIGRAVITY_CLIENT_ID"),
+        "TERMIGO_ANTIGRAVITY_CLIENT_ID",
+        "TERMIXGO_ANTIGRAVITY_CLIENT_ID",
+    )
+}
+
+fn antigravity_client_secret() -> String {
+    antigravity_value(
+        option_env!("TERMIGO_ANTIGRAVITY_CLIENT_SECRET"),
+        "TERMIGO_ANTIGRAVITY_CLIENT_SECRET",
+        "TERMIXGO_ANTIGRAVITY_CLIENT_SECRET",
+    )
+}
+
+fn antigravity_value(compiled: Option<&str>, primary: &str, legacy: &str) -> String {
+    if let Some(value) = compiled {
+        if !value.trim().is_empty() {
+            return value.trim().to_string();
+        }
+    }
+    std::env::var(primary)
+        .or_else(|_| std::env::var(legacy))
+        .map(|value| value.trim().to_string())
+        .unwrap_or_default()
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct OAuthTokens {
     pub provider: String,
@@ -411,15 +449,11 @@ async fn login_claude_oauth(app: &tauri::AppHandle) -> Result<OAuthTokens, Strin
 }
 
 async fn login_antigravity(app: &tauri::AppHandle) -> Result<OAuthTokens, String> {
-    let client_id = std::env::var("TERMIGO_ANTIGRAVITY_CLIENT_ID")
-        .or_else(|_| std::env::var("TERMIXGO_ANTIGRAVITY_CLIENT_ID"))
-        .unwrap_or_default();
-    let client_secret = std::env::var("TERMIGO_ANTIGRAVITY_CLIENT_SECRET")
-        .or_else(|_| std::env::var("TERMIXGO_ANTIGRAVITY_CLIENT_SECRET"))
-        .unwrap_or_default();
+    let client_id = antigravity_client_id();
+    let client_secret = antigravity_client_secret();
 
     if client_id.trim().is_empty() {
-        return Err("Antigravity requires TERMIGO_ANTIGRAVITY_CLIENT_ID in the environment or secrets".to_string());
+        return Err("Antigravity needs its client id: build with TERMIGO_ANTIGRAVITY_CLIENT_ID set, or put it in the environment".to_string());
     }
 
     const AUTHORIZE_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
@@ -780,6 +814,8 @@ async fn login_muse(app: &tauri::AppHandle) -> Result<OAuthTokens, String> {
     let res = client
         .post(DEVICE_URL)
         .header("content-type", "application/x-www-form-urlencoded")
+        .header("accept", "application/json")
+        .header("user-agent", MUSE_USER_AGENT)
         .body(query(&[("client_id", CLIENT_ID)]))
         .send()
         .await
@@ -828,6 +864,8 @@ async fn login_muse(app: &tauri::AppHandle) -> Result<OAuthTokens, String> {
         let res = client
             .post(TOKEN_URL)
             .header("content-type", "application/x-www-form-urlencoded")
+            .header("accept", "application/json")
+            .header("user-agent", MUSE_USER_AGENT)
             .body(query(&[
                 ("client_id", CLIENT_ID),
                 ("device_code", &dev.device_code),
@@ -864,7 +902,8 @@ async fn login_muse(app: &tauri::AppHandle) -> Result<OAuthTokens, String> {
     let mint_res = client
         .post(MINT_URL)
         .header("authorization", format!("Bearer {dca_token}"))
-        .header("user-agent", "muse-code/1.0.2")
+        .header("user-agent", MUSE_USER_AGENT)
+        .header("accept", "application/json")
         .header("x-api-version", "1.0.0")
         .json(&serde_json::json!({ "onboard": true }))
         .send()
@@ -1141,12 +1180,8 @@ async fn do_refresh_token(provider: &str, refresh_token: &str) -> Result<OAuthTo
             })
         }
         "antigravity" => {
-            let client_id = std::env::var("TERMIGO_ANTIGRAVITY_CLIENT_ID")
-                .or_else(|_| std::env::var("TERMIXGO_ANTIGRAVITY_CLIENT_ID"))
-                .unwrap_or_default();
-            let client_secret = std::env::var("TERMIGO_ANTIGRAVITY_CLIENT_SECRET")
-                .or_else(|_| std::env::var("TERMIXGO_ANTIGRAVITY_CLIENT_SECRET"))
-                .unwrap_or_default();
+            let client_id = antigravity_client_id();
+            let client_secret = antigravity_client_secret();
             const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 
             let form = query(&[
