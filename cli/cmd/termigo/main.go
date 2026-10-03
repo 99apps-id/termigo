@@ -193,7 +193,7 @@ Commands that drive a running Termigo:
   telegram [status]                Run the companion bot, or show its status
   service [install|uninstall|status] Run the Telegram assistant 24/7 via the OS
   secret <provider>                Store a provider API key (prompted, never echoed)
-  login <provider>                 OAuth login: xai-oauth, openai-codex, claude-oauth, antigravity, github-copilot
+  login <provider>                 OAuth login: xai-oauth, openai-codex, claude-oauth, antigravity, github-copilot, muse
   logout <provider>                Drop a stored OAuth login
   endpoint list [--json]           List custom OpenAI-compatible endpoints
   endpoint add <name> <url> <model> [--key <k>] [--default] Add custom endpoint

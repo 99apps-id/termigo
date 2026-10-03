@@ -43,6 +43,11 @@ type Spec struct {
 	// CopilotTokenURL is the GitHub Copilot token minting endpoint.
 	CopilotTokenURL string
 
+	// MintURL is where a device grant that only yields a short-lived token is
+	// exchanged for the credential the model endpoint accepts. Meta Muse
+	// returns a "dca:" device token that must be minted into an LLM API key.
+	MintURL string
+
 	// RefreshLead overrides how early the access token is renewed; zero is
 	// the five-minute default. MaxRefreshAge renews a credential that has
 	// gone unrenewed for that long even while its access token still looks
@@ -135,6 +140,19 @@ var specs = map[string]Spec{
 		VerifyHint:      "https://github.com/login/device",
 		CopilotTokenURL: "https://api.github.com/copilot_internal/v2/token",
 		RefreshLead:     5 * time.Minute,
+	},
+	// Meta Muse Code. The device grant yields a durable "dca:" token that
+	// the model endpoint does not accept directly; it is minted into an LLM
+	// API key at MintURL, which becomes the stored access token. The client id
+	// is the public one Meta's Muse CLI ships, so it is not a secret.
+	"muse": {
+		Provider:   "muse",
+		Kind:       "muse",
+		ClientID:   "1031625952748946",
+		DeviceURL:  "https://auth.meta.com/oidc/device/authorization/",
+		TokenURL:   "https://auth.meta.com/oidc/device/token/",
+		VerifyHint: "https://auth.meta.com/oauth/device/",
+		MintURL:    "https://api.meta.ai/muse-code/key",
 	},
 }
 

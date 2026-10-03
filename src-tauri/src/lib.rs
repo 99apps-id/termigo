@@ -15,7 +15,7 @@ use launch::{get_launch_dir, get_launch_files, parse_launch_target, LaunchDir, L
 use launch::{resolve_launch_target, LaunchEntry};
 use modules::{
     agent, audit, backup, browser, chatgpt_auth, control, extensions, fs, git, history, lsp, mcp,
-    net, pty, secrets, shell, sql, ssh, system, workspace,
+    net, oauth, pty, secrets, shell, sql, ssh, system, workspace,
 };
 use settings_window::open_settings_window;
 
@@ -274,6 +274,8 @@ pub fn run() {
             browser::browser_embed_close,
             chatgpt_auth::chatgpt_auth_login,
             chatgpt_auth::chatgpt_auth_refresh,
+            oauth::oauth_login,
+            oauth::oauth_refresh,
             backup::backup_seal,
             backup::backup_open,
             sql::sql_run,

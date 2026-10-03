@@ -27,6 +27,7 @@ import {
   getProvider,
   isCompatModelId,
   MODELS,
+  OAUTH_PROVIDERS,
   PROVIDERS,
   type ProviderId,
   type ProviderInfo,
@@ -91,7 +92,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useMemo, useState } from "react";
-import { ChatGptAccountCard } from "../components/ChatGptAccountCard";
+import { OAuthProviderCard } from "../components/OAuthProviderCard";
 import { ProviderIcon } from "../components/ProviderIcon";
 import { ProviderKeyCard } from "../components/ProviderKeyCard";
 import { SectionHeader } from "../components/SectionHeader";
@@ -465,9 +466,15 @@ export function ModelsSection() {
                 onRemove={() => removeCustomEndpoint(ep.id)}
               />
             ))}
-            {/* Sign in with a ChatGPT account (subscription, no API key). Always
-                shown so it is discoverable without an "add provider" step. */}
-            <ChatGptAccountCard />
+            {/* OAuth accounts (subscription login via browser or device flow, no API keys needed). */}
+            <div className="mt-4 flex flex-col gap-2">
+              <div className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">
+                OAuth & Subscriptions
+              </div>
+              {OAUTH_PROVIDERS.map((oauthId) => (
+                <OAuthProviderCard key={oauthId} providerId={oauthId} />
+              ))}
+            </div>
           </div>
         )}
       </div>

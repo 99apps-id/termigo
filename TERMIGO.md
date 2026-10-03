@@ -67,50 +67,29 @@ Details in [module layout](docs/architecture/module-layout.md):
 
 ### Go CLI (`cli/`)
 
-`cli/cmd/termigo` is a standalone terminal agent, not only an automation
-companion: it talks to the providers directly, so it runs on a headless VPS with
-no webview.
+`cli/cmd/termigo` is a standalone terminal agent and automation companion talking directly to providers (runs on headless VPS without webview).
 
-- **Agent**: `ask` (one prompt), `code` (the file/shell/git loop), and `chat`, a
-  Bubble Tea TUI. `chat` persists a session: every turn is written to
-  `<state home>/sessions/*.json`, `--continue` resumes the last session for the
-  workspace and `--session <id>` a specific one. In the TUI: `/model` (provider
-  then model), `/providers`, `/settings`, `/status`, `/cost`, `/setup`,
-  `/key <provider> <key>`, `/login <provider>`, `/sessions`, `/new`, `/copy [n]`
-  (OSC 52 clipboard) and Ctrl+Y.
-- **Auth**: `login`/`logout` run the vendor OAuth flows (device or PKCE on a
-  loopback callback) and store tokens in the 0600 secret file. The Antigravity
-  client pair is stamped at build time by `scripts/build-cli.mjs` from a
-  repository secret or the git-ignored `.env.local`, never committed.
-- **Tools**: filesystem, search, shell, git and web search/fetch, plus every
-  configured MCP server: its tools are offered under a `server__tool` name and
-  go through the approval policy because they run in another process.
-- **Remote**: `telegram` runs the companion bot and `service install` sets it up
-  to run 24/7 (a systemd user unit with linger, launchd, or a Windows scheduled
-  task).
-- **Automation companion**: `doctor`, `init`, `agent run`, `skill`, `mcp`,
-  `config`, `models`, `model`, `settings`, `approval`, `secret`, `endpoint`, and
-  terminal control (`tui`, `setup`) via `internal/control` for the running app.
+- **Agent**: `ask`, `code`, and `chat` (Bubble Tea TUI persisting sessions in `<state home>/sessions/`).
+- **Auth**: `login`/`logout` run vendor OAuth flows (device or PKCE loopback) into 0600 secret store. Antigravity pair is stamped at build time.
+- **Tools**: filesystem, search, shell, git, web search/fetch, and configured MCP servers.
+- **Remote**: `telegram` bot relay; `service install` configures 24/7 daemon.
+- **Companion commands**: `doctor`, `init`, `agent run`, `skill`, `mcp`, `config`, `models`, `settings`, and terminal control via `internal/control`.
 
-Keep the module dependency-light (stdlib, yaml.v3, `golang.org/x/term` and the
-Bubble Tea stack). Provider credentials live in the CLI's own 0600 secret store
-under the state home; app API keys are stored only by the app.
+Dependency-light: stdlib, yaml.v3, `golang.org/x/term`, Bubble Tea stack. Credentials stay in CLI secret store; app API keys stay in OS keychain.
 
 ### AI subsystem (`src/modules/ai/`)
 
-BYOK, cloud and local, with `PROVIDERS` and the model registry in `config.ts`. Providers, run loop, sessions, composer, transport and how to add a provider: [AI subsystem](docs/architecture/ai-subsystem.md).
+BYOK with `PROVIDERS` and model registry in `config.ts`. Full details in [AI subsystem](docs/architecture/ai-subsystem.md). Invariants:
 
-The parts that are invariants rather than description:
-
-- **Keys** live in the OS keychain via `secrets_*` (on Linux, a `0600` `secrets.json` in the app data dir). Never persist a key to disk, settings, or `localStorage`.
-- **Agent** (`lib/agent.ts`): keep `Agent` / `DirectChatTransport` shape adhering to AI SDK v6 semantics. Stop reasons report by name. Budgets escalate per Continue: `[25, 50, 100]`.
-- **Subagents** (`lib/subagentPool.ts`, `agents/runSubagent.ts`): managed by `SubagentConcurrencyPool` (default 4). Parents yield slots via `ctx.yieldSlot()` to prevent deadlock. Batch subagents bounded (max 2 nested). Local subagents isolate root from remote SSH tabs. Rate limits retry with backoff.
-- **Tools & Environment** (`tools/tools.ts`, `lib/repairToolCall.ts`): no sandbox or artificial path boundary limitations for agents and subagents; all tools are available. Instructions are governed by `USER.md`, `AGENTS.md`, and `TERMIGO.md`. Parameter aliases auto-repair.
-- **Shell execution & worktree** (`src-tauri/src/modules/shell/mod.rs`): unrestricted command execution without artificial sandbox allowlists. Full support for git worktrees, background shells, and subagent concurrency.
-- **Approval resume trailing message is load-bearing**: `streamText` finds approvals only in `messages.at(-1)`. Nothing may be appended after an answered approval.
-- **Chat UX & Timeline**: edit/resend turns (`messageEdit.ts`), turn checkpoints and navigator (`turnCheckpoints.ts`, `ChatTimelineNavigator.tsx`), session fork (`forkSession`), auto-approval toggle, ANSI rendering (`AnsiOutput.tsx`), stream watchdog (`streamWatchdog.ts`).
-- **Telegram companion**: remote tool approvals, interactive commands, and Mermaid image previews (`src/modules/telegram/`).
-- **Memory path**: learned memory loads from `.termigo/memory.md` in workspace root (project scope), falling back to `~/.termigo/memory.md` when absent.
+- **Keys**: stored in OS keychain via `secrets_*` (Linux: `0600` `secrets.json`). Never in settings or `localStorage`.
+- **Agent** (`lib/agent.ts`): AI SDK v6 semantics. Budgets escalate per Continue: `[25, 50, 100]`.
+- **Subagents** (`lib/subagentPool.ts`, `agents/runSubagent.ts`): managed by `SubagentConcurrencyPool` (default 4). Parents yield slots to prevent deadlock.
+- **Tools & Environment** (`tools/tools.ts`, `lib/repairToolCall.ts`): no sandbox or artificial path boundary limits; all tools available.
+- **Shell execution & worktree** (`src-tauri/src/modules/shell/mod.rs`): unrestricted execution, full git worktree and subagent concurrency support.
+- **Approval resume trailing message is load-bearing**: `streamText` finds approvals only in `messages.at(-1)`. Nothing appended after answered approval.
+- **Chat UX & Timeline**: edit/resend turns, checkpoints, session fork, auto-approval toggle, ANSI rendering, stream watchdog.
+- **Telegram companion**: remote tool approvals, interactive commands, Mermaid previews (`src/modules/telegram/`).
+- **Memory path**: loads from `.termigo/memory.md` (project scope), falling back to `~/.termigo/memory.md`.
 
 ### UI conventions
 

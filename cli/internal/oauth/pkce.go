@@ -140,7 +140,7 @@ func (s *pkceSession) handle(writer http.ResponseWriter, request *http.Request) 
 		}
 		return
 	}
-	fmt.Fprint(writer, "Login complete. You can close this window and return to Termixgo.")
+	fmt.Fprint(writer, "Login complete. You can close this window and return to Termigo.")
 	select {
 	case s.codeCh <- code:
 	default:

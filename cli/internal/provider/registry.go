@@ -13,6 +13,7 @@ const (
 	KindGoogle      Kind = "google"
 	KindAntigravity Kind = "antigravity"
 	KindCopilot     Kind = "copilot"
+	KindMuse        Kind = "muse"
 )
 
 // Provider describes one BYOK provider.
@@ -37,6 +38,7 @@ var providers = []Provider{
 	{ID: "xai-oauth", Label: "xAI Grok (OAuth)", Kind: KindOpenAI, DefaultBaseURL: "https://api.x.ai/v1", NeedsKey: true, OAuth: true},
 	{ID: "openai-codex", Label: "OpenAI Codex (ChatGPT)", Kind: KindOpenAI, DefaultBaseURL: "https://chatgpt.com/backend-api/codex", NeedsKey: true, OAuth: true},
 	{ID: "github-copilot", Label: "GitHub Copilot", Kind: KindCopilot, DefaultBaseURL: "https://api.githubcopilot.com", NeedsKey: true, OAuth: true},
+	{ID: "muse", Label: "Meta Muse Code", Kind: KindMuse, DefaultBaseURL: "https://api.meta.ai/v1", NeedsKey: true, OAuth: true},
 
 	// Vendors that matter most for agentic coding, cheapest strong models
 	// first so the wizard's default order is also a sensible one.

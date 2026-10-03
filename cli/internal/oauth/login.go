@@ -87,6 +87,27 @@ func Login(ctx context.Context, store *Store, provider string, in io.Reader, out
 				token, err = FetchCopilotToken(ctx, spec.CopilotTokenURL, ghToken.Access, clock)
 			}
 		}
+	case "muse":
+		flow := DeviceFlow{ClientID: spec.ClientID, Scope: spec.Scope, DeviceURL: spec.DeviceURL, TokenURL: spec.TokenURL, VerifyHint: spec.VerifyHint}
+		var code DeviceCode
+		code, err = StartDevice(ctx, flow)
+		if err == nil {
+			target := code.VerificationURIComplete
+			if strings.TrimSpace(target) == "" {
+				target = code.VerificationURI
+			}
+			fmt.Fprintf(out, "Open %s and enter code %s\n", target, code.UserCode)
+			openBrowser(target)
+			var device Token
+			device, err = WaitDevice(ctx, flow, code, clock)
+			if err == nil {
+				var notice string
+				token, notice, err = museTokenFromDevice(ctx, spec.MintURL, device, clock.now())
+				if err == nil && strings.TrimSpace(notice) != "" {
+					fmt.Fprintf(out, "%s\n", notice)
+				}
+			}
+		}
 	default:
 		flow := DeviceFlow{ClientID: spec.ClientID, Scope: spec.Scope, DeviceURL: spec.DeviceURL, TokenURL: spec.TokenURL, VerifyHint: spec.VerifyHint}
 		var code DeviceCode
@@ -181,6 +202,15 @@ func AccessToken(ctx context.Context, store *Store, provider string) string {
 	if !ok || strings.TrimSpace(token.Refresh) == "" {
 		return token.Access
 	}
+	if provider == "muse" {
+		if !token.Expires.IsZero() {
+			token.Expires = time.Time{}
+			_ = store.Save(provider, token)
+		}
+		if strings.TrimSpace(token.Access) != "" {
+			return token.Access
+		}
+	}
 	lead := spec.RefreshLead
 	if lead <= 0 {
 		lead = defaultRefreshLead
@@ -198,7 +228,7 @@ func AccessToken(ctx context.Context, store *Store, provider string) string {
 		// rotation). Keep sending its bearer only if the access token still
 		// works; otherwise drop the login so HasKey, /status and the setup
 		// wizard all agree the operator must log in again.
-		if token.Valid(time.Now(), 0) {
+		if token.Valid(time.Now(), 0) || (provider == "muse" && strings.TrimSpace(token.Access) != "") {
 			return token.Access
 		}
 		_ = store.Delete(provider)
@@ -226,6 +256,9 @@ func ForceRefreshToken(ctx context.Context, store *Store, provider string) strin
 	}
 	var grant *GrantError
 	if errors.As(err, &grant) {
+		if provider == "muse" && strings.TrimSpace(token.Access) != "" {
+			return token.Access
+		}
 		_ = store.Delete(provider)
 		return ""
 	}
@@ -268,6 +301,14 @@ func refreshTokenOnce(ctx context.Context, store *Store, spec Spec, token Token)
 	switch spec.Kind {
 	case "copilot":
 		refreshed, err = FetchCopilotToken(ctx, spec.CopilotTokenURL, token.Refresh, clock)
+	case "muse":
+		refreshed, err = MintMetaKey(ctx, spec.MintURL, token.Refresh)
+		if err == nil {
+			refreshed.Expires = time.Time{}
+			if strings.TrimSpace(refreshed.Refresh) == "" {
+				refreshed.Refresh = token.Refresh
+			}
+		}
 	case "codex":
 		refreshed, err = RefreshCodex(ctx, CodexFlow{ClientID: spec.ClientID, Issuer: spec.Issuer}, token.Refresh, clock)
 	case "pkce":

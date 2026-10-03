@@ -17,7 +17,47 @@ export type ProviderId =
   | "lmstudio"
   | "mlx"
   | "ollama"
-  | "chatgpt";
+  | "chatgpt"
+  | "claude-oauth"
+  | "xai-oauth"
+  | "github-copilot"
+  | "antigravity"
+  | "muse"
+  | "moonshot"
+  | "minimax"
+  | "together"
+  | "fireworks"
+  | "deepinfra"
+  | "siliconflow"
+  | "nebius"
+  | "nvidia"
+  | "sambanova"
+  | "novita"
+  | "hyperbolic"
+  | "chutes"
+  | "perplexity"
+  | "cohere";
+
+export type OAuthProviderId =
+  | "chatgpt"
+  | "claude-oauth"
+  | "xai-oauth"
+  | "github-copilot"
+  | "antigravity"
+  | "muse";
+
+export const OAUTH_PROVIDERS: readonly OAuthProviderId[] = [
+  "chatgpt",
+  "claude-oauth",
+  "xai-oauth",
+  "github-copilot",
+  "antigravity",
+  "muse",
+] as const;
+
+export function isOAuthProvider(id: string): id is OAuthProviderId {
+  return (OAUTH_PROVIDERS as readonly string[]).includes(id);
+}
 
 export type ProviderInfo = {
   id: ProviderId;
@@ -155,6 +195,139 @@ export const PROVIDERS: readonly ProviderInfo[] = [
     keyPrefix: null,
     consoleUrl: "https://chatgpt.com/",
   },
+  {
+    id: "claude-oauth",
+    label: "Claude (OAuth)",
+    keyringAccount: "claude-oauth-token",
+    keyPrefix: null,
+    consoleUrl: "https://claude.ai/",
+  },
+  {
+    id: "xai-oauth",
+    label: "xAI Grok (OAuth)",
+    keyringAccount: "xai-oauth-token",
+    keyPrefix: null,
+    consoleUrl: "https://x.ai/",
+  },
+  {
+    id: "github-copilot",
+    label: "GitHub Copilot",
+    keyringAccount: "github-copilot-token",
+    keyPrefix: null,
+    consoleUrl: "https://github.com/features/copilot",
+  },
+  {
+    id: "antigravity",
+    label: "Google Antigravity",
+    keyringAccount: "antigravity-token",
+    keyPrefix: null,
+    consoleUrl: "https://antigravity.google/",
+  },
+  {
+    id: "muse",
+    label: "Meta Muse Code",
+    keyringAccount: "muse-token",
+    keyPrefix: null,
+    consoleUrl: "https://dev.meta.ai/products/muse-code",
+  },
+  {
+    id: "moonshot",
+    label: "Moonshot Kimi",
+    keyringAccount: "moonshot-api-key",
+    keyPrefix: "sk-",
+    consoleUrl: "https://platform.moonshot.cn/console/api-keys",
+  },
+  {
+    id: "minimax",
+    label: "MiniMax",
+    keyringAccount: "minimax-api-key",
+    keyPrefix: null,
+    consoleUrl: "https://platform.minimax.io/user-center/basic-information/interface-key",
+  },
+  {
+    id: "together",
+    label: "Together AI",
+    keyringAccount: "together-api-key",
+    keyPrefix: null,
+    consoleUrl: "https://api.together.ai/settings/api-keys",
+  },
+  {
+    id: "fireworks",
+    label: "Fireworks",
+    keyringAccount: "fireworks-api-key",
+    keyPrefix: null,
+    consoleUrl: "https://fireworks.ai/account/api-keys",
+  },
+  {
+    id: "deepinfra",
+    label: "DeepInfra",
+    keyringAccount: "deepinfra-api-key",
+    keyPrefix: null,
+    consoleUrl: "https://deepinfra.com/dash/api_keys",
+  },
+  {
+    id: "siliconflow",
+    label: "SiliconFlow",
+    keyringAccount: "siliconflow-api-key",
+    keyPrefix: "sk-",
+    consoleUrl: "https://cloud.siliconflow.com/account/ak",
+  },
+  {
+    id: "nebius",
+    label: "Nebius AI Studio",
+    keyringAccount: "nebius-api-key",
+    keyPrefix: null,
+    consoleUrl: "https://studio.nebius.ai/",
+  },
+  {
+    id: "nvidia",
+    label: "NVIDIA NIM",
+    keyringAccount: "nvidia-api-key",
+    keyPrefix: "nvapi-",
+    consoleUrl: "https://build.nvidia.com/settings/api-keys",
+  },
+  {
+    id: "sambanova",
+    label: "SambaNova",
+    keyringAccount: "sambanova-api-key",
+    keyPrefix: null,
+    consoleUrl: "https://cloud.sambanova.ai/apis",
+  },
+  {
+    id: "novita",
+    label: "Novita AI",
+    keyringAccount: "novita-api-key",
+    keyPrefix: null,
+    consoleUrl: "https://novita.ai/settings/key-management",
+  },
+  {
+    id: "hyperbolic",
+    label: "Hyperbolic",
+    keyringAccount: "hyperbolic-api-key",
+    keyPrefix: null,
+    consoleUrl: "https://app.hyperbolic.xyz/settings",
+  },
+  {
+    id: "chutes",
+    label: "Chutes",
+    keyringAccount: "chutes-api-key",
+    keyPrefix: null,
+    consoleUrl: "https://chutes.ai/app/api",
+  },
+  {
+    id: "perplexity",
+    label: "Perplexity",
+    keyringAccount: "perplexity-api-key",
+    keyPrefix: "pplx-",
+    consoleUrl: "https://www.perplexity.ai/settings/api",
+  },
+  {
+    id: "cohere",
+    label: "Cohere",
+    keyringAccount: "cohere-api-key",
+    keyPrefix: null,
+    consoleUrl: "https://dashboard.cohere.com/api-keys",
+  },
 ] as const;
 
 export type CustomEndpoint = {
@@ -209,7 +382,13 @@ export type ModelCapabilities = {
   cost: CapabilityScore;
 };
 
-export type ModelTag = "vision" | "reasoning" | "tools" | "coding";
+export type ModelTag =
+  | "vision"
+  | "reasoning"
+  | "tools"
+  | "coding"
+  | "fast"
+  | "search";
 
 export type ModelInfo = {
   id: string;
@@ -987,6 +1166,127 @@ export const MODELS = [
   // (`chatgpt-*`) so they never collide with the key-billed "openai" models of
   // the same name; `apiModelId` is the real backend id.
   {
+    id: "chatgpt-gpt-6.1-sol",
+    provider: "chatgpt",
+    label: "GPT-6.1 Sol (ChatGPT)",
+    hint: "Flagship",
+    description: "Newest Sol tier through a ChatGPT login.",
+    capabilities: { intelligence: 5, speed: 4, cost: 5 },
+    tags: ["reasoning", "tools", "coding"],
+    supportsTemperature: false,
+    apiModelId: "gpt-6.1-sol",
+  },
+  {
+    id: "chatgpt-gpt-6-astra",
+    provider: "chatgpt",
+    label: "GPT-6 Astra (ChatGPT)",
+    hint: "Frontier",
+    description: "Flagship through a ChatGPT login.",
+    capabilities: { intelligence: 5, speed: 3, cost: 5 },
+    tags: ["reasoning", "tools", "coding"],
+    supportsTemperature: false,
+    apiModelId: "gpt-6-astra",
+  },
+  {
+    id: "chatgpt-gpt-6-sol",
+    provider: "chatgpt",
+    label: "GPT-6 Sol (ChatGPT)",
+    hint: "Balanced",
+    description: "Balanced through a ChatGPT login.",
+    capabilities: { intelligence: 5, speed: 4, cost: 5 },
+    tags: ["reasoning", "tools"],
+    supportsTemperature: false,
+    apiModelId: "gpt-6-sol",
+  },
+  {
+    id: "chatgpt-gpt-6-luna",
+    provider: "chatgpt",
+    label: "GPT-6 Luna (ChatGPT)",
+    hint: "Fast",
+    description: "Efficient through a ChatGPT login.",
+    capabilities: { intelligence: 4, speed: 5, cost: 5 },
+    tags: ["fast", "tools"],
+    supportsTemperature: false,
+    apiModelId: "gpt-6-luna",
+  },
+  {
+    id: "chatgpt-gpt-5.6-terra",
+    provider: "chatgpt",
+    label: "GPT-5.6 Terra (ChatGPT)",
+    hint: "Reasoning",
+    description: "Previous balanced generation through a ChatGPT login.",
+    capabilities: { intelligence: 5, speed: 3, cost: 5 },
+    tags: ["reasoning", "tools"],
+    supportsTemperature: false,
+    apiModelId: "gpt-5.6-terra",
+  },
+  {
+    id: "chatgpt-gpt-5.6-sol",
+    provider: "chatgpt",
+    label: "GPT-5.6 Sol (ChatGPT)",
+    hint: "Balanced",
+    description: "Previous balanced generation through a ChatGPT login.",
+    capabilities: { intelligence: 5, speed: 4, cost: 5 },
+    tags: ["reasoning", "tools"],
+    supportsTemperature: false,
+    apiModelId: "gpt-5.6-sol",
+  },
+  {
+    id: "chatgpt-gpt-5.6-luna",
+    provider: "chatgpt",
+    label: "GPT-5.6 Luna (ChatGPT)",
+    hint: "Fast",
+    description: "Previous efficient generation through a ChatGPT login.",
+    capabilities: { intelligence: 4, speed: 5, cost: 5 },
+    tags: ["fast", "tools"],
+    supportsTemperature: false,
+    apiModelId: "gpt-5.6-luna",
+  },
+  {
+    id: "chatgpt-gpt-5.5",
+    provider: "chatgpt",
+    label: "GPT-5.5 (ChatGPT)",
+    hint: "Frontier",
+    description: "Latest frontier generation through a ChatGPT login.",
+    capabilities: { intelligence: 5, speed: 3, cost: 5 },
+    tags: ["reasoning", "tools", "coding"],
+    supportsTemperature: false,
+    apiModelId: "gpt-5.5",
+  },
+  {
+    id: "chatgpt-gpt-daybreak-blue-latest",
+    provider: "chatgpt",
+    label: "GPT Daybreak Blue (ChatGPT)",
+    hint: "Preview",
+    description: "Live experimental codex model.",
+    capabilities: { intelligence: 5, speed: 3, cost: 5 },
+    tags: ["reasoning", "coding"],
+    supportsTemperature: false,
+    apiModelId: "gpt-daybreak-blue-latest",
+  },
+  {
+    id: "chatgpt-gpt-reserve",
+    provider: "chatgpt",
+    label: "GPT Reserve (ChatGPT)",
+    hint: "Reserve",
+    description: "Reserve capacity model through a ChatGPT login.",
+    capabilities: { intelligence: 5, speed: 3, cost: 5 },
+    tags: ["reasoning", "coding"],
+    supportsTemperature: false,
+    apiModelId: "gpt-reserve",
+  },
+  {
+    id: "chatgpt-codex-auto-review",
+    provider: "chatgpt",
+    label: "Codex Auto Review (ChatGPT)",
+    hint: "Review",
+    description: "Virtual auto-review model through a ChatGPT login.",
+    capabilities: { intelligence: 4, speed: 4, cost: 5 },
+    tags: ["coding"],
+    supportsTemperature: false,
+    apiModelId: "codex-auto-review",
+  },
+  {
     id: "chatgpt-codex",
     provider: "chatgpt",
     label: "GPT-5.3 Codex",
@@ -996,6 +1296,50 @@ export const MODELS = [
     tags: ["reasoning", "tools", "coding"],
     supportsTemperature: false,
     apiModelId: "gpt-5.3-codex",
+  },
+  {
+    id: "chatgpt-gpt-5.2-codex",
+    provider: "chatgpt",
+    label: "GPT-5.2 Codex",
+    hint: "Coding",
+    description: "Previous Codex generation.",
+    capabilities: { intelligence: 5, speed: 3, cost: 5 },
+    tags: ["coding", "tools"],
+    supportsTemperature: false,
+    apiModelId: "gpt-5.2-codex",
+  },
+  {
+    id: "chatgpt-gpt-5.1-codex-max",
+    provider: "chatgpt",
+    label: "GPT-5.1 Codex Max",
+    hint: "Long-horizon",
+    description: "Long-horizon Codex model.",
+    capabilities: { intelligence: 5, speed: 3, cost: 5 },
+    tags: ["coding", "tools"],
+    supportsTemperature: false,
+    apiModelId: "gpt-5.1-codex-max",
+  },
+  {
+    id: "chatgpt-gpt-5.1-codex",
+    provider: "chatgpt",
+    label: "GPT-5.1 Codex",
+    hint: "Coding",
+    description: "Earlier Codex model.",
+    capabilities: { intelligence: 4, speed: 4, cost: 5 },
+    tags: ["coding", "tools"],
+    supportsTemperature: false,
+    apiModelId: "gpt-5.1-codex",
+  },
+  {
+    id: "chatgpt-gpt-5-codex",
+    provider: "chatgpt",
+    label: "GPT-5 Codex",
+    hint: "Coding",
+    description: "First Codex generation.",
+    capabilities: { intelligence: 4, speed: 4, cost: 5 },
+    tags: ["coding", "tools"],
+    supportsTemperature: false,
+    apiModelId: "gpt-5-codex",
   },
   {
     id: "chatgpt-codex-mini",
@@ -1028,6 +1372,295 @@ export const MODELS = [
     capabilities: { intelligence: 4, speed: 4, cost: 5 },
     tags: ["vision", "tools", "coding"],
     apiModelId: "gpt-4o",
+  },
+  // ── Claude OAuth ───────────────────────────────────────────────────────────
+  {
+    id: "claude-oauth-opus-5.5",
+    provider: "claude-oauth",
+    label: "Claude Opus 5.5 (OAuth)",
+    hint: "Frontier",
+    description: "Anthropic Claude Opus 5.5 through OAuth login.",
+    capabilities: { intelligence: 5, speed: 3, cost: 5 },
+    tags: ["reasoning", "tools", "coding"],
+    apiModelId: "claude-opus-5-5",
+  },
+  {
+    id: "claude-oauth-sonnet-5",
+    provider: "claude-oauth",
+    label: "Claude Sonnet 5 (OAuth)",
+    hint: "Balanced",
+    description: "Anthropic Claude Sonnet 5 through OAuth login.",
+    capabilities: { intelligence: 5, speed: 4, cost: 5 },
+    tags: ["reasoning", "tools", "coding"],
+    apiModelId: "claude-sonnet-5",
+  },
+  {
+    id: "claude-oauth-haiku-4.5",
+    provider: "claude-oauth",
+    label: "Claude Haiku 4.5 (OAuth)",
+    hint: "Fast",
+    description: "Fast Anthropic Claude through OAuth login.",
+    capabilities: { intelligence: 4, speed: 5, cost: 5 },
+    tags: ["fast", "tools"],
+    apiModelId: "claude-haiku-4-5",
+  },
+  // ── xAI OAuth ──────────────────────────────────────────────────────────────
+  {
+    id: "xai-oauth-grok-4",
+    provider: "xai-oauth",
+    label: "Grok 4 (OAuth)",
+    hint: "Frontier",
+    description: "xAI Grok 4 via OAuth device login.",
+    capabilities: { intelligence: 5, speed: 4, cost: 5 },
+    tags: ["reasoning", "tools", "coding"],
+    apiModelId: "grok-4",
+  },
+  {
+    id: "xai-oauth-grok-3",
+    provider: "xai-oauth",
+    label: "Grok 3 (OAuth)",
+    hint: "Reasoning",
+    description: "xAI Grok 3 via OAuth device login.",
+    capabilities: { intelligence: 5, speed: 3, cost: 5 },
+    tags: ["reasoning", "tools"],
+    apiModelId: "grok-3",
+  },
+  // ── GitHub Copilot ─────────────────────────────────────────────────────────
+  {
+    id: "copilot-claude-3.7-sonnet",
+    provider: "github-copilot",
+    label: "Claude 3.7 Sonnet (Copilot)",
+    hint: "Hybrid",
+    description: "Claude 3.7 Sonnet billed to GitHub Copilot.",
+    capabilities: { intelligence: 5, speed: 4, cost: 5 },
+    tags: ["reasoning", "tools", "coding"],
+    apiModelId: "claude-3.7-sonnet",
+  },
+  {
+    id: "copilot-gpt-4o",
+    provider: "github-copilot",
+    label: "GPT-4o (Copilot)",
+    hint: "Omni",
+    description: "GPT-4o through GitHub Copilot.",
+    capabilities: { intelligence: 4, speed: 4, cost: 5 },
+    tags: ["tools", "coding"],
+    apiModelId: "gpt-4o",
+  },
+  {
+    id: "copilot-o3-mini",
+    provider: "github-copilot",
+    label: "o3-mini (Copilot)",
+    hint: "Reasoning",
+    description: "o3-mini reasoning model through GitHub Copilot.",
+    capabilities: { intelligence: 5, speed: 4, cost: 5 },
+    tags: ["reasoning", "tools"],
+    apiModelId: "o3-mini",
+  },
+  // ── Google Antigravity ─────────────────────────────────────────────────────
+  {
+    id: "antigravity-gemini-2.5-pro",
+    provider: "antigravity",
+    label: "Gemini 2.5 Pro (Antigravity)",
+    hint: "Frontier",
+    description: "Google Cloud Code Antigravity tier.",
+    capabilities: { intelligence: 5, speed: 4, cost: 5 },
+    tags: ["reasoning", "tools", "coding"],
+    apiModelId: "gemini-2.5-pro",
+  },
+  {
+    id: "antigravity-gemini-2.5-flash",
+    provider: "antigravity",
+    label: "Gemini 2.5 Flash (Antigravity)",
+    hint: "Fast",
+    description: "Fast Antigravity model.",
+    capabilities: { intelligence: 4, speed: 5, cost: 5 },
+    tags: ["fast", "tools"],
+    apiModelId: "gemini-2.5-flash",
+  },
+  // ── Meta Muse Code ─────────────────────────────────────────────────────────
+  {
+    id: "muse-code",
+    provider: "muse",
+    label: "Meta Muse Code",
+    hint: "Coding",
+    description: "Meta Muse Code model via device authorization.",
+    capabilities: { intelligence: 5, speed: 4, cost: 5 },
+    tags: ["coding", "tools"],
+    apiModelId: "muse-code",
+  },
+  // ── Moonshot Kimi ──────────────────────────────────────────────────────────
+  {
+    id: "moonshot-kimi-k3",
+    provider: "moonshot",
+    label: "Kimi K3",
+    hint: "Frontier",
+    description: "Moonshot Kimi K3 long-context model.",
+    capabilities: { intelligence: 5, speed: 4, cost: 4 },
+    tags: ["reasoning", "tools", "coding"],
+    apiModelId: "kimi-k3",
+  },
+  {
+    id: "moonshot-v1-auto",
+    provider: "moonshot",
+    label: "Moonshot v1 Auto",
+    hint: "Auto",
+    description: "Moonshot dynamic context model.",
+    capabilities: { intelligence: 4, speed: 4, cost: 4 },
+    tags: ["tools"],
+    apiModelId: "moonshot-v1-auto",
+  },
+  // ── MiniMax ────────────────────────────────────────────────────────────────
+  {
+    id: "minimax-m2.7",
+    provider: "minimax",
+    label: "MiniMax M2.7",
+    hint: "Agentic",
+    description: "High-performance agentic model.",
+    capabilities: { intelligence: 5, speed: 4, cost: 4 },
+    tags: ["tools", "coding"],
+    apiModelId: "MiniMax-M2.7",
+  },
+  // ── Together AI ────────────────────────────────────────────────────────────
+  {
+    id: "together-kimi-k3",
+    provider: "together",
+    label: "Kimi K3 (Together)",
+    hint: "Fast",
+    description: "Kimi K3 on Together AI.",
+    capabilities: { intelligence: 5, speed: 5, cost: 4 },
+    tags: ["reasoning", "tools"],
+    apiModelId: "moonshotai/Kimi-K3",
+  },
+  // ── Fireworks ──────────────────────────────────────────────────────────────
+  {
+    id: "fireworks-deepseek-v4-pro",
+    provider: "fireworks",
+    label: "DeepSeek V4 Pro (Fireworks)",
+    hint: "Wafer",
+    description: "DeepSeek V4 Pro hosted on Fireworks.",
+    capabilities: { intelligence: 5, speed: 5, cost: 4 },
+    tags: ["reasoning", "tools", "coding"],
+    apiModelId: "accounts/fireworks/models/deepseek-v4-pro",
+  },
+  // ── DeepInfra ──────────────────────────────────────────────────────────────
+  {
+    id: "deepinfra-qwen-3.8-27b",
+    provider: "deepinfra",
+    label: "Qwen 3.8 27B (DeepInfra)",
+    hint: "Vision",
+    description: "Open vision-language model.",
+    capabilities: { intelligence: 4, speed: 5, cost: 4 },
+    tags: ["tools", "fast"],
+    apiModelId: "Qwen/Qwen3.8-27B",
+  },
+  // ── SiliconFlow ────────────────────────────────────────────────────────────
+  {
+    id: "siliconflow-deepseek-v4-pro",
+    provider: "siliconflow",
+    label: "DeepSeek V4 Pro (SiliconFlow)",
+    hint: "Fast",
+    description: "DeepSeek on SiliconFlow platform.",
+    capabilities: { intelligence: 5, speed: 4, cost: 4 },
+    tags: ["reasoning", "coding"],
+    apiModelId: "deepseek-ai/DeepSeek-V4-Pro",
+  },
+  // ── Nebius AI ──────────────────────────────────────────────────────────────
+  {
+    id: "nebius-kimi-k3",
+    provider: "nebius",
+    label: "Kimi K3 (Nebius)",
+    hint: "Cloud",
+    description: "Kimi K3 hosted on Nebius AI Studio.",
+    capabilities: { intelligence: 5, speed: 4, cost: 4 },
+    tags: ["reasoning", "tools"],
+    apiModelId: "moonshotai/Kimi-K3",
+  },
+  // ── NVIDIA NIM ─────────────────────────────────────────────────────────────
+  {
+    id: "nvidia-kimi-k3",
+    provider: "nvidia",
+    label: "Kimi K3 (NVIDIA NIM)",
+    hint: "Accelerated",
+    description: "Kimi K3 on NVIDIA accelerated cloud.",
+    capabilities: { intelligence: 5, speed: 5, cost: 4 },
+    tags: ["reasoning", "tools"],
+    apiModelId: "moonshotai/kimi-k3",
+  },
+  // ── SambaNova ──────────────────────────────────────────────────────────────
+  {
+    id: "sambanova-minimax-m2.7",
+    provider: "sambanova",
+    label: "MiniMax M2.7 (SambaNova)",
+    hint: "Fast",
+    description: "MiniMax M2.7 at high tokens per second.",
+    capabilities: { intelligence: 5, speed: 5, cost: 4 },
+    tags: ["tools", "fast"],
+    apiModelId: "MiniMax-M2.7",
+  },
+  // ── Novita AI ──────────────────────────────────────────────────────────────
+  {
+    id: "novita-deepseek-v4-pro",
+    provider: "novita",
+    label: "DeepSeek V4 Pro (Novita)",
+    hint: "Cloud",
+    description: "DeepSeek V4 Pro on Novita AI.",
+    capabilities: { intelligence: 5, speed: 4, cost: 4 },
+    tags: ["reasoning", "coding"],
+    apiModelId: "deepseek/deepseek-v4-pro",
+  },
+  // ── Hyperbolic ─────────────────────────────────────────────────────────────
+  {
+    id: "hyperbolic-qwen-3.8-27b",
+    provider: "hyperbolic",
+    label: "Qwen 3.8 27B (Hyperbolic)",
+    hint: "Vision",
+    description: "Open vision-language model on Hyperbolic.",
+    capabilities: { intelligence: 4, speed: 5, cost: 4 },
+    tags: ["tools"],
+    apiModelId: "Qwen/Qwen3.8-27B",
+  },
+  // ── Chutes ─────────────────────────────────────────────────────────────────
+  {
+    id: "chutes-qwen-3.8-27b",
+    provider: "chutes",
+    label: "Qwen 3.8 27B (Chutes)",
+    hint: "Decentralized",
+    description: "Qwen vision model hosted on Chutes.",
+    capabilities: { intelligence: 4, speed: 4, cost: 4 },
+    tags: ["tools"],
+    apiModelId: "Qwen/Qwen3.8-27B",
+  },
+  // ── Perplexity ─────────────────────────────────────────────────────────────
+  {
+    id: "sonar-pro",
+    provider: "perplexity",
+    label: "Sonar Pro",
+    hint: "Search",
+    description: "Search-backed answers with citations.",
+    capabilities: { intelligence: 5, speed: 4, cost: 4 },
+    tags: ["search", "tools"],
+    apiModelId: "sonar-pro",
+  },
+  {
+    id: "sonar-deep-research",
+    provider: "perplexity",
+    label: "Sonar Deep Research",
+    hint: "Deep Research",
+    description: "Multi-step retrieval and synthesis.",
+    capabilities: { intelligence: 5, speed: 3, cost: 3 },
+    tags: ["search", "reasoning"],
+    apiModelId: "sonar-deep-research",
+  },
+  // ── Cohere ─────────────────────────────────────────────────────────────────
+  {
+    id: "command-a-plus-05-2026",
+    provider: "cohere",
+    label: "Command A+",
+    hint: "Enterprise",
+    description: "Enterprise agentic workflows from Cohere.",
+    capabilities: { intelligence: 5, speed: 4, cost: 4 },
+    tags: ["tools"],
+    apiModelId: "command-a-plus-05-2026",
   },
 ] as const satisfies readonly ModelInfo[];
 
@@ -1548,6 +2181,11 @@ export const KEYLESS_PROVIDERS: readonly ProviderId[] = [
   "mlx",
   "ollama",
   "chatgpt",
+  "claude-oauth",
+  "xai-oauth",
+  "github-copilot",
+  "antigravity",
+  "muse",
   "openai-compatible",
 ] as const;
 

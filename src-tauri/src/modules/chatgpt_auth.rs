@@ -183,6 +183,8 @@ async fn post_token(form: String) -> Result<TokenResponse, String> {
     let res = client
         .post(TOKEN_URL)
         .header("content-type", "application/x-www-form-urlencoded")
+        .header("user-agent", "codex_cli_rs/0.159.0")
+        .header("originator", "codex_cli_rs")
         .body(form)
         .send()
         .await
@@ -293,6 +295,7 @@ pub async fn chatgpt_auth_login(app: tauri::AppHandle) -> Result<ChatGptTokens, 
             ("state", &state),
             ("id_token_add_organizations", "true"),
             ("codex_cli_simplified_flow", "true"),
+            ("originator", "codex_cli_rs"),
         ])
     );
 

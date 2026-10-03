@@ -336,13 +336,46 @@ export async function buildLanguageModel(
     }
     case "stepfun":
     case "qwen":
-    case "zhipu": {
+    case "zhipu":
+    case "moonshot":
+    case "minimax":
+    case "together":
+    case "fireworks":
+    case "deepinfra":
+    case "siliconflow":
+    case "nebius":
+    case "nvidia":
+    case "sambanova":
+    case "novita":
+    case "hyperbolic":
+    case "chutes":
+    case "perplexity":
+    case "cohere": {
       const { createOpenAICompatible } = await import(
         "@ai-sdk/openai-compatible"
       );
+      const defaultBases: Partial<Record<ProviderId, string>> = {
+        stepfun: "https://api.stepfun.com/v1",
+        qwen: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        zhipu: "https://open.bigmodel.cn/api/paas/v4",
+        moonshot: "https://api.moonshot.cn/v1",
+        minimax: "https://api.minimax.io/v1",
+        together: "https://api.together.xyz/v1",
+        fireworks: "https://api.fireworks.ai/inference/v1",
+        deepinfra: "https://api.deepinfra.com/v1/openai",
+        siliconflow: "https://api.siliconflow.com/v1",
+        nebius: "https://api.studio.nebius.ai/v1",
+        nvidia: "https://integrate.api.nvidia.com/v1",
+        sambanova: "https://api.sambanova.ai/v1",
+        novita: "https://api.novita.ai/v3/openai",
+        hyperbolic: "https://api.hyperbolic.xyz/v1",
+        chutes: "https://llm.chutes.ai/v1",
+        perplexity: "https://api.perplexity.ai",
+        cohere: "https://api.cohere.ai/compatibility/v1",
+      };
       built = createOpenAICompatible({
         name: provider,
-        baseURL: compatURL,
+        baseURL: compatURL || defaultBases[provider] || "",
         apiKey: epKey || key || undefined,
         fetch: apiFetch,
       })(resolvedModelId);
@@ -405,6 +438,104 @@ export async function buildLanguageModel(
         },
         fetch: apiFetch,
       }).responses(resolvedModelId);
+    }
+    case "claude-oauth": {
+      const { createAnthropic } = await import("@ai-sdk/anthropic");
+      const { getOAuthAccess } = await import("./oauthAuth");
+      const auth = await getOAuthAccess("claude-oauth");
+      if (!auth) {
+        throw new Error(
+          "Not signed in to Claude (OAuth). Open Settings → Models and sign in.",
+        );
+      }
+      return createAnthropic({
+        baseURL: "https://api.anthropic.com",
+        apiKey: auth.accessToken,
+        headers: {
+          "anthropic-beta":
+            "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14",
+          "anthropic-dangerous-direct-browser-access": "true",
+          "x-app": "cli",
+          "User-Agent": "claude-cli/2.1.280 (external, sdk-cli)",
+        },
+        fetch: apiFetch,
+      })(resolvedModelId);
+    }
+    case "xai-oauth": {
+      const { createOpenAICompatible } = await import(
+        "@ai-sdk/openai-compatible"
+      );
+      const { getOAuthAccess } = await import("./oauthAuth");
+      const auth = await getOAuthAccess("xai-oauth");
+      if (!auth) {
+        throw new Error(
+          "Not signed in to xAI Grok (OAuth). Open Settings → Models and sign in.",
+        );
+      }
+      return createOpenAICompatible({
+        name: "xai-oauth",
+        baseURL: "https://api.x.ai/v1",
+        apiKey: auth.accessToken,
+        fetch: apiFetch,
+      })(resolvedModelId);
+    }
+    case "github-copilot": {
+      const { createOpenAICompatible } = await import(
+        "@ai-sdk/openai-compatible"
+      );
+      const { getOAuthAccess } = await import("./oauthAuth");
+      const auth = await getOAuthAccess("github-copilot");
+      if (!auth) {
+        throw new Error(
+          "Not signed in to GitHub Copilot. Open Settings → Models and sign in.",
+        );
+      }
+      return createOpenAICompatible({
+        name: "github-copilot",
+        baseURL: "https://api.githubcopilot.com",
+        apiKey: auth.accessToken,
+        headers: {
+          "copilot-integration-id": "vscode-chat",
+          "editor-version": "vscode/1.110.0",
+        },
+        fetch: apiFetch,
+      })(resolvedModelId);
+    }
+    case "antigravity": {
+      const { createOpenAICompatible } = await import(
+        "@ai-sdk/openai-compatible"
+      );
+      const { getOAuthAccess } = await import("./oauthAuth");
+      const auth = await getOAuthAccess("antigravity");
+      if (!auth) {
+        throw new Error(
+          "Not signed in to Google Antigravity. Open Settings → Models and sign in.",
+        );
+      }
+      return createOpenAICompatible({
+        name: "antigravity",
+        baseURL: "https://daily-cloudcode-pa.googleapis.com",
+        apiKey: auth.accessToken,
+        fetch: apiFetch,
+      })(resolvedModelId);
+    }
+    case "muse": {
+      const { createOpenAICompatible } = await import(
+        "@ai-sdk/openai-compatible"
+      );
+      const { getOAuthAccess } = await import("./oauthAuth");
+      const auth = await getOAuthAccess("muse");
+      if (!auth) {
+        throw new Error(
+          "Not signed in to Meta Muse Code. Open Settings → Models and sign in.",
+        );
+      }
+      return createOpenAICompatible({
+        name: "muse",
+        baseURL: "https://api.meta.ai/v1",
+        apiKey: auth.accessToken,
+        fetch: apiFetch,
+      })(resolvedModelId);
     }
     default: {
       const _exhaustive: never = provider;
