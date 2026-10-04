@@ -2285,20 +2285,21 @@ export const MLX_DEFAULT_BASE_URL = "http://127.0.0.1:8080/v1";
 export const OLLAMA_DEFAULT_BASE_URL = "http://localhost:11434/v1";
 export const OPENAI_COMPATIBLE_DEFAULT_BASE_URL = "";
 /**
- * Step budget: one explicit number, exactly how many steps one reply may run.
+ * Step budget: one explicit cap per reply, resolved per model.
  *
  * This follows the Termixgo invariant: the per-turn ceiling is one explicit
  * number, not a hidden multiple. A budget that escalates on every Continue
- * (the old 25 -> 50 -> 100 ladder) is a multiplier the user never agreed to:
- * a run paused at "25 steps" could resume and be allowed a hundred without
- * anything being said. Each round now gets the same explicit cap; a heavy
- * task earns depth by continuing, and every round honestly stops at 25. The
- * loop guards and the cost cap stay the real stops for a run that goes
- * nowhere, so the ceiling only bounds a productive one.
+ * (the old 25 -> 50 -> 100 ladder) is a multiplier the user never agreed to.
+ * Every round gets the same cap for the chosen model; a heavy task earns
+ * depth by continuing, and the loop guards and the cost cap remain the real
+ * stops for a run that goes nowhere.
  *
- * 25 matches VS Code's agent mode default (`chat.agent.maxRequests`). The
- * harness profile may adjust it visibly (`stepBudgetDelta`), which is a
- * choice the user made, not a hidden escalation.
+ * API-key providers run `MAX_AGENT_STEPS` (500). OAuth / keyless providers
+ * run `OAUTH_MAX_AGENT_STEPS` (10,000) because they are not billed per step
+ * or per token, so their real bound is the provider's 5-hour usage window.
+ * The harness profile may still adjust the number visibly
+ * (`stepBudgetDelta`), which is a choice the user made, not a hidden
+ * escalation.
  */
 export const MAX_AGENT_STEPS = 500;
 

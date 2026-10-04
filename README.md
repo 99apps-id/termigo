@@ -161,9 +161,12 @@ automation: agent runs, MCP, skills, and project scaffolding.
   model can see its work was cut short instead of being shown a past in which it
   never made the call - and repeating it.
 - **The run says why it stopped, and goes on when you ask.** One request
-  gets 25 steps - the same default as VS Code's agent mode - and it is one
-  explicit number every round: Continue resumes the task on the same cap,
-  never a hidden ladder that quietly lets a "25-step" pause run to a hundred.
+  gets one explicit per-round cap, resolved per model: 500 steps on an API-key
+  model, 10,000 on an OAuth / keyless model (ChatGPT, Claude OAuth, xAI OAuth,
+  Antigravity, GitHub Copilot, Muse), whose real limit is the provider's 5-hour
+  usage window rather than a step count. It is one number every round, so
+  Continue resumes the task on the same cap for that model - never a hidden
+  ladder that quietly lets a paused run go further than the number it showed.
   A task that needs more depth earns it round by round, one informed click at
   a time. Two guards sit alongside the budget: the same tool called three
   times with identical input, and two turns in a row that call no tool at all.
