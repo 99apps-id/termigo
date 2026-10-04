@@ -3,7 +3,7 @@
 //! Supports:
 //!   - `openai-codex` (OpenAI Codex / ChatGPT, PKCE on 127.0.0.1:1455)
 //!   - `claude-oauth` (Anthropic Claude, PKCE on 127.0.0.1:54545)
-//!   - `antigravity` (Google Antigravity, PKCE on 127.0.0.1:8085)
+//!   - `antigravity` (Google Antigravity, PKCE on an ephemeral loopback port)
 //!   - `xai-oauth` (xAI Grok, RFC 8628 Device Flow)
 //!   - `github-copilot` (GitHub Copilot Device Flow + Copilot token exchange)
 //!   - `muse` (Meta Muse Code Device Flow + key minting)
@@ -205,30 +205,50 @@ async fn accept_callback(listener: &TcpListener, path_prefix: &str) -> Result<St
 
 // ── PKCE Flows ────────────────────────────────────────────────────────────────
 
+/// Binds a PKCE loopback listener and returns the port actually bound, so the
+/// redirect URI is always built from the listener rather than a constant.
+///
+/// `preferred` is the port a vendor's registered redirect pins; `None` asks the
+/// OS for an ephemeral one. A fixed port that is taken (a stale listener, or a
+/// second instance) fails here with the port named; the vendor clients whose
+/// loopback flow ignores the port pass `None` and cannot collide at all.
+async fn bind_loopback(preferred: Option<u16>) -> Result<(TcpListener, u16), String> {
+    let addr = match preferred {
+        Some(port) => format!("127.0.0.1:{port}"),
+        None => "127.0.0.1:0".to_string(),
+    };
+    let listener = TcpListener::bind(&addr).await.map_err(|e| match preferred {
+        Some(port) => format!(
+            "could not listen on 127.0.0.1:{port} ({e}). Please close any process using port {port} and try again."
+        ),
+        None => format!("could not listen on a loopback port ({e})."),
+    })?;
+    let port = listener
+        .local_addr()
+        .map_err(|e| format!("could not read the callback port: {e}"))?
+        .port();
+    Ok((listener, port))
+}
+
 async fn login_openai_codex(app: &tauri::AppHandle) -> Result<OAuthTokens, String> {
     const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
     const AUTHORIZE_URL: &str = "https://auth.openai.com/oauth/authorize";
     const TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
-    const REDIRECT_URI: &str = "http://localhost:1455/auth/callback";
-    const CALLBACK_ADDR: &str = "127.0.0.1:1455";
     const SCOPE: &str = "openid profile email offline_access";
 
     let verifier = random_b64(32)?;
     let challenge = b64url(&Sha256::digest(verifier.as_bytes()));
     let state = random_b64(16)?;
 
-    let listener = TcpListener::bind(CALLBACK_ADDR).await.map_err(|e| {
-        format!(
-            "could not listen on {CALLBACK_ADDR} ({e}). Please close any process using port 1455 and try again."
-        )
-    })?;
+    let (listener, port) = bind_loopback(Some(1455)).await?;
+    let redirect_uri = format!("http://localhost:{port}/auth/callback");
 
     let auth_url = format!(
         "{AUTHORIZE_URL}?{}",
         query(&[
             ("response_type", "code"),
             ("client_id", CLIENT_ID),
-            ("redirect_uri", REDIRECT_URI),
+            ("redirect_uri", &redirect_uri),
             ("scope", SCOPE),
             ("code_challenge", &challenge),
             ("code_challenge_method", "S256"),
@@ -283,7 +303,7 @@ async fn login_openai_codex(app: &tauri::AppHandle) -> Result<OAuthTokens, Strin
     let form = query(&[
         ("grant_type", "authorization_code"),
         ("code", &code),
-        ("redirect_uri", REDIRECT_URI),
+        ("redirect_uri", &redirect_uri),
         ("client_id", CLIENT_ID),
         ("code_verifier", &verifier),
     ]);
@@ -335,26 +355,21 @@ async fn login_claude_oauth(app: &tauri::AppHandle) -> Result<OAuthTokens, Strin
     const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
     const AUTHORIZE_URL: &str = "https://claude.ai/oauth/authorize";
     const TOKEN_URL: &str = "https://api.anthropic.com/v1/oauth/token";
-    const REDIRECT_URI: &str = "http://localhost:54545/callback";
-    const CALLBACK_ADDR: &str = "127.0.0.1:54545";
     const SCOPE: &str = "org:create_api_key user:profile user:inference";
 
     let verifier = random_b64(32)?;
     let challenge = b64url(&Sha256::digest(verifier.as_bytes()));
     let state = random_b64(16)?;
 
-    let listener = TcpListener::bind(CALLBACK_ADDR).await.map_err(|e| {
-        format!(
-            "could not listen on {CALLBACK_ADDR} ({e}). Please close any process using port 54545 and try again."
-        )
-    })?;
+    let (listener, port) = bind_loopback(Some(54545)).await?;
+    let redirect_uri = format!("http://localhost:{port}/callback");
 
     let auth_url = format!(
         "{AUTHORIZE_URL}?{}",
         query(&[
             ("response_type", "code"),
             ("client_id", CLIENT_ID),
-            ("redirect_uri", REDIRECT_URI),
+            ("redirect_uri", &redirect_uri),
             ("scope", SCOPE),
             ("code_challenge", &challenge),
             ("code_challenge_method", "S256"),
@@ -406,7 +421,7 @@ async fn login_claude_oauth(app: &tauri::AppHandle) -> Result<OAuthTokens, Strin
     let payload = serde_json::json!({
         "grant_type": "authorization_code",
         "code": code,
-        "redirect_uri": REDIRECT_URI,
+        "redirect_uri": redirect_uri,
         "client_id": CLIENT_ID,
         "code_verifier": verifier,
         "state": state,
@@ -458,23 +473,24 @@ async fn login_antigravity(app: &tauri::AppHandle) -> Result<OAuthTokens, String
 
     const AUTHORIZE_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
     const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
-    const REDIRECT_URI: &str = "http://localhost:8085/auth/callback";
-    const CALLBACK_ADDR: &str = "127.0.0.1:8085";
 
     let verifier = random_b64(32)?;
     let challenge = b64url(&Sha256::digest(verifier.as_bytes()));
     let state = random_b64(16)?;
 
-    let listener = TcpListener::bind(CALLBACK_ADDR).await.map_err(|e| {
-        format!("could not listen on {CALLBACK_ADDR} ({e}).")
-    })?;
+    // Google's installed-app loopback flow ignores the port, and the Go
+    // companion logs in the same way, so bind an ephemeral one. The old fixed
+    // 8085 failed with os error 10048 ("Only one usage of each socket address")
+    // whenever the port was busy, which blocked sign-in entirely.
+    let (listener, port) = bind_loopback(None).await?;
+    let redirect_uri = format!("http://localhost:{port}/auth/callback");
 
     let auth_url = format!(
         "{AUTHORIZE_URL}?{}",
         query(&[
             ("response_type", "code"),
             ("client_id", &client_id),
-            ("redirect_uri", REDIRECT_URI),
+            ("redirect_uri", &redirect_uri),
             (
                 "scope",
                 "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/cclog https://www.googleapis.com/auth/experimentsandconfigs",
@@ -515,7 +531,7 @@ async fn login_antigravity(app: &tauri::AppHandle) -> Result<OAuthTokens, String
     let form = query(&[
         ("grant_type", "authorization_code"),
         ("code", &code),
-        ("redirect_uri", REDIRECT_URI),
+        ("redirect_uri", &redirect_uri),
         ("client_id", &client_id),
         ("client_secret", &client_secret),
         ("code_verifier", &verifier),
@@ -1253,4 +1269,40 @@ pub async fn oauth_refresh(provider: String, refresh_token: String) -> Result<OA
         return Err("no refresh token stored; sign in again".to_string());
     }
     do_refresh_token(&provider, &refresh_token).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn bind_loopback_ephemeral_reports_the_bound_port() {
+        let (listener, port) = bind_loopback(None).await.expect("ephemeral bind");
+        assert!(port > 0);
+        assert_eq!(listener.local_addr().expect("addr").port(), port);
+    }
+
+    // The antigravity flow passes None, so a busy port never blocks it: a fixed
+    // port fails while an ephemeral bind still succeeds alongside it.
+    #[tokio::test]
+    async fn bind_loopback_ephemeral_works_while_the_fixed_port_is_busy() {
+        let (held, held_port) = bind_loopback(None).await.expect("hold a port");
+        assert!(bind_loopback(Some(held_port)).await.is_err());
+        let (_ephemeral, port) = bind_loopback(None).await.expect("ephemeral bind");
+        assert_ne!(port, held_port);
+        drop(held);
+    }
+
+    #[tokio::test]
+    async fn bind_loopback_names_a_busy_preferred_port() {
+        let (held, held_port) = bind_loopback(None).await.expect("hold a port");
+        let err = bind_loopback(Some(held_port))
+            .await
+            .expect_err("a busy fixed port must fail, not steal the port");
+        assert!(
+            err.contains(&held_port.to_string()),
+            "error must name the busy port: {err}"
+        );
+        drop(held);
+    }
 }

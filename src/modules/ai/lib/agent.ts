@@ -502,9 +502,6 @@ export async function buildLanguageModel(
       })(resolvedModelId);
     }
     case "antigravity": {
-      const { createOpenAICompatible } = await import(
-        "@ai-sdk/openai-compatible"
-      );
       const { getOAuthAccess } = await import("./oauthAuth");
       const auth = await getOAuthAccess("antigravity");
       if (!auth) {
@@ -512,12 +509,11 @@ export async function buildLanguageModel(
           "Not signed in to Google Antigravity. Open Settings → Models and sign in.",
         );
       }
-      return createOpenAICompatible({
-        name: "antigravity",
-        baseURL: "https://daily-cloudcode-pa.googleapis.com",
-        apiKey: auth.accessToken,
-        fetch: apiFetch,
-      })(resolvedModelId);
+      // Cloud Code, not an OpenAI-compatible endpoint: the adapter rewrites the
+      // Google provider's requests and unwraps its SSE envelopes. Returned, not
+      // cached: the access token rotates on refresh.
+      const { createAntigravityLanguageModel } = await import("./antigravity");
+      return createAntigravityLanguageModel(auth.accessToken, resolvedModelId);
     }
     case "muse": {
       const { createOpenAICompatible } = await import(

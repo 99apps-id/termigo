@@ -262,6 +262,16 @@ jobs:
                 squashfs-root/usr/lib/libwayland-cursor.so.0 \
                 squashfs-root/usr/lib/libwayland-server.so.0
 
+          # The cached Tauri/linuxdeploy launcher is packaged as mode 0770
+          # root:root, so AppRun.wrapped has no execute bit for anyone outside
+          # root. The AppImageHub test runs as an unprivileged user and dies at
+          # `AppRun: line 13: AppRun.wrapped: Permission denied`. Normalize the
+          # whole AppDir before repacking, which is exactly what the catalog's
+          # diagnoser recommends. `X` only adds execute to dirs and files that
+          # already carry an execute bit, so nothing loses its mode.
+          chmod -R a+rX squashfs-root
+          chmod a+x squashfs-root/AppRun squashfs-root/AppRun.wrapped
+
           curl -fsSL -o appimagetool.AppImage \
             https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
           chmod +x appimagetool.AppImage
@@ -277,6 +287,14 @@ jobs:
           done
           test -x squashfs-root/usr/bin/termigo \
             || { echo "termigo binary missing from repacked AppImage"; exit 1; }
+          # The catalog test runs as a different user than the file owner, so
+          # owner-execute is not enough: assert the world-execute bit on the
+          # launcher pair, the exact failure that got Termigo rejected.
+          for f in AppRun AppRun.wrapped; do
+            mode=$(stat -c '%A' "squashfs-root/$f")
+            test "${mode: -1}" = "x" \
+              || { echo "$f is not executable for others after repack: $mode"; exit 1; }
+          done
           popd >/dev/null
 
           cp "$WORK/$BASENAME" "$APPIMAGE"

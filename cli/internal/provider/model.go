@@ -101,6 +101,9 @@ var models = []Model{
 	{ID: "antigravity-gemini-3.5-flash", Provider: "antigravity", Label: "Gemini 3.5 Flash (Antigravity)", APIID: "gemini-3.5-flash-low", Description: "Balanced Gemini through an Antigravity login.", Tags: []string{"fast", "tools"}},
 	{ID: "antigravity-gemini-pro", Provider: "antigravity", Label: "Gemini Pro (Antigravity)", APIID: "gemini-pro-agent", Description: "Flagship Gemini through an Antigravity login.", Tags: []string{"reasoning", "tools", "coding"}},
 	{ID: "antigravity-claude-sonnet-4-6", Provider: "antigravity", Label: "Claude Sonnet 4.6 (Antigravity)", APIID: "claude-sonnet-4-6", Description: "Claude through an Antigravity login.", Tags: []string{"reasoning", "tools", "coding"}},
+	// Meta Muse Code. The device grant mints an account key; the model id is
+	// what api.meta.ai serves it under.
+	{ID: "muse-spark-1.3", Provider: "muse", Label: "Muse Spark 1.3", APIID: "muse-spark-1.3", Description: "Meta's coding model through a Muse Code login.", Tags: []string{"coding", "tools"}},
 	{ID: "claude-opus-5", Provider: "anthropic", Label: "Claude Opus 5", Description: "Previous flagship, still available.", Tags: []string{"reasoning", "tools"}},
 	{ID: "claude-sonnet-4-6", Provider: "anthropic", Label: "Claude Sonnet 4.6", Description: "Previous Sonnet generation.", Tags: []string{"tools", "coding"}},
 
