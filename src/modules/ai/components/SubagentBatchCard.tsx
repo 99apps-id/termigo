@@ -42,7 +42,27 @@ export type SubagentWorker = {
   skipped?: string;
   /** Done, but its review inspected nothing - the summary is unverified. */
   inconclusive?: boolean;
+  /** Tokens the sub-agent spent, summed across its steps. */
+  usage?: { inputTokens: number; outputTokens: number };
 };
+
+/** Reads a `{ inputTokens, outputTokens }` usage object, or undefined when absent/empty. */
+function readUsage(value: unknown): SubagentWorker["usage"] {
+  if (!value || typeof value !== "object") return undefined;
+  const raw = value as { inputTokens?: unknown; outputTokens?: unknown };
+  const inputTokens = typeof raw.inputTokens === "number" ? raw.inputTokens : 0;
+  const outputTokens =
+    typeof raw.outputTokens === "number" ? raw.outputTokens : 0;
+  if (inputTokens === 0 && outputTokens === 0) return undefined;
+  return { inputTokens, outputTokens };
+}
+
+/** Compact token count for the card's tight chrome. */
+export function formatTokens(n: number): string {
+  if (n < 1000) return String(n);
+  if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`;
+  return `${(n / 1_000_000).toFixed(2)}M`;
+}
 
 export function fmtDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
@@ -127,6 +147,7 @@ export function extractWorkerData(
         typeof res?.durationMs === "number" ? res.durationMs : undefined;
       const resInconclusive =
         res?.inconclusive === true || matchedRun?.inconclusive === true;
+      const resUsage = readUsage(res?.usage) ?? matchedRun?.usage;
 
       let status: SubagentWorker["status"] = "pending";
       if (resError || matchedRun?.status === "error") {
@@ -153,6 +174,7 @@ export function extractWorkerData(
         error: resError ?? matchedRun?.error,
         skipped: resSkipped,
         inconclusive: resInconclusive,
+        usage: resUsage,
       };
     });
 
@@ -180,6 +202,7 @@ export function extractWorkerData(
     typeof outObj?.durationMs === "number" ? outObj.durationMs : undefined;
   const outInconclusive =
     outObj?.inconclusive === true || matchedRun?.inconclusive === true;
+  const outUsage = readUsage(outObj?.usage) ?? matchedRun?.usage;
 
   let status: SubagentWorker["status"] = "pending";
   if (outError || matchedRun?.status === "error") {
@@ -203,6 +226,7 @@ export function extractWorkerData(
       summary: outSummary ?? matchedRun?.summary,
       error: outError ?? matchedRun?.error,
       inconclusive: outInconclusive,
+      usage: outUsage,
     },
   ];
 
@@ -249,6 +273,10 @@ export const SubagentBatchCard = memo(function SubagentBatchCard({
 
   const totalDuration = workers.reduce(
     (acc, w) => acc + (w.durationMs ?? 0),
+    0,
+  );
+  const totalTokens = workers.reduce(
+    (acc, w) => acc + (w.usage ? w.usage.inputTokens + w.usage.outputTokens : 0),
     0,
   );
 
@@ -335,6 +363,12 @@ export const SubagentBatchCard = memo(function SubagentBatchCard({
             <span className="hidden sm:inline-flex items-center gap-1 font-mono text-[10.5px] text-muted-foreground">
               <HugeiconsIcon icon={Clock01Icon} size={10.5} strokeWidth={1.8} />
               <span>{fmtDuration(totalDuration)}</span>
+            </span>
+          )}
+
+          {totalTokens > 0 && (
+            <span className="hidden sm:inline-flex items-center gap-1 font-mono text-[10.5px] text-muted-foreground">
+              <span>{formatTokens(totalTokens)} tok</span>
             </span>
           )}
 
@@ -517,6 +551,14 @@ const WorkerRow = memo(function WorkerRow({
           )}
           {worker.durationMs != null && worker.durationMs > 0 && (
             <span>{fmtDuration(worker.durationMs)}</span>
+          )}
+          {worker.usage && (
+            <span>
+              {formatTokens(
+                worker.usage.inputTokens + worker.usage.outputTokens,
+              )}{" "}
+              tok
+            </span>
           )}
 
           {worker.summary && (

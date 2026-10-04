@@ -1,7 +1,13 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { resolvePath, type ToolContext } from "./context";
+import { native } from "../lib/native";
 import { checkReadable } from "../lib/security";
+import {
+  applyTextEdits,
+  collectFileEdits,
+  type LspWorkspaceEdit,
+} from "../lib/workspaceEdit";
 import { useDiagnosticsStore } from "@/modules/editor/lib/diagnosticsStore";
 import { acquireQuerySession } from "@/modules/lsp/lib/sessionManager";
 import {
@@ -173,6 +179,114 @@ export function buildLspTools(ctx: ToolContext) {
             character,
             references: refs,
             count: refs.length,
+          };
+        } catch (e) {
+          return { error: String(e), path: rawPath };
+        } finally {
+          q.release();
+        }
+      },
+    }),
+
+    lsp_rename: tool({
+      description:
+        "Rename a symbol across the whole workspace using a live Language Server Protocol session, applying the server's rename edit to every affected file. Line and character are 1-indexed and must point at the symbol. Prefer this over a sequence of edit calls for a cross-file rename: the server computes every reference, so nothing is missed and no unrelated text is rewritten. Local-only; writes the files the server names.",
+      inputSchema: z.object({
+        path: z.string().describe("Relative or absolute path to the source file."),
+        line: z.number().int().min(1).describe("1-indexed line number of the symbol."),
+        character: z
+          .number()
+          .int()
+          .min(1)
+          .describe("1-indexed character / column of the symbol."),
+        newName: z.string().min(1).describe("The new symbol name."),
+      }),
+      execute: async ({ path: rawPath, line, character, newName }) => {
+        const path = resolvePath(rawPath, ctx.getCwd());
+        const secret = checkReadable(path);
+        if (!secret.ok) {
+          return { error: `Access denied: ${secret.reason}`, path: rawPath };
+        }
+        if (ctx.getRemoteSession()) {
+          return {
+            error:
+              "lsp_rename is local-only; use edit on the remote host to rename symbols.",
+            path: rawPath,
+          };
+        }
+        const q = await acquireQuerySession(path);
+        if (!q) {
+          return {
+            error:
+              "No enabled language server covered this file (or the server binary is missing). Enable LSP for its language in Settings, or install the server.",
+            path: rawPath,
+          };
+        }
+        try {
+          const edit = (await q.client.textDocumentRename({
+            textDocument: { uri: q.uri },
+            position: toPos({ line, character }),
+            newName,
+          })) as unknown as LspWorkspaceEdit | null;
+          if (!edit) {
+            return {
+              path: rawPath,
+              newName,
+              changed: 0,
+              files: [],
+              note: "The language server returned no rename edit; the position may not be on a renamable symbol.",
+            };
+          }
+          const plans = collectFileEdits(edit);
+          if (plans.length === 0) {
+            return {
+              path: rawPath,
+              newName,
+              changed: 0,
+              files: [],
+              note: "The language server's rename edit named no files.",
+            };
+          }
+          const files: Array<{ path: string; edits?: number; error?: string }> =
+            [];
+          for (const plan of plans) {
+            const guard = checkReadable(plan.path);
+            if (!guard.ok) {
+              files.push({
+                path: plan.path,
+                error: `Access denied: ${guard.reason}`,
+              });
+              continue;
+            }
+            const read = await native.readFile(plan.path);
+            if (read.kind !== "text") {
+              files.push({
+                path: plan.path,
+                error: "Skipped: not a readable text file.",
+              });
+              continue;
+            }
+            const updated = applyTextEdits(read.content, plan.edits);
+            if (updated === read.content) {
+              files.push({ path: plan.path, edits: 0 });
+              continue;
+            }
+            await native.writeFile(plan.path, updated);
+            files.push({ path: plan.path, edits: plan.edits.length });
+          }
+          const changed = files.filter(
+            (f) => !f.error && (f.edits ?? 0) > 0,
+          ).length;
+          return {
+            path: rawPath,
+            newName,
+            changed,
+            files,
+            ...(changed === 0
+              ? {
+                  note: "The rename produced no text change; the symbol may already have that name.",
+                }
+              : {}),
           };
         } catch (e) {
           return { error: String(e), path: rawPath };

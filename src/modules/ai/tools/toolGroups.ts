@@ -66,8 +66,13 @@ export const TOOL_GROUPS: readonly ToolGroup[] = [
     id: "lsp",
     label: "Language servers",
     description:
-      "Definitions, references and diagnostics from a language server. Off means grep and reading instead.",
-    tools: ["lsp_definitions", "lsp_diagnostics", "lsp_references"],
+      "Definitions, references, rename and diagnostics from a language server. Off means grep and reading instead.",
+    tools: [
+      "lsp_definitions",
+      "lsp_diagnostics",
+      "lsp_references",
+      "lsp_rename",
+    ],
   },
   {
     id: "web",

@@ -179,6 +179,7 @@ Approval works exactly as it does for you: read-only tools auto-run, and every m
             durationMs: r.durationMs,
             summary: r.summary,
             inconclusive: r.inconclusive,
+            ...(r.usage ? { usage: r.usage } : {}),
           });
           return {
             type: resolved,
@@ -412,6 +413,7 @@ Each task's subagent has the same toolset you do and may itself spawn further su
               durationMs: r.durationMs,
               summary: r.summary,
               inconclusive: r.inconclusive,
+              ...(r.usage ? { usage: r.usage } : {}),
             });
           } catch (e) {
             results[i].error = String(e);

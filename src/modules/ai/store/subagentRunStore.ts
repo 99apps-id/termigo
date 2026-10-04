@@ -103,6 +103,8 @@ export type SubagentRun = {
    *  conclusion is unverified (see `lib/subagentEvidence.ts`). A done run that
    *  carries this must not be shown as a clean result. */
   inconclusive?: boolean;
+  /** Tokens the sub-agent spent, summed across its steps. */
+  usage?: { inputTokens: number; outputTokens: number };
 };
 
 const MAX_RUNS_PER_SESSION = 24;
@@ -123,6 +125,7 @@ type SubagentRunState = {
       durationMs?: number;
       summary?: string;
       inconclusive?: boolean;
+      usage?: { inputTokens: number; outputTokens: number };
     },
   ) => void;
   fail: (sessionId: string, id: string, error: string) => void;

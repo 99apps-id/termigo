@@ -1,5 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { info as logInfo, warn as logWarn } from "@tauri-apps/plugin-log";
+import { usePreferencesStore } from "@/modules/settings/preferences";
 
 /** RFC1918 + loopback + link-local + unspecified address ranges. */
 const PRIVATE_NET_RE =

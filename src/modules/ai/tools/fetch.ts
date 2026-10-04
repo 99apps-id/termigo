@@ -22,7 +22,7 @@ import {
   looksLikeHtml,
 } from "../lib/htmlText";
 import { isLoopbackIpv4 } from "../lib/browserGuard";
-import { usePreferencesStore } from "../settings/preferences";
+import { usePreferencesStore } from "@/modules/settings/preferences";
 
 type HttpResponse = {
   status: number;
