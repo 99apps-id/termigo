@@ -15,7 +15,7 @@
 
 /** How many automatic continues one task may chain before the manual
  *  Continue button takes over again. Reset by any fresh user message. */
-export const MAX_AUTO_CONTINUES = 8;
+export const MAX_AUTO_CONTINUES = 50;
 
 /** Breathing room between the pause and the auto-resume, so the UI settles
  *  (and a queued Stop lands) before the next round is dispatched. */

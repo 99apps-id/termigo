@@ -13,6 +13,8 @@ import {
   type ProviderId,
   providerNeedsKey,
   MAX_AGENT_STEPS,
+  isOAuthModel,
+  stepBudgetForModel,
 } from "../config";
 import { buildLanguageModel, type AgentStopReason } from "../lib/agent";
 import { splitForEdit } from "../lib/messageEdit";
