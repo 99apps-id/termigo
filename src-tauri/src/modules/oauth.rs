@@ -1095,7 +1095,8 @@ async fn do_refresh_token(provider: &str, refresh_token: &str) -> Result<OAuthTo
             let mint_res = client
                 .post(MINT_URL)
                 .header("authorization", format!("Bearer {refresh_token}"))
-                .header("user-agent", "muse-code/1.0.2")
+                .header("user-agent", MUSE_USER_AGENT)
+                .header("accept", "application/json")
                 .header("x-api-version", "1.0.0")
                 .json(&serde_json::json!({ "onboard": true }))
                 .send()

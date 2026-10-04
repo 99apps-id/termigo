@@ -212,6 +212,9 @@ func extraHeaders(headers map[string]string, providerID string) {
 		headers["HTTP-Referer"] = "https://github.com/99apps-id/termixgo"
 		headers["X-Title"] = "Termixgo"
 	}
+	if providerID == "muse" {
+		headers["User-Agent"] = "muse-code/1.0.2"
+	}
 }
 
 // openAIDelta is one streamed delta. reasoning_content is DeepSeek's field,

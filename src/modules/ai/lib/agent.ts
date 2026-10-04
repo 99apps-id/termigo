@@ -450,7 +450,7 @@ export async function buildLanguageModel(
       }
       return createAnthropic({
         baseURL: "https://api.anthropic.com",
-        apiKey: auth.accessToken,
+        authToken: auth.accessToken,
         headers: {
           "anthropic-beta":
             "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14",
@@ -534,6 +534,9 @@ export async function buildLanguageModel(
         name: "muse",
         baseURL: "https://api.meta.ai/v1",
         apiKey: auth.accessToken,
+        headers: {
+          "User-Agent": "muse-code/1.0.2",
+        },
         fetch: apiFetch,
       })(resolvedModelId);
     }

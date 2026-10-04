@@ -209,6 +209,10 @@ These two commands are the whole crypto surface; everything above them in JS onl
 
 - `chatgpt_auth_login` / `chatgpt_auth_refresh` - OAuth token acquisition and refresh for the ChatGPT provider path
 
+### OAuth (`src-tauri/src/modules/oauth.rs`)
+
+- `oauth_login` / `oauth_refresh` - PKCE and Device Flow OAuth authentication and token refresh for external AI providers (Codex, Claude, Antigravity, xAI, Copilot, Muse)
+
 ### MCP (`src-tauri/src/modules/mcp.rs`)
 
 - `mcp_list_servers` / `mcp_list_tools` / `mcp_call_tool` / `mcp_ping` - enumerate and invoke configured servers
