@@ -165,6 +165,22 @@ describe("browser tools", () => {
     expect(js).toContain("dispatchEvent(new Event('input'");
   });
 
+  it("drives a React controlled input through the prototype value setter", async () => {
+    const ctx = makeCtx();
+    const tools = buildBrowserTools(ctx);
+    await execOf(tools.browser_type)(
+      { instance: "docs", selector: "input[name='q']", text: "hello" },
+      OPTS,
+    );
+    const js = (native.browserEmbedEval as ReturnType<typeof vi.fn>).mock
+      .calls[0][1] as string;
+    // A direct `el.value = ...` is invisible to React's value tracker; the
+    // prototype setter is what makes onChange fire for a controlled input.
+    expect(js).toContain("getOwnPropertyDescriptor");
+    expect(js).toContain("desc.set.call(el");
+    expect(js).toContain("dispatchEvent(new Event('change'");
+  });
+
   it("supports ref IDs for browser_click and browser_type", async () => {
     const ctx = makeCtx();
     const tools = buildBrowserTools(ctx);

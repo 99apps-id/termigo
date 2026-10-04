@@ -114,6 +114,41 @@ function resolveTargetSelector(
   return { error: "Either selector or ref must be provided" };
 }
 
+/** Click JS for a resolved selector. Pure, so the injected string is testable. */
+export function buildClickJs(targetSelector: string): string {
+  return `(()=>{const el=document.querySelector(${cssJson(
+    targetSelector,
+  )});if(!el){throw new Error('No element matched selector: '+${cssJson(
+    targetSelector,
+  )});}el.click();})();`;
+}
+
+/**
+ * Type JS for a resolved selector.
+ *
+ * A React controlled input tracks its value separately from the DOM node, so
+ * assigning `el.value` directly is seen as an untracked mutation and `onChange`
+ * never fires. Setting the value through the element's own prototype setter
+ * updates the value React is watching, which is the documented way to drive a
+ * controlled component from injected script. Contenteditable targets fall back
+ * to text plus an input event.
+ */
+export function buildTypeJs(targetSelector: string, text: string): string {
+  return `(()=>{const el=document.querySelector(${cssJson(
+    targetSelector,
+  )});if(!el){throw new Error('No element matched selector: '+${cssJson(
+    targetSelector,
+  )});}el.focus();if('value' in el&&typeof el.value==='string'){const proto=Object.getPrototypeOf(el);const desc=proto?Object.getOwnPropertyDescriptor(proto,'value'):null;if(desc&&desc.set){desc.set.call(el,${cssJson(
+    text,
+  )});}else{el.value=${cssJson(
+    text,
+  )};}el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));}else if(el.isContentEditable){el.innerText=${cssJson(
+    text,
+  )};el.dispatchEvent(new Event('input',{bubbles:true}));}else{throw new Error('Selector does not match an input-like element: '+${cssJson(
+    targetSelector,
+  )});}})();`;
+}
+
 export function buildBrowserTools(ctx: ToolContext) {
   const guard = (url: string): { error: string } | null => {
     const reason = guardUrl(url);
@@ -331,11 +366,7 @@ export function buildBrowserTools(ctx: ToolContext) {
         const target = resolveTargetSelector(ref, selector);
         if ("error" in target) return target;
         const targetSelector = target.targetSelector;
-        const js = `(()=>{const el=document.querySelector(${cssJson(
-          targetSelector,
-        )});if(!el){throw new Error('No element matched selector: '+${cssJson(
-          targetSelector,
-        )});}el.click();})();`;
+        const js = buildClickJs(targetSelector);
         consecutiveScreenshotCounts.delete(instance);
         return await embedEval(instance, js);
       },
@@ -360,11 +391,7 @@ export function buildBrowserTools(ctx: ToolContext) {
         const target = resolveTargetSelector(ref, selector);
         if ("error" in target) return target;
         const targetSelector = target.targetSelector;
-        const js = `(()=>{const el=document.querySelector(${cssJson(
-          targetSelector,
-        )});if(!el){throw new Error('No element matched selector: '+${cssJson(
-          targetSelector,
-        )});}if('value' in el){el.focus();el.value=${cssJson(text)};el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));}else if(el.isContentEditable){el.focus();el.innerText=${cssJson(text)};el.dispatchEvent(new Event('input',{bubbles:true}));}else{throw new Error('Selector does not match an input-like element: '+${cssJson(targetSelector)});}})();`;
+        const js = buildTypeJs(targetSelector, text);
         consecutiveScreenshotCounts.delete(instance);
         return await embedEval(instance, js);
       },
