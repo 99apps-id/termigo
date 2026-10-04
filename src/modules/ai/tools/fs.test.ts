@@ -127,6 +127,26 @@ describe("sliceLines and read_file windowing", () => {
     expect(sliced.content.endsWith("\nline 700")).toBe(true);
   });
 
+  it("keeps a surrogate pair whole when the cap splits it", () => {
+    const emoji = "😀"; // high 0xd83d, low 0xde00
+    // The cap lands between the two halves: cap-1 chars then the high half.
+    const content = `${"a".repeat(READ_BYTE_CAP - 1)}${emoji}tail`;
+    const sliced = sliceLines(content, undefined, undefined);
+    expect(sliced.truncated).toBe(true);
+    expect(sliced.content).toBe(`${"a".repeat(READ_BYTE_CAP - 1)}${emoji}`);
+    expect(sliced.content.endsWith(emoji)).toBe(true);
+  });
+
+  it("does not corrupt a pair that ends exactly at the cap", () => {
+    const emoji = "😀";
+    // The low half is the cap-th char; cutting there keeps both halves.
+    const content = `${"a".repeat(READ_BYTE_CAP - 2)}${emoji}tail`;
+    const sliced = sliceLines(content, undefined, undefined);
+    expect(sliced.truncated).toBe(true);
+    expect(sliced.content).toBe(`${"a".repeat(READ_BYTE_CAP - 2)}${emoji}`);
+    expect(sliced.content.endsWith(emoji)).toBe(true);
+  });
+
   it("returns helpful hint when read_file truncates", async () => {
     const ctx = makeCtx();
     const tools = buildFsTools(ctx);

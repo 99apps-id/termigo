@@ -25,7 +25,11 @@ export function createAgentNotificationGate(
       key.leafId,
     ]);
     const previous = recent.get(id);
-    if (previous !== undefined && now >= previous && now - previous < cooldownMs) {
+    if (
+      previous !== undefined &&
+      now >= previous &&
+      now - previous < cooldownMs
+    ) {
       return false;
     }
 

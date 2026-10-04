@@ -69,7 +69,8 @@ async function withBodyArg<T>(
 
   // Multiline markdown bodies: write to temporary file to avoid breaking
   // checkShellCommand single-line / control-character security invariants.
-  const tempName = `.termigo/tmp_gh_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.md`;
+  const rand = crypto.randomUUID().slice(0, 8);
+  const tempName = `.termigo/tmp_gh_${Date.now()}_${rand}.md`;
   const tempPath = `${cwd.replace(/[\\/]+$/, "")}/${tempName}`;
   try {
     await native.writeFile(tempPath, body);

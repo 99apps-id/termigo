@@ -61,6 +61,23 @@ function isImageReadOutput(o: unknown): o is ImageReadOutput {
   );
 }
 
+/** Truncate to a char cap without splitting a surrogate pair, so an emoji at
+ *  the boundary never becomes a lone replacement glyph.
+ *
+ *  Only one case needs handling: the cut falls between a high and a low
+ *  surrogate, so the low half at the cap is taken too. A cut that lands right
+ *  after a pair is already whole; shortening it there would strip the low half
+ *  and leave the high half alone, which is the very corruption this avoids. */
+function truncateChars(text: string, cap: number): string {
+  if (text.length <= cap) return text;
+  let end = cap;
+  const tail = text.charCodeAt(end - 1);
+  if (tail >= 0xd800 && tail <= 0xdbff && end < text.length) {
+    end += 1;
+  }
+  return text.slice(0, end);
+}
+
 /** Slice file content to the read tool's line/byte caps. Shared by the local
  *  and remote read paths so both honour identical limits. */
 export function sliceLines(
@@ -81,7 +98,7 @@ export function sliceLines(
     let c = lines.slice(0, sliceEnd).join("\n");
     let truncated = sliceEnd < lines.length;
     if (c.length > READ_BYTE_CAP) {
-      c = c.slice(0, READ_BYTE_CAP);
+      c = truncateChars(c, READ_BYTE_CAP);
       truncated = true;
     }
     return { content: c, total_lines: lines.length, truncated };
@@ -92,7 +109,7 @@ export function sliceLines(
   let c = lines.slice(start, end).join("\n");
   let truncated = end < lines.length;
   if (c.length > READ_BYTE_CAP) {
-    c = c.slice(0, READ_BYTE_CAP);
+    c = truncateChars(c, READ_BYTE_CAP);
     truncated = true;
   }
   return {

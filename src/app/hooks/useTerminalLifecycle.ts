@@ -1,4 +1,5 @@
 import { native } from "@/modules/ai/lib/native";
+import { useAgentStore } from "@/modules/agents/store/agentStore";
 import type { Tab } from "@/modules/tabs";
 import {
   disposeSession,
@@ -115,6 +116,15 @@ export function useTerminalLifecycle({
       return ptyId === null ? [] : [ptyId];
     });
     useAgentActivityStore.getState().acknowledgeAttention(ptyIds);
+    // The terminal activity store drives tab dots; the agent store drives the
+    // bell badge. Acknowledge both or the badge keeps counting an agent the
+    // user is already looking at.
+    const leafSet = new Set(leafIds(tab.paneTree));
+    for (const s of Object.values(useAgentStore.getState().sessions)) {
+      if (s.status === "waiting" && leafSet.has(s.leafId)) {
+        useAgentStore.getState().setStatus(s.leafId, "working");
+      }
+    }
   }, [activeId, tabsRef]);
 
   // A dev server printed a local url in a terminal.
