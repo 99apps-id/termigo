@@ -1,11 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { extractWorkerData, fmtDuration } from "./SubagentBatchCard";
+import {
+  extractWorkerData,
+  fmtDuration,
+  formatTokens,
+} from "./SubagentBatchCard";
 
 describe("fmtDuration", () => {
   it("formats milliseconds, seconds, and minutes correctly", () => {
     expect(fmtDuration(450)).toBe("450ms");
     expect(fmtDuration(1500)).toBe("1.5s");
     expect(fmtDuration(65000)).toBe("1m 5s");
+  });
+});
+
+describe("formatTokens", () => {
+  it("compacts counts above a thousand", () => {
+    expect(formatTokens(950)).toBe("950");
+    expect(formatTokens(1500)).toBe("1.5k");
+    expect(formatTokens(2_000_000)).toBe("2.00M");
   });
 });
 
