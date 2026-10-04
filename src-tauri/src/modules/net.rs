@@ -366,7 +366,8 @@ struct CachedClient {
 /// few minutes. Until then the pinned addresses are reused, which keeps the
 /// guarantee `resolve_to_addrs` exists for: a connection may still only use
 /// addresses that passed `ip_kind`.
-static CLIENT_CACHE: OnceLock<Mutex<HashMap<(String, bool), CachedClient>>> = OnceLock::new();
+#[allow(clippy::type_complexity)]
+static CLIENT_CACHE: OnceLock<Mutex<HashMap<(String, bool, String), CachedClient>>> = OnceLock::new();
 
 async fn client_for(host: &str, allow_private: bool, proxy_url: Option<&str>) -> Result<reqwest::Client, String> {
     let key = (host.to_string(), allow_private, proxy_url.unwrap_or("").to_string());
@@ -408,7 +409,7 @@ fn build_safe_client(
 ) -> Result<reqwest::Client, String> {
     let mut builder = reqwest::Client::builder().connect_timeout(Duration::from_secs(10));
     if let Some(proxy_url) = proxy_url {
-        if let Ok(proxy) = proxy_url.parse::<reqwest::Proxy>() {
+        if let Ok(proxy) = reqwest::Proxy::http(proxy_url) {
             builder = builder.proxy(proxy);
         }
     }
@@ -604,6 +605,7 @@ struct StreamTimeouts {
     idle: Duration,
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn stream_http(
     url: String,
     method: String,
@@ -1062,12 +1064,12 @@ mod tests {
     #[tokio::test]
     async fn same_host_reuses_one_client() {
         let host = "203.0.113.7"; // TEST-NET-3, never routed
-        let first = client_for(host, false).await.expect("builds");
-        let second = client_for(host, false).await.expect("reuses");
+        let first = client_for(host, false, None).await.expect("builds");
+        let second = client_for(host, false, None).await.expect("reuses");
 
         let map = CLIENT_CACHE.get().expect("initialised").lock().unwrap_or_else(|e| e.into_inner());
         assert_eq!(
-            map.keys().filter(|(h, _)| h == host).count(),
+            map.keys().filter(|(h, _, _)| h == host).count(),
             1,
             "a second request should not add a second client"
         );
@@ -1120,13 +1122,13 @@ mod tests {
         // 127.0.0.1 is refused unless private networks are opted into, so the
         // two policies must never share an entry.
         let host = "127.0.0.1";
-        assert!(client_for(host, false).await.is_err());
-        assert!(client_for(host, true).await.is_ok());
+        assert!(client_for(host, false, None).await.is_err());
+        assert!(client_for(host, true, None).await.is_ok());
 
         let map = CLIENT_CACHE.get().expect("initialised").lock().unwrap_or_else(|e| e.into_inner());
-        assert!(map.contains_key(&(host.to_string(), true)));
+        assert!(map.contains_key(&(host.to_string(), true, String::new())));
         assert!(
-            !map.contains_key(&(host.to_string(), false)),
+            !map.contains_key(&(host.to_string(), false, String::new())),
             "a refused host must not be cached as usable"
         );
     }
