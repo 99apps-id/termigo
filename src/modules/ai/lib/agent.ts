@@ -33,6 +33,8 @@ import {
   isCompatModelId,
   LMSTUDIO_DEFAULT_BASE_URL,
   MAX_AGENT_STEPS,
+  OAUTH_MAX_AGENT_STEPS,
+  isOAuthModel,
   MLX_DEFAULT_BASE_URL,
   modelAllowsForcedToolChoice,
   modelKeepsReasoning,
@@ -1523,8 +1525,10 @@ export async function runAgentStream(opts: RunAgentOptions) {
   const workspaceRoot = opts.toolContext.getWorkspaceRoot();
   const profile = getProfile(activeProfileIdFor(workspaceRoot));
 
+  const isOAuth = isOAuthModel(modelId, opts.customEndpoints);
+  const defaultBudget = isOAuth ? OAUTH_MAX_AGENT_STEPS : MAX_AGENT_STEPS;
   const stepBudget = applyProfileToStepBudget(
-    opts.stepBudget ?? MAX_AGENT_STEPS,
+    opts.stepBudget ?? defaultBudget,
     profile,
   );
   const costBudget = opts.costBudgetUsd ?? 0;
@@ -1627,7 +1631,9 @@ export async function runAgentStream(opts: RunAgentOptions) {
       return true;
     },
     (args) =>
-      (capPred(args) as boolean) ? requestSynthesisOrStop("step-cap") : false,
+      !isOAuth && (capPred(args) as boolean)
+        ? requestSynthesisOrStop("step-cap")
+        : false,
     (args) =>
       (repeatPred(args) as boolean)
         ? requestSynthesisOrStop("tool-repetition")
@@ -2392,7 +2398,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
       // paths, so fall back to the step count rather than reporting no reason
       // for a run that plainly ran out of budget.
       const settledStop =
-        stopReason ?? (stepsSeen >= stepBudget ? "step-cap" : null);
+        stopReason ?? (!isOAuth && stepsSeen >= stepBudget ? "step-cap" : null);
       // A run is a CLEAN finish only when nothing else ended it. A guard that
       // named a stop reason and an abort (watchdog stall, or a user stop) both
       // mean somebody else stopped the run. Reading a null stopReason as a

@@ -1,7 +1,7 @@
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { info as logInfo } from "@tauri-apps/plugin-log";
 import { generateText } from "ai";
-import { subagentModelExceedsBudget } from "../config";
+import { isOAuthModel, subagentModelExceedsBudget } from "../config";
 import {
   buildConfiguredLanguageModel,
   isStepCount,
@@ -289,6 +289,9 @@ export async function runSubagent({
     }
   };
 
+  const isOAuth = isOAuthModel(modelId);
+  const effectiveMaxSteps = isOAuth ? 500 : spec.maxSteps;
+
   const runAttempt = (attemptPrompt: string) =>
     generateText({
       model,
@@ -300,10 +303,10 @@ export async function runSubagent({
       // hard-failing with "Invalid input for tool".
       experimental_repairToolCall: repairToolCall as never,
       // The step cap alone is not enough: a model that repeats the same tool
-      // call or stalls without progress burns all twelve steps doing nothing.
+      // call or stalls without progress burns all steps doing nothing.
       // The same guards the main run uses close that loop here too.
       stopWhen: [
-        isStepCount(spec.maxSteps),
+        ...(isOAuth ? [] : [isStepCount(effectiveMaxSteps)]),
         noToolRepetition(3),
         noProgressStop(2),
         noErrorProgress(3),
@@ -354,7 +357,7 @@ export async function runSubagent({
     let summary = result.text?.trim();
     if (
       !summary ||
-      isUnfinishedOrGarbledSummary(summary, result, spec.maxSteps)
+      isUnfinishedOrGarbledSummary(summary, result, effectiveMaxSteps)
     ) {
       const summaryTimer = setTimeout(() => {
         timedOut = true;

@@ -12,7 +12,6 @@ import {
   type ModelId,
   type ProviderId,
   providerNeedsKey,
-  MAX_AGENT_STEPS,
   isOAuthModel,
   stepBudgetForModel,
 } from "../config";
@@ -153,8 +152,11 @@ function requestAutoContinue(sessionId: string): boolean {
   // A task the user typed while we were working owns the next turn; racing it
   // with a resume would queue their correction behind work it supersedes.
   if (useChatStore.getState().steerQueue.pending.length > 0) return false;
+  const selectedModelId = useChatStore.getState().selectedModelId;
+  const customEndpoints = usePreferencesStore.getState().customEndpoints;
+  const isOAuth = isOAuthModel(selectedModelId, customEndpoints);
   const used = autoContinueCount.get(sessionId) ?? 0;
-  if (!autoContinueSlot(used)) return false;
+  if (!isOAuth && !autoContinueSlot(used)) return false;
   autoContinueCount.set(sessionId, used + 1);
   useChatStore.getState().patchAgentMeta({
     status: "thinking",
@@ -476,7 +478,11 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       };
     },
     getPlanMode: () => usePlanStore.getState().active,
-    getStepBudget: () => MAX_AGENT_STEPS,
+    getStepBudget: () => {
+      const selectedModelId = useChatStore.getState().selectedModelId;
+      const customEndpoints = usePreferencesStore.getState().customEndpoints;
+      return stepBudgetForModel(selectedModelId, customEndpoints);
+    },
     getCostBudgetUsd: () => usePreferencesStore.getState().costBudgetUsd,
     getCostDailyBudgetUsd: () =>
       usePreferencesStore.getState().costDailyBudgetUsd,

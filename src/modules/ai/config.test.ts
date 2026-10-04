@@ -21,6 +21,9 @@ import {
   resolveModel,
   resolveModelContextLimit,
   resolveModelLabel,
+  isOAuthModel,
+  OAUTH_MAX_AGENT_STEPS,
+  stepBudgetForModel,
   stepBudgetForRound,
   subagentModelExceedsBudget,
   SYSTEM_PROMPT,
@@ -251,18 +254,26 @@ describe("migrateLegacyCompatEndpoint", () => {
 });
 
 describe("stepBudgetForRound", () => {
-  it("is VS Code's agent-mode default", () => {
-    expect(stepBudgetForRound(0)).toBe(25);
-    expect(MAX_AGENT_STEPS).toBe(25);
+  it("provides generous autonomous step turn budget", () => {
+    expect(stepBudgetForRound(0)).toBe(500);
+    expect(MAX_AGENT_STEPS).toBe(500);
   });
 
-  it("is one explicit cap per reply, not a hidden multiplier", () => {
-    // The ceiling is the whole per-round budget: Continue resumes the task on
-    // the same history with the same cap, so no round may deepen the number
-    // behind the user's back (Termixgo's MaxSteps invariant).
+  it("is one explicit cap per reply for api models, not a hidden multiplier", () => {
     for (let r = 0; r < 12; r++) {
       expect(stepBudgetForRound(r)).toBe(MAX_AGENT_STEPS);
     }
+  });
+
+  it("gives oauth models uncapped step turn budget (bounded by 5h limit)", () => {
+    expect(stepBudgetForModel("claude-oauth-sonnet-5")).toBe(
+      OAUTH_MAX_AGENT_STEPS,
+    );
+    expect(stepBudgetForModel("chatgpt-gpt-6-astra")).toBe(
+      OAUTH_MAX_AGENT_STEPS,
+    );
+    expect(isOAuthModel("claude-oauth-opus-5.5")).toBe(true);
+    expect(isOAuthModel("gpt-5.6")).toBe(false);
   });
 
   it("ignores an out-of-range round instead of inventing a budget", () => {

@@ -61,7 +61,6 @@ export const SUBAGENTS: Record<SubagentType, SubagentDef> = {
     description:
       "Reviews changed code for correctness, architecture, performance, security.",
     capabilities: { readOnly: true },
-    maxSteps: 12,
     systemPrompt: `You are a code-review subagent. Inspect the requested code and report only ACTIONABLE findings: correctness bugs, architecture violations, performance issues, security risks. Skip style/formatting. Format each finding as: "[MUST/SHOULD/NIT] file:line -> issue -> fix". If nothing is wrong, say "Looks good." Do NOT propose unrelated cleanups.`,
   },
   security: {

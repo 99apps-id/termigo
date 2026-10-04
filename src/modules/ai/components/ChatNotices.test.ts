@@ -8,7 +8,7 @@ describe("stopCopy", () => {
     expect(copy.text).toContain("steps");
     // Round 1 advertises the same number round 0 did: Continue repeats the
     // cap, it never deepens the budget behind the click.
-    expect(copy.action).toBe("Continue (+25 steps)");
+    expect(copy.action).toBe("Continue (+500 steps)");
   });
 
   it("returns tool-repetition copy", () => {

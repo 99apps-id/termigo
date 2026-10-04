@@ -33,7 +33,7 @@ import {
  */
 
 /** Shared step budget for one sub-agent run unless a def overrides it. */
-export const DEFAULT_SUBAGENT_MAX_STEPS = 12;
+export const DEFAULT_SUBAGENT_MAX_STEPS = 50;
 
 /** Default nesting cap when no preference is available (see runSubagent). */
 export const DEFAULT_MAX_SUBAGENT_DEPTH = 3;
