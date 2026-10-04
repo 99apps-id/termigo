@@ -32,6 +32,30 @@ fn is_blocked_host_name(host: &str) -> bool {
 }
 
 fn ip_kind(ip: IpAddr) -> IpKind {
+    // Canonicalize IPv4-mapped IPv6 (::ffff:x.x.x.x) or IPv4-compatible IPv6 to
+    // real IPv4 so SSRF metadata / private network filters cannot be bypassed.
+    let ip = match ip {
+        IpAddr::V6(v) => match v.to_ipv4_mapped() {
+            Some(v4) => IpAddr::V4(v4),
+            None => {
+                let segs = v.segments();
+                if segs[0] == 0
+                    && segs[1] == 0
+                    && segs[2] == 0
+                    && segs[3] == 0
+                    && segs[4] == 0
+                    && segs[5] == 0
+                    && segs[6] != 0
+                {
+                    let oct = v.octets();
+                    IpAddr::V4(std::net::Ipv4Addr::new(oct[12], oct[13], oct[14], oct[15]))
+                } else {
+                    IpAddr::V6(v)
+                }
+            }
+        },
+        IpAddr::V4(v4) => IpAddr::V4(v4),
+    };
     match ip {
         IpAddr::V4(v) => {
             let o = v.octets();
@@ -762,6 +786,11 @@ mod tests {
         );
         // IPv6 link-local fe80::/10
         assert_eq!(ip_kind("fe80::1".parse().unwrap()), IpKind::BlockedMetadata);
+        // IPv4-mapped IPv6 metadata bypass attempt
+        assert_eq!(
+            ip_kind("::ffff:169.254.169.254".parse().unwrap()),
+            IpKind::BlockedMetadata
+        );
     }
 
     #[test]
@@ -783,6 +812,11 @@ mod tests {
             ip_kind(IpAddr::V4(Ipv4Addr::new(100, 64, 0, 1))),
             IpKind::Private
         );
+        // IPv4-mapped IPv6 private IP
+        assert_eq!(
+            ip_kind("::ffff:10.0.0.1".parse().unwrap()),
+            IpKind::Private
+        );
     }
 
     #[test]
@@ -792,6 +826,7 @@ mod tests {
             IpKind::Loopback
         );
         assert_eq!(ip_kind("::1".parse().unwrap()), IpKind::Loopback);
+        assert_eq!(ip_kind("::ffff:127.0.0.1".parse().unwrap()), IpKind::Loopback);
     }
 
     #[test]
