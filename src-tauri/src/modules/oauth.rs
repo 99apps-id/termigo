@@ -155,21 +155,28 @@ async fn accept_callback(listener: &TcpListener, path_prefix: &str) -> Result<St
 
         let mut buf = Vec::with_capacity(2048);
         let mut chunk = [0u8; 1024];
-        let target = loop {
-            let n = match stream.read(&mut chunk).await {
-                Ok(0) => break None,
-                Ok(n) => n,
-                Err(e) => return Err(format!("callback read failed: {e}")),
-            };
-            buf.extend_from_slice(&chunk[..n]);
-            if buf.windows(4).any(|w| w == b"\r\n\r\n") || buf.len() > 16 * 1024 {
-                let text = String::from_utf8_lossy(&buf).to_string();
-                break text
-                    .lines()
-                    .next()
-                    .and_then(|line| line.split_whitespace().nth(1))
-                    .map(|s| s.to_string());
+        let read_loop = async {
+            loop {
+                let n = match stream.read(&mut chunk).await {
+                    Ok(0) => break Ok(None),
+                    Ok(n) => n,
+                    Err(e) => return Err(format!("callback read failed: {e}")),
+                };
+                buf.extend_from_slice(&chunk[..n]);
+                if buf.windows(4).any(|w| w == b"\r\n\r\n") || buf.len() > 16 * 1024 {
+                    let text = String::from_utf8_lossy(&buf).to_string();
+                    break Ok(text
+                        .lines()
+                        .next()
+                        .and_then(|line| line.split_whitespace().nth(1))
+                        .map(|s| s.to_string()));
+                }
             }
+        };
+
+        let target = match tokio::time::timeout(Duration::from_secs(5), read_loop).await {
+            Ok(Ok(t)) => t,
+            _ => continue,
         };
 
         let Some(target) = target else {

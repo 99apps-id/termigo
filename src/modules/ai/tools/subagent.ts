@@ -56,6 +56,10 @@ type BatchResult = {
    * follow-up (merge the worktree, or look at the workspace).
    */
   worktreePath?: string;
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+  };
 };
 
 /** Parse a value that may be a JSON string, returning it unchanged if not. */
@@ -109,7 +113,7 @@ Approval works exactly as it does for you: read-only tools auto-run, and every m
             .boolean()
             .optional()
             .describe(
-               "Run this subagent in its OWN git worktree under .wt/ instead of your working tree. Use it when the subagent will edit files you are also editing, or when you want its changes kept apart until you accept them. Ignored for read-only subagent types, for SSH sessions, and when the workspace is not a git repo (the subagent then shares the workspace and the result says so). Nothing is merged back automatically: the result reports the worktree path, and worktree_diff / worktree_discard act on it.",
+              "Run this subagent in its OWN git worktree under .wt/ instead of your working tree. Use it when the subagent will edit files you are also editing, or when you want its changes kept apart until you accept them. Ignored for read-only subagent types, for SSH sessions, and when the workspace is not a git repo (the subagent then shares the workspace and the result says so). Nothing is merged back automatically: the result reports the worktree path, and worktree_diff / worktree_discard act on it.",
             ),
         }),
       ),
@@ -184,6 +188,7 @@ Approval works exactly as it does for you: read-only tools auto-run, and every m
             durationMs: r.durationMs,
             ...(r.inconclusive ? { inconclusive: true } : {}),
             ...(r.worktreePath ? { worktreePath: r.worktreePath } : {}),
+            ...(r.usage ? { usage: r.usage } : {}),
           };
         } catch (e) {
           useSubagentRunStore.getState().fail(sid, runId, String(e));
@@ -398,6 +403,7 @@ Each task's subagent has the same toolset you do and may itself spawn further su
             results[i].summary = r.summary;
             results[i].stepCount = r.stepCount;
             results[i].durationMs = r.durationMs;
+            if (r.usage) results[i].usage = r.usage;
             if (r.inconclusive) results[i].inconclusive = true;
             if (r.worktreePath) results[i].worktreePath = r.worktreePath;
             state[i] = { settled: true, bad: false, running: false };

@@ -45,7 +45,10 @@ export class SubagentConcurrencyPool {
       let release: (() => void) | null = null;
 
       const run = () => {
-        if (aborted) return;
+        if (aborted) {
+          this.dequeue();
+          return;
+        }
         signal?.removeEventListener("abort", onAbort);
         this.active++;
         release = () => {

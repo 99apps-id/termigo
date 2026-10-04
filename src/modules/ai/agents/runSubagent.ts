@@ -103,6 +103,11 @@ type RunResult = {
    * look like it vanished.
    */
   worktreePath?: string;
+  /** Accumulated token usage by the subagent run across all steps. */
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+  };
 };
 
 export async function runSubagent({
@@ -397,12 +402,25 @@ export async function runSubagent({
       { audit: subagentIsReadOnly(type) },
     );
     const text = summary || "(no output)";
+    const totalInputTokens = (result.steps ?? []).reduce(
+      (n, s) => n + (s.usage?.inputTokens ?? 0),
+      result.usage?.inputTokens ?? 0,
+    );
+    const totalOutputTokens = (result.steps ?? []).reduce(
+      (n, s) => n + (s.usage?.outputTokens ?? 0),
+      result.usage?.outputTokens ?? 0,
+    );
+
     return {
       summary: verdict.note ? `${text}\n\n${verdict.note}` : text,
       stepCount: steps,
       durationMs: Date.now() - start,
       ...(verdict.inconclusive ? { inconclusive: true } : {}),
       ...(worktreePath ? { worktreePath } : {}),
+      usage: {
+        inputTokens: totalInputTokens,
+        outputTokens: totalOutputTokens,
+      },
     };
   } catch (e) {
     // The denial breaker trips by aborting the run, and a user stop of the
