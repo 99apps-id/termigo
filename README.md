@@ -271,7 +271,7 @@ automation: agent runs, MCP, skills, and project scaffolding.
     posts the pending action with `Allow session`, `Allow always`, and `Deny`
     inline buttons. No more typing `/approve` without knowing why.
   - **Step-cap continuation**: `/continue` (or the inline button) resumes the
-    agent past the 25-step default without leaving Telegram.
+    agent past its per-round cap without leaving Telegram.
   - **Custom endpoint models**: `/model` resolves raw model names and endpoint
     IDs (e.g. `step-3.7-flash`) to the correct compat ID and persists the
     choice as the new default.

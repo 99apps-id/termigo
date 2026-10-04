@@ -1181,7 +1181,8 @@ export type RunAgentOptions = {
     };
   }) => void;
   /** Loop budget for this round: one explicit cap per reply, the same number
-   *  every round. Defaults to MAX_AGENT_STEPS; only the harness profile
+   *  every round. Defaults per model (`MAX_AGENT_STEPS` for API-key providers,
+   *  `OAUTH_MAX_AGENT_STEPS` for OAuth / keyless); only the harness profile
    *  adjusts it, which is a chosen setting rather than a hidden escalation. */
   stepBudget?: number;
   /** Maximum cost in USD allowed for this run. 0 = unlimited. */
