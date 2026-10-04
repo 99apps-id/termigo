@@ -368,8 +368,8 @@ struct CachedClient {
 /// addresses that passed `ip_kind`.
 static CLIENT_CACHE: OnceLock<Mutex<HashMap<(String, bool), CachedClient>>> = OnceLock::new();
 
-async fn client_for(host: &str, allow_private: bool) -> Result<reqwest::Client, String> {
-    let key = (host.to_string(), allow_private);
+async fn client_for(host: &str, allow_private: bool, proxy_url: Option<&str>) -> Result<reqwest::Client, String> {
+    let key = (host.to_string(), allow_private, proxy_url.unwrap_or("").to_string());
     let cache = CLIENT_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
 
     // Scoped so the guard is dropped before the await below: holding a
@@ -386,7 +386,7 @@ async fn client_for(host: &str, allow_private: bool) -> Result<reqwest::Client, 
     }
 
     let safe_ips = classify_and_collect_safe_ips(host, allow_private).await?;
-    let client = build_safe_client(allow_private, &[(host.to_string(), safe_ips)])?;
+    let client = build_safe_client(allow_private, &[(host.to_string(), safe_ips)], proxy_url)?;
     // Two concurrent misses both resolve and the later one wins. That costs a
     // duplicate lookup, which is cheaper than holding the lock across DNS.
     if let Ok(mut map) = cache.lock() {
@@ -407,6 +407,11 @@ fn build_safe_client(
     proxy_url: Option<&str>,
 ) -> Result<reqwest::Client, String> {
     let mut builder = reqwest::Client::builder().connect_timeout(Duration::from_secs(10));
+    if let Some(proxy_url) = proxy_url {
+        if let Ok(proxy) = proxy_url.parse::<reqwest::Proxy>() {
+            builder = builder.proxy(proxy);
+        }
+    }
     // Pin reqwest's resolver to the IPs we just classified. Without this,
     // reqwest's own DNS lookup could return a different (private/metadata) IP
     // for the same hostname between classify and connect — classic DNS
@@ -482,6 +487,7 @@ pub async fn ai_http_request(
     headers: Option<HashMap<String, String>>,
     body: Option<Vec<u8>>,
     allow_private_network: Option<bool>,
+    proxy_url: Option<String>,
 ) -> Result<HttpResponse, String> {
     let allow_private = allow_private_network.unwrap_or(false);
     let parsed = validate_url(&url, allow_private)?;
@@ -489,7 +495,7 @@ pub async fn ai_http_request(
         .host_str()
         .ok_or_else(|| "missing host".to_string())?
         .to_string();
-    let client = client_for(&host, allow_private).await?;
+    let client = client_for(&host, allow_private, proxy_url.as_deref()).await?;
 
     let req = build_request(&client, &method, parsed, headers, body)?;
     let resp = req.send().await.map_err(|e| describe_error(&e))?;
@@ -606,6 +612,7 @@ async fn stream_http(
     allow_private_network: Option<bool>,
     on_event: &Channel<AiStreamEvent>,
     timeouts: StreamTimeouts,
+    proxy_url: Option<&str>,
 ) -> Result<(), String> {
     let allow_private = allow_private_network.unwrap_or(false);
     let body = match body.map(RequestBody::into_bytes).transpose() {
@@ -630,7 +637,7 @@ async fn stream_http(
             return Err(e);
         }
     };
-    let client = match client_for(&host, allow_private).await {
+    let client = match client_for(&host, allow_private, proxy_url).await {
         Ok(c) => c,
         Err(e) => {
             let _ = on_event.send(AiStreamEvent::Error { message: e.clone() });
@@ -732,6 +739,7 @@ pub async fn ai_http_stream(
             first_byte: AI_STREAM_FIRST_BYTE_TIMEOUT,
             idle: AI_STREAM_IDLE_TIMEOUT,
         },
+        proxy_url.as_deref(),
     )
     .await
 }
@@ -1096,6 +1104,7 @@ mod tests {
                 first_byte: Duration::from_millis(400),
                 idle: Duration::from_millis(400),
             },
+            None,
         )
         .await
         .expect_err("a silent provider must time out");

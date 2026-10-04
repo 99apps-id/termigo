@@ -22,6 +22,7 @@ import {
   looksLikeHtml,
 } from "../lib/htmlText";
 import { isLoopbackIpv4 } from "../lib/browserGuard";
+import { usePreferencesStore } from "../settings/store";
 
 type HttpResponse = {
   status: number;
@@ -100,6 +101,7 @@ export function createUnifiedWebFetchTool() {
     execute: async ({ url, raw, use_reader }) => {
       const fetchUrl = use_reader ? `https://r.jina.ai/${encodeURI(url)}` : url;
       let resp: HttpResponse;
+      const proxyUrl = usePreferencesStore.getState().aiHttpProxyUrl;
       try {
         resp = await withFetchTimeout(
           invoke<HttpResponse>("ai_http_request", {
@@ -113,6 +115,7 @@ export function createUnifiedWebFetchTool() {
             // User-approved dev server verification allows loopback addresses (localhost, 127.0.0.1, ::1).
             // Non-loopback private networks and cloud metadata (169.254.169.254) are strictly disallowed.
             allowPrivateNetwork: isLoopbackTarget(url),
+            proxyUrl: proxyUrl || null,
           }),
           FETCH_TIMEOUT_MS,
           fetchUrl,

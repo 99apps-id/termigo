@@ -156,6 +156,7 @@ export type Preferences = {
   ollamaBaseURL: string;
   ollamaModelId: string;
   openaiCompatibleBaseURL: string;
+  aiHttpProxyUrl: string;
   openaiCompatibleModelId: string;
   openaiCompatibleContextLimit: number;
   customEndpoints: CustomEndpoint[];
@@ -404,6 +405,7 @@ const KEY_MLX_MODEL_ID = "mlxModelId";
 const KEY_OLLAMA_BASE_URL = "ollamaBaseURL";
 const KEY_OLLAMA_MODEL_ID = "ollamaModelId";
 const KEY_OPENAI_COMPAT_BASE_URL = "openaiCompatibleBaseURL";
+const KEY_AI_HTTP_PROXY_URL = "aiHttpProxyUrl";
 const KEY_OPENAI_COMPAT_MODEL_ID = "openaiCompatibleModelId";
 const KEY_OPENAI_COMPAT_CONTEXT_LIMIT = "openaiCompatibleContextLimit";
 const KEY_CUSTOM_ENDPOINTS = "customEndpoints";
@@ -522,6 +524,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   ollamaBaseURL: OLLAMA_DEFAULT_BASE_URL,
   ollamaModelId: "",
   openaiCompatibleBaseURL: OPENAI_COMPATIBLE_DEFAULT_BASE_URL,
+  aiHttpProxyUrl: "",
   openaiCompatibleModelId: "",
   openaiCompatibleContextLimit: 128_000,
   customEndpoints: [],
@@ -757,6 +760,7 @@ export async function loadPreferences(): Promise<Preferences> {
     openaiCompatibleBaseURL:
       get<string>(KEY_OPENAI_COMPAT_BASE_URL) ??
       DEFAULT_PREFERENCES.openaiCompatibleBaseURL,
+    aiHttpProxyUrl: get<string>(KEY_AI_HTTP_PROXY_URL) ?? "",
     openaiCompatibleModelId:
       get<string>(KEY_OPENAI_COMPAT_MODEL_ID) ??
       DEFAULT_PREFERENCES.openaiCompatibleModelId,
@@ -1106,6 +1110,10 @@ export async function setOllamaModelId(value: string): Promise<void> {
 
 export async function setOpenaiCompatibleBaseURL(value: string): Promise<void> {
   await writePref(KEY_OPENAI_COMPAT_BASE_URL, value);
+}
+
+export async function setAiHttpProxyUrl(value: string): Promise<void> {
+  await writePref(KEY_AI_HTTP_PROXY_URL, value);
 }
 
 export async function setOpenaiCompatibleModelId(value: string): Promise<void> {
@@ -1514,6 +1522,7 @@ export async function onPreferencesChange(
     [KEY_OLLAMA_BASE_URL]: "ollamaBaseURL",
     [KEY_OLLAMA_MODEL_ID]: "ollamaModelId",
     [KEY_OPENAI_COMPAT_BASE_URL]: "openaiCompatibleBaseURL",
+    [KEY_AI_HTTP_PROXY_URL]: "aiHttpProxyUrl",
     [KEY_OPENAI_COMPAT_MODEL_ID]: "openaiCompatibleModelId",
     [KEY_OPENAI_COMPAT_CONTEXT_LIMIT]: "openaiCompatibleContextLimit",
     [KEY_CUSTOM_ENDPOINTS]: "customEndpoints",
