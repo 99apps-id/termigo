@@ -404,6 +404,7 @@ async fn client_for(host: &str, allow_private: bool) -> Result<reqwest::Client, 
 fn build_safe_client(
     allow_private: bool,
     pinned: &[(String, Vec<IpAddr>)],
+    proxy_url: Option<&str>,
 ) -> Result<reqwest::Client, String> {
     let mut builder = reqwest::Client::builder().connect_timeout(Duration::from_secs(10));
     // Pin reqwest's resolver to the IPs we just classified. Without this,
