@@ -2300,14 +2300,41 @@ export const OPENAI_COMPATIBLE_DEFAULT_BASE_URL = "";
  * harness profile may adjust it visibly (`stepBudgetDelta`), which is a
  * choice the user made, not a hidden escalation.
  */
-export const MAX_AGENT_STEPS = 25;
+export const MAX_AGENT_STEPS = 500;
 
-/** Budget for round `round`. Flat by design: a round's cap is one explicit
- *  number, not a ladder rung. Hitting it is a pause, not a failure - the
- *  transcript is intact and Continue resumes on the same history with the
- *  same budget. */
-export function stepBudgetForRound(_round: number): number {
+/** Step budget for OAuth / keyless providers (ChatGPT, Claude OAuth, xAI OAuth,
+ *  Antigravity, GitHub Copilot, Muse). Uncapped in practice because these
+ *  providers do not bill per step or per token, and are bounded by the
+ *  provider's 5-hour rate window instead. */
+export const OAUTH_MAX_AGENT_STEPS = 10_000;
+
+export function isOAuthModel(
+  modelId: string | undefined,
+  endpoints: readonly CustomEndpoint[] = [],
+): boolean {
+  if (!modelId) return false;
+  const m = getModel(modelId, endpoints);
+  return isOAuthProvider(m.provider);
+}
+
+export function stepBudgetForModel(
+  modelId: string | undefined,
+  endpoints: readonly CustomEndpoint[] = [],
+): number {
+  if (isOAuthModel(modelId, endpoints)) {
+    return OAUTH_MAX_AGENT_STEPS;
+  }
   return MAX_AGENT_STEPS;
+}
+
+/** Budget for round `round`. For OAuth providers, returns OAUTH_MAX_AGENT_STEPS
+ *  so execution runs without arbitrary step-cap pauses. */
+export function stepBudgetForRound(
+  _round: number,
+  modelId?: string,
+  endpoints?: readonly CustomEndpoint[],
+): number {
+  return stepBudgetForModel(modelId, endpoints);
 }
 export const TERMINAL_BUFFER_LINES = 300;
 
