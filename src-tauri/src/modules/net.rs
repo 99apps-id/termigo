@@ -727,6 +727,7 @@ pub async fn ai_http_stream(
     body: Option<RequestBody>,
     allow_private_network: Option<bool>,
     on_event: Channel<AiStreamEvent>,
+    proxy_url: Option<String>,
 ) -> Result<(), String> {
     stream_http(
         url,

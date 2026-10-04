@@ -129,6 +129,7 @@ async function proxyFetchImpl(
   const method = (init?.method ?? "GET").toUpperCase();
   const headers = headerInitToRecord(init?.headers);
   const body = await bodyToPayload(init?.body);
+  const proxyUrl = usePreferencesStore.getState().aiHttpProxyUrl || null;
 
   // Audit log: record private-network requests so the user can inspect them
   // in the AI inspector.
@@ -223,6 +224,7 @@ async function proxyFetchImpl(
       body,
       allowPrivateNetwork,
       onEvent: channel,
+      proxyUrl,
     }).catch((e) => {
       const err = e instanceof Error ? e : new Error(String(e));
       if (resolved) {
