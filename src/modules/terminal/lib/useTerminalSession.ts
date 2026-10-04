@@ -1424,8 +1424,12 @@ export function useTerminalSession({
   );
 }
 
+// The full CSI grammar ([0-?]* params, [ -/]* intermediates, [@-~] final), not
+// just [0-9;?]*: a mouse report carries a private '<' prefix (ESC[<35;106;27M,
+// mode 1006) that the narrow class missed, so the sequence survived with its
+// ESC invisible and leaked "[<35;106;27M" into the extracted terminal context.
 const ANSI_RE =
-  /\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][AB012]|\x1b[78=>]|\x1bc|\x1b[NOP\]X^_]/g;
+  /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][AB012]|\x1b[78=>]|\x1bc|\x1b[NOP\]X^_]/g;
 
 function stripAnsi(s: string): string {
   return s.replace(ANSI_RE, "");

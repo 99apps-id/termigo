@@ -79,12 +79,20 @@ function color256ToHex(code: number): string | null {
 export function parseAnsiText(raw: string): AnsiSpan[] {
   if (!raw) return [];
 
-  // Strip non-SGR escape sequences (e.g. \x1b[2K, \x1b[?25h, etc.)
+  // Strip every escape sequence, keeping only SGR (styling) for the pass below.
+  // The full CSI grammar is required: a [0-9;]* class misses the private prefix
+  // (< or ?) that a mouse report or a mode set carries, so an SGR mouse report
+  // like ESC[<35;106;27M (mode 1006, sent on every pointer move) used to survive
+  // with its ESC invisible and leak "[<35;106;27M" as visible text.
   const text = raw
-    .replace(/\x1B\[[0-9;]*[A-HJKSTfhilmnsu]/g, (match) =>
-      match.endsWith("m") ? match : "",
+    .replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, (match) =>
+      /^\x1B\[[0-9;:]*m$/.test(match) ? match : "",
     )
-    .replace(/\x1B\([B0-2]/g, "")
+    // A mouse report whose ESC an earlier layer already stripped.
+    .replace(/\[<\d+(?:;\d+)*[Mm]/g, "")
+    // OSC (window title, hyperlink) and charset selection.
+    .replace(/\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)/g, "")
+    .replace(/\x1B[()][0-2A-Z]/g, "")
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n");
 

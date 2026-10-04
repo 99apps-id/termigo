@@ -70,6 +70,22 @@ describe("parseAnsiText", () => {
     expect(spans[0].color).toBe("rgb(100, 150, 200)");
   });
 
+  it("strips SGR mouse reports (mode 1006) instead of leaking them as text", () => {
+    const raw = "before\u001b[<35;106;27M\u001b[<35;106;28M after";
+    const combined = parseAnsiText(raw)
+      .map((s) => s.text)
+      .join("");
+    expect(combined).toBe("before after");
+    expect(combined).not.toContain("[<");
+  });
+
+  it("strips a mouse report whose ESC was already removed upstream", () => {
+    const combined = parseAnsiText("run[<35;106;27Mdone")
+      .map((s) => s.text)
+      .join("");
+    expect(combined).toBe("rundone");
+  });
+
   it("strips non-SGR escape sequences like cursor moves", () => {
     const raw = "step 1\u001b[2K\rstep 2\u001b[1A";
     const spans = parseAnsiText(raw);
