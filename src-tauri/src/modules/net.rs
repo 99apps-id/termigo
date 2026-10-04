@@ -135,6 +135,44 @@ enum IpKind {
     BlockedMetadata,
 }
 
+/// Query DNS over HTTPS (DoH) directly via literal IPs (1.1.1.1 or 8.8.8.8)
+/// when the local system resolver fails (e.g. ISP censorship, port 53 blocked,
+/// or Win32 error 11001).
+async fn resolve_via_doh(host: &str) -> Result<Vec<IpAddr>, String> {
+    let urls = [
+        format!("https://1.1.1.1/dns-query?name={}&type=A", host),
+        format!("https://8.8.8.8/resolve?name={}&type=A", host),
+    ];
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .map_err(|e| format!("doh client: {e}"))?;
+
+    for url in &urls {
+        let req = client.get(url).header("accept", "application/dns-json");
+        if let Ok(resp) = req.send().await {
+            if resp.status().is_success() {
+                if let Ok(json) = resp.json::<serde_json::Value>().await {
+                    if let Some(answers) = json.get("Answer").and_then(|a| a.as_array()) {
+                        let mut ips = Vec::new();
+                        for ans in answers {
+                            if let Some(data) = ans.get("data").and_then(|d| d.as_str()) {
+                                if let Ok(ip) = data.trim().parse::<IpAddr>() {
+                                    ips.push(ip);
+                                }
+                            }
+                        }
+                        if !ips.is_empty() {
+                            return Ok(ips);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Err(format!("dns: could not resolve host {host} via system or DoH"))
+}
+
 /// Resolve `host` once and return both its safety classification and the
 /// concrete IPs we resolved. Callers can pin reqwest to these IPs to defeat
 /// DNS rebinding (where a second lookup returns a different address).
@@ -144,14 +182,21 @@ async fn resolve_and_classify(host: &str) -> Result<(IpKind, Vec<IpAddr>), Strin
         return Ok((ip_kind(ip), vec![ip]));
     }
     let host_owned = host.to_string();
-    let lookup = tokio::task::spawn_blocking(move || {
+    let sys_lookup = tokio::task::spawn_blocking(move || {
         (host_owned.as_str(), 0u16)
             .to_socket_addrs()
             .map(|it| it.map(|a| a.ip()).collect::<Vec<_>>())
     })
-    .await
-    .map_err(|e| e.to_string())?
-    .map_err(|e| format!("dns: {e}"))?;
+    .await;
+
+    let lookup = match sys_lookup {
+        Ok(Ok(ips)) if !ips.is_empty() => ips,
+        _ => {
+            // Local OS resolver failed or blocked (e.g. error 11001, ISP DNS censorship, port 53 dropped).
+            // Fall back to DoH (DNS over HTTPS) over literal IP addresses (1.1.1.1 / 8.8.8.8).
+            resolve_via_doh(host).await?
+        }
+    };
     if lookup.is_empty() {
         return Err("dns: no addresses".into());
     }
@@ -1097,5 +1142,14 @@ mod tests {
         assert!(validate_probe_url("http://10.0.0.1/").is_err());
         assert!(validate_probe_url("ftp://localhost/").is_err());
         assert!(validate_probe_url("file:///etc/passwd").is_err());
+    }
+
+    #[tokio::test]
+    async fn resolve_via_doh_resolves_public_domain() {
+        let ips = resolve_via_doh("html.duckduckgo.com").await;
+        if let Ok(ips) = ips {
+            assert!(!ips.is_empty());
+            assert_eq!(ip_kind(ips[0]), IpKind::Public);
+        }
     }
 }

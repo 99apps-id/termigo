@@ -13,14 +13,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { tool } from "ai";
 import { z } from "zod";
-import {
-  capText,
-  decodeEntities,
-  extractTitle,
-  htmlToMarkdown,
-  looksLikeHtml,
-} from "../lib/htmlText";
+import { decodeEntities } from "../lib/htmlText";
 import { useChatStore } from "../store/chatStore";
+import { createUnifiedWebFetchTool } from "./fetch";
 
 type HttpResponse = {
   status: number;
@@ -283,77 +278,6 @@ export function buildWebSearchTools() {
       },
     }),
 
-    web_fetch: tool({
-      description:
-        "Fetch and extract clean, readable text/markdown from a web page (stripping scripts, styling, ads, and navigation boilerplate). For single-page JavaScript web apps, set `use_reader: true` to render via reader mode. Read-only; asks for approval.",
-      inputSchema: z.object({
-        url: z.string().describe("Absolute HTTP or HTTPS URL to fetch."),
-        use_reader: z
-          .boolean()
-          .optional()
-          .describe(
-            "If true, use reader service (r.jina.ai) to render JavaScript SPAs into clean markdown.",
-          ),
-      }),
-      needsApproval: true,
-      execute: async ({ url, use_reader }) => {
-        const fetchUrl = use_reader
-          ? `https://r.jina.ai/${encodeURI(url)}`
-          : url;
-        let resp: HttpResponse;
-        try {
-          resp = capHttpBody(
-            await invoke<HttpResponse>("ai_http_request", {
-              url: fetchUrl,
-              method: "GET",
-              headers: {
-                "User-Agent":
-                  "Mozilla/5.0 (compatible; TermigoBot/1.0; +https://github.com/99apps-id/termigo)",
-              },
-              body: null,
-              allowPrivateNetwork: false,
-            }),
-          );
-        } catch (e) {
-          return { error: String(e), url };
-        }
-
-        const contentType = header(resp.headers, "content-type");
-        const bytes = new Uint8Array(resp.body);
-        if (bytes.length === 0) {
-          return {
-            url,
-            status: resp.status,
-            content: "",
-            note: "Empty response body.",
-          };
-        }
-
-        const body = new TextDecoder("utf-8").decode(bytes);
-        if (use_reader) {
-          const capped = capText(body);
-          return {
-            url,
-            readerMode: true,
-            status: resp.status,
-            content: capped.text,
-            ...(capped.truncated ? { truncated: true } : {}),
-          };
-        }
-
-        const isHtml = looksLikeHtml(contentType, body);
-        const text = isHtml ? htmlToMarkdown(body) : body;
-        const capped = capText(text);
-
-        return {
-          url,
-          status: resp.status,
-          contentType,
-          ...(isHtml ? { title: extractTitle(body) } : {}),
-          content: capped.text,
-          ...(capped.truncated ? { truncated: true } : {}),
-        };
-      },
-    }),
+    web_fetch: createUnifiedWebFetchTool(),
   } as const;
 }
