@@ -13,8 +13,11 @@ import {
 } from "../lib/postExecuteConfirm";
 import { lookupToolAlias } from "../lib/repairToolCall";
 import { buildSkillRegistryTools } from "../lib/skillRegistry";
-import { markRunActivity, startActivityHeartbeat } from "../lib/streamWatchdog";
-import { heartbeatMaxMsForTool } from "../lib/streamWatchdog";
+import {
+  heartbeatMaxMsForTool,
+  markRunActivity,
+  startActivityHeartbeat,
+} from "../lib/streamWatchdog";
 import { useApprovalQueue } from "../store/approvalQueueStore";
 import { buildManagedAgentTools } from "./agent";
 import { buildBrowserTools } from "./browser";
