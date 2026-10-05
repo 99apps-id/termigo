@@ -1,6 +1,9 @@
 import type { ModelMessage } from "ai";
 import { describe, expect, it } from "vitest";
-import { repairModelMessageSequence } from "./validateModelSequence";
+import {
+  dedupeDuplicateToolParts,
+  repairModelMessageSequence,
+} from "./validateModelSequence";
 
 function userMsg(text: string): ModelMessage {
   return { role: "user", content: text };
@@ -278,5 +281,52 @@ describe("repairModelMessageSequence", () => {
     expect(parts).toHaveLength(1);
     expect(parts[0].type).toBe("tool-result");
     expect(parts[0].toolCallId).toBe("call_write");
+  });
+});
+
+describe("dedupeDuplicateToolParts", () => {
+  it("keeps one result when a tool message repeats a tool_call_id", () => {
+    const messages: ModelMessage[] = [
+      assistantToolCallsMsg([{ id: "call_1", name: "fetch" }]),
+      toolResultMsg([
+        { id: "call_1", value: "a" },
+        { id: "call_1", value: "b" },
+      ]),
+    ];
+    const out = dedupeDuplicateToolParts(messages);
+    const parts = out[1].content as unknown[];
+    expect(parts).toHaveLength(1);
+    expect((parts[0] as { toolCallId: string }).toolCallId).toBe("call_1");
+  });
+
+  it("collapses a duplicate result split across two tool messages", () => {
+    const messages: ModelMessage[] = [
+      assistantToolCallsMsg([{ id: "call_1", name: "fetch" }]),
+      toolResultMsg([{ id: "call_1", value: "a" }]),
+      toolResultMsg([{ id: "call_1", value: "b" }]),
+    ];
+    const out = dedupeDuplicateToolParts(messages);
+    expect(out.filter((m) => m.role === "tool")).toHaveLength(1);
+  });
+
+  it("keeps one tool-call when an assistant message repeats an id", () => {
+    const messages: ModelMessage[] = [
+      assistantToolCallsMsg([
+        { id: "call_1", name: "fetch" },
+        { id: "call_1", name: "fetch" },
+        { id: "call_2", name: "grep" },
+      ]),
+    ];
+    const out = dedupeDuplicateToolParts(messages);
+    const parts = out[0].content as Array<{ toolCallId: string }>;
+    expect(parts.map((p) => p.toolCallId)).toEqual(["call_1", "call_2"]);
+  });
+
+  it("returns the same array reference when nothing is duplicated", () => {
+    const messages: ModelMessage[] = [
+      assistantToolCallsMsg([{ id: "call_1", name: "fetch" }]),
+      toolResultMsg([{ id: "call_1", value: "a" }]),
+    ];
+    expect(dedupeDuplicateToolParts(messages)).toBe(messages);
   });
 });

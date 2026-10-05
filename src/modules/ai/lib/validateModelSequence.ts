@@ -249,3 +249,92 @@ export function repairModelMessageSequence(
 
   return out;
 }
+
+/**
+ * Drops duplicate tool parts so a provider never sees two responses for one
+ * `tool_call_id`. Some backends (Meta's Muse among them) reject a request with
+ * "Duplicate tool response for tool_call_id=...; each tool_call must have
+ * exactly one matching tool response", which a duplicated history (a retried
+ * step, a replayed approval) can otherwise produce.
+ *
+ * Dedupe is global across the sequence: the first `tool-call` per id and the
+ * first `tool-result` per id are kept, later repeats dropped, so a result split
+ * across two `tool` messages still collapses to one. Returns the input array
+ * unchanged (same reference) when nothing was duplicated, so the provider's
+ * cached prefix is not needlessly rewritten.
+ */
+export function dedupeDuplicateToolParts(
+  messages: readonly ModelMessage[],
+): ModelMessage[] {
+  const seenCalls = new Set<string>();
+  const seenResults = new Set<string>();
+  const seenApprovals = new Set<string>();
+  let changed = false;
+
+  const out: ModelMessage[] = [];
+  for (const msg of messages) {
+    if (msg.role !== "assistant" && msg.role !== "tool") {
+      out.push(msg);
+      continue;
+    }
+    const parts = partsOf(msg);
+    if (parts.length === 0) {
+      out.push(msg);
+      continue;
+    }
+
+    let localChanged = false;
+    const kept: ContentPart[] = [];
+    for (const part of parts) {
+      if (part.type === "tool-call" && typeof part.toolCallId === "string") {
+        if (seenCalls.has(part.toolCallId)) {
+          localChanged = true;
+          continue;
+        }
+        seenCalls.add(part.toolCallId);
+      } else if (
+        part.type === "tool-result" &&
+        typeof part.toolCallId === "string"
+      ) {
+        if (seenResults.has(part.toolCallId)) {
+          localChanged = true;
+          continue;
+        }
+        seenResults.add(part.toolCallId);
+      } else if (
+        part.type === "tool-approval-request" ||
+        part.type === "tool-approval-response"
+      ) {
+        const key =
+          typeof part.approvalId === "string"
+            ? part.approvalId
+            : typeof part.toolCallId === "string"
+              ? part.toolCallId
+              : null;
+        if (key) {
+          if (seenApprovals.has(key)) {
+            localChanged = true;
+            continue;
+          }
+          seenApprovals.add(key);
+        }
+      }
+      kept.push(part);
+    }
+
+    if (kept.length === 0) {
+      // Every part was a duplicate: drop the now-empty message rather than
+      // send a provider an assistant/tool turn with no content.
+      changed = true;
+      continue;
+    }
+    if (!localChanged) {
+      out.push(msg);
+      continue;
+    }
+    changed = true;
+    out.push({ ...msg, content: kept } as ModelMessage);
+  }
+
+  return changed ? out : (messages as ModelMessage[]);
+}

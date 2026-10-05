@@ -116,7 +116,10 @@ import {
 } from "./toolChoiceLearning";
 import { measureToolPayload } from "./toolPayload";
 import { formatUserModelBlock, type UserModel } from "./userModel";
-import { repairModelMessageSequence } from "./validateModelSequence";
+import {
+  dedupeDuplicateToolParts,
+  repairModelMessageSequence,
+} from "./validateModelSequence";
 import {
   claimsVerification,
   newVerifyLedger,
@@ -1965,7 +1968,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
   return streamText({
     model,
     system: baseSystem,
-    messages: prompt.messages,
+    messages: dedupeDuplicateToolParts(prompt.messages),
     allowSystemInMessages: false,
     // MCP last: a server cannot shadow a built-in tool by naming a tool after
     // it, and the `mcp__` prefix means a collision would take deliberate effort
@@ -2058,6 +2061,13 @@ export async function runAgentStream(opts: RunAgentOptions) {
         Array.isArray(stepMessages) &&
         stepMessages.length > 0
       ) {
+        // A duplicated tool response (a retried step, a replayed approval) makes
+        // some providers reject the whole request. Collapse repeats before any
+        // size work, and override the messages only when that changed something
+        // so the cached prefix is not rewritten for nothing.
+        const deduped = dedupeDuplicateToolParts(stepMessages);
+        if (deduped !== stepMessages) nextMessages = deduped;
+
         // Gated by size, not run blind: rewriting history breaks the
         // provider's cached prefix from the rewrite point, while resending
         // cached tokens is cheap. Below half the history budget the full pass
@@ -2065,10 +2075,10 @@ export async function runAgentStream(opts: RunAgentOptions) {
         // 0.5 x budget), so skipping it keeps the prefix hot AND saves the
         // per-step serialization cost. The pre-run pipeline already trimmed
         // once; this only re-engages under real pressure.
-        const size = estimateMessagesSize(stepMessages);
+        const size = estimateMessagesSize(deduped);
         const trimBudget = historyTokenBudget(compactionLimit, reservedTokens);
         if (shouldTrimStepMessages(size.tokens, trimBudget, size.bytes)) {
-          const eviction = evictObsoleteToolOutputs(stepMessages);
+          const eviction = evictObsoleteToolOutputs(deduped);
           const compacted = compactModelMessagesDetailed(
             eviction.messages,
             compactionLimit,
