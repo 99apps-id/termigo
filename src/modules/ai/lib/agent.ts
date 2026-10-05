@@ -528,6 +528,9 @@ export async function buildLanguageModel(
           "Not signed in to Meta Muse Code. Open Settings → Models and sign in.",
         );
       }
+      const { createMuseFetch } = await import("./museStream");
+      // Muse's SSE tail can omit `choices`, which the SDK's chunk union rejects
+      // with `invalid_union`; the wrapper normalises those lines.
       return createOpenAICompatible({
         name: "muse",
         baseURL: "https://api.meta.ai/v1",
@@ -535,7 +538,7 @@ export async function buildLanguageModel(
         headers: {
           "User-Agent": "muse-code/1.0.2",
         },
-        fetch: apiFetch,
+        fetch: createMuseFetch(apiFetch),
       })(resolvedModelId);
     }
     default: {
