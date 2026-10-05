@@ -66,6 +66,20 @@ export function humanizeModelError(raw: string | null | undefined): string {
     return "The provider rate-limited this request (or reached concurrency limits). Wait a few seconds and press Continue, or switch to another model.";
   }
 
+  // Gemini's own safety filter. Termigo already sends the loosest thresholds
+  // the API accepts (see googleSafety.ts), so a block that still lands is
+  // policy-level and deterministic: retrying the same text fails again.
+  if (
+    l.includes("blocked by gemini") ||
+    l.includes("gemini's filters") ||
+    l.includes("gemini filters") ||
+    l.includes("safety filter") ||
+    l.includes("prohibited_content") ||
+    (l.includes("safety") && l.includes("block"))
+  ) {
+    return "Gemini's safety filter blocked this request (a common false positive on coding, security or biology work). Retrying the same text fails again. Rephrase the prompt, or switch to another model in Settings → Providers.";
+  }
+
   // Provider-side content moderation. DashScope / Qwen-compatible endpoints
   // (and others) run an input filter that rejects a request outright with
   // `data_inspection_failed` / "inappropriate content". It is deterministic -

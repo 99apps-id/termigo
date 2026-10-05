@@ -45,6 +45,14 @@ describe("buildAntigravityBody", () => {
     expect((request.systemInstruction as JsonObject).role).toBe("user");
   });
 
+  it("sends permissive safety settings so code/security prompts are not blocked", () => {
+    const envelope = parse(
+      buildAntigravityBody('{"contents":[]}', "p", "1", "gemini-pro-agent"),
+    );
+    const request = envelope.request as JsonObject;
+    expect(request.safetySettings).toEqual(GEMINI_SAFETY_SETTINGS);
+  });
+
   it("cleans unsupported tool-schema keywords and prunes required", () => {
     const envelope = parse(
       buildAntigravityBody(
