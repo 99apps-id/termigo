@@ -266,6 +266,26 @@ export function startActivityHeartbeat(options?: {
 export const TOOL_RESULT_DELIVERY_MS = 120_000;
 
 /**
+ * Tools whose work is a human decision rather than a process.
+ *
+ * The heartbeat ceiling exists so a hung subprocess cannot excuse a run
+ * forever, but a question waits on a person who may step away. Observed in the
+ * field on a Muse run: the 20-minute ceiling expired while `ask_user` waited,
+ * the tool-execution guard fired 120s later, and the run aborted with the
+ * question permanently unanswered (`no answer given`). A human-paced wait has no
+ * ceiling; the chooser's dismiss button, `cancelAll`, and Stop stay the ways out.
+ */
+export const HUMAN_WAIT_TOOLS = new Set(["ask_user"]);
+
+/**
+ * The heartbeat ceiling for a tool: unbounded for a human-paced wait, `undefined`
+ * (the default ceiling) otherwise.
+ */
+export function heartbeatMaxMsForTool(toolName: string): number | undefined {
+  return HUMAN_WAIT_TOOLS.has(toolName) ? Number.POSITIVE_INFINITY : undefined;
+}
+
+/**
  * What the tool-result delivery guard should do when its timer fires.
  *
  * Pure so the policy is asserted by a test: only a stalled provider in the
