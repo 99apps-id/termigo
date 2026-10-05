@@ -71,7 +71,7 @@ func (p ApprovalPolicy) NeedsApproval(tool Tool) bool {
 	case ApprovalPlan:
 		return true
 	case ApprovalEdits:
-		// File edits run; commands and anything outside the workspace wait.
+		// File edits run; commands wait.
 		return tool.Risk() != RiskEdit
 	default:
 		return true
@@ -95,7 +95,7 @@ func (p *ApprovalPolicy) AllowSession(name string) {
 type Risk string
 
 const (
-	// RiskEdit changes a file inside the workspace.
+	// RiskEdit changes a file.
 	RiskEdit Risk = "edit"
 	// RiskCommand runs a process.
 	RiskCommand Risk = "command"

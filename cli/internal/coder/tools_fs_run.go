@@ -65,10 +65,8 @@ func (t *readFileTool) Run(ctx context.Context, env *Env, args map[string]any) (
 
 func (t *listDirectoryTool) Run(ctx context.Context, env *Env, args map[string]any) (Result, error) {
 	path := resolvePath(env, argString(args, "path", "dir", "directory"))
-	// The empty fallback comes first. resolvePath returns "" for an absent
-	// argument, and the workspace check rejects "" because it cannot be made
-	// relative to anything, so the check used to fail before the fallback could
-	// turn the empty path into the workspace root.
+	// The empty fallback comes first: resolvePath returns "" for an absent
+	// argument, so turn it into the workspace root before listing.
 	if path == "" {
 		path = env.Workspace
 	}
