@@ -260,9 +260,11 @@ export async function buildLanguageModel(
     }
     case "google": {
       const { createGoogleGenerativeAI } = await import("@ai-sdk/google");
-      built = createGoogleGenerativeAI({ fetch: apiFetch, apiKey: key })(
-        resolvedModelId,
-      );
+      const { createGoogleSafetyFetch } = await import("./googleSafety");
+      built = createGoogleGenerativeAI({
+        fetch: createGoogleSafetyFetch(apiFetch),
+        apiKey: key,
+      })(resolvedModelId);
       break;
     }
     case "xai": {
