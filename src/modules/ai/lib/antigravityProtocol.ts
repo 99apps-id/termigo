@@ -1,3 +1,5 @@
+import { GEMINI_SAFETY_SETTINGS } from "./googleSafety";
+
 /**
  * Pure protocol helpers for Google Antigravity's Cloud Code backend.
  *
@@ -218,6 +220,14 @@ export function buildAntigravityBody(
   const request: JsonObject = { ...original, sessionId: session };
   request.tools = cleanTools(request.tools);
   request.generationConfig = buildGenerationConfig(request.generationConfig);
+  // Unlock the permissive Gemini safety thresholds so legitimate security /
+  // biology / coding prompts are not falsely blocked. Skips a caller-set list.
+  if (
+    !Array.isArray(request.safetySettings) ||
+    request.safetySettings.length === 0
+  ) {
+    request.safetySettings = GEMINI_SAFETY_SETTINGS;
+  }
   // With tools but no explicit choice, the Go client asks the backend to
   // validate every call (mode VALIDATED). A forced tool choice the SDK already
   // set is kept: override it and the agent loses ANY/allowedFunctionNames.

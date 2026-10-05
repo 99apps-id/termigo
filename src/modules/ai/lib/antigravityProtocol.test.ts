@@ -8,6 +8,7 @@ import {
   unwrapAntigravitySseLine,
   type JsonObject,
 } from "./antigravityProtocol";
+import { GEMINI_SAFETY_SETTINGS } from "./googleSafety";
 
 function parse(text: string): JsonObject {
   return JSON.parse(text) as JsonObject;
