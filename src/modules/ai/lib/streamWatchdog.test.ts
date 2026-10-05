@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   deliveryCheckDecision,
+  heartbeatMaxMsForTool,
   markRunActivity,
   msSinceActivity,
   pendingApprovalToolTimeoutMs,
@@ -216,6 +217,16 @@ describe("startActivityHeartbeat", () => {
     stop();
   });
 
+});
+
+describe("heartbeatMaxMsForTool", () => {
+  it("gives a human-paced wait no ceiling", () => {
+    expect(heartbeatMaxMsForTool("ask_user")).toBe(Number.POSITIVE_INFINITY);
+  });
+
+  it("leaves a normal tool on the default ceiling", () => {
+    expect(heartbeatMaxMsForTool("bash_run")).toBeUndefined();
+  });
 });
 
 describe("deliveryCheckDecision", () => {

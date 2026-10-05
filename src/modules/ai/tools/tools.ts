@@ -113,7 +113,13 @@ export function withToolLifecycle<
       if (ctx.firePreToolHook) {
         await ctx.firePreToolHook(name, args).catch(() => {});
       }
-      const stopHeartbeat = startActivityHeartbeat();
+      // A human-paced tool (ask_user) waits on a person, so its heartbeat has no
+      // ceiling; every other tool keeps the bounded one so a hung process still
+      // trips the execution guard.
+      const heartbeatMaxMs = heartbeatMaxMsForTool(name);
+      const stopHeartbeat = startActivityHeartbeat(
+        heartbeatMaxMs === undefined ? undefined : { maxMs: heartbeatMaxMs },
+      );
       try {
         const result = await original(args, options);
         auditToolEvent({
