@@ -21,6 +21,20 @@ func TestParseFrontmatter(t *testing.T) {
 	}
 }
 
+func TestParseFrontmatterWithBOMAndColons(t *testing.T) {
+	data := []byte("\xef\xbb\xbf---\nname: deploy\ndescription: \"Deploy: build & ship to prod\"\n---\n\nSteps here.\n")
+	meta, body, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse with BOM returned an error: %v", err)
+	}
+	if meta.Name != "deploy" || meta.Description != "Deploy: build & ship to prod" {
+		t.Fatalf("unexpected frontmatter: %+v", meta)
+	}
+	if !strings.Contains(body, "Steps here.") {
+		t.Fatalf("body missing content: %q", body)
+	}
+}
+
 func TestParseWithoutFrontmatter(t *testing.T) {
 	meta, body, err := Parse([]byte("just instructions"))
 	if err != nil {

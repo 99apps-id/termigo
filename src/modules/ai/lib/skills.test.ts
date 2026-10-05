@@ -11,7 +11,13 @@ import {
 
 describe("isValidSkillName", () => {
   it("accepts ordinary slugs", () => {
-    for (const n of ["deploy", "deploy-to-vps", "fix-flaky-tests", "a", "v2-release"]) {
+    for (const n of [
+      "deploy",
+      "deploy-to-vps",
+      "fix-flaky-tests",
+      "a",
+      "v2-release",
+    ]) {
       expect(isValidSkillName(n)).toBe(true);
     }
   });
@@ -47,7 +53,9 @@ describe("slugifySkillName", () => {
   // for a reason that has nothing to do with the skill.
   it("turns a human title into a usable name", () => {
     expect(slugifySkillName("Deploy to VPS")).toBe("deploy-to-vps");
-    expect(slugifySkillName("Fix the flaky tests!")).toBe("fix-the-flaky-tests");
+    expect(slugifySkillName("Fix the flaky tests!")).toBe(
+      "fix-the-flaky-tests",
+    );
     expect(slugifySkillName("v2 release")).toBe("v2-release");
   });
 
@@ -66,11 +74,15 @@ describe("slugifySkillName", () => {
 
 describe("skillPath", () => {
   it("puts each skill in its own directory", () => {
-    expect(skillPath("/ws", "deploy")).toBe("/ws/.termigo/skills/deploy/SKILL.md");
+    expect(skillPath("/ws", "deploy")).toBe(
+      "/ws/.termigo/skills/deploy/SKILL.md",
+    );
   });
 
   it("does not double the separator on a trailing slash", () => {
-    expect(skillPath("/ws/", "deploy")).toBe("/ws/.termigo/skills/deploy/SKILL.md");
+    expect(skillPath("/ws/", "deploy")).toBe(
+      "/ws/.termigo/skills/deploy/SKILL.md",
+    );
   });
 });
 
@@ -88,13 +100,20 @@ describe("parseSkill", () => {
   // error; refusing it would make the format harder to use than it needs to be.
   it("accepts a file with no frontmatter", () => {
     const parsed = parseSkill("notes", "just the steps");
-    expect(parsed).toEqual({ name: "notes", description: "", body: "just the steps" });
+    expect(parsed).toEqual({
+      name: "notes",
+      description: "",
+      body: "just the steps",
+    });
   });
 
   // The directory is what use_skill is called with, so honouring a mismatched
   // declaration would make the skill unreachable.
   it("lets the directory name win over the frontmatter", () => {
-    const parsed = parseSkill("real-name", "---\nname: other\ndescription: d\n---\nbody");
+    const parsed = parseSkill(
+      "real-name",
+      "---\nname: other\ndescription: d\n---\nbody",
+    );
     expect(parsed.name).toBe("real-name");
   });
 
@@ -106,15 +125,38 @@ describe("parseSkill", () => {
   });
 
   it("strips quotes people add around the description", () => {
-    expect(parseSkill("s", '---\ndescription: "quoted"\n---\nb').description).toBe(
-      "quoted",
-    );
+    expect(
+      parseSkill("s", '---\ndescription: "quoted"\n---\nb').description,
+    ).toBe("quoted");
   });
 
   it("handles CRLF, which is what Windows editors write", () => {
     const parsed = parseSkill("s", "---\r\ndescription: d\r\n---\r\nbody here");
     expect(parsed.description).toBe("d");
     expect(parsed.body).toBe("body here");
+  });
+
+  it("handles UTF-8 BOM at the start of the file", () => {
+    const parsed = parseSkill(
+      "s",
+      "\uFEFF---\ndescription: with bom\n---\nbody",
+    );
+    expect(parsed.description).toBe("with bom");
+    expect(parsed.body).toBe("body");
+  });
+
+  it("safely round-trips descriptions containing colons and quotes", () => {
+    const skill = {
+      name: "build-deploy",
+      description: 'Build: test & ship "production" release',
+      body: "step 1",
+    };
+    const formatted = formatSkill(skill);
+    expect(formatted).toContain(
+      'description: "Build: test & ship \\"production\\" release"',
+    );
+    const parsed = parseSkill("build-deploy", formatted);
+    expect(parsed).toEqual(skill);
   });
 });
 
@@ -127,7 +169,11 @@ describe("skillsBlock", () => {
   // kilobytes on every request, mostly irrelevant to the task at hand.
   it("lists names and descriptions only, never bodies", () => {
     const block = skillsBlock([
-      { name: "deploy", description: "Use when deploying.", body: "SECRET BODY" },
+      {
+        name: "deploy",
+        description: "Use when deploying.",
+        body: "SECRET BODY",
+      },
     ]);
     expect(block).toContain("deploy");
     expect(block).toContain("Use when deploying.");

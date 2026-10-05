@@ -19,6 +19,7 @@
 package skill
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -120,7 +121,7 @@ func Create(workspace, name, description string) (Skill, error) {
 
 	content := fmt.Sprintf(`---
 name: %s
-description: %s
+description: %q
 ---
 
 # %s
@@ -173,12 +174,10 @@ func fromFolder(root, scope string) ([]Skill, error) {
 		}
 		parsed, body, err := Parse(data)
 		if err != nil {
-			return nil, fmt.Errorf("parse %s: %w", document, err)
+			// Skip corrupt frontmatter so one broken file does not break the entire skill directory
+			continue
 		}
-		name := parsed.Name
-		if name == "" {
-			name = entry.Name()
-		}
+		name := entry.Name()
 		skills = append(skills, Skill{
 			Name:        name,
 			Description: parsed.Description,
@@ -193,6 +192,7 @@ func fromFolder(root, scope string) ([]Skill, error) {
 
 // Parse splits a SKILL.md document into frontmatter and body.
 func Parse(data []byte) (Frontmatter, string, error) {
+	data = bytes.TrimPrefix(data, []byte("\xef\xbb\xbf"))
 	lines := strings.Split(string(data), "\n")
 	if len(lines) < 3 || strings.TrimSpace(lines[0]) != frontmatterDelimiter {
 		// No frontmatter: treat the whole document as the body.

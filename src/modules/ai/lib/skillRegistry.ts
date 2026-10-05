@@ -1,6 +1,11 @@
 import { native } from "./native";
 import { useChatStore } from "../store/chatStore";
-import { isValidSkillName, SKILLS_REL_DIR, type Skill } from "./skills";
+import {
+  invalidateSkillsCache,
+  isValidSkillName,
+  SKILLS_REL_DIR,
+  type Skill,
+} from "./skills";
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -24,11 +29,10 @@ export type RegistryEntry = {
 
 // ─── Storage ──────────────────────────────────────────────────────────────
 
-const REGISTRY_DIR = ".termigo/registry";
-
-async function registryRoot(): Promise<string | null> {
-  const cwd = useChatStore.getState().live.getWorkspaceRoot() ?? ".";
-  return `${cwd.replace(/\/$/, "")}/${REGISTRY_DIR}`;
+async function workspaceSkillsRoot(): Promise<string | null> {
+  const cwd = useChatStore.getState().live.getWorkspaceRoot();
+  if (!cwd) return null;
+  return `${cwd.replace(/[\\/]$/, "")}/${SKILLS_REL_DIR}`;
 }
 
 // ─── Registry operations ──────────────────────────────────────────────────
@@ -36,15 +40,17 @@ async function registryRoot(): Promise<string | null> {
 /**
  * Install a skill from a registry entry into the workspace skills directory.
  */
-export async function installSkill(entry: RegistryEntry): Promise<{ ok: boolean; error?: string }> {
+export async function installSkill(
+  entry: RegistryEntry,
+): Promise<{ ok: boolean; error?: string }> {
   if (!isValidSkillName(entry.name)) {
     return { ok: false, error: `Invalid skill name: ${entry.name}` };
   }
 
-  const root = await registryRoot();
+  const root = await workspaceSkillsRoot();
   if (!root) return { ok: false, error: "no workspace root" };
 
-  const skillDir = `${root}/${SKILLS_REL_DIR}/${entry.name}`;
+  const skillDir = `${root}/${entry.name}`;
   const skillFile = `${skillDir}/SKILL.md`;
 
   try {
@@ -52,7 +58,7 @@ export async function installSkill(entry: RegistryEntry): Promise<{ ok: boolean;
     const content = [
       "---",
       `name: ${entry.name}`,
-      `description: ${entry.description}`,
+      `description: ${JSON.stringify(entry.description)}`,
       `version: ${entry.version}`,
       `author: ${entry.author}`,
       ...(entry.tags?.length ? [`tags: ${entry.tags.join(", ")}`] : []),
@@ -63,6 +69,7 @@ export async function installSkill(entry: RegistryEntry): Promise<{ ok: boolean;
     ].join("\n");
 
     await native.writeFile(skillFile, content);
+    invalidateSkillsCache();
     return { ok: true };
   } catch (e) {
     return { ok: false, error: String(e) };
@@ -72,18 +79,21 @@ export async function installSkill(entry: RegistryEntry): Promise<{ ok: boolean;
 /**
  * Remove an installed skill from the workspace.
  */
-export async function uninstallSkill(name: string): Promise<{ ok: boolean; error?: string }> {
+export async function uninstallSkill(
+  name: string,
+): Promise<{ ok: boolean; error?: string }> {
   if (!isValidSkillName(name)) {
     return { ok: false, error: `Invalid skill name: ${name}` };
   }
 
-  const root = await registryRoot();
+  const root = await workspaceSkillsRoot();
   if (!root) return { ok: false, error: "no workspace root" };
 
-  const skillDir = `${root}/${SKILLS_REL_DIR}/${name}`;
+  const skillDir = `${root}/${name}`;
 
   try {
     await native.deletePath(skillDir);
+    invalidateSkillsCache();
     return { ok: true };
   } catch (e) {
     return { ok: false, error: String(e) };
@@ -94,17 +104,17 @@ export async function uninstallSkill(name: string): Promise<{ ok: boolean; error
  * List all installed skills in the workspace.
  */
 export async function listInstalledSkills(): Promise<Skill[]> {
-  const root = await registryRoot();
+  const root = await workspaceSkillsRoot();
   if (!root) return [];
 
   try {
-    const entries = await native.readDir(`${root}/${SKILLS_REL_DIR}`);
+    const entries = await native.readDir(root);
     const skills: Skill[] = [];
 
     for (const entry of entries) {
       if (entry.kind !== "dir" || !isValidSkillName(entry.name)) continue;
       try {
-        const read = await native.readFile(`${root}/${SKILLS_REL_DIR}/${entry.name}/SKILL.md`);
+        const read = await native.readFile(`${root}/${entry.name}/SKILL.md`);
         if (read.kind !== "text") continue;
         const skill = parseSkill(entry.name, read.content);
         if (skill.description) skills.push(skill);
@@ -163,15 +173,24 @@ export function buildSkillRegistryTools() {
   return {
     install_skill: tool({
       description:
-        "Install a skill from a registry entry into the workspace. The skill becomes available for use in future agent runs.",
+        "Install a skill from a registry entry into the workspace. The skill becomes available for use in future agent runs. Asks for approval.",
       inputSchema: z.object({
         name: z.string().describe("Skill name"),
         description: z.string().describe("Skill description"),
-        version: z.string().optional().default("1.0.0").describe("Skill version"),
-        author: z.string().optional().default("unknown").describe("Skill author"),
+        version: z
+          .string()
+          .optional()
+          .default("1.0.0")
+          .describe("Skill version"),
+        author: z
+          .string()
+          .optional()
+          .default("unknown")
+          .describe("Skill author"),
         tags: z.array(z.string()).optional().default([]).describe("Skill tags"),
         body: z.string().describe("Skill body (SKILL.md content)"),
       }),
+      needsApproval: true,
       execute: async ({ name, description, version, author, tags, body }) => {
         const entry: RegistryEntry = {
           name,
@@ -189,10 +208,11 @@ export function buildSkillRegistryTools() {
 
     uninstall_skill: tool({
       description:
-        "Remove an installed skill from the workspace. This cannot be undone.",
+        "Remove an installed skill from the workspace. This cannot be undone. Asks for approval.",
       inputSchema: z.object({
         name: z.string().describe("Skill name to remove"),
       }),
+      needsApproval: true,
       execute: async ({ name }) => {
         const result = await uninstallSkill(name);
         if (!result.ok) return { error: result.error };
@@ -218,4 +238,3 @@ export function buildSkillRegistryTools() {
     }),
   } as const;
 }
-

@@ -63,7 +63,7 @@ function withFetchTimeout<T>(
   ]);
 }
 
-function isLoopbackTarget(rawUrl: string): boolean {
+export function isLoopbackTarget(rawUrl: string): boolean {
   try {
     const u = new URL(rawUrl);
     const host = u.hostname.toLowerCase();

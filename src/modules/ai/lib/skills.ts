@@ -73,15 +73,28 @@ export function skillPath(workspaceRoot: string, name: string): string {
  * be. The name falls back to the directory it came from.
  */
 export function parseSkill(name: string, content: string): Skill {
-  const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(content);
+  const stripped = content.replace(/^\uFEFF/, "");
+  const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(stripped);
   if (!match) {
-    return { name, description: "", body: content.trim() };
+    return { name, description: "", body: stripped.trim() };
   }
   const front = match[1];
   const body = match[2].trim();
   const field = (key: string): string => {
     const m = new RegExp(`^${key}:\\s*(.*)$`, "mi").exec(front);
-    return m ? m[1].trim().replace(/^["']|["']$/g, "") : "";
+    if (!m) return "";
+    const raw = m[1].trim();
+    if (raw.startsWith('"') && raw.endsWith('"') && raw.length >= 2) {
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return raw.slice(1, -1);
+      }
+    }
+    if (raw.startsWith("'") && raw.endsWith("'") && raw.length >= 2) {
+      return raw.slice(1, -1);
+    }
+    return raw;
   };
   return {
     // The directory name wins over any `name:` in the frontmatter: the
@@ -99,7 +112,7 @@ export function formatSkill(skill: Skill): string {
   return [
     "---",
     `name: ${skill.name}`,
-    `description: ${description}`,
+    `description: ${JSON.stringify(description)}`,
     "---",
     "",
     skill.body.trim(),
@@ -181,7 +194,10 @@ export async function saveSkill(
   skill: Skill,
 ): Promise<SaveOutcome> {
   if (!workspaceRoot) {
-    return { saved: false, reason: "no workspace is open, so there is nowhere to store this" };
+    return {
+      saved: false,
+      reason: "no workspace is open, so there is nowhere to store this",
+    };
   }
   if (!isValidSkillName(skill.name)) {
     return {
@@ -192,7 +208,8 @@ export async function saveSkill(
   if (!skill.description.trim()) {
     return {
       saved: false,
-      reason: "a skill needs a description saying when to use it, or it can never be chosen",
+      reason:
+        "a skill needs a description saying when to use it, or it can never be chosen",
     };
   }
   const content = formatSkill(skill);

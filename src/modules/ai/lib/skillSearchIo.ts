@@ -50,7 +50,12 @@ export async function collectCandidates(
 ): Promise<SkillCandidate[]> {
   const jobs: Promise<SkillCandidate[]>[] = [];
   if (workspaceRoot) {
-    jobs.push(candidatesIn(`${workspaceRoot.replace(/[\\/]$/, "")}/.termigo/skills`, "workspace"));
+    jobs.push(
+      candidatesIn(
+        `${workspaceRoot.replace(/[\\/]$/, "")}/.termigo/skills`,
+        "workspace",
+      ),
+    );
   }
   try {
     const home = (await homeDir()).replace(/[\\/]$/, "");
@@ -74,6 +79,11 @@ export async function collectCandidates(
 
 /** Read one SKILL.md by absolute path, for a skill find_skill turned up. */
 export async function readSkillAt(path: string) {
+  const normalized = path.replace(/\\/g, "/");
+  const fileName = normalized.split("/").pop() ?? "";
+  if (fileName.toLowerCase() !== "skill.md") {
+    return null;
+  }
   try {
     const read = await native.readFile(path);
     if (read.kind !== "text") return null;
