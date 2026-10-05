@@ -433,3 +433,48 @@ describe("diagnoseMismatch grounding hints", () => {
     expect(hint).toContain("line-ending mismatch");
   });
 });
+
+describe("apply_patch tool", () => {
+  async function runApplyPatch(
+    ctx: ToolContext,
+    patch: string,
+  ): Promise<{ error?: string; changed?: number; files?: unknown[] }> {
+    const execute = buildEditTools(ctx).apply_patch.execute;
+    if (!execute) throw new Error("apply_patch tool has no execute");
+    return (await execute({ patch } as never, toolOptions)) as never;
+  }
+
+  it("applies a unified diff and writes the file", async () => {
+    setFile("const a = 1;\nconst b = 2;\n");
+    const result = await runApplyPatch(
+      readContext(),
+      "--- a/a.txt\n+++ b/a.txt\n@@ -1,2 +1,2 @@\n const a = 1;\n-const b = 2;\n+const b = 3;\n",
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.changed).toBe(1);
+    expect(nativeMock.writeFile).toHaveBeenCalledWith(
+      FILE,
+      "const a = 1;\nconst b = 3;\n",
+    );
+  });
+
+  it("writes nothing when a hunk does not match the file", async () => {
+    setFile("x\ny\n");
+    const result = await runApplyPatch(
+      readContext(),
+      "--- a/a.txt\n+++ b/a.txt\n@@ -1,2 +1,2 @@\n nope\n-y\n+Y\n",
+    );
+    expect(result.error).toContain("patch failed");
+    expect(nativeMock.writeFile).not.toHaveBeenCalled();
+  });
+
+  it("rejects a deletion patch with guidance", async () => {
+    setFile("x\n");
+    const result = await runApplyPatch(
+      readContext(),
+      "--- a/a.txt\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-x\n",
+    );
+    expect(result.error).toContain("does not delete files");
+    expect(nativeMock.writeFile).not.toHaveBeenCalled();
+  });
+});

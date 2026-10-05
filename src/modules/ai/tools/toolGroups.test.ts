@@ -109,6 +109,7 @@ describe("tool group definitions", () => {
       "write_file",
       "edit",
       "multi_edit",
+      "apply_patch",
       "create_directory",
       "list_directory",
       "glob",

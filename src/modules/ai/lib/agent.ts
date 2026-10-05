@@ -94,6 +94,8 @@ import type { McpToolset } from "./mcpTools";
 import { memoryBlock as learnedBlock, type MemoryEntry } from "./memory";
 import { wantsForcedFanout } from "./orchestrationIntent";
 import { prepareAgentPrompt } from "./prompt";
+import { createGoogleSafetyFetch } from "./googleSafety";
+import { createOpenAiCacheFetch } from "./promptCacheKey";
 import { createProxyFetch } from "./proxyFetch";
 import { repairToolCall } from "./repairToolCall";
 import { isRepetitionDominated } from "./repetitionGuard";
@@ -133,7 +135,17 @@ import {
 // blocked deepseek/openai for users on such networks). SSRF hardening belongs on
 // AGENT-controlled URLs (the `fetch` tool, the browser), not on the model API
 // the user configured. So all providers, cloud and local, share this fetch.
-const apiFetch = createProxyFetch({ allowPrivateNetwork: true });
+//
+// Per-provider request normalisation is folded in here so EVERY provider passes
+// through it: Google's permissive safety thresholds (no-op off generativelanguage
+// hosts) and OpenAI's `prompt_cache_key` (no-op off api.openai.com). Wrapping the
+// shared fetch keeps the whole provider set covered without a call site having to
+// remember either.
+const apiFetch = createOpenAiCacheFetch(
+  createGoogleSafetyFetch(
+    createProxyFetch({ allowPrivateNetwork: true }),
+  ),
+);
 
 const TOOL_LABELS: Record<string, (input: Record<string, unknown>) => string> =
   {
@@ -260,11 +272,9 @@ export async function buildLanguageModel(
     }
     case "google": {
       const { createGoogleGenerativeAI } = await import("@ai-sdk/google");
-      const { createGoogleSafetyFetch } = await import("./googleSafety");
-      built = createGoogleGenerativeAI({
-        fetch: createGoogleSafetyFetch(apiFetch),
-        apiKey: key,
-      })(resolvedModelId);
+      built = createGoogleGenerativeAI({ fetch: apiFetch, apiKey: key })(
+        resolvedModelId,
+      );
       break;
     }
     case "xai": {

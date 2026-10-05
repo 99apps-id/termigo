@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { ToolExecutionOptions } from "ai";
-import { normalizeLspLocations, buildLspTools } from "./lsp";
+import {
+  buildLspTools,
+  normalizeDocumentSymbols,
+  normalizeLspLocations,
+} from "./lsp";
 import type { ToolContext } from "./context";
 
 const toolOptions: ToolExecutionOptions = {
@@ -104,5 +108,56 @@ describe("lsp tools", () => {
     expect(result.diagnostics).toEqual([]);
     expect(result.count).toBe(0);
     expect(result.note).toContain("run_checks");
+  });
+});
+
+describe("normalizeDocumentSymbols", () => {
+  it("flattens hierarchical DocumentSymbol results with container names", () => {
+    const out = normalizeDocumentSymbols([
+      {
+        name: "Foo",
+        kind: 5,
+        range: { start: { line: 0, character: 0 } },
+        selectionRange: { start: { line: 0, character: 6 } },
+        children: [
+          {
+            name: "bar",
+            kind: 6,
+            range: { start: { line: 1, character: 0 } },
+            selectionRange: { start: { line: 1, character: 2 } },
+          },
+        ],
+      },
+    ]);
+    expect(out).toEqual([
+      { name: "Foo", kind: "class", line: 1 },
+      { name: "bar", kind: "method", line: 2, containerName: "Foo" },
+    ]);
+  });
+
+  it("maps flat SymbolInformation results", () => {
+    const out = normalizeDocumentSymbols([
+      {
+        name: "x",
+        kind: 12,
+        location: { uri: "file:///a.ts", range: { start: { line: 9, character: 0 } } },
+        containerName: "mod",
+      },
+    ]);
+    expect(out).toEqual([
+      { name: "x", kind: "function", line: 10, containerName: "mod" },
+    ]);
+  });
+
+  it("returns empty for null and empty results", () => {
+    expect(normalizeDocumentSymbols(null)).toEqual([]);
+    expect(normalizeDocumentSymbols([])).toEqual([]);
+  });
+
+  it("exposes the code-action and symbol tools", () => {
+    const tools = buildLspTools(makeContext());
+    expect(tools.lsp_document_symbols).toBeDefined();
+    expect(tools.lsp_code_actions).toBeDefined();
+    expect(tools.lsp_apply_code_action).toBeDefined();
   });
 });

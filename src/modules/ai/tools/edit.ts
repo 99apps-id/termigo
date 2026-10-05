@@ -4,6 +4,7 @@ import { z } from "zod";
 import { native } from "../lib/native";
 import { fileCacheKey, routePath } from "../lib/remoteFs";
 import { checkWritable, checkWritableCanonical } from "../lib/security";
+import { applyFilePatch, parseUnifiedDiff } from "../lib/unifiedDiff";
 import { newQueuedEditId, usePlanStore } from "../store/planStore";
 import { resolvePath, type ToolContext } from "./context";
 
@@ -532,6 +533,117 @@ export function buildEditTools(ctx: ToolContext) {
           }
         }
         return applyEdits(abs, edits, "multi_edit", ctx.readCache, io);
+      },
+    }),
+
+    apply_patch: tool({
+      description:
+        "Apply a unified diff to one or more files. Preferred over a chain of edit calls for a multi-hunk or multi-file change: each hunk carries its own context, so it lands exactly where written or fails loudly instead of guessing. Every file is read and every hunk matched BEFORE anything is written, so a bad hunk changes nothing. Accepts the standard `--- a/path` / `+++ b/path` / `@@ ... @@` format; `--- /dev/null` creates a file. Local or remote. Asks for user approval.",
+      inputSchema: z.object({
+        patch: z
+          .string()
+          .min(1)
+          .describe(
+            "Unified diff text. Use paths relative to the workspace cwd (the a/ and b/ prefixes are stripped).",
+          ),
+      }),
+      needsApproval: true,
+      execute: async ({ patch }) => {
+        const parsed = parseUnifiedDiff(patch);
+        if (parsed.error) return { error: parsed.error };
+
+        type Staged = {
+          path: string;
+          abs: string;
+          content: string;
+          io: EditIo;
+          added: number;
+          removed: number;
+        };
+        const stagedByAbs = new Map<string, Staged>();
+
+        // Read + apply every hunk in memory first, so a mismatch anywhere leaves
+        // the workspace untouched rather than half-patched. Two headers naming
+        // the same file merge, so the second hunk set applies to the first set's
+        // result instead of re-reading the original content and losing it.
+        for (const file of parsed.files) {
+          if (file.newPath === "/dev/null") {
+            return {
+              error: `apply_patch does not delete files (${file.oldPath}); use delete_file.`,
+              file: file.oldPath,
+            };
+          }
+          const rel =
+            file.newPath && file.newPath !== "/dev/null"
+              ? file.newPath
+              : file.oldPath;
+          const resolved = await resolveEditTarget(ctx, rel);
+          if (!resolved.ok) return { ...resolved.error, file: rel };
+          const { abs, io } = resolved;
+
+          const existing = stagedByAbs.get(abs);
+          let content = existing?.content ?? "";
+          if (!existing && file.oldPath !== "/dev/null") {
+            try {
+              const r = await io.read(abs);
+              if (r.kind !== "text") {
+                return { error: `cannot patch ${rel}: not a text file`, file: rel };
+              }
+              content = r.content;
+            } catch (e) {
+              return { error: `cannot read ${rel}: ${String(e)}`, file: rel };
+            }
+          }
+          const applied = applyFilePatch(content, file);
+          if (!applied.ok) {
+            return { error: `patch failed for ${rel}: ${applied.error}`, file: rel };
+          }
+          const added = file.hunks.reduce(
+            (n, h) => n + h.lines.filter((l) => l.type === "add").length,
+            0,
+          );
+          const removed = file.hunks.reduce(
+            (n, h) => n + h.lines.filter((l) => l.type === "remove").length,
+            0,
+          );
+          if (existing) {
+            existing.content = applied.content;
+            existing.added += added;
+            existing.removed += removed;
+          } else {
+            stagedByAbs.set(abs, {
+              path: rel,
+              abs,
+              content: applied.content,
+              io,
+              added,
+              removed,
+            });
+          }
+        }
+        const staged = [...stagedByAbs.values()];
+
+        const files: Array<{ path: string; added: number; removed: number }> = [];
+        for (const item of staged) {
+          try {
+            await item.io.write(item.abs, item.content);
+            ctx.readCache.set(item.io.cacheKey(item.abs), {
+              size: item.content.length,
+              hash: djb2(item.content),
+            });
+            files.push({
+              path: item.path,
+              added: item.added,
+              removed: item.removed,
+            });
+          } catch (e) {
+            return {
+              error: `wrote ${files.length} of ${staged.length} file(s), then failed on ${item.path}: ${String(e)}`,
+              files,
+            };
+          }
+        }
+        return { changed: files.length, files };
       },
     }),
   } as const;

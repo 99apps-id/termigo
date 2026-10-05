@@ -46,6 +46,32 @@ type DefinitionResult =
   | null
   | undefined;
 
+/** A `textDocument/codeAction` result entry (the fields the agent reads). */
+export type LspCodeAction = {
+  title: string;
+  kind?: string;
+  isPreferred?: boolean;
+  edit?: unknown;
+  command?: unknown;
+};
+
+/** A hierarchical `textDocument/documentSymbol` entry. */
+export type LspDocumentSymbol = {
+  name: string;
+  kind: number;
+  range: { start: LspPos };
+  selectionRange: { start: LspPos };
+  children?: LspDocumentSymbol[];
+};
+
+/** A flat `textDocument/documentSymbol` entry (SymbolInformation). */
+export type LspSymbolInformation = {
+  name: string;
+  kind: number;
+  location: { uri: string; range: { start: LspPos } };
+  containerName?: string;
+};
+
 function normalizeLocations(result: DefinitionResult): LspLocation[] {
   if (!result) return [];
   const list = Array.isArray(result) ? result : [result];
@@ -422,6 +448,22 @@ export class TermigoLspClient extends LanguageServerClient {
   }): Promise<LspLocation[] | null> {
     return this.raw.request("textDocument/references", params, 10_000) as
       Promise<LspLocation[] | null>;
+  }
+
+  textDocumentCodeAction(params: {
+    textDocument: { uri: string };
+    range: { start: LspPos; end: LspPos };
+    context: { diagnostics: unknown[] };
+  }): Promise<LspCodeAction[] | null> {
+    return this.raw.request("textDocument/codeAction", params, 10_000) as
+      Promise<LspCodeAction[] | null>;
+  }
+
+  textDocumentDocumentSymbol(params: {
+    textDocument: { uri: string };
+  }): Promise<LspDocumentSymbol[] | LspSymbolInformation[] | null> {
+    return this.raw.request("textDocument/documentSymbol", params, 10_000) as
+      Promise<LspDocumentSymbol[] | LspSymbolInformation[] | null>;
   }
 
   textDocumentDidClose(uri: string): void {
