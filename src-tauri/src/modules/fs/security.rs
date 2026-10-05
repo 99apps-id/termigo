@@ -57,7 +57,6 @@ fn secret_basename_patterns() -> &'static [Regex] {
 #[allow(dead_code)]
 const PROTECTED_DIRS: &[&str] = &[
     "/.ssh",
-    "/.shh",
     "/.gnupg",
     "/.aws",
     "/.azure",
@@ -150,7 +149,6 @@ const PROTECTED_WRITE_DIRS: &[&str] = &[
     // locked here so the record cannot be rewritten by the thing it records.
     "/.termigo/audit",
     "/.ssh",
-    "/.shh",
     "/.gnupg",
     "/.aws",
     "/.azure",
