@@ -24,6 +24,42 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `.env.local`, so it is never committed and GitHub secret scanning has nothing
   to flag.
 
+## [0.9.23] - 2026-10-06
+
+### Added
+
+- **Antigravity models and chat.** Antigravity runs over the Cloud Code
+  protocol (the previous OpenAI-compatible path returned HTML/404), and the
+  catalogue carries the current Gemini 3.8/3.5 Flash, Gemini Pro, Claude
+  Opus/Sonnet 5.5 and Sonnet 4.6 entries plus Muse Spark 1.3.
+- **Refactoring tools.** `lsp_document_symbols`, `lsp_code_actions` and
+  `lsp_apply_code_action` join `lsp_rename`, and `apply_patch` applies a
+  unified diff across files.
+- **Subagent usage.** Per-worker token counts are persisted and shown in the
+  subagent batch card.
+- **Provider tuning.** Gemini requests carry permissive `safetySettings`; OpenAI
+  requests carry a stable `prompt_cache_key`.
+
+### Fixed
+
+- **Antigravity sign-in** binds an ephemeral loopback port, so a busy 8085 no
+  longer blocks login with `os error 10048`.
+- **Muse chat** no longer fails with `invalid_union` on a usage-only stream
+  tail, and a duplicated tool response is collapsed before each request.
+- **`ask_user`** is no longer aborted by the tool watchdog while it waits for a
+  human; the heartbeat has no ceiling for a human-paced wait.
+- **Browser `type`** writes through the element's prototype value setter, so a
+  React controlled input actually updates.
+- **Skills** read only `SKILL.md`, install into the workspace skills directory,
+  and survive BOMs and quoted frontmatter values.
+- **AppImage** ships `AppRun.wrapped` executable (mode 0755), so the catalog
+  test no longer fails with "not executable".
+
+### Changed
+
+- **Step budget** is 500 per round for API-key providers and 10,000 for OAuth /
+  keyless providers, whose real bound is the provider's 5-hour window.
+
 ## [0.9.22] - 2026-09-29
 
 ### Fixed
