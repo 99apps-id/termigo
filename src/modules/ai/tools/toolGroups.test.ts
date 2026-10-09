@@ -161,6 +161,7 @@ describe("tool group definitions", () => {
       "git_commit",
       "git_conflicts",
       "git_stash",
+      "git_stash_list",
       "git_stash_pop",
       "git_pull",
       "git_push",
@@ -332,7 +333,10 @@ describe("tool payload measurement", () => {
   // cache hit rate on compat endpoints. If this grows, every step on every run
   // pays the tax. Keep it tight.
   it("always-on payload stays under its own ceiling", () => {
-    const built = buildTools(stubContext()) as unknown as Record<string, unknown>;
+    const built = buildTools(stubContext()) as unknown as Record<
+      string,
+      unknown
+    >;
     const active = Object.fromEntries(
       Object.entries(built).filter(([n]) => TOOL_SEARCH_ALWAYS_ON.has(n)),
     );

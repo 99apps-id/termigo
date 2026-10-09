@@ -203,6 +203,20 @@ export const TOOL_GROUPS: readonly ToolGroup[] = [
       "Send a file or a message to your paired Telegram chat, so a long run can report to you while you are away from the desk.",
     tools: ["telegram_send_document", "telegram_send_message"],
   },
+  {
+    id: "utility",
+    label: "Utility",
+    description:
+      "Quick helpers: hashing, encoding, JWT inspection, secret pattern scan, and archive create/extract.",
+    tools: [
+      "http_request",
+      "jwt_inspect",
+      "secret_scan",
+      "hash_calc",
+      "archive_tool",
+      "encoding_tool",
+    ],
+  },
 ];
 
 /** Every tool name that appears in some group. */

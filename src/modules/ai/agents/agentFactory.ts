@@ -109,6 +109,8 @@ export const CORE_TOOL_NAMES = new Set([
   "git_checkpoint",
   "git_commit",
   "git_conflicts",
+  "git_stash",
+  "git_stash_list",
   "run_subagent",
   "run_subagents",
 ]);

@@ -115,6 +115,10 @@ export function gitStashPopCommand(): string {
   return "git stash pop";
 }
 
+export function gitStashListCommand(): string {
+  return "git stash list";
+}
+
 export function gitLogCommand(limit: number): string {
   const n = Math.max(1, Math.min(200, Math.floor(limit)));
   return `git log --oneline -n ${n}`;
@@ -865,6 +869,42 @@ export function buildGitTools(ctx: ToolContext) {
         if (!sid) return { error: "no active chat session" };
         const cwd = repoRootFor(ctx.getWorkspaceRoot(), ctx.getCwd());
         const command = gitStashPopCommand();
+        const safety = checkShellCommand(command);
+        if (!safety.ok) return { error: safety.reason };
+        try {
+          const shellId = await getSessionShell(
+            sessionShellKey("git", sid, ctx.getWorkspaceRoot()),
+            cwd,
+          );
+          const r = await native.shellSessionRun(shellId, command, cwd, 120);
+          return {
+            command,
+            stdout: r.stdout,
+            stderr: r.stderr,
+            exit_code: r.exit_code,
+          };
+        } catch (e) {
+          return { error: String(e) };
+        }
+      },
+    }),
+
+    git_stash_list: tool({
+      description:
+        "List all stashes in the repository (refs/stash). Returns each stash name, branch, and short message so the agent can inspect parked changes.",
+      inputSchema: z.object({}),
+      needsApproval: false,
+      execute: async () => {
+        if (ctx.getRemoteSession()) {
+          return remoteUnsupported(
+            "git_stash_list",
+            "Use bash_run with `git stash list` on the remote host.",
+          );
+        }
+        const sid = ctx.getSessionId();
+        if (!sid) return { error: "no active chat session" };
+        const cwd = repoRootFor(ctx.getWorkspaceRoot(), ctx.getCwd());
+        const command = gitStashListCommand();
         const safety = checkShellCommand(command);
         if (!safety.ok) return { error: safety.reason };
         try {

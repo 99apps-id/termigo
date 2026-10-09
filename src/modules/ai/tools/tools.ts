@@ -56,6 +56,14 @@ import { buildTelegramTools } from "./telegram";
 import { buildTerminalTools } from "./terminal";
 import { buildTestLoopTools } from "./testLoopTools";
 import { buildTodoTools } from "./todo";
+import {
+  buildArchiveTool,
+  buildEncodingTool,
+  buildHashCalcTool,
+  buildHttpRequestTools,
+  buildJwtInspectTool,
+  buildSecretScanTool,
+} from "./tools_util";
 import { buildUnknownToolFallback, UNKNOWN_TOOL_NAME } from "./toolFallback";
 import { buildVerifyTools } from "./verify";
 import { buildWebSearchTools } from "./webSearch";
@@ -343,6 +351,12 @@ export function buildTools(
     ...buildSystemTools(),
     ...buildProcessTools(ctx),
     ...buildTelegramTools(ctx),
+    ...buildHttpRequestTools(ctx),
+    ...buildJwtInspectTool(),
+    ...buildSecretScanTool(),
+    ...buildHashCalcTool(),
+    ...buildEncodingTool(),
+    ...buildArchiveTool(ctx),
   } as const;
 
   // The unknown-tool fallback is added last and reads its own toolset, so its
