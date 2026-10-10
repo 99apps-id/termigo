@@ -6,14 +6,17 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Kbd } from "@/components/ui/kbd";
-import { Spinner } from "@/components/ui/spinner";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { fmtShortcut, MOD_KEY } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { useTelegramStore } from "@/modules/telegram/store";
 import {
-  Add01Icon,
   AiBookIcon,
   AiBrain01Icon,
   AiBrain02Icon,
@@ -38,12 +41,12 @@ import {
   InspectCodeIcon,
   Layers02Icon,
   Message01Icon,
-  Mic01Icon,
   MistralIcon,
   PlugIcon,
   Search01Icon,
   ServerStack01Icon,
   Settings01Icon,
+  SparklesIcon,
   StarIcon,
   Tick01Icon,
 } from "@hugeicons/core-free-icons";
@@ -63,9 +66,8 @@ import {
   type ProviderId,
   providerNeedsKey,
   resolveApiModelId,
-  STT_PROVIDER_LABELS,
 } from "../config";
-import { ACCEPTED_FILES, useComposer } from "../lib/composer";
+import { useComposer } from "../lib/composer";
 import { costToday } from "../lib/costLedger";
 import { toggleFavoriteModel } from "../lib/modelPrefs";
 import { useChatStore } from "../store/chatStore";
@@ -176,7 +178,6 @@ export function AiOpenButton({ onOpen }: { onOpen: () => void }) {
 
 export function AiStatusBarControls() {
   const c = useComposer();
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [diagOpen, setDiagOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [replayOpen, setReplayOpen] = useState(false);
@@ -187,128 +188,49 @@ export function AiStatusBarControls() {
   const closePanel = useChatStore((s) => s.closePanel);
 
   return (
-    <div className="flex items-center gap-0.5">
-      <input
-        ref={fileInputRef}
-        type="file"
-        multiple
-        accept={ACCEPTED_FILES}
-        className="hidden"
-        onChange={(e) => {
-          void c.addFiles(e.target.files);
-          e.target.value = "";
-        }}
-      />
-
+    <div className="flex items-center gap-1">
       <ApprovalModeControl className="mr-0.5" />
 
       {/* Live context / token meter against the model's window. */}
       <ContextMeter />
 
-      {/* Live round counter, so a running loop's progress is visible even when
-          the chat panel is minimized. */}
+      {/* Live round counter during active agent execution. */}
       <RoundChip />
 
       {/* Telegram relay status. */}
       <TelegramStatusChip />
 
-      {/* One surface for run metrics, the request inspector, and context state. */}
-      <IconBtn
-        title="Agent diagnostics — run journey, checkpoints & restore, requests, context"
-        onClick={() => setDiagOpen(true)}
-      >
-        <HugeiconsIcon icon={InspectCodeIcon} size={13} strokeWidth={2} />
-      </IconBtn>
-      <AgentDiagnosticsDialog open={diagOpen} onOpenChange={setDiagOpen} />
-
-      <IconBtn
-        title="Replay past agent runs"
-        onClick={() => setReplayOpen(true)}
-      >
-        <HugeiconsIcon icon={Clock01Icon} size={13} strokeWidth={2} />
-      </IconBtn>
-      <RunReplayDialog open={replayOpen} onOpenChange={setReplayOpen} />
-
-      <IconBtn
-        title="Review changes in the working tree"
-        onClick={() => setReviewOpen(true)}
-      >
-        <HugeiconsIcon icon={FileDiffIcon} size={13} strokeWidth={2} />
-      </IconBtn>
-      <ChangeReviewDialog open={reviewOpen} onOpenChange={setReviewOpen} />
-
-      <IconBtn
-        title="Agent memory — what the agent learned about this project"
-        onClick={() => setMemoryOpen(true)}
-      >
-        <HugeiconsIcon icon={BrainIcon} size={13} strokeWidth={2} />
-      </IconBtn>
-      <AgentMemoryDialog open={memoryOpen} onOpenChange={setMemoryOpen} />
-
-      <IconBtn
-        title="Artifacts — canvases, previews, and files the agent produced"
-        onClick={() => setArtifactsOpen(true)}
-      >
-        <HugeiconsIcon icon={Layers02Icon} size={13} strokeWidth={2} />
-      </IconBtn>
-      <ArtifactsDialog open={artifactsOpen} onOpenChange={setArtifactsOpen} />
-
-      <IconBtn
-        title="Attach file or image"
-        onClick={() => fileInputRef.current?.click()}
-        disabled={c.isBusy}
-      >
-        <HugeiconsIcon icon={Add01Icon} size={13} strokeWidth={2} />
-      </IconBtn>
-
-      {c.voice.supported && (
-        <IconBtn
-          title={
-            !c.voice.hasKey
-              ? `Voice needs a ${STT_PROVIDER_LABELS[c.voice.sttProvider]} key`
-              : c.voice.recording
-                ? "Stop & transcribe"
-                : c.voice.transcribing
-                  ? "Transcribing…"
-                  : "Voice input"
-          }
-          onClick={() =>
-            c.voice.recording ? c.voice.stop() : void c.voice.start()
-          }
-          disabled={c.isBusy || c.voice.transcribing || !c.voice.hasKey}
-          className={cn(
-            c.voice.recording &&
-              "bg-destructive/10 text-destructive hover:bg-destructive/15",
-          )}
-        >
-          {c.voice.recording ? (
-            <span className="size-2 animate-pulse rounded-full bg-destructive" />
-          ) : c.voice.transcribing ? (
-            <Spinner className="size-3" />
-          ) : (
-            <HugeiconsIcon icon={Mic01Icon} size={13} strokeWidth={1.75} />
-          )}
-        </IconBtn>
-      )}
-
+      {/* Model picker dropdown. */}
       <ModelDropdown />
 
-      <TodayCostChip />
+      {/* Consolidated Telemetry Pill (Today Spend, Current Run, Tokens). */}
+      <AgentTelemetryPill onOpenDiag={() => setDiagOpen(true)} />
 
-      <TokenUsageChip />
+      {/* Consolidated Agent Tools Popover (Review, Memory, Artifacts, Replay, Diagnostics). */}
+      <AgentToolsMenu
+        onOpenDiag={() => setDiagOpen(true)}
+        onOpenReplay={() => setReplayOpen(true)}
+        onOpenReview={() => setReviewOpen(true)}
+        onOpenMemory={() => setMemoryOpen(true)}
+        onOpenArtifacts={() => setArtifactsOpen(true)}
+      />
 
-      <RunCostChip />
+      <AgentDiagnosticsDialog open={diagOpen} onOpenChange={setDiagOpen} />
+      <RunReplayDialog open={replayOpen} onOpenChange={setReplayOpen} />
+      <ChangeReviewDialog open={reviewOpen} onOpenChange={setReviewOpen} />
+      <AgentMemoryDialog open={memoryOpen} onOpenChange={setMemoryOpen} />
+      <ArtifactsDialog open={artifactsOpen} onOpenChange={setArtifactsOpen} />
 
-      <span className="mx-1 h-8 w-px bg-border" aria-hidden />
+      <span className="mx-1 h-4 w-px bg-border/60" aria-hidden />
       <Button
         onClick={closePanel}
         title="Close AI panel"
         size="xs"
         variant="ghost"
         aria-label="Close AI panel"
-        className="text-[11px] text-foreground/85 px-1"
+        className="h-6 px-1 text-[11px] text-foreground/85"
       >
-        <Kbd className="h-4 gap-px px-2 font-mono text-[11px]">
+        <Kbd className="h-4 gap-px px-1.5 font-mono text-[10.5px]">
           {fmtShortcut(MOD_KEY, "I")}
         </Kbd>
       </Button>
@@ -327,7 +249,7 @@ export function AiStatusBarControls() {
         size="icon"
         onClick={c.isBusy ? c.stop : c.submit}
         disabled={!c.isBusy && !c.canSend}
-        className="ml-1 size-7 rounded-lg border-0 shadow-none hover:brightness-110 disabled:opacity-50"
+        className="ml-0.5 size-6 rounded-md border-0 shadow-none hover:brightness-110 disabled:opacity-50"
         style={{
           backgroundColor: "var(--composer-accent)",
           color: "var(--composer-accent-foreground)",
@@ -336,9 +258,9 @@ export function AiStatusBarControls() {
         title={c.isBusy ? "Stop (Esc)" : "Send (Enter)"}
       >
         {c.isBusy ? (
-          <span className="size-2.5 rounded-[2px] bg-current" />
+          <span className="size-2 rounded-[2px] bg-current" />
         ) : (
-          <HugeiconsIcon icon={ArrowUpIcon} size={14} strokeWidth={2.2} />
+          <HugeiconsIcon icon={ArrowUpIcon} size={13} strokeWidth={2.2} />
         )}
       </Button>
     </div>
@@ -861,17 +783,185 @@ function IconBtn({
   );
 }
 
-/**
- * Live readout of today's recorded agent spend, straight from the cost
- * ledger. Hidden when nothing has been recorded yet, so an idle bar stays
- * quiet. Refreshes when a run finishes (lastRun changes) and once a minute,
- * since the day can roll over while the app is open.
- */
-function TodayCostChip() {
-  const lastRun = useChatStore((s) => s.lastRun);
-  const [today, setToday] = useState<number | null>(null);
+function fmtK(n: number): string {
+  if (n < 1000) return String(n);
+  return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
+}
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies(lastRun): refresh the chip when a run finishes; the body reads no dep, but a new run must re-fetch spend.
+/**
+ * Consolidated Agent Tools popover menu.
+ * Collapses the 5 separate status-bar dialog buttons (Review, Memory, Artifacts,
+ * Replay, Diagnostics) into a single unified entry point.
+ */
+function AgentToolsMenu({
+  onOpenDiag,
+  onOpenReplay,
+  onOpenReview,
+  onOpenMemory,
+  onOpenArtifacts,
+}: {
+  onOpenDiag: () => void;
+  onOpenReplay: () => void;
+  onOpenReview: () => void;
+  onOpenMemory: () => void;
+  onOpenArtifacts: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className={cn(
+            "flex h-6 items-center gap-1 rounded-md px-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+            open && "bg-accent text-foreground",
+          )}
+          title="Agent tools & insights (Review, Memory, Artifacts, Replay, Diagnostics)"
+          aria-label="Agent tools and insights"
+        >
+          <HugeiconsIcon icon={SparklesIcon} size={13} strokeWidth={2} />
+          <span className="text-[11px] font-medium">Tools</span>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="end"
+        side="top"
+        sideOffset={6}
+        className="z-50 w-64 rounded-xl border border-border/80 bg-popover/95 p-1 text-[12px] shadow-xl backdrop-blur-md"
+      >
+        <div className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Agent Tools & Insights
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              onOpenReview();
+            }}
+            className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-foreground/90 transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <div className="grid size-6 place-items-center rounded-md bg-muted text-muted-foreground">
+              <HugeiconsIcon icon={FileDiffIcon} size={13} strokeWidth={2} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="text-[12px] font-medium leading-none">
+                Review Changes
+              </div>
+              <div className="mt-0.5 truncate text-[10.5px] text-muted-foreground">
+                Working tree diffs and staged edits
+              </div>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              onOpenMemory();
+            }}
+            className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-foreground/90 transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <div className="grid size-6 place-items-center rounded-md bg-muted text-muted-foreground">
+              <HugeiconsIcon icon={BrainIcon} size={13} strokeWidth={2} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="text-[12px] font-medium leading-none">
+                Agent Memory
+              </div>
+              <div className="mt-0.5 truncate text-[10.5px] text-muted-foreground">
+                Learned project facts and conventions
+              </div>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              onOpenArtifacts();
+            }}
+            className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-foreground/90 transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <div className="grid size-6 place-items-center rounded-md bg-muted text-muted-foreground">
+              <HugeiconsIcon icon={Layers02Icon} size={13} strokeWidth={2} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="text-[12px] font-medium leading-none">
+                Artifacts
+              </div>
+              <div className="mt-0.5 truncate text-[10.5px] text-muted-foreground">
+                Canvases, previews, and generated files
+              </div>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              onOpenReplay();
+            }}
+            className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-foreground/90 transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <div className="grid size-6 place-items-center rounded-md bg-muted text-muted-foreground">
+              <HugeiconsIcon icon={Clock01Icon} size={13} strokeWidth={2} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="text-[12px] font-medium leading-none">
+                Run Replay
+              </div>
+              <div className="mt-0.5 truncate text-[10.5px] text-muted-foreground">
+                Step-by-step agent turn history
+              </div>
+            </div>
+          </button>
+
+          <div className="my-1 h-px bg-border/60" />
+
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              onOpenDiag();
+            }}
+            className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-foreground/90 transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <div className="grid size-6 place-items-center rounded-md bg-muted text-muted-foreground">
+              <HugeiconsIcon icon={InspectCodeIcon} size={13} strokeWidth={2} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="text-[12px] font-medium leading-none">
+                Diagnostics & Traces
+              </div>
+              <div className="mt-0.5 truncate text-[10.5px] text-muted-foreground">
+                Raw run telemetry, checkpoints, and context
+              </div>
+            </div>
+          </button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/**
+ * Consolidated telemetry pill.
+ * Unifies Today's Spend, live in-flight cost, and token usage into a single
+ * quiet status-bar indicator with a detailed breakdown popover.
+ */
+function AgentTelemetryPill({ onOpenDiag }: { onOpenDiag: () => void }) {
+  const [popoverOpen, setPopoverOpen] = useState(false);
+  const [today, setToday] = useState<number | null>(null);
+  const lastRun = useChatStore((s) => s.lastRun);
+  const status = useChatStore((s) => s.agentMeta.status);
+  const tokens = useChatStore((s) => s.agentMeta.tokens);
+  const lastInput = useChatStore((s) => s.agentMeta.lastInputTokens);
+  const lastCached = useChatStore((s) => s.agentMeta.lastCachedTokens);
+  const modelId = useChatStore((s) => s.selectedModelId);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies(lastRun): refresh the pill when a run finishes; the body reads no dep, but a new run must re-fetch spend.
   useEffect(() => {
     let alive = true;
     const load = () => {
@@ -889,92 +979,12 @@ function TodayCostChip() {
     };
   }, [lastRun]);
 
-  if (today == null) return null;
-
-  return (
-    <span
-      className="flex items-center gap-1 rounded-md px-1.5 text-[10.5px] text-muted-foreground"
-      title={`Recorded agent cost today: $${today.toFixed(4)}`}
-    >
-      <HugeiconsIcon
-        icon={CoinsDollarIcon}
-        size={11}
-        strokeWidth={1.75}
-        className="text-muted-foreground/70"
-      />
-      {`$${today.toFixed(2)}`}
-    </span>
-  );
-}
-
-function fmtK(n: number): string {
-  if (n < 1000) return String(n);
-  return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
-}
-
-/**
- * Compact token usage chip: shows last request input / cached tokens, plus
- * run totals, so the user can see token spend without opening diagnostics.
- */
-function TokenUsageChip() {
-  const tokens = useChatStore((s) => s.agentMeta.tokens);
-  const lastInput = useChatStore((s) => s.agentMeta.lastInputTokens);
-  const lastCached = useChatStore((s) => s.agentMeta.lastCachedTokens);
-  const status = useChatStore((s) => s.agentMeta.status);
-  const busy =
-    status === "thinking" ||
-    status === "streaming" ||
-    status === "awaiting-approval";
-
-  const hasData = lastInput > 0 || tokens.inputTokens > 0;
-  if (!hasData) return null;
-
-  const title = `Tokens: last input ${fmtK(lastInput || tokens.inputTokens)} · cached ${fmtK(lastCached)} · run output ${fmtK(tokens.outputTokens)}`;
-
-  return (
-    <span
-      className="flex items-center gap-1 rounded-md px-1.5 text-[10.5px] text-muted-foreground"
-      title={title}
-    >
-      <HugeiconsIcon
-        icon={CpuIcon}
-        size={11}
-        strokeWidth={1.75}
-        className="text-muted-foreground/70"
-      />
-      <span className="tabular-nums">
-        {fmtK(lastInput || tokens.inputTokens)}
-      </span>
-      <span className="text-muted-foreground/70">/</span>
-      <span className="tabular-nums text-muted-foreground/80">
-        {fmtK(tokens.outputTokens)}
-      </span>
-      {busy && lastCached > 0 && (
-        <span className="text-muted-foreground/70">
-          ({fmtK(lastCached)} cached)
-        </span>
-      )}
-    </span>
-  );
-}
-
-/**
- * Live per-run cost estimate, derived from the tokens the current run has
- * already produced and the selected model's pricing. Shown only while a run
- * is in flight so an idle bar stays quiet; hidden for local/keyless models
- * whose cost is not priced.
- */
-function RunCostChip() {
-  const status = useChatStore((s) => s.agentMeta.status);
-  const tokens = useChatStore((s) => s.agentMeta.tokens);
-  const modelId = useChatStore((s) => s.selectedModelId);
-
   const inFlight =
     status === "thinking" ||
     status === "streaming" ||
     status === "awaiting-approval";
 
-  const cost = useMemo(
+  const runCost = useMemo(
     () =>
       estimateCost(modelId, {
         inputTokens: tokens.inputTokens,
@@ -984,20 +994,143 @@ function RunCostChip() {
     [modelId, tokens],
   );
 
-  if (!inFlight || cost == null || cost <= 0) return null;
+  const hasTokens = lastInput > 0 || tokens.inputTokens > 0;
+  if (today == null && !hasTokens && (!inFlight || runCost == null)) {
+    return null;
+  }
+
+  let summaryText = "";
+  if (inFlight && runCost != null && runCost > 0) {
+    summaryText = `~$${runCost.toFixed(2)}`;
+    if (hasTokens) {
+      summaryText += ` · ${fmtK(lastInput || tokens.inputTokens)} tok`;
+    }
+  } else if (today != null && today > 0) {
+    summaryText = `$${today.toFixed(2)}`;
+  } else if (hasTokens) {
+    summaryText = `${fmtK(lastInput || tokens.inputTokens)} tok`;
+  }
+
+  if (!summaryText) return null;
 
   return (
-    <span
-      className="flex items-center gap-1 rounded-md px-1.5 text-[10.5px] text-muted-foreground"
-      title={`Estimated cost of the current run: $${cost.toFixed(4)}`}
-    >
-      <HugeiconsIcon
-        icon={CoinsDollarIcon}
-        size={11}
-        strokeWidth={1.75}
-        className="animate-pulse text-foreground/60"
-      />
-      <span className="tabular-nums">~${cost.toFixed(2)}</span>
-    </span>
+    <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className={cn(
+            "flex h-6 items-center gap-1 rounded-md px-1.5 text-[10.5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+            popoverOpen && "bg-accent text-foreground",
+          )}
+          title="Telemetry breakdown: cost and token usage"
+          aria-label="Telemetry breakdown"
+        >
+          <HugeiconsIcon
+            icon={CoinsDollarIcon}
+            size={11.5}
+            strokeWidth={1.75}
+            className={cn(
+              "text-muted-foreground/80",
+              inFlight && "animate-pulse text-amber-500 dark:text-amber-400",
+            )}
+          />
+          <span className="font-mono tabular-nums">{summaryText}</span>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="end"
+        side="top"
+        sideOffset={6}
+        className="z-50 w-72 rounded-xl border border-border/80 bg-popover/95 p-3 text-xs shadow-xl backdrop-blur-md"
+      >
+        <div className="flex items-center justify-between border-b border-border/60 pb-2">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-foreground/90">
+            Agent Spend & Tokens
+          </span>
+          {inFlight && (
+            <span className="flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+              <span className="size-1.5 animate-pulse rounded-full bg-amber-500" />
+              In flight
+            </span>
+          )}
+        </div>
+
+        <div className="mt-2.5 flex flex-col gap-2">
+          {today != null && (
+            <div className="flex items-center justify-between rounded-lg bg-muted/40 px-2.5 py-1.5">
+              <span className="text-[11px] text-muted-foreground">
+                Today's Recorded Spend
+              </span>
+              <span className="font-mono text-[12px] font-medium text-foreground">
+                ${today.toFixed(4)}
+              </span>
+            </div>
+          )}
+
+          {inFlight && runCost != null && (
+            <div className="flex items-center justify-between rounded-lg bg-muted/40 px-2.5 py-1.5">
+              <span className="text-[11px] text-muted-foreground">
+                Current Run Estimate
+              </span>
+              <span className="font-mono text-[12px] font-medium text-foreground">
+                ~${runCost.toFixed(4)}
+              </span>
+            </div>
+          )}
+
+          {hasTokens && (
+            <div className="rounded-lg bg-muted/40 p-2.5">
+              <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Token Utilization
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-[11px]">
+                <div>
+                  <div className="text-[10.5px] text-muted-foreground">
+                    Last Input
+                  </div>
+                  <div className="font-mono font-medium text-foreground">
+                    {fmtK(lastInput || tokens.inputTokens)} tokens
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[10.5px] text-muted-foreground">
+                    Run Output
+                  </div>
+                  <div className="font-mono font-medium text-foreground">
+                    {fmtK(tokens.outputTokens)} tokens
+                  </div>
+                </div>
+                {lastCached > 0 && (
+                  <div className="col-span-2">
+                    <div className="text-[10.5px] text-muted-foreground">
+                      Cached Prompt Tokens
+                    </div>
+                    <div className="font-mono font-medium text-emerald-600 dark:text-emerald-400">
+                      {fmtK(lastCached)} tokens saved
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={() => {
+              setPopoverOpen(false);
+              onOpenDiag();
+            }}
+            className="mt-1 flex w-full items-center justify-center gap-1.5 rounded-lg border border-border/60 bg-card py-1.5 text-[11px] font-medium text-foreground/80 transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <HugeiconsIcon
+              icon={InspectCodeIcon}
+              size={12}
+              strokeWidth={1.75}
+            />
+            <span>Open Detailed Diagnostics</span>
+          </button>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }

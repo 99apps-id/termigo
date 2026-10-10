@@ -2,11 +2,17 @@ import { Popover, PopoverAnchor } from "@/components/ui/popover";
 import { Spinner } from "@/components/ui/spinner";
 import { usePresence } from "@/lib/usePresence";
 import { cn } from "@/lib/utils";
-import { Add01Icon, CommandIcon, Edit02Icon } from "@hugeicons/core-free-icons";
+import {
+  Add01Icon,
+  CommandIcon,
+  Edit02Icon,
+  Mic01Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { setAgentApprovalMode } from "@/modules/settings/store";
+import { STT_PROVIDER_LABELS } from "../config";
 import { useWorkspaceFiles } from "../hooks/useWorkspaceFiles";
 import { ACCEPTED_FILES, useComposer } from "../lib/composer";
 import { splitComposerHighlights } from "../lib/composerHighlights";
@@ -18,9 +24,7 @@ import { useCustomCommandsStore } from "../store/customCommandsStore";
 import { useSnippetsStore } from "../store/snippetsStore";
 
 /** Present a user-defined command as a picker entry, like a built-in one. */
-function customCommandMeta(
-  cmd: CustomCommand,
-): SlashCommandMeta & {
+function customCommandMeta(cmd: CustomCommand): SlashCommandMeta & {
   tags: string[];
   favorite?: boolean;
   usageCount?: number;
@@ -501,106 +505,106 @@ export function AiComposerInput() {
                 value={c.value}
                 onChange={(e) => c.setValue(e.target.value)}
                 onScroll={syncBackdropScroll}
-              onPaste={(e) => {
-                // Pasting a screenshot, image, or document attaches it to the composer.
-                // Text paste falls through to the default textarea behaviour.
-                const fileList: File[] = [];
-                const items = e.clipboardData?.items;
-                if (items && items.length > 0) {
-                  for (const item of Array.from(items)) {
-                    if (item.kind === "file") {
-                      const f = item.getAsFile();
-                      if (f) fileList.push(f);
+                onPaste={(e) => {
+                  // Pasting a screenshot, image, or document attaches it to the composer.
+                  // Text paste falls through to the default textarea behaviour.
+                  const fileList: File[] = [];
+                  const items = e.clipboardData?.items;
+                  if (items && items.length > 0) {
+                    for (const item of Array.from(items)) {
+                      if (item.kind === "file") {
+                        const f = item.getAsFile();
+                        if (f) fileList.push(f);
+                      }
                     }
                   }
-                }
-                if (
-                  fileList.length === 0 &&
-                  e.clipboardData?.files &&
-                  e.clipboardData.files.length > 0
-                ) {
-                  for (const f of Array.from(e.clipboardData.files)) {
-                    fileList.push(f);
+                  if (
+                    fileList.length === 0 &&
+                    e.clipboardData?.files &&
+                    e.clipboardData.files.length > 0
+                  ) {
+                    for (const f of Array.from(e.clipboardData.files)) {
+                      fileList.push(f);
+                    }
                   }
-                }
-                if (fileList.length > 0) {
-                  e.preventDefault();
-                  void c.addFiles(fileList);
-                }
-              }}
-              onKeyUp={updateTrigger}
-              onClick={updateTrigger}
-              onSelect={updateTrigger}
-              onKeyDown={(e) => {
-                if (pickerOpen) {
-                  const items = fileTrigger ? filteredFiles : filteredItems;
-                  if (e.key === "ArrowDown") {
+                  if (fileList.length > 0) {
                     e.preventDefault();
-                    setActiveIndex((i) =>
-                      Math.min(i + 1, Math.max(0, items.length - 1)),
-                    );
-                    return;
+                    void c.addFiles(fileList);
                   }
-                  if (e.key === "ArrowUp") {
-                    e.preventDefault();
-                    setActiveIndex((i) => Math.max(0, i - 1));
-                    return;
-                  }
-                  if (e.key === "Tab" || e.key === "Enter") {
-                    if (items.length > 0) {
+                }}
+                onKeyUp={updateTrigger}
+                onClick={updateTrigger}
+                onSelect={updateTrigger}
+                onKeyDown={(e) => {
+                  if (pickerOpen) {
+                    const items = fileTrigger ? filteredFiles : filteredItems;
+                    if (e.key === "ArrowDown") {
                       e.preventDefault();
-                      pickActive();
+                      setActiveIndex((i) =>
+                        Math.min(i + 1, Math.max(0, items.length - 1)),
+                      );
+                      return;
+                    }
+                    if (e.key === "ArrowUp") {
+                      e.preventDefault();
+                      setActiveIndex((i) => Math.max(0, i - 1));
+                      return;
+                    }
+                    if (e.key === "Tab" || e.key === "Enter") {
+                      if (items.length > 0) {
+                        e.preventDefault();
+                        pickActive();
+                        return;
+                      }
+                    }
+                    if (e.key === "Escape") {
+                      e.preventDefault();
+                      if (fileTrigger) {
+                        const before = c.value.slice(0, fileTrigger.start);
+                        const after = c.value.slice(fileTrigger.end);
+                        c.setValue(`${before}${after}`);
+                        setFileTrigger(null);
+                      } else {
+                        setTrigger(null);
+                      }
                       return;
                     }
                   }
-                  if (e.key === "Escape") {
+                  // Cancelling an edit-and-resend keeps the text in the box: the
+                  // correction is still worth sending, just as an ordinary turn.
+                  if (e.key === "Escape" && editTarget) {
                     e.preventDefault();
-                    if (fileTrigger) {
-                      const before = c.value.slice(0, fileTrigger.start);
-                      const after = c.value.slice(fileTrigger.end);
-                      c.setValue(`${before}${after}`);
-                      setFileTrigger(null);
-                    } else {
-                      setTrigger(null);
-                    }
+                    void import("../store/chatRuntime").then((m) =>
+                      m.cancelEditUserMessage(),
+                    );
                     return;
                   }
-                }
-                // Cancelling an edit-and-resend keeps the text in the box: the
-                // correction is still worth sending, just as an ordinary turn.
-                if (e.key === "Escape" && editTarget) {
-                  e.preventDefault();
-                  void import("../store/chatRuntime").then((m) =>
-                    m.cancelEditUserMessage(),
-                  );
-                  return;
-                }
-                // Stopping a run had no keyboard path at all: the only way was
-                // to reach the far corner of the bar with the mouse. Inside the
-                // picker Escape already means "dismiss", handled above, so this
-                // only fires once that is closed. The mini window's global
-                // Escape ignores textareas, so nothing else claims this key.
-                if (e.key === "Escape" && c.isBusy) {
-                  e.preventDefault();
-                  c.stop();
-                  return;
-                }
-                if (
-                  e.key === "Enter" &&
-                  !e.shiftKey &&
-                  !e.nativeEvent.isComposing
-                ) {
-                  e.preventDefault();
-                  c.submit();
-                }
-              }}
-              placeholder="Ask Termigo anything   -   # for snippets and commands, @ for files"
-              rows={1}
-              className={cn(
-                "relative max-h-40 w-full resize-none bg-transparent text-[13px] leading-relaxed outline-none",
-                "placeholder:text-muted-foreground/60",
-              )}
-            />
+                  // Stopping a run had no keyboard path at all: the only way was
+                  // to reach the far corner of the bar with the mouse. Inside the
+                  // picker Escape already means "dismiss", handled above, so this
+                  // only fires once that is closed. The mini window's global
+                  // Escape ignores textareas, so nothing else claims this key.
+                  if (e.key === "Escape" && c.isBusy) {
+                    e.preventDefault();
+                    c.stop();
+                    return;
+                  }
+                  if (
+                    e.key === "Enter" &&
+                    !e.shiftKey &&
+                    !e.nativeEvent.isComposing
+                  ) {
+                    e.preventDefault();
+                    c.submit();
+                  }
+                }}
+                placeholder="Ask Termigo anything   -   # for snippets and commands, @ for files"
+                rows={1}
+                className={cn(
+                  "relative max-h-40 w-full resize-none bg-transparent text-[13px] leading-relaxed outline-none",
+                  "placeholder:text-muted-foreground/60",
+                )}
+              />
             </div>
             <div className="flex shrink-0 items-center gap-0.5">
               <input
@@ -624,6 +628,42 @@ export function AiComposerInput() {
               >
                 <HugeiconsIcon icon={Add01Icon} size={14} strokeWidth={2} />
               </button>
+              {c.voice.supported && (
+                <button
+                  type="button"
+                  title={
+                    !c.voice.hasKey
+                      ? `Voice needs a ${STT_PROVIDER_LABELS[c.voice.sttProvider]} key`
+                      : c.voice.recording
+                        ? "Stop & transcribe"
+                        : c.voice.transcribing
+                          ? "Transcribing…"
+                          : "Voice input"
+                  }
+                  onClick={() =>
+                    c.voice.recording ? c.voice.stop() : void c.voice.start()
+                  }
+                  disabled={c.isBusy || c.voice.transcribing || !c.voice.hasKey}
+                  aria-label="Voice input"
+                  className={cn(
+                    "grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40",
+                    c.voice.recording &&
+                      "bg-destructive/10 text-destructive hover:bg-destructive/15",
+                  )}
+                >
+                  {c.voice.recording ? (
+                    <span className="size-2 animate-pulse rounded-full bg-destructive" />
+                  ) : c.voice.transcribing ? (
+                    <Spinner className="size-3" />
+                  ) : (
+                    <HugeiconsIcon
+                      icon={Mic01Icon}
+                      size={14}
+                      strokeWidth={1.75}
+                    />
+                  )}
+                </button>
+              )}
               <AgentSwitcher />
             </div>
           </div>
