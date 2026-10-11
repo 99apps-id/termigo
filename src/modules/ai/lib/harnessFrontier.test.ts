@@ -23,10 +23,13 @@ vi.mock("@tauri-apps/plugin-store", () => {
 });
 
 import {
+  avgCachePct,
+  avgCostUsd,
   bestProfile,
   loadFrontier,
   recordRun,
   resetFrontier,
+  summarizeFrontier,
 } from "./harnessFrontier";
 
 describe("harnessFrontier", () => {
@@ -66,5 +69,54 @@ describe("harnessFrontier", () => {
     await recordRun("/ws", "balanced", { success: true, steps: 1 });
     await resetFrontier();
     expect(await loadFrontier()).toEqual({});
+  });
+
+  it("never produces NaN for avgCache, avgCost, or score when token counts are zero or missing", async () => {
+    await recordRun("/ws", "balanced", { success: true, steps: 2 });
+    const record = await loadFrontier();
+    const stat = record["/ws::balanced"];
+
+    expect(Number.isNaN(avgCostUsd(stat))).toBe(false);
+    expect(Number.isNaN(avgCachePct(stat))).toBe(false);
+    expect(avgCostUsd(stat)).toBe(0);
+    expect(avgCachePct(stat)).toBe(0);
+
+    const summary = summarizeFrontier(record);
+    expect(summary.groups).toHaveLength(1);
+    const group = summary.groups[0];
+    expect(Number.isNaN(group.rate)).toBe(false);
+    expect(Number.isNaN(group.avgCost)).toBe(false);
+    expect(Number.isNaN(group.avgCache)).toBe(false);
+    expect(group.avgCache).toBe(0);
+    expect(group.avgCost).toBe(0);
+    expect(group.rate).toBe(1);
+
+    expect(summary.best).not.toBeNull();
+    expect(Number.isNaN(summary.best?.score)).toBe(false);
+    expect(summary.best?.score).toBe(1);
+
+    const best = await bestProfile("/ws");
+    expect(best).not.toBeNull();
+    expect(Number.isNaN(best?.score)).toBe(false);
+  });
+
+  it("handles malformed or partial records safely in summarizeFrontier", () => {
+    const malformed = {
+      "/ws::broken": {
+        runs: 3,
+        successes: 2,
+        totalSteps: 4,
+        totalInputTokens: 0,
+        totalOutputTokens: 0,
+        totalCachedTokens: 0,
+        totalCostUsd: Number.NaN,
+        lastAt: 0,
+      },
+    };
+    const summary = summarizeFrontier(malformed);
+    expect(summary.groups).toHaveLength(1);
+    expect(Number.isNaN(summary.groups[0].avgCost)).toBe(false);
+    expect(Number.isNaN(summary.groups[0].avgCache)).toBe(false);
+    expect(Number.isNaN(summary.best?.score)).toBe(false);
   });
 });

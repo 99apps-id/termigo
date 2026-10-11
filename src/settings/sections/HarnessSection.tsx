@@ -7,7 +7,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { loadFrontier, resetFrontier } from "@/modules/ai/lib/harnessFrontier";
+import {
+  loadFrontier,
+  resetFrontier,
+  summarizeFrontier,
+  type FrontierSummary,
+} from "@/modules/ai/lib/harnessFrontier";
 import {
   BUILTIN_PROFILES,
   DEFAULT_PROFILE_ID,
@@ -19,78 +24,6 @@ import { CheckmarkCircle02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { SectionHeader } from "../components/SectionHeader";
-
-type FrontierGroup = {
-  id: string;
-  runs: number;
-  successes: number;
-  totalSteps: number;
-  totalInputTokens: number;
-  totalOutputTokens: number;
-  totalCachedTokens: number;
-  totalCostUsd: number;
-  lastAt: number;
-  rate: number;
-  avgCost: number;
-  avgCache: number;
-};
-
-type FrontierSummary = {
-  groups: FrontierGroup[];
-  best: { id: string; stats: FrontierGroup; score: number } | null;
-};
-
-function summarizeFrontier(
-  record: Awaited<ReturnType<typeof loadFrontier>>,
-): FrontierSummary {
-  const map = new Map<string, FrontierGroup>();
-  for (const [key, stats] of Object.entries(record)) {
-    const id = key.includes("::") ? key.slice(key.indexOf("::") + 2) : key;
-    const prev = map.get(id) ?? {
-      id,
-      runs: 0,
-      successes: 0,
-      totalSteps: 0,
-      totalInputTokens: 0,
-      totalOutputTokens: 0,
-      totalCachedTokens: 0,
-      totalCostUsd: 0,
-      lastAt: 0,
-      rate: 0,
-      avgCost: 0,
-      avgCache: 0,
-    };
-    prev.runs += stats.runs;
-    prev.successes += stats.successes;
-    prev.totalSteps += stats.totalSteps;
-    prev.totalInputTokens += stats.totalInputTokens;
-    prev.totalOutputTokens += stats.totalOutputTokens;
-    prev.totalCachedTokens += stats.totalCachedTokens;
-    prev.totalCostUsd += stats.totalCostUsd;
-    prev.lastAt = Math.max(prev.lastAt, stats.lastAt);
-    map.set(id, prev);
-  }
-  const groups = [...map.values()].map((g) => ({
-    ...g,
-    rate: g.runs ? g.successes / g.runs : 0,
-    avgCost: g.runs ? g.totalCostUsd / g.runs : 0,
-    avgCache: g.runs ? (g.totalCachedTokens / (g.totalInputTokens + g.totalCachedTokens)) * 100 : 0,
-  }));
-  groups.sort((a, b) => {
-    const scoreA = a.rate / (1 + a.avgCost);
-    const scoreB = b.rate / (1 + b.avgCost);
-    if (scoreB !== scoreA) return scoreB - scoreA;
-    return b.runs - a.runs;
-  });
-  const best = groups[0] ?? null;
-  return {
-    groups,
-    best:
-      best !== null
-        ? { id: best.id, stats: best, score: best.rate / (1 + best.avgCost) }
-        : null,
-  };
-}
 
 export function HarnessSection() {
   const byWorkspace = useHarnessProfileStore((s) => s.byWorkspace);
@@ -188,31 +121,50 @@ export function HarnessSection() {
           </p>
         ) : (
           <div className="mt-2 space-y-1.5">
-            {frontier.groups.map((g) => (
-              <div
-                key={g.id}
-                className="flex items-center justify-between rounded border border-border/50 px-2.5 py-1.5 text-[11.5px]"
-              >
-                <span className="font-medium">{getProfile(g.id).label}</span>
-                <span className="text-muted-foreground">
-                  {g.runs} run{g.runs === 1 ? "" : "s"} ·{" "}
-                  {Math.round(g.rate * 100)}% clean ·{" "}
-                  ${g.avgCost.toFixed(4)}/run ·{" "}
-                  {Math.round(g.avgCache)}% cache
-                </span>
-              </div>
-            ))}
-            {frontier.best && (
-              <p className="pt-0.5 text-[11px] text-muted-foreground">
-                Suggested:{" "}
-                <span className="font-medium text-foreground">
-                  {getProfile(frontier.best.id).label}
-                </span>
-                <span className="text-muted-foreground ml-1">
-                  (score {frontier.best.score.toFixed(3)}, ${frontier.best.stats.avgCost.toFixed(4)}/run, {Math.round(frontier.best.stats.avgCache)}% cache)
-                </span>
-              </p>
-            )}
+            {frontier.groups.map((g) => {
+              const cleanRate = Number.isFinite(g.rate) ? g.rate : 0;
+              const avgCost = Number.isFinite(g.avgCost) ? g.avgCost : 0;
+              const avgCache = Number.isFinite(g.avgCache) ? g.avgCache : 0;
+              return (
+                <div
+                  key={g.id}
+                  className="flex items-center justify-between rounded border border-border/50 px-2.5 py-1.5 text-[11.5px]"
+                >
+                  <span className="font-medium">{getProfile(g.id).label}</span>
+                  <span className="text-muted-foreground">
+                    {g.runs} run{g.runs === 1 ? "" : "s"} ·{" "}
+                    {Math.round(cleanRate * 100)}% clean · ${avgCost.toFixed(4)}
+                    /run · {Math.round(avgCache)}% cache
+                  </span>
+                </div>
+              );
+            })}
+            {frontier.best &&
+              (() => {
+                const bestScore = Number.isFinite(frontier.best.score)
+                  ? frontier.best.score
+                  : 0;
+                const bestAvgCost = Number.isFinite(frontier.best.stats.avgCost)
+                  ? frontier.best.stats.avgCost
+                  : 0;
+                const bestAvgCache = Number.isFinite(
+                  frontier.best.stats.avgCache,
+                )
+                  ? frontier.best.stats.avgCache
+                  : 0;
+                return (
+                  <p className="pt-0.5 text-[11px] text-muted-foreground">
+                    Suggested:{" "}
+                    <span className="font-medium text-foreground">
+                      {getProfile(frontier.best.id).label}
+                    </span>
+                    <span className="text-muted-foreground ml-1">
+                      (score {bestScore.toFixed(3)}, ${bestAvgCost.toFixed(4)}
+                      /run, {Math.round(bestAvgCache)}% cache)
+                    </span>
+                  </p>
+                );
+              })()}
           </div>
         )}
       </div>

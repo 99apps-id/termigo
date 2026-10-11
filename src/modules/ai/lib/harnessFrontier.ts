@@ -29,6 +29,26 @@ export type FrontierStats = {
 
 export type FrontierRecord = Record<string, FrontierStats>;
 
+export type FrontierGroup = {
+  id: string;
+  runs: number;
+  successes: number;
+  totalSteps: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalCachedTokens: number;
+  totalCostUsd: number;
+  lastAt: number;
+  rate: number;
+  avgCost: number;
+  avgCache: number;
+};
+
+export type FrontierSummary = {
+  groups: FrontierGroup[];
+  best: { id: string; stats: FrontierGroup; score: number } | null;
+};
+
 const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
 
 export async function loadFrontier(): Promise<FrontierRecord> {
@@ -73,17 +93,99 @@ export async function recordRun(
     lastAt: 0,
   };
   record[key] = {
-    runs: prev.runs + 1,
-    successes: prev.successes + (outcome.success ? 1 : 0),
-    totalSteps: prev.totalSteps + outcome.steps,
-    totalInputTokens: prev.totalInputTokens + (outcome.inputTokens ?? 0),
-    totalOutputTokens: prev.totalOutputTokens + (outcome.outputTokens ?? 0),
-    totalCachedTokens: prev.totalCachedTokens + (outcome.cachedTokens ?? 0),
-    totalCostUsd: prev.totalCostUsd + (outcome.costUsd ?? 0),
+    runs: (Number(prev.runs) || 0) + 1,
+    successes: (Number(prev.successes) || 0) + (outcome.success ? 1 : 0),
+    totalSteps: (Number(prev.totalSteps) || 0) + (Number(outcome.steps) || 0),
+    totalInputTokens:
+      (Number(prev.totalInputTokens) || 0) + (Number(outcome.inputTokens) || 0),
+    totalOutputTokens:
+      (Number(prev.totalOutputTokens) || 0) +
+      (Number(outcome.outputTokens) || 0),
+    totalCachedTokens:
+      (Number(prev.totalCachedTokens) || 0) +
+      (Number(outcome.cachedTokens) || 0),
+    totalCostUsd:
+      (Number(prev.totalCostUsd) || 0) + (Number(outcome.costUsd) || 0),
     lastAt: Date.now(),
   };
   await saveFrontier(record);
   return record;
+}
+
+/** Summarize frontier record across profiles without NaN values. */
+export function summarizeFrontier(record: FrontierRecord): FrontierSummary {
+  const map = new Map<string, FrontierGroup>();
+  for (const [key, stats] of Object.entries(record ?? {})) {
+    if (!stats || typeof stats !== "object") continue;
+    const id = key.includes("::") ? key.slice(key.indexOf("::") + 2) : key;
+    const prev = map.get(id) ?? {
+      id,
+      runs: 0,
+      successes: 0,
+      totalSteps: 0,
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+      totalCachedTokens: 0,
+      totalCostUsd: 0,
+      lastAt: 0,
+      rate: 0,
+      avgCost: 0,
+      avgCache: 0,
+    };
+    prev.runs += Number(stats.runs) || 0;
+    prev.successes += Number(stats.successes) || 0;
+    prev.totalSteps += Number(stats.totalSteps) || 0;
+    prev.totalInputTokens += Number(stats.totalInputTokens) || 0;
+    prev.totalOutputTokens += Number(stats.totalOutputTokens) || 0;
+    prev.totalCachedTokens += Number(stats.totalCachedTokens) || 0;
+    prev.totalCostUsd += Number(stats.totalCostUsd) || 0;
+    prev.lastAt = Math.max(prev.lastAt, Number(stats.lastAt) || 0);
+    map.set(id, prev);
+  }
+
+  const groups = [...map.values()].map((g) => {
+    const runs = g.runs > 0 ? g.runs : 0;
+    const rate = runs > 0 ? g.successes / runs : 0;
+    const avgCost = runs > 0 ? g.totalCostUsd / runs : 0;
+    const totalTokens = g.totalInputTokens + g.totalCachedTokens;
+    const avgCache =
+      totalTokens > 0 ? (g.totalCachedTokens / totalTokens) * 100 : 0;
+
+    return {
+      ...g,
+      rate: Number.isFinite(rate) ? rate : 0,
+      avgCost: Number.isFinite(avgCost) ? avgCost : 0,
+      avgCache: Number.isFinite(avgCache) ? avgCache : 0,
+    };
+  });
+
+  groups.sort((a, b) => {
+    const costA = Math.max(0, a.avgCost);
+    const costB = Math.max(0, b.avgCost);
+    const scoreA = Number.isFinite(a.rate / (1 + costA))
+      ? a.rate / (1 + costA)
+      : 0;
+    const scoreB = Number.isFinite(b.rate / (1 + costB))
+      ? b.rate / (1 + costB)
+      : 0;
+    if (scoreB !== scoreA) return scoreB - scoreA;
+    return b.runs - a.runs;
+  });
+
+  const bestGroup = groups[0] ?? null;
+  const bestScore = bestGroup
+    ? Number.isFinite(bestGroup.rate / (1 + Math.max(0, bestGroup.avgCost)))
+      ? bestGroup.rate / (1 + Math.max(0, bestGroup.avgCost))
+      : 0
+    : 0;
+
+  return {
+    groups,
+    best:
+      bestGroup !== null
+        ? { id: bestGroup.id, stats: bestGroup, score: bestScore }
+        : null,
+  };
 }
 
 /** Best profile for a workspace by a composite score.
@@ -100,28 +202,39 @@ export async function bestProfile(
     .filter(([key]) => key.startsWith(prefix))
     .map(([key, stats]) => {
       const id = key.slice(prefix.length);
-      const rate = stats.runs ? stats.successes / stats.runs : 0;
-      const avgCost = stats.runs ? stats.totalCostUsd / stats.runs : 0;
-      const score = rate / (1 + avgCost);
+      const runs = Number(stats?.runs) || 0;
+      const successes = Number(stats?.successes) || 0;
+      const totalCostUsd = Number(stats?.totalCostUsd) || 0;
+      const rate = runs > 0 ? successes / runs : 0;
+      const avgCost = runs > 0 ? totalCostUsd / runs : 0;
+      const score = Number.isFinite(rate / (1 + Math.max(0, avgCost)))
+        ? rate / (1 + Math.max(0, avgCost))
+        : 0;
       return { id, stats, score };
     });
   if (candidates.length === 0) return null;
   candidates.sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;
-    return b.stats.runs - a.stats.runs;
+    return (b.stats?.runs || 0) - (a.stats?.runs || 0);
   });
   return candidates[0];
 }
 
 /** Helper: average cost per run for a profile, for UI. */
 export function avgCostUsd(stats: FrontierStats): number {
-  return stats.runs ? stats.totalCostUsd / stats.runs : 0;
+  const runs = Number(stats?.runs) || 0;
+  const cost = Number(stats?.totalCostUsd) || 0;
+  return runs > 0 ? cost / runs : 0;
 }
 
 /** Helper: average cache hit % for a profile. */
 export function avgCachePct(stats: FrontierStats): number {
-  const total = stats.totalInputTokens + stats.totalCachedTokens;
-  return total ? (stats.totalCachedTokens / total) * 100 : 0;
+  const total =
+    (Number(stats?.totalInputTokens) || 0) +
+    (Number(stats?.totalCachedTokens) || 0);
+  return total > 0
+    ? ((Number(stats?.totalCachedTokens) || 0) / total) * 100
+    : 0;
 }
 
 /** Reset hook for tests and the settings UI. */
