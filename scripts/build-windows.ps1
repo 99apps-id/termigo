@@ -27,6 +27,8 @@ if (Test-Path $envFile) {
             $name = "TERMIGO_ANTIGRAVITY_CLIENT_$($Matches[1])"
             $value = $Matches[2].Trim('"', "'")
             [Environment]::SetEnvironmentVariable($name, $value, "Process")
+            Set-Item -Path "env:$name" -Value $value
+            Write-Host "==> Loaded $name from .env.local" -ForegroundColor Green
         }
     }
 }
@@ -47,7 +49,7 @@ if ($LASTEXITCODE -ne 0) { throw "frontend build failed" }
 Write-Host "==> Building Tauri Windows application..." -ForegroundColor Cyan
 if (-not $env:TAURI_SIGNING_PRIVATE_KEY) {
     Write-Host "    Note: TAURI_SIGNING_PRIVATE_KEY is not set. Building local installers without updater signature artifacts." -ForegroundColor Yellow
-    pnpm exec tauri build --bundles nsis msi -c '{\"bundle\":{\"createUpdaterArtifacts\":false}}'
+    pnpm exec tauri build --bundles nsis msi -c '{"bundle":{"createUpdaterArtifacts":false}}'
 } else {
     pnpm exec tauri build --bundles nsis msi
 }
