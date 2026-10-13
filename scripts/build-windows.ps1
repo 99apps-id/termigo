@@ -49,7 +49,12 @@ if ($LASTEXITCODE -ne 0) { throw "frontend build failed" }
 Write-Host "==> Building Tauri Windows application..." -ForegroundColor Cyan
 if (-not $env:TAURI_SIGNING_PRIVATE_KEY) {
     Write-Host "    Note: TAURI_SIGNING_PRIVATE_KEY is not set. Building local installers without updater signature artifacts." -ForegroundColor Yellow
-    pnpm exec tauri build --bundles nsis msi -c '{"bundle":{"createUpdaterArtifacts":false}}'
+    # Inline JSON never survives the PowerShell/pnpm/cmd quoting chain intact
+    # (quotes are eaten before tauri sees them), so pass the override as a
+    # file, which --config also accepts.
+    $TmpConf = Join-Path ([System.IO.Path]::GetTempPath()) "termigo-tauri-build.json"
+    '{ "bundle": { "createUpdaterArtifacts": false } }' | Set-Content -Path $TmpConf -Encoding utf8
+    pnpm exec tauri build --bundles nsis msi -c $TmpConf
 } else {
     pnpm exec tauri build --bundles nsis msi
 }
