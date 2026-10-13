@@ -11,6 +11,12 @@ vi.mock("../lib/native", () => ({
     browserEmbedEval: vi.fn(async () => undefined),
     browserEmbedClose: vi.fn(async () => undefined),
     browserEmbedScreenshot: vi.fn(async () => "data:image/png;base64,mockBase64"),
+    readFileBase64: vi.fn(async () => ({
+      media_type: "image/png",
+      data: "QUJD",
+      size: 3,
+    })),
+    writeFileBase64: vi.fn(async () => 3),
   },
 }));
 
@@ -197,6 +203,45 @@ describe("browser tools", () => {
     expect(calls[1][1]).toContain('[data-termigo-ref=\\"@e2\\"]');
   });
 
+  it("presses Enter on the focused element when no target is given", async () => {
+    const ctx = makeCtx();
+    const tools = buildBrowserTools(ctx);
+    const r = (await execOf(tools.browser_press)(
+      { instance: "docs", key: "Enter" },
+      OPTS,
+    )) as { ok?: boolean };
+    expect(r.ok).toBe(true);
+    const js = (native.browserEmbedEval as ReturnType<typeof vi.fn>).mock
+      .calls[0][1] as string;
+    expect(js).toContain("document.activeElement||document.body");
+    expect(js).toContain('KeyboardEvent(\'keydown\'');
+    expect(js).toContain('"Enter"');
+  });
+
+  it("focuses a snapshot ref before pressing a key", async () => {
+    const ctx = makeCtx();
+    const tools = buildBrowserTools(ctx);
+    await execOf(tools.browser_press)(
+      { instance: "docs", key: "Tab", ref: "@e3" },
+      OPTS,
+    );
+    const js = (native.browserEmbedEval as ReturnType<typeof vi.fn>).mock
+      .calls[0][1] as string;
+    expect(js).toContain('[data-termigo-ref=\\"@e3\\"]');
+    expect(js).toContain('"Tab"');
+  });
+
+  it("rejects a bad ref in browser_press without touching the webview", async () => {
+    const ctx = makeCtx();
+    const tools = buildBrowserTools(ctx);
+    const r = (await execOf(tools.browser_press)(
+      { instance: "docs", key: "Enter", ref: "nope" },
+      OPTS,
+    )) as { error?: string };
+    expect(r.error).toContain("Invalid ref format");
+    expect(native.browserEmbedEval).not.toHaveBeenCalled();
+  });
+
   it("takes accessibility snapshot via browser_snapshot", async () => {
     const ctx = makeCtx();
     const tools = buildBrowserTools(ctx);
@@ -320,6 +365,195 @@ describe("browser tools", () => {
     )) as { kind?: string; data?: string; error?: string };
     expect(fourth.kind).toBe("screenshot");
     expect(fourth.error).toBeUndefined();
+  });
+
+  it("selects a dropdown option by value then label", async () => {
+    const ctx = makeCtx();
+    const tools = buildBrowserTools(ctx);
+    const r = (await execOf(tools.browser_select)(
+      { instance: "docs", selector: "select#country", option: "Indonesia" },
+      OPTS,
+    )) as { ok?: boolean };
+    expect(r.ok).toBe(true);
+    const js = (native.browserEmbedEval as ReturnType<typeof vi.fn>).mock
+      .calls[0][1] as string;
+    expect(js).toContain("HTMLSelectElement");
+    expect(js).toContain("selectedIndex=idx");
+    expect(js).toContain("dispatchEvent(new Event('change'");
+  });
+
+  it("rejects browser_select on a non-select element via the page", async () => {
+    const ctx = makeCtx();
+    const tools = buildBrowserTools(ctx);
+    (
+      native.browserEmbedEval as ReturnType<typeof vi.fn>
+    ).mockRejectedValueOnce(new Error("not a select"));
+    const r = (await execOf(tools.browser_select)(
+      { instance: "docs", selector: "div", option: "x" },
+      OPTS,
+    )) as { error?: string };
+    expect(r.error).toContain("not a select");
+  });
+
+  it("scrolls to an element, an offset, or top/bottom", async () => {
+    const ctx = makeCtx();
+    const tools = buildBrowserTools(ctx);
+    await execOf(tools.browser_scroll)(
+      { instance: "docs", ref: "@e5" },
+      OPTS,
+    );
+    let calls = (native.browserEmbedEval as ReturnType<typeof vi.fn>).mock
+      .calls;
+    expect(calls[0][1]).toContain("scrollIntoView");
+
+    await execOf(tools.browser_scroll)({ instance: "docs", to: "bottom" }, OPTS);
+    calls = (native.browserEmbedEval as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls[1][1]).toContain("document.body.scrollHeight");
+
+    const bad = (await execOf(tools.browser_scroll)(
+      { instance: "docs" },
+      OPTS,
+    )) as { error?: string };
+    expect(bad.error).toContain("give an element");
+  });
+
+  it("hovers an element with pointer and mouse events", async () => {
+    const ctx = makeCtx();
+    const tools = buildBrowserTools(ctx);
+    const r = (await execOf(tools.browser_hover)(
+      { instance: "docs", selector: ".menu" },
+      OPTS,
+    )) as { ok?: boolean };
+    expect(r.ok).toBe(true);
+    const js = (native.browserEmbedEval as ReturnType<typeof vi.fn>).mock
+      .calls[0][1] as string;
+    expect(js).toContain("pointerover");
+    expect(js).toContain("mouseenter");
+  });
+
+  it("browser_wait_for returns once the text appears", async () => {
+    const ctx = makeCtx();
+    const tools = buildBrowserTools(ctx);
+    (native.browserEmbedRead as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce("loading…")
+      .mockResolvedValueOnce("Welcome back, you are logged in");
+    const r = (await execOf(tools.browser_wait_for)(
+      { instance: "docs", kind: "text", value: "logged in" },
+      OPTS,
+    )) as { ok?: boolean };
+    expect(r.ok).toBe(true);
+  });
+
+  it("browser_wait_for times out with guidance instead of hanging", async () => {
+    const ctx = makeCtx();
+    const tools = buildBrowserTools(ctx);
+    (native.browserEmbedRead as ReturnType<typeof vi.fn>).mockResolvedValue(
+      "loading…",
+    );
+    const r = (await execOf(tools.browser_wait_for)(
+      { instance: "docs", kind: "text", value: "never", timeout_ms: 600 },
+      OPTS,
+    )) as { error?: string };
+    expect(r.error).toContain("timed out");
+  });
+
+  it("lists cookies through the value channel", async () => {
+    const ctx = makeCtx();
+    const tools = buildBrowserTools(ctx);
+    (native.browserEmbedRead as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      JSON.stringify({ cookies: "session=abc" }),
+    );
+    const r = (await execOf(tools.browser_storage)(
+      { instance: "docs", target: "cookies", action: "list" },
+      OPTS,
+    )) as { cookies?: string };
+    expect(r.cookies).toBe("session=abc");
+  });
+
+  it("lists network requests through the value channel", async () => {
+    const ctx = makeCtx();
+    const tools = buildBrowserTools(ctx);
+    (native.browserEmbedRead as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      JSON.stringify({
+        requests: [{ url: "https://api.example.com/login", type: "fetch" }],
+        count: 1,
+      }),
+    );
+    const r = (await execOf(tools.browser_network)(
+      { instance: "docs" },
+      OPTS,
+    )) as { requests?: unknown[]; count?: number };
+    expect(r.count).toBe(1);
+    expect(r.requests).toHaveLength(1);
+  });
+
+  it("uploads a workspace file into a file input with approval", async () => {
+    const ctx = makeCtx();
+    const tools = buildBrowserTools(ctx);
+    expect(tools.browser_upload).toMatchObject({ needsApproval: true });
+    const r = (await execOf(tools.browser_upload)(
+      { instance: "docs", selector: "input[type=file]", path: "a.png" },
+      OPTS,
+    )) as { ok?: boolean };
+    expect(r.ok).toBe(true);
+    expect(native.readFileBase64).toHaveBeenCalledWith("/workspace/a.png");
+    const js = (native.browserEmbedEval as ReturnType<typeof vi.fn>).mock
+      .calls[0][1] as string;
+    expect(js).toContain("DataTransfer");
+    expect(js).toContain("a.png");
+  });
+
+  it("refuses browser_upload over SSH and oversized files", async () => {
+    const remote = { ...makeCtx(), getRemoteSession: () => ({ sessionId: 1, cwd: null }) };
+    const tools = buildBrowserTools(remote);
+    const r = (await execOf(tools.browser_upload)(
+      { instance: "docs", selector: "input", path: "a.png" },
+      OPTS,
+    )) as { error?: string };
+    expect(r.error).toContain("not available over SSH");
+
+    const big = makeCtx();
+    (native.readFileBase64 as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      media_type: "application/octet-stream",
+      data: "AA",
+      size: 99_000_000,
+    });
+    const r2 = (await execOf(buildBrowserTools(big).browser_upload)(
+      { instance: "docs", selector: "input", path: "big.bin" },
+      OPTS,
+    )) as { error?: string };
+    expect(r2.error).toContain("over the");
+  });
+
+  it("downloads a file through page context into the workspace", async () => {
+    const ctx = makeCtx();
+    const tools = buildBrowserTools(ctx);
+    expect(tools.browser_download).toMatchObject({ needsApproval: true });
+    const dataUrl = "data:text/plain;base64,aGVsbG8=";
+    (native.browserEmbedRead as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      JSON.stringify({ chunk: dataUrl, last: true, total: dataUrl.length, error: null }),
+    );
+    const r = (await execOf(tools.browser_download)(
+      { instance: "docs", url: "https://example.com/f.txt", path: "f.txt" },
+      OPTS,
+    )) as { ok?: boolean; path?: string };
+    expect(r.ok).toBe(true);
+    expect(r.path).toBe("/workspace/f.txt");
+    expect(native.writeFileBase64).toHaveBeenCalledWith(
+      "/workspace/f.txt",
+      "aGVsbG8=",
+    );
+  });
+
+  it("refuses SSRF targets in browser_download", async () => {
+    const ctx = makeCtx();
+    const tools = buildBrowserTools(ctx);
+    const r = (await execOf(tools.browser_download)(
+      { instance: "docs", url: "http://169.254.169.254/x", path: "x" },
+      OPTS,
+    )) as { error?: string };
+    expect(r.error).toBeTruthy();
+    expect(native.writeFileBase64).not.toHaveBeenCalled();
   });
 });
 

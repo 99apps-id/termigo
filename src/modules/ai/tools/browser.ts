@@ -3,8 +3,10 @@ import { z } from "zod";
 import { modelSupportsVision } from "../config";
 import { unsafeBrowserUrl } from "../lib/browserGuard";
 import { native } from "../lib/native";
+import { remoteUnsupported } from "../lib/remoteFs";
 import { useChatStore } from "../store/chatStore";
-import type { ToolContext } from "./context";
+import { resolvePath, type ToolContext } from "./context";
+import { isLoopbackTarget } from "./fetch";
 
 // The read/act browser tools target the NATIVE embedded webview created by
 // `browser_open` (label `browser-embed-<instance>`), driven through the
@@ -147,6 +149,165 @@ export function buildTypeJs(targetSelector: string, text: string): string {
   )};el.dispatchEvent(new Event('input',{bubbles:true}));}else{throw new Error('Selector does not match an input-like element: '+${cssJson(
     targetSelector,
   )});}})();`;
+}
+
+/** Keys the agent may send to the page. Small on purpose: login and form
+ *  flows need Enter/Tab/Escape plus arrows, anything else is out of scope. */
+export const PRESS_KEYS = [
+  "Enter",
+  "Tab",
+  "Escape",
+  "ArrowUp",
+  "ArrowDown",
+  "ArrowLeft",
+  "ArrowRight",
+  " ",
+] as const;
+
+export type PressKey = (typeof PRESS_KEYS)[number];
+
+/**
+ * Key-press JS for an optional resolved selector. Pure, so the injected
+ * string is testable.
+ *
+ * Synthetic key events do not trigger a form's implicit submission (that
+ * needs a trusted keypress), so a login that ignores Enter still needs its
+ * submit button clicked via browser_click. React key handlers DO observe
+ * these events, since React listens at the root for bubbled keydown.
+ */
+export function buildPressJs(
+  targetSelector: string | null,
+  key: PressKey,
+): string {
+  const target =
+    targetSelector === null
+      ? "document.activeElement||document.body"
+      : `document.querySelector(${cssJson(targetSelector)})`;
+  return `(()=>{const el=${target};if(!el){throw new Error('No element matched selector: '+${cssJson(
+    targetSelector ?? "(focused element)",
+  )});}if(el.focus){el.focus();}const init={key:${cssJson(
+    key,
+  )},bubbles:true,cancelable:true,composed:true};el.dispatchEvent(new KeyboardEvent('keydown',init));el.dispatchEvent(new KeyboardEvent('keypress',init));el.dispatchEvent(new KeyboardEvent('keyup',init));})();`;
+}
+
+/** Select-dropdown JS for a resolved selector. Pure, testable. */
+export function buildSelectJs(
+  targetSelector: string,
+  wanted: string,
+): string {
+  return `(()=>{const el=document.querySelector(${cssJson(
+    targetSelector,
+  )});if(!el){throw new Error('No element matched selector: '+${cssJson(
+    targetSelector,
+  )});}if(!(el instanceof HTMLSelectElement)){throw new Error('Selector does not match a <select> dropdown: '+${cssJson(
+    targetSelector,
+  )});}const opts=Array.from(el.options);let idx=opts.findIndex(o=>o.value===${cssJson(
+    wanted,
+  )});if(idx<0){idx=opts.findIndex(o=>(o.text||'').trim()===${cssJson(
+    wanted,
+  )});}if(idx<0){throw new Error('No option with value or label '+${cssJson(
+    wanted,
+  )});}el.selectedIndex=idx;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));})();`;
+}
+
+/** Scroll JS: an element into view, an absolute Y, or top/bottom. Pure. */
+export function buildScrollJs(
+  targetSelector: string | null,
+  to: "top" | "bottom" | null,
+  y: number | null,
+): string {
+  if (targetSelector !== null) {
+    return `(()=>{const el=document.querySelector(${cssJson(
+      targetSelector,
+    )});if(!el){throw new Error('No element matched selector: '+${cssJson(
+      targetSelector,
+    )});}el.scrollIntoView({block:'center'});})();`;
+  }
+  if (y !== null) {
+    return `(()=>{window.scrollTo(0,${Math.trunc(y)});})();`;
+  }
+  const top = to !== "bottom";
+  return `(()=>{window.scrollTo(0,${top ? "0" : "document.body.scrollHeight"});})();`;
+}
+
+/** Hover JS for a resolved selector. Pure, testable. */
+export function buildHoverJs(targetSelector: string): string {
+  return `(()=>{const el=document.querySelector(${cssJson(
+    targetSelector,
+  )});if(!el){throw new Error('No element matched selector: '+${cssJson(
+    targetSelector,
+  )});}const r=el.getBoundingClientRect();const init={bubbles:true,cancelable:true,composed:true,clientX:r.left+r.width/2,clientY:r.top+r.height/2};el.dispatchEvent(new PointerEvent('pointerover',init));el.dispatchEvent(new MouseEvent('mouseover',init));el.dispatchEvent(new MouseEvent('mouseenter',init));el.dispatchEvent(new MouseEvent('mousemove',init));if(el.focus){el.focus();}})();`;
+}
+
+/**
+ * Read an arbitrary page-computed value through the extract event channel.
+ *
+ * `browserEmbedEval` reports only ok/error, so producers temporarily replace
+ * `window.__termigoExtract` with a function emitting `computeJs`, then a read
+ * triggers it. The override is deleted afterwards so later extracts return to
+ * page text. Same pattern as `browser_snapshot`, with the restore included.
+ */
+async function embedReadValue(
+  instance: string,
+  computeJs: string,
+): Promise<string> {
+  const producer = `(()=>{try{window.__termigoExtract=function(){var out;try{out=(${computeJs});}catch(e){out={error:String((e&&e.message)||e)};}var s=(typeof out==='string')?out:JSON.stringify(out);try{if(window.__TAURI__&&window.__TAURI__.event){window.__TAURI__.event.emit('termigo:browser-value',{instance:${JSON.stringify(instance)},kind:'extract',value:String(s).slice(0,200000)});}}catch(e){}};}catch(e){}})();`;
+  await native.browserEmbedEval(instance, producer).catch(() => {});
+  try {
+    return await native.browserEmbedRead(instance);
+  } finally {
+    await native
+      .browserEmbedEval(
+        instance,
+        "(()=>{try{delete window.__termigoExtract;}catch(e){}})();",
+      )
+      .catch(() => {});
+  }
+}
+
+/** Largest page-context download the agent may pull into the workspace. */
+export const MAX_DOWNLOAD_BYTES = 8_000_000;
+/** Value-channel payloads are sliced at 200k chars; chunks stay under it. */
+export const DOWNLOAD_CHUNK_CHARS = 150_000;
+/** Largest local file the agent may attach to a page file input. */
+export const MAX_UPLOAD_BYTES = 12_000_000;
+
+/** Page-context download starter: fetch with page cookies into a data URL. */
+export function buildDownloadStartJs(url: string): string {
+  return `(()=>{try{window.__termigoDl={done:false};fetch(${cssJson(
+    url,
+  )}).then(r=>{if(!r.ok){throw new Error('HTTP '+r.status);}return r.blob();}).then(b=>{if(b.size>${MAX_DOWNLOAD_BYTES}){window.__termigoDl={done:true,error:'file too large ('+b.size+' bytes, max ${MAX_DOWNLOAD_BYTES}'};return;}var fr=new FileReader();fr.onload=()=>{window.__termigoDl={done:true,dataUrl:String(fr.result)};};fr.onerror=()=>{window.__termigoDl={done:true,error:'read failed'};};fr.readAsDataURL(b);}).catch(e=>{window.__termigoDl={done:true,error:String((e&&e.message)||e)};});}catch(e){window.__termigoDl={done:true,error:String(e)}}})();`;
+}
+
+/** Poll probe: ok once the page-context download finished (or failed). */
+export const DOWNLOAD_READY_JS =
+  "(()=>{const s=window.__termigoDl;if(!s||!s.done){throw new Error('download pending');}})();";
+
+/** Chunk reader for the finished page-context download (0-based index). */
+export function buildDownloadChunkJs(index: number): string {
+  return `(()=>{var s=window.__termigoDl;var d=(s&&s.dataUrl)||'';var n=${DOWNLOAD_CHUNK_CHARS};var a=d.slice(${index}*n,(${index}+1)*n);var last=((${index}+1)*n>=d.length);if(last){try{delete window.__termigoDl;}catch(e){}}return {chunk:a,last:last,total:d.length,error:(s&&s.error)||null};})()`;
+}
+
+/** File-upload JS: attach local bytes to a file input. Pure, testable. */
+export function buildUploadJs(
+  targetSelector: string,
+  fileName: string,
+  mediaType: string,
+  base64: string,
+): string {
+  return `(()=>{const el=document.querySelector(${cssJson(
+    targetSelector,
+  )});if(!el){throw new Error('No element matched selector: '+${cssJson(
+    targetSelector,
+  )});}if(!(el instanceof HTMLInputElement)||el.type!=='file'){throw new Error('Selector does not match a file input: '+${cssJson(
+    targetSelector,
+  )});}const bin=atob(${cssJson(
+    base64,
+  )});const bytes=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++){bytes[i]=bin.charCodeAt(i);}const f=new File([bytes],${cssJson(
+    fileName,
+  )},{type:${cssJson(
+    mediaType || "application/octet-stream",
+  )}});const dt=new DataTransfer();dt.items.add(f);el.files=dt.files;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));})();`;
 }
 
 export function buildBrowserTools(ctx: ToolContext) {
@@ -295,6 +456,62 @@ export function buildBrowserTools(ctx: ToolContext) {
       },
     }),
 
+    browser_storage: tool({
+      description:
+        "List or clear cookies, localStorage, or sessionStorage of the page in a browser instance. Use it to inspect a login session (which cookies exist), to log out by clearing, or to reset page state for a fresh test. Only script-accessible cookies are listed; HttpOnly cookies are invisible to this tool by browser design. Clearing asks for approval.",
+      inputSchema: z.object({
+        instance: z.string().describe("Instance name."),
+        target: z
+          .enum(["cookies", "localStorage", "sessionStorage"])
+          .describe("Which storage to inspect."),
+        action: z.enum(["list", "clear"]).describe("Read or wipe the storage."),
+      }),
+      execute: async ({ instance, target, action }) => {
+        if (action === "clear") {
+          const js =
+            target === "cookies"
+              ? "(()=>{document.cookie.split(';').forEach(c=>{const n=c.split('=')[0].trim();if(!n){return;}['/'].concat([location.pathname]).forEach(p=>{document.cookie=n+'=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path='+p;});});})();"
+              : `(()=>{try{${target === "localStorage" ? "localStorage" : "sessionStorage"}.clear();}catch(e){throw new Error(String((e&&e.message)||e));}})();`;
+          return await embedEval(instance, js);
+        }
+        const compute =
+          target === "cookies"
+            ? "({cookies: document.cookie})"
+            : `(()=>{var o={};try{var s=${target === "localStorage" ? "localStorage" : "sessionStorage"};for(var i=0;i<s.length&&i<100;i++){var k=s.key(i);if(k===null){continue;}var v=s.getItem(k);o[String(k).slice(0,120)]=v===null?'':String(v).slice(0,500);}}catch(e){return {error:String((e&&e.message)||e)};}return o;})()`;
+        try {
+          const raw = await embedReadValue(instance, compute);
+          try {
+            return JSON.parse(raw) as unknown;
+          } catch {
+            return { value: raw };
+          }
+        } catch (e) {
+          return { error: String(e) };
+        }
+      },
+    }),
+
+    browser_network: tool({
+      description:
+        "List the page's recent network requests (URL, type, duration, bytes) from the browser resource timing buffer, newest last, capped at 200 entries. Use it to confirm a form submission reached its API, to find XHR endpoints, or to see what a page loads. Response bodies are not included; use browser_console or fetch for content. Auto-executes.",
+      inputSchema: z.object({
+        instance: z.string().describe("Instance name."),
+      }),
+      execute: async ({ instance }) => {
+        const compute = `(()=>{var out=[];try{var es=performance.getEntriesByType('resource');for(var i=Math.max(0,es.length-200);i<es.length;i++){var e=es[i];out.push({url:String(e.name).slice(0,200),type:e.initiatorType,ms:Math.round(e.duration),bytes:(typeof e.transferSize==='number'?e.transferSize:null)});}return {requests:out,count:es.length};}catch(e){return {error:String((e&&e.message)||e)};}})()`;
+        try {
+          const raw = await embedReadValue(instance, compute);
+          try {
+            return JSON.parse(raw) as unknown;
+          } catch {
+            return { value: raw };
+          }
+        } catch (e) {
+          return { error: String(e) };
+        }
+      },
+    }),
+
     browser_snapshot: tool({
       description:
         "Capture an accessibility snapshot of the current page with short ref IDs (@e1, @e2, ...) assigned to all interactive elements (buttons, links, inputs). Returns a clean, token-efficient text representation of the UI tree. Pass the assigned ref ID directly to browser_click or browser_type instead of complex CSS selectors. Auto-executes.",
@@ -394,6 +611,178 @@ export function buildBrowserTools(ctx: ToolContext) {
         const js = buildTypeJs(targetSelector, text);
         consecutiveScreenshotCounts.delete(instance);
         return await embedEval(instance, js);
+      },
+    }),
+
+    browser_press: tool({
+      description:
+        "Press a keyboard key in the browser instance, optionally focused on an element by ref ID (e.g. '@e3') or CSS selector. Use Enter to submit a login or search form after browser_type, Tab to move between fields, Escape to dismiss a dialog. If Enter does not submit the form, snapshot the page and click its submit button instead.",
+      inputSchema: z.object({
+        instance: z.string().describe("Instance name."),
+        key: z
+          .enum(PRESS_KEYS)
+          .describe("Key to press: Enter, Tab, Escape, arrows, or space."),
+        selector: z
+          .string()
+          .optional()
+          .describe(
+            "CSS selector of the element to focus first. Omit to press on the currently focused element.",
+          ),
+        ref: z
+          .string()
+          .optional()
+          .describe("Element reference ID from browser_snapshot, e.g. '@e3'."),
+      }),
+      execute: async ({ instance, key, selector, ref }) => {
+        let targetSelector: string | null = null;
+        if (ref?.trim() || selector?.trim()) {
+          const target = resolveTargetSelector(ref, selector);
+          if ("error" in target) return target;
+          targetSelector = target.targetSelector;
+        }
+        const js = buildPressJs(targetSelector, key);
+        consecutiveScreenshotCounts.delete(instance);
+        return await embedEval(instance, js);
+      },
+    }),
+
+    browser_select: tool({
+      description:
+        "Pick an option in a native <select> dropdown by ref ID (e.g. '@e4') or CSS selector, matching the option value first then its visible label. browser_type does not work on dropdowns, so this is the tool for them. Auto-executes.",
+      inputSchema: z.object({
+        instance: z.string().describe("Instance name."),
+        selector: z
+          .string()
+          .optional()
+          .describe("CSS selector for the <select>. Omit if using `ref`."),
+        ref: z
+          .string()
+          .optional()
+          .describe("Element reference ID from browser_snapshot, e.g. '@e4'."),
+        option: z
+          .string()
+          .describe("Option value or visible label to pick."),
+      }),
+      execute: async ({ instance, selector, ref, option }) => {
+        const target = resolveTargetSelector(ref, selector);
+        if ("error" in target) return target;
+        const js = buildSelectJs(target.targetSelector, option);
+        consecutiveScreenshotCounts.delete(instance);
+        return await embedEval(instance, js);
+      },
+    }),
+
+    browser_scroll: tool({
+      description:
+        "Scroll the page to an element (by ref ID or selector), an absolute Y offset, or top/bottom. Use it before a screenshot to inspect content below the fold, or to bring a lazy-loaded section into view. Auto-executes.",
+      inputSchema: z.object({
+        instance: z.string().describe("Instance name."),
+        selector: z.string().optional().describe("CSS selector to scroll to."),
+        ref: z
+          .string()
+          .optional()
+          .describe("Element reference ID from browser_snapshot, e.g. '@e5'."),
+        to: z
+          .enum(["top", "bottom"])
+          .optional()
+          .describe("Scroll to the page top or bottom."),
+        y: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe("Absolute vertical offset in CSS pixels."),
+      }),
+      execute: async ({ instance, selector, ref, to, y }) => {
+        let targetSelector: string | null = null;
+        if (ref?.trim() || selector?.trim()) {
+          const target = resolveTargetSelector(ref, selector);
+          if ("error" in target) return target;
+          targetSelector = target.targetSelector;
+        } else if (y === undefined && to === undefined) {
+          return {
+            error: "give an element (ref/selector), an absolute `y`, or `to`.",
+          };
+        }
+        const js = buildScrollJs(targetSelector, to ?? null, y ?? null);
+        consecutiveScreenshotCounts.delete(instance);
+        return await embedEval(instance, js);
+      },
+    }),
+
+    browser_hover: tool({
+      description:
+        "Hover over an element by ref ID (e.g. '@e6') or CSS selector to reveal menus, tooltips, or hover states before clicking or screenshotting. Auto-executes.",
+      inputSchema: z.object({
+        instance: z.string().describe("Instance name."),
+        selector: z.string().optional().describe("CSS selector. Omit if using `ref`."),
+        ref: z
+          .string()
+          .optional()
+          .describe("Element reference ID from browser_snapshot, e.g. '@e6'."),
+      }),
+      execute: async ({ instance, selector, ref }) => {
+        const target = resolveTargetSelector(ref, selector);
+        if ("error" in target) return target;
+        const js = buildHoverJs(target.targetSelector);
+        consecutiveScreenshotCounts.delete(instance);
+        return await embedEval(instance, js);
+      },
+    }),
+
+    browser_wait_for: tool({
+      description:
+        "Wait until page text appears or an element exists, polling until a timeout. Prefer this over browser_wait with a fixed delay after navigation, login submit, or a click that loads content: it returns as soon as the condition holds instead of sleeping blindly. Auto-executes.",
+      inputSchema: z.object({
+        instance: z.string().describe("Instance name."),
+        kind: z
+          .enum(["text", "selector"])
+          .describe("'text': substring of the rendered page; 'selector': element exists."),
+        value: z
+          .string()
+          .describe("Text to wait for, or CSS selector that must match."),
+        timeout_ms: z
+          .number()
+          .int()
+          .min(500)
+          .max(30000)
+          .optional()
+          .describe("How long to poll. Default 5000."),
+      }),
+      execute: async (
+        { instance, kind, value, timeout_ms },
+        { abortSignal }: { abortSignal?: AbortSignal } = {},
+      ) => {
+        const deadline = Date.now() + (timeout_ms ?? 5000);
+        const started = Date.now();
+        for (;;) {
+          if (abortSignal?.aborted) return { error: "wait aborted" };
+          let found = false;
+          try {
+            if (kind === "text") {
+              const text = await native.browserEmbedRead(instance);
+              found =
+                typeof text === "string" &&
+                !text.startsWith("(no readable text") &&
+                text.includes(value);
+            } else {
+              await native.browserEmbedEval(
+                instance,
+                `(()=>{if(!document.querySelector(${cssJson(value)})){throw new Error('not present');}})();`,
+              );
+              found = true;
+            }
+          } catch {
+            found = false;
+          }
+          if (found) return { ok: true as const, waited_ms: Date.now() - started };
+          if (Date.now() >= deadline) {
+            return {
+              error: `timed out waiting for ${kind} "${value.slice(0, 120)}". The content may need a login, a different page state, or a longer timeout.`,
+            };
+          }
+          await new Promise((r) => setTimeout(r, 300));
+        }
       },
     }),
 
@@ -565,6 +954,163 @@ export function buildBrowserTools(ctx: ToolContext) {
           };
         }
         return { type: "json", value: output as never };
+      },
+    }),
+
+    browser_upload: tool({
+      description:
+        "Attach a local workspace file to a file input in the browser instance by ref ID or CSS selector. Use it to submit forms with attachments. Reads the file from this machine, so it asks for approval, refuses while an SSH session is active (the file would come from the wrong machine), and refuses files over 12 MB.",
+      inputSchema: z.object({
+        instance: z.string().describe("Instance name."),
+        selector: z
+          .string()
+          .optional()
+          .describe("CSS selector for the file input. Omit if using `ref`."),
+        ref: z
+          .string()
+          .optional()
+          .describe("Element reference ID from browser_snapshot, e.g. '@e7'."),
+        path: z
+          .string()
+          .describe(
+            "File to attach (absolute, or relative to the active terminal cwd).",
+          ),
+      }),
+      needsApproval: true,
+      execute: async ({ instance, selector, ref, path }) => {
+        const target = resolveTargetSelector(ref, selector);
+        if ("error" in target) return target;
+        if (ctx.getRemoteSession()) {
+          return remoteUnsupported(
+            "browser_upload",
+            "Download the file from the host first, or run the upload from a local workspace.",
+          );
+        }
+        let abs: string;
+        try {
+          abs = resolvePath(path, ctx.getCwd());
+        } catch (e) {
+          return { error: String(e) };
+        }
+        let file: { media_type: string; data: string; size: number };
+        try {
+          file = await native.readFileBase64(abs);
+        } catch (e) {
+          return { error: String(e), path: abs };
+        }
+        if (file.size > MAX_UPLOAD_BYTES) {
+          return {
+            error: `file is ${file.size} bytes, over the ${MAX_UPLOAD_BYTES} byte upload cap`,
+            path: abs,
+          };
+        }
+        const fileName = abs.split(/[/\\]/).pop() || "upload";
+        const js = buildUploadJs(
+          target.targetSelector,
+          fileName,
+          file.media_type,
+          file.data,
+        );
+        consecutiveScreenshotCounts.delete(instance);
+        return await embedEval(instance, js);
+      },
+    }),
+
+    browser_download: tool({
+      description:
+        "Download a file through the page in a browser instance and save it into the workspace. The fetch runs in page context, so session cookies apply and authenticated downloads behind a login work; a plain fetch/http_request cannot do that. Asks for approval, refuses while an SSH session is active, and refuses files over 8 MB.",
+      inputSchema: z.object({
+        instance: z.string().describe("Instance name."),
+        url: z
+          .url()
+          .describe(
+            "Full http(s) URL of the file. Loopback dev assets allowed; other hosts must pass the SSRF guard.",
+          ),
+        path: z
+          .string()
+          .describe(
+            "Where to save it (absolute, or relative to the active terminal cwd).",
+          ),
+      }),
+      needsApproval: true,
+      execute: async (
+        { instance, url, path },
+        { abortSignal }: { abortSignal?: AbortSignal } = {},
+      ) => {
+        if (!isLoopbackTarget(url)) {
+          const blocked = guard(url);
+          if (blocked) return blocked;
+        }
+        if (ctx.getRemoteSession()) {
+          return remoteUnsupported(
+            "browser_download",
+            "Save to the remote host with a shell download command instead.",
+          );
+        }
+        let abs: string;
+        try {
+          abs = resolvePath(path, ctx.getCwd());
+        } catch (e) {
+          return { error: String(e) };
+        }
+        try {
+          await native.browserEmbedEval(instance, buildDownloadStartJs(url));
+        } catch (e) {
+          return { error: String(e) };
+        }
+        const deadline = Date.now() + 25_000;
+        for (;;) {
+          if (abortSignal?.aborted) return { error: "download aborted" };
+          try {
+            await native.browserEmbedEval(instance, DOWNLOAD_READY_JS);
+            break;
+          } catch {
+            if (Date.now() >= deadline) {
+              return { error: "download timed out waiting for the page fetch" };
+            }
+            await new Promise((r) => setTimeout(r, 300));
+          }
+        }
+        let dataUrl = "";
+        let total = 0;
+        let parts: string[] = [];
+        try {
+          for (let i = 0; i * DOWNLOAD_CHUNK_CHARS < MAX_DOWNLOAD_BYTES + 50000; i++) {
+            const raw = await embedReadValue(instance, buildDownloadChunkJs(i));
+            let chunk: {
+              chunk?: string;
+              last?: boolean;
+              total?: number;
+              error?: string | null;
+            };
+            try {
+              chunk = JSON.parse(raw) as typeof chunk;
+            } catch {
+              return { error: "could not read the download from the page" };
+            }
+            if (chunk.error) return { error: chunk.error };
+            if (typeof chunk.chunk !== "string") {
+              return { error: "could not read the download from the page" };
+            }
+            parts.push(chunk.chunk);
+            total = chunk.total ?? total;
+            if (chunk.last) break;
+          }
+          dataUrl = parts.join("");
+          parts = [];
+        } catch (e) {
+          return { error: String(e) };
+        }
+        const marker = ";base64,";
+        const at = dataUrl.indexOf(marker);
+        if (at < 0) return { error: "page did not produce a file body" };
+        const base64 = dataUrl.slice(at + marker.length);
+        try {
+          await native.writeFileBase64(abs, base64);
+        } catch (e) {
+          return { error: String(e), path: abs };
+        }
+        return { ok: true as const, path: abs, bytes: Math.floor((base64.length * 3) / 4) };
       },
     }),
 

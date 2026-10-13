@@ -320,10 +320,12 @@ describe("tool payload measurement", () => {
   it("stays under a budget, so growth is caught here and not in production", () => {
     const payload = measureToolPayload(built);
     const kb = payload.bytes / 1024;
-    // Measured at ~79 KB when this guard was written. The ceiling is the point
-    // of the test: a feature that adds schemas has to either fit or raise it
-    // deliberately, in a diff a reviewer sees.
-    expect(kb).toBeLessThan(105);
+    // Measured at ~107.6 KB after the browser-operation additions
+    // (browser_press/select/scroll/hover/wait_for/storage/network/
+    // upload/download). The ceiling is the point of the test: a feature
+    // that adds schemas has to either fit or raise it deliberately, in a
+    // diff a reviewer sees.
+    expect(kb).toBeLessThan(110);
     // And it must be exact: an unmeasured schema would silently under-report.
     expect(payload.unmeasured).toBe(0);
   });
