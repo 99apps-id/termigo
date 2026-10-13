@@ -140,7 +140,11 @@ export const EditorPane = memo(
       [onChange],
     );
     const themeExt = useEditorThemeExt();
-    const minimapEnabled = usePreferencesStore((s) => s.editorMinimap);
+    const minimapPref = usePreferencesStore((s) => s.editorMinimap);
+    const wordWrapOn = usePreferencesStore((s) => s.editorWordWrap);
+    // A wrapped line is several visual rows, so the 1-line-to-1-row minimap
+    // mapping lies about position. Hide instead of showing a wrong overview.
+    const minimapEnabled = minimapPref && !wordWrapOn;
     const vimMode = usePreferencesStore((s) => s.vimMode);
     const wordWrapColumn = usePreferencesStore((s) =>
       s.editorWordWrap ? s.editorWordWrapColumn : null,
@@ -742,7 +746,11 @@ export const EditorPane = memo(
             }}
           />
           {minimapEnabled && (
-            <EditorMinimap getView={getView} repaintSignal={minimapTick} />
+            <EditorMinimap
+              getView={getView}
+              repaintSignal={minimapTick}
+              path={path}
+            />
           )}
         </div>
       </div>
