@@ -27,6 +27,7 @@ import {
   setEditorCustomFormatCommand,
   setEditorFontSize,
   setEditorFormatOnSave,
+  setEditorMinimap,
   setEditorFormatter,
   setEditorFormatterByLang,
   setEditorWordWrap,
@@ -44,6 +45,7 @@ const AUTO_SAVE_STEP = 100;
 
 export function EditorSection() {
   const editorFontSize = usePreferencesStore((s) => s.editorFontSize);
+  const editorMinimap = usePreferencesStore((s) => s.editorMinimap);
   const vimMode = usePreferencesStore((s) => s.vimMode);
   const editorWordWrap = usePreferencesStore((s) => s.editorWordWrap);
   const editorWordWrapColumn = usePreferencesStore(
@@ -94,6 +96,15 @@ export function EditorSection() {
 
       <div className="flex flex-col gap-2">
         <Label>Editing</Label>
+        <SettingRow
+          title="Minimap"
+          description="Show a clickable code overview on the right edge of the editor."
+        >
+          <Switch
+            checked={editorMinimap}
+            onCheckedChange={(v) => void setEditorMinimap(v)}
+          />
+        </SettingRow>
         <SettingRow
           title="Vim mode"
           description="Enable Vim keybindings in the code editor."

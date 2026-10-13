@@ -35,6 +35,7 @@ import {
   triggerInlineCompletion,
 } from "./lib/autocomplete/inlineExtension";
 import { diagnosticsReporter } from "./lib/diagnosticsReporter";
+import { EditorMinimap } from "./EditorMinimap";
 import { useDiagnosticsStore } from "./lib/diagnosticsStore";
 import {
   buildSharedExtensions,
@@ -129,7 +130,17 @@ export const EditorPane = memo(
     const adoptDiskTextRef = useRef(adoptDiskText);
     adoptDiskTextRef.current = adoptDiskText;
     const cmRef = useRef<ReactCodeMirrorRef>(null);
+    const getView = useCallback(() => cmRef.current?.view ?? null, []);
+    const [minimapTick, setMinimapTick] = useState(0);
+    const handleChange = useCallback(
+      (next: string) => {
+        onChange(next);
+        setMinimapTick((t) => (t + 1) % 1000000);
+      },
+      [onChange],
+    );
     const themeExt = useEditorThemeExt();
+    const minimapEnabled = usePreferencesStore((s) => s.editorMinimap);
     const vimMode = usePreferencesStore((s) => s.vimMode);
     const wordWrapColumn = usePreferencesStore((s) =>
       s.editorWordWrap ? s.editorWordWrapColumn : null,
@@ -709,26 +720,31 @@ export const EditorPane = memo(
 
     return (
       <div className="flex h-full min-h-0 flex-col zoom-exempt">
-        <CodeMirror
-          ref={cmRef}
-          value={doc.content}
-          onChange={onChange}
-          theme={themeExt}
-          extensions={extensions}
-          height="100%"
-          className="flex-1 min-h-0 overflow-hidden"
-          basicSetup={{
-            lineNumbers: true,
-            highlightActiveLineGutter: true,
-            foldGutter: true,
-            bracketMatching: true,
-            closeBrackets: true,
-            autocompletion: true,
-            highlightActiveLine: true,
-            highlightSelectionMatches: true,
-            searchKeymap: true,
-          }}
-        />
+        <div className="flex min-h-0 flex-1 flex-row">
+          <CodeMirror
+            ref={cmRef}
+            value={doc.content}
+            onChange={minimapEnabled ? handleChange : onChange}
+            theme={themeExt}
+            extensions={extensions}
+            height="100%"
+            className="min-h-0 min-w-0 flex-1 overflow-hidden"
+            basicSetup={{
+              lineNumbers: true,
+              highlightActiveLineGutter: true,
+              foldGutter: true,
+              bracketMatching: true,
+              closeBrackets: true,
+              autocompletion: true,
+              highlightActiveLine: true,
+              highlightSelectionMatches: true,
+              searchKeymap: true,
+            }}
+          />
+          {minimapEnabled && (
+            <EditorMinimap getView={getView} repaintSignal={minimapTick} />
+          )}
+        </div>
       </div>
     );
   }),
