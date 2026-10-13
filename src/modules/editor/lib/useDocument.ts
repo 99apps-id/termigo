@@ -58,43 +58,72 @@ export function useDocument({ path, onDirtyChange }: Options) {
 
   const diskMtimeRef = useRef<number | null>(null);
 
-  const writeToDisk = useCallback(async () => {
-    const content = bufferRef.current;
-    const mtime = await invoke<number>("fs_write_file", {
-      path,
-      content: restoreEol(content, eolRef.current),
-      workspace: currentWorkspaceEnv(),
-      source: "editor",
-    });
-    diskMtimeRef.current = mtime;
-    savedRef.current = content;
-    // Edits typed while the write was in flight must stay dirty.
-    setDirty(bufferRef.current !== content);
-    notifyDocumentSaved(path);
-  }, [path]);
+  const writeToDisk = useCallback(
+    async (force = false) => {
+      const content = bufferRef.current;
+      const known = diskMtimeRef.current;
+      const mtime = await invoke<number>("fs_write_file", {
+        path,
+        content: restoreEol(content, eolRef.current),
+        workspace: currentWorkspaceEnv(),
+        source: "editor",
+        expectedMtime: !force && known !== null ? known : null,
+      });
+      diskMtimeRef.current = mtime;
+      savedRef.current = content;
+      // Edits typed while the write was in flight must stay dirty.
+      setDirty(bufferRef.current !== content);
+      notifyDocumentSaved(path);
+    },
+    [path],
+  );
 
   // False when the write was withheld because the file changed on disk
   // since load; overwriting is an explicit user action from the toast.
-  const saveNow = useCallback(async (): Promise<boolean> => {
-    const known = diskMtimeRef.current;
-    if (known !== null) {
-      const stat = await invoke<FileStat>("fs_stat", {
-        path,
-        workspace: currentWorkspaceEnv(),
-      }).catch(() => null);
-      if (stat && stat.mtime !== known) {
-        const name = path.split(/[\\/]/).pop() ?? path;
-        toast.warning("File changed on disk", {
-          id: `save-conflict:${path}`,
-          description: `${name} was modified by another program while you had unsaved changes. Overwrite to keep your version.`,
-          action: { label: "Overwrite", onClick: () => void writeToDisk() },
-        });
-        return false;
+  const saveNow = useCallback(
+    async (force = false): Promise<boolean> => {
+      const known = diskMtimeRef.current;
+      if (!force && known !== null) {
+        const stat = await invoke<FileStat>("fs_stat", {
+          path,
+          workspace: currentWorkspaceEnv(),
+        }).catch(() => null);
+        if (stat && stat.mtime !== known) {
+          const name = path.split(/[\\/]/).pop() ?? path;
+          toast.warning("File changed on disk", {
+            id: `save-conflict:${path}`,
+            description: `${name} was modified by another program while you had unsaved changes. Overwrite to keep your version.`,
+            action: {
+              label: "Overwrite",
+              onClick: () => void saveNow(true).catch(() => {}),
+            },
+          });
+          return false;
+        }
       }
-    }
-    await writeToDisk();
-    return true;
-  }, [path, writeToDisk]);
+      try {
+        await writeToDisk(force);
+      } catch (e) {
+        // The guard raced: someone wrote between our stat and the backend
+        // check. Same toast as the stat path, no silent overwrite.
+        if (!force && String(e).includes("changed on disk")) {
+          const name = path.split(/[\\/]/).pop() ?? path;
+          toast.warning("File changed on disk", {
+            id: `save-conflict:${path}`,
+            description: `${name} was modified by another program while you had unsaved changes. Overwrite to keep your version.`,
+            action: {
+              label: "Overwrite",
+              onClick: () => void saveNow(true).catch(() => {}),
+            },
+          });
+          return false;
+        }
+        throw e;
+      }
+      return true;
+    },
+    [path, writeToDisk],
+  );
 
   // Notify parent of dirty transitions.
   const onDirtyChangeRef = useRef(onDirtyChange);

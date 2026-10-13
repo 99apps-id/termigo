@@ -563,6 +563,7 @@ pub async fn fs_write_file(
     content: String,
     workspace: Option<WorkspaceEnv>,
     source: Option<String>,
+    expected_mtime: Option<u64>,
     app: tauri::AppHandle,
     registry: tauri::State<'_, WorkspaceRegistry>,
 ) -> Result<u64, String> {
@@ -577,6 +578,18 @@ pub async fn fs_write_file(
     let workspace = WorkspaceEnv::from_option(workspace);
     let target = guard_write(&resolve_path(&path, &workspace))?;
     require_authorized(&registry, &target)?;
+    // Optimistic-concurrency guard for the editor's save conflict path. The
+    // frontend stat-then-write window races an external writer: both see the
+    // old mtime, both proceed, and the second silently wins. When the caller
+    // passes the mtime it read, refuse here instead so no interleaving can
+    // slip between the check and the rename. Absent means no guard, so every
+    // existing caller keeps working unchanged.
+    if let Some(expected) = expected_mtime {
+        let current = fs::metadata(&target).map(|m| mtime_millis(&m)).unwrap_or(0);
+        if current != expected {
+            return Err("file changed on disk since it was read; reload before overwriting".into());
+        }
+    }
     let original_permissions = fs::metadata(&target).ok().map(|m| m.permissions());
     write_atomic(&target, content.as_bytes()).map_err(|e| {
         log::warn!("fs_write_file({}) failed: {e}", target.display());
