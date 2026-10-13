@@ -41,6 +41,10 @@ if (-not (Test-Path "node_modules/.bin/tsc")) {
 }
 
 Write-Host "==> Building frontend and CLI..." -ForegroundColor Cyan
+# Clean Vite output dir so a fresh build never hits ENOTEMPTY/EPERM on stale files.
+if (Test-Path "dist") {
+    Remove-Item -Path "dist" -Recurse -Force -ErrorAction SilentlyContinue
+}
 pnpm build:cli
 if ($LASTEXITCODE -ne 0) { throw "build:cli failed" }
 pnpm build
