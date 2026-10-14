@@ -1,0 +1,11 @@
+{
+  "permission": [
+    {
+      "identifier": "allow-browser-open",
+      "description": "Allow opening a browser window",
+      "commands": {
+        "allow": ["browser_open"]
+      }
+    }
+  ]
+}

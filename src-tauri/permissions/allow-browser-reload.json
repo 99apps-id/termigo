@@ -1,0 +1,11 @@
+{
+  "permission": [
+    {
+      "identifier": "allow-browser-reload",
+      "description": "Allow reloading a browser window",
+      "commands": {
+        "allow": ["browser_reload"]
+      }
+    }
+  ]
+}

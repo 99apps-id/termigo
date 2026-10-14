@@ -352,6 +352,7 @@ export async function buildLanguageModel(
       break;
     }
     case "stepfun":
+    case "stepfun-plan":
     case "qwen":
     case "zhipu":
     case "moonshot":
@@ -373,6 +374,7 @@ export async function buildLanguageModel(
       );
       const defaultBases: Partial<Record<ProviderId, string>> = {
         stepfun: "https://api.stepfun.com/v1",
+        "stepfun-plan": "https://api.stepfun.ai/step_plan/v1",
         qwen: "https://dashscope.aliyuncs.com/compatible-mode/v1",
         zhipu: "https://open.bigmodel.cn/api/paas/v4",
         moonshot: "https://api.moonshot.cn/v1",

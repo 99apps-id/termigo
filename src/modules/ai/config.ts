@@ -9,6 +9,7 @@ export type ProviderId =
   | "groq"
   | "deepseek"
   | "stepfun"
+  | "stepfun-plan"
   | "qwen"
   | "zhipu"
   | "mistral"
@@ -123,6 +124,13 @@ export const PROVIDERS: readonly ProviderInfo[] = [
     id: "stepfun",
     label: "StepFun",
     keyringAccount: "stepfun-api-key",
+    keyPrefix: null,
+    consoleUrl: "https://platform.stepfun.com/",
+  },
+  {
+    id: "stepfun-plan",
+    label: "StepFun Plan",
+    keyringAccount: "stepfun-plan-api-key",
     keyPrefix: null,
     consoleUrl: "https://platform.stepfun.com/",
   },
@@ -867,51 +875,42 @@ export const MODELS = [
 
   // ── StepFun ───────────────────────────────────────────────────────────────
   {
-    id: "step-2-16k",
+    id: "step-3.7-flash",
     provider: "stepfun",
-    label: "Step-2 16K",
+    label: "Step 3.7 Flash",
     hint: "Flagship",
-    description:
-      "Flagship 1T-parameter MoE model for complex reasoning and multimodal tasks.",
+    description: "Multimodal MoE for agentic coding.",
     capabilities: { intelligence: 5, speed: 3, cost: 3 },
-    tags: ["vision", "reasoning", "tools", "coding"],
-  },
-  {
-    id: "step-2-mini",
-    provider: "stepfun",
-    label: "Step-2 Mini",
-    hint: "Fast",
-    description: "High-speed, low-latency reasoning model.",
-    capabilities: { intelligence: 4, speed: 5, cost: 4 },
-    tags: ["reasoning", "tools", "coding"],
-  },
-  {
-    id: "step-1-8k",
-    provider: "stepfun",
-    label: "Step-1 8K",
-    hint: "Standard",
-    description: "Standard high-performance multimodal model.",
-    capabilities: { intelligence: 4, speed: 4, cost: 4 },
     tags: ["vision", "tools", "coding"],
   },
   {
-    id: "step-1-flash",
+    id: "step-3.5-flash",
     provider: "stepfun",
-    label: "Step-1 Flash",
-    hint: "Ultra-fast",
-    description: "Lightweight fast model for real-time tasks.",
-    capabilities: { intelligence: 3, speed: 5, cost: 5 },
-    tags: ["tools"],
+    label: "Step 3.5 Flash",
+    hint: "Efficient",
+    description: "Previous efficient generation.",
+    capabilities: { intelligence: 4, speed: 4, cost: 4 },
+    tags: ["fast", "tools", "coding"],
+  },
+
+  // ── StepFun Plan ────────────────────────────────────────────────────────────
+  {
+    id: "step-3.7-flash",
+    provider: "stepfun-plan",
+    label: "Step 3.7 Flash (Plan)",
+    hint: "Flagship",
+    description: "Step 3.7 Flash on the StepFun plan endpoint.",
+    capabilities: { intelligence: 5, speed: 3, cost: 3 },
+    tags: ["tools", "coding"],
   },
   {
-    id: "step-1-thinking",
-    provider: "stepfun",
-    label: "Step-1 Thinking",
-    hint: "Reasoning",
-    description: "Deep reasoning model with step-by-step thinking.",
-    capabilities: { intelligence: 5, speed: 3, cost: 4 },
-    tags: ["reasoning", "tools", "coding"],
-    supportsTemperature: false,
+    id: "step-3.5-flash",
+    provider: "stepfun-plan",
+    label: "Step 3.5 Flash (Plan)",
+    hint: "Efficient",
+    description: "Step 3.5 Flash on the StepFun plan endpoint.",
+    capabilities: { intelligence: 4, speed: 4, cost: 4 },
+    tags: ["fast", "tools", "coding"],
   },
 
   // ── Qwen ──────────────────────────────────────────────────────────────────
@@ -2279,7 +2278,7 @@ export const DEFAULT_AUTOCOMPLETE_MODEL: Partial<Record<ProviderId, string>> = {
   google: "gemini-2.5-flash",
   xai: "grok-4.3",
   deepseek: "deepseek-v4-flash",
-  stepfun: "step-1-flash",
+  stepfun: "step-3.7-flash",
   qwen: "qwen-turbo-latest",
   zhipu: "glm-4-flash",
   openrouter: "openai/gpt-5.4-mini",

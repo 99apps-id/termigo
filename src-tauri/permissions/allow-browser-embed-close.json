@@ -1,0 +1,11 @@
+{
+  "permission": [
+    {
+      "identifier": "allow-browser-embed-close",
+      "description": "Allow closing embedded browser",
+      "commands": {
+        "allow": ["browser_embed_close"]
+      }
+    }
+  ]
+}

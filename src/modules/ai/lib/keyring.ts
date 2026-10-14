@@ -20,6 +20,7 @@ export const EMPTY_PROVIDER_KEYS: ProviderKeys = {
   groq: null,
   deepseek: null,
   stepfun: null,
+  "stepfun-plan": null,
   qwen: null,
   zhipu: null,
   mistral: null,

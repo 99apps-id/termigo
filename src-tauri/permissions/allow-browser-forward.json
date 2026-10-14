@@ -1,0 +1,11 @@
+{
+  "permission": [
+    {
+      "identifier": "allow-browser-forward",
+      "description": "Allow going forward in browser history",
+      "commands": {
+        "allow": ["browser_forward"]
+      }
+    }
+  ]
+}

@@ -88,6 +88,7 @@ const PROVIDER_ICON = {
   groq: FlashIcon,
   deepseek: DeepseekIcon,
   stepfun: AiBrain01Icon,
+  "stepfun-plan": AiBrain01Icon,
   qwen: AiCloud01Icon,
   zhipu: AiBrain02Icon,
   mistral: MistralIcon,

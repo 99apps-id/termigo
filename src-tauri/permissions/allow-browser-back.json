@@ -1,0 +1,11 @@
+{
+  "permission": [
+    {
+      "identifier": "allow-browser-back",
+      "description": "Allow going back in browser history",
+      "commands": {
+        "allow": ["browser_back"]
+      }
+    }
+  ]
+}

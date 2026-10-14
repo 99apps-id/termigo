@@ -1,0 +1,11 @@
+{
+  "permission": [
+    {
+      "identifier": "allow-browser-close",
+      "description": "Allow closing a browser window",
+      "commands": {
+        "allow": ["browser_close"]
+      }
+    }
+  ]
+}

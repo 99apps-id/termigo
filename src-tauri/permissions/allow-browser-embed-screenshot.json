@@ -1,0 +1,11 @@
+{
+  "permission": [
+    {
+      "identifier": "allow-browser-embed-screenshot",
+      "description": "Allow taking screenshots of embedded browser",
+      "commands": {
+        "allow": ["browser_embed_screenshot"]
+      }
+    }
+  ]
+}

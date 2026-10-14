@@ -1,0 +1,29 @@
+{
+  "set": [
+    {
+      "identifier": "browser",
+      "description": "Default browser automation permissions",
+      "permissions": [
+        "allow-browser-open",
+        "allow-browser-navigate",
+        "allow-browser-back",
+        "allow-browser-forward",
+        "allow-browser-reload",
+        "allow-browser-wait",
+        "allow-browser-eval",
+        "allow-browser-extract",
+        "allow-browser-console",
+        "allow-browser-screenshot",
+        "allow-browser-url",
+        "allow-browser-close",
+        "allow-browser-list",
+        "allow-browser-embed-update",
+        "allow-browser-embed-navigate",
+        "allow-browser-embed-read",
+        "allow-browser-embed-eval",
+        "allow-browser-embed-screenshot",
+        "allow-browser-embed-close"
+      ]
+    }
+  ]
+}

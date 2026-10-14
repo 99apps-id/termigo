@@ -1,0 +1,11 @@
+{
+  "permission": [
+    {
+      "identifier": "allow-browser-embed-eval",
+      "description": "Allow evaluating JavaScript in embedded browser",
+      "commands": {
+        "allow": ["browser_embed_eval"]
+      }
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "permission": [
+    {
+      "identifier": "allow-browser-url",
+      "description": "Allow getting the current URL of a browser window",
+      "commands": {
+        "allow": ["browser_url"]
+      }
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "permission": [
+    {
+      "identifier": "allow-browser-embed-update",
+      "description": "Allow updating embedded browser",
+      "commands": {
+        "allow": ["browser_embed_update"]
+      }
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "permission": [
+    {
+      "identifier": "allow-browser-embed-navigate",
+      "description": "Allow navigating embedded browser",
+      "commands": {
+        "allow": ["browser_embed_navigate"]
+      }
+    }
+  ]
+}

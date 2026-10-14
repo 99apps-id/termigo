@@ -1,0 +1,11 @@
+{
+  "permission": [
+    {
+      "identifier": "allow-browser-screenshot",
+      "description": "Allow taking screenshots of a browser window",
+      "commands": {
+        "allow": ["browser_screenshot"]
+      }
+    }
+  ]
+}
