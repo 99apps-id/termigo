@@ -14,5 +14,5 @@ this file wins over `AGENTS.md` on matters of taste and workflow.
 ## Preferences
 
 - Concise, factual communication. No superlatives, no filler.
-- No em-dash and no emojis anywhere (repo convention).
+- No unicode em-dash or emojis anywhere (repo convention). Standard ASCII double-hyphen (`--`) is permitted and required for CLI/SSH flags, code, and markdown.
 - Ground claims in real files and lines, never from memory alone.

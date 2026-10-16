@@ -29,6 +29,7 @@ Reference: `docs/contributing/testing.md` and `.github/workflows/ci.yml`.
 
 ## Conventions
 
-- No em-dash anywhere: code, comments, commits, docs.
+- No unicode em-dash (`—`, U+2014) or en-dash (`–`, U+2013) in prose, comments, commits, or documentation.
+- Standard ASCII double-hyphen (`--`) IS PERMITTED AND REQUIRED for CLI flags (e.g. `--version`, `--build`, `ssh -- <command>`), code operators (`--i`), and markdown fences. Never confuse ASCII `--` with unicode em-dash.
 - No emojis anywhere.
 - Defer to `USER.md` for specific user preferences and workflow instructions.
