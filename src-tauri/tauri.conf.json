@@ -9,7 +9,7 @@
 
     "beforeBuildCommand": "pnpm build:cli && pnpm build",
     "frontendDist": "../dist",
-    "removeUnusedCommands": true
+    "removeUnusedCommands": false
   },
   "app": {
     "withGlobalTauri": true,
