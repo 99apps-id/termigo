@@ -2,7 +2,7 @@ import { DEFAULT_SPACE_ID, type Tab } from "@/modules/tabs/lib/useTabs";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { type RefObject, useEffect } from "react";
+import { type RefObject, useEffect, useRef } from "react";
 import { resolveControlContext } from "./lib/context";
 import { createReadinessQueue } from "./lib/readiness";
 import {
@@ -368,6 +368,29 @@ export function useControlBridge({
   onQuery,
   onRunCommand,
 }: UseControlBridgeOptions): void {
+  const callbacksRef = useRef({
+    onOpen,
+    onFocus,
+    onPentestRun,
+    onPentestStatus,
+    onPentestReport,
+    onAgentRun,
+    onStatus,
+    onQuery,
+    onRunCommand,
+  });
+  callbacksRef.current = {
+    onOpen,
+    onFocus,
+    onPentestRun,
+    onPentestStatus,
+    onPentestReport,
+    onAgentRun,
+    onStatus,
+    onQuery,
+    onRunCommand,
+  };
+
   useEffect(() => {
     if (!ready) return;
     let disposed = false;
@@ -386,7 +409,7 @@ export function useControlBridge({
           return;
         }
         if (request.method === "status") {
-          const status = await onStatus();
+          const status = await callbacksRef.current.onStatus();
           if (!status.ok) {
             throw new RequestError(
               "status_failed",
@@ -405,7 +428,7 @@ export function useControlBridge({
           } catch (error) {
             console.warn("[termigo] could not focus for query:", error);
           }
-          const answer = await onQuery(query);
+          const answer = await callbacksRef.current.onQuery(query);
           if (!answer.ok) {
             throw new RequestError(
               "query_failed",
@@ -420,7 +443,7 @@ export function useControlBridge({
         }
         if (request.method === "run-command") {
           const run = parseRunCommandRequest(request.params);
-          const result = await onRunCommand(run);
+          const result = await callbacksRef.current.onRunCommand(run);
           if (!result.ok) {
             throw new RequestError(
               "run_command_failed",
@@ -549,7 +572,7 @@ export function useControlBridge({
           } catch (error) {
             console.warn("[termigo] could not focus for run:", error);
           }
-          const started = await onAgentRun(run);
+          const started = await callbacksRef.current.onAgentRun(run);
           if (!started.ok) {
             throw new RequestError(
               "agent_run_failed",
@@ -564,7 +587,7 @@ export function useControlBridge({
         }
         if (request.method === "focus") {
           const focus = parseFocusRequest(request.params);
-          const focused = onFocus({
+          const focused = callbacksRef.current.onFocus({
             query: focus.query,
             spaceId: context.space_id,
           });
@@ -594,7 +617,7 @@ export function useControlBridge({
           } catch (error) {
             console.warn("[termigo] could not focus for pentest-run:", error);
           }
-          const started = await onPentestRun(run);
+          const started = await callbacksRef.current.onPentestRun(run);
           if (!started.ok) {
             throw new RequestError(
               "pentest_run_failed",
@@ -608,7 +631,7 @@ export function useControlBridge({
           return;
         }
         if (request.method === "pentest-status") {
-          const status = await onPentestStatus();
+          const status = await callbacksRef.current.onPentestStatus();
           if (!status.ok) {
             throw new RequestError(
               "pentest_status_failed",
@@ -620,7 +643,7 @@ export function useControlBridge({
         }
         if (request.method === "pentest-report") {
           const report = parsePentestReportRequest(request.params);
-          const started = await onPentestReport(report);
+          const started = await callbacksRef.current.onPentestReport(report);
           if (!started.ok) {
             throw new RequestError(
               "pentest_report_failed",
@@ -646,7 +669,7 @@ export function useControlBridge({
               console.warn("[termigo] could not focus control target:", error);
             }
           }
-          const tabId = onOpen({ ...open, spaceId: context.space_id });
+          const tabId = callbacksRef.current.onOpen({ ...open, spaceId: context.space_id });
           if (tabId === null) {
             throw new RequestError(
               "open_failed",
@@ -708,19 +731,5 @@ export function useControlBridge({
         console.error("[termigo] control bridge cleanup failed:", error);
       });
     };
-  }, [
-    ready,
-    tabsRef,
-    activeTabIdRef,
-    activeSpaceIdRef,
-    onOpen,
-    onFocus,
-    onPentestRun,
-    onPentestStatus,
-    onPentestReport,
-    onAgentRun,
-    onStatus,
-    onQuery,
-    onRunCommand,
-  ]);
+  }, [ready, tabsRef, activeTabIdRef, activeSpaceIdRef]);
 }
