@@ -29,7 +29,6 @@
     "store:default",
     "autostart:allow-enable",
     "autostart:allow-disable",
-    "autostart:allow-is-enabled",
-    "browser"
+    "autostart:allow-is-enabled"
   ]
 }
