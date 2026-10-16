@@ -288,6 +288,44 @@ export function setChatRateLimited(
   chatFloodWaitUntil.set(chatId, Date.now() + Math.max(1, waitSec) * 1000);
 }
 
+function findActiveCodeFence(text: string): string | null {
+  const fenceMatches = text.matchAll(/```([a-zA-Z0-9_-]*)/g);
+  let activeLang: string | null = null;
+  for (const match of fenceMatches) {
+    if (activeLang === null) {
+      activeLang = match[1] || "";
+    } else {
+      activeLang = null;
+    }
+  }
+  return activeLang;
+}
+
+/** Split escaped HTML text safely across entity boundaries so no entity is cut in half and no characters are lost. */
+export function splitEscapedHtml(
+  escapedHtml: string,
+  maxLen = TELEGRAM_MAX_MESSAGE_CHARS,
+): string[] {
+  if (escapedHtml.length <= maxLen) return [escapedHtml];
+  const parts: string[] = [];
+  let rest = escapedHtml;
+  while (rest.length > 0) {
+    if (rest.length <= maxLen) {
+      parts.push(rest);
+      break;
+    }
+    const piece = clampEscapedHtml(rest, maxLen);
+    if (piece.length === 0) {
+      parts.push(rest.slice(0, maxLen));
+      rest = rest.slice(maxLen);
+    } else {
+      parts.push(piece);
+      rest = rest.slice(piece.length);
+    }
+  }
+  return parts;
+}
+
 /** Split long messages on newline/word boundaries so nothing is truncated. Default 3500 leaves headroom for HTML entity expansion. */
 export function splitTelegramText(text: string, maxLen = 3500): string[] {
   if (text.length <= maxLen) return [text];
@@ -305,9 +343,17 @@ export function splitTelegramText(text: string, maxLen = 3500): string[] {
     if (cut <= 0) {
       cut = maxLen;
     }
-    const chunk = remaining.slice(0, cut).trimEnd();
+    let chunk = remaining.slice(0, cut).trimEnd();
+    let next = remaining.slice(cut).trimStart();
+
+    const openLang = findActiveCodeFence(chunk);
+    if (openLang !== null) {
+      chunk = `${chunk}\n\`\`\``;
+      next = `\`\`\`${openLang}\n${next}`;
+    }
+
     if (chunk.length > 0) chunks.push(chunk);
-    remaining = remaining.slice(cut).trimStart();
+    remaining = next;
   }
   return chunks;
 }
@@ -331,21 +377,21 @@ async function sendSingleChunk(
     }
   }
 
-  await apiPost(
-    "sendMessage",
-    {
-      chat_id: chatId,
-      // Clamped AFTER escaping, so it must be entity-aware: a slice here could
-      // leave a half-written entity and Telegram would reject the message that
-      // this fallback exists to deliver.
-      text: clampEscapedHtml(
-        escapePlainTextToHtml(chunk),
-        TELEGRAM_MAX_MESSAGE_CHARS,
-      ),
-      parse_mode: "HTML",
-    },
-    signal,
-  );
+  // Fallback: send escaped plain text in sequential chunks so nothing is truncated
+  const escaped = escapePlainTextToHtml(chunk);
+  const parts = splitEscapedHtml(escaped, TELEGRAM_MAX_MESSAGE_CHARS);
+  for (const part of parts) {
+    if (signal.aborted) break;
+    await apiPost(
+      "sendMessage",
+      {
+        chat_id: chatId,
+        text: part,
+        parse_mode: "HTML",
+      },
+      signal,
+    );
+  }
 }
 
 export async function sendTelegram(

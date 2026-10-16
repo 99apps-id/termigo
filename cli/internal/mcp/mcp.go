@@ -37,27 +37,39 @@ const WorkspaceFileName = ".termigo/mcp.json"
 // file is equivalent to adding a backdoor to every contributor who pulls the
 // repo (see CVE-2024-22471 / Cody).
 var allowedMCPCommands = map[string]struct{}{
-	"npx": {}, "uvx": {}, "bunx": {}, "node": {}, "python3": {}, "go": {},
+	"npx": {}, "uvx": {}, "bunx": {}, "node": {}, "python": {}, "python3": {}, "go": {},
 	"bun": {}, "deno": {}, "npm": {}, "pnpm": {}, "yarn": {}, "java": {},
 	"ruby": {}, "rustc": {}, "cargo": {},
 }
 
-// validateMCPCommand ensures the MCP server executable is on the allow-list.
-// It strips a trailing "run"/"exec" subcommand for launchers that need it,
-// so "go run ." is accepted because the base "go" is allowed.
-func validateMCPCommand(command string) error {
+// validateMCPCommand ensures the MCP server executable is allowed.
+// User-scoped configuration is explicitly configured by the machine owner.
+// Project-scoped configuration from git repositories is checked against the allow-list.
+func validateMCPCommand(command, scope string) error {
 	cmd := strings.TrimSpace(command)
 	if cmd == "" {
 		return fmt.Errorf("command is empty")
 	}
-	base := cmd
-	fields := strings.Fields(base)
+	if scope == "user" {
+		return nil
+	}
+	fields := strings.Fields(cmd)
 	if len(fields) == 0 {
 		return fmt.Errorf("command is empty")
 	}
-	baseCmd := fields[0]
-	if _, ok := allowedMCPCommands[baseCmd]; !ok {
-		return fmt.Errorf("MCP command %q is not allowed", baseCmd)
+	rawBase := fields[0]
+	rawBase = strings.Trim(rawBase, `"'`)
+	base := filepath.Base(rawBase)
+	ext := strings.ToLower(filepath.Ext(base))
+	stem := base
+	if ext == ".exe" || ext == ".cmd" || ext == ".bat" {
+		stem = strings.TrimSuffix(base, ext)
+	}
+
+	if _, ok := allowedMCPCommands[stem]; !ok {
+		if _, ok := allowedMCPCommands[base]; !ok {
+			return fmt.Errorf("MCP command %q is not allowed in project scope", rawBase)
+		}
 	}
 	return nil
 }
@@ -133,7 +145,7 @@ func loadFile(path, scope string) ([]Server, error) {
 		if server.Command == "" {
 			return nil, fmt.Errorf("%s: server %q has no command", path, name)
 		}
-		if err := validateMCPCommand(server.Command); err != nil {
+		if err := validateMCPCommand(server.Command, scope); err != nil {
 			return nil, fmt.Errorf("%s: server %q: %w", path, name, err)
 		}
 		servers = append(servers, Server{
@@ -159,7 +171,7 @@ func Add(workspace, name string, server config.MCPServer) (Server, error) {
 	if server.Command == "" {
 		return Server{}, errors.New("server command must not be empty")
 	}
-	if err := validateMCPCommand(server.Command); err != nil {
+	if err := validateMCPCommand(server.Command, "project"); err != nil {
 		return Server{}, err
 	}
 

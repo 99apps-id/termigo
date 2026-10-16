@@ -93,6 +93,16 @@ describe("applyProfileToStepBudget", () => {
       1,
     );
   });
+
+  it("preserves full budget for OAuth models regardless of profile cap", () => {
+    expect(
+      applyProfileToStepBudget(
+        10_000,
+        profile({ stepBudgetDelta: 25, stepBudgetCap: 50 }),
+        true,
+      ),
+    ).toBe(10_000);
+  });
 });
 
 describe("buildStepSystem", () => {

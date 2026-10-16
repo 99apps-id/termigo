@@ -294,7 +294,7 @@ export async function runSubagent({
     }
   };
 
-  const isOAuth = isOAuthModel(modelId);
+  const isOAuth = isOAuthModel(routedModelId, prefs.customEndpoints);
   const effectiveMaxSteps = isOAuth ? 500 : spec.maxSteps;
 
   const runAttempt = (attemptPrompt: string) =>

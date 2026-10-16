@@ -130,7 +130,7 @@ import {
 } from "./verifyOnStop";
 
 // Every model/provider connection uses a trusted, user-configured endpoint, so
-// it must honour the machine's own DNS — including a provider host that a proxy,
+// it must honour the machine's own DNS -- including a provider host that a proxy,
 // VPN, or regional route resolves to a private address (which is exactly what
 // blocked deepseek/openai for users on such networks). SSRF hardening belongs on
 // AGENT-controlled URLs (the `fetch` tool, the browser), not on the model API
@@ -1325,7 +1325,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // The transcript is not the whole request. Reserve room for the system
   // prompt (measured), the tool schemas, and the model's own answer, so
   // compaction targets what is actually left for history instead of the raw
-  // window — this is what stopped a compacted-but-still-huge request from
+  // window -- this is what stopped a compacted-but-still-huge request from
   // arriving just over the model's hard limit.
   const systemChars =
     stableSystem.length + (opts.planMode ? PLAN_MODE_PROMPT.length : 0);
@@ -1339,7 +1339,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
     estimateTokens(systemChars) + TOOLS_AND_OUTPUT_RESERVE_TOKENS;
   // The limit compaction targets is the configured window, but capped by what
   // the provider actually accepted before (learned from a prior overflow) and
-  // scaled down when a previous request overshot — so a wrong config or an
+  // scaled down when a previous request overshot -- so a wrong config or an
   // undercounting estimate self-corrects on the retry instead of failing again.
   const configuredLimit = getModelContextLimit(modelId, compatCtxOverride);
   const compactionLimit = effectiveContextLimit(modelId, configuredLimit);
@@ -1480,7 +1480,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
   /**
    * (Re)start the silence clock for a wait on the model.
    *
-   * Named for what it measures — silence from NOW. The previous version answered
+   * Named for what it measures -- silence from NOW. The previous version answered
    * a different question ("has anything arrived since the run began?"), and that
    * framing hid a real bug: it was armed once and cleared by the first chunk, so
    * nothing watched the rest of the run. A reasoning model made it concrete - a
@@ -1526,8 +1526,8 @@ export async function runAgentStream(opts: RunAgentOptions) {
     stallNotice = setTimeout(() => {
       opts.onStep?.(
         resumingApproval
-          ? "The approved tool is still executing — waiting for completion…"
-          : "The model is taking a while to respond — still waiting…",
+          ? "The approved tool is still executing -- waiting for completion..."
+          : "The model is taking a while to respond -- still waiting...",
       );
     }, stallNoticeMs);
   };
@@ -1551,6 +1551,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
   const stepBudget = applyProfileToStepBudget(
     opts.stepBudget ?? defaultBudget,
     profile,
+    isOAuth,
   );
   const costBudget = opts.costBudgetUsd ?? 0;
   const capPred = isStepCount(stepBudget);
@@ -1562,7 +1563,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // Forced-synthesis on a stuck stop. When a guard (step cap, tool loop, no
   // progress) would end the run, the last thing the user saw was usually a
   // repeated tool call and then silence. Instead, give the model ONE final
-  // tool-less step to summarise what it found and what remains — `prepareStep`
+  // tool-less step to summarise what it found and what remains -- `prepareStep`
   // pins `toolChoice: "none"` for that step (see below), and this flag both
   // requests it and then lets the run stop once the summary lands. Gated on the
   // model accepting a forced tool choice (reasoning models reject it).
@@ -1605,7 +1606,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
 
   const trackingStopWhen: StopCondition<ToolSet>[] = [
     // Highest priority: the user pressed Stop. End the step loop at the next
-    // step boundary even if the model call did not reject — this is what makes
+    // step boundary even if the model call did not reject -- this is what makes
     // Stop reliably halt a looping agent, not only the in-flight round.
     (_args) => {
       if (opts.abortSignal?.aborted) {
@@ -1617,7 +1618,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
     // Next: the user queued a task while this run was working. End at the next
     // step boundary so that task is picked up promptly (a long run no longer
     // blocks it), then resume from here on the following turn. No synthesis
-    // step — the queued task is the next thing to do.
+    // step -- the queued task is the next thing to do.
     (_args) => {
       if (opts.hasPendingSteer?.()) {
         stopReason ??= "steered";
@@ -1668,7 +1669,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
         : false,
     // Text repetition loop: a step whose prose is mostly one repeated 60+
     // char window is degenerate output (the model echoing itself). Continuing
-    // would spend more budget on noise, so end at the step boundary — with
+    // would spend more budget on noise, so end at the step boundary -- with
     // the same single forced-synthesis chance the other stuck guards get, in
     // case the loop was confined to one step and a real summary is possible.
     (args) => {
@@ -1687,7 +1688,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
         ? requestSynthesisOrStop("tool-error")
         : false,
     (_args) => {
-      // Cost cap stops immediately — the whole point is to not spend more, so
+      // Cost cap stops immediately -- the whole point is to not spend more, so
       // it does not buy an extra synthesis step.
       if (costBudget <= 0) return false;
       const current = estimateCost(modelId, {
@@ -1704,7 +1705,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
       return false;
     },
     // Once a synthesis step was requested, stop as soon as the model produces a
-    // tool-less (text) step — that is the summary we asked for. `ignored` is
+    // tool-less (text) step -- that is the summary we asked for. `ignored` is
     // handled above (it must not be reported as the auto-continued reason).
     (args) => {
       if (!synthesisRequested) return false;
@@ -1900,7 +1901,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // has `run_subagents` and the prompt still describes when to use it. So a
   // model that rejects a pinned choice loses some reliability of delegation,
   // which is far better than losing the request. The static tag check only
-  // covers the built-in registry — a custom endpoint that rejected the pin on
+  // covers the built-in registry -- a custom endpoint that rejected the pin on
   // an earlier round (learned in toolChoiceLearning) is honoured here too.
   const forceFanout =
     "run_subagents" in tools &&
@@ -2003,7 +2004,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
     // the model must summarise (see `synthesisRequested`); the forced-fanout
     // case pins step 0 to `run_subagents`. Every other step is free. The
     // system prompt is also refreshed each step with the live todo list, so the
-    // model is reminded at every tool decision what is done / in progress —
+    // model is reminded at every tool decision what is done / in progress --
     // the mechanical nudge that gets items checked off as they finish instead
     // of being left stale until the end.
     prepareStep: ({
@@ -2035,7 +2036,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
       );
       // Memoized: an unchanged hint set resends the identical system array so
       // the provider's prefix cache stays hot. A new/changed hint rebuilds
-      // once — that single reprocess is the price of delivering new content.
+      // once -- that single reprocess is the price of delivering new content.
       const activeNudge = circuitBreakerState.activeNudge;
       let system: SystemLike;
       if (
@@ -2350,7 +2351,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
         // `tool-error` part: it carries `.error`, not `.output`. Reading only
         // `.output` made those calls look "resultless", so their card either
         // went green (hasResult true, error invisible) or stayed RUNNING
-        // forever when the round died mid-flight — a dead card the user
+        // forever when the round died mid-flight -- a dead card the user
         // mistook for a question awaiting their click.
         for (const r of step.toolResults ?? []) {
           const res = r as {
@@ -2492,8 +2493,8 @@ export async function runAgentStream(opts: RunAgentOptions) {
       });
 
       // A clean finish means the model decided it was done (its last step was a
-      // summary, no more tools). If it forgot to check off the items it began —
-      // the one it was actively working on, and any earlier ones it neglected —
+      // summary, no more tools). If it forgot to check off the items it began --
+      // the one it was actively working on, and any earlier ones it neglected --
       // mark them complete now so the todo list reflects the run instead of
       // leaving everything unchecked. Items it never started (still `pending`)
       // are left alone, because the model may legitimately judge some of the

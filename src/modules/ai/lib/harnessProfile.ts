@@ -203,7 +203,15 @@ export function applyProfileToTools<T>(
 export function applyProfileToStepBudget(
   base: number,
   profile: HarnessProfile,
+  isOAuth = false,
 ): number {
+  if (isOAuth) {
+    // Keyless / OAuth providers (ChatGPT, Claude OAuth, xAI OAuth, Copilot, Antigravity, Muse)
+    // are billed by subscription or free tier, not per token/step. Their real bound is the
+    // provider's rate limit window, so harness profile step caps (e.g. 50 or 16) must not
+    // clamp their execution down.
+    return base;
+  }
   let budget = base;
   if (profile.stepBudgetDelta) budget += profile.stepBudgetDelta;
   // The floor must not depend on a delta being present. A base of 0, a negative

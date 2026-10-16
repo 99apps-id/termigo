@@ -125,6 +125,19 @@ describe("splitTelegramText", () => {
     expect(chunks.join("\n")).toContain("line 0");
     expect(chunks.join("\n")).toContain("line 399");
   });
+
+  it("preserves fenced code blocks across split chunks", () => {
+    const code =
+      "```typescript\n" +
+      Array.from({ length: 50 }, (_, i) => `const x${i} = ${i};`).join("\n") +
+      "\n```";
+    const chunks = splitTelegramText(code, 300);
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const chunk of chunks) {
+      expect(chunk.startsWith("```typescript")).toBe(true);
+      expect(chunk.endsWith("```")).toBe(true);
+    }
+  });
 });
 
 describe("sendTelegram", () => {

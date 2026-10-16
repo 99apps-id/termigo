@@ -34,7 +34,7 @@ const WORKSPACE_REGISTRY: &str = ".termigo/mcp.json";
 /// CVE-2024-22471 / Cody), so the launcher is restricted to well-known
 /// package runners and language CLIs.
 const ALLOWED_MCP_COMMANDS: &[&str] = &[
-    "npx", "uvx", "bunx", "node", "python3", "go", "bun", "deno", "npm", "pnpm",
+    "npx", "uvx", "bunx", "node", "python", "python3", "go", "bun", "deno", "npm", "pnpm",
     "yarn", "java", "ruby", "rustc", "cargo",
 ];
 
@@ -80,7 +80,7 @@ fn read_registry(path: &Path, scope: &str, cwd: Option<&Path>) -> Vec<ServerConf
     file.servers
         .into_iter()
         .filter_map(|(name, entry)| {
-            if let Err(e) = validate_mcp_command(&entry.command) {
+            if let Err(e) = validate_mcp_command(&entry.command, scope) {
                 log::warn!("mcp: ignoring server {name} in {}: {e}", path.display());
                 None
             } else {
@@ -97,14 +97,30 @@ fn read_registry(path: &Path, scope: &str, cwd: Option<&Path>) -> Vec<ServerConf
         .collect()
 }
 
-fn validate_mcp_command(command: &str) -> Result<(), String> {
+fn validate_mcp_command(command: &str, scope: &str) -> Result<(), String> {
     let cmd = command.trim();
     if cmd.is_empty() {
         return Err("command is empty".into());
     }
-    let base = cmd.split_whitespace().next().ok_or("empty command")?;
-    if !ALLOWED_MCP_COMMANDS.contains(&base) {
-        return Err(format!("MCP command {base:?} is not allowed"));
+    // User-scoped configuration (~/.termigo/mcp.json) is explicitly configured
+    // by the machine owner and is never loaded from an untrusted git repository.
+    // CVE-2024-22471 only applies to project-scoped registries (.termigo/mcp.json)
+    // committed into repositories.
+    if scope == "user" {
+        return Ok(());
+    }
+    let raw_base = cmd.split_whitespace().next().ok_or("empty command")?;
+    let base = raw_base.trim_matches('"').trim_matches('\'');
+    let path = Path::new(base);
+    let file_name = path.file_name().and_then(|f| f.to_str()).unwrap_or(base);
+    let stem = file_name
+        .strip_suffix(".exe")
+        .or_else(|| file_name.strip_suffix(".cmd"))
+        .or_else(|| file_name.strip_suffix(".bat"))
+        .unwrap_or(file_name);
+
+    if !ALLOWED_MCP_COMMANDS.contains(&stem) && !ALLOWED_MCP_COMMANDS.contains(&file_name) {
+        return Err(format!("MCP command {raw_base:?} is not allowed in project scope"));
     }
     Ok(())
 }
@@ -177,7 +193,7 @@ pub async fn mcp_add_server(
     if command.trim().is_empty() {
         return Err("a server needs a command".into());
     }
-    validate_mcp_command(&command)?;
+    validate_mcp_command(&command, "user")?;
     edit_user_registry(move |servers| {
         let mut entry = serde_json::Map::new();
         entry.insert("command".into(), Value::String(command.trim().to_string()));
@@ -510,5 +526,22 @@ mod tests {
         }
         assert_eq!(by_name["shared"].command, "node");
         assert_eq!(by_name["shared"].scope, "project");
+    }
+
+    #[test]
+    fn user_scope_allows_custom_and_arbitrary_executables() {
+        assert!(validate_mcp_command("C:/project/doh-mcp/doh-mcp.exe", "user").is_ok());
+        assert!(validate_mcp_command("custom-mcp-server", "user").is_ok());
+        assert!(validate_mcp_command("C:/project/doh-mcp/doh-mcp.exe", "project").is_err());
+    }
+
+    #[test]
+    fn project_scope_allows_python_and_windows_extensions() {
+        assert!(validate_mcp_command("python", "project").is_ok());
+        assert!(validate_mcp_command("python.exe", "project").is_ok());
+        assert!(validate_mcp_command("node.exe", "project").is_ok());
+        assert!(validate_mcp_command("npx.cmd", "project").is_ok());
+        assert!(validate_mcp_command("cargo", "project").is_ok());
+        assert!(validate_mcp_command("powershell.exe", "project").is_err());
     }
 }

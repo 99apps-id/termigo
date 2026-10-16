@@ -399,10 +399,7 @@ export async function publishProgress(
         completed: true,
         outcome,
         elapsedMs: Date.now() - started,
-        answerText:
-          (outcome === "done" || outcome === "stopped") && answerText
-            ? answerText
-            : undefined,
+        answerText: answerText || undefined,
         todos:
           todosStore.useTodosStore.getState().bySession[sessionId]?.items ?? [],
       });

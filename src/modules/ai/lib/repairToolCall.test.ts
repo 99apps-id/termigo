@@ -436,6 +436,42 @@ describe("repairToolCall", () => {
     expect(parsed.glob).toEqual(["src-tauri/src/modules/pty/mod.rs"]);
   });
 
+  it("repairs todo_write when todos is sent as an object or uses tasks/title", async () => {
+    const tools = { todo_write: {} };
+    // Case 1: single object for todos
+    const res1 = await repairToolCall({
+      tools,
+      toolCall: {
+        toolCallId: "tw-1",
+        toolName: "todo_write",
+        input: JSON.stringify({
+          todos: { id: "1", title: "Refactor", status: "in_progress" },
+        }),
+      },
+    });
+    assert(res1);
+    const p1 = JSON.parse(res1.input);
+    expect(Array.isArray(p1.todos)).toBe(true);
+    expect(p1.todos).toHaveLength(1);
+    expect(p1.todos[0].title).toBe("Refactor");
+
+    // Case 2: tasks used instead of todos
+    const res2 = await repairToolCall({
+      tools,
+      toolCall: {
+        toolCallId: "tw-2",
+        toolName: "todo_write",
+        input: JSON.stringify({
+          tasks: [{ title: "Phase 1", status: "pending" }],
+        }),
+      },
+    });
+    assert(res2);
+    const p2 = JSON.parse(res2.input);
+    expect(Array.isArray(p2.todos)).toBe(true);
+    expect(p2.todos[0].title).toBe("Phase 1");
+  });
+
   it("repairs code_search arguments when pattern or relative/absolute path are used", async () => {
     const tools = { code_search: {} };
     // Relative path should map to path_filter

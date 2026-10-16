@@ -674,12 +674,21 @@ function applySemanticRepairs(
       } else if (Array.isArray(obj.items)) {
         p.todos = obj.items;
         modified = true;
+      } else if (Array.isArray(obj.tasks)) {
+        p.todos = obj.tasks;
+        modified = true;
+      } else if (obj.title || obj.description || obj.text || obj.status) {
+        p.todos = [obj];
+        modified = true;
       } else {
         p.todos = Object.values(obj);
         modified = true;
       }
     } else if (!p.todos && Array.isArray(p.items)) {
       p.todos = p.items;
+      modified = true;
+    } else if (!p.todos && Array.isArray(p.tasks)) {
+      p.todos = p.tasks;
       modified = true;
     }
   } else if (toolName === "run_subagents") {

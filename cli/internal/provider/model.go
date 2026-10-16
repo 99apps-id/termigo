@@ -33,6 +33,7 @@ var models = []Model{
 	{ID: "gpt-5.4", Provider: "openai", Label: "GPT-5.4", Description: "Long-context workhorse.", Tags: []string{"tools", "vision"}},
 	{ID: "gpt-5.4-mini", Provider: "openai", Label: "GPT-5.4 mini", Description: "Fast and inexpensive.", Tags: []string{"fast", "tools"}},
 	{ID: "gpt-5.3-codex", Provider: "openai", Label: "GPT-5.3 Codex", Description: "Tuned for agentic software engineering.", Tags: []string{"coding", "tools"}},
+	{ID: "gpt-4.5", Provider: "openai", Label: "GPT-4.5", APIID: "gpt-4.5-preview", Description: "Frontier knowledge and coding model.", Tags: []string{"vision", "tools", "coding"}},
 	// The models served through a ChatGPT login (Codex OAuth). The local id
 	// is distinct because the catalogue keys by id alone; APIID is what goes
 	// on the wire. The newest Codex generation first.
@@ -84,6 +85,9 @@ var models = []Model{
 	{ID: "copilot-claude-sonnet-5-5", Provider: "github-copilot", Label: "Claude Sonnet 5.5 (Copilot)", APIID: "claude-sonnet-5.5", Description: "Frontier Claude through GitHub Copilot.", Tags: []string{"reasoning", "tools", "coding"}},
 	{ID: "copilot-claude-sonnet-5", Provider: "github-copilot", Label: "Claude Sonnet 5 (Copilot)", APIID: "claude-sonnet-5", Description: "Balanced Claude through GitHub Copilot.", Tags: []string{"reasoning", "tools", "coding"}},
 	{ID: "copilot-claude-haiku-4-5", Provider: "github-copilot", Label: "Claude Haiku 4.5 (Copilot)", APIID: "claude-haiku-4.5", Description: "Fast Claude through GitHub Copilot.", Tags: []string{"fast", "tools"}},
+	{ID: "copilot-claude-3.7-sonnet", Provider: "github-copilot", Label: "Claude 3.7 Sonnet (Copilot)", APIID: "claude-3.7-sonnet", Description: "Claude 3.7 Sonnet billed to GitHub Copilot.", Tags: []string{"reasoning", "tools", "coding"}},
+	{ID: "copilot-gpt-4o", Provider: "github-copilot", Label: "GPT-4o (Copilot)", APIID: "gpt-4o", Description: "GPT-4o through GitHub Copilot.", Tags: []string{"tools", "coding"}},
+	{ID: "copilot-o3-mini", Provider: "github-copilot", Label: "o3-mini (Copilot)", APIID: "o3-mini", Description: "o3-mini reasoning model through GitHub Copilot.", Tags: []string{"reasoning", "tools"}},
 	{ID: "copilot-gemini-3.8-flash", Provider: "github-copilot", Label: "Gemini 3.8 Flash (Copilot)", APIID: "gemini-3.8-flash", Description: "Fast Gemini through GitHub Copilot.", Tags: []string{"fast", "tools"}},
 	{ID: "copilot-gemini-3.6-flash", Provider: "github-copilot", Label: "Gemini 3.6 Flash (Copilot)", APIID: "gemini-3.6-flash", Description: "Balanced Gemini through GitHub Copilot.", Tags: []string{"fast", "tools"}},
 	{ID: "copilot-gemini-3.5-flash", Provider: "github-copilot", Label: "Gemini 3.5 Flash (Copilot)", APIID: "gemini-3.5-flash", Description: "Efficient Gemini through GitHub Copilot.", Tags: []string{"fast", "tools"}},
@@ -97,9 +101,12 @@ var models = []Model{
 	// (gemini-3.8-flash-medium); 9router's "(medium)" preset is stripped
 	// before the request and sent as thinkingConfig, so it must not be part
 	// of the id. A wrong id returns 404 "check the model id and base URL".
+	{ID: "antigravity-gemini-4-argon", Provider: "antigravity", Label: "Gemini 4 Argon (Antigravity)", APIID: "gemini-4-argon", Description: "Frontier multimodal Gemini through an Antigravity login.", Tags: []string{"reasoning", "tools", "coding"}},
+	{ID: "antigravity-gemini-3.1-pro", Provider: "antigravity", Label: "Gemini 3.1 Pro (Antigravity)", APIID: "gemini-3.1-pro", Description: "Frontier reasoning Gemini through an Antigravity login.", Tags: []string{"reasoning", "tools", "coding"}},
 	{ID: "antigravity-gemini-3.8-flash", Provider: "antigravity", Label: "Gemini 3.8 Flash (Antigravity)", APIID: "gemini-3.8-flash-medium", Description: "Fast Gemini through an Antigravity login.", Tags: []string{"fast", "tools", "coding"}},
-	{ID: "antigravity-gemini-3.5-flash", Provider: "antigravity", Label: "Gemini 3.5 Flash (Antigravity)", APIID: "gemini-3.5-flash-low", Description: "Balanced Gemini through an Antigravity login.", Tags: []string{"fast", "tools"}},
-	{ID: "antigravity-gemini-pro", Provider: "antigravity", Label: "Gemini Pro (Antigravity)", APIID: "gemini-pro-agent", Description: "Flagship Gemini through an Antigravity login.", Tags: []string{"reasoning", "tools", "coding"}},
+	{ID: "antigravity-gemini-3.8-flash-high", Provider: "antigravity", Label: "Gemini 3.8 Flash High (Antigravity)", APIID: "gemini-3.8-flash-high", Description: "Deep thinking Gemini Flash through an Antigravity login.", Tags: []string{"reasoning", "tools", "coding"}},
+	{ID: "antigravity-claude-opus-5-5", Provider: "antigravity", Label: "Claude Opus 5.5 (Antigravity)", APIID: "claude-opus-5-5", Description: "Flagship Claude through an Antigravity login.", Tags: []string{"reasoning", "tools", "coding"}},
+	{ID: "antigravity-claude-sonnet-5-5", Provider: "antigravity", Label: "Claude Sonnet 5.5 (Antigravity)", APIID: "claude-sonnet-5-5", Description: "Fast Claude through an Antigravity login.", Tags: []string{"reasoning", "tools", "coding"}},
 	{ID: "antigravity-claude-sonnet-4-6", Provider: "antigravity", Label: "Claude Sonnet 4.6 (Antigravity)", APIID: "claude-sonnet-4-6", Description: "Claude through an Antigravity login.", Tags: []string{"reasoning", "tools", "coding"}},
 	// Meta Muse Code. The device grant mints an account key; the model id is
 	// what api.meta.ai serves it under.
@@ -108,6 +115,7 @@ var models = []Model{
 	{ID: "claude-sonnet-4-6", Provider: "anthropic", Label: "Claude Sonnet 4.6", Description: "Previous Sonnet generation.", Tags: []string{"tools", "coding"}},
 
 	// Google. The Flash line ships far more often than the Pro one.
+	{ID: "gemini-4-argon", Provider: "google", Label: "Gemini 4 Argon", Description: "Next-generation flagship reasoning and agentic model.", Tags: []string{"reasoning", "tools", "vision", "coding"}},
 	{ID: "gemini-3.1-pro-preview", Provider: "google", Label: "Gemini 3.1 Pro", Description: "Frontier reasoning with a large window.", Tags: []string{"reasoning", "tools", "vision"}},
 	{ID: "gemini-3.8-flash", Provider: "google", Label: "Gemini 3.8 Flash", Description: "Newest Flash: software engineering and agentic tasks.", Tags: []string{"tools", "vision", "fast"}},
 	{ID: "gemini-3.7-flash", Provider: "google", Label: "Gemini 3.7 Flash", Description: "Fast agentic workflows and coding.", Tags: []string{"tools", "fast"}},

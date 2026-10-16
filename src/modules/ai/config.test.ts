@@ -191,7 +191,7 @@ describe("modelKeepsReasoning", () => {
   });
 
   it("keeps reasoning for tagged reasoning models", () => {
-    expect(modelKeepsReasoning(resolveModel("claude-opus-4-7"))).toBe(true);
+    expect(modelKeepsReasoning(resolveModel("claude-opus-5-5"))).toBe(true);
   });
 });
 
@@ -273,7 +273,15 @@ describe("stepBudgetForRound", () => {
       OAUTH_MAX_AGENT_STEPS,
     );
     expect(isOAuthModel("claude-oauth-opus-5.5")).toBe(true);
+    expect(isOAuthModel("copilot-gpt-5.4")).toBe(true);
+    expect(isOAuthModel("copilot-custom-new-model")).toBe(true);
+    expect(isOAuthModel("antigravity-gemini-3.8-flash")).toBe(true);
+    expect(isOAuthModel("antigravity-gemini-4-argon")).toBe(true);
+    expect(isOAuthModel("antigravity-gemini-3.1-pro")).toBe(true);
+    expect(isOAuthModel("muse-spark-1.3")).toBe(true);
+    expect(isOAuthModel("grok-4.7-oauth")).toBe(true);
     expect(isOAuthModel("gpt-5.6")).toBe(false);
+    expect(isOAuthModel("gpt-6-astra")).toBe(false);
   });
 
   it("ignores an out-of-range round instead of inventing a budget", () => {
