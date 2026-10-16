@@ -53,7 +53,8 @@ export async function getTelegramToken(): Promise<string | null> {
       const token = v && v.length > 0 ? v : null;
       cachedToken = token;
       return token;
-    } catch {
+    } catch (error) {
+      console.warn("[telegram] secrets_get token error:", error);
       // Deliberately NOT cached: the keychain may not be available yet at
       // startup, and caching that failure would disable the bot until a restart.
       return null;
@@ -75,7 +76,8 @@ export async function getTelegramOwner(): Promise<string | null> {
       account: "owner",
     });
     return v && v.length > 0 ? v : null;
-  } catch {
+  } catch (error) {
+    console.warn("[telegram] secrets_get owner error:", error);
     return null;
   }
 }
