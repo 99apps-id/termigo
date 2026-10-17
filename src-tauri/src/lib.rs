@@ -37,7 +37,7 @@ pub fn run() {
     }
 
     // Log any Rust panic (with its location) before the default hook aborts, so
-    // a crash — e.g. switching workspace environments — leaves a trail in
+    // a crash -- e.g. switching workspace environments -- leaves a trail in
     // Termigo.log instead of vanishing. Chained, so backtraces still print.
     {
         let default_hook = std::panic::take_hook();
@@ -70,13 +70,20 @@ pub fn run() {
     #[cfg(windows)]
     browser::apply_webview2_browser_args_env();
 
+    // Linux: disable WebKitGTK DMA-BUF renderer before initializing WebKitGTK
+    // to prevent deadlocks and freezing of mouse/touch events and window resizing.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
+
     let builder = tauri::Builder::default();
     #[cfg(target_os = "linux")]
     let builder = builder.plugin(tauri_plugin_clipboard_manager::init());
     builder
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        // Skip restoring VISIBLE — frontend calls window.show() after first
+        // Skip restoring VISIBLE -- frontend calls window.show() after first
         // paint so the user never sees a transparent window-shadow flash on
         // Windows/Linux.
         .plugin(
@@ -93,18 +100,18 @@ pub fn run() {
                 .level(tauri_plugin_log::log::LevelFilter::Info)
                 // Local time, not UTC. The plugin's default is
                 // `TimezoneStrategy::UseUtc`, so a log line carried `[01:02:24]`
-                // while the file's own mtime said `08:02:24` — the same moment,
+                // while the file's own mtime said `08:02:24` -- the same moment,
                 // seven hours apart, which made a live log read as stale and cost
                 // real time to diagnose on both the desktop and the headless VPS.
                 // A log line is read next to `date`/`journalctl` output, so it has
                 // to agree with the clock on the wall.
                 //
                 // Note this call also re-renders the line with the level BEFORE
-                // the target (`[INFO][webview:…]`), where the UTC default wrote
-                // the target first (`[webview:…][INFO]`). Called out because it is
+                // the target (`[INFO][webview:...]`), where the UTC default wrote
+                // the target first (`[webview:...][INFO]`). Called out because it is
                 // not visible from the call site: setting the strategy installs
                 // the plugin's own format, and that format orders the two that
-                // way. Nothing parses these lines — they are read by people — and
+                // way. Nothing parses these lines -- they are read by people -- and
                 // grepping `[WARN]` or `webview` still works either way.
                 .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
                 .build(),

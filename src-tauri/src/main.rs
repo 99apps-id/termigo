@@ -17,5 +17,15 @@ fn main() {
         defaults.setBool_forKey(false, ns_string!("ApplePressAndHoldEnabled"));
     }
 
+    #[cfg(target_os = "linux")]
+    {
+        // Fix WebKitGTK freeze / hang on Linux (especially with NVIDIA, Mesa, Wayland & X11).
+        // WebKitGTK 2.40+ DMA-BUF renderer frequently causes deadlocks where the window renders
+        // but becomes completely unclickable, cannot resize or maximize, and ignores all events.
+        if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        }
+    }
+
     termigo_lib::run()
 }
