@@ -6,8 +6,12 @@ export const MAX_GLOBAL_SUBAGENTS = 4;
 
 export class SubagentConcurrencyPool {
   private active = 0;
+  private generation = 0;
   private readonly maxConcurrent: number;
-  private readonly queue: Array<() => void> = [];
+  private readonly queue: Array<{
+    run: () => void;
+    cancel: () => void;
+  }> = [];
 
   constructor(maxConcurrent = MAX_GLOBAL_SUBAGENTS) {
     this.maxConcurrent = maxConcurrent;
@@ -26,14 +30,17 @@ export class SubagentConcurrencyPool {
       throw new Error("Aborted before acquiring subagent slot");
     }
 
+    const gen = this.generation;
     if (this.active < this.maxConcurrent) {
       this.active++;
       let released = false;
       const release = () => {
         if (!released) {
           released = true;
-          this.active--;
-          this.dequeue();
+          if (this.generation === gen && this.active > 0) {
+            this.active--;
+            this.dequeue();
+          }
         }
       };
       return release;
@@ -42,7 +49,6 @@ export class SubagentConcurrencyPool {
     return new Promise<() => void>((resolve, reject) => {
       let aborted = false;
       let released = false;
-      let release: (() => void) | null = null;
 
       const run = () => {
         if (aborted) {
@@ -50,20 +56,32 @@ export class SubagentConcurrencyPool {
           return;
         }
         signal?.removeEventListener("abort", onAbort);
+        const runGen = this.generation;
         this.active++;
-        release = () => {
+        const release = () => {
           if (!released) {
             released = true;
-            this.active--;
-            this.dequeue();
+            if (this.generation === runGen && this.active > 0) {
+              this.active--;
+              this.dequeue();
+            }
           }
         };
         resolve(release);
       };
 
+      const cancel = () => {
+        if (aborted) return;
+        aborted = true;
+        signal?.removeEventListener("abort", onAbort);
+        reject(new Error("Aborted waiting for subagent slot"));
+      };
+
+      const entry = { run, cancel };
+
       const onAbort = () => {
         aborted = true;
-        const idx = this.queue.indexOf(run);
+        const idx = this.queue.indexOf(entry);
         if (idx !== -1) {
           this.queue.splice(idx, 1);
         }
@@ -71,7 +89,7 @@ export class SubagentConcurrencyPool {
       };
 
       signal?.addEventListener("abort", onAbort, { once: true });
-      this.queue.push(run);
+      this.queue.push(entry);
     });
   }
 
@@ -82,14 +100,18 @@ export class SubagentConcurrencyPool {
         // No increment here: the waiter counts its own slot in `run()`.
         // Incrementing in both places double-counts every queued grant,
         // halving the effective pool and letting `active` exceed the max.
-        next();
+        next.run();
       }
     }
   }
 
   reset(): void {
+    this.generation++;
     this.active = 0;
-    this.queue.length = 0;
+    const pending = this.queue.splice(0, this.queue.length);
+    for (const item of pending) {
+      item.cancel();
+    }
   }
 }
 

@@ -166,12 +166,24 @@ pub fn run_query(engine: &str, connection: &str, query: &str) -> Result<String, 
 /// filesystem gate; a path does.
 pub fn local_db_path(engine: &str, connection: &str) -> Option<std::path::PathBuf> {
     let trimmed = connection.trim();
-    if trimmed.is_empty() || trimmed == ":memory:" || trimmed.contains("://") {
+    if trimmed.is_empty() || trimmed == ":memory:" {
+        return None;
+    }
+    let stripped = if let Some(rest) = trimmed.strip_prefix("file://") {
+        rest.split('?').next().unwrap_or(rest)
+    } else if let Some(rest) = trimmed.strip_prefix("file:") {
+        rest.split('?').next().unwrap_or(rest)
+    } else if trimmed.contains("://") {
+        return None;
+    } else {
+        trimmed
+    };
+    if stripped.is_empty() || stripped == ":memory:" {
         return None;
     }
     match engine {
         // These two open the argument as a file on this machine.
-        "sqlite3" | "sqlite" | "duckdb" => Some(std::path::PathBuf::from(trimmed)),
+        "sqlite3" | "sqlite" | "duckdb" => Some(std::path::PathBuf::from(stripped)),
         _ => None,
     }
 }
@@ -185,14 +197,14 @@ pub async fn sql_run(
     query: String,
     registry: tauri::State<'_, crate::modules::workspace::WorkspaceRegistry>,
 ) -> Result<String, String> {
-    // A local database file is a file read like any other. Without this gate,
-    // `sqlite3 <path>` was a way to open any database on disk - a browser
-    // profile, a password manager store, a credential DB - from inside the
-    // agent, outside the workspace authorization that `fs::*` now enforces.
-    // The deny-list and the authorized-root check are the same two halves the
-    // `fs::*` commands pass, so the boundary is one rule rather than two.
+    // A local database file is a file read/write like any other. Without this
+    // gate, `sqlite3 <path>` was a way to open or overwrite any database on
+    // disk - a browser profile, a password manager store, a credential DB -
+    // from inside the agent, outside the workspace authorization that `fs::*`
+    // now enforces.
     if let Some(db) = local_db_path(&engine, &connection) {
         crate::modules::fs::security::validate_read(&db)?;
+        crate::modules::fs::security::validate_write(&db)?;
         crate::modules::workspace::require_authorized(&registry, &db)?;
     }
     tauri::async_runtime::spawn_blocking(move || run_query(&engine, &connection, &query))

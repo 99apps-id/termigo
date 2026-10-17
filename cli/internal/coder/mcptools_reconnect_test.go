@@ -162,6 +162,7 @@ func TestMCPSessionStaysUsableThroughTheToolAdapter(t *testing.T) {
 // TestConnectMCPReturnsAToolsetAndACloser proves the public entry point still
 // returns working tools plus a close function that is safe to call.
 func TestConnectMCPReturnsAToolsetAndACloser(t *testing.T) {
+	t.Setenv("TERMIGO_HOME", t.TempDir())
 	workspace := t.TempDir()
 	// No MCP registry in the workspace: the empty result is still a valid
 	// (nil, func()) pair that a caller can close.

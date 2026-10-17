@@ -32,7 +32,7 @@ export const sentApprovalIds = new Set<string>();
  *  are otherwise useless after the run. Cap the set so a long-lived session
  *  cannot grow it without bound, dropping the oldest (insertion order). */
 const SENT_APPROVAL_IDS_MAX = 200;
-function rememberSentApproval(id: string): void {
+export function rememberSentApproval(id: string): void {
   sentApprovalIds.add(id);
   while (sentApprovalIds.size > SENT_APPROVAL_IDS_MAX) {
     const first = sentApprovalIds.values().next();
@@ -354,7 +354,6 @@ export async function publishProgress(
       await sleep(signal, 1000);
     }
   } finally {
-    activeProgressMessageIds.delete(chatId);
     // A `return` used to short-circuit here when this message was already
     // finalized (by the stop or approval path). That is a real bug, not lint
     // noise: a `return` inside `finally` SWALLOWS an exception thrown by the
@@ -363,8 +362,10 @@ export async function publishProgress(
     // condition keeps the same skip without taking the failure with it.
     if (
       progressMessageId &&
+      !signal.aborted &&
       !finalizedProgressMessages.has(progressMessageId)
     ) {
+      finalizedProgressMessages.add(progressMessageId);
       // State the outcome rather than a bare "Completed.". `stoppedByUser` and
       // `stopReason` are what the desktop app uses to tell a finished run from
       // one the user stopped, one that hit the step limit and one that failed;
@@ -448,9 +449,8 @@ export async function publishProgress(
       if (!answerText || (outcome !== "done" && outcome !== "stopped")) {
         lastFinishedProgressMessageIds.set(chatId, progressMessageId);
       }
-    } else if (progressMessageId) {
-      // Already finalized by the stop / approval path - only the marker is left.
-      finalizedProgressMessages.delete(progressMessageId);
+    } else if (progressMessageId && signal.aborted) {
+      activeProgressMessageIds.delete(chatId);
     }
   }
 }

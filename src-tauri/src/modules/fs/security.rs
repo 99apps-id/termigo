@@ -132,6 +132,8 @@ const AGENT_IMMUTABLE_CONFIG: &[&str] = &[
     "/.claude/settings.json",
     "/.claude/settings.local.json",
     "/.codex/config.toml",
+    "/.codex/hooks.json",
+    "/.cursor/mcp.json",
     "/.gemini/settings.json",
 ];
 
@@ -148,6 +150,7 @@ const PROTECTED_WRITE_DIRS: &[&str] = &[
     // The agent's own audit log. It is written by `audit_append` in Rust, and
     // locked here so the record cannot be rewritten by the thing it records.
     "/.termigo/audit",
+    "/.pi/agent/extensions",
     "/.ssh",
     "/.gnupg",
     "/.aws",
@@ -225,38 +228,38 @@ fn comparison_form(p: &str) -> String {
     if is_windows_style {
         s = s[2..].to_string();
     }
-    let segs: Vec<String> = s
-        .split('/')
-        .map(|seg| {
-            if is_windows_style {
-                let colon = seg.find(':').unwrap_or(seg.len());
-                let trimmed =
-                    seg[..colon].trim_end_matches(|c: char| c == '.' || c.is_whitespace());
-                trimmed.to_string()
-            } else {
-                seg.to_string()
-            }
-        })
-        .collect();
-    s = segs.join("/");
-    let mut collapsed = String::with_capacity(s.len());
-    let mut prev_slash = false;
-    for c in s.chars() {
-        if c == '/' {
-            if !prev_slash {
-                collapsed.push(c);
-            }
-            prev_slash = true;
+    let leading_slash = s.starts_with('/');
+    let mut resolved: Vec<String> = Vec::new();
+    for seg in s.split('/') {
+        if seg.is_empty() || seg == "." {
+            continue;
+        }
+        if seg == ".." {
+            resolved.pop();
+            continue;
+        }
+        let cleaned = if is_windows_style {
+            let colon = seg.find(':').unwrap_or(seg.len());
+            seg[..colon]
+                .trim_end_matches(|c: char| c == '.' || c.is_whitespace())
+                .to_string()
         } else {
-            collapsed.push(c);
-            prev_slash = false;
+            seg.to_string()
+        };
+        if !cleaned.is_empty() && cleaned != "." {
+            if cleaned == ".." {
+                resolved.pop();
+            } else {
+                resolved.push(cleaned);
+            }
         }
     }
-    s = collapsed.to_lowercase();
-    if s.len() > 1 && s.ends_with('/') {
-        s.pop();
+    let joined = resolved.join("/").to_lowercase();
+    if leading_slash {
+        format!("/{joined}")
+    } else {
+        joined
     }
-    s
 }
 
 /// System roots match at the filesystem root only. They must NOT float like
@@ -533,28 +536,50 @@ pub fn validate_read(path: &std::path::Path) -> Result<(), String> {
     Ok(())
 }
 
+fn canonicalize_nearest_ancestor(path: &Path) -> Option<PathBuf> {
+    let mut cur = path.parent();
+    let mut tail_parts: Vec<std::ffi::OsString> = Vec::new();
+    if let Some(name) = path.file_name() {
+        tail_parts.push(name.to_os_string());
+    }
+    while let Some(ancestor) = cur {
+        if ancestor.as_os_str().is_empty() {
+            break;
+        }
+        if let Ok(canon) = std::fs::canonicalize(ancestor) {
+            let mut joined = canon;
+            for part in tail_parts.into_iter().rev() {
+                joined.push(part);
+            }
+            return Some(joined);
+        }
+        if let Some(name) = ancestor.file_name() {
+            tail_parts.push(name.to_os_string());
+        }
+        cur = ancestor.parent();
+    }
+    None
+}
+
 /// Same as `validate_read` for the write deny-list. A target that does not exist
-/// yet cannot be canonicalized, so its parent is resolved instead, exactly as
-/// `guard_write` does: without that fallback a new file behind a symlinked
-/// directory would only ever be checked in its literal spelling, which never
-/// matches the deny-list.
+/// yet cannot be canonicalized, so its nearest existing ancestor is resolved
+/// instead, exactly as `guard_write` does: without that fallback a new file
+/// behind a symlinked directory would only ever be checked in its literal
+/// spelling, which never matches the deny-list.
 pub fn validate_write(path: &std::path::Path) -> Result<(), String> {
     check_writable(&path.to_string_lossy())?;
     if let Ok(canon) = std::fs::canonicalize(path) {
         check_writable(&canon.to_string_lossy())?;
         return Ok(());
     }
-    if let Some(parent) = path.parent() {
-        if let Ok(canon_parent) = std::fs::canonicalize(parent) {
-            let joined = canon_parent.join(path.file_name().unwrap_or_default());
-            check_writable(&joined.to_string_lossy())?;
-        }
+    if let Some(joined) = canonicalize_nearest_ancestor(path) {
+        check_writable(&joined.to_string_lossy())?;
     }
     Ok(())
 }
 
-/// Write guard: deny on the literal path, then canonicalize (target, or parent
-/// for a new file) and deny again. Returns the path to operate on.
+/// Write guard: deny on the literal path, then canonicalize (target, or nearest
+/// existing ancestor for a new file) and deny again. Returns the path to operate on.
 pub fn guard_write(path: &Path) -> Result<PathBuf, String> {
     check_writable(&path.to_string_lossy())?;
     match std::fs::canonicalize(path) {
@@ -563,13 +588,9 @@ pub fn guard_write(path: &Path) -> Result<PathBuf, String> {
             Ok(canon)
         }
         Err(_) => {
-            if let Some(parent) = path.parent() {
-                if let Ok(canon_parent) = std::fs::canonicalize(parent) {
-                    let tail = path.file_name().unwrap_or_default();
-                    let joined = canon_parent.join(tail);
-                    check_writable(&joined.to_string_lossy())?;
-                    return Ok(joined);
-                }
+            if let Some(joined) = canonicalize_nearest_ancestor(path) {
+                check_writable(&joined.to_string_lossy())?;
+                return Ok(joined);
             }
             Ok(path.to_path_buf())
         }

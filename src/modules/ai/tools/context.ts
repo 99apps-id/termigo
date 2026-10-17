@@ -106,6 +106,8 @@ export type ToolContext = {
    * Yield subagent concurrency slot during nested tool execution to avoid deadlock.
    */
   yieldSlot?: <T>(work: () => Promise<T>) => Promise<T>;
+  /** Active model id for the current agent/subagent execution context. */
+  getModelId?: () => string;
 };
 
 export function resolvePath(rawPath: string, cwd: string | null): string {

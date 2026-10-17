@@ -279,7 +279,10 @@ function isReportDocument(path: string): boolean {
  * 2. The target is a report or documentation document.
  * 3. The file was created earlier by this same subagent run.
  */
-export function newFilesOnly<T extends AnyTool>(tool: T): T {
+export function newFilesOnly<T extends AnyTool>(
+  tool: T,
+  resolveTarget?: (rawPath: string) => string,
+): T {
   const inner = tool.execute;
   if (!inner) return tool;
   const selfCreated = new Set<string>();
@@ -304,14 +307,22 @@ export function newFilesOnly<T extends AnyTool>(tool: T): T {
 
       if (typeof rawPath === "string" && rawPath.trim()) {
         const path = rawPath.trim();
-        const targetKey = normalizeTargetKey(path);
+        let resolvedPath = path;
+        if (resolveTarget) {
+          try {
+            resolvedPath = resolveTarget(path);
+          } catch {
+            resolvedPath = path;
+          }
+        }
+        const targetKey = normalizeTargetKey(resolvedPath);
         const canOverwrite =
           typed.overwrite === true ||
           isReportDocument(targetKey) ||
           selfCreated.has(targetKey);
 
         if (!canOverwrite) {
-          const existing = await native.readFile(path).catch(() => null);
+          const existing = await native.readFile(resolvedPath).catch(() => null);
           if (existing) {
             return {
               error: `${path} already exists. If you intend to overwrite this file entirely, supply overwrite: true; or call read_file followed by edit/multi_edit for safe in-place modifications.`,

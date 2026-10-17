@@ -67,6 +67,8 @@ export async function saveFrontier(record: FrontierRecord): Promise<void> {
   await store.set("frontier", record);
 }
 
+let writeChain: Promise<unknown> = Promise.resolve();
+
 /** Record one run outcome for (workspace, profile). */
 export async function recordRun(
   workspace: string,
@@ -80,36 +82,40 @@ export async function recordRun(
     costUsd?: number;
   },
 ): Promise<FrontierRecord> {
-  const record = await loadFrontier();
-  const key = frontierKey(workspace, profileId);
-  const prev = record[key] ?? {
-    runs: 0,
-    successes: 0,
-    totalSteps: 0,
-    totalInputTokens: 0,
-    totalOutputTokens: 0,
-    totalCachedTokens: 0,
-    totalCostUsd: 0,
-    lastAt: 0,
-  };
-  record[key] = {
-    runs: (Number(prev.runs) || 0) + 1,
-    successes: (Number(prev.successes) || 0) + (outcome.success ? 1 : 0),
-    totalSteps: (Number(prev.totalSteps) || 0) + (Number(outcome.steps) || 0),
-    totalInputTokens:
-      (Number(prev.totalInputTokens) || 0) + (Number(outcome.inputTokens) || 0),
-    totalOutputTokens:
-      (Number(prev.totalOutputTokens) || 0) +
-      (Number(outcome.outputTokens) || 0),
-    totalCachedTokens:
-      (Number(prev.totalCachedTokens) || 0) +
-      (Number(outcome.cachedTokens) || 0),
-    totalCostUsd:
-      (Number(prev.totalCostUsd) || 0) + (Number(outcome.costUsd) || 0),
-    lastAt: Date.now(),
-  };
-  await saveFrontier(record);
-  return record;
+  const next = writeChain.then(async () => {
+    const record = await loadFrontier();
+    const key = frontierKey(workspace, profileId);
+    const prev = record[key] ?? {
+      runs: 0,
+      successes: 0,
+      totalSteps: 0,
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+      totalCachedTokens: 0,
+      totalCostUsd: 0,
+      lastAt: 0,
+    };
+    record[key] = {
+      runs: (Number(prev.runs) || 0) + 1,
+      successes: (Number(prev.successes) || 0) + (outcome.success ? 1 : 0),
+      totalSteps: (Number(prev.totalSteps) || 0) + (Number(outcome.steps) || 0),
+      totalInputTokens:
+        (Number(prev.totalInputTokens) || 0) + (Number(outcome.inputTokens) || 0),
+      totalOutputTokens:
+        (Number(prev.totalOutputTokens) || 0) +
+        (Number(outcome.outputTokens) || 0),
+      totalCachedTokens:
+        (Number(prev.totalCachedTokens) || 0) +
+        (Number(outcome.cachedTokens) || 0),
+      totalCostUsd:
+        (Number(prev.totalCostUsd) || 0) + (Number(outcome.costUsd) || 0),
+      lastAt: Date.now(),
+    };
+    await saveFrontier(record);
+    return record;
+  });
+  writeChain = next.catch(() => {});
+  return next;
 }
 
 /** Summarize frontier record across profiles without NaN values. */
@@ -147,9 +153,9 @@ export function summarizeFrontier(record: FrontierRecord): FrontierSummary {
     const runs = g.runs > 0 ? g.runs : 0;
     const rate = runs > 0 ? g.successes / runs : 0;
     const avgCost = runs > 0 ? g.totalCostUsd / runs : 0;
-    const totalTokens = g.totalInputTokens + g.totalCachedTokens;
+    const totalInput = Math.max(g.totalInputTokens, g.totalCachedTokens);
     const avgCache =
-      totalTokens > 0 ? (g.totalCachedTokens / totalTokens) * 100 : 0;
+      totalInput > 0 ? (g.totalCachedTokens / totalInput) * 100 : 0;
 
     return {
       ...g,
@@ -190,7 +196,7 @@ export function summarizeFrontier(record: FrontierRecord): FrontierSummary {
 
 /** Best profile for a workspace by a composite score.
  *
- * Score = successRate * (1 / (1 + avgCostUsd)) — profiles that succeed often
+ * Score = successRate * (1 / (1 + avgCostUsd)) -- profiles that succeed often
  * AND cost less rank higher. Ties broken by most runs.
  */
 export async function bestProfile(
@@ -229,15 +235,14 @@ export function avgCostUsd(stats: FrontierStats): number {
 
 /** Helper: average cache hit % for a profile. */
 export function avgCachePct(stats: FrontierStats): number {
-  const total =
-    (Number(stats?.totalInputTokens) || 0) +
-    (Number(stats?.totalCachedTokens) || 0);
-  return total > 0
-    ? ((Number(stats?.totalCachedTokens) || 0) / total) * 100
-    : 0;
+  const cached = Number(stats?.totalCachedTokens) || 0;
+  const total = Math.max(Number(stats?.totalInputTokens) || 0, cached);
+  return total > 0 ? (cached / total) * 100 : 0;
 }
 
 /** Reset hook for tests and the settings UI. */
 export function resetFrontier(): Promise<void> {
-  return saveFrontier({});
+  const next = writeChain.then(() => saveFrontier({}));
+  writeChain = next.catch(() => {});
+  return next;
 }

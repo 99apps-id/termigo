@@ -58,6 +58,7 @@ import {
   lastFinishedProgressMessageIds,
   progressCtrls,
   publishProgress,
+  rememberSentApproval,
   sentApprovalIds,
 } from "./telegramProgress";
 
@@ -338,12 +339,20 @@ export async function runMirror(signal: AbortSignal): Promise<void> {
         const sessionId = state.activeSessionId;
         const chat = store.getChat(sessionId);
         const messages = chat?.messages ?? [];
+        const settled =
+          state.agentMeta.status === "idle" ||
+          state.agentMeta.status === "error";
         if (sessionId !== seenSession) {
           seenSession = sessionId;
           mirrorLastNotifiedStopKey = "";
           // Seed so pre-existing history is not replayed to Telegram - only
-          // messages added from now on are mirrored.
-          for (const m of messages) {
+          // messages added from now on are mirrored. Do not mark a trailing
+          // assistant message as seen while a run is still streaming.
+          for (let i = 0; i < messages.length; i++) {
+            const m = messages[i];
+            const isTrailingStreamingAssistant =
+              !settled && i === messages.length - 1 && m.role === "assistant";
+            if (isTrailingStreamingAssistant) continue;
             markMessageSeen(m.id, sessionId, m.role, messageText(m));
           }
           // Anything still mid-stream belongs to the session being left, and
@@ -351,9 +360,6 @@ export async function runMirror(signal: AbortSignal): Promise<void> {
           // target a message the loop no longer walks.
           mirrorStreams.clear();
         }
-        const settled =
-          state.agentMeta.status === "idle" ||
-          state.agentMeta.status === "error";
         for (const m of messages) {
           const text = messageText(m);
           if (isMessageSeen(m.id, sessionId, m.role, text)) continue;
@@ -547,7 +553,7 @@ export async function runMirror(signal: AbortSignal): Promise<void> {
               signal,
             );
             if (ok) {
-              sentApprovalIds.add(p.id);
+              rememberSentApproval(p.id);
             }
           }
 
@@ -1049,6 +1055,11 @@ export async function runAgentAndStream(
           typingTimer = null;
         }
         progressCtl.abort();
+        const leftoverProgId = activeProgressMessageIds.get(chatId);
+        if (leftoverProgId !== undefined) {
+          activeProgressMessageIds.delete(chatId);
+          finalizedProgressMessages.delete(leftoverProgId);
+        }
         if (progressCtrls.get(chatId) === progressCtl) {
           progressCtrls.delete(chatId);
         }

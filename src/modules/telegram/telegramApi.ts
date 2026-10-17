@@ -372,8 +372,12 @@ async function sendSingleChunk(
         signal,
       );
       return;
-    } catch {
-      // Fall through to plain text fallback below
+    } catch (err) {
+      if (signal.aborted) throw err;
+      if (err instanceof TelegramApiError && err.status !== 400) {
+        throw err;
+      }
+      // Fall through to plain text fallback on HTTP 400 HTML parse errors
     }
   }
 

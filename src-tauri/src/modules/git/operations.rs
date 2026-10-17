@@ -658,50 +658,49 @@ pub fn commit_files(
         return Err(GitError::command("git diff-tree", "invalid commit sha"));
     }
 
-    let output = run_git(
+    let name_status_output = run_git(
         &repo_root.workspace,
         Some(&repo_root.git_path),
         [
             OsStr::new("diff-tree"),
+            OsStr::new("--root"),
+            OsStr::new("-m"),
+            OsStr::new("--first-parent"),
             OsStr::new("--no-commit-id"),
             OsStr::new("-r"),
+            OsStr::new("-M"),
+            OsStr::new("-C"),
             OsStr::new("-z"),
             OsStr::new("--name-status"),
+            OsStr::new(sha),
+        ],
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    ensure_success(&name_status_output, "git diff-tree --name-status failed")?;
+
+    let numstat_output = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        [
+            OsStr::new("diff-tree"),
+            OsStr::new("--root"),
+            OsStr::new("-m"),
+            OsStr::new("--first-parent"),
+            OsStr::new("--no-commit-id"),
+            OsStr::new("-r"),
+            OsStr::new("-M"),
+            OsStr::new("-C"),
+            OsStr::new("-z"),
             OsStr::new("--numstat"),
             OsStr::new(sha),
         ],
         DEFAULT_TIMEOUT_SECS,
     )?;
-    ensure_success(&output, "git diff-tree failed")?;
+    ensure_success(&numstat_output, "git diff-tree --numstat failed")?;
 
-    let (name_status_bytes, numstat_bytes) = split_name_status_numstat(&output.stdout);
-    let mut files = parse_diff_tree_name_status(name_status_bytes);
-    apply_numstat(&mut files, numstat_bytes);
+    let mut files = parse_diff_tree_name_status(&name_status_output.stdout);
+    apply_numstat(&mut files, &numstat_output.stdout);
     Ok(files)
-}
-
-fn split_name_status_numstat(bytes: &[u8]) -> (&[u8], &[u8]) {
-    let s = std::str::from_utf8(bytes).unwrap_or("");
-    let tokens: Vec<(usize, &str)> = s
-        .split('\0')
-        .scan(0usize, |off, t| {
-            let start = *off;
-            *off += t.len() + 1;
-            Some((start, t))
-        })
-        .collect();
-    let mut split_at = bytes.len();
-    for (idx, tok) in tokens.iter().enumerate() {
-        if tok.1.contains('\t') {
-            split_at = tok.0;
-            // Walk back: numstat for R/C with -z emits "<a>\t<r>" then two
-            // NUL-separated paths. The two trailing path tokens belong to the
-            // numstat block, not name-status.
-            let _ = idx;
-            break;
-        }
-    }
-    (&bytes[..split_at], &bytes[split_at..])
 }
 
 pub fn commit_file_diff(

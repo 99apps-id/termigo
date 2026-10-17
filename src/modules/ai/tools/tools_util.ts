@@ -78,7 +78,7 @@ export function buildHttpRequestTools(ctx: ToolContext) {
 // ---------------------------------------------------------------------------
 
 function decodeBase64UrlSegment(seg: string): string {
-  let s = seg.replace(/-/g, "+").replace(/_/g, "+");
+  let s = seg.replace(/-/g, "+").replace(/_/g, "/");
   while (s.length % 4) s += "=";
   try {
     return decodeURIComponent(
@@ -124,33 +124,65 @@ export function buildJwtInspectTool() {
 // secret_scan
 // ---------------------------------------------------------------------------
 
-const SECRET_RE =
-  /(?:secret|api[_-]?key|token|password|passwd|auth|bearer)\s*[=:]\s*[^\s'"]+/i;
+const SECRET_RE_SOURCE =
+  "(?:secret|api[_-]?key|token|password|passwd|auth|bearer)\\s*[=:]\\s*[^\\s'\"]+";
+const SECRET_RE = new RegExp(SECRET_RE_SOURCE, "i");
 
-export function buildSecretScanTool() {
+function resolveToolPath(path: string, ctx?: ToolContext): string {
+  const trimmed = path.trim();
+  if (
+    trimmed.startsWith("/") ||
+    trimmed.startsWith("\\\\") ||
+    /^[a-zA-Z]:[\\/]/.test(trimmed)
+  ) {
+    return trimmed.replace(/\\/g, "/");
+  }
+  const base = repoRootFor(
+    ctx?.getWorkspaceRoot() ?? null,
+    ctx?.getCwd() ?? null,
+  ).replace(/\\/g, "/");
+  return `${base.replace(/\/+$/, "")}/${trimmed.replace(/^\.\/+/, "")}`;
+}
+
+export function buildSecretScanTool(ctx?: ToolContext) {
   return {
     secret_scan: tool({
       description:
-        "Scan a file for lines that look like secrets (API keys, tokens, passwords). Returns the matching lines with line numbers. Not a substitute for a real secrets scanner.",
+        "Scan a file or directory for lines that look like secrets (API keys, tokens, passwords). Returns the matching lines with line numbers. Not a substitute for a real secrets scanner.",
       inputSchema: z.object({
-        path: z.string().describe("File path to scan"),
+        path: z.string().describe("File or directory path to scan"),
       }),
       execute: async ({ path }) => {
         try {
-          const resolved =
-            path.startsWith("/") || /^[a-zA-Z]:\\/.test(path)
-              ? path
-              : `${repoRootFor(null, null)}/${path}`;
-          const r = await native.readFile(resolved);
-          if (r.kind !== "text" || !r.content) return { matches: [] };
-          const lines = r.content.split(/\r?\n/);
-          const matches: Array<{ line: number; text: string }> = [];
-          for (let i = 0; i < lines.length; i++) {
-            if (SECRET_RE.test(lines[i])) {
-              matches.push({ line: i + 1, text: lines[i] });
+          const resolved = resolveToolPath(path, ctx);
+          try {
+            const r = await native.readFile(resolved);
+            if (r.kind !== "text" || !r.content) return { path: resolved, matches: [] };
+            const lines = r.content.split(/\r?\n/);
+            const matches: Array<{ line: number; text: string }> = [];
+            for (let i = 0; i < lines.length; i++) {
+              if (SECRET_RE.test(lines[i])) {
+                matches.push({ line: i + 1, text: lines[i] });
+              }
             }
+            return { path: resolved, matches };
+          } catch {
+            const grepRes = await native.grep({
+              pattern: SECRET_RE_SOURCE,
+              root: resolved,
+              caseInsensitive: true,
+              maxResults: 200,
+            });
+            return {
+              path: resolved,
+              matches: grepRes.hits.map((m) => ({
+                file: m.path,
+                line: m.line,
+                text: m.text,
+              })),
+              truncated: grepRes.truncated,
+            };
           }
-          return { path: resolved, matches };
         } catch (e) {
           return { error: String(e) };
         }
@@ -171,29 +203,30 @@ async function sha256(message: string): Promise<string> {
     .join("");
 }
 
+const MD5_SHIFTS = [
+  7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
+  5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20,
+  4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
+  6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21,
+];
+
 async function md5(message: string): Promise<string> {
-  // MD5 is not available in WebCrypto; use a tiny pure-JS implementation.
-  // This is only for tool use, not cryptography.
+  // MD5 is not available in WebCrypto; pure-JS RFC 1321 implementation.
   const msgUint8 = new TextEncoder().encode(message);
   const len = msgUint8.length;
-  const bits = len * 8;
-  // Padding
-  const padded = new Uint8Array(((len + 8) >> 6) * 64 + 64);
+  const paddedLen = (((len + 8) >>> 6) + 1) * 64;
+  const padded = new Uint8Array(paddedLen);
   padded.set(msgUint8);
   padded[len] = 0x80;
   const view = new DataView(padded.buffer);
-  view.setUint32(padded.length - 4, bits, true);
+  view.setUint32(paddedLen - 8, (len << 3) >>> 0, true);
+  view.setUint32(paddedLen - 4, (len >>> 29) >>> 0, true);
 
-  const s = (n: number) => n >>> 0;
-  const f = (x: number, y: number, z: number) => (x & y) | (~x & z);
-  const _G = (x: number, y: number, z: number) => (x & z) | (y & ~z);
-  const h = (x: number, y: number, z: number) => x ^ y ^ z;
-  const i = (x: number, y: number, z: number) => y ^ (x | ~z);
-  const rol = (x: number, n: number) => s((x << n) | (x >>> (32 - n)));
+  const rol = (x: number, n: number) => ((x << n) | (x >>> (32 - n))) >>> 0;
 
   const K = new Uint32Array(64);
   for (let j = 0; j < 64; j++) {
-    K[j] = s(Math.floor(Math.abs(Math.sin(j + 1)) * 0x1_0000_0000));
+    K[j] = Math.floor(Math.abs(Math.sin(j + 1)) * 0x1_0000_0000) >>> 0;
   }
 
   let A = 0x67452301;
@@ -201,43 +234,47 @@ async function md5(message: string): Promise<string> {
   let C = 0x98badcfe;
   let D = 0x10325476;
 
-  for (let j = 0; j < padded.length; j += 64) {
+  for (let j = 0; j < paddedLen; j += 64) {
     const M = new Uint32Array(16);
     for (let k = 0; k < 16; k++) {
       M[k] = view.getUint32(j + k * 4, true);
     }
-    let a = A,
-      b = B,
-      c = C,
-      d = D;
+    let a = A;
+    let b = B;
+    let c = C;
+    let d = D;
     for (let k = 0; k < 64; k++) {
-      let F: number, idx: number;
+      let F: number;
+      let idx: number;
       if (k < 16) {
-        F = f(b, c, d);
+        F = (b & c) | (~b & d);
         idx = k;
       } else if (k < 32) {
-        F = _G(b, c, d);
+        F = (d & b) | (~d & c);
         idx = (5 * k + 1) % 16;
       } else if (k < 48) {
-        F = h(b, c, d);
+        F = b ^ c ^ d;
         idx = (3 * k + 5) % 16;
       } else {
-        F = i(b, c, d);
+        F = c ^ (b | ~d);
         idx = (7 * k) % 16;
       }
-      const temp = s(s(rol(a, 5)) + F + d + K[k] + M[idx]);
+      const sum = (a + F + K[k] + M[idx]) >>> 0;
       a = d;
       d = c;
-      c = s(rol(b, 30));
-      b = temp;
+      c = b;
+      b = (b + rol(sum, MD5_SHIFTS[k])) >>> 0;
     }
-    A = s(A + a);
-    B = s(B + b);
-    C = s(C + c);
-    D = s(D + d);
+    A = (A + a) >>> 0;
+    B = (B + b) >>> 0;
+    C = (C + c) >>> 0;
+    D = (D + d) >>> 0;
   }
-  const toHex = (n: number) => ((n >>> 0) >>> 0).toString(16).padStart(8, "0");
-  return `${toHex(A)}${toHex(B)}${toHex(C)}${toHex(D)}`;
+  const toHexLE = (n: number) =>
+    [n & 0xff, (n >>> 8) & 0xff, (n >>> 16) & 0xff, (n >>> 24) & 0xff]
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+  return `${toHexLE(A)}${toHexLE(B)}${toHexLE(C)}${toHexLE(D)}`;
 }
 
 export function buildHashCalcTool() {
@@ -334,7 +371,10 @@ export function buildArchiveTool(ctx: ToolContext) {
           .string()
           .optional()
           .describe("Output archive path (create only)"),
-        archive: z.string().describe("Archive path (extract only)"),
+        archive: z
+          .string()
+          .optional()
+          .describe("Archive path (extract only)"),
         destination: z
           .string()
           .optional()
@@ -353,12 +393,16 @@ export function buildArchiveTool(ctx: ToolContext) {
         const cwd = repoRootFor(ctx.getWorkspaceRoot(), ctx.getCwd());
         let command = "";
         if (action === "create") {
-          const out = output || "archive.tar.gz";
+          const out = output || archive || "archive.tar.gz";
           const src = paths && paths.length > 0 ? paths : ["."];
-          command = `tar -czf ${src.map((p) => quoteShellArg(p)).join(" ")} -f ${quoteShellArg(out)}`;
+          command = `tar -czf ${quoteShellArg(out)} -- ${src.map((p) => quoteShellArg(p)).join(" ")}`;
         } else {
+          const archivePath = archive || output;
+          if (!archivePath?.trim()) {
+            return { error: "archive path is required for extract action" };
+          }
           const dest = destination || ".";
-          command = `tar -xzf ${quoteShellArg(archive)} -C ${quoteShellArg(dest)}`;
+          command = `tar -xzf ${quoteShellArg(archivePath)} -C ${quoteShellArg(dest)}`;
         }
         const safety = checkShellCommand(command);
         if (!safety.ok) return { error: safety.reason };

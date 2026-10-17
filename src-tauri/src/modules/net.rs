@@ -119,7 +119,7 @@ pub(crate) fn ssrf_redirect_policy() -> reqwest::redirect::Policy {
             return attempt.stop();
         }
         if let Ok(ip) = host.parse::<IpAddr>() {
-            if ip_kind(ip) == IpKind::BlockedMetadata {
+            if ip_kind(ip) != IpKind::Public {
                 return attempt.stop();
             }
         }
@@ -408,10 +408,10 @@ fn build_safe_client(
     proxy_url: Option<&str>,
 ) -> Result<reqwest::Client, String> {
     let mut builder = reqwest::Client::builder().connect_timeout(Duration::from_secs(10));
-    if let Some(proxy_url) = proxy_url {
-        if let Ok(proxy) = reqwest::Proxy::http(proxy_url) {
-            builder = builder.proxy(proxy);
-        }
+    if let Some(proxy_url) = proxy_url.filter(|s| !s.trim().is_empty()) {
+        validate_url(proxy_url, true)?;
+        let proxy = reqwest::Proxy::all(proxy_url).map_err(|e| format!("invalid proxy url: {e}"))?;
+        builder = builder.proxy(proxy);
     }
     // Pin reqwest's resolver to the IPs we just classified. Without this,
     // reqwest's own DNS lookup could return a different (private/metadata) IP

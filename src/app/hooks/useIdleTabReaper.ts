@@ -1,9 +1,10 @@
 import { usePreferencesStore } from "@/modules/settings/preferences";
-import type { Tab } from "@/modules/tabs";
+import { nextActiveInSpace, type Tab } from "@/modules/tabs";
 import { leafHasForegroundProcess, leafIds } from "@/modules/terminal";
 import { useEffect, useLayoutEffect, useRef } from "react";
 import {
   IDLE_TAB_TICK_MS,
+  isTabSafeToAutoClose,
   selectIdleTabsToClose,
   stampTabActivity,
 } from "./idleTabReap";
@@ -63,9 +64,15 @@ export function useIdleTabReaper({ tabs, activeId, disposeTab }: Params): void {
               );
               if (busy.some(Boolean)) continue;
             }
-            // The probe awaited: the user may have switched back or a guard may
-            // now refuse the close, so re-check before acting.
+            // The probe awaited: the user may have switched back or edited the
+            // buffer or closed another tab in the same space, so re-check live
+            // state before acting.
             if (tab.id === activeIdRef.current) continue;
+            const liveTab = tabsRef.current.find((t) => t.id === tab.id);
+            if (!liveTab || !isTabSafeToAutoClose(liveTab)) continue;
+            if (nextActiveInSpace(tabsRef.current, tab.id) === null) continue;
+            const since = lastActiveAt.current.get(tab.id);
+            if (since === undefined || Date.now() - since < minIdleMs) continue;
             if (disposeRef.current) disposeRef.current(tab.id);
           }
         } finally {

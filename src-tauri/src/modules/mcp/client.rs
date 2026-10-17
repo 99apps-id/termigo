@@ -169,7 +169,15 @@ impl McpClient {
             None,
         );
         match handshake.await {
-            Ok(_) => {}
+            Ok(_) => {
+                // Drain stderr in the background so a chatty MCP server cannot
+                // fill the OS pipe buffer (~64 KiB) and deadlock on stderr write.
+                if let Some(mut stderr) = client.child.stderr.take() {
+                    tokio::spawn(async move {
+                        let _ = tokio::io::copy(&mut stderr, &mut tokio::io::sink()).await;
+                    });
+                }
+            }
             Err(error) => {
                 let detail = client.drain_stderr().await;
                 let _ = client.child.kill().await;
@@ -279,19 +287,21 @@ impl McpClient {
         id: u64,
         progress_handler: Option<ProgressHandler>,
     ) -> Result<Value, String> {
+        use tokio::io::AsyncReadExt;
         loop {
-            let mut line = String::new();
-            let read = self
-                .reader
-                .read_line(&mut line)
+            let mut buf = Vec::new();
+            let read = (&mut self.reader)
+                .take((MAX_LINE_BYTES + 1) as u64)
+                .read_until(b'\n', &mut buf)
                 .await
                 .map_err(|e| format!("cannot read from MCP server: {e}"))?;
             if read == 0 {
                 return Err("MCP server closed the connection".to_string());
             }
-            if line.len() > MAX_LINE_BYTES {
+            if buf.len() > MAX_LINE_BYTES {
                 return Err("MCP server sent an oversized message".to_string());
             }
+            let line = String::from_utf8_lossy(&buf);
             let Ok(message) = serde_json::from_str::<Value>(line.trim()) else {
                 continue; // not JSON: a log line on stdout
             };

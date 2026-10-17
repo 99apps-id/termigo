@@ -244,10 +244,15 @@ async function handle(msg: HostMessage): Promise<void> {
         const url = URL.createObjectURL(
           new Blob([msg.code], { type: "text/javascript" }),
         );
-        const mod = (await import(/* @vite-ignore */ url)) as {
+        let mod: {
           activate?: (ctx: Record<string, unknown>) => unknown;
           default?: { activate?: (ctx: Record<string, unknown>) => unknown };
         };
+        try {
+          mod = (await import(/* @vite-ignore */ url)) as typeof mod;
+        } finally {
+          URL.revokeObjectURL(url);
+        }
         const ctx = buildCtx(msg.id, msg.platform);
         const activateFn = mod.activate ?? mod.default?.activate;
         if (typeof activateFn === "function") {

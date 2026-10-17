@@ -2058,9 +2058,6 @@ export async function runAgentStream(opts: RunAgentOptions) {
         lastStepNudge = activeNudge;
         lastStepBudgetBlock = budgetBlock;
       }
-      // Keep the harness profile's prompt prelude available on every step so a
-      // profile change mid-run does not silently drop its guidance.
-      system = applyProfileToSystem(system, profile);
       // Search mode: only the always-on set, plus whatever the model has asked
       // for. The SDK filters the serialised tool list by this, so a deferred
       // tool costs nothing until it is discovered.
@@ -2081,7 +2078,11 @@ export async function runAgentStream(opts: RunAgentOptions) {
         // size work, and override the messages only when that changed something
         // so the cached prefix is not rewritten for nothing.
         const deduped = dedupeDuplicateToolParts(stepMessages);
-        if (deduped !== stepMessages) nextMessages = deduped;
+        if (deduped !== stepMessages) {
+          nextMessages = repairModelMessageSequence(deduped, {
+            preserveTrailingApproval: false,
+          });
+        }
 
         // Gated by size, not run blind: rewriting history breaks the
         // provider's cached prefix from the rewrite point, while resending

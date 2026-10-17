@@ -42,9 +42,12 @@ async function pipelineRoot(): Promise<string | null> {
   return `${cwd.replace(/[\\/]+$/, "")}/${PIPELINES_DIR}`;
 }
 
+const SAFE_PIPELINE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+
 export async function loadPipeline(
   id: string,
 ): Promise<OrchestrationPipeline | null> {
+  if (!SAFE_PIPELINE_ID_RE.test(id)) return null;
   const root = await pipelineRoot();
   if (!root) return null;
 

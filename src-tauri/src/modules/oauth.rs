@@ -523,10 +523,21 @@ async fn login_antigravity(app: &tauri::AppHandle) -> Result<OAuthTokens, String
     let parsed = url::Url::parse(&format!("http://localhost{target}"))
         .map_err(|e| format!("could not parse callback: {e}"))?;
     let mut code = None;
+    let mut got_state = None;
+    let mut err_param = None;
     for (k, v) in parsed.query_pairs() {
-        if k == "code" {
-            code = Some(v.into_owned());
+        match k.as_ref() {
+            "code" => code = Some(v.into_owned()),
+            "state" => got_state = Some(v.into_owned()),
+            "error" => err_param = Some(v.into_owned()),
+            _ => {}
         }
+    }
+    if let Some(e) = err_param {
+        return Err(format!("Google sign-in returned error: {e}"));
+    }
+    if got_state.as_deref() != Some(state.as_str()) {
+        return Err("OAuth state mismatch in Antigravity callback".to_string());
     }
     let code = code.ok_or_else(|| "no code returned".to_string())?;
 

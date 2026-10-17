@@ -1,11 +1,12 @@
 import { native } from "@/modules/ai/lib/native";
 import { useAgentStore } from "@/modules/agents/store/agentStore";
-import type { Tab } from "@/modules/tabs";
+import { nextActiveInSpace, type Tab } from "@/modules/tabs";
 import {
   disposeSession,
   hasLeaf,
   leafIds,
   ptyIdForLeaf,
+  respawnSession,
   type TerminalPaneHandle,
   useAgentActivityStore,
   writeToSession,
@@ -135,7 +136,7 @@ export function useTerminalLifecycle({
       toast(`Dev server: ${url}`, {
         id: `dev-url:${url}`,
         action: {
-          label: "Buka",
+          label: "Open",
           onClick: () => openPreviewTab(url),
         },
       });
@@ -177,9 +178,15 @@ export function useTerminalLifecycle({
         (t) => t.kind === "terminal" && hasLeaf(t.paneTree, leafId),
       );
       if (tab?.kind !== "terminal") return;
-      // Last pane of the last tab: quit instead of respawning a shell.
-      if (leafIds(tab.paneTree).length === 1 && all.length === 1) {
+      const isSingleLeaf = leafIds(tab.paneTree).length === 1;
+      // Last pane of the last tab across all spaces: quit the window.
+      if (isSingleLeaf && all.length === 1) {
         void getCurrentWindow().close();
+      } else if (isSingleLeaf && nextActiveInSpace(all, tab.id) === null) {
+        // Last tab in this Space while other Spaces still have tabs:
+        // closeTab refuses to empty a Space, so respawn a fresh shell instead
+        // of leaving a dead terminal pane.
+        void respawnSession(leafId, tab.cwd);
       } else {
         closePaneByLeaf(leafId);
       }

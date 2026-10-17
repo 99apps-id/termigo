@@ -458,6 +458,17 @@ export const FileExplorer = memo(
           else onOpenFile(row.path);
           break;
         }
+        case "F2": {
+          if (currentIdx < 0) return;
+          e.preventDefault();
+          const path = entryPaths[currentIdx];
+          const idx = entryIndexByPath.get(path);
+          if (idx === undefined) break;
+          const row = rows[idx];
+          if (row.kind !== "entry") break;
+          tree.beginRename(row.path);
+          break;
+        }
       }
     };
 
@@ -777,6 +788,12 @@ export const FileExplorer = memo(
                     Attach to Agent
                   </ContextMenuItem>
                   <ContextMenuSeparator />
+                  <ContextMenuItem
+                    className={COMPACT_ITEM}
+                    onSelect={() => tree.beginRename(menuTarget.path)}
+                  >
+                    Rename
+                  </ContextMenuItem>
                   <ContextMenuItem
                     className={COMPACT_ITEM}
                     variant="destructive"

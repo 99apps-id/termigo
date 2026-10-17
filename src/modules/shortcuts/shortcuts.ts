@@ -376,6 +376,7 @@ export const SHORTCUTS: Shortcut[] = [
 export const SHORTCUT_GROUPS: ShortcutGroup[] = [
   "General",
   "Tabs",
+  "Spaces",
   "Panes",
   "Terminal",
   "View",
@@ -422,7 +423,9 @@ export function matchBinding(
   if (id === "tab.selectByIndex") {
     if (!/^[1-9]$/.test(e.key)) return false;
   } else if (eventKey !== bindingKey) {
-    if (!binding.alt || keyFromCode(e.code) !== bindingKey) return false;
+    if (!(binding.alt || binding.shift) || keyFromCode(e.code) !== bindingKey) {
+      return false;
+    }
   }
 
   return (

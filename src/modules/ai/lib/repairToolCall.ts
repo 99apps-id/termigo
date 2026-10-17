@@ -103,6 +103,15 @@ export function repairJsonText(text: string): string {
         out += "\\n";
         continue;
       }
+      if (ch === "\t") {
+        out += "\\t";
+        continue;
+      }
+      const code = ch.charCodeAt(0);
+      if (code < 0x20) {
+        out += `\\u${code.toString(16).padStart(4, "0")}`;
+        continue;
+      }
       out += ch;
       continue;
     }
@@ -755,16 +764,21 @@ function applySemanticRepairs(
       delete p.path;
       modified = true;
     }
-    if (typeof p.max_results === "number") {
-      const clamped = Math.min(Math.max(1, Math.floor(p.max_results)), 100);
-      if (p.max_results > 20 || clamped !== p.max_results) {
-        p.max_results = clamped;
-        modified = true;
-      }
+    if (typeof p.max_results === "number" && p.max_results > 20) {
+      p.max_results = Math.min(Math.floor(p.max_results), 100);
+      modified = true;
     }
   } else if (toolName === "replace_in_files") {
     if (typeof p.glob === "string") {
       p.glob = [p.glob];
+      modified = true;
+    }
+  } else if (
+    toolName.startsWith("browser_") &&
+    toolName !== "browser_connect"
+  ) {
+    if (typeof p.instance !== "string" || !p.instance.trim()) {
+      p.instance = "default";
       modified = true;
     }
   }

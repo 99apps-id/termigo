@@ -3,9 +3,12 @@ import { useChatStore } from "../store/chatStore";
 import {
   invalidateSkillsCache,
   isValidSkillName,
+  parseSkill,
   SKILLS_REL_DIR,
   type Skill,
 } from "./skills";
+import { tool } from "ai";
+import { z } from "zod";
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -35,6 +38,10 @@ async function workspaceSkillsRoot(): Promise<string | null> {
   return `${cwd.replace(/[\\/]$/, "")}/${SKILLS_REL_DIR}`;
 }
 
+function sanitizeHeaderLine(val: string): string {
+  return val.replace(/[\r\n]+/g, " ").trim();
+}
+
 // ─── Registry operations ──────────────────────────────────────────────────
 
 /**
@@ -55,13 +62,16 @@ export async function installSkill(
 
   try {
     await native.createDir(skillDir);
+    const cleanTags = (entry.tags ?? [])
+      .map((t) => sanitizeHeaderLine(t))
+      .filter(Boolean);
     const content = [
       "---",
       `name: ${entry.name}`,
-      `description: ${JSON.stringify(entry.description)}`,
-      `version: ${entry.version}`,
-      `author: ${entry.author}`,
-      ...(entry.tags?.length ? [`tags: ${entry.tags.join(", ")}`] : []),
+      `description: ${JSON.stringify(sanitizeHeaderLine(entry.description))}`,
+      `version: ${JSON.stringify(sanitizeHeaderLine(entry.version))}`,
+      `author: ${JSON.stringify(sanitizeHeaderLine(entry.author))}`,
+      ...(cleanTags.length ? [`tags: ${cleanTags.join(", ")}`] : []),
       "---",
       "",
       entry.body.trim(),
@@ -143,29 +153,6 @@ export async function searchInstalledSkills(query: string): Promise<Skill[]> {
       s.description.toLowerCase().includes(q),
   );
 }
-
-// ─── Helpers ──────────────────────────────────────────────────────────────
-
-function parseSkill(name: string, content: string): Skill {
-  const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(content);
-  if (!match) {
-    return { name, description: "", body: content.trim() };
-  }
-  const front = match[1];
-  const body = match[2].trim();
-  const field = (key: string): string => {
-    const m = new RegExp(`^${key}:\\s*(.*)$`, "mi").exec(front);
-    return m ? m[1].trim().replace(/^["']|["']$/g, "") : "";
-  };
-  return {
-    name,
-    description: field("description").slice(0, 300),
-    body,
-  };
-}
-
-import { tool } from "ai";
-import { z } from "zod";
 
 // ─── Agent tools ──────────────────────────────────────────────────────────
 

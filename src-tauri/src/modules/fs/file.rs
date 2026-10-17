@@ -526,14 +526,26 @@ fn write_atomic(target: &Path, content: &[u8]) -> std::io::Result<()> {
     })?;
     tmp.as_file_mut().write_all(content)?;
     tmp.as_file_mut().sync_all()?;
-    tmp.persist(target).map_err(|e| {
+    if let Err(e) = tmp.persist(target) {
+        if target.exists()
+            && (e.error.kind() == std::io::ErrorKind::PermissionDenied
+                || e.error.raw_os_error() == Some(5))
+        {
+            let mut f = fs::OpenOptions::new()
+                .write(true)
+                .truncate(true)
+                .open(target)?;
+            f.write_all(content)?;
+            f.sync_all()?;
+            return Ok(());
+        }
         log::debug!(
             "write_atomic persist({}) failed ({})",
             target.display(),
             e.error
         );
-        e.error
-    })?;
+        return Err(e.error);
+    }
     Ok(())
 }
 

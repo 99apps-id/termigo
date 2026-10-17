@@ -353,7 +353,7 @@ export function buildTools(
     ...buildTelegramTools(ctx),
     ...buildHttpRequestTools(ctx),
     ...buildJwtInspectTool(),
-    ...buildSecretScanTool(),
+    ...buildSecretScanTool(ctx),
     ...buildHashCalcTool(),
     ...buildEncodingTool(),
     ...buildArchiveTool(ctx),

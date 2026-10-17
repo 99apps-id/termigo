@@ -69,6 +69,7 @@ func execAllowed() bool {
 // Serve reads JSON-RPC requests from in and writes responses to out.
 func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 	scanner := bufio.NewScanner(in)
+	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
@@ -93,6 +94,9 @@ func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 }
 
 func (s *Server) handleRequest(out io.Writer, req RPCRequest) {
+	if req.ID == nil && strings.HasPrefix(req.Method, "notifications/") {
+		return
+	}
 	switch req.Method {
 	case "initialize":
 		s.sendResult(out, req.ID, map[string]interface{}{
@@ -273,6 +277,9 @@ func (s *Server) handleRequest(out io.Writer, req RPCRequest) {
 		s.sendError(out, req.ID, -32601, fmt.Sprintf("Unknown tool: %s", params.Name))
 
 	default:
+		if req.ID == nil {
+			return
+		}
 		s.sendError(out, req.ID, -32601, fmt.Sprintf("Method not found: %s", req.Method))
 	}
 }

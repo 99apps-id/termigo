@@ -130,6 +130,7 @@ async function refreshTokens(
       // vanish mid-session. Keep what we already knew.
       const merged: ChatGptTokens = {
         ...next,
+        refresh_token: next.refresh_token || current.refresh_token,
         account_id: next.account_id ?? current.account_id,
         email: next.email ?? current.email,
         plan: next.plan ?? current.plan,

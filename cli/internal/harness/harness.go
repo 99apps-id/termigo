@@ -69,7 +69,11 @@ func validateEvalCommand(cmd string) error {
 	for strings.HasPrefix(base, "sudo ") || strings.HasPrefix(base, "timeout ") {
 		base = strings.TrimSpace(strings.TrimPrefix(base, strings.Split(base, " ")[0]))
 	}
-	baseCmd := strings.Fields(base)[0]
+	fields := strings.Fields(base)
+	if len(fields) == 0 {
+		return fmt.Errorf("eval command is empty")
+	}
+	baseCmd := fields[0]
 	if _, ok := allowedEvalCommands[baseCmd]; !ok {
 		return fmt.Errorf("eval command %q is not allowed", baseCmd)
 	}

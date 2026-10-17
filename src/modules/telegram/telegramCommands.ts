@@ -451,14 +451,22 @@ export async function handleCallback(
 
     const sessionId = state.useChatStore.getState().activeSessionId ?? "";
     if (!pending && sessionId) {
-      const found = getPendingApprovals(sessionId, state.useChatStore, aqStore);
+      const found = getPendingApprovals(
+        sessionId,
+        state,
+        aqStore.useApprovalQueue,
+      );
       pending = found.find((p) => p.id === id);
     }
 
-    if (!pending && state.chats) {
-      for (const [sessId] of state.chats.entries()) {
-        if (sessId === sessionId) continue;
-        const found = getPendingApprovals(sessId, state.useChatStore, aqStore);
+    if (!pending) {
+      for (const s of state.useChatStore.getState().sessions) {
+        if (s.id === sessionId) continue;
+        const found = getPendingApprovals(
+          s.id,
+          state,
+          aqStore.useApprovalQueue,
+        );
         pending = found.find((p) => p.id === id);
         if (pending) break;
       }

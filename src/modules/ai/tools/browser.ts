@@ -323,8 +323,10 @@ export function buildBrowserTools(ctx: ToolContext) {
       inputSchema: z.object({
         instance: z
           .string()
+          .optional()
+          .default("default")
           .describe(
-            "A short name for this browser, e.g. 'docs'. Currently informational.",
+            "A short name for this browser, e.g. 'docs'. Defaults to 'default'.",
           ),
         url: z
           .url()
@@ -332,7 +334,7 @@ export function buildBrowserTools(ctx: ToolContext) {
             "Full http(s) URL. External sites allowed; SSRF targets are refused.",
           ),
       }),
-      execute: async ({ instance, url }) => {
+      execute: async ({ instance = "default", url }) => {
         const blocked = guard(url);
         if (blocked) return blocked;
         // Open as an embedded browser TAB (a native child webview docked in the
@@ -364,10 +366,12 @@ export function buildBrowserTools(ctx: ToolContext) {
       inputSchema: z.object({
         instance: z
           .string()
-          .describe("Instance name returned by browser_open."),
+          .optional()
+          .default("default")
+          .describe("Instance name returned by browser_open (default 'default')."),
         url: z.url().describe("Full http(s) URL to visit."),
       }),
-      execute: async ({ instance, url }) => {
+      execute: async ({ instance = "default", url }) => {
         const blocked = guard(url);
         if (blocked) return blocked;
         try {
@@ -398,27 +402,27 @@ export function buildBrowserTools(ctx: ToolContext) {
     browser_back: tool({
       description: "Go back one page in the browser instance's history.",
       inputSchema: z.object({
-        instance: z.string().describe("Instance name."),
+        instance: z.string().optional().default("default").describe("Instance name."),
       }),
-      execute: async ({ instance }) =>
+      execute: async ({ instance = "default" }) =>
         await embedEval(instance, "history.back();"),
     }),
 
     browser_forward: tool({
       description: "Go forward one page in the browser instance's history.",
       inputSchema: z.object({
-        instance: z.string().describe("Instance name."),
+        instance: z.string().optional().default("default").describe("Instance name."),
       }),
-      execute: async ({ instance }) =>
+      execute: async ({ instance = "default" }) =>
         await embedEval(instance, "history.forward();"),
     }),
 
     browser_reload: tool({
       description: "Reload the current page in the browser instance.",
       inputSchema: z.object({
-        instance: z.string().describe("Instance name."),
+        instance: z.string().optional().default("default").describe("Instance name."),
       }),
-      execute: async ({ instance }) =>
+      execute: async ({ instance = "default" }) =>
         await embedEval(instance, "location.reload();"),
     }),
 
@@ -426,18 +430,18 @@ export function buildBrowserTools(ctx: ToolContext) {
       description:
         "Return the visible text of the current page in a browser instance - the fully rendered DOM, including content added by JavaScript. If it returns no readable text, do not loop on browser_wait; fall back to other tools or continue with local files.",
       inputSchema: z.object({
-        instance: z.string().describe("Instance name."),
+        instance: z.string().optional().default("default").describe("Instance name."),
       }),
-      execute: async ({ instance }) => await embedRead(instance),
+      execute: async ({ instance = "default" }) => await embedRead(instance),
     }),
 
     browser_console: tool({
       description:
         "Return the captured console logs and JavaScript errors for a browser instance. Use this to diagnose hydration errors, script exceptions, or warnings when a page fails to load or render properly. Auto-executes.",
       inputSchema: z.object({
-        instance: z.string().describe("Instance name."),
+        instance: z.string().optional().default("default").describe("Instance name."),
       }),
-      execute: async ({ instance }) => {
+      execute: async ({ instance = "default" }) => {
         try {
           const res = await ctx.browserConsole(instance);
           if (res && typeof res === "object" && "error" in res && res.error) {
@@ -460,13 +464,13 @@ export function buildBrowserTools(ctx: ToolContext) {
       description:
         "List or clear cookies, localStorage, or sessionStorage of the page in a browser instance. Use it to inspect a login session (which cookies exist), to log out by clearing, or to reset page state for a fresh test. Only script-accessible cookies are listed; HttpOnly cookies are invisible to this tool by browser design. Clearing asks for approval.",
       inputSchema: z.object({
-        instance: z.string().describe("Instance name."),
+        instance: z.string().optional().default("default").describe("Instance name."),
         target: z
           .enum(["cookies", "localStorage", "sessionStorage"])
           .describe("Which storage to inspect."),
         action: z.enum(["list", "clear"]).describe("Read or wipe the storage."),
       }),
-      execute: async ({ instance, target, action }) => {
+      execute: async ({ instance = "default", target, action }) => {
         if (action === "clear") {
           const js =
             target === "cookies"
@@ -495,9 +499,9 @@ export function buildBrowserTools(ctx: ToolContext) {
       description:
         "List the page's recent network requests (URL, type, duration, bytes) from the browser resource timing buffer, newest last, capped at 200 entries. Use it to confirm a form submission reached its API, to find XHR endpoints, or to see what a page loads. Response bodies are not included; use browser_console or fetch for content. Auto-executes.",
       inputSchema: z.object({
-        instance: z.string().describe("Instance name."),
+        instance: z.string().optional().default("default").describe("Instance name."),
       }),
-      execute: async ({ instance }) => {
+      execute: async ({ instance = "default" }) => {
         const compute = `(()=>{var out=[];try{var es=performance.getEntriesByType('resource');for(var i=Math.max(0,es.length-200);i<es.length;i++){var e=es[i];out.push({url:String(e.name).slice(0,200),type:e.initiatorType,ms:Math.round(e.duration),bytes:(typeof e.transferSize==='number'?e.transferSize:null)});}return {requests:out,count:es.length};}catch(e){return {error:String((e&&e.message)||e)};}})()`;
         try {
           const raw = await embedReadValue(instance, compute);
@@ -516,9 +520,9 @@ export function buildBrowserTools(ctx: ToolContext) {
       description:
         "Capture an accessibility snapshot of the current page with short ref IDs (@e1, @e2, ...) assigned to all interactive elements (buttons, links, inputs). Returns a clean, token-efficient text representation of the UI tree. Pass the assigned ref ID directly to browser_click or browser_type instead of complex CSS selectors. Auto-executes.",
       inputSchema: z.object({
-        instance: z.string().describe("Instance name."),
+        instance: z.string().optional().default("default").describe("Instance name."),
       }),
-      execute: async ({ instance }) => {
+      execute: async ({ instance = "default" }) => {
         const js = `(()=>{
           try {
             var origExtract = window.__termigoExtract;
@@ -569,7 +573,7 @@ export function buildBrowserTools(ctx: ToolContext) {
       description:
         "Click an element in the browser instance by ref ID (e.g. '@e1' returned by browser_snapshot) or CSS selector.",
       inputSchema: z.object({
-        instance: z.string().describe("Instance name."),
+        instance: z.string().optional().default("default").describe("Instance name."),
         selector: z
           .string()
           .optional()
@@ -579,7 +583,7 @@ export function buildBrowserTools(ctx: ToolContext) {
           .optional()
           .describe("Element reference ID from browser_snapshot, e.g. '@e1'."),
       }),
-      execute: async ({ instance, selector, ref }) => {
+      execute: async ({ instance = "default", selector, ref }) => {
         const target = resolveTargetSelector(ref, selector);
         if ("error" in target) return target;
         const targetSelector = target.targetSelector;
@@ -593,7 +597,7 @@ export function buildBrowserTools(ctx: ToolContext) {
       description:
         "Type text into an input in the browser instance by ref ID (e.g. '@e3') or CSS selector.",
       inputSchema: z.object({
-        instance: z.string().describe("Instance name."),
+        instance: z.string().optional().default("default").describe("Instance name."),
         selector: z
           .string()
           .optional()
@@ -604,7 +608,7 @@ export function buildBrowserTools(ctx: ToolContext) {
           .describe("Element reference ID from browser_snapshot, e.g. '@e3'."),
         text: z.string().describe("Text to type."),
       }),
-      execute: async ({ instance, selector, ref, text }) => {
+      execute: async ({ instance = "default", selector, ref, text }) => {
         const target = resolveTargetSelector(ref, selector);
         if ("error" in target) return target;
         const targetSelector = target.targetSelector;
@@ -618,7 +622,7 @@ export function buildBrowserTools(ctx: ToolContext) {
       description:
         "Press a keyboard key in the browser instance, optionally focused on an element by ref ID (e.g. '@e3') or CSS selector. Use Enter to submit a login or search form after browser_type, Tab to move between fields, Escape to dismiss a dialog. If Enter does not submit the form, snapshot the page and click its submit button instead.",
       inputSchema: z.object({
-        instance: z.string().describe("Instance name."),
+        instance: z.string().optional().default("default").describe("Instance name."),
         key: z
           .enum(PRESS_KEYS)
           .describe("Key to press: Enter, Tab, Escape, arrows, or space."),
@@ -633,7 +637,7 @@ export function buildBrowserTools(ctx: ToolContext) {
           .optional()
           .describe("Element reference ID from browser_snapshot, e.g. '@e3'."),
       }),
-      execute: async ({ instance, key, selector, ref }) => {
+      execute: async ({ instance = "default", key, selector, ref }) => {
         let targetSelector: string | null = null;
         if (ref?.trim() || selector?.trim()) {
           const target = resolveTargetSelector(ref, selector);
@@ -650,7 +654,7 @@ export function buildBrowserTools(ctx: ToolContext) {
       description:
         "Pick an option in a native <select> dropdown by ref ID (e.g. '@e4') or CSS selector, matching the option value first then its visible label. browser_type does not work on dropdowns, so this is the tool for them. Auto-executes.",
       inputSchema: z.object({
-        instance: z.string().describe("Instance name."),
+        instance: z.string().optional().default("default").describe("Instance name."),
         selector: z
           .string()
           .optional()
@@ -663,7 +667,7 @@ export function buildBrowserTools(ctx: ToolContext) {
           .string()
           .describe("Option value or visible label to pick."),
       }),
-      execute: async ({ instance, selector, ref, option }) => {
+      execute: async ({ instance = "default", selector, ref, option }) => {
         const target = resolveTargetSelector(ref, selector);
         if ("error" in target) return target;
         const js = buildSelectJs(target.targetSelector, option);
@@ -676,7 +680,7 @@ export function buildBrowserTools(ctx: ToolContext) {
       description:
         "Scroll the page to an element (by ref ID or selector), an absolute Y offset, or top/bottom. Use it before a screenshot to inspect content below the fold, or to bring a lazy-loaded section into view. Auto-executes.",
       inputSchema: z.object({
-        instance: z.string().describe("Instance name."),
+        instance: z.string().optional().default("default").describe("Instance name."),
         selector: z.string().optional().describe("CSS selector to scroll to."),
         ref: z
           .string()
@@ -693,7 +697,7 @@ export function buildBrowserTools(ctx: ToolContext) {
           .optional()
           .describe("Absolute vertical offset in CSS pixels."),
       }),
-      execute: async ({ instance, selector, ref, to, y }) => {
+      execute: async ({ instance = "default", selector, ref, to, y }) => {
         let targetSelector: string | null = null;
         if (ref?.trim() || selector?.trim()) {
           const target = resolveTargetSelector(ref, selector);
@@ -714,14 +718,14 @@ export function buildBrowserTools(ctx: ToolContext) {
       description:
         "Hover over an element by ref ID (e.g. '@e6') or CSS selector to reveal menus, tooltips, or hover states before clicking or screenshotting. Auto-executes.",
       inputSchema: z.object({
-        instance: z.string().describe("Instance name."),
+        instance: z.string().optional().default("default").describe("Instance name."),
         selector: z.string().optional().describe("CSS selector. Omit if using `ref`."),
         ref: z
           .string()
           .optional()
           .describe("Element reference ID from browser_snapshot, e.g. '@e6'."),
       }),
-      execute: async ({ instance, selector, ref }) => {
+      execute: async ({ instance = "default", selector, ref }) => {
         const target = resolveTargetSelector(ref, selector);
         if ("error" in target) return target;
         const js = buildHoverJs(target.targetSelector);
@@ -734,7 +738,7 @@ export function buildBrowserTools(ctx: ToolContext) {
       description:
         "Wait until page text appears or an element exists, polling until a timeout. Prefer this over browser_wait with a fixed delay after navigation, login submit, or a click that loads content: it returns as soon as the condition holds instead of sleeping blindly. Auto-executes.",
       inputSchema: z.object({
-        instance: z.string().describe("Instance name."),
+        instance: z.string().optional().default("default").describe("Instance name."),
         kind: z
           .enum(["text", "selector"])
           .describe("'text': substring of the rendered page; 'selector': element exists."),
@@ -750,7 +754,7 @@ export function buildBrowserTools(ctx: ToolContext) {
           .describe("How long to poll. Default 5000."),
       }),
       execute: async (
-        { instance, kind, value, timeout_ms },
+        { instance = "default", kind, value, timeout_ms },
         { abortSignal }: { abortSignal?: AbortSignal } = {},
       ) => {
         const deadline = Date.now() + (timeout_ms ?? 5000);
@@ -790,7 +794,7 @@ export function buildBrowserTools(ctx: ToolContext) {
       description:
         "Wait a short time (ms) before the next action, so a page can settle after navigation or a click. Prefer small values (200-1000ms) and poll browser_extract when checking for content.",
       inputSchema: z.object({
-        instance: z.string().describe("Instance name."),
+        instance: z.string().optional().default("default").describe("Instance name."),
         ms: z
           .number()
           .int()
@@ -890,10 +894,11 @@ export function buildBrowserTools(ctx: ToolContext) {
       description:
         "Capture a screenshot of the browser instance and SEE it - use this to inspect a page's visual layout, verify a UI change, or read something that is drawn rather than text (a chart, a canvas). Requires a vision-capable model and is Windows-only (WebView2). For plain page text, browser_extract is cheaper.",
       inputSchema: z.object({
-        instance: z.string().describe("Instance name."),
+        instance: z.string().optional().default("default").describe("Instance name."),
       }),
-      execute: async ({ instance }) => {
-        const modelId = useChatStore.getState().selectedModelId;
+      execute: async ({ instance = "default" }) => {
+        const modelId =
+          ctx.getModelId?.() ?? useChatStore.getState().selectedModelId;
         if (!modelSupportsVision(modelId)) {
           return {
             error:
@@ -961,7 +966,7 @@ export function buildBrowserTools(ctx: ToolContext) {
       description:
         "Attach a local workspace file to a file input in the browser instance by ref ID or CSS selector. Use it to submit forms with attachments. Reads the file from this machine, so it asks for approval, refuses while an SSH session is active (the file would come from the wrong machine), and refuses files over 12 MB.",
       inputSchema: z.object({
-        instance: z.string().describe("Instance name."),
+        instance: z.string().optional().default("default").describe("Instance name."),
         selector: z
           .string()
           .optional()
@@ -977,7 +982,7 @@ export function buildBrowserTools(ctx: ToolContext) {
           ),
       }),
       needsApproval: true,
-      execute: async ({ instance, selector, ref, path }) => {
+      execute: async ({ instance = "default", selector, ref, path }) => {
         const target = resolveTargetSelector(ref, selector);
         if ("error" in target) return target;
         if (ctx.getRemoteSession()) {
@@ -1020,7 +1025,7 @@ export function buildBrowserTools(ctx: ToolContext) {
       description:
         "Download a file through the page in a browser instance and save it into the workspace. The fetch runs in page context, so session cookies apply and authenticated downloads behind a login work; a plain fetch/http_request cannot do that. Asks for approval, refuses while an SSH session is active, and refuses files over 8 MB.",
       inputSchema: z.object({
-        instance: z.string().describe("Instance name."),
+        instance: z.string().optional().default("default").describe("Instance name."),
         url: z
           .url()
           .describe(
@@ -1034,7 +1039,7 @@ export function buildBrowserTools(ctx: ToolContext) {
       }),
       needsApproval: true,
       execute: async (
-        { instance, url, path },
+        { instance = "default", url, path },
         { abortSignal }: { abortSignal?: AbortSignal } = {},
       ) => {
         if (!isLoopbackTarget(url)) {
@@ -1117,9 +1122,9 @@ export function buildBrowserTools(ctx: ToolContext) {
     browser_close: tool({
       description: "Close a browser instance and free its embedded webview.",
       inputSchema: z.object({
-        instance: z.string().describe("Instance name."),
+        instance: z.string().optional().default("default").describe("Instance name."),
       }),
-      execute: async ({ instance }) => {
+      execute: async ({ instance = "default" }) => {
         try {
           await native.browserEmbedClose(instance);
           return { ok: true as const };

@@ -258,7 +258,6 @@ fn remove_paths(inner: &mut WatchInner, paths: Vec<PathBuf>) {
     }
 }
 
-// Canonical keys keep add/remove symmetric regardless of how the path was spelled.
 fn prepare_add(
     registry: &WorkspaceRegistry,
     workspace: &WorkspaceEnv,
@@ -269,7 +268,11 @@ fn prepare_add(
         .filter_map(|raw| {
             let resolved = resolve_path(&raw, workspace);
             let canonical = std::fs::canonicalize(&resolved).ok()?;
-            if !canonical.is_dir() || is_skipped(&canonical) || !registry.is_authorized(&canonical)
+            if !canonical.is_dir()
+                || is_skipped(&canonical)
+                || !registry.is_authorized(&canonical)
+                || super::security::validate_read(&canonical).is_err()
+                || super::security::validate_write(&canonical).is_err()
             {
                 return None;
             }

@@ -118,6 +118,9 @@ export function useDocument({ path, onDirtyChange }: Options) {
           });
           return false;
         }
+        toast.error("Failed to save file", {
+          description: e instanceof Error ? e.message : String(e),
+        });
         throw e;
       }
       return true;
@@ -166,20 +169,35 @@ export function useDocument({ path, onDirtyChange }: Options) {
     [path],
   );
 
-  // Load on path change.
+  // Load on initial mount or path change. When a dirty file tab is renamed in
+  // place, preserve the unsaved buffer and only refresh disk baseline metadata.
   useEffect(() => {
     let cancelled = false;
     // "Open anyway" is a per-file decision; a new path starts unforced.
     forceRef.current = false;
-    setDoc({ status: "loading" });
-    setDirty(false);
+    const preserveDirtyBuffer =
+      bufferRef.current !== savedRef.current && bufferRef.current.length > 0;
+    if (!preserveDirtyBuffer) {
+      setDoc({ status: "loading" });
+      setDirty(false);
+    }
 
     readFromDisk(forceRef.current)
       .then((res) => {
-        if (!cancelled) adoptRead(res);
+        if (cancelled) return;
+        if (preserveDirtyBuffer && res.kind === "text") {
+          eolRef.current = detectEol(res.content);
+          diskMtimeRef.current = res.mtime;
+          savedRef.current = normalizeToLf(res.content);
+          setDirty(bufferRef.current !== savedRef.current);
+          return;
+        }
+        adoptRead(res);
       })
       .catch((e) => {
-        if (!cancelled) setDoc({ status: "error", message: String(e) });
+        if (!cancelled && !preserveDirtyBuffer) {
+          setDoc({ status: "error", message: String(e) });
+        }
       });
 
     return () => {

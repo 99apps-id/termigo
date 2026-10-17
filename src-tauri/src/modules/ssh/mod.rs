@@ -177,7 +177,9 @@ pub async fn ssh_open(
     if let Some(rx) = exit_signal {
         rt.spawn(async move {
             let _ = rx.await;
-            sessions_handle.write().await.remove(&id);
+            if let Some(removed) = sessions_handle.write().await.remove(&id) {
+                removed.close().await;
+            }
             log::info!("ssh session id={id} evicted after pump exit");
         });
     }

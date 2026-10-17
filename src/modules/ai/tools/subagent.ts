@@ -10,6 +10,7 @@ import {
   routeSubagentType,
 } from "../agents/resolveSubagent";
 import { effectiveSubagentMaxDepth, runSubagent } from "../agents/runSubagent";
+import { defaultBatchIsolation } from "../lib/subagentIsolation";
 import {
   cascadeSkip,
   detectBatchConflicts,
@@ -305,6 +306,12 @@ Each task's subagent has the same toolset you do and may itself spawn further su
           };
         });
 
+        const writingCount = results.filter(
+          (r) => !subagentIsReadOnly(r.type),
+        ).length;
+        const effectiveIsolate =
+          isolate ?? defaultBatchIsolation(writingCount);
+
         // Two tasks touching the same file is the batch's merge conflict: each
         // edits from the same baseline, both write, the second overwrites the
         // first. Reported before anything runs so the orchestrator (or the user
@@ -377,7 +384,7 @@ Each task's subagent has the same toolset you do and may itself spawn further su
               // Numbered, because several run at once and the approval queue
               // is unreadable if every row says "builder".
               requester: `${task.description ?? resolvedType} #${i + 1}`,
-              isolate,
+              isolate: effectiveIsolate,
               abortSignal: batchSignal,
               onStep: (label) => {
                 patchAgentMeta({

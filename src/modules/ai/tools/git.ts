@@ -5,7 +5,7 @@ import { scanTextForConflicts, summarizeConflicts } from "../lib/conflicts";
 import { native } from "../lib/native";
 import { enforcePolicy } from "../lib/policyEngine";
 import { remoteUnsupported } from "../lib/remoteFs";
-import { checkShellCommand } from "../lib/security";
+import { checkReadableCanonical, checkShellCommand } from "../lib/security";
 import { getSessionShell, sessionShellKey } from "../lib/sessionShell";
 import { resolvePath, type ToolContext } from "./context";
 
@@ -462,7 +462,7 @@ export function buildGitTools(ctx: ToolContext) {
         if (!sid) return { error: "no active chat session" };
         const cwd = repoRootFor(ctx.getWorkspaceRoot(), ctx.getCwd());
         const add = paths?.length
-          ? paths.map((p) => quoteShellArg(p)).join(" ")
+          ? `-- ${paths.map((p) => quoteShellArg(p)).join(" ")}`
           : "-A";
         const addCommand = `git add ${add}`;
         const commitCommand = `git commit ${gitCommitMessageArgs(message)}`;
@@ -950,7 +950,12 @@ export function buildGitTools(ctx: ToolContext) {
         try {
           if (targetPath) {
             const resolved = resolvePath(targetPath, cwd);
-            const r = await native.readFile(resolved);
+            const safety = await checkReadableCanonical(
+              resolved,
+              native.canonicalize,
+            );
+            if (!safety.ok) return { error: safety.reason, path: targetPath };
+            const r = await native.readFile(safety.canonical);
             if (r.kind === "binary")
               return { error: "file is binary", path: targetPath };
             if (r.kind === "toolarge")
@@ -997,7 +1002,12 @@ export function buildGitTools(ctx: ToolContext) {
           for (const relFile of unmergedFiles) {
             try {
               const fullPath = resolvePath(relFile, cwd);
-              const fileData = await native.readFile(fullPath);
+              const safety = await checkReadableCanonical(
+                fullPath,
+                native.canonicalize,
+              );
+              if (!safety.ok) continue;
+              const fileData = await native.readFile(safety.canonical);
               if (fileData.kind === "text") {
                 const blocks = scanTextForConflicts(fileData.content);
                 fileResults.push({

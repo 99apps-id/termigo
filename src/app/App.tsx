@@ -318,7 +318,11 @@ export default function App() {
       .spaces.find((s) => s.id === activeSpaceId);
     if (meta) void adoptWorkspaceEnv(meta.env);
     const inSpace = tabsRef.current.filter((t) => t.spaceId === activeSpaceId);
-    if (inSpace.length === 0) return;
+    if (inSpace.length === 0) {
+      const id = newTabInSpace(activeSpaceId, meta?.root ?? home ?? undefined);
+      setActiveId(id);
+      return;
+    }
     if (inSpace.some((t) => t.id === activeId)) return;
     setActiveId(inSpace[inSpace.length - 1].id);
   }, [
@@ -328,6 +332,8 @@ export default function App() {
     setActiveSpaceForNewTabs,
     setActiveId,
     adoptWorkspaceEnv,
+    newTabInSpace,
+    home,
   ]);
 
   const [switcherOpen, setSwitcherOpen] = useState(false);
@@ -568,14 +574,20 @@ export default function App() {
 
   const handlePathRenamed = useCallback(
     (from: string, to: string) => {
+      const normFrom = from.replace(/\\/g, "/");
+      const normTo = to.replace(/\\/g, "/");
       for (const t of tabs) {
-        if (t.kind !== "editor") continue;
-        if (t.path === from) {
-          const i = to.lastIndexOf("/");
-          updateTab(t.id, { path: to, title: i === -1 ? to : to.slice(i + 1) });
-        } else if (t.path.startsWith(`${from}/`)) {
-          const suffix = t.path.slice(from.length);
-          const newPath = `${to}${suffix}`;
+        if (t.kind !== "editor" && t.kind !== "markdown") continue;
+        const tabPath = t.path.replace(/\\/g, "/");
+        if (tabPath === normFrom) {
+          const i = normTo.lastIndexOf("/");
+          updateTab(t.id, {
+            path: normTo,
+            title: i === -1 ? normTo : normTo.slice(i + 1),
+          });
+        } else if (tabPath.startsWith(`${normFrom}/`)) {
+          const suffix = tabPath.slice(normFrom.length);
+          const newPath = `${normTo}${suffix}`;
           const i = newPath.lastIndexOf("/");
           updateTab(t.id, {
             path: newPath,
@@ -824,10 +836,12 @@ export default function App() {
     />
   );
 
+  const spaces = useSpaces((s) => s.spaces);
+
   const allCommandItems = useMemo(
     () =>
       createCommandItems({
-        tabs,
+        tabs: spaceTabs,
         activeId,
         searchTarget,
         explorerRoot,
@@ -844,20 +858,23 @@ export default function App() {
         splitPaneRight: () => splitActivePaneInActiveTab("row"),
         splitPaneDown: () => splitActivePaneInActiveTab("col"),
         focusSearch: () => searchInlineRef.current?.focus(),
-        focusExplorerSearch: () => explorerRef.current?.focusSearch(),
+        focusExplorerSearch: () => {
+          openSidebarView("explorer");
+          requestAnimationFrame(() => explorerRef.current?.focusSearch());
+        },
         toggleSidebar,
         toggleAi: togglePanelAndFocus,
         askAiSelection: askFromSelection,
         openSettings: () => void openSettingsWindow(),
         openKeyboardShortcuts: () => void openSettingsWindow("shortcuts"),
-        spaces: useSpaces.getState().spaces,
+        spaces,
         activeSpaceId,
         openSpacesOverview: () => setSwitcherOpen(true),
         newSpace: () => void handleNewSpace(),
         switchSpace: (id) => useSpaces.getState().setActive(id),
       }),
     [
-      tabs,
+      spaceTabs,
       activeId,
       searchTarget,
       explorerRoot,
@@ -871,9 +888,11 @@ export default function App() {
       toggleSourceControl,
       handleCloseTabOrPane,
       splitActivePaneInActiveTab,
+      openSidebarView,
       toggleSidebar,
       togglePanelAndFocus,
       askFromSelection,
+      spaces,
       activeSpaceId,
       handleNewSpace,
     ],
@@ -1299,55 +1318,73 @@ export default function App() {
                 </div>
               </ResizablePanel>
               {sshPanelOpen && activeSshSession ? (
-                <ResizablePanel
-                  id="ssh-remote"
-                  defaultSize="28%"
-                  minSize="16%"
-                  maxSize="45%"
-                >
-                  <div className="flex h-full min-h-0 flex-col border-l border-border bg-card">
-                    <SshFileExplorer
-                      sessionId={activeSshSession.sessionId}
-                      hostLabel={activeSshSession.hostLabel}
-                      currentCwd={activeRemoteCwd}
-                      onOpenFile={(path, _sid, host) => {
-                        void navigator.clipboard.writeText(path).catch(() => {});
-                        toast.info(`Remote path: ${path}${host ? ` (${host})` : ""}`);
-                      }}
-                      onClose={() =>
-                        useSshRightPanelStore.getState().closePanel()
-                      }
-                    />
-                  </div>
-                </ResizablePanel>
+                <>
+                  <ResizableHandle
+                    withHandle
+                    className="w-px bg-border/60 transition-colors hover:bg-primary/40"
+                  />
+                  <ResizablePanel
+                    id="ssh-remote"
+                    defaultSize="28%"
+                    minSize="16%"
+                    maxSize="45%"
+                  >
+                    <div className="flex h-full min-h-0 flex-col border-l border-border bg-card">
+                      <SshFileExplorer
+                        sessionId={activeSshSession.sessionId}
+                        hostLabel={activeSshSession.hostLabel}
+                        currentCwd={activeRemoteCwd}
+                        onOpenFile={(path, _sid, host) => {
+                          void navigator.clipboard.writeText(path).catch(() => {});
+                          toast.info(`Remote path: ${path}${host ? ` (${host})` : ""}`);
+                        }}
+                        onClose={() =>
+                          useSshRightPanelStore.getState().closePanel()
+                        }
+                      />
+                    </div>
+                  </ResizablePanel>
+                </>
               ) : null}
               {extActivePanels.length > 0 ? (
-                <ResizablePanel
-                  id="ext-right"
-                  defaultSize="28%"
-                  minSize="16%"
-                  maxSize="45%"
-                >
-                  <div className="flex h-full min-h-0 flex-col border-l border-border/60 bg-card">
-                    {extActivePanels.map((p) => (
-                      <RightPanelHost
-                        key={`${p.extensionId}:${p.panelId}`}
-                        extensionId={p.extensionId}
-                        panelId={p.panelId}
-                      />
-                    ))}
-                  </div>
-                </ResizablePanel>
+                <>
+                  <ResizableHandle
+                    withHandle
+                    className="w-px bg-border/60 transition-colors hover:bg-primary/40"
+                  />
+                  <ResizablePanel
+                    id="ext-right"
+                    defaultSize="28%"
+                    minSize="16%"
+                    maxSize="45%"
+                  >
+                    <div className="flex h-full min-h-0 flex-col border-l border-border/60 bg-card">
+                      {extActivePanels.map((p) => (
+                        <RightPanelHost
+                          key={`${p.extensionId}:${p.panelId}`}
+                          extensionId={p.extensionId}
+                          panelId={p.panelId}
+                        />
+                      ))}
+                    </div>
+                  </ResizablePanel>
+                </>
               ) : null}
               {hasComposer && panelOpen ? (
-                <ResizablePanel
-                  id="ai-chat"
-                  defaultSize="30%"
-                  minSize="20%"
-                  maxSize="50%"
-                >
-                  <AiDockPanel />
-                </ResizablePanel>
+                <>
+                  <ResizableHandle
+                    withHandle
+                    className="w-px bg-border/60 transition-colors hover:bg-primary/40"
+                  />
+                  <ResizablePanel
+                    id="ai-chat"
+                    defaultSize="30%"
+                    minSize="20%"
+                    maxSize="50%"
+                  >
+                    <AiDockPanel />
+                  </ResizablePanel>
+                </>
               ) : null}
             </ResizablePanelGroup>
           </main>

@@ -150,6 +150,14 @@ export function GitDiffPane({ source, chipLabel, active }: Props) {
     active ? loadStateFromCache(source) : { kind: "idle" },
   );
 
+  const sourceKind = source.kind;
+  const sourceRepoRoot = source.repoRoot;
+  const sourcePath = source.path;
+  const sourceOriginalPath = source.originalPath;
+  const sourceMode = source.kind === "working" ? source.mode : undefined;
+  const sourceSha = source.kind === "commit" ? source.sha : undefined;
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: depend on primitive fields of source rather than the inline object literal reconstructed on each parent render
   useEffect(() => {
     if (!active) return;
     const cached = loadStateFromCache(source);
@@ -198,7 +206,15 @@ export function GitDiffPane({ source, chipLabel, active }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [active, source]);
+  }, [
+    active,
+    sourceKind,
+    sourceRepoRoot,
+    sourcePath,
+    sourceOriginalPath,
+    sourceMode,
+    sourceSha,
+  ]);
 
   const path = source.path;
   const repoRoot = source.repoRoot;

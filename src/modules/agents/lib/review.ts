@@ -29,12 +29,8 @@ function fireReview(m: ManagedAgent): void {
   store.markReviewed(m.leafId);
   store.setPhase(m.leafId, "reviewing");
   void (async () => {
-    const { getOrCreateChat } = await import("@/modules/ai/store/chatRuntime");
-    const chat = getOrCreateChat(m.sessionId);
-    void chat.sendMessage({
-      role: "user",
-      parts: [{ type: "text", text: buildReviewDirective(m) }],
-    } as Parameters<typeof chat.sendMessage>[0]);
+    const { sendParts } = await import("@/modules/ai/store/chatRuntime");
+    sendParts(m.sessionId, [{ type: "text", text: buildReviewDirective(m) }]);
   })();
 }
 

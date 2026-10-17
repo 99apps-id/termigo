@@ -118,8 +118,18 @@ export function getRemainingCooldownMs(
   now = Date.now(),
 ): number {
   const record = providerRegistry.get(providerId);
-  if (!record?.rateLimitedUntil) return 0;
-  return Math.max(0, record.rateLimitedUntil - now);
+  if (!record) return 0;
+  let remaining = 0;
+  if (record.rateLimitedUntil && record.rateLimitedUntil > now) {
+    remaining = Math.max(remaining, record.rateLimitedUntil - now);
+  }
+  if (record.consecutiveFailures >= 5) {
+    const failureExpiry = (record.lastFailureTime ?? 0) + DEFAULT_COOLDOWN_MS;
+    if (failureExpiry > now) {
+      remaining = Math.max(remaining, failureExpiry - now);
+    }
+  }
+  return remaining;
 }
 
 /**

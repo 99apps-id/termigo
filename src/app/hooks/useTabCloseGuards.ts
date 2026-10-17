@@ -217,11 +217,13 @@ export function useTabCloseGuards({
 
   const handlePathDeleted = useCallback(
     (path: string) => {
+      const norm = path.replace(/\\/g, "/");
       const dirty: number[] = [];
       for (const t of tabs) {
-        if (t.kind !== "editor") continue;
-        if (t.path !== path && !t.path.startsWith(`${path}/`)) continue;
-        if (t.dirty) {
+        if (t.kind !== "editor" && t.kind !== "markdown") continue;
+        const tabPath = t.path.replace(/\\/g, "/");
+        if (tabPath !== norm && !tabPath.startsWith(`${norm}/`)) continue;
+        if (t.kind === "editor" && t.dirty) {
           dirty.push(t.id);
         } else {
           disposeTab(t.id);

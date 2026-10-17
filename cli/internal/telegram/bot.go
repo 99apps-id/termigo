@@ -703,10 +703,10 @@ func (b *Bot) runDocument(ctx context.Context, chatID int64, message *Message) {
 		fileName = "uploaded_document"
 	}
 
-	uploadRelPath := filepath.Join(".termixgo", "uploads", fileName)
+	uploadRelPath := filepath.Join(".termigo", "uploads", fileName)
 	savedToWorkspace := false
 	if wp, ok := b.agent.(WorkspaceProvider); ok && wp.Workspace() != "" {
-		uploadDir := filepath.Join(wp.Workspace(), ".termixgo", "uploads")
+		uploadDir := filepath.Join(wp.Workspace(), ".termigo", "uploads")
 		if err := os.MkdirAll(uploadDir, 0o755); err == nil {
 			fullPath := filepath.Join(uploadDir, fileName)
 			if err := os.WriteFile(fullPath, data, 0o644); err == nil {
@@ -979,7 +979,7 @@ func imageMediaType(path string) string {
 func (b *Bot) tryPair(ctx context.Context, message *Message, code string) {
 	expected := b.PairingCode()
 	if strings.TrimSpace(expected) == "" {
-		b.reply(ctx, message.Chat.ID, "No pairing code is active. Run /setup in Termixgo.")
+		b.reply(ctx, message.Chat.ID, "No pairing code is active. Run /setup in Termigo.")
 		return
 	}
 	if strings.TrimSpace(code) != strings.TrimSpace(expected) {

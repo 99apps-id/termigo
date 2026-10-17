@@ -489,7 +489,9 @@ impl SshSession {
                 }
             }
         });
-        self.forwards.lock().await.insert(bound, task);
+        if let Some(prev) = self.forwards.lock().await.insert(bound, task) {
+            prev.abort();
+        }
         log::info!("ssh -L {label}");
         Ok(bound)
     }
@@ -511,7 +513,13 @@ impl SshSession {
 impl Drop for SshSession {
     fn drop(&mut self) {
         // Last-resort cleanup when the frontend hung up without calling
-        // ssh_close. Abort the pump so its tokio task can unwind.
+        // ssh_close. Abort the pump and any port-forward tasks so their tokio
+        // tasks can unwind.
+        if let Ok(mut forwards) = self.forwards.try_lock() {
+            for (_, task) in forwards.drain() {
+                task.abort();
+            }
+        }
         if let Ok(mut g) = self.pump.try_lock() {
             if let Some(j) = g.take() {
                 j.abort();

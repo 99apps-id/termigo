@@ -243,11 +243,21 @@ export function buildPtyDriverTools(ctx: ToolContext) {
           if (input === undefined) {
             return { error: "input parameter is required for action='write'" };
           }
+          const safety = checkShellCommand(input);
+          if (!safety.ok) return { error: safety.reason };
           const ok = ctx.injectIntoActivePty(input);
           if (!ok) {
             return {
               error: "Failed to inject input: no active terminal tab found.",
               sent: false,
+            };
+          }
+          if (ctx.isActiveTerminalPrivate()) {
+            return {
+              action: "write",
+              sent: true,
+              input,
+              note: "Input injected. Buffer withheld: terminal is in Privacy mode.",
             };
           }
           if (wait_for) {
@@ -267,17 +277,6 @@ export function buildPtyDriverTools(ctx: ToolContext) {
               }
               await new Promise((r) => setTimeout(r, 150));
             }
-            if (ctx.isActiveTerminalPrivate()) {
-              return {
-                action: "write",
-                sent: true,
-                input,
-                matched,
-                pattern: wait_for,
-                timed_out: !matched,
-                note: "Input injected. Buffer withheld: terminal is in Privacy mode.",
-              };
-            }
             const raw = ctx.getTerminalContext() ?? "";
             const lines = raw.split("\n");
             const tail = lines.slice(-maxLines).join("\n");
@@ -292,15 +291,6 @@ export function buildPtyDriverTools(ctx: ToolContext) {
             };
           }
           await new Promise((r) => setTimeout(r, 300));
-          // Keystrokes are operational; the echoed-back buffer is a read.
-          if (ctx.isActiveTerminalPrivate()) {
-            return {
-              action: "write",
-              sent: true,
-              input,
-              note: "Input injected. Buffer withheld: terminal is in Privacy mode.",
-            };
-          }
           const raw = ctx.getTerminalContext() ?? "";
           const lines = raw.split("\n");
           const tail = lines.slice(-maxLines).join("\n");
@@ -440,6 +430,8 @@ export function buildPtyDriverTools(ctx: ToolContext) {
       }),
       needsApproval: true,
       execute: async ({ input }) => {
+        const safety = checkShellCommand(input);
+        if (!safety.ok) return { error: safety.reason, sent: false };
         const ok = ctx.injectIntoActivePty(input);
         if (!ok) {
           return {

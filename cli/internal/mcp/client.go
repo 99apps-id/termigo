@@ -24,17 +24,15 @@ const defaultTimeout = 60 * time.Second
 // over stdio. It supports initialization, tool discovery and tool calls,
 // which is enough to inspect and exercise the servers Termigo manages.
 type Client struct {
-	cmd       *exec.Cmd
-	stdin     io.WriteCloser
-	responses map[int64]chan rpcResponse
-	mu        sync.Mutex
-	nextID    int64
-	waitErr   chan error
-	stderr    *stderrBuffer
-	// exited is set once the server process has terminated. The waitErr
-	// channel can only be read once, and only from inside a pending call, so
-	// a separate flag is what lets an outside observer ask "is the process
-	// still there" without stealing the error a call is waiting on.
+	cmd        *exec.Cmd
+	stdin      io.WriteCloser
+	responses  map[int64]chan rpcResponse
+	mu         sync.Mutex
+	nextID     int64
+	waitDone   chan struct{}
+	waitErrVal error
+	stderr     *stderrBuffer
+	// exited is set once the server process has terminated.
 	exited atomic.Bool
 }
 
@@ -101,15 +99,18 @@ func Connect(ctx context.Context, server Server) (*Client, error) {
 		cmd:       command,
 		stdin:     stdin,
 		responses: make(map[int64]chan rpcResponse),
-		waitErr:   make(chan error, 1),
+		waitDone:  make(chan struct{}),
 		stderr:    stderr,
 	}
 	go client.readLoop(stdout)
 	go client.captureStderr(stderrPipe, stderr)
 	go func() {
 		err := command.Wait()
+		client.mu.Lock()
+		client.waitErrVal = err
+		client.mu.Unlock()
 		client.exited.Store(true)
-		client.waitErr <- err
+		close(client.waitDone)
 	}()
 
 	// MCP handshake: initialize, then notify the server it can start.
@@ -212,7 +213,7 @@ func (client *Client) Close() error {
 	go func() {
 		defer close(done)
 		select {
-		case <-client.waitErr:
+		case <-client.waitDone:
 			return
 		case <-time.After(2 * time.Second):
 		}
@@ -220,7 +221,7 @@ func (client *Client) Close() error {
 			_ = client.cmd.Process.Kill()
 		}
 		select {
-		case <-client.waitErr:
+		case <-client.waitDone:
 		case <-time.After(2 * time.Second):
 		}
 	}()
@@ -236,8 +237,7 @@ func (client *Client) Close() error {
 
 // call sends a request and waits for its response.
 func (client *Client) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
-	id := client.nextID
-	client.nextID++
+	id := atomic.AddInt64(&client.nextID, 1) - 1
 	response := make(chan rpcResponse, 1)
 
 	client.mu.Lock()
@@ -265,7 +265,10 @@ func (client *Client) call(ctx context.Context, method string, params any) (json
 			return nil, fmt.Errorf("%s failed: %s", method, message.Error)
 		}
 		return message.Result, nil
-	case err := <-client.waitErr:
+	case <-client.waitDone:
+		client.mu.Lock()
+		err := client.waitErrVal
+		client.mu.Unlock()
 		tail := client.stderr.string()
 		if tail == "" {
 			tail = "no stderr output"

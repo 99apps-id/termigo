@@ -136,9 +136,17 @@ async function refreshOAuthTokens(
         provider: backendProvider,
         refreshToken: current.refresh_token,
       });
-      await writeOAuthTokens(provider, refreshed);
+      const merged: OAuthTokens = {
+        ...refreshed,
+        refresh_token: refreshed.refresh_token || current.refresh_token,
+        account_id: refreshed.account_id ?? current.account_id,
+        email: refreshed.email ?? current.email,
+        plan: refreshed.plan ?? current.plan,
+        id_token: refreshed.id_token || current.id_token,
+      };
+      await writeOAuthTokens(provider, merged);
       notifyChanged();
-      return refreshed;
+      return merged;
     } catch (e) {
       logRefreshFailure(provider, e);
       return null;

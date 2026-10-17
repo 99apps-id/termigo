@@ -499,10 +499,10 @@ export const EditorPane = memo(
       });
     }, [lspExt]);
 
-    useEffect(
-      () => () => useDiagnosticsStore.getState().report(pathRef.current, null),
-      [],
-    );
+    useEffect(() => {
+      const currentPath = path;
+      return () => useDiagnosticsStore.getState().report(currentPath, null);
+    }, [path]);
 
     // Warm the language chunk while the file is still being read; the
     // ready-gated effect below then resolves from cache.

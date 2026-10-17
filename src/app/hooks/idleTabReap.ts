@@ -40,13 +40,19 @@ export function selectIdleTabsToClose({
   now: number;
   minIdleMs: number;
 }): Tab[] {
-  return tabs.filter((tab) => {
-    if (tab.id === activeId) return false;
-    if (nextActiveInSpace(tabs, tab.id) === null) return false;
+  const remaining = [...tabs];
+  const selected: Tab[] = [];
+  for (const tab of tabs) {
+    if (tab.id === activeId) continue;
+    if (nextActiveInSpace(remaining, tab.id) === null) continue;
     const since = lastActiveAt.get(tab.id);
-    if (since === undefined || now - since < minIdleMs) return false;
-    return isTabSafeToAutoClose(tab);
-  });
+    if (since === undefined || now - since < minIdleMs) continue;
+    if (!isTabSafeToAutoClose(tab)) continue;
+    selected.push(tab);
+    const idx = remaining.findIndex((t) => t.id === tab.id);
+    if (idx !== -1) remaining.splice(idx, 1);
+  }
+  return selected;
 }
 
 /**

@@ -156,6 +156,7 @@ export function createCommandItems(
       group: "Tabs",
       keywords: ["blocks", "warp", "command blocks", "terminal"],
       icon: DashboardSquare01Icon,
+      shortcutId: "tab.newBlock",
       run: ctx.openNewBlock,
     },
     {

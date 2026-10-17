@@ -20,12 +20,18 @@ type Agent struct {
 	workspace string
 	client    provider.Client
 	model     provider.Model
+	session   *coder.Session
 	cancel    context.CancelFunc
 }
 
 // NewAgent builds a bridge for a provider and model.
 func NewAgent(store *secrets.Store, workspace string, model provider.Model) (*Agent, error) {
-	agent := &Agent{store: store, workspace: workspace, model: model}
+	agent := &Agent{
+		store:     store,
+		workspace: workspace,
+		model:     model,
+		session:   coder.NewSession(workspace, model.WireID()),
+	}
 	if err := agent.applyModel(model); err != nil {
 		return nil, err
 	}
@@ -40,6 +46,9 @@ func (a *Agent) applyModel(model provider.Model) error {
 	provider.SetForceResolver(client, a.store)
 	a.client = client
 	a.model = model
+	if a.session != nil {
+		a.session.Model = model.WireID()
+	}
 	return nil
 }
 
@@ -57,6 +66,10 @@ func (a *Agent) run(ctx context.Context, prompt string, images []provider.Image,
 	a.mu.Lock()
 	client := a.client
 	model := a.model
+	if a.session == nil {
+		a.session = coder.NewSession(a.workspace, model.WireID())
+	}
+	session := a.session
 	a.mu.Unlock()
 	if client == nil {
 		return "", errors.New("no model is configured")
@@ -82,9 +95,10 @@ func (a *Agent) run(ctx context.Context, prompt string, images []provider.Image,
 		}
 	}
 	return coder.Run(runCtx, coder.Options{
-		Client: client,
-		Model:  model.WireID(),
-		Images: images,
+		Client:  client,
+		Model:   model.WireID(),
+		Images:  images,
+		Session: session,
 		Env: &coder.Env{
 			Workspace: a.workspace,
 			Trusted:   true,
@@ -104,8 +118,12 @@ func (a *Agent) Stop() {
 	}
 }
 
-// NewSession is a no-op: each Telegram turn starts a fresh run.
-func (a *Agent) NewSession() {}
+// NewSession resets the conversation history for a fresh Telegram session.
+func (a *Agent) NewSession() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.session = coder.NewSession(a.workspace, a.model.WireID())
+}
 
 // Model returns the current model id.
 func (a *Agent) Model() string {

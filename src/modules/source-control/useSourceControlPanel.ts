@@ -469,7 +469,8 @@ export function useSourceControlPanel(
   }, [fileEntries]);
 
   const allClean = stagedEntries.length === 0 && unstagedEntries.length === 0;
-  const canPush = !!status?.upstream && status.behind === 0;
+  const canPush =
+    !!status?.upstream && status.behind === 0 && status.ahead > 0;
   const selectedModel = resolveModel(selectedModelId);
   const selectedModelSupportsTemperature = modelSupportsTemperature(
     selectedModel.provider,
@@ -515,7 +516,11 @@ export function useSourceControlPanel(
     stagedEntries.length,
   ]);
   const canGenerateCommitMessage =
-    stagedEntries.length > 0 && !anyActionBusy && !aiBusy && !!repo;
+    stagedEntries.length > 0 &&
+    !anyActionBusy &&
+    !aiBusy &&
+    !aiUnavailableReason &&
+    !!repo;
   const generateCommitMessageHint = aiUnavailableReason
     ? aiUnavailableReason
     : aiBusy
@@ -661,13 +666,9 @@ export function useSourceControlPanel(
         path: entry.path,
         mode: entry.mode,
       };
-      if (sameSelection(selected, nextSelection)) {
-        setActionError(null);
-        setActionMessage(null);
-        setSelectionTransition("none");
-        return;
+      if (!sameSelection(selected, nextSelection)) {
+        setSelected(nextSelection);
       }
-      setSelected(nextSelection);
       setActionError(null);
       setActionMessage(null);
       setSelectionTransition("none");
@@ -801,13 +802,9 @@ export function useSourceControlPanel(
       if (!repo) return;
       const mode: DiffMode = entry.unstaged ? "-" : "+";
       const nextSelection: DiffSelection = { path: entry.path, mode };
-      if (sameSelection(selected, nextSelection)) {
-        setActionError(null);
-        setActionMessage(null);
-        setSelectionTransition("none");
-        return;
+      if (!sameSelection(selected, nextSelection)) {
+        setSelected(nextSelection);
       }
-      setSelected(nextSelection);
       setActionError(null);
       setActionMessage(null);
       setSelectionTransition("none");

@@ -125,6 +125,40 @@ func Load(workspace string) (Registry, error) {
 	return Registry{Servers: servers}, nil
 }
 
+func parseMCPRegistryData(data []byte) (map[string]config.MCPServer, error) {
+	trimmed := strings.TrimSpace(strings.TrimPrefix(string(data), "\uFEFF"))
+	if trimmed == "" {
+		return map[string]config.MCPServer{}, nil
+	}
+	dec := json.NewDecoder(strings.NewReader(trimmed))
+	merged := map[string]config.MCPServer{}
+	decodedAny := false
+	for dec.More() {
+		var raw struct {
+			MCPServers map[string]config.MCPServer `json:"mcpServers"`
+		}
+		if err := dec.Decode(&raw); err != nil {
+			return nil, err
+		}
+		decodedAny = true
+		for k, v := range raw.MCPServers {
+			merged[k] = v
+		}
+	}
+	if !decodedAny {
+		var raw struct {
+			MCPServers map[string]config.MCPServer `json:"mcpServers"`
+		}
+		if err := json.Unmarshal([]byte(trimmed), &raw); err != nil {
+			return nil, err
+		}
+		for k, v := range raw.MCPServers {
+			merged[k] = v
+		}
+	}
+	return merged, nil
+}
+
 // loadFile reads one registry file; a missing file is not an error.
 func loadFile(path, scope string) ([]Server, error) {
 	data, err := os.ReadFile(path)
@@ -134,14 +168,12 @@ func loadFile(path, scope string) ([]Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
-	var raw struct {
-		MCPServers map[string]config.MCPServer `json:"mcpServers"`
-	}
-	if err := json.Unmarshal(data, &raw); err != nil {
+	mcpServers, err := parseMCPRegistryData(data)
+	if err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
-	servers := make([]Server, 0, len(raw.MCPServers))
-	for name, server := range raw.MCPServers {
+	servers := make([]Server, 0, len(mcpServers))
+	for name, server := range mcpServers {
 		if server.Command == "" {
 			return nil, fmt.Errorf("%s: server %q has no command", path, name)
 		}

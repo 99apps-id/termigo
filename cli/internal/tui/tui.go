@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/bubbles/textarea"
@@ -81,7 +82,8 @@ type Model struct {
 	// session. Cleared by /new, because a fresh session is a fresh trust
 	// decision: carrying the allowance over would silently keep a tool the
 	// operator only meant to allow for the previous task.
-	sessionAllowed map[string]bool
+	sessionAllowedMu sync.Mutex
+	sessionAllowed   map[string]bool
 
 	input   textarea.Model
 	blocks  []block
@@ -212,10 +214,12 @@ func (m *Model) answerApproval(answer decisionReply) {
 		return
 	}
 	if answer == decisionAllowSession && m.pendingTool != "" {
+		m.sessionAllowedMu.Lock()
 		if m.sessionAllowed == nil {
 			m.sessionAllowed = map[string]bool{}
 		}
 		m.sessionAllowed[m.pendingTool] = true
+		m.sessionAllowedMu.Unlock()
 		m.appendBlock(blockNotice, m.pendingTool+" approved for this session.")
 	}
 	m.pendingReply <- answer
@@ -339,7 +343,9 @@ func (m *Model) handleSlash(value string) (tea.Model, tea.Cmd) {
 		m.session = coder.NewSession(m.workspace, m.model.WireID())
 		// A new session is a new trust scope: the tools allowed for the previous
 		// task must not ride along unasked.
+		m.sessionAllowedMu.Lock()
 		m.sessionAllowed = map[string]bool{}
+		m.sessionAllowedMu.Unlock()
 		if err := m.session.Save(); err != nil {
 			m.appendBlock(blockError, err.Error())
 			return m, nil
@@ -598,6 +604,10 @@ func (m *Model) assistantText(which int) (string, bool) {
 // osc52 is the escape sequence that sets the terminal's clipboard. It is the
 // one clipboard path that works over SSH, where there is no local clipboard,
 // and in a Windows Terminal. A terminal that ignores it just copies nothing.
+func (m *Model) osc52(text string) string {
+	return osc52(text)
+}
+
 func osc52(text string) string {
 	return "\x1b]52;c;" + base64.StdEncoding.EncodeToString([]byte(text)) + "\a"
 }
@@ -700,7 +710,10 @@ func (m *Model) waitForEvent() tea.Cmd {
 // which is what keeps a long refactor from asking the same question thirty
 // times.
 func (m *Model) approve(request coder.ApprovalRequest) coder.Decision {
-	if m.sessionAllowed[request.Tool] {
+	m.sessionAllowedMu.Lock()
+	allowed := m.sessionAllowed[request.Tool]
+	m.sessionAllowedMu.Unlock()
+	if allowed {
 		return coder.DecisionAllowSession
 	}
 	reply := make(chan decisionReply, 1)

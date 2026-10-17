@@ -271,7 +271,12 @@ export function lspInteractions(opts: {
   onExternal: (uri: string, line: number) => void;
 }): Extension {
   const navigate = (view: EditorView, loc: LspLocation): void => {
-    if (loc.uri === opts.documentUri) {
+    const locPath = fileUriToPath(loc.uri);
+    const docPath = fileUriToPath(opts.documentUri);
+    if (
+      loc.uri === opts.documentUri ||
+      (locPath !== null && docPath !== null && locPath === docPath)
+    ) {
       const targetLine = Math.min(
         loc.range.start.line + 1,
         view.state.doc.lines,

@@ -870,7 +870,12 @@ export async function ensureChatSession(
   threadId?: number | null,
 ) {
   const existing = resolveChatSession(chatId, threadId);
-  if (existing) return existing;
+  if (existing) {
+    if (useChatStore.getState().activeSessionId !== existing) {
+      useChatStore.getState().switchSession(existing);
+    }
+    return existing;
+  }
   return useChatStore.getState().newSession(chatId, threadId);
 }
 

@@ -11,7 +11,6 @@ import { error as logError, info as logInfo } from "@tauri-apps/plugin-log";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import { PLATFORM } from "@/lib/platform";
 import { LazyStore } from "@tauri-apps/plugin-store";
-import { toast } from "@/components/ui/toast";
 import * as chatMod from "@/modules/ai/store/chatStore";
 import { aiToolsRegistry, commandsRegistry, headerItemsRegistry, panelRenderersRegistry, sidebarSectionsRegistry, statusItemsRegistry } from "./registries";
 import { requirePermission } from "./permissions";
@@ -183,7 +182,8 @@ async function buildExecutor(
         });
         container.innerHTML = clean;
         const handler = (e: Event): void => {
-          const target = e.target as HTMLElement | null;
+          const rawTarget = e.target as HTMLElement | null;
+          const target = rawTarget?.closest?.<HTMLElement>("[data-ext-event]") ?? null;
           const ev = target?.getAttribute?.("data-ext-event");
           if (!ev) return;
           logInfo(`[ext:${ext.id}] sandboxHost: ui:event '${ev}' clicked`);
@@ -290,6 +290,13 @@ export async function activateSandboxed(
   const pendingToolCalls = new Map<number, Pending>();
   let callSeq = 1;
 
+  function rejectAllPending(err: Error): void {
+    for (const [, p] of pendingToolCalls) {
+      p.reject(err);
+    }
+    pendingToolCalls.clear();
+  }
+
   function post(msg: unknown): void {
     worker.postMessage(msg);
   }
@@ -342,9 +349,11 @@ export async function activateSandboxed(
   );
 
   worker.onerror = (e) => {
+    const err = new Error(`worker error: ${e.message ?? "unknown"}`);
     logError(`[ext:${ext.id}] sandboxHost: worker onerror: ${e.message ?? "unknown"}`);
     clearTimeout(readyTimeout);
-    rejectReady(new Error(`worker error: ${e.message ?? "unknown"}`));
+    rejectReady(err);
+    rejectAllPending(err);
   };
 
   worker.onmessage = (e) => {
@@ -364,14 +373,8 @@ export async function activateSandboxed(
       return;
     }
     if (msg.type === "activate_error") {
-      // Surface the failure so the user sees why a sandbox extension's panel
-      // stays on \"Loading panel…\" without opening DevTools (disabled in
-      // release builds).
       logError(`[ext:${ext.id}] sandboxHost: activate_error: ${msg.error}`);
       clearTimeout(readyTimeout);
-      toast(`Extension "${ext.id}" failed to activate: ${msg.error}`, {
-        variant: "error",
-      });
       rejectReady(new Error(msg.error));
       return;
     }
@@ -392,6 +395,7 @@ export async function activateSandboxed(
 
   return {
     dispose: () => {
+      rejectAllPending(new Error(`Extension "${ext.id}" was disposed`));
       post({ type: "deactivate" });
       worker.terminate();
     },

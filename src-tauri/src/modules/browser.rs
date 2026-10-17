@@ -205,6 +205,8 @@ impl BrowserState {
                 e.last_eval = Some(Ok(()));
             } else if kind == "eval-error" {
                 e.last_eval = Some(Err(value.to_string()));
+            } else if kind == "url" {
+                e.url = Some(value.to_string());
             } else {
                 e.last_value = Some(value.to_string());
                 e.last_value_kind = Some(kind.to_string());
@@ -419,7 +421,7 @@ pub fn browser_extract(
     let w = webview(&app, &instance).ok_or("browser instance not open")?;
     // Clear any value left from a previous page so a slow load cannot return
     // stale text as if it were the current page.
-    state.clear_eval(&instance);
+    state.clear_value(&instance);
     // Prefer the helper the initialization script installed (it shares one
     // send() path with the console hook); fall back to an inline emit if the
     // helper is not present yet (e.g. extract called before the first load).
@@ -714,7 +716,7 @@ pub async fn browser_embed_read(
     );
     wv.eval(&js).map_err(|e| e.to_string())?;
     for _ in 0..25 {
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         if let Some(v) = state.entry(&instance).and_then(|e| e.last_value) {
             return Ok(v);
         }
@@ -730,13 +732,13 @@ pub async fn browser_embed_eval(
     js: String,
 ) -> Result<(), String> {
     let wv = wait_embed_webview(&app, &instance).ok_or("embedded browser not open")?;
-    state.clear_value(&instance);
+    state.clear_eval(&instance);
     let wrapped = format!(
         r#"(()=>{{try{{const result=({js});window.__TAURI__&&window.__TAURI__.event&&window.__TAURI__.event.emit('{VALUE_EVENT}',{{instance:{instance:?},kind:'eval-ok',value:String(result ?? '')}});}}catch(e){{window.__TAURI__&&window.__TAURI__.event&&window.__TAURI__.event.emit('{VALUE_EVENT}',{{instance:{instance:?},kind:'eval-error',value:String(e && e.message ? e.message : e)}});}}}})();"#
     );
     wv.eval(&wrapped).map_err(|e| e.to_string())?;
     for _ in 0..10 {
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         if let Some(entry) = state.entry(&instance) {
             if let Some(result) = entry.last_eval {
                 return result;

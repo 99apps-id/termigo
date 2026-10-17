@@ -33,7 +33,7 @@ import { capAttachOutput } from "./lib/outputCap";
 let cachedHome: string | null = null;
 void homeDir()
   .then((h) => {
-    cachedHome = h.replace(/\/+$/, "");
+    cachedHome = h.replace(/\\/g, "/").replace(/\/+$/, "");
   })
   .catch(() => {});
 
@@ -73,8 +73,9 @@ function fmtTime(ms: number): string {
 }
 
 function relPath(p: string): string {
-  if (cachedHome && (p === cachedHome || p.startsWith(`${cachedHome}/`))) {
-    return `~${p.slice(cachedHome.length)}`;
+  const norm = p.replace(/\\/g, "/");
+  if (cachedHome && (norm === cachedHome || norm.startsWith(`${cachedHome}/`))) {
+    return `~${norm.slice(cachedHome.length)}`;
   }
   return p;
 }
@@ -127,6 +128,7 @@ export function BlockOverlay(props: Props) {
       )}
       {searchId && (
         <SearchBar
+          key={searchId}
           blockId={searchId}
           searchBlock={props.searchBlock}
           revealMatch={props.revealMatch}

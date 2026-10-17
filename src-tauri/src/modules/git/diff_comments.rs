@@ -72,15 +72,27 @@ fn read_file(path: &Path) -> Result<Vec<GitDiffComment>> {
 }
 
 fn write_file(path: &Path, comments: &[GitDiffComment]) -> Result<()> {
-    let tmp = path.with_extension("json.tmp");
     let batch = GitDiffCommentsFile {
         comments: comments.to_vec(),
         updated_at: now_millis(),
     };
     let bytes = serde_json::to_vec_pretty(&batch)
         .map_err(|e| GitError::command("serialize_diff_comments", e.to_string()))?;
-    fs::write(&tmp, bytes).map_err(GitError::Io)?;
-    fs::rename(&tmp, path).map_err(GitError::Io)?;
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() && !parent.exists() {
+            fs::create_dir_all(parent).map_err(GitError::Io)?;
+        }
+        if let Ok(mut tmp) = tempfile::NamedTempFile::new_in(parent) {
+            use std::io::Write;
+            if tmp.as_file_mut().write_all(&bytes).is_ok()
+                && tmp.as_file_mut().sync_all().is_ok()
+                && tmp.persist(path).is_ok()
+            {
+                return Ok(());
+            }
+        }
+    }
+    fs::write(path, bytes).map_err(GitError::Io)?;
     Ok(())
 }
 
@@ -98,7 +110,7 @@ pub fn list_comments(
     workspace: &WorkspaceEnv,
 ) -> Result<Vec<GitDiffComment>> {
     let repo = resolve_repo(registry, cwd, workspace)?;
-    let path = comments_path(Path::new(&repo.git_path));
+    let path = comments_path(&repo.local_path);
     read_file(&path)
 }
 
@@ -109,7 +121,7 @@ pub fn add_comment(
     comment: GitDiffComment,
 ) -> Result<GitDiffComment> {
     let repo = resolve_repo(registry, cwd, workspace)?;
-    let path = comments_path(Path::new(&repo.git_path));
+    let path = comments_path(&repo.local_path);
     let mut comments = read_file(&path)?;
     let normalized = normalize_comment(&comment);
     comments.retain(|c| c.id != normalized.id);
@@ -126,7 +138,7 @@ pub fn update_comment(
     patch: serde_json::Value,
 ) -> Result<Option<GitDiffComment>> {
     let repo = resolve_repo(registry, cwd, workspace)?;
-    let path = comments_path(Path::new(&repo.git_path));
+    let path = comments_path(&repo.local_path);
     let mut comments = read_file(&path)?;
     let mut updated = false;
     for c in &mut comments {
@@ -157,7 +169,7 @@ pub fn remove_comment(
     id: &str,
 ) -> Result<bool> {
     let repo = resolve_repo(registry, cwd, workspace)?;
-    let path = comments_path(Path::new(&repo.git_path));
+    let path = comments_path(&repo.local_path);
     let mut comments = read_file(&path)?;
     let len = comments.len();
     comments.retain(|c| c.id != id);

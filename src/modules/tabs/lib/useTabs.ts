@@ -261,10 +261,13 @@ export function planFileTabOpen(
   spaceId: string,
   allocId: () => number,
 ): { tabs: Tab[]; tabId: number } {
+  const pathKey = path.replace(/\\/g, "/");
   if (pin) {
     const existing = tabs.find(
       (tab) =>
-        tab.kind === "editor" && tab.spaceId === spaceId && tab.path === path,
+        tab.kind === "editor" &&
+        tab.spaceId === spaceId &&
+        tab.path.replace(/\\/g, "/") === pathKey,
     );
     if (existing?.kind === "editor") {
       return {
@@ -299,7 +302,7 @@ export function planFileTabOpen(
     (tab) =>
       tab.kind === "editor" &&
       tab.spaceId === spaceId &&
-      tab.path === path &&
+      tab.path.replace(/\\/g, "/") === pathKey &&
       !tab.preview,
   );
   if (persistent) return { tabs, tabId: persistent.id };
@@ -308,7 +311,7 @@ export function planFileTabOpen(
     (tab) =>
       tab.kind === "editor" &&
       tab.spaceId === spaceId &&
-      tab.path === path &&
+      tab.path.replace(/\\/g, "/") === pathKey &&
       tab.preview,
   );
   if (existingPreview) return { tabs, tabId: existingPreview.id };
@@ -477,11 +480,13 @@ export function planGitDiffOpen(
 ): { tabs: Tab[]; targetId: number } {
   const title = input.title ?? `${basename(input.path)} (${input.mode})`;
   const originalPath = input.originalPath ?? null;
+  const repoKey = input.repoRoot.replace(/\\/g, "/");
+  const pathKey = input.path.replace(/\\/g, "/");
   const matches = (tab: Tab): tab is GitDiffTab =>
     tab.kind === "git-diff" &&
     tab.spaceId === spaceId &&
-    tab.repoRoot === input.repoRoot &&
-    tab.path === input.path &&
+    tab.repoRoot.replace(/\\/g, "/") === repoKey &&
+    tab.path.replace(/\\/g, "/") === pathKey &&
     tab.mode === input.mode;
   const matchingTabs = tabs.filter(matches);
   const existing = matchingTabs.find((tab) => !tab.preview) ?? matchingTabs[0];
@@ -539,11 +544,12 @@ export function planCommitHistoryOpen(
   spaceId: string,
   allocId: () => number,
 ): { tabs: Tab[]; targetId: number } {
+  const repoKey = input.repoRoot.replace(/\\/g, "/");
   const existing = tabs.find(
     (tab) =>
       tab.kind === "git-history" &&
       tab.spaceId === spaceId &&
-      tab.repoRoot === input.repoRoot,
+      tab.repoRoot.replace(/\\/g, "/") === repoKey,
   );
   const title = input.branch ? `History · ${input.branch}` : "Git History";
   if (existing) {
@@ -1233,12 +1239,14 @@ export function useTabs(initial?: Partial<TerminalTab>) {
       originalPath: string | null;
     }) => {
       const curr = tabsRef.current;
+      const repoKey = input.repoRoot.replace(/\\/g, "/");
+      const pathKey = input.path.replace(/\\/g, "/");
       const existing = curr.find(
         (t) =>
           t.kind === "git-commit-file" &&
-          t.repoRoot === input.repoRoot &&
+          t.repoRoot.replace(/\\/g, "/") === repoKey &&
           t.sha === input.sha &&
-          t.path === input.path,
+          t.path.replace(/\\/g, "/") === pathKey,
       );
       const title = `${basename(input.path)} @ ${input.shortSha}`;
       if (existing) {
@@ -1343,6 +1351,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
           return {
             ...x,
             ...(patch.title !== undefined && { title: patch.title }),
+            ...(patch.path !== undefined && { path: patch.path }),
           };
         }
         // editor tab: auto-promote from preview the moment the file becomes dirty.
@@ -1510,10 +1519,21 @@ export function useTabs(initial?: Partial<TerminalTab>) {
         const sib = siblingLeafOf(tab.paneTree, leafId);
         newActive = sib && remaining.includes(sib) ? sib : remaining[0];
       }
+      const activeChanged = newActive !== tab.activeLeafId;
+      const nextCwd =
+        activeChanged && !isSshLeaf(newTree, newActive)
+          ? findLeafCwd(newTree, newActive)
+          : undefined;
       didRemove = true;
       return curr.map((x) =>
         x.id === tab.id
-          ? { ...x, paneTree: newTree, activeLeafId: newActive }
+          ? {
+              ...x,
+              paneTree: newTree,
+              activeLeafId: newActive,
+              ...(nextCwd !== undefined && { cwd: nextCwd }),
+              ...(activeChanged && { oscTitle: undefined }),
+            }
           : x,
       );
     });
@@ -1547,10 +1567,19 @@ export function useTabs(initial?: Partial<TerminalTab>) {
       const remaining = leafIds(newTree);
       const sib = siblingLeafOf(t.paneTree, target);
       const newActive = sib && remaining.includes(sib) ? sib : remaining[0];
+      const nextCwd = !isSshLeaf(newTree, newActive)
+        ? findLeafCwd(newTree, newActive)
+        : undefined;
       removedLeaf = target;
       return curr.map((x) =>
         x.id === tabId
-          ? { ...x, paneTree: newTree, activeLeafId: newActive }
+          ? {
+              ...x,
+              paneTree: newTree,
+              activeLeafId: newActive,
+              ...(nextCwd !== undefined && { cwd: nextCwd }),
+              oscTitle: undefined,
+            }
           : x,
       );
     });

@@ -286,11 +286,12 @@ export function buildFsTools(ctx: ToolContext) {
         // when the selected model can actually see, and only for local files
         // (SFTP image reads are not wired up).
         if (isImagePath(abs)) {
-          const modelId = useChatStore.getState().selectedModelId;
+          const modelId =
+            ctx.getModelId?.() ?? useChatStore.getState().selectedModelId;
           if (!modelSupportsVision(modelId)) {
             return {
               error:
-                "this file is an image, but the selected model has no vision capability — switch to a vision-capable model to read it.",
+                "this file is an image, but the selected model has no vision capability -- switch to a vision-capable model to read it.",
               path: abs,
             };
           }

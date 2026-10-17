@@ -54,6 +54,7 @@ pub(crate) async fn http_get_bytes_with_progress<F: FnMut(u64, Option<u64>)>(
         .user_agent(USER_AGENT)
         .connect_timeout(std::time::Duration::from_secs(15))
         .timeout(std::time::Duration::from_secs(300))
+        .redirect(crate::modules::net::ssrf_redirect_policy())
         .build()
         .map_err(|e| format!("http client: {e}"))?;
     let mut resp = client
@@ -102,6 +103,7 @@ pub(crate) async fn http_get_text(url: &str) -> Result<String, String> {
         .user_agent(USER_AGENT)
         .connect_timeout(std::time::Duration::from_secs(15))
         .timeout(std::time::Duration::from_secs(30))
+        .redirect(crate::modules::net::ssrf_redirect_policy())
         .build()
         .map_err(|e| format!("http client: {e}"))?;
     let mut req = client

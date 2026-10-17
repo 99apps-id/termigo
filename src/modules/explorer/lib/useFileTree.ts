@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { listenFsChanged, watchAdd, watchRemove } from "./watch";
@@ -360,6 +361,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
         await fetchChildren(pendingCreate.parentPath);
       } catch (e) {
         console.error(`${cmd} failed:`, e);
+        toast.error(`Failed to create ${pendingCreate.kind}: ${String(e)}`);
       } finally {
         setPendingCreate(null);
       }
@@ -395,6 +397,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
         await fetchChildren(parent);
       } catch (e) {
         console.error("fs_rename failed:", e);
+        toast.error(`Failed to rename: ${String(e)}`);
       } finally {
         setRenaming(null);
       }
@@ -410,6 +413,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
         await fetchChildren(dirname(path));
       } catch (e) {
         console.error("fs_delete failed:", e);
+        toast.error(`Failed to delete: ${String(e)}`);
       }
     },
     [fetchChildren, options],
@@ -427,7 +431,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
         target?.status === "loaded" &&
         target.entries.some((e) => e.name === name)
       ) {
-        console.warn(`move skipped: "${name}" already exists in ${toDir}`);
+        toast.error(`"${name}" already exists in target folder`);
         return;
       }
       try {
@@ -440,6 +444,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
         await Promise.all([fetchChildren(dirname(from)), fetchChildren(toDir)]);
       } catch (e) {
         console.error("fs_rename (move) failed:", e);
+        toast.error(`Failed to move "${name}": ${String(e)}`);
       }
     },
     [fetchChildren, options],

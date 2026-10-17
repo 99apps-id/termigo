@@ -22,7 +22,7 @@ import {
 } from "../lib/subagentIsolation";
 import { subagentMadeProgress } from "../lib/subagentProgress";
 import { useChatStore } from "../store/chatStore";
-import type { ToolContext } from "../tools/context";
+import { resolvePath, type ToolContext } from "../tools/context";
 import { buildTools } from "../tools/tools";
 import { buildAgentTools, buildSubagentSpec } from "./agentFactory";
 import { SUBAGENTS, type SubagentType, subagentIsReadOnly } from "./registry";
@@ -176,6 +176,26 @@ export async function runSubagent({
     }
   }
 
+  const prefs = usePreferencesStore.getState();
+  let routedModelId = prefs.subagentModelId.trim() || modelId;
+  // A vision subagent (e.g. the "vision" agent that reads images via read_file)
+  // must run on a vision-capable model. Default to subagentVisionModelId when
+  // set and this subagent needs vision; otherwise it would inherit a non-vision
+  // subagent model and report "no vision capability" instead of reading images.
+  if (type === "vision" && prefs.subagentVisionModelId.trim()) {
+    routedModelId = prefs.subagentVisionModelId.trim();
+  } else if (
+    prefs.subagentModelId.trim() &&
+    subagentModelExceedsBudget(routedModelId, modelId)
+  ) {
+    void logInfo(
+      `[ai] subagent model ${routedModelId} exceeds the main model's cost tier; falling back to ${modelId}`,
+    ).catch(() => {});
+    routedModelId = modelId;
+  }
+
+  ctx = { ...ctx, getModelId: () => routedModelId };
+
   // The full main-agent toolset plus extension tools - a sub-agent is a peer of
   // the main agent, not a read-only subset. `buildTools` is the same builder the
   // main run uses; extension tools are added the same way the main run adds them
@@ -216,12 +236,14 @@ export async function runSubagent({
 
   for (const [name, found] of Object.entries(injected)) {
     if (!found) continue;
-    if (!subagentToolNeedsGate(name, found)) {
-      tools[name] = found;
+    const guarded =
+      name === WRITE_FILE
+        ? newFilesOnly(found as AnyTool, (p) => resolvePath(p, ctx.getCwd()))
+        : found;
+    if (!subagentToolNeedsGate(name, guarded)) {
+      tools[name] = guarded;
       continue;
     }
-    const guarded =
-      name === WRITE_FILE ? newFilesOnly(found as AnyTool) : found;
     tools[name] = gate(
       guarded as AnyTool,
       name,
@@ -231,32 +253,6 @@ export async function runSubagent({
     );
   }
 
-  // Multi-model routing: a cheaper or local model can do the fan-out while the
-  // frontier model orchestrates. The preference wins when set; otherwise the
-  // sub-agent inherits the parent run's model. Resolved through the same
-  // builder the main run uses so local and custom-endpoint models work here too.
-  //
-  // Cost-tier guard (BatikCode parity): a user-set subagent model must not cost
-  // more than 1.5x the main model's input price, so a cheap orchestrator is not
-  // silently topped up by an expensive worker. Over budget, the sub-agent falls
-  // back to the main model instead of overspending.
-  const prefs = usePreferencesStore.getState();
-  let routedModelId = prefs.subagentModelId.trim() || modelId;
-  // A vision subagent (e.g. the "vision" agent that reads images via read_file)
-  // must run on a vision-capable model. Default to subagentVisionModelId when
-  // set and this subagent needs vision; otherwise it would inherit a non-vision
-  // subagent model and report "no vision capability" instead of reading images.
-  if (type === "vision" && prefs.subagentVisionModelId.trim()) {
-    routedModelId = prefs.subagentVisionModelId.trim();
-  } else if (
-    prefs.subagentModelId.trim() &&
-    subagentModelExceedsBudget(routedModelId, modelId)
-  ) {
-    void logInfo(
-      `[ai] subagent model ${routedModelId} exceeds the main model's cost tier; falling back to ${modelId}`,
-    ).catch(() => {});
-    routedModelId = modelId;
-  }
   const model = await buildConfiguredLanguageModel(routedModelId, keys, {
     lmstudioBaseURL: prefs.lmstudioBaseURL,
     lmstudioModelId: prefs.lmstudioModelId,

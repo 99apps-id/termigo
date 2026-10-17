@@ -69,30 +69,52 @@ struct RegistryEntry {
     env: HashMap<String, String>,
 }
 
+fn parse_registry_servers(text: &str) -> Result<HashMap<String, RegistryEntry>, serde_json::Error> {
+    let trimmed = text.trim_start_matches('\u{feff}').trim();
+    if trimmed.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let mut merged = HashMap::new();
+    let stream = serde_json::Deserializer::from_str(trimmed).into_iter::<RegistryFile>();
+    let mut saw_any = false;
+    for item in stream {
+        let file = item?;
+        saw_any = true;
+        merged.extend(file.servers);
+    }
+    if !saw_any {
+        return Err(serde::de::Error::custom("empty JSON document"));
+    }
+    Ok(merged)
+}
+
 fn read_registry(path: &Path, scope: &str, cwd: Option<&Path>) -> Vec<ServerConfig> {
     let Ok(text) = std::fs::read_to_string(path) else {
         return Vec::new(); // absent registry is not an error
     };
-    let Ok(file) = serde_json::from_str::<RegistryFile>(&text) else {
+    let Ok(servers) = parse_registry_servers(&text) else {
         log::warn!("mcp: ignoring malformed registry at {}", path.display());
         return Vec::new(); // malformed registry is not fatal
     };
-    file.servers
+    servers
         .into_iter()
         .filter_map(|(name, entry)| {
             if let Err(e) = validate_mcp_command(&entry.command, scope) {
                 log::warn!("mcp: ignoring server {name} in {}: {e}", path.display());
-                None
-            } else {
-                Some(ServerConfig {
-                    name,
-                    command: entry.command,
-                    args: entry.args,
-                    env: entry.env,
-                    scope: scope.to_string(),
-                    cwd: cwd.map(|p| p.to_string_lossy().into_owned()),
-                })
+                return None;
             }
+            if let Err(e) = validate_mcp_env(&entry.env, scope) {
+                log::warn!("mcp: ignoring server {name} in {}: {e}", path.display());
+                return None;
+            }
+            Some(ServerConfig {
+                name,
+                command: entry.command,
+                args: entry.args,
+                env: entry.env,
+                scope: scope.to_string(),
+                cwd: cwd.map(|p| p.to_string_lossy().into_owned()),
+            })
         })
         .collect()
 }
@@ -109,18 +131,60 @@ fn validate_mcp_command(command: &str, scope: &str) -> Result<(), String> {
     if scope == "user" {
         return Ok(());
     }
-    let raw_base = cmd.split_whitespace().next().ok_or("empty command")?;
-    let base = raw_base.trim_matches('"').trim_matches('\'');
-    let path = Path::new(base);
-    let file_name = path.file_name().and_then(|f| f.to_str()).unwrap_or(base);
-    let stem = file_name
+    // In project scope, reject any command containing paths, drive letters, or
+    // embedded whitespace so a repository cannot point `command` at `./node.exe`
+    // or `../evil/npx` inside the workspace.
+    if cmd.chars().any(|c| c.is_whitespace() || c == '/' || c == '\\' || c == ':') {
+        return Err(format!(
+            "MCP command {cmd:?} must be a bare executable name in project scope"
+        ));
+    }
+    let stem = cmd
         .strip_suffix(".exe")
-        .or_else(|| file_name.strip_suffix(".cmd"))
-        .or_else(|| file_name.strip_suffix(".bat"))
-        .unwrap_or(file_name);
+        .or_else(|| cmd.strip_suffix(".cmd"))
+        .or_else(|| cmd.strip_suffix(".bat"))
+        .unwrap_or(cmd);
 
-    if !ALLOWED_MCP_COMMANDS.contains(&stem) && !ALLOWED_MCP_COMMANDS.contains(&file_name) {
-        return Err(format!("MCP command {raw_base:?} is not allowed in project scope"));
+    if !ALLOWED_MCP_COMMANDS.contains(&stem) && !ALLOWED_MCP_COMMANDS.contains(&cmd) {
+        return Err(format!("MCP command {cmd:?} is not allowed in project scope"));
+    }
+    Ok(())
+}
+
+fn validate_mcp_env(env: &HashMap<String, String>, scope: &str) -> Result<(), String> {
+    if scope == "user" {
+        return Ok(());
+    }
+    for key in env.keys() {
+        let upper = key.trim().to_ascii_uppercase();
+        let dangerous = matches!(
+            upper.as_str(),
+            "PATH"
+                | "PATHEXT"
+                | "NODE_OPTIONS"
+                | "NODE_PATH"
+                | "PYTHONSTARTUP"
+                | "PYTHONPATH"
+                | "PYTHONHOME"
+                | "RUBYOPT"
+                | "RUBYLIB"
+                | "PERL5OPT"
+                | "PERL5LIB"
+                | "JAVA_TOOL_OPTIONS"
+                | "JDK_JAVA_OPTIONS"
+                | "_JAVA_OPTIONS"
+                | "CARGO_BUILD_RUSTC_WRAPPER"
+                | "RUSTC_WRAPPER"
+                | "BASH_ENV"
+                | "ENV"
+                | "NPM_CONFIG_SCRIPT_SHELL"
+        ) || upper.starts_with("LD_")
+            || upper.starts_with("DYLD_");
+        if dangerous {
+            return Err(format!(
+                "MCP env variable {key:?} is not allowed in project scope"
+            ));
+        }
     }
     Ok(())
 }
@@ -144,8 +208,31 @@ where
 {
     let path = user_registry_path().ok_or_else(|| "no home directory".to_string())?;
     let mut root: Value = match std::fs::read_to_string(&path) {
-        Ok(text) => serde_json::from_str(&text)
-            .map_err(|e| format!("{} is not valid JSON: {e}", path.display()))?,
+        Ok(text) => {
+            let trimmed = text.trim_start_matches('\u{feff}').trim();
+            if trimmed.is_empty() {
+                serde_json::json!({})
+            } else {
+                let mut merged_root = serde_json::Map::new();
+                let mut merged_servers = serde_json::Map::new();
+                let stream = serde_json::Deserializer::from_str(trimmed).into_iter::<Value>();
+                for item in stream {
+                    let val = item.map_err(|e| format!("{} is not valid JSON: {e}", path.display()))?;
+                    if let Value::Object(mut map) = val {
+                        if let Some(Value::Object(srvs)) = map.remove("mcpServers") {
+                            for (k, v) in srvs {
+                                merged_servers.insert(k, v);
+                            }
+                        }
+                        for (k, v) in map {
+                            merged_root.insert(k, v);
+                        }
+                    }
+                }
+                merged_root.insert("mcpServers".to_string(), Value::Object(merged_servers));
+                Value::Object(merged_root)
+            }
+        }
         Err(_) => serde_json::json!({}),
     };
     if !root.is_object() {

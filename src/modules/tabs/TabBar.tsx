@@ -146,9 +146,10 @@ export function TabBar({
     setPill(el ? { left: el.offsetLeft, width: el.offsetWidth } : null);
   }, []);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure pill whenever active tab, tab list, inline rename state, or compact mode changes
   useLayoutEffect(() => {
     measurePill();
-  }, [measurePill]);
+  }, [measurePill, activeId, tabs, editingId, compact]);
 
   useEffect(() => {
     const list = listRef.current;
@@ -227,9 +228,10 @@ export function TabBar({
 
   // Re-measure when the tab set changes: adding/closing tabs changes
   // scrollWidth without resizing the strip, so the ResizeObserver won't fire.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure overflow when tabs or compact mode change
   useLayoutEffect(() => {
     measureOverflow();
-  }, [measureOverflow]);
+  }, [measureOverflow, tabs, compact]);
 
   const nudge = useCallback((dir: -1 | 1) => {
     const el = scrollRef.current;
@@ -580,23 +582,21 @@ export function TabBar({
                             />
                             <span className="flex-1">Rename</span>
                           </ContextMenuItem>
-                          {tabs.length > 1 && (
-                            <>
-                              <ContextMenuSeparator />
-                              <ContextMenuItem
-                                className="gap-2 rounded-xl px-2.5 py-1.5 text-[13px]"
-                                onSelect={() => onClose(t.id)}
-                              >
-                                <HugeiconsIcon
-                                  icon={Cancel01Icon}
-                                  size={13}
-                                  strokeWidth={1.75}
-                                />
-                                <span className="flex-1">Close</span>
-                              </ContextMenuItem>
-                            </>
-                          )}
+                          <ContextMenuSeparator />
                         </>
+                      )}
+                      {tabs.length > 1 && (
+                        <ContextMenuItem
+                          className="gap-2 rounded-xl px-2.5 py-1.5 text-[13px]"
+                          onSelect={() => onClose(t.id)}
+                        >
+                          <HugeiconsIcon
+                            icon={Cancel01Icon}
+                            size={13}
+                            strokeWidth={1.75}
+                          />
+                          <span className="flex-1">Close</span>
+                        </ContextMenuItem>
                       )}
                       <ContextMenuItem
                         className="gap-2 rounded-xl px-2.5 py-1.5 text-[13px]"
