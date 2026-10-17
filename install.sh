@@ -161,8 +161,8 @@ get_release_info() {
 
   TAG_NAME="$(python3 -c "import json; data=json.loads('''$json'''); print(data.get('tag_name', ''))" 2>/dev/null || echo "")"
   if [ -z "$TAG_NAME" ]; then
-    warn "Gagal mengambil metadata rilis dari GitHub API (mungkin rate limit API). Menggunakan fallback versi v0.9.23."
-    TAG_NAME="v0.9.23"
+    warn "Gagal mengambil metadata rilis dari GitHub API (mungkin rate limit API). Menggunakan fallback versi v0.9.24."
+    TAG_NAME="v0.9.24"
   fi
 
   VERSION_NUM="${TAG_NAME#v}"
@@ -210,8 +210,8 @@ install_desktop() {
   info "Mengunduh AppImage: ${asset_name}..."
   if ! http_get "$download_url" "$target_appimage"; then
     error "Gagal mengunduh AppImage dari $download_url"
-    info "Mencoba rilis fallback v0.9.22 jika versi terbaru belum memiliki asset Linux..."
-    download_url="https://github.com/${GITHUB_REPO}/releases/download/v0.9.22/Termigo_0.9.22_${ARCH_TAG}.AppImage"
+    info "Mencoba rilis fallback v0.9.23 jika versi terbaru belum memiliki asset Linux..."
+    download_url="https://github.com/${GITHUB_REPO}/releases/download/v0.9.23/Termigo_0.9.23_${ARCH_TAG}.AppImage"
     http_get "$download_url" "$target_appimage" || {
       error "Gagal mengunduh AppImage fallback."
       exit 1
@@ -592,7 +592,7 @@ Opsi Utama:
   --uninstall           Hapus instalasi Termigo dari sistem
 
 Opsi Tambahan:
-  --version <v>         Tentukan versi rilis (default: latest, contoh: v0.9.23)
+  --version <v>         Tentukan versi rilis (default: latest, contoh: v0.9.24)
   --prefix <path>       Prefix lokasi instalasi (default: ~/.local)
   -y, --non-interactive Jalankan tanpa pertanyaan interaktif
   -h, --help            Tampilkan bantuan ini

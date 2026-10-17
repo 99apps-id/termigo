@@ -6,6 +6,8 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.24] - 2026-10-18
+
 ### Added
 
 - **Standalone agent in the Go companion (`cli/`).** The Go binary now talks to
@@ -16,6 +18,19 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   server's tools offered under a `server__tool` name. `telegram` and
   `service install` run the companion bot 24/7. It runs on a headless VPS with
   no webview.
+
+### Fixed
+
+- **Linux WebKitGTK freeze.** Disabled the WebKitGTK DMA-BUF renderer on Linux
+  to prevent hardware acceleration deadlocks (`drm_syncobj_array_wait_timeout`)
+  on Wayland and X11 sessions with Intel, AMD, and NVIDIA GPUs.
+- **Linux AppImage launch without FUSE.** Added direct extraction mode in
+  `install.sh` and wrapper fallback so Termigo runs natively on modern Linux
+  distributions (such as Ubuntu 24.04+) without `libfuse2` or `fusermount3`
+  socket incompatibilities.
+- **Window management capabilities.** Added missing `allow-maximize`,
+  `allow-unmaximize`, and `allow-set-size` permissions to the Tauri capabilities
+  allowlist for Linux and cross-platform window resizing.
 
 ### Security
 
