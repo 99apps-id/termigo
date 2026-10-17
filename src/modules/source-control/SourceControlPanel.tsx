@@ -41,11 +41,17 @@ import {
   copyToClipboard,
   revealInFinder,
 } from "@/modules/explorer/lib/contextActions";
-import { fileIconUrl } from "@/modules/explorer/lib/iconResolver";
+import { fileIconUrl, folderIconUrl } from "@/modules/explorer/lib/iconResolver";
 import {
   COMPACT_CONTENT,
   COMPACT_ITEM,
 } from "@/modules/explorer/lib/menuItemClass";
+import {
+  ChevronsDownUp,
+  ChevronsUpDown,
+  FolderTree,
+  List,
+} from "lucide-react";
 import { joinPath } from "@/modules/explorer/lib/useFileTree";
 import {
   AiContentGenerator02Icon,
@@ -89,6 +95,13 @@ import {
   type SourceControlFileEntry,
   useSourceControlPanel,
 } from "./useSourceControlPanel";
+import {
+  buildFileTree,
+  computeFolderCheckState,
+  flattenTree,
+  type TreeFolderNode,
+  type ViewMode,
+} from "./lib/fileTree";
 
 type Props = {
   open: boolean;
@@ -114,12 +127,38 @@ const ROW_HEIGHTS = {
   banner: 32,
   header: 30,
   entry: 30,
+  folder: 30,
 } as const;
+
+export type ViewMode = "list" | "tree";
 
 type RowDescriptor =
   | { kind: "banner-diverged"; key: string }
-  | { kind: "list-header"; key: string; count: number }
-  | { kind: "entry"; key: string; entry: SourceControlFileEntry };
+  | {
+      kind: "list-header";
+      key: string;
+      count: number;
+      viewMode: ViewMode;
+      allFoldersCollapsed: boolean;
+      hasFolders: boolean;
+    }
+  | {
+      kind: "tree-folder";
+      key: string;
+      path: string;
+      name: string;
+      depth: number;
+      fileCount: number;
+      isExpanded: boolean;
+      allEntries: SourceControlFileEntry[];
+    }
+  | {
+      kind: "entry";
+      key: string;
+      entry: SourceControlFileEntry;
+      depth?: number;
+      isTree?: boolean;
+    };
 
 function basename(path: string): string {
   const parts = path.split(/[\\/]/).filter(Boolean);
@@ -525,6 +564,86 @@ export const SourceControlPanel = memo(function SourceControlPanel({
     void sourceControl.runRemoteAction("pull");
   }, [sourceControl]);
 
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    try {
+      const saved = localStorage.getItem("termigo:scm-view-mode");
+      if (saved === "tree" || saved === "list") return saved;
+    } catch {}
+    return "list";
+  });
+
+  const [collapsedDirs, setCollapsedDirs] = useState<Set<string>>(
+    () => new Set<string>(),
+  );
+
+  const handleToggleViewMode = useCallback(() => {
+    setViewMode((prev) => {
+      const next = prev === "list" ? "tree" : "list";
+      try {
+        localStorage.setItem("termigo:scm-view-mode", next);
+      } catch {}
+      return next;
+    });
+  }, []);
+
+  const toggleDirExpanded = useCallback((path: string) => {
+    setCollapsedDirs((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return next;
+    });
+  }, []);
+
+  const fileTree = useMemo(() => {
+    if (viewMode !== "tree" || changedCount === 0) return null;
+    return buildFileTree(scm.fileEntries);
+  }, [changedCount, scm.fileEntries, viewMode]);
+
+  const allFolderPaths = useMemo(() => {
+    if (!fileTree) return [];
+    const paths: string[] = [];
+    function collect(node: TreeFolderNode) {
+      for (const child of node.children) {
+        if (child.kind === "folder") {
+          paths.push(child.path);
+          collect(child);
+        }
+      }
+    }
+    collect(fileTree);
+    return paths;
+  }, [fileTree]);
+
+  const allFoldersCollapsed =
+    allFolderPaths.length > 0 &&
+    allFolderPaths.every((p) => collapsedDirs.has(p));
+
+  const handleToggleCollapseAll = useCallback(() => {
+    if (allFoldersCollapsed) {
+      setCollapsedDirs(new Set());
+    } else {
+      setCollapsedDirs(new Set(allFolderPaths));
+    }
+  }, [allFolderPaths, allFoldersCollapsed]);
+
+  const handleToggleStageFolder = useCallback(
+    async (entries: SourceControlFileEntry[]) => {
+      const checkState = computeFolderCheckState(entries);
+      if (checkState === "checked") {
+        const paths = entries.filter((e) => e.staged).map((e) => e.path);
+        await scm.unstageFiles(paths);
+      } else {
+        const paths = entries.filter((e) => e.unstaged).map((e) => e.path);
+        await scm.stageFiles(paths);
+      }
+    },
+    [scm],
+  );
+
   const rows = useMemo<RowDescriptor[]>(() => {
     const result: RowDescriptor[] = [];
     if (isDiverged) {
@@ -535,13 +654,30 @@ export const SourceControlPanel = memo(function SourceControlPanel({
         kind: "list-header",
         key: "list-header",
         count: changedCount,
+        viewMode,
+        allFoldersCollapsed,
+        hasFolders: allFolderPaths.length > 0,
       });
-      for (const entry of scm.fileEntries) {
-        result.push({ kind: "entry", key: entry.key, entry });
+      if (viewMode === "tree" && fileTree) {
+        const treeRows = flattenTree(fileTree, collapsedDirs);
+        result.push(...treeRows);
+      } else {
+        for (const entry of scm.fileEntries) {
+          result.push({ kind: "entry", key: entry.key, entry });
+        }
       }
     }
     return result;
-  }, [changedCount, isDiverged, scm.fileEntries]);
+  }, [
+    allFolderPaths.length,
+    allFoldersCollapsed,
+    changedCount,
+    collapsedDirs,
+    fileTree,
+    isDiverged,
+    scm.fileEntries,
+    viewMode,
+  ]);
 
   const rowKeyToIndex = useMemo(() => {
     const map = new Map<string, number>();
@@ -561,7 +697,7 @@ export const SourceControlPanel = memo(function SourceControlPanel({
   const focusableIndices = useMemo(() => {
     const out: number[] = [];
     rows.forEach((row, index) => {
-      if (row.kind === "entry") out.push(index);
+      if (row.kind === "entry" || row.kind === "tree-folder") out.push(index);
     });
     return out;
   }, [rows]);
@@ -575,6 +711,8 @@ export const SourceControlPanel = memo(function SourceControlPanel({
           return ROW_HEIGHTS.banner;
         case "list-header":
           return ROW_HEIGHTS.header;
+        case "tree-folder":
+          return ROW_HEIGHTS.folder;
         case "entry":
           return ROW_HEIGHTS.entry;
       }
@@ -610,12 +748,11 @@ export const SourceControlPanel = memo(function SourceControlPanel({
     [focusableIndices, focusedRowKey, rowKeyToIndex, rows, virtualizer],
   );
 
-  const focusedEntry = useCallback((): SourceControlFileEntry | null => {
+  const focusedRow = useCallback((): RowDescriptor | null => {
     if (!focusedRowKey) return null;
     const index = rowKeyToIndex.get(focusedRowKey);
     if (index === undefined) return null;
-    const row = rows[index];
-    return row && row.kind === "entry" ? row.entry : null;
+    return rows[index] ?? null;
   }, [focusedRowKey, rowKeyToIndex, rows]);
 
   const handlePanelKeyDown = useCallback(
@@ -644,11 +781,30 @@ export const SourceControlPanel = memo(function SourceControlPanel({
           event.preventDefault();
           moveFocus(-1);
           break;
-        case "Enter": {
-          const entry = focusedEntry();
-          if (entry) {
+        case "ArrowRight": {
+          const row = focusedRow();
+          if (row?.kind === "tree-folder" && !row.isExpanded) {
             event.preventDefault();
-            void scm.selectFile(entry);
+            toggleDirExpanded(row.path);
+          }
+          break;
+        }
+        case "ArrowLeft": {
+          const row = focusedRow();
+          if (row?.kind === "tree-folder" && row.isExpanded) {
+            event.preventDefault();
+            toggleDirExpanded(row.path);
+          }
+          break;
+        }
+        case "Enter": {
+          const row = focusedRow();
+          if (row?.kind === "tree-folder") {
+            event.preventDefault();
+            toggleDirExpanded(row.path);
+          } else if (row?.kind === "entry") {
+            event.preventDefault();
+            void scm.selectFile(row.entry);
           }
           break;
         }
@@ -656,26 +812,42 @@ export const SourceControlPanel = memo(function SourceControlPanel({
         case "s":
         case "S": {
           if (meta) break;
-          const entry = focusedEntry();
-          if (entry) {
+          const row = focusedRow();
+          if (row?.kind === "tree-folder") {
             event.preventDefault();
-            void scm.toggleStageFile(entry);
+            void handleToggleStageFolder(row.allEntries);
+          } else if (row?.kind === "entry") {
+            event.preventDefault();
+            void scm.toggleStageFile(row.entry);
           }
           break;
         }
         case "d":
         case "D": {
           if (meta) break;
-          const entry = focusedEntry();
-          if (entry?.unstaged) {
+          const row = focusedRow();
+          if (row?.kind === "tree-folder") {
+            const hasUnstaged = row.allEntries.some((e) => e.unstaged);
+            if (hasUnstaged) {
+              event.preventDefault();
+              scm.requestDiscardFolder(row.allEntries, row.path);
+            }
+          } else if (row?.kind === "entry" && row.entry.unstaged) {
             event.preventDefault();
-            scm.requestDiscardFile(entry);
+            scm.requestDiscardFile(row.entry);
           }
           break;
         }
       }
     },
-    [focusedEntry, handleRefresh, moveFocus, scm],
+    [
+      focusedRow,
+      handleRefresh,
+      handleToggleStageFolder,
+      moveFocus,
+      scm,
+      toggleDirExpanded,
+    ],
   );
 
   if (!open) return null;
@@ -1050,6 +1222,11 @@ export const SourceControlPanel = memo(function SourceControlPanel({
                             onToggleStageFile={scm.toggleStageFile}
                             onDiscardFile={scm.requestDiscardFile}
                             onOpenFile={onOpenFile}
+                            onToggleViewMode={handleToggleViewMode}
+                            onToggleCollapseAll={handleToggleCollapseAll}
+                            onToggleExpand={toggleDirExpanded}
+                            onToggleStageFolder={handleToggleStageFolder}
+                            onDiscardFolder={scm.requestDiscardFolder}
                           />
                         </div>
                       );
@@ -1072,7 +1249,8 @@ export const SourceControlPanel = memo(function SourceControlPanel({
           <AlertDialogHeader>
             <AlertDialogTitle>Discard changes?</AlertDialogTitle>
             <AlertDialogDescription>
-              {scm.pendingDiscard?.scope === "all"
+              {scm.pendingDiscard?.scope === "all" ||
+              scm.pendingDiscard?.scope === "folder"
                 ? `This will discard ${scm.pendingDiscard.label} and cannot be undone.`
                 : scm.pendingDiscard
                   ? `Discard changes in "${scm.pendingDiscard.label}"? This cannot be undone.`
@@ -1148,6 +1326,11 @@ type RowRendererProps = {
   onToggleStageFile: (entry: SourceControlFileEntry) => Promise<void>;
   onDiscardFile: (entry: SourceControlFileEntry) => void;
   onOpenFile?: (absolutePath: string) => void;
+  onToggleViewMode: () => void;
+  onToggleCollapseAll: () => void;
+  onToggleExpand: (path: string) => void;
+  onToggleStageFolder: (entries: SourceControlFileEntry[]) => Promise<void>;
+  onDiscardFolder: (entries: SourceControlFileEntry[], path: string) => void;
 };
 
 const RowRenderer = memo(function RowRenderer(props: RowRendererProps) {
@@ -1157,6 +1340,8 @@ const RowRenderer = memo(function RowRenderer(props: RowRendererProps) {
       return <DivergedBanner />;
     case "list-header":
       return <ListHeader {...props} row={row} />;
+    case "tree-folder":
+      return <TreeFolderRow {...props} row={row} />;
     case "entry":
       return <EntryRow {...props} row={row} />;
   }
@@ -1175,7 +1360,7 @@ function DivergedBanner() {
         <span className="font-medium text-foreground/85">
           Diverged from upstream
         </span>
-        <span className="ml-1 opacity-75">— resolve in terminal</span>
+        <span className="ml-1 opacity-75">-- resolve in terminal</span>
       </span>
     </div>
   );
@@ -1186,6 +1371,8 @@ function ListHeader({
   actionBusy,
   headerCheckState,
   onToggleAll,
+  onToggleViewMode,
+  onToggleCollapseAll,
 }: RowRendererProps & {
   row: Extract<RowDescriptor, { kind: "list-header" }>;
 }) {
@@ -1193,35 +1380,242 @@ function ListHeader({
   // when two panels are mounted side by side.
   const stageAllId = useId();
   return (
-    <div className="flex h-7 items-center gap-2 px-3">
+    <div className="flex h-7 items-center gap-1.5 px-3">
       <span className="text-[10.5px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/85">
         Changes
       </span>
       <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full border border-border/60 px-1 text-[9.5px] font-semibold tabular-nums text-muted-foreground">
         {row.count}
       </span>
-      {/* The visible word and the checkbox are one control, not a label beside
-          a button: `label` with no `for` is a label without a control, so the
-          word "All" was a click target that assistive tech could not name. An
-          explicit htmlFor/id pair keeps the click-to-toggle and makes the
-          association real. */}
-      <label
-        htmlFor={stageAllId}
-        className="ml-auto flex shrink-0 cursor-pointer select-none items-center gap-1.5 text-[10.5px] font-medium text-muted-foreground hover:text-foreground"
-      >
-        <span>All</span>
-        <Checkbox
-          id={stageAllId}
-          aria-label="Stage all changes"
-          checked={checkboxValue(headerCheckState)}
-          disabled={actionBusy !== null}
-          onCheckedChange={() => void onToggleAll()}
-          className="size-3.5"
-        />
-      </label>
+      <div className="ml-auto flex shrink-0 items-center gap-1">
+        {row.viewMode === "tree" && row.hasFolders && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={onToggleCollapseAll}
+                className="inline-flex size-5 cursor-pointer items-center justify-center rounded text-muted-foreground/75 transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
+                aria-label={
+                  row.allFoldersCollapsed
+                    ? "Expand all folders"
+                    : "Collapse all folders"
+                }
+              >
+                {row.allFoldersCollapsed ? (
+                  <ChevronsUpDown className="size-3.5" />
+                ) : (
+                  <ChevronsDownUp className="size-3.5" />
+                )}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent
+              side="top"
+              className={cn(SOURCE_CONTROL_TOOLTIP_CLASS, "text-[10.5px]")}
+            >
+              {row.allFoldersCollapsed
+                ? "Expand all folders"
+                : "Collapse all folders"}
+            </TooltipContent>
+          </Tooltip>
+        )}
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={onToggleViewMode}
+              className="inline-flex size-5 cursor-pointer items-center justify-center rounded text-muted-foreground/75 transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
+              aria-label={
+                row.viewMode === "tree" ? "View as list" : "View as tree"
+              }
+            >
+              {row.viewMode === "tree" ? (
+                <List className="size-3.5" />
+              ) : (
+                <FolderTree className="size-3.5" />
+              )}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent
+            side="top"
+            className={cn(SOURCE_CONTROL_TOOLTIP_CLASS, "text-[10.5px]")}
+          >
+            {row.viewMode === "tree" ? "View as list" : "View as tree"}
+          </TooltipContent>
+        </Tooltip>
+
+        <label
+          htmlFor={stageAllId}
+          className="ml-1 flex shrink-0 cursor-pointer select-none items-center gap-1 text-[10.5px] font-medium text-muted-foreground hover:text-foreground"
+        >
+          <span>All</span>
+          <Checkbox
+            id={stageAllId}
+            aria-label="Stage all changes"
+            checked={checkboxValue(headerCheckState)}
+            disabled={actionBusy !== null}
+            onCheckedChange={() => void onToggleAll()}
+            className="size-3.5"
+          />
+        </label>
+      </div>
     </div>
   );
 }
+
+const TreeFolderRow = memo(function TreeFolderRow({
+  row,
+  focused,
+  actionBusy,
+  onFocusRow,
+  onToggleExpand,
+  onToggleStageFolder,
+  onDiscardFolder,
+}: RowRendererProps & {
+  row: Extract<RowDescriptor, { kind: "tree-folder" }>;
+}) {
+  const folderCheckState = useMemo(
+    () => computeFolderCheckState(row.allEntries),
+    [row.allEntries],
+  );
+  const hasUnstaged = useMemo(
+    () => row.allEntries.some((e) => e.unstaged),
+    [row.allEntries],
+  );
+  const disabled = actionBusy !== null;
+  const isFolderBusy =
+    actionBusy === "stage:batch" ||
+    actionBusy === "unstage:batch" ||
+    actionBusy === "stage:all" ||
+    actionBusy === "unstage:all";
+
+  const baseName = basename(row.path);
+  const iconUrl = folderIconUrl(baseName, row.isExpanded);
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div
+          id={`scm-row-${row.key}`}
+          data-focused={focused || undefined}
+          role="option"
+          aria-selected={false}
+          tabIndex={-1}
+          onMouseDown={() => onFocusRow(row.key)}
+          style={{ paddingLeft: `${8 + row.depth * 14}px` }}
+          className={cn(
+            "group relative flex h-[30px] items-center gap-1.5 rounded-md pr-2 transition-all duration-100 select-none",
+            focused ? "bg-accent/60" : "hover:bg-accent/30",
+          )}
+        >
+          <button
+            type="button"
+            onClick={() => onToggleExpand(row.path)}
+            className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left"
+          >
+            <HugeiconsIcon
+              icon={ArrowRight01Icon}
+              size={11}
+              strokeWidth={2}
+              className={cn(
+                "shrink-0 text-muted-foreground/75 transition-transform duration-150",
+                row.isExpanded && "rotate-90",
+              )}
+            />
+            {iconUrl ? (
+              <img src={iconUrl} alt="" className="size-4 shrink-0" />
+            ) : (
+              <HugeiconsIcon
+                icon={Folder01Icon}
+                size={14}
+                className="shrink-0 text-muted-foreground"
+              />
+            )}
+            <span
+              className={cn(
+                "truncate text-[12px] leading-tight text-foreground/90",
+                focused && "font-semibold text-foreground",
+              )}
+              title={row.path}
+            >
+              {row.name}
+            </span>
+            <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/60 font-mono">
+              ({row.fileCount})
+            </span>
+          </button>
+
+          {hasUnstaged ? (
+            <div className="flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100 data-[focused=true]:opacity-100">
+              <IconActionButton
+                label={`Discard changes in ${row.name}`}
+                disabled={disabled}
+                side="top"
+                onClick={() => onDiscardFolder(row.allEntries, row.path)}
+              >
+                <HugeiconsIcon
+                  icon={RemoveSquareIcon}
+                  size={11}
+                  strokeWidth={1.9}
+                />
+              </IconActionButton>
+            </div>
+          ) : null}
+
+          <span className="flex size-5 shrink-0 items-center justify-center">
+            {isFolderBusy ? (
+              <Spinner className="size-3" />
+            ) : (
+              <Checkbox
+                aria-label={`Stage changes in ${row.name}`}
+                checked={checkboxValue(folderCheckState)}
+                disabled={disabled}
+                onCheckedChange={() => void onToggleStageFolder(row.allEntries)}
+                className="size-3.5"
+              />
+            )}
+          </span>
+        </div>
+      </ContextMenuTrigger>
+
+      <ContextMenuContent className={COMPACT_CONTENT}>
+        <ContextMenuItem
+          className={COMPACT_ITEM}
+          onSelect={() => onToggleExpand(row.path)}
+        >
+          {row.isExpanded ? "Collapse Folder" : "Expand Folder"}
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem
+          className={COMPACT_ITEM}
+          disabled={disabled}
+          onSelect={() => void onToggleStageFolder(row.allEntries)}
+        >
+          {folderCheckState === "checked"
+            ? "Unstage All Changes in Folder"
+            : "Stage All Changes in Folder"}
+        </ContextMenuItem>
+        {hasUnstaged ? (
+          <ContextMenuItem
+            className={COMPACT_ITEM}
+            variant="destructive"
+            disabled={disabled}
+            onSelect={() => onDiscardFolder(row.allEntries, row.path)}
+          >
+            Discard All Changes in Folder
+          </ContextMenuItem>
+        ) : null}
+        <ContextMenuSeparator />
+        <ContextMenuItem
+          className={COMPACT_ITEM}
+          onSelect={() => void copyToClipboard(row.path)}
+        >
+          Copy Relative Path
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+});
 
 const EntryRow = memo(function EntryRow({
   row,
@@ -1241,7 +1635,12 @@ const EntryRow = memo(function EntryRow({
   const isSelected = selectedPath === entry.path;
   const fileName = basename(entry.path);
   const iconUrl = fileIconUrl(fileName);
-  const pathLabel = entryPathLabel(entry);
+  const isTree = !!row.isTree;
+  const pathLabel = isTree
+    ? entry.originalPath
+      ? `${entry.originalPath} -> ${fileName}`
+      : null
+    : entryPathLabel(entry);
   const showDiscard = entry.unstaged;
   const isStageBusy =
     actionBusy === `stage:${entry.path}` ||
@@ -1266,8 +1665,14 @@ const EntryRow = memo(function EntryRow({
           aria-selected={isSelected}
           tabIndex={-1}
           onMouseDown={() => onFocusRow(row.key)}
+          style={
+            isTree
+              ? { paddingLeft: `${8 + (row.depth ?? 0) * 14}px` }
+              : undefined
+          }
           className={cn(
-            "group relative flex h-[30px] items-center gap-2 rounded-md pl-2 pr-2 transition-all duration-100",
+            "group relative flex h-[30px] items-center gap-1.5 rounded-md pr-2 transition-all duration-100",
+            !isTree && "pl-2",
             focused
               ? "bg-accent/60"
               : isSelected
@@ -1291,8 +1696,9 @@ const EntryRow = memo(function EntryRow({
               onFocusRow(row.key);
               void onSelectFile(entry);
             }}
-            className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
+            className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left"
           >
+            {isTree ? <span className="w-[11px] shrink-0" /> : null}
             {iconUrl ? (
               <img src={iconUrl} alt="" className="size-4 shrink-0" />
             ) : (

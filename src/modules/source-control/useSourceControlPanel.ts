@@ -67,7 +67,7 @@ export type SourceControlFileEntry = {
 };
 
 export type PendingDiscard = {
-  scope: "single" | "all";
+  scope: "single" | "all" | "folder";
   count: number;
   label: string;
 };
@@ -102,10 +102,16 @@ type SourceControlPanelState = {
   selectFile: (entry: SourceControlFileEntry) => Promise<void>;
   stageEntry: (entry: SourceControlEntry) => Promise<void>;
   unstageEntry: (entry: SourceControlEntry) => Promise<void>;
+  stageFiles: (paths: string[]) => Promise<void>;
+  unstageFiles: (paths: string[]) => Promise<void>;
   toggleStageFile: (entry: SourceControlFileEntry) => Promise<void>;
   toggleAll: () => Promise<void>;
   requestDiscardEntry: (entry: SourceControlEntry) => void;
   requestDiscardFile: (entry: SourceControlFileEntry) => void;
+  requestDiscardFolder: (
+    entries: SourceControlFileEntry[],
+    folderPath: string,
+  ) => void;
   requestDiscardAll: () => void;
   confirmPendingDiscard: () => Promise<void>;
   cancelPendingDiscard: () => void;
@@ -405,6 +411,7 @@ export function useSourceControlPanel(
   const [pendingDiscard, setPendingDiscard] = useState<
     | { scope: "single"; entry: SourceControlEntry }
     | { scope: "all"; entries: SourceControlEntry[] }
+    | { scope: "folder"; entries: SourceControlEntry[]; label: string }
     | null
   >(null);
   const selectedRef = useRef<DiffSelection | null>(null);
@@ -837,6 +844,34 @@ export function useSourceControlPanel(
     [repo, runMutation],
   );
 
+  const stageFiles = useCallback(
+    async (pathsToStage: string[]) => {
+      if (!repo || pathsToStage.length === 0) return;
+      const paths = new Set(pathsToStage);
+      await runMutation(
+        "stage:batch",
+        (s) => optimisticStage(s, paths),
+        () => native.gitStage(repo.repoRoot, [...paths]),
+        [...paths],
+      );
+    },
+    [repo, runMutation],
+  );
+
+  const unstageFiles = useCallback(
+    async (pathsToUnstage: string[]) => {
+      if (!repo || pathsToUnstage.length === 0) return;
+      const paths = new Set(pathsToUnstage);
+      await runMutation(
+        "unstage:batch",
+        (s) => optimisticUnstage(s, paths),
+        () => native.gitUnstage(repo.repoRoot, [...paths]),
+        [...paths],
+      );
+    },
+    [repo, runMutation],
+  );
+
   const toggleAll = useCallback(async () => {
     if (headerCheckState === "checked") await unstageAllEntries();
     else await stageAllEntries();
@@ -858,6 +893,32 @@ export function useSourceControlPanel(
           originalPath: entry.originalPath,
           untracked: entry.untracked,
         },
+      });
+    },
+    [repo, summary.busyAction],
+  );
+
+  const requestDiscardFolder = useCallback(
+    (entries: SourceControlFileEntry[], folderPath: string) => {
+      if (!repo || summary.busyAction) return;
+      const unstaged = entries
+        .filter((e) => e.unstaged)
+        .map((entry) => ({
+          key: `-:${entry.path}`,
+          path: entry.path,
+          mode: "-" as DiffMode,
+          indexStatus: " ",
+          worktreeStatus: entry.statusCode,
+          statusLabel: entry.statusLabel,
+          statusCode: entry.statusCode,
+          originalPath: entry.originalPath,
+          untracked: entry.untracked,
+        }));
+      if (unstaged.length === 0) return;
+      setPendingDiscard({
+        scope: "folder",
+        entries: unstaged,
+        label: folderPath,
       });
     },
     [repo, summary.busyAction],
@@ -999,6 +1060,15 @@ export function useSourceControlPanel(
         label: pendingDiscard.entry.path,
       };
     }
+    if (pendingDiscard.scope === "folder") {
+      return {
+        scope: "folder",
+        count: pendingDiscard.entries.length,
+        label: `${pendingDiscard.entries.length} ${
+          pendingDiscard.entries.length === 1 ? "file" : "files"
+        } in "${pendingDiscard.label}"`,
+      };
+    }
     return {
       scope: "all",
       count: pendingDiscard.entries.length,
@@ -1038,10 +1108,13 @@ export function useSourceControlPanel(
     selectFile,
     stageEntry,
     unstageEntry,
+    stageFiles,
+    unstageFiles,
     toggleStageFile,
     toggleAll,
     requestDiscardEntry,
     requestDiscardFile,
+    requestDiscardFolder,
     requestDiscardAll,
     confirmPendingDiscard,
     cancelPendingDiscard,
