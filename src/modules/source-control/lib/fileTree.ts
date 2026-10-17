@@ -86,7 +86,7 @@ export function buildFileTree(entries: SourceControlFileEntry[]): TreeFolderNode
   }
 
   function convertAndCompact(raw: RawFolder, isRoot: boolean): TreeFolderNode {
-    let folderChildren: TreeFolderNode[] = [];
+    const folderChildren: TreeFolderNode[] = [];
     for (const sub of raw.folders.values()) {
       folderChildren.push(convertAndCompact(sub, false));
     }

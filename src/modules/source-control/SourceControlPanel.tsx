@@ -130,7 +130,7 @@ const ROW_HEIGHTS = {
   folder: 30,
 } as const;
 
-export type ViewMode = "list" | "tree";
+export type { ViewMode };
 
 type RowDescriptor =
   | { kind: "banner-diverged"; key: string }
