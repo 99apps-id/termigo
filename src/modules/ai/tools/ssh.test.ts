@@ -91,6 +91,19 @@ function makeCtx(overrides?: Partial<ToolContext>): ToolContext {
   };
 }
 
+const OPTS = { toolCallId: "test", messages: [] } as never;
+
+type Exec = (
+  args: Record<string, unknown>,
+  options: { toolCallId: string; messages: never[] },
+) => Promise<unknown>;
+
+function execOf(tool: { execute?: unknown }): Exec {
+  const fn = tool.execute;
+  if (typeof fn !== "function") throw new Error("tool has no execute");
+  return fn as Exec;
+}
+
 describe("buildSshTools", () => {
   it("lists saved connections and includes active session status", async () => {
     mockActiveSession = {
@@ -101,9 +114,9 @@ describe("buildSshTools", () => {
 
     const ctx = makeCtx();
     const tools = buildSshTools(ctx);
-    const result = (await tools.ssh_list_connections.execute(
+    const result = (await execOf(tools.ssh_list_connections)(
       {},
-      { toolCallId: "1" },
+      OPTS,
     )) as { count: number; connections: Array<{ id: string }>; active_session: unknown };
 
     expect(result.count).toBe(2);
@@ -118,9 +131,9 @@ describe("buildSshTools", () => {
   it("filters saved connections by name or host", async () => {
     const ctx = makeCtx();
     const tools = buildSshTools(ctx);
-    const result = (await tools.ssh_list_connections.execute(
+    const result = (await execOf(tools.ssh_list_connections)(
       { filter: "staging" },
-      { toolCallId: "2" },
+      OPTS,
     )) as { count: number; connections: Array<{ id: string; name: string }> };
 
     expect(result.count).toBe(1);
@@ -132,9 +145,9 @@ describe("buildSshTools", () => {
     const ctx = makeCtx({ openSshTab });
     const tools = buildSshTools(ctx);
 
-    const result = (await tools.ssh_connect.execute(
+    const result = (await execOf(tools.ssh_connect)(
       { connection_id: "conn-1" },
-      { toolCallId: "3" },
+      OPTS,
     )) as { connected: boolean; tab_id: number; connection_id: string };
 
     expect(openSshTab).toHaveBeenCalledWith("conn-1", "Production VPS");
@@ -162,9 +175,9 @@ describe("buildSshTools", () => {
     });
     const tools = buildSshTools(ctx);
 
-    const result = (await tools.ssh_run_command.execute(
+    const result = (await execOf(tools.ssh_run_command)(
       { command: "uname -a" },
-      { toolCallId: "4" },
+      OPTS,
     )) as { stdout: string; exit_code: number; remote: boolean; session_id: number };
     expect(sshExecMock).toHaveBeenCalledWith(42, "cd '/root' && uname -a", 60);
     expect(result.remote).toBe(true);
@@ -192,9 +205,9 @@ describe("buildSshTools", () => {
     });
     const tools = buildSshTools(ctx);
 
-    const result = (await tools.ssh_run_command.execute(
+    const result = (await execOf(tools.ssh_run_command)(
       { command: "true" },
-      { toolCallId: "4b" },
+      OPTS,
     )) as { stdout: string; exit_code: number; remote: boolean; info?: string };
 
     expect(sshExecMock).toHaveBeenCalledWith(42, "true", 60);
@@ -208,9 +221,9 @@ describe("buildSshTools", () => {
     const ctx = makeCtx({ getRemoteSession: () => null });
     const tools = buildSshTools(ctx);
 
-    const result = (await tools.ssh_run_command.execute(
+    const result = (await execOf(tools.ssh_run_command)(
       { command: "uptime" },
-      { toolCallId: "5" },
+      OPTS,
     )) as { error: string };
 
     expect(result.error).toContain("No active SSH session");
@@ -228,9 +241,9 @@ describe("buildSshTools", () => {
     });
     const tools = buildSshTools(ctx);
 
-    const result = (await tools.ssh_active_session.execute(
+    const result = (await execOf(tools.ssh_active_session)(
       {},
-      { toolCallId: "6" },
+      OPTS,
     )) as { connected: boolean; session_id: number; cwd: string; host_label: string };
 
     expect(result.connected).toBe(true);
