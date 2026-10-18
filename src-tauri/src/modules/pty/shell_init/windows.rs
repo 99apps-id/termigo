@@ -317,13 +317,29 @@ fn prepare_wsl_bash_rcfile(distro: &str) -> Result<String, String> {
 
 fn prepare_wsl_fish_conf_d(distro: &str) -> Result<(), String> {
     let home = crate::modules::workspace::wsl_home_blocking(distro)?;
-    let linux_dir = format!("{}/.config/fish/conf.d", home.trim_end_matches('/'));
+    // fish reads conf.d from $XDG_CONFIG_HOME/fish when set to an absolute path;
+    // probing sh (the same environment wsl.exe hands to fish) is what the shell
+    // itself would resolve.
+    let config_home = wsl_xdg_config_home(distro)
+        .unwrap_or_else(|| format!("{}/.config", home.trim_end_matches('/')));
+    let linux_dir = format!("{}/fish/conf.d", config_home.trim_end_matches('/'));
     let unc_dir = crate::modules::workspace::wsl_path_to_unc(distro, &linux_dir);
     fs::create_dir_all(&unc_dir).map_err(|e| format!("create {}: {e}", unc_dir.display()))?;
     let unc_file = unc_dir.join("termigo.fish");
     let content = normalize_script(FISH_INIT_SCRIPT);
     write_if_changed(&unc_file, &content)?;
     Ok(())
+}
+
+fn wsl_xdg_config_home(distro: &str) -> Option<String> {
+    let out = crate::modules::workspace::wsl_exec_capture(
+        distro,
+        "sh",
+        &["-c", r#"printf %s "${XDG_CONFIG_HOME:-}""#],
+    )
+    .ok()?;
+    let value = crate::modules::workspace::normalize_wsl_value(out, "");
+    value.starts_with('/').then_some(value)
 }
 
 fn integration_root() -> Result<PathBuf, String> {

@@ -238,7 +238,14 @@ fn prepare_bash_rcfile() -> Result<PathBuf, String> {
 
 fn prepare_fish_conf_d() -> Result<(), String> {
     let home = dirs::home_dir().ok_or_else(|| "could not resolve home dir".to_string())?;
-    let dir = home.join(".config").join("fish").join("conf.d");
+    // fish reads conf.d from $XDG_CONFIG_HOME/fish when that variable is set to
+    // an absolute path (the default ~/.config/fish applies otherwise). Writing
+    // to the default while fish reads elsewhere would silently drop integration.
+    let config_home = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .unwrap_or_else(|| home.join(".config"));
+    let dir = config_home.join("fish").join("conf.d");
     fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
     write_if_changed(&dir.join("termigo.fish"), FISH_INIT)?;
     Ok(())

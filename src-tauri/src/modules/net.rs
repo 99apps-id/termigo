@@ -216,7 +216,7 @@ async fn resolve_and_classify(host: &str) -> Result<(IpKind, Vec<IpAddr>), Strin
 
 use std::net::ToSocketAddrs;
 
-fn validate_url(url: &str, allow_private: bool) -> Result<reqwest::Url, String> {
+fn validate_url(url: &str) -> Result<reqwest::Url, String> {
     let parsed = reqwest::Url::parse(url).map_err(|e| format!("invalid url: {e}"))?;
     match parsed.scheme() {
         "http" | "https" => {}
@@ -231,8 +231,6 @@ fn validate_url(url: &str, allow_private: bool) -> Result<reqwest::Url, String> 
     if is_blocked_host_name(host) {
         return Err(format!("host not allowed: {host}"));
     }
-    // The actual IP classification has to be async — caller does it.
-    let _ = allow_private;
     Ok(parsed)
 }
 
@@ -293,7 +291,7 @@ pub async fn lm_ping(base_url: String) -> Result<u16, String> {
         return Err("empty base url".into());
     }
     let probe = format!("{trimmed}/models");
-    let parsed = validate_url(&probe, true)?;
+    let parsed = validate_url(&probe)?;
     let host = parsed
         .host_str()
         .ok_or_else(|| "missing host".to_string())?
@@ -409,7 +407,7 @@ fn build_safe_client(
 ) -> Result<reqwest::Client, String> {
     let mut builder = reqwest::Client::builder().connect_timeout(Duration::from_secs(10));
     if let Some(proxy_url) = proxy_url.filter(|s| !s.trim().is_empty()) {
-        validate_url(proxy_url, true)?;
+        validate_url(proxy_url)?;
         let proxy = reqwest::Proxy::all(proxy_url).map_err(|e| format!("invalid proxy url: {e}"))?;
         builder = builder.proxy(proxy);
     }
@@ -491,7 +489,7 @@ pub async fn ai_http_request(
     proxy_url: Option<String>,
 ) -> Result<HttpResponse, String> {
     let allow_private = allow_private_network.unwrap_or(false);
-    let parsed = validate_url(&url, allow_private)?;
+    let parsed = validate_url(&url)?;
     let host = parsed
         .host_str()
         .ok_or_else(|| "missing host".to_string())?
@@ -624,7 +622,7 @@ async fn stream_http(
             return Err(e);
         }
     };
-    let parsed = match validate_url(&url, allow_private) {
+    let parsed = match validate_url(&url) {
         Ok(p) => p,
         Err(e) => {
             let _ = on_event.send(AiStreamEvent::Error { message: e.clone() });
@@ -901,18 +899,18 @@ mod tests {
     #[test]
     fn validate_url_blocks_userinfo_and_metadata_hostnames() {
         // URLs with userinfo can confuse browsers / leak creds in redirects.
-        assert!(validate_url("http://user:pass@example.com/", true).is_err());
+        assert!(validate_url("http://user:pass@example.com/").is_err());
         // Cloud metadata-by-name.
-        assert!(validate_url("http://metadata.google.internal/", true).is_err());
-        assert!(validate_url("http://metadata/", true).is_err());
-        assert!(validate_url("http://metadata.azure.com/", true).is_err());
+        assert!(validate_url("http://metadata.google.internal/").is_err());
+        assert!(validate_url("http://metadata/").is_err());
+        assert!(validate_url("http://metadata.azure.com/").is_err());
     }
 
     #[test]
     fn validate_url_rejects_non_http_schemes() {
-        assert!(validate_url("ftp://example.com/", true).is_err());
-        assert!(validate_url("file:///etc/passwd", true).is_err());
-        assert!(validate_url("javascript:alert(1)", true).is_err());
+        assert!(validate_url("ftp://example.com/").is_err());
+        assert!(validate_url("file:///etc/passwd").is_err());
+        assert!(validate_url("javascript:alert(1)").is_err());
     }
 
     #[test]

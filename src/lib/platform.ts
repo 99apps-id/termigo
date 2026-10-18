@@ -1,6 +1,11 @@
 import { platform } from "@tauri-apps/plugin-os";
 
-/** The OS family, or "" when it cannot be read (e.g. outside the Tauri host). */
+/** The OS family, or "" when it cannot be read (e.g. outside the Tauri host).
+ *
+ * An empty string deliberately makes every IS_* flag false. That defaults to
+ * POSIX-like behaviour, which is the safe fallback outside Tauri: assuming
+ * Windows here would make shell quoting wrong on real Windows, while assuming
+ * POSIX only degrades gracefully (Ctrl instead of Cmd, etc.). */
 export const PLATFORM = (() => {
   try {
     return platform();

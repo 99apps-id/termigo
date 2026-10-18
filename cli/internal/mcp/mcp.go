@@ -42,6 +42,38 @@ var allowedMCPCommands = map[string]struct{}{
 	"ruby": {}, "rustc": {}, "cargo": {},
 }
 
+// inlineCodeArgs are flags that make an otherwise-allowlisted interpreter run
+// code supplied on the command line. A project registry is attacker-controlled
+// (it ships in the repo), and `python3 -c '...'` would be arbitrary execution
+// without even naming a package, which is exactly what the allow-list exists to
+// prevent. Only checked for project scope; user scope is the machine owner.
+var inlineCodeArgs = map[string]struct{}{
+	"-c": {}, "--call": {}, "-e": {}, "--eval": {}, "-p": {}, "--print": {},
+	"--exec": {}, "eval": {},
+}
+
+func validateMCPArgs(command string, args []string) error {
+	base := strings.Trim(strings.TrimSpace(command), `"'`)
+	base = filepath.Base(base)
+	if ext := filepath.Ext(base); ext != "" {
+		if lowered := strings.ToLower(ext); lowered == ".exe" || lowered == ".cmd" || lowered == ".bat" {
+			base = strings.TrimSuffix(base, ext)
+		}
+	}
+	switch strings.ToLower(base) {
+	case "python", "python3", "node", "bun", "bunx", "deno", "ruby", "npx", "uvx", "npm", "pnpm", "yarn":
+	default:
+		return nil
+	}
+	for _, arg := range args {
+		name := strings.ToLower(strings.SplitN(strings.TrimSpace(arg), "=", 2)[0])
+		if _, bad := inlineCodeArgs[name]; bad {
+			return fmt.Errorf("MCP argument %q is not allowed in project scope", arg)
+		}
+	}
+	return nil
+}
+
 // validateMCPCommand ensures the MCP server executable is allowed.
 // User-scoped configuration is explicitly configured by the machine owner.
 // Project-scoped configuration from git repositories is checked against the allow-list.
@@ -180,6 +212,11 @@ func loadFile(path, scope string) ([]Server, error) {
 		if err := validateMCPCommand(server.Command, scope); err != nil {
 			return nil, fmt.Errorf("%s: server %q: %w", path, name, err)
 		}
+		if scope != "user" {
+			if err := validateMCPArgs(server.Command, server.Args); err != nil {
+				return nil, fmt.Errorf("%s: server %q: %w", path, name, err)
+			}
+		}
 		servers = append(servers, Server{
 			Name:    name,
 			Command: server.Command,
@@ -204,6 +241,9 @@ func Add(workspace, name string, server config.MCPServer) (Server, error) {
 		return Server{}, errors.New("server command must not be empty")
 	}
 	if err := validateMCPCommand(server.Command, "project"); err != nil {
+		return Server{}, err
+	}
+	if err := validateMCPArgs(server.Command, server.Args); err != nil {
 		return Server{}, err
 	}
 

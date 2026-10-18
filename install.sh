@@ -52,7 +52,7 @@ APPS_DIR="${HOME}/.local/share/applications"
 ICONS_DIR="${HOME}/.local/share/icons/hicolor/512x512/apps"
 OPT_DIR="/opt/termigo"
 TARGET_VERSION="latest"
-DEFAULT_FORMAT="appimage"
+DEFAULT_FORMAT="auto"
 ACTION=""
 NON_INTERACTIVE=0
 
@@ -195,13 +195,94 @@ install_cli() {
   fi
 }
 
-# --- Mode 1: Install Termigo Desktop (AppImage) ---
+# --- Mode 1: Install Termigo Desktop (Native DEB / AppImage) ---
 install_desktop() {
   info "Memulai instalasi Termigo Desktop..."
   get_release_info "$TARGET_VERSION"
 
   mkdir -p "$SHARE_DIR" "$APPS_DIR" "$ICONS_DIR" "$BIN_DIR"
   ensure_local_bin_in_path
+
+  local prefer_deb=0
+  if [ "$DEFAULT_FORMAT" = "deb" ]; then
+    prefer_deb=1
+  elif [ "$DEFAULT_FORMAT" = "auto" ] && command -v dpkg-deb >/dev/null 2>&1; then
+    prefer_deb=1
+  fi
+
+  if [ "$prefer_deb" = "1" ]; then
+    local deb_asset="Termigo_${VERSION_NUM}_${ARCH_TAG}.deb"
+    local deb_url="https://github.com/${GITHUB_REPO}/releases/download/${TAG_NAME}/${deb_asset}"
+    local target_deb="${SHARE_DIR}/termigo.deb"
+
+    info "Mengunduh package native DEB: ${deb_asset}..."
+    if http_get "$deb_url" "$target_deb"; then
+      info "Mengekstrak package native Termigo DEB..."
+      local deb_extract_dir="${SHARE_DIR}/native"
+      mkdir -p "$deb_extract_dir"
+      dpkg-deb -x "$target_deb" "$deb_extract_dir"
+
+      local bin_source="${deb_extract_dir}/usr/bin/termigo"
+      local cli_source="${deb_extract_dir}/usr/bin/termigo-cli"
+      if [ -x "$bin_source" ]; then
+        mkdir -p "${SHARE_DIR}/bin"
+        cp -f "$bin_source" "${SHARE_DIR}/bin/termigo"
+        chmod +x "${SHARE_DIR}/bin/termigo"
+
+        if [ -x "$cli_source" ]; then
+          cp -f "$cli_source" "${SHARE_DIR}/bin/termigo-cli"
+          chmod +x "${SHARE_DIR}/bin/termigo-cli"
+        fi
+
+        if [ -d "${deb_extract_dir}/usr/share/icons/hicolor" ]; then
+          mkdir -p "${HOME}/.local/share/icons/hicolor"
+          cp -rf "${deb_extract_dir}/usr/share/icons/hicolor/"* "${HOME}/.local/share/icons/hicolor/" 2>/dev/null || true
+        fi
+
+        cat << EOF > "${BIN_DIR}/termigo"
+#!/bin/sh
+# Fix WebKitGTK DMA-BUF renderer deadlock / freeze on Linux (Wayland, Intel, AMD, NVIDIA)
+export WEBKIT_DISABLE_DMABUF_RENDERER="\${WEBKIT_DISABLE_DMABUF_RENDERER:-1}"
+exec "${SHARE_DIR}/bin/termigo" "\$@"
+EOF
+        chmod +x "${BIN_DIR}/termigo"
+        success "Binary native terpasang di ${SHARE_DIR}/bin/termigo dan wrapper di ${BIN_DIR}/termigo"
+
+        local target_icon="${ICONS_DIR}/termigo.png"
+        local logo_src="${SCRIPT_DIR}/public/logo.png"
+        if [ -f "$logo_src" ]; then
+          cp -f "$logo_src" "$target_icon"
+        fi
+
+        cat << EOF > "${APPS_DIR}/termigo.desktop"
+[Desktop Entry]
+Name=Termigo
+Comment=Terminal-first, AI-native development environment
+Exec=env WEBKIT_DISABLE_DMABUF_RENDERER=1 ${BIN_DIR}/termigo %U
+Icon=termigo
+Terminal=false
+Type=Application
+Categories=Development;IDE;TerminalEmulator;
+StartupWMClass=termigo
+MimeType=text/plain;
+EOF
+        chmod +x "${APPS_DIR}/termigo.desktop"
+        if command -v update-desktop-database >/dev/null 2>&1; then
+          update-desktop-database "${APPS_DIR}" 2>/dev/null || true
+        fi
+        success "Desktop shortcut terpasang di ${APPS_DIR}/termigo.desktop"
+
+        install_cli
+        echo ""
+        success "${BOLD}Instalasi Desktop Native Selesai!${RESET}"
+        info "Anda dapat membuka Termigo melalui menu aplikasi atau menjalankan: ${BOLD}termigo${RESET}"
+        info "Companion Go CLI dapat dipanggil melalui: ${BOLD}termi-go help${RESET} atau ${BOLD}termigo-go help${RESET}"
+        return 0
+      fi
+    else
+      warn "Gagal mengunduh DEB atau aset tidak ditemukan. Beralih ke fallback AppImage..."
+    fi
+  fi
 
   local asset_name="Termigo_${VERSION_NUM}_${ARCH_TAG}.AppImage"
   local download_url="https://github.com/${GITHUB_REPO}/releases/download/${TAG_NAME}/${asset_name}"
@@ -459,6 +540,33 @@ build_from_source() {
     cp -f "$release_bin" "${BIN_DIR}/termigo"
     chmod +x "${BIN_DIR}/termigo"
     success "Binary berhasil dikompilasi dan dipasang di ${BIN_DIR}/termigo"
+
+    local logo_src="${SCRIPT_DIR}/public/logo.png"
+    local target_icon="${ICONS_DIR}/termigo.png"
+    mkdir -p "$ICONS_DIR" "$APPS_DIR"
+    if [ -f "$logo_src" ]; then
+      cp -f "$logo_src" "$target_icon"
+    elif [ -f "${SCRIPT_DIR}/termigo.png" ]; then
+      cp -f "${SCRIPT_DIR}/termigo.png" "$target_icon"
+    fi
+
+    cat << EOF > "${APPS_DIR}/termigo.desktop"
+[Desktop Entry]
+Name=Termigo
+Comment=Terminal-first, AI-native development environment
+Exec=env WEBKIT_DISABLE_DMABUF_RENDERER=1 ${BIN_DIR}/termigo %U
+Icon=${target_icon}
+Terminal=false
+Type=Application
+Categories=Development;IDE;TerminalEmulator;
+StartupWMClass=termigo
+MimeType=text/plain;
+EOF
+    chmod +x "${APPS_DIR}/termigo.desktop"
+    if command -v update-desktop-database >/dev/null 2>&1; then
+      update-desktop-database "${APPS_DIR}" 2>/dev/null || true
+    fi
+    success "Desktop shortcut terpasang di ${APPS_DIR}/termigo.desktop"
   else
     error "Kompilasi selesai tetapi binary tidak ditemukan di src-tauri/target/release/termigo"
     exit 1
@@ -584,7 +692,7 @@ show_help() {
 Penggunaan: ./install.sh [OPSI]
 
 Opsi Utama:
-  --desktop             Instalasi Termigo Desktop AppImage + CLI
+  --desktop             Instalasi Termigo Desktop (Native DEB / AppImage) + CLI
   --headless, --vps     Instalasi mode Headless VPS (Telegram relay + systemd)
   --cli                 Hanya pasang Go Companion CLI (termi-go)
   --source              Build & install dari source code lokal
@@ -592,6 +700,7 @@ Opsi Utama:
   --uninstall           Hapus instalasi Termigo dari sistem
 
 Opsi Tambahan:
+  --format <fmt>        Format paket desktop (auto, deb, appimage; default: auto)
   --version <v>         Tentukan versi rilis (default: latest, contoh: v0.9.24)
   --prefix <path>       Prefix lokasi instalasi (default: ~/.local)
   -y, --non-interactive Jalankan tanpa pertanyaan interaktif
@@ -599,6 +708,7 @@ Opsi Tambahan:
 
 Contoh:
   ./install.sh --desktop
+  ./install.sh --desktop --format deb
   ./install.sh --headless
   ./install.sh --cli
 EOF
@@ -612,6 +722,7 @@ while [ $# -gt 0 ]; do
     --source) ACTION="source"; shift ;;
     --status) ACTION="status"; shift ;;
     --uninstall) ACTION="uninstall"; shift ;;
+    --format) DEFAULT_FORMAT="$2"; shift 2 ;;
     --version) TARGET_VERSION="$2"; shift 2 ;;
     --prefix) INSTALL_PREFIX="$2"; BIN_DIR="${INSTALL_PREFIX}/bin"; shift 2 ;;
     -y|--non-interactive) NON_INTERACTIVE=1; shift ;;

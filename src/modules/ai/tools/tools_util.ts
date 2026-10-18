@@ -1,3 +1,4 @@
+import { quoteShellArg } from "@/lib/shellQuote";
 import { invoke } from "@tauri-apps/api/core";
 import { tool } from "ai";
 import { z } from "zod";
@@ -425,9 +426,4 @@ export function buildArchiveTool(ctx: ToolContext) {
       },
     }),
   } as const;
-}
-
-function quoteShellArg(arg: string): string {
-  if (/^[A-Za-z0-9_.\-/]+$/.test(arg)) return arg;
-  return `'${arg.replace(/'/g, "'\\''")}'`;
 }

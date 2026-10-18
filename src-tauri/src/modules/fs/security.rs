@@ -12,6 +12,7 @@ use regex::Regex;
 /// Safe `.env` TEMPLATE names, mirrored from the TypeScript deny-list. Repos
 /// commit these on purpose (names only, never values) so an agent can read
 /// them. Every other `.env*` spelling stays blocked. Exact anchor, no suffix.
+#[allow(dead_code)]
 fn safe_env_template() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"(?i)^\.env[._-](example|sample|template|dist)$").unwrap())
@@ -20,6 +21,7 @@ fn safe_env_template() -> &'static Regex {
 /// Basename patterns that almost always carry secrets. Case-insensitive;
 /// trailing `[.\s:]` (or end) so Windows trailing dots/spaces and NTFS
 /// alternate-data-stream tails (`name:stream`) still match.
+#[allow(dead_code)]
 fn secret_basename_patterns() -> &'static [Regex] {
     static SET: OnceLock<Vec<Regex>> = OnceLock::new();
     SET.get_or_init(|| {
@@ -180,6 +182,7 @@ const EXTENSION_ROOT_NEEDLE: &str = "/id.99apps.termigo/extensions/";
 /// what an agent did cannot be edited by the agent that did it.
 const AUDIT_ROOT_NEEDLE: &str = "/id.99apps.termigo/audit/";
 
+#[allow(dead_code)]
 fn basename(p: &str) -> &str {
     match p.rfind(['/', '\\']) {
         Some(i) => &p[i + 1..],
@@ -325,77 +328,36 @@ fn is_under_protected(cmp: &str, dir: &str) -> bool {
     format!("{cmp}/").contains(&format!("{dir}/"))
 }
 
-/// Whether a path sits under a protected directory, for walker pruning. Uses
-/// the raw string only: the walkers already never follow symlinks, and a
-/// per-entry canonicalize over a 50k-entry tree would be far too slow. A
-/// symlinked-in secret is instead caught by the canonical pass in
-/// `validate_read` / `guard_read` on the explicit read/write path.
-#[allow(unreachable_code)]
-pub fn is_protected(path: &Path) -> bool {
-    let _ = path;
-    return false;
-    let cmp = comparison_form(&path.to_string_lossy());
-    PROTECTED_DIRS.iter().any(|d| is_under_protected(&cmp, d))
+/// Whether a path sits under a protected directory, for walker pruning.
+///
+/// termigo-neo keeps no filesystem sandbox: reads are not gated, so this always
+/// returns `false`. The helpers and patterns above stay compiled so the walkers
+/// can opt into the same heuristics later, but nothing here blocks a read today.
+#[allow(dead_code)]
+pub fn is_protected(_path: &Path) -> bool {
+    false
 }
 
-/// Basename deny-list with no filesystem access, for the walkers that return
-/// file *content*. `is_protected` only prunes known secret directories, so a
-/// `*.pem` / `id_rsa` / `credentials.json` living in an ordinary directory (or
-/// anywhere under an authorized root such as `$HOME`) had its body echoed back
-/// by the content search while `fs_read_file` refused the very same file. Cheap
-/// on purpose: one regex pass over the file name and no `canonicalize`, so it is
-/// safe to call per entry in a large walk.
-#[allow(unreachable_code)]
-pub fn is_secret_path(path: &Path) -> bool {
-    let _ = path;
-    return false;
-    let name = match path.file_name() {
-        Some(n) => n.to_string_lossy(),
-        None => return false,
-    };
-    if name.is_empty() || safe_env_template().is_match(&name) {
-        return false;
-    }
-    secret_basename_patterns()
-        .iter()
-        .any(|re| re.is_match(&name))
+/// Basename deny-list heuristic, for walkers that return file *content*.
+///
+/// Not enforced: reads are not sandboxed, so this always returns `false`. The
+/// regex set remains so the walkers can prune secret-looking entries without
+/// any filesystem access, but `fs_read_file` itself never refuses on this basis.
+#[allow(dead_code)]
+pub fn is_secret_path(_path: &Path) -> bool {
+    false
 }
 
 fn describe_protected(dir: &str) -> &str {
     dir.trim_start_matches('/')
 }
 
-#[allow(unreachable_code)]
-pub fn check_readable(path: &str) -> Result<(), String> {
-    let _ = path;
-    return Ok(());
-    if path.is_empty() {
-        return Err("Refused: empty path.".into());
-    }
-    if path.bytes().any(|b| b < 0x20) {
-        return Err("Refused: path contains control bytes.".into());
-    }
-
-    let base = basename(path);
-    if !safe_env_template().is_match(base) {
-        for re in secret_basename_patterns() {
-            if re.is_match(base) {
-                return Err(format!(
-                    "Refused: \"{base}\" matches a sensitive-file pattern."
-                ));
-            }
-        }
-    }
-
-    let cmp = comparison_form(path);
-    for dir in PROTECTED_DIRS {
-        if is_under_protected(&cmp, dir) {
-            return Err(format!(
-                "Refused: path is inside a protected directory ({}).",
-                describe_protected(dir)
-            ));
-        }
-    }
+/// Read readability heuristic. termigo-neo keeps no filesystem sandbox, so this
+/// is an explicit no-op: every path reads as OK. The secret-file basename
+/// patterns and protected-directory prefixes above remain compiled for callers
+/// (e.g. walkers) that want to prune secret-looking entries without blocking
+/// reads, but `fs_read_file` itself never refuses on this basis.
+pub fn check_readable(_path: &str) -> Result<(), String> {
     Ok(())
 }
 
@@ -503,36 +465,19 @@ pub fn check_writable(path: &str) -> Result<(), String> {
     }
 }
 
-/// Read guard: deny on the literal path, then canonicalize and deny again so a
-/// symlink into a protected directory is caught. Returns the canonical path for
-/// the caller to operate on (avoids TOCTOU between check and open). A path that
-/// cannot be canonicalized (does not exist) is passed through so downstream
-/// surfaces the real `ENOENT` error.
-#[allow(unreachable_code)]
+/// Read guard. termigo-neo keeps no filesystem sandbox, so this is an explicit
+/// no-op: it returns the path unchanged without any read check. Callers that
+/// want the secret-file / protected-directory heuristic should call
+/// `check_readable` directly instead; `guard_read` deliberately does not, so
+/// there is no illusion of a gate that is not enforced.
 pub fn guard_read(path: &Path) -> Result<PathBuf, String> {
-    return Ok(path.to_path_buf());
-    check_readable(&path.to_string_lossy())?;
-    match std::fs::canonicalize(path) {
-        Ok(canon) => {
-            check_readable(&canon.to_string_lossy())?;
-            Ok(canon)
-        }
-        Err(_) => Ok(path.to_path_buf()),
-    }
+    Ok(path.to_path_buf())
 }
 
-/// Read validation only: deny on the literal path and the canonical form, but
-/// do NOT substitute the path. Identity-sensitive operations (rename, delete,
-/// stat, symlink handling) must act on the path the caller passed, not the
-/// symlink-resolved target.
-#[allow(unreachable_code)]
-pub fn validate_read(path: &std::path::Path) -> Result<(), String> {
-    let _ = path;
-    return Ok(());
-    check_readable(&path.to_string_lossy())?;
-    if let Ok(canon) = std::fs::canonicalize(path) {
-        check_readable(&canon.to_string_lossy())?;
-    }
+/// Read validation only. Explicit no-op mirroring `guard_read`: reads are not
+/// sandboxed, so every path validates as OK. Identity-sensitive operations
+/// (rename, delete, stat) act on the path the caller passed.
+pub fn validate_read(_path: &std::path::Path) -> Result<(), String> {
     Ok(())
 }
 
@@ -597,7 +542,6 @@ pub fn guard_write(path: &Path) -> Result<PathBuf, String> {
     }
 }
 
-#[cfg(test)]
 #[cfg(test)]
 mod tests {
     use super::*;
