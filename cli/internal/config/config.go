@@ -193,7 +193,9 @@ func Save(config Config) error {
 	if err != nil {
 		return fmt.Errorf("encode config: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	// 0700 to match EnsureHome: this directory may hold tokens/secrets, so it
+	// must not be group/other-readable when Save creates it first.
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create config directory: %w", err)
 	}
 	// Replace atomically where possible so a failed write never truncates

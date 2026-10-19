@@ -453,6 +453,14 @@ impl McpClient {
     // -----------------------------------------------------------------
 
     pub async fn shutdown(mut self) {
+        // The command is usually an `npx`/`uvx`/`bunx` wrapper that re-parents
+        // the real server, so killing only the direct child leaves the tool
+        // running (holding pipes/CPU). On Unix, kill the whole tree first; on
+        // Windows the Job Object taken below does the same.
+        #[cfg(unix)]
+        if let Some(pid) = self.child.id() {
+            crate::modules::proc::kill_tree(pid);
+        }
         let _ = self.child.kill().await;
         #[cfg(windows)]
         {

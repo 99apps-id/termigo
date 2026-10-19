@@ -270,7 +270,7 @@ func Add(workspace, name string, server config.MCPServer) (Server, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return Server{}, fmt.Errorf("create .termigo folder: %w", err)
 	}
-	if err := os.WriteFile(path, append(data, '\n'), 0o644); err != nil {
+	if err := writeRegistryFile(path, data); err != nil {
 		return Server{}, fmt.Errorf("write %s: %w", path, err)
 	}
 	return Server{Name: name, Command: server.Command, Args: server.Args, Env: server.Env, Scope: "project"}, nil
@@ -303,7 +303,7 @@ func Remove(workspace, name string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(payload, '\n'), 0o644)
+	return writeRegistryFile(path, payload)
 }
 
 func userRegistryPath() (string, error) {
@@ -312,6 +312,25 @@ func userRegistryPath() (string, error) {
 		return "", err
 	}
 	return filepath.Join(home, "mcp.json"), nil
+}
+
+// writeRegistryFile persists a marshalled registry atomically: the payload is
+// copied with a trailing newline onto a fresh buffer (json.Marshal output must
+// never be appended past its length) and written to a temp file that is
+// renamed over the target, so a crash cannot leave a torn registry behind.
+func writeRegistryFile(path string, payload []byte) error {
+	out := make([]byte, len(payload)+1)
+	copy(out, payload)
+	out[len(payload)] = '\n'
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, out, 0o644); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 // FormatRegistry renders a human-readable registry listing.

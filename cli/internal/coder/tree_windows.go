@@ -18,8 +18,9 @@ import (
 // server running: the operator saw "stopped" while the port stayed occupied.
 // A job object with kill-on-close is the Windows mechanism for the job.
 type processTree struct {
-	mu  sync.Mutex
-	job windows.Handle
+	mu       sync.Mutex
+	job      windows.Handle
+	attached bool
 }
 
 func newProcessTree() (*processTree, error) {
@@ -72,6 +73,9 @@ func (t *processTree) attach(cmd *exec.Cmd) error {
 	if err := windows.AssignProcessToJobObject(t.job, handle); err != nil {
 		return fmt.Errorf("assign process %d to job: %w", cmd.Process.Pid, err)
 	}
+	t.mu.Lock()
+	t.attached = true
+	t.mu.Unlock()
 	return nil
 }
 
@@ -81,6 +85,18 @@ func (t *processTree) terminate(cmd *exec.Cmd) error {
 	defer t.mu.Unlock()
 	if t.job == 0 {
 		return fmt.Errorf("no job object")
+	}
+	// A process that never made it into the job (AssignProcessToJobObject
+	// fails inside a nested/restricted job, common under terminals, CI and
+	// service hosts) makes TerminateJobObject succeed against an empty job.
+	// Reporting success there would skip the caller's Process.Kill fallback and
+	// leave the command running after a "cancelled" result, so report failure
+	// whenever nothing was attached.
+	if !t.attached {
+		if cmd.Process == nil {
+			return fmt.Errorf("no process was attached to the job")
+		}
+		return fmt.Errorf("process %d was not attached to the job", cmd.Process.Pid)
 	}
 	return windows.TerminateJobObject(t.job, 1)
 }

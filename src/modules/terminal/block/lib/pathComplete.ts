@@ -15,14 +15,23 @@ type DirEntry = {
 export type PathResult = { fromOffset: number; options: Completion[] };
 
 function joinRel(cwd: string, rel: string): string {
-  const base = cwd.endsWith("/") ? cwd.slice(0, -1) : cwd;
-  const clean = rel.replace(/\/$/, "");
+  const base = cwd.replace(/[\\/]+$/, "");
+  const clean = rel.replace(/[\\/]+$/, "");
   return clean ? `${base}/${clean}` : base;
+}
+
+/** Absolute for the host: POSIX `/`, Windows drive `C:\`/`C:/`, or UNC `\\host`. */
+function isAbsoluteDir(dirPart: string): boolean {
+  return (
+    dirPart.startsWith("/") ||
+    /^[A-Za-z]:[\\/]/.test(dirPart) ||
+    dirPart.startsWith("\\\\")
+  );
 }
 
 function resolveDir(dirPart: string, cwd: string): string | null {
   if (dirPart.startsWith("~")) return null; // home expansion not handled yet
-  if (dirPart.startsWith("/")) return dirPart || "/";
+  if (isAbsoluteDir(dirPart)) return dirPart;
   return joinRel(cwd, dirPart);
 }
 
@@ -32,7 +41,9 @@ export async function pathCompletions(
   token: string,
   cwd: string,
 ): Promise<PathResult | null> {
-  const slash = token.lastIndexOf("/");
+  // Split on both separators: Windows users type `dir\` and may use `C:\` or
+  // `\\host\share` roots, none of which contain a forward slash.
+  const slash = Math.max(token.lastIndexOf("/"), token.lastIndexOf("\\"));
   const dirPart = slash >= 0 ? token.slice(0, slash + 1) : "";
   const base = slash >= 0 ? token.slice(slash + 1) : token;
   const dir = resolveDir(dirPart, cwd);

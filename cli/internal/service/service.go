@@ -113,6 +113,13 @@ func installDarwin(stdout io.Writer, binary string) error {
 	if err := os.MkdirAll(agentDir, 0o755); err != nil {
 		return fmt.Errorf("cannot create LaunchAgents dir: %v", err)
 	}
+	// Logs live under the user's own Library, not the shared world-writable
+	// /tmp, where two users collide and a pre-created symlink can redirect the
+	// write.
+	logDir := filepath.Join(home, "Library", "Logs", "termigo")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		return fmt.Errorf("cannot create log dir: %v", err)
+	}
 	plistPath := filepath.Join(agentDir, launchdLabel+".plist")
 	plist := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -130,11 +137,13 @@ func installDarwin(stdout io.Writer, binary string) error {
 	<key>KeepAlive</key>
 	<true/>
 	<key>StandardOutPath</key>
-	<string>/tmp/termigo-stdout.log</string>
+	<string>%s</string>
 	<key>StandardErrorPath</key>
-	<string>/tmp/termigo-stderr.log</string>
+	<string>%s</string>
 </dict>
-</plist>`, launchdLabel, binary)
+</plist>`, launchdLabel, xmlEscape(binary),
+		xmlEscape(filepath.Join(logDir, "stdout.log")),
+		xmlEscape(filepath.Join(logDir, "stderr.log")))
 	if err := os.WriteFile(plistPath, []byte(plist), 0o644); err != nil {
 		return fmt.Errorf("cannot write plist: %v", err)
 	}
@@ -182,19 +191,23 @@ func installLinux(stdout io.Writer, binary string) error {
 		return fmt.Errorf("cannot create systemd user dir: %v", err)
 	}
 	servicePath := filepath.Join(systemDir, systemdService)
+	// systemd splits ExecStart on whitespace and treats `%` as a specifier, so
+	// a binary path with a space (or `%`) needs quoting and `%%`. The Windows
+	// branch already quotes; Linux was the outlier.
+	execStart := strings.ReplaceAll(binary, "%", "%%")
 	unit := fmt.Sprintf(`[Unit]
 Description=Termigo Telegram assistant
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=%s telegram
+ExecStart="%s" telegram
 Restart=on-failure
 RestartSec=5
 
 [Install]
 WantedBy=default.target
-`, binary)
+`, execStart)
 	if err := os.WriteFile(servicePath, []byte(unit), 0o644); err != nil {
 		return fmt.Errorf("cannot write service file: %v", err)
 	}
@@ -248,4 +261,11 @@ func systemdUserDir() (string, error) {
 		return "", err
 	}
 	return filepath.Join(home, ".config", "systemd", "user"), nil
+}
+
+// xmlEscape makes a value safe to embed in the launchd plist. A path containing
+// `&` or `<` (e.g. /Users/a&b/termigo) otherwise produces invalid XML and
+// `launchctl load` fails.
+func xmlEscape(s string) string {
+	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(s)
 }

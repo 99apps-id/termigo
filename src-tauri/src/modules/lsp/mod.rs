@@ -123,7 +123,7 @@ pub async fn lsp_resolve_root(path: String, markers: Vec<String>) -> Option<Stri
 // Stops below the home directory: a stray ~/package.json must not make a
 // server index the entire home dir.
 fn resolve_root(path: &str, markers: &[String]) -> Option<String> {
-    let home = dirs::home_dir();
+    let home = dirs::home_dir().map(|h| dir_identity(&h));
     let start = std::path::PathBuf::from(path);
     let mut dir = if start.is_dir() {
         start.as_path()
@@ -131,13 +131,29 @@ fn resolve_root(path: &str, markers: &[String]) -> Option<String> {
         start.parent()?
     };
     loop {
-        if home.as_deref() == Some(dir) {
+        if home.as_deref() == Some(dir_identity(dir).as_str()) {
             return None;
         }
         if markers.iter().any(|m| dir.join(m).exists()) {
             return Some(dir.to_string_lossy().into_owned());
         }
         dir = dir.parent()?;
+    }
+}
+
+/// Comparable identity for a directory. `dirs::home_dir()` returns backslashes
+/// on Windows while the frontend passes forward-slash canonical paths, so a
+/// raw `Path` comparison never matches and the home guard silently fails.
+/// Normalize separators, then fold case on Windows (NTFS is case-insensitive).
+fn dir_identity(p: &std::path::Path) -> String {
+    let s = p.to_string_lossy().replace('\\', "/");
+    #[cfg(windows)]
+    {
+        s.to_ascii_lowercase()
+    }
+    #[cfg(not(windows))]
+    {
+        s
     }
 }
 

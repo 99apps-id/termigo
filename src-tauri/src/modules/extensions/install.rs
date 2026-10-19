@@ -481,8 +481,14 @@ fn detect_single_root(
 }
 
 fn resolve_inside_root(root: &Path, rel: &str) -> Option<PathBuf> {
-    // Reject absolute or parent-traversal inputs.
-    if rel.contains("..") || rel.starts_with('/') || rel.starts_with('\\') {
+    // Reject absolute or parent-traversal inputs. `..` is matched as a whole
+    // path component, not a substring, so legitimate names such as `foo..bar.js`
+    // are still allowed; `Path::starts_with` below is lexical and would accept
+    // `root/../escape`, which is why this check is the real containment guard.
+    if rel.split(['/', '\\']).any(|c| c == "..")
+        || rel.starts_with('/')
+        || rel.starts_with('\\')
+    {
         return None;
     }
     let joined = root.join(rel);

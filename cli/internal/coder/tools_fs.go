@@ -14,9 +14,13 @@ func resolvePath(env *Env, raw string) string {
 	if trimmed == "" {
 		return ""
 	}
-	if strings.HasPrefix(trimmed, "~") {
+	// Only the bare `~` and `~/...` / `~\...` forms expand. `~user/path` names
+	// another user's home, which is not resolved here: rewriting it to the
+	// current user's home silently pointed at the wrong directory.
+	if trimmed == "~" || strings.HasPrefix(trimmed, "~/") || strings.HasPrefix(trimmed, `~\`) {
 		if home, err := os.UserHomeDir(); err == nil {
-			trimmed = filepath.Join(home, strings.TrimPrefix(strings.TrimPrefix(trimmed, "~"), string(filepath.Separator)))
+			rest := strings.TrimLeft(trimmed[1:], `/\`)
+			trimmed = filepath.Join(home, rest)
 		}
 	}
 	if filepath.IsAbs(trimmed) {

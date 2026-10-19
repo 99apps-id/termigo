@@ -53,7 +53,12 @@ fn capture_login_env() -> Option<HashMap<String, String>> {
 
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
     let mut cmd = Command::new(&shell);
-    cmd.args(["-l", "-c", "/usr/bin/env -0"])
+    // `env` is resolved by the login shell's own PATH rather than hardcoded
+    // `/usr/bin/env`: on BusyBox/Alpine, Nix and other minimal systems it lives
+    // in `/bin`, and the absolute path produced no output at all. A non-GNU
+    // `env` may not support `-0` either, so the parser below accepts both
+    // NUL-separated and newline-separated output.
+    cmd.args(["-l", "-c", "env -0"])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
@@ -83,22 +88,67 @@ fn capture_login_env() -> Option<HashMap<String, String>> {
         }
     };
 
-    let env: HashMap<String, String> = bytes
-        .split(|&b| b == 0)
-        .filter(|chunk| !chunk.is_empty())
-        .filter_map(|chunk| {
-            let s = std::str::from_utf8(chunk).ok()?;
-            let (k, v) = s.split_once('=')?;
-            if k.is_empty() {
-                return None;
-            }
-            Some((k.to_string(), v.to_string()))
-        })
-        .collect();
+    let env = parse_env_bytes(&bytes);
     if env.is_empty() {
         return None;
     }
     Some(env)
+}
+
+/// Parse `env` output into a map. GNU `env -0` separates entries with NUL; when
+/// the shell's `env` does not support `-0` (BusyBox) the output is
+/// newline-separated, so fall back to that rather than returning nothing.
+/// Values keep a trailing CR on CRLF systems, which is stripped.
+/// A continuation line without `=` is folded into the previous value instead
+/// of becoming a bogus entry, so a multi-line value degrades to one entry
+/// rather than corrupting the map.
+#[cfg(unix)]
+fn parse_env_bytes(bytes: &[u8]) -> HashMap<String, String> {
+    if bytes.contains(&0) {
+        return bytes
+            .split(|&b| b == 0)
+            .filter(|chunk| !chunk.is_empty())
+            .filter_map(|chunk| {
+                let s = std::str::from_utf8(chunk).ok()?;
+                let (k, v) = s.split_once('=')?;
+                if k.is_empty() {
+                    return None;
+                }
+                Some((k.to_string(), v.trim_end_matches('\r').to_string()))
+            })
+            .collect();
+    }
+    let mut env: HashMap<String, String> = HashMap::new();
+    let mut last_key: Option<String> = None;
+    for chunk in bytes.split(|&b| b == b'\n') {
+        if chunk.is_empty() {
+            continue;
+        }
+        let s = match std::str::from_utf8(chunk) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        match s.split_once('=') {
+            Some((k, v)) if !k.is_empty() => {
+                last_key = Some(k.to_string());
+                env.insert(
+                    k.to_string(),
+                    v.trim_end_matches('\r').to_string(),
+                );
+            }
+            _ => {
+                // No `=`: a wrapped line of a multi-line value. Keep it with
+                // the previous entry instead of dropping or misparsing it.
+                if let Some(key) = last_key.clone() {
+                    if let Some(prev) = env.get_mut(&key) {
+                        prev.push('\n');
+                        prev.push_str(s.trim_end_matches('\r'));
+                    }
+                }
+            }
+        }
+    }
+    env
 }
 
 #[cfg(all(test, unix))]
@@ -116,5 +166,22 @@ mod tests {
         assert!(resolve_binary("").is_none());
         assert!(resolve_binary("   ").is_none());
         assert!(resolve_binary("termigo-definitely-not-a-real-binary").is_none());
+    }
+
+    #[test]
+    fn parse_env_bytes_prefers_nul_separator() {
+        let bytes = b"PATH=/usr/bin:/bin\0HOME=/root\0";
+        let env = parse_env_bytes(bytes);
+        assert_eq!(env.get("PATH").map(String::as_str), Some("/usr/bin:/bin"));
+        assert_eq!(env.get("HOME").map(String::as_str), Some("/root"));
+    }
+
+    #[test]
+    fn parse_env_bytes_falls_back_to_newlines_and_folds_continuations() {
+        let bytes = b"PATH=/usr/bin:/bin\nMULTI=one\ntwo\nHOME=/root\n";
+        let env = parse_env_bytes(bytes);
+        assert_eq!(env.get("PATH").map(String::as_str), Some("/usr/bin:/bin"));
+        assert_eq!(env.get("MULTI").map(String::as_str), Some("one\ntwo"));
+        assert_eq!(env.get("HOME").map(String::as_str), Some("/root"));
     }
 }

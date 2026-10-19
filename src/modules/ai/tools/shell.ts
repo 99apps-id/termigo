@@ -299,7 +299,14 @@ export function buildShellTools(ctx: ToolContext) {
                 return s ? { sessionId: s.sessionId, cwd: null } : null;
               })()
             : null);
-        const hasWindowsDrive = /[a-zA-Z]:[/\\]/.test(normalized);
+        // A real local drive/UNC path only: require a boundary before it and
+        // reject the `scheme://` form, so `https://...` or `docker -v a:/b`
+        // no longer looks like a local Windows path and wrongly runs locally
+        // when an SSH terminal is focused.
+        const hasWindowsDrive =
+          /(?:^|[\s"'(=,;|&])(?:[A-Za-z]:[\\/](?![\\/])|\\\\[^\s"'<>|]+)/.test(
+            normalized,
+          );
         if (remote && !hasWindowsDrive) {
           // Run from the shell's own directory. The exec channel starts in the
           // SSH user's home, so `docker compose up` would otherwise run

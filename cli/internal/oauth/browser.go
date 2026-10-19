@@ -11,7 +11,9 @@ func openBrowser(link string) {
 	var command *exec.Cmd
 	switch runtime.GOOS {
 	case "windows":
-		command = exec.Command("rundll32", "url.dll,FileProtocolHandler", link)
+		// `cmd /c start "" <url>` handles commas and spaces in the URL, which
+		// rundll32's nonstandard argument parsing splits.
+		command = exec.Command("cmd", "/c", "start", "", link)
 	case "darwin":
 		command = exec.Command("open", link)
 	default:

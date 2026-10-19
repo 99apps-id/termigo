@@ -58,10 +58,12 @@ export async function setMcpTokens(
   tokens: McpOAuthTokens,
 ): Promise<void> {
   const account = keychainAccountForServer(serverUrl);
+  // The Rust command is `secrets_set(service, account, password)`; sending
+  // `value` made Tauri reject the call, so every token save silently failed.
   await invoke("secrets_set", {
     service: KEYRING_SERVICE,
     account,
-    value: JSON.stringify(tokens),
+    password: JSON.stringify(tokens),
   });
 }
 
@@ -73,10 +75,26 @@ export async function deleteMcpTokens(serverUrl: string): Promise<void> {
   });
 }
 
+function base64UrlEncode(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
 /**
- * Generate cryptographic PKCE code_verifier and code_challenge.
+ * Generate a PKCE `code_verifier` and its S256 `code_challenge`.
+ *
+ * The challenge is `base64url(SHA-256(verifier))`, which is what
+ * `code_challenge_method=S256` (set in `buildMcpAuthUrl`) promises the
+ * authorization server. Returning the verifier itself as the challenge would
+ * fail the token exchange (the server hashes the verifier it stored, which was
+ * never a digest), so PKCE would not work at all. Async because Web Crypto
+ * digesting is async.
  */
-export function generatePkce(): { codeVerifier: string; codeChallenge: string } {
+export async function generatePkce(): Promise<{
+  codeVerifier: string;
+  codeChallenge: string;
+}> {
   const chars =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
   let verifier = "";
@@ -86,10 +104,13 @@ export function generatePkce(): { codeVerifier: string; codeChallenge: string } 
     verifier += chars[byte % chars.length];
   }
 
-  // Simple base64url encoding of SHA-256 for challenge
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(verifier),
+  );
   return {
     codeVerifier: verifier,
-    codeChallenge: verifier, // Plain or S256 depending on provider capability
+    codeChallenge: base64UrlEncode(new Uint8Array(digest)),
   };
 }
 
@@ -185,7 +206,7 @@ export function buildMcpOAuthTools() {
               error: "Missing auth_endpoint or client_id for 'initiate' action.",
             };
           }
-          const { codeVerifier, codeChallenge } = generatePkce();
+          const { codeVerifier, codeChallenge } = await generatePkce();
           const redirect =
             redirect_uri || "http://127.0.0.1:8765/auth/mcp/callback";
           const authUrl = buildMcpAuthUrl({

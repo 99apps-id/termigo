@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -123,5 +124,5 @@ func (s *Server) runDiagnostics(ctx context.Context, path string) string {
 }
 
 func isWindows() bool {
-	return strings.Contains(strings.ToLower(os.Getenv("OS")), "windows")
+	return runtime.GOOS == "windows"
 }

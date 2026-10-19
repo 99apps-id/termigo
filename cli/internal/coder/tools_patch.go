@@ -180,7 +180,12 @@ func applyPatchUpdate(path string, op patchOp) error {
 	if err != nil {
 		return fmt.Errorf("read %s: %w", op.path, err)
 	}
-	content := strings.ReplaceAll(string(data), "\r\n", "\n")
+	raw := string(data)
+	// Preserve the file's own line endings: a CRLF checkout (Windows,
+	// core.autocrlf) must not be rewritten to LF by a one-hunk patch, which
+	// would show every line as changed. Mirrors applyEdits.
+	usesCRLF := strings.Contains(raw, "\r\n")
+	content := strings.ReplaceAll(raw, "\r\n", "\n")
 	lines := strings.Split(content, "\n")
 	// A trailing newline splits into a final empty element; drop it so line
 	// numbers stay honest, and restore it when writing back.
@@ -201,6 +206,9 @@ func applyPatchUpdate(path string, op patchOp) error {
 	output := strings.Join(lines, "\n")
 	if trailing {
 		output += "\n"
+	}
+	if usesCRLF {
+		output = strings.ReplaceAll(output, "\n", "\r\n")
 	}
 	if err := os.WriteFile(path, []byte(output), 0o644); err != nil {
 		return fmt.Errorf("write %s: %w", op.path, err)

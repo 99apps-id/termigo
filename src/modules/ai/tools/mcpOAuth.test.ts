@@ -19,7 +19,7 @@ vi.mock("@tauri-apps/api/core", () => ({
     }
     if (cmd === "secrets_set") {
       const key = `${args.service}:${args.account}`;
-      mockKeychain.set(key, String(args.value));
+      mockKeychain.set(key, String(args.password));
       return;
     }
     if (cmd === "secrets_delete") {
@@ -61,10 +61,13 @@ describe("mcpOAuth", () => {
     expect(afterDelete).toBeNull();
   });
 
-  it("generates PKCE and builds authorization URL", () => {
-    const pkce = generatePkce();
+  it("generates PKCE and builds authorization URL", async () => {
+    const pkce = await generatePkce();
     expect(pkce.codeVerifier.length).toBeGreaterThan(10);
     expect(pkce.codeChallenge.length).toBeGreaterThan(10);
+    // S256: the challenge is the digest, never the verifier itself.
+    expect(pkce.codeChallenge).not.toBe(pkce.codeVerifier);
+    expect(pkce.codeChallenge).not.toContain("=");
 
     const authUrl = buildMcpAuthUrl({
       authEndpoint: "https://auth.example.com/oauth/authorize",
