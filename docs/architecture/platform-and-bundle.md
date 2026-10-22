@@ -8,8 +8,9 @@ keeps the rules that are invariants and points here for the rest.
 ### Window styling
 
 - macOS: `titleBarStyle: Overlay` + `hiddenTitle: true` in `tauri.conf.json` (native traffic lights via overlay).
-- Linux: `decorations: false` + `transparent: true` from `tauri.linux.conf.json`; re-asserted post-realize for GNOME/Mutter CSD.
-- Windows: same as Linux via `tauri.windows.conf.json`. React renders custom `WindowControls`.
+- Linux: borderless via the backend (`decorations(false)` + `transparent(true)` are NOT in `tauri.conf.json`); re-asserted post-realize for GNOME/Mutter CSD. `tauri.linux.conf.json` exists but nothing merges it -- do not rely on it.
+- Windows: same backend-driven borderless path as Linux. `tauri.windows.conf.json` exists but nothing merges it -- do not rely on it. React renders custom `WindowControls`.
+- Borderless Linux/Windows resize goes through invisible `ResizeHandles` (`startResizeDragging`); macOS keeps native resize (tao rejects programmatic resize-drag there).
 
 ### Tauri capabilities
 

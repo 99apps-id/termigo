@@ -1,4 +1,5 @@
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ResizeHandles } from "@/components/ResizeHandles";
 import { WindowControls } from "@/components/WindowControls";
 import { IS_MAC } from "@/lib/platform";
 import type { SettingsTab } from "@/modules/settings/openSettingsWindow";
@@ -187,6 +188,7 @@ export function SettingsApp() {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground select-none">
+      <ResizeHandles />
       <header
         data-tauri-drag-region
         className={`flex h-11 shrink-0 items-center justify-between border-b border-border/60 bg-card/60 ${

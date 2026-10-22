@@ -82,7 +82,7 @@ export function sanitizeInlineKeyboard(
 
 /** Trim to `max`, never returning an empty string for non-empty input. */
 function clampText(text: string, max: number): string {
-  return text.length <= max ? text : text.slice(0, Math.max(0, max - 1));
+  return text.length <= max ? text : text.slice(0, max);
 }
 
 function clampMessage(text: string): string {
@@ -108,7 +108,7 @@ function clampMessage(text: string): string {
  */
 export function clampEscapedHtml(text: string, max: number): string {
   if (text.length <= max) return text;
-  let cut = Math.max(0, max - 1);
+  let cut = Math.max(0, max);
   const amp = text.lastIndexOf("&", cut);
   if (amp !== -1) {
     const semi = text.indexOf(";", amp);

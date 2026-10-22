@@ -6,6 +6,19 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.25] - 2026-10-22
+
+### Fixed
+
+- **Borderless window resize on Linux/Windows.** Added invisible edge/corner
+  resize grips (`ResizeHandles`, native `startResizeDragging`) to the main and
+  settings windows, plus the missing `core:window:allow-start-resize-dragging`
+  capability and a runtime 420x280 min-size floor.
+- **MCP OAuth keychain fingerprint.** Replaced the weak integer-sum hash with
+  FNV-1a so different MCP servers cannot collide on the same keychain slot.
+- **Telegram message clamp.** `clampText`/`clampEscapedHtml` cut at `max - 1`;
+  entities ending exactly at the limit and one plain-text char were dropped.
+
 ## [0.9.24] - 2026-10-18
 
 ### Added

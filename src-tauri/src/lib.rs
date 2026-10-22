@@ -134,6 +134,18 @@ pub fn run() {
             if let Some(browser) = _app.try_state::<browser::BrowserState>() {
                 browser::browser_start(_app.handle(), browser.inner());
             }
+            // Enforce the documented min size at runtime as well as in
+            // tauri.conf.json: a restored window-state or a compositor that
+            // ignores builder hints must not leave the main window smaller
+            // than the layout can render.
+            if let Some(main) = _app.get_webview_window("main") {
+                let _ = main.set_min_size(Some(tauri::Size::Logical(
+                    tauri::LogicalSize {
+                        width: 420.0,
+                        height: 280.0,
+                    },
+                )));
+            }
             // macOS skips parent() for the settings window, so tie its lifecycle
             // to the main window here instead. Other platforms keep parent().
             #[cfg(target_os = "macos")]

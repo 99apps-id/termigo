@@ -51,9 +51,9 @@ describe("clampEscapedHtml", () => {
   });
 
   it("keeps a complete entity that ends before the cut", () => {
-    // Cuts at max-1, matching `clampText`, so 19 characters survive.
+    // Cuts at max, so 20 characters survive.
     const text = `a&amp;b${"c".repeat(100)}`;
-    expect(clampEscapedHtml(text, 20)).toBe(`a&amp;b${"c".repeat(12)}`);
+    expect(clampEscapedHtml(text, 20)).toBe(`a&amp;b${"c".repeat(13)}`);
   });
 
   // Backing off must not run away to nothing when the cut lands on an entity.

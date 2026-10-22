@@ -16,13 +16,14 @@ export type McpOAuthTokens = {
  */
 export function mcpServerFingerprint(serverUrl: string): string {
   const normalized = serverUrl.trim().toLowerCase().replace(/\/+$/, "");
-  let hash = 0;
+  // FNV-1a 32-bit: much lower collision probability than the previous
+  // integer-sum hash, so different MCP servers do not share a keychain slot.
+  let h = 2166136261;
   for (let i = 0; i < normalized.length; i++) {
-    const char = normalized.charCodeAt(i);
-    hash = (hash << 5) - hash + char;
-    hash |= 0;
+    h ^= normalized.charCodeAt(i);
+    h = Math.imul(h, 16777619);
   }
-  return Math.abs(hash).toString(16);
+  return (h >>> 0).toString(16);
 }
 
 function keychainAccountForServer(serverUrl: string): string {
