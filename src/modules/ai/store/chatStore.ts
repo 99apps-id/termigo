@@ -775,7 +775,11 @@ export const useChatStore = create<StoreState>((set, get) => ({
       return;
     }
     void loadMessages(id).then((m) => {
-      if (m && m.length > 0 && !chats.has(id)) seedMessages.set(id, m);
+      if (m && m.length > 0 && !chats.has(id)) {
+        const windowed =
+          m.length > MAX_HYDRATE_MESSAGES ? m.slice(-MAX_HYDRATE_MESSAGES) : m;
+        seedMessages.set(id, windowed);
+      }
       if (m) warnIfLargeSession(m.length);
       flip();
     });
@@ -927,6 +931,14 @@ function notifySessionLeft(sessionId: string | null): void {
  *  real tokens on every step even after compaction, and the user deserves a
  *  nudge that /new is cheaper than scrolling. */
 export const LARGE_SESSION_MESSAGES = 400;
+
+/** Past this many persisted messages, opening a session loads only a recent
+ *  window instead of the whole transcript. WebKitGTK runs the whole UI in one
+ *  WebProcess: materialising a multi-megabyte history (hundreds of tool
+ *  results with large outputs) in a single Chat construction freezes the
+ *  renderer with no crash log, and the app reads as "hang". The window keeps
+ *  older history on disk; the user can still open it from history search. */
+export const MAX_HYDRATE_MESSAGES = 60;
 
 function warnIfLargeSession(count: number): void {
   if (count < LARGE_SESSION_MESSAGES) return;
