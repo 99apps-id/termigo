@@ -36,9 +36,30 @@ type antigravityClient struct {
 }
 
 const (
-	agUserAgent      = "antigravity/ide/2.11.0 darwin/arm64"
 	agMaxOutputToken = 64000
 )
+
+func agUserAgent() string {
+	platform := "linux"
+	switch runtime.GOOS {
+	case "darwin":
+		platform = "darwin"
+	case "windows":
+		platform = "windows"
+	}
+	arch := runtime.GOARCH
+	switch arch {
+	case "amd64":
+		arch = "x64"
+	case "386":
+		arch = "x86"
+	case "arm64":
+		arch = "arm64"
+	case "arm":
+		arch = "arm"
+	}
+	return fmt.Sprintf("antigravity/ide/2.11.0 %s/%s", platform, arch)
+}
 
 // The onboarding endpoints are variables so tests can point them at a server.
 var (
@@ -78,7 +99,7 @@ func (c *antigravityClient) Stream(ctx context.Context, req ChatRequest, emit fu
 	key := c.currentKey()
 	headers := map[string]string{
 		"Authorization":        "Bearer " + key,
-		"User-Agent":           agUserAgent,
+		"User-Agent":           agUserAgent(),
 		"X-Machine-Session-Id": session,
 	}
 	endpoint := c.baseURL + "/v1internal:streamGenerateContent?alt=sse"
@@ -278,7 +299,7 @@ func (c *antigravityClient) doJSONWithKey(ctx context.Context, endpoint string, 
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Authorization", "Bearer "+key)
-	request.Header.Set("User-Agent", agUserAgent)
+	request.Header.Set("User-Agent", agUserAgent())
 	response, err := c.http.Do(request)
 	if err != nil {
 		return nil, 0, err

@@ -3,7 +3,7 @@ import type { LanguageModel } from "ai";
 import {
   AG_HOST,
   AG_HOST_FALLBACK,
-  AG_USER_AGENT,
+  agUserAgent,
   buildAntigravityBody,
   isObject,
   newSessionId,
@@ -51,7 +51,7 @@ async function agPostJson(
       headers: {
         "content-type": "application/json",
         authorization: `Bearer ${token}`,
-        "user-agent": AG_USER_AGENT,
+        "user-agent": agUserAgent(),
       },
       body: JSON.stringify(payload),
     });
@@ -197,7 +197,7 @@ export function createAntigravityFetch(
       const headers = new Headers(init.headers);
       headers.delete("x-goog-api-key");
       headers.set("authorization", `Bearer ${token}`);
-      headers.set("user-agent", AG_USER_AGENT);
+      headers.set("user-agent", agUserAgent());
       headers.set("x-machine-session-id", session);
       headers.set("content-type", "application/json");
       return {

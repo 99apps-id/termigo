@@ -10,8 +10,14 @@ import { GEMINI_SAFETY_SETTINGS } from "./googleSafety";
 
 export const AG_HOST = "https://daily-cloudcode-pa.googleapis.com";
 export const AG_HOST_FALLBACK = "https://cloudcode-pa.googleapis.com";
-export const AG_USER_AGENT = "antigravity/ide/2.11.0 darwin/arm64";
 export const AG_MAX_OUTPUT_TOKENS = 64_000;
+
+export function agUserAgent(): string {
+  const ua = typeof navigator === "undefined" ? "" : navigator.userAgent;
+  if (/Windows/i.test(ua)) return "antigravity/ide/2.11.0 windows/x64";
+  if (/Macintosh|Mac OS/i.test(ua)) return "antigravity/ide/2.11.0 darwin/arm64";
+  return "antigravity/ide/2.11.0 linux/x64";
+}
 
 export type JsonObject = Record<string, unknown>;
 

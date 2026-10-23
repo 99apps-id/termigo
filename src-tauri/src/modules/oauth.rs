@@ -470,6 +470,22 @@ async fn login_claude_oauth(app: &tauri::AppHandle) -> Result<OAuthTokens, Strin
     })
 }
 
+fn ag_user_agent() -> String {
+    let platform = match std::env::consts::OS {
+        "macos" => "darwin",
+        "windows" => "windows",
+        _ => "linux",
+    };
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => "x64",
+        "x86" => "x86",
+        "aarch64" => "arm64",
+        "arm" => "arm",
+        other => other,
+    };
+    format!("antigravity/ide/2.11.0 {platform}/{arch}")
+}
+
 async fn login_antigravity(app: &tauri::AppHandle) -> Result<OAuthTokens, String> {
     let client_id = antigravity_client_id();
     let client_secret = antigravity_client_secret();
@@ -558,6 +574,7 @@ async fn login_antigravity(app: &tauri::AppHandle) -> Result<OAuthTokens, String
     let res = client
         .post(TOKEN_URL)
         .header("content-type", "application/x-www-form-urlencoded")
+        .header("user-agent", ag_user_agent())
         .body(form)
         .send()
         .await
