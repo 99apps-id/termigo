@@ -71,21 +71,29 @@ beforeEach(() => {
 });
 
 describe("browser tools", () => {
-  it("refuses SSRF targets in browser_open before touching the context", async () => {
+  it("refuses true SSRF targets in browser_open but allows loopback dev servers", async () => {
     const ctx = makeCtx();
     const tools = buildBrowserTools(ctx);
     const run = execOf(tools.browser_open);
+    // These are still blocked.
     for (const url of [
       "http://169.254.169.254",
-      "http://127.0.0.1",
-      "http://2130706433",
       "http://[fe80::1]/",
       "file:///etc/passwd",
     ]) {
       const r = (await run({ instance: "x", url }, OPTS)) as { error?: string };
       expect(r.error, url).toBeTruthy();
+      expect(ctx.openPreview).not.toHaveBeenCalled();
     }
-    expect(ctx.openPreview).not.toHaveBeenCalled();
+    // Loopback dev servers are allowed because `browser_open` now uses the
+    // embedded preview pane (same surface as `open_preview`).
+    ctx.openPreview.mockClear();
+    for (const url of ["http://127.0.0.1", "http://2130706433", "http://localhost:5173"]) {
+      const r = (await run({ instance: "docs", url }, OPTS)) as { url?: string; ok?: boolean };
+      expect(r.error, url).toBeUndefined();
+      expect(r.ok).toBe(true);
+    }
+    expect(ctx.openPreview).toHaveBeenCalledTimes(3);
   });
 
   it("opens an external site as an embedded browser tab keyed by instance", async () => {

@@ -74,13 +74,34 @@ async function embedEval(instance: string, js: string) {
   }
 }
 
-// The agent browser is for external pages, so it mirrors TEDI's `unsafeBrowserUrl`
-// policy: refuse non-http(s), cloud metadata, loopback, link-local and non-loopback
-// IPv6. This duplicates the Rust guard so a bypass in one layer is caught by the
-// other. Use `browser_open` for the agent browser; `open_preview` remains the
-// loopback-only local dev server surface.
+// `browser_open` renders in the embedded preview pane (same surface as
+// `open_preview`), so it shares the same URL policy: safe external hosts are
+// allowed, and loopback dev servers are allowed too. The Rust `browser_open`
+// command is registered but the TypeScript tool path uses `ctx.openPreview`.
+function isLoopbackHost(url: string): boolean {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.toLowerCase();
+    const ipv4 = /^(\d{1,3}\.){3}\d{1,3}$/.test(host)
+      ? host.split(".").map(Number)
+      : null;
+    return (
+      host === "localhost" ||
+      host === "[::1]" ||
+      host === "::1" ||
+      host.endsWith(".localhost") ||
+      (ipv4 !== null && ipv4[0] === 127)
+    );
+  } catch {
+    return false;
+  }
+}
+
 function guardUrl(url: string): string | null {
-  return unsafeBrowserUrl(url);
+  const bad = unsafeBrowserUrl(url);
+  if (bad === null) return null;
+  if (isLoopbackHost(url)) return null;
+  return bad;
 }
 
 function cssJson(value: string): string {
