@@ -23,9 +23,7 @@ async function embedRead(instance: string) {
   try {
     const text = await native.browserEmbedRead(instance);
     const isUnreadable =
-      !text ||
-      text.trim().length === 0 ||
-      text.startsWith("(no readable text");
+      !text || text.trim().length === 0 || text.startsWith("(no readable text");
 
     if (isUnreadable) {
       const count = (emptyExtractCounts.get(instance) ?? 0) + 1;
@@ -141,7 +139,9 @@ function resolveTargetSelector(
 export function buildClickJs(targetSelector: string): string {
   return `(()=>{const el=document.querySelector(${cssJson(
     targetSelector,
-  )});if(!el){throw new Error('No element matched selector: '+${cssJson(
+  )})||(()=>{for(const f of document.querySelectorAll('iframe')){try{const e=f.contentDocument&&f.contentDocument.querySelector(${cssJson(
+    targetSelector,
+  )});if(e)return e;}catch(_){}}return null;})();if(!el){throw new Error('No element matched selector: '+${cssJson(
     targetSelector,
   )});}el.click();})();`;
 }
@@ -159,7 +159,9 @@ export function buildClickJs(targetSelector: string): string {
 export function buildTypeJs(targetSelector: string, text: string): string {
   return `(()=>{const el=document.querySelector(${cssJson(
     targetSelector,
-  )});if(!el){throw new Error('No element matched selector: '+${cssJson(
+  )})||(()=>{for(const f of document.querySelectorAll('iframe')){try{const e=f.contentDocument&&f.contentDocument.querySelector(${cssJson(
+    targetSelector,
+  )});if(e)return e;}catch(_){}}return null;})();if(!el){throw new Error('No element matched selector: '+${cssJson(
     targetSelector,
   )});}el.focus();if('value' in el&&typeof el.value==='string'){const proto=Object.getPrototypeOf(el);const desc=proto?Object.getOwnPropertyDescriptor(proto,'value'):null;if(desc&&desc.set){desc.set.call(el,${cssJson(
     text,
@@ -212,10 +214,7 @@ export function buildPressJs(
 }
 
 /** Select-dropdown JS for a resolved selector. Pure, testable. */
-export function buildSelectJs(
-  targetSelector: string,
-  wanted: string,
-): string {
+export function buildSelectJs(targetSelector: string, wanted: string): string {
   return `(()=>{const el=document.querySelector(${cssJson(
     targetSelector,
   )});if(!el){throw new Error('No element matched selector: '+${cssJson(
@@ -389,7 +388,9 @@ export function buildBrowserTools(ctx: ToolContext) {
           .string()
           .optional()
           .default("default")
-          .describe("Instance name returned by browser_open (default 'default')."),
+          .describe(
+            "Instance name returned by browser_open (default 'default').",
+          ),
         url: z.url().describe("Full http(s) URL to visit."),
       }),
       execute: async ({ instance = "default", url }) => {
@@ -423,7 +424,11 @@ export function buildBrowserTools(ctx: ToolContext) {
     browser_back: tool({
       description: "Go back one page in the browser instance's history.",
       inputSchema: z.object({
-        instance: z.string().optional().default("default").describe("Instance name."),
+        instance: z
+          .string()
+          .optional()
+          .default("default")
+          .describe("Instance name."),
       }),
       execute: async ({ instance = "default" }) =>
         await embedEval(instance, "history.back();"),
@@ -432,7 +437,11 @@ export function buildBrowserTools(ctx: ToolContext) {
     browser_forward: tool({
       description: "Go forward one page in the browser instance's history.",
       inputSchema: z.object({
-        instance: z.string().optional().default("default").describe("Instance name."),
+        instance: z
+          .string()
+          .optional()
+          .default("default")
+          .describe("Instance name."),
       }),
       execute: async ({ instance = "default" }) =>
         await embedEval(instance, "history.forward();"),
@@ -441,7 +450,11 @@ export function buildBrowserTools(ctx: ToolContext) {
     browser_reload: tool({
       description: "Reload the current page in the browser instance.",
       inputSchema: z.object({
-        instance: z.string().optional().default("default").describe("Instance name."),
+        instance: z
+          .string()
+          .optional()
+          .default("default")
+          .describe("Instance name."),
       }),
       execute: async ({ instance = "default" }) =>
         await embedEval(instance, "location.reload();"),
@@ -451,7 +464,11 @@ export function buildBrowserTools(ctx: ToolContext) {
       description:
         "Return the visible text of the current page in a browser instance - the fully rendered DOM, including content added by JavaScript. If it returns no readable text, do not loop on browser_wait; fall back to other tools or continue with local files.",
       inputSchema: z.object({
-        instance: z.string().optional().default("default").describe("Instance name."),
+        instance: z
+          .string()
+          .optional()
+          .default("default")
+          .describe("Instance name."),
       }),
       execute: async ({ instance = "default" }) => await embedRead(instance),
     }),
@@ -460,7 +477,11 @@ export function buildBrowserTools(ctx: ToolContext) {
       description:
         "Return the captured console logs and JavaScript errors for a browser instance. Use this to diagnose hydration errors, script exceptions, or warnings when a page fails to load or render properly. Auto-executes.",
       inputSchema: z.object({
-        instance: z.string().optional().default("default").describe("Instance name."),
+        instance: z
+          .string()
+          .optional()
+          .default("default")
+          .describe("Instance name."),
       }),
       execute: async ({ instance = "default" }) => {
         try {
@@ -485,7 +506,11 @@ export function buildBrowserTools(ctx: ToolContext) {
       description:
         "List or clear cookies, localStorage, or sessionStorage of the page in a browser instance. Use it to inspect a login session (which cookies exist), to log out by clearing, or to reset page state for a fresh test. Only script-accessible cookies are listed; HttpOnly cookies are invisible to this tool by browser design. Clearing asks for approval.",
       inputSchema: z.object({
-        instance: z.string().optional().default("default").describe("Instance name."),
+        instance: z
+          .string()
+          .optional()
+          .default("default")
+          .describe("Instance name."),
         target: z
           .enum(["cookies", "localStorage", "sessionStorage"])
           .describe("Which storage to inspect."),
@@ -520,7 +545,11 @@ export function buildBrowserTools(ctx: ToolContext) {
       description:
         "List the page's recent network requests (URL, type, duration, bytes) from the browser resource timing buffer, newest last, capped at 200 entries. Use it to confirm a form submission reached its API, to find XHR endpoints, or to see what a page loads. Response bodies are not included; use browser_console or fetch for content. Auto-executes.",
       inputSchema: z.object({
-        instance: z.string().optional().default("default").describe("Instance name."),
+        instance: z
+          .string()
+          .optional()
+          .default("default")
+          .describe("Instance name."),
       }),
       execute: async ({ instance = "default" }) => {
         const compute = `(()=>{var out=[];try{var es=performance.getEntriesByType('resource');for(var i=Math.max(0,es.length-200);i<es.length;i++){var e=es[i];out.push({url:String(e.name).slice(0,200),type:e.initiatorType,ms:Math.round(e.duration),bytes:(typeof e.transferSize==='number'?e.transferSize:null)});}return {requests:out,count:es.length};}catch(e){return {error:String((e&&e.message)||e)};}})()`;
@@ -541,7 +570,11 @@ export function buildBrowserTools(ctx: ToolContext) {
       description:
         "Capture an accessibility snapshot of the current page with short ref IDs (@e1, @e2, ...) assigned to all interactive elements (buttons, links, inputs). Returns a clean, token-efficient text representation of the UI tree. Pass the assigned ref ID directly to browser_click or browser_type instead of complex CSS selectors. Auto-executes.",
       inputSchema: z.object({
-        instance: z.string().optional().default("default").describe("Instance name."),
+        instance: z
+          .string()
+          .optional()
+          .default("default")
+          .describe("Instance name."),
       }),
       execute: async ({ instance = "default" }) => {
         const js = `(()=>{
@@ -565,6 +598,36 @@ export function buildBrowserTools(ctx: ToolContext) {
                     info += ' href=' + href.slice(0, 60);
                   }
                   items.push(info);
+                });
+                var iframes = document.querySelectorAll('iframe');
+                iframes.forEach(function(frame) {
+                  var src = frame.getAttribute('src') || '';
+                  var title = frame.getAttribute('title') || '';
+                  var isCaptcha = /recaptcha|turnstile|hcaptcha|challenge/i.test(src) || /recaptcha|turnstile|hcaptcha|challenge|security/i.test(title);
+                  try {
+                    var cDoc = frame.contentDocument;
+                    if (cDoc) {
+                      var frameInteractive = cDoc.querySelectorAll('button, a[href], input, textarea, select, [role="button"], [role="link"], [role="tab"], [tabindex="0"]');
+                      frameInteractive.forEach(function(el) {
+                        if (el.offsetParent === null && el.offsetWidth === 0 && el.offsetHeight === 0) return;
+                        var ref = '@e' + (counter++);
+                        el.setAttribute('data-termigo-ref', ref);
+                        var tag = el.tagName.toLowerCase();
+                        var role = el.getAttribute('role') || tag;
+                        var text = (el.innerText || el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('title') || (el.value !== undefined ? String(el.value) : '') || '').replace(/\\s+/g, ' ').trim().slice(0, 80);
+                        var href = el.getAttribute('href');
+                        var info = '[' + role + '] ' + (text ? '"' + text + '" ' : '') + 'ref=' + ref + ' (in iframe: ' + (title || src.slice(0, 30) || 'frame') + ')';
+                        if (href && href !== '#' && !href.startsWith('javascript:')) {
+                          info += ' href=' + href.slice(0, 60);
+                        }
+                        items.push(info);
+                      });
+                      return;
+                    }
+                  } catch(e) {}
+                  if (isCaptcha) {
+                    items.push('[captcha-iframe] "' + (title || 'CAPTCHA Challenge') + '" (Cross-Origin Protected: Silakan selesaikan di panel browser visual) src=' + src.slice(0, 60));
+                  }
                 });
                 var title = document.title || 'Untitled';
                 var headingEls = Array.from(document.querySelectorAll('h1, h2, h3')).slice(0, 10).map(function(h) { return h.tagName.toLowerCase() + ': "' + h.innerText.replace(/\\s+/g, ' ').trim() + '"'; });
@@ -594,7 +657,11 @@ export function buildBrowserTools(ctx: ToolContext) {
       description:
         "Click an element in the browser instance by ref ID (e.g. '@e1' returned by browser_snapshot) or CSS selector.",
       inputSchema: z.object({
-        instance: z.string().optional().default("default").describe("Instance name."),
+        instance: z
+          .string()
+          .optional()
+          .default("default")
+          .describe("Instance name."),
         selector: z
           .string()
           .optional()
@@ -618,7 +685,11 @@ export function buildBrowserTools(ctx: ToolContext) {
       description:
         "Type text into an input in the browser instance by ref ID (e.g. '@e3') or CSS selector.",
       inputSchema: z.object({
-        instance: z.string().optional().default("default").describe("Instance name."),
+        instance: z
+          .string()
+          .optional()
+          .default("default")
+          .describe("Instance name."),
         selector: z
           .string()
           .optional()
@@ -643,7 +714,11 @@ export function buildBrowserTools(ctx: ToolContext) {
       description:
         "Press a keyboard key in the browser instance, optionally focused on an element by ref ID (e.g. '@e3') or CSS selector. Use Enter to submit a login or search form after browser_type, Tab to move between fields, Escape to dismiss a dialog. If Enter does not submit the form, snapshot the page and click its submit button instead.",
       inputSchema: z.object({
-        instance: z.string().optional().default("default").describe("Instance name."),
+        instance: z
+          .string()
+          .optional()
+          .default("default")
+          .describe("Instance name."),
         key: z
           .enum(PRESS_KEYS)
           .describe("Key to press: Enter, Tab, Escape, arrows, or space."),
@@ -675,7 +750,11 @@ export function buildBrowserTools(ctx: ToolContext) {
       description:
         "Pick an option in a native <select> dropdown by ref ID (e.g. '@e4') or CSS selector, matching the option value first then its visible label. browser_type does not work on dropdowns, so this is the tool for them. Auto-executes.",
       inputSchema: z.object({
-        instance: z.string().optional().default("default").describe("Instance name."),
+        instance: z
+          .string()
+          .optional()
+          .default("default")
+          .describe("Instance name."),
         selector: z
           .string()
           .optional()
@@ -684,9 +763,7 @@ export function buildBrowserTools(ctx: ToolContext) {
           .string()
           .optional()
           .describe("Element reference ID from browser_snapshot, e.g. '@e4'."),
-        option: z
-          .string()
-          .describe("Option value or visible label to pick."),
+        option: z.string().describe("Option value or visible label to pick."),
       }),
       execute: async ({ instance = "default", selector, ref, option }) => {
         const target = resolveTargetSelector(ref, selector);
@@ -701,7 +778,11 @@ export function buildBrowserTools(ctx: ToolContext) {
       description:
         "Scroll the page to an element (by ref ID or selector), an absolute Y offset, or top/bottom. Use it before a screenshot to inspect content below the fold, or to bring a lazy-loaded section into view. Auto-executes.",
       inputSchema: z.object({
-        instance: z.string().optional().default("default").describe("Instance name."),
+        instance: z
+          .string()
+          .optional()
+          .default("default")
+          .describe("Instance name."),
         selector: z.string().optional().describe("CSS selector to scroll to."),
         ref: z
           .string()
@@ -739,8 +820,15 @@ export function buildBrowserTools(ctx: ToolContext) {
       description:
         "Hover over an element by ref ID (e.g. '@e6') or CSS selector to reveal menus, tooltips, or hover states before clicking or screenshotting. Auto-executes.",
       inputSchema: z.object({
-        instance: z.string().optional().default("default").describe("Instance name."),
-        selector: z.string().optional().describe("CSS selector. Omit if using `ref`."),
+        instance: z
+          .string()
+          .optional()
+          .default("default")
+          .describe("Instance name."),
+        selector: z
+          .string()
+          .optional()
+          .describe("CSS selector. Omit if using `ref`."),
         ref: z
           .string()
           .optional()
@@ -759,10 +847,16 @@ export function buildBrowserTools(ctx: ToolContext) {
       description:
         "Wait until page text appears or an element exists, polling until a timeout. Prefer this over browser_wait with a fixed delay after navigation, login submit, or a click that loads content: it returns as soon as the condition holds instead of sleeping blindly. Auto-executes.",
       inputSchema: z.object({
-        instance: z.string().optional().default("default").describe("Instance name."),
+        instance: z
+          .string()
+          .optional()
+          .default("default")
+          .describe("Instance name."),
         kind: z
           .enum(["text", "selector"])
-          .describe("'text': substring of the rendered page; 'selector': element exists."),
+          .describe(
+            "'text': substring of the rendered page; 'selector': element exists.",
+          ),
         value: z
           .string()
           .describe("Text to wait for, or CSS selector that must match."),
@@ -800,7 +894,8 @@ export function buildBrowserTools(ctx: ToolContext) {
           } catch {
             found = false;
           }
-          if (found) return { ok: true as const, waited_ms: Date.now() - started };
+          if (found)
+            return { ok: true as const, waited_ms: Date.now() - started };
           if (Date.now() >= deadline) {
             return {
               error: `timed out waiting for ${kind} "${value.slice(0, 120)}". The content may need a login, a different page state, or a longer timeout.`,
@@ -815,7 +910,11 @@ export function buildBrowserTools(ctx: ToolContext) {
       description:
         "Wait a short time (ms) before the next action, so a page can settle after navigation or a click. Prefer small values (200-1000ms) and poll browser_extract when checking for content.",
       inputSchema: z.object({
-        instance: z.string().optional().default("default").describe("Instance name."),
+        instance: z
+          .string()
+          .optional()
+          .default("default")
+          .describe("Instance name."),
         ms: z
           .number()
           .int()
@@ -841,7 +940,13 @@ export function buildBrowserTools(ctx: ToolContext) {
           .optional()
           .describe("CDP remote debugging port (default 9222)."),
         action: z
-          .enum(["version", "list_tabs", "new_tab", "activate_tab", "close_tab"])
+          .enum([
+            "version",
+            "list_tabs",
+            "new_tab",
+            "activate_tab",
+            "close_tab",
+          ])
           .optional()
           .describe("Action to perform with CDP (default 'list_tabs')."),
         url: z
@@ -853,28 +958,41 @@ export function buildBrowserTools(ctx: ToolContext) {
           .optional()
           .describe("Tab/target ID for activate_tab or close_tab."),
       }),
-      execute: async ({ port = 9222, action = "list_tabs", url, target_id }) => {
+      execute: async ({
+        port = 9222,
+        action = "list_tabs",
+        url,
+        target_id,
+      }) => {
         const base = `http://127.0.0.1:${port}`;
         try {
           if (action === "version") {
-            const res = await fetch(`${base}/json/version`, { signal: AbortSignal.timeout(3000) });
+            const res = await fetch(`${base}/json/version`, {
+              signal: AbortSignal.timeout(3000),
+            });
             if (!res.ok) return { error: `CDP error HTTP ${res.status}` };
             return await res.json();
           }
           if (action === "list_tabs") {
-            const res = await fetch(`${base}/json/list`, { signal: AbortSignal.timeout(3000) });
+            const res = await fetch(`${base}/json/list`, {
+              signal: AbortSignal.timeout(3000),
+            });
             if (!res.ok) return { error: `CDP error HTTP ${res.status}` };
             const list = await res.json();
             if (!Array.isArray(list)) {
-              return { error: `Port ${port} is not a valid Chrome DevTools Protocol endpoint.` };
+              return {
+                error: `Port ${port} is not a valid Chrome DevTools Protocol endpoint.`,
+              };
             }
             return {
               count: list.length,
-              tabs: list.filter((t) => t && t.type === "page").map((t) => ({
-                id: t.id,
-                title: t.title,
-                url: t.url,
-              })),
+              tabs: list
+                .filter((t) => t && t.type === "page")
+                .map((t) => ({
+                  id: t.id,
+                  title: t.title,
+                  url: t.url,
+                })),
             };
           }
           if (action === "new_tab") {
@@ -882,8 +1000,13 @@ export function buildBrowserTools(ctx: ToolContext) {
               const blocked = guard(url);
               if (blocked) return blocked;
             }
-            const endpoint = url ? `${base}/json/new?${encodeURIComponent(url)}` : `${base}/json/new`;
-            const res = await fetch(endpoint, { method: "PUT", signal: AbortSignal.timeout(3000) });
+            const endpoint = url
+              ? `${base}/json/new?${encodeURIComponent(url)}`
+              : `${base}/json/new`;
+            const res = await fetch(endpoint, {
+              method: "PUT",
+              signal: AbortSignal.timeout(3000),
+            });
             if (!res.ok) return { error: `CDP error HTTP ${res.status}` };
             return await res.json();
           }
@@ -891,14 +1014,20 @@ export function buildBrowserTools(ctx: ToolContext) {
             if (!target_id?.trim()) {
               return { error: "action 'activate_tab' requires 'target_id'" };
             }
-            const res = await fetch(`${base}/json/activate/${encodeURIComponent(target_id.trim())}`, { signal: AbortSignal.timeout(3000) });
+            const res = await fetch(
+              `${base}/json/activate/${encodeURIComponent(target_id.trim())}`,
+              { signal: AbortSignal.timeout(3000) },
+            );
             return { ok: res.ok, activated: target_id };
           }
           if (action === "close_tab") {
             if (!target_id?.trim()) {
               return { error: "action 'close_tab' requires 'target_id'" };
             }
-            const res = await fetch(`${base}/json/close/${encodeURIComponent(target_id.trim())}`, { signal: AbortSignal.timeout(3000) });
+            const res = await fetch(
+              `${base}/json/close/${encodeURIComponent(target_id.trim())}`,
+              { signal: AbortSignal.timeout(3000) },
+            );
             return { ok: res.ok, closed: target_id };
           }
           return { error: `Unsupported CDP action: ${action}` };
@@ -915,7 +1044,11 @@ export function buildBrowserTools(ctx: ToolContext) {
       description:
         "Capture a screenshot of the browser instance and SEE it - use this to inspect a page's visual layout, verify a UI change, or read something that is drawn rather than text (a chart, a canvas). Requires a vision-capable model and is Windows-only (WebView2). For plain page text, browser_extract is cheaper.",
       inputSchema: z.object({
-        instance: z.string().optional().default("default").describe("Instance name."),
+        instance: z
+          .string()
+          .optional()
+          .default("default")
+          .describe("Instance name."),
       }),
       execute: async ({ instance = "default" }) => {
         const modelId =
@@ -987,7 +1120,11 @@ export function buildBrowserTools(ctx: ToolContext) {
       description:
         "Attach a local workspace file to a file input in the browser instance by ref ID or CSS selector. Use it to submit forms with attachments. Reads the file from this machine, so it asks for approval, refuses while an SSH session is active (the file would come from the wrong machine), and refuses files over 12 MB.",
       inputSchema: z.object({
-        instance: z.string().optional().default("default").describe("Instance name."),
+        instance: z
+          .string()
+          .optional()
+          .default("default")
+          .describe("Instance name."),
         selector: z
           .string()
           .optional()
@@ -1046,7 +1183,11 @@ export function buildBrowserTools(ctx: ToolContext) {
       description:
         "Download a file through the page in a browser instance and save it into the workspace. The fetch runs in page context, so session cookies apply and authenticated downloads behind a login work; a plain fetch/http_request cannot do that. Asks for approval, refuses while an SSH session is active, and refuses files over 8 MB.",
       inputSchema: z.object({
-        instance: z.string().optional().default("default").describe("Instance name."),
+        instance: z
+          .string()
+          .optional()
+          .default("default")
+          .describe("Instance name."),
         url: z
           .url()
           .describe(
@@ -1101,7 +1242,11 @@ export function buildBrowserTools(ctx: ToolContext) {
         let total = 0;
         let parts: string[] = [];
         try {
-          for (let i = 0; i * DOWNLOAD_CHUNK_CHARS < MAX_DOWNLOAD_BYTES + 50000; i++) {
+          for (
+            let i = 0;
+            i * DOWNLOAD_CHUNK_CHARS < MAX_DOWNLOAD_BYTES + 50000;
+            i++
+          ) {
             const raw = await embedReadValue(instance, buildDownloadChunkJs(i));
             let chunk: {
               chunk?: string;
@@ -1136,14 +1281,22 @@ export function buildBrowserTools(ctx: ToolContext) {
         } catch (e) {
           return { error: String(e), path: abs };
         }
-        return { ok: true as const, path: abs, bytes: Math.floor((base64.length * 3) / 4) };
+        return {
+          ok: true as const,
+          path: abs,
+          bytes: Math.floor((base64.length * 3) / 4),
+        };
       },
     }),
 
     browser_close: tool({
       description: "Close a browser instance and free its embedded webview.",
       inputSchema: z.object({
-        instance: z.string().optional().default("default").describe("Instance name."),
+        instance: z
+          .string()
+          .optional()
+          .default("default")
+          .describe("Instance name."),
       }),
       execute: async ({ instance = "default" }) => {
         try {

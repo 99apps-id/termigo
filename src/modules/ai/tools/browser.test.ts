@@ -10,7 +10,9 @@ vi.mock("../lib/native", () => ({
     browserEmbedRead: vi.fn(async () => "body text"),
     browserEmbedEval: vi.fn(async () => undefined),
     browserEmbedClose: vi.fn(async () => undefined),
-    browserEmbedScreenshot: vi.fn(async () => "data:image/png;base64,mockBase64"),
+    browserEmbedScreenshot: vi.fn(
+      async () => "data:image/png;base64,mockBase64",
+    ),
     readFileBase64: vi.fn(async () => ({
       media_type: "image/png",
       data: "QUJD",
@@ -88,8 +90,15 @@ describe("browser tools", () => {
     // Loopback dev servers are allowed because `browser_open` now uses the
     // embedded preview pane (same surface as `open_preview`).
     ctx.openPreview.mockClear();
-    for (const url of ["http://127.0.0.1", "http://2130706433", "http://localhost:5173"]) {
-      const r = (await run({ instance: "docs", url }, OPTS)) as { url?: string; ok?: boolean };
+    for (const url of [
+      "http://127.0.0.1",
+      "http://2130706433",
+      "http://localhost:5173",
+    ]) {
+      const r = (await run({ instance: "docs", url }, OPTS)) as {
+        url?: string;
+        ok?: boolean;
+      };
       expect(r.error, url).toBeUndefined();
       expect(r.ok).toBe(true);
     }
@@ -222,7 +231,7 @@ describe("browser tools", () => {
     const js = (native.browserEmbedEval as ReturnType<typeof vi.fn>).mock
       .calls[0][1] as string;
     expect(js).toContain("document.activeElement||document.body");
-    expect(js).toContain('KeyboardEvent(\'keydown\'');
+    expect(js).toContain("KeyboardEvent('keydown'");
     expect(js).toContain('"Enter"');
   });
 
@@ -259,6 +268,11 @@ describe("browser tools", () => {
     )) as { snapshot?: string };
     expect(r.snapshot).toBe("body text");
     expect(native.browserEmbedEval).toHaveBeenCalled();
+    const calls = (native.browserEmbedEval as ReturnType<typeof vi.fn>).mock
+      .calls;
+    const js = calls[calls.length - 1][1] as string;
+    expect(js).toContain("document.querySelectorAll('iframe')");
+    expect(js).toContain("captcha-iframe");
     expect(native.browserEmbedRead).toHaveBeenCalledWith("docs");
   });
 
@@ -358,7 +372,9 @@ describe("browser tools", () => {
       { instance: "app-loop" },
       OPTS,
     )) as { error?: string };
-    expect(third.error).toContain("Consecutive browser_screenshot limit reached");
+    expect(third.error).toContain(
+      "Consecutive browser_screenshot limit reached",
+    );
 
     // Intervening action resets the counter
     await execOf(tools.browser_navigate)(
@@ -393,9 +409,9 @@ describe("browser tools", () => {
   it("rejects browser_select on a non-select element via the page", async () => {
     const ctx = makeCtx();
     const tools = buildBrowserTools(ctx);
-    (
-      native.browserEmbedEval as ReturnType<typeof vi.fn>
-    ).mockRejectedValueOnce(new Error("not a select"));
+    (native.browserEmbedEval as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error("not a select"),
+    );
     const r = (await execOf(tools.browser_select)(
       { instance: "docs", selector: "div", option: "x" },
       OPTS,
@@ -406,15 +422,15 @@ describe("browser tools", () => {
   it("scrolls to an element, an offset, or top/bottom", async () => {
     const ctx = makeCtx();
     const tools = buildBrowserTools(ctx);
-    await execOf(tools.browser_scroll)(
-      { instance: "docs", ref: "@e5" },
-      OPTS,
-    );
+    await execOf(tools.browser_scroll)({ instance: "docs", ref: "@e5" }, OPTS);
     let calls = (native.browserEmbedEval as ReturnType<typeof vi.fn>).mock
       .calls;
     expect(calls[0][1]).toContain("scrollIntoView");
 
-    await execOf(tools.browser_scroll)({ instance: "docs", to: "bottom" }, OPTS);
+    await execOf(tools.browser_scroll)(
+      { instance: "docs", to: "bottom" },
+      OPTS,
+    );
     calls = (native.browserEmbedEval as ReturnType<typeof vi.fn>).mock.calls;
     expect(calls[1][1]).toContain("document.body.scrollHeight");
 
@@ -512,7 +528,10 @@ describe("browser tools", () => {
   });
 
   it("refuses browser_upload over SSH and oversized files", async () => {
-    const remote = { ...makeCtx(), getRemoteSession: () => ({ sessionId: 1, cwd: null }) };
+    const remote = {
+      ...makeCtx(),
+      getRemoteSession: () => ({ sessionId: 1, cwd: null }),
+    };
     const tools = buildBrowserTools(remote);
     const r = (await execOf(tools.browser_upload)(
       { instance: "docs", selector: "input", path: "a.png" },
@@ -539,7 +558,12 @@ describe("browser tools", () => {
     expect(tools.browser_download).toMatchObject({ needsApproval: true });
     const dataUrl = "data:text/plain;base64,aGVsbG8=";
     (native.browserEmbedRead as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
-      JSON.stringify({ chunk: dataUrl, last: true, total: dataUrl.length, error: null }),
+      JSON.stringify({
+        chunk: dataUrl,
+        last: true,
+        total: dataUrl.length,
+        error: null,
+      }),
     );
     const r = (await execOf(tools.browser_download)(
       { instance: "docs", url: "https://example.com/f.txt", path: "f.txt" },
@@ -564,4 +588,3 @@ describe("browser tools", () => {
     expect(native.writeFileBase64).not.toHaveBeenCalled();
   });
 });
-
