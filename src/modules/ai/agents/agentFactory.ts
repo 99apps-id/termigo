@@ -84,6 +84,7 @@ export const CORE_TOOL_NAMES = new Set([
   "revert_changes",
   "format_code",
   "test_file",
+  "synthesize_tests",
   "grep",
   "glob",
   "code_search",

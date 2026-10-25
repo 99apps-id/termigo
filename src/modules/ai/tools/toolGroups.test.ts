@@ -126,6 +126,7 @@ describe("tool group definitions", () => {
       "list_terminals",
       "run_checks",
       "test_file",
+      "synthesize_tests",
       "format_code",
       "think",
       "todo_write",
@@ -163,6 +164,7 @@ describe("tool group definitions", () => {
       "git_stash",
       "git_stash_list",
       "git_stash_pop",
+      "git_bisect",
       "git_pull",
       "git_push",
       "git_pr",
@@ -320,12 +322,11 @@ describe("tool payload measurement", () => {
   it("stays under a budget, so growth is caught here and not in production", () => {
     const payload = measureToolPayload(built);
     const kb = payload.bytes / 1024;
-    // Measured at ~107.6 KB after the browser-operation additions
-    // (browser_press/select/scroll/hover/wait_for/storage/network/
-    // upload/download). The ceiling is the point of the test: a feature
-    // that adds schemas has to either fit or raise it deliberately, in a
-    // diff a reviewer sees.
-    expect(kb).toBeLessThan(110);
+    // Measured at ~107.6 KB after browser additions and ~110.4 KB after
+    // test-synthesizer, git-bisect and browser-visual-diff schemas.
+    // The ceiling is the point of the test: a feature that adds schemas has
+    // to either fit or raise it deliberately, in a diff a reviewer sees.
+    expect(kb).toBeLessThan(112);
     // And it must be exact: an unmeasured schema would silently under-report.
     expect(payload.unmeasured).toBe(0);
   });

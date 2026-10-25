@@ -92,6 +92,16 @@ const SYNONYMS: Record<string, SubagentType> = {
   debug: "general",
   architecture: "general",
   reasoning: "general",
+  // test synthesizer: autonomous test generation & regression synthesizer
+  test: "test-synthesizer",
+  tests: "test-synthesizer",
+  testing: "test-synthesizer",
+  testgen: "test-synthesizer",
+  synthesizer: "test-synthesizer",
+  synthesize: "test-synthesizer",
+  tdd: "test-synthesizer",
+  regression: "test-synthesizer",
+  "test-synthesizer": "test-synthesizer",
   // vision: looking at images / screenshots / mockups / diagrams
   vision: "vision",
   image: "vision",
@@ -146,6 +156,11 @@ const DOMAIN_ROUTES: Array<{
   type: SubagentType;
   label: string;
 }> = [
+  {
+    test: /generate test|write test|create test|synthesize test|regression test|test synthesizer|tdd\b/i,
+    type: "test-synthesizer",
+    label: "test-synthesizer",
+  },
   {
     test: /frontend|front[- ]?end|react|next\.?js|vue|svelte|angular|ui\b|component|css|tailwind|html\b/i,
     type: "builder",

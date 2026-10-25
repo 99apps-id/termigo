@@ -92,6 +92,7 @@ import { fireHooksForEvent, makeRunId } from "./hooksRunner";
 import type { CustomEndpointKeys, ProviderKeys } from "./keyring";
 import type { McpToolset } from "./mcpTools";
 import { memoryBlock as learnedBlock, type MemoryEntry } from "./memory";
+import { formatRepoMapBlock, getOrGenerateRepoMap } from "./repoMap";
 import { wantsForcedFanout } from "./orchestrationIntent";
 import { prepareAgentPrompt } from "./prompt";
 import { createGoogleSafetyFetch } from "./googleSafety";
@@ -142,9 +143,7 @@ import {
 // shared fetch keeps the whole provider set covered without a call site having to
 // remember either.
 const apiFetch = createOpenAiCacheFetch(
-  createGoogleSafetyFetch(
-    createProxyFetch({ allowPrivateNetwork: true }),
-  ),
+  createGoogleSafetyFetch(createProxyFetch({ allowPrivateNetwork: true })),
 );
 
 const TOOL_LABELS: Record<string, (input: Record<string, unknown>) => string> =
@@ -668,6 +667,7 @@ function buildStableSystem(
   globalLearned?: readonly MemoryEntry[],
   userQuery?: string,
   userModel?: UserModel,
+  repoMap?: string | null,
 ): string {
   const base = selectSystemPrompt(modelNameForTier);
   const personaBlock = persona?.instructions.trim()
@@ -683,7 +683,8 @@ function buildStableSystem(
   const invariantBlock = formatInvariantsBlock();
   const invariantSection = invariantBlock ? `\n\n${invariantBlock}` : "";
   const userModelBlock = formatUserModelBlock(userModel);
-  return `${base}${memoryBlock}${learnedBlock(learned, globalLearned, userQuery)}${invariantSection}${userModelBlock}${skillsBlock(skills)}${personaBlock}${customBlock}`;
+  const repoMapSection = formatRepoMapBlock(repoMap ?? null);
+  return `${base}${memoryBlock}${learnedBlock(learned, globalLearned, userQuery)}${invariantSection}${userModelBlock}${repoMapSection}${skillsBlock(skills)}${personaBlock}${customBlock}`;
 }
 
 /** Stable key for a value, so equivalent inputs written in a different key
@@ -1301,6 +1302,11 @@ export async function runAgentStream(opts: RunAgentOptions) {
   );
   const userQuery = latestUserRequest(history);
 
+  const rootForRepoMap = opts.toolContext.getWorkspaceRoot();
+  const repoMap = rootForRepoMap
+    ? await getOrGenerateRepoMap(rootForRepoMap)
+    : null;
+
   const stableSystem = buildStableSystem(
     tierModelName,
     opts.agentPersona ?? null,
@@ -1311,6 +1317,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
     opts.globalMemory ?? [],
     userQuery,
     opts.userModel,
+    repoMap,
   );
   const keepsReasoning = modelKeepsReasoning(info);
   const prunedHistory = pruneMessages({

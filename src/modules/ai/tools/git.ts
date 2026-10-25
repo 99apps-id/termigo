@@ -1036,5 +1036,184 @@ export function buildGitTools(ctx: ToolContext) {
         }
       },
     }),
+
+    git_bisect: tool({
+      description:
+        "Autonomous binary search across git commits to pinpoint regression culprits. Action 'run' tests commits automatically. Requires approval.",
+      inputSchema: z.object({
+        action: z
+          .enum(["run", "start", "good", "bad", "reset", "log"])
+          .default("run")
+          .describe(
+            "Action: 'run' (auto test loop), 'start', 'good', 'bad', 'reset', 'log'.",
+          ),
+        bad: z
+          .string()
+          .optional()
+          .describe("Broken commit ref (defaults to HEAD)."),
+        good: z
+          .string()
+          .optional()
+          .describe("Known working/passing commit ref."),
+        test_command: z
+          .string()
+          .optional()
+          .describe(
+            "Test command to run at each step (e.g. 'pnpm test'). Required for 'run'.",
+          ),
+      }),
+      needsApproval: true,
+      execute: async ({ action, bad, good, test_command }) => {
+        if (ctx.getRemoteSession()) {
+          return remoteUnsupported(
+            "git_bisect",
+            "Use bash_run with `git bisect` on the remote host.",
+          );
+        }
+        const sid = ctx.getSessionId();
+        if (!sid) return { error: "no active chat session" };
+        const cwd = repoRootFor(ctx.getWorkspaceRoot(), ctx.getCwd());
+
+        try {
+          const shellId = await getSessionShell(
+            sessionShellKey("git", sid, ctx.getWorkspaceRoot()),
+            cwd,
+          );
+
+          if (action === "reset") {
+            const r = await native.shellSessionRun(
+              shellId,
+              "git bisect reset",
+              cwd,
+              30,
+            );
+            return {
+              action: "reset",
+              stdout: r.stdout.trim(),
+              stderr: r.stderr.trim(),
+              exit_code: r.exit_code,
+              message: "Bisect session reset and returned to original HEAD.",
+            };
+          }
+
+          if (action === "log") {
+            const r = await native.shellSessionRun(
+              shellId,
+              "git bisect log",
+              cwd,
+              30,
+            );
+            return {
+              action: "log",
+              stdout: r.stdout.trim(),
+              stderr: r.stderr.trim(),
+              exit_code: r.exit_code,
+            };
+          }
+
+          if (action === "good" || action === "bad") {
+            const cmd = `git bisect ${action}`;
+            const r = await native.shellSessionRun(shellId, cmd, cwd, 30);
+            return {
+              action,
+              stdout: r.stdout.trim(),
+              stderr: r.stderr.trim(),
+              exit_code: r.exit_code,
+            };
+          }
+
+          if (action === "start") {
+            const badRef = bad?.trim() || "HEAD";
+            const goodRef = good?.trim() || "";
+            const cmd =
+              `git bisect start ${quoteShellArg(badRef)} ${goodRef ? quoteShellArg(goodRef) : ""}`.trim();
+            const r = await native.shellSessionRun(shellId, cmd, cwd, 60);
+            return {
+              action: "start",
+              stdout: r.stdout.trim(),
+              stderr: r.stderr.trim(),
+              exit_code: r.exit_code,
+            };
+          }
+
+          // action === "run"
+          if (!test_command?.trim()) {
+            return {
+              error:
+                "test_command is required for autonomous 'run' bisect (e.g. test_command: 'pnpm test').",
+            };
+          }
+
+          const safety = checkShellCommand(test_command);
+          if (!safety.ok) {
+            return { error: `test_command rejected: ${safety.reason}` };
+          }
+
+          // 1. Initialize bisect session with start bad good
+          const badRef = bad?.trim() || "HEAD";
+          if (!good?.trim()) {
+            return {
+              error:
+                "good commit reference is required to establish binary search baseline (e.g. good: 'HEAD~10' or tag/sha).",
+            };
+          }
+
+          const startCmd = `git bisect start ${quoteShellArg(badRef)} ${quoteShellArg(good.trim())}`;
+          const startRes = await native.shellSessionRun(
+            shellId,
+            startCmd,
+            cwd,
+            60,
+          );
+          if (startRes.exit_code !== 0) {
+            return {
+              error: `Failed to initialize git bisect: ${startRes.stderr || startRes.stdout}`,
+              start_output: startRes.stdout,
+            };
+          }
+
+          // 2. Execute git bisect run <test_command>
+          const runCmd = `git bisect run ${test_command}`;
+          const bisectRes = await native.shellSessionRun(
+            shellId,
+            runCmd,
+            cwd,
+            300,
+          );
+
+          // Parse culprit commit
+          const culpritMatch = bisectRes.stdout.match(
+            /([0-9a-f]{7,40})\s+is the first bad commit/i,
+          );
+          let commitDetails: string | undefined;
+
+          if (culpritMatch?.[1]) {
+            const showCmd = `git show --stat ${culpritMatch[1]}`;
+            const showRes = await native.shellSessionRun(
+              shellId,
+              showCmd,
+              cwd,
+              30,
+            );
+            commitDetails = showRes.stdout.trim();
+          }
+
+          return {
+            action: "run",
+            completed: Boolean(culpritMatch),
+            culprit_commit: culpritMatch?.[1],
+            culprit_details: commitDetails,
+            bisect_stdout: bisectRes.stdout.trim().slice(-2000),
+            bisect_stderr: bisectRes.stderr.trim(),
+            exit_code: bisectRes.exit_code,
+            guidance: culpritMatch
+              ? `Identified regression in commit ${culpritMatch[1]}. Call git_bisect(action: 'reset') when finished.`
+              : "Bisect did not reach an unequivocal bad commit. Check bisect_stdout for details or run git_bisect(action: 'reset').",
+          };
+        } catch (e) {
+          return { error: String(e) };
+        }
+      },
+    }),
   } as const;
 }

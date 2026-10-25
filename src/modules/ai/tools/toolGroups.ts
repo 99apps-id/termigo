@@ -53,6 +53,7 @@ export const TOOL_GROUPS: readonly ToolGroup[] = [
       "browser_storage",
       "browser_type",
       "browser_upload",
+      "browser_visual_diff",
       "browser_wait",
       "browser_wait_for",
     ],

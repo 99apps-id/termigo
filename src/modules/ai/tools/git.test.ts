@@ -244,3 +244,17 @@ describe("git command builders", () => {
     expect(res.conflicts[0].theirsLabel).toBe("branch");
   });
 });
+
+describe("git_bisect tool", () => {
+  it("builds git_bisect tool and requires approval", () => {
+    const mockCtx = {
+      getCwd: () => "/repo",
+      getWorkspaceRoot: () => "/repo",
+      getRemoteSession: () => null,
+      getSessionId: () => "test-session",
+    } as unknown as import("./context").ToolContext;
+    const tools = buildGitTools(mockCtx);
+    expect(tools.git_bisect).toBeDefined();
+    expect(tools.git_bisect.needsApproval).toBe(true);
+  });
+});

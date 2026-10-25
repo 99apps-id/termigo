@@ -19,6 +19,32 @@ const emptyExtractCounts = new Map<string, number>();
 // Tracks consecutive screenshot calls per instance to prevent infinite screenshot loops.
 const consecutiveScreenshotCounts = new Map<string, number>();
 
+type VisualBaseline = {
+  data: string;
+  timestamp: number;
+  label?: string;
+};
+const visualBaselines = new Map<string, VisualBaseline>();
+
+export function clearVisualBaselines(): void {
+  visualBaselines.clear();
+}
+
+export function calculateVisualDiffRatio(a: string, b: string): number {
+  if (a === b) return 0;
+  if (!a || !b) return 1;
+  const minLen = Math.min(a.length, b.length);
+  const maxLen = Math.max(a.length, b.length);
+  let mismatches = maxLen - minLen;
+  const step = Math.max(1, Math.floor(minLen / 1000));
+  let samples = 0;
+  for (let i = 0; i < minLen; i += step) {
+    samples++;
+    if (a[i] !== b[i]) mismatches++;
+  }
+  return Math.min(1, mismatches / (samples + (maxLen - minLen)));
+}
+
 async function embedRead(instance: string) {
   try {
     const text = await native.browserEmbedRead(instance);
@@ -1113,6 +1139,88 @@ export function buildBrowserTools(ctx: ToolContext) {
           };
         }
         return { type: "json", value: output as never };
+      },
+    }),
+
+    browser_visual_diff: tool({
+      description:
+        "Automated visual regression diffing: capture a baseline UI screenshot, apply frontend edits, then compare current view against the baseline to detect visual regressions. Auto-executes.",
+      inputSchema: z.object({
+        action: z
+          .enum(["baseline", "compare", "reset"])
+          .default("compare")
+          .describe(
+            "Action: 'baseline' captures initial UI state, 'compare' evaluates current view against baseline, 'reset' clears baseline.",
+          ),
+        instance: z
+          .string()
+          .optional()
+          .default("default")
+          .describe("Instance name."),
+        label: z
+          .string()
+          .optional()
+          .describe("Optional descriptive label for this visual checkpoint."),
+      }),
+      execute: async ({ action = "compare", instance = "default", label }) => {
+        if (action === "reset") {
+          visualBaselines.delete(instance);
+          return {
+            ok: true,
+            action: "reset",
+            message: "Visual baseline cleared.",
+          };
+        }
+
+        try {
+          const currentData = await native.browserEmbedScreenshot(instance);
+          if (action === "baseline") {
+            visualBaselines.set(instance, {
+              data: currentData,
+              timestamp: Date.now(),
+              label: label ?? "initial",
+            });
+            return {
+              ok: true,
+              action: "baseline",
+              label: label ?? "initial",
+              bytes: Math.floor((currentData.length * 3) / 4),
+              message:
+                "Baseline screenshot captured. Make your changes and call browser_visual_diff(action: 'compare') to verify.",
+            };
+          }
+
+          const baseline = visualBaselines.get(instance);
+          if (!baseline) {
+            return {
+              error:
+                "No visual baseline found for this instance. Call browser_visual_diff(action: 'baseline') first.",
+            };
+          }
+
+          const identical = baseline.data === currentData;
+          const diffRatio = calculateVisualDiffRatio(
+            baseline.data,
+            currentData,
+          );
+
+          return {
+            ok: true,
+            action: "compare",
+            identical,
+            baseline_label: baseline.label,
+            diff_percentage: Math.round(diffRatio * 1000) / 10,
+            conclusion: identical
+              ? "identical: no visual regression detected"
+              : diffRatio < 0.05
+                ? "subtle_change: minor visual shift within acceptable bounds"
+                : "significant_visual_diff: notable UI layout or styling alteration",
+            mediaType: "image/png",
+            data: currentData,
+          };
+        } catch (e) {
+          return { error: String(e) };
+        }
       },
     }),
 

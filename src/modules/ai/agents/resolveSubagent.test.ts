@@ -27,6 +27,9 @@ describe("resolveSubagentType", () => {
     expect(resolveSubagentType("implement")).toBe("builder");
     expect(resolveSubagentType("recon")).toBe("pentest");
     expect(resolveSubagentType("plan")).toBe("general");
+    expect(resolveSubagentType("testgen")).toBe("test-synthesizer");
+    expect(resolveSubagentType("synthesize")).toBe("test-synthesizer");
+    expect(resolveSubagentType("tdd")).toBe("test-synthesizer");
     // Pentest specialists resolve by name and by their own synonyms, while the
     // bare/ambiguous words stay on the generalist.
     expect(resolveSubagentType("pentest-web")).toBe("pentest-web");
@@ -78,6 +81,15 @@ describe("routeSubagentType", () => {
       "general",
     );
     expect(routeSubagentType("Review the CI/CD pipeline").type).toBe("general");
+  });
+
+  it("routes test generation to test-synthesizer", () => {
+    expect(
+      routeSubagentType("Synthesize tests for the auth service").type,
+    ).toBe("test-synthesizer");
+    expect(
+      routeSubagentType("Generate regression tests for edge cases").type,
+    ).toBe("test-synthesizer");
   });
 
   it("routes testing work to code-review", () => {

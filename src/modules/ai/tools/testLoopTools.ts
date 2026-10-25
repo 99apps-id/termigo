@@ -6,6 +6,7 @@ import { remoteUnsupported } from "../lib/remoteFs";
 import { getSessionShell, sessionShellKey } from "../lib/sessionShell";
 import { native } from "../lib/native";
 import { TestAttemptTracker, retryGuidance } from "../lib/testLoop";
+import { extractKeyDeclarations } from "../lib/repoMap";
 import { detectCheckCommand } from "./verify";
 import { truncateCommandOutput } from "./shell";
 
@@ -66,17 +67,26 @@ export function focusTestFile(
     } else if (isVitest && !/\b(run|--run)\b/.test(b)) {
       extra = " --run";
     }
-    return { command: `${b} ${normalizedFile}${extra}`, note: `focused ${normalizedFile}` };
+    return {
+      command: `${b} ${normalizedFile}${extra}`,
+      note: `focused ${normalizedFile}`,
+    };
   }
   const isPkgScript = /^(?:pnpm|bun|yarn)(\s+run)?\s+test(\s+--)?$/i.test(b);
   if (isPkgScript) {
     const prefix = b.endsWith("--") ? b : `${b}`;
-    return { command: `${prefix} ${normalizedFile}`, note: `focused ${normalizedFile}` };
+    return {
+      command: `${prefix} ${normalizedFile}`,
+      note: `focused ${normalizedFile}`,
+    };
   }
   const isNpmScript = /^npm(\s+run)?\s+test(\s+--)?$/i.test(b);
   if (isNpmScript) {
     const prefix = b.endsWith("--") ? b : `${b} --`;
-    return { command: `${prefix} ${normalizedFile}`, note: `focused ${normalizedFile}` };
+    return {
+      command: `${prefix} ${normalizedFile}`,
+      note: `focused ${normalizedFile}`,
+    };
   }
   if (/\bgo test\b/.test(b)) {
     const slash = normalizedFile.lastIndexOf("/");
@@ -92,7 +102,10 @@ export function focusTestFile(
       note: "cargo filters by module path at runtime, not by file; running the full suite",
     };
   }
-  return { command: b, note: "could not focus this runner; running the configured command" };
+  return {
+    command: b,
+    note: "could not focus this runner; running the configured command",
+  };
 }
 
 /**
@@ -107,7 +120,9 @@ export function buildTestLoopTools(ctx: ToolContext) {
       description:
         "Run the project's test command focused on a single file where the runner supports it (vitest, jest, pytest, go test), returning distilled failure summaries. Use for fast TDD iteration instead of running the whole suite every fix. Requires approval.",
       inputSchema: z.object({
-        file: z.string().describe("Relative or absolute path to the test file."),
+        file: z
+          .string()
+          .describe("Relative or absolute path to the test file."),
         command: z
           .string()
           .optional()
@@ -185,7 +200,8 @@ export function buildTestLoopTools(ctx: ToolContext) {
           stderr: stderrTrunc.text,
           exit_code: r.exit_code,
           timed_out: r.timed_out,
-          truncated: r.truncated || stdoutTrunc.truncated || stderrTrunc.truncated,
+          truncated:
+            r.truncated || stdoutTrunc.truncated || stderrTrunc.truncated,
           passing: r.exit_code === 0,
           attempt,
           max_retries: MAX_TEST_RETRIES,
@@ -199,7 +215,145 @@ export function buildTestLoopTools(ctx: ToolContext) {
         };
       },
     }),
+
+    synthesize_tests: tool({
+      description:
+        "Synthesize test scenarios for a source file (boundaries, nullish inputs, error paths) matching project test conventions. Read-only, auto-executes.",
+      inputSchema: z.object({
+        source_file: z
+          .string()
+          .describe("Source file path to synthesize tests for."),
+        test_file: z
+          .string()
+          .optional()
+          .describe("Optional test path. Defaults to repo convention."),
+        regression_scenario: z
+          .string()
+          .optional()
+          .describe(
+            "Optional regression scenario to reproduce and guard against.",
+          ),
+      }),
+      execute: async ({ source_file, test_file, regression_scenario }) => {
+        const fullSourcePath = resolvePath(source_file, ctx.getCwd());
+        let readRes: Awaited<ReturnType<typeof native.readFile>>;
+        try {
+          readRes = await native.readFile(fullSourcePath);
+        } catch (e) {
+          return {
+            error: `Failed to read source file: ${String(e)}`,
+            path: fullSourcePath,
+          };
+        }
+
+        if (readRes.kind !== "text") {
+          return {
+            error: "Source file is not a text file.",
+            path: fullSourcePath,
+          };
+        }
+
+        const symbols = extractKeyDeclarations(readRes.content, 15);
+        const root = ctx.getWorkspaceRoot();
+        const testCmd = await resolveCheckCommand("test", root);
+        const targetTestFile = test_file ?? defaultTestFilePath(source_file);
+
+        const scenarios: {
+          name: string;
+          kind:
+            | "invariant"
+            | "boundary"
+            | "nullish"
+            | "error_path"
+            | "regression";
+          description: string;
+          recommended_assertion: string;
+        }[] = [];
+
+        // 1. Invariants & Happy path
+        for (const sym of symbols.slice(0, 4)) {
+          scenarios.push({
+            name: `${sym} satisfies core behavioral contract`,
+            kind: "invariant",
+            description: `Verify that ${sym} handles standard, valid inputs deterministically without side-effect leaks.`,
+            recommended_assertion: `expect(${sym}(...)).toBeDefined() or equivalent contract validation`,
+          });
+        }
+
+        // 2. Boundary limits
+        scenarios.push({
+          name: "Handles boundary and off-by-one extremes",
+          kind: "boundary",
+          description:
+            "Verify behavior against zero-length arrays/strings, 0/negative numbers, or maximum allowable limits.",
+          recommended_assertion:
+            "Should cleanly return empty collection, neutral fallback, or clamped result without panic",
+        });
+
+        // 3. Nullish & Malformed input guards
+        scenarios.push({
+          name: "Resilient against null, undefined, or malformed inputs",
+          kind: "nullish",
+          description:
+            "Test passing nullish, empty, or unexpected input types at API boundaries.",
+          recommended_assertion:
+            "Should safely reject with clear validation error or default fallback, never throwing uncaught exception",
+        });
+
+        // 4. Failure and error propagation paths
+        scenarios.push({
+          name: "Error propagation and recovery",
+          kind: "error_path",
+          description:
+            "Simulate downstream failures (rejected promise, disk error, missing config) to verify error recovery.",
+          recommended_assertion:
+            "Should propagate typed failure result or reject gracefully",
+        });
+
+        // 5. Specific regression scenario (if requested)
+        if (regression_scenario?.trim()) {
+          scenarios.push({
+            name: `Regression reproduction: ${regression_scenario.slice(0, 60)}`,
+            kind: "regression",
+            description: `Reproduce regression (${regression_scenario}) and ensure fixes prevent future recurrence.`,
+            recommended_assertion:
+              "Expected fixed output rather than previous buggy failure state",
+          });
+        }
+
+        return {
+          source_file: fullSourcePath,
+          suggested_test_file: targetTestFile,
+          detected_runner: testCmd.note,
+          detected_command: testCmd.command,
+          symbols_detected: symbols,
+          scenarios_count: scenarios.length,
+          scenarios,
+          guidance: `Write the test suite to ${targetTestFile} covering the synthesized scenarios, then run test_file(file: "${targetTestFile}") to verify.`,
+        };
+      },
+    }),
   } as const;
+}
+
+function defaultTestFilePath(sourcePath: string): string {
+  const norm = sourcePath.replace(/\\/g, "/");
+  if (norm.endsWith(".ts")) return norm.replace(/\.ts$/, ".test.ts");
+  if (norm.endsWith(".tsx")) return norm.replace(/\.tsx$/, ".test.tsx");
+  if (norm.endsWith(".js")) return norm.replace(/\.js$/, ".test.js");
+  if (norm.endsWith(".jsx")) return norm.replace(/\.jsx$/, ".test.jsx");
+  if (norm.endsWith(".go")) return norm.replace(/\.go$/, "_test.go");
+  if (norm.endsWith(".rs")) {
+    const parts = norm.split("/");
+    const filename = parts.pop()?.replace(/\.rs$/, "") ?? "lib";
+    return [...parts, `${filename}_test.rs`].join("/");
+  }
+  if (norm.endsWith(".py")) {
+    const parts = norm.split("/");
+    const last = parts.pop() ?? "";
+    return [...parts, `test_${last}`].join("/");
+  }
+  return `${norm}.test`;
 }
 
 async function resolveCheckCommand(

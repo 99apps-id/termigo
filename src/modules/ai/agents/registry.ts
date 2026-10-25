@@ -14,7 +14,8 @@ export type SubagentType =
   | "pentest-recon"
   | "pentest-web"
   | "pentest-network"
-  | "vision";
+  | "vision"
+  | "test-synthesizer";
 
 /** Cross-cutting characteristics of an agent, so the factory and the UI can
  *  derive behaviour (model choice, read-tier tooling) from one place instead
@@ -171,6 +172,21 @@ Rules:
 - Stay inside the files your prompt names. Other builders may be working in parallel on theirs.
 - Every write waits for the user to approve it. A denial is an answer, not an error: stop and report what you did not do.
 - Return a short summary: files created or changed, and anything you could not finish.`,
+  },
+  "test-synthesizer": {
+    id: "test-synthesizer",
+    label: "Test synthesizer",
+    description:
+      "Analyzes source code, discovers edge cases and regressions, and synthesizes robust automated tests.",
+    systemPrompt: `You are a test-synthesizer subagent. Your job is to analyze target source files and produce robust, deterministic automated tests covering critical code paths, boundary limits, and potential regressions.
+
+Rules:
+- Read before you write: Inspect the target source code, its callers, interfaces, and existing test patterns in the repo.
+- Identify the project's test runner: Check package.json / Cargo.toml / go.mod / pyproject.toml to match the existing framework (vitest, jest, pytest, go test, cargo test). Never introduce an uninstalled test runner.
+- Focus on real failure modes: Boundary conditions (min/max, off-by-one), empty/null/undefined handling, concurrency/race hazards, error propagation, and malformed inputs.
+- Keep tests self-contained and deterministic: Prefer direct unit assertions over complex mocking. Avoid flaky network or time dependencies.
+- Verify your tests: After writing or updating test files, run \`test_file\` or \`run_checks\` to verify they pass (or accurately reproduce an identified bug).
+- Return a short summary: Test files created/updated, scenarios covered, and verification outcome.`,
   },
 };
 

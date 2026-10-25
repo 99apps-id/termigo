@@ -68,6 +68,7 @@ export const TOOL_SEARCH_ALWAYS_ON: ReadonlySet<string> = new Set([
   "git_pull",
   "git_stash",
   "git_stash_pop",
+  "git_bisect",
   // Shell is core, and bash_wait is the other half of bash_background.
   "bash_run",
   "bash_wait",
@@ -77,7 +78,6 @@ export const TOOL_SEARCH_ALWAYS_ON: ReadonlySet<string> = new Set([
   "artifact_write",
   "artifact_read",
 ]);
-
 
 /** One searchable tool, reduced to what a keyword search needs. */
 export type ToolIndexEntry = {
@@ -122,9 +122,7 @@ export function buildToolIndex(
 }
 
 /** The distinct categories present, for the hint and the tool description. */
-export function indexCategories(
-  index: readonly ToolIndexEntry[],
-): string[] {
+export function indexCategories(index: readonly ToolIndexEntry[]): string[] {
   return [...new Set(index.map((e) => categoryOf(e.name)))].sort();
 }
 

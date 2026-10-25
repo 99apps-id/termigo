@@ -587,4 +587,53 @@ describe("browser tools", () => {
     expect(r.error).toBeTruthy();
     expect(native.writeFileBase64).not.toHaveBeenCalled();
   });
+
+  it("calculates visual diff ratio and executes browser_visual_diff workflow", async () => {
+    const { calculateVisualDiffRatio, clearVisualBaselines } = await import(
+      "./browser"
+    );
+    clearVisualBaselines();
+
+    expect(calculateVisualDiffRatio("same", "same")).toBe(0);
+    expect(calculateVisualDiffRatio("AAAA", "BBBB")).toBeGreaterThan(0);
+
+    const ctx = makeCtx();
+    const tools = buildBrowserTools(ctx);
+
+    (
+      native.browserEmbedScreenshot as ReturnType<typeof vi.fn>
+    ).mockResolvedValueOnce(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkWPifDwAEeQH3Z71qygAAAABJRU5ErkJggg==",
+    );
+
+    // 1. Capture baseline
+    const baseRes = (await execOf(tools.browser_visual_diff)(
+      { action: "baseline", instance: "ui" },
+      OPTS,
+    )) as { ok?: boolean; action?: string; bytes?: number };
+    expect(baseRes.ok).toBe(true);
+    expect(baseRes.action).toBe("baseline");
+    expect(baseRes.bytes).toBeGreaterThan(0);
+
+    // 2. Compare against identical view
+    (
+      native.browserEmbedScreenshot as ReturnType<typeof vi.fn>
+    ).mockResolvedValueOnce(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkWPifDwAEeQH3Z71qygAAAABJRU5ErkJggg==",
+    );
+    const compRes = (await execOf(tools.browser_visual_diff)(
+      { action: "compare", instance: "ui" },
+      OPTS,
+    )) as { ok?: boolean; identical?: boolean; diff_percentage?: number };
+    expect(compRes.ok).toBe(true);
+    expect(compRes.identical).toBe(true);
+    expect(compRes.diff_percentage).toBe(0);
+
+    // 3. Reset
+    const resetRes = (await execOf(tools.browser_visual_diff)(
+      { action: "reset", instance: "ui" },
+      OPTS,
+    )) as { ok?: boolean };
+    expect(resetRes.ok).toBe(true);
+  });
 });

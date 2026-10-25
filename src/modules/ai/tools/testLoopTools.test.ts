@@ -3,14 +3,19 @@ import { focusTestFile } from "./testLoopTools";
 
 describe("focusTestFile", () => {
   it("scopes vitest to the file", () => {
-    const r = focusTestFile("pnpm exec vitest run", "src/modules/ai/tools/a.test.ts");
+    const r = focusTestFile(
+      "pnpm exec vitest run",
+      "src/modules/ai/tools/a.test.ts",
+    );
     expect(r.command).toContain("src/modules/ai/tools/a.test.ts");
     expect(r.note).toContain("focused");
   });
 
   it("adds --watchAll=false and --passWithNoTests for jest so an unmatched file is not a failure", () => {
     const r = focusTestFile("jest", "/repo/src/a.test.ts");
-    expect(r.command).toBe("jest /repo/src/a.test.ts --watchAll=false --passWithNoTests");
+    expect(r.command).toBe(
+      "jest /repo/src/a.test.ts --watchAll=false --passWithNoTests",
+    );
   });
 
   it("adds --run for vitest when not already running in single-run mode", () => {
@@ -27,7 +32,10 @@ describe("focusTestFile", () => {
   });
 
   it("scopes go test to the file's package directory", () => {
-    const r = focusTestFile("go test ./...", "/repo/internal/worker/util_test.go");
+    const r = focusTestFile(
+      "go test ./...",
+      "/repo/internal/worker/util_test.go",
+    );
     expect(r.command).toBe("go test /repo/internal/worker");
     expect(r.note).toContain("package");
   });
@@ -45,8 +53,13 @@ describe("focusTestFile", () => {
   });
 
   it("scopes pnpm run test and pnpm test to the file", () => {
-    const r1 = focusTestFile("pnpm run test", "src/modules/terminal/lib/unparkRepaint.test.ts");
-    expect(r1.command).toBe("pnpm run test src/modules/terminal/lib/unparkRepaint.test.ts");
+    const r1 = focusTestFile(
+      "pnpm run test",
+      "src/modules/terminal/lib/unparkRepaint.test.ts",
+    );
+    expect(r1.command).toBe(
+      "pnpm run test src/modules/terminal/lib/unparkRepaint.test.ts",
+    );
     expect(r1.note).toContain("focused");
 
     const r2 = focusTestFile("pnpm test", "src/a.test.ts");
@@ -66,5 +79,20 @@ describe("focusTestFile", () => {
   it("returns the empty base unchanged", () => {
     const r = focusTestFile("   ", "a.test.ts");
     expect(r.command).toBe("");
+  });
+});
+
+describe("synthesize_tests tool", () => {
+  it("builds synthesize_tests and test_file tools in buildTestLoopTools", async () => {
+    const { buildTestLoopTools } = await import("./testLoopTools");
+    const mockCtx = {
+      getCwd: () => "/repo",
+      getWorkspaceRoot: () => "/repo",
+      getRemoteSession: () => null,
+      getSessionId: () => "test-session",
+    } as unknown as import("./context").ToolContext;
+    const tools = buildTestLoopTools(mockCtx);
+    expect(tools.test_file).toBeDefined();
+    expect(tools.synthesize_tests).toBeDefined();
   });
 });

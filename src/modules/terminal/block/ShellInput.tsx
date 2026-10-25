@@ -19,6 +19,7 @@ import {
   historyRecord,
   historySuggest,
 } from "./lib/history";
+import { predictGhostText } from "./lib/ghostPredictor";
 import type { BlockMode } from "./lib/modeMachine";
 import { createShellEditor, type ShellEditorHandle } from "./lib/shellEditor";
 
@@ -71,10 +72,12 @@ export default function ShellInput({
   const fontRef = useRef({ fontFamily, fontSize, fontWeight });
   fontRef.current = { fontFamily, fontSize, fontWeight };
 
-  // History first (instant, local, free). Only when it has no match and the
-  // user has opted in does the AI layer run - lazily imported so the AI SDK
-  // stays out of the terminal's startup bundle.
+  // Zero-latency local in-memory prediction first (<1ms, no IPC).
+  // Next: persistent Rust history storage.
+  // Last: optional AI suggestion layer (when opted in).
   const combinedSuggest = async (line: string): Promise<string | null> => {
+    const local = predictGhostText(line, { history: commandsRef.current });
+    if (local) return local;
     const fromHistory = await historySuggest(line);
     if (fromHistory) return fromHistory;
     if (!usePreferencesStore.getState().terminalAiSuggest) return null;

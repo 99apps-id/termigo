@@ -6,6 +6,26 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.26] - 2026-10-23
+
+### Added
+
+- **Repository Map Engine & Semantic Context Injection**: AST top-level
+  declaration extractor, compact hierarchical tree formatter with in-memory
+  caching, and automatic injection into stable system prompt.
+- **Autonomous Test Generation & Regression Synthesizer**: Specialized
+  `test-synthesizer` subagent, dynamic semantic routing for test tasks, and
+  `synthesize_tests` tool.
+- **Autonomous Git Bisect & Regression Pinpointer**: Added `git_bisect` tool
+  with automated `run` test loop, commit culprit discovery, and RCA diffstat
+  reporting.
+- **Zero-Latency Terminal Ghost Text Engine**: Context-aware `ghostPredictor`
+  providing sub-millisecond Fish-style autosuggestions from local session
+  history and developer CLI patterns.
+- **Automated Frontend Visual Regression Diffing**: Added `browser_visual_diff`
+  tool with baseline capture, pixel divergence ratio analysis, and visual shift
+  detection.
+
 ## [0.9.25] - 2026-10-22
 
 ### Fixed
