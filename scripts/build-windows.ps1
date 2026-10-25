@@ -3,6 +3,15 @@
 
 $ErrorActionPreference = "Stop"
 
+$toolchainBin = Join-Path $env:USERPROFILE ".rustup\toolchains\stable-x86_64-pc-windows-msvc\bin"
+if ((Test-Path $toolchainBin) -and ($env:PATH -notlike "*$toolchainBin*")) {
+    $env:PATH = "$toolchainBin;$env:PATH"
+}
+$cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
+if ((Test-Path $cargoBin) -and ($env:PATH -notlike "*$cargoBin*")) {
+    $env:PATH = "$cargoBin;$env:PATH"
+}
+
 Write-Host "==> Checking build prerequisites..." -ForegroundColor Cyan
 if (-not (Get-Command pnpm -ErrorAction SilentlyContinue)) {
     Write-Error "pnpm is not found in PATH. Please install pnpm."
