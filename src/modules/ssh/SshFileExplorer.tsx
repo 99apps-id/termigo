@@ -8,7 +8,11 @@ import {
 } from "@/components/ui/context-menu";
 import { IconTooltip } from "@/components/ui/icon-tooltip";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { FileTreeNode } from "@/modules/explorer/FileTreeNode";
 import { InlineInput } from "@/modules/explorer/InlineInput";
 import { copyToClipboard } from "@/modules/explorer/lib/contextActions";
@@ -17,7 +21,10 @@ import {
   folderIconUrl,
   useExplorerIconsReady,
 } from "@/modules/explorer/lib/iconResolver";
-import { COMPACT_CONTENT, COMPACT_ITEM } from "@/modules/explorer/lib/menuItemClass";
+import {
+  COMPACT_CONTENT,
+  COMPACT_ITEM,
+} from "@/modules/explorer/lib/menuItemClass";
 import type { useFileTree } from "@/modules/explorer/lib/useFileTree";
 import { basename } from "@/lib/path";
 import { cn } from "@/lib/utils";
@@ -26,7 +33,14 @@ import { humanizeFsError } from "@/lib/fsError";
 import { segmentsFromCwd } from "@/modules/statusbar/lib/pathUtils";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { setSshInRightPanel } from "./settingsShim";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { sftpHome } from "./sftp";
 import { useSshFileTree } from "./useSshFileTree";
 import { useSshFileDrop } from "./useSshFileDrop";
@@ -65,7 +79,11 @@ type Props = {
   /** Last-known cwd of the active SSH terminal leaf (from OSC 7). If set, roots the tree here instead of the SFTP home. */
   currentCwd?: string | null;
   /** Opens a remote file in an editor leaf. Caller must thread `sessionId` + `hostLabel` so reads/writes use SFTP. */
-  onOpenFile?: (path: string, sessionId: number, hostLabel: string | null) => void;
+  onOpenFile?: (
+    path: string,
+    sessionId: number,
+    hostLabel: string | null,
+  ) => void;
   /** Accordion mode: header becomes a toggle and the body hides when `collapsed`. */
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
@@ -124,13 +142,16 @@ export function SshFileExplorer({
 
   // Base root follows the terminal cwd (OSC 7), else the SFTP home. Empty cwd
   // means "unknown", not "null", to avoid blanking the tree mid-session.
-  const followRoot = currentCwd && currentCwd.length > 0 ? currentCwd : homePath;
+  const followRoot =
+    currentCwd && currentCwd.length > 0 ? currentCwd : homePath;
   // Root navigation (Back / Forward / Up / breadcrumb). Tracks `followRoot`
   // until the user navigates, then pins to the chosen folder; resets when the
   // session changes so a reconnect never replays a stale path.
   const nav = useSshNav(followRoot, sessionId);
   const rootPath = nav.root;
-  const tree = useSshFileTree(sessionId, rootPath, { includeHidden: showHiddenFiles });
+  const tree = useSshFileTree(sessionId, rootPath, {
+    includeHidden: showHiddenFiles,
+  });
 
   // Publish the browsed folder so Source Control can anchor remote git status on
   // it. The shell's $PWD is $HOME until the user cd's, which is almost never a
@@ -150,17 +171,26 @@ export function SshFileExplorer({
     },
     [tree, rootPath],
   );
-  const upload = useSshFileDrop({ sessionId, rootPath, containerRef, onUploaded });
+  const upload = useSshFileDrop({
+    sessionId,
+    rootPath,
+    containerRef,
+    onUploaded,
+  });
   // total 0 = size not known yet (first event) -> show indeterminate-ish 0%.
   const uploadPct =
-    upload && upload.total > 0 ? Math.round((upload.written / upload.total) * 100) : 0;
+    upload && upload.total > 0
+      ? Math.round((upload.written / upload.total) * 100)
+      : 0;
 
   const accordion = !!onToggleCollapsed;
   const headerLabel = rootPath ? basename(rootPath) : (hostLabel ?? "SSH");
 
   const root = rootPath ? tree.nodes[rootPath] : undefined;
   const pendingAtRoot =
-    rootPath && tree.pendingCreate?.parentPath === rootPath ? tree.pendingCreate : null;
+    rootPath && tree.pendingCreate?.parentPath === rootPath
+      ? tree.pendingCreate
+      : null;
   // Local and SSH tree shapes match, so cast here to reuse the recursive
   // renderer without parameterising it.
   //
@@ -186,20 +216,33 @@ export function SshFileExplorer({
     <span className="text-foreground/80 flex min-w-0 flex-1 items-center gap-1.5 truncate text-xs font-medium">
       {accordion ? (
         collapsed ? (
-          <ChevronRight size={10} strokeWidth={2.25} className="text-muted-foreground shrink-0" />
+          <ChevronRight
+            size={10}
+            strokeWidth={2.25}
+            className="text-muted-foreground shrink-0"
+          />
         ) : (
-          <ChevronDown size={10} strokeWidth={2.25} className="text-muted-foreground shrink-0" />
+          <ChevronDown
+            size={10}
+            strokeWidth={2.25}
+            className="text-muted-foreground shrink-0"
+          />
         )
       ) : null}
       {/* Mirrors the local FileExplorer header: one server icon plus the
           cwd basename. Full path and host go in the tooltip so the header
           stays a compact h-8 strip. */}
-      <Server size={13} strokeWidth={2} className="text-muted-foreground shrink-0" />
+      <Server
+        size={13}
+        strokeWidth={2}
+        className="text-muted-foreground shrink-0"
+      />
       <span className="truncate">{headerLabel}</span>
     </span>
   );
 
-  const headerActionsVisible = !collapsed && sessionId !== null && rootPath !== null;
+  const headerActionsVisible =
+    !collapsed && sessionId !== null && rootPath !== null;
 
   return (
     <div ref={containerRef} className="flex h-full flex-col outline-none">
@@ -213,7 +256,9 @@ export function SshFileExplorer({
                 onClick={onToggleCollapsed}
                 className="hover:text-foreground flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 truncate outline-none"
                 aria-expanded={!collapsed}
-                aria-label={collapsed ? "Expand SSH files" : "Collapse SSH files"}
+                aria-label={
+                  collapsed ? "Expand SSH files" : "Collapse SSH files"
+                }
               >
                 {titleNode}
               </button>
@@ -376,7 +421,11 @@ export function SshFileExplorer({
                 const isCurrent = i === arr.length - 1;
                 return (
                   <span key={s.fullPath} className="flex items-center gap-0.5">
-                    {i > 0 ? <span className="text-muted-foreground/40 text-[10px]">/</span> : null}
+                    {i > 0 ? (
+                      <span className="text-muted-foreground/40 text-[10px]">
+                        /
+                      </span>
+                    ) : null}
                     <button
                       type="button"
                       disabled={isCurrent}
@@ -406,7 +455,9 @@ export function SshFileExplorer({
               Uploading {upload.name}
               {upload.count > 1 ? ` (${upload.index}/${upload.count})` : ""}
             </span>
-            <span className="text-muted-foreground shrink-0 tabular-nums">{uploadPct}%</span>
+            <span className="text-muted-foreground shrink-0 tabular-nums">
+              {uploadPct}%
+            </span>
           </div>
           <div className="bg-muted h-1 w-full overflow-hidden rounded-full">
             <div
@@ -419,7 +470,11 @@ export function SshFileExplorer({
 
       {collapsed ? null : sessionId === null ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
-          <Server size={24} strokeWidth={1.5} className="text-muted-foreground" />
+          <Server
+            size={24}
+            strokeWidth={1.5}
+            className="text-muted-foreground"
+          />
           <div className="text-muted-foreground text-xs">
             No active SSH session.
             <br />
@@ -459,14 +514,20 @@ export function SshFileExplorer({
                       />
                       <InlineInput
                         initial=""
-                        placeholder={pendingAtRoot.kind === "dir" ? "New folder" : "New file"}
+                        placeholder={
+                          pendingAtRoot.kind === "dir"
+                            ? "New folder"
+                            : "New file"
+                        }
                         onCommit={tree.commitCreate}
                         onCancel={tree.cancelCreate}
                       />
                     </div>
                   )}
                   {root?.status === "loading" && (
-                    <div className="text-muted-foreground px-3 py-2 text-[11px]">Loading…</div>
+                    <div className="text-muted-foreground px-3 py-2 text-[11px]">
+                      Loading…
+                    </div>
                   )}
                   {root?.status === "error" &&
                     (() => {
@@ -483,7 +544,10 @@ export function SshFileExplorer({
                               className="text-muted-foreground/80"
                             />
                           ) : null}
-                          <div className="text-muted-foreground text-[11px]" title={err.raw}>
+                          <div
+                            className="text-muted-foreground text-[11px]"
+                            title={err.raw}
+                          >
                             {err.message}
                           </div>
                           {nav.canBack ? (
@@ -557,7 +621,10 @@ export function SshFileExplorer({
               >
                 Copy Path
               </ContextMenuItem>
-              <ContextMenuItem className={COMPACT_ITEM} onSelect={() => tree.refreshAllLoaded()}>
+              <ContextMenuItem
+                className={COMPACT_ITEM}
+                onSelect={() => tree.refreshAllLoaded()}
+              >
                 Refresh
               </ContextMenuItem>
             </ContextMenuContent>

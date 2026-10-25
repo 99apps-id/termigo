@@ -35,5 +35,7 @@ export const useSshBrowseStore = create<SshBrowseState>((set) => ({
   root: null,
   sessionId: null,
   set: (sessionId, root) =>
-    set((s) => (s.sessionId === sessionId && s.root === root ? s : { sessionId, root })),
+    set((s) =>
+      s.sessionId === sessionId && s.root === root ? s : { sessionId, root },
+    ),
 }));

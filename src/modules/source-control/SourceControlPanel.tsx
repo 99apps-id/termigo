@@ -41,17 +41,15 @@ import {
   copyToClipboard,
   revealInFinder,
 } from "@/modules/explorer/lib/contextActions";
-import { fileIconUrl, folderIconUrl } from "@/modules/explorer/lib/iconResolver";
+import {
+  fileIconUrl,
+  folderIconUrl,
+} from "@/modules/explorer/lib/iconResolver";
 import {
   COMPACT_CONTENT,
   COMPACT_ITEM,
 } from "@/modules/explorer/lib/menuItemClass";
-import {
-  ChevronsDownUp,
-  ChevronsUpDown,
-  FolderTree,
-  List,
-} from "lucide-react";
+import { ChevronsDownUp, ChevronsUpDown, FolderTree, List } from "lucide-react";
 import { joinPath } from "@/modules/explorer/lib/useFileTree";
 import {
   AiContentGenerator02Icon,

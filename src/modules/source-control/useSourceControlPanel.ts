@@ -476,8 +476,7 @@ export function useSourceControlPanel(
   }, [fileEntries]);
 
   const allClean = stagedEntries.length === 0 && unstagedEntries.length === 0;
-  const canPush =
-    !!status?.upstream && status.behind === 0 && status.ahead > 0;
+  const canPush = !!status?.upstream && status.behind === 0 && status.ahead > 0;
   const selectedModel = resolveModel(selectedModelId);
   const selectedModelSupportsTemperature = modelSupportsTemperature(
     selectedModel.provider,

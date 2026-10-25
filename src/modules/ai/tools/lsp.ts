@@ -15,10 +15,7 @@ import type {
   LspSymbolInformation,
 } from "@/modules/lsp/lib/client";
 import { acquireQuerySession } from "@/modules/lsp/lib/sessionManager";
-import {
-  fileUriToPath,
-  pathToFileUri,
-} from "@/modules/lsp/lib/uri";
+import { fileUriToPath, pathToFileUri } from "@/modules/lsp/lib/uri";
 
 export type LspLocationResult = {
   path: string;
@@ -68,7 +65,8 @@ export function normalizeLspLocations(
   const out: LspLocationResult[] = [];
   for (const loc of list) {
     const uri = "uri" in loc ? loc.uri : loc.targetUri;
-    const range = "uri" in loc ? loc.range : (loc.targetSelectionRange ?? loc.targetRange);
+    const range =
+      "uri" in loc ? loc.range : (loc.targetSelectionRange ?? loc.targetRange);
     out.push({
       path: fileUriToPath(uri) ?? uri,
       line: range.start.line + 1,
@@ -116,11 +114,7 @@ function symbolKindName(kind: number): string {
 
 /** Flatten a `documentSymbol` result (hierarchical or flat) to an outline. */
 export function normalizeDocumentSymbols(
-  result:
-    | LspDocumentSymbol[]
-    | LspSymbolInformation[]
-    | null
-    | undefined,
+  result: LspDocumentSymbol[] | LspSymbolInformation[] | null | undefined,
 ): LspSymbolResult[] {
   if (!result || result.length === 0) return [];
   const out: LspSymbolResult[] = [];
@@ -143,7 +137,9 @@ export function normalizeDocumentSymbols(
         name: symbol.name,
         kind: symbolKindName(symbol.kind),
         line: symbol.location.range.start.line + 1,
-        ...(symbol.containerName ? { containerName: symbol.containerName } : {}),
+        ...(symbol.containerName
+          ? { containerName: symbol.containerName }
+          : {}),
       });
     }
   }
@@ -167,7 +163,10 @@ async function applyEditPlans(
     }
     const read = await native.readFile(plan.path);
     if (read.kind !== "text") {
-      files.push({ path: plan.path, error: "Skipped: not a readable text file." });
+      files.push({
+        path: plan.path,
+        error: "Skipped: not a readable text file.",
+      });
       continue;
     }
     const updated = applyTextEdits(read.content, plan.edits);
@@ -192,9 +191,15 @@ export function buildLspTools(ctx: ToolContext) {
       description:
         "Find the definition of a symbol at the given file and position using a live Language Server Protocol session. Line and character are 1-indexed. Returns target file paths and positions. Read-only, but starts the relevant language server on first use if it is enabled and not already running.",
       inputSchema: z.object({
-        path: z.string().describe("Relative or absolute path to the source file."),
+        path: z
+          .string()
+          .describe("Relative or absolute path to the source file."),
         line: z.number().int().min(1).describe("1-indexed line number."),
-        character: z.number().int().min(1).describe("1-indexed character / column number."),
+        character: z
+          .number()
+          .int()
+          .min(1)
+          .describe("1-indexed character / column number."),
       }),
       execute: async ({ path: rawPath, line, character }) => {
         const path = resolvePath(rawPath, ctx.getCwd());
@@ -204,7 +209,8 @@ export function buildLspTools(ctx: ToolContext) {
         }
         if (ctx.getRemoteSession()) {
           return {
-            error: "lsp_definitions is local-only; use grep on the remote host to locate symbols.",
+            error:
+              "lsp_definitions is local-only; use grep on the remote host to locate symbols.",
             path: rawPath,
           };
         }
@@ -243,16 +249,27 @@ export function buildLspTools(ctx: ToolContext) {
       description:
         "Find all references to a symbol across the workspace using a live Language Server Protocol session. Line and character are 1-indexed. Returns target file paths and positions. Read-only, but starts the relevant language server on first use if enabled.",
       inputSchema: z.object({
-        path: z.string().describe("Relative or absolute path to the source file."),
+        path: z
+          .string()
+          .describe("Relative or absolute path to the source file."),
         line: z.number().int().min(1).describe("1-indexed line number."),
-        character: z.number().int().min(1).describe("1-indexed character / column number."),
+        character: z
+          .number()
+          .int()
+          .min(1)
+          .describe("1-indexed character / column number."),
         includeDeclaration: z
           .boolean()
           .optional()
           .default(true)
           .describe("Include the symbol declaration in the reference results."),
       }),
-      execute: async ({ path: rawPath, line, character, includeDeclaration }) => {
+      execute: async ({
+        path: rawPath,
+        line,
+        character,
+        includeDeclaration,
+      }) => {
         const path = resolvePath(rawPath, ctx.getCwd());
         const secret = checkReadable(path);
         if (!secret.ok) {
@@ -260,7 +277,8 @@ export function buildLspTools(ctx: ToolContext) {
         }
         if (ctx.getRemoteSession()) {
           return {
-            error: "lsp_references is local-only; use grep on the remote host to locate symbols.",
+            error:
+              "lsp_references is local-only; use grep on the remote host to locate symbols.",
             path: rawPath,
           };
         }
@@ -300,8 +318,14 @@ export function buildLspTools(ctx: ToolContext) {
       description:
         "Rename a symbol across the whole workspace using a live Language Server Protocol session, applying the server's rename edit to every affected file. Line and character are 1-indexed and must point at the symbol. Prefer this over a sequence of edit calls for a cross-file rename: the server computes every reference, so nothing is missed and no unrelated text is rewritten. Local-only; writes the files the server names.",
       inputSchema: z.object({
-        path: z.string().describe("Relative or absolute path to the source file."),
-        line: z.number().int().min(1).describe("1-indexed line number of the symbol."),
+        path: z
+          .string()
+          .describe("Relative or absolute path to the source file."),
+        line: z
+          .number()
+          .int()
+          .min(1)
+          .describe("1-indexed line number of the symbol."),
         character: z
           .number()
           .int()
@@ -382,7 +406,9 @@ export function buildLspTools(ctx: ToolContext) {
       description:
         "List the symbols (classes, functions, methods, variables) in a file from a live language server, as a flat outline with 1-indexed line numbers. Cheaper than reading a large file when you only need to know what it defines and where. Local-only.",
       inputSchema: z.object({
-        path: z.string().describe("Relative or absolute path to the source file."),
+        path: z
+          .string()
+          .describe("Relative or absolute path to the source file."),
       }),
       execute: async ({ path: rawPath }) => {
         const path = resolvePath(rawPath, ctx.getCwd());
@@ -417,7 +443,9 @@ export function buildLspTools(ctx: ToolContext) {
       description:
         "List the code actions a language server offers at a position: quick fixes for a diagnostic, organize imports, and source refactors. Read-only; returns each action's index and title. Call lsp_apply_code_action with an index to apply one that carries an edit. Local-only.",
       inputSchema: z.object({
-        path: z.string().describe("Relative or absolute path to the source file."),
+        path: z
+          .string()
+          .describe("Relative or absolute path to the source file."),
         line: z.number().int().min(1).describe("1-indexed line number."),
         character: z
           .number()
@@ -481,7 +509,9 @@ export function buildLspTools(ctx: ToolContext) {
       description:
         "Apply one code action returned by lsp_code_actions, writing its edit to the affected files. Actions that only run a server-side command (no edit) cannot be applied here and are reported as such. Local-only.",
       inputSchema: z.object({
-        path: z.string().describe("Relative or absolute path to the source file."),
+        path: z
+          .string()
+          .describe("Relative or absolute path to the source file."),
         line: z.number().int().min(1).describe("1-indexed line number."),
         character: z
           .number()
@@ -564,7 +594,12 @@ export function buildLspTools(ctx: ToolContext) {
       description:
         "Get the latest LSP diagnostics (errors, warnings, type mismatches) that the editor has received for a file. Read-only. If no diagnostics are known yet for the file, returns an empty list and suggests run_checks (lint) as the definitive source for compiler feedback.",
       inputSchema: z.object({
-        path: z.string().optional().describe("Optional file path to limit diagnostics to a specific file."),
+        path: z
+          .string()
+          .optional()
+          .describe(
+            "Optional file path to limit diagnostics to a specific file.",
+          ),
       }),
       execute: async ({ path: rawPath }) => {
         const target = rawPath

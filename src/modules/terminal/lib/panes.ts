@@ -38,9 +38,7 @@ export type PaneNode =
       children: PaneNode[];
     };
 
-export function isLeaf(
-  n: PaneNode,
-): n is Extract<PaneNode, { kind: "leaf" }> {
+export function isLeaf(n: PaneNode): n is Extract<PaneNode, { kind: "leaf" }> {
   return n.kind === "leaf";
 }
 
@@ -92,11 +90,7 @@ export function isSshLeaf(n: PaneNode, id: PaneId): boolean {
  * Routing by leaf kind here rather than at the call sites keeps the one place
  * that knows a leaf is remote in charge of the distinction.
  */
-export function setLeafCwd(
-  n: PaneNode,
-  id: PaneId,
-  cwd: string,
-): PaneNode {
+export function setLeafCwd(n: PaneNode, id: PaneId, cwd: string): PaneNode {
   if (isLeaf(n)) {
     if (n.id !== id) return n;
     if (n.ssh) {
@@ -177,10 +171,7 @@ export function splitLeaf(
  * Remove a leaf and collapse single-child splits left in its wake. Returns
  * `null` when the entire subtree is gone.
  */
-export function removeLeaf(
-  tree: PaneNode,
-  targetId: PaneId,
-): PaneNode | null {
+export function removeLeaf(tree: PaneNode, targetId: PaneId): PaneNode | null {
   if (isLeaf(tree)) return tree.id === targetId ? null : tree;
   const newChildren: PaneNode[] = [];
   for (const c of tree.children) {
@@ -208,10 +199,7 @@ export function nextLeafId(
 // next sibling, fall back to the previous. Used to pick the new focus
 // when a pane closes (so focus stays in the same neighborhood instead of
 // snapping to the first pane in the tree).
-export function siblingLeafOf(
-  tree: PaneNode,
-  leafId: PaneId,
-): PaneId | null {
+export function siblingLeafOf(tree: PaneNode, leafId: PaneId): PaneId | null {
   if (isLeaf(tree)) return null;
   for (let i = 0; i < tree.children.length; i++) {
     const c = tree.children[i];
@@ -234,7 +222,13 @@ export function hasLeaf(tree: PaneNode, id: PaneId): boolean {
   return leafIds(tree).includes(id);
 }
 
-type PaneRect = { id: PaneId; x: number; y: number; width: number; height: number };
+type PaneRect = {
+  id: PaneId;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
 
 function paneRects(
   node: PaneNode,
@@ -248,7 +242,13 @@ function paneRects(
   return node.children.flatMap((child, index) =>
     node.dir === "row"
       ? paneRects(child, x + (width * index) / count, y, width / count, height)
-      : paneRects(child, x, y + (height * index) / count, width, height / count),
+      : paneRects(
+          child,
+          x,
+          y + (height * index) / count,
+          width,
+          height / count,
+        ),
   );
 }
 
@@ -276,24 +276,31 @@ function directionalTarget(
   );
   const candidates = ahead.length > 0 ? ahead : others;
   candidates.sort((a, b) => {
-    const axisA = ahead.length > 0
-      ? Math.abs(center(a) - center(active))
-      : forward
-        ? center(a)
-        : -center(a);
-    const axisB = ahead.length > 0
-      ? Math.abs(center(b) - center(active))
-      : forward
-        ? center(b)
-        : -center(b);
-    return axisA - axisB ||
+    const axisA =
+      ahead.length > 0
+        ? Math.abs(center(a) - center(active))
+        : forward
+          ? center(a)
+          : -center(a);
+    const axisB =
+      ahead.length > 0
+        ? Math.abs(center(b) - center(active))
+        : forward
+          ? center(b)
+          : -center(b);
+    return (
+      axisA - axisB ||
       Math.abs(crossCenter(a) - crossCenter(active)) -
-        Math.abs(crossCenter(b) - crossCenter(active));
+        Math.abs(crossCenter(b) - crossCenter(active))
+    );
   });
   return candidates[0]?.id ?? null;
 }
 
-function findLeaf(node: PaneNode, id: PaneId): Extract<PaneNode, { kind: "leaf" }> | null {
+function findLeaf(
+  node: PaneNode,
+  id: PaneId,
+): Extract<PaneNode, { kind: "leaf" }> | null {
   if (isLeaf(node)) return node.id === id ? node : null;
   for (const child of node.children) {
     const found = findLeaf(child, id);

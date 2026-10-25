@@ -83,9 +83,10 @@ describe("sanitizeInlineKeyboard", () => {
   });
 
   it("caps the total number of buttons", () => {
-    const rows = Array.from({ length: TELEGRAM_MAX_INLINE_BUTTONS + 20 }, (_, i) => [
-      button(`ms:m-${i}`),
-    ]);
+    const rows = Array.from(
+      { length: TELEGRAM_MAX_INLINE_BUTTONS + 20 },
+      (_, i) => [button(`ms:m-${i}`)],
+    );
     const total = sanitizeInlineKeyboard(rows).reduce(
       (n, row) => n + row.length,
       0,

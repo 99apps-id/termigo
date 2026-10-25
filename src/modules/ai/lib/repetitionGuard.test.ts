@@ -84,7 +84,9 @@ describe("isRepetitionDominated", () => {
 
   it("trips exactly at the minimum repeat count when it dominates", () => {
     const line = "b".repeat(100);
-    const text = Array.from({ length: MIN_REPEAT_COUNT }, () => line).join("\n");
+    const text = Array.from({ length: MIN_REPEAT_COUNT }, () => line).join(
+      "\n",
+    );
     // 5 lines x 100 chars = 500 chars >= MIN_FRAGMENT_LENGTH, coverage = 1.
     expect(text.length).toBeGreaterThanOrEqual(MIN_FRAGMENT_LENGTH);
     expect(isRepetitionDominated(text)).toBe(true);
@@ -106,7 +108,8 @@ describe("isRepetitionDominated", () => {
     // unique so nothing dominates.
     const unique = Array.from(
       { length: 30 },
-      (_, i) => `line ${i.toString(36).padStart(4, "0")} of distinct content here`,
+      (_, i) =>
+        `line ${i.toString(36).padStart(4, "0")} of distinct content here`,
     ).join("\n");
     const text = `${unique}\n\n\n\n\n\n\n\n\n\n\n\n`;
     expect(text.length).toBeGreaterThan(MIN_FRAGMENT_LENGTH);

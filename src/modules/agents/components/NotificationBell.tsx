@@ -96,7 +96,11 @@ function HookAgentRow({
 }) {
   return (
     <div className="flex items-center gap-2 px-2 py-1">
-      <AgentIcon agent={id} size={14} className="shrink-0 text-muted-foreground" />
+      <AgentIcon
+        agent={id}
+        size={14}
+        className="shrink-0 text-muted-foreground"
+      />
       <span className="flex-1 truncate text-[12px] text-muted-foreground">
         {label}
       </span>
@@ -332,7 +336,11 @@ export function NotificationBell({ onActivate, onActivateLocal }: Props) {
             aria-expanded={alertsOpen}
             className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70 transition-colors hover:text-foreground"
           >
-            <HugeiconsIcon icon={Notification03Icon} size={11} strokeWidth={2} />
+            <HugeiconsIcon
+              icon={Notification03Icon}
+              size={11}
+              strokeWidth={2}
+            />
             Agent alerts
             <span className="ml-auto flex items-center gap-1.5 normal-case tracking-normal">
               {enabledCount > 0 ? (

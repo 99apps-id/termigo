@@ -46,7 +46,10 @@ describe("truncateCommandOutput", () => {
   });
 
   it("truncates long multi-line output preserving head and tail", () => {
-    const lines = Array.from({ length: 100 }, (_, i) => `Line ${i + 1}: detailed output log entry here`);
+    const lines = Array.from(
+      { length: 100 },
+      (_, i) => `Line ${i + 1}: detailed output log entry here`,
+    );
     const fullText = lines.join("\n");
     const res = truncateCommandOutput(fullText, 500, 5, 5);
 
@@ -63,7 +66,9 @@ describe("truncateCommandOutput", () => {
     const res = truncateCommandOutput(singleLine, 200);
 
     expect(res.truncated).toBe(true);
-    expect(res.text).toContain("... [Output truncated: 800 characters omitted] ...");
+    expect(res.text).toContain(
+      "... [Output truncated: 800 characters omitted] ...",
+    );
     expect(res.text.startsWith("AAAAA")).toBe(true);
     expect(res.text.endsWith("AAAAA")).toBe(true);
   });
@@ -80,7 +85,9 @@ describe("unwrapPowershellCommand", () => {
 
   it("unwraps pwsh -Command with single quotes", () => {
     const input = "pwsh -Command 'Get-Process | Select-Object -First 5'";
-    expect(unwrapPowershellCommand(input)).toBe("Get-Process | Select-Object -First 5");
+    expect(unwrapPowershellCommand(input)).toBe(
+      "Get-Process | Select-Object -First 5",
+    );
   });
 
   it("unwraps script blocks in curly braces", () => {
@@ -96,7 +103,9 @@ describe("unwrapPowershellCommand", () => {
   it("leaves standard commands untouched", () => {
     expect(unwrapPowershellCommand("pnpm test")).toBe("pnpm test");
     expect(unwrapPowershellCommand("git status")).toBe("git status");
-    expect(unwrapPowershellCommand("Get-Content file.txt")).toBe("Get-Content file.txt");
+    expect(unwrapPowershellCommand("Get-Content file.txt")).toBe(
+      "Get-Content file.txt",
+    );
   });
 });
 
@@ -178,7 +187,11 @@ describe("bash_run ssh fallback", () => {
     try {
       let cleared = false;
       const tools = buildShellTools(
-        sshCtx({ clearRemoteSession: () => { cleared = true; } }),
+        sshCtx({
+          clearRemoteSession: () => {
+            cleared = true;
+          },
+        }),
       );
       const exec = tools.bash_run.execute;
       if (!exec) throw new Error("bash_run execute missing");
@@ -200,9 +213,7 @@ describe("bash_run ssh fallback", () => {
     const { sshExec } = await import("@/modules/ssh/bridge");
     vi.mocked(sshExec).mockRejectedValueOnce(new Error("no ssh session"));
     const { native } = await import("../lib/native");
-    const open = vi
-      .spyOn(native, "shellSessionOpen")
-      .mockResolvedValue(41);
+    const open = vi.spyOn(native, "shellSessionOpen").mockResolvedValue(41);
     const run = vi.spyOn(native, "shellSessionRun").mockResolvedValue({
       stdout: "a\n",
       stderr: "",
@@ -337,7 +348,8 @@ describe("staleNodeModulesHint", () => {
       command:
         "node node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/tsc.js --noEmit",
       exitCode: 1,
-      output: "Error: Cannot find module 'node_modules/.pnpm/typescript@5.9.3/...'",
+      output:
+        "Error: Cannot find module 'node_modules/.pnpm/typescript@5.9.3/...'",
     });
     expect(hint).toContain("STALE view of node_modules");
     expect(hint).toContain("pnpm exec");

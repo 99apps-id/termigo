@@ -51,7 +51,9 @@ export function SshBackupDialog({ open, onOpenChange, mode }: Props) {
 
   const mismatch = isExport && confirm.length > 0 && passphrase !== confirm;
   const canSubmit =
-    !busy && passphrase.length > 0 && (!isExport || (confirm.length > 0 && !mismatch));
+    !busy &&
+    passphrase.length > 0 &&
+    (!isExport || (confirm.length > 0 && !mismatch));
 
   const run = async () => {
     setError(null);
@@ -64,14 +66,18 @@ export function SshBackupDialog({ open, onOpenChange, mode }: Props) {
         // filename for a file that was never going to be written.
         const target = await saveFileDialog({
           defaultPath: `termigo-ssh-connections.${BACKUP_EXTENSION}`,
-          filters: [{ name: "Termigo SSH backup", extensions: [BACKUP_EXTENSION] }],
+          filters: [
+            { name: "Termigo SSH backup", extensions: [BACKUP_EXTENSION] },
+          ],
         });
         if (!target) {
           setBusy(false);
           return;
         }
         await invoke<void>("fs_write_file", { path: target, content: text });
-        setDone(`Exported ${count} connection${count === 1 ? "" : "s"} to ${target}`);
+        setDone(
+          `Exported ${count} connection${count === 1 ? "" : "s"} to ${target}`,
+        );
       } else {
         const result = await applyBackup(mode.text, passphrase);
         setDone(summarize(result));
@@ -98,7 +104,10 @@ export function SshBackupDialog({ open, onOpenChange, mode }: Props) {
         </DialogHeader>
 
         {!isExport ? (
-          <p className="text-muted-foreground truncate font-mono text-[10.5px]" title={mode.path}>
+          <p
+            className="text-muted-foreground truncate font-mono text-[10.5px]"
+            title={mode.path}
+          >
             {mode.path}
           </p>
         ) : null}
@@ -144,13 +153,18 @@ export function SshBackupDialog({ open, onOpenChange, mode }: Props) {
 
           {isExport ? (
             <p className="text-muted-foreground text-[10.5px]">
-              The file contains your SSH passwords and private keys, encrypted with this passphrase
-              (PBKDF2-SHA256, AES-256-GCM). Treat it like a key file.
+              The file contains your SSH passwords and private keys, encrypted
+              with this passphrase (PBKDF2-SHA256, AES-256-GCM). Treat it like a
+              key file.
             </p>
           ) : null}
 
-          {error ? <span className="text-destructive text-[10.5px]">{error}</span> : null}
-          {done ? <span className="text-muted-foreground text-[10.5px]">{done}</span> : null}
+          {error ? (
+            <span className="text-destructive text-[10.5px]">{error}</span>
+          ) : null}
+          {done ? (
+            <span className="text-muted-foreground text-[10.5px]">{done}</span>
+          ) : null}
         </div>
 
         <DialogFooter>
@@ -159,7 +173,12 @@ export function SshBackupDialog({ open, onOpenChange, mode }: Props) {
               {done ? "Close" : "Cancel"}
             </Button>
           </DialogClose>
-          <Button size="sm" disabled={!canSubmit} onClick={() => void run()} className="gap-1.5">
+          <Button
+            size="sm"
+            disabled={!canSubmit}
+            onClick={() => void run()}
+            className="gap-1.5"
+          >
             {busy ? <Spinner className="size-3" /> : null}
             {isExport ? "Export" : "Import"}
           </Button>
@@ -172,6 +191,7 @@ export function SshBackupDialog({ open, onOpenChange, mode }: Props) {
 function summarize(r: ImportResult): string {
   const parts = [`${r.added} added`, `${r.replaced} updated`];
   if (r.skipped > 0) parts.push(`${r.skipped} skipped as unreadable`);
-  if (r.withoutSecrets > 0) parts.push(`${r.withoutSecrets} without stored credentials`);
+  if (r.withoutSecrets > 0)
+    parts.push(`${r.withoutSecrets} without stored credentials`);
   return `Imported: ${parts.join(", ")}.`;
 }

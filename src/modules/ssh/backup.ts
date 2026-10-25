@@ -34,10 +34,13 @@ import {
  * Returns the count alongside it so the caller can say what it wrote without
  * parsing the JSON back out.
  */
-export async function buildBackup(passphrase: string): Promise<{ text: string; count: number }> {
+export async function buildBackup(
+  passphrase: string,
+): Promise<{ text: string; count: number }> {
   if (!passphrase) throw new Error("A passphrase is required.");
   const connections = await listConnections();
-  if (connections.length === 0) throw new Error("There are no saved connections to export.");
+  if (connections.length === 0)
+    throw new Error("There are no saved connections to export.");
 
   const secrets: BackupSecrets = {};
   for (const c of connections) {
@@ -83,7 +86,10 @@ export type ImportResult = {
  * rather than duplicating. Nothing is deleted: a connection that exists here
  * but not in the file is left alone.
  */
-export async function applyBackup(text: string, passphrase: string): Promise<ImportResult> {
+export async function applyBackup(
+  text: string,
+  passphrase: string,
+): Promise<ImportResult> {
   if (!passphrase) throw new Error("A passphrase is required.");
 
   let raw: unknown;
@@ -104,7 +110,9 @@ export async function applyBackup(text: string, passphrase: string): Promise<Imp
   try {
     secrets = sanitizeSecrets(JSON.parse(plain));
   } catch {
-    throw new Error("The encrypted block did not contain readable credentials.");
+    throw new Error(
+      "The encrypted block did not contain readable credentials.",
+    );
   }
 
   const existing = await listConnections();

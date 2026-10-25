@@ -1337,8 +1337,12 @@ export default function App() {
                         hostLabel={activeSshSession.hostLabel}
                         currentCwd={activeRemoteCwd}
                         onOpenFile={(path, _sid, host) => {
-                          void navigator.clipboard.writeText(path).catch(() => {});
-                          toast.info(`Remote path: ${path}${host ? ` (${host})` : ""}`);
+                          void navigator.clipboard
+                            .writeText(path)
+                            .catch(() => {});
+                          toast.info(
+                            `Remote path: ${path}${host ? ` (${host})` : ""}`,
+                          );
                         }}
                         onClose={() =>
                           useSshRightPanelStore.getState().closePanel()

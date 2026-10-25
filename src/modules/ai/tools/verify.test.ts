@@ -7,11 +7,25 @@ describe("detectCheckCommand", () => {
       packageManager: "pnpm@11.9.0",
       scripts: { test: "vitest run", lint: "biome lint ./src" },
     });
-    expect(detectCheckCommand("test", { pkgJson, cargo: null, goMod: null, pyproject: null })).toEqual({
+    expect(
+      detectCheckCommand("test", {
+        pkgJson,
+        cargo: null,
+        goMod: null,
+        pyproject: null,
+      }),
+    ).toEqual({
       command: "pnpm run test",
       note: "package.json script (pnpm)",
     });
-    expect(detectCheckCommand("lint", { pkgJson, cargo: null, goMod: null, pyproject: null })).toEqual({
+    expect(
+      detectCheckCommand("lint", {
+        pkgJson,
+        cargo: null,
+        goMod: null,
+        pyproject: null,
+      }),
+    ).toEqual({
       command: "pnpm run lint",
       note: "package.json script (pnpm)",
     });
@@ -19,11 +33,25 @@ describe("detectCheckCommand", () => {
 
   it("falls back to cargo for a Rust project without package.json", () => {
     const cargo = "[package]\nname = 'x'\n";
-    expect(detectCheckCommand("test", { pkgJson: null, cargo, goMod: null, pyproject: null })).toEqual({
+    expect(
+      detectCheckCommand("test", {
+        pkgJson: null,
+        cargo,
+        goMod: null,
+        pyproject: null,
+      }),
+    ).toEqual({
       command: "cargo test --lib",
       note: "Cargo.toml",
     });
-    expect(detectCheckCommand("lint", { pkgJson: null, cargo, goMod: null, pyproject: null })).toEqual({
+    expect(
+      detectCheckCommand("lint", {
+        pkgJson: null,
+        cargo,
+        goMod: null,
+        pyproject: null,
+      }),
+    ).toEqual({
       command: "cargo clippy --all-targets -- -D warnings",
       note: "Cargo.toml (clippy)",
     });
@@ -31,7 +59,14 @@ describe("detectCheckCommand", () => {
 
   it("falls back to go for a Go project", () => {
     const goMod = "module example.com/x\n";
-    expect(detectCheckCommand("test", { pkgJson: null, cargo: null, goMod, pyproject: null })).toEqual({
+    expect(
+      detectCheckCommand("test", {
+        pkgJson: null,
+        cargo: null,
+        goMod,
+        pyproject: null,
+      }),
+    ).toEqual({
       command: "go test ./...",
       note: "go.mod",
     });
@@ -39,7 +74,14 @@ describe("detectCheckCommand", () => {
 
   it("falls back to python for a Python project", () => {
     const pyproject = "[tool.pytest.ini_options]\n";
-    expect(detectCheckCommand("test", { pkgJson: null, cargo: null, goMod: null, pyproject })).toEqual({
+    expect(
+      detectCheckCommand("test", {
+        pkgJson: null,
+        cargo: null,
+        goMod: null,
+        pyproject,
+      }),
+    ).toEqual({
       command: "python -m pytest",
       note: "pyproject.toml (pytest)",
     });

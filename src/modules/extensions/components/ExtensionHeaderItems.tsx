@@ -18,11 +18,16 @@ import { useRegistry } from "../useRegistry";
 export function ExtensionHeaderItems({
   placement = "right",
   compact = false,
-}: { placement?: "left" | "right"; compact?: boolean } = {}) {
+}: {
+  placement?: "left" | "right";
+  compact?: boolean;
+} = {}) {
   const items = useRegistry(headerItemsRegistry);
   // Subscribe so the icon row re-renders once the lazy icon chunk arrives.
   useIconsReady();
-  const matching = items.filter(({ item }) => (item.placement ?? "right") === placement);
+  const matching = items.filter(
+    ({ item }) => (item.placement ?? "right") === placement,
+  );
   if (matching.length === 0) return null;
   const sorted = [...matching].sort((a, b) => {
     const e = a.extensionId.localeCompare(b.extensionId);
@@ -60,7 +65,8 @@ function HeaderItemView({
   const Icon = resolveExtIcon(item.icon);
   const iconUrl = useResolvedExtensionIcon(extensionId, Icon ? "" : item.icon);
   const isSvg =
-    iconUrl !== null && (iconUrl.startsWith("data:image/svg+xml") || iconUrl.endsWith(".svg"));
+    iconUrl !== null &&
+    (iconUrl.startsWith("data:image/svg+xml") || iconUrl.endsWith(".svg"));
   const tone = item.tone ?? "default";
   const toneColorClass =
     tone === "success"
@@ -79,7 +85,10 @@ function HeaderItemView({
           try {
             item.onClick(event.nativeEvent);
           } catch (err) {
-            console.error(`[extensions] header item "${extensionId}:${item.id}" threw`, err);
+            console.error(
+              `[extensions] header item "${extensionId}:${item.id}" threw`,
+              err,
+            );
           }
         }}
         className={cn(

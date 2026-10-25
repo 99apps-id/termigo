@@ -14,14 +14,24 @@ describe("diffComments", () => {
     let batch = createEmptyDiffBatch();
     expect(batch.comments).toHaveLength(0);
 
-    const c1 = createDiffComment("src/utils/math.ts", 42, "Use safe integer addition", "const sum = a + b;");
+    const c1 = createDiffComment(
+      "src/utils/math.ts",
+      42,
+      "Use safe integer addition",
+      "const sum = a + b;",
+    );
     batch = addCommentToBatch(batch, c1);
     expect(batch.comments).toHaveLength(1);
     expect(batch.comments[0].filePath).toBe("src/utils/math.ts");
     expect(batch.comments[0].lineNumber).toBe(42);
 
     // Overwrites existing comment on same file, line, and side
-    const c1Updated = createDiffComment("src/utils/math.ts", 42, "Use BigInt instead", "const sum = a + b;");
+    const c1Updated = createDiffComment(
+      "src/utils/math.ts",
+      42,
+      "Use BigInt instead",
+      "const sum = a + b;",
+    );
     batch = addCommentToBatch(batch, c1Updated);
     expect(batch.comments).toHaveLength(1);
     expect(batch.comments[0].comment).toBe("Use BigInt instead");
@@ -53,9 +63,18 @@ describe("diffComments", () => {
 
   it("groups comments by file in ascending line order", () => {
     let batch = createEmptyDiffBatch();
-    batch = addCommentToBatch(batch, createDiffComment("src/z.ts", 50, "comment 50"));
-    batch = addCommentToBatch(batch, createDiffComment("src/z.ts", 10, "comment 10"));
-    batch = addCommentToBatch(batch, createDiffComment("src/a.ts", 5, "comment 5"));
+    batch = addCommentToBatch(
+      batch,
+      createDiffComment("src/z.ts", 50, "comment 50"),
+    );
+    batch = addCommentToBatch(
+      batch,
+      createDiffComment("src/z.ts", 10, "comment 10"),
+    );
+    batch = addCommentToBatch(
+      batch,
+      createDiffComment("src/a.ts", 5, "comment 5"),
+    );
 
     const grouped = groupCommentsByFile(batch);
     expect(Object.keys(grouped)).toEqual(["src/z.ts", "src/a.ts"]);
@@ -68,20 +87,35 @@ describe("diffComments", () => {
 
     batch = addCommentToBatch(
       batch,
-      createDiffComment("src/auth.ts", 42, "Use crypto.timingSafeEqual here", "if (a === b) return true;")
+      createDiffComment(
+        "src/auth.ts",
+        42,
+        "Use crypto.timingSafeEqual here",
+        "if (a === b) return true;",
+      ),
     );
     batch = addCommentToBatch(
       batch,
-      createDiffComment("src/auth.ts", 80, "Handle null or expired tokens gracefully")
+      createDiffComment(
+        "src/auth.ts",
+        80,
+        "Handle null or expired tokens gracefully",
+      ),
     );
 
     const prompt = formatDiffFeedbackPrompt(batch);
-    expect(prompt).toContain("I have reviewed your changes and noted 2 inline annotation(s)");
+    expect(prompt).toContain(
+      "I have reviewed your changes and noted 2 inline annotation(s)",
+    );
     expect(prompt).toContain("### File: `src/auth.ts`");
     expect(prompt).toContain("- Line 42: `if (a === b) return true;`");
     expect(prompt).toContain("Feedback: Use crypto.timingSafeEqual here");
     expect(prompt).toContain("- Line 80:");
-    expect(prompt).toContain("Feedback: Handle null or expired tokens gracefully");
-    expect(prompt).toContain("Please apply these changes directly and verify that tests still pass.");
+    expect(prompt).toContain(
+      "Feedback: Handle null or expired tokens gracefully",
+    );
+    expect(prompt).toContain(
+      "Please apply these changes directly and verify that tests still pass.",
+    );
   });
 });

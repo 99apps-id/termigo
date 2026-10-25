@@ -119,12 +119,16 @@ describe("humanizeModelError", () => {
 
   it("explains concurrency throttling", () => {
     expect(
-      humanizeModelError("concurrency reached, current: 9, limit: 8").toLowerCase(),
+      humanizeModelError(
+        "concurrency reached, current: 9, limit: 8",
+      ).toLowerCase(),
     ).toContain("rate-limit");
   });
 
   it("handles empty retry error wrappers gracefully", () => {
-    const out = humanizeModelError("AI_RetryError: Failed after 3 attempts. Last error:");
+    const out = humanizeModelError(
+      "AI_RetryError: Failed after 3 attempts. Last error:",
+    );
     expect(out.toLowerCase()).toContain("failed after multiple retry attempts");
   });
 
@@ -136,7 +140,8 @@ describe("humanizeModelError", () => {
   });
 
   it("sanitizes raw HTML error responses from proxies", () => {
-    const html = "<!DOCTYPE html><html lang=\"en\"><head><title>404 Not Found</title></head><body>Error</body></html>";
+    const html =
+      '<!DOCTYPE html><html lang="en"><head><title>404 Not Found</title></head><body>Error</body></html>';
     const out = humanizeModelError(html);
     expect(out.toLowerCase()).toContain("html web page");
     expect(out.toLowerCase()).not.toContain("<!doctype");

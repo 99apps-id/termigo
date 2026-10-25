@@ -308,11 +308,9 @@ export function tryRunSlashCommand(input: string): SlashOutcome {
       void (async () => {
         const { answerSideQuestion } = await import("./sideQuestion");
         const answer = await answerSideQuestion(tail, messages);
-        useChatStore
-          .getState()
-          .patchAgentMeta({
-            sideQuestion: { question: tail, answer, at: Date.now() },
-          });
+        useChatStore.getState().patchAgentMeta({
+          sideQuestion: { question: tail, answer, at: Date.now() },
+        });
       })().catch((e) => {
         toast.error(`Side question failed: ${String(e)}`);
       });

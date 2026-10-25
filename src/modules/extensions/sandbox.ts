@@ -17,7 +17,12 @@ import type { SidebarSection } from "./registries";
 
 /** Outbound request from the sandbox (extension) to the host. */
 export type SandboxRequest =
-  | { id: number; kind: "invoke"; command: string; args?: Record<string, unknown> }
+  | {
+      id: number;
+      kind: "invoke";
+      command: string;
+      args?: Record<string, unknown>;
+    }
   | { id: number; kind: "storage:get"; key: string }
   | { id: number; kind: "storage:set"; key: string; value: unknown }
   | { id: number; kind: "storage:delete"; key: string }
@@ -38,7 +43,13 @@ export type SandboxRequest =
   | { id: number; kind: "panel:open"; panelId: string }
   | { id: number; kind: "panel:close" }
   | { id: number; kind: "panel:toggle"; panelId: string }
-  | { id: number; kind: "ui:mountPanel"; panelId: string; html: string; events: string[] }
+  | {
+      id: number;
+      kind: "ui:mountPanel";
+      panelId: string;
+      html: string;
+      events: string[];
+    }
   | { id: number; kind: "headerbar:set"; item: SerializedHeaderItem }
   | { id: number; kind: "headerbar:remove"; itemId: string }
   | { id: number; kind: "statusbar:set"; item: SerializedStatusItem }
@@ -46,7 +57,12 @@ export type SandboxRequest =
   | { id: number; kind: "sidebar:set"; section: SerializedSidebarSection }
   | { id: number; kind: "sidebar:remove"; sectionId: string }
   | { id: number; kind: "dom:unsupported"; surface: string }
-  | { id: number; kind: "logger"; level: "info" | "warn" | "error"; args: unknown[] };
+  | {
+      id: number;
+      kind: "logger";
+      level: "info" | "warn" | "error";
+      args: unknown[];
+    };
 
 /** Reply from the host to a sandbox request. */
 export type SandboxResponse =
@@ -92,12 +108,34 @@ export type SerializedSidebarSection = Omit<
 /** Inbound message from the host to the worker (init + calls the host owns). */
 export type HostMessage =
   | { type: "init"; id: string; code: string; platform?: string }
-  | { type: "invoke_tool"; name: string; args: Record<string, unknown>; callId: number }
+  | {
+      type: "invoke_tool";
+      name: string;
+      args: Record<string, unknown>;
+      callId: number;
+    }
   | { type: "invoke_command"; id: string; args: unknown[]; callId: number }
   | { type: "event"; channel: string; payload: unknown }
-  | { type: "ui:event"; panelId: string; event: string; fields?: Record<string, string> }
-  | { type: "ui:itemClick"; surface: "header" | "status"; id: string; event: string }
-  | { type: "ui:sidebarEvent"; kind: "click" | "toggle" | "action" | "context"; sectionId: string; itemId?: string; actionId?: string; event: string }
+  | {
+      type: "ui:event";
+      panelId: string;
+      event: string;
+      fields?: Record<string, string>;
+    }
+  | {
+      type: "ui:itemClick";
+      surface: "header" | "status";
+      id: string;
+      event: string;
+    }
+  | {
+      type: "ui:sidebarEvent";
+      kind: "click" | "toggle" | "action" | "context";
+      sectionId: string;
+      itemId?: string;
+      actionId?: string;
+      event: string;
+    }
   | { type: "deactivate" };
 
 /** Outbound message from the worker to the host for calls the host initiated. */
@@ -320,7 +358,11 @@ export function createSandboxDispatcher(
       }
       return { id: req.id, ok: true, value };
     } catch (e) {
-      return { id: req.id, ok: false, error: e instanceof Error ? e.message : String(e) };
+      return {
+        id: req.id,
+        ok: false,
+        error: e instanceof Error ? e.message : String(e),
+      };
     }
   };
 }

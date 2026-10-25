@@ -42,7 +42,11 @@ export function sftpReadFile(sessionId: number, path: string): Promise<string> {
   return invoke<string>("ssh_sftp_read_file", { id: sessionId, path });
 }
 
-export function sftpWriteFile(sessionId: number, path: string, contents: string): Promise<void> {
+export function sftpWriteFile(
+  sessionId: number,
+  path: string,
+  contents: string,
+): Promise<void> {
   return invoke("ssh_sftp_write_file", { id: sessionId, path, contents });
 }
 
@@ -77,7 +81,11 @@ export function sftpCreateDir(sessionId: number, path: string): Promise<void> {
   return invoke("ssh_sftp_create_dir", { id: sessionId, path });
 }
 
-export function sftpRename(sessionId: number, from: string, to: string): Promise<void> {
+export function sftpRename(
+  sessionId: number,
+  from: string,
+  to: string,
+): Promise<void> {
   return invoke("ssh_sftp_rename", { id: sessionId, from, to });
 }
 

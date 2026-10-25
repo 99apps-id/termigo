@@ -19,7 +19,13 @@ describe("subagentToolNeedsGate", () => {
   const readOnly = { execute: () => undefined };
 
   it("lets every built-in tool through without gating", () => {
-    for (const name of ["write_file", "edit", "bash_run", "delete_file", "git_commit"]) {
+    for (const name of [
+      "write_file",
+      "edit",
+      "bash_run",
+      "delete_file",
+      "git_commit",
+    ]) {
       expect(subagentToolNeedsGate(name, mutating)).toBe(false);
     }
   });
@@ -35,7 +41,13 @@ describe("subagentToolNeedsGate", () => {
   });
 
   it("lets read-only tools auto-run (no needsApproval, not third-party)", () => {
-    for (const name of ["read_file", "list_directory", "grep", "glob", "bash_logs"]) {
+    for (const name of [
+      "read_file",
+      "list_directory",
+      "grep",
+      "glob",
+      "bash_logs",
+    ]) {
       expect(subagentToolNeedsGate(name, readOnly)).toBe(false);
     }
   });

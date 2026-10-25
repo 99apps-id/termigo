@@ -14,10 +14,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-const source = readFileSync(
-  join(__dirname, "store.ts"),
-  "utf8",
-);
+const source = readFileSync(join(__dirname, "store.ts"), "utf8");
 
 /** `const KEY_FOO = "foo";` */
 function declaredKeys(): string[] {

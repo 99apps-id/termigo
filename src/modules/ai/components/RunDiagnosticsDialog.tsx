@@ -106,7 +106,11 @@ export function RunSummary({ run }: { run: RunDiagnostics }) {
       <Row
         label="Steps"
         value={`${run.steps}/${run.stepBudget}`}
-        hint={run.compactedAway != null ? `compacted ${run.compactedAway}` : undefined}
+        hint={
+          run.compactedAway != null
+            ? `compacted ${run.compactedAway}`
+            : undefined
+        }
       />
       <Row
         label="Context limit"

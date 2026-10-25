@@ -190,7 +190,9 @@ export function buildSshTools(ctx: ToolContext) {
             }
           } else if (host?.trim()) {
             const parsedPort =
-              typeof port === "string" ? parseInt(port, 10) || 22 : port ?? 22;
+              typeof port === "string"
+                ? parseInt(port, 10) || 22
+                : (port ?? 22);
             const targetUser = user?.trim() || "root";
             target = all.find(
               (c) =>

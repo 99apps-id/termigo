@@ -117,9 +117,9 @@ describe("several agents wait at once", () => {
     void useApprovalQueue.getState().request(req("builder #1"));
     void useApprovalQueue.getState().request(req("builder #2"));
     await tick();
-    expect(
-      useApprovalQueue.getState().pending.map((p) => p.requester),
-    ).toEqual(["builder #1", "builder #2"]);
+    expect(useApprovalQueue.getState().pending.map((p) => p.requester)).toEqual(
+      ["builder #1", "builder #2"],
+    );
   });
 
   it("answers only the one addressed", async () => {

@@ -35,19 +35,17 @@ describe("reconcileApprovalTimers", () => {
   });
 
   it("clears every timer when nothing is waiting", () => {
-    const { arm, clear } = reconcileApprovalTimers(
-      new Set(["a", "b"]),
-      [],
-    );
+    const { arm, clear } = reconcileApprovalTimers(new Set(["a", "b"]), []);
     expect(arm).toEqual([]);
     expect(clear).toEqual(["a", "b"]);
   });
 
   it("arms only the new ones when others are already running", () => {
-    const { arm, clear } = reconcileApprovalTimers(
-      new Set(["a"]),
-      ["a", "b", "c"],
-    );
+    const { arm, clear } = reconcileApprovalTimers(new Set(["a"]), [
+      "a",
+      "b",
+      "c",
+    ]);
     expect(arm).toEqual(["b", "c"]);
     expect(clear).toEqual([]);
   });
@@ -69,8 +67,16 @@ describe("pendingApprovalIds", () => {
   it("collects the ids awaiting an answer", () => {
     const ids = pendingApprovalIds(
       assistant([
-        { type: "tool-bash_run", state: "approval-requested", approval: { id: "q1" } },
-        { type: "tool-edit", state: "approval-requested", approval: { id: "q2" } },
+        {
+          type: "tool-bash_run",
+          state: "approval-requested",
+          approval: { id: "q1" },
+        },
+        {
+          type: "tool-edit",
+          state: "approval-requested",
+          approval: { id: "q2" },
+        },
       ]),
     );
     expect(ids).toEqual(["q1", "q2"]);
@@ -79,8 +85,16 @@ describe("pendingApprovalIds", () => {
   it("ignores parts that are already answered or running", () => {
     const ids = pendingApprovalIds(
       assistant([
-        { type: "tool-bash_run", state: "approval-responded", approval: { id: "q1" } },
-        { type: "tool-edit", state: "output-available", approval: { id: "q2" } },
+        {
+          type: "tool-bash_run",
+          state: "approval-responded",
+          approval: { id: "q1" },
+        },
+        {
+          type: "tool-edit",
+          state: "output-available",
+          approval: { id: "q2" },
+        },
         { type: "tool-grep", state: "output-available" },
       ]),
     );
@@ -89,7 +103,9 @@ describe("pendingApprovalIds", () => {
 
   it("ignores a requested part with no id", () => {
     expect(
-      pendingApprovalIds(assistant([{ type: "tool-x", state: "approval-requested" }])),
+      pendingApprovalIds(
+        assistant([{ type: "tool-x", state: "approval-requested" }]),
+      ),
     ).toEqual([]);
   });
 
@@ -98,7 +114,10 @@ describe("pendingApprovalIds", () => {
     // stays `approval-requested` and the run stays blocked on it. Dropping it
     // here clears its timer and parks the run past its deadline forever.
     const messages = [
-      { role: "assistant", parts: [{ state: "approval-requested", approval: { id: "old" } }] },
+      {
+        role: "assistant",
+        parts: [{ state: "approval-requested", approval: { id: "old" } }],
+      },
       { role: "user", parts: [{ type: "text", text: "next" }] },
     ];
     expect(pendingApprovalIds(messages)).toEqual(["old"]);

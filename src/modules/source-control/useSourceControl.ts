@@ -42,9 +42,7 @@ export type SourceControlSummary = {
   applyStatus: (
     updater: (status: GitStatusSnapshot) => GitStatusSnapshot,
   ) => void;
-  refresh: (options?: {
-    remote?: SourceControlRefreshMode;
-  }) => Promise<void>;
+  refresh: (options?: { remote?: SourceControlRefreshMode }) => Promise<void>;
   runRemoteAction: (
     mode?: SourceControlRemoteActionMode,
   ) => Promise<SourceControlRemoteActionResult>;
@@ -160,7 +158,13 @@ export function getSourceControlRemoteIndicator(
   >,
 ): SourceControlRemoteIndicator {
   if (!summary.hasRepo || !summary.upstream) {
-    return { visible: false, label: "", title: "", disabled: true, action: null };
+    return {
+      visible: false,
+      label: "",
+      title: "",
+      disabled: true,
+      action: null,
+    };
   }
   if (summary.ahead > 0 && summary.behind > 0) {
     return {
@@ -281,10 +285,7 @@ export function useSourceControl(
   const doRefresh = useCallback(
     async (remoteMode: SourceControlRefreshMode): Promise<void> => {
       const refreshContextKey = contextKey;
-      if (
-        !enabledRef.current ||
-        refreshContextKey !== contextKeyRef.current
-      ) {
+      if (!enabledRef.current || refreshContextKey !== contextKeyRef.current) {
         return;
       }
       const requestId = ++requestIdRef.current;
@@ -385,8 +386,7 @@ export function useSourceControl(
           repo.upstream &&
           remoteMode !== "never" &&
           (remoteMode === "always" ||
-            Date.now() -
-              (autoFetchByRepoRef.current.get(repo.repoRoot) ?? 0) >=
+            Date.now() - (autoFetchByRepoRef.current.get(repo.repoRoot) ?? 0) >=
               AUTO_FETCH_THROTTLE_MS);
 
         if (shouldAutoFetch) {
@@ -472,8 +472,7 @@ export function useSourceControl(
 
       setState((current) => ({ ...current, busyAction: action }));
       const actionContextKey = contextKeyRef.current;
-      const isCurrentContext = () =>
-        actionContextKey === contextKeyRef.current;
+      const isCurrentContext = () => actionContextKey === contextKeyRef.current;
 
       try {
         if (action === "fetch") {

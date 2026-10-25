@@ -49,7 +49,10 @@ export function buildWorktreeTools(ctx: ToolContext) {
       description:
         "Create an isolated git worktree sandbox under `.wt/` for multi-file edits and experimental changes. Auto-executes.",
       inputSchema: z.object({
-        task_id: z.string().optional().describe("Optional identifier for the task or experiment."),
+        task_id: z
+          .string()
+          .optional()
+          .describe("Optional identifier for the task or experiment."),
       }),
       execute: async ({ task_id }) => {
         if (ctx.getRemoteSession()) {
@@ -188,10 +191,20 @@ export function buildWorktreeTools(ctx: ToolContext) {
             sessionShellKey("git", sid, ctx.getWorkspaceRoot()),
             cwd,
           );
-          const removeResult = await native.shellSessionRun(shellId, removeCommand, cwd, 120);
+          const removeResult = await native.shellSessionRun(
+            shellId,
+            removeCommand,
+            cwd,
+            120,
+          );
           // Removing the branch is best-effort; the worktree removal is the
           // authoritative cleanup, so a stale branch is not fatal.
-          const branchResult = await native.shellSessionRun(shellId, branchCommand, cwd, 60);
+          const branchResult = await native.shellSessionRun(
+            shellId,
+            branchCommand,
+            cwd,
+            60,
+          );
 
           unregisterSandbox(sandbox_id, "discarded");
           return {

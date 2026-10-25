@@ -1346,9 +1346,7 @@ function ToolGroupsBlock() {
   );
 
   const toggle = (id: string, enabled: boolean) => {
-    const next = enabled
-      ? disabled.filter((x) => x !== id)
-      : [...disabled, id];
+    const next = enabled ? disabled.filter((x) => x !== id) : [...disabled, id];
     void setDisabledToolGroups(next);
   };
 
@@ -1367,8 +1365,8 @@ function ToolGroupsBlock() {
       <Label>Tool domains</Label>
       <p className="text-[11px] leading-relaxed text-muted-foreground">
         Every enabled tool sends its full schema with each request. Switch off
-        the domains you never use and the model gets that context back. The
-        core loop (files, shell, search, git, sub-agents) always stays on.
+        the domains you never use and the model gets that context back. The core
+        loop (files, shell, search, git, sub-agents) always stays on.
         {off > 0
           ? ` ${off} of ${grouped} optional tools are currently off.`
           : ""}

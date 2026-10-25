@@ -138,7 +138,13 @@ describe("github helpers", () => {
       exit_code: 0,
     });
     const multiline = "Line 1\n\nLine 2\n- Item 1\n- Item 2";
-    const result = await createPr("Multiline PR", multiline, "main", "feat", "/repo");
+    const result = await createPr(
+      "Multiline PR",
+      multiline,
+      "main",
+      "feat",
+      "/repo",
+    );
     expect(result.ok).toBe(true);
     expect(writeFile).toHaveBeenCalled();
     const writtenPath = writeFile.mock.calls[0][0] as string;

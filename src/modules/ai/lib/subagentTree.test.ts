@@ -132,9 +132,9 @@ describe("formatRunSummary", () => {
   });
 
   it("includes depth only when nested deeper than 1", () => {
-    expect(
-      formatRunSummary(aggregateRuns([run({ depth: 1 })])),
-    ).not.toContain("d1");
+    expect(formatRunSummary(aggregateRuns([run({ depth: 1 })]))).not.toContain(
+      "d1",
+    );
     expect(formatRunSummary(aggregateRuns([run({ depth: 2 })]))).toContain(
       "d2",
     );

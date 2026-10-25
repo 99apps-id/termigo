@@ -56,7 +56,11 @@ type PrettierConfigFile = PartialPrettierOptions & {
   overrides?: Override[];
 };
 
-const CONFIG_FILENAMES = [".prettierrc", ".prettierrc.json", ".prettierrc.json5"];
+const CONFIG_FILENAMES = [
+  ".prettierrc",
+  ".prettierrc.json",
+  ".prettierrc.json5",
+];
 
 /** Cache by directory so repeated formats inside a folder don't re-walk. */
 const cache = new Map<string, Promise<PrettierConfigFile | null>>();

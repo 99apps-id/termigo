@@ -5,13 +5,16 @@ import {
 } from "@codemirror/lint";
 import type { Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import {
-  type DiagnosticItem,
-  useDiagnosticsStore,
-} from "./diagnosticsStore";
+import { type DiagnosticItem, useDiagnosticsStore } from "./diagnosticsStore";
 
-function toItem(state: EditorView["state"], d: Diagnostic, from: number): DiagnosticItem {
-  const line = state.doc.lineAt(Math.min(from, Math.max(0, state.doc.length - 1)));
+function toItem(
+  state: EditorView["state"],
+  d: Diagnostic,
+  from: number,
+): DiagnosticItem {
+  const line = state.doc.lineAt(
+    Math.min(from, Math.max(0, state.doc.length - 1)),
+  );
   return {
     line: line.number,
     column: from - line.from + 1,

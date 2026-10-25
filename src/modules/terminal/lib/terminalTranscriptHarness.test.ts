@@ -8,7 +8,8 @@ import {
 
 describe("terminalTranscriptHarness", () => {
   it("scrubs secrets such as api keys and bearer tokens", () => {
-    const raw = "export ANTHROPIC_API_KEY=sk-ant-api03-1234567890abcdef1234567890abcdef12345678";
+    const raw =
+      "export ANTHROPIC_API_KEY=sk-ant-api03-1234567890abcdef1234567890abcdef12345678";
     const scrubbed = scrubSensitiveOutput(raw);
     expect(scrubbed).not.toContain("sk-ant-api03");
     expect(scrubbed).toContain("[REDACTED_SECRET]");

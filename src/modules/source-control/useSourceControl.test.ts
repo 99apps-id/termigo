@@ -7,9 +7,7 @@ import {
 describe("repositoryContainsContext", () => {
   it("matches a repository root and its descendants", () => {
     expect(repositoryContainsContext("/repo", "/repo")).toBe(true);
-    expect(repositoryContainsContext("/repo", "/repo/packages/app")).toBe(
-      true,
-    );
+    expect(repositoryContainsContext("/repo", "/repo/packages/app")).toBe(true);
   });
 
   it("rejects sibling paths that only share a string prefix", () => {
@@ -18,9 +16,9 @@ describe("repositoryContainsContext", () => {
   });
 
   it("normalizes Windows separators and drive-letter casing", () => {
-    expect(
-      repositoryContainsContext("C:\\Repo", "c:/repo/packages/app"),
-    ).toBe(true);
+    expect(repositoryContainsContext("C:\\Repo", "c:/repo/packages/app")).toBe(
+      true,
+    );
   });
 
   it("normalizes UNC server and share casing", () => {

@@ -43,7 +43,9 @@ export const DEFAULT_POLICIES: PolicySet = {
       description: "Block direct commits to main/master branches",
       tools: ["git_commit"],
       evaluate: (ctx) => {
-        const branch = ctx.command?.match(/git commit.*-m\s+["']?\[([^\]]+)\]/)?.[1];
+        const branch = ctx.command?.match(
+          /git commit.*-m\s+["']?\[([^\]]+)\]/,
+        )?.[1];
         if (branch && /^(main|master)$/i.test(branch)) {
           return {
             allowed: false,
@@ -104,7 +106,8 @@ export const DEFAULT_POLICIES: PolicySet = {
         ) {
           return {
             allowed: false,
-            reason: "Deleting files in system directories is blocked by policy.",
+            reason:
+              "Deleting files in system directories is blocked by policy.",
             ruleId: "no-delete-in-system-dirs",
           };
         }

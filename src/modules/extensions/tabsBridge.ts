@@ -76,7 +76,9 @@ export type SetExtensionTabStateFn = (opts: SetExtensionTabStateOpts) => void;
 
 let tabStateSetter: SetExtensionTabStateFn | null = null;
 
-export function setSetExtensionTabState(fn: SetExtensionTabStateFn | null): void {
+export function setSetExtensionTabState(
+  fn: SetExtensionTabStateFn | null,
+): void {
   tabStateSetter = fn;
 }
 
@@ -97,7 +99,10 @@ export function setExtensionTabState(opts: SetExtensionTabStateOpts): void {
  *  from that extension's tab, and re-hide when they return. Calls without
  *  an owner are treated as a user-driven toggle and clear any pending
  *  restore. */
-export type SetSidebarVisibleFn = (visible: boolean, ownerExtensionId?: string) => void;
+export type SetSidebarVisibleFn = (
+  visible: boolean,
+  ownerExtensionId?: string,
+) => void;
 
 let sidebarSetter: SetSidebarVisibleFn | null = null;
 
@@ -105,7 +110,10 @@ export function setSidebarSetter(fn: SetSidebarVisibleFn | null): void {
   sidebarSetter = fn;
 }
 
-export function setSidebarVisible(visible: boolean, ownerExtensionId?: string): void {
+export function setSidebarVisible(
+  visible: boolean,
+  ownerExtensionId?: string,
+): void {
   if (!sidebarSetter) {
     console.warn(
       "[extensions] setSidebarVisible called before App wired the bridge; ignoring",
@@ -121,15 +129,23 @@ export function setSidebarVisible(visible: boolean, ownerExtensionId?: string): 
  *  three is currently open. Mirrors `setSidebarVisible` for the left rail,
  *  so an extension can give its workspace tab the full width on both sides
  *  without having to reach into individual stores. */
-export type SetRightSidebarVisibleFn = (visible: boolean, ownerExtensionId?: string) => void;
+export type SetRightSidebarVisibleFn = (
+  visible: boolean,
+  ownerExtensionId?: string,
+) => void;
 
 let rightSidebarSetter: SetRightSidebarVisibleFn | null = null;
 
-export function setRightSidebarSetter(fn: SetRightSidebarVisibleFn | null): void {
+export function setRightSidebarSetter(
+  fn: SetRightSidebarVisibleFn | null,
+): void {
   rightSidebarSetter = fn;
 }
 
-export function setRightSidebarVisible(visible: boolean, ownerExtensionId?: string): void {
+export function setRightSidebarVisible(
+  visible: boolean,
+  ownerExtensionId?: string,
+): void {
   if (!rightSidebarSetter) {
     console.warn(
       "[extensions] setRightSidebarVisible called before App wired the bridge; ignoring",

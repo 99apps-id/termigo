@@ -34,7 +34,10 @@ export type PtyAction = "run" | "write" | "read" | "wait" | "ctrl_c";
  * is not.
  */
 export function normalizePtyAction(raw: unknown): PtyAction {
-  const a = String(raw ?? "run").trim().toLowerCase().replace(/[-\s]/g, "_");
+  const a = String(raw ?? "run")
+    .trim()
+    .toLowerCase()
+    .replace(/[-\s]/g, "_");
   switch (a) {
     case "write":
     case "send_input":
@@ -142,7 +145,8 @@ export function buildPtyDriverTools(ctx: ToolContext) {
         const command = rawCommand ?? cmd;
         // `write`/`wait` models routinely put the payload in `command` (e.g.
         // `{"action":"send_input","command":"exit"}`), so accept it there too.
-        const input = rawInput ?? text ?? (action === "run" ? undefined : command);
+        const input =
+          rawInput ?? text ?? (action === "run" ? undefined : command);
         const parsedTimeout =
           typeof timeout_secs === "string"
             ? parseInt(timeout_secs, 10) || 30
@@ -209,7 +213,9 @@ export function buildPtyDriverTools(ctx: ToolContext) {
             return { error: PRIVATE_TERMINAL_REFUSAL };
           }
           if (!wait_for) {
-            return { error: "wait_for parameter is required for action='wait'" };
+            return {
+              error: "wait_for parameter is required for action='wait'",
+            };
           }
           let re: RegExp;
           try {

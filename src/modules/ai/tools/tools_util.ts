@@ -158,7 +158,8 @@ export function buildSecretScanTool(ctx?: ToolContext) {
           const resolved = resolveToolPath(path, ctx);
           try {
             const r = await native.readFile(resolved);
-            if (r.kind !== "text" || !r.content) return { path: resolved, matches: [] };
+            if (r.kind !== "text" || !r.content)
+              return { path: resolved, matches: [] };
             const lines = r.content.split(/\r?\n/);
             const matches: Array<{ line: number; text: string }> = [];
             for (let i = 0; i < lines.length; i++) {
@@ -205,10 +206,10 @@ async function sha256(message: string): Promise<string> {
 }
 
 const MD5_SHIFTS = [
-  7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
-  5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20,
-  4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
-  6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21,
+  7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 5, 9, 14, 20, 5,
+  9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11,
+  16, 23, 4, 11, 16, 23, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15,
+  21,
 ];
 
 async function md5(message: string): Promise<string> {
@@ -372,10 +373,7 @@ export function buildArchiveTool(ctx: ToolContext) {
           .string()
           .optional()
           .describe("Output archive path (create only)"),
-        archive: z
-          .string()
-          .optional()
-          .describe("Archive path (extract only)"),
+        archive: z.string().optional().describe("Archive path (extract only)"),
         destination: z
           .string()
           .optional()

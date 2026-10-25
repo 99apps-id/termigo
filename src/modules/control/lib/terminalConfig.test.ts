@@ -116,15 +116,15 @@ describe("writeTerminalConfig", () => {
   });
 
   it("validates the value for toolSearchEnabled", async () => {
-    await expect(writeTerminalConfig("toolSearchEnabled", "true")).rejects.toThrow(
-      /must be true or false/,
-    );
+    await expect(
+      writeTerminalConfig("toolSearchEnabled", "true"),
+    ).rejects.toThrow(/must be true or false/);
   });
 
   it("validates the value for disabledToolGroups", async () => {
-    await expect(writeTerminalConfig("disabledToolGroups", "browser")).rejects.toThrow(
-      /list of group names/,
-    );
+    await expect(
+      writeTerminalConfig("disabledToolGroups", "browser"),
+    ).rejects.toThrow(/list of group names/);
     await expect(
       writeTerminalConfig("disabledToolGroups", ["browser", 7]),
     ).rejects.toThrow(/list of group names/);
@@ -134,9 +134,9 @@ describe("writeTerminalConfig", () => {
     await expect(
       writeTerminalConfig("agentApprovalMode", "never"),
     ).rejects.toThrow(/must be one of/);
-    await expect(writeTerminalConfig("agentApprovalMode", true)).rejects.toThrow(
-      /must be one of/,
-    );
+    await expect(
+      writeTerminalConfig("agentApprovalMode", true),
+    ).rejects.toThrow(/must be one of/);
   });
 });
 
@@ -156,9 +156,9 @@ describe("setProviderSecret", () => {
   it("refuses a provider that does not use a key", async () => {
     const keyless = listModels().providers.find((p) => !p.needsKey);
     expect(keyless, "expected a keyless provider to exist").toBeDefined();
-    await expect(
-      setProviderSecret(keyless?.id ?? "", "sk-x"),
-    ).rejects.toThrow(/does not use an API key/);
+    await expect(setProviderSecret(keyless?.id ?? "", "sk-x")).rejects.toThrow(
+      /does not use an API key/,
+    );
   });
 });
 

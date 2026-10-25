@@ -35,7 +35,11 @@ export type CustomTool = {
 
 // Re-exported so callers have one entry point; the light module stays
 // importable on its own for anything on the startup path.
-export { CUSTOM_TOOL_PREFIX, customToolName, isCustomTool } from "./customToolNames";
+export {
+  CUSTOM_TOOL_PREFIX,
+  customToolName,
+  isCustomTool,
+} from "./customToolNames";
 
 /** Names must be safe identifiers: they become part of a tool name. */
 export function isValidToolName(name: string): boolean {
@@ -80,7 +84,10 @@ export function validateTool(tool: CustomTool): ToolValidation {
     };
   }
   if (!tool.description.trim()) {
-    return { ok: false, reason: "a tool needs a description saying when to use it" };
+    return {
+      ok: false,
+      reason: "a tool needs a description saying when to use it",
+    };
   }
   if (!tool.command.trim()) {
     return { ok: false, reason: "a tool needs a command" };

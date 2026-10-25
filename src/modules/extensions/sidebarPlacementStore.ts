@@ -33,7 +33,10 @@ export function parseSectionPanelId(panelId: string): string | null {
 }
 
 /** The stable key for a contributed section (matches AppSidebar's keying). */
-export function sidebarSectionKey(extensionId: string, sectionId: string): string {
+export function sidebarSectionKey(
+  extensionId: string,
+  sectionId: string,
+): string {
   return `xsec:${extensionId}:${sectionId}`;
 }
 
@@ -78,7 +81,11 @@ export function undockTarget(
   // work left-to-right and not back: `moveRight` was reachable, `moveLeft` was
   // not, for the one section most likely to be dragged.
   if (MOVABLE_BUILTIN_SECTIONS.some((s) => s.id === key)) {
-    return { extensionId: BUILTIN_SECTION_EXT, panelId: sectionPanelId(key), placement: key };
+    return {
+      extensionId: BUILTIN_SECTION_EXT,
+      panelId: sectionPanelId(key),
+      placement: key,
+    };
   }
   if (!key.startsWith("xp:")) return null;
   const rest = key.slice(3);
@@ -92,7 +99,9 @@ export function undockTarget(
     extensionId,
     panelId,
     placement:
-      extensionId === BUILTIN_SECTION_EXT ? sectionId : sidebarSectionKey(extensionId, sectionId),
+      extensionId === BUILTIN_SECTION_EXT
+        ? sectionId
+        : sidebarSectionKey(extensionId, sectionId),
   };
 }
 
@@ -140,7 +149,9 @@ function persist(placement: Record<string, Placement>): void {
 
 function loadRightOpen(): Record<string, boolean> {
   try {
-    const raw: unknown = JSON.parse(localStorage.getItem(LS_OPEN_KEY) ?? "null");
+    const raw: unknown = JSON.parse(
+      localStorage.getItem(LS_OPEN_KEY) ?? "null",
+    );
     if (raw && typeof raw === "object") {
       const out: Record<string, boolean> = {};
       for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {

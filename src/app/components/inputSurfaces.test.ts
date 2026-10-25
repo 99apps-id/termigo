@@ -54,7 +54,11 @@ describe("inputSurfaces", () => {
 
   it("shows no composer on a normal tab without one", () => {
     expect(
-      inputSurfaces({ isBlockTab: false, hasComposer: false, panelOpen: false }),
+      inputSurfaces({
+        isBlockTab: false,
+        hasComposer: false,
+        panelOpen: false,
+      }),
     ).toEqual({ shell: false, ai: false });
   });
 

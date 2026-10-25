@@ -35,11 +35,17 @@ export function HostKeyPromptDialog() {
             <DialogTitle>Verify SSH host key</DialogTitle>
             <DialogDescription>
               First connection to{" "}
-              <span className="text-foreground font-medium">{current.host}</span>. Confirm this
-              fingerprint matches the server's real key by checking it out-of-band: ask the admin,
-              or run <code className="text-foreground">ssh-keygen -lf &lt;hostkey&gt;</code> on the
-              server. Trusting an attacker's key on first connect hands them your credentials. Once
-              trusted, this host is not asked about again.
+              <span className="text-foreground font-medium">
+                {current.host}
+              </span>
+              . Confirm this fingerprint matches the server's real key by
+              checking it out-of-band: ask the admin, or run{" "}
+              <code className="text-foreground">
+                ssh-keygen -lf &lt;hostkey&gt;
+              </code>{" "}
+              on the server. Trusting an attacker's key on first connect hands
+              them your credentials. Once trusted, this host is not asked about
+              again.
             </DialogDescription>
           </DialogHeader>
           <div className="bg-muted text-foreground rounded-md p-2.5 font-mono text-xs break-all select-all">
@@ -50,10 +56,15 @@ export function HostKeyPromptDialog() {
               Reject + Trust split the row into equal columns that fill the
               dialog width, instead of clustering on the right. */}
           <DialogFooter className="grid grid-cols-2 gap-2">
-            <Button variant="outline" onClick={() => resolve(current.promptId, false)}>
+            <Button
+              variant="outline"
+              onClick={() => resolve(current.promptId, false)}
+            >
               Reject
             </Button>
-            <Button onClick={() => resolve(current.promptId, true)}>Trust &amp; connect</Button>
+            <Button onClick={() => resolve(current.promptId, true)}>
+              Trust &amp; connect
+            </Button>
           </DialogFooter>
         </DialogContent>
       )}

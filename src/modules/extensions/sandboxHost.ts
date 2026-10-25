@@ -12,7 +12,14 @@ import { currentWorkspaceEnv } from "@/modules/workspace";
 import { PLATFORM } from "@/lib/platform";
 import { LazyStore } from "@tauri-apps/plugin-store";
 import * as chatMod from "@/modules/ai/store/chatStore";
-import { aiToolsRegistry, commandsRegistry, headerItemsRegistry, panelRenderersRegistry, sidebarSectionsRegistry, statusItemsRegistry } from "./registries";
+import {
+  aiToolsRegistry,
+  commandsRegistry,
+  headerItemsRegistry,
+  panelRenderersRegistry,
+  sidebarSectionsRegistry,
+  statusItemsRegistry,
+} from "./registries";
 import { requirePermission } from "./permissions";
 import { useRightPanelStore } from "./rightPanelStore";
 import type { ExtensionRuntime } from "./host";
@@ -39,8 +46,18 @@ async function buildExecutor(
   hooks: BridgeHooks,
   postToWorker: (
     msg:
-      | { type: "ui:event"; panelId: string; event: string; fields?: Record<string, string> }
-      | { type: "ui:itemClick"; surface: "header" | "status"; id: string; event: string }
+      | {
+          type: "ui:event";
+          panelId: string;
+          event: string;
+          fields?: Record<string, string>;
+        }
+      | {
+          type: "ui:itemClick";
+          surface: "header" | "status";
+          id: string;
+          event: string;
+        }
       | {
           type: "ui:sidebarEvent";
           kind: "click" | "toggle" | "action" | "context";
@@ -51,7 +68,10 @@ async function buildExecutor(
         },
   ) => void,
 ): Promise<SandboxExecutor> {
-  const store = new LazyStore(STORAGE_FILE(ext.id), { defaults: {}, autoSave: 200 });
+  const store = new LazyStore(STORAGE_FILE(ext.id), {
+    defaults: {},
+    autoSave: 200,
+  });
   const log = (level: "info" | "warn" | "error", args: unknown[]): void => {
     // eslint-disable-next-line no-console
     console[level](`[ext:${ext.id}]`, ...args);
@@ -72,7 +92,10 @@ async function buildExecutor(
       if (injectsWorkspace) {
         const a = (args ?? {}) as Record<string, unknown>;
         if (a.workspace === undefined) {
-          return tauriInvoke(command, { ...a, workspace: currentWorkspaceEnv() });
+          return tauriInvoke(command, {
+            ...a,
+            workspace: currentWorkspaceEnv(),
+          });
         }
       }
       return tauriInvoke(command, args);
@@ -111,12 +134,15 @@ async function buildExecutor(
         account: name,
       }),
     aiGetState: () => ({
-      provider: chatMod.useChatStore.getState().selectedModelId?.split(":")[0] ?? "",
+      provider:
+        chatMod.useChatStore.getState().selectedModelId?.split(":")[0] ?? "",
       modelId: chatMod.useChatStore.getState().selectedModelId ?? "",
       hasKey: false,
     }),
     aiSetModel: async (modelId, provider) => {
-      chatMod.useChatStore.getState().setSelectedModelId(`${provider}:${modelId}`);
+      chatMod.useChatStore
+        .getState()
+        .setSelectedModelId(`${provider}:${modelId}`);
     },
     aiSetSubagentsEnabled: async () => {},
     aiSendPrompt: async (text) => {
@@ -142,10 +168,14 @@ async function buildExecutor(
       // Same gate as the non-sandboxed path: a worker must declare
       // `aiTools:register` to hand the agent an executable tool.
       requirePermission(ext.id, ext.manifest.permissions, "aiTools:register");
-      aiToolsRegistry.setRuntime(ext.id, name, (args: unknown) => hooks.invokeTool(name, args));
+      aiToolsRegistry.setRuntime(ext.id, name, (args: unknown) =>
+        hooks.invokeTool(name, args),
+      );
     },
     onCommandRegister: (id) => {
-      commandsRegistry.setRuntime(ext.id, id, (...args: unknown[]) => hooks.invokeCommand(id, args));
+      commandsRegistry.setRuntime(ext.id, id, (...args: unknown[]) =>
+        hooks.invokeCommand(id, args),
+      );
     },
     panelOpen: (panelId) => {
       useRightPanelStore.getState().open(ext.id, panelId);
@@ -158,7 +188,9 @@ async function buildExecutor(
     },
     onPanelMount: (panelId, html, events) => {
       void events;
-      logInfo(`[ext:${ext.id}] sandboxHost: register panel renderer '${panelId}' (${html.length} bytes)`);
+      logInfo(
+        `[ext:${ext.id}] sandboxHost: register panel renderer '${panelId}' (${html.length} bytes)`,
+      );
       // Host-managed panel: the worker sent an HTML template. The host renders
       // it and routes any `data-ext-event` click back to the worker, so the
       // extension keeps its interactive handlers without running DOM code in
@@ -166,24 +198,64 @@ async function buildExecutor(
       panelRenderersRegistry.set(ext.id, panelId, (container) => {
         const clean = DOMPurify.sanitize(html, {
           ALLOWED_TAGS: [
-            "div", "span", "p", "pre", "code", "blockquote",
-            "ul", "ol", "li", "strong", "em", "a", "img",
-            "h1", "h2", "h3", "h4", "h5", "h6",
-            "table", "thead", "tbody", "tr", "td", "th",
-            "br", "hr", "input", "button", "label",
+            "div",
+            "span",
+            "p",
+            "pre",
+            "code",
+            "blockquote",
+            "ul",
+            "ol",
+            "li",
+            "strong",
+            "em",
+            "a",
+            "img",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "table",
+            "thead",
+            "tbody",
+            "tr",
+            "td",
+            "th",
+            "br",
+            "hr",
+            "input",
+            "button",
+            "label",
           ],
           ALLOWED_ATTR: [
-            "href", "src", "alt", "title", "target", "rel",
-            "class", "id", "style",
-            "data-ext-event", "data-ext-field", "data-ext-arg",
-            "type", "name", "value", "placeholder", "disabled", "readonly",
+            "href",
+            "src",
+            "alt",
+            "title",
+            "target",
+            "rel",
+            "class",
+            "id",
+            "style",
+            "data-ext-event",
+            "data-ext-field",
+            "data-ext-arg",
+            "type",
+            "name",
+            "value",
+            "placeholder",
+            "disabled",
+            "readonly",
           ],
           ALLOW_DATA_ATTR: false,
         });
         container.innerHTML = clean;
         const handler = (e: Event): void => {
           const rawTarget = e.target as HTMLElement | null;
-          const target = rawTarget?.closest?.<HTMLElement>("[data-ext-event]") ?? null;
+          const target =
+            rawTarget?.closest?.<HTMLElement>("[data-ext-event]") ?? null;
           const ev = target?.getAttribute?.("data-ext-event");
           if (!ev) return;
           logInfo(`[ext:${ext.id}] sandboxHost: ui:event '${ev}' clicked`);
@@ -220,7 +292,13 @@ async function buildExecutor(
         tone: item.tone,
         placement: item.placement,
         onClick: () => {
-          if (item.event) postToWorker({ type: "ui:itemClick", surface: "header", id: item.id, event: item.event });
+          if (item.event)
+            postToWorker({
+              type: "ui:itemClick",
+              surface: "header",
+              id: item.id,
+              event: item.event,
+            });
         },
       });
     },
@@ -237,7 +315,13 @@ async function buildExecutor(
         progress: item.progress,
         kind: item.kind,
         onClick: () => {
-          if (item.event) postToWorker({ type: "ui:itemClick", surface: "status", id: item.id, event: item.event });
+          if (item.event)
+            postToWorker({
+              type: "ui:itemClick",
+              surface: "status",
+              id: item.id,
+              event: item.event,
+            });
         },
       });
     },
@@ -256,16 +340,45 @@ async function buildExecutor(
         searchPlaceholder: section.searchPlaceholder,
         movableToRight: section.movableToRight,
         onItemClick: (itemId) => {
-          if (section.eventClick) postToWorker({ type: "ui:sidebarEvent", kind: "click", sectionId: section.id, itemId, event: section.eventClick });
+          if (section.eventClick)
+            postToWorker({
+              type: "ui:sidebarEvent",
+              kind: "click",
+              sectionId: section.id,
+              itemId,
+              event: section.eventClick,
+            });
         },
         onItemToggle: (itemId) => {
-          if (section.eventToggle) postToWorker({ type: "ui:sidebarEvent", kind: "toggle", sectionId: section.id, itemId, event: section.eventToggle });
+          if (section.eventToggle)
+            postToWorker({
+              type: "ui:sidebarEvent",
+              kind: "toggle",
+              sectionId: section.id,
+              itemId,
+              event: section.eventToggle,
+            });
         },
         onItemAction: (itemId, actionId) => {
-          if (section.eventAction) postToWorker({ type: "ui:sidebarEvent", kind: "action", sectionId: section.id, itemId, actionId, event: section.eventAction });
+          if (section.eventAction)
+            postToWorker({
+              type: "ui:sidebarEvent",
+              kind: "action",
+              sectionId: section.id,
+              itemId,
+              actionId,
+              event: section.eventAction,
+            });
         },
         onItemContextMenu: (itemId) => {
-          if (section.eventContext) postToWorker({ type: "ui:sidebarEvent", kind: "context", sectionId: section.id, itemId, event: section.eventContext });
+          if (section.eventContext)
+            postToWorker({
+              type: "ui:sidebarEvent",
+              kind: "context",
+              sectionId: section.id,
+              itemId,
+              event: section.eventContext,
+            });
         },
       });
     },
@@ -273,7 +386,9 @@ async function buildExecutor(
       sidebarSectionsRegistry.remove(ext.id, sectionId);
     },
     onDomUnsupported: (surface) => {
-      log("warn", [`${surface} is not available in the sandbox; use the declared manifest contributes instead`]);
+      log("warn", [
+        `${surface} is not available in the sandbox; use the declared manifest contributes instead`,
+      ]);
     },
     log,
   };
@@ -324,7 +439,11 @@ export async function activateSandboxed(
     return p;
   };
 
-  const executor = await buildExecutor(ext, { invokeTool, invokeCommand }, post);
+  const executor = await buildExecutor(
+    ext,
+    { invokeTool, invokeCommand },
+    post,
+  );
   const dispatch = createSandboxDispatcher(
     { id: ext.id, declared: ext.manifest.permissions },
     executor,
@@ -340,24 +459,25 @@ export async function activateSandboxed(
   // Host-side bound: if the worker never loads / imports / activates, surface
   // it. The worker's own activate guard fires activate_error, but a blob import
   // that hangs would otherwise leave the panel on "Loading panel..." forever.
-  const readyTimeout = setTimeout(
-    () => {
-      logError(`[ext:${ext.id}] sandboxHost: worker not ready within 12s`);
-      rejectReady(new Error("worker did not become ready within 12s"));
-    },
-    12000,
-  );
+  const readyTimeout = setTimeout(() => {
+    logError(`[ext:${ext.id}] sandboxHost: worker not ready within 12s`);
+    rejectReady(new Error("worker did not become ready within 12s"));
+  }, 12000);
 
   worker.onerror = (e) => {
     const err = new Error(`worker error: ${e.message ?? "unknown"}`);
-    logError(`[ext:${ext.id}] sandboxHost: worker onerror: ${e.message ?? "unknown"}`);
+    logError(
+      `[ext:${ext.id}] sandboxHost: worker onerror: ${e.message ?? "unknown"}`,
+    );
     clearTimeout(readyTimeout);
     rejectReady(err);
     rejectAllPending(err);
   };
 
   worker.onmessage = (e) => {
-    const data = e.data as { kind?: string; req?: SandboxRequest } | WorkerMessage;
+    const data = e.data as
+      | { kind?: string; req?: SandboxRequest }
+      | WorkerMessage;
     if (!data) return;
     // Worker -> host requests go through the permission dispatcher.
     if ((data as { kind?: string }).kind === "request") {

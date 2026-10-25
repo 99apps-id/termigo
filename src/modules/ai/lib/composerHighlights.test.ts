@@ -62,7 +62,11 @@ describe("splitComposerHighlights", () => {
   });
 
   it("handles multiple tokens in one string", () => {
-    expect(refs("/plan with #env and @a.ts")).toEqual(["/plan", "#env", "@a.ts"]);
+    expect(refs("/plan with #env and @a.ts")).toEqual([
+      "/plan",
+      "#env",
+      "@a.ts",
+    ]);
   });
 
   it("returns one plain span for text with no tokens", () => {

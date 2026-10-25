@@ -14,7 +14,11 @@ import {
   describeExtTool,
   extToolSchema,
 } from "./extensionTools";
-import { extToolName, isExtensionTool, parseExtToolName } from "./extensionToolNames";
+import {
+  extToolName,
+  isExtensionTool,
+  parseExtToolName,
+} from "./extensionToolNames";
 
 const schema = { type: "object", properties: { q: { type: "string" } } };
 
@@ -26,7 +30,9 @@ function declared(name: string, approval: "auto" | "needsApproval" = "auto") {
 }
 
 function exec(tools: Record<string, unknown>, name: string, args: unknown) {
-  const t = tools[name] as { execute: (a: unknown, o: unknown) => Promise<unknown> };
+  const t = tools[name] as {
+    execute: (a: unknown, o: unknown) => Promise<unknown>;
+  };
   return t.execute(args, {});
 }
 
@@ -34,7 +40,10 @@ describe("names", () => {
   it("round-trips", () => {
     const n = extToolName("my_ext", "do_thing");
     expect(isExtensionTool(n)).toBe(true);
-    expect(parseExtToolName(n)).toEqual({ extensionId: "my_ext", tool: "do_thing" });
+    expect(parseExtToolName(n)).toEqual({
+      extensionId: "my_ext",
+      tool: "do_thing",
+    });
   });
 
   // Extension ids contain underscores, so splitting on the first `__` would
@@ -70,7 +79,9 @@ describe("extToolSchema", () => {
 
 describe("describeExtTool", () => {
   it("names the extension so the origin is visible to the model", () => {
-    expect(describeExtTool("my_ext", "does a thing", false)).toContain('"my_ext"');
+    expect(describeExtTool("my_ext", "does a thing", false)).toContain(
+      '"my_ext"',
+    );
   });
 
   it("says when it will ask", () => {
@@ -82,32 +93,47 @@ describe("describeExtTool", () => {
 describe("buildExtensionTools", () => {
   it("builds one prefixed tool per contribution", () => {
     list.mockReturnValue([declared("do_thing")]);
-    expect(Object.keys(buildExtensionTools())).toEqual(["ext__my_ext__do_thing"]);
+    expect(Object.keys(buildExtensionTools())).toEqual([
+      "ext__my_ext__do_thing",
+    ]);
   });
 
   it("honours the declared approval preference", () => {
-    list.mockReturnValue([declared("a", "auto"), declared("b", "needsApproval")]);
+    list.mockReturnValue([
+      declared("a", "auto"),
+      declared("b", "needsApproval"),
+    ]);
     const tools = buildExtensionTools();
-    expect((tools.ext__my_ext__a as { needsApproval: boolean }).needsApproval).toBe(
-      false,
-    );
-    expect((tools.ext__my_ext__b as { needsApproval: boolean }).needsApproval).toBe(
-      true,
-    );
+    expect(
+      (tools.ext__my_ext__a as { needsApproval: boolean }).needsApproval,
+    ).toBe(false);
+    expect(
+      (tools.ext__my_ext__b as { needsApproval: boolean }).needsApproval,
+    ).toBe(true);
   });
 
   it("skips a contribution missing its name or description", () => {
     list.mockReturnValue([
-      { extensionId: "e", item: { name: "", description: "d", parameters: schema } },
-      { extensionId: "e", item: { name: "n", description: "", parameters: schema } },
+      {
+        extensionId: "e",
+        item: { name: "", description: "d", parameters: schema },
+      },
+      {
+        extensionId: "e",
+        item: { name: "n", description: "", parameters: schema },
+      },
     ]);
     expect(buildExtensionTools()).toEqual({});
   });
 
   it("calls the handler bound for that tool", async () => {
     list.mockReturnValue([declared("do_thing")]);
-    getRuntime.mockReturnValue(async (a: Record<string, unknown>) => ({ got: a.q }));
-    const out = await exec(buildExtensionTools(), "ext__my_ext__do_thing", { q: "hi" });
+    getRuntime.mockReturnValue(async (a: Record<string, unknown>) => ({
+      got: a.q,
+    }));
+    const out = await exec(buildExtensionTools(), "ext__my_ext__do_thing", {
+      q: "hi",
+    });
     expect(out).toEqual({ got: "hi" });
     expect(getRuntime).toHaveBeenCalledWith("my_ext", "do_thing");
   });
@@ -127,6 +153,8 @@ describe("buildExtensionTools", () => {
       throw new Error("extension blew up");
     });
     const out = await exec(buildExtensionTools(), "ext__my_ext__do_thing", {});
-    expect(String((out as { error: string }).error)).toContain("extension blew up");
+    expect(String((out as { error: string }).error)).toContain(
+      "extension blew up",
+    );
   });
 });

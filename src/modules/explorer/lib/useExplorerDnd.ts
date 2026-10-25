@@ -54,8 +54,7 @@ export function finishExplorerDrag(
   onMove: (from: string, toDir: string) => void,
 ): void {
   const handledByPathTarget =
-    commit &&
-    (pathDropTarget?.dropPath(source, clientX, clientY) ?? false);
+    commit && (pathDropTarget?.dropPath(source, clientX, clientY) ?? false);
   if (commit && !handledByPathTarget && moveTarget) {
     onMove(source, moveTarget);
   }
@@ -92,83 +91,91 @@ export function useExplorerDnd({
     }
   }, []);
 
-  const ghostRef = useCallback((el: HTMLDivElement | null) => {
-    ghostElRef.current = el;
-    if (el) placeGhost(lastPosRef.current.x, lastPosRef.current.y);
-  }, [placeGhost]);
+  const ghostRef = useCallback(
+    (el: HTMLDivElement | null) => {
+      ghostElRef.current = el;
+      if (el) placeGhost(lastPosRef.current.x, lastPosRef.current.y);
+    },
+    [placeGhost],
+  );
 
-  const onPointerDown = useCallback((e: ReactPointerEvent) => {
-    if (e.button !== 0) return;
-    const el = (e.target as HTMLElement).closest<HTMLElement>("[data-fs-path]");
-    const source = el?.getAttribute("data-fs-path");
-    if (!source) return;
-    const name = source.slice(source.lastIndexOf("/") + 1);
-    const sx = e.clientX;
-    const sy = e.clientY;
-    let active = false;
-
-    const move = (ev: PointerEvent) => {
-      if (!active) {
-        if (Math.hypot(ev.clientX - sx, ev.clientY - sy) < THRESHOLD) return;
-        active = true;
-        lastPosRef.current = { x: ev.clientX, y: ev.clientY };
-        setDragLabel(name);
-      }
-      placeGhost(ev.clientX, ev.clientY);
-      const { rootPath, isDir, pathDropTarget } = optsRef.current;
-      const element = document.elementFromPoint(ev.clientX, ev.clientY);
-      const terminalTargeted =
-        pathDropTarget?.updateTarget(ev.clientX, ev.clientY) ?? false;
-      const hit = element?.closest<HTMLElement>("[data-fs-path]");
-      const p = hit?.getAttribute("data-fs-path");
-      const valid = terminalTargeted
-        ? null
-        : resolveExplorerMoveTarget(
-            source,
-            rootPath,
-            p ?? null,
-            element?.closest("[data-explorer-drop]") != null,
-            isDir,
-          );
-      if (dropTargetRef.current !== valid) {
-        dropTargetRef.current = valid;
-        setDropTargetDir(valid);
-      }
-    };
-    const detach = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      window.removeEventListener("pointercancel", cancel);
-      cleanupRef.current = null;
-    };
-    const end = (commit: boolean) => {
-      detach();
-      if (!active) return;
-      const { x, y } = lastPosRef.current;
-      finishExplorerDrag(
-        commit,
-        source,
-        x,
-        y,
-        dropTargetRef.current,
-        optsRef.current.pathDropTarget,
-        optsRef.current.onMove,
+  const onPointerDown = useCallback(
+    (e: ReactPointerEvent) => {
+      if (e.button !== 0) return;
+      const el = (e.target as HTMLElement).closest<HTMLElement>(
+        "[data-fs-path]",
       );
-      suppressClickRef.current = true;
-      setTimeout(() => {
-        suppressClickRef.current = false;
-      }, 0);
-      dropTargetRef.current = null;
-      setDragLabel(null);
-      setDropTargetDir(null);
-    };
-    const up = () => end(true);
-    const cancel = () => end(false);
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-    window.addEventListener("pointercancel", cancel);
-    cleanupRef.current = detach;
-  }, [placeGhost]);
+      const source = el?.getAttribute("data-fs-path");
+      if (!source) return;
+      const name = source.slice(source.lastIndexOf("/") + 1);
+      const sx = e.clientX;
+      const sy = e.clientY;
+      let active = false;
+
+      const move = (ev: PointerEvent) => {
+        if (!active) {
+          if (Math.hypot(ev.clientX - sx, ev.clientY - sy) < THRESHOLD) return;
+          active = true;
+          lastPosRef.current = { x: ev.clientX, y: ev.clientY };
+          setDragLabel(name);
+        }
+        placeGhost(ev.clientX, ev.clientY);
+        const { rootPath, isDir, pathDropTarget } = optsRef.current;
+        const element = document.elementFromPoint(ev.clientX, ev.clientY);
+        const terminalTargeted =
+          pathDropTarget?.updateTarget(ev.clientX, ev.clientY) ?? false;
+        const hit = element?.closest<HTMLElement>("[data-fs-path]");
+        const p = hit?.getAttribute("data-fs-path");
+        const valid = terminalTargeted
+          ? null
+          : resolveExplorerMoveTarget(
+              source,
+              rootPath,
+              p ?? null,
+              element?.closest("[data-explorer-drop]") != null,
+              isDir,
+            );
+        if (dropTargetRef.current !== valid) {
+          dropTargetRef.current = valid;
+          setDropTargetDir(valid);
+        }
+      };
+      const detach = () => {
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", up);
+        window.removeEventListener("pointercancel", cancel);
+        cleanupRef.current = null;
+      };
+      const end = (commit: boolean) => {
+        detach();
+        if (!active) return;
+        const { x, y } = lastPosRef.current;
+        finishExplorerDrag(
+          commit,
+          source,
+          x,
+          y,
+          dropTargetRef.current,
+          optsRef.current.pathDropTarget,
+          optsRef.current.onMove,
+        );
+        suppressClickRef.current = true;
+        setTimeout(() => {
+          suppressClickRef.current = false;
+        }, 0);
+        dropTargetRef.current = null;
+        setDragLabel(null);
+        setDropTargetDir(null);
+      };
+      const up = () => end(true);
+      const cancel = () => end(false);
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", up);
+      window.addEventListener("pointercancel", cancel);
+      cleanupRef.current = detach;
+    },
+    [placeGhost],
+  );
 
   const onClickCapture = useCallback((e: React.MouseEvent) => {
     if (suppressClickRef.current) {

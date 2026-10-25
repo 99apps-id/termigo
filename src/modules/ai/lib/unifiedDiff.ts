@@ -88,7 +88,10 @@ export function parseUnifiedDiff(text: string): ParseResult {
       ) {
         const body = lines[i];
         if (body.startsWith("@@")) break;
-        if (body.startsWith("--- ") && (lines[i + 1] ?? "").startsWith("+++ ")) {
+        if (
+          body.startsWith("--- ") &&
+          (lines[i + 1] ?? "").startsWith("+++ ")
+        ) {
           break;
         }
         if (body.startsWith("\\")) {
@@ -135,7 +138,9 @@ function matchAt(
 ): boolean {
   if (start < 0 || start + expected.length > lines.length) return false;
   for (let i = 0; i < expected.length; i++) {
-    const a = normalize ? lines[start + i].replace(/\s+$/, "") : lines[start + i];
+    const a = normalize
+      ? lines[start + i].replace(/\s+$/, "")
+      : lines[start + i];
     const b = normalize ? expected[i].replace(/\s+$/, "") : expected[i];
     if (a !== b) return false;
   }
@@ -170,10 +175,7 @@ export type ApplyResult =
   | { ok: false; error: string };
 
 /** Apply every hunk of one file patch to `content`. */
-export function applyFilePatch(
-  content: string,
-  patch: FilePatch,
-): ApplyResult {
+export function applyFilePatch(content: string, patch: FilePatch): ApplyResult {
   const eol = content.includes("\r\n") ? "\r\n" : "\n";
   const lf = content.replace(/\r\n/g, "\n");
   const lines = lf.split("\n");

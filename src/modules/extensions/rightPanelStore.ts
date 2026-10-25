@@ -68,7 +68,8 @@ export const useRightPanelStore = create<State & Actions>((set, get) => ({
   },
   toggle: (extensionId, panelId) => {
     const { panels } = get();
-    if (isRightPanelOpen(panels, extensionId, panelId)) get().close(extensionId, panelId);
+    if (isRightPanelOpen(panels, extensionId, panelId))
+      get().close(extensionId, panelId);
     else get().open(extensionId, panelId);
   },
   markDefaultOpenHandled: (extensionId, panelId) => {

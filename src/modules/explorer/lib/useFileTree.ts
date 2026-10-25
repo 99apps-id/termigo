@@ -25,12 +25,21 @@ type TreeState = Record<string, ChildrenState>;
 
 /** True when two entry lists are identical (used by the SSH tree to skip
  *  re-renders when the remote listing has not changed). */
-export function sameEntries(a: ReadonlyArray<{ name: string; kind: string; mtime: number; size: number }>, b: ReadonlyArray<{ name: string; kind: string; mtime: number; size: number }>): boolean {
+export function sameEntries(
+  a: ReadonlyArray<{ name: string; kind: string; mtime: number; size: number }>,
+  b: ReadonlyArray<{ name: string; kind: string; mtime: number; size: number }>,
+): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) {
     const x = a[i];
     const y = b[i];
-    if (x.name !== y.name || x.kind !== y.kind || x.mtime !== y.mtime || x.size !== y.size) return false;
+    if (
+      x.name !== y.name ||
+      x.kind !== y.kind ||
+      x.mtime !== y.mtime ||
+      x.size !== y.size
+    )
+      return false;
   }
   return true;
 }
@@ -159,7 +168,9 @@ export function useFileTree(rootPath: string | null, options?: Options) {
       }
 
       const liveDirs = new Set(
-        entries.filter((e) => e.kind === "dir").map((e) => joinPath(path, e.name)),
+        entries
+          .filter((e) => e.kind === "dir")
+          .map((e) => joinPath(path, e.name)),
       );
       const removedRoots: string[] = [];
       for (const key of Object.keys(nodesRef.current)) {
@@ -192,7 +203,8 @@ export function useFileTree(rootPath: string | null, options?: Options) {
           return changed ? n : c;
         });
         const toUnwatch: string[] = [];
-        for (const d of dead) if (watchedRef.current.delete(d)) toUnwatch.push(d);
+        for (const d of dead)
+          if (watchedRef.current.delete(d)) toUnwatch.push(d);
         watchRemove(toUnwatch);
       }
     } catch (e) {

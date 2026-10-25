@@ -12,10 +12,7 @@ import { remoteUnsupported } from "../lib/remoteFs";
 import { checkShellCommand } from "../lib/security";
 import type { ToolContext } from "./context";
 
-function sleepWithSignal(
-  ms: number,
-  abortSignal?: AbortSignal,
-): Promise<void> {
+function sleepWithSignal(ms: number, abortSignal?: AbortSignal): Promise<void> {
   return new Promise((r) => {
     if (abortSignal?.aborted) return r(undefined);
     const t = setTimeout(r, ms);

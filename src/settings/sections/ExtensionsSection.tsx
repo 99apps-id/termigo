@@ -72,12 +72,19 @@ export function ExtensionsSection() {
 
   const [repoInput, setRepoInput] = useState("");
   const [installing, setInstalling] = useState(false);
-  const [peek, setPeek] = useState<{ result: PeekResult; spec: InstallSpec } | null>(null);
+  const [peek, setPeek] = useState<{
+    result: PeekResult;
+    spec: InstallSpec;
+  } | null>(null);
 
   const runPeekInstall = async (spec: InstallSpec, result: PeekResult) => {
     setInstalling(true);
     try {
-      await install(spec, result.manifest.id, result.manifest.permissions ?? []);
+      await install(
+        spec,
+        result.manifest.id,
+        result.manifest.permissions ?? [],
+      );
       setPeek(null);
     } catch (err) {
       // Store surfaces the error via lastError; keep the dialog open so the
@@ -95,7 +102,9 @@ export function ExtensionsSection() {
     });
     if (typeof picked !== "string") return;
     try {
-      const result = await invoke<PeekResult>("ext_peek_zip", { zipPath: picked });
+      const result = await invoke<PeekResult>("ext_peek_zip", {
+        zipPath: picked,
+      });
       setPeek({ result, spec: { kind: "zip", path: picked } });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -143,12 +152,16 @@ export function ExtensionsSection() {
         <CardHeader>
           <CardTitle>Install from package</CardTitle>
           <CardDescription>
-            Install a local .zip you built or downloaded, or a package published on GitHub.
+            Install a local .zip you built or downloaded, or a package published
+            on GitHub.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <div className="flex flex-col gap-2">
-            <label className="text-[11px] font-medium text-muted-foreground" htmlFor="ext-repo">
+            <label
+              className="text-[11px] font-medium text-muted-foreground"
+              htmlFor="ext-repo"
+            >
               GitHub repository (owner/repo)
             </label>
             <div className="flex gap-2">
@@ -175,7 +188,11 @@ export function ExtensionsSection() {
             <p className="text-[11px] text-muted-foreground">
               From a local .zip file
             </p>
-            <Button variant="outline" disabled={installing} onClick={() => void installFromZip()}>
+            <Button
+              variant="outline"
+              disabled={installing}
+              onClick={() => void installFromZip()}
+            >
               Choose zip…
             </Button>
           </div>
@@ -212,14 +229,20 @@ export function ExtensionsSection() {
         )}
       </div>
 
-      <Dialog open={peek !== null} onOpenChange={(open) => !open && setPeek(null)}>
+      <Dialog
+        open={peek !== null}
+        onOpenChange={(open) => !open && setPeek(null)}
+      >
         <DialogContent className="sm:max-w-[460px]">
           {peek ? (
             <>
               <DialogHeader>
-                <DialogTitle>Install "{peek.result.manifest.name}"?</DialogTitle>
+                <DialogTitle>
+                  Install "{peek.result.manifest.name}"?
+                </DialogTitle>
                 <DialogDescription>
-                  Version {peek.result.manifest.version} · from {sourceLabel(peek.result.source)}
+                  Version {peek.result.manifest.version} · from{" "}
+                  {sourceLabel(peek.result.source)}
                 </DialogDescription>
               </DialogHeader>
               <div className="flex flex-col gap-3">
@@ -233,18 +256,25 @@ export function ExtensionsSection() {
                     Requested permissions
                   </span>
                   <div className="flex max-h-48 flex-wrap gap-1.5 overflow-auto rounded-md border border-border/50 bg-card/40 p-2">
-                    {peek.result.manifest.permissions && peek.result.manifest.permissions.length > 0 ? (
+                    {peek.result.manifest.permissions &&
+                    peek.result.manifest.permissions.length > 0 ? (
                       peek.result.manifest.permissions.map((p) => (
                         <PermissionLabel key={p} permission={p} />
                       ))
                     ) : (
-                      <span className="text-[11px] text-muted-foreground">None</span>
+                      <span className="text-[11px] text-muted-foreground">
+                        None
+                      </span>
                     )}
                   </div>
                 </div>
               </div>
               <DialogFooter>
-                <Button variant="ghost" disabled={installing} onClick={() => setPeek(null)}>
+                <Button
+                  variant="ghost"
+                  disabled={installing}
+                  onClick={() => setPeek(null)}
+                >
                   Cancel
                 </Button>
                 <Button
@@ -270,7 +300,8 @@ function InstalledCard({ ext }: { ext: InstalledExtension }) {
   const busy = updatingIds.has(ext.id);
 
   const isGithub = ext.source.startsWith("github:");
-  const hasUpdate = ext.latest_version != null && ext.latest_version !== ext.version;
+  const hasUpdate =
+    ext.latest_version != null && ext.latest_version !== ext.version;
 
   const onToggle = async (enabled: boolean) => {
     try {
@@ -305,7 +336,9 @@ function InstalledCard({ ext }: { ext: InstalledExtension }) {
       <CardContent className="flex items-center gap-3 py-3">
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <div className="flex items-center gap-2">
-            <span className="truncate text-[13px] font-medium text-foreground">{name}</span>
+            <span className="truncate text-[13px] font-medium text-foreground">
+              {name}
+            </span>
             <Badge variant="secondary" className="text-[9.5px]">
               v{ext.version}
             </Badge>
@@ -319,19 +352,35 @@ function InstalledCard({ ext }: { ext: InstalledExtension }) {
             ) : null}
           </div>
           {description ? (
-            <p className="truncate text-[11px] text-muted-foreground">{description}</p>
+            <p className="truncate text-[11px] text-muted-foreground">
+              {description}
+            </p>
           ) : null}
         </div>
 
         {isGithub && hasUpdate ? (
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => void onUpdate()}>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={() => void onUpdate()}
+          >
             {busy ? "Updating…" : "Update"}
           </Button>
         ) : null}
 
-        <Switch checked={ext.enabled} disabled={busy} onCheckedChange={(v) => void onToggle(v)} />
+        <Switch
+          checked={ext.enabled}
+          disabled={busy}
+          onCheckedChange={(v) => void onToggle(v)}
+        />
 
-        <Button size="sm" variant="ghost" disabled={busy} onClick={() => void onUninstall()}>
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={busy}
+          onClick={() => void onUninstall()}
+        >
           Uninstall
         </Button>
       </CardContent>

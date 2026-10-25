@@ -1540,9 +1540,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
     if (fallbackTabId !== null && removedTabId !== null) {
       const nextActive: number = fallbackTabId;
       const targetRemoved: number = removedTabId;
-      setActiveId((active) =>
-        active === targetRemoved ? nextActive : active,
-      );
+      setActiveId((active) => (active === targetRemoved ? nextActive : active));
     }
     if (didRemove) disposeSession(leafId);
   }, []);

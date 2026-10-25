@@ -13,10 +13,11 @@ describe("think tool", () => {
     expect(tools.think).toBeDefined();
 
     const thoughts = "Need to test edge case where file does not exist";
-    const result = (await tools.think.execute(
-      { thoughts },
-      toolOptions,
-    )) as { ok: boolean; recorded: boolean; length: number };
+    const result = (await tools.think.execute({ thoughts }, toolOptions)) as {
+      ok: boolean;
+      recorded: boolean;
+      length: number;
+    };
 
     expect(result.ok).toBe(true);
     expect(result.recorded).toBe(true);

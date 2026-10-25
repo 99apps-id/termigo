@@ -115,9 +115,7 @@ describe("a model we carry no metadata for is not assumed capable", () => {
   it("still forces nothing on a built-in that takes it", () => {
     // The fix must not disable the optimisation where it is known to work.
     const plain = ALL.find(
-      (m) =>
-        !m.tags?.includes("reasoning") &&
-        m.provider === "openai",
+      (m) => !m.tags?.includes("reasoning") && m.provider === "openai",
     );
     if (plain) expect(modelAllowsForcedToolChoice(plain)).toBe(true);
   });

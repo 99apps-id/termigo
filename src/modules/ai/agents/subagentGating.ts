@@ -187,8 +187,7 @@ export function gate<T extends AnyTool>(
         breaker.tripped = true;
         breaker.trip();
         return {
-          error:
-            `denied by the user ${MAX_CONSECUTIVE_DENIALS} times in a row. This sub-agent is stopping; report the write as not done.`,
+          error: `denied by the user ${MAX_CONSECUTIVE_DENIALS} times in a row. This sub-agent is stopping; report the write as not done.`,
         };
       }
       return {
@@ -322,7 +321,9 @@ export function newFilesOnly<T extends AnyTool>(
           selfCreated.has(targetKey);
 
         if (!canOverwrite) {
-          const existing = await native.readFile(resolvedPath).catch(() => null);
+          const existing = await native
+            .readFile(resolvedPath)
+            .catch(() => null);
           if (existing) {
             return {
               error: `${path} already exists. If you intend to overwrite this file entirely, supply overwrite: true; or call read_file followed by edit/multi_edit for safe in-place modifications.`,

@@ -39,10 +39,7 @@ export function WindowControls({ closeOnly = false }: Props) {
     if (!closeOnly) return null;
     return (
       <div className="flex h-full shrink-0 items-center pr-1">
-        <CtlButton
-          ariaLabel="Close (Esc)"
-          onClick={() => void w.close()}
-        >
+        <CtlButton ariaLabel="Close (Esc)" onClick={() => void w.close()}>
           <HugeiconsIcon icon={Cancel01Icon} size={13} strokeWidth={2} />
         </CtlButton>
       </div>

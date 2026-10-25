@@ -34,9 +34,15 @@ test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
   });
 
   it("evaluates shouldRetryTest logic properly", () => {
-    expect(shouldRetryTest({ attempt: 1, maxRetries: 3, exitCode: 1 })).toBe(true);
-    expect(shouldRetryTest({ attempt: 3, maxRetries: 3, exitCode: 1 })).toBe(false);
-    expect(shouldRetryTest({ attempt: 1, maxRetries: 3, exitCode: 0 })).toBe(false);
+    expect(shouldRetryTest({ attempt: 1, maxRetries: 3, exitCode: 1 })).toBe(
+      true,
+    );
+    expect(shouldRetryTest({ attempt: 3, maxRetries: 3, exitCode: 1 })).toBe(
+      false,
+    );
+    expect(shouldRetryTest({ attempt: 1, maxRetries: 3, exitCode: 0 })).toBe(
+      false,
+    );
   });
 
   it("builds capped retry guidance", () => {

@@ -33,7 +33,8 @@ function sanitizeSseStream(
       },
       flush(controller) {
         buffer += decoder.decode();
-        if (buffer) controller.enqueue(encoder.encode(sanitizeMuseSseLine(buffer)));
+        if (buffer)
+          controller.enqueue(encoder.encode(sanitizeMuseSseLine(buffer)));
       },
     }),
   );

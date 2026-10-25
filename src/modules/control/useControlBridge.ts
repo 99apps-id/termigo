@@ -236,7 +236,10 @@ export type ConfigSetRequest = { key: string; value: unknown };
 
 export function parseConfigSetRequest(params: unknown): ConfigSetRequest {
   if (typeof params !== "object" || params === null) {
-    throw new RequestError("invalid_params", "config-set parameters are required");
+    throw new RequestError(
+      "invalid_params",
+      "config-set parameters are required",
+    );
   }
   const value = params as Record<string, unknown>;
   const key = typeof value.key === "string" ? value.key.trim() : "";
@@ -252,11 +255,13 @@ export type SecretSetRequest = { provider: string; value: string };
 
 export function parseSecretSetRequest(params: unknown): SecretSetRequest {
   if (typeof params !== "object" || params === null) {
-    throw new RequestError("invalid_params", "secret-set parameters are required");
+    throw new RequestError(
+      "invalid_params",
+      "secret-set parameters are required",
+    );
   }
   const raw = params as Record<string, unknown>;
-  const provider =
-    typeof raw.provider === "string" ? raw.provider.trim() : "";
+  const provider = typeof raw.provider === "string" ? raw.provider.trim() : "";
   const value = typeof raw.value === "string" ? raw.value : "";
   if (!provider) {
     throw new RequestError("invalid_params", "secret-set needs a provider");
@@ -269,7 +274,10 @@ export function parseSecretSetRequest(params: unknown): SecretSetRequest {
 
 export function parseEndpointAddRequest(params: unknown): CustomEndpointInput {
   if (typeof params !== "object" || params === null) {
-    throw new RequestError("invalid_params", "endpoint-add parameters are required");
+    throw new RequestError(
+      "invalid_params",
+      "endpoint-add parameters are required",
+    );
   }
   const raw = params as Record<string, unknown>;
   const baseURL =
@@ -326,12 +334,18 @@ export function parseEndpointAddRequest(params: unknown): CustomEndpointInput {
 
 export function parseEndpointRemoveRequest(params: unknown): { id: string } {
   if (typeof params !== "object" || params === null) {
-    throw new RequestError("invalid_params", "endpoint-remove parameters are required");
+    throw new RequestError(
+      "invalid_params",
+      "endpoint-remove parameters are required",
+    );
   }
   const raw = params as Record<string, unknown>;
   const id = typeof raw.id === "string" ? raw.id.trim() : "";
   if (!id) {
-    throw new RequestError("invalid_params", "endpoint-remove needs an endpoint id or name");
+    throw new RequestError(
+      "invalid_params",
+      "endpoint-remove needs an endpoint id or name",
+    );
   }
   return { id };
 }
@@ -552,7 +566,10 @@ export function useControlBridge({
         if (request.method === "secret-set") {
           const secret = parseSecretSetRequest(request.params);
           try {
-            const stored = await setProviderSecret(secret.provider, secret.value);
+            const stored = await setProviderSecret(
+              secret.provider,
+              secret.value,
+            );
             // The key itself is never included in the reply.
             await respond(request.id, { ok: true, result: stored });
           } catch (error) {
@@ -669,7 +686,10 @@ export function useControlBridge({
               console.warn("[termigo] could not focus control target:", error);
             }
           }
-          const tabId = callbacksRef.current.onOpen({ ...open, spaceId: context.space_id });
+          const tabId = callbacksRef.current.onOpen({
+            ...open,
+            spaceId: context.space_id,
+          });
           if (tabId === null) {
             throw new RequestError(
               "open_failed",

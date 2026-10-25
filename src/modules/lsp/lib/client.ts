@@ -451,8 +451,11 @@ export class TermigoLspClient extends LanguageServerClient {
     position: LspPos;
     context: { includeDeclaration: boolean };
   }): Promise<LspLocation[] | null> {
-    return this.raw.request("textDocument/references", params, 10_000) as
-      Promise<LspLocation[] | null>;
+    return this.raw.request(
+      "textDocument/references",
+      params,
+      10_000,
+    ) as Promise<LspLocation[] | null>;
   }
 
   textDocumentCodeAction(params: {
@@ -460,15 +463,21 @@ export class TermigoLspClient extends LanguageServerClient {
     range: { start: LspPos; end: LspPos };
     context: { diagnostics: unknown[] };
   }): Promise<LspCodeAction[] | null> {
-    return this.raw.request("textDocument/codeAction", params, 10_000) as
-      Promise<LspCodeAction[] | null>;
+    return this.raw.request(
+      "textDocument/codeAction",
+      params,
+      10_000,
+    ) as Promise<LspCodeAction[] | null>;
   }
 
   textDocumentDocumentSymbol(params: {
     textDocument: { uri: string };
   }): Promise<LspDocumentSymbol[] | LspSymbolInformation[] | null> {
-    return this.raw.request("textDocument/documentSymbol", params, 10_000) as
-      Promise<LspDocumentSymbol[] | LspSymbolInformation[] | null>;
+    return this.raw.request(
+      "textDocument/documentSymbol",
+      params,
+      10_000,
+    ) as Promise<LspDocumentSymbol[] | LspSymbolInformation[] | null>;
   }
 
   textDocumentDidClose(uri: string): void {

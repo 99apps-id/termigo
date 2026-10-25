@@ -64,8 +64,6 @@ describe("turnCheckpointStore", () => {
     store.record("s2", entry("u9"));
     store.clearSession("s1");
     expect(useTurnCheckpointStore.getState().bySession.s1).toBeUndefined();
-    expect(
-      useTurnCheckpointStore.getState().bySession.s2,
-    ).toHaveLength(1);
+    expect(useTurnCheckpointStore.getState().bySession.s2).toHaveLength(1);
   });
 });

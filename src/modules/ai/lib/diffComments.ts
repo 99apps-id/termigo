@@ -42,7 +42,7 @@ export function createDiffComment(
   lineNumber: number,
   comment: string,
   originalLine?: string,
-  side: DiffCommentSide = "new"
+  side: DiffCommentSide = "new",
 ): DiffComment {
   const cleanPath = filePath.replace(/\\/g, "/").trim();
   const id = `diff-comm-${Math.random().toString(36).slice(2, 9)}-${Date.now()}`;
@@ -62,10 +62,15 @@ export function createDiffComment(
  */
 export function addCommentToBatch(
   batch: DiffAnnotationBatch,
-  comment: DiffComment
+  comment: DiffComment,
 ): DiffAnnotationBatch {
   const filtered = batch.comments.filter(
-    (c) => !(c.filePath === comment.filePath && c.lineNumber === comment.lineNumber && c.side === comment.side)
+    (c) =>
+      !(
+        c.filePath === comment.filePath &&
+        c.lineNumber === comment.lineNumber &&
+        c.side === comment.side
+      ),
   );
 
   return {
@@ -79,7 +84,7 @@ export function addCommentToBatch(
  */
 export function removeCommentFromBatch(
   batch: DiffAnnotationBatch,
-  commentId: string
+  commentId: string,
 ): DiffAnnotationBatch {
   return {
     comments: batch.comments.filter((c) => c.id !== commentId),
@@ -92,7 +97,7 @@ export function removeCommentFromBatch(
  */
 export function clearCommentsForFile(
   batch: DiffAnnotationBatch,
-  filePath: string
+  filePath: string,
 ): DiffAnnotationBatch {
   const cleanPath = filePath.replace(/\\/g, "/").trim();
   return {
@@ -105,7 +110,7 @@ export function clearCommentsForFile(
  * Groups comments in a batch by their normalized file paths.
  */
 export function groupCommentsByFile(
-  batch: DiffAnnotationBatch
+  batch: DiffAnnotationBatch,
 ): Record<string, DiffComment[]> {
   const grouped: Record<string, DiffComment[]> = {};
   for (const c of batch.comments) {
@@ -154,6 +159,8 @@ export function formatDiffFeedbackPrompt(batch: DiffAnnotationBatch): string {
     lines.push("");
   }
 
-  lines.push(`Please apply these changes directly and verify that tests still pass.`);
+  lines.push(
+    `Please apply these changes directly and verify that tests still pass.`,
+  );
   return lines.join("\n").trim();
 }

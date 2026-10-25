@@ -88,11 +88,13 @@ export function buildTodoTools(ctx: ToolContext) {
               todos = parsed;
             } else if (parsed && typeof parsed === "object") {
               const obj = parsed as Record<string, unknown>;
-              todos = (Array.isArray(obj.todos)
-                ? obj.todos
-                : Array.isArray(obj.items)
-                  ? obj.items
-                  : Object.values(obj)) as typeof todos;
+              todos = (
+                Array.isArray(obj.todos)
+                  ? obj.todos
+                  : Array.isArray(obj.items)
+                    ? obj.items
+                    : Object.values(obj)
+              ) as typeof todos;
             }
           } catch {
             return { error: "Failed to parse todos JSON string" };
@@ -203,7 +205,9 @@ export function buildTodoTools(ctx: ToolContext) {
           const newItem: Todo = {
             id: id ?? newTodoId(),
             title: taskTitle,
-            ...(description && description !== taskTitle ? { description } : {}),
+            ...(description && description !== taskTitle
+              ? { description }
+              : {}),
             status: status ?? "pending",
             ...(parent ? { parent } : {}),
           };
@@ -290,9 +294,7 @@ export function buildTodoTools(ctx: ToolContext) {
 
         const updatedItem: Todo = {
           ...existing,
-          ...(title?.trim()
-            ? { title: title.trim() }
-            : {}),
+          ...(title?.trim() ? { title: title.trim() } : {}),
           ...(description !== undefined ? { description } : {}),
           status: nextStatus,
           ...(parent !== undefined ? { parent } : {}),

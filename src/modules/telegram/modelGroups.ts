@@ -29,7 +29,12 @@ export type ProviderGroup = {
 };
 
 type BuiltinLike = { id: string; provider: string; label: string };
-type EndpointLike = { id: string; name: string; modelId: string; baseURL?: string };
+type EndpointLike = {
+  id: string;
+  name: string;
+  modelId: string;
+  baseURL?: string;
+};
 
 export type ModelGroupsInput = {
   models: readonly BuiltinLike[];

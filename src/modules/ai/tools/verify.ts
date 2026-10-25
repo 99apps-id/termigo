@@ -80,7 +80,10 @@ async function resolveCheckCommand(
   root: string | null,
 ): Promise<{ command: string | null; note: string }> {
   if (!root) {
-    return { command: null, note: "no project root; pass `command` explicitly" };
+    return {
+      command: null,
+      note: "no project root; pass `command` explicitly",
+    };
   }
   const manifests = {
     pkgJson: await tryRead(root, "package.json"),
@@ -111,7 +114,9 @@ export function detectCheckCommand(
     if (script) {
       const pm = packageManager(pkgJson);
       const command =
-        script.startsWith(`${pm} `) || script.startsWith("npx ") || script.startsWith("bunx ")
+        script.startsWith(`${pm} `) ||
+        script.startsWith("npx ") ||
+        script.startsWith("bunx ")
           ? script
           : `${pm} run ${kind}`;
       return { command, note: `package.json script (${pm})` };
@@ -137,8 +142,7 @@ export function detectCheckCommand(
   }
   return {
     command: null,
-    note:
-      "could not detect a test/lint runner from package.json, Cargo.toml, go.mod or pyproject.toml; pass `command` explicitly",
+    note: "could not detect a test/lint runner from package.json, Cargo.toml, go.mod or pyproject.toml; pass `command` explicitly",
   };
 }
 
@@ -148,14 +152,18 @@ export function buildVerifyTools(ctx: ToolContext) {
       description:
         "Detect and run this project's test or lint command, returning the output. Use after editing code so the agent sees the result and can fix failures itself (the verification step of read -> change -> verify). Chooses the right runner from package.json / Cargo.toml / go.mod / pyproject.toml. Pass `command` to override the detected one. Runs locally in the workspace; use bash_run on an SSH terminal. Requires approval.",
       inputSchema: z.object({
-        kind: z.enum(["test", "lint"]).describe("Run tests, or run the linter."),
+        kind: z
+          .enum(["test", "lint"])
+          .describe("Run tests, or run the linter."),
         command: z
           .string()
           .optional()
           .describe(
             "Override the detected command, e.g. `pnpm test ui` or `cargo test --lib`.",
           ),
-        timeout_secs: clampedInt(1, 900).describe("Timeout in seconds (default 300, clamped up to 900)."),
+        timeout_secs: clampedInt(1, 900).describe(
+          "Timeout in seconds (default 300, clamped up to 900).",
+        ),
       }),
       needsApproval: true,
       execute: async ({ kind, command, timeout_secs }, { abortSignal }) => {
@@ -227,7 +235,8 @@ export function buildVerifyTools(ctx: ToolContext) {
           stderr: stderrTrunc.text,
           exit_code: r.exit_code,
           timed_out: r.timed_out,
-          truncated: r.truncated || stdoutTrunc.truncated || stderrTrunc.truncated,
+          truncated:
+            r.truncated || stdoutTrunc.truncated || stderrTrunc.truncated,
           distilled_error: failureSummary,
         };
       },

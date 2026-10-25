@@ -16,10 +16,7 @@ import {
   sendTelegram,
   sendTyping,
 } from "./telegramApi";
-import {
-  startTelegramDispatch,
-  startTelegramResume,
-} from "./telegramDispatch";
+import { startTelegramDispatch, startTelegramResume } from "./telegramDispatch";
 import { getPendingApprovals } from "./telegramHelpers";
 
 export type Update = {
@@ -219,14 +216,17 @@ export async function buildGitDiffSummary(): Promise<string> {
       return `Branch: ${branch}\nWorking tree is completely clean. No pending changes.`;
     }
 
-
     const lines: string[] = [
       `Branch: ${branch}`,
       `Changed files (${changed.length}):`,
     ];
 
     for (const f of changed.slice(0, 15)) {
-      const tag = f.staged ? "[staged]" : f.untracked ? "[untracked]" : "[modified]";
+      const tag = f.staged
+        ? "[staged]"
+        : f.untracked
+          ? "[untracked]"
+          : "[modified]";
       lines.push(`• ${tag} ${f.path}`);
     }
 
@@ -239,7 +239,6 @@ export async function buildGitDiffSummary(): Promise<string> {
     return `Failed to fetch diff summary: ${err instanceof Error ? err.message : String(err)}`;
   }
 }
-
 
 /**
  * Resolve what the user typed to a registry model id.
@@ -414,7 +413,13 @@ export async function handleCallback(
     await setDefaultModel(resolved).catch(() => {});
     const settled = await modelLabel(resolved);
     await answerCallback(cb.id, `Model set to ${settled}`, signal);
-    await editKeyboard(chatId, messageId, `Model set to ${settled}.`, [], signal);
+    await editKeyboard(
+      chatId,
+      messageId,
+      `Model set to ${settled}.`,
+      [],
+      signal,
+    );
     return;
   }
 
@@ -618,7 +623,10 @@ export async function handleCallback(
   await answerCallback(cb.id, null, signal);
 }
 
-export async function handleUpdate(u: Update, signal: AbortSignal): Promise<void> {
+export async function handleUpdate(
+  u: Update,
+  signal: AbortSignal,
+): Promise<void> {
   // Inline-keyboard taps from the /model menu come through as callback_query.
   if (u.callback_query) {
     await handleCallback(u.callback_query, signal);
@@ -898,9 +906,7 @@ export async function handleUpdate(u: Update, signal: AbortSignal): Promise<void
     }
     case "/mode": {
       if (!isOwnerUser(msg.from)) return;
-      const { setAgentApprovalMode } = await import(
-        "@/modules/settings/store"
-      );
+      const { setAgentApprovalMode } = await import("@/modules/settings/store");
       const { usePreferencesStore } = await import(
         "@/modules/settings/preferences"
       );
@@ -1026,10 +1032,7 @@ export async function handleUpdate(u: Update, signal: AbortSignal): Promise<void
           );
           return;
         }
-        const lines = [
-          `Custom Endpoints (${endpoints.length}):`,
-          "",
-        ];
+        const lines = [`Custom Endpoints (${endpoints.length}):`, ""];
         for (const ep of endpoints) {
           const activeTag = ep.isDefault ? " [active default]" : "";
           const keyTag = ep.hasKey ? "configured" : "none (unauthenticated)";
@@ -1069,7 +1072,9 @@ export async function handleUpdate(u: Update, signal: AbortSignal): Promise<void
             apiKey,
             setDefault: false,
           });
-          const keyStatus = apiKey ? "API key saved." : "No API key (unauthenticated).";
+          const keyStatus = apiKey
+            ? "API key saved."
+            : "No API key (unauthenticated).";
           await sendTelegram(
             chatId,
             `Added custom endpoint '${result.endpoint.name}'.\nID: ${result.endpoint.id}\nURL: ${result.endpoint.baseURL}\nModel: ${result.endpoint.modelId}\n${keyStatus}\n\nSwitch to it with: /model ${result.endpoint.id}`,

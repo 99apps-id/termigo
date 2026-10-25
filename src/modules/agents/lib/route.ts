@@ -47,7 +47,9 @@ export function routeAgentNotification({
   if (delivery === "none") return;
   if (!shouldDeliver({ source, agent, kind, tabId, leafId })) return;
 
-  useAgentStore.getState().pushNotification({ source, agent, kind, tabId, leafId });
+  useAgentStore
+    .getState()
+    .pushNotification({ source, agent, kind, tabId, leafId });
 
   if (delivery === "native") {
     void osNotify(title, body ?? agent).then((result) => {

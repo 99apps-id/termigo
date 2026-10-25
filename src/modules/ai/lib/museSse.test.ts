@@ -9,9 +9,9 @@ describe("sanitizeMuseSseLine", () => {
   });
 
   it("adds an empty choices array to a usage-only tail", () => {
-    expect(
-      sanitizeMuseSseLine('data: {"usage":{"total_tokens":12}}\n'),
-    ).toBe('data: {"usage":{"total_tokens":12},"choices":[]}\n');
+    expect(sanitizeMuseSseLine('data: {"usage":{"total_tokens":12}}\n')).toBe(
+      'data: {"usage":{"total_tokens":12},"choices":[]}\n',
+    );
   });
 
   it("fixes a null choices value", () => {

@@ -21,11 +21,14 @@ export type ScheduleTiming = { intervalMs?: number; dailyAt?: string };
  *  strings yield no auto timing (the task is still recorded, just not run). */
 export function parseScheduleWhen(when: string): ScheduleTiming {
   const w = when.trim().toLowerCase();
-  const interval = w.match(/^every\s+(\d+)\s*(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours)$/);
+  const interval = w.match(
+    /^every\s+(\d+)\s*(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours)$/,
+  );
   if (interval) {
     const n = Number(interval[1]);
     const unit = interval[2][0];
-    const ms = unit === "s" ? n * 1000 : unit === "m" ? n * 60_000 : n * 3_600_000;
+    const ms =
+      unit === "s" ? n * 1000 : unit === "m" ? n * 60_000 : n * 3_600_000;
     return { intervalMs: ms };
   }
   const daily = w.match(/^daily(?:\s+at)?\s+(\d{1,2}):(\d{2})$/);
@@ -38,7 +41,10 @@ export function parseScheduleWhen(when: string): ScheduleTiming {
 }
 
 /** The next fire time, or null when the task has no repeat rule. */
-export function computeNextDueAt(now: number, timing: ScheduleTiming): number | null {
+export function computeNextDueAt(
+  now: number,
+  timing: ScheduleTiming,
+): number | null {
   if (timing.intervalMs) return now + timing.intervalMs;
   if (timing.dailyAt) {
     const [hh, mm] = timing.dailyAt.split(":").map((x) => Number(x));
@@ -71,7 +77,9 @@ export function startScheduler(): void {
   const tick = async (): Promise<void> => {
     try {
       const { useChatStore } = await import("../store/chatStore");
-      const { useSessionDirectiveStore } = await import("../store/sessionDirectiveStore");
+      const { useSessionDirectiveStore } = await import(
+        "../store/sessionDirectiveStore"
+      );
       const { sendMessage } = await import("../store/chatRuntime");
       const sessionId = useChatStore.getState().activeSessionId;
       if (sessionId) {

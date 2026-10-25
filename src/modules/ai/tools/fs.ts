@@ -19,11 +19,7 @@ import {
 import { useArtifactsStore } from "../store/artifactsStore";
 import { useChatStore } from "../store/chatStore";
 import { newQueuedEditId, usePlanStore } from "../store/planStore";
-import {
-  type RemoteFsSession,
-  resolvePath,
-  type ToolContext,
-} from "./context";
+import { type RemoteFsSession, resolvePath, type ToolContext } from "./context";
 
 export const READ_BYTE_CAP = 64 * 1024;
 export const READ_LINE_CAP = 2000;
@@ -50,7 +46,6 @@ type ImageReadOutput = {
   data: string;
   size: number;
 };
-
 
 function isImageReadOutput(o: unknown): o is ImageReadOutput {
   return (
@@ -142,7 +137,13 @@ async function readRemoteFile(
     const isFullRead = offset === undefined && limit === undefined;
     const key = fileCacheKey(remotePath, remote.sessionId);
     const prior = readCache.get(key);
-    if (!force && isFullRead && prior && prior.size === size && prior.hash === hash) {
+    if (
+      !force &&
+      isFullRead &&
+      prior &&
+      prior.size === size &&
+      prior.hash === hash
+    ) {
       return {
         path: remotePath,
         unchanged: true,

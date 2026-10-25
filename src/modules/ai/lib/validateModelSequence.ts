@@ -159,7 +159,9 @@ export function repairModelMessageSequence(
             (pendingToolCalls.length > 0 ? pendingToolCalls[0].id : undefined);
 
           if (callId && pendingToolCallIds.has(callId)) {
-            const matchingCall = pendingToolCalls.find((c) => c.id === callId) ?? {
+            const matchingCall = pendingToolCalls.find(
+              (c) => c.id === callId,
+            ) ?? {
               id: callId,
               name: "tool",
             };
@@ -180,7 +182,8 @@ export function repairModelMessageSequence(
                     ? {
                         type: "error-text",
                         value:
-                          (p.reason as string) ?? "Tool execution denied by user.",
+                          (p.reason as string) ??
+                          "Tool execution denied by user.",
                       }
                     : {
                         type: "error-text",

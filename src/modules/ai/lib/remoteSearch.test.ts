@@ -10,7 +10,6 @@ import {
   shellQuote,
 } from "./remoteSearch";
 
-
 /**
  * Parse a string the way POSIX `sh` would, so quoting can be checked by what
  * the shell actually receives rather than by which characters are visible.
@@ -110,7 +109,11 @@ describe("buildGrepCommand", () => {
   // grep matches --include against the basename, so a caller's `**/` prefix
   // would otherwise match nothing at all.
   it("strips a glob prefix grep would never match", () => {
-    const cmd = buildGrepCommand({ pattern: "x", path: "/a", glob: ["**/*.ts"] });
+    const cmd = buildGrepCommand({
+      pattern: "x",
+      path: "/a",
+      glob: ["**/*.ts"],
+    });
     expect(cmd).toContain("--include='*.ts'");
     expect(cmd).not.toContain("**/");
   });
@@ -119,16 +122,16 @@ describe("buildGrepCommand", () => {
     expect(buildGrepCommand({ pattern: "x", path: "/a" })).toContain(
       `head -n ${REMOTE_SEARCH_MAX_RESULTS}`,
     );
-    expect(buildGrepCommand({ pattern: "x", path: "/a", maxResults: 5 })).toContain(
-      "head -n 5",
-    );
+    expect(
+      buildGrepCommand({ pattern: "x", path: "/a", maxResults: 5 }),
+    ).toContain("head -n 5");
   });
 
   it("never emits a head count that would be a syntax error", () => {
     for (const n of [0, -10, 0.4]) {
-      expect(buildGrepCommand({ pattern: "x", path: "/a", maxResults: n })).toContain(
-        "head -n 1",
-      );
+      expect(
+        buildGrepCommand({ pattern: "x", path: "/a", maxResults: n }),
+      ).toContain("head -n 1");
     }
   });
 });

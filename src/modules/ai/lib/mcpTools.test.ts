@@ -111,7 +111,9 @@ describe("loadMcpTools", () => {
     listServers.mockResolvedValue([server("github")]);
     listTools.mockResolvedValue({
       server: "github",
-      tools: [{ name: "create_issue", description: "d", inputSchema: objectSchema }],
+      tools: [
+        { name: "create_issue", description: "d", inputSchema: objectSchema },
+      ],
     });
 
     const tools = await loadMcpTools("/ws");
@@ -166,7 +168,9 @@ describe("loadMcpTools", () => {
     ) => Promise<unknown>;
     const result = await exec({}, {});
     expect(result).toMatchObject({ server: "s", tool: "t" });
-    expect(String((result as { error: string }).error)).toContain("server died");
+    expect(String((result as { error: string }).error)).toContain(
+      "server died",
+    );
   });
 });
 

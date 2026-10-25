@@ -88,7 +88,7 @@ describe("withToolHeartbeat covers tools built outside buildTools", () => {
     expect(msSinceActivity()).toBe(Number.POSITIVE_INFINITY);
 
     const tools = withToolHeartbeat({
-      "mcp__server__probe": {
+      mcp__server__probe: {
         description: "a remote tool",
         inputSchema: { type: "object", properties: {} },
         execute: async () => "remote ok",

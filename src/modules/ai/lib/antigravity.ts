@@ -138,7 +138,10 @@ function unwrapSseStream(
         buffer += decoder.decode(chunk, { stream: true });
         let index = buffer.indexOf("\n");
         while (index >= 0) {
-          emit(controller, unwrapAntigravitySseLine(buffer.slice(0, index + 1)));
+          emit(
+            controller,
+            unwrapAntigravitySseLine(buffer.slice(0, index + 1)),
+          );
           buffer = buffer.slice(index + 1);
           index = buffer.indexOf("\n");
         }
@@ -171,7 +174,8 @@ async function unwrapJsonResponse(response: Response): Promise<Response> {
 
 // ── Fetch interception ────────────────────────────────────────────────────────
 
-const MODEL_IN_URL = /\/models\/([^:/?]+):(streamGenerateContent|generateContent)/;
+const MODEL_IN_URL =
+  /\/models\/([^:/?]+):(streamGenerateContent|generateContent)/;
 
 export function createAntigravityFetch(
   token: string,
@@ -203,7 +207,12 @@ export function createAntigravityFetch(
       return {
         url: `${host}/v1internal:${method}${streaming ? "?alt=sse" : ""}`,
         headers,
-        body: buildAntigravityBody(init.body as string, project, session, modelId),
+        body: buildAntigravityBody(
+          init.body as string,
+          project,
+          session,
+          modelId,
+        ),
       };
     };
 

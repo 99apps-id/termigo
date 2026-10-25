@@ -50,7 +50,9 @@ export function QueuedSteerRow() {
               strokeWidth={1.75}
               className="shrink-0"
             />
-            <span className="shrink-0 font-medium tabular-nums">{idx + 1}.</span>
+            <span className="shrink-0 font-medium tabular-nums">
+              {idx + 1}.
+            </span>
             <span className="min-w-0 flex-1 truncate">{m.preview}</span>
             <button
               type="button"
@@ -72,11 +74,7 @@ export function QueuedSteerRow() {
               aria-label={`Cancel queued message ${idx + 1}: ${m.preview}`}
               className="shrink-0 rounded p-0.5 opacity-60 hover:bg-accent hover:text-destructive hover:opacity-100"
             >
-              <HugeiconsIcon
-                icon={Cancel01Icon}
-                size={12}
-                strokeWidth={1.75}
-              />
+              <HugeiconsIcon icon={Cancel01Icon} size={12} strokeWidth={1.75} />
             </button>
           </div>
         );

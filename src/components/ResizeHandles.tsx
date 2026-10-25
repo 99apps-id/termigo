@@ -20,14 +20,54 @@ type Edge = {
 };
 
 const EDGES: Edge[] = [
-  { direction: "North", cursor: "ns-resize", className: "top-0 right-2 left-2 h-1.5", label: "Resize from top edge" },
-  { direction: "South", cursor: "ns-resize", className: "right-2 bottom-0 left-2 h-1.5", label: "Resize from bottom edge" },
-  { direction: "West", cursor: "ew-resize", className: "top-2 bottom-2 left-0 w-1.5", label: "Resize from left edge" },
-  { direction: "East", cursor: "ew-resize", className: "top-2 right-0 bottom-2 w-1.5", label: "Resize from right edge" },
-  { direction: "NorthWest", cursor: "nwse-resize", className: "top-0 left-0 size-3", label: "Resize from top left corner" },
-  { direction: "NorthEast", cursor: "nesw-resize", className: "top-0 right-0 size-3", label: "Resize from top right corner" },
-  { direction: "SouthWest", cursor: "nesw-resize", className: "bottom-0 left-0 size-3", label: "Resize from bottom left corner" },
-  { direction: "SouthEast", cursor: "nwse-resize", className: "right-0 bottom-0 size-3", label: "Resize from bottom right corner" },
+  {
+    direction: "North",
+    cursor: "ns-resize",
+    className: "top-0 right-2 left-2 h-1.5",
+    label: "Resize from top edge",
+  },
+  {
+    direction: "South",
+    cursor: "ns-resize",
+    className: "right-2 bottom-0 left-2 h-1.5",
+    label: "Resize from bottom edge",
+  },
+  {
+    direction: "West",
+    cursor: "ew-resize",
+    className: "top-2 bottom-2 left-0 w-1.5",
+    label: "Resize from left edge",
+  },
+  {
+    direction: "East",
+    cursor: "ew-resize",
+    className: "top-2 right-0 bottom-2 w-1.5",
+    label: "Resize from right edge",
+  },
+  {
+    direction: "NorthWest",
+    cursor: "nwse-resize",
+    className: "top-0 left-0 size-3",
+    label: "Resize from top left corner",
+  },
+  {
+    direction: "NorthEast",
+    cursor: "nesw-resize",
+    className: "top-0 right-0 size-3",
+    label: "Resize from top right corner",
+  },
+  {
+    direction: "SouthWest",
+    cursor: "nesw-resize",
+    className: "bottom-0 left-0 size-3",
+    label: "Resize from bottom left corner",
+  },
+  {
+    direction: "SouthEast",
+    cursor: "nwse-resize",
+    className: "right-0 bottom-0 size-3",
+    label: "Resize from bottom right corner",
+  },
 ];
 
 /**

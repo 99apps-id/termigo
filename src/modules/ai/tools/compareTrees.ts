@@ -78,10 +78,7 @@ export function buildTreeCompareTools(ctx: ToolContext) {
         let l: { files: TreeFile[]; truncated: boolean };
         let r: { files: TreeFile[]; truncated: boolean };
         try {
-          [l, r] = await Promise.all([
-            manifest(leftRoot),
-            manifest(rightRoot),
-          ]);
+          [l, r] = await Promise.all([manifest(leftRoot), manifest(rightRoot)]);
         } catch (e) {
           return {
             error: `cannot read ${leftRoot} or ${rightRoot}: ${

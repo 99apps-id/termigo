@@ -223,7 +223,11 @@ describe("sanitizeUiMessages: resumed sessions", () => {
 describe("sanitizeUiMessages: the trailing env turn", () => {
   const ENV = "<env>\nworkspace_root: C:/project/termigo\n</env>";
   const envTurn = () =>
-    ({ id: "env", role: "user", parts: [{ type: "text", text: ENV }] }) as UIMessage;
+    ({
+      id: "env",
+      role: "user",
+      parts: [{ type: "text", text: ENV }],
+    }) as UIMessage;
 
   it("still recognises a live approval behind the env turn", () => {
     const out = sanitizeUiMessages([

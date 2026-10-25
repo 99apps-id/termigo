@@ -58,7 +58,9 @@ export function setAppContext(next: AppContextSnapshot): void {
   }
 }
 
-export function subscribeAppContext(cb: (ctx: AppContextSnapshot) => void): () => void {
+export function subscribeAppContext(
+  cb: (ctx: AppContextSnapshot) => void,
+): () => void {
   listeners.add(cb);
   // Fire once on subscribe so callers see the current state.
   try {

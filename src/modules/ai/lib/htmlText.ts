@@ -139,7 +139,11 @@ export function htmlToMarkdown(html: string): string {
     /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi,
     (_, href, text) => {
       const cleanText = text.replace(/<[^>]+>/g, " ").trim();
-      if (!cleanText || href.startsWith("javascript:") || href.startsWith("#")) {
+      if (
+        !cleanText ||
+        href.startsWith("javascript:") ||
+        href.startsWith("#")
+      ) {
         return cleanText;
       }
       return `[${cleanText}](${href})`;

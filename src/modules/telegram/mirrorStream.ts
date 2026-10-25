@@ -99,7 +99,12 @@ export function planMirrorDelivery(input: {
     if (settled) {
       // The run is over, so this is the whole answer. One chunked send, never a
       // partial one.
-      return { send: { kind: "send", text }, markSeen: true, next: null, complete: true };
+      return {
+        send: { kind: "send", text },
+        markSeen: true,
+        next: null,
+        complete: true,
+      };
     }
     if (text.length > limit) {
       // Too long to stream. Stay silent until it settles rather than sending a

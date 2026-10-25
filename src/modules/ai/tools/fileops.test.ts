@@ -52,7 +52,10 @@ describe("move_file", () => {
   it("allows a source the old safety layer denied", async () => {
     rename.mockClear();
     rename.mockResolvedValue(undefined);
-    const out = await run("move_file", { from: "../../.ssh/id_rsa", to: "k.txt" });
+    const out = await run("move_file", {
+      from: "../../.ssh/id_rsa",
+      to: "k.txt",
+    });
     expect(out).toMatchObject({ moved: true });
     expect(rename).toHaveBeenCalledWith(
       expect.stringContaining("id_rsa"),
@@ -63,7 +66,10 @@ describe("move_file", () => {
   it("allows a destination the old safety layer denied", async () => {
     rename.mockClear();
     rename.mockResolvedValue(undefined);
-    const out = await run("move_file", { from: "a.txt", to: "../../.ssh/authorized_keys" });
+    const out = await run("move_file", {
+      from: "a.txt",
+      to: "../../.ssh/authorized_keys",
+    });
     expect(out).toMatchObject({ moved: true });
     expect(rename).toHaveBeenCalled();
   });
@@ -71,14 +77,19 @@ describe("move_file", () => {
   it("returns a backend failure instead of throwing", async () => {
     rename.mockRejectedValue(new Error("already exists: /workspace/b.txt"));
     const out = await run("move_file", { from: "a.txt", to: "b.txt" });
-    expect(String((out as { error: string }).error)).toContain("already exists");
+    expect(String((out as { error: string }).error)).toContain(
+      "already exists",
+    );
   });
 });
 
 describe("copy_file", () => {
   it("copies into the directory and reports where it landed", async () => {
     copyInto.mockResolvedValue(undefined);
-    const out = await run("copy_file", { source: "src/a.txt", dest_dir: "backup" });
+    const out = await run("copy_file", {
+      source: "src/a.txt",
+      dest_dir: "backup",
+    });
     // The tool takes a directory, so without this the model has to guess the
     // resulting path.
     expect(out).toMatchObject({
@@ -90,7 +101,10 @@ describe("copy_file", () => {
   it("allows a source the old safety layer denied", async () => {
     copyInto.mockClear();
     copyInto.mockResolvedValue(undefined);
-    const out = await run("copy_file", { source: "../../.env", dest_dir: "backup" });
+    const out = await run("copy_file", {
+      source: "../../.env",
+      dest_dir: "backup",
+    });
     expect(out).toMatchObject({ copied: true });
     expect(copyInto).toHaveBeenCalled();
   });
@@ -114,16 +128,18 @@ describe("delete_file", () => {
   it("returns a backend failure instead of throwing", async () => {
     deletePath.mockRejectedValue(new Error("permission denied"));
     const out = await run("delete_file", { path: "locked.txt" });
-    expect(String((out as { error: string }).error)).toContain("permission denied");
+    expect(String((out as { error: string }).error)).toContain(
+      "permission denied",
+    );
   });
 });
 
 describe("approval", () => {
   it("every file operation asks before running", () => {
     for (const name of ["move_file", "copy_file", "delete_file"] as const) {
-      expect((tools[name] as unknown as { needsApproval: boolean }).needsApproval).toBe(
-        true,
-      );
+      expect(
+        (tools[name] as unknown as { needsApproval: boolean }).needsApproval,
+      ).toBe(true);
     }
   });
 });
@@ -151,7 +167,11 @@ describe("with an SSH session open", () => {
     sftpRename.mockResolvedValue(undefined);
     const out = await runRemote("move_file", { from: "a.txt", to: "b.txt" });
     expect(out).toMatchObject({ moved: true, remote: true });
-    expect(sftpRename).toHaveBeenCalledWith(5, "/srv/app/a.txt", "/srv/app/b.txt");
+    expect(sftpRename).toHaveBeenCalledWith(
+      5,
+      "/srv/app/a.txt",
+      "/srv/app/b.txt",
+    );
     expect(rename).not.toHaveBeenCalled();
   });
 
@@ -168,7 +188,10 @@ describe("with an SSH session open", () => {
   // name, with none of a rename's atomicity.
   it("refuses a move that would cross machines", async () => {
     sftpRename.mockClear();
-    const out = await runRemote("move_file", { from: "a.txt", to: "C:/temp/b.txt" });
+    const out = await runRemote("move_file", {
+      from: "a.txt",
+      to: "C:/temp/b.txt",
+    });
     expect(String((out as { error: string }).error)).toContain("same one");
     expect(sftpRename).not.toHaveBeenCalled();
   });

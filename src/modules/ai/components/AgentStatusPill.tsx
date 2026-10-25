@@ -42,8 +42,7 @@ function describe(meta: AgentMeta): {
 } {
   if (meta.status === "error") {
     return {
-      tone:
-        "border-destructive/40 bg-destructive/10 text-destructive hover:bg-destructive/15",
+      tone: "border-destructive/40 bg-destructive/10 text-destructive hover:bg-destructive/15",
       icon: (
         <HugeiconsIcon icon={AlertCircleIcon} size={12} strokeWidth={1.75} />
       ),
@@ -52,8 +51,7 @@ function describe(meta: AgentMeta): {
   }
   // thinking | streaming
   return {
-    tone:
-      "border-border/60 bg-card text-muted-foreground hover:text-foreground",
+    tone: "border-border/60 bg-card text-muted-foreground hover:text-foreground",
     icon: <Spinner className="size-3" />,
     label: meta.step ?? "Thinking…",
   };

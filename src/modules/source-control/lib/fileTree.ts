@@ -1,4 +1,7 @@
-import type { CheckState, SourceControlFileEntry } from "../useSourceControlPanel";
+import type {
+  CheckState,
+  SourceControlFileEntry,
+} from "../useSourceControlPanel";
 
 export type ViewMode = "list" | "tree";
 
@@ -43,7 +46,9 @@ export type SCMTreeRow = SCMTreeFolderRow | SCMTreeEntryRow;
  * Compulsorily compacts single-child directory chains (e.g. `src/modules/foo`
  * becomes one row instead of three nested rows), matching modern IDE tree views.
  */
-export function buildFileTree(entries: SourceControlFileEntry[]): TreeFolderNode {
+export function buildFileTree(
+  entries: SourceControlFileEntry[],
+): TreeFolderNode {
   interface RawFolder {
     name: string;
     path: string;

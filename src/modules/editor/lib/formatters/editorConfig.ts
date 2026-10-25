@@ -45,7 +45,11 @@ type Parsed = {
 
 const cache = new Map<string, Promise<Parsed | null>>();
 
-function mapKeyValue(key: string, value: string, into: PartialPrettierOptions): void {
+function mapKeyValue(
+  key: string,
+  value: string,
+  into: PartialPrettierOptions,
+): void {
   const v = value.trim().toLowerCase();
   switch (key.trim().toLowerCase()) {
     case "indent_style":
@@ -166,7 +170,9 @@ async function loadFromDir(dir: string): Promise<Parsed | null> {
  * upward, accumulates matching sections, and stops at the first
  * `root = true` file (per spec).
  */
-export async function resolveEditorConfig(filepath: string): Promise<PartialPrettierOptions> {
+export async function resolveEditorConfig(
+  filepath: string,
+): Promise<PartialPrettierOptions> {
   const stack: Parsed[] = [];
   let dir = parentDir(filepath);
   while (dir) {

@@ -28,7 +28,9 @@ export function buildForwardTools(ctx: ToolContext) {
           .min(0)
           .max(65535)
           .optional()
-          .describe("Local port to bind. Omit or pass 0 to let the OS pick a free one."),
+          .describe(
+            "Local port to bind. Omit or pass 0 to let the OS pick a free one.",
+          ),
       }),
       needsApproval: true,
       execute: async ({ remote_port, remote_host, local_port }) => {

@@ -59,7 +59,8 @@ export function turnCheckpointInfo(
   const text = userTextOf(last).trim();
   if (text === RESUME_PROMPT) return null;
   if (text.startsWith(VERIFY_NUDGE_PREFIX)) return null;
-  const label = turnLabelFor(text) ?? (hasFileParts(last) ? "attachments" : null);
+  const label =
+    turnLabelFor(text) ?? (hasFileParts(last) ? "attachments" : null);
   if (!label) return null;
   return { messageId: last.id, sha, label, at };
 }

@@ -1,3 +1,6 @@
+// Tool results are unions whose fields differ per action; these harness tests
+// read them loosely instead of re-deriving every variant.
+// biome-ignore-all lint/suspicious/noExplicitAny: harness tests read loose tool results
 import { describe, expect, it, vi } from "vitest";
 import type { ToolContext } from "./context";
 import { buildPtyDriverTools, normalizePtyAction } from "./ptyDriver";
@@ -43,7 +46,6 @@ describe("ptyDriver tools", () => {
     const exec = tools.pty_read_screen.execute;
     if (!exec) throw new Error("pty_read_screen execute missing");
 
-    // biome-ignore lint/suspicious/noExplicitAny: tool ctx and result are harness-typed, empty exec ctx is enough
     const res = (await exec({ max_lines: 2 }, {} as any)) as any;
     expect(res.lines_returned).toBe(2);
     expect(res.buffer).toBe("line 2\nline 3");
@@ -56,11 +58,9 @@ describe("ptyDriver tools", () => {
     const exec = tools.pty_wait_for_pattern.execute;
     if (!exec) throw new Error("pty_wait_for_pattern execute missing");
 
-    // biome-ignore lint/suspicious/noExplicitAny: tool ctx and result are harness-typed, empty exec ctx is enough
     const found = (await exec({ pattern: "port 8080" }, {} as any)) as any;
     expect(found.found).toBe(true);
 
-    // biome-ignore lint/suspicious/noExplicitAny: tool ctx and result are harness-typed, empty exec ctx is enough
     const notFound = (await exec({ pattern: "port 3000" }, {} as any)) as any;
     expect(notFound.found).toBe(false);
   });
@@ -70,7 +70,6 @@ describe("ptyDriver tools", () => {
     const exec = tools.pty_wait_for_pattern.execute;
     if (!exec) throw new Error("pty_wait_for_pattern execute missing");
 
-    // biome-ignore lint/suspicious/noExplicitAny: tool ctx and result are harness-typed, empty exec ctx is enough
     const result = (await exec({ pattern: "(" }, {} as any)) as any;
     expect(result.found).toBe(false);
     expect(result.error).toMatch(/invalid regex/i);
@@ -82,8 +81,10 @@ describe("ptyDriver tools", () => {
     const exec = tools.pty_session.execute;
     if (!exec) throw new Error("pty_session execute missing");
 
-    // biome-ignore lint/suspicious/noExplicitAny: tool ctx and result are harness-typed, empty exec ctx is enough
-    const res = (await exec({ action: "read", max_lines: 2 }, {} as any)) as any;
+    const res = (await exec(
+      { action: "read", max_lines: 2 },
+      {} as any,
+    )) as any;
     expect(res.action).toBe("read");
     expect(res.lines_returned).toBe(2);
     expect(res.buffer).toBe("second line\nthird line");
@@ -102,7 +103,6 @@ describe("ptyDriver tools", () => {
     const exec = tools.pty_session.execute;
     if (!exec) throw new Error("pty_session execute missing");
 
-    // biome-ignore lint/suspicious/noExplicitAny: tool ctx and result are harness-typed, empty exec ctx is enough
     const res = (await exec({ action: "ctrl_c" }, {} as any)) as any;
     expect(res.action).toBe("ctrl_c");
     expect(res.sent).toBe(true);
@@ -122,8 +122,10 @@ describe("ptyDriver tools", () => {
     const exec = tools.pty_session.execute;
     if (!exec) throw new Error("pty_session execute missing");
 
-    // biome-ignore lint/suspicious/noExplicitAny: tool ctx and result are harness-typed, empty exec ctx is enough
-    const res = (await exec({ action: "write", input: "yes\r" }, {} as any)) as any;
+    const res = (await exec(
+      { action: "write", input: "yes\r" },
+      {} as any,
+    )) as any;
     expect(res.action).toBe("write");
     expect(res.sent).toBe(true);
     expect(sentInput).toBe("yes\r");
@@ -134,8 +136,10 @@ describe("ptyDriver tools", () => {
     const exec = tools.pty_session.execute;
     if (!exec) throw new Error("pty_session execute missing");
 
-    // biome-ignore lint/suspicious/noExplicitAny: tool ctx and result are harness-typed, empty exec ctx is enough
-    const res = (await exec({ action: "run", command: "rm -rf /", wait_for: "Ready" }, {} as any)) as any;
+    const res = (await exec(
+      { action: "run", command: "rm -rf /", wait_for: "Ready" },
+      {} as any,
+    )) as any;
     expect(res.error).toBeUndefined();
   });
 
@@ -152,8 +156,10 @@ describe("ptyDriver tools", () => {
     const exec = tools.pty_session.execute;
     if (!exec) throw new Error("pty_session execute missing");
 
-    // biome-ignore lint/suspicious/noExplicitAny: tool ctx and result are harness-typed, empty exec ctx is enough
-    const res = (await exec({ action: "run", command: "echo hello", timeout_secs: 1 }, {} as any)) as any;
+    const res = (await exec(
+      { action: "run", command: "echo hello", timeout_secs: 1 },
+      {} as any,
+    )) as any;
     expect(res.action).toBe("run");
     expect(res.command).toBe("echo hello");
     expect(injected).toBe("echo hello\r");
@@ -166,7 +172,9 @@ describe("ptyDriver tools", () => {
       ...makeContext("$ initial prompt\n"),
       getTerminalContext: () => {
         calls++;
-        return calls > 2 ? "$ initial prompt\ncargo test output\n$ " : "$ initial prompt\n";
+        return calls > 2
+          ? "$ initial prompt\ncargo test output\n$ "
+          : "$ initial prompt\n";
       },
       injectIntoActivePty: (text: string) => {
         injected = text;
@@ -177,8 +185,10 @@ describe("ptyDriver tools", () => {
     const exec = tools.pty_session.execute;
     if (!exec) throw new Error("pty_session execute missing");
 
-    // biome-ignore lint/suspicious/noExplicitAny: test harness
-    const res = (await exec({ cmd: "cargo test", timeout_secs: "5", max_lines: "80" }, {} as any)) as any;
+    const res = (await exec(
+      { cmd: "cargo test", timeout_secs: "5", max_lines: "80" },
+      {} as any,
+    )) as any;
     expect(res.action).toBe("run");
     expect(res.command).toBe("cargo test");
     expect(injected).toBe("cargo test\r");
@@ -196,7 +206,6 @@ describe("ptyDriver privacy mode", () => {
     const exec = tools.pty_read_screen.execute;
     if (!exec) throw new Error("pty_read_screen execute missing");
 
-    // biome-ignore lint/suspicious/noExplicitAny: tool ctx and result are harness-typed, empty exec ctx is enough
     const res = (await exec({ max_lines: 50 }, {} as any)) as any;
     expect(res.error).toMatch(/privacy mode/i);
     expect(res.buffer ?? "").not.toContain("secret");
@@ -210,7 +219,6 @@ describe("ptyDriver privacy mode", () => {
     const exec = tools.pty_wait_for_pattern.execute;
     if (!exec) throw new Error("pty_wait_for_pattern execute missing");
 
-    // biome-ignore lint/suspicious/noExplicitAny: tool ctx and result are harness-typed, empty exec ctx is enough
     const res = (await exec({ pattern: "secret" }, {} as any)) as any;
     expect(res.found).toBe(false);
     expect(res.error).toMatch(/privacy mode/i);
@@ -223,7 +231,6 @@ describe("ptyDriver privacy mode", () => {
     const exec = tools.pty_session.execute;
     if (!exec) throw new Error("pty_session execute missing");
 
-    // biome-ignore lint/suspicious/noExplicitAny: tool ctx and result are harness-typed, empty exec ctx is enough
     const res = (await exec({ action: "read" }, {} as any)) as any;
     expect(res.error).toMatch(/privacy mode/i);
   });
@@ -240,7 +247,6 @@ describe("ptyDriver privacy mode", () => {
     const exec = tools.pty_session.execute;
     if (!exec) throw new Error("pty_session execute missing");
 
-    // biome-ignore lint/suspicious/noExplicitAny: tool ctx and result are harness-typed, empty exec ctx is enough
     const res = (await exec({ action: "ctrl_c" }, {} as any)) as any;
     expect(injected).toBe("");
     expect(res.sent).toBe(true);
@@ -303,8 +309,10 @@ describe("normalizePtyAction", () => {
 
     // The payload from the log, minus the unknown `pty_handle` key (zod strips
     // unknown keys by default, so it never reaches execute).
-    // biome-ignore lint/suspicious/noExplicitAny: tool ctx and result are harness-typed, empty exec ctx is enough
-    const res = (await exec({ action: "send_input", command: "exit" }, {} as any)) as any;
+    const res = (await exec(
+      { action: "send_input", command: "exit" },
+      {} as any,
+    )) as any;
     expect(res.action).toBe("write");
     expect(res.sent).toBe(true);
     expect(sentInput).toBe("exit");
@@ -315,7 +323,9 @@ describe("normalizePtyAction", () => {
     // handler ever saw the args. A string schema must parse these.
     const tools = buildPtyDriverTools(makeContext());
     const schema = tools.pty_session.inputSchema;
-    expect(schema.safeParse({ action: "send_input", command: "exit" }).success).toBe(true);
+    expect(
+      schema.safeParse({ action: "send_input", command: "exit" }).success,
+    ).toBe(true);
     expect(schema.safeParse({ action: "anything-new" }).success).toBe(true);
     expect(schema.safeParse({}).success).toBe(true);
   });

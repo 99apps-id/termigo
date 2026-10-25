@@ -55,7 +55,8 @@ describe("scanConflictLines", () => {
   });
 
   it("handles CRLF lines correctly", () => {
-    const text = "<<<<<<< HEAD\r\nline1\r\n=======\r\nline2\r\n>>>>>>> remote\r\n";
+    const text =
+      "<<<<<<< HEAD\r\nline1\r\n=======\r\nline2\r\n>>>>>>> remote\r\n";
     const blocks = scanTextForConflicts(text);
     expect(blocks).toHaveLength(1);
     expect(blocks[0].oursLines).toEqual(["line1"]);
@@ -90,13 +91,7 @@ describe("scanConflictLines", () => {
   });
 
   it("produces concise conflict summaries", () => {
-    const lines = [
-      "<<<<<<< HEAD",
-      "foo",
-      "=======",
-      "bar",
-      ">>>>>>> main",
-    ];
+    const lines = ["<<<<<<< HEAD", "foo", "=======", "bar", ">>>>>>> main"];
     const blocks = scanConflictLines(lines);
     const summaries = summarizeConflicts(blocks);
     expect(summaries).toHaveLength(1);

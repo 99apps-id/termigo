@@ -7,7 +7,11 @@
 // browser tool) was told it did not exist and gave up on the capability.
 
 import { describe, expect, it } from "vitest";
-import { bestToolMatch, editDistance, suggestToolNames } from "../lib/toolNames";
+import {
+  bestToolMatch,
+  editDistance,
+  suggestToolNames,
+} from "../lib/toolNames";
 import {
   buildUnknownToolFallback,
   buildUnknownToolMessage,
@@ -251,7 +255,10 @@ describe("the fallback answers from the real toolset", () => {
     });
     const execute = t.execute;
     if (!execute) throw new Error("no execute");
-    const out = (await execute({ requested_tool: "create_file" }, {} as never)) as {
+    const out = (await execute(
+      { requested_tool: "create_file" },
+      {} as never,
+    )) as {
       error: string;
     };
     expect(out.error).not.toContain("equivalent tool");
@@ -267,7 +274,10 @@ describe("the fallback answers from the real toolset", () => {
     });
     const execute = t.execute;
     if (!execute) throw new Error("no execute");
-    const out = (await execute({ requested_tool: "view_file" }, {} as never)) as {
+    const out = (await execute(
+      { requested_tool: "view_file" },
+      {} as never,
+    )) as {
       error: string;
     };
     expect(out.error).toContain("does not exist");

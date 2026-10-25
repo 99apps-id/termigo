@@ -89,9 +89,7 @@ describe("isUnfinishedOrGarbledSummary", () => {
 
   it("flags incomplete sentences ending with a colon after hitting step limit or tool call", () => {
     const result = {
-      steps: [
-        { toolCalls: [{ toolName: "read_file" }] },
-      ],
+      steps: [{ toolCalls: [{ toolName: "read_file" }] }],
     };
     expect(
       isUnfinishedOrGarbledSummary(
@@ -113,7 +111,7 @@ describe("isUnfinishedOrGarbledSummary", () => {
     ).toBe(true);
     expect(
       isUnfinishedOrGarbledSummary(
-        "read_file({\"path\":\"foo.rs\"}) -> { ... }",
+        'read_file({"path":"foo.rs"}) -> { ... }',
         result,
         6,
       ),
@@ -122,10 +120,7 @@ describe("isUnfinishedOrGarbledSummary", () => {
 
   it("accepts a normal finished prose summary", () => {
     const result = {
-      steps: [
-        { toolCalls: [{ toolName: "read_file" }] },
-        { toolCalls: [] },
-      ],
+      steps: [{ toolCalls: [{ toolName: "read_file" }] }, { toolCalls: [] }],
     };
     const goodSummary =
       "Audit findings: 1. In downloader.rs: missing validation for protocol schemes. 2. In video.rs: unchecked integer conversion. Everything else looks fine.";
@@ -135,7 +130,8 @@ describe("isUnfinishedOrGarbledSummary", () => {
 
 describe("sanitizeGarbledSummary", () => {
   it("strips pseudo tool tags from text", () => {
-    const raw = "Leading text <tool_call><function=read_file>content</function></tool_call> trailing text";
+    const raw =
+      "Leading text <tool_call><function=read_file>content</function></tool_call> trailing text";
     const cleaned = sanitizeGarbledSummary(raw);
     expect(cleaned).toBe("Leading text  trailing text");
   });

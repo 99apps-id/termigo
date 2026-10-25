@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { GitChangedFile, GitStatusSnapshot } from "@/modules/ai/lib/native";
+import type {
+  GitChangedFile,
+  GitStatusSnapshot,
+} from "@/modules/ai/lib/native";
 import {
   buildGitStatusMap,
   lookupGitStatus,

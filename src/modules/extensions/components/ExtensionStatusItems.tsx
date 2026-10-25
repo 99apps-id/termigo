@@ -47,7 +47,11 @@ export function ExtensionStatusItems({
   return (
     <div className="flex items-center gap-1.5">
       {sorted.map(({ extensionId, item }) => (
-        <StatusItemView key={`${extensionId}:${item.id}`} extensionId={extensionId} item={item} />
+        <StatusItemView
+          key={`${extensionId}:${item.id}`}
+          extensionId={extensionId}
+          item={item}
+        />
       ))}
     </div>
   );
@@ -98,10 +102,19 @@ function PixelBar({
   const filled = Math.round(clamp01(progress) * cells);
   const fill = BAR_FILL[tone ?? "default"];
   return (
-    <span className={cn("inline-flex shrink-0 items-center", className)} aria-hidden>
+    <span
+      className={cn("inline-flex shrink-0 items-center", className)}
+      aria-hidden
+    >
       {Array.from({ length: cells }).map((_, i) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: pixel cells are positional, no stable identity
-        <span key={i} className={cn(cellClass, i < filled ? fill : "bg-muted-foreground/25")} />
+        <span
+          // biome-ignore lint/suspicious/noArrayIndexKey: pixel cells are positional, no stable identity
+          key={i}
+          className={cn(
+            cellClass,
+            i < filled ? fill : "bg-muted-foreground/25",
+          )}
+        />
       ))}
     </span>
   );
@@ -110,15 +123,25 @@ function PixelBar({
 // Tooltip body. With `detail` set it renders a small panel with a pixel
 // progress bar per row; otherwise the plain `tooltip` string (newlines kept).
 function TooltipBody({ item }: { item: StatusItem }) {
-  if (!item.detail) return <span className="whitespace-pre-line">{item.tooltip}</span>;
+  if (!item.detail)
+    return <span className="whitespace-pre-line">{item.tooltip}</span>;
   const { title, rows } = item.detail;
   return (
     <div className="flex min-w-[196px] flex-col gap-1.5">
-      {title ? <div className="text-foreground text-xs font-medium">{title}</div> : null}
+      {title ? (
+        <div className="text-foreground text-xs font-medium">{title}</div>
+      ) : null}
       {rows.map((r, i) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: detail rows are positional
-        <div key={i} className="flex items-center gap-2 text-[11px] leading-none">
-          {r.label ? <span className="text-muted-foreground w-14 shrink-0">{r.label}</span> : null}
+        <div
+          // biome-ignore lint/suspicious/noArrayIndexKey: detail rows are positional
+          key={i}
+          className="flex items-center gap-2 text-[11px] leading-none"
+        >
+          {r.label ? (
+            <span className="text-muted-foreground w-14 shrink-0">
+              {r.label}
+            </span>
+          ) : null}
           {r.progress != null ? (
             <PixelBar
               progress={r.progress}
@@ -129,16 +152,26 @@ function TooltipBody({ item }: { item: StatusItem }) {
             />
           ) : null}
           {r.value ? (
-            <span className={cn("shrink-0 tabular-nums", valueColor(r.tone))}>{r.value}</span>
+            <span className={cn("shrink-0 tabular-nums", valueColor(r.tone))}>
+              {r.value}
+            </span>
           ) : null}
-          {r.note ? <span className="text-muted-foreground shrink-0">{r.note}</span> : null}
+          {r.note ? (
+            <span className="text-muted-foreground shrink-0">{r.note}</span>
+          ) : null}
         </div>
       ))}
     </div>
   );
 }
 
-function StatusItemView({ extensionId, item }: { extensionId: string; item: StatusItem }) {
+function StatusItemView({
+  extensionId,
+  item,
+}: {
+  extensionId: string;
+  item: StatusItem;
+}) {
   useIconsReady(); // re-render once the lazy icon chunk lands
   // `lucide:<Name>` / legacy `hugeicon:<Name>` renders a Lucide icon (parity
   // with the header bar); otherwise the value is a `data:` URL or `ext-asset:`.
@@ -150,7 +183,8 @@ function StatusItemView({ extensionId, item }: { extensionId: string; item: Stat
   const isLive = item.tone === "success";
   const isPulsing = item.tone === "warning";
   const isSvg =
-    iconUrl !== null && (iconUrl.startsWith("data:image/svg+xml") || iconUrl.endsWith(".svg"));
+    iconUrl !== null &&
+    (iconUrl.startsWith("data:image/svg+xml") || iconUrl.endsWith(".svg"));
   // Only `error` gets a corner dot. `warning` pulses instead.
   const dot = item.tone === "error" ? "bg-icon-blocked" : null;
   // Icon-only items keep the plain-icon tint. A metered item (has `label`
@@ -211,10 +245,15 @@ function StatusItemView({ extensionId, item }: { extensionId: string; item: Stat
 
   const body = hasMeter ? (
     <>
-      <span className="inline-flex size-4 items-center justify-center">{iconEl}</span>
+      <span className="inline-flex size-4 items-center justify-center">
+        {iconEl}
+      </span>
       {item.label != null ? (
         <span
-          className={cn("text-[10px] leading-none font-medium tabular-nums", valueColor(item.tone))}
+          className={cn(
+            "text-[10px] leading-none font-medium tabular-nums",
+            valueColor(item.tone),
+          )}
         >
           {item.label}
         </span>
@@ -235,7 +274,10 @@ function StatusItemView({ extensionId, item }: { extensionId: string; item: Stat
       {dot ? (
         <span
           aria-hidden
-          className={cn("ring-card absolute -top-0.5 -right-0.5 size-1.5 rounded-full ring-2", dot)}
+          className={cn(
+            "ring-card absolute -top-0.5 -right-0.5 size-1.5 rounded-full ring-2",
+            dot,
+          )}
         />
       ) : null}
     </>

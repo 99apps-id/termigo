@@ -79,7 +79,10 @@ export async function deleteMcpTokens(serverUrl: string): Promise<void> {
 function base64UrlEncode(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return btoa(binary)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
 }
 
 /**
@@ -147,7 +150,9 @@ export function buildMcpOAuthTools() {
           ),
         server_url: z
           .string()
-          .describe("URL of the remote MCP server (e.g. 'https://api.example.com/mcp')."),
+          .describe(
+            "URL of the remote MCP server (e.g. 'https://api.example.com/mcp').",
+          ),
         auth_endpoint: z
           .string()
           .optional()
@@ -159,7 +164,9 @@ export function buildMcpOAuthTools() {
         redirect_uri: z
           .string()
           .optional()
-          .describe("OAuth Redirect URI (defaults to 'http://127.0.0.1:8765/auth/mcp/callback')."),
+          .describe(
+            "OAuth Redirect URI (defaults to 'http://127.0.0.1:8765/auth/mcp/callback').",
+          ),
         access_token: z
           .string()
           .optional()
@@ -167,7 +174,9 @@ export function buildMcpOAuthTools() {
         refresh_token: z
           .string()
           .optional()
-          .describe("Optional refresh token to store in Keychain (for 'save_token')."),
+          .describe(
+            "Optional refresh token to store in Keychain (for 'save_token').",
+          ),
         expires_in_secs: z
           .number()
           .optional()
@@ -204,7 +213,8 @@ export function buildMcpOAuthTools() {
         if (action === "initiate") {
           if (!auth_endpoint || !client_id) {
             return {
-              error: "Missing auth_endpoint or client_id for 'initiate' action.",
+              error:
+                "Missing auth_endpoint or client_id for 'initiate' action.",
             };
           }
           const { codeVerifier, codeChallenge } = await generatePkce();

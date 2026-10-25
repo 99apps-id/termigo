@@ -36,10 +36,12 @@ describe("tabAgentStatus", () => {
       state: "attention",
       agent: null,
     });
-    expect(tabAgentStatus({ 1: "working", 2: "finished" }, {}, [1, 2])).toEqual({
-      state: "working",
-      agent: null,
-    });
+    expect(tabAgentStatus({ 1: "working", 2: "finished" }, {}, [1, 2])).toEqual(
+      {
+        state: "working",
+        agent: null,
+      },
+    );
     expect(tabAgentStatus({ 1: "finished" }, {}, [1])).toEqual({
       state: "finished",
       agent: null,

@@ -19,12 +19,18 @@ export function buildGithubTools(ctx: ToolContext) {
       inputSchema: z.object({
         title: z.string().describe("PR title."),
         body: z.string().optional().describe("PR body (Markdown)."),
-        base: z.string().optional().describe("Target branch (default: repo default)."),
+        base: z
+          .string()
+          .optional()
+          .describe("Target branch (default: repo default)."),
       }),
       needsApproval: true,
       execute: async ({ title, body, base }) => {
         if (ctx.getRemoteSession()) {
-          return { error: "GitHub operations are not supported in remote SSH sessions." };
+          return {
+            error:
+              "GitHub operations are not supported in remote SSH sessions.",
+          };
         }
         const sid = ctx.getSessionId();
         if (!sid) return { error: "no active chat session" };
@@ -54,7 +60,10 @@ export function buildGithubTools(ctx: ToolContext) {
       }),
       execute: async ({ number }) => {
         if (ctx.getRemoteSession()) {
-          return { error: "GitHub operations are not supported in remote SSH sessions." };
+          return {
+            error:
+              "GitHub operations are not supported in remote SSH sessions.",
+          };
         }
         const cwd = ctx.getWorkspaceRoot() ?? ctx.getCwd() ?? ".";
         const result = await getPr(number, cwd);
@@ -71,11 +80,18 @@ export function buildGithubTools(ctx: ToolContext) {
       description:
         "List open pull requests in the current repository. Read-only, auto-executes.",
       inputSchema: z.object({
-        state: z.enum(["open", "closed", "all"]).optional().default("open").describe("Filter by PR state."),
+        state: z
+          .enum(["open", "closed", "all"])
+          .optional()
+          .default("open")
+          .describe("Filter by PR state."),
       }),
       execute: async ({ state }) => {
         if (ctx.getRemoteSession()) {
-          return { error: "GitHub operations are not supported in remote SSH sessions." };
+          return {
+            error:
+              "GitHub operations are not supported in remote SSH sessions.",
+          };
         }
         const cwd = ctx.getWorkspaceRoot() ?? ctx.getCwd() ?? ".";
         const result = await listPrs(cwd, state ?? "open");
@@ -91,13 +107,18 @@ export function buildGithubTools(ctx: ToolContext) {
         "Submit a review on a pull request (approve, request changes, or comment). Requires approval.",
       inputSchema: z.object({
         number: z.number().int().positive().describe("PR number."),
-        state: z.enum(["APPROVED", "CHANGES_REQUESTED", "COMMENTED"]).describe("Review decision."),
+        state: z
+          .enum(["APPROVED", "CHANGES_REQUESTED", "COMMENTED"])
+          .describe("Review decision."),
         body: z.string().describe("Review body (Markdown)."),
       }),
       needsApproval: true,
       execute: async ({ number, state, body }) => {
         if (ctx.getRemoteSession()) {
-          return { error: "GitHub operations are not supported in remote SSH sessions." };
+          return {
+            error:
+              "GitHub operations are not supported in remote SSH sessions.",
+          };
         }
         const sid = ctx.getSessionId();
         if (!sid) return { error: "no active chat session" };
@@ -117,7 +138,10 @@ export function buildGithubTools(ctx: ToolContext) {
       needsApproval: true,
       execute: async ({ number, body }) => {
         if (ctx.getRemoteSession()) {
-          return { error: "GitHub operations are not supported in remote SSH sessions." };
+          return {
+            error:
+              "GitHub operations are not supported in remote SSH sessions.",
+          };
         }
         const sid = ctx.getSessionId();
         if (!sid) return { error: "no active chat session" };
@@ -132,12 +156,19 @@ export function buildGithubTools(ctx: ToolContext) {
       description: "Merge a pull request. Requires approval.",
       inputSchema: z.object({
         number: z.number().int().positive().describe("PR number."),
-        method: z.enum(["merge", "squash", "rebase"]).optional().default("merge").describe("Merge strategy."),
+        method: z
+          .enum(["merge", "squash", "rebase"])
+          .optional()
+          .default("merge")
+          .describe("Merge strategy."),
       }),
       needsApproval: true,
       execute: async ({ number, method }) => {
         if (ctx.getRemoteSession()) {
-          return { error: "GitHub operations are not supported in remote SSH sessions." };
+          return {
+            error:
+              "GitHub operations are not supported in remote SSH sessions.",
+          };
         }
         const sid = ctx.getSessionId();
         if (!sid) return { error: "no active chat session" };
@@ -154,7 +185,12 @@ async function getCurrentBranch(cwd: string): Promise<string | null> {
   let shellId: number | null = null;
   try {
     shellId = await native.shellSessionOpen(cwd);
-    const r = await native.shellSessionRun(shellId, "git branch --show-current", cwd, 10);
+    const r = await native.shellSessionRun(
+      shellId,
+      "git branch --show-current",
+      cwd,
+      10,
+    );
     if (r.exit_code === 0 && r.stdout.trim()) {
       return r.stdout.trim();
     }

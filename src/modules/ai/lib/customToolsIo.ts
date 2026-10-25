@@ -23,10 +23,7 @@ function toolsPath(workspaceRoot: string): string {
   return `${workspaceRoot.replace(/[\\/]$/, "")}/${TOOLS_REL_PATH}`;
 }
 
-const customToolsCache = new Map<
-  string,
-  { tools: CustomTool[]; at: number }
->();
+const customToolsCache = new Map<string, { tools: CustomTool[]; at: number }>();
 
 export function clearCustomToolsCache(): void {
   customToolsCache.clear();
@@ -61,7 +58,10 @@ export async function saveCustomTool(
   tool: CustomTool,
 ): Promise<SaveToolOutcome> {
   if (!workspaceRoot) {
-    return { saved: false, reason: "no workspace is open, so there is nowhere to store this" };
+    return {
+      saved: false,
+      reason: "no workspace is open, so there is nowhere to store this",
+    };
   }
   const valid = validateTool(tool);
   if (!valid.ok) return { saved: false, reason: valid.reason };
@@ -110,13 +110,17 @@ export function buildCustomTools(
       // exec regardless of who wrote the template.
       needsApproval: true,
       execute: async (args) => {
-        const rendered = renderCommand(tool, (args ?? {}) as Record<string, unknown>);
+        const rendered = renderCommand(
+          tool,
+          (args ?? {}) as Record<string, unknown>,
+        );
         if (!rendered.ok) return { error: rendered.reason, tool: tool.name };
 
         // The same gate bash_run uses. The template came from the model, so it
         // gets no more trust than a command the model types directly.
         const safety = checkShellCommand(rendered.command);
-        if (!safety.ok) return { error: safety.reason, command: rendered.command };
+        if (!safety.ok)
+          return { error: safety.reason, command: rendered.command };
 
         const remote = deps.getRemoteSession();
         if (remote) {
@@ -142,9 +146,17 @@ export function buildCustomTools(
 
         try {
           const result = await deps.runLocal(rendered.command, deps.getCwd());
-          return { tool: tool.name, command: rendered.command, ...(result as object) };
+          return {
+            tool: tool.name,
+            command: rendered.command,
+            ...(result as object),
+          };
         } catch (e) {
-          return { error: String(e), tool: tool.name, command: rendered.command };
+          return {
+            error: String(e),
+            tool: tool.name,
+            command: rendered.command,
+          };
         }
       },
     });

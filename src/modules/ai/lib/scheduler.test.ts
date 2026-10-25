@@ -12,7 +12,9 @@ describe("parseScheduleWhen", () => {
     expect(parseScheduleWhen("every 30m")).toEqual({ intervalMs: 30 * 60_000 });
     expect(parseScheduleWhen("every 1h")).toEqual({ intervalMs: 3_600_000 });
     expect(parseScheduleWhen("every 5s")).toEqual({ intervalMs: 5_000 });
-    expect(parseScheduleWhen("every 90 minutes")).toEqual({ intervalMs: 90 * 60_000 });
+    expect(parseScheduleWhen("every 90 minutes")).toEqual({
+      intervalMs: 90 * 60_000,
+    });
   });
 
   it("parses daily triggers", () => {

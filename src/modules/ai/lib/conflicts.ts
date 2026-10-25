@@ -70,7 +70,11 @@ export function scanConflictLines(
 
     const oursLabel = matchMarker(line, OURS_PREFIX);
     if (oursLabel !== null) {
-      partial = { startLine: ln, oursLabel: oursLabel || undefined, oursLines: [] };
+      partial = {
+        startLine: ln,
+        oursLabel: oursLabel || undefined,
+        oursLines: [],
+      };
       phase = "ours";
       continue;
     }
@@ -105,7 +109,11 @@ export function scanConflictLines(
 
     const theirsLabel = matchMarker(line, THEIRS_PREFIX);
     if (theirsLabel !== null) {
-      if (phase === "theirs" && partial.separatorLine !== undefined && partial.theirsLines) {
+      if (
+        phase === "theirs" &&
+        partial.separatorLine !== undefined &&
+        partial.theirsLines
+      ) {
         blocks.push({
           startLine: partial.startLine,
           separatorLine: partial.separatorLine,
@@ -125,8 +133,10 @@ export function scanConflictLines(
     }
 
     if (phase === "ours") partial.oursLines.push(line);
-    else if (phase === "base" && partial.baseLines) partial.baseLines.push(line);
-    else if (phase === "theirs" && partial.theirsLines) partial.theirsLines.push(line);
+    else if (phase === "base" && partial.baseLines)
+      partial.baseLines.push(line);
+    else if (phase === "theirs" && partial.theirsLines)
+      partial.theirsLines.push(line);
   }
 
   return blocks;

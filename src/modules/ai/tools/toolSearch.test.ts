@@ -78,8 +78,10 @@ describe("buildToolIndex", () => {
 
   it("leaves the always-on tools out, since they are already visible", () => {
     for (const name of TOOL_SEARCH_ALWAYS_ON) {
-      expect(index.some((e) => e.name === name), `${name} should not be indexed`)
-        .toBe(false);
+      expect(
+        index.some((e) => e.name === name),
+        `${name} should not be indexed`,
+      ).toBe(false);
     }
   });
 
@@ -254,7 +256,9 @@ describe("buildFindToolsTool", () => {
     const t = buildFindToolsTool({ index, discover: () => {} });
     const description = (t as { description?: string }).description ?? "";
     expect(description).toContain("browser");
-    expect(description).toContain(FIND_TOOLS_NAME === "find_tools" ? "keyword" : "");
+    expect(description).toContain(
+      FIND_TOOLS_NAME === "find_tools" ? "keyword" : "",
+    );
   });
 });
 

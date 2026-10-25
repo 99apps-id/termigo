@@ -33,7 +33,13 @@ vi.mock("@tauri-apps/plugin-store", () => ({
   LazyStore: harness.FakeLazyStore,
 }));
 
-import { extractMessageText, loadAll, capPersistedMessages, saveMessages, MAX_PERSISTED_OUTPUT_CHARS } from "./sessions";
+import {
+  extractMessageText,
+  loadAll,
+  capPersistedMessages,
+  saveMessages,
+  MAX_PERSISTED_OUTPUT_CHARS,
+} from "./sessions";
 
 const msg = (role: "user" | "assistant", ...texts: string[]): UIMessage =>
   ({

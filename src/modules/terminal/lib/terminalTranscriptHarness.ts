@@ -80,7 +80,7 @@ export class TranscriptRecorder {
 export async function replayTranscript(
   transcript: TerminalTranscript,
   onChunk: (data: string, frameIndex: number) => void | Promise<void>,
-  opts: { instant?: boolean; timeScale?: number } = {}
+  opts: { instant?: boolean; timeScale?: number } = {},
 ): Promise<void> {
   const instant = opts.instant ?? true;
   const scale = opts.timeScale ?? 1.0;

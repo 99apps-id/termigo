@@ -5,7 +5,10 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { ArrowTurnBackwardIcon, Compass01Icon } from "@hugeicons/core-free-icons";
+import {
+  ArrowTurnBackwardIcon,
+  Compass01Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { UIMessage } from "ai";
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
@@ -46,7 +49,9 @@ export const ChatTimelineNavigator = memo(function ChatTimelineNavigator({
 
   // Checkpoints for this session - use stable fallback reference to prevent re-render thrashing
   const checkpoints = useTurnCheckpointStore((s) =>
-    sessionId ? s.bySession[sessionId] ?? EMPTY_CHECKPOINTS : EMPTY_CHECKPOINTS,
+    sessionId
+      ? (s.bySession[sessionId] ?? EMPTY_CHECKPOINTS)
+      : EMPTY_CHECKPOINTS,
   );
 
   const checkpointMap = useMemo(() => {

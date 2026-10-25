@@ -127,7 +127,10 @@ export function useAiLiveBridge(params: Params) {
         for (const t of tabs) {
           if (t.kind !== "terminal") continue;
           for (const lid of leafIds(t.paneTree)) {
-            if (isSshLeaf(t.paneTree, lid) && leafSessionId(lid) === activeSsh.sessionId) {
+            if (
+              isSshLeaf(t.paneTree, lid) &&
+              leafSessionId(lid) === activeSsh.sessionId
+            ) {
               const remoteCwd = findLeafRemoteCwd(t.paneTree, lid);
               if (remoteCwd) return remoteCwd;
             }
@@ -137,7 +140,10 @@ export function useAiLiveBridge(params: Params) {
 
       if (active?.kind === "terminal") {
         if (isSshLeaf(active.paneTree, active.activeLeafId)) {
-          const remoteCwd = findLeafRemoteCwd(active.paneTree, active.activeLeafId);
+          const remoteCwd = findLeafRemoteCwd(
+            active.paneTree,
+            active.activeLeafId,
+          );
           if (remoteCwd) return remoteCwd;
         }
         return (
@@ -171,10 +177,14 @@ export function useAiLiveBridge(params: Params) {
         const active = tabs.find((x) => x.id === activeId);
 
         // 1. If active tab is an SSH leaf, prioritize it
-        if (active?.kind === "terminal" && isSshLeaf(active.paneTree, active.activeLeafId)) {
+        if (
+          active?.kind === "terminal" &&
+          isSshLeaf(active.paneTree, active.activeLeafId)
+        ) {
           const sessionId = leafSessionId(active.activeLeafId);
           if (sessionId !== null) {
-            const cwd = findLeafRemoteCwd(active.paneTree, active.activeLeafId) ?? null;
+            const cwd =
+              findLeafRemoteCwd(active.paneTree, active.activeLeafId) ?? null;
             return { sessionId, cwd };
           }
         }
@@ -189,7 +199,10 @@ export function useAiLiveBridge(params: Params) {
             for (const t of tabs) {
               if (t.kind !== "terminal") continue;
               for (const lid of leafIds(t.paneTree)) {
-                if (isSshLeaf(t.paneTree, lid) && leafSessionId(lid) === activeSsh.sessionId) {
+                if (
+                  isSshLeaf(t.paneTree, lid) &&
+                  leafSessionId(lid) === activeSsh.sessionId
+                ) {
                   const found = findLeafRemoteCwd(t.paneTree, lid);
                   if (found) {
                     remoteCwd = found;
@@ -232,7 +245,10 @@ export function useAiLiveBridge(params: Params) {
           for (const tab of tabs) {
             if (tab.kind !== "terminal") continue;
             for (const lid of leafIds(tab.paneTree)) {
-              if (isSshLeaf(tab.paneTree, lid) && leafSessionId(lid) === activeSsh.sessionId) {
+              if (
+                isSshLeaf(tab.paneTree, lid) &&
+                leafSessionId(lid) === activeSsh.sessionId
+              ) {
                 t = tab;
                 targetLeafId = lid;
                 break;
@@ -254,7 +270,7 @@ export function useAiLiveBridge(params: Params) {
           .map((t) => {
             const isRemote = isSshLeaf(t.paneTree, t.activeLeafId);
             const remoteCwd = isRemote
-              ? findLeafRemoteCwd(t.paneTree, t.activeLeafId) ?? null
+              ? (findLeafRemoteCwd(t.paneTree, t.activeLeafId) ?? null)
               : null;
             return {
               tabId: t.id,
@@ -291,7 +307,10 @@ export function useAiLiveBridge(params: Params) {
           for (const tab of tabs) {
             if (tab.kind !== "terminal") continue;
             for (const lid of leafIds(tab.paneTree)) {
-              if (isSshLeaf(tab.paneTree, lid) && leafSessionId(lid) === activeSsh.sessionId) {
+              if (
+                isSshLeaf(tab.paneTree, lid) &&
+                leafSessionId(lid) === activeSsh.sessionId
+              ) {
                 targetLeafId = lid;
                 break;
               }

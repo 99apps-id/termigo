@@ -14,7 +14,11 @@ describe("segmentsFromCwd", () => {
     expect(shape("/Users/me/projects/termigo", "/Users/me")).toEqual([
       { label: "~", fullPath: "/Users/me", isHome: true },
       { label: "projects", fullPath: "/Users/me/projects", isHome: false },
-      { label: "termigo", fullPath: "/Users/me/projects/termigo", isHome: false },
+      {
+        label: "termigo",
+        fullPath: "/Users/me/projects/termigo",
+        isHome: false,
+      },
     ]);
   });
 
@@ -87,8 +91,10 @@ describe("segmentsFromCwd", () => {
   });
 
   it("still keeps a Windows sibling that only shares the home prefix", () => {
-    expect(
-      shape("c:/users/mefoo", "C:/Users/Me").map((s) => s.label),
-    ).toEqual(["c:", "users", "mefoo"]);
+    expect(shape("c:/users/mefoo", "C:/Users/Me").map((s) => s.label)).toEqual([
+      "c:",
+      "users",
+      "mefoo",
+    ]);
   });
 });

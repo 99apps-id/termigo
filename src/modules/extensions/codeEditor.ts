@@ -29,7 +29,12 @@ import {
   foldKeymap,
   syntaxHighlighting,
 } from "@codemirror/language";
-import { mySQL, pgSQL, sqlite, standardSQL } from "@codemirror/legacy-modes/mode/sql";
+import {
+  mySQL,
+  pgSQL,
+  sqlite,
+  standardSQL,
+} from "@codemirror/legacy-modes/mode/sql";
 import { makeFoldMarker } from "@/modules/editor/lib/foldMarker";
 import { EDITOR_THEME_EXT } from "@/modules/editor/lib/themes";
 import { usePreferencesStore } from "@/modules/settings/preferences";
@@ -51,7 +56,13 @@ import {
 } from "@codemirror/view";
 
 export type CodeEditorLanguage =
-  "sql" | "sql:mysql" | "sql:postgres" | "sql:sqlite" | "json" | "javascript" | "plain";
+  | "sql"
+  | "sql:mysql"
+  | "sql:postgres"
+  | "sql:sqlite"
+  | "json"
+  | "javascript"
+  | "plain";
 
 /** Single autocomplete suggestion. `type` controls the leading icon CM
  *  paints (keyword / variable / property / type / function / etc - see
@@ -133,7 +144,11 @@ const tediHighlightStyle = HighlightStyle.define([
   { tag: t.number, color: "var(--tedi-tab-git-diff, #f59e0b)" },
   { tag: t.bool, color: "var(--tedi-tab-git-diff, #f59e0b)" },
   { tag: t.null, color: "var(--muted-foreground)" },
-  { tag: [t.lineComment, t.blockComment], color: "var(--muted-foreground)", fontStyle: "italic" },
+  {
+    tag: [t.lineComment, t.blockComment],
+    color: "var(--muted-foreground)",
+    fontStyle: "italic",
+  },
   { tag: t.typeName, color: "var(--tedi-tab-ssh, #0ea5e9)" },
   { tag: [t.variableName, t.propertyName], color: "var(--foreground)" },
   { tag: t.atom, color: "var(--tedi-tab-browser, #06b6d4)" },
@@ -152,10 +167,11 @@ const baseTheme = EditorView.theme({
     height: "100%",
   },
   ".cm-scroller": {
-    fontFamily: `var(--tedi-mono-font, ${MONO_FONT_CSS_FALLBACK})`,    // Same var the main editor reads, so an extension's editor can't disagree
+    fontFamily: `var(--tedi-mono-font, ${MONO_FONT_CSS_FALLBACK})`, // Same var the main editor reads, so an extension's editor can't disagree
     // with it about whether `=>` renders as an arrow.
     fontVariantLigatures: "var(--tedi-editor-ligatures, normal)",
-    fontSize: "calc(var(--tedi-editor-font-size, 13px) * var(--content-zoom, 1))",
+    fontSize:
+      "calc(var(--tedi-editor-font-size, 13px) * var(--content-zoom, 1))",
     lineHeight: "1.55",
     backgroundColor: "transparent !important",
     overflow: "auto",
@@ -172,7 +188,11 @@ const baseTheme = EditorView.theme({
     borderRight: "1px solid var(--border) !important",
   },
   ".cm-lineNumbers": { minWidth: "32px" },
-  ".cm-lineNumbers .cm-gutterElement": { opacity: "0.55", padding: "0 8px", textAlign: "right" },
+  ".cm-lineNumbers .cm-gutterElement": {
+    opacity: "0.55",
+    padding: "0 8px",
+    textAlign: "right",
+  },
   // Same chevron as the editor pane, but it stays visible instead of appearing
   // on hover: this editor is mostly a read-only JSON/response viewer, where a
   // collapsible object is only useful if you can see it is collapsible. A
@@ -223,9 +243,11 @@ const baseTheme = EditorView.theme({
   // and this editor is not tagged dark, so its light default (#d7d4f0) used to
   // win and paint an opaque pale block over dark-theme text. Same rule the main
   // editor pane carries.
-  ".cm-selectionBackground, &.cm-focused .cm-selectionBackground, ::selection": {
-    backgroundColor: "color-mix(in srgb, var(--foreground) 18%, transparent) !important",
-  },
+  ".cm-selectionBackground, &.cm-focused .cm-selectionBackground, ::selection":
+    {
+      backgroundColor:
+        "color-mix(in srgb, var(--foreground) 18%, transparent) !important",
+    },
   "&.cm-focused .cm-cursor": {
     borderLeftColor: "var(--foreground)",
   },
@@ -277,14 +299,19 @@ const baseTheme = EditorView.theme({
  *  compartment: CodeMirror unions the classes of every active highlighter, and
  *  two of them fight over each tag. */
 function tryEditorTheme(id: EditorThemeId): Extension | null {
-  return (EDITOR_THEME_EXT as Record<string, Extension | undefined>)[id] ?? null;
+  return (
+    (EDITOR_THEME_EXT as Record<string, Extension | undefined>)[id] ?? null
+  );
 }
 
 function highlightExtFor(id: EditorThemeId): Extension {
   return tryEditorTheme(id) ?? syntaxHighlighting(tediHighlightStyle);
 }
 
-export function mountCodeEditor(container: HTMLElement, opts: CodeEditorOptions): CodeEditorHandle {
+export function mountCodeEditor(
+  container: HTMLElement,
+  opts: CodeEditorOptions,
+): CodeEditorHandle {
   const langCompartment = new Compartment();
   const readOnlyCompartment = new Compartment();
   const themeCompartment = new Compartment();
@@ -319,7 +346,8 @@ export function mountCodeEditor(container: HTMLElement, opts: CodeEditorOptions)
         override: [
           (context: CompletionContext): CompletionResult | null => {
             const word = context.matchBefore(/[\w]+/);
-            if (!word || (word.from === word.to && !context.explicit)) return null;
+            if (!word || (word.from === word.to && !context.explicit))
+              return null;
             let items: CodeEditorCompletion[] = [];
             try {
               items = completionsCb(word.text) ?? [];
@@ -365,7 +393,9 @@ export function mountCodeEditor(container: HTMLElement, opts: CodeEditorOptions)
       keymap.of([...defaultKeymap, ...historyKeymap, ...foldKeymap]),
       cmdEnterKeymap,
       completionExtension,
-      themeCompartment.of(highlightExtFor(themeId === "auto" ? "kanagawa" : themeId)),
+      themeCompartment.of(
+        highlightExtFor(themeId === "auto" ? "kanagawa" : themeId),
+      ),
       syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
       langCompartment.of(pickLanguage(opts.language)),
       readOnlyCompartment.of(EditorState.readOnly.of(opts.readOnly ?? false)),
@@ -388,7 +418,9 @@ export function mountCodeEditor(container: HTMLElement, opts: CodeEditorOptions)
   // Follow the editor pane: swap when the user picks another theme in
   // Settings. EditorThemePref resolves through the same mapping the pane uses.
   const applyTheme = (id: EditorThemeId) => {
-    view.dispatch({ effects: themeCompartment.reconfigure(highlightExtFor(id)) });
+    view.dispatch({
+      effects: themeCompartment.reconfigure(highlightExtFor(id)),
+    });
   };
   const themeId2 = usePreferencesStore.getState().editorTheme;
   applyTheme(themeId2 === "auto" ? "kanagawa" : themeId2);

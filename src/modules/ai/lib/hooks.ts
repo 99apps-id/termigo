@@ -9,7 +9,12 @@
 export const HOOKS_REL_PATH = ".termigo/hooks.json";
 
 /** Events the agent can fire. */
-export type HookEvent = "PreToolUse" | "PostToolUse" | "RunStart" | "RunStop" | "FileSave";
+export type HookEvent =
+  | "PreToolUse"
+  | "PostToolUse"
+  | "RunStart"
+  | "RunStop"
+  | "FileSave";
 
 /** One configured hook command for a specific event. */
 export type HookRule = {
@@ -76,9 +81,13 @@ export function validateHooksConfig(config: HooksConfig): HookParseResult {
   ][]) {
     if (!rules) continue;
     if (
-      !["PreToolUse", "PostToolUse", "RunStart", "RunStop", "FileSave"].includes(
-        event,
-      )
+      ![
+        "PreToolUse",
+        "PostToolUse",
+        "RunStart",
+        "RunStop",
+        "FileSave",
+      ].includes(event)
     ) {
       return {
         ok: false,
@@ -130,11 +139,7 @@ export function parseHooksFile(content: string): HookParseResult {
     return { ok: false, reason: "hooks.json is not valid JSON" };
   }
 
-  if (
-    typeof parsed !== "object" ||
-    parsed === null ||
-    Array.isArray(parsed)
-  ) {
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     return { ok: false, reason: "hooks.json must be a JSON object" };
   }
 

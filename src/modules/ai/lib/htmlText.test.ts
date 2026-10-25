@@ -22,7 +22,11 @@ describe("isTextual", () => {
   });
 
   it("rejects binary, which would only decode to noise", () => {
-    for (const t of ["image/png", "application/pdf", "application/octet-stream"]) {
+    for (const t of [
+      "image/png",
+      "application/pdf",
+      "application/octet-stream",
+    ]) {
       expect(isTextual(t)).toBe(false);
     }
   });

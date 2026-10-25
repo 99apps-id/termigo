@@ -15,7 +15,8 @@ export const AG_MAX_OUTPUT_TOKENS = 64_000;
 export function agUserAgent(): string {
   const ua = typeof navigator === "undefined" ? "" : navigator.userAgent;
   if (/Windows/i.test(ua)) return "antigravity/ide/2.11.0 windows/x64";
-  if (/Macintosh|Mac OS/i.test(ua)) return "antigravity/ide/2.11.0 darwin/arm64";
+  if (/Macintosh|Mac OS/i.test(ua))
+    return "antigravity/ide/2.11.0 darwin/arm64";
   return "antigravity/ide/2.11.0 linux/x64";
 }
 
@@ -175,7 +176,8 @@ function cleanFunctionDeclaration(declaration: JsonObject): JsonObject {
 function cleanTools(tools: unknown): unknown {
   if (!Array.isArray(tools)) return tools;
   return tools.map((tool) => {
-    if (!isObject(tool) || !Array.isArray(tool.functionDeclarations)) return tool;
+    if (!isObject(tool) || !Array.isArray(tool.functionDeclarations))
+      return tool;
     return {
       ...tool,
       functionDeclarations: tool.functionDeclarations.map((declaration) =>
@@ -237,14 +239,21 @@ export function buildAntigravityBody(
   // With tools but no explicit choice, the Go client asks the backend to
   // validate every call (mode VALIDATED). A forced tool choice the SDK already
   // set is kept: override it and the agent loses ANY/allowedFunctionNames.
-  if (Array.isArray(request.tools) && request.tools.length > 0 && !isObject(request.toolConfig)) {
+  if (
+    Array.isArray(request.tools) &&
+    request.tools.length > 0 &&
+    !isObject(request.toolConfig)
+  ) {
     request.toolConfig = {
       functionCallingConfig: { mode: "VALIDATED" },
     };
   }
   // The Cloud Code backend wants the system instruction as a user Content; the
   // Google provider omits the role, so add it the way the Go client does.
-  if (isObject(request.systemInstruction) && !("role" in request.systemInstruction)) {
+  if (
+    isObject(request.systemInstruction) &&
+    !("role" in request.systemInstruction)
+  ) {
     request.systemInstruction = { role: "user", ...request.systemInstruction };
   }
   const envelope: JsonObject = {

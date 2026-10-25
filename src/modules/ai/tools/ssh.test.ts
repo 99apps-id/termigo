@@ -114,10 +114,11 @@ describe("buildSshTools", () => {
 
     const ctx = makeCtx();
     const tools = buildSshTools(ctx);
-    const result = (await execOf(tools.ssh_list_connections)(
-      {},
-      OPTS,
-    )) as { count: number; connections: Array<{ id: string }>; active_session: unknown };
+    const result = (await execOf(tools.ssh_list_connections)({}, OPTS)) as {
+      count: number;
+      connections: Array<{ id: string }>;
+      active_session: unknown;
+    };
 
     expect(result.count).toBe(2);
     expect(result.connections[0].id).toBe("conn-1");
@@ -178,7 +179,12 @@ describe("buildSshTools", () => {
     const result = (await execOf(tools.ssh_run_command)(
       { command: "uname -a" },
       OPTS,
-    )) as { stdout: string; exit_code: number; remote: boolean; session_id: number };
+    )) as {
+      stdout: string;
+      exit_code: number;
+      remote: boolean;
+      session_id: number;
+    };
     expect(sshExecMock).toHaveBeenCalledWith(42, "cd '/root' && uname -a", 60);
     expect(result.remote).toBe(true);
     expect(result.session_id).toBe(42);
@@ -241,10 +247,12 @@ describe("buildSshTools", () => {
     });
     const tools = buildSshTools(ctx);
 
-    const result = (await execOf(tools.ssh_active_session)(
-      {},
-      OPTS,
-    )) as { connected: boolean; session_id: number; cwd: string; host_label: string };
+    const result = (await execOf(tools.ssh_active_session)({}, OPTS)) as {
+      connected: boolean;
+      session_id: number;
+      cwd: string;
+      host_label: string;
+    };
 
     expect(result.connected).toBe(true);
     expect(result.session_id).toBe(99);

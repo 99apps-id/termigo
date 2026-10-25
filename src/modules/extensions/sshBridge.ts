@@ -30,7 +30,9 @@ export type SafeSshConnection = {
 };
 
 export type ListSshConnectionsFn = () => Promise<SafeSshConnection[]>;
-export type OpenSshConnectionFn = (id: string) => Promise<{ ok: boolean; error?: string }>;
+export type OpenSshConnectionFn = (
+  id: string,
+) => Promise<{ ok: boolean; error?: string }>;
 
 let lister: ListSshConnectionsFn | null = null;
 let opener: OpenSshConnectionFn | null = null;
@@ -55,15 +57,21 @@ export function setSshConnectionBridge(
 
 export async function listSshConnections(): Promise<SafeSshConnection[]> {
   if (!lister) {
-    console.warn("[extensions] listSshConnections called before App wired the bridge; ignoring");
+    console.warn(
+      "[extensions] listSshConnections called before App wired the bridge; ignoring",
+    );
     return [];
   }
   return lister();
 }
 
-export async function openSshConnection(id: string): Promise<{ ok: boolean; error?: string }> {
+export async function openSshConnection(
+  id: string,
+): Promise<{ ok: boolean; error?: string }> {
   if (!opener) {
-    console.warn("[extensions] openSshConnection called before App wired the bridge; ignoring");
+    console.warn(
+      "[extensions] openSshConnection called before App wired the bridge; ignoring",
+    );
     return { ok: false, error: "ssh bridge not ready" };
   }
   return opener(id);
@@ -71,7 +79,9 @@ export async function openSshConnection(id: string): Promise<{ ok: boolean; erro
 
 export function closeSshConnection(sessionId: number): boolean {
   if (!closer) {
-    console.warn("[extensions] closeSshConnection called before App wired the bridge; ignoring");
+    console.warn(
+      "[extensions] closeSshConnection called before App wired the bridge; ignoring",
+    );
     return false;
   }
   return closer(sessionId);

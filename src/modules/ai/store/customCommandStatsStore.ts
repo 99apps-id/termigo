@@ -92,6 +92,6 @@ export const useCustomCommandStatsStore = create<State>()(
     {
       name: "termigo-custom-command-stats",
       partialize: ({ stats }) => ({ stats }),
-    }
-  )
+    },
+  ),
 );

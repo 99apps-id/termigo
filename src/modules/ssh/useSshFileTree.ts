@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { sameEntries } from "@/modules/explorer/lib/useFileTree";
-import { sftpCreateDir, sftpCreateFile, sftpDelete, sftpReadDir, sftpRename } from "./sftp";
+import {
+  sftpCreateDir,
+  sftpCreateFile,
+  sftpDelete,
+  sftpReadDir,
+  sftpRename,
+} from "./sftp";
 import { coalesceResume } from "@/lib/windowResume";
 
 // SFTP-backed file tree. Same shape as `useFileTree` so `FileTreeNode` can
@@ -65,7 +71,9 @@ export function useSshFileTree(
 ) {
   const [nodes, setNodes] = useState<TreeState>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [pendingCreate, setPendingCreate] = useState<PendingCreate | null>(null);
+  const [pendingCreate, setPendingCreate] = useState<PendingCreate | null>(
+    null,
+  );
   const [renaming, setRenaming] = useState<string | null>(null);
   const includeHidden = options?.includeHidden ?? false;
 
@@ -84,14 +92,19 @@ export function useSshFileTree(
         setNodes((s) => ({ ...s, [path]: { status: "loading" } }));
       }
       try {
-        const entries = (await sftpReadDir(sessionId, path, includeHidden)) as SshDirEntry[];
+        const entries = (await sftpReadDir(
+          sessionId,
+          path,
+          includeHidden,
+        )) as SshDirEntry[];
         if (fetchGen.current.get(path) !== gen) return;
         setNodes((s) => {
           // Skip the state update when the listing is unchanged, so a poll on an
           // idle remote costs no repaint.
           if (opts.silent) {
             const prev = s[path];
-            if (prev?.status === "loaded" && sameEntries(prev.entries, entries)) return s;
+            if (prev?.status === "loaded" && sameEntries(prev.entries, entries))
+              return s;
           }
           return { ...s, [path]: { status: "loaded", entries } };
         });
@@ -212,7 +225,8 @@ export function useSshFileTree(
     const start = () => {
       if (intervalId !== null) return;
       intervalId = window.setInterval(() => {
-        if (document.visibilityState === "visible") refreshAllLoadedRef.current();
+        if (document.visibilityState === "visible")
+          refreshAllLoadedRef.current();
       }, SSH_AUTO_REFRESH_MS);
     };
     const stop = () => {

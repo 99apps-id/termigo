@@ -101,7 +101,8 @@ export function withPostExecuteConfirm<
         mode === "all" ||
         alwaysAllowed.includes(name) ||
         isSessionAllowed(name) ||
-        (mode === "edits" && (name === "write_file" || name === "edit" || name === "multi_edit"));
+        (mode === "edits" &&
+          (name === "write_file" || name === "edit" || name === "multi_edit"));
 
       if (isAuto) {
         return result;

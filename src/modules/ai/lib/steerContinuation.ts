@@ -16,10 +16,14 @@ export type SteerContinuationContext = {
  * Constructs an instruction prompt that weaves the user's steer message
  * together with the in-flight task status so the model can pivot or adjust.
  */
-export function buildSteeredContinuationPrompt(ctx: SteerContinuationContext): string {
+export function buildSteeredContinuationPrompt(
+  ctx: SteerContinuationContext,
+): string {
   const parts: string[] = [];
 
-  parts.push(`<user_steer_interrupt>\n${ctx.steerInput.trim()}\n</user_steer_interrupt>`);
+  parts.push(
+    `<user_steer_interrupt>\n${ctx.steerInput.trim()}\n</user_steer_interrupt>`,
+  );
 
   if (ctx.originalTask) {
     parts.push(`Original Goal: ${ctx.originalTask.trim()}`);

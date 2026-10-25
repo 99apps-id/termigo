@@ -52,9 +52,25 @@ describe("worktree isolation", () => {
       branchName: "termigo-sandbox/task-1",
     });
 
-    expect(cmds.add).toEqual(["worktree", "add", "-b", "termigo-sandbox/task-1", ".wt/task-1", "HEAD"]);
-    expect(cmds.remove).toEqual(["worktree", "remove", "--force", ".wt/task-1"]);
-    expect(cmds.deleteBranch).toEqual(["branch", "-D", "termigo-sandbox/task-1"]);
+    expect(cmds.add).toEqual([
+      "worktree",
+      "add",
+      "-b",
+      "termigo-sandbox/task-1",
+      ".wt/task-1",
+      "HEAD",
+    ]);
+    expect(cmds.remove).toEqual([
+      "worktree",
+      "remove",
+      "--force",
+      ".wt/task-1",
+    ]);
+    expect(cmds.deleteBranch).toEqual([
+      "branch",
+      "-D",
+      "termigo-sandbox/task-1",
+    ]);
   });
 
   it("builds quoted shell commands for worktree operations", () => {

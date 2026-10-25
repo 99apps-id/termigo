@@ -187,9 +187,7 @@ describe("formatTodoStatusBlock", () => {
       ...(i > 0 ? { parent: `n${i - 1}` } : {}),
     }));
     const block = formatTodoStatusBlock(items) ?? "";
-    const deepest = block
-      .split("\n")
-      .find((l) => l.includes("level 7")) ?? "";
+    const deepest = block.split("\n").find((l) => l.includes("level 7")) ?? "";
     expect(deepest.startsWith("        - ")).toBe(true); // 8 spaces = 4 levels
     expect(deepest.startsWith("          ")).toBe(false); // not 5+
   });

@@ -58,7 +58,12 @@ export function toolSchema(input: unknown): Record<string, unknown> {
 
 // Re-exported so callers have one MCP entry point; the light module stays
 // importable on its own for anything on the startup path.
-export { isMcpTool, mcpToolName, parseMcpToolName, MCP_TOOL_PREFIX } from "./mcpToolNames";
+export {
+  isMcpTool,
+  mcpToolName,
+  parseMcpToolName,
+  MCP_TOOL_PREFIX,
+} from "./mcpToolNames";
 
 export type McpToolset = Record<string, Tool>;
 

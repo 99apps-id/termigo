@@ -48,7 +48,10 @@ export function replaceAllCount(
  * keeps growing the file. Worth telling the model rather than letting it
  * discover the mess.
  */
-export function isSelfReferential(search: string, replacement: string): boolean {
+export function isSelfReferential(
+  search: string,
+  replacement: string,
+): boolean {
   return search.length > 0 && replacement.includes(search);
 }
 

@@ -64,23 +64,48 @@ const ALL_VARS: readonly string[] = [
 // the palette for the active mode so ANSI text stays readable on a light or
 // dark background instead of inheriting a dark-only palette.
 const DEFAULT_ANSI_LIGHT: readonly string[] = [
-  "#1e293b", "#b91c1c", "#15803d", "#a16207",
-  "#1d4ed8", "#7e22ce", "#0e7490", "#1f2937",
-  "#64748b", "#dc2626", "#16a34a", "#ca8a04",
-  "#2563eb", "#9333ea", "#0891b2", "#0f172a",
+  "#1e293b",
+  "#b91c1c",
+  "#15803d",
+  "#a16207",
+  "#1d4ed8",
+  "#7e22ce",
+  "#0e7490",
+  "#1f2937",
+  "#64748b",
+  "#dc2626",
+  "#16a34a",
+  "#ca8a04",
+  "#2563eb",
+  "#9333ea",
+  "#0891b2",
+  "#0f172a",
 ];
 const DEFAULT_ANSI_DARK: readonly string[] = [
-  "#141b2e", "#ff6b6b", "#2dd4a7", "#ffd166",
-  "#749bff", "#a76bff", "#22d3ee", "#e7e9f2",
-  "#4b5570", "#ff8a8a", "#5eead4", "#ffe08a",
-  "#9ab6ff", "#c39bff", "#67e8f9", "#f6f7fc",
+  "#141b2e",
+  "#ff6b6b",
+  "#2dd4a7",
+  "#ffd166",
+  "#749bff",
+  "#a76bff",
+  "#22d3ee",
+  "#e7e9f2",
+  "#4b5570",
+  "#ff8a8a",
+  "#5eead4",
+  "#ffe08a",
+  "#9ab6ff",
+  "#c39bff",
+  "#67e8f9",
+  "#f6f7fc",
 ];
 
 let lastApplied: string | null = null;
 
 export function applyTheme(theme: Theme, mode: ThemeMode): void {
   const root = document.documentElement;
-  const variant = theme.variants[mode] ?? theme.variants.dark ?? theme.variants.light;
+  const variant =
+    theme.variants[mode] ?? theme.variants.dark ?? theme.variants.light;
   if (!variant) {
     clearTheme();
     return;
@@ -107,19 +132,36 @@ function writeColors(root: HTMLElement, c: ThemeColors): void {
   }
 }
 
-function writeTerminal(root: HTMLElement, t: TerminalPalette, mode: ThemeMode): void {
+function writeTerminal(
+  root: HTMLElement,
+  t: TerminalPalette,
+  mode: ThemeMode,
+): void {
   // A field a theme does not declare falls back to the matching UI token, so
   // the terminal always tracks the active background/foreground.
-  root.style.setProperty("--terminal-background", t.background ?? "var(--background)");
-  root.style.setProperty("--terminal-foreground", t.foreground ?? "var(--foreground)");
+  root.style.setProperty(
+    "--terminal-background",
+    t.background ?? "var(--background)",
+  );
+  root.style.setProperty(
+    "--terminal-foreground",
+    t.foreground ?? "var(--foreground)",
+  );
   root.style.setProperty("--terminal-cursor", t.cursor ?? "var(--foreground)");
-  root.style.setProperty("--terminal-cursor-accent", t.cursorAccent ?? "var(--background)");
-  root.style.setProperty("--terminal-selection", t.selection ?? "var(--accent)");
-  const ansi = t.ansi?.length === ANSI_VARS.length
-    ? t.ansi
-    : mode === "light"
-      ? DEFAULT_ANSI_LIGHT
-      : DEFAULT_ANSI_DARK;
+  root.style.setProperty(
+    "--terminal-cursor-accent",
+    t.cursorAccent ?? "var(--background)",
+  );
+  root.style.setProperty(
+    "--terminal-selection",
+    t.selection ?? "var(--accent)",
+  );
+  const ansi =
+    t.ansi?.length === ANSI_VARS.length
+      ? t.ansi
+      : mode === "light"
+        ? DEFAULT_ANSI_LIGHT
+        : DEFAULT_ANSI_DARK;
   for (let i = 0; i < ANSI_VARS.length; i++) {
     root.style.setProperty(ANSI_VARS[i], ansi[i]);
   }

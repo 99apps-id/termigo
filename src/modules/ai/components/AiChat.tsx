@@ -63,7 +63,13 @@ import {
 } from "./ChatNotices";
 import { PartAppear, ReadGroup, ReadRow } from "./ChatReadGroup";
 import { ConfirmationCarousel } from "./ConfirmationCarousel";
-import { type AnyPart, buildPartGroups, isThinkingLive, lastReasoningGroupIndex, partType } from "./chatPartGrouping";
+import {
+  type AnyPart,
+  buildPartGroups,
+  isThinkingLive,
+  lastReasoningGroupIndex,
+  partType,
+} from "./chatPartGrouping";
 import { ElicitationCarousel } from "./ElicitationCarousel";
 import { ChatTimelineNavigator } from "./ChatTimelineNavigator";
 import { RollbackSuggestion } from "./RollbackSuggestion";
@@ -249,7 +255,11 @@ export function AiChatView({
             round={runRound}
             onContinue={() => {
               clearError();
-              patchAgentMeta({ error: null, stopReason: null, stoppedByUser: false });
+              patchAgentMeta({
+                error: null,
+                stopReason: null,
+                stoppedByUser: false,
+              });
               void resumeRun();
             }}
           />
@@ -268,7 +278,11 @@ export function AiChatView({
                 type="button"
                 onClick={() => {
                   clearError();
-                  patchAgentMeta({ error: null, stopReason: null, stoppedByUser: false });
+                  patchAgentMeta({
+                    error: null,
+                    stopReason: null,
+                    stoppedByUser: false,
+                  });
                   void resumeRun();
                 }}
                 className="rounded bg-destructive/20 px-2 py-0.5 font-medium hover:bg-destructive/30"
@@ -598,7 +612,8 @@ const RenderedMessage = memo(function RenderedMessage({
           })}
           {!hasTextPart && !streaming && !hasAnyToolParts && !showReasoning ? (
             <p className="text-xs text-muted-foreground italic">
-              (Model completed with reasoning output only. You can enable reasoning visibility in chat settings to inspect details.)
+              (Model completed with reasoning output only. You can enable
+              reasoning visibility in chat settings to inspect details.)
             </p>
           ) : null}
         </div>

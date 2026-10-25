@@ -25,7 +25,10 @@ import {
   normalizeModelId,
   providerSupportsKey,
 } from "@/modules/ai/config";
-import { APPROVAL_MODES, type ApprovalMode } from "@/modules/ai/lib/approvalPolicy";
+import {
+  APPROVAL_MODES,
+  type ApprovalMode,
+} from "@/modules/ai/lib/approvalPolicy";
 import {
   clearCustomEndpointKey,
   getAllCustomEndpointKeys,

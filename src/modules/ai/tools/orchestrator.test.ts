@@ -96,7 +96,11 @@ describe("runPipelineByName", () => {
       name: "Failing Pipe",
       steps: [
         { id: "step1", type: "general" as const, prompt: "First step" },
-        { id: "step2", type: "general" as const, prompt: "Second independent step" },
+        {
+          id: "step2",
+          type: "general" as const,
+          prompt: "Second independent step",
+        },
       ],
     };
     const mockContext = {
@@ -169,7 +173,12 @@ describe("runPipelineByName", () => {
     };
     const controller = new AbortController();
     controller.abort();
-    const result = await runPipeline(pipeline, mockContext, {}, controller.signal);
+    const result = await runPipeline(
+      pipeline,
+      mockContext,
+      {},
+      controller.signal,
+    );
     expect(result.stoppedAt).toBe("aborted");
     expect(result.skipped).toContain("step1");
     expect(result.skipped).toContain("step2");
@@ -188,7 +197,9 @@ describe("interpolatePrompt", () => {
   it("supports shorthand {{stepId}}", () => {
     const prompt = "Summary: {{recon}}";
     const context = { recon: "Open ports: 80, 443" };
-    expect(interpolatePrompt(prompt, context)).toBe("Summary: Open ports: 80, 443");
+    expect(interpolatePrompt(prompt, context)).toBe(
+      "Summary: Open ports: 80, 443",
+    );
   });
 
   it("formats structured objects and arrays as pretty JSON", () => {
@@ -211,7 +222,8 @@ describe("interpolatePrompt", () => {
 
   it("leaves unmatched placeholders untouched", () => {
     const prompt = "Input: {{unknown_step.output}}";
-    expect(interpolatePrompt(prompt, {})).toBe("Input: {{unknown_step.output}}");
+    expect(interpolatePrompt(prompt, {})).toBe(
+      "Input: {{unknown_step.output}}",
+    );
   });
 });
-

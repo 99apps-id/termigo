@@ -151,7 +151,10 @@ describe("PreviewBlock", () => {
   it("renders write_file preview with line count hint", () => {
     const el = PreviewBlock({
       toolName: "write_file",
-      input: { path: "src/app.ts", content: "console.log(1);\nconsole.log(2);" },
+      input: {
+        path: "src/app.ts",
+        content: "console.log(1);\nconsole.log(2);",
+      },
       isEditing: false,
       setIsEditing: vi.fn(),
       editedCommand: "",

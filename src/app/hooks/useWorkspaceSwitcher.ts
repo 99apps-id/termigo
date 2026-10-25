@@ -1,4 +1,10 @@
-import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
+import {
+  type RefObject,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { homeDir } from "@tauri-apps/api/path";
 import { native } from "@/modules/ai/lib/native";
 import type { Tab } from "@/modules/tabs";

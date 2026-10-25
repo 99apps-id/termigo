@@ -40,7 +40,12 @@ describe("turnCheckpointInfo", () => {
       userMessage("u2", "second task"),
     ];
     const out: TurnCheckpoint | null = turnCheckpointInfo(messages, SHA, 7);
-    expect(out).toEqual({ messageId: "u2", sha: SHA, label: "second task", at: 7 });
+    expect(out).toEqual({
+      messageId: "u2",
+      sha: SHA,
+      label: "second task",
+      at: 7,
+    });
   });
 
   it("returns null without a sha", () => {
@@ -52,7 +57,10 @@ describe("turnCheckpointInfo", () => {
   });
 
   it("skips the resume continuation prompt", () => {
-    const messages = [userMessage("u1", "work"), userMessage("u2", RESUME_PROMPT)];
+    const messages = [
+      userMessage("u1", "work"),
+      userMessage("u2", RESUME_PROMPT),
+    ];
     expect(turnCheckpointInfo(messages, SHA, 1)).toBeNull();
   });
 

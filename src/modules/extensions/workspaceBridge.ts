@@ -12,7 +12,9 @@ export type ExtensionWorkspaceBridge = {
 
 let bridge: ExtensionWorkspaceBridge | null = null;
 
-export function setExtensionWorkspaceBridge(next: ExtensionWorkspaceBridge | null): void {
+export function setExtensionWorkspaceBridge(
+  next: ExtensionWorkspaceBridge | null,
+): void {
   bridge = next;
 }
 

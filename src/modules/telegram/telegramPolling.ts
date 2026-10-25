@@ -414,7 +414,8 @@ async function runLoop(signal: AbortSignal): Promise<void> {
       useTelegramStore.getState().setOnline(false);
       const errMsg = e instanceof Error ? e.message : String(e);
       useTelegramStore.getState().setLastError(errMsg);
-      if (e instanceof TelegramApiError && e.status === 409) conflictStreak += 1;
+      if (e instanceof TelegramApiError && e.status === 409)
+        conflictStreak += 1;
       consecutiveFailures += 1;
       const backoffMs = pollBackoffMs(e, conflictStreak, consecutiveFailures);
       // The store keeps lastError for the UI, but the UI is a webview on a

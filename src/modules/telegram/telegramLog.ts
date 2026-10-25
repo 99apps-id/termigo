@@ -146,10 +146,7 @@ export function relayErrorLine(where: string, error: unknown): string {
  * an unhandled rejection - which vitest reports as a failed run even when every
  * test passed. Diagnostics must never be able to fail the thing they describe.
  */
-function emit(
-  write: (message: string) => Promise<void>,
-  line: string,
-): void {
+function emit(write: (message: string) => Promise<void>, line: string): void {
   write(`${TAG} ${line}`).catch(() => {});
 }
 

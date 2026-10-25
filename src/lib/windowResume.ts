@@ -12,7 +12,10 @@
  * Only wrap the resume handlers: a refresh triggered by something the user just
  * did must never be swallowed because it landed near a focus change.
  */
-export function coalesceResume(refresh: () => void, windowMs = 400): () => void {
+export function coalesceResume(
+  refresh: () => void,
+  windowMs = 400,
+): () => void {
   let lastRun = 0;
   return () => {
     const now = Date.now();

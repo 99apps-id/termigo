@@ -309,8 +309,7 @@ Each task's subagent has the same toolset you do and may itself spawn further su
         const writingCount = results.filter(
           (r) => !subagentIsReadOnly(r.type),
         ).length;
-        const effectiveIsolate =
-          isolate ?? defaultBatchIsolation(writingCount);
+        const effectiveIsolate = isolate ?? defaultBatchIsolation(writingCount);
 
         // Two tasks touching the same file is the batch's merge conflict: each
         // edits from the same baseline, both write, the second overwrites the

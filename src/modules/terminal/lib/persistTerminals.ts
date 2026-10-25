@@ -48,7 +48,10 @@ function baseName(path: string): string {
  * A `symbol` (typically the leaf's creation ordinal) keeps same-cwd leaves
  * apart.
  */
-export function makePersistKey(cwd: string | undefined, symbol: string): string {
+export function makePersistKey(
+  cwd: string | undefined,
+  symbol: string,
+): string {
   const base = cwd ? baseName(cwd) : "leaf";
   const slug = sanitizePersistKey(`${base}-${symbol}`);
   return slug;
@@ -69,7 +72,10 @@ function quote(arg: string): string {
  * `shellArgv` is the resolved shell argv (program plus arguments) that tmux
  * should start inside the session. Each element is quoted.
  */
-export function tmuxAttachCommand(persistKey: string, shellArgv: string[]): string {
+export function tmuxAttachCommand(
+  persistKey: string,
+  shellArgv: string[],
+): string {
   const session = tmuxSessionKey(persistKey);
   const argv = shellArgv.map(quote).join(" ");
   return `tmux new-session -A -s ${session} -- ${argv}`;

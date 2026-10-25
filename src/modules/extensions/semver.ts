@@ -37,7 +37,10 @@ function compareVersions(a: string, b: string): -1 | 0 | 1 {
   return 0;
 }
 
-export function satisfies(constraint: string | null | undefined, host: string): boolean {
+export function satisfies(
+  constraint: string | null | undefined,
+  host: string,
+): boolean {
   const raw = (constraint ?? "").trim();
   if (raw === "" || raw === "*") return true;
   let op = "=";

@@ -161,9 +161,21 @@ export async function upsertConnection(
   return enqueueWrite(async () => {
     // Flags must agree with what's now in the keyring so UI pips stay accurate.
     const next = { ...conn };
-    next.hasPassword = await writeSecret(conn.id, PASSWORD_FIELD, secrets.password);
-    next.hasPrivateKey = await writeSecret(conn.id, PRIVATE_KEY_FIELD, secrets.privateKey);
-    next.hasKeyPassphrase = await writeSecret(conn.id, KEY_PASSPHRASE_FIELD, secrets.keyPassphrase);
+    next.hasPassword = await writeSecret(
+      conn.id,
+      PASSWORD_FIELD,
+      secrets.password,
+    );
+    next.hasPrivateKey = await writeSecret(
+      conn.id,
+      PRIVATE_KEY_FIELD,
+      secrets.privateKey,
+    );
+    next.hasKeyPassphrase = await writeSecret(
+      conn.id,
+      KEY_PASSPHRASE_FIELD,
+      secrets.keyPassphrase,
+    );
 
     const list = await listConnections();
     const idx = list.findIndex((c) => c.id === conn.id);
@@ -183,7 +195,9 @@ export async function upsertConnection(
  * over would fail the next connect as a key MISMATCH, which reads as an attack
  * rather than as a copy. The copy takes one first-connect prompt instead.
  */
-export async function duplicateConnection(id: string): Promise<SshConnection | null> {
+export async function duplicateConnection(
+  id: string,
+): Promise<SshConnection | null> {
   const source = (await listConnections()).find((c) => c.id === id);
   if (!source) return null;
   const secrets = await getConnectionSecrets(id);
@@ -214,7 +228,9 @@ export async function deleteConnection(id: string): Promise<void> {
     // would fail every connect with "a jump host in the chain no longer exists").
     const list = (await listConnections())
       .filter((c) => c.id !== id)
-      .map((c) => (c.proxyJumpId === id ? { ...c, proxyJumpId: undefined } : c));
+      .map((c) =>
+        c.proxyJumpId === id ? { ...c, proxyJumpId: undefined } : c,
+      );
     await persist(list);
   });
 }
@@ -243,10 +259,14 @@ export function onConnectionsChanged(cb: () => void): Promise<UnlistenFn> {
  * ends up showing a stale host name after a rename.
  */
 export function useSshHosts(): Map<string, SshConnection> {
-  const [hosts, setHosts] = useState<Map<string, SshConnection>>(() => new Map());
+  const [hosts, setHosts] = useState<Map<string, SshConnection>>(
+    () => new Map(),
+  );
   useEffect(() => {
     const load = () =>
-      void listConnections().then((list) => setHosts(new Map(list.map((c) => [c.id, c]))));
+      void listConnections().then((list) =>
+        setHosts(new Map(list.map((c) => [c.id, c]))),
+      );
     load();
     const unsub = onConnectionsChanged(load);
     return () => {
@@ -278,7 +298,10 @@ async function patchConnection(
 }
 
 /** Marks a successful SSH handshake. Updates the timestamp and server fingerprint. */
-export async function markConnected(id: string, fingerprint: string): Promise<void> {
+export async function markConnected(
+  id: string,
+  fingerprint: string,
+): Promise<void> {
   return patchConnection(id, (c) => ({
     lastConnectedAt: Date.now(),
     lastFingerprint: fingerprint || c.lastFingerprint,
@@ -296,7 +319,10 @@ export async function markConnected(id: string, fingerprint: string): Promise<vo
  * was forgotten by the time the connection was saved. `lastConnectedAt` is
  * deliberately not touched: nothing has connected yet.
  */
-export async function pinFingerprint(id: string, fingerprint: string): Promise<void> {
+export async function pinFingerprint(
+  id: string,
+  fingerprint: string,
+): Promise<void> {
   if (!fingerprint) return;
   return patchConnection(id, (c) =>
     c.lastFingerprint === fingerprint ? null : { lastFingerprint: fingerprint },
@@ -339,7 +365,8 @@ export async function resolveJumpHops(
   const chain: SshConnection[] = [];
   let cursor: string | undefined = startProxyJumpId;
   while (cursor) {
-    if (visited.has(cursor)) throw new Error("ssh: jump host chain has a cycle");
+    if (visited.has(cursor))
+      throw new Error("ssh: jump host chain has a cycle");
     visited.add(cursor);
     const hop = byId.get(cursor);
     if (!hop) throw new Error("ssh: a jump host in the chain no longer exists");

@@ -51,7 +51,9 @@ describe("sandbox dispatcher", () => {
       args: { path: "/x" },
     });
     expect(resp).toEqual({ id: 1, ok: true, value: "ok" });
-    expect(executor.invoke).toHaveBeenCalledWith("fs_read_file", { path: "/x" });
+    expect(executor.invoke).toHaveBeenCalledWith("fs_read_file", {
+      path: "/x",
+    });
   });
 
   it("denies invoke when the permission is missing and never calls the backend", async () => {
@@ -62,7 +64,9 @@ describe("sandbox dispatcher", () => {
       args: { command: "rm -rf /" },
     });
     expect(resp.ok).toBe(false);
-    expect((resp as { error: string }).error).toMatch(/lacks permission "invoke:shell_run_command"/);
+    expect((resp as { error: string }).error).toMatch(
+      /lacks permission "invoke:shell_run_command"/,
+    );
     expect(executor.invoke).not.toHaveBeenCalled();
   });
 
@@ -129,11 +133,15 @@ describe("sandbox dispatcher", () => {
       id: 9,
       kind: "ui:mountPanel",
       panelId: "p",
-      html: "<button data-ext-event=\"go\">Go</button>",
+      html: '<button data-ext-event="go">Go</button>',
       events: ["go"],
     });
     expect(resp.ok).toBe(true);
-    expect(executor.onPanelMount).toHaveBeenCalledWith("p", expect.stringContaining("go"), ["go"]);
+    expect(executor.onPanelMount).toHaveBeenCalledWith(
+      "p",
+      expect.stringContaining("go"),
+      ["go"],
+    );
   });
 
   it("gates header/status items behind their write permission", async () => {

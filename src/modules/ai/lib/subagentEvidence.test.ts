@@ -43,17 +43,25 @@ describe("declaresIncomplete", () => {
 
 describe("judgeSubagentEvidence", () => {
   it("leaves a mutating sub-agent alone", () => {
-    const v = judgeSubagentEvidence("Wrote the file.", { steps: 0, toolCalls: 0 }, {
-      audit: false,
-    });
+    const v = judgeSubagentEvidence(
+      "Wrote the file.",
+      { steps: 0, toolCalls: 0 },
+      {
+        audit: false,
+      },
+    );
     expect(v.inconclusive).toBe(false);
     expect(v.note).toBeNull();
   });
 
   it("flags an audit of a run that inspected nothing", () => {
-    const v = judgeSubagentEvidence("Looks fine.", { steps: 2, toolCalls: 1 }, {
-      audit: true,
-    });
+    const v = judgeSubagentEvidence(
+      "Looks fine.",
+      { steps: 2, toolCalls: 1 },
+      {
+        audit: true,
+      },
+    );
     expect(v.inconclusive).toBe(true);
     expect(v.note).toContain("[inconclusive]");
     expect(v.note).toContain("1 tool call(s)");
@@ -70,9 +78,13 @@ describe("judgeSubagentEvidence", () => {
   });
 
   it("passes an audit that read and reported", () => {
-    const v = judgeSubagentEvidence(FOUND_SOMETHING, { steps: 5, toolCalls: 8 }, {
-      audit: true,
-    });
+    const v = judgeSubagentEvidence(
+      FOUND_SOMETHING,
+      { steps: 5, toolCalls: 8 },
+      {
+        audit: true,
+      },
+    );
     expect(v.inconclusive).toBe(false);
     expect(v.note).toBeNull();
   });

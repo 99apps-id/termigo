@@ -127,9 +127,12 @@ export async function listInstalled(): Promise<InstalledExtension[]> {
       console.warn(`[extensions] skipping ${entry.id}: ${parsed.error}`);
       if (!warnedBadManifest.has(entry.id)) {
         warnedBadManifest.add(entry.id);
-        toast(`Extension "${entry.id}" has an invalid manifest: ${parsed.error}`, {
-          variant: "error",
-        });
+        toast(
+          `Extension "${entry.id}" has an invalid manifest: ${parsed.error}`,
+          {
+            variant: "error",
+          },
+        );
       }
       continue;
     }
@@ -142,7 +145,9 @@ export async function activate(ext: InstalledExtension): Promise<void> {
   if (active.has(ext.id)) return;
   // Skip disabled extensions even if a stale entry slips through.
   if (!ext.enabled) {
-    console.warn(`[extensions] activate called on disabled ext ${ext.id} - ignoring`);
+    console.warn(
+      `[extensions] activate called on disabled ext ${ext.id} - ignoring`,
+    );
     return;
   }
   // Engine-compat gate. Refuse to activate when the manifest asks for a
@@ -155,7 +160,9 @@ export async function activate(ext: InstalledExtension): Promise<void> {
     const host = await getHostVersion();
     if (!satisfies(required, host)) {
       const msg = `${ext.manifest.name} needs TEDI ${required} (you have ${host}).`;
-      console.warn(`[extensions] skipping ${ext.id}: host ${host} does not satisfy ${required}`);
+      console.warn(
+        `[extensions] skipping ${ext.id}: host ${host} does not satisfy ${required}`,
+      );
       toast(msg, { variant: "warning" });
       return;
     }
@@ -208,7 +215,9 @@ export async function activate(ext: InstalledExtension): Promise<void> {
         });
         return;
       } catch (err) {
-        logError(`[ext:${ext.id}] activate: sandbox activation failed: ${String(err)}`);
+        logError(
+          `[ext:${ext.id}] activate: sandbox activation failed: ${String(err)}`,
+        );
         console.error(`[extensions] failed to sandbox-activate ${ext.id}`, err);
         await dispose();
         clearExtensionContributions(ext.id);
@@ -218,9 +227,12 @@ export async function activate(ext: InstalledExtension): Promise<void> {
     }
 
     logInfo(`[ext:${ext.id}] activate: non-sandboxed path`);
-    toast(`Extension "${ext.id}" is running without sandbox. This is less safe; consider enabling sandbox if the extension supports it.`, {
-      variant: "warning",
-    });
+    toast(
+      `Extension "${ext.id}" is running without sandbox. This is less safe; consider enabling sandbox if the extension supports it.`,
+      {
+        variant: "warning",
+      },
+    );
     const blob = new Blob([text], { type: "text/javascript" });
     try {
       scriptUrl = URL.createObjectURL(blob);
@@ -228,7 +240,10 @@ export async function activate(ext: InstalledExtension): Promise<void> {
       const mod = module as {
         activate?: (ctx: ExtensionContext) => unknown;
         deactivate?: () => unknown;
-        default?: { activate?: (ctx: ExtensionContext) => unknown; deactivate?: () => unknown };
+        default?: {
+          activate?: (ctx: ExtensionContext) => unknown;
+          deactivate?: () => unknown;
+        };
       };
       const activateFn = mod.activate ?? mod.default?.activate;
       const deactivateFn = mod.deactivate ?? mod.default?.deactivate;
@@ -300,7 +315,9 @@ const ACTIVATE_TIMEOUT_MS = 15_000;
 export function withActivationTimeout(ext: InstalledExtension): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => {
-      reject(new Error(`activation timed out after ${ACTIVATE_TIMEOUT_MS / 1000}s`));
+      reject(
+        new Error(`activation timed out after ${ACTIVATE_TIMEOUT_MS / 1000}s`),
+      );
     }, ACTIVATE_TIMEOUT_MS);
     activate(ext).then(
       () => {
@@ -347,7 +364,10 @@ export async function bootAll(): Promise<InstalledExtension[]> {
   return installed;
 }
 
-export async function reload(id: string, fresh?: InstalledExtension): Promise<void> {
+export async function reload(
+  id: string,
+  fresh?: InstalledExtension,
+): Promise<void> {
   await deactivate(id);
   let next = fresh;
   if (!next) {

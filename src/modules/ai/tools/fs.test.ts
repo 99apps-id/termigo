@@ -63,17 +63,31 @@ describe("normalizeWriteFileInput", () => {
 
     expect(
       normalizeWriteFileInput({ file: "src/app.ts", text: "code" }),
-    ).toEqual({ path: "src/app.ts", file: "src/app.ts", content: "code", text: "code" });
+    ).toEqual({
+      path: "src/app.ts",
+      file: "src/app.ts",
+      content: "code",
+      text: "code",
+    });
 
     expect(
       normalizeWriteFileInput({ filename: "notes.txt", body: "my notes" }),
-    ).toEqual({ path: "notes.txt", filename: "notes.txt", content: "my notes", body: "my notes" });
+    ).toEqual({
+      path: "notes.txt",
+      filename: "notes.txt",
+      content: "my notes",
+      body: "my notes",
+    });
   });
 
   it("normalizes content aliases text, body, contents, data", () => {
     expect(
       normalizeWriteFileInput({ path: "out.log", contents: "line 1\nline 2" }),
-    ).toEqual({ path: "out.log", content: "line 1\nline 2", contents: "line 1\nline 2" });
+    ).toEqual({
+      path: "out.log",
+      content: "line 1\nline 2",
+      contents: "line 1\nline 2",
+    });
   });
 
   it("leaves standard inputs intact", () => {
@@ -105,7 +119,10 @@ describe("write_file tool execution", () => {
 
     expect(result.ok).toBe(true);
     expect(result.bytesWritten).toBe(13);
-    expect(native.writeFile).toHaveBeenCalledWith("/workspace/report.md", "# Hello World");
+    expect(native.writeFile).toHaveBeenCalledWith(
+      "/workspace/report.md",
+      "# Hello World",
+    );
   });
 });
 
@@ -286,5 +303,3 @@ describe("sliceLines and read_file windowing", () => {
     expect(forced.unchanged).toBeUndefined();
   });
 });
-
-

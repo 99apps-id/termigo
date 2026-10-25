@@ -91,7 +91,8 @@ describe("MarkdownLink", () => {
     const el = MarkdownLink({
       href: "https://example.com/docs",
       children: "Documentation",
-      onClick: onCustomClick as unknown as React.MouseEventHandler<HTMLAnchorElement>,
+      onClick:
+        onCustomClick as unknown as React.MouseEventHandler<HTMLAnchorElement>,
     });
 
     const preventDefault = vi.fn();

@@ -32,9 +32,10 @@ export function buildSkillTools(
         // A path rather than a name means it came from find_skill, which
         // reaches libraries outside the workspace. Reading by name alone would
         // make every found skill unreachable.
-        const skill = name.includes("/") || name.includes("\\")
-          ? await readSkillAt(name)
-          : await readSkill(ctx.getWorkspaceRoot(), name);
+        const skill =
+          name.includes("/") || name.includes("\\")
+            ? await readSkillAt(name)
+            : await readSkill(ctx.getWorkspaceRoot(), name);
         if (!skill) {
           // Not an error the model should retry: the name is either wrong or
           // the file is gone, and both are answered by picking another route.
@@ -68,13 +69,20 @@ ${skill.body}`,
         query: z
           .string()
           .min(2)
-          .describe("What the skill would be about, e.g. 'airtable' or 'deploy docker'."),
+          .describe(
+            "What the skill would be about, e.g. 'airtable' or 'deploy docker'.",
+          ),
       }),
       execute: async ({ query }) => {
         try {
           const matches = await searchSkills(ctx.getWorkspaceRoot(), query);
           if (matches.length === 0) {
-            return { query, count: 0, matches: [], hint: "no skill matched; proceed on your own" };
+            return {
+              query,
+              count: 0,
+              matches: [],
+              hint: "no skill matched; proceed on your own",
+            };
           }
           return {
             query,
@@ -98,11 +106,15 @@ ${skill.body}`,
       inputSchema: z.object({
         name: z
           .string()
-          .describe("Short snake_case name, e.g. 'deploy_app'. Reuse a name to revise it."),
+          .describe(
+            "Short snake_case name, e.g. 'deploy_app'. Reuse a name to revise it.",
+          ),
         description: z
           .string()
           .min(1)
-          .describe("When to use it. This is what you will match against later."),
+          .describe(
+            "When to use it. This is what you will match against later.",
+          ),
         command: z
           .string()
           .min(1)
@@ -112,12 +124,16 @@ ${skill.body}`,
         parameters: z
           .array(
             z.object({
-              name: z.string().describe("Placeholder name, matching the command."),
+              name: z
+                .string()
+                .describe("Placeholder name, matching the command."),
               description: z.string().describe("What this argument is."),
               required: z.boolean().optional(),
             }),
           )
-          .describe("One entry per placeholder. Every placeholder must be declared."),
+          .describe(
+            "One entry per placeholder. Every placeholder must be declared.",
+          ),
       }),
       needsApproval: true,
       execute: async ({ name, description, command, parameters }) => {
@@ -202,7 +218,9 @@ ${skill.body}`,
       inputSchema: z.object({
         name: z
           .string()
-          .describe("Name of the existing skill to update, e.g. 'deploy-to-vps'."),
+          .describe(
+            "Name of the existing skill to update, e.g. 'deploy-to-vps'.",
+          ),
         description: z
           .string()
           .optional()

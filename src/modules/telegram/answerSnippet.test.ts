@@ -41,9 +41,9 @@ describe("renderAnswerSnippet", () => {
 
   it("never exceeds the cap, whatever the input length", () => {
     for (const n of [0, 1, 699, 700, 701, 5000, 20000]) {
-      expect(renderAnswerSnippet("y".repeat(n), 700).length).toBeLessThanOrEqual(
-        700,
-      );
+      expect(
+        renderAnswerSnippet("y".repeat(n), 700).length,
+      ).toBeLessThanOrEqual(700);
     }
   });
 
@@ -73,7 +73,12 @@ describe("formatLiveProgress with answer text", () => {
       mode: "task",
       answerText: "Mulai dengan mencari apakah repo sudah ada di mesin ini.",
       tools: [
-        { toolName: "list_directory", state: "done", input: "/x/modules", output: "28 entries" },
+        {
+          toolName: "list_directory",
+          state: "done",
+          input: "/x/modules",
+          output: "28 entries",
+        },
         { toolName: "read_file", state: "done", input: "/x/file.rs" },
         { toolName: "run_subagents", state: "running", input: "explore" },
       ],
@@ -117,11 +122,11 @@ describe("formatLiveProgress with answer text", () => {
       completed: true,
       outcome: "done",
       answerText: "Berikut adalah hasil pemeriksaan server: semua port aktif.",
-      tools: [
-        { toolName: "bash_run", state: "done", input: "netstat -tuln" },
-      ],
+      tools: [{ toolName: "bash_run", state: "done", input: "netstat -tuln" }],
     });
-    expect(card).toBe("Berikut adalah hasil pemeriksaan server: semua port aktif.");
+    expect(card).toBe(
+      "Berikut adalah hasil pemeriksaan server: semua port aktif.",
+    );
     expect(card).not.toContain("Termigo Agent");
     expect(card).not.toContain("bash_run");
   });

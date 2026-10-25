@@ -29,9 +29,7 @@ describe("discoveredWorktrees", () => {
   });
 
   it("parses a relative worktree path", () => {
-    const found = discoveredWorktrees([
-      wt("termigo-sandbox/rel1", ".wt/rel1"),
-    ]);
+    const found = discoveredWorktrees([wt("termigo-sandbox/rel1", ".wt/rel1")]);
     expect(found.map((w) => w.id)).toEqual(["rel1"]);
   });
 

@@ -47,7 +47,10 @@ export function useSshNav(followRoot: string | null, sessionId: number | null) {
     });
   }, []);
 
-  const back = useCallback(() => setNav((n) => (n.i >= 0 ? { ...n, i: n.i - 1 } : n)), []);
+  const back = useCallback(
+    () => setNav((n) => (n.i >= 0 ? { ...n, i: n.i - 1 } : n)),
+    [],
+  );
   const forward = useCallback(
     () => setNav((n) => (n.i < n.stack.length - 1 ? { ...n, i: n.i + 1 } : n)),
     [],

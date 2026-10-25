@@ -216,7 +216,6 @@ describe("startActivityHeartbeat", () => {
     expect(msSinceActivity(now)).toBeGreaterThan(atCeiling);
     stop();
   });
-
 });
 
 describe("heartbeatMaxMsForTool", () => {
@@ -234,12 +233,12 @@ describe("deliveryCheckDecision", () => {
   // tool result, killing runs whose sibling tools were still executing (and
   // heartbeating). Only a genuinely stale clock may abort now.
   it("aborts when the clock has been stale for the whole budget", () => {
-    expect(deliveryCheckDecision(121_000, { sinceActivityMs: 121_000 })).toEqual(
-      { abort: true, recheckInMs: 0 },
-    );
-    expect(deliveryCheckDecision(120_000, { sinceActivityMs: 120_000 })).toEqual(
-      { abort: true, recheckInMs: 0 },
-    );
+    expect(
+      deliveryCheckDecision(121_000, { sinceActivityMs: 121_000 }),
+    ).toEqual({ abort: true, recheckInMs: 0 });
+    expect(
+      deliveryCheckDecision(120_000, { sinceActivityMs: 120_000 }),
+    ).toEqual({ abort: true, recheckInMs: 0 });
   });
 
   it("moves the check out instead of aborting live work", () => {

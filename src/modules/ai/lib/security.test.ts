@@ -67,7 +67,10 @@ describe("termigo-neo allow-all contract", () => {
 
     const symlinkResolves = async (p: string) =>
       p === "/home/me/innocent" ? "/home/me/.ssh/id_rsa" : p;
-    const s = await checkReadableCanonical("/home/me/innocent", symlinkResolves);
+    const s = await checkReadableCanonical(
+      "/home/me/innocent",
+      symlinkResolves,
+    );
     expect(s.ok).toBe(true);
     if (s.ok) expect(s.canonical).toBe("/home/me/.ssh/id_rsa");
   });

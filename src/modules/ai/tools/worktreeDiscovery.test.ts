@@ -80,7 +80,10 @@ describe("worktree_list sees sandboxes this process did not create", () => {
     });
 
     const res = asRecord(
-      await buildWorktreeTools(makeContext()).worktree_list.execute?.({}, {} as never),
+      await buildWorktreeTools(makeContext()).worktree_list.execute?.(
+        {},
+        {} as never,
+      ),
     );
     const sandboxes = res.sandboxes as Record<string, unknown>[];
 
@@ -105,7 +108,7 @@ describe("worktree_list sees sandboxes this process did not create", () => {
         {
           name: "termigo-sandbox/mine",
           kind: "worktree",
-      worktreePath: "/workspace/.wt/mine",
+          worktreePath: "/workspace/.wt/mine",
           isHead: false,
           isDetached: false,
         },
@@ -120,9 +123,14 @@ describe("worktree_list sees sandboxes this process did not create", () => {
     });
 
     const res = asRecord(
-      await buildWorktreeTools(makeContext()).worktree_list.execute?.({}, {} as never),
+      await buildWorktreeTools(makeContext()).worktree_list.execute?.(
+        {},
+        {} as never,
+      ),
     );
-    const ids = (res.sandboxes as Record<string, unknown>[]).map((s) => s.id).sort();
+    const ids = (res.sandboxes as Record<string, unknown>[])
+      .map((s) => s.id)
+      .sort();
 
     expect(ids).toEqual(["mine", "old2"]);
     expect(res.count).toBe(2);
@@ -140,7 +148,10 @@ describe("worktree_list sees sandboxes this process did not create", () => {
     gitListBranches.mockRejectedValue(new Error("not a git repository"));
 
     const res = asRecord(
-      await buildWorktreeTools(makeContext()).worktree_list.execute?.({}, {} as never),
+      await buildWorktreeTools(makeContext()).worktree_list.execute?.(
+        {},
+        {} as never,
+      ),
     );
 
     expect(res.count).toBe(1);

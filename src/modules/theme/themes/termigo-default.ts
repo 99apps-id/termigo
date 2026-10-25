@@ -72,4 +72,3 @@ export const termigoDefault: Theme = {
     },
   },
 };
-

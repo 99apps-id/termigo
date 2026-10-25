@@ -36,11 +36,20 @@ type State = {
   getGoal: (sessionId: string) => string | null;
   getSchedules: (sessionId: string) => SessionSchedule[];
   setGoal: (sessionId: string, goal: string | null) => void;
-  addSchedule: (sessionId: string, when: string, prompt: string, spec?: ScheduleSpec) => void;
+  addSchedule: (
+    sessionId: string,
+    when: string,
+    prompt: string,
+    spec?: ScheduleSpec,
+  ) => void;
   removeSchedule: (sessionId: string, id: string) => void;
   toggleSchedule: (sessionId: string, id: string) => void;
   /** Bump a schedule's next fire time after it runs. */
-  updateScheduleNext: (sessionId: string, id: string, nextDueAt: number) => void;
+  updateScheduleNext: (
+    sessionId: string,
+    id: string,
+    nextDueAt: number,
+  ) => void;
 };
 
 function directivesFor(state: State, sessionId: string): Directives {
@@ -49,8 +58,7 @@ function directivesFor(state: State, sessionId: string): Directives {
 
 export const useSessionDirectiveStore = create<State>((set, get) => ({
   bySession: {},
-  getGoal: (sessionId) =>
-    directivesFor(get(), sessionId).goal,
+  getGoal: (sessionId) => directivesFor(get(), sessionId).goal,
   getSchedules: (sessionId) => directivesFor(get(), sessionId).schedules,
   setGoal: (sessionId, goal) =>
     set((state) => ({

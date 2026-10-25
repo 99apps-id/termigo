@@ -120,12 +120,7 @@ describe("extractWorkerData", () => {
       ],
     };
 
-    const { workers } = extractWorkerData(
-      "run_subagents",
-      input,
-      output,
-      [],
-    );
+    const { workers } = extractWorkerData("run_subagents", input, output, []);
     expect(workers[0].status).toBe("error");
     expect(workers[0].error).toBe("Network timeout");
     expect(workers[1].status).toBe("skipped");

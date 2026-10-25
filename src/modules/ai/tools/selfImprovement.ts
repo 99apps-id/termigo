@@ -38,15 +38,29 @@ export function buildSelfImprovementTools() {
         label: z.string().min(1).describe("Human-readable label."),
         value: z.string().min(1).describe("Inferred preference value."),
       }),
-      execute: async ({ key, label, value }: { key: string; label: string; value: string }) => {
+      execute: async ({
+        key,
+        label,
+        value,
+      }: {
+        key: string;
+        label: string;
+        value: string;
+      }) => {
         const model = await getOrCreateUserModel();
         const existingIndex = model.preferences.findIndex((p) => p.key === key);
         const entry: Preference = {
           key,
           label,
           value,
-          confidence: existingIndex >= 0 ? model.preferences[existingIndex].confidence + 0.1 : 0.5,
-          observations: existingIndex >= 0 ? model.preferences[existingIndex].observations + 1 : 1,
+          confidence:
+            existingIndex >= 0
+              ? model.preferences[existingIndex].confidence + 0.1
+              : 0.5,
+          observations:
+            existingIndex >= 0
+              ? model.preferences[existingIndex].observations + 1
+              : 1,
           updatedAt: new Date().toISOString().slice(0, 10),
           approved: null,
         };
@@ -54,7 +68,8 @@ export function buildSelfImprovementTools() {
           model.preferences[existingIndex] = entry;
         } else {
           model.preferences.push(entry);
-          while (model.preferences.length > MAX_PREFERENCES) model.preferences.shift();
+          while (model.preferences.length > MAX_PREFERENCES)
+            model.preferences.shift();
         }
         await saveUserModel(model);
         return {
@@ -72,7 +87,13 @@ export function buildSelfImprovementTools() {
         text: z.string().min(1).describe("The fact to remember."),
         category: z.string().optional().describe("Optional category."),
       }),
-      execute: async ({ text, category }: { text: string; category?: string }) => {
+      execute: async ({
+        text,
+        category,
+      }: {
+        text: string;
+        category?: string;
+      }) => {
         const model = await getOrCreateUserModel();
         const fact: LearnedFact = {
           id: nextId(),
@@ -105,7 +126,8 @@ export function buildSelfImprovementTools() {
         const trimmed = name.trim();
         if (!model.suggestedSkills.includes(trimmed)) {
           model.suggestedSkills.push(trimmed);
-          while (model.suggestedSkills.length > 50) model.suggestedSkills.shift();
+          while (model.suggestedSkills.length > 50)
+            model.suggestedSkills.shift();
         }
         model.suggestedSkillCounts = model.suggestedSkillCounts ?? {};
         const next = (model.suggestedSkillCounts[trimmed] ?? 0) + 1;
@@ -129,7 +151,15 @@ export function buildSelfImprovementTools() {
         description: z.string().min(1).describe("When to use this skill."),
         body: z.string().min(1).describe("Skill procedure/markdown body."),
       }),
-      execute: async ({ name, description, body }: { name: string; description: string; body: string }) => {
+      execute: async ({
+        name,
+        description,
+        body,
+      }: {
+        name: string;
+        description: string;
+        body: string;
+      }) => {
         const model = await getOrCreateUserModel();
         const skill: Skill = {
           name,
@@ -184,7 +214,9 @@ export function buildSelfImprovementTools() {
           facts: model.facts.length,
           patterns: model.patterns.length,
           suggestedSkills: model.suggestedSkills.length,
-          suggestedSkillCounts: Object.entries(model.suggestedSkillCounts ?? {}).slice(-12),
+          suggestedSkillCounts: Object.entries(
+            model.suggestedSkillCounts ?? {},
+          ).slice(-12),
           topPreferences: model.preferences.slice(-8),
           recentFacts: model.facts.slice(-10),
         };

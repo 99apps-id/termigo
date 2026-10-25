@@ -79,7 +79,8 @@ describe("createIsolatedWorktree", () => {
     shellSessionRun.mockResolvedValue(
       cmdOut({
         exit_code: 128,
-        stderr: "fatal: not a git repository (or any of the parent directories)\n",
+        stderr:
+          "fatal: not a git repository (or any of the parent directories)\n",
       }),
     );
     const r = await createIsolatedWorktree({
@@ -118,7 +119,7 @@ describe("createIsolatedWorktree", () => {
     if (r.ok) {
       // Path is inside the workspace's ignored .termigo dir, and the branch is
       // namespaced, so a leftover one is identifiable.
-       expect(r.worktreePath).toContain("/repo/.wt/");
+      expect(r.worktreePath).toContain("/repo/.wt/");
       expect(r.worktreePath).toContain(r.sandboxId);
       expect(r.branchName).toBe(`termigo-sandbox/${r.sandboxId}`);
       // Registered, so the existing discard path can clean it up.

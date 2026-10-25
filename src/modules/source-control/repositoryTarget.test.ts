@@ -54,12 +54,7 @@ describe("repository targets", () => {
       mode: "follow-context",
     });
     expect(
-      setRepositoryTargetForSpace(
-        targets,
-        "space-a",
-        "local",
-        "/repos/a",
-      ),
+      setRepositoryTargetForSpace(targets, "space-a", "local", "/repos/a"),
     ).toBe(targets);
   });
 

@@ -54,7 +54,9 @@ export function InlineDiffReview({
       )}
     >
       <div className="flex items-center justify-between bg-muted/50 px-3 py-2 border-b border-border/50">
-        <span className="font-semibold text-foreground truncate">{fileDiff.filePath}</span>
+        <span className="font-semibold text-foreground truncate">
+          {fileDiff.filePath}
+        </span>
         <div className="flex items-center gap-1.5 shrink-0">
           <Button
             size="sm"
@@ -120,13 +122,18 @@ export function InlineDiffReview({
                   key={idx}
                   className={cn(
                     "px-2 py-0.5 rounded-sm flex items-start gap-2",
-                    line.type === "add" && "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+                    line.type === "add" &&
+                      "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
                     line.type === "del" && "bg-destructive/10 text-destructive",
                     line.type === "context" && "text-muted-foreground",
                   )}
                 >
                   <span className="select-none text-muted-foreground/60 w-3 text-right">
-                    {line.type === "add" ? "+" : line.type === "del" ? "-" : " "}
+                    {line.type === "add"
+                      ? "+"
+                      : line.type === "del"
+                        ? "-"
+                        : " "}
                   </span>
                   <span className="whitespace-pre">{line.content}</span>
                 </div>

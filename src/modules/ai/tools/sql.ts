@@ -61,7 +61,9 @@ export function buildSqlTools() {
 
         // Try to resolve as a saved connection first
         const saved = findSqlConnection(connection);
-        const resolvedEngine = (engine ?? saved?.engine) as SqlEngine | undefined;
+        const resolvedEngine = (engine ?? saved?.engine) as
+          | SqlEngine
+          | undefined;
         const resolvedConnection = saved ? saved.connection : connection;
 
         if (!resolvedEngine) {

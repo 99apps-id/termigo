@@ -186,7 +186,9 @@ export async function listPrs(
       title: item.title,
       body: item.body,
       state: item.state,
-      author: (item.author as Record<string, unknown> | undefined)?.login ? String((item.author as Record<string, unknown>).login) : "unknown",
+      author: (item.author as Record<string, unknown> | undefined)?.login
+        ? String((item.author as Record<string, unknown>).login)
+        : "unknown",
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
       url: item.url,

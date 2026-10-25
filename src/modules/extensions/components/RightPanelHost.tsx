@@ -5,7 +5,13 @@
  * comes from `panelsRegistry`, the renderer from `panelRenderersRegistry`. On
  * unmount or target change the renderer's cleanup callback runs.
  */
-import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import { createPortal } from "react-dom";
 
 import { Button } from "@/components/ui/button";
@@ -56,7 +62,9 @@ function useControlsSlot(
     // this observer sees every one of those.
     const find = () =>
       setSlot((prev) =>
-        prev?.isConnected ? prev : host.querySelector("[data-tedi-panel-controls]"),
+        prev?.isConnected
+          ? prev
+          : host.querySelector("[data-tedi-panel-controls]"),
       );
     find();
     const observer = new MutationObserver(find);
@@ -108,12 +116,17 @@ export function RightPanelHost({
 
   const containerRef = useRef<HTMLDivElement | null>(null);
 
-  const meta = panels.find((p) => p.extensionId === extensionId && p.item.id === panelId);
+  const meta = panels.find(
+    (p) => p.extensionId === extensionId && p.item.id === panelId,
+  );
   const title = meta?.item.title ?? "";
   const hideHostHeader = meta?.item.hideHostHeader === true;
   // Only a header-less panel has a reason to adopt the controls; one with the
   // host header already shows them there.
-  const controlsSlot = useControlsSlot(containerRef, hideHostHeader && !!dragHandle);
+  const controlsSlot = useControlsSlot(
+    containerRef,
+    hideHostHeader && !!dragHandle,
+  );
 
   useEffect(() => {
     if (!renderer) return;
@@ -124,13 +137,19 @@ export function RightPanelHost({
     try {
       cleanup = renderer(el);
     } catch (err) {
-      console.error(`[extensions] panel renderer for "${extensionId}:${panelId}" threw`, err);
+      console.error(
+        `[extensions] panel renderer for "${extensionId}:${panelId}" threw`,
+        err,
+      );
     }
     return () => {
       try {
         cleanup?.();
       } catch (err) {
-        console.error(`[extensions] panel cleanup for "${extensionId}:${panelId}" threw`, err);
+        console.error(
+          `[extensions] panel cleanup for "${extensionId}:${panelId}" threw`,
+          err,
+        );
       }
       // Clear leftover DOM if the extension forgot to detach.
       if (el.firstChild) {
@@ -213,8 +232,13 @@ export function RightPanelHost({
       )}
       {/* Placeholder sits outside the extension's container so the
           extension's first `replaceChildren()` doesn't wipe it. */}
-      <div ref={containerRef} className="flex min-h-0 flex-1 flex-col overflow-auto" />
-      {controlsSlot && dragHandle ? createPortal(dragHandle, controlsSlot) : null}
+      <div
+        ref={containerRef}
+        className="flex min-h-0 flex-1 flex-col overflow-auto"
+      />
+      {controlsSlot && dragHandle
+        ? createPortal(dragHandle, controlsSlot)
+        : null}
       {!renderer ? (
         <div className="text-muted-foreground pointer-events-none absolute inset-0 top-11 flex items-center justify-center text-[11px]">
           Loading panel…

@@ -47,7 +47,13 @@ export function buildGrepCommand(opts: {
     // caller thinking in globs would match nothing at all.
     (g) => `--include=${shellQuote(g.replace(/^\*\*\//, ""))}`,
   );
-  const flags = ["-r", "-n", "-I", "-E", ...(opts.caseInsensitive ? ["-i"] : [])];
+  const flags = [
+    "-r",
+    "-n",
+    "-I",
+    "-E",
+    ...(opts.caseInsensitive ? ["-i"] : []),
+  ];
   return [
     "grep",
     ...flags,

@@ -231,7 +231,9 @@ describe("hasActiveToolCalls", () => {
 
 describe("isActivelyTyping", () => {
   it("is false during awaiting-approval, idle, or error", () => {
-    expect(isActivelyTyping("streaming", "awaiting-approval", true)).toBe(false);
+    expect(isActivelyTyping("streaming", "awaiting-approval", true)).toBe(
+      false,
+    );
     expect(isActivelyTyping("streaming", "idle", true)).toBe(false);
     expect(isActivelyTyping("streaming", "error", true)).toBe(false);
   });

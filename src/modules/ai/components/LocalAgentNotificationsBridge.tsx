@@ -41,9 +41,9 @@ export function LocalAgentNotificationsBridge() {
 
   useEffect(() => {
     const live = liveStatus(status);
-    useAgentStore.getState().setLocalAgent(
-      live ? { agent: AGENT, status: live } : null,
-    );
+    useAgentStore
+      .getState()
+      .setLocalAgent(live ? { agent: AGENT, status: live } : null);
 
     const was = prev.current;
     prev.current = status;
@@ -87,11 +87,19 @@ export function LocalAgentNotificationsBridge() {
     if (was === status) return;
 
     if (status === "awaiting-approval") {
-      fire("attention", "Termigo needs your approval", "Approve a tool to continue");
+      fire(
+        "attention",
+        "Termigo needs your approval",
+        "Approve a tool to continue",
+      );
     } else if (status === "error") {
       fire("error", "Termigo run failed", error ?? undefined);
     } else if (status === "idle" && isBusy(was)) {
-      if (stoppedByUser || stopReason === "steered" || stopReason === "aborted") {
+      if (
+        stoppedByUser ||
+        stopReason === "steered" ||
+        stopReason === "aborted"
+      ) {
         // User stopped intentionally; no notification needed.
       } else if (isLoopStop) {
         fire(

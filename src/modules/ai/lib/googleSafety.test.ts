@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  GEMINI_SAFETY_SETTINGS,
-  injectSafetySettings,
-} from "./googleSafety";
+import { GEMINI_SAFETY_SETTINGS, injectSafetySettings } from "./googleSafety";
 
 describe("GEMINI_SAFETY_SETTINGS", () => {
   it("unlocks the four adjustable categories and skips civic integrity", () => {
@@ -12,9 +9,9 @@ describe("GEMINI_SAFETY_SETTINGS", () => {
     expect(categories).toContain("HARM_CATEGORY_HARASSMENT");
     // Google rejects BLOCK_NONE for civic integrity, so it must not be sent.
     expect(categories).not.toContain("HARM_CATEGORY_CIVIC_INTEGRITY");
-    expect(GEMINI_SAFETY_SETTINGS.every((s) => s.threshold === "BLOCK_NONE")).toBe(
-      true,
-    );
+    expect(
+      GEMINI_SAFETY_SETTINGS.every((s) => s.threshold === "BLOCK_NONE"),
+    ).toBe(true);
   });
 });
 

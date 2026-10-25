@@ -611,8 +611,7 @@ export const MODELS = [
     provider: "anthropic",
     label: "Claude Fable 5.1",
     hint: "Frontier",
-    description:
-      "Deepest reasoning and long-horizon agentic work.",
+    description: "Deepest reasoning and long-horizon agentic work.",
     capabilities: { intelligence: 5, speed: 2, cost: 1 },
     tags: ["vision", "reasoning", "tools", "coding"],
     supportsTemperature: false,
@@ -623,8 +622,7 @@ export const MODELS = [
     provider: "anthropic",
     label: "Claude Opus 5.5",
     hint: "Flagship",
-    description:
-      "Long-running agentic coding and knowledge work.",
+    description: "Long-running agentic coding and knowledge work.",
     capabilities: { intelligence: 5, speed: 3, cost: 1 },
     tags: ["vision", "reasoning", "tools", "coding"],
     supportsTemperature: false,
@@ -635,8 +633,7 @@ export const MODELS = [
     provider: "anthropic",
     label: "Claude Sonnet 5.5",
     hint: "Frontier",
-    description:
-      "Frontier speed and intelligence for agentic coding.",
+    description: "Frontier speed and intelligence for agentic coding.",
     capabilities: { intelligence: 5, speed: 4, cost: 2 },
     tags: ["vision", "reasoning", "tools", "coding"],
     supportsTemperature: false,
@@ -811,7 +808,8 @@ export const MODELS = [
     provider: "google",
     label: "Gemini 4 Argon",
     hint: "Flagship",
-    description: "Next-generation flagship reasoning and agentic model with 2M context.",
+    description:
+      "Next-generation flagship reasoning and agentic model with 2M context.",
     capabilities: { intelligence: 5, speed: 3, cost: 2 },
     tags: ["vision", "reasoning", "tools", "coding"],
   },
@@ -1778,7 +1776,8 @@ export const MODELS = [
     provider: "antigravity",
     label: "Gemini 4 Argon (Antigravity)",
     hint: "Frontier",
-    description: "Next-generation flagship Gemini through a Google Antigravity login.",
+    description:
+      "Next-generation flagship Gemini through a Google Antigravity login.",
     capabilities: { intelligence: 5, speed: 3, cost: 5 },
     tags: ["reasoning", "tools", "coding"],
     apiModelId: "gemini-4-argon",
@@ -1788,7 +1787,8 @@ export const MODELS = [
     provider: "antigravity",
     label: "Gemini 3.1 Pro (Antigravity)",
     hint: "Reasoning",
-    description: "Frontier reasoning Gemini through a Google Antigravity login.",
+    description:
+      "Frontier reasoning Gemini through a Google Antigravity login.",
     capabilities: { intelligence: 5, speed: 4, cost: 5 },
     tags: ["reasoning", "tools", "coding"],
     apiModelId: "gemini-3.1-pro",
@@ -1798,7 +1798,8 @@ export const MODELS = [
     provider: "antigravity",
     label: "Gemini 3.8 Flash (Antigravity)",
     hint: "Fast",
-    description: "Fast Gemini with medium thinking through a Google Antigravity login.",
+    description:
+      "Fast Gemini with medium thinking through a Google Antigravity login.",
     capabilities: { intelligence: 4, speed: 5, cost: 5 },
     tags: ["fast", "tools", "coding"],
     apiModelId: "gemini-3.8-flash-medium",
@@ -1808,7 +1809,8 @@ export const MODELS = [
     provider: "antigravity",
     label: "Gemini 3.8 Flash High (Antigravity)",
     hint: "Deep Reasoning",
-    description: "Deep thinking Gemini Flash through a Google Antigravity login.",
+    description:
+      "Deep thinking Gemini Flash through a Google Antigravity login.",
     capabilities: { intelligence: 5, speed: 4, cost: 5 },
     tags: ["reasoning", "tools", "coding"],
     apiModelId: "gemini-3.8-flash-high",

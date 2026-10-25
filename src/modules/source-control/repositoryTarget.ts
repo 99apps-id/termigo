@@ -5,9 +5,7 @@ export type SourceControlRepositoryTarget =
   | { mode: "follow-context" }
   | { mode: "fixed"; repoRoot: string };
 
-export type SourceControlRepositoryTargets = Readonly<
-  Record<string, string>
->;
+export type SourceControlRepositoryTargets = Readonly<Record<string, string>>;
 
 const FOLLOW_CONTEXT: SourceControlRepositoryTarget = {
   mode: "follow-context",
@@ -35,9 +33,7 @@ export function repositoryTargetForSpace(
   workspaceKey: string,
 ): SourceControlRepositoryTarget {
   const repoRoot = targets[targetScopeKey(spaceId, workspaceKey)];
-  return repoRoot
-    ? { mode: "fixed", repoRoot }
-    : FOLLOW_CONTEXT;
+  return repoRoot ? { mode: "fixed", repoRoot } : FOLLOW_CONTEXT;
 }
 
 export function setRepositoryTargetForSpace(

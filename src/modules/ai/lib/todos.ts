@@ -97,7 +97,8 @@ export function formatTodoStatusBlock(
   // positional one so nothing collides in the seen-set.
   const withIds = items.map((t, i) => ({ ...t, id: t.id ?? `idx-${i}` }));
   const lines = todoTree(withIds).map(
-    ([t, depth]) => `${"  ".repeat(Math.min(depth, 4))}- [${t.status}] ${t.title}`,
+    ([t, depth]) =>
+      `${"  ".repeat(Math.min(depth, 4))}- [${t.status}] ${t.title}`,
   );
   return [
     "Current todo list — keep it accurate: mark each item [completed] the moment you finish it, then set the next [in_progress].",

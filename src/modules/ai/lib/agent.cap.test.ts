@@ -92,8 +92,6 @@ describe("runAgentStream message-count cap", () => {
     const result = messages;
     expect(result.length).toBe(total);
     // Verify tail preserved
-    expect(result[result.length - 1]).toBe(
-      messages[messages.length - 1],
-    );
+    expect(result[result.length - 1]).toBe(messages[messages.length - 1]);
   });
 });

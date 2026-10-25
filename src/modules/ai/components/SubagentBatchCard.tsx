@@ -131,10 +131,13 @@ export function extractWorkerData(
         ? (task.depends_on as number[])
         : undefined;
 
-      const matchedRun = [...runs].reverse().find(
-        (r) =>
-          r.type === rawType && (r.label === label || r.label === task.prompt),
-      );
+      const matchedRun = [...runs]
+        .reverse()
+        .find(
+          (r) =>
+            r.type === rawType &&
+            (r.label === label || r.label === task.prompt),
+        );
 
       const resError = typeof res?.error === "string" ? res.error : undefined;
       const resSkipped =
@@ -250,8 +253,9 @@ export const SubagentBatchCard = memo(function SubagentBatchCard({
 
   const sessionId = useChatStore((s) => s.activeSessionId) ?? "";
   const runs =
-    useSubagentRunStore((s) => (sessionId ? s.bySession[sessionId] : undefined)) ??
-    [];
+    useSubagentRunStore((s) =>
+      sessionId ? s.bySession[sessionId] : undefined,
+    ) ?? [];
 
   const { workers, note, maxConcurrency } = useMemo(
     () => extractWorkerData(toolName, input, output, runs),
@@ -276,7 +280,8 @@ export const SubagentBatchCard = memo(function SubagentBatchCard({
     0,
   );
   const totalTokens = workers.reduce(
-    (acc, w) => acc + (w.usage ? w.usage.inputTokens + w.usage.outputTokens : 0),
+    (acc, w) =>
+      acc + (w.usage ? w.usage.inputTokens + w.usage.outputTokens : 0),
     0,
   );
 
@@ -284,7 +289,8 @@ export const SubagentBatchCard = memo(function SubagentBatchCard({
     <div
       className={cn(
         "my-2 overflow-hidden rounded-lg border border-border/80 bg-card text-[12px] shadow-xs transition-all dark:border-border/70 dark:bg-card/60",
-        inProgress && "border-primary/50 bg-primary/10 dark:border-primary/40 dark:bg-primary/5",
+        inProgress &&
+          "border-primary/50 bg-primary/10 dark:border-primary/40 dark:bg-primary/5",
         (errorCount > 0 || unverifiedCount > 0) &&
           !inProgress &&
           "border-amber-500/50",
@@ -337,15 +343,15 @@ export const SubagentBatchCard = memo(function SubagentBatchCard({
           {inProgress ? (
             <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary">
               <Shimmer as="span" duration={1} iterations="infinite">
-                {runningCount > 0
-                  ? `${runningCount} active`
-                  : "Dispatching..."}
+                {runningCount > 0 ? `${runningCount} active` : "Dispatching..."}
               </Shimmer>
             </span>
           ) : errorCount > 0 ? (
             <span className="inline-flex items-center gap-1 rounded border border-destructive/20 bg-destructive/15 px-1.5 py-0.5 text-[10.5px] font-semibold text-destructive dark:border-transparent dark:bg-destructive/20 dark:text-red-300">
               <HugeiconsIcon icon={AlertCircleIcon} size={11} strokeWidth={2} />
-              <span>{errorCount} issue{errorCount === 1 ? "" : "s"}</span>
+              <span>
+                {errorCount} issue{errorCount === 1 ? "" : "s"}
+              </span>
             </span>
           ) : unverifiedCount > 0 ? (
             <span className="inline-flex items-center gap-1 rounded border border-amber-500/30 bg-amber-500/15 px-1.5 py-0.5 text-[10.5px] font-semibold text-amber-800 dark:text-amber-300">
@@ -448,8 +454,10 @@ const WorkerRow = memo(function WorkerRow({
     <div
       className={cn(
         "rounded-md border border-border/80 bg-card p-2 shadow-2xs transition-all dark:border-border/50 dark:bg-background/50",
-        isRunning && "border-primary/50 bg-primary/10 dark:border-primary/40 dark:bg-primary/5",
-        isError && "border-destructive/40 bg-destructive/10 dark:bg-destructive/5",
+        isRunning &&
+          "border-primary/50 bg-primary/10 dark:border-primary/40 dark:bg-primary/5",
+        isError &&
+          "border-destructive/40 bg-destructive/10 dark:bg-destructive/5",
         isDone &&
           worker.inconclusive &&
           "border-amber-500/40 bg-amber-500/5 dark:bg-amber-500/5",
@@ -505,7 +513,11 @@ const WorkerRow = memo(function WorkerRow({
 
               {worker.dependsOn && worker.dependsOn.length > 0 && (
                 <span className="inline-flex items-center gap-1 rounded bg-muted/60 px-1.5 py-0.2 text-[9.5px] text-muted-foreground">
-                  <HugeiconsIcon icon={GitForkIcon} size={9} strokeWidth={1.8} />
+                  <HugeiconsIcon
+                    icon={GitForkIcon}
+                    size={9}
+                    strokeWidth={1.8}
+                  />
                   <span>waits for #{worker.dependsOn.join(", #")}</span>
                 </span>
               )}
@@ -578,7 +590,9 @@ const WorkerRow = memo(function WorkerRow({
       {expanded && worker.summary && (
         <div className="mt-2 border-t border-border/40 pt-2 text-[11px] leading-relaxed">
           <div className="flex items-center justify-between pb-1 text-[10px] text-muted-foreground">
-            <span className="font-medium uppercase tracking-wider">Summary</span>
+            <span className="font-medium uppercase tracking-wider">
+              Summary
+            </span>
             <button
               type="button"
               onClick={handleCopySummary}

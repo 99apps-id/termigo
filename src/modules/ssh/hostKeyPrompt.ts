@@ -47,7 +47,9 @@ export function hostKeyOwners(
   target: { host: string; connectionId: string },
   jumps: readonly { host: string; connectionId: string }[],
 ): string[] {
-  const ids = jumps.filter((j) => j.host === promptHost).map((j) => j.connectionId);
+  const ids = jumps
+    .filter((j) => j.host === promptHost)
+    .map((j) => j.connectionId);
   if (target.host === promptHost) ids.unshift(target.connectionId);
   return [...new Set(ids)];
 }
@@ -68,5 +70,6 @@ export const useHostKeyPrompt = create<HostKeyPromptState>((set, get) => ({
     void confirmHostKey(promptId, accept).catch(() => {});
     set((s) => ({ queue: s.queue.filter((p) => p.promptId !== promptId) }));
   },
-  dismiss: (promptId) => set((s) => ({ queue: s.queue.filter((p) => p.promptId !== promptId) })),
+  dismiss: (promptId) =>
+    set((s) => ({ queue: s.queue.filter((p) => p.promptId !== promptId) })),
 }));

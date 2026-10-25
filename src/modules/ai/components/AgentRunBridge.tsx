@@ -143,19 +143,14 @@ function Bridge({
       -1,
     );
     const candidateParts =
-      lastStepStartIndex >= 0
-        ? m.parts.slice(lastStepStartIndex + 1)
-        : m.parts;
+      lastStepStartIndex >= 0 ? m.parts.slice(lastStepStartIndex + 1) : m.parts;
     for (const p of candidateParts) {
       const part = p as {
         state?: string;
         type?: string;
         output?: unknown;
       };
-      if (
-        part.type?.startsWith("tool-") ||
-        part.type === "dynamic-tool"
-      ) {
+      if (part.type?.startsWith("tool-") || part.type === "dynamic-tool") {
         if (
           part.state === "input-available" ||
           part.state === "approval-responded" ||
@@ -179,7 +174,8 @@ function Bridge({
     if (approvalsPending > 0) runStatus = "awaiting-approval";
     else if (status === "submitted") runStatus = "thinking";
     else if (status === "streaming") runStatus = "streaming";
-    else if (isResumingApproval(messages) || hasActiveTools) runStatus = "thinking";
+    else if (isResumingApproval(messages) || hasActiveTools)
+      runStatus = "thinking";
     else if (status === "error") runStatus = "error";
     else runStatus = "idle";
     patch({
@@ -189,7 +185,14 @@ function Bridge({
       ...(runStatus === "idle" || runStatus === "error" ? { step: null } : {}),
       ...(runStatus === "idle" ? { error: null } : {}),
     });
-  }, [status, approvalsPending, pendingApprovals, hasActiveTools, messages, patch]);
+  }, [
+    status,
+    approvalsPending,
+    pendingApprovals,
+    hasActiveTools,
+    messages,
+    patch,
+  ]);
 
   // A run that stopped leaves its `in_progress` todo saying work is under way,
   // and nothing ever revisits it - this app's own store had five frozen that

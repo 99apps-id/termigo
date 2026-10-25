@@ -37,10 +37,8 @@ const OAUTH_DESCRIPTIONS: Record<OAuthProviderId, string> = {
     "Sign in with xAI Grok via device authorization to use Grok models.",
   "github-copilot":
     "Sign in with your GitHub account to run models through GitHub Copilot.",
-  antigravity:
-    "Sign in with Google Cloud Code / Antigravity through OAuth.",
-  muse:
-    "Sign in with Meta Muse Code via device authorization.",
+  antigravity: "Sign in with Google Cloud Code / Antigravity through OAuth.",
+  muse: "Sign in with Meta Muse Code via device authorization.",
 };
 
 type Props = {
@@ -54,7 +52,9 @@ export function OAuthProviderCard({ providerId }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [authUrl, setAuthUrl] = useState<string | null>(null);
-  const [devicePrompt, setDevicePrompt] = useState<DevicePromptPayload | null>(null);
+  const [devicePrompt, setDevicePrompt] = useState<DevicePromptPayload | null>(
+    null,
+  );
   const [copied, setCopied] = useState(false);
 
   const reload = useCallback(() => {
@@ -76,7 +76,10 @@ export function OAuthProviderCard({ providerId }: Props) {
       if (providerId === "chatgpt") setAuthUrl(e.payload);
     });
     const unPrompt = listen<DevicePromptPayload>("oauth-device-prompt", (e) => {
-      if (e.payload.provider === providerId || (providerId === "chatgpt" && e.payload.provider === "openai-codex")) {
+      if (
+        e.payload.provider === providerId ||
+        (providerId === "chatgpt" && e.payload.provider === "openai-codex")
+      ) {
         setDevicePrompt(e.payload);
       }
     });
@@ -143,7 +146,9 @@ export function OAuthProviderCard({ providerId }: Props) {
       ) : account ? (
         <>
           <div className="min-w-0 text-[11px]">
-            <div className="truncate">{account.email ?? `${provider.label} account`}</div>
+            <div className="truncate">
+              {account.email ?? `${provider.label} account`}
+            </div>
             <div className="text-[10.5px] text-muted-foreground">
               {account.plan ? `Plan: ${account.plan}. ` : ""}
               Connected via OAuth subscription.
@@ -170,7 +175,9 @@ export function OAuthProviderCard({ providerId }: Props) {
 
           {devicePrompt ? (
             <div className="rounded border border-amber-500/30 bg-amber-500/10 p-2 text-[11px]">
-              <div className="font-medium text-amber-500">Device verification required:</div>
+              <div className="font-medium text-amber-500">
+                Device verification required:
+              </div>
               <div className="mt-1 flex items-center gap-2">
                 <span>Enter code:</span>
                 <code className="rounded bg-background px-1.5 py-0.5 font-mono text-[12px] font-semibold text-foreground">
@@ -201,7 +208,11 @@ export function OAuthProviderCard({ providerId }: Props) {
                     void openUrl(devicePrompt.verification_uri);
                   }}
                 >
-                  <HugeiconsIcon icon={ArrowUpRight01Icon} size={10} strokeWidth={2} />
+                  <HugeiconsIcon
+                    icon={ArrowUpRight01Icon}
+                    size={10}
+                    strokeWidth={2}
+                  />
                   Open {devicePrompt.verification_uri}
                 </Button>
               </div>

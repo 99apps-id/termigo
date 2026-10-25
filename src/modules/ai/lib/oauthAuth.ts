@@ -1,10 +1,6 @@
 import { emitKeysChanged } from "@/modules/settings/store";
 import { invoke } from "@tauri-apps/api/core";
-import {
-  getProvider,
-  KEYRING_SERVICE,
-  type ProviderId,
-} from "../config";
+import { getProvider, KEYRING_SERVICE, type ProviderId } from "../config";
 
 export type OAuthTokens = {
   provider: string;
@@ -131,7 +127,8 @@ async function refreshOAuthTokens(
 
   const promise = (async () => {
     try {
-      const backendProvider = provider === "chatgpt" ? "openai-codex" : provider;
+      const backendProvider =
+        provider === "chatgpt" ? "openai-codex" : provider;
       const refreshed = await invoke<OAuthTokens>("oauth_refresh", {
         provider: backendProvider,
         refreshToken: current.refresh_token,

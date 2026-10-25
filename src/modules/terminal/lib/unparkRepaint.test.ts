@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { shouldRepaintOnUnpark, type UnparkRepaintState } from "./unparkRepaint";
+import {
+  shouldRepaintOnUnpark,
+  type UnparkRepaintState,
+} from "./unparkRepaint";
 
 const base: UnparkRepaintState = {
   wasParked: true,

@@ -48,7 +48,9 @@ export function buildFileOpsTools(ctx: ToolContext) {
       needsApproval: true,
       execute: async ({ from, to }) => {
         const remote = ctx.getRemoteSession();
-        const fromT = routePath(remote, from, (p) => resolvePath(p, ctx.getCwd()));
+        const fromT = routePath(remote, from, (p) =>
+          resolvePath(p, ctx.getCwd()),
+        );
         const toT = routePath(remote, to, (p) => resolvePath(p, ctx.getCwd()));
         if (fromT.kind === "error") return { error: fromT.reason, path: from };
         if (toT.kind === "error") return { error: toT.reason, path: to };
@@ -69,9 +71,19 @@ export function buildFileOpsTools(ctx: ToolContext) {
           }
           try {
             await sftpRename(fromT.sessionId, fromT.path, toT.path);
-            return { moved: true, remote: true, from: fromT.path, to: toT.path };
+            return {
+              moved: true,
+              remote: true,
+              from: fromT.path,
+              to: toT.path,
+            };
           } catch (e) {
-            return { error: String(e), from: fromT.path, to: toT.path, remote: true };
+            return {
+              error: String(e),
+              from: fromT.path,
+              to: toT.path,
+              remote: true,
+            };
           }
         }
 
@@ -111,7 +123,9 @@ export function buildFileOpsTools(ctx: ToolContext) {
       inputSchema: z.object({
         source: z
           .string()
-          .describe("File or directory to copy, absolute or relative to the terminal cwd."),
+          .describe(
+            "File or directory to copy, absolute or relative to the terminal cwd.",
+          ),
         dest_dir: z
           .string()
           .describe("Existing directory to copy INTO. The name is preserved."),
@@ -129,9 +143,15 @@ export function buildFileOpsTools(ctx: ToolContext) {
         }
         const sourcePath = resolvePath(source, ctx.getCwd());
         const destPath = resolvePath(dest_dir, ctx.getCwd());
-        const src = await checkWritableCanonical(sourcePath, native.canonicalize);
+        const src = await checkWritableCanonical(
+          sourcePath,
+          native.canonicalize,
+        );
         if (!src.ok) return { error: src.reason, path: sourcePath };
-        const dest = await checkWritableCanonical(destPath, native.canonicalize);
+        const dest = await checkWritableCanonical(
+          destPath,
+          native.canonicalize,
+        );
         if (!dest.ok) return { error: dest.reason, path: destPath };
 
         const policy = await enforcePolicy({
@@ -163,7 +183,9 @@ export function buildFileOpsTools(ctx: ToolContext) {
       inputSchema: z.object({
         path: z
           .string()
-          .describe("Path to delete, absolute or relative to the terminal cwd."),
+          .describe(
+            "Path to delete, absolute or relative to the terminal cwd.",
+          ),
       }),
       needsApproval: true,
       execute: async ({ path }) => {
@@ -183,7 +205,10 @@ export function buildFileOpsTools(ctx: ToolContext) {
         }
 
         const reqPath = target.path;
-        const safety = await checkWritableCanonical(reqPath, native.canonicalize);
+        const safety = await checkWritableCanonical(
+          reqPath,
+          native.canonicalize,
+        );
         if (!safety.ok) return { error: safety.reason, path: reqPath };
         const policy = await enforcePolicy({
           toolName: "delete_file",

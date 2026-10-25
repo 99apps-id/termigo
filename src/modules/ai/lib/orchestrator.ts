@@ -274,12 +274,7 @@ export async function runPipeline(
         break;
       }
       pending.delete(step.id);
-      const result = await executeStep(
-        step,
-        toolContext,
-        results,
-        abortSignal,
-      );
+      const result = await executeStep(step, toolContext, results, abortSignal);
 
       if (result.ok) {
         completed.add(step.id);

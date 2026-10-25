@@ -52,7 +52,9 @@ describe("parseHooksFile", () => {
   });
 
   it("rejects empty command", () => {
-    expect(parseHooksFile(JSON.stringify({ PreToolUse: [{ command: "" }] }))).toEqual({
+    expect(
+      parseHooksFile(JSON.stringify({ PreToolUse: [{ command: "" }] })),
+    ).toEqual({
       ok: false,
       reason: "hook command must not be empty",
     });
@@ -60,16 +62,21 @@ describe("parseHooksFile", () => {
 
   it("rejects multi-line command", () => {
     expect(
-      parseHooksFile(JSON.stringify({ PreToolUse: [{ command: "echo\nrm -rf /" }] })),
+      parseHooksFile(
+        JSON.stringify({ PreToolUse: [{ command: "echo\nrm -rf /" }] }),
+      ),
     ).toEqual({
       ok: false,
-      reason: "hook command must be single-line (no CR/LF or control characters)",
+      reason:
+        "hook command must be single-line (no CR/LF or control characters)",
     });
   });
 
   it("rejects empty tool filter", () => {
     expect(
-      parseHooksFile(JSON.stringify({ PreToolUse: [{ command: "echo", tool: "" }] })),
+      parseHooksFile(
+        JSON.stringify({ PreToolUse: [{ command: "echo", tool: "" }] }),
+      ),
     ).toEqual({
       ok: false,
       reason: "hook tool filter must not be empty when set",
@@ -114,9 +121,7 @@ describe("legacy Stop normalization", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.config.RunStop).toEqual([{ command: "echo done" }]);
-    expect(
-      (result.config as Record<string, unknown>).Stop,
-    ).toBeUndefined();
+    expect((result.config as Record<string, unknown>).Stop).toBeUndefined();
   });
 
   it("appends legacy Stop rules after existing RunStop rules", () => {

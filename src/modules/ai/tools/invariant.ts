@@ -146,7 +146,8 @@ export function buildInvariantTools(ctx: ToolContext) {
     }),
 
     list_invariants: tool({
-      description: "List all active pinned invariants and architectural rules. Read-only, auto-executes.",
+      description:
+        "List all active pinned invariants and architectural rules. Read-only, auto-executes.",
       inputSchema: z.object({}),
       execute: async () => {
         return {

@@ -19,7 +19,11 @@ import { cn } from "@/lib/utils";
 import { humanizeFsError } from "@/lib/fsError";
 import { memo, useCallback, useState } from "react";
 import { InlineInput } from "./InlineInput";
-import { copyToClipboard, relativePath, revealInFinder } from "./lib/contextActions";
+import {
+  copyToClipboard,
+  relativePath,
+  revealInFinder,
+} from "./lib/contextActions";
 import { useGitDecoration } from "./lib/gitDecorations";
 import { fileIconUrl, folderIconUrl } from "./lib/iconResolver";
 import { COMPACT_CONTENT, COMPACT_ITEM } from "./lib/menuItemClass";
@@ -72,7 +76,9 @@ function FileTreeNodeImpl({
 
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  const iconUrl = isDir ? folderIconUrl(entry.name, isExpanded) : fileIconUrl(entry.name);
+  const iconUrl = isDir
+    ? folderIconUrl(entry.name, isExpanded)
+    : fileIconUrl(entry.name);
 
   // VSCode-style git status: colored name + M/A/U badge on files, rolled-up
   // color on folders with changed descendants, plus an ignored flag.
@@ -91,7 +97,9 @@ function FileTreeNodeImpl({
   const isSelected = selectedPath === path;
 
   const pendingInThisDir =
-    isDir && isExpanded && tree.pendingCreate?.parentPath === path ? tree.pendingCreate : null;
+    isDir && isExpanded && tree.pendingCreate?.parentPath === path
+      ? tree.pendingCreate
+      : null;
 
   // New file/folder target: directories target themselves, files target parent.
   const createTarget = isDir ? path : parentPath;
@@ -146,12 +154,19 @@ function FileTreeNodeImpl({
                   <ChevronRight
                     size={12}
                     strokeWidth={2.25}
-                    className={cn("transition-transform", isExpanded && "rotate-90")}
+                    className={cn(
+                      "transition-transform",
+                      isExpanded && "rotate-90",
+                    )}
                   />
                 ) : null}
               </span>
               {iconUrl ? (
-                <img src={iconUrl} alt="" className={cn("size-4 shrink-0", dim && "opacity-60")} />
+                <img
+                  src={iconUrl}
+                  alt=""
+                  className={cn("size-4 shrink-0", dim && "opacity-60")}
+                />
               ) : (
                 <span className="size-4 shrink-0" />
               )}
@@ -195,24 +210,36 @@ function FileTreeNodeImpl({
           }}
         >
           {!isDir && (
-            <ContextMenuItem className={COMPACT_ITEM} onSelect={() => onOpenFile(path, true)}>
+            <ContextMenuItem
+              className={COMPACT_ITEM}
+              onSelect={() => onOpenFile(path, true)}
+            >
               Open
             </ContextMenuItem>
           )}
           {isHtml && onPreviewInBrowser && (
-            <ContextMenuItem className={COMPACT_ITEM} onSelect={() => onPreviewInBrowser(path)}>
+            <ContextMenuItem
+              className={COMPACT_ITEM}
+              onSelect={() => onPreviewInBrowser(path)}
+            >
               Open in Browser
             </ContextMenuItem>
           )}
           {isDir && onRevealInTerminal && (
-            <ContextMenuItem className={COMPACT_ITEM} onSelect={() => onRevealInTerminal(path)}>
+            <ContextMenuItem
+              className={COMPACT_ITEM}
+              onSelect={() => onRevealInTerminal(path)}
+            >
               Open in Terminal
             </ContextMenuItem>
           )}
           {/* Local-only: revealInFinder hands the path to the host OS file
               manager, which cannot resolve a remote POSIX path. */}
           {!remote && (
-            <ContextMenuItem className={COMPACT_ITEM} onSelect={() => void revealInFinder(path)}>
+            <ContextMenuItem
+              className={COMPACT_ITEM}
+              onSelect={() => void revealInFinder(path)}
+            >
               Reveal in Finder
             </ContextMenuItem>
           )}
@@ -230,7 +257,10 @@ function FileTreeNodeImpl({
             New Folder
           </ContextMenuItem>
           <ContextMenuSeparator />
-          <ContextMenuItem className={COMPACT_ITEM} onSelect={() => void copyToClipboard(path)}>
+          <ContextMenuItem
+            className={COMPACT_ITEM}
+            onSelect={() => void copyToClipboard(path)}
+          >
             Copy Path
           </ContextMenuItem>
           <ContextMenuItem
@@ -242,13 +272,19 @@ function FileTreeNodeImpl({
           <ContextMenuSeparator />
           {onAttachToAgent && (
             <>
-              <ContextMenuItem className={COMPACT_ITEM} onSelect={() => onAttachToAgent(path)}>
+              <ContextMenuItem
+                className={COMPACT_ITEM}
+                onSelect={() => onAttachToAgent(path)}
+              >
                 Attach to Agent
               </ContextMenuItem>
               <ContextMenuSeparator />
             </>
           )}
-          <ContextMenuItem className={COMPACT_ITEM} onSelect={() => tree.beginRename(path)}>
+          <ContextMenuItem
+            className={COMPACT_ITEM}
+            onSelect={() => tree.beginRename(path)}
+          >
             Rename
           </ContextMenuItem>
           <ContextMenuItem
@@ -275,7 +311,10 @@ function FileTreeNodeImpl({
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onClick={() => void tree.deletePath(path)}>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => void tree.deletePath(path)}
+            >
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -290,14 +329,18 @@ function FileTreeNodeImpl({
           <span className="size-3.5 shrink-0" />
           <img
             src={
-              pendingInThisDir.kind === "dir" ? folderIconUrl("", false) : fileIconUrl("untitled")
+              pendingInThisDir.kind === "dir"
+                ? folderIconUrl("", false)
+                : fileIconUrl("untitled")
             }
             alt=""
             className="size-4 shrink-0 opacity-70"
           />
           <InlineInput
             initial=""
-            placeholder={pendingInThisDir.kind === "dir" ? "New folder" : "New file"}
+            placeholder={
+              pendingInThisDir.kind === "dir" ? "New folder" : "New file"
+            }
             onCommit={tree.commitCreate}
             onCancel={tree.cancelCreate}
           />
@@ -324,7 +367,9 @@ function FileTreeNodeImpl({
             <div
               className={cn(
                 "flex items-center gap-1 px-2 py-0.5 text-[11px]",
-                err.kind === "other" ? "text-destructive" : "text-muted-foreground",
+                err.kind === "other"
+                  ? "text-destructive"
+                  : "text-muted-foreground",
               )}
               style={{ paddingLeft: 6 + (depth + 1) * 12 + 18 }}
               title={err.raw}

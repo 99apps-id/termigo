@@ -123,7 +123,8 @@ function TodoRow({ todo, depth = 0 }: { todo: Todo; depth?: number }) {
       style={depth > 0 ? { marginLeft: Math.min(depth, 4) * 12 } : undefined}
       className={cn(
         "flex items-start gap-2 rounded px-1.5 py-1 text-[11px] leading-snug",
-        isInProgress && "border-l-2 border-primary bg-primary/10 dark:border-foreground/50 dark:bg-muted/40",
+        isInProgress &&
+          "border-l-2 border-primary bg-primary/10 dark:border-foreground/50 dark:bg-muted/40",
       )}
     >
       <span className="mt-[2px] inline-flex size-3.5 shrink-0 items-center justify-center">

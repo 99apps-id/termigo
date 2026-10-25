@@ -7,7 +7,11 @@ import { createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { onIconsReady, resolveExtIcon } from "@/lib/iconRegistry";
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
-import { emit as tauriEmit, listen as tauriListen, type UnlistenFn } from "@tauri-apps/api/event";
+import {
+  emit as tauriEmit,
+  listen as tauriListen,
+  type UnlistenFn,
+} from "@tauri-apps/api/event";
 import { toast } from "@/components/ui/toast";
 import { resolveModel } from "@/modules/ai/config";
 
@@ -18,7 +22,11 @@ import type {
   ContributedPanel,
   ContributedSetting,
 } from "./manifest";
-import { PermissionDeniedError, isInvokeAllowed, requirePermission } from "./permissions";
+import {
+  PermissionDeniedError,
+  isInvokeAllowed,
+  requirePermission,
+} from "./permissions";
 import { useRightPanelStore } from "./rightPanelStore";
 import {
   mountFolderTree,
@@ -29,7 +37,11 @@ import {
   closeForwardForConnection as closeSshForwardForConnection,
   openForwardForConnection as openSshForwardForConnection,
 } from "@/modules/ssh/tunnel";
-import { mountCodeEditor, type CodeEditorHandle, type CodeEditorOptions } from "./codeEditor";
+import {
+  mountCodeEditor,
+  type CodeEditorHandle,
+  type CodeEditorOptions,
+} from "./codeEditor";
 import {
   aiToolsRegistry,
   commandsRegistry,
@@ -65,7 +77,11 @@ import {
   setActiveWorkspace as setActiveWorkspaceBridge,
 } from "./workspaceMgmtBridge";
 import type { ExtensionTabState } from "@/modules/tabs/lib/useTabs";
-import { getActiveEditor, setActiveEditorContent, type ActiveEditorSnapshot } from "./editorBridge";
+import {
+  getActiveEditor,
+  setActiveEditorContent,
+  type ActiveEditorSnapshot,
+} from "./editorBridge";
 
 export type ExtensionRuntime = {
   id: string;
@@ -90,13 +106,18 @@ async function detectOs(): Promise<ExtensionOs> {
     const rawPlatform = mod.platform();
     const rawArch = mod.arch();
     const platform: ExtensionOs["platform"] =
-      rawPlatform === "windows" || rawPlatform === "macos" || rawPlatform === "linux"
+      rawPlatform === "windows" ||
+      rawPlatform === "macos" ||
+      rawPlatform === "linux"
         ? rawPlatform
         : rawPlatform === "android" || rawPlatform === "ios"
           ? rawPlatform
           : "unknown";
     const arch: ExtensionOs["arch"] =
-      rawArch === "x86_64" || rawArch === "aarch64" || rawArch === "x86" || rawArch === "arm"
+      rawArch === "x86_64" ||
+      rawArch === "aarch64" ||
+      rawArch === "x86" ||
+      rawArch === "arm"
         ? rawArch
         : "unknown";
     cachedOs = { platform, arch };
@@ -133,7 +154,14 @@ export type AppContextSnapshot = {
    *  `terminalCountAll` when "all open terminals" is the intent. */
   terminalCount: number;
   /** Kind of the focused tab. `null` when no tab is active. */
-  activeTabKind: "terminal" | "ssh" | "editor" | "diff" | "browser" | "ext" | null;
+  activeTabKind:
+    | "terminal"
+    | "ssh"
+    | "editor"
+    | "diff"
+    | "browser"
+    | "ext"
+    | null;
   /** Total workspaces the user has open in the workspace store. ≥ 1. */
   workspaceCount: number;
   /** Sum of terminal leaves across every workspace (active workspace uses
@@ -238,7 +266,9 @@ export type ExtensionContext = {
     /** Create a new workspace and switch to it; resolves with its id. Requires
      *  `workspaces:manage`. Switching to the fresh (empty) workspace auto-seeds
      *  a default terminal tab, so the new workspace becomes visible to a mirror. */
-    createWorkspace(name: string): Promise<{ ok: boolean; wsId?: string; error?: string }>;
+    createWorkspace(
+      name: string,
+    ): Promise<{ ok: boolean; wsId?: string; error?: string }>;
     /** Switch the active workspace by id. Requires `workspaces:manage`. */
     setActiveWorkspace(wsId: string): Promise<{ ok: boolean; error?: string }>;
   };
@@ -281,7 +311,10 @@ export type ExtensionContext = {
     stop(): void;
   };
   /** Invoke a Rust command. Each command id needs an `invoke:` permission. */
-  invoke<T = unknown>(command: string, args?: Record<string, unknown>): Promise<T>;
+  invoke<T = unknown>(
+    command: string,
+    args?: Record<string, unknown>,
+  ): Promise<T>;
   /** Invoke a Rust command that streams events through a Tauri `Channel`
    *  (e.g. `pty_attach`, `ssh_attach`). The channel is created internally and
    *  passed as the `onEvent` arg. Gated by the same `invoke:<command>`
@@ -311,7 +344,10 @@ export type ExtensionContext = {
     /** Mount TEDI's built-in folder explorer into a container the extension
      *  owns. No permission required: read-only render, click-to-open routes
      *  through the same workspace bridge as the built-in explorer. */
-    mountFolderTree(container: HTMLElement, options: MountFolderTreeOptions): MountedFolderTree;
+    mountFolderTree(
+      container: HTMLElement,
+      options: MountFolderTreeOptions,
+    ): MountedFolderTree;
     /** Returns a `<span>` with a Lucide icon mounted inside via React. `name`
      *  is a Lucide icon name (for example `"Plus"`, `"Database"`); a bare name
      *  or a `lucide:`/legacy `hugeicon:` prefixed ref both resolve. Unknown
@@ -331,7 +367,10 @@ export type ExtensionContext = {
      *
      *  Languages supported in v0.2.4: `sql`, `sql:mysql`, `sql:postgres`,
      *  `sql:sqlite`, `json`, `plain`. */
-    codeEditor(container: HTMLElement, opts: CodeEditorOptions): CodeEditorHandle;
+    codeEditor(
+      container: HTMLElement,
+      opts: CodeEditorOptions,
+    ): CodeEditorHandle;
   };
   /** Status-bar icons in the bottom-right. Multiple items per extension;
    *  keyed by `id`. Removed automatically on `deactivate`. */
@@ -428,7 +467,11 @@ export type ExtensionContext = {
     ): Promise<{ localPort: number }>;
     /** Release a forward opened by `openForward`. The underlying session is
      *  closed once its last forward goes away. */
-    closeForward(connectionId: string, remoteHost: string, remotePort: number): Promise<void>;
+    closeForward(
+      connectionId: string,
+      remoteHost: string,
+      remotePort: number,
+    ): Promise<void>;
   };
   /** AI shell hook. Registers a synchronous transformer that rewrites
    *  commands before `bash_run`, `bash_background`, `run_in_terminal`, and
@@ -465,7 +508,10 @@ export type ExtensionContext = {
   };
   /** Binds a JS handler to a contributed command id. The command must be
    *  declared in `contribute.commands` first. */
-  registerCommandHandler(commandId: string, handler: (...args: unknown[]) => unknown): void;
+  registerCommandHandler(
+    commandId: string,
+    handler: (...args: unknown[]) => unknown,
+  ): void;
   /** Binds a handler to a contributed AI tool. The host packages the result
    *  for the AI SDK. */
   registerAiToolHandler(
@@ -491,7 +537,10 @@ const STORAGE_FILE = (id: string) => `tedi-ext-${id}.json`;
  */
 async function buildStorage(id: string): Promise<ExtensionContext["storage"]> {
   const { LazyStore } = await import("@tauri-apps/plugin-store");
-  const store = new LazyStore(STORAGE_FILE(id), { defaults: {}, autoSave: 200 });
+  const store = new LazyStore(STORAGE_FILE(id), {
+    defaults: {},
+    autoSave: 200,
+  });
   return {
     async get<T>(key: string): Promise<T | null> {
       const v = await store.get<T>(key);
@@ -547,13 +596,14 @@ export async function buildContext(ext: ExtensionRuntime): Promise<{
     iconRoots.clear();
   });
 
-  const [{ getAppContext, subscribeAppContext }, chatMod, prefsMod, os, home] = await Promise.all([
-    import("./appBridge"),
-    import("@/modules/ai/store/chatStore"),
-    import("@/modules/settings/preferences"),
-    detectOs(),
-    detectHome(),
-  ]);
+  const [{ getAppContext, subscribeAppContext }, chatMod, prefsMod, os, home] =
+    await Promise.all([
+      import("./appBridge"),
+      import("@/modules/ai/store/chatStore"),
+      import("@/modules/settings/preferences"),
+      detectOs(),
+      detectHome(),
+    ]);
 
   // Derived on every call rather than pushed from a component: the only place
   // that could push (AgentRunBridge) is mounted just when a key exists AND a
@@ -613,7 +663,8 @@ export async function buildContext(ext: ExtensionRuntime): Promise<{
         return dispose;
       },
       setSidebarVisible: (visible) => setSidebarVisibleBridge(visible, ext.id),
-      setRightSidebarVisible: (visible) => setRightSidebarVisibleBridge(visible, ext.id),
+      setRightSidebarVisible: (visible) =>
+        setRightSidebarVisibleBridge(visible, ext.id),
       createWorkspace: (name) => {
         requirePermission(ext.id, declared, "workspaces:manage");
         return createWorkspaceBridge(String(name ?? ""));
@@ -651,9 +702,11 @@ export async function buildContext(ext: ExtensionRuntime): Promise<{
         // from the id, the same fallback an omitted argument gets.
         const { PROVIDERS } = await import("@/modules/ai/config");
         const known = PROVIDERS.find((p) => p.id === provider)?.id;
-        chatMod.useChatStore.getState().setSelectedModelId(
-          String(known ? `${known}:${modelId}` : modelId ?? ""),
-        );
+        chatMod.useChatStore
+          .getState()
+          .setSelectedModelId(
+            String(known ? `${known}:${modelId}` : (modelId ?? "")),
+          );
       },
       // Kept in the extension API after the preference was removed: it now
       // switches the spawn tools in the picker, which is the same user-visible
@@ -718,7 +771,10 @@ export async function buildContext(ext: ExtensionRuntime): Promise<{
         return dispose;
       },
     },
-    async invoke<T = unknown>(command: string, args?: Record<string, unknown>): Promise<T> {
+    async invoke<T = unknown>(
+      command: string,
+      args?: Record<string, unknown>,
+    ): Promise<T> {
       if (!isInvokeAllowed(declared, command)) {
         throw new PermissionDeniedError(ext.id, `invoke:${command}`);
       }
@@ -770,12 +826,17 @@ export async function buildContext(ext: ExtensionRuntime): Promise<{
         requirePermission(ext.id, declared, "events:emit");
         await tauriEmit(`ext://${ext.id}/${name}`, payload);
       },
-      async on(name: string, cb: (payload: unknown) => void): Promise<Disposer> {
+      async on(
+        name: string,
+        cb: (payload: unknown) => void,
+      ): Promise<Disposer> {
         requirePermission(ext.id, declared, "events:listen");
         let unsub: UnlistenFn | null = null;
         let disposed = false;
         // Per-extension channel prevents event-name collisions.
-        void tauriListen(`ext://${ext.id}/${name}`, (event) => cb(event.payload)).then((fn) => {
+        void tauriListen(`ext://${ext.id}/${name}`, (event) =>
+          cb(event.payload),
+        ).then((fn) => {
           if (disposed) {
             fn();
           } else {
@@ -794,12 +855,17 @@ export async function buildContext(ext: ExtensionRuntime): Promise<{
     ui: {
       toast(
         message: string,
-        opts?: { variant?: "default" | "success" | "info" | "warning" | "error" },
+        opts?: {
+          variant?: "default" | "success" | "info" | "warning" | "error";
+        },
       ) {
         requirePermission(ext.id, declared, "ui:toast");
         toast(message, { variant: opts?.variant ?? "default" });
       },
-      mountFolderTree(container: HTMLElement, options: MountFolderTreeOptions): MountedFolderTree {
+      mountFolderTree(
+        container: HTMLElement,
+        options: MountFolderTreeOptions,
+      ): MountedFolderTree {
         const mounted = mountFolderTree(container, options);
         // Auto-dispose on deactivate so React roots don't leak.
         disposers.push(() => mounted.dispose());
@@ -964,7 +1030,9 @@ export async function buildContext(ext: ExtensionRuntime): Promise<{
       },
     },
     shell: {
-      registerCommandTransformer(transformer: ShellCommandTransformer): Disposer {
+      registerCommandTransformer(
+        transformer: ShellCommandTransformer,
+      ): Disposer {
         requirePermission(ext.id, declared, "shell:transform");
         shellTransformersRegistry.set(ext.id, transformer);
         const dispose = (): void => shellTransformersRegistry.clear(ext.id);
@@ -976,7 +1044,8 @@ export async function buildContext(ext: ExtensionRuntime): Promise<{
     registerPanelRenderer(panelId: string, renderer: PanelRenderer): Disposer {
       requirePermission(ext.id, declared, "panels:register");
       panelRenderersRegistry.set(ext.id, panelId, renderer);
-      const dispose = (): void => panelRenderersRegistry.remove(ext.id, panelId);
+      const dispose = (): void =>
+        panelRenderersRegistry.remove(ext.id, panelId);
       disposers.push(dispose);
       return dispose;
     },

@@ -149,7 +149,10 @@ export async function syncTelegramFromStorage(): Promise<void> {
           useTelegramStore.getState().setChatId(state.chatId);
         if (state.chatId === null && cur.chatId !== null)
           useTelegramStore.getState().setChatId(null);
-        if (typeof state.ownerUserId === "string" && state.ownerUserId !== cur.ownerUserId)
+        if (
+          typeof state.ownerUserId === "string" &&
+          state.ownerUserId !== cur.ownerUserId
+        )
           useTelegramStore.getState().setOwnerUserId(state.ownerUserId);
         if (state.ownerUserId === null && cur.ownerUserId !== null)
           useTelegramStore.getState().setOwnerUserId(null);

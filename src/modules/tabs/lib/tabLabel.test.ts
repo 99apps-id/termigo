@@ -16,9 +16,9 @@ function terminalTab(over: Partial<TerminalTab> = {}): TerminalTab {
 
 describe("labelFor (terminal tabs)", () => {
   it("derives the label from the last cwd segment", () => {
-    expect(labelFor(terminalTab({ cwd: "/Users/me/projects/termigo-ai" }))).toBe(
-      "termigo-ai",
-    );
+    expect(
+      labelFor(terminalTab({ cwd: "/Users/me/projects/termigo-ai" })),
+    ).toBe("termigo-ai");
   });
 
   it("falls back to the title when there is no cwd", () => {
@@ -27,7 +27,12 @@ describe("labelFor (terminal tabs)", () => {
 
   it("prefers a custom title over the cwd-derived name", () => {
     expect(
-      labelFor(terminalTab({ cwd: "/Users/me/projects/termigo-ai", customTitle: "Server" })),
+      labelFor(
+        terminalTab({
+          cwd: "/Users/me/projects/termigo-ai",
+          customTitle: "Server",
+        }),
+      ),
     ).toBe("Server");
   });
 

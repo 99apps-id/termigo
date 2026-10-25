@@ -48,7 +48,9 @@ const str = (v: unknown): string => (typeof v === "string" ? v : "");
 
 /** A port is only usable if it is a whole number in range; 0 is not valid to dial. */
 function port(v: unknown): number | null {
-  return typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= 65535 ? v : null;
+  return typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= 65535
+    ? v
+    : null;
 }
 
 function sanitizeForwards(v: unknown): SshPortForward[] | undefined {
@@ -87,7 +89,9 @@ export function sanitizeConnection(raw: unknown): SshConnection | null {
   if (!id || !host || p === null) return null;
 
   const authMode: SshAuthMode =
-    raw.authMode === "key" || raw.authMode === "agent" ? raw.authMode : "password";
+    raw.authMode === "key" || raw.authMode === "agent"
+      ? raw.authMode
+      : "password";
   const description = str(raw.description).trim();
   const proxyJumpId = str(raw.proxyJumpId).trim();
   const lastFingerprint = str(raw.lastFingerprint).trim();
@@ -128,7 +132,11 @@ function sanitizeSealed(raw: unknown): SealedBlob | null {
   const ciphertext = str(raw.ciphertext);
   const iterations = raw.iterations;
   if (!kdf || !salt || !nonce || !ciphertext) return null;
-  if (typeof iterations !== "number" || !Number.isInteger(iterations) || iterations < 1)
+  if (
+    typeof iterations !== "number" ||
+    !Number.isInteger(iterations) ||
+    iterations < 1
+  )
     return null;
   return { kdf, iterations, salt, nonce, ciphertext };
 }
@@ -140,9 +148,14 @@ function sanitizeSealed(raw: unknown): SealedBlob | null {
  * connect through that host would fail with a message about a host the user
  * never knowingly deleted.
  */
-export function clearDanglingJumps(list: SshConnection[], known: Set<string>): SshConnection[] {
+export function clearDanglingJumps(
+  list: SshConnection[],
+  known: Set<string>,
+): SshConnection[] {
   return list.map((c) =>
-    c.proxyJumpId && !known.has(c.proxyJumpId) ? { ...c, proxyJumpId: undefined } : c,
+    c.proxyJumpId && !known.has(c.proxyJumpId)
+      ? { ...c, proxyJumpId: undefined }
+      : c,
   );
 }
 
@@ -151,11 +164,19 @@ export function clearDanglingJumps(list: SshConnection[], known: Set<string>): S
  * file is not a Termigo SSH backup at all; skips individual bad entries instead of
  * failing the whole import, and reports how many were skipped.
  */
-export function parseBackupFile(raw: unknown): { file: SshBackupFile; skipped: number } {
+export function parseBackupFile(raw: unknown): {
+  file: SshBackupFile;
+  skipped: number;
+} {
   if (!isRecord(raw)) throw new Error("Not a Termigo SSH backup file.");
-  if (raw.kind !== BACKUP_KIND) throw new Error("Not a Termigo SSH backup file.");
+  if (raw.kind !== BACKUP_KIND)
+    throw new Error("Not a Termigo SSH backup file.");
   const version = raw.version;
-  if (typeof version !== "number" || !Number.isInteger(version) || version < 1) {
+  if (
+    typeof version !== "number" ||
+    !Number.isInteger(version) ||
+    version < 1
+  ) {
     throw new Error("Backup file has no usable version.");
   }
   if (version > BACKUP_VERSION) {
@@ -163,10 +184,12 @@ export function parseBackupFile(raw: unknown): { file: SshBackupFile; skipped: n
       `This backup was written by a newer Termigo (format v${version}); this build reads up to v${BACKUP_VERSION}.`,
     );
   }
-  if (!Array.isArray(raw.connections)) throw new Error("Backup file has no connections list.");
+  if (!Array.isArray(raw.connections))
+    throw new Error("Backup file has no connections list.");
 
   const secrets = sanitizeSealed(raw.secrets);
-  if (!secrets) throw new Error("Backup file is missing its encrypted credentials block.");
+  if (!secrets)
+    throw new Error("Backup file is missing its encrypted credentials block.");
 
   const connections: SshConnection[] = [];
   const seen = new Set<string>();
@@ -183,7 +206,10 @@ export function parseBackupFile(raw: unknown): { file: SshBackupFile; skipped: n
   }
 
   const exportedAt = typeof raw.exportedAt === "number" ? raw.exportedAt : 0;
-  return { file: { kind: BACKUP_KIND, version, exportedAt, connections, secrets }, skipped };
+  return {
+    file: { kind: BACKUP_KIND, version, exportedAt, connections, secrets },
+    skipped,
+  };
 }
 
 /** Validate the decrypted secrets payload before any of it reaches the keychain. */
@@ -193,8 +219,10 @@ export function sanitizeSecrets(raw: unknown): BackupSecrets {
   for (const [id, v] of Object.entries(raw)) {
     if (!isRecord(v)) continue;
     const entry: BackupSecrets[string] = {};
-    if (typeof v.password === "string" && v.password) entry.password = v.password;
-    if (typeof v.privateKey === "string" && v.privateKey) entry.privateKey = v.privateKey;
+    if (typeof v.password === "string" && v.password)
+      entry.password = v.password;
+    if (typeof v.privateKey === "string" && v.privateKey)
+      entry.privateKey = v.privateKey;
     if (typeof v.keyPassphrase === "string" && v.keyPassphrase) {
       entry.keyPassphrase = v.keyPassphrase;
     }

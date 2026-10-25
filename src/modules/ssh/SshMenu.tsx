@@ -19,7 +19,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { IconTooltip } from "@/components/ui/icon-tooltip";
 import { cn } from "@/lib/utils";
-import { DESTRUCTIVE_ACTION, TOOLBAR_EXPANDED, TOOLBAR_HOVER } from "@/lib/toolbarButton";
+import {
+  DESTRUCTIVE_ACTION,
+  TOOLBAR_EXPANDED,
+  TOOLBAR_HOVER,
+} from "@/lib/toolbarButton";
 import { lazy, Suspense, useEffect, useState } from "react";
 import {
   deleteConnection,
@@ -51,7 +55,9 @@ import {
 
 // Heavy module. Lazy-load until the user opens the add/edit modal.
 const SshConnectionDialog = lazy(() =>
-  import("./SshConnectionDialog").then((m) => ({ default: m.SshConnectionDialog })),
+  import("./SshConnectionDialog").then((m) => ({
+    default: m.SshConnectionDialog,
+  })),
 );
 
 // Same treatment: the backup dialog pulls in the crypto/IO path, which nobody
@@ -79,14 +85,18 @@ export function SshMenu({ onConnect }: Props) {
     if (editorOpen) setEditorMounted(true);
   }, [editorOpen]);
   const [editing, setEditing] = useState<SshConnection | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState<SshConnection | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<SshConnection | null>(
+    null,
+  );
   const [backup, setBackup] = useState<BackupMode | null>(null);
   const [backupOpen, setBackupOpen] = useState(false);
   const [pickError, setPickError] = useState<string | null>(null);
 
   useEffect(() => {
     void listConnections().then(setConns);
-    const unsub = onConnectionsChanged(() => void listConnections().then(setConns));
+    const unsub = onConnectionsChanged(
+      () => void listConnections().then(setConns),
+    );
     return () => {
       void unsub.then((fn) => fn());
     };
@@ -141,7 +151,12 @@ export function SshMenu({ onConnect }: Props) {
     try {
       const selected = await openFileDialog({
         multiple: false,
-        filters: [{ name: "Termigo SSH backup", extensions: [BACKUP_EXTENSION, "json"] }],
+        filters: [
+          {
+            name: "Termigo SSH backup",
+            extensions: [BACKUP_EXTENSION, "json"],
+          },
+        ],
       });
       const path = typeof selected === "string" ? selected : null;
       if (!path) return;
@@ -195,9 +210,13 @@ export function SshMenu({ onConnect }: Props) {
           ) : null}
           <DropdownMenuSeparator />
           {conns === null ? (
-            <div className="text-muted-foreground px-3 py-2 text-[11px]">Loading…</div>
+            <div className="text-muted-foreground px-3 py-2 text-[11px]">
+              Loading…
+            </div>
           ) : conns.length === 0 ? (
-            <div className="text-muted-foreground px-3 py-2 text-[11px]">No saved hosts yet.</div>
+            <div className="text-muted-foreground px-3 py-2 text-[11px]">
+              No saved hosts yet.
+            </div>
           ) : (
             conns.map((c) => (
               <DropdownMenuItem
@@ -259,19 +278,28 @@ export function SshMenu({ onConnect }: Props) {
             <Download size={13} strokeWidth={1.75} />
             <span>Export connections…</span>
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => void openImport()} className="gap-2 text-[12px]">
+          <DropdownMenuItem
+            onSelect={() => void openImport()}
+            className="gap-2 text-[12px]"
+          >
             <Upload size={13} strokeWidth={1.75} />
             <span>Import connections…</span>
           </DropdownMenuItem>
           {pickError ? (
-            <div className="text-destructive px-3 py-1 text-[10.5px]">{pickError}</div>
+            <div className="text-destructive px-3 py-1 text-[10.5px]">
+              {pickError}
+            </div>
           ) : null}
         </DropdownMenuContent>
       </DropdownMenu>
 
       {editorMounted ? (
         <Suspense fallback={null}>
-          <SshConnectionDialog open={editorOpen} onOpenChange={setEditorOpen} editing={editing} />
+          <SshConnectionDialog
+            open={editorOpen}
+            onOpenChange={setEditorOpen}
+            editing={editing}
+          />
         </Suspense>
       ) : null}
 

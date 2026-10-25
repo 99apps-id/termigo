@@ -80,7 +80,9 @@ export function splitComposerHighlights(
   const spans = matchSpans(text, vocab)
     .sort((a, b) => a.start - b.start)
     .reduce<Span[]>((kept, span) => {
-      if (!kept.some((prev) => span.start < prev.end && span.end > prev.start)) {
+      if (
+        !kept.some((prev) => span.start < prev.end && span.end > prev.start)
+      ) {
         kept.push(span);
       }
       return kept;

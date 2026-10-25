@@ -38,13 +38,22 @@ describe("parseApprovalTarget", () => {
   });
 
   it("reads a list or range as a batch", () => {
-    expect(parseApprovalTarget("1,3")).toEqual({ kind: "list", indices: [1, 3] });
-    expect(parseApprovalTarget("1-3")).toEqual({ kind: "list", indices: [1, 2, 3] });
-    expect(parseApprovalTarget("2,4-6")).toEqual({ kind: "list", indices: [2, 4, 5, 6] });
+    expect(parseApprovalTarget("1,3")).toEqual({
+      kind: "list",
+      indices: [1, 3],
+    });
+    expect(parseApprovalTarget("1-3")).toEqual({
+      kind: "list",
+      indices: [1, 2, 3],
+    });
+    expect(parseApprovalTarget("2,4-6")).toEqual({
+      kind: "list",
+      indices: [2, 4, 5, 6],
+    });
   });
 
   it("rejects a malformed batch", () => {
-    expect(parseApprovalTarget(("3-1") as string)).toBeNull();
+    expect(parseApprovalTarget("3-1" as string)).toBeNull();
     expect(parseApprovalTarget("0,2")).toBeNull();
     expect(parseApprovalTarget("1,x")).toBeNull();
   });
@@ -58,7 +67,9 @@ describe("resolveTarget", () => {
 
   it("counts from one, the way the listing is printed", () => {
     const q = [entry("a"), entry("b")];
-    expect(resolveTarget(q, { kind: "index", index: 2 })).toEqual({ ids: ["b"] });
+    expect(resolveTarget(q, { kind: "index", index: 2 })).toEqual({
+      ids: ["b"],
+    });
   });
 
   it("says how many there are when the position does not exist", () => {
@@ -76,7 +87,9 @@ describe("resolveTarget", () => {
   });
 
   it("accepts a bare command when only one is waiting", () => {
-    expect(resolveTarget([entry("a")], { kind: "only" })).toEqual({ ids: ["a"] });
+    expect(resolveTarget([entry("a")], { kind: "only" })).toEqual({
+      ids: ["a"],
+    });
   });
 
   it("says so when nothing is waiting at all", () => {
@@ -114,7 +127,9 @@ describe("formatQueue", () => {
 
 describe("summarizeInput", () => {
   it("prefers the field that identifies the action", () => {
-    expect(summarizeInput({ command: "rm -rf dist", cwd: "/w" })).toBe("rm -rf dist");
+    expect(summarizeInput({ command: "rm -rf dist", cwd: "/w" })).toBe(
+      "rm -rf dist",
+    );
     expect(summarizeInput({ content: "x", path: "src/a.ts" })).toBe("src/a.ts");
   });
 

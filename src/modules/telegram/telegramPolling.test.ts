@@ -35,9 +35,9 @@ import {
 
 describe("pollBackoffMs", () => {
   it("honours the retry hint on a 429", () => {
-    expect(pollBackoffMs(new TelegramApiError(429, "Too Many Requests", 30))).toBe(
-      30_000,
-    );
+    expect(
+      pollBackoffMs(new TelegramApiError(429, "Too Many Requests", 30)),
+    ).toBe(30_000);
   });
 
   it("still waits a little when a 429 carries no hint", () => {
@@ -48,9 +48,9 @@ describe("pollBackoffMs", () => {
 
   it("never backs off less than a second on a 429", () => {
     // A server hint of 0 (or a missing one) must not become a hot retry loop.
-    expect(pollBackoffMs(new TelegramApiError(429, "Too Many Requests", 0))).toBe(
-      1_000,
-    );
+    expect(
+      pollBackoffMs(new TelegramApiError(429, "Too Many Requests", 0)),
+    ).toBe(1_000);
   });
 
   it("stands down for a minute on a 409, unlike every other failure", () => {
@@ -310,9 +310,9 @@ describe("isPollTimeoutError", () => {
 
   it("leaves real network and API failures alone", () => {
     expect(isPollTimeoutError(new Error("Failed to fetch"))).toBe(false);
-    expect(
-      isPollTimeoutError(new TelegramApiError(409, "Conflict")),
-    ).toBe(false);
+    expect(isPollTimeoutError(new TelegramApiError(409, "Conflict"))).toBe(
+      false,
+    );
     expect(isPollTimeoutError("a string throw")).toBe(false);
     expect(isPollTimeoutError(undefined)).toBe(false);
   });

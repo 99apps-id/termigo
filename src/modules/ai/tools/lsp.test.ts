@@ -140,7 +140,10 @@ describe("normalizeDocumentSymbols", () => {
       {
         name: "x",
         kind: 12,
-        location: { uri: "file:///a.ts", range: { start: { line: 9, character: 0 } } },
+        location: {
+          uri: "file:///a.ts",
+          range: { start: { line: 9, character: 0 } },
+        },
         containerName: "mod",
       },
     ]);

@@ -4,11 +4,19 @@ import { Add01Icon, Delete02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
 import { SectionHeader } from "../components/SectionHeader";
-import { SQL_ENGINES, runSql, type SqlEngine } from "@/modules/ai/sqlexplorer/bridge";
+import {
+  SQL_ENGINES,
+  runSql,
+  type SqlEngine,
+} from "@/modules/ai/sqlexplorer/bridge";
 import { useSqlConnectionsStore } from "@/modules/ai/sqlexplorer/connectionsStore";
 import type { SqlConnection } from "@/modules/ai/sqlexplorer/bridge";
 
-type Probe = { state: "idle" } | { state: "running" } | { state: "ok" } | { state: "failed"; reason: string };
+type Probe =
+  | { state: "idle" }
+  | { state: "running" }
+  | { state: "ok" }
+  | { state: "failed"; reason: string };
 
 function ConnectionRow({
   connection,
@@ -25,7 +33,10 @@ function ConnectionRow({
       await runSql(connection.engine, connection.connection, "SELECT 1;");
       setProbe({ state: "ok" });
     } catch (e) {
-      setProbe({ state: "failed", reason: e instanceof Error ? e.message : String(e) });
+      setProbe({
+        state: "failed",
+        reason: e instanceof Error ? e.message : String(e),
+      });
     }
   };
 
@@ -52,7 +63,12 @@ function ConnectionRow({
         >
           Test
         </Button>
-        <Button variant="ghost" size="sm" onClick={onRemoved} aria-label={`Remove ${connection.name}`}>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onRemoved}
+          aria-label={`Remove ${connection.name}`}
+        >
           <HugeiconsIcon icon={Delete02Icon} size={16} />
         </Button>
       </div>
@@ -124,7 +140,11 @@ export function SqlSection() {
           </p>
         ) : (
           connections.map((c) => (
-            <ConnectionRow key={c.id} connection={c} onRemoved={() => removeConnection(c.id)} />
+            <ConnectionRow
+              key={c.id}
+              connection={c}
+              onRemoved={() => removeConnection(c.id)}
+            />
           ))
         )}
       </div>

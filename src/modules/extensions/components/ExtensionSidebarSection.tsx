@@ -16,13 +16,20 @@ import { useState, type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { IconTooltip } from "@/components/ui/icon-tooltip";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { DESTRUCTIVE_ACTION } from "@/lib/toolbarButton";
 import { resolveExtIcon, useIconsReady } from "@/lib/iconRegistry";
 
-import { explorerIconUrl, useExplorerIconsReady } from "@/modules/explorer/lib/iconResolver";
+import {
+  explorerIconUrl,
+  useExplorerIconsReady,
+} from "@/modules/explorer/lib/iconResolver";
 
 import { useResolvedExtensionIcon } from "../icon";
 import type { SidebarSection, SidebarSectionItem } from "../registries";
@@ -49,14 +56,21 @@ import {
  * be pre-lowercased. Lazy/unloaded children can't be matched (only what the
  * extension has loaded into the tree is searchable).
  */
-function filterSidebarItems(list: SidebarSectionItem[], q: string): SidebarSectionItem[] {
+function filterSidebarItems(
+  list: SidebarSectionItem[],
+  q: string,
+): SidebarSectionItem[] {
   const out: SidebarSectionItem[] = [];
   for (const it of list) {
     const selfMatch =
-      it.label.toLowerCase().includes(q) || (it.sublabel ?? "").toLowerCase().includes(q);
+      it.label.toLowerCase().includes(q) ||
+      (it.sublabel ?? "").toLowerCase().includes(q);
     const kids = it.children ? filterSidebarItems(it.children, q) : [];
     if (selfMatch) {
-      out.push({ ...it, expanded: it.children && it.children.length > 0 ? true : it.expanded });
+      out.push({
+        ...it,
+        expanded: it.children && it.children.length > 0 ? true : it.expanded,
+      });
     } else if (kids.length > 0) {
       out.push({ ...it, children: kids, expanded: true });
     }
@@ -83,7 +97,9 @@ function SectionIcon({
   useIconsReady();
   // `fileicon:<name>` resolves against the Catppuccin pack the file tree uses,
   // so SQL Explorer's database/table rows match the folder tree's glyphs.
-  const fileIconName = icon?.startsWith("fileicon:") ? icon.slice("fileicon:".length) : null;
+  const fileIconName = icon?.startsWith("fileicon:")
+    ? icon.slice("fileicon:".length)
+    : null;
   useExplorerIconsReady();
   const Icon = fileIconName ? null : resolveExtIcon(icon);
   // Resolve the asset/data URL only when we won't be using a fileicon or
@@ -112,13 +128,16 @@ function SectionIcon({
   }
   if (Icon) {
     return (
-      <span className={cn("flex shrink-0 items-center justify-center", className)}>
+      <span
+        className={cn("flex shrink-0 items-center justify-center", className)}
+      >
         <Icon size={size} strokeWidth={1.75} />
       </span>
     );
   }
   if (iconUrl) {
-    const isSvg = iconUrl.startsWith("data:image/svg+xml") || iconUrl.endsWith(".svg");
+    const isSvg =
+      iconUrl.startsWith("data:image/svg+xml") || iconUrl.endsWith(".svg");
     return isSvg ? (
       <span
         aria-hidden
@@ -145,7 +164,9 @@ function SectionIcon({
   }
   // Fallback: a generic dashboard glyph so the header is never empty.
   return (
-    <span className={cn("flex shrink-0 items-center justify-center", className)}>
+    <span
+      className={cn("flex shrink-0 items-center justify-center", className)}
+    >
       <LayoutDashboard size={size} strokeWidth={1.75} />
     </span>
   );
@@ -156,7 +177,10 @@ function SectionIcon({
  * the AI tool cards use. Every value is themable, so an extension can colour a
  * category (an HTTP verb, a severity) without a raw-colour escape hatch.
  */
-const BADGE_TONE: Record<NonNullable<NonNullable<SidebarSectionItem["badge"]>["tone"]>, string> = {
+const BADGE_TONE: Record<
+  NonNullable<NonNullable<SidebarSectionItem["badge"]>["tone"]>,
+  string
+> = {
   success: "bg-icon-idle/15 text-icon-idle",
   warning: "bg-icon-working/15 text-icon-working",
   error: "bg-icon-blocked/15 text-icon-blocked",
@@ -228,10 +252,14 @@ export function ExtensionSidebarSection({
   };
   const moveLeft = () => {
     useSidebarPlacementStore.getState().moveLeft(placementKey);
-    useRightPanelStore.getState().close(extensionId, sectionPanelId(section.id));
+    useRightPanelStore
+      .getState()
+      .close(extensionId, sectionPanelId(section.id));
   };
   const closeRight = () =>
-    useRightPanelStore.getState().close(extensionId, sectionPanelId(section.id));
+    useRightPanelStore
+      .getState()
+      .close(extensionId, sectionPanelId(section.id));
   // The header always renders its control cluster when the section is movable
   // (so the move toggle shows even with no header actions) or when hosted right.
   const showControlCluster =
@@ -242,9 +270,14 @@ export function ExtensionSidebarSection({
 
   // Recursive row renderer: rows nest into a lazy tree (caret + indent). A
   // non-expandable row with no children is a plain leaf (the flat-list case).
-  const renderRow = (item: (typeof items)[number], depth: number): ReactNode => {
+  const renderRow = (
+    item: (typeof items)[number],
+    depth: number,
+  ): ReactNode => {
     const hasActions = !!(item.actions && item.actions.length > 0);
-    const actionHoverPad = hasActions ? actionHoverPadding(item.actions?.length ?? 0) : undefined;
+    const actionHoverPad = hasActions
+      ? actionHoverPadding(item.actions?.length ?? 0)
+      : undefined;
     const onContextMenu = section.onItemContextMenu;
     const rowContent = (
       // biome-ignore lint/a11y/noStaticElementInteractions: row wrapper; its controls are real <button>s and the context menu is pointer-only
@@ -260,7 +293,10 @@ export function ExtensionSidebarSection({
                 try {
                   onContextMenu(item.id, { x: e.clientX, y: e.clientY });
                 } catch (err) {
-                  console.error(`[extensions] sidebar context menu "${item.id}" threw`, err);
+                  console.error(
+                    `[extensions] sidebar context menu "${item.id}" threw`,
+                    err,
+                  );
                 }
               }
             : undefined
@@ -282,7 +318,10 @@ export function ExtensionSidebarSection({
               try {
                 section.onItemToggle?.(item.id);
               } catch (err) {
-                console.error(`[extensions] sidebar toggle "${item.id}" threw`, err);
+                console.error(
+                  `[extensions] sidebar toggle "${item.id}" threw`,
+                  err,
+                );
               }
             }}
             className="hover:bg-foreground/10 flex size-4 shrink-0 items-center justify-center rounded transition-colors"
@@ -292,7 +331,10 @@ export function ExtensionSidebarSection({
             <ChevronRight
               size={11}
               strokeWidth={2.25}
-              className={cn("transition-transform", item.expanded && "rotate-90")}
+              className={cn(
+                "transition-transform",
+                item.expanded && "rotate-90",
+              )}
             />
           </button>
         ) : (
@@ -304,7 +346,10 @@ export function ExtensionSidebarSection({
             try {
               section.onItemClick?.(item.id);
             } catch (err) {
-              console.error(`[extensions] sidebar item "${item.id}" threw`, err);
+              console.error(
+                `[extensions] sidebar item "${item.id}" threw`,
+                err,
+              );
             }
           }}
           className={cn(
@@ -323,7 +368,12 @@ export function ExtensionSidebarSection({
             size={13}
             className="opacity-90"
           />
-          <span className={cn("min-w-0 truncate", !item.active && toneLabelClass(item.tone))}>
+          <span
+            className={cn(
+              "min-w-0 truncate",
+              !item.active && toneLabelClass(item.tone),
+            )}
+          >
             {item.label}
           </span>
           {item.badge ? (
@@ -336,7 +386,11 @@ export function ExtensionSidebarSection({
             // actions overlay the row's right edge, and a chip left underneath
             // them reads as two things printed on top of each other.
             <Badge
-              variant={item.badge.tone ? "secondary" : (item.badge.variant ?? "secondary")}
+              variant={
+                item.badge.tone
+                  ? "secondary"
+                  : (item.badge.variant ?? "secondary")
+              }
               className={cn(
                 "h-4 shrink-0 rounded px-1.5 text-[9px] leading-none font-medium tracking-wide",
                 item.badge.tone && BADGE_TONE[item.badge.tone],
@@ -373,7 +427,10 @@ export function ExtensionSidebarSection({
                     try {
                       section.onItemAction?.(item.id, a.id);
                     } catch (err) {
-                      console.error(`[extensions] sidebar item action "${a.id}" threw`, err);
+                      console.error(
+                        `[extensions] sidebar item action "${a.id}" threw`,
+                        err,
+                      );
                     }
                   }}
                   aria-label={a.tooltip}
@@ -384,7 +441,11 @@ export function ExtensionSidebarSection({
                     a.danger ? DESTRUCTIVE_ACTION : "text-muted-foreground",
                   )}
                 >
-                  <SectionIcon extensionId={extensionId} icon={a.icon} size={11} />
+                  <SectionIcon
+                    extensionId={extensionId}
+                    icon={a.icon}
+                    size={11}
+                  />
                 </Button>
               </IconTooltip>
             ))}
@@ -435,7 +496,10 @@ export function ExtensionSidebarSection({
                     try {
                       section.onHeaderAction?.(a.id);
                     } catch (err) {
-                      console.error(`[extensions] sidebar header action "${a.id}" threw`, err);
+                      console.error(
+                        `[extensions] sidebar header action "${a.id}" threw`,
+                        err,
+                      );
                     }
                   }}
                   aria-label={a.tooltip}
@@ -443,10 +507,16 @@ export function ExtensionSidebarSection({
                   size="icon"
                   className={cn(
                     "size-6",
-                    a.danger ? DESTRUCTIVE_ACTION : "text-muted-foreground hover:text-foreground",
+                    a.danger
+                      ? DESTRUCTIVE_ACTION
+                      : "text-muted-foreground hover:text-foreground",
                   )}
                 >
-                  <SectionIcon extensionId={extensionId} icon={a.icon} size={13} />
+                  <SectionIcon
+                    extensionId={extensionId}
+                    icon={a.icon}
+                    size={13}
+                  />
                 </Button>
               </IconTooltip>
             ))}
@@ -497,7 +567,11 @@ export function ExtensionSidebarSection({
           {/* Filled rounded box mirroring the Source Control commit input:
               bg-input/50, transparent border that turns ring-colored on focus. */}
           <div className="bg-input/50 focus-within:border-ring flex h-7 items-center gap-1.5 rounded-md border border-transparent px-2 transition-[color,background-color]">
-            <Search size={12} strokeWidth={2} className="text-muted-foreground/70 shrink-0" />
+            <Search
+              size={12}
+              strokeWidth={2}
+              className="text-muted-foreground/70 shrink-0"
+            />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -530,7 +604,9 @@ export function ExtensionSidebarSection({
                 {section.emptyText ?? "Nothing here yet."}
               </li>
             ) : shown.length === 0 ? (
-              <li className="text-muted-foreground px-2 py-1.5 text-[11px]">No matches.</li>
+              <li className="text-muted-foreground px-2 py-1.5 text-[11px]">
+                No matches.
+              </li>
             ) : (
               shown.map((item) => renderRow(item, 0))
             )}

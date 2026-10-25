@@ -100,9 +100,9 @@ describe("latestUserRequest", () => {
   const ENV = "<env>\nworkspace_root: C:/project/termigo\n</env>";
 
   it("skips a trailing env turn to find the real request", () => {
-    expect(
-      latestUserRequest([user("pahami fungsi ini"), user(ENV)]),
-    ).toBe("pahami fungsi ini");
+    expect(latestUserRequest([user("pahami fungsi ini"), user(ENV)])).toBe(
+      "pahami fungsi ini",
+    );
   });
 
   it("takes the newest request when several turns exist", () => {
@@ -121,9 +121,7 @@ describe("latestUserRequest", () => {
       latestUserRequest([
         {
           role: "user",
-          content: [
-            { type: "text", text: "audit seluruh proyek" },
-          ] as never,
+          content: [{ type: "text", text: "audit seluruh proyek" }] as never,
         },
         user(ENV),
       ]),

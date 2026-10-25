@@ -6,7 +6,12 @@
  */
 
 export type ErrorSummary = {
-  kind: "compile_error" | "test_failure" | "lint_error" | "runtime_error" | "unknown";
+  kind:
+    | "compile_error"
+    | "test_failure"
+    | "lint_error"
+    | "runtime_error"
+    | "unknown";
   conciseMessage: string;
   failingFiles: string[];
   lineNumbers: number[];
@@ -36,8 +41,10 @@ export function distillTestOutput(output: string): ErrorSummary {
   let detectedKind: ErrorSummary["kind"] = "test_failure";
 
   // Regex patterns for TypeScript/Rust/Go/Python errors
-  const fileLinePattern = /(?:^|[\s(])([a-zA-Z0-9_\-./\\]+\.[a-zA-Z0-9]+):(\d+)(?::(\d+))?/;
-  const errorIndicatorPattern = /(?:FAIL|FAILED|error\[E\d+\]|Error:|panic:|AssertionError|SyntaxError|TypeError)/i;
+  const fileLinePattern =
+    /(?:^|[\s(])([a-zA-Z0-9_\-./\\]+\.[a-zA-Z0-9]+):(\d+)(?::(\d+))?/;
+  const errorIndicatorPattern =
+    /(?:FAIL|FAILED|error\[E\d+\]|Error:|panic:|AssertionError|SyntaxError|TypeError)/i;
 
   for (const line of lines) {
     const trimmed = line.trim();
@@ -45,7 +52,10 @@ export function distillTestOutput(output: string): ErrorSummary {
 
     if (errorIndicatorPattern.test(trimmed)) {
       failingLines.push(trimmed);
-      if (trimmed.toLowerCase().includes("syntaxerror") || trimmed.includes("error[E")) {
+      if (
+        trimmed.toLowerCase().includes("syntaxerror") ||
+        trimmed.includes("error[E")
+      ) {
         detectedKind = "compile_error";
       } else if (trimmed.toLowerCase().includes("lint")) {
         detectedKind = "lint_error";
@@ -61,7 +71,8 @@ export function distillTestOutput(output: string): ErrorSummary {
     }
   }
 
-  const conciseLines = failingLines.length > 0 ? failingLines.slice(0, 25) : lines.slice(-20);
+  const conciseLines =
+    failingLines.length > 0 ? failingLines.slice(0, 25) : lines.slice(-20);
   const distilledOutput = conciseLines.join("\n");
 
   return {

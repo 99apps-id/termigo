@@ -247,7 +247,9 @@ describe("repairModelMessageSequence", () => {
       } as ModelMessage,
     ];
 
-    const res = repairModelMessageSequence(input, { preserveTrailingApproval: true });
+    const res = repairModelMessageSequence(input, {
+      preserveTrailingApproval: true,
+    });
     expect(res).toHaveLength(3);
     const toolMsg = res[2];
     // biome-ignore lint/suspicious/noExplicitAny: reading a dynamic tool-message part list in a test
@@ -273,7 +275,9 @@ describe("repairModelMessageSequence", () => {
       } as ModelMessage,
     ];
 
-    const res = repairModelMessageSequence(input, { preserveTrailingApproval: false });
+    const res = repairModelMessageSequence(input, {
+      preserveTrailingApproval: false,
+    });
     expect(res).toHaveLength(3);
     const toolMsg = res[2];
     // biome-ignore lint/suspicious/noExplicitAny: reading a dynamic tool-message part list in a test

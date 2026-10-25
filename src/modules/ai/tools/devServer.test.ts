@@ -13,7 +13,9 @@ vi.mock("../lib/native", () => ({ native: nativeFns }));
 import type { ToolContext } from "./context";
 import { buildDevServerTools } from "./devServer";
 
-function createMockCtx(remote: { sessionId: number; cwd: string | null } | null = null): ToolContext {
+function createMockCtx(
+  remote: { sessionId: number; cwd: string | null } | null = null,
+): ToolContext {
   return {
     getCwd: () => "C:/workspace",
     getWorkspaceRoot: () => "C:/workspace",
@@ -39,7 +41,9 @@ describe("dev_server tool", () => {
   it("refuses when an SSH session is active", async () => {
     const ctx = createMockCtx({ sessionId: 1, cwd: "/remote" });
     const tools = buildDevServerTools(ctx);
-    const res = (await exec(tools, "dev_server", { command: "pnpm dev" })) as { error: string };
+    const res = (await exec(tools, "dev_server", { command: "pnpm dev" })) as {
+      error: string;
+    };
     expect(res.error).toBeDefined();
     expect(res.error).toContain("dev_server");
   });
@@ -57,7 +61,10 @@ describe("dev_server tool", () => {
     nativeFns.httpProbe.mockResolvedValue({ ok: true, status: 200 });
 
     const tools = buildDevServerTools(ctx);
-    const res = (await exec(tools, "dev_server", { command: "pnpm dev", restart: false })) as {
+    const res = (await exec(tools, "dev_server", {
+      command: "pnpm dev",
+      restart: false,
+    })) as {
       handle: number;
       reused: boolean;
       ready: boolean;
@@ -87,7 +94,10 @@ describe("dev_server tool", () => {
     nativeFns.httpProbe.mockResolvedValue({ ok: true, status: 200 });
 
     const tools = buildDevServerTools(ctx);
-    const res = (await exec(tools, "dev_server", { command: "pnpm dev", restart: true })) as {
+    const res = (await exec(tools, "dev_server", {
+      command: "pnpm dev",
+      restart: true,
+    })) as {
       handle: number;
       note: string;
       ready: boolean;
@@ -95,7 +105,10 @@ describe("dev_server tool", () => {
     };
 
     expect(nativeFns.shellBgKill).toHaveBeenCalledWith(42);
-    expect(nativeFns.shellBgSpawn).toHaveBeenCalledWith("pnpm dev", "C:/workspace");
+    expect(nativeFns.shellBgSpawn).toHaveBeenCalledWith(
+      "pnpm dev",
+      "C:/workspace",
+    );
     expect(res.handle).toBe(99);
     expect(res.note).toContain("restarted previous server #42");
     expect(res.ready).toBe(true);

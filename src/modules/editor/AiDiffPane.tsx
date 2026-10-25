@@ -97,7 +97,9 @@ export function AiDiffPane({
 }: Props) {
   const cmRef = useRef<ReactCodeMirrorRef>(null);
   const themeExt = useEditorThemeExt();
-  const [submitting, setSubmitting] = useState<"accept" | "reject" | null>(null);
+  const [submitting, setSubmitting] = useState<"accept" | "reject" | null>(
+    null,
+  );
 
   useEffect(() => {
     if (status !== "pending") {

@@ -82,7 +82,7 @@ function lastMeaningfulIndex(messages: readonly UIMessage[]): number {
     const m = messages[i];
     if (m.role !== "user") return i;
     const text = m.parts
-      .map((p) => (p as { type?: string; text?: string }))
+      .map((p) => p as { type?: string; text?: string })
       .filter((p) => p.type === "text")
       .map((p) => p.text ?? "")
       .join("");

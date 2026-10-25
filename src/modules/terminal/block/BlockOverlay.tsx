@@ -74,7 +74,10 @@ function fmtTime(ms: number): string {
 
 function relPath(p: string): string {
   const norm = p.replace(/\\/g, "/");
-  if (cachedHome && (norm === cachedHome || norm.startsWith(`${cachedHome}/`))) {
+  if (
+    cachedHome &&
+    (norm === cachedHome || norm.startsWith(`${cachedHome}/`))
+  ) {
     return `~${norm.slice(cachedHome.length)}`;
   }
   return p;

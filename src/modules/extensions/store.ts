@@ -56,9 +56,7 @@ type Actions = {
   init(): Promise<void>;
   refresh(): Promise<void>;
   install(
-    source:
-      | { kind: "zip"; path: string }
-      | { kind: "github"; repo: string },
+    source: { kind: "zip"; path: string } | { kind: "github"; repo: string },
     /** Manifest id from a prior `ext_peek_*` call. When set, deactivates any
      *  existing extension with this id before Rust runs the install pipeline,
      *  releasing Windows file handles so the replace step doesn't hit
@@ -100,7 +98,9 @@ export const useExtensionsStore = create<State & Actions>((set, get) => ({
       try {
         // Only main activates. Other windows refresh the list and sync
         // via `tedi://ext-changed`.
-        const list = isMainWindow() ? await loader.bootAll() : await loader.listInstalled();
+        const list = isMainWindow()
+          ? await loader.bootAll()
+          : await loader.listInstalled();
         // Settings webview is a separate JS context with empty registries;
         // seed manifest contributions so the Extensions tab can render.
         if (!isMainWindow()) {
@@ -108,28 +108,34 @@ export const useExtensionsStore = create<State & Actions>((set, get) => ({
         }
         set({ list, hydrated: true });
         // Cross-window sync: settings installs an ext, main reloads.
-        const unlisten = await listen<ExtChangedPayload>(EXT_CHANGED_EVENT, async (e) => {
-          const payload = e.payload;
-          if (isMainWindow()) {
-            try {
-              if (payload.kind === "removed") {
-                await loader.deactivate(payload.id);
-              } else {
-                await loader.reload(payload.id);
+        const unlisten = await listen<ExtChangedPayload>(
+          EXT_CHANGED_EVENT,
+          async (e) => {
+            const payload = e.payload;
+            if (isMainWindow()) {
+              try {
+                if (payload.kind === "removed") {
+                  await loader.deactivate(payload.id);
+                } else {
+                  await loader.reload(payload.id);
+                }
+              } catch (err) {
+                console.error(
+                  `[extensions] sync ${payload.kind} ${payload.id} failed`,
+                  err,
+                );
               }
-            } catch (err) {
-              console.error(`[extensions] sync ${payload.kind} ${payload.id} failed`, err);
             }
-          }
-          // Refresh list in every window.
-          const list = await loader.listInstalled();
-          // Re-seed on non-main so the Extensions tab renders toggles
-          // for newly installed/updated extensions without a webview reload.
-          if (!isMainWindow()) {
-            for (const ext of list) loader.seedManifestContributions(ext);
-          }
-          set({ list });
-        });
+            // Refresh list in every window.
+            const list = await loader.listInstalled();
+            // Re-seed on non-main so the Extensions tab renders toggles
+            // for newly installed/updated extensions without a webview reload.
+            if (!isMainWindow()) {
+              for (const ext of list) loader.seedManifestContributions(ext);
+            }
+            set({ list });
+          },
+        );
         // Stash unlisten on a global for HMR cleanup.
         if (typeof window !== "undefined") {
           const w = window as unknown as { __tediExtUnlisten?: () => void };
@@ -160,7 +166,9 @@ export const useExtensionsStore = create<State & Actions>((set, get) => ({
       // Pass the approved permission set (when the install came from the
       // review dialog) so Rust can reject a package that requests more than
       // the user saw. Spread to a plain array for the IPC boundary.
-      const approved = approvedPermissions ? [...approvedPermissions] : undefined;
+      const approved = approvedPermissions
+        ? [...approvedPermissions]
+        : undefined;
       let entry: InstalledExtension;
       if (source.kind === "zip") {
         entry = (await invoke("ext_install_from_zip", {
@@ -203,9 +211,12 @@ export const useExtensionsStore = create<State & Actions>((set, get) => ({
             // Surface enable-time activation failures the same way boot does,
             // so toggling an extension on gives immediate feedback.
             const msg = e instanceof Error ? e.message : String(e);
-            toast(`Extension "${fresh.manifest.name}" failed to activate: ${msg}`, {
-              variant: "error",
-            });
+            toast(
+              `Extension "${fresh.manifest.name}" failed to activate: ${msg}`,
+              {
+                variant: "error",
+              },
+            );
           });
         }
       }
@@ -239,7 +250,9 @@ export const useExtensionsStore = create<State & Actions>((set, get) => ({
     await announce({ kind: "reloaded", id });
   },
   checkUpdate: async (id) => {
-    const result = (await invoke("ext_check_update", { id })) as UpdateCheckResult;
+    const result = (await invoke("ext_check_update", {
+      id,
+    })) as UpdateCheckResult;
     // Refresh list to pull the new `latest_version` and `last_checked_at_ms`.
     const list = await loader.listInstalled();
     set({ list });

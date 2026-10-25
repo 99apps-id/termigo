@@ -107,7 +107,12 @@ describe("AI search tools path safety", () => {
       toolOptions,
     )) as GrepToolResult;
 
-    expect(result.hits.map((h) => h.path)).toEqual(["/workspace/src/app.ts", "/workspace/secrets.json", "/workspace/server.pem", "/etc/passwd"]);
+    expect(result.hits.map((h) => h.path)).toEqual([
+      "/workspace/src/app.ts",
+      "/workspace/secrets.json",
+      "/workspace/server.pem",
+      "/etc/passwd",
+    ]);
     expect(result.hits.map((h) => h.text)).toEqual([
       "const tokenName = 'safe fixture';",
       '{"token":"secret"}',

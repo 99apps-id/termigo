@@ -369,7 +369,9 @@ export type SidebarSection = {
  * Per-extension Map<sectionId, SidebarSection>; `clearExtensionContributions`
  * drops the slice on deactivate so the section vanishes when disabled.
  */
-export const sidebarSectionsRegistry = new KeyedRegistry<SidebarSection>("sidebar-section");
+export const sidebarSectionsRegistry = new KeyedRegistry<SidebarSection>(
+  "sidebar-section",
+);
 
 /**
  * Shell-command transformer registry. Lets extensions rewrite shell commands
@@ -385,7 +387,10 @@ export const sidebarSectionsRegistry = new KeyedRegistry<SidebarSection>("sideba
  * Disable/uninstall clears the extension's entry.
  */
 export type ShellCommandKind = "bash" | "terminal";
-export type ShellCommandTransformer = (command: string, kind: ShellCommandKind) => string;
+export type ShellCommandTransformer = (
+  command: string,
+  kind: ShellCommandKind,
+) => string;
 
 class ShellTransformerRegistry {
   /** Insertion-ordered so `applyAll` is deterministic. */
@@ -410,12 +415,18 @@ class ShellTransformerRegistry {
       try {
         const next = transformer(result, kind);
         if (typeof next !== "string") {
-          console.error(`[extensions] shell transformer from "${extId}" returned non-string`, next);
+          console.error(
+            `[extensions] shell transformer from "${extId}" returned non-string`,
+            next,
+          );
           continue;
         }
         result = next;
       } catch (err) {
-        console.error(`[extensions] shell transformer from "${extId}" threw`, err);
+        console.error(
+          `[extensions] shell transformer from "${extId}" threw`,
+          err,
+        );
       }
     }
     return result;

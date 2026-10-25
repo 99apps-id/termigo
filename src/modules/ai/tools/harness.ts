@@ -34,7 +34,9 @@ export function buildHarnessTools(ctx: ToolContext) {
       description:
         "Enable plan mode to make the agent queue ALL file edits for the user to review as one diff before applying — use for a large multi-file change. Disable it to apply edits directly (each still asks for approval). Auto-executes.",
       inputSchema: z.object({
-        enabled: z.boolean().describe("Turn plan mode on (true) or off (false)."),
+        enabled: z
+          .boolean()
+          .describe("Turn plan mode on (true) or off (false)."),
       }),
       execute: async ({ enabled }) => {
         if (enabled) {

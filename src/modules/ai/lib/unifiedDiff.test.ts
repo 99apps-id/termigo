@@ -39,7 +39,9 @@ describe("applyFilePatch", () => {
     const file = oneFile(
       "--- a/f\n+++ b/f\n@@ -1,3 +1,3 @@\n const a = 1;\n-const b = 2;\n+const b = 3;\n const c = 4;\n",
     );
-    expect(applyFilePatch("const a = 1;\nconst b = 2;\nconst c = 4;\n", file)).toEqual({
+    expect(
+      applyFilePatch("const a = 1;\nconst b = 2;\nconst c = 4;\n", file),
+    ).toEqual({
       ok: true,
       content: "const a = 1;\nconst b = 3;\nconst c = 4;\n",
     });

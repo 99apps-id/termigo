@@ -1,8 +1,5 @@
 import { create } from "zustand";
-import {
-  newApprovalId,
-  type PendingApproval,
-} from "../lib/approvalQueue";
+import { newApprovalId, type PendingApproval } from "../lib/approvalQueue";
 
 /**
  * How the user answered a single approval request.
@@ -169,10 +166,14 @@ export const useApprovalQueue = create<ApprovalQueueState>((set, get) => ({
       // Stop has to reach work that is blocked, not just work that is running.
       // Without this a denied-by-stop call would hold its sub-agent open until
       // the app closed.
-      abortSignal?.addEventListener("abort", () => {
-        cancelExpiry();
-        settle("deny");
-      }, { once: true });
+      abortSignal?.addEventListener(
+        "abort",
+        () => {
+          cancelExpiry();
+          settle("deny");
+        },
+        { once: true },
+      );
     });
   },
 

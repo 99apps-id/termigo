@@ -587,7 +587,10 @@ export function buildEditTools(ctx: ToolContext) {
             try {
               const r = await io.read(abs);
               if (r.kind !== "text") {
-                return { error: `cannot patch ${rel}: not a text file`, file: rel };
+                return {
+                  error: `cannot patch ${rel}: not a text file`,
+                  file: rel,
+                };
               }
               content = r.content;
             } catch (e) {
@@ -596,7 +599,10 @@ export function buildEditTools(ctx: ToolContext) {
           }
           const applied = applyFilePatch(content, file);
           if (!applied.ok) {
-            return { error: `patch failed for ${rel}: ${applied.error}`, file: rel };
+            return {
+              error: `patch failed for ${rel}: ${applied.error}`,
+              file: rel,
+            };
           }
           const added = file.hunks.reduce(
             (n, h) => n + h.lines.filter((l) => l.type === "add").length,
@@ -623,7 +629,8 @@ export function buildEditTools(ctx: ToolContext) {
         }
         const staged = [...stagedByAbs.values()];
 
-        const files: Array<{ path: string; added: number; removed: number }> = [];
+        const files: Array<{ path: string; added: number; removed: number }> =
+          [];
         for (const item of staged) {
           try {
             await item.io.write(item.abs, item.content);

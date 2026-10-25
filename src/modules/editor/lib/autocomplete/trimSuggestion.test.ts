@@ -8,7 +8,13 @@ import {
 describe("trimSuggestion", () => {
   it("drops suggestions that echo the recent prefix", () => {
     const prefix = "useEffect(() => {\n  void init();\n}, [init]);";
-    expect(trimSuggestion("useEffect(() => {\n  void init();\n}, [init]);", prefix, "")).toBe("");
+    expect(
+      trimSuggestion(
+        "useEffect(() => {\n  void init();\n}, [init]);",
+        prefix,
+        "",
+      ),
+    ).toBe("");
   });
 
   it("keeps genuinely new code", () => {
@@ -67,9 +73,9 @@ describe("reindentClosers", () => {
   });
 
   it("aligns a closer with its opener line", () => {
-    expect(reindentClosers("() => {\n  run();\n  }", "  ", "  useEffect(")).toBe(
-      "() => {\n  run();\n}",
-    );
+    expect(
+      reindentClosers("() => {\n  run();\n  }", "  ", "  useEffect("),
+    ).toBe("() => {\n  run();\n}");
   });
 
   it("leaves correctly indented suggestions untouched", () => {

@@ -30,7 +30,11 @@ export function humanizeFsError(raw: string): FriendlyFsError {
     errno === 13 || // EACCES (unix)
     errno === 5; // ERROR_ACCESS_DENIED (windows)
   if (denied) {
-    return { kind: "denied", message: "You don't have permission to open this folder.", raw };
+    return {
+      kind: "denied",
+      message: "You don't have permission to open this folder.",
+      raw,
+    };
   }
 
   const missing =

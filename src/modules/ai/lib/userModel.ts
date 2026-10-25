@@ -83,9 +83,11 @@ export async function loadUserModel(): Promise<UserModel> {
       suggestedSkills: Array.isArray(parsed.suggestedSkills)
         ? parsed.suggestedSkills
         : [],
-      suggestedSkillCounts: parsed.suggestedSkillCounts && typeof parsed.suggestedSkillCounts === "object"
-        ? parsed.suggestedSkillCounts
-        : {},
+      suggestedSkillCounts:
+        parsed.suggestedSkillCounts &&
+        typeof parsed.suggestedSkillCounts === "object"
+          ? parsed.suggestedSkillCounts
+          : {},
     };
   } catch {
     return { ...DEFAULT };

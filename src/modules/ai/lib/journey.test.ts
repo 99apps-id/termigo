@@ -20,10 +20,7 @@ describe("buildJourney", () => {
   const run: Pick<TrajectoryRun, "startedAt" | "finishedAt" | "steps"> = {
     startedAt: 1_000,
     finishedAt: 10_000,
-    steps: [
-      step("s1", "read_file", 2_000),
-      step("s2", "edit", 6_000),
-    ],
+    steps: [step("s1", "read_file", 2_000), step("s2", "edit", 6_000)],
   };
 
   it("interleaves steps and in-window checkpoints chronologically", () => {

@@ -90,7 +90,10 @@ export function staleNodeModulesHint(input: {
     input.command,
   );
   const mentionsNodeModules = /node_modules/i.test(input.command);
-  if (!pinnedPath && !(mentionsNodeModules && STALE_NODE_MODULES_RE.test(input.output))) {
+  if (
+    !pinnedPath &&
+    !(mentionsNodeModules && STALE_NODE_MODULES_RE.test(input.output))
+  ) {
     return null;
   }
   return "This failure looks like a STALE view of node_modules, not a missing package: version-pinned .pnpm paths are renamed by every (re)install, and a tree repaired earlier in this session invalidates older findings. Re-check from scratch before concluding anything — run the tool by its bare name (the shell PATH already includes node_modules/.bin) or via `pnpm exec <tool> --version`. Do not retry the same memorised path, and do not reinstall packages that a fresh check shows present.";
@@ -105,7 +108,8 @@ export function screenCommand(
   if (command.trimEnd().endsWith(`# ${UNCLOSED_QUOTE_SENTINEL}`)) {
     return {
       ok: false,
-      reason: "Refused: the command has an unclosed quote. Close the quote and try again.",
+      reason:
+        "Refused: the command has an unclosed quote. Close the quote and try again.",
     };
   }
   const safety = checkShellCommand(command);
@@ -318,7 +322,8 @@ export function buildShellTools(ctx: ToolContext) {
             : normalized;
           try {
             const out = await sshExec(remote.sessionId, full, timeout_secs);
-            const isSilentSuccess = !out.stdout && !out.stderr && out.exitCode === 0;
+            const isSilentSuccess =
+              !out.stdout && !out.stderr && out.exitCode === 0;
             const stdoutTrunc = truncateCommandOutput(out.stdout ?? "");
             const stderrTrunc = truncateCommandOutput(out.stderr ?? "");
             return {
@@ -328,9 +333,12 @@ export function buildShellTools(ctx: ToolContext) {
               stdout: stdoutTrunc.text,
               stderr: stderrTrunc.text,
               exit_code: out.exitCode,
-              truncated: out.truncated || stdoutTrunc.truncated || stderrTrunc.truncated,
+              truncated:
+                out.truncated || stdoutTrunc.truncated || stderrTrunc.truncated,
               ...(isSilentSuccess
-                ? { info: "Command completed successfully with no output (exit code 0)." }
+                ? {
+                    info: "Command completed successfully with no output (exit code 0).",
+                  }
                 : {}),
               // Say where it ran when that is not what the model would assume.
               // A shell the OSC 7 hook does not fit (fish, dash) reports no
@@ -422,10 +430,13 @@ export function buildShellTools(ctx: ToolContext) {
             stderr: stderrTrunc.text,
             exit_code: r.exit_code,
             timed_out: r.timed_out,
-            truncated: r.truncated || stdoutTrunc.truncated || stderrTrunc.truncated,
+            truncated:
+              r.truncated || stdoutTrunc.truncated || stderrTrunc.truncated,
             cwd_after: r.cwd_after,
             ...(isSilentSuccess
-              ? { info: "Command completed successfully with no output (exit code 0)." }
+              ? {
+                  info: "Command completed successfully with no output (exit code 0).",
+                }
               : {}),
             ...(hint ? { hint } : {}),
           };
@@ -465,8 +476,16 @@ export function buildShellTools(ctx: ToolContext) {
         // the workspace root, else the terminal cwd.
         const effectiveCwd = cwd ?? ctx.getWorkspaceRoot() ?? ctx.getCwd();
         try {
-          const handle = await native.shellBgSpawn(effectiveCommand, effectiveCwd);
-          return { handle, command: effectiveCommand, cwd: effectiveCwd, ok: true };
+          const handle = await native.shellBgSpawn(
+            effectiveCommand,
+            effectiveCwd,
+          );
+          return {
+            handle,
+            command: effectiveCommand,
+            cwd: effectiveCwd,
+            ok: true,
+          };
         } catch (e) {
           return { error: String(e) };
         }

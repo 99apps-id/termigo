@@ -12,7 +12,10 @@
  * Quotes are honoured because package names and paths contain spaces often
  * enough, and a naive split would turn one argument into two without saying so.
  */
-export function parseCommandLine(input: string): { command: string; args: string[] } {
+export function parseCommandLine(input: string): {
+  command: string;
+  args: string[];
+} {
   const tokens: string[] = [];
   let current = "";
   let quote: '"' | "'" | null = null;

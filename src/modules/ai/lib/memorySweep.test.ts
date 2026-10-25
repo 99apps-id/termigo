@@ -30,7 +30,9 @@ describe("shouldSweep", () => {
   });
 
   it("sweeps in the delegating modes once there is enough conversation", () => {
-    expect(shouldSweep(conversation(MIN_MESSAGES_TO_SWEEP), "edits")).toBe(true);
+    expect(shouldSweep(conversation(MIN_MESSAGES_TO_SWEEP), "edits")).toBe(
+      true,
+    );
     expect(shouldSweep(conversation(MIN_MESSAGES_TO_SWEEP), "all")).toBe(true);
   });
 
@@ -97,9 +99,9 @@ describe("parseFacts", () => {
   });
 
   it("strips list markers the model adds despite being told not to", () => {
-    expect(parseFacts("- Uses pnpm.\n* Never npm.\n1. Rust is stable.")).toEqual(
-      ["Uses pnpm.", "Never npm.", "Rust is stable."],
-    );
+    expect(
+      parseFacts("- Uses pnpm.\n* Never npm.\n1. Rust is stable."),
+    ).toEqual(["Uses pnpm.", "Never npm.", "Rust is stable."]);
   });
 
   it("caps how much one sweep can add", () => {

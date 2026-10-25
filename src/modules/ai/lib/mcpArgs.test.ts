@@ -3,7 +3,9 @@ import { formatEnvLines, parseCommandLine, parseEnvLines } from "./mcpArgs";
 
 describe("parseCommandLine", () => {
   it("reads the shape every MCP server is documented as", () => {
-    expect(parseCommandLine("npx -y @modelcontextprotocol/server-github")).toEqual({
+    expect(
+      parseCommandLine("npx -y @modelcontextprotocol/server-github"),
+    ).toEqual({
       command: "npx",
       args: ["-y", "@modelcontextprotocol/server-github"],
     });
@@ -18,7 +20,9 @@ describe("parseCommandLine", () => {
 
   // A naive split would turn one path into two arguments without saying so.
   it("keeps a quoted argument whole", () => {
-    expect(parseCommandLine('node "C:/My Tools/server.js" --port 3000')).toEqual({
+    expect(
+      parseCommandLine('node "C:/My Tools/server.js" --port 3000'),
+    ).toEqual({
       command: "node",
       args: ["C:/My Tools/server.js", "--port", "3000"],
     });
@@ -29,7 +33,10 @@ describe("parseCommandLine", () => {
   });
 
   it("handles a bare command", () => {
-    expect(parseCommandLine("my-server")).toEqual({ command: "my-server", args: [] });
+    expect(parseCommandLine("my-server")).toEqual({
+      command: "my-server",
+      args: [],
+    });
   });
 
   it("returns an empty command for empty input rather than throwing", () => {

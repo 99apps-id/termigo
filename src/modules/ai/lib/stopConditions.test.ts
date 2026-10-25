@@ -14,7 +14,6 @@ import {
   synthesisStopDecision,
 } from "./agent";
 
-
 type Call = {
   toolName: string;
   toolCallId: string;
@@ -276,8 +275,7 @@ describe("noIdleReadLoop", () => {
     }
     expect(
       logs.some(
-        (l) =>
-          l.includes("[idle-read-loop]") && l.includes("tool=read_file"),
+        (l) => l.includes("[idle-read-loop]") && l.includes("tool=read_file"),
       ),
     ).toBe(true);
   });
@@ -285,7 +283,6 @@ describe("noIdleReadLoop", () => {
 
 describe("noProgressStop", () => {
   const stop = noProgressStop<ToolSet>(2);
-
 
   it("fires after two consecutive text-only steps", () => {
     expect(stop(steps(null, null))).toBe(true);

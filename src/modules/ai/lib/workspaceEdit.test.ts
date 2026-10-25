@@ -25,10 +25,7 @@ function edit(
 describe("applyTextEdits", () => {
   it("renames every occurrence on a line regardless of edit order", () => {
     const content = "const foo = foo + 1;\n";
-    const edits = [
-      edit(0, 12, 0, 15, "bar"),
-      edit(0, 6, 0, 9, "bar"),
-    ];
+    const edits = [edit(0, 12, 0, 15, "bar"), edit(0, 6, 0, 9, "bar")];
     expect(applyTextEdits(content, edits)).toBe("const bar = bar + 1;\n");
   });
 

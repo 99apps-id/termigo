@@ -423,8 +423,7 @@ export async function acquireQuerySession(
   if (prefs.lspActivation[preset.id] !== "enabled") return null;
   if (!(await detectBinary(preset.command))) return null;
 
-  const markers =
-    preset.rootMarkers.length > 0 ? preset.rootMarkers : [".git"];
+  const markers = preset.rootMarkers.length > 0 ? preset.rootMarkers : [".git"];
   const root = await invoke<string | null>("lsp_resolve_root", {
     path,
     markers,

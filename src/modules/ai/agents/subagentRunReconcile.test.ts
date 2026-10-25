@@ -20,7 +20,11 @@ const running = (id: number, startedAt = NOW - 60_000): TestRun => ({
   status: "running",
   startedAt,
 });
-const done = (id: number): TestRun => ({ id, status: "done", endedAt: NOW - 1000 });
+const done = (id: number): TestRun => ({
+  id,
+  status: "done",
+  endedAt: NOW - 1000,
+});
 const errored = (id: number, error = "boom"): TestRun => ({
   id,
   status: "error",
@@ -74,7 +78,10 @@ describe("reconcileInterruptedRuns", () => {
   });
 
   it("keeps every row, including the ones it settles", () => {
-    const { runs } = reconcileInterruptedRuns([done(1), running(2), errored(3)], NOW);
+    const { runs } = reconcileInterruptedRuns(
+      [done(1), running(2), errored(3)],
+      NOW,
+    );
     expect(runs).toHaveLength(3);
     expect(runs.map((r) => r.id)).toEqual([1, 2, 3]);
   });

@@ -67,7 +67,11 @@ export function buildExtensionTools(): ExtensionToolset {
     const full = extToolName(extensionId, item.name);
 
     out[full] = dynamicTool({
-      description: describeExtTool(extensionId, item.description, needsApproval),
+      description: describeExtTool(
+        extensionId,
+        item.description,
+        needsApproval,
+      ),
       inputSchema: jsonSchema(extToolSchema(item.parameters)),
       // An extension declaring `auto` is asking for its tool to run unattended.
       // That is honoured, but only as far as the approval mode allows: the

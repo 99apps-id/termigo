@@ -74,9 +74,11 @@ describe("buildModelGroups", () => {
         customEndpoints: [{ id: "zai", name: "", modelId: "glm" }],
       }),
     );
-    expect(
-      groups.find((x) => x.key === "endpoint:zai")?.models[0],
-    ).toEqual({ id: "compat-zai", label: "glm", displayId: "glm" });
+    expect(groups.find((x) => x.key === "endpoint:zai")?.models[0]).toEqual({
+      id: "compat-zai",
+      label: "glm",
+      displayId: "glm",
+    });
   });
 
   it("uses the registry id as the display id for built-in models", () => {
@@ -130,7 +132,11 @@ describe("buildModelGroups", () => {
     const groups = buildModelGroups(
       input({
         models: [
-          { id: "deepseek-v4-flash", provider: "openai", label: "DeepSeek Flash" },
+          {
+            id: "deepseek-v4-flash",
+            provider: "openai",
+            label: "DeepSeek Flash",
+          },
         ],
         apiModelIdFor: (id) =>
           id === "deepseek-v4-flash" ? "deepseek-flash" : id,
@@ -146,9 +152,7 @@ describe("buildModelGroups", () => {
   });
 
   it("leaves the label alone when the wire id matches", () => {
-    const groups = buildModelGroups(
-      input({ apiModelIdFor: (id) => id }),
-    );
+    const groups = buildModelGroups(input({ apiModelIdFor: (id) => id }));
     expect(groups.find((g) => g.key === "openai")?.models).toEqual([
       { id: "gpt-5.6", label: "GPT-5.6 Sol", displayId: "gpt-5.6" },
     ]);

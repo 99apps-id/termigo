@@ -95,7 +95,9 @@ export function renderTranscript(
     }
     const label = m.role === "user" ? "USER" : "ASSISTANT";
     if (texts.length > 0) {
-      lines.push(`${label}: ${texts.join("\n").slice(0, PER_MESSAGE_CHAR_CAP)}`);
+      lines.push(
+        `${label}: ${texts.join("\n").slice(0, PER_MESSAGE_CHAR_CAP)}`,
+      );
     }
     for (const r of results) {
       lines.push(`TOOL RESULT: ${r.slice(0, PER_MESSAGE_CHAR_CAP)}`);
@@ -114,9 +116,7 @@ export function renderTranscript(
   if (kept.length === 0) return "(no prior conversation)";
   kept.reverse();
   const prefix =
-    kept.length < lines.length
-      ? "[...older conversation omitted...]\n"
-      : "";
+    kept.length < lines.length ? "[...older conversation omitted...]\n" : "";
   return prefix + kept.join("\n");
 }
 

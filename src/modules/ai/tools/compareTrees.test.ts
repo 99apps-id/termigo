@@ -64,17 +64,15 @@ async function run(input: {
 const globOk = (
   entries: Record<string, { rel: string; size: number; mtime: number }[]>,
 ) =>
-  nativeMock.glob.mockImplementation(
-    async ({ root }: { root: string }) => ({
-      hits: (entries[root] ?? []).map((e) => ({
-        path: `${root}/${e.rel}`,
-        rel: e.rel,
-        mtime: e.mtime,
-        size: e.size,
-      })),
-      truncated: false,
-    }),
-  );
+  nativeMock.glob.mockImplementation(async ({ root }: { root: string }) => ({
+    hits: (entries[root] ?? []).map((e) => ({
+      path: `${root}/${e.rel}`,
+      rel: e.rel,
+      mtime: e.mtime,
+      size: e.size,
+    })),
+    truncated: false,
+  }));
 
 describe("compare_trees", () => {
   beforeEach(() => {

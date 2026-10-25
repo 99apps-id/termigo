@@ -121,14 +121,26 @@ export function rerootToolContext(ctx: ToolContext, dir: string): ToolContext {
     openPreview: () => false,
     openCanvas: () => false,
     browserOpen: async () => ({ error: "not available in isolated subagent" }),
-    browserNavigate: async () => ({ error: "not available in isolated subagent" }),
+    browserNavigate: async () => ({
+      error: "not available in isolated subagent",
+    }),
     browserBack: async () => ({ error: "not available in isolated subagent" }),
-    browserForward: async () => ({ error: "not available in isolated subagent" }),
-    browserReload: async () => ({ error: "not available in isolated subagent" }),
-    browserExtract: async () => ({ error: "not available in isolated subagent" }),
+    browserForward: async () => ({
+      error: "not available in isolated subagent",
+    }),
+    browserReload: async () => ({
+      error: "not available in isolated subagent",
+    }),
+    browserExtract: async () => ({
+      error: "not available in isolated subagent",
+    }),
     browserEval: async () => ({ error: "not available in isolated subagent" }),
-    browserScreenshot: async () => ({ error: "not available in isolated subagent" }),
-    browserConsole: async () => ({ error: "not available in isolated subagent" }),
+    browserScreenshot: async () => ({
+      error: "not available in isolated subagent",
+    }),
+    browserConsole: async () => ({
+      error: "not available in isolated subagent",
+    }),
     browserUrl: async () => ({ error: "not available in isolated subagent" }),
     browserClose: async () => ({ error: "not available in isolated subagent" }),
     browserList: async () => [],

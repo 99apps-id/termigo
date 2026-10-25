@@ -1,8 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  setApprovalRespondedHandler,
-  useChatStore,
-} from "./chatStore";
+import { setApprovalRespondedHandler, useChatStore } from "./chatStore";
 
 describe("respondToApproval dispatch", () => {
   beforeEach(() => {

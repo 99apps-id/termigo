@@ -100,7 +100,8 @@ export async function recordRun(
       successes: (Number(prev.successes) || 0) + (outcome.success ? 1 : 0),
       totalSteps: (Number(prev.totalSteps) || 0) + (Number(outcome.steps) || 0),
       totalInputTokens:
-        (Number(prev.totalInputTokens) || 0) + (Number(outcome.inputTokens) || 0),
+        (Number(prev.totalInputTokens) || 0) +
+        (Number(outcome.inputTokens) || 0),
       totalOutputTokens:
         (Number(prev.totalOutputTokens) || 0) +
         (Number(outcome.outputTokens) || 0),

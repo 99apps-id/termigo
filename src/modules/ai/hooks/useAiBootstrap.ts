@@ -7,10 +7,7 @@ import {
   getAllKeys,
   hasAnyKey,
 } from "../lib/keyring";
-import {
-  isSignedInToChatGpt,
-  onChatGptAuthChanged,
-} from "../lib/chatgptAuth";
+import { isSignedInToChatGpt, onChatGptAuthChanged } from "../lib/chatgptAuth";
 import {
   DEFAULT_MODEL_ID,
   compatModelIdForEndpoint,
@@ -125,7 +122,8 @@ export function useAiBootstrap(): {
       // Write the repair back: a bare endpoint id left in the settings file
       // would resolve the same way on every boot, and the next reader (a
       // support note, the deployment guide) learns the wrong shape from it.
-      if (resolved !== rawDefault) void setDefaultModel(resolved).catch(() => {});
+      if (resolved !== rawDefault)
+        void setDefaultModel(resolved).catch(() => {});
       return;
     }
     setSelectedModelId(

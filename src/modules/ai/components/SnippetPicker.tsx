@@ -118,7 +118,9 @@ export function SnippetPickerContent({
                   const i = cursor;
                   if (it.kind !== "command") return null;
                   const c = it.command;
-                  const stats = useCustomCommandStatsStore.getState().get(c.name);
+                  const stats = useCustomCommandStatsStore
+                    .getState()
+                    .get(c.name);
                   const isFav = c.favorite ?? stats?.favorite ?? false;
                   const count = c.usageCount ?? stats?.count ?? 0;
                   return (
@@ -175,14 +177,18 @@ export function SnippetPickerContent({
                               }}
                               className="rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
                               aria-label={
-                                isFav ? "Remove from favorites" : "Add to favorites"
+                                isFav
+                                  ? "Remove from favorites"
+                                  : "Add to favorites"
                               }
                             >
                               <HugeiconsIcon
                                 icon={FavouriteIcon}
                                 size={12}
                                 strokeWidth={2}
-                                className={isFav ? "fill-amber-500 text-amber-500" : ""}
+                                className={
+                                  isFav ? "fill-amber-500 text-amber-500" : ""
+                                }
                               />
                             </button>
                           ) : null}

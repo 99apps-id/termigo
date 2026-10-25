@@ -84,9 +84,9 @@ export function evictObsoleteToolOutputs(messages: readonly ModelMessage[]): {
               ((part.output as { kind?: unknown }).kind === "screenshot" ||
                 ((part.output as { type?: unknown }).type === "content" &&
                   Array.isArray((part.output as { value?: unknown }).value) &&
-                  (part.output as { value: Array<{ type?: unknown }> }).value.some(
-                    (v) => v?.type === "image-data",
-                  )))));
+                  (
+                    part.output as { value: Array<{ type?: unknown }> }
+                  ).value.some((v) => v?.type === "image-data")))));
 
         if (isScreenshotResult) {
           seenScreenshots++;

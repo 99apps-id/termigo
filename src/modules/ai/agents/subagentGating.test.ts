@@ -157,10 +157,7 @@ describe("newFilesOnly", () => {
     const guarded = newFilesOnly({ execute: inner });
 
     // Step 1: creates file using relative dot-slash path
-    await guarded.execute(
-      { path: "./src/feature.ts" } as never,
-      {} as never,
-    );
+    await guarded.execute({ path: "./src/feature.ts" } as never, {} as never);
 
     // Step 2: updates same file using Windows backslashes without leading dot-slash
     vi.mocked(native.readFile).mockResolvedValue("file content");
@@ -190,7 +187,9 @@ describe("normalizeTargetKey", () => {
     expect(normalizeTargetKey("./src/b/../b/c.ts")).toBe("src/b/c.ts");
     // Leading .. escapes the root and is preserved, never collapsed away.
     expect(normalizeTargetKey("../shared/a.ts")).toBe("../shared/a.ts");
-    expect(normalizeTargetKey("c:/project/../other/a.ts")).toBe("c:/other/a.ts");
+    expect(normalizeTargetKey("c:/project/../other/a.ts")).toBe(
+      "c:/other/a.ts",
+    );
   });
 });
 
@@ -198,8 +197,12 @@ describe("gate & breaker", () => {
   // termigo-neo: no gates. runSubagent hands every tool to the subagent
   // directly, so nothing ever routes through the approval queue.
   it("subagentToolNeedsGate lets every tool through without gating", () => {
-    expect(subagentToolNeedsGate("bash_run", { needsApproval: true })).toBe(false);
-    expect(subagentToolNeedsGate("read_file", { needsApproval: false })).toBe(false);
+    expect(subagentToolNeedsGate("bash_run", { needsApproval: true })).toBe(
+      false,
+    );
+    expect(subagentToolNeedsGate("read_file", { needsApproval: false })).toBe(
+      false,
+    );
   });
 
   it(`never asks the user and never trips the breaker (${MAX_CONSECUTIVE_DENIALS} denials stay at zero)`, async () => {

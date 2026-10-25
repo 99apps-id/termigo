@@ -1,6 +1,9 @@
 import type { UIMessagePart } from "ai";
 
-export type AnyPart = UIMessagePart<Record<string, never>, Record<string, never>>;
+export type AnyPart = UIMessagePart<
+  Record<string, never>,
+  Record<string, never>
+>;
 
 export type Group =
   | { kind: "single"; part: AnyPart; idx: number; key: string }

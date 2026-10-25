@@ -69,7 +69,10 @@ export function useSshFileDrop({
     // or null when the point isn't over this panel.
     const dirAtPoint = (physX: number, physY: number): string | null => {
       const dpr = window.devicePixelRatio || 1;
-      const under = document.elementFromPoint(physX / dpr, physY / dpr) as HTMLElement | null;
+      const under = document.elementFromPoint(
+        physX / dpr,
+        physY / dpr,
+      ) as HTMLElement | null;
       const container = containerRef.current;
       if (!under || !container?.contains(under)) return null;
       const row = under.closest<HTMLElement>("[data-fs-path]");
@@ -86,7 +89,9 @@ export function useSshFileDrop({
           return;
         }
         if (payload.type === "enter" || payload.type === "over") {
-          highlight(dirAtPoint(payload.position.x, payload.position.y) !== null);
+          highlight(
+            dirAtPoint(payload.position.x, payload.position.y) !== null,
+          );
           return;
         }
         if (payload.type !== "drop") return;
@@ -100,7 +105,13 @@ export function useSshFileDrop({
         for (let i = 0; i < paths.length; i++) {
           const local = paths[i];
           const name = localBasename(local);
-          setUpload({ name, index: i + 1, count: paths.length, written: 0, total: 0 });
+          setUpload({
+            name,
+            index: i + 1,
+            count: paths.length,
+            written: 0,
+            total: 0,
+          });
           try {
             await sftpUpload(sessionId, local, joinRemote(dir, name), (p) =>
               setUpload({ name, index: i + 1, count: paths.length, ...p }),
@@ -113,12 +124,17 @@ export function useSshFileDrop({
         onUploadedRef.current(dir);
         const ok = paths.length - failures.length;
         if (failures.length === 0) {
-          toast(`Uploaded ${ok} file${ok === 1 ? "" : "s"} to ${dir}`, { variant: "success" });
+          toast(`Uploaded ${ok} file${ok === 1 ? "" : "s"} to ${dir}`, {
+            variant: "success",
+          });
         } else {
           console.error("ssh upload failures:", failures);
-          toast(`Uploaded ${ok}/${paths.length} - ${failures.length} failed (${failures[0]})`, {
-            variant: "warning",
-          });
+          toast(
+            `Uploaded ${ok}/${paths.length} - ${failures.length} failed (${failures[0]})`,
+            {
+              variant: "warning",
+            },
+          );
         }
       })
       .then((un) => {

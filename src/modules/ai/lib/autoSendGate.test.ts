@@ -209,8 +209,12 @@ describe("helpers", () => {
   });
 
   it("summarizes input cleanly for UI diagnostics", () => {
-    expect(summarizeInput("edit", { path: "src/core/flow.ts" })).toBe("flow.ts");
-    expect(summarizeInput("bash_run", { command: "cargo test" })).toBe('"cargo test"');
+    expect(summarizeInput("edit", { path: "src/core/flow.ts" })).toBe(
+      "flow.ts",
+    );
+    expect(summarizeInput("bash_run", { command: "cargo test" })).toBe(
+      '"cargo test"',
+    );
   });
 });
 
@@ -402,7 +406,9 @@ describe("autoSendGate tool repetition and failure breakers", () => {
 
     expect(decision.allow).toBe(false);
     expect(decision.stoppedLoop).toBe(true);
-    expect(decision.reason).toContain("failed repeatedly with identical arguments");
+    expect(decision.reason).toContain(
+      "failed repeatedly with identical arguments",
+    );
   });
 
   it("catches alternating read and failed edit loops", () => {
@@ -590,7 +596,9 @@ describe("autoSendGate tool repetition and failure breakers", () => {
     expect(allowed).toHaveLength(MAX_TOTAL_AUTO_SENDS);
     expect(decisions.at(-1)?.allow).toBe(false);
     expect(decisions.at(-1)?.stoppedLoop).toBe(true);
-    expect(decisions.at(-1)?.reason).toContain("maximum limit of 10 automatic sends");
+    expect(decisions.at(-1)?.reason).toContain(
+      "maximum limit of 10 automatic sends",
+    );
   });
 });
 
@@ -599,36 +607,82 @@ describe("isMutatingToolCall", () => {
     expect(isMutatingToolCall("edit", { path: "a.ts" })).toBe(true);
     expect(isMutatingToolCall("write_file", { path: "a.ts" })).toBe(true);
     expect(isMutatingToolCall("multi_edit", { path: "a.ts" })).toBe(true);
-    expect(isMutatingToolCall("replace_file_content", { path: "a.ts" })).toBe(true);
+    expect(isMutatingToolCall("replace_file_content", { path: "a.ts" })).toBe(
+      true,
+    );
   });
 
   it("treats read-only shell commands and probes as non-mutating", () => {
-    expect(isMutatingToolCall("bash_run", { command: "cat file.txt" })).toBe(false);
-    expect(isMutatingToolCall("bash_run", { command: "git status" })).toBe(false);
-    expect(isMutatingToolCall("bash_run", { command: "git diff HEAD~1" })).toBe(false);
-    expect(isMutatingToolCall("bash_run", { command: "npx tsc --noEmit" })).toBe(false);
-    expect(isMutatingToolCall("bash_run", { command: "node -e 'console.log(process.version)'" })).toBe(false);
-    expect(isMutatingToolCall("bash_run", { command: "Get-Content -Path file.txt" })).toBe(false);
+    expect(isMutatingToolCall("bash_run", { command: "cat file.txt" })).toBe(
+      false,
+    );
+    expect(isMutatingToolCall("bash_run", { command: "git status" })).toBe(
+      false,
+    );
+    expect(isMutatingToolCall("bash_run", { command: "git diff HEAD~1" })).toBe(
+      false,
+    );
+    expect(
+      isMutatingToolCall("bash_run", { command: "npx tsc --noEmit" }),
+    ).toBe(false);
+    expect(
+      isMutatingToolCall("bash_run", {
+        command: "node -e 'console.log(process.version)'",
+      }),
+    ).toBe(false);
+    expect(
+      isMutatingToolCall("bash_run", { command: "Get-Content -Path file.txt" }),
+    ).toBe(false);
     expect(isMutatingToolCall("bash_run", { command: "ls -la" })).toBe(false);
-    expect(isMutatingToolCall("bash_run", { command: "grep -rn 'foo' src/" })).toBe(false);
+    expect(
+      isMutatingToolCall("bash_run", { command: "grep -rn 'foo' src/" }),
+    ).toBe(false);
   });
 
   it("treats mutating shell commands as mutating", () => {
-    expect(isMutatingToolCall("bash_run", { command: "pnpm install" })).toBe(true);
-    expect(isMutatingToolCall("bash_run", { command: "npm i -D vitest" })).toBe(true);
-    expect(isMutatingToolCall("bash_run", { command: "rm -rf dist/" })).toBe(true);
-    expect(isMutatingToolCall("bash_run", { command: "mkdir -p newdir" })).toBe(true);
-    expect(isMutatingToolCall("bash_run", { command: "touch newfile.ts" })).toBe(true);
-    expect(isMutatingToolCall("bash_run", { command: "git commit -m 'feat: update'" })).toBe(true);
-    expect(isMutatingToolCall("bash_run", { command: "git checkout -b feature" })).toBe(true);
-    expect(isMutatingToolCall("bash_run", { command: "echo 'line' > file.txt" })).toBe(true);
-    expect(isMutatingToolCall("bash_run", { command: "echo 'line' >> file.txt" })).toBe(true);
-    expect(isMutatingToolCall("bash_run", { command: "cargo build --release" })).toBe(true);
+    expect(isMutatingToolCall("bash_run", { command: "pnpm install" })).toBe(
+      true,
+    );
+    expect(isMutatingToolCall("bash_run", { command: "npm i -D vitest" })).toBe(
+      true,
+    );
+    expect(isMutatingToolCall("bash_run", { command: "rm -rf dist/" })).toBe(
+      true,
+    );
+    expect(isMutatingToolCall("bash_run", { command: "mkdir -p newdir" })).toBe(
+      true,
+    );
+    expect(
+      isMutatingToolCall("bash_run", { command: "touch newfile.ts" }),
+    ).toBe(true);
+    expect(
+      isMutatingToolCall("bash_run", {
+        command: "git commit -m 'feat: update'",
+      }),
+    ).toBe(true);
+    expect(
+      isMutatingToolCall("bash_run", { command: "git checkout -b feature" }),
+    ).toBe(true);
+    expect(
+      isMutatingToolCall("bash_run", { command: "echo 'line' > file.txt" }),
+    ).toBe(true);
+    expect(
+      isMutatingToolCall("bash_run", { command: "echo 'line' >> file.txt" }),
+    ).toBe(true);
+    expect(
+      isMutatingToolCall("bash_run", { command: "cargo build --release" }),
+    ).toBe(true);
   });
 
   it("treats null device redirection as non-mutating", () => {
-    expect(isMutatingToolCall("bash_run", { command: "node -e 'console.log(1)' > /dev/null 2>&1" })).toBe(false);
-    expect(isMutatingToolCall("bash_run", { command: "git status > nul 2>&1" })).toBe(false);
+    expect(
+      isMutatingToolCall("bash_run", {
+        command: "node -e 'console.log(1)' > /dev/null 2>&1",
+      }),
+    ).toBe(false);
+    expect(
+      isMutatingToolCall("bash_run", { command: "git status > nul 2>&1" }),
+    ).toBe(false);
   });
 
   it("prevents read-only bash probes from resetting tool repeat counters", () => {
@@ -676,4 +730,3 @@ describe("hasFileRedirection", () => {
     expect(hasFileRedirection("node -e '...' > /dev/null 2>&1")).toBe(false);
   });
 });
-

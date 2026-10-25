@@ -13,7 +13,11 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
 }));
 
-let mockSshActiveSession: { sessionId: number; connectionId: string; hostLabel: string } | null = null;
+let mockSshActiveSession: {
+  sessionId: number;
+  connectionId: string;
+  hostLabel: string;
+} | null = null;
 let mockSshRightPanelOpen = false;
 
 vi.mock("@/modules/ssh/sshActiveSession", () => ({
@@ -33,7 +37,8 @@ vi.mock("@/modules/terminal", () => ({
   findLeafRemoteCwd: (_paneTree: unknown, leafId: number) =>
     leafId === 10 ? "/remote/dir" : null,
   isSshLeaf: (_paneTree: unknown, leafId: number) => leafId === 10,
-  leafIds: (paneTree: { id?: number } | undefined) => (paneTree?.id ? [paneTree.id] : [10]),
+  leafIds: (paneTree: { id?: number } | undefined) =>
+    paneTree?.id ? [paneTree.id] : [10],
   leafSessionId: (leafId: number) => (leafId === 10 ? 42 : null),
   whenSessionReady: vi.fn().mockResolvedValue(undefined),
   writeToSession: vi.fn(),

@@ -29,7 +29,9 @@ export function FolderTreeShell({
   showOpenFolder: boolean;
   onClose?: () => void;
 }) {
-  const [pickedPath, setPickedPath] = useState<string | null>(initialPickedPath);
+  const [pickedPath, setPickedPath] = useState<string | null>(
+    initialPickedPath,
+  );
   // When `rootPath` changes (workspace switch), drop the user pick.
   const lastPropRootRef = useRef<string | null>(rootPath);
   useEffect(() => {
@@ -128,7 +130,9 @@ export function FolderTreeShell({
       // otherwise gets above its content. Rendered unconditionally: it is a
       // zero-size span when nothing adopts it (a float window, say), and a
       // conditional one would have to be told when the host is there.
-      dragHandle={<span data-tedi-panel-controls className="flex shrink-0 items-center" />}
+      dragHandle={
+        <span data-tedi-panel-controls className="flex shrink-0 items-center" />
+      }
     />
   );
 }

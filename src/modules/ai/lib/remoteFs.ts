@@ -74,7 +74,11 @@ export function routePath(
     };
   }
   const base = remote.cwd.endsWith("/") ? remote.cwd : `${remote.cwd}/`;
-  return { kind: "remote", sessionId: remote.sessionId, path: `${base}${rawPath}` };
+  return {
+    kind: "remote",
+    sessionId: remote.sessionId,
+    path: `${base}${rawPath}`,
+  };
 }
 
 /**
@@ -95,7 +99,9 @@ export function remoteUnsupported(
 }
 
 /** True when a tool call would land on the remote host. */
-export function isRemoteTarget(t: FsTarget): t is Extract<FsTarget, { kind: "remote" }> {
+export function isRemoteTarget(
+  t: FsTarget,
+): t is Extract<FsTarget, { kind: "remote" }> {
   return t.kind === "remote";
 }
 

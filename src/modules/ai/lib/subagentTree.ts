@@ -46,10 +46,7 @@ function isRunning(status: string): boolean {
 export function widthByDepth(runs: readonly SubagentRunLike[]): number[] {
   const widths: number[] = [];
   for (const r of runs) {
-    const d = Math.min(
-      MAX_DEPTH_INDEX,
-      Math.max(0, Math.trunc(r.depth ?? 0)),
-    );
+    const d = Math.min(MAX_DEPTH_INDEX, Math.max(0, Math.trunc(r.depth ?? 0)));
     widths[d] = (widths[d] ?? 0) + 1;
   }
   // Fill holes so index i always exists up to the deepest populated level.
@@ -83,7 +80,9 @@ export function sparkline(values: readonly number[]): string {
 }
 
 /** Flat totals across all runs — feeds the HUD summary line. */
-export function aggregateRuns(runs: readonly SubagentRunLike[]): SubagentTotals {
+export function aggregateRuns(
+  runs: readonly SubagentRunLike[],
+): SubagentTotals {
   let active = 0;
   let failed = 0;
   let steps = 0;
@@ -115,9 +114,7 @@ function fmtDuration(ms: number): string {
  */
 export function formatRunSummary(totals: SubagentTotals): string {
   if (totals.agents === 0) return "";
-  const pieces = [
-    `${totals.agents} agent${totals.agents === 1 ? "" : "s"}`,
-  ];
+  const pieces = [`${totals.agents} agent${totals.agents === 1 ? "" : "s"}`];
   if (totals.active > 0) pieces.push(`${totals.active} running`);
   if (totals.failed > 0) pieces.push(`${totals.failed} failed`);
   if (totals.maxDepth > 1) pieces.push(`d${totals.maxDepth}`);

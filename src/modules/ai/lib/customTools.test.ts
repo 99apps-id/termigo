@@ -136,7 +136,10 @@ describe("renderCommand", () => {
     const t = tool({
       parameters: [{ name: "branch", description: "b", required: false }],
     });
-    expect(renderCommand(t, {})).toEqual({ ok: true, command: "./deploy.sh ''" });
+    expect(renderCommand(t, {})).toEqual({
+      ok: true,
+      command: "./deploy.sh ''",
+    });
   });
 
   it("substitutes every occurrence", () => {
@@ -152,7 +155,9 @@ describe("toolInputSchema", () => {
   it("describes the parameters for the model", () => {
     expect(toolInputSchema(tool())).toEqual({
       type: "object",
-      properties: { branch: { type: "string", description: "Branch to deploy" } },
+      properties: {
+        branch: { type: "string", description: "Branch to deploy" },
+      },
       required: ["branch"],
       additionalProperties: false,
     });
@@ -178,7 +183,11 @@ describe("the store", () => {
   // definition read back says plainly what it expects.
   it("round-trips, normalising required to an explicit flag", () => {
     expect(parseToolsFile(formatToolsFile([tool()]))).toEqual([
-      tool({ parameters: [{ name: "branch", description: "Branch to deploy", required: true }] }),
+      tool({
+        parameters: [
+          { name: "branch", description: "Branch to deploy", required: true },
+        ],
+      }),
     ]);
   });
 
@@ -189,7 +198,10 @@ describe("the store", () => {
   // A tool that cannot run correctly is worse in the list than absent from it.
   it("skips a broken definition instead of offering it", () => {
     const content = JSON.stringify({
-      tools: [tool(), { name: "bad", description: "d", command: "x {{missing}}" }],
+      tools: [
+        tool(),
+        { name: "bad", description: "d", command: "x {{missing}}" },
+      ],
     });
     expect(parseToolsFile(content).map((t) => t.name)).toEqual(["deploy"]);
   });

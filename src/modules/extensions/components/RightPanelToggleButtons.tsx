@@ -35,7 +35,11 @@ import {
 import { Camera, Folder, type LucideIcon } from "lucide-react";
 
 import { useResolvedExtensionIcon } from "../icon";
-import { commandsRegistry, keybindingsRegistry, panelsRegistry } from "../registries";
+import {
+  commandsRegistry,
+  keybindingsRegistry,
+  panelsRegistry,
+} from "../registries";
 import { useRegistry } from "../useRegistry";
 import { isRightPanelOpen, useRightPanelStore } from "../rightPanelStore";
 
@@ -49,9 +53,13 @@ const ICON_MAP: Record<string, LucideIcon> = {
   "tedi.secondary-folder-tree": Folder,
 };
 
-function useSortedRightPanels(match: (p: { compact?: boolean; kind?: string }) => boolean) {
+function useSortedRightPanels(
+  match: (p: { compact?: boolean; kind?: string }) => boolean,
+) {
   const panels = useRegistry(panelsRegistry);
-  const filtered = panels.filter((p) => p.item.surface === "right" && match(p.item));
+  const filtered = panels.filter(
+    (p) => p.item.surface === "right" && match(p.item),
+  );
   return [...filtered].sort((a, b) => {
     const e = a.extensionId.localeCompare(b.extensionId);
     return e !== 0 ? e : a.item.id.localeCompare(b.item.id);
@@ -102,7 +110,11 @@ export function RightPanelActionToggles() {
  * so borderless icons (Screenshot, Discord, ...) sit together as one cluster.
  */
 export function RightPanelCompactToggles() {
-  return <RightPanelToggleRow match={(p) => p.kind !== "action" && p.compact === true} />;
+  return (
+    <RightPanelToggleRow
+      match={(p) => p.kind !== "action" && p.compact === true}
+    />
+  );
 }
 
 /**
@@ -111,7 +123,11 @@ export function RightPanelCompactToggles() {
  * only the placement differs. The title + shortcut chip appear in the tooltip.
  */
 export function RightPanelDefaultToggles() {
-  return <RightPanelToggleRow match={(p) => p.kind !== "action" && p.compact !== true} />;
+  return (
+    <RightPanelToggleRow
+      match={(p) => p.kind !== "action" && p.compact !== true}
+    />
+  );
 }
 
 function ToggleButton({
@@ -147,13 +163,16 @@ function ToggleButton({
       chipBinding = userBinding;
     } else {
       const entry = keybindings.find(
-        (k) => k.extensionId === extensionId && k.item.command === toggleCommand,
+        (k) =>
+          k.extensionId === extensionId && k.item.command === toggleCommand,
       );
       if (entry) chipBinding = parseKeybindingString(entry.item.key);
     }
   }
   // `KEY_SEP` is "+" on Win/Linux, empty on macOS. Matches `fmtShortcut`.
-  const chipText = chipBinding ? getBindingTokens(chipBinding).join(KEY_SEP) : null;
+  const chipText = chipBinding
+    ? getBindingTokens(chipBinding).join(KEY_SEP)
+    : null;
   const tooltipLabel = (
     <span className="inline-flex items-center gap-1.5">
       <span>{isAction ? title : `${isOpen ? "Close" : "Open"} ${title}`}</span>
@@ -176,7 +195,10 @@ function ToggleButton({
     try {
       (handler as () => unknown)();
     } catch (err) {
-      console.error(`[extensions] command "${extensionId}:${toggleCommand}" threw`, err);
+      console.error(
+        `[extensions] command "${extensionId}:${toggleCommand}" threw`,
+        err,
+      );
     }
   };
 
@@ -196,7 +218,12 @@ function ToggleButton({
             : "text-muted-foreground hover:text-foreground",
         )}
       >
-        <PanelIcon extensionId={extensionId} icon={icon} alt={title} size={16} />
+        <PanelIcon
+          extensionId={extensionId}
+          icon={icon}
+          alt={title}
+          size={16}
+        />
       </button>
     </IconTooltip>
   );
@@ -260,7 +287,13 @@ function PanelImageIcon({
   if (!url) {
     // Manifest didn't ship an icon (or it failed to load) - fall back to
     // a muted square so the button is still visible.
-    return <span className="bg-muted shrink-0 rounded-sm" style={style} aria-hidden />;
+    return (
+      <span
+        className="bg-muted shrink-0 rounded-sm"
+        style={style}
+        aria-hidden
+      />
+    );
   }
   // Decorative: the wrapping toggle button already carries aria-label={title},
   // so an empty alt avoids screen readers announcing the name twice.

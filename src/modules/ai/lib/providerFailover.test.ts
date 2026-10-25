@@ -16,8 +16,12 @@ describe("providerFailover", () => {
 
   it("identifies rate limit and quota exhaustion error strings", () => {
     expect(isRateLimitError("Error: 429 Too Many Requests")).toBe(true);
-    expect(isRateLimitError(new Error("rate_limit_exceeded: TPM limit reached"))).toBe(true);
-    expect(isRateLimitError("quota exceeded for this billing period")).toBe(true);
+    expect(
+      isRateLimitError(new Error("rate_limit_exceeded: TPM limit reached")),
+    ).toBe(true);
+    expect(isRateLimitError("quota exceeded for this billing period")).toBe(
+      true,
+    );
     expect(isRateLimitError("Connection timed out: ECONNRESET")).toBe(false);
   });
 
@@ -28,11 +32,17 @@ describe("providerFailover", () => {
     expect(isProviderAvailable(provider, now)).toBe(true);
 
     // Record 429 error with 30s cooldown
-    recordProviderError(provider, new Error("HTTP 429: Too Many Requests"), 30_000);
+    recordProviderError(
+      provider,
+      new Error("HTTP 429: Too Many Requests"),
+      30_000,
+    );
 
     // Should be unavailable at now + 5s
     expect(isProviderAvailable(provider, Date.now() + 5_000)).toBe(false);
-    expect(getRemainingCooldownMs(provider, Date.now() + 5_000)).toBeGreaterThan(0);
+    expect(
+      getRemainingCooldownMs(provider, Date.now() + 5_000),
+    ).toBeGreaterThan(0);
 
     // Success clears rate limit
     recordProviderSuccess(provider);
@@ -50,7 +60,11 @@ describe("providerFailover", () => {
     expect(res1.isFallback).toBe(false);
 
     // 2. Primary throttled: falls back to first available fallback
-    recordProviderError("claude-3-7-sonnet", new Error("429 Rate limit reached"), 60_000);
+    recordProviderError(
+      "claude-3-7-sonnet",
+      new Error("429 Rate limit reached"),
+      60_000,
+    );
 
     const res2 = selectActiveProvider(primary, fallbacks);
     expect(res2.selectedProvider).toBe("gpt-4o");

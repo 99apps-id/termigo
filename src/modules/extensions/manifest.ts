@@ -30,8 +30,12 @@ const SettingSchema = z
     label: z.string().min(1).optional(),
     title: z.string().min(1).optional(),
     description: z.string().optional(),
-    default: z.union([z.string(), z.number(), z.boolean(), z.null()]).optional(),
-    options: z.array(z.object({ value: z.string(), label: z.string() })).optional(),
+    default: z
+      .union([z.string(), z.number(), z.boolean(), z.null()])
+      .optional(),
+    options: z
+      .array(z.object({ value: z.string(), label: z.string() }))
+      .optional(),
     section: z.string().optional(),
     secret: z.boolean().optional(),
   })
@@ -135,7 +139,10 @@ export const ManifestSchema = z
       .string()
       .min(3)
       .max(64)
-      .regex(/^[a-z0-9][a-z0-9\-_.]*[a-z0-9]$/, "id must be lowercase kebab/dotted"),
+      .regex(
+        /^[a-z0-9][a-z0-9\-_.]*[a-z0-9]$/,
+        "id must be lowercase kebab/dotted",
+      ),
     name: z.string().min(1),
     version: SemverIshSchema,
     // `.nullish()` accepts `null` and `undefined`. Rust serializes
@@ -157,17 +164,24 @@ export const ManifestSchema = z
     raw_top_level_settings: z.record(z.string(), z.unknown()).optional(),
     // Rust emits JSON `null` when `contributes` is omitted. `.default({})`
     // only fires on `undefined`, so coerce `null` to `undefined` first.
-    contributes: z.preprocess((v) => (v == null ? undefined : v), ContributesSchema.default({})),
+    contributes: z.preprocess(
+      (v) => (v == null ? undefined : v),
+      ContributesSchema.default({}),
+    ),
     engines: EnginesSchema.nullish(),
   })
   .passthrough()
   .transform((v) => {
     // Merge top-level `settings` (map of id -> definition) into
     // `contributes.settings` so every extension's settings live in one place.
-    if (v.raw_top_level_settings && typeof v.raw_top_level_settings === "object") {
+    if (
+      v.raw_top_level_settings &&
+      typeof v.raw_top_level_settings === "object"
+    ) {
       const settings_map = v.raw_top_level_settings as Record<string, unknown>;
       const contributes = v.contributes ?? {};
-      const existing = "settings" in contributes ? contributes.settings : undefined;
+      const existing =
+        "settings" in contributes ? contributes.settings : undefined;
       const settingsArray = Array.isArray(existing) ? [...existing] : [];
       for (const [id, def] of Object.entries(settings_map)) {
         if (def && typeof def === "object") {

@@ -48,7 +48,11 @@ describe("renderTranscript", () => {
     const msg: SideQuestionMessage = {
       role: "assistant",
       parts: [
-        { type: "tool-read_file", toolName: "read_file", state: "input-available" },
+        {
+          type: "tool-read_file",
+          toolName: "read_file",
+          state: "input-available",
+        },
         { type: "tool-grep", toolName: "grep", state: "input-available" },
       ],
     };
@@ -65,7 +69,9 @@ describe("renderTranscript", () => {
   });
 
   it("stringifies non-string tool output", () => {
-    const out = renderTranscript([toolCall("edit", { ok: true, path: "a.ts" })]);
+    const out = renderTranscript([
+      toolCall("edit", { ok: true, path: "a.ts" }),
+    ]);
     expect(out).toContain('TOOL RESULT: edit: {"ok":true,"path":"a.ts"}');
   });
 

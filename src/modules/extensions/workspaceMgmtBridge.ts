@@ -23,7 +23,9 @@
 export type CreateWorkspaceFn = (
   name: string,
 ) => Promise<{ ok: boolean; wsId?: string; error?: string }>;
-export type SetActiveWorkspaceFn = (wsId: string) => Promise<{ ok: boolean; error?: string }>;
+export type SetActiveWorkspaceFn = (
+  wsId: string,
+) => Promise<{ ok: boolean; error?: string }>;
 
 let creator: CreateWorkspaceFn | null = null;
 let activator: SetActiveWorkspaceFn | null = null;
@@ -40,7 +42,9 @@ export async function createWorkspace(
   name: string,
 ): Promise<{ ok: boolean; wsId?: string; error?: string }> {
   if (!creator) {
-    console.warn("[extensions] createWorkspace called before App wired the bridge; ignoring");
+    console.warn(
+      "[extensions] createWorkspace called before App wired the bridge; ignoring",
+    );
     return { ok: false, error: "workspace bridge not ready" };
   }
   return creator(name);
@@ -50,7 +54,9 @@ export async function setActiveWorkspace(
   wsId: string,
 ): Promise<{ ok: boolean; error?: string }> {
   if (!activator) {
-    console.warn("[extensions] setActiveWorkspace called before App wired the bridge; ignoring");
+    console.warn(
+      "[extensions] setActiveWorkspace called before App wired the bridge; ignoring",
+    );
     return { ok: false, error: "workspace bridge not ready" };
   }
   return activator(wsId);

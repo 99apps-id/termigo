@@ -67,46 +67,40 @@ export function buildSearchTools(ctx: ToolContext) {
       description:
         "Search file contents in the workspace using a regular expression. Honors .gitignore. Returns up to `max_results` (default 30, max 500) `{path, line, text}` hits, with a `truncated` flag when more existed. Long match lines are clipped to 160 chars. Use this for code navigation: do NOT brute-force read_file across the tree. Narrow with `glob` when you can; raise `max_results` only if the first batch truly isn't enough.",
       inputSchema: z.object({
-          pattern: z
-            .string()
-            .optional()
-            .describe(
-              `Regex pattern (Rust ripgrep dialect). Anchor and escape literal characters as needed. ${SEARCH_PATTERN_HINT} Match the broader pattern and filter by reading the hits instead.`,
-            ),
-          query: z
-            .string()
-            .optional()
-            .describe("Alias for pattern."),
-          root: z
-            .string()
-            .optional()
-            .describe(
-              "Root to search under. Defaults to the active terminal cwd, then the workspace root.",
-            ),
-          path: z
-            .string()
-            .optional()
-            .describe("Alias for root."),
-          // A bare string is accepted as well as a list. Models reach for
-          // `"glob": "src/**/*.ts"` when they have exactly one pattern, and the
-          // array-only schema rejected the whole call - the tool never ran, and
-          // the run died on a validation error rather than a search.
-          //
-          // Normalised in `execute` rather than with `.transform()`: a Zod
-          // transform cannot be expressed in JSON Schema, so `z.toJSONSchema`
-          // throws on it and the tool's schema became the one entry in the
-          // payload that could not be measured (`lib/toolPayload.ts` reports it
-          // as `unmeasured`). Keeping the schema declarative means the reported
-          // request size is exact.
-          glob: z
-            .union([z.string(), z.array(z.string())])
-            .optional()
-            .describe(
-              "Optional include-globs over relative paths. One pattern or several: 'src/**/*.ts' or ['**/*.ts', 'src/**/*.tsx'].",
-            ),
-          case_insensitive: z.boolean().optional(),
-          max_results: z.number().int().min(1).max(500).optional(),
-        }),
+        pattern: z
+          .string()
+          .optional()
+          .describe(
+            `Regex pattern (Rust ripgrep dialect). Anchor and escape literal characters as needed. ${SEARCH_PATTERN_HINT} Match the broader pattern and filter by reading the hits instead.`,
+          ),
+        query: z.string().optional().describe("Alias for pattern."),
+        root: z
+          .string()
+          .optional()
+          .describe(
+            "Root to search under. Defaults to the active terminal cwd, then the workspace root.",
+          ),
+        path: z.string().optional().describe("Alias for root."),
+        // A bare string is accepted as well as a list. Models reach for
+        // `"glob": "src/**/*.ts"` when they have exactly one pattern, and the
+        // array-only schema rejected the whole call - the tool never ran, and
+        // the run died on a validation error rather than a search.
+        //
+        // Normalised in `execute` rather than with `.transform()`: a Zod
+        // transform cannot be expressed in JSON Schema, so `z.toJSONSchema`
+        // throws on it and the tool's schema became the one entry in the
+        // payload that could not be measured (`lib/toolPayload.ts` reports it
+        // as `unmeasured`). Keeping the schema declarative means the reported
+        // request size is exact.
+        glob: z
+          .union([z.string(), z.array(z.string())])
+          .optional()
+          .describe(
+            "Optional include-globs over relative paths. One pattern or several: 'src/**/*.ts' or ['**/*.ts', 'src/**/*.tsx'].",
+          ),
+        case_insensitive: z.boolean().optional(),
+        max_results: z.number().int().min(1).max(500).optional(),
+      }),
       execute: async ({
         pattern: rawPattern,
         query,
@@ -124,8 +118,7 @@ export function buildSearchTools(ctx: ToolContext) {
           };
         }
         const root = rawRoot ?? path;
-        const glob =
-          typeof globInput === "string" ? [globInput] : globInput;
+        const glob = typeof globInput === "string" ? [globInput] : globInput;
         const remote = ctx.getRemoteSession();
         if (remote) {
           // The server's own grep, not an SFTP walk: a recursive walk is one
@@ -209,7 +202,10 @@ export function buildSearchTools(ctx: ToolContext) {
       description:
         "Find files by path pattern (gitignore-aware). Use over `list_directory` when you want all matches recursively. Patterns use globset syntax: `**/*.ts`, `src/**/test_*.py`. Returns up to `max_results` matches.",
       inputSchema: z.object({
-        pattern: z.string().optional().describe("Glob pattern over relative paths."),
+        pattern: z
+          .string()
+          .optional()
+          .describe("Glob pattern over relative paths."),
         query: z.string().optional().describe("Alias for pattern."),
         root: z
           .string()

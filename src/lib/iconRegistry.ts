@@ -76,11 +76,14 @@ function toIconsKey(name: string): string {
  * non-icon-name refs, an unknown name, or while the chunk is still loading
  * (kicks off the load on first call).
  */
-export function resolveExtIcon(ref: string | undefined | null): LucideIcon | null {
+export function resolveExtIcon(
+  ref: string | undefined | null,
+): LucideIcon | null {
   if (!ref) return null;
   let name: string | null = null;
   if (ref.startsWith("lucide:")) name = ref.slice(7);
-  else if (ref.startsWith("hugeicon:")) name = HUGEICON_ALIAS[ref.slice(9)] ?? ref.slice(9);
+  else if (ref.startsWith("hugeicon:"))
+    name = HUGEICON_ALIAS[ref.slice(9)] ?? ref.slice(9);
   else return null;
   if (!name) return null;
   if (!cache) {

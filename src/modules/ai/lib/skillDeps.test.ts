@@ -40,7 +40,9 @@ describe("referencedTools", () => {
   // A checker that warns about `npm` teaches the reader to stop reading
   // warnings, which costs more than the misses.
   it("ignores single words, which are as likely to be programs", () => {
-    expect(referencedTools("Run `npm`, `docker`, `browser`, `grep`.")).toEqual([]);
+    expect(referencedTools("Run `npm`, `docker`, `browser`, `grep`.")).toEqual(
+      [],
+    );
   });
 
   it("ignores prose and shell lines outside backticks", () => {
@@ -48,9 +50,9 @@ describe("referencedTools", () => {
   });
 
   it("does not report the same tool twice", () => {
-    expect(referencedTools("`run_in_terminal` then `run_in_terminal`")).toEqual([
-      "run_in_terminal",
-    ]);
+    expect(referencedTools("`run_in_terminal` then `run_in_terminal`")).toEqual(
+      ["run_in_terminal"],
+    );
   });
 });
 
@@ -126,7 +128,9 @@ describe("dependencyWarning", () => {
 describe("foreignAgentMentions", () => {
   it("recognises the agent a skill was written for", () => {
     expect(
-      foreignAgentMentions("Use when controlling web pages with the OpenClaw browser tool."),
+      foreignAgentMentions(
+        "Use when controlling web pages with the OpenClaw browser tool.",
+      ),
     ).toEqual(["openclaw"]);
     expect(foreignAgentMentions("Run this in Claude Code first.")).toEqual([
       "claude code",
@@ -140,7 +144,9 @@ describe("foreignAgentMentions", () => {
   });
 
   it("says nothing about a skill that names no agent", () => {
-    expect(foreignAgentMentions("Deploy with docker compose up -d.")).toEqual([]);
+    expect(foreignAgentMentions("Deploy with docker compose up -d.")).toEqual(
+      [],
+    );
   });
 
   it("catches the real openclaw phrasing end to end", () => {

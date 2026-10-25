@@ -16,8 +16,18 @@ describe("step compaction sequence validity", () => {
         role: "assistant",
         content: [
           { type: "text", text: "Writing routes" },
-          { type: "tool-call", toolCallId: "call_0", toolName: "write_file", input: { path: "a.ts" } },
-          { type: "tool-call", toolCallId: "call_1", toolName: "write_file", input: { path: "b.ts" } },
+          {
+            type: "tool-call",
+            toolCallId: "call_0",
+            toolName: "write_file",
+            input: { path: "a.ts" },
+          },
+          {
+            type: "tool-call",
+            toolCallId: "call_1",
+            toolName: "write_file",
+            input: { path: "b.ts" },
+          },
         ],
       },
       {
@@ -42,45 +52,61 @@ describe("step compaction sequence validity", () => {
         role: "assistant",
         content: [
           { type: "text", text: "Now checking status" },
-          { type: "tool-call", toolCallId: "call_2", toolName: "bash_run", input: { command: "git status" } },
+          {
+            type: "tool-call",
+            toolCallId: "call_2",
+            toolName: "bash_run",
+            input: { command: "git status" },
+          },
         ],
       },
       {
         role: "tool",
         content: [
-          { type: "tool-result", toolCallId: "call_2", toolName: "bash_run", output: { type: "text", value: "clean" } },
+          {
+            type: "tool-result",
+            toolCallId: "call_2",
+            toolName: "bash_run",
+            output: { type: "text", value: "clean" },
+          },
         ],
       },
     ];
 
     const eviction = evictObsoleteToolOutputs(messages);
-    const compacted = compactModelMessagesDetailed(eviction.messages, 10000, 1000);
-    const nextMessages = repairModelMessageSequence(compacted.messages, { preserveTrailingApproval: false });
+    const compacted = compactModelMessagesDetailed(
+      eviction.messages,
+      10000,
+      1000,
+    );
+    const nextMessages = repairModelMessageSequence(compacted.messages, {
+      preserveTrailingApproval: false,
+    });
 
     // Validate that every assistant message with tool-calls is followed by tool results for all calls
     for (let i = 0; i < nextMessages.length; i++) {
       const m = nextMessages[i];
       if (m.role === "assistant" && Array.isArray(m.content)) {
-        // biome-ignore lint/suspicious/noExplicitAny: reading dynamic model-message parts in a repro test
-        const calls = m.content.filter((p: any) => p.type === "tool-call");
+        const calls = m.content.filter((p) => p.type === "tool-call");
         if (calls.length > 0) {
-          // biome-ignore lint/suspicious/noExplicitAny: reading dynamic model-message parts in a repro test
-          const toolResults: any[] = [];
+          const toolResults: ToolResultPart[] = [];
           let j = i + 1;
-          while (j < nextMessages.length && nextMessages[j].role === "tool") {
+          while (j < nextMessages.length) {
             const tm = nextMessages[j];
+            if (tm.role !== "tool") break;
             if (Array.isArray(tm.content)) {
-              // biome-ignore lint/suspicious/noExplicitAny: reading dynamic model-message parts in a repro test
-              toolResults.push(...tm.content.filter((p: any) => p.type === "tool-result"));
+              toolResults.push(
+                ...tm.content.filter((p) => p.type === "tool-result"),
+              );
             }
             j++;
           }
 
-          // biome-ignore lint/suspicious/noExplicitAny: reading dynamic model-message parts in a repro test
-          const callIds = calls.map((c: any) => c.toolCallId);
-          // biome-ignore lint/suspicious/noExplicitAny: reading dynamic model-message parts in a repro test
-          const resultCallIds = new Set(toolResults.map((r: any) => r.toolCallId));
-          const missing = callIds.filter((id: string) => !resultCallIds.has(id));
+          const callIds = calls.map((c) => c.toolCallId);
+          const resultCallIds = new Set(toolResults.map((r) => r.toolCallId));
+          const missing = callIds.filter(
+            (id: string) => !resultCallIds.has(id),
+          );
 
           expect(missing).toEqual([]);
         }

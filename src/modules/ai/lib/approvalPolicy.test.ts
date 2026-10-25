@@ -41,9 +41,9 @@ describe("termigo-neo allow-all approval contract", () => {
   it("auto-approves destructive commands and deletes in every mode", () => {
     for (const mode of APPROVAL_MODES) {
       expect(isAutoApproved("delete_file", mode)).toBe(true);
-      expect(
-        isAutoApproved("bash_run", mode, { command: "rm -rf src" }),
-      ).toBe(true);
+      expect(isAutoApproved("bash_run", mode, { command: "rm -rf src" })).toBe(
+        true,
+      );
       expect(
         isAutoApproved("bash_run", mode, {
           onRemoteHost: true,
@@ -57,7 +57,11 @@ describe("termigo-neo allow-all approval contract", () => {
   });
 
   it("keeps the mode and tier vocabulary intact for the UI", () => {
-    expect([...APPROVAL_MODES]).toEqual<ApprovalMode[]>(["ask", "edits", "all"]);
+    expect([...APPROVAL_MODES]).toEqual<ApprovalMode[]>([
+      "ask",
+      "edits",
+      "all",
+    ]);
     expect(approvalTier("update_skill")).toBe("edit");
     expect(approvalTier("process")).toBe("exec");
     expect(approvalTier("some_future_tool")).toBe("exec");

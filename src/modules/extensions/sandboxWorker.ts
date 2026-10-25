@@ -8,19 +8,29 @@
 // AI-tool and command handlers registered by the extension stay here and are
 // driven by inbound `invoke_tool` / `invoke_command` messages from the host.
 
-import type { HostMessage, SandboxRequest, SerializedSidebarSection, WorkerMessage } from "./sandbox";
+import type {
+  HostMessage,
+  SandboxRequest,
+  SerializedSidebarSection,
+  WorkerMessage,
+} from "./sandbox";
 
 declare const self: DedicatedWorkerGlobalScope;
 
 type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void };
 type Handler = (args: unknown) => unknown | Promise<unknown>;
-type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown
+  ? Omit<T, K>
+  : never;
 
 let idSeq = 1;
 const pending = new Map<number, Pending>();
 const toolHandlers = new Map<string, Handler>();
 const commandHandlers = new Map<string, Handler>();
-const panelHandlers = new Map<string, (fields: Record<string, string>) => void>();
+const panelHandlers = new Map<
+  string,
+  (fields: Record<string, string>) => void
+>();
 const itemHandlers = new Map<string, () => void>();
 const sidebarHandlers = new Map<string, (...args: unknown[]) => void>();
 const listeners = new Map<string, ((payload: unknown) => void)[]>();
@@ -31,7 +41,9 @@ function send(msg: WorkerMessage): void {
 
 function call(req: DistributiveOmit<SandboxRequest, "id">): Promise<unknown> {
   const id = idSeq++;
-  const p = new Promise<unknown>((resolve, reject) => pending.set(id, { resolve, reject }));
+  const p = new Promise<unknown>((resolve, reject) =>
+    pending.set(id, { resolve, reject }),
+  );
   const msg = { ...req, id } as SandboxRequest;
   self.postMessage({ kind: "request", req: msg });
   return p;
@@ -60,12 +72,14 @@ function buildCtx(id: string, platform?: string): Record<string, unknown> {
       call({ kind: "invoke", command, args }),
     storage: {
       get: (key: string) => call({ kind: "storage:get", key }),
-      set: (key: string, value: unknown) => call({ kind: "storage:set", key, value }),
+      set: (key: string, value: unknown) =>
+        call({ kind: "storage:set", key, value }),
       delete: (key: string) => call({ kind: "storage:delete", key }),
     },
     settings: {
       get: (key: string) => call({ kind: "settings:get", key }),
-      set: (key: string, value: unknown) => call({ kind: "settings:set", key, value }),
+      set: (key: string, value: unknown) =>
+        call({ kind: "settings:set", key, value }),
       onChange: (key: string, cb: (v: unknown) => void) => {
         const channel = `settings:${key}`;
         const list = listeners.get(channel) ?? [];
@@ -73,13 +87,18 @@ function buildCtx(id: string, platform?: string): Record<string, unknown> {
         listeners.set(channel, list);
         return () => {
           const cur = listeners.get(channel);
-          if (cur) listeners.set(channel, cur.filter((x) => x !== cb));
+          if (cur)
+            listeners.set(
+              channel,
+              cur.filter((x) => x !== cb),
+            );
         };
       },
     },
     secrets: {
       get: (name: string) => call({ kind: "secrets:get", name }),
-      set: (name: string, value: string) => call({ kind: "secrets:set", name, value }),
+      set: (name: string, value: string) =>
+        call({ kind: "secrets:set", name, value }),
       delete: (name: string) => call({ kind: "secrets:delete", name }),
     },
     ai: {
@@ -101,9 +120,12 @@ function buildCtx(id: string, platform?: string): Record<string, unknown> {
       set: (scope: string[]) => call({ kind: "pentest:scopeSet", scope }),
     },
     logger: {
-      info: (...args: unknown[]) => call({ kind: "logger", level: "info", args }),
-      warn: (...args: unknown[]) => call({ kind: "logger", level: "warn", args }),
-      error: (...args: unknown[]) => call({ kind: "logger", level: "error", args }),
+      info: (...args: unknown[]) =>
+        call({ kind: "logger", level: "info", args }),
+      warn: (...args: unknown[]) =>
+        call({ kind: "logger", level: "warn", args }),
+      error: (...args: unknown[]) =>
+        call({ kind: "logger", level: "error", args }),
     },
     registerAiToolHandler: (name: string, handler: Handler) => {
       toolHandlers.set(name, handler);
@@ -118,7 +140,14 @@ function buildCtx(id: string, platform?: string): Record<string, unknown> {
     // and status items are rendered by the host from a serializable spec; clicks
     // route back to the worker over `ui:event` / `ui:itemClick`.
     headerBar: {
-      setItem: (item: { id: string; icon: string; tooltip: string; tone?: string; placement?: string; onClick?: () => void }) => {
+      setItem: (item: {
+        id: string;
+        icon: string;
+        tooltip: string;
+        tone?: string;
+        placement?: string;
+        onClick?: () => void;
+      }) => {
         const event = item.onClick ? `hb:${item.id}` : undefined;
         if (item.onClick && event) itemHandlers.set(event, item.onClick);
         return call({
@@ -127,16 +156,31 @@ function buildCtx(id: string, platform?: string): Record<string, unknown> {
             id: item.id,
             icon: item.icon,
             tooltip: item.tooltip,
-            tone: item.tone as "default" | "success" | "warning" | "error" | undefined,
+            tone: item.tone as
+              | "default"
+              | "success"
+              | "warning"
+              | "error"
+              | undefined,
             placement: item.placement as "left" | "right" | undefined,
             event,
           },
         });
       },
-      removeItem: (id: string) => call({ kind: "headerbar:remove", itemId: id }),
+      removeItem: (id: string) =>
+        call({ kind: "headerbar:remove", itemId: id }),
     },
     statusBar: {
-      setItem: (item: { id: string; icon: string; tooltip: string; tone?: string; label?: string; progress?: number; kind?: string; onClick?: () => void }) => {
+      setItem: (item: {
+        id: string;
+        icon: string;
+        tooltip: string;
+        tone?: string;
+        label?: string;
+        progress?: number;
+        kind?: string;
+        onClick?: () => void;
+      }) => {
         const event = item.onClick ? `sb:${item.id}` : undefined;
         if (item.onClick && event) itemHandlers.set(event, item.onClick);
         return call({
@@ -145,7 +189,12 @@ function buildCtx(id: string, platform?: string): Record<string, unknown> {
             id: item.id,
             icon: item.icon,
             tooltip: item.tooltip,
-            tone: item.tone as "default" | "success" | "warning" | "error" | undefined,
+            tone: item.tone as
+              | "default"
+              | "success"
+              | "warning"
+              | "error"
+              | undefined,
             label: item.label,
             progress: item.progress,
             kind: item.kind as "status" | "action" | undefined,
@@ -153,12 +202,18 @@ function buildCtx(id: string, platform?: string): Record<string, unknown> {
           },
         });
       },
-      removeItem: (id: string) => call({ kind: "statusbar:remove", itemId: id }),
+      removeItem: (id: string) =>
+        call({ kind: "statusbar:remove", itemId: id }),
     },
     registerPanelRenderer: (panelId: string, view: unknown) => {
       if (view && typeof view === "object" && "html" in view) {
         const spec = view as { html: string; events?: string[] };
-        return call({ kind: "ui:mountPanel", panelId, html: spec.html, events: spec.events ?? [] });
+        return call({
+          kind: "ui:mountPanel",
+          panelId,
+          html: spec.html,
+          events: spec.events ?? [],
+        });
       }
       // A function renderer cannot cross a worker boundary; host-managed panels
       // take an HTML template instead. Degrade so the extension is honest.
@@ -170,7 +225,10 @@ function buildCtx(id: string, platform?: string): Record<string, unknown> {
       toggle: (panelId: string) => call({ kind: "panel:toggle", panelId }),
       setView: (panelId: string, html: string, events: string[] = []) =>
         call({ kind: "ui:mountPanel", panelId, html, events }),
-      on: (event: string, handler: (fields: Record<string, string>) => void) => {
+      on: (
+        event: string,
+        handler: (fields: Record<string, string>) => void,
+      ) => {
         panelHandlers.set(event, handler);
       },
     },
@@ -188,7 +246,10 @@ function buildCtx(id: string, platform?: string): Record<string, unknown> {
         onItemClick?: (itemId: string) => void;
         onItemToggle?: (itemId: string) => void;
         onItemAction?: (itemId: string, actionId: string) => void;
-        onItemContextMenu?: (itemId: string, at: { x: number; y: number }) => void;
+        onItemContextMenu?: (
+          itemId: string,
+          at: { x: number; y: number },
+        ) => void;
       }) => {
         const clickCb = section.onItemClick;
         const toggleCb = section.onItemToggle;
@@ -198,17 +259,28 @@ function buildCtx(id: string, platform?: string): Record<string, unknown> {
         const eventToggle = toggleCb ? `sb:${section.id}:toggle` : undefined;
         const eventAction = actionCb ? `sb:${section.id}:action` : undefined;
         const eventContext = contextCb ? `sb:${section.id}:context` : undefined;
-        if (clickCb && eventClick) sidebarHandlers.set(eventClick, (itemId) => clickCb(String(itemId)));
-        if (toggleCb && eventToggle) sidebarHandlers.set(eventToggle, (itemId) => toggleCb(String(itemId)));
-        if (actionCb && eventAction) sidebarHandlers.set(eventAction, (itemId, actionId) => actionCb(String(itemId), String(actionId)));
-        if (contextCb && eventContext) sidebarHandlers.set(eventContext, (itemId, at) => contextCb(String(itemId), at as { x: number; y: number }));
+        if (clickCb && eventClick)
+          sidebarHandlers.set(eventClick, (itemId) => clickCb(String(itemId)));
+        if (toggleCb && eventToggle)
+          sidebarHandlers.set(eventToggle, (itemId) =>
+            toggleCb(String(itemId)),
+          );
+        if (actionCb && eventAction)
+          sidebarHandlers.set(eventAction, (itemId, actionId) =>
+            actionCb(String(itemId), String(actionId)),
+          );
+        if (contextCb && eventContext)
+          sidebarHandlers.set(eventContext, (itemId, at) =>
+            contextCb(String(itemId), at as { x: number; y: number }),
+          );
         return call({
           kind: "sidebar:set",
           section: {
             id: section.id,
             title: section.title,
             icon: section.icon,
-            headerActions: section.headerActions as SerializedSidebarSection["headerActions"],
+            headerActions:
+              section.headerActions as SerializedSidebarSection["headerActions"],
             items: section.items as SerializedSidebarSection["items"],
             emptyText: section.emptyText,
             searchable: section.searchable,
@@ -221,7 +293,8 @@ function buildCtx(id: string, platform?: string): Record<string, unknown> {
           },
         });
       },
-      removeSection: (sectionId: string) => call({ kind: "sidebar:remove", sectionId }),
+      removeSection: (sectionId: string) =>
+        call({ kind: "sidebar:remove", sectionId }),
     },
     app: {
       getContext: () => ({}),
@@ -231,7 +304,12 @@ function buildCtx(id: string, platform?: string): Record<string, unknown> {
     },
     editor: { getActive: () => null, setActiveContent: () => {} },
     events: {
-      emit: () => call({ kind: "logger", level: "info", args: ["events not supported in sandbox"] }),
+      emit: () =>
+        call({
+          kind: "logger",
+          level: "info",
+          args: ["events not supported in sandbox"],
+        }),
       on: () => () => {},
     },
   };
@@ -284,7 +362,12 @@ async function handle(msg: HostMessage): Promise<void> {
         const value = fn ? await fn(msg.args) : { error: "no handler bound" };
         send({ type: "tool_result", callId: msg.callId, ok: true, value });
       } catch (e) {
-        send({ type: "tool_result", callId: msg.callId, ok: false, error: String(e) });
+        send({
+          type: "tool_result",
+          callId: msg.callId,
+          ok: false,
+          error: String(e),
+        });
       }
       break;
     }
@@ -294,7 +377,12 @@ async function handle(msg: HostMessage): Promise<void> {
         const value = fn ? await fn(msg.args) : undefined;
         send({ type: "command_result", callId: msg.callId, ok: true, value });
       } catch (e) {
-        send({ type: "command_result", callId: msg.callId, ok: false, error: String(e) });
+        send({
+          type: "command_result",
+          callId: msg.callId,
+          ok: false,
+          error: String(e),
+        });
       }
       break;
     }

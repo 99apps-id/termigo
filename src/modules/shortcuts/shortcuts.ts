@@ -414,7 +414,7 @@ function keyFromCode(code: string): string | null {
 export function matchBinding(
   e: KeyboardEvent,
   binding: KeyBinding,
-  id?: ShortcutId
+  id?: ShortcutId,
 ): boolean {
   const eventKey = e.key.toLowerCase();
   const bindingKey = binding.key.toLowerCase();
@@ -472,7 +472,10 @@ export function getBindingTokens(binding?: KeyBinding): string[] {
  * "Mod" maps to the platform modifier. Unknown modifiers are ignored.
  */
 export function parseKeybindingString(value: string): KeyBinding {
-  const parts = value.split("+").map((p) => p.trim()).filter(Boolean);
+  const parts = value
+    .split("+")
+    .map((p) => p.trim())
+    .filter(Boolean);
   const binding: KeyBinding = { key: "" };
   for (const part of parts) {
     const lower = part.toLowerCase();
