@@ -17,6 +17,12 @@ If a guide conflicts with `TERMIGO.md`, `TERMIGO.md` wins.
 - [SSH & remote files](SSH.md) - SSH sessions as terminal tabs, host-key
   verification (TOFU), SFTP file explorer, port forwarding.
 
+## Operations
+
+- [Headless VPS deployment](headless-vps.md) - run the app as a 24/7 relay on a
+  headless Linux server, with the systemd unit, watchdog, memory caps and
+  rollback procedure.
+
 ## Visual tour
 
 - [Open Excel and create table](termigo-open-excel-create-table.png) - AI agent automating data analysis, spreadsheet creation, and opening Microsoft Excel directly from the terminal.

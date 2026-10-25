@@ -8,8 +8,10 @@ The canonical commands are what CI runs (`.github/workflows/ci.yml`):
 
 ```bash
 pnpm lint
+pnpm format:check                 # biome formatter, same config as `pnpm format`
 pnpm check-types
 pnpm check:commands               # every invoke("x") has a registered Rust command
+pnpm check:doc-commands           # the docs command catalog matches generate_handler!
 pnpm test
 
 cd src-tauri
@@ -99,7 +101,7 @@ because a Rust command was referenced but never registered.
 
 `e2e/` is a standalone WebdriverIO + [`tauri-driver`](https://v2.tauri.app/develop/tests/webdriver/)
 package that boots the built binary and drives its webview. It runs in CI on
-Linux (the `e2e` job in `ci.yml`, advisory until proven stable) and can be run
+Linux (the `e2e` job in `ci.yml`, required) and can be run
 locally on Linux/Windows - see [`e2e/README.md`](../../e2e/README.md). Keep smoke
 specs shallow and resilient (they guard the boot/integration path, not fine UI
 detail) and select on the app's stable `data-*` hooks.

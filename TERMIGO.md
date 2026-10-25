@@ -8,7 +8,7 @@ Termigo loads `TERMIGO.md` from the workspace root as agent memory (like AGENTS.
 
 Bundle id `id.99apps.termigo`, package manager **pnpm**, platforms macOS / Linux / Windows.
 
-Checks: `pnpm lint`, `pnpm check-types`, `pnpm check:commands`, `pnpm test`; and in `src-tauri/`, `cargo clippy --all-targets --locked -- -D warnings` and `cargo nextest run --locked` (fallback `cargo test --locked`).
+Checks: `pnpm lint`, `pnpm format:check`, `pnpm check-types`, `pnpm check:commands`, `pnpm check:doc-commands`, `pnpm test`; and in `src-tauri/`, `cargo clippy --all-targets --locked -- -D warnings` and `cargo nextest run --locked` (fallback `cargo test --locked`).
 
 ## Quality bar
 

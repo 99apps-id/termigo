@@ -18,8 +18,10 @@ Termigo: open-source AI-native terminal emulator. Tauri 2 + Rust (`portable-pty`
 
 ```bash
 pnpm lint
+pnpm format:check
 pnpm check-types
 pnpm check:commands
+pnpm check:doc-commands
 pnpm test
 cd src-tauri && cargo clippy --all-targets --locked -- -D warnings
 cd src-tauri && cargo nextest run --locked # fallback: cargo test --locked

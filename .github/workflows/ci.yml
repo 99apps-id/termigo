@@ -33,11 +33,17 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      - name: Format check
+        run: pnpm format:check
+
       - name: Type-check
         run: pnpm check-types
 
       - name: Invoke/command registration guard
         run: pnpm check:commands
+
+      - name: Docs command catalog guard
+        run: pnpm check:doc-commands
 
       - name: CLI version stamp guard
         run: pnpm check:cli-version

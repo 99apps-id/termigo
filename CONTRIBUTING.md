@@ -20,7 +20,7 @@ pnpm install
 pnpm tauri dev
 ```
 
-Prereqs: Rust (stable), Node 20+, pnpm, plus your platform's [Tauri prerequisites](https://tauri.app/start/prerequisites/).
+Prereqs: Rust (stable), Node 22+, pnpm, plus your platform's [Tauri prerequisites](https://tauri.app/start/prerequisites/).
 
 For the architecture and how to contribute safely, see [TERMIGO.md](TERMIGO.md) and the [docs/ index](docs/README.md).
 
