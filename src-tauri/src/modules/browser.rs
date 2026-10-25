@@ -121,9 +121,6 @@ pub fn unsafe_url(url: &str) -> Option<String> {
         if ip == "0.0.0.0" {
             return Some("wildcard bind addresses are not valid browser targets".to_string());
         }
-        if ip.starts_with("127.") {
-            return Some("loopback addresses are blocked".to_string());
-        }
         if ip.starts_with("169.254.") {
             return Some("link-local addresses are blocked".to_string());
         }
@@ -733,8 +730,9 @@ pub async fn browser_embed_eval(
 ) -> Result<(), String> {
     let wv = wait_embed_webview(&app, &instance).ok_or("embedded browser not open")?;
     state.clear_eval(&instance);
+    let js_clean = js.trim().trim_end_matches(';');
     let wrapped = format!(
-        r#"(()=>{{try{{const result=({js});window.__TAURI__&&window.__TAURI__.event&&window.__TAURI__.event.emit('{VALUE_EVENT}',{{instance:{instance:?},kind:'eval-ok',value:String(result ?? '')}});}}catch(e){{window.__TAURI__&&window.__TAURI__.event&&window.__TAURI__.event.emit('{VALUE_EVENT}',{{instance:{instance:?},kind:'eval-error',value:String(e && e.message ? e.message : e)}});}}}})();"#
+        r#"(()=>{{try{{const result=({js_clean});window.__TAURI__&&window.__TAURI__.event&&window.__TAURI__.event.emit('{VALUE_EVENT}',{{instance:{instance:?},kind:'eval-ok',value:String(result ?? '')}});}}catch(e){{window.__TAURI__&&window.__TAURI__.event&&window.__TAURI__.event.emit('{VALUE_EVENT}',{{instance:{instance:?},kind:'eval-error',value:String(e && e.message ? e.message : e)}});}}}})();"#
     );
     wv.eval(&wrapped).map_err(|e| e.to_string())?;
     for _ in 0..10 {
@@ -854,15 +852,18 @@ mod tests {
     }
 
     #[test]
-    fn refuses_metadata_loopback_link_local_and_ipv6() {
+    fn refuses_metadata_link_local_and_ipv6_but_allows_loopback() {
         assert!(unsafe_url("not a url").is_some());
         assert!(unsafe_url("http://169.254.169.254").is_some());
         assert!(unsafe_url("http://metadata.google.internal").is_some());
         assert!(unsafe_url("http://0.0.0.0:5173").is_some());
-        assert!(unsafe_url("http://127.0.0.1").is_some());
-        assert!(unsafe_url("http://2130706433").is_some());
         assert!(unsafe_url("http://[fe80::1]/").is_some());
         assert!(unsafe_url("file:///etc/passwd").is_some());
+        // Loopback dev servers are allowed for preview and embedded tabs.
+        assert_eq!(unsafe_url("http://127.0.0.1"), None);
+        assert_eq!(unsafe_url("http://2130706433"), None);
+        assert_eq!(unsafe_url("http://localhost:5173"), None);
+        assert_eq!(unsafe_url("http://[::1]:3000"), None);
         // Normal https sites are allowed by the raw guard.
         assert_eq!(unsafe_url("https://example.com"), None);
     }

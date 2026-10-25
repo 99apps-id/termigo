@@ -1,7 +1,7 @@
 import { native } from "@/modules/ai/lib/native";
 import { listen } from "@tauri-apps/api/event";
 import { error as logError, info as logInfo } from "@tauri-apps/plugin-log";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { anyOverlayIntersects, useAnyOverlayOpen } from "./overlaySuppress";
 
 // The embedded webview's injected script emits this when the page navigates
@@ -20,6 +20,8 @@ type Props = {
   /** Fired when the page navigates itself (a link, back/forward) so the address
    *  bar can follow the real URL instead of showing the one we asked for. */
   onNavigate?: (url: string) => void;
+  /** Fired when the native webview fails to attach or load. */
+  onError?: (error: string | null) => void;
 };
 
 /**
@@ -37,12 +39,16 @@ export function BrowserPane({
   visible,
   suppress,
   onNavigate,
+  onError,
 }: Props) {
   const boxRef = useRef<HTMLDivElement>(null);
   const createdUrl = useRef<string | null>(null);
   const lastKey = useRef<string>("");
   const suppressRef = useRef(suppress);
   suppressRef.current = suppress;
+  const [paneError, setPaneError] = useState<string | null>(null);
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
   // The last URL the page reported navigating to itself. Kept so the navigate
   // effect below does NOT push it straight back (which would reload the page
   // the browser is already on) when the address bar follows a self-navigation.
@@ -89,11 +95,14 @@ export function BrowserPane({
             .browserEmbedUpdate(instance, url, bounds, show)
             .then(() => {
               createdUrl.current = url;
+              setPaneError(null);
+              onErrorRef.current?.(null);
             })
             .catch((e) => {
-              void logError(
-                `BrowserPane: browserEmbedUpdate failed: ${String(e)}`,
-              );
+              const msg = String(e);
+              setPaneError(msg);
+              onErrorRef.current?.(msg);
+              void logError(`BrowserPane: browserEmbedUpdate failed: ${msg}`);
             });
         }
       }
@@ -116,8 +125,14 @@ export function BrowserPane({
         .browserEmbedNavigate(instance, url)
         .then(() => {
           createdUrl.current = url;
+          setPaneError(null);
+          onErrorRef.current?.(null);
         })
-        .catch(() => {});
+        .catch((e) => {
+          const msg = String(e);
+          setPaneError(msg);
+          onErrorRef.current?.(msg);
+        });
     }
   }, [instance, url]);
 
@@ -149,5 +164,24 @@ export function BrowserPane({
     };
   }, [instance]);
 
-  return <div ref={boxRef} className="size-full" />;
+  return (
+    <div ref={boxRef} className="relative size-full">
+      {paneError ? (
+        <div className="flex size-full flex-col items-center justify-center p-6 text-center text-muted-foreground">
+          <div className="max-w-md rounded-lg border border-border/80 bg-card/60 p-4 shadow-sm">
+            <p className="text-xs font-medium text-foreground">
+              Unable to load page in native browser
+            </p>
+            <p className="mt-1.5 break-all text-[11px] text-destructive">
+              {paneError}
+            </p>
+            <p className="mt-2 text-[10px] text-muted-foreground">
+              You can toggle the engine mode or open this URL in your system
+              browser.
+            </p>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
 }

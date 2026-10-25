@@ -6,7 +6,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 import {
+  AppWindowIcon,
   ArrowReloadHorizontalIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -65,11 +67,24 @@ type Props = {
    *  webview while it is focused so the DOM input actually receives keystrokes
    *  (a native child webview otherwise steals keyboard focus). */
   onFocusChange?: (focused: boolean) => void;
+  /** Whether the pane is currently rendering in native webview mode. */
+  asNative?: boolean;
+  /** Switch between native webview and iframe rendering engines. */
+  onToggleEngine?: () => void;
 };
 
 export const PreviewAddressBar = forwardRef<PreviewAddressBarHandle, Props>(
   function PreviewAddressBar(
-    { url, onSubmit, onReload, onBack, onForward, onFocusChange },
+    {
+      url,
+      onSubmit,
+      onReload,
+      onBack,
+      onForward,
+      onFocusChange,
+      asNative,
+      onToggleEngine,
+    },
     ref,
   ) {
     const [draft, setDraft] = useState(url);
@@ -249,6 +264,31 @@ export const PreviewAddressBar = forwardRef<PreviewAddressBarHandle, Props>(
               }}
             />
           </div>
+          {onToggleEngine && url ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={onToggleEngine}
+              title={
+                asNative
+                  ? "Engine: Native Webview (Click to switch to iframe)"
+                  : "Engine: Iframe (Click to switch to Native Webview to bypass frame restrictions)"
+              }
+              className={cn(
+                "size-7 shrink-0 rounded-md hover:bg-accent",
+                asNative
+                  ? "text-primary hover:text-primary"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <HugeiconsIcon
+                icon={asNative ? AppWindowIcon : Globe02Icon}
+                size={14}
+                strokeWidth={1.75}
+              />
+            </Button>
+          ) : null}
           <Button
             type="button"
             variant="ghost"
@@ -284,33 +324,66 @@ export const PreviewAddressBar = forwardRef<PreviewAddressBarHandle, Props>(
   },
 );
 
-function isPrivateIPv4(ip: string): boolean {
+export function isLoopback(host: string): boolean {
+  if (
+    host === "localhost" ||
+    host === "::1" ||
+    host === "[::1]" ||
+    host.endsWith(".localhost")
+  ) {
+    return true;
+  }
+  let clean = host;
+  if (clean.startsWith("[") && clean.endsWith("]")) {
+    clean = clean.slice(1, -1);
+  }
+  if (clean === "::1") return true;
+  const parts = clean.split(".").map(Number);
+  if (
+    parts.length === 4 &&
+    parts.every((p) => !Number.isNaN(p) && p >= 0 && p <= 255)
+  ) {
+    return parts[0] === 127;
+  }
+  return false;
+}
+
+export function isPrivateIPv4(ip: string): boolean {
   const parts = ip.split(".").map(Number);
-  if (parts.length !== 4 || parts.some((p) => Number.isNaN(p) || p < 0 || p > 255)) {
+  if (
+    parts.length !== 4 ||
+    parts.some((p) => Number.isNaN(p) || p < 0 || p > 255)
+  ) {
     return false;
   }
   if (parts[0] === 10) return true;
   if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
   if (parts[0] === 192 && parts[1] === 168) return true;
-  if (parts[0] === 127) return true;
   if (parts[0] === 169 && parts[1] === 254) return true;
   return false;
 }
 
-function isPrivateHost(host: string): boolean {
-  if (host === "localhost" || host === "::1") return false;
-  if (/^\[.+\]$/.test(host)) host = host.slice(1, -1);
-  if (/^[\d.:a-fA-F]+$/.test(host) && (host.includes(":") || /^\d{1,3}(\.\d{1,3}){3}$/.test(host))) {
-    if (host.includes(":")) {
-      // IPv6 loopback / link-local / unique local
-      return host === "::1" || host.startsWith("fe80") || host.startsWith("fc") || host.startsWith("fd");
+export function isPrivateHost(host: string): boolean {
+  if (isLoopback(host)) return false;
+  let clean = host;
+  if (/^\[.+\]$/.test(clean)) clean = clean.slice(1, -1);
+  if (
+    /^[\d.:a-fA-F]+$/.test(clean) &&
+    (clean.includes(":") || /^\d{1,3}(\.\d{1,3}){3}$/.test(clean))
+  ) {
+    if (clean.includes(":")) {
+      return (
+        clean.startsWith("fe80") ||
+        clean.startsWith("fc") ||
+        clean.startsWith("fd")
+      );
     }
-    return isPrivateIPv4(host);
+    return isPrivateIPv4(clean);
   }
   return false;
 }
 
-async function probeUrl(url: string): Promise<boolean> {
+export async function probeUrl(url: string): Promise<boolean> {
   try {
     const parsed = new URL(url);
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
@@ -331,11 +404,16 @@ async function probeUrl(url: string): Promise<boolean> {
   }
 }
 
-function normalizeUrl(raw: string): string | null {
+export function normalizeUrl(raw: string): string | null {
   const trimmed = raw.trim();
   if (!trimmed) return null;
   if (/^https?:\/\//i.test(trimmed)) return trimmed;
   if (/^localhost(:|\/|$)/i.test(trimmed)) return `http://${trimmed}`;
+  if (/^127(?:\.\d{1,3}){3}(:|\/|$)/.test(trimmed)) return `http://${trimmed}`;
+  if (/^\[::1\](:|\/|$)/.test(trimmed)) return `http://${trimmed}`;
+  if (/^\[[0-9a-fA-F:]+\](:|\/|$)/.test(trimmed)) return `http://${trimmed}`;
+  if (/^\d{1,3}(?:\.\d{1,3}){3}(:|\/|$)/.test(trimmed))
+    return `http://${trimmed}`;
   if (/^[\w.-]+\.[a-z]{2,}/i.test(trimmed)) return `https://${trimmed}`;
   return trimmed;
 }

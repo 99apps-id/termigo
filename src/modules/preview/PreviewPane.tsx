@@ -82,12 +82,32 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, Props>(
     // the iframe - public sites refuse to be framed (X-Frame-Options), which is
     // the whole reason the embedded browser exists. Local dev servers keep the
     // lightweight iframe.
+    const [engineOverride, setEngineOverride] = useState<
+      "auto" | "native" | "iframe"
+    >("auto");
+    const [lastUrl, setLastUrl] = useState(url);
+    if (url !== lastUrl) {
+      setLastUrl(url);
+      setEngineOverride("auto");
+    }
+
     const external = url ? !isLocalUrl(url) : false;
     // An agent-driven tab (a stable `browserInstance`) ALWAYS renders in the
     // native webview, even for a loopback dev server: the agent's
     // browser_extract / browser_screenshot / click / type tools drive that
     // webview, and the iframe path would leave them with nothing to read.
-    const asNative = url ? external || browserInstance !== undefined : false;
+    const asNative =
+      engineOverride === "native"
+        ? true
+        : engineOverride === "iframe"
+          ? false
+          : url
+            ? external || browserInstance !== undefined
+            : false;
+
+    const handleToggleEngine = () => {
+      setEngineOverride(asNative ? "iframe" : "native");
+    };
 
     // Agent canvas: render the HTML the agent produced (a graph, a plan) in a
     // sandboxed iframe, no address bar. It is a DOM element, so app modals and
@@ -120,6 +140,8 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, Props>(
           ref={addressRef}
           url={url}
           onSubmit={onUrlChange}
+          asNative={asNative}
+          onToggleEngine={handleToggleEngine}
           onReload={() => {
             // The native embedded webview is not an iframe: bumping the nonce
             // remounts nothing there, so reload must drive the page itself.
@@ -267,13 +289,19 @@ function EmptyState() {
 function isLocalUrl(url: string): boolean {
   try {
     const u = new URL(url);
-    const h = u.hostname;
+    const h = u.hostname.toLowerCase();
+    const clean = h.startsWith("[") && h.endsWith("]") ? h.slice(1, -1) : h;
+    const parts = clean.split(".").map(Number);
+    const isLoopbackIpv4 =
+      parts.length === 4 &&
+      parts.every((p) => !Number.isNaN(p) && p >= 0 && p <= 255) &&
+      parts[0] === 127;
     return (
-      h === "localhost" ||
-      h === "127.0.0.1" ||
-      h === "0.0.0.0" ||
-      h === "[::1]" ||
-      h.endsWith(".localhost")
+      clean === "localhost" ||
+      clean === "::1" ||
+      isLoopbackIpv4 ||
+      clean === "0.0.0.0" ||
+      clean.endsWith(".localhost")
     );
   } catch {
     return false;

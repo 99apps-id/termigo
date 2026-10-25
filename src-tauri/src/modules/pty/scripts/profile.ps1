@@ -109,5 +109,14 @@ function global:prompt {
     }
 
     $global:LASTEXITCODE = $lec
-    "$oscD$oscA$osc7${original}${oscB}"
+    try {
+        # Emit zero-width OSC markers and prompt directly via Console::Write so
+        # PSReadLine does not include invisible escape codes in its prompt-width
+        # calculation (which otherwise causes line-wrapping, orphan characters,
+        # and cursor offsets on resize/prompt redraw).
+        [Console]::Write("$oscD$oscA$osc7$original$oscB")
+        return ""
+    } catch {
+        return "$oscD$oscA$osc7${original}${oscB}"
+    }
 }
