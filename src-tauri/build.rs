@@ -8,6 +8,7 @@ fn main() {
         }
     }
     configure_sidecar();
+    stamp_env_local();
     tauri_build::build()
 }
 
@@ -42,4 +43,45 @@ fn configure_sidecar() {
         "TAURI_CONFIG",
         serde_json::to_string(&config).expect("serialize TAURI_CONFIG"),
     );
+}
+
+fn stamp_env_local() {
+    let root = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default())
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_default();
+    let path = root.join(".env.local");
+    let Ok(contents) = std::fs::read_to_string(&path) else {
+        return;
+    };
+
+    let mut client_id = None;
+    let mut client_secret = None;
+    for line in contents.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let mut iter = line.splitn(2, '=');
+        let Some(key) = iter.next() else { continue };
+        let Some(raw_value) = iter.next() else {
+            continue;
+        };
+        let value = raw_value.trim_matches('"').trim_matches('\'').trim();
+        if value.is_empty() {
+            continue;
+        }
+        match key {
+            "TERMIGO_ANTIGRAVITY_CLIENT_ID" => client_id = Some(value.to_string()),
+            "TERMIGO_ANTIGRAVITY_CLIENT_SECRET" => client_secret = Some(value.to_string()),
+            _ => {}
+        }
+    }
+
+    if let Some(value) = client_id {
+        println!("cargo:rustc-env=TERMIGO_ANTIGRAVITY_CLIENT_ID={value}");
+    }
+    if let Some(value) = client_secret {
+        println!("cargo:rustc-env=TERMIGO_ANTIGRAVITY_CLIENT_SECRET={value}");
+    }
 }
