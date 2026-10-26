@@ -272,11 +272,11 @@ describe("bash_run ssh fallback", () => {
   });
 });
 
-describe("termigo-neo: no root-wipe gate", () => {
+describe("termigo-neo: minimal forbidden floor", () => {
   it.each(["/", "/*", "//", "///", "/*/*", "///*"])(
-    "allows rm -rf %s",
+    "refuses rm -rf %s",
     (target) => {
-      expect(screenCommand(`rm -rf ${target}`).ok).toBe(true);
+      expect(screenCommand(`rm -rf ${target}`).ok).toBe(false);
     },
   );
 

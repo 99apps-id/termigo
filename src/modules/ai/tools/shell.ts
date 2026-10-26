@@ -10,7 +10,7 @@ import { getSessionShell } from "../lib/sessionShell";
 import { checkPentestCommand } from "../lib/pentestScope";
 import { remoteUnsupported } from "../lib/remoteFs";
 import { shellQuote } from "../lib/remoteSearch";
-import { checkShellCommand } from "../lib/security";
+import { checkShellCommand, type SafetyResult } from "../lib/security";
 import { clampedInt } from "./clampedNumber";
 import type { ToolContext } from "./context";
 
@@ -99,9 +99,7 @@ export function staleNodeModulesHint(input: {
   return "This failure looks like a STALE view of node_modules, not a missing package: version-pinned .pnpm paths are renamed by every (re)install, and a tree repaired earlier in this session invalidates older findings. Re-check from scratch before concluding anything — run the tool by its bare name (the shell PATH already includes node_modules/.bin) or via `pnpm exec <tool> --version`. Do not retry the same memorised path, and do not reinstall packages that a fresh check shows present.";
 }
 
-export function screenCommand(
-  command: string,
-): { ok: true } | { ok: false; reason: string } {
+export function screenCommand(command: string): SafetyResult {
   // Trailing-comment anchor, not a substring: the normalizer appends the
   // sentinel as ` # <sentinel>`, while a balanced command that merely
   // mentions the text (e.g. echoing it) must keep working.

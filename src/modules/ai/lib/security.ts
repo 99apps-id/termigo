@@ -61,9 +61,40 @@ export async function checkWritableCanonical(
   }
 }
 
+/**
+ * Minimal forbidden-command floor: root/home wipes and fork bombs are
+ * refused at the execute layer, where no approval mode or allowance can
+ * bypass them. Kept deliberately narrow -- termigo-neo holds no other
+ * gates, so anything beyond this floor would silently block ordinary work.
+ */
+const FORBIDDEN_COMMANDS = [
+  {
+    pattern:
+      /(^|[\s;&|(`])rm\s+(?:(?:-[a-zA-Z]*[rRfF][a-zA-Z]*|--[^\s]*)\s+)*(\/|\/\*|\/{2,})(\/\S*)?(\s|$)/,
+    name: "filesystem root wipe",
+  },
+  {
+    pattern:
+      /(^|[\s;&|(`])rm\s+(?:(?:-[a-zA-Z]*[rRfF][a-zA-Z]*|--[^-\s][^\s]*)\s+)*(~|\$HOME|\$\{HOME\})(\s|$|\/)/,
+    name: "home directory wipe",
+  },
+  {
+    pattern: /:\(\)\s*\{\s*:\|:&\s*\}\s*;?\s*:/,
+    name: "fork bomb",
+  },
+] as const;
+
 export function checkShellCommand(cmd: string): SafetyResult {
   if (cmd.trim().length === 0) {
     return { ok: false, reason: "Refused: empty command." };
+  }
+  for (const { pattern, name } of FORBIDDEN_COMMANDS) {
+    if (pattern.test(cmd)) {
+      return {
+        ok: false,
+        reason: `Refused: ${name} is never executed, even with approval. Run a narrower command instead.`,
+      };
+    }
   }
   return { ok: true };
 }
