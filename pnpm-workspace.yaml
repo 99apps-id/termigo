@@ -30,6 +30,10 @@ allowBuilds:
 # pnpm >= 11 rejects an override that conflicts with a direct dependency.
 overrides:
   '@ai-sdk/provider-utils': '>=4.0.33'
+  # Keep a single @lezer/common copy: @replit/codemirror-lang-svelte is peer-locked
+  # to 1.5.2 while updated @codemirror packages resolve 1.5.3, and two copies in
+  # one tree break Lezer parsing (TreeNode.nextChild reads a foreign tree).
+  '@lezer/common': '1.5.3'
   dompurify: '>=3.4.9'
   nanoid: '>=3.3.18'
   undici: '>=7.29.1'
