@@ -55,8 +55,16 @@ type State = {
     prompt: string,
     spec?: ScheduleSpec,
   ) => void;
-  removeSchedule: (sessionId: string, workspaceRoot: string | null, id: string) => void;
-  toggleSchedule: (sessionId: string, workspaceRoot: string | null, id: string) => void;
+  removeSchedule: (
+    sessionId: string,
+    workspaceRoot: string | null,
+    id: string,
+  ) => void;
+  toggleSchedule: (
+    sessionId: string,
+    workspaceRoot: string | null,
+    id: string,
+  ) => void;
   /** Bump a schedule's next fire time after it runs. */
   updateScheduleNext: (
     sessionId: string,
@@ -67,23 +75,30 @@ type State = {
 };
 
 function directivesFor(state: State, sessionId: string): Directives {
-  return state.bySession[sessionId] ?? { goal: null, schedules: [], workspaceRoot: null };
+  return (
+    state.bySession[sessionId] ?? {
+      goal: null,
+      schedules: [],
+      workspaceRoot: null,
+    }
+  );
 }
 
 const STORE_PATH = "termigo-ai-directives.json";
 const DIRECTIVES_KEY = (sessionId: string) => `directives:${sessionId}`;
 
-let storeInstance:
-  | {
-      get: (k: string) => Promise<unknown>;
-      set: (k: string, v: unknown) => Promise<void>;
-      delete: (k: string) => Promise<boolean>;
-    }
-  | null = null;
+let storeInstance: {
+  get: (k: string) => Promise<unknown>;
+  set: (k: string, v: unknown) => Promise<void>;
+  delete: (k: string) => Promise<boolean>;
+} | null = null;
 
 async function getStore() {
   if (!storeInstance) {
-    storeInstance = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 }) as {
+    storeInstance = new LazyStore(STORE_PATH, {
+      defaults: {},
+      autoSave: 200,
+    }) as {
       get: (k: string) => Promise<unknown>;
       set: (k: string, v: unknown) => Promise<void>;
       delete: (k: string) => Promise<boolean>;
@@ -103,7 +118,9 @@ export async function persistLoad(sessionId: string): Promise<Directives> {
       : typeof obj.goal === "number"
         ? String(obj.goal)
         : null;
-  const schedules = Array.isArray(obj.schedules) ? (obj.schedules as SessionSchedule[]) : [];
+  const schedules = Array.isArray(obj.schedules)
+    ? (obj.schedules as SessionSchedule[])
+    : [];
   const workspaceRoot =
     typeof obj.workspaceRoot === "string" ? obj.workspaceRoot : null;
   return { goal, schedules, workspaceRoot };
@@ -165,7 +182,11 @@ export const useSessionDirectiveStore = create<State>((set, get) => ({
       return {
         bySession: {
           ...state.bySession,
-          [sessionId]: { ...d, goal, workspaceRoot: d.workspaceRoot ?? workspaceRoot },
+          [sessionId]: {
+            ...d,
+            goal,
+            workspaceRoot: d.workspaceRoot ?? workspaceRoot,
+          },
         },
       };
     }),

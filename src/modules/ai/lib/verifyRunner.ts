@@ -36,7 +36,10 @@ export async function runAutoVerify(
     read(`${cwd}/pyproject.toml`).catch(() => null),
   ]);
   const manifests = { pkgJson, cargo, goMod, pyproject };
-  const checks = [detectCheckCommand("lint", manifests), detectCheckCommand("test", manifests)]
+  const checks = [
+    detectCheckCommand("lint", manifests),
+    detectCheckCommand("test", manifests),
+  ]
     .filter((c) => !!c.command)
     .slice(0, AUTO_VERIFY_MAX_ATTEMPTS);
   if (!checks.length) return null;
@@ -45,7 +48,12 @@ export async function runAutoVerify(
   const results: VerifyRunResult[] = [];
   for (const check of checks) {
     if (!check.command) continue;
-    const r = await native.shellSessionRun(shellId, check.command, cwd, AUTO_VERIFY_TIMEOUT_SECS);
+    const r = await native.shellSessionRun(
+      shellId,
+      check.command,
+      cwd,
+      AUTO_VERIFY_TIMEOUT_SECS,
+    );
     results.push({
       command: check.command,
       kind: check.note.includes("test") ? "test" : "lint",

@@ -239,15 +239,17 @@ function requestVerifyNudge(
             `: \`${run.command}\` exited ${run.exit_code}` +
             (run.timed_out ? " (timed out)" : "") +
             (run.truncated ? " (truncated)" : "") +
-            (run.stdout ? `\n\`\`\`\n${run.stdout.slice(0, 4000)}\n\`\`\`` : "") +
-            (run.stderr ? `\nstderr:\`\`\`\n${run.stderr.slice(0, 4000)}\n\`\`\`` : "");
-          useChatStore
-            .getState()
-            .patchAgentMeta({
-              status: useChatStore.getState().agentMeta.status ?? "idle",
-              stopReason: null,
-              error: null,
-            });
+            (run.stdout
+              ? `\n\`\`\`\n${run.stdout.slice(0, 4000)}\n\`\`\``
+              : "") +
+            (run.stderr
+              ? `\nstderr:\`\`\`\n${run.stderr.slice(0, 4000)}\n\`\`\``
+              : "");
+          useChatStore.getState().patchAgentMeta({
+            status: useChatStore.getState().agentMeta.status ?? "idle",
+            stopReason: null,
+            error: null,
+          });
           return sendMessage(message);
         }
         return sendMessage(nudge);

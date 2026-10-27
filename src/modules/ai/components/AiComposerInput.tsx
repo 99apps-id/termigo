@@ -103,14 +103,21 @@ export function AiComposerInput() {
   const workspaceRoot = useChatStore((s) => s.live.getWorkspaceRoot());
   const editTarget = useChatStore((s) => s.pendingEditTarget);
   const approvalMode = usePreferencesStore((s) => s.agentApprovalMode);
-  const goal = useSessionDirectiveStore((s) => s.getGoal(useChatStore.getState().activeSessionId ?? "", workspaceRoot));
-  const todos = workspaceRoot ? getTodos(useChatStore.getState().activeSessionId ?? "", workspaceRoot) : [];
+  const goal = useSessionDirectiveStore((s) =>
+    s.getGoal(useChatStore.getState().activeSessionId ?? "", workspaceRoot),
+  );
+  const todos = workspaceRoot
+    ? getTodos(useChatStore.getState().activeSessionId ?? "", workspaceRoot)
+    : [];
   const suggestions = useMemo(() => {
     const out: string[] = [];
     if (goal) out.push(`Work on: ${goal}`);
-    const active = todos.filter((t: { status: string }) => t.status !== "completed");
+    const active = todos.filter(
+      (t: { status: string }) => t.status !== "completed",
+    );
     if (active.length) out.push(`Next: ${active[0].title}`);
-    if (active.length > 1) out.push(`Continue task ${active[1].title.slice(0, 48)}`);
+    if (active.length > 1)
+      out.push(`Continue task ${active[1].title.slice(0, 48)}`);
     return out.slice(0, 3);
   }, [goal, todos]);
 

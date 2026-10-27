@@ -151,7 +151,12 @@ function SubagentPoolChip() {
       className="flex h-6 items-center gap-1 rounded-md border border-border/60 bg-card px-2 text-[11px] tabular-nums text-muted-foreground"
       title={`Subagent pool: ${active} running, ${queued} queued.`}
     >
-      <HugeiconsIcon icon={CpuIcon} size={13} strokeWidth={1.75} className="text-foreground/70" />
+      <HugeiconsIcon
+        icon={CpuIcon}
+        size={13}
+        strokeWidth={1.75}
+        className="text-foreground/70"
+      />
       <span className="font-medium text-foreground/80">{active}</span>
       {queued > 0 && <span className="text-muted-foreground">q:{queued}</span>}
     </span>

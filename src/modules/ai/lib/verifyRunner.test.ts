@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { runAutoVerify, AUTO_VERIFY_MAX_ATTEMPTS } from "./verifyRunner";
+import { runAutoVerify } from "./verifyRunner";
 
 const pkgJsonContent = JSON.stringify({
   scripts: { test: "vitest run", lint: "pnpm run lint" },
@@ -15,15 +15,13 @@ vi.mock("./native", () => {
   return {
     native: {
       shellSessionOpen: vi.fn().mockResolvedValue("shell-1"),
-      shellSessionRun: vi
-        .fn()
-        .mockResolvedValue({
-          stdout: "ok",
-          stderr: "",
-          exit_code: 0,
-          timed_out: false,
-          truncated: false,
-        }),
+      shellSessionRun: vi.fn().mockResolvedValue({
+        stdout: "ok",
+        stderr: "",
+        exit_code: 0,
+        timed_out: false,
+        truncated: false,
+      }),
       shellSessionClose: vi.fn().mockResolvedValue(undefined),
       readFile,
     },

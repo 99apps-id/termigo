@@ -217,6 +217,7 @@ These two commands are the whole crypto surface; everything above them in JS onl
 
 - `mcp_list_servers` / `mcp_list_tools` / `mcp_call_tool` / `mcp_ping` - enumerate and invoke configured servers
 - `mcp_add_server` / `mcp_remove_server` - server registry
+- `mcp_set_tool_enabled` - per-tool enable/disable on a server
 
 ### Extensions (`src-tauri/src/modules/extensions/`)
 

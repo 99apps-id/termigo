@@ -80,7 +80,12 @@ function ServerRow({
       const disabled = server.disabled_tools ?? [];
       const disabledEntries: McpTool[] = disabled
         .filter((name) => !listed.tools.some((t) => t.name === name))
-        .map((name) => ({ name, description: "", inputSchema: {}, enabled: false }));
+        .map((name) => ({
+          name,
+          description: "",
+          inputSchema: {},
+          enabled: false,
+        }));
       setProbe({
         state: "ok",
         tools: [
@@ -219,7 +224,9 @@ function ToolRow({
           icon={ToggleOnIcon}
           size={11}
           strokeWidth={1.75}
-          className={enabled ? "text-foreground/80" : "text-muted-foreground/50"}
+          className={
+            enabled ? "text-foreground/80" : "text-muted-foreground/50"
+          }
         />
       </button>
       <span
@@ -373,12 +380,12 @@ export function McpSection() {
       // Null workspace: this window has no active project, so only the
       // user-level registry is readable here. Project servers still work at
       // runtime; see the note below.
-          setServers(await mcpListServers(null));
-  } catch (e) {
-    setServers([]);
-    setError(String(e));
-  }
-}, []);
+      setServers(await mcpListServers(null));
+    } catch (e) {
+      setServers([]);
+      setError(String(e));
+    }
+  }, []);
 
   useEffect(() => {
     void load();
