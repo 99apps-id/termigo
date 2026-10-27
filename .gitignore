@@ -71,6 +71,9 @@ cli/bin/
 # Claude Code local settings (may contain credentials)
 .claude/
 
+# CommandCode agent scratch (local tool permissions, taste notes)
+.commandcode/
+
 # Agent session memory and workspace-local agent state
 .termigo/
 

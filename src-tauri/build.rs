@@ -51,6 +51,11 @@ fn stamp_env_local() {
         .map(|p| p.to_path_buf())
         .unwrap_or_default();
     let path = root.join(".env.local");
+    // Emitting any rerun-if-changed disables cargo's default package-wide
+    // tracking, and a build script that does not rerun replays its previous
+    // rustc-env output. Without this line, editing .env.local leaves the old
+    // Antigravity pair baked into the binary until an unrelated rebuild.
+    println!("cargo:rerun-if-changed={}", path.display());
     let Ok(contents) = std::fs::read_to_string(&path) else {
         return;
     };

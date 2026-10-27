@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import babel from "@rolldown/plugin-babel";
 import tailwindcss from "@tailwindcss/vite";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
@@ -141,6 +142,14 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => ({
     },
   },
   clearScreen: false,
+  test: {
+    // Vitest defaults NODE_ENV to "test" only when the ambient value is unset.
+    // Any launcher that exports NODE_ENV=production (agent shells, IDE tasks)
+    // would otherwise load React's production build, whose missing `act`
+    // breaks the component tests for reasons that have nothing to do with the
+    // code under test.
+    env: { NODE_ENV: "test" },
+  },
   server: {
     port: 1420,
     strictPort: true,
