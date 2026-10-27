@@ -315,6 +315,7 @@ pub fn run() {
             mcp::mcp_ping,
             mcp::mcp_add_server,
             mcp::mcp_remove_server,
+            mcp::mcp_set_tool_enabled,
             extensions::commands::ext_list,
             extensions::commands::ext_read_manifest,
             extensions::commands::ext_read_asset,

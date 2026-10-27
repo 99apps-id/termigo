@@ -15,7 +15,7 @@ export type McpServer = {
   env: Record<string, string>;
   scope: McpScope;
   cwd: string | null;
-  enabled: boolean;
+  disabled_tools: string[];
 };
 
 export type McpTool = {
@@ -23,6 +23,8 @@ export type McpTool = {
   description: string;
   /** JSON Schema for the arguments, passed through from the server. */
   inputSchema: unknown;
+  /** True when the user disabled this tool in settings. */
+  enabled?: boolean;
 };
 
 export type McpToolList = {
@@ -88,10 +90,11 @@ export async function mcpRemoveServer(name: string): Promise<void> {
   return invoke("mcp_remove_server", { name });
 }
 
-/** Enable or disable a server without removing it. */
-export async function mcpSetServerEnabled(
-  name: string,
+/** Enable or disable one tool on a server without removing either. */
+export async function mcpSetToolEnabled(
+  server: string,
+  tool: string,
   enabled: boolean,
 ): Promise<void> {
-  return invoke("mcp_set_server_enabled", { name, enabled });
+  return invoke("mcp_set_tool_enabled", { server, tool, enabled });
 }

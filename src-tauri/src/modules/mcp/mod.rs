@@ -51,6 +51,11 @@ pub struct ServerConfig {
     /// Working directory for the child, set to the workspace for project scope.
     #[serde(default)]
     pub cwd: Option<String>,
+    /// Tools the user disabled in settings. Absent (empty) means all tools on.
+    /// Stored per server entry in the shared registry, so unknown to older
+    /// readers it is just an ignored key.
+    #[serde(default)]
+    pub disabled_tools: Vec<String>,
 }
 
 /// The on-disk shape: `{ "mcpServers": { "<name>": { command, args, env } } }`.
@@ -67,6 +72,10 @@ struct RegistryEntry {
     args: Vec<String>,
     #[serde(default)]
     env: HashMap<String, String>,
+    /// Tools the user disabled for this server. Optional key: older readers
+    /// and the Go companion ignore it, so adding it never breaks them.
+    #[serde(default, rename = "disabledTools")]
+    disabled_tools: Vec<String>,
 }
 
 fn parse_registry_servers(text: &str) -> Result<HashMap<String, RegistryEntry>, serde_json::Error> {
@@ -114,6 +123,7 @@ fn read_registry(path: &Path, scope: &str, cwd: Option<&Path>) -> Vec<ServerConf
                 env: entry.env,
                 scope: scope.to_string(),
                 cwd: cwd.map(|p| p.to_string_lossy().into_owned()),
+                disabled_tools: entry.disabled_tools,
             })
         })
         .collect()
@@ -320,6 +330,57 @@ pub async fn mcp_remove_server(name: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Enable or disable one tool on a user-level server, without removing it.
+///
+/// Disabled tools are recorded as a `disabledTools` list on the registry
+/// entry and filtered out of `mcp_list_tools` and rejected by `mcp_call_tool`.
+/// Project-scope entries are read-only here, same as removal.
+#[tauri::command]
+pub async fn mcp_set_tool_enabled(
+    name: String,
+    tool: String,
+    enabled: bool,
+) -> Result<(), String> {
+    let trimmed_tool = tool.trim().to_string();
+    if trimmed_tool.is_empty() {
+        return Err("a tool needs a name".into());
+    }
+    edit_user_registry(move |servers| {
+        let Some(entry) = servers.get_mut(&name) else {
+            return Err(format!("no MCP server named '{name}' is configured"));
+        };
+        let Some(obj) = entry.as_object_mut() else {
+            return Err(format!("MCP server '{name}' entry is not an object"));
+        };
+        let mut disabled: Vec<String> = obj
+            .get("disabledTools")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if enabled {
+            disabled.retain(|t| t != &trimmed_tool);
+        } else if !disabled.contains(&trimmed_tool) {
+            disabled.push(trimmed_tool.clone());
+        }
+        if disabled.is_empty() {
+            obj.remove("disabledTools");
+        } else {
+            disabled.sort();
+            obj.insert(
+                "disabledTools".into(),
+                Value::Array(disabled.into_iter().map(Value::String).collect()),
+            );
+        }
+        Ok(())
+    })?;
+    clear_pool();
+    Ok(())
+}
+
 /// Merged registry for a workspace, sorted by name.
 pub fn load_servers(workspace: Option<&Path>) -> Vec<ServerConfig> {
     let mut by_name: HashMap<String, ServerConfig> = HashMap::new();
@@ -494,11 +555,18 @@ pub async fn mcp_list_tools(
     workspace: Option<String>,
     server: String,
 ) -> Result<McpToolList, String> {
+    let disabled = find_server(workspace_path(workspace.clone()).as_deref(), &server)
+        .map(|c| c.disabled_tools)
+        .unwrap_or_default();
     let mut s = session(workspace, &server).await?;
     let listed = s.client().list_tools().await;
+    let mut listed = s.finish(listed)?;
+    if !disabled.is_empty() {
+        listed.retain(|t| !disabled.contains(&t.name));
+    }
     Ok(McpToolList {
         server,
-        tools: s.finish(listed)?,
+        tools: listed,
     })
 }
 
@@ -509,6 +577,14 @@ pub async fn mcp_call_tool(
     tool: String,
     arguments: Option<Value>,
 ) -> Result<Value, String> {
+    let disabled = find_server(workspace_path(workspace.clone()).as_deref(), &server)
+        .map(|c| c.disabled_tools)
+        .unwrap_or_default();
+    if disabled.contains(&tool) {
+        return Err(format!(
+            "tool '{tool}' on MCP server '{server}' is disabled in settings"
+        ));
+    }
     let args = arguments.unwrap_or(Value::Object(Default::default()));
     let mut s = session(workspace, &server).await?;
     let called = s.client().call_tool(&tool, args).await;
@@ -572,6 +648,35 @@ mod tests {
         assert!(servers[0].cwd.is_some());
     }
 
+    #[test]
+    fn reads_disabled_tools_from_the_registry() {
+        let dir = tempfile::tempdir().unwrap();
+        write_registry(
+            dir.path(),
+            r#"{"mcpServers":{"fs":{"command":"npx","disabledTools":["dangerous_tool"]}}}"#,
+        );
+        let servers = read_registry(
+            &dir.path().join(WORKSPACE_REGISTRY),
+            "project",
+            Some(dir.path()),
+        );
+        assert_eq!(servers.len(), 1);
+        assert_eq!(servers[0].disabled_tools, vec!["dangerous_tool".to_string()]);
+    }
+
+    #[test]
+    fn absent_disabled_tools_defaults_to_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        write_registry(dir.path(), r#"{"mcpServers":{"fs":{"command":"npx"}}}"#);
+        let servers = read_registry(
+            &dir.path().join(WORKSPACE_REGISTRY),
+            "project",
+            Some(dir.path()),
+        );
+        assert_eq!(servers.len(), 1);
+        assert!(servers[0].disabled_tools.is_empty());
+    }
+
     /// A missing registry is the normal case for a workspace that never
     /// configured one, and a malformed one must not take the app down with it.
     #[test]
@@ -602,6 +707,7 @@ mod tests {
                 env: HashMap::new(),
                 scope: "user".into(),
                 cwd: None,
+                disabled_tools: vec![],
             },
         );
         for server in read_registry(

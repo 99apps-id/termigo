@@ -113,10 +113,15 @@ type ProviderOptions struct {
 
 // MCPServer follows the MCP (Model Context Protocol) server configuration
 // shape used by Claude Code, Codex and other MCP-aware clients.
+//
+// DisabledTools lists tools the desktop app disabled in settings. The CLI
+// ignores it when spawning but keeps it on write-back, so toggling in the
+// app never loses the entry for the CLI.
 type MCPServer struct {
-	Command string            `json:"command"`
-	Args    []string          `json:"args,omitempty"`
-	Env     map[string]string `json:"env,omitempty"`
+	Command       string            `json:"command"`
+	Args          []string          `json:"args,omitempty"`
+	Env           map[string]string `json:"env,omitempty"`
+	DisabledTools []string          `json:"disabledTools,omitempty"`
 }
 
 // EnvHome overrides the state directory, which is what keeps tests and
