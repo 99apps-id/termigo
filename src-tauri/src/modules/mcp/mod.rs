@@ -379,6 +379,25 @@ fn tool_is_disabled(disabled: &[String], tool: &str) -> bool {
     disabled.iter().any(|d| d == tool)
 }
 
+/// Refuse a disabled tool before any spawn. Called at the top of
+/// `mcp_call_tool` so the check cannot be bypassed by a stale session.
+fn reject_if_disabled(config: &ServerConfig, server: &str, tool: &str) -> Result<(), String> {
+    if tool_is_disabled(&config.disabled_tools, tool) {
+        return Err(format!(
+            "tool '{tool}' on MCP server '{server}' is disabled in settings"
+        ));
+    }
+    Ok(())
+}
+
+/// Keep only enabled tools in a list response. Called by `mcp_list_tools`
+/// after the server answers, so the model is never offered a disabled tool.
+fn retain_enabled(tools: &mut Vec<McpTool>, disabled: &[String]) {
+    if !disabled.is_empty() {
+        tools.retain(|t| !tool_is_disabled(disabled, &t.name));
+    }
+}
+
 /// Enable or disable one tool on a user-level server, without removing it.
 ///
 /// Disabled tools are recorded as a `disabledTools` list on the registry
@@ -575,9 +594,7 @@ pub async fn mcp_list_tools(
     let mut s = session(workspace, &server).await?;
     let listed = s.client().list_tools().await;
     let mut listed = s.finish(listed)?;
-    if !disabled.is_empty() {
-        listed.retain(|t| !tool_is_disabled(&disabled, &t.name));
-    }
+    retain_enabled(&mut listed, &disabled);
     Ok(McpToolList {
         server,
         tools: listed,
@@ -591,14 +608,8 @@ pub async fn mcp_call_tool(
     tool: String,
     arguments: Option<Value>,
 ) -> Result<Value, String> {
-    let disabled = find_server(workspace_path(workspace.clone()).as_deref(), &server)
-        .map(|c| c.disabled_tools)
-        .unwrap_or_default();
-    if tool_is_disabled(&disabled, &tool) {
-        return Err(format!(
-            "tool '{tool}' on MCP server '{server}' is disabled in settings"
-        ));
-    }
+    let config = find_server(workspace_path(workspace.clone()).as_deref(), &server)?;
+    reject_if_disabled(&config, &server, &tool)?;
     let args = arguments.unwrap_or(Value::Object(Default::default()));
     let mut s = session(workspace, &server).await?;
     let called = s.client().call_tool(&tool, args).await;
@@ -724,6 +735,54 @@ mod tests {
         assert!(tool_is_disabled(&["read".to_string()], "read"));
         assert!(!tool_is_disabled(&["read".to_string()], "read_file"));
         assert!(!tool_is_disabled(&[], "read"));
+    }
+
+    fn test_config(disabled: &[&str]) -> ServerConfig {
+        ServerConfig {
+            name: "fs".into(),
+            command: "npx".into(),
+            args: vec![],
+            env: HashMap::new(),
+            scope: "user".into(),
+            cwd: None,
+            disabled_tools: disabled.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    fn test_tool(name: &str) -> McpTool {
+        McpTool {
+            name: name.into(),
+            description: String::new(),
+            input_schema: Value::Null,
+        }
+    }
+
+    #[test]
+    fn disabled_call_is_rejected_before_any_spawn() {
+        let config = test_config(&["dangerous_tool"]);
+        let err = reject_if_disabled(&config, "fs", "dangerous_tool").unwrap_err();
+        assert!(
+            err.contains("disabled in settings"),
+            "refusal must name the reason, got: {err}"
+        );
+        // Exact match only: read_file survives a read ban.
+        assert!(reject_if_disabled(&config, "fs", "other_tool").is_ok());
+        assert!(reject_if_disabled(&test_config(&["read"]), "fs", "read_file").is_ok());
+        assert!(reject_if_disabled(&test_config(&[]), "fs", "anything").is_ok());
+    }
+
+    #[test]
+    fn list_response_keeps_only_enabled_tools() {
+        let mut tools = vec![test_tool("read"), test_tool("dangerous_tool")];
+        retain_enabled(&mut tools, &["dangerous_tool".to_string()]);
+        assert_eq!(
+            tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
+            vec!["read"]
+        );
+        // Empty disabled list leaves everything alone.
+        let mut tools = vec![test_tool("read")];
+        retain_enabled(&mut tools, &[]);
+        assert_eq!(tools.len(), 1);
     }
 
     #[test]
