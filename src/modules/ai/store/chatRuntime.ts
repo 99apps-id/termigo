@@ -23,6 +23,7 @@ import { rollbackToCheckpoint } from "../lib/snapshots";
 import { BUILTIN_AGENTS } from "../lib/agents";
 import { isResumingApproval } from "../lib/approvalResume";
 import { AUTO_CONTINUE_DELAY_MS, autoContinueSlot } from "../lib/autoContinue";
+import { runAutoVerify } from "../lib/verifyRunner";
 import {
   type AutoSendGateState,
   autoSendAskIsDuplicate,
@@ -226,9 +227,10 @@ function requestVerifyNudge(
       releaseFabricatedBusy(sessionId);
       return;
     }
-    const root = getWorkspaceRoot();
-    const runAutoVerify = runAutoVerifyFactory(root, sessionId);
-    runAutoVerify()
+    const root = useChatStore.getState().live.getWorkspaceRoot();
+    if (!root) return false;
+    const verifyPromise = runAutoVerify(sessionId, root);
+    verifyPromise
       .then((run) => {
         if (run) {
           const message =

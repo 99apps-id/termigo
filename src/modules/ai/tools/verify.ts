@@ -9,7 +9,7 @@ import { clampedInt } from "./clampedNumber";
 import { truncateCommandOutput } from "./shell";
 import type { ToolContext } from "./context";
 
-type CheckKind = "test" | "lint";
+export type CheckKind = "test" | "lint";
 
 /** First file extension, lowercased, or "" when there is none. */
 function extOf(paths: string[]): string {
