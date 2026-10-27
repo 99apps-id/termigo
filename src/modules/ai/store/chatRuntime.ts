@@ -226,13 +226,37 @@ function requestVerifyNudge(
       releaseFabricatedBusy(sessionId);
       return;
     }
-    void sendMessage(nudge).catch(() => {
-      useChatStore.getState().patchAgentMeta({
-        status: "error",
-        error: "The verification follow-up could not start.",
+    const root = getWorkspaceRoot();
+    const runAutoVerify = runAutoVerifyFactory(root, sessionId);
+    runAutoVerify()
+      .then((run) => {
+        if (run) {
+          const message =
+            `Auto-verified edit` +
+            (run.kind === "lint" ? " lint" : " test") +
+            `: \`${run.command}\` exited ${run.exit_code}` +
+            (run.timed_out ? " (timed out)" : "") +
+            (run.truncated ? " (truncated)" : "") +
+            (run.stdout ? `\n\`\`\`\n${run.stdout.slice(0, 4000)}\n\`\`\`` : "") +
+            (run.stderr ? `\nstderr:\`\`\`\n${run.stderr.slice(0, 4000)}\n\`\`\`` : "");
+          useChatStore
+            .getState()
+            .patchAgentMeta({
+              status: useChatStore.getState().agentMeta.status ?? "idle",
+              stopReason: null,
+              error: null,
+            });
+          return sendMessage(message);
+        }
+        return sendMessage(nudge);
+      })
+      .catch(() => {
+        useChatStore.getState().patchAgentMeta({
+          status: "error",
+          error: "The verification follow-up could not start.",
+        });
+        useChatStore.getState().syncRunMeta();
       });
-      useChatStore.getState().syncRunMeta();
-    });
   }, AUTO_CONTINUE_DELAY_MS);
   return true;
 }
