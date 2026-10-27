@@ -21,7 +21,9 @@ import { SLASH_COMMANDS, type SlashCommandMeta } from "../lib/slashCommands";
 import { useChatStore } from "../store/chatStore";
 import { useCustomCommandStatsStore } from "../store/customCommandStatsStore";
 import { useCustomCommandsStore } from "../store/customCommandsStore";
+import { useSessionDirectiveStore } from "../store/sessionDirectiveStore";
 import { useSnippetsStore } from "../store/snippetsStore";
+import { getTodos } from "../store/todoStore";
 
 /** Present a user-defined command as a picker entry, like a built-in one. */
 function customCommandMeta(cmd: CustomCommand): SlashCommandMeta & {
@@ -101,6 +103,16 @@ export function AiComposerInput() {
   const workspaceRoot = useChatStore((s) => s.live.getWorkspaceRoot());
   const editTarget = useChatStore((s) => s.pendingEditTarget);
   const approvalMode = usePreferencesStore((s) => s.agentApprovalMode);
+  const goal = useSessionDirectiveStore((s) => s.getGoal(useChatStore.getState().activeSessionId ?? "", workspaceRoot));
+  const todos = workspaceRoot ? getTodos(useChatStore.getState().activeSessionId ?? "", workspaceRoot) : [];
+  const suggestions = useMemo(() => {
+    const out: string[] = [];
+    if (goal) out.push(`Work on: ${goal}`);
+    const active = todos.filter((t: { status: string }) => t.status !== "completed");
+    if (active.length) out.push(`Next: ${active[0].title}`);
+    if (active.length > 1) out.push(`Continue task ${active[1].title.slice(0, 48)}`);
+    return out.slice(0, 3);
+  }, [goal, todos]);
 
   const [trigger, setTrigger] = useState<SnippetTrigger | null>(null);
   const [fileTrigger, setFileTrigger] = useState<FileTrigger | null>(null);
@@ -606,6 +618,23 @@ export function AiComposerInput() {
                 )}
               />
             </div>
+            {suggestions.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 border-t border-border/60 px-2 pt-2">
+                {suggestions.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => {
+                      c.setValue((v) => (v ? `${v} ${s}` : s));
+                      c.textareaRef.current?.focus();
+                    }}
+                    className="rounded-md border border-border/70 bg-muted/40 px-2 py-1 text-[11px] text-muted-foreground transition hover:border-foreground/20 hover:text-foreground"
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="flex shrink-0 items-center gap-0.5">
               <input
                 ref={fileInputRef}
