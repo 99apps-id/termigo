@@ -42,7 +42,7 @@ export function AiDockPanel() {
     c.pickedCommands.length > 0;
 
   return (
-    <div className="flex h-full min-h-0 flex-col border-l border-border/60 bg-card text-[12px]">
+    <div className="flex h-full min-h-0 min-w-[320px] flex-col border-l border-border/60 bg-card text-[12px]">
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <AiChatBody
           key={sessionId}
