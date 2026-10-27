@@ -15,6 +15,7 @@ import { fmtShortcut, MOD_KEY } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import { usePreferencesStore } from "@/modules/settings/preferences";
+import { globalSubagentPool } from "@/modules/ai/lib/subagentPool";
 import { useTelegramStore } from "@/modules/telegram/store";
 import {
   AiBookIcon,
@@ -141,6 +142,22 @@ function TelegramStatusChip() {
   );
 }
 
+function SubagentPoolChip() {
+  const active = globalSubagentPool.activeCount;
+  const queued = globalSubagentPool.queueLength;
+  if (active === 0 && queued === 0) return null;
+  return (
+    <span
+      className="flex h-6 items-center gap-1 rounded-md border border-border/60 bg-card px-2 text-[11px] tabular-nums text-muted-foreground"
+      title={`Subagent pool: ${active} running, ${queued} queued.`}
+    >
+      <HugeiconsIcon icon={CpuIcon} size={13} strokeWidth={1.75} className="text-foreground/70" />
+      <span className="font-medium text-foreground/80">{active}</span>
+      {queued > 0 && <span className="text-muted-foreground">q:{queued}</span>}
+    </span>
+  );
+}
+
 function RoundChip() {
   const status = useChatStore((s) => s.agentMeta.status);
   const round = useChatStore((s) => s.agentMeta.round);
@@ -197,6 +214,9 @@ export function AiStatusBarControls() {
 
       {/* Live round counter during active agent execution. */}
       <RoundChip />
+
+      {/* Subagent pool utilization. */}
+      <SubagentPoolChip />
 
       {/* Telegram relay status. */}
       <TelegramStatusChip />

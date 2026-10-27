@@ -10,6 +10,7 @@ import {
   routeSubagentType,
 } from "../agents/resolveSubagent";
 import { effectiveSubagentMaxDepth, runSubagent } from "../agents/runSubagent";
+import { globalSubagentPool } from "../lib/subagentPool";
 import { defaultBatchIsolation } from "../lib/subagentIsolation";
 import {
   cascadeSkip,
@@ -451,9 +452,13 @@ Each task's subagent has the same toolset you do and may itself spawn further su
               concurrency - inFlight.size,
             )) {
               state[i].running = true;
+              const release = await globalSubagentPool.acquire(batchSignal);
               inFlight.set(
                 i,
-                runOne(i).finally(() => inFlight.delete(i)),
+                runOne(i).finally(() => {
+                  release();
+                  inFlight.delete(i);
+                }),
               );
             }
           }
