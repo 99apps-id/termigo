@@ -180,6 +180,8 @@ func fetchOnce(ctx context.Context, raw string, reader bool) (Result, int, error
 // enforced here.
 func isBlockedHost(host string) bool {
 	trimmed := strings.ToLower(strings.TrimSpace(host))
+	trimmed = strings.TrimPrefix(trimmed, "[")
+	trimmed = strings.TrimSuffix(trimmed, "]")
 	if trimmed == "169.254.169.254" || trimmed == "metadata.google.internal" {
 		return true
 	}

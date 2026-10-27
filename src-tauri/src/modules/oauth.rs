@@ -1340,4 +1340,12 @@ mod tests {
         );
         drop(held);
     }
+
+    #[test]
+    fn antigravity_credentials_are_stamped_when_env_local_is_present() {
+        if std::path::Path::new("../.env.local").exists() {
+            assert!(!antigravity_client_id().is_empty());
+            assert!(!antigravity_client_secret().is_empty());
+        }
+    }
 }

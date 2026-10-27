@@ -56,30 +56,40 @@ fn stamp_env_local() {
     // rustc-env output. Without this line, editing .env.local leaves the old
     // Antigravity pair baked into the binary until an unrelated rebuild.
     println!("cargo:rerun-if-changed={}", path.display());
-    let Ok(contents) = std::fs::read_to_string(&path) else {
-        return;
-    };
+    println!("cargo:rerun-if-env-changed=TERMIGO_ANTIGRAVITY_CLIENT_ID");
+    println!("cargo:rerun-if-env-changed=TERMIGO_ANTIGRAVITY_CLIENT_SECRET");
 
-    let mut client_id = None;
-    let mut client_secret = None;
-    for line in contents.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let mut iter = line.splitn(2, '=');
-        let Some(key) = iter.next() else { continue };
-        let Some(raw_value) = iter.next() else {
-            continue;
-        };
-        let value = raw_value.trim_matches('"').trim_matches('\'').trim();
-        if value.is_empty() {
-            continue;
-        }
-        match key {
-            "TERMIGO_ANTIGRAVITY_CLIENT_ID" => client_id = Some(value.to_string()),
-            "TERMIGO_ANTIGRAVITY_CLIENT_SECRET" => client_secret = Some(value.to_string()),
-            _ => {}
+    let mut client_id = std::env::var("TERMIGO_ANTIGRAVITY_CLIENT_ID")
+        .ok()
+        .filter(|v| !v.trim().is_empty());
+    let mut client_secret = std::env::var("TERMIGO_ANTIGRAVITY_CLIENT_SECRET")
+        .ok()
+        .filter(|v| !v.trim().is_empty());
+
+    if let Ok(contents) = std::fs::read_to_string(&path) {
+        for line in contents.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let mut iter = line.splitn(2, '=');
+            let Some(key) = iter.next() else { continue };
+            let Some(raw_value) = iter.next() else {
+                continue;
+            };
+            let value = raw_value.trim_matches('"').trim_matches('\'').trim();
+            if value.is_empty() {
+                continue;
+            }
+            match key {
+                "TERMIGO_ANTIGRAVITY_CLIENT_ID" if client_id.is_none() => {
+                    client_id = Some(value.to_string());
+                }
+                "TERMIGO_ANTIGRAVITY_CLIENT_SECRET" if client_secret.is_none() => {
+                    client_secret = Some(value.to_string());
+                }
+                _ => {}
+            }
         }
     }
 
