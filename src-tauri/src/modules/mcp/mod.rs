@@ -330,6 +330,55 @@ pub async fn mcp_remove_server(name: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Pure registry mutation behind `mcp_set_tool_enabled`, kept free of FS and
+/// pool access so tests can drive the round-trip without env isolation.
+fn apply_tool_enabled(
+    servers: &mut serde_json::Map<String, Value>,
+    name: &str,
+    tool: &str,
+    enabled: bool,
+) -> Result<(), String> {
+    let trimmed_tool = tool.trim().to_string();
+    if trimmed_tool.is_empty() {
+        return Err("a tool needs a name".into());
+    }
+    let Some(entry) = servers.get_mut(name) else {
+        return Err(format!("no MCP server named '{name}' is configured"));
+    };
+    let Some(obj) = entry.as_object_mut() else {
+        return Err(format!("MCP server '{name}' entry is not an object"));
+    };
+    let mut disabled: Vec<String> = obj
+        .get("disabledTools")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    if enabled {
+        disabled.retain(|t| t != &trimmed_tool);
+    } else if !disabled.contains(&trimmed_tool) {
+        disabled.push(trimmed_tool.clone());
+    }
+    if disabled.is_empty() {
+        obj.remove("disabledTools");
+    } else {
+        disabled.sort();
+        obj.insert(
+            "disabledTools".into(),
+            Value::Array(disabled.into_iter().map(Value::String).collect()),
+        );
+    }
+    Ok(())
+}
+
+/// Exact-name match only: `read` must not disable `read_file`.
+fn tool_is_disabled(disabled: &[String], tool: &str) -> bool {
+    disabled.iter().any(|d| d == tool)
+}
+
 /// Enable or disable one tool on a user-level server, without removing it.
 ///
 /// Disabled tools are recorded as a `disabledTools` list on the registry
@@ -341,42 +390,7 @@ pub async fn mcp_set_tool_enabled(
     tool: String,
     enabled: bool,
 ) -> Result<(), String> {
-    let trimmed_tool = tool.trim().to_string();
-    if trimmed_tool.is_empty() {
-        return Err("a tool needs a name".into());
-    }
-    edit_user_registry(move |servers| {
-        let Some(entry) = servers.get_mut(&name) else {
-            return Err(format!("no MCP server named '{name}' is configured"));
-        };
-        let Some(obj) = entry.as_object_mut() else {
-            return Err(format!("MCP server '{name}' entry is not an object"));
-        };
-        let mut disabled: Vec<String> = obj
-            .get("disabledTools")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect()
-            })
-            .unwrap_or_default();
-        if enabled {
-            disabled.retain(|t| t != &trimmed_tool);
-        } else if !disabled.contains(&trimmed_tool) {
-            disabled.push(trimmed_tool.clone());
-        }
-        if disabled.is_empty() {
-            obj.remove("disabledTools");
-        } else {
-            disabled.sort();
-            obj.insert(
-                "disabledTools".into(),
-                Value::Array(disabled.into_iter().map(Value::String).collect()),
-            );
-        }
-        Ok(())
-    })?;
+    edit_user_registry(move |servers| apply_tool_enabled(servers, &name, &tool, enabled))?;
     clear_pool();
     Ok(())
 }
@@ -562,7 +576,7 @@ pub async fn mcp_list_tools(
     let listed = s.client().list_tools().await;
     let mut listed = s.finish(listed)?;
     if !disabled.is_empty() {
-        listed.retain(|t| !disabled.contains(&t.name));
+        listed.retain(|t| !tool_is_disabled(&disabled, &t.name));
     }
     Ok(McpToolList {
         server,
@@ -580,7 +594,7 @@ pub async fn mcp_call_tool(
     let disabled = find_server(workspace_path(workspace.clone()).as_deref(), &server)
         .map(|c| c.disabled_tools)
         .unwrap_or_default();
-    if disabled.contains(&tool) {
+    if tool_is_disabled(&disabled, &tool) {
         return Err(format!(
             "tool '{tool}' on MCP server '{server}' is disabled in settings"
         ));
@@ -662,6 +676,54 @@ mod tests {
         );
         assert_eq!(servers.len(), 1);
         assert_eq!(servers[0].disabled_tools, vec!["dangerous_tool".to_string()]);
+    }
+
+    #[test]
+    fn tool_toggle_round_trips_through_the_registry_map() {
+        let mut servers = serde_json::Map::new();
+        servers.insert(
+            "fs".into(),
+            serde_json::json!({"command": "npx"}),
+        );
+        apply_tool_enabled(&mut servers, "fs", "dangerous_tool", false).unwrap();
+        assert_eq!(
+            servers["fs"]["disabledTools"],
+            serde_json::json!(["dangerous_tool"])
+        );
+
+        // Round-trip through serialised JSON, the way the file stores it.
+        let reparsed: HashMap<String, RegistryEntry> =
+            serde_json::from_value(Value::Object(servers.clone())).unwrap();
+        assert_eq!(
+            reparsed["fs"].disabled_tools,
+            vec!["dangerous_tool".to_string()]
+        );
+
+        // Re-enabling the last tool removes the key instead of leaving [].
+        apply_tool_enabled(&mut servers, "fs", "dangerous_tool", true).unwrap();
+        assert!(servers["fs"].get("disabledTools").is_none());
+    }
+
+    #[test]
+    fn tool_toggle_rejects_unknown_server_and_blank_tool() {
+        let mut servers = serde_json::Map::new();
+        assert!(apply_tool_enabled(&mut servers, "ghost", "t", false).is_err());
+        servers.insert(
+            "fs".into(),
+            serde_json::json!({"command": "npx"}),
+        );
+        assert!(apply_tool_enabled(&mut servers, "fs", "  ", false).is_err());
+        assert!(apply_tool_enabled(&mut servers, "fs", "t", false).is_ok());
+        // Disabling twice keeps a single entry.
+        assert!(apply_tool_enabled(&mut servers, "fs", "t", false).is_ok());
+        assert_eq!(servers["fs"]["disabledTools"], serde_json::json!(["t"]));
+    }
+
+    #[test]
+    fn tool_match_is_exact_not_prefix() {
+        assert!(tool_is_disabled(&["read".to_string()], "read"));
+        assert!(!tool_is_disabled(&["read".to_string()], "read_file"));
+        assert!(!tool_is_disabled(&[], "read"));
     }
 
     #[test]
