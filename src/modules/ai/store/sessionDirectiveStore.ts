@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { LazyStore } from "@tauri-apps/plugin-store";
 
 /** A recurring task the agent is asked to keep in mind for this session. */
 export type SessionSchedule = {
@@ -28,46 +29,148 @@ export type ScheduleSpec = {
 type Directives = {
   goal: string | null;
   schedules: SessionSchedule[];
+  /** The workspace this directive was set for. Null = legacy untagged. */
+  workspaceRoot: string | null;
 };
 
 type State = {
   /** Directives keyed by session id so switching sessions does not bleed goals. */
   bySession: Record<string, Directives>;
-  getGoal: (sessionId: string) => string | null;
-  getSchedules: (sessionId: string) => SessionSchedule[];
-  setGoal: (sessionId: string, goal: string | null) => void;
+  /** Set of sessionIds whose directives were hydrated from disk. */
+  hydrated: Set<string>;
+  getGoal: (sessionId: string, workspaceRoot: string | null) => string | null;
+  getSchedules: (
+    sessionId: string,
+    workspaceRoot: string | null,
+  ) => SessionSchedule[];
+  setGoal: (
+    sessionId: string,
+    workspaceRoot: string | null,
+    goal: string | null,
+  ) => void;
   addSchedule: (
     sessionId: string,
+    workspaceRoot: string | null,
     when: string,
     prompt: string,
     spec?: ScheduleSpec,
   ) => void;
-  removeSchedule: (sessionId: string, id: string) => void;
-  toggleSchedule: (sessionId: string, id: string) => void;
+  removeSchedule: (sessionId: string, workspaceRoot: string | null, id: string) => void;
+  toggleSchedule: (sessionId: string, workspaceRoot: string | null, id: string) => void;
   /** Bump a schedule's next fire time after it runs. */
   updateScheduleNext: (
     sessionId: string,
+    workspaceRoot: string | null,
     id: string,
     nextDueAt: number,
   ) => void;
 };
 
 function directivesFor(state: State, sessionId: string): Directives {
-  return state.bySession[sessionId] ?? { goal: null, schedules: [] };
+  return state.bySession[sessionId] ?? { goal: null, schedules: [], workspaceRoot: null };
+}
+
+const STORE_PATH = "termigo-ai-directives.json";
+const DIRECTIVES_KEY = (sessionId: string) => `directives:${sessionId}`;
+
+let storeInstance:
+  | {
+      get: (k: string) => Promise<unknown>;
+      set: (k: string, v: unknown) => Promise<void>;
+      delete: (k: string) => Promise<boolean>;
+    }
+  | null = null;
+
+async function getStore() {
+  if (!storeInstance) {
+    storeInstance = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 }) as {
+      get: (k: string) => Promise<unknown>;
+      set: (k: string, v: unknown) => Promise<void>;
+      delete: (k: string) => Promise<boolean>;
+    };
+  }
+  return storeInstance;
+}
+
+export async function persistLoad(sessionId: string): Promise<Directives> {
+  const store = await getStore();
+  const raw = await store.get(DIRECTIVES_KEY(sessionId));
+  if (!raw) return { goal: null, schedules: [], workspaceRoot: null };
+  const obj = raw as Record<string, unknown>;
+  const goal =
+    typeof obj.goal === "string"
+      ? obj.goal
+      : typeof obj.goal === "number"
+        ? String(obj.goal)
+        : null;
+  const schedules = Array.isArray(obj.schedules) ? (obj.schedules as SessionSchedule[]) : [];
+  const workspaceRoot =
+    typeof obj.workspaceRoot === "string" ? obj.workspaceRoot : null;
+  return { goal, schedules, workspaceRoot };
+}
+
+export async function persistSave(
+  sessionId: string,
+  directives: Directives,
+): Promise<void> {
+  const store = await getStore();
+  await store.set(DIRECTIVES_KEY(sessionId), directives);
+}
+
+export async function persistDelete(sessionId: string): Promise<void> {
+  const store = await getStore();
+  await store.delete(DIRECTIVES_KEY(sessionId));
+}
+
+function belongsToWorkspace(
+  recordWorkspaceRoot: string | null,
+  workspaceRoot: string | null,
+): boolean {
+  if (recordWorkspaceRoot === null) return true;
+  return recordWorkspaceRoot === workspaceRoot;
 }
 
 export const useSessionDirectiveStore = create<State>((set, get) => ({
   bySession: {},
-  getGoal: (sessionId) => directivesFor(get(), sessionId).goal,
-  getSchedules: (sessionId) => directivesFor(get(), sessionId).schedules,
-  setGoal: (sessionId, goal) =>
-    set((state) => ({
-      bySession: {
-        ...state.bySession,
-        [sessionId]: { ...directivesFor(state, sessionId), goal },
-      },
-    })),
-  addSchedule: (sessionId, when, prompt, spec) =>
+  hydrated: new Set<string>(),
+
+  async hydrate(sessionId: string) {
+    if (get().hydrated.has(sessionId)) return;
+    const directives = await persistLoad(sessionId);
+    set((s) => {
+      const nextHydrated = new Set(s.hydrated);
+      nextHydrated.add(sessionId);
+      return {
+        bySession: { ...s.bySession, [sessionId]: directives },
+        hydrated: nextHydrated,
+      };
+    });
+  },
+
+  getGoal: (sessionId, workspaceRoot) => {
+    const d = directivesFor(get(), sessionId);
+    if (!belongsToWorkspace(d.workspaceRoot, workspaceRoot)) return null;
+    return d.goal;
+  },
+
+  getSchedules: (sessionId, workspaceRoot) => {
+    const d = directivesFor(get(), sessionId);
+    if (!belongsToWorkspace(d.workspaceRoot, workspaceRoot)) return [];
+    return d.schedules;
+  },
+
+  setGoal: (sessionId, workspaceRoot, goal) =>
+    set((state) => {
+      const d = directivesFor(state, sessionId);
+      return {
+        bySession: {
+          ...state.bySession,
+          [sessionId]: { ...d, goal, workspaceRoot: d.workspaceRoot ?? workspaceRoot },
+        },
+      };
+    }),
+
+  addSchedule: (sessionId, workspaceRoot, when, prompt, spec) =>
     set((state) => {
       const d = directivesFor(state, sessionId);
       const schedule: SessionSchedule = {
@@ -80,53 +183,71 @@ export const useSessionDirectiveStore = create<State>((set, get) => ({
         nextDueAt: spec?.nextDueAt,
         createdAt: Date.now(),
       };
+      const nextDirectives: Directives = {
+        ...d,
+        schedules: [...d.schedules, schedule],
+        workspaceRoot: d.workspaceRoot ?? workspaceRoot,
+      };
+      void persistSave(sessionId, nextDirectives);
       return {
         bySession: {
           ...state.bySession,
-          [sessionId]: { ...d, schedules: [...d.schedules, schedule] },
+          [sessionId]: nextDirectives,
         },
       };
     }),
-  removeSchedule: (sessionId, id) =>
+
+  removeSchedule: (sessionId, workspaceRoot, id) =>
     set((state) => {
       const d = directivesFor(state, sessionId);
+      if (!belongsToWorkspace(d.workspaceRoot, workspaceRoot)) return state;
+      const nextDirectives: Directives = {
+        ...d,
+        schedules: d.schedules.filter((s) => s.id !== id),
+      };
+      void persistDelete(sessionId);
       return {
         bySession: {
           ...state.bySession,
-          [sessionId]: {
-            ...d,
-            schedules: d.schedules.filter((s) => s.id !== id),
-          },
+          [sessionId]: nextDirectives,
         },
       };
     }),
-  toggleSchedule: (sessionId, id) =>
+
+  toggleSchedule: (sessionId, workspaceRoot, id) =>
     set((state) => {
       const d = directivesFor(state, sessionId);
+      if (!belongsToWorkspace(d.workspaceRoot, workspaceRoot)) return state;
+      const nextDirectives: Directives = {
+        ...d,
+        schedules: d.schedules.map((s) =>
+          s.id === id ? { ...s, enabled: !s.enabled } : s,
+        ),
+      };
+      void persistSave(sessionId, nextDirectives);
       return {
         bySession: {
           ...state.bySession,
-          [sessionId]: {
-            ...d,
-            schedules: d.schedules.map((s) =>
-              s.id === id ? { ...s, enabled: !s.enabled } : s,
-            ),
-          },
+          [sessionId]: nextDirectives,
         },
       };
     }),
-  updateScheduleNext: (sessionId, id, nextDueAt) =>
+
+  updateScheduleNext: (sessionId, workspaceRoot, id, nextDueAt) =>
     set((state) => {
       const d = directivesFor(state, sessionId);
+      if (!belongsToWorkspace(d.workspaceRoot, workspaceRoot)) return state;
+      const nextDirectives: Directives = {
+        ...d,
+        schedules: d.schedules.map((s) =>
+          s.id === id ? { ...s, nextDueAt } : s,
+        ),
+      };
+      void persistSave(sessionId, nextDirectives);
       return {
         bySession: {
           ...state.bySession,
-          [sessionId]: {
-            ...d,
-            schedules: d.schedules.map((s) =>
-              s.id === id ? { ...s, nextDueAt } : s,
-            ),
-          },
+          [sessionId]: nextDirectives,
         },
       };
     }),

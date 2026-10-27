@@ -338,24 +338,26 @@ export function tryRunSlashCommand(input: string): SlashOutcome {
 function respondToGoal(tail: string): SlashOutcome {
   const sessionId = useChatStore.getState().activeSessionId ?? "";
   const store = useSessionDirectiveStore.getState();
+  const workspaceRoot = useChatStore.getState().live.getWorkspaceRoot();
   if (tail === "off") {
-    store.setGoal(sessionId, null);
+    store.setGoal(sessionId, workspaceRoot, null);
     return { kind: "handled", toast: "Goal cleared" };
   }
   if (!tail) {
-    const goal = store.getGoal(sessionId);
+    const goal = store.getGoal(sessionId, workspaceRoot);
     return {
       kind: "handled",
       insert: goal ? `Goal: ${goal}` : "No goal set. Usage: /goal <goal>",
     };
   }
-  store.setGoal(sessionId, tail);
+  store.setGoal(sessionId, workspaceRoot, tail);
   return { kind: "handled", toast: "Goal set" };
 }
 
 function respondToSchedule(tail: string): SlashOutcome {
   const sessionId = useChatStore.getState().activeSessionId ?? "";
   const store = useSessionDirectiveStore.getState();
+  const workspaceRoot = useChatStore.getState().live.getWorkspaceRoot();
   if (!tail) {
     return {
       kind: "handled",
@@ -363,7 +365,7 @@ function respondToSchedule(tail: string): SlashOutcome {
     };
   }
   if (tail === "list") {
-    const schedules = store.getSchedules(sessionId);
+    const schedules = store.getSchedules(sessionId, workspaceRoot);
     if (schedules.length === 0) {
       return { kind: "handled", insert: "No scheduled tasks." };
     }
@@ -375,10 +377,10 @@ function respondToSchedule(tail: string): SlashOutcome {
   }
   if (tail.startsWith("remove ")) {
     const n = Number(tail.slice(7).trim());
-    const schedules = store.getSchedules(sessionId);
+    const schedules = store.getSchedules(sessionId, workspaceRoot);
     const target = schedules[n - 1];
     if (!target) return { kind: "handled", toast: "No such schedule." };
-    store.removeSchedule(sessionId, target.id);
+    store.removeSchedule(sessionId, workspaceRoot, target.id);
     return { kind: "handled", toast: `Removed schedule ${n}` };
   }
   const sp = tail.indexOf(" ");
@@ -396,7 +398,7 @@ function respondToSchedule(tail: string): SlashOutcome {
   const timing = parseScheduleWhen(when);
   const nextDueAt = computeNextDueAt(Date.now(), timing);
   const spec = nextDueAt !== null ? { ...timing, nextDueAt } : undefined;
-  store.addSchedule(sessionId, when, prompt, spec);
+  store.addSchedule(sessionId, workspaceRoot, when, prompt, spec);
   if (spec) startScheduler();
   return {
     kind: "handled",

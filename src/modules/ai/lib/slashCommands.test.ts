@@ -1,5 +1,20 @@
 import { startPentestRun } from "@/modules/control/lib/startPentestRun";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+// The Tauri store plugin expects a browser-like global. Vitest runs in Node, so
+// provide just enough of `window` for the plugin to load without crashing.
+if (typeof globalThis.window === "undefined") {
+  const win = (globalThis.window = {} as unknown as Window & typeof globalThis);
+  win.localStorage = {
+    getItem: vi.fn().mockReturnValue(null),
+    setItem: vi.fn(),
+    removeItem: vi.fn(),
+    clear: vi.fn(),
+    length: 0,
+    key: vi.fn(),
+  } as Storage;
+}
+import * as directiveStore from "../store/sessionDirectiveStore";
 import { useChatStore } from "../store/chatStore";
 import { useSessionDirectiveStore } from "../store/sessionDirectiveStore";
 import { listPipelines, runPipelineByName } from "./orchestrator";
@@ -12,8 +27,55 @@ vi.mock("./orchestrator", () => ({
   listPipelines: vi.fn().mockResolvedValue([]),
   runPipelineByName: vi.fn().mockResolvedValue({ ok: true }),
 }));
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn().mockResolvedValue(undefined),
+  invokeBatch: vi.fn(),
+  convertFileSrc: vi.fn(),
+}));
+
+vi.mock("@tauri-apps/plugin-store", () => {
+  const data: Record<string, unknown> = {};
+  return {
+    LazyStore: class {
+      async get(key: string) {
+        return data[key] ?? null;
+      }
+      async set(key: string, value: unknown) {
+        data[key] = value;
+      }
+      async delete(key: string) {
+        return delete data[key];
+      }
+      async save() {}
+      async clear() {
+        for (const k in data) delete data[k];
+      }
+      async keys() {
+        return Object.keys(data);
+      }
+      async values() {
+        return Object.values(data);
+      }
+      async entries() {
+        return Object.entries(data);
+      }
+      async length() {
+        return Object.keys(data).length;
+      }
+      async load() {}
+    },
+  };
+});
 
 beforeEach(() => {
+  vi.clearAllMocks();
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  // These tests cover slash-command UX, not Tauri persistence. Keep them fast
+  // and hermetic by stubbing the disk layer.
+  // Slash-command tests are hermetic: keep them off the real Tauri store.
+  vi.spyOn(directiveStore, "persistLoad").mockResolvedValue({ goal: null, schedules: [], workspaceRoot: null });
+  vi.spyOn(directiveStore, "persistSave").mockResolvedValue();
+  vi.spyOn(directiveStore, "persistDelete").mockResolvedValue();
   useChatStore.setState({ activeSessionId: "s1" });
   useSessionDirectiveStore.setState({ bySession: {} });
   vi.mocked(startPentestRun).mockClear();

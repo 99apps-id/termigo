@@ -462,8 +462,8 @@ function makeChat(sessionId: string): Chat<UIMessage> {
         terminalPrivate: live.isActiveTerminalPrivate(),
         workspaceRoot: live.getWorkspaceRoot(),
         activeFile: live.getActiveFile(),
-        goal: directives.getGoal(sessionId),
-        schedules: directives.getSchedules(sessionId),
+        goal: directives.getGoal(sessionId, live.getWorkspaceRoot()),
+        schedules: directives.getSchedules(sessionId, live.getWorkspaceRoot()),
         todos: todos.map((t) => ({ title: t.title, status: t.status })),
         remoteSession: remote
           ? {

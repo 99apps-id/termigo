@@ -85,11 +85,13 @@ export function startScheduler(): void {
       if (sessionId) {
         const now = Date.now();
         const store = useSessionDirectiveStore.getState();
-        const due = dueTasks(now, store.getSchedules(sessionId));
+        const workspaceRoot = useChatStore.getState().live.getWorkspaceRoot();
+        const due = dueTasks(now, store.getSchedules(sessionId, workspaceRoot));
         for (const task of due) {
           // Reschedule before firing so a slow run does not re-fire the same task.
           const next = computeNextDueAt(now, task);
-          if (next !== null) store.updateScheduleNext(sessionId, task.id, next);
+          if (next !== null)
+            store.updateScheduleNext(sessionId, workspaceRoot, task.id, next);
           await sendMessage(task.prompt);
         }
       }
