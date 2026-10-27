@@ -28,6 +28,7 @@
     "lint:fix": "biome lint --write ./src",
     "format": "biome format --write ./src",
     "format:check": "biome format ./src",
+    "verify": "pnpm lint && pnpm format:check && pnpm check-types && pnpm check:commands && pnpm check:doc-commands",
     "analyze:bundle": "ANALYZE=true vite build",
     "analyze:eager": "node scripts/eager-graph.mjs src/main.tsx && node scripts/eager-graph.mjs src/settings/main.tsx",
     "size": "size-limit",

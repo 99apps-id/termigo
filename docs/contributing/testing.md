@@ -14,6 +14,11 @@ pnpm check:commands               # every invoke("x") has a registered Rust comm
 pnpm check:doc-commands           # the docs command catalog matches generate_handler!
 pnpm test
 
+# One command for the static half, before pushing: lint, format, types,
+# command registration, and the docs catalog. Run `pnpm test` separately;
+# the suite takes longer and deserves its own pass.
+pnpm verify
+
 cd src-tauri
 cargo clippy --all-targets --locked -- -D warnings
 cargo nextest run --locked        # CI uses nextest
