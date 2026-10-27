@@ -15,6 +15,7 @@ export type McpServer = {
   env: Record<string, string>;
   scope: McpScope;
   cwd: string | null;
+  enabled: boolean;
 };
 
 export type McpTool = {
@@ -85,4 +86,12 @@ export async function mcpAddServer(input: {
 /** Remove a user-level server. Project-scope entries are untouched. */
 export async function mcpRemoveServer(name: string): Promise<void> {
   return invoke("mcp_remove_server", { name });
+}
+
+/** Enable or disable a server without removing it. */
+export async function mcpSetServerEnabled(
+  name: string,
+  enabled: boolean,
+): Promise<void> {
+  return invoke("mcp_set_server_enabled", { name, enabled });
 }

@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { useChatStore } from "@/modules/ai/store/chatStore";
 import { parseCommandLine, parseEnvLines } from "@/modules/ai/lib/mcpArgs";
 import { mcpToolName } from "@/modules/ai/lib/mcpToolNames";
 import {
@@ -11,6 +12,7 @@ import {
   mcpListTools,
   mcpPing,
   mcpRemoveServer,
+  mcpSetServerEnabled,
 } from "@/modules/mcp/bridge";
 import {
   Add01Icon,
@@ -18,6 +20,7 @@ import {
   CheckmarkCircle02Icon,
   Delete02Icon,
   RefreshIcon,
+  ToggleOnIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useId, useState } from "react";
@@ -56,13 +59,14 @@ function ServerRow({
 }: {
   server: McpServer;
   onRemoved: () => void;
+  workspaceRoot: string | null;
 }) {
   const [probe, setProbe] = useState<Probe>({ state: "idle" });
 
   const test = useCallback(async () => {
     setProbe({ state: "running" });
     try {
-      const alive = await mcpPing(server.name, null);
+      const alive = await mcpPing(server.name, workspaceRoot);
       if (!alive) {
         setProbe({
           state: "failed",
@@ -70,7 +74,7 @@ function ServerRow({
         });
         return;
       }
-      const listed = await mcpListTools(server.name, null);
+      const listed = await mcpListTools(server.name, workspaceRoot);
       setProbe({ state: "ok", tools: listed.tools });
     } catch (e) {
       setProbe({ state: "failed", reason: String(e) });
@@ -94,6 +98,25 @@ function ServerRow({
         >
           <HugeiconsIcon icon={RefreshIcon} size={12} strokeWidth={1.75} />
           {probe.state === "running" ? "Testing..." : "Test"}
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() =>
+            void mcpSetServerEnabled(server.name, !(server.enabled ?? true)).then(
+              invalidateMcpTools,
+            )
+          }
+          title={`${server.enabled ?? true ? "Disable" : "Enable"} ${server.name}`}
+          aria-label={`${server.enabled ?? true ? "Disable" : "Enable"} ${server.name}`}
+          className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground"
+        >
+          <HugeiconsIcon
+            icon={ToggleOnIcon}
+            size={12}
+            strokeWidth={1.75}
+            className={server.enabled ?? true ? "text-foreground/80" : "text-muted-foreground"}
+          />
         </Button>
         {/* Only user-scope entries: a project entry lives in the workspace
             file, which this panel does not manage. */}
@@ -179,6 +202,8 @@ function AddServerForm({ onAdded }: { onAdded: () => void }) {
   const [envText, setEnvText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const live = useChatStore((s) => s.live);
+  const workspaceRoot = live.getWorkspaceRoot();
 
   const reset = () => {
     setName("");
@@ -305,12 +330,12 @@ export function McpSection() {
       // Null workspace: this window has no active project, so only the
       // user-level registry is readable here. Project servers still work at
       // runtime; see the note below.
-      setServers(await mcpListServers(null));
-    } catch (e) {
-      setServers([]);
-      setError(String(e));
-    }
-  }, []);
+          setServers(await mcpListServers(workspaceRoot));
+  } catch (e) {
+    setServers([]);
+    setError(String(e));
+  }
+}, [workspaceRoot]);
 
   useEffect(() => {
     void load();
@@ -363,6 +388,7 @@ export function McpSection() {
               key={`${s.scope}:${s.name}`}
               server={s}
               onRemoved={() => void load()}
+              workspaceRoot={workspaceRoot}
             />
           ))}
         </div>
