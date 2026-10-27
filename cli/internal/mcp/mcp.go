@@ -135,6 +135,10 @@ type Server struct {
 	Env     map[string]string `json:"env,omitempty"`
 	// Scope is "project" or "user".
 	Scope string `json:"scope"`
+	// DisabledTools lists tools the desktop app disabled in settings.
+	// The CLI filters them from the offered toolset and rejects direct
+	// calls, mirroring the desktop enforcement.
+	DisabledTools []string `json:"disabledTools,omitempty"`
 }
 
 // Tool is a tool exposed by an MCP server.
@@ -239,11 +243,12 @@ func loadFile(path, scope string) ([]Server, error) {
 			}
 		}
 		servers = append(servers, Server{
-			Name:    name,
-			Command: server.Command,
-			Args:    server.Args,
-			Env:     server.Env,
-			Scope:   scope,
+			Name:          name,
+			Command:       server.Command,
+			Args:          server.Args,
+			Env:           server.Env,
+			Scope:         scope,
+			DisabledTools: server.DisabledTools,
 		})
 	}
 	return servers, nil

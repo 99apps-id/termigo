@@ -85,7 +85,12 @@ type mcpSession struct {
 const mcpMaxReconnectsPerCall = 2
 
 // call runs one tool invocation, reconnecting once when the process is gone.
+// A tool disabled in settings is rejected before any spawn: the session may
+// predate the toggle, so list-time filtering alone is not enough.
 func (s *mcpSession) call(ctx context.Context, name string, arguments map[string]any) (mcp.Call, error) {
+	if toolDisabled(s.server.DisabledTools, name) {
+		return mcp.Call{}, fmt.Errorf("tool %q on MCP server %q is disabled in settings", name, s.server.Name)
+	}
 	var lastErr error
 	for attempt := 0; attempt <= mcpMaxReconnectsPerCall; attempt++ {
 		s.mu.Lock()
@@ -166,8 +171,19 @@ func (s *mcpSession) Dead() bool {
 	return s.client == nil || s.client.Dead()
 }
 
+// toolDisabled is an exact-name match: "read" must not disable "read_file".
+func toolDisabled(disabled []string, name string) bool {
+	for _, d := range disabled {
+		if d == name {
+			return true
+		}
+	}
+	return false
+}
+
 // connectMCP is the one-shot connection path for callers that only need a
-// snapshot of tools, such as a CLI list command.
+// snapshot of tools, such as a CLI list command. Tools the desktop app
+// disabled in settings are filtered here so the model is never offered them.
 func connectMCP(ctx context.Context, server mcp.Server) (*mcpSession, []Tool, bool) {
 	client, err := mcp.Connect(ctx, server)
 	if err != nil {
@@ -181,6 +197,9 @@ func connectMCP(ctx context.Context, server mcp.Server) (*mcpSession, []Tool, bo
 	session := &mcpSession{server: server, client: client}
 	tools := make([]Tool, 0, len(list))
 	for _, item := range list {
+		if toolDisabled(server.DisabledTools, item.Name) {
+			continue
+		}
 		tools = append(tools, &mcpTool{
 			client: session,
 			server: server.Name,
