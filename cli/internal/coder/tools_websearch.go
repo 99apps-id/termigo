@@ -716,7 +716,13 @@ var dohClient = &http.Client{Timeout: 10 * time.Second}
 // IP. A literal address and a successful system lookup use the plain dialer,
 // so the fallback only runs where DNS is actually broken.
 func dialWithDoHFallback(ctx context.Context, network, addr string) (net.Conn, error) {
-	dialer := &net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}
+	// Control sees the RESOLVED address, which is the only place a name that
+	// points at link-local or the cloud metadata endpoint can be caught.
+	dialer := &net.Dialer{
+		Timeout:   15 * time.Second,
+		KeepAlive: 30 * time.Second,
+		Control:   blockMetadataAddress,
+	}
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil || net.ParseIP(host) != nil {
 		return dialer.DialContext(ctx, network, addr)

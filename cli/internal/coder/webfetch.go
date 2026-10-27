@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -167,6 +168,11 @@ func fetchOnce(ctx context.Context, raw string, reader bool) (Result, int, error
 // isBlockedHost refuses the cloud metadata addresses and the link-local range,
 // which are never the documentation the model meant to read.
 //
+// This is the cheap check on the URL the model wrote. It is not sufficient on
+// its own: a name is resolved later, and a hostile or compromised answer can
+// point it at an address this refuses. The dial-time guard below is what
+// actually holds.
+//
 // Loopback and the private ranges are deliberately allowed: a documentation
 // server running on the operator's own machine is a legitimate target, and the
 // project's own tests fetch from one. That does leave the tool able to reach a
@@ -177,10 +183,43 @@ func isBlockedHost(host string) bool {
 	if trimmed == "169.254.169.254" || trimmed == "metadata.google.internal" {
 		return true
 	}
-	if ip := net.ParseIP(trimmed); ip != nil && ip.IsLinkLocalUnicast() {
-		return true
+	if ip := net.ParseIP(trimmed); ip != nil {
+		return isBlockedIP(ip)
 	}
 	return false
+}
+
+// isBlockedIP reports whether a resolved address is one these tools never
+// connect to: the link-local range (including 169.254.169.254) and the IPv6
+// EC2 instance-metadata literal, which is a unique-local address rather than a
+// link-local one and would otherwise slip through.
+func isBlockedIP(ip net.IP) bool {
+	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+		return true
+	}
+	return ip.Equal(metadataIPv6)
+}
+
+var metadataIPv6 = net.ParseIP("fd00:ec2::254")
+
+// errBlockedAddress reports a dial the guard refused.
+var errBlockedAddress = errors.New("refusing a link-local or cloud metadata address")
+
+// blockMetadataAddress is the dial-time guard, wired as net.Dialer.Control.
+//
+// Control runs once the address is resolved and before the connection is
+// used, so a hostname whose A record is 169.254.169.254 (DNS rebinding, a
+// hosts entry, a domain that simply points there) is refused at the same point
+// a literal is. Checking only the name leaves the guard as a suggestion.
+func blockMetadataAddress(_, address string, _ syscall.RawConn) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil
+	}
+	if ip := net.ParseIP(host); ip != nil && isBlockedIP(ip) {
+		return fmt.Errorf("%w: %s", errBlockedAddress, host)
+	}
+	return nil
 }
 
 // htmlToText reduces a page to readable text.
