@@ -11,6 +11,7 @@
 
 import { dynamicTool, jsonSchema, type Tool } from "ai";
 import { mcpToolName } from "./mcpToolNames";
+import { recordMcpUsage } from "./mcpUsage";
 import {
   mcpCallTool,
   mcpListServers,
@@ -107,13 +108,16 @@ export async function loadMcpTools(
         needsApproval: true,
         execute: async (args) => {
           try {
-            return await mcpCallTool(
+            const out = await mcpCallTool(
               server,
               t.name,
               (args ?? {}) as Record<string, unknown>,
               workspaceRoot,
             );
+            recordMcpUsage(server, t.name, true);
+            return out;
           } catch (e) {
+            recordMcpUsage(server, t.name, false);
             // Returned, not thrown: the model should see the failure and pick
             // another route rather than have the run collapse.
             return { error: String(e), server, tool: t.name };

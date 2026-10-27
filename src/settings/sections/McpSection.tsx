@@ -3,6 +3,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { parseCommandLine, parseEnvLines } from "@/modules/ai/lib/mcpArgs";
 import { mcpToolName } from "@/modules/ai/lib/mcpToolNames";
+import { getMcpUsageForServer } from "@/modules/ai/lib/mcpUsage";
 import {
   type McpServer,
   type McpTool,
@@ -202,6 +203,9 @@ function ToolRow({
 }) {
   const [busy, setBusy] = useState(false);
   const enabled = tool.enabled ?? true;
+  const used = getMcpUsageForServer(server.name).find(
+    (u) => u.tool === tool.name,
+  );
   return (
     <li className="flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground">
       <button
@@ -231,9 +235,19 @@ function ToolRow({
       </button>
       <span
         className={`truncate ${enabled ? "" : "line-through opacity-60"}`}
-        title={tool.description}
+        title={
+          tool.description +
+          (used
+            ? ` Used ${used.calls}x${used.errors ? `, ${used.errors} failed` : ""} this session.`
+            : "")
+        }
       >
         {mcpToolName(server.name, tool.name)}
+        {used && used.calls > 0 && (
+          <span className="ml-1 text-muted-foreground/70 no-underline">
+            {used.calls}x{used.errors > 0 ? `!${used.errors}` : ""}
+          </span>
+        )}
       </span>
     </li>
   );
