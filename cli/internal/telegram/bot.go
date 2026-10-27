@@ -607,7 +607,7 @@ func (b *Bot) handleMessage(ctx context.Context, message *Message) {
 			}
 			return
 		}
-		b.reply(ctx, chatID, "```diff\n"+trimmed+"\n```")
+		b.replyMarkdown(ctx, chatID, "```diff\n"+trimmed+"\n```")
 	case "run", "query":
 		prompt := strings.TrimSpace(argument)
 		if prompt == "" {
@@ -768,7 +768,9 @@ func (b *Bot) runVoice(ctx context.Context, chatID int64, fileID, filename, capt
 		return
 	}
 
-	b.reply(ctx, chatID, "Transcribed: <i>\""+escapeHTML(text)+"\"</i>")
+	// Markdown, not raw HTML: `reply` sends no parse mode, so escaped tags
+	// arrived literal - the operator read `<i>"..."</i>` instead of a quote.
+	b.replyMarkdown(ctx, chatID, "Transcribed: "+text)
 
 	prompt := text
 	if caption = strings.TrimSpace(caption); caption != "" {

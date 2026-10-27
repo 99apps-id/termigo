@@ -137,10 +137,22 @@ describe("ptyDriver tools", () => {
     if (!exec) throw new Error("pty_session execute missing");
 
     const res = (await exec(
-      { action: "run", command: "rm -rf /", wait_for: "Ready" },
+      { action: "run", command: "rm -rf ./build", wait_for: "Ready" },
       {} as any,
     )) as any;
     expect(res.error).toBeUndefined();
+  });
+
+  it("pty_session still refuses a root wipe", async () => {
+    const tools = buildPtyDriverTools(makeContext());
+    const exec = tools.pty_session.execute;
+    if (!exec) throw new Error("pty_session execute missing");
+
+    const res = (await exec(
+      { action: "run", command: "rm -rf /", wait_for: "Ready" },
+      {} as any,
+    )) as any;
+    expect(res.error).toMatch(/Refused/);
   });
 
   it("pty_session runs command and returns output", async () => {

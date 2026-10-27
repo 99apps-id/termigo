@@ -447,21 +447,24 @@ impl McpClient {
         )
         .await
     }
+}
 
-    // -----------------------------------------------------------------
-    // Lifecycle
-    // -----------------------------------------------------------------
-
-    pub async fn shutdown(mut self) {
-        // The command is usually an `npx`/`uvx`/`bunx` wrapper that re-parents
-        // the real server, so killing only the direct child leaves the tool
-        // running (holding pipes/CPU). On Unix, kill the whole tree first; on
-        // Windows the Job Object taken below does the same.
+/// Dropping the client has to stop the server for real.
+///
+/// Every eviction from the pool is a plain drop - a transport failure in
+/// `Session::finish`, a config change, `clear_pool` when the registry is
+/// edited - so the cleanup cannot live in a `shutdown` method nothing calls.
+/// `kill_on_drop(true)` alone is not enough: the command is usually an
+/// `npx`/`uvx`/`bunx` wrapper that re-parents the real server, so killing only
+/// the direct child leaves the tool running and holding its pipes. On Unix the
+/// whole tree goes first; on Windows closing the Job Object does the same.
+impl Drop for McpClient {
+    fn drop(&mut self) {
         #[cfg(unix)]
         if let Some(pid) = self.child.id() {
             crate::modules::proc::kill_tree(pid);
         }
-        let _ = self.child.kill().await;
+        let _ = self.child.start_kill();
         #[cfg(windows)]
         {
             self.job.take();

@@ -206,8 +206,11 @@ func TestGoogleStreamParsesTextThoughtsAndFunctions(t *testing.T) {
 		if !strings.Contains(request.URL.Path, ":streamGenerateContent") {
 			t.Errorf("path = %q", request.URL.Path)
 		}
-		if request.URL.Query().Get("key") != "google-key" {
-			t.Errorf("the API key should travel in the query, got %q", request.URL.Query().Get("key"))
+		if request.URL.Query().Get("key") != "" {
+			t.Errorf("the API key must not travel in the URL, got %q", request.URL.Query().Get("key"))
+		}
+		if request.Header.Get("x-goog-api-key") != "google-key" {
+			t.Errorf("the API key should travel in the x-goog-api-key header, got %q", request.Header.Get("x-goog-api-key"))
 		}
 		writer.Header().Set("Content-Type", "text/event-stream")
 		chunks := []string{

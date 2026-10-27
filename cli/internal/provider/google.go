@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/url"
 	"strings"
 )
 
@@ -38,9 +37,14 @@ func (c *googleClient) Stream(ctx context.Context, req ChatRequest, emit func(St
 		payload["generationConfig"] = generation
 	}
 
-	endpoint := fmt.Sprintf("%s/v1beta/%s:streamGenerateContent?alt=sse&key=%s",
-		c.baseURL, googleModelPath(req.Model), url.QueryEscape(c.apiKey))
-	response, err := c.post(ctx, endpoint, nil, payload)
+	// The key travels in a header, never the query string: a failed request
+	// surfaces its URL verbatim (`retry.go` wraps the transport's *url.Error),
+	// so `?key=` would print the credential into the terminal and into every
+	// pasted log or Telegram error card.
+	endpoint := fmt.Sprintf("%s/v1beta/%s:streamGenerateContent?alt=sse",
+		c.baseURL, googleModelPath(req.Model))
+	headers := map[string]string{"x-goog-api-key": c.currentKey()}
+	response, err := c.post(ctx, endpoint, headers, payload)
 	if err != nil {
 		return err
 	}

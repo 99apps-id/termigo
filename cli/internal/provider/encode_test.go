@@ -234,8 +234,14 @@ func TestGoogleRequestCarriesFunctionDeclarationsAndThoughts(t *testing.T) {
 	if !strings.Contains(recorder.path, ":streamGenerateContent") {
 		t.Errorf("path = %q", recorder.path)
 	}
-	if !strings.Contains(recorder.query, "key=google-key") {
-		t.Errorf("query = %q, want the key", recorder.query)
+	if !strings.Contains(recorder.query, "alt=sse") {
+		t.Errorf("query = %q, want alt=sse", recorder.query)
+	}
+	if strings.Contains(recorder.query, "key=") {
+		t.Errorf("the API key must never ride in the URL, query = %q", recorder.query)
+	}
+	if got := recorder.headers.Get("x-goog-api-key"); got != "google-key" {
+		t.Errorf("x-goog-api-key = %q, want the key in a header", got)
 	}
 	instruction := object(t, body["systemInstruction"], "systemInstruction")
 	instructionParts := array(t, instruction, "parts")

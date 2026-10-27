@@ -101,6 +101,29 @@ pub fn validate_query(query: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Write the whole payload to the child's stdin from a helper thread, then
+/// wait for the child.
+///
+/// Writing inline deadlocks: the engine answers while it reads, and once its
+/// stdout pipe (64 KiB) fills with a reply nobody is draining yet, it stops
+/// reading its input - where the parent is still blocked. `MAX_QUERY_CHARS`
+/// is far past that buffer, so a multi-statement report reaches this without
+/// anything unusual. The helper thread also closes stdin when it finishes, so
+/// a child still reading sees EOF.
+fn write_stdin_and_wait(
+    mut child: std::process::Child,
+    payload: &[u8],
+) -> Result<(std::io::Result<()>, std::process::Output), String> {
+    let mut stdin = child.stdin.take().ok_or("failed to open child stdin")?;
+    let payload = payload.to_vec();
+    let writer = std::thread::spawn(move || stdin.write_all(&payload));
+    let output = child.wait_with_output().map_err(|e| e.to_string())?;
+    let write_result = writer
+        .join()
+        .map_err(|_| "stdin writer thread panicked".to_string())?;
+    Ok((write_result, output))
+}
+
 /// Run `sql` against `connection` using `engine`, returning stdout (and any
 /// stderr). The query is written to the child's stdin and the output is capped.
 pub fn run_query(engine: &str, connection: &str, query: &str) -> Result<String, String> {
@@ -120,16 +143,17 @@ pub fn run_query(engine: &str, connection: &str, query: &str) -> Result<String, 
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
 
-    let mut child = cmd.spawn().map_err(|e| format!("spawn {engine}: {e}"))?;
-    {
-        let stdin = child.stdin.as_mut().ok_or("failed to open child stdin")?;
-        stdin
-            .write_all(query.as_bytes())
-            .map_err(|e| format!("write query to {engine}: {e}"))?;
-    }
-    let output = child
-        .wait_with_output()
+    let child = cmd.spawn().map_err(|e| format!("spawn {engine}: {e}"))?;
+    let (write_result, output) = write_stdin_and_wait(child, query.as_bytes())
         .map_err(|e| format!("wait for {engine}: {e}"))?;
+    // A failed write usually means the engine exited first, and its own stderr
+    // explains why better than "broken pipe" does; only report the write when
+    // the child claims success.
+    if output.status.success() {
+        if let Err(e) = write_result {
+            return Err(format!("write query to {engine}: {e}"));
+        }
+    }
 
     let stdout_text = String::from_utf8_lossy(&output.stdout);
     let stderr_text = String::from_utf8_lossy(&output.stderr);
@@ -276,6 +300,30 @@ mod tests {
             local_db_path("duckdb", "data.duckdb"),
             Some(std::path::PathBuf::from("data.duckdb"))
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn drains_output_while_stdin_is_still_being_written() {
+        // 200 KB in, 200 KB out. The child fills its stdout pipe before it
+        // finishes reading stdin, and both pipes hold ~64 KiB, so a parent
+        // that writes stdin inline blocks forever here.
+        let child = Command::new("sh")
+            .arg("-c")
+            .arg("head -c 200000 /dev/zero | tr '\\0' 'x'; cat > /dev/null")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn sh");
+        let payload = vec![b'y'; 200_000];
+
+        let (write, output) = write_stdin_and_wait(child, &payload).expect("no thread error");
+
+        write.expect("stdin write");
+        assert!(output.status.success());
+        assert_eq!(output.stdout.len(), 200_000);
+        assert!(output.stdout.iter().all(|&byte| byte == b'x'));
     }
 
     #[test]

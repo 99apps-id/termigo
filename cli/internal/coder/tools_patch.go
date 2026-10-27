@@ -97,6 +97,13 @@ func parsePatch(document string) ([]patchOp, error) {
 	}
 	for _, raw := range strings.Split(trimmed, "\n") {
 		line := strings.TrimRight(raw, "\r")
+		// The Add File form this tool documents carries no `@@`: the body
+		// starts on the following line. Opening an implicit hunk there is
+		// what keeps `+line` content, which used to be dropped and then
+		// reported as "add <path> holds no hunks".
+		if current != nil && current.action == "add" && hunk == nil && isHunkLine(line) {
+			hunk = &patchHunk{}
+		}
 		switch {
 		case line == "*** Begin Patch" || line == "*** End Patch":
 			flush()
@@ -141,6 +148,19 @@ func parsePatch(document string) ([]patchOp, error) {
 		}
 	}
 	return ops, nil
+}
+
+// isHunkLine reports whether the line carries one of the three hunk prefixes.
+func isHunkLine(line string) bool {
+	if line == "" {
+		return false
+	}
+	switch line[0] {
+	case ' ', '-', '+':
+		return true
+	default:
+		return false
+	}
 }
 
 func applyPatchAdd(path string, op patchOp) error {

@@ -1157,7 +1157,13 @@ func runChat(args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	cfg, _ := config.Load()
+	// Never continue on a config that failed to parse: runChat hands `cfg` to
+	// the TUI, and the TUI writes it back on /settings, which would replace the
+	// operator's file with the zero value.
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
 
 	continueLast := false
 	sessionID := ""
@@ -1245,7 +1251,17 @@ func runTelegram(args []string, stdout io.Writer) error {
 		case "status":
 			fmt.Fprintln(stdout, tgbridge.Status(store))
 			return nil
+		case "--help", "-h":
+			fmt.Fprintln(stdout, "Usage: termigo telegram [status | <bot-token>]\n\nWith no argument, starts the Telegram companion bot.")
+			return nil
 		default:
+			// Anything flag-shaped is a mistyped option, never a token: bot
+			// tokens are `<digits>:<secret>` and start with a digit. Saving the
+			// literal here would overwrite a working token with "--help" and
+			// only surface later as a Telegram auth error.
+			if strings.HasPrefix(args[0], "-") {
+				return fmt.Errorf("unknown option %q; pass a bot token or use 'termigo telegram status'", args[0])
+			}
 			if err := tgbridge.SaveToken(store, args[0]); err != nil {
 				return err
 			}

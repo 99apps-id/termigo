@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os/exec"
+	"strings"
 	"sync"
 
 	"github.com/99apps-id/termigo/cli/internal/coder"
@@ -36,6 +38,31 @@ func NewAgent(store *secrets.Store, workspace string, model provider.Model) (*Ag
 		return nil, err
 	}
 	return agent, nil
+}
+
+// Workspace reports the directory every run is rooted in, so the Telegram bot
+// can save uploads into `.termigo/uploads` instead of only reporting a size.
+func (a *Agent) Workspace() string { return a.workspace }
+
+// GitDiff returns the workspace's uncommitted changes for /diff.
+//
+// The bot advertises /diff in its command menu and help text, and it looks for
+// this method: without it every call answered "Diff is not supported by this
+// agent" even though the workspace is right here.
+func (a *Agent) GitDiff(ctx context.Context) (string, error) {
+	command := exec.CommandContext(ctx, "git", "-C", a.workspace, "diff")
+	var stderr strings.Builder
+	command.Stderr = &stderr
+	output, err := command.Output()
+	if err != nil {
+		// git's own words ("not a git repository", "unknown revision") are the
+		// actionable part; a bare exit status is not.
+		if message := strings.TrimSpace(stderr.String()); message != "" {
+			return "", errors.New(message)
+		}
+		return "", err
+	}
+	return string(output), nil
 }
 
 func (a *Agent) applyModel(model provider.Model) error {

@@ -70,8 +70,29 @@ func validateMCPArgs(command string, args []string) error {
 		if _, bad := inlineCodeArgs[name]; bad {
 			return fmt.Errorf("MCP argument %q is not allowed in project scope", arg)
 		}
+		for _, expanded := range expandShortFlags(name) {
+			if _, bad := inlineCodeArgs[expanded]; bad {
+				return fmt.Errorf("MCP argument %q is not allowed in project scope", arg)
+			}
+		}
 	}
 	return nil
+}
+
+// expandShortFlags lists the single-letter flags a bundled token stands for:
+// `-we` means `-w -e`. Both spellings run the same code in every interpreter,
+// so matching only the literal token leaves the gate open to
+// `ruby -we "system('id')"`. Long options (`--eval`) and bare words return
+// nothing: they are compared whole by the caller.
+func expandShortFlags(arg string) []string {
+	if len(arg) < 3 || !strings.HasPrefix(arg, "-") || strings.HasPrefix(arg, "--") {
+		return nil
+	}
+	out := make([]string, 0, len(arg)-1)
+	for _, r := range arg[1:] {
+		out = append(out, "-"+string(r))
+	}
+	return out
 }
 
 // validateMCPCommand ensures the MCP server executable is allowed.

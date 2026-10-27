@@ -140,7 +140,13 @@ func Run(store *secrets.Store, workspace string, model provider.Model, session *
 	mcpTools, closeMCP := coder.ConnectMCP(context.Background(), workspace)
 	defer closeMCP()
 
-	cfg, _ := config.Load()
+	// A config that failed to parse must not become the zero value here: the
+	// first /settings command would then Save that empty struct over the
+	// operator's providers, trusted folders and model prices.
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
 	intro := fmt.Sprintf("Termigo. Model %s. Workspace %s. Session %s.", model.ID, workspace, session.ID)
 	if len(mcpTools) > 0 {
 		intro += fmt.Sprintf(" %d MCP tool(s) connected.", len(mcpTools))

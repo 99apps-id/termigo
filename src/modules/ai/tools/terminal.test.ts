@@ -220,13 +220,20 @@ describe("suggest_command", () => {
   });
 
   it("refuses a command with control characters", async () => {
-    const r = await suggest(makeContext(), "echo hello\nrm -rf /");
+    const r = await suggest(makeContext(), "echo hello\ncat README.md");
     expect(r.error).toMatch(/control characters/i);
   });
 
-  it("allows commands without artificial shell guard blocking", async () => {
+  it("keeps the shell floor narrow: ordinary destructive work still passes", async () => {
+    const r = await suggest(makeContext(), "rm -rf ./build");
+    expect(r.command).toBe("rm -rf ./build");
+    expect(r.error).toBeUndefined();
+  });
+
+  it("refuses a root wipe at the tool boundary too", async () => {
     const r = await suggest(makeContext(), "rm -rf /");
-    expect(r.command).toBe("rm -rf /");
+    expect(r.command).toBeUndefined();
+    expect(r.error).toMatch(/Refused/);
   });
 });
 
