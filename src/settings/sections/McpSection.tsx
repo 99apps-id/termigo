@@ -186,6 +186,25 @@ function ServerRow({
 }
 
 /**
+ * Run the enable/disable toggle for one tool: persist, invalidate the agent
+ * toolset, then refresh. Extracted so the wiring is testable without DOM.
+ */
+export async function toggleMcpTool(
+  serverName: string,
+  toolName: string,
+  enabled: boolean,
+  deps: {
+    setToolEnabled: typeof mcpSetToolEnabled;
+    invalidate: typeof invalidateMcpTools;
+    onChanged: () => void;
+  },
+): Promise<void> {
+  await deps.setToolEnabled(serverName, toolName, !enabled);
+  deps.invalidate();
+  deps.onChanged();
+}
+
+/**
  * One tool with a per-tool enable/disable toggle.
  *
  * Disabled tools are filtered out of the agent's toolset and rejected at the
@@ -213,12 +232,11 @@ function ToolRow({
         disabled={busy}
         onClick={() => {
           setBusy(true);
-          void mcpSetToolEnabled(server.name, tool.name, !enabled)
-            .then(() => {
-              invalidateMcpTools();
-              onChanged();
-            })
-            .finally(() => setBusy(false));
+          void toggleMcpTool(server.name, tool.name, enabled, {
+            setToolEnabled: mcpSetToolEnabled,
+            invalidate: invalidateMcpTools,
+            onChanged,
+          }).finally(() => setBusy(false));
         }}
         title={`${enabled ? "Disable" : "Enable"} ${tool.name}`}
         aria-label={`${enabled ? "Disable" : "Enable"} ${tool.name}`}

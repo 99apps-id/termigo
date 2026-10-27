@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { McpTool } from "@/modules/mcp/bridge";
+import { toggleMcpTool } from "./McpSection";
 
 /**
  * The probe merge in ServerRow: live tools marked enabled, plus entries for
@@ -47,5 +48,40 @@ describe("MCP probe merge", () => {
     expect(out).toEqual([
       { name: "a", description: "d", inputSchema: {}, enabled: true },
     ]);
+  });
+});
+
+describe("toggleMcpTool", () => {
+  it("persists the flipped flag, invalidates, then refreshes", async () => {
+    const setToolEnabled = vi.fn().mockResolvedValue(undefined);
+    const invalidate = vi.fn();
+    const onChanged = vi.fn();
+    await toggleMcpTool("github", "dangerous_tool", true, {
+      setToolEnabled,
+      invalidate,
+      onChanged,
+    });
+    expect(setToolEnabled).toHaveBeenCalledWith(
+      "github",
+      "dangerous_tool",
+      false,
+    );
+    expect(invalidate).toHaveBeenCalledOnce();
+    expect(onChanged).toHaveBeenCalledOnce();
+  });
+
+  it("propagates a persistence failure without invalidating", async () => {
+    const setToolEnabled = vi.fn().mockRejectedValue(new Error("nope"));
+    const invalidate = vi.fn();
+    const onChanged = vi.fn();
+    await expect(
+      toggleMcpTool("github", "t", true, {
+        setToolEnabled,
+        invalidate,
+        onChanged,
+      }),
+    ).rejects.toThrow("nope");
+    expect(invalidate).not.toHaveBeenCalled();
+    expect(onChanged).not.toHaveBeenCalled();
   });
 });
