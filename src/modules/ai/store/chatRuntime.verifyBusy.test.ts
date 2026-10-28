@@ -68,30 +68,26 @@ describe("requestVerifyNudge fabricated busy release", () => {
     vi.clearAllMocks();
   });
 
-  it(
-    "releases the fabricated thinking status when the workspace root is missing",
-    async () => {
-      useChatStore.setState({
-        activeSessionId: "session-verify-busy",
-        agentMeta: { ...useChatStore.getState().agentMeta, status: "idle" },
-      });
-      liveState.getWorkspaceRoot = () => null;
+  it("releases the fabricated thinking status when the workspace root is missing", async () => {
+    useChatStore.setState({
+      activeSessionId: "session-verify-busy",
+      agentMeta: { ...useChatStore.getState().agentMeta, status: "idle" },
+    });
+    liveState.getWorkspaceRoot = () => null;
 
-      const scheduled = requestVerifyNudge("session-verify-busy", {
-        changedCodePaths: ["src/app.ts"],
-        verifiedAfterLastEdit: false,
-        claimedVerification: false,
-      });
-      expect(scheduled).toBe(true);
+    const scheduled = requestVerifyNudge("session-verify-busy", {
+      changedCodePaths: ["src/app.ts"],
+      verifiedAfterLastEdit: false,
+      claimedVerification: false,
+    });
+    expect(scheduled).toBe(true);
 
-      // The gate sets "thinking" up front.
-      expect(useChatStore.getState().agentMeta.status).toBe("thinking");
+    // The gate sets "thinking" up front.
+    expect(useChatStore.getState().agentMeta.status).toBe("thinking");
 
-      await vi.advanceTimersByTimeAsync(5000);
+    await vi.advanceTimersByTimeAsync(5000);
 
-      // Without the release the status stays "thinking" forever.
-      expect(useChatStore.getState().agentMeta.status).toBe("idle");
-    },
-    30_000,
-  );
+    // Without the release the status stays "thinking" forever.
+    expect(useChatStore.getState().agentMeta.status).toBe("idle");
+  }, 30_000);
 });
