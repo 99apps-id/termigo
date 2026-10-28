@@ -1,6 +1,6 @@
-import { getSessionShell } from "./sessionShell";
-import { detectCheckCommand, type CheckKind } from "../tools/verify";
+import { type CheckKind, detectCheckCommand } from "../tools/verify";
 import { native } from "./native";
+import { getSessionShell, sessionShellKey } from "./sessionShell";
 
 /** Bounded retry for the post-run auto-verifier. */
 export const AUTO_VERIFY_MAX_ATTEMPTS = 2;
@@ -36,27 +36,38 @@ export async function runAutoVerify(
     read(`${cwd}/pyproject.toml`).catch(() => null),
   ]);
   const manifests = { pkgJson, cargo, goMod, pyproject };
-  const checks = [
-    detectCheckCommand("lint", manifests),
-    detectCheckCommand("test", manifests),
-  ]
-    .filter((c) => !!c.command)
+  // Keep the requested kind alongside each resolved command. The note text is
+  // free-form prose ("package.json script (pnpm)"), so it must never be used
+  // to recover the kind: "pnpm run test" carries no "test" substring and would
+  // be mislabelled as a lint run.
+  const checks = (
+    [
+      ["lint", detectCheckCommand("lint", manifests)],
+      ["test", detectCheckCommand("test", manifests)],
+    ] as const
+  )
+    .map(([kind, resolved]) => ({ kind, resolved }))
+    .filter((c) => !!c.resolved.command)
     .slice(0, AUTO_VERIFY_MAX_ATTEMPTS);
   if (!checks.length) return null;
 
-  const shellId = await getSessionShell(sessionId, cwd);
+  const shellId = await getSessionShell(
+    sessionShellKey("verify", sessionId, root),
+    cwd,
+  );
   const results: VerifyRunResult[] = [];
   for (const check of checks) {
-    if (!check.command) continue;
+    const { kind, resolved } = check;
+    if (!resolved.command) continue;
     const r = await native.shellSessionRun(
       shellId,
-      check.command,
+      resolved.command,
       cwd,
       AUTO_VERIFY_TIMEOUT_SECS,
     );
     results.push({
-      command: check.command,
-      kind: check.note.includes("test") ? "test" : "lint",
+      command: resolved.command,
+      kind,
       exit_code: r.exit_code ?? 0,
       timed_out: r.timed_out,
       stdout: r.stdout,

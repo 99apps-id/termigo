@@ -193,8 +193,10 @@ function requestAutoContinue(sessionId: string): boolean {
  * Same refusals as requestAutoContinue (user stopped, switched session,
  * queued task owns the next turn) plus its own budget: at most
  * MAX_VERIFY_NUDGES per task, and only when the preference is on.
+ *
+ * Exported for testing.
  */
-function requestVerifyNudge(
+export function requestVerifyNudge(
   sessionId: string,
   verify: {
     changedCodePaths: string[];
@@ -228,7 +230,13 @@ function requestVerifyNudge(
       return;
     }
     const root = useChatStore.getState().live.getWorkspaceRoot();
-    if (!root) return false;
+    if (!root) {
+      // The "thinking" status above was fabricated by this gate, so it must be
+      // released here. Leaving it set would strand the session in a permanent
+      // thinking state with no run behind it, which stalls every later message.
+      releaseFabricatedBusy(sessionId);
+      return;
+    }
     const verifyPromise = runAutoVerify(sessionId, root);
     verifyPromise
       .then((run) => {
