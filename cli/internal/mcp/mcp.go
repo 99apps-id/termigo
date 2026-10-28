@@ -106,22 +106,57 @@ func validateMCPCommand(command, scope string) error {
 	if scope == "user" {
 		return nil
 	}
-	fields := strings.Fields(cmd)
-	if len(fields) == 0 {
-		return fmt.Errorf("command is empty")
+	// In project scope, reject any command containing paths, drive letters, or
+	// embedded whitespace so a repository cannot point `command` at `./node.exe`
+	// or `../evil/npx` inside the workspace. The command is later executed
+	// verbatim by exec.Command, so a bare executable name is the only safe form.
+	if strings.ContainsAny(cmd, " \t\r\n/\\:") {
+		return fmt.Errorf("MCP command %q must be a bare executable name in project scope", cmd)
 	}
-	rawBase := fields[0]
-	rawBase = strings.Trim(rawBase, `"'`)
-	base := filepath.Base(rawBase)
-	ext := strings.ToLower(filepath.Ext(base))
-	stem := base
-	if ext == ".exe" || ext == ".cmd" || ext == ".bat" {
-		stem = strings.TrimSuffix(base, ext)
+	// The suffix is stripped case-sensitively, matching the desktop app, so
+	// both readers make the same decision about a given registry file.
+	stem := cmd
+	for _, ext := range []string{".exe", ".cmd", ".bat"} {
+		if strings.HasSuffix(stem, ext) {
+			stem = stem[:len(stem)-len(ext)]
+			break
+		}
 	}
-
 	if _, ok := allowedMCPCommands[stem]; !ok {
-		if _, ok := allowedMCPCommands[base]; !ok {
-			return fmt.Errorf("MCP command %q is not allowed in project scope", rawBase)
+		if _, ok := allowedMCPCommands[cmd]; !ok {
+			return fmt.Errorf("MCP command %q is not allowed in project scope", cmd)
+		}
+	}
+	return nil
+}
+
+// dangerousMCPEnvKeys lists environment variables that can hijack the MCP
+// server process. A project registry ships inside the repository, so it must
+// not be able to repoint the interpreter loader or the runtime search path.
+var dangerousMCPEnvKeys = map[string]struct{}{
+	"PATH": {}, "PATHEXT": {}, "NODE_OPTIONS": {}, "NODE_PATH": {},
+	"PYTHONSTARTUP": {}, "PYTHONPATH": {}, "PYTHONHOME": {},
+	"RUBYOPT": {}, "RUBYLIB": {}, "PERL5OPT": {}, "PERL5LIB": {},
+	"JAVA_TOOL_OPTIONS": {}, "JDK_JAVA_OPTIONS": {}, "_JAVA_OPTIONS": {},
+	"CARGO_BUILD_RUSTC_WRAPPER": {}, "RUSTC_WRAPPER": {},
+	"BASH_ENV": {}, "ENV": {}, "NPM_CONFIG_SCRIPT_SHELL": {},
+}
+
+// validateMCPEnv rejects environment overrides that can subvert the MCP server
+// process. User-scoped configuration belongs to the machine owner and is left
+// untouched; project-scoped configuration is attacker-controlled.
+func validateMCPEnv(env map[string]string, scope string) error {
+	if scope == "user" {
+		return nil
+	}
+	for key := range env {
+		upper := strings.ToUpper(strings.TrimSpace(key))
+		_, dangerous := dangerousMCPEnvKeys[upper]
+		if strings.HasPrefix(upper, "LD_") || strings.HasPrefix(upper, "DYLD_") {
+			dangerous = true
+		}
+		if dangerous {
+			return fmt.Errorf("MCP env variable %q is not allowed in project scope", key)
 		}
 	}
 	return nil
@@ -157,14 +192,16 @@ type Registry struct {
 }
 
 // Load returns the merged project + user MCP registry for a workspace.
+//
+// A server name present in both scopes resolves to the project entry: the
+// closer config is the more specific one. This matches the desktop app's
+// merge rule, and without it the same server would be offered twice - once
+// per scope - producing two identically named tools in the agent's toolset.
 func Load(workspace string) (Registry, error) {
-	var servers []Server
-
 	project, err := loadFile(filepath.Join(workspace, WorkspaceFileName), "project")
 	if err != nil {
 		return Registry{}, err
 	}
-	servers = append(servers, project...)
 
 	userPath, err := userRegistryPath()
 	if err != nil {
@@ -174,8 +211,21 @@ func Load(workspace string) (Registry, error) {
 	if err != nil {
 		return Registry{}, err
 	}
-	servers = append(servers, user...)
 
+	// User entries first, project entries second, so a project entry of the
+	// same name replaces the user one.
+	byName := make(map[string]Server, len(project)+len(user))
+	for _, server := range user {
+		byName[server.Name] = server
+	}
+	for _, server := range project {
+		byName[server.Name] = server
+	}
+
+	servers := make([]Server, 0, len(byName))
+	for _, server := range byName {
+		servers = append(servers, server)
+	}
 	sort.SliceStable(servers, func(i, j int) bool {
 		return strings.ToLower(servers[i].Name) < strings.ToLower(servers[j].Name)
 	})
@@ -227,19 +277,30 @@ func loadFile(path, scope string) ([]Server, error) {
 	}
 	mcpServers, err := parseMCPRegistryData(data)
 	if err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
+		// A malformed registry is a broken file, not a broken install. The
+		// desktop app warns and continues, so a corrupt registry must not
+		// strip the agent of every MCP tool it had configured.
+		fmt.Fprintf(os.Stderr, "termigo: ignoring malformed MCP registry at %s: %v\n", path, err)
+		return nil, nil
 	}
 	servers := make([]Server, 0, len(mcpServers))
 	for name, server := range mcpServers {
 		if server.Command == "" {
-			return nil, fmt.Errorf("%s: server %q has no command", path, name)
+			fmt.Fprintf(os.Stderr, "termigo: ignoring MCP server %q in %s: command is empty\n", name, path)
+			continue
 		}
 		if err := validateMCPCommand(server.Command, scope); err != nil {
-			return nil, fmt.Errorf("%s: server %q: %w", path, name, err)
+			fmt.Fprintf(os.Stderr, "termigo: ignoring MCP server %q in %s: %v\n", name, path, err)
+			continue
+		}
+		if err := validateMCPEnv(server.Env, scope); err != nil {
+			fmt.Fprintf(os.Stderr, "termigo: ignoring MCP server %q in %s: %v\n", name, path, err)
+			continue
 		}
 		if scope != "user" {
 			if err := validateMCPArgs(server.Command, server.Args); err != nil {
-				return nil, fmt.Errorf("%s: server %q: %w", path, name, err)
+				fmt.Fprintf(os.Stderr, "termigo: ignoring MCP server %q in %s: %v\n", name, path, err)
+				continue
 			}
 		}
 		servers = append(servers, Server{
@@ -267,6 +328,9 @@ func Add(workspace, name string, server config.MCPServer) (Server, error) {
 		return Server{}, errors.New("server command must not be empty")
 	}
 	if err := validateMCPCommand(server.Command, "project"); err != nil {
+		return Server{}, err
+	}
+	if err := validateMCPEnv(server.Env, "project"); err != nil {
 		return Server{}, err
 	}
 	if err := validateMCPArgs(server.Command, server.Args); err != nil {

@@ -604,6 +604,19 @@ func listMCPServers(ctx context.Context, workspace, filter string, jsonOutput bo
 	return nil
 }
 
+// mcpToolDisabled reports whether a tool was disabled in the desktop app's
+// settings. It is an exact-name match: disabling "read" must not disable
+// "read_file". The registry is shared with the desktop app, so the CLI has to
+// honour the same list the app enforces.
+func mcpToolDisabled(disabled []string, name string) bool {
+	for _, entry := range disabled {
+		if entry == name {
+			return true
+		}
+	}
+	return false
+}
+
 func serverTools(ctx context.Context, server mcp.Server) ([]mcp.Tool, error) {
 	client, err := mcp.Connect(ctx, server)
 	if err != nil {
@@ -614,10 +627,15 @@ func serverTools(ctx context.Context, server mcp.Server) ([]mcp.Tool, error) {
 	if err != nil {
 		return nil, err
 	}
-	for index := range tools {
-		tools[index].Server = server.Name
+	enabled := tools[:0]
+	for _, tool := range tools {
+		if mcpToolDisabled(server.DisabledTools, tool.Name) {
+			continue
+		}
+		tool.Server = server.Name
+		enabled = append(enabled, tool)
 	}
-	return tools, nil
+	return enabled, nil
 }
 
 func pingMCPServer(ctx context.Context, workspace, name string, stdout io.Writer) error {
@@ -657,6 +675,19 @@ func callMCPTool(ctx context.Context, workspace, serverName, toolName string, pa
 			return fmt.Errorf("tool arguments must be key=value, got %q", pair)
 		}
 		arguments[key] = value
+	}
+	return callMCPToolWithServer(ctx, server, toolName, arguments, stdout)
+}
+
+// callMCPToolWithServer invokes one tool on an already-resolved server.
+//
+// A tool disabled in settings is refused before the server is contacted,
+// mirroring the desktop app's enforcement: the registry is shared between the
+// two, so a tool the user switched off must not still be callable from the
+// command line.
+func callMCPToolWithServer(ctx context.Context, server mcp.Server, toolName string, arguments map[string]any, stdout io.Writer) error {
+	if mcpToolDisabled(server.DisabledTools, toolName) {
+		return fmt.Errorf("tool %q on MCP server %q is disabled in settings", toolName, server.Name)
 	}
 	client, err := mcp.Connect(ctx, server)
 	if err != nil {

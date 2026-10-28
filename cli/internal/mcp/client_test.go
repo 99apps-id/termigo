@@ -227,7 +227,9 @@ func TestRegistryMergeAndEdit(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsServerWithoutCommand(t *testing.T) {
+// A server without a command is unusable, but it must not take down the other
+// servers: the registry is skipped per entry and the rest keep working.
+func TestLoadSkipsServerWithoutCommand(t *testing.T) {
 	workspace := t.TempDir()
 	project := filepath.Join(workspace, ".termigo", "mcp.json")
 	if err := os.MkdirAll(filepath.Dir(project), 0o755); err != nil {
@@ -237,8 +239,14 @@ func TestLoadRejectsServerWithoutCommand(t *testing.T) {
 	if err := os.WriteFile(project, []byte(bad), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Load(workspace); err == nil {
-		t.Fatal("Load accepted a server without a command")
+	registry, err := Load(workspace)
+	if err != nil {
+		t.Fatalf("Load must not fail on one unusable server, got %v", err)
+	}
+	for _, server := range registry.Servers {
+		if server.Name == "broken" {
+			t.Fatal("Load accepted a server without a command")
+		}
 	}
 }
 
