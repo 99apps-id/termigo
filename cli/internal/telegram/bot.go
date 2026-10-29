@@ -219,11 +219,16 @@ func (b *Bot) saveOffset(offset int64) {
 	if b.cursorPath == "" {
 		return
 	}
-	tmp := b.cursorPath + ".tmp"
+	b.offsetMu.Lock()
+	defer b.offsetMu.Unlock()
+	tmp := b.cursorPath + ".tmp." + strconv.FormatInt(time.Now().UnixNano(), 10)
 	if err := os.WriteFile(tmp, []byte(strconv.FormatInt(offset, 10)), 0o600); err != nil {
 		return
 	}
-	_ = os.Rename(tmp, b.cursorPath)
+	if err := os.Rename(tmp, b.cursorPath); err != nil {
+		_ = os.Remove(tmp)
+		return
+	}
 }
 
 // Verify checks the token and returns the bot identity.

@@ -27,30 +27,18 @@ type Options struct {
 // benchmark evaluation. Only commands that are read-only diagnostics or
 // simple output generators are permitted; anything that mutates state,
 // reaches the network, or invokes a shell feature is rejected.
+// allowedEvalCommands is an allow-list of base commands that are safe for
+// benchmark evaluation. Only very simple read-only commands are permitted;
+// anything that mutates state, reaches the network, or invokes a shell feature
+// is rejected.
 var allowedEvalCommands = map[string]struct{}{
-	"grep": {}, "egrep": {}, "fgrep": {}, "rg": {},
-	"wc":   {},
-	"diff": {}, "cmp": {}, "comm": {}, "diff3": {},
-	"find": {},
-	"sed":  {}, "awk": {},
-	"sort": {}, "uniq": {},
-	"head": {}, "tail": {}, "cut": {}, "tr": {}, "nl": {}, "tee": {},
-	"paste": {}, "expand": {}, "unexpand": {}, "fold": {},
-	"jq": {}, "yq": {},
-	"python3": {}, "node": {}, "go": {},
-	"cat": {}, "ls": {}, "echo": {}, "test": {}, "expr": {},
-	"md5sum": {}, "sha256sum": {}, "sha1sum": {}, "base64": {},
-	"pwd": {}, "dirname": {}, "basename": {}, "realpath": {}, "readlink": {},
-	"stat": {}, "file": {}, "which": {},
-	"true": {}, "false": {},
-	"seq": {}, "printf": {}, "tac": {}, "rev": {}, "shuf": {},
-	"strings": {}, "yes": {}, "nohup": {}, "timeout": {},
-	"xargs": {},
+	"cat": {}, "ls": {}, "echo": {}, "pwd": {}, "true": {}, "false": {}, "test": {}, "expr": {},
+	"grep": {}, "wc": {}, "head": {}, "tail": {}, "cut": {}, "sort": {}, "uniq": {},
 }
 
 // evalCommandMetachar rejects shell metacharacters that would allow a
 // second statement to be smuggled past a single-line approval.
-var evalCommandMetachar = regexp.MustCompile(`[;|&$(){}` + "`" + `]`)
+var evalCommandMetachar = regexp.MustCompile(`[;|&$(){}` + "`" + `<>[]\*?~'"\\]`)
 
 // validateEvalCommand checks that an eval command is safe to run: it must
 // not contain shell metacharacters and its base executable must be on the
@@ -60,6 +48,15 @@ func validateEvalCommand(cmd string) error {
 	if cmd == "" {
 		return fmt.Errorf("eval command is empty")
 	}
+	if strings.ContainsAny(cmd, "\n\r") {
+		return fmt.Errorf("eval command contains newlines")
+	}
+	if strings.Contains(cmd, "$(") || strings.Contains(cmd, "`") {
+		return fmt.Errorf("eval command contains shell metacharacters")
+	}
+	if strings.ContainsAny(cmd, "<>") {
+		return fmt.Errorf("eval command contains shell metacharacters")
+	}
 	if evalCommandMetachar.MatchString(cmd) {
 		return fmt.Errorf("eval command contains shell metacharacters")
 	}
@@ -67,7 +64,14 @@ func validateEvalCommand(cmd string) error {
 	// inspected.
 	base := cmd
 	for strings.HasPrefix(base, "sudo ") || strings.HasPrefix(base, "timeout ") {
-		base = strings.TrimSpace(strings.TrimPrefix(base, strings.Split(base, " ")[0]))
+		parts := strings.Fields(base)
+		if len(parts) == 0 {
+			break
+		}
+		base = strings.TrimSpace(strings.Join(parts[1:], " "))
+		if base == "" {
+			break
+		}
 	}
 	fields := strings.Fields(base)
 	if len(fields) == 0 {
@@ -76,6 +80,9 @@ func validateEvalCommand(cmd string) error {
 	baseCmd := fields[0]
 	if _, ok := allowedEvalCommands[baseCmd]; !ok {
 		return fmt.Errorf("eval command %q is not allowed", baseCmd)
+	}
+	if strings.Contains(cmd, "..") {
+		return fmt.Errorf("eval command contains forbidden path")
 	}
 	return nil
 }

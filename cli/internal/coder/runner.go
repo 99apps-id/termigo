@@ -178,7 +178,7 @@ func executeTool(ctx context.Context, env *Env, registry *Registry, call provide
 func sessionTitle(prompt string) string {
 	line := strings.TrimSpace(strings.SplitN(prompt, "\n", 2)[0])
 	if len(line) > 60 {
-		line = line[:60]
+		line = trimRunes(line, 60)
 	}
 	return line
 }

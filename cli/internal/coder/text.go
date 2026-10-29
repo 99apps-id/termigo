@@ -39,3 +39,14 @@ func clipTailBytes(text string, limit int) string {
 	}
 	return text[start:]
 }
+
+func trimRunes(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max])
+}

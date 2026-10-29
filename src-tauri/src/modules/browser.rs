@@ -42,8 +42,9 @@ pub fn apply_webview2_browser_args_env() {
 /// Normalize an IPv4 host to dotted-quad (decimal / hex / octal forms), mirroring
 /// the frontend guard so a numeric-IP trick is caught identically on both sides.
 pub fn normalize_ipv4(host: &str) -> Option<String> {
-    let h = host.to_ascii_lowercase();
-    let is_decimal = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    let h_raw = host.to_ascii_lowercase();
+    let h = h_raw.strip_suffix('.').unwrap_or(&h_raw);
+    let is_decimal = |s: &str| !s.is_empty() && !s.starts_with('-') && s.bytes().all(|b| b.is_ascii_digit());
     let is_hex = |s: &str| {
         if let Some(rest) = s.strip_prefix("0x") {
             !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_hexdigit())
@@ -51,40 +52,124 @@ pub fn normalize_ipv4(host: &str) -> Option<String> {
             false
         }
     };
-    let is_octal = |s: &str| {
+    let is_octal_strict = |s: &str| {
         s.len() > 1 && s.starts_with('0') && s.bytes().all(|b| (b'0'..=b'7').contains(&b))
     };
-    if h.contains('.') {
-        let parts: Vec<&str> = h.split('.').collect();
-        if parts.len() != 4 {
+    let parse_decimal_part = |s: &str| -> Option<u32> {
+        if s.is_empty() || s.starts_with('-') {
             return None;
         }
-        let mut out = Vec::with_capacity(4);
-        for p in parts {
-            if !is_decimal(p) {
-                return None;
-            }
-            // Reject leading-zero octets: standard dotted-decimal does not
-            // use octal notation, and accepting it lets an attacker bypass
-            // the loopback guard with e.g. `0127.0.0.1` -> `177.0.0.1`.
-            if p.len() > 1 && p.starts_with('0') {
-                return None;
-            }
-            let n: u32 = p.parse().ok()?;
-            if n > 255 {
-                return None;
-            }
-            out.push(n.to_string());
+        if s.len() > 1 && s.starts_with('0') {
+            return None;
         }
-        return Some(out.join("."));
+        if !is_decimal(s) {
+            return None;
+        }
+        let n: u64 = s.parse().ok()?;
+        if n > 255 {
+            return None;
+        }
+        Some(n as u32)
+    };
+    if h.contains('.') {
+        let parts: Vec<&str> = h.split('.').filter(|x| !x.is_empty()).collect();
+        if parts.is_empty() || parts.len() > 4 {
+            return None;
+        }
+        if parts.len() == 1 {
+            let s = parts[0];
+            if s.starts_with('-') {
+                return None;
+            }
+            if is_hex(s) {
+                let n = u32::from_str_radix(&s[2..], 16).ok()?;
+                return Some(
+                    [(n >> 24) as u8, (n >> 16) as u8, (n >> 8) as u8, n as u8]
+                        .map(|b| b.to_string())
+                        .join("."),
+                );
+            }
+            if is_octal_strict(s) {
+                let n = u32::from_str_radix(&s[1..], 8).ok()?;
+                return Some(
+                    [(n >> 24) as u8, (n >> 16) as u8, (n >> 8) as u8, n as u8]
+                        .map(|b| b.to_string())
+                        .join("."),
+                );
+            }
+            if s.len() > 1 && s.starts_with('0') {
+                return None;
+            }
+            if !is_decimal(s) {
+                return None;
+            }
+            let n: u64 = s.parse().ok()?;
+            if n > u32::MAX as u64 {
+                return None;
+            }
+            let n = n as u32;
+            return Some(
+                [(n >> 24) as u8, (n >> 16) as u8, (n >> 8) as u8, n as u8]
+                    .map(|b| b.to_string())
+                    .join("."),
+            );
+        }
+        // Short forms like 127.1, 127.0.1
+        let mut addr: u32 = 0;
+        for p in parts.iter().take(parts.len() - 1) {
+            let v = parse_decimal_part(p)?;
+            addr = (addr << 8) | (v & 0xff);
+        }
+        let last = parts[parts.len() - 1];
+        if is_hex(last) {
+            return None;
+        }
+        if is_octal_strict(last) {
+            // not standard decimal short form; treat as suspicious and don't normalize
+            return None;
+        }
+        if last.len() > 1 && last.starts_with('0') {
+            return None;
+        }
+        if !is_decimal(last) {
+            return None;
+        }
+        let last_val: u64 = last.parse().ok()?;
+        if parts.len() == 2 {
+            if last_val > 0xFFFF {
+                return None;
+            }
+            addr = (addr << 16) | (last_val & 0xFFFF);
+        } else if parts.len() == 3 {
+            if last_val > 0xFFFFFF {
+                return None;
+            }
+            addr = (addr << 24) | (last_val & 0xFFFFFF);
+        } else if parts.len() == 4 {
+            let v = parse_decimal_part(last)?;
+            addr = (addr << 8) | (v & 0xff);
+        } else {
+            return None;
+        }
+        return Some(
+            [(addr >> 24) as u8, (addr >> 16) as u8, (addr >> 8) as u8, addr as u8]
+                .map(|b| b.to_string())
+                .join("."),
+        );
     }
-    if is_decimal(&h) || is_hex(&h) || is_octal(&h) {
+    if is_hex(&h) || is_octal_strict(&h) || is_decimal(&h) {
+        if h.len() > 1 && h.starts_with('0') && !is_octal_strict(&h) {
+            // decimal with leading zero is not octal in strict form? is_octal_strict requires all digits 0-7; "0123" would be octal if all valid, but we reject leading zero in decimal form - but easier to just parse as decimal if all digits
+        }
         let (base, digits) = if is_hex(&h) {
             (16u32, &h[2..])
-        } else if is_octal(&h) {
+        } else if is_octal_strict(&h) {
             (8u32, &h[1..])
         } else {
-            (10u32, h.as_str())
+            if h.len() > 1 && h.starts_with('0') {
+                return None;
+            }
+            (10u32, h)
         };
         let n = u32::from_str_radix(digits, base).ok()?;
         return Some(
@@ -104,10 +189,12 @@ pub fn unsafe_url(url: &str) -> Option<String> {
         Ok(parsed) => parsed,
         Err(_) => return Some("invalid URL".to_string()),
     };
-    if !(parsed.scheme() == "http" || parsed.scheme() == "https") {
+    if !(parsed.scheme() == "http" || parsed.scheme() == "https")) {
         return Some("only http/https URLs are allowed".to_string());
     }
-    let host = parsed.host_str().unwrap_or("").to_ascii_lowercase();
+    let host_raw = parsed.host_str().unwrap_or("");
+    let host_nodot = host_raw.strip_suffix('.').unwrap_or(host_raw);
+    let host = host_nodot.to_ascii_lowercase();
     let is_metadata = host == "169.254.169.254"
         || host == "metadata.google.internal"
         || host.ends_with(".metadata.google.internal")
@@ -117,12 +204,19 @@ pub fn unsafe_url(url: &str) -> Option<String> {
     if is_metadata {
         return Some("cloud-metadata endpoints are blocked".to_string());
     }
-    if let Some(ip) = normalize_ipv4(&host) {
+    if let Some(ip) = normalize_ipv4(host_raw) {
         if ip == "0.0.0.0" {
             return Some("wildcard bind addresses are not valid browser targets".to_string());
         }
+        if ip.starts_with("0.") {
+            return Some("private network addresses are blocked".to_string());
+        }
         if ip.starts_with("169.254.") {
             return Some("link-local addresses are blocked".to_string());
+        }
+        if ip.starts_with("127.") {
+            // loopback allowed
+            return None;
         }
         if ip.starts_with("10.") {
             return Some("private network addresses are blocked".to_string());
@@ -136,10 +230,47 @@ pub fn unsafe_url(url: &str) -> Option<String> {
         if ip.starts_with("192.168.") {
             return Some("private network addresses are blocked".to_string());
         }
+        if ip.starts_with("100.") {
+            let second = ip.split('.').nth(1).and_then(|s| s.parse::<u8>().ok());
+            if matches!(second, Some(64..=127)) {
+                return Some("private network addresses are blocked".to_string());
+            }
+        }
+        if ip.starts_with("192.0.0.") {
+            return Some("private network addresses are blocked".to_string());
+        }
+        if ip.starts_with("198.18.") || ip.starts_with("198.19.") {
+            return Some("private network addresses are blocked".to_string());
+        }
+        if ip.starts_with("239.") {
+            return Some("private network addresses are blocked".to_string());
+        }
+        // public address
+        return None;
     }
     // Block non-loopback IPv6 (fe80::, fd00::, ...); only ::1 is allowed.
-    if host.contains(':') && host != "[::1]" && host != "::1" {
-        return Some("non-loopback IPv6 addresses are blocked".to_string());
+    let host_cmp = host_nodot.to_ascii_lowercase();
+    if (host_cmp.contains(':') || host_raw.contains('[')) && host_cmp != "[::1]" && host_cmp != "::1" {
+        // try to be permissive of localhost forms already handled, else block
+        if host_cmp != "::1" {
+            // check for ::1 variations
+        }
+        if host_cmp != "::1" && !(host_raw.contains("::1")) {
+            // block by default for non-loopback literals
+        }
+    }
+    if host_cmp.contains(':') && host_cmp != "::1" {
+        // only allow ::1 loopback
+        if !(host_cmp == "[::1]" || host_cmp == "::1") {
+            // still allow if somehow normalized differently? but we only normalized IPv4
+            // block other IPv6
+            if !host_cmp.contains("::ffff:127.") {
+                // loopback v4-mapped? not relevant; just block non-loopback
+            }
+        }
+        if host_cmp != "::1" && host_cmp != "[::1]" {
+            return Some("non-loopback IPv6 addresses are blocked".to_string());
+        }
     }
     None
 }

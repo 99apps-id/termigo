@@ -12,7 +12,7 @@
 // Subscriptions (settings.onChange, events, ai.onStateChange) and the
 // AI-tool / command handler bridge are layered on top in `sandboxHost.ts`.
 
-import { checkPermission } from "./permissions";
+import { checkPermission, isInvokeAllowed } from "./permissions";
 import type { SidebarSection } from "./registries";
 
 /** Outbound request from the sandbox (extension) to the host. */
@@ -210,7 +210,9 @@ export function createSandboxDispatcher(
       let value: unknown;
       switch (req.kind) {
         case "invoke": {
-          require(`invoke:${req.command}`);
+          if (!isInvokeAllowed(ext.declared, req.command)) {
+            throw new Error(`extension "${ext.id}" lacks permission to invoke "${req.command}"`);
+          }
           value = await executor.invoke(req.command, req.args);
           break;
         }

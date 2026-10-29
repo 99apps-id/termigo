@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -362,6 +363,16 @@ func (client *Client) captureStderr(reader io.Reader, buffer *stderrBuffer) {
 func envFor(overrides map[string]string) []string {
 	environment := os.Environ()
 	for key, value := range overrides {
+		// Remove existing entries for this key so overrides take precedence
+		filtered := make([]string, 0, len(environment))
+		prefix := key + "="
+		for _, e := range environment {
+			if strings.HasPrefix(e, prefix) {
+				continue
+			}
+			filtered = append(filtered, e)
+		}
+		environment = filtered
 		environment = append(environment, key+"="+value)
 	}
 	return environment

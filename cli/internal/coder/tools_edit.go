@@ -145,11 +145,14 @@ func applyEdits(env *Env, path string, instructions []editInstruction) (string, 
 	raw := string(data)
 	usesCRLF := strings.Contains(raw, "\r\n")
 	text := strings.ReplaceAll(raw, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
 
 	totalApplied := 0
 	for index, instruction := range instructions {
 		old := strings.ReplaceAll(instruction.Old, "\r\n", "\n")
+		old = strings.ReplaceAll(old, "\r", "\n")
 		replacement := strings.ReplaceAll(instruction.New, "\r\n", "\n")
+		replacement = strings.ReplaceAll(replacement, "\r", "\n")
 		if old == "" {
 			return "", fmt.Errorf("edit %d: old_string must not be empty", index+1)
 		}

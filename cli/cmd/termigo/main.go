@@ -303,8 +303,14 @@ Flags:
 		return printAgentList(stdout)
 	case "run":
 		rest = rest[1:]
+		if len(rest) == 0 {
+			return fmt.Errorf("usage: termigo agent run <provider> [args...]")
+		}
 	}
 
+	if len(rest) == 0 {
+		return fmt.Errorf("usage: termigo agent run <provider> [args...]")
+	}
 	providerID := rest[0]
 	rest = rest[1:]
 

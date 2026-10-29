@@ -237,6 +237,31 @@ func argInt(args map[string]any, key string, fallback, min, max int) int {
 	if !ok || value == nil {
 		return fallback
 	}
+	// Treat explicit zero as unset if fallback is also zero
+	if fallback == 0 {
+		switch typed := value.(type) {
+		case float64:
+			if typed == 0 {
+				return fallback
+			}
+		case int:
+			if typed == 0 {
+				return fallback
+			}
+		case int64:
+			if typed == 0 {
+				return fallback
+			}
+		case json.Number:
+			if typed == "0" {
+				return fallback
+			}
+		case string:
+			if strings.TrimSpace(typed) == "0" {
+				return fallback
+			}
+		}
+	}
 	number := 0
 	switch typed := value.(type) {
 	case float64:
@@ -256,6 +281,9 @@ func argInt(args map[string]any, key string, fallback, min, max int) int {
 		}
 		number = parsed
 	default:
+		return fallback
+	}
+	if number == 0 && fallback == 0 {
 		return fallback
 	}
 	if number < min {

@@ -76,12 +76,29 @@ func (s *Session) Save() error {
 	if s.ID == "" {
 		s.ID = newSessionID(time.Now())
 	}
+	if strings.ContainsAny(s.ID, `/\`) || strings.Contains(s.ID, "..") {
+		return errors.New("invalid session id")
+	}
 	s.UpdatedAt = time.Now()
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, s.ID+".json"), data, 0o600)
+	path := filepath.Join(dir, s.ID+".json")
+	clean := filepath.Clean(path)
+	baseDir := filepath.Clean(dir)
+	if clean != baseDir && !strings.HasPrefix(clean+string(os.PathSeparator), baseDir+string(os.PathSeparator)) {
+		return errors.New("invalid session id")
+	}
+	tmp := clean + ".tmp." + fmt.Sprintf("%d", time.Now().UnixNano())
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, clean); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 // LoadSession reads one session by id.
@@ -90,11 +107,20 @@ func LoadSession(id string) (*Session, error) {
 	if id == "" {
 		return nil, errors.New("a session id is required")
 	}
+	if strings.ContainsAny(id, `/\`) || strings.Contains(id, "..") {
+		return nil, errors.New("invalid session id")
+	}
 	dir, err := sessionsDir()
 	if err != nil {
 		return nil, err
 	}
-	data, err := os.ReadFile(filepath.Join(dir, id+".json"))
+	path := filepath.Join(dir, id+".json")
+	clean := filepath.Clean(path)
+	baseDir := filepath.Clean(dir)
+	if clean != baseDir && !strings.HasPrefix(clean+string(os.PathSeparator), baseDir+string(os.PathSeparator)) {
+		return nil, errors.New("invalid session id")
+	}
+	data, err := os.ReadFile(clean)
 	if err != nil {
 		return nil, err
 	}
