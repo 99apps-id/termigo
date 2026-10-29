@@ -460,6 +460,9 @@ var geminiUnsupportedKeys = map[string]bool{
 	"uniqueItems": true, "const": true, "oneOf": true, "anyOf": true, "allOf": true, "not": true,
 	"if": true, "then": true, "else": true,
 	"contentEncoding": true, "contentMediaType": true, "contentSchema": true,
+	"exclusiveMinimum": true, "exclusiveMaximum": true, "minimum": true, "maximum": true,
+	"multipleOf": true, "minLength": true, "maxLength": true, "pattern": true,
+	"minItems": true, "maxItems": true, "minProperties": true, "maxProperties": true,
 }
 
 var antigravityUnsupportedKeys = geminiUnsupportedKeys
@@ -499,6 +502,17 @@ func stripSchemaKeys(value any) any {
 				}
 			}
 			out[key] = stripSchemaKeys(entry)
+		}
+		if out["items"] != nil && out["type"] != "array" {
+			delete(out, "items")
+		}
+		if out["type"] == "array" {
+			if items, ok := out["items"].(map[string]any); !ok || items["type"] == nil {
+				out["items"] = map[string]any{"type": "string"}
+			}
+		}
+		if out["properties"] != nil && out["type"] != "object" {
+			delete(out, "properties")
 		}
 		return out
 	case []any:
@@ -690,10 +704,9 @@ func isEndpointError(err error) bool {
 		return false
 	}
 	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "404") ||
-		strings.Contains(msg, "429") ||
-		strings.Contains(msg, "502") ||
+	return strings.Contains(msg, "502") ||
 		strings.Contains(msg, "503") ||
+		strings.Contains(msg, "504") ||
 		strings.Contains(msg, "connection refused") ||
 		strings.Contains(msg, "no such host")
 }

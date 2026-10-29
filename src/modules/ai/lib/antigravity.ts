@@ -250,16 +250,26 @@ export function createAntigravityFetch(
       body: first.body,
       signal: init.signal,
     });
-    // The daily host is the chat host; when it fails at the endpoint level,
-    // retry once on the prod host, matching the Go client.
-    if (useDaily && !response.ok) {
+    // The daily host is the chat host; only retry on the prod host for genuine
+    // server/gateway failures (502, 503, 504), never for 4xx client errors (400,
+    // 401, 403, 404) where prod either fails identically or falsely returns 429
+    // RESOURCE_EXHAUSTED for consumer accounts.
+    if (
+      useDaily &&
+      (response.status === 502 ||
+        response.status === 503 ||
+        response.status === 504)
+    ) {
       const fallback = build(AG_HOST_FALLBACK);
-      response = await proxyFetch(fallback.url, {
+      const fallbackResponse = await proxyFetch(fallback.url, {
         method: "POST",
         headers: fallback.headers,
         body: fallback.body,
         signal: init.signal,
       });
+      if (fallbackResponse.ok || fallbackResponse.status < 500) {
+        response = fallbackResponse;
+      }
     }
     // If token expired (HTTP 401), attempt an OAuth refresh and retry once.
     if (response.status === 401) {

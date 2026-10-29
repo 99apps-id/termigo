@@ -62,14 +62,28 @@ describe("buildAntigravityBody", () => {
             {
               functionDeclarations: [
                 {
-                  name: "read_file",
+                  name: "a".repeat(80),
                   parameters: {
                     type: "object",
                     additionalProperties: false,
                     anyOf: [{ type: "string" }],
+                    exclusiveMinimum: 0,
                     properties: {
                       title: { type: "string", additionalProperties: false },
                       path: { type: ["string", "null"] },
+                      count: { type: "number", minimum: 1, maximum: 100 },
+                      tags: {
+                        type: ["null", "boolean", "array"],
+                        items: {},
+                      },
+                      notArray: {
+                        type: "boolean",
+                        items: { type: "string" },
+                      },
+                      notObject: {
+                        type: "string",
+                        properties: { a: { type: "string" } },
+                      },
                     },
                     required: ["path", "missing"],
                   },
@@ -86,12 +100,22 @@ describe("buildAntigravityBody", () => {
     const request = envelope.request as JsonObject;
     const tools = request.tools as JsonObject[];
     const declaration = (tools[0].functionDeclarations as JsonObject[])[0];
+    expect(declaration.name).toBe("a".repeat(64));
     const parameters = declaration.parameters as JsonObject;
     expect(parameters.additionalProperties).toBeUndefined();
     expect(parameters.anyOf).toBeUndefined();
+    expect(parameters.exclusiveMinimum).toBeUndefined();
     const properties = parameters.properties as JsonObject;
     expect(properties.title).toEqual({ type: "string" });
     expect(properties.path).toEqual({ type: "string", nullable: true });
+    expect(properties.count).toEqual({ type: "number" });
+    expect(properties.tags).toEqual({
+      type: "array",
+      nullable: true,
+      items: { type: "string" },
+    });
+    expect(properties.notArray).toEqual({ type: "boolean" });
+    expect(properties.notObject).toEqual({ type: "string" });
     expect(parameters.required).toEqual(["path"]);
   });
 });

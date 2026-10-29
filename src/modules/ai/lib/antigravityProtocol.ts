@@ -97,6 +97,19 @@ const UNSUPPORTED_SCHEMA_KEYS = new Set([
   "contentEncoding",
   "contentMediaType",
   "contentSchema",
+  // JSON schema constraints unsupported by Gemini protobuf Schema:
+  "exclusiveMinimum",
+  "exclusiveMaximum",
+  "minimum",
+  "maximum",
+  "multipleOf",
+  "minLength",
+  "maxLength",
+  "pattern",
+  "minItems",
+  "maxItems",
+  "minProperties",
+  "maxProperties",
 ]);
 
 function reduceTypeList(names: readonly unknown[]): {
@@ -105,15 +118,19 @@ function reduceTypeList(names: readonly unknown[]): {
 } {
   let chosen = "";
   let nullable = false;
-  for (const name of names) {
-    if (typeof name !== "string") continue;
-    if (name.toLowerCase() === "null") {
-      nullable = true;
-      continue;
-    }
-    if (!chosen) chosen = name;
-  }
-  return { type: chosen || "string", nullable };
+  const strings = names.filter((n): n is string => typeof n === "string");
+  const lower = strings.map((s) => s.toLowerCase());
+  if (lower.includes("null")) nullable = true;
+  // When reducing a type union, prefer structured types so schema properties
+  // or items are preserved rather than orphaned.
+  if (lower.includes("array")) chosen = "array";
+  else if (lower.includes("object")) chosen = "object";
+  else if (lower.includes("string")) chosen = "string";
+  else if (lower.includes("number")) chosen = "number";
+  else if (lower.includes("integer")) chosen = "integer";
+  else if (lower.includes("boolean")) chosen = "boolean";
+  else chosen = strings[0] || "string";
+  return { type: chosen, nullable };
 }
 
 function stripSchemaKeys(value: unknown): unknown {
@@ -142,6 +159,23 @@ function stripSchemaKeys(value: unknown): unknown {
     }
     out[key] = stripSchemaKeys(entry);
   }
+
+  // Gemini Schema protobuf structural invariants:
+  // 1. "items" is strictly valid only when type is "array".
+  if (out.items !== undefined && out.type !== "array") {
+    delete out.items;
+  }
+  // 2. An "array" type must provide "items" with a concrete type.
+  if (out.type === "array") {
+    if (!isObject(out.items) || !out.items.type) {
+      out.items = { type: "string" };
+    }
+  }
+  // 3. "properties" is strictly valid only when type is "object".
+  if (out.properties !== undefined && out.type !== "object") {
+    delete out.properties;
+  }
+
   return out;
 }
 
@@ -165,10 +199,23 @@ function pruneUndefinedRequired(value: unknown): unknown {
   return out;
 }
 
+export function sanitizeFunctionName(name: string): string {
+  const cleaned = name.replace(/[^a-zA-Z0-9_.:-]/g, "_");
+  const prefixed =
+    cleaned.length > 0 && /^[0-9]/.test(cleaned) ? `_${cleaned}` : cleaned;
+  const trimmed = prefixed || "_unknown";
+  return trimmed.length > 64 ? trimmed.slice(0, 64) : trimmed;
+}
+
 function cleanFunctionDeclaration(declaration: JsonObject): JsonObject {
-  if (!("parameters" in declaration)) return { ...declaration };
+  const name =
+    typeof declaration.name === "string"
+      ? sanitizeFunctionName(declaration.name)
+      : declaration.name;
+  if (!("parameters" in declaration)) return { ...declaration, name };
   return {
     ...declaration,
+    name,
     parameters: pruneUndefinedRequired(stripSchemaKeys(declaration.parameters)),
   };
 }
