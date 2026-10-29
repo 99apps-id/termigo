@@ -4,9 +4,11 @@ import { usePresence } from "@/lib/usePresence";
 import { cn } from "@/lib/utils";
 import {
   Add01Icon,
+  Cancel01Icon,
   CommandIcon,
   Edit02Icon,
   Mic01Icon,
+  SparklesIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -103,26 +105,153 @@ export function AiComposerInput() {
   const workspaceRoot = useChatStore((s) => s.live.getWorkspaceRoot());
   const editTarget = useChatStore((s) => s.pendingEditTarget);
   const approvalMode = usePreferencesStore((s) => s.agentApprovalMode);
+  const activeSessionId = useChatStore((s) => s.activeSessionId);
   const goal = useSessionDirectiveStore((s) =>
-    s.getGoal(useChatStore.getState().activeSessionId ?? "", workspaceRoot),
+    s.getGoal(activeSessionId ?? "", workspaceRoot),
   );
   const todos = workspaceRoot
-    ? getTodos(useChatStore.getState().activeSessionId ?? "", workspaceRoot)
+    ? getTodos(activeSessionId ?? "", workspaceRoot)
     : [];
-  const suggestions = useMemo(() => {
-    const out: string[] = [];
-    if (goal) out.push(`Work on: ${goal}`);
-    const active = todos.filter(
-      (t: { status: string }) => t.status !== "completed",
+
+  const [dismissed, setDismissed] = useState(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies(activeSessionId): reset dismissed state when active session changes.
+  useEffect(() => {
+    setDismissed(false);
+  }, [activeSessionId]);
+
+  const [composerHeight, setComposerHeight] = useState<number | null>(() => {
+    try {
+      const saved = localStorage.getItem("termigo:composer-height");
+      if (saved) {
+        const val = Number.parseInt(saved, 10);
+        if (!Number.isNaN(val) && val >= 36 && val <= 500) {
+          return val;
+        }
+      }
+    } catch {}
+    return null;
+  });
+
+  const handleResizeStart = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startHeight =
+      c.textareaRef.current?.clientHeight ?? composerHeight ?? 40;
+
+    const onPointerMove = (ev: PointerEvent) => {
+      // Dragging upward (ev.clientY < startY) increases height upwards
+      const deltaY = startY - ev.clientY;
+      const nextHeight = Math.max(36, Math.min(500, startHeight + deltaY));
+      setComposerHeight(nextHeight);
+      try {
+        localStorage.setItem("termigo:composer-height", String(nextHeight));
+      } catch {}
+      if (c.textareaRef.current) {
+        c.textareaRef.current.style.height = `${nextHeight}px`;
+      }
+    };
+
+    const onPointerUp = () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+  };
+
+  const handleResetHeight = () => {
+    setComposerHeight(null);
+    try {
+      localStorage.removeItem("termigo:composer-height");
+    } catch {}
+    if (c.textareaRef.current) {
+      c.textareaRef.current.style.height = "auto";
+      autoresize(c.textareaRef.current, null);
+    }
+  };
+
+  type ComposerSuggestion = {
+    id: string;
+    label: string;
+    prompt: string;
+    hint?: string;
+  };
+
+  const suggestions = useMemo<ComposerSuggestion[]>(() => {
+    const out: ComposerSuggestion[] = [];
+    if (goal) {
+      out.push({
+        id: "goal",
+        label: `Goal: ${goal.length > 28 ? `${goal.slice(0, 28)}...` : goal}`,
+        prompt: `Work on goal: ${goal}`,
+        hint: goal,
+      });
+    }
+    const activeTodos = todos.filter(
+      (t: { status: string; id?: string; title: string }) =>
+        t.status !== "completed",
     );
-    if (active.length) out.push(`Next: ${active[0].title}`);
-    if (active.length > 1)
-      out.push(`Continue task ${active[1].title.slice(0, 48)}`);
-    return out.slice(0, 3);
+    if (activeTodos.length > 0) {
+      const t = activeTodos[0];
+      out.push({
+        id: `todo-${t.id ?? 0}`,
+        label: `Todo: ${t.title.length > 28 ? `${t.title.slice(0, 28)}...` : t.title}`,
+        prompt: `Work on todo: ${t.title}`,
+        hint: t.title,
+      });
+    }
+    if (activeTodos.length > 1) {
+      const t = activeTodos[1];
+      out.push({
+        id: `todo-${t.id ?? 1}`,
+        label: `Next: ${t.title.length > 28 ? `${t.title.slice(0, 28)}...` : t.title}`,
+        prompt: `Continue with task: ${t.title}`,
+        hint: t.title,
+      });
+    }
+
+    if (out.length < 3) {
+      const defaults: ComposerSuggestion[] = [
+        {
+          id: "def-explain",
+          label: "Explain last error",
+          prompt: "Explain the last error in the terminal and how to fix it",
+          hint: "Read recent terminal output and diagnose errors",
+        },
+        {
+          id: "def-diff",
+          label: "Review git changes",
+          prompt: "Review recent changes and git status in this workspace",
+          hint: "Inspect git diff, modified files, and staging status",
+        },
+        {
+          id: "def-check",
+          label: "Run project checks",
+          prompt:
+            "Run project tests, typechecks, and linting to check codebase health",
+          hint: "Execute tests and linters to verify codebase",
+        },
+      ];
+      for (const d of defaults) {
+        if (out.length >= 3) break;
+        out.push(d);
+      }
+    }
+
+    return out;
   }, [goal, todos]);
 
   const [trigger, setTrigger] = useState<SnippetTrigger | null>(null);
   const [fileTrigger, setFileTrigger] = useState<FileTrigger | null>(null);
+
+  const showSuggestions =
+    suggestions.length > 0 &&
+    !dismissed &&
+    !c.value.trim() &&
+    !trigger &&
+    !fileTrigger &&
+    !editTarget;
   const [activeIndex, setActiveIndex] = useState(0);
   const [tagFilter, setTagFilter] = useState<string | null>(null);
   const workspaceFiles = useWorkspaceFiles(workspaceRoot, fileTrigger !== null);
@@ -140,8 +269,8 @@ export function AiComposerInput() {
 
   // biome-ignore lint/correctness/useExhaustiveDependencies(c.value): autoresize must re-run when the text content changes so the textarea grows with input.
   useEffect(() => {
-    autoresize(c.textareaRef.current);
-  }, [c.value, c.textareaRef]);
+    autoresize(c.textareaRef.current, composerHeight);
+  }, [c.value, c.textareaRef, composerHeight]);
 
   const updateTrigger = () => {
     const el = c.textareaRef.current;
@@ -420,6 +549,17 @@ export function AiComposerInput() {
 
   return (
     <>
+      {/* Top resize handle for expanding composer height */}
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: pointer-only resize handle for the composer height */}
+      <div
+        title="Drag to resize composer (double-click to reset)"
+        onPointerDown={handleResizeStart}
+        onDoubleClick={handleResetHeight}
+        className="group -mt-1 -mb-0.5 flex h-2 w-full cursor-ns-resize items-center justify-center py-0.5 touch-none select-none"
+      >
+        <div className="h-0.5 w-8 rounded-full bg-border/60 transition-colors group-hover:h-1 group-hover:w-12 group-hover:bg-primary/60 group-active:h-1 group-active:w-14 group-active:bg-primary" />
+      </div>
+
       {editTarget ? (
         <div className="flex items-center gap-1.5 rounded-md border border-primary/30 bg-primary/5 px-2 py-1 text-[11px] text-muted-foreground">
           <HugeiconsIcon
@@ -462,6 +602,45 @@ export function AiComposerInput() {
           </button>
         </div>
       ) : null}
+
+      {/* AI suggestions: rendered in a dedicated row above the input, never squishing the textarea */}
+      {showSuggestions && (
+        <div className="flex flex-wrap items-center gap-1.5 px-0.5 pb-1 text-[11px]">
+          <span className="flex items-center gap-1 font-medium text-muted-foreground/70">
+            <HugeiconsIcon
+              icon={SparklesIcon}
+              size={11}
+              strokeWidth={2}
+              className="text-primary/70"
+            />
+            <span>Suggestions:</span>
+          </span>
+          {suggestions.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => {
+                c.setValue(s.prompt);
+                c.textareaRef.current?.focus();
+              }}
+              title={s.hint || s.prompt}
+              className="inline-flex max-w-[220px] items-center gap-1 truncate rounded-md border border-border/70 bg-muted/40 px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:border-foreground/20 hover:bg-muted/80 hover:text-foreground"
+            >
+              <span className="truncate">{s.label}</span>
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => setDismissed(true)}
+            title="Dismiss suggestions"
+            aria-label="Dismiss suggestions"
+            className="ml-auto rounded p-0.5 text-muted-foreground/50 transition-colors hover:bg-muted hover:text-muted-foreground"
+          >
+            <HugeiconsIcon icon={Cancel01Icon} size={11} strokeWidth={1.75} />
+          </button>
+        </div>
+      )}
+
       <Popover open={pickerOpen}>
         <PopoverAnchor asChild>
           {/* biome-ignore lint/a11y/noStaticElementInteractions: pointer-only drop target; the keyboard path is the attach button in the toolbar */}
@@ -619,29 +798,34 @@ export function AiComposerInput() {
                 }}
                 placeholder="Ask Termigo anything   -   # for snippets and commands, @ for files"
                 rows={1}
+                style={{
+                  height: composerHeight ? `${composerHeight}px` : undefined,
+                  minHeight: composerHeight ? `${composerHeight}px` : "36px",
+                }}
+                onPointerUp={() => {
+                  const el = c.textareaRef.current;
+                  if (
+                    el &&
+                    Math.abs(
+                      el.clientHeight - (composerHeight ?? el.clientHeight),
+                    ) > 4
+                  ) {
+                    const h = Math.max(36, Math.min(500, el.clientHeight));
+                    setComposerHeight(h);
+                    try {
+                      localStorage.setItem(
+                        "termigo:composer-height",
+                        String(h),
+                      );
+                    } catch {}
+                  }
+                }}
                 className={cn(
-                  "relative max-h-40 w-full resize-none bg-transparent text-[13px] leading-relaxed outline-none",
+                  "relative min-h-[36px] max-h-[500px] w-full resize-y bg-transparent text-[13px] leading-relaxed outline-none",
                   "placeholder:text-muted-foreground/60",
                 )}
               />
             </div>
-            {suggestions.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 border-t border-border/60 px-2 pt-2">
-                {suggestions.map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => {
-                      c.setValue((v) => (v ? `${v} ${s}` : s));
-                      c.textareaRef.current?.focus();
-                    }}
-                    className="rounded-md border border-border/70 bg-muted/40 px-2 py-1 text-[11px] text-muted-foreground transition hover:border-foreground/20 hover:text-foreground"
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
-            )}
             <div className="flex shrink-0 items-center gap-0.5">
               <input
                 ref={fileInputRef}
@@ -744,8 +928,15 @@ export function AiComposerInput() {
   );
 }
 
-function autoresize(el: HTMLTextAreaElement | null) {
+function autoresize(
+  el: HTMLTextAreaElement | null,
+  customHeight: number | null,
+) {
   if (!el) return;
-  el.style.height = "auto";
-  el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  if (customHeight != null) {
+    el.style.height = `${Math.max(customHeight, Math.min(el.scrollHeight, 500))}px`;
+  } else {
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 280)}px`;
+  }
 }
