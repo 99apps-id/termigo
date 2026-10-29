@@ -13,6 +13,7 @@ import {
   unwrapAntigravitySseLine,
   type JsonObject,
 } from "./antigravityProtocol";
+import { onOAuthAuthChanged } from "./oauthAuth";
 import { createProxyFetch } from "./proxyFetch";
 
 /**
@@ -70,7 +71,10 @@ async function resolveProject(token: string): Promise<string> {
     `${AG_HOST_FALLBACK}/v1internal:loadCodeAssist`,
     { metadata },
   );
-  const project = projectIdFrom(loaded?.cloudaicompanionProject);
+  const project =
+    projectIdFrom(loaded?.cloudaicompanionProject) ||
+    projectIdFrom(loaded?.project) ||
+    projectIdFrom(loaded?.projectId);
   if (project) return project;
 
   let tier = "legacy-tier";
@@ -91,9 +95,13 @@ async function resolveProject(token: string): Promise<string> {
       { tierId: tier, metadata },
     );
     const response = onboarded?.response;
-    const fromOnboard = projectIdFrom(
-      isObject(response) ? response.cloudaicompanionProject : undefined,
-    );
+    const fromOnboard =
+      projectIdFrom(
+        isObject(response) ? response.cloudaicompanionProject : undefined,
+      ) ||
+      projectIdFrom(onboarded?.cloudaicompanionProject) ||
+      projectIdFrom(response) ||
+      projectIdFrom(onboarded);
     if (fromOnboard) return fromOnboard;
     if (onboarded?.done === true) break;
     await new Promise((resolve) => setTimeout(resolve, 2000));
@@ -105,17 +113,35 @@ let cachedProject: string | null = null;
 let projectFlight: Promise<string> | null = null;
 
 export function ensureAntigravityProject(token: string): Promise<string> {
-  if (cachedProject) return Promise.resolve(cachedProject);
+  if (cachedProject && !cachedProject.startsWith("termixgo-")) {
+    return Promise.resolve(cachedProject);
+  }
   if (projectFlight) return projectFlight;
   projectFlight = resolveProject(token)
     .then((project) => {
-      cachedProject = project;
+      // Only cache valid Google Cloud projects. A fallback generated id
+      // must not be permanently pinned, otherwise a temporary resolution
+      // failure causes persistent quota/permission rejection on all future turns.
+      if (project && !project.startsWith("termixgo-")) {
+        cachedProject = project;
+      }
       return project;
     })
     .finally(() => {
       projectFlight = null;
     });
   return projectFlight;
+}
+
+export function clearAntigravityProjectCache(): void {
+  cachedProject = null;
+  projectFlight = null;
+}
+
+if (typeof window !== "undefined") {
+  onOAuthAuthChanged(() => {
+    clearAntigravityProjectCache();
+  });
 }
 
 // ── Response unwrapping ───────────────────────────────────────────────────────
@@ -182,6 +208,7 @@ export function createAntigravityFetch(
   project: string,
   session: string,
 ): typeof fetch {
+  let currentToken = token;
   return async (input, init) => {
     const url =
       input instanceof URL
@@ -200,7 +227,7 @@ export function createAntigravityFetch(
     const build = (host: string) => {
       const headers = new Headers(init.headers);
       headers.delete("x-goog-api-key");
-      headers.set("authorization", `Bearer ${token}`);
+      headers.set("authorization", `Bearer ${currentToken}`);
       headers.set("user-agent", agUserAgent());
       headers.set("x-machine-session-id", session);
       headers.set("content-type", "application/json");
@@ -233,6 +260,25 @@ export function createAntigravityFetch(
         body: fallback.body,
         signal: init.signal,
       });
+    }
+    // If token expired (HTTP 401), attempt an OAuth refresh and retry once.
+    if (response.status === 401) {
+      try {
+        const { getOAuthAccess } = await import("./oauthAuth");
+        const freshAuth = await getOAuthAccess("antigravity");
+        if (freshAuth && freshAuth.accessToken !== currentToken) {
+          currentToken = freshAuth.accessToken;
+          const retryBuild = build(useDaily ? AG_HOST : AG_HOST_FALLBACK);
+          response = await proxyFetch(retryBuild.url, {
+            method: "POST",
+            headers: retryBuild.headers,
+            body: retryBuild.body,
+            signal: init.signal,
+          });
+        }
+      } catch {
+        // Fall through with original response
+      }
     }
     if (!response.ok || !response.body) return response;
     if (!streaming) return unwrapJsonResponse(response);

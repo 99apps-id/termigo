@@ -36,6 +36,16 @@ describe("humanizeModelError", () => {
     expect(humanizeModelError("Rate limit reached").toLowerCase()).toContain(
       "rate-limit",
     );
+    expect(
+      humanizeModelError(
+        "Resource has been exhausted (e.g. check quota).",
+      ).toLowerCase(),
+    ).toContain("rate-limit");
+    expect(
+      humanizeModelError(
+        "Quota exceeded for quota metric 'GenerateContent requests' and limit 'GenerateContent requests per minute'",
+      ).toLowerCase(),
+    ).toContain("rate-limit");
   });
 
   it("explains a rejected key", () => {

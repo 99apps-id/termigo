@@ -138,6 +138,15 @@ describe("transient/recoverable error classifiers", () => {
     ).toBe(true);
     expect(isQuotaError("402 Payment Required: out of tokens")).toBe(true);
     expect(isQuotaError("Rate limit reached.")).toBe(false);
+    // Transient Google Cloud Code / Antigravity throttle mentions quota but is a rate limit, not account quota exhaustion.
+    expect(
+      isQuotaError("Resource has been exhausted (e.g. check quota)."),
+    ).toBe(false);
+    expect(
+      isQuotaError(
+        "Quota exceeded for quota metric 'GenerateContent requests' and limit 'GenerateContent requests per minute'",
+      ),
+    ).toBe(false);
   });
 
   it("recognises rate limit errors", () => {
@@ -149,6 +158,15 @@ describe("transient/recoverable error classifiers", () => {
       true,
     );
     expect(isRateLimitError("Invalid API key.")).toBe(false);
+    // Google Antigravity / Gemini RESOURCE_EXHAUSTED must be classified as rate limit.
+    expect(
+      isRateLimitError("Resource has been exhausted (e.g. check quota)."),
+    ).toBe(true);
+    expect(
+      isRateLimitError(
+        "Quota exceeded for quota metric 'GenerateContent requests' and limit 'GenerateContent requests per minute'",
+      ),
+    ).toBe(true);
   });
 
   it("recognises provider content-moderation rejections", () => {

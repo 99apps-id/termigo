@@ -20,22 +20,18 @@ export function humanizeModelError(raw: string | null | undefined): string {
     return "This conversation is too long for the model's context window. History has been trimmed. Press Continue to retry, switch to a larger-context model, or start a new chat.";
   }
 
-  // Quota / billing / credits exhausted.
+  // Genuine account-level quota exhaustion (OpenAI sends 429 insufficient_quota).
+  // Kept explicit so true billing/credit limits are not swallowed by the 429 check.
   if (
     l.includes("insufficient_quota") ||
     l.includes("insufficient quota") ||
-    l.includes("exceeded your current quota") ||
-    l.includes("quota has been exhausted") ||
-    l.includes("quota is exhausted") ||
-    l.includes("quota exhausted") ||
-    (l.includes("quota") && l.includes("exhaust")) ||
+    l.includes("token-plan") ||
     l.includes("out of credit") ||
     l.includes("no credit") ||
-    l.includes("billing") ||
-    l.includes("payment required") ||
-    l.includes("status 402")
+    l.includes("status 402") ||
+    l.includes("payment required")
   ) {
-    return "Your API key is out of quota or credits. Add credits with your provider, or switch provider/model in Settings → Providers.";
+    return "Your account or API key is out of quota or credits. Add credits with your provider or check your plan, or switch provider/model in Settings → Providers.";
   }
 
   // Tool input validation failures.
@@ -54,16 +50,35 @@ export function humanizeModelError(raw: string | null | undefined): string {
     return "This model doesn't support forcing a specific tool call. Termigo stopped forcing it automatically - press Continue or Try again to carry on.";
   }
 
-  // Rate limited or concurrency limit reached.
+  // Rate limited or concurrency limit reached. Checked before general quota phrases
+  // so that Google's "Resource has been exhausted (e.g. check quota)", 429,
+  // and per-minute quota limits are correctly classified as rate limits.
   if (
     l.includes("rate limit") ||
     l.includes("rate_limit") ||
     l.includes("too many requests") ||
     l.includes("status 429") ||
     l.includes("429") ||
-    l.includes("concurrency")
+    l.includes("concurrency") ||
+    l.includes("resource_exhausted") ||
+    l.includes("resource has been exhausted") ||
+    l.includes("per minute") ||
+    l.includes("per-minute") ||
+    l.includes("tokens per min")
   ) {
     return "The provider rate-limited this request (or reached concurrency limits). Wait a few seconds and press Continue, or switch to another model.";
+  }
+
+  // Other quota / billing exhausted phrases (not matched by rate limiting above).
+  if (
+    l.includes("exceeded your current quota") ||
+    l.includes("quota has been exhausted") ||
+    l.includes("quota is exhausted") ||
+    l.includes("quota exhausted") ||
+    (l.includes("quota") && l.includes("exhaust")) ||
+    l.includes("billing")
+  ) {
+    return "Your account or API key is out of quota or credits. Add credits with your provider or check your plan, or switch provider/model in Settings → Providers.";
   }
 
   // Gemini's own safety filter. Termigo already sends the loosest thresholds

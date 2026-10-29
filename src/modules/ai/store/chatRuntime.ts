@@ -13,6 +13,7 @@ import {
   type ProviderId,
   providerNeedsKey,
   isOAuthModel,
+  isOAuthProvider,
   stepBudgetForModel,
 } from "../config";
 import { buildLanguageModel, type AgentStopReason } from "../lib/agent";
@@ -995,9 +996,11 @@ function makeChat(sessionId: string): Chat<UIMessage> {
             : "";
         useChatStore.getState().patchAgentMeta({
           status: "error",
-          error: isQuotaError(raw)
-            ? "The provider reports your API quota or credits are exhausted. Top up and click Try again - your work is preserved."
-            : `Rate limit reached.${waitHint} Then click Try again - your work is preserved.`,
+          error: isRateLimitError(raw)
+            ? `Rate limit reached.${waitHint} Then click Try again - your work is preserved.`
+            : isOAuthProvider(provider)
+              ? "The provider reports your account quota is temporarily exhausted or unavailable. Check your plan in Settings → Models and click Try again."
+              : "The provider reports your API quota or credits are exhausted. Top up and click Try again - your work is preserved.",
         });
         useChatStore.getState().syncRunMeta();
         return;

@@ -114,24 +114,46 @@ export function isConnectivityError(message: string): boolean {
   );
 }
 
-/** The provider says the account's quota / credits are exhausted (or billing
- *  failed). Recoverable once the user tops up. */
-export function isQuotaError(message: string): boolean {
-  const m = String(message ?? "").toLowerCase();
-  return (
-    /\binsufficient_quota\b|quota|billing|credit|balance|payment required/i.test(
-      m,
-    ) ||
-    /out of (?:credits|quota|tokens)/i.test(m) ||
-    /exceeded.*(?:quota|limit)/i.test(m)
-  );
-}
-
 /** The provider throttled the request (rate limit / 429). Recoverable after a
  *  short wait. */
 export function isRateLimitError(message: string): boolean {
   const m = String(message ?? "").toLowerCase();
-  return /rate[-_]?limit|429|too many requests|throttl|concurrency/i.test(m);
+  // Explicit account quota exhaustion takes precedence even when riding a 429
+  // (e.g. OpenAI's "429 insufficient_quota").
+  if (/\binsufficient_quota\b/.test(m)) {
+    return false;
+  }
+  return (
+    /rate[-_]?limit|429|too many requests|throttl|concurrency/i.test(m) ||
+    /resource_exhausted|resource has been exhausted/i.test(m) ||
+    /tokens? per (?:min|minute|sec|second)|requests? per (?:min|minute|sec|second)|rpm|tpm/i.test(
+      m,
+    ) ||
+    /quota exceeded.*(?:per[- ]?minute|per[- ]?sec|daily|limit)/i.test(m) ||
+    /exceeded.*(?:rate[-_]?limit|concurrency|requests? per|tokens? per|per[- ]?minute)/i.test(
+      m,
+    )
+  );
+}
+
+/** The provider says the account's quota / credits are exhausted (or billing
+ *  failed). Recoverable once the user tops up. */
+export function isQuotaError(message: string): boolean {
+  const m = String(message ?? "").toLowerCase();
+  // A transient rate limit, concurrency throttle, or per-minute burst cap
+  // (such as Google's "Resource has been exhausted (e.g. check quota)" or HTTP 429)
+  // is NOT an account-level quota exhaustion.
+  if (isRateLimitError(message)) {
+    return false;
+  }
+  return (
+    /\binsufficient_quota\b|billing|credit|balance|payment required|status 402/i.test(
+      m,
+    ) ||
+    /out of (?:credits|quota|tokens)/i.test(m) ||
+    /quota.*exhausted|exhausted.*quota/i.test(m) ||
+    /exceeded.*(?:current quota|monthly quota|tier quota|plan quota)/i.test(m)
+  );
 }
 
 /** The provider's content-moderation filter rejected the request outright
