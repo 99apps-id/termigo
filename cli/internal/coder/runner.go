@@ -25,6 +25,9 @@ type Options struct {
 	Env      *Env
 	MaxSteps int
 	System   string
+	// Effort is the reasoning effort to request ("low", "medium", "high"),
+	// or empty for the provider's own default.
+	Effort string
 	// Images attach to the first user message, for a vision model.
 	Images []provider.Image
 	// Session, when set, seeds the run with its prior messages and collects the
@@ -87,23 +90,36 @@ func Run(ctx context.Context, opts Options, prompt string, emit func(provider.St
 
 	for step := 0; step < maxSteps; step++ {
 		var text strings.Builder
+		var reasoning strings.Builder
 		var calls []provider.ToolCall
+		var reasoningItems []provider.ReasoningItem
+		var stepReasoningTokens int
 		err := opts.Client.Stream(ctx, provider.ChatRequest{
 			Model:    opts.Model,
 			System:   system,
 			Messages: messages,
 			Tools:    definitions,
+			Effort:   opts.Effort,
 		}, func(event provider.StreamEvent) error {
 			switch event.Type {
 			case provider.EventTextDelta:
 				text.WriteString(event.Text)
+			case provider.EventReasoningDelta:
+				reasoning.WriteString(event.Text)
 			case provider.EventToolCall:
 				if event.ToolCall != nil {
 					calls = append(calls, *event.ToolCall)
 				}
+			case provider.EventReasoningItem:
+				if event.ReasoningItem != nil {
+					reasoningItems = append(reasoningItems, *event.ReasoningItem)
+				}
 			case provider.EventUsage:
-				if event.Usage != nil && opts.Session != nil {
-					opts.Session.Usage = opts.Session.Usage.Add(*event.Usage)
+				if event.Usage != nil {
+					stepReasoningTokens += event.Usage.ReasoningTokens
+					if opts.Session != nil {
+						opts.Session.Usage = opts.Session.Usage.Add(*event.Usage)
+					}
 				}
 			}
 			if emit != nil {
@@ -118,17 +134,29 @@ func Run(ctx context.Context, opts Options, prompt string, emit func(provider.St
 		if len(calls) == 0 {
 			last = strings.TrimSpace(text.String())
 			if last == "" {
-				if stop, reason := guard.noteEmptyStep(); stop {
+				// Reasoning is model output, not silence: a step that only
+				// thought (a reasoning model cut off before its answer, or
+				// working through a hard step) must not feed the idle guard,
+				// or a run that is demonstrably working gets filed as stuck
+				// after three such steps. The thought may be visible as
+				// summary text, as stored reasoning items, or only as
+				// reasoning tokens in the step's usage when the backend
+				// streamed no summary; all three are the model working. It
+				// still earns the nudge below; the step budget stays the
+				// outer bound.
+				if strings.TrimSpace(reasoning.String()) != "" || len(reasoningItems) > 0 || stepReasoningTokens > 0 {
+					guard.noteProgress()
+				} else if stop, reason := guard.noteEmptyStep(); stop {
 					return "", errors.New(reason)
 				}
 				messages = append(messages, provider.Message{Role: provider.RoleUser, Content: "Reply with the answer."})
 				continue
 			}
-			messages = append(messages, provider.Message{Role: provider.RoleAssistant, Content: last})
+			messages = append(messages, provider.Message{Role: provider.RoleAssistant, Content: last, ReasoningItems: reasoningItems})
 			return last, nil
 		}
 		guard.noteProgress()
-		messages = append(messages, provider.Message{Role: provider.RoleAssistant, Content: text.String(), ToolCalls: calls})
+		messages = append(messages, provider.Message{Role: provider.RoleAssistant, Content: text.String(), ToolCalls: calls, ReasoningItems: reasoningItems})
 
 		for _, call := range calls {
 			if stop, reason := guard.noteCall(call.Name, call.Arguments); stop {

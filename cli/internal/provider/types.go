@@ -32,13 +32,27 @@ type ToolCall struct {
 	Arguments string // raw JSON object
 }
 
+// ReasoningItem is one reasoning output item from a Responses stream, kept
+// so a stateless backend (store: false) can be handed its own reasoning back
+// on the next step: the id and the encrypted content are what the backend
+// needs to pick the thought up again, the summary is what it carried.
+type ReasoningItem struct {
+	ID               string
+	EncryptedContent string
+	Summary          []string
+}
+
 // Message is one turn. The flat shape covers every provider, which keeps
 // session storage and compaction simple.
 type Message struct {
 	Role      Role
 	Content   string
 	Reasoning string
-	ToolCalls []ToolCall
+	// ReasoningItems are the Responses reasoning items the step produced,
+	// replayed to a stateless Codex backend on the next request. Other
+	// encoders ignore them.
+	ReasoningItems []ReasoningItem
+	ToolCalls      []ToolCall
 	// ToolID correlates a tool result with the assistant call (OpenAI,
 	// Anthropic). Name is the tool name (Google matches results by name).
 	ToolID string
@@ -60,6 +74,7 @@ type Usage struct {
 	TotalTokens      int
 	CacheReadTokens  int
 	CacheWriteTokens int
+	ReasoningTokens  int
 }
 
 // Add sums two usage reports.
@@ -70,6 +85,7 @@ func (u Usage) Add(other Usage) Usage {
 		TotalTokens:      u.TotalTokens + other.TotalTokens,
 		CacheReadTokens:  u.CacheReadTokens + other.CacheReadTokens,
 		CacheWriteTokens: u.CacheWriteTokens + other.CacheWriteTokens,
+		ReasoningTokens:  u.ReasoningTokens + other.ReasoningTokens,
 	}
 }
 
@@ -82,6 +98,9 @@ type ChatRequest struct {
 	Tools       []ToolDef
 	Temperature *float64
 	MaxTokens   int
+	// Effort is the reasoning effort the operator asked for ("low",
+	// "medium", "high"), or empty for the provider's own default.
+	Effort string
 }
 
 // StreamEventType discriminates the chunks a client emits.
@@ -96,14 +115,18 @@ const (
 	EventToolCall StreamEventType = "tool-call"
 	// EventUsage carries token accounting for the step.
 	EventUsage StreamEventType = "usage"
+	// EventReasoningItem carries one completed reasoning output item, for
+	// stateless replay on the next step.
+	EventReasoningItem StreamEventType = "reasoning-item"
 )
 
 // StreamEvent is one chunk of a streaming completion.
 type StreamEvent struct {
-	Type     StreamEventType
-	Text     string
-	ToolCall *ToolCall
-	Usage    *Usage
+	Type          StreamEventType
+	Text          string
+	ToolCall      *ToolCall
+	Usage         *Usage
+	ReasoningItem *ReasoningItem
 }
 
 // Client streams one provider.
