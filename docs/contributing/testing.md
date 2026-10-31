@@ -12,7 +12,15 @@ pnpm format:check                 # biome formatter, same config as `pnpm format
 pnpm check-types
 pnpm check:commands               # every invoke("x") has a registered Rust command
 pnpm check:doc-commands           # the docs command catalog matches generate_handler!
+pnpm check:cli-version            # Go fallback and linker version stamp contract
 pnpm test
+pnpm test:scripts                 # target and release-asset naming logic
+
+cd cli
+gofmt -l .                        # must print nothing
+go vet ./...
+go test ./...
+cd ..
 
 # One command for the static half, before pushing: lint, format, types,
 # command registration, and the docs catalog. Run `pnpm test` separately;
@@ -32,6 +40,11 @@ string-literal `invoke("cmd")` in `src/` against the commands registered in
 the "referenced from the UI but never registered" bug that shipped SSH backup
 broken. If a command is genuinely dynamic or handled outside `generate_handler!`,
 add it to the `ALLOWLIST` in that script with a comment saying why.
+
+`pnpm check:cli-version` verifies the two ends of the Go release stamp: source
+keeps the deliberate `dev` fallback, while `scripts/build-cli.mjs` injects the
+version from `package.json`. `pnpm test:scripts` covers target-triple mapping and
+release asset names, which are not imported by the frontend test suite.
 
 ### Agent verification and test execution
 

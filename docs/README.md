@@ -22,6 +22,9 @@ If a guide conflicts with `TERMIGO.md`, `TERMIGO.md` wins.
 - [Headless VPS deployment](headless-vps.md) - run the app as a 24/7 relay on a
   headless Linux server, with the systemd unit, watchdog, memory caps and
   rollback procedure.
+- [Release process](contributing/releasing.md) - versioning, full verification,
+  Antigravity OAuth stamping, tag and draft release flow, signing, and artifact
+  checks.
 
 ## Visual tour
 
@@ -52,3 +55,4 @@ If a guide conflicts with `TERMIGO.md`, `TERMIGO.md` wins.
 ## Contributing guides
 
 - [Testing](contributing/testing.md) - the testing contract, how to run checks, and what makes a good core-subsystem test.
+- [Releasing](contributing/releasing.md) - the maintainer checklist from version bump through a published, verified GitHub Release.

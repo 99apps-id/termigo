@@ -152,3 +152,21 @@ func TestCopilotEscalatesToResponsesWhenChatCompletionsRejectsTheModel(t *testin
 		t.Errorf("second call: chatHits=%d responsesHits=%d, want 1 and 2", chatHits, responsesHits)
 	}
 }
+
+func TestCopilotResponsesInputOmitsCodexReasoningItems(t *testing.T) {
+	input := encodeResponsesInputWithoutReasoning(ChatRequest{Messages: []Message{
+		{
+			Role:    RoleAssistant,
+			Content: "answer",
+			ReasoningItems: []ReasoningItem{
+				{ID: "rs_1", EncryptedContent: "codex-only", Summary: []string{"thought"}},
+			},
+		},
+	}})
+
+	for _, item := range input {
+		if item["type"] == "reasoning" {
+			t.Fatalf("Copilot input contains Codex reasoning item: %+v", item)
+		}
+	}
+}

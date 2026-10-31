@@ -144,8 +144,13 @@ resumes the last conversation for the workspace and `--session <id>` a specific
 one. The TUI keeps token usage per session (`/cost`), copies the last reply with
 `/copy` or Ctrl+Y, stores an API key with `/key <provider> <key>`, and offers
 every configured MCP server's tools. `login antigravity` needs no prompt on a
-release build: the public client pair is stamped into the binary at build time.
-This path needs no display and no `libwebkit2gtk`.
+release build: the installed-app client pair is stamped into the binary from
+GitHub Actions secrets. A local source build reads the same two values from the
+environment or the git-ignored `.env.local`; an unstamped development build
+falls back to those runtime sources and then to a one-time prompt. The pair is
+extractable from a distributed binary and is not a user access token. OAuth
+access and refresh tokens remain in the CLI's `0600` secret store. This path
+needs no display and no `libwebkit2gtk`.
 
 > **Never run two Termigo instances against one data directory.** Termigo has no
 > single-instance guard. Both would use `~/.local/share/id.99apps.termigo/`

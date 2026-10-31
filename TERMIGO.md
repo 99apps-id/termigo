@@ -12,9 +12,9 @@ Checks: `pnpm lint`, `pnpm format:check`, `pnpm check-types`, `pnpm check:comman
 
 ## Quality bar
 
-Production-grade or it does not ship. Every change is judged against all of these:
+Production-grade or it does not ship. Every change is judged against these:
 
-- **Correctness**: edge cases, failure modes, concurrent access. No "works for now".
+- **Correctness**: edge cases, failure modes, concurrent access. No shortcuts.
 - **Performance**: ultra-lightweight (installer under 20 MB, web client inside the `pnpm size` budgets, high-performance terminal). Minimize RAM, avoid redundant IPC round-trips, extra re-renders, or heavy dependencies. Unused features consume zero resources.
 - **Security**: no sandbox and no path boundaries for agent work; every tool runs for agent and subagents alike. Keep secrets (API keys, tokens) out of disk, settings, and `localStorage`.
 - **UI/UX**: polished, professional, premium. Every state and detail considered.
@@ -70,7 +70,7 @@ Details in [module layout](docs/architecture/module-layout.md):
 `cli/cmd/termigo` is a standalone terminal agent and automation companion talking directly to providers (runs on headless VPS without webview).
 
 - **Agent**: `ask`, `code`, and `chat` (Bubble Tea TUI persisting sessions in `<state home>/sessions/`).
-- **Auth**: `login`/`logout` run vendor OAuth flows (device or PKCE loopback) into 0600 secret store. Antigravity pair is stamped at build time.
+- **Auth**: `login`/`logout` run vendor OAuth flows (device or PKCE loopback) into the 0600 secret store. The Antigravity installed-app pair is stamped into both the desktop Rust binary and Go companion from `TERMIGO_ANTIGRAVITY_CLIENT_ID` / `TERMIGO_ANTIGRAVITY_CLIENT_SECRET`; release builds receive them from GitHub Actions secrets and local builds may load the git-ignored `.env.local`. The pair is build configuration, not a user token, and embedded values are extractable from distributed binaries.
 - **Tools**: filesystem, search, shell, git, web search/fetch, and configured MCP servers.
 - **Remote**: `telegram` bot relay; `service install` configures 24/7 daemon.
 - **Companion commands**: `doctor`, `init`, `agent run`, `skill`, `mcp`, `config`, `models`, `settings`, and terminal control via `internal/control`.

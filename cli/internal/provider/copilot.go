@@ -92,7 +92,7 @@ func (c *copilotClient) streamResponses(ctx context.Context, headers map[string]
 		"model":  req.Model,
 		"stream": true,
 		"store":  false,
-		"input":  encodeResponsesInput(req),
+		"input":  encodeResponsesInputWithoutReasoning(req),
 	}
 	if system := strings.TrimSpace(req.System); system != "" {
 		payload["instructions"] = system

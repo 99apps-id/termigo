@@ -93,6 +93,19 @@ Launcher directories for exited processes are removed at the next control-server
 
 The release profile uses one codegen unit, fat LTO, size optimization, abort-on-panic, and stripping. Always measure the actual target artifacts after changing dependencies.
 
+The separately published Go companion is built by the same
+`scripts/build-cli.mjs` entry point when a Go toolchain is available. Release
+CI installs Go on every matrix runner and uploads the resulting
+`termigo-go-<platform>-<arch>` asset. Its version comes from `package.json` via
+Go linker flags. The Antigravity installed-app client ID and secret use linker
+flags as well. The desktop Rust build receives the same environment variables
+through `src-tauri/build.rs`; neither value belongs in Git. Release CI sources
+them from GitHub Actions secrets, while local builds may use `.env.local`.
+Because compiled strings can be extracted, this pair is treated as public
+installed-app configuration, not as a user credential. Desktop OAuth tokens
+remain in the platform secret store; Go companion tokens remain in its
+permission-restricted `0600` secret file. Neither is embedded in artifacts.
+
 ## Current limits
 
 - WSL panes do not receive the control credentials or CLI launcher yet. Windows path translation and WSL networking must be implemented and tested together.

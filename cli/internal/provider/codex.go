@@ -182,6 +182,14 @@ func decodeResponsesStream(label string, body io.Reader, emit func(StreamEvent) 
 }
 
 func encodeResponsesInput(req ChatRequest) []map[string]any {
+	return encodeResponsesInputWithReasoning(req, true)
+}
+
+func encodeResponsesInputWithoutReasoning(req ChatRequest) []map[string]any {
+	return encodeResponsesInputWithReasoning(req, false)
+}
+
+func encodeResponsesInputWithReasoning(req ChatRequest, includeReasoning bool) []map[string]any {
 	items := make([]map[string]any, 0, len(req.Messages))
 	for _, message := range req.Messages {
 		switch message.Role {
@@ -195,8 +203,10 @@ func encodeResponsesInput(req ChatRequest) []map[string]any {
 			// The step's reasoning items go back before its words and
 			// calls: they are the thought that produced them, and a
 			// stateless backend has no other way to recover it.
-			for _, item := range message.ReasoningItems {
-				items = append(items, reasoningItemInput(item))
+			if includeReasoning {
+				for _, item := range message.ReasoningItems {
+					items = append(items, reasoningItemInput(item))
+				}
 			}
 			if strings.TrimSpace(message.Content) != "" {
 				items = append(items, map[string]any{

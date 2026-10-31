@@ -14,17 +14,20 @@ import (
 // scriptedClient replays one event batch per Stream call, in order, and
 // counts the calls so a test can see where the run stopped.
 type scriptedClient struct {
-	mu    sync.Mutex
-	steps [][]provider.StreamEvent
-	calls int
+	mu       sync.Mutex
+	steps    [][]provider.StreamEvent
+	requests []provider.ChatRequest
+	calls    int
 }
 
 func (f *scriptedClient) ID() string { return "scripted" }
 
-func (f *scriptedClient) Stream(_ context.Context, _ provider.ChatRequest, emit func(provider.StreamEvent) error) error {
+func (f *scriptedClient) Stream(_ context.Context, request provider.ChatRequest, emit func(provider.StreamEvent) error) error {
 	f.mu.Lock()
 	index := f.calls
 	f.calls++
+	request.Messages = append([]provider.Message(nil), request.Messages...)
+	f.requests = append(f.requests, request)
 	f.mu.Unlock()
 	if index >= len(f.steps) {
 		return nil
@@ -35,6 +38,12 @@ func (f *scriptedClient) Stream(_ context.Context, _ provider.ChatRequest, emit 
 		}
 	}
 	return nil
+}
+
+func (f *scriptedClient) request(index int) provider.ChatRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.requests[index]
 }
 
 func (f *scriptedClient) callCount() int {
@@ -108,11 +117,45 @@ func TestRunContinuesAStepCutAtTheOutputCeiling(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if out != "wer, finished." {
-		t.Errorf("answer = %q, want the continuation step's text, not the truncated partial", out)
+	if out != "Partial answer, finished." {
+		t.Errorf("answer = %q, want the complete answer across both steps", out)
 	}
 	if calls := client.callCount(); calls != 2 {
 		t.Errorf("provider calls = %d, want the truncated step and its continuation", calls)
+	}
+}
+
+// A reasoning-only step still has backend state: its encrypted item must be
+// replayed before the next request, and an output-ceiling cut must ask the
+// model to continue rather than treating the thought as an empty answer.
+func TestRunReplaysReasoningOnlyOutputCeilingStep(t *testing.T) {
+	item := provider.ReasoningItem{ID: "rs_1", EncryptedContent: "enc_abc", Summary: []string{"thought one"}}
+	client := &scriptedClient{steps: [][]provider.StreamEvent{
+		{
+			{Type: provider.EventReasoningItem, ReasoningItem: &item},
+			{Type: provider.EventIncomplete, IncompleteReason: "max_output_tokens"},
+		},
+		{{Type: provider.EventTextDelta, Text: "Finished."}},
+	}}
+
+	out, err := Run(context.Background(), Options{Client: client, Model: "fake", MaxSteps: 3}, "think hard", nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if out != "Finished." {
+		t.Fatalf("answer = %q, want the final text step", out)
+	}
+	messages := client.request(1).Messages
+	if len(messages) < 3 {
+		t.Fatalf("second request messages = %+v, want prompt, reasoning, and continuation", messages)
+	}
+	reasoningMessage := messages[len(messages)-2]
+	if reasoningMessage.Role != provider.RoleAssistant || len(reasoningMessage.ReasoningItems) != 1 || reasoningMessage.ReasoningItems[0].EncryptedContent != "enc_abc" {
+		t.Errorf("replayed reasoning message = %+v", reasoningMessage)
+	}
+	continueMessage := messages[len(messages)-1]
+	if continueMessage.Role != provider.RoleUser || continueMessage.Content != "Continue." {
+		t.Errorf("continuation message = %+v", continueMessage)
 	}
 }
 

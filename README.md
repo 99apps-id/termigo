@@ -583,9 +583,15 @@ Configured MCP servers are connected at start and their tools offered under a
 `server__tool` name.
 
 - **Auth:** `login`/`logout` run the vendor OAuth device or PKCE flows and store
-  tokens in the CLI's own 0600 secret file. The Antigravity client pair is
-  stamped into the binary at build time from a repository secret or the
-  git-ignored `.env.local`, never committed.
+  tokens in the CLI's own 0600 secret file. The Antigravity installed-app pair
+  is stamped into both the desktop app and Go companion at build time from the
+  `TERMIGO_ANTIGRAVITY_CLIENT_ID` and `TERMIGO_ANTIGRAVITY_CLIENT_SECRET`
+  GitHub Actions secrets, or from the git-ignored `.env.local` for a local
+  build. It is build configuration rather than a user token; values embedded
+  in a distributed executable are inherently extractable. Desktop OAuth access
+  and refresh tokens remain in the platform secret store; Go companion tokens
+  remain in its permission-restricted `0600` secret file. Neither is baked into
+  an artifact.
 - **Providers:** Codex, Claude Code, Gemini, Antigravity, Ollama (local).
   `agent run` drives Codex, Claude and Gemini in print mode and Ollama over its
   local HTTP API; a provider with no headless mode is reported rather than

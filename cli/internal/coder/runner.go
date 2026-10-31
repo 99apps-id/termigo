@@ -70,7 +70,7 @@ func Run(ctx context.Context, opts Options, prompt string, emit func(provider.St
 		messages = append(messages, opts.Session.Messages...)
 	}
 	messages = append(messages, provider.Message{Role: provider.RoleUser, Content: prompt, Images: opts.Images})
-	last := ""
+	var answer strings.Builder
 
 	// Collect the conversation into the session before returning, from any
 	// path. Images are dropped: a base64 payload would bloat the session file
@@ -135,8 +135,8 @@ func Run(ctx context.Context, opts Options, prompt string, emit func(provider.St
 		}
 
 		if len(calls) == 0 {
-			last = strings.TrimSpace(text.String())
-			if last == "" {
+			stepText := text.String()
+			if strings.TrimSpace(stepText) == "" {
 				// Reasoning is model output, not silence: a step that only
 				// thought (a reasoning model cut off before its answer, or
 				// working through a hard step) must not feed the idle guard,
@@ -152,10 +152,22 @@ func Run(ctx context.Context, opts Options, prompt string, emit func(provider.St
 				} else if stop, reason := guard.noteEmptyStep(); stop {
 					return "", errors.New(reason)
 				}
-				messages = append(messages, provider.Message{Role: provider.RoleUser, Content: "Reply with the answer."})
+				if len(reasoningItems) > 0 {
+					messages = append(messages, provider.Message{
+						Role:           provider.RoleAssistant,
+						Reasoning:      reasoning.String(),
+						ReasoningItems: reasoningItems,
+					})
+				}
+				nudge := "Reply with the answer."
+				if truncated {
+					nudge = "Continue."
+				}
+				messages = append(messages, provider.Message{Role: provider.RoleUser, Content: nudge})
 				continue
 			}
-			messages = append(messages, provider.Message{Role: provider.RoleAssistant, Content: last, ReasoningItems: reasoningItems})
+			messages = append(messages, provider.Message{Role: provider.RoleAssistant, Content: stepText, ReasoningItems: reasoningItems})
+			answer.WriteString(stepText)
 			if truncated {
 				// A step cut at the backend's output ceiling produced a
 				// partial answer, not a finished one: it is stored above,
@@ -165,7 +177,7 @@ func Run(ctx context.Context, opts Options, prompt string, emit func(provider.St
 				messages = append(messages, provider.Message{Role: provider.RoleUser, Content: "Continue."})
 				continue
 			}
-			return last, nil
+			return strings.TrimSpace(answer.String()), nil
 		}
 		guard.noteProgress()
 		messages = append(messages, provider.Message{Role: provider.RoleAssistant, Content: text.String(), ToolCalls: calls, ReasoningItems: reasoningItems})
@@ -186,7 +198,7 @@ func Run(ctx context.Context, opts Options, prompt string, emit func(provider.St
 			}
 		}
 	}
-	return last, fmt.Errorf("reached the %d step budget without a final answer", maxSteps)
+	return strings.TrimSpace(answer.String()), fmt.Errorf("reached the %d step budget without a final answer", maxSteps)
 }
 
 // executeTool resolves a call, enforces approval for a mutating tool, and runs

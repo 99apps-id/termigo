@@ -22,7 +22,11 @@ pnpm tauri dev
 
 Prereqs: Rust (stable), Node 22+, pnpm, plus your platform's [Tauri prerequisites](https://tauri.app/start/prerequisites/).
 
-For the architecture and how to contribute safely, see [TERMIGO.md](TERMIGO.md) and the [docs/ index](docs/README.md).
+For the architecture and how to contribute safely, see
+[TERMIGO.md](TERMIGO.md) and the [docs index](docs/README.md). Maintainers
+preparing a tag should follow the
+[release checklist](docs/contributing/releasing.md), including the Antigravity
+stamp and artifact verification steps.
 
 ## Where to discuss
 

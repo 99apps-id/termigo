@@ -6,6 +6,32 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.27] - 2026-10-31
+
+### Added
+
+- **Workspace-aware MCP controls.** MCP servers and individual tools can be
+  enabled or disabled with backend enforcement, exact-name matching, persisted
+  state, and per-tool usage counts in Settings.
+- **Agent run guidance.** Goal and todo suggestions, a bounded post-run
+  verifier, and a global subagent concurrency pool make long agent runs easier
+  to direct and keep provider load bounded.
+
+### Fixed
+
+- **Codex continuation and reasoning replay.** Output-ceiling continuations now
+  return the complete answer, reasoning-only steps preserve encrypted state,
+  and Codex reasoning items are not sent to GitHub Copilot.
+- **ChatGPT subscription backend compatibility.** ChatGPT sign-in models send
+  the required stateless Responses settings, current Codex client identity,
+  and valid reasoning summaries.
+- **Antigravity reliability.** Transient rate limits are distinguished from
+  exhausted quota, production fallback is restricted, and both the desktop app
+  and Go companion receive their OAuth client pair during local and release
+  builds.
+- **Cross-platform security and edge cases.** Tightened command, workspace,
+  browser, extension sandbox, MCP, IPv6, and frontend/backend validation paths.
+
 ## [0.9.26] - 2026-10-23
 
 ### Added
