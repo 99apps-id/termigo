@@ -69,6 +69,10 @@ export async function writeOAuthTokens(
   });
 }
 
+export async function cancelOAuthSignIn(): Promise<void> {
+  await invoke("oauth_cancel");
+}
+
 export async function signInWithOAuth(
   provider: ProviderId,
 ): Promise<OAuthAccount> {
@@ -86,7 +90,7 @@ export async function signInWithOAuth(
   };
 }
 
-export async function signOutOAuth(provider: ProviderId): Promise<void> {
+async function clearOAuthTokens(provider: ProviderId): Promise<void> {
   try {
     await invoke("secrets_delete", {
       service: KEYRING_SERVICE,
@@ -98,11 +102,32 @@ export async function signOutOAuth(provider: ProviderId): Promise<void> {
   notifyChanged();
 }
 
+export async function signOutOAuth(provider: ProviderId): Promise<void> {
+  await clearOAuthTokens(provider);
+}
+
 export async function getOAuthAccount(
   provider: ProviderId,
 ): Promise<OAuthAccount | null> {
   const t = await readOAuthTokens(provider);
   if (!t) return null;
+
+  const nowSecs = Math.floor(Date.now() / 1000);
+  if (t.expires_at > 0 && t.expires_at <= nowSecs) {
+    if (!t.refresh_token || !(await refreshOAuthTokens(provider, t))) {
+      await clearOAuthTokens(provider);
+      return null;
+    }
+    const refreshed = await readOAuthTokens(provider);
+    if (!refreshed) return null;
+    return {
+      provider,
+      email: refreshed.email ?? null,
+      plan: refreshed.plan ?? null,
+      accountId: refreshed.account_id ?? null,
+    };
+  }
+
   return {
     provider,
     email: t.email ?? null,
@@ -179,7 +204,10 @@ export async function getOAuthAccess(
         accountId: refreshed.account_id ?? null,
       };
     }
-    if (t.expires_at <= nowSecs) return null;
+    if (t.expires_at <= nowSecs) {
+      await clearOAuthTokens(provider);
+      return null;
+    }
   }
 
   return {

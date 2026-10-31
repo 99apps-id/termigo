@@ -1563,7 +1563,7 @@ export const MODELS = [
     description: "Fast Anthropic Claude through OAuth login.",
     capabilities: { intelligence: 4, speed: 5, cost: 5 },
     tags: ["fast", "tools"],
-    apiModelId: "claude-haiku-4-5",
+    apiModelId: "claude-haiku-4-5-20251001",
   },
   // ── xAI OAuth ──────────────────────────────────────────────────────────────
   {
@@ -1585,6 +1585,26 @@ export const MODELS = [
     capabilities: { intelligence: 5, speed: 4, cost: 5 },
     tags: ["reasoning", "tools", "coding"],
     apiModelId: "grok-4",
+  },
+  {
+    id: "xai-oauth-grok-4.5",
+    provider: "xai-oauth",
+    label: "Grok 4.5 (OAuth)",
+    hint: "Balanced",
+    description: "xAI Grok 4.5 through OAuth device login.",
+    capabilities: { intelligence: 5, speed: 4, cost: 5 },
+    tags: ["reasoning", "tools", "coding"],
+    apiModelId: "grok-4.5",
+  },
+  {
+    id: "xai-oauth-grok-build-0.1",
+    provider: "xai-oauth",
+    label: "Grok Build 0.1 (OAuth)",
+    hint: "Coding",
+    description: "xAI coding model through OAuth device login.",
+    capabilities: { intelligence: 4, speed: 4, cost: 5 },
+    tags: ["tools", "coding"],
+    apiModelId: "grok-build-0.1",
   },
   // ── GitHub Copilot ─────────────────────────────────────────────────────────
   {

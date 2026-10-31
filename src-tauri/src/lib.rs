@@ -294,6 +294,7 @@ pub fn run() {
             chatgpt_auth::chatgpt_auth_login,
             chatgpt_auth::chatgpt_auth_refresh,
             oauth::oauth_login,
+            oauth::oauth_cancel,
             oauth::oauth_refresh,
             backup::backup_seal,
             backup::backup_open,

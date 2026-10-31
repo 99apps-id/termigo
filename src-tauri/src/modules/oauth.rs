@@ -8,6 +8,7 @@
 //!   - `github-copilot` (GitHub Copilot Device Flow + Copilot token exchange)
 //!   - `muse` (Meta Muse Code Device Flow + key minting)
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use base64::Engine;
@@ -19,6 +20,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 const TIMEOUT_SECS: u64 = 300;
+static OAUTH_CANCELLED: AtomicBool = AtomicBool::new(false);
 
 /// The Muse CLI identity its endpoints expect. Meta answers a device request
 /// with no User-Agent with a 302 to an HTML page, whose empty body then fails
@@ -136,6 +138,13 @@ fn account_id_of(claims: &serde_json::Value) -> Option<String> {
         }
     }
     None
+}
+
+fn email_of(claims: &serde_json::Value) -> Option<String> {
+    claims
+        .get("email")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
 }
 
 fn plan_of(claims: &serde_json::Value) -> Option<String> {
@@ -338,8 +347,8 @@ async fn login_openai_codex(app: &tauri::AppHandle) -> Result<OAuthTokens, Strin
         id_token: Option<String>,
         expires_in: Option<i64>,
     }
-    let parsed: RawResp = serde_json::from_str(&body)
-        .map_err(|e| format!("could not parse token response: {e}"))?;
+    let parsed: RawResp =
+        serde_json::from_str(&body).map_err(|e| format!("could not parse token response: {e}"))?;
 
     let claims = parsed.id_token.as_deref().and_then(jwt_claims);
     Ok(OAuthTokens {
@@ -455,13 +464,16 @@ async fn login_claude_oauth(app: &tauri::AppHandle) -> Result<OAuthTokens, Strin
         refresh_token: Option<String>,
         expires_in: Option<i64>,
     }
-    let parsed: ClaudeResp = serde_json::from_str(&body)
-        .map_err(|e| format!("could not parse token response: {e}"))?;
+    let parsed: ClaudeResp =
+        serde_json::from_str(&body).map_err(|e| format!("could not parse token response: {e}"))?;
 
+    let refresh_token = parsed
+        .refresh_token
+        .ok_or_else(|| "Claude OAuth did not return a refresh token".to_string())?;
     Ok(OAuthTokens {
         provider: "claude-oauth".to_string(),
         access_token: parsed.access_token,
-        refresh_token: parsed.refresh_token.unwrap_or_default(),
+        refresh_token,
         id_token: None,
         expires_at: now_secs() + parsed.expires_in.unwrap_or(14400),
         account_id: None,
@@ -593,8 +605,8 @@ async fn login_antigravity(app: &tauri::AppHandle) -> Result<OAuthTokens, String
         id_token: Option<String>,
         expires_in: Option<i64>,
     }
-    let parsed: GoogleResp = serde_json::from_str(&body)
-        .map_err(|e| format!("could not parse response: {e}"))?;
+    let parsed: GoogleResp =
+        serde_json::from_str(&body).map_err(|e| format!("could not parse response: {e}"))?;
 
     let claims = parsed.id_token.as_deref().and_then(jwt_claims);
     Ok(OAuthTokens {
@@ -614,6 +626,19 @@ async fn login_antigravity(app: &tauri::AppHandle) -> Result<OAuthTokens, String
 }
 
 // ── Device Code Flows ────────────────────────────────────────────────────────
+
+fn validate_device_verification_uri(uri: &str) -> Result<(), String> {
+    let parsed = url::Url::parse(uri).map_err(|_| "invalid device verification URL".to_string())?;
+    let host = parsed.host_str().unwrap_or_default();
+    let allowed = matches!(
+        host,
+        "accounts.x.ai" | "x.ai" | "console.x.ai" | "github.com" | "copilot.github.com"
+    );
+    if parsed.scheme() != "https" || !allowed {
+        return Err("device verification URL is not an allowed HTTPS endpoint".to_string());
+    }
+    Ok(())
+}
 
 async fn login_xai_oauth(app: &tauri::AppHandle) -> Result<OAuthTokens, String> {
     const CLIENT_ID: &str = "b1a00492-073a-47ea-816f-4c329264a828";
@@ -648,14 +673,16 @@ async fn login_xai_oauth(app: &tauri::AppHandle) -> Result<OAuthTokens, String> 
         verification_uri_complete: Option<String>,
         #[serde(default)]
         interval: Option<u64>,
+        expires_in: Option<u64>,
     }
-    let dev: DeviceResp = serde_json::from_str(&body)
-        .map_err(|e| format!("could not parse device response: {e}"))?;
+    let dev: DeviceResp =
+        serde_json::from_str(&body).map_err(|e| format!("could not parse device response: {e}"))?;
 
     let target_uri = dev
         .verification_uri_complete
         .clone()
         .unwrap_or_else(|| dev.verification_uri.clone());
+    validate_device_verification_uri(&target_uri)?;
 
     let _ = app.emit(
         "oauth-device-prompt",
@@ -667,10 +694,14 @@ async fn login_xai_oauth(app: &tauri::AppHandle) -> Result<OAuthTokens, String> 
     );
     let _ = tauri_plugin_opener::open_url(target_uri, None::<&str>);
 
-    let interval = Duration::from_secs(dev.interval.unwrap_or(5).max(3));
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(TIMEOUT_SECS);
+    let mut interval = Duration::from_secs(dev.interval.unwrap_or(5).max(3));
+    let deadline =
+        tokio::time::Instant::now() + Duration::from_secs(dev.expires_in.unwrap_or(TIMEOUT_SECS));
 
     loop {
+        if OAUTH_CANCELLED.load(Ordering::Relaxed) {
+            return Err("OAuth login cancelled".to_string());
+        }
         if tokio::time::Instant::now() >= deadline {
             return Err("device authorization timed out".to_string());
         }
@@ -700,28 +731,35 @@ async fn login_xai_oauth(app: &tauri::AppHandle) -> Result<OAuthTokens, String> 
                 access_token: String,
                 refresh_token: Option<String>,
                 expires_in: Option<i64>,
+                id_token: Option<String>,
             }
             let parsed: TokenResp = serde_json::from_str(&body)
                 .map_err(|e| format!("could not parse token response: {e}"))?;
+            let claims = parsed.id_token.as_deref().and_then(jwt_claims);
             return Ok(OAuthTokens {
                 provider: "xai-oauth".to_string(),
                 access_token: parsed.access_token,
                 refresh_token: parsed.refresh_token.unwrap_or_default(),
-                id_token: None,
+                id_token: parsed.id_token.clone(),
                 expires_at: now_secs() + parsed.expires_in.unwrap_or(3600),
-                account_id: None,
-                email: None,
-                plan: Some("xAI Grok".to_string()),
+                account_id: claims.as_ref().and_then(account_id_of),
+                email: claims.as_ref().and_then(email_of),
+                plan: claims.as_ref().and_then(plan_of),
             });
         }
 
-        if body.contains("authorization_pending") || body.contains("slow_down") {
+        if body.contains("slow_down") {
+            interval += Duration::from_secs(5);
+            continue;
+        }
+        if body.contains("authorization_pending") {
             continue;
         }
         return Err(format!("authorization failed: {body}"));
     }
 }
 
+#[allow(unused_mut)]
 async fn login_github_copilot(app: &tauri::AppHandle) -> Result<OAuthTokens, String> {
     const CLIENT_ID: &str = "Iv1.b507a08c87ecfe98";
     const DEVICE_URL: &str = "https://github.com/login/device/code";
@@ -756,9 +794,10 @@ async fn login_github_copilot(app: &tauri::AppHandle) -> Result<OAuthTokens, Str
         verification_uri: String,
         #[serde(default)]
         interval: Option<u64>,
+        expires_in: Option<u64>,
     }
-    let dev: GhDeviceResp = serde_json::from_str(&body)
-        .map_err(|e| format!("could not parse response: {e}"))?;
+    let dev: GhDeviceResp =
+        serde_json::from_str(&body).map_err(|e| format!("could not parse response: {e}"))?;
 
     let _ = app.emit(
         "oauth-device-prompt",
@@ -770,10 +809,14 @@ async fn login_github_copilot(app: &tauri::AppHandle) -> Result<OAuthTokens, Str
     );
     let _ = tauri_plugin_opener::open_url(dev.verification_uri.clone(), None::<&str>);
 
-    let interval = Duration::from_secs(dev.interval.unwrap_or(5).max(3));
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(TIMEOUT_SECS);
+    let mut interval = Duration::from_secs(dev.interval.unwrap_or(5).max(3));
+    let deadline =
+        tokio::time::Instant::now() + Duration::from_secs(dev.expires_in.unwrap_or(TIMEOUT_SECS));
 
     let gh_access_token = loop {
+        if OAUTH_CANCELLED.load(Ordering::Relaxed) {
+            return Err("OAuth login cancelled".to_string());
+        }
         if tokio::time::Instant::now() >= deadline {
             return Err("timed out waiting for GitHub Copilot authorization".to_string());
         }
@@ -828,7 +871,9 @@ async fn login_github_copilot(app: &tauri::AppHandle) -> Result<OAuthTokens, Str
     let copilot_status = copilot_res.status();
     let copilot_body = copilot_res.text().await.unwrap_or_default();
     if !copilot_status.is_success() {
-        return Err(format!("copilot mint endpoint returned {copilot_status}: {copilot_body}"));
+        return Err(format!(
+            "copilot mint endpoint returned {copilot_status}: {copilot_body}"
+        ));
     }
 
     #[derive(Deserialize)]
@@ -851,6 +896,7 @@ async fn login_github_copilot(app: &tauri::AppHandle) -> Result<OAuthTokens, Str
     })
 }
 
+#[allow(unused_mut)]
 async fn login_muse(app: &tauri::AppHandle) -> Result<OAuthTokens, String> {
     const CLIENT_ID: &str = "1031625952748946";
     const DEVICE_URL: &str = "https://auth.meta.com/oidc/device/authorization/";
@@ -885,6 +931,7 @@ async fn login_muse(app: &tauri::AppHandle) -> Result<OAuthTokens, String> {
         verification_uri: Option<String>,
         #[serde(default)]
         interval: Option<u64>,
+        expires_in: Option<u64>,
     }
     let dev: MetaDevResp = serde_json::from_str(&body)
         .map_err(|e| format!("could not parse meta device response: {e}"))?;
@@ -903,10 +950,14 @@ async fn login_muse(app: &tauri::AppHandle) -> Result<OAuthTokens, String> {
     );
     let _ = tauri_plugin_opener::open_url(verify_url, None::<&str>);
 
-    let interval = Duration::from_secs(dev.interval.unwrap_or(5).max(3));
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(TIMEOUT_SECS);
+    let mut interval = Duration::from_secs(dev.interval.unwrap_or(5).max(3));
+    let deadline =
+        tokio::time::Instant::now() + Duration::from_secs(dev.expires_in.unwrap_or(TIMEOUT_SECS));
 
     let dca_token = loop {
+        if OAUTH_CANCELLED.load(Ordering::Relaxed) {
+            return Err("OAuth login cancelled".to_string());
+        }
         if tokio::time::Instant::now() >= deadline {
             return Err("timed out waiting for Meta Muse authorization".to_string());
         }
@@ -1214,9 +1265,11 @@ async fn do_refresh_token(provider: &str, refresh_token: &str) -> Result<OAuthTo
                 access_token: String,
                 refresh_token: Option<String>,
                 expires_in: Option<i64>,
+                id_token: Option<String>,
             }
             let parsed: TokenResp = serde_json::from_str(&body)
                 .map_err(|e| format!("could not parse token response: {e}"))?;
+            let claims = parsed.id_token.as_deref().and_then(jwt_claims);
 
             Ok(OAuthTokens {
                 provider: "xai-oauth".to_string(),
@@ -1224,11 +1277,11 @@ async fn do_refresh_token(provider: &str, refresh_token: &str) -> Result<OAuthTo
                 refresh_token: parsed
                     .refresh_token
                     .unwrap_or_else(|| refresh_token.to_string()),
-                id_token: None,
+                id_token: parsed.id_token.clone(),
                 expires_at: now_secs() + parsed.expires_in.unwrap_or(3600),
-                account_id: None,
-                email: None,
-                plan: Some("xAI Grok".to_string()),
+                account_id: claims.as_ref().and_then(account_id_of),
+                email: claims.as_ref().and_then(email_of),
+                plan: claims.as_ref().and_then(plan_of),
             })
         }
         "antigravity" => {
@@ -1287,6 +1340,7 @@ async fn do_refresh_token(provider: &str, refresh_token: &str) -> Result<OAuthTo
 
 #[tauri::command]
 pub async fn oauth_login(app: tauri::AppHandle, provider: String) -> Result<OAuthTokens, String> {
+    OAUTH_CANCELLED.store(false, Ordering::Relaxed);
     match provider.as_str() {
         "openai-codex" | "chatgpt" => login_openai_codex(&app).await,
         "claude-oauth" => login_claude_oauth(&app).await,
@@ -1296,6 +1350,12 @@ pub async fn oauth_login(app: tauri::AppHandle, provider: String) -> Result<OAut
         "muse" => login_muse(&app).await,
         _ => Err(format!("unknown OAuth provider: {provider}")),
     }
+}
+
+#[tauri::command]
+pub async fn oauth_cancel() -> Result<(), String> {
+    OAUTH_CANCELLED.store(true, Ordering::Relaxed);
+    Ok(())
 }
 
 #[tauri::command]

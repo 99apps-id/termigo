@@ -7,6 +7,7 @@ import {
   type OAuthAccount,
   getOAuthAccount,
   onOAuthAuthChanged,
+  cancelOAuthSignIn,
   signInWithOAuth,
   signOutOAuth,
 } from "@/modules/ai/lib/oauthAuth";
@@ -106,6 +107,13 @@ export function OAuthProviderCard({ providerId }: Props) {
       setAuthUrl(null);
       setDevicePrompt(null);
     }
+  };
+
+  const cancel = async () => {
+    await cancelOAuthSignIn();
+    setBusy(false);
+    setDevicePrompt(null);
+    setAuthUrl(null);
   };
 
   const signOut = async () => {
@@ -225,8 +233,8 @@ export function OAuthProviderCard({ providerId }: Props) {
               variant="outline"
               size="sm"
               className="h-6 gap-1 px-2 text-[11px]"
-              disabled={busy}
-              onClick={() => void signIn()}
+              disabled={false}
+              onClick={() => void (busy ? cancel() : signIn())}
             >
               {busy ? (
                 <Spinner className="size-3" />
