@@ -211,7 +211,7 @@ These two commands are the whole crypto surface; everything above them in JS onl
 
 ### OAuth (`src-tauri/src/modules/oauth.rs`)
 
-- `oauth_login` / `oauth_refresh` - PKCE and Device Flow OAuth authentication and token refresh for external AI providers (Codex, Claude, Antigravity, xAI, Copilot, Muse)
+- `oauth_login` / `oauth_cancel` / `oauth_refresh` - PKCE and Device Flow OAuth authentication, cancellation, and token refresh for external AI providers (Codex, Claude, Antigravity, xAI, Copilot, Muse)
 
 ### MCP (`src-tauri/src/modules/mcp.rs`)
 

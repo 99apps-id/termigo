@@ -73,7 +73,8 @@ fn stamp_env_local() {
                 continue;
             }
             let mut iter = line.splitn(2, '=');
-            let Some(key) = iter.next() else { continue };
+            let key = iter.next().map(str::trim);
+            let Some(key) = key else { continue };
             let Some(raw_value) = iter.next() else {
                 continue;
             };

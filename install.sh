@@ -528,7 +528,7 @@ build_from_source() {
 
   info "Membangun companion CLI Go..."
   if [ -f "${SCRIPT_DIR}/scripts/build-cli.mjs" ]; then
-    (cd "$SCRIPT_DIR" && node scripts/build-cli.mjs)
+    (cd "$SCRIPT_DIR" && node scripts/build-cli.mjs --release)
   fi
 
   info "Membangun aplikasi Termigo (Tauri 2 + Vite frontend)..."
