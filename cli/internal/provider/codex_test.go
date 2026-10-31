@@ -3,7 +3,6 @@ package provider
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -254,15 +253,71 @@ func TestCodexInputReplaysReasoningItems(t *testing.T) {
 	}
 }
 
-// An incomplete response is a cut-off generation, not a silent one: the
-// decoder must still harvest its usage, then end the stream in an error
-// naming the reason, so the agent loop reports a provider failure instead of
-// counting the step as idle.
-func TestDecodeResponsesStreamReportsIncomplete(t *testing.T) {
+// TestCodexInputAlwaysSendsReasoningSummary proves a stored reasoning item
+// that arrived without summary parts still replays with the summary key
+// present, as an empty array: the backend requires the key on a replayed
+// reasoning item and rejects the whole request when it is omitted
+// ("Missing required parameter: 'input[N].summary'").
+func TestCodexInputAlwaysSendsReasoningSummary(t *testing.T) {
+	input := encodeResponsesInput(ChatRequest{Messages: []Message{
+		{Role: RoleAssistant, Content: "working", ReasoningItems: []ReasoningItem{
+			{ID: "rs_2", EncryptedContent: "enc_def"},
+		}},
+	}})
+	if len(input) != 2 {
+		t.Fatalf("input = %#v, want reasoning, message", input)
+	}
+	raw, present := input[0]["summary"]
+	if !present {
+		t.Fatalf("input[0] = %#v, want the summary key present on a summary-less item", input[0])
+	}
+	summary, ok := raw.([]map[string]any)
+	if !ok || len(summary) != 0 {
+		t.Errorf("summary = %#v, want an empty summary array", raw)
+	}
+}
+
+// A response cut at the backend's output ceiling is a truncated step, not
+// a failed one: the decoder must still harvest its usage, then report the
+// cut as an EventIncomplete so the loop can continue from the partial
+// output instead of the run dying on a limit the client never set.
+func TestDecodeResponsesStreamReportsOutputCeilingAsEvent(t *testing.T) {
 	sse := strings.Join([]string{
 		`data: {"type":"response.reasoning_summary_text.delta","delta":"thinking"}`,
 		``,
 		`data: {"type":"response.incomplete","response":{"usage":{"input_tokens":10,"output_tokens":99,"total_tokens":109},"incomplete_details":{"reason":"max_output_tokens"}}}`,
+		``,
+	}, "\n")
+
+	var usages int
+	var incomplete []string
+	err := decodeResponsesStream("test", strings.NewReader(sse), func(event StreamEvent) error {
+		switch event.Type {
+		case EventUsage:
+			usages++
+		case EventIncomplete:
+			incomplete = append(incomplete, event.IncompleteReason)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("a step cut at the output ceiling must not fail the stream: %v", err)
+	}
+	if len(incomplete) != 1 || incomplete[0] != "max_output_tokens" {
+		t.Errorf("incomplete events = %v, want one max_output_tokens event", incomplete)
+	}
+	if usages != 1 {
+		t.Errorf("usage events = %d, want the incomplete response's usage harvested once", usages)
+	}
+}
+
+// An incomplete response for any other reason (a content filter) is not a
+// step the loop should quietly retry: the decoder must still harvest its
+// usage, then end the stream in an error naming the reason, so the agent
+// loop reports a provider failure instead of counting the step as idle.
+func TestDecodeResponsesStreamErrorsOnOtherIncompleteReasons(t *testing.T) {
+	sse := strings.Join([]string{
+		`data: {"type":"response.incomplete","response":{"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15},"incomplete_details":{"reason":"content_filter"}}}`,
 		``,
 	}, "\n")
 
@@ -274,50 +329,12 @@ func TestDecodeResponsesStreamReportsIncomplete(t *testing.T) {
 		return nil
 	})
 	if err == nil {
-		t.Fatalf("an incomplete response must end the stream in an error")
+		t.Fatalf("an incomplete response cut by a content filter must end the stream in an error")
 	}
-	if !strings.Contains(err.Error(), "incomplete") || !strings.Contains(err.Error(), "max_output_tokens") {
+	if !strings.Contains(err.Error(), "incomplete") || !strings.Contains(err.Error(), "content_filter") {
 		t.Errorf("error = %q, want it to name the incomplete reason", err)
 	}
 	if usages != 1 {
 		t.Errorf("usage events = %d, want the incomplete response's usage harvested once", usages)
-	}
-}
-
-// A max_output_tokens cut is typed so the agent loop can recover the step;
-// the partial output is still harvested, and any other incomplete reason
-// stays a hard, untyped error.
-func TestDecodeResponsesStreamTypesMaxOutputTokensTruncation(t *testing.T) {
-	sse := strings.Join([]string{
-		`data: {"type":"response.output_text.delta","delta":"partial"}`,
-		``,
-		`data: {"type":"response.incomplete","response":{"usage":{"input_tokens":1,"output_tokens":2,"total_tokens":3},"incomplete_details":{"reason":"max_output_tokens"}}}`,
-		``,
-	}, "\n")
-
-	var text strings.Builder
-	err := decodeResponsesStream("test", strings.NewReader(sse), func(event StreamEvent) error {
-		if event.Type == EventTextDelta {
-			text.WriteString(event.Text)
-		}
-		return nil
-	})
-	if err == nil {
-		t.Fatalf("an incomplete response must end the stream in an error")
-	}
-	if !errors.Is(err, ErrOutputTruncated) {
-		t.Errorf("err = %v, want it to wrap ErrOutputTruncated", err)
-	}
-	if text.String() != "partial" {
-		t.Errorf("text = %q, want the partial output harvested before the cut", text.String())
-	}
-
-	other := strings.Join([]string{
-		`data: {"type":"response.incomplete","response":{"incomplete_details":{"reason":"content_filter"}}}`,
-		``,
-	}, "\n")
-	err = decodeResponsesStream("test", strings.NewReader(other), func(StreamEvent) error { return nil })
-	if err == nil || errors.Is(err, ErrOutputTruncated) {
-		t.Errorf("err = %v, want a non-truncation incomplete reason to stay untyped", err)
 	}
 }

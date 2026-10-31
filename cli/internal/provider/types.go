@@ -5,16 +5,9 @@ package provider
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 )
-
-// ErrOutputTruncated marks a stream the backend ended early because the
-// generation hit its output-token ceiling. The step still produced real
-// output, so the runner keeps it and asks the model to continue instead of
-// failing a run that was demonstrably working.
-var ErrOutputTruncated = errors.New("output truncated at the provider's token limit")
 
 // Role is a message author.
 type Role string
@@ -125,6 +118,10 @@ const (
 	// EventReasoningItem carries one completed reasoning output item, for
 	// stateless replay on the next step.
 	EventReasoningItem StreamEventType = "reasoning-item"
+	// EventIncomplete reports that the backend ended the response early
+	// at its own output ceiling (max_output_tokens). The step's partial
+	// output stays valid; the loop decides whether to continue from it.
+	EventIncomplete StreamEventType = "incomplete"
 )
 
 // StreamEvent is one chunk of a streaming completion.
@@ -134,6 +131,9 @@ type StreamEvent struct {
 	ToolCall      *ToolCall
 	Usage         *Usage
 	ReasoningItem *ReasoningItem
+	// IncompleteReason carries the backend's reason on an EventIncomplete
+	// event (for example "max_output_tokens").
+	IncompleteReason string
 }
 
 // Client streams one provider.

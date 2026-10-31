@@ -94,6 +94,7 @@ func Run(ctx context.Context, opts Options, prompt string, emit func(provider.St
 		var calls []provider.ToolCall
 		var reasoningItems []provider.ReasoningItem
 		var stepReasoningTokens int
+		var truncated bool
 		err := opts.Client.Stream(ctx, provider.ChatRequest{
 			Model:    opts.Model,
 			System:   system,
@@ -114,6 +115,8 @@ func Run(ctx context.Context, opts Options, prompt string, emit func(provider.St
 				if event.ReasoningItem != nil {
 					reasoningItems = append(reasoningItems, *event.ReasoningItem)
 				}
+			case provider.EventIncomplete:
+				truncated = true
 			case provider.EventUsage:
 				if event.Usage != nil {
 					stepReasoningTokens += event.Usage.ReasoningTokens
@@ -127,44 +130,42 @@ func Run(ctx context.Context, opts Options, prompt string, emit func(provider.St
 			}
 			return nil
 		})
-		truncated := errors.Is(err, provider.ErrOutputTruncated)
-		if err != nil && !truncated {
+		if err != nil {
 			return "", err
 		}
 
 		if len(calls) == 0 {
 			last = strings.TrimSpace(text.String())
-			if last != "" && !truncated {
-				messages = append(messages, provider.Message{Role: provider.RoleAssistant, Content: last, ReasoningItems: reasoningItems})
-				return last, nil
-			}
-			if truncated && last != "" {
-				// The backend cut the generation at its output ceiling. The
-				// partial answer is real model output: keep it in the
-				// transcript and ask the model to finish rather than failing
-				// a run that was demonstrably working.
-				messages = append(messages, provider.Message{Role: provider.RoleAssistant, Content: last, ReasoningItems: reasoningItems})
-				messages = append(messages, provider.Message{Role: provider.RoleUser, Content: "Your previous reply was cut off at the provider's output token limit. Continue from where you stopped and finish the answer."})
-				guard.noteProgress()
+			if last == "" {
+				// Reasoning is model output, not silence: a step that only
+				// thought (a reasoning model cut off before its answer, or
+				// working through a hard step) must not feed the idle guard,
+				// or a run that is demonstrably working gets filed as stuck
+				// after three such steps. The thought may be visible as
+				// summary text, as stored reasoning items, or only as
+				// reasoning tokens in the step's usage when the backend
+				// streamed no summary; all three are the model working. It
+				// still earns the nudge below; the step budget stays the
+				// outer bound.
+				if strings.TrimSpace(reasoning.String()) != "" || len(reasoningItems) > 0 || stepReasoningTokens > 0 {
+					guard.noteProgress()
+				} else if stop, reason := guard.noteEmptyStep(); stop {
+					return "", errors.New(reason)
+				}
+				messages = append(messages, provider.Message{Role: provider.RoleUser, Content: "Reply with the answer."})
 				continue
 			}
-			// Reasoning is model output, not silence: a step that only
-			// thought (a reasoning model cut off before its answer, or
-			// working through a hard step) must not feed the idle guard,
-			// or a run that is demonstrably working gets filed as stuck
-			// after three such steps. The thought may be visible as
-			// summary text, as stored reasoning items, or only as
-			// reasoning tokens in the step's usage when the backend
-			// streamed no summary; all three are the model working. It
-			// still earns the nudge below; the step budget stays the
-			// outer bound.
-			if strings.TrimSpace(reasoning.String()) != "" || len(reasoningItems) > 0 || stepReasoningTokens > 0 {
+			messages = append(messages, provider.Message{Role: provider.RoleAssistant, Content: last, ReasoningItems: reasoningItems})
+			if truncated {
+				// A step cut at the backend's output ceiling produced a
+				// partial answer, not a finished one: it is stored above,
+				// so continue and let the next step finish it rather than
+				// returning half an answer as the run's result.
 				guard.noteProgress()
-			} else if stop, reason := guard.noteEmptyStep(); stop {
-				return "", errors.New(reason)
+				messages = append(messages, provider.Message{Role: provider.RoleUser, Content: "Continue."})
+				continue
 			}
-			messages = append(messages, provider.Message{Role: provider.RoleUser, Content: "Reply with the answer."})
-			continue
+			return last, nil
 		}
 		guard.noteProgress()
 		messages = append(messages, provider.Message{Role: provider.RoleAssistant, Content: text.String(), ToolCalls: calls, ReasoningItems: reasoningItems})

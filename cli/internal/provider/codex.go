@@ -132,11 +132,13 @@ func decodeResponsesStream(label string, body io.Reader, emit func(StreamEvent) 
 		case "response.completed", "response.incomplete":
 			// An incomplete response still bills, so its usage is harvested
 			// like a completed one; but it is not a finished step. It means
-			// the backend cut the generation off (an output ceiling reached
-			// mid-reasoning, a content filter), so after the usage the stream
-			// ends in an error naming the reason instead of looking like a
-			// model that silently produced nothing, which the agent loop
-			// would count as an idle step.
+			// the backend cut the generation off. A cut at the output
+			// ceiling (max_output_tokens) is reported as an EventIncomplete
+			// after the usage so the loop can continue the truncated step
+			// from its partial output; any other reason (a content filter)
+			// still ends the stream in an error naming the reason instead
+			// of looking like a model that silently produced nothing,
+			// which the agent loop would count as an idle step.
 			if event.Response != nil && event.Response.Usage != nil {
 				raw := event.Response.Usage
 				stepUsage := Usage{
@@ -159,12 +161,18 @@ func decodeResponsesStream(label string, body io.Reader, emit func(StreamEvent) 
 					reason = event.Response.IncompleteDetails.Reason
 				}
 				if reason == "max_output_tokens" {
-					// Typed so the agent loop can tell a cut-off generation
-					// (recoverable: keep the partial output, ask the model to
-					// finish) from every other incomplete reason.
-					return wrapStreamError(label, fmt.Errorf("%w: the Responses backend ended the response incomplete (%s) before the step finished", ErrOutputTruncated, reason))
+					// The backend's own per-response output ceiling cut
+					// the generation; neither client sets that ceiling, so
+					// a reasoning-heavy step can hit it on a healthy run.
+					// The partial step stays valid: report it and let the
+					// loop continue from what arrived instead of failing
+					// the whole run.
+					if err := emit(StreamEvent{Type: EventIncomplete, IncompleteReason: reason}); err != nil {
+						return err
+					}
+				} else {
+					return wrapStreamError(label, fmt.Errorf("the Responses backend ended the response incomplete (%s) before the step finished", reason))
 				}
-				return wrapStreamError(label, fmt.Errorf("the Responses backend ended the response incomplete (%s) before the step finished", reason))
 			}
 		case "response.failed", "error":
 			return wrapStreamError(label, fmt.Errorf("the Responses backend reported a failure: %s", event.message()))
@@ -246,13 +254,15 @@ func reasoningItemInput(item ReasoningItem) map[string]any {
 	if item.ID != "" {
 		out["id"] = item.ID
 	}
-	if len(item.Summary) > 0 {
-		summary := make([]map[string]any, 0, len(item.Summary))
-		for _, text := range item.Summary {
-			summary = append(summary, map[string]any{"type": "summary_text", "text": text})
-		}
-		out["summary"] = summary
+	// The summary key is required on a replayed reasoning item even when
+	// the backend issued the item without summary parts: omitting it makes
+	// the backend reject the whole request ("Missing required parameter:
+	// 'input[N].summary'"). An empty array is the accepted shape.
+	summary := make([]map[string]any, 0, len(item.Summary))
+	for _, text := range item.Summary {
+		summary = append(summary, map[string]any{"type": "summary_text", "text": text})
 	}
+	out["summary"] = summary
 	return out
 }
 
