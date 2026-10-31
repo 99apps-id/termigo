@@ -66,14 +66,9 @@ func Inspect() Report {
 }
 
 func trimVersion(value string) string {
-	value = strings.TrimSpace(value)
-			if len(value) > 120 {
-				r := []rune(value)
-				if len(r) > 120 {
-					value = string(r[:120]) + "..."
-				} else if len(value) > 120 {
-					value = value[:120] + "..."
-				}
-			}
-	return value
+	runes := []rune(strings.TrimSpace(value))
+	if len(runes) > 120 {
+		return string(runes[:120]) + "..."
+	}
+	return string(runes)
 }
