@@ -118,6 +118,10 @@ const (
 	// EventReasoningItem carries one completed reasoning output item, for
 	// stateless replay on the next step.
 	EventReasoningItem StreamEventType = "reasoning-item"
+	// EventIncomplete reports that the backend ended the response early
+	// at its own output ceiling (max_output_tokens). The step's partial
+	// output stays valid; the loop decides whether to continue from it.
+	EventIncomplete StreamEventType = "incomplete"
 )
 
 // StreamEvent is one chunk of a streaming completion.
@@ -127,6 +131,9 @@ type StreamEvent struct {
 	ToolCall      *ToolCall
 	Usage         *Usage
 	ReasoningItem *ReasoningItem
+	// IncompleteReason carries the backend's reason on an EventIncomplete
+	// event (for example "max_output_tokens").
+	IncompleteReason string
 }
 
 // Client streams one provider.

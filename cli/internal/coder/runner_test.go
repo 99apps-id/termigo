@@ -92,6 +92,30 @@ func TestRunReasoningTokenOnlyStepsAreNotIdle(t *testing.T) {
 	}
 }
 
+// A step cut at the backend's output ceiling is a truncated step, not the
+// run's end: the partial text must not be returned as the finished answer,
+// and the loop continues so the next step completes it.
+func TestRunContinuesAStepCutAtTheOutputCeiling(t *testing.T) {
+	client := &scriptedClient{steps: [][]provider.StreamEvent{
+		{
+			{Type: provider.EventTextDelta, Text: "Partial ans"},
+			{Type: provider.EventIncomplete, IncompleteReason: "max_output_tokens"},
+		},
+		{{Type: provider.EventTextDelta, Text: "wer, finished."}},
+	}}
+
+	out, err := Run(context.Background(), Options{Client: client, Model: "fake", MaxSteps: 6}, "answer", nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if out != "wer, finished." {
+		t.Errorf("answer = %q, want the continuation step's text, not the truncated partial", out)
+	}
+	if calls := client.callCount(); calls != 2 {
+		t.Errorf("provider calls = %d, want the truncated step and its continuation", calls)
+	}
+}
+
 // The step's reasoning items ride on its stored message: they are the only
 // copy of the thought a stateless backend produced, and the next request
 // replays them from there.

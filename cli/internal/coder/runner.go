@@ -94,6 +94,7 @@ func Run(ctx context.Context, opts Options, prompt string, emit func(provider.St
 		var calls []provider.ToolCall
 		var reasoningItems []provider.ReasoningItem
 		var stepReasoningTokens int
+		var truncated bool
 		err := opts.Client.Stream(ctx, provider.ChatRequest{
 			Model:    opts.Model,
 			System:   system,
@@ -114,6 +115,8 @@ func Run(ctx context.Context, opts Options, prompt string, emit func(provider.St
 				if event.ReasoningItem != nil {
 					reasoningItems = append(reasoningItems, *event.ReasoningItem)
 				}
+			case provider.EventIncomplete:
+				truncated = true
 			case provider.EventUsage:
 				if event.Usage != nil {
 					stepReasoningTokens += event.Usage.ReasoningTokens
@@ -153,6 +156,15 @@ func Run(ctx context.Context, opts Options, prompt string, emit func(provider.St
 				continue
 			}
 			messages = append(messages, provider.Message{Role: provider.RoleAssistant, Content: last, ReasoningItems: reasoningItems})
+			if truncated {
+				// A step cut at the backend's output ceiling produced a
+				// partial answer, not a finished one: it is stored above,
+				// so continue and let the next step finish it rather than
+				// returning half an answer as the run's result.
+				guard.noteProgress()
+				messages = append(messages, provider.Message{Role: provider.RoleUser, Content: "Continue."})
+				continue
+			}
 			return last, nil
 		}
 		guard.noteProgress()

@@ -253,15 +253,47 @@ func TestCodexInputReplaysReasoningItems(t *testing.T) {
 	}
 }
 
-// An incomplete response is a cut-off generation, not a silent one: the
-// decoder must still harvest its usage, then end the stream in an error
-// naming the reason, so the agent loop reports a provider failure instead of
-// counting the step as idle.
-func TestDecodeResponsesStreamReportsIncomplete(t *testing.T) {
+// A response cut at the backend's output ceiling is a truncated step, not
+// a failed one: the decoder must still harvest its usage, then report the
+// cut as an EventIncomplete so the loop can continue from the partial
+// output instead of the run dying on a limit the client never set.
+func TestDecodeResponsesStreamReportsOutputCeilingAsEvent(t *testing.T) {
 	sse := strings.Join([]string{
 		`data: {"type":"response.reasoning_summary_text.delta","delta":"thinking"}`,
 		``,
 		`data: {"type":"response.incomplete","response":{"usage":{"input_tokens":10,"output_tokens":99,"total_tokens":109},"incomplete_details":{"reason":"max_output_tokens"}}}`,
+		``,
+	}, "\n")
+
+	var usages int
+	var incomplete []string
+	err := decodeResponsesStream("test", strings.NewReader(sse), func(event StreamEvent) error {
+		switch event.Type {
+		case EventUsage:
+			usages++
+		case EventIncomplete:
+			incomplete = append(incomplete, event.IncompleteReason)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("a step cut at the output ceiling must not fail the stream: %v", err)
+	}
+	if len(incomplete) != 1 || incomplete[0] != "max_output_tokens" {
+		t.Errorf("incomplete events = %v, want one max_output_tokens event", incomplete)
+	}
+	if usages != 1 {
+		t.Errorf("usage events = %d, want the incomplete response's usage harvested once", usages)
+	}
+}
+
+// An incomplete response for any other reason (a content filter) is not a
+// step the loop should quietly retry: the decoder must still harvest its
+// usage, then end the stream in an error naming the reason, so the agent
+// loop reports a provider failure instead of counting the step as idle.
+func TestDecodeResponsesStreamErrorsOnOtherIncompleteReasons(t *testing.T) {
+	sse := strings.Join([]string{
+		`data: {"type":"response.incomplete","response":{"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15},"incomplete_details":{"reason":"content_filter"}}}`,
 		``,
 	}, "\n")
 
@@ -273,9 +305,9 @@ func TestDecodeResponsesStreamReportsIncomplete(t *testing.T) {
 		return nil
 	})
 	if err == nil {
-		t.Fatalf("an incomplete response must end the stream in an error")
+		t.Fatalf("an incomplete response cut by a content filter must end the stream in an error")
 	}
-	if !strings.Contains(err.Error(), "incomplete") || !strings.Contains(err.Error(), "max_output_tokens") {
+	if !strings.Contains(err.Error(), "incomplete") || !strings.Contains(err.Error(), "content_filter") {
 		t.Errorf("error = %q, want it to name the incomplete reason", err)
 	}
 	if usages != 1 {
