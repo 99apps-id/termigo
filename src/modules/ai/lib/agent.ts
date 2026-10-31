@@ -230,6 +230,30 @@ function pruneModelCache() {
   }
 }
 
+// Apply the Codex backend's request contract to a ChatGPT-route model.
+//
+// The backend serves subscription accounts statelessly and rejects a
+// Responses request whose `store` is not explicitly false: the public API
+// default is true, and the SDK leaves the field out of the body unless it is
+// set, so an unadorned `.responses()` model is refused even with a valid
+// token (the Go CLI's Codex client hard-codes the same `store: false`).
+// Setting it as a model default rather than per call means every caller of
+// the built model sends it (agent run, subagents, side questions, session
+// titles), and the SDK also converts the conversation for stateless replay:
+// no stored item ids, and reasoning returns as encrypted content the next
+// step can carry.
+export function withCodexBackendDefaults(model: LanguageModel): LanguageModel {
+  if (typeof model === "string" || model.specificationVersion !== "v3") {
+    return model;
+  }
+  return aiSdk.wrapLanguageModel({
+    model,
+    middleware: aiSdk.defaultSettingsMiddleware({
+      settings: { providerOptions: { openai: { store: false } } },
+    }),
+  });
+}
+
 export async function buildLanguageModel(
   provider: ProviderId,
   keys: ProviderKeys,
@@ -445,17 +469,19 @@ export async function buildLanguageModel(
       // headers for this route and the webview refuses to send `originator`.
       // Returned, NOT cached: the access token rotates on refresh, so a cached
       // model would keep serving an expired token until restart.
-      return createOpenAI({
-        baseURL: CHATGPT_BASE_URL,
-        apiKey: auth.accessToken,
-        headers: {
-          ...CHATGPT_HEADERS,
-          // Omitted rather than sent empty when the claim was missing: an empty
-          // header reads as "account none" and 401s less clearly than absence.
-          ...(auth.accountId ? { "chatgpt-account-id": auth.accountId } : {}),
-        },
-        fetch: apiFetch,
-      }).responses(resolvedModelId);
+      return withCodexBackendDefaults(
+        createOpenAI({
+          baseURL: CHATGPT_BASE_URL,
+          apiKey: auth.accessToken,
+          headers: {
+            ...CHATGPT_HEADERS,
+            // Omitted rather than sent empty when the claim was missing: an empty
+            // header reads as "account none" and 401s less clearly than absence.
+            ...(auth.accountId ? { "chatgpt-account-id": auth.accountId } : {}),
+          },
+          fetch: apiFetch,
+        }).responses(resolvedModelId),
+      );
     }
     case "claude-oauth": {
       const { createAnthropic } = await import("@ai-sdk/anthropic");

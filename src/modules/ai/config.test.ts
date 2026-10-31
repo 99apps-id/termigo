@@ -3,6 +3,8 @@ import {
   apiModelIdDiffers,
   type CustomEndpoint,
   compatModelIdForEndpoint,
+  CHATGPT_HEADERS,
+  CODEX_CLI_VERSION,
   DEFAULT_MODEL_ID,
   effectiveModelName,
   endpointIdFromCompatModel,
@@ -309,6 +311,21 @@ describe("resolveModelContextLimit", () => {
 
   it("leaves a first-class model at its configured limit", () => {
     expect(resolveModelContextLimit("claude-opus-4-7", [])).toBe(1_000_000);
+  });
+});
+
+describe("ChatGPT (Codex backend) request identity", () => {
+  it("presents the pinned Codex CLI identity the backend gates on", () => {
+    // The backend gates the newer models on the client identity: `originator`
+    // names the client family, and the User-Agent/`version` pair carries the
+    // release (the Go CLI in cli/internal/provider/codex.go pins the same
+    // release for the same reason).
+    expect(CHATGPT_HEADERS.originator).toBe("codex_cli_rs");
+    expect(CHATGPT_HEADERS["User-Agent"]).toBe(
+      `codex_cli_rs/${CODEX_CLI_VERSION}`,
+    );
+    expect(CHATGPT_HEADERS.version).toBe(CODEX_CLI_VERSION);
+    expect(CODEX_CLI_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
   });
 });
 
