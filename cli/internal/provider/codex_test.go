@@ -90,6 +90,19 @@ func TestCodexStreamUsesTheResponsesAPI(t *testing.T) {
 	if gotBody["instructions"] != "be brief" || gotBody["store"] != false {
 		t.Errorf("body = %v", gotBody)
 	}
+	// The reasoning controls travel as one object asking for an auto
+	// summary: without the summary a reasoning step streams nothing the
+	// agent loop can see.
+	reasoningBody, ok := gotBody["reasoning"].(map[string]any)
+	if !ok || reasoningBody["summary"] != "auto" {
+		t.Errorf("reasoning = %v, want an object asking for an auto summary", gotBody["reasoning"])
+	}
+	// The encrypted reasoning include is what lets the next step hand this
+	// step's reasoning items back to a store: false backend.
+	include, ok := gotBody["include"].([]any)
+	if !ok || len(include) != 1 || include[0] != "reasoning.encrypted_content" {
+		t.Errorf("include = %v, want the encrypted reasoning content", gotBody["include"])
+	}
 	if text.String() != "Hello " || reasoning.String() != "thinking" {
 		t.Errorf("text=%q reasoning=%q", text.String(), reasoning.String())
 	}
@@ -171,5 +184,101 @@ func TestCodexResponsesLiteMovesToolsAndInstructions(t *testing.T) {
 	reasoning, _ := gotBody["reasoning"].(map[string]any)
 	if reasoning["context"] != "all_turns" {
 		t.Errorf("reasoning = %#v, want context all_turns", reasoning)
+	}
+	if reasoning["summary"] != "auto" {
+		t.Errorf("reasoning = %#v, want an auto summary so the thinking streams back", reasoning)
+	}
+}
+
+// TestDecodeResponsesStreamCapturesReasoningItem proves the decoder keeps a
+// completed reasoning item whole: with store: false the item is the only
+// copy of the step's thought, and the next request hands it back. It also
+// pins the reasoning-token half of the usage, the loop's other proof that a
+// summary-less step was thinking rather than idle.
+func TestDecodeResponsesStreamCapturesReasoningItem(t *testing.T) {
+	sse := strings.Join([]string{
+		`data: {"type":"response.output_item.done","item":{"type":"reasoning","id":"rs_1","encrypted_content":"enc_abc","summary":[{"type":"summary_text","text":"thought one"}]}}`,
+		``,
+		`data: {"type":"response.output_text.delta","delta":"answer"}`,
+		``,
+		`data: {"type":"response.completed","response":{"usage":{"input_tokens":3,"output_tokens":9,"total_tokens":12,"output_tokens_details":{"reasoning_tokens":7}}}}`,
+		``,
+	}, "\n")
+	var items []ReasoningItem
+	var usage *Usage
+	err := decodeResponsesStream("Codex", strings.NewReader(sse), func(event StreamEvent) error {
+		switch event.Type {
+		case EventReasoningItem:
+			items = append(items, *event.ReasoningItem)
+		case EventUsage:
+			usage = event.Usage
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("decodeResponsesStream: %v", err)
+	}
+	if len(items) != 1 || items[0].ID != "rs_1" || items[0].EncryptedContent != "enc_abc" ||
+		len(items[0].Summary) != 1 || items[0].Summary[0] != "thought one" {
+		t.Errorf("items = %+v, want the one reasoning item kept whole", items)
+	}
+	if usage == nil || usage.ReasoningTokens != 7 {
+		t.Errorf("usage = %+v, want the reasoning tokens carried through", usage)
+	}
+}
+
+// TestCodexInputReplaysReasoningItems proves an assistant turn's stored
+// reasoning items go back into the next request ahead of its words and
+// calls, in the shape the backend issued them.
+func TestCodexInputReplaysReasoningItems(t *testing.T) {
+	input := encodeResponsesInput(ChatRequest{Messages: []Message{
+		{Role: RoleUser, Content: "read a"},
+		{Role: RoleAssistant, Content: "working", ReasoningItems: []ReasoningItem{
+			{ID: "rs_1", EncryptedContent: "enc_abc", Summary: []string{"thought one"}},
+		}, ToolCalls: []ToolCall{{ID: "call_1", Name: "read_file", Arguments: "{}"}}},
+	}})
+	if len(input) != 4 {
+		t.Fatalf("input = %#v, want user, reasoning, message, function_call", input)
+	}
+	item := input[1]
+	if item["type"] != "reasoning" || item["id"] != "rs_1" || item["encrypted_content"] != "enc_abc" {
+		t.Errorf("input[1] = %#v, want the replayed reasoning item", item)
+	}
+	summary, ok := item["summary"].([]map[string]any)
+	if !ok || len(summary) != 1 || summary[0]["type"] != "summary_text" || summary[0]["text"] != "thought one" {
+		t.Errorf("summary = %#v, want the one summary_text part", item["summary"])
+	}
+	if input[2]["type"] != "message" || input[3]["type"] != "function_call" {
+		t.Errorf("input order = %#v, want the reasoning item before the words and the call", input)
+	}
+}
+
+// An incomplete response is a cut-off generation, not a silent one: the
+// decoder must still harvest its usage, then end the stream in an error
+// naming the reason, so the agent loop reports a provider failure instead of
+// counting the step as idle.
+func TestDecodeResponsesStreamReportsIncomplete(t *testing.T) {
+	sse := strings.Join([]string{
+		`data: {"type":"response.reasoning_summary_text.delta","delta":"thinking"}`,
+		``,
+		`data: {"type":"response.incomplete","response":{"usage":{"input_tokens":10,"output_tokens":99,"total_tokens":109},"incomplete_details":{"reason":"max_output_tokens"}}}`,
+		``,
+	}, "\n")
+
+	var usages int
+	err := decodeResponsesStream("test", strings.NewReader(sse), func(event StreamEvent) error {
+		if event.Type == EventUsage {
+			usages++
+		}
+		return nil
+	})
+	if err == nil {
+		t.Fatalf("an incomplete response must end the stream in an error")
+	}
+	if !strings.Contains(err.Error(), "incomplete") || !strings.Contains(err.Error(), "max_output_tokens") {
+		t.Errorf("error = %q, want it to name the incomplete reason", err)
+	}
+	if usages != 1 {
+		t.Errorf("usage events = %d, want the incomplete response's usage harvested once", usages)
 	}
 }
