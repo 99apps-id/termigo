@@ -2037,11 +2037,21 @@ export const MODELS = [
 // credits; this draws on the ChatGPT subscription). Best-effort against a
 // private endpoint OpenAI documents for its own Codex client; it can change.
 export const CHATGPT_BASE_URL = "https://chatgpt.com/backend-api/codex";
-// The endpoint gates on these. `originator` identifies the caller as the Codex
-// client; `OpenAI-Beta` opts into the Responses shape. The per-request
+// The Codex CLI release this client presents as. The backend gates access to
+// the newer models on this identity: it is checked in the User-Agent and the
+// `version` header, so both carry it (the Go CLI's Codex client in
+// cli/internal/provider/codex.go pins the same release for the same reason,
+// and the Rust token exchange sends the same User-Agent). Bump all of them
+// together.
+export const CODEX_CLI_VERSION = "0.159.0";
+// The endpoint gates on these. `originator` plus the User-Agent/`version`
+// pair identify the caller as the Codex client of CODEX_CLI_VERSION;
+// `OpenAI-Beta` opts into the Responses shape. The per-request
 // `chatgpt-account-id` is added in buildLanguageModel from the signed-in token.
 export const CHATGPT_HEADERS: Record<string, string> = {
   originator: "codex_cli_rs",
+  "User-Agent": `codex_cli_rs/${CODEX_CLI_VERSION}`,
+  version: CODEX_CLI_VERSION,
   "OpenAI-Beta": "responses=experimental",
 };
 
