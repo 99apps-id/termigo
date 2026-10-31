@@ -139,12 +139,12 @@ pub fn normalize_ipv4(host: &str) -> Option<String> {
             if last_val > 0xFFFF {
                 return None;
             }
-            addr = (addr << 16) | (last_val & 0xFFFF);
+            addr = (addr << 16) | ((last_val & 0xFFFF) as u32);
         } else if parts.len() == 3 {
             if last_val > 0xFFFFFF {
                 return None;
             }
-            addr = (addr << 24) | (last_val & 0xFFFFFF);
+            addr = (addr << 24) | ((last_val & 0xFFFFFF) as u32);
         } else if parts.len() == 4 {
             let v = parse_decimal_part(last)?;
             addr = (addr << 8) | (v & 0xff);
@@ -157,13 +157,13 @@ pub fn normalize_ipv4(host: &str) -> Option<String> {
                 .join("."),
         );
     }
-    if is_hex(&h) || is_octal_strict(&h) || is_decimal(&h) {
-        if h.len() > 1 && h.starts_with('0') && !is_octal_strict(&h) {
+    if is_hex(h) || is_octal_strict(h) || is_decimal(h) {
+        if h.len() > 1 && h.starts_with('0') && !is_octal_strict(h) {
             // decimal with leading zero is not octal in strict form? is_octal_strict requires all digits 0-7; "0123" would be octal if all valid, but we reject leading zero in decimal form - but easier to just parse as decimal if all digits
         }
-        let (base, digits) = if is_hex(&h) {
+        let (base, digits) = if is_hex(h) {
             (16u32, &h[2..])
-        } else if is_octal_strict(&h) {
+        } else if is_octal_strict(h) {
             (8u32, &h[1..])
         } else {
             if h.len() > 1 && h.starts_with('0') {
@@ -189,7 +189,7 @@ pub fn unsafe_url(url: &str) -> Option<String> {
         Ok(parsed) => parsed,
         Err(_) => return Some("invalid URL".to_string()),
     };
-    if !(parsed.scheme() == "http" || parsed.scheme() == "https")) {
+    if !(parsed.scheme() == "http" || parsed.scheme() == "https") {
         return Some("only http/https URLs are allowed".to_string());
     }
     let host_raw = parsed.host_str().unwrap_or("");

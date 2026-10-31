@@ -158,6 +158,12 @@ func decodeResponsesStream(label string, body io.Reader, emit func(StreamEvent) 
 				if event.Response != nil && event.Response.IncompleteDetails != nil && event.Response.IncompleteDetails.Reason != "" {
 					reason = event.Response.IncompleteDetails.Reason
 				}
+				if reason == "max_output_tokens" {
+					// Typed so the agent loop can tell a cut-off generation
+					// (recoverable: keep the partial output, ask the model to
+					// finish) from every other incomplete reason.
+					return wrapStreamError(label, fmt.Errorf("%w: the Responses backend ended the response incomplete (%s) before the step finished", ErrOutputTruncated, reason))
+				}
 				return wrapStreamError(label, fmt.Errorf("the Responses backend ended the response incomplete (%s) before the step finished", reason))
 			}
 		case "response.failed", "error":

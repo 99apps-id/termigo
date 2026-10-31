@@ -5,9 +5,16 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 )
+
+// ErrOutputTruncated marks a stream the backend ended early because the
+// generation hit its output-token ceiling. The step still produced real
+// output, so the runner keeps it and asks the model to continue instead of
+// failing a run that was demonstrably working.
+var ErrOutputTruncated = errors.New("output truncated at the provider's token limit")
 
 // Role is a message author.
 type Role string

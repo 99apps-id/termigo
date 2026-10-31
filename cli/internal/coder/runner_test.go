@@ -2,6 +2,8 @@ package coder
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,10 +14,12 @@ import (
 )
 
 // scriptedClient replays one event batch per Stream call, in order, and
-// counts the calls so a test can see where the run stopped.
+// counts the calls so a test can see where the run stopped. errs, when long
+// enough, is the error each step's stream ends with after its events.
 type scriptedClient struct {
 	mu    sync.Mutex
 	steps [][]provider.StreamEvent
+	errs  []error
 	calls int
 }
 
@@ -33,6 +37,9 @@ func (f *scriptedClient) Stream(_ context.Context, _ provider.ChatRequest, emit 
 		if err := emit(event); err != nil {
 			return err
 		}
+	}
+	if index < len(f.errs) {
+		return f.errs[index]
 	}
 	return nil
 }
@@ -144,5 +151,80 @@ func TestRunTrulyEmptyStepsStopAsIdle(t *testing.T) {
 	}
 	if calls := client.callCount(); calls != 3 {
 		t.Errorf("provider calls = %d, want the guard to stop at 3 empty steps", calls)
+	}
+}
+
+// A step the backend cut at its output ceiling is not a failed run: the
+// partial answer stays in the transcript, the model is asked to finish, and
+// the next step's answer is returned.
+func TestRunTruncatedStepKeepsPartialAnswerAndContinues(t *testing.T) {
+	workspace := t.TempDir()
+	client := &scriptedClient{
+		steps: [][]provider.StreamEvent{
+			{{Type: provider.EventTextDelta, Text: "Partial answer."}},
+			{{Type: provider.EventTextDelta, Text: "The rest of it."}},
+		},
+		errs: []error{
+			fmt.Errorf("ChatGPT stream interrupted: %w: the Responses backend ended the response incomplete (max_output_tokens) before the step finished", provider.ErrOutputTruncated),
+			nil,
+		},
+	}
+	session := NewSession(workspace, "fake")
+
+	out, err := Run(context.Background(), Options{Client: client, Model: "fake", Env: &Env{Workspace: workspace}, Session: session}, "answer briefly", nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if out != "The rest of it." {
+		t.Fatalf("answer = %q, want the continuation step's answer", out)
+	}
+	var sawPartial, sawNudge bool
+	for _, message := range session.Messages {
+		if message.Role == provider.RoleAssistant && message.Content == "Partial answer." {
+			sawPartial = true
+		}
+		if message.Role == provider.RoleUser && strings.Contains(message.Content, "cut off") {
+			sawNudge = true
+		}
+	}
+	if !sawPartial || !sawNudge {
+		t.Errorf("session = %+v, want the partial answer kept and a continue nudge recorded", session.Messages)
+	}
+}
+
+// A truncated step with no visible output still counts the model's thinking
+// as progress, and the plain nudge recovers the answer on the next step.
+func TestRunTruncatedEmptyStepNudgesInsteadOfFailing(t *testing.T) {
+	client := &scriptedClient{
+		steps: [][]provider.StreamEvent{
+			{{Type: provider.EventReasoningDelta, Text: "thinking"}},
+			{{Type: provider.EventTextDelta, Text: "Finished."}},
+		},
+		errs: []error{
+			fmt.Errorf("stream interrupted: %w", provider.ErrOutputTruncated),
+			nil,
+		},
+	}
+
+	out, err := Run(context.Background(), Options{Client: client, Model: "fake", MaxSteps: 4}, "answer", nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if out != "Finished." {
+		t.Fatalf("answer = %q, want the nudged step's answer", out)
+	}
+}
+
+// Only the output ceiling is recoverable: any other stream error still fails
+// the run instead of being swallowed as a nudge.
+func TestRunNonTruncationStreamErrorStillFails(t *testing.T) {
+	client := &scriptedClient{
+		steps: [][]provider.StreamEvent{{}},
+		errs:  []error{errors.New("boom")},
+	}
+
+	_, err := Run(context.Background(), Options{Client: client, Model: "fake", MaxSteps: 2}, "answer", nil)
+	if err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("err = %v, want the provider's stream error", err)
 	}
 }

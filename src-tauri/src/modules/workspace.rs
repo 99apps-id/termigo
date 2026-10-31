@@ -378,17 +378,16 @@ pub fn is_git_worktree_of_authorized(registry: &WorkspaceRegistry, path: &Path) 
 static LAUNCH_CWD: OnceLock<Option<PathBuf>> = OnceLock::new();
 
 pub fn init_launch_cwd(cli_dir: Option<&str>) {
-    LAUNCH_CWD.get_or_init(|| resolve_launch_cwd(cli_dir, std::env::current_dir().ok()));
+    LAUNCH_CWD.get_or_init(|| resolve_launch_cwd(cli_dir));
 }
 
-fn resolve_launch_cwd(cli_dir: Option<&str>, env_cwd: Option<PathBuf>) -> Option<PathBuf> {
-    if let Some(dir) = cli_dir {
-        let p = PathBuf::from(dir);
-        if p.is_dir() {
-            return Some(p);
-        }
-    }
-    env_cwd.filter(|p| is_usable_launch_dir(p))
+// Only an explicitly chosen directory seeds the launch cwd: a file manager's
+// "Open in Termigo", a deep link, a CLI argument. The process's inherited cwd
+// must not - an app opened from a shell sitting in a repo would otherwise pin
+// every new terminal and the explorer panel to that repo instead of home.
+fn resolve_launch_cwd(cli_dir: Option<&str>) -> Option<PathBuf> {
+    let dir = cli_dir.map(PathBuf::from)?;
+    is_usable_launch_dir(&dir).then_some(dir)
 }
 
 pub fn launch_cwd_snapshot() -> Option<PathBuf> {
@@ -397,12 +396,6 @@ pub fn launch_cwd_snapshot() -> Option<PathBuf> {
 
 fn resolve_launch_dir() -> PathBuf {
     if let Some(cwd) = launch_cwd_snapshot() {
-        return cwd;
-    }
-    if let Some(cwd) = std::env::current_dir()
-        .ok()
-        .filter(|p| is_usable_launch_dir(p))
-    {
         return cwd;
     }
     dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"))
@@ -1269,25 +1262,24 @@ mod auth_tests {
     }
 
     #[test]
-    fn resolve_launch_cwd_prefers_cli_dir_over_env() {
+    fn resolve_launch_cwd_accepts_explicit_cli_dir() {
         let cli = tempdir("cli");
-        let env = tempdir("env");
         let s = cli.to_string_lossy().into_owned();
-        let resolved = resolve_launch_cwd(Some(&s), Some(env.clone()));
+        let resolved = resolve_launch_cwd(Some(&s));
         assert_eq!(resolved.as_deref(), Some(cli.as_path()));
     }
 
     #[test]
-    fn resolve_launch_cwd_falls_back_to_env_when_cli_missing() {
-        let env = tempdir("envonly");
-        assert_eq!(resolve_launch_cwd(None, Some(env.clone())), Some(env));
+    fn resolve_launch_cwd_ignores_inherited_process_cwd() {
+        // The inherited cwd must not seed the workspace: an app opened from a
+        // shell inside a repo would otherwise pin every terminal and the
+        // explorer panel to that repo instead of home.
+        assert_eq!(resolve_launch_cwd(None), None);
     }
 
     #[test]
     fn resolve_launch_cwd_ignores_nonexistent_cli_dir() {
-        let env = tempdir("envfb");
-        let resolved = resolve_launch_cwd(Some("/no/such/termigo/dir"), Some(env.clone()));
-        assert_eq!(resolved, Some(env));
+        assert_eq!(resolve_launch_cwd(Some("/no/such/termigo/dir")), None);
     }
 
     #[test]

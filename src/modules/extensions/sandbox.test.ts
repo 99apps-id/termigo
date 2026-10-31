@@ -65,7 +65,7 @@ describe("sandbox dispatcher", () => {
     });
     expect(resp.ok).toBe(false);
     expect((resp as { error: string }).error).toMatch(
-      /lacks permission "invoke:shell_run_command"/,
+      /lacks permission to invoke "shell_run_command"/,
     );
     expect(executor.invoke).not.toHaveBeenCalled();
   });

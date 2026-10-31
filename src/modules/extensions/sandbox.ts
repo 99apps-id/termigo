@@ -211,7 +211,9 @@ export function createSandboxDispatcher(
       switch (req.kind) {
         case "invoke": {
           if (!isInvokeAllowed(ext.declared, req.command)) {
-            throw new Error(`extension "${ext.id}" lacks permission to invoke "${req.command}"`);
+            throw new Error(
+              `extension "${ext.id}" lacks permission to invoke "${req.command}"`,
+            );
           }
           value = await executor.invoke(req.command, req.args);
           break;

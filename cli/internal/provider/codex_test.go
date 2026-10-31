@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -280,5 +281,43 @@ func TestDecodeResponsesStreamReportsIncomplete(t *testing.T) {
 	}
 	if usages != 1 {
 		t.Errorf("usage events = %d, want the incomplete response's usage harvested once", usages)
+	}
+}
+
+// A max_output_tokens cut is typed so the agent loop can recover the step;
+// the partial output is still harvested, and any other incomplete reason
+// stays a hard, untyped error.
+func TestDecodeResponsesStreamTypesMaxOutputTokensTruncation(t *testing.T) {
+	sse := strings.Join([]string{
+		`data: {"type":"response.output_text.delta","delta":"partial"}`,
+		``,
+		`data: {"type":"response.incomplete","response":{"usage":{"input_tokens":1,"output_tokens":2,"total_tokens":3},"incomplete_details":{"reason":"max_output_tokens"}}}`,
+		``,
+	}, "\n")
+
+	var text strings.Builder
+	err := decodeResponsesStream("test", strings.NewReader(sse), func(event StreamEvent) error {
+		if event.Type == EventTextDelta {
+			text.WriteString(event.Text)
+		}
+		return nil
+	})
+	if err == nil {
+		t.Fatalf("an incomplete response must end the stream in an error")
+	}
+	if !errors.Is(err, ErrOutputTruncated) {
+		t.Errorf("err = %v, want it to wrap ErrOutputTruncated", err)
+	}
+	if text.String() != "partial" {
+		t.Errorf("text = %q, want the partial output harvested before the cut", text.String())
+	}
+
+	other := strings.Join([]string{
+		`data: {"type":"response.incomplete","response":{"incomplete_details":{"reason":"content_filter"}}}`,
+		``,
+	}, "\n")
+	err = decodeResponsesStream("test", strings.NewReader(other), func(StreamEvent) error { return nil })
+	if err == nil || errors.Is(err, ErrOutputTruncated) {
+		t.Errorf("err = %v, want a non-truncation incomplete reason to stay untyped", err)
 	}
 }
