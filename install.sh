@@ -254,7 +254,7 @@ EOF
           cp -f "$logo_src" "$target_icon"
         fi
 
-        cat << EOF > "${APPS_DIR}/termigo.desktop"
+        cat << EOF > "${APPS_DIR}/Termigo.desktop"
 [Desktop Entry]
 Name=Termigo
 Comment=Terminal-first, AI-native development environment
@@ -266,11 +266,11 @@ Categories=Development;IDE;TerminalEmulator;
 StartupWMClass=termigo
 MimeType=text/plain;
 EOF
-        chmod +x "${APPS_DIR}/termigo.desktop"
+        chmod +x "${APPS_DIR}/Termigo.desktop"
         if command -v update-desktop-database >/dev/null 2>&1; then
           update-desktop-database "${APPS_DIR}" 2>/dev/null || true
         fi
-        success "Desktop shortcut terpasang di ${APPS_DIR}/termigo.desktop"
+        success "Desktop shortcut terpasang di ${APPS_DIR}/Termigo.desktop"
 
         install_cli
         echo ""
@@ -345,7 +345,7 @@ EOF
   fi
 
   # Desktop Entry (Menu Aplikasi) dengan patch anti-freeze
-  cat << EOF > "${APPS_DIR}/termigo.desktop"
+  cat << EOF > "${APPS_DIR}/Termigo.desktop"
 [Desktop Entry]
 Name=Termigo
 Comment=Terminal-first, AI-native development environment
@@ -357,11 +357,11 @@ Categories=Development;IDE;TerminalEmulator;
 StartupWMClass=termigo
 MimeType=text/plain;
 EOF
-  chmod +x "${APPS_DIR}/termigo.desktop"
+  chmod +x "${APPS_DIR}/Termigo.desktop"
   if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "${APPS_DIR}" 2>/dev/null || true
   fi
-  success "Desktop shortcut terpasang di ${APPS_DIR}/termigo.desktop"
+  success "Desktop shortcut terpasang di ${APPS_DIR}/Termigo.desktop"
 
   # Pasang Companion CLI
   install_cli
@@ -550,7 +550,7 @@ build_from_source() {
       cp -f "${SCRIPT_DIR}/termigo.png" "$target_icon"
     fi
 
-    cat << EOF > "${APPS_DIR}/termigo.desktop"
+    cat << EOF > "${APPS_DIR}/Termigo.desktop"
 [Desktop Entry]
 Name=Termigo
 Comment=Terminal-first, AI-native development environment
@@ -562,11 +562,11 @@ Categories=Development;IDE;TerminalEmulator;
 StartupWMClass=termigo
 MimeType=text/plain;
 EOF
-    chmod +x "${APPS_DIR}/termigo.desktop"
+    chmod +x "${APPS_DIR}/Termigo.desktop"
     if command -v update-desktop-database >/dev/null 2>&1; then
       update-desktop-database "${APPS_DIR}" 2>/dev/null || true
     fi
-    success "Desktop shortcut terpasang di ${APPS_DIR}/termigo.desktop"
+    success "Desktop shortcut terpasang di ${APPS_DIR}/Termigo.desktop"
   else
     error "Kompilasi selesai tetapi binary tidak ditemukan di src-tauri/target/release/termigo"
     exit 1
@@ -634,7 +634,7 @@ uninstall_termigo() {
 
   info "Menghapus binary desktop & CLI..."
   rm -f "${BIN_DIR}/termigo" "${BIN_DIR}/termigo-go" "${BIN_DIR}/termi-go"
-  rm -rf "$SHARE_DIR" "${APPS_DIR}/termigo.desktop" "${ICONS_DIR}/termigo.png"
+  rm -rf "$SHARE_DIR" "${APPS_DIR}/Termigo.desktop" "${ICONS_DIR}/termigo.png"
 
   if [ -f "/etc/systemd/system/termigo.service" ]; then
     info "Menghentikan dan menghapus systemd service..."
