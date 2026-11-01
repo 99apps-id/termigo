@@ -1428,11 +1428,13 @@ export function useTabs(initial?: Partial<TerminalTab>) {
         if (t.id !== tabId || t.kind !== "terminal") return t;
         if (!hasLeaf(t.paneTree, leafId)) return t;
         if (t.activeLeafId === leafId) return t;
-        const cwd = findLeafCwd(t.paneTree, leafId);
+        const cwd = !isSshLeaf(t.paneTree, leafId)
+          ? findLeafCwd(t.paneTree, leafId)
+          : undefined;
         return {
           ...t,
           activeLeafId: leafId,
-          ...(cwd !== undefined && { cwd }),
+          cwd,
         };
       }),
     );
@@ -1444,8 +1446,10 @@ export function useTabs(initial?: Partial<TerminalTab>) {
         if (t.id !== tabId || t.kind !== "terminal") return t;
         const next = nextLeafId(t.paneTree, t.activeLeafId, delta);
         if (next === t.activeLeafId) return t;
-        const cwd = findLeafCwd(t.paneTree, next);
-        return { ...t, activeLeafId: next, ...(cwd !== undefined && { cwd }) };
+        const cwd = !isSshLeaf(t.paneTree, next)
+          ? findLeafCwd(t.paneTree, next)
+          : undefined;
+        return { ...t, activeLeafId: next, cwd };
       }),
     );
   }, []);
@@ -1523,7 +1527,9 @@ export function useTabs(initial?: Partial<TerminalTab>) {
       const nextCwd =
         activeChanged && !isSshLeaf(newTree, newActive)
           ? findLeafCwd(newTree, newActive)
-          : undefined;
+          : activeChanged
+            ? undefined
+            : tab.cwd;
       didRemove = true;
       return curr.map((x) =>
         x.id === tab.id
@@ -1531,7 +1537,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
               ...x,
               paneTree: newTree,
               activeLeafId: newActive,
-              ...(nextCwd !== undefined && { cwd: nextCwd }),
+              cwd: nextCwd,
               ...(activeChanged && { oscTitle: undefined }),
             }
           : x,
@@ -1575,7 +1581,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
               ...x,
               paneTree: newTree,
               activeLeafId: newActive,
-              ...(nextCwd !== undefined && { cwd: nextCwd }),
+              cwd: nextCwd,
               oscTitle: undefined,
             }
           : x,

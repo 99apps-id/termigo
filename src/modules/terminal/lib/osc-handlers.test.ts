@@ -66,6 +66,22 @@ describe("OSC 7 cwd handler — gated by OSC 133 in-command state", () => {
     expect(onCwd).toHaveBeenCalledWith("C:/Users/leo/project");
   });
 
+  it("accepts OSC 7 emitted while typing at prompt (after OSC 133 B)", () => {
+    const { term, handlers } = makeFakeTerm();
+    const state = createShellIntegrationState();
+    const onCwd = vi.fn();
+    registerPromptTracker(term, state);
+    registerCwdHandler(term, onCwd, state);
+
+    // Prompt draws A, then renders prompt body, then ends with B.
+    // Shell hook (e.g. Starship, chpwd, direnv) emits OSC 7 at or after B.
+    handlers.get(133)?.("A");
+    handlers.get(133)?.("B");
+    handlers.get(7)?.("file://host/home/me/project");
+
+    expect(onCwd).toHaveBeenCalledWith("/home/me/project");
+  });
+
   it("rejects OSC 7 emitted while a command is running", () => {
     const { term, handlers } = makeFakeTerm();
     const state = createShellIntegrationState();
@@ -76,8 +92,9 @@ describe("OSC 7 cwd handler — gated by OSC 133 in-command state", () => {
     // Simulate: user runs `ssh attacker.host`, which prints attacker bytes
     // including an OSC 7 trying to silently move the AI's cwd into /etc.
     handlers.get(133)?.("A"); // prompt drawn
-    handlers.get(133)?.("B"); // command begins (user hit enter)
-    handlers.get(7)?.("file://host/etc"); // attacker injection
+    handlers.get(133)?.("B"); // prompt end, user typed command
+    handlers.get(133)?.("C;ssh attacker.host"); // command execution begins
+    handlers.get(7)?.("file://host/etc"); // attacker injection during command
 
     expect(onCwd).not.toHaveBeenCalled();
   });
@@ -90,7 +107,8 @@ describe("OSC 7 cwd handler — gated by OSC 133 in-command state", () => {
     registerCwdHandler(term, onCwd, state);
 
     handlers.get(133)?.("A");
-    handlers.get(133)?.("B"); // running
+    handlers.get(133)?.("B");
+    handlers.get(133)?.("C;ssh attacker.host"); // running
     handlers.get(7)?.("file://host/etc"); // blocked
     handlers.get(133)?.("D;0"); // command exited
     handlers.get(7)?.("file://host/home/me/new-cwd"); // legitimate post-cmd OSC 7
