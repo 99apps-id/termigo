@@ -10,6 +10,7 @@ export type { ExtensionTabState } from "@/modules/extensions/tabStateShim";
 import {
   findLeafCwd,
   hasLeaf,
+  isLeaf,
   isSshLeaf,
   leafIds,
   nextLeafId,
@@ -1392,7 +1393,9 @@ export function useTabs(initial?: Partial<TerminalTab>) {
       const next = curr.map((t) => {
         if (t.kind !== "terminal" || !hasLeaf(t.paneTree, leafId)) return t;
         const paneTree = setLeafCwdInTree(t.paneTree, leafId, cwd);
-        const isActive = t.activeLeafId === leafId;
+        const isActive =
+          t.activeLeafId === leafId ||
+          (isLeaf(t.paneTree) && t.paneTree.id === leafId);
         // A remote shell's cwd stays on the leaf. Promoting it to `tab.cwd`
         // would hand a remote path to every local consumer of the tab.
         const cwdChanged =

@@ -1,3 +1,4 @@
+import { canonicalDirPath } from "@/lib/path";
 import { IS_WINDOWS } from "@/lib/platform";
 import type { IMarker, Terminal } from "@xterm/xterm";
 
@@ -45,30 +46,36 @@ export type PromptTracker = {
 export function registerPromptTracker(
   term: Terminal,
   state?: ShellIntegrationState,
-  // Fires on C (process executing) and A/D (back at prompt).
+  // Fires on C (process executing) and A/D/B (back at prompt).
   onCommandState?: (running: boolean) => void,
 ): PromptTracker {
   let marker: IMarker | null = null;
+  let lastRunning: boolean | null = null;
+  const updateRunning = (next: boolean) => {
+    if (state) state.inCommand = next;
+    if (lastRunning !== next) {
+      lastRunning = next;
+      onCommandState?.(next);
+    }
+  };
   const d = term.parser.registerOscHandler(133, (data) => {
     // OSC 133 A -- start of new prompt (between commands).
     if (data.startsWith("A")) {
-      if (state) state.inCommand = false;
-      onCommandState?.(false);
+      updateRunning(false);
       marker?.dispose();
       marker = term.registerMarker(0);
     } else if (data.startsWith("B")) {
       // OSC 133 B -- prompt ended, command line starts. The user is typing
       // at the prompt (no command executing yet). Keep inCommand false so
       // prompt hooks (Starship, chpwd, direnv) emitting OSC 7 are honored.
+      updateRunning(false);
     } else if (data.startsWith("C")) {
       // OSC 133 C -- command execution begins. From here until D/A, all output
       // comes from the executing process and is untrusted for CWD updates.
-      if (state) state.inCommand = true;
-      onCommandState?.(true);
+      updateRunning(true);
     } else if (data.startsWith("D")) {
       // OSC 133 D -- command ends.
-      if (state) state.inCommand = false;
-      onCommandState?.(false);
+      updateRunning(false);
     }
     return true;
   });
@@ -83,7 +90,7 @@ export function registerPromptTracker(
 }
 
 /**
- * ConEmu's OSC 9;4 progress sub-protocol — build tools (cargo, webpack, vite)
+ * ConEmu's OSC 9;4 progress sub-protocol -- build tools (cargo, webpack, vite)
  * emit it to drive a taskbar progress bar. `9;4;<state>;<pct>`:
  *   state 0 = clear, 1 = normal (pct), 2 = error, 3 = indeterminate, 4 = paused.
  * Declines any non-`4;` OSC 9 (iTerm2 notification) so another handler can run.
@@ -138,7 +145,7 @@ function parseOsc7(data: string): string | null {
     const drive = path.match(/^\/([A-Za-z])(\/.*)?$/);
     if (drive) path = `${drive[1].toUpperCase()}:${drive[2] ?? "/"}`;
   }
-  return path;
+  return canonicalDirPath(path);
 }
 
 function parseOsc52Clipboard(data: string): string | null {

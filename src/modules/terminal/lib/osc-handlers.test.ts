@@ -11,7 +11,7 @@ import {
 vi.mock("@/lib/platform", () => ({ IS_WINDOWS: true }));
 
 /**
- * Minimal in-memory fake of the xterm `Terminal` surface we touch — just
+ * Minimal in-memory fake of the xterm `Terminal` surface we touch -- just
  * enough to register OSC handlers and invoke them with crafted payloads.
  * The OSC handler signature is `(data: string) => boolean | Promise<boolean>`.
  */
@@ -37,7 +37,7 @@ async function flushClipboardQueue() {
   await Promise.resolve();
 }
 
-describe("OSC 7 cwd handler — gated by OSC 133 in-command state", () => {
+describe("OSC 7 cwd handler -- gated by OSC 133 in-command state", () => {
   it("accepts OSC 7 when no command is running", () => {
     const { term, handlers } = makeFakeTerm();
     const state = createShellIntegrationState();
@@ -45,7 +45,7 @@ describe("OSC 7 cwd handler — gated by OSC 133 in-command state", () => {
     registerPromptTracker(term, state);
     registerCwdHandler(term, onCwd, state);
 
-    // OSC 133 A means "new prompt is about to be drawn" — we're between
+    // OSC 133 A means "new prompt is about to be drawn" -- we're between
     // commands and OSC 7 from the shell is legitimate here.
     handlers.get(133)?.("A");
     handlers.get(7)?.("file://host/home/me/project");
@@ -118,7 +118,7 @@ describe("OSC 7 cwd handler — gated by OSC 133 in-command state", () => {
   });
 
   it("works without state for backwards compatibility (legacy callers)", () => {
-    // The state parameter is optional — when omitted, OSC 7 is always
+    // The state parameter is optional -- when omitted, OSC 7 is always
     // honored (legacy behavior). Tests must confirm we didn't break this.
     const { term, handlers } = makeFakeTerm();
     const onCwd = vi.fn();
@@ -135,6 +135,18 @@ describe("OSC 7 cwd handler — gated by OSC 133 in-command state", () => {
 
     handlers.get(7)?.("file:///C:/Users/me/project");
     expect(onCwd).toHaveBeenCalledWith("C:/Users/me/project");
+  });
+
+  it("canonicalizes Linux POSIX paths by stripping trailing slashes and collapsing separators", () => {
+    const { term, handlers } = makeFakeTerm();
+    const onCwd = vi.fn();
+    registerCwdHandler(term, onCwd);
+
+    handlers.get(7)?.("file://host/home/iwan/project/termigo/");
+    expect(onCwd).toHaveBeenCalledWith("/home/iwan/project/termigo");
+
+    handlers.get(7)?.("file://host/home/iwan//project/termigo");
+    expect(onCwd).toHaveBeenCalledWith("/home/iwan/project/termigo");
   });
 });
 
@@ -163,6 +175,28 @@ describe("OSC 133 command-state tracking", () => {
     expect(onCommandState).toHaveBeenLastCalledWith(true);
     handlers.get(133)?.("A");
     expect(onCommandState).toHaveBeenLastCalledWith(false);
+  });
+
+  it("clears running state and resets inCommand on OSC 133 B when D was lost", () => {
+    const { term, handlers } = makeFakeTerm();
+    const state = createShellIntegrationState();
+    const onCommandState = vi.fn();
+    const onCwd = vi.fn();
+    registerPromptTracker(term, state, onCommandState);
+    registerCwdHandler(term, onCwd, state);
+
+    handlers.get(133)?.("C;make build");
+    expect(state.inCommand).toBe(true);
+    expect(onCommandState).toHaveBeenLastCalledWith(true);
+
+    // Shell skipped D and emitted B (prompt rendered)
+    handlers.get(133)?.("B");
+    expect(state.inCommand).toBe(false);
+    expect(onCommandState).toHaveBeenLastCalledWith(false);
+
+    // CWD updates at the prompt are honored
+    handlers.get(7)?.("file://host/home/iwan/project/recovered");
+    expect(onCwd).toHaveBeenCalledWith("/home/iwan/project/recovered");
   });
 });
 

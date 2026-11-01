@@ -250,7 +250,7 @@ export class BlockDecorations {
 
   visibleBlocks(): VisibleBlocks {
     const term = this.term;
-    // No block chrome over a full-screen TUI (vim/htop) — it owns the screen.
+    // No block chrome over a full-screen TUI (vim/htop) -- it owns the screen.
     if (this.mode.altScreen) return { blocks: [], sticky: null };
     const screen = term.element?.querySelector<HTMLElement>(".xterm-screen");
     if (!screen || term.rows === 0) return { blocks: [], sticky: null };
@@ -459,7 +459,7 @@ export class BlockDecorations {
         this.mode = reduceMode(this.mode, { type: "osc133", marker: "A" });
         break;
       case "B":
-        this.shellState.inCommand = true;
+        this.shellState.inCommand = false;
         this.mode = reduceMode(this.mode, { type: "osc133", marker: "B" });
         break;
       case "C":
