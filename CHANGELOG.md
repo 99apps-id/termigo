@@ -6,6 +6,25 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Muse Wonder 1.0.** The Muse catalogue now offers `muse-wonder-1.0`
+  through a Muse Code login, with a 1M-token context window.
+
+### Fixed
+
+- **Muse Code subscription logins could not chat.** Sign-in and the key mint
+  succeeded, but Meta returns `403 client_attestation_denied` for a Muse
+  Code subscription key outside the official client (on the
+  chat-completions route even without tools), so every Muse turn failed.
+  The Muse fetch now switches a refused credential to a text tool protocol
+  on the Responses route: the tools are listed in the instructions, the
+  model replies with `tool_call` blocks, and the SDK executes the parsed
+  calls locally as native-looking tool calls, so the subscription login
+  drives the tool and exec loop. The switch is sticky per credential, a
+  pay-as-you-go Model API key keeps native tool calls, and other errors
+  pass through untouched.
+
 ## [0.9.27] - 2026-10-31
 
 ### Added

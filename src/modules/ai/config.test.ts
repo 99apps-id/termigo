@@ -286,6 +286,14 @@ describe("stepBudgetForRound", () => {
     expect(isOAuthModel("gpt-6-astra")).toBe(false);
   });
 
+  it("offers muse-wonder-1.0 through the muse login", () => {
+    const model = MODELS.find((m) => m.id === "muse-wonder-1.0");
+    expect(model?.provider).toBe("muse");
+    expect(model?.apiModelId).toBe("muse-wonder-1.0");
+    expect(isOAuthModel("muse-wonder-1.0")).toBe(true);
+    expect(getModelContextLimit("muse-wonder-1.0")).toBe(1_000_000);
+  });
+
   it("ignores an out-of-range round instead of inventing a budget", () => {
     expect(stepBudgetForRound(-1)).toBe(MAX_AGENT_STEPS);
     expect(stepBudgetForRound(99)).toBe(MAX_AGENT_STEPS);

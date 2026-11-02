@@ -1877,6 +1877,16 @@ export const MODELS = [
     tags: ["coding", "tools"],
     apiModelId: "muse-spark-1.3",
   },
+  {
+    id: "muse-wonder-1.0",
+    provider: "muse",
+    label: "Muse Wonder 1.0",
+    hint: "Creative",
+    description: "Meta's creative reasoning model through a Muse Code login.",
+    capabilities: { intelligence: 5, speed: 4, cost: 5 },
+    tags: ["reasoning", "coding"],
+    apiModelId: "muse-wonder-1.0",
+  },
   // ── Moonshot Kimi ──────────────────────────────────────────────────────────
   {
     id: "moonshot-kimi-k3",
@@ -2405,6 +2415,7 @@ export const MODEL_CONTEXT_LIMITS: Record<string, number> = {
   "antigravity-claude-sonnet-5-5": 1_000_000,
   "antigravity-claude-sonnet-4-6": 1_000_000,
   "muse-spark-1.3": 1_000_000,
+  "muse-wonder-1.0": 1_000_000,
   "gemini-2.0-flash": 1_000_000,
   "grok-4.7": 1_000_000,
   "grok-4.5": 500_000,
