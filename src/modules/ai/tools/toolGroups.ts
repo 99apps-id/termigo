@@ -185,7 +185,27 @@ export const TOOL_GROUPS: readonly ToolGroup[] = [
     label: "SQL explorer",
     description:
       "Run queries against a configured database CLI and list saved connections.",
-    tools: ["run_sql", "list_sql_connections"],
+    tools: [
+      "run_sql",
+      "list_sql_connections",
+      "sql_schema",
+      "sql_explain",
+      "sql_health",
+    ],
+  },
+  {
+    id: "filesystem_advanced",
+    label: "Advanced filesystem",
+    description:
+      "Inspect links and permissions, or create links and change Unix modes.",
+    tools: ["readlink", "file_permissions", "symlink", "chmod"],
+  },
+  {
+    id: "git_metadata",
+    label: "Git metadata",
+    description:
+      "Read tags, remotes, stashes and worktrees through structured Git APIs.",
+    tools: ["git_tags", "git_remotes", "git_stashes", "git_worktrees"],
   },
   {
     id: "documents",

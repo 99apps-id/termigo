@@ -1,6 +1,12 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { runSql, type SqlEngine } from "../sqlexplorer/bridge";
+import {
+  runSql,
+  sqlExplain,
+  sqlHealth,
+  sqlSchema,
+  type SqlEngine,
+} from "../sqlexplorer/bridge";
 import {
   findSqlConnection,
   getPublicSqlConnections,
@@ -11,6 +17,44 @@ import {
 // or resolved from saved database connections in Settings. Only the output is
 // returned, never the raw DSN with credentials.
 export function buildSqlTools() {
+  const resolve = (connection: string, engine?: SqlEngine) => {
+    const saved = findSqlConnection(connection);
+    return {
+      saved,
+      resolvedEngine: (engine ?? saved?.engine) as SqlEngine | undefined,
+      resolvedConnection: saved ? saved.connection : connection,
+    };
+  };
+
+  const inspect = async (
+    action: "schema" | "explain" | "health",
+    connection: string,
+    engine: SqlEngine | undefined,
+    query?: string,
+  ) => {
+    const { saved, resolvedEngine, resolvedConnection } = resolve(
+      connection,
+      engine,
+    );
+    if (!resolvedEngine) {
+      return {
+        error:
+          "Engine is required when connection is not a saved connection name.",
+      };
+    }
+    try {
+      const output =
+        action === "schema"
+          ? await sqlSchema(resolvedEngine, resolvedConnection)
+          : action === "explain"
+            ? await sqlExplain(resolvedEngine, resolvedConnection, query ?? "")
+            : await sqlHealth(resolvedEngine, resolvedConnection);
+      return { output, engine: resolvedEngine, connectionName: saved?.name };
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : String(e) };
+    }
+  };
+
   return {
     list_sql_connections: tool({
       description:
@@ -88,6 +132,69 @@ export function buildSqlTools() {
           return { error: e instanceof Error ? e.message : String(e) };
         }
       },
+    }),
+
+    sql_schema: tool({
+      description:
+        "List tables and views from a configured database connection.",
+      inputSchema: z.object({
+        connection: z.string(),
+        engine: z
+          .enum([
+            "sqlite3",
+            "sqlite",
+            "duckdb",
+            "psql",
+            "postgres",
+            "mysql",
+            "mariadb",
+          ])
+          .optional(),
+      }),
+      execute: ({ connection, engine }) =>
+        inspect("schema", connection, engine),
+    }),
+
+    sql_explain: tool({
+      description: "Return the database query plan without changing data.",
+      inputSchema: z.object({
+        connection: z.string(),
+        query: z.string(),
+        engine: z
+          .enum([
+            "sqlite3",
+            "sqlite",
+            "duckdb",
+            "psql",
+            "postgres",
+            "mysql",
+            "mariadb",
+          ])
+          .optional(),
+      }),
+      execute: ({ connection, query, engine }) =>
+        inspect("explain", connection, engine, query),
+    }),
+
+    sql_health: tool({
+      description:
+        "Check whether a configured database connection responds to a read-only probe.",
+      inputSchema: z.object({
+        connection: z.string(),
+        engine: z
+          .enum([
+            "sqlite3",
+            "sqlite",
+            "duckdb",
+            "psql",
+            "postgres",
+            "mysql",
+            "mariadb",
+          ])
+          .optional(),
+      }),
+      execute: ({ connection, engine }) =>
+        inspect("health", connection, engine),
     }),
   } as const;
 }

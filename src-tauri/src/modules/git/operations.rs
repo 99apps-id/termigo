@@ -11,7 +11,8 @@ use crate::modules::git::process::{
 use crate::modules::git::types::{
     DiscardEntry, GitBranchEntry, GitBranchListResult, GitCommitFileChange, GitCommitResult,
     GitDiffContentResult, GitDiffResult, GitLogEntry, GitOutput, GitPanelSnapshot, GitPushResult,
-    GitRepoInfo, GitStatusSnapshot, TextSource, DEFAULT_TIMEOUT_SECS, NETWORK_TIMEOUT_SECS,
+    GitRemoteEntry, GitRepoInfo, GitStashEntry, GitStatusSnapshot, GitTagEntry, GitWorktreeEntry,
+    TextSource, DEFAULT_TIMEOUT_SECS, NETWORK_TIMEOUT_SECS,
 };
 use crate::modules::git::utils::{
     authorized_repo_root, canonical_dir, resolve_within_repo, split_upstream, ResolvedGitDirectory,
@@ -26,6 +27,133 @@ pub fn resolve_repo(
     let cwd = authorized_repo_root(registry, cwd, workspace)?;
     ensure_git_available(&cwd.workspace)?;
     resolve_repo_in_authorized(registry, &cwd)
+}
+
+pub fn tag_list(
+    registry: &WorkspaceRegistry,
+    repo_root: &str,
+    workspace: &WorkspaceEnv,
+) -> Result<Vec<GitTagEntry>> {
+    let repo = authorized_repo_root(registry, repo_root, workspace)?;
+    let lines = git_stdout_lines(
+        &repo.workspace,
+        &repo.git_path,
+        ["tag", "--list", "--format=%(refname:short)\t%(objectname)"],
+    )?;
+    Ok(lines
+        .into_iter()
+        .filter_map(|line| {
+            let (name, object) = line.split_once('\t')?;
+            Some(GitTagEntry {
+                name: name.to_string(),
+                object: object.to_string(),
+            })
+        })
+        .collect())
+}
+
+pub fn remote_list(
+    registry: &WorkspaceRegistry,
+    repo_root: &str,
+    workspace: &WorkspaceEnv,
+) -> Result<Vec<GitRemoteEntry>> {
+    let repo = authorized_repo_root(registry, repo_root, workspace)?;
+    let lines = git_stdout_lines(&repo.workspace, &repo.git_path, ["remote", "-v"])?;
+    let mut out = Vec::new();
+    for line in &lines {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        if fields.len() < 3 || fields[2] == "(push)" {
+            continue;
+        }
+        let push = lines
+            .iter()
+            .find(|candidate| {
+                candidate.starts_with(&format!("{} ", fields[0])) && candidate.ends_with("(push)")
+            })
+            .and_then(|candidate| candidate.split_whitespace().nth(1))
+            .unwrap_or(fields[1]);
+        out.push(GitRemoteEntry {
+            name: fields[0].to_string(),
+            fetch_url: fields[1].to_string(),
+            push_url: push.to_string(),
+        });
+    }
+    Ok(out)
+}
+
+pub fn stash_list(
+    registry: &WorkspaceRegistry,
+    repo_root: &str,
+    workspace: &WorkspaceEnv,
+) -> Result<Vec<GitStashEntry>> {
+    let repo = authorized_repo_root(registry, repo_root, workspace)?;
+    let lines = git_stdout_lines(
+        &repo.workspace,
+        &repo.git_path,
+        ["stash", "list", "--format=%gd\t%s"],
+    )?;
+    Ok(lines
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            let (_, subject) = line.split_once('\t')?;
+            Some(GitStashEntry {
+                index: index as u32,
+                subject: subject.to_string(),
+            })
+        })
+        .collect())
+}
+
+pub fn worktree_list(
+    registry: &WorkspaceRegistry,
+    repo_root: &str,
+    workspace: &WorkspaceEnv,
+) -> Result<Vec<GitWorktreeEntry>> {
+    let repo = authorized_repo_root(registry, repo_root, workspace)?;
+    let lines = git_stdout_lines(
+        &repo.workspace,
+        &repo.git_path,
+        ["worktree", "list", "--porcelain"],
+    )?;
+    let mut out = Vec::new();
+    let mut path = None;
+    let mut head = None;
+    let mut branch = None;
+    let mut locked = false;
+    let flush = |out: &mut Vec<GitWorktreeEntry>,
+                 path: &mut Option<String>,
+                 head: &mut Option<String>,
+                 branch: &mut Option<String>,
+                 locked: &mut bool| {
+        if let (Some(path), Some(head)) = (path.take(), head.take()) {
+            out.push(GitWorktreeEntry {
+                path,
+                head,
+                branch: branch.take(),
+                locked: *locked,
+            });
+        }
+        *locked = false;
+    };
+    for line in lines {
+        if line.is_empty() {
+            flush(&mut out, &mut path, &mut head, &mut branch, &mut locked);
+        } else if let Some(v) = line.strip_prefix("worktree ") {
+            if path.is_some() {
+                flush(&mut out, &mut path, &mut head, &mut branch, &mut locked);
+            }
+            path = Some(v.to_string());
+        } else if let Some(v) = line.strip_prefix("HEAD ") {
+            head = Some(v.to_string());
+        } else if let Some(v) = line.strip_prefix("branch ") {
+            branch = Some(v.strip_prefix("refs/heads/").unwrap_or(v).to_string());
+        } else if line == "locked" {
+            locked = true;
+        }
+    }
+    flush(&mut out, &mut path, &mut head, &mut branch, &mut locked);
+    Ok(out)
 }
 
 fn resolve_repo_in_authorized(

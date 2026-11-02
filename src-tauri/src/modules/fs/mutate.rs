@@ -42,6 +42,72 @@ pub fn fs_create_dir(
     create_dir_inner(&registry, path, workspace)
 }
 
+#[tauri::command]
+pub fn fs_symlink(
+    target: String,
+    link_path: String,
+    target_is_dir: Option<bool>,
+    workspace: Option<WorkspaceEnv>,
+    registry: tauri::State<'_, WorkspaceRegistry>,
+) -> Result<(), String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    let link = resolve_path(&link_path, &workspace);
+    super::security::validate_write(&link)?;
+    require_authorized(&registry, &link)?;
+    if link.exists() {
+        return Err(format!("already exists: {}", link.display()));
+    }
+    #[cfg(unix)]
+    let _ = target_is_dir;
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(target, link).map_err(|e| e.to_string())
+    }
+    #[cfg(windows)]
+    {
+        let target_path = std::path::Path::new(&target);
+        let resolved_target = if target_path.is_relative() {
+            link.parent()
+                .unwrap_or_else(|| std::path::Path::new("."))
+                .join(target_path)
+        } else {
+            target_path.to_path_buf()
+        };
+        if target_is_dir.unwrap_or_else(|| resolved_target.is_dir()) {
+            std::os::windows::fs::symlink_dir(target, link).map_err(|e| e.to_string())
+        } else {
+            std::os::windows::fs::symlink_file(target, link).map_err(|e| e.to_string())
+        }
+    }
+}
+
+#[tauri::command]
+pub fn fs_chmod(
+    path: String,
+    mode: u32,
+    workspace: Option<WorkspaceEnv>,
+    registry: tauri::State<'_, WorkspaceRegistry>,
+) -> Result<(), String> {
+    if mode > 0o7777 {
+        return Err("mode must be an octal permission value up to 07777".to_string());
+    }
+    let workspace = WorkspaceEnv::from_option(workspace);
+    let p = resolve_path(&path, &workspace);
+    super::security::validate_write(&p)?;
+    require_authorized(&registry, &p)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(mode))
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = p;
+        Err("fs_chmod is only supported on Unix".to_string())
+    }
+}
+
 fn create_dir_inner(
     registry: &WorkspaceRegistry,
     path: String,
@@ -182,7 +248,9 @@ fn copy_recursive(src: &std::path::Path, dst: &std::path::Path) -> Result<(), St
         }
         Ok(())
     } else {
-        std::fs::copy(src, dst).map(|_| ()).map_err(|e| e.to_string())
+        std::fs::copy(src, dst)
+            .map(|_| ())
+            .map_err(|e| e.to_string())
     }
 }
 

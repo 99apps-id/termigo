@@ -70,6 +70,11 @@ fn wrap_in_tmux(cmd: &CommandBuilder, persist_key: &str) -> CommandBuilder {
     let mut wrapped = cmd.clone();
     let mut argv: Vec<OsString> = vec![
         OsString::from("tmux"),
+        OsString::from("set-option"),
+        OsString::from("-g"),
+        OsString::from("allow-passthrough"),
+        OsString::from("on"),
+        OsString::from(";"),
         OsString::from("new-session"),
         OsString::from("-A"),
         OsString::from("-s"),
@@ -263,7 +268,7 @@ mod tests {
 
     use portable_pty::CommandBuilder;
 
-    use super::{apply_common, sanitize_shell_override, ShellControlEnv};
+    use super::{apply_common, sanitize_shell_override, wrap_in_tmux, ShellControlEnv};
 
     #[test]
     fn rejects_non_enumerated_override() {
@@ -278,6 +283,31 @@ mod tests {
     fn empty_or_missing_override_is_none() {
         assert_eq!(sanitize_shell_override(Some("   ".into())), None);
         assert_eq!(sanitize_shell_override(None), None);
+    }
+
+    #[test]
+    fn tmux_persistence_enables_osc_passthrough_before_attach() {
+        let command = CommandBuilder::new("/bin/bash");
+        let wrapped = wrap_in_tmux(&command, "pane-1");
+        let argv: Vec<_> = wrapped
+            .get_argv()
+            .iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+
+        assert_eq!(
+            &argv[..8],
+            [
+                "tmux",
+                "set-option",
+                "-g",
+                "allow-passthrough",
+                "on",
+                ";",
+                "new-session",
+                "-A",
+            ]
+        );
     }
 
     #[test]

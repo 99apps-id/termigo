@@ -229,6 +229,98 @@ export function normalizeWriteFileInput(input: unknown): unknown {
 
 export function buildFsTools(ctx: ToolContext) {
   return {
+    readlink: tool({
+      description:
+        "Read a symbolic-link target without following it. Local workspace paths only.",
+      inputSchema: z.object({ path: z.string() }),
+      execute: async ({ path }) => {
+        if (ctx.getRemoteSession())
+          return { error: "readlink is currently local-only" };
+        const target = resolvePath(path, ctx.getCwd());
+        const safety = await checkReadableCanonical(
+          target,
+          native.canonicalize,
+        );
+        if (!safety.ok) return { error: safety.reason, path: target };
+        try {
+          return { path: target, target: await native.readlink(target) };
+        } catch (e) {
+          return { error: String(e), path: target };
+        }
+      },
+    }),
+
+    file_permissions: tool({
+      description:
+        "Read file kind, size, readonly state, and Unix permission mode. Local workspace paths only.",
+      inputSchema: z.object({ path: z.string() }),
+      execute: async ({ path }) => {
+        if (ctx.getRemoteSession())
+          return { error: "file_permissions is currently local-only" };
+        const target = resolvePath(path, ctx.getCwd());
+        const safety = await checkReadableCanonical(
+          target,
+          native.canonicalize,
+        );
+        if (!safety.ok) return { error: safety.reason, path: target };
+        try {
+          return { path: target, ...(await native.stat(target)) };
+        } catch (e) {
+          return { error: String(e), path: target };
+        }
+      },
+    }),
+
+    symlink: tool({
+      description:
+        "Create a symbolic link. Always asks for approval and only operates on local workspace paths.",
+      needsApproval: true,
+      inputSchema: z.object({
+        target: z.string(),
+        link_path: z.string(),
+        target_is_dir: z.boolean().optional(),
+      }),
+      execute: async ({ target, link_path, target_is_dir }) => {
+        if (ctx.getRemoteSession())
+          return { error: "symlink is currently local-only" };
+        const link = resolvePath(link_path, ctx.getCwd());
+        const safety = await checkWritableCanonical(link, native.canonicalize);
+        if (!safety.ok) return { error: safety.reason, path: link };
+        try {
+          await native.symlink(target, link, target_is_dir);
+          return { ok: true, target, link_path: link };
+        } catch (e) {
+          return { error: String(e), target, link_path: link };
+        }
+      },
+    }),
+
+    chmod: tool({
+      description:
+        "Change Unix permission bits using a numeric mode such as 493 for 0755. Always asks for approval.",
+      needsApproval: true,
+      inputSchema: z.object({
+        path: z.string(),
+        mode: z.number().int().min(0).max(4095),
+      }),
+      execute: async ({ path, mode }) => {
+        if (ctx.getRemoteSession())
+          return { error: "chmod is currently local-only" };
+        const target = resolvePath(path, ctx.getCwd());
+        const safety = await checkWritableCanonical(
+          target,
+          native.canonicalize,
+        );
+        if (!safety.ok) return { error: safety.reason, path: target };
+        try {
+          await native.chmod(target, mode);
+          return { ok: true, path: target, mode };
+        } catch (e) {
+          return { error: String(e), path: target, mode };
+        }
+      },
+    }),
+
     read_file: tool({
       description:
         "Read a UTF-8 text file. Defaults to the first 2000 lines (capped at 64KB). Pass `offset`/`limit` for line-based windowing of large files. Refuses binary or oversized files. IMAGES (png, jpeg, gif, webp) are returned as a picture you can actually see - call this on a screenshot, mockup, or diagram to look at it (requires a vision-capable model; local files only). If you call this on the same path twice in a session without edits in between, the second call returns `unchanged: true` instead of re-emitting the content - re-read the prior tool result. When the active terminal is an SSH session, paths resolve on the remote host (POSIX) and reads go over SFTP; Windows drive paths (C:...) still read locally.",

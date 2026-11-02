@@ -44,7 +44,11 @@ if [ -z "$__TERMIGO_HOOKS_LOADED" ]; then
   _termigo_precmd() {
     local _termigo_ret=$?
     printf '\e]133;D;%s\e\\' "$_termigo_ret"
-    printf '\e]7;file://%s%s\e\\' "${HOSTNAME:-$(uname -n 2>/dev/null)}" "$(_termigo_urlencode "$PWD")"
+    if [ -n "${TMUX:-}" ]; then
+      printf '\ePtmux;\e\e]7;file://%s%s\a\e\\' "${HOSTNAME:-$(uname -n 2>/dev/null)}" "$(_termigo_urlencode "$PWD")"
+    else
+      printf '\e]7;file://%s%s\e\\' "${HOSTNAME:-$(uname -n 2>/dev/null)}" "$(_termigo_urlencode "$PWD")"
+    fi
     if [ -n "$TERMIGO_BLOCKS" ]; then
       # Host renders its own input bar: suppress the shell prompt (B marker
       # only) and reserve header/gap rows, mirroring the zsh integration.

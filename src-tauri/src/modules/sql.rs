@@ -101,6 +101,23 @@ pub fn validate_query(query: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_explain_query(query: &str) -> Result<(), String> {
+    validate_query(query)?;
+    let trimmed = query.trim().trim_end_matches(';').trim();
+    if trimmed.contains(';') {
+        return Err("EXPLAIN accepts exactly one SQL statement".into());
+    }
+    let keyword = trimmed
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if !matches!(keyword.as_str(), "select" | "with" | "values") {
+        return Err("EXPLAIN is limited to read-only SELECT, WITH, or VALUES statements".into());
+    }
+    Ok(())
+}
+
 /// Write the whole payload to the child's stdin from a helper thread, then
 /// wait for the child.
 ///
@@ -236,6 +253,79 @@ pub async fn sql_run(
         .map_err(|e| e.to_string())?
 }
 
+fn authorize_connection(
+    engine: &str,
+    connection: &str,
+    registry: &crate::modules::workspace::WorkspaceRegistry,
+) -> Result<(), String> {
+    if let Some(db) = local_db_path(engine, connection) {
+        crate::modules::fs::security::validate_read(&db)?;
+        crate::modules::fs::security::validate_write(&db)?;
+        crate::modules::workspace::require_authorized(registry, &db)?;
+    }
+    Ok(())
+}
+
+fn schema_query(engine: &str) -> Result<&'static str, String> {
+    match engine {
+        "sqlite" | "sqlite3" => Ok("SELECT name, type, sql FROM sqlite_master WHERE type IN ('table','view') ORDER BY name;"),
+        "duckdb" => Ok("SELECT table_schema, table_name, table_type FROM information_schema.tables ORDER BY table_schema, table_name;"),
+        "psql" | "postgres" => Ok("SELECT table_schema, table_name, table_type FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog','information_schema') ORDER BY table_schema, table_name;"),
+        "mysql" | "mariadb" => Ok("SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE FROM information_schema.tables WHERE TABLE_SCHEMA NOT IN ('information_schema','mysql','performance_schema','sys') ORDER BY TABLE_SCHEMA, TABLE_NAME;"),
+        _ => Err(format!("unsupported engine {engine:?}")),
+    }
+}
+
+#[tauri::command]
+pub async fn sql_schema(
+    engine: String,
+    connection: String,
+    registry: tauri::State<'_, crate::modules::workspace::WorkspaceRegistry>,
+) -> Result<String, String> {
+    authorize_connection(&engine, &connection, &registry)?;
+    let query = schema_query(&engine)?.to_string();
+    tauri::async_runtime::spawn_blocking(move || run_query(&engine, &connection, &query))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn sql_explain(
+    engine: String,
+    connection: String,
+    query: String,
+    registry: tauri::State<'_, crate::modules::workspace::WorkspaceRegistry>,
+) -> Result<String, String> {
+    authorize_connection(&engine, &connection, &registry)?;
+    validate_explain_query(&query)?;
+    let prefix = match engine.as_str() {
+        "sqlite" | "sqlite3" => "EXPLAIN QUERY PLAN ",
+        "duckdb" | "psql" | "postgres" | "mysql" | "mariadb" => "EXPLAIN ",
+        _ => return Err(format!("unsupported engine {engine:?}")),
+    };
+    let explain = format!("{prefix}{query}");
+    tauri::async_runtime::spawn_blocking(move || run_query(&engine, &connection, &explain))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn sql_health(
+    engine: String,
+    connection: String,
+    registry: tauri::State<'_, crate::modules::workspace::WorkspaceRegistry>,
+) -> Result<String, String> {
+    authorize_connection(&engine, &connection, &registry)?;
+    let query = match engine.as_str() {
+        "sqlite" | "sqlite3" | "duckdb" | "psql" | "postgres" | "mysql" | "mariadb" => "SELECT 1;",
+        _ => return Err(format!("unsupported engine {engine:?}")),
+    };
+    let engine_for_task = engine.clone();
+    tauri::async_runtime::spawn_blocking(move || run_query(&engine_for_task, &connection, query))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -264,7 +354,10 @@ mod tests {
     #[test]
     fn mysql_uri_uses_uri_flag() {
         let argv = build_sql_argv("mysql", "mysql://root:pass@localhost:3306/db").unwrap();
-        assert_eq!(argv, vec!["mysql", "--uri=mysql://root:pass@localhost:3306/db"]);
+        assert_eq!(
+            argv,
+            vec!["mysql", "--uri=mysql://root:pass@localhost:3306/db"]
+        );
 
         let plain = build_sql_argv("mysql", "testdb").unwrap();
         assert_eq!(plain, vec!["mysql", "testdb"]);

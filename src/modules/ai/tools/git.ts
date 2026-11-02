@@ -181,6 +181,93 @@ export function gitShowCommand(opts: {
 
 export function buildGitTools(ctx: ToolContext) {
   return {
+    git_tags: tool({
+      description:
+        "List Git tags with their target object ids using the structured Git API.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        if (ctx.getRemoteSession())
+          return remoteUnsupported(
+            "git_tags",
+            "Use bash_run on the remote host.",
+          );
+        try {
+          return {
+            tags: await native.gitTagList(
+              repoRootFor(ctx.getWorkspaceRoot(), ctx.getCwd()),
+            ),
+          };
+        } catch (e) {
+          return { error: String(e) };
+        }
+      },
+    }),
+
+    git_remotes: tool({
+      description:
+        "List Git remotes with fetch and push URLs using the structured Git API.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        if (ctx.getRemoteSession())
+          return remoteUnsupported(
+            "git_remotes",
+            "Use bash_run on the remote host.",
+          );
+        try {
+          return {
+            remotes: await native.gitRemoteList(
+              repoRootFor(ctx.getWorkspaceRoot(), ctx.getCwd()),
+            ),
+          };
+        } catch (e) {
+          return { error: String(e) };
+        }
+      },
+    }),
+
+    git_stashes: tool({
+      description: "List Git stashes using the structured Git API.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        if (ctx.getRemoteSession())
+          return remoteUnsupported(
+            "git_stashes",
+            "Use bash_run on the remote host.",
+          );
+        try {
+          return {
+            stashes: await native.gitStashList(
+              repoRootFor(ctx.getWorkspaceRoot(), ctx.getCwd()),
+            ),
+          };
+        } catch (e) {
+          return { error: String(e) };
+        }
+      },
+    }),
+
+    git_worktrees: tool({
+      description:
+        "List Git worktrees and their branches using the structured Git API.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        if (ctx.getRemoteSession())
+          return remoteUnsupported(
+            "git_worktrees",
+            "Use bash_run on the remote host.",
+          );
+        try {
+          return {
+            worktrees: await native.gitWorktreeList(
+              repoRootFor(ctx.getWorkspaceRoot(), ctx.getCwd()),
+            ),
+          };
+        } catch (e) {
+          return { error: String(e) };
+        }
+      },
+    }),
+
     git_status: tool({
       description:
         "Report the git working-tree state: current branch and untracked/modified/staged files. Read-only, auto-executes. Use before committing or before a risky change so the agent knows what is already dirty.",

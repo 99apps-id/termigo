@@ -38,7 +38,7 @@ export function buildProcessTools(ctx: ToolContext) {
   return {
     process: tool({
       description:
-        "Unified process management tool. Manage long-running background tasks, dev servers, crawlers, watchers, and listeners. Actions: 'spawn' (launch command in background), 'list' (list all managed background processes), 'status' (inspect specific process status, uptime, exit code and latest log snippet), 'logs' (stream logs from offset), 'wait' (block until process exits or timeout), 'kill' (terminate process by handle), 'find_port' (detect which process is listening on a local port).",
+        "Unified process and system tool. Manage background tasks and inspect system health. Actions: 'spawn', 'list', 'status', 'logs', 'wait', 'kill', 'find_port', 'system_snapshot', 'system_processes', or 'system_ports'.",
       inputSchema: z.object({
         action: z
           .enum([
@@ -49,6 +49,9 @@ export function buildProcessTools(ctx: ToolContext) {
             "wait",
             "kill",
             "find_port",
+            "system_snapshot",
+            "system_processes",
+            "system_ports",
           ])
           .describe("Action to perform."),
         command: z
@@ -89,6 +92,30 @@ export function buildProcessTools(ctx: ToolContext) {
         if (action === "find_port") {
           if (!port) return { error: "action 'find_port' requires 'port'" };
           return inspectPort(port);
+        }
+
+        if (action === "system_snapshot") {
+          try {
+            return await native.systemSnapshot();
+          } catch (e) {
+            return { error: String(e) };
+          }
+        }
+
+        if (action === "system_processes") {
+          try {
+            return { processes: await native.systemProcesses(100) };
+          } catch (e) {
+            return { error: String(e) };
+          }
+        }
+
+        if (action === "system_ports") {
+          try {
+            return { ports: await native.systemListeningPorts() };
+          } catch (e) {
+            return { error: String(e) };
+          }
         }
 
         if (action === "list") {

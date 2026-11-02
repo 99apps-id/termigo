@@ -33,6 +33,8 @@ Long-lived interactive terminal sessions.
 - `pty_write` - send input bytes (text or control sequences)
 - `pty_resize` - resize the PTY
 - `pty_close` / `pty_close_all` - destroy one or all sessions
+- `pty_signal` - send a bounded named signal (`interrupt`, `terminate`, `kill`, `stop`, or `continue`) to the PTY process group
+- `pty_get_cwd` - read the PTY shell cwd where the host OS exposes it
 - `pty_has_foreground_process` / `pty_has_foreground_job` - detect whether a command is running
 - `pty_shell_name` / `pty_list_shells` - shell detection and enumeration
 - `pty_persist_available` - whether shell-init persistence works in this environment
@@ -55,11 +57,13 @@ Output streams from `pty_open` via a Tauri `Channel<PtyEvent>`.
 - `fs_write_file` - write file contents
 - `fs_write_file_base64` - write file contents from base64
 - `fs_stat` - file metadata
+- `fs_readlink` - read a symbolic-link target without following it
 - `fs_canonicalize` - canonical path
 
 #### Mutate
 
 - `fs_create_file` / `fs_create_dir`
+- `fs_symlink` / `fs_chmod`
 - `fs_rename` / `fs_delete` / `fs_copy`
 
 #### Watch
@@ -91,6 +95,7 @@ All git commands are gated through the workspace authorization registry.
 - `git_fetch` / `git_pull_ff_only` / `git_push`
 - `git_log` / `git_show_commit` / `git_commit_files` / `git_commit_file_diff`
 - `git_remote_url`
+- `git_tag_list` / `git_remote_list` / `git_stash_list` / `git_worktree_list`
 - `git_list_branches` / `git_checkout_branch`
 - `git_diff_comments_add` / `git_diff_comments_list` / `git_diff_comments_list_for_file` / `git_diff_comments_update` / `git_diff_comments_remove` - review annotations attached to a diff
 
@@ -187,6 +192,7 @@ The frontend guards URLs through `browserGuard.ts`, and this module **re-applies
 ### SQL (`src-tauri/src/modules/sql.rs`)
 
 - `sql_run` - run a query against an engine chosen in Settings
+- `sql_schema` / `sql_explain` / `sql_health` - read-only schema inspection, query plans, and connectivity checks
 
 Execution is delegated to an installed CLI (`sqlite3`, `duckdb`, `psql`, `mysql`, `mariadb`), and the engine name is checked against that fixed list so a typo cannot reach a shell. The query is piped over stdin, so it never appears in process argv and cannot be shell-escaped, and the connection string is passed as a single argument rather than through a shell, rejecting option-injection and control-byte tricks up front. Output is capped.
 
@@ -194,6 +200,10 @@ Execution is delegated to an installed CLI (`sqlite3`, `duckdb`, `psql`, `mysql`
 
 - `clipboard_get` / `clipboard_set` - clipboard text, via `arboard`
 - `env_get` / `env_list` - process environment inspection
+- `system_snapshot` - read-only OS, CPU, load, memory, and swap summary
+- `system_disk_usage` - bounded `df`-based disk usage for a path
+- `system_processes` - bounded Linux process list
+- `system_listening_ports` - Linux TCP listening port list
 
 Environment access is **read-only by design**. The agent may inspect `PATH`, `HOME`, `TERM` and friends to answer questions, but mutating the parent process environment would be useless (child shells snapshot their own) and surprising.
 

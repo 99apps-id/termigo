@@ -43,7 +43,11 @@ if [[ -z "$__TERMIGO_HOOKS_LOADED" ]]; then
   _termigo_precmd() {
     local _termigo_ret=$?
     printf '\e]133;D;%s\e\\' "$_termigo_ret"
-    printf '\e]7;file://%s%s\e\\' "${HOST}" "$(_termigo_urlencode "$PWD")"
+    if [[ -n "${TMUX:-}" ]]; then
+      printf '\ePtmux;\e\e]7;file://%s%s\a\e\\' "${HOST}" "$(_termigo_urlencode "$PWD")"
+    else
+      printf '\e]7;file://%s%s\e\\' "${HOST}" "$(_termigo_urlencode "$PWD")"
+    fi
     # In block mode the host renders its own input bar, so suppress the shell
     # prompt entirely (keep only the OSC 133 B marker) and add a leading blank
     # line so frozen command blocks get vertical breathing room.

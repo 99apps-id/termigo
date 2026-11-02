@@ -16,6 +16,33 @@ export async function runSql(
   }
 }
 
+async function sqlCommand(
+  command: "sql_schema" | "sql_explain" | "sql_health",
+  args: Record<string, string>,
+): Promise<string> {
+  try {
+    return await invoke<string>(command, args);
+  } catch (e) {
+    throw new Error(e instanceof Error ? e.message : String(e));
+  }
+}
+
+export function sqlSchema(engine: string, connection: string): Promise<string> {
+  return sqlCommand("sql_schema", { engine, connection });
+}
+
+export function sqlExplain(
+  engine: string,
+  connection: string,
+  query: string,
+): Promise<string> {
+  return sqlCommand("sql_explain", { engine, connection, query });
+}
+
+export function sqlHealth(engine: string, connection: string): Promise<string> {
+  return sqlCommand("sql_health", { engine, connection });
+}
+
 export type SqlEngine =
   | "sqlite3"
   | "sqlite"

@@ -7,7 +7,9 @@ use tauri::Emitter;
 use tempfile::NamedTempFile;
 
 use super::security::{guard_read, guard_write};
-use crate::modules::workspace::{require_authorized, resolve_path, WorkspaceEnv, WorkspaceRegistry};
+use crate::modules::workspace::{
+    require_authorized, resolve_path, WorkspaceEnv, WorkspaceRegistry,
+};
 
 const MAX_READ_BYTES: u64 = 10 * 1024 * 1024; // 10 MB
 /// Ceiling for explicit "open anyway"; mirrored as FORCE_READ_LIMIT in useDocument.ts.
@@ -204,6 +206,8 @@ pub struct FileStat {
     pub size: u64,
     pub mtime: u64,
     pub kind: StatKind,
+    pub mode: Option<u32>,
+    pub readonly: bool,
 }
 
 fn mtime_millis(meta: &fs::Metadata) -> u64 {
@@ -264,10 +268,8 @@ fn resolve_symlink_components(path: &Path) -> Option<PathBuf> {
                     if m.file_type().is_symlink() {
                         if let Ok(target) = std::fs::read_link(&acc) {
                             if target.is_relative() {
-                                let mut parent = acc
-                                    .parent()
-                                    .map(|p| p.to_path_buf())
-                                    .unwrap_or_default();
+                                let mut parent =
+                                    acc.parent().map(|p| p.to_path_buf()).unwrap_or_default();
                                 parent.push(target);
                                 acc = normalize_lexical(&parent);
                             } else {
@@ -333,7 +335,11 @@ fn read_file_sync(p: &Path, force: bool) -> Result<ReadResult, String> {
     read_file_sync_inner(&resolved_path, &meta, force)
 }
 
-fn read_file_sync_inner(p: &Path, meta: &std::fs::Metadata, force: bool) -> Result<ReadResult, String> {
+fn read_file_sync_inner(
+    p: &Path,
+    meta: &std::fs::Metadata,
+    force: bool,
+) -> Result<ReadResult, String> {
     if meta.is_dir() {
         return Err(format!("'{}' is a directory, not a file", p.display()));
     }
@@ -430,9 +436,9 @@ fn is_likely_text_file(path: &Path, bytes: &[u8]) -> bool {
         match ext.as_str() {
             "txt" | "md" | "markdown" | "json" | "js" | "mjs" | "cjs" | "ts" | "tsx" | "jsx"
             | "css" | "scss" | "less" | "html" | "htm" | "xml" | "svg" | "yaml" | "yml"
-            | "toml" | "ini" | "conf" | "cfg" | "sh" | "bash" | "zsh" | "fish" | "ps1"
-            | "bat" | "cmd" | "py" | "rs" | "go" | "c" | "cpp" | "h" | "hpp" | "java" | "kt"
-            | "php" | "rb" | "sql" | "log" | "env" | "csv" | "tsv" => {
+            | "toml" | "ini" | "conf" | "cfg" | "sh" | "bash" | "zsh" | "fish" | "ps1" | "bat"
+            | "cmd" | "py" | "rs" | "go" | "c" | "cpp" | "h" | "hpp" | "java" | "kt" | "php"
+            | "rb" | "sql" | "log" | "env" | "csv" | "tsv" => {
                 return true;
             }
             _ => {}
@@ -518,10 +524,7 @@ fn write_atomic(target: &Path, content: &[u8]) -> std::io::Result<()> {
         fs::create_dir_all(parent)?;
     }
     let mut tmp = NamedTempFile::new_in(parent).map_err(|e| {
-        log::debug!(
-            "write_atomic new_in({}) failed ({e})",
-            parent.display()
-        );
+        log::debug!("write_atomic new_in({}) failed ({e})", parent.display());
         e
     })?;
     tmp.as_file_mut().write_all(content)?;
@@ -556,9 +559,7 @@ fn write_atomic(target: &Path, content: &[u8]) -> std::io::Result<()> {
 /// read-only, or the ACL refuses us. The raw OS string says none of that, so
 /// map permission failures to a hint and pass everything else through.
 fn friendly_write_error(target: &Path, op: &str, error: &std::io::Error) -> String {
-    if error.kind() == std::io::ErrorKind::PermissionDenied
-        || error.raw_os_error() == Some(5)
-    {
+    if error.kind() == std::io::ErrorKind::PermissionDenied || error.raw_os_error() == Some(5) {
         return format!(
             "{op}({}) access denied: the file may be locked by a running process or read-only ({error})",
             target.display()
@@ -610,7 +611,10 @@ pub async fn fs_write_file(
 
     if let Some(perms) = original_permissions {
         if let Err(e) = fs::set_permissions(&target, perms) {
-            log::warn!("fs_write_file({}) failed to restore permissions: {e}", target.display());
+            log::warn!(
+                "fs_write_file({}) failed to restore permissions: {e}",
+                target.display()
+            );
         }
     }
     let mtime = fs::metadata(&target).map(|m| mtime_millis(&m)).unwrap_or(0);
@@ -660,7 +664,10 @@ pub async fn fs_write_file_base64(
     })?;
     if let Some(perms) = original_permissions {
         if let Err(e) = fs::set_permissions(&target, perms) {
-            log::warn!("fs_write_file_base64({}) failed to restore permissions: {e}", target.display());
+            log::warn!(
+                "fs_write_file_base64({}) failed to restore permissions: {e}",
+                target.display()
+            );
         }
     }
     let mtime = fs::metadata(&target).map(|m| mtime_millis(&m)).unwrap_or(0);
@@ -702,6 +709,21 @@ pub async fn fs_canonicalize(
 }
 
 #[tauri::command]
+pub fn fs_readlink(
+    path: String,
+    workspace: Option<WorkspaceEnv>,
+    registry: tauri::State<'_, WorkspaceRegistry>,
+) -> Result<String, String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    let p = resolve_path(&path, &workspace);
+    super::security::validate_read(&p)?;
+    require_authorized(&registry, &p)?;
+    std::fs::read_link(&p)
+        .map(|target| target.to_string_lossy().into_owned())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn fs_stat(
     path: String,
     workspace: Option<WorkspaceEnv>,
@@ -727,7 +749,20 @@ pub async fn fs_stat(
         size: meta.len(),
         mtime: mtime_millis(&meta),
         kind,
+        mode: file_mode(&meta),
+        readonly: meta.permissions().readonly(),
     })
+}
+
+#[cfg(unix)]
+fn file_mode(meta: &fs::Metadata) -> Option<u32> {
+    use std::os::unix::fs::PermissionsExt;
+    Some(meta.permissions().mode())
+}
+
+#[cfg(not(unix))]
+fn file_mode(_meta: &fs::Metadata) -> Option<u32> {
+    None
 }
 
 #[cfg(test)]

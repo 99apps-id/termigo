@@ -89,7 +89,11 @@ pub async fn pty_open(
     let join_output = inner;
     let spawn_result = join_output.map_err(|e| e.to_string())?;
     let inner = spawn_result.map_err(|e| e.to_string())?;
-    state.sessions.write().unwrap_or_else(|e| e.into_inner()).insert(id, inner);
+    state
+        .sessions
+        .write()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(id, inner);
     // The shell can exit before this insert (instant failure, `exit` in an rc
     // file); the waiter's reap then ran with the id absent. Re-check and reap
     // so the pseudoconsole isn't stranded.
@@ -226,7 +230,11 @@ pub fn pty_resize(
 
 #[tauri::command]
 pub fn pty_close(state: tauri::State<PtyState>, id: u64) -> Result<(), String> {
-    let session = state.sessions.write().unwrap_or_else(|e| e.into_inner()).remove(&id);
+    let session = state
+        .sessions
+        .write()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&id);
     if let Some(s) = session {
         if let Err(e) = s.killer.lock().unwrap_or_else(|e| e.into_inner()).kill() {
             log::debug!("pty_close: kill id={id} returned {e}");
@@ -237,6 +245,103 @@ pub fn pty_close(state: tauri::State<PtyState>, id: u64) -> Result<(), String> {
         log::debug!("pty_close: unknown id={id}");
     }
     Ok(())
+}
+
+const ALLOWED_SIGNALS: &[&str] = &["interrupt", "terminate", "kill", "stop", "continue"];
+
+fn signal_number(name: &str) -> Option<i32> {
+    #[cfg(unix)]
+    {
+        match name {
+            "interrupt" => Some(libc::SIGINT),
+            "terminate" => Some(libc::SIGTERM),
+            "kill" => Some(libc::SIGKILL),
+            "stop" => Some(libc::SIGSTOP),
+            "continue" => Some(libc::SIGCONT),
+            _ => None,
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = name;
+        None
+    }
+}
+
+/// Send a bounded, named signal to the PTY's foreground process group.
+/// Arbitrary numeric signals and arbitrary PIDs never cross this boundary.
+#[tauri::command]
+pub fn pty_signal(state: tauri::State<PtyState>, id: u64, signal: String) -> Result<(), String> {
+    let signal = signal.trim().to_ascii_lowercase();
+    if !ALLOWED_SIGNALS.contains(&signal.as_str()) {
+        return Err(format!(
+            "unsupported signal {signal:?}; expected one of {}",
+            ALLOWED_SIGNALS.join(", ")
+        ));
+    }
+    let session = state
+        .sessions
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| format!("no PTY session {id}"))?;
+
+    #[cfg(unix)]
+    {
+        let leader = session
+            .master
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .process_group_leader()
+            .map(|pid| pid as libc::pid_t)
+            .filter(|pid| *pid > 0)
+            .ok_or_else(|| format!("PTY session {id} has no process group"))?;
+        let number = signal_number(&signal).expect("validated signal");
+        let result = unsafe { libc::kill(-leader, number) };
+        if result != 0 {
+            return Err(std::io::Error::last_os_error().to_string());
+        }
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    {
+        if signal != "terminate" && signal != "kill" {
+            return Err("this signal is not supported for Windows PTYs".to_string());
+        }
+        session
+            .killer
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .kill()
+            .map_err(|e| e.to_string())
+    }
+}
+
+#[tauri::command]
+pub fn pty_get_cwd(state: tauri::State<PtyState>, id: u64) -> Result<Option<String>, String> {
+    let session = state
+        .sessions
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| format!("no PTY session {id}"))?;
+    if session.shell_pid == 0 {
+        return Ok(None);
+    }
+    #[cfg(unix)]
+    {
+        let path = std::fs::read_link(format!("/proc/{}/cwd", session.shell_pid))
+            .map_err(|e| format!("read PTY cwd: {e}"))?;
+        Ok(Some(path.to_string_lossy().into_owned()))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = session;
+        Ok(None)
+    }
 }
 
 #[tauri::command]
@@ -272,7 +377,11 @@ pub fn pty_has_foreground_job(state: tauri::State<PtyState>, id: u64) -> Result<
     }
     #[cfg(unix)]
     {
-        let leader = session.master.lock().unwrap_or_else(|e| e.into_inner()).process_group_leader();
+        let leader = session
+            .master
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .process_group_leader();
         Ok(matches!(leader, Some(pid) if pid > 0 && (pid as u64) != shell_pid))
     }
     #[cfg(windows)]
@@ -368,7 +477,12 @@ pub async fn pty_ack_output(
     bytes: u64,
     state: tauri::State<'_, PtyState>,
 ) -> Result<(), String> {
-    let session = state.sessions.read().unwrap_or_else(|e| e.into_inner()).get(&id).cloned();
+    let session = state
+        .sessions
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&id)
+        .cloned();
     let Some(session) = session else {
         return Ok(());
     };
@@ -383,6 +497,24 @@ pub async fn pty_ack_output(
         .acknowledge(bytes);
     session.output_cv.notify_all();
     Ok(())
+}
+
+#[cfg(test)]
+mod pty_signal_tests {
+    use super::{signal_number, ALLOWED_SIGNALS};
+
+    #[cfg(unix)]
+    #[test]
+    fn named_signals_are_bounded_to_supported_process_controls() {
+        for name in ALLOWED_SIGNALS {
+            assert!(
+                signal_number(name).is_some(),
+                "missing signal mapping: {name}"
+            );
+        }
+        assert!(signal_number("9").is_none());
+        assert!(signal_number("usr1").is_none());
+    }
 }
 
 #[cfg(test)]

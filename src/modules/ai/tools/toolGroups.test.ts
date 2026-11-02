@@ -326,7 +326,7 @@ describe("tool payload measurement", () => {
     // test-synthesizer, git-bisect and browser-visual-diff schemas.
     // The ceiling is the point of the test: a feature that adds schemas has
     // to either fit or raise it deliberately, in a diff a reviewer sees.
-    expect(kb).toBeLessThan(112);
+    expect(kb).toBeLessThan(114);
     // And it must be exact: an unmeasured schema would silently under-report.
     expect(payload.unmeasured).toBe(0);
   });

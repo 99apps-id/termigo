@@ -11,7 +11,13 @@ type ReadResult =
   | { kind: "binary"; size: number }
   | { kind: "toolarge"; size: number; limit: number };
 
-type FileStat = { size: number; mtime: number; kind: string };
+type FileStat = {
+  size: number;
+  mtime: number;
+  kind: string;
+  mode?: number | null;
+  readonly: boolean;
+};
 
 /// Mirrors FORCE_MAX_READ_BYTES in src-tauri fs/file.rs.
 export const FORCE_READ_LIMIT = 50 * 1024 * 1024;

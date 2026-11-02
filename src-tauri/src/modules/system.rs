@@ -73,6 +73,208 @@ pub fn env_list() -> Vec<EnvVar> {
     vars
 }
 
+#[derive(Serialize)]
+pub struct SystemSnapshot {
+    pub os: String,
+    pub arch: String,
+    pub hostname: Option<String>,
+    pub cpu_count: usize,
+    pub load_average: Option<[f64; 3]>,
+    pub memory_total_bytes: Option<u64>,
+    pub memory_available_bytes: Option<u64>,
+    pub swap_total_bytes: Option<u64>,
+    pub swap_free_bytes: Option<u64>,
+}
+
+#[derive(Serialize)]
+pub struct DiskUsage {
+    pub path: String,
+    pub total_bytes: u64,
+    pub used_bytes: u64,
+    pub available_bytes: u64,
+    pub used_percent: u8,
+}
+
+#[derive(Serialize)]
+pub struct ProcessInfo {
+    pub pid: u32,
+    pub parent_pid: Option<u32>,
+    pub command: String,
+}
+
+#[derive(Serialize)]
+pub struct ListeningPort {
+    pub protocol: String,
+    pub address: String,
+    pub port: u16,
+}
+
+#[tauri::command]
+pub fn system_snapshot() -> SystemSnapshot {
+    let (memory_total_bytes, memory_available_bytes, swap_total_bytes, swap_free_bytes) =
+        linux_memory();
+    SystemSnapshot {
+        os: std::env::consts::OS.to_string(),
+        arch: std::env::consts::ARCH.to_string(),
+        hostname: hostname(),
+        cpu_count: std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1),
+        load_average: load_average(),
+        memory_total_bytes,
+        memory_available_bytes,
+        swap_total_bytes,
+        swap_free_bytes,
+    }
+}
+
+#[tauri::command]
+pub fn system_disk_usage(path: String) -> Result<DiskUsage, String> {
+    if path.is_empty() || path.len() > 4096 || path.bytes().any(|b| b == 0) {
+        return Err("invalid disk path".to_string());
+    }
+    let output = std::process::Command::new("df")
+        .args(["-P", "-k", "--", &path])
+        .output()
+        .map_err(|e| format!("run df: {e}"))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let line = stdout
+        .lines()
+        .nth(1)
+        .ok_or_else(|| "df returned no filesystem row".to_string())?;
+    let fields: Vec<&str> = line.split_whitespace().collect();
+    if fields.len() < 5 {
+        return Err("unexpected df output".to_string());
+    }
+    let total_kb = fields[1].parse::<u64>().map_err(|_| "invalid total size")?;
+    let used_kb = fields[2].parse::<u64>().map_err(|_| "invalid used size")?;
+    let available_kb = fields[3]
+        .parse::<u64>()
+        .map_err(|_| "invalid available size")?;
+    let used_percent = fields[4]
+        .trim_end_matches('%')
+        .parse::<u8>()
+        .map_err(|_| "invalid used percentage")?;
+    Ok(DiskUsage {
+        path,
+        total_bytes: total_kb.saturating_mul(1024),
+        used_bytes: used_kb.saturating_mul(1024),
+        available_bytes: available_kb.saturating_mul(1024),
+        used_percent,
+    })
+}
+
+#[tauri::command]
+pub fn system_processes(limit: Option<u32>) -> Result<Vec<ProcessInfo>, String> {
+    let limit = limit.unwrap_or(100).clamp(1, 500) as usize;
+    #[cfg(target_os = "linux")]
+    {
+        let mut processes = Vec::new();
+        for entry in std::fs::read_dir("/proc").map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else { continue };
+            let Ok(pid) = name.parse::<u32>() else {
+                continue;
+            };
+            let stat = std::fs::read_to_string(entry.path().join("stat")).unwrap_or_default();
+            let parent_pid = stat
+                .rsplit_once(") ")
+                .and_then(|(_, rest)| rest.split_whitespace().nth(1))
+                .and_then(|v| v.parse().ok());
+            let command = std::fs::read_to_string(entry.path().join("comm"))
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            processes.push(ProcessInfo {
+                pid,
+                parent_pid,
+                command,
+            });
+            if processes.len() >= limit {
+                break;
+            }
+        }
+        processes.sort_by_key(|p| p.pid);
+        Ok(processes)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = limit;
+        Err("system_processes is currently supported on Linux only".to_string())
+    }
+}
+
+#[tauri::command]
+pub fn system_listening_ports() -> Result<Vec<ListeningPort>, String> {
+    #[cfg(target_os = "linux")]
+    {
+        let mut ports = Vec::new();
+        for (protocol, file) in [("tcp", "/proc/net/tcp"), ("tcp6", "/proc/net/tcp6")] {
+            let text = std::fs::read_to_string(file).map_err(|e| e.to_string())?;
+            for line in text.lines().skip(1) {
+                let fields: Vec<&str> = line.split_whitespace().collect();
+                if fields.get(3) != Some(&"0A") {
+                    continue;
+                }
+                let Some(local) = fields.get(1) else { continue };
+                let Some((address, port)) = local.split_once(':') else {
+                    continue;
+                };
+                let Ok(port) = u16::from_str_radix(port, 16) else {
+                    continue;
+                };
+                ports.push(ListeningPort {
+                    protocol: protocol.to_string(),
+                    address: address.to_string(),
+                    port,
+                });
+            }
+        }
+        ports.sort_by_key(|p| (p.port, p.protocol.clone()));
+        Ok(ports)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Err("system_listening_ports is currently supported on Linux only".to_string())
+    }
+}
+
+fn hostname() -> Option<String> {
+    std::fs::read_to_string("/etc/hostname")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+fn load_average() -> Option<[f64; 3]> {
+    let text = std::fs::read_to_string("/proc/loadavg").ok()?;
+    let mut values = text.split_whitespace().take(3).map(|v| v.parse().ok());
+    Some([values.next()??, values.next()??, values.next()??])
+}
+
+fn linux_memory() -> (Option<u64>, Option<u64>, Option<u64>, Option<u64>) {
+    let Ok(text) = std::fs::read_to_string("/proc/meminfo") else {
+        return (None, None, None, None);
+    };
+    let value = |key: &str| {
+        text.lines()
+            .find_map(|line| line.strip_prefix(key))
+            .and_then(|v| v.split_whitespace().next())
+            .and_then(|v| v.parse::<u64>().ok())
+            .map(|v| v.saturating_mul(1024))
+    };
+    (
+        value("MemTotal:"),
+        value("MemAvailable:"),
+        value("SwapTotal:"),
+        value("SwapFree:"),
+    )
+}
+
 /// Priority for env-list ordering: shells and tools read these first.
 fn priority(name: &str) -> u8 {
     let upper = name.to_ascii_uppercase();

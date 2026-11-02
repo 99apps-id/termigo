@@ -157,6 +157,48 @@ export type GitDiffComment = {
 };
 
 export const native = {
+  ptyGetCwd: (id: number) => invoke<string | null>("pty_get_cwd", { id }),
+  ptySignal: (
+    id: number,
+    signal: "interrupt" | "terminate" | "kill" | "stop" | "continue",
+  ) => invoke<void>("pty_signal", { id, signal }),
+  readlink: (path: string) =>
+    invoke<string>("fs_readlink", { path, workspace: currentWorkspaceEnv() }),
+  stat: (path: string) =>
+    invoke<{
+      size: number;
+      mtime: number;
+      kind: string;
+      mode?: number | null;
+      readonly: boolean;
+    }>("fs_stat", { path, workspace: currentWorkspaceEnv() }),
+  symlink: (target: string, linkPath: string, targetIsDir?: boolean) =>
+    invoke<void>("fs_symlink", {
+      target,
+      linkPath,
+      targetIsDir,
+      workspace: currentWorkspaceEnv(),
+    }),
+  chmod: (path: string, mode: number) =>
+    invoke<void>("fs_chmod", { path, mode, workspace: currentWorkspaceEnv() }),
+  systemSnapshot: () => invoke("system_snapshot"),
+  systemDiskUsage: (path: string) => invoke("system_disk_usage", { path }),
+  systemProcesses: (limit?: number) => invoke("system_processes", { limit }),
+  systemListeningPorts: () => invoke("system_listening_ports"),
+  gitTagList: (repoRoot: string) =>
+    invoke("git_tag_list", { repoRoot, workspace: currentWorkspaceEnv() }),
+  gitRemoteList: (repoRoot: string) =>
+    invoke("git_remote_list", { repoRoot, workspace: currentWorkspaceEnv() }),
+  gitStashList: (repoRoot: string) =>
+    invoke("git_stash_list", { repoRoot, workspace: currentWorkspaceEnv() }),
+  gitWorktreeList: (repoRoot: string) =>
+    invoke("git_worktree_list", { repoRoot, workspace: currentWorkspaceEnv() }),
+  sqlSchema: (engine: string, connection: string) =>
+    invoke("sql_schema", { engine, connection }),
+  sqlExplain: (engine: string, connection: string, query: string) =>
+    invoke("sql_explain", { engine, connection, query }),
+  sqlHealth: (engine: string, connection: string) =>
+    invoke("sql_health", { engine, connection }),
   workspaceCurrentDir: () => invoke<string>("workspace_current_dir"),
   workspaceAuthorize: (path: string) =>
     invoke<string>("workspace_authorize", {

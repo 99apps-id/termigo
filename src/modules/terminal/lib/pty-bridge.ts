@@ -4,6 +4,21 @@ import { PtyOutputReceiver } from "./PtyOutputReceiver";
 
 const textEncoder = new TextEncoder();
 
+export type PtySignal =
+  | "interrupt"
+  | "terminate"
+  | "kill"
+  | "stop"
+  | "continue";
+
+export function signalPty(id: number, signal: PtySignal): Promise<void> {
+  return invoke("pty_signal", { id, signal });
+}
+
+export function getPtyCwd(id: number): Promise<string | null> {
+  return invoke<string | null>("pty_get_cwd", { id });
+}
+
 export type PtyHandlers = {
   onData: (bytes: Uint8Array) => void;
   onExit?: (code: number) => void;
