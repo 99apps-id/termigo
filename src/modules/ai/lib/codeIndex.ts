@@ -1,17 +1,8 @@
 import { canonicalDirPath } from "@/lib/path";
+import { invoke } from "@tauri-apps/api/core";
 import { native } from "./native";
 
 // ─── Types ────────────────────────────────────────────────────────────────
-
-export type CodeChunk = {
-  path: string;
-  startLine: number;
-  endLine: number;
-  text: string;
-  tokens: string[];
-  tokenCounts: Map<string, number>;
-  scopeHeader?: string;
-};
 
 export type SearchResult = {
   path: string;
@@ -127,6 +118,10 @@ const STOP_WORDS = new Set([
   "undefined",
 ]);
 
+/** Words of one character are dropped on purpose: as index terms they
+ *  would match nearly everything, and the exact-substring bonus in search
+ *  still finds the literal text. Indexing and querying share this one
+ *  function, so the policy can never drift between the two sides. */
 export function tokenize(text: string): string[] {
   const rawWords = text
     .replace(/[^a-zA-Z0-9_]/g, " ")
@@ -139,20 +134,22 @@ export function tokenize(text: string): string[] {
     if (!STOP_WORDS.has(lower)) {
       tokens.push(lower);
     }
-    // Split camelCase, PascalCase, or snake_case into sub-tokens
+    // Split camelCase, PascalCase, snake_case, and digit-to-letter humps
+    // (sha256Hash -> sha256 + hash) into sub-tokens. A lone sub-token still
+    // counts when it differs from the word itself, so an underscore-wrapped
+    // stem (__init__, _private) is findable by its stem. One word
+    // contributes each sub-token once: fooFoo must not count foo twice.
     const subWords = word
-      .replace(/([a-z])([A-Z])/g, "$1 $2")
+      .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
       .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
       .replace(/_/g, " ")
       .toLowerCase()
       .split(/\s+/)
       .filter((w) => w.length > 1 && !STOP_WORDS.has(w));
 
-    if (subWords.length > 1) {
-      for (const sw of subWords) {
-        if (sw !== lower) {
-          tokens.push(sw);
-        }
+    for (const sw of new Set(subWords)) {
+      if (sw !== lower) {
+        tokens.push(sw);
       }
     }
   }
@@ -162,7 +159,10 @@ export function tokenize(text: string): string[] {
 // ─── Chunking ─────────────────────────────────────────────────────────────
 
 const CHUNK_LINES = 80;
-const CHUNK_OVERLAP = 20;
+/** Minimum lines a chunk spans before the next one starts. Despite the
+ *  historical name (overlap), chunks are strictly adjacent: this is the
+ *  step floor that keeps a boundary snap from producing slivers. */
+const CHUNK_MIN_SPAN = 20;
 
 const DECLARATION_BOUNDARY_REGEX =
   /^(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function|class|interface|type|enum|struct|impl|trait|fn|def|pub(?:\s*\([^)]+\))?\s+(?:fn|struct|enum|trait|type|impl)|const\s+[A-Z0-9_]+\s*=|var\s+[A-Z0-9_]+\s*=)/;
@@ -200,7 +200,7 @@ export function chunkLines(
 
     // If we are not at the end of the file, prefer breaking at a declaration boundary or empty line
     if (end < lines.length) {
-      const searchMin = Math.max(start + CHUNK_OVERLAP, end - 15);
+      const searchMin = Math.max(start + CHUNK_MIN_SPAN, end - 15);
       for (let cand = end; cand >= searchMin; cand--) {
         const line = lines[cand]?.trim() ?? "";
         if (DECLARATION_BOUNDARY_REGEX.test(line) || line === "") {
@@ -215,37 +215,72 @@ export function chunkLines(
     const text = slice.join("\n");
     chunks.push({ start, end, text, scopeHeader });
 
-    i = Math.max(start + CHUNK_OVERLAP, end);
+    i = Math.max(start + CHUNK_MIN_SPAN, end);
     if (i >= lines.length) break;
   }
   return chunks;
 }
 
-// ─── Index & BM25 Stats ───────────────────────────────────────────────────
+// ─── FTS5 index (Rust side) ─────────────────────────────────────────────
+//
+// Storage, freshness, matching and ranking live in SQLite FTS5 behind the
+// codeindex_* commands (src-tauri/src/modules/codeindex.rs). This module
+// keeps the parts FTS5 cannot do: the walk, the chunker, and the code-aware
+// tokenizer (FTS5's unicode61 tokenizer cannot split camelCase or
+// snake_case, so the indexed stream is pre-tokenized here). The database
+// sits in the app data directory: nothing is written into the indexed tree
+// anymore, where the old JSON cache planted a multi-megabyte copy of the
+// corpus as `.termigo/code-index.json`.
 
-const index = new Map<string, CodeChunk[]>();
-const docFrequencies = new Map<string, number>();
-let totalChunksCount = 0;
-let totalTokensCount = 0;
+type FtsChunkInput = {
+  startLine: number;
+  endLine: number;
+  scopeHeader: string | null;
+  text: string;
+  /** Space-joined token stream for the chunk. */
+  tokens: string;
+};
 
-/** Path -> mtime/size as of the moment the file was indexed. A saved index is
- *  checked against this before it is reused, so an index that describes a tree
- *  that no longer exists cannot answer a search. */
-const fileFingerprints = new Map<string, { mtime: number; size: number }>();
+type FtsFileInput = {
+  path: string;
+  mtime: number;
+  size: number;
+  /** Space-joined token stream for the file path, indexed with a high
+   *  ranking weight so a term naming the file outranks a body mention. */
+  pathTokens: string;
+  chunks: FtsChunkInput[];
+};
+
+type FtsSearchHit = {
+  path: string;
+  startLine: number;
+  endLine: number;
+  scopeHeader: string | null;
+  text: string;
+  score: number;
+};
 
 let indexedRoot: string | null = null;
+let indexStats = { files: 0, chunks: 0, truncated: false };
 
 export function getIndexedRoot(): string | null {
   return indexedRoot;
 }
 
+export function getIndexStats(): {
+  files: number;
+  chunks: number;
+  truncated: boolean;
+} {
+  return { ...indexStats };
+}
+
+/** Forget which root this session indexed. The FTS rows stay in the
+ *  database: they are fingerprint-checked before any reuse, so a later
+ *  search revalidates instead of trusting them. */
 export function clearIndex(): void {
-  index.clear();
-  docFrequencies.clear();
-  fileFingerprints.clear();
-  totalChunksCount = 0;
-  totalTokensCount = 0;
   indexedRoot = null;
+  indexStats = { files: 0, chunks: 0, truncated: false };
 }
 
 export const INDEXABLE_EXTENSIONS = [
@@ -311,48 +346,26 @@ function shouldSkipPath(path: string): boolean {
   return false;
 }
 
+/** Where the pre-FTS5 index kept its JSON cache. The file is no longer
+ *  written; a successful FTS5 build deletes the leftover so upgraded
+ *  workspaces do not keep a stale multi-megabyte copy of their own code. */
 export const CODE_INDEX_CACHE_REL_PATH = ".termigo/code-index.json";
 
 function codeIndexCachePath(root: string): string {
   return `${canonicalDirPath(root)}/${CODE_INDEX_CACHE_REL_PATH}`;
 }
 
-export type SerializedCodeChunk = {
-  path: string;
-  startLine: number;
-  endLine: number;
-  text: string;
-  tokens: string[];
-  scopeHeader?: string;
-};
-
-export type SerializedCodeFile = {
-  path: string;
-  mtime: number;
-  size: number;
-  chunks: SerializedCodeChunk[];
-};
-
-/** `version: 2` carries a per-file fingerprint (mtime + size). A version 1 entry
- *  was written without one, so it cannot be checked and is treated as stale. */
-export type SerializedCodeIndex = {
-  version: 2;
-  root: string;
-  savedAt: number;
-  totalChunksCount: number;
-  totalTokensCount: number;
-  docFrequencies: [string, number][];
-  files: SerializedCodeFile[];
-};
-
 /** The files an index build may read, from a single glob.
  *
- *  The build and the cache check both go through here, and that is load
- *  bearing: if the two filtered differently, every load would compare a
- *  manifest against a differently shaped one and invalidate a good cache. */
-async function collectIndexableFiles(
-  root: string,
-): Promise<{ path: string; mtime: number; size: number }[]> {
+ *  The build and the freshness check both go through here, and that is load
+ *  bearing: if the two filtered differently, every comparison would compare
+ *  a manifest against a differently shaped one and invalidate a good index.
+ *  `truncated` reports that the walk hit the file cap, so callers can say
+ *  the index covers only part of the tree instead of implying it is whole. */
+async function collectIndexableFiles(root: string): Promise<{
+  files: { path: string; mtime: number; size: number }[];
+  truncated: boolean;
+}> {
   const result = await native.glob({
     pattern: INDEXABLE_GLOB,
     root,
@@ -366,206 +379,119 @@ async function collectIndexableFiles(
     if (shouldSkipPath(hit.path)) continue;
     files.push({ path: hit.path, mtime: hit.mtime ?? 0, size: hit.size ?? 0 });
   }
-  return files;
-}
-
-export async function saveIndexCache(root: string | null): Promise<boolean> {
-  if (!root || index.size === 0) return false;
-  try {
-    const dir = `${canonicalDirPath(root)}/.termigo`;
-    try {
-      await native.createDir(dir);
-    } catch {
-      // already exists
-    }
-    const filesList: SerializedCodeFile[] = [];
-    for (const [path, chunks] of index.entries()) {
-      const fingerprint = fileFingerprints.get(path);
-      // No fingerprint means the entry did not come from a file walk; the cache
-      // check would reject it on the next load anyway.
-      if (!fingerprint) continue;
-      filesList.push({
-        path,
-        mtime: fingerprint.mtime,
-        size: fingerprint.size,
-        chunks: chunks.map((c) => ({
-          path: c.path,
-          startLine: c.startLine,
-          endLine: c.endLine,
-          text: c.text,
-          tokens: c.tokens,
-          scopeHeader: c.scopeHeader,
-        })),
-      });
-    }
-    const payload: SerializedCodeIndex = {
-      version: 2,
-      root: canonicalDirPath(root),
-      savedAt: Date.now(),
-      totalChunksCount,
-      totalTokensCount,
-      docFrequencies: Array.from(docFrequencies.entries()),
-      files: filesList,
-    };
-    await native.writeFile(codeIndexCachePath(root), JSON.stringify(payload));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export async function loadIndexCache(
-  root: string | null,
-): Promise<{ files: number; chunks: number } | null> {
-  if (!root) return null;
-  try {
-    const res = await native.readFile(codeIndexCachePath(root));
-    if (res.kind !== "text" || !res.content) return null;
-    const data = JSON.parse(res.content) as SerializedCodeIndex;
-    // Canonical compare: the same tree spelled with a trailing slash or with
-    // Windows backslashes is the same cache. A raw compare dropped a valid
-    // index and then overwrote it under the other spelling, so every call paid
-    // a full rebuild and neither spelling ever hit.
-    if (
-      data.version !== 2 ||
-      canonicalDirPath(data.root) !== canonicalDirPath(root)
-    ) {
-      return null;
-    }
-
-    // Freshness check. Version and root alone are not enough: that combination
-    // was reused forever, so `code_search` kept answering from a tree that had
-    // since changed, across restarts and after every edit, with no signal to
-    // the caller. One glob of path+mtime+size decides it.
-    const onDisk = new Map(
-      (await collectIndexableFiles(root)).map((f) => [f.path, f]),
-    );
-    if (onDisk.size !== data.files.length) return null;
-    for (const f of data.files) {
-      const current = onDisk.get(f.path);
-      if (!current || current.mtime !== f.mtime || current.size !== f.size) {
-        return null;
-      }
-    }
-
-    clearIndex();
-    indexedRoot = root;
-    totalChunksCount = data.totalChunksCount;
-    totalTokensCount = data.totalTokensCount;
-    for (const [term, freq] of data.docFrequencies) {
-      docFrequencies.set(term, freq);
-    }
-    for (const f of data.files) {
-      const chunks: CodeChunk[] = f.chunks.map((c) => {
-        const counts = new Map<string, number>();
-        for (const t of c.tokens) {
-          counts.set(t, (counts.get(t) ?? 0) + 1);
-        }
-        return {
-          path: c.path,
-          startLine: c.startLine,
-          endLine: c.endLine,
-          text: c.text,
-          tokens: c.tokens,
-          tokenCounts: counts,
-          scopeHeader: c.scopeHeader,
-        };
-      });
-      fileFingerprints.set(f.path, { mtime: f.mtime, size: f.size });
-      index.set(f.path, chunks);
-    }
-    return { files: data.files.length, chunks: totalChunksCount };
-  } catch {
-    return null;
-  }
+  return { files, truncated: result.truncated };
 }
 
 export async function indexWorkspace(
   root: string | null,
   forceReindex = false,
-  persist = false,
-): Promise<{ files: number; chunks: number }> {
+): Promise<{ files: number; chunks: number; truncated: boolean }> {
   if (!root) {
     clearIndex();
-    return { files: 0, chunks: 0 };
+    return { files: 0, chunks: 0, truncated: false };
   }
+  const canonicalRoot = canonicalDirPath(root);
+  const { files, truncated } = await collectIndexableFiles(canonicalRoot);
 
   if (!forceReindex) {
-    const cached = await loadIndexCache(root);
-    if (cached && cached.chunks > 0) {
-      return cached;
+    // Freshness is one fingerprint comparison on the Rust side: when the
+    // tree is unchanged, no file is read and no chunk is rebuilt, across
+    // restarts as well as within a session. A failed check (first run, no
+    // database yet) falls through to the build below.
+    try {
+      const fresh = await invoke<{
+        fresh: boolean;
+        files: number;
+        chunks: number;
+      }>("codeindex_check_fresh", {
+        root: canonicalRoot,
+        files: files.map((f) => ({
+          path: f.path,
+          mtime: f.mtime,
+          size: f.size,
+        })),
+      });
+      if (fresh.fresh) {
+        indexedRoot = canonicalRoot;
+        indexStats = { files: fresh.files, chunks: fresh.chunks, truncated };
+        return { ...indexStats };
+      }
+    } catch {
+      // fall through to a rebuild
     }
   }
 
-  index.clear();
-  docFrequencies.clear();
-  fileFingerprints.clear();
-  totalChunksCount = 0;
-  totalTokensCount = 0;
-  indexedRoot = root;
-
-  let files = 0;
-
-  for (const hit of await collectIndexableFiles(root)) {
+  const inputs: FtsFileInput[] = [];
+  for (const hit of files) {
+    // A file the build cannot index still gets a row (with no chunks) when
+    // the skip is a property of the file itself. Freshness compares the
+    // glob against the stored rows, so an unrecorded empty or oversized
+    // file would invalidate the whole index on every single search.
+    const unindexed: FtsFileInput = {
+      path: hit.path,
+      mtime: hit.mtime,
+      size: hit.size,
+      pathTokens: tokenize(hit.path).join(" "),
+      chunks: [],
+    };
+    if (hit.size > 500_000) {
+      inputs.push(unindexed); // Huge generated file; never worth the read.
+      continue;
+    }
     try {
       const read = await native.readFile(hit.path);
-      if (read.kind !== "text" || !read.content) continue;
-      if (read.size > 500_000) continue; // Skip huge generated files
+      if (read.kind !== "text" || !read.content || read.size > 500_000) {
+        inputs.push(unindexed);
+        continue;
+      }
 
       const lines = read.content.replace(/\r\n/g, "\n").split("\n");
       const pieces = chunkLines(lines);
-      const indexed: CodeChunk[] = [];
-
-      for (const p of pieces) {
-        const tokens = tokenize(p.text);
-        const counts = new Map<string, number>();
-        const seenInChunk = new Set<string>();
-
-        for (const t of tokens) {
-          counts.set(t, (counts.get(t) ?? 0) + 1);
-          if (!seenInChunk.has(t)) {
-            seenInChunk.add(t);
-            docFrequencies.set(t, (docFrequencies.get(t) ?? 0) + 1);
-          }
-        }
-
-        totalChunksCount++;
-        totalTokensCount += tokens.length;
-
-        indexed.push({
-          path: hit.path,
+      inputs.push({
+        path: hit.path,
+        mtime: hit.mtime,
+        size: hit.size,
+        pathTokens: tokenize(hit.path).join(" "),
+        chunks: pieces.map((p) => ({
           startLine: p.start + 1,
           endLine: p.end,
+          scopeHeader: p.scopeHeader ?? null,
           text: p.text,
-          tokens,
-          tokenCounts: counts,
-          scopeHeader: p.scopeHeader,
-        });
-      }
-
-      index.set(hit.path, indexed);
-      fileFingerprints.set(hit.path, { mtime: hit.mtime, size: hit.size });
-      files++;
+          tokens: tokenize(p.text).join(" "),
+        })),
+      });
     } catch {
-      // skip unreadable files
+      // Unreadable right now (permissions, a write in flight): leave the
+      // file unrecorded, so the next search retries the build instead of
+      // trusting a fingerprint for content that was never seen.
     }
   }
 
-  // Only the workspace root keeps a cache file. Caching any `root` put a
-  // multi-megabyte `.termigo/code-index.json` into whatever directory was
-  // searched, so indexing a subdirectory or a third-party checkout planted an
-  // index inside that tree (13 such directories, 58 MB, in this repository).
-  if (files > 0 && persist) {
-    await saveIndexCache(root);
-  }
+  const stats = await invoke<{ files: number; chunks: number }>(
+    "codeindex_replace_root",
+    { root: canonicalRoot, files: inputs },
+  );
+  indexedRoot = canonicalRoot;
+  indexStats = { files: stats.files, chunks: stats.chunks, truncated };
+  void deleteLegacyCache(canonicalRoot);
+  return { ...indexStats };
+}
 
-  return { files, chunks: totalChunksCount };
+/** Remove a pre-FTS5 JSON cache from the tree, best effort. The old index
+ *  wrote it into the workspace itself; leaving it behind would keep a stale
+ *  copy of the corpus on disk that nothing reads anymore. */
+async function deleteLegacyCache(root: string): Promise<void> {
+  try {
+    await native.deletePath(codeIndexCachePath(root));
+  } catch {
+    // already gone, or not ours to remove
+  }
 }
 
 // ─── Search & Snippet Extraction ──────────────────────────────────────────
 
 function extractCenteredSnippet(
-  chunk: CodeChunk,
+  chunk: { text: string; startLine: number },
   queryTokens: string[],
   windowSize = 8,
 ): { snippet: string; startLine: number } {
@@ -604,102 +530,52 @@ function extractCenteredSnippet(
   return { snippet, startLine: chunk.startLine + startIdx };
 }
 
+/** The distinct tokens a query searches for, in first-use order. FTS5
+ *  matches them with OR; a repeated term must not count twice. */
+export function queryTokens(query: string): string[] {
+  return [...new Set(tokenize(query))];
+}
+
 /**
- * Searches indexed code using Okapi BM25 scoring with path weighting
- * and exact-match bonus.
+ * Searches indexed code with FTS5: bm25 ranking over the pre-tokenized
+ * chunk stream, path-token weighting, and exact substring bonuses (the
+ * bonuses are applied on the Rust side). Snippets are centered here, where
+ * the chunk text already is.
  */
-export function searchCode(
+export async function searchCode(
   query: string,
   maxResults = 10,
   filterPath?: string,
-): SearchResult[] {
-  const queryTokens = tokenize(query);
-  if (queryTokens.length === 0 || totalChunksCount === 0) return [];
+): Promise<SearchResult[]> {
+  if (!indexedRoot || indexStats.chunks === 0) return [];
+  const tokens = queryTokens(query);
+  if (tokens.length === 0) return [];
 
-  const k1 = 1.2;
-  const b = 0.75;
-  const avgdl = Math.max(1, totalTokensCount / totalChunksCount);
-  const queryLower = query.toLowerCase().trim();
+  const hits = await invoke<FtsSearchHit[]>("codeindex_search", {
+    root: indexedRoot,
+    queryTokens: tokens,
+    queryText: query,
+    maxResults,
+    filterPath: filterPath ?? null,
+  });
 
-  const scored: { chunk: CodeChunk; score: number }[] = [];
-
-  for (const [filePath, chunks] of index.entries()) {
-    if (
-      filterPath &&
-      !filePath.toLowerCase().includes(filterPath.toLowerCase())
-    ) {
-      continue;
-    }
-
-    const pathLower = filePath.toLowerCase();
-    const pathTokens = tokenize(filePath);
-
-    for (const chunk of chunks) {
-      let bm25Score = 0;
-      const chunkLen = chunk.tokens.length;
-
-      for (const qt of queryTokens) {
-        const tf = chunk.tokenCounts.get(qt) ?? 0;
-        const df = docFrequencies.get(qt) ?? 0;
-        if (df === 0) continue;
-
-        // Smoothed BM25 IDF
-        const idf = Math.log(1 + (totalChunksCount - df + 0.5) / (df + 0.5));
-        // BM25 term weight
-        const num = tf * (k1 + 1);
-        const denom = tf + k1 * (1 - b + b * (chunkLen / avgdl));
-        const termScore = idf * (num / denom);
-
-        bm25Score += termScore;
-
-        // Path boosting: if query term matches file path/name
-        if (pathTokens.includes(qt)) {
-          bm25Score += idf * 1.5;
-        }
-      }
-
-      // Exact substring match bonus
-      if (
-        queryLower.length > 2 &&
-        chunk.text.toLowerCase().includes(queryLower)
-      ) {
-        bm25Score += 2.5;
-      }
-      if (queryLower.length > 2 && pathLower.includes(queryLower)) {
-        bm25Score += 4.0;
-      }
-
-      if (bm25Score > 0) {
-        scored.push({ chunk, score: bm25Score });
-      }
-    }
-  }
-
-  scored.sort((a, b) => b.score - a.score);
-
-  return scored.slice(0, maxResults).map(({ chunk, score }) => {
+  return hits.map((hit) => {
     const { snippet, startLine } = extractCenteredSnippet(
-      chunk,
-      queryTokens,
+      { text: hit.text, startLine: hit.startLine },
+      tokens,
       8,
     );
+    // The reported range covers exactly the lines the snippet shows: the
+    // window is 8 lines, so its last line is startLine + shown - 1, never
+    // startLine + 8.
+    const shownLines = snippet.split("\n").filter((l) => l !== "...").length;
     return {
-      path: chunk.path,
+      path: hit.path,
       startLine,
-      endLine: Math.min(chunk.endLine, startLine + 8),
-      score: Number(score.toFixed(3)),
+      endLine: Math.min(hit.endLine, startLine + Math.max(0, shownLines - 1)),
+      score: hit.score,
       snippet,
-      scopeHeader: chunk.scopeHeader,
+      scopeHeader: hit.scopeHeader ?? undefined,
     };
   });
-}
-
-export function getIndexStats(): { files: number; chunks: number } {
-  let files = 0;
-  let chunks = 0;
-  for (const [_, cs] of index) {
-    files++;
-    chunks += cs.length;
-  }
-  return { files, chunks };
 }

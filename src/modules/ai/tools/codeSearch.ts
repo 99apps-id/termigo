@@ -25,7 +25,6 @@ let indexingPromise: {
 
 async function ensureIndexed(
   rawRoot: string,
-  persist: boolean,
 ): Promise<{ files: number; chunks: number }> {
   // One canonical spelling per tree: the same directory arriving as "C:/x/",
   // "C:\\x" or "C:/x" is ONE index. Comparing raw strings read those as
@@ -46,25 +45,11 @@ async function ensureIndexed(
   if (indexingPromise && indexingPromise.root === root) {
     return indexingPromise.promise;
   }
-  const promise = indexWorkspace(root, false, persist).finally(() => {
+  const promise = indexWorkspace(root, false).finally(() => {
     if (indexingPromise?.promise === promise) indexingPromise = null;
   });
   indexingPromise = { root, promise };
   return promise;
-}
-
-/** Whether `root` IS the workspace root, which is the only tree that keeps a
- *  cache file on disk. A search aimed at another checkout or a subdirectory
- *  stays in memory: caching it wrote a `.termigo/code-index.json` into that
- *  tree, including trees the user does not own. */
-function isWorkspaceRoot(root: string, workspaceRoot: string | null): boolean {
-  if (!workspaceRoot) return false;
-  // Case-folded as well: on Windows one directory arrives spelled with
-  // different casing, and a persist decision is not worth a rebuild.
-  return (
-    canonicalDirPath(root).toLowerCase() ===
-    canonicalDirPath(workspaceRoot).toLowerCase()
-  );
 }
 
 /**
@@ -86,7 +71,7 @@ export function buildCodeSearchTools(ctx: ToolContext) {
   return {
     code_search: tool({
       description:
-        "Codebase search across the workspace. Uses Okapi BM25 ranking over syntax-aware code and configuration chunks with scope-boundary detection, path boosting, and exact substring matching. Returns file paths, line ranges, relevance scores, centered snippets, and enclosing scope headers (functions, classes, structs). Use this when you need to find where something is implemented, discover symbols, or locate relevant code without knowing exact filenames.",
+        "Codebase search across the workspace. Uses SQLite FTS5 with bm25 ranking over syntax-aware code and configuration chunks with scope-boundary detection, path weighting, and exact substring matching. Returns file paths, line ranges, relevance scores, centered snippets, and enclosing scope headers (functions, classes, structs). Use this when you need to find where something is implemented, discover symbols, or locate relevant code without knowing exact filenames.",
       inputSchema: z.object({
         query: z
           .string()
@@ -144,17 +129,18 @@ export function buildCodeSearchTools(ctx: ToolContext) {
         const root = targetRoot(ctx, effectiveRoot);
         if (!root) return { error: "no workspace root or cwd available" };
 
-        const stats = await ensureIndexed(
-          root,
-          isWorkspaceRoot(root, ctx.getWorkspaceRoot()),
-        );
+        const stats = await ensureIndexed(root);
         if (stats.chunks === 0) {
           return {
             error: `no indexable files found under ${root}. Check that the path is a directory that exists, then retry.`,
           };
         }
 
-        const results = searchCode(query, max_results ?? 10, effectiveFilter);
+        const results = await searchCode(
+          query,
+          max_results ?? 10,
+          effectiveFilter,
+        );
         return {
           query,
           // Reported so a cross-repo audit can see WHICH tree answered, instead
@@ -169,7 +155,7 @@ export function buildCodeSearchTools(ctx: ToolContext) {
 
     code_index: tool({
       description:
-        "Index a workspace for codebase search. Rebuilds the local BM25 index over code and configuration files. Use this once before asking `code_search` about an unfamiliar codebase, or when files have changed. Defaults to the workspace root; pass `root` to index another checkout (a large tree takes a while to build once, then searches are instant).",
+        "Index a workspace for codebase search. Rebuilds the local FTS5 index over code and configuration files. Use this once before asking `code_search` about an unfamiliar codebase, or when files have changed. Defaults to the workspace root; pass `root` to index another checkout (a large tree takes a while to build once, then searches are instant).",
       inputSchema: z.object({
         root: z
           .string()
@@ -191,11 +177,7 @@ export function buildCodeSearchTools(ctx: ToolContext) {
           const stats = await indexingPromise.promise;
           return { status: "ok", root, ...stats };
         }
-        const promise = indexWorkspace(
-          root,
-          true,
-          isWorkspaceRoot(root, ctx.getWorkspaceRoot()),
-        ).finally(() => {
+        const promise = indexWorkspace(root, true).finally(() => {
           if (indexingPromise?.promise === promise) indexingPromise = null;
         });
         indexingPromise = { root, promise };

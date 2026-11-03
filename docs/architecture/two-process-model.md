@@ -152,6 +152,16 @@ The spawn cwd goes through the same workspace authorization registry as every ot
 
 Written by the host, not by a tool, because the point is a record the agent cannot rewrite: the log directory is in the write deny-list, so `fs_write_file`, the shell route and every tool an agent can reach are locked out of it while this command writes with `std::fs` directly. App-scoped rather than workspace-scoped, so one file per day reads as a single timeline across every project a session touched. Entries are bounded at 64 KB and refused rather than truncated (half a JSON object is worse than a missing line when the log is what is read after an incident), the caller's date is validated as a bare `YYYY-MM-DD` so it cannot steer the write out of the audit directory, and lines are appended with `O_APPEND` so concurrent runs interleave instead of overwriting. Auditing is observation, so every failure is logged and swallowed: the caller always sees `Ok`.
 
+### Code index (`src-tauri/src/modules/codeindex.rs`)
+
+- `codeindex_replace_root` - replace one root's indexed chunks in the FTS5 database (one transaction)
+- `codeindex_check_fresh` - compare a root's stored file fingerprints (path, mtime, size) against the caller's
+- `codeindex_search` - FTS5 MATCH over the pre-tokenized chunk stream with bm25 ranking, path weighting and exact-match bonuses
+- `codeindex_stats` - indexed file and chunk counts for one root
+- `codeindex_clear` - drop one root's index
+
+The index lives in `<app_data_dir>/code-index.db`, never inside the indexed tree (the previous JSON cache planted a multi-megabyte copy of the corpus in the user's repository). The webview still owns chunking and the code-aware tokenizer, because FTS5's unicode61 tokenizer cannot split camelCase or snake_case identifiers; Rust owns storage, freshness, matching and ranking. The database is a rebuildable cache, so it runs WAL with relaxed sync.
+
 ### Agent hooks (`src-tauri/src/modules/agent.rs`)
 
 - `agent_enable_hooks` / `agent_hooks_status` - install/status terminal coding-agent hooks (Claude Code, Codex, Gemini CLI)

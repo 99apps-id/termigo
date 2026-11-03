@@ -432,7 +432,7 @@ function InlineDiff({ oldStr, newStr }: { oldStr: string; newStr: string }) {
           <div
             // biome-ignore lint/suspicious/noArrayIndexKey: static diff lines, order never changes
             key={`o${i}`}
-            className="whitespace-pre-wrap bg-red-500/10 px-2 text-red-500"
+            className="whitespace-pre-wrap bg-destructive/10 px-2 text-destructive"
           >
             <span className="mr-1 select-none text-muted-foreground">−</span>
             {l || " "}
@@ -447,7 +447,7 @@ function InlineDiff({ oldStr, newStr }: { oldStr: string; newStr: string }) {
           <div
             // biome-ignore lint/suspicious/noArrayIndexKey: static diff lines, order never changes
             key={`n${i}`}
-            className="whitespace-pre-wrap bg-green-500/10 px-2 text-green-600 dark:text-green-400"
+            className="whitespace-pre-wrap bg-emerald-500/10 px-2 text-emerald-700 dark:text-emerald-400"
           >
             <span className="mr-1 select-none text-muted-foreground">+</span>
             {l || " "}

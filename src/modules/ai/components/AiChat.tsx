@@ -561,19 +561,18 @@ const RenderedMessage = memo(function RenderedMessage({
             if (g.kind === "reasoning") {
               // "Live" means the model is writing into THIS block right now, so
               // passing isStreaming auto-opens it and the user watches the
-              // thinking unfold. It stays open once finished, so the transcript reads
-              // thinking, reasoned, work, answer per step - and collapses by clicking
-              //
-              // the header. The finished "Reasoned" label keeps a long run scannable
-              // without losing the thinking behind each step.
+              // thinking unfold. Once the step finishes, autoClose folds the
+              // block to the one-line "Reasoned" label the grouping module
+              // documents, so a long run stays scannable instead of stacking
+              // open thinking blocks; the header reopens any block on click.
               const reasoningLive = thinkingLive && gi === liveReasoningIdx;
               return showReasoning ? (
                 <PartAppear key={`${message.id}-${g.key}`}>
                   <Reasoning
                     isStreaming={reasoningLive}
                     showReasoning={showReasoning}
-                    autoClose={false}
-                    defaultOpen
+                    autoClose
+                    defaultOpen={reasoningLive}
                   >
                     <ReasoningTrigger />
                     <ReasoningContent>{g.text}</ReasoningContent>
@@ -672,7 +671,7 @@ const RenderedPart = memo(function RenderedPart({
 
   if (part.type === "reasoning") {
     return showReasoning ? (
-      <Reasoning showReasoning={showReasoning} defaultOpen>
+      <Reasoning showReasoning={showReasoning} autoClose>
         <ReasoningTrigger />
         <ReasoningContent>
           {(part as unknown as { text: string }).text}

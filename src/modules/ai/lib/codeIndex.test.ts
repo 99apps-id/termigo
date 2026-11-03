@@ -1,14 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
+
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+
+import { invoke } from "@tauri-apps/api/core";
 import {
   tokenize,
   searchCode,
   getIndexStats,
   indexWorkspace,
+  queryTokens,
   INDEXABLE_EXTENSIONS,
   chunkLines,
   findScopeHeader,
   clearIndex,
-  CODE_INDEX_CACHE_REL_PATH,
   INDEXABLE_GLOB,
 } from "./codeIndex";
 
@@ -47,17 +51,29 @@ describe("tokenize", () => {
     expect(tokens).toContain("retry");
     expect(tokens).toContain("count");
   });
+
+  it("splits digit-to-letter humps and underscore-wrapped stems", () => {
+    expect(tokenize("sha256Hash")).toContain("hash");
+    expect(tokenize("base64Encode")).toContain("base64");
+    expect(tokenize("__init__")).toContain("init");
+    expect(tokenize("_private")).toContain("private");
+  });
+
+  it("counts a repeated sub-token once per word", () => {
+    const tokens = tokenize("fooFoo");
+    expect(tokens.filter((t) => t === "foo")).toHaveLength(1);
+  });
 });
 
 describe("searchCode with empty or null workspace", () => {
-  it("returns empty results when index is empty", () => {
-    expect(getIndexStats()).toEqual({ files: 0, chunks: 0 });
-    expect(searchCode("anything")).toEqual([]);
+  it("returns empty results when index is empty", async () => {
+    expect(getIndexStats()).toEqual({ files: 0, chunks: 0, truncated: false });
+    await expect(searchCode("anything")).resolves.toEqual([]);
   });
 
   it("returns 0 files and chunks when root is null", async () => {
     const res = await indexWorkspace(null);
-    expect(res).toEqual({ files: 0, chunks: 0 });
+    expect(res).toEqual({ files: 0, chunks: 0, truncated: false });
   });
 
   it("includes common source and configuration extensions", () => {
@@ -141,52 +157,127 @@ async function mockNativeTree(writtenFiles: Map<string, string>) {
   return native;
 }
 
-describe("code index persistence and cache", () => {
-  it("saves the index and reuses it while the tree is unchanged", async () => {
+describe("queryTokens", () => {
+  it("dedupes repeated terms without dropping sub-tokens", () => {
+    expect(queryTokens("token token authenticateUser")).toEqual([
+      "token",
+      "authenticateuser",
+      "authenticate",
+      "user",
+    ]);
+  });
+});
+
+type Stamp = { path: string; mtime: number; size: number };
+type FtsFilePayload = {
+  path: string;
+  mtime: number;
+  size: number;
+  pathTokens: string;
+  chunks: { tokens: string; text: string }[];
+};
+
+/** A contract double for the Rust FTS5 side: it stores the stamps a
+ *  replace reported and answers freshness by comparing them, the same
+ *  semantics codeindex.rs implements against SQLite. */
+function mockFtsBackend() {
+  const stored = new Map<
+    string,
+    { stamps: Stamp[]; files: number; chunks: number }
+  >();
+  const replaced: { root: string; files: FtsFilePayload[] }[] = [];
+  vi.mocked(invoke).mockReset();
+  vi.mocked(invoke).mockImplementation(
+    async (cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "codeindex_check_fresh") {
+        const { root, files } = args as unknown as {
+          root: string;
+          files: Stamp[];
+        };
+        const entry = stored.get(root);
+        const fresh =
+          !!entry &&
+          entry.chunks > 0 &&
+          entry.stamps.length === files.length &&
+          files.every((f) =>
+            entry.stamps.some(
+              (s) =>
+                s.path === f.path && s.mtime === f.mtime && s.size === f.size,
+            ),
+          );
+        return {
+          fresh,
+          files: entry?.files ?? 0,
+          chunks: entry?.chunks ?? 0,
+        };
+      }
+      if (cmd === "codeindex_replace_root") {
+        const { root, files } = args as unknown as {
+          root: string;
+          files: FtsFilePayload[];
+        };
+        replaced.push({ root, files });
+        const chunks = files.reduce((n, f) => n + f.chunks.length, 0);
+        stored.set(root, {
+          stamps: files.map((f) => ({
+            path: f.path,
+            mtime: f.mtime,
+            size: f.size,
+          })),
+          files: files.length,
+          chunks,
+        });
+        return { files: files.length, chunks };
+      }
+      if (cmd === "codeindex_search") return [];
+      if (cmd === "fs_delete") return undefined;
+      throw new Error(`unexpected invoke: ${cmd}`);
+    },
+  );
+  return { replaced };
+}
+
+describe("code index FTS5 storage", () => {
+  it("builds once, then serves an unchanged tree without re-reading files", async () => {
     const writtenFiles = new Map<string, string>();
     const native = await mockNativeTree(writtenFiles);
+    const { replaced } = mockFtsBackend();
 
-    const stats1 = await indexWorkspace("/workspace", false, true);
+    const stats1 = await indexWorkspace("/workspace");
     expect(stats1.files).toBe(1);
     expect(stats1.chunks).toBeGreaterThan(0);
+    expect(replaced).toHaveLength(1);
 
-    const cacheFile = writtenFiles.get(
-      `/workspace/${CODE_INDEX_CACHE_REL_PATH}`,
-    );
-    expect(cacheFile).toBeDefined();
-    expect(cacheFile).toContain("authenticateUser");
+    // The payload carries the pre-tokenized stream FTS5 indexes: the whole
+    // identifier plus its split sub-tokens.
+    const chunk = replaced[0]?.files[0]?.chunks[0];
+    expect(chunk?.tokens).toContain("authenticateuser");
+    expect(chunk?.tokens).toContain("authenticate");
+    expect(chunk?.tokens).toContain("user");
+    expect(replaced[0]?.files[0]?.pathTokens).toContain("auth");
 
     clearIndex();
     expect(getIndexStats().chunks).toBe(0);
 
-    // An unchanged tree is served from the cache: the freshness check stats
-    // files, it does not re-read their contents.
     const readSpy = vi.spyOn(native, "readFile");
     readSpy.mockClear();
 
     const stats2 = await indexWorkspace("/workspace");
-    expect(stats2.files).toBe(1);
-    expect(stats2.chunks).toBe(stats1.chunks);
+    expect(stats2).toEqual(stats1);
     expect(readSpy).not.toHaveBeenCalledWith("/workspace/src/auth.ts");
-
-    const results = searchCode("authenticateUser");
-    expect(results.length).toBeGreaterThan(0);
-    expect(results[0].path).toBe("/workspace/src/auth.ts");
+    expect(replaced).toHaveLength(1);
   });
 
-  it("rebuilds instead of trusting a cache whose files changed", async () => {
+  it("rebuilds when a file fingerprint changed", async () => {
     const writtenFiles = new Map<string, string>();
     const native = await mockNativeTree(writtenFiles);
+    const { replaced } = mockFtsBackend();
 
-    await indexWorkspace("/workspace", false, true);
-    expect(writtenFiles.has(`/workspace/${CODE_INDEX_CACHE_REL_PATH}`)).toBe(
-      true,
-    );
-
+    await indexWorkspace("/workspace");
     clearIndex();
 
-    // Same path, new mtime and size: the cached chunks describe a file that no
-    // longer exists in that shape, so they must not answer a search.
+    // Same path, new mtime and size: the stored chunks describe a file that
+    // no longer exists in that shape, so they must not answer a search.
     vi.mocked(native.glob).mockResolvedValue({
       hits: [
         {
@@ -205,11 +296,13 @@ describe("code index persistence and cache", () => {
     const stats = await indexWorkspace("/workspace");
     expect(stats.files).toBe(1);
     expect(readSpy).toHaveBeenCalledWith("/workspace/src/auth.ts");
+    expect(replaced).toHaveLength(2);
   });
 
-  it("writes a cache only for the workspace root", async () => {
+  it("never writes an index file into the searched tree", async () => {
     const writtenFiles = new Map<string, string>();
     const native = await mockNativeTree(writtenFiles);
+    mockFtsBackend();
     vi.mocked(native.glob).mockResolvedValue({
       hits: [
         {
@@ -224,13 +317,10 @@ describe("code index persistence and cache", () => {
     writtenFiles.set("/other-checkout/src/auth.ts", FILE_CONTENT);
 
     await indexWorkspace("/other-checkout");
-    expect(
-      writtenFiles.has(`/other-checkout/${CODE_INDEX_CACHE_REL_PATH}`),
-    ).toBe(false);
+    await indexWorkspace("/other-checkout", true);
 
-    await indexWorkspace("/other-checkout", false, true);
-    expect(
-      writtenFiles.has(`/other-checkout/${CODE_INDEX_CACHE_REL_PATH}`),
-    ).toBe(true);
+    // The FTS5 database lives in the app data directory. The old JSON cache
+    // planted a copy of the corpus in every workspace root it indexed.
+    expect(vi.mocked(native.writeFile)).not.toHaveBeenCalled();
   });
 });

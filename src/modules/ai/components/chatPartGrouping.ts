@@ -61,6 +61,33 @@ export function lastReasoningGroupIndex(groups: readonly Group[]): number {
   return -1;
 }
 
+/**
+ * Split leading `<think>...</think>` blocks off a text part.
+ *
+ * Providers with native reasoning emit separate reasoning parts and never
+ * reach this. Some OpenAI-compatible endpoints instead return the thinking
+ * as tagged text inside the answer part, which used to render the raw tags
+ * and the whole chain of thought as answer prose. A tagged block only
+ * counts when it opens the part (after whitespace) and is fully closed: a
+ * mid-text tag is prose or an example, and an unclosed tag is still
+ * arriving, so both are left exactly as they are.
+ */
+export function splitLeadingThinkTags(text: string): {
+  thinking: string[];
+  rest: string;
+} {
+  const thinking: string[] = [];
+  let rest = text;
+  for (;;) {
+    const m = /^\s*<(think|thinking)>([\s\S]*?)<\/\1>/.exec(rest);
+    if (!m) break;
+    const inner = (m[2] ?? "").trim();
+    if (inner) thinking.push(inner);
+    rest = rest.slice(m[0].length);
+  }
+  return { thinking, rest };
+}
+
 export function buildPartGroups(parts: AnyPart[]): Group[] {
   const out: Group[] = [];
   let run: { parts: AnyPart[]; startIdx: number } | null = null;
@@ -114,6 +141,24 @@ export function buildPartGroups(parts: AnyPart[]): Group[] {
   };
 
   parts.forEach((p, i) => {
+    if (partType(p) === "text") {
+      // Tagged thinking inside an answer part joins this step's reasoning
+      // block (see splitLeadingThinkTags); the remainder stays the answer.
+      const raw = (p as unknown as { text?: string }).text ?? "";
+      const split = splitLeadingThinkTags(raw);
+      if (split.rest !== raw) {
+        if (split.thinking.length > 0) {
+          flushRun();
+          if (!thinking) {
+            thinking = { text: [], key: `reasoning-${partKey(p, i)}` };
+            out.push({ kind: "reasoning", text: "", key: thinking.key });
+          }
+          thinking.text.push(...split.thinking);
+        }
+        if (split.rest.trim() === "") return;
+        p = { ...p, text: split.rest } as AnyPart;
+      }
+    }
     if (partType(p) === "reasoning") {
       flushRun();
       if (!thinking) {

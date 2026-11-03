@@ -16,7 +16,7 @@ import type { TrajectoryRun } from "../store/trajectoryStore";
 import { RunJourney } from "./RunJourney";
 
 const STATUS_STYLE: Record<TrajectoryRun["status"], string> = {
-  running: "bg-blue-500/10 text-blue-500",
+  running: "bg-primary/10 text-primary",
   completed: "bg-emerald-500/10 text-emerald-500",
   failed: "bg-destructive/10 text-destructive",
   aborted: "bg-destructive/10 text-destructive",

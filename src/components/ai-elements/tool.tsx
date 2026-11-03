@@ -104,11 +104,11 @@ function fallbackPresent(toolName: string): string {
 
 const STATUS_DOT: Record<ToolPart["state"], string> = {
   "approval-requested": "bg-amber-500",
-  "approval-responded": "bg-sky-500",
+  "approval-responded": "bg-slate-400",
   "input-streaming": "bg-muted-foreground/40",
   "input-available": "bg-amber-500",
   "output-available": "bg-transparent border border-muted-foreground/40",
-  "output-denied": "bg-orange-500",
+  "output-denied": "bg-destructive/70",
   "output-error": "bg-destructive",
 };
 
@@ -496,7 +496,7 @@ function ToolInput({ toolName, input }: { toolName: string; input: unknown }) {
   return (
     <CodeBlockMini
       code={typeof input === "string" ? input : JSON.stringify(input, null, 2)}
-      language="json"
+      language={typeof input === "string" ? "text" : "json"}
     />
   );
 }
@@ -525,7 +525,7 @@ function renderInputPreview(
             {cwd}
           </div>
         ) : null}
-        <pre className="overflow-auto rounded bg-muted/40 p-2 font-mono text-[11px] leading-relaxed">
+        <pre className="overflow-auto rounded bg-code p-2 font-mono text-[11px] leading-relaxed">
           {cmd}
         </pre>
       </div>
@@ -943,7 +943,7 @@ function renderToolOutput(
 
     return (
       <div className="space-y-1">
-        <div className="max-h-72 overflow-auto rounded bg-muted/30 font-mono text-[11px]">
+        <div className="max-h-72 overflow-auto rounded bg-code font-mono text-[11px]">
           {hits.slice(0, 200).map((h, idx) => (
             <div
               key={`${h.rel ?? h.path}-${h.line}-${idx}`}
@@ -995,7 +995,7 @@ function renderToolOutput(
       );
     }
     return (
-      <div className="max-h-60 overflow-auto rounded bg-muted/30 px-2 py-1 font-mono text-[11px]">
+      <div className="max-h-60 overflow-auto rounded bg-code px-2 py-1 font-mono text-[11px]">
         {matches.slice(0, 300).map((p) => (
           <div key={p} className="truncate text-muted-foreground">
             {p}
@@ -1211,7 +1211,7 @@ function BashBackgroundLiveOutput({
       ) : null}
       <pre
         ref={scrollRef}
-        className="max-h-56 overflow-auto rounded bg-muted/40 p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap"
+        className="max-h-56 overflow-auto rounded bg-code p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap"
       >
         <AnsiOutput text={log || " "} />
       </pre>
@@ -1299,7 +1299,7 @@ function BashRunOutput({
           </span>
         ) : null}
       </div>
-      <pre className="max-h-72 overflow-auto rounded bg-muted/40 p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap">
+      <pre className="max-h-72 overflow-auto rounded bg-code p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap">
         <AnsiOutput
           text={
             tab === "stdout"
@@ -1331,7 +1331,7 @@ function highlightMatch(text: string, pattern: string): ReactNode {
   const parts = text.split(re);
   return parts.map((p, i) =>
     i % 2 === 1 ? (
-      <mark key={i} className="rounded bg-amber-500/30 px-0.5 text-foreground">
+      <mark key={i} className="rounded bg-amber-400/25 px-0.5 text-foreground">
         {p}
       </mark>
     ) : (
@@ -1354,14 +1354,29 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)}MB`;
 }
 
-function CodeBlockMini({ code }: { code: string; language: string }) {
+function CodeBlockMini({
+  code,
+  language,
+}: {
+  code: string;
+  language: string;
+}) {
   // Tool input/output is debug-grade detail - JSON arrives pre-formatted and
   // file content is shown in the editor diff tab. Highlighting here is not
-  // worth the parser hop.
+  // worth the parser hop, but the language still labels the block, so a SQL
+  // result and a JSON payload do not read as the same anonymous blob.
+  const label = language && language !== "text" ? language : null;
   return (
-    <pre className="max-h-60 overflow-auto rounded bg-muted/40 p-2 font-mono text-[11px] leading-relaxed text-foreground whitespace-pre-wrap">
-      {code}
-    </pre>
+    <div className="overflow-hidden rounded bg-code">
+      {label ? (
+        <div className="bg-code-header px-2 py-0.5 font-mono text-[9.5px] tracking-wide text-muted-foreground uppercase">
+          {label}
+        </div>
+      ) : null}
+      <pre className="max-h-60 overflow-auto p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-foreground">
+        {code}
+      </pre>
+    </div>
   );
 }
 
@@ -1384,7 +1399,7 @@ function SuggestCommandCard({
       {explanation ? (
         <div className="text-[11px] text-muted-foreground">{explanation}</div>
       ) : null}
-      <div className="flex items-stretch gap-1.5 rounded bg-muted/40 overflow-hidden">
+      <div className="flex items-stretch gap-1.5 rounded bg-code overflow-hidden">
         <pre className="flex-1 overflow-auto p-2 font-mono text-[11px] leading-relaxed">
           {command}
         </pre>

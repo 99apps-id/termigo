@@ -12,7 +12,7 @@ import { useTodosStore } from "../store/todoStore";
 
 const STATUS_STYLE: Record<string, string> = {
   completed: "text-emerald-700 dark:text-emerald-400 font-semibold",
-  in_progress: "text-sky-700 dark:text-sky-400 font-semibold",
+  in_progress: "text-foreground font-semibold",
   pending: "text-muted-foreground",
 };
 
@@ -102,8 +102,8 @@ export function RunProgressHUD() {
       {step && (
         <div className="flex items-center gap-2 text-[12px] text-foreground">
           <span className="relative flex size-2">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-500 opacity-60 dark:bg-sky-400" />
-            <span className="relative inline-flex size-2 rounded-full bg-sky-500 dark:bg-sky-400" />
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-slate-400 opacity-60" />
+            <span className="relative inline-flex size-2 rounded-full bg-slate-400" />
           </span>
           <span className="min-w-0 truncate">{step}</span>
         </div>
@@ -164,7 +164,7 @@ export function RunProgressHUD() {
             {fanSpark && (
               <span
                 aria-hidden
-                className="font-mono text-[11px] normal-case tracking-normal text-violet-600 dark:text-violet-400"
+                className="font-mono text-[11px] normal-case tracking-normal text-muted-foreground"
                 title={fanSummary || undefined}
               >
                 {fanSpark}
@@ -178,8 +178,8 @@ export function RunProgressHUD() {
                 className="flex items-center gap-2 text-[12px] leading-snug"
               >
                 <span className="relative flex size-1.5 shrink-0">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-violet-500 opacity-60 dark:bg-violet-400" />
-                  <span className="relative inline-flex size-1.5 rounded-full bg-violet-500 dark:bg-violet-400" />
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-zinc-400 opacity-60" />
+                  <span className="relative inline-flex size-1.5 rounded-full bg-zinc-400" />
                 </span>
                 <span className="min-w-0 truncate text-muted-foreground">
                   <span className="text-foreground">{r.label || r.type}</span>

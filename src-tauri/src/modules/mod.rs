@@ -3,6 +3,7 @@ pub mod audit;
 pub mod backup;
 pub mod browser;
 pub mod chatgpt_auth;
+pub mod codeindex;
 pub mod control;
 pub mod extensions;
 pub mod fs;

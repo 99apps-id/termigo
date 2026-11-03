@@ -172,6 +172,7 @@ pub fn run() {
         .manage(ssh::SshState::default())
         .manage(extensions::ExtensionsState::default())
         .manage(fs::watch::FsWatchState::default())
+        .manage(codeindex::CodeIndexState::default())
         .manage(history::HistoryState::default())
         .manage(lsp::LspState::default())
         .manage(fs::grep::ContentSearchState::default())
@@ -187,6 +188,11 @@ pub fn run() {
         .manage(LaunchFiles(Mutex::new(launch.files)))
         .invoke_handler(tauri::generate_handler![
             audit::audit_append,
+            codeindex::codeindex_replace_root,
+            codeindex::codeindex_check_fresh,
+            codeindex::codeindex_search,
+            codeindex::codeindex_stats,
+            codeindex::codeindex_clear,
             pty::pty_open,
             pty::pty_write,
             pty::pty_resize,

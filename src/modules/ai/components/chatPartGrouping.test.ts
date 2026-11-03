@@ -6,6 +6,7 @@ import {
   lastReasoningGroupIndex,
   partKey,
   partType,
+  splitLeadingThinkTags,
   type AnyPart,
 } from "./chatPartGrouping";
 
@@ -158,6 +159,74 @@ describe("chatPartGrouping", () => {
     const groups = buildPartGroups(parts);
     const thinking = groups.filter((g) => g.kind === "reasoning");
     expect(thinking.length).toBe(2);
+  });
+
+  it("moves a leading think-tag block out of a text part into the reasoning group", () => {
+    const parts = [
+      { type: "step-start" },
+      { type: "text", text: "<think>weighing options</think>The answer." },
+    ] as unknown as AnyPart[];
+
+    const groups = buildPartGroups(parts);
+    const reasoning = groups.find((g) => g.kind === "reasoning");
+    expect(reasoning).toBeDefined();
+    expect(reasoning?.kind === "reasoning" && reasoning.text).toBe(
+      "weighing options",
+    );
+    const singles = groups.filter(
+      (g) =>
+        g.kind === "single" &&
+        (g.part as unknown as { type: string }).type === "text",
+    );
+    expect(singles.length).toBe(1);
+    const single = singles[0];
+    expect(
+      single?.kind === "single" &&
+        (single.part as unknown as { text: string }).text,
+    ).toBe("The answer.");
+  });
+
+  it("a think-only text part leaves no empty answer behind", () => {
+    const parts = [
+      { type: "text", text: "<thinking>only thinking</thinking>" },
+      { type: "tool-bash_run", toolCallId: "sh-9" },
+    ] as unknown as AnyPart[];
+
+    const groups = buildPartGroups(parts);
+    expect(groups.some((g) => g.kind === "reasoning")).toBe(true);
+    expect(
+      groups.filter(
+        (g) =>
+          g.kind === "single" &&
+          (g.part as unknown as { type: string }).type === "text",
+      ).length,
+    ).toBe(0);
+  });
+});
+
+describe("splitLeadingThinkTags", () => {
+  it("splits closed leading blocks, repeatedly", () => {
+    expect(
+      splitLeadingThinkTags("<think>one</think> <think>two</think>answer"),
+    ).toEqual({ thinking: ["one", "two"], rest: "answer" });
+  });
+
+  it("leaves unclosed or mid-text tags untouched", () => {
+    expect(splitLeadingThinkTags("<think>still arriving")).toEqual({
+      thinking: [],
+      rest: "<think>still arriving",
+    });
+    expect(splitLeadingThinkTags("prose <think>x</think> more")).toEqual({
+      thinking: [],
+      rest: "prose <think>x</think> more",
+    });
+  });
+
+  it("drops empty think blocks without inventing reasoning", () => {
+    expect(splitLeadingThinkTags("<think></think>answer")).toEqual({
+      thinking: [],
+      rest: "answer",
+    });
   });
 });
 

@@ -55,8 +55,8 @@ export function ConfirmationCarousel() {
               type="button"
               onClick={() => resolve(c.id, false)}
               className={cn(
-                "rounded-md border border-destructive/40 bg-destructive/15 px-2.5 py-1 text-[11.5px] font-semibold text-destructive transition-colors dark:bg-red-500/10 dark:text-red-300",
-                "hover:bg-destructive/25 dark:hover:bg-red-500/20",
+                "rounded-md border border-destructive/40 bg-destructive/15 px-2.5 py-1 text-[11.5px] font-semibold text-destructive transition-colors",
+                "hover:bg-destructive/25",
                 "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
               )}
             >

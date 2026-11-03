@@ -22,7 +22,7 @@
   --tok-punctuation: oklch(0.46 0.02 250);
   --tok-heading: oklch(0.42 0.13 25);
   --tok-link: oklch(0.46 0.15 240);
-  --tok-invalid: oklch(0.52 0.22 25);
+  --tok-invalid: oklch(0.52 0.13 25);
 }
 
 :is(.dark *) {
@@ -42,7 +42,7 @@
   --tok-punctuation: oklch(0.72 0.02 250);
   --tok-heading: oklch(0.82 0.1 25);
   --tok-link: oklch(0.78 0.13 240);
-  --tok-invalid: oklch(0.7 0.22 25);
+  --tok-invalid: oklch(0.7 0.13 25);
 }
 
 .tok-keyword,

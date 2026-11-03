@@ -10,14 +10,25 @@ import {
   TerminalIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { createContext, memo, useContext, useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  memo,
+  useContext,
+  useEffect,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 
 import { Shimmer } from "./shimmer";
 import { highlight, isHighlightable, type HighlightedNode } from "./chat-code-lezer";
 
-// True while the parent message is still streaming from the model. We hide
-// fenced-code contents during this phase: parsing partial code is wasted
-// work and a flashing skeleton is calmer UI than text that grows char-by-char.
+// True while the parent message is still streaming from the model. A fenced
+// block whose own text is still changing shows a skeleton instead of being
+// parsed mid-flight: parsing partial code is wasted work and a flashing
+// skeleton is calmer UI than text that grows char-by-char. A block the model
+// has already moved past goes quiet, settles (see useCodeSettled), and
+// renders for real while the rest of the answer streams around it.
 const StreamingCtx = createContext(false);
 export const ChatStreamingProvider = StreamingCtx.Provider;
 
@@ -64,11 +75,40 @@ export type ChatCodeBlockProps = {
   lang: string | null;
 };
 
+/** How long a fenced block's text must stop changing before it counts as
+ *  finished while its part is still streaming. Live deltas land far more
+ *  often than this; a block the model has moved past goes quiet and settles. */
+export const CODE_SETTLE_MS = 300;
+
+export function isCodeSettled(
+  streaming: boolean,
+  msSinceChange: number,
+): boolean {
+  return !streaming || msSinceChange >= CODE_SETTLE_MS;
+}
+
+function useCodeSettled(code: string, streaming: boolean): boolean {
+  const [, tick] = useReducer((n: number) => n + 1, 0);
+  const changedAtRef = useRef(Date.now());
+  const prevCodeRef = useRef(code);
+  if (prevCodeRef.current !== code) {
+    prevCodeRef.current = code;
+    changedAtRef.current = Date.now();
+  }
+  useEffect(() => {
+    if (!streaming) return;
+    const t = setTimeout(tick, CODE_SETTLE_MS + 20);
+    return () => clearTimeout(t);
+  }, [code, streaming]);
+  return isCodeSettled(streaming, Date.now() - changedAtRef.current);
+}
+
 export function ChatCodeBlock({ code, lang }: ChatCodeBlockProps) {
   const streaming = useContext(StreamingCtx);
+  const settled = useCodeSettled(code, streaming);
   const label = normalizeLangLabel(lang ?? "");
 
-  if (streaming) {
+  if (streaming && !settled) {
     return <GeneratingPlaceholder label={label} />;
   }
 
@@ -81,7 +121,7 @@ export function ChatCodeBlock({ code, lang }: ChatCodeBlockProps) {
 
 function GeneratingPlaceholder({ label }: { label: string }) {
   return (
-    <div className="not-prose my-2 flex items-center gap-2 rounded-lg border border-border/50 bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
+    <div className="not-prose my-2 flex items-center gap-2 rounded-lg border border-border/50 bg-code px-3 py-2 text-[11px] text-muted-foreground">
       <span className="inline-block size-1.5 animate-pulse rounded-full bg-muted-foreground/60" />
       <Shimmer duration={1.2}>
         {label === "text" ? "Generating code…" : `Generating ${label}…`}
@@ -100,8 +140,8 @@ function BlockChrome({
   children: React.ReactNode;
 }) {
   return (
-    <div className="not-prose my-2 overflow-hidden rounded-lg border border-border/50 bg-muted/30">
-      <div className="flex items-center justify-between gap-2 border-b border-border/40 bg-muted/20 px-3 py-1">
+    <div className="not-prose my-2 overflow-hidden rounded-lg border border-border/50 bg-code">
+      <div className="flex items-center justify-between gap-2 border-b border-border/40 bg-code-header px-3 py-1">
         <span className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
           {label}
         </span>
@@ -186,7 +226,7 @@ function CommandCard({ code, lang }: { code: string; lang: string }) {
   const isMultiline = code.includes("\n");
   const prompt = shellPrompt(lang);
   return (
-    <div className="not-prose my-2 overflow-hidden rounded-lg border border-border/50 bg-muted/40">
+    <div className="not-prose my-2 overflow-hidden rounded-lg border border-border/50 bg-code">
       <div className="flex items-center justify-between gap-2 px-3 py-1.5">
         <span className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
           {normalizeLangLabel(lang)}
@@ -196,7 +236,7 @@ function CommandCard({ code, lang }: { code: string; lang: string }) {
           <CopyButton text={code} />
         </div>
       </div>
-      <div className="border-t border-border/40 bg-background/40">
+      <div className="border-t border-border/40 bg-code-header">
         <pre
           className={cn(
             "m-0 overflow-x-auto px-3 py-2 font-mono text-[12px] leading-relaxed text-foreground",

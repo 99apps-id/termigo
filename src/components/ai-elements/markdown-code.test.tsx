@@ -1,6 +1,27 @@
 import { describe, expect, it } from "vitest";
 
-import { markdownCodeText, parseFileRef } from "./markdown-code";
+import {
+  markdownCodeText,
+  parseFenceLanguage,
+  parseFileRef,
+} from "./markdown-code";
+
+describe("parseFenceLanguage", () => {
+  it("keeps symbol-bearing language tags whole", () => {
+    expect(parseFenceLanguage("language-c++")).toBe("c++");
+    expect(parseFenceLanguage("language-c#")).toBe("c#");
+    expect(parseFenceLanguage("language-f#")).toBe("f#");
+    expect(parseFenceLanguage("language-objective-c")).toBe("objective-c");
+  });
+
+  it("reads plain tags and rejects missing ones", () => {
+    expect(parseFenceLanguage("language-typescript")).toBe("typescript");
+    expect(parseFenceLanguage("language-rust")).toBe("rust");
+    expect(parseFenceLanguage(undefined)).toBeNull();
+    expect(parseFenceLanguage("")).toBeNull();
+    expect(parseFenceLanguage("hljs")).toBeNull();
+  });
+});
 
 describe("markdownCodeText", () => {
   it("preserves text nested inside React children for HTML-wrapped code blocks", async () => {

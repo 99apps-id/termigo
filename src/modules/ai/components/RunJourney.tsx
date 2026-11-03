@@ -22,7 +22,7 @@ import {
 
 const STATUS_STYLE: Record<string, string> = {
   pending: "bg-muted text-muted-foreground",
-  running: "bg-blue-500/10 text-blue-500 animate-pulse",
+  running: "bg-primary/10 text-primary animate-pulse",
   success: "bg-emerald-500/10 text-emerald-500",
   error: "bg-destructive/10 text-destructive",
 };
@@ -238,7 +238,7 @@ export function RunJourney({
             className={cn(
               "rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide",
               statusLabel === "running"
-                ? "bg-blue-500/10 text-blue-500"
+                ? "bg-primary/10 text-primary"
                 : statusLabel === "failed" || statusLabel === "aborted"
                   ? "bg-destructive/10 text-destructive"
                   : "bg-emerald-500/10 text-emerald-500",

@@ -11,7 +11,7 @@ export const MemoryNotice = memo(function MemoryNotice({
 }) {
   return (
     <div className="flex items-start gap-2 rounded-md border border-border/80 bg-card px-2.5 py-1.5 text-[11px] text-muted-foreground shadow-2xs dark:border-border/40 dark:bg-muted/30">
-      <span className="mt-1 size-1.5 shrink-0 rounded-full bg-sky-500/80" />
+      <span className="mt-1 size-1.5 shrink-0 rounded-full bg-slate-400/80" />
       <span className="flex-1">
         <span className="font-medium text-foreground">Remembered</span>
         {" - "}
@@ -43,7 +43,7 @@ export const SideQuestionNotice = memo(function SideQuestionNotice({
 }) {
   return (
     <div className="flex items-start gap-2 rounded-md border border-border/80 bg-card px-2.5 py-1.5 text-[11px] text-muted-foreground shadow-2xs dark:border-border/40 dark:bg-muted/30">
-      <span className="mt-1 size-1.5 shrink-0 rounded-full bg-violet-500/80" />
+      <span className="mt-1 size-1.5 shrink-0 rounded-full bg-zinc-400/80" />
       <span className="min-w-0 flex-1">
         <span className="font-medium text-foreground">/btw</span>{" "}
         <span className="opacity-75">{question}</span>

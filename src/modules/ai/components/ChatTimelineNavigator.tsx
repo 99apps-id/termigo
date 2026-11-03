@@ -197,12 +197,12 @@ export const ChatTimelineNavigator = memo(function ChatTimelineNavigator({
                           : "text-muted-foreground hover:bg-muted hover:text-foreground",
                         t.hasCheckpoint &&
                           !isActive &&
-                          "ring-1 ring-sky-500/40 text-sky-600 dark:text-sky-400",
+                          "ring-1 ring-primary/40 text-primary",
                       )}
                     >
                       {t.turnIndex}
                       {t.hasCheckpoint && (
-                        <span className="absolute -top-0.5 -right-0.5 size-1.5 rounded-full bg-sky-500" />
+                        <span className="absolute -top-0.5 -right-0.5 size-1.5 rounded-full bg-primary" />
                       )}
                     </button>
                   </TooltipTrigger>
@@ -217,7 +217,7 @@ export const ChatTimelineNavigator = memo(function ChatTimelineNavigator({
                       </span>
                       <span>· {t.partCount} parts</span>
                       {t.hasCheckpoint && (
-                        <span className="inline-flex items-center gap-1 font-medium text-sky-600 dark:text-sky-400">
+                        <span className="inline-flex items-center gap-1 font-medium text-primary">
                           <HugeiconsIcon
                             icon={ArrowTurnBackwardIcon}
                             size={10}

@@ -78,6 +78,15 @@ export function markdownCodeText(children?: ReactNode): string {
   return "";
 }
 
+/** The language tag of a fenced block from its className, or null for inline
+ *  code and unlabeled fences. Tags carry more than word characters (c++,
+ *  c#, f#, objective-c); truncating at the first symbol mislabels the block
+ *  and picks the wrong Lezer parser (c++ parsed as C). */
+export function parseFenceLanguage(className?: string): string | null {
+  const match = className?.match(/language-([\w#+-]+)/);
+  return match?.[1] ?? null;
+}
+
 /**
  * Streamdown `components.code` override. Handles both inline (`code`) and
  * fenced blocks (className "language-X"). Fenced blocks delegate to the
@@ -91,18 +100,23 @@ export function MarkdownCode({
   className?: string;
   children?: ReactNode;
 }) {
-  const match = className?.match(/language-(\w+)/);
-  if (!match) {
+  const lang = parseFenceLanguage(className);
+  if (!lang) {
+    const text = markdownCodeText(children);
+    // A fenced block with no language tag arrives with no className too, but
+    // its text spans lines: it is a block, not an inline pill.
+    if (text.includes("\n")) {
+      return <ChatCodeBlock code={text.replace(/\n$/, "")} lang={null} />;
+    }
     // Inline code that is really a file reference becomes a clickable pill that
     // opens the file in the editor. Anything else stays a plain code pill.
-    const text = markdownCodeText(children);
     const fileRef = parseFileRef(text);
     if (fileRef && getLspNavigator()) {
       return <FileRefCode ref={fileRef} text={text} />;
     }
     return (
       <code
-        className="rounded bg-muted/70 px-1.5 py-0.5 font-mono text-[0.875em] text-foreground"
+        className="rounded bg-code px-1.5 py-0.5 font-mono text-[0.875em] text-foreground"
         {...rest}
       >
         {children}
@@ -110,7 +124,6 @@ export function MarkdownCode({
     );
   }
 
-  const lang = match[1] ?? null;
   const code = markdownCodeText(children).replace(/\n$/, "");
   // A ```mermaid fence renders as a diagram instead of a code block.
   if (lang?.toLowerCase() === "mermaid") {

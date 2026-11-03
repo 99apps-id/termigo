@@ -134,7 +134,7 @@ export function MermaidDiagram({ code }: { code: string }) {
         type="button"
         title="Click to enlarge"
         onClick={() => setZoomed(true)}
-        className="not-prose my-2 flex w-full cursor-zoom-in justify-center overflow-x-auto rounded-lg border border-black/10 bg-white p-3 [&_svg]:h-auto [&_svg]:max-w-full"
+        className="not-prose my-2 flex w-full cursor-zoom-in justify-center overflow-x-auto rounded-lg border border-border/50 bg-[#f7f5f0] p-3 dark:bg-[#e9e6df] [&_svg]:h-auto [&_svg]:max-w-full"
         dangerouslySetInnerHTML={{ __html: sanitizeSvg(svg!) }}
       />
       {zoomed ? (
@@ -146,7 +146,7 @@ export function MermaidDiagram({ code }: { code: string }) {
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="relative max-h-[90vh] max-w-[92vw] overflow-auto rounded-xl bg-white p-6 shadow-2xl [&_svg]:h-auto [&_svg]:w-auto"
+            className="relative max-h-[90vh] max-w-[92vw] overflow-auto rounded-xl bg-[#f7f5f0] p-6 shadow-2xl [&_svg]:h-auto [&_svg]:w-auto"
             dangerouslySetInnerHTML={{ __html: sanitizeSvg(svg!) }}
           />
           <button

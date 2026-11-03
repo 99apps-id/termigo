@@ -32,6 +32,8 @@
     --color-accent: var(--accent);
     --color-muted-foreground: var(--muted-foreground);
     --color-muted: var(--muted);
+    --color-code: var(--code);
+    --color-code-header: var(--code-header);
     --color-secondary-foreground: var(--secondary-foreground);
     --color-secondary: var(--secondary);
     --color-primary-foreground: var(--primary-foreground);
@@ -58,32 +60,34 @@
     --card-foreground: oklch(0.17 0.03 285);
     --popover: oklch(1 0 0);
     --popover-foreground: oklch(0.17 0.03 285);
-    --primary: oklch(0.55 0.13 190);
-    --primary-foreground: oklch(0.99 0.005 190);
-    /* Warm accent for the composer glow, the send/stop button and the token
-       meter, so those read as one orange family. Defined once (works on both
-       themes) and inherited by the dark block below. */
-    /* Light theme uses a teal accent (aligned with --primary) instead of the
-       warm orange: the orange read as a jarring yellow on the light ground and
-       added a second accent hue to an already busy surface. Dark keeps the
-       orange glow (redefined in the .dark block below). */
-    --composer-accent: oklch(0.6 0.13 195);
-    --composer-accent-foreground: oklch(0.99 0.005 195);
+    --primary: oklch(0.56 0.1 42);
+    --primary-foreground: oklch(0.99 0.005 60);
+    /* Warm clay accent for the composer glow, the send/stop button and the
+       token meter, so those read as one family with --primary. One soft hue
+       in both themes (the Muse AI clay family), never a saturated orange
+       or a second teal: a calm professional accent, not a contrast color. */
+    --composer-accent: oklch(0.57 0.1 42);
+    --composer-accent-foreground: oklch(0.99 0.005 60);
     --secondary: oklch(0.94 0.02 290);
     --secondary-foreground: oklch(0.25 0.05 285);
     --muted: oklch(0.945 0.012 295);
+    /* Soft warm surface for code blocks and tool results in chat: a gentle
+       gray, never black, shared by every theme so code reads the same calm
+       way everywhere. The header strip sits one step deeper. */
+    --code: oklch(0.955 0.008 85);
+    --code-header: oklch(0.928 0.01 85);
     /* Darkened from 0.5 for legibility: the UI leans hard on small
        (10–11px) muted text, often at reduced opacity, which failed WCAG AA
        contrast on the near-white background at the old lightness. */
     --muted-foreground: oklch(0.44 0.04 285);
     --accent: oklch(0.93 0.03 285);
     --accent-foreground: oklch(0.25 0.06 285);
-    --destructive: oklch(0.577 0.245 27.325);
+    --destructive: oklch(0.55 0.14 28);
     /* Darkened from 0.9 so outline buttons and input fields read as clear,
        defined edges on the light background instead of nearly invisible ones. */
     --border: oklch(0.855 0.016 290);
     --input: oklch(0.85 0.016 290);
-    --ring: oklch(0.62 0.12 190);
+    --ring: oklch(0.6 0.09 42);
     --chart-1: oklch(0.62 0.13 190);
     --chart-2: oklch(0.6 0.19 300);
     --chart-3: oklch(0.7 0.13 45);
@@ -107,22 +111,26 @@
     --card-foreground: oklch(0.972 0.006 300);
     --popover: oklch(0.2 0.035 282);
     --popover-foreground: oklch(0.972 0.006 300);
-    --primary: oklch(0.76 0.11 190);
-    --primary-foreground: oklch(0.17 0.03 285);
-    /* Dark keeps the signature warm-orange composer glow (light overrides it
-       to teal in :root above). */
-    --composer-accent: oklch(0.7 0.17 52);
+    --primary: oklch(0.68 0.11 45);
+    --primary-foreground: oklch(0.2 0.02 60);
+    /* The same soft clay family as the light theme, one step lighter for
+       the dark ground. */
+    --composer-accent: oklch(0.68 0.11 45);
     --composer-accent-foreground: oklch(0.99 0.01 60);
     --secondary: oklch(0.27 0.045 285);
     --secondary-foreground: oklch(0.972 0.006 300);
     --muted: oklch(0.26 0.04 285);
+    /* Soft warm charcoal for code blocks and tool results: lifted well
+       above the near-black stage so code never sits on a black card. */
+    --code: oklch(0.27 0.008 80);
+    --code-header: oklch(0.238 0.008 80);
     --muted-foreground: oklch(0.75 0.028 295);
     --accent: oklch(0.3 0.055 285);
     --accent-foreground: oklch(0.972 0.006 300);
-    --destructive: oklch(0.637 0.209 25);
+    --destructive: oklch(0.64 0.13 25);
     --border: oklch(0.62 0.06 290 / 26%);
     --input: oklch(0.62 0.06 290 / 32%);
-    --ring: oklch(0.7 0.12 190);
+    --ring: oklch(0.68 0.09 45);
     --chart-1: oklch(0.7 0.13 190);
     --chart-2: oklch(0.64 0.19 300);
     --chart-3: oklch(0.74 0.13 45);
@@ -510,7 +518,7 @@ html *::-webkit-scrollbar {
     color-mix(in oklch, var(--composer-accent) 20%, transparent) 0deg,
     color-mix(in oklch, var(--composer-accent) 20%, transparent) 240deg,
     color-mix(in oklch, var(--composer-accent) 80%, transparent) 315deg,
-    color-mix(in oklch, var(--composer-accent) 100%, white) 345deg,
+    color-mix(in oklch, var(--composer-accent) 85%, transparent) 345deg,
     color-mix(in oklch, var(--composer-accent) 20%, transparent) 360deg
   );
   -webkit-mask:
