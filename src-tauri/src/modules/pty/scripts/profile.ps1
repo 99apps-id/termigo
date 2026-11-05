@@ -88,6 +88,7 @@ function global:prompt {
     if ($loc.Provider.Name -eq 'FileSystem') {
         $cwd = $loc.ProviderPath -replace '\\','/'
         if ($cwd -match '^[A-Za-z]:') { $cwd = "/$cwd" }
+        elseif ($cwd -match '^//') { $cwd = "//" + ($cwd.Substring(2) -replace '^[^/]+/','') }
         $cwdEnc = __termigo_urlencode $cwd
         $hostName = [System.Environment]::MachineName
         $osc7 = "$esc]7;file://$hostName$cwdEnc$esc\"

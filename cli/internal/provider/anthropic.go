@@ -200,6 +200,11 @@ func (c *anthropicClient) streamWithURL(ctx context.Context, url string, headers
 				}
 			}
 		case "message_delta":
+			if event.Delta.StopReason == "max_tokens" {
+				if err := emit(StreamEvent{Type: EventIncomplete, IncompleteReason: "max_tokens"}); err != nil {
+					return err
+				}
+			}
 			if event.Usage != nil {
 				usage := Usage{CompletionTokens: event.Usage.OutputTokens}
 				if err := emit(StreamEvent{Type: EventUsage, Usage: &usage}); err != nil {
@@ -354,6 +359,7 @@ type anthropicEvent struct {
 		Text        string `json:"text"`
 		Thinking    string `json:"thinking"`
 		PartialJSON string `json:"partial_json"`
+		StopReason  string `json:"stop_reason"`
 	} `json:"delta"`
 	ContentBlock *struct {
 		Type  string `json:"type"`

@@ -610,9 +610,9 @@ const RenderedMessage = memo(function RenderedMessage({
               </PartAppear>
             );
           })}
-          {!hasTextPart && !streaming && !hasAnyToolParts && !showReasoning ? (
+          {!hasTextPart && !streaming && !hasAnyToolParts ? (
             <p className="text-xs text-muted-foreground italic">
-              (Model completed with reasoning output only. You can enable
+              (No text output from the model. Use Continue to resume, or enable
               reasoning visibility in chat settings to inspect details.)
             </p>
           ) : null}

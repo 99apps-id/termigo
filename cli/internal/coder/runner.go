@@ -182,6 +182,13 @@ func Run(ctx context.Context, opts Options, prompt string, emit func(provider.St
 		guard.noteProgress()
 		messages = append(messages, provider.Message{Role: provider.RoleAssistant, Content: text.String(), ToolCalls: calls, ReasoningItems: reasoningItems})
 
+		if truncated {
+			// A tool-call step cut at the output ceiling may carry a half-built
+			// call. Skip the next tool round so the model re-emits a complete
+			// call instead of executing a truncated argument object.
+			messages = append(messages, provider.Message{Role: provider.RoleUser, Content: "Continue."})
+			continue
+		}
 		for _, call := range calls {
 			if stop, reason := guard.noteCall(call.Name, call.Arguments); stop {
 				return "", errors.New(reason)
@@ -209,6 +216,9 @@ func executeTool(ctx context.Context, env *Env, registry *Registry, call provide
 		return Result{Output: fmt.Sprintf("unknown tool %q", call.Name), IsError: true}
 	}
 	args := decodeArgs(call.Arguments)
+	if _, bad := args["_repair_error"]; bad {
+		return Result{Output: fmt.Sprintf("invalid tool arguments for %q: %v; re-emit as a single JSON object", call.Name, args["_repair_error"]), IsError: true}
+	}
 	if tool.Mutating() {
 		if env.Approve == nil {
 			return Result{Output: fmt.Sprintf("%s changes files or runs a command and needs approval; re-run with --yes to allow it", tool.Name()), IsError: true}
@@ -243,7 +253,10 @@ func decodeArgs(raw string) map[string]any {
 	}
 	var decoded map[string]any
 	if err := json.Unmarshal([]byte(trimmed), &decoded); err != nil || decoded == nil {
-		return map[string]any{}
+		// Surface the repair failure instead of silently dropping args: an
+		// empty map makes the tool run with defaults and fails downstream
+		// without telling the model its input was malformed.
+		return map[string]any{"_repair_error": "tool arguments were not valid JSON: " + trimmed}
 	}
 	return decoded
 }

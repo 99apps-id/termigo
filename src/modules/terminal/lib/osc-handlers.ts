@@ -137,9 +137,11 @@ function parseOsc7(data: string): string | null {
   try {
     path = decodeURIComponent(path);
   } catch {}
-  // /C:/Users/foo -> C:/Users/foo so it's a valid Windows path.
   if (/^\/[A-Za-z]:/.test(path)) {
     path = path.slice(1);
+  } else if (/^\/$/.test(path)) {
+    // Bare root has no drive prefix; keep it so useFileTree does not clear.
+    return canonicalDirPath(path);
   } else if (IS_WINDOWS) {
     // git-bash (MSYS) reports cwd as /c/Users/foo; map it to C:/Users/foo.
     const drive = path.match(/^\/([A-Za-z])(\/.*)?$/);

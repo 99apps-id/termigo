@@ -2460,14 +2460,17 @@ export async function runAgentStream(opts: RunAgentOptions) {
       // The predicates fire before the final step is counted in some SDK
       // paths, so fall back to the step count rather than reporting no reason
       // for a run that plainly ran out of budget.
+      // A length/maxTokens finish is a truncated answer, not a clean finish:
+      // the model was cut at the output ceiling mid-sentence. Treating it as
+      // done returned a half-answer as the run result (CLI already continues;
+      // desktop now degrades to step-cap so Continue resumes like opencode).
+      const truncatedFinish =
+        finishReason === "length" ||
+        finishReason === "maxTokens" ||
+        finishReason.startsWith("max_tokens");
+      if (truncatedFinish && !stopReason) stopReason = "step-cap";
       const settledStop =
         stopReason ?? (!isOAuth && stepsSeen >= stepBudget ? "step-cap" : null);
-      // A run is a CLEAN finish only when nothing else ended it. A guard that
-      // named a stop reason and an abort (watchdog stall, or a user stop) both
-      // mean somebody else stopped the run. Reading a null stopReason as a
-      // clean finish recorded every watchdog abort as a success: "completed"
-      // in the trajectory timeline, `success: true` on the harness frontier,
-      // and its started todos force-completed.
       const cleanFinish = !settledStop && !aborted;
       const kb = (n: number) => (n / 1024).toFixed(1);
       const cachePct =

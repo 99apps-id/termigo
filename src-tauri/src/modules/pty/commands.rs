@@ -249,6 +249,7 @@ pub fn pty_close(state: tauri::State<PtyState>, id: u64) -> Result<(), String> {
 
 const ALLOWED_SIGNALS: &[&str] = &["interrupt", "terminate", "kill", "stop", "continue"];
 
+#[cfg(unix)]
 fn signal_number(name: &str) -> Option<i32> {
     #[cfg(unix)]
     {
@@ -498,11 +499,10 @@ pub async fn pty_ack_output(
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod pty_signal_tests {
     use super::{signal_number, ALLOWED_SIGNALS};
 
-    #[cfg(unix)]
     #[test]
     fn named_signals_are_bounded_to_supported_process_controls() {
         for name in ALLOWED_SIGNALS {
