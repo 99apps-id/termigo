@@ -234,6 +234,48 @@ fn validate_url(url: &str) -> Result<reqwest::Url, String> {
     Ok(parsed)
 }
 
+pub(crate) async fn validate_url_allow_loopback(
+    url: &str,
+) -> Result<(reqwest::Url, Vec<IpAddr>), String> {
+    let parsed = validate_url(url)?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "missing host".to_string())?
+        .to_string();
+    let (worst, ips) = resolve_and_classify(&host).await?;
+    match worst {
+        IpKind::BlockedMetadata => return Err(format!("host not allowed: {host}")),
+        IpKind::Private => return Err(format!("host {host} resolves to a private address")),
+        IpKind::Loopback | IpKind::Public => {}
+    }
+    Ok((parsed, ips))
+}
+
+pub(crate) fn host_resolver_rules(
+    url: &reqwest::Url,
+    ips: &[IpAddr],
+) -> Option<String> {
+    let host = url.host_str()?.to_ascii_lowercase();
+    if host.parse::<IpAddr>().is_ok() {
+        return None;
+    }
+    if ips.is_empty() {
+        return None;
+    }
+    let map = ips
+        .iter()
+        .map(|ip| {
+            if ip.is_ipv6() {
+                format!("{ip}")
+            } else {
+                format!("{ip}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    Some(format!("MAP {host} {map}"))
+}
+
 /// Classify the host AND return safe IPs to pin reqwest's resolver to.
 /// Defeats DNS rebinding (second-lookup-returns-different-IP) by reusing
 /// exactly the addresses that passed `ip_kind`.
