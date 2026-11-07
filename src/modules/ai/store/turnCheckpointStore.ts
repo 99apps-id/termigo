@@ -52,7 +52,13 @@ export function ensureTurnCheckpointsHydrated(): Promise<void> {
             )
             .slice(-MAX_TURNS_PER_SESSION);
         }
-        useTurnCheckpointStore.setState({ bySession: clean });
+        // MERGE, do not replace. This runs fire-and-forget at import, so a
+        // checkpoint recorded (or a session cleared) before the read resolved
+        // was overwritten by the disk copy and silently vanished: the forked
+        // session lost its rewind affordance with nothing to show for it.
+        useTurnCheckpointStore.setState((state) => ({
+          bySession: mergeBySession(state.bySession, clean),
+        }));
       }
     } catch {
       // No file yet, or the store plugin is unavailable (tests / non-Tauri):
@@ -60,6 +66,31 @@ export function ensureTurnCheckpointsHydrated(): Promise<void> {
     }
   })();
   return hydratePromise;
+}
+
+/**
+ * Disk copy under live state.
+ *
+ * A session the live store has explicitly cleared stays cleared: hydration is
+ * a load, not a resurrection. Anything else is the union, with the longer list
+ * winning per session so neither side loses a row.
+ */
+function mergeBySession(
+  live: Record<string, TurnCheckpoint[]>,
+  disk: Record<string, TurnCheckpoint[]>,
+): Record<string, TurnCheckpoint[]> {
+  const out: Record<string, TurnCheckpoint[]> = { ...disk };
+  for (const [sessionId, rows] of Object.entries(live)) {
+    const fromDisk = disk[sessionId];
+    if (!fromDisk) {
+      out[sessionId] = rows;
+      continue;
+    }
+    const ids = new Set(rows.map((r) => r.messageId));
+    const merged = [...fromDisk.filter((r) => !ids.has(r.messageId)), ...rows];
+    out[sessionId] = merged.slice(-MAX_TURNS_PER_SESSION);
+  }
+  return out;
 }
 
 void ensureTurnCheckpointsHydrated();

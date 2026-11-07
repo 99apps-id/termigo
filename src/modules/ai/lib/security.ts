@@ -84,16 +84,32 @@ const FORBIDDEN_COMMANDS = [
   },
 ] as const;
 
+/**
+ * The command with every quote character removed.
+ *
+ * `rm -rf "/"` is the same command as `rm -rf /`, but the `"` sitting between
+ * the flags and the path kept the patterns above from matching, so the one
+ * guard no approval mode can bypass waved it through. Matching the dequoted
+ * form as well closes that; the residual false positives (a commit message
+ * that happens to contain `rm -rf /`) are the ones the patterns already had.
+ */
+function dequote(command: string): string {
+  return command.replace(/["']/g, "");
+}
+
 export function checkShellCommand(cmd: string): SafetyResult {
   if (cmd.trim().length === 0) {
     return { ok: false, reason: "Refused: empty command." };
   }
+  const variants = cmd === dequote(cmd) ? [cmd] : [cmd, dequote(cmd)];
   for (const { pattern, name } of FORBIDDEN_COMMANDS) {
-    if (pattern.test(cmd)) {
-      return {
-        ok: false,
-        reason: `Refused: ${name} is never executed, even with approval. Run a narrower command instead.`,
-      };
+    for (const variant of variants) {
+      if (pattern.test(variant)) {
+        return {
+          ok: false,
+          reason: `Refused: ${name} is never executed, even with approval. Run a narrower command instead.`,
+        };
+      }
     }
   }
   return { ok: true };

@@ -182,4 +182,41 @@ describe("generateRepoMap & getOrGenerateRepoMap", () => {
     expect(first).toBe(second);
     expect(native.glob).toHaveBeenCalledTimes(1);
   });
+
+  // A drive root normalises to "C:" (the trailing slash is stripped), so
+  // `startsWith("C:/")` was false for every hit and the map filled its
+  // character budget with absolute paths instead of relative ones.
+  it("produces relative paths for a drive root", async () => {
+    vi.mocked(native.glob).mockResolvedValueOnce({
+      hits: [
+        { path: "C:/proj/src/App.tsx", mtime: 100, size: 200 },
+        { path: "C:/proj/src-tauri/src/main.rs", mtime: 100, size: 200 },
+      ],
+      truncated: false,
+    });
+    vi.mocked(native.readFile).mockResolvedValue({
+      kind: "text",
+      content: "export function App() {}",
+    });
+
+    const res = await generateRepoMap("C:/");
+    expect(res).not.toBeNull();
+    expect(res).toContain("proj/src/App.tsx");
+    expect(res).not.toContain("- C:/proj");
+  });
+
+  it("produces relative paths for a normal root", async () => {
+    vi.mocked(native.glob).mockResolvedValueOnce({
+      hits: [{ path: "/repo/src/index.ts", mtime: 100, size: 200 }],
+      truncated: false,
+    });
+    vi.mocked(native.readFile).mockResolvedValueOnce({
+      kind: "text",
+      content: "export function main() {}",
+    });
+
+    const res = await generateRepoMap("/repo/");
+    expect(res).toContain("src/index.ts");
+    expect(res).not.toContain("/repo/");
+  });
 });

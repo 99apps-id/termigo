@@ -78,11 +78,10 @@ function __termigo_install_prompt
     function fish_prompt
         set -l __termigo_status $status
         printf '\e]133;D;%d\e\\' $__termigo_status
-        if set -q TMUX
-            printf '\ePtmux;\e\e]7;file://%s%s\a\e\\' "$__TERMIGO_HOST" (__termigo_urlencode_path "$PWD")
-        else
-            printf '\e]7;file://%s%s\e\\' "$__TERMIGO_HOST" (__termigo_urlencode_path "$PWD")
-        end
+        # No tmux DCS wrapping: Termigo forces TERM=xterm-256color, so tmux
+        # passes OSC through untouched, and the wrapper made the sequence
+        # unreachable because xterm.js has no DCS unwrapper.
+        printf '\e]7;file://%s%s\e\\' "$__TERMIGO_HOST" (__termigo_urlencode_path "$PWD")
         printf '\e]133;A\e\\'
         # Block mode: host renders its own input bar, so suppress the shell prompt
         # (B marker only) and reserve header/gap rows, mirroring zsh.

@@ -208,12 +208,17 @@ export async function generateRepoMap(
 
     const candidateFiles: { path: string; relPath: string }[] = [];
     const rootNorm = root.replace(/\\/g, "/").replace(/\/+$/, "");
+    // A drive root ("C:/") normalises to "C:", so `startsWith("C:/")` was false
+    // for every hit and the map filled its character budget with absolute
+    // paths. Comparing against the root WITH its trailing slash is what makes
+    // a drive root behave like any other directory.
+    const rootPrefix = `${rootNorm}/`;
 
     for (const hit of globRes.hits) {
       if (shouldSkipRepoMapPath(hit.path)) continue;
       const pathNorm = hit.path.replace(/\\/g, "/");
-      const relPath = pathNorm.startsWith(`${rootNorm}/`)
-        ? pathNorm.slice(rootNorm.length + 1)
+      const relPath = pathNorm.startsWith(rootPrefix)
+        ? pathNorm.slice(rootPrefix.length)
         : hit.path;
 
       candidateFiles.push({ path: hit.path, relPath });

@@ -234,6 +234,11 @@ fn validate_url(url: &str) -> Result<reqwest::Url, String> {
     Ok(parsed)
 }
 
+// Staged for the loopback-allowing fetch path (dev servers behind the SSRF
+// guard): the pair validates a URL while permitting loopback and then pins the
+// resolver to exactly the addresses that passed. Not wired yet, so keep them
+// compiling rather than deleting half of a guard.
+#[allow(dead_code)]
 pub(crate) async fn validate_url_allow_loopback(
     url: &str,
 ) -> Result<(reqwest::Url, Vec<IpAddr>), String> {
@@ -251,6 +256,7 @@ pub(crate) async fn validate_url_allow_loopback(
     Ok((parsed, ips))
 }
 
+#[allow(dead_code)]
 pub(crate) fn host_resolver_rules(
     url: &reqwest::Url,
     ips: &[IpAddr],
@@ -264,9 +270,11 @@ pub(crate) fn host_resolver_rules(
     }
     let map = ips
         .iter()
+        // An IPv6 literal in a `--host-resolver-rules` MAP must be bracketed;
+        // a bare one is not a valid address token and the rule is dropped.
         .map(|ip| {
             if ip.is_ipv6() {
-                format!("{ip}")
+                format!("[{ip}]")
             } else {
                 format!("{ip}")
             }

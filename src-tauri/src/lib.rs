@@ -14,8 +14,8 @@ use launch::{get_launch_dir, get_launch_files, parse_launch_target, LaunchDir, L
 #[cfg(target_os = "macos")]
 use launch::{resolve_launch_target, LaunchEntry};
 use modules::{
-    agent, audit, backup, browser, chatgpt_auth, control, extensions, fs, git, history, lsp, mcp,
-    net, oauth, pty, secrets, shell, sql, ssh, system, workspace,
+    agent, audit, backup, browser, browser_session, chatgpt_auth, control, extensions, fs, git,
+    history, lsp, mcp, net, oauth, pty, secrets, shell, sql, ssh, system, workspace,
 };
 use settings_window::open_settings_window;
 
@@ -300,6 +300,13 @@ pub fn run() {
             browser::browser_embed_eval,
             browser::browser_embed_screenshot,
             browser::browser_embed_close,
+            browser_session::browser_session_create,
+            browser_session::browser_session_list,
+            browser_session::browser_session_navigate,
+            browser_session::browser_session_text,
+            browser_session::browser_session_click,
+            browser_session::browser_session_type,
+            browser_session::browser_session_close,
             chatgpt_auth::chatgpt_auth_login,
             chatgpt_auth::chatgpt_auth_refresh,
             oauth::oauth_login,

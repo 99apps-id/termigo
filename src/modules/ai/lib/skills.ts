@@ -139,7 +139,9 @@ export async function listSkills(
   const now = Date.now();
   const cached = skillsCache.get(workspaceRoot);
   if (cached && now - cached.at < 30_000) {
-    return cached.skills;
+    // A copy, not the cached array: handing out the live array let any caller
+    // that sorted or spliced it corrupt the cache for the next 30 seconds.
+    return cached.skills.slice();
   }
   const root = `${workspaceRoot.replace(/[\\/]$/, "")}/${SKILLS_REL_DIR}`;
   let entries: Awaited<ReturnType<typeof native.readDir>>;

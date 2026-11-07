@@ -187,6 +187,18 @@ Each browser instance is a dedicated Tauri webview window that the agent drives.
 - `browser_eval` - inject JS into the page
 - `browser_embed_update` / `browser_embed_navigate` / `browser_embed_read` / `browser_embed_eval` / `browser_embed_screenshot` / `browser_embed_close` - the embedded preview surface
 
+### Persistent browser sessions (`src-tauri/src/modules/browser_session.rs`)
+
+A named Chromium session driven over the DevTools protocol, with its own profile directory under `~/.termigo/browser-sessions`. Unlike the embedded webview, the profile survives the process, so **cookies and logins persist across runs** and an authenticated flow does not have to be repeated every time.
+
+- `browser_session_create` / `browser_session_close` - session lifecycle
+- `browser_session_list` - the sessions currently known
+- `browser_session_navigate` - send a session to a URL
+- `browser_session_text` - read the rendered page text
+- `browser_session_click` / `browser_session_type` - drive the page
+
+The URL guard is the same `unsafe_url` policy the embedded browser applies, and session ids are restricted to ASCII letters, digits, `_` and `-` so a name cannot escape the profile directory.
+
 The frontend guards URLs through `browserGuard.ts`, and this module **re-applies the same host policy on the Rust side**, so a bypass in one layer cannot reach the network stack. Value-returning reads flow back through a `termigo:browser-value` Tauri event rather than IPC return values, because the injected script cannot always reach Tauri's sync invoke path.
 
 ### SQL (`src-tauri/src/modules/sql.rs`)

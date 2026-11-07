@@ -8,6 +8,7 @@ import {
   hasAnyKey,
 } from "../lib/keyring";
 import { isSignedInToChatGpt, onChatGptAuthChanged } from "../lib/chatgptAuth";
+import { startCodeIndexSync } from "../lib/codeIndexSync";
 import {
   DEFAULT_MODEL_ID,
   compatModelIdForEndpoint,
@@ -144,6 +145,12 @@ export function useAiBootstrap(): {
     void useAgentsStore.getState().hydrate();
     void useSnippetsStore.getState().hydrate();
   }, [hydrateSessions]);
+
+  // The code-search index must forget a file the moment it changes on disk,
+  // or `code_search` answers from stale chunks for the rest of the session.
+  useEffect(() => {
+    startCodeIndexSync();
+  }, []);
 
   return { hasComposer, keysLoaded };
 }

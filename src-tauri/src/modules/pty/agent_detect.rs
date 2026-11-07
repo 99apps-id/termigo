@@ -2,6 +2,9 @@ const ESC: u8 = 0x1b;
 const BEL: u8 = 0x07;
 const OSC_INTRO: u8 = b']';
 const ST_FINAL: u8 = b'\\';
+/// 8-bit String Terminator (0x9c), the single-byte form of ESC \. Also valid
+/// as an OSC introducer's terminator and accepted by xterm.js.
+const ST8: u8 = 0x9c;
 
 const OSC_MAX: usize = 2048;
 
@@ -125,6 +128,14 @@ impl AgentDetector {
                         self.state = State::Ground;
                     }
                     ESC => self.state = State::OscEsc,
+                    // 8-bit ST. xterm.js accepts both forms, and a hook that
+                    // emits the single-byte terminator was silently swallowed
+                    // here (the byte was buffered as payload and the OSC never
+                    // completed), so the agent badge never armed.
+                    ST8 => {
+                        self.finish_osc(&mut emit);
+                        self.state = State::Ground;
+                    }
                     _ => {
                         if self.osc.len() < OSC_MAX {
                             self.osc.push(b);
@@ -296,6 +307,14 @@ mod tests {
         v
     }
 
+    /// Same sequence terminated with the 8-bit ST (0x9c) instead of ESC \. */
+    fn osc8(body: &str) -> Vec<u8> {
+        let mut v = vec![ESC, OSC_INTRO];
+        v.extend_from_slice(body.as_bytes());
+        v.push(ST8);
+        v
+    }
+
     fn started(agent: &str) -> Transition {
         Transition::Started {
             agent: agent.into(),
@@ -315,6 +334,18 @@ mod tests {
     fn arms_on_pi_command() {
         let mut d = AgentDetector::new();
         assert_eq!(run(&mut d, &osc("133;C;pi")), vec![started("pi")]);
+    }
+
+    // xterm.js accepts the single-byte 8-bit ST (0x9c) as an OSC terminator.
+    // The detector used to buffer it as payload, so the OSC never completed
+    // and the agent badge never armed for a hook that emits that form.
+    #[test]
+    fn arms_on_an_osc_terminated_with_8bit_st() {
+        let mut d = AgentDetector::new();
+        assert_eq!(
+            run(&mut d, &osc8("133;C;claude -p hello")),
+            vec![started("claude")]
+        );
     }
 
     #[test]

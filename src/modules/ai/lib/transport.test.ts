@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
+import {
+  CONTINUATION_NUDGE_PREFIX,
+  OUTPUT_LIMIT_NUDGE,
+} from "./turnContinuation";
 import type { DirEntry } from "./native";
 
 vi.mock("./native", () => ({
@@ -12,6 +16,7 @@ import {
   formatEnvBlock,
   isResumingApproval,
   mergeRuleFiles,
+  prepareOutgoingMessages,
   PROJECT_RULE_FILES,
   readProjectRules,
   resolveRuleFiles,
@@ -219,6 +224,45 @@ describe("readProjectRules discovery", () => {
 // into the last user message on the outgoing copy only, so the message that
 // carried it on one turn arrived without it on the next - and the difference
 // landed at the first user message, invalidating everything after it.
+describe("prepareOutgoingMessages", () => {
+  const user = (id: string, text: string) =>
+    ({ id, role: "user", parts: [{ type: "text", text }] }) as never;
+  const assistant = (id: string, text: string) =>
+    ({ id, role: "assistant", parts: [{ type: "text", text }] }) as never;
+
+  const textOf = (m: { parts: unknown }) =>
+    (m.parts as { type: string; text?: string }[])
+      .filter((p) => p.type === "text")
+      .map((p) => p.text)
+      .join("");
+
+  // A resumed answer repeats the tail of the one it continues. The nudge asks
+  // it not to, but when it does the duplicate would ride in every later
+  // request. Only the outgoing copy is rewritten; the stored chat keeps what
+  // the user saw.
+  it("drops the seam a resumed answer repeated", () => {
+    const seam =
+      "The build failed because the module was not registered in the workspace.";
+    const history = [
+      user("u1", "fix the build"),
+      assistant("a1", `First paragraph. ${seam}`),
+      user("n1", `${CONTINUATION_NUDGE_PREFIX} ${OUTPUT_LIMIT_NUDGE}`),
+      assistant("a2", `${seam} So I fixed it.`),
+    ];
+    const out = prepareOutgoingMessages(history, "<env>\ncwd: /x\n</env>");
+    expect(textOf(out[3])).toBe(" So I fixed it.");
+    // Stored history is untouched.
+    expect(textOf(history[3])).toBe(`${seam} So I fixed it.`);
+    // The env turn still goes last.
+    expect(textOf(out[out.length - 1])).toContain("<env>");
+  });
+
+  it("leaves history with no resumed seam untouched", () => {
+    const history = [user("u1", "hi"), assistant("a1", "hello")];
+    expect(prepareOutgoingMessages(history, null)).toEqual(history);
+  });
+});
+
 describe("appendEnvTurn", () => {
   const user = (id: string, text: string) =>
     ({ id, role: "user", parts: [{ type: "text", text }] }) as never;

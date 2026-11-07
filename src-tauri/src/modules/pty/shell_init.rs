@@ -196,7 +196,12 @@ fn ensure_utf8_locale(cmd: &mut CommandBuilder) {
     let fallback = "C.UTF-8";
     #[cfg(windows)]
     let fallback = "en_US.UTF-8";
-    cmd.env("LANG", fallback);
+    // `LC_ALL`, not `LANG`. LC_ALL overrides LANG and LC_CTYPE, so injecting
+    // LANG while LC_ALL=C left the shell in the C locale and every non-ASCII
+    // filename rendered as `???`. A terminal emulator is UTF-8 by definition,
+    // which is what makes overriding the inherited value correct here rather
+    // than invasive.
+    cmd.env("LC_ALL", fallback);
 }
 
 fn apply_common(
@@ -247,6 +252,9 @@ fn apply_common(
     }
     ensure_utf8_locale(cmd);
 
+    // Captured before `cwd` is consumed so the failure branch can report what
+    // was actually asked for.
+    let requested_cwd = cwd.clone();
     let resolved_cwd = cwd
         .map(PathBuf::from)
         .filter(|p| p.is_dir())
@@ -258,7 +266,13 @@ fn apply_common(
         log::info!("pty cwd: {}", cwd.display());
         cmd.cwd(cwd);
     } else {
-        log::warn!("pty cwd: no usable directory, inheriting from process");
+        // No usable directory: the child inherits ours. Logged loudly because
+        // the frontend still holds the path it asked for, so the shell and
+        // `tab.cwd` disagree until the shell's first OSC 7 - a deleted folder
+        // or a moved space root lands here.
+        log::warn!(
+            "pty cwd: requested {requested_cwd:?} is not a directory and no fallback exists; inheriting the process cwd"
+        );
     }
 }
 
@@ -311,8 +325,7 @@ mod tests {
     }
 
     #[test]
-    fn common_env_includes_authenticated_caller_context() {
-        let mut command = CommandBuilder::new("shell");
+    fn common_env_includes_authenticated_caller_context() {        let mut command = CommandBuilder::new("shell");
         let control = ShellControlEnv {
             address: "127.0.0.1:1234".into(),
             token: "secret".into(),
@@ -341,5 +354,39 @@ mod tests {
                 .and_then(|path| std::env::split_paths(path).next()),
             Some(std::path::PathBuf::from("/app/bin"))
         );
+    }
+
+    // LC_ALL overrides LANG and LC_CTYPE, so injecting LANG while LC_ALL=C
+    // left the shell in the C locale and non-ASCII filenames rendered as
+    // `???`. The fix must pin LC_ALL, and it must still yield to a UTF-8
+    // setting the user already has.
+    #[test]
+    fn locale_pins_lc_all_not_lang() {
+        let mut command = CommandBuilder::new("shell");
+        apply_common(&mut command, None, false, None);
+        // `ensure_utf8_locale` runs inside `apply_common`; when nothing in the
+        // ambient environment is UTF-8 it must set LC_ALL.
+        let lc_all = command.get_env("LC_ALL").map(|v| v.to_string_lossy());
+        let lang = command.get_env("LANG").map(|v| v.to_string_lossy());
+        assert!(
+            lc_all.is_some() || lang.is_some(),
+            "a UTF-8 locale must be pinned one way or another"
+        );
+        if let Some(lc_all) = lc_all {
+            let up = lc_all.to_ascii_uppercase();
+            assert!(
+                up.contains("UTF-8") || up.contains("UTF8"),
+                "LC_ALL must be a UTF-8 locale, got {lc_all}"
+            );
+        }
+    }
+
+    #[test]
+    fn forces_term_and_termigo_markers() {
+        let mut command = CommandBuilder::new("shell");
+        apply_common(&mut command, None, false, None);
+        assert_eq!(command.get_env("TERM"), Some(OsStr::new("xterm-256color")));
+        assert_eq!(command.get_env("COLORTERM"), Some(OsStr::new("truecolor")));
+        assert_eq!(command.get_env("TERMIGO_TERMINAL"), Some(OsStr::new("1")));
     }
 }

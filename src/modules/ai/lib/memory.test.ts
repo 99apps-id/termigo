@@ -10,6 +10,7 @@ import {
   isDuplicate,
   MAX_FACT_CHARS,
   MAX_FACTS,
+  MAX_GOTCHA_FACTS,
   MAX_MEMORY_BYTES,
   memoryBlock,
   normalizeFact,
@@ -153,6 +154,30 @@ describe("gotchas, global memory, and relevance in memoryBlock", () => {
     // High relevance facts appear
     expect(block).toContain("Fact about auth token verification.");
     expect(block).toContain("Fact about payment stripe webhook.");
+  });
+
+  // The general sections were capped but the gotcha lists were not, so a file
+  // full of gotchas (legal under MAX_FACTS) put ~41 KB of them into a system
+  // prompt the module documents as bounded.
+  it("caps the gotcha sections so the prompt block stays bounded", () => {
+    const facts = Array.from({ length: 60 }, (_, i) =>
+      entry(`[GOTCHA] Trap number ${i} with enough text to be measurable.`),
+    );
+    const globals = Array.from({ length: 60 }, (_, i) =>
+      entry(
+        `[GOTCHA] Global trap number ${i} with enough text to be measurable.`,
+      ),
+    );
+    const block = memoryBlock(facts, globals);
+    const projectGotchas = block
+      .split("\n")
+      .filter((l) => l.startsWith("- [GOTCHA] Trap number")).length;
+    const globalGotchas = block
+      .split("\n")
+      .filter((l) => l.startsWith("- [GOTCHA] Global trap number")).length;
+    expect(projectGotchas).toBe(MAX_GOTCHA_FACTS);
+    expect(globalGotchas).toBe(MAX_GOTCHA_FACTS);
+    expect(block.length).toBeLessThan(20_000);
   });
 });
 

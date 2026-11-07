@@ -128,6 +128,39 @@ describe("OSC 7 cwd handler -- gated by OSC 133 in-command state", () => {
     expect(onCwd).toHaveBeenCalledWith("/home/me/project");
   });
 
+  // With no shell integration installed there is no legitimate source of an
+  // OSC 7 on this pane, so accepting one lets any program the user runs
+  // retarget the workspace (and widen the asset-protocol scope).
+  it("rejects OSC 7 before any shell-integration marker has been seen", () => {
+    const { term, handlers } = makeFakeTerm();
+    const state = createShellIntegrationState();
+    const onCwd = vi.fn();
+    registerPromptTracker(term, state);
+    registerCwdHandler(term, onCwd, state);
+
+    handlers.get(7)?.("file://host/etc");
+    expect(onCwd).not.toHaveBeenCalled();
+
+    // Once the shell's own hook has spoken, reports are trusted again.
+    handlers.get(133)?.("A");
+    handlers.get(7)?.("file://host/home/me/project");
+    expect(onCwd).toHaveBeenCalledWith("/home/me/project");
+  });
+
+  it("keeps a UNC cwd whole instead of dropping the server component", () => {
+    const { term, handlers } = makeFakeTerm();
+    const onCwd = vi.fn();
+    registerCwdHandler(term, onCwd);
+
+    // PowerShell emits `file://<machineName>//server/share/dir` for a UNC
+    // cwd: the machine name is the URI host and the UNC server lives in the
+    // path. The old frontend mangling plus the old script-side stripping
+    // produced //share/dir, a host that does not exist, so the status bar and
+    // the file tree both failed to open it.
+    handlers.get(7)?.("file://mypc//fileserver/builds/nightly");
+    expect(onCwd).toHaveBeenCalledWith("//fileserver/builds/nightly");
+  });
+
   it("normalizes Windows drive-letter OSC 7 paths", () => {
     const { term, handlers } = makeFakeTerm();
     const onCwd = vi.fn();

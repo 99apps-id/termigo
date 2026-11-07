@@ -1195,6 +1195,7 @@ pub fn shell_bg_logs(
     handle: u32,
     since_offset: Option<u64>,
 ) -> Result<BackgroundLogResponse, String> {
+    reap_background(&state);
     let proc = state
         .bg
         .read()
@@ -1203,6 +1204,18 @@ pub fn shell_bg_logs(
         .cloned()
         .ok_or_else(|| "no background handle".to_string())?;
     Ok(proc.read_logs(since_offset.unwrap_or(0)))
+}
+
+/// Drop entries whose process has already exited.
+///
+/// Nothing used to remove them: `shell_bg_kill` kills but leaves the
+/// `Arc<BackgroundProc>` in the map, so every start/stop cycle retained its
+/// ring buffer (up to 4 MiB) and its open log-file handle for the app's
+/// lifetime, and `shell_bg_list` grew without bound. Reaped on the read paths
+/// rather than from a background thread so there is no extra timer to own.
+fn reap_background(state: &ShellState) {
+    let mut map = state.bg.write().unwrap_or_else(|e| e.into_inner());
+    map.retain(|_, p| !p.exited.load(std::sync::atomic::Ordering::Acquire));
 }
 
 #[tauri::command]
@@ -1216,6 +1229,7 @@ pub fn shell_bg_kill(state: tauri::State<ShellState>, handle: u32) -> Result<boo
 
 #[tauri::command]
 pub fn shell_bg_list(state: tauri::State<ShellState>) -> Result<Vec<BackgroundProcInfo>, String> {
+    reap_background(&state);
     let map = state.bg.read().unwrap_or_else(|e| e.into_inner());
     let mut out = Vec::with_capacity(map.len());
     for (id, p) in map.iter() {

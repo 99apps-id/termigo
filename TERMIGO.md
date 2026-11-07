@@ -1,6 +1,6 @@
 # TERMIGO.md
 
-Termigo loads `TERMIGO.md` from the workspace root as agent memory (like AGENTS.md / CLAUDE.md), and it is the project's living architecture doc. Only the first 10k characters reach the agent, so keep what matters here and put detail in `docs/`.
+Agent memory (like AGENTS.md / CLAUDE.md) and the project's living architecture doc. Only the first 10k characters reach the agent, so keep what matters here and detail in `docs/`.
 
 ## Project
 
@@ -8,19 +8,17 @@ Termigo loads `TERMIGO.md` from the workspace root as agent memory (like AGENTS.
 
 Bundle id `id.99apps.termigo`, package manager **pnpm**, platforms macOS / Linux / Windows.
 
-Checks: `pnpm lint`, `pnpm format:check`, `pnpm check-types`, `pnpm check:commands`, `pnpm check:doc-commands`, `pnpm test`; and in `src-tauri/`, `cargo clippy --all-targets --locked -- -D warnings` and `cargo nextest run --locked` (fallback `cargo test --locked`).
+Checks: `pnpm lint`, `format:check`, `check-types`, `check:commands`, `check:doc-commands`, `test`; and in `src-tauri/`, `cargo clippy --all-targets --locked -- -D warnings` and `cargo nextest run --locked` (fallback `cargo test --locked`).
 
 ## Quality bar
 
 Production-grade or it does not ship. Every change is judged against these:
 
 - **Correctness**: edge cases, failure modes, concurrent access. No shortcuts.
-- **Performance**: ultra-lightweight (installer under 20 MB, web client inside the `pnpm size` budgets, high-performance terminal). Minimize RAM, avoid redundant IPC round-trips, extra re-renders, or heavy dependencies. Unused features consume zero resources.
-- **Security**: no sandbox and no path boundaries for agent work; every tool runs for agent and subagents alike. Keep secrets (API keys, tokens) out of disk, settings, and `localStorage`.
+- **Performance**: ultra-lightweight (installer under 20 MB, web client inside the `pnpm size` budgets). Minimize RAM and avoid redundant IPC, re-renders, or heavy dependencies. Unused features consume zero resources.
+- **Security**: no sandbox and no path boundaries for agent work; every tool runs for agent and subagents alike. Keep secrets out of disk, settings, and `localStorage`.
 - **UI/UX**: polished, professional, premium. Every state and detail considered.
-- **Architecture**: functional core, thin imperative shell. Pure testable functions for logic; thin Tauri commands and React components.
-
-Verify: `pnpm lint`/`check-types`/`test`; Rust `cargo clippy --all-targets --locked -- -D warnings`, `cargo test --locked`. A core-subsystem change needs a test that locks the invariant.
+- **Architecture**: functional core, thin imperative shell. Pure testable functions for logic; thin Tauri commands and React components. A core-subsystem change needs a test that locks the invariant.
 
 ## Conventions
 
@@ -28,7 +26,7 @@ Verify: `pnpm lint`/`check-types`/`test`; Rust `cargo clippy --all-targets --loc
 - **No em-dash** anywhere: code, comments, commits, docs.
 - **No emojis** anywhere.
 - **Imports**: always `@/...` on the frontend, never relative across modules.
-- **Package manager**: pnpm only (junctions/symlinks on Windows; do not force `node-linker=hoisted`). If global `pnpm` is unavailable, use `corepack pnpm`, `npx -y pnpm@latest`, or invoke project binaries in `node_modules/.bin/` directly (already prepended to the agent shell PATH). Never commit `package-lock.json`. Details: [tooling](docs/contributing/tooling.md).
+- **Package manager**: pnpm only (junctions/symlinks on Windows; do not force `node-linker=hoisted`). If global `pnpm` is unavailable use `corepack pnpm`, `npx -y pnpm@latest`, or `node_modules/.bin/`. Never commit `package-lock.json`. Details: [tooling](docs/contributing/tooling.md).
 - **Branding**: `termigo.png` at repo root is master logo. After changing it run `node scripts/generate-logo.mjs` to regenerate `public/logo.png` and `src-tauri/icons`; never hand-edit those. Render `/logo.png` in UI, not a CSS lookalike.
 
 ## Architecture
@@ -43,9 +41,7 @@ Command catalog, module map and how to add a command: [two-process model](docs/a
 
 ### PTY shell integration
 
-Shell init scripts emit **OSC 7** (cwd) and **OSC 133** (prompt/command markers); the Rust reader parses them off the byte stream. Windows goes through ConPTY.
-
-Invariant: **never serialize a pane mid-command.**
+Shell init scripts emit **OSC 7** (cwd) and **OSC 133** (prompt/command markers); the Rust reader parses them off the byte stream. Windows goes through ConPTY. Invariant: **never serialize a pane mid-command.** OSC 7 is accepted only between commands (OSC 133 gates it, since command output is untrusted) and never before the first marker, and the scripts emit it **unwrapped** even inside tmux, because a DCS wrapper hides it from xterm.js.
 
 Init scripts, `SPAWN_LOCK`, Job Object, WSL: [PTY shell integration](docs/architecture/pty-shell-integration.md).
 
@@ -60,46 +56,45 @@ Single-window React app, path alias `@/*` -> `src/*`. Tabs are a tagged union on
 Details in [module layout](docs/architecture/module-layout.md):
 
 - **terminal/** xterm panes, renderer pool, splits. **editor/** CodeMirror 6, LSP client, diffs. **explorer/** file tree. **preview/**, **markdown/** previews.
-- **tabs/** tab list and active id. **spaces/** projects with own root, env, tabs. **workspace/** Local and WSL.
-- **header/**, **statusbar/**, **sidebar/**, **command-palette/**, **shortcuts/** chrome and keymaps. **theme/**, **settings/**, **updater/**.
-- **source-control/**, **git-history/** staging, commits, diffs, commit graph. **lsp/** opt-in language servers.
-- **ssh/** remote tabs, host-key TOFU, SFTP explorer. **extensions/** manifest + worker sandbox. **agents/** agent lifecycle. **ai/** agentic subsystem. **telegram/** companion bot.
+- **tabs/** tab list and active id. **spaces/** projects with own root, env, tabs. **workspace/** Local and WSL. **header/**, **statusbar/**, **sidebar/**, **command-palette/**, **shortcuts/** chrome and keymaps. **theme/**, **settings/**, **updater/**.
+- **source-control/**, **git-history/** staging, commits, diffs, commit graph. **lsp/** opt-in language servers. **ssh/** remote tabs, host-key TOFU, SFTP explorer. **extensions/** manifest + worker sandbox. **agents/** agent lifecycle. **ai/** agentic subsystem. **telegram/** companion bot.
 
 ### Go CLI (`cli/`)
 
-`cli/cmd/termigo` is a standalone terminal agent and automation companion talking directly to providers (runs on headless VPS without webview).
+`cli/cmd/termigo` is a standalone terminal agent and automation companion talking directly to providers (headless VPS, no webview).
 
 - **Agent**: `ask`, `code`, and `chat` (Bubble Tea TUI persisting sessions in `<state home>/sessions/`).
-- **Auth**: `login`/`logout` run vendor OAuth flows (device or PKCE loopback) into the 0600 secret store. The Antigravity installed-app pair is stamped into both the desktop Rust binary and Go companion from `TERMIGO_ANTIGRAVITY_CLIENT_ID` / `TERMIGO_ANTIGRAVITY_CLIENT_SECRET`; release builds receive them from GitHub Actions secrets and local builds may load the git-ignored `.env.local`. The pair is build configuration, not a user token, and embedded values are extractable from distributed binaries.
+- **Auth**: `login`/`logout` run vendor OAuth flows (device or PKCE loopback) into the 0600 secret store. The Antigravity installed-app pair is stamped into the desktop binary and the Go companion from `TERMIGO_ANTIGRAVITY_CLIENT_ID` / `TERMIGO_ANTIGRAVITY_CLIENT_SECRET` (CI secrets, or the git-ignored `.env.local`); it is build configuration, not a user token, and is extractable from distributed binaries.
 - **Tools**: filesystem, search, shell, git, web search/fetch, and configured MCP servers.
-- **Remote**: `telegram` bot relay; `service install` configures 24/7 daemon.
-- **Companion commands**: `doctor`, `init`, `agent run`, `skill`, `mcp`, `config`, `models`, `settings`, and terminal control via `internal/control`.
+- **Remote**: `telegram` bot relay; `service install` configures a 24/7 daemon.
+- **Companion commands**: `doctor`, `init`, `agent run`, `skill`, `mcp`, `config`, `models`, `settings`, terminal control.
 
-Dependency-light: stdlib, yaml.v3, `golang.org/x/term`, Bubble Tea stack. Credentials stay in CLI secret store; app API keys stay in OS keychain.
+Dependency-light: stdlib, yaml.v3, `golang.org/x/term`, Bubble Tea stack. Credentials stay in the CLI secret store; app API keys in the OS keychain.
 
 ### AI subsystem (`src/modules/ai/`)
 
 BYOK with `PROVIDERS` and model registry in `config.ts`. Full details in [AI subsystem](docs/architecture/ai-subsystem.md). Invariants:
-
-- **Keys**: stored in OS keychain via `secrets_*` (Linux: `0600` `secrets.json`). Never in settings or `localStorage`.
-- **Agent** (`lib/agent.ts`): AI SDK v6 semantics. One explicit step budget per round, resolved per model by `stepBudgetForModel`: `MAX_AGENT_STEPS` = 500 for API-key providers, `OAUTH_MAX_AGENT_STEPS` = 10_000 for OAuth / keyless providers (ChatGPT, Claude OAuth, xAI OAuth, Antigravity, GitHub Copilot, Muse), whose real bound is the provider's 5-hour usage window. Hitting it pauses the run, and Continue resumes with the same cap - never a hidden escalation ladder.
-- **Subagents** (`lib/subagentPool.ts`, `agents/runSubagent.ts`): managed by `SubagentConcurrencyPool` (default 4). Parents yield slots to prevent deadlock.
-- **Tools & Environment** (`tools/tools.ts`, `lib/repairToolCall.ts`): no sandbox or artificial path boundary limits; all tools available.
+- **Keys**: OS keychain via `secrets_*` (Linux: `0600` `secrets.json`). Never in settings or `localStorage`.
+- **Agent** (`lib/agent.ts`): AI SDK v6 semantics. One explicit step budget per round, per model (`stepBudgetForModel`): 500 for API-key providers, 10_000 for OAuth / keyless ones (ChatGPT, Claude OAuth, xAI OAuth, Antigravity, Copilot, Muse), whose real bound is the provider's 5-hour usage window. Continue resumes with the same cap - never a hidden escalation ladder.
+- **Turn continuation** (lib/turnContinuation.ts): a run can end without finishing the task in three ways that look normal - the output budget cut the answer, a reasoning-only step produced nothing, or the model announced its next step and issued no call. Each gets one bounded nudge (4 / 2 / 2). Decided when the run ENDS, never in prepareStep: a step with no tool call never reaches it again. From ODON.
+- **Subagents** (`lib/subagentPool.ts`): `SubagentConcurrencyPool` (default 4) plus a per-depth allowance, so a parent cannot deadlock waiting for its own child.
+- **Tools & Environment** (`tools/tools.ts`, `lib/repairToolCall.ts`): no sandbox or path boundary limits; all tools available.
 - **Shell execution & worktree** (`src-tauri/src/modules/shell/mod.rs`): unrestricted execution, full git worktree and subagent concurrency support.
 - **Approval resume trailing message is load-bearing**: `streamText` finds approvals only in `messages.at(-1)`. Nothing appended after answered approval.
-- **Chat UX & Timeline**: edit/resend turns, checkpoints, session fork, auto-approval toggle, ANSI rendering, stream watchdog.
-- **Telegram companion**: remote tool approvals, interactive commands, Mermaid previews (`src/modules/telegram/`).
-- **Memory path**: loads from `.termigo/memory.md` (project scope), falling back to `~/.termigo/memory.md`.
+- **Chat UX & Timeline**: edit/resend (attachments restored), checkpoints, fork, auto-approval toggle, ANSI rendering, stream watchdog.
+- **Memory path**: .termigo/memory.md (project), else ~/.termigo/memory.md.
+- **Code search (RAG)**: lib/codeIndex.ts BM25 over overlapping chunks, kept fresh by lib/codeIndexSync.ts.
+- **Telegram companion**: remote approvals, commands, Mermaid previews (src/modules/telegram/).
 
 ### UI conventions
 
 - **shadcn/ui** primitives (`src/components/ui/`, style `radix-luma`, icons **hugeicons**) and **AI Elements** (`src/components/ai-elements/`) are generated: regenerate with `pnpm dlx shadcn add`, never hand-edit. Composition wrappers belong in `modules/<area>/components/`.
 - **Tailwind v4**: no `tailwind.config.*`; config is `src/App.css` via `@theme`. Use `cn()` from `@/lib/utils`. Animation `motion`, layout `react-resizable-panels`.
-- **Canonical paths**: forward-slash form on the frontend. `homeDir()` returns backslashes on Windows: convert at the boundary. Split anything from OSC 7, explorer, or OS on both separators (`/` and `\`), never `/` alone: equal canonical strings prevent `useFileTree` from clearing its tree on `tab.cwd` updates.
+- **Canonical paths**: forward slashes on the frontend; `homeDir()` returns backslashes on Windows, so convert at the boundary. Split anything from OSC 7, explorer, or OS on both separators, never `/` alone: equal canonical strings stop `useFileTree` clearing its tree on `tab.cwd` updates.
 
 ### Platform, capabilities and bundle
 
-Per-platform window styling, the capability allowlist and bundle / updater config: [platform and bundle](docs/architecture/platform-and-bundle.md). The rules that bite if forgotten:
+Per-platform window styling, the capability allowlist and bundle / updater config: [platform and bundle](docs/architecture/platform-and-bundle.md). Rules that bite:
 
 - A plugin API the webview may call must be in `src-tauri/capabilities/default.json`, or it does not exist.
 - HOME / cache dirs come from the `dirs` crate, never raw `$HOME` / `%USERPROFILE%`.
@@ -108,10 +103,8 @@ Per-platform window styling, the capability allowlist and bundle / updater confi
 
 ### Known gotchas
 
-- **React 19 state and dev mode**: `setActiveId` is called outside `setTabs` updaters for concurrent-mode safety. `useTerminalSession` tracks `openSession` via ref. In dev, `useEffect` double-mounts; `SPAWN_LOCK` serializes early PTY cleanup (`pty opened` then `pty closed` in dev logs is normal).
-- **Windows PowerShell process lifecycle**: `killer.kill()` from `portable-pty` kills only the immediate child. The Job Object in `pty/job.rs` terminates descendant process trees on exit; explicit `pty_close` relies on the Job Object. Do not disable without replacement.
-- **Tab `cwd` storage**: OSC 7 emits forward slashes (after `parseOsc7` strips `/C:` to `C:`). Consumers on Windows must normalize separators: `apply_common` in `pty::shell_init` handles PTY spawn.
+- **React 19 state and dev mode**: `setActiveId` is called outside `setTabs` updaters for concurrent-mode safety; `useTerminalSession` tracks `openSession` via ref. In dev `useEffect` double-mounts and `SPAWN_LOCK` serializes early PTY cleanup (`pty opened` then `pty closed` in dev logs is normal).
+- **Windows process lifecycle**: `killer.kill()` kills only the immediate child; the Job Object in `pty/job.rs` terminates the descendant tree on exit and `pty_close` relies on it. Do not disable without replacement.
+- **Tab `cwd` storage**: OSC 7 emits forward slashes (after `parseOsc7` strips `/C:` to `C:`). Windows consumers must normalize separators: `apply_common` in `pty::shell_init` handles PTY spawn.
 
-## Further reading
-
-Contributor guides live in `docs/` (`README.md` indexes `docs/architecture/` and `docs/contributing/`). If anything conflicts, `TERMIGO.md` wins.
+If anything conflicts, this file wins.

@@ -154,10 +154,18 @@ fn check_input_size(len: usize) -> Result<(), String> {
 
 // Input is the latency-critical path: raw body + id header skips JSON
 // serialization of every keystroke on both sides of the IPC boundary.
+//
+// `async` is load-bearing, not stylistic. A synchronous command body runs
+// inline on the IPC handler thread - the UI thread on Windows and macOS - and
+// `write_all` on a PTY whose child is not draining blocks indefinitely (the
+// kernel tty input queue is a few KB, so a paste of 200 KB parks forever while
+// `sleep 60` runs). The window then stops repainting and ignores input, and a
+// Ctrl-C queues behind the same blocked call. Moving the write onto the
+// blocking pool keeps the main thread pumping no matter how full the queue is.
 #[tauri::command]
-pub fn pty_write(
-    state: tauri::State<PtyState>,
-    request: tauri::ipc::Request,
+pub async fn pty_write(
+    state: tauri::State<'_, PtyState>,
+    request: tauri::ipc::Request<'_>,
 ) -> Result<(), String> {
     let id: u64 = request
         .headers()
@@ -182,16 +190,23 @@ pub fn pty_write(
             log::warn!("pty_write: unknown id={id}");
             "no session".to_string()
         })?;
-    let result = session
-        .writer
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .write_all(bytes)
-        .map_err(|e| {
-            log::debug!("pty_write id={id} failed: {e}");
-            e.to_string()
-        });
-    result
+    // Owned so the write can move to the blocking pool. A keystroke is one
+    // byte; the worst case is one memcpy of a 4 MiB paste, which is far cheaper
+    // than the frozen window it prevents.
+    let payload = bytes.to_vec();
+    let writer = session.writer.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        writer
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .write_all(&payload)
+            .map_err(|e| {
+                log::debug!("pty_write id={id} failed: {e}");
+                e.to_string()
+            })
+    })
+    .await
+    .map_err(|e| format!("pty_write id={id}: worker join failed: {e}"))?
 }
 
 #[tauri::command]
@@ -344,6 +359,14 @@ pub fn pty_get_cwd(state: tauri::State<PtyState>, id: u64) -> Result<Option<Stri
     }
 }
 
+/// Whether anything is in the FOREGROUND of this PTY right now.
+///
+/// "Has a child process" is not the same question: `sleep 300 &` leaves a
+/// child while the shell sits idle at the prompt, and answering "yes" there
+/// raised the close confirmation and stopped the idle-tab reaper for a shell
+/// with nothing running. Unix answers with the terminal's process group
+/// (only a foreground job takes it over); Windows has no process groups, so
+/// any child is the best available signal.
 #[tauri::command]
 pub fn pty_has_foreground_process(state: tauri::State<PtyState>, id: u64) -> Result<bool, String> {
     let sessions = state.sessions.read().unwrap_or_else(|e| e.into_inner());
@@ -360,7 +383,21 @@ pub fn pty_has_foreground_process(state: tauri::State<PtyState>, id: u64) -> Res
     if shell_pid == 0 {
         return Ok(false);
     }
-    Ok(shell_has_children(shell_pid))
+    #[cfg(unix)]
+    {
+        let leader = session
+            .master
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .process_group_leader();
+        // The shell holds the foreground group while it waits at the prompt.
+        // Anything else holding it is a foreground job.
+        Ok(matches!(leader, Some(pid) if pid > 0 && (pid as u64) != shell_pid))
+    }
+    #[cfg(windows)]
+    {
+        Ok(shell_has_children(shell_pid))
+    }
 }
 
 #[tauri::command]

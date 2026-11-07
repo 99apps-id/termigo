@@ -2,6 +2,7 @@ pub mod agent;
 pub mod audit;
 pub mod backup;
 pub mod browser;
+pub mod browser_session;
 pub mod chatgpt_auth;
 pub mod control;
 pub mod extensions;

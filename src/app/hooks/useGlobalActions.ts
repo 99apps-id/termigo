@@ -21,6 +21,7 @@ import {
   navigateFocusedBlocks,
   type PaneBounds,
   type TerminalPaneHandle,
+  whenSessionReady,
 } from "@/modules/terminal";
 import {
   type RefObject,
@@ -242,14 +243,18 @@ export function useGlobalActions({
   const cdInNewTab = useCallback(
     (path: string) => {
       const tabId = newTab(path);
-      setTimeout(() => {
+      // Wait for the session, do not guess at 80 ms. A fixed delay raced the
+      // terminal mount, and when the ref was still missing the `cd` was
+      // silently dropped - the tab opened at the inherited cwd with no error.
+      void (async () => {
         const tab = tabsRef.current.find((x) => x.id === tabId);
         if (tab?.kind !== "terminal") return;
+        await whenSessionReady(tab.activeLeafId);
         const t = terminalRefs.current?.get(tab.activeLeafId);
         if (!t) return;
         t.write(`cd ${quoteShellArg(path)}\r`);
         t.focus();
-      }, 80);
+      })();
     },
     [newTab, tabsRef, terminalRefs],
   );

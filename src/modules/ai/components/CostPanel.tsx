@@ -8,6 +8,7 @@ import {
   entriesForWorkspace,
   entriesOnDay,
   loadCostLedger,
+  onCostLedgerChanged,
   sumCost,
 } from "../lib/costLedger";
 import { useChatStore } from "../store/chatStore";
@@ -37,15 +38,22 @@ export function CostPanel() {
 
   useEffect(() => {
     let alive = true;
-    void loadCostLedger()
-      .then((e) => {
-        if (alive) setEntries(e);
-      })
-      .catch(() => {
-        if (alive) setEntries([]);
-      });
+    const reload = () => {
+      void loadCostLedger()
+        .then((e) => {
+          if (alive) setEntries(e);
+        })
+        .catch(() => {
+          if (alive) setEntries([]);
+        });
+    };
+    reload();
+    // Re-read when a run records, so the panel is live while a run finishes
+    // instead of frozen at mount-time figures.
+    const unsubscribe = onCostLedgerChanged(reload);
     return () => {
       alive = false;
+      unsubscribe();
     };
   }, []);
 

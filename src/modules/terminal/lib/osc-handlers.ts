@@ -1,5 +1,6 @@
 import { canonicalDirPath } from "@/lib/path";
 import { IS_WINDOWS } from "@/lib/platform";
+import { useWorkspaceEnvStore } from "@/modules/workspace";
 import type { IMarker, Terminal } from "@xterm/xterm";
 
 const MAX_OSC52_CLIPBOARD_BYTES = 1024 * 1024;
@@ -14,10 +15,22 @@ const MAX_OSC52_CLIPBOARD_BYTES = 1024 * 1024;
  */
 export type ShellIntegrationState = {
   inCommand: boolean;
+  /**
+   * Whether this terminal has ever seen a shell-integration marker.
+   *
+   * OSC 133 and OSC 7 are ordinary bytes on the same stream as command
+   * output, so a `printf` can forge them. That is inherent to in-band shell
+   * integration (VS Code lives with the same property), but a terminal with
+   * NO integration at all has no legitimate source of OSC 7: accepting it
+   * there lets any program the user runs retarget the workspace. Requiring
+   * one marker first means the attacker has to forge a plausible prompt
+   * sequence, and the real shell's markers interleave with theirs.
+   */
+  sawMarker: boolean;
 };
 
 export function createShellIntegrationState(): ShellIntegrationState {
-  return { inCommand: false };
+  return { inCommand: false, sawMarker: false };
 }
 
 export function registerCwdHandler(
@@ -31,6 +44,9 @@ export function registerCwdHandler(
     // of attacker-controlled bytes). The local shell only emits OSC 7
     // between commands via its precmd/PROMPT_COMMAND hook.
     if (state?.inCommand) return true;
+    // No marker seen yet means no shell integration is installed, so there is
+    // no legitimate source for a cwd report on this pane.
+    if (state && !state.sawMarker) return true;
     const cwd = parseOsc7(data);
     if (cwd) onCwd(cwd);
     return true;
@@ -52,7 +68,10 @@ export function registerPromptTracker(
   let marker: IMarker | null = null;
   let lastRunning: boolean | null = null;
   const updateRunning = (next: boolean) => {
-    if (state) state.inCommand = next;
+    if (state) {
+      state.inCommand = next;
+      state.sawMarker = true;
+    }
     if (lastRunning !== next) {
       lastRunning = next;
       onCommandState?.(next);
@@ -137,17 +156,32 @@ function parseOsc7(data: string): string | null {
   try {
     path = decodeURIComponent(path);
   } catch {}
+  // UNC (\\server\share\dir) arrives as //server/share/dir. Keep it whole: the
+  // old code stripped the server component and produced //share/dir, a host
+  // that does not exist, so the status bar and the file tree both failed.
+  if (path.startsWith("//")) {
+    return canonicalDirPath(path);
+  }
   if (/^\/[A-Za-z]:/.test(path)) {
     path = path.slice(1);
   } else if (/^\/$/.test(path)) {
     // Bare root has no drive prefix; keep it so useFileTree does not clear.
     return canonicalDirPath(path);
-  } else if (IS_WINDOWS) {
+  } else if (IS_WINDOWS && !isWslWorkspace()) {
     // git-bash (MSYS) reports cwd as /c/Users/foo; map it to C:/Users/foo.
+    //
+    // Gated on the WORKSPACE, not the host OS: on a Windows host with a WSL
+    // distro selected, a legitimate Linux path like /e/tools was being
+    // rewritten to E:/tools, a path that exists only inside WSL.
     const drive = path.match(/^\/([A-Za-z])(\/.*)?$/);
     if (drive) path = `${drive[1].toUpperCase()}:${drive[2] ?? "/"}`;
   }
   return canonicalDirPath(path);
+}
+
+/** Whether the active workspace is WSL, so MSYS drive mapping must not run. */
+function isWslWorkspace(): boolean {
+  return useWorkspaceEnvStore.getState().env.kind === "wsl";
 }
 
 function parseOsc52Clipboard(data: string): string | null {

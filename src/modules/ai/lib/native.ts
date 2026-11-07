@@ -2,7 +2,7 @@ import { currentWorkspaceEnv } from "@/modules/workspace";
 import { invoke } from "@tauri-apps/api/core";
 
 export type ReadResult =
-  | { kind: "text"; content: string; size: number }
+  | { kind: "text"; content: string; size: number; mtime?: number }
   | { kind: "binary"; size: number }
   | { kind: "toolarge"; size: number; limit: number };
 
@@ -588,6 +588,42 @@ export const native = {
     invoke<string>("browser_embed_screenshot", { instance }),
   browserEmbedClose: (instance: string) =>
     invoke<void>("browser_embed_close", { instance }),
+
+  browserSessionCreate: (name: string | null, url: string, headful: boolean) =>
+    invoke<{
+      session_id: string;
+      profile_dir: string;
+      port: number;
+      url: string;
+      headful: boolean;
+    }>("browser_session_create", { name, url, headful }),
+  browserSessionList: () =>
+    invoke<{ live: unknown[]; saved_profiles: string[] }>(
+      "browser_session_list",
+    ),
+  browserSessionNavigate: (sessionId: string, url: string) =>
+    invoke<{ url: string; title: string; ready: boolean }>(
+      "browser_session_navigate",
+      { sessionId, url },
+    ),
+  browserSessionText: (sessionId: string) =>
+    invoke<{ title: string; url: string; text: string }>(
+      "browser_session_text",
+      { sessionId },
+    ),
+  browserSessionClick: (sessionId: string, selector: string) =>
+    invoke<{ clicked: boolean }>("browser_session_click", {
+      sessionId,
+      selector,
+    }),
+  browserSessionType: (sessionId: string, selector: string, text: string) =>
+    invoke<{ typed: number }>("browser_session_type", {
+      sessionId,
+      selector,
+      text,
+    }),
+  browserSessionClose: (sessionId: string) =>
+    invoke<void>("browser_session_close", { sessionId }),
 
   clipboardGet: () => invoke<string>("clipboard_get"),
   clipboardSet: (text: string) => invoke<void>("clipboard_set", { text }),

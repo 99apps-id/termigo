@@ -37,6 +37,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import type { ChatStatus, DynamicToolUIPart, ToolUIPart, UIMessage } from "ai";
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useAutoApproval } from "../hooks/useAutoApproval";
+import { useComposer } from "../lib/composer";
 import { humanizeModelError } from "../lib/errorMessage";
 import { isContentFilterError } from "../lib/errors";
 import { TERMIGO_CMD_RE } from "../lib/slashCommands";
@@ -365,6 +366,7 @@ const RenderedMessage = memo(function RenderedMessage({
     [groups],
   );
   const focusInput = useChatStore((s) => s.focusInput);
+  const restoreFileParts = useComposer().restoreFileParts;
   const sessionId = useChatStore((s) => s.activeSessionId);
   // Rewind is offered only on turns that actually have a pre-run snapshot.
   const hasTurnCheckpoint = useTurnCheckpointStore((s) =>
@@ -421,7 +423,18 @@ const RenderedMessage = memo(function RenderedMessage({
     // submitting truncates the transcript from this turn instead of stacking
     // a correction on top of a run that already went the wrong way.
     const onEdit = () => {
-      if (beginEditUserMessage(message.id)) focusInput(rawText);
+      if (!beginEditUserMessage(message.id)) return;
+      focusInput(rawText);
+      // Re-attach what the turn carried. Prefilling only the text used to
+      // silently drop every attachment, so the resend asked the model to
+      // reason about an image it never received.
+      const restored = restoreFileParts(fileParts, message.id);
+      if (fileParts.length > 0 && restored < fileParts.length) {
+        toast(
+          `${fileParts.length - restored} attachment(s) could not be restored for editing.`,
+          { variant: "error" },
+        );
+      }
     };
     const onRewind = async () => {
       const ok = window.confirm(

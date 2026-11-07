@@ -107,6 +107,36 @@ describe("syntax-aware chunkLines and findScopeHeader", () => {
     expect(chunks.length).toBeGreaterThanOrEqual(2);
     expect(chunks[0].scopeHeader).toContain("runProcess");
   });
+
+  // The overlap used to be dead code: the step was
+  // `Math.max(start + CHUNK_OVERLAP, end)`, which can never be below `end`
+  // because the boundary search only lowers `end` to `start + CHUNK_OVERLAP`
+  // at worst. Chunks were therefore strictly adjacent, so a declaration
+  // straddling a boundary had its signature in one chunk and its body in the
+  // next and no BM25 chunk ever saw both.
+  it("overlaps consecutive chunks so a straddling declaration stays whole", () => {
+    const lines = Array.from({ length: 300 }, (_, i) => `line ${i}`);
+    const chunks = chunkLines(lines);
+    expect(chunks.length).toBeGreaterThan(2);
+    for (let i = 1; i < chunks.length; i++) {
+      const overlap = chunks[i - 1].end - chunks[i].start;
+      expect(overlap).toBeGreaterThan(0);
+      expect(overlap).toBeLessThanOrEqual(20);
+    }
+    // Every line is still covered exactly once by the union of the chunks.
+    const covered = new Set<number>();
+    for (const c of chunks) {
+      for (let i = c.start; i < c.end; i++) covered.add(i);
+    }
+    expect(covered.size).toBe(lines.length);
+  });
+
+  it("keeps making progress on a file shorter than one chunk", () => {
+    const chunks = chunkLines(["only one line"]);
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0].start).toBe(0);
+    expect(chunks[0].end).toBe(1);
+  });
 });
 
 const FILE_CONTENT =
@@ -232,5 +262,90 @@ describe("code index persistence and cache", () => {
     expect(
       writtenFiles.has(`/other-checkout/${CODE_INDEX_CACHE_REL_PATH}`),
     ).toBe(true);
+  });
+
+  // The freshness check compared the on-disk walk against the number of files
+  // that reached the INDEX. Files the build skips (binary, over the size cap,
+  // unreadable) are part of the tree but never indexed, so any tree containing
+  // even one could never validate its own cache: every start rebuilt the whole
+  // index and rewrote the same unusable file.
+  it("reuses a cache when a tree file was skipped during the build", async () => {
+    const writtenFiles = new Map<string, string>();
+    const native = await mockNativeTree(writtenFiles);
+    writtenFiles.set("/workspace/src/binary.ts", "text");
+    vi.mocked(native.glob).mockResolvedValue({
+      hits: [
+        {
+          path: "/workspace/src/auth.ts",
+          rel: "src/auth.ts",
+          mtime: 1000,
+          size: FILE_CONTENT.length,
+        },
+        {
+          path: "/workspace/src/generated.ts",
+          rel: "src/generated.ts",
+          mtime: 1000,
+          size: 4,
+        },
+      ],
+      truncated: false,
+    });
+    // A file the walk reports but the build cannot index (binary content).
+    // Everything else, the cache file included, still comes from the tree.
+    vi.mocked(native.readFile).mockImplementation(async (p) => {
+      if (p === "/workspace/src/generated.ts") {
+        return { kind: "binary", size: 4 } as never;
+      }
+      const c = writtenFiles.get(p);
+      return c
+        ? ({ kind: "text", content: c, size: c.length, mtime: 1000 } as never)
+        : ({ kind: "text", content: "", size: 0 } as never);
+    });
+
+    const stats1 = await indexWorkspace("/workspace", false, true);
+    expect(stats1.files).toBe(1);
+    expect(writtenFiles.has(`/workspace/${CODE_INDEX_CACHE_REL_PATH}`)).toBe(
+      true,
+    );
+
+    clearIndex();
+    const readSpy = vi.spyOn(native, "readFile");
+    readSpy.mockClear();
+
+    const stats2 = await indexWorkspace("/workspace");
+    expect(stats2.files).toBe(1);
+    expect(readSpy).not.toHaveBeenCalledWith("/workspace/src/auth.ts");
+  });
+
+  it("drops a cache when a new file appears in the tree", async () => {
+    const writtenFiles = new Map<string, string>();
+    const native = await mockNativeTree(writtenFiles);
+    await indexWorkspace("/workspace", false, true);
+    clearIndex();
+
+    vi.mocked(native.glob).mockResolvedValue({
+      hits: [
+        {
+          path: "/workspace/src/auth.ts",
+          rel: "src/auth.ts",
+          mtime: 1000,
+          size: FILE_CONTENT.length,
+        },
+        {
+          path: "/workspace/src/extra.ts",
+          rel: "src/extra.ts",
+          mtime: 1000,
+          size: 10,
+        },
+      ],
+      truncated: false,
+    });
+    writtenFiles.set("/workspace/src/extra.ts", "export const x = 1;");
+
+    const readSpy = vi.spyOn(native, "readFile");
+    readSpy.mockClear();
+    const stats = await indexWorkspace("/workspace");
+    expect(stats.files).toBe(2);
+    expect(readSpy).toHaveBeenCalledWith("/workspace/src/extra.ts");
   });
 });

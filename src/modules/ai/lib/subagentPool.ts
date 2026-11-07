@@ -4,6 +4,39 @@
 
 export const MAX_GLOBAL_SUBAGENTS = 4;
 
+/**
+ * Per-depth allowance for work a SUBAGENT spawns.
+ *
+ * Separate pools per nesting depth, on purpose. A subagent holds a slot in its
+ * parent's pool for its whole run, so making its children queue on that same
+ * pool let four parents occupy all four slots and then block forever waiting
+ * for children that could never be admitted -- a hard hang with no recovery
+ * short of the user pressing Stop. Keying the nested allowance by depth keeps
+ * a parent and its children on different pools, so no lineage can wait on
+ * itself, while the total stays bounded (4 top-level + 2 per deeper level).
+ */
+export const MAX_NESTED_SUBAGENTS_PER_DEPTH = 2;
+
+const nestedPools = new Map<number, SubagentConcurrencyPool>();
+
+/** The pool a batch at `depth` draws its slots from. Depth 0 is the main
+ *  agent's own global pool. */
+export function poolForDepth(depth: number): SubagentConcurrencyPool {
+  if (!Number.isFinite(depth) || depth <= 0) return globalSubagentPool;
+  let pool = nestedPools.get(depth);
+  if (!pool) {
+    pool = new SubagentConcurrencyPool(MAX_NESTED_SUBAGENTS_PER_DEPTH);
+    nestedPools.set(depth, pool);
+  }
+  return pool;
+}
+
+/** Test/teardown hook: forget every per-depth pool built so far. */
+export function resetNestedPools(): void {
+  for (const pool of nestedPools.values()) pool.reset();
+  nestedPools.clear();
+}
+
 export class SubagentConcurrencyPool {
   private active = 0;
   private generation = 0;
@@ -116,3 +149,12 @@ export class SubagentConcurrencyPool {
 }
 
 export const globalSubagentPool = new SubagentConcurrencyPool();
+
+/** True when `error` is the abort rejection `acquire` raises. */
+export function isSlotAbortError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.message.startsWith("Aborted before acquiring") ||
+      error.message.startsWith("Aborted waiting for subagent slot"))
+  );
+}

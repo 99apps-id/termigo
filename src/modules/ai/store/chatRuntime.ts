@@ -68,6 +68,16 @@ import {
 } from "../lib/toolChoiceLearning";
 import { createContextAwareTransport } from "../lib/transport";
 import {
+  buildContinuationNudge,
+  continuationDecision,
+  type ContinuationState,
+  isContinuationNudgeParts,
+  isTruncatedFinish,
+  newContinuationState,
+  recordContinuation,
+  trailingContinueIntent,
+} from "../lib/turnContinuation";
+import {
   buildVerifyNudge,
   isVerifyNudgeParts,
   MAX_VERIFY_NUDGES,
@@ -84,6 +94,7 @@ import {
   getActiveProviderKey,
   seedMessages,
   setApprovalRespondedHandler,
+  setSessionDeletedHandler,
   setSessionLeftHandler,
   touchChat,
   useChatStore,
@@ -105,6 +116,24 @@ const overflowAutoResumeCount = new Map<string, number>();
 const TRANSIENT_RETRY_DELAY_MS = 3_000;
 const MAX_TRANSIENT_RETRIES = 2;
 const transientRetryCount = new Map<string, number>();
+
+/** Forget a session's overflow auto-resume budget, so deleting a session does
+ *  not leave a permanent row in the map. */
+export function clearOverflowAutoResumeCount(sessionId: string): void {
+  overflowAutoResumeCount.delete(sessionId);
+}
+
+// Deleting a session used to leave its overflow budget behind forever: the
+// only other removal is on a clean finish, and a deleted session never gets
+// one. chatStore cannot import this module, so it exposes a hook instead.
+setSessionDeletedHandler((sessionId) => {
+  clearOverflowAutoResumeCount(sessionId);
+  transientRetryCount.delete(sessionId);
+  // The verify and continuation budgets are per session and only cleared by a
+  // fresh message, so a deleted session used to leave both behind forever.
+  verifyNudgeCount.delete(sessionId);
+  continuationStates.delete(sessionId);
+});
 
 // A "thinking mode" model rejecting tool_choice: "none" is a model-specific
 // limitation. Drop the forced tool choice and retry immediately on the same
@@ -133,6 +162,126 @@ const autoContinueCount = new Map<string, number>();
 // eventually gets its summary through instead of looping. Cleared by a fresh
 // user message or a delivered queued task.
 const verifyNudgeCount = new Map<string, number>();
+
+// Continuation nudges sent for the current task, per session, by kind. Bounded
+// so a model that always cuts, goes silent, or promises without acting cannot
+// spin. Cleared by a fresh user message, like the other same-task budgets.
+const continuationStates = new Map<string, ContinuationState>();
+
+/**
+ * Whether a send continues the SAME task (a resume, a verify nudge, a
+ *  continuation nudge) rather than starting a new one. Same-task sends keep the
+ *  todo list and every per-task budget.
+ */
+function isSameTaskParts(parts: readonly SteerPart[]): boolean {
+  return (
+    isResumeParts(parts) ||
+    isVerifyNudgeParts(parts) ||
+    isContinuationNudgeParts(parts)
+  );
+}
+
+/**
+ * Turn a bare carry-on request into the resume prompt.
+ *
+ * Only when the session already has an assistant turn to carry on from, and
+ * only for a single text part: a message with an attachment or more than one
+ * part is real work, not a nudge. Anything else is passed through unchanged.
+ */
+function maybeResumeParts(
+  sessionId: string,
+  parts: readonly SteerPart[],
+): readonly SteerPart[] {
+  if (parts.length !== 1) return parts;
+  const first = parts[0];
+  if (first?.type !== "text" || typeof first.text !== "string") return parts;
+  if (!trailingContinueIntent(first.text)) return parts;
+  const messages =
+    getOrCreateChat(sessionId).messages ?? seedMessages.get(sessionId) ?? [];
+  const hasAssistant = messages.some((m) => m.role === "assistant");
+  return hasAssistant ? [{ type: "text", text: RESUME_PROMPT }] : parts;
+}
+
+/**
+ * Continuation gate (policy only): a run that ENDED without finishing the task
+ * gets one bounded synthetic follow-up.
+ *
+ * Three endings look clean and are not: the output budget cut the answer, the
+ * final step was reasoning only (no prose, no tool call), or the model
+ * announced its next step and issued no call. Each strands the task with
+ * nothing failed, which the operator sees as "the agent suddenly stopped".
+ *
+ * The decision is made here, once the run is over, because a step that makes no
+ * tool call never reaches `prepareStep` again. A truncated finish arrives as
+ * `step-cap` (agent.ts degrades it so a manual Continue exists); every other
+ * stop reason is a guard ending a run on purpose and is never nudged.
+ *
+ * Same refusals as requestVerifyNudge (user stopped, switched session, queued
+ * task owns the next turn). Exported for testing.
+ */
+export function requestContinuationNudge(
+  sessionId: string,
+  info: {
+    stopReason: string | null;
+    aborted: boolean;
+    lastStep: {
+      text: string;
+      finishReason: string | undefined;
+      usedTools: boolean;
+    };
+  },
+): boolean {
+  if (info.aborted) return false;
+  const truncated = isTruncatedFinish(info.lastStep.finishReason);
+  if (
+    info.stopReason !== null &&
+    !(info.stopReason === "step-cap" && truncated)
+  )
+    return false;
+  if (stopLatch.has(sessionId)) return false;
+  if (useChatStore.getState().activeSessionId !== sessionId) return false;
+  if (useChatStore.getState().agentMeta.stoppedByUser) return false;
+  if (useChatStore.getState().steerQueue.pending.length > 0) return false;
+
+  const state = continuationStates.get(sessionId) ?? newContinuationState();
+  const kind = continuationDecision({
+    lastStepText: info.lastStep.text,
+    finishReason: info.lastStep.finishReason,
+    usedToolsThisRun: info.lastStep.usedTools,
+    state,
+  });
+  if (!kind) return false;
+  continuationStates.set(sessionId, recordContinuation(state, kind));
+  logInfo(`[ai] continuation nudge: session=${sessionId} kind=${kind}`);
+
+  useChatStore.getState().patchAgentMeta({
+    status: "thinking",
+    stopReason: null,
+    error: null,
+  });
+  const nudge = buildContinuationNudge(kind, info.lastStep.text);
+  setTimeout(() => {
+    if (!canResumeDeferred(sessionId)) {
+      releaseFabricatedBusy(sessionId);
+      return;
+    }
+    void sendMessage(nudge)
+      .then((sent) => {
+        // The "thinking" status above was fabricated by this gate; a send that
+        // never started (no provider key) must release it or the session is
+        // stranded in a permanent thinking state.
+        if (!sent) releaseFabricatedBusy(sessionId);
+      })
+      .catch(() => {
+        useChatStore.getState().patchAgentMeta({
+          status: "error",
+          error: "The continuation follow-up could not start.",
+        });
+        useChatStore.getState().syncRunMeta();
+      });
+  }, AUTO_CONTINUE_DELAY_MS);
+  return true;
+}
 
 /**
  * Continue a budget-paused run on the user's behalf.
@@ -670,6 +819,11 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       // without waiting for a click (bounded + preference-gated; see
       // requestAutoContinue). Runs LAST so the cost of this round is recorded
       // and Stop hooks fire before the next round begins.
+      // A run that ENDED without finishing (cut answer, reasoning-only step,
+      // announced-but-untaken action) gets one bounded nudge first. When its
+      // budget is spent a truncated finish falls through to the auto-continue
+      // below, exactly as before.
+      if (requestContinuationNudge(sessionId, info)) return;
       if (stopReason === "step-cap") requestAutoContinue(sessionId);
       // Verification-on-stop: a CLEAN finish right after unverified code edits
       // gets one bounded follow-up (preference-gated; see requestVerifyNudge).
@@ -1068,8 +1222,13 @@ export async function sendMessage(text: string): Promise<boolean> {
  */
 export async function sendParts(
   sessionId: string,
-  parts: readonly SteerPart[],
+  inputParts: readonly SteerPart[],
 ): Promise<boolean> {
+  // A bare "continue" / "lanjut" is a request to carry on, not new
+  // instructions. Sent as the resume prompt it keeps the todo list and the
+  // auto-continue budget; sent as-is it starts a fresh task with no content
+  // and clears both.
+  const parts = maybeResumeParts(sessionId, inputParts);
   // A fresh user message supersedes a prior stop, so let it run.
   stopLatch.delete(sessionId);
   approvalResumeFailureCount.delete(sessionId);
@@ -1080,9 +1239,10 @@ export async function sendParts(
   // the same task and must NOT reset it, or the budget would never be spent.
   // A verification nudge is the same task too (it continues the run that just
   // finished), so it keeps the budget; a fresh task clears the nudge counter.
-  if (!isResumeParts(parts) && !isVerifyNudgeParts(parts)) {
+  if (!isSameTaskParts(parts)) {
     autoContinueCount.delete(sessionId);
     verifyNudgeCount.delete(sessionId);
+    continuationStates.delete(sessionId);
     toolChoiceAutoResumeAt.delete(sessionId);
   }
   const c = getOrCreateChat(sessionId);
@@ -1092,7 +1252,7 @@ export async function sendParts(
   // after a failed run always goes out.
   const appStatus = useChatStore.getState().agentMeta.status;
   const errored = appStatus === "error";
-  const isRecovery = isResumeParts(parts) || isVerifyNudgeParts(parts);
+  const isRecovery = isSameTaskParts(parts);
   const action = submissionAction({
     appStatus,
     sdkStatus: c.status,
@@ -1123,7 +1283,7 @@ export async function sendParts(
       // mid-plan (leftover pending items) would otherwise sit on top of the
       // chat while the user has already moved on. A resume is the same task,
       // so it keeps the list - and so does a verification nudge.
-      if (!isResumeParts(parts) && !isVerifyNudgeParts(parts)) {
+      if (!isSameTaskParts(parts)) {
         void useTodosStore.getState().clearSession(sessionId);
       }
       // Pin the workspace anchor for the whole run (see runAnchor above). The
@@ -1250,16 +1410,17 @@ export async function flushSteer(bypassBusyCheck = false): Promise<boolean> {
     stopLatch.delete(sessionId);
     // A genuinely new queued task also earns a fresh automatic-continue budget;
     // a queued resume is the same task and keeps whatever budget it has.
-    if (!isResumeParts(out.parts) && !isVerifyNudgeParts(out.parts)) {
+    if (!isSameTaskParts(out.parts)) {
       autoContinueCount.delete(sessionId);
       verifyNudgeCount.delete(sessionId);
+      continuationStates.delete(sessionId);
       toolChoiceAutoResumeAt.delete(sessionId);
     }
     // A fresh user turn resets the loop-round counter (see sendParts).
     store.patchAgentMeta({ round: 0 });
     // A queued task is a new task, not a resume: clear the previous task's list
     // so the strip does not carry stale work into it (see sendParts).
-    if (!isResumeParts(out.parts) && !isVerifyNudgeParts(out.parts)) {
+    if (!isSameTaskParts(out.parts)) {
       void useTodosStore.getState().clearSession(sessionId);
     }
     // A run that yielded to this queued task set stopReason "steered"; clear it

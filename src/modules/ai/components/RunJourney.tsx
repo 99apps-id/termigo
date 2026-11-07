@@ -6,7 +6,7 @@ import {
   TerminalIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { buildJourney, type JourneyEvent, relativeTime } from "../lib/journey";
 import { native } from "../lib/native";
 import {
@@ -26,6 +26,16 @@ const STATUS_STYLE: Record<string, string> = {
   success: "bg-emerald-500/10 text-emerald-500",
   error: "bg-destructive/10 text-destructive",
 };
+
+/** A `Date.now()` that refreshes on an interval, for relative timestamps. */
+function useTickingNow(intervalMs: number): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs]);
+  return now;
+}
 
 function Event({
   event,
@@ -202,7 +212,11 @@ export function RunJourney({
     [repoRoot, restoring, reload],
   );
 
-  const now = useMemo(() => Date.now(), []);
+  // A ticking clock, not a frozen one: `useMemo(() => Date.now(), [])` pinned
+  // every relative timestamp to the dialog's mount time, so a dialog left open
+  // kept labelling steps "3s ago" forever and newly arrived steps rendered as
+  // stale or future-dated.
+  const now = useTickingNow(30_000);
 
   if (!currentRun) {
     return (

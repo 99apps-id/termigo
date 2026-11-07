@@ -74,10 +74,18 @@ export async function loadUserModel(): Promise<UserModel> {
     const result = await native.readFile(path);
     if (result.kind !== "text") return { ...DEFAULT };
     const parsed = JSON.parse(result.content) as UserModel;
+    const rawPreferences = Array.isArray(parsed.preferences)
+      ? parsed.preferences
+      : [];
     return {
       ...DEFAULT,
       ...parsed,
-      preferences: Array.isArray(parsed.preferences) ? parsed.preferences : [],
+      // Clamp on load: a file written by an older build can carry an
+      // out-of-range confidence, and the settings UI would render >100%.
+      preferences: rawPreferences.map((p) => ({
+        ...p,
+        confidence: clampConfidence(p.confidence),
+      })),
       facts: Array.isArray(parsed.facts) ? parsed.facts : [],
       patterns: Array.isArray(parsed.patterns) ? parsed.patterns : [],
       suggestedSkills: Array.isArray(parsed.suggestedSkills)
@@ -95,6 +103,14 @@ export async function loadUserModel(): Promise<UserModel> {
 }
 
 let userModelLoadedAt = 0;
+
+/** Confidence is documented as 0..1. Without a clamp it grew without bound
+ *  (+0.1 per observation), so the settings UI rendered 140% and any comparison
+ *  against the range silently mis-ranked the preference. */
+export function clampConfidence(value: unknown): number {
+  const n = typeof value === "number" && Number.isFinite(value) ? value : 0;
+  return Math.min(1, Math.max(0, n));
+}
 
 export async function saveUserModel(model: UserModel): Promise<void> {
   const path = await userModelPath();

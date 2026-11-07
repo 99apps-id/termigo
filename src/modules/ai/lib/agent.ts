@@ -1226,6 +1226,16 @@ export type RunAgentOptions = {
        *  (see verifyOnStop.claimsVerification). */
       claimedVerification: boolean;
     };
+    /** What the run's final step produced, for the continuation gate (see
+     *  turnContinuation.ts): a cut answer, an empty reply, or an announced
+     *  action with no tool call all END a run without finishing the task. */
+    lastStep: {
+      text: string;
+      /** The SDK's finish reason for that step, when it reported one. */
+      finishReason: string | undefined;
+      /** Whether any step of the run called a tool. */
+      usedTools: boolean;
+    };
   }) => void;
   /** Loop budget for this round: one explicit cap per reply, the same number
    *  every round. Defaults per model (`MAX_AGENT_STEPS` for API-key providers,
@@ -1722,15 +1732,11 @@ export async function runAgentStream(opts: RunAgentOptions) {
         : false,
     (_args) => {
       // Cost cap stops immediately -- the whole point is to not spend more, so
-      // it does not buy an extra synthesis step.
+      // it does not buy an extra synthesis step. `runCost` is maintained in
+      // onStepFinish regardless of this budget, so the reported figure is
+      // correct even when no cap is configured.
       if (costBudget <= 0) return false;
-      const current = estimateCost(modelId, {
-        inputTokens: runInput,
-        outputTokens: runOutput,
-        cachedInputTokens: runCached,
-      });
-      if (current == null) return false;
-      runCost = current;
+      if (runCost <= 0) return false;
       if (runCost >= costBudget) {
         stopReason ??= "cost-cap";
         return true;
@@ -2013,6 +2019,14 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // across the whole run. Reported via onFinishMeta so the runtime can fire a
   // bounded nudge when the model ends cleanly right after unverified edits.
   let verifyLedger: VerifyLedger = newVerifyLedger();
+  // What the run's LAST step produced, reported through onFinishMeta. The
+  // decision to nudge a stranded task (cut answer, empty reply, announced but
+  // untaken action) is made by the runtime once the run is over: a step that
+  // makes no tool call never reaches `prepareStep` again, so it cannot be made
+  // here (see turnContinuation.ts).
+  let lastStepText = "";
+  let lastStepFinishReason: string | undefined;
+  let anyToolCallThisRun = false;
   return streamText({
     model,
     system: baseSystem,
@@ -2116,7 +2130,6 @@ export async function runAgentStream(opts: RunAgentOptions) {
             preserveTrailingApproval: false,
           });
         }
-
         // Gated by size, not run blind: rewriting history breaks the
         // provider's cached prefix from the rewrite point, while resending
         // cached tokens is cheap. Below half the history budget the full pass
@@ -2287,6 +2300,12 @@ export async function runAgentStream(opts: RunAgentOptions) {
       markRunActivity();
       logInfo(`[ai] runAgentStream: step finished (#${stepsSeen})`);
       stepsSeen++;
+      // Continuation bookkeeping: what this step produced and how the provider
+      // says it ended. `prepareStep` for the next step reads these to decide
+      // whether the task is actually finished.
+      lastStepText = typeof step.text === "string" ? step.text : "";
+      lastStepFinishReason = step.finishReason;
+      if ((step.toolCalls?.length ?? 0) > 0) anyToolCallThisRun = true;
       // The step is over, so the next thing expected is another model response -
       // which is what the watchdog is for. Previously this only re-armed on an
       // approval resume, leaving every other step of a multi-step run unguarded.
@@ -2338,6 +2357,18 @@ export async function runAgentStream(opts: RunAgentOptions) {
         runInput += step.usage.inputTokens ?? 0;
         runCached += step.usage.inputTokenDetails?.cacheReadTokens ?? 0;
         runOutput += step.usage.outputTokens ?? 0;
+        // Maintained on EVERY step, not only when a cost budget is set. The
+        // cost-cap predicate below used to be the only assignment site, and it
+        // returns early when `costBudget <= 0` (the default), so
+        // `estimatedCostUsd` was always null and the whole cost ledger,
+        // /cost panel, run diagnostics and trajectory `totalCostUsd` were dead
+        // code in the default configuration.
+        const cost = estimateCost(modelId, {
+          inputTokens: runInput,
+          outputTokens: runOutput,
+          cachedInputTokens: runCached,
+        });
+        if (cost != null) runCost = cost;
       }
       if (opts.onUsage && step.usage) {
         const u = step.usage;
@@ -2517,6 +2548,11 @@ export async function runAgentStream(opts: RunAgentOptions) {
           changedCodePaths: verifyLedger.changedCodePaths,
           verifiedAfterLastEdit: verifyLedger.verifiedAfterLastEdit,
           claimedVerification: claimsVerification(finalText),
+        },
+        lastStep: {
+          text: lastStepText,
+          finishReason: lastStepFinishReason ?? (finishReason || undefined),
+          usedTools: anyToolCallThisRun,
         },
       });
 

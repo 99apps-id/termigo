@@ -1,6 +1,9 @@
 import { memo } from "react";
+import { usePreferencesStore } from "@/modules/settings/preferences";
+import type { CustomEndpoint } from "../config";
 import { stepBudgetForRound } from "../config";
 import type { AgentStopReason } from "../lib/agent";
+import { useChatStore } from "../store/chatStore";
 
 export const MemoryNotice = memo(function MemoryNotice({
   fact,
@@ -122,8 +125,10 @@ export type StopKind = AgentStopReason | "idle-read-loop" | "stopped";
 export function stopCopy(
   kind: StopKind,
   round: number,
+  modelId?: string,
+  endpoints?: readonly CustomEndpoint[],
 ): { text: string; action: string; hint?: string } {
-  const budget = stepBudgetForRound(round);
+  const budget = stepBudgetForRound(round, modelId, endpoints);
   switch (kind) {
     case "step-cap":
       return {
@@ -197,7 +202,12 @@ export const ContinueRow = memo(function ContinueRow({
   round: number;
   onContinue: () => void;
 }) {
-  const copy = stopCopy(kind, round);
+  // The cap is per MODEL, not a constant: an OAuth / keyless run (ChatGPT,
+  // Claude OAuth, Muse) pauses at 10,000 steps, and reporting 500 told the
+  // user the wrong number and offered the wrong continuation.
+  const modelId = useChatStore((s) => s.selectedModelId);
+  const endpoints = usePreferencesStore((s) => s.customEndpoints);
+  const copy = stopCopy(kind, round, modelId, endpoints);
   return (
     <div className="flex items-start gap-2 rounded-md border border-border/80 bg-card px-2.5 py-1.5 text-[11px] shadow-2xs dark:border-border/50 dark:bg-card/60">
       <span className="flex-1 text-muted-foreground">

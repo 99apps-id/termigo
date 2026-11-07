@@ -322,11 +322,12 @@ describe("tool payload measurement", () => {
   it("stays under a budget, so growth is caught here and not in production", () => {
     const payload = measureToolPayload(built);
     const kb = payload.bytes / 1024;
-    // Measured at ~107.6 KB after browser additions and ~110.4 KB after
-    // test-synthesizer, git-bisect and browser-visual-diff schemas.
+    // Measured at ~107.6 KB after browser additions, ~110.4 KB after
+    // test-synthesizer, git-bisect and browser-visual-diff schemas, and
+    // ~116.3 KB after the seven persistent browser_session_* schemas.
     // The ceiling is the point of the test: a feature that adds schemas has
     // to either fit or raise it deliberately, in a diff a reviewer sees.
-    expect(kb).toBeLessThan(114);
+    expect(kb).toBeLessThan(118);
     // And it must be exact: an unmeasured schema would silently under-report.
     expect(payload.unmeasured).toBe(0);
   });

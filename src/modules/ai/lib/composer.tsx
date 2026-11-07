@@ -69,6 +69,20 @@ type ComposerCtx = {
   cancelQueued: (index: number) => void;
   /** Pull a queued message's text back into the composer to revise it. */
   editQueued: (index: number) => void;
+  /**
+   * Re-attach the file parts of a stored user message. Editing a turn used to
+   * prefill only its text, so resending dropped every attachment and asked the
+   * model to reason about an image it never received.
+   */
+  restoreFileParts: (
+    parts: ReadonlyArray<{
+      type: "file";
+      mediaType: string;
+      url: string;
+      filename?: string;
+    }>,
+    key: string,
+  ) => number;
 };
 
 const Ctx = createContext<ComposerCtx | null>(null);
@@ -318,6 +332,53 @@ export function AiComposerProvider({ children }: ProviderProps) {
     }
   };
 
+  /**
+   * Rebuild the attachments a stored turn carried.
+   *
+   * The message keeps `{mediaType, url, filename}` per file part, which is
+   * exactly the shape `submit` re-emits, so restoring them is a straight
+   * mapping rather than a re-read from disk. Returns how many were attached so
+   * the caller can tell the user when none could be.
+   */
+  const restoreFileParts = (
+    parts: ReadonlyArray<{
+      type: "file";
+      mediaType: string;
+      url: string;
+      filename?: string;
+    }>,
+    key: string,
+  ): number => {
+    if (parts.length === 0) return 0;
+    let added = 0;
+    setFiles((prev) => {
+      const next = prev.slice();
+      parts.forEach((part, index) => {
+        if (typeof part.url !== "string" || part.url.length === 0) return;
+        const id = `restored-${key}-${index}`;
+        if (next.some((f) => f.id === id)) return;
+        const mediaType = part.mediaType || "application/octet-stream";
+        const marker = ";base64,";
+        const at = part.url.indexOf(marker);
+        const size =
+          at >= 0
+            ? Math.floor(((part.url.length - at - marker.length) * 3) / 4)
+            : 0;
+        next.push({
+          id,
+          name: part.filename || `attachment-${index + 1}`,
+          kind: mediaType.startsWith("image/") ? "image" : "file",
+          mediaType,
+          url: part.url,
+          size,
+        });
+        added += 1;
+      });
+      return next;
+    });
+    return added;
+  };
+
   const submit = () => {
     // No early return on `isBusy`. Typing during a run used to vanish without a
     // trace; it is now queued by sendParts and delivered when the run settles.
@@ -439,7 +500,16 @@ export function AiComposerProvider({ children }: ProviderProps) {
       const configured = getModelContextLimit(modelId);
       const effective = effectiveContextLimit(modelId, configured);
       const estimatedTokens = Math.ceil(totalText / CHARS_PER_TOKEN);
-      const available = effective - CONTEXT_RESERVE_TOKENS;
+      // The reserve carves out the system prompt, tool schemas and answer
+      // headroom. It must never make `available` negative: the learned limit
+      // floors at MIN_LIMIT (8k) and the reserve is 60k, so a small-context
+      // model that overflowed a few times produced -52000 and refused EVERY
+      // message, including a one-word one. Flooring at half the effective
+      // window keeps the intent (leave room) without ever blocking the user.
+      const available = Math.max(
+        Math.floor(effective * 0.5),
+        effective - CONTEXT_RESERVE_TOKENS,
+      );
       if (estimatedTokens > available) {
         toast.error(
           `Estimated ${estimatedTokens.toLocaleString()} tokens exceeds available context (${available.toLocaleString()} tokens). Shorten your message or attachments, or use /new to start fresh.`,
@@ -558,6 +628,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
     files,
     addFiles,
     attachFileByPath,
+    restoreFileParts,
     removeFile,
     pickedSnippets,
     addSnippet,

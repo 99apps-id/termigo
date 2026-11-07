@@ -42,6 +42,10 @@ export type SlotAdapter = {
   isLeafBlocks(leafId: number): boolean;
   isLeafBusy(leafId: number): boolean;
   isLeafVisible(leafId: number): boolean;
+  /** Whether the leaf still has a live session (a PTY, an SSH session). A
+   *  parked slot for a dead leaf is pure memory; one for a live leaf is still
+   *  the only thing parsing that pane's OSC 7. */
+  isLeafAlive(leafId: number): boolean;
   storeSnapshot(leafId: number, out: SerializeOutput): void;
 };
 
@@ -921,6 +925,14 @@ function cancelSlotReap(slot: Slot): void {
 
 function reapIdleSlot(slot: Slot): void {
   if (slot.currentLeafId !== null) return;
+  const retained = slot.retainedLeafId;
+  // A parked slot for a LIVE leaf is still the only thing parsing that pane's
+  // OSC 7. Disposing it stops cwd tracking for a hidden pane until the user
+  // re-activates it, which is why `listTerminals()` and the AI's
+  // `getTerminalContextFor` went stale after 45 s of inactivity. Only reclaim
+  // slots whose leaf is gone; the pool still converges because a closed tab
+  // disposes its session and then its slot.
+  if (retained !== null && (adapter?.isLeafAlive(retained) ?? true)) return;
   const idle = slots.filter((s) => s.currentLeafId === null);
   if (idle.length <= IDLE_SLOTS_KEEP_WARM) return;
   idle.sort((a, b) => a.lastUsedAt - b.lastUsedAt);

@@ -1438,6 +1438,11 @@ export function useTabs(initial?: Partial<TerminalTab>) {
           ...t,
           activeLeafId: leafId,
           cwd,
+          // Drop the outgoing pane's program title. `setLeafTitle` only fires
+          // for the leaf that is ALREADY active, so a plain shell cannot clear
+          // `oscTitle` itself (bash/zsh emit no OSC 0/2) and the tab strip kept
+          // showing the previous pane's `ssh prod` name indefinitely.
+          oscTitle: undefined,
         };
       }),
     );
@@ -1452,7 +1457,9 @@ export function useTabs(initial?: Partial<TerminalTab>) {
         const cwd = !isSshLeaf(t.paneTree, next)
           ? findLeafCwd(t.paneTree, next)
           : undefined;
-        return { ...t, activeLeafId: next, cwd };
+        // Same reason as focusPane: the outgoing pane's program title must
+        // not survive the switch.
+        return { ...t, activeLeafId: next, cwd, oscTitle: undefined };
       }),
     );
   }, []);

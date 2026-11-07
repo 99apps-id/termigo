@@ -215,7 +215,14 @@ export function chunkLines(
     const text = slice.join("\n");
     chunks.push({ start, end, text, scopeHeader });
 
-    i = Math.max(start + CHUNK_OVERLAP, end);
+    // Step BACK by the overlap so the next chunk re-reads the tail of this one.
+    // The previous `Math.max(start + CHUNK_OVERLAP, end)` could never be below
+    // `end` (the boundary search above only lowers `end` to
+    // `start + CHUNK_OVERLAP` at worst), so chunks were strictly adjacent and
+    // CHUNK_OVERLAP was dead: a declaration straddling a boundary had its
+    // signature in one chunk and its body in the next, and no BM25 chunk ever
+    // saw both.
+    i = Math.max(start + 1, end - CHUNK_OVERLAP);
     if (i >= lines.length) break;
   }
   return chunks;
@@ -235,8 +242,61 @@ const fileFingerprints = new Map<string, { mtime: number; size: number }>();
 
 let indexedRoot: string | null = null;
 
+/** How many indexable files the last walk returned, including the ones the
+ *  build then skipped. Persisted with the cache so the freshness check can
+ *  compare like with like (see SerializedCodeIndex). */
+let scannedCount = 0;
+
 export function getIndexedRoot(): string | null {
   return indexedRoot;
+}
+
+/**
+ * Drop `paths` from the in-memory index so the next search re-reads them.
+ *
+ * Without this the index lived for the whole process lifetime: an agent that
+ * edits a file and then searches it was answered from the pre-edit chunk text
+ * with the pre-edit line numbers, so every `read_file` at a reported line read
+ * the wrong code, and the only recovery was an app restart.
+ *
+ * Returns how many indexed paths were actually dropped.
+ */
+export function invalidateIndexedPaths(paths: readonly string[]): number {
+  let removed = 0;
+  for (const raw of paths) {
+    if (typeof raw !== "string" || raw.length === 0) continue;
+    const wanted = normalizeIndexKey(raw);
+    let key: string | null = null;
+    for (const candidate of index.keys()) {
+      if (normalizeIndexKey(candidate) === wanted) {
+        key = candidate;
+        break;
+      }
+    }
+    if (key === null) continue;
+    const chunks = index.get(key);
+    if (!chunks) continue;
+    for (const chunk of chunks) {
+      for (const term of new Set(chunk.tokens)) {
+        const df = docFrequencies.get(term);
+        if (df == null) continue;
+        if (df <= 1) docFrequencies.delete(term);
+        else docFrequencies.set(term, df - 1);
+      }
+      totalChunksCount = Math.max(0, totalChunksCount - 1);
+      totalTokensCount = Math.max(0, totalTokensCount - chunk.tokens.length);
+    }
+    index.delete(key);
+    fileFingerprints.delete(key);
+    removed++;
+  }
+  return removed;
+}
+
+/** Index keys arrive from a glob (forward slashes); fs-change events arrive
+ *  with the OS separator, so both sides are folded before comparing. */
+function normalizeIndexKey(path: string): string {
+  return path.replace(/\\/g, "/").toLowerCase();
 }
 
 export function clearIndex(): void {
@@ -245,6 +305,7 @@ export function clearIndex(): void {
   fileFingerprints.clear();
   totalChunksCount = 0;
   totalTokensCount = 0;
+  scannedCount = 0;
   indexedRoot = null;
 }
 
@@ -333,12 +394,17 @@ export type SerializedCodeFile = {
   chunks: SerializedCodeChunk[];
 };
 
-/** `version: 2` carries a per-file fingerprint (mtime + size). A version 1 entry
- *  was written without one, so it cannot be checked and is treated as stale. */
+/** `version: 3` adds `scanned`: how many indexable files the walk returned,
+ *  including the ones the build then skipped (binary, over the size cap,
+ *  unreadable). `version: 2` compared the on-disk walk against the number of
+ *  files that actually reached the index, so a tree containing even one
+ *  skippable file could never validate its own cache: every start rebuilt the
+ *  whole index and rewrote the same unusable file. */
 export type SerializedCodeIndex = {
-  version: 2;
+  version: 3;
   root: string;
   savedAt: number;
+  scanned: number;
   totalChunksCount: number;
   totalTokensCount: number;
   docFrequencies: [string, number][];
@@ -399,9 +465,10 @@ export async function saveIndexCache(root: string | null): Promise<boolean> {
       });
     }
     const payload: SerializedCodeIndex = {
-      version: 2,
+      version: 3,
       root: canonicalDirPath(root),
       savedAt: Date.now(),
+      scanned: scannedCount,
       totalChunksCount,
       totalTokensCount,
       docFrequencies: Array.from(docFrequencies.entries()),
@@ -427,7 +494,7 @@ export async function loadIndexCache(
     // index and then overwrote it under the other spelling, so every call paid
     // a full rebuild and neither spelling ever hit.
     if (
-      data.version !== 2 ||
+      data.version !== 3 ||
       canonicalDirPath(data.root) !== canonicalDirPath(root)
     ) {
       return null;
@@ -440,7 +507,12 @@ export async function loadIndexCache(
     const onDisk = new Map(
       (await collectIndexableFiles(root)).map((f) => [f.path, f]),
     );
-    if (onDisk.size !== data.files.length) return null;
+    // Compared against `scanned`, the count the WALK returned, not the number
+    // of files that reached the index. Skipped files (binary, over the size
+    // cap, unreadable) are part of the tree: counting only indexed ones made
+    // the check unsatisfiable whenever a single file was skipped, so the cache
+    // was dead on arrival and every start paid a full rebuild.
+    if (onDisk.size !== (data.scanned ?? data.files.length)) return null;
     for (const f of data.files) {
       const current = onDisk.get(f.path);
       if (!current || current.mtime !== f.mtime || current.size !== f.size) {
@@ -502,11 +574,13 @@ export async function indexWorkspace(
   fileFingerprints.clear();
   totalChunksCount = 0;
   totalTokensCount = 0;
+  scannedCount = 0;
   indexedRoot = root;
 
   let files = 0;
 
   for (const hit of await collectIndexableFiles(root)) {
+    scannedCount++;
     try {
       const read = await native.readFile(hit.path);
       if (read.kind !== "text" || !read.content) continue;
@@ -544,7 +618,15 @@ export async function indexWorkspace(
       }
 
       index.set(hit.path, indexed);
-      fileFingerprints.set(hit.path, { mtime: hit.mtime, size: hit.size });
+      // Fingerprint the metadata the READ observed, not the glob's: `fs_read_file`
+      // stats the file itself, so this is the state the chunks actually describe.
+      // Recording the walk's older stat let a file edited mid-walk be cached
+      // under its pre-edit fingerprint, which the next load then accepted and
+      // served stale chunks from.
+      fileFingerprints.set(hit.path, {
+        mtime: read.mtime ?? hit.mtime,
+        size: read.size || hit.size,
+      });
       files++;
     } catch {
       // skip unreadable files
@@ -605,6 +687,31 @@ function extractCenteredSnippet(
 }
 
 /**
+ * Whether `filePath` matches the caller's `path_filter`.
+ *
+ * Anchored on path segments, not a raw substring: an unanchored
+ * `includes("ai")` also matches `src/utils/tail.ts` and `src/detail.ts`, so
+ * the filter silently WIDENED the result set the model believed it had
+ * narrowed. A filter matches when it equals the whole path, ends at a segment
+ * boundary, or starts at one.
+ */
+export function matchesPathFilter(
+  filePath: string,
+  filterPath: string,
+): boolean {
+  const path = filePath.toLowerCase().replace(/\\/g, "/");
+  const filter = filterPath
+    .toLowerCase()
+    .replace(/\\/g, "/")
+    .replace(/^\.?\//, "");
+  if (!filter) return true;
+  if (path === filter) return true;
+  if (path.endsWith(`/${filter}`)) return true;
+  if (path.startsWith(`${filter}/`)) return true;
+  return path.includes(`/${filter}/`);
+}
+
+/**
  * Searches indexed code using Okapi BM25 scoring with path weighting
  * and exact-match bonus.
  */
@@ -624,10 +731,7 @@ export function searchCode(
   const scored: { chunk: CodeChunk; score: number }[] = [];
 
   for (const [filePath, chunks] of index.entries()) {
-    if (
-      filterPath &&
-      !filePath.toLowerCase().includes(filterPath.toLowerCase())
-    ) {
+    if (filterPath && !matchesPathFilter(filePath, filterPath)) {
       continue;
     }
 
@@ -678,15 +782,25 @@ export function searchCode(
   scored.sort((a, b) => b.score - a.score);
 
   return scored.slice(0, maxResults).map(({ chunk, score }) => {
+    const windowSize = 8;
     const { snippet, startLine } = extractCenteredSnippet(
       chunk,
       queryTokens,
-      8,
+      windowSize,
+    );
+    // The snippet holds at most `windowSize` lines starting at `startLine`, so
+    // the last line is `startLine + windowSize - 1`. The old `+ windowSize`
+    // reported a range one line longer than the text it shipped, and a caller
+    // reading to `endLine` pulled in an unrelated line.
+    const lastLine = Math.min(
+      chunk.endLine,
+      startLine + windowSize - 1,
+      chunk.startLine + chunk.text.split("\n").length - 1,
     );
     return {
       path: chunk.path,
       startLine,
-      endLine: Math.min(chunk.endLine, startLine + 8),
+      endLine: Math.max(startLine, lastLine),
       score: Number(score.toFixed(3)),
       snippet,
       scopeHeader: chunk.scopeHeader,

@@ -362,7 +362,129 @@ export function buildBrowserTools(ctx: ToolContext) {
     return reason === null ? null : { error: reason };
   };
 
+  const sessionError = (e: unknown) => ({ error: String(e) });
+
   return {
+    browser_session_create: tool({
+      description:
+        "Start a persistent Chromium session the agent can drive over DevTools. Pass the same `name` on later runs to reuse the saved profile, so a login survives between runs. Headless by default; set `headful` to show the window.",
+      inputSchema: z.object({
+        name: z
+          .string()
+          .optional()
+          .describe(
+            "Stable profile name, e.g. 'instagram'. Omit for a throwaway session.",
+          ),
+        url: z
+          .string()
+          .default("about:blank")
+          .describe("Page to open first. SSRF targets are refused."),
+        headful: z.boolean().optional().default(false),
+      }),
+      execute: async ({ name, url, headful }) => {
+        if (url !== "about:blank") {
+          const blocked = guard(url);
+          if (blocked) return blocked;
+        }
+        try {
+          return await native.browserSessionCreate(name ?? null, url, headful);
+        } catch (e) {
+          return sessionError(e);
+        }
+      },
+    }),
+
+    browser_session_list: tool({
+      description:
+        "List live browser sessions and the saved profiles that can be resumed by name.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        try {
+          return await native.browserSessionList();
+        } catch (e) {
+          return sessionError(e);
+        }
+      },
+    }),
+
+    browser_session_navigate: tool({
+      description:
+        "Navigate a live browser session to a URL and wait for it to finish loading. SSRF targets are refused.",
+      inputSchema: z.object({
+        session_id: z.string(),
+        url: z.url(),
+      }),
+      execute: async ({ session_id, url }) => {
+        const blocked = guard(url);
+        if (blocked) return blocked;
+        try {
+          return await native.browserSessionNavigate(session_id, url);
+        } catch (e) {
+          return sessionError(e);
+        }
+      },
+    }),
+
+    browser_session_text: tool({
+      description:
+        "Read the visible text and title of a live browser session's current page.",
+      inputSchema: z.object({ session_id: z.string() }),
+      execute: async ({ session_id }) => {
+        try {
+          return await native.browserSessionText(session_id);
+        } catch (e) {
+          return sessionError(e);
+        }
+      },
+    }),
+
+    browser_session_click: tool({
+      description:
+        "Click the first element matching a CSS selector in a live browser session. Waits up to 5s for it to appear.",
+      inputSchema: z.object({
+        session_id: z.string(),
+        selector: z.string(),
+      }),
+      execute: async ({ session_id, selector }) => {
+        try {
+          return await native.browserSessionClick(session_id, selector);
+        } catch (e) {
+          return sessionError(e);
+        }
+      },
+    }),
+
+    browser_session_type: tool({
+      description:
+        "Set the value of an input or textarea matching a CSS selector in a live browser session. Works with React-controlled inputs.",
+      inputSchema: z.object({
+        session_id: z.string(),
+        selector: z.string(),
+        text: z.string(),
+      }),
+      execute: async ({ session_id, selector, text }) => {
+        try {
+          return await native.browserSessionType(session_id, selector, text);
+        } catch (e) {
+          return sessionError(e);
+        }
+      },
+    }),
+
+    browser_session_close: tool({
+      description:
+        "Close a live browser session. The saved profile is kept, so the session can be resumed by name later.",
+      inputSchema: z.object({ session_id: z.string() }),
+      execute: async ({ session_id }) => {
+        try {
+          await native.browserSessionClose(session_id);
+          return { ok: true as const };
+        } catch (e) {
+          return sessionError(e);
+        }
+      },
+    }),
+
     browser_open: tool({
       description:
         "Open a web URL in an in-app browser tab, next to the terminal, and switch to it. The page renders in a real embedded browser (runs JavaScript, so JS-heavy sites work). Use it to show the user a site or to render a page. To read a page's content, prefer the `fetch` tool. SSRF targets are refused.",

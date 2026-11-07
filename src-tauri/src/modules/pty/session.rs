@@ -155,6 +155,19 @@ fn stop_workers(done: &AtomicBool, pending: &(Mutex<Vec<u8>>, Condvar)) {
     pending.1.notify_all();
 }
 
+/// Kill a child and reap it on a throwaway thread.
+///
+/// Killing alone is not enough: without a `wait()` the entry stays in the
+/// process table for the app's lifetime, so every refused worker spawn leaked
+/// one zombie shell. The reap is off-thread because `wait()` on a just-killed
+/// process can take a moment and this runs on the pty_open path.
+fn kill_and_reap(mut child: Box<dyn portable_pty::Child + Send + Sync>) {
+    let _ = child.kill();
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn spawn(
     id: u64,
@@ -171,6 +184,14 @@ pub fn spawn(
     on_data: Channel<Response>,
     on_exit: Channel<i32>,
 ) -> Result<(Arc<Session>, PtySize), String> {
+    // Resolve the command BEFORE taking the lifecycle lock. The Windows branch
+    // of `build_command` shells out to `wsl.exe` twice (each with a 15 s cap)
+    // and does UNC I/O, and holding CONPTY_LIFECYCLE_LOCK across that
+    // serialized every other pty_open AND every pty_close behind a cold-booting
+    // WSL distro. The lock only needs to cover openpty + spawn + pipe setup.
+    let cmd =
+        shell_init::build_command(cwd, workspace, blocks, shell, control, persist, persist_key)?;
+
     #[cfg(windows)]
     let _spawn_guard = acquire_conpty_lifecycle_lock();
 
@@ -183,8 +204,6 @@ pub fn spawn(
     };
     let pair = pty_system.openpty(size).map_err(|e| e.to_string())?;
 
-    let cmd =
-        shell_init::build_command(cwd, workspace, blocks, shell, control, persist, persist_key)?;
     let mut child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
     drop(pair.slave);
 
@@ -292,6 +311,9 @@ pub fn spawn(
         Ok(handle) => handle,
         Err(e) => {
             log::error!("pty id={id}: reader thread spawn failed: {e}");
+            // Kill AND reap. `guard` kills on drop, but nothing calls `wait()`,
+            // so the entry stayed a zombie for the app's lifetime (Unix).
+            kill_and_reap(child);
             return Err(format!("pty_open: {e}"));
         }
     };
@@ -300,7 +322,12 @@ pub fn spawn(
     let pending_f = pending.clone();
     let done_f = done.clone();
     let session_flush = session.clone();
-    if let Err(e) = spawn_worker("termigo-pty-flusher", move || {
+    // Kept so the waiter can tell "the flusher has nothing left in flight"
+    // from "the flusher is mid-send". Without this the exit code could
+    // overtake a chunk the flusher had already taken out of `pending`, and
+    // the frontend's onExit installs a no-op onData handler, so that chunk
+    // was silently dropped.
+    let flusher_thread = match spawn_worker("termigo-pty-flusher", move || {
         let (lock, cv) = &*pending_f;
         loop {
             {
@@ -363,11 +390,14 @@ pub fn spawn(
             }
         }
     }) {
-        log::error!("pty id={id}: flusher thread spawn failed: {e}");
-        stop_workers(&done, &pending);
-        return Err(format!("pty_open: {e}"));
-    }
-
+        Ok(handle) => handle,
+        Err(e) => {
+            log::error!("pty id={id}: flusher thread spawn failed: {e}");
+            stop_workers(&done, &pending);
+            kill_and_reap(child);
+            return Err(format!("pty_open: {e}"));
+        }
+    };
     let on_data_exit = on_data;
     let pending_e = pending;
     let done_e = done;
@@ -405,14 +435,29 @@ pub fn spawn(
             log::error!("pty reader thread panicked: {e:?}");
         }
         let (lock, cv) = &*pending_e;
+        // Stop the flusher and WAIT for it, then drain. Order matters: the
+        // flusher takes a chunk out of `pending` and is inside
+        // `on_data_flush.send(...)` while this thread would otherwise be
+        // taking the tail and emitting the exit code, and the frontend's
+        // onExit handler installs a no-op onData - so that chunk never
+        // arrives. Setting `done` first makes the flusher finish its send,
+        // find `pending` empty and return; polling rather than joining keeps
+        // a wedged send from hanging the exit path forever.
+        done_e.store(true, Ordering::Release);
+        cv.notify_all();
+        let drain_deadline = Instant::now() + Duration::from_secs(2);
+        while !flusher_thread.is_finished() && Instant::now() < drain_deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        if !flusher_thread.is_finished() {
+            log::warn!("pty id={id}: flusher did not settle before exit");
+        }
         let tail = std::mem::take(&mut *lock.lock().unwrap_or_else(|e| e.into_inner()));
         if !tail.is_empty() {
             if let Err(e) = on_data_exit.send(Response::new(tail)) {
                 log::debug!("pty final-data send failed (channel closed): {e}");
             }
         }
-        done_e.store(true, Ordering::Release);
-        cv.notify_all();
         if let Err(e) = on_exit.send(code) {
             log::debug!("pty exit send failed (channel closed): {e}");
         }

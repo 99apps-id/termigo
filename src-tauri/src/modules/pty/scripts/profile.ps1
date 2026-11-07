@@ -6,6 +6,21 @@
 if ($global:__TERMIGO_HOOKS_LOADED) { return }
 $global:__TERMIGO_HOOKS_LOADED = $true
 
+# The host launches us with `-File`, which SKIPS $PROFILE entirely. Without
+# dot-sourcing it, a user's aliases, modules, conda/posh-git init and PATH
+# tweaks were silently absent while their own PowerShell windows had them, and
+# the "wrap the user's prompt" logic below could only ever see the default.
+# Set first so a profile that re-invokes this file cannot recurse.
+try {
+    $__termigo_user_profile = $PROFILE.AllUsers.AllHosts, $PROFILE.AllUsers.CurrentUser,
+        $PROFILE.CurrentUser.CurrentHost, $PROFILE.CurrentUser.AllHosts | Where-Object {
+            $_ -and (Test-Path -LiteralPath $_ -PathType Leaf)
+        } | Select-Object -First 1
+    if ($__termigo_user_profile) { . $__termigo_user_profile }
+} catch {
+    # A broken user profile must not cost the user their shell.
+}
+
 if ($env:TERMIGO_CLI -and (Test-Path -LiteralPath $env:TERMIGO_CLI -PathType Leaf)) {
     function global:termigo {
         & $env:TERMIGO_CLI @args
@@ -18,6 +33,9 @@ try {
     $global:OutputEncoding    = [System.Text.UTF8Encoding]::new($false)
 } catch {}
 
+# Capture whatever prompt is in effect NOW -- after the user's $PROFILE has
+# run and possibly replaced the default one. Capturing before that point
+# wrapped the stock `PS C:\>` and dropped starship/posh-git prompts.
 if (Test-Path Function:prompt) {
     Copy-Item Function:prompt Function:__termigo_user_prompt -Force -ErrorAction SilentlyContinue
 }
@@ -88,7 +106,11 @@ function global:prompt {
     if ($loc.Provider.Name -eq 'FileSystem') {
         $cwd = $loc.ProviderPath -replace '\\','/'
         if ($cwd -match '^[A-Za-z]:') { $cwd = "/$cwd" }
-        elseif ($cwd -match '^//') { $cwd = "//" + ($cwd.Substring(2) -replace '^[^/]+/','') }
+        # UNC (\\server\share\dir -> //server/share/dir) keeps its server
+        # component. Stripping it produced //share/dir, a host that does not
+        # exist, so the status bar and the file tree both failed to open it.
+        # parseOsc7 discards the file:// host anyway, so the server can only
+        # survive inside the path component.
         $cwdEnc = __termigo_urlencode $cwd
         $hostName = [System.Environment]::MachineName
         $osc7 = "$esc]7;file://$hostName$cwdEnc$esc\"

@@ -99,6 +99,22 @@ The budget is one explicit number per model, resolved by `stepBudgetForModel(mod
 
 The tool set is assembled in `src/modules/ai/tools/tools.ts` from `fs`, `edit`, `search`, `shell`, `subagent`, `terminal`, `todo`, and `managedAgent` builders.
 
+### Finishing a turn: continuation (`lib/turnContinuation.ts`)
+
+A step can end without the task being finished in three ways that look like normal endings, and each of them used to silently strand the work:
+
+- the output budget cut the answer (`finishReason` `length` / `max_tokens`), which was then persisted as if complete;
+- a reasoning model spent the whole budget on hidden thoughts and closed with neither prose nor a tool call, so the operator got "[The model returned no reply]";
+- the model announced its next step ("Next I'll inspect...") and issued no tool call, so the ReAct loop ended with the task half-done.
+
+**Where the decision lives matters.** In the AI SDK a following step happens only after a step that made tool calls, so a turn that ends WITHOUT one never reaches `prepareStep` again. Deciding there therefore fires on every tool-only step - which usually has no prose - and asks a working agent to "write the final response". The gate is `requestContinuationNudge` in `chatRuntime`, called from `onFinishMeta` once the run is over, and it sends one bounded synthetic follow-up (`4` truncations, `2` empty replies, `2` promised actions per task) exactly the way the verify-on-stop gate does. Same refusals too: user stopped, switched session, or queued a task that owns the next turn.
+
+A truncated finish arrives as `stopReason: "step-cap"` because `agent.ts` degrades it so a manual Continue exists; every other stop reason is a guard ending a run on purpose and is never nudged. `continuationDecision` checks truncation FIRST, because a cut can land inside reasoning or a tool call's arguments and leave no text, which would otherwise be read as an empty reply.
+
+A resumed turn usually repeats the tail of the answer it continues. The nudge asks it not to, but when it does `dedupeResumedSeams` strips the seam from the OUTGOING copy in `prepareOutgoingMessages` (cut answer, nudge, resumed answer), never from the stored chat - so what the user saw is preserved.
+
+Continuation nudges carry `[System: continuation]` and are treated as the same task as a resume: they keep the todo list, the auto-continue budget, and get no rewind checkpoint. A bare "continue" / "lanjut" typed by the user is likewise turned into the resume prompt when the session already has an assistant turn. This mirrors ODON's `odon-agent/src/continuation.rs`.
+
 ### One request in flight per session
 
 A `Chat` must never carry two concurrent requests. `Chat.sendMessage` is not serialised through the SDK's `jobExecutor`, and when a round settles the SDK auto-continues into the next tool round a microtask later. A queued steering task is therefore delivered by `flushSteer` only after a macrotask (`setTimeout(0)`) and only while the live `Chat.status` is not busy - the same liveness rule `sendParts` applies via `submitAction`. Delivering into the `ready`→`submitted` gap races the SDK's own continuation, and two loops append to the same transcript at once, roughly doubling it every cycle until compaction and the provider's request-body cap both give out. The stop path passes `bypassBusyCheck` because an aborted round never auto-continues, so there is nothing to race and waiting would strand the queued task.
@@ -117,10 +133,13 @@ Sub-agents can nest up to `effectiveSubagentMaxDepth()` (default 3, preference c
 Parallel subagent execution is managed by a centralized concurrency pool:
 
 - **`lib/subagentPool.ts` (`SubagentConcurrencyPool`)**: caps active concurrent subagents across the entire application (default limit 4) to protect against provider rate limits and local system overload.
+- **Per-depth pools (`poolForDepth`)**: the pool a batch draws from is chosen by the spawning agent's depth, not one global pool. A subagent holds a slot in its parent's pool for its whole run, so queueing its children on that same pool let four parents occupy all four slots and then block forever on children that could never be admitted - a hard hang recoverable only by pressing Stop. Depth 0 is the main agent's global pool; each deeper depth gets its own allowance (2), so no lineage can wait on itself and the total stays bounded at 4 + 2 per level. The single `run_subagent` path draws from the same pool rather than bypassing it, so a model that fans out with several single calls cannot exceed the limit.
 - **Hierarchical slot yielding (`ctx.yieldSlot`)**: when a parent subagent invokes a child subagent or a batch of subagents, it yields its slot in the pool while awaiting the children. This eliminates hierarchical deadlocks where parent subagents fill the pool and starve child subagents.
 - **Nested batch concurrency**: nested `run_subagents` calls bound their internal concurrency to a maximum of 2 workers to prevent combinatorial concurrency explosion.
 - **Workspace isolation**: local workspace subagents isolate their workspace root from remote SSH tabs (`getRemoteSession = () => null`, `getCwd = () => workspaceRoot`), ensuring file and shell operations run strictly against the local project rather than leaking into an active remote shell.
 - **Transient provider backoff**: when encountering provider concurrency limits (`concurrency reached`, `rate_limit`, HTTP 429), `runSubagent` executes an exponential backoff retry loop (up to 2 retries) before failing.
+
+An abort that arrives while a task is still queued for a slot is handled gracefully: the remaining tasks are marked skipped and the structured partial-result summary is returned, rather than throwing a raw tool error and losing the tasks that already finished.
 
 Two spawners live in `tools/subagent.ts`. `run_subagent` runs one. `run_subagents` takes a batch and is the one to prefer: independent tasks run concurrently up to `max_concurrency`, and a task's `depends_on` makes it wait for the tasks it names and receive their summaries as context: scatter, then gather. A task whose dependency failed is skipped rather than run without it; cycles and self-references are rejected; tasks beyond the cap are dropped and reported in `note` rather than silently. Each sub-agent starts with a fresh history, so a prompt that leans on the parent conversation will not work: dependency summaries are the only context injected.
 
@@ -251,7 +270,7 @@ A long agentic task that outgrows the model's context window used to die mid-way
 
 Compaction trims messages *by size* but still ships every message on every turn, so a long task keeps re-paying for its finished history. Context pruning goes further: when an early span of the transcript is **verified** - its mutations are saved to git via a successful `git_checkpoint` / `git_commit` - the whole span is replaced by a single user message carrying a compressed checkpoint summary (files changed, files read, commands/checks run with exit status, a compact diff note). The model keeps knowing the current state without the history that produced it.
 
-- **`lib/contextPrune.ts`** `findVerifiedCut` picks the highest safe cut: the prefix must be self-contained (every tool-call inside has its tool-result inside - never a dangling call or orphaned result), contain at least one verified checkpoint, be at least `PRUNE_MIN_VERIFIED_MESSAGES` long, and leave `PRUNE_TAIL_KEEP` trailing messages fully intact. `summarizeSegment` pairs commands/checks by `toolCallId` (not by string-matching the command, which breaks on `run_checks {kind}` overrides) and treats `exit_code ≠ 0` or any `error` as a failure. `formatPruneSummary` caps at 1800 chars.
+- **`lib/contextPrune.ts`** `findVerifiedCut` picks the highest safe cut: the prefix must be self-contained (every tool-call inside has its tool-result inside - never a dangling call or orphaned result), contain at least one verified checkpoint, be at least `PRUNE_MIN_VERIFIED_MESSAGES` long, and leave `PRUNE_TAIL_KEEP` trailing messages fully intact. Self-containment is decided by tracking the actual unanswered `toolCallId` set, not just a running +/- balance: an orphan result appearing before its call cancels the balance, so a zero balance can still leave a dangling call at the end of the retained prefix, which providers reject outright. A checkpoint only counts as verified when its `exit_code` is exactly 0 - the shell tools report `exit_code: null` when the process was killed by a timeout or abort, and treating that as success told the model its work was saved to git when nothing had been committed. `summarizeSegment` pairs commands/checks by `toolCallId` (not by string-matching the command, which breaks on `run_checks {kind}` overrides). `formatPruneSummary` caps at 1800 chars.
 - **Pipeline order** in `runAgentStream` (`agent.ts`): SDK `pruneMessages` → `compactModelMessagesDetailed` → `evictObsoleteToolOutputs` → `pruneVerifiedPrefix` (last, so it prunes the smallest already-trimmed history). When it fires, `opts.onPrune({ prunedMessages })` surfaces a `PruneNotice` in the chat (`AgentMeta.pruneNotice`).
 - **Why it is safe.** A cut only happens on a balanced tool-call/result boundary and after the work is committed to git, so the collapsed span is reproducible from the checkpoint; the summary message is plain text, so provider tool-call/result validation is never affected.
 
@@ -314,6 +333,14 @@ One tool turns "run the app and show me" into a started, opened, controllable de
 5. **Open + control** - once the URL responds (a 4xx still counts as up), `dev_server` opens it via `open_preview` (`instance` `dev-<handle>`) and returns the handle, URL and a log tail; the `browser_*` tools (`browser_navigate`, `browser_click`, `browser_type`, `browser_eval`, `browser_extract`, `browser_screenshot`) then drive the page, and `bash_logs`/`bash_kill` watch or stop the server.
 
 On a remote SSH session the tool refuses and points at the composed path (`bash_run` + `forward_remote_port` + `open_preview`) instead.
+
+## Code search index (RAG)
+
+`lib/codeIndex.ts` is the retrieval layer behind `code_search`: one glob walk of every indexable extension, syntax-aware chunking, and Okapi BM25 scoring with path boosting and an exact-substring bonus.
+
+- **Chunking** (`chunkLines`) breaks at a declaration boundary or blank line within a 15-line window, and steps BACK by `CHUNK_OVERLAP` (20 lines) so a declaration straddling a boundary has its signature and its body in the same chunk. The overlap is not cosmetic: without it no BM25 chunk ever sees both halves, so the symbol is unfindable by its own body.
+- **Freshness** has two layers. Across restarts, the persisted cache (`.termigo/code-index.json`) records `scanned` - how many files the WALK returned, including the ones the build then skipped - and a load is rejected when that count, or any cached file's mtime/size, no longer matches. Comparing against the number of files that reached the INDEX instead made the check unsatisfiable for any tree containing even one skippable file, so the cache was dead on arrival and every start paid a full rebuild. Within a session, `lib/codeIndexSync.ts` subscribes to the Rust fs watcher and drops changed paths (`invalidateIndexedPaths`), so a search after an `edit` re-reads the file instead of answering from pre-edit chunks with pre-edit line numbers.
+- **Path filtering** (`matchesPathFilter`) is anchored on path segments, not a raw substring: `path_filter: "ai"` used to also match `src/utils/tail.ts`, silently widening the result set the model believed it had narrowed.
 
 ## Scheduled runs
 

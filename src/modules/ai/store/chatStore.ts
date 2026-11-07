@@ -802,6 +802,10 @@ export const useChatStore = create<StoreState>((set, get) => ({
     void useTurnCheckpointStore.getState().clearSession(id);
     void useSubagentRunStore.getState().clearSession(id);
     void useArtifactsStore.getState().clearSession(id);
+    // Per-session runtime budgets (the overflow auto-resume counter) live in
+    // chatRuntime, which imports this store. Registered as a hook for the same
+    // reason the approval one is: no circular import.
+    onSessionDeleted?.(id);
 
     if (remaining.length === 0) {
       const fresh: SessionMeta = {
@@ -971,6 +975,19 @@ function notifyApprovalResponded(
 ): void {
   if (!sessionId || !onApprovalResponded) return;
   onApprovalResponded(sessionId, approvalId, approved);
+}
+
+/**
+ * Called when a session is deleted. Registered by chatRuntime so per-session
+ * runtime state (the overflow auto-resume budget) is dropped with the session
+ * instead of leaking for the app's lifetime.
+ */
+let onSessionDeleted: ((sessionId: string) => void) | null = null;
+
+export function setSessionDeletedHandler(
+  fn: ((sessionId: string) => void) | null,
+): void {
+  onSessionDeleted = fn;
 }
 
 export function getChat(sessionId?: string): Chat<UIMessage> | undefined {

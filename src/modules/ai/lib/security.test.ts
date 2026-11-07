@@ -109,6 +109,17 @@ describe("termigo-neo allow-all contract", () => {
     "rm -fr $HOME/projects",
     "sudo rm -rf $HOME",
     ":(){ :|:& };:",
+    // Quoting the path is the same command: the quote used to sit between the
+    // flags and the target and hide the wipe from the floor entirely.
+    'rm -rf "/"',
+    "rm -rf '/'",
+    'rm -rf "/*"',
+    'rm -rf "//"',
+    'rm -rf "$HOME"',
+    "rm -rf '~'",
+    // Whitespace inside the quotes still leaves the bare root as the target.
+    'rm -fr  " / "',
+    'rm -rf " / "',
   ])("refuses the minimal forbidden floor: %s", (cmd) => {
     const res = checkShellCommand(cmd);
     expect(res.ok).toBe(false);
@@ -121,6 +132,12 @@ describe("termigo-neo allow-all contract", () => {
     "git clean -fdx",
     "echo home",
     "echo ~/notes",
+    // Quoting an ordinary path must stay allowed: the floor is about the root
+    // and home, not about the presence of a quote.
+    'rm -rf "build"',
+    "rm -rf './build'",
+    'rm -rf "node_modules" ".next"',
+    'echo "hello"',
   ])("keeps ordinary destructive work allowed: %s", (cmd) => {
     expect(checkShellCommand(cmd)).toEqual({ ok: true });
   });
