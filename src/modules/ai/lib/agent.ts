@@ -31,13 +31,13 @@ import {
   getModelContextLimit,
   isCompactTierModel,
   isCompatModelId,
+  isOAuthModel,
   LMSTUDIO_DEFAULT_BASE_URL,
   MAX_AGENT_STEPS,
-  OAUTH_MAX_AGENT_STEPS,
-  isOAuthModel,
   MLX_DEFAULT_BASE_URL,
   modelAllowsForcedToolChoice,
   modelKeepsReasoning,
+  OAUTH_MAX_AGENT_STEPS,
   OLLAMA_DEFAULT_BASE_URL,
   type ProviderId,
   providerNeedsKey,
@@ -60,8 +60,8 @@ import {
 } from "../tools/toolSearch";
 import {
   buildTools,
-  withToolHeartbeat,
   type ToolContext,
+  withToolHeartbeat,
 } from "../tools/tools";
 import { isResumingApproval } from "./approvalResume";
 import { getChatGptAccess } from "./chatgptAuth";
@@ -78,6 +78,7 @@ import { effectiveContextLimit } from "./contextLimitLearning";
 import { pruneVerifiedPrefix } from "./contextPrune";
 import type { CustomToolset } from "./customToolsIo";
 import type { ExtensionToolset } from "./extensionTools";
+import { createGoogleSafetyFetch } from "./googleSafety";
 import { recordRun } from "./harnessFrontier";
 import {
   appendSystemHint,
@@ -92,14 +93,13 @@ import { fireHooksForEvent, makeRunId } from "./hooksRunner";
 import type { CustomEndpointKeys, ProviderKeys } from "./keyring";
 import type { McpToolset } from "./mcpTools";
 import { memoryBlock as learnedBlock, type MemoryEntry } from "./memory";
-import { formatRepoMapBlock, getOrGenerateRepoMap } from "./repoMap";
 import { wantsForcedFanout } from "./orchestrationIntent";
 import { prepareAgentPrompt } from "./prompt";
-import { createGoogleSafetyFetch } from "./googleSafety";
 import { createOpenAiCacheFetch } from "./promptCacheKey";
 import { createProxyFetch } from "./proxyFetch";
 import { repairToolCall } from "./repairToolCall";
 import { isRepetitionDominated } from "./repetitionGuard";
+import { formatRepoMapBlock, getOrGenerateRepoMap } from "./repoMap";
 import { sanitizeUiMessages } from "./sanitizeMessages";
 import { type Skill, skillsBlock } from "./skills";
 import {
@@ -145,6 +145,10 @@ import {
 const apiFetch = createOpenAiCacheFetch(
   createGoogleSafetyFetch(createProxyFetch({ allowPrivateNetwork: true })),
 );
+
+// One id per app process, as the official CLI sends one per session.
+const CLAUDE_SESSION_ID: string = crypto.randomUUID();
+const CODEX_SESSION_ID: string = crypto.randomUUID();
 
 const TOOL_LABELS: Record<string, (input: Record<string, unknown>) => string> =
   {
@@ -231,17 +235,6 @@ function pruneModelCache() {
 }
 
 // Apply the Codex backend's request contract to a ChatGPT-route model.
-//
-// The backend serves subscription accounts statelessly and rejects a
-// Responses request whose `store` is not explicitly false: the public API
-// default is true, and the SDK leaves the field out of the body unless it is
-// set, so an unadorned `.responses()` model is refused even with a valid
-// token (the Go CLI's Codex client hard-codes the same `store: false`).
-// Setting it as a model default rather than per call means every caller of
-// the built model sends it (agent run, subagents, side questions, session
-// titles), and the SDK also converts the conversation for stateless replay:
-// no stored item ids, and reasoning returns as encrypted content the next
-// step can carry.
 export function withCodexBackendDefaults(model: LanguageModel): LanguageModel {
   if (typeof model === "string" || model.specificationVersion !== "v3") {
     return model;
@@ -249,7 +242,19 @@ export function withCodexBackendDefaults(model: LanguageModel): LanguageModel {
   return aiSdk.wrapLanguageModel({
     model,
     middleware: aiSdk.defaultSettingsMiddleware({
-      settings: { providerOptions: { openai: { store: false } } },
+      settings: {
+        providerOptions: {
+          openai: {
+            store: false,
+            reasoningEffort: "medium",
+            reasoningSummary: "auto",
+            forceReasoning: true,
+            systemMessageMode: "developer",
+            include: ["reasoning.encrypted_content"],
+            promptCacheKey: CODEX_SESSION_ID,
+          },
+        },
+      },
     }),
   });
 }
@@ -478,6 +483,7 @@ export async function buildLanguageModel(
             // Omitted rather than sent empty when the claim was missing: an empty
             // header reads as "account none" and 401s less clearly than absence.
             ...(auth.accountId ? { "chatgpt-account-id": auth.accountId } : {}),
+            session_id: CODEX_SESSION_ID,
           },
           fetch: apiFetch,
         }).responses(resolvedModelId),
@@ -486,11 +492,8 @@ export async function buildLanguageModel(
     case "claude-oauth": {
       const { createAnthropic } = await import("@ai-sdk/anthropic");
       const { getOAuthAccess } = await import("./oauthAuth");
-      const {
-        CLAUDE_OAUTH_BETA,
-        claudeCliUserAgent,
-        createClaudeOAuthFetch,
-      } = await import("./claudeOAuth");
+      const { CLAUDE_OAUTH_BETA, claudeCliUserAgent, createClaudeOAuthFetch } =
+        await import("./claudeOAuth");
       const auth = await getOAuthAccess("claude-oauth");
       if (!auth) {
         throw new Error(
@@ -505,7 +508,10 @@ export async function buildLanguageModel(
           "anthropic-dangerous-direct-browser-access": "true",
           "x-app": "cli",
           "User-Agent": claudeCliUserAgent(),
+          "X-Claude-Code-Session-Id": CLAUDE_SESSION_ID,
         },
+        // The subscription is only served when the Claude Code identity is
+        // the first system block on its own; see claudeOAuth.ts.
         fetch: createClaudeOAuthFetch(apiFetch, auth.accessToken),
       })(resolvedModelId);
     }

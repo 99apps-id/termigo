@@ -15,8 +15,9 @@ if (typeof globalThis.window === "undefined") {
     key: vi.fn(),
   } as Storage;
 }
-import * as directiveStore from "../store/sessionDirectiveStore";
+
 import { useChatStore } from "../store/chatStore";
+import * as directiveStore from "../store/sessionDirectiveStore";
 import { useSessionDirectiveStore } from "../store/sessionDirectiveStore";
 import { listPipelines, runPipelineByName } from "./orchestrator";
 import { SLASH_COMMANDS, tryRunSlashCommand } from "./slashCommands";
@@ -205,9 +206,9 @@ describe("slash commands", () => {
     const spy = vi
       .spyOn(useChatStore.getState(), "setSelectedModelId")
       .mockImplementation(() => {});
-    const out = tryRunSlashCommand("/model gpt-5.6");
+    const out = tryRunSlashCommand("/model gpt-6.1-sol");
     expect(out.kind).toBe("handled");
-    expect(spy).toHaveBeenCalledWith("gpt-5.6");
+    expect(spy).toHaveBeenCalledWith("gpt-6.1-sol");
     expect((out as { toast?: string }).toast).toMatch(/Model/);
     spy.mockRestore();
   });

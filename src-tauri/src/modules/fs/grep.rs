@@ -299,11 +299,7 @@ pub fn fs_grep_blocking(
 
     if root_path.is_file() {
         return Ok(search_single_file(
-            &root_path,
-            &root,
-            &workspace,
-            &matcher,
-            cap,
+            &root_path, &root, &workspace, &matcher, cap,
         ));
     }
 
@@ -364,11 +360,7 @@ pub async fn fs_grep_interactive(
 
         if root_path.is_file() {
             return Ok(search_single_file(
-                &root_path,
-                &root,
-                &workspace,
-                &matcher,
-                cap,
+                &root_path, &root, &workspace, &matcher, cap,
             ));
         }
 

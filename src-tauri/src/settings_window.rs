@@ -1,9 +1,12 @@
-use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 #[cfg(target_os = "macos")]
 use tauri::PhysicalPosition;
+use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 #[tauri::command]
-pub async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Result<(), String> {
+pub async fn open_settings_window(
+    app: tauri::AppHandle,
+    tab: Option<String>,
+) -> Result<(), String> {
     let url_path = match tab.as_deref() {
         Some(t) if !t.is_empty() => format!("settings.html?tab={}", t),
         _ => "settings.html".to_string(),
@@ -115,9 +118,11 @@ pub async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) ->
                 let mon_pos = mon.position();
                 let mon_size = mon.size();
                 let min_x = mon_pos.x + 8;
-                let max_x = (mon_pos.x + mon_size.width as i32 - settings_size.width as i32 - 8).max(min_x);
+                let max_x =
+                    (mon_pos.x + mon_size.width as i32 - settings_size.width as i32 - 8).max(min_x);
                 let min_y = mon_pos.y + 32;
-                let max_y = (mon_pos.y + mon_size.height as i32 - settings_size.height as i32 - 8).max(min_y);
+                let max_y = (mon_pos.y + mon_size.height as i32 - settings_size.height as i32 - 8)
+                    .max(min_y);
                 x = x.clamp(min_x, max_x);
                 y = y.clamp(min_y, max_y);
             } else {

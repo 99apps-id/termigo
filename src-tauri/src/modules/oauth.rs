@@ -2,14 +2,13 @@
 //!
 //! Supports:
 //!   - `openai-codex` (OpenAI Codex / ChatGPT, PKCE on 127.0.0.1:1455)
-//!   - `claude-oauth` (Anthropic Claude, PKCE on 127.0.0.1:54545)
+//!   - `claude-oauth` (Anthropic Claude, PKCE on 127.0.0.1:54545, pasted-code fallback)
 //!   - `antigravity` (Google Antigravity, PKCE on an ephemeral loopback port)
 //!   - `xai-oauth` (xAI Grok, RFC 8628 Device Flow)
 //!   - `github-copilot` (GitHub Copilot Device Flow + Copilot token exchange)
 //!   - `muse` (Meta Muse Code Device Flow + key minting)
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
 use std::time::Duration;
 
 use base64::Engine;
@@ -22,12 +21,6 @@ use tokio::net::TcpListener;
 
 const TIMEOUT_SECS: u64 = 300;
 static OAUTH_CANCELLED: AtomicBool = AtomicBool::new(false);
-
-/// Authorization code pasted by the operator for flows that cannot use a
-/// loopback listener. Claude registers a hosted redirect, so the browser shows
-/// the `code#state` instead of calling back into the app; this slot carries the
-/// pasted value from `oauth_submit_manual_code` to the waiting login.
-static OAUTH_MANUAL_CODE: Mutex<Option<String>> = Mutex::new(None);
 
 /// The Muse CLI identity its endpoints expect. Meta answers a device request
 /// with no User-Agent with a 302 to an HTML page, whose empty body then fails
@@ -85,47 +78,6 @@ pub struct DevicePrompt {
     pub provider: String,
     pub user_code: String,
     pub verification_uri: String,
-}
-
-#[derive(Serialize, Clone, Debug)]
-pub struct ManualCodePrompt {
-    pub provider: String,
-    pub authorization_url: String,
-    pub redirect_uri: String,
-}
-
-const DEFAULT_CLAUDE_CLI_VERSION: &str = "2.1.325";
-
-fn is_dotted_version(value: &str) -> bool {
-    let v = value.trim();
-    if v.is_empty() || v.ends_with('.') || v.contains("..") {
-        return false;
-    }
-    let first = match v.as_bytes().first() {
-        Some(b) => *b,
-        None => return false,
-    };
-    if !first.is_ascii_digit() {
-        return false;
-    }
-    v.contains('.') && v.bytes().all(|b| b.is_ascii_digit() || b == b'.')
-}
-
-pub(crate) fn claude_cli_user_agent() -> String {
-    let mut ver = DEFAULT_CLAUDE_CLI_VERSION.to_string();
-    for key in [
-        "TERMIGO_CLAUDE_CLI_VERSION",
-        "ODON_CLAUDE_CLI_VERSION",
-        "CLAUDE_CLI_VERSION",
-    ] {
-        if let Ok(v) = std::env::var(key) {
-            if is_dotted_version(&v) {
-                ver = v.trim().to_string();
-                break;
-            }
-        }
-    }
-    format!("claude-cli/{ver} (external, sdk-cli)")
 }
 
 fn b64url(bytes: &[u8]) -> String {
@@ -281,28 +233,11 @@ async fn bind_loopback(preferred: Option<u16>) -> Result<(TcpListener, u16), Str
         Some(port) => format!("127.0.0.1:{port}"),
         None => "127.0.0.1:0".to_string(),
     };
-    // A pinned port can be taken by a stale listener or a previous attempt that
-    // has not released yet, so retry briefly before giving up. `login_claude_oauth`
-    // falls back to a pasted code, which is why this is not fatal.
-    let mut last_error = String::new();
-    let mut listener = None;
-    for _ in 0..6 {
-        match TcpListener::bind(&addr).await {
-            Ok(l) => {
-                listener = Some(l);
-                break;
-            }
-            Err(e) => {
-                last_error = e.to_string();
-                tokio::time::sleep(Duration::from_millis(250)).await;
-            }
-        }
-    }
-    let listener = listener.ok_or_else(|| match preferred {
+    let listener = TcpListener::bind(&addr).await.map_err(|e| match preferred {
         Some(port) => format!(
-            "could not listen on 127.0.0.1:{port} ({last_error}). Please close any process using port {port} and try again."
+            "could not listen on 127.0.0.1:{port} ({e}). Please close any process using port {port} and try again."
         ),
-        None => format!("could not listen on a loopback port ({last_error})."),
+        None => format!("could not listen on a loopback port ({e})."),
     })?;
     let port = listener
         .local_addr()
@@ -432,88 +367,233 @@ async fn login_openai_codex(app: &tauri::AppHandle) -> Result<OAuthTokens, Strin
     })
 }
 
-fn build_claude_authorize_url(
-    authorize_base: &str,
-    client_id: &str,
+// ── Claude (Claude Code OAuth) ──────────────────────────────────────────────
+//
+// Mirrors the ODON flow (claude.ai authorize, api.anthropic.com token, the
+// claude-cli/2.1.290 identity): the loopback redirect on the registered port is preferred, and
+// when that port is held by another program the login switches to the hosted
+// pasted-code redirect instead of failing.
+
+/// Claude Code release this client presents as. Anthropic gates newer models
+/// and the subscription endpoints on a minimum client version, so this is kept
+/// current; `TERMIGO_CLAUDE_CLI_VERSION` overrides it without a rebuild. The
+/// TypeScript side (`CLAUDE_CLI_VERSION` in src/modules/ai/config.ts) pins the
+/// same release; bump both together.
+pub const CLAUDE_CLI_VERSION: &str = "2.1.290";
+
+const CLAUDE_CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
+const CLAUDE_AUTHORIZE_URL: &str = "https://claude.ai/oauth/authorize";
+const CLAUDE_MANUAL_AUTHORIZE_URL: &str = "https://platform.claude.com/oauth/authorize";
+const CLAUDE_TOKEN_URL: &str = "https://api.anthropic.com/v1/oauth/token";
+/// The hosted redirect registered for the Claude Code client. Its consent page
+/// shows `code#state` for the operator to paste back; no local port is needed.
+const CLAUDE_MANUAL_REDIRECT_URI: &str = "https://platform.claude.com/oauth/code/callback";
+const CLAUDE_SCOPE: &str = "org:create_api_key user:profile user:inference";
+const CLAUDE_LOOPBACK_PORT: u16 = 54545;
+
+/// A pending pasted-code Claude login: the state it expects and the channel
+/// that receives the validated authorization code.
+struct ManualCodeSlot {
+    state: String,
+    sender: tokio::sync::oneshot::Sender<String>,
+}
+
+static CLAUDE_MANUAL_CODE: std::sync::Mutex<Option<ManualCodeSlot>> = std::sync::Mutex::new(None);
+
+fn is_dotted_version(value: &str) -> bool {
+    !value.is_empty()
+        && value.chars().all(|c| c.is_ascii_digit() || c == '.')
+        && value.starts_with(|c: char| c.is_ascii_digit())
+        && !value.ends_with('.')
+        && !value.contains("..")
+}
+
+/// `User-Agent` for every Claude subscription request, in the exact shape the
+/// official CLI sends.
+pub fn claude_cli_user_agent() -> String {
+    let version = std::env::var("TERMIGO_CLAUDE_CLI_VERSION")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| is_dotted_version(v))
+        .unwrap_or_else(|| CLAUDE_CLI_VERSION.to_string());
+    format!("claude-cli/{version} (external, sdk-cli)")
+}
+
+/// Builds the authorization URL with the parameter order the official client
+/// uses (`code=true` at the end as in odon-ai/RFC).
+fn claude_authorize_url(
+    endpoint: &str,
     redirect_uri: &str,
-    scope: &str,
     challenge: &str,
     state: &str,
 ) -> String {
     format!(
-        "{authorize_base}?{}",
+        "{endpoint}?{}",
         query(&[
-            ("code", "true"),
-            ("client_id", client_id),
             ("response_type", "code"),
+            ("client_id", CLAUDE_CLIENT_ID),
             ("redirect_uri", redirect_uri),
-            ("scope", scope),
+            ("scope", CLAUDE_SCOPE),
             ("code_challenge", challenge),
             ("code_challenge_method", "S256"),
             ("state", state),
+            ("code", "true"),
         ])
     )
 }
 
-async fn login_claude_oauth(app: &tauri::AppHandle, manual: bool) -> Result<OAuthTokens, String> {
-    const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
-    const LOOPBACK_AUTHORIZE_URL: &str = "https://claude.ai/oauth/authorize";
-    const MANUAL_AUTHORIZE_URL: &str = "https://platform.claude.com/oauth/authorize";
-    const MANUAL_REDIRECT_URI: &str = "https://platform.claude.com/oauth/code/callback";
-    const TOKEN_URL: &str = "https://api.anthropic.com/v1/oauth/token";
-    const SCOPE: &str = "org:create_api_key user:profile user:inference";
+/// Splits a pasted `code#state` (a bare code is accepted too) and checks the
+/// state against this login.
+fn parse_pasted_claude_code(pasted: &str, expected_state: &str) -> Result<String, String> {
+    let trimmed = pasted.trim();
+    if trimmed.is_empty() {
+        return Err("paste the authorization code shown after sign-in".to_string());
+    }
+    let (code, state) = match trimmed.split_once('#') {
+        Some((code, state)) => (code.trim(), Some(state.trim())),
+        None => (trimmed, None),
+    };
+    if code.is_empty() {
+        return Err("the pasted value has no authorization code".to_string());
+    }
+    if let Some(state) = state {
+        if state != expected_state {
+            return Err(
+                "authorization state does not match this login; start the sign-in again"
+                    .to_string(),
+            );
+        }
+    }
+    Ok(code.to_string())
+}
 
-    let verifier = random_b64(32)?;
+/// Binds the registered loopback port, retrying briefly so a listener from a
+/// login that was just cancelled has time to release it.
+async fn bind_claude_loopback() -> Result<(TcpListener, u16), String> {
+    let mut last = String::new();
+    for attempt in 0..6 {
+        match bind_loopback(Some(CLAUDE_LOOPBACK_PORT)).await {
+            Ok(bound) => return Ok(bound),
+            Err(e) => {
+                last = e;
+                if attempt < 5 {
+                    tokio::time::sleep(Duration::from_millis(150)).await;
+                }
+            }
+        }
+    }
+    Err(last)
+}
+
+#[derive(Serialize, Clone)]
+struct ManualCodePrompt {
+    provider: String,
+    authorization_url: String,
+}
+
+async fn wait_for_pasted_claude_code(state: &str) -> Result<String, String> {
+    let (tx, mut rx) = tokio::sync::oneshot::channel::<String>();
+    if let Ok(mut slot) = CLAUDE_MANUAL_CODE.lock() {
+        *slot = Some(ManualCodeSlot {
+            state: state.to_string(),
+            sender: tx,
+        });
+    }
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(TIMEOUT_SECS);
+    let result = loop {
+        if OAUTH_CANCELLED.load(Ordering::Relaxed) {
+            break Err("sign-in cancelled".to_string());
+        }
+        if tokio::time::Instant::now() >= deadline {
+            break Err("timed out waiting for the authorization code".to_string());
+        }
+        match tokio::time::timeout(Duration::from_millis(500), &mut rx).await {
+            // Already validated by `oauth_submit_code`.
+            Ok(Ok(code)) => break Ok(code),
+            Ok(Err(_)) => break Err("sign-in cancelled".to_string()),
+            Err(_) => continue,
+        }
+    };
+    if let Ok(mut slot) = CLAUDE_MANUAL_CODE.lock() {
+        *slot = None;
+    }
+    result
+}
+
+async fn login_claude_oauth(app: &tauri::AppHandle) -> Result<OAuthTokens, String> {
+    let verifier = random_b64(64)?;
     let challenge = b64url(&Sha256::digest(verifier.as_bytes()));
-    let state = random_b64(16)?;
+    let state = random_b64(32)?;
 
-    // Prefer the loopback listener so sign-in finishes automatically. When the
-    // fixed port is busy (or manual mode was requested), switch to Claude's
-    // hosted pasted-code redirect (matching odon-ai).
-    let bound = if manual {
-        None
-    } else {
-        bind_loopback(Some(54545)).await.ok()
+    let (code, redirect_uri) = match bind_claude_loopback().await {
+        Ok((listener, port)) => {
+            let redirect_uri = format!("http://localhost:{port}/callback");
+            let auth_url =
+                claude_authorize_url(CLAUDE_AUTHORIZE_URL, &redirect_uri, &challenge, &state);
+            let _ = app.emit("oauth-auth-url", auth_url.clone());
+            if let Err(e) = tauri_plugin_opener::open_url(auth_url, None::<&str>) {
+                log::warn!("[oauth] could not open browser: {e}");
+            }
+
+            let target = tokio::time::timeout(
+                Duration::from_secs(TIMEOUT_SECS),
+                accept_callback(&listener, "/callback"),
+            )
+            .await
+            .map_err(|_| "timed out waiting for browser sign-in".to_string())??;
+
+            let parsed = url::Url::parse(&format!("http://localhost{target}"))
+                .map_err(|e| format!("could not parse callback: {e}"))?;
+            let mut code = None;
+            let mut got_state = None;
+            let mut err = None;
+            for (k, v) in parsed.query_pairs() {
+                match k.as_ref() {
+                    "code" => code = Some(v.into_owned()),
+                    "state" => got_state = Some(v.into_owned()),
+                    "error_description" | "error" => {
+                        err.get_or_insert(v.into_owned());
+                    }
+                    _ => continue,
+                }
+            }
+            if let Some(e) = err {
+                return Err(format!("sign-in refused: {e}"));
+            }
+            if got_state.as_deref() != Some(state.as_str()) {
+                return Err("callback state mismatch".to_string());
+            }
+            (
+                code.ok_or_else(|| "no code returned".to_string())?,
+                redirect_uri,
+            )
+        }
+        Err(bind_error) => {
+            log::warn!(
+                "[oauth] Claude loopback listener unavailable ({bind_error}); \
+                 switching to the pasted-code flow"
+            );
+            let redirect_uri = CLAUDE_MANUAL_REDIRECT_URI.to_string();
+            let auth_url = claude_authorize_url(
+                CLAUDE_MANUAL_AUTHORIZE_URL,
+                &redirect_uri,
+                &challenge,
+                &state,
+            );
+            let _ = app.emit("oauth-auth-url", auth_url.clone());
+            let _ = app.emit(
+                "oauth-manual-code",
+                ManualCodePrompt {
+                    provider: "claude-oauth".to_string(),
+                    authorization_url: auth_url.clone(),
+                },
+            );
+            if let Err(e) = tauri_plugin_opener::open_url(auth_url, None::<&str>) {
+                log::warn!("[oauth] could not open browser: {e}");
+            }
+            (wait_for_pasted_claude_code(&state).await?, redirect_uri)
+        }
     };
-    let (authorize_base, redirect_uri) = match bound.as_ref() {
-        Some((_, port)) => (
-            LOOPBACK_AUTHORIZE_URL,
-            format!("http://localhost:{port}/callback"),
-        ),
-        None => (MANUAL_AUTHORIZE_URL, MANUAL_REDIRECT_URI.to_string()),
-    };
-
-    let auth_url = build_claude_authorize_url(
-        authorize_base,
-        CLIENT_ID,
-        &redirect_uri,
-        SCOPE,
-        &challenge,
-        &state,
-    );
-
-    let _ = app.emit("oauth-auth-url", auth_url.clone());
-    if bound.is_none() {
-        let _ = app.emit(
-            "oauth-manual-code-prompt",
-            ManualCodePrompt {
-                provider: "claude-oauth".to_string(),
-                authorization_url: auth_url.clone(),
-                redirect_uri: redirect_uri.clone(),
-            },
-        );
-    }
-    if let Err(e) = tauri_plugin_opener::open_url(auth_url.clone(), None::<&str>) {
-        log::warn!("[oauth] could not open browser: {e}");
-    }
-
-    let code = wait_for_claude_code(bound, &state).await?;
-
-    // Claude can hand the code back as `code#state`, where the fragment carries
-    // the state (the CLI companion splits it the same way). Sending the whole
-    // string as `code` makes the token endpoint answer `invalid_grant`, which
-    // surfaces as a failed sign-in, so split it before the exchange.
-    let (code, code_state) = split_code_state(code, &state);
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
@@ -524,13 +604,13 @@ async fn login_claude_oauth(app: &tauri::AppHandle, manual: bool) -> Result<OAut
         "grant_type": "authorization_code",
         "code": code,
         "redirect_uri": redirect_uri,
-        "client_id": CLIENT_ID,
+        "client_id": CLAUDE_CLIENT_ID,
         "code_verifier": verifier,
-        "state": code_state,
+        "state": state,
     });
 
     let res = client
-        .post(TOKEN_URL)
+        .post(CLAUDE_TOKEN_URL)
         .header("content-type", "application/json")
         .header("user-agent", claude_cli_user_agent())
         .json(&payload)
@@ -541,7 +621,6 @@ async fn login_claude_oauth(app: &tauri::AppHandle, manual: bool) -> Result<OAut
     let status = res.status();
     let body = res.text().await.unwrap_or_default();
     if !status.is_success() {
-        log::warn!("[oauth] claude token exchange failed: {status} {body}");
         return Err(format!("token endpoint returned {status}: {body}"));
     }
 
@@ -554,15 +633,9 @@ async fn login_claude_oauth(app: &tauri::AppHandle, manual: bool) -> Result<OAut
     let parsed: ClaudeResp =
         serde_json::from_str(&body).map_err(|e| format!("could not parse token response: {e}"))?;
 
-    // Anthropic answers the later refresh with a bare "Invalid request format"
-    // when the stored refresh token is empty, so a login without one is worth
-    // nothing: refuse it here, like the reference implementation does.
     let refresh_token = parsed
         .refresh_token
-        .filter(|t| !t.trim().is_empty())
-        .ok_or_else(|| {
-            "Claude sign-in returned no refresh_token; sign in again or use the manual code flow".to_string()
-        })?;
+        .ok_or_else(|| "Claude OAuth did not return a refresh token".to_string())?;
     Ok(OAuthTokens {
         provider: "claude-oauth".to_string(),
         access_token: parsed.access_token,
@@ -575,11 +648,6 @@ async fn login_claude_oauth(app: &tauri::AppHandle, manual: bool) -> Result<OAut
     })
 }
 
-/// Client identity sent to Google's Antigravity / Cloud Code backend.
-///
-/// The backend picks the model catalogue from it: the `ide/2.11.0` identity no
-/// longer lists the Gemini 4 family (Hydrogen, Argon, Carbon), while the
-/// Antigravity CLI 1.5.9 identity does.
 fn ag_user_agent() -> String {
     let platform = match std::env::consts::OS {
         "macos" => "darwin",
@@ -593,6 +661,8 @@ fn ag_user_agent() -> String {
         "arm" => "arm",
         other => other,
     };
+    // The Antigravity CLI identity: Cloud Code lists Gemini 4 only for it (see
+    // `agUserAgent` in src/modules/ai/lib/antigravityProtocol.ts).
     format!("antigravity/cli/1.5.9 {platform}/{arch}")
 }
 
@@ -1208,17 +1278,14 @@ async fn do_refresh_token(provider: &str, refresh_token: &str) -> Result<OAuthTo
             })
         }
         "claude-oauth" => {
-            const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
-            const TOKEN_URL: &str = "https://api.anthropic.com/v1/oauth/token";
-
             let payload = serde_json::json!({
                 "grant_type": "refresh_token",
                 "refresh_token": refresh_token,
-                "client_id": CLIENT_ID,
+                "client_id": CLAUDE_CLIENT_ID,
             });
 
             let res = client
-                .post(TOKEN_URL)
+                .post(CLAUDE_TOKEN_URL)
                 .header("content-type", "application/json")
                 .header("user-agent", claude_cli_user_agent())
                 .json(&payload)
@@ -1437,16 +1504,11 @@ async fn do_refresh_token(provider: &str, refresh_token: &str) -> Result<OAuthTo
 // ── Tauri Commands ──────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub async fn oauth_login(
-    app: tauri::AppHandle,
-    provider: String,
-    manual: Option<bool>,
-) -> Result<OAuthTokens, String> {
+pub async fn oauth_login(app: tauri::AppHandle, provider: String) -> Result<OAuthTokens, String> {
     OAUTH_CANCELLED.store(false, Ordering::Relaxed);
-    let _ = take_manual_code();
     match provider.as_str() {
         "openai-codex" | "chatgpt" => login_openai_codex(&app).await,
-        "claude-oauth" => login_claude_oauth(&app, manual.unwrap_or(false)).await,
+        "claude-oauth" => login_claude_oauth(&app).await,
         "antigravity" => login_antigravity(&app).await,
         "xai-oauth" => login_xai_oauth(&app).await,
         "github-copilot" => login_github_copilot(&app).await,
@@ -1458,26 +1520,33 @@ pub async fn oauth_login(
 #[tauri::command]
 pub async fn oauth_cancel() -> Result<(), String> {
     OAUTH_CANCELLED.store(true, Ordering::Relaxed);
+    if let Ok(mut slot) = CLAUDE_MANUAL_CODE.lock() {
+        slot.take();
+    }
     Ok(())
 }
 
-/// Hands the pasted `code#state` to the login that is waiting for it.
-///
-/// Claude's registered redirect is hosted, so the browser ends on a page that
-/// displays the authorization code instead of calling back into the app. The
-/// login keeps waiting for a real loopback callback first; this is the path
-/// that always works.
+/// Delivers the `code#state` pasted from the Claude consent page to the
+/// pending pasted-code login.
 #[tauri::command]
-pub async fn oauth_submit_manual_code(code: String) -> Result<(), String> {
-    let trimmed = code.trim().to_string();
-    if trimmed.is_empty() {
-        return Err("paste the authorization code first".to_string());
-    }
-    let mut slot = OAUTH_MANUAL_CODE
+pub async fn oauth_submit_code(code: String) -> Result<(), String> {
+    let mut guard = CLAUDE_MANUAL_CODE
         .lock()
-        .map_err(|_| "manual code slot is poisoned".to_string())?;
-    *slot = Some(trimmed);
-    Ok(())
+        .map_err(|_| "sign-in state is unavailable".to_string())?;
+    let expected = guard
+        .as_ref()
+        .ok_or_else(|| "no sign-in is waiting for a code".to_string())?
+        .state
+        .clone();
+    // A mistyped or stale paste is reported back to the form and the login
+    // keeps waiting, instead of failing the whole sign-in.
+    let parsed = parse_pasted_claude_code(&code, &expected)?;
+    let slot = guard
+        .take()
+        .ok_or_else(|| "no sign-in is waiting for a code".to_string())?;
+    slot.sender
+        .send(parsed)
+        .map_err(|_| "the sign-in is no longer waiting for a code".to_string())
 }
 
 #[tauri::command]
@@ -1486,134 +1555,6 @@ pub async fn oauth_refresh(provider: String, refresh_token: String) -> Result<OA
         return Err("no refresh token stored; sign in again".to_string());
     }
     do_refresh_token(&provider, &refresh_token).await
-}
-
-/// Splits the Claude Code `code#state` paste into its parts.
-///
-/// Waits for the Claude sign-in to finish, either by loopback callback or by a
-/// code pasted from the console page.
-///
-/// The listener is optional: with Claude's hosted redirect the browser usually
-/// never calls back, so `OAUTH_MANUAL_CODE` is the path that always completes.
-async fn wait_for_claude_code(
-    bound: Option<(TcpListener, u16)>,
-    flow_state: &str,
-) -> Result<String, String> {
-    let listener = bound.map(|(l, _)| l);
-    if let Some(listener) = listener {
-        let callback = accept_callback(&listener, "/callback");
-        tokio::pin!(callback);
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(TIMEOUT_SECS);
-        loop {
-            tokio::select! {
-                result = &mut callback => {
-                    let target = result?;
-                    return code_from_callback(&target, flow_state);
-                }
-                _ = tokio::time::sleep(Duration::from_millis(200)) => {
-                    if OAUTH_CANCELLED.load(Ordering::Relaxed) {
-                        return Err("sign-in cancelled".to_string());
-                    }
-                    if let Some(pasted) = take_manual_code() {
-                        return manual_code_to_code(pasted, flow_state);
-                    }
-                    if tokio::time::Instant::now() >= deadline {
-                        return Err(
-                            "timed out waiting for sign-in; paste the code from the Claude page and retry"
-                                .to_string(),
-                        );
-                    }
-                }
-            }
-        }
-    }
-
-    loop {
-        if let Some(pasted) = take_manual_code() {
-            return manual_code_to_code(pasted, flow_state);
-        }
-        if OAUTH_CANCELLED.load(Ordering::Relaxed) {
-            return Err("sign-in cancelled".to_string());
-        }
-        tokio::time::sleep(Duration::from_millis(200)).await;
-    }
-}
-
-fn take_manual_code() -> Option<String> {
-    let mut slot = OAUTH_MANUAL_CODE.lock().ok()?;
-    slot.take()
-}
-
-fn manual_code_to_code(pasted: String, flow_state: &str) -> Result<String, String> {
-    let trimmed = pasted.trim().to_string();
-    let (code, pasted_state) = match trimmed.split_once('#') {
-        Some((bare, frag)) => {
-            let frag = frag.trim();
-            (
-                bare.trim().to_string(),
-                if frag.is_empty() { None } else { Some(frag) },
-            )
-        }
-        None => (trimmed, None),
-    };
-    if code.is_empty() {
-        return Err("the pasted code is empty".to_string());
-    }
-    if let Some(state) = pasted_state {
-        if state != flow_state {
-            return Err(
-                "authorization state does not match this sign-in; paste the code from this attempt"
-                    .to_string(),
-            );
-        }
-    }
-    Ok(code)
-}
-
-fn code_from_callback(target: &str, flow_state: &str) -> Result<String, String> {
-    let parsed = url::Url::parse(&format!("http://localhost{target}"))
-        .map_err(|e| format!("could not parse callback: {e}"))?;
-    let mut code = None;
-    let mut got_state = None;
-    let mut err = None;
-    for (k, v) in parsed.query_pairs() {
-        match k.as_ref() {
-            "code" => code = Some(v.into_owned()),
-            "state" => got_state = Some(v.into_owned()),
-            "error_description" | "error" => {
-                err.get_or_insert(v.into_owned());
-            }
-            _ => continue,
-        }
-    }
-    if let Some(e) = err {
-        return Err(format!("sign-in refused: {e}"));
-    }
-    if got_state.as_deref() != Some(flow_state) {
-        return Err("callback state mismatch".to_string());
-    }
-    code.ok_or_else(|| "no code returned".to_string())
-}
-
-/// Splits the Claude Code `code#state` paste into its parts.
-///
-/// Claude's console hands the operator a string shaped `code#state`, so the
-/// state half must be sent to the token endpoint instead of the flow state we
-/// generated. A bare code keeps the flow state.
-fn split_code_state(code: String, flow_state: &str) -> (String, String) {
-    match code.split_once('#') {
-        // Strip the separator even when the fragment is empty, so the code sent
-        // upstream is never polluted by a trailing '#'.
-        Some((bare, fragment)) => (
-            bare.to_string(),
-            if fragment.is_empty() {
-                flow_state.to_string()
-            } else {
-                fragment.to_string()
-            },
-        ),
-        None => (code, flow_state.to_string()),
-    }
 }
 
 #[cfg(test)]
@@ -1652,65 +1593,54 @@ mod tests {
     }
 
     #[test]
+    fn claude_authorize_url_matches_the_official_client() {
+        let url = claude_authorize_url(
+            CLAUDE_AUTHORIZE_URL,
+            "http://localhost:54545/callback",
+            "chal",
+            "st",
+        );
+        let parsed = url::Url::parse(&url).expect("valid url");
+        assert_eq!(parsed.host_str(), Some("claude.ai"));
+        assert_eq!(parsed.path(), "/oauth/authorize");
+        let pairs: Vec<(String, String)> = parsed
+            .query_pairs()
+            .map(|(k, v)| (k.into_owned(), v.into_owned()))
+            .collect();
+        let get = |k: &str| pairs.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
+        assert_eq!(get("response_type"), Some("code"));
+        assert_eq!(get("client_id"), Some(CLAUDE_CLIENT_ID));
+        assert_eq!(get("redirect_uri"), Some("http://localhost:54545/callback"));
+        assert_eq!(get("code_challenge_method"), Some("S256"));
+        assert_eq!(get("state"), Some("st"));
+        assert_eq!(get("code"), Some("true"));
+        assert_eq!(
+            get("scope"),
+            Some("org:create_api_key user:profile user:inference")
+        );
+    }
+
+    #[test]
+    fn pasted_claude_code_checks_state() {
+        assert_eq!(parse_pasted_claude_code(" abc#st ", "st").unwrap(), "abc");
+        assert_eq!(parse_pasted_claude_code("abc", "st").unwrap(), "abc");
+        assert!(parse_pasted_claude_code("abc#other", "st").is_err());
+        assert!(parse_pasted_claude_code("#st", "st").is_err());
+        assert!(parse_pasted_claude_code("  ", "st").is_err());
+    }
+
+    #[test]
+    fn claude_user_agent_has_the_cli_shape() {
+        let ua = claude_cli_user_agent();
+        assert!(ua.starts_with("claude-cli/"), "{ua}");
+        assert!(ua.ends_with(" (external, sdk-cli)"), "{ua}");
+    }
+
+    #[test]
     fn antigravity_credentials_are_stamped_when_env_local_is_present() {
         if std::path::Path::new("../.env.local").exists() {
             assert!(!antigravity_client_id().is_empty());
             assert!(!antigravity_client_secret().is_empty());
         }
-    }
-
-    #[test]
-    fn claude_code_state_is_split_from_the_code() {
-        // A bare code keeps the flow state generated for this sign-in.
-        assert_eq!(
-            split_code_state("abc123".to_string(), "flow-state"),
-            ("abc123".to_string(), "flow-state".to_string())
-        );
-        // `code#state` hands the state back in the fragment.
-        assert_eq!(
-            split_code_state("abc123#frag-state".to_string(), "flow-state"),
-            ("abc123".to_string(), "frag-state".to_string())
-        );
-        // A trailing separator carries no state, so the flow state stays.
-        assert_eq!(
-            split_code_state("abc123#".to_string(), "flow-state"),
-            ("abc123".to_string(), "flow-state".to_string())
-        );
-    }
-
-    #[test]
-    fn manual_code_keeps_the_code_validates_state_and_rejects_empty() {
-        assert_eq!(
-            manual_code_to_code("code-1#flow-state".to_string(), "flow-state").unwrap(),
-            "code-1".to_string()
-        );
-        assert_eq!(
-            manual_code_to_code("code-only".to_string(), "flow-state").unwrap(),
-            "code-only".to_string()
-        );
-        assert!(manual_code_to_code("code-1#other-state".to_string(), "flow-state").is_err());
-        assert!(manual_code_to_code("#".to_string(), "flow-state").is_err());
-    }
-
-    #[test]
-    fn claude_cli_user_agent_reports_2_1_325_by_default() {
-        let ua = claude_cli_user_agent();
-        assert!(ua.starts_with("claude-cli/"), "unexpected ua: {ua}");
-        assert!(ua.ends_with("(external, sdk-cli)"), "unexpected ua: {ua}");
-    }
-
-    #[test]
-    fn claude_authorize_url_uses_platform_host_for_manual_flow() {
-        let url = build_claude_authorize_url(
-            "https://platform.claude.com/oauth/authorize",
-            "cid",
-            "https://platform.claude.com/oauth/code/callback",
-            "org:create_api_key user:profile user:inference",
-            "chal",
-            "st",
-        );
-        assert!(url.starts_with("https://platform.claude.com/oauth/authorize?"));
-        assert!(url.contains("redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback"));
-        assert!(url.contains("code=true"));
     }
 }

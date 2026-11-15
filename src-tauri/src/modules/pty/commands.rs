@@ -326,10 +326,7 @@ pub fn pty_signal(state: tauri::State<PtyState>, id: u64, signal: String) -> Res
         if signal != "terminate" && signal != "kill" {
             return Err("this signal is not supported for Windows PTYs".to_string());
         }
-        let mut killer = session
-            .killer
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut killer = session.killer.lock().unwrap_or_else(|e| e.into_inner());
         killer.kill().map_err(|e| e.to_string())
     }
 }
@@ -428,6 +425,7 @@ pub fn pty_has_foreground_job(state: tauri::State<PtyState>, id: u64) -> Result<
 }
 
 #[cfg(unix)]
+#[allow(dead_code)]
 fn shell_has_children(shell_pid: u64) -> bool {
     std::process::Command::new("pgrep")
         .args(["-P", &shell_pid.to_string()])

@@ -165,9 +165,7 @@ fn read_logs_advances_offset() {
     )
     .expect("spawn");
 
-    wait_until(Duration::from_secs(5), || {
-        proc.read_logs(0).next_offset > 0
-    });
+    wait_until(Duration::from_secs(5), || proc.read_logs(0).next_offset > 0);
 
     let first = proc.read_logs(0);
     assert!(first.next_offset > 0);

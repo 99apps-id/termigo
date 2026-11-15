@@ -74,10 +74,7 @@ const ALLOWED_WITHOUT_AUTHORIZATION: &[(&str, &str)] = &[
         "confined to the extension's own sandbox directory by resolve_asset, \
          which refuses `..` and absolute rel paths",
     ),
-    (
-        "ext_read_asset_bytes",
-        "same as ext_read_asset",
-    ),
+    ("ext_read_asset_bytes", "same as ext_read_asset"),
     (
         "workspace_authorize",
         "this IS the registry's add operation",
@@ -99,9 +96,7 @@ fn registered_commands(lib_rs: &str) -> BTreeSet<(String, String)> {
         .find("invoke_handler")
         .expect("lib.rs declares an invoke_handler");
     let rest = &lib_rs[start..];
-    let end = rest
-        .find("])")
-        .expect("the invoke_handler block is closed");
+    let end = rest.find("])").expect("the invoke_handler block is closed");
     let block = &rest[..end];
 
     let mut out = BTreeSet::new();
@@ -112,11 +107,9 @@ fn registered_commands(lib_rs: &str) -> BTreeSet<(String, String)> {
         let Some((module, command)) = line.rsplit_once("::") else {
             continue;
         };
-        let is_ident = |s: &str| {
-            !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
-        };
-        let is_module_path = !module.is_empty()
-            && module.split("::").all(is_ident);
+        let is_ident =
+            |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+        let is_module_path = !module.is_empty() && module.split("::").all(is_ident);
         if is_module_path && is_ident(command) {
             out.insert((module.to_string(), command.to_string()));
         }
@@ -201,8 +194,8 @@ fn module_delegates_authorization(module: &str) -> bool {
 #[test]
 fn every_path_taking_command_consults_the_workspace_registry() {
     let root = manifest_dir();
-    let lib_rs = std::fs::read_to_string(root.join("src/lib.rs"))
-        .expect("read src-tauri/src/lib.rs");
+    let lib_rs =
+        std::fs::read_to_string(root.join("src/lib.rs")).expect("read src-tauri/src/lib.rs");
     let commands = registered_commands(&lib_rs);
     assert!(
         commands.len() > 80,

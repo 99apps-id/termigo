@@ -3,9 +3,9 @@ pub mod modules;
 pub mod settings_window;
 
 use std::sync::Mutex;
-use tauri::Manager;
 #[cfg(target_os = "macos")]
 use tauri::Emitter;
+use tauri::Manager;
 #[cfg(target_os = "macos")]
 use tauri::WindowEvent;
 use tauri_plugin_window_state::StateFlags;
@@ -15,7 +15,7 @@ use launch::{get_launch_dir, get_launch_files, parse_launch_target, LaunchDir, L
 use launch::{resolve_launch_target, LaunchEntry};
 use modules::{
     agent, audit, backup, browser, browser_session, chatgpt_auth, control, extensions, fs, git,
-    history, lsp, mcp, net, oauth, office, pty, secrets, shell, sql, ssh, system, workspace,
+    history, lsp, mcp, net, oauth, pty, secrets, shell, sql, ssh, system, workspace,
 };
 use settings_window::open_settings_window;
 
@@ -139,12 +139,10 @@ pub fn run() {
             // ignores builder hints must not leave the main window smaller
             // than the layout can render.
             if let Some(main) = _app.get_webview_window("main") {
-                let _ = main.set_min_size(Some(tauri::Size::Logical(
-                    tauri::LogicalSize {
-                        width: 420.0,
-                        height: 280.0,
-                    },
-                )));
+                let _ = main.set_min_size(Some(tauri::Size::Logical(tauri::LogicalSize {
+                    width: 420.0,
+                    height: 280.0,
+                })));
             }
             // macOS skips parent() for the settings window, so tie its lifecycle
             // to the main window here instead. Other platforms keep parent().
@@ -307,31 +305,11 @@ pub fn run() {
             browser_session::browser_session_click,
             browser_session::browser_session_type,
             browser_session::browser_session_close,
-            browser_session::browser_session_select,
-            browser_session::browser_session_click_at,
-            browser_session::browser_session_composer,
-            browser_session::browser_session_click_item,
-            browser_session::browser_session_eval,
-            browser_session::browser_session_cookies,
-            browser_session::browser_session_wait,
-            browser_session::browser_session_screenshot,
-            browser_session::browser_session_resume,
-            office::office_docx_read,
-            office::office_docx_write,
-            office::office_xlsx_read,
-            office::office_xlsx_write,
-            office::office_pptx_write,
-            office::office_pptx_read,
-            office::office_pdf_write,
-            office::office_csv_read,
-            office::office_csv_write,
-            office::office_ics_read,
-            office::office_ics_write,
             chatgpt_auth::chatgpt_auth_login,
             chatgpt_auth::chatgpt_auth_refresh,
             oauth::oauth_login,
             oauth::oauth_cancel,
-            oauth::oauth_submit_manual_code,
+            oauth::oauth_submit_code,
             oauth::oauth_refresh,
             backup::backup_seal,
             backup::backup_open,

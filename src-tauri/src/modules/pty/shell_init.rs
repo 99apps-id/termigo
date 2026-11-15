@@ -325,7 +325,8 @@ mod tests {
     }
 
     #[test]
-    fn common_env_includes_authenticated_caller_context() {        let mut command = CommandBuilder::new("shell");
+    fn common_env_includes_authenticated_caller_context() {
+        let mut command = CommandBuilder::new("shell");
         let control = ShellControlEnv {
             address: "127.0.0.1:1234".into(),
             token: "secret".into(),

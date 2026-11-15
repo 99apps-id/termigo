@@ -1155,10 +1155,9 @@ pub async fn connect(
                 }
                 ChannelMsg::Eof | ChannelMsg::Close => {
                     pump_alive.store(false, Ordering::Release);
-                    if let Some(ev) = channel_end_event(
-                        reported_status,
-                        pump_closed.load(Ordering::Acquire),
-                    ) {
+                    if let Some(ev) =
+                        channel_end_event(reported_status, pump_closed.load(Ordering::Acquire))
+                    {
                         let _ = on_event_pump.send(ev.clone());
                         fan(&ev);
                     }
@@ -1169,9 +1168,7 @@ pub async fn connect(
         }
         // wait() returned None; peer closed without sending exit-status.
         pump_alive.store(false, Ordering::Release);
-        if let Some(ev) =
-            channel_end_event(reported_status, pump_closed.load(Ordering::Acquire))
-        {
+        if let Some(ev) = channel_end_event(reported_status, pump_closed.load(Ordering::Acquire)) {
             let _ = on_event_pump.send(ev.clone());
             fan(&ev);
         }
@@ -1265,7 +1262,10 @@ mod tests {
     #[test]
     fn a_reported_status_is_not_overwritten_when_the_channel_closes() {
         assert!(channel_end_event(true, false).is_none(), "a dropped link");
-        assert!(channel_end_event(true, true).is_none(), "a deliberate close");
+        assert!(
+            channel_end_event(true, true).is_none(),
+            "a deliberate close"
+        );
     }
 
     /// Closing the tab is a clean end, not a mystery: this path has always

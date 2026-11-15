@@ -227,8 +227,7 @@ pub fn fs_read_dir_blocking(
             // own stat, not the target's.
             let (meta, was_symlink) = match entry.metadata() {
                 Ok(m) => {
-                    let is_symlink =
-                        entry.file_type().map(|t| t.is_symlink()).unwrap_or(false);
+                    let is_symlink = entry.file_type().map(|t| t.is_symlink()).unwrap_or(false);
                     (Some(m), is_symlink)
                 }
                 Err(_) => (None, false),
@@ -358,7 +357,8 @@ mod tests {
     // other reason is not a link, and mislabelling it hides the cause.
     #[cfg(unix)]
     #[test]
-    fn only_a_real_symlink_is_labelled_symlink() {        use super::{fs_read_dir_blocking, EntryKind};
+    fn only_a_real_symlink_is_labelled_symlink() {
+        use super::{fs_read_dir_blocking, EntryKind};
         use std::os::unix::fs::symlink;
 
         let dir = tempfile::tempdir().unwrap();

@@ -140,10 +140,10 @@ pub async fn office_xlsx_write(
                 let result = match value {
                     Value::Number(n) => match n.as_f64() {
                         Some(number) => sheet.write_number(row, col, number),
-                        None => sheet.write_string(row, col, &n.to_string()),
+                        None => sheet.write_string(row, col, n.to_string()),
                     },
                     Value::Bool(b) => sheet.write_string(row, col, if *b { "TRUE" } else { "FALSE" }),
-                    other => sheet.write_string(row, col, &cell_text(other)),
+                    other => sheet.write_string(row, col, cell_text(other)),
                 };
                 result.map_err(|e| {
                     format!("write cell ({row},{col}) failed: {e}")
@@ -1251,7 +1251,7 @@ mod tests {
                         }
                         other => {
                             sheet
-                                .write_string(r, c, &cell_text(other))
+                                .write_string(r, c, cell_text(other))
                                 .map_err(|e| e.to_string())?;
                         }
                     }

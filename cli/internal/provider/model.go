@@ -39,58 +39,34 @@ var models = []Model{
 	// on the wire. The newest Codex generation first.
 	{ID: "codex-gpt-6.1-sol", Provider: "openai-codex", Label: "GPT-6.1 Sol (ChatGPT)", APIID: "gpt-6.1-sol", Description: "Newest Sol tier through a ChatGPT login.", Tags: []string{"reasoning", "tools", "coding"}},
 	{ID: "codex-gpt-6-astra", Provider: "openai-codex", Label: "GPT-6 Astra (ChatGPT)", APIID: "gpt-6-astra", Description: "Flagship through a ChatGPT login.", Tags: []string{"reasoning", "tools", "coding"}},
-	{ID: "codex-gpt-6-sol", Provider: "openai-codex", Label: "GPT-6 Sol (ChatGPT)", APIID: "gpt-6-sol", Description: "Balanced through a ChatGPT login.", Tags: []string{"reasoning", "tools"}},
+	{ID: "codex-gpt-6.1-terra", Provider: "openai-codex", Label: "GPT-6.1 Terra (ChatGPT)", APIID: "gpt-6.1-terra", Description: "Newest Terra tier through a ChatGPT login.", Tags: []string{"reasoning", "tools", "coding"}},
 	{ID: "codex-gpt-6-luna", Provider: "openai-codex", Label: "GPT-6 Luna (ChatGPT)", APIID: "gpt-6-luna", Description: "Efficient through a ChatGPT login.", Tags: []string{"fast", "tools"}},
-	{ID: "codex-gpt-5.6-terra", Provider: "openai-codex", Label: "GPT-5.6 Terra (ChatGPT)", APIID: "gpt-5.6-terra", Description: "Previous balanced generation through a ChatGPT login.", Tags: []string{"reasoning", "tools"}},
-	{ID: "codex-gpt-5.6-sol", Provider: "openai-codex", Label: "GPT-5.6 Sol (ChatGPT)", APIID: "gpt-5.6-sol", Description: "Previous balanced generation through a ChatGPT login.", Tags: []string{"reasoning", "tools"}},
-	{ID: "codex-gpt-5.6-luna", Provider: "openai-codex", Label: "GPT-5.6 Luna (ChatGPT)", APIID: "gpt-5.6-luna", Description: "Previous efficient generation through a ChatGPT login.", Tags: []string{"fast", "tools"}},
-	{ID: "codex-gpt-5.5", Provider: "openai-codex", Label: "GPT-5.5 (ChatGPT)", APIID: "gpt-5.5", Description: "Latest frontier generation through a ChatGPT login.", Tags: []string{"reasoning", "tools", "coding"}},
-	{ID: "codex-gpt-daybreak-blue-latest", Provider: "openai-codex", Label: "GPT Daybreak Blue (ChatGPT)", APIID: "gpt-daybreak-blue-latest", Description: "Live experimental codex model.", Tags: []string{"reasoning", "coding"}},
-	{ID: "codex-gpt-reserve", Provider: "openai-codex", Label: "GPT Reserve (ChatGPT)", APIID: "gpt-reserve", Description: "Reserve capacity model through a ChatGPT login.", Tags: []string{"reasoning", "coding"}},
-	{ID: "codex-auto-review", Provider: "openai-codex", Label: "Codex Auto Review (ChatGPT)", APIID: "codex-auto-review", Description: "Virtual auto-review model through a ChatGPT login.", Tags: []string{"coding"}},
-	// gpt-5.4, gpt-5.4-mini and gpt-5.3-codex-spark are gone from
-	// backend-api/codex/models for ChatGPT accounts and return HTTP 400
-	// "model is not supported", so they are not offered (9router #4202).
-	{ID: "codex-gpt-5.3-codex", Provider: "openai-codex", Label: "GPT-5.3 Codex", APIID: "gpt-5.3-codex", Description: "Agentic software engineering.", Tags: []string{"coding", "tools"}},
-	{ID: "codex-gpt-5.2-codex", Provider: "openai-codex", Label: "GPT-5.2 Codex", APIID: "gpt-5.2-codex", Description: "Previous Codex generation.", Tags: []string{"coding", "tools"}},
-	{ID: "codex-gpt-5.1-codex-max", Provider: "openai-codex", Label: "GPT-5.1 Codex Max", APIID: "gpt-5.1-codex-max", Description: "Long-horizon Codex model.", Tags: []string{"coding", "tools"}},
-	{ID: "codex-gpt-5.1-codex", Provider: "openai-codex", Label: "GPT-5.1 Codex", APIID: "gpt-5.1-codex", Description: "Earlier Codex model.", Tags: []string{"coding", "tools"}},
-	{ID: "codex-gpt-5-codex", Provider: "openai-codex", Label: "GPT-5 Codex", APIID: "gpt-5-codex", Description: "First Codex generation.", Tags: []string{"coding", "tools"}},
 
-	// Anthropic. Fable is the Mythos tier, above Opus.
-	{ID: "claude-fable-5-1", Provider: "anthropic", Label: "Claude Fable 5.1", Description: "Deepest reasoning and long-horizon agentic work.", Tags: []string{"reasoning", "tools", "coding"}},
+	// Anthropic: the current generation (Fable 5.2, Opus 5.5, Sonnet 5.5, Haiku 5.5).
+	{ID: "claude-fable-5-2", Provider: "anthropic", Label: "Claude Fable 5.2", Description: "Most capable Claude for the hardest long-horizon work.", Tags: []string{"reasoning", "tools", "coding"}},
 	{ID: "claude-opus-5-5", Provider: "anthropic", Label: "Claude Opus 5.5", Description: "Long-running agentic coding and knowledge work.", Tags: []string{"reasoning", "tools", "coding"}},
-	{ID: "claude-sonnet-5", Provider: "anthropic", Label: "Claude Sonnet 5", Description: "Best combination of speed and intelligence.", Tags: []string{"reasoning", "tools", "coding"}},
-	{ID: "claude-haiku-4-5", Provider: "anthropic", Label: "Claude Haiku 4.5", Description: "Fastest Claude, near-frontier.", Tags: []string{"fast", "tools"}},
+	{ID: "claude-sonnet-5-5", Provider: "anthropic", Label: "Claude Sonnet 5.5", Description: "Frontier speed and intelligence for agentic coding.", Tags: []string{"reasoning", "tools", "coding"}},
+	{ID: "claude-haiku-5-5", Provider: "anthropic", Label: "Claude Haiku 5.5", Description: "Fastest current Claude.", Tags: []string{"fast", "tools"}},
 	// The Claude models served through a Claude login (OAuth).
+	{ID: "claude-oauth-fable-5-2", Provider: "claude-oauth", Label: "Claude Fable 5.2 (OAuth)", APIID: "claude-fable-5-2", Description: "Most capable Claude through a Claude login.", Tags: []string{"reasoning", "tools", "coding"}},
 	{ID: "claude-oauth-opus-5-5", Provider: "claude-oauth", Label: "Claude Opus 5.5 (OAuth)", APIID: "claude-opus-5-5", Description: "Flagship reasoning and coding through a Claude login.", Tags: []string{"reasoning", "tools", "coding"}},
-	{ID: "claude-oauth-opus-5", Provider: "claude-oauth", Label: "Claude Opus 5 (OAuth)", APIID: "claude-opus-5", Description: "Previous flagship through a Claude login.", Tags: []string{"reasoning", "tools", "coding"}},
-	{ID: "claude-oauth-fable-5-1", Provider: "claude-oauth", Label: "Claude Fable 5.1 (OAuth)", APIID: "claude-fable-5-1", Description: "Deepest reasoning and agentic work through a Claude login.", Tags: []string{"reasoning", "tools", "coding"}},
-	{ID: "claude-oauth-fable-5", Provider: "claude-oauth", Label: "Claude Fable 5 (OAuth)", APIID: "claude-fable-5", Description: "Mythos tier reasoning through a Claude login.", Tags: []string{"reasoning", "tools", "coding"}},
 	{ID: "claude-oauth-sonnet-5-5", Provider: "claude-oauth", Label: "Claude Sonnet 5.5 (OAuth)", APIID: "claude-sonnet-5-5", Description: "Frontier speed and intelligence through a Claude login.", Tags: []string{"reasoning", "tools", "coding"}},
-	{ID: "claude-oauth-sonnet-5", Provider: "claude-oauth", Label: "Claude Sonnet 5 (OAuth)", APIID: "claude-sonnet-5", Description: "Balanced Claude through a Claude login.", Tags: []string{"reasoning", "tools", "coding"}},
-	{ID: "claude-oauth-haiku-4-5", Provider: "claude-oauth", Label: "Claude 4.5 Haiku (OAuth)", APIID: "claude-haiku-4-5-20251001", Description: "Fast Claude through a Claude login.", Tags: []string{"fast", "tools"}},
+	{ID: "claude-oauth-haiku-5-5", Provider: "claude-oauth", Label: "Claude Haiku 5.5 (OAuth)", APIID: "claude-haiku-5-5", Description: "Fastest current Claude through a Claude login.", Tags: []string{"fast", "tools"}},
 
 	// GitHub Copilot models served through a GitHub login (OAuth).
 	// GitHub Copilot models served through a GitHub login. The wire ids are
 	// the account's live catalogue at api.githubcopilot.com/models; a Copilot
 	// account only serves the entries its policy enables, so models that a
 	// given account has disabled are not offered here.
-	{ID: "copilot-gpt-5.4", Provider: "github-copilot", Label: "GPT-5.4 (Copilot)", APIID: "gpt-5.4", Description: "Long-context frontier model through GitHub Copilot.", Tags: []string{"reasoning", "tools", "coding"}},
-	{ID: "copilot-gpt-5.4-mini", Provider: "github-copilot", Label: "GPT-5.4 Mini (Copilot)", APIID: "gpt-5.4-mini", Description: "Faster GPT-5.4 through GitHub Copilot.", Tags: []string{"fast", "tools"}},
-	{ID: "copilot-gpt-5.3-codex", Provider: "github-copilot", Label: "GPT-5.3 Codex (Copilot)", APIID: "gpt-5.3-codex", Description: "Agentic coding model through GitHub Copilot.", Tags: []string{"coding", "tools"}},
-	{ID: "copilot-gpt-5.6-terra", Provider: "github-copilot", Label: "GPT-5.6 Terra (Copilot)", APIID: "gpt-5.6-terra", Description: "Balanced GPT-5.6 through GitHub Copilot.", Tags: []string{"reasoning", "tools"}},
-	{ID: "copilot-gpt-5.6-luna", Provider: "github-copilot", Label: "GPT-5.6 Luna (Copilot)", APIID: "gpt-5.6-luna", Description: "Efficient GPT-5.6 through GitHub Copilot.", Tags: []string{"fast", "tools"}},
-	{ID: "copilot-gpt-6-luna", Provider: "github-copilot", Label: "GPT-6 Luna (Copilot)", APIID: "gpt-6-luna", Description: "Newest efficient GPT through GitHub Copilot.", Tags: []string{"fast", "tools"}},
+	{ID: "copilot-gpt-6.1-sol", Provider: "github-copilot", Label: "GPT-6.1 Sol (Copilot)", APIID: "gpt-6.1-sol", Description: "Newest Sol tier through GitHub Copilot.", Tags: []string{"reasoning", "tools", "coding"}},
 	{ID: "copilot-claude-sonnet-5-5", Provider: "github-copilot", Label: "Claude Sonnet 5.5 (Copilot)", APIID: "claude-sonnet-5.5", Description: "Frontier Claude through GitHub Copilot.", Tags: []string{"reasoning", "tools", "coding"}},
-	{ID: "copilot-claude-sonnet-5", Provider: "github-copilot", Label: "Claude Sonnet 5 (Copilot)", APIID: "claude-sonnet-5", Description: "Balanced Claude through GitHub Copilot.", Tags: []string{"reasoning", "tools", "coding"}},
-	{ID: "copilot-claude-haiku-4-5", Provider: "github-copilot", Label: "Claude Haiku 4.5 (Copilot)", APIID: "claude-haiku-4.5", Description: "Fast Claude through GitHub Copilot.", Tags: []string{"fast", "tools"}},
-	{ID: "copilot-claude-3.7-sonnet", Provider: "github-copilot", Label: "Claude 3.7 Sonnet (Copilot)", APIID: "claude-3.7-sonnet", Description: "Claude 3.7 Sonnet billed to GitHub Copilot.", Tags: []string{"reasoning", "tools", "coding"}},
-	{ID: "copilot-gpt-4o", Provider: "github-copilot", Label: "GPT-4o (Copilot)", APIID: "gpt-4o", Description: "GPT-4o through GitHub Copilot.", Tags: []string{"tools", "coding"}},
-	{ID: "copilot-o3-mini", Provider: "github-copilot", Label: "o3-mini (Copilot)", APIID: "o3-mini", Description: "o3-mini reasoning model through GitHub Copilot.", Tags: []string{"reasoning", "tools"}},
 	{ID: "copilot-gemini-3.8-flash", Provider: "github-copilot", Label: "Gemini 3.8 Flash (Copilot)", APIID: "gemini-3.8-flash", Description: "Fast Gemini through GitHub Copilot.", Tags: []string{"fast", "tools"}},
-	{ID: "copilot-gemini-3.6-flash", Provider: "github-copilot", Label: "Gemini 3.6 Flash (Copilot)", APIID: "gemini-3.6-flash", Description: "Balanced Gemini through GitHub Copilot.", Tags: []string{"fast", "tools"}},
-	{ID: "copilot-gemini-3.5-flash", Provider: "github-copilot", Label: "Gemini 3.5 Flash (Copilot)", APIID: "gemini-3.5-flash", Description: "Efficient Gemini through GitHub Copilot.", Tags: []string{"fast", "tools"}},
+	{ID: "copilot-gpt-6.1-terra", Provider: "github-copilot", Label: "GPT-6.1 Terra (Copilot)", APIID: "gpt-6.1-terra", Description: "Newest Terra tier through GitHub Copilot.", Tags: []string{"reasoning", "tools", "coding"}},
+	{ID: "copilot-gpt-6-astra", Provider: "github-copilot", Label: "GPT-6 Astra (Copilot)", APIID: "gpt-6-astra", Description: "GPT-6 flagship through GitHub Copilot.", Tags: []string{"reasoning", "tools", "coding"}},
+	{ID: "copilot-gpt-6-luna", Provider: "github-copilot", Label: "GPT-6 Luna (Copilot)", APIID: "gpt-6-luna", Description: "Efficient GPT through GitHub Copilot.", Tags: []string{"fast", "tools"}},
+	{ID: "copilot-claude-opus-5-5", Provider: "github-copilot", Label: "Claude Opus 5.5 (Copilot)", APIID: "claude-opus-5.5", Description: "Flagship Claude through GitHub Copilot.", Tags: []string{"reasoning", "tools", "coding"}},
+	{ID: "copilot-claude-haiku-5-5", Provider: "github-copilot", Label: "Claude Haiku 5.5 (Copilot)", APIID: "claude-haiku-5.5", Description: "Fastest current Claude through GitHub Copilot.", Tags: []string{"fast", "tools"}},
+	{ID: "copilot-gemini-4-argon", Provider: "github-copilot", Label: "Gemini 4 Argon (Copilot)", APIID: "gemini-4-argon", Description: "Gemini 4 flagship through GitHub Copilot.", Tags: []string{"reasoning", "tools", "coding"}},
 	{ID: "copilot-grok-4.7", Provider: "github-copilot", Label: "Grok 4.7 (Copilot)", APIID: "grok-4.7", Description: "xAI Grok through GitHub Copilot.", Tags: []string{"reasoning", "tools"}},
 	{ID: "copilot-kimi-k3", Provider: "github-copilot", Label: "Kimi K3 (Copilot)", APIID: "kimi-k3", Description: "Moonshot Kimi through GitHub Copilot.", Tags: []string{"reasoning", "tools", "coding"}},
 	{ID: "copilot-mai-code-1-flash", Provider: "github-copilot", Label: "MAI-Code-1.1-Flash (Copilot)", APIID: "mai-code-1.1-flash", Description: "Fast coding model through GitHub Copilot.", Tags: []string{"coding", "fast"}},
@@ -101,20 +77,16 @@ var models = []Model{
 	// (gemini-3.8-flash-medium); 9router's "(medium)" preset is stripped
 	// before the request and sent as thinkingConfig, so it must not be part
 	// of the id. A wrong id returns 404 "check the model id and base URL".
-	{ID: "antigravity-gemini-4-argon", Provider: "antigravity", Label: "Gemini 4 Argon (Antigravity)", APIID: "gemini-4-argon-high", Description: "Frontier multimodal Gemini through an Antigravity login.", Tags: []string{"reasoning", "tools", "coding"}},
-	{ID: "antigravity-gemini-4-carbon", Provider: "antigravity", Label: "Gemini 4 Carbon (Antigravity)", APIID: "gemini-4-carbon-high", Description: "Gemini 4 mid-tier through an Antigravity login.", Tags: []string{"reasoning", "tools", "coding"}},
-	{ID: "antigravity-gemini-4-hydrogen", Provider: "antigravity", Label: "Gemini 4 Hydrogen (Antigravity)", APIID: "gemini-4-hydrogen-high", Description: "Gemini 4 speed tier through an Antigravity login.", Tags: []string{"fast", "tools", "coding"}},
-	{ID: "antigravity-gemini-3.1-pro", Provider: "antigravity", Label: "Gemini 3.1 Pro (Antigravity)", APIID: "gemini-3.1-pro", Description: "Frontier reasoning Gemini through an Antigravity login.", Tags: []string{"reasoning", "tools", "coding"}},
+	{ID: "antigravity-gemini-4-hydrogen", Provider: "antigravity", Label: "Gemini 4 Hydrogen (Antigravity)", APIID: "gemini-4-hydrogen-high", Description: "Fast agentic Gemini 4 on every Antigravity plan.", Tags: []string{"reasoning", "tools", "coding"}},
+	{ID: "antigravity-gemini-4-argon", Provider: "antigravity", Label: "Gemini 4 Argon (Antigravity)", APIID: "gemini-4-argon-medium", Description: "Gemini 4 flagship for Pro, Ultra and Enterprise plans.", Tags: []string{"reasoning", "tools", "coding"}},
+	{ID: "antigravity-gemini-4-carbon", Provider: "antigravity", Label: "Gemini 4 Carbon (Antigravity)", APIID: "gemini-4-carbon-medium", Description: "Top Gemini 4 tier; Google AI Ultra and Enterprise only.", Tags: []string{"reasoning", "tools", "coding"}},
 	{ID: "antigravity-gemini-3.8-flash", Provider: "antigravity", Label: "Gemini 3.8 Flash (Antigravity)", APIID: "gemini-3.8-flash-medium", Description: "Fast Gemini through an Antigravity login.", Tags: []string{"fast", "tools", "coding"}},
 	{ID: "antigravity-gemini-3.8-flash-high", Provider: "antigravity", Label: "Gemini 3.8 Flash High (Antigravity)", APIID: "gemini-3.8-flash-high", Description: "Deep thinking Gemini Flash through an Antigravity login.", Tags: []string{"reasoning", "tools", "coding"}},
-	{ID: "antigravity-claude-opus-5-5", Provider: "antigravity", Label: "Claude Opus 5.5 (Antigravity)", APIID: "claude-opus-5-5", Description: "Flagship Claude through an Antigravity login.", Tags: []string{"reasoning", "tools", "coding"}},
-	{ID: "antigravity-claude-sonnet-5-5", Provider: "antigravity", Label: "Claude Sonnet 5.5 (Antigravity)", APIID: "claude-sonnet-5-5", Description: "Fast Claude through an Antigravity login.", Tags: []string{"reasoning", "tools", "coding"}},
-	{ID: "antigravity-claude-sonnet-4-6", Provider: "antigravity", Label: "Claude Sonnet 4.6 (Antigravity)", APIID: "claude-sonnet-4-6", Description: "Claude through an Antigravity login.", Tags: []string{"reasoning", "tools", "coding"}},
+	{ID: "antigravity-claude-opus-5-5", Provider: "antigravity", Label: "Claude Opus 5.5 (Antigravity)", APIID: "claude-opus-5-5-medium", Description: "Flagship Claude through an Antigravity login.", Tags: []string{"reasoning", "tools", "coding"}},
+	{ID: "antigravity-claude-sonnet-5-5", Provider: "antigravity", Label: "Claude Sonnet 5.5 (Antigravity)", APIID: "claude-sonnet-5-5-medium", Description: "Fast Claude through an Antigravity login.", Tags: []string{"reasoning", "tools", "coding"}},
 	// Meta Muse Code. The device grant mints an account key; the model id is
 	// what api.meta.ai serves it under.
 	{ID: "muse-spark-1.3", Provider: "muse", Label: "Muse Spark 1.3", APIID: "muse-spark-1.3", Description: "Meta's coding model through a Muse Code login.", Tags: []string{"coding", "tools"}},
-	{ID: "claude-opus-5", Provider: "anthropic", Label: "Claude Opus 5", Description: "Previous flagship, still available.", Tags: []string{"reasoning", "tools"}},
-	{ID: "claude-sonnet-4-6", Provider: "anthropic", Label: "Claude Sonnet 4.6", Description: "Previous Sonnet generation.", Tags: []string{"tools", "coding"}},
 
 	// Google. The Flash line ships far more often than the Pro one.
 	{ID: "gemini-4-argon", Provider: "google", Label: "Gemini 4 Argon", Description: "Next-generation flagship reasoning and agentic model.", Tags: []string{"reasoning", "tools", "vision", "coding"}},

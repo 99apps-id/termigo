@@ -176,9 +176,7 @@ pub fn route_request(
                 Err((code, message)) => ControlResponse::failure(request.id, code, message),
             }
         }
-        METHOD_PENTEST_STATUS => {
-            forward_to_frontend(request, app, state)
-        }
+        METHOD_PENTEST_STATUS => forward_to_frontend(request, app, state),
         METHOD_AGENT_RUN => {
             let params: AgentRunParams = match serde_json::from_value(request.params.clone()) {
                 Ok(params) => params,
@@ -369,7 +367,8 @@ pub fn route_request(
             forward_to_frontend(request, app, state)
         }
         METHOD_ENDPOINT_REMOVE => {
-            let params: EndpointRemoveParams = match serde_json::from_value(request.params.clone()) {
+            let params: EndpointRemoveParams = match serde_json::from_value(request.params.clone())
+            {
                 Ok(params) => params,
                 Err(error) => {
                     return ControlResponse::failure(

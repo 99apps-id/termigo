@@ -106,15 +106,16 @@ pub fn start(app: tauri::AppHandle, state: ControlState) -> Result<(), String> {
     let descriptor_path = launcher::descriptor_path()?;
     launcher::sweep_stale_launcher_dirs(&descriptor_path);
     let cli_path = launcher::find_bundled_cli();
-    let launcher_dir = cli_path.as_deref().and_then(|cli_path| {
-        match launcher::prepare_cli_launcher(&descriptor_path, cli_path) {
-            Ok(dir) => Some(dir),
-            Err(error) => {
-                log::warn!("could not prepare termigo CLI launcher: {error}");
-                None
+    let launcher_dir =
+        cli_path.as_deref().and_then(|cli_path| {
+            match launcher::prepare_cli_launcher(&descriptor_path, cli_path) {
+                Ok(dir) => Some(dir),
+                Err(error) => {
+                    log::warn!("could not prepare termigo CLI launcher: {error}");
+                    None
+                }
             }
-        }
-    });
+        });
 
     let descriptor = ControlDescriptor {
         protocol: PROTOCOL_VERSION,

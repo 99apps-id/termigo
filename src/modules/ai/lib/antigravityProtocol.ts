@@ -13,19 +13,23 @@ export const AG_HOST_FALLBACK = "https://cloudcode-pa.googleapis.com";
 export const AG_MAX_OUTPUT_TOKENS = 64_000;
 
 /**
- * Client identity the Cloud Code backend reads the model catalogue from.
- *
- * The `ide/2.11.0` identity no longer lists the Gemini 4 family (Hydrogen,
- * Argon, Carbon); the Antigravity CLI 1.5.9 identity does.
+ * The Antigravity client this app presents as. Cloud Code gates models on it:
+ * `fetchAvailableModels` lists the Gemini 4 family (Hydrogen, Argon, Carbon)
+ * only for the Antigravity CLI 1.5.9 identity, and a model it does not list
+ * answers 404 "Requested entity was not found". The IDE identity
+ * (`antigravity/ide/2.11.0`) and older CLI releases get no Gemini 4 at all.
+ * Matches the `agy` release verified on 2026-11-15; the Rust token exchange
+ * (oauth.rs `ag_user_agent`) and the Go companion pin the same identity.
  */
+export const AG_CLI_VERSION = "1.5.9";
 export const AG_CLIENT = "antigravity/cli/1.5.9";
 
 export function agUserAgent(): string {
   const ua = typeof navigator === "undefined" ? "" : navigator.userAgent;
-  let platform = "linux/x64";
-  if (/Windows/i.test(ua)) platform = "windows/x64";
-  else if (/Macintosh|Mac OS/i.test(ua)) platform = "darwin/arm64";
-  return `${AG_CLIENT} ${platform}`;
+  const base = `antigravity/cli/${AG_CLI_VERSION}`;
+  if (/Windows/i.test(ua)) return `${base} windows/x64`;
+  if (/Macintosh|Mac OS/i.test(ua)) return `${base} darwin/arm64`;
+  return `${base} linux/x64`;
 }
 
 export type JsonObject = Record<string, unknown>;

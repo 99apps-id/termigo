@@ -699,7 +699,11 @@ export const native = {
       cookies,
       urls,
     }),
-  browserSessionWait: (sessionId: string, selector: string, timeoutMs: number) =>
+  browserSessionWait: (
+    sessionId: string,
+    selector: string,
+    timeoutMs: number,
+  ) =>
     invoke<{ visible: boolean; elapsed_ms?: number; timeout?: boolean }>(
       "browser_session_wait",
       { sessionId, selector, timeoutMs },
@@ -718,8 +722,16 @@ export const native = {
       headful: boolean;
     }>("browser_session_resume", { sessionId }),
 
-  officeXlsxWrite: (path: string, sheets: unknown[], workspace?: WorkspaceEnv) =>
-    invoke<Record<string, unknown>>("office_xlsx_write", { path, sheets, workspace: workspace ?? currentWorkspaceEnv }),
+  officeXlsxWrite: (
+    path: string,
+    sheets: unknown[],
+    workspace?: WorkspaceEnv,
+  ) =>
+    invoke<Record<string, unknown>>("office_xlsx_write", {
+      path,
+      sheets,
+      workspace: workspace ?? currentWorkspaceEnv,
+    }),
   officeXlsxRead: (
     path: string,
     sheet?: string,
@@ -734,18 +746,64 @@ export const native = {
       maxCols,
       workspace: workspace ?? currentWorkspaceEnv,
     }),
-  officeDocxWrite: (path: string, title: string | undefined, blocks: unknown[], workspace?: WorkspaceEnv) =>
-    invoke<Record<string, unknown>>("office_docx_write", { path, title, blocks, workspace: workspace ?? currentWorkspaceEnv }),
+  officeDocxWrite: (
+    path: string,
+    title: string | undefined,
+    blocks: unknown[],
+    workspace?: WorkspaceEnv,
+  ) =>
+    invoke<Record<string, unknown>>("office_docx_write", {
+      path,
+      title,
+      blocks,
+      workspace: workspace ?? currentWorkspaceEnv,
+    }),
   officeDocxRead: (path: string, maxChars?: number, workspace?: WorkspaceEnv) =>
-    invoke<Record<string, unknown>>("office_docx_read", { path, maxChars, workspace: workspace ?? currentWorkspaceEnv }),
-  officePptxWrite: (path: string, slides: unknown[], workspace?: WorkspaceEnv) =>
-    invoke<Record<string, unknown>>("office_pptx_write", { path, slides, workspace: workspace ?? currentWorkspaceEnv }),
+    invoke<Record<string, unknown>>("office_docx_read", {
+      path,
+      maxChars,
+      workspace: workspace ?? currentWorkspaceEnv,
+    }),
+  officePptxWrite: (
+    path: string,
+    slides: unknown[],
+    workspace?: WorkspaceEnv,
+  ) =>
+    invoke<Record<string, unknown>>("office_pptx_write", {
+      path,
+      slides,
+      workspace: workspace ?? currentWorkspaceEnv,
+    }),
   officePptxRead: (path: string, maxChars?: number, workspace?: WorkspaceEnv) =>
-    invoke<Record<string, unknown>>("office_pptx_read", { path, maxChars, workspace: workspace ?? currentWorkspaceEnv }),
-  officePdfWrite: (path: string, title: string | undefined, blocks: unknown[], workspace?: WorkspaceEnv) =>
-    invoke<Record<string, unknown>>("office_pdf_write", { path, title, blocks, workspace: workspace ?? currentWorkspaceEnv }),
-  officeCsvWrite: (path: string, rows: unknown[][], delimiter?: string, workspace?: WorkspaceEnv) =>
-    invoke<Record<string, unknown>>("office_csv_write", { path, rows, delimiter, workspace: workspace ?? currentWorkspaceEnv }),
+    invoke<Record<string, unknown>>("office_pptx_read", {
+      path,
+      maxChars,
+      workspace: workspace ?? currentWorkspaceEnv,
+    }),
+  officePdfWrite: (
+    path: string,
+    title: string | undefined,
+    blocks: unknown[],
+    workspace?: WorkspaceEnv,
+  ) =>
+    invoke<Record<string, unknown>>("office_pdf_write", {
+      path,
+      title,
+      blocks,
+      workspace: workspace ?? currentWorkspaceEnv,
+    }),
+  officeCsvWrite: (
+    path: string,
+    rows: unknown[][],
+    delimiter?: string,
+    workspace?: WorkspaceEnv,
+  ) =>
+    invoke<Record<string, unknown>>("office_csv_write", {
+      path,
+      rows,
+      delimiter,
+      workspace: workspace ?? currentWorkspaceEnv,
+    }),
   officeCsvRead: (
     path: string,
     delimiter?: string,
@@ -761,9 +819,16 @@ export const native = {
       workspace: workspace ?? currentWorkspaceEnv,
     }),
   officeIcsWrite: (path: string, events: unknown[], workspace?: WorkspaceEnv) =>
-    invoke<Record<string, unknown>>("office_ics_write", { path, events, workspace: workspace ?? currentWorkspaceEnv }),
+    invoke<Record<string, unknown>>("office_ics_write", {
+      path,
+      events,
+      workspace: workspace ?? currentWorkspaceEnv,
+    }),
   officeIcsRead: (path: string, workspace?: WorkspaceEnv) =>
-    invoke<Record<string, unknown>>("office_ics_read", { path, workspace: workspace ?? currentWorkspaceEnv }),
+    invoke<Record<string, unknown>>("office_ics_read", {
+      path,
+      workspace: workspace ?? currentWorkspaceEnv,
+    }),
 
   clipboardGet: () => invoke<string>("clipboard_get"),
   clipboardSet: (text: string) => invoke<void>("clipboard_set", { text }),

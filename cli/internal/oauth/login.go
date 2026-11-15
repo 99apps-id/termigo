@@ -175,17 +175,18 @@ func pkceFlowFromSpec(spec Spec, store *Store) PKCEFlow {
 		}
 	}
 	return PKCEFlow{
-		ClientID:     clientID,
-		ClientSecret: clientSecret,
-		AuthorizeURL: spec.AuthorizeURL,
-		TokenURL:     spec.TokenURL,
-		Scopes:       spec.Scopes,
-		RedirectPort: spec.RedirectPort,
-		RedirectPath: spec.RedirectPath,
-		ExtraAuth:    spec.ExtraAuth,
-		ExchangeJSON: spec.ExchangeJSON,
-		RefreshJSON:  spec.RefreshJSON,
-		RefreshScope: spec.RefreshScope,
+		ClientID:        clientID,
+		ClientSecret:    clientSecret,
+		AuthorizeURL:    spec.AuthorizeURL,
+		TokenURL:        spec.TokenURL,
+		Scopes:          spec.Scopes,
+		RedirectPort:    spec.RedirectPort,
+		RedirectPath:    spec.RedirectPath,
+		RedirectURIHost: spec.RedirectURIHost,
+		ExtraAuth:       spec.ExtraAuth,
+		ExchangeJSON:    spec.ExchangeJSON,
+		RefreshJSON:     spec.RefreshJSON,
+		RefreshScope:    spec.RefreshScope,
 	}
 }
 

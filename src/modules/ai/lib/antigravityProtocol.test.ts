@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
-
 import {
+  AG_CLI_VERSION,
   AG_MAX_OUTPUT_TOKENS,
   agUserAgent,
   agWireModel,
   buildAntigravityBody,
+  type JsonObject,
   newSessionId,
   projectIdFrom,
   unwrapAntigravitySseLine,
-  type JsonObject,
 } from "./antigravityProtocol";
 import { GEMINI_SAFETY_SETTINGS } from "./googleSafety";
 
@@ -169,6 +169,15 @@ describe("agUserAgent", () => {
     const ua = agUserAgent();
     expect(ua.startsWith("antigravity/cli/1.5.9 ")).toBe(true);
     expect(ua).toMatch(/ (windows|darwin|linux)\/(x64|arm64)$/);
+  });
+
+  // Cloud Code lists Gemini 4 only for the Antigravity CLI identity; the IDE
+  // identity got 404 "Requested entity was not found" for Hydrogen and Argon.
+  it("presents as the current Antigravity CLI", () => {
+    expect(agUserAgent()).toMatch(
+      new RegExp(`^antigravity/cli/${AG_CLI_VERSION.replace(/\./g, "\\.")} `),
+    );
+    expect(AG_CLI_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
   });
 });
 

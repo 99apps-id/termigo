@@ -44,7 +44,8 @@ pub fn apply_webview2_browser_args_env() {
 pub fn normalize_ipv4(host: &str) -> Option<String> {
     let h_raw = host.to_ascii_lowercase();
     let h = h_raw.strip_suffix('.').unwrap_or(&h_raw);
-    let is_decimal = |s: &str| !s.is_empty() && !s.starts_with('-') && s.bytes().all(|b| b.is_ascii_digit());
+    let is_decimal =
+        |s: &str| !s.is_empty() && !s.starts_with('-') && s.bytes().all(|b| b.is_ascii_digit());
     let is_hex = |s: &str| {
         if let Some(rest) = s.strip_prefix("0x") {
             !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_hexdigit())
@@ -152,9 +153,14 @@ pub fn normalize_ipv4(host: &str) -> Option<String> {
             return None;
         }
         return Some(
-            [(addr >> 24) as u8, (addr >> 16) as u8, (addr >> 8) as u8, addr as u8]
-                .map(|b| b.to_string())
-                .join("."),
+            [
+                (addr >> 24) as u8,
+                (addr >> 16) as u8,
+                (addr >> 8) as u8,
+                addr as u8,
+            ]
+            .map(|b| b.to_string())
+            .join("."),
         );
     }
     if is_hex(h) || is_octal_strict(h) || is_decimal(h) {
@@ -250,7 +256,10 @@ pub fn unsafe_url(url: &str) -> Option<String> {
     }
     // Block non-loopback IPv6 (fe80::, fd00::, ...); only ::1 is allowed.
     let host_cmp = host_nodot.to_ascii_lowercase();
-    if (host_cmp.contains(':') || host_raw.contains('[')) && host_cmp != "[::1]" && host_cmp != "::1" {
+    if (host_cmp.contains(':') || host_raw.contains('['))
+        && host_cmp != "[::1]"
+        && host_cmp != "::1"
+    {
         // try to be permissive of localhost forms already handled, else block
         if host_cmp != "::1" {
             // check for ::1 variations
@@ -582,7 +591,8 @@ pub fn browser_console(
     // Console output is captured live by the window's initialization script,
     // which forwards each console.* call over the value channel. This just
     // returns what has accumulated for the instance.
-    let is_open = webview(&app, &instance).is_some() || app.get_webview(&embed_label(&instance)).is_some();
+    let is_open =
+        webview(&app, &instance).is_some() || app.get_webview(&embed_label(&instance)).is_some();
     if !is_open {
         return Err("browser instance not open".into());
     }
@@ -795,14 +805,8 @@ pub async fn browser_embed_update(
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(150));
             let _ = wvc.set_bounds(Rect {
-                position: Position::Physical(PhysicalPosition::new(
-                    position.x,
-                    position.y,
-                )),
-                size: Size::Physical(PhysicalSize::new(
-                    size.width.saturating_add(1),
-                    size.height,
-                )),
+                position: Position::Physical(PhysicalPosition::new(position.x, position.y)),
+                size: Size::Physical(PhysicalSize::new(size.width.saturating_add(1), size.height)),
             });
             let _ = wvc.set_bounds(Rect {
                 position: Position::Physical(position),

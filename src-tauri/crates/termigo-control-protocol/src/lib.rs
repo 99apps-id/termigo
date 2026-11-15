@@ -464,7 +464,10 @@ mod tests {
         // A Debug/Serialize round trip must not be the reason a key leaks into a
         // log, so the struct carries no Debug impl that prints the value.
         let encoded = serde_json::to_string(&params).expect("serialize");
-        assert!(encoded.contains("sk-test"), "the request must carry the key");
+        assert!(
+            encoded.contains("sk-test"),
+            "the request must carry the key"
+        );
         assert!(METHODS.contains(&METHOD_SECRET_SET));
     }
 

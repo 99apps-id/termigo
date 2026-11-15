@@ -31,6 +31,9 @@ impl Default for PtyState {
 
 impl PtyState {
     pub(crate) fn take(&self, id: u64) -> Option<Arc<Session>> {
-        self.sessions.write().unwrap_or_else(|e| e.into_inner()).remove(&id)
+        self.sessions
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&id)
     }
 }

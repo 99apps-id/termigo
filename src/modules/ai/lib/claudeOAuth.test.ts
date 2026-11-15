@@ -48,7 +48,10 @@ describe("claudeOAuth", () => {
   it("builds beta header with all OAuth flags and pdfs beta when needed", () => {
     const plain = buildClaudeOAuthBetaHeader(null, false);
     expect(plain).toBe(CLAUDE_OAUTH_BETA);
-    const withPdf = buildClaudeOAuthBetaHeader("fine-grained-tool-streaming-2025-05-14", true);
+    const withPdf = buildClaudeOAuthBetaHeader(
+      "fine-grained-tool-streaming-2025-05-14",
+      true,
+    );
     expect(withPdf).toContain(CLAUDE_PDF_BETA);
     expect(withPdf).toContain("fine-grained-tool-streaming-2025-05-14");
   });
@@ -68,22 +71,26 @@ describe("claudeOAuth", () => {
     const seenBodies: Array<Record<string, unknown>> = [];
     let call = 0;
 
-    const baseFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      call += 1;
-      expect(String(input)).toBe("https://api.anthropic.com/v1/messages?beta=true");
-      seenHeaders.push(new Headers(init?.headers));
-      seenBodies.push(JSON.parse(String(init?.body)));
-      if (call === 1) {
-        return new Response("unauthorized", { status: 401 });
-      }
-      if (call === 2) {
-        return new Response(
-          '{"error":{"type":"claude_code_version_too_old","message":"minimum required version is 2.1.400"}}',
-          { status: 400 },
+    const baseFetch = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        call += 1;
+        expect(String(input)).toBe(
+          "https://api.anthropic.com/v1/messages?beta=true",
         );
-      }
-      return new Response('{"id":"msg_1"}', { status: 200 });
-    });
+        seenHeaders.push(new Headers(init?.headers));
+        seenBodies.push(JSON.parse(String(init?.body)));
+        if (call === 1) {
+          return new Response("unauthorized", { status: 401 });
+        }
+        if (call === 2) {
+          return new Response(
+            '{"error":{"type":"claude_code_version_too_old","message":"minimum required version is 2.1.400"}}',
+            { status: 400 },
+          );
+        }
+        return new Response('{"id":"msg_1"}', { status: 200 });
+      },
+    );
 
     const wrapped = createClaudeOAuthFetch(
       baseFetch as unknown as typeof fetch,
@@ -108,11 +115,15 @@ describe("claudeOAuth", () => {
     expect(baseFetch).toHaveBeenCalledTimes(3);
     expect(seenHeaders[0].get("authorization")).toBe("Bearer tok-old");
     expect(seenHeaders[0].has("x-api-key")).toBe(false);
-    expect(seenHeaders[0].get("user-agent")).toBe(claudeCliUserAgent("2.1.325"));
+    expect(seenHeaders[0].get("user-agent")).toBe(
+      claudeCliUserAgent("2.1.325"),
+    );
     expect(seenHeaders[0].get("x-app")).toBe("cli");
     expect(seenHeaders[0].get("x-stainless-runtime")).toBe("node");
     expect(seenHeaders[1].get("authorization")).toBe("Bearer tok-new");
-    expect(seenHeaders[2].get("user-agent")).toBe(claudeCliUserAgent("2.1.400"));
+    expect(seenHeaders[2].get("user-agent")).toBe(
+      claudeCliUserAgent("2.1.400"),
+    );
     expect((seenBodies[0].system as Array<{ text: string }>)[0].text).toBe(
       CLAUDE_CODE_IDENTITY,
     );

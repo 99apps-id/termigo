@@ -6580,7 +6580,7 @@ dependencies = [
 
 [[package]]
 name = "termigo"
-version = "0.9.27"
+version = "0.9.28"
 dependencies = [
  "arboard",
  "base64 0.23.1",
@@ -6642,7 +6642,7 @@ dependencies = [
 
 [[package]]
 name = "termigo-cli"
-version = "0.9.27"
+version = "0.9.28"
 dependencies = [
  "dirs 6.0.0",
  "libc",
@@ -6654,7 +6654,7 @@ dependencies = [
 
 [[package]]
 name = "termigo-control-protocol"
-version = "0.9.27"
+version = "0.9.28"
 dependencies = [
  "serde",
  "serde_json",

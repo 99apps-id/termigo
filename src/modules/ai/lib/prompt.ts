@@ -1,5 +1,6 @@
-import type { ModelMessage, SystemModelMessage } from "ai";
 import type { ProviderId } from "@/modules/ai/config";
+import type { ModelMessage, SystemModelMessage } from "ai";
+import { CLAUDE_CODE_IDENTITY } from "./claudeOAuthFetch";
 
 export type PreparedAgentPrompt = {
   system: SystemModelMessage[];
@@ -12,16 +13,26 @@ export function prepareAgentPrompt(
   history: readonly ModelMessage[],
   provider: ProviderId,
 ): PreparedAgentPrompt {
-  const system: SystemModelMessage[] = [
-    { role: "system", content: stableSystem },
-  ];
+  const system: SystemModelMessage[] = [];
+  if (provider === "claude-oauth") {
+    system.push({
+      role: "system",
+      content: CLAUDE_CODE_IDENTITY,
+    });
+  }
+  system.push({ role: "system", content: stableSystem });
   if (planInstructions) {
     system.push({ role: "system", content: planInstructions });
   }
   const messages = history.slice();
-  if (provider !== "anthropic" && provider !== "claude-oauth") return { system, messages };
+  if (provider !== "anthropic" && provider !== "claude-oauth") {
+    return { system, messages };
+  }
 
-  system[0] = withAnthropicCacheMarker(system[0]);
+  const cacheIdx = provider === "claude-oauth" ? 1 : 0;
+  if (system[cacheIdx]) {
+    system[cacheIdx] = withAnthropicCacheMarker(system[cacheIdx]);
+  }
   const lastIdx = messages.length - 1;
   if (lastIdx >= 0) {
     messages[lastIdx] = withAnthropicCacheMarker(messages[lastIdx]);

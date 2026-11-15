@@ -19,15 +19,8 @@ fn grep_finds_matches_and_returns_relative_paths() {
     );
     fx.write("src/lib.rs", "pub fn greet() {}\n");
 
-    let res = fs_grep_blocking(
-        "hello".into(),
-        fx.root_str(),
-        None,
-        None,
-        None,
-        None,
-    )
-    .expect("grep");
+    let res =
+        fs_grep_blocking("hello".into(), fx.root_str(), None, None, None, None).expect("grep");
 
     assert_eq!(res.hits.len(), 1);
     let hit = &res.hits[0];
@@ -79,8 +72,8 @@ fn grep_max_results_truncates() {
         fx.write(&format!("f{i}.txt"), "needle\n");
     }
 
-    let res = fs_grep_blocking("needle".into(), fx.root_str(), None, None, Some(3), None)
-        .expect("grep");
+    let res =
+        fs_grep_blocking("needle".into(), fx.root_str(), None, None, Some(3), None).expect("grep");
 
     assert!(res.hits.len() <= 3);
     assert!(res.truncated);
@@ -113,8 +106,8 @@ fn grep_respects_ignore_file() {
     fx.write("ignored.txt", "secret\n");
     fx.write("visible.txt", "secret\n");
 
-    let res = fs_grep_blocking("secret".into(), fx.root_str(), None, None, None, None)
-        .expect("grep");
+    let res =
+        fs_grep_blocking("secret".into(), fx.root_str(), None, None, None, None).expect("grep");
 
     let rels: Vec<&str> = res.hits.iter().map(|h| h.rel.as_str()).collect();
     assert!(rels.contains(&"visible.txt"));
@@ -303,8 +296,7 @@ fn read_dir_flags_gitignored_entries_only_when_requested() {
     fx.write_file("ignored.txt", "");
     fx.write_file("build/out.o", "");
 
-    let entries =
-        fs_read_dir_blocking(fx.repo_path.clone(), false, Some(true)).expect("read_dir");
+    let entries = fs_read_dir_blocking(fx.repo_path.clone(), false, Some(true)).expect("read_dir");
     let flag = |name: &str| {
         entries
             .iter()
@@ -326,8 +318,7 @@ fn read_dir_skips_gitignore_outside_a_repo() {
     fx.write(".gitignore", "ignored.txt\n");
     fx.write("ignored.txt", "");
     fx.write("kept.txt", "");
-    let entries =
-        fs_read_dir_blocking(fx.root.clone(), false, Some(true)).expect("read_dir");
+    let entries = fs_read_dir_blocking(fx.root.clone(), false, Some(true)).expect("read_dir");
     assert!(entries.iter().all(|e| !e.gitignored));
 }
 

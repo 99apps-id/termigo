@@ -58,6 +58,8 @@ func agUserAgent() string {
 	case "arm":
 		arch = "arm"
 	}
+	// The Antigravity CLI identity: Cloud Code lists Gemini 4 (Hydrogen,
+	// Argon) only for it; the IDE identity gets 404 for those models.
 	return fmt.Sprintf("antigravity/cli/1.5.9 %s/%s", platform, arch)
 }
 

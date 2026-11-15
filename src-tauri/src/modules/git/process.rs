@@ -316,11 +316,9 @@ where
         log::warn!("git process: pipe readers timed out after process exit/kill");
     }
 
-    let take_output = |target: &Arc<Mutex<(Vec<u8>, bool)>>| {
-        match target.lock() {
-            Ok(mut g) => std::mem::take(&mut *g),
-            Err(p) => std::mem::take(&mut *p.into_inner()),
-        }
+    let take_output = |target: &Arc<Mutex<(Vec<u8>, bool)>>| match target.lock() {
+        Ok(mut g) => std::mem::take(&mut *g),
+        Err(p) => std::mem::take(&mut *p.into_inner()),
     };
     let (stdout, stdout_truncated) = take_output(&stdout_target);
     let (stderr, _stderr_truncated) = take_output(&stderr_target);

@@ -272,7 +272,12 @@ pub fn spawn(
                 state.take(id);
             }
             log::info!("lsp id={id} exited code={code:?}");
-            let tail: Vec<String> = stderr_tail.lock().unwrap_or_else(|e| e.into_inner()).iter().cloned().collect();
+            let tail: Vec<String> = stderr_tail
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .iter()
+                .cloned()
+                .collect();
             let exit = LspExit {
                 code,
                 stderr_tail: tail.join("\n"),

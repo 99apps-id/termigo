@@ -170,7 +170,9 @@ async fn resolve_via_doh(host: &str) -> Result<Vec<IpAddr>, String> {
             }
         }
     }
-    Err(format!("dns: could not resolve host {host} via system or DoH"))
+    Err(format!(
+        "dns: could not resolve host {host} via system or DoH"
+    ))
 }
 
 /// Resolve `host` once and return both its safety classification and the
@@ -257,10 +259,7 @@ pub(crate) async fn validate_url_allow_loopback(
 }
 
 #[allow(dead_code)]
-pub(crate) fn host_resolver_rules(
-    url: &reqwest::Url,
-    ips: &[IpAddr],
-) -> Option<String> {
+pub(crate) fn host_resolver_rules(url: &reqwest::Url, ips: &[IpAddr]) -> Option<String> {
     let host = url.host_str()?.to_ascii_lowercase();
     if host.parse::<IpAddr>().is_ok() {
         return None;
@@ -415,10 +414,19 @@ struct CachedClient {
 /// guarantee `resolve_to_addrs` exists for: a connection may still only use
 /// addresses that passed `ip_kind`.
 #[allow(clippy::type_complexity)]
-static CLIENT_CACHE: OnceLock<Mutex<HashMap<(String, bool, String), CachedClient>>> = OnceLock::new();
+static CLIENT_CACHE: OnceLock<Mutex<HashMap<(String, bool, String), CachedClient>>> =
+    OnceLock::new();
 
-async fn client_for(host: &str, allow_private: bool, proxy_url: Option<&str>) -> Result<reqwest::Client, String> {
-    let key = (host.to_string(), allow_private, proxy_url.unwrap_or("").to_string());
+async fn client_for(
+    host: &str,
+    allow_private: bool,
+    proxy_url: Option<&str>,
+) -> Result<reqwest::Client, String> {
+    let key = (
+        host.to_string(),
+        allow_private,
+        proxy_url.unwrap_or("").to_string(),
+    );
     let cache = CLIENT_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
 
     // Scoped so the guard is dropped before the await below: holding a
@@ -458,7 +466,8 @@ fn build_safe_client(
     let mut builder = reqwest::Client::builder().connect_timeout(Duration::from_secs(10));
     if let Some(proxy_url) = proxy_url.filter(|s| !s.trim().is_empty()) {
         validate_url(proxy_url)?;
-        let proxy = reqwest::Proxy::all(proxy_url).map_err(|e| format!("invalid proxy url: {e}"))?;
+        let proxy =
+            reqwest::Proxy::all(proxy_url).map_err(|e| format!("invalid proxy url: {e}"))?;
         builder = builder.proxy(proxy);
     }
     // Pin reqwest's resolver to the IPs we just classified. Without this,
@@ -918,10 +927,7 @@ mod tests {
             IpKind::Private
         );
         // IPv4-mapped IPv6 private IP
-        assert_eq!(
-            ip_kind("::ffff:10.0.0.1".parse().unwrap()),
-            IpKind::Private
-        );
+        assert_eq!(ip_kind("::ffff:10.0.0.1".parse().unwrap()), IpKind::Private);
     }
 
     #[test]
@@ -931,7 +937,10 @@ mod tests {
             IpKind::Loopback
         );
         assert_eq!(ip_kind("::1".parse().unwrap()), IpKind::Loopback);
-        assert_eq!(ip_kind("::ffff:127.0.0.1".parse().unwrap()), IpKind::Loopback);
+        assert_eq!(
+            ip_kind("::ffff:127.0.0.1".parse().unwrap()),
+            IpKind::Loopback
+        );
     }
 
     #[test]
@@ -1115,7 +1124,11 @@ mod tests {
         let first = client_for(host, false, None).await.expect("builds");
         let second = client_for(host, false, None).await.expect("reuses");
 
-        let map = CLIENT_CACHE.get().expect("initialised").lock().unwrap_or_else(|e| e.into_inner());
+        let map = CLIENT_CACHE
+            .get()
+            .expect("initialised")
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         assert_eq!(
             map.keys().filter(|(h, _, _)| h == host).count(),
             1,
@@ -1173,7 +1186,11 @@ mod tests {
         assert!(client_for(host, false, None).await.is_err());
         assert!(client_for(host, true, None).await.is_ok());
 
-        let map = CLIENT_CACHE.get().expect("initialised").lock().unwrap_or_else(|e| e.into_inner());
+        let map = CLIENT_CACHE
+            .get()
+            .expect("initialised")
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         assert!(map.contains_key(&(host.to_string(), true, String::new())));
         assert!(
             !map.contains_key(&(host.to_string(), false, String::new())),

@@ -27,7 +27,9 @@ export function claudeCliUserAgent(version = getClaudeCliVersion()): string {
 export function extractClaudeCodeMinVersion(body: string): string | null {
   if (!body.includes("claude_code_version_too_old")) return null;
   const match =
-    body.match(/minimum(?:\s+required)?\s+version(?:\s+is)?\s+v?(\d+\.\d+\.\d+)/i) ??
+    body.match(
+      /minimum(?:\s+required)?\s+version(?:\s+is)?\s+v?(\d+\.\d+\.\d+)/i,
+    ) ??
     body.match(/at least\s+v?(\d+\.\d+\.\d+)/i) ??
     body.match(/v?(\d+\.\d+\.\d+)/);
   return match?.[1] ?? null;
@@ -46,7 +48,9 @@ export type AnthropicSystemBlock = {
  * and termixgo). Anthropic rejects OAuth subscription requests when another
  * block precedes it.
  */
-export function withClaudeCodeIdentity(system: unknown): AnthropicSystemBlock[] {
+export function withClaudeCodeIdentity(
+  system: unknown,
+): AnthropicSystemBlock[] {
   const identityBlock: AnthropicSystemBlock = {
     type: "text",
     text: CLAUDE_CODE_IDENTITY,
@@ -61,10 +65,17 @@ export function withClaudeCodeIdentity(system: unknown): AnthropicSystemBlock[] 
     for (const item of system) {
       if (!item || typeof item !== "object") continue;
       const block = item as AnthropicSystemBlock;
-      if (block.type === "text" && block.text?.trim() === CLAUDE_CODE_IDENTITY) {
+      if (
+        block.type === "text" &&
+        block.text?.trim() === CLAUDE_CODE_IDENTITY
+      ) {
         continue;
       }
-      if (block.type === "text" && typeof block.text === "string" && !block.text.trim()) {
+      if (
+        block.type === "text" &&
+        typeof block.text === "string" &&
+        !block.text.trim()
+      ) {
         continue;
       }
       rest.push(block);
@@ -131,7 +142,10 @@ function applyClaudeOAuthHeaders(
 ): void {
   headers.set("authorization", `Bearer ${accessToken}`);
   headers.delete("x-api-key");
-  headers.set("anthropic-version", headers.get("anthropic-version") ?? "2023-06-01");
+  headers.set(
+    "anthropic-version",
+    headers.get("anthropic-version") ?? "2023-06-01",
+  );
   headers.set(
     "anthropic-beta",
     buildClaudeOAuthBetaHeader(headers.get("anthropic-beta"), hasPdf),
@@ -159,8 +173,7 @@ export function createClaudeOAuthFetch(
   baseFetch: typeof fetch,
   initialAccessToken: string,
   refreshAccess: () => Promise<string | null> = async () =>
-    (await getOAuthAccess("claude-oauth", { forceRefresh: true }))?.accessToken ??
-    null,
+    (await getOAuthAccess("claude-oauth"))?.accessToken ?? null,
 ): typeof fetch {
   let currentToken = initialAccessToken;
 
