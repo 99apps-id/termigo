@@ -51,6 +51,25 @@ function sanitizeResponsesName(name: string): string {
   return clean || "unknown_tool";
 }
 
+function responseToolAliases(body: unknown): Record<string, string> {
+  const tools = isObject(body) && Array.isArray(body.tools) ? body.tools : [];
+  const aliases: Record<string, string> = {};
+  for (const entry of tools) {
+    if (
+      !isObject(entry) ||
+      entry.type !== "function" ||
+      !isObject(entry.function)
+    )
+      continue;
+    const name =
+      typeof entry.function.name === "string" ? entry.function.name : "";
+    if (!name) continue;
+    const wireName = sanitizeResponsesName(name);
+    if (!(wireName in aliases)) aliases[wireName] = name;
+  }
+  return aliases;
+}
+
 function isObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
