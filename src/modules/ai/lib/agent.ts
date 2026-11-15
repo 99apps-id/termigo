@@ -581,15 +581,13 @@ export async function buildLanguageModel(
         );
       }
       const { createMuseFetch } = await import("./museStream");
-      // Muse's SSE tail can omit `choices`, which the SDK's chunk union rejects
-      // with `invalid_union`; the wrapper normalises those lines.
+      // The wrapper translates the SDK's chat request onto Meta's Responses
+      // route under the Muse Code CLI identity (see museStream.ts); the old
+      // muse-code/1.0.2 header is what Meta served as plain chat only.
       return createOpenAICompatible({
         name: "muse",
         baseURL: "https://api.meta.ai/v1",
         apiKey: auth.accessToken,
-        headers: {
-          "User-Agent": "muse-code/1.0.2",
-        },
         fetch: createMuseFetch(apiFetch),
       })(resolvedModelId);
     }

@@ -16,6 +16,41 @@
 
 type JsonObject = Record<string, unknown>;
 
+/** The Muse Code CLI release whose identity Meta's backend gates native
+ * tool calls on (verified against the installed CLI by capturing its
+ * request to a local endpoint, the same evidence as the Go clients). */
+export const MUSE_CLI_VERSION = "1.4.20";
+
+export function museBuildUserAgent(): string {
+  const platform = typeof navigator !== "undefined" ? navigator.platform : "";
+  const os = /win/i.test(platform)
+    ? "windows"
+    : /mac/i.test(platform)
+      ? "darwin"
+      : /linux/i.test(platform)
+        ? "linux"
+        : "windows";
+  return `muse-build/${MUSE_CLI_VERSION} (non-interactive; ${os}-x86_64)`;
+}
+
+/** The headers the official CLI sends on a Responses request. */
+export function museIdentityHeaders(sessionId: string): Record<string, string> {
+  return {
+    "user-agent": museBuildUserAgent(),
+    "x-client-id": "tbh:exec",
+    "x-tbh-session-id": sessionId,
+    "x-meta-ai-gateway-session-id": sessionId,
+    "x-tbh-thread-id": sessionId,
+    "x-tbh-root-session-id": sessionId,
+    "x-tbh-agent-role": "main",
+  };
+}
+
+function sanitizeResponsesName(name: string): string {
+  const clean = name.replace(/[^a-zA-Z0-9_-]/g, "_");
+  return clean || "unknown_tool";
+}
+
 function isObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -78,6 +113,15 @@ function toolCallBlock(name: string, args: unknown): string {
   const argumentsText =
     typeof args === "string" ? args : JSON.stringify(args ?? {});
   return `\`\`\`tool_call\n${JSON.stringify({ name, arguments: safeJson(argumentsText) })}\n\`\`\``;
+}
+
+function isValidJson(text: string): boolean {
+  try {
+    JSON.parse(text);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function safeJson(text: string): unknown {
@@ -199,6 +243,105 @@ export function chatToResponsesBody(body: unknown): JsonObject | null {
   return out;
 }
 
+/**
+ * Translates one chat-completions request body into the native Responses
+ * body the official Muse Code CLI sends: tools as one `muse` namespace
+ * tool, stored calls and results as function_call items, reasoning summary
+ * requested and encrypted content included. This is the first attempt for
+ * every Muse request; the text protocol is only the attestation fallback.
+ */
+export function chatToNativeResponsesBody(
+  body: unknown,
+  sessionId: string,
+): JsonObject | null {
+  if (!isObject(body) || !Array.isArray(body.messages)) return null;
+  const tools = chatTools(body);
+  const instructions: string[] = [];
+  const input: JsonObject[] = [];
+
+  for (const message of body.messages) {
+    if (!isObject(message)) continue;
+    const role = asString(message.role);
+    if (role === "system" || role === "developer") {
+      const text = contentText(message.content);
+      if (text.trim()) instructions.push(text);
+    } else if (role === "user") {
+      input.push({
+        type: "message",
+        role: "user",
+        content: userContent(message.content),
+      });
+    } else if (role === "assistant") {
+      const text = contentText(message.content);
+      if (text.trim()) {
+        input.push({
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text }],
+        });
+      }
+      if (Array.isArray(message.tool_calls)) {
+        for (const call of message.tool_calls) {
+          if (!isObject(call)) continue;
+          const fn = isObject(call.function) ? call.function : call;
+          const name = asString(fn.name);
+          if (!name) continue;
+          const rawArgs =
+            typeof fn.arguments === "string"
+              ? fn.arguments
+              : JSON.stringify(fn.arguments ?? {});
+          input.push({
+            type: "function_call",
+            call_id: asString(call.id) || `call_${input.length}`,
+            name: sanitizeResponsesName(name),
+            arguments: isValidJson(rawArgs) ? rawArgs : "{}",
+            status: "completed",
+          });
+        }
+      }
+    } else if (role === "tool") {
+      input.push({
+        type: "function_call_output",
+        call_id: asString(message.tool_call_id),
+        output: contentText(message.content),
+      });
+    }
+  }
+
+  const out: JsonObject = {
+    model: asString(body.model),
+    stream: true,
+    store: false,
+    input,
+  };
+  if (instructions.length > 0) out.instructions = instructions.join("\n\n");
+  if (tools.length > 0) {
+    out.tools = [
+      {
+        type: "namespace",
+        name: "muse",
+        description: "Muse Code tool set.",
+        tools: tools.map((tool) => ({
+          type: "function",
+          name: sanitizeResponsesName(tool.name),
+          description: tool.description,
+          parameters: tool.parameters,
+          strict: false,
+        })),
+      },
+    ];
+  }
+  const effort =
+    typeof body.reasoning_effort === "string" &&
+    ["low", "medium", "high"].includes(body.reasoning_effort)
+      ? body.reasoning_effort
+      : "high";
+  out.reasoning = { effort, summary: "auto" };
+  out.include = "reasoning.encrypted_content";
+  out.prompt_cache_key = `tbh:main:${sessionId}`;
+  return out;
+}
+
 function textToolProtocol(tools: ChatTool[]): string {
   const lines = [
     "Tool use (text protocol): the tools below are available, but they are not registered with this API request. Termigo executes them on the operator's machine and returns their output to you.",
@@ -269,12 +412,16 @@ export function parseTextToolCalls(text: string): {
 
 type ResponsesOutcome = {
   text: string;
+  calls: TextToolCall[];
   usage: { prompt: number; completion: number; total: number } | null;
   error: string | null;
 };
 
 function readResponsesStream(sseText: string): ResponsesOutcome {
   let text = "";
+  const calls: TextToolCall[] = [];
+  const finalArgs = new Map<string, string>();
+  const deltaArgs = new Map<string, string>();
   let usage: ResponsesOutcome["usage"] = null;
   let error: string | null = null;
   for (const line of sseText.split("\n")) {
@@ -291,6 +438,34 @@ function readResponsesStream(sseText: string): ResponsesOutcome {
     if (!isObject(event)) continue;
     if (event.type === "response.output_text.delta") {
       if (typeof event.delta === "string") text += event.delta;
+    } else if (event.type === "response.function_call_arguments.delta") {
+      const itemId = asString(event.item_id);
+      if (itemId && typeof event.delta === "string") {
+        deltaArgs.set(itemId, (deltaArgs.get(itemId) ?? "") + event.delta);
+      }
+    } else if (event.type === "response.function_call_arguments.done") {
+      const itemId = asString(event.item_id);
+      if (itemId) {
+        finalArgs.set(
+          itemId,
+          asString(event.arguments) || deltaArgs.get(itemId) || "{}",
+        );
+      }
+    } else if (event.type === "response.output_item.done") {
+      const item = isObject(event.item) ? event.item : null;
+      if (item?.type === "function_call" && asString(item.name)) {
+        const itemId = asString(item.id);
+        const args =
+          asString(item.arguments) ||
+          finalArgs.get(itemId) ||
+          deltaArgs.get(itemId) ||
+          "{}";
+        calls.push({
+          id: asString(item.call_id) || itemId || `call_muse_${++textToolSeq}`,
+          name: asString(item.name),
+          arguments: isValidJson(args) ? args : "{}",
+        });
+      }
     } else if (
       event.type === "response.completed" ||
       event.type === "response.incomplete"
@@ -317,7 +492,7 @@ function readResponsesStream(sseText: string): ResponsesOutcome {
         "Muse request failed";
     }
   }
-  return { text, usage, error };
+  return { text, calls, usage, error };
 }
 
 /**
@@ -354,7 +529,13 @@ export function responsesStreamToChatSse(
       `data: ${JSON.stringify({ ...base, choices: [choice], ...(withUsage && usage ? { usage } : {}) })}\n\n`,
     );
   };
-  const { prose, calls } = parseTextToolCalls(outcome.text);
+  // Native function_call items win; the text protocol is the fallback
+  // parse for a reply that arrived without them.
+  const parsed =
+    outcome.calls.length > 0
+      ? { prose: outcome.text, calls: outcome.calls }
+      : parseTextToolCalls(outcome.text);
+  const { prose, calls } = parsed;
   if (calls.length === 0) {
     if (outcome.text) {
       chunk({

@@ -6,7 +6,7 @@ export const CLAUDE_CODE_IDENTITY =
 export const CLAUDE_OAUTH_DEFAULT_CLI_VERSION = "2.1.325";
 
 export const CLAUDE_OAUTH_BETA =
-  "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,thinking-token-count-2026-05-13,advanced-tool-use-2025-11-20,effort-2025-11-24,extended-cache-ttl-2025-04-11";
+  "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05,advanced-tool-use-2025-11-20,effort-2025-11-24,structured-outputs-2025-12-15,fast-mode-2026-02-01,redact-thinking-2026-02-12,token-efficient-tools-2026-03-28";
 
 export const CLAUDE_PDF_BETA = "pdfs-2024-09-25";
 
@@ -135,10 +135,191 @@ export function rewriteClaudeOAuthUrl(input: string): string {
   }
 }
 
+export const CLAUDE_TOOL_SUFFIX = "_ide";
+
+const CLAUDE_DECOY_TOOL_NAMES = [
+  "Task",
+  "TaskOutput",
+  "TaskStop",
+  "TaskCreate",
+  "TaskGet",
+  "TaskUpdate",
+  "TaskList",
+  "Bash",
+  "Glob",
+  "Grep",
+  "Read",
+  "Edit",
+  "Write",
+  "NotebookEdit",
+  "WebFetch",
+  "WebSearch",
+  "AskUserQuestion",
+  "Skill",
+  "EnterPlanMode",
+  "ExitPlanMode",
+];
+
+async function sha256Hex(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(text),
+  );
+  return [...new Uint8Array(digest)]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function uuidFromHex(hex: string): string {
+  const chars = hex.slice(0, 32).split("");
+  chars[12] = "4";
+  chars[16] = ((Number.parseInt(chars[16], 16) & 0x3) | 0x8).toString(16);
+  const s = chars.join("");
+  return `${s.slice(0, 8)}-${s.slice(8, 12)}-${s.slice(12, 16)}-${s.slice(16, 20)}-${s.slice(20, 32)}`;
+}
+
+async function uuidFromSeed(seed: string): Promise<string> {
+  return uuidFromHex(await sha256Hex(seed));
+}
+
+/**
+ * The metadata.user_id Anthropic requires on a subscription request, in the
+ * JSON shape the Claude Code client sends. Without it the Messages endpoint
+ * answers 400 invalid_request_error even for a healthy login. Mirrors
+ * claudeUserID in cli/internal/provider/anthropic.go.
+ */
+export async function claudeOAuthUserId(
+  accessToken: string,
+  sessionId: string,
+): Promise<string> {
+  const [deviceId, accountUuid, sessionUuid] = await Promise.all([
+    sha256Hex(`device:${accessToken}`),
+    uuidFromSeed(`account:${accessToken}`),
+    uuidFromSeed(`session:${sessionId}`),
+  ]);
+  return JSON.stringify({
+    device_id: deviceId,
+    account_uuid: accountUuid,
+    session_id: sessionUuid,
+  });
+}
+
+/**
+ * Suffixes the client's tool names and appends the Claude Code decoy tools:
+ * the subscription endpoint expects the CLI's tool surface, and a foreign
+ * tool name is answered with 400. History tool_use blocks are renamed to
+ * match. Returns the suffixed-to-original aliases for the response stream.
+ */
+export function cloakClaudeToolNames(
+  body: Record<string, unknown>,
+): Map<string, string> {
+  const aliases = new Map<string, string>();
+  if (Array.isArray(body.tools)) {
+    const cloaked: unknown[] = [];
+    const present = new Set<string>();
+    for (const tool of body.tools) {
+      if (!tool || typeof tool !== "object") {
+        cloaked.push(tool);
+        continue;
+      }
+      const record = tool as Record<string, unknown>;
+      const name = typeof record.name === "string" ? record.name : "";
+      if (!name) {
+        cloaked.push(tool);
+        continue;
+      }
+      const suffixed = name.endsWith(CLAUDE_TOOL_SUFFIX)
+        ? name
+        : `${name}${CLAUDE_TOOL_SUFFIX}`;
+      aliases.set(suffixed, name);
+      present.add(suffixed);
+      cloaked.push({ ...record, name: suffixed });
+    }
+    for (const decoy of CLAUDE_DECOY_TOOL_NAMES) {
+      if (present.has(decoy)) continue;
+      cloaked.push({
+        name: decoy,
+        description: "This tool is currently unavailable.",
+        input_schema: { type: "object", properties: {} },
+      });
+    }
+    body.tools = cloaked;
+  }
+  if (Array.isArray(body.messages)) {
+    for (const message of body.messages) {
+      if (!message || typeof message !== "object") continue;
+      const content = (message as { content?: unknown }).content;
+      if (!Array.isArray(content)) continue;
+      for (const block of content) {
+        if (!block || typeof block !== "object") continue;
+        const record = block as Record<string, unknown>;
+        if (record.type !== "tool_use") continue;
+        const name = typeof record.name === "string" ? record.name : "";
+        if (name && !name.endsWith(CLAUDE_TOOL_SUFFIX)) {
+          const suffixed = `${name}${CLAUDE_TOOL_SUFFIX}`;
+          aliases.set(suffixed, name);
+          record.name = suffixed;
+        }
+      }
+    }
+  }
+  return aliases;
+}
+
+/** Renames cloaked tool names back on the streamed tool_use blocks. */
+function renameCloakedStream(
+  stream: ReadableStream<Uint8Array>,
+  aliases: Map<string, string>,
+): ReadableStream<Uint8Array> {
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  let buffer = "";
+  const rewrite = (line: string): string => {
+    const trimmed = line.trimEnd();
+    if (!trimmed.startsWith("data:")) return line;
+    try {
+      const event = JSON.parse(trimmed.slice("data:".length)) as {
+        content_block?: { type?: string; name?: string };
+      };
+      const block = event.content_block;
+      if (block?.type === "tool_use" && block.name) {
+        const original = aliases.get(block.name);
+        if (original) {
+          block.name = original;
+          return `data: ${JSON.stringify(event)}\n`;
+        }
+      }
+    } catch {
+      // Not a JSON data line: pass it through untouched.
+    }
+    return line;
+  };
+  return stream.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        buffer += decoder.decode(chunk, { stream: true });
+        let index = buffer.indexOf("\n");
+        while (index >= 0) {
+          controller.enqueue(
+            encoder.encode(rewrite(buffer.slice(0, index + 1))),
+          );
+          buffer = buffer.slice(index + 1);
+          index = buffer.indexOf("\n");
+        }
+      },
+      flush(controller) {
+        buffer += decoder.decode();
+        if (buffer) controller.enqueue(encoder.encode(rewrite(buffer)));
+      },
+    }),
+  );
+}
+
 function applyClaudeOAuthHeaders(
   headers: Headers,
   accessToken: string,
   hasPdf: boolean,
+  sessionId?: string,
 ): void {
   headers.set("authorization", `Bearer ${accessToken}`);
   headers.delete("x-api-key");
@@ -159,6 +340,8 @@ function applyClaudeOAuthHeaders(
   headers.set("x-stainless-runtime-version", "v24.14.0");
   headers.set("x-stainless-package-version", "0.80.0");
   headers.set("x-stainless-timeout", "600");
+  headers.set("x-stainless-lang", "js");
+  if (sessionId) headers.set("x-claude-code-session-id", sessionId);
 }
 
 /**
@@ -176,6 +359,10 @@ export function createClaudeOAuthFetch(
     (await getOAuthAccess("claude-oauth"))?.accessToken ?? null,
 ): typeof fetch {
   let currentToken = initialAccessToken;
+  const sessionId =
+    typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : "termigo-claude-oauth";
 
   return async (input, init) => {
     const rawUrl =
@@ -186,16 +373,18 @@ export function createClaudeOAuthFetch(
           : input.url;
     const url = rewriteClaudeOAuthUrl(rawUrl);
 
-    let bodyText: string | undefined;
+    let parsedBody: Record<string, unknown> | null = null;
+    let aliases = new Map<string, string>();
     let hasPdf = false;
     if (typeof init?.body === "string") {
       try {
         const parsed = JSON.parse(init.body) as Record<string, unknown>;
         parsed.system = withClaudeCodeIdentity(parsed.system);
         hasPdf = hasPdfDocumentInMessages(parsed.messages);
-        bodyText = JSON.stringify(parsed);
+        aliases = cloakClaudeToolNames(parsed);
+        parsedBody = parsed;
       } catch {
-        bodyText = init.body;
+        parsedBody = null;
       }
     }
 
@@ -203,12 +392,20 @@ export function createClaudeOAuthFetch(
       const headers = new Headers(
         init?.headers ?? (input instanceof Request ? input.headers : undefined),
       );
-      applyClaudeOAuthHeaders(headers, currentToken, hasPdf);
-      return baseFetch(url, {
-        ...init,
-        headers,
-        body: bodyText ?? init?.body,
-      });
+      const sessionUuid = await uuidFromSeed(`session:${sessionId}`);
+      applyClaudeOAuthHeaders(headers, currentToken, hasPdf, sessionUuid);
+      let body = init?.body;
+      if (parsedBody) {
+        const userId = await claudeOAuthUserId(currentToken, sessionId);
+        body = JSON.stringify({
+          ...parsedBody,
+          metadata: {
+            ...((parsedBody.metadata as Record<string, unknown>) ?? {}),
+            user_id: userId,
+          },
+        });
+      }
+      return baseFetch(url, { ...init, headers, body });
     };
 
     let res = await sendOnce();
@@ -233,6 +430,18 @@ export function createClaudeOAuthFetch(
       }
     }
 
+    if (
+      aliases.size > 0 &&
+      res.ok &&
+      res.body &&
+      (res.headers.get("content-type") ?? "").includes("text/event-stream")
+    ) {
+      return new Response(renameCloakedStream(res.body, aliases), {
+        status: res.status,
+        statusText: res.statusText,
+        headers: { "content-type": "text/event-stream" },
+      });
+    }
     return res;
   };
 }

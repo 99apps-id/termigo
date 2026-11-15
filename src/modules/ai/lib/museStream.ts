@@ -1,25 +1,30 @@
 import { sanitizeMuseSseLine } from "./museSse";
 import {
+  chatToNativeResponsesBody,
   chatToResponsesBody,
   isAttestationDenial,
+  museIdentityHeaders,
   responsesStreamToChatSse,
   responsesUrl,
 } from "./museTextTools";
 
 /**
- * Muse stream normalisation, applied as a `fetch` wrapper around the shared
- * proxy fetch. See `museSse.ts` for why the SSE lines need rewriting. Only a
- * successful SSE response is touched; errors and JSON bodies pass through so
- * the SDK's own error handling still sees them.
+ * Muse fetch wrapper around the shared proxy fetch. A chat-completions
+ * post is translated onto Meta's Responses route under the Muse Code CLI
+ * identity (see `museTextTools.ts`): the `muse-build` user agent, the tbh
+ * session headers and the tools as one `muse` namespace tool are what Meta
+ * serves native tool calls to; the old `muse-code/1.0.2` identity on the
+ * chat route was answered with plain chat only. The Responses stream is
+ * buffered and translated back into chat-completions chunks, because a
+ * function_call item is only complete once it has arrived whole.
  *
- * The wrapper also carries the attestation fallback (see
- * `museTextTools.ts`): when Meta refuses the request with
- * `client_attestation_denied`, the credential is remembered and the call is
- * retried on the Responses route under the text tool protocol, with the
- * Responses stream translated back into chat-completions chunks. Later
- * calls with the same credential go straight to the text protocol, so the
- * refusal is paid once per login, not on every step. A pay-as-you-go Model
- * API key is never refused, so it never leaves the native path.
+ * The wrapper also carries the attestation fallback: when Meta still
+ * refuses the native request with `client_attestation_denied`, the
+ * credential is remembered and the call is retried under the text tool
+ * protocol, and later calls with the same credential go straight there, so
+ * the refusal is paid once per login, not on every step. Requests that are
+ * not chat posts pass through untouched, with Muse's SSE tail sanitised
+ * (see `museSse.ts`).
  */
 
 function isEventStream(response: Response): boolean {
@@ -87,6 +92,32 @@ function authorizationOf(
   return "";
 }
 
+function withIdentityHeaders(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+  sessionId: string,
+): Headers {
+  const headers = new Headers(
+    init?.headers ?? (input instanceof Request ? input.headers : undefined),
+  );
+  for (const [key, value] of Object.entries(museIdentityHeaders(sessionId))) {
+    headers.set(key, value);
+  }
+  headers.set("content-type", "application/json");
+  return headers;
+}
+
+async function bufferedChatResponse(
+  response: Response,
+  model: string,
+): Promise<Response> {
+  const sseText = await response.text();
+  return new Response(responsesStreamToChatSse(sseText, model), {
+    status: 200,
+    headers: { "content-type": "text/event-stream" },
+  });
+}
+
 /**
  * Retries one chat request on the Responses route under the text tool
  * protocol and translates the reply back into chat-completions SSE.
@@ -97,6 +128,7 @@ async function textToolRequest(
   base: typeof fetch,
   input: RequestInfo | URL,
   init: RequestInit | undefined,
+  sessionId: string,
 ): Promise<Response | null> {
   if (typeof init?.body !== "string") return null;
   let chatBody: unknown;
@@ -111,6 +143,7 @@ async function textToolRequest(
   if (!url) return null;
   const response = await base(url, {
     ...init,
+    headers: withIdentityHeaders(input, init, sessionId),
     body: JSON.stringify(responsesBody),
   });
   if (!response.ok || !response.body) return response;
@@ -118,21 +151,48 @@ async function textToolRequest(
     typeof responsesBody.model === "string" && responsesBody.model
       ? responsesBody.model
       : "muse";
-  const sseText = await response.text();
-  return new Response(responsesStreamToChatSse(sseText, model), {
-    status: 200,
-    headers: { "content-type": "text/event-stream" },
-  });
+  return bufferedChatResponse(response, model);
 }
 
 export function createMuseFetch(base: typeof fetch): typeof fetch {
+  const sessionId =
+    typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : "termigo-muse";
   return async (input, init) => {
     const authorization = authorizationOf(input, init);
+    const url = urlOf(input);
+    // Only chat-completions posts are translated; everything else keeps
+    // the original pass-through with SSE sanitising.
+    if (!url.endsWith("/chat/completions") || typeof init?.body !== "string") {
+      const response = await base(input, init);
+      if (!response.ok || !response.body || !isEventStream(response)) {
+        return response;
+      }
+      return new Response(sanitizeSseStream(response.body), {
+        status: response.status,
+        statusText: response.statusText,
+        headers: { "content-type": "text/event-stream" },
+      });
+    }
     if (authorization && textToolCredentials.has(authorization)) {
-      const viaText = await textToolRequest(base, input, init);
+      const viaText = await textToolRequest(base, input, init, sessionId);
       if (viaText) return viaText;
     }
-    const response = await base(input, init);
+    let chatBody: unknown;
+    try {
+      chatBody = JSON.parse(init.body);
+    } catch {
+      return base(input, init);
+    }
+    const nativeBody = chatToNativeResponsesBody(chatBody, sessionId);
+    const responsesURL = responsesUrl(url);
+    if (!nativeBody || !responsesURL) return base(input, init);
+    const response = await base(responsesURL, {
+      ...init,
+      headers: withIdentityHeaders(input, init, sessionId),
+      body: JSON.stringify(nativeBody),
+    });
     if (response.status === 403) {
       const bodyText = await response
         .clone()
@@ -140,18 +200,16 @@ export function createMuseFetch(base: typeof fetch): typeof fetch {
         .catch(() => "");
       if (isAttestationDenial(response.status, bodyText)) {
         if (authorization) textToolCredentials.add(authorization);
-        const viaText = await textToolRequest(base, input, init);
+        const viaText = await textToolRequest(base, input, init, sessionId);
         if (viaText) return viaText;
       }
       return response;
     }
-    if (!response.ok || !response.body || !isEventStream(response)) {
-      return response;
-    }
-    return new Response(sanitizeSseStream(response.body), {
-      status: response.status,
-      statusText: response.statusText,
-      headers: { "content-type": "text/event-stream" },
-    });
+    if (!response.ok || !response.body) return response;
+    const model =
+      typeof nativeBody.model === "string" && nativeBody.model
+        ? nativeBody.model
+        : "muse";
+    return bufferedChatResponse(response, model);
   };
 }

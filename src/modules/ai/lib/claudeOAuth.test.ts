@@ -65,6 +65,76 @@ describe("claudeOAuth", () => {
     expect(extractClaudeCodeMinVersion("some other error 2.2.10")).toBeNull();
   });
 
+  it("injects metadata.user_id and cloaks tool names in both directions", async () => {
+    const seenBodies: Array<Record<string, unknown>> = [];
+    const baseFetch = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
+        seenBodies.push(JSON.parse(String(init?.body)));
+        return new Response(
+          'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"read_file_ide","input":{}}}\n\n' +
+            'event: message_stop\ndata: {"type":"message_stop"}\n\n',
+          {
+            status: 200,
+            headers: { "content-type": "text/event-stream" },
+          },
+        );
+      },
+    );
+    const wrapped = createClaudeOAuthFetch(
+      baseFetch as unknown as typeof fetch,
+      "tok-meta",
+      async () => null,
+    );
+    const res = await wrapped("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      body: JSON.stringify({
+        model: "claude-sonnet-5",
+        system: "You are Termigo.",
+        messages: [
+          {
+            role: "assistant",
+            content: [
+              { type: "tool_use", id: "toolu_0", name: "read_file", input: {} },
+            ],
+          },
+        ],
+        tools: [
+          {
+            name: "read_file",
+            description: "Read a file.",
+            input_schema: { type: "object", properties: {} },
+          },
+        ],
+      }),
+    });
+    const body = seenBodies[0];
+    const metadata = body.metadata as { user_id?: string };
+    const userId = JSON.parse(metadata?.user_id ?? "{}") as Record<
+      string,
+      string
+    >;
+    expect(userId.device_id).toMatch(/^[0-9a-f]{64}$/);
+    expect(userId.account_uuid).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    expect(userId.session_id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    const toolNames = (body.tools as Array<{ name: string }>).map(
+      (t) => t.name,
+    );
+    expect(toolNames).toContain("read_file_ide");
+    expect(toolNames).toContain("Bash");
+    expect(toolNames).not.toContain("read_file");
+    const messages = body.messages as Array<{
+      content: Array<{ name?: string }>;
+    }>;
+    expect(messages[0].content[0].name).toBe("read_file_ide");
+    const streamed = await res.text();
+    expect(streamed).toContain('"name":"read_file"');
+    expect(streamed).not.toContain("read_file_ide");
+  });
+
   it("injects identity, headers, refreshes on 401, and upgrades CLI version once", async () => {
     setClaudeCliVersionForTests(null);
     const seenHeaders: Array<Headers> = [];
