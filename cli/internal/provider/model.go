@@ -101,7 +101,9 @@ var models = []Model{
 	// (gemini-3.8-flash-medium); 9router's "(medium)" preset is stripped
 	// before the request and sent as thinkingConfig, so it must not be part
 	// of the id. A wrong id returns 404 "check the model id and base URL".
-	{ID: "antigravity-gemini-4-argon", Provider: "antigravity", Label: "Gemini 4 Argon (Antigravity)", APIID: "gemini-4-argon", Description: "Frontier multimodal Gemini through an Antigravity login.", Tags: []string{"reasoning", "tools", "coding"}},
+	{ID: "antigravity-gemini-4-argon", Provider: "antigravity", Label: "Gemini 4 Argon (Antigravity)", APIID: "gemini-4-argon-high", Description: "Frontier multimodal Gemini through an Antigravity login.", Tags: []string{"reasoning", "tools", "coding"}},
+	{ID: "antigravity-gemini-4-carbon", Provider: "antigravity", Label: "Gemini 4 Carbon (Antigravity)", APIID: "gemini-4-carbon-high", Description: "Gemini 4 mid-tier through an Antigravity login.", Tags: []string{"reasoning", "tools", "coding"}},
+	{ID: "antigravity-gemini-4-hydrogen", Provider: "antigravity", Label: "Gemini 4 Hydrogen (Antigravity)", APIID: "gemini-4-hydrogen-high", Description: "Gemini 4 speed tier through an Antigravity login.", Tags: []string{"fast", "tools", "coding"}},
 	{ID: "antigravity-gemini-3.1-pro", Provider: "antigravity", Label: "Gemini 3.1 Pro (Antigravity)", APIID: "gemini-3.1-pro", Description: "Frontier reasoning Gemini through an Antigravity login.", Tags: []string{"reasoning", "tools", "coding"}},
 	{ID: "antigravity-gemini-3.8-flash", Provider: "antigravity", Label: "Gemini 3.8 Flash (Antigravity)", APIID: "gemini-3.8-flash-medium", Description: "Fast Gemini through an Antigravity login.", Tags: []string{"fast", "tools", "coding"}},
 	{ID: "antigravity-gemini-3.8-flash-high", Provider: "antigravity", Label: "Gemini 3.8 Flash High (Antigravity)", APIID: "gemini-3.8-flash-high", Description: "Deep thinking Gemini Flash through an Antigravity login.", Tags: []string{"reasoning", "tools", "coding"}},

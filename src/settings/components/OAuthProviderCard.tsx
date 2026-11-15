@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { DESTRUCTIVE_ACTION } from "@/lib/toolbarButton";
 import { getProvider, type OAuthProviderId } from "@/modules/ai/config";
+import { Input } from "@/components/ui/input";
 import {
   type OAuthAccount,
   getOAuthAccount,
@@ -10,6 +11,7 @@ import {
   cancelOAuthSignIn,
   signInWithOAuth,
   signOutOAuth,
+  submitOAuthManualCode,
 } from "@/modules/ai/lib/oauthAuth";
 import {
   ArrowRight01Icon,
@@ -27,6 +29,12 @@ type DevicePromptPayload = {
   provider: string;
   user_code: string;
   verification_uri: string;
+};
+
+type ManualCodePromptPayload = {
+  provider: string;
+  authorization_url: string;
+  redirect_uri: string;
 };
 
 const OAUTH_DESCRIPTIONS: Record<OAuthProviderId, string> = {
@@ -56,6 +64,11 @@ export function OAuthProviderCard({ providerId }: Props) {
   const [devicePrompt, setDevicePrompt] = useState<DevicePromptPayload | null>(
     null,
   );
+  const [manualPrompt, setManualPrompt] =
+    useState<ManualCodePromptPayload | null>(null);
+  const [showManualInput, setShowManualInput] = useState(false);
+  const [manualCode, setManualCode] = useState("");
+  const [manualSubmitted, setManualSubmitted] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const reload = useCallback(() => {
@@ -84,28 +97,56 @@ export function OAuthProviderCard({ providerId }: Props) {
         setDevicePrompt(e.payload);
       }
     });
+    const unManual = listen<ManualCodePromptPayload>(
+      "oauth-manual-code-prompt",
+      (e) => {
+        if (e.payload.provider === providerId) {
+          setManualPrompt(e.payload);
+          setShowManualInput(true);
+        }
+      },
+    );
 
     return () => {
       void unUrl.then((f) => f());
       void unChatgpt.then((f) => f());
       void unPrompt.then((f) => f());
+      void unManual.then((f) => f());
     };
   }, [providerId]);
 
-  const signIn = async () => {
+  const signIn = async (manual = false) => {
     setBusy(true);
     setError(null);
     setCopied(false);
     setAuthUrl(null);
     setDevicePrompt(null);
+    setManualPrompt(null);
+    setManualCode("");
+    setManualSubmitted(false);
+    setShowManualInput(manual);
     try {
-      setAccount(await signInWithOAuth(providerId));
+      setAccount(await signInWithOAuth(providerId, { manual }));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
       setAuthUrl(null);
       setDevicePrompt(null);
+      setManualPrompt(null);
+      setShowManualInput(false);
+      setManualCode("");
+      setManualSubmitted(false);
+    }
+  };
+
+  const submitManual = async () => {
+    setError(null);
+    try {
+      await submitOAuthManualCode(manualCode);
+      setManualSubmitted(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -113,6 +154,10 @@ export function OAuthProviderCard({ providerId }: Props) {
     await cancelOAuthSignIn();
     setBusy(false);
     setDevicePrompt(null);
+    setManualPrompt(null);
+    setShowManualInput(false);
+    setManualCode("");
+    setManualSubmitted(false);
     setAuthUrl(null);
   };
 
@@ -227,6 +272,60 @@ export function OAuthProviderCard({ providerId }: Props) {
             </div>
           ) : null}
 
+          {busy &&
+          providerId === "claude-oauth" &&
+          (manualPrompt || showManualInput) ? (
+            <div className="rounded border border-sky-500/30 bg-sky-500/10 p-2 text-[11px]">
+              <div className="font-medium text-sky-400">
+                Paste Claude authorization code (code#state):
+              </div>
+              <p className="mt-0.5 text-[10.5px] text-muted-foreground">
+                After approving in your browser, copy the code shown on the
+                Claude callback page and paste it below.
+              </p>
+              <div className="mt-1.5 flex items-center gap-1.5">
+                <Input
+                  value={manualCode}
+                  onChange={(e) => {
+                    setManualCode(e.target.value);
+                    setManualSubmitted(false);
+                  }}
+                  placeholder="Paste code or code#state here"
+                  className="h-7 flex-1 font-mono text-[11px]"
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-7 px-2.5 text-[11px]"
+                  disabled={!manualCode.trim() || manualSubmitted}
+                  onClick={() => void submitManual()}
+                >
+                  {manualSubmitted ? "Submitted\u2026" : "Submit code"}
+                </Button>
+              </div>
+              {manualPrompt?.authorization_url ? (
+                <div className="mt-1.5 flex items-center gap-1.5">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-6 gap-1 px-2 text-[10px]"
+                    onClick={() => {
+                      void openUrl(manualPrompt.authorization_url);
+                    }}
+                  >
+                    <HugeiconsIcon
+                      icon={ArrowUpRight01Icon}
+                      size={10}
+                      strokeWidth={2}
+                    />
+                    Open Claude sign-in
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
           <div className="flex flex-wrap items-center gap-1.5">
             <Button
               type="button"
@@ -234,7 +333,7 @@ export function OAuthProviderCard({ providerId }: Props) {
               size="sm"
               className="h-6 gap-1 px-2 text-[11px]"
               disabled={false}
-              onClick={() => void (busy ? cancel() : signIn())}
+              onClick={() => void (busy ? cancel() : signIn(false))}
             >
               {busy ? (
                 <Spinner className="size-3" />
@@ -265,6 +364,28 @@ export function OAuthProviderCard({ providerId }: Props) {
               >
                 <HugeiconsIcon icon={Copy01Icon} size={11} strokeWidth={2} />
                 {copied ? "Link copied" : "Copy sign-in link"}
+              </Button>
+            ) : null}
+            {!busy && providerId === "claude-oauth" ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-6 gap-1 px-2 text-[11px]"
+                onClick={() => void signIn(true)}
+              >
+                Paste code manually
+              </Button>
+            ) : null}
+            {busy && providerId === "claude-oauth" && !showManualInput ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-6 gap-1 px-2 text-[11px]"
+                onClick={() => setShowManualInput(true)}
+              >
+                Paste code
               </Button>
             ) : null}
           </div>

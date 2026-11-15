@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   AG_MAX_OUTPUT_TOKENS,
+  agUserAgent,
+  agWireModel,
   buildAntigravityBody,
   newSessionId,
   projectIdFrom,
@@ -159,5 +161,45 @@ describe("projectIdFrom", () => {
     expect(projectIdFrom({ projectId: "xyz" })).toBe("xyz");
     expect(projectIdFrom({ id: "projects/klm" })).toBe("klm");
     expect(projectIdFrom(null)).toBe("");
+  });
+});
+
+describe("agUserAgent", () => {
+  it("names the Antigravity CLI 1.5.9 client the backend catalogues Gemini 4 under", () => {
+    const ua = agUserAgent();
+    expect(ua.startsWith("antigravity/cli/1.5.9 ")).toBe(true);
+    expect(ua).toMatch(/ (windows|darwin|linux)\/(x64|arm64)$/);
+  });
+});
+
+describe("agWireModel", () => {
+  it("appends the level the Cloud Code backend names each Gemini 4 tier by", () => {
+    expect(agWireModel("gemini-4-argon")).toBe("gemini-4-argon-high");
+    expect(agWireModel("antigravity-gemini-4-argon")).toBe(
+      "gemini-4-argon-high",
+    );
+    expect(agWireModel("gemini-4-carbon")).toBe("gemini-4-carbon-high");
+    expect(agWireModel("gemini-4-hydrogen")).toBe("gemini-4-hydrogen-high");
+  });
+
+  it("keeps a level the family actually takes", () => {
+    expect(agWireModel("gemini-4-hydrogen-xhigh")).toBe(
+      "gemini-4-hydrogen-xhigh",
+    );
+    expect(agWireModel("gemini-4-carbon-low")).toBe("gemini-4-carbon-low");
+  });
+
+  it("caps a level the family does not take at its top tier", () => {
+    // Argon stops at high, so the CLI's Hydrogen-only xhigh is not a valid id.
+    expect(agWireModel("gemini-4-argon-xhigh")).toBe("gemini-4-argon-high");
+  });
+
+  it("leaves every other model id alone", () => {
+    expect(agWireModel("gemini-3.8-flash-medium")).toBe(
+      "gemini-3.8-flash-medium",
+    );
+    expect(agWireModel("claude-sonnet-5-5-medium")).toBe(
+      "claude-sonnet-5-5-medium",
+    );
   });
 });

@@ -486,23 +486,27 @@ export async function buildLanguageModel(
     case "claude-oauth": {
       const { createAnthropic } = await import("@ai-sdk/anthropic");
       const { getOAuthAccess } = await import("./oauthAuth");
+      const {
+        CLAUDE_OAUTH_BETA,
+        claudeCliUserAgent,
+        createClaudeOAuthFetch,
+      } = await import("./claudeOAuth");
       const auth = await getOAuthAccess("claude-oauth");
       if (!auth) {
         throw new Error(
-          "Not signed in to Claude (OAuth). Open Settings → Models and sign in.",
+          "Not signed in to Claude (OAuth). Open Settings \u2192 Models and sign in.",
         );
       }
       return createAnthropic({
         baseURL: "https://api.anthropic.com",
         authToken: auth.accessToken,
         headers: {
-          "anthropic-beta":
-            "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14",
+          "anthropic-beta": CLAUDE_OAUTH_BETA,
           "anthropic-dangerous-direct-browser-access": "true",
           "x-app": "cli",
-          "User-Agent": "claude-cli/2.1.280 (external, sdk-cli)",
+          "User-Agent": claudeCliUserAgent(),
         },
-        fetch: apiFetch,
+        fetch: createClaudeOAuthFetch(apiFetch, auth.accessToken),
       })(resolvedModelId);
     }
     case "xai-oauth": {

@@ -4,6 +4,7 @@ import {
   AG_HOST,
   AG_HOST_FALLBACK,
   agUserAgent,
+  agWireModel,
   buildAntigravityBody,
   isObject,
   newSessionId,
@@ -312,5 +313,5 @@ export async function createAntigravityLanguageModel(
     apiKey: token,
     baseURL: AG_HOST,
     fetch: createAntigravityFetch(token, project, session),
-  })(modelId);
+  })(agWireModel(modelId));
 }

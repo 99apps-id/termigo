@@ -12,12 +12,20 @@ export const AG_HOST = "https://daily-cloudcode-pa.googleapis.com";
 export const AG_HOST_FALLBACK = "https://cloudcode-pa.googleapis.com";
 export const AG_MAX_OUTPUT_TOKENS = 64_000;
 
+/**
+ * Client identity the Cloud Code backend reads the model catalogue from.
+ *
+ * The `ide/2.11.0` identity no longer lists the Gemini 4 family (Hydrogen,
+ * Argon, Carbon); the Antigravity CLI 1.5.9 identity does.
+ */
+export const AG_CLIENT = "antigravity/cli/1.5.9";
+
 export function agUserAgent(): string {
   const ua = typeof navigator === "undefined" ? "" : navigator.userAgent;
-  if (/Windows/i.test(ua)) return "antigravity/ide/2.11.0 windows/x64";
-  if (/Macintosh|Mac OS/i.test(ua))
-    return "antigravity/ide/2.11.0 darwin/arm64";
-  return "antigravity/ide/2.11.0 linux/x64";
+  let platform = "linux/x64";
+  if (/Windows/i.test(ua)) platform = "windows/x64";
+  else if (/Macintosh|Mac OS/i.test(ua)) platform = "darwin/arm64";
+  return `${AG_CLIENT} ${platform}`;
 }
 
 export type JsonObject = Record<string, unknown>;
@@ -41,6 +49,47 @@ export function newSessionId(): string {
   for (const byte of bytes) value = (value << 8n) | BigInt(byte);
   value &= 0x7fffffffffffffffn;
   return value.toString();
+}
+
+/** Gemini 4 families the Antigravity CLI 1.5.9 backend serves. */
+const GEMINI4_FAMILIES = ["hydrogen", "argon", "carbon"] as const;
+type Gemini4Family = (typeof GEMINI4_FAMILIES)[number];
+
+/** Levels each family takes, lowest first, as the CLI names its wire ids. */
+const GEMINI4_LEVELS: Record<Gemini4Family, readonly string[]> = {
+  hydrogen: ["low", "medium", "high", "xhigh"],
+  argon: ["low", "medium", "high"],
+  carbon: ["low", "medium", "high"],
+};
+
+/** `hydrogen`, `argon` or `carbon` for a Gemini 4 id, prefixed or not. */
+export function gemini4Family(model: string): Gemini4Family | null {
+  const id = model.replace(/^antigravity-/, "");
+  const rest = id.startsWith("gemini-4-") ? id.slice("gemini-4-".length) : "";
+  const family = rest.split("-")[0];
+  const known = GEMINI4_FAMILIES.find((f) => f === family);
+  return known ?? null;
+}
+
+/**
+ * The wire id the Cloud Code backend expects for a Gemini 4 pick.
+ *
+ * The backend names each tier `gemini-4-<family>-<level>`, so a bare
+ * `gemini-4-argon` is rejected as an unknown model. An id that already ends in
+ * a level the family takes is kept; otherwise "high" is appended, which is the
+ * models' own default. Any other id is returned unchanged.
+ */
+export function agWireModel(modelId: string): string {
+  const family = gemini4Family(modelId);
+  if (!family) return modelId;
+  const id = modelId.replace(/^antigravity-/, "");
+  const base = `gemini-4-${family}`;
+  const levels = GEMINI4_LEVELS[family];
+  if (id.startsWith(`${base}-`)) {
+    const suffix = id.slice(base.length + 1);
+    if (levels.includes(suffix)) return id;
+  }
+  return `${base}-high`;
 }
 
 export function platformCode(): number {

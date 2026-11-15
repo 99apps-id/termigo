@@ -73,13 +73,31 @@ export async function cancelOAuthSignIn(): Promise<void> {
   await invoke("oauth_cancel");
 }
 
+/// Hands a pasted `code#state` to the running sign-in.
+///
+/// Claude's registered redirect is hosted, so the browser ends on a page that
+/// shows the code instead of calling back into the app.
+export async function submitOAuthManualCode(code: string): Promise<void> {
+  await invoke("oauth_submit_manual_code", { code });
+}
+
 export async function signInWithOAuth(
   provider: ProviderId,
+  options?: { manual?: boolean },
 ): Promise<OAuthAccount> {
   const backendProvider = provider === "chatgpt" ? "openai-codex" : provider;
   const tokens = await invoke<OAuthTokens>("oauth_login", {
     provider: backendProvider,
+    manual: options?.manual,
   });
+  // Anthropic answers a later refresh of an empty token with a bare
+  // "Invalid request format", so a login without a refresh token would only
+  // produce a session that dies at the next expiry.
+  if (provider === "claude-oauth" && !tokens.refresh_token?.trim()) {
+    throw new Error(
+      "Claude sign-in returned no refresh_token; sign in again or use the manual code flow",
+    );
+  }
   await writeOAuthTokens(provider, tokens);
   notifyChanged();
   return {
@@ -188,13 +206,15 @@ function logRefreshFailure(provider: ProviderId, e: unknown) {
 
 export async function getOAuthAccess(
   provider: ProviderId,
+  options?: { forceRefresh?: boolean },
 ): Promise<OAuthAccess | null> {
   const t = await readOAuthTokens(provider);
   if (!t) return null;
 
   const nowSecs = Math.floor(Date.now() / 1000);
   const isExpiring =
-    t.expires_at > 0 && t.expires_at - nowSecs < REFRESH_SKEW_SECONDS;
+    Boolean(options?.forceRefresh) ||
+    (t.expires_at > 0 && t.expires_at - nowSecs < REFRESH_SKEW_SECONDS);
 
   if (isExpiring && t.refresh_token) {
     const refreshed = await refreshOAuthTokens(provider, t);

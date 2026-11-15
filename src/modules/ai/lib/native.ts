@@ -1,4 +1,4 @@
-import { currentWorkspaceEnv } from "@/modules/workspace";
+import { currentWorkspaceEnv, type WorkspaceEnv } from "@/modules/workspace";
 import { invoke } from "@tauri-apps/api/core";
 
 export type ReadResult =
@@ -624,6 +624,146 @@ export const native = {
     }),
   browserSessionClose: (sessionId: string) =>
     invoke<void>("browser_session_close", { sessionId }),
+  browserSessionSelect: (sessionId: string, selector: string, value: string) =>
+    invoke<{ value: string }>("browser_session_select", {
+      sessionId,
+      selector,
+      value,
+    }),
+  browserSessionClickAt: (
+    sessionId: string,
+    x: number,
+    y: number,
+    button: string,
+  ) =>
+    invoke<{ clicked: boolean }>("browser_session_click_at", {
+      sessionId,
+      x,
+      y,
+      button,
+    }),
+  browserSessionComposer: (
+    sessionId: string,
+    text: string,
+    selector: string | null,
+    submit: boolean,
+  ) =>
+    invoke<{ typed: number; submitted: boolean }>("browser_session_composer", {
+      sessionId,
+      text,
+      selector,
+      submit,
+    }),
+  browserSessionClickItem: (
+    sessionId: string,
+    text: string,
+    exact: boolean,
+    containerSelector: string | null,
+    index: number,
+    click: boolean,
+  ) =>
+    invoke<{
+      text: string;
+      selector: string | null;
+      x: number;
+      y: number;
+      matches: number;
+      clicked?: boolean;
+    }>("browser_session_click_item", {
+      sessionId,
+      text,
+      exact,
+      containerSelector,
+      index,
+      click,
+    }),
+  browserSessionEval: (
+    sessionId: string,
+    expression: string,
+    awaitPromise: boolean,
+  ) =>
+    invoke<{ value: unknown }>("browser_session_eval", {
+      sessionId,
+      expression,
+      awaitPromise,
+    }),
+  browserSessionCookies: (
+    sessionId: string,
+    action: string,
+    cookies?: unknown[],
+    urls?: string[],
+  ) =>
+    invoke<Record<string, unknown>>("browser_session_cookies", {
+      sessionId,
+      action,
+      cookies,
+      urls,
+    }),
+  browserSessionWait: (sessionId: string, selector: string, timeoutMs: number) =>
+    invoke<{ visible: boolean; elapsed_ms?: number; timeout?: boolean }>(
+      "browser_session_wait",
+      { sessionId, selector, timeoutMs },
+    ),
+  browserSessionScreenshot: (sessionId: string, path: string) =>
+    invoke<{ path: string; bytes: number }>("browser_session_screenshot", {
+      sessionId,
+      path,
+    }),
+  browserSessionResume: (sessionId: string) =>
+    invoke<{
+      session_id: string;
+      profile_dir: string;
+      port: number;
+      url: string;
+      headful: boolean;
+    }>("browser_session_resume", { sessionId }),
+
+  officeXlsxWrite: (path: string, sheets: unknown[], workspace?: WorkspaceEnv) =>
+    invoke<Record<string, unknown>>("office_xlsx_write", { path, sheets, workspace: workspace ?? currentWorkspaceEnv }),
+  officeXlsxRead: (
+    path: string,
+    sheet?: string,
+    maxRows?: number,
+    maxCols?: number,
+    workspace?: WorkspaceEnv,
+  ) =>
+    invoke<Record<string, unknown>>("office_xlsx_read", {
+      path,
+      sheet,
+      maxRows,
+      maxCols,
+      workspace: workspace ?? currentWorkspaceEnv,
+    }),
+  officeDocxWrite: (path: string, title: string | undefined, blocks: unknown[], workspace?: WorkspaceEnv) =>
+    invoke<Record<string, unknown>>("office_docx_write", { path, title, blocks, workspace: workspace ?? currentWorkspaceEnv }),
+  officeDocxRead: (path: string, maxChars?: number, workspace?: WorkspaceEnv) =>
+    invoke<Record<string, unknown>>("office_docx_read", { path, maxChars, workspace: workspace ?? currentWorkspaceEnv }),
+  officePptxWrite: (path: string, slides: unknown[], workspace?: WorkspaceEnv) =>
+    invoke<Record<string, unknown>>("office_pptx_write", { path, slides, workspace: workspace ?? currentWorkspaceEnv }),
+  officePptxRead: (path: string, maxChars?: number, workspace?: WorkspaceEnv) =>
+    invoke<Record<string, unknown>>("office_pptx_read", { path, maxChars, workspace: workspace ?? currentWorkspaceEnv }),
+  officePdfWrite: (path: string, title: string | undefined, blocks: unknown[], workspace?: WorkspaceEnv) =>
+    invoke<Record<string, unknown>>("office_pdf_write", { path, title, blocks, workspace: workspace ?? currentWorkspaceEnv }),
+  officeCsvWrite: (path: string, rows: unknown[][], delimiter?: string, workspace?: WorkspaceEnv) =>
+    invoke<Record<string, unknown>>("office_csv_write", { path, rows, delimiter, workspace: workspace ?? currentWorkspaceEnv }),
+  officeCsvRead: (
+    path: string,
+    delimiter?: string,
+    hasHeader?: boolean,
+    maxRows?: number,
+    workspace?: WorkspaceEnv,
+  ) =>
+    invoke<Record<string, unknown>>("office_csv_read", {
+      path,
+      delimiter,
+      hasHeader,
+      maxRows,
+      workspace: workspace ?? currentWorkspaceEnv,
+    }),
+  officeIcsWrite: (path: string, events: unknown[], workspace?: WorkspaceEnv) =>
+    invoke<Record<string, unknown>>("office_ics_write", { path, events, workspace: workspace ?? currentWorkspaceEnv }),
+  officeIcsRead: (path: string, workspace?: WorkspaceEnv) =>
+    invoke<Record<string, unknown>>("office_ics_read", { path, workspace: workspace ?? currentWorkspaceEnv }),
 
   clipboardGet: () => invoke<string>("clipboard_get"),
   clipboardSet: (text: string) => invoke<void>("clipboard_set", { text }),

@@ -485,6 +485,255 @@ export function buildBrowserTools(ctx: ToolContext) {
       },
     }),
 
+    browser_session_select: tool({
+      description:
+        "Choose an option in a <select> element of a live browser session by value, firing input and change so a React-controlled select updates.",
+      inputSchema: z.object({
+        session_id: z.string(),
+        selector: z.string().describe("CSS selector for the <select> element."),
+        value: z.string().describe("The option value to select."),
+      }),
+      execute: async ({ session_id, selector, value }) => {
+        try {
+          return await native.browserSessionSelect(session_id, selector, value);
+        } catch (e) {
+          return sessionError(e);
+        }
+      },
+    }),
+
+    browser_session_click_at: tool({
+      description:
+        "Dispatch a real mouse press and release at viewport coordinates in a live browser session. Use it when a selector click is refused or the target has no stable selector; browser_session_click_item returns the x and y to pass here.",
+      inputSchema: z.object({
+        session_id: z.string(),
+        x: z.number().describe("Viewport x in CSS pixels."),
+        y: z.number().describe("Viewport y in CSS pixels."),
+        button: z
+          .enum(["left", "right", "middle"])
+          .optional()
+          .default("left")
+          .describe("Mouse button. Defaults to left."),
+      }),
+      execute: async ({ session_id, x, y, button = "left" }) => {
+        try {
+          return await native.browserSessionClickAt(session_id, x, y, button);
+        } catch (e) {
+          return sessionError(e);
+        }
+      },
+    }),
+
+    browser_session_composer: tool({
+      description:
+        "Type into a live browser session's message box, chat composer or any contenteditable/textarea, the way a person does, and optionally press Enter to send. Prefer it over browser_session_type on rich editors that ignore a plain value assignment.",
+      inputSchema: z.object({
+        session_id: z.string(),
+        text: z.string().describe("The text to insert at the caret."),
+        selector: z
+          .string()
+          .optional()
+          .describe(
+            "CSS selector for the composer. Omit to use the first visible contenteditable, textarea or textbox.",
+          ),
+        submit: z
+          .boolean()
+          .optional()
+          .default(false)
+          .describe("Press Enter after typing. Defaults to false."),
+      }),
+      execute: async ({ session_id, text, selector, submit = false }) => {
+        try {
+          return await native.browserSessionComposer(
+            session_id,
+            text,
+            selector ?? null,
+            submit,
+          );
+        } catch (e) {
+          return sessionError(e);
+        }
+      },
+    }),
+
+    browser_session_click_item: tool({
+      description:
+        "Find a visible item by its text inside a live browser session and click its centre with real mouse events. Use it for search results, list rows, menu entries and links whose text you can see but whose selector you do not know.",
+      inputSchema: z.object({
+        session_id: z.string(),
+        text: z.string().describe("Visible text of the item to click."),
+        exact: z
+          .boolean()
+          .optional()
+          .default(false)
+          .describe(
+            "Require the item text to equal this exactly instead of containing it. Defaults to false.",
+          ),
+        container_selector: z
+          .string()
+          .optional()
+          .describe("Limit the search to this container's items."),
+        index: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .default(0)
+          .describe("Which match to use when several match. Defaults to 0."),
+        click: z
+          .boolean()
+          .optional()
+          .default(true)
+          .describe(
+            "Click the item. Set false to only locate it and read its coordinates. Defaults to true.",
+          ),
+      }),
+      execute: async ({
+        session_id,
+        text,
+        exact = false,
+        container_selector,
+        index = 0,
+        click = true,
+      }) => {
+        try {
+          return await native.browserSessionClickItem(
+            session_id,
+            text,
+            exact,
+            container_selector ?? null,
+            index,
+            click,
+          );
+        } catch (e) {
+          return sessionError(e);
+        }
+      },
+    }),
+
+    browser_session_eval: tool({
+      description:
+        "Evaluate a JavaScript expression in the page of a live browser session and return its value. Awaits promises. Use it to read state the DOM text does not expose, or to drive a widget no other tool reaches.",
+      inputSchema: z.object({
+        session_id: z.string(),
+        expression: z
+          .string()
+          .describe("JavaScript expression or promise; its value is returned."),
+        await_promise: z
+          .boolean()
+          .optional()
+          .default(true)
+          .describe("Await a returned promise. Defaults to true."),
+      }),
+      execute: async ({ session_id, expression, await_promise = true }) => {
+        try {
+          return await native.browserSessionEval(
+            session_id,
+            expression,
+            await_promise,
+          );
+        } catch (e) {
+          return sessionError(e);
+        }
+      },
+    }),
+
+    browser_session_cookies: tool({
+      description:
+        "Read, write or clear the cookies of a live browser session. Use it to check whether a login is still valid, or to seed a session cookie for an authenticated API call.",
+      inputSchema: z.object({
+        session_id: z.string(),
+        action: z
+          .enum(["get", "set", "clear"])
+          .optional()
+          .default("get")
+          .describe("Cookie operation. Defaults to get."),
+        cookies: z
+          .array(z.record(z.string(), z.unknown()))
+          .optional()
+          .describe(
+            "Cookies for action=set. Each needs name, value and either domain or url.",
+          ),
+        urls: z
+          .array(z.string())
+          .optional()
+          .describe("Limit action=get to these URLs."),
+      }),
+      execute: async ({ session_id, action = "get", cookies, urls }) => {
+        try {
+          return await native.browserSessionCookies(
+            session_id,
+            action,
+            cookies,
+            urls,
+          );
+        } catch (e) {
+          return sessionError(e);
+        }
+      },
+    }),
+
+    browser_session_wait: tool({
+      description:
+        "Wait until a CSS selector matches an element that is visible in a live browser session. Use it after navigating or submitting, instead of guessing with a fixed sleep.",
+      inputSchema: z.object({
+        session_id: z.string(),
+        selector: z.string(),
+        timeout_ms: z
+          .number()
+          .int()
+          .min(100)
+          .max(30000)
+          .optional()
+          .default(5000)
+          .describe("Maximum wait in milliseconds. Defaults to 5000."),
+      }),
+      execute: async ({ session_id, selector, timeout_ms = 5000 }) => {
+        try {
+          return await native.browserSessionWait(
+            session_id,
+            selector,
+            timeout_ms,
+          );
+        } catch (e) {
+          return sessionError(e);
+        }
+      },
+    }),
+
+    browser_session_screenshot: tool({
+      description:
+        "Capture the current page of a live browser session as a PNG and save it. Returns the saved path; read the image with read_image when the answer depends on how the page looks.",
+      inputSchema: z.object({
+        session_id: z.string(),
+        path: z
+          .string()
+          .describe("Workspace path for the PNG; must end with .png."),
+      }),
+      execute: async ({ session_id, path }) => {
+        try {
+          return await native.browserSessionScreenshot(session_id, path);
+        } catch (e) {
+          return sessionError(e);
+        }
+      },
+    }),
+
+    browser_session_resume: tool({
+      description:
+        "Reopen a saved browser session by name after its process exited, keeping the same profile so cookies and logins survive. Use browser_session_list to see the saved names.",
+      inputSchema: z.object({
+        session_id: z.string().describe("The saved session name."),
+      }),
+      execute: async ({ session_id }) => {
+        try {
+          return await native.browserSessionResume(session_id);
+        } catch (e) {
+          return sessionError(e);
+        }
+      },
+    }),
+
     browser_open: tool({
       description:
         "Open a web URL in an in-app browser tab, next to the terminal, and switch to it. The page renders in a real embedded browser (runs JavaScript, so JS-heavy sites work). Use it to show the user a site or to render a page. To read a page's content, prefer the `fetch` tool. SSRF targets are refused.",

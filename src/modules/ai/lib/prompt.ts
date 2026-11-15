@@ -19,7 +19,7 @@ export function prepareAgentPrompt(
     system.push({ role: "system", content: planInstructions });
   }
   const messages = history.slice();
-  if (provider !== "anthropic") return { system, messages };
+  if (provider !== "anthropic" && provider !== "claude-oauth") return { system, messages };
 
   system[0] = withAnthropicCacheMarker(system[0]);
   const lastIdx = messages.length - 1;

@@ -1800,7 +1800,29 @@ export const MODELS = [
       "Next-generation flagship Gemini through a Google Antigravity login.",
     capabilities: { intelligence: 5, speed: 3, cost: 5 },
     tags: ["reasoning", "tools", "coding"],
-    apiModelId: "gemini-4-argon",
+    apiModelId: "gemini-4-argon-high",
+  },
+  {
+    id: "antigravity-gemini-4-carbon",
+    provider: "antigravity",
+    label: "Gemini 4 Carbon (Antigravity)",
+    hint: "Balanced",
+    description:
+      "Gemini 4 mid-tier through a Google Antigravity login.",
+    capabilities: { intelligence: 4, speed: 4, cost: 5 },
+    tags: ["reasoning", "tools", "coding"],
+    apiModelId: "gemini-4-carbon-high",
+  },
+  {
+    id: "antigravity-gemini-4-hydrogen",
+    provider: "antigravity",
+    label: "Gemini 4 Hydrogen (Antigravity)",
+    hint: "Fast",
+    description:
+      "Gemini 4 speed tier through a Google Antigravity login.",
+    capabilities: { intelligence: 4, speed: 5, cost: 5 },
+    tags: ["fast", "tools", "coding"],
+    apiModelId: "gemini-4-hydrogen-high",
   },
   {
     id: "antigravity-gemini-3.1-pro",
@@ -2408,6 +2430,8 @@ export const MODEL_CONTEXT_LIMITS: Record<string, number> = {
   // Antigravity serves Gemini and Claude through the Cloud Code backend. Keyed
   // by the registry id, the model the picker actually stores.
   "antigravity-gemini-4-argon": 2_000_000,
+  "antigravity-gemini-4-carbon": 2_000_000,
+  "antigravity-gemini-4-hydrogen": 2_000_000,
   "antigravity-gemini-3.1-pro": 1_048_576,
   "antigravity-gemini-3.8-flash": 1_048_576,
   "antigravity-gemini-3.8-flash-high": 1_048_576,

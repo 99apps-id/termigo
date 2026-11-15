@@ -38,6 +38,7 @@ import { buildInvariantTools } from "./invariant";
 import { buildLspTools } from "./lsp";
 import { buildMcpOAuthTools } from "./mcpOAuth";
 import { buildMemoryTools } from "./memory";
+import { buildOfficeTools } from "./office";
 import { buildPdfTools } from "./pdf";
 import { buildPolicyTools } from "./policyTools";
 import { buildProcessTools } from "./process";
@@ -345,6 +346,7 @@ export function buildTools(
     ...buildBrowserTools(ctx),
     ...buildSqlTools(),
     ...buildWebSearchTools(),
+    ...buildOfficeTools(ctx),
     ...buildPdfTools(ctx),
     ...buildImageTools(ctx),
     ...buildMcpOAuthTools(),

@@ -48,6 +48,21 @@ describe("prepareAgentPrompt", () => {
     );
   });
 
+  it("also places Anthropic cache markers for claude-oauth", () => {
+    const prompt = prepareAgentPrompt(
+      "Stable instructions",
+      null,
+      history,
+      "claude-oauth",
+    );
+    expect(prompt.system[0].providerOptions).toEqual({
+      anthropic: { cacheControl: { type: "ephemeral", ttl: "1h" } },
+    });
+    expect(prompt.messages[1].providerOptions).toEqual({
+      anthropic: { cacheControl: { type: "ephemeral", ttl: "1h" } },
+    });
+  });
+
   it("does not trigger the SDK system-message warning", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const model = new MockLanguageModelV3({

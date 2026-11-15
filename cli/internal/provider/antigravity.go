@@ -58,7 +58,7 @@ func agUserAgent() string {
 	case "arm":
 		arch = "arm"
 	}
-	return fmt.Sprintf("antigravity/ide/2.11.0 %s/%s", platform, arch)
+	return fmt.Sprintf("antigravity/cli/1.5.9 %s/%s", platform, arch)
 }
 
 // The onboarding endpoints are variables so tests can point them at a server.

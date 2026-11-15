@@ -12,6 +12,7 @@ pub mod history;
 pub mod lsp;
 pub mod mcp;
 pub mod net;
+pub mod office;
 pub mod oauth;
 pub mod proc;
 pub mod pty;
