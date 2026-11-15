@@ -71,7 +71,7 @@ base64 = "0.23"
 ring = "0.17"
 url = "2"
 russh = { version = "0.60", default-features = false, features = ["ring", "flate2", "rsa"] }
-russh-sftp = "2.1"
+russh-sftp = "3.0"
 zip = { version = "4", default-features = false, features = ["deflate"] }
 # Office documents. calamine reads xlsx/xls/ods and rust_xlsxwriter writes
 # xlsx; docx and pptx are written directly as OOXML packages over the zip and
