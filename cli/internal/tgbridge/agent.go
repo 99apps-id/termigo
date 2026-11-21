@@ -24,6 +24,12 @@ type Agent struct {
 	model     provider.Model
 	session   *coder.Session
 	cancel    context.CancelFunc
+
+	// steerMu guards the messages typed while a turn is running and whether one
+	// is. They are separate from mu so a steer is never stuck behind the turn.
+	steerMu sync.Mutex
+	steers  []string
+	turning bool
 }
 
 // NewAgent builds a bridge for a provider and model.
@@ -89,7 +95,69 @@ func (a *Agent) RunPromptWithImage(ctx context.Context, prompt, mediaType, data 
 	return a.run(ctx, prompt, []provider.Image{{MediaType: mediaType, Data: data}}, progress)
 }
 
+// Steer queues a message for the turn that is running, and reports false when
+// none is, so the bot can treat the message as a new prompt instead.
+func (a *Agent) Steer(prompt string) bool {
+	text := strings.TrimSpace(prompt)
+	if text == "" {
+		return false
+	}
+	a.steerMu.Lock()
+	defer a.steerMu.Unlock()
+	if !a.turning {
+		return false
+	}
+	a.steers = append(a.steers, text)
+	return true
+}
+
+func (a *Agent) takeSteers() []string {
+	a.steerMu.Lock()
+	defer a.steerMu.Unlock()
+	taken := a.steers
+	a.steers = nil
+	return taken
+}
+
+// settle ends the turn, unless a steer arrived after the last step took its
+// share: those come back so they run as a follow-up turn instead of being lost
+// between the model's final answer and the end of the turn.
+func (a *Agent) settle(abandon bool) []string {
+	a.steerMu.Lock()
+	defer a.steerMu.Unlock()
+	pending := a.steers
+	a.steers = nil
+	if abandon || len(pending) == 0 {
+		a.turning = false
+		return nil
+	}
+	return pending
+}
+
 func (a *Agent) run(ctx context.Context, prompt string, images []provider.Image, progress func(string)) (string, error) {
+	a.steerMu.Lock()
+	a.turning = true
+	a.steerMu.Unlock()
+
+	var answers []string
+	for {
+		answer, err := a.runOnce(ctx, prompt, images, progress)
+		if err != nil {
+			a.settle(true)
+			return strings.Join(answers, "\n\n"), err
+		}
+		if strings.TrimSpace(answer) != "" {
+			answers = append(answers, answer)
+		}
+		pending := a.settle(ctx.Err() != nil)
+		if len(pending) == 0 {
+			return strings.Join(answers, "\n\n"), nil
+		}
+		prompt, images = strings.Join(pending, "\n\n"), nil
+	}
+}
+
+func (a *Agent) runOnce(ctx context.Context, prompt string, images []provider.Image, progress func(string)) (string, error) {
 	a.mu.Lock()
 	client := a.client
 	model := a.model
@@ -118,7 +186,7 @@ func (a *Agent) run(ctx context.Context, prompt string, images []provider.Image,
 			return
 		}
 		if event.Type == provider.EventToolCall && event.ToolCall != nil {
-			progress("tool: " + event.ToolCall.Name)
+			progress(coder.ToolLabel(*event.ToolCall))
 		}
 	}
 	return coder.Run(runCtx, coder.Options{
@@ -126,6 +194,7 @@ func (a *Agent) run(ctx context.Context, prompt string, images []provider.Image,
 		Model:   model.WireID(),
 		Images:  images,
 		Session: session,
+		Steer:   a.takeSteers,
 		Env: &coder.Env{
 			Workspace: a.workspace,
 			Trusted:   true,

@@ -37,6 +37,27 @@ type Options struct {
 	// Tools are extra tools offered alongside the built-ins, such as the ones
 	// an MCP server exposes.
 	Tools []Tool
+	// Steer, when set, is asked for messages the operator typed while the run
+	// was working. They are added as user messages before the next step, so a
+	// correction lands in the turn in flight instead of waiting for it to end.
+	Steer func() []string
+}
+
+// appendSteer adds the operator's mid-run messages to the conversation and
+// reports whether any were added.
+func appendSteer(messages []provider.Message, steer func() []string) ([]provider.Message, bool) {
+	if steer == nil {
+		return messages, false
+	}
+	added := false
+	for _, text := range steer() {
+		if strings.TrimSpace(text) == "" {
+			continue
+		}
+		messages = append(messages, provider.Message{Role: provider.RoleUser, Content: text})
+		added = true
+	}
+	return messages, added
 }
 
 // Run drives one coding turn: stream a completion, execute any tool calls, feed
@@ -89,6 +110,16 @@ func Run(ctx context.Context, opts Options, prompt string, emit func(provider.St
 	}
 
 	for step := 0; step < maxSteps; step++ {
+		// The messages end on a complete exchange here (the prompt, or tool
+		// results), so a user message can be added without splitting a call from
+		// its result. A steer is new information, so it also clears the
+		// repetition guard: the operator has a reason for the model to try again.
+		if step > 0 {
+			var steered bool
+			if messages, steered = appendSteer(messages, opts.Steer); steered {
+				*guard = loopGuard{}
+			}
+		}
 		var text strings.Builder
 		var reasoning strings.Builder
 		var calls []provider.ToolCall

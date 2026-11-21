@@ -6,6 +6,7 @@ package tui
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/textarea"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -40,9 +42,10 @@ type block struct {
 }
 
 type eventMsg struct {
-	kind blockKind
-	text string
-	done bool
+	kind  blockKind
+	text  string
+	done  bool
+	usage *provider.Usage
 }
 
 type errMsg struct{ err error }
@@ -85,14 +88,29 @@ type Model struct {
 	sessionAllowedMu sync.Mutex
 	sessionAllowed   map[string]bool
 
-	input   textarea.Model
-	blocks  []block
-	width   int
-	height  int
-	running bool
-	cancel  context.CancelFunc
-	events  chan eventMsg
-	program *tea.Program
+	input    textarea.Model
+	viewport viewport.Model
+	blocks   []block
+	width    int
+	height   int
+	running  bool
+	cancel   context.CancelFunc
+	events   chan eventMsg
+	program  *tea.Program
+
+	// lastPrompt is the input of the most recent request: how full the context
+	// is right now. The session total adds every step, and each step re-sends the
+	// history, so it passes the window and says nothing about fill.
+	lastPrompt  int
+	runStarted  time.Time
+	interrupted bool
+	quitArmedAt time.Time
+	// showReasoning expands the model's thinking; collapsed it is one line.
+	showReasoning bool
+	// steers are messages typed while a run is working. The agent takes them
+	// before its next step, and any left when the run ends start the next turn.
+	steerMu sync.Mutex
+	steers  []string
 
 	pendingTool   string
 	pendingDetail string
@@ -164,6 +182,7 @@ func Run(store *secrets.Store, workspace string, model provider.Model, session *
 		trusted:        cfg.IsTrusted(workspace),
 		sessionAllowed: map[string]bool{},
 		input:          input,
+		viewport:       viewport.New(0, 0),
 		events:         make(chan eventMsg, 256),
 		blocks:         []block{{kind: blockNotice, text: intro}},
 	}
@@ -176,20 +195,59 @@ func Run(store *secrets.Store, workspace string, model provider.Model, session *
 func (m *Model) Init() tea.Cmd { return textarea.Blink }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	model, cmd := m.update(msg)
+	m.refresh()
+	return model, cmd
+}
+
+// layout sizes the composer and gives the transcript every row that is left.
+func (m *Model) layout() {
+	m.input.SetWidth(max(20, m.width-4))
+	if m.height > 10 {
+		m.input.SetHeight(3)
+	}
+	m.viewport.Width = m.width
+	m.viewport.Height = max(3, m.height-m.input.Height()-3)
+}
+
+// refresh rebuilds the transcript. It stays pinned to the bottom while the
+// operator has not scrolled up, and leaves their place alone once they have.
+func (m *Model) refresh() {
+	follow := m.viewport.AtBottom()
+	m.viewport.SetContent(m.content())
+	if follow {
+		m.viewport.GotoBottom()
+	}
+}
+
+func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch typed := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = typed.Width
 		m.height = typed.Height
-		m.input.SetWidth(max(20, typed.Width-4))
-		if typed.Height > 10 {
-			m.input.SetHeight(3)
-		}
+		m.layout()
 		return m, nil
 
 	case eventMsg:
+		if typed.usage != nil {
+			if typed.usage.PromptTokens > 0 {
+				m.lastPrompt = typed.usage.PromptTokens
+			}
+			return m, m.waitForEvent()
+		}
 		if typed.done {
+			interrupted := m.interrupted
 			m.running = false
 			m.cancel = nil
+			m.interrupted = false
+			queued := m.takeSteer()
+			if interrupted {
+				m.appendBlock(blockNotice, "Interrupted.")
+				return m, nil
+			}
+			if len(queued) > 0 {
+				return m.startRun(strings.Join(queued, "\n\n"))
+			}
 			return m, nil
 		}
 		m.appendBlock(typed.kind, typed.text)
@@ -263,19 +321,54 @@ func (m *Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch key.String() {
 	case "ctrl+c":
-		if m.cancel != nil {
-			m.cancel()
+		// Ctrl+C stops what is happening before it ends the program: a run is
+		// interrupted, a draft is cleared, and only an idle empty prompt quits,
+		// after a second press, so one stray key cannot throw a session away.
+		switch {
+		case m.running:
+			m.interrupt()
+		case strings.TrimSpace(m.input.Value()) != "":
+			m.input.Reset()
+		case !m.quitArmedAt.IsZero() && time.Since(m.quitArmedAt) < 2*time.Second:
+			if m.session != nil {
+				_ = m.session.Save()
+			}
+			return m, tea.Quit
+		default:
+			m.quitArmedAt = time.Now()
+			m.appendBlock(blockNotice, "Press Ctrl+C again to quit.")
 		}
-		return m, tea.Quit
+		return m, nil
+	case "esc":
+		if m.running {
+			m.interrupt()
+		}
+		return m, nil
 	case "ctrl+y":
 		m.copyReply(1)
 		return m, nil
+	case "ctrl+o":
+		m.showReasoning = !m.showReasoning
+		return m, nil
+	case "pgup", "pgdown":
+		var cmd tea.Cmd
+		m.viewport, cmd = m.viewport.Update(key)
+		return m, cmd
 	case "enter":
-		if m.running {
-			return m, nil
-		}
 		value := strings.TrimSpace(m.input.Value())
 		if value == "" {
+			return m, nil
+		}
+		if m.running {
+			// A command changes state the run is using, so it waits; a plain
+			// message is a correction, and goes to the run.
+			if strings.HasPrefix(value, "/") {
+				m.appendBlock(blockNotice, "Commands wait for the run to finish. Esc interrupts it.")
+				return m, nil
+			}
+			m.input.Reset()
+			m.queueSteer(value)
+			m.appendBlock(blockNotice, "Queued for the run: "+value)
 			return m, nil
 		}
 		m.input.Reset()
@@ -285,18 +378,42 @@ func (m *Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.startRun(value)
 	}
 
-	if m.running {
-		return m, nil
-	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(key)
 	return m, cmd
+}
+
+// interrupt stops the run in flight. The run reports back through its done
+// event, which is where the transcript says so.
+func (m *Model) interrupt() {
+	if m.cancel == nil {
+		return
+	}
+	m.interrupted = true
+	m.cancel()
+}
+
+func (m *Model) queueSteer(text string) {
+	m.steerMu.Lock()
+	m.steers = append(m.steers, text)
+	m.steerMu.Unlock()
+}
+
+func (m *Model) takeSteer() []string {
+	m.steerMu.Lock()
+	defer m.steerMu.Unlock()
+	taken := m.steers
+	m.steers = nil
+	return taken
 }
 
 func (m *Model) handleSlash(value string) (tea.Model, tea.Cmd) {
 	fields := strings.Fields(value)
 	switch strings.ToLower(fields[0]) {
 	case "/quit", "/exit":
+		if m.session != nil {
+			_ = m.session.Save()
+		}
 		return m, tea.Quit
 	case "/help":
 		m.appendBlock(blockNotice, "Commands: /model [query] pick provider then model, /providers, /settings [key value], /status, /cost, /setup, /key <provider> <key>, /login <provider>, /sessions, /copy [n], /new, /help, /quit. Enter sends, Ctrl+J newline, Ctrl+Y copies the last reply. Approvals: y once, s for this session, Esc denies. Start with --continue to resume the last session.")
@@ -661,6 +778,7 @@ func (m *Model) setModel(model provider.Model) {
 func (m *Model) startRun(prompt string) (tea.Model, tea.Cmd) {
 	m.appendBlock(blockUser, prompt)
 	m.running = true
+	m.runStarted = time.Now()
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
 
@@ -684,7 +802,7 @@ func (m *Model) startRun(prompt string) (tea.Model, tea.Cmd) {
 			Approve:   approve,
 		}
 		mcpTools := m.mcpTools
-		_, err := coder.Run(ctx, coder.Options{Client: client, Model: model.WireID(), Env: env, Session: session, Tools: mcpTools}, prompt, func(event provider.StreamEvent) {
+		_, err := coder.Run(ctx, coder.Options{Client: client, Model: model.WireID(), Env: env, Session: session, Tools: mcpTools, Steer: m.takeSteer}, prompt, func(event provider.StreamEvent) {
 			switch event.Type {
 			case provider.EventTextDelta:
 				events <- eventMsg{kind: blockAssistant, text: event.Text}
@@ -692,11 +810,18 @@ func (m *Model) startRun(prompt string) (tea.Model, tea.Cmd) {
 				events <- eventMsg{kind: blockReasoning, text: event.Text}
 			case provider.EventToolCall:
 				if event.ToolCall != nil {
-					events <- eventMsg{kind: blockTool, text: event.ToolCall.Name}
+					events <- eventMsg{kind: blockTool, text: coder.ToolLabel(*event.ToolCall)}
+				}
+			case provider.EventUsage:
+				if event.Usage != nil {
+					usage := *event.Usage
+					events <- eventMsg{usage: &usage}
 				}
 			}
 		})
-		if err != nil {
+		// An interrupt ends the run through the context; it is the operator's
+		// own action, reported once as "Interrupted.", not as a failure.
+		if err != nil && !errors.Is(err, context.Canceled) {
 			events <- eventMsg{kind: blockError, text: err.Error()}
 		}
 		_ = session.Save()
@@ -757,22 +882,44 @@ func (m *Model) appendBlock(kind blockKind, text string) {
 	m.blocks = append(m.blocks, block{kind: kind, text: text})
 }
 
-func (m *Model) View() string {
+// wrapped renders text in a style at the width of the transcript. A line the
+// terminal has to wrap itself makes the renderer miscount rows, which is what
+// left stale and doubled lines on screen.
+func (m *Model) wrapped(style lipgloss.Style, text string) string {
+	if m.width > 1 {
+		style = style.Width(m.width - 1)
+	}
+	return style.Render(text)
+}
+
+// content is the whole transcript, the open picker and the approval prompt: the
+// text the viewport scrolls over.
+func (m *Model) content() string {
 	var builder strings.Builder
-	for _, entry := range m.blocks {
+	for index, entry := range m.blocks {
 		switch entry.kind {
 		case blockUser:
-			builder.WriteString(userStyle.Render("You: ") + entry.text + "\n\n")
+			builder.WriteString(m.wrapped(lipgloss.NewStyle(), userStyle.Render("You: ")+entry.text) + "\n\n")
 		case blockAssistant:
-			builder.WriteString(assistantStyle.Render(entry.text) + "\n")
+			builder.WriteString(m.wrapped(assistantStyle, entry.text) + "\n")
 		case blockReasoning:
-			builder.WriteString(reasoningStyle.Render(entry.text) + "\n")
+			// Thinking is one dim line until the operator asks to read it: the
+			// full text is long and mostly scaffolding, and showing all of it
+			// pushed the answer off screen.
+			switch {
+			case m.showReasoning:
+				builder.WriteString(m.wrapped(reasoningStyle, entry.text) + "\n")
+			case m.running && index == len(m.blocks)-1:
+				builder.WriteString(reasoningStyle.Render("Thinking... (Ctrl+O to read)") + "\n")
+			default:
+				builder.WriteString(reasoningStyle.Render("Thought (Ctrl+O to read)") + "\n")
+			}
 		case blockTool:
-			builder.WriteString(toolStyle.Render("> "+entry.text) + "\n")
+			builder.WriteString(m.wrapped(toolStyle, "> "+entry.text) + "\n")
 		case blockError:
-			builder.WriteString(errorStyle.Render("error: "+entry.text) + "\n")
+			builder.WriteString(m.wrapped(errorStyle, "error: "+entry.text) + "\n")
 		case blockNotice:
-			builder.WriteString(noticeStyle.Render(entry.text) + "\n")
+			builder.WriteString(m.wrapped(noticeStyle, entry.text) + "\n")
 		}
 	}
 
@@ -800,11 +947,57 @@ func (m *Model) View() string {
 	if m.pendingReply != nil {
 		builder.WriteString("\n" + toolStyle.Render(fmt.Sprintf("Approve %s? [y]es once / [s]ession / [n]o  %s", m.pendingTool, m.pendingDetail)) + "\n")
 	}
-	if m.running {
-		builder.WriteString(statusStyle.Render("working...") + "\n")
-	}
-	builder.WriteString("\n" + m.input.View())
 	return builder.String()
+}
+
+// View is the scrollable transcript, one status line, and the composer.
+func (m *Model) View() string {
+	return m.viewport.View() + "\n" + m.statusLine() + "\n" + m.input.View() + "\n" + statusStyle.Render(m.hints())
+}
+
+// statusLine is the numbers the operator watches while a run works: the model,
+// how full the context is, what the session has billed and what it cost.
+func (m *Model) statusLine() string {
+	parts := []string{m.model.ID}
+	if m.lastPrompt > 0 {
+		parts = append(parts, "ctx "+formatTokens(m.lastPrompt))
+	}
+	if m.session != nil && m.session.Usage.TotalTokens > 0 {
+		usage := m.session.Usage
+		parts = append(parts, "billed "+formatTokens(usage.TotalTokens))
+		if price, ok := m.cfg.Price(m.model.ID, m.model.WireID()); ok {
+			parts = append(parts, fmt.Sprintf("~$%.4f", price.Cost(usage.PromptTokens, usage.CompletionTokens)))
+		}
+	}
+	approval := m.approvalMode
+	if approval == "" {
+		approval = "ask"
+	}
+	parts = append(parts, "approval "+approval)
+	if m.running {
+		parts = append(parts, "working "+time.Since(m.runStarted).Round(time.Second).String())
+	}
+	return statusStyle.Render(strings.Join(parts, " | "))
+}
+
+// hints names the keys that apply right now.
+func (m *Model) hints() string {
+	switch {
+	case m.pendingReply != nil:
+		return "y once | s session | n deny"
+	case m.running:
+		return "Enter queues a message for the run | Esc interrupts | PgUp/PgDn scroll"
+	default:
+		return "Enter send | Ctrl+J newline | PgUp/PgDn scroll | Ctrl+O thinking | /help"
+	}
+}
+
+// formatTokens writes a token count the short way: 950, 12.4k.
+func formatTokens(count int) string {
+	if count < 1000 {
+		return strconv.Itoa(count)
+	}
+	return fmt.Sprintf("%.1fk", float64(count)/1000)
 }
 
 func max(a, b int) int {

@@ -6,6 +6,41 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Steering in the Go CLI.** A message typed while a run is working is added
+  to the conversation before the model's next step, and clears the repetition
+  guard, instead of waiting for the turn to end. In the terminal it is queued
+  with Enter; in Telegram it is accepted rather than refused with "a run is
+  already in progress", and one that lands after the last step runs as a
+  follow-up turn so it is never accepted and then dropped.
+- **Chat TUI.** The transcript scrolls (PgUp and PgDn) and wraps to the width,
+  a status line carries the model, the context fill of the latest request, the
+  tokens billed and the cost, Ctrl+O opens the collapsed thinking, and tool
+  lines read as phrases ("Reading main.go") through the shared `ToolLabel`.
+
+### Changed
+
+- **Interrupting.** Ctrl+C and Esc stop a run in flight instead of quitting the
+  TUI mid-turn, which could lose the turn's session save. Ctrl+C clears a
+  draft first, and an idle empty prompt quits on the second press. An
+  interrupt is reported once as "Interrupted." rather than as a "context
+  canceled" error, and drops what was queued for the run.
+- **Telegram progress card** names each tool by what it does instead of
+  `tool: read_file`.
+
+### Fixed
+
+- **Telegram showed the answer twice.** Telegram answers an edit that changes
+  nothing with 400 "message is not modified", which the client reported as a
+  failure; the bot then posted the answer again as a new message. It is now a
+  successful edit. When the card genuinely cannot be rewritten, the answer is
+  sent once and the stale progress card is deleted instead of left above it.
+- **Long lines garbled the transcript.** Lines were not wrapped to the width,
+  so the terminal wrapped them itself and the renderer miscounted rows.
+- The unpaired Telegram bot told the operator to look for the code "in
+  Termixgo"; it now says Termigo.
+
 ## [0.9.28] - 2026-11-15
 
 ### Added

@@ -37,6 +37,13 @@ type Agent interface {
 	Status() string
 }
 
+// Steerer is an optional interface an Agent can implement to take a message
+// into the turn that is already running, instead of refusing it. It reports
+// false when no turn is running.
+type Steerer interface {
+	Steer(prompt string) bool
+}
+
 // DiffProvider is an optional interface an Agent can implement to surface git diffs.
 type DiffProvider interface {
 	GitDiff(ctx context.Context) (string, error)
@@ -183,6 +190,12 @@ func (b *Bot) endRun() {
 	b.runMu.Lock()
 	b.running = false
 	b.runMu.Unlock()
+}
+
+func (b *Bot) isRunning() bool {
+	b.runMu.Lock()
+	defer b.runMu.Unlock()
+	return b.running
 }
 
 func (b *Bot) logf(format string, args ...any) {
@@ -509,7 +522,7 @@ func (b *Bot) handleMessage(ctx context.Context, message *Message) {
 				return
 			}
 		}
-		b.reply(ctx, chatID, "This bot is not paired yet. Send /pair <code> with the code shown in Termixgo.")
+		b.reply(ctx, chatID, "This bot is not paired yet. Send /pair <code> with the code shown in Termigo.")
 		return
 	}
 
@@ -626,7 +639,13 @@ func (b *Bot) handleMessage(ctx context.Context, message *Message) {
 }
 
 // runPrompt runs one text turn and mirrors progress into a single edited card.
+// A message that arrives while a turn is running steers it, when the agent can
+// be steered, rather than being refused.
 func (b *Bot) runPrompt(ctx context.Context, chatID int64, prompt string) {
+	if steerer, ok := b.agent.(Steerer); ok && b.isRunning() && steerer.Steer(prompt) {
+		b.reply(ctx, chatID, "Steer message accepted. The agent will adjust its next steps.")
+		return
+	}
 	b.runWithCard(ctx, chatID, func(runCtx context.Context, progress func(string)) (string, error) {
 		return b.agent.RunPrompt(runCtx, prompt, progress)
 	})
@@ -905,8 +924,13 @@ func (b *Bot) runWithCard(ctx context.Context, chatID int64, run func(context.Co
 	parts := markdownChunks(answer, messageLimit)
 	if err := b.client.EditMarkdown(ctx, chatID, statusMessage.MessageID, parts[0], nil); err != nil {
 		// The card could not be rewritten, so deliver the whole answer as its
-		// own message rather than lose it.
+		// own message rather than lose it. The card is then stale (tool lines
+		// that no longer describe anything), so it is removed instead of left
+		// above the answer.
 		b.replyMarkdown(ctx, chatID, answer)
+		if delErr := b.client.DeleteMessage(ctx, chatID, statusMessage.MessageID); delErr != nil {
+			b.logf("could not remove the stale progress card: %v", delErr)
+		}
 		return
 	}
 	for _, part := range parts[1:] {
