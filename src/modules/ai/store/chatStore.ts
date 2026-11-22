@@ -18,6 +18,7 @@ import {
 } from "../lib/keyring";
 import { pushRecentModel } from "../lib/modelPrefs";
 import {
+  closeSessionStore,
   deleteRunInFlight,
   deleteRunMeta,
   deleteSessionData,
@@ -925,7 +926,10 @@ export function setSessionLeftHandler(
 }
 
 function notifySessionLeft(sessionId: string | null): void {
-  if (!sessionId || !onSessionLeft) return;
+  if (!sessionId) return;
+  flushPersist(sessionId);
+  void closeSessionStore(sessionId);
+  if (!onSessionLeft) return;
   const messages = chats.get(sessionId)?.messages;
   if (!messages || messages.length === 0) return;
   onSessionLeft(sessionId, [...messages]);

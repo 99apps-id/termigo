@@ -1,4 +1,5 @@
 import type { UIMessage } from "@ai-sdk/react";
+import { invoke } from "@tauri-apps/api/core";
 import { LazyStore } from "@tauri-apps/plugin-store";
 
 export type SessionMeta = {
@@ -10,13 +11,154 @@ export type SessionMeta = {
   threadId?: number | null;
 };
 
+export type MigrationReport = {
+  migrated: number;
+  alreadyMigrated: number;
+  backupCreated: boolean;
+};
+
 const STORE_PATH = "termigo-ai-sessions.json";
 const KEY_SESSIONS = "sessions";
 const KEY_ACTIVE = "activeId";
-const messagesKey = (id: string) => `messages:${id}`;
+const KEY_SESSION_MESSAGES = "messages";
+const legacyMessagesKey = (id: string) => `messages:${id}`;
 const runMetaKey = (id: string) => `runMeta:${id}`;
 
 const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
+
+const MAX_OPEN_SESSION_STORES = 2;
+const sessionStores = new Map<string, LazyStore>();
+const sessionLocks = new Map<string, Promise<unknown>>();
+const cleanLegacyIds = new Set<string>();
+let migrationPromise: Promise<MigrationReport | null> | null = null;
+
+/**
+ * Per-session LazyStore filename in `app_data_dir`. Percent-encodes any
+ * character that could be invalid or ambiguous in cross-platform filenames
+ * (notably `:` in Telegram `chatId:threadId` session keys on Windows).
+ */
+export function sessionStorePath(id: string): string {
+  const safe = encodeURIComponent(id).replace(
+    /[*!'().]/g,
+    (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+  return `termigo-ai-session-${safe}.json`;
+}
+
+async function tryInvoke<T>(
+  cmd: string,
+  args?: Record<string, unknown>,
+): Promise<
+  { ok: true; value: T } | { ok: false; unavailable: boolean; error: unknown }
+> {
+  try {
+    const value = await invoke<T>(cmd, args);
+    return { ok: true, value };
+  } catch (error) {
+    const hasTauri =
+      typeof window !== "undefined" &&
+      Boolean(
+        (window as unknown as { __TAURI_INTERNALS__?: unknown })
+          .__TAURI_INTERNALS__,
+      );
+    const unavailable =
+      !hasTauri &&
+      (error instanceof TypeError || error instanceof ReferenceError);
+    return { ok: false, unavailable, error };
+  }
+}
+
+/**
+ * Stream-migrate all legacy `messages:<id>` keys (including orphan keys) out
+ * of `termigo-ai-sessions.json` in Rust with bounded memory before `LazyStore`
+ * ever loads the monolithic file. Safe to call concurrently; runs once per
+ * process and leaves the legacy file untouched if safety cannot be guaranteed.
+ */
+export function ensureLegacyMigrated(): Promise<MigrationReport | null> {
+  if (!migrationPromise) {
+    migrationPromise = (async () => {
+      const res = await tryInvoke<MigrationReport>("sessions_migrate_legacy");
+      if (res.ok) return res.value;
+      if (res.unavailable) return null;
+      migrationPromise = null;
+      throw res.error;
+    })();
+  }
+  return migrationPromise;
+}
+
+/** Reset migration state for unit tests. */
+export function _resetMigrationForTest(): void {
+  migrationPromise = null;
+  cleanLegacyIds.clear();
+}
+
+function getSessionStore(id: string): {
+  store: LazyStore;
+  evicted: Array<[string, LazyStore]>;
+} {
+  const existing = sessionStores.get(id);
+  if (existing) {
+    // Refresh LRU position.
+    sessionStores.delete(id);
+    sessionStores.set(id, existing);
+    return { store: existing, evicted: [] };
+  }
+  const created = new LazyStore(sessionStorePath(id), {
+    defaults: {},
+    autoSave: false,
+  });
+  sessionStores.set(id, created);
+
+  const evicted: Array<[string, LazyStore]> = [];
+  while (sessionStores.size > MAX_OPEN_SESSION_STORES) {
+    const oldest = sessionStores.entries().next().value;
+    if (!oldest) break;
+    const [oldId, oldStore] = oldest;
+    if (oldId === id) break;
+    sessionStores.delete(oldId);
+    evicted.push([oldId, oldStore]);
+  }
+  return { store: created, evicted };
+}
+
+function scheduleEvictedClose(evicted: Array<[string, LazyStore]>): void {
+  for (const [oldId, oldStore] of evicted) {
+    void withSessionLock(oldId, async () => {
+      await oldStore.save().catch(() => {});
+      await oldStore.close().catch(() => {});
+    });
+  }
+}
+
+export async function closeSessionStore(id: string): Promise<void> {
+  await withSessionLock(id, async () => {
+    const s = sessionStores.get(id);
+    if (!s) return;
+    sessionStores.delete(id);
+    await s.save().catch(() => {});
+    await s.close().catch(() => {});
+  });
+}
+
+function withSessionLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
+  const prev = sessionLocks.get(id) ?? Promise.resolve();
+  const next = prev.then(fn, fn);
+  const settled = next.then(
+    () => {
+      if (sessionLocks.get(id) === settled) {
+        sessionLocks.delete(id);
+      }
+    },
+    () => {
+      if (sessionLocks.get(id) === settled) {
+        sessionLocks.delete(id);
+      }
+    },
+  );
+  sessionLocks.set(id, settled);
+  return next;
+}
 
 /**
  * Where the active session's run was left off, persisted so the app can offer
@@ -36,6 +178,7 @@ export type LoadedSessions = {
 };
 
 export async function loadAll(): Promise<LoadedSessions> {
+  await ensureLegacyMigrated();
   // Two reads rather than one `entries()`.
   //
   // The comment here used to say entries() saved an IPC roundtrip, and it does,
@@ -54,7 +197,88 @@ export async function loadAll(): Promise<LoadedSessions> {
 }
 
 export async function loadMessages(id: string): Promise<UIMessage[] | null> {
-  return (await store.get<UIMessage[]>(messagesKey(id))) ?? null;
+  await ensureLegacyMigrated();
+  return withSessionLock(id, async () => {
+    const nativeLoad = await tryInvoke<UIMessage[] | null>(
+      "sessions_load_messages",
+      { id },
+    );
+    if (nativeLoad.ok) {
+      if (nativeLoad.value !== null && nativeLoad.value !== undefined) {
+        return nativeLoad.value;
+      }
+      // Fallback if startup migration was skipped or a legacy key remained.
+      const legacy = await store.get<UIMessage[]>(legacyMessagesKey(id));
+      if (legacy === undefined || legacy === null) {
+        cleanLegacyIds.add(id);
+        return null;
+      }
+      const nativeSave = await tryInvoke<void>("sessions_save_messages", {
+        id,
+        messages: legacy,
+      });
+      if (!nativeSave.ok) {
+        throw nativeSave.error;
+      }
+      try {
+        await store.delete(legacyMessagesKey(id));
+        await store.save();
+        cleanLegacyIds.add(id);
+      } catch {
+        // Non-fatal: the atomic per-session file already holds the full copy.
+      }
+      return legacy;
+    }
+    if (!nativeLoad.unavailable) {
+      throw nativeLoad.error;
+    }
+
+    // LazyStore fallback (used in node tests or non-Tauri environments).
+    const cached = sessionStores.get(id);
+    const sessionStore =
+      cached ??
+      new LazyStore(sessionStorePath(id), { defaults: {}, autoSave: false });
+
+    try {
+      const existing =
+        await sessionStore.get<UIMessage[]>(KEY_SESSION_MESSAGES);
+      if (existing !== undefined && existing !== null) {
+        return existing;
+      }
+
+      // Legacy fallback & lossless migration from monolithic termigo-ai-sessions.json.
+      const legacy = await store.get<UIMessage[]>(legacyMessagesKey(id));
+      if (legacy === undefined || legacy === null) {
+        cleanLegacyIds.add(id);
+        return null;
+      }
+
+      // Flush the per-session store BEFORE deleting from the legacy store so a
+      // crash or write failure never loses messages. If flushing fails, roll back
+      // the in-memory set so a subsequent retry completes the migration cleanly.
+      await sessionStore.set(KEY_SESSION_MESSAGES, legacy);
+      try {
+        await sessionStore.save();
+      } catch (err) {
+        await sessionStore.delete(KEY_SESSION_MESSAGES).catch(() => {});
+        throw err;
+      }
+
+      try {
+        await store.delete(legacyMessagesKey(id));
+        await store.save();
+        cleanLegacyIds.add(id);
+      } catch {
+        // Non-fatal: the per-session store already holds the full copy.
+      }
+
+      return legacy;
+    } finally {
+      if (!cached) {
+        await sessionStore.close().catch(() => {});
+      }
+    }
+  });
 }
 
 /**
@@ -130,10 +354,12 @@ export function capPersistedMessages(messages: UIMessage[]): UIMessage[] {
 }
 
 export async function saveSessionsList(sessions: SessionMeta[]): Promise<void> {
+  await ensureLegacyMigrated();
   await store.set(KEY_SESSIONS, sessions);
 }
 
 export async function saveActiveId(id: string | null): Promise<void> {
+  await ensureLegacyMigrated();
   await store.set(KEY_ACTIVE, id);
 }
 
@@ -141,7 +367,53 @@ export async function saveMessages(
   id: string,
   messages: UIMessage[],
 ): Promise<void> {
-  await store.set(messagesKey(id), capPersistedMessages(messages));
+  await ensureLegacyMigrated();
+  const capped = capPersistedMessages(messages);
+  await withSessionLock(id, async () => {
+    const nativeSave = await tryInvoke<void>("sessions_save_messages", {
+      id,
+      messages: capped,
+    });
+    if (nativeSave.ok) {
+      if (!cleanLegacyIds.has(id)) {
+        if (await store.has(legacyMessagesKey(id))) {
+          try {
+            await store.delete(legacyMessagesKey(id));
+            await store.save();
+            cleanLegacyIds.add(id);
+          } catch {
+            // Non-fatal: atomic per-session file already has the latest copy.
+          }
+        } else {
+          cleanLegacyIds.add(id);
+        }
+      }
+      return;
+    }
+    if (!nativeSave.unavailable) {
+      throw nativeSave.error;
+    }
+
+    const { store: sessionStore, evicted } = getSessionStore(id);
+    scheduleEvictedClose(evicted);
+
+    await sessionStore.set(KEY_SESSION_MESSAGES, capped);
+    await sessionStore.save();
+
+    if (!cleanLegacyIds.has(id)) {
+      if (await store.has(legacyMessagesKey(id))) {
+        try {
+          await store.delete(legacyMessagesKey(id));
+          await store.save();
+          cleanLegacyIds.add(id);
+        } catch {
+          // Non-fatal: the per-session store already has the latest copy.
+        }
+      } else {
+        cleanLegacyIds.add(id);
+      }
+    }
+  });
   try {
     const { indexMessagesBatch } = await import("./fts5");
     const items: Array<{ messageId: string; text: string }> = [];
@@ -163,7 +435,40 @@ export async function saveMessages(
 }
 
 export async function deleteSessionData(id: string): Promise<void> {
-  await store.delete(messagesKey(id));
+  await ensureLegacyMigrated();
+  await withSessionLock(id, async () => {
+    const nativeDel = await tryInvoke<void>("sessions_delete_messages", {
+      id,
+    });
+    if (!nativeDel.ok && !nativeDel.unavailable) {
+      throw nativeDel.error;
+    }
+
+    const existing = sessionStores.get(id);
+    if (existing) {
+      sessionStores.delete(id);
+      await existing.clear().catch(() => {});
+      await existing.save().catch(() => {});
+      await existing.close().catch(() => {});
+    } else if (!nativeDel.ok && nativeDel.unavailable) {
+      const temp = new LazyStore(sessionStorePath(id), {
+        defaults: {},
+        autoSave: false,
+      });
+      await temp.clear().catch(() => {});
+      await temp.save().catch(() => {});
+      await temp.close().catch(() => {});
+    }
+
+    if (!cleanLegacyIds.has(id)) {
+      if (await store.has(legacyMessagesKey(id))) {
+        await store.delete(legacyMessagesKey(id));
+      }
+      cleanLegacyIds.add(id);
+    }
+    await store.delete(runMetaKey(id));
+    await store.delete(runInFlightKey(id));
+  });
   try {
     const { deleteSessionFromIndex } = await import("./fts5");
     void deleteSessionFromIndex(id);
@@ -173,14 +478,17 @@ export async function deleteSessionData(id: string): Promise<void> {
 }
 
 export async function saveRunMeta(id: string, meta: RunMeta): Promise<void> {
+  await ensureLegacyMigrated();
   await store.set(runMetaKey(id), meta);
 }
 
 export async function loadRunMeta(id: string): Promise<RunMeta | null> {
+  await ensureLegacyMigrated();
   return (await store.get<RunMeta>(runMetaKey(id))) ?? null;
 }
 
 export async function deleteRunMeta(id: string): Promise<void> {
+  await ensureLegacyMigrated();
   await store.delete(runMetaKey(id));
 }
 
@@ -193,14 +501,17 @@ export async function deleteRunMeta(id: string): Promise<void> {
 const runInFlightKey = (id: string) => `runInFlight:${id}`;
 
 export async function saveRunInFlight(id: string, at: number): Promise<void> {
+  await ensureLegacyMigrated();
   await store.set(runInFlightKey(id), at);
 }
 
 export async function loadRunInFlight(id: string): Promise<number | null> {
+  await ensureLegacyMigrated();
   return (await store.get<number>(runInFlightKey(id))) ?? null;
 }
 
 export async function deleteRunInFlight(id: string): Promise<void> {
+  await ensureLegacyMigrated();
   await store.delete(runInFlightKey(id));
 }
 

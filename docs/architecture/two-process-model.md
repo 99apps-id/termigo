@@ -142,6 +142,11 @@ The spawn cwd goes through the same workspace authorization registry as every ot
 - `lm_ping` - local-model ping
 - `http_probe` - health-probe a local dev server. Loopback only (`localhost` / `127.0.0.1` / `::1`), no redirects, short bounded timeout; used to wait until a spawned server is listening before opening it in the preview pane
 
+### AI session storage (`src-tauri/src/modules/sessions_store.rs`)
+
+- `sessions_migrate_legacy` - migrate legacy transcripts into per-session files while preserving a backup
+- `sessions_load_messages` / `sessions_save_messages` / `sessions_delete_messages` - read, atomically write, or delete one session transcript
+
 ### Secrets (`src-tauri/src/modules/secrets.rs`)
 
 - `secrets_get` / `secrets_set` / `secrets_delete` / `secrets_get_all` - OS keychain access, service `termigo-ai`

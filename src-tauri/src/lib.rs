@@ -15,7 +15,8 @@ use launch::{get_launch_dir, get_launch_files, parse_launch_target, LaunchDir, L
 use launch::{resolve_launch_target, LaunchEntry};
 use modules::{
     agent, audit, backup, browser, browser_session, chatgpt_auth, codeindex, control, extensions,
-    fs, git, history, lsp, mcp, net, oauth, pty, secrets, shell, sql, ssh, system, workspace,
+    fs, git, history, lsp, mcp, net, oauth, pty, secrets, sessions_store, shell, sql, ssh, system,
+    workspace,
 };
 use settings_window::open_settings_window;
 
@@ -347,6 +348,10 @@ pub fn run() {
             secrets::secrets_set,
             secrets::secrets_delete,
             secrets::secrets_get_all,
+            sessions_store::sessions_migrate_legacy,
+            sessions_store::sessions_save_messages,
+            sessions_store::sessions_load_messages,
+            sessions_store::sessions_delete_messages,
             mcp::mcp_list_servers,
             mcp::mcp_list_tools,
             mcp::mcp_call_tool,
