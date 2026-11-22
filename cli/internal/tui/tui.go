@@ -203,6 +203,8 @@ func Run(store *secrets.Store, workspace string, model provider.Model, session *
 	program := tea.NewProgram(m, tea.WithAltScreen())
 	m.program = program
 	_, err = program.Run()
+	// Servers the agent left running end with the session.
+	coder.StopBackground()
 	return err
 }
 

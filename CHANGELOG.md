@@ -8,6 +8,13 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Plan and background tools in the Go CLI.** `todo_write`, `todo_update` and
+  `todo_read` keep a numbered plan on the session (ids survive a rewrite, one
+  step in progress at a time, a step is found by id or by unique text, and every
+  result repeats the plan so a step left unchecked stays in view).
+  `run_background`, `run_logs`, `run_wait`, `run_kill` and `run_list` run a dev
+  server or watcher across steps; output is read by offset, a wait can end on a
+  ready line, and the processes stop when the TUI exits.
 - **TUI composer.** Typing `/` opens a command menu with descriptions, and `@`
   completes workspace files (dependency and build directories skipped). A
   mentioned file is attached to the prompt, capped at 64 KB, text only and

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/99apps-id/termigo/cli/internal/config"
@@ -28,6 +29,24 @@ type Session struct {
 	// Usage is the token accounting accumulated across every turn, so /cost can
 	// report a session total without recomputing it from the transcript.
 	Usage provider.Usage `json:"usage,omitempty"`
+	// Plan is the task list the agent keeps, saved with the session so it
+	// survives a resume and is read back by todo_read.
+	Plan []Todo `json:"plan,omitempty"`
+
+	planMu sync.Mutex
+}
+
+// Todos returns a copy of the plan.
+func (s *Session) Todos() []Todo {
+	s.planMu.Lock()
+	defer s.planMu.Unlock()
+	return append([]Todo(nil), s.Plan...)
+}
+
+func (s *Session) setTodos(todos []Todo) {
+	s.planMu.Lock()
+	s.Plan = todos
+	s.planMu.Unlock()
 }
 
 // sessionsDir returns the directory that holds the session files, creating it

@@ -16,6 +16,7 @@ const defaultMaxSteps = 40
 // systemPrompt is the coding-agent instruction the runner sends.
 const systemPrompt = "You are a terminal coding agent working in the user's project. " +
 	"Read files before editing them, make the smallest correct change, and verify with a check when one exists. " +
+	"For work of three or more steps, write the plan with todo_write and mark each step completed with todo_update the moment it is done. " +
 	"Use the tools instead of guessing. When the task is done, reply with a short summary."
 
 // Options configures one agent run.
@@ -70,6 +71,14 @@ func Run(ctx context.Context, opts Options, prompt string, emit func(provider.St
 	env := opts.Env
 	if env == nil {
 		env = &Env{}
+	}
+	if env.Session == nil {
+		scoped := *env
+		scoped.Session = opts.Session
+		if scoped.Session == nil {
+			scoped.Session = &Session{}
+		}
+		env = &scoped
 	}
 	registry := DefaultRegistry()
 	if len(opts.Tools) > 0 {
