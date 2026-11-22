@@ -112,6 +112,20 @@ type Model struct {
 	steerMu sync.Mutex
 	steers  []string
 
+	// Composer completion: the rows offered for the token being typed, which
+	// one is selected, and the typed value the operator closed the menu on.
+	files         []string
+	filesLoaded   bool
+	menuKind      int
+	menu          []suggestion
+	menuCursor    int
+	menuStart     int
+	menuDismissed string
+	// history is what was sent from this composer; Up and Down walk it.
+	history   []string
+	histPos   int
+	histDraft string
+
 	pendingTool   string
 	pendingDetail string
 	// pendingReply carries the operator's answer class, not a bare bool,
@@ -207,7 +221,7 @@ func (m *Model) layout() {
 		m.input.SetHeight(3)
 	}
 	m.viewport.Width = m.width
-	m.viewport.Height = max(3, m.height-m.input.Height()-3)
+	m.viewport.Height = max(3, m.height-m.input.Height()-3-len(m.menu))
 }
 
 // refresh rebuilds the transcript. It stays pinned to the bottom while the
@@ -240,6 +254,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.running = false
 			m.cancel = nil
 			m.interrupted = false
+			m.filesLoaded = false
 			queued := m.takeSteer()
 			if interrupted {
 				m.appendBlock(blockNotice, "Interrupted.")
@@ -319,6 +334,34 @@ func (m *Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	if len(m.menu) > 0 {
+		switch key.String() {
+		case "up":
+			m.menuCursor = (m.menuCursor + len(m.menu) - 1) % len(m.menu)
+			return m, nil
+		case "down":
+			m.menuCursor = (m.menuCursor + 1) % len(m.menu)
+			return m, nil
+		case "tab":
+			m.acceptSuggestion()
+			return m, nil
+		case "enter":
+			// A command typed out in full runs; anything else completes first.
+			if m.menuKind == menuFile || strings.TrimSpace(m.input.Value()) != m.menu[m.menuCursor].label {
+				m.acceptSuggestion()
+				return m, nil
+			}
+		case "esc":
+			m.menuDismissed = m.input.Value()
+			m.syncMenu()
+			return m, nil
+		}
+	} else if key.String() == "up" || key.String() == "down" {
+		if m.walkHistory(key.String() == "up") {
+			return m, nil
+		}
+	}
+
 	switch key.String() {
 	case "ctrl+c":
 		// Ctrl+C stops what is happening before it ends the program: a run is
@@ -329,6 +372,7 @@ func (m *Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.interrupt()
 		case strings.TrimSpace(m.input.Value()) != "":
 			m.input.Reset()
+			m.syncMenu()
 		case !m.quitArmedAt.IsZero() && time.Since(m.quitArmedAt) < 2*time.Second:
 			if m.session != nil {
 				_ = m.session.Save()
@@ -367,20 +411,138 @@ func (m *Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.input.Reset()
-			m.queueSteer(value)
+			m.syncMenu()
+			m.remember(value)
+			sent, attached := expandMentions(value, m.workspace)
+			m.queueSteer(sent)
 			m.appendBlock(blockNotice, "Queued for the run: "+value)
+			m.noteAttached(attached)
 			return m, nil
 		}
 		m.input.Reset()
+		m.syncMenu()
+		m.remember(value)
 		if strings.HasPrefix(value, "/") {
 			return m.handleSlash(value)
 		}
-		return m.startRun(value)
+		sent, attached := expandMentions(value, m.workspace)
+		m.noteAttached(attached)
+		return m.startRunWith(value, sent)
 	}
 
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(key)
+	m.syncMenu()
 	return m, cmd
+}
+
+// noteAttached tells the operator which files @ mentions put in front of the
+// model, so nothing is sent that they did not see named.
+func (m *Model) noteAttached(attached []string) {
+	if len(attached) > 0 {
+		m.appendBlock(blockNotice, "Attached: "+strings.Join(attached, ", "))
+	}
+}
+
+// remember keeps a sent line for Up and Down, without repeating the last one.
+func (m *Model) remember(value string) {
+	if n := len(m.history); n == 0 || m.history[n-1] != value {
+		m.history = append(m.history, value)
+	}
+	m.histPos = len(m.history)
+	m.histDraft = ""
+}
+
+// walkHistory steps through earlier lines when the composer holds a single
+// line, so Up and Down still move the cursor inside a multi-line draft. It
+// reports whether it handled the key.
+func (m *Model) walkHistory(older bool) bool {
+	if len(m.history) == 0 || m.input.LineCount() > 1 {
+		return false
+	}
+	if older {
+		if m.histPos == 0 {
+			return true
+		}
+		if m.histPos == len(m.history) {
+			m.histDraft = m.input.Value()
+		}
+		m.histPos--
+	} else {
+		if m.histPos >= len(m.history) {
+			return false
+		}
+		m.histPos++
+	}
+	if m.histPos == len(m.history) {
+		m.input.SetValue(m.histDraft)
+	} else {
+		m.input.SetValue(m.history[m.histPos])
+	}
+	m.menuDismissed = m.input.Value()
+	m.syncMenu()
+	return true
+}
+
+// syncMenu recomputes the completion rows for the composer's current text.
+func (m *Model) syncMenu() {
+	value := m.input.Value()
+	var rows []suggestion
+	kind, start := menuNone, 0
+	if value != m.menuDismissed {
+		m.menuDismissed = ""
+		if !m.filesLoaded && m.workspace != "" && strings.Contains(value, "@") {
+			m.files = listFiles(m.workspace)
+			m.filesLoaded = true
+		}
+		kind, rows, start = completion(value, m.files)
+		// A command changes state the run is using, so it is not offered.
+		if kind == menuSlash && m.running {
+			rows = nil
+		}
+	}
+	if len(rows) == 0 {
+		kind = menuNone
+	}
+	if kind != m.menuKind || len(rows) != len(m.menu) {
+		m.menuCursor = 0
+	}
+	m.menuKind, m.menu, m.menuStart = kind, rows, start
+	m.layout()
+}
+
+// acceptSuggestion puts the selected row into the composer in place of the
+// token being typed.
+func (m *Model) acceptSuggestion() {
+	if len(m.menu) == 0 {
+		return
+	}
+	value := m.input.Value()
+	m.input.SetValue(value[:m.menuStart] + m.menu[m.menuCursor].insert)
+	m.syncMenu()
+}
+
+// menuView draws the completion rows above the status line.
+func (m *Model) menuView() string {
+	if len(m.menu) == 0 {
+		return ""
+	}
+	lines := make([]string, len(m.menu))
+	for index, row := range m.menu {
+		line := row.label
+		if row.desc != "" {
+			line += "  " + row.desc
+		}
+		if m.width > 4 && len([]rune(line)) > m.width-4 {
+			line = string([]rune(line)[:m.width-4])
+		}
+		if index == m.menuCursor {
+			lines[index] = userStyle.Render("> " + line)
+		} else {
+			lines[index] = statusStyle.Render("  " + line)
+		}
+	}
+	return strings.Join(lines, "\n") + "\n"
 }
 
 // interrupt stops the run in flight. The run reports back through its done
@@ -416,7 +578,7 @@ func (m *Model) handleSlash(value string) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Quit
 	case "/help":
-		m.appendBlock(blockNotice, "Commands: /model [query] pick provider then model, /providers, /settings [key value], /status, /cost, /setup, /key <provider> <key>, /login <provider>, /sessions, /copy [n], /new, /help, /quit. Enter sends, Ctrl+J newline, Ctrl+Y copies the last reply. Approvals: y once, s for this session, Esc denies. Start with --continue to resume the last session.")
+		m.appendBlock(blockNotice, "Commands: /model [query] pick provider then model, /providers, /settings [key value], /status, /cost, /setup, /key <provider> <key>, /login <provider>, /sessions, /copy [n], /new, /help, /quit. Enter sends, Ctrl+J newline, Ctrl+Y copies the last reply. Type / for a command menu and @ to attach a file; Up and Down walk earlier messages. Approvals: y once, s for this session, Esc denies. Start with --continue to resume the last session.")
 		return m, nil
 	case "/settings":
 		return m.handleSettings(fields), nil
@@ -776,7 +938,13 @@ func (m *Model) setModel(model provider.Model) {
 }
 
 func (m *Model) startRun(prompt string) (tea.Model, tea.Cmd) {
-	m.appendBlock(blockUser, prompt)
+	return m.startRunWith(prompt, prompt)
+}
+
+// startRunWith shows display in the transcript and sends prompt to the model:
+// they differ when @ mentions added file content the operator need not reread.
+func (m *Model) startRunWith(display, prompt string) (tea.Model, tea.Cmd) {
+	m.appendBlock(blockUser, display)
 	m.running = true
 	m.runStarted = time.Now()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -952,7 +1120,7 @@ func (m *Model) content() string {
 
 // View is the scrollable transcript, one status line, and the composer.
 func (m *Model) View() string {
-	return m.viewport.View() + "\n" + m.statusLine() + "\n" + m.input.View() + "\n" + statusStyle.Render(m.hints())
+	return m.viewport.View() + "\n" + m.menuView() + m.statusLine() + "\n" + m.input.View() + "\n" + statusStyle.Render(m.hints())
 }
 
 // statusLine is the numbers the operator watches while a run works: the model,
@@ -988,7 +1156,7 @@ func (m *Model) hints() string {
 	case m.running:
 		return "Enter queues a message for the run | Esc interrupts | PgUp/PgDn scroll"
 	default:
-		return "Enter send | Ctrl+J newline | PgUp/PgDn scroll | Ctrl+O thinking | /help"
+		return "Enter send | Ctrl+J newline | @file | / commands | Up history | Ctrl+O thinking"
 	}
 }
 

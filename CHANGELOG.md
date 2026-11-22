@@ -8,6 +8,11 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **TUI composer.** Typing `/` opens a command menu with descriptions, and `@`
+  completes workspace files (dependency and build directories skipped). A
+  mentioned file is attached to the prompt, capped at 64 KB, text only and
+  inside the workspace, and the transcript says which files went along. Up and
+  Down walk the messages sent from the composer and restore the unsent draft.
 - **Live answer in the Telegram card.** The answer is written into the card as
   the model produces it (throttled edits, a cursor, open code fences closed for
   display). Text before a tool call is dropped from the card as narration, and
