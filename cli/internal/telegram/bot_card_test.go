@@ -3,6 +3,7 @@ package telegram
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -201,4 +202,82 @@ func TestMessageWhileRunningIsRefusedWithoutSteering(t *testing.T) {
 	if len(sent) != 1 || !strings.Contains(sent[0], "already in progress") {
 		t.Fatalf("got %q", sent)
 	}
+}
+
+// The answer is shown in the card as it is written; a tool call after some text
+// takes it back, because that text was narration; and the final answer replaces
+// the card once, with no second copy.
+func TestCardShowsTheAnswerAsItIsWritten(t *testing.T) {
+	previous := cardEditInterval
+	cardEditInterval = 0
+	t.Cleanup(func() { cardEditInterval = previous })
+
+	api := &scriptedAPI{}
+	bot := newCardBot(t, api, &streamingAgent{})
+	bot.runPrompt(context.Background(), 1, "go")
+
+	edits := api.texts("editMessageText")
+	if len(edits) < 3 {
+		t.Fatalf("want draft edits and the final one, got %q", edits)
+	}
+	sawDraft := false
+	for _, edit := range edits[:len(edits)-1] {
+		if strings.Contains(edit, "Hello wor") && strings.Contains(edit, "\u258d") {
+			sawDraft = true
+		}
+	}
+	if !sawDraft {
+		t.Fatalf("the growing answer never reached the card: %q", edits)
+	}
+	final := edits[len(edits)-1]
+	if !strings.Contains(final, "Hello world") || strings.Contains(final, "\u258d") || strings.Contains(final, "Let me look") {
+		t.Fatalf("the final edit is the whole answer without the cursor: %q", final)
+	}
+	if got := api.count("sendMessage"); got != 1 {
+		t.Fatalf("only the card is sent, got %d messages: %q", got, api.texts("sendMessage"))
+	}
+}
+
+type streamingAgent struct{ cardAgent }
+
+func (a *streamingAgent) RunPromptStream(_ context.Context, _ string, progress func(string), text func(string)) (string, error) {
+	text("Let me look")
+	progress("Reading main.go")
+	text("")
+	text("Hello wor")
+	text("Hello world")
+	return "Hello world", nil
+}
+
+// A half-written code fence is closed for display, so it renders as code and
+// does not swallow the rest of the card.
+func TestCloseOpenFence(t *testing.T) {
+	if got := closeOpenFence("see:\n```go\nfmt.Println(1)"); !strings.HasSuffix(got, "\n```") {
+		t.Fatalf("an open fence should be closed: %q", got)
+	}
+	if got := closeOpenFence("```go\nx\n```"); got != "```go\nx\n```" {
+		t.Fatalf("a closed fence is left alone: %q", got)
+	}
+}
+
+// A failure is shown over a half-written answer, not hidden behind it.
+func TestFailureIsNotHiddenBehindADraft(t *testing.T) {
+	previous := cardEditInterval
+	cardEditInterval = 0
+	t.Cleanup(func() { cardEditInterval = previous })
+
+	api := &scriptedAPI{}
+	bot := newCardBot(t, api, &failingStreamAgent{})
+	bot.runPrompt(context.Background(), 1, "go")
+	edits := api.texts("editMessageText")
+	if len(edits) == 0 || !strings.Contains(edits[len(edits)-1], "Run failed") {
+		t.Fatalf("the last card should say the run failed, got %q", edits)
+	}
+}
+
+type failingStreamAgent struct{ cardAgent }
+
+func (a *failingStreamAgent) RunPromptStream(_ context.Context, _ string, _ func(string), text func(string)) (string, error) {
+	text("partial answer")
+	return "", errors.New("provider went away")
 }

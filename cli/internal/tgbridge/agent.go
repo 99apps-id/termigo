@@ -87,12 +87,18 @@ func (a *Agent) applyModel(model provider.Model) error {
 
 // RunPrompt runs one turn.
 func (a *Agent) RunPrompt(ctx context.Context, prompt string, progress func(string)) (string, error) {
-	return a.run(ctx, prompt, nil, progress)
+	return a.run(ctx, prompt, nil, progress, nil)
+}
+
+// RunPromptStream runs one turn and also reports the answer as it is written,
+// so the bot can show it in the card instead of waiting for the end.
+func (a *Agent) RunPromptStream(ctx context.Context, prompt string, progress func(string), text func(string)) (string, error) {
+	return a.run(ctx, prompt, nil, progress, text)
 }
 
 // RunPromptWithImage runs one turn with an image attached.
 func (a *Agent) RunPromptWithImage(ctx context.Context, prompt, mediaType, data string, progress func(string)) (string, error) {
-	return a.run(ctx, prompt, []provider.Image{{MediaType: mediaType, Data: data}}, progress)
+	return a.run(ctx, prompt, []provider.Image{{MediaType: mediaType, Data: data}}, progress, nil)
 }
 
 // Steer queues a message for the turn that is running, and reports false when
@@ -134,14 +140,14 @@ func (a *Agent) settle(abandon bool) []string {
 	return pending
 }
 
-func (a *Agent) run(ctx context.Context, prompt string, images []provider.Image, progress func(string)) (string, error) {
+func (a *Agent) run(ctx context.Context, prompt string, images []provider.Image, progress func(string), text func(string)) (string, error) {
 	a.steerMu.Lock()
 	a.turning = true
 	a.steerMu.Unlock()
 
 	var answers []string
 	for {
-		answer, err := a.runOnce(ctx, prompt, images, progress)
+		answer, err := a.runOnce(ctx, prompt, images, progress, text)
 		if err != nil {
 			a.settle(true)
 			return strings.Join(answers, "\n\n"), err
@@ -157,7 +163,7 @@ func (a *Agent) run(ctx context.Context, prompt string, images []provider.Image,
 	}
 }
 
-func (a *Agent) runOnce(ctx context.Context, prompt string, images []provider.Image, progress func(string)) (string, error) {
+func (a *Agent) runOnce(ctx context.Context, prompt string, images []provider.Image, progress func(string), text func(string)) (string, error) {
 	a.mu.Lock()
 	client := a.client
 	model := a.model
@@ -181,12 +187,30 @@ func (a *Agent) runOnce(ctx context.Context, prompt string, images []provider.Im
 		cancel()
 	}()
 
+	// step is the text since the last tool call. Words written before a call
+	// are narration, so a call empties it; only the text that follows the last
+	// call, or a step that makes none, is the answer being written.
+	var step strings.Builder
 	onEvent := func(event provider.StreamEvent) {
-		if progress == nil {
-			return
-		}
-		if event.Type == provider.EventToolCall && event.ToolCall != nil {
-			progress(coder.ToolLabel(*event.ToolCall))
+		switch event.Type {
+		case provider.EventTextDelta:
+			step.WriteString(event.Text)
+			if text != nil {
+				text(step.String())
+			}
+		case provider.EventToolCall:
+			if event.ToolCall == nil {
+				return
+			}
+			if step.Len() > 0 {
+				step.Reset()
+				if text != nil {
+					text("")
+				}
+			}
+			if progress != nil {
+				progress(coder.ToolLabel(*event.ToolCall))
+			}
 		}
 	}
 	return coder.Run(runCtx, coder.Options{

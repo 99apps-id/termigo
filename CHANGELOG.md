@@ -8,6 +8,10 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Live answer in the Telegram card.** The answer is written into the card as
+  the model produces it (throttled edits, a cursor, open code fences closed for
+  display). Text before a tool call is dropped from the card as narration, and
+  the final answer still replaces the card once.
 - **Steering in the Go CLI.** A message typed while a run is working is added
   to the conversation before the model's next step, and clears the repetition
   guard, instead of waiting for the turn to end. In the terminal it is queued

@@ -44,6 +44,21 @@ type Steerer interface {
 	Steer(prompt string) bool
 }
 
+// TextStreamer is an optional interface an Agent can implement to report the
+// answer as it is written. text receives the whole text of the step so far, not
+// a delta, and an empty string when a tool call starts and the words before it
+// stop being the answer.
+type TextStreamer interface {
+	RunPromptStream(ctx context.Context, prompt string, progress func(string), text func(string)) (string, error)
+}
+
+// cardEditInterval is the least time between edits of the progress card:
+// Telegram rate-limits edits to one message. A variable so a test need not wait.
+var cardEditInterval = 2 * time.Second
+
+// streamCursor ends a draft that is still being written.
+const streamCursor = " ▍"
+
 // DiffProvider is an optional interface an Agent can implement to surface git diffs.
 type DiffProvider interface {
 	GitDiff(ctx context.Context) (string, error)
@@ -646,6 +661,12 @@ func (b *Bot) runPrompt(ctx context.Context, chatID int64, prompt string) {
 		b.reply(ctx, chatID, "Steer message accepted. The agent will adjust its next steps.")
 		return
 	}
+	if streamer, ok := b.agent.(TextStreamer); ok {
+		b.runWithCardStream(ctx, chatID, func(runCtx context.Context, progress func(string), text func(string)) (string, error) {
+			return streamer.RunPromptStream(runCtx, prompt, progress, text)
+		})
+		return
+	}
 	b.runWithCard(ctx, chatID, func(runCtx context.Context, progress func(string)) (string, error) {
 		return b.agent.RunPrompt(runCtx, prompt, progress)
 	})
@@ -839,6 +860,24 @@ func (b *Bot) keepTyping(ctx context.Context, chatID int64, done <-chan struct{}
 // runWithCard runs one turn behind the single-run gate and mirrors progress
 // into one message that is edited in place instead of flooding the chat.
 func (b *Bot) runWithCard(ctx context.Context, chatID int64, run func(context.Context, func(string)) (string, error)) {
+	b.runWithCardStream(ctx, chatID, func(runCtx context.Context, progress func(string), _ func(string)) (string, error) {
+		return run(runCtx, progress)
+	})
+}
+
+// closeOpenFence ends a code fence the draft has not closed yet, so a half
+// written block renders as code instead of swallowing the rest of the card.
+func closeOpenFence(text string) string {
+	if strings.Count(text, "```")%2 == 1 {
+		return text + "\n```"
+	}
+	return text
+}
+
+// runWithCardStream is runWithCard for an agent that can report its answer as
+// it writes: while text is flowing the card shows it, and while only tools are
+// running the card shows them.
+func (b *Bot) runWithCardStream(ctx context.Context, chatID int64, run func(context.Context, func(string), func(string)) (string, error)) {
 	if !b.tryStartRun() {
 		b.reply(ctx, chatID, "A run is already in progress. Send /stop to stop it, then retry.")
 		return
@@ -864,16 +903,41 @@ func (b *Bot) runWithCard(ctx context.Context, chatID int64, run func(context.Co
 	// either, because the next edit carries the whole list.
 	var lines []string
 	var lastEdit time.Time
+	var lastShown string
+	// draft is the answer text of the step being written. It is not kept once a
+	// tool call starts: the words before a call are narration, not the answer.
+	draft := ""
+	display := func() string {
+		if strings.TrimSpace(draft) != "" {
+			return closeOpenFence(draft) + streamCursor
+		}
+		return strings.Join(lines, "\n")
+	}
 	flush := func(force bool) {
 		if statusMessage.MessageID == 0 {
 			return
 		}
 		// Throttle edits: Telegram rate-limits rapid edits to one message.
-		if !force && time.Since(lastEdit) < 2*time.Second {
+		if !force && time.Since(lastEdit) < cardEditInterval {
+			return
+		}
+		shown := display()
+		if shown == lastShown {
 			return
 		}
 		lastEdit = time.Now()
-		_ = b.client.EditMarkdown(ctx, chatID, statusMessage.MessageID, strings.Join(lines, "\n"), nil)
+		if err := b.client.EditMarkdown(ctx, chatID, statusMessage.MessageID, shown, nil); err == nil {
+			lastShown = shown
+		}
+	}
+	text := func(full string) {
+		// Past one message there is nothing useful left to edit in place; the
+		// card keeps what it shows and the final answer is sent in chunks.
+		if len(full) > telegramChunkLimit-len(streamCursor)-8 {
+			return
+		}
+		draft = full
+		flush(false)
 	}
 	progress := func(line string) {
 		line = strings.TrimSpace(line)
@@ -888,7 +952,7 @@ func (b *Bot) runWithCard(ctx context.Context, chatID int64, run func(context.Co
 		flush(false)
 	}
 
-	answer, runErr := run(ctx, progress)
+	answer, runErr := run(ctx, progress, text)
 
 	if statusMessage.MessageID == 0 {
 		// No card to edit: deliver the failure or the answer directly.
@@ -904,6 +968,8 @@ func (b *Bot) runWithCard(ctx context.Context, chatID int64, run func(context.Co
 	}
 
 	if runErr != nil {
+		// A half-written answer must not hide the failure behind it.
+		draft = ""
 		progress("Run failed: " + runErr.Error())
 		flush(true)
 		return
