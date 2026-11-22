@@ -11,6 +11,9 @@ pub struct BoundedRingBuffer {
     buf: VecDeque<u8>,
     cap: usize,
     next_offset: u64,
+    /// Offset the last `read_from` actually served, so a reaper can tell a
+    /// fully consumed buffer (drained) from one whose bytes nobody has read.
+    last_served: u64,
     /// Bytes that were dropped to keep the buffer ≤ cap. Helps the caller
     /// detect overflow ("you missed N bytes").
     dropped: u64,
@@ -22,6 +25,7 @@ impl BoundedRingBuffer {
             buf: VecDeque::with_capacity(cap.min(64 * 1024)),
             cap,
             next_offset: 0,
+            last_served: 0,
             dropped: 0,
         }
     }
@@ -48,7 +52,14 @@ impl BoundedRingBuffer {
         self.buf.extend(data);
     }
 
-    pub fn read_from(&self, since: u64) -> (Vec<u8>, u64, u64) {
+    /// True once `read_from` has served every byte through `next_offset`:
+    /// first read-from-zero on a fresh buffer does not count, since serving
+    /// nothing yet is the same as having nothing read.
+    pub fn is_consumed(&self) -> bool {
+        self.last_served >= self.next_offset && self.next_offset > 0
+    }
+
+    pub fn read_from(&mut self, since: u64) -> (Vec<u8>, u64, u64) {
         let oldest = self.next_offset.saturating_sub(self.buf.len() as u64);
         let start = since.max(oldest);
         let skip = (start - oldest) as usize;
@@ -63,6 +74,7 @@ impl BoundedRingBuffer {
                 out.extend_from_slice(&back[back_skip..]);
             }
         }
+        self.last_served = self.next_offset;
         (out, self.next_offset, self.dropped)
     }
 }

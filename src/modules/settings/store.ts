@@ -533,7 +533,10 @@ export const DEFAULT_PREFERENCES: Preferences = {
   customEndpoints: [],
   modelIdOverrides: {},
   disabledToolGroups: [],
-  toolSearchEnabled: false,
+  // On by default: sending every registered tool schema on every step cost
+  // about 45KB of prompt per step in a logged run (54 of 481 tools sent);
+  // deferred tools load on demand through find_tools instead.
+  toolSearchEnabled: true,
   openrouterModelId: "",
   agentApprovalMode: DEFAULT_APPROVAL_MODE,
   agentAlwaysAllowedTools: [],

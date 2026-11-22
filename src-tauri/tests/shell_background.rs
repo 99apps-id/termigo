@@ -179,6 +179,18 @@ fn read_logs_advances_offset() {
 }
 
 #[test]
+fn unread_buffer_is_not_consumed() {
+    let mut buf = background::ShellRingBuffer::new(16);
+    assert!(!buf.is_consumed());
+    buf.push(b"hello");
+    assert!(!buf.is_consumed(), "bytes nobody read must not count as drained");
+    let (bytes, off, _) = buf.read_from(0);
+    assert_eq!(bytes, b"hello");
+    assert_eq!(off, 5);
+    assert!(buf.is_consumed(), "a fully served buffer is drained");
+}
+
+#[test]
 fn info_reflects_command_and_exit() {
     let proc = background::spawn(
         "true".into(),

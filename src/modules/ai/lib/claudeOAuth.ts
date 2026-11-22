@@ -205,18 +205,54 @@ export async function claudeOAuthUserId(
 }
 
 /**
+ * The only shape Anthropic accepts for a tool name. A name outside it (an
+ * MCP name with a dot or slash, a server name with a space) is answered with
+ * 400 invalid_request_error naming this exact pattern, verified live.
+ */
+export function sanitizeClaudeToolName(name: string): string {
+  const cleaned = name.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 128);
+  return cleaned || "tool";
+}
+
+function cloakOne(
+  name: string,
+  aliases: Map<string, string>,
+  present: Set<string>,
+): string {
+  let cloaked = sanitizeClaudeToolName(name);
+  if (!cloaked.endsWith(CLAUDE_TOOL_SUFFIX)) {
+    cloaked = sanitizeClaudeToolName(`${cloaked}${CLAUDE_TOOL_SUFFIX}`);
+  }
+  if (present.has(cloaked) && aliases.get(cloaked) !== name) {
+    let n = 2;
+    let candidate = sanitizeClaudeToolName(`${cloaked}_${n}`);
+    while (present.has(candidate) && aliases.get(candidate) !== name) {
+      n += 1;
+      candidate = sanitizeClaudeToolName(`${cloaked}_${n}`);
+    }
+    cloaked = candidate;
+  }
+  present.add(cloaked);
+  aliases.set(cloaked, name);
+  return cloaked;
+}
+
+/**
  * Suffixes the client's tool names and appends the Claude Code decoy tools:
  * the subscription endpoint expects the CLI's tool surface, and a foreign
- * tool name is answered with 400. History tool_use blocks are renamed to
- * match. Returns the suffixed-to-original aliases for the response stream.
+ * tool name is answered with 400. Names are also sanitized to the pattern
+ * Anthropic accepts, since an MCP or extension name may carry dots, slashes
+ * or spaces the suffix alone would leave in place. History tool_use blocks
+ * are renamed to match. Returns the cloaked-to-original aliases for the
+ * response stream.
  */
 export function cloakClaudeToolNames(
   body: Record<string, unknown>,
 ): Map<string, string> {
   const aliases = new Map<string, string>();
+  const present = new Set<string>();
   if (Array.isArray(body.tools)) {
     const cloaked: unknown[] = [];
-    const present = new Set<string>();
     for (const tool of body.tools) {
       if (!tool || typeof tool !== "object") {
         cloaked.push(tool);
@@ -228,12 +264,7 @@ export function cloakClaudeToolNames(
         cloaked.push(tool);
         continue;
       }
-      const suffixed = name.endsWith(CLAUDE_TOOL_SUFFIX)
-        ? name
-        : `${name}${CLAUDE_TOOL_SUFFIX}`;
-      aliases.set(suffixed, name);
-      present.add(suffixed);
-      cloaked.push({ ...record, name: suffixed });
+      cloaked.push({ ...record, name: cloakOne(name, aliases, present) });
     }
     for (const decoy of CLAUDE_DECOY_TOOL_NAMES) {
       if (present.has(decoy)) continue;
@@ -255,11 +286,13 @@ export function cloakClaudeToolNames(
         const record = block as Record<string, unknown>;
         if (record.type !== "tool_use") continue;
         const name = typeof record.name === "string" ? record.name : "";
-        if (name && !name.endsWith(CLAUDE_TOOL_SUFFIX)) {
-          const suffixed = `${name}${CLAUDE_TOOL_SUFFIX}`;
-          aliases.set(suffixed, name);
-          record.name = suffixed;
-        }
+        if (!name || aliases.has(name)) continue;
+        const known = [...aliases.entries()].find(
+          ([, original]) => original === name,
+        );
+        record.name = known
+          ? known[0]
+          : cloakOne(name, aliases, present);
       }
     }
   }

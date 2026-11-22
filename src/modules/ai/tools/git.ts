@@ -331,7 +331,10 @@ export function buildGitTools(ctx: ToolContext) {
             "Use bash_run with `git diff` on the remote host.",
           );
         }
-        if (base !== undefined && !isValidRev(base)) {
+        // A blank base is "no base" (the model sends "" for none): the command
+        // builder below already treats it as omitted, so only validate a
+        // revision that actually names something.
+        if (base?.trim() && !isValidRev(base)) {
           return {
             error:
               "invalid base revision: pass a commit sha, branch/tag name or range (no options, spaces, or control characters)",

@@ -144,7 +144,7 @@ impl ReplProc {
 
         loop {
             let (bytes, next_offset, dropped) = {
-                let buf = self.buffer.lock().unwrap_or_else(|e| e.into_inner());
+                let mut buf = self.buffer.lock().unwrap_or_else(|e| e.into_inner());
                 buf.read_from(offset)
             };
             if !bytes.is_empty() {

@@ -2159,8 +2159,8 @@ export const OPENAI_COMPATIBLE_DEFAULT_BASE_URL = "";
  * stops for a run that goes nowhere.
  *
  * API-key providers run `MAX_AGENT_STEPS` (500). OAuth / keyless providers
- * run `OAUTH_MAX_AGENT_STEPS` (10,000) because they are not billed per step
- * or per token, so their real bound is the provider's 5-hour usage window.
+ * run `OAUTH_MAX_AGENT_STEPS` (500): not billed per token, but every step
+ * burns the subscription's rate window all the same.
  * The harness profile may still adjust the number visibly
  * (`stepBudgetDelta`), which is a choice the user made, not a hidden
  * escalation.
@@ -2168,10 +2168,12 @@ export const OPENAI_COMPATIBLE_DEFAULT_BASE_URL = "";
 export const MAX_AGENT_STEPS = 500;
 
 /** Step budget for OAuth / keyless providers (ChatGPT, Claude OAuth, xAI OAuth,
- *  Antigravity, GitHub Copilot, Muse). Uncapped in practice because these
- *  providers do not bill per step or per token, and are bounded by the
- *  provider's 5-hour rate window instead. */
-export const OAUTH_MAX_AGENT_STEPS = 10_000;
+ *  Antigravity, GitHub Copilot, Muse). These providers do not bill per token,
+ *  but every step still burns the subscription's rate window: a logged run
+ *  reached 89 steps and 7.0M input tokens before finishing, with 429s along
+ *  the way. The budget therefore matches the API-key cap instead of being
+ *  uncapped in practice. */
+export const OAUTH_MAX_AGENT_STEPS = 500;
 
 export const OAUTH_MODEL_PREFIXES = [
   "chatgpt-",

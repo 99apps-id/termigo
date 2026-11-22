@@ -1703,8 +1703,11 @@ export async function runAgentStream(opts: RunAgentOptions) {
       stopReason = "tool-only-loop";
       return true;
     },
+    // The step cap binds OAuth runs too: a subscription is not billed per
+    // token, but an uncapped run still burns its rate window (one logged run
+    // spent 7.0M input tokens over 89 steps), so there is no auth exemption.
     (args) =>
-      !isOAuth && (capPred(args) as boolean)
+      (capPred(args) as boolean)
         ? requestSynthesisOrStop("step-cap")
         : false,
     (args) =>
@@ -2509,7 +2512,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
         finishReason.startsWith("max_tokens");
       if (truncatedFinish && !stopReason) stopReason = "step-cap";
       const settledStop =
-        stopReason ?? (!isOAuth && stepsSeen >= stepBudget ? "step-cap" : null);
+        stopReason ?? (stepsSeen >= stepBudget ? "step-cap" : null);
       const cleanFinish = !settledStop && !aborted;
       const kb = (n: number) => (n / 1024).toFixed(1);
       const cachePct =

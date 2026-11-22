@@ -75,7 +75,7 @@ Dependency-light: stdlib, yaml.v3, `golang.org/x/term`, Bubble Tea stack. Creden
 
 BYOK with `PROVIDERS` and model registry in `config.ts`. Full details in [AI subsystem](docs/architecture/ai-subsystem.md). Invariants:
 - **Keys**: OS keychain via `secrets_*` (Linux: `0600` `secrets.json`). Never in settings or `localStorage`.
-- **Agent** (`lib/agent.ts`): AI SDK v6 semantics. One explicit step budget per round, per model (`stepBudgetForModel`): 500 for API-key providers, 10_000 for OAuth / keyless ones (ChatGPT, Claude OAuth, xAI OAuth, Antigravity, Copilot, Muse), whose real bound is the provider's 5-hour usage window. Continue resumes with the same cap - never a hidden escalation ladder.
+- **Agent** (`lib/agent.ts`): AI SDK v6 semantics. One explicit step budget per round, per model (`stepBudgetForModel`): 500 for every provider, OAuth / keyless ones (ChatGPT, Claude OAuth, xAI OAuth, Antigravity, Copilot, Muse) included, since a subscription still burns its rate window per step. Continue resumes with the same cap - never a hidden escalation ladder.
 - **Turn continuation** (lib/turnContinuation.ts): a run can end without finishing the task in three ways that look normal - the output budget cut the answer, a reasoning-only step produced nothing, or the model announced its next step and issued no call. Each gets one bounded nudge (4 / 2 / 2). Decided when the run ENDS, never in prepareStep: a step with no tool call never reaches it again. From ODON.
 - **Subagents** (`lib/subagentPool.ts`): `SubagentConcurrencyPool` (default 4) plus a per-depth allowance, so a parent cannot deadlock waiting for its own child.
 - **Tools & Environment** (`tools/tools.ts`, `lib/repairToolCall.ts`): no sandbox or path boundary limits; all tools available.

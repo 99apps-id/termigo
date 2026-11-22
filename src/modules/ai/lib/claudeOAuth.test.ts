@@ -135,6 +135,74 @@ describe("claudeOAuth", () => {
     expect(streamed).not.toContain("read_file_ide");
   });
 
+  it("sanitizes dotted and slashed tool names Anthropic would reject", async () => {
+    const seenBodies: Array<Record<string, unknown>> = [];
+    const baseFetch = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
+        seenBodies.push(JSON.parse(String(init?.body)));
+        return new Response(
+          'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"mcp_files_read_ide","input":{}}}\n\n' +
+            'event: message_stop\ndata: {"type":"message_stop"}\n\n',
+          {
+            status: 200,
+            headers: { "content-type": "text/event-stream" },
+          },
+        );
+      },
+    );
+    const wrapped = createClaudeOAuthFetch(
+      baseFetch as unknown as typeof fetch,
+      "tok-meta",
+      async () => null,
+    );
+    const res = await wrapped("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      body: JSON.stringify({
+        model: "claude-sonnet-5",
+        system: "You are Termigo.",
+        messages: [
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "tool_use",
+                id: "toolu_0",
+                name: "mcp/files.read",
+                input: {},
+              },
+            ],
+          },
+        ],
+        tools: [
+          {
+            name: "mcp/files.read",
+            description: "Read via MCP.",
+            input_schema: { type: "object", properties: {} },
+          },
+          {
+            name: "mcp files.read",
+            description: "Same after sanitizing; must not collide.",
+            input_schema: { type: "object", properties: {} },
+          },
+        ],
+      }),
+    });
+    const body = seenBodies[0];
+    const toolNames = (body.tools as Array<{ name: string }>).map(
+      (t) => t.name,
+    );
+    for (const name of toolNames) {
+      expect(name).toMatch(/^[a-zA-Z0-9_-]{1,128}$/);
+    }
+    expect(new Set(toolNames).size).toBe(toolNames.length);
+    const messages = body.messages as Array<{
+      content: Array<{ name?: string }>;
+    }>;
+    expect(messages[0].content[0].name).toMatch(/^[a-zA-Z0-9_-]{1,128}$/);
+    const streamed = await res.text();
+    expect(streamed).toContain('"name":"mcp/files.read"');
+  });
+
   it("injects identity, headers, refreshes on 401, and upgrades CLI version once", async () => {
     setClaudeCliVersionForTests(null);
     const seenHeaders: Array<Headers> = [];

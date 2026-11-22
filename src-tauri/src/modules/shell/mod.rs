@@ -1630,7 +1630,12 @@ pub fn shell_bg_logs(
     handle: u32,
     since_offset: Option<u64>,
 ) -> Result<BackgroundLogResponse, String> {
-    reap_background(&state);
+    // Read before reaping: a fast-exiting process must keep its buffered logs
+    // and exit code until the agent has seen them. Reaping first deleted the
+    // entry and answered "no background handle" on the very read that should
+    // have returned the process's final output (audit: 8 bash_wait + 7
+    // bash_logs failures, each forcing a blind respawn).
+    reap_background(&state, Some(handle));
     let proc = state
         .bg
         .read()
@@ -1641,16 +1646,25 @@ pub fn shell_bg_logs(
     Ok(proc.read_logs(since_offset.unwrap_or(0)))
 }
 
-/// Drop entries whose process has already exited.
+/// Drop entries whose process has exited AND whose buffered output was fully
+/// consumed, keeping the current read's handle alive.
 ///
-/// Nothing used to remove them: `shell_bg_kill` kills but leaves the
-/// `Arc<BackgroundProc>` in the map, so every start/stop cycle retained its
-/// ring buffer (up to 4 MiB) and its open log-file handle for the app's
-/// lifetime, and `shell_bg_list` grew without bound. Reaped on the read paths
-/// rather than from a background thread so there is no extra timer to own.
-fn reap_background(state: &ShellState) {
+/// Nothing used to remove entries at all: `shell_bg_kill` kills but leaves
+/// the `Arc<BackgroundProc>` in the map, so every start/stop cycle retained
+/// its ring buffer (up to 4 MiB) and its open log-file handle for the app's
+/// lifetime, and `shell_bg_list` grew without bound. Unconditionally dropping
+/// every exited process also broke the reader: `bash_wait` polls `logs`, and
+/// the fast exit of a dev-server launch deleted the output the model was
+/// waiting for. Reaped on the read paths rather than from a background thread
+/// so there is no extra timer to own.
+fn reap_background(state: &ShellState, keep: Option<u32>) {
     let mut map = state.bg.write().unwrap_or_else(|e| e.into_inner());
-    map.retain(|_, p| !p.exited.load(std::sync::atomic::Ordering::Acquire));
+    map.retain(|id, p| {
+        if Some(*id) == keep {
+            return true;
+        }
+        !p.reapable()
+    });
 }
 
 #[tauri::command]
@@ -1670,7 +1684,9 @@ pub fn shell_bg_kill(state: tauri::State<ShellState>, handle: u32) -> Result<boo
 
 #[tauri::command]
 pub fn shell_bg_list(state: tauri::State<ShellState>) -> Result<Vec<BackgroundProcInfo>, String> {
-    reap_background(&state);
+    // No keep handle here: this is a pure listing. Drained-but-exited entries
+    // are dropped; a process the agent is still reading keeps its row.
+    reap_background(&state, None);
     let map = state.bg.read().unwrap_or_else(|e| e.into_inner());
     let mut out = Vec::with_capacity(map.len());
     for (id, p) in map.iter() {
