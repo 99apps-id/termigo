@@ -55,7 +55,10 @@ describe("prepareAgentPrompt", () => {
       history,
       "claude-oauth",
     );
-    expect(prompt.system[0].providerOptions).toEqual({
+    // system[0] is the fixed Claude Code identity; the marker sits on the
+    // stable instructions after it.
+    expect(prompt.system[0].providerOptions).toBeUndefined();
+    expect(prompt.system[1].providerOptions).toEqual({
       anthropic: { cacheControl: { type: "ephemeral", ttl: "1h" } },
     });
     expect(prompt.messages[1].providerOptions).toEqual({
