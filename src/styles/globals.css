@@ -600,3 +600,11 @@ html[data-platform="linux"] *::after {
   backdrop-filter: none !important;
 }
 
+/* Ensure native <select> popups remain legible in dark and light themes across
+ * WebKitGTK and WebView2 instead of rendering light text on a white popup. */
+select,
+select option {
+  background-color: var(--color-popover);
+  color: var(--color-popover-foreground);
+}
+

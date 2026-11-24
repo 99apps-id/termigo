@@ -92,13 +92,20 @@ export function useWhisperRecording({
       rec.ondataavailable = (e) => {
         if (e.data.size > 0) chunksRef.current.push(e.data);
       };
+      rec.onerror = () => {
+        chunksRef.current = [];
+        teardownStream();
+        toast.error("Voice recording interrupted");
+        setState("idle");
+      };
       rec.onstop = async () => {
         const blob = new Blob(chunksRef.current, {
-          type: rec.mimeType || "audio/webm",
+          type: rec.mimeType || mimeType || "audio/webm",
         });
         chunksRef.current = [];
         teardownStream();
         if (blob.size === 0) {
+          toast.info("No audio captured");
           setState("idle");
           return;
         }
@@ -110,7 +117,11 @@ export function useWhisperRecording({
             apiKeys,
             sttOptions,
           );
-          if (text.trim()) onResult(text.trim());
+          if (text.trim()) {
+            onResult(text.trim());
+          } else {
+            toast.info("No speech detected");
+          }
         } catch (e) {
           console.error("stt.transcribe", e);
           toast.error(e instanceof Error ? e.message : "Transcription failed");
@@ -119,11 +130,22 @@ export function useWhisperRecording({
         }
       };
       recRef.current = rec;
-      rec.start();
+      rec.start(250);
       setState("recording");
     } catch (e) {
       console.error("stt.getUserMedia", e);
-      toast.error("Microphone access failed");
+      const name = e instanceof Error ? e.name : "";
+      const detail =
+        name === "NotAllowedError"
+          ? "Microphone permission denied. Check system/webview audio permissions."
+          : name === "NotFoundError"
+            ? "No microphone device found."
+            : name === "NotReadableError"
+              ? "Microphone is already in use by another application."
+              : e instanceof Error && e.message
+                ? `Microphone access failed: ${e.message}`
+                : "Microphone access failed";
+      toast.error(detail);
       teardownStream();
       setState("idle");
     }
@@ -140,7 +162,12 @@ export function useWhisperRecording({
 
   useEffect(() => {
     return () => {
-      recRef.current?.stop();
+      const rec = recRef.current;
+      if (rec && rec.state !== "inactive") {
+        try {
+          rec.stop();
+        } catch {}
+      }
       teardownStream();
     };
   }, [teardownStream]);

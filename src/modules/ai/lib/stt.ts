@@ -1,9 +1,31 @@
 import type { ProviderKeys } from "./keyring";
 import { createProxyFetch } from "./proxyFetch";
 
+const OPENAI_BASE_URL = "https://api.openai.com/v1";
 const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
+const STT_TIMEOUT_OPENAI_MS = 60_000;
 const STT_TIMEOUT_GROQ_MS = 30_000;
 const STT_TIMEOUT_WHISPERCPP_MS = 180_000;
+
+export function audioFileMeta(mimeType: string): {
+  filename: string;
+  mime: string;
+} {
+  const base = (mimeType || "audio/webm").split(";")[0].trim().toLowerCase();
+  if (base.includes("ogg") || base.includes("opus")) {
+    return { filename: "audio.ogg", mime: "audio/ogg" };
+  }
+  if (base.includes("mp4") || base.includes("m4a")) {
+    return { filename: "audio.m4a", mime: "audio/mp4" };
+  }
+  if (base.includes("mpeg") || base.includes("mp3")) {
+    return { filename: "audio.mp3", mime: "audio/mpeg" };
+  }
+  if (base.includes("wav")) {
+    return { filename: "audio.wav", mime: "audio/wav" };
+  }
+  return { filename: "audio.webm", mime: base || "audio/webm" };
+}
 
 // Transcription goes through the Rust HTTP proxy, like every other AI call.
 // A direct browser fetch to api.openai.com / api.groq.com is cross-origin and
@@ -65,15 +87,13 @@ async function fetchWithTimeout(
 }
 
 async function transcribeOpenAI(blob: Blob, apiKey: string): Promise<string> {
-  const [{ createOpenAI }, { experimental_transcribe: transcribe }] =
-    await Promise.all([import("@ai-sdk/openai"), import("ai")]);
-  const openai = createOpenAI({ apiKey, fetch: localProxyFetch });
-  const buf = new Uint8Array(await blob.arrayBuffer());
-  const { text } = await transcribe({
-    model: openai.transcription("whisper-1"),
-    audio: buf,
-  });
-  return text;
+  return transcribeViaRest(
+    OPENAI_BASE_URL,
+    blob,
+    apiKey,
+    "whisper-1",
+    STT_TIMEOUT_OPENAI_MS,
+  );
 }
 
 async function transcribeViaRest(
@@ -81,12 +101,14 @@ async function transcribeViaRest(
   blob: Blob,
   apiKey: string | null,
   model: string,
+  timeoutMs = STT_TIMEOUT_GROQ_MS,
 ): Promise<string> {
+  const { filename, mime } = audioFileMeta(blob.type);
   const { body, contentType } = multipartBody(
     {
       field: "file",
-      filename: "audio.webm",
-      type: blob.type || "audio/webm",
+      filename,
+      type: mime,
       bytes: new Uint8Array(await blob.arrayBuffer()),
     },
     { model, response_format: "text" },
@@ -102,7 +124,7 @@ async function transcribeViaRest(
       headers,
       body,
     },
-    STT_TIMEOUT_GROQ_MS,
+    timeoutMs,
   );
   if (!res.ok) {
     const body = await res.text().catch(() => "");
@@ -152,7 +174,7 @@ async function toWav(blob: Blob): Promise<Blob> {
 
     return new Blob([buffer], { type: "audio/wav" });
   } finally {
-    ctx.close();
+    void ctx.close().catch(() => {});
   }
 }
 
