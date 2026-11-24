@@ -42,6 +42,7 @@ import { buildMediaTools } from "./media";
 import { buildMemoryTools } from "./memory";
 import { buildOfficeTools } from "./office";
 import { buildPdfTools } from "./pdf";
+import { buildPentestTools } from "./pentest";
 import { buildPolicyTools } from "./policyTools";
 import { buildProcessTools } from "./process";
 import { buildPtyDriverTools } from "./ptyDriver";
@@ -353,6 +354,7 @@ export function buildTools(
     ...buildImageTools(ctx),
     ...buildMediaTools(ctx),
     ...buildCronTools(ctx),
+    ...buildPentestTools(ctx),
     ...buildMcpOAuthTools(),
     ...buildSystemTools(),
     ...buildProcessTools(ctx),

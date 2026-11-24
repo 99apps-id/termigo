@@ -288,6 +288,20 @@ export const TOOL_GROUPS: readonly ToolGroup[] = [
     tools: ["cron_list", "cron_create", "cron_toggle", "cron_delete"],
   },
   {
+    id: "pentest",
+    label: "Security assessment & pentest",
+    description:
+      "Authorized scope check, passive HTTP security headers and TLS auditing, CVSS v3.1 scoring, structured finding ledger, and client-ready Markdown report generation.",
+    tools: [
+      "pentest_scope_status",
+      "security_headers_audit",
+      "tls_audit",
+      "cvss_calculate",
+      "pentest_finding_log",
+      "pentest_report_generate",
+    ],
+  },
+  {
     id: "utility",
     label: "Utility",
     description:
