@@ -588,6 +588,103 @@ export async function sendPhoto(
   await apiPostForm("sendPhoto", form, signal);
 }
 
+/** Send raw image bytes as a Telegram photo. */
+export async function sendPhotoBytes(
+  chatId: number | string,
+  bytes: Uint8Array,
+  filename: string,
+  mimeType: string,
+  caption: string,
+  signal: AbortSignal,
+): Promise<void> {
+  const form = new FormData();
+  form.append("chat_id", String(chatId));
+  const copy = new Uint8Array(bytes);
+  form.append("photo", new Blob([copy], { type: mimeType }), filename);
+  if (caption) form.append("caption", caption.slice(0, 1024));
+  await apiPostForm("sendPhoto", form, signal);
+}
+
+/**
+ * Send raw audio bytes as a Telegram voice note (`sendVoice` for OGG/Opus) or
+ * audio message (`sendAudio` for MP3/WAV/M4A).
+ */
+export async function sendVoice(
+  chatId: number | string,
+  bytes: Uint8Array,
+  filename: string,
+  mimeType: string,
+  caption: string,
+  signal: AbortSignal,
+): Promise<void> {
+  const form = new FormData();
+  form.append("chat_id", String(chatId));
+  const copy = new Uint8Array(bytes);
+  const lower = filename.toLowerCase();
+  const isOgg =
+    lower.endsWith(".ogg") ||
+    lower.endsWith(".oga") ||
+    lower.endsWith(".opus") ||
+    mimeType.includes("ogg") ||
+    mimeType.includes("opus");
+  const field = isOgg ? "voice" : "audio";
+  const method = isOgg ? "sendVoice" : "sendAudio";
+  form.append(
+    field,
+    new Blob([copy], { type: mimeType || "audio/ogg" }),
+    filename,
+  );
+  if (caption) form.append("caption", caption.slice(0, 1024));
+  await apiPostForm(method, form, signal);
+}
+
+const MAX_TELEGRAM_DOWNLOAD_BYTES = 20 * 1024 * 1024;
+
+/** Download a file sent to the bot by its Telegram `file_id`. */
+export async function downloadTelegramFile(
+  fileId: string,
+  signal: AbortSignal,
+  timeoutMs = 30_000,
+): Promise<{ bytes: Uint8Array; filePath: string }> {
+  const info = (await apiGet(
+    `getFile?file_id=${encodeURIComponent(fileId)}`,
+    signal,
+    timeoutMs,
+  )) as { ok?: boolean; result?: { file_path?: string; file_size?: number } };
+  const filePath = info?.result?.file_path;
+  if (!filePath) {
+    throw new Error("Telegram getFile did not return a file_path");
+  }
+  if (
+    typeof info.result?.file_size === "number" &&
+    info.result.file_size > MAX_TELEGRAM_DOWNLOAD_BYTES
+  ) {
+    throw new Error(
+      `File exceeds 20 MB Telegram download limit (${info.result.file_size} bytes)`,
+    );
+  }
+  const { signal: reqSignal, cleanup } = mergeSignals(signal, timeoutMs);
+  try {
+    const token = await getTelegramToken();
+    if (!token) throw new Error("No Telegram token configured");
+    const res = await fetch(`${API}/file/bot${token}/${filePath}`, {
+      signal: reqSignal,
+    });
+    if (!res.ok) {
+      throw await parseTelegramError(res);
+    }
+    const buf = await res.arrayBuffer();
+    if (buf.byteLength > MAX_TELEGRAM_DOWNLOAD_BYTES) {
+      throw new Error(
+        `Downloaded file exceeds 20 MB limit (${buf.byteLength} bytes)`,
+      );
+    }
+    return { bytes: new Uint8Array(buf), filePath };
+  } finally {
+    cleanup();
+  }
+}
+
 /** Send raw bytes as a document (PDF, HTML, Markdown, image…). */
 export async function sendDocument(
   chatId: number | string,

@@ -6,7 +6,7 @@ export const CLAUDE_CODE_IDENTITY =
 export const CLAUDE_OAUTH_DEFAULT_CLI_VERSION = "2.1.325";
 
 export const CLAUDE_OAUTH_BETA =
-  "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05,advanced-tool-use-2025-11-20,effort-2025-11-24,structured-outputs-2025-12-15,fast-mode-2026-02-01,redact-thinking-2026-02-12,token-efficient-tools-2026-03-28";
+  "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,advanced-tool-use-2025-11-20,effort-2025-11-24,extended-cache-ttl-2025-04-11";
 
 export const CLAUDE_PDF_BETA = "pdfs-2024-09-25";
 
@@ -21,7 +21,7 @@ export function setClaudeCliVersionForTests(version: string | null): void {
 }
 
 export function claudeCliUserAgent(version = getClaudeCliVersion()): string {
-  return `claude-cli/${version} (external, sdk-cli)`;
+  return `claude-cli/${version} (external, cli)`;
 }
 
 export function extractClaudeCodeMinVersion(body: string): string | null {
@@ -290,9 +290,7 @@ export function cloakClaudeToolNames(
         const known = [...aliases.entries()].find(
           ([, original]) => original === name,
         );
-        record.name = known
-          ? known[0]
-          : cloakOne(name, aliases, present);
+        record.name = known ? known[0] : cloakOne(name, aliases, present);
       }
     }
   }
@@ -367,11 +365,10 @@ function applyClaudeOAuthHeaders(
   headers.set("anthropic-dangerous-direct-browser-access", "true");
   headers.set("x-app", "cli");
   headers.set("user-agent", claudeCliUserAgent());
-  headers.set("x-stainless-helper-method", "stream");
   headers.set("x-stainless-retry-count", "0");
   headers.set("x-stainless-runtime", "node");
-  headers.set("x-stainless-runtime-version", "v24.14.0");
-  headers.set("x-stainless-package-version", "0.80.0");
+  headers.set("x-stainless-runtime-version", "v26.12.1");
+  headers.set("x-stainless-package-version", "0.128.0");
   headers.set("x-stainless-timeout", "600");
   headers.set("x-stainless-lang", "js");
   if (sessionId) headers.set("x-claude-code-session-id", sessionId);

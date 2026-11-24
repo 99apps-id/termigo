@@ -4,12 +4,13 @@
 // route them here, and command logic can evolve without the long-poll loop
 // getting bigger.
 
-import { ensureChatSession } from "../ai/store/chatStore";
+import { ensureChatSession, useChatStore } from "../ai/store/chatStore";
 import type { ModelChoice, ProviderGroup } from "./modelGroups";
 import { useTelegramStore } from "./store";
 import {
   answerCallback,
   deleteTelegramMessage,
+  downloadTelegramFile,
   editKeyboard,
   type InlineButton,
   sendKeyboard,
@@ -25,7 +26,26 @@ export type Update = {
     chat: { id: number };
     from?: { id: number };
     text?: string;
+    caption?: string;
     message_thread_id?: number | null;
+    photo?: Array<{ file_id: string; width?: number; height?: number }>;
+    document?: {
+      file_id: string;
+      file_name?: string;
+      mime_type?: string;
+      file_size?: number;
+    };
+    voice?: {
+      file_id: string;
+      mime_type?: string;
+      duration?: number;
+    };
+    audio?: {
+      file_id: string;
+      file_name?: string;
+      mime_type?: string;
+      duration?: number;
+    };
   };
   callback_query?: {
     id: string;
@@ -623,6 +643,203 @@ export async function handleCallback(
   await answerCallback(cb.id, null, signal);
 }
 
+function bytesToBase64(bytes: Uint8Array): string {
+  const chunkSize = 0x8000;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
+function safeUploadName(raw: string, fallback: string): string {
+  const base = raw.split(/[\\/]/).pop() ?? "";
+  const cleaned = base.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 120);
+  return cleaned && cleaned !== "." && cleaned !== ".." ? cleaned : fallback;
+}
+
+function documentToolHint(filename: string, mime?: string): string {
+  const lower = filename.toLowerCase();
+  if (lower.endsWith(".pdf") || mime === "application/pdf") {
+    return "Use `read_pdf` to read this PDF (and `ocr_extract` if it is a scanned PDF without a text layer).";
+  }
+  if (lower.endsWith(".docx")) {
+    return "Use `docx_read` to inspect this Word document.";
+  }
+  if (lower.endsWith(".xlsx") || lower.endsWith(".xls")) {
+    return "Use `excel_read` to inspect this spreadsheet.";
+  }
+  if (lower.endsWith(".pptx")) {
+    return "Use `pptx_read` to inspect this presentation.";
+  }
+  if (lower.endsWith(".csv")) {
+    return "Use `csv_analyze` or `read_file` to inspect this CSV.";
+  }
+  if (
+    /\.(png|jpe?g|webp|gif|bmp|tiff?)$/.test(lower) ||
+    mime?.startsWith("image/")
+  ) {
+    return "Use `read_image` (or `ocr_extract` for OCR text extraction) to inspect this image.";
+  }
+  return "Inspect the saved file with `read_file`.";
+}
+
+async function saveTelegramUpload(
+  bytes: Uint8Array,
+  filename: string,
+): Promise<string | null> {
+  const root = useChatStore.getState().live.getWorkspaceRoot();
+  if (!root) return null;
+  const { native } = await import("../ai/lib/native");
+  const stamp = Date.now();
+  const safeName = safeUploadName(filename, `upload-${stamp}`);
+  const target = `${root.replace(/[\\/]+$/, "")}/.termigo/telegram-uploads/${stamp}-${safeName}`;
+  await native.writeFileBase64(target, bytesToBase64(bytes));
+  return target;
+}
+
+async function handleIncomingMedia(
+  msg: NonNullable<Update["message"]>,
+  chatId: number,
+  signal: AbortSignal,
+): Promise<boolean> {
+  const hasMedia =
+    Boolean(msg.voice) ||
+    Boolean(msg.audio) ||
+    Boolean(msg.document) ||
+    Boolean(msg.photo && msg.photo.length > 0);
+  if (!hasMedia) return false;
+
+  if (!isOwnerUser(msg.from)) return true;
+  await ensureChatSession(chatId, msg.message_thread_id ?? null);
+  void sendTyping(chatId, signal).catch(() => {});
+
+  const caption = (msg.caption ?? "").trim();
+
+  // 1. Voice note or audio track -> transcribe via configured STT provider.
+  const voiceOrAudio = msg.voice ?? msg.audio;
+  if (voiceOrAudio) {
+    try {
+      const { bytes, filePath } = await downloadTelegramFile(
+        voiceOrAudio.file_id,
+        signal,
+      );
+      const mime =
+        voiceOrAudio.mime_type ||
+        (filePath.endsWith(".mp3") ? "audio/mpeg" : "audio/ogg");
+      const { usePreferencesStore } = await import("../settings/preferences");
+      const { getAllKeys } = await import("../ai/lib/keyring");
+      const { transcribeAudio } = await import("../ai/lib/stt");
+      const prefs = usePreferencesStore.getState();
+      const apiKeys = await getAllKeys();
+      const blob = new Blob([new Uint8Array(bytes)], { type: mime });
+      const transcript = (
+        await transcribeAudio(blob, prefs.sttProvider, apiKeys, {
+          groqSttModel: prefs.groqSttModel,
+          whispercppBaseURL: prefs.whispercppBaseURL,
+        })
+      ).trim();
+      if (!transcript) {
+        await sendTelegram(
+          chatId,
+          "Could not transcribe the voice note (empty transcript).",
+          signal,
+        );
+        return true;
+      }
+      await sendTelegram(chatId, `Transcript: ${transcript}`, signal);
+      const prompt = caption ? `${caption}\n\n${transcript}` : transcript;
+      void startTelegramDispatch(
+        prompt,
+        chatId,
+        signal,
+        "Voice note transcribed, processing...",
+      );
+    } catch (e) {
+      await sendTelegram(
+        chatId,
+        `Voice note transcription failed: ${e instanceof Error ? e.message : String(e)}`,
+        signal,
+      );
+    }
+    return true;
+  }
+
+  // 2. Photo -> download highest resolution, save to workspace, prompt agent.
+  if (msg.photo && msg.photo.length > 0) {
+    try {
+      const largest = msg.photo[msg.photo.length - 1];
+      const { bytes } = await downloadTelegramFile(largest.file_id, signal);
+      const savedPath = await saveTelegramUpload(bytes, "photo.jpg");
+      if (!savedPath) {
+        await sendTelegram(
+          chatId,
+          "No active workspace is open in Termigo to save the photo.",
+          signal,
+        );
+        return true;
+      }
+      const instruction =
+        caption || "Describe this image and extract any relevant text or data.";
+      const prompt = `[Telegram photo saved at: ${savedPath}]\nUse \`read_image\` (or \`ocr_extract\` if OCR text extraction is needed) to inspect it.\n\nUser request: ${instruction}`;
+      void startTelegramDispatch(
+        prompt,
+        chatId,
+        signal,
+        "Photo received, inspecting...",
+      );
+    } catch (e) {
+      await sendTelegram(
+        chatId,
+        `Failed to download photo: ${e instanceof Error ? e.message : String(e)}`,
+        signal,
+      );
+    }
+    return true;
+  }
+
+  // 3. Document (PDF, Word, Excel, PPT, CSV, image, code, etc.).
+  if (msg.document) {
+    try {
+      const doc = msg.document;
+      const { bytes, filePath } = await downloadTelegramFile(
+        doc.file_id,
+        signal,
+      );
+      const filename =
+        doc.file_name || filePath.split("/").pop() || "document.bin";
+      const savedPath = await saveTelegramUpload(bytes, filename);
+      if (!savedPath) {
+        await sendTelegram(
+          chatId,
+          "No active workspace is open in Termigo to save the document.",
+          signal,
+        );
+        return true;
+      }
+      const hint = documentToolHint(filename, doc.mime_type);
+      const instruction =
+        caption || `Inspect and summarize the uploaded file (${filename}).`;
+      const prompt = `[Telegram document "${filename}" (${bytes.byteLength} bytes) saved at: ${savedPath}]\n${hint}\n\nUser request: ${instruction}`;
+      void startTelegramDispatch(
+        prompt,
+        chatId,
+        signal,
+        `Document "${filename}" received, inspecting...`,
+      );
+    } catch (e) {
+      await sendTelegram(
+        chatId,
+        `Failed to download document: ${e instanceof Error ? e.message : String(e)}`,
+        signal,
+      );
+    }
+    return true;
+  }
+
+  return false;
+}
+
 export async function handleUpdate(
   u: Update,
   signal: AbortSignal,
@@ -633,10 +850,15 @@ export async function handleUpdate(
     return;
   }
   const msg = u.message;
-  if (!msg?.text) return;
+  if (!msg) return;
   const chatId = msg.chat.id;
   const owner = useTelegramStore.getState().chatId;
   if (owner && String(owner) !== String(chatId)) return;
+
+  if (!msg.text) {
+    await handleIncomingMedia(msg, chatId, signal);
+    return;
+  }
 
   const text = msg.text.trim();
   const [head, ...rest] = text.split(/\s+/);

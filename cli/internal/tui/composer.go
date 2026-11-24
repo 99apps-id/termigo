@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -204,15 +205,27 @@ func expandMentions(prompt, workspace string) (string, []string) {
 }
 
 func insideWorkspace(workspace, name string) (string, bool) {
+	absRoot, err := filepath.Abs(workspace)
+	if err != nil {
+		return "", false
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(absRoot)
+	if err != nil {
+		return "", false
+	}
 	path := name
 	if !filepath.IsAbs(path) {
-		path = filepath.Join(workspace, filepath.FromSlash(name))
+		path = filepath.Join(absRoot, filepath.FromSlash(name))
 	}
-	rel, err := filepath.Rel(workspace, path)
+	resolvedPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", false
+	}
+	rel, err := filepath.Rel(resolvedRoot, resolvedPath)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", false
 	}
-	return path, true
+	return resolvedPath, true
 }
 
 func readMention(path string) (content string, truncated, ok bool) {
@@ -225,10 +238,11 @@ func readMention(path string) (content string, truncated, ok bool) {
 		return "", false, false
 	}
 	defer file.Close()
-	buffer := make([]byte, maxMentionBytes+1)
-	n, _ := file.Read(buffer)
-	buffer = buffer[:n]
-	if n > maxMentionBytes {
+	buffer, err := io.ReadAll(io.LimitReader(file, maxMentionBytes+1))
+	if err != nil {
+		return "", false, false
+	}
+	if len(buffer) > maxMentionBytes {
 		buffer, truncated = buffer[:maxMentionBytes], true
 	}
 	probe := buffer

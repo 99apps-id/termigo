@@ -425,6 +425,27 @@ export type ModelInfo = {
 export const MODELS = [
   // ── OpenAI ────────────────────────────────────────────────────────────────
   {
+    id: "gpt-6.2-sol",
+    provider: "openai",
+    label: "GPT-6.2 Sol",
+    hint: "Flagship",
+    description:
+      "Newest fast, go-to GPT-6.2 tier for coding and everyday work.",
+    capabilities: { intelligence: 5, speed: 4, cost: 2 },
+    tags: ["vision", "reasoning", "tools", "coding"],
+    supportsTemperature: false,
+  },
+  {
+    id: "gpt-6.2-astra",
+    provider: "openai",
+    label: "GPT-6.2 Astra",
+    hint: "Frontier",
+    description: "Newest flagship for the hardest end-to-end work.",
+    capabilities: { intelligence: 5, speed: 3, cost: 1 },
+    tags: ["vision", "reasoning", "tools", "coding"],
+    supportsTemperature: false,
+  },
+  {
     id: "gpt-6-astra",
     provider: "openai",
     label: "GPT-6 Astra",
@@ -753,6 +774,15 @@ export const MODELS = [
     tags: ["vision", "reasoning", "tools", "coding"],
   },
   {
+    id: "glm-5.3-flash",
+    provider: "zhipu",
+    label: "GLM-5.3 Flash",
+    hint: "Fast",
+    description: "Efficient coding with a very large 1.3M context window.",
+    capabilities: { intelligence: 4, speed: 5, cost: 4 },
+    tags: ["fast", "tools", "coding"],
+  },
+  {
     id: "glm-4-plus",
     provider: "zhipu",
     label: "GLM-4 Plus",
@@ -817,6 +847,15 @@ export const MODELS = [
     description: "Compact Ministral for cheap, quick tasks.",
     capabilities: { intelligence: 3, speed: 5, cost: 5 },
     tags: ["tools"],
+  },
+  {
+    id: "devstral-2512",
+    provider: "mistral",
+    label: "Devstral 2",
+    hint: "Agentic Code",
+    description: "Open-weight agentic coding model from Mistral.",
+    capabilities: { intelligence: 5, speed: 4, cost: 4 },
+    tags: ["coding", "tools"],
   },
   {
     id: "codestral-latest",
@@ -949,6 +988,29 @@ export const MODELS = [
   // subscription pays for the turn rather than API credits. INTERNAL ids
   // (`chatgpt-*`) so they never collide with the key-billed "openai" models of
   // the same name; `apiModelId` is the real backend id.
+  {
+    id: "chatgpt-gpt-6.2-sol",
+    provider: "chatgpt",
+    label: "GPT-6.2 Sol (ChatGPT)",
+    hint: "Flagship",
+    description:
+      "Newest fast, go-to model for coding and everyday work through a ChatGPT login.",
+    capabilities: { intelligence: 5, speed: 4, cost: 5 },
+    tags: ["reasoning", "tools", "coding"],
+    supportsTemperature: false,
+    apiModelId: "gpt-6.2-sol",
+  },
+  {
+    id: "chatgpt-gpt-6.2-astra",
+    provider: "chatgpt",
+    label: "GPT-6.2 Astra (ChatGPT)",
+    hint: "Frontier",
+    description: "Newest flagship through a ChatGPT login.",
+    capabilities: { intelligence: 5, speed: 3, cost: 5 },
+    tags: ["reasoning", "tools", "coding"],
+    supportsTemperature: false,
+    apiModelId: "gpt-6.2-astra",
+  },
   {
     id: "chatgpt-gpt-6.1-sol",
     provider: "chatgpt",
@@ -1177,6 +1239,36 @@ export const MODELS = [
     apiModelId: "kimi-k3",
   },
   {
+    id: "copilot-gemini-4-hydrogen",
+    provider: "github-copilot",
+    label: "Gemini 4 Hydrogen (Copilot)",
+    hint: "Agentic",
+    description: "Fast agentic Gemini 4 through GitHub Copilot.",
+    capabilities: { intelligence: 5, speed: 4, cost: 5 },
+    tags: ["reasoning", "tools", "coding"],
+    apiModelId: "gemini-4-hydrogen",
+  },
+  {
+    id: "copilot-mai-code-2",
+    provider: "github-copilot",
+    label: "MAI Code 2 (Copilot)",
+    hint: "Coding",
+    description: "Microsoft coding model through GitHub Copilot.",
+    capabilities: { intelligence: 5, speed: 4, cost: 5 },
+    tags: ["coding", "tools"],
+    apiModelId: "mai-code-2",
+  },
+  {
+    id: "copilot-mai-code-2-flash",
+    provider: "github-copilot",
+    label: "MAI Code 2 Flash (Copilot)",
+    hint: "Fast Coding",
+    description: "Fast Microsoft coding model through GitHub Copilot.",
+    capabilities: { intelligence: 4, speed: 5, cost: 5 },
+    tags: ["coding", "fast"],
+    apiModelId: "mai-code-2-flash",
+  },
+  {
     id: "copilot-mai-code-1-flash",
     provider: "github-copilot",
     label: "MAI-Code-1.1-Flash (Copilot)",
@@ -1190,6 +1282,17 @@ export const MODELS = [
   // The Cloud Code backend keys each model by an upstream id that differs from
   // the registry id, so `apiModelId` carries the tier the server expects. These
   // mirror the Go companion's catalogue (cli/internal/provider/model.go).
+  {
+    id: "antigravity-gemini-4-neon",
+    provider: "antigravity",
+    label: "Gemini 4 Neon (Antigravity)",
+    hint: "Newest",
+    description:
+      "Newest Gemini 4 tier (low, medium, high and xhigh thinking) through Antigravity.",
+    capabilities: { intelligence: 5, speed: 4, cost: 5 },
+    tags: ["reasoning", "tools", "coding"],
+    apiModelId: "gemini-4-neon-high",
+  },
   {
     id: "antigravity-gemini-4-hydrogen",
     provider: "antigravity",
@@ -1281,10 +1384,22 @@ export const MODELS = [
     provider: "muse",
     label: "Muse Spark 1.3",
     hint: "Coding",
-    description: "Meta's coding model through a Muse Code login.",
+    description:
+      "Meta's flagship reasoning and agentic coding model through a Muse Code login.",
     capabilities: { intelligence: 5, speed: 4, cost: 5 },
-    tags: ["coding", "tools"],
+    tags: ["reasoning", "coding", "tools"],
     apiModelId: "muse-spark-1.3",
+  },
+  {
+    id: "muse-ember-1.0",
+    provider: "muse",
+    label: "Muse Ember 1.0",
+    hint: "Agentic",
+    description:
+      "Muse Ember from the live api.meta.ai catalogue for Muse Code logins.",
+    capabilities: { intelligence: 5, speed: 4, cost: 5 },
+    tags: ["reasoning", "coding", "tools"],
+    apiModelId: "muse-ember-1.0",
   },
   {
     id: "muse-wonder-1.0",
@@ -1295,6 +1410,36 @@ export const MODELS = [
     capabilities: { intelligence: 5, speed: 4, cost: 5 },
     tags: ["reasoning", "coding"],
     apiModelId: "muse-wonder-1.0",
+  },
+  {
+    id: "muse-spark-1.3-contributor",
+    provider: "muse",
+    label: "Muse Spark 1.3 Contributor",
+    hint: "Contributor",
+    description: "Muse Spark contributor tier through a Meta login.",
+    capabilities: { intelligence: 5, speed: 4, cost: 5 },
+    tags: ["coding", "tools"],
+    apiModelId: "muse-spark-1.3-contributor",
+  },
+  {
+    id: "muse-wonder-1.0-contributor",
+    provider: "muse",
+    label: "Muse Wonder 1.0 Contributor",
+    hint: "Contributor",
+    description: "Muse Wonder contributor tier through a Meta login.",
+    capabilities: { intelligence: 4, speed: 4, cost: 5 },
+    tags: ["coding"],
+    apiModelId: "muse-wonder-1.0-contributor",
+  },
+  {
+    id: "muse-spark-1.2",
+    provider: "muse",
+    label: "Muse Spark 1.2",
+    hint: "Previous",
+    description: "Previous Muse generation through a Meta login.",
+    capabilities: { intelligence: 4, speed: 4, cost: 5 },
+    tags: ["reasoning", "coding"],
+    apiModelId: "muse-spark-1.2",
   },
   // ── Moonshot Kimi ──────────────────────────────────────────────────────────
   {
@@ -1308,6 +1453,16 @@ export const MODELS = [
     apiModelId: "kimi-k3",
   },
   {
+    id: "moonshot-kimi-k2.7-code",
+    provider: "moonshot",
+    label: "Kimi K2.7 Code",
+    hint: "Coding",
+    description: "Coding-focused Moonshot model for long contexts.",
+    capabilities: { intelligence: 5, speed: 4, cost: 4 },
+    tags: ["coding", "tools"],
+    apiModelId: "kimi-k2.7-code",
+  },
+  {
     id: "moonshot-v1-auto",
     provider: "moonshot",
     label: "Moonshot v1 Auto",
@@ -1318,6 +1473,16 @@ export const MODELS = [
     apiModelId: "moonshot-v1-auto",
   },
   // ── MiniMax ────────────────────────────────────────────────────────────────
+  {
+    id: "minimax-m3",
+    provider: "minimax",
+    label: "MiniMax M3",
+    hint: "Frontier",
+    description: "Multimodal 1M-context model for long-horizon agentic work.",
+    capabilities: { intelligence: 5, speed: 4, cost: 4 },
+    tags: ["vision", "tools", "coding"],
+    apiModelId: "minimax-m3",
+  },
   {
     id: "minimax-m2.7",
     provider: "minimax",
@@ -1495,15 +1660,15 @@ export const CHATGPT_HEADERS: Record<string, string> = {
 // Anthropic gates newer models on a minimum client version, so this tracks the
 // current CLI; the Rust token exchange (`CLAUDE_CLI_VERSION` in
 // src-tauri/src/modules/oauth.rs) pins the same release. Bump both together.
-export const CLAUDE_CLI_VERSION = "2.1.290";
+export const CLAUDE_CLI_VERSION = "2.1.325";
 // Headers the official CLI sends on a subscription Messages request. The
 // per-process `X-Claude-Code-Session-Id` is added in buildLanguageModel.
 export const CLAUDE_OAUTH_HEADERS: Record<string, string> = {
   "anthropic-beta":
-    "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14",
+    "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,advanced-tool-use-2025-11-20,effort-2025-11-24,extended-cache-ttl-2025-04-11",
   "anthropic-dangerous-direct-browser-access": "true",
   "x-app": "cli",
-  "User-Agent": `claude-cli/${CLAUDE_CLI_VERSION} (external, sdk-cli)`,
+  "User-Agent": `claude-cli/${CLAUDE_CLI_VERSION} (external, cli)`,
 };
 
 export type ModelId = (typeof MODELS)[number]["id"];
@@ -1872,8 +2037,12 @@ export const MODEL_CONTEXT_LIMITS: Record<string, number> = {
   // the same Codex backend, so they share the window.
   "gpt-6-astra": 1_050_000,
   "gpt-6-luna": 1_050_000,
+  "gpt-6.2-sol": 1_050_000,
+  "gpt-6.2-astra": 1_050_000,
   "gpt-6.1-sol": 1_050_000,
   "gpt-6.1-terra": 1_050_000,
+  "chatgpt-gpt-6.2-sol": 500_000,
+  "chatgpt-gpt-6.2-astra": 272_000,
   "gpt-5.5": 1_050_000,
   "claude-fable-5-2": 1_000_000,
   "claude-haiku-5-5": 1_000_000,
@@ -1890,6 +2059,7 @@ export const MODEL_CONTEXT_LIMITS: Record<string, number> = {
   "gemini-3.8-flash": 1_000_000,
   // Antigravity serves Gemini and Claude through the Cloud Code backend. Keyed
   // by the registry id, the model the picker actually stores.
+  "antigravity-gemini-4-neon": 1_048_576,
   "antigravity-gemini-4-hydrogen": 1_048_576,
   "antigravity-gemini-4-argon": 1_048_576,
   "antigravity-gemini-4-carbon": 1_048_576,
@@ -1899,7 +2069,11 @@ export const MODEL_CONTEXT_LIMITS: Record<string, number> = {
   "antigravity-claude-sonnet-5-5": 1_000_000,
   "antigravity-gpt-oss-120b": 131_072,
   "muse-spark-1.3": 1_000_000,
+  "muse-spark-1.3-contributor": 1_000_000,
   "muse-wonder-1.0": 1_000_000,
+  "muse-wonder-1.0-contributor": 1_000_000,
+  "muse-spark-1.2": 1_000_000,
+  "muse-ember-1.0": 128_000,
   "grok-4.7": 1_000_000,
   "grok-4.5": 500_000,
   "grok-4.20-reasoning": 2_000_000,
@@ -1916,11 +2090,18 @@ export const MODEL_CONTEXT_LIMITS: Record<string, number> = {
   "copilot-claude-fable-5-2": 264_000,
   "copilot-claude-haiku-5-5": 200_000,
   "copilot-gemini-4-argon": 265_536,
+  "copilot-gemini-4-hydrogen": 1_048_576,
   "copilot-claude-sonnet-5-5": 1_000_000,
   "copilot-gemini-3.8-flash": 1_000_000,
   "copilot-grok-4.7": 1_000_000,
   "copilot-kimi-k3": 1_000_000,
+  "copilot-mai-code-2": 1_050_000,
+  "copilot-mai-code-2-flash": 1_050_000,
   "copilot-mai-code-1-flash": 128_000,
+  "minimax-m3": 1_048_576,
+  "glm-5.3-flash": 1_310_720,
+  "moonshot-kimi-k2.7-code": 262_144,
+  "devstral-2512": 262_144,
   // DeepSeek V4 serves a full 1M-token window. If a specific endpoint rejects
   // for length, the contextLimitLearning layer scales the effective budget down
   // from the observed overshoot  -  so this stays the real cap, not a guess.

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -15,10 +16,32 @@ import (
 // matches what the current CLI sends; the first entry is what unlocks an
 // OAuth bearer at all.
 const (
-	claudeCLIVersion   = "2.1.290"
-	claudeCLIUserAgent = "claude-cli/" + claudeCLIVersion + " (external, sdk-cli)"
-	claudeOAuthBeta    = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05,advanced-tool-use-2025-11-20,effort-2025-11-24,structured-outputs-2025-12-15,fast-mode-2026-02-01,redact-thinking-2026-02-12,token-efficient-tools-2026-03-28"
+	claudeCLIVersion   = "2.1.325"
+	claudeCLIUserAgent = "claude-cli/" + claudeCLIVersion + " (external, cli)"
+	claudeOAuthBeta    = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,advanced-tool-use-2025-11-20,effort-2025-11-24,extended-cache-ttl-2025-04-11"
 )
+
+func stainlessOS() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return "MacOS"
+	case "windows":
+		return "Windows"
+	default:
+		return "Linux"
+	}
+}
+
+func stainlessArch() string {
+	switch runtime.GOARCH {
+	case "amd64":
+		return "x64"
+	case "arm64":
+		return "arm64"
+	default:
+		return runtime.GOARCH
+	}
+}
 
 // anthropicClient speaks the Messages streaming protocol.
 type anthropicClient struct{ *httpClient }
@@ -71,16 +94,16 @@ func (c *anthropicClient) Stream(ctx context.Context, req ChatRequest, emit func
 		headers["Authorization"] = "Bearer " + key
 		headers["anthropic-beta"] = claudeOAuthBeta
 		headers["anthropic-dangerous-direct-browser-access"] = "true"
+		headers["Accept"] = "application/json"
 		headers["x-app"] = "cli"
 		headers["User-Agent"] = claudeCLIUserAgent
-		headers["X-Stainless-Helper-Method"] = "stream"
 		headers["X-Stainless-Retry-Count"] = "0"
-		headers["X-Stainless-Runtime-Version"] = "v24.14.0"
-		headers["X-Stainless-Package-Version"] = "0.80.0"
+		headers["X-Stainless-Runtime-Version"] = "v26.12.1"
+		headers["X-Stainless-Package-Version"] = "0.128.0"
 		headers["X-Stainless-Runtime"] = "node"
 		headers["X-Stainless-Lang"] = "js"
-		headers["X-Stainless-Arch"] = "arm64"
-		headers["X-Stainless-Os"] = "MacOS"
+		headers["X-Stainless-Arch"] = stainlessArch()
+		headers["X-Stainless-Os"] = stainlessOS()
 		headers["X-Stainless-Timeout"] = "600"
 		// The endpoint expects the Claude Code tool names, so client tools are
 		// suffixed and the CLI's own tools are offered as unavailable decoys.

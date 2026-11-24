@@ -69,9 +69,22 @@ func (b *bgBuffer) since(offset int) (text string, missed, next int) {
 }
 
 func (b *bgBuffer) contains(text string) bool {
+	return b.containsSince(-1, text)
+}
+
+// containsSince checks whether buffered output at or after offset contains
+// text. A negative offset searches the entire retained buffer.
+func (b *bgBuffer) containsSince(offset int, text string) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return strings.Contains(string(b.data), text)
+	start := 0
+	if offset > b.base {
+		start = offset - b.base
+		if start > len(b.data) {
+			return false
+		}
+	}
+	return strings.Contains(string(b.data[start:]), text)
 }
 
 type bgProc struct {
@@ -346,6 +359,7 @@ func (t *runWaitTool) Run(ctx context.Context, _ *Env, args map[string]any) (Res
 		return Result{Output: problem, IsError: true}, nil
 	}
 	until := argString(args, "until")
+	since := sinceArg(args)
 	timeout := time.Duration(argInt(args, "timeout_secs", 30, 1, bgMaxWait)) * time.Second
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
@@ -354,7 +368,7 @@ func (t *runWaitTool) Run(ctx context.Context, _ *Env, args map[string]any) (Res
 	reason := "timed out waiting"
 wait:
 	for {
-		if until != "" && proc.buf.contains(until) {
+		if until != "" && proc.buf.containsSince(since, until) {
 			reason = "the output contains " + fmt.Sprintf("%q", until)
 			break
 		}
@@ -370,7 +384,7 @@ wait:
 		case <-tick.C:
 		}
 	}
-	return Result{Output: reason + "\n" + describeLogs(proc, sinceArg(args))}, nil
+	return Result{Output: reason + "\n" + describeLogs(proc, since)}, nil
 }
 
 type runKillTool struct{}

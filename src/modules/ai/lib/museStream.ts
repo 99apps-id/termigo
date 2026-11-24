@@ -2,10 +2,13 @@ import { sanitizeMuseSseLine } from "./museSse";
 import {
   chatToNativeResponsesBody,
   chatToResponsesBody,
+  declaredChatToolNames,
   isAttestationDenial,
   museIdentityHeaders,
+  type ResponsesToChatOptions,
   responsesStreamToChatSse,
   responsesUrl,
+  responseToolAliases,
 } from "./museTextTools";
 
 /**
@@ -110,9 +113,10 @@ function withIdentityHeaders(
 async function bufferedChatResponse(
   response: Response,
   model: string,
+  options?: ResponsesToChatOptions,
 ): Promise<Response> {
   const sseText = await response.text();
-  return new Response(responsesStreamToChatSse(sseText, model), {
+  return new Response(responsesStreamToChatSse(sseText, model, options), {
     status: 200,
     headers: { "content-type": "text/event-stream" },
   });
@@ -151,7 +155,10 @@ async function textToolRequest(
     typeof responsesBody.model === "string" && responsesBody.model
       ? responsesBody.model
       : "muse";
-  return bufferedChatResponse(response, model);
+  return bufferedChatResponse(response, model, {
+    allowedTools: declaredChatToolNames(chatBody),
+    toolAliases: responseToolAliases(chatBody),
+  });
 }
 
 export function createMuseFetch(base: typeof fetch): typeof fetch {
@@ -210,6 +217,9 @@ export function createMuseFetch(base: typeof fetch): typeof fetch {
       typeof nativeBody.model === "string" && nativeBody.model
         ? nativeBody.model
         : "muse";
-    return bufferedChatResponse(response, model);
+    return bufferedChatResponse(response, model, {
+      allowedTools: declaredChatToolNames(chatBody),
+      toolAliases: responseToolAliases(chatBody),
+    });
   };
 }

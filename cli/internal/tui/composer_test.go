@@ -145,6 +145,25 @@ func TestExpandMentionsTruncatesLargeFiles(t *testing.T) {
 	}
 }
 
+func TestExpandMentionsBlocksSymlinkEscape(t *testing.T) {
+	outside := t.TempDir()
+	secretPath := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(secretPath, []byte("top-secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	root := workspaceWith(t, map[string]string{"ok.txt": "safe"})
+	if err := os.Symlink(secretPath, filepath.Join(root, "escape.txt")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	sent, attached := expandMentions("check @escape.txt and @ok.txt", root)
+	if strings.Contains(sent, "top-secret") {
+		t.Fatalf("symlink outside workspace must not be attached: %q", sent)
+	}
+	if len(attached) != 1 || attached[0] != "ok.txt" {
+		t.Fatalf("attached = %q, want [ok.txt]", attached)
+	}
+}
+
 // The transcript shows what was typed; the model gets the file as well.
 func TestSendingAMentionShowsTheTextAndNamesTheFile(t *testing.T) {
 	root := workspaceWith(t, map[string]string{"a.txt": "hello"})

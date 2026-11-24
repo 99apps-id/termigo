@@ -10,26 +10,35 @@ import { GEMINI_SAFETY_SETTINGS } from "./googleSafety";
 
 export const AG_HOST = "https://daily-cloudcode-pa.googleapis.com";
 export const AG_HOST_FALLBACK = "https://cloudcode-pa.googleapis.com";
-export const AG_MAX_OUTPUT_TOKENS = 64_000;
+export const AG_MAX_OUTPUT_TOKENS = 65_536;
+export const AG_CONSUMER_PROJECT = "aicode-consumers";
 
 /**
  * The Antigravity client this app presents as. Cloud Code gates models on it:
- * `fetchAvailableModels` lists the Gemini 4 family (Hydrogen, Argon, Carbon)
- * only for the Antigravity CLI 1.5.9 identity, and a model it does not list
- * answers 404 "Requested entity was not found". The IDE identity
- * (`antigravity/ide/2.11.0`) and older CLI releases get no Gemini 4 at all.
- * Matches the `agy` release verified on 2026-11-15; the Rust token exchange
- * (oauth.rs `ag_user_agent`) and the Go companion pin the same identity.
+ * `fetchAvailableModels` lists the Gemini 4 family (Neon, Hydrogen, Argon,
+ * Carbon) only for the Antigravity CLI 1.5.15 identity with its paired
+ * changelist (`cl=1027820220`), matching termixgo (`internal/provider/antigravity.go`).
+ * The Rust token exchange (oauth.rs `ag_user_agent`) and the Go companion pin
+ * the same identity.
  */
-export const AG_CLI_VERSION = "1.5.9";
-export const AG_CLIENT = "antigravity/cli/1.5.9";
+export const AG_CLI_VERSION = "1.5.15";
+export const AG_CLI_CHANGELIST = "1027820220";
+export const AG_CLIENT = `antigravity/cli/${AG_CLI_VERSION}`;
 
 export function agUserAgent(): string {
   const ua = typeof navigator === "undefined" ? "" : navigator.userAgent;
-  const base = `antigravity/cli/${AG_CLI_VERSION}`;
-  if (/Windows/i.test(ua)) return `${base} windows/x64`;
-  if (/Macintosh|Mac OS/i.test(ua)) return `${base} darwin/arm64`;
-  return `${base} linux/x64`;
+  let osType = "linux";
+  let arch = "amd64";
+  if (/Windows/i.test(ua)) {
+    osType = "windows";
+    arch = /ARM64|aarch64/i.test(ua) ? "arm64" : "amd64";
+  } else if (/Macintosh|Mac OS/i.test(ua)) {
+    osType = "darwin";
+    arch = "arm64";
+  } else if (/aarch64|arm64/i.test(ua)) {
+    arch = "arm64";
+  }
+  return `antigravity/cli/${AG_CLI_VERSION} (aidev_client; os_type=${osType}; arch=${arch}; cl=${AG_CLI_CHANGELIST}; auth_method=consumer)`;
 }
 
 export type JsonObject = Record<string, unknown>;
@@ -55,18 +64,28 @@ export function newSessionId(): string {
   return value.toString();
 }
 
-/** Gemini 4 families the Antigravity CLI 1.5.9 backend serves. */
-const GEMINI4_FAMILIES = ["hydrogen", "argon", "carbon"] as const;
+/** Gemini 4 families the Antigravity CLI 1.5.15 backend serves. */
+const GEMINI4_FAMILIES = ["neon", "hydrogen", "argon", "carbon"] as const;
 type Gemini4Family = (typeof GEMINI4_FAMILIES)[number];
 
 /** Levels each family takes, lowest first, as the CLI names its wire ids. */
 const GEMINI4_LEVELS: Record<Gemini4Family, readonly string[]> = {
+  neon: ["low", "medium", "high", "xhigh"],
   hydrogen: ["low", "medium", "high", "xhigh"],
   argon: ["low", "medium", "high"],
   carbon: ["low", "medium", "high"],
 };
 
-/** `hydrogen`, `argon` or `carbon` for a Gemini 4 id, prefixed or not. */
+const AG_MODEL_ENUMS: Record<string, string> = {
+  "gemini-4-argon-low": "MODEL_PLACEHOLDER_M419",
+  "gemini-4-argon-medium": "MODEL_PLACEHOLDER_M418",
+  "gemini-4-argon-high": "MODEL_PLACEHOLDER_M417",
+  "gemini-3.8-flash-low": "MODEL_PLACEHOLDER_M320",
+  "gemini-3.8-flash-medium": "MODEL_PLACEHOLDER_M319",
+  "gemini-3.8-flash-high": "MODEL_PLACEHOLDER_M318",
+};
+
+/** `neon`, `hydrogen`, `argon` or `carbon` for a Gemini 4 id, prefixed or not. */
 export function gemini4Family(model: string): Gemini4Family | null {
   const id = model.replace(/^antigravity-/, "");
   const rest = id.startsWith("gemini-4-") ? id.slice("gemini-4-".length) : "";
@@ -305,9 +324,39 @@ function buildGenerationConfig(existing: unknown): JsonObject {
   return config;
 }
 
-function antigravityRequestId(messageCount: number): string {
-  const step = Math.max(1, messageCount * 2 - 1);
-  return `agent/${randomHex(16)}/${Date.now()}/${randomHex(16)}/${step}`;
+export function newUuid(): string {
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  const hex = randomHex(16);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
+function modelStepCount(contents: readonly unknown[]): number {
+  let steps = 0;
+  for (const item of contents) {
+    if (isObject(item) && item.role === "model") steps += 1;
+  }
+  return steps;
+}
+
+function antigravityLabels(
+  wireModel: string,
+  steps: number,
+  cascadeId: string,
+  trajectoryId: string,
+): Record<string, string> {
+  const labels: Record<string, string> = {
+    cascade_id: cascadeId,
+    last_step_index: String(steps),
+    request_id: `${trajectoryId}-${steps}`,
+    root_cascade_id: cascadeId,
+    trajectory_id: trajectoryId,
+    used_claude: String(wireModel.startsWith("claude-")),
+    used_claude_conservative: "false",
+    used_non_gemini_model: String(!wireModel.startsWith("gemini-")),
+  };
+  const modelEnum = AG_MODEL_ENUMS[wireModel];
+  if (modelEnum) labels.model_enum = modelEnum;
+  return labels;
 }
 
 /** Wraps a Gemini generateContent body in the Cloud Code envelope. */
@@ -316,6 +365,7 @@ export function buildAntigravityBody(
   project: string,
   session: string,
   modelId: string,
+  ids?: { cascadeId: string; trajectoryId: string },
 ): string {
   let parsed: unknown = null;
   try {
@@ -325,7 +375,14 @@ export function buildAntigravityBody(
   }
   const original = isObject(parsed) ? parsed : {};
   const contents = Array.isArray(original.contents) ? original.contents : [];
-  const request: JsonObject = { ...original, sessionId: session };
+  const steps = modelStepCount(contents);
+  const cascadeId = ids?.cascadeId || newUuid();
+  const trajectoryId = ids?.trajectoryId || newUuid();
+  const request: JsonObject = {
+    ...original,
+    sessionId: session,
+    labels: antigravityLabels(modelId, steps, cascadeId, trajectoryId),
+  };
   request.tools = cleanTools(request.tools);
   request.generationConfig = buildGenerationConfig(request.generationConfig);
   // Unlock the permissive Gemini safety thresholds so legitimate security /
@@ -336,9 +393,7 @@ export function buildAntigravityBody(
   ) {
     request.safetySettings = GEMINI_SAFETY_SETTINGS;
   }
-  // With tools but no explicit choice, the Go client asks the backend to
-  // validate every call (mode VALIDATED). A forced tool choice the SDK already
-  // set is kept: override it and the agent loses ANY/allowedFunctionNames.
+  // With tools but no explicit choice, keep caller-set toolConfig only.
   if (
     Array.isArray(request.tools) &&
     request.tools.length > 0 &&
@@ -360,7 +415,8 @@ export function buildAntigravityBody(
     project,
     model: modelId,
     userAgent: "antigravity",
-    requestId: antigravityRequestId(contents.length),
+    requestType: "agent",
+    requestId: `agent/${cascadeId}/${Date.now()}/${trajectoryId}/${steps + 1}`,
     request,
   };
   return JSON.stringify(envelope);

@@ -265,8 +265,27 @@ export const TOOL_GROUPS: readonly ToolGroup[] = [
     id: "telegram",
     label: "Telegram relay",
     description:
-      "Send a file or a message to your paired Telegram chat, so a long run can report to you while you are away from the desk.",
-    tools: ["telegram_send_document", "telegram_send_message"],
+      "Send a file, photo, voice note, or message to your paired Telegram chat, so a long run can report to you while you are away from the desk.",
+    tools: [
+      "telegram_send_document",
+      "telegram_send_message",
+      "telegram_send_photo",
+      "telegram_send_voice",
+    ],
+  },
+  {
+    id: "media",
+    label: "OCR, image generation and TTS",
+    description:
+      "Extract text from images and scanned PDFs (OCR), generate images, and synthesize speech / Telegram voice notes.",
+    tools: ["ocr_extract", "generate_image", "text_to_speech"],
+  },
+  {
+    id: "cron",
+    label: "Automation and cron jobs",
+    description:
+      "Create, list, toggle and delete scheduled recurring automation / cron jobs.",
+    tools: ["cron_list", "cron_create", "cron_toggle", "cron_delete"],
   },
   {
     id: "utility",

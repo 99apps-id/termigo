@@ -1,6 +1,7 @@
 import type { LanguageModel } from "ai";
 
 import {
+  AG_CONSUMER_PROJECT,
   AG_HOST,
   AG_HOST_FALLBACK,
   agUserAgent,
@@ -8,9 +9,9 @@ import {
   buildAntigravityBody,
   isObject,
   newSessionId,
+  newUuid,
   platformCode,
   projectIdFrom,
-  randomHex,
   unwrapAntigravitySseLine,
   type JsonObject,
 } from "./antigravityProtocol";
@@ -107,23 +108,20 @@ async function resolveProject(token: string): Promise<string> {
     if (onboarded?.done === true) break;
     await new Promise((resolve) => setTimeout(resolve, 2000));
   }
-  return `termixgo-${randomHex(8)}`;
+  return AG_CONSUMER_PROJECT;
 }
 
 let cachedProject: string | null = null;
 let projectFlight: Promise<string> | null = null;
 
 export function ensureAntigravityProject(token: string): Promise<string> {
-  if (cachedProject && !cachedProject.startsWith("termixgo-")) {
+  if (cachedProject) {
     return Promise.resolve(cachedProject);
   }
   if (projectFlight) return projectFlight;
   projectFlight = resolveProject(token)
     .then((project) => {
-      // Only cache valid Google Cloud projects. A fallback generated id
-      // must not be permanently pinned, otherwise a temporary resolution
-      // failure causes persistent quota/permission rejection on all future turns.
-      if (project && !project.startsWith("termixgo-")) {
+      if (project) {
         cachedProject = project;
       }
       return project;
@@ -210,6 +208,7 @@ export function createAntigravityFetch(
   session: string,
 ): typeof fetch {
   let currentToken = token;
+  const ids = { cascadeId: newUuid(), trajectoryId: newUuid() };
   return async (input, init) => {
     const url =
       input instanceof URL
@@ -228,9 +227,9 @@ export function createAntigravityFetch(
     const build = (host: string) => {
       const headers = new Headers(init.headers);
       headers.delete("x-goog-api-key");
+      headers.delete("x-machine-session-id");
       headers.set("authorization", `Bearer ${currentToken}`);
       headers.set("user-agent", agUserAgent());
-      headers.set("x-machine-session-id", session);
       headers.set("content-type", "application/json");
       return {
         url: `${host}/v1internal:${method}${streaming ? "?alt=sse" : ""}`,
@@ -240,6 +239,7 @@ export function createAntigravityFetch(
           project,
           session,
           modelId,
+          ids,
         ),
       };
     };

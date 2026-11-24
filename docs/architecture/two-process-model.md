@@ -191,11 +191,15 @@ Each browser instance is a dedicated Tauri webview window that the agent drives.
 
 A named Chromium session driven over the DevTools protocol, with its own profile directory under `~/.termigo/browser-sessions`. Unlike the embedded webview, the profile survives the process, so **cookies and logins persist across runs** and an authenticated flow does not have to be repeated every time.
 
-- `browser_session_create` / `browser_session_close` - session lifecycle
+- `browser_session_create` / `browser_session_close` / `browser_session_resume` - session lifecycle and resuming a saved profile
 - `browser_session_list` - the sessions currently known
 - `browser_session_navigate` - send a session to a URL
 - `browser_session_text` - read the rendered page text
-- `browser_session_click` / `browser_session_type` - drive the page
+- `browser_session_click` / `browser_session_type` / `browser_session_select` / `browser_session_click_at` / `browser_session_composer` / `browser_session_click_item` - drive page interactions and forms
+- `browser_session_eval` - evaluate JavaScript in the page context
+- `browser_session_cookies` - inspect or update session cookies
+- `browser_session_wait` - wait for a selector to become visible
+- `browser_session_screenshot` - capture a screenshot of the active page
 
 The URL guard is the same `unsafe_url` policy the embedded browser applies, and session ids are restricted to ASCII letters, digits, `_` and `-` so a name cannot escape the profile directory.
 

@@ -1,5 +1,10 @@
 import { useTelegramStore } from "@/modules/telegram/store";
-import { sendDocument, sendTelegram } from "@/modules/telegram/telegramApi";
+import {
+  sendDocument,
+  sendPhotoBytes,
+  sendTelegram,
+  sendVoice,
+} from "@/modules/telegram/telegramApi";
 import { tool } from "ai";
 import { z } from "zod";
 import { native } from "../lib/native";
@@ -141,6 +146,130 @@ export function buildTelegramTools(ctx: ToolContext) {
           return {
             ok: false,
             error: `Failed to send message to Telegram: ${err instanceof Error ? err.message : String(err)}`,
+          };
+        }
+      },
+    }),
+
+    telegram_send_photo: tool({
+      description:
+        "Send an image file (.png, .jpg, .webp) directly as a photo to the user's paired Telegram chat.",
+      inputSchema: z.object({
+        path: z
+          .string()
+          .min(1)
+          .describe("Relative or absolute path of the image file to send."),
+        caption: z
+          .string()
+          .optional()
+          .describe("Optional caption accompanying the photo."),
+      }),
+      execute: async ({ path, caption }) => {
+        const store = useTelegramStore.getState();
+        const targetChatId = store.chatId ?? store.ownerUserId;
+        if (!targetChatId) {
+          return {
+            ok: false,
+            error:
+              "Telegram relay is not currently paired with a chat ID in Termigo.",
+          };
+        }
+        const reqPath = resolvePath(path, ctx.getCwd());
+        const safety = await checkReadableCanonical(
+          reqPath,
+          native.canonicalize,
+        );
+        if (!safety.ok) {
+          return { ok: false, error: safety.reason, path: reqPath };
+        }
+        const abs = safety.canonical;
+        try {
+          const base64Data = await native.readFileBase64(abs);
+          const bytes = base64ToBytes(base64Data.data);
+          const filename =
+            base64Data.file_name || abs.split(/[\\/]/).pop() || "image.png";
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 30_000);
+          try {
+            await sendPhotoBytes(
+              targetChatId,
+              bytes,
+              filename,
+              base64Data.media_type || "image/png",
+              caption ?? "",
+              controller.signal,
+            );
+          } finally {
+            clearTimeout(timeout);
+          }
+          return { ok: true, path: abs, filename, bytes: bytes.byteLength };
+        } catch (e) {
+          return {
+            ok: false,
+            path: abs,
+            error: `Failed to send Telegram photo: ${String(e)}`,
+          };
+        }
+      },
+    }),
+
+    telegram_send_voice: tool({
+      description:
+        "Send an audio or voice note file (.ogg, .opus, .mp3, .wav, .m4a) directly to the user's paired Telegram chat.",
+      inputSchema: z.object({
+        path: z
+          .string()
+          .min(1)
+          .describe("Relative or absolute path of the audio/voice file."),
+        caption: z
+          .string()
+          .optional()
+          .describe("Optional caption accompanying the voice note."),
+      }),
+      execute: async ({ path, caption }) => {
+        const store = useTelegramStore.getState();
+        const targetChatId = store.chatId ?? store.ownerUserId;
+        if (!targetChatId) {
+          return {
+            ok: false,
+            error:
+              "Telegram relay is not currently paired with a chat ID in Termigo.",
+          };
+        }
+        const reqPath = resolvePath(path, ctx.getCwd());
+        const safety = await checkReadableCanonical(
+          reqPath,
+          native.canonicalize,
+        );
+        if (!safety.ok) {
+          return { ok: false, error: safety.reason, path: reqPath };
+        }
+        const abs = safety.canonical;
+        try {
+          const base64Data = await native.readFileBase64(abs);
+          const bytes = base64ToBytes(base64Data.data);
+          const filename =
+            base64Data.file_name || abs.split(/[\\/]/).pop() || "voice.ogg";
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 30_000);
+          try {
+            await sendVoice(
+              targetChatId,
+              bytes,
+              filename,
+              base64Data.media_type || "audio/ogg",
+              caption ?? "",
+              controller.signal,
+            );
+          } finally {
+            clearTimeout(timeout);
+          }
+          return { ok: true, path: abs, filename, bytes: bytes.byteLength };
+        } catch (e) {
+          return {
+            ok: false,
+            path: abs,
+            error: `Failed to send Telegram voice note: ${String(e)}`,
           };
         }
       },

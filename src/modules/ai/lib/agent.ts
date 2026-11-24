@@ -1707,9 +1707,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
     // token, but an uncapped run still burns its rate window (one logged run
     // spent 7.0M input tokens over 89 steps), so there is no auth exemption.
     (args) =>
-      (capPred(args) as boolean)
-        ? requestSynthesisOrStop("step-cap")
-        : false,
+      (capPred(args) as boolean) ? requestSynthesisOrStop("step-cap") : false,
     (args) =>
       (repeatPred(args) as boolean)
         ? requestSynthesisOrStop("tool-repetition")

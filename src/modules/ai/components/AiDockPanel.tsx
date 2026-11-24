@@ -1,8 +1,10 @@
-import { lazy, Suspense } from "react";
-import { useComposer } from "../lib/composer";
+import { lazy, Suspense, useCallback } from "react";
+import { useComposerActions } from "../lib/composer";
 import { useChatStore } from "../store/chatStore";
 import { AiChatBody } from "./AiMiniWindow";
 import { ChipsRow } from "./ChipsRow";
+
+const noop = () => {};
 
 const AiComposerInput = lazy(() =>
   import("./AiComposerInput").then((m) => ({ default: m.AiComposerInput })),
@@ -26,15 +28,15 @@ export function AiDockPanel() {
   const sessionId = useChatStore((s) => s.activeSessionId);
   const closePanel = useChatStore((s) => s.closePanel);
   const openMini = useChatStore((s) => s.openMini);
-  const c = useComposer();
-
-  if (!sessionId) return null;
+  const c = useComposerActions();
 
   // The header's expand control pops the chat back out to the floating window.
-  const popOut = () => {
+  const popOut = useCallback(() => {
     closePanel();
     openMini();
-  };
+  }, [closePanel, openMini]);
+
+  if (!sessionId) return null;
 
   const hasChips =
     c.files.length > 0 ||
@@ -49,7 +51,7 @@ export function AiDockPanel() {
           sessionId={sessionId}
           onClose={closePanel}
           onExpand={popOut}
-          onHeaderPointerDown={() => {}}
+          onHeaderPointerDown={noop}
         />
       </div>
       <div className="shrink-0 border-t border-border/60 bg-card/40 px-3 py-2">

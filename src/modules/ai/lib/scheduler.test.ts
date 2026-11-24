@@ -71,3 +71,18 @@ describe("dueTasks", () => {
     expect(dueTasks(150, tasks).map((t) => t.id)).toEqual(["a"]);
   });
 });
+
+describe("cron expressions", () => {
+  it("parses 5-field cron expressions and computes the next fire time", () => {
+    const timing = parseScheduleWhen("*/15 * * * *");
+    expect(timing).toEqual({ cronExpr: "*/15 * * * *" });
+    const base = new Date(2026, 10, 24, 10, 7, 0, 0).getTime();
+    const next = computeNextDueAt(base, timing);
+    expect(next).toBe(new Date(2026, 10, 24, 10, 15, 0, 0).getTime());
+  });
+
+  it("rejects invalid cron expressions", () => {
+    expect(parseScheduleWhen("99 * * * *")).toEqual({});
+    expect(parseScheduleWhen("* * *")).toEqual({});
+  });
+});

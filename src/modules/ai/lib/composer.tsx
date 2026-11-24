@@ -1,6 +1,13 @@
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import { invoke } from "@tauri-apps/api/core";
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { toast } from "sonner";
 import { useWhisperRecording } from "../hooks/useWhisperRecording";
 import { expandSnippetTokens, type Snippet } from "../lib/snippets";
@@ -85,13 +92,37 @@ type ComposerCtx = {
   ) => number;
 };
 
-const Ctx = createContext<ComposerCtx | null>(null);
+type ComposerMetaCtx = Omit<ComposerCtx, "value" | "canSend">;
+
+const MetaCtx = createContext<ComposerMetaCtx | null>(null);
+const CanSendCtx = createContext<boolean>(false);
+const ValueCtx = createContext<string>("");
+
+/**
+ * Subscribe only to composer actions and non-keystroke state (attachments,
+ * snippets, commands, busy/queued status). Components using this hook never
+ * re-render while the user types in the textarea.
+ */
+export function useComposerActions(): ComposerMetaCtx {
+  const ctx = useContext(MetaCtx);
+  if (!ctx) {
+    throw new Error(
+      "useComposerActions must be used inside <AiComposerProvider>",
+    );
+  }
+  return ctx;
+}
+
+/** Subscribe only to whether the composer currently has something to send. */
+export function useComposerCanSend(): boolean {
+  return useContext(CanSendCtx);
+}
 
 export function useComposer(): ComposerCtx {
-  const ctx = useContext(Ctx);
-  if (!ctx)
-    throw new Error("useComposer must be used inside <AiComposerProvider>");
-  return ctx;
+  const meta = useComposerActions();
+  const value = useContext(ValueCtx);
+  const canSend = useContext(CanSendCtx);
+  return useMemo(() => ({ ...meta, value, canSend }), [meta, value, canSend]);
 }
 
 type ProviderProps = {
@@ -621,32 +652,93 @@ export function AiComposerProvider({ children }: ProviderProps) {
     requestAnimationFrame(() => textareaRef.current?.focus());
   };
 
-  const ctx: ComposerCtx = {
-    textareaRef,
-    value,
-    setValue,
-    files,
+  const actionsRef = useRef({
     addFiles,
     attachFileByPath,
     restoreFileParts,
     removeFile,
-    pickedSnippets,
     addSnippet,
     removeSnippet,
-    pickedCommands,
     addCommand,
     removeCommand,
-    queued,
     cancelQueued,
     editQueued,
-    isBusy,
     submit,
     stop,
-    voice,
-    canSend,
+  });
+  actionsRef.current = {
+    addFiles,
+    attachFileByPath,
+    restoreFileParts,
+    removeFile,
+    addSnippet,
+    removeSnippet,
+    addCommand,
+    removeCommand,
+    cancelQueued,
+    editQueued,
+    submit,
+    stop,
   };
 
-  return <Ctx.Provider value={ctx}>{children}</Ctx.Provider>;
+  const stableActions = useMemo(
+    () => ({
+      addFiles: (list: FileList | File[] | readonly File[] | null) =>
+        actionsRef.current.addFiles(list),
+      attachFileByPath: (path: string) =>
+        actionsRef.current.attachFileByPath(path),
+      restoreFileParts: (
+        parts: ReadonlyArray<{
+          type: "file";
+          mediaType: string;
+          url: string;
+          filename?: string;
+        }>,
+        key: string,
+      ) => actionsRef.current.restoreFileParts(parts, key),
+      removeFile: (id: string) => actionsRef.current.removeFile(id),
+      addSnippet: (s: Snippet) => actionsRef.current.addSnippet(s),
+      removeSnippet: (id: string) => actionsRef.current.removeSnippet(id),
+      addCommand: (cmd: SlashCommandMeta) => actionsRef.current.addCommand(cmd),
+      removeCommand: (name: string) => actionsRef.current.removeCommand(name),
+      cancelQueued: (index: number) => actionsRef.current.cancelQueued(index),
+      editQueued: (index: number) => actionsRef.current.editQueued(index),
+      submit: () => actionsRef.current.submit(),
+      stop: () => actionsRef.current.stop(),
+    }),
+    [],
+  );
+
+  const meta = useMemo<ComposerMetaCtx>(
+    () => ({
+      textareaRef,
+      setValue,
+      files,
+      pickedSnippets,
+      pickedCommands,
+      queued,
+      isBusy,
+      voice,
+      ...stableActions,
+    }),
+    [
+      files,
+      pickedSnippets,
+      pickedCommands,
+      queued,
+      isBusy,
+      voice,
+      stableActions,
+    ],
+  );
+
+  return (
+    <MetaCtx.Provider value={meta}>
+      <CanSendCtx.Provider value={canSend}>
+        <ValueCtx.Provider value={value}>{children}</ValueCtx.Provider>
+      </CanSendCtx.Provider>
+    </MetaCtx.Provider>
+  );
 }
 
 export const IMAGE_ATTACH_EXTS = new Set([

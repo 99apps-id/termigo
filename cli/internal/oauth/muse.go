@@ -34,7 +34,7 @@ func museBuildUserAgent() string {
 	if arch == "amd64" {
 		arch = "x86_64"
 	}
-	return fmt.Sprintf("muse-build/%s (non-interactive; %s-%s)", "1.4.20", runtime.GOOS, arch)
+	return fmt.Sprintf("muse-build/%s (non-interactive; %s-%s)", "1.4.24", runtime.GOOS, arch)
 }
 
 // metaMintedKey is the subset of the mint response Termigo needs.

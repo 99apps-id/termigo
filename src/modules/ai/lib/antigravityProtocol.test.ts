@@ -165,14 +165,15 @@ describe("projectIdFrom", () => {
 });
 
 describe("agUserAgent", () => {
-  it("names the Antigravity CLI 1.5.9 client the backend catalogues Gemini 4 under", () => {
+  it("names the Antigravity CLI 1.5.15 client identity with aidev_client and changelist", () => {
     const ua = agUserAgent();
-    expect(ua.startsWith("antigravity/cli/1.5.9 ")).toBe(true);
-    expect(ua).toMatch(/ (windows|darwin|linux)\/(x64|arm64)$/);
+    expect(ua.startsWith("antigravity/cli/1.5.15 (aidev_client; ")).toBe(true);
+    expect(ua).toMatch(
+      /os_type=(windows|darwin|linux); arch=(amd64|arm64); cl=1027820220; auth_method=consumer\)$/,
+    );
   });
 
-  // Cloud Code lists Gemini 4 only for the Antigravity CLI identity; the IDE
-  // identity got 404 "Requested entity was not found" for Hydrogen and Argon.
+  // Cloud Code lists Gemini 4 only for the Antigravity CLI identity.
   it("presents as the current Antigravity CLI", () => {
     expect(agUserAgent()).toMatch(
       new RegExp(`^antigravity/cli/${AG_CLI_VERSION.replace(/\./g, "\\.")} `),
@@ -183,6 +184,8 @@ describe("agUserAgent", () => {
 
 describe("agWireModel", () => {
   it("appends the level the Cloud Code backend names each Gemini 4 tier by", () => {
+    expect(agWireModel("gemini-4-neon")).toBe("gemini-4-neon-high");
+    expect(agWireModel("antigravity-gemini-4-neon")).toBe("gemini-4-neon-high");
     expect(agWireModel("gemini-4-argon")).toBe("gemini-4-argon-high");
     expect(agWireModel("antigravity-gemini-4-argon")).toBe(
       "gemini-4-argon-high",
@@ -192,6 +195,7 @@ describe("agWireModel", () => {
   });
 
   it("keeps a level the family actually takes", () => {
+    expect(agWireModel("gemini-4-neon-xhigh")).toBe("gemini-4-neon-xhigh");
     expect(agWireModel("gemini-4-hydrogen-xhigh")).toBe(
       "gemini-4-hydrogen-xhigh",
     );

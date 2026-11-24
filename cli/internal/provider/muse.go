@@ -15,7 +15,7 @@ import (
 // museCLIVersion is the Muse Code CLI release whose identity Meta's backend
 // gates native tool calls on, verified against the installed CLI (1.4.20) by
 // capturing its request to a local endpoint.
-const museCLIVersion = "1.4.20"
+const museCLIVersion = "1.4.24"
 
 var museUserAgent = museBuildUserAgent()
 
@@ -380,15 +380,18 @@ func strconvQuote(value string) string {
 	return string(encoded)
 }
 
-// parseTextToolCalls splits a model reply into prose and tool_call blocks. A\n// block naming a tool the request did not declare stays prose, so an example\n// or quoted JSON in an answer is never executed.
+var textToolBlockRE = regexp.MustCompile("(?s)(```(?:tool_call|tool-call|json)\\s*(.*?)```|<tool_call>\\s*(.*?)\\s*</tool_call>)")
+
+// parseTextToolCalls splits a model reply into prose and tool_call blocks. A
+// block naming a tool the request did not declare stays prose, so an example
+// or quoted JSON in an answer is never executed.
 // A block that does not parse is not a call: the reply then stays prose.
 func parseTextToolCalls(text string, tools []ToolDef) (string, []ToolCall) {
 	known := make(map[string]bool, len(tools))
 	for _, tool := range tools {
 		known[tool.Name] = true
 	}
-	blockRE := regexp.MustCompile("(?s)(```(?:tool_call|tool-call|json)\\s*(.*?)```|<tool_call>\\s*(.*?)\\s*</tool_call>)")
-	matches := blockRE.FindAllStringSubmatchIndex(text, -1)
+	matches := textToolBlockRE.FindAllStringSubmatchIndex(text, -1)
 	if len(matches) == 0 {
 		return strings.TrimSpace(text), nil
 	}

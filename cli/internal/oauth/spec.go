@@ -3,6 +3,7 @@ package oauth
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -36,6 +37,7 @@ type Spec struct {
 	// differ from the address the callback listens on (Claude registers
 	// "localhost"); empty means the listen host.
 	RedirectURIHost string
+	UserAgent       string
 	ExtraAuth       map[string]string
 	ExchangeJSON    bool
 	RefreshJSON     bool
@@ -135,7 +137,8 @@ var specs = map[string]Spec{
 			"https://www.googleapis.com/auth/experimentsandconfigs",
 		},
 		RedirectPath: "/auth/callback",
-		ExtraAuth:    map[string]string{"access_type": "offline", "prompt": "consent"},
+		UserAgent:    "antigravity/cli/1.5.15 (aidev_client; os_type=" + runtime.GOOS + "; arch=" + runtime.GOARCH + "; cl=1027820220; auth_method=consumer)",
+		ExtraAuth:    map[string]string{"access_type": "offline", "prompt": "consent select_account"},
 	},
 	"github-copilot": {
 		Provider:        "github-copilot",

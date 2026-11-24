@@ -37,7 +37,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import type { ChatStatus, DynamicToolUIPart, ToolUIPart, UIMessage } from "ai";
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useAutoApproval } from "../hooks/useAutoApproval";
-import { useComposer } from "../lib/composer";
+import { useComposerActions } from "../lib/composer";
 import { humanizeModelError } from "../lib/errorMessage";
 import { isContentFilterError } from "../lib/errors";
 import { TERMIGO_CMD_RE } from "../lib/slashCommands";
@@ -366,7 +366,7 @@ const RenderedMessage = memo(function RenderedMessage({
     [groups],
   );
   const focusInput = useChatStore((s) => s.focusInput);
-  const restoreFileParts = useComposer().restoreFileParts;
+  const restoreFileParts = useComposerActions().restoreFileParts;
   const sessionId = useChatStore((s) => s.activeSessionId);
   // Rewind is offered only on turns that actually have a pre-run snapshot.
   const hasTurnCheckpoint = useTurnCheckpointStore((s) =>

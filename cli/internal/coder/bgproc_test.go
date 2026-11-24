@@ -81,3 +81,19 @@ func TestBackgroundUnknownHandleAndOffsets(t *testing.T) {
 		t.Fatal("a reader that fell behind is told how much it missed")
 	}
 }
+
+func TestBackgroundContainsSinceRespectsOffset(t *testing.T) {
+	buf := &bgBuffer{}
+	buf.Write([]byte("ready-1\n"))
+	afterFirst := buf.end()
+	if !buf.containsSince(-1, "ready-1") {
+		t.Fatal("negative offset should search full buffer")
+	}
+	if buf.containsSince(afterFirst, "ready-1") {
+		t.Fatal("stale output before since offset must not match")
+	}
+	buf.Write([]byte("ready-2\n"))
+	if !buf.containsSince(afterFirst, "ready-2") {
+		t.Fatal("output written after since offset should match")
+	}
+}

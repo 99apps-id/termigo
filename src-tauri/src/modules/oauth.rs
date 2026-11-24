@@ -26,7 +26,21 @@ static OAUTH_CANCELLED: AtomicBool = AtomicBool::new(false);
 /// with no User-Agent with a 302 to an HTML page, whose empty body then fails
 /// to parse as JSON ("expected value at line 1 column 1"), so the header is
 /// required rather than cosmetic.
-const MUSE_USER_AGENT: &str = "muse-code/1.0.2";
+const MUSE_CLI_VERSION: &str = "1.4.24";
+
+fn muse_user_agent() -> String {
+    let os = match std::env::consts::OS {
+        "macos" => "darwin",
+        "windows" => "windows",
+        _ => "linux",
+    };
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => "x86_64",
+        "aarch64" => "arm64",
+        other => other,
+    };
+    format!("muse-build/{MUSE_CLI_VERSION} (non-interactive; {os}-{arch})")
+}
 
 /// The public Google installed-app pair for Antigravity, the same one Termixgo
 /// ships. A release build bakes it in with option_env! so the app never asks
@@ -379,7 +393,7 @@ async fn login_openai_codex(app: &tauri::AppHandle) -> Result<OAuthTokens, Strin
 /// current; `TERMIGO_CLAUDE_CLI_VERSION` overrides it without a rebuild. The
 /// TypeScript side (`CLAUDE_CLI_VERSION` in src/modules/ai/config.ts) pins the
 /// same release; bump both together.
-pub const CLAUDE_CLI_VERSION: &str = "2.1.290";
+pub const CLAUDE_CLI_VERSION: &str = "2.1.325";
 
 const CLAUDE_CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 const CLAUDE_AUTHORIZE_URL: &str = "https://claude.ai/oauth/authorize";
@@ -416,7 +430,7 @@ pub fn claude_cli_user_agent() -> String {
         .map(|v| v.trim().to_string())
         .filter(|v| is_dotted_version(v))
         .unwrap_or_else(|| CLAUDE_CLI_VERSION.to_string());
-    format!("claude-cli/{version} (external, sdk-cli)")
+    format!("claude-cli/{version} (external, cli)")
 }
 
 /// Builds the authorization URL with the parameter order the official client
@@ -649,21 +663,23 @@ async fn login_claude_oauth(app: &tauri::AppHandle) -> Result<OAuthTokens, Strin
 }
 
 fn ag_user_agent() -> String {
-    let platform = match std::env::consts::OS {
+    let os_type = match std::env::consts::OS {
         "macos" => "darwin",
         "windows" => "windows",
         _ => "linux",
     };
     let arch = match std::env::consts::ARCH {
-        "x86_64" => "x64",
-        "x86" => "x86",
+        "x86_64" => "amd64",
+        "x86" => "386",
         "aarch64" => "arm64",
         "arm" => "arm",
         other => other,
     };
-    // The Antigravity CLI identity: Cloud Code lists Gemini 4 only for it (see
-    // `agUserAgent` in src/modules/ai/lib/antigravityProtocol.ts).
-    format!("antigravity/cli/1.5.9 {platform}/{arch}")
+    // The Antigravity CLI 1.5.15 identity (matching termixgo agUserAgent):
+    // Cloud Code lists Gemini 4 (Neon, Hydrogen, Argon, Carbon) only for it.
+    format!(
+        "antigravity/cli/1.5.15 (aidev_client; os_type={os_type}; arch={arch}; cl=1027820220; auth_method=consumer)"
+    )
 }
 
 async fn login_antigravity(app: &tauri::AppHandle) -> Result<OAuthTokens, String> {
@@ -1080,7 +1096,7 @@ async fn login_muse(app: &tauri::AppHandle) -> Result<OAuthTokens, String> {
         .post(DEVICE_URL)
         .header("content-type", "application/x-www-form-urlencoded")
         .header("accept", "application/json")
-        .header("user-agent", MUSE_USER_AGENT)
+        .header("user-agent", muse_user_agent())
         .body(query(&[("client_id", CLIENT_ID)]))
         .send()
         .await
@@ -1135,7 +1151,7 @@ async fn login_muse(app: &tauri::AppHandle) -> Result<OAuthTokens, String> {
             .post(TOKEN_URL)
             .header("content-type", "application/x-www-form-urlencoded")
             .header("accept", "application/json")
-            .header("user-agent", MUSE_USER_AGENT)
+            .header("user-agent", muse_user_agent())
             .body(query(&[
                 ("client_id", CLIENT_ID),
                 ("device_code", &dev.device_code),
@@ -1172,7 +1188,7 @@ async fn login_muse(app: &tauri::AppHandle) -> Result<OAuthTokens, String> {
     let mint_res = client
         .post(MINT_URL)
         .header("authorization", format!("Bearer {dca_token}"))
-        .header("user-agent", MUSE_USER_AGENT)
+        .header("user-agent", muse_user_agent())
         .header("accept", "application/json")
         .header("x-api-version", "1.0.0")
         .json(&serde_json::json!({ "onboard": true }))
@@ -1362,7 +1378,7 @@ async fn do_refresh_token(provider: &str, refresh_token: &str) -> Result<OAuthTo
             let mint_res = client
                 .post(MINT_URL)
                 .header("authorization", format!("Bearer {refresh_token}"))
-                .header("user-agent", MUSE_USER_AGENT)
+                .header("user-agent", muse_user_agent())
                 .header("accept", "application/json")
                 .header("x-api-version", "1.0.0")
                 .json(&serde_json::json!({ "onboard": true }))
@@ -1633,7 +1649,7 @@ mod tests {
     fn claude_user_agent_has_the_cli_shape() {
         let ua = claude_cli_user_agent();
         assert!(ua.starts_with("claude-cli/"), "{ua}");
-        assert!(ua.ends_with(" (external, sdk-cli)"), "{ua}");
+        assert!(ua.ends_with(" (external, cli)"), "{ua}");
     }
 
     #[test]

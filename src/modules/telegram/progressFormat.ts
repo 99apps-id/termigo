@@ -431,8 +431,23 @@ export function markdownToTelegramHtml(markdown: string): string {
   // 5. Allow explicit user HTML tags: <b>, <i>, <u>, <s>, <code>, <pre>
   text = text.replace(/&lt;(\/)?(b|i|u|s|code|pre)&gt;/gi, "<$1$2>");
 
-  // 6. Headings (# Title) -> <b>Title</b>
-  text = text.replace(/^(#{1,6})\s+(.+)$/gm, "<b>$2</b>");
+  // 5b. Extract link URLs before emphasis rules so underscores/asterisks in
+  // URLs (e.g. https://example.com/__v1__/a*b) are never rewritten into HTML
+  // tags inside href="...".
+  const linkHrefs: string[] = [];
+  text = text.replace(
+    /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+    (_match, label: string, url: string) => {
+      const idx = linkHrefs.length;
+      linkHrefs.push(url.replace(/"/g, "%22"));
+      return `<a href="\x00LN_${idx}\x00">${label}</a>`;
+    },
+  );
+
+  // 6. Headings (# Title) -> <b>Title</b> (strip inner **bold** to avoid <b><b>)
+  text = text.replace(/^(#{1,6})\s+(.+)$/gm, (_m, _hashes, title: string) => {
+    return `<b>${title.replace(/\*\*(.+?)\*\*/g, "$1")}</b>`;
+  });
 
   // 7. Bold + Italic: ***text***
   text = text.replace(/\*\*\*(.+?)\*\*\*/g, "<b><i>$1</i></b>");
@@ -464,12 +479,10 @@ export function markdownToTelegramHtml(markdown: string): string {
   // 12. Strikethrough: ~~text~~
   text = text.replace(/~~(.+?)~~/g, "<s>$1</s>");
 
-  // 13. Links: [label](url). The URL goes into an attribute, so a quote must
-  // not be able to close it early (escapeHtml does not touch quotes).
+  // 13. Restore link URLs intact.
   text = text.replace(
-    /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
-    (_match, label: string, url: string) =>
-      `<a href="${url.replace(/"/g, "%22")}">${label}</a>`,
+    /\x00LN_(\d+)\x00/g,
+    (_, idx) => linkHrefs[Number(idx)] ?? "",
   );
 
   // 14. Blockquotes: > quote -> Telegram HTML parse_mode does not support <blockquote>,

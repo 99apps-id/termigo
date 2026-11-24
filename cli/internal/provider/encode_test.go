@@ -185,8 +185,11 @@ func TestAnthropicOAuthUsesTheClaudeCodeIdentity(t *testing.T) {
 	if recorder.headers.Get("anthropic-dangerous-direct-browser-access") != "true" {
 		t.Errorf("anthropic-dangerous-direct-browser-access header missing")
 	}
-	if recorder.headers.Get("X-Stainless-Helper-Method") != "stream" {
-		t.Errorf("X-Stainless-Helper-Method = %q, want stream", recorder.headers.Get("X-Stainless-Helper-Method"))
+	if recorder.headers.Get("X-Stainless-Runtime-Version") != "v26.12.1" {
+		t.Errorf("X-Stainless-Runtime-Version = %q, want v26.12.1", recorder.headers.Get("X-Stainless-Runtime-Version"))
+	}
+	if recorder.headers.Get("X-Stainless-Package-Version") != "0.128.0" {
+		t.Errorf("X-Stainless-Package-Version = %q, want 0.128.0", recorder.headers.Get("X-Stainless-Package-Version"))
 	}
 	if meta, ok := recorder.body["metadata"].(map[string]any); !ok || !strings.Contains(fmt.Sprint(meta["user_id"]), "device_id") {
 		t.Errorf("expected metadata.user_id in payload, got %v", recorder.body["metadata"])

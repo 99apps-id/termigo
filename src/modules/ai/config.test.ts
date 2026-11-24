@@ -653,7 +653,7 @@ describe("Claude OAuth identity", () => {
   it("presents as the current Claude Code CLI", () => {
     expect(CLAUDE_CLI_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
     expect(CLAUDE_OAUTH_HEADERS["User-Agent"]).toBe(
-      `claude-cli/${CLAUDE_CLI_VERSION} (external, sdk-cli)`,
+      `claude-cli/${CLAUDE_CLI_VERSION} (external, cli)`,
     );
     expect(CLAUDE_OAUTH_HEADERS["anthropic-beta"]).toContain(
       "oauth-2025-04-20",

@@ -19,7 +19,7 @@ type JsonObject = Record<string, unknown>;
 /** The Muse Code CLI release whose identity Meta's backend gates native
  * tool calls on (verified against the installed CLI by capturing its
  * request to a local endpoint, the same evidence as the Go clients). */
-export const MUSE_CLI_VERSION = "1.4.20";
+export const MUSE_CLI_VERSION = "1.4.24";
 
 export function museBuildUserAgent(): string {
   const platform = typeof navigator !== "undefined" ? navigator.platform : "";
@@ -49,6 +49,30 @@ export function museIdentityHeaders(sessionId: string): Record<string, string> {
 function sanitizeResponsesName(name: string): string {
   const clean = name.replace(/[^a-zA-Z0-9_-]/g, "_");
   return clean || "unknown_tool";
+}
+
+/**
+ * Returns the exact tool names declared on a chat-completions request body.
+ * Used to ensure text-protocol `tool_call` blocks only execute tools the
+ * request actually declared.
+ */
+export function declaredChatToolNames(body: unknown): Set<string> {
+  if (!isObject(body)) return new Set();
+  return new Set(chatTools(body).map((tool) => tool.name));
+}
+
+/**
+ * Maps sanitized Responses wire names back to the original chat tool names
+ * (for example MCP tools whose names carry dots or slashes).
+ */
+export function responseToolAliases(body: unknown): Record<string, string> {
+  const aliases: Record<string, string> = {};
+  if (!isObject(body)) return aliases;
+  for (const tool of chatTools(body)) {
+    const wire = sanitizeResponsesName(tool.name);
+    if (!(wire in aliases)) aliases[wire] = tool.name;
+  }
+  return aliases;
 }
 
 function isObject(value: unknown): value is JsonObject {
@@ -272,16 +296,19 @@ export function chatToNativeResponsesBody(
         content: userContent(message.content),
       });
     } else if (role === "assistant") {
+      const hasToolCalls =
+        Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
       const text = contentText(message.content);
       if (text.trim()) {
         input.push({
           type: "message",
           role: "assistant",
+          phase: hasToolCalls ? "commentary" : "final_answer",
           content: [{ type: "output_text", text }],
         });
       }
-      if (Array.isArray(message.tool_calls)) {
-        for (const call of message.tool_calls) {
+      if (hasToolCalls) {
+        for (const call of message.tool_calls as unknown[]) {
           if (!isObject(call)) continue;
           const fn = isObject(call.function) ? call.function : call;
           const name = asString(fn.name);
@@ -290,9 +317,11 @@ export function chatToNativeResponsesBody(
             typeof fn.arguments === "string"
               ? fn.arguments
               : JSON.stringify(fn.arguments ?? {});
+          const callId = asString(call.id) || `call_${input.length}`;
           input.push({
             type: "function_call",
-            call_id: asString(call.id) || `call_${input.length}`,
+            id: callId.startsWith("fc_") ? callId : `fc_${callId}`,
+            call_id: callId,
             name: sanitizeResponsesName(name),
             arguments: isValidJson(rawArgs) ? rawArgs : "{}",
             status: "completed",
@@ -337,7 +366,7 @@ export function chatToNativeResponsesBody(
       ? body.reasoning_effort
       : "high";
   out.reasoning = { effort, summary: "auto" };
-  out.include = "reasoning.encrypted_content";
+  out.include = ["reasoning.encrypted_content"];
   out.prompt_cache_key = `tbh:main:${sessionId}`;
   return out;
 }
@@ -366,11 +395,16 @@ let textToolSeq = 0;
 
 /**
  * Splits a model reply into the prose around the tool_call blocks and the
- * calls themselves. A block that does not parse is not a call: the whole
- * reply then stays prose, so a model that talks about the protocol in a
- * code sample is not mistaken for one using it.
+ * calls themselves. When `allowedTools` is supplied, a block naming a tool the
+ * request did not declare stays prose so quoted examples are never executed.
+ * A block that does not parse is not a call: the whole reply then stays prose,
+ * so a model that talks about the protocol in a code sample is not mistaken
+ * for one using it.
  */
-export function parseTextToolCalls(text: string): {
+export function parseTextToolCalls(
+  text: string,
+  allowedTools?: ReadonlySet<string>,
+): {
   prose: string;
   calls: TextToolCall[];
 } {
@@ -393,15 +427,22 @@ export function parseTextToolCalls(text: string): {
     } catch {
       return { prose: text, calls: [] };
     }
-    if (!isObject(parsed) || !asString(parsed.name).trim()) {
+    const name = isObject(parsed) ? asString(parsed.name).trim() : "";
+    if (!name) {
       return { prose: text, calls: [] };
     }
-    let args: unknown = parsed.arguments ?? {};
+    const blockEnd = start + fence.length + end + "```".length;
+    if (allowedTools && !allowedTools.has(name)) {
+      prose += rest.slice(0, blockEnd);
+      rest = tail.slice(end + "```".length);
+      continue;
+    }
+    let args: unknown = (parsed as JsonObject).arguments ?? {};
     if (typeof args === "string") args = safeJson(args);
     prose += rest.slice(0, start);
     calls.push({
       id: `call_muse_${++textToolSeq}`,
-      name: asString(parsed.name).trim(),
+      name,
       arguments: JSON.stringify(args),
     });
     rest = tail.slice(end + "```".length);
@@ -502,9 +543,15 @@ function readResponsesStream(sseText: string): ResponsesOutcome {
  * reply is necessarily whole rather than token-streamed, because a
  * tool_call block is only a call once its closing fence has arrived.
  */
+export type ResponsesToChatOptions = {
+  allowedTools?: ReadonlySet<string>;
+  toolAliases?: Record<string, string>;
+};
+
 export function responsesStreamToChatSse(
   sseText: string,
   model: string,
+  options?: ResponsesToChatOptions,
 ): string {
   const outcome = readResponsesStream(sseText);
   if (outcome.error) {
@@ -531,10 +578,17 @@ export function responsesStreamToChatSse(
   };
   // Native function_call items win; the text protocol is the fallback
   // parse for a reply that arrived without them.
+  const aliases = options?.toolAliases;
+  const nativeCalls = aliases
+    ? outcome.calls.map((call) => ({
+        ...call,
+        name: aliases[call.name] ?? call.name,
+      }))
+    : outcome.calls;
   const parsed =
-    outcome.calls.length > 0
-      ? { prose: outcome.text, calls: outcome.calls }
-      : parseTextToolCalls(outcome.text);
+    nativeCalls.length > 0
+      ? { prose: outcome.text, calls: nativeCalls }
+      : parseTextToolCalls(outcome.text, options?.allowedTools);
   const { prose, calls } = parsed;
   if (calls.length === 0) {
     if (outcome.text) {

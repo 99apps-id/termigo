@@ -138,7 +138,7 @@ describe("createMuseFetch attestation fallback", () => {
     expect(tools[0].type).toBe("namespace");
     expect(tools[0].name).toBe("muse");
     expect(sent.body?.tool_choice).toBeUndefined();
-    expect(sent.headers.get("user-agent")).toContain("muse-build/1.4.20");
+    expect(sent.headers.get("user-agent")).toContain("muse-build/1.4.24");
     expect(sent.headers.get("x-client-id")).toBe("tbh:exec");
     expect(sent.headers.get("x-tbh-agent-role")).toBe("main");
     expect(sent.headers.get("x-tbh-session-id")).toBeTruthy();
@@ -283,5 +283,125 @@ describe("createMuseFetch attestation fallback", () => {
       chatInit([{ role: "user", content: "hi" }], undefined, "key-native"),
     );
     expect(await response.text()).toContain('"choices":[]');
+  });
+
+  it("ignores text tool_call blocks for tools not declared in the request", async () => {
+    const sse = [
+      `data: ${JSON.stringify({
+        type: "response.output_text.delta",
+        delta:
+          'Example:\n```tool_call\n{"name":"undeclared_tool","arguments":{"x":1}}\n```',
+      })}\n\n`,
+      `data: ${JSON.stringify({ type: "response.completed", response: {} })}\n\n`,
+    ].join("");
+    const base = (async () =>
+      new Response(sse, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      })) as typeof fetch;
+    const museFetch = createMuseFetch(base);
+    const response = await museFetch(
+      "https://api.meta.ai/v1/chat/completions",
+      chatInit(
+        [{ role: "user", content: "show an example" }],
+        [BASH_TOOL],
+        "key-undeclared",
+      ),
+    );
+    const text = await response.text();
+    expect(text).not.toContain('"finish_reason":"tool_calls"');
+    expect(text).toContain('"finish_reason":"stop"');
+    expect(text).toContain("undeclared_tool");
+  });
+
+  it("restores original tool names when native function_call returns a sanitized wire name", async () => {
+    const mcpTool = {
+      type: "function",
+      function: {
+        name: "mcp.docs/search",
+        description: "Search docs.",
+        parameters: { type: "object", properties: { q: { type: "string" } } },
+      },
+    };
+    const sse = [
+      `data: ${JSON.stringify({
+        type: "response.output_item.done",
+        item: {
+          type: "function_call",
+          id: "fc_1",
+          call_id: "call_1",
+          name: "mcp_docs_search",
+          arguments: '{"q":"linux"}',
+        },
+      })}\n\n`,
+      `data: ${JSON.stringify({ type: "response.completed", response: {} })}\n\n`,
+    ].join("");
+    const base = (async () =>
+      new Response(sse, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      })) as typeof fetch;
+    const museFetch = createMuseFetch(base);
+    const response = await museFetch(
+      "https://api.meta.ai/v1/chat/completions",
+      chatInit(
+        [{ role: "user", content: "search" }],
+        [mcpTool],
+        "key-mcp-alias",
+      ),
+    );
+    const text = await response.text();
+    expect(text).toContain('"name":"mcp.docs/search"');
+    expect(text).toContain('"finish_reason":"tool_calls"');
+  });
+
+  it("stamps fc_ id, commentary phase, and array include on native tool-loop replay", async () => {
+    let captured: Record<string, unknown> | null = null;
+    const base = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      captured = JSON.parse(String(init?.body ?? "{}")) as Record<
+        string,
+        unknown
+      >;
+      return new Response(
+        `data: ${JSON.stringify({ type: "response.output_text.delta", delta: "done" })}\n\ndata: ${JSON.stringify({ type: "response.completed", response: {} })}\n\n`,
+        { status: 200, headers: { "content-type": "text/event-stream" } },
+      );
+    }) as typeof fetch;
+    const museFetch = createMuseFetch(base);
+    await museFetch(
+      "https://api.meta.ai/v1/chat/completions",
+      chatInit(
+        [
+          { role: "user", content: "run ls" },
+          {
+            role: "assistant",
+            content: "Checking files now.",
+            tool_calls: [
+              {
+                id: "call_abc",
+                type: "function",
+                function: { name: "bash_run", arguments: '{"command":"ls"}' },
+              },
+            ],
+          },
+          { role: "tool", tool_call_id: "call_abc", content: "README.md" },
+        ],
+        [BASH_TOOL],
+        "key-native-replay",
+      ),
+    );
+    expect(captured).not.toBeNull();
+    expect((captured as unknown as Record<string, unknown>).include).toEqual([
+      "reasoning.encrypted_content",
+    ]);
+    const input = (captured as unknown as { input: Record<string, unknown>[] })
+      .input;
+    const assistantMsg = input.find(
+      (i) => i.type === "message" && i.role === "assistant",
+    );
+    expect(assistantMsg?.phase).toBe("commentary");
+    const fnCall = input.find((i) => i.type === "function_call");
+    expect(fnCall?.id).toBe("fc_call_abc");
+    expect(fnCall?.status).toBe("completed");
   });
 });

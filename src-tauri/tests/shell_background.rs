@@ -191,6 +191,19 @@ fn unread_buffer_is_not_consumed() {
 }
 
 #[test]
+fn empty_buffer_is_consumed_after_read() {
+    let mut buf = background::ShellRingBuffer::new(16);
+    assert!(!buf.is_consumed());
+    let (bytes, off, _) = buf.read_from(0);
+    assert!(bytes.is_empty());
+    assert_eq!(off, 0);
+    assert!(
+        buf.is_consumed(),
+        "a zero-output process is drained once its caller has read logs"
+    );
+}
+
+#[test]
 fn info_reflects_command_and_exit() {
     let proc = background::spawn(
         "true".into(),

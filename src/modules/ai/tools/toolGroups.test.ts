@@ -332,9 +332,12 @@ describe("tool payload measurement", () => {
     // The office group (11 document/CSV/calendar tools) adds ~8.1 KB; it is
     // group-gated, so a coding session that never produces a document pays
     // none of it. Measured 132.4 KB in total.
+    // The media (ocr_extract, generate_image, text_to_speech), cron (4 tools),
+    // and Telegram photo/voice tools add ~5.5 KB; all are group-gated, so
+    // sessions that do not load those domains pay none of it. Measured ~138 KB.
     // The ceiling is the point of the test: a feature that adds schemas has
     // to either fit or raise it deliberately, in a diff a reviewer sees.
-    expect(kb).toBeLessThan(134);
+    expect(kb).toBeLessThan(142);
     // And it must be exact: an unmeasured schema would silently under-report.
     expect(payload.unmeasured).toBe(0);
   });

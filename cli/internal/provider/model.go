@@ -23,6 +23,8 @@ func (m Model) WireID() string {
 
 var models = []Model{
 	// OpenAI. Astra is the flagship, Sol the middle, Luna the fast tier.
+	{ID: "gpt-6.2-sol", Provider: "openai", Label: "GPT-6.2 Sol", Description: "Newest fast, go-to tier for coding and everyday work.", Tags: []string{"reasoning", "tools", "vision", "coding"}},
+	{ID: "gpt-6.2-astra", Provider: "openai", Label: "GPT-6.2 Astra", Description: "Newest flagship for the hardest end-to-end work.", Tags: []string{"reasoning", "tools", "vision", "coding"}},
 	{ID: "gpt-6-astra", Provider: "openai", Label: "GPT-6 Astra", Description: "Flagship for the hardest end-to-end work.", Tags: []string{"reasoning", "tools", "vision", "coding"}},
 	{ID: "gpt-6-sol", Provider: "openai", Label: "GPT-6 Sol", Description: "Balances intelligence and cost.", Tags: []string{"reasoning", "tools", "vision", "coding"}},
 	{ID: "gpt-6-luna", Provider: "openai", Label: "GPT-6 Luna", Description: "Efficient tier for high-volume work.", Tags: []string{"fast", "tools", "coding"}},
@@ -37,7 +39,9 @@ var models = []Model{
 	// The models served through a ChatGPT login (Codex OAuth). The local id
 	// is distinct because the catalogue keys by id alone; APIID is what goes
 	// on the wire. The newest Codex generation first.
-	{ID: "codex-gpt-6.1-sol", Provider: "openai-codex", Label: "GPT-6.1 Sol (ChatGPT)", APIID: "gpt-6.1-sol", Description: "Newest Sol tier through a ChatGPT login.", Tags: []string{"reasoning", "tools", "coding"}},
+	{ID: "codex-gpt-6.2-sol", Provider: "openai-codex", Label: "GPT-6.2 Sol (ChatGPT)", APIID: "gpt-6.2-sol", Description: "Newest fast, go-to model for coding and everyday work through a ChatGPT login.", Tags: []string{"reasoning", "tools", "coding"}},
+	{ID: "codex-gpt-6.2-astra", Provider: "openai-codex", Label: "GPT-6.2 Astra (ChatGPT)", APIID: "gpt-6.2-astra", Description: "Newest flagship through a ChatGPT login.", Tags: []string{"reasoning", "tools", "coding"}},
+	{ID: "codex-gpt-6.1-sol", Provider: "openai-codex", Label: "GPT-6.1 Sol (ChatGPT)", APIID: "gpt-6.1-sol", Description: "Previous Sol tier through a ChatGPT login.", Tags: []string{"reasoning", "tools", "coding"}},
 	{ID: "codex-gpt-6-astra", Provider: "openai-codex", Label: "GPT-6 Astra (ChatGPT)", APIID: "gpt-6-astra", Description: "Flagship through a ChatGPT login.", Tags: []string{"reasoning", "tools", "coding"}},
 	{ID: "codex-gpt-6.1-terra", Provider: "openai-codex", Label: "GPT-6.1 Terra (ChatGPT)", APIID: "gpt-6.1-terra", Description: "Newest Terra tier through a ChatGPT login.", Tags: []string{"reasoning", "tools", "coding"}},
 	{ID: "codex-gpt-6-luna", Provider: "openai-codex", Label: "GPT-6 Luna (ChatGPT)", APIID: "gpt-6-luna", Description: "Efficient through a ChatGPT login.", Tags: []string{"fast", "tools"}},
@@ -64,11 +68,15 @@ var models = []Model{
 	{ID: "copilot-gpt-6.1-terra", Provider: "github-copilot", Label: "GPT-6.1 Terra (Copilot)", APIID: "gpt-6.1-terra", Description: "Newest Terra tier through GitHub Copilot.", Tags: []string{"reasoning", "tools", "coding"}},
 	{ID: "copilot-gpt-6-astra", Provider: "github-copilot", Label: "GPT-6 Astra (Copilot)", APIID: "gpt-6-astra", Description: "GPT-6 flagship through GitHub Copilot.", Tags: []string{"reasoning", "tools", "coding"}},
 	{ID: "copilot-gpt-6-luna", Provider: "github-copilot", Label: "GPT-6 Luna (Copilot)", APIID: "gpt-6-luna", Description: "Efficient GPT through GitHub Copilot.", Tags: []string{"fast", "tools"}},
+	{ID: "copilot-claude-fable-5-2", Provider: "github-copilot", Label: "Claude Fable 5.2 (Copilot)", APIID: "claude-fable-5.2", Description: "Flagship deep reasoning through GitHub Copilot.", Tags: []string{"reasoning", "tools", "coding"}},
 	{ID: "copilot-claude-opus-5-5", Provider: "github-copilot", Label: "Claude Opus 5.5 (Copilot)", APIID: "claude-opus-5.5", Description: "Flagship Claude through GitHub Copilot.", Tags: []string{"reasoning", "tools", "coding"}},
 	{ID: "copilot-claude-haiku-5-5", Provider: "github-copilot", Label: "Claude Haiku 5.5 (Copilot)", APIID: "claude-haiku-5.5", Description: "Fastest current Claude through GitHub Copilot.", Tags: []string{"fast", "tools"}},
 	{ID: "copilot-gemini-4-argon", Provider: "github-copilot", Label: "Gemini 4 Argon (Copilot)", APIID: "gemini-4-argon", Description: "Gemini 4 flagship through GitHub Copilot.", Tags: []string{"reasoning", "tools", "coding"}},
+	{ID: "copilot-gemini-4-hydrogen", Provider: "github-copilot", Label: "Gemini 4 Hydrogen (Copilot)", APIID: "gemini-4-hydrogen", Description: "Fast agentic Gemini 4 through GitHub Copilot.", Tags: []string{"reasoning", "tools", "coding"}},
 	{ID: "copilot-grok-4.7", Provider: "github-copilot", Label: "Grok 4.7 (Copilot)", APIID: "grok-4.7", Description: "xAI Grok through GitHub Copilot.", Tags: []string{"reasoning", "tools"}},
 	{ID: "copilot-kimi-k3", Provider: "github-copilot", Label: "Kimi K3 (Copilot)", APIID: "kimi-k3", Description: "Moonshot Kimi through GitHub Copilot.", Tags: []string{"reasoning", "tools", "coding"}},
+	{ID: "copilot-mai-code-2", Provider: "github-copilot", Label: "MAI Code 2 (Copilot)", APIID: "mai-code-2", Description: "Microsoft coding model through GitHub Copilot.", Tags: []string{"coding", "tools"}},
+	{ID: "copilot-mai-code-2-flash", Provider: "github-copilot", Label: "MAI Code 2 Flash (Copilot)", APIID: "mai-code-2-flash", Description: "Fast Microsoft coding model through GitHub Copilot.", Tags: []string{"coding", "fast"}},
 	{ID: "copilot-mai-code-1-flash", Provider: "github-copilot", Label: "MAI-Code-1.1-Flash (Copilot)", APIID: "mai-code-1.1-flash", Description: "Fast coding model through GitHub Copilot.", Tags: []string{"coding", "fast"}},
 	// Google Antigravity serves Gemini and Claude models through its Cloud
 	// Code backend under an Antigravity login.
@@ -77,6 +85,7 @@ var models = []Model{
 	// (gemini-3.8-flash-medium); 9router's "(medium)" preset is stripped
 	// before the request and sent as thinkingConfig, so it must not be part
 	// of the id. A wrong id returns 404 "check the model id and base URL".
+	{ID: "antigravity-gemini-4-neon", Provider: "antigravity", Label: "Gemini 4 Neon (Antigravity)", APIID: "gemini-4-neon-high", Description: "Newest Gemini 4 tier: low, medium, high and xhigh thinking.", Tags: []string{"reasoning", "tools", "coding"}},
 	{ID: "antigravity-gemini-4-hydrogen", Provider: "antigravity", Label: "Gemini 4 Hydrogen (Antigravity)", APIID: "gemini-4-hydrogen-high", Description: "Fast agentic Gemini 4 on every Antigravity plan.", Tags: []string{"reasoning", "tools", "coding"}},
 	{ID: "antigravity-gemini-4-argon", Provider: "antigravity", Label: "Gemini 4 Argon (Antigravity)", APIID: "gemini-4-argon-medium", Description: "Gemini 4 flagship for Pro, Ultra and Enterprise plans.", Tags: []string{"reasoning", "tools", "coding"}},
 	{ID: "antigravity-gemini-4-carbon", Provider: "antigravity", Label: "Gemini 4 Carbon (Antigravity)", APIID: "gemini-4-carbon-medium", Description: "Top Gemini 4 tier; Google AI Ultra and Enterprise only.", Tags: []string{"reasoning", "tools", "coding"}},
@@ -86,7 +95,12 @@ var models = []Model{
 	{ID: "antigravity-claude-sonnet-5-5", Provider: "antigravity", Label: "Claude Sonnet 5.5 (Antigravity)", APIID: "claude-sonnet-5-5-medium", Description: "Fast Claude through an Antigravity login.", Tags: []string{"reasoning", "tools", "coding"}},
 	// Meta Muse Code. The device grant mints an account key; the model id is
 	// what api.meta.ai serves it under.
-	{ID: "muse-spark-1.3", Provider: "muse", Label: "Muse Spark 1.3", APIID: "muse-spark-1.3", Description: "Meta's coding model through a Muse Code login.", Tags: []string{"coding", "tools"}},
+	{ID: "muse-spark-1.3", Provider: "muse", Label: "Muse Spark 1.3", APIID: "muse-spark-1.3", Description: "Meta's flagship reasoning and agentic coding model through a Muse Code login.", Tags: []string{"reasoning", "coding", "tools"}},
+	{ID: "muse-ember-1.0", Provider: "muse", Label: "Muse Ember 1.0", APIID: "muse-ember-1.0", Description: "Muse Ember from the live api.meta.ai catalogue for Muse Code logins.", Tags: []string{"reasoning", "coding", "tools"}},
+	{ID: "muse-wonder-1.0", Provider: "muse", Label: "Muse Wonder 1.0", APIID: "muse-wonder-1.0", Description: "Muse creative reasoning model through a Meta login.", Tags: []string{"reasoning", "coding"}},
+	{ID: "muse-spark-1.3-contributor", Provider: "muse", Label: "Muse Spark 1.3 Contributor", APIID: "muse-spark-1.3-contributor", Description: "Muse contributor model through a Meta login.", Tags: []string{"coding", "tools"}},
+	{ID: "muse-wonder-1.0-contributor", Provider: "muse", Label: "Muse Wonder 1.0 Contributor", APIID: "muse-wonder-1.0-contributor", Description: "Muse Wonder contributor model through a Meta login.", Tags: []string{"coding"}},
+	{ID: "muse-spark-1.2", Provider: "muse", Label: "Muse Spark 1.2", APIID: "muse-spark-1.2", Description: "Previous Muse generation through a Meta login.", Tags: []string{"reasoning", "coding"}},
 
 	// Google. The Flash line ships far more often than the Pro one.
 	{ID: "gemini-4-argon", Provider: "google", Label: "Gemini 4 Argon", Description: "Next-generation flagship reasoning and agentic model.", Tags: []string{"reasoning", "tools", "vision", "coding"}},
@@ -120,6 +134,7 @@ var models = []Model{
 	// endpoint. The host prefix keeps the id unique.
 	{ID: "stepfun-plan/step-3.7-flash", Provider: "stepfun-plan", Label: "Step 3.7 Flash (Plan)", APIID: "step-3.7-flash", Description: "Step 3.7 Flash on the StepFun plan endpoint.", Tags: []string{"tools", "coding"}},
 	{ID: "stepfun-plan/step-3.5-flash", Provider: "stepfun-plan", Label: "Step 3.5 Flash (Plan)", APIID: "step-3.5-flash", Description: "Step 3.5 Flash on the StepFun plan endpoint.", Tags: []string{"fast", "tools"}},
+	{ID: "stepfun-plan/step-5-preview", Provider: "stepfun-plan", Label: "Step 5 Preview (Plan)", APIID: "step-5-preview", Description: "Step 5 Preview on the StepFun plan endpoint.", Tags: []string{"tools", "coding"}},
 
 	// Moonshot. K3 is the open-weight flagship.
 	{ID: "kimi-k3", Provider: "moonshot", Label: "Kimi K3", Description: "Open-weight multimodal reasoning at scale.", Tags: []string{"reasoning", "tools", "coding"}},
@@ -224,6 +239,13 @@ var models = []Model{
 	{ID: "deepseek-v4-flash:latest", Provider: "ollama", Label: "DeepSeek V4 Flash", Description: "Local DeepSeek.", Tags: []string{"local", "coding"}},
 	{ID: "qwen2.5-coder:latest", Provider: "ollama", Label: "Qwen2.5 Coder", Description: "Older local coding model, still widely pulled.", Tags: []string{"local", "coding"}},
 	{ID: "llama3.2:latest", Provider: "ollama", Label: "Llama 3.2", Description: "Older local general model.", Tags: []string{"local"}},
+
+	{ID: "ollama/glm-5.3-flash", Provider: "ollama", Label: "GLM 5.3 Flash", APIID: "glm-5.3-flash", Description: "Ollama cloud model.", Tags: []string{"cloud"}},
+	{ID: "ollama/deepseek-v4.1-flash", Provider: "ollama", Label: "DeepSeek V4.1 Flash", APIID: "deepseek-v4.1-flash", Description: "Ollama cloud model.", Tags: []string{"cloud"}},
+	{ID: "ollama/minimax-m3.1-flash", Provider: "ollama", Label: "MiniMax M3.1 Flash", APIID: "minimax-m3.1-flash", Description: "Ollama cloud model.", Tags: []string{"cloud"}},
+	{ID: "ollama/minimax-m3", Provider: "ollama", Label: "MiniMax M3", APIID: "minimax-m3", Description: "Ollama cloud model.", Tags: []string{"cloud"}},
+	{ID: "ollama/kimi-k2.7-code", Provider: "ollama", Label: "Kimi K2.7 Code", APIID: "kimi-k2.7-code", Description: "Ollama cloud model.", Tags: []string{"cloud", "coding"}},
+	{ID: "ollama/nemotron-3-ultra", Provider: "ollama", Label: "Nemotron 3 Ultra", APIID: "nemotron-3-ultra", Description: "Ollama cloud model.", Tags: []string{"cloud", "reasoning"}},
 
 	{ID: "qwen3.8-27b-lmstudio", Provider: "lmstudio", Label: "Qwen3.8 27B (LM Studio)", APIID: "qwen3.8-27b", Description: "Loaded in LM Studio.", Tags: []string{"local", "tools"}},
 	{ID: "qwen3.8-27b-mlx", Provider: "mlx", Label: "Qwen3.8 27B (MLX)", APIID: "qwen3.8-27b", Description: "Loaded in MLX on Apple silicon.", Tags: []string{"local", "tools"}},

@@ -385,6 +385,16 @@ describe("progressFormat", () => {
       expect(markdownToTelegramHtml("snake_case_name")).toBe("snake_case_name");
     });
 
+    it("keeps link URLs with underscores/asterisks intact and avoids nested bold in headings", () => {
+      expect(
+        markdownToTelegramHtml(
+          "## **Ringkasan**\nLihat [**docs**](https://example.com/__v1__/a*b*c)",
+        ),
+      ).toBe(
+        '<b>Ringkasan</b>\nLihat <a href="https://example.com/__v1__/a*b*c"><b>docs</b></a>',
+      );
+    });
+
     // Portability guard, not a formatting rule. Lookbehind is ES2018 and is
     // absent from older WebKitGTK builds (the Linux webview), where the regex
     // LITERAL is a parse-time SyntaxError: the module would fail to load and

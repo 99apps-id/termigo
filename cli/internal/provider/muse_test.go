@@ -56,7 +56,7 @@ func TestMuseStreamUsesResponsesWithCLIIdentity(t *testing.T) {
 	if gotPath != "/responses" {
 		t.Errorf("path = %q, want /responses", gotPath)
 	}
-	if !strings.Contains(gotAgent, "muse-build/1.4.20") {
+	if !strings.Contains(gotAgent, "muse-build/1.4.24") {
 		t.Errorf("User-Agent = %q, want the Muse CLI build identity", gotAgent)
 	}
 	if gotClientID != "tbh:exec" || gotRole != "main" || gotSession == "" {
