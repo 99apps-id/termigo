@@ -302,6 +302,20 @@ export const TOOL_GROUPS: readonly ToolGroup[] = [
     ],
   },
   {
+    id: "desktop",
+    label: "Desktop apps & Blender",
+    description:
+      "Launch and focus desktop applications (Blender, GIMP, LibreOffice, browsers), take desktop screenshots, send GUI input, and run Python (bpy) scripts inside Blender.",
+    tools: [
+      "desktop_launch_app",
+      "desktop_list_windows",
+      "desktop_focus_window",
+      "desktop_screenshot",
+      "desktop_input",
+      "blender_run_python",
+    ],
+  },
+  {
     id: "utility",
     label: "Utility",
     description:

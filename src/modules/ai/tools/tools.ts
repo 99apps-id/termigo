@@ -24,6 +24,7 @@ import { buildBrowserTools } from "./browser";
 import { buildCodeSearchTools } from "./codeSearch";
 import { buildTreeCompareTools } from "./compareTrees";
 import { buildCronTools } from "./cron";
+import { buildDesktopTools } from "./desktop";
 import { buildDevServerTools } from "./devServer";
 import { buildEditTools } from "./edit";
 import { buildElicitationTools } from "./elicitation";
@@ -355,6 +356,7 @@ export function buildTools(
     ...buildMediaTools(ctx),
     ...buildCronTools(ctx),
     ...buildPentestTools(ctx),
+    ...buildDesktopTools(ctx),
     ...buildMcpOAuthTools(),
     ...buildSystemTools(),
     ...buildProcessTools(ctx),
