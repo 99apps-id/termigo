@@ -589,3 +589,14 @@ html *::-webkit-scrollbar {
     background-position: 0% center;
   }
 }
+
+/* Linux WebKitGTK runs with WEBKIT_DISABLE_DMABUF_RENDERER=1 (software SHM
+ * compositing). Disabling backdrop-filter blur eliminates full-window CPU
+ * Gaussian blur stalls on every keystroke in both terminal and composer. */
+html[data-platform="linux"] *,
+html[data-platform="linux"] *::before,
+html[data-platform="linux"] *::after {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+

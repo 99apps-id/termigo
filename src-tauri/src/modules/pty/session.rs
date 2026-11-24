@@ -329,8 +329,9 @@ pub fn spawn(
     // was silently dropped.
     let flusher_thread = match spawn_worker("termigo-pty-flusher", move || {
         let (lock, cv) = &*pending_f;
+        let mut last_flush: Option<Instant> = None;
         loop {
-            {
+            let initial_len = {
                 let mut g = lock.lock().unwrap_or_else(|e| e.into_inner());
                 while g.is_empty() {
                     if done_f.load(Ordering::Acquire) {
@@ -341,9 +342,16 @@ pub fn spawn(
                         .unwrap_or_else(|e| e.into_inner());
                     g = next;
                 }
+                g.len()
+            };
+            // Flush small interactive echoes from an idle PTY immediately (0ms)
+            // so typing feels crisp; only coalesce when a burst is in progress.
+            let in_burst = initial_len > 256
+                || last_flush.is_some_and(|t| t.elapsed() < FLUSH_COALESCE);
+            if in_burst {
+                thread::sleep(FLUSH_COALESCE);
             }
-            // Coalesce a short window so a burst flushes as one chunk.
-            thread::sleep(FLUSH_COALESCE);
+            last_flush = Some(Instant::now());
             // Hold back while the frontend is behind. Anything still
             // unflushed stays in `pending`, so the waiter's final snapshot
             // picks it up even if the window never reopens.

@@ -1021,7 +1021,18 @@ function detachWebglContextListeners(slot: Slot): void {
   slot.webglContextHandlers = null;
 }
 
+// On Linux, `main.rs` / `lib.rs` set `WEBKIT_DISABLE_DMABUF_RENDERER=1` to
+// prevent WebKitGTK deadlocks. Without DMA-BUF zero-copy compositing, xterm's
+// WebGL canvas forces a full-viewport software readback + CPU SHM copy on
+// every keystroke/scroll, making typing feel sluggish. Falling back to xterm's
+// DOM renderer on Linux repaints only the single changed row (<1ms).
+const IS_LINUX_WEBKIT =
+  typeof navigator !== "undefined" &&
+  /Linux/i.test(navigator.userAgent) &&
+  !/Android/i.test(navigator.userAgent);
+
 function attachWebgl(slot: Slot): void {
+  if (IS_LINUX_WEBKIT) return;
   if (slot.webglAddon || !slot.term.element) return;
   if (!usePreferencesStore.getState().terminalWebglEnabled) return;
   const elem = slot.term.element;
