@@ -22,26 +22,122 @@ function loadMermaid() {
 function sanitizeSvg(svg: string): string {
   return DOMPurify.sanitize(svg, {
     ALLOWED_TAGS: [
-      "svg", "g", "path", "rect", "circle", "ellipse", "line", "polyline", "polygon",
-      "text", "tspan", "textPath", "defs", "linearGradient", "radialGradient", "stop",
-      "clipPath", "use", "image", "filter", "feGaussianBlur", "feOffset", "feBlend",
-      "feMerge", "feMergeNode", "feColorMatrix", "feComponentTransfer", "feFunc",
-      "marker", "view", "title", "desc",
+      "svg",
+      "style",
+      "g",
+      "path",
+      "rect",
+      "circle",
+      "ellipse",
+      "line",
+      "polyline",
+      "polygon",
+      "text",
+      "tspan",
+      "textPath",
+      "defs",
+      "linearGradient",
+      "radialGradient",
+      "stop",
+      "clipPath",
+      "use",
+      "image",
+      "filter",
+      "feGaussianBlur",
+      "feOffset",
+      "feBlend",
+      "feMerge",
+      "feMergeNode",
+      "feColorMatrix",
+      "feComponentTransfer",
+      "feFunc",
+      "marker",
+      "view",
+      "title",
+      "desc",
     ],
     ALLOWED_ATTR: [
-      "id", "class", "style", "transform", "d", "x", "y", "width", "height",
-      "cx", "cy", "r", "rx", "ry", "x1", "y1", "x2", "y2", "points",
-      "fill", "stroke", "stroke-width", "stroke-linecap", "stroke-linejoin",
-      "stroke-dasharray", "stroke-dashoffset", "opacity", "fill-opacity",
-      "stroke-opacity", "font-family", "font-size", "font-weight", "text-anchor",
-      "dominant-baseline", "clip-path", "mask", "filter", "href", "xlink:href",
-      "xmlns", "xmlns:xlink", "viewBox", "preserveAspectRatio", "gradientUnits",
-      "gradientTransform", "offset", "stop-color", "stop-opacity", "spreadMethod",
-      "fx", "fy", "flood-color", "flood-opacity", "in", "result", "mode",
-      "stdDeviation", "dx", "dy", "dx1", "dy1", "dx2", "dy2",
+      "id",
+      "class",
+      "style",
+      "transform",
+      "d",
+      "x",
+      "y",
+      "width",
+      "height",
+      "cx",
+      "cy",
+      "r",
+      "rx",
+      "ry",
+      "x1",
+      "y1",
+      "x2",
+      "y2",
+      "points",
+      "fill",
+      "stroke",
+      "stroke-width",
+      "stroke-linecap",
+      "stroke-linejoin",
+      "stroke-dasharray",
+      "stroke-dashoffset",
+      "opacity",
+      "fill-opacity",
+      "stroke-opacity",
+      "font-family",
+      "font-size",
+      "font-weight",
+      "text-anchor",
+      "dominant-baseline",
+      "clip-path",
+      "mask",
+      "filter",
+      "href",
+      "xlink:href",
+      "xmlns",
+      "xmlns:xlink",
+      "viewBox",
+      "preserveAspectRatio",
+      "gradientUnits",
+      "gradientTransform",
+      "offset",
+      "stop-color",
+      "stop-opacity",
+      "spreadMethod",
+      "fx",
+      "fy",
+      "flood-color",
+      "flood-opacity",
+      "in",
+      "result",
+      "mode",
+      "stdDeviation",
+      "dx",
+      "dy",
+      "dx1",
+      "dy1",
+      "dx2",
+      "dy2",
+      "marker-end",
+      "marker-start",
+      "markerWidth",
+      "markerHeight",
+      "refX",
+      "refY",
+      "orient",
+      "markerUnits",
     ],
-    FORBID_TAGS: ["foreignObject", "script", "iframe", "object", "embed", "form"],
-    FORBID_ATTR: ["on*", "style*"],
+    FORBID_TAGS: [
+      "foreignObject",
+      "script",
+      "iframe",
+      "object",
+      "embed",
+      "form",
+    ],
+    FORBID_ATTR: ["on*"],
   });
 }
 
@@ -83,9 +179,13 @@ export function MermaidDiagram({ code }: { code: string }) {
           securityLevel: "strict",
           theme: "default",
           fontFamily: "inherit",
+          // Render labels as pure SVG <text> instead of <foreignObject> so
+          // strict SVG sanitization preserves every node label intact.
+          htmlLabels: false,
+          flowchart: { htmlLabels: false },
         });
         const { svg: out } = await mermaid.render(id, code);
-        if (!cancelled) setSvg(out);
+        if (!cancelled) setSvg(sanitizeSvg(out));
       })
       .catch(() => {
         if (cancelled) return;
@@ -135,7 +235,7 @@ export function MermaidDiagram({ code }: { code: string }) {
         title="Click to enlarge"
         onClick={() => setZoomed(true)}
         className="not-prose my-2 flex w-full cursor-zoom-in justify-center overflow-x-auto rounded-lg border border-black/10 bg-white p-3 [&_svg]:h-auto [&_svg]:max-w-full"
-        dangerouslySetInnerHTML={{ __html: sanitizeSvg(svg!) }}
+        dangerouslySetInnerHTML={{ __html: svg }}
       />
       {zoomed ? (
         <div
@@ -147,7 +247,7 @@ export function MermaidDiagram({ code }: { code: string }) {
           <div
             onClick={(e) => e.stopPropagation()}
             className="relative max-h-[90vh] max-w-[92vw] overflow-auto rounded-xl bg-white p-6 shadow-2xl [&_svg]:h-auto [&_svg]:w-auto"
-            dangerouslySetInnerHTML={{ __html: sanitizeSvg(svg!) }}
+            dangerouslySetInnerHTML={{ __html: svg }}
           />
           <button
             type="button"

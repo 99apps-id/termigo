@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { extractMermaidBlocks, MERMAID_INIT } from "./mermaidImage";
+import {
+  extractMermaidBlocks,
+  MERMAID_INIT,
+  svgViewBoxSize,
+} from "./mermaidImage";
 
 describe("extractMermaidBlocks", () => {
   it("returns no blocks when there is no mermaid fence", () => {
@@ -37,8 +41,21 @@ describe("MERMAID_INIT", () => {
   // carry a click handler or raw HTML is script execution, not a rendering
   // defect. Mermaid's default is not strict; nothing else sets it either, since
   // initialize() is per-call here. Losing this key silently reopens SEC-2.
-  it("renders at strict security level", () => {
+  it("renders at strict security level with pure SVG labels", () => {
     expect(MERMAID_INIT.securityLevel).toBe("strict");
     expect(MERMAID_INIT.startOnLoad).toBe(false);
+    expect(MERMAID_INIT.htmlLabels).toBe(false);
+    expect(
+      (MERMAID_INIT.flowchart as { htmlLabels?: boolean })?.htmlLabels,
+    ).toBe(false);
+  });
+});
+
+describe("svgViewBoxSize", () => {
+  it("parses dimensions from SVG viewBox", () => {
+    expect(
+      svgViewBoxSize('<svg width="100%" viewBox="0 0 640.5 320.2"></svg>'),
+    ).toEqual({ width: 641, height: 321 });
+    expect(svgViewBoxSize("<svg></svg>")).toBeNull();
   });
 });
