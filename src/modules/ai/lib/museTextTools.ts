@@ -419,7 +419,11 @@ export type TextToolCall = { id: string; name: string; arguments: string };
 let textToolSeq = 0;
 
 const TEXT_TOOL_BLOCK_RE =
-  /```(?:tool_call|tool-call|json)\s*([\s\S]*?)```|<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/g;
+  /```(tool_call|tool-call|json)\s*([\s\S]*?)```|<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/g;
+
+const UNCLOSED_TOOL_BLOCK_RE = /```(tool_call|tool-call)\s*(\{[\s\S]*\})\s*$/;
+
+const UNKNOWN_TOOL_FALLBACK_NAME = "unknown_tool_fallback";
 
 function extractParsedToolArguments(parsed: JsonObject): string | null {
   let rawArgs: unknown;
@@ -456,14 +460,62 @@ function extractParsedToolArguments(parsed: JsonObject): string | null {
   return JSON.stringify(rawArgs);
 }
 
+function buildParsedTextToolCall(
+  body: string,
+  explicitWrapper: boolean,
+  allowedTools?: ReadonlySet<string>,
+  toolAliases?: Readonly<Record<string, string>>,
+): TextToolCall | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return null;
+  }
+
+  const rawName = isObject(parsed) ? asString(parsed.name).trim() : "";
+  const resolvedName = rawName ? (toolAliases?.[rawName] ?? rawName) : "";
+  if (!resolvedName) return null;
+
+  const argsJson = extractParsedToolArguments(parsed as JsonObject);
+  if (argsJson === null) return null;
+
+  if (allowedTools && !allowedTools.has(resolvedName)) {
+    // When the model emits an EXPLICIT tool_call block for a deferred or
+    // unknown tool (e.g. `web_fetch` remembered from an earlier turn before
+    // `find_tools` reloaded it), route through `unknown_tool_fallback` if
+    // registered instead of leaking raw ```tool_call JSON into user prose.
+    // Ambiguous ```json fences stay prose so ordinary JSON examples never fire.
+    if (explicitWrapper && allowedTools.has(UNKNOWN_TOOL_FALLBACK_NAME)) {
+      return {
+        id: `call_muse_${++textToolSeq}`,
+        name: UNKNOWN_TOOL_FALLBACK_NAME,
+        arguments: JSON.stringify({
+          requested_tool: resolvedName,
+          provided_input: argsJson,
+        }),
+      };
+    }
+    return null;
+  }
+
+  return {
+    id: `call_muse_${++textToolSeq}`,
+    name: resolvedName,
+    arguments: argsJson,
+  };
+}
+
 /**
  * Splits a model reply into the prose around the tool_call blocks and the
  * calls themselves. Accepts the documented ```tool_call fence as well as
  * ```tool-call, ```json, and <tool_call>...</tool_call> wrappers (matching
- * Meta Muse's observed output variants). When `allowedTools` is supplied, a
- * block naming a tool the request did not declare stays prose so quoted
- * examples are never executed. A block that does not parse as a tool call
- * stays prose without discarding other valid blocks in the same reply.
+ * Meta Muse's observed output variants), plus an unclosed trailing
+ * ```tool_call block with valid JSON. When `allowedTools` is supplied, a
+ * block naming an undeclared tool is routed to `unknown_tool_fallback` if
+ * registered and wrapped in an explicit tool_call block, or kept as prose
+ * otherwise. A block that does not parse as a tool call stays prose without
+ * discarding other valid blocks in the same reply.
  */
 export function parseTextToolCalls(
   text: string,
@@ -480,43 +532,47 @@ export function parseTextToolCalls(
   for (const match of text.matchAll(TEXT_TOOL_BLOCK_RE)) {
     const matchIndex = match.index ?? 0;
     const rawBlock = match[0];
-    const body = (match[1] ?? match[2] ?? "").trim();
+    const fenceTag = match[1];
+    const explicitWrapper = fenceTag !== "json";
+    const body = (match[2] ?? match[3] ?? "").trim();
 
     prose += text.slice(cursor, matchIndex);
 
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(body);
-    } catch {
+    const call = buildParsedTextToolCall(
+      body,
+      explicitWrapper,
+      allowedTools,
+      toolAliases,
+    );
+    if (!call) {
       prose += rawBlock;
       cursor = matchIndex + rawBlock.length;
       continue;
     }
 
-    const rawName = isObject(parsed) ? asString(parsed.name).trim() : "";
-    const resolvedName = rawName ? (toolAliases?.[rawName] ?? rawName) : "";
-    if (!resolvedName || (allowedTools && !allowedTools.has(resolvedName))) {
-      prose += rawBlock;
-      cursor = matchIndex + rawBlock.length;
-      continue;
-    }
-
-    const argsJson = extractParsedToolArguments(parsed as JsonObject);
-    if (argsJson === null) {
-      prose += rawBlock;
-      cursor = matchIndex + rawBlock.length;
-      continue;
-    }
-
-    calls.push({
-      id: `call_muse_${++textToolSeq}`,
-      name: resolvedName,
-      arguments: argsJson,
-    });
+    calls.push(call);
     cursor = matchIndex + rawBlock.length;
   }
 
-  prose += text.slice(cursor);
+  const tail = text.slice(cursor);
+  const unclosed = UNCLOSED_TOOL_BLOCK_RE.exec(tail);
+  if (unclosed) {
+    const call = buildParsedTextToolCall(
+      (unclosed[2] ?? "").trim(),
+      true,
+      allowedTools,
+      toolAliases,
+    );
+    if (call) {
+      prose += tail.slice(0, unclosed.index);
+      calls.push(call);
+    } else {
+      prose += tail;
+    }
+  } else {
+    prose += tail;
+  }
+
   if (calls.length === 0) return { prose: text, calls: [] };
   return { prose, calls };
 }

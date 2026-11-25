@@ -260,6 +260,22 @@ describe("buildFindToolsTool", () => {
       FIND_TOOLS_NAME === "find_tools" ? "keyword" : "",
     );
   });
+
+  it("handles empty {} input gracefully instead of throwing a schema error", async () => {
+    const t = buildFindToolsTool({ index: sampleIndex, discover: () => {} });
+    const schema = (t as { inputSchema?: { parse: (v: unknown) => unknown } })
+      .inputSchema;
+    const parsed = schema?.parse({}) as { query: string };
+    expect(parsed.query).toBe("");
+    const execute = t.execute;
+    if (!execute) throw new Error("find_tools has no execute");
+    const res = (await execute(parsed, {} as never)) as {
+      matched: string[];
+      note: string;
+    };
+    expect(res.matched).toEqual([]);
+    expect(res.note).toContain("Available categories:");
+  });
 });
 
 describe("search mode saves what it claims", () => {

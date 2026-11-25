@@ -290,3 +290,48 @@ describe("responsesStreamToChatSse incomplete handling", () => {
     expect(out).toContain("content_filter");
   });
 });
+
+describe("parseTextToolCalls recovery for deferred tools and unclosed fences", () => {
+  it("routes undeclared explicit tool_call blocks to unknown_tool_fallback when registered", () => {
+    const reply =
+      'Mencari berita viral Jakarta hari ini dulu.```tool_call\n{"name":"web_fetch","arguments":{"raw":true,"url":"https://news.google.com/rss/search?q=Jakarta%20viral"}}\n```';
+    const { prose, calls } = parseTextToolCalls(
+      reply,
+      new Set(["find_tools", "unknown_tool_fallback"]),
+    );
+    expect(prose).toBe("Mencari berita viral Jakarta hari ini dulu.");
+    expect(calls).toHaveLength(1);
+    expect(calls[0].name).toBe("unknown_tool_fallback");
+    expect(JSON.parse(calls[0].arguments)).toEqual({
+      requested_tool: "web_fetch",
+      provided_input:
+        '{"raw":true,"url":"https://news.google.com/rss/search?q=Jakarta%20viral"}',
+    });
+  });
+
+  it("parses an unclosed trailing ```tool_call block with valid JSON", () => {
+    const reply =
+      'Mencari berita viral Jakarta hari ini dulu.```tool_call {"name":"web_fetch","arguments":{"raw":true,"url":"https://example.com"}}';
+    const { prose, calls } = parseTextToolCalls(
+      reply,
+      new Set(["web_fetch", "unknown_tool_fallback"]),
+    );
+    expect(prose).toBe("Mencari berita viral Jakarta hari ini dulu.");
+    expect(calls).toHaveLength(1);
+    expect(calls[0].name).toBe("web_fetch");
+    expect(JSON.parse(calls[0].arguments)).toEqual({
+      raw: true,
+      url: "https://example.com",
+    });
+  });
+
+  it("keeps undeclared ```json example blocks as prose even when unknown_tool_fallback is registered", () => {
+    const reply = 'Contoh:\n```json\n{"name":"not_a_tool","x":1}\n```';
+    const { prose, calls } = parseTextToolCalls(
+      reply,
+      new Set(["find_tools", "unknown_tool_fallback"]),
+    );
+    expect(calls).toEqual([]);
+    expect(prose).toBe(reply);
+  });
+});

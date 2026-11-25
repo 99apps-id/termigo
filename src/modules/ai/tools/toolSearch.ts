@@ -191,14 +191,25 @@ export function runFindTools(
   query: string,
   limit?: number,
 ): FindToolsResult {
-  const matches = searchToolIndex(index, query, limit ?? 8);
+  const trimmed = query.trim();
+  if (!trimmed) {
+    const categories = indexCategories(index);
+    return {
+      matched: [],
+      tools: [],
+      note:
+        `Pass a keyword in "query" to load tools. Available categories: ` +
+        `${categories.join(", ")}. Try a single keyword (e.g. "web", "fetch", "browser") or the exact tool name.`,
+    };
+  }
+  const matches = searchToolIndex(index, trimmed, limit ?? 8);
   if (matches.length === 0) {
     const categories = indexCategories(index);
     return {
       matched: [],
       tools: [],
       note:
-        `No tool matches "${query}". Available categories: ` +
+        `No tool matches "${trimmed}". Available categories: ` +
         `${categories.join(", ")}. Try a single keyword, or the exact tool name.`,
     };
   }
@@ -235,7 +246,8 @@ export function buildFindToolsTool(opts: {
     inputSchema: z.object({
       query: z
         .string()
-        .min(1)
+        .optional()
+        .default("")
         .describe(
           "Keyword or tool name to load. One or two words works better than a sentence.",
         ),
@@ -248,7 +260,7 @@ export function buildFindToolsTool(opts: {
         .describe("Maximum matches to load (default 8)."),
     }),
     execute: async ({ query, limit }) => {
-      const result = runFindTools(opts.index, query, limit ?? opts.limit);
+      const result = runFindTools(opts.index, query ?? "", limit ?? opts.limit);
       if (result.matched.length > 0) opts.discover(result.matched);
       return result;
     },
