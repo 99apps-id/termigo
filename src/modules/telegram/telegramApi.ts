@@ -326,7 +326,7 @@ export function splitEscapedHtml(
   return parts;
 }
 
-/** Split long messages on newline/word boundaries so nothing is truncated. Default 3500 leaves headroom for HTML entity expansion. */
+/** Split long messages on paragraph/newline/word boundaries so nothing is truncated. Default 3500 leaves headroom for HTML entity expansion. */
 export function splitTelegramText(text: string, maxLen = 3500): string[] {
   if (text.length <= maxLen) return [text];
   const chunks: string[] = [];
@@ -336,7 +336,10 @@ export function splitTelegramText(text: string, maxLen = 3500): string[] {
       chunks.push(remaining);
       break;
     }
-    let cut = remaining.lastIndexOf("\n", maxLen);
+    let cut = remaining.lastIndexOf("\n\n", maxLen);
+    if (cut < Math.floor(maxLen / 2)) {
+      cut = remaining.lastIndexOf("\n", maxLen);
+    }
     if (cut <= 0) {
       cut = remaining.lastIndexOf(" ", maxLen);
     }

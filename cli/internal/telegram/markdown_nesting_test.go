@@ -27,3 +27,40 @@ func TestLinkHrefIsLeftIntactAndQuoted(t *testing.T) {
 		t.Fatalf("the URL must not gain italics: %q", got)
 	}
 }
+
+func TestEnrichedTelegramMarkdown(t *testing.T) {
+	input := strings.Join([]string{
+		"Paragraf 1 👨‍💻",
+		"",
+		"",
+		"- Item *satu*",
+		"  - Sub item",
+		"+ Item plus",
+		"- [ ] Todo",
+		"- [x] Done",
+		"",
+		"1. Langkah **pertama**",
+		"2. Langkah _kedua_",
+		"",
+		"> baris satu",
+		"> baris dua",
+		"",
+		"Rahasia ||rahasia||",
+	}, "\r\n")
+	got := markdownToTelegramHTML(input)
+	for _, want := range []string{
+		"Paragraf 1 👨‍💻\n\n• Item <i>satu</i>",
+		"  ◦ Sub item",
+		"• Item plus",
+		"☐ Todo",
+		"☑ Done",
+		"1. Langkah <b>pertama</b>",
+		"2. Langkah <i>kedua</i>",
+		"<blockquote>baris satu\nbaris dua</blockquote>",
+		"Rahasia <tg-spoiler>rahasia</tg-spoiler>",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q in:\n%s", want, got)
+		}
+	}
+}

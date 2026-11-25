@@ -4,8 +4,10 @@ import {
   chatToResponsesBody,
   declaredChatToolNames,
   isAttestationDenial,
+  isTransientMuseResponseError,
   museIdentityHeaders,
   type ResponsesToChatOptions,
+  readResponsesStream,
   responsesStreamToChatSse,
   responsesUrl,
   responseToolAliases,
@@ -110,16 +112,119 @@ function withIdentityHeaders(
   return headers;
 }
 
-async function bufferedChatResponse(
-  response: Response,
-  model: string,
-  options?: ResponsesToChatOptions,
-): Promise<Response> {
-  const sseText = await response.text();
-  return new Response(responsesStreamToChatSse(sseText, model, options), {
-    status: 200,
-    headers: { "content-type": "text/event-stream" },
+const MUSE_RETRY_ATTEMPTS = 3;
+
+function isTransientHttpStatus(status: number): boolean {
+  return (
+    status === 404 ||
+    status === 408 ||
+    status === 429 ||
+    status === 500 ||
+    status === 502 ||
+    status === 503 ||
+    status === 504
+  );
+}
+
+function waitWithAbort(ms: number, signal?: AbortSignal | null): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  if (signal?.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
+}
+
+function defaultRetryDelayMs(attempt: number): number {
+  const base = Math.min(4000, 500 * 2 ** (attempt - 1));
+  return base + Math.floor(Math.random() * (base / 2 + 1));
+}
+
+export type MuseFetchOptions = {
+  retryDelayMs?: (attempt: number) => number;
+};
+
+async function postResponsesWithRetry(
+  base: typeof fetch,
+  url: string,
+  init: RequestInit,
+  model: string,
+  options: ResponsesToChatOptions,
+  retryDelay: (attempt: number) => number,
+): Promise<{ response: Response; translated: boolean }> {
+  let lastResponse: Response | null = null;
+  let lastSseText: string | null = null;
+
+  for (let attempt = 1; attempt <= MUSE_RETRY_ATTEMPTS; attempt++) {
+    const response = await base(url, init);
+    lastResponse = response;
+    lastSseText = null;
+
+    if (!response.ok) {
+      if (
+        attempt < MUSE_RETRY_ATTEMPTS &&
+        isTransientHttpStatus(response.status) &&
+        !init.signal?.aborted
+      ) {
+        await waitWithAbort(retryDelay(attempt), init.signal);
+        continue;
+      }
+      return { response, translated: false };
+    }
+
+    if (!response.body) {
+      return { response, translated: false };
+    }
+
+    const sseText = await response.text();
+    lastSseText = sseText;
+    const outcome = readResponsesStream(sseText);
+    if (
+      outcome.error &&
+      isTransientMuseResponseError(outcome.error) &&
+      attempt < MUSE_RETRY_ATTEMPTS &&
+      !init.signal?.aborted
+    ) {
+      await waitWithAbort(retryDelay(attempt), init.signal);
+      continue;
+    }
+
+    return {
+      response: new Response(
+        responsesStreamToChatSse(sseText, model, options),
+        {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        },
+      ),
+      translated: true,
+    };
+  }
+
+  if (lastSseText !== null) {
+    return {
+      response: new Response(
+        responsesStreamToChatSse(lastSseText, model, options),
+        {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        },
+      ),
+      translated: true,
+    };
+  }
+  return {
+    response:
+      lastResponse ?? new Response("Muse request failed", { status: 502 }),
+    translated: false,
+  };
 }
 
 /**
@@ -133,6 +238,7 @@ async function textToolRequest(
   input: RequestInfo | URL,
   init: RequestInit | undefined,
   sessionId: string,
+  retryDelay: (attempt: number) => number,
 ): Promise<Response | null> {
   if (typeof init?.body !== "string") return null;
   let chatBody: unknown;
@@ -145,23 +251,33 @@ async function textToolRequest(
   if (!responsesBody) return null;
   const url = responsesUrl(urlOf(input));
   if (!url) return null;
-  const response = await base(url, {
-    ...init,
-    headers: withIdentityHeaders(input, init, sessionId),
-    body: JSON.stringify(responsesBody),
-  });
-  if (!response.ok || !response.body) return response;
   const model =
     typeof responsesBody.model === "string" && responsesBody.model
       ? responsesBody.model
       : "muse";
-  return bufferedChatResponse(response, model, {
-    allowedTools: declaredChatToolNames(chatBody),
-    toolAliases: responseToolAliases(chatBody),
-  });
+  const { response } = await postResponsesWithRetry(
+    base,
+    url,
+    {
+      ...init,
+      headers: withIdentityHeaders(input, init, sessionId),
+      body: JSON.stringify(responsesBody),
+    },
+    model,
+    {
+      allowedTools: declaredChatToolNames(chatBody),
+      toolAliases: responseToolAliases(chatBody),
+    },
+    retryDelay,
+  );
+  return response;
 }
 
-export function createMuseFetch(base: typeof fetch): typeof fetch {
+export function createMuseFetch(
+  base: typeof fetch,
+  opts?: MuseFetchOptions,
+): typeof fetch {
+  const retryDelay = opts?.retryDelayMs ?? defaultRetryDelayMs;
   const sessionId =
     typeof crypto.randomUUID === "function"
       ? crypto.randomUUID()
@@ -183,7 +299,13 @@ export function createMuseFetch(base: typeof fetch): typeof fetch {
       });
     }
     if (authorization && textToolCredentials.has(authorization)) {
-      const viaText = await textToolRequest(base, input, init, sessionId);
+      const viaText = await textToolRequest(
+        base,
+        input,
+        init,
+        sessionId,
+        retryDelay,
+      );
       if (viaText) return viaText;
     }
     let chatBody: unknown;
@@ -195,11 +317,26 @@ export function createMuseFetch(base: typeof fetch): typeof fetch {
     const nativeBody = chatToNativeResponsesBody(chatBody, sessionId);
     const responsesURL = responsesUrl(url);
     if (!nativeBody || !responsesURL) return base(input, init);
-    const response = await base(responsesURL, {
-      ...init,
-      headers: withIdentityHeaders(input, init, sessionId),
-      body: JSON.stringify(nativeBody),
-    });
+    const model =
+      typeof nativeBody.model === "string" && nativeBody.model
+        ? nativeBody.model
+        : "muse";
+    const { response, translated } = await postResponsesWithRetry(
+      base,
+      responsesURL,
+      {
+        ...init,
+        headers: withIdentityHeaders(input, init, sessionId),
+        body: JSON.stringify(nativeBody),
+      },
+      model,
+      {
+        allowedTools: declaredChatToolNames(chatBody),
+        toolAliases: responseToolAliases(chatBody),
+      },
+      retryDelay,
+    );
+    if (translated) return response;
     if (response.status === 403) {
       const bodyText = await response
         .clone()
@@ -207,19 +344,17 @@ export function createMuseFetch(base: typeof fetch): typeof fetch {
         .catch(() => "");
       if (isAttestationDenial(response.status, bodyText)) {
         if (authorization) textToolCredentials.add(authorization);
-        const viaText = await textToolRequest(base, input, init, sessionId);
+        const viaText = await textToolRequest(
+          base,
+          input,
+          init,
+          sessionId,
+          retryDelay,
+        );
         if (viaText) return viaText;
       }
       return response;
     }
-    if (!response.ok || !response.body) return response;
-    const model =
-      typeof nativeBody.model === "string" && nativeBody.model
-        ? nativeBody.model
-        : "muse";
-    return bufferedChatResponse(response, model, {
-      allowedTools: declaredChatToolNames(chatBody),
-      toolAliases: responseToolAliases(chatBody),
-    });
+    return response;
   };
 }

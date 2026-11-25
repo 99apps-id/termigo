@@ -238,10 +238,13 @@ export function chatToResponsesBody(body: unknown): JsonObject | null {
         content: [{ type: "output_text", text: parts.join("\n\n") }],
       });
     } else if (role === "tool") {
-      const block = JSON.stringify({
+      const toolResult: Record<string, string> = {
         call_id: asString(message.tool_call_id),
         output: contentText(message.content),
-      });
+      };
+      const toolName = asString(message.name);
+      if (toolName) toolResult.name = toolName;
+      const block = JSON.stringify(toolResult);
       input.push({
         type: "message",
         role: "user",
@@ -261,9 +264,6 @@ export function chatToResponsesBody(body: unknown): JsonObject | null {
     input,
   };
   if (instructions.length > 0) out.instructions = instructions.join("\n\n");
-  if (typeof body.temperature === "number") out.temperature = body.temperature;
-  const maxTokens = body.max_completion_tokens ?? body.max_tokens;
-  if (typeof maxTokens === "number") out.max_output_tokens = maxTokens;
   return out;
 }
 
@@ -393,78 +393,145 @@ export type TextToolCall = { id: string; name: string; arguments: string };
 
 let textToolSeq = 0;
 
+const TEXT_TOOL_BLOCK_RE =
+  /```(?:tool_call|tool-call|json)\s*([\s\S]*?)```|<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/g;
+
+function extractParsedToolArguments(parsed: JsonObject): string | null {
+  let rawArgs: unknown;
+  if ("arguments" in parsed) {
+    rawArgs = parsed.arguments;
+  } else if ("args" in parsed) {
+    rawArgs = parsed.args;
+  } else if ("parameters" in parsed) {
+    rawArgs = parsed.parameters;
+  } else if ("input" in parsed) {
+    rawArgs = parsed.input;
+  } else {
+    // Some models place tool parameters directly on the call object
+    // (e.g. {"name":"find_tools","query":"mcp"}). Collect any non-metadata keys.
+    const metaKeys = new Set(["name", "id", "call_id", "type"]);
+    const inlineArgs: JsonObject = {};
+    let hasInline = false;
+    for (const [k, v] of Object.entries(parsed)) {
+      if (!metaKeys.has(k)) {
+        inlineArgs[k] = v;
+        hasInline = true;
+      }
+    }
+    rawArgs = hasInline ? inlineArgs : {};
+  }
+
+  if (rawArgs == null) return "{}";
+  if (typeof rawArgs === "string") {
+    const trimmed = rawArgs.trim();
+    if (!trimmed) return "{}";
+    if (!isValidJson(trimmed)) return null;
+    return trimmed;
+  }
+  return JSON.stringify(rawArgs);
+}
+
 /**
  * Splits a model reply into the prose around the tool_call blocks and the
- * calls themselves. When `allowedTools` is supplied, a block naming a tool the
- * request did not declare stays prose so quoted examples are never executed.
- * A block that does not parse is not a call: the whole reply then stays prose,
- * so a model that talks about the protocol in a code sample is not mistaken
- * for one using it.
+ * calls themselves. Accepts the documented ```tool_call fence as well as
+ * ```tool-call, ```json, and <tool_call>...</tool_call> wrappers (matching
+ * Meta Muse's observed output variants). When `allowedTools` is supplied, a
+ * block naming a tool the request did not declare stays prose so quoted
+ * examples are never executed. A block that does not parse as a tool call
+ * stays prose without discarding other valid blocks in the same reply.
  */
 export function parseTextToolCalls(
   text: string,
   allowedTools?: ReadonlySet<string>,
+  toolAliases?: Readonly<Record<string, string>>,
 ): {
   prose: string;
   calls: TextToolCall[];
 } {
-  const fence = "```tool_call";
   let prose = "";
   const calls: TextToolCall[] = [];
-  let rest = text;
-  for (;;) {
-    const start = rest.indexOf(fence);
-    if (start < 0) {
-      prose += rest;
-      break;
-    }
-    const tail = rest.slice(start + fence.length);
-    const end = tail.indexOf("```");
-    if (end < 0) return { prose: text, calls: [] };
+  let cursor = 0;
+
+  for (const match of text.matchAll(TEXT_TOOL_BLOCK_RE)) {
+    const matchIndex = match.index ?? 0;
+    const rawBlock = match[0];
+    const body = (match[1] ?? match[2] ?? "").trim();
+
+    prose += text.slice(cursor, matchIndex);
+
     let parsed: unknown;
     try {
-      parsed = JSON.parse(tail.slice(0, end).trim());
+      parsed = JSON.parse(body);
     } catch {
-      return { prose: text, calls: [] };
-    }
-    const name = isObject(parsed) ? asString(parsed.name).trim() : "";
-    if (!name) {
-      return { prose: text, calls: [] };
-    }
-    const blockEnd = start + fence.length + end + "```".length;
-    if (allowedTools && !allowedTools.has(name)) {
-      prose += rest.slice(0, blockEnd);
-      rest = tail.slice(end + "```".length);
+      prose += rawBlock;
+      cursor = matchIndex + rawBlock.length;
       continue;
     }
-    let args: unknown = (parsed as JsonObject).arguments ?? {};
-    if (typeof args === "string") args = safeJson(args);
-    prose += rest.slice(0, start);
+
+    const rawName = isObject(parsed) ? asString(parsed.name).trim() : "";
+    const resolvedName = rawName ? (toolAliases?.[rawName] ?? rawName) : "";
+    if (!resolvedName || (allowedTools && !allowedTools.has(resolvedName))) {
+      prose += rawBlock;
+      cursor = matchIndex + rawBlock.length;
+      continue;
+    }
+
+    const argsJson = extractParsedToolArguments(parsed as JsonObject);
+    if (argsJson === null) {
+      prose += rawBlock;
+      cursor = matchIndex + rawBlock.length;
+      continue;
+    }
+
     calls.push({
       id: `call_muse_${++textToolSeq}`,
-      name,
-      arguments: JSON.stringify(args),
+      name: resolvedName,
+      arguments: argsJson,
     });
-    rest = tail.slice(end + "```".length);
+    cursor = matchIndex + rawBlock.length;
   }
+
+  prose += text.slice(cursor);
   if (calls.length === 0) return { prose: text, calls: [] };
   return { prose, calls };
 }
 
-type ResponsesOutcome = {
+export type ResponsesOutcome = {
   text: string;
   calls: TextToolCall[];
   usage: { prompt: number; completion: number; total: number } | null;
   error: string | null;
+  incompleteReason: string | null;
 };
 
-function readResponsesStream(sseText: string): ResponsesOutcome {
+/**
+ * Reports whether a Muse SSE `response.failed` / `error` message is a
+ * transient backend failure worth retrying (such as Meta's intermittent
+ * "The model failed to generate a response." on HTTP 200).
+ */
+export function isTransientMuseResponseError(message: string | null): boolean {
+  if (!message) return false;
+  const lower = message.toLowerCase();
+  return (
+    lower.includes("failed to generate a response") ||
+    lower.includes("overloaded") ||
+    lower.includes("temporarily unavailable") ||
+    lower.includes("internal error") ||
+    lower.includes("server error") ||
+    lower.includes("try again") ||
+    lower.includes("timeout") ||
+    lower.includes("timed out")
+  );
+}
+
+export function readResponsesStream(sseText: string): ResponsesOutcome {
   let text = "";
   const calls: TextToolCall[] = [];
   const finalArgs = new Map<string, string>();
   const deltaArgs = new Map<string, string>();
   let usage: ResponsesOutcome["usage"] = null;
   let error: string | null = null;
+  let incompleteReason: string | null = null;
   for (const line of sseText.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed.startsWith("data:")) continue;
@@ -479,6 +546,8 @@ function readResponsesStream(sseText: string): ResponsesOutcome {
     if (!isObject(event)) continue;
     if (event.type === "response.output_text.delta") {
       if (typeof event.delta === "string") text += event.delta;
+    } else if (event.type === "response.output_text.done") {
+      if (!text && typeof event.text === "string") text = event.text;
     } else if (event.type === "response.function_call_arguments.delta") {
       const itemId = asString(event.item_id);
       if (itemId && typeof event.delta === "string") {
@@ -487,9 +556,10 @@ function readResponsesStream(sseText: string): ResponsesOutcome {
     } else if (event.type === "response.function_call_arguments.done") {
       const itemId = asString(event.item_id);
       if (itemId) {
+        const doneArgs = asString(event.arguments).trim();
         finalArgs.set(
           itemId,
-          asString(event.arguments) || deltaArgs.get(itemId) || "{}",
+          doneArgs || deltaArgs.get(itemId)?.trim() || "{}",
         );
       }
     } else if (event.type === "response.output_item.done") {
@@ -497,15 +567,31 @@ function readResponsesStream(sseText: string): ResponsesOutcome {
       if (item?.type === "function_call" && asString(item.name)) {
         const itemId = asString(item.id);
         const args =
-          asString(item.arguments) ||
-          finalArgs.get(itemId) ||
-          deltaArgs.get(itemId) ||
+          asString(item.arguments).trim() ||
+          finalArgs.get(itemId)?.trim() ||
+          deltaArgs.get(itemId)?.trim() ||
           "{}";
         calls.push({
           id: asString(item.call_id) || itemId || `call_muse_${++textToolSeq}`,
           name: asString(item.name),
           arguments: isValidJson(args) ? args : "{}",
         });
+      } else if (
+        item?.type === "message" &&
+        !text &&
+        Array.isArray(item.content)
+      ) {
+        const parts: string[] = [];
+        for (const part of item.content) {
+          if (
+            isObject(part) &&
+            part.type === "output_text" &&
+            typeof part.text === "string"
+          ) {
+            parts.push(part.text);
+          }
+        }
+        if (parts.length > 0) text = parts.join("");
       }
     } else if (
       event.type === "response.completed" ||
@@ -522,6 +608,12 @@ function readResponsesStream(sseText: string): ResponsesOutcome {
           total: Number(raw.total_tokens ?? prompt + completion) || 0,
         };
       }
+      if (event.type === "response.incomplete" && response) {
+        const details = isObject(response.incomplete_details)
+          ? response.incomplete_details
+          : null;
+        incompleteReason = asString(details?.reason) || "unspecified";
+      }
     } else if (event.type === "response.failed" || event.type === "error") {
       const nested = isObject(event.error) ? event.error : null;
       const response = isObject(event.response) ? event.response : null;
@@ -533,7 +625,7 @@ function readResponsesStream(sseText: string): ResponsesOutcome {
         "Muse request failed";
     }
   }
-  return { text, calls, usage, error };
+  return { text, calls, usage, error, incompleteReason };
 }
 
 /**
@@ -588,7 +680,7 @@ export function responsesStreamToChatSse(
   const parsed =
     nativeCalls.length > 0
       ? { prose: outcome.text, calls: nativeCalls }
-      : parseTextToolCalls(outcome.text, options?.allowedTools);
+      : parseTextToolCalls(outcome.text, options?.allowedTools, aliases);
   const { prose, calls } = parsed;
   if (calls.length === 0) {
     if (outcome.text) {
@@ -598,7 +690,9 @@ export function responsesStreamToChatSse(
         finish_reason: null,
       });
     }
-    chunk({ index: 0, delta: {}, finish_reason: "stop" }, true);
+    const finishReason =
+      outcome.incompleteReason === "max_output_tokens" ? "length" : "stop";
+    chunk({ index: 0, delta: {}, finish_reason: finishReason }, true);
   } else {
     if (prose.trim()) {
       chunk({

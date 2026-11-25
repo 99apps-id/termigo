@@ -404,4 +404,86 @@ describe("createMuseFetch attestation fallback", () => {
     expect(fnCall?.id).toBe("fc_call_abc");
     expect(fnCall?.status).toBe("completed");
   });
+
+  it("parses <tool_call>, json fences, and args/inline parameter variants without losing arguments", async () => {
+    const findTool = {
+      type: "function",
+      function: {
+        name: "find_tools",
+        description: "Find tools.",
+        parameters: {
+          type: "object",
+          properties: { query: { type: "string" } },
+          required: ["query"],
+        },
+      },
+    };
+    const sse = [
+      `data: ${JSON.stringify({
+        type: "response.output_text.delta",
+        delta: [
+          "Checking tools:",
+          '```json\n{"example":"not a tool"}\n```',
+          '<tool_call>\n{"name":"find_tools","args":{"query":"mcp"}}\n</tool_call>',
+          '```tool-call\n{"name":"bash_run","command":"pwd"}\n```',
+        ].join("\n"),
+      })}\n\n`,
+      `data: ${JSON.stringify({ type: "response.completed", response: {} })}\n\n`,
+    ].join("");
+    const base = (async () =>
+      new Response(sse, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      })) as typeof fetch;
+    const museFetch = createMuseFetch(base, { retryDelayMs: () => 0 });
+    const response = await museFetch(
+      "https://api.meta.ai/v1/chat/completions",
+      chatInit(
+        [{ role: "user", content: "find mcp" }],
+        [findTool, BASH_TOOL],
+        "key-text-variants",
+      ),
+    );
+    const text = await response.text();
+    expect(text).toContain('"name":"find_tools"');
+    expect(text).toContain('"{\\"query\\":\\"mcp\\"}"');
+    expect(text).toContain('"name":"bash_run"');
+    expect(text).toContain('"{\\"command\\":\\"pwd\\"}"');
+    expect(text).toContain('"finish_reason":"tool_calls"');
+  });
+
+  it("retries transient response.failed SSE errors before failing", async () => {
+    let attempts = 0;
+    const base = (async () => {
+      attempts++;
+      if (attempts === 1) {
+        const failedSse =
+          'data: {"type":"response.failed","response":{"error":{"message":"The model failed to generate a response."}}}\n\n';
+        return new Response(failedSse, {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        });
+      }
+      const okSse =
+        'data: {"type":"response.output_text.delta","delta":"recovered"}\n\n' +
+        'data: {"type":"response.completed","response":{}}\n\n';
+      return new Response(okSse, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    }) as typeof fetch;
+    const museFetch = createMuseFetch(base, { retryDelayMs: () => 0 });
+    const response = await museFetch(
+      "https://api.meta.ai/v1/chat/completions",
+      chatInit(
+        [{ role: "user", content: "continue" }],
+        [BASH_TOOL],
+        "key-transient-retry",
+      ),
+    );
+    const text = await response.text();
+    expect(attempts).toBe(2);
+    expect(text).toContain("recovered");
+    expect(text).not.toContain("muse_response_failed");
+  });
 });

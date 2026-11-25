@@ -14,25 +14,30 @@ var (
 	italicAsterisk    = regexp.MustCompile(`\*([^\s*](?:[^*\n]*?[^\s*])?)\*`)
 	italicUnderscore  = regexp.MustCompile(`\b_([^_]+)_\b`)
 	strikePattern     = regexp.MustCompile(`~~([^~\n]+)~~`)
+	spoilerPattern    = regexp.MustCompile(`\|\|([^\n]+?)\|\|`)
 	linkPattern       = regexp.MustCompile(`\[([^\]\n]+)\]\(([^)\s]+)\)`)
 	tableRowPattern   = regexp.MustCompile(`^\|?[ \t]*([^|\r\n]+(?:[ \t]*\|[ \t]*[^|\r\n]+)*)\|?[ \t]*$`)
 	tableCellSplitter = regexp.MustCompile(`[ \t]*\|[ \t]*`)
 )
 
 // markdownToTelegramHTML renders a small, deliberate subset of Markdown as the
-// HTML that Telegram accepts: fenced code, inline code, bold, links, strikethrough,
-// blockquotes and headings. It also converts pipe tables and fenced code blocks
+// HTML that Telegram accepts: fenced code, inline code, bold, italic, spoilers,
+// links, strikethrough, multi-line blockquotes, bullet/task/numbered lists,
+// paragraphs and headings. It also converts pipe tables and fenced code blocks
 // whose info string ends with `linenos` into numbered code blocks. Everything
 // else passes through escaped, so a stray '<' or '&' in model output cannot
 // break the message.
 func markdownToTelegramHTML(text string) string {
-	lines := strings.Split(text, "\n")
+	normalized := strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
+	lines := strings.Split(normalized, "\n")
 	var out strings.Builder
 	inCode := false
 	codeLinenos := false
 	codeLang := ""
 	var codeLines []string
 	inTable := false
+	var quoteLines []string
+	blankRun := 0
 	flushCode := func() {
 		if !inCode {
 			return
@@ -65,11 +70,22 @@ func markdownToTelegramHTML(text string) string {
 			inTable = false
 		}
 	}
+	flushQuote := func() {
+		if len(quoteLines) == 0 {
+			return
+		}
+		out.WriteString("<blockquote>")
+		out.WriteString(strings.Join(quoteLines, "\n"))
+		out.WriteString("</blockquote>\n")
+		quoteLines = nil
+	}
 	for _, line := range lines {
 		if !inCode {
 			tableRow, isTable := parseTableRow(line)
 			isSep := isTableSeparator(line)
 			if isTable || isSep {
+				flushQuote()
+				blankRun = 0
 				if !inTable {
 					out.WriteString("<pre>")
 					inTable = true
@@ -88,6 +104,8 @@ func markdownToTelegramHTML(text string) string {
 			closeTable()
 		}
 		if !inCode && strings.HasPrefix(strings.TrimSpace(line), "```") {
+			flushQuote()
+			blankRun = 0
 			inCode = true
 			codeInfo := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "```"))
 			codeLinenos = strings.HasSuffix(codeInfo, "linenos")
@@ -106,16 +124,34 @@ func markdownToTelegramHTML(text string) string {
 			codeLines = append(codeLines, line)
 			continue
 		}
+		trimmedRaw := strings.TrimLeft(line, " \t")
+		if trimmedRaw == ">" || strings.HasPrefix(trimmedRaw, "> ") {
+			blankRun = 0
+			quoteBody := strings.TrimPrefix(trimmedRaw, ">")
+			quoteBody = strings.TrimPrefix(quoteBody, " ")
+			quoteLines = append(quoteLines, inlineSpansToHTML(escapeHTML(quoteBody)))
+			continue
+		}
+		flushQuote()
+		if strings.TrimSpace(line) == "" {
+			blankRun++
+			if blankRun <= 1 {
+				out.WriteString("\n")
+			}
+			continue
+		}
+		blankRun = 0
 		out.WriteString(inlineToHTML(line))
 		out.WriteString("\n")
 	}
 	flushCode()
 	closeTable()
+	flushQuote()
 	return strings.TrimRight(out.String(), "\n")
 }
 
 // inlineToHTML styles one non-code line: headings, inline code, bold, links,
-// quotes, and bullet lists.
+// task lists, bullet lists, and numbered lists.
 func inlineToHTML(line string) string {
 	escaped := escapeHTML(line)
 	trimmed := strings.TrimLeft(escaped, " \t")
@@ -129,19 +165,32 @@ func inlineToHTML(line string) string {
 			return "<b>" + inlineSpansToHTML(cleaned) + "</b>"
 		}
 	}
-	if strings.HasPrefix(trimmed, "&gt; ") {
-		quote := strings.TrimPrefix(trimmed, "&gt; ")
-		return "<blockquote>" + inlineSpansToHTML(quote) + "</blockquote>"
-	}
-	if strings.HasPrefix(trimmed, "- ") {
-		leading := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
-		return leading + "• " + inlineSpansToHTML(trimmed[2:])
-	}
-	if strings.HasPrefix(trimmed, "* ") && !strings.HasPrefix(trimmed, "* *") {
-		leading := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
-		return leading + "• " + inlineSpansToHTML(trimmed[2:])
+	leading := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+	if isBulletLine(trimmed) {
+		rest := trimmed[2:]
+		if strings.HasPrefix(rest, "[ ] ") {
+			return leading + "☐ " + inlineSpansToHTML(rest[4:])
+		}
+		if strings.HasPrefix(rest, "[x] ") || strings.HasPrefix(rest, "[X] ") {
+			return leading + "☑ " + inlineSpansToHTML(rest[4:])
+		}
+		depth := len(strings.ReplaceAll(leading, "\t", "  "))
+		bullet := "• "
+		if depth >= 4 {
+			bullet = "▪ "
+		} else if depth >= 2 {
+			bullet = "◦ "
+		}
+		return leading + bullet + inlineSpansToHTML(rest)
 	}
 	return inlineSpansToHTML(escaped)
+}
+
+func isBulletLine(trimmed string) bool {
+	if strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "+ ") {
+		return true
+	}
+	return strings.HasPrefix(trimmed, "* ") && !strings.HasPrefix(trimmed, "* *")
 }
 
 // inlineSpansToHTML styles one escaped line. Code spans are cut out first and
@@ -203,6 +252,7 @@ func emphasisToHTML(text string) string {
 	text = italicAsterisk.ReplaceAllString(text, iOpen+"$1"+iClose)
 	text = italicUnderscore.ReplaceAllString(text, iOpen+"$1"+iClose)
 	text = strikePattern.ReplaceAllString(text, "<s>$1</s>")
+	text = spoilerPattern.ReplaceAllString(text, "<tg-spoiler>$1</tg-spoiler>")
 	return strings.NewReplacer(
 		bOpen, "<b>",
 		bClose, "</b>",

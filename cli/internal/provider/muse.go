@@ -4,13 +4,25 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"regexp"
 	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
+
+const museRetryAttempts = 3
+
+var museRetryWait = func(attempt int) time.Duration {
+	delay := 500 * time.Millisecond << uint(attempt-1)
+	if delay > 4*time.Second {
+		delay = 4 * time.Second
+	}
+	return delay + time.Duration(rand.Int63n(int64(delay/2+1)))
+}
 
 // museCLIVersion is the Muse Code CLI release whose identity Meta's backend
 // gates native tool calls on, verified against the installed CLI (1.4.20) by
@@ -72,7 +84,8 @@ func (c *museClient) Stream(ctx context.Context, req ChatRequest, emit func(Stre
 	if c.useTextTools() {
 		return c.streamTextTools(ctx, req, emit)
 	}
-	response, err := c.send(ctx, c.payload(req))
+	payload := c.payload(req)
+	response, err := c.sendWithRetry(ctx, payload)
 	if err == nil {
 		defer response.Body.Close()
 		return decodeResponsesStream(c.info.Label, response.Body, emit)
@@ -86,7 +99,7 @@ func (c *museClient) Stream(ctx context.Context, req ChatRequest, emit func(Stre
 	}
 	c.resetSession()
 	c.refreshKey()
-	response, err = c.send(ctx, c.payload(req))
+	response, err = c.sendWithRetry(ctx, payload)
 	if err != nil {
 		if isAttestationDenied(err) {
 			c.setTextTools()
@@ -96,6 +109,51 @@ func (c *museClient) Stream(ctx context.Context, req ChatRequest, emit func(Stre
 	}
 	defer response.Body.Close()
 	return decodeResponsesStream(c.info.Label, response.Body, emit)
+}
+
+func (c *museClient) sendWithRetry(ctx context.Context, payload map[string]any) (*http.Response, error) {
+	var err error
+	for attempt := 1; attempt <= museRetryAttempts; attempt++ {
+		var response *http.Response
+		response, err = c.send(ctx, payload)
+		if err == nil {
+			return response, nil
+		}
+		if attempt == museRetryAttempts || !museTransient(err) {
+			return nil, err
+		}
+		if waitErr := museWait(ctx, museRetryWait(attempt)); waitErr != nil {
+			return nil, waitErr
+		}
+	}
+	return nil, err
+}
+
+func museTransient(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	for _, code := range []string{"404", "408", "429", "500", "502", "503", "504", "timeout", "temporarily unavailable", "connection reset", "eof"} {
+		if strings.Contains(msg, code) {
+			return true
+		}
+	}
+	return false
+}
+
+func museWait(ctx context.Context, delay time.Duration) error {
+	if delay <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func (c *museClient) send(ctx context.Context, payload map[string]any) (*http.Response, error) {
@@ -242,26 +300,61 @@ func responsesFunctionName(name string) string {
 	return b.String()
 }
 
+func isTransientMuseStreamError(err error) bool {
+	if err == nil {
+		return false
+	}
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "failed to generate a response") ||
+		strings.Contains(lower, "overloaded") ||
+		strings.Contains(lower, "temporarily unavailable") ||
+		strings.Contains(lower, "internal error") ||
+		strings.Contains(lower, "server error")
+}
+
 // streamTextTools runs one step without a native tools field, carrying
 // the tools in the instructions instead. It is the attestation fallback:
 // the parsed tool_call blocks are emitted as ordinary ToolCall events, so
 // the agent loop executes them locally exactly as it does a native call.
 func (c *museClient) streamTextTools(ctx context.Context, req ChatRequest, emit func(StreamEvent) error) error {
-	response, err := c.send(ctx, c.textToolsPayload(req))
-	if err != nil {
-		return err
-	}
-	defer response.Body.Close()
+	payload := c.textToolsPayload(req)
 	var text strings.Builder
-	buffered := func(event StreamEvent) error {
-		if event.Type == EventTextDelta {
-			text.WriteString(event.Text)
-			return nil
+	var lastErr error
+	for attempt := 1; attempt <= museRetryAttempts; attempt++ {
+		text.Reset()
+		response, err := c.sendWithRetry(ctx, payload)
+		if err != nil && !isAttestationDenied(err) && isMuseAuthOrSessionError(err) {
+			c.resetSession()
+			c.refreshKey()
+			response, err = c.sendWithRetry(ctx, payload)
 		}
-		return emit(event)
+		if err != nil {
+			return err
+		}
+		buffered := func(event StreamEvent) error {
+			if event.Type == EventTextDelta {
+				text.WriteString(event.Text)
+				return nil
+			}
+			return emit(event)
+		}
+		decodeErr := decodeResponsesStream(c.info.Label, response.Body, buffered)
+		response.Body.Close()
+		if decodeErr == nil {
+			lastErr = nil
+			break
+		}
+		lastErr = decodeErr
+		if attempt < museRetryAttempts && isTransientMuseStreamError(decodeErr) {
+			if waitErr := museWait(ctx, museRetryWait(attempt)); waitErr != nil {
+				return waitErr
+			}
+			continue
+		}
+		return decodeErr
 	}
-	if err := decodeResponsesStream(c.info.Label, response.Body, buffered); err != nil {
-		return err
+	if lastErr != nil {
+		return lastErr
 	}
 	prose, calls := parseTextToolCalls(text.String(), req.Tools)
 	if len(calls) == 0 {
@@ -404,16 +497,39 @@ func parseTextToolCalls(text string, tools []ToolDef) (string, []ToolCall) {
 		if bodyStart < 0 {
 			bodyStart, bodyEnd = match[6], match[7]
 		}
-		var parsed struct {
-			Name      string          `json:"name"`
-			Arguments json.RawMessage `json:"arguments"`
-		}
-		if bodyStart < 0 || json.Unmarshal([]byte(strings.TrimSpace(text[bodyStart:bodyEnd])), &parsed) != nil || strings.TrimSpace(parsed.Name) == "" || !known[strings.TrimSpace(parsed.Name)] {
+		var rawObj map[string]json.RawMessage
+		if bodyStart < 0 || json.Unmarshal([]byte(strings.TrimSpace(text[bodyStart:bodyEnd])), &rawObj) != nil {
 			prose.WriteString(text[match[0]:match[1]])
 			cursor = match[1]
 			continue
 		}
-		arguments := strings.TrimSpace(string(parsed.Arguments))
+		var name string
+		if rawName, ok := rawObj["name"]; !ok || json.Unmarshal(rawName, &name) != nil || strings.TrimSpace(name) == "" || !known[strings.TrimSpace(name)] {
+			prose.WriteString(text[match[0]:match[1]])
+			cursor = match[1]
+			continue
+		}
+		var rawArgs json.RawMessage
+		for _, key := range []string{"arguments", "args", "parameters", "input"} {
+			if val, ok := rawObj[key]; ok {
+				rawArgs = val
+				break
+			}
+		}
+		if len(rawArgs) == 0 {
+			inline := make(map[string]json.RawMessage)
+			for k, v := range rawObj {
+				if k != "name" && k != "id" && k != "call_id" && k != "type" {
+					inline[k] = v
+				}
+			}
+			if len(inline) > 0 {
+				if encoded, err := json.Marshal(inline); err == nil {
+					rawArgs = encoded
+				}
+			}
+		}
+		arguments := strings.TrimSpace(string(rawArgs))
 		if arguments == "" || arguments == "null" {
 			arguments = "{}"
 		}
@@ -428,7 +544,7 @@ func parseTextToolCalls(text string, tools []ToolDef) (string, []ToolCall) {
 		}
 		calls = append(calls, ToolCall{
 			ID:        fmt.Sprintf("call_muse_%d", museSeq.Add(1)),
-			Name:      strings.TrimSpace(parsed.Name),
+			Name:      strings.TrimSpace(name),
 			Arguments: arguments,
 		})
 		cursor = match[1]
