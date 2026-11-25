@@ -166,7 +166,7 @@ describe("noToolRepetition", () => {
 });
 
 describe("noIdleReadLoop", () => {
-  // maxRepeats=5 with window=15
+  // maxRepeats=5 consecutive identical calls (termixgo-style streak counting)
   const stop = noIdleReadLoop<ToolSet>(5);
 
   // Helper: a read_file call where result changes each time (simulates eviction)
@@ -221,8 +221,11 @@ describe("noIdleReadLoop", () => {
     ).toBe(false);
   });
 
-  it("fires on alternating reads of different offsets if same offset repeats 5x", () => {
-    // Offset 1 and offset 2 alternate, but offset 1 still hits 5 times
+  it("does not fire when reads of one offset are interleaved with other reads", () => {
+    // Offset 1 is read 5 times in total, but never twice back to back: each
+    // read is separated by a read of offset 2, so no streak ever forms. The
+    // old cumulative counting flagged this working-through-a-file pattern as
+    // a loop and paused healthy runs; consecutive counting must not.
     expect(
       stop(
         steps(
@@ -237,7 +240,29 @@ describe("noIdleReadLoop", () => {
           [readEvicted("f.js", 1, "a")],
         ),
       ),
-    ).toBe(true);
+    ).toBe(false);
+  });
+
+  it("does not fire when an edit lands between repeats of the same read", () => {
+    // The read -> edit -> read-to-verify cycle: four identical reads, an
+    // edit, then the same four reads again. Neither streak reaches 5, even
+    // though the read repeats 8 times in total.
+    const edit = (path: string): Call => ({
+      toolName: "edit",
+      toolCallId: `edit-${path}`,
+      input: { path, new_string: "x", old_string: "y" },
+    });
+    const reads = (tag: string) =>
+      [1, 2, 3, 4].map((i) => readEvicted("f.js", 1, `${tag}${i}`));
+    expect(
+      stop(
+        steps(
+          ...reads("a").map((c) => [c]),
+          [edit("f.js")],
+          ...reads("b").map((c) => [c]),
+        ),
+      ),
+    ).toBe(false);
   });
 
   it("does not fire when different offsets are read (genuine exploration)", () => {

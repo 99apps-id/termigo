@@ -184,7 +184,23 @@ export function chatToResponsesBody(body: unknown): JsonObject | null {
     }
   }
 
-  if (tools.length > 0) {
+  // A forced tool-less step (the agent loop's synthesis step) arrives as
+  // tool_choice "none". The chat body carries it, but a Responses request
+  // has no tools field to switch off, so without this the model never
+  // learns tools are off: it emits tool_call blocks anyway, the loop reads
+  // that as the model ignoring the forced choice, and the model is marked
+  // as one that ignores synthesis -- after which every stuck-guard stops
+  // the run instantly. Say it in the instructions instead, and leave the
+  // tool catalogue out so nothing contradicts it.
+  const toolChoice = body.tool_choice;
+  const toolsDisabled =
+    toolChoice === "none" ||
+    (isObject(toolChoice) && toolChoice.type === "none");
+  if (toolsDisabled) {
+    instructions.push(
+      "Tool use is disabled for this reply. Do not emit any tool_call block. Answer now in plain text only, summarising what you found and what remains to be done.",
+    );
+  } else if (tools.length > 0) {
     instructions.push(textToolProtocol(tools));
   }
   const out: JsonObject = {

@@ -828,14 +828,17 @@ export function noToolRepetition<T extends ToolSet>(
  * is never detected.
  *
  * This guard catches that by looking at input-only fingerprints for a fixed
- * set of read-only tools (`read_file`, `list_directory`, `glob`, `grep`). If
- * the same (tool + args) combination appears `maxRepeats` or more times in
- * the recent window it is a stuck loop regardless of what the results look
- * like.
+ * set of read-only tools (`read_file`, `list_directory`, `glob`, `grep`), and
+ * -- like termixgo's loop guard -- it counts only CONSECUTIVE identical calls.
+ * A read repeated after anything else (an edit in between, a different read,
+ * a command) starts a new streak, so the ordinary read -> edit -> read-to-
+ * verify cycle of real coding work is never flagged; only a model emitting
+ * the same read back to back, with nothing in between, counts as stuck,
+ * regardless of what the results look like.
  *
- * Only read-only tools are included. Write tools (`edit`, `bash_run`, etc.)
+ * Only read-only tools are counted. Write tools (`edit`, `bash_run`, etc.)
  * legitimately operate on the same path repeatedly, so they stay under the
- * result-aware guard.
+ * result-aware guard -- and any of them in between resets the streak.
  */
 const IDLE_READ_TOOLS = new Set([
   "read_file",
@@ -845,30 +848,70 @@ const IDLE_READ_TOOLS = new Set([
   "find_files",
 ]);
 
+export type IdleReadStreak = {
+  toolName: string | null;
+  streak: number;
+};
+
+/**
+ * Walks every tool call in step order and reports the trailing streak of
+ * identical read-only calls: how many times the most recent read-only call
+ * has repeated back to back with no other tool call in between. Steps with
+ * no tool calls leave the streak untouched.
+ */
+export function idleReadStreak(
+  steps: Array<{
+    toolCalls?: Array<{ toolName: string; input?: unknown }>;
+  }>,
+): IdleReadStreak {
+  let fingerprint: string | null = null;
+  let toolName: string | null = null;
+  let streak = 0;
+  for (const s of steps) {
+    const calls = s.toolCalls;
+    if (!calls) continue;
+    for (const c of calls) {
+      if (!IDLE_READ_TOOLS.has(c.toolName)) {
+        fingerprint = null;
+        toolName = null;
+        streak = 0;
+        continue;
+      }
+      const fp = toolCallFingerprint(c.toolName, c.input);
+      if (fp === fingerprint) {
+        streak += 1;
+      } else {
+        fingerprint = fp;
+        toolName = c.toolName;
+        streak = 1;
+      }
+    }
+  }
+  return { toolName, streak };
+}
+
+/** Consecutive identical reads that earn a recovery nudge, and how many
+ *  nudges a run gets before the idle-read guard pauses it. Mirrors
+ *  termixgo's loop guard (MaxSameCallRepeats / MaxLoopNudges): a stop on
+ *  the first repetition answers a model that was one hint away from
+ *  succeeding, which is the "agent suddenly stops mid-work" complaint. */
+export const IDLE_READ_NUDGE_AT = 3;
+export const IDLE_READ_MAX_NUDGES = 2;
+
 export function noIdleReadLoop<T extends ToolSet>(
-  maxRepeats = 5,
+  maxRepeats = 3,
 ): StopCondition<T> {
   return ({ steps }) => {
-    if (steps.length < maxRepeats) return false;
-    const window = maxRepeats * 3;
-    const recent = steps.slice(-window);
-    const counts = new Map<string, { n: number; toolName: string }>();
-    for (const s of recent) {
-      const calls = s.toolCalls;
-      if (!calls || calls.length === 0) continue;
-      for (const c of calls) {
-        if (!IDLE_READ_TOOLS.has(c.toolName)) continue;
-        const fp = toolCallFingerprint(c.toolName, c.input);
-        const entry = counts.get(fp) ?? { n: 0, toolName: c.toolName };
-        entry.n += 1;
-        counts.set(fp, entry);
-        if (entry.n >= maxRepeats) {
-          console.log(
-            `[idle-read-loop] stop triggered tool=${entry.toolName} count=${entry.n} window=${window}`,
-          );
-          return true;
-        }
-      }
+    const { toolName, streak } = idleReadStreak(
+      steps as Array<{
+        toolCalls?: Array<{ toolName: string; input?: unknown }>;
+      }>,
+    );
+    if (toolName && streak >= maxRepeats) {
+      console.log(
+        `[idle-read-loop] stop triggered tool=${toolName} count=${streak} consecutive`,
+      );
+      return true;
     }
     return false;
   };
@@ -1589,7 +1632,6 @@ export async function runAgentStream(opts: RunAgentOptions) {
   const costBudget = opts.costBudgetUsd ?? 0;
   const capPred = isStepCount(stepBudget);
   const repeatPred = noToolRepetition<ToolSet>(3);
-  const idleReadPred = noIdleReadLoop<ToolSet>(5);
   const idlePred = noProgressStop<ToolSet>(2);
   const errorPred = noErrorProgress<ToolSet>(3);
 
@@ -1615,6 +1657,13 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // Step count when the synthesis step was requested, so the stop conditions can
   // tell "the step that asked for it" from "the step that answered it".
   let synthesisRequestedAtStepCount = -1;
+  // Idle-read recovery nudges (termixgo loop-guard parity): the first trips
+  // of the idle-read guard do not pause the run. A recovery note naming the
+  // repeated call is injected into the next step's system prompt instead,
+  // and only a streak that survives every nudge pauses the run.
+  let idleNudgesUsed = 0;
+  let idleNudgeLastStreak = 0;
+  let idleNudgePending: string | null = null;
   // Set when a guard decides the run must end but cannot stop the loop itself
   // (onStepFinish runs before the stop conditions are checked). The first stop
   // condition honours it.
@@ -1693,13 +1742,43 @@ export async function runAgentStream(opts: RunAgentOptions) {
       (repeatPred(args) as boolean)
         ? requestSynthesisOrStop("tool-repetition")
         : false,
-    // Idle-read-loop guard: detects read-only tools called with the same args
-    // 5+ times. Unlike noToolRepetition, this uses input-only fingerprints so
-    // context eviction replacing old results does not fool it.
-    (args) =>
-      (idleReadPred(args) as boolean)
-        ? requestSynthesisOrStop("idle-read-loop")
-        : false,
+    // Idle-read-loop guard: the same read-only call repeated back to back.
+    // Unlike noToolRepetition, this uses input-only fingerprints so context
+    // eviction replacing old results does not fool it. Nudge before pausing,
+    // the way termixgo's loop guard does: a trip while nudges remain injects
+    // a recovery note for the next step and lets the run continue; only a
+    // streak that outlives every nudge earns the pause.
+    (args) => {
+      const { toolName, streak } = idleReadStreak(
+        (
+          args as {
+            steps?: Array<{
+              toolCalls?: Array<{ toolName: string; input?: unknown }>;
+            }>;
+          }
+        ).steps ?? [],
+      );
+      if (!toolName || streak < IDLE_READ_NUDGE_AT) return false;
+      if (
+        idleNudgesUsed < IDLE_READ_MAX_NUDGES &&
+        streak > idleNudgeLastStreak
+      ) {
+        idleNudgesUsed += 1;
+        idleNudgeLastStreak = streak;
+        idleNudgePending =
+          `[RECOVERY: REPEATED READ LOOP]\n` +
+          `You have called ${toolName} with the exact same arguments ${streak} times in a row, with no other action in between.\n` +
+          `Do not repeat that call again. Work from what you already read, change the arguments (a different offset, path or pattern), or move on to editing or answering.`;
+        console.log(
+          `[idle-read-loop] nudge ${idleNudgesUsed} tool=${toolName} streak=${streak}`,
+        );
+        return false;
+      }
+      if (idleNudgesUsed >= IDLE_READ_MAX_NUDGES) {
+        return requestSynthesisOrStop("idle-read-loop");
+      }
+      return false;
+    },
     // Text repetition loop: a step whose prose is mostly one repeated 60+
     // char window is degenerate output (the model echoing itself). Continuing
     // would spend more budget on noise, so end at the step boundary -- with
@@ -2070,7 +2149,14 @@ export async function runAgentStream(opts: RunAgentOptions) {
       // Memoized: an unchanged hint set resends the identical system array so
       // the provider's prefix cache stays hot. A new/changed hint rebuilds
       // once -- that single reprocess is the price of delivering new content.
-      const activeNudge = circuitBreakerState.activeNudge;
+      // The idle-read recovery note rides one step's system prompt, then is
+      // gone; the circuit breaker's nudge (a live failure) wins if both
+      // exist, because it describes the step that just happened.
+      let activeNudge = circuitBreakerState.activeNudge;
+      if (activeNudge === null && idleNudgePending !== null) {
+        activeNudge = idleNudgePending;
+        idleNudgePending = null;
+      }
       let system: SystemLike;
       if (
         lastStepSystem !== null &&
