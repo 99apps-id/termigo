@@ -3,7 +3,9 @@ import { arch } from "@tauri-apps/plugin-os";
 import { sanitizeMuseSseLine } from "./museSse";
 import {
   chatToResponsesBody,
+  chatToResponsesNativeBody,
   isAttestationDenial,
+  responsesNativeStreamToChatSse,
   responsesStreamToChatSse,
   responsesUrl,
 } from "./museTextTools";
@@ -14,14 +16,17 @@ import {
  * successful SSE response is touched; errors and JSON bodies pass through so
  * the SDK's own error handling still sees them.
  *
- * The wrapper also carries the attestation fallback (see
- * `museTextTools.ts`): when Meta refuses the request with
- * `client_attestation_denied`, the credential is remembered and the call is
- * retried on the Responses route under the text tool protocol, with the
- * Responses stream translated back into chat-completions chunks. Later
- * calls with the same credential go straight to the text protocol, so the
- * refusal is paid once per login, not on every step. A pay-as-you-go Model
- * API key is never refused, so it never leaves the native path.
+ * Like termixgo's client, every Muse call goes to the Responses route
+ * first, with tools registered as the one `muse` namespace tool (see
+ * `museTextTools.ts`): that is the official client's shape, and the one
+ * Meta serves native tool calls to. When Meta refuses a credential with
+ * `client_attestation_denied` -- the subscription-key case -- the
+ * credential is remembered and the call is retried on the same route
+ * under the text tool protocol instead. Later calls with the same
+ * credential go straight to the text protocol, so the refusal is paid
+ * once per login, not on every step. Either way the Responses stream is
+ * translated back into chat-completions chunks for the SDK. The plain
+ * chat route remains only for bodies neither translation takes.
  *
  * Around both routes sits termixgo's recovery shape: transient statuses
  * and transport errors retry with `Retry-After` honoured, and a stale-key
@@ -138,6 +143,47 @@ async function textToolRequest(
   });
 }
 
+/**
+ * One attempt on the native Responses route: tools registered as the one
+ * `muse` namespace tool, the reply's real function_call items translated
+ * back into chat-completions chunks. Returns null when the request is not
+ * a translatable chat body, and the raw response when Meta answered with
+ * an error, so the caller can classify it (attestation, stale key, or a
+ * plain failure to surface).
+ */
+async function nativeResponsesRequest(
+  base: typeof fetch,
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+  sessionId: string,
+): Promise<Response | null> {
+  if (typeof init?.body !== "string") return null;
+  let chatBody: unknown;
+  try {
+    chatBody = JSON.parse(init.body);
+  } catch {
+    return null;
+  }
+  const responsesBody = chatToResponsesNativeBody(chatBody, sessionId);
+  if (!responsesBody) return null;
+  const url = responsesUrl(urlOf(input));
+  if (!url) return null;
+  const response = await base(url, {
+    ...init,
+    body: JSON.stringify(responsesBody),
+  });
+  if (!response.ok || !response.body) return response;
+  const model =
+    typeof responsesBody.model === "string" && responsesBody.model
+      ? responsesBody.model
+      : "muse";
+  const sseText = await response.text();
+  return new Response(responsesNativeStreamToChatSse(sseText, model), {
+    status: 200,
+    headers: { "content-type": "text/event-stream" },
+  });
+}
+
 export type MuseFetchOptions = {
   /** Mint a fresh credential after the API rejects the current one as stale
    *  (401, 404, or a 403 that is not the attestation refusal). Returns the
@@ -150,6 +196,12 @@ export type MuseFetchOptions = {
  *  would pay the rejection-plus-remint round trip again. In memory only,
  *  like the text-protocol set above. */
 const refreshedCredentials = new Map<string, string>();
+
+/** Credentials whose native Responses route Meta has accepted. The
+ *  native route is every unclassified credential's first attempt anyway;
+ *  the set exists so a remint can carry the classification over to the
+ *  fresh credential. In memory only. */
+const nativeResponsesCredentials = new Set<string>();
 
 /** The official Muse build identity, termixgo's museidentity shape: the
  *  gateway routes subscription traffic by it, and a generic client
@@ -323,15 +375,9 @@ export function createMuseFetch(
     const send = (i: RequestInfo | URL, ini: RequestInit | undefined) =>
       sendWithTransientRetry(base, i, ini);
 
-    if (authorization && textToolCredentials.has(authorization)) {
-      const viaText = await textToolRequest(send, input, init);
-      if (viaText) return viaText;
-    }
-    let response = await send(input, init);
-
     // Attestation fallback: on Meta's refusal, remember the credential and
-    // retry under the text tool protocol. Returns the response unchanged
-    // when the 403 is something else, so the remint path below can see it.
+    // retry under the text tool protocol. Returns null when the 403 is
+    // something else, so the remint path below can see it.
     const attestationFallback = async (
       res: Response,
       auth: string,
@@ -346,17 +392,60 @@ export function createMuseFetch(
       if (auth) textToolCredentials.add(auth);
       return textToolRequest(send, input, ini);
     };
-    const viaAttestation = await attestationFallback(
-      response,
-      authorization,
-      init,
-    );
-    if (viaAttestation) return viaAttestation;
+
+    // One attempt for one credential, termixgo's route order: the native
+    // Responses route first (tools as the one `muse` namespace tool), the
+    // text protocol for a credential Meta attestation-refused, and the
+    // plain chat route only for a body neither translation takes (the
+    // SDK's non-chat calls). A native success marks the credential so the
+    // route choice is remembered, though the native route is the default
+    // for every unclassified credential anyway.
+    const runAttempt = async (
+      ini: RequestInit | undefined,
+      auth: string,
+    ): Promise<Response> => {
+      if (auth && textToolCredentials.has(auth)) {
+        const viaText = await textToolRequest(send, input, ini);
+        if (viaText) return viaText;
+      } else if (auth) {
+        const native = await nativeResponsesRequest(
+          send,
+          input,
+          ini,
+          sessionIdentityFor(auth).sessionId,
+        );
+        if (native) {
+          if (native.status === 403) {
+            const viaAtt = await attestationFallback(native, auth, ini);
+            if (viaAtt) return viaAtt;
+          }
+          if (native.ok) nativeResponsesCredentials.add(auth);
+          return native;
+        }
+      }
+      const response = await send(input, ini);
+      if (response.status === 403 && auth) {
+        const viaAtt = await attestationFallback(response, auth, ini);
+        if (viaAtt) return viaAtt;
+      }
+      if (!response.ok || !response.body || !isEventStream(response)) {
+        return response;
+      }
+      return new Response(sanitizeSseStream(response.body), {
+        status: response.status,
+        statusText: response.statusText,
+        headers: { "content-type": "text/event-stream" },
+      });
+    };
+
+    let response = await runAttempt(init, authorization);
 
     // Auth recovery, termixgo's ladder: a stale-key rejection (401, 404, or
     // a 403 that was not attestation) earns one remint and one retry with
-    // the fresh credential. A pay-as-you-go key has no remint behind it;
-    // opts.remint is only wired for the OAuth login.
+    // the fresh credential, re-running the same route logic. This now also
+    // covers the text route, whose error responses used to return before
+    // the ladder could see them. A pay-as-you-go key has no remint behind
+    // it; opts.remint is only wired for the OAuth login.
     if (
       opts?.remint &&
       authorization &&
@@ -372,37 +461,25 @@ export function createMuseFetch(
           // A remint is a session reset: the fresh credential starts a
           // fresh session identity rather than reusing the rejected one.
           sessionByCredential.set(freshAuth, newSessionIdentity());
+          // A credential already known to need the text protocol (or
+          // confirmed native) keeps its route under its replacement; the
+          // classification is keyed by credential.
+          if (textToolCredentials.has(authorization)) {
+            textToolCredentials.add(freshAuth);
+          }
+          if (nativeResponsesCredentials.has(authorization)) {
+            nativeResponsesCredentials.add(freshAuth);
+          }
           const retryInit = withIdentityHeaders(
             input,
             withAuthorization(input, init, freshAuth),
             sessionIdentityFor(freshAuth),
           );
-          // A credential already known to need the text protocol keeps it
-          // under its replacement; the attestation refusal would only
-          // repeat, and the sticky set is keyed by credential.
-          if (textToolCredentials.has(authorization)) {
-            textToolCredentials.add(freshAuth);
-            const viaText = await textToolRequest(send, input, retryInit);
-            if (viaText) return viaText;
-          }
-          response = await send(input, retryInit);
-          const viaRetryAttestation = await attestationFallback(
-            response,
-            freshAuth,
-            retryInit,
-          );
-          if (viaRetryAttestation) return viaRetryAttestation;
+          response = await runAttempt(retryInit, freshAuth);
         }
       }
     }
 
-    if (!response.ok || !response.body || !isEventStream(response)) {
-      return response;
-    }
-    return new Response(sanitizeSseStream(response.body), {
-      status: response.status,
-      statusText: response.statusText,
-      headers: { "content-type": "text/event-stream" },
-    });
+    return response;
   };
 }

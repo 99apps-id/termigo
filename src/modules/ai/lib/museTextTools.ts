@@ -227,6 +227,146 @@ export function chatToResponsesBody(body: unknown): JsonObject | null {
   return out;
 }
 
+/** Arguments for a replayed function_call item: Meta validates them and
+ *  answers 400 when they are not valid JSON, so a blank or broken string
+ *  degrades to an empty object (termixgo's responsesArguments). */
+function responsesArguments(raw: unknown): string {
+  const text = typeof raw === "string" ? raw : JSON.stringify(raw ?? {});
+  const trimmed = (text ?? "").trim();
+  if (!trimmed) return "{}";
+  try {
+    JSON.parse(trimmed);
+    return trimmed;
+  } catch {
+    return "{}";
+  }
+}
+
+/** Meta's reasoning effort for a chat body, termixgo's mapping: the
+ *  official client defaults to high, and its ultra tier is a client-side
+ *  mode on top of the endpoint's max. */
+function museEffort(body: JsonObject): string {
+  const raw = asString(body.reasoning_effort).toLowerCase();
+  if (raw === "ultra") return "max";
+  if (["low", "medium", "high", "xhigh", "max"].includes(raw)) return raw;
+  return "high";
+}
+
+/**
+ * Translates one chat-completions request body into the NATIVE Responses
+ * body, termixgo's payload shape: tools registered as ONE namespace tool
+ * named `muse` (the official client's registration, and the only shape
+ * Meta serves native calls to), stored calls replayed as function_call
+ * items stamped with `fc_` ids and a completed status, results as
+ * function_call_output items, assistant messages phase-tagged
+ * (commentary before a call, final_answer otherwise) -- the three replay
+ * repairs Meta's backend validates with a misleading 404 or a 400.
+ *
+ * Reasoning items are the one thing this translation cannot carry: the
+ * chat-shaped history the SDK keeps has nowhere to store them, so a
+ * step's encrypted reasoning is dropped between steps (termixgo's own
+ * client keeps and replays them). The request still asks for them, as
+ * the official client does.
+ */
+export function chatToResponsesNativeBody(
+  body: unknown,
+  sessionId: string,
+): JsonObject | null {
+  if (!isObject(body) || !Array.isArray(body.messages)) return null;
+  const tools = chatTools(body);
+  const instructions: string[] = [];
+  const input: JsonObject[] = [];
+  const seenOutputs = new Set<string>();
+  for (const message of body.messages) {
+    if (!isObject(message)) continue;
+    const role = asString(message.role);
+    if (role === "system" || role === "developer") {
+      const text = contentText(message.content);
+      if (text.trim()) instructions.push(text);
+    } else if (role === "user") {
+      input.push({
+        type: "message",
+        role: "user",
+        content: userContent(message.content),
+      });
+    } else if (role === "assistant") {
+      const text = contentText(message.content);
+      if (text.trim()) {
+        input.push({
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text }],
+        });
+      }
+      if (Array.isArray(message.tool_calls)) {
+        for (const call of message.tool_calls) {
+          if (!isObject(call)) continue;
+          const fn = isObject(call.function) ? call.function : call;
+          const name = asString(fn.name);
+          const callId = asString(call.id);
+          if (!name || !callId) continue;
+          input.push({
+            type: "function_call",
+            id: `fc_${callId}`,
+            call_id: callId,
+            name,
+            arguments: responsesArguments(fn.arguments ?? "{}"),
+            status: "completed",
+          });
+        }
+      }
+    } else if (role === "tool") {
+      const callId = asString(message.tool_call_id);
+      if (callId && seenOutputs.has(callId)) continue;
+      if (callId) seenOutputs.add(callId);
+      input.push({
+        type: "function_call_output",
+        call_id: callId,
+        output: contentText(message.content),
+      });
+    }
+  }
+  for (let i = 0; i < input.length; i += 1) {
+    const item = input[i];
+    if (item && item.type === "message" && item.role === "assistant") {
+      item.phase =
+        input[i + 1]?.type === "function_call" ? "commentary" : "final_answer";
+    }
+  }
+  const out: JsonObject = {
+    model: asString(body.model),
+    stream: true,
+    store: false,
+    input,
+    reasoning: { summary: "auto", effort: museEffort(body) },
+    include: ["reasoning.encrypted_content"],
+  };
+  if (instructions.length > 0) out.instructions = instructions.join("\n\n");
+  const toolChoiceNone =
+    body.tool_choice === "none" ||
+    (isObject(body.tool_choice) && body.tool_choice.type === "none");
+  if (tools.length > 0 && !toolChoiceNone) {
+    out.tools = [
+      {
+        type: "namespace",
+        name: "muse",
+        description: "Muse Code tool set.",
+        tools: tools.map((t) => ({
+          type: "function",
+          name: t.name,
+          description: t.description,
+          parameters: t.parameters,
+        })),
+      },
+    ];
+  }
+  if (sessionId) out.prompt_cache_key = `tbh:main:${sessionId}`;
+  if (typeof body.temperature === "number") out.temperature = body.temperature;
+  const maxTokens = body.max_completion_tokens ?? body.max_tokens;
+  if (typeof maxTokens === "number") out.max_output_tokens = maxTokens;
+  return out;
+}
+
 function textToolProtocol(tools: ChatTool[]): string {
   const lines = [
     "Tool use (text protocol): the tools below are available, but they are not registered with this API request. Termigo executes them on the operator's machine and returns their output to you.",
@@ -335,6 +475,9 @@ type ResponsesOutcome = {
   /** Why a `response.incomplete` ended the reply ("max_output_tokens" when
    *  the backend cut the answer), or null for a completed response. */
   incompleteReason: string | null;
+  /** Native function calls carried by the stream (namespace route), in
+   *  arrival order. Empty on the text-protocol route. */
+  nativeCalls: { id: string; name: string; arguments: string }[];
 };
 
 function readResponsesStream(sseText: string): ResponsesOutcome {
@@ -342,6 +485,12 @@ function readResponsesStream(sseText: string): ResponsesOutcome {
   let usage: ResponsesOutcome["usage"] = null;
   let error: string | null = null;
   let incompleteReason: string | null = null;
+  const nativeCalls: ResponsesOutcome["nativeCalls"] = [];
+  // Muse finalizes a call's arguments in a dedicated done event, and the
+  // output_item.done item can carry them empty; track both the finalized
+  // value and the accumulated deltas per item id (termixgo's decoder).
+  const finalArgs = new Map<string, string>();
+  const deltaArgs = new Map<string, string>();
   for (const line of sseText.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed.startsWith("data:")) continue;
@@ -356,6 +505,32 @@ function readResponsesStream(sseText: string): ResponsesOutcome {
     if (!isObject(event)) continue;
     if (event.type === "response.output_text.delta") {
       if (typeof event.delta === "string") text += event.delta;
+    } else if (event.type === "response.function_call_arguments.delta") {
+      const itemId = asString(event.item_id);
+      if (itemId && typeof event.delta === "string") {
+        deltaArgs.set(itemId, (deltaArgs.get(itemId) ?? "") + event.delta);
+      }
+    } else if (event.type === "response.function_call_arguments.done") {
+      const itemId = asString(event.item_id);
+      if (itemId) {
+        const args = asString(event.arguments) || deltaArgs.get(itemId) || "";
+        if (args) finalArgs.set(itemId, args);
+      }
+    } else if (event.type === "response.output_item.done") {
+      const item = isObject(event.item) ? event.item : null;
+      if (item && item.type === "function_call") {
+        const name = asString(item.name);
+        const callId = asString(item.call_id);
+        if (name && callId) {
+          const itemId = asString(item.id);
+          const args =
+            asString(item.arguments) ||
+            finalArgs.get(itemId) ||
+            deltaArgs.get(itemId) ||
+            "{}";
+          nativeCalls.push({ id: callId, name, arguments: args });
+        }
+      }
     } else if (event.type === "response.subscription_usage") {
       // The quota reading rides the stream; stash it for the account UI.
       recordMuseSubscription(event.subscription);
@@ -392,7 +567,7 @@ function readResponsesStream(sseText: string): ResponsesOutcome {
         "Muse request failed";
     }
   }
-  return { text, usage, error, incompleteReason };
+  return { text, usage, error, incompleteReason, nativeCalls };
 }
 
 /**
@@ -486,6 +661,86 @@ export function responsesStreamToChatSse(
     });
     chunk({ index: 0, delta: {}, finish_reason: "tool_calls" }, true);
   }
+  lines.push("data: [DONE]\n\n");
+  return lines.join("");
+}
+
+/**
+ * The native-route twin of `responsesStreamToChatSse`: the stream's text
+ * and its real function_call items become chat-completions chunks, with
+ * the call ids Meta issued (the next request replays them as `fc_` items).
+ * Same incomplete and failure semantics as the text route.
+ */
+export function responsesNativeStreamToChatSse(
+  sseText: string,
+  model: string,
+): string {
+  const outcome = readResponsesStream(sseText);
+  if (outcome.error) {
+    return `data: ${JSON.stringify({ error: { message: outcome.error, code: "muse_response_failed" } })}\n\ndata: [DONE]\n\n`;
+  }
+  if (
+    outcome.incompleteReason &&
+    outcome.incompleteReason !== "max_output_tokens"
+  ) {
+    return `data: ${JSON.stringify({ error: { message: `Muse response incomplete: ${outcome.incompleteReason}`, code: "muse_response_incomplete" } })}\n\ndata: [DONE]\n\n`;
+  }
+  const base = {
+    id: "chatcmpl-muse",
+    object: "chat.completion.chunk",
+    created: Math.floor(Date.now() / 1000),
+    model,
+  };
+  const usage = outcome.usage
+    ? {
+        prompt_tokens: outcome.usage.prompt,
+        completion_tokens: outcome.usage.completion,
+        total_tokens: outcome.usage.total,
+      }
+    : undefined;
+  const lines: string[] = [];
+  const chunk = (choice: JsonObject, withUsage = false) => {
+    lines.push(
+      `data: ${JSON.stringify({ ...base, choices: [choice], ...(withUsage && usage ? { usage } : {}) })}\n\n`,
+    );
+  };
+  const calls = outcome.nativeCalls;
+  if (outcome.text) {
+    chunk({
+      index: 0,
+      delta: { role: "assistant", content: outcome.text },
+      finish_reason: null,
+    });
+  }
+  calls.forEach((call, index) => {
+    chunk({
+      index: 0,
+      delta: {
+        tool_calls: [
+          {
+            index,
+            id: call.id,
+            type: "function",
+            function: { name: call.name, arguments: call.arguments },
+          },
+        ],
+      },
+      finish_reason: null,
+    });
+  });
+  chunk(
+    {
+      index: 0,
+      delta: {},
+      finish_reason:
+        calls.length > 0
+          ? "tool_calls"
+          : outcome.incompleteReason === "max_output_tokens"
+            ? "length"
+            : "stop",
+    },
+    true,
+  );
   lines.push("data: [DONE]\n\n");
   return lines.join("");
 }

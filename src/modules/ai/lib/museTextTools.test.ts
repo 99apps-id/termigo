@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   chatToResponsesBody,
+  chatToResponsesNativeBody,
   parseTextToolCalls,
+  responsesNativeStreamToChatSse,
   responsesStreamToChatSse,
 } from "./museTextTools";
 
@@ -138,6 +140,102 @@ describe("chatToResponsesBody tool results", () => {
     expect(block.name).toBe("bash_run");
     expect(block.call_id).toBe("call_1");
     expect(block.output).toBe("file.txt");
+  });
+});
+
+describe("chatToResponsesNativeBody", () => {
+  it("registers the tools as one namespace tool and stamps the payload", () => {
+    const body = chatToResponsesNativeBody(
+      {
+        model: "muse-spark-1.3",
+        messages: [{ role: "user", content: "list files" }],
+        tools: [
+          {
+            type: "function",
+            function: {
+              name: "bash_run",
+              description: "Run a command.",
+              parameters: { type: "object", properties: {} },
+            },
+          },
+        ],
+      },
+      "sess-1",
+    );
+    expect(body?.store).toBe(false);
+    expect(body?.prompt_cache_key).toBe("tbh:main:sess-1");
+    expect(body?.include).toEqual(["reasoning.encrypted_content"]);
+    expect(body?.reasoning).toEqual({ summary: "auto", effort: "high" });
+    const tools = body?.tools as { type?: string; name?: string }[];
+    expect(tools).toHaveLength(1);
+    expect(tools[0]?.type).toBe("namespace");
+    expect(tools[0]?.name).toBe("muse");
+  });
+
+  it("omits the tools field when the step forbids tool use", () => {
+    const body = chatToResponsesNativeBody(
+      {
+        model: "muse-spark-1.3",
+        tool_choice: "none",
+        messages: [{ role: "user", content: "answer now" }],
+        tools: [
+          {
+            type: "function",
+            function: { name: "bash_run", description: "", parameters: {} },
+          },
+        ],
+      },
+      "sess-1",
+    );
+    expect(body?.tools).toBeUndefined();
+  });
+
+  it("degrades broken replayed arguments to an empty object", () => {
+    const body = chatToResponsesNativeBody(
+      {
+        model: "muse-spark-1.3",
+        messages: [
+          {
+            role: "assistant",
+            content: "",
+            tool_calls: [
+              {
+                id: "call_9",
+                type: "function",
+                function: { name: "bash_run", arguments: "not json" },
+              },
+            ],
+          },
+        ],
+      },
+      "sess-1",
+    );
+    const items = (body?.input ?? []) as Record<string, unknown>[];
+    expect(items[0]?.type).toBe("function_call");
+    expect(items[0]?.arguments).toBe("{}");
+  });
+});
+
+describe("responsesNativeStreamToChatSse", () => {
+  it("takes a call's arguments from the accumulated deltas when the item and done event lack them", () => {
+    const sse =
+      'data: {"type":"response.function_call_arguments.delta","item_id":"fc_7","delta":"{\\"comm"}\n\n' +
+      'data: {"type":"response.function_call_arguments.delta","item_id":"fc_7","delta":"and\\":\\"ls\\"}"}\n\n' +
+      'data: {"type":"response.output_item.done","item":{"type":"function_call","id":"fc_7","call_id":"call_7","name":"bash_run","arguments":""}}\n\n' +
+      'data: {"type":"response.completed","response":{"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}\n\n';
+    const out = responsesNativeStreamToChatSse(sse, "muse-spark-1.3");
+    expect(out).toContain('"id":"call_7"');
+    expect(out).toContain('"{\\"command\\":\\"ls\\"}"');
+    expect(out).toContain('"finish_reason":"tool_calls"');
+  });
+
+  it("ends a truncated native reply as length, not stop", () => {
+    const sse =
+      'data: {"type":"response.output_text.delta","delta":"partial"}\n\n' +
+      'data: {"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"usage":{"input_tokens":1,"output_tokens":9,"total_tokens":10}}}\n\n';
+    const out = responsesNativeStreamToChatSse(sse, "muse-spark-1.3");
+    expect(out).toContain("partial");
+    expect(out).toContain('"finish_reason":"length"');
   });
 });
 
