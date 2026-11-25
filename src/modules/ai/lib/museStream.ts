@@ -1,3 +1,5 @@
+import { PLATFORM } from "@/lib/platform";
+import { arch } from "@tauri-apps/plugin-os";
 import { sanitizeMuseSseLine } from "./museSse";
 import {
   chatToResponsesBody,
@@ -26,6 +28,11 @@ import {
  * rejection (401, 404, a non-attestation 403) triggers one remint through
  * `opts.remint` and one retry with the fresh credential, which later calls
  * then reuse. Without a remint wired, errors pass through as before.
+ *
+ * Every request also carries the official Muse build identity
+ * (`muse-build/1.4.24`, the `tbh:exec` client id and a stable per-credential
+ * session header set), matching termixgo's museidentity; a remint starts a
+ * fresh session identity.
  */
 
 function isEventStream(response: Response): boolean {
@@ -144,6 +151,78 @@ export type MuseFetchOptions = {
  *  like the text-protocol set above. */
 const refreshedCredentials = new Map<string, string>();
 
+/** The official Muse build identity, termixgo's museidentity shape: the
+ *  gateway routes subscription traffic by it, and a generic client
+ *  User-Agent is part of what marks a request as third-party. */
+function museUserAgent(): string {
+  let slug = "unknown";
+  try {
+    const os = PLATFORM === "macos" ? "darwin" : PLATFORM;
+    let cpu = "";
+    try {
+      cpu = arch();
+    } catch {
+      cpu = "";
+    }
+    const archSlug =
+      cpu === "x86_64" ? "amd64" : cpu === "aarch64" ? "arm64" : cpu;
+    if (os) slug = archSlug ? `${os}-${archSlug}` : os;
+  } catch {
+    // Outside the Tauri host the slug stays "unknown"; the header is an
+    // identity string, not a capability claim.
+  }
+  return `muse-build/1.4.24 (non-interactive; ${slug})`;
+}
+
+/** One stable session identity per credential, termixgo's shape: the same
+ *  ids ride every request until the credential is reminted, which is the
+ *  reset point -- a fresh credential gets a fresh session rather than
+ *  inheriting the one Meta just rejected. */
+type MuseSessionIdentity = {
+  sessionId: string;
+  gatewaySessionId: string;
+  threadId: string;
+  rootSessionId: string;
+};
+
+const sessionByCredential = new Map<string, MuseSessionIdentity>();
+
+function newSessionIdentity(): MuseSessionIdentity {
+  return {
+    sessionId: crypto.randomUUID(),
+    gatewaySessionId: crypto.randomUUID(),
+    threadId: crypto.randomUUID(),
+    rootSessionId: crypto.randomUUID(),
+  };
+}
+
+function sessionIdentityFor(credential: string): MuseSessionIdentity {
+  let identity = sessionByCredential.get(credential);
+  if (!identity) {
+    identity = newSessionIdentity();
+    sessionByCredential.set(credential, identity);
+  }
+  return identity;
+}
+
+function withIdentityHeaders(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+  identity: MuseSessionIdentity,
+): RequestInit {
+  const headers = new Headers(
+    init?.headers ?? (input instanceof Request ? input.headers : undefined),
+  );
+  headers.set("user-agent", museUserAgent());
+  headers.set("x-client-id", "tbh:exec");
+  headers.set("x-tbh-session-id", identity.sessionId);
+  headers.set("x-meta-ai-gateway-session-id", identity.gatewaySessionId);
+  headers.set("x-tbh-thread-id", identity.threadId);
+  headers.set("x-tbh-root-session-id", identity.rootSessionId);
+  headers.set("x-tbh-agent-role", "main");
+  return { ...init, headers };
+}
+
 /** Statuses worth retrying as-is: rate limits and transient overload. 404
  *  joins them in the remint path below, not here, because for Muse a 404
  *  usually means a stale key rather than a missing resource. */
@@ -232,6 +311,15 @@ export function createMuseFetch(
       init = withAuthorization(input, init, replacement);
       authorization = replacement;
     }
+    // Every Muse request carries the official build identity and this
+    // credential's stable session headers, on both routes.
+    if (authorization) {
+      init = withIdentityHeaders(
+        input,
+        init,
+        sessionIdentityFor(authorization),
+      );
+    }
     const send = (i: RequestInfo | URL, ini: RequestInit | undefined) =>
       sendWithTransientRetry(base, i, ini);
 
@@ -281,7 +369,14 @@ export function createMuseFetch(
         const freshAuth = `Bearer ${freshToken}`;
         if (freshAuth !== authorization) {
           refreshedCredentials.set(authorization, freshAuth);
-          const retryInit = withAuthorization(input, init, freshAuth);
+          // A remint is a session reset: the fresh credential starts a
+          // fresh session identity rather than reusing the rejected one.
+          sessionByCredential.set(freshAuth, newSessionIdentity());
+          const retryInit = withIdentityHeaders(
+            input,
+            withAuthorization(input, init, freshAuth),
+            sessionIdentityFor(freshAuth),
+          );
           // A credential already known to need the text protocol keeps it
           // under its replacement; the attestation refusal would only
           // repeat, and the sticky set is keyed by credential.

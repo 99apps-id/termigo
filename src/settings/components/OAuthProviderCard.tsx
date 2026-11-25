@@ -4,6 +4,11 @@ import { Spinner } from "@/components/ui/spinner";
 import { DESTRUCTIVE_ACTION } from "@/lib/toolbarButton";
 import { getProvider, type OAuthProviderId } from "@/modules/ai/config";
 import {
+  type MuseQuotaSnapshot,
+  getMuseQuotaSnapshot,
+  onMuseQuotaChanged,
+} from "@/modules/ai/lib/museQuota";
+import {
   type OAuthAccount,
   getOAuthAccount,
   onOAuthAuthChanged,
@@ -57,6 +62,7 @@ export function OAuthProviderCard({ providerId }: Props) {
     null,
   );
   const [copied, setCopied] = useState(false);
+  const [quota, setQuota] = useState<MuseQuotaSnapshot | null>(null);
 
   const reload = useCallback(() => {
     void getOAuthAccount(providerId)
@@ -68,6 +74,15 @@ export function OAuthProviderCard({ providerId }: Props) {
     reload();
     return onOAuthAuthChanged(reload);
   }, [reload]);
+
+  // Muse has no usage endpoint: the quota reading arrives inside response
+  // streams (see museQuota) and this card is where the account lives.
+  useEffect(() => {
+    if (providerId !== "muse") return;
+    const read = () => setQuota(getMuseQuotaSnapshot());
+    read();
+    return onMuseQuotaChanged(read);
+  }, [providerId]);
 
   useEffect(() => {
     const unUrl = listen<string>("oauth-auth-url", (e) => {
@@ -161,6 +176,16 @@ export function OAuthProviderCard({ providerId }: Props) {
               {account.plan ? `Plan: ${account.plan}. ` : ""}
               Connected via OAuth subscription.
             </div>
+            {providerId === "muse" && quota ? (
+              <div className="text-[10.5px] text-muted-foreground">
+                {quota.windows
+                  .map(
+                    (w) =>
+                      `${w.displayName}: ${Math.round(w.usedPercent)}% used`,
+                  )
+                  .join(" · ")}
+              </div>
+            ) : null}
           </div>
           <div className="flex items-center gap-1.5">
             <Button

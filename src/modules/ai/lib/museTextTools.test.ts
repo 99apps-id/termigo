@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { chatToResponsesBody, responsesStreamToChatSse } from "./museTextTools";
+import {
+  chatToResponsesBody,
+  parseTextToolCalls,
+  responsesStreamToChatSse,
+} from "./museTextTools";
 
 const baseBody = {
   model: "muse-spark-1.3",
@@ -48,6 +52,92 @@ describe("chatToResponsesBody tool_choice", () => {
       tool_choice: { type: "none" },
     });
     expect(out?.instructions).toContain("Tool use is disabled for this reply");
+  });
+});
+
+describe("parseTextToolCalls tolerance", () => {
+  it("keeps valid calls and leaves a bad block as prose", () => {
+    const text =
+      "Before.\n" +
+      '```tool_call\n{"name":"bash_run","arguments":{"command":"ls"}}\n```\n' +
+      "Middle.\n```tool_call\n{not json}\n```\nAfter.";
+    const { prose, calls } = parseTextToolCalls(text);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.name).toBe("bash_run");
+    expect(calls[0]?.arguments).toBe('{"command":"ls"}');
+    expect(prose).toContain("Before.");
+    expect(prose).toContain("{not json}");
+    expect(prose).toContain("After.");
+  });
+
+  it("accepts the XML tag and json fence spellings", () => {
+    const xml = parseTextToolCalls(
+      '<tool_call>{"name":"read_file","arguments":{"path":"a.txt"}}</tool_call>',
+    );
+    expect(xml.calls).toHaveLength(1);
+    expect(xml.calls[0]?.name).toBe("read_file");
+    const fenced = parseTextToolCalls(
+      '```json\n{"name":"grep","arguments":{}}\n```',
+    );
+    expect(fenced.calls).toHaveLength(1);
+    expect(fenced.calls[0]?.name).toBe("grep");
+  });
+
+  it("survives an unclosed trailing block", () => {
+    const text =
+      '```tool_call\n{"name":"bash_run","arguments":{}}\n```\n' +
+      '```tool_call\n{"name":"x"';
+    const { prose, calls } = parseTextToolCalls(text);
+    expect(calls).toHaveLength(1);
+    expect(prose).toContain('{"name":"x"');
+  });
+
+  it("returns the text untouched when no block is a valid call", () => {
+    const text = "```tool_call\n{bad}\n```";
+    const { prose, calls } = parseTextToolCalls(text);
+    expect(calls).toHaveLength(0);
+    expect(prose).toBe(text);
+  });
+});
+
+describe("chatToResponsesBody tool results", () => {
+  it("carries the tool name in the tool_result block", () => {
+    const out = chatToResponsesBody({
+      model: "muse-spark-1.3",
+      messages: [
+        { role: "user", content: "list files" },
+        {
+          role: "assistant",
+          content: "",
+          tool_calls: [
+            {
+              id: "call_1",
+              type: "function",
+              function: {
+                name: "bash_run",
+                arguments: '{"command":"ls"}',
+              },
+            },
+          ],
+        },
+        { role: "tool", tool_call_id: "call_1", content: "file.txt" },
+      ],
+    });
+    const input = (out as { input?: unknown[] } | null)?.input ?? [];
+    const resultItem = input.find((item) =>
+      JSON.stringify(item).includes("tool_result"),
+    );
+    expect(resultItem).toBeDefined();
+    const text = (resultItem as { content: { text: string }[] }).content[0]
+      ?.text;
+    const block = JSON.parse(
+      String(text)
+        .replace(/```tool_result\n?/, "")
+        .replace(/\n?```$/, ""),
+    ) as Record<string, unknown>;
+    expect(block.name).toBe("bash_run");
+    expect(block.call_id).toBe("call_1");
+    expect(block.output).toBe("file.txt");
   });
 });
 

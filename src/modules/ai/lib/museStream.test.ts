@@ -286,6 +286,40 @@ describe("createMuseFetch recovery ladder", () => {
     expect(seenAuth[seenAuth.length - 1]).toBe("Bearer fresh-key");
   });
 
+  it("sends the official build identity and a stable per-credential session", async () => {
+    const seen: { ua: string; session: string; client: string }[] = [];
+    const base = (async (
+      _input: RequestInfo | URL,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const headers = new Headers(init?.headers);
+      seen.push({
+        ua: headers.get("user-agent") ?? "",
+        session: headers.get("x-tbh-session-id") ?? "",
+        client: headers.get("x-client-id") ?? "",
+      });
+      return new Response(OK_SSE, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    }) as typeof fetch;
+    const museFetch = createMuseFetch(base);
+    const call = (auth: string) =>
+      museFetch(
+        "https://api.meta.ai/v1/chat/completions",
+        chatInit([{ role: "user", content: "hi" }], undefined, auth),
+      );
+    await call("Bearer identity-key-a");
+    await call("Bearer identity-key-a");
+    await call("Bearer identity-key-b");
+    expect(seen[0]?.ua).toMatch(/^muse-build\/1\.4\.24 \(non-interactive; /);
+    expect(seen[0]?.client).toBe("tbh:exec");
+    expect(seen[0]?.session).not.toBe("");
+    // Same credential, same session; another credential, its own session.
+    expect(seen[1]?.session).toBe(seen[0]?.session);
+    expect(seen[2]?.session).not.toBe(seen[0]?.session);
+  });
+
   it("retries a transient 429 and succeeds", async () => {
     let hits = 0;
     const base = (async (): Promise<Response> => {

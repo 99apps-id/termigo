@@ -14,6 +14,8 @@
  * lives in `museStream.ts`.
  */
 
+import { recordMuseSubscription } from "./museQuota";
+
 type JsonObject = Record<string, unknown>;
 
 function isObject(value: unknown): value is JsonObject {
@@ -138,6 +140,11 @@ export function chatToResponsesBody(body: unknown): JsonObject | null {
   const tools = chatTools(body);
   const instructions: string[] = [];
   const input: JsonObject[] = [];
+  // Tool results in the chat shape carry only a call id; the name lives on
+  // the assistant call that produced it. Termixgo's result blocks carry
+  // name + call_id + output, which is what the model reads back, so map
+  // ids to names as the calls go past.
+  const callNames = new Map<string, string>();
 
   for (const message of body.messages) {
     if (!isObject(message)) continue;
@@ -160,6 +167,8 @@ export function chatToResponsesBody(body: unknown): JsonObject | null {
           if (!isObject(call)) continue;
           const fn = isObject(call.function) ? call.function : call;
           const name = asString(fn.name);
+          const callId = asString(call.id);
+          if (name && callId) callNames.set(callId, name);
           if (name) parts.push(toolCallBlock(name, fn.arguments ?? "{}"));
         }
       }
@@ -170,8 +179,11 @@ export function chatToResponsesBody(body: unknown): JsonObject | null {
         content: [{ type: "output_text", text: parts.join("\n\n") }],
       });
     } else if (role === "tool") {
+      const callId = asString(message.tool_call_id);
+      const name = callNames.get(callId);
       const block = JSON.stringify({
-        call_id: asString(message.tool_call_id),
+        ...(name ? { name } : {}),
+        call_id: callId,
         output: contentText(message.content),
       });
       input.push({
@@ -243,44 +255,77 @@ let textToolSeq = 0;
  * reply then stays prose, so a model that talks about the protocol in a
  * code sample is not mistaken for one using it.
  */
+/**
+ * Split a reply into the prose around tool-call blocks and the calls
+ * themselves, termixgo's tolerant shape: Muse models have emitted several
+ * equivalent wrappers, so the documented fence, a `tool-call` or `json`
+ * fence, and an XML-style tag are all accepted, and tolerance is per block
+ * -- a block whose body is not a valid call-shaped JSON object stays prose
+ * and the scan continues, instead of the old all-or-nothing rule where one
+ * bad or unclosed block discarded every valid call in the reply.
+ */
 export function parseTextToolCalls(text: string): {
   prose: string;
   calls: TextToolCall[];
 } {
-  const fence = "```tool_call";
-  let prose = "";
+  const blockRe =
+    /```(?:tool_call|tool-call|json)\s*([\s\S]*?)```|<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/g;
   const calls: TextToolCall[] = [];
-  let rest = text;
-  for (;;) {
-    const start = rest.indexOf(fence);
-    if (start < 0) {
-      prose += rest;
-      break;
-    }
-    const tail = rest.slice(start + fence.length);
-    const end = tail.indexOf("```");
-    if (end < 0) return { prose: text, calls: [] };
-    let parsed: unknown;
+  let prose = "";
+  let cursor = 0;
+  let sawBlock = false;
+  for (const match of text.matchAll(blockRe)) {
+    sawBlock = true;
+    const start = match.index;
+    const end = start + match[0].length;
+    const body = (match[1] ?? match[2] ?? "").trim();
+    let parsed: unknown = null;
     try {
-      parsed = JSON.parse(tail.slice(0, end).trim());
+      parsed = JSON.parse(body);
     } catch {
-      return { prose: text, calls: [] };
+      parsed = null;
     }
-    if (!isObject(parsed) || !asString(parsed.name).trim()) {
-      return { prose: text, calls: [] };
+    const name = isObject(parsed) ? asString(parsed.name).trim() : "";
+    let argsJson: string | null = null;
+    if (isObject(parsed)) {
+      const rawArgs = parsed.arguments;
+      if (rawArgs === undefined || rawArgs === null) {
+        argsJson = "{}";
+      } else if (typeof rawArgs === "string") {
+        // The arguments may themselves be a JSON string; unquote one level
+        // and require the result to be valid JSON, as termixgo does.
+        const inner = rawArgs.trim();
+        if (inner) {
+          try {
+            const once = JSON.parse(inner) as unknown;
+            argsJson =
+              typeof once === "string" ? once : (JSON.stringify(once) ?? null);
+            if (argsJson !== null) JSON.parse(argsJson);
+          } catch {
+            argsJson = null;
+          }
+        }
+      } else {
+        argsJson = JSON.stringify(rawArgs) ?? null;
+      }
     }
-    let args: unknown = parsed.arguments ?? {};
-    if (typeof args === "string") args = safeJson(args);
-    prose += rest.slice(0, start);
+    if (!name || argsJson === null) {
+      // Not a valid call: the block stays prose and the scan moves past it.
+      prose += text.slice(cursor, end);
+      cursor = end;
+      continue;
+    }
+    prose += text.slice(cursor, start);
     calls.push({
       id: `call_muse_${++textToolSeq}`,
-      name: asString(parsed.name).trim(),
-      arguments: JSON.stringify(args),
+      name,
+      arguments: argsJson,
     });
-    rest = tail.slice(end + "```".length);
+    cursor = end;
   }
-  if (calls.length === 0) return { prose: text, calls: [] };
-  return { prose, calls };
+  if (!sawBlock || calls.length === 0) return { prose: text, calls: [] };
+  prose += text.slice(cursor);
+  return { prose: prose.trim(), calls };
 }
 
 type ResponsesOutcome = {
@@ -311,6 +356,9 @@ function readResponsesStream(sseText: string): ResponsesOutcome {
     if (!isObject(event)) continue;
     if (event.type === "response.output_text.delta") {
       if (typeof event.delta === "string") text += event.delta;
+    } else if (event.type === "response.subscription_usage") {
+      // The quota reading rides the stream; stash it for the account UI.
+      recordMuseSubscription(event.subscription);
     } else if (
       event.type === "response.completed" ||
       event.type === "response.incomplete"
