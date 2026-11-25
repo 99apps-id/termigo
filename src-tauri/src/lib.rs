@@ -14,8 +14,8 @@ use launch::{get_launch_dir, get_launch_files, parse_launch_target, LaunchDir, L
 #[cfg(target_os = "macos")]
 use launch::{resolve_launch_target, LaunchEntry};
 use modules::{
-    agent, audit, backup, browser, browser_session, chatgpt_auth, control, extensions, fs, git,
-    history, lsp, mcp, net, oauth, pty, secrets, shell, sql, ssh, system, workspace,
+    agent, audit, backup, browser, browser_session, chatgpt_auth, codeindex, control, extensions,
+    fs, git, history, lsp, mcp, net, oauth, pty, secrets, shell, sql, ssh, system, workspace,
 };
 use settings_window::open_settings_window;
 

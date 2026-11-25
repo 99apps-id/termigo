@@ -25,6 +25,8 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::Manager;
 
+use crate::modules::workspace::WorkspaceRegistry;
+
 #[derive(Default)]
 pub struct CodeIndexState(pub Mutex<Option<Connection>>);
 
@@ -165,7 +167,11 @@ fn stats_for(conn: &Connection, root: &str) -> Result<IndexStats, String> {
     Ok(IndexStats { files, chunks })
 }
 
-fn replace_root(conn: &mut Connection, root: &str, files: &[FileInput]) -> Result<IndexStats, String> {
+fn replace_root(
+    conn: &mut Connection,
+    root: &str,
+    files: &[FileInput],
+) -> Result<IndexStats, String> {
     let tx = conn
         .transaction()
         .map_err(|e| format!("code index: cannot begin replace: {e}"))?;
@@ -334,7 +340,11 @@ fn search(
             }
         })
         .collect();
-    hits.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    hits.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     hits.truncate(limit);
     Ok(hits)
 }
@@ -343,9 +353,11 @@ fn search(
 pub fn codeindex_replace_root(
     app: tauri::AppHandle,
     state: tauri::State<'_, CodeIndexState>,
+    registry: tauri::State<'_, WorkspaceRegistry>,
     root: String,
     files: Vec<FileInput>,
 ) -> Result<IndexStats, String> {
+    crate::modules::workspace::require_authorized(&registry, std::path::Path::new(&root))?;
     with_db(&app, &state, |conn| replace_root(conn, &root, &files))
 }
 
@@ -353,22 +365,27 @@ pub fn codeindex_replace_root(
 pub fn codeindex_check_fresh(
     app: tauri::AppHandle,
     state: tauri::State<'_, CodeIndexState>,
+    registry: tauri::State<'_, WorkspaceRegistry>,
     root: String,
     files: Vec<FileStamp>,
 ) -> Result<Freshness, String> {
+    crate::modules::workspace::require_authorized(&registry, std::path::Path::new(&root))?;
     with_db(&app, &state, |conn| check_fresh(conn, &root, &files))
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn codeindex_search(
     app: tauri::AppHandle,
     state: tauri::State<'_, CodeIndexState>,
+    registry: tauri::State<'_, WorkspaceRegistry>,
     root: String,
     query_tokens: Vec<String>,
     query_text: String,
     max_results: usize,
     filter_path: Option<String>,
 ) -> Result<Vec<SearchHit>, String> {
+    crate::modules::workspace::require_authorized(&registry, std::path::Path::new(&root))?;
     with_db(&app, &state, |conn| {
         search(
             conn,
@@ -385,8 +402,10 @@ pub fn codeindex_search(
 pub fn codeindex_stats(
     app: tauri::AppHandle,
     state: tauri::State<'_, CodeIndexState>,
+    registry: tauri::State<'_, WorkspaceRegistry>,
     root: String,
 ) -> Result<IndexStats, String> {
+    crate::modules::workspace::require_authorized(&registry, std::path::Path::new(&root))?;
     with_db(&app, &state, |conn| stats_for(conn, &root))
 }
 
@@ -394,8 +413,10 @@ pub fn codeindex_stats(
 pub fn codeindex_clear(
     app: tauri::AppHandle,
     state: tauri::State<'_, CodeIndexState>,
+    registry: tauri::State<'_, WorkspaceRegistry>,
     root: String,
 ) -> Result<(), String> {
+    crate::modules::workspace::require_authorized(&registry, std::path::Path::new(&root))?;
     with_db(&app, &state, |conn| {
         conn.execute("DELETE FROM code_chunks WHERE root = ?1", params![root])
             .map_err(|e| format!("code index: clear failed: {e}"))?;
@@ -420,9 +441,7 @@ mod tests {
             path: path.to_string(),
             mtime: 10,
             size: 100,
-            path_tokens: path
-                .to_lowercase()
-                .replace(['/', '.', '-'], " "),
+            path_tokens: path.to_lowercase().replace(['/', '.', '-'], " "),
             chunks: chunks
                 .into_iter()
                 .enumerate()
@@ -477,20 +496,16 @@ mod tests {
                 ),
                 file(
                     "src/other/thing.ts",
-                    vec![("token token token everywhere", "token token token everywhere")],
+                    vec![(
+                        "token token token everywhere",
+                        "token token token everywhere",
+                    )],
                 ),
             ],
         )
         .expect("replace");
-        let hits = search(
-            &conn,
-            "/repo",
-            &["token".to_string()],
-            "token",
-            10,
-            None,
-        )
-        .expect("search");
+        let hits =
+            search(&conn, "/repo", &["token".to_string()], "token", 10, None).expect("search");
         assert_eq!(hits.len(), 2);
         assert_eq!(hits[0].path, "src/auth/token.ts");
     }
@@ -509,22 +524,32 @@ mod tests {
             mtime,
             size,
         };
-        assert!(check_fresh(&conn, "/repo", &[stamp(10, 100)])
-            .expect("fresh")
-            .fresh);
-        assert!(!check_fresh(&conn, "/repo", &[stamp(11, 100)])
-            .expect("stale mtime")
-            .fresh);
-        assert!(!check_fresh(&conn, "/repo", &[])
-            .expect("missing file")
-            .fresh);
+        assert!(
+            check_fresh(&conn, "/repo", &[stamp(10, 100)])
+                .expect("fresh")
+                .fresh
+        );
+        assert!(
+            !check_fresh(&conn, "/repo", &[stamp(11, 100)])
+                .expect("stale mtime")
+                .fresh
+        );
+        assert!(
+            !check_fresh(&conn, "/repo", &[])
+                .expect("missing file")
+                .fresh
+        );
     }
 
     #[test]
     fn roots_are_isolated_and_clearable() {
         let mut conn = memory_db();
-        replace_root(&mut conn, "/a", &[file("src/a.ts", vec![("alpha", "alpha")])])
-            .expect("replace a");
+        replace_root(
+            &mut conn,
+            "/a",
+            &[file("src/a.ts", vec![("alpha", "alpha")])],
+        )
+        .expect("replace a");
         replace_root(&mut conn, "/b", &[file("src/b.ts", vec![("beta", "beta")])])
             .expect("replace b");
         assert_eq!(

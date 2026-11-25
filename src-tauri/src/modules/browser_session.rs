@@ -18,6 +18,7 @@ use tokio_tungstenite::tungstenite::Message;
 
 use crate::modules::browser::unsafe_url;
 use crate::modules::fs::security::guard_write;
+use crate::modules::workspace::WorkspaceRegistry;
 
 const MAX_TEXT_CHARS: usize = 20_000;
 
@@ -772,11 +773,16 @@ pub async fn browser_session_wait(
 }
 
 #[tauri::command]
-pub async fn browser_session_screenshot(session_id: String, path: String) -> Result<Value, String> {
+pub async fn browser_session_screenshot(
+    session_id: String,
+    path: String,
+    registry: tauri::State<'_, WorkspaceRegistry>,
+) -> Result<Value, String> {
     if !path.to_ascii_lowercase().ends_with(".png") {
         return Err("path must end with .png".to_string());
     }
     let target = guard_write(Path::new(&path))?;
+    crate::modules::workspace::require_authorized(&registry, &target)?;
     if let Some(parent) = target.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
