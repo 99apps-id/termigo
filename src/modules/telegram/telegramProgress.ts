@@ -365,7 +365,6 @@ export async function publishProgress(
       !signal.aborted &&
       !finalizedProgressMessages.has(progressMessageId)
     ) {
-      finalizedProgressMessages.add(progressMessageId);
       // State the outcome rather than a bare "Completed.". `stoppedByUser` and
       // `stopReason` are what the desktop app uses to tell a finished run from
       // one the user stopped, one that hit the step limit and one that failed;
@@ -395,58 +394,75 @@ export async function publishProgress(
           )
         : "";
 
-      const doneText = formatLiveProgress({
-        status: "idle",
-        completed: true,
-        outcome,
-        elapsedMs: Date.now() - started,
-        answerText: answerText || undefined,
-        todos:
-          todosStore.useTodosStore.getState().bySession[sessionId]?.items ?? [],
-      });
-      // Telegram rejects any edit or send past 4096 characters, and the
-      // closing card carries the whole answer: one edit of a long answer
-      // failed quietly and left the card stuck on the last live snippet -
-      // a truncated output with no follow-up. Split instead, like the
-      // relay's finalize: the card takes the first chunk, the rest follow
-      // as their own messages. If the card cannot be edited at all, send
-      // the text whole through the chunked path rather than dropping it.
-      const chunks = splitTelegramText(doneText);
-      const edited = await editProgressMessage(
-        chatId,
-        progressMessageId,
-        chunks[0] ?? doneText,
-        AbortSignal.timeout(4000),
-      ).catch(() => false);
-      if (edited) {
-        for (const chunk of chunks.slice(1)) {
-          const sent = await sendTelegram(
-            chatId,
-            chunk,
-            AbortSignal.timeout(10_000),
-          ).then(
-            () => true,
-            () => false,
-          );
-          if (!sent) {
-            logRelayWarn(
-              `closing card ${progressMessageId} kept its first chunk but a follow-up did not send`,
+      // Ownership of the answer: when the run produced answer text, the
+      // dispatch loop delivers it (it aborts this loop and finalizes the
+      // card itself, with confirmed delivery). This finally used to claim
+      // the card first -- flag set before its own snippet-bearing closing
+      // card was written -- so the dispatch loop read "already finalized"
+      // and never sent the full answer; the chat kept the card's truncated
+      // snippet. A status-only ending (no answer text) is still this
+      // finally's job: there is nothing else to deliver. Conjoining the
+      // condition, not returning, for the reason the finally's own header
+      // comment gives.
+      if (!answerText) {
+        finalizedProgressMessages.add(progressMessageId);
+
+        const doneText = formatLiveProgress({
+          status: "idle",
+          completed: true,
+          outcome,
+          elapsedMs: Date.now() - started,
+          answerText: answerText || undefined,
+          todos:
+            todosStore.useTodosStore.getState().bySession[sessionId]?.items ??
+            [],
+        });
+        // Telegram rejects any edit or send past 4096 characters, and the
+        // closing card carries the whole answer: one edit of a long answer
+        // failed quietly and left the card stuck on the last live snippet -
+        // a truncated output with no follow-up. Split instead, like the
+        // relay's finalize: the card takes the first chunk, the rest follow
+        // as their own messages. If the card cannot be edited at all, send
+        // the text whole through the chunked path rather than dropping it.
+        const chunks = splitTelegramText(doneText);
+        const edited = await editProgressMessage(
+          chatId,
+          progressMessageId,
+          chunks[0] ?? doneText,
+          AbortSignal.timeout(4000),
+        ).catch(() => false);
+        if (edited) {
+          for (const chunk of chunks.slice(1)) {
+            const sent = await sendTelegram(
+              chatId,
+              chunk,
+              AbortSignal.timeout(10_000),
+            ).then(
+              () => true,
+              () => false,
             );
-            break;
+            if (!sent) {
+              logRelayWarn(
+                `closing card ${progressMessageId} kept its first chunk but a follow-up did not send`,
+              );
+              break;
+            }
           }
-        }
-      } else {
-        // The card could not be rewritten. Send the whole text through the
-        // chunked path - it splits internally - so the answer still arrives.
-        await sendTelegram(chatId, doneText, AbortSignal.timeout(10_000)).catch(
-          () => {
+        } else {
+          // The card could not be rewritten. Send the whole text through the
+          // chunked path - it splits internally - so the answer still arrives.
+          await sendTelegram(
+            chatId,
+            doneText,
+            AbortSignal.timeout(10_000),
+          ).catch(() => {
             logRelayWarn(
               `closing card ${progressMessageId} could not be edited and the whole-text fallback did not send either`,
             );
-          },
-        );
-      }
-      if (!answerText || (outcome !== "done" && outcome !== "stopped")) {
+          });
+        }
+        // The pre-gate condition reduced to always-true on this branch
+        // (it was `!answerText || ...`, and answerText is empty here).
         lastFinishedProgressMessageIds.set(chatId, progressMessageId);
       }
     } else if (progressMessageId && signal.aborted) {

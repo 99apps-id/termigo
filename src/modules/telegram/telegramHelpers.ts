@@ -249,6 +249,35 @@ export function countAssistantMessages(
   return chat ? chat.messages.filter((m) => m.role === "assistant").length : 0;
 }
 
+/**
+ * Every fresh assistant text segment of a run, in order. `lastAssistantText`
+ * answers "what is the newest thing the agent said" for the live card; a
+ * finished run is owed ALL of its segments -- a run that explains, runs
+ * tools, then concludes has prose in more than one message, and delivering
+ * only the last one is how Telegram answers arrived truncated even though
+ * nothing failed on the wire.
+ */
+export function allAssistantTexts(
+  getChat: (id: string) => ChatLike | undefined,
+  sessionId: string,
+  sinceCount: number,
+): string[] {
+  const chat = getChat(sessionId);
+  if (!chat) return [];
+  const assistants = chat.messages.filter((m) => m.role === "assistant");
+  const relevant = assistants.slice(sinceCount);
+  const texts: string[] = [];
+  for (const m of relevant) {
+    const text = (m.parts ?? [])
+      .filter((p): p is { type: "text"; text: string } => p.type === "text")
+      .map((p) => p.text)
+      .join("\n")
+      .trim();
+    if (text) texts.push(text);
+  }
+  return texts;
+}
+
 export function lastAssistantText(
   getChat: (id: string) => ChatLike | undefined,
   sessionId: string,

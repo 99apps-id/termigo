@@ -204,4 +204,71 @@ describe("sendTelegram", () => {
     expect(delivered.join("")).toContain("aaa");
     expect(delivered.join("")).toContain("bbb");
   });
+
+  it("retries a chunk after a 429 flood wait and delivers it", async () => {
+    const delivered: string[] = [];
+    let calls = 0;
+    globalThis.fetch = vi.fn(async (_url, init) => {
+      calls += 1;
+      const body = init?.body ? JSON.parse(String(init.body)) : {};
+      const text = typeof body.text === "string" ? body.text : "";
+      if (calls === 1) {
+        return {
+          ok: false,
+          status: 429,
+          text: async () =>
+            JSON.stringify({
+              ok: false,
+              error_code: 429,
+              description: "Too Many Requests: retry after 0",
+              parameters: { retry_after: 0 },
+            }),
+        } as unknown as Response;
+      }
+      delivered.push(text);
+      return {
+        ok: true,
+        json: async () => ({ ok: true, result: { message_id: 1 } }),
+        text: async () => JSON.stringify({ ok: true }),
+      } as unknown as Response;
+    });
+    await sendTelegram(
+      429001,
+      "hello after the wait",
+      new AbortController().signal,
+    );
+    expect(calls).toBe(2);
+    expect(delivered.join("")).toContain("hello after the wait");
+  });
+
+  it("still delivers later chunks when an earlier chunk hard-fails, then reports it", async () => {
+    const delivered: string[] = [];
+    globalThis.fetch = vi.fn(async (_url, init) => {
+      const body = init?.body ? JSON.parse(String(init.body)) : {};
+      const text = typeof body.text === "string" ? body.text : "";
+      if (text.startsWith("a")) {
+        return {
+          ok: false,
+          status: 500,
+          text: async () =>
+            JSON.stringify({
+              ok: false,
+              error_code: 500,
+              description: "Internal Server Error",
+            }),
+        } as unknown as Response;
+      }
+      delivered.push(text);
+      return {
+        ok: true,
+        json: async () => ({ ok: true, result: { message_id: 1 } }),
+        text: async () => JSON.stringify({ ok: true }),
+      } as unknown as Response;
+    });
+    const text = `${"a".repeat(3900)}\n${"b".repeat(3900)}`;
+    await expect(
+      sendTelegram(1, text, new AbortController().signal),
+    ).rejects.toThrow();
+    expect(delivered.join("")).toContain("bbb");
+  });
 });

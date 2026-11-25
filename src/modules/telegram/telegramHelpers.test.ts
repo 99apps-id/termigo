@@ -8,6 +8,7 @@
 import { describe, expect, it } from "vitest";
 import {
   type ChatLike,
+  allAssistantTexts,
   hasActiveToolCalls,
   isActivelyTyping,
   lastAssistantText,
@@ -26,6 +27,41 @@ function chatWith(messages: ChatLike["messages"]): ChatLike {
 }
 
 const getter = (chat: ChatLike | undefined) => (): ChatLike | undefined => chat;
+
+describe("allAssistantTexts", () => {
+  it("returns every fresh segment in order, skipping text-less messages", () => {
+    const chat = chatWith([
+      { role: "user", parts: [text("audit this repo")] },
+      {
+        role: "assistant",
+        parts: [text("First I scanned the tree."), tool("read_file")],
+      },
+      { role: "assistant", parts: [reasoning, tool("git_status")] },
+      {
+        role: "assistant",
+        parts: [tool("bash_run"), text("Conclusion: 3 findings.")],
+      },
+    ]);
+    expect(allAssistantTexts(getter(chat), "s1", 0)).toEqual([
+      "First I scanned the tree.",
+      "Conclusion: 3 findings.",
+    ]);
+  });
+
+  it("respects the baseline count", () => {
+    const chat = chatWith([
+      { role: "assistant", parts: [text("old run")] },
+      { role: "assistant", parts: [text("new run")] },
+    ]);
+    expect(allAssistantTexts(getter(chat), "s1", 1)).toEqual(["new run"]);
+  });
+
+  it("returns an empty list when there is no chat or no prose", () => {
+    expect(allAssistantTexts(getter(undefined), "s1", 0)).toEqual([]);
+    const chat = chatWith([{ role: "assistant", parts: [tool("bash_run")] }]);
+    expect(allAssistantTexts(getter(chat), "s1", 0)).toEqual([]);
+  });
+});
 
 describe("lastAssistantText", () => {
   it("returns the text of the newest assistant message", () => {

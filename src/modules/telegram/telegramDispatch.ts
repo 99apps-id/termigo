@@ -36,6 +36,7 @@ import {
 } from "./telegramDedup";
 import {
   type ChatLike,
+  allAssistantTexts,
   countAssistantMessages,
   getPendingApprovals,
   hasActiveToolCalls,
@@ -157,9 +158,12 @@ async function sendReplyWithDiagrams(
   chatId: number | string,
   text: string,
   signal: AbortSignal,
-): Promise<void> {
-  await sendTelegram(chatId, text, signal);
+): Promise<boolean> {
+  const sent = await sendTelegram(chatId, text, signal)
+    .then(() => true)
+    .catch(() => false);
   await sendDiagrams(chatId, text, signal);
+  return sent;
 }
 
 /** The Mermaid PNGs for a finished answer, best-effort. */
@@ -427,10 +431,18 @@ export async function runMirror(signal: AbortSignal): Promise<void> {
                     signal,
                   );
                 } else {
-                  await sendReplyWithDiagrams(chatId, plan.send.text, signal);
+                  delivered = await sendReplyWithDiagrams(
+                    chatId,
+                    plan.send.text,
+                    signal,
+                  );
                 }
               } else if (plan.send?.kind === "send") {
-                await sendReplyWithDiagrams(chatId, plan.send.text, signal);
+                delivered = await sendReplyWithDiagrams(
+                  chatId,
+                  plan.send.text,
+                  signal,
+                );
               } else if (plan.next) {
                 // Nothing to send this tick (throttled, or waiting out an
                 // overflow). Still worth recording, since `next` carries the
@@ -464,9 +476,7 @@ export async function runMirror(signal: AbortSignal): Promise<void> {
                   chatId,
                   text,
                   signal,
-                )
-                  .then(() => true)
-                  .catch(() => false);
+                ).catch(() => false);
                 if (!rescued) {
                   logRelayWarn(
                     `mirror could not deliver a ${m.role} message after ${attempts} attempts and a whole send (session ${sessionId})`,
@@ -488,7 +498,8 @@ export async function runMirror(signal: AbortSignal): Promise<void> {
             continue;
           }
           try {
-            await sendReplyWithDiagrams(chatId, text, signal);
+            const sent = await sendReplyWithDiagrams(chatId, text, signal);
+            if (!sent) throw new Error("mirror send did not land");
             markMessageSeen(m.id, sessionId, m.role, text);
             mirrorSendFailures.delete(mirrorKey);
           } catch {
@@ -890,11 +901,34 @@ export async function runAgentAndStream(
           // waitForReply, so a settled run with no fresh assistant text spun
           // here forever (one 25s wait per cycle) instead of reaching `break`.
           const isFallback = FALLBACK_REPLIES.has(reply);
+          // Whether this round's answer actually reached the chat. The
+          // mark-seen below is gated on it: marking an undelivered answer as
+          // seen is what lost replies outright, because nothing ever retries
+          // a seen message. An undelivered round stays unseen, so the mirror
+          // can still pick the messages up with its own retry budget.
+          let roundDelivered = false;
           if (isFallback && fallbackSent) {
             // Already told the user once. Fall through to the settle check so
             // an actually-idle run can end this handler.
+            roundDelivered = true;
           } else {
             if (isFallback) fallbackSent = true;
+            // A run's answer can span several assistant messages (prose,
+            // tools, more prose). Deliver every segment in order, not only
+            // the last one `waitForReply` returned.
+            const segments = isFallback
+              ? []
+              : allAssistantTexts(store.getChat, sessionId, currentBaseline);
+            const deliverables = segments.length > 0 ? segments : [reply];
+            const deliverWhole = async (): Promise<boolean> => {
+              for (const text of deliverables) {
+                const ok = await sendReplyWithDiagrams(chatId, text, signal)
+                  .then((sent) => sent)
+                  .catch(() => false);
+                if (!ok) return false;
+              }
+              return true;
+            };
             const activeProgId = activeProgressMessageIds.get(chatId);
             if (
               !isFallback &&
@@ -906,37 +940,72 @@ export async function runAgentAndStream(
               // sehingga jawaban tidak perlu dikirim ulang secara terpisah.
               progressCtl.abort();
               activeProgressMessageIds.delete(chatId);
-              finalizedProgressMessages.add(activeProgId);
-              await finalizeStreamedMessage(
+              // The card takes the FIRST segment so the segments that follow
+              // as new messages stay in order. The finalized flag is set
+              // only once delivery is confirmed -- it used to be set before
+              // the finalize ran, so a failed finalize still read as
+              // "already delivered" and swallowed every later round.
+              const cardOk = await finalizeStreamedMessage(
                 chatId,
                 activeProgId,
-                reply,
+                deliverables[0] ?? reply,
                 signal,
               );
-              replies += 1;
-              sentChars += reply.length;
+              if (cardOk) {
+                let allOk = true;
+                for (const text of deliverables.slice(1)) {
+                  const ok = await sendReplyWithDiagrams(chatId, text, signal)
+                    .then((sent) => sent)
+                    .catch(() => false);
+                  if (!ok) {
+                    allOk = false;
+                    break;
+                  }
+                }
+                if (allOk) {
+                  finalizedProgressMessages.add(activeProgId);
+                  roundDelivered = true;
+                }
+              } else if (await deliverWhole()) {
+                // The card would not take the answer; the whole-send
+                // fallback landed instead, so the card needs no second
+                // finalize from anyone else.
+                finalizedProgressMessages.add(activeProgId);
+                roundDelivered = true;
+              }
+              if (roundDelivered) {
+                replies += 1;
+                sentChars += deliverables.reduce((n, t) => n + t.length, 0);
+              }
             } else if (
               !isFallback &&
               activeProgId &&
               finalizedProgressMessages.has(activeProgId)
             ) {
               // Sudah difinalisasikan ke pesan progress; tidak perlu kirim dobel.
+              // The flag now only ever means a confirmed delivery.
               replies += 1;
               sentChars += reply.length;
+              roundDelivered = true;
             } else {
-              await sendReplyWithDiagrams(chatId, reply, signal);
-              replies += 1;
-              sentChars += reply.length;
+              roundDelivered = await deliverWhole();
+              if (roundDelivered) {
+                replies += 1;
+                sentChars += deliverables.reduce((n, t) => n + t.length, 0);
+              }
               if (isFallback) seenFallback = true;
             }
           }
 
-          // Immediately mark fresh assistant message(s) as seen and Telegram-origin.
-          const chatAfterReply = store.getChat(sessionId);
-          for (const m of chatAfterReply?.messages ?? []) {
-            if (m.id && !priorIds.has(m.id)) {
-              markMessageSeen(m.id, sessionId, m.role, messageText(m));
-              rememberTelegramOrigin(m.id);
+          // Mark fresh assistant message(s) as seen and Telegram-origin --
+          // only for a round whose answer was confirmed delivered.
+          if (roundDelivered) {
+            const chatAfterReply = store.getChat(sessionId);
+            for (const m of chatAfterReply?.messages ?? []) {
+              if (m.id && !priorIds.has(m.id)) {
+                markMessageSeen(m.id, sessionId, m.role, messageText(m));
+                rememberTelegramOrigin(m.id);
+              }
             }
           }
 

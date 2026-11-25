@@ -358,6 +358,35 @@ export function splitTelegramText(text: string, maxLen = 3500): string[] {
   return chunks;
 }
 
+/** POST one sendMessage body, honouring a 429 the way the edit path does:
+ *  record the chat's flood wait, and when the wait is short, sleep it out
+ *  and retry once. The send path never had this: a single 429 killed the
+ *  chunk, and with it every chunk after it in the same answer. */
+async function postSendWithFloodRetry(
+  chatId: number | string,
+  body: { chat_id: number | string; text: string; parse_mode?: string },
+  signal: AbortSignal,
+): Promise<void> {
+  try {
+    await apiPost("sendMessage", body, signal);
+  } catch (err) {
+    if (
+      err instanceof TelegramApiError &&
+      err.status === 429 &&
+      !signal.aborted
+    ) {
+      const waitSec = err.retryAfter ?? 5;
+      setChatRateLimited(chatId, waitSec);
+      if (waitSec > 10) throw err;
+      await sleep(signal, waitSec * 1000);
+      if (signal.aborted) throw err;
+      await apiPost("sendMessage", body, signal);
+      return;
+    }
+    throw err;
+  }
+}
+
 async function sendSingleChunk(
   chatId: number | string,
   chunk: string,
@@ -366,8 +395,8 @@ async function sendSingleChunk(
   const html = markdownToTelegramHtml(chunk);
   if (html.length <= TELEGRAM_MAX_MESSAGE_CHARS) {
     try {
-      await apiPost(
-        "sendMessage",
+      await postSendWithFloodRetry(
+        chatId,
         { chat_id: chatId, text: html, parse_mode: "HTML" },
         signal,
       );
@@ -386,8 +415,8 @@ async function sendSingleChunk(
   const parts = splitEscapedHtml(escaped, TELEGRAM_MAX_MESSAGE_CHARS);
   for (const part of parts) {
     if (signal.aborted) break;
-    await apiPost(
-      "sendMessage",
+    await postSendWithFloodRetry(
+      chatId,
       {
         chat_id: chatId,
         text: part,
@@ -398,15 +427,26 @@ async function sendSingleChunk(
   }
 }
 
+/**
+ * Send a text as one or more messages. A failed chunk no longer takes the
+ * remaining chunks with it: every chunk is attempted, and the first
+ * failure is thrown only after the rest have had their chance, so the
+ * caller's contract is unchanged (resolution means the whole text
+ * landed) while a partial delivery still delivers its tail. An abort
+ * before every chunk was sent throws too -- it used to return silently,
+ * which callers wrapping this in `.then(() => true)` read as a delivered
+ * answer, and the undelivered tail was then marked seen and lost.
+ */
 export async function sendTelegram(
   chatId: number | string,
   text: string,
   signal: AbortSignal,
 ): Promise<void> {
   const chunks = splitTelegramText(text, 3500);
+  // Expand the plan up front: a chunk whose converted HTML will definitely
+  // exceed Telegram's limit is subdivided before anything is sent.
+  const plan: string[] = [];
   for (const chunk of chunks) {
-    if (signal.aborted) break;
-    // If the converted HTML will definitely exceed Telegram's limit, subdivide
     const estimatedHtml = markdownToTelegramHtml(chunk);
     if (estimatedHtml.length > TELEGRAM_MAX_MESSAGE_CHARS) {
       const ratio = estimatedHtml.length / Math.max(1, chunk.length);
@@ -414,14 +454,25 @@ export async function sendTelegram(
         (TELEGRAM_MAX_MESSAGE_CHARS - 100) / Math.max(1, ratio),
       );
       const subChunkSize = Math.max(100, Math.min(1800, targetLen));
-      const subChunks = splitTelegramText(chunk, subChunkSize);
-      for (const sub of subChunks) {
-        if (signal.aborted) break;
-        await sendSingleChunk(chatId, sub, signal);
-      }
+      plan.push(...splitTelegramText(chunk, subChunkSize));
     } else {
-      await sendSingleChunk(chatId, chunk, signal);
+      plan.push(chunk);
     }
+  }
+  let firstError: unknown = null;
+  let attempted = 0;
+  for (const chunk of plan) {
+    if (signal.aborted) break;
+    attempted += 1;
+    try {
+      await sendSingleChunk(chatId, chunk, signal);
+    } catch (err) {
+      if (firstError === null) firstError = err;
+    }
+  }
+  if (firstError !== null) throw firstError;
+  if (attempted < plan.length) {
+    throw new Error("Telegram send aborted before every chunk was sent");
   }
 }
 
