@@ -230,10 +230,17 @@ mod tests {
         }"#;
         let m = Manifest::parse(text).expect("parse");
         let contributes = m.contributes.as_object().expect("contributes is object");
-        let settings = contributes.get("settings").expect("settings exists").as_array().expect("settings is array");
+        let settings = contributes
+            .get("settings")
+            .expect("settings exists")
+            .as_array()
+            .expect("settings is array");
         assert_eq!(settings.len(), 1);
         let first = settings[0].as_object().expect("setting is object");
-        assert_eq!(first.get("id").expect("id").as_str(), Some("security.timeout"));
+        assert_eq!(
+            first.get("id").expect("id").as_str(),
+            Some("security.timeout")
+        );
         assert_eq!(first.get("type").expect("type").as_str(), Some("number"));
         assert_eq!(first.get("title").expect("title").as_str(), Some("Timeout"));
     }

@@ -1,5 +1,6 @@
 import type { UIMessage } from "ai";
 import { RESUME_PROMPT } from "./steer";
+import { CONTINUATION_NUDGE_PREFIX } from "./turnContinuation";
 import { VERIFY_NUDGE_PREFIX } from "./verifyOnStop";
 
 /** One user turn pinned to the git snapshot taken before its run. */
@@ -59,6 +60,7 @@ export function turnCheckpointInfo(
   const text = userTextOf(last).trim();
   if (text === RESUME_PROMPT) return null;
   if (text.startsWith(VERIFY_NUDGE_PREFIX)) return null;
+  if (text.startsWith(CONTINUATION_NUDGE_PREFIX)) return null;
   const label =
     turnLabelFor(text) ?? (hasFileParts(last) ? "attachments" : null);
   if (!label) return null;

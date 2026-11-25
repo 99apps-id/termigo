@@ -8,10 +8,112 @@ aims for [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- **Muse Wonder 1.0.** The Muse catalogue now offers `muse-wonder-1.0`
-  through a Muse Code login, with a 1M-token context window.
+- **Plan and background tools in the Go CLI.** `todo_write`, `todo_update` and
+  `todo_read` keep a numbered plan on the session (ids survive a rewrite, one
+  step in progress at a time, a step is found by id or by unique text, and every
+  result repeats the plan so a step left unchecked stays in view).
+  `run_background`, `run_logs`, `run_wait`, `run_kill` and `run_list` run a dev
+  server or watcher across steps; output is read by offset, a wait can end on a
+  ready line, and the processes stop when the TUI exits.
+- **TUI composer.** Typing `/` opens a command menu with descriptions, and `@`
+  completes workspace files (dependency and build directories skipped). A
+  mentioned file is attached to the prompt, capped at 64 KB, text only and
+  inside the workspace, and the transcript says which files went along. Up and
+  Down walk the messages sent from the composer and restore the unsent draft.
+- **Live answer in the Telegram card.** The answer is written into the card as
+  the model produces it (throttled edits, a cursor, open code fences closed for
+  display). Text before a tool call is dropped from the card as narration, and
+  the final answer still replaces the card once.
+- **Steering in the Go CLI.** A message typed while a run is working is added
+  to the conversation before the model's next step, and clears the repetition
+  guard, instead of waiting for the turn to end. In the terminal it is queued
+  with Enter; in Telegram it is accepted rather than refused with "a run is
+  already in progress", and one that lands after the last step runs as a
+  follow-up turn so it is never accepted and then dropped.
+- **Chat TUI.** The transcript scrolls (PgUp and PgDn) and wraps to the width,
+  a status line carries the model, the context fill of the latest request, the
+  tokens billed and the cost, Ctrl+O opens the collapsed thinking, and tool
+  lines read as phrases ("Reading main.go") through the shared `ToolLabel`.
+
+### Changed
+
+- **Interrupting.** Ctrl+C and Esc stop a run in flight instead of quitting the
+  TUI mid-turn, which could lose the turn's session save. Ctrl+C clears a
+  draft first, and an idle empty prompt quits on the second press. An
+  interrupt is reported once as "Interrupted." rather than as a "context
+  canceled" error, and drops what was queued for the run.
+- **Telegram progress card** names each tool by what it does instead of
+  `tool: read_file`.
 
 ### Fixed
+
+- **Telegram showed the answer twice.** Telegram answers an edit that changes
+  nothing with 400 "message is not modified", which the client reported as a
+  failure; the bot then posted the answer again as a new message. It is now a
+  successful edit. When the card genuinely cannot be rewritten, the answer is
+  sent once and the stale progress card is deleted instead of left above it.
+- **Long lines garbled the transcript.** Lines were not wrapped to the width,
+  so the terminal wrapped them itself and the renderer miscounted rows.
+- The unpaired Telegram bot told the operator to look for the code "in
+  Termixgo"; it now says Termigo.
+
+## [0.9.28] - 2026-11-15
+
+### Added
+
+- **Muse Wonder 1.0.** The Muse catalogue now offers `muse-wonder-1.0`
+  through a Muse Code login, with a 1M-token context window.
+- **Claude Fable 5.2 and Haiku 5.5.** Both are available with an Anthropic
+  API key and through a Claude login, and Haiku 5.5 is the new Anthropic
+  autocomplete default.
+- **Gemini 4 Hydrogen and Argon on Antigravity.** Sent under the ids Cloud
+  Code's `fetchAvailableModels` serves (`gemini-4-hydrogen-high`,
+  `gemini-4-argon-medium`); the Antigravity Claude models now carry their
+  `-medium` thinking tier as well.
+- **Pasted-code Claude sign-in.** When the callback port 54545 is held by
+  another program, the Claude login switches to the hosted
+  `platform.claude.com` redirect and asks for the `code#state` shown after
+  sign-in instead of failing. A mistyped paste is reported in the form and
+  the login keeps waiting.
+
+### Changed
+
+- **Model catalogue refreshed for November 2026.** Every provider shared
+  with the ODON catalogue now lists the current generation (GPT-6 / 6.1,
+  Claude 5.5 and Fable 5.2, Gemini 4 and 3.8 Flash, Qwen 3.8, current
+  Copilot and ChatGPT models). Retired and superseded models (Claude 3.x,
+  GPT-4o / o3 / o4, Gemini 2.x and previews, DeepSeek R1 / V3, and older
+  subscription models) were removed. A saved default, favourite, recent,
+  subagent or autocomplete choice that names one is upgraded to the current
+  model of the same tier. The default model is now GPT-6 Luna.
+- **Claude subscription identity.** The OAuth flow, token endpoints, and
+  `claude-cli/2.1.290` identity match ODON's working client, and a Claude
+  login turn opens with the Claude Code system identity.
+
+### Fixed
+
+- **Every Claude subscription chat failed with `429 rate_limit_error`.**
+  Anthropic serves a Claude login only when the first system block is the
+  Claude Code identity on its own; a harness-profile prelude placed ahead of
+  it, or the identity merged into another block, is refused with a 429 that
+  reads as a quota error and never clears on retry. A request filter now
+  puts the identity first, alone, on every subscription Messages call.
+- **Gemini 4 Hydrogen and Argon on Antigravity answered 404.** Cloud Code
+  lists Gemini 4 only for the Antigravity CLI client identity, so the IDE
+  identity Termigo sent (`antigravity/ide/2.11.0`) got "Requested entity was
+  not found". Termigo and the Go companion now present as
+  `antigravity/cli/1.5.9`, which every other Antigravity model also accepts.
+  Gemini 4 Carbon (`gemini-4-carbon-medium`) is listed too, marked for
+  Google AI Ultra and Enterprise: Cloud Code disables it on other plans,
+  where it answers 404.
+- **Claude OAuth sign-in returned "Invalid request".** The Go companion
+  sent `http://127.0.0.1:54545/callback` as the redirect, but Claude
+  registers `http://localhost`; the redirect now uses `localhost` while the
+  listener stays on the loopback address. The PKCE state is 32 bytes on
+  both clients.
+- **Anthropic prices.** Claude Opus 5.5 and Opus 4.7 were billed in the cost
+  estimate at $15 / $75 per MTok; they now use the published $4 / $20 and
+  $5 / $25, and Sonnet 5.5 / 5 use $2 / $10.
 
 - **Muse Code subscription logins could not chat.** Sign-in and the key mint
   succeeded, but Meta returns `403 client_attestation_denied` for a Muse

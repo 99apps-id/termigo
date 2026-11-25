@@ -48,6 +48,24 @@ describe("prepareAgentPrompt", () => {
     );
   });
 
+  it("also places Anthropic cache markers for claude-oauth", () => {
+    const prompt = prepareAgentPrompt(
+      "Stable instructions",
+      null,
+      history,
+      "claude-oauth",
+    );
+    // system[0] is the fixed Claude Code identity; the marker sits on the
+    // stable instructions after it.
+    expect(prompt.system[0].providerOptions).toBeUndefined();
+    expect(prompt.system[1].providerOptions).toEqual({
+      anthropic: { cacheControl: { type: "ephemeral", ttl: "1h" } },
+    });
+    expect(prompt.messages[1].providerOptions).toEqual({
+      anthropic: { cacheControl: { type: "ephemeral", ttl: "1h" } },
+    });
+  });
+
   it("does not trigger the SDK system-message warning", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const model = new MockLanguageModelV3({
@@ -82,5 +100,23 @@ describe("prepareAgentPrompt", () => {
     } finally {
       warn.mockRestore();
     }
+  });
+
+  it("prepends the Claude Code identity for claude-oauth", () => {
+    const prompt = prepareAgentPrompt(
+      "Stable instructions",
+      null,
+      history,
+      "claude-oauth",
+    );
+
+    expect(prompt.system[0]).toEqual({
+      role: "system",
+      content: "You are Claude Code, Anthropic's official CLI for Claude.",
+    });
+    expect(prompt.system[1].content).toBe("Stable instructions");
+    expect(prompt.system[1].providerOptions).toEqual({
+      anthropic: { cacheControl: { type: "ephemeral", ttl: "1h" } },
+    });
   });
 });

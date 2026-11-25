@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -24,9 +25,17 @@ func museExpiry(deviceExpiry, now time.Time) time.Time {
 const metaDefaultMintURL = "https://api.meta.ai/muse-code/key"
 
 // metaUserAgent identifies the caller as the Muse CLI. Meta gates the mint and
-// the Responses endpoint on this identity, so the official client string is
-// reused rather than sending the Termigo user agent.
-const metaUserAgent = "muse-code/1.0.2"
+// the Responses endpoint on this identity, so the official CLI build string
+// (verified against CLI 1.4.20) is reused rather than the Termigo agent.
+var metaUserAgent = museBuildUserAgent()
+
+func museBuildUserAgent() string {
+	arch := runtime.GOARCH
+	if arch == "amd64" {
+		arch = "x86_64"
+	}
+	return fmt.Sprintf("muse-build/%s (non-interactive; %s-%s)", "1.4.24", runtime.GOOS, arch)
+}
 
 // metaMintedKey is the subset of the mint response Termigo needs.
 type metaMintedKey struct {

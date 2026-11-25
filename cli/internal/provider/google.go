@@ -115,6 +115,11 @@ func (c *googleClient) Stream(ctx context.Context, req ChatRequest, emit func(St
 					return err
 				}
 			}
+			if candidate.FinishReason == "MAX_TOKENS" {
+				if err := emit(StreamEvent{Type: EventIncomplete, IncompleteReason: "max_tokens"}); err != nil {
+					return err
+				}
+			}
 			if candidate.FinishReason == "SAFETY" || candidate.FinishReason == "BLOCKLIST" || candidate.FinishReason == "PROHIBITED_CONTENT" {
 				return fmt.Errorf("the Google endpoint blocked the response (%s)", candidate.FinishReason)
 			}

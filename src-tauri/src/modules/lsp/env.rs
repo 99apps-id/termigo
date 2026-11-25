@@ -131,10 +131,7 @@ fn parse_env_bytes(bytes: &[u8]) -> HashMap<String, String> {
         match s.split_once('=') {
             Some((k, v)) if !k.is_empty() => {
                 last_key = Some(k.to_string());
-                env.insert(
-                    k.to_string(),
-                    v.trim_end_matches('\r').to_string(),
-                );
+                env.insert(k.to_string(), v.trim_end_matches('\r').to_string());
             }
             _ => {
                 // No `=`: a wrapped line of a multi-line value. Keep it with

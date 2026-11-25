@@ -1,5 +1,5 @@
 import { usePreferencesStore } from "@/modules/settings/preferences";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ToolContext } from "../tools/context";
 import { useConfirmationStore } from "../store/confirmationStore";
 import {
@@ -80,5 +80,38 @@ describe("postExecuteConfirm (BatikCode PendingResultConfirmation parity)", () =
     const result = await wrapped.execute({ path: "/p/b.ts" }, {});
     expect(result).toEqual({ ok: true, path: "/p/b.ts" });
     expect(useConfirmationStore.getState().pending).toHaveLength(0);
+  });
+
+  // "Revert" on a `bash_run` used to fall through to `revertCommand(undefined)`,
+  // which is `git restore .` -- that discards EVERY tracked change in the
+  // repository, including the user's and other agents' uncommitted work.
+  it("refuses to revert a change it cannot attribute to a single path", async () => {
+    usePreferencesStore.setState({
+      confirmAfterMutations: true,
+      agentApprovalMode: "ask",
+      agentAlwaysAllowedTools: [],
+    });
+    const fakeTool = {
+      execute: async () => ({ ok: true, stdout: "done", exit_code: 0 }),
+    };
+    const ctx = {
+      getSessionId: () => "s1",
+      getWorkspaceRoot: () => "/p",
+      getCwd: () => "/p",
+    } as unknown as ToolContext;
+    const wrapped = withPostExecuteConfirm("bash_run", fakeTool, ctx);
+
+    // The wrapper parks on the confirmation card, so answer it: Revert.
+    const run = wrapped.execute({ command: "rm -rf build" }, {});
+    await vi.waitFor(() => {
+      expect(useConfirmationStore.getState().pending).toHaveLength(1);
+    });
+    const pending = useConfirmationStore.getState().pending[0];
+    useConfirmationStore.getState().resolve(pending.id, false);
+
+    const result = (await run) as Record<string, unknown>;
+    expect(result.reverted_by_user).toBe(true);
+    expect(result.revert_command).toBeNull();
+    expect(String(result.note)).toContain("nothing was reverted");
   });
 });

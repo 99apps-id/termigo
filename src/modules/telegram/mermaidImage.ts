@@ -24,6 +24,10 @@ export const MERMAID_INIT: Record<string, unknown> = {
   startOnLoad: false,
   securityLevel: "strict",
   theme: "base",
+  // Pure SVG <text> labels prevent <foreignObject> from tainting the canvas
+  // (SecurityError on canvas.toDataURL) during Telegram PNG rasterization.
+  htmlLabels: false,
+  flowchart: { htmlLabels: false },
   themeVariables: {
     background: "#ffffff",
     primaryColor: "#f7f7f7",
@@ -32,6 +36,28 @@ export const MERMAID_INIT: Record<string, unknown> = {
     lineColor: "#666666",
   },
 };
+
+/** Extract explicit pixel dimensions from an SVG viewBox when width="100%". */
+export function svgViewBoxSize(svg: string): {
+  width: number;
+  height: number;
+} | null {
+  const m = svg.match(
+    /viewBox=["']\s*[\d.eE+-]+[\s,]+[\d.eE+-]+[\s,]+([\d.eE+-]+)[\s,]+([\d.eE+-]+)\s*["']/i,
+  );
+  if (!m) return null;
+  const width = Math.ceil(Number(m[1]));
+  const height = Math.ceil(Number(m[2]));
+  if (
+    !Number.isFinite(width) ||
+    !Number.isFinite(height) ||
+    width <= 0 ||
+    height <= 0
+  ) {
+    return null;
+  }
+  return { width, height };
+}
 
 /** Extract the code of every fenced ```mermaid block in a reply. */
 export function extractMermaidBlocks(text: string): string[] {
@@ -52,11 +78,19 @@ export function extractMermaidBlocks(text: string): string[] {
  * exported. Failure is caught so a bad diagram never breaks the bot.
  */
 export async function renderMermaidToPng(code: string): Promise<string | null> {
+  const id = `tg-mermaid-${Math.random().toString(36).slice(2, 10)}`;
   try {
     const mermaid = await loadMermaid();
     mermaid.initialize(MERMAID_INIT);
-    const id = `tg-mermaid-${Math.random().toString(36).slice(2, 10)}`;
-    const { svg } = await mermaid.render(id, code);
+    const { svg: rawSvg } = await mermaid.render(id, code);
+    const vb = svgViewBoxSize(rawSvg);
+    const svg = vb
+      ? rawSvg.replace(
+          /<svg\b([^>]*)>/i,
+          (_m, attrs: string) =>
+            `<svg${attrs.replace(/\s+(?:width|height)=["'][^"']*["']/gi, "")} width="${vb.width}" height="${vb.height}">`,
+        )
+      : rawSvg;
     const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     try {
@@ -67,9 +101,11 @@ export async function renderMermaidToPng(code: string): Promise<string | null> {
         img.onerror = () => reject(new Error("svg load failed"));
       });
       const scale = 2;
+      const baseW = vb?.width ?? (img.naturalWidth || img.width || 600);
+      const baseH = vb?.height ?? (img.naturalHeight || img.height || 400);
       const canvas = document.createElement("canvas");
-      canvas.width = Math.max(1, Math.round(img.width * scale));
-      canvas.height = Math.max(1, Math.round(img.height * scale));
+      canvas.width = Math.max(1, Math.round(baseW * scale));
+      canvas.height = Math.max(1, Math.round(baseH * scale));
       const ctx = canvas.getContext("2d");
       if (!ctx) return null;
       ctx.fillStyle = "#ffffff";
@@ -81,5 +117,8 @@ export async function renderMermaidToPng(code: string): Promise<string | null> {
     }
   } catch {
     return null;
+  } finally {
+    document.getElementById(id)?.remove();
+    document.getElementById(`d${id}`)?.remove();
   }
 }

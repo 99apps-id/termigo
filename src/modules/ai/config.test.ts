@@ -1,16 +1,20 @@
 import { describe, expect, it } from "vitest";
 import {
   apiModelIdDiffers,
+  CHATGPT_HEADERS,
+  CLAUDE_CLI_VERSION,
+  CLAUDE_OAUTH_HEADERS,
+  CODEX_CLI_VERSION,
   type CustomEndpoint,
   compatModelIdForEndpoint,
-  CHATGPT_HEADERS,
-  CODEX_CLI_VERSION,
   DEFAULT_MODEL_ID,
   effectiveModelName,
   endpointIdFromCompatModel,
   getModelContextLimit,
   isCompactTierModel,
   isCompatModelId,
+  isKnownModelId,
+  isOAuthModel,
   MAX_AGENT_STEPS,
   MODEL_PRICING,
   MODELS,
@@ -19,17 +23,18 @@ import {
   modelSupportsTemperature,
   modelUsesReasoningTokens,
   normalizeModelId,
+  OAUTH_MAX_AGENT_STEPS,
+  RETIRED_MODEL_IDS,
   resolveApiModelId,
   resolveModel,
   resolveModelContextLimit,
   resolveModelLabel,
-  isOAuthModel,
-  OAUTH_MAX_AGENT_STEPS,
+  SYSTEM_PROMPT,
+  SYSTEM_PROMPT_LITE,
   stepBudgetForModel,
   stepBudgetForRound,
   subagentModelExceedsBudget,
-  SYSTEM_PROMPT,
-  SYSTEM_PROMPT_LITE,
+  upgradeRetiredModelId,
 } from "./config";
 
 const endpoint: CustomEndpoint = {
@@ -68,15 +73,15 @@ describe("resolveModel", () => {
   });
 
   it("resolves a static model id from the registry", () => {
-    expect(resolveModel("gpt-5.4-mini").provider).toBe("openai");
+    expect(resolveModel("gpt-6-luna").provider).toBe("openai");
   });
 
   it.each([
-    ["gpt-5.6", "openai"],
-    ["gpt-5.6-terra", "openai"],
-    ["gpt-5.6-luna", "openai"],
-    ["claude-fable-5", "anthropic"],
-    ["claude-sonnet-5", "anthropic"],
+    ["gpt-6.1-sol", "openai"],
+    ["gpt-6.1-terra", "openai"],
+    ["gpt-6-luna", "openai"],
+    ["claude-fable-5-2", "anthropic"],
+    ["claude-haiku-5-5", "anthropic"],
     ["grok-4.5", "xai"],
   ] as const)("resolves current model %s through %s", (modelId, provider) => {
     expect(resolveModel(modelId).provider).toBe(provider);
@@ -98,11 +103,11 @@ describe("getModelContextLimit", () => {
   });
 
   it.each([
-    ["gpt-5.6", 1_050_000],
-    ["gpt-5.6-terra", 1_050_000],
-    ["gpt-5.6-luna", 1_050_000],
-    ["claude-fable-5", 1_000_000],
-    ["claude-sonnet-5", 1_000_000],
+    ["gpt-6.1-sol", 1_050_000],
+    ["gpt-6.1-terra", 1_050_000],
+    ["gpt-6-luna", 1_050_000],
+    ["claude-fable-5-2", 1_000_000],
+    ["claude-haiku-5-5", 1_000_000],
     ["grok-4.5", 500_000],
   ] as const)("uses the published context limit for %s", (modelId, limit) => {
     expect(getModelContextLimit(modelId)).toBe(limit);
@@ -115,13 +120,12 @@ describe("getModelContextLimit", () => {
     "deepseek-v4-pro",
     "deepseek-v4-flash",
     "claude-opus-4-7",
-    "claude-sonnet-4-6",
-    "claude-opus-4-8",
-    "claude-fable-5",
-    "claude-sonnet-5",
-    "gpt-5.3-codex",
-    "chatgpt-codex",
-    "chatgpt-codex-mini",
+    "claude-fable-5-2",
+    "claude-opus-5-5",
+    "claude-sonnet-5-5",
+    "claude-haiku-5-5",
+    "claude-oauth-fable-5-2",
+    "claude-oauth-haiku-5-5",
   ])("gives %s its 1M-token window", (modelId) => {
     expect(getModelContextLimit(modelId)).toBe(1_000_000);
   });
@@ -129,11 +133,11 @@ describe("getModelContextLimit", () => {
 
 describe("current model pricing", () => {
   it.each([
-    ["gpt-5.6", 5, 30, 0.5],
-    ["gpt-5.6-terra", 2.5, 15, 0.25],
-    ["gpt-5.6-luna", 1, 6, 0.1],
-    ["claude-fable-5", 10, 50, 1],
-    ["claude-sonnet-5", 3, 15, 0.3],
+    ["gpt-6-luna", 1, 6, 0.1],
+    ["claude-fable-5-2", 8, 40, 0.2],
+    ["claude-opus-5-5", 4, 20, 0.2],
+    ["claude-sonnet-5-5", 2, 10, 0.1],
+    ["claude-haiku-5-5", 0.1, 0.5, 0.01],
     ["grok-4.5", 2, 6, 0.5],
   ] as const)(
     "uses the published token pricing for %s",
@@ -189,7 +193,9 @@ describe("modelKeepsReasoning", () => {
   });
 
   it("drops reasoning for plain non-reasoning models", () => {
-    expect(modelKeepsReasoning(resolveModel("gpt-5.4-mini"))).toBe(false);
+    expect(modelKeepsReasoning(resolveModel("mistral-small-latest"))).toBe(
+      false,
+    );
   });
 
   it("keeps reasoning for tagged reasoning models", () => {
@@ -199,16 +205,18 @@ describe("modelKeepsReasoning", () => {
 
 describe("model sampling capabilities", () => {
   it.each([
-    ["openai", "gpt-5.4-nano"],
-    ["openai", "gpt-5.6"],
-    ["anthropic", "claude-fable-5"],
-    ["anthropic", "claude-sonnet-5"],
+    ["openai", "gpt-6-luna"],
+    ["openai", "gpt-6.1-sol"],
+    ["anthropic", "claude-fable-5-2"],
+    ["anthropic", "claude-haiku-5-5"],
   ] as const)("omits temperature for %s/%s", (provider, modelId) => {
     expect(modelSupportsTemperature(provider, modelId)).toBe(false);
   });
 
   it("keeps temperature for models that accept sampling parameters", () => {
-    expect(modelSupportsTemperature("openai", "gpt-4.1-mini")).toBe(true);
+    expect(modelSupportsTemperature("mistral", "mistral-small-latest")).toBe(
+      true,
+    );
     expect(modelSupportsTemperature("xai", "grok-4.5")).toBe(true);
   });
 
@@ -219,9 +227,9 @@ describe("model sampling capabilities", () => {
   });
 
   it.each([
-    ["openai", "gpt-5.4-nano"],
-    ["openai", "gpt-5.6-luna"],
-    ["anthropic", "claude-sonnet-5"],
+    ["openai", "gpt-6-luna"],
+    ["openai", "gpt-6.1-terra"],
+    ["anthropic", "claude-sonnet-5-5"],
     ["xai", "grok-4.5"],
     ["groq", "openai/gpt-oss-20b"],
   ] as const)(
@@ -279,7 +287,7 @@ describe("stepBudgetForRound", () => {
     expect(isOAuthModel("copilot-custom-new-model")).toBe(true);
     expect(isOAuthModel("antigravity-gemini-3.8-flash")).toBe(true);
     expect(isOAuthModel("antigravity-gemini-4-argon")).toBe(true);
-    expect(isOAuthModel("antigravity-gemini-3.1-pro")).toBe(true);
+    expect(isOAuthModel("antigravity-gemini-4-hydrogen")).toBe(true);
     expect(isOAuthModel("muse-spark-1.3")).toBe(true);
     expect(isOAuthModel("grok-4.7-oauth")).toBe(true);
     expect(isOAuthModel("gpt-5.6")).toBe(false);
@@ -323,16 +331,13 @@ describe("resolveModelContextLimit", () => {
 });
 
 describe("ChatGPT (Codex backend) request identity", () => {
-  it("presents the pinned Codex CLI identity the backend gates on", () => {
-    // The backend gates the newer models on the client identity: `originator`
-    // names the client family, and the User-Agent/`version` pair carries the
-    // release (the Go CLI in cli/internal/provider/codex.go pins the same
-    // release for the same reason).
+  it("matches odon-ai's native Codex CLI identity", () => {
     expect(CHATGPT_HEADERS.originator).toBe("codex_cli_rs");
     expect(CHATGPT_HEADERS["User-Agent"]).toBe(
       `codex_cli_rs/${CODEX_CLI_VERSION}`,
     );
     expect(CHATGPT_HEADERS.version).toBe(CODEX_CLI_VERSION);
+    expect(CHATGPT_HEADERS).not.toHaveProperty("OpenAI-Beta");
     expect(CODEX_CLI_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
   });
 });
@@ -345,8 +350,8 @@ describe("resolveApiModelId", () => {
 
   it("uses the registry apiModelId when it differs from the id", () => {
     // The chatgpt-* ids are internal; the Codex backend wants the bare name.
-    expect(resolveApiModelId("chatgpt-codex")).toBe("gpt-5.3-codex");
-    expect(apiModelIdDiffers("chatgpt-codex")).toBe(true);
+    expect(resolveApiModelId("chatgpt-gpt-6.1-terra")).toBe("gpt-6.1-terra");
+    expect(apiModelIdDiffers("chatgpt-gpt-6.1-terra")).toBe(true);
   });
 
   it("lets a user override win over the registry apiModelId", () => {
@@ -429,7 +434,7 @@ describe("normalizeModelId", () => {
   ];
 
   it("accepts a built-in registry id unchanged", () => {
-    expect(normalizeModelId("gpt-5.4-mini", eps)).toBe("gpt-5.4-mini");
+    expect(normalizeModelId("gpt-6-luna", eps)).toBe("gpt-6-luna");
   });
 
   it("accepts the compat form when the endpoint exists", () => {
@@ -486,8 +491,8 @@ describe("normalizeModelId", () => {
 
 describe("compact tier detection", () => {
   it("matches a lite model by its registry id", () => {
-    expect(isCompactTierModel("claude-haiku-4-5")).toBe(true);
-    expect(isCompactTierModel("gpt-4.1-mini")).toBe(true);
+    expect(isCompactTierModel("claude-haiku-5-5")).toBe(true);
+    expect(isCompactTierModel("gemini-3.5-flash-lite")).toBe(true);
     expect(isCompactTierModel("qwen-3-32b")).toBe(true);
   });
 
@@ -495,7 +500,11 @@ describe("compact tier detection", () => {
     // Every lite model is served under its registry id today, so this asserts
     // the provider-side route is wired to the same list - the route a rename or
     // a user override reaches the request through.
-    for (const id of ["claude-haiku-4-5", "gemini-2.5-flash", "gpt-4.1-mini"])
+    for (const id of [
+      "claude-haiku-5-5",
+      "gemini-3.5-flash-lite",
+      "grok-build-0.1",
+    ])
       expect(isCompactTierModel(resolveApiModelId(id))).toBe(true);
   });
 
@@ -539,12 +548,12 @@ describe("compact tier detection", () => {
         id: "ep1",
         name: "Haiku",
         baseURL: "https://x/v1",
-        modelId: "claude-haiku-4-5",
+        modelId: "claude-haiku-5-5",
         contextLimit: 200_000,
       },
     ];
     const mid = compatModelIdForEndpoint("ep1");
-    expect(effectiveModelName(mid, eps)).toBe("claude-haiku-4-5");
+    expect(effectiveModelName(mid, eps)).toBe("claude-haiku-5-5");
     // The synthetic id alone would miss the lite tier; the resolved name hits.
     expect(isCompactTierModel(mid)).toBe(false);
     expect(isCompactTierModel(effectiveModelName(mid, eps))).toBe(true);
@@ -615,5 +624,54 @@ describe("system prompts substantive output guidelines", () => {
   it("SYSTEM_PROMPT_LITE contains substantive output guidelines and zero em-dashes", () => {
     expect(SYSTEM_PROMPT_LITE).toContain("Substantive output (CRITICAL)");
     expect(SYSTEM_PROMPT_LITE.includes("\u2014")).toBe(false);
+  });
+});
+
+describe("retired model ids", () => {
+  it("upgrades a retired id to the current model of the same tier", () => {
+    expect(upgradeRetiredModelId("claude-3-5-haiku")).toBe("claude-haiku-5-5");
+    expect(upgradeRetiredModelId("claude-oauth-haiku-4.5")).toBe(
+      "claude-oauth-haiku-5-5",
+    );
+    expect(upgradeRetiredModelId("gpt-5.4-mini")).toBe("gpt-6-luna");
+    expect(upgradeRetiredModelId("claude-opus-5-5")).toBe("claude-opus-5-5");
+  });
+
+  it("only ever points at a model that is still in the registry", () => {
+    for (const [from, to] of Object.entries(RETIRED_MODEL_IDS)) {
+      expect(isKnownModelId(from), from).toBe(false);
+      expect(isKnownModelId(to), `${from} -> ${to}`).toBe(true);
+    }
+  });
+
+  it("resolves a stored retired id through normalizeModelId", () => {
+    expect(normalizeModelId("claude-sonnet-4-6")).toBe("claude-sonnet-5-5");
+  });
+});
+
+describe("Claude OAuth identity", () => {
+  it("presents as the current Claude Code CLI", () => {
+    expect(CLAUDE_CLI_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(CLAUDE_OAUTH_HEADERS["User-Agent"]).toBe(
+      `claude-cli/${CLAUDE_CLI_VERSION} (external, cli)`,
+    );
+    expect(CLAUDE_OAUTH_HEADERS["anthropic-beta"]).toContain(
+      "oauth-2025-04-20",
+    );
+  });
+});
+
+describe("Antigravity Gemini 4", () => {
+  it.each([
+    // Wire ids as Cloud Code's fetchAvailableModels serves them (agy 1.5.9).
+    ["antigravity-gemini-4-hydrogen", "gemini-4-hydrogen-high"],
+    ["antigravity-gemini-4-argon", "gemini-4-argon-medium"],
+    ["antigravity-gemini-4-carbon", "gemini-4-carbon-medium"],
+    ["antigravity-claude-opus-5-5", "claude-opus-5-5-medium"],
+    ["antigravity-claude-sonnet-5-5", "claude-sonnet-5-5-medium"],
+  ])("sends %s to Cloud Code as %s", (id, wire) => {
+    expect(resolveModel(id).provider).toBe("antigravity");
+    expect(resolveApiModelId(id)).toBe(wire);
+    expect(getModelContextLimit(id)).toBeGreaterThanOrEqual(1_000_000);
   });
 });

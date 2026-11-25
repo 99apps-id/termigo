@@ -1,6 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { rememberFact } from "../lib/memory";
+import { normalizeFact, rememberFact } from "../lib/memory";
 import type { ToolContext } from "./context";
 
 export function buildMemoryTools(ctx: ToolContext) {
@@ -46,7 +46,12 @@ export function buildMemoryTools(ctx: ToolContext) {
         }
         return {
           stored: true,
-          remembered: fact,
+          // Report what was WRITTEN, not what was asked for. `rememberFact`
+          // normalizes the fact (whitespace collapsed, clipped to
+          // MAX_FACT_CHARS), so echoing the raw input told the model a
+          // 900-character fact had been stored in full when only the first
+          // 500 characters reached the file.
+          remembered: normalizeFact(fact),
           scope: outcome.scope,
           totalFacts: outcome.total,
         };

@@ -3,7 +3,7 @@ import { AiInputBarConnect } from "@/modules/ai";
 import { Chip } from "@/modules/ai/components/Chip";
 import { ChipsRow } from "@/modules/ai/components/ChipsRow";
 import { QueuedSteerRow } from "@/modules/ai/components/QueuedSteerRow";
-import { useComposer } from "@/modules/ai/lib/composer";
+import { useComposerActions } from "@/modules/ai/lib/composer";
 import { useBlockController } from "@/modules/terminal/lib/blockController";
 import { focusLeafInput } from "@/modules/terminal/lib/useTerminalSession";
 import {
@@ -49,7 +49,7 @@ export function WorkspaceInputBar({
   keysLoaded,
   onConnect,
 }: Props) {
-  const c = useComposer();
+  const c = useComposerActions();
   const { os, shell } = useSystemInfo();
 
   const controller = useBlockController(isBlockTab ? activeLeafId : null);

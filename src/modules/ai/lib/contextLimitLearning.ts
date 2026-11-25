@@ -144,10 +144,16 @@ export function noteSuccessfulRequest(
   }
   const scale = budgetScale.get(modelId);
   if (!scale || scale >= 1) return;
-  const real = realLimit.get(modelId);
-  if (!real) return;
-  // Plenty of headroom used → we over-tightened; ease the scale back up.
-  if (realInputTokens < 0.45 * real) {
+  // Relax against the window we are actually targeting, not `realLimit`. The
+  // numberless-overflow branch above shrinks `budgetScale` WITHOUT setting a
+  // `realLimit`, so gating on `realLimit` pinned that scale at its shrunk
+  // value forever: the module's own invariant ("let a comfortably-fitting
+  // request relax the scale back toward 1") could never hold for exactly the
+  // models that needed it, and they were over-compacted for the app's life.
+  const target = knownWindow.get(modelId) ?? realLimit.get(modelId);
+  if (!target) return;
+  // Plenty of headroom used -> we over-tightened; ease the scale back up.
+  if (realInputTokens < 0.45 * target) {
     budgetScale.set(modelId, Math.min(1, scale * 1.4));
   }
 }

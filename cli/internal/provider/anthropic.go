@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"runtime"
+	"strconv"
 	"strings"
 )
 
@@ -14,10 +16,32 @@ import (
 // matches what the current CLI sends; the first entry is what unlocks an
 // OAuth bearer at all.
 const (
-	claudeCLIVersion   = "2.1.280"
-	claudeCLIUserAgent = "claude-cli/" + claudeCLIVersion + " (external, sdk-cli)"
-	claudeOAuthBeta    = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05,advanced-tool-use-2025-11-20,effort-2025-11-24,structured-outputs-2025-12-15,fast-mode-2026-02-01,redact-thinking-2026-02-12,token-efficient-tools-2026-03-28"
+	claudeCLIVersion   = "2.1.325"
+	claudeCLIUserAgent = "claude-cli/" + claudeCLIVersion + " (external, cli)"
+	claudeOAuthBeta    = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,advanced-tool-use-2025-11-20,effort-2025-11-24,extended-cache-ttl-2025-04-11"
 )
+
+func stainlessOS() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return "MacOS"
+	case "windows":
+		return "Windows"
+	default:
+		return "Linux"
+	}
+}
+
+func stainlessArch() string {
+	switch runtime.GOARCH {
+	case "amd64":
+		return "x64"
+	case "arm64":
+		return "arm64"
+	default:
+		return runtime.GOARCH
+	}
+}
 
 // anthropicClient speaks the Messages streaming protocol.
 type anthropicClient struct{ *httpClient }
@@ -70,16 +94,16 @@ func (c *anthropicClient) Stream(ctx context.Context, req ChatRequest, emit func
 		headers["Authorization"] = "Bearer " + key
 		headers["anthropic-beta"] = claudeOAuthBeta
 		headers["anthropic-dangerous-direct-browser-access"] = "true"
+		headers["Accept"] = "application/json"
 		headers["x-app"] = "cli"
 		headers["User-Agent"] = claudeCLIUserAgent
-		headers["X-Stainless-Helper-Method"] = "stream"
 		headers["X-Stainless-Retry-Count"] = "0"
-		headers["X-Stainless-Runtime-Version"] = "v24.14.0"
-		headers["X-Stainless-Package-Version"] = "0.80.0"
+		headers["X-Stainless-Runtime-Version"] = "v26.12.1"
+		headers["X-Stainless-Package-Version"] = "0.128.0"
 		headers["X-Stainless-Runtime"] = "node"
 		headers["X-Stainless-Lang"] = "js"
-		headers["X-Stainless-Arch"] = "arm64"
-		headers["X-Stainless-Os"] = "MacOS"
+		headers["X-Stainless-Arch"] = stainlessArch()
+		headers["X-Stainless-Os"] = stainlessOS()
 		headers["X-Stainless-Timeout"] = "600"
 		// The endpoint expects the Claude Code tool names, so client tools are
 		// suffixed and the CLI's own tools are offered as unavailable decoys.
@@ -91,7 +115,7 @@ func (c *anthropicClient) Stream(ctx context.Context, req ChatRequest, emit func
 			cloaked, names := cloakClaudeTools(tools)
 			payload["tools"] = cloaked
 			aliases = names
-			cloakClaudeMessages(messages)
+			cloakClaudeMessages(messages, aliases)
 		}
 		payload["system"] = withClaudeBillingHeader(payload["system"], payload)
 		payload["metadata"] = map[string]any{
@@ -200,6 +224,11 @@ func (c *anthropicClient) streamWithURL(ctx context.Context, url string, headers
 				}
 			}
 		case "message_delta":
+			if event.Delta.StopReason == "max_tokens" {
+				if err := emit(StreamEvent{Type: EventIncomplete, IncompleteReason: "max_tokens"}); err != nil {
+					return err
+				}
+			}
 			if event.Usage != nil {
 				usage := Usage{CompletionTokens: event.Usage.OutputTokens}
 				if err := emit(StreamEvent{Type: EventUsage, Usage: &usage}); err != nil {
@@ -354,6 +383,7 @@ type anthropicEvent struct {
 		Text        string `json:"text"`
 		Thinking    string `json:"thinking"`
 		PartialJSON string `json:"partial_json"`
+		StopReason  string `json:"stop_reason"`
 	} `json:"delta"`
 	ContentBlock *struct {
 		Type  string `json:"type"`
@@ -404,29 +434,76 @@ func deriveUUIDFromSeed(seed string) string {
 // named read_file is sent as read_file_ide and renamed back on the stream.
 const claudeToolSuffix = "_ide"
 
-// cloakClaudeTools suffixes the client tools and appends the Claude Code decoy
-// tools, which are advertised as unavailable. It returns the aliases mapping a
-// suffixed name back to the original.
+// sanitizeClaudeToolName reduces a name to the only shape Anthropic accepts,
+// ^[a-zA-Z0-9_-]{1,128}$: an MCP name with a dot or slash is answered with
+// 400 invalid_request_error naming that pattern (verified live), so the
+// suffix alone is not enough.
+func sanitizeClaudeToolName(name string) string {
+	var builder strings.Builder
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_', r == '-':
+			builder.WriteRune(r)
+		default:
+			builder.WriteByte('_')
+		}
+	}
+	cleaned := builder.String()
+	if len(cleaned) > 128 {
+		cleaned = cleaned[:128]
+	}
+	if cleaned == "" {
+		cleaned = "tool"
+	}
+	return cleaned
+}
+
+func cloakClaudeName(name string, aliases map[string]string, present map[string]bool) string {
+	cloaked := sanitizeClaudeToolName(name)
+	if !strings.HasSuffix(cloaked, claudeToolSuffix) {
+		cloaked = sanitizeClaudeToolName(cloaked + claudeToolSuffix)
+	}
+	if present[cloaked] && aliases[cloaked] != name {
+		for n := 2; ; n++ {
+			candidate := sanitizeClaudeToolName(cloaked + "_" + strconv.Itoa(n))
+			if !present[candidate] || aliases[candidate] == name {
+				cloaked = candidate
+				break
+			}
+		}
+	}
+	present[cloaked] = true
+	aliases[cloaked] = name
+	return cloaked
+}
+
+// cloakClaudeTools suffixes and sanitizes the client tools and appends the
+// Claude Code decoy tools, which are advertised as unavailable. It returns
+// the aliases mapping a cloaked name back to the original.
 func cloakClaudeTools(tools []map[string]any) ([]map[string]any, map[string]string) {
 	aliases := make(map[string]string, len(tools))
+	present := make(map[string]bool, len(tools))
 	cloaked := make([]map[string]any, 0, len(tools)+len(claudeDecoyTools))
 	for _, tool := range tools {
 		name, _ := tool["name"].(string)
-		suffixed := name + claudeToolSuffix
-		aliases[suffixed] = name
 		copied := make(map[string]any, len(tool))
 		for key, value := range tool {
 			copied[key] = value
 		}
-		copied["name"] = suffixed
+		copied["name"] = cloakClaudeName(name, aliases, present)
 		cloaked = append(cloaked, copied)
 	}
 	return append(cloaked, claudeDecoyTools...), aliases
 }
 
 // cloakClaudeMessages renames the tool_use blocks in the history to the
-// suffixed names the tools list now carries.
-func cloakClaudeMessages(messages []map[string]any) {
+// cloaked names the tools list now carries, reusing the same aliases so a
+// sanitized history name matches its tool exactly.
+func cloakClaudeMessages(messages []map[string]any, aliases map[string]string) {
+	present := make(map[string]bool, len(aliases))
+	for cloaked := range aliases {
+		present[cloaked] = true
+	}
 	for _, message := range messages {
 		blocks, ok := message["content"].([]map[string]any)
 		if !ok {
@@ -437,8 +514,23 @@ func cloakClaudeMessages(messages []map[string]any) {
 				continue
 			}
 			name, _ := block["name"].(string)
-			if name != "" && !strings.HasSuffix(name, claudeToolSuffix) {
-				block["name"] = name + claudeToolSuffix
+			if name == "" {
+				continue
+			}
+			if _, ok := aliases[name]; ok {
+				continue
+			}
+			known := ""
+			for cloaked, original := range aliases {
+				if original == name {
+					known = cloaked
+					break
+				}
+			}
+			if known != "" {
+				block["name"] = known
+			} else {
+				block["name"] = cloakClaudeName(name, aliases, present)
 			}
 		}
 	}

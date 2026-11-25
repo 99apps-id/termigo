@@ -13,6 +13,8 @@ export type SessionSchedule = {
   intervalMs?: number;
   /** Daily trigger "HH:MM" in local time. Absent for interval tasks. */
   dailyAt?: string;
+  /** Standard 5-field cron expression ("m h dom mon dow") in local time. */
+  cronExpr?: string;
   /** Epoch ms of the next fire. Absent for display-only tasks that never auto-run. */
   nextDueAt?: number;
   /** Epoch ms when the task was created. */
@@ -23,6 +25,7 @@ export type SessionSchedule = {
 export type ScheduleSpec = {
   intervalMs?: number;
   dailyAt?: string;
+  cronExpr?: string;
   nextDueAt: number;
 };
 
@@ -201,6 +204,7 @@ export const useSessionDirectiveStore = create<State>((set, get) => ({
         enabled: true,
         intervalMs: spec?.intervalMs,
         dailyAt: spec?.dailyAt,
+        cronExpr: spec?.cronExpr,
         nextDueAt: spec?.nextDueAt,
         createdAt: Date.now(),
       };

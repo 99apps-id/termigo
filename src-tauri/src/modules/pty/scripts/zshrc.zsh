@@ -43,11 +43,10 @@ if [[ -z "$__TERMIGO_HOOKS_LOADED" ]]; then
   _termigo_precmd() {
     local _termigo_ret=$?
     printf '\e]133;D;%s\e\\' "$_termigo_ret"
-    if [[ -n "${TMUX:-}" ]]; then
-      printf '\ePtmux;\e\e]7;file://%s%s\a\e\\' "${HOST}" "$(_termigo_urlencode "$PWD")"
-    else
-      printf '\e]7;file://%s%s\e\\' "${HOST}" "$(_termigo_urlencode "$PWD")"
-    fi
+    # No tmux DCS wrapping: Termigo forces TERM=xterm-256color, so tmux passes
+    # OSC through untouched, and the wrapper made the sequence unreachable
+    # because xterm.js has no DCS unwrapper.
+    printf '\e]7;file://%s%s\e\\' "${HOST}" "$(_termigo_urlencode "$PWD")"
     # In block mode the host renders its own input bar, so suppress the shell
     # prompt entirely (keep only the OSC 133 B marker) and add a leading blank
     # line so frozen command blocks get vertical breathing room.

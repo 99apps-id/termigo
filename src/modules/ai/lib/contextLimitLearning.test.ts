@@ -86,4 +86,27 @@ describe("recordContextOverflow + effectiveContextLimit", () => {
     noteSuccessfulRequest("m", 20_000);
     expect(effectiveContextLimit("m", 1_000_000)).toBeGreaterThan(tightened);
   });
+
+  // The numberless-overflow branch shrinks `budgetScale` WITHOUT recording a
+  // `realLimit`. The relax path used to bail on `if (!real) return;`, so that
+  // scale was pinned at its shrunk value forever and the model was
+  // over-compacted for the rest of the app's life.
+  it("relaxes a scale learned from a numberless overflow", () => {
+    // No prior `effectiveContextLimit` call, so `lastAttempted` is unset and
+    // the overflow takes the branch that shrinks `budgetScale` alone.
+    recordContextOverflow("m", "context_length_exceeded");
+    const shrunk = effectiveContextLimit("m", 1_000_000);
+    expect(shrunk).toBeLessThan(1_000_000);
+
+    // Requests that comfortably fit must walk the scale back toward 1.
+    for (let i = 0; i < 12; i++) noteSuccessfulRequest("m", 10_000);
+    const relaxed = effectiveContextLimit("m", 1_000_000);
+    expect(relaxed).toBeGreaterThan(shrunk);
+  });
+
+  it("still tightens when a fitting request nearly fills the window", () => {
+    effectiveContextLimit("m", 1_000_000);
+    noteSuccessfulRequest("m", 800_000);
+    expect(effectiveContextLimit("m", 1_000_000)).toBeLessThan(1_000_000);
+  });
 });

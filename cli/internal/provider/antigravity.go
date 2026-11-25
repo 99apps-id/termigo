@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -33,32 +34,33 @@ type antigravityClient struct {
 	// replayed on the next request, which Gemini 3 requires for a tool loop.
 	signatures map[string]string
 	sessionID  string
+	cascade    string
+	trajectory string
 }
 
 const (
-	agMaxOutputToken = 64000
+	agConsumerProject   = "aicode-consumers"
+	defaultAGCLIVersion = "1.5.15"
+	defaultAGChangelist = "1027820220"
+	agMaxOutputToken    = 65536
 )
 
+var agModelEnums = map[string]string{
+	"gemini-4-argon-low":      "MODEL_PLACEHOLDER_M419",
+	"gemini-4-argon-medium":   "MODEL_PLACEHOLDER_M418",
+	"gemini-4-argon-high":     "MODEL_PLACEHOLDER_M417",
+	"gemini-3.8-flash-low":    "MODEL_PLACEHOLDER_M320",
+	"gemini-3.8-flash-medium": "MODEL_PLACEHOLDER_M319",
+	"gemini-3.8-flash-high":   "MODEL_PLACEHOLDER_M318",
+}
+
 func agUserAgent() string {
-	platform := "linux"
-	switch runtime.GOOS {
-	case "darwin":
-		platform = "darwin"
-	case "windows":
-		platform = "windows"
-	}
-	arch := runtime.GOARCH
-	switch arch {
-	case "amd64":
-		arch = "x64"
-	case "386":
-		arch = "x86"
-	case "arm64":
-		arch = "arm64"
-	case "arm":
-		arch = "arm"
-	}
-	return fmt.Sprintf("antigravity/ide/2.11.0 %s/%s", platform, arch)
+	// The Antigravity CLI 1.5.15 identity (matching termixgo agUserAgent):
+	// Cloud Code lists Gemini 4 (Neon, Hydrogen, Argon, Carbon) only for it.
+	return fmt.Sprintf(
+		"antigravity/cli/%s (aidev_client; os_type=%s; arch=%s; cl=%s; auth_method=consumer)",
+		defaultAGCLIVersion, runtime.GOOS, runtime.GOARCH, defaultAGChangelist,
+	)
 }
 
 // The onboarding endpoints are variables so tests can point them at a server.
@@ -73,15 +75,18 @@ func (c *antigravityClient) Stream(ctx context.Context, req ChatRequest, emit fu
 		return err
 	}
 	session := c.session()
+	steps := agModelSteps(req.Messages)
 	body := map[string]any{
-		"project":   project,
-		"model":     req.Model,
-		"userAgent": "antigravity",
-		"requestId": agRequestID(session, req.Model, len(req.Messages)),
+		"project":     project,
+		"model":       req.Model,
+		"userAgent":   "antigravity",
+		"requestType": "agent",
+		"requestId":   c.requestID(steps),
 		"request": map[string]any{
 			"contents":         c.encodeContents(req),
 			"sessionId":        session,
 			"generationConfig": agGenerationConfig(req),
+			"labels":           c.labels(req.Model, steps),
 		},
 	}
 	request := body["request"].(map[string]any)
@@ -93,14 +98,13 @@ func (c *antigravityClient) Stream(ctx context.Context, req ChatRequest, emit fu
 	}
 	if len(req.Tools) > 0 {
 		request["tools"] = []map[string]any{{"functionDeclarations": agTools(req.Tools)}}
-		request["toolConfig"] = map[string]any{"functionCallingConfig": map[string]any{"mode": "VALIDATED"}}
 	}
 
 	key := c.currentKey()
 	headers := map[string]string{
-		"Authorization":        "Bearer " + key,
-		"User-Agent":           agUserAgent(),
-		"X-Machine-Session-Id": session,
+		"Authorization": "Bearer " + key,
+		"User-Agent":    agUserAgent(),
+		"Accept":        "",
 	}
 	endpoint := c.baseURL + "/v1internal:streamGenerateContent?alt=sse"
 	response, err := c.post(ctx, endpoint, headers, body)
@@ -110,10 +114,9 @@ func (c *antigravityClient) Stream(ctx context.Context, req ChatRequest, emit fu
 			newKey := c.refreshKey()
 			newSession := c.resetSession()
 			headers["Authorization"] = "Bearer " + newKey
-			headers["X-Machine-Session-Id"] = newSession
 			reqMap := body["request"].(map[string]any)
 			reqMap["sessionId"] = newSession
-			body["requestId"] = agRequestID(newSession, req.Model, len(req.Messages))
+			body["requestId"] = c.requestID(steps)
 			response, err = c.post(ctx, endpoint, headers, body)
 		}
 		// The daily host is the chat host; when it fails at the endpoint level,
@@ -263,7 +266,7 @@ func (c *antigravityClient) ensureProject(ctx context.Context) (string, error) {
 		}
 	}
 	if project == "" {
-		project = "termixgo-" + randomHex(8)
+		project = agConsumerProject
 	}
 	c.project = project
 	return project, nil
@@ -711,15 +714,60 @@ func isEndpointError(err error) bool {
 		strings.Contains(msg, "no such host")
 }
 
-func agRequestID(session, model string, messageCount int) string {
-	if messageCount < 1 {
-		messageCount = 1
+func agModelSteps(messages []Message) int {
+	steps := 0
+	for _, message := range messages {
+		if message.Role == RoleAssistant {
+			steps++
+		}
 	}
-	step := messageCount*2 - 1
-	if step < 1 {
-		step = 1
+	return steps
+}
+
+func (c *antigravityClient) ids() (string, string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.cascade == "" {
+		c.cascade = randomUUID()
 	}
-	return fmt.Sprintf("agent/%s/%d/%s/%d", randomHex(16), time.Now().UnixMilli(), randomHex(16), step)
+	if c.trajectory == "" {
+		c.trajectory = randomUUID()
+	}
+	return c.cascade, c.trajectory
+}
+
+func (c *antigravityClient) requestID(steps int) string {
+	cascade, trajectory := c.ids()
+	return fmt.Sprintf("agent/%s/%d/%s/%d", cascade, time.Now().UnixMilli(), trajectory, steps+1)
+}
+
+func (c *antigravityClient) labels(wireModel string, steps int) map[string]string {
+	cascade, trajectory := c.ids()
+	claude := strings.HasPrefix(wireModel, "claude-")
+	labels := map[string]string{
+		"cascade_id":               cascade,
+		"last_step_index":          strconv.Itoa(steps),
+		"request_id":               fmt.Sprintf("%s-%d", trajectory, steps),
+		"root_cascade_id":          cascade,
+		"trajectory_id":            trajectory,
+		"used_claude":              strconv.FormatBool(claude),
+		"used_claude_conservative": "false",
+		"used_non_gemini_model":    strconv.FormatBool(!strings.HasPrefix(wireModel, "gemini-")),
+	}
+	if enum, ok := agModelEnums[wireModel]; ok {
+		labels["model_enum"] = enum
+	}
+	return labels
+}
+
+func randomUUID() string {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "00000000-0000-4000-8000-000000000000"
+	}
+	raw[6] = (raw[6] & 0x0f) | 0x40
+	raw[8] = (raw[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", raw[0:4], raw[4:6], raw[6:8], raw[8:10], raw[10:16])
 }
 
 func randomHex(bytes int) string {

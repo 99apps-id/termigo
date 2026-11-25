@@ -25,6 +25,7 @@ import { listSkills } from "./skills";
 import { autoCheckpointForRun } from "./snapshots";
 import { formatTodoStatusBlock } from "./todos";
 import { turnCheckpointInfo, type TurnCheckpoint } from "./turnCheckpoints";
+import { dedupeResumedSeams } from "./turnContinuation";
 import { getOrCreateUserModel } from "./userModel";
 
 /**
@@ -297,6 +298,13 @@ type Deps = {
       verifiedAfterLastEdit: boolean;
       /** The final prose claimed a verification result without ledger evidence. */
       claimedVerification: boolean;
+    };
+    /** What the run's final step produced, for the continuation gate (see
+     *  RunAgentOptions.onFinishMeta and turnContinuation.ts). */
+    lastStep: {
+      text: string;
+      finishReason: string | undefined;
+      usedTools: boolean;
     };
   }) => void;
   getPlanMode?: () => boolean;
@@ -628,9 +636,13 @@ export function prepareOutgoingMessages(
   messages: UIMessage[],
   envBlock: string | null,
 ): UIMessage[] {
-  if (!envBlock) return messages;
   if (isResumingApproval(messages)) return messages;
-  return appendEnvTurn(messages, envBlock);
+  // Drop the seam a resumed answer repeated (see turnContinuation.ts) BEFORE
+  // the env turn is appended, so the dedupe still sees the pattern it matches
+  // (cut answer, nudge, resumed answer) as the last three messages.
+  const deduped = dedupeResumedSeams(messages);
+  if (!envBlock) return deduped;
+  return appendEnvTurn(deduped, envBlock);
 }
 
 export function appendEnvTurn(

@@ -22,6 +22,25 @@ async function getStore(): Promise<LazyStore> {
   return store;
 }
 
+// Serialises every read-modify-write of the index. `saveMessages` fires this
+// fire-and-forget on a 300 ms debounce, and two sessions persisting in the
+// same tick used to both read the same array, both rebuild it, and both write
+// it: the second write won and the other session's freshly indexed messages
+// vanished from `search_history` with no error anywhere. Chaining the writes
+// makes each one see the previous one's result.
+let writeChain: Promise<unknown> = Promise.resolve();
+
+function enqueueWrite<T>(work: () => Promise<T>): Promise<T> {
+  const next = writeChain.then(work, work);
+  // Keep the chain alive even when a step rejects, and do not leak a rejected
+  // promise into the next link.
+  writeChain = next.then(
+    () => undefined,
+    () => undefined,
+  );
+  return next;
+}
+
 export async function indexMessagesBatch(
   sessionId: string,
   items: Array<{ messageId: string; text: string }>,
@@ -31,32 +50,38 @@ export async function indexMessagesBatch(
     .filter((i) => i.text.length > 0);
   if (valid.length === 0) return;
 
-  const s = await getStore();
-  const raw = (await s.get("index")) as SearchHit[] | undefined;
-  const idsToRemove = new Set(valid.map((v) => `${sessionId}:${v.messageId}`));
-  const entries: SearchHit[] = Array.isArray(raw)
-    ? raw.filter((h) => !idsToRemove.has(`${h.sessionId}:${h.messageId}`))
-    : [];
+  await enqueueWrite(async () => {
+    const s = await getStore();
+    const raw = (await s.get("index")) as SearchHit[] | undefined;
+    const idsToRemove = new Set(
+      valid.map((v) => `${sessionId}:${v.messageId}`),
+    );
+    const entries: SearchHit[] = Array.isArray(raw)
+      ? raw.filter((h) => !idsToRemove.has(`${h.sessionId}:${h.messageId}`))
+      : [];
 
-  for (const item of valid) {
-    entries.push({ sessionId, messageId: item.messageId, text: item.text });
-  }
+    for (const item of valid) {
+      entries.push({ sessionId, messageId: item.messageId, text: item.text });
+    }
 
-  // hard cap: keep most recent entries only
-  const MAX = 8000;
-  while (entries.length > MAX) entries.shift();
+    // hard cap: keep most recent entries only
+    const MAX = 8000;
+    while (entries.length > MAX) entries.shift();
 
-  await s.set("index", entries);
+    await s.set("index", entries);
+  });
 }
 
 export async function deleteSessionFromIndex(sessionId: string): Promise<void> {
-  const s = await getStore();
-  const raw = (await s.get("index")) as SearchHit[] | undefined;
-  if (!Array.isArray(raw)) return;
-  const filtered = raw.filter((h) => h.sessionId !== sessionId);
-  if (filtered.length !== raw.length) {
-    await s.set("index", filtered);
-  }
+  await enqueueWrite(async () => {
+    const s = await getStore();
+    const raw = (await s.get("index")) as SearchHit[] | undefined;
+    if (!Array.isArray(raw)) return;
+    const filtered = raw.filter((h) => h.sessionId !== sessionId);
+    if (filtered.length !== raw.length) {
+      await s.set("index", filtered);
+    }
+  });
 }
 
 export async function indexMessage(

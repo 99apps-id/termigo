@@ -646,31 +646,41 @@ fn parse_run_command(args: Vec<OsString>) -> Result<Action, CliError> {
 
 fn parse_endpoint(args: Vec<OsString>) -> Result<Action, CliError> {
     if args.is_empty() {
-        return Err(usage_error("endpoint requires a subcommand: list, add, remove"));
+        return Err(usage_error(
+            "endpoint requires a subcommand: list, add, remove",
+        ));
     }
     let mut args = args;
     let sub = args.remove(0);
     let sub_str = sub.to_str();
     match sub_str {
-        Some("list" | "ls") => {
-            no_extra_args(args, Action::Request {
+        Some("list" | "ls") => no_extra_args(
+            args,
+            Action::Request {
                 method: METHOD_ENDPOINT_LIST,
                 params: json!({}),
-            })
-        }
+            },
+        ),
         Some("remove" | "rm") => {
             if args.is_empty() {
-                return Err(usage_error("endpoint remove requires an endpoint id or name"));
+                return Err(usage_error(
+                    "endpoint remove requires an endpoint id or name",
+                ));
             }
             if args.len() > 1 {
-                return Err(usage_error("endpoint remove accepts exactly one endpoint id or name"));
+                return Err(usage_error(
+                    "endpoint remove accepts exactly one endpoint id or name",
+                ));
             }
             let id = args.remove(0).into_string().map_err(|_| {
-                CliError::new("non_utf8_argument", "Termigo cannot use a non-UTF-8 endpoint id", EXIT_USAGE)
+                CliError::new(
+                    "non_utf8_argument",
+                    "Termigo cannot use a non-UTF-8 endpoint id",
+                    EXIT_USAGE,
+                )
             })?;
-            let params = serde_json::to_value(EndpointRemoveParams { id }).map_err(|e| {
-                CliError::new("serialization_error", e.to_string(), EXIT_PROTOCOL)
-            })?;
+            let params = serde_json::to_value(EndpointRemoveParams { id })
+                .map_err(|e| CliError::new("serialization_error", e.to_string(), EXIT_PROTOCOL))?;
             Ok(Action::Request {
                 method: METHOD_ENDPOINT_REMOVE,
                 params,
@@ -688,19 +698,28 @@ fn parse_endpoint(args: Vec<OsString>) -> Result<Action, CliError> {
                 };
                 match s {
                     "--key" => {
-                        let val = iter.next().ok_or_else(|| usage_error("--key requires a value"))?;
+                        let val = iter
+                            .next()
+                            .ok_or_else(|| usage_error("--key requires a value"))?;
                         api_key = Some(val.to_string_lossy().to_string());
                     }
                     val if val.starts_with("--key=") => {
                         api_key = Some(val["--key=".len()..].to_string());
                     }
                     "--context-limit" => {
-                        let val = iter.next().ok_or_else(|| usage_error("--context-limit requires an integer"))?;
-                        let n = val.to_string_lossy().parse::<u32>().map_err(|_| usage_error("--context-limit requires an integer"))?;
+                        let val = iter
+                            .next()
+                            .ok_or_else(|| usage_error("--context-limit requires an integer"))?;
+                        let n = val
+                            .to_string_lossy()
+                            .parse::<u32>()
+                            .map_err(|_| usage_error("--context-limit requires an integer"))?;
                         context_limit = Some(n);
                     }
                     val if val.starts_with("--context-limit=") => {
-                        let n = val["--context-limit=".len()..].parse::<u32>().map_err(|_| usage_error("--context-limit requires an integer"))?;
+                        let n = val["--context-limit=".len()..]
+                            .parse::<u32>()
+                            .map_err(|_| usage_error("--context-limit requires an integer"))?;
                         context_limit = Some(n);
                     }
                     "--default" => {
@@ -713,10 +732,14 @@ fn parse_endpoint(args: Vec<OsString>) -> Result<Action, CliError> {
                 }
             }
             if positional.len() < 3 {
-                return Err(usage_error("endpoint add requires: <name> <base_url> <model_id>"));
+                return Err(usage_error(
+                    "endpoint add requires: <name> <base_url> <model_id>",
+                ));
             }
             if positional.len() > 3 {
-                return Err(usage_error("endpoint add accepts at most: <name> <base_url> <model_id>"));
+                return Err(usage_error(
+                    "endpoint add accepts at most: <name> <base_url> <model_id>",
+                ));
             }
             let name = positional.remove(0);
             let base_url = positional.remove(0);
@@ -729,28 +752,36 @@ fn parse_endpoint(args: Vec<OsString>) -> Result<Action, CliError> {
                 context_limit,
                 api_key,
                 set_default,
-            }).map_err(|e| CliError::new("serialization_error", e.to_string(), EXIT_PROTOCOL))?;
+            })
+            .map_err(|e| CliError::new("serialization_error", e.to_string(), EXIT_PROTOCOL))?;
             Ok(Action::Request {
                 method: METHOD_ENDPOINT_ADD,
                 params,
             })
         }
-        _ => Err(usage_error(format!("unknown endpoint subcommand '{}'", sub.to_string_lossy()))),
+        _ => Err(usage_error(format!(
+            "unknown endpoint subcommand '{}'",
+            sub.to_string_lossy()
+        ))),
     }
 }
 
 fn parse_models(args: Vec<OsString>) -> Result<Action, CliError> {
-    no_extra_args(args, Action::Request {
-        method: METHOD_MODELS_LIST,
-        params: json!({}),
-    })
+    no_extra_args(
+        args,
+        Action::Request {
+            method: METHOD_MODELS_LIST,
+            params: json!({}),
+        },
+    )
 }
 
 fn parse_model(args: Vec<OsString>) -> Result<Action, CliError> {
     if args.is_empty() {
         let params = serde_json::to_value(ConfigGetParams {
             key: "defaultModelId".to_string(),
-        }).map_err(|e| CliError::new("serialization_error", e.to_string(), EXIT_PROTOCOL))?;
+        })
+        .map_err(|e| CliError::new("serialization_error", e.to_string(), EXIT_PROTOCOL))?;
         return Ok(Action::Request {
             method: METHOD_CONFIG_GET,
             params,
@@ -759,14 +790,17 @@ fn parse_model(args: Vec<OsString>) -> Result<Action, CliError> {
     if args.len() > 1 {
         return Err(usage_error("model accepts at most one model id"));
     }
-    let model_id = args[0].to_str().ok_or_else(|| usage_error("model id must be UTF-8"))?;
+    let model_id = args[0]
+        .to_str()
+        .ok_or_else(|| usage_error("model id must be UTF-8"))?;
     if model_id.starts_with('-') {
         return Err(usage_error(format!("unknown model option '{model_id}'")));
     }
     let params = serde_json::to_value(ConfigSetParams {
         key: "defaultModelId".to_string(),
         value: json!(model_id),
-    }).map_err(|e| CliError::new("serialization_error", e.to_string(), EXIT_PROTOCOL))?;
+    })
+    .map_err(|e| CliError::new("serialization_error", e.to_string(), EXIT_PROTOCOL))?;
     Ok(Action::Request {
         method: METHOD_CONFIG_SET,
         params,
@@ -782,32 +816,39 @@ fn parse_settings(args: Vec<OsString>) -> Result<Action, CliError> {
     }
     let mut args = args;
     let first = args.remove(0);
-    let first_str = first.to_str().ok_or_else(|| usage_error("invalid argument"))?;
+    let first_str = first
+        .to_str()
+        .ok_or_else(|| usage_error("invalid argument"))?;
     if first_str == "set" {
         if args.len() < 2 {
             return Err(usage_error("usage: termigo settings set <key> <value>"));
         }
         let key = args.remove(0).to_string_lossy().to_string();
-        let raw_val: Vec<String> = args.into_iter().map(|s| s.to_string_lossy().to_string()).collect();
+        let raw_val: Vec<String> = args
+            .into_iter()
+            .map(|s| s.to_string_lossy().to_string())
+            .collect();
         let raw_val = raw_val.join(" ");
         let value = parse_setting_value(&key, &raw_val)?;
-        let params = serde_json::to_value(ConfigSetParams { key, value }).map_err(|e| {
-            CliError::new("serialization_error", e.to_string(), EXIT_PROTOCOL)
-        })?;
+        let params = serde_json::to_value(ConfigSetParams { key, value })
+            .map_err(|e| CliError::new("serialization_error", e.to_string(), EXIT_PROTOCOL))?;
         return Ok(Action::Request {
             method: METHOD_CONFIG_SET,
             params,
         });
     }
     if first_str.starts_with('-') {
-        return Err(usage_error(format!("unknown settings option '{first_str}'")));
+        return Err(usage_error(format!(
+            "unknown settings option '{first_str}'"
+        )));
     }
     if !args.is_empty() {
         return Err(usage_error("usage: termigo settings [<key>]"));
     }
     let params = serde_json::to_value(ConfigGetParams {
         key: first_str.to_string(),
-    }).map_err(|e| CliError::new("serialization_error", e.to_string(), EXIT_PROTOCOL))?;
+    })
+    .map_err(|e| CliError::new("serialization_error", e.to_string(), EXIT_PROTOCOL))?;
     Ok(Action::Request {
         method: METHOD_CONFIG_GET,
         params,
@@ -844,7 +885,9 @@ fn parse_secret(args: Vec<OsString>) -> Result<Action, CliError> {
         };
         match s {
             "--key" => {
-                let val = iter.next().ok_or_else(|| usage_error("--key requires a value"))?;
+                let val = iter
+                    .next()
+                    .ok_or_else(|| usage_error("--key requires a value"))?;
                 key = Some(val.to_string_lossy().to_string());
             }
             val if val.starts_with("--key=") => {
@@ -861,11 +904,14 @@ fn parse_secret(args: Vec<OsString>) -> Result<Action, CliError> {
             }
         }
     }
-    let provider = provider.ok_or_else(|| usage_error("usage: termigo secret <provider> [--key <value>]"))?;
+    let provider =
+        provider.ok_or_else(|| usage_error("usage: termigo secret <provider> [--key <value>]"))?;
     let key = key.ok_or_else(|| usage_error("secret requires --key <value>"))?;
-    let params = serde_json::to_value(SecretSetParams { provider, value: key }).map_err(|e| {
-        CliError::new("serialization_error", e.to_string(), EXIT_PROTOCOL)
-    })?;
+    let params = serde_json::to_value(SecretSetParams {
+        provider,
+        value: key,
+    })
+    .map_err(|e| CliError::new("serialization_error", e.to_string(), EXIT_PROTOCOL))?;
     Ok(Action::Request {
         method: METHOD_SECRET_SET,
         params,
@@ -1305,8 +1351,13 @@ fn print_result(method: &str, result: Value, as_json: bool) {
                         for m in models {
                             if m.get("provider").and_then(Value::as_str) == Some(prov_id) {
                                 let m_id = m.get("id").and_then(Value::as_str).unwrap_or("");
-                                let m_label = m.get("label").and_then(Value::as_str).unwrap_or(m_id);
-                                let marker = if m_id == default_model { " [default]" } else { "" };
+                                let m_label =
+                                    m.get("label").and_then(Value::as_str).unwrap_or(m_id);
+                                let marker = if m_id == default_model {
+                                    " [default]"
+                                } else {
+                                    ""
+                                };
                                 println!("  - {m_id}: {m_label}{marker}");
                             }
                         }
@@ -1834,7 +1885,8 @@ mod tests {
         assert_eq!(params["context_limit"], 32768);
         assert_eq!(params["set_default"], true);
 
-        let remove = parse_args(args(&["endpoint", "remove", "my-ollama"])).expect("parse endpoint remove");
+        let remove =
+            parse_args(args(&["endpoint", "remove", "my-ollama"])).expect("parse endpoint remove");
         assert_eq!(
             remove.action,
             Action::Request {
@@ -1852,7 +1904,8 @@ mod tests {
         let err = parse_args(args(&["endpoint", "add", "only-one"])).expect_err("incomplete add");
         assert_eq!(err.code, "usage");
 
-        let err = parse_args(args(&["endpoint", "remove", "a", "b"])).expect_err("too many remove args");
+        let err =
+            parse_args(args(&["endpoint", "remove", "a", "b"])).expect_err("too many remove args");
         assert_eq!(err.code, "usage");
     }
 
@@ -1897,7 +1950,8 @@ mod tests {
             }
         );
 
-        let one_setting = parse_args(args(&["settings", "toolSearchEnabled"])).expect("parse one setting");
+        let one_setting =
+            parse_args(args(&["settings", "toolSearchEnabled"])).expect("parse one setting");
         assert_eq!(
             one_setting.action,
             Action::Request {
@@ -1906,7 +1960,8 @@ mod tests {
             }
         );
 
-        let set_setting = parse_args(args(&["settings", "set", "toolSearchEnabled", "true"])).expect("parse set setting");
+        let set_setting = parse_args(args(&["settings", "set", "toolSearchEnabled", "true"]))
+            .expect("parse set setting");
         assert_eq!(
             set_setting.action,
             Action::Request {
@@ -1915,7 +1970,8 @@ mod tests {
             }
         );
 
-        let secret = parse_args(args(&["secret", "openai", "--key", "sk-secret123"])).expect("parse secret");
+        let secret =
+            parse_args(args(&["secret", "openai", "--key", "sk-secret123"])).expect("parse secret");
         assert_eq!(
             secret.action,
             Action::Request {

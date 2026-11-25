@@ -322,11 +322,22 @@ describe("tool payload measurement", () => {
   it("stays under a budget, so growth is caught here and not in production", () => {
     const payload = measureToolPayload(built);
     const kb = payload.bytes / 1024;
-    // Measured at ~107.6 KB after browser additions and ~110.4 KB after
-    // test-synthesizer, git-bisect and browser-visual-diff schemas.
+    // Measured at ~107.6 KB after browser additions, ~110.4 KB after
+    // test-synthesizer, git-bisect and browser-visual-diff schemas, and
+    // ~116.3 KB after the seven persistent browser_session_* schemas.
+    // The nine deep-interaction session tools (select, click_at, click_item,
+    // composer, eval, cookies, wait, screenshot, resume) add ~6 KB; they are
+    // browser-group only, so a session that does not drive a browser pays none
+    // of it.
+    // The office group (11 document/CSV/calendar tools) adds ~8.1 KB; it is
+    // group-gated, so a coding session that never produces a document pays
+    // none of it. Measured 132.4 KB in total.
+    // The media, cron, Telegram photo/voice, pentest (6 tools), and desktop/
+    // Blender (6 tools) groups are all group-gated so coding sessions that do
+    // not load those domains pay none of it. Measured ~145.6 KB.
     // The ceiling is the point of the test: a feature that adds schemas has
     // to either fit or raise it deliberately, in a diff a reviewer sees.
-    expect(kb).toBeLessThan(114);
+    expect(kb).toBeLessThan(150);
     // And it must be exact: an unmeasured schema would silently under-report.
     expect(payload.unmeasured).toBe(0);
   });

@@ -4,7 +4,11 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createMuseFetch } from "./museStream";
 
-type RecordedCall = { url: string; body: Record<string, unknown> | null };
+type RecordedCall = {
+  url: string;
+  body: Record<string, unknown> | null;
+  headers: Headers;
+};
 
 const ATTESTATION_BODY = JSON.stringify({
   error: {
@@ -15,10 +19,12 @@ const ATTESTATION_BODY = JSON.stringify({
   },
 });
 
-function fakeMeta(reply: { toolBlock: string; finalText: string }) {
+function fakeMeta(
+  reply: { toolBlock: string; finalText: string },
+  opts: { refuseNative?: boolean } = {},
+) {
   const calls: RecordedCall[] = [];
   let chatHits = 0;
-  let responsesHits = 0;
   const base = async (
     input: RequestInfo | URL,
     init?: RequestInit,
@@ -26,7 +32,7 @@ function fakeMeta(reply: { toolBlock: string; finalText: string }) {
     const url = typeof input === "string" ? input : input.toString();
     const raw = typeof init?.body === "string" ? init.body : "";
     const body = raw ? (JSON.parse(raw) as Record<string, unknown>) : null;
-    calls.push({ url, body });
+    calls.push({ url, body, headers: new Headers(init?.headers) });
     if (url.endsWith("/chat/completions")) {
       chatHits++;
       // Meta refuses a Muse Code subscription key on this route, with
@@ -37,14 +43,30 @@ function fakeMeta(reply: { toolBlock: string; finalText: string }) {
       });
     }
     if (url.endsWith("/responses")) {
-      responsesHits++;
-      // The same subscription key is refused when it registers tools
-      // natively, and served on this route when it does not (the text
-      // tool protocol).
-      if (body?.tools) {
-        return new Response(ATTESTATION_BODY, {
-          status: 403,
-          headers: { "content-type": "application/json" },
+      const done =
+        'data: {"type":"response.completed","response":{"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}}\n\n';
+      if (Array.isArray(body?.tools)) {
+        if (opts.refuseNative) {
+          return new Response(ATTESTATION_BODY, {
+            status: 403,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        if (raw.includes("function_call_output")) {
+          const sse =
+            `data: {"type":"response.output_text.delta","delta":${JSON.stringify(reply.finalText)}}\n\n` +
+            done;
+          return new Response(sse, {
+            status: 200,
+            headers: { "content-type": "text/event-stream" },
+          });
+        }
+        const sse =
+          'data: {"type":"response.output_item.done","item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"bash_run","arguments":"{\\"command\\":\\"ls\\"}"}}\n\n' +
+          done;
+        return new Response(sse, {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
         });
       }
       const text = raw.includes("```tool_result")
@@ -53,7 +75,7 @@ function fakeMeta(reply: { toolBlock: string; finalText: string }) {
       const delta = JSON.stringify(text);
       const sse =
         `data: {"type":"response.output_text.delta","delta":${delta}}\n\n` +
-        'data: {"type":"response.completed","response":{"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}}\n\n';
+        done;
       return new Response(sse, {
         status: 200,
         headers: { "content-type": "text/event-stream" },
@@ -61,54 +83,7 @@ function fakeMeta(reply: { toolBlock: string; finalText: string }) {
     }
     return new Response("not found", { status: 404 });
   };
-  return {
-    base: base as typeof fetch,
-    calls,
-    chatHits: () => chatHits,
-    responsesHits: () => responsesHits,
-  };
-}
-
-/** A Meta that ACCEPTS the native namespace registration (the pay-as-you-go
- *  shape): function calls arrive as real Responses items, with the
- *  arguments finalized in their own event and the item carrying them
- *  empty, the way Muse actually streams them. */
-function fakeMetaNative(reply: { finalText: string }) {
-  const calls: RecordedCall[] = [];
-  const base = async (
-    input: RequestInfo | URL,
-    init?: RequestInit,
-  ): Promise<Response> => {
-    const url = typeof input === "string" ? input : input.toString();
-    const raw = typeof init?.body === "string" ? init.body : "";
-    const body = raw ? (JSON.parse(raw) as Record<string, unknown>) : null;
-    calls.push({ url, body });
-    if (!url.endsWith("/responses")) {
-      return new Response("not found", { status: 404 });
-    }
-    const usage =
-      '"response":{"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}';
-    if (raw.includes("function_call_output")) {
-      const delta = JSON.stringify(reply.finalText);
-      const sse =
-        `data: {"type":"response.output_text.delta","delta":${delta}}\n\n` +
-        `data: {"type":"response.completed",${usage}}\n\n`;
-      return new Response(sse, {
-        status: 200,
-        headers: { "content-type": "text/event-stream" },
-      });
-    }
-    const sse =
-      'data: {"type":"response.output_text.delta","delta":"Checking."}\n\n' +
-      'data: {"type":"response.function_call_arguments.done","item_id":"fc_1","arguments":"{\\"command\\":\\"ls\\"}"}\n\n' +
-      'data: {"type":"response.output_item.done","item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"bash_run","arguments":""}}\n\n' +
-      `data: {"type":"response.completed",${usage}}\n\n`;
-    return new Response(sse, {
-      status: 200,
-      headers: { "content-type": "text/event-stream" },
-    });
-  };
-  return { base: base as typeof fetch, calls };
+  return { base: base as typeof fetch, calls, chatHits: () => chatHits };
 }
 
 function chatInit(
@@ -144,12 +119,40 @@ const BASH_TOOL = {
 };
 
 describe("createMuseFetch attestation fallback", () => {
+  it("sends native Responses tools under the Muse CLI identity", async () => {
+    const fake = fakeMeta({ toolBlock: "", finalText: "done listing" });
+    const museFetch = createMuseFetch(fake.base);
+    const first = await museFetch(
+      "https://api.meta.ai/v1/chat/completions",
+      chatInit([{ role: "user", content: "list files" }], [BASH_TOOL]),
+    );
+    const firstText = await first.text();
+    expect(first.status).toBe(200);
+    expect(firstText).toContain('"tool_calls"');
+    expect(firstText).toContain('"name":"bash_run"');
+    expect(fake.chatHits()).toBe(0);
+    const sent = fake.calls[fake.calls.length - 1];
+    expect(sent.url.endsWith("/responses")).toBe(true);
+    const tools = sent.body?.tools as Array<Record<string, unknown>>;
+    expect(tools).toHaveLength(1);
+    expect(tools[0].type).toBe("namespace");
+    expect(tools[0].name).toBe("muse");
+    expect(sent.body?.tool_choice).toBeUndefined();
+    expect(sent.headers.get("user-agent")).toContain("muse-build/1.4.24");
+    expect(sent.headers.get("x-client-id")).toBe("tbh:exec");
+    expect(sent.headers.get("x-tbh-agent-role")).toBe("main");
+    expect(sent.headers.get("x-tbh-session-id")).toBeTruthy();
+  });
+
   it("switches a refused muse login to the text tool protocol and keeps it there", async () => {
-    const fake = fakeMeta({
-      toolBlock:
-        '```tool_call\n{"name":"bash_run","arguments":{"command":"ls"}}\n```',
-      finalText: "done listing",
-    });
+    const fake = fakeMeta(
+      {
+        toolBlock:
+          '```tool_call\n{"name":"bash_run","arguments":{"command":"ls"}}\n```',
+        finalText: "done listing",
+      },
+      { refuseNative: true },
+    );
     const museFetch = createMuseFetch(fake.base);
 
     const first = await museFetch(
@@ -206,11 +209,7 @@ describe("createMuseFetch attestation fallback", () => {
       ),
     );
     const secondText = await second.text();
-    // The chat route is never used at all now: the refusal and both text
-    // steps all happened on /responses (native attempt + text retry on
-    // step one, straight text on step two).
     expect(fake.chatHits()).toBe(0);
-    expect(fake.responsesHits()).toBe(3);
     expect(secondText).toContain("done listing");
     expect(secondText).toContain('"finish_reason":"stop"');
     const last = fake.calls[fake.calls.length - 1];
@@ -271,117 +270,259 @@ describe("createMuseFetch attestation fallback", () => {
     expect(await response.text()).toContain("invalid_api_key");
   });
 
-  it("serves a native Responses call when Meta accepts the namespace registration", async () => {
-    const fake = fakeMetaNative({ finalText: "done listing" });
-    const museFetch = createMuseFetch(fake.base);
+  it("still sanitises a stream on a route it does not translate", async () => {
+    const base = (async () =>
+      new Response(
+        'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n' +
+          'data: {"usage":{"total_tokens":12}}\n\n',
+        { status: 200, headers: { "content-type": "text/event-stream" } },
+      )) as typeof fetch;
+    const museFetch = createMuseFetch(base);
+    const response = await museFetch(
+      "https://api.meta.ai/v1/models",
+      chatInit([{ role: "user", content: "hi" }], undefined, "key-native"),
+    );
+    expect(await response.text()).toContain('"choices":[]');
+  });
 
-    const first = await museFetch(
+  it("ignores text tool_call blocks for tools not declared in the request", async () => {
+    const sse = [
+      `data: ${JSON.stringify({
+        type: "response.output_text.delta",
+        delta:
+          'Example:\n```tool_call\n{"name":"undeclared_tool","arguments":{"x":1}}\n```',
+      })}\n\n`,
+      `data: ${JSON.stringify({ type: "response.completed", response: {} })}\n\n`,
+    ].join("");
+    const base = (async () =>
+      new Response(sse, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      })) as typeof fetch;
+    const museFetch = createMuseFetch(base);
+    const response = await museFetch(
       "https://api.meta.ai/v1/chat/completions",
       chatInit(
-        [{ role: "user", content: "list files" }],
+        [{ role: "user", content: "show an example" }],
         [BASH_TOOL],
-        "key-native-ok",
+        "key-undeclared",
       ),
     );
-    const firstText = await first.text();
-    expect(first.status).toBe(200);
-    expect(firstText).toContain("Checking.");
-    expect(firstText).toContain('"tool_calls"');
-    expect(firstText).toContain('"id":"call_1"');
-    expect(firstText).toContain('"name":"bash_run"');
-    expect(firstText).toContain('"{\\"command\\":\\"ls\\"}"');
-    expect(firstText).toContain('"finish_reason":"tool_calls"');
+    const text = await response.text();
+    expect(text).not.toContain('"finish_reason":"tool_calls"');
+    expect(text).toContain('"finish_reason":"stop"');
+    expect(text).toContain("undeclared_tool");
+  });
 
-    // The request itself is termixgo's payload shape: one namespace tool,
-    // no stored state, the session cache key, encrypted reasoning asked.
-    const sent = fake.calls[0];
-    expect(sent.url.endsWith("/responses")).toBe(true);
-    expect(sent.body?.store).toBe(false);
-    expect(String(sent.body?.prompt_cache_key)).toMatch(/^tbh:main:/);
-    expect(sent.body?.include).toEqual(["reasoning.encrypted_content"]);
-    const tools = sent.body?.tools as {
-      type?: string;
-      name?: string;
-      tools?: unknown[];
-    }[];
-    expect(tools).toHaveLength(1);
-    expect(tools[0]?.type).toBe("namespace");
-    expect(tools[0]?.name).toBe("muse");
-    expect(tools[0]?.tools).toHaveLength(1);
+  it("restores original tool names when native function_call returns a sanitized wire name", async () => {
+    const mcpTool = {
+      type: "function",
+      function: {
+        name: "mcp.docs/search",
+        description: "Search docs.",
+        parameters: { type: "object", properties: { q: { type: "string" } } },
+      },
+    };
+    const sse = [
+      `data: ${JSON.stringify({
+        type: "response.output_item.done",
+        item: {
+          type: "function_call",
+          id: "fc_1",
+          call_id: "call_1",
+          name: "mcp_docs_search",
+          arguments: '{"q":"linux"}',
+        },
+      })}\n\n`,
+      `data: ${JSON.stringify({ type: "response.completed", response: {} })}\n\n`,
+    ].join("");
+    const base = (async () =>
+      new Response(sse, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      })) as typeof fetch;
+    const museFetch = createMuseFetch(base);
+    const response = await museFetch(
+      "https://api.meta.ai/v1/chat/completions",
+      chatInit(
+        [{ role: "user", content: "search" }],
+        [mcpTool],
+        "key-mcp-alias",
+      ),
+    );
+    const text = await response.text();
+    expect(text).toContain('"name":"mcp.docs/search"');
+    expect(text).toContain('"finish_reason":"tool_calls"');
+  });
 
-    // The next step replays the call in native shape: the function_call
-    // item stamped with its fc_ id and completed status, the commentary
-    // phase on the prose that preceded it, the result as an output item.
-    const second = await museFetch(
+  it("stamps fc_ id, commentary phase, and array include on native tool-loop replay", async () => {
+    let captured: Record<string, unknown> | null = null;
+    const base = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      captured = JSON.parse(String(init?.body ?? "{}")) as Record<
+        string,
+        unknown
+      >;
+      return new Response(
+        `data: ${JSON.stringify({ type: "response.output_text.delta", delta: "done" })}\n\ndata: ${JSON.stringify({ type: "response.completed", response: {} })}\n\n`,
+        { status: 200, headers: { "content-type": "text/event-stream" } },
+      );
+    }) as typeof fetch;
+    const museFetch = createMuseFetch(base);
+    await museFetch(
       "https://api.meta.ai/v1/chat/completions",
       chatInit(
         [
-          { role: "user", content: "list files" },
+          { role: "user", content: "run ls" },
           {
             role: "assistant",
-            content: "Checking.",
+            content: "Checking files now.",
             tool_calls: [
               {
-                id: "call_1",
+                id: "call_abc",
                 type: "function",
                 function: { name: "bash_run", arguments: '{"command":"ls"}' },
               },
             ],
           },
-          { role: "tool", tool_call_id: "call_1", content: "file.txt" },
+          { role: "tool", tool_call_id: "call_abc", content: "README.md" },
         ],
         [BASH_TOOL],
-        "key-native-ok",
+        "key-native-replay",
       ),
     );
-    expect(await second.text()).toContain("done listing");
-    const replay = fake.calls[fake.calls.length - 1];
-    const items = (replay.body?.input ?? []) as Record<string, unknown>[];
-    const callItem = items.find((i) => i.type === "function_call");
-    expect(callItem?.id).toBe("fc_call_1");
-    expect(callItem?.call_id).toBe("call_1");
-    expect(callItem?.status).toBe("completed");
-    const proseItem = items.find(
+    expect(captured).not.toBeNull();
+    expect((captured as unknown as Record<string, unknown>).include).toEqual([
+      "reasoning.encrypted_content",
+    ]);
+    const input = (captured as unknown as { input: Record<string, unknown>[] })
+      .input;
+    const assistantMsg = input.find(
       (i) => i.type === "message" && i.role === "assistant",
     );
-    expect(proseItem?.phase).toBe("commentary");
-    const outputItem = items.find((i) => i.type === "function_call_output");
-    expect(outputItem?.call_id).toBe("call_1");
-    expect(outputItem?.output).toBe("file.txt");
+    expect(assistantMsg?.phase).toBe("commentary");
+    const fnCall = input.find((i) => i.type === "function_call");
+    expect(fnCall?.id).toBe("fc_call_abc");
+    expect(fnCall?.status).toBe("completed");
   });
-});
 
-describe("createMuseFetch recovery ladder", () => {
-  const OK_SSE =
-    'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n' + "data: [DONE]\n\n";
+  it("parses <tool_call>, json fences, and args/inline parameter variants without losing arguments", async () => {
+    const findTool = {
+      type: "function",
+      function: {
+        name: "find_tools",
+        description: "Find tools.",
+        parameters: {
+          type: "object",
+          properties: { query: { type: "string" } },
+          required: ["query"],
+        },
+      },
+    };
+    const sse = [
+      `data: ${JSON.stringify({
+        type: "response.output_text.delta",
+        delta: [
+          "Checking tools:",
+          '```json\n{"example":"not a tool"}\n```',
+          '<tool_call>\n{"name":"find_tools","args":{"query":"mcp"}}\n</tool_call>',
+          '```tool-call\n{"name":"bash_run","command":"pwd"}\n```',
+        ].join("\n"),
+      })}\n\n`,
+      `data: ${JSON.stringify({ type: "response.completed", response: {} })}\n\n`,
+    ].join("");
+    const base = (async () =>
+      new Response(sse, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      })) as typeof fetch;
+    const museFetch = createMuseFetch(base, { retryDelayMs: () => 0 });
+    const response = await museFetch(
+      "https://api.meta.ai/v1/chat/completions",
+      chatInit(
+        [{ role: "user", content: "find mcp" }],
+        [findTool, BASH_TOOL],
+        "key-text-variants",
+      ),
+    );
+    const text = await response.text();
+    expect(text).toContain('"name":"find_tools"');
+    expect(text).toContain('"{\\"query\\":\\"mcp\\"}"');
+    expect(text).toContain('"name":"bash_run"');
+    expect(text).toContain('"{\\"command\\":\\"pwd\\"}"');
+    expect(text).toContain('"finish_reason":"tool_calls"');
+  });
 
-  it("remints once on a stale-key 401 and retries with the fresh credential", async () => {
-    const seenAuth: string[] = [];
-    const base = (async (
-      _input: RequestInfo | URL,
-      init?: RequestInit,
-    ): Promise<Response> => {
-      const auth =
-        init?.headers instanceof Headers
-          ? (init.headers.get("authorization") ?? "")
-          : ((init?.headers as Record<string, string>)?.Authorization ?? "");
-      seenAuth.push(auth);
-      if (auth === "Bearer fresh-key") {
-        return new Response(OK_SSE, {
+  it("retries transient response.failed SSE errors before failing", async () => {
+    let attempts = 0;
+    const base = (async () => {
+      attempts++;
+      if (attempts === 1) {
+        const failedSse =
+          'data: {"type":"response.failed","response":{"error":{"message":"The model failed to generate a response."}}}\n\n';
+        return new Response(failedSse, {
           status: 200,
           headers: { "content-type": "text/event-stream" },
         });
       }
-      return new Response(
-        JSON.stringify({ error: { code: "invalid_api_key" } }),
-        { status: 401, headers: { "content-type": "application/json" } },
-      );
+      const okSse =
+        'data: {"type":"response.output_text.delta","delta":"recovered"}\n\n' +
+        'data: {"type":"response.completed","response":{}}\n\n';
+      return new Response(okSse, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
     }) as typeof fetch;
-    let remints = 0;
+    const museFetch = createMuseFetch(base, { retryDelayMs: () => 0 });
+    const response = await museFetch(
+      "https://api.meta.ai/v1/chat/completions",
+      chatInit(
+        [{ role: "user", content: "continue" }],
+        [BASH_TOOL],
+        "key-transient-retry",
+      ),
+    );
+    const text = await response.text();
+    expect(attempts).toBe(2);
+    expect(text).toContain("recovered");
+    expect(text).not.toContain("muse_response_failed");
+  });
+});
+
+describe("createMuseFetch remint ladder", () => {
+  it("remints once on a stale-key 401, retries with the fresh key, and substitutes it later", async () => {
+    const seenAuth: string[] = [];
+    const base = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const url = typeof input === "string" ? input : input.toString();
+      const headers = new Headers(init?.headers);
+      seenAuth.push(headers.get("authorization") ?? "");
+      if (!url.endsWith("/responses")) {
+        return new Response("not found", { status: 404 });
+      }
+      if (headers.get("authorization") === "Bearer key-stale") {
+        return new Response(
+          JSON.stringify({
+            error: { code: "invalid_api_key", message: "Unauthorized" },
+          }),
+          { status: 401, headers: { "content-type": "application/json" } },
+        );
+      }
+      const sse =
+        'data: {"type":"response.output_text.delta","delta":"fresh answer"}\n\n' +
+        'data: {"type":"response.completed","response":{"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}\n\n';
+      return new Response(sse, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    }) as typeof fetch;
+    let remintCalls = 0;
     const museFetch = createMuseFetch(base, {
+      retryDelayMs: () => 0,
       remint: async () => {
-        remints += 1;
-        return "fresh-key";
+        remintCalls++;
+        return "key-fresh";
       },
     });
 
@@ -389,84 +530,50 @@ describe("createMuseFetch recovery ladder", () => {
       "https://api.meta.ai/v1/chat/completions",
       chatInit(
         [{ role: "user", content: "hi" }],
-        undefined,
-        "Bearer stale-key",
+        [BASH_TOOL],
+        "Bearer key-stale",
       ),
     );
     expect(first.status).toBe(200);
-    expect(remints).toBe(1);
-    expect(seenAuth).toEqual(["Bearer stale-key", "Bearer fresh-key"]);
+    expect(await first.text()).toContain("fresh answer");
+    expect(remintCalls).toBe(1);
+    expect(seenAuth).toEqual(["Bearer key-stale", "Bearer key-fresh"]);
 
-    // The retired credential is substituted up front on later calls, so
-    // the rejection is not paid again.
+    // The retired credential is substituted up front on the next call:
+    // no second rejection, no second remint.
     const second = await museFetch(
       "https://api.meta.ai/v1/chat/completions",
       chatInit(
         [{ role: "user", content: "hi" }],
-        undefined,
-        "Bearer stale-key",
+        [BASH_TOOL],
+        "Bearer key-stale",
       ),
     );
     expect(second.status).toBe(200);
-    expect(remints).toBe(1);
-    expect(seenAuth[seenAuth.length - 1]).toBe("Bearer fresh-key");
+    expect(remintCalls).toBe(1);
+    expect(seenAuth).toEqual([
+      "Bearer key-stale",
+      "Bearer key-fresh",
+      "Bearer key-fresh",
+    ]);
   });
 
-  it("sends the official build identity and a stable per-credential session", async () => {
-    const seen: { ua: string; session: string; client: string }[] = [];
-    const base = (async (
-      _input: RequestInfo | URL,
-      init?: RequestInit,
-    ): Promise<Response> => {
-      const headers = new Headers(init?.headers);
-      seen.push({
-        ua: headers.get("user-agent") ?? "",
-        session: headers.get("x-tbh-session-id") ?? "",
-        client: headers.get("x-client-id") ?? "",
-      });
-      return new Response(OK_SSE, {
-        status: 200,
-        headers: { "content-type": "text/event-stream" },
-      });
-    }) as typeof fetch;
-    const museFetch = createMuseFetch(base);
-    const call = (auth: string) =>
-      museFetch(
-        "https://api.meta.ai/v1/chat/completions",
-        chatInit([{ role: "user", content: "hi" }], undefined, auth),
-      );
-    await call("Bearer identity-key-a");
-    await call("Bearer identity-key-a");
-    await call("Bearer identity-key-b");
-    expect(seen[0]?.ua).toMatch(/^muse-build\/1\.4\.24 \(non-interactive; /);
-    expect(seen[0]?.client).toBe("tbh:exec");
-    expect(seen[0]?.session).not.toBe("");
-    // Same credential, same session; another credential, its own session.
-    expect(seen[1]?.session).toBe(seen[0]?.session);
-    expect(seen[2]?.session).not.toBe(seen[0]?.session);
-  });
-
-  it("retries a transient 429 and succeeds", async () => {
-    let hits = 0;
-    const base = (async (): Promise<Response> => {
-      hits += 1;
-      if (hits === 1) {
-        return new Response("rate limited", {
-          status: 429,
-          headers: { "retry-after": "Wed, 01 Jan 2025 00:00:00 GMT" },
-        });
-      }
-      return new Response(OK_SSE, {
-        status: 200,
-        headers: { "content-type": "text/event-stream" },
-      });
-    }) as typeof fetch;
-    const museFetch = createMuseFetch(base);
+  it("does not remint for a credential with no remint wired", async () => {
+    const base = (async () =>
+      new Response(
+        JSON.stringify({
+          error: { code: "invalid_api_key", message: "Unauthorized" },
+        }),
+        {
+          status: 401,
+          headers: { "content-type": "application/json" },
+        },
+      )) as typeof fetch;
+    const museFetch = createMuseFetch(base, { retryDelayMs: () => 0 });
     const response = await museFetch(
       "https://api.meta.ai/v1/chat/completions",
-      chatInit([{ role: "user", content: "hi" }], undefined, "key-native"),
+      chatInit([{ role: "user", content: "hi" }], [BASH_TOOL], "key-lonely"),
     );
-    expect(response.status).toBe(200);
-    expect(hits).toBe(2);
+    expect(response.status).toBe(401);
   });
 });

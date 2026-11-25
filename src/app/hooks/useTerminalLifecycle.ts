@@ -25,6 +25,13 @@ import {
 } from "react";
 import { toast } from "sonner";
 
+/**
+ * How many distinct cwds to keep authorized. One entry per directory the
+ * terminal has ever been in; past this the oldest is dropped (the asset scope
+ * is re-granted on the next visit).
+ */
+const MAX_AUTHORIZED_CWDS = 256;
+
 type Params = {
   tabs: Tab[];
   tabsRef: RefObject<Tab[]>;
@@ -156,6 +163,17 @@ export function useTerminalLifecycle({
       if (onSsh) return;
       if (cwd && !authorizedCwds.current.has(cwd)) {
         authorizedCwds.current.add(cwd);
+        // Bounded: this set is one entry per distinct cwd ever visited and
+        // nothing pruned it, so a script that `cd`s through hundreds of
+        // directories (or a `find`-driven loop) grew it for the session's
+        // lifetime. A Set keeps insertion order, so the oldest entry is the
+        // first iterated and can be dropped once the cap is reached.
+        if (authorizedCwds.current.size > MAX_AUTHORIZED_CWDS) {
+          const oldest = authorizedCwds.current.values().next().value;
+          if (oldest !== undefined && oldest !== cwd) {
+            authorizedCwds.current.delete(oldest);
+          }
+        }
         native.workspaceAuthorize(cwd).catch(() => {
           authorizedCwds.current.delete(cwd);
         });

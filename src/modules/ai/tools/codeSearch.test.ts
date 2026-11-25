@@ -14,8 +14,8 @@ describe("codeSearch tools", () => {
     expect(tools.code_index).toBeDefined();
   });
 
-  it("returns empty results when index is empty", async () => {
-    expect(getIndexStats()).toEqual({ files: 0, chunks: 0, truncated: false });
-    await expect(searchCode("anything")).resolves.toEqual([]);
+  it("returns empty results when index is empty", () => {
+    expect(getIndexStats()).toEqual({ files: 0, chunks: 0 });
+    expect(searchCode("anything")).toEqual([]);
   });
 });

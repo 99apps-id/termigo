@@ -129,10 +129,17 @@ pub fn system_snapshot() -> SystemSnapshot {
 }
 
 #[tauri::command]
-pub fn system_disk_usage(path: String) -> Result<DiskUsage, String> {
+pub fn system_disk_usage(
+    path: String,
+    registry: tauri::State<'_, crate::modules::workspace::WorkspaceRegistry>,
+) -> Result<DiskUsage, String> {
     if path.is_empty() || path.len() > 4096 || path.bytes().any(|b| b == 0) {
         return Err("invalid disk path".to_string());
     }
+    // A disk-usage probe names an arbitrary filesystem location, so it goes
+    // through the same workspace authorization as every other path-taking
+    // command (enforced by tests/command_authorization.rs).
+    crate::modules::workspace::require_authorized(&registry, std::path::Path::new(&path))?;
     let output = std::process::Command::new("df")
         .args(["-P", "-k", "--", &path])
         .output()

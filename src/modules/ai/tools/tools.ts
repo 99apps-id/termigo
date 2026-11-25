@@ -23,6 +23,8 @@ import { buildManagedAgentTools } from "./agent";
 import { buildBrowserTools } from "./browser";
 import { buildCodeSearchTools } from "./codeSearch";
 import { buildTreeCompareTools } from "./compareTrees";
+import { buildCronTools } from "./cron";
+import { buildDesktopTools } from "./desktop";
 import { buildDevServerTools } from "./devServer";
 import { buildEditTools } from "./edit";
 import { buildElicitationTools } from "./elicitation";
@@ -37,8 +39,11 @@ import { buildImageTools } from "./image";
 import { buildInvariantTools } from "./invariant";
 import { buildLspTools } from "./lsp";
 import { buildMcpOAuthTools } from "./mcpOAuth";
+import { buildMediaTools } from "./media";
 import { buildMemoryTools } from "./memory";
+import { buildOfficeTools } from "./office";
 import { buildPdfTools } from "./pdf";
+import { buildPentestTools } from "./pentest";
 import { buildPolicyTools } from "./policyTools";
 import { buildProcessTools } from "./process";
 import { buildPtyDriverTools } from "./ptyDriver";
@@ -345,8 +350,13 @@ export function buildTools(
     ...buildBrowserTools(ctx),
     ...buildSqlTools(),
     ...buildWebSearchTools(),
+    ...buildOfficeTools(ctx),
     ...buildPdfTools(ctx),
     ...buildImageTools(ctx),
+    ...buildMediaTools(ctx),
+    ...buildCronTools(ctx),
+    ...buildPentestTools(ctx),
+    ...buildDesktopTools(ctx),
     ...buildMcpOAuthTools(),
     ...buildSystemTools(),
     ...buildProcessTools(ctx),

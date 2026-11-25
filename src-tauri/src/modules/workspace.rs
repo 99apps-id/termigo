@@ -215,9 +215,8 @@ pub fn authorize_spawn_cwd(
         return Ok(None);
     };
     let resolved = resolve_path(cwd, workspace);
-    let canonical =
-        canonicalize_with_reparse_fallback(&resolved)
-            .map_err(|e| format!("cwd not accessible: {e}"))?;
+    let canonical = canonicalize_with_reparse_fallback(&resolved)
+        .map_err(|e| format!("cwd not accessible: {e}"))?;
     if !canonical.is_dir() {
         return Err(format!("cwd is not a directory: {}", canonical.display()));
     }
@@ -242,9 +241,8 @@ pub fn authorize_user_spawn_cwd(
         return Ok(None);
     };
     let resolved = resolve_path(cwd, workspace);
-    let canonical =
-        canonicalize_with_reparse_fallback(&resolved)
-            .map_err(|e| format!("cwd not accessible: {e}"))?;
+    let canonical = canonicalize_with_reparse_fallback(&resolved)
+        .map_err(|e| format!("cwd not accessible: {e}"))?;
     if !canonical.is_dir() {
         return Err(format!("cwd is not a directory: {}", canonical.display()));
     }
@@ -310,7 +308,10 @@ pub async fn workspace_current_dir(
 /// with a backlink pointing back to the worktree's `.git` file.
 /// We verify this bidirectional link and check that the target gitdir or main repo
 /// resides within an authorized workspace root.
-pub fn find_git_worktree_root_of_authorized(registry: &WorkspaceRegistry, path: &Path) -> Option<PathBuf> {
+pub fn find_git_worktree_root_of_authorized(
+    registry: &WorkspaceRegistry,
+    path: &Path,
+) -> Option<PathBuf> {
     let mut candidate = path.to_path_buf();
     loop {
         let git_file = candidate.join(".git");
@@ -337,11 +338,12 @@ pub fn find_git_worktree_root_of_authorized(registry: &WorkspaceRegistry, path: 
                                     let backlink_path = canon_gitdir.join("gitdir");
                                     if let Ok(backlink) = std::fs::read_to_string(&backlink_path) {
                                         let trimmed_backlink = backlink.trim();
-                                        let resolved_bl = if Path::new(trimmed_backlink).is_relative() {
-                                            canon_gitdir.join(trimmed_backlink)
-                                        } else {
-                                            PathBuf::from(trimmed_backlink)
-                                        };
+                                        let resolved_bl =
+                                            if Path::new(trimmed_backlink).is_relative() {
+                                                canon_gitdir.join(trimmed_backlink)
+                                            } else {
+                                                PathBuf::from(trimmed_backlink)
+                                            };
                                         if let (Ok(canon_bl), Ok(canon_gf)) = (
                                             std::fs::canonicalize(&resolved_bl),
                                             std::fs::canonicalize(&git_file),
@@ -709,7 +711,9 @@ pub fn decode_command_output(bytes: &[u8]) -> String {
             0
         };
         let units: Vec<u16> = bytes[start..]
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|c| u16::from_le_bytes([c[0], c[1]]))
             .collect();
         String::from_utf16_lossy(&units)
@@ -1025,12 +1029,30 @@ mod tests {
 
     #[test]
     fn host_to_wsl_path_converts_windows_drive_and_unc_correctly() {
-        assert_eq!(host_to_wsl_path(r"C:\Users\test\project", "Ubuntu"), "/mnt/c/Users/test/project");
-        assert_eq!(host_to_wsl_path("C:/Users/test/project", "Ubuntu"), "/mnt/c/Users/test/project");
-        assert_eq!(host_to_wsl_path(r"\\wsl.localhost\Ubuntu\home\test\pentest", "Ubuntu"), "/home/test/pentest");
-        assert_eq!(host_to_wsl_path("//wsl.localhost/Ubuntu/home/test/pentest", "Ubuntu"), "/home/test/pentest");
-        assert_eq!(host_to_wsl_path(r"\\wsl$\Ubuntu\var\log", "Ubuntu"), "/var/log");
-        assert_eq!(host_to_wsl_path("/usr/share/wordlists", "Ubuntu"), "/usr/share/wordlists");
+        assert_eq!(
+            host_to_wsl_path(r"C:\Users\test\project", "Ubuntu"),
+            "/mnt/c/Users/test/project"
+        );
+        assert_eq!(
+            host_to_wsl_path("C:/Users/test/project", "Ubuntu"),
+            "/mnt/c/Users/test/project"
+        );
+        assert_eq!(
+            host_to_wsl_path(r"\\wsl.localhost\Ubuntu\home\test\pentest", "Ubuntu"),
+            "/home/test/pentest"
+        );
+        assert_eq!(
+            host_to_wsl_path("//wsl.localhost/Ubuntu/home/test/pentest", "Ubuntu"),
+            "/home/test/pentest"
+        );
+        assert_eq!(
+            host_to_wsl_path(r"\\wsl$\Ubuntu\var\log", "Ubuntu"),
+            "/var/log"
+        );
+        assert_eq!(
+            host_to_wsl_path("/usr/share/wordlists", "Ubuntu"),
+            "/usr/share/wordlists"
+        );
     }
 
     #[test]
@@ -1290,17 +1312,11 @@ mod auth_tests {
 
         let wt_dir = tempdir("feature_wt_workdir");
         let wt_git_file = wt_dir.join(".git");
-        fs::write(
-            &wt_git_file,
-            format!("gitdir: {}", wt_meta.display()),
-        )
-        .expect("write wt .git file");
+        fs::write(&wt_git_file, format!("gitdir: {}", wt_meta.display()))
+            .expect("write wt .git file");
 
-        fs::write(
-            wt_meta.join("gitdir"),
-            format!("{}", wt_git_file.display()),
-        )
-        .expect("write backlink in repo");
+        fs::write(wt_meta.join("gitdir"), format!("{}", wt_git_file.display()))
+            .expect("write backlink in repo");
 
         let reg = WorkspaceRegistry::default();
         reg.authorize(&main_repo).expect("authorize main repo");

@@ -73,6 +73,15 @@ export async function cancelOAuthSignIn(): Promise<void> {
   await invoke("oauth_cancel");
 }
 
+/**
+ * Hands the `code#state` pasted from the Claude consent page to the pending
+ * sign-in. Used only when the loopback port is busy and the backend fell back
+ * to the hosted pasted-code redirect.
+ */
+export async function submitOAuthCode(code: string): Promise<void> {
+  await invoke("oauth_submit_code", { code });
+}
+
 export async function signInWithOAuth(
   provider: ProviderId,
 ): Promise<OAuthAccount> {

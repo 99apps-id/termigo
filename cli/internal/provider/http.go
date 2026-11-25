@@ -105,6 +105,9 @@ func newHTTPClient(info Provider, baseURL, apiKey string) (Client, error) {
 	if info.Kind == KindCopilot || info.ID == "github-copilot" {
 		return &copilotClient{httpClient: base}, nil
 	}
+	if info.Kind == KindMuse {
+		return &museClient{httpClient: base}, nil
+	}
 	switch info.Kind {
 	case KindAnthropic:
 		return &anthropicClient{httpClient: base}, nil

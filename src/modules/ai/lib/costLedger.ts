@@ -127,11 +127,36 @@ export async function loadCostLedger(): Promise<CostEntry[]> {
   }
 }
 
+/** Bumped every time a run is recorded, so a mounted panel can re-read. */
+let ledgerRevision = 0;
+const ledgerListeners = new Set<() => void>();
+
+/** Subscribe to ledger writes. Returns an unsubscribe function. */
+export function onCostLedgerChanged(listener: () => void): () => void {
+  ledgerListeners.add(listener);
+  return () => {
+    ledgerListeners.delete(listener);
+  };
+}
+
+/** How many times the ledger has been written this session. */
+export function costLedgerRevision(): number {
+  return ledgerRevision;
+}
+
+function notifyCostLedgerChanged(): void {
+  ledgerRevision++;
+  for (const listener of ledgerListeners) listener();
+}
+
 export async function recordRunCost(entry: CostEntry): Promise<void> {
   const entries = await loadCostLedger();
   const next = [...pruneEntries(entries, entry.at), entry];
   await store.set(KEY_ENTRIES, next);
   await store.save();
+  // A panel that is open while a run finishes used to keep showing the
+  // pre-run figures until it was closed and reopened.
+  notifyCostLedgerChanged();
 }
 
 /** Total cost for a given day (YYYY-MM-DD). */

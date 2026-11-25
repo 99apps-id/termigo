@@ -2,10 +2,10 @@ use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::SystemTime;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use shared_child::SharedChild;
@@ -29,6 +29,9 @@ pub struct BackgroundProc {
     pub exited: AtomicBool,
     pub exit_code: AtomicI32,
     pub exit_unknown: AtomicBool,
+    /// Unix ms when the process exited, 0 while it runs. Lets the reaper drop
+    /// an exited entry whose output nobody ever read.
+    pub exited_at_ms: AtomicU64,
     /// Absolute path of the full-output log file, when the caller requested one.
     pub log_path: Option<String>,
     /// Handle to that file; both reader threads append to it as bytes arrive.
@@ -57,9 +60,51 @@ pub struct BackgroundProcInfo {
     pub log_path: Option<String>,
 }
 
+pub use super::ringbuffer::BoundedRingBuffer as ShellRingBuffer;
+
+/// How long an exited process keeps its output when nobody reads it.
+pub const UNREAD_GRACE_MS: u64 = 10 * 60 * 1000;
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
 impl BackgroundProc {
+    /// True once the process exited and its output has either been read or sat
+    /// unread past the grace period, so an abandoned process cannot pin its
+    /// buffer for the app's lifetime.
+    pub fn reapable(&self) -> bool {
+        if !self.exited.load(Ordering::Acquire) {
+            return false;
+        }
+        if self.drained() {
+            return true;
+        }
+        let at = self.exited_at_ms.load(Ordering::Acquire);
+        at > 0 && now_ms().saturating_sub(at) > UNREAD_GRACE_MS
+    }
+    /// True once the process exited and every buffered byte was consumed, so
+    /// the reap pass may finally drop the entry. A process still streaming, or
+    /// one whose final bytes nobody has read yet, always returns false.
+    pub fn drained(&self) -> bool {
+        if !self.exited.load(Ordering::Acquire) {
+            return false;
+        }
+        self.buffer
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_consumed()
+    }
+
     pub fn read_logs(&self, since: u64) -> BackgroundLogResponse {
-        let (bytes, next_offset, dropped) = self.buffer.lock().unwrap_or_else(|e| e.into_inner()).read_from(since);
+        let (bytes, next_offset, dropped) = self
+            .buffer
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .read_from(since);
         let exited = self.exited.load(Ordering::Acquire);
         let exit_code = if exited && !self.exit_unknown.load(Ordering::Acquire) {
             Some(self.exit_code.load(Ordering::Acquire))
@@ -224,6 +269,7 @@ pub fn spawn(
         exited: AtomicBool::new(false),
         exit_code: AtomicI32::new(0),
         exit_unknown: AtomicBool::new(false),
+        exited_at_ms: AtomicU64::new(0),
         log_path: log_path_str,
         log_file,
     });
@@ -237,7 +283,11 @@ pub fn spawn(
                 match pipe.read(&mut buf) {
                     Ok(0) => break,
                     Ok(n) => {
-                        proc_ref.buffer.lock().unwrap_or_else(|e| e.into_inner()).push(&buf[..n]);
+                        proc_ref
+                            .buffer
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .push(&buf[..n]);
                         if let Some(ref lf) = proc_ref.log_file {
                             if let Ok(mut f) = lf.lock() {
                                 let _ = f.write_all(&buf[..n]);
@@ -258,7 +308,11 @@ pub fn spawn(
                 match pipe.read(&mut buf) {
                     Ok(0) => break,
                     Ok(n) => {
-                        proc_ref.buffer.lock().unwrap_or_else(|e| e.into_inner()).push(&buf[..n]);
+                        proc_ref
+                            .buffer
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .push(&buf[..n]);
                         if let Some(ref lf) = proc_ref.log_file {
                             if let Ok(mut f) = lf.lock() {
                                 let _ = f.write_all(&buf[..n]);
@@ -281,6 +335,7 @@ pub fn spawn(
                 },
                 Err(_) => proc_ref.exit_unknown.store(true, Ordering::Release),
             }
+            proc_ref.exited_at_ms.store(now_ms(), Ordering::Release);
             proc_ref.exited.store(true, Ordering::Release);
             if let Some(ref lf) = proc_ref.log_file {
                 if let Ok(mut f) = lf.lock() {

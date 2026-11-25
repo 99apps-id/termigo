@@ -274,11 +274,11 @@ export function escapeHtml(text: string): string {
 export function sanitizeForTelegramHtml(text: string): string {
   // Remove C0 controls except HT(0x09), LF(0x0A), CR(0x0D)
   // Remove DEL(0x7F)
-  // Remove C1 controls 0x80-0x9F
-  // Note: intentionally keep valid emoji/surrogate pairs; Telegram accepts them.
+  // Preserve U+200D (Zero Width Joiner) and U+FE0F (Variation Selector-16)
+  // because compound Unicode emojis (e.g. 👨‍💻, 🏳️‍🌈, ❤️‍🔥) rely on ZWJ.
   return text
     .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "")
-    .replace(/[\u200b-\u200f\u2028-\u202f\u2060-\u206f\ufeff]/g, ""); // zero-width / line-separator / bidi / unicode control
+    .replace(/[\u200b\u200e\u200f\u2028-\u202f\u2060-\u206f\ufeff]/g, "");
 }
 
 /** Convert plain text for Telegram HTML parse_mode without interpreting markdown. */
@@ -358,16 +358,21 @@ export function formatMarkdownTable(markdownTable: string): string {
  * - *italic* or _italic_ -> <i>italic</i>
  * - __underline__ -> <u>underline</u>
  * - ~~strikethrough~~ -> <s>strikethrough</s>
+ * - ||spoiler|| -> <tg-spoiler>spoiler</tg-spoiler>
  * - `inline code` -> <code>inline code</code>
  * - ```code block``` -> <pre><code>code block</code></pre>
+ * - > quote -> <blockquote>quote</blockquote> (consecutive lines grouped)
+ * - Bullet lists (-, *, +) & task lists (- [ ], - [x]) -> • / ◦ / ▪ / ☐ / ☑
+ * - Numbered lists (1., 2., ...) & paragraph breaks preserved cleanly
+ * - Horizontal rules (---, ***, ___) -> ──────────
  * - Markdown tables -> clean monospace box tables inside <pre><code>...</code></pre>
  * - [link](url) -> <a href="url">link</a>
- * - Unicode emojis pass through natively
+ * - Unicode emojis (including ZWJ sequences) pass through natively
  */
 export function markdownToTelegramHtml(markdown: string): string {
   if (!markdown) return "";
 
-  let input = markdown;
+  let input = markdown.replace(/\r\n?/g, "\n");
   // Ensure unclosed code fences at the end of the message are closed
   const fenceMatches = input.match(/```/g);
   if (fenceMatches && fenceMatches.length % 2 !== 0) {
@@ -384,7 +389,7 @@ export function markdownToTelegramHtml(markdown: string): string {
 
   // 1. Extract fenced code blocks: ```lang\ncode\n```
   let text = input.replace(
-    /```([a-zA-Z0-9_-]*)\r?\n([\s\S]*?)\r?\n```/g,
+    /```([a-zA-Z0-9_-]*)\n([\s\S]*?)\n```/g,
     (_, lang, code) => {
       const idx = codeBlocks.length;
       const escaped = escapeHtml(code);
@@ -404,7 +409,7 @@ export function markdownToTelegramHtml(markdown: string): string {
   });
 
   // 3. Extract inline code: `code`
-  text = text.replace(/`([^`\r\n]+)`/g, (_, code) => {
+  text = text.replace(/`([^`\n]+)`/g, (_, code) => {
     const idx = inlineCodes.length;
     inlineCodes.push(`<code>${escapeHtml(code)}</code>`);
     return `\x00IC_${idx}\x00`;
@@ -412,7 +417,7 @@ export function markdownToTelegramHtml(markdown: string): string {
 
   // 4. Extract and format markdown tables into preformatted code blocks
   text = text.replace(
-    /(?:^|\n)((?:\|[^\r\n]+\|\r?\n?)+)/g,
+    /(?:^|\n)((?:\|[^\n]+\|\n?)+)/g,
     (fullMatch, tableBlock: string) => {
       const formatted = formatMarkdownTable(tableBlock);
       if (formatted !== tableBlock) {
@@ -428,11 +433,50 @@ export function markdownToTelegramHtml(markdown: string): string {
   // 5. Escape remaining HTML entities so raw <, >, & do not break Telegram parsing
   text = escapeHtml(text);
 
-  // 5. Allow explicit user HTML tags: <b>, <i>, <u>, <s>, <code>, <pre>
-  text = text.replace(/&lt;(\/)?(b|i|u|s|code|pre)&gt;/gi, "<$1$2>");
+  // 5a. Allow explicit Telegram-supported HTML tags
+  text = text.replace(
+    /&lt;(\/)?(b|i|u|s|code|pre|blockquote|tg-spoiler|strong|em|ins|del)&gt;/gi,
+    "<$1$2>",
+  );
 
-  // 6. Headings (# Title) -> <b>Title</b>
-  text = text.replace(/^(#{1,6})\s+(.+)$/gm, "<b>$2</b>");
+  // 5b. Extract link URLs before emphasis rules so underscores/asterisks in
+  // URLs (e.g. https://example.com/__v1__/a*b) are never rewritten into HTML
+  // tags inside href="...".
+  const linkHrefs: string[] = [];
+  text = text.replace(
+    /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+    (_match, label: string, url: string) => {
+      const idx = linkHrefs.length;
+      linkHrefs.push(url.replace(/"/g, "%22"));
+      return `<a href="\x00LN_${idx}\x00">${label}</a>`;
+    },
+  );
+
+  // 5c. Horizontal rules (---, ***, ___) -> clean divider (before bold/italic)
+  text = text.replace(/^[ \t]*(?:---+|\*\*\*+|___+)[ \t]*$/gm, "──────────");
+
+  // 6. Headings (# Title) -> <b>Title</b> (strip inner **bold** to avoid <b><b>)
+  text = text.replace(/^(#{1,6})\s+(.+)$/gm, (_m, _hashes, title: string) => {
+    return `<b>${title.replace(/\*\*(.+?)\*\*/g, "$1")}</b>`;
+  });
+
+  // 6b. Task lists (- [ ] / - [x]) and bullet lists (-, *, +) BEFORE italic
+  // rules so `* item with *italic*` never collides with `*...*`.
+  text = text.replace(
+    /^([ \t]*)[-*+]\s+\[([ xX])\]\s+(.+)$/gm,
+    (_m, indent: string, check: string, item: string) => {
+      const glyph = check.toLowerCase() === "x" ? "☑" : "☐";
+      return `${indent}${glyph} ${item}`;
+    },
+  );
+  text = text.replace(
+    /^([ \t]*)[-*+]\s+(.+)$/gm,
+    (_m, indent: string, item: string) => {
+      const depth = indent.replace(/\t/g, "  ").length;
+      const bullet = depth >= 4 ? "▪" : depth >= 2 ? "◦" : "•";
+      return `${indent}${bullet} ${item}`;
+    },
+  );
 
   // 7. Bold + Italic: ***text***
   text = text.replace(/\*\*\*(.+?)\*\*\*/g, "<b><i>$1</i></b>");
@@ -450,31 +494,44 @@ export function markdownToTelegramHtml(markdown: string): string {
   // every message instead of mis-formatting one. A capture group is supported
   // everywhere and has identical semantics here, because the boundary character
   // is put straight back. Same reasoning for step 11.
-  text = text.replace(/(^|[^*])\*([^*\r\n]+?)\*(?!\*)/g, "$1<i>$2</i>");
+  text = text.replace(/(^|[^*])\*([^*\n]+?)\*(?!\*)/g, "$1<i>$2</i>");
 
   // 11. Italic: _text_ (only when surrounded by whitespace or punctuation, to
   // avoid snake_case). The trailing boundary may stay a lookahead: look-ahead
   // has been in the language since ES3, and a zero-width assertion there is what
   // keeps the trailing delimiter available to the next match.
   text = text.replace(
-    /(^|[\s([{])_([^_ \r\n][^_\r\n]*?[^_ \r\n]|\S)_(?=[)\]}\s.,:;!?]|$)/gm,
+    /(^|[\s([{])_([^_ \n][^_\n]*?[^_ \n]|\S)_(?=[)\]}\s.,:;!?]|$)/gm,
     "$1<i>$2</i>",
   );
 
   // 12. Strikethrough: ~~text~~
   text = text.replace(/~~(.+?)~~/g, "<s>$1</s>");
 
-  // 13. Links: [label](url). The URL goes into an attribute, so a quote must
-  // not be able to close it early (escapeHtml does not touch quotes).
+  // 12b. Telegram spoilers: ||text|| -> <tg-spoiler>text</tg-spoiler>
+  text = text.replace(/\|\|([^\n]+?)\|\|/g, "<tg-spoiler>$1</tg-spoiler>");
+
+  // 13. Restore link URLs intact.
   text = text.replace(
-    /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
-    (_match, label: string, url: string) =>
-      `<a href="${url.replace(/"/g, "%22")}">${label}</a>`,
+    /\x00LN_(\d+)\x00/g,
+    (_, idx) => linkHrefs[Number(idx)] ?? "",
   );
 
-  // 14. Blockquotes: > quote -> Telegram HTML parse_mode does not support <blockquote>,
-  // so keep them as quoted lines instead of an unsupported tag.
-  text = text.replace(/^&gt;\s+(.+)$/gm, "&gt; $1");
+  // 14. Blockquotes: group consecutive `> ...` lines into a single
+  // Telegram-supported `<blockquote>...</blockquote>` block.
+  text = text.replace(/(?:^&gt;(?: ?.*)(?:\n|$))+/gm, (block: string) => {
+    const trailingNewline = block.endsWith("\n") ? "\n" : "";
+    const inner = block
+      .replace(/\n$/, "")
+      .split("\n")
+      .map((line) => line.replace(/^&gt; ?/, ""))
+      .join("\n");
+    return `<blockquote>${inner}</blockquote>${trailingNewline}`;
+  });
+
+  // 14b. Collapse excessive blank lines (3+) outside code blocks into a single
+  // paragraph break so multi-paragraph replies stay clean and readable.
+  text = text.replace(/\n{3,}/g, "\n\n");
 
   // 15. Restore inline code and code blocks
   text = text.replace(

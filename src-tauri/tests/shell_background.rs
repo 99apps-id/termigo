@@ -165,9 +165,7 @@ fn read_logs_advances_offset() {
     )
     .expect("spawn");
 
-    wait_until(Duration::from_secs(5), || {
-        proc.read_logs(0).next_offset > 0
-    });
+    wait_until(Duration::from_secs(5), || proc.read_logs(0).next_offset > 0);
 
     let first = proc.read_logs(0);
     assert!(first.next_offset > 0);
@@ -178,6 +176,31 @@ fn read_logs_advances_offset() {
         "consumed offset must return no bytes"
     );
     assert_eq!(next.next_offset, first.next_offset);
+}
+
+#[test]
+fn unread_buffer_is_not_consumed() {
+    let mut buf = background::ShellRingBuffer::new(16);
+    assert!(!buf.is_consumed());
+    buf.push(b"hello");
+    assert!(!buf.is_consumed(), "bytes nobody read must not count as drained");
+    let (bytes, off, _) = buf.read_from(0);
+    assert_eq!(bytes, b"hello");
+    assert_eq!(off, 5);
+    assert!(buf.is_consumed(), "a fully served buffer is drained");
+}
+
+#[test]
+fn empty_buffer_is_consumed_after_read() {
+    let mut buf = background::ShellRingBuffer::new(16);
+    assert!(!buf.is_consumed());
+    let (bytes, off, _) = buf.read_from(0);
+    assert!(bytes.is_empty());
+    assert_eq!(off, 0);
+    assert!(
+        buf.is_consumed(),
+        "a zero-output process is drained once its caller has read logs"
+    );
 }
 
 #[test]

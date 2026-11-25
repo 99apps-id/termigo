@@ -209,6 +209,21 @@ function truncateTextPart(part: ToolPart, keepChars: number): ToolPart {
   };
 }
 
+/** The replacement payload `elideToolResult` writes, measured the same way
+ *  `messageBytes` measures a live output, so the "is this worth it?" test below
+ *  compares like with like. */
+const ELIDED_OUTPUT = {
+  type: "text",
+  value: ELISION_TEXT,
+  __elided: true,
+} as const;
+const ELIDED_OUTPUT_CHARS = JSON.stringify(ELIDED_OUTPUT).length;
+
+/** Serialized size of a tool-result output, matching `messageBytes`. */
+function outputChars(output: unknown): number {
+  return JSON.stringify(output ?? "").length;
+}
+
 function elideToolResult(part: ToolPart): { changed: boolean; part: ToolPart } {
   if (part.type !== "tool-result") return { changed: false, part };
   if (
@@ -218,11 +233,21 @@ function elideToolResult(part: ToolPart): { changed: boolean; part: ToolPart } {
   ) {
     return { changed: false, part };
   }
+  // Only elide when the marker is actually SMALLER than what it replaces.
+  // The marker is ~98 characters, so eliding a short result (`{"ok":true}`,
+  // an `"hi"` from `echo hi`) GROWS the transcript by 70+ characters per
+  // part. Pass 1 elides every pre-tail result, so a long chat of small tool
+  // calls inflated instead of shrank -- and because the estimate rose, the
+  // following passes found nothing left to cut and returned over budget with
+  // `compacted: true`.
+  if (outputChars(part.output) <= ELIDED_OUTPUT_CHARS) {
+    return { changed: false, part };
+  }
   return {
     changed: true,
     part: {
       ...part,
-      output: { type: "text", value: ELISION_TEXT, __elided: true },
+      output: { ...ELIDED_OUTPUT },
     },
   };
 }
@@ -367,12 +392,13 @@ export function compactModelMessagesDetailed(
 
   let dropped = 0;
   let working = messages;
-  // Standing per-call cap: shrink oversized tool-call inputs (file bodies in
-  // write_file/edit arguments) EVERYWHERE before anything else. These are the
-  // payload an app-building run is made of, and the result-eliding passes
-  // never touched them, which is how a "compacted" request still arrived over
-  // the provider's body-size cap. The tail's newest call is left intact so the
-  // work in progress is never corrupted.
+  // Whether the standing per-call cap rewrote anything. Reported separately
+  // from `dropped` (it is a size guard, not a context-reduction pass), but it
+  // still means the returned array is NOT the input: the per-step path in
+  // agent.ts decides whether to override `messages` from this flag, and a
+  // transcript over the body cap only because of a 90 KB write_file argument
+  // must be overridden or the uncapped original is resent and 413s.
+  let standingCapApplied = false;
   {
     const tailStart = Math.max(0, working.length - 1);
     let any = false;
@@ -389,7 +415,10 @@ export function compactModelMessagesDetailed(
       });
       return local ? ({ ...m, content: next } as ModelMessage) : m;
     });
-    if (any) working = capped;
+    if (any) {
+      working = capped;
+      standingCapApplied = true;
+    }
   }
   // Running byte total. The previous code re-measured the WHOLE transcript
   // (JSON.stringify over every message) inside each trim step's break check --
@@ -418,7 +447,7 @@ export function compactModelMessagesDetailed(
   if (approxTokens < 0.6 * tokenBudget && totalBytes < MAX_TRANSCRIPT_BYTES) {
     return {
       messages: working,
-      compacted: dropped > 0,
+      compacted: dropped > 0 || standingCapApplied,
       droppedCount: dropped,
     };
   }
@@ -516,7 +545,19 @@ export function compactModelMessagesDetailed(
     for (let i = stopIdx; i < out.length; i++) {
       if (!Array.isArray(out[i].content)) continue;
       for (const part of out[i].content as ToolPart[]) {
-        if (part.type === "tool-result") tailResults++;
+        if (part.type !== "tool-result") continue;
+        // Already-elided results do not count toward the keep budget: the
+        // invariant is "the newest TAIL_RESULTS_KEEP LIVE results survive", and
+        // counting dead ones let `canElide` under-count and eat into the live
+        // set it was meant to protect.
+        if (
+          part.output &&
+          typeof part.output === "object" &&
+          (part.output as { __elided?: boolean }).__elided
+        ) {
+          continue;
+        }
+        tailResults++;
       }
     }
     let canElide = Math.max(0, tailResults - TAIL_RESULTS_KEEP);
@@ -657,7 +698,7 @@ export function compactModelMessagesDetailed(
 
   return {
     messages: out,
-    compacted: dropped > 0,
+    compacted: dropped > 0 || standingCapApplied,
     droppedCount: dropped,
   };
 }

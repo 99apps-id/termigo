@@ -23,16 +23,22 @@ export const POST_EXECUTE_CONFIRM_TOOLS = new Set([
 /**
  * Best-effort revert of touched paths via `git restore` on the shared session
  * shell (the same plumbing the `revert_changes` tool uses). Returns the
- * command that ran, or null when revert was skipped/unsafe.
+ * command that ran, or null when revert was skipped or unsafe.
+ *
+ * A path-less revert is refused rather than downgraded to `git restore .`:
+ * that form discards EVERY tracked change in the repository, so "Revert" on a
+ * `bash_run` (whose result carries no `path`) would wipe the user's and other
+ * agents' uncommitted work instead of undoing one command.
  */
 async function revertTouched(
   ctx: ToolContext,
   sessionId: string,
   paths: string[],
 ): Promise<string | null> {
+  if (paths.length === 0) return null;
   try {
     const cwd = ctx.getWorkspaceRoot() ?? ctx.getCwd();
-    const command = revertCommand(paths.length > 0 ? paths : undefined);
+    const command = revertCommand(paths);
     const safety = checkShellCommand(command);
     if (!safety.ok) return null;
     const shellId = await getSessionShell(
@@ -124,7 +130,10 @@ export function withPostExecuteConfirm<
         ...(result as Record<string, unknown>),
         reverted_by_user: true,
         revert_command: reverted ?? null,
-        note: "The user reverted this change after it ran; do not treat it as applied.",
+        note:
+          reverted === null
+            ? "The user asked to revert, but no single file path could be attributed to this change, so nothing was reverted (a path-less revert would discard every uncommitted change in the repository). Inspect the workspace with git diff and revert the specific paths yourself."
+            : "The user reverted this change after it ran; do not treat it as applied.",
       };
     },
   };

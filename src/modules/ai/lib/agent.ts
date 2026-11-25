@@ -31,13 +31,13 @@ import {
   getModelContextLimit,
   isCompactTierModel,
   isCompatModelId,
+  isOAuthModel,
   LMSTUDIO_DEFAULT_BASE_URL,
   MAX_AGENT_STEPS,
-  OAUTH_MAX_AGENT_STEPS,
-  isOAuthModel,
   MLX_DEFAULT_BASE_URL,
   modelAllowsForcedToolChoice,
   modelKeepsReasoning,
+  OAUTH_MAX_AGENT_STEPS,
   OLLAMA_DEFAULT_BASE_URL,
   type ProviderId,
   providerNeedsKey,
@@ -60,8 +60,8 @@ import {
 } from "../tools/toolSearch";
 import {
   buildTools,
-  withToolHeartbeat,
   type ToolContext,
+  withToolHeartbeat,
 } from "../tools/tools";
 import { isResumingApproval } from "./approvalResume";
 import { getChatGptAccess } from "./chatgptAuth";
@@ -78,6 +78,7 @@ import { effectiveContextLimit } from "./contextLimitLearning";
 import { pruneVerifiedPrefix } from "./contextPrune";
 import type { CustomToolset } from "./customToolsIo";
 import type { ExtensionToolset } from "./extensionTools";
+import { createGoogleSafetyFetch } from "./googleSafety";
 import { recordRun } from "./harnessFrontier";
 import {
   appendSystemHint,
@@ -92,14 +93,13 @@ import { fireHooksForEvent, makeRunId } from "./hooksRunner";
 import type { CustomEndpointKeys, ProviderKeys } from "./keyring";
 import type { McpToolset } from "./mcpTools";
 import { memoryBlock as learnedBlock, type MemoryEntry } from "./memory";
-import { formatRepoMapBlock, getOrGenerateRepoMap } from "./repoMap";
 import { wantsForcedFanout } from "./orchestrationIntent";
 import { prepareAgentPrompt } from "./prompt";
-import { createGoogleSafetyFetch } from "./googleSafety";
 import { createOpenAiCacheFetch } from "./promptCacheKey";
 import { createProxyFetch } from "./proxyFetch";
 import { repairToolCall } from "./repairToolCall";
 import { isRepetitionDominated } from "./repetitionGuard";
+import { formatRepoMapBlock, getOrGenerateRepoMap } from "./repoMap";
 import { sanitizeUiMessages } from "./sanitizeMessages";
 import { type Skill, skillsBlock } from "./skills";
 import {
@@ -145,6 +145,10 @@ import {
 const apiFetch = createOpenAiCacheFetch(
   createGoogleSafetyFetch(createProxyFetch({ allowPrivateNetwork: true })),
 );
+
+// One id per app process, as the official CLI sends one per session.
+const CLAUDE_SESSION_ID: string = crypto.randomUUID();
+const CODEX_SESSION_ID: string = crypto.randomUUID();
 
 const TOOL_LABELS: Record<string, (input: Record<string, unknown>) => string> =
   {
@@ -231,17 +235,6 @@ function pruneModelCache() {
 }
 
 // Apply the Codex backend's request contract to a ChatGPT-route model.
-//
-// The backend serves subscription accounts statelessly and rejects a
-// Responses request whose `store` is not explicitly false: the public API
-// default is true, and the SDK leaves the field out of the body unless it is
-// set, so an unadorned `.responses()` model is refused even with a valid
-// token (the Go CLI's Codex client hard-codes the same `store: false`).
-// Setting it as a model default rather than per call means every caller of
-// the built model sends it (agent run, subagents, side questions, session
-// titles), and the SDK also converts the conversation for stateless replay:
-// no stored item ids, and reasoning returns as encrypted content the next
-// step can carry.
 export function withCodexBackendDefaults(model: LanguageModel): LanguageModel {
   if (typeof model === "string" || model.specificationVersion !== "v3") {
     return model;
@@ -249,7 +242,19 @@ export function withCodexBackendDefaults(model: LanguageModel): LanguageModel {
   return aiSdk.wrapLanguageModel({
     model,
     middleware: aiSdk.defaultSettingsMiddleware({
-      settings: { providerOptions: { openai: { store: false } } },
+      settings: {
+        providerOptions: {
+          openai: {
+            store: false,
+            reasoningEffort: "medium",
+            reasoningSummary: "auto",
+            forceReasoning: true,
+            systemMessageMode: "developer",
+            include: ["reasoning.encrypted_content"],
+            promptCacheKey: CODEX_SESSION_ID,
+          },
+        },
+      },
     }),
   });
 }
@@ -478,6 +483,7 @@ export async function buildLanguageModel(
             // Omitted rather than sent empty when the claim was missing: an empty
             // header reads as "account none" and 401s less clearly than absence.
             ...(auth.accountId ? { "chatgpt-account-id": auth.accountId } : {}),
+            session_id: CODEX_SESSION_ID,
           },
           fetch: apiFetch,
         }).responses(resolvedModelId),
@@ -486,23 +492,27 @@ export async function buildLanguageModel(
     case "claude-oauth": {
       const { createAnthropic } = await import("@ai-sdk/anthropic");
       const { getOAuthAccess } = await import("./oauthAuth");
+      const { CLAUDE_OAUTH_BETA, claudeCliUserAgent, createClaudeOAuthFetch } =
+        await import("./claudeOAuth");
       const auth = await getOAuthAccess("claude-oauth");
       if (!auth) {
         throw new Error(
-          "Not signed in to Claude (OAuth). Open Settings → Models and sign in.",
+          "Not signed in to Claude (OAuth). Open Settings \u2192 Models and sign in.",
         );
       }
       return createAnthropic({
         baseURL: "https://api.anthropic.com",
         authToken: auth.accessToken,
         headers: {
-          "anthropic-beta":
-            "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14",
+          "anthropic-beta": CLAUDE_OAUTH_BETA,
           "anthropic-dangerous-direct-browser-access": "true",
           "x-app": "cli",
-          "User-Agent": "claude-cli/2.1.280 (external, sdk-cli)",
+          "User-Agent": claudeCliUserAgent(),
+          "X-Claude-Code-Session-Id": CLAUDE_SESSION_ID,
         },
-        fetch: apiFetch,
+        // The subscription is only served when the Claude Code identity is
+        // the first system block on its own; see claudeOAuth.ts.
+        fetch: createClaudeOAuthFetch(apiFetch, auth.accessToken),
       })(resolvedModelId);
     }
     case "xai-oauth": {
@@ -573,15 +583,13 @@ export async function buildLanguageModel(
         );
       }
       const { createMuseFetch } = await import("./museStream");
-      // Muse's SSE tail can omit `choices`, which the SDK's chunk union rejects
-      // with `invalid_union`; the wrapper normalises those lines.
+      // The wrapper translates the SDK's chat request onto Meta's Responses
+      // route under the Muse Code CLI identity (see museStream.ts); the old
+      // muse-code/1.0.2 header is what Meta served as plain chat only.
       return createOpenAICompatible({
         name: "muse",
         baseURL: "https://api.meta.ai/v1",
         apiKey: auth.accessToken,
-        headers: {
-          "User-Agent": "muse-code/1.0.2",
-        },
         fetch: createMuseFetch(apiFetch, {
           // Muse keys carry no expiry, so nothing renews them until the
           // API itself rejects one; the fetch layer calls this remint on a
@@ -1176,7 +1184,6 @@ export function noErrorProgress<T extends ToolSet>(
  */
 export type AgentStopReason =
   | "step-cap"
-  | "output-truncated"
   | "tool-repetition"
   | "text-repetition"
   | "no-progress"
@@ -1277,6 +1284,16 @@ export type RunAgentOptions = {
       /** The final prose claimed a verification result the ledger cannot back
        *  (see verifyOnStop.claimsVerification). */
       claimedVerification: boolean;
+    };
+    /** What the run's final step produced, for the continuation gate (see
+     *  turnContinuation.ts): a cut answer, an empty reply, or an announced
+     *  action with no tool call all END a run without finishing the task. */
+    lastStep: {
+      text: string;
+      /** The SDK's finish reason for that step, when it reported one. */
+      finishReason: string | undefined;
+      /** Whether any step of the run called a tool. */
+      usedTools: boolean;
     };
   }) => void;
   /** Loop budget for this round: one explicit cap per reply, the same number
@@ -1743,10 +1760,11 @@ export async function runAgentStream(opts: RunAgentOptions) {
       stopReason = "tool-only-loop";
       return true;
     },
+    // The step cap binds OAuth runs too: a subscription is not billed per
+    // token, but an uncapped run still burns its rate window (one logged run
+    // spent 7.0M input tokens over 89 steps), so there is no auth exemption.
     (args) =>
-      !isOAuth && (capPred(args) as boolean)
-        ? requestSynthesisOrStop("step-cap")
-        : false,
+      (capPred(args) as boolean) ? requestSynthesisOrStop("step-cap") : false,
     (args) =>
       (repeatPred(args) as boolean)
         ? requestSynthesisOrStop("tool-repetition")
@@ -1810,15 +1828,11 @@ export async function runAgentStream(opts: RunAgentOptions) {
         : false,
     (_args) => {
       // Cost cap stops immediately -- the whole point is to not spend more, so
-      // it does not buy an extra synthesis step.
+      // it does not buy an extra synthesis step. `runCost` is maintained in
+      // onStepFinish regardless of this budget, so the reported figure is
+      // correct even when no cap is configured.
       if (costBudget <= 0) return false;
-      const current = estimateCost(modelId, {
-        inputTokens: runInput,
-        outputTokens: runOutput,
-        cachedInputTokens: runCached,
-      });
-      if (current == null) return false;
-      runCost = current;
+      if (runCost <= 0) return false;
       if (runCost >= costBudget) {
         stopReason ??= "cost-cap";
         return true;
@@ -2101,6 +2115,14 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // across the whole run. Reported via onFinishMeta so the runtime can fire a
   // bounded nudge when the model ends cleanly right after unverified edits.
   let verifyLedger: VerifyLedger = newVerifyLedger();
+  // What the run's LAST step produced, reported through onFinishMeta. The
+  // decision to nudge a stranded task (cut answer, empty reply, announced but
+  // untaken action) is made by the runtime once the run is over: a step that
+  // makes no tool call never reaches `prepareStep` again, so it cannot be made
+  // here (see turnContinuation.ts).
+  let lastStepText = "";
+  let lastStepFinishReason: string | undefined;
+  let anyToolCallThisRun = false;
   return streamText({
     model,
     system: baseSystem,
@@ -2211,7 +2233,6 @@ export async function runAgentStream(opts: RunAgentOptions) {
             preserveTrailingApproval: false,
           });
         }
-
         // Gated by size, not run blind: rewriting history breaks the
         // provider's cached prefix from the rewrite point, while resending
         // cached tokens is cheap. Below half the history budget the full pass
@@ -2382,6 +2403,12 @@ export async function runAgentStream(opts: RunAgentOptions) {
       markRunActivity();
       logInfo(`[ai] runAgentStream: step finished (#${stepsSeen})`);
       stepsSeen++;
+      // Continuation bookkeeping: what this step produced and how the provider
+      // says it ended. `prepareStep` for the next step reads these to decide
+      // whether the task is actually finished.
+      lastStepText = typeof step.text === "string" ? step.text : "";
+      lastStepFinishReason = step.finishReason;
+      if ((step.toolCalls?.length ?? 0) > 0) anyToolCallThisRun = true;
       // The step is over, so the next thing expected is another model response -
       // which is what the watchdog is for. Previously this only re-armed on an
       // approval resume, leaving every other step of a multi-step run unguarded.
@@ -2433,6 +2460,18 @@ export async function runAgentStream(opts: RunAgentOptions) {
         runInput += step.usage.inputTokens ?? 0;
         runCached += step.usage.inputTokenDetails?.cacheReadTokens ?? 0;
         runOutput += step.usage.outputTokens ?? 0;
+        // Maintained on EVERY step, not only when a cost budget is set. The
+        // cost-cap predicate below used to be the only assignment site, and it
+        // returns early when `costBudget <= 0` (the default), so
+        // `estimatedCostUsd` was always null and the whole cost ledger,
+        // /cost panel, run diagnostics and trajectory `totalCostUsd` were dead
+        // code in the default configuration.
+        const cost = estimateCost(modelId, {
+          inputTokens: runInput,
+          outputTokens: runOutput,
+          cachedInputTokens: runCached,
+        });
+        if (cost != null) runCost = cost;
       }
       if (opts.onUsage && step.usage) {
         const u = step.usage;
@@ -2555,17 +2594,17 @@ export async function runAgentStream(opts: RunAgentOptions) {
       // The predicates fire before the final step is counted in some SDK
       // paths, so fall back to the step count rather than reporting no reason
       // for a run that plainly ran out of budget.
-      // A "length" finish is the backend cutting the answer at its output
-      // limit, not the model deciding to stop: name it, so the run is not
-      // filed as a clean finish and the runtime can auto-continue it the
-      // way termixgo continues a step the backend truncated.
+      // A length/maxTokens finish is a truncated answer, not a clean finish:
+      // the model was cut at the output ceiling mid-sentence. Treating it as
+      // done returned a half-answer as the run result (CLI already continues;
+      // desktop now degrades to step-cap so Continue resumes like opencode).
+      const truncatedFinish =
+        finishReason === "length" ||
+        finishReason === "maxTokens" ||
+        finishReason.startsWith("max_tokens");
+      if (truncatedFinish && !stopReason) stopReason = "step-cap";
       const settledStop =
-        stopReason ??
-        (finishReason === "length"
-          ? "output-truncated"
-          : !isOAuth && stepsSeen >= stepBudget
-            ? "step-cap"
-            : null);
+        stopReason ?? (stepsSeen >= stepBudget ? "step-cap" : null);
       // A run is a CLEAN finish only when nothing else ended it. A guard that
       // named a stop reason and an abort (watchdog stall, or a user stop) both
       // mean somebody else stopped the run. Reading a null stopReason as a
@@ -2618,6 +2657,11 @@ export async function runAgentStream(opts: RunAgentOptions) {
           changedCodePaths: verifyLedger.changedCodePaths,
           verifiedAfterLastEdit: verifyLedger.verifiedAfterLastEdit,
           claimedVerification: claimsVerification(finalText),
+        },
+        lastStep: {
+          text: lastStepText,
+          finishReason: lastStepFinishReason ?? (finishReason || undefined),
+          usedTools: anyToolCallThisRun,
         },
       });
 

@@ -52,7 +52,9 @@ async function resolveReviewBase(
   ctx: ToolContext,
   explicit?: string,
 ): Promise<{ base?: string; error?: undefined } | { error: string }> {
-  if (explicit !== undefined) {
+  // A blank explicit base is "no base" (the model sends "" for none): fall
+  // through to auto-detection instead of failing validation.
+  if (explicit?.trim()) {
     if (!isValidRev(explicit)) {
       return {
         error:

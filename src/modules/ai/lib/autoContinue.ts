@@ -11,10 +11,9 @@
 //
 // Stops that signal a STUCK agent (tool repetition, no progress, repeated tool
 // errors, cost cap) are deliberately NOT auto-continued — a new round would
-// just repeat the same failure. Only "step-cap" qualifies, plus
-// "output-truncated": the backend cutting an answer at its output limit is
-// not the agent being stuck either, and termixgo likewise continues a step
-// the backend truncated instead of filing the partial answer as done.
+// just repeat the same failure. Only "step-cap" qualifies; a finish the
+// backend cut at its output limit is filed as a step-cap too (see agent.ts),
+// because a truncated answer is not the agent being stuck either.
 
 /** How many automatic continues one task may chain before the manual
  *  Continue button takes over again. Reset by any fresh user message. */

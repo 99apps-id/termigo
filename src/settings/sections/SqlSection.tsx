@@ -1,5 +1,12 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Add01Icon, Delete02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
@@ -109,17 +116,21 @@ export function SqlSection() {
             placeholder="Connection name"
             className="w-48"
           />
-          <select
+          <Select
             value={engine}
-            onChange={(e) => setEngine(e.target.value as SqlEngine)}
-            className="w-36 rounded-md border border-input bg-transparent px-3 py-2 text-sm"
+            onValueChange={(v) => setEngine(v as SqlEngine)}
           >
-            {SQL_ENGINES.map((e) => (
-              <option key={e.id} value={e.id}>
-                {e.label}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger className="w-40 text-foreground">
+              <SelectValue placeholder="Engine" />
+            </SelectTrigger>
+            <SelectContent>
+              {SQL_ENGINES.map((e) => (
+                <SelectItem key={e.id} value={e.id}>
+                  {e.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Input
             value={connection}
             onChange={(e) => setConnection(e.target.value)}

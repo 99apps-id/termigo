@@ -24,7 +24,7 @@ function failingStreamModel() {
 
 async function firstCallOptions(
   model: MockLanguageModelV3,
-  providerOptions?: Record<string, Record<string, string>>,
+  providerOptions?: Record<string, Record<string, unknown>>,
 ) {
   const result = streamText({
     model: withCodexBackendDefaults(model),
@@ -41,7 +41,15 @@ describe("withCodexBackendDefaults", () => {
   it("sends store: false to the OpenAI provider on every call", async () => {
     const options = await firstCallOptions(failingStreamModel());
     expect(options.providerOptions).toMatchObject({
-      openai: { store: false },
+      openai: {
+        store: false,
+        reasoningEffort: "medium",
+        reasoningSummary: "auto",
+        forceReasoning: true,
+        systemMessageMode: "developer",
+        include: ["reasoning.encrypted_content"],
+        promptCacheKey: expect.any(String),
+      },
     });
   });
 
@@ -50,7 +58,15 @@ describe("withCodexBackendDefaults", () => {
       openai: { reasoningEffort: "low" },
     });
     expect(options.providerOptions).toMatchObject({
-      openai: { store: false, reasoningEffort: "low" },
+      openai: {
+        store: false,
+        reasoningEffort: "low",
+        reasoningSummary: "auto",
+        forceReasoning: true,
+        systemMessageMode: "developer",
+        include: ["reasoning.encrypted_content"],
+        promptCacheKey: expect.any(String),
+      },
     });
   });
 

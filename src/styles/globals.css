@@ -597,3 +597,22 @@ html *::-webkit-scrollbar {
     background-position: 0% center;
   }
 }
+
+/* Linux WebKitGTK runs with WEBKIT_DISABLE_DMABUF_RENDERER=1 (software SHM
+ * compositing). Disabling backdrop-filter blur eliminates full-window CPU
+ * Gaussian blur stalls on every keystroke in both terminal and composer. */
+html[data-platform="linux"] *,
+html[data-platform="linux"] *::before,
+html[data-platform="linux"] *::after {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+/* Ensure native <select> popups remain legible in dark and light themes across
+ * WebKitGTK and WebView2 instead of rendering light text on a white popup. */
+select,
+select option {
+  background-color: var(--color-popover);
+  color: var(--color-popover-foreground);
+}
+

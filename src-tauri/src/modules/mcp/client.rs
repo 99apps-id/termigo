@@ -379,10 +379,7 @@ impl McpClient {
             .ok_or_else(|| "resources.list did not return an array".to_string())
     }
 
-    pub async fn resources_read(
-        &mut self,
-        uri: &str,
-    ) -> Result<String, String> {
+    pub async fn resources_read(&mut self, uri: &str) -> Result<String, String> {
         let result = self
             .request(
                 "resources/read",
@@ -404,10 +401,7 @@ impl McpClient {
         Ok(text.to_string())
     }
 
-    pub async fn resources_subscribe(
-        &mut self,
-        uri: &str,
-    ) -> Result<(), String> {
+    pub async fn resources_subscribe(&mut self, uri: &str) -> Result<(), String> {
         self.request(
             "resources/subscribe",
             json!({ "uri": uri }),
@@ -433,11 +427,7 @@ impl McpClient {
             .ok_or_else(|| "prompts.list did not return an array".to_string())
     }
 
-    pub async fn prompts_get(
-        &mut self,
-        name: &str,
-        arguments: Value,
-    ) -> Result<Value, String> {
+    pub async fn prompts_get(&mut self, name: &str, arguments: Value) -> Result<Value, String> {
         self.request(
             "prompts/get",
             json!({ "name": name, "arguments": arguments }),
@@ -576,7 +566,11 @@ impl McpSseClient {
     /// Send an initialized notification.
     pub async fn send_initialized(&self) -> Result<(), String> {
         let client = reqwest::Client::new();
-        let url = format!("{}/messages?session_id={}", self.url, self.session_id.as_deref().unwrap_or(""));
+        let url = format!(
+            "{}/messages?session_id={}",
+            self.url,
+            self.session_id.as_deref().unwrap_or("")
+        );
         client
             .post(&url)
             .json(&json!({
@@ -622,8 +616,8 @@ impl McpSseClient {
             .await
             .map_err(|e| format!("failed to read response: {e}"))?;
 
-        let value: Value = serde_json::from_str(&text)
-            .map_err(|e| format!("invalid JSON response: {e}"))?;
+        let value: Value =
+            serde_json::from_str(&text).map_err(|e| format!("invalid JSON response: {e}"))?;
 
         if let Some(error) = value.get("error") {
             let message = error

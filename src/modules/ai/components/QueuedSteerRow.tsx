@@ -4,7 +4,7 @@ import {
   PencilEdit02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useComposer } from "../lib/composer";
+import { useComposerActions } from "../lib/composer";
 import { getQueueWindow } from "../lib/steer";
 
 /**
@@ -20,7 +20,7 @@ import { getQueueWindow } from "../lib/steer";
  * a long queue never crowds out the composer it sits above.
  */
 export function QueuedSteerRow() {
-  const { queued, cancelQueued, editQueued } = useComposer();
+  const { queued, cancelQueued, editQueued } = useComposerActions();
   if (queued.length === 0) return null;
 
   const win = getQueueWindow(queued.length);

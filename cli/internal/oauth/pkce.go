@@ -26,9 +26,12 @@ type PKCEFlow struct {
 	TokenURL     string
 	Scopes       []string
 	RedirectHost string
-	RedirectPort int
-	RedirectPath string
-	ExtraAuth    map[string]string
+	// RedirectURIHost overrides the host in redirect_uri; the listener still
+	// binds RedirectHost. Empty means RedirectHost.
+	RedirectURIHost string
+	RedirectPort    int
+	RedirectPath    string
+	ExtraAuth       map[string]string
 	// ExchangeJSON and RefreshJSON send the token request as JSON instead of a
 	// form, which the Anthropic endpoint expects.
 	ExchangeJSON bool
@@ -76,7 +79,7 @@ func StartPKCE(flow PKCEFlow) (*pkceSession, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	state, err := randomURLSafe(16)
+	state, err := randomURLSafe(32)
 	if err != nil {
 		return nil, "", err
 	}
@@ -85,11 +88,15 @@ func StartPKCE(flow PKCEFlow) (*pkceSession, string, error) {
 		return nil, "", fmt.Errorf("open the login callback port: %w", err)
 	}
 	port := listener.Addr().(*net.TCPAddr).Port
+	uriHost := strings.TrimSpace(flow.RedirectURIHost)
+	if uriHost == "" {
+		uriHost = host
+	}
 	session := &pkceSession{
 		flow:        flow,
 		verifier:    verifier,
 		state:       state,
-		redirectURI: fmt.Sprintf("http://%s:%d%s", host, port, path),
+		redirectURI: fmt.Sprintf("http://%s:%d%s", uriHost, port, path),
 		listener:    listener,
 		codeCh:      make(chan string, 1),
 		errCh:       make(chan error, 1),

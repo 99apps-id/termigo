@@ -19,6 +19,7 @@ import {
   OLLAMA_DEFAULT_BASE_URL,
   OPENAI_COMPATIBLE_DEFAULT_BASE_URL,
   type SttProvider,
+  upgradeRetiredModelId,
   WHISPERCPP_DEFAULT_BASE_URL,
 } from "@/modules/ai/config";
 import {
@@ -532,7 +533,10 @@ export const DEFAULT_PREFERENCES: Preferences = {
   customEndpoints: [],
   modelIdOverrides: {},
   disabledToolGroups: [],
-  toolSearchEnabled: false,
+  // On by default: sending every registered tool schema on every step cost
+  // about 45KB of prompt per step in a logged run (54 of 481 tools sent);
+  // deferred tools load on demand through find_tools instead.
+  toolSearchEnabled: true,
   openrouterModelId: "",
   agentApprovalMode: DEFAULT_APPROVAL_MODE,
   agentAlwaysAllowedTools: [],
@@ -714,7 +718,8 @@ export async function loadPreferences(): Promise<Preferences> {
       get<number>(KEY_BG_BLUR) ?? DEFAULT_PREFERENCES.backgroundBlur,
     ),
     defaultModelId: ((): string => {
-      const stored = get<string>(KEY_DEFAULT_MODEL);
+      const raw = get<string>(KEY_DEFAULT_MODEL);
+      const stored = raw ? upgradeRetiredModelId(raw) : raw;
       return stored && (isKnownModelId(stored) || isCompatModelId(stored))
         ? stored
         : DEFAULT_PREFERENCES.defaultModelId;
@@ -747,9 +752,10 @@ export async function loadPreferences(): Promise<Preferences> {
     autocompleteProvider:
       get<AutocompleteProviderId>(KEY_AUTOCOMPLETE_PROVIDER) ??
       DEFAULT_PREFERENCES.autocompleteProvider,
-    autocompleteModelId:
+    autocompleteModelId: upgradeRetiredModelId(
       get<string>(KEY_AUTOCOMPLETE_MODEL) ??
-      DEFAULT_PREFERENCES.autocompleteModelId,
+        DEFAULT_PREFERENCES.autocompleteModelId,
+    ),
     lmstudioBaseURL:
       get<string>(KEY_LMSTUDIO_BASE_URL) ?? DEFAULT_PREFERENCES.lmstudioBaseURL,
     lmstudioModelId:
@@ -825,10 +831,14 @@ export async function loadPreferences(): Promise<Preferences> {
       DEFAULT_PREFERENCES.whispercppBaseURL,
     favoriteModelIds: (
       get<string[]>(KEY_FAVORITE_MODELS) ?? DEFAULT_PREFERENCES.favoriteModelIds
-    ).filter(isKnownModelId),
+    )
+      .map(upgradeRetiredModelId)
+      .filter(isKnownModelId),
     recentModelIds: (
       get<string[]>(KEY_RECENT_MODELS) ?? DEFAULT_PREFERENCES.recentModelIds
-    ).filter(isKnownModelId),
+    )
+      .map(upgradeRetiredModelId)
+      .filter(isKnownModelId),
     vimMode: get<boolean>(KEY_VIM_MODE) ?? DEFAULT_PREFERENCES.vimMode,
     editorMinimap:
       get<boolean>(KEY_EDITOR_MINIMAP) ?? DEFAULT_PREFERENCES.editorMinimap,
@@ -898,11 +908,13 @@ export async function loadPreferences(): Promise<Preferences> {
     costDailyBudgetUsd:
       get<number>(KEY_COST_DAILY_BUDGET_USD) ??
       DEFAULT_PREFERENCES.costDailyBudgetUsd,
-    subagentModelId:
+    subagentModelId: upgradeRetiredModelId(
       get<string>(KEY_SUBAGENT_MODEL_ID) ?? DEFAULT_PREFERENCES.subagentModelId,
-    subagentVisionModelId:
+    ),
+    subagentVisionModelId: upgradeRetiredModelId(
       get<string>(KEY_SUBAGENT_VISION_MODEL_ID) ??
-      DEFAULT_PREFERENCES.subagentVisionModelId,
+        DEFAULT_PREFERENCES.subagentVisionModelId,
+    ),
     subagentMaxDepth: clampSubagentMaxDepth(
       get<number>(KEY_SUBAGENT_MAX_DEPTH) ??
         DEFAULT_PREFERENCES.subagentMaxDepth,

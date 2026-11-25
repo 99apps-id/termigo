@@ -100,8 +100,32 @@ export const SearchInline = forwardRef<SearchInlineHandle, Props>(
       target.focus();
     }, [target]);
 
-    // Target switched (terminal ↔ editor) or removed → drop highlights.
-    useEffect(() => clearTarget, [clearTarget]);
+    // The live query, readable from an effect without being a dependency:
+    // re-running on every keystroke would fight `applyIncremental`.
+    const qRef = useRef(q);
+    qRef.current = q;
+
+    // Target switched (terminal <-> editor) or removed, OR the renderer slot
+    // was rebound and handed us a fresh SearchAddon on a new Terminal (which
+    // starts with no decorations). Re-apply the live query instead of only
+    // clearing: clearing left the box showing a query with zero highlights
+    // until the user typed another character.
+    useEffect(() => {
+      if (!target) return;
+      const query = qRef.current;
+      if (target.kind === "terminal") {
+        if (query) {
+          target.addon.findNext(query, {
+            incremental: true,
+            decorations: TERM_DECORATIONS,
+          });
+        } else {
+          target.addon.clearDecorations();
+        }
+      } else {
+        target.handle.clearQuery();
+      }
+    }, [target]);
 
     const applyIncremental = (next: string) => {
       if (!target) return;

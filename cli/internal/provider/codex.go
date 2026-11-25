@@ -205,6 +205,13 @@ func encodeResponsesInputWithReasoning(req ChatRequest, includeReasoning bool) [
 			// stateless backend has no other way to recover it.
 			if includeReasoning {
 				for _, item := range message.ReasoningItems {
+					// An item another backend issued with no encrypted
+					// content and an id this API cannot carry (Meta joins
+					// two ids with a colon) cannot be resumed here: the
+					// backend rejects the whole request over its id.
+					if strings.TrimSpace(item.EncryptedContent) == "" && !validResponsesID(item.ID) {
+						continue
+					}
 					items = append(items, reasoningItemInput(item))
 				}
 			}
@@ -223,7 +230,7 @@ func encodeResponsesInputWithReasoning(req ChatRequest, includeReasoning bool) [
 				items = append(items, map[string]any{
 					"type":      "function_call",
 					"call_id":   call.ID,
-					"name":      call.Name,
+					"name":      responsesFunctionName(call.Name),
 					"arguments": arguments,
 				})
 			}
@@ -261,7 +268,7 @@ func responsesUserContent(message Message) []map[string]any {
 // originally did.
 func reasoningItemInput(item ReasoningItem) map[string]any {
 	out := map[string]any{"type": "reasoning", "encrypted_content": item.EncryptedContent}
-	if item.ID != "" {
+	if validResponsesID(item.ID) {
 		out["id"] = item.ID
 	}
 	// The summary key is required on a replayed reasoning item even when
@@ -285,7 +292,7 @@ func encodeResponsesTools(tools []ToolDef) []map[string]any {
 		}
 		out = append(out, map[string]any{
 			"type":        "function",
-			"name":        tool.Name,
+			"name":        responsesFunctionName(tool.Name),
 			"description": tool.Description,
 			"parameters":  schema,
 		})

@@ -16,6 +16,7 @@ const defaultMaxSteps = 40
 // systemPrompt is the coding-agent instruction the runner sends.
 const systemPrompt = "You are a terminal coding agent working in the user's project. " +
 	"Read files before editing them, make the smallest correct change, and verify with a check when one exists. " +
+	"For work of three or more steps, write the plan with todo_write and mark each step completed with todo_update the moment it is done. " +
 	"Use the tools instead of guessing. When the task is done, reply with a short summary."
 
 // Options configures one agent run.
@@ -37,6 +38,27 @@ type Options struct {
 	// Tools are extra tools offered alongside the built-ins, such as the ones
 	// an MCP server exposes.
 	Tools []Tool
+	// Steer, when set, is asked for messages the operator typed while the run
+	// was working. They are added as user messages before the next step, so a
+	// correction lands in the turn in flight instead of waiting for it to end.
+	Steer func() []string
+}
+
+// appendSteer adds the operator's mid-run messages to the conversation and
+// reports whether any were added.
+func appendSteer(messages []provider.Message, steer func() []string) ([]provider.Message, bool) {
+	if steer == nil {
+		return messages, false
+	}
+	added := false
+	for _, text := range steer() {
+		if strings.TrimSpace(text) == "" {
+			continue
+		}
+		messages = append(messages, provider.Message{Role: provider.RoleUser, Content: text})
+		added = true
+	}
+	return messages, added
 }
 
 // Run drives one coding turn: stream a completion, execute any tool calls, feed
@@ -49,6 +71,14 @@ func Run(ctx context.Context, opts Options, prompt string, emit func(provider.St
 	env := opts.Env
 	if env == nil {
 		env = &Env{}
+	}
+	if env.Session == nil {
+		scoped := *env
+		scoped.Session = opts.Session
+		if scoped.Session == nil {
+			scoped.Session = &Session{}
+		}
+		env = &scoped
 	}
 	registry := DefaultRegistry()
 	if len(opts.Tools) > 0 {
@@ -89,6 +119,16 @@ func Run(ctx context.Context, opts Options, prompt string, emit func(provider.St
 	}
 
 	for step := 0; step < maxSteps; step++ {
+		// The messages end on a complete exchange here (the prompt, or tool
+		// results), so a user message can be added without splitting a call from
+		// its result. A steer is new information, so it also clears the
+		// repetition guard: the operator has a reason for the model to try again.
+		if step > 0 {
+			var steered bool
+			if messages, steered = appendSteer(messages, opts.Steer); steered {
+				*guard = loopGuard{}
+			}
+		}
 		var text strings.Builder
 		var reasoning strings.Builder
 		var calls []provider.ToolCall
@@ -182,6 +222,13 @@ func Run(ctx context.Context, opts Options, prompt string, emit func(provider.St
 		guard.noteProgress()
 		messages = append(messages, provider.Message{Role: provider.RoleAssistant, Content: text.String(), ToolCalls: calls, ReasoningItems: reasoningItems})
 
+		if truncated {
+			// A tool-call step cut at the output ceiling may carry a half-built
+			// call. Skip the next tool round so the model re-emits a complete
+			// call instead of executing a truncated argument object.
+			messages = append(messages, provider.Message{Role: provider.RoleUser, Content: "Continue."})
+			continue
+		}
 		for _, call := range calls {
 			if stop, reason := guard.noteCall(call.Name, call.Arguments); stop {
 				return "", errors.New(reason)
@@ -209,6 +256,9 @@ func executeTool(ctx context.Context, env *Env, registry *Registry, call provide
 		return Result{Output: fmt.Sprintf("unknown tool %q", call.Name), IsError: true}
 	}
 	args := decodeArgs(call.Arguments)
+	if _, bad := args["_repair_error"]; bad {
+		return Result{Output: fmt.Sprintf("invalid tool arguments for %q: %v; re-emit as a single JSON object", call.Name, args["_repair_error"]), IsError: true}
+	}
 	if tool.Mutating() {
 		if env.Approve == nil {
 			return Result{Output: fmt.Sprintf("%s changes files or runs a command and needs approval; re-run with --yes to allow it", tool.Name()), IsError: true}
@@ -243,7 +293,10 @@ func decodeArgs(raw string) map[string]any {
 	}
 	var decoded map[string]any
 	if err := json.Unmarshal([]byte(trimmed), &decoded); err != nil || decoded == nil {
-		return map[string]any{}
+		// Surface the repair failure instead of silently dropping args: an
+		// empty map makes the tool run with defaults and fails downstream
+		// without telling the model its input was malformed.
+		return map[string]any{"_repair_error": "tool arguments were not valid JSON: " + trimmed}
 	}
 	return decoded
 }

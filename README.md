@@ -162,9 +162,9 @@ automation: agent runs, MCP, skills, and project scaffolding.
   never made the call - and repeating it.
 - **The run says why it stopped, and goes on when you ask.** One request
   gets one explicit per-round cap, resolved per model: 500 steps on an API-key
-  model, 10,000 on an OAuth / keyless model (ChatGPT, Claude OAuth, xAI OAuth,
-  Antigravity, GitHub Copilot, Muse), whose real limit is the provider's 5-hour
-  usage window rather than a step count. It is one number every round, so
+  model and the same 500 on an OAuth / keyless model (ChatGPT, Claude OAuth, xAI
+  OAuth, Antigravity, GitHub Copilot, Muse), since a subscription still burns
+  its rate window on every step. It is one number every round, so
   Continue resumes the task on the same cap for that model - never a hidden
   ladder that quietly lets a paused run go further than the number it showed.
   A task that needs more depth earns it round by round, one informed click at

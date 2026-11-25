@@ -44,11 +44,12 @@ if [ -z "$__TERMIGO_HOOKS_LOADED" ]; then
   _termigo_precmd() {
     local _termigo_ret=$?
     printf '\e]133;D;%s\e\\' "$_termigo_ret"
-    if [ -n "${TMUX:-}" ]; then
-      printf '\ePtmux;\e\e]7;file://%s%s\a\e\\' "${HOSTNAME:-$(uname -n 2>/dev/null)}" "$(_termigo_urlencode "$PWD")"
-    else
-      printf '\e]7;file://%s%s\e\\' "${HOSTNAME:-$(uname -n 2>/dev/null)}" "$(_termigo_urlencode "$PWD")"
-    fi
+    # No tmux DCS wrapping here. Termigo forces TERM=xterm-256color, so tmux
+    # passes OSC straight through, and wrapping it in `\ePtmux;...\e\\` made
+    # the sequence unreachable: xterm.js has no DCS unwrapper, so the OSC 7
+    # never arrived and tab.cwd, the explorer root and the AI's cwd all froze
+    # on the launch directory for every pane inside tmux.
+    printf '\e]7;file://%s%s\e\\' "${HOSTNAME:-$(uname -n 2>/dev/null)}" "$(_termigo_urlencode "$PWD")"
     if [ -n "$TERMIGO_BLOCKS" ]; then
       # Host renders its own input bar: suppress the shell prompt (B marker
       # only) and reserve header/gap rows, mirroring the zsh integration.
@@ -64,10 +65,19 @@ if [ -z "$__TERMIGO_HOOKS_LOADED" ]; then
     printf '\e]133;A\e\\'
   }
 
-  case ":${PROMPT_COMMAND:-}:" in
-    *":_termigo_precmd:"*) ;;
-    *) PROMPT_COMMAND="_termigo_precmd${PROMPT_COMMAND:+;$PROMPT_COMMAND}" ;;
-  esac
+  # bash 5.1+ allows PROMPT_COMMAND to be an ARRAY, executed element by
+  # element. A plain string expansion only ever sees element 0, so prepending
+  # as a string dropped every other hook and silently demoted the array to a
+  # scalar. Prepend as an element when there is more than one.
+  if [ "${#PROMPT_COMMAND[@]}" -gt 1 ]; then
+    [ "${PROMPT_COMMAND[0]:-}" = "_termigo_precmd" ] || \
+      PROMPT_COMMAND=(_termigo_precmd "${PROMPT_COMMAND[@]}")
+  else
+    case ":${PROMPT_COMMAND:-}:" in
+      *":_termigo_precmd:"*) ;;
+      *) PROMPT_COMMAND="_termigo_precmd${PROMPT_COMMAND:+;$PROMPT_COMMAND}" ;;
+    esac
+  fi
 
   # Pre-exec marker via PS0 (bash 4.4+). PS0 is expanded just before a command
   # runs — cleaner than a DEBUG trap, which would clobber user traps and fire

@@ -75,6 +75,10 @@ describe("git command builders", () => {
   });
 
   it("diffs against a base revision, staged or scoped", () => {
+    // A blank base means "no base" (the model sends "" for none): it must be
+    // treated as omitted, not rejected as an invalid revision.
+    expect(gitDiffCommand({ base: "" })).toBe("git diff");
+    expect(gitDiffCommand({ base: "  " })).toBe("git diff");
     expect(gitDiffCommand({ base: "14eb149d" })).toBe("git diff '14eb149d'");
     expect(gitDiffCommand({ staged: true, base: "HEAD~3" })).toBe(
       "git diff --staged 'HEAD~3'",

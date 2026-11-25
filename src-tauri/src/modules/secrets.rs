@@ -90,9 +90,7 @@ pub(crate) fn write_store_at(
     std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o600))
         .map_err(|e| format!("secrets: secure temp file: {e}"))?;
     tmp.write_all(&bytes).map_err(|e| e.to_string())?;
-    tmp.as_file()
-        .sync_all()
-        .map_err(|e| e.to_string())?;
+    tmp.as_file().sync_all().map_err(|e| e.to_string())?;
     tmp.persist(path)
         .map_err(|e| format!("secrets: publish store: {}", e.error))?;
     Ok(())

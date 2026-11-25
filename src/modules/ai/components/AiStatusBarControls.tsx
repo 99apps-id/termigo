@@ -68,7 +68,7 @@ import {
   providerNeedsKey,
   resolveApiModelId,
 } from "../config";
-import { useComposer } from "../lib/composer";
+import { useComposerActions, useComposerCanSend } from "../lib/composer";
 import { costToday } from "../lib/costLedger";
 import { toggleFavoriteModel } from "../lib/modelPrefs";
 import { useChatStore } from "../store/chatStore";
@@ -200,7 +200,8 @@ export function AiOpenButton({ onOpen }: { onOpen: () => void }) {
 }
 
 export function AiStatusBarControls() {
-  const c = useComposer();
+  const c = useComposerActions();
+  const canSend = useComposerCanSend();
   const [diagOpen, setDiagOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [replayOpen, setReplayOpen] = useState(false);
@@ -274,7 +275,7 @@ export function AiStatusBarControls() {
         type="button"
         size="icon"
         onClick={c.isBusy ? c.stop : c.submit}
-        disabled={!c.isBusy && !c.canSend}
+        disabled={!c.isBusy && !canSend}
         className="ml-0.5 size-6 rounded-md border-0 shadow-none hover:brightness-110 disabled:opacity-50"
         style={{
           backgroundColor: "var(--composer-accent)",

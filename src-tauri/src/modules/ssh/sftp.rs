@@ -145,10 +145,7 @@ fn validate_remote_path(path: &str) -> Result<String, String> {
             "Refused: remote path is longer than {MAX_REMOTE_PATH_LEN} bytes."
         ));
     }
-    if let Some(bad) = trimmed
-        .bytes()
-        .find(|b| *b < 0x20 || *b == 0x7f)
-    {
+    if let Some(bad) = trimmed.bytes().find(|b| *b < 0x20 || *b == 0x7f) {
         return Err(format!(
             "Refused: remote path contains a control byte (0x{bad:02x})."
         ));
@@ -168,9 +165,7 @@ fn validate_remote_path(path: &str) -> Result<String, String> {
                     // An absolute path cannot go above the filesystem root, so
                     // the escape is refused rather than silently rewritten.
                     _ if absolute => {
-                        return Err(
-                            "Refused: remote path escapes the filesystem root.".into()
-                        );
+                        return Err("Refused: remote path escapes the filesystem root.".into());
                     }
                     // A relative path may legitimately start with `..`.
                     _ => segments.push(".."),
@@ -437,8 +432,7 @@ pub async fn ssh_sftp_upload(
                 MAX_UPLOAD_BYTES
             ));
         }
-        let bytes =
-            std::fs::read(&read_path).map_err(|e| format!("read local file: {e}"))?;
+        let bytes = std::fs::read(&read_path).map_err(|e| format!("read local file: {e}"))?;
         // Re-check after the read: a file that grows between stat and read
         // would otherwise sail past the cap above into memory.
         if bytes.len() as u64 > MAX_UPLOAD_BYTES {

@@ -359,18 +359,57 @@ describe("progressFormat", () => {
       expect(result).toContain("Semua layanan terdeteksi.");
     });
 
-    it("does not emit unsupported <blockquote> tags", () => {
-      const input = "> quote block\n> another line";
+    it("groups consecutive blockquotes into a Telegram <blockquote>", () => {
+      const input = "> quote block\n> another **line**";
       const result = markdownToTelegramHtml(input);
-      expect(result).not.toContain("<blockquote>");
-      expect(result).toContain("&gt; quote block");
-      expect(result).toContain("&gt; another line");
+      expect(result).toBe(
+        "<blockquote>quote block\nanother <b>line</b></blockquote>",
+      );
     });
 
-    it("strips unsupported control characters and zero-width chars", () => {
-      const input = "normal\x00\x01\x02\x7f\u200btext";
+    it("strips unsupported control characters while preserving ZWJ emojis", () => {
+      const input = "normal\x00\x01\x02\x7f\u200btext 👨‍💻 🏳️‍🌈 ❤️‍🔥";
       const result = markdownToTelegramHtml(input);
-      expect(result).toBe("normaltext");
+      expect(result).toBe("normaltext 👨‍💻 🏳️‍🌈 ❤️‍🔥");
+    });
+
+    it("renders bullet lists, nested bullets, task lists, numbering, spoilers, rules, and paragraphs", () => {
+      const input = [
+        "Paragraf pertama 🚀",
+        "",
+        "",
+        "",
+        "- Item *miring* pertama",
+        "  - Sub item kedua",
+        "    - Sub dalam",
+        "* Item bintang dengan *italic*",
+        "+ Item plus",
+        "- [ ] Belum selesai",
+        "- [x] Sudah selesai",
+        "",
+        "1. Langkah **pertama**",
+        "2. Langkah _kedua_",
+        "",
+        "---",
+        "Rahasia: ||kode rahasia||",
+      ].join("\r\n");
+
+      const result = markdownToTelegramHtml(input);
+      expect(result).toContain(
+        "Paragraf pertama 🚀\n\n• Item <i>miring</i> pertama",
+      );
+      expect(result).toContain("  ◦ Sub item kedua");
+      expect(result).toContain("    ▪ Sub dalam");
+      expect(result).toContain("• Item bintang dengan <i>italic</i>");
+      expect(result).toContain("• Item plus");
+      expect(result).toContain("☐ Belum selesai");
+      expect(result).toContain("☑ Sudah selesai");
+      expect(result).toContain("1. Langkah <b>pertama</b>");
+      expect(result).toContain("2. Langkah <i>kedua</i>");
+      expect(result).toContain("──────────");
+      expect(result).toContain(
+        "Rahasia: <tg-spoiler>kode rahasia</tg-spoiler>",
+      );
     });
 
     it("italic boundaries survive a single delimiter pair", () => {
@@ -383,6 +422,16 @@ describe("progressFormat", () => {
       expect(markdownToTelegramHtml("a*b*c")).toBe("a<i>b</i>c");
       expect(markdownToTelegramHtml("(halo)_x_.")).toBe("(halo)_x_.");
       expect(markdownToTelegramHtml("snake_case_name")).toBe("snake_case_name");
+    });
+
+    it("keeps link URLs with underscores/asterisks intact and avoids nested bold in headings", () => {
+      expect(
+        markdownToTelegramHtml(
+          "## **Ringkasan**\nLihat [**docs**](https://example.com/__v1__/a*b*c)",
+        ),
+      ).toBe(
+        '<b>Ringkasan</b>\nLihat <a href="https://example.com/__v1__/a*b*c"><b>docs</b></a>',
+      );
     });
 
     // Portability guard, not a formatting rule. Lookbehind is ES2018 and is

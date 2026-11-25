@@ -49,6 +49,9 @@ type Env struct {
 	// Secrets holds provider keys and other stored values a tool may read
 	// (web_search uses a stored search key when one exists).
 	Secrets *secrets.Store
+	// Session is the conversation the run belongs to; the plan tools keep the
+	// task list in it. Run fills it in from Options.Session.
+	Session *Session
 	// Approve blocks until the operator answers. Nil means deny.
 	Approve func(ApprovalRequest) Decision
 }
@@ -103,6 +106,14 @@ func DefaultRegistry() *Registry {
 		&gitCommitTool{},
 		&gitBranchTool{},
 		&gitRestoreTool{},
+		&todoWriteTool{},
+		&todoUpdateTool{},
+		&todoReadTool{},
+		&runBackgroundTool{},
+		&runLogsTool{},
+		&runWaitTool{},
+		&runKillTool{},
+		&runListTool{},
 	)
 }
 

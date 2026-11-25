@@ -1,43 +1,35 @@
-import { PLATFORM } from "@/lib/platform";
-import { arch } from "@tauri-apps/plugin-os";
 import { sanitizeMuseSseLine } from "./museSse";
 import {
+  chatToNativeResponsesBody,
   chatToResponsesBody,
-  chatToResponsesNativeBody,
+  declaredChatToolNames,
   isAttestationDenial,
-  responsesNativeStreamToChatSse,
+  isTransientMuseResponseError,
+  museIdentityHeaders,
+  type ResponsesToChatOptions,
+  readResponsesStream,
   responsesStreamToChatSse,
   responsesUrl,
+  responseToolAliases,
 } from "./museTextTools";
 
 /**
- * Muse stream normalisation, applied as a `fetch` wrapper around the shared
- * proxy fetch. See `museSse.ts` for why the SSE lines need rewriting. Only a
- * successful SSE response is touched; errors and JSON bodies pass through so
- * the SDK's own error handling still sees them.
+ * Muse fetch wrapper around the shared proxy fetch. A chat-completions
+ * post is translated onto Meta's Responses route under the Muse Code CLI
+ * identity (see `museTextTools.ts`): the `muse-build` user agent, the tbh
+ * session headers and the tools as one `muse` namespace tool are what Meta
+ * serves native tool calls to; the old `muse-code/1.0.2` identity on the
+ * chat route was answered with plain chat only. The Responses stream is
+ * buffered and translated back into chat-completions chunks, because a
+ * function_call item is only complete once it has arrived whole.
  *
- * Like termixgo's client, every Muse call goes to the Responses route
- * first, with tools registered as the one `muse` namespace tool (see
- * `museTextTools.ts`): that is the official client's shape, and the one
- * Meta serves native tool calls to. When Meta refuses a credential with
- * `client_attestation_denied` -- the subscription-key case -- the
- * credential is remembered and the call is retried on the same route
- * under the text tool protocol instead. Later calls with the same
- * credential go straight to the text protocol, so the refusal is paid
- * once per login, not on every step. Either way the Responses stream is
- * translated back into chat-completions chunks for the SDK. The plain
- * chat route remains only for bodies neither translation takes.
- *
- * Around both routes sits termixgo's recovery shape: transient statuses
- * and transport errors retry with `Retry-After` honoured, and a stale-key
- * rejection (401, 404, a non-attestation 403) triggers one remint through
- * `opts.remint` and one retry with the fresh credential, which later calls
- * then reuse. Without a remint wired, errors pass through as before.
- *
- * Every request also carries the official Muse build identity
- * (`muse-build/1.4.24`, the `tbh:exec` client id and a stable per-credential
- * session header set), matching termixgo's museidentity; a remint starts a
- * fresh session identity.
+ * The wrapper also carries the attestation fallback: when Meta still
+ * refuses the native request with `client_attestation_denied`, the
+ * credential is remembered and the call is retried under the text tool
+ * protocol, and later calls with the same credential go straight there, so
+ * the refusal is paid once per login, not on every step. Requests that are
+ * not chat posts pass through untouched, with Muse's SSE tail sanitised
+ * (see `museSse.ts`).
  */
 
 function isEventStream(response: Response): boolean {
@@ -77,6 +69,24 @@ function sanitizeSseStream(
  * only; the set is the sticky switch, never a log or a store. */
 const textToolCredentials = new Set<string>();
 
+/** Credentials Meta retired, mapped to the credential that replaced them
+ * after a remint. The model is built once per login, so without this
+ * every later step would pay the rejection-plus-remint round trip again.
+ * In memory only, like the set above. */
+const refreshedCredentials = new Map<string, string>();
+
+function withAuthorization(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+  value: string,
+): RequestInit {
+  const headers = new Headers(
+    init?.headers ?? (input instanceof Request ? input.headers : undefined),
+  );
+  headers.set("authorization", value);
+  return { ...init, headers };
+}
+
 function urlOf(input: RequestInfo | URL): string {
   if (typeof input === "string") return input;
   if (input instanceof URL) return input.toString();
@@ -105,6 +115,141 @@ function authorizationOf(
   return "";
 }
 
+function withIdentityHeaders(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+  sessionId: string,
+): Headers {
+  const headers = new Headers(
+    init?.headers ?? (input instanceof Request ? input.headers : undefined),
+  );
+  for (const [key, value] of Object.entries(museIdentityHeaders(sessionId))) {
+    headers.set(key, value);
+  }
+  headers.set("content-type", "application/json");
+  return headers;
+}
+
+const MUSE_RETRY_ATTEMPTS = 3;
+
+function isTransientHttpStatus(status: number): boolean {
+  return (
+    status === 404 ||
+    status === 408 ||
+    status === 429 ||
+    status === 500 ||
+    status === 502 ||
+    status === 503 ||
+    status === 504
+  );
+}
+
+function waitWithAbort(ms: number, signal?: AbortSignal | null): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  if (signal?.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function defaultRetryDelayMs(attempt: number): number {
+  const base = Math.min(4000, 500 * 2 ** (attempt - 1));
+  return base + Math.floor(Math.random() * (base / 2 + 1));
+}
+
+export type MuseFetchOptions = {
+  retryDelayMs?: (attempt: number) => number;
+  /** Renew the OAuth-minted key after a stale-key rejection (401, 404, or
+   * a non-attestation 403) and retry once with the fresh key. Muse keys
+   * carry no expiry, so nothing else ever renews them. Wired only for the
+   * OAuth login; a pay-as-you-go key has no remint behind it. */
+  remint?: () => Promise<string | null>;
+};
+
+async function postResponsesWithRetry(
+  base: typeof fetch,
+  url: string,
+  init: RequestInit,
+  model: string,
+  options: ResponsesToChatOptions,
+  retryDelay: (attempt: number) => number,
+): Promise<{ response: Response; translated: boolean }> {
+  let lastResponse: Response | null = null;
+  let lastSseText: string | null = null;
+
+  for (let attempt = 1; attempt <= MUSE_RETRY_ATTEMPTS; attempt++) {
+    const response = await base(url, init);
+    lastResponse = response;
+    lastSseText = null;
+
+    if (!response.ok) {
+      if (
+        attempt < MUSE_RETRY_ATTEMPTS &&
+        isTransientHttpStatus(response.status) &&
+        !init.signal?.aborted
+      ) {
+        await waitWithAbort(retryDelay(attempt), init.signal);
+        continue;
+      }
+      return { response, translated: false };
+    }
+
+    if (!response.body) {
+      return { response, translated: false };
+    }
+
+    const sseText = await response.text();
+    lastSseText = sseText;
+    const outcome = readResponsesStream(sseText);
+    if (
+      outcome.error &&
+      isTransientMuseResponseError(outcome.error) &&
+      attempt < MUSE_RETRY_ATTEMPTS &&
+      !init.signal?.aborted
+    ) {
+      await waitWithAbort(retryDelay(attempt), init.signal);
+      continue;
+    }
+
+    return {
+      response: new Response(
+        responsesStreamToChatSse(sseText, model, options),
+        {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        },
+      ),
+      translated: true,
+    };
+  }
+
+  if (lastSseText !== null) {
+    return {
+      response: new Response(
+        responsesStreamToChatSse(lastSseText, model, options),
+        {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        },
+      ),
+      translated: true,
+    };
+  }
+  return {
+    response:
+      lastResponse ?? new Response("Muse request failed", { status: 502 }),
+    translated: false,
+  };
+}
+
 /**
  * Retries one chat request on the Responses route under the text tool
  * protocol and translates the reply back into chat-completions SSE.
@@ -115,6 +260,8 @@ async function textToolRequest(
   base: typeof fetch,
   input: RequestInfo | URL,
   init: RequestInit | undefined,
+  sessionId: string,
+  retryDelay: (attempt: number) => number,
 ): Promise<Response | null> {
   if (typeof init?.body !== "string") return null;
   let chatBody: unknown;
@@ -127,307 +274,47 @@ async function textToolRequest(
   if (!responsesBody) return null;
   const url = responsesUrl(urlOf(input));
   if (!url) return null;
-  const response = await base(url, {
-    ...init,
-    body: JSON.stringify(responsesBody),
-  });
-  if (!response.ok || !response.body) return response;
   const model =
     typeof responsesBody.model === "string" && responsesBody.model
       ? responsesBody.model
       : "muse";
-  const sseText = await response.text();
-  return new Response(responsesStreamToChatSse(sseText, model), {
-    status: 200,
-    headers: { "content-type": "text/event-stream" },
-  });
-}
-
-/**
- * One attempt on the native Responses route: tools registered as the one
- * `muse` namespace tool, the reply's real function_call items translated
- * back into chat-completions chunks. Returns null when the request is not
- * a translatable chat body, and the raw response when Meta answered with
- * an error, so the caller can classify it (attestation, stale key, or a
- * plain failure to surface).
- */
-async function nativeResponsesRequest(
-  base: typeof fetch,
-  input: RequestInfo | URL,
-  init: RequestInit | undefined,
-  sessionId: string,
-): Promise<Response | null> {
-  if (typeof init?.body !== "string") return null;
-  let chatBody: unknown;
-  try {
-    chatBody = JSON.parse(init.body);
-  } catch {
-    return null;
-  }
-  const responsesBody = chatToResponsesNativeBody(chatBody, sessionId);
-  if (!responsesBody) return null;
-  const url = responsesUrl(urlOf(input));
-  if (!url) return null;
-  const response = await base(url, {
-    ...init,
-    body: JSON.stringify(responsesBody),
-  });
-  if (!response.ok || !response.body) return response;
-  const model =
-    typeof responsesBody.model === "string" && responsesBody.model
-      ? responsesBody.model
-      : "muse";
-  const sseText = await response.text();
-  return new Response(responsesNativeStreamToChatSse(sseText, model), {
-    status: 200,
-    headers: { "content-type": "text/event-stream" },
-  });
-}
-
-export type MuseFetchOptions = {
-  /** Mint a fresh credential after the API rejects the current one as stale
-   *  (401, 404, or a 403 that is not the attestation refusal). Returns the
-   *  new access token, or null when renewal is impossible. */
-  remint?: () => Promise<string | null>;
-};
-
-/** Credentials Meta retired, mapped to the credential that replaced them.
- *  The model is built once per login, so without this every later call
- *  would pay the rejection-plus-remint round trip again. In memory only,
- *  like the text-protocol set above. */
-const refreshedCredentials = new Map<string, string>();
-
-/** Credentials whose native Responses route Meta has accepted. The
- *  native route is every unclassified credential's first attempt anyway;
- *  the set exists so a remint can carry the classification over to the
- *  fresh credential. In memory only. */
-const nativeResponsesCredentials = new Set<string>();
-
-/** The official Muse build identity, termixgo's museidentity shape: the
- *  gateway routes subscription traffic by it, and a generic client
- *  User-Agent is part of what marks a request as third-party. */
-function museUserAgent(): string {
-  let slug = "unknown";
-  try {
-    const os = PLATFORM === "macos" ? "darwin" : PLATFORM;
-    let cpu = "";
-    try {
-      cpu = arch();
-    } catch {
-      cpu = "";
-    }
-    const archSlug =
-      cpu === "x86_64" ? "amd64" : cpu === "aarch64" ? "arm64" : cpu;
-    if (os) slug = archSlug ? `${os}-${archSlug}` : os;
-  } catch {
-    // Outside the Tauri host the slug stays "unknown"; the header is an
-    // identity string, not a capability claim.
-  }
-  return `muse-build/1.4.24 (non-interactive; ${slug})`;
-}
-
-/** One stable session identity per credential, termixgo's shape: the same
- *  ids ride every request until the credential is reminted, which is the
- *  reset point -- a fresh credential gets a fresh session rather than
- *  inheriting the one Meta just rejected. */
-type MuseSessionIdentity = {
-  sessionId: string;
-  gatewaySessionId: string;
-  threadId: string;
-  rootSessionId: string;
-};
-
-const sessionByCredential = new Map<string, MuseSessionIdentity>();
-
-function newSessionIdentity(): MuseSessionIdentity {
-  return {
-    sessionId: crypto.randomUUID(),
-    gatewaySessionId: crypto.randomUUID(),
-    threadId: crypto.randomUUID(),
-    rootSessionId: crypto.randomUUID(),
-  };
-}
-
-function sessionIdentityFor(credential: string): MuseSessionIdentity {
-  let identity = sessionByCredential.get(credential);
-  if (!identity) {
-    identity = newSessionIdentity();
-    sessionByCredential.set(credential, identity);
-  }
-  return identity;
-}
-
-function withIdentityHeaders(
-  input: RequestInfo | URL,
-  init: RequestInit | undefined,
-  identity: MuseSessionIdentity,
-): RequestInit {
-  const headers = new Headers(
-    init?.headers ?? (input instanceof Request ? input.headers : undefined),
+  const { response } = await postResponsesWithRetry(
+    base,
+    url,
+    {
+      ...init,
+      headers: withIdentityHeaders(input, init, sessionId),
+      body: JSON.stringify(responsesBody),
+    },
+    model,
+    {
+      allowedTools: declaredChatToolNames(chatBody),
+      toolAliases: responseToolAliases(chatBody),
+    },
+    retryDelay,
   );
-  headers.set("user-agent", museUserAgent());
-  headers.set("x-client-id", "tbh:exec");
-  headers.set("x-tbh-session-id", identity.sessionId);
-  headers.set("x-meta-ai-gateway-session-id", identity.gatewaySessionId);
-  headers.set("x-tbh-thread-id", identity.threadId);
-  headers.set("x-tbh-root-session-id", identity.rootSessionId);
-  headers.set("x-tbh-agent-role", "main");
-  return { ...init, headers };
-}
-
-/** Statuses worth retrying as-is: rate limits and transient overload. 404
- *  joins them in the remint path below, not here, because for Muse a 404
- *  usually means a stale key rather than a missing resource. */
-const TRANSIENT_STATUSES = new Set([408, 429, 500, 502, 503, 504, 529]);
-const MAX_TRANSIENT_RETRIES = 3;
-
-function retryDelayMs(response: Response | null, attempt: number): number {
-  const retryAfter = response?.headers.get("retry-after");
-  if (retryAfter) {
-    const seconds = Number(retryAfter);
-    if (Number.isFinite(seconds) && seconds > 0) {
-      return Math.min(seconds * 1000, 20_000);
-    }
-    const date = Date.parse(retryAfter);
-    if (!Number.isNaN(date)) {
-      return Math.min(Math.max(date - Date.now(), 0), 20_000);
-    }
-  }
-  return Math.min(600 * 2 ** attempt, 4_000);
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/** One sender with termixgo's retry shape: transient statuses and transport
- *  errors are retried with `Retry-After` honoured (capped at 20 s) and a
- *  short exponential backoff. Retrying at the fetch layer is safe because
- *  nothing has consumed the response body yet. An aborted signal stops the
- *  ladder immediately. */
-async function sendWithTransientRetry(
-  base: typeof fetch,
-  input: RequestInfo | URL,
-  init: RequestInit | undefined,
-): Promise<Response> {
-  let attempt = 0;
-  for (;;) {
-    let response: Response;
-    try {
-      response = await base(input, init);
-    } catch (error) {
-      if (init?.signal?.aborted || attempt >= MAX_TRANSIENT_RETRIES) {
-        throw error;
-      }
-      await sleep(retryDelayMs(null, attempt));
-      attempt += 1;
-      continue;
-    }
-    if (
-      !TRANSIENT_STATUSES.has(response.status) ||
-      init?.signal?.aborted ||
-      attempt >= MAX_TRANSIENT_RETRIES
-    ) {
-      return response;
-    }
-    await response.body?.cancel().catch(() => {});
-    await sleep(retryDelayMs(response, attempt));
-    attempt += 1;
-  }
-}
-
-function withAuthorization(
-  input: RequestInfo | URL,
-  init: RequestInit | undefined,
-  value: string,
-): RequestInit {
-  const headers = new Headers(
-    init?.headers ?? (input instanceof Request ? input.headers : undefined),
-  );
-  headers.set("authorization", value);
-  return { ...init, headers };
+  return response;
 }
 
 export function createMuseFetch(
   base: typeof fetch,
   opts?: MuseFetchOptions,
 ): typeof fetch {
-  return async (input, init) => {
-    let authorization = authorizationOf(input, init);
-    // A credential Meta already retired once: go straight to its
-    // replacement instead of paying the rejection again on every call.
-    const replacement = authorization
-      ? refreshedCredentials.get(authorization)
-      : undefined;
-    if (replacement && replacement !== authorization) {
-      init = withAuthorization(input, init, replacement);
-      authorization = replacement;
-    }
-    // Every Muse request carries the official build identity and this
-    // credential's stable session headers, on both routes.
-    if (authorization) {
-      init = withIdentityHeaders(
-        input,
-        init,
-        sessionIdentityFor(authorization),
-      );
-    }
-    const send = (i: RequestInfo | URL, ini: RequestInit | undefined) =>
-      sendWithTransientRetry(base, i, ini);
-
-    // Attestation fallback: on Meta's refusal, remember the credential and
-    // retry under the text tool protocol. Returns null when the 403 is
-    // something else, so the remint path below can see it.
-    const attestationFallback = async (
-      res: Response,
-      auth: string,
-      ini: RequestInit | undefined,
-    ): Promise<Response | null> => {
-      if (res.status !== 403) return null;
-      const bodyText = await res
-        .clone()
-        .text()
-        .catch(() => "");
-      if (!isAttestationDenial(res.status, bodyText)) return null;
-      if (auth) textToolCredentials.add(auth);
-      return textToolRequest(send, input, ini);
-    };
-
-    // One attempt for one credential, termixgo's route order: the native
-    // Responses route first (tools as the one `muse` namespace tool), the
-    // text protocol for a credential Meta attestation-refused, and the
-    // plain chat route only for a body neither translation takes (the
-    // SDK's non-chat calls). A native success marks the credential so the
-    // route choice is remembered, though the native route is the default
-    // for every unclassified credential anyway.
-    const runAttempt = async (
-      ini: RequestInit | undefined,
-      auth: string,
-    ): Promise<Response> => {
-      if (auth && textToolCredentials.has(auth)) {
-        const viaText = await textToolRequest(send, input, ini);
-        if (viaText) return viaText;
-      } else if (auth) {
-        const native = await nativeResponsesRequest(
-          send,
-          input,
-          ini,
-          sessionIdentityFor(auth).sessionId,
-        );
-        if (native) {
-          if (native.status === 403) {
-            const viaAtt = await attestationFallback(native, auth, ini);
-            if (viaAtt) return viaAtt;
-          }
-          if (native.ok) nativeResponsesCredentials.add(auth);
-          return native;
-        }
-      }
-      const response = await send(input, ini);
-      if (response.status === 403 && auth) {
-        const viaAtt = await attestationFallback(response, auth, ini);
-        if (viaAtt) return viaAtt;
-      }
+  const retryDelay = opts?.retryDelayMs ?? defaultRetryDelayMs;
+  const sessionId =
+    typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : "termigo-muse";
+  const attempt = async (
+    input: RequestInfo | URL,
+    init: RequestInit | undefined,
+  ): Promise<Response> => {
+    const authorization = authorizationOf(input, init);
+    const url = urlOf(input);
+    // Only chat-completions posts are translated; everything else keeps
+    // the original pass-through with SSE sanitising.
+    if (!url.endsWith("/chat/completions") || typeof init?.body !== "string") {
+      const response = await base(input, init);
       if (!response.ok || !response.body || !isEventStream(response)) {
         return response;
       }
@@ -436,16 +323,84 @@ export function createMuseFetch(
         statusText: response.statusText,
         headers: { "content-type": "text/event-stream" },
       });
-    };
+    }
+    if (authorization && textToolCredentials.has(authorization)) {
+      const viaText = await textToolRequest(
+        base,
+        input,
+        init,
+        sessionId,
+        retryDelay,
+      );
+      if (viaText) return viaText;
+    }
+    let chatBody: unknown;
+    try {
+      chatBody = JSON.parse(init.body);
+    } catch {
+      return base(input, init);
+    }
+    const nativeBody = chatToNativeResponsesBody(chatBody, sessionId);
+    const responsesURL = responsesUrl(url);
+    if (!nativeBody || !responsesURL) return base(input, init);
+    const model =
+      typeof nativeBody.model === "string" && nativeBody.model
+        ? nativeBody.model
+        : "muse";
+    const { response, translated } = await postResponsesWithRetry(
+      base,
+      responsesURL,
+      {
+        ...init,
+        headers: withIdentityHeaders(input, init, sessionId),
+        body: JSON.stringify(nativeBody),
+      },
+      model,
+      {
+        allowedTools: declaredChatToolNames(chatBody),
+        toolAliases: responseToolAliases(chatBody),
+      },
+      retryDelay,
+    );
+    if (translated) return response;
+    if (response.status === 403) {
+      const bodyText = await response
+        .clone()
+        .text()
+        .catch(() => "");
+      if (isAttestationDenial(response.status, bodyText)) {
+        if (authorization) textToolCredentials.add(authorization);
+        const viaText = await textToolRequest(
+          base,
+          input,
+          init,
+          sessionId,
+          retryDelay,
+        );
+        if (viaText) return viaText;
+      }
+      return response;
+    }
+    return response;
+  };
 
-    let response = await runAttempt(init, authorization);
-
-    // Auth recovery, termixgo's ladder: a stale-key rejection (401, 404, or
-    // a 403 that was not attestation) earns one remint and one retry with
-    // the fresh credential, re-running the same route logic. This now also
-    // covers the text route, whose error responses used to return before
-    // the ladder could see them. A pay-as-you-go key has no remint behind
-    // it; opts.remint is only wired for the OAuth login.
+  return async (input, init) => {
+    let authorization = authorizationOf(input, init);
+    // A credential Meta already retired once: go straight to its
+    // replacement instead of paying the rejection again on every step.
+    const replacement = authorization
+      ? refreshedCredentials.get(authorization)
+      : undefined;
+    if (replacement && replacement !== authorization) {
+      init = withAuthorization(input, init, replacement);
+      authorization = replacement;
+    }
+    let response = await attempt(input, init);
+    // Auth recovery, termixgo's ladder: a stale-key rejection earns one
+    // remint and one retry with the fresh credential, re-running the same
+    // route logic. An attestation 403 never reaches here as a bare 403 --
+    // the attempt already converted it to the text protocol -- so a 403
+    // at this point is the non-attestation kind.
     if (
       opts?.remint &&
       authorization &&
@@ -458,28 +413,17 @@ export function createMuseFetch(
         const freshAuth = `Bearer ${freshToken}`;
         if (freshAuth !== authorization) {
           refreshedCredentials.set(authorization, freshAuth);
-          // A remint is a session reset: the fresh credential starts a
-          // fresh session identity rather than reusing the rejected one.
-          sessionByCredential.set(freshAuth, newSessionIdentity());
-          // A credential already known to need the text protocol (or
-          // confirmed native) keeps its route under its replacement; the
-          // classification is keyed by credential.
+          // The route classification follows the credential it replaces.
           if (textToolCredentials.has(authorization)) {
             textToolCredentials.add(freshAuth);
           }
-          if (nativeResponsesCredentials.has(authorization)) {
-            nativeResponsesCredentials.add(freshAuth);
-          }
-          const retryInit = withIdentityHeaders(
+          response = await attempt(
             input,
             withAuthorization(input, init, freshAuth),
-            sessionIdentityFor(freshAuth),
           );
-          response = await runAttempt(retryInit, freshAuth);
         }
       }
     }
-
     return response;
   };
 }

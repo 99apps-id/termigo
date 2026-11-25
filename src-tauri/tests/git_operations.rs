@@ -604,4 +604,3 @@ fn resolve_repo_authorizes_and_resolves_git_worktree() {
     assert!(!info.is_detached);
     assert!(fx.registry.is_authorized(&wt_path));
 }
-

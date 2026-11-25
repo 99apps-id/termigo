@@ -2,7 +2,7 @@
 //!
 //! Supports:
 //!   - `openai-codex` (OpenAI Codex / ChatGPT, PKCE on 127.0.0.1:1455)
-//!   - `claude-oauth` (Anthropic Claude, PKCE on 127.0.0.1:54545)
+//!   - `claude-oauth` (Anthropic Claude, PKCE on 127.0.0.1:54545, pasted-code fallback)
 //!   - `antigravity` (Google Antigravity, PKCE on an ephemeral loopback port)
 //!   - `xai-oauth` (xAI Grok, RFC 8628 Device Flow)
 //!   - `github-copilot` (GitHub Copilot Device Flow + Copilot token exchange)
@@ -26,7 +26,21 @@ static OAUTH_CANCELLED: AtomicBool = AtomicBool::new(false);
 /// with no User-Agent with a 302 to an HTML page, whose empty body then fails
 /// to parse as JSON ("expected value at line 1 column 1"), so the header is
 /// required rather than cosmetic.
-const MUSE_USER_AGENT: &str = "muse-code/1.0.2";
+const MUSE_CLI_VERSION: &str = "1.4.24";
+
+fn muse_user_agent() -> String {
+    let os = match std::env::consts::OS {
+        "macos" => "darwin",
+        "windows" => "windows",
+        _ => "linux",
+    };
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => "x86_64",
+        "aarch64" => "arm64",
+        other => other,
+    };
+    format!("muse-build/{MUSE_CLI_VERSION} (non-interactive; {os}-{arch})")
+}
 
 /// The public Google installed-app pair for Antigravity, the same one Termixgo
 /// ships. A release build bakes it in with option_env! so the app never asks
@@ -367,67 +381,233 @@ async fn login_openai_codex(app: &tauri::AppHandle) -> Result<OAuthTokens, Strin
     })
 }
 
-async fn login_claude_oauth(app: &tauri::AppHandle) -> Result<OAuthTokens, String> {
-    const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
-    const AUTHORIZE_URL: &str = "https://claude.ai/oauth/authorize";
-    const TOKEN_URL: &str = "https://api.anthropic.com/v1/oauth/token";
-    const SCOPE: &str = "org:create_api_key user:profile user:inference";
+// ── Claude (Claude Code OAuth) ──────────────────────────────────────────────
+//
+// Mirrors the ODON flow (claude.ai authorize, api.anthropic.com token, the
+// claude-cli/2.1.290 identity): the loopback redirect on the registered port is preferred, and
+// when that port is held by another program the login switches to the hosted
+// pasted-code redirect instead of failing.
 
-    let verifier = random_b64(32)?;
-    let challenge = b64url(&Sha256::digest(verifier.as_bytes()));
-    let state = random_b64(16)?;
+/// Claude Code release this client presents as. Anthropic gates newer models
+/// and the subscription endpoints on a minimum client version, so this is kept
+/// current; `TERMIGO_CLAUDE_CLI_VERSION` overrides it without a rebuild. The
+/// TypeScript side (`CLAUDE_CLI_VERSION` in src/modules/ai/config.ts) pins the
+/// same release; bump both together.
+pub const CLAUDE_CLI_VERSION: &str = "2.1.325";
 
-    let (listener, port) = bind_loopback(Some(54545)).await?;
-    let redirect_uri = format!("http://localhost:{port}/callback");
+const CLAUDE_CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
+const CLAUDE_AUTHORIZE_URL: &str = "https://claude.ai/oauth/authorize";
+const CLAUDE_MANUAL_AUTHORIZE_URL: &str = "https://platform.claude.com/oauth/authorize";
+const CLAUDE_TOKEN_URL: &str = "https://api.anthropic.com/v1/oauth/token";
+/// The hosted redirect registered for the Claude Code client. Its consent page
+/// shows `code#state` for the operator to paste back; no local port is needed.
+const CLAUDE_MANUAL_REDIRECT_URI: &str = "https://platform.claude.com/oauth/code/callback";
+const CLAUDE_SCOPE: &str = "org:create_api_key user:profile user:inference";
+const CLAUDE_LOOPBACK_PORT: u16 = 54545;
 
-    let auth_url = format!(
-        "{AUTHORIZE_URL}?{}",
+/// A pending pasted-code Claude login: the state it expects and the channel
+/// that receives the validated authorization code.
+struct ManualCodeSlot {
+    state: String,
+    sender: tokio::sync::oneshot::Sender<String>,
+}
+
+static CLAUDE_MANUAL_CODE: std::sync::Mutex<Option<ManualCodeSlot>> = std::sync::Mutex::new(None);
+
+fn is_dotted_version(value: &str) -> bool {
+    !value.is_empty()
+        && value.chars().all(|c| c.is_ascii_digit() || c == '.')
+        && value.starts_with(|c: char| c.is_ascii_digit())
+        && !value.ends_with('.')
+        && !value.contains("..")
+}
+
+/// `User-Agent` for every Claude subscription request, in the exact shape the
+/// official CLI sends.
+pub fn claude_cli_user_agent() -> String {
+    let version = std::env::var("TERMIGO_CLAUDE_CLI_VERSION")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| is_dotted_version(v))
+        .unwrap_or_else(|| CLAUDE_CLI_VERSION.to_string());
+    format!("claude-cli/{version} (external, cli)")
+}
+
+/// Builds the authorization URL with the parameter order the official client
+/// uses (`code=true` at the end as in odon-ai/RFC).
+fn claude_authorize_url(
+    endpoint: &str,
+    redirect_uri: &str,
+    challenge: &str,
+    state: &str,
+) -> String {
+    format!(
+        "{endpoint}?{}",
         query(&[
             ("response_type", "code"),
-            ("client_id", CLIENT_ID),
-            ("redirect_uri", &redirect_uri),
-            ("scope", SCOPE),
-            ("code_challenge", &challenge),
+            ("client_id", CLAUDE_CLIENT_ID),
+            ("redirect_uri", redirect_uri),
+            ("scope", CLAUDE_SCOPE),
+            ("code_challenge", challenge),
             ("code_challenge_method", "S256"),
-            ("state", &state),
+            ("state", state),
             ("code", "true"),
         ])
-    );
-
-    let _ = app.emit("oauth-auth-url", auth_url.clone());
-    if let Err(e) = tauri_plugin_opener::open_url(auth_url.clone(), None::<&str>) {
-        log::warn!("[oauth] could not open browser: {e}");
-    }
-
-    let target = tokio::time::timeout(
-        Duration::from_secs(TIMEOUT_SECS),
-        accept_callback(&listener, "/callback"),
     )
-    .await
-    .map_err(|_| "timed out waiting for browser sign-in".to_string())??;
+}
 
-    let parsed = url::Url::parse(&format!("http://localhost{target}"))
-        .map_err(|e| format!("could not parse callback: {e}"))?;
-    let mut code = None;
-    let mut got_state = None;
-    let mut err = None;
-    for (k, v) in parsed.query_pairs() {
-        match k.as_ref() {
-            "code" => code = Some(v.into_owned()),
-            "state" => got_state = Some(v.into_owned()),
-            "error_description" | "error" => {
-                err.get_or_insert(v.into_owned());
-            }
-            _ => continue,
+/// Splits a pasted `code#state` (a bare code is accepted too) and checks the
+/// state against this login.
+fn parse_pasted_claude_code(pasted: &str, expected_state: &str) -> Result<String, String> {
+    let trimmed = pasted.trim();
+    if trimmed.is_empty() {
+        return Err("paste the authorization code shown after sign-in".to_string());
+    }
+    let (code, state) = match trimmed.split_once('#') {
+        Some((code, state)) => (code.trim(), Some(state.trim())),
+        None => (trimmed, None),
+    };
+    if code.is_empty() {
+        return Err("the pasted value has no authorization code".to_string());
+    }
+    if let Some(state) = state {
+        if state != expected_state {
+            return Err(
+                "authorization state does not match this login; start the sign-in again"
+                    .to_string(),
+            );
         }
     }
-    if let Some(e) = err {
-        return Err(format!("sign-in refused: {e}"));
+    Ok(code.to_string())
+}
+
+/// Binds the registered loopback port, retrying briefly so a listener from a
+/// login that was just cancelled has time to release it.
+async fn bind_claude_loopback() -> Result<(TcpListener, u16), String> {
+    let mut last = String::new();
+    for attempt in 0..6 {
+        match bind_loopback(Some(CLAUDE_LOOPBACK_PORT)).await {
+            Ok(bound) => return Ok(bound),
+            Err(e) => {
+                last = e;
+                if attempt < 5 {
+                    tokio::time::sleep(Duration::from_millis(150)).await;
+                }
+            }
+        }
     }
-    if got_state.as_deref() != Some(state.as_str()) {
-        return Err("callback state mismatch".to_string());
+    Err(last)
+}
+
+#[derive(Serialize, Clone)]
+struct ManualCodePrompt {
+    provider: String,
+    authorization_url: String,
+}
+
+async fn wait_for_pasted_claude_code(state: &str) -> Result<String, String> {
+    let (tx, mut rx) = tokio::sync::oneshot::channel::<String>();
+    if let Ok(mut slot) = CLAUDE_MANUAL_CODE.lock() {
+        *slot = Some(ManualCodeSlot {
+            state: state.to_string(),
+            sender: tx,
+        });
     }
-    let code = code.ok_or_else(|| "no code returned".to_string())?;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(TIMEOUT_SECS);
+    let result = loop {
+        if OAUTH_CANCELLED.load(Ordering::Relaxed) {
+            break Err("sign-in cancelled".to_string());
+        }
+        if tokio::time::Instant::now() >= deadline {
+            break Err("timed out waiting for the authorization code".to_string());
+        }
+        match tokio::time::timeout(Duration::from_millis(500), &mut rx).await {
+            // Already validated by `oauth_submit_code`.
+            Ok(Ok(code)) => break Ok(code),
+            Ok(Err(_)) => break Err("sign-in cancelled".to_string()),
+            Err(_) => continue,
+        }
+    };
+    if let Ok(mut slot) = CLAUDE_MANUAL_CODE.lock() {
+        *slot = None;
+    }
+    result
+}
+
+async fn login_claude_oauth(app: &tauri::AppHandle) -> Result<OAuthTokens, String> {
+    let verifier = random_b64(64)?;
+    let challenge = b64url(&Sha256::digest(verifier.as_bytes()));
+    let state = random_b64(32)?;
+
+    let (code, redirect_uri) = match bind_claude_loopback().await {
+        Ok((listener, port)) => {
+            let redirect_uri = format!("http://localhost:{port}/callback");
+            let auth_url =
+                claude_authorize_url(CLAUDE_AUTHORIZE_URL, &redirect_uri, &challenge, &state);
+            let _ = app.emit("oauth-auth-url", auth_url.clone());
+            if let Err(e) = tauri_plugin_opener::open_url(auth_url, None::<&str>) {
+                log::warn!("[oauth] could not open browser: {e}");
+            }
+
+            let target = tokio::time::timeout(
+                Duration::from_secs(TIMEOUT_SECS),
+                accept_callback(&listener, "/callback"),
+            )
+            .await
+            .map_err(|_| "timed out waiting for browser sign-in".to_string())??;
+
+            let parsed = url::Url::parse(&format!("http://localhost{target}"))
+                .map_err(|e| format!("could not parse callback: {e}"))?;
+            let mut code = None;
+            let mut got_state = None;
+            let mut err = None;
+            for (k, v) in parsed.query_pairs() {
+                match k.as_ref() {
+                    "code" => code = Some(v.into_owned()),
+                    "state" => got_state = Some(v.into_owned()),
+                    "error_description" | "error" => {
+                        err.get_or_insert(v.into_owned());
+                    }
+                    _ => continue,
+                }
+            }
+            if let Some(e) = err {
+                return Err(format!("sign-in refused: {e}"));
+            }
+            if got_state.as_deref() != Some(state.as_str()) {
+                return Err("callback state mismatch".to_string());
+            }
+            (
+                code.ok_or_else(|| "no code returned".to_string())?,
+                redirect_uri,
+            )
+        }
+        Err(bind_error) => {
+            log::warn!(
+                "[oauth] Claude loopback listener unavailable ({bind_error}); \
+                 switching to the pasted-code flow"
+            );
+            let redirect_uri = CLAUDE_MANUAL_REDIRECT_URI.to_string();
+            let auth_url = claude_authorize_url(
+                CLAUDE_MANUAL_AUTHORIZE_URL,
+                &redirect_uri,
+                &challenge,
+                &state,
+            );
+            let _ = app.emit("oauth-auth-url", auth_url.clone());
+            let _ = app.emit(
+                "oauth-manual-code",
+                ManualCodePrompt {
+                    provider: "claude-oauth".to_string(),
+                    authorization_url: auth_url.clone(),
+                },
+            );
+            if let Err(e) = tauri_plugin_opener::open_url(auth_url, None::<&str>) {
+                log::warn!("[oauth] could not open browser: {e}");
+            }
+            (wait_for_pasted_claude_code(&state).await?, redirect_uri)
+        }
+    };
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
@@ -438,15 +618,15 @@ async fn login_claude_oauth(app: &tauri::AppHandle) -> Result<OAuthTokens, Strin
         "grant_type": "authorization_code",
         "code": code,
         "redirect_uri": redirect_uri,
-        "client_id": CLIENT_ID,
+        "client_id": CLAUDE_CLIENT_ID,
         "code_verifier": verifier,
         "state": state,
     });
 
     let res = client
-        .post(TOKEN_URL)
+        .post(CLAUDE_TOKEN_URL)
         .header("content-type", "application/json")
-        .header("user-agent", "claude-cli/2.1.280 (external, sdk-cli)")
+        .header("user-agent", claude_cli_user_agent())
         .json(&payload)
         .send()
         .await
@@ -483,19 +663,23 @@ async fn login_claude_oauth(app: &tauri::AppHandle) -> Result<OAuthTokens, Strin
 }
 
 fn ag_user_agent() -> String {
-    let platform = match std::env::consts::OS {
+    let os_type = match std::env::consts::OS {
         "macos" => "darwin",
         "windows" => "windows",
         _ => "linux",
     };
     let arch = match std::env::consts::ARCH {
-        "x86_64" => "x64",
-        "x86" => "x86",
+        "x86_64" => "amd64",
+        "x86" => "386",
         "aarch64" => "arm64",
         "arm" => "arm",
         other => other,
     };
-    format!("antigravity/ide/2.11.0 {platform}/{arch}")
+    // The Antigravity CLI 1.5.15 identity (matching termixgo agUserAgent):
+    // Cloud Code lists Gemini 4 (Neon, Hydrogen, Argon, Carbon) only for it.
+    format!(
+        "antigravity/cli/1.5.15 (aidev_client; os_type={os_type}; arch={arch}; cl=1027820220; auth_method=consumer)"
+    )
 }
 
 async fn login_antigravity(app: &tauri::AppHandle) -> Result<OAuthTokens, String> {
@@ -912,7 +1096,7 @@ async fn login_muse(app: &tauri::AppHandle) -> Result<OAuthTokens, String> {
         .post(DEVICE_URL)
         .header("content-type", "application/x-www-form-urlencoded")
         .header("accept", "application/json")
-        .header("user-agent", MUSE_USER_AGENT)
+        .header("user-agent", muse_user_agent())
         .body(query(&[("client_id", CLIENT_ID)]))
         .send()
         .await
@@ -967,7 +1151,7 @@ async fn login_muse(app: &tauri::AppHandle) -> Result<OAuthTokens, String> {
             .post(TOKEN_URL)
             .header("content-type", "application/x-www-form-urlencoded")
             .header("accept", "application/json")
-            .header("user-agent", MUSE_USER_AGENT)
+            .header("user-agent", muse_user_agent())
             .body(query(&[
                 ("client_id", CLIENT_ID),
                 ("device_code", &dev.device_code),
@@ -1004,7 +1188,7 @@ async fn login_muse(app: &tauri::AppHandle) -> Result<OAuthTokens, String> {
     let mint_res = client
         .post(MINT_URL)
         .header("authorization", format!("Bearer {dca_token}"))
-        .header("user-agent", MUSE_USER_AGENT)
+        .header("user-agent", muse_user_agent())
         .header("accept", "application/json")
         .header("x-api-version", "1.0.0")
         .json(&serde_json::json!({ "onboard": true }))
@@ -1110,19 +1294,16 @@ async fn do_refresh_token(provider: &str, refresh_token: &str) -> Result<OAuthTo
             })
         }
         "claude-oauth" => {
-            const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
-            const TOKEN_URL: &str = "https://api.anthropic.com/v1/oauth/token";
-
             let payload = serde_json::json!({
                 "grant_type": "refresh_token",
                 "refresh_token": refresh_token,
-                "client_id": CLIENT_ID,
+                "client_id": CLAUDE_CLIENT_ID,
             });
 
             let res = client
-                .post(TOKEN_URL)
+                .post(CLAUDE_TOKEN_URL)
                 .header("content-type", "application/json")
-                .header("user-agent", "claude-cli/2.1.280 (external, sdk-cli)")
+                .header("user-agent", claude_cli_user_agent())
                 .json(&payload)
                 .send()
                 .await
@@ -1197,7 +1378,7 @@ async fn do_refresh_token(provider: &str, refresh_token: &str) -> Result<OAuthTo
             let mint_res = client
                 .post(MINT_URL)
                 .header("authorization", format!("Bearer {refresh_token}"))
-                .header("user-agent", MUSE_USER_AGENT)
+                .header("user-agent", muse_user_agent())
                 .header("accept", "application/json")
                 .header("x-api-version", "1.0.0")
                 .json(&serde_json::json!({ "onboard": true }))
@@ -1355,7 +1536,33 @@ pub async fn oauth_login(app: tauri::AppHandle, provider: String) -> Result<OAut
 #[tauri::command]
 pub async fn oauth_cancel() -> Result<(), String> {
     OAUTH_CANCELLED.store(true, Ordering::Relaxed);
+    if let Ok(mut slot) = CLAUDE_MANUAL_CODE.lock() {
+        slot.take();
+    }
     Ok(())
+}
+
+/// Delivers the `code#state` pasted from the Claude consent page to the
+/// pending pasted-code login.
+#[tauri::command]
+pub async fn oauth_submit_code(code: String) -> Result<(), String> {
+    let mut guard = CLAUDE_MANUAL_CODE
+        .lock()
+        .map_err(|_| "sign-in state is unavailable".to_string())?;
+    let expected = guard
+        .as_ref()
+        .ok_or_else(|| "no sign-in is waiting for a code".to_string())?
+        .state
+        .clone();
+    // A mistyped or stale paste is reported back to the form and the login
+    // keeps waiting, instead of failing the whole sign-in.
+    let parsed = parse_pasted_claude_code(&code, &expected)?;
+    let slot = guard
+        .take()
+        .ok_or_else(|| "no sign-in is waiting for a code".to_string())?;
+    slot.sender
+        .send(parsed)
+        .map_err(|_| "the sign-in is no longer waiting for a code".to_string())
 }
 
 #[tauri::command]
@@ -1399,6 +1606,50 @@ mod tests {
             "error must name the busy port: {err}"
         );
         drop(held);
+    }
+
+    #[test]
+    fn claude_authorize_url_matches_the_official_client() {
+        let url = claude_authorize_url(
+            CLAUDE_AUTHORIZE_URL,
+            "http://localhost:54545/callback",
+            "chal",
+            "st",
+        );
+        let parsed = url::Url::parse(&url).expect("valid url");
+        assert_eq!(parsed.host_str(), Some("claude.ai"));
+        assert_eq!(parsed.path(), "/oauth/authorize");
+        let pairs: Vec<(String, String)> = parsed
+            .query_pairs()
+            .map(|(k, v)| (k.into_owned(), v.into_owned()))
+            .collect();
+        let get = |k: &str| pairs.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
+        assert_eq!(get("response_type"), Some("code"));
+        assert_eq!(get("client_id"), Some(CLAUDE_CLIENT_ID));
+        assert_eq!(get("redirect_uri"), Some("http://localhost:54545/callback"));
+        assert_eq!(get("code_challenge_method"), Some("S256"));
+        assert_eq!(get("state"), Some("st"));
+        assert_eq!(get("code"), Some("true"));
+        assert_eq!(
+            get("scope"),
+            Some("org:create_api_key user:profile user:inference")
+        );
+    }
+
+    #[test]
+    fn pasted_claude_code_checks_state() {
+        assert_eq!(parse_pasted_claude_code(" abc#st ", "st").unwrap(), "abc");
+        assert_eq!(parse_pasted_claude_code("abc", "st").unwrap(), "abc");
+        assert!(parse_pasted_claude_code("abc#other", "st").is_err());
+        assert!(parse_pasted_claude_code("#st", "st").is_err());
+        assert!(parse_pasted_claude_code("  ", "st").is_err());
+    }
+
+    #[test]
+    fn claude_user_agent_has_the_cli_shape() {
+        let ua = claude_cli_user_agent();
+        assert!(ua.starts_with("claude-cli/"), "{ua}");
+        assert!(ua.ends_with(" (external, cli)"), "{ua}");
     }
 
     #[test]

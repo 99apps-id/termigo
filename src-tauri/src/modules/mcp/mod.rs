@@ -34,8 +34,8 @@ const WORKSPACE_REGISTRY: &str = ".termigo/mcp.json";
 /// CVE-2024-22471 / Cody), so the launcher is restricted to well-known
 /// package runners and language CLIs.
 const ALLOWED_MCP_COMMANDS: &[&str] = &[
-    "npx", "uvx", "bunx", "node", "python", "python3", "go", "bun", "deno", "npm", "pnpm",
-    "yarn", "java", "ruby", "rustc", "cargo",
+    "npx", "uvx", "bunx", "node", "python", "python3", "go", "bun", "deno", "npm", "pnpm", "yarn",
+    "java", "ruby", "rustc", "cargo",
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -144,7 +144,10 @@ fn validate_mcp_command(command: &str, scope: &str) -> Result<(), String> {
     // In project scope, reject any command containing paths, drive letters, or
     // embedded whitespace so a repository cannot point `command` at `./node.exe`
     // or `../evil/npx` inside the workspace.
-    if cmd.chars().any(|c| c.is_whitespace() || c == '/' || c == '\\' || c == ':') {
+    if cmd
+        .chars()
+        .any(|c| c.is_whitespace() || c == '/' || c == '\\' || c == ':')
+    {
         return Err(format!(
             "MCP command {cmd:?} must be a bare executable name in project scope"
         ));
@@ -156,7 +159,9 @@ fn validate_mcp_command(command: &str, scope: &str) -> Result<(), String> {
         .unwrap_or(cmd);
 
     if !ALLOWED_MCP_COMMANDS.contains(&stem) && !ALLOWED_MCP_COMMANDS.contains(&cmd) {
-        return Err(format!("MCP command {cmd:?} is not allowed in project scope"));
+        return Err(format!(
+            "MCP command {cmd:?} is not allowed in project scope"
+        ));
     }
     Ok(())
 }
@@ -227,7 +232,8 @@ where
                 let mut merged_servers = serde_json::Map::new();
                 let stream = serde_json::Deserializer::from_str(trimmed).into_iter::<Value>();
                 for item in stream {
-                    let val = item.map_err(|e| format!("{} is not valid JSON: {e}", path.display()))?;
+                    let val =
+                        item.map_err(|e| format!("{} is not valid JSON: {e}", path.display()))?;
                     if let Value::Object(mut map) = val {
                         if let Some(Value::Object(srvs)) = map.remove("mcpServers") {
                             for (k, v) in srvs {
@@ -404,11 +410,7 @@ fn retain_enabled(tools: &mut Vec<McpTool>, disabled: &[String]) {
 /// entry and filtered out of `mcp_list_tools` and rejected by `mcp_call_tool`.
 /// Project-scope entries are read-only here, same as removal.
 #[tauri::command]
-pub async fn mcp_set_tool_enabled(
-    name: String,
-    tool: String,
-    enabled: bool,
-) -> Result<(), String> {
+pub async fn mcp_set_tool_enabled(name: String, tool: String, enabled: bool) -> Result<(), String> {
     edit_user_registry(move |servers| apply_tool_enabled(servers, &name, &tool, enabled))?;
     clear_pool();
     Ok(())
@@ -570,7 +572,10 @@ async fn session(workspace: Option<String>, name: &str) -> Result<Session, Strin
             }
         }
     }
-    Ok(Session { guard, name: name.to_string() })
+    Ok(Session {
+        guard,
+        name: name.to_string(),
+    })
 }
 
 /// Stop every pooled server. Called when the registry changes, so an edited or
@@ -686,16 +691,16 @@ mod tests {
             Some(dir.path()),
         );
         assert_eq!(servers.len(), 1);
-        assert_eq!(servers[0].disabled_tools, vec!["dangerous_tool".to_string()]);
+        assert_eq!(
+            servers[0].disabled_tools,
+            vec!["dangerous_tool".to_string()]
+        );
     }
 
     #[test]
     fn tool_toggle_round_trips_through_the_registry_map() {
         let mut servers = serde_json::Map::new();
-        servers.insert(
-            "fs".into(),
-            serde_json::json!({"command": "npx"}),
-        );
+        servers.insert("fs".into(), serde_json::json!({"command": "npx"}));
         apply_tool_enabled(&mut servers, "fs", "dangerous_tool", false).unwrap();
         assert_eq!(
             servers["fs"]["disabledTools"],
@@ -719,10 +724,7 @@ mod tests {
     fn tool_toggle_rejects_unknown_server_and_blank_tool() {
         let mut servers = serde_json::Map::new();
         assert!(apply_tool_enabled(&mut servers, "ghost", "t", false).is_err());
-        servers.insert(
-            "fs".into(),
-            serde_json::json!({"command": "npx"}),
-        );
+        servers.insert("fs".into(), serde_json::json!({"command": "npx"}));
         assert!(apply_tool_enabled(&mut servers, "fs", "  ", false).is_err());
         assert!(apply_tool_enabled(&mut servers, "fs", "t", false).is_ok());
         // Disabling twice keeps a single entry.

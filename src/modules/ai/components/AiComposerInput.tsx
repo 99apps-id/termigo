@@ -269,7 +269,12 @@ export function AiComposerInput() {
 
   // biome-ignore lint/correctness/useExhaustiveDependencies(c.value): autoresize must re-run when the text content changes so the textarea grows with input.
   useEffect(() => {
-    autoresize(c.textareaRef.current, composerHeight);
+    const el = c.textareaRef.current;
+    if (!el) return;
+    const frame = requestAnimationFrame(() => {
+      autoresize(el, composerHeight);
+    });
+    return () => cancelAnimationFrame(frame);
   }, [c.value, c.textareaRef, composerHeight]);
 
   const updateTrigger = () => {

@@ -10,7 +10,7 @@ import {
   routeSubagentType,
 } from "../agents/resolveSubagent";
 import { effectiveSubagentMaxDepth, runSubagent } from "../agents/runSubagent";
-import { globalSubagentPool } from "../lib/subagentPool";
+import { isSlotAbortError, poolForDepth } from "../lib/subagentPool";
 import { defaultBatchIsolation } from "../lib/subagentIsolation";
 import {
   cascadeSkip,
@@ -144,6 +144,11 @@ Approval works exactly as it does for you: read-only tools auto-run, and every m
           depth: childDepth,
         });
         let steps = 0;
+        // The single-spawn path used to bypass the pool entirely, so a model
+        // that fans out with several `run_subagent` calls (which the SDK runs
+        // concurrently) ran more model calls at once than the limiter allows,
+        // and the Active/Queued readout under-reported what was really live.
+        const release = await poolForDepth(depth).acquire(opts?.abortSignal);
         try {
           const r = await runSubagent({
             type: resolved,
@@ -196,6 +201,8 @@ Approval works exactly as it does for you: read-only tools auto-run, and every m
         } catch (e) {
           useSubagentRunStore.getState().fail(sid, runId, String(e));
           return { error: String(e), type: resolved };
+        } finally {
+          release();
         }
       },
     }),
@@ -452,7 +459,28 @@ Each task's subagent has the same toolset you do and may itself spawn further su
               concurrency - inFlight.size,
             )) {
               state[i].running = true;
-              const release = await globalSubagentPool.acquire(batchSignal);
+              // A nested batch draws from its own depth's pool: a subagent
+              // holds a slot in its parent's pool for its whole run, so
+              // queueing its children on that pool let four parents fill all
+              // four slots and then block forever on children that could
+              // never be admitted.
+              const pool = poolForDepth(depth);
+              let release: () => void;
+              try {
+                release = await pool.acquire(batchSignal);
+              } catch (e) {
+                // Aborted while queued for a slot: keep the graceful path
+                // (mark the rest skipped, return the partial summary) instead
+                // of throwing a raw tool error and losing the tasks that did
+                // finish.
+                if (!isSlotAbortError(e)) throw e;
+                state[i] = { settled: true, bad: true, running: false };
+                results[i].skipped = "Aborted waiting for a subagent slot";
+                for (const s of cascadeSkip(plan.deps, state, i)) {
+                  results[s.index].skipped ??= s.reason;
+                }
+                continue;
+              }
               inFlight.set(
                 i,
                 runOne(i).finally(() => {

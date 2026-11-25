@@ -1,5 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { DESTRUCTIVE_ACTION } from "@/lib/toolbarButton";
 import { getProvider, type OAuthProviderId } from "@/modules/ai/config";
@@ -10,11 +11,12 @@ import {
 } from "@/modules/ai/lib/museQuota";
 import {
   type OAuthAccount,
+  cancelOAuthSignIn,
   getOAuthAccount,
   onOAuthAuthChanged,
-  cancelOAuthSignIn,
   signInWithOAuth,
   signOutOAuth,
+  submitOAuthCode,
 } from "@/modules/ai/lib/oauthAuth";
 import {
   ArrowRight01Icon,
@@ -27,6 +29,11 @@ import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useCallback, useEffect, useState } from "react";
 import { ProviderIcon } from "./ProviderIcon";
+
+type ManualCodePayload = {
+  provider: string;
+  authorization_url: string;
+};
 
 type DevicePromptPayload = {
   provider: string;
@@ -63,6 +70,8 @@ export function OAuthProviderCard({ providerId }: Props) {
   );
   const [copied, setCopied] = useState(false);
   const [quota, setQuota] = useState<MuseQuotaSnapshot | null>(null);
+  const [manualCode, setManualCode] = useState<string | null>(null);
+  const [codeError, setCodeError] = useState<string | null>(null);
 
   const reload = useCallback(() => {
     void getOAuthAccount(providerId)
@@ -100,7 +109,15 @@ export function OAuthProviderCard({ providerId }: Props) {
       }
     });
 
+    const unManual = listen<ManualCodePayload>("oauth-manual-code", (e) => {
+      if (e.payload.provider === providerId) {
+        setAuthUrl(e.payload.authorization_url);
+        setManualCode("");
+      }
+    });
+
     return () => {
+      void unManual.then((f) => f());
       void unUrl.then((f) => f());
       void unChatgpt.then((f) => f());
       void unPrompt.then((f) => f());
@@ -113,6 +130,8 @@ export function OAuthProviderCard({ providerId }: Props) {
     setCopied(false);
     setAuthUrl(null);
     setDevicePrompt(null);
+    setManualCode(null);
+    setCodeError(null);
     try {
       setAccount(await signInWithOAuth(providerId));
     } catch (e) {
@@ -121,6 +140,17 @@ export function OAuthProviderCard({ providerId }: Props) {
       setBusy(false);
       setAuthUrl(null);
       setDevicePrompt(null);
+      setManualCode(null);
+    }
+  };
+
+  const submitCode = async () => {
+    if (!manualCode?.trim()) return;
+    setCodeError(null);
+    try {
+      await submitOAuthCode(manualCode.trim());
+    } catch (e) {
+      setCodeError(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -129,6 +159,7 @@ export function OAuthProviderCard({ providerId }: Props) {
     setBusy(false);
     setDevicePrompt(null);
     setAuthUrl(null);
+    setManualCode(null);
   };
 
   const signOut = async () => {
@@ -252,6 +283,43 @@ export function OAuthProviderCard({ providerId }: Props) {
             </div>
           ) : null}
 
+          {busy && manualCode !== null ? (
+            <form
+              className="flex flex-col gap-1.5 rounded border border-border/60 bg-muted/30 p-2 text-[11px]"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void submitCode();
+              }}
+            >
+              <span className="text-muted-foreground">
+                The local callback port is busy. Finish signing in, then paste
+                the code shown on the Claude page.
+              </span>
+              <div className="flex items-center gap-1.5">
+                <Input
+                  value={manualCode}
+                  onChange={(e) => setManualCode(e.target.value)}
+                  placeholder="code#state"
+                  className="h-6 font-mono text-[11px]"
+                  autoFocus
+                  spellCheck={false}
+                />
+                <Button
+                  type="submit"
+                  variant="outline"
+                  size="sm"
+                  className="h-6 px-2 text-[11px]"
+                  disabled={!manualCode.trim()}
+                >
+                  Submit
+                </Button>
+              </div>
+              {codeError ? (
+                <span className="text-destructive">{codeError}</span>
+              ) : null}
+            </form>
+          ) : null}
+
           <div className="flex flex-wrap items-center gap-1.5">
             <Button
               type="button"
@@ -273,7 +341,9 @@ export function OAuthProviderCard({ providerId }: Props) {
               {busy
                 ? devicePrompt
                   ? "Waiting for verification…"
-                  : "Waiting for browser…"
+                  : manualCode !== null
+                    ? "Waiting for code…"
+                    : "Waiting for browser…"
                 : `Sign in with ${provider.label}`}
             </Button>
             {busy && authUrl ? (

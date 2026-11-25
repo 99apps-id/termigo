@@ -128,3 +128,7 @@ termigo.prev-*
 .watchdog/
 scripts/run-headless-debug.sh
 run-headless.sh
+
+# Tauri installer bundles (build output, never committed)
+*.exe
+*.msi

@@ -353,6 +353,11 @@ func (c *Client) EditMarkdown(ctx context.Context, chatID int64, messageID int64
 	return err
 }
 
+// DeleteMessage removes a message the bot sent.
+func (c *Client) DeleteMessage(ctx context.Context, chatID int64, messageID int64) error {
+	return c.call(ctx, "deleteMessage", map[string]any{"chat_id": chatID, "message_id": messageID}, nil)
+}
+
 func (c *Client) editMessage(ctx context.Context, chatID int64, messageID int64, text string, keyboard *InlineKeyboard, parseMode string) error {
 	payload := map[string]any{
 		"chat_id":                  chatID,
@@ -369,7 +374,23 @@ func (c *Client) editMessage(ctx context.Context, chatID int64, messageID int64,
 		}
 		payload["reply_markup"] = keyboard
 	}
-	return c.call(ctx, "editMessageText", payload, nil)
+	err := c.call(ctx, "editMessageText", payload, nil)
+	// A 400 "message is not modified" means the message already shows this text.
+	// Reported as a failure it sent callers to the fallback that posts the answer
+	// as a new message, which showed the same answer twice.
+	if err != nil && isNotModified(err) {
+		return nil
+	}
+	return err
+}
+
+// isNotModified reports the API's "nothing to change" answer to an edit.
+func isNotModified(err error) bool {
+	apiErr, ok := err.(*APIError)
+	if !ok || apiErr.Code != http.StatusBadRequest {
+		return false
+	}
+	return strings.Contains(strings.ToLower(apiErr.Description), "message is not modified")
 }
 
 // isParseError reports whether the API rejected the message body's entities,

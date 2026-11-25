@@ -1,13 +1,38 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// The ledger is backed by the Tauri store, which needs a webview. An in-memory
+// stand-in keeps the write-notification contract testable.
+vi.mock("@tauri-apps/plugin-store", () => {
+  const data = new Map<string, unknown>();
+  return {
+    LazyStore: class {
+      async get(key: string) {
+        return data.get(key);
+      }
+      async set(key: string, value: unknown) {
+        data.set(key, value);
+      }
+      async save() {}
+      async delete(key: string) {
+        data.delete(key);
+      }
+    },
+  };
+});
+
 import {
   aggregateByDay,
   aggregateByModel,
   type CostEntry,
+  clearCostLedger,
+  costLedgerRevision,
   dayKey,
   entriesForWorkspace,
   entriesOnDay,
   MAX_AGE_DAYS,
+  onCostLedgerChanged,
   pruneEntries,
+  recordRunCost,
   sumCost,
 } from "./costLedger";
 
@@ -128,5 +153,28 @@ describe("aggregateByDay", () => {
     expect(rows.map((r) => r.day)).toEqual(["2026-08-29", "2026-08-28"]);
     expect(rows[0].costUsd).toBeCloseTo(0.05);
     expect(rows[0].runs).toBe(2);
+  });
+});
+
+describe("onCostLedgerChanged", () => {
+  it("notifies subscribers on every write and stops after unsubscribe", async () => {
+    let calls = 0;
+    const off = onCostLedgerChanged(() => {
+      calls++;
+    });
+    const before = costLedgerRevision();
+
+    await recordRunCost(entry());
+    expect(calls).toBe(1);
+    expect(costLedgerRevision()).toBe(before + 1);
+
+    await recordRunCost(entry());
+    expect(calls).toBe(2);
+
+    off();
+    await recordRunCost(entry());
+    expect(calls).toBe(2);
+
+    await clearCostLedger();
   });
 });

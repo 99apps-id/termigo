@@ -7,10 +7,13 @@ import ReactDOM from "react-dom/client";
 import App from "./app/App";
 import { AppErrorBoundary } from "@/app/components/AppErrorBoundary";
 import { initLaunchDir } from "./lib/launchDir";
-import { USE_CUSTOM_WINDOW_CONTROLS } from "./lib/platform";
+import { IS_LINUX, USE_CUSTOM_WINDOW_CONTROLS } from "./lib/platform";
 
 if (USE_CUSTOM_WINDOW_CONTROLS) {
   document.documentElement.dataset.chrome = "borderless";
+}
+if (IS_LINUX) {
+  document.documentElement.dataset.platform = "linux";
 }
 
 // Render-instrumentation overlay, opt-in: `VITE_REACT_SCAN=true pnpm dev`.

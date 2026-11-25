@@ -35,23 +35,90 @@ const MAX_OUTPUT_BYTES: usize = 256 * 1024;
 /// for reference only.
 #[allow(dead_code)]
 const SANDBOX_ALLOWLIST: &[&str] = &[
-    "cat", "head", "tail", "wc", "grep", "rg", "sed", "awk",
-    "find", "ls", "Get-ChildItem", "dir", "stat", "file", "xxd", "hexdump", "od",
-    "git", "npm", "pnpm", "yarn", "cargo", "go", "python", "python3",
-    "node", "deno", "bun", "make", "just", "task", "cmake", "npx",
-    "echo", "printf", "test", "true", "false", "pwd", "cd", "source",
-    "which", "where", "type", "command", "hash",
-    "diff", "cmp", "comm", "patch", "jq", "yq",
-    "tar", "gzip", "gunzip", "zip", "unzip",
-    "curl", "wget", "http", "xh",
-    "date", "uptime", "whoami", "id", "uname", "hostname",
-    "sleep", "Start-Sleep", "cp", "mv", "del", "rmdir", "mkdir", "touch", "chmod", "chown",
+    "cat",
+    "head",
+    "tail",
+    "wc",
+    "grep",
+    "rg",
+    "sed",
+    "awk",
+    "find",
+    "ls",
+    "Get-ChildItem",
+    "dir",
+    "stat",
+    "file",
+    "xxd",
+    "hexdump",
+    "od",
+    "git",
+    "npm",
+    "pnpm",
+    "yarn",
+    "cargo",
+    "go",
+    "python",
+    "python3",
+    "node",
+    "deno",
+    "bun",
+    "make",
+    "just",
+    "task",
+    "cmake",
+    "npx",
+    "echo",
+    "printf",
+    "test",
+    "true",
+    "false",
+    "pwd",
+    "cd",
+    "source",
+    "which",
+    "where",
+    "type",
+    "command",
+    "hash",
+    "diff",
+    "cmp",
+    "comm",
+    "patch",
+    "jq",
+    "yq",
+    "tar",
+    "gzip",
+    "gunzip",
+    "zip",
+    "unzip",
+    "curl",
+    "wget",
+    "http",
+    "xh",
+    "date",
+    "uptime",
+    "whoami",
+    "id",
+    "uname",
+    "hostname",
+    "sleep",
+    "Start-Sleep",
+    "cp",
+    "mv",
+    "del",
+    "rmdir",
+    "mkdir",
+    "touch",
+    "chmod",
+    "chown",
     // PowerShell file removal cmdlet. `del` is already allowed as an alias;
     // `Remove-Item` is the canonical name and is explicitly permitted for
     // scripts that call it without relying on alias resolution.
     "Remove-Item",
     "Out-File",
-    "Get-ItemProperty", "Invoke-WebRequest",
+    "Get-ItemProperty",
+    "Invoke-WebRequest",
     // Windows command interpreter. Allowing `cmd` lets the agent run
     // `.bat`/`.cmd` batch files directly without escaping to a PTY.
     "cmd",
@@ -61,69 +128,264 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
     // inspected for cmdlet-level danger. They are allowed because the agent
     // already has equivalent power through PTY sessions, and some Windows-only
     // workflows need them without interactive terminal overhead.
-    "powershell", "pwsh",
+    "powershell",
+    "pwsh",
     // Unix shells / login-shell wrappers. These widen the trust boundary
     // because invoking a shell can run arbitrary startup files and builtins;
     // they are allowed because the agent already has equivalent power through
     // PTY sessions, and some workflows need them without interactive overhead.
-    "bash", "zsh", "sh",
+    "bash",
+    "zsh",
+    "sh",
     // Privilege / system management. These expand the agent's reach beyond
     // normal user permissions, so they are allowed only because the same
     // effect is already possible via an interactive PTY session.
-    "sudo", "doas", "systemctl", "service",
+    "sudo",
+    "doas",
+    "systemctl",
+    "service",
     // Remote / container tooling. These can reach other hosts or control
     // system services; allowed for parity with PTY capability.
-    "ssh", "docker",
+    "ssh",
+    "docker",
     // Pentest & network recon tooling supported by Termigo
-    "nmap", "masscan", "rustscan", "nikto", "nuclei", "httpx", "wpscan",
-    "sqlmap", "ffuf", "gobuster", "dirsearch", "subfinder",
-    "dig", "host", "nslookup", "ping", "traceroute", "tracepath", "mtr",
-    "dnsx", "cmseek", "arjun",
-    "tshark", "responder", "bettercap", "ettercap", "enum4linux", "smbclient",
+    "nmap",
+    "masscan",
+    "rustscan",
+    "nikto",
+    "nuclei",
+    "httpx",
+    "wpscan",
+    "sqlmap",
+    "ffuf",
+    "gobuster",
+    "dirsearch",
+    "subfinder",
+    "dig",
+    "host",
+    "nslookup",
+    "ping",
+    "traceroute",
+    "tracepath",
+    "mtr",
+    "dnsx",
+    "cmseek",
+    "arjun",
+    "tshark",
+    "responder",
+    "bettercap",
+    "ettercap",
+    "enum4linux",
+    "smbclient",
     // Extended recon, TLS and secret scanners (parity with the pentest kits)
-    "katana", "amass", "testssl.sh", "testssl",
-    "lynis", "gitleaks", "trufflehog", "weasyprint", "whois",
-    "whatweb", "hydra", "wafw00f", "searchsploit", "feroxbuster", "showmount",
+    "katana",
+    "amass",
+    "testssl.sh",
+    "testssl",
+    "lynis",
+    "gitleaks",
+    "trufflehog",
+    "weasyprint",
+    "whois",
+    "whatweb",
+    "hydra",
+    "wafw00f",
+    "searchsploit",
+    "feroxbuster",
+    "showmount",
     // Privilege elevation & package management (Linux/WSL, macOS, Windows)
-    "sudo", "doas",
+    "sudo",
+    "doas",
     // Linux / WSL package managers (Debian/Ubuntu/Kali, Arch, RedHat/Fedora, Alpine, openSUSE)
-    "apt", "apt-get", "apt-cache", "dpkg", "dpkg-query",
-    "pacman", "dnf", "yum", "rpm", "apk", "zypper", "snap", "flatpak",
+    "apt",
+    "apt-get",
+    "apt-cache",
+    "dpkg",
+    "dpkg-query",
+    "pacman",
+    "dnf",
+    "yum",
+    "rpm",
+    "apk",
+    "zypper",
+    "snap",
+    "flatpak",
     // macOS package management
-    "brew", "port", "mas", "softwareupdate", "pkgutil", "installer",
+    "brew",
+    "port",
+    "mas",
+    "softwareupdate",
+    "pkgutil",
+    "installer",
     // Python packaging & tool runners
-    "pip", "pip3", "pipx", "uv", "pipenv", "poetry", "conda", "pdm", "flit", "tox", "nox",
+    "pip",
+    "pip3",
+    "pipx",
+    "uv",
+    "pipenv",
+    "poetry",
+    "conda",
+    "pdm",
+    "flit",
+    "tox",
+    "nox",
     // Node package runners & companion tools
-    "npx", "bunx", "yarnpkg", "corepack",
+    "npx",
+    "bunx",
+    "yarnpkg",
+    "corepack",
     // Containers & virtualization
-    "docker", "docker-compose", "podman",
+    "docker",
+    "docker-compose",
+    "podman",
     // Windows shell & package managers (parity with TERMIGO.md / security-model.md)
-    "cmd", "powershell", "pwsh", "set", "wsl", "wslpath", "winget", "choco", "scoop",
+    "cmd",
+    "powershell",
+    "pwsh",
+    "set",
+    "wsl",
+    "wslpath",
+    "winget",
+    "choco",
+    "scoop",
     // Windows PowerShell cmdlets & shell utilities
-    "Get-ChildItem", "Get-Content", "Get-Item", "Get-ItemProperty", "Get-Location", "Set-Location",
-    "Test-Path", "Select-Object", "Select-String", "Where-Object", "ForEach-Object",
-    "Measure-Object", "Sort-Object", "Group-Object", "Out-String", "Out-Null", "Out-File",
-    "Write-Output", "Write-Host", "Remove-Item", "New-Item", "Copy-Item", "Move-Item", "Clear-Content",
-    "Set-Content", "Add-Content", "Start-Process", "Stop-Process", "Get-Process", "Start-Sleep",
-    "Get-Command", "Resolve-Path", "Split-Path", "Join-Path", "Expand-Archive", "Compress-Archive",
-    "Invoke-WebRequest", "Invoke-RestMethod", "ConvertFrom-Json", "ConvertTo-Json",
-    "Get-NetTCPConnection", "Get-NetIPAddress", "Get-NetRoute", "Test-NetConnection",
-    "Get-CimInstance", "Get-WmiObject", "Get-Service", "Start-Service", "Stop-Service", "Restart-Service",
-    "Format-Table", "Format-List", "ft", "fl",
-    "dir", "del", "cls", "ver", "copy", "move", "ren", "rename", "md", "rd", "tree",
-    "findstr", "tasklist", "taskkill", "wmic", "fc", "attrib", "systeminfo", "net", "route", "arp", "netsh",
+    "Get-ChildItem",
+    "Get-Content",
+    "Get-Item",
+    "Get-ItemProperty",
+    "Get-Location",
+    "Set-Location",
+    "Test-Path",
+    "Select-Object",
+    "Select-String",
+    "Where-Object",
+    "ForEach-Object",
+    "Measure-Object",
+    "Sort-Object",
+    "Group-Object",
+    "Out-String",
+    "Out-Null",
+    "Out-File",
+    "Write-Output",
+    "Write-Host",
+    "Remove-Item",
+    "New-Item",
+    "Copy-Item",
+    "Move-Item",
+    "Clear-Content",
+    "Set-Content",
+    "Add-Content",
+    "Start-Process",
+    "Stop-Process",
+    "Get-Process",
+    "Start-Sleep",
+    "Get-Command",
+    "Resolve-Path",
+    "Split-Path",
+    "Join-Path",
+    "Expand-Archive",
+    "Compress-Archive",
+    "Invoke-WebRequest",
+    "Invoke-RestMethod",
+    "ConvertFrom-Json",
+    "ConvertTo-Json",
+    "Get-NetTCPConnection",
+    "Get-NetIPAddress",
+    "Get-NetRoute",
+    "Test-NetConnection",
+    "Get-CimInstance",
+    "Get-WmiObject",
+    "Get-Service",
+    "Start-Service",
+    "Stop-Service",
+    "Restart-Service",
+    "Format-Table",
+    "Format-List",
+    "ft",
+    "fl",
+    "dir",
+    "del",
+    "cls",
+    "ver",
+    "copy",
+    "move",
+    "ren",
+    "rename",
+    "md",
+    "rd",
+    "tree",
+    "findstr",
+    "tasklist",
+    "taskkill",
+    "wmic",
+    "fc",
+    "attrib",
+    "systeminfo",
+    "net",
+    "route",
+    "arp",
+    "netsh",
     // Linux/WSL and Unix system administration & root utilities (user-approved)
-    "systemctl", "service", "journalctl", "dmesg",
-    "chown", "chmod", "mkdir", "rmdir", "cp", "mv", "touch", "ln", "tee",
-    "ip", "ifconfig", "netstat", "ss", "lsof", "ps", "pidof", "pgrep", "kill", "pkill", "killall",
-    "free", "df", "du", "ufw", "iptables",
+    "systemctl",
+    "service",
+    "journalctl",
+    "dmesg",
+    "chown",
+    "chmod",
+    "mkdir",
+    "rmdir",
+    "cp",
+    "mv",
+    "touch",
+    "ln",
+    "tee",
+    "ip",
+    "ifconfig",
+    "netstat",
+    "ss",
+    "lsof",
+    "ps",
+    "pidof",
+    "pgrep",
+    "kill",
+    "pkill",
+    "killall",
+    "free",
+    "df",
+    "du",
+    "ufw",
+    "iptables",
     "timeout",
-    "useradd", "usermod", "userdel", "groupadd", "groupmod", "groupdel",
-    "apt-key", "gpg", "update-alternatives", "su",
-    "xargs", "env", "printenv", "basename", "dirname", "realpath", "readlink",
-    "cut", "sort", "uniq", "tr", "fold", "paste", "split", "nl",
+    "useradd",
+    "usermod",
+    "userdel",
+    "groupadd",
+    "groupmod",
+    "groupdel",
+    "apt-key",
+    "gpg",
+    "update-alternatives",
+    "su",
+    "xargs",
+    "env",
+    "printenv",
+    "basename",
+    "dirname",
+    "realpath",
+    "readlink",
+    "cut",
+    "sort",
+    "uniq",
+    "tr",
+    "fold",
+    "paste",
+    "split",
+    "nl",
     // SSH & remote transfer utilities
-    "ssh", "scp", "sftp", "rsync",
+    "ssh",
+    "scp",
+    "sftp",
+    "rsync",
     //
     // Project toolchains. An agent that cannot run the project's own checks
     // cannot verify its work, and these are the binaries a repository's scripts
@@ -140,18 +402,46 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
     // while the friction is gone.
     //
     // JS/TS (`biome`, `tsc`, `vitest`, `knip`, `vite` are this repo's own)
-    "biome", "tsc", "vitest", "knip", "vite", "eslint", "prettier",
-    "jest", "mocha", "playwright", "size-limit", "lint",
+    "biome",
+    "tsc",
+    "vitest",
+    "knip",
+    "vite",
+    "eslint",
+    "prettier",
+    "jest",
+    "mocha",
+    "playwright",
+    "size-limit",
+    "lint",
     // Python
-    "ruff", "black", "mypy", "pytest", "flake8", "isort",
+    "ruff",
+    "black",
+    "mypy",
+    "pytest",
+    "flake8",
+    "isort",
     // GitHub CLI and companion tools
     "gh",
     // Extension introspection (safe read-only inspection of installed extensions)
-    "ext_read_manifest", "ext_read_asset", "ext_read_asset_bytes", "ext_list",
+    "ext_read_manifest",
+    "ext_read_asset",
+    "ext_read_asset_bytes",
+    "ext_list",
     // Go / Rust helpers whose base command is not `go`/`cargo`
-    "rustc", "rustup", "cargo-nextest", "cargo-clippy", "cargo-machete",
-    "golangci-lint", "rustfmt", "clippy-driver", "clippy", "rust",
-    "gofmt", "govulncheck", "dlv",
+    "rustc",
+    "rustup",
+    "cargo-nextest",
+    "cargo-clippy",
+    "cargo-machete",
+    "golangci-lint",
+    "rustfmt",
+    "clippy-driver",
+    "clippy",
+    "rust",
+    "gofmt",
+    "govulncheck",
+    "dlv",
     //
     // Document generators. An agent asked for a report in a format the user can
     // open in Word/Excel/PowerPoint has to be able to produce one, and
@@ -172,52 +462,169 @@ const SANDBOX_ALLOWLIST: &[&str] = &[
     // that excludes `xargs`, `env`, `timeout`, `nice`, `nohup`, `watch`, `tee`
     // and the shells, each of which would let an unlisted program run behind a
     // listed name.
-    "sort", "uniq", "cut", "tr", "nl", "paste", "join", "fold", "rev",
-    "basename", "dirname", "realpath", "readlink", "seq", "expr",
-    "sha256sum", "sha1sum", "md5sum", "base64", "strings", "du", "df",
+    "sort",
+    "uniq",
+    "cut",
+    "tr",
+    "nl",
+    "paste",
+    "join",
+    "fold",
+    "rev",
+    "basename",
+    "dirname",
+    "realpath",
+    "readlink",
+    "seq",
+    "expr",
+    "sha256sum",
+    "sha1sum",
+    "md5sum",
+    "base64",
+    "strings",
+    "du",
+    "df",
     // Process and job control. `ps` is read-only; `kill`/`killall`/`pkill`
     // let the agent clean up hung shells or background jobs it started, which
     // is already possible through a PTY. `top`/`htop` are interactive viewers.
-    "ps", "kill", "killall", "pkill", "top", "htop",
+    "ps",
+    "kill",
+    "killall",
+    "pkill",
+    "top",
+    "htop",
     // Pagers and editors. The agent legitimately needs to inspect long output
     // or edit config files; these are narrower than spawning a full shell.
-    "less", "more", "most", "vim", "nano", "vi",
+    "less",
+    "more",
+    "most",
+    "vim",
+    "nano",
+    "vi",
     // File transfer and remote sync. Common in devops and deployment flows;
     // equivalent power exists through an SSH PTY session.
-    "scp", "rsync", "sftp",
+    "scp",
+    "rsync",
+    "sftp",
     // Cloud and infrastructure CLIs. Widely used in modern workflows; the
     // agent already has equivalent reach through an interactive shell.
-    "kubectl", "helm", "terraform", "ansible", "aws", "gcloud", "az",
+    "kubectl",
+    "helm",
+    "terraform",
+    "ansible",
+    "aws",
+    "gcloud",
+    "az",
     // Editor CLIs. Useful for headless automation and file inspection.
-    "code", "cursor", "windsurf", "subl", "notepad++",
+    "code",
+    "cursor",
+    "windsurf",
+    "subl",
+    "notepad++",
     // OS-level file and URL openers. Let the agent open files/URLs in the
     // user's default application without widening the trust boundary.
-    "explorer", "xdg-open", "open",
+    "explorer",
+    "xdg-open",
+    "open",
     //
     // Additional project, language & framework toolchains (coding & refactoring)
-    "tsx", "ts-node", "turbo", "prisma", "drizzle-kit",
-    "next", "nuxt", "astro", "svelte-kit", "remix",
-    "esbuild", "rollup", "webpack", "swc",
-    "cross-env", "concurrently", "rimraf", "tree-sitter",
-    "zig", "dotnet",
-    "java", "javac", "mvn", "gradle", "gradlew",
-    "php", "composer",
-    "ruby", "gem", "bundle", "rake",
-    "elixir", "mix",
-    "clang", "clang++", "gcc", "g++", "cc", "c++", "ld", "lld",
+    "tsx",
+    "ts-node",
+    "turbo",
+    "prisma",
+    "drizzle-kit",
+    "next",
+    "nuxt",
+    "astro",
+    "svelte-kit",
+    "remix",
+    "esbuild",
+    "rollup",
+    "webpack",
+    "swc",
+    "cross-env",
+    "concurrently",
+    "rimraf",
+    "tree-sitter",
+    "zig",
+    "dotnet",
+    "java",
+    "javac",
+    "mvn",
+    "gradle",
+    "gradlew",
+    "php",
+    "composer",
+    "ruby",
+    "gem",
+    "bundle",
+    "rake",
+    "elixir",
+    "mix",
+    "clang",
+    "clang++",
+    "gcc",
+    "g++",
+    "cc",
+    "c++",
+    "ld",
+    "lld",
     // Database CLIs & query utilities
-    "sqlite3", "duckdb", "psql", "mysql", "mariadb", "mongosh", "mongo", "redis-cli",
+    "sqlite3",
+    "duckdb",
+    "psql",
+    "mysql",
+    "mariadb",
+    "mongosh",
+    "mongo",
+    "redis-cli",
     // Code audit, linting, formatting & refactoring tools
-    "oxlint", "jscodeshift", "ast-grep", "sg", "comby",
-    "radon", "pylint", "shellcheck", "shfmt", "sqlfluff",
-    "markdownlint", "markdownlint-cli2", "actionlint", "yamllint", "hadolint", "dotenv-linter",
-    "cargo-audit", "cargo-deny", "cargo-outdated", "npm-audit", "pnpm-audit",
+    "oxlint",
+    "jscodeshift",
+    "ast-grep",
+    "sg",
+    "comby",
+    "radon",
+    "pylint",
+    "shellcheck",
+    "shfmt",
+    "sqlfluff",
+    "markdownlint",
+    "markdownlint-cli2",
+    "actionlint",
+    "yamllint",
+    "hadolint",
+    "dotenv-linter",
+    "cargo-audit",
+    "cargo-deny",
+    "cargo-outdated",
+    "npm-audit",
+    "pnpm-audit",
     // Security audit, vulnerability scanners & pentest tooling
-    "semgrep", "bandit", "trivy", "snyk", "osv-scanner", "checkov",
-    "grype", "syft", "retire", "auditjs", "checksec",
-    "kiterunner", "gau", "waybackurls", "paramspider",
-    "dalfox", "commix", "cve-bin-tool", "whispers", "detect-secrets",
-    "netcat", "nc", "socat", "tcpdump",
+    "semgrep",
+    "bandit",
+    "trivy",
+    "snyk",
+    "osv-scanner",
+    "checkov",
+    "grype",
+    "syft",
+    "retire",
+    "auditjs",
+    "checksec",
+    "kiterunner",
+    "gau",
+    "waybackurls",
+    "paramspider",
+    "dalfox",
+    "commix",
+    "cve-bin-tool",
+    "whispers",
+    "detect-secrets",
+    "netcat",
+    "nc",
+    "socat",
+    "tcpdump",
 ];
 
 /// Whether a program token may run without a PTY.
@@ -278,9 +685,9 @@ fn allows_program(program: &str) -> bool {
         .next()
         .unwrap_or(base_program);
 
-    SANDBOX_ALLOWLIST
-        .iter()
-        .any(|allowed| base_program.eq_ignore_ascii_case(allowed) || file_name.eq_ignore_ascii_case(allowed))
+    SANDBOX_ALLOWLIST.iter().any(|allowed| {
+        base_program.eq_ignore_ascii_case(allowed) || file_name.eq_ignore_ascii_case(allowed)
+    })
 }
 
 /// Characters refused outright because a shell turns them into something other
@@ -346,10 +753,31 @@ const SHELL_SEPARATORS: &[char] = &[';', '\n', '\r'];
 /// `fs::security::write_refusal`, so the fs route and the shell route cannot
 /// drift apart the way they did when this heuristic was the only copy.
 const SHELL_WRITE_VERBS: &[&str] = &[
-    "set-content", "add-content", "out-file", "tee-object", "tee",
-    "cp", "copy", "copy-item", "mv", "move", "move-item",
-    "ren", "rename", "rename-item", "new-item", "ni", "sc", "ac",
-    "del", "erase", "remove-item", "ri", "rm", "rmdir", "rd",
+    "set-content",
+    "add-content",
+    "out-file",
+    "tee-object",
+    "tee",
+    "cp",
+    "copy",
+    "copy-item",
+    "mv",
+    "move",
+    "move-item",
+    "ren",
+    "rename",
+    "rename-item",
+    "new-item",
+    "ni",
+    "sc",
+    "ac",
+    "del",
+    "erase",
+    "remove-item",
+    "ri",
+    "rm",
+    "rmdir",
+    "rd",
 ];
 
 /// Tool families that write to one of their arguments without the `>` or the
@@ -441,9 +869,9 @@ fn shell_persistence_target_refusal(raw: &str) -> Option<String> {
     let named_file = SHELL_PERSISTENCE_FILES
         .iter()
         .any(|f| probe.ends_with(&format!("/{f}")));
-    let held_dir = SHELL_PERSISTENCE_DIRS.iter().any(|d| {
-        probe.ends_with(&format!("/{d}")) || probe.contains(&format!("/{d}/"))
-    });
+    let held_dir = SHELL_PERSISTENCE_DIRS
+        .iter()
+        .any(|d| probe.ends_with(&format!("/{d}")) || probe.contains(&format!("/{d}/")));
     if named_file || held_dir {
         return Some(trimmed.to_string());
     }
@@ -665,7 +1093,10 @@ fn rhs_program_if_any(segment: &str) -> Option<String> {
     if first_char == '"' || first_char == '\'' || first_char == '$' || first_char.is_ascii_digit() {
         return None;
     }
-    let prog = rhs.split_whitespace().next()?.trim_matches(['"', '\'', ';', '&', '|']);
+    let prog = rhs
+        .split_whitespace()
+        .next()?
+        .trim_matches(['"', '\'', ';', '&', '|']);
     if prog.is_empty() {
         None
     } else {
@@ -715,10 +1146,7 @@ fn is_hijack_env_var(name: &str, value: &str) -> bool {
         // Quotes are punctuation around the value, not part of the flag: both
         // `$env:NODE_OPTIONS='--require x.js'` and `NODE_OPTIONS='--require
         // x.js' node` reach here with the quote still attached to the token.
-        let unquoted: String = value
-            .chars()
-            .filter(|c| *c != '\'' && *c != '"')
-            .collect();
+        let unquoted: String = value.chars().filter(|c| *c != '\'' && *c != '"').collect();
         return unquoted.split_whitespace().any(|flag| {
             flag == "-r"
                 || flag.starts_with("--require")
@@ -749,11 +1177,7 @@ fn assignment_target(segment: &str) -> Option<(String, String)> {
         .trim_start_matches('$')
         .trim_matches(['{', '}']);
     let name = lhs.strip_prefix("env:").unwrap_or(lhs).trim();
-    if name.is_empty()
-        || !name
-            .chars()
-            .all(|c| c.is_ascii_alphabetic() || c == '_')
-    {
+    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphabetic() || c == '_') {
         return None;
     }
     Some((name.to_ascii_uppercase(), trimmed[eq + 1..].to_string()))
@@ -1086,14 +1510,19 @@ pub fn shell_session_open(
             if let WorkspaceEnv::Wsl { distro } = &workspace {
                 crate::modules::workspace::wsl_home_blocking(distro)?
             } else {
-                let home = dirs::home_dir().ok_or_else(|| "unable to resolve home directory".to_string())?;
+                let home = dirs::home_dir()
+                    .ok_or_else(|| "unable to resolve home directory".to_string())?;
                 crate::modules::fs::to_canon(home)
             }
         }
     };
     let session = Arc::new(ShellSession::new(initial, workspace));
     let id = state.next_session_id.fetch_add(1, Ordering::Relaxed);
-    state.sessions.write().unwrap_or_else(|e| e.into_inner()).insert(id, session);
+    state
+        .sessions
+        .write()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(id, session);
     Ok(id)
 }
 
@@ -1131,9 +1560,7 @@ pub async fn shell_session_run(
         .get(&id)
         .cloned()
         .ok_or_else(|| "no shell session".to_string())?;
-    let effective_workspace = workspace
-        .as_ref()
-        .unwrap_or(&session.workspace);
+    let effective_workspace = workspace.as_ref().unwrap_or(&session.workspace);
     authorize_spawn_cwd(&registry, cwd.as_deref(), effective_workspace)?;
 
     // Interactive shell sessions already give the user a controlled environment,
@@ -1160,7 +1587,11 @@ pub async fn shell_session_run(
 
 #[tauri::command]
 pub fn shell_session_close(state: tauri::State<ShellState>, id: u32) -> Result<(), String> {
-    state.sessions.write().unwrap_or_else(|e| e.into_inner()).remove(&id);
+    state
+        .sessions
+        .write()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&id);
     Ok(())
 }
 
@@ -1185,7 +1616,11 @@ pub fn shell_bg_spawn(
     authorize_spawn_cwd(&registry, cwd.as_deref(), &workspace)?;
     let proc = background::spawn(trimmed, cwd, workspace, log_path, &registry)?;
     let id = state.next_bg_id.fetch_add(1, Ordering::Relaxed);
-    state.bg.write().unwrap_or_else(|e| e.into_inner()).insert(id, proc);
+    state
+        .bg
+        .write()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(id, proc);
     Ok(id)
 }
 
@@ -1195,6 +1630,12 @@ pub fn shell_bg_logs(
     handle: u32,
     since_offset: Option<u64>,
 ) -> Result<BackgroundLogResponse, String> {
+    // Read before reaping: a fast-exiting process must keep its buffered logs
+    // and exit code until the agent has seen them. Reaping first deleted the
+    // entry and answered "no background handle" on the very read that should
+    // have returned the process's final output (audit: 8 bash_wait + 7
+    // bash_logs failures, each forcing a blind respawn).
+    reap_background(&state, Some(handle));
     let proc = state
         .bg
         .read()
@@ -1205,9 +1646,36 @@ pub fn shell_bg_logs(
     Ok(proc.read_logs(since_offset.unwrap_or(0)))
 }
 
+/// Drop entries whose process has exited AND whose buffered output was fully
+/// consumed, keeping the current read's handle alive.
+///
+/// Nothing used to remove entries at all: `shell_bg_kill` kills but leaves
+/// the `Arc<BackgroundProc>` in the map, so every start/stop cycle retained
+/// its ring buffer (up to 4 MiB) and its open log-file handle for the app's
+/// lifetime, and `shell_bg_list` grew without bound. Unconditionally dropping
+/// every exited process also broke the reader: `bash_wait` polls `logs`, and
+/// the fast exit of a dev-server launch deleted the output the model was
+/// waiting for. Reaped on the read paths rather than from a background thread
+/// so there is no extra timer to own.
+fn reap_background(state: &ShellState, keep: Option<u32>) {
+    let mut map = state.bg.write().unwrap_or_else(|e| e.into_inner());
+    map.retain(|id, p| {
+        if Some(*id) == keep {
+            return true;
+        }
+        !p.reapable()
+    });
+}
+
 #[tauri::command]
 pub fn shell_bg_kill(state: tauri::State<ShellState>, handle: u32) -> Result<bool, String> {
-    if let Some(proc) = state.bg.read().unwrap_or_else(|e| e.into_inner()).get(&handle).cloned() {
+    if let Some(proc) = state
+        .bg
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&handle)
+        .cloned()
+    {
         Ok(proc.kill())
     } else {
         Ok(false)
@@ -1216,6 +1684,9 @@ pub fn shell_bg_kill(state: tauri::State<ShellState>, handle: u32) -> Result<boo
 
 #[tauri::command]
 pub fn shell_bg_list(state: tauri::State<ShellState>) -> Result<Vec<BackgroundProcInfo>, String> {
+    // No keep handle here: this is a pure listing. Drained-but-exited entries
+    // are dropped; a process the agent is still reading keeps its row.
+    reap_background(&state, None);
     let map = state.bg.read().unwrap_or_else(|e| e.into_inner());
     let mut out = Vec::with_capacity(map.len());
     for (id, p) in map.iter() {
@@ -1244,7 +1715,10 @@ pub fn repl_open(
     let mut map = state.repls.write().unwrap_or_else(|e| e.into_inner());
     map.retain(|_, p| !p.exited.load(std::sync::atomic::Ordering::Acquire));
     if map.len() >= repl::MAX_LIVE {
-        return Err(format!("too many live REPL processes (max {})", repl::MAX_LIVE));
+        return Err(format!(
+            "too many live REPL processes (max {})",
+            repl::MAX_LIVE
+        ));
     }
     let proc = repl::spawn(trimmed.to_string(), cwd, workspace)?;
     let id = state.next_repl_id.fetch_add(1, Ordering::Relaxed);
@@ -1291,7 +1765,12 @@ pub async fn repl_send(
 
 #[tauri::command]
 pub fn repl_close(state: tauri::State<ShellState>, handle: u32) -> Result<(), String> {
-    if let Some(proc) = state.repls.write().unwrap_or_else(|e| e.into_inner()).remove(&handle) {
+    if let Some(proc) = state
+        .repls
+        .write()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&handle)
+    {
         proc.kill();
     }
     Ok(())
@@ -1470,7 +1949,8 @@ mod tests {
             Default::default(),
         )
         .expect("run")
-    }    #[test]
+    }
+    #[test]
     fn run_blocking_captures_stdout_and_zero_exit() {
         let out = run("printf 'hello\\n'", 5);
         assert_eq!(out.stdout, "hello\n");
@@ -1511,7 +1991,10 @@ mod tests {
 
     #[test]
     fn run_blocking_sets_ci_and_pager_env_on_unix() {
-        let out = run("printf 'CI=%s PAGER=%s GIT_PAGER=%s\\n' \"$CI\" \"$PAGER\" \"$GIT_PAGER\"", 5);
+        let out = run(
+            "printf 'CI=%s PAGER=%s GIT_PAGER=%s\\n' \"$CI\" \"$PAGER\" \"$GIT_PAGER\"",
+            5,
+        );
         assert_eq!(out.stdout, "CI=true PAGER=cat GIT_PAGER=cat\n");
         assert_eq!(out.exit_code, Some(0));
     }
@@ -1599,7 +2082,9 @@ mod tests_windows_node_path_e2e {
         // The system PATH must survive the prepend, or the shell loses every
         // other tool. Check a directory that is essentially always present.
         let windir = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
-        let win_pos = lower_printed.find(&windir.to_lowercase()).unwrap_or(usize::MAX);
+        let win_pos = lower_printed
+            .find(&windir.to_lowercase())
+            .unwrap_or(usize::MAX);
         assert!(
             bin_pos < win_pos,
             "project bin dir is not prioritized ahead of system PATH: {printed}"
@@ -1632,8 +2117,11 @@ mod tests_windows_node_path_e2e {
         assert_eq!(out.exit_code, Some(0));
         assert!(out.stdout.contains("CI=true"), "stdout: {}", out.stdout);
         assert!(out.stdout.contains("PAGER=cat"), "stdout: {}", out.stdout);
-        assert!(out.stdout.contains("GIT_PAGER=cat"), "stdout: {}", out.stdout);
-
+        assert!(
+            out.stdout.contains("GIT_PAGER=cat"),
+            "stdout: {}",
+            out.stdout
+        );
     }
 }
 
@@ -1721,9 +2209,15 @@ mod tests_sandbox {
 
     #[test]
     fn validate_shell_command_allows_env_vars() {
-        assert!(validate_shell_command("DEBIAN_FRONTEND=noninteractive apt-get install -y nmap").is_ok());
+        assert!(
+            validate_shell_command("DEBIAN_FRONTEND=noninteractive apt-get install -y nmap")
+                .is_ok()
+        );
         assert!(validate_shell_command("FOO=bar echo hello").is_ok());
-        assert!(validate_shell_command("CI=true NODE_OPTIONS=--max-old-space-size=4096 pnpm test").is_ok());
+        assert!(
+            validate_shell_command("CI=true NODE_OPTIONS=--max-old-space-size=4096 pnpm test")
+                .is_ok()
+        );
         assert!(validate_shell_command("FOO=bar shred -u /").is_ok());
         assert!(validate_shell_command("PATH=/tmp/evil git status").is_ok());
         assert!(validate_shell_command(" = Get-ChildItem; echo ").is_ok());
@@ -1902,7 +2396,8 @@ mod tests_sandbox {
     }
 }
 
-#[cfg(test)]mod tests_node_path {
+#[cfg(test)]
+mod tests_node_path {
     use super::*;
 
     /// The failure this covers: `vitest run` / `biome lint` are allowlisted, but
@@ -1941,9 +2436,12 @@ mod tests_sandbox {
         assert!(path_with_node_bins(None).is_none());
         assert!(path_with_node_bins(Some("")).is_none());
 
-        let joined = path_with_node_bins(Some(root.path().to_str().unwrap()))
-            .expect("bin dir exists");
-        assert!(joined.starts_with(&bin.to_string_lossy().to_string()), "{joined}");
+        let joined =
+            path_with_node_bins(Some(root.path().to_str().unwrap())).expect("bin dir exists");
+        assert!(
+            joined.starts_with(&bin.to_string_lossy().to_string()),
+            "{joined}"
+        );
         // The original PATH survives after the separator, or the shell loses
         // every system tool.
         let original = std::env::var("PATH")
@@ -1954,4 +2452,3 @@ mod tests_sandbox {
         }
     }
 }
-

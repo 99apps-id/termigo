@@ -450,6 +450,12 @@ configureRendererPool({
   isLeafVisible(leafId) {
     return sessions.get(leafId)?.visibleNow ?? false;
   },
+  isLeafAlive(leafId) {
+    // Disposed sessions are removed from the map, so presence IS the answer.
+    // A parked slot for a live leaf keeps parsing that pane's OSC 7 and must
+    // not be reclaimed out from under it.
+    return sessions.has(leafId);
+  },
   storeSnapshot(leafId, out) {
     const s = sessions.get(leafId);
     if (!s) return;
@@ -1050,7 +1056,11 @@ export async function respawnSession(
   s.ptyOpening = true;
   let pty: PtySession;
   try {
-    pty = await openPtyWithRetry(leafId, s, cwd ?? s.initialCwd);
+    // The LAST directory the user cd'd to, not the spawn-time one. The
+    // Enter-to-retry path passes no cwd, so it used to restart at the
+    // directory the pane was opened in while `tab.cwd` still reported the
+    // directory the user had navigated to - until the shell's first OSC 7.
+    pty = await openPtyWithRetry(leafId, s, cwd ?? s.lastCwd ?? s.initialCwd);
   } catch (e) {
     s.ptyOpening = false;
     if (!s.disposed) surfaceSpawnFailure(leafId, s, e);

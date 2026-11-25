@@ -42,6 +42,10 @@ export type SlotAdapter = {
   isLeafBlocks(leafId: number): boolean;
   isLeafBusy(leafId: number): boolean;
   isLeafVisible(leafId: number): boolean;
+  /** Whether the leaf still has a live session (a PTY, an SSH session). A
+   *  parked slot for a dead leaf is pure memory; one for a live leaf is still
+   *  the only thing parsing that pane's OSC 7. */
+  isLeafAlive(leafId: number): boolean;
   storeSnapshot(leafId: number, out: SerializeOutput): void;
 };
 
@@ -921,6 +925,14 @@ function cancelSlotReap(slot: Slot): void {
 
 function reapIdleSlot(slot: Slot): void {
   if (slot.currentLeafId !== null) return;
+  const retained = slot.retainedLeafId;
+  // A parked slot for a LIVE leaf is still the only thing parsing that pane's
+  // OSC 7. Disposing it stops cwd tracking for a hidden pane until the user
+  // re-activates it, which is why `listTerminals()` and the AI's
+  // `getTerminalContextFor` went stale after 45 s of inactivity. Only reclaim
+  // slots whose leaf is gone; the pool still converges because a closed tab
+  // disposes its session and then its slot.
+  if (retained !== null && (adapter?.isLeafAlive(retained) ?? true)) return;
   const idle = slots.filter((s) => s.currentLeafId === null);
   if (idle.length <= IDLE_SLOTS_KEEP_WARM) return;
   idle.sort((a, b) => a.lastUsedAt - b.lastUsedAt);
@@ -1009,7 +1021,18 @@ function detachWebglContextListeners(slot: Slot): void {
   slot.webglContextHandlers = null;
 }
 
+// On Linux, `main.rs` / `lib.rs` set `WEBKIT_DISABLE_DMABUF_RENDERER=1` to
+// prevent WebKitGTK deadlocks. Without DMA-BUF zero-copy compositing, xterm's
+// WebGL canvas forces a full-viewport software readback + CPU SHM copy on
+// every keystroke/scroll, making typing feel sluggish. Falling back to xterm's
+// DOM renderer on Linux repaints only the single changed row (<1ms).
+const IS_LINUX_WEBKIT =
+  typeof navigator !== "undefined" &&
+  /Linux/i.test(navigator.userAgent) &&
+  !/Android/i.test(navigator.userAgent);
+
 function attachWebgl(slot: Slot): void {
+  if (IS_LINUX_WEBKIT) return;
   if (slot.webglAddon || !slot.term.element) return;
   if (!usePreferencesStore.getState().terminalWebglEnabled) return;
   const elem = slot.term.element;

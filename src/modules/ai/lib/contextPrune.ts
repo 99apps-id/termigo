@@ -85,6 +85,13 @@ function outputText(part: Part): string {
  * A tool result counts as successful when it carries no `error` key and its
  * `exit_code` (when present) is 0. The exit code can sit directly on the
  * output object or inside the SDK's stringified `value`.
+ *
+ * A present `exit_code` that is anything other than the number 0 is a
+ * failure, `null` included: the shell tools report `exit_code: null` when the
+ * process was killed (a timeout, an abort) and no code was ever observed.
+ * Treating that as success let a killed `git add -A` read as a verified
+ * checkpoint, so the prune replaced everything before it with "the work is
+ * already saved to git" while nothing had been committed.
  */
 function resultOk(part: Part): boolean {
   const out = part.output;
@@ -101,16 +108,16 @@ function resultOk(part: Part): boolean {
     if (obj.ok === false) return false;
     if (obj.passed === false) return false;
     if (obj.timed_out === true) return false;
-    if (typeof obj.exit_code === "number" && obj.exit_code !== 0) return false;
+    if (obj.exit_code !== undefined && obj.exit_code !== 0) return false;
     const raw = JSON.stringify(out);
-    const exitMatch = /"exit_code"\s*:\s*(-?\d+)/.exec(raw);
+    const exitMatch = /"exit_code"\s*:\s*([^,}\]\s]+)/.exec(raw);
     if (exitMatch && exitMatch[1] !== "0") return false;
     return true;
   }
   if (typeof out === "string") {
     const trimmed = out.trim();
     if (/^(error|fatal)[:\s]/i.test(trimmed)) return false;
-    const exitMatch = /"exit_code"\s*:\s*(-?\d+)/.exec(trimmed);
+    const exitMatch = /"exit_code"\s*:\s*([^,}\]\s]+)/.exec(trimmed);
     if (exitMatch && exitMatch[1] !== "0") return false;
     return trimmed.length > 0;
   }
@@ -143,6 +150,34 @@ function lastVerifiedEnd(messages: ModelMessage[]): number {
 }
 
 /**
+ * For every prefix `[0, c)`, how many tool-calls inside it have NOT been
+ * answered inside it.
+ *
+ * A zero running balance is not enough to call a prefix self-contained: an
+ * orphan tool-result appearing before its call cancels a later unanswered
+ * call, so `balance[c] === 0` could still leave a tool-call at the end of the
+ * retained prefix whose result sits in the discarded tail -- and providers
+ * reject that request outright. Tracking the actual open ids catches it.
+ *
+ * Only id-bearing parts are tracked; the SDK always sets `toolCallId` on
+ * tool-call and tool-result parts.
+ */
+function unansweredCallCounts(messages: ModelMessage[]): number[] {
+  const open = new Set<string>();
+  const counts = new Array<number>(messages.length + 1).fill(0);
+  for (let i = 0; i < messages.length; i++) {
+    for (const part of partsOf(messages[i])) {
+      const id = part.toolCallId;
+      if (typeof id !== "string") continue;
+      if (part.type === "tool-call") open.add(id);
+      else if (part.type === "tool-result") open.delete(id);
+    }
+    counts[i + 1] = open.size;
+  }
+  return counts;
+}
+
+/**
  * Find the highest index `c` (in message-count terms) such that the prefix
  * `[0, c)` is self-contained (every tool-call inside has its result inside),
  * contains at least one verified checkpoint/commit, and leaves the tail intact.
@@ -163,6 +198,7 @@ export function findVerifiedCut(messages: ModelMessage[]): number {
 
   const balance = new Array<number>(n + 1).fill(0);
   const verifiedPrefix = new Array<number>(n + 1).fill(0);
+  const unanswered = unansweredCallCounts(messages);
   let b = 0;
   let v = 0;
   for (let i = 0; i < n; i++) {
@@ -174,6 +210,9 @@ export function findVerifiedCut(messages: ModelMessage[]): number {
 
   for (let c = maxCut; c >= PRUNE_MIN_VERIFIED_MESSAGES; c--) {
     if (balance[c] !== 0) continue;
+    // The real self-containment test: no tool-call in the prefix is still
+    // waiting for a result that would be discarded with the tail.
+    if (unanswered[c] > 0) continue;
     if (verifiedPrefix[c] === 0) continue;
     return c;
   }

@@ -18,6 +18,65 @@ import { recordMuseSubscription } from "./museQuota";
 
 type JsonObject = Record<string, unknown>;
 
+/** The Muse Code CLI release whose identity Meta's backend gates native
+ * tool calls on (verified against the installed CLI by capturing its
+ * request to a local endpoint, the same evidence as the Go clients). */
+export const MUSE_CLI_VERSION = "1.4.24";
+
+export function museBuildUserAgent(): string {
+  const platform = typeof navigator !== "undefined" ? navigator.platform : "";
+  const os = /win/i.test(platform)
+    ? "windows"
+    : /mac/i.test(platform)
+      ? "darwin"
+      : /linux/i.test(platform)
+        ? "linux"
+        : "windows";
+  return `muse-build/${MUSE_CLI_VERSION} (non-interactive; ${os}-x86_64)`;
+}
+
+/** The headers the official CLI sends on a Responses request. */
+export function museIdentityHeaders(sessionId: string): Record<string, string> {
+  return {
+    "user-agent": museBuildUserAgent(),
+    "x-client-id": "tbh:exec",
+    "x-tbh-session-id": sessionId,
+    "x-meta-ai-gateway-session-id": sessionId,
+    "x-tbh-thread-id": sessionId,
+    "x-tbh-root-session-id": sessionId,
+    "x-tbh-agent-role": "main",
+  };
+}
+
+function sanitizeResponsesName(name: string): string {
+  const clean = name.replace(/[^a-zA-Z0-9_-]/g, "_");
+  return clean || "unknown_tool";
+}
+
+/**
+ * Returns the exact tool names declared on a chat-completions request body.
+ * Used to ensure text-protocol `tool_call` blocks only execute tools the
+ * request actually declared.
+ */
+export function declaredChatToolNames(body: unknown): Set<string> {
+  if (!isObject(body)) return new Set();
+  return new Set(chatTools(body).map((tool) => tool.name));
+}
+
+/**
+ * Maps sanitized Responses wire names back to the original chat tool names
+ * (for example MCP tools whose names carry dots or slashes).
+ */
+export function responseToolAliases(body: unknown): Record<string, string> {
+  const aliases: Record<string, string> = {};
+  if (!isObject(body)) return aliases;
+  for (const tool of chatTools(body)) {
+    const wire = sanitizeResponsesName(tool.name);
+    if (!(wire in aliases)) aliases[wire] = tool.name;
+  }
+  return aliases;
+}
+
 function isObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -82,6 +141,15 @@ function toolCallBlock(name: string, args: unknown): string {
   return `\`\`\`tool_call\n${JSON.stringify({ name, arguments: safeJson(argumentsText) })}\n\`\`\``;
 }
 
+function isValidJson(text: string): boolean {
+  try {
+    JSON.parse(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function safeJson(text: string): unknown {
   try {
     return JSON.parse(text) as unknown;
@@ -140,10 +208,9 @@ export function chatToResponsesBody(body: unknown): JsonObject | null {
   const tools = chatTools(body);
   const instructions: string[] = [];
   const input: JsonObject[] = [];
-  // Tool results in the chat shape carry only a call id; the name lives on
-  // the assistant call that produced it. Termixgo's result blocks carry
-  // name + call_id + output, which is what the model reads back, so map
-  // ids to names as the calls go past.
+  // Tool names by call id, from the assistant calls that produced the
+  // results: a stored tool message does not always carry its tool's name,
+  // and termixgo's tool_result blocks always name the tool.
   const callNames = new Map<string, string>();
 
   for (const message of body.messages) {
@@ -179,13 +246,16 @@ export function chatToResponsesBody(body: unknown): JsonObject | null {
         content: [{ type: "output_text", text: parts.join("\n\n") }],
       });
     } else if (role === "tool") {
-      const callId = asString(message.tool_call_id);
-      const name = callNames.get(callId);
-      const block = JSON.stringify({
-        ...(name ? { name } : {}),
-        call_id: callId,
+      const toolResult: Record<string, string> = {
+        call_id: asString(message.tool_call_id),
         output: contentText(message.content),
-      });
+      };
+      const toolName =
+        asString(message.name) ||
+        callNames.get(asString(message.tool_call_id)) ||
+        "";
+      if (toolName) toolResult.name = toolName;
+      const block = JSON.stringify(toolResult);
       input.push({
         type: "message",
         role: "user",
@@ -196,24 +266,19 @@ export function chatToResponsesBody(body: unknown): JsonObject | null {
     }
   }
 
-  // A forced tool-less step (the agent loop's synthesis step) arrives as
-  // tool_choice "none". The chat body carries it, but a Responses request
-  // has no tools field to switch off, so without this the model never
-  // learns tools are off: it emits tool_call blocks anyway, the loop reads
-  // that as the model ignoring the forced choice, and the model is marked
-  // as one that ignores synthesis -- after which every stuck-guard stops
-  // the run instantly. Say it in the instructions instead, and leave the
-  // tool catalogue out so nothing contradicts it.
-  const toolChoice = body.tool_choice;
-  const toolsDisabled =
-    toolChoice === "none" ||
-    (isObject(toolChoice) && toolChoice.type === "none");
-  if (toolsDisabled) {
-    instructions.push(
-      "Tool use is disabled for this reply. Do not emit any tool_call block. Answer now in plain text only, summarising what you found and what remains to be done.",
-    );
-  } else if (tools.length > 0) {
+  // A step that forbids tool use (the SDK's forced final synthesis sets
+  // tool_choice "none") must not be handed the catalogue anyway: the model
+  // would keep calling tools, the calls would be dropped, and the run
+  // would be filed as ignoring the synthesis. Say so instead.
+  const toolChoiceNone =
+    body.tool_choice === "none" ||
+    (isObject(body.tool_choice) && body.tool_choice.type === "none");
+  if (tools.length > 0 && !toolChoiceNone) {
     instructions.push(textToolProtocol(tools));
+  } else if (toolChoiceNone) {
+    instructions.push(
+      "Tool use is disabled for this reply. Answer in plain text only; do not emit any tool_call block.",
+    );
   }
   const out: JsonObject = {
     model: asString(body.model),
@@ -221,54 +286,17 @@ export function chatToResponsesBody(body: unknown): JsonObject | null {
     input,
   };
   if (instructions.length > 0) out.instructions = instructions.join("\n\n");
-  if (typeof body.temperature === "number") out.temperature = body.temperature;
-  const maxTokens = body.max_completion_tokens ?? body.max_tokens;
-  if (typeof maxTokens === "number") out.max_output_tokens = maxTokens;
   return out;
 }
 
-/** Arguments for a replayed function_call item: Meta validates them and
- *  answers 400 when they are not valid JSON, so a blank or broken string
- *  degrades to an empty object (termixgo's responsesArguments). */
-function responsesArguments(raw: unknown): string {
-  const text = typeof raw === "string" ? raw : JSON.stringify(raw ?? {});
-  const trimmed = (text ?? "").trim();
-  if (!trimmed) return "{}";
-  try {
-    JSON.parse(trimmed);
-    return trimmed;
-  } catch {
-    return "{}";
-  }
-}
-
-/** Meta's reasoning effort for a chat body, termixgo's mapping: the
- *  official client defaults to high, and its ultra tier is a client-side
- *  mode on top of the endpoint's max. */
-function museEffort(body: JsonObject): string {
-  const raw = asString(body.reasoning_effort).toLowerCase();
-  if (raw === "ultra") return "max";
-  if (["low", "medium", "high", "xhigh", "max"].includes(raw)) return raw;
-  return "high";
-}
-
 /**
- * Translates one chat-completions request body into the NATIVE Responses
- * body, termixgo's payload shape: tools registered as ONE namespace tool
- * named `muse` (the official client's registration, and the only shape
- * Meta serves native calls to), stored calls replayed as function_call
- * items stamped with `fc_` ids and a completed status, results as
- * function_call_output items, assistant messages phase-tagged
- * (commentary before a call, final_answer otherwise) -- the three replay
- * repairs Meta's backend validates with a misleading 404 or a 400.
- *
- * Reasoning items are the one thing this translation cannot carry: the
- * chat-shaped history the SDK keeps has nowhere to store them, so a
- * step's encrypted reasoning is dropped between steps (termixgo's own
- * client keeps and replays them). The request still asks for them, as
- * the official client does.
+ * Translates one chat-completions request body into the native Responses
+ * body the official Muse Code CLI sends: tools as one `muse` namespace
+ * tool, stored calls and results as function_call items, reasoning summary
+ * requested and encrypted content included. This is the first attempt for
+ * every Muse request; the text protocol is only the attestation fallback.
  */
-export function chatToResponsesNativeBody(
+export function chatToNativeResponsesBody(
   body: unknown,
   sessionId: string,
 ): JsonObject | null {
@@ -276,7 +304,7 @@ export function chatToResponsesNativeBody(
   const tools = chatTools(body);
   const instructions: string[] = [];
   const input: JsonObject[] = [];
-  const seenOutputs = new Set<string>();
+
   for (const message of body.messages) {
     if (!isObject(message)) continue;
     const role = asString(message.role);
@@ -290,80 +318,81 @@ export function chatToResponsesNativeBody(
         content: userContent(message.content),
       });
     } else if (role === "assistant") {
+      const hasToolCalls =
+        Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
       const text = contentText(message.content);
       if (text.trim()) {
         input.push({
           type: "message",
           role: "assistant",
+          phase: hasToolCalls ? "commentary" : "final_answer",
           content: [{ type: "output_text", text }],
         });
       }
-      if (Array.isArray(message.tool_calls)) {
-        for (const call of message.tool_calls) {
+      if (hasToolCalls) {
+        for (const call of message.tool_calls as unknown[]) {
           if (!isObject(call)) continue;
           const fn = isObject(call.function) ? call.function : call;
           const name = asString(fn.name);
-          const callId = asString(call.id);
-          if (!name || !callId) continue;
+          if (!name) continue;
+          const rawArgs =
+            typeof fn.arguments === "string"
+              ? fn.arguments
+              : JSON.stringify(fn.arguments ?? {});
+          const callId = asString(call.id) || `call_${input.length}`;
           input.push({
             type: "function_call",
-            id: `fc_${callId}`,
+            id: callId.startsWith("fc_") ? callId : `fc_${callId}`,
             call_id: callId,
-            name,
-            arguments: responsesArguments(fn.arguments ?? "{}"),
+            name: sanitizeResponsesName(name),
+            arguments: isValidJson(rawArgs) ? rawArgs : "{}",
             status: "completed",
           });
         }
       }
     } else if (role === "tool") {
-      const callId = asString(message.tool_call_id);
-      if (callId && seenOutputs.has(callId)) continue;
-      if (callId) seenOutputs.add(callId);
       input.push({
         type: "function_call_output",
-        call_id: callId,
+        call_id: asString(message.tool_call_id),
         output: contentText(message.content),
       });
     }
   }
-  for (let i = 0; i < input.length; i += 1) {
-    const item = input[i];
-    if (item && item.type === "message" && item.role === "assistant") {
-      item.phase =
-        input[i + 1]?.type === "function_call" ? "commentary" : "final_answer";
-    }
-  }
+
   const out: JsonObject = {
     model: asString(body.model),
     stream: true,
     store: false,
     input,
-    reasoning: { summary: "auto", effort: museEffort(body) },
-    include: ["reasoning.encrypted_content"],
   };
   if (instructions.length > 0) out.instructions = instructions.join("\n\n");
-  const toolChoiceNone =
+  const nativeToolChoiceNone =
     body.tool_choice === "none" ||
     (isObject(body.tool_choice) && body.tool_choice.type === "none");
-  if (tools.length > 0 && !toolChoiceNone) {
+  if (tools.length > 0 && !nativeToolChoiceNone) {
     out.tools = [
       {
         type: "namespace",
         name: "muse",
         description: "Muse Code tool set.",
-        tools: tools.map((t) => ({
+        tools: tools.map((tool) => ({
           type: "function",
-          name: t.name,
-          description: t.description,
-          parameters: t.parameters,
+          name: sanitizeResponsesName(tool.name),
+          description: tool.description,
+          parameters: tool.parameters,
+          strict: false,
         })),
       },
     ];
   }
-  if (sessionId) out.prompt_cache_key = `tbh:main:${sessionId}`;
-  if (typeof body.temperature === "number") out.temperature = body.temperature;
-  const maxTokens = body.max_completion_tokens ?? body.max_tokens;
-  if (typeof maxTokens === "number") out.max_output_tokens = maxTokens;
+  const effort =
+    typeof body.reasoning_effort === "string" &&
+    ["low", "medium", "high"].includes(body.reasoning_effort)
+      ? body.reasoning_effort
+      : "high";
+  out.reasoning = { effort, summary: "auto" };
+  out.include = ["reasoning.encrypted_content"];
+  out.prompt_cache_key = `tbh:main:${sessionId}`;
   return out;
 }
 
@@ -389,108 +418,145 @@ export type TextToolCall = { id: string; name: string; arguments: string };
 
 let textToolSeq = 0;
 
+const TEXT_TOOL_BLOCK_RE =
+  /```(?:tool_call|tool-call|json)\s*([\s\S]*?)```|<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/g;
+
+function extractParsedToolArguments(parsed: JsonObject): string | null {
+  let rawArgs: unknown;
+  if ("arguments" in parsed) {
+    rawArgs = parsed.arguments;
+  } else if ("args" in parsed) {
+    rawArgs = parsed.args;
+  } else if ("parameters" in parsed) {
+    rawArgs = parsed.parameters;
+  } else if ("input" in parsed) {
+    rawArgs = parsed.input;
+  } else {
+    // Some models place tool parameters directly on the call object
+    // (e.g. {"name":"find_tools","query":"mcp"}). Collect any non-metadata keys.
+    const metaKeys = new Set(["name", "id", "call_id", "type"]);
+    const inlineArgs: JsonObject = {};
+    let hasInline = false;
+    for (const [k, v] of Object.entries(parsed)) {
+      if (!metaKeys.has(k)) {
+        inlineArgs[k] = v;
+        hasInline = true;
+      }
+    }
+    rawArgs = hasInline ? inlineArgs : {};
+  }
+
+  if (rawArgs == null) return "{}";
+  if (typeof rawArgs === "string") {
+    const trimmed = rawArgs.trim();
+    if (!trimmed) return "{}";
+    if (!isValidJson(trimmed)) return null;
+    return trimmed;
+  }
+  return JSON.stringify(rawArgs);
+}
+
 /**
  * Splits a model reply into the prose around the tool_call blocks and the
- * calls themselves. A block that does not parse is not a call: the whole
- * reply then stays prose, so a model that talks about the protocol in a
- * code sample is not mistaken for one using it.
+ * calls themselves. Accepts the documented ```tool_call fence as well as
+ * ```tool-call, ```json, and <tool_call>...</tool_call> wrappers (matching
+ * Meta Muse's observed output variants). When `allowedTools` is supplied, a
+ * block naming a tool the request did not declare stays prose so quoted
+ * examples are never executed. A block that does not parse as a tool call
+ * stays prose without discarding other valid blocks in the same reply.
  */
-/**
- * Split a reply into the prose around tool-call blocks and the calls
- * themselves, termixgo's tolerant shape: Muse models have emitted several
- * equivalent wrappers, so the documented fence, a `tool-call` or `json`
- * fence, and an XML-style tag are all accepted, and tolerance is per block
- * -- a block whose body is not a valid call-shaped JSON object stays prose
- * and the scan continues, instead of the old all-or-nothing rule where one
- * bad or unclosed block discarded every valid call in the reply.
- */
-export function parseTextToolCalls(text: string): {
+export function parseTextToolCalls(
+  text: string,
+  allowedTools?: ReadonlySet<string>,
+  toolAliases?: Readonly<Record<string, string>>,
+): {
   prose: string;
   calls: TextToolCall[];
 } {
-  const blockRe =
-    /```(?:tool_call|tool-call|json)\s*([\s\S]*?)```|<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/g;
-  const calls: TextToolCall[] = [];
   let prose = "";
+  const calls: TextToolCall[] = [];
   let cursor = 0;
-  let sawBlock = false;
-  for (const match of text.matchAll(blockRe)) {
-    sawBlock = true;
-    const start = match.index;
-    const end = start + match[0].length;
+
+  for (const match of text.matchAll(TEXT_TOOL_BLOCK_RE)) {
+    const matchIndex = match.index ?? 0;
+    const rawBlock = match[0];
     const body = (match[1] ?? match[2] ?? "").trim();
-    let parsed: unknown = null;
+
+    prose += text.slice(cursor, matchIndex);
+
+    let parsed: unknown;
     try {
       parsed = JSON.parse(body);
     } catch {
-      parsed = null;
-    }
-    const name = isObject(parsed) ? asString(parsed.name).trim() : "";
-    let argsJson: string | null = null;
-    if (isObject(parsed)) {
-      const rawArgs = parsed.arguments;
-      if (rawArgs === undefined || rawArgs === null) {
-        argsJson = "{}";
-      } else if (typeof rawArgs === "string") {
-        // The arguments may themselves be a JSON string; unquote one level
-        // and require the result to be valid JSON, as termixgo does.
-        const inner = rawArgs.trim();
-        if (inner) {
-          try {
-            const once = JSON.parse(inner) as unknown;
-            argsJson =
-              typeof once === "string" ? once : (JSON.stringify(once) ?? null);
-            if (argsJson !== null) JSON.parse(argsJson);
-          } catch {
-            argsJson = null;
-          }
-        }
-      } else {
-        argsJson = JSON.stringify(rawArgs) ?? null;
-      }
-    }
-    if (!name || argsJson === null) {
-      // Not a valid call: the block stays prose and the scan moves past it.
-      prose += text.slice(cursor, end);
-      cursor = end;
+      prose += rawBlock;
+      cursor = matchIndex + rawBlock.length;
       continue;
     }
-    prose += text.slice(cursor, start);
+
+    const rawName = isObject(parsed) ? asString(parsed.name).trim() : "";
+    const resolvedName = rawName ? (toolAliases?.[rawName] ?? rawName) : "";
+    if (!resolvedName || (allowedTools && !allowedTools.has(resolvedName))) {
+      prose += rawBlock;
+      cursor = matchIndex + rawBlock.length;
+      continue;
+    }
+
+    const argsJson = extractParsedToolArguments(parsed as JsonObject);
+    if (argsJson === null) {
+      prose += rawBlock;
+      cursor = matchIndex + rawBlock.length;
+      continue;
+    }
+
     calls.push({
       id: `call_muse_${++textToolSeq}`,
-      name,
+      name: resolvedName,
       arguments: argsJson,
     });
-    cursor = end;
+    cursor = matchIndex + rawBlock.length;
   }
-  if (!sawBlock || calls.length === 0) return { prose: text, calls: [] };
+
   prose += text.slice(cursor);
-  return { prose: prose.trim(), calls };
+  if (calls.length === 0) return { prose: text, calls: [] };
+  return { prose, calls };
 }
 
-type ResponsesOutcome = {
+export type ResponsesOutcome = {
   text: string;
+  calls: TextToolCall[];
   usage: { prompt: number; completion: number; total: number } | null;
   error: string | null;
-  /** Why a `response.incomplete` ended the reply ("max_output_tokens" when
-   *  the backend cut the answer), or null for a completed response. */
   incompleteReason: string | null;
-  /** Native function calls carried by the stream (namespace route), in
-   *  arrival order. Empty on the text-protocol route. */
-  nativeCalls: { id: string; name: string; arguments: string }[];
 };
 
-function readResponsesStream(sseText: string): ResponsesOutcome {
+/**
+ * Reports whether a Muse SSE `response.failed` / `error` message is a
+ * transient backend failure worth retrying (such as Meta's intermittent
+ * "The model failed to generate a response." on HTTP 200).
+ */
+export function isTransientMuseResponseError(message: string | null): boolean {
+  if (!message) return false;
+  const lower = message.toLowerCase();
+  return (
+    lower.includes("failed to generate a response") ||
+    lower.includes("overloaded") ||
+    lower.includes("temporarily unavailable") ||
+    lower.includes("internal error") ||
+    lower.includes("server error") ||
+    lower.includes("try again") ||
+    lower.includes("timeout") ||
+    lower.includes("timed out")
+  );
+}
+
+export function readResponsesStream(sseText: string): ResponsesOutcome {
   let text = "";
+  const calls: TextToolCall[] = [];
+  const finalArgs = new Map<string, string>();
+  const deltaArgs = new Map<string, string>();
   let usage: ResponsesOutcome["usage"] = null;
   let error: string | null = null;
   let incompleteReason: string | null = null;
-  const nativeCalls: ResponsesOutcome["nativeCalls"] = [];
-  // Muse finalizes a call's arguments in a dedicated done event, and the
-  // output_item.done item can carry them empty; track both the finalized
-  // value and the accumulated deltas per item id (termixgo's decoder).
-  const finalArgs = new Map<string, string>();
-  const deltaArgs = new Map<string, string>();
   for (const line of sseText.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed.startsWith("data:")) continue;
@@ -503,8 +569,15 @@ function readResponsesStream(sseText: string): ResponsesOutcome {
       continue;
     }
     if (!isObject(event)) continue;
-    if (event.type === "response.output_text.delta") {
+    if (event.type === "response.subscription_usage") {
+      // The subscription's own accounting of the step (5-hour and weekly
+      // windows), recorded for the account card; malformed events are
+      // ignored by the recorder.
+      recordMuseSubscription(event.subscription);
+    } else if (event.type === "response.output_text.delta") {
       if (typeof event.delta === "string") text += event.delta;
+    } else if (event.type === "response.output_text.done") {
+      if (!text && typeof event.text === "string") text = event.text;
     } else if (event.type === "response.function_call_arguments.delta") {
       const itemId = asString(event.item_id);
       if (itemId && typeof event.delta === "string") {
@@ -513,27 +586,43 @@ function readResponsesStream(sseText: string): ResponsesOutcome {
     } else if (event.type === "response.function_call_arguments.done") {
       const itemId = asString(event.item_id);
       if (itemId) {
-        const args = asString(event.arguments) || deltaArgs.get(itemId) || "";
-        if (args) finalArgs.set(itemId, args);
+        const doneArgs = asString(event.arguments).trim();
+        finalArgs.set(
+          itemId,
+          doneArgs || deltaArgs.get(itemId)?.trim() || "{}",
+        );
       }
     } else if (event.type === "response.output_item.done") {
       const item = isObject(event.item) ? event.item : null;
-      if (item && item.type === "function_call") {
-        const name = asString(item.name);
-        const callId = asString(item.call_id);
-        if (name && callId) {
-          const itemId = asString(item.id);
-          const args =
-            asString(item.arguments) ||
-            finalArgs.get(itemId) ||
-            deltaArgs.get(itemId) ||
-            "{}";
-          nativeCalls.push({ id: callId, name, arguments: args });
+      if (item?.type === "function_call" && asString(item.name)) {
+        const itemId = asString(item.id);
+        const args =
+          asString(item.arguments).trim() ||
+          finalArgs.get(itemId)?.trim() ||
+          deltaArgs.get(itemId)?.trim() ||
+          "{}";
+        calls.push({
+          id: asString(item.call_id) || itemId || `call_muse_${++textToolSeq}`,
+          name: asString(item.name),
+          arguments: isValidJson(args) ? args : "{}",
+        });
+      } else if (
+        item?.type === "message" &&
+        !text &&
+        Array.isArray(item.content)
+      ) {
+        const parts: string[] = [];
+        for (const part of item.content) {
+          if (
+            isObject(part) &&
+            part.type === "output_text" &&
+            typeof part.text === "string"
+          ) {
+            parts.push(part.text);
+          }
         }
+        if (parts.length > 0) text = parts.join("");
       }
-    } else if (event.type === "response.subscription_usage") {
-      // The quota reading rides the stream; stash it for the account UI.
-      recordMuseSubscription(event.subscription);
     } else if (
       event.type === "response.completed" ||
       event.type === "response.incomplete"
@@ -549,12 +638,11 @@ function readResponsesStream(sseText: string): ResponsesOutcome {
           total: Number(raw.total_tokens ?? prompt + completion) || 0,
         };
       }
-      if (event.type === "response.incomplete") {
-        const details =
-          response && isObject(response.incomplete_details)
-            ? response.incomplete_details
-            : null;
-        incompleteReason = asString(details?.reason) || "unknown";
+      if (event.type === "response.incomplete" && response) {
+        const details = isObject(response.incomplete_details)
+          ? response.incomplete_details
+          : null;
+        incompleteReason = asString(details?.reason) || "unspecified";
       }
     } else if (event.type === "response.failed" || event.type === "error") {
       const nested = isObject(event.error) ? event.error : null;
@@ -567,7 +655,7 @@ function readResponsesStream(sseText: string): ResponsesOutcome {
         "Muse request failed";
     }
   }
-  return { text, usage, error, incompleteReason, nativeCalls };
+  return { text, calls, usage, error, incompleteReason };
 }
 
 /**
@@ -577,17 +665,24 @@ function readResponsesStream(sseText: string): ResponsesOutcome {
  * reply is necessarily whole rather than token-streamed, because a
  * tool_call block is only a call once its closing fence has arrived.
  */
+export type ResponsesToChatOptions = {
+  allowedTools?: ReadonlySet<string>;
+  toolAliases?: Record<string, string>;
+};
+
 export function responsesStreamToChatSse(
   sseText: string,
   model: string,
+  options?: ResponsesToChatOptions,
 ): string {
   const outcome = readResponsesStream(sseText);
   if (outcome.error) {
     return `data: ${JSON.stringify({ error: { message: outcome.error, code: "muse_response_failed" } })}\n\ndata: [DONE]\n\n`;
   }
-  // An incomplete response that is not the output limit is a failure with a
-  // name (content filter, refusal, ...): surface it like termixgo does
-  // instead of passing the partial text off as a finished answer.
+  // An incomplete response that is not the output limit is a failure with
+  // a name (content filter, refusal, ...): surface it like termixgo does
+  // instead of passing the partial text off as a finished answer. The
+  // output-limit case is handled below as a "length" finish.
   if (
     outcome.incompleteReason &&
     outcome.incompleteReason !== "max_output_tokens"
@@ -613,7 +708,20 @@ export function responsesStreamToChatSse(
       `data: ${JSON.stringify({ ...base, choices: [choice], ...(withUsage && usage ? { usage } : {}) })}\n\n`,
     );
   };
-  const { prose, calls } = parseTextToolCalls(outcome.text);
+  // Native function_call items win; the text protocol is the fallback
+  // parse for a reply that arrived without them.
+  const aliases = options?.toolAliases;
+  const nativeCalls = aliases
+    ? outcome.calls.map((call) => ({
+        ...call,
+        name: aliases[call.name] ?? call.name,
+      }))
+    : outcome.calls;
+  const parsed =
+    nativeCalls.length > 0
+      ? { prose: outcome.text, calls: nativeCalls }
+      : parseTextToolCalls(outcome.text, options?.allowedTools, aliases);
+  const { prose, calls } = parsed;
   if (calls.length === 0) {
     if (outcome.text) {
       chunk({
@@ -622,19 +730,9 @@ export function responsesStreamToChatSse(
         finish_reason: null,
       });
     }
-    // A reply the backend cut at its output limit ends as "length", never
-    // as a clean "stop": the partial text is real, but filing it as
-    // finished is how truncated answers passed as complete. The agent loop
-    // names the pause and auto-continues it, as termixgo does.
-    chunk(
-      {
-        index: 0,
-        delta: {},
-        finish_reason:
-          outcome.incompleteReason === "max_output_tokens" ? "length" : "stop",
-      },
-      true,
-    );
+    const finishReason =
+      outcome.incompleteReason === "max_output_tokens" ? "length" : "stop";
+    chunk({ index: 0, delta: {}, finish_reason: finishReason }, true);
   } else {
     if (prose.trim()) {
       chunk({
@@ -661,86 +759,6 @@ export function responsesStreamToChatSse(
     });
     chunk({ index: 0, delta: {}, finish_reason: "tool_calls" }, true);
   }
-  lines.push("data: [DONE]\n\n");
-  return lines.join("");
-}
-
-/**
- * The native-route twin of `responsesStreamToChatSse`: the stream's text
- * and its real function_call items become chat-completions chunks, with
- * the call ids Meta issued (the next request replays them as `fc_` items).
- * Same incomplete and failure semantics as the text route.
- */
-export function responsesNativeStreamToChatSse(
-  sseText: string,
-  model: string,
-): string {
-  const outcome = readResponsesStream(sseText);
-  if (outcome.error) {
-    return `data: ${JSON.stringify({ error: { message: outcome.error, code: "muse_response_failed" } })}\n\ndata: [DONE]\n\n`;
-  }
-  if (
-    outcome.incompleteReason &&
-    outcome.incompleteReason !== "max_output_tokens"
-  ) {
-    return `data: ${JSON.stringify({ error: { message: `Muse response incomplete: ${outcome.incompleteReason}`, code: "muse_response_incomplete" } })}\n\ndata: [DONE]\n\n`;
-  }
-  const base = {
-    id: "chatcmpl-muse",
-    object: "chat.completion.chunk",
-    created: Math.floor(Date.now() / 1000),
-    model,
-  };
-  const usage = outcome.usage
-    ? {
-        prompt_tokens: outcome.usage.prompt,
-        completion_tokens: outcome.usage.completion,
-        total_tokens: outcome.usage.total,
-      }
-    : undefined;
-  const lines: string[] = [];
-  const chunk = (choice: JsonObject, withUsage = false) => {
-    lines.push(
-      `data: ${JSON.stringify({ ...base, choices: [choice], ...(withUsage && usage ? { usage } : {}) })}\n\n`,
-    );
-  };
-  const calls = outcome.nativeCalls;
-  if (outcome.text) {
-    chunk({
-      index: 0,
-      delta: { role: "assistant", content: outcome.text },
-      finish_reason: null,
-    });
-  }
-  calls.forEach((call, index) => {
-    chunk({
-      index: 0,
-      delta: {
-        tool_calls: [
-          {
-            index,
-            id: call.id,
-            type: "function",
-            function: { name: call.name, arguments: call.arguments },
-          },
-        ],
-      },
-      finish_reason: null,
-    });
-  });
-  chunk(
-    {
-      index: 0,
-      delta: {},
-      finish_reason:
-        calls.length > 0
-          ? "tool_calls"
-          : outcome.incompleteReason === "max_output_tokens"
-            ? "length"
-            : "stop",
-    },
-    true,
-  );
   lines.push("data: [DONE]\n\n");
   return lines.join("");
 }

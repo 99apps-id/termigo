@@ -55,14 +55,15 @@ beforeEach(() => {
     loadedChunks = 10;
     return { files: 1, chunks: 10 };
   });
-  m.searchCode.mockResolvedValue([]);
+  m.searchCode.mockReturnValue([]);
 });
 
 describe("code_index / code_search root targeting", () => {
   it("indexes the workspace root when no root is given", async () => {
     await run(tools().code_index)({});
 
-    expect(m.indexWorkspace).toHaveBeenCalledWith(WORKSPACE, true);
+    // Third argument: the workspace root is the one tree allowed a cache file.
+    expect(m.indexWorkspace).toHaveBeenCalledWith(WORKSPACE, true, true);
   });
 
   it("indexes an explicit root instead of the workspace", async () => {
@@ -71,11 +72,13 @@ describe("code_index / code_search root targeting", () => {
     // so the other repo was crawled one directory at a time with `ls`.
     await run(tools().code_index)({ root: "C:/project/other-repo" });
 
-    // Indexing another checkout is safe because the FTS5 database lives in
-    // the app data directory: nothing is written into the searched tree.
+    // Another checkout is indexed in memory only. Caching it wrote a
+    // `.termigo/code-index.json` into that tree, which is why the third
+    // argument exists.
     expect(m.indexWorkspace).toHaveBeenCalledWith(
       "C:/project/other-repo",
       true,
+      false,
     );
   });
 
@@ -87,6 +90,7 @@ describe("code_index / code_search root targeting", () => {
     expect(m.indexWorkspace).toHaveBeenCalledWith(
       "C:/fake/project/src/../other-repo",
       true,
+      false,
     );
   });
 
@@ -118,9 +122,10 @@ describe("code_index / code_search root targeting", () => {
     });
 
     // ...but a search of a DIFFERENT root must not accept it. `ensureIndexed`
-    // passes no force flag, so a stored index for that root is reused.
+    // passes no force flag, so a cached index for that root is reused.
     expect(m.indexWorkspace).toHaveBeenCalledWith(
       "C:/project/other-repo",
+      false,
       false,
     );
   });
@@ -144,8 +149,18 @@ describe("code_index / code_search root targeting", () => {
     const b = run(t.code_index)({ root: "C:/repo-b" });
 
     expect(m.indexWorkspace).toHaveBeenCalledTimes(2);
-    expect(m.indexWorkspace).toHaveBeenNthCalledWith(1, "C:/repo-a", true);
-    expect(m.indexWorkspace).toHaveBeenNthCalledWith(2, "C:/repo-b", true);
+    expect(m.indexWorkspace).toHaveBeenNthCalledWith(
+      1,
+      "C:/repo-a",
+      true,
+      false,
+    );
+    expect(m.indexWorkspace).toHaveBeenNthCalledWith(
+      2,
+      "C:/repo-b",
+      true,
+      false,
+    );
 
     release?.({ files: 1, chunks: 10 });
     await Promise.all([a, b]);
@@ -183,12 +198,13 @@ describe("code_index / code_search root targeting", () => {
     expect(m.searchCode).toHaveBeenCalledWith("pty", 10, undefined);
   });
 
-  it("indexes the canonical spelling, so the index is not rebuilt per spelling", async () => {
+  it("indexes the canonical spelling, so the cache is not rewritten per spelling", async () => {
     await run(tools().code_index)({ root: "C:/project/other-repo/" });
 
     expect(m.indexWorkspace).toHaveBeenCalledWith(
       "C:/project/other-repo",
       true,
+      false,
     );
   });
 });

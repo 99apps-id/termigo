@@ -1,6 +1,13 @@
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import { invoke } from "@tauri-apps/api/core";
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { toast } from "sonner";
 import { useWhisperRecording } from "../hooks/useWhisperRecording";
 import { expandSnippetTokens, type Snippet } from "../lib/snippets";
@@ -69,15 +76,53 @@ type ComposerCtx = {
   cancelQueued: (index: number) => void;
   /** Pull a queued message's text back into the composer to revise it. */
   editQueued: (index: number) => void;
+  /**
+   * Re-attach the file parts of a stored user message. Editing a turn used to
+   * prefill only its text, so resending dropped every attachment and asked the
+   * model to reason about an image it never received.
+   */
+  restoreFileParts: (
+    parts: ReadonlyArray<{
+      type: "file";
+      mediaType: string;
+      url: string;
+      filename?: string;
+    }>,
+    key: string,
+  ) => number;
 };
 
-const Ctx = createContext<ComposerCtx | null>(null);
+type ComposerMetaCtx = Omit<ComposerCtx, "value" | "canSend">;
+
+const MetaCtx = createContext<ComposerMetaCtx | null>(null);
+const CanSendCtx = createContext<boolean>(false);
+const ValueCtx = createContext<string>("");
+
+/**
+ * Subscribe only to composer actions and non-keystroke state (attachments,
+ * snippets, commands, busy/queued status). Components using this hook never
+ * re-render while the user types in the textarea.
+ */
+export function useComposerActions(): ComposerMetaCtx {
+  const ctx = useContext(MetaCtx);
+  if (!ctx) {
+    throw new Error(
+      "useComposerActions must be used inside <AiComposerProvider>",
+    );
+  }
+  return ctx;
+}
+
+/** Subscribe only to whether the composer currently has something to send. */
+export function useComposerCanSend(): boolean {
+  return useContext(CanSendCtx);
+}
 
 export function useComposer(): ComposerCtx {
-  const ctx = useContext(Ctx);
-  if (!ctx)
-    throw new Error("useComposer must be used inside <AiComposerProvider>");
-  return ctx;
+  const meta = useComposerActions();
+  const value = useContext(ValueCtx);
+  const canSend = useContext(CanSendCtx);
+  return useMemo(() => ({ ...meta, value, canSend }), [meta, value, canSend]);
 }
 
 type ProviderProps = {
@@ -318,6 +363,53 @@ export function AiComposerProvider({ children }: ProviderProps) {
     }
   };
 
+  /**
+   * Rebuild the attachments a stored turn carried.
+   *
+   * The message keeps `{mediaType, url, filename}` per file part, which is
+   * exactly the shape `submit` re-emits, so restoring them is a straight
+   * mapping rather than a re-read from disk. Returns how many were attached so
+   * the caller can tell the user when none could be.
+   */
+  const restoreFileParts = (
+    parts: ReadonlyArray<{
+      type: "file";
+      mediaType: string;
+      url: string;
+      filename?: string;
+    }>,
+    key: string,
+  ): number => {
+    if (parts.length === 0) return 0;
+    let added = 0;
+    setFiles((prev) => {
+      const next = prev.slice();
+      parts.forEach((part, index) => {
+        if (typeof part.url !== "string" || part.url.length === 0) return;
+        const id = `restored-${key}-${index}`;
+        if (next.some((f) => f.id === id)) return;
+        const mediaType = part.mediaType || "application/octet-stream";
+        const marker = ";base64,";
+        const at = part.url.indexOf(marker);
+        const size =
+          at >= 0
+            ? Math.floor(((part.url.length - at - marker.length) * 3) / 4)
+            : 0;
+        next.push({
+          id,
+          name: part.filename || `attachment-${index + 1}`,
+          kind: mediaType.startsWith("image/") ? "image" : "file",
+          mediaType,
+          url: part.url,
+          size,
+        });
+        added += 1;
+      });
+      return next;
+    });
+    return added;
+  };
+
   const submit = () => {
     // No early return on `isBusy`. Typing during a run used to vanish without a
     // trace; it is now queued by sendParts and delivered when the run settles.
@@ -439,7 +531,16 @@ export function AiComposerProvider({ children }: ProviderProps) {
       const configured = getModelContextLimit(modelId);
       const effective = effectiveContextLimit(modelId, configured);
       const estimatedTokens = Math.ceil(totalText / CHARS_PER_TOKEN);
-      const available = effective - CONTEXT_RESERVE_TOKENS;
+      // The reserve carves out the system prompt, tool schemas and answer
+      // headroom. It must never make `available` negative: the learned limit
+      // floors at MIN_LIMIT (8k) and the reserve is 60k, so a small-context
+      // model that overflowed a few times produced -52000 and refused EVERY
+      // message, including a one-word one. Flooring at half the effective
+      // window keeps the intent (leave room) without ever blocking the user.
+      const available = Math.max(
+        Math.floor(effective * 0.5),
+        effective - CONTEXT_RESERVE_TOKENS,
+      );
       if (estimatedTokens > available) {
         toast.error(
           `Estimated ${estimatedTokens.toLocaleString()} tokens exceeds available context (${available.toLocaleString()} tokens). Shorten your message or attachments, or use /new to start fresh.`,
@@ -551,31 +652,93 @@ export function AiComposerProvider({ children }: ProviderProps) {
     requestAnimationFrame(() => textareaRef.current?.focus());
   };
 
-  const ctx: ComposerCtx = {
-    textareaRef,
-    value,
-    setValue,
-    files,
+  const actionsRef = useRef({
     addFiles,
     attachFileByPath,
+    restoreFileParts,
     removeFile,
-    pickedSnippets,
     addSnippet,
     removeSnippet,
-    pickedCommands,
     addCommand,
     removeCommand,
-    queued,
     cancelQueued,
     editQueued,
-    isBusy,
     submit,
     stop,
-    voice,
-    canSend,
+  });
+  actionsRef.current = {
+    addFiles,
+    attachFileByPath,
+    restoreFileParts,
+    removeFile,
+    addSnippet,
+    removeSnippet,
+    addCommand,
+    removeCommand,
+    cancelQueued,
+    editQueued,
+    submit,
+    stop,
   };
 
-  return <Ctx.Provider value={ctx}>{children}</Ctx.Provider>;
+  const stableActions = useMemo(
+    () => ({
+      addFiles: (list: FileList | File[] | readonly File[] | null) =>
+        actionsRef.current.addFiles(list),
+      attachFileByPath: (path: string) =>
+        actionsRef.current.attachFileByPath(path),
+      restoreFileParts: (
+        parts: ReadonlyArray<{
+          type: "file";
+          mediaType: string;
+          url: string;
+          filename?: string;
+        }>,
+        key: string,
+      ) => actionsRef.current.restoreFileParts(parts, key),
+      removeFile: (id: string) => actionsRef.current.removeFile(id),
+      addSnippet: (s: Snippet) => actionsRef.current.addSnippet(s),
+      removeSnippet: (id: string) => actionsRef.current.removeSnippet(id),
+      addCommand: (cmd: SlashCommandMeta) => actionsRef.current.addCommand(cmd),
+      removeCommand: (name: string) => actionsRef.current.removeCommand(name),
+      cancelQueued: (index: number) => actionsRef.current.cancelQueued(index),
+      editQueued: (index: number) => actionsRef.current.editQueued(index),
+      submit: () => actionsRef.current.submit(),
+      stop: () => actionsRef.current.stop(),
+    }),
+    [],
+  );
+
+  const meta = useMemo<ComposerMetaCtx>(
+    () => ({
+      textareaRef,
+      setValue,
+      files,
+      pickedSnippets,
+      pickedCommands,
+      queued,
+      isBusy,
+      voice,
+      ...stableActions,
+    }),
+    [
+      files,
+      pickedSnippets,
+      pickedCommands,
+      queued,
+      isBusy,
+      voice,
+      stableActions,
+    ],
+  );
+
+  return (
+    <MetaCtx.Provider value={meta}>
+      <CanSendCtx.Provider value={canSend}>
+        <ValueCtx.Provider value={value}>{children}</ValueCtx.Provider>
+      </CanSendCtx.Provider>
+    </MetaCtx.Provider>
+  );
 }
 
 export const IMAGE_ATTACH_EXTS = new Set([

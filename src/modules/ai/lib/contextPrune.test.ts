@@ -212,6 +212,82 @@ describe("findVerifiedCut", () => {
     expect(messages.slice(cut)).toContain(messages[7]);
     expect(messages.slice(cut)).toContain(messages[9]);
   });
+
+  // `git add -A` that blows its timeout reports `exit_code: null` (no code was
+  // ever observed). The old check only rejected a NUMERIC non-zero code, so a
+  // killed checkpoint read as verified and the prune told the model the work
+  // was already saved to git.
+  it("does not treat a killed checkpoint (exit_code null) as verified", () => {
+    const messages = verifiedTranscript().map((m) =>
+      m.role === "tool" &&
+      Array.isArray(m.content) &&
+      (m.content as ToolPart[]).some((p) => p.toolName === "git_checkpoint")
+        ? toolResult("c1", "git_checkpoint", {
+            command: "git add -A",
+            message: "checkpoint: fix a",
+            exit_code: null,
+          })
+        : m,
+    );
+    expect(findVerifiedCut(messages)).toBe(-1);
+  });
+
+  it("treats an exit_code of 0 as verified even beside other fields", () => {
+    const messages = verifiedTranscript().map((m) =>
+      m.role === "tool" &&
+      Array.isArray(m.content) &&
+      (m.content as ToolPart[]).some((p) => p.toolName === "git_checkpoint")
+        ? toolResult("c1", "git_checkpoint", {
+            command: "git add -A && git commit",
+            message: "checkpoint: fix a",
+            stdout: "1 file changed",
+            exit_code: 0,
+          })
+        : m,
+    );
+    expect(findVerifiedCut(messages)).toBeGreaterThan(0);
+  });
+
+  // A zero running balance is not self-containment: an orphan tool-result
+  // before an unanswered call cancels it out, so the old check cut at a
+  // boundary that left a tool-call in the retained prefix with its result in
+  // the discarded tail - a request providers reject outright.
+  it("refuses a balanced-looking cut that strands a tool-call", () => {
+    const messages: ModelMessage[] = [
+      user("do the work"),
+      // An orphan result: its call never appears.
+      toolResult("ghost", "read_file", { path: "src/ghost.ts" }),
+      toolCall("c1", "git_checkpoint", { message: "cp" }),
+      toolResult("c1", "git_checkpoint", {
+        message: "checkpoint: cp",
+        exit_code: 0,
+      }),
+      // A call whose result would land past the cut.
+      toolCall("r1", "read_file", { path: "src/a.ts" }),
+      toolResult("r1", "read_file", { path: "src/a.ts" }),
+      toolCall("r2", "read_file", { path: "src/b.ts" }),
+      toolResult("r2", "read_file", { path: "src/b.ts" }),
+      user("next"),
+      assistant("ok"),
+    ];
+    // Balance at index 5 is +1 (call) -1 (orphan result) = 0, but r1's call is
+    // still unanswered there. The cut must not land on it.
+    const cut = findVerifiedCut(messages);
+    expect(cut).not.toBe(5);
+    if (cut > 0) {
+      const prefix = messages.slice(0, cut);
+      const open = new Set<string>();
+      for (const m of prefix) {
+        for (const p of (m.content ?? []) as ToolPart[]) {
+          if (p.type === "tool-call" && typeof p.toolCallId === "string")
+            open.add(p.toolCallId);
+          else if (p.type === "tool-result" && typeof p.toolCallId === "string")
+            open.delete(p.toolCallId);
+        }
+      }
+      expect(open.size).toBe(0);
+    }
+  });
 });
 
 describe("summarizeSegment", () => {

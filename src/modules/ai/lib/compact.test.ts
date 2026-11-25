@@ -440,6 +440,89 @@ describe("compactModelMessagesDetailed body-size cap", () => {
     expect((input?.content ?? "").length).toBeLessThan(70_000);
     expect(input?.path).toBe("/big.txt");
   });
+
+  // The standing cap used to be invisible to the caller: it rewrote the
+  // transcript but reported `compacted: false` (only the elision passes
+  // incremented `dropped`), so the per-step path in agent.ts kept the
+  // ORIGINAL uncapped messages and resent the very body the cap exists to
+  // shrink.
+  it("reports compacted when only the standing tool-call cap fired", () => {
+    const messages: ModelMessage[] = [
+      writeCallWithContent("c0", "/big.txt", "w".repeat(100_000)),
+      readResult("r0", "ok"),
+      { role: "user", content: "next" } as ModelMessage,
+    ];
+    const result = compactModelMessagesDetailed(messages, 1_000_000);
+    expect(result.compacted).toBe(true);
+  });
+});
+
+describe("compaction must never grow the transcript", () => {
+  // Eliding replaces the output with a ~98-character marker. Eliding a SHORT
+  // result therefore ADDS ~70 characters per part, and pass 1 elides every
+  // pre-tail result -- so a long chat of small tool calls inflated instead of
+  // shrank, then reported `compacted: true` while still over budget.
+  it("leaves a short tool result alone instead of inflating it", () => {
+    const messages: ModelMessage[] = [];
+    for (let i = 0; i < 400; i++) {
+      messages.push(readCall(`c${i}`, `/f${i}.txt`));
+      messages.push(readResult(`c${i}`, "hi"));
+    }
+    const limit = 20_000;
+    const before = estimateMessagesSize(messages).tokens;
+    const result = compactModelMessagesDetailed(messages, limit, 32_000);
+    const after = estimateMessagesSize(result.messages).tokens;
+    expect(after).toBeLessThanOrEqual(before);
+    // Nothing was elided, so nothing is reported as dropped.
+    expect(isElided(result.messages[1])).toBe(false);
+    expect(result.droppedCount).toBe(0);
+  });
+
+  it("still elides a large tool result", () => {
+    // Long enough that KEEP_TAIL (24 messages) does not protect everything:
+    // the pre-tail pass must reach the results on its own.
+    const messages: ModelMessage[] = [];
+    for (let i = 0; i < 30; i++) {
+      messages.push(readCall(`c${i}`, `/f${i}.txt`));
+      messages.push(readResult(`c${i}`, BIG));
+    }
+    const result = compactModelMessagesDetailed(messages, 1000);
+    expect(isElided(result.messages[1])).toBe(true);
+  });
+
+  it("keeps the newest live tail results when older ones are already elided", () => {
+    // A collapsed turn: one message carrying every result. Four are already
+    // elided, six are live. The keep budget applies to LIVE results, so
+    // counting the dead ones let `canElide` under-count and eat into the
+    // protected set it exists to defend.
+    const parts: unknown[] = [];
+    for (let i = 0; i < 4; i++) {
+      parts.push({
+        type: "tool-result",
+        toolCallId: `dead${i}`,
+        output: { type: "text", value: "[elided]", __elided: true },
+      });
+    }
+    for (let i = 0; i < 6; i++) {
+      parts.push({
+        type: "tool-result",
+        toolCallId: `live${i}`,
+        output: { type: "text", value: "y".repeat(2500) },
+      });
+    }
+    const messages: ModelMessage[] = [];
+    for (let i = 0; i < 40; i++) {
+      messages.push(readResult(`c${i}`, "y".repeat(4000)));
+    }
+    messages.push({ role: "tool", content: parts } as unknown as ModelMessage);
+    const result = compactModelMessagesDetailed(messages, 60_000);
+    const liveLeft = (
+      result.messages[result.messages.length - 1].content as Array<{
+        output?: { __elided?: boolean };
+      }>
+    ).filter((p) => p.output?.__elided !== true).length;
+    expect(liveLeft).toBe(6);
+  });
 });
 
 describe("compactModelMessages", () => {

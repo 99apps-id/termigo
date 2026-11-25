@@ -1,6 +1,6 @@
 [package]
 name = "termigo"
-version = "0.9.27"
+version = "0.9.28"
 description = "Termigo - an open-source AI-native terminal emulator"
 authors = ["99apps-id"]
 license = "Apache-2.0"
@@ -13,7 +13,7 @@ default-members = [".", "crates/termigo-cli", "crates/termigo-control-protocol"]
 resolver = "2"
 
 [workspace.package]
-version = "0.9.27"
+version = "0.9.28"
 edition = "2021"
 license = "Apache-2.0"
 
@@ -74,10 +74,19 @@ url = "2"
 russh = { version = "0.60", default-features = false, features = ["ring", "flate2", "rsa"] }
 russh-sftp = "2.1"
 zip = { version = "4", default-features = false, features = ["deflate"] }
+# Office documents. calamine reads xlsx/xls/ods and rust_xlsxwriter writes
+# xlsx; docx and pptx are written directly as OOXML packages over the zip and
+# quick-xml already in the tree, because a full OOXML writer is far more than
+# this needs. Both pull their own zip 9, which coexists with the zip 4 above;
+# it costs compile time, not correctness.
+calamine = { version = "0.38", default-features = false, features = ["dates"] }
+rust_xlsxwriter = { version = "0.102", default-features = false }
+quick-xml = { version = "0.42", features = ["encoding"] }
 sha2 = "0.10"
 hex = "0.4"
 uuid = { version = "1", features = ["v4", "serde"] }
 regex = "1"
+tokio-tungstenite = "0.26"
 
 [dev-dependencies]
 proptest = "1"

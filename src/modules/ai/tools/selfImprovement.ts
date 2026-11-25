@@ -1,6 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
 import {
+  clampConfidence,
   type LearnedFact,
   type Preference,
   getOrCreateUserModel,
@@ -53,10 +54,11 @@ export function buildSelfImprovementTools() {
           key,
           label,
           value,
-          confidence:
+          confidence: clampConfidence(
             existingIndex >= 0
               ? model.preferences[existingIndex].confidence + 0.1
               : 0.5,
+          ),
           observations:
             existingIndex >= 0
               ? model.preferences[existingIndex].observations + 1
@@ -132,6 +134,13 @@ export function buildSelfImprovementTools() {
         model.suggestedSkillCounts = model.suggestedSkillCounts ?? {};
         const next = (model.suggestedSkillCounts[trimmed] ?? 0) + 1;
         model.suggestedSkillCounts[trimmed] = next;
+        // The name list is capped but the counts record was not, so it gained a
+        // permanent key for every name ever suggested and grew for the life of
+        // the install. Keep only the names still on the suggestion list.
+        const live = new Set(model.suggestedSkills);
+        for (const key of Object.keys(model.suggestedSkillCounts)) {
+          if (!live.has(key)) delete model.suggestedSkillCounts[key];
+        }
         await saveUserModel(model);
         return {
           ok: true,

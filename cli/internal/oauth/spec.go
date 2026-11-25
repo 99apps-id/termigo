@@ -3,6 +3,7 @@ package oauth
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -32,6 +33,11 @@ type Spec struct {
 	Scopes          []string
 	RedirectPort    int
 	RedirectPath    string
+	// RedirectURIHost is the host written into redirect_uri when it must
+	// differ from the address the callback listens on (Claude registers
+	// "localhost"); empty means the listen host.
+	RedirectURIHost string
+	UserAgent       string
 	ExtraAuth       map[string]string
 	ExchangeJSON    bool
 	RefreshJSON     bool
@@ -100,13 +106,16 @@ var specs = map[string]Spec{
 		ClientID:     "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
 		AuthorizeURL: "https://claude.ai/oauth/authorize",
 		TokenURL:     "https://api.anthropic.com/v1/oauth/token",
-		Scopes:       []string{"org:create_api_key", "user:profile", "user:inference"},
-		RedirectPort: 54545,
-		RedirectPath: "/callback",
-		ExtraAuth:    map[string]string{"code": "true"},
-		ExchangeJSON: true,
-		RefreshJSON:  true,
-		RefreshLead:  4 * time.Hour, // 9router refreshLeadMs
+		Scopes: []string{
+			"org:create_api_key", "user:profile", "user:inference",
+		},
+		RedirectURIHost: "localhost",
+		RedirectPort:    54545,
+		RedirectPath:    "/callback",
+		ExtraAuth:       map[string]string{"code": "true"},
+		ExchangeJSON:    true,
+		RefreshJSON:     true,
+		RefreshLead:     4 * time.Hour, // 9router refreshLeadMs
 	},
 	// Antigravity shares Google's OAuth. The client id and the public
 	// installed-app secret are read from the environment rather than committed,
@@ -128,7 +137,8 @@ var specs = map[string]Spec{
 			"https://www.googleapis.com/auth/experimentsandconfigs",
 		},
 		RedirectPath: "/auth/callback",
-		ExtraAuth:    map[string]string{"access_type": "offline", "prompt": "consent"},
+		UserAgent:    "antigravity/cli/1.5.15 (aidev_client; os_type=" + runtime.GOOS + "; arch=" + runtime.GOARCH + "; cl=1027820220; auth_method=consumer)",
+		ExtraAuth:    map[string]string{"access_type": "offline", "prompt": "consent select_account"},
 	},
 	"github-copilot": {
 		Provider:        "github-copilot",

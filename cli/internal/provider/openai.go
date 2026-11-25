@@ -92,6 +92,11 @@ func (c *openAIClient) streamWithURL(ctx context.Context, url string, headers ma
 			}
 		}
 		for _, choice := range chunk.Choices {
+			if choice.FinishReason == "length" {
+				if err := emit(StreamEvent{Type: EventIncomplete, IncompleteReason: "length"}); err != nil {
+					return err
+				}
+			}
 			delta := choice.Delta
 			if delta.Content != "" {
 				if err := emit(StreamEvent{Type: EventTextDelta, Text: delta.Content}); err != nil {

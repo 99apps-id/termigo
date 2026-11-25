@@ -53,13 +53,13 @@ pub fn kill_tree(pid: u32) {
 }
 
 /// Kill a process and its descendants on Unix.
- ///
- /// A bare `kill -9 <pid>` leaves backgrounded grandchildren alive - and a
- /// grandchild holding a stdout pipe keeps the drain threads in
- /// `run_blocking` blocked on `read()` forever, so the join after a timeout
- /// never returns. Recurse through `pgrep -P` (present on Linux, macOS and
- /// WSL) depth-first so grandchildren die before their parents reparent them
- /// to init; without `pgrep` this degrades to the single kill it replaces.
+///
+/// A bare `kill -9 <pid>` leaves backgrounded grandchildren alive - and a
+/// grandchild holding a stdout pipe keeps the drain threads in
+/// `run_blocking` blocked on `read()` forever, so the join after a timeout
+/// never returns. Recurse through `pgrep -P` (present on Linux, macOS and
+/// WSL) depth-first so grandchildren die before their parents reparent them
+/// to init; without `pgrep` this degrades to the single kill it replaces.
 #[cfg(not(windows))]
 pub fn kill_tree(pid: u32) {
     kill_tree_recursive(pid, 0);
@@ -70,7 +70,11 @@ fn kill_tree_recursive(pid: u32, depth: u8) {
     if depth > 8 {
         return;
     }
-    if let Ok(out) = Command::new("pgrep").arg("-P").arg(pid.to_string()).output() {
+    if let Ok(out) = Command::new("pgrep")
+        .arg("-P")
+        .arg(pid.to_string())
+        .output()
+    {
         if out.status.success() {
             for line in String::from_utf8_lossy(&out.stdout).lines() {
                 if let Ok(child) = line.trim().parse::<u32>() {
