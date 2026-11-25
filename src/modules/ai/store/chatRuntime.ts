@@ -670,7 +670,8 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       // without waiting for a click (bounded + preference-gated; see
       // requestAutoContinue). Runs LAST so the cost of this round is recorded
       // and Stop hooks fire before the next round begins.
-      if (stopReason === "step-cap") requestAutoContinue(sessionId);
+      if (stopReason === "step-cap" || stopReason === "output-truncated")
+        requestAutoContinue(sessionId);
       // Verification-on-stop: a CLEAN finish right after unverified code edits
       // gets one bounded follow-up (preference-gated; see requestVerifyNudge).
       // Runs after the step-cap branch so a budget pause continues as before -

@@ -287,12 +287,16 @@ type ResponsesOutcome = {
   text: string;
   usage: { prompt: number; completion: number; total: number } | null;
   error: string | null;
+  /** Why a `response.incomplete` ended the reply ("max_output_tokens" when
+   *  the backend cut the answer), or null for a completed response. */
+  incompleteReason: string | null;
 };
 
 function readResponsesStream(sseText: string): ResponsesOutcome {
   let text = "";
   let usage: ResponsesOutcome["usage"] = null;
   let error: string | null = null;
+  let incompleteReason: string | null = null;
   for (const line of sseText.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed.startsWith("data:")) continue;
@@ -322,6 +326,13 @@ function readResponsesStream(sseText: string): ResponsesOutcome {
           total: Number(raw.total_tokens ?? prompt + completion) || 0,
         };
       }
+      if (event.type === "response.incomplete") {
+        const details =
+          response && isObject(response.incomplete_details)
+            ? response.incomplete_details
+            : null;
+        incompleteReason = asString(details?.reason) || "unknown";
+      }
     } else if (event.type === "response.failed" || event.type === "error") {
       const nested = isObject(event.error) ? event.error : null;
       const response = isObject(event.response) ? event.response : null;
@@ -333,7 +344,7 @@ function readResponsesStream(sseText: string): ResponsesOutcome {
         "Muse request failed";
     }
   }
-  return { text, usage, error };
+  return { text, usage, error, incompleteReason };
 }
 
 /**
@@ -350,6 +361,15 @@ export function responsesStreamToChatSse(
   const outcome = readResponsesStream(sseText);
   if (outcome.error) {
     return `data: ${JSON.stringify({ error: { message: outcome.error, code: "muse_response_failed" } })}\n\ndata: [DONE]\n\n`;
+  }
+  // An incomplete response that is not the output limit is a failure with a
+  // name (content filter, refusal, ...): surface it like termixgo does
+  // instead of passing the partial text off as a finished answer.
+  if (
+    outcome.incompleteReason &&
+    outcome.incompleteReason !== "max_output_tokens"
+  ) {
+    return `data: ${JSON.stringify({ error: { message: `Muse response incomplete: ${outcome.incompleteReason}`, code: "muse_response_incomplete" } })}\n\ndata: [DONE]\n\n`;
   }
   const base = {
     id: "chatcmpl-muse",
@@ -379,7 +399,19 @@ export function responsesStreamToChatSse(
         finish_reason: null,
       });
     }
-    chunk({ index: 0, delta: {}, finish_reason: "stop" }, true);
+    // A reply the backend cut at its output limit ends as "length", never
+    // as a clean "stop": the partial text is real, but filing it as
+    // finished is how truncated answers passed as complete. The agent loop
+    // names the pause and auto-continues it, as termixgo does.
+    chunk(
+      {
+        index: 0,
+        delta: {},
+        finish_reason:
+          outcome.incompleteReason === "max_output_tokens" ? "length" : "stop",
+      },
+      true,
+    );
   } else {
     if (prose.trim()) {
       chunk({

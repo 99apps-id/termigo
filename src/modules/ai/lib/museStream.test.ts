@@ -224,3 +224,89 @@ describe("createMuseFetch attestation fallback", () => {
     expect(await response.text()).toContain('"choices":[]');
   });
 });
+
+describe("createMuseFetch recovery ladder", () => {
+  const OK_SSE =
+    'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n' + "data: [DONE]\n\n";
+
+  it("remints once on a stale-key 401 and retries with the fresh credential", async () => {
+    const seenAuth: string[] = [];
+    const base = (async (
+      _input: RequestInfo | URL,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const auth =
+        init?.headers instanceof Headers
+          ? (init.headers.get("authorization") ?? "")
+          : ((init?.headers as Record<string, string>)?.Authorization ?? "");
+      seenAuth.push(auth);
+      if (auth === "Bearer fresh-key") {
+        return new Response(OK_SSE, {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        });
+      }
+      return new Response(
+        JSON.stringify({ error: { code: "invalid_api_key" } }),
+        { status: 401, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+    let remints = 0;
+    const museFetch = createMuseFetch(base, {
+      remint: async () => {
+        remints += 1;
+        return "fresh-key";
+      },
+    });
+
+    const first = await museFetch(
+      "https://api.meta.ai/v1/chat/completions",
+      chatInit(
+        [{ role: "user", content: "hi" }],
+        undefined,
+        "Bearer stale-key",
+      ),
+    );
+    expect(first.status).toBe(200);
+    expect(remints).toBe(1);
+    expect(seenAuth).toEqual(["Bearer stale-key", "Bearer fresh-key"]);
+
+    // The retired credential is substituted up front on later calls, so
+    // the rejection is not paid again.
+    const second = await museFetch(
+      "https://api.meta.ai/v1/chat/completions",
+      chatInit(
+        [{ role: "user", content: "hi" }],
+        undefined,
+        "Bearer stale-key",
+      ),
+    );
+    expect(second.status).toBe(200);
+    expect(remints).toBe(1);
+    expect(seenAuth[seenAuth.length - 1]).toBe("Bearer fresh-key");
+  });
+
+  it("retries a transient 429 and succeeds", async () => {
+    let hits = 0;
+    const base = (async (): Promise<Response> => {
+      hits += 1;
+      if (hits === 1) {
+        return new Response("rate limited", {
+          status: 429,
+          headers: { "retry-after": "Wed, 01 Jan 2025 00:00:00 GMT" },
+        });
+      }
+      return new Response(OK_SSE, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    }) as typeof fetch;
+    const museFetch = createMuseFetch(base);
+    const response = await museFetch(
+      "https://api.meta.ai/v1/chat/completions",
+      chatInit([{ role: "user", content: "hi" }], undefined, "key-native"),
+    );
+    expect(response.status).toBe(200);
+    expect(hits).toBe(2);
+  });
+});

@@ -216,6 +216,28 @@ export async function getOAuthAccess(
   };
 }
 
+/**
+ * Renew the credential on demand, ignoring the stored expiry. Muse tokens
+ * carry `expires_at: 0` (a stable account key), so the expiry gate in
+ * `getOAuthAccess` never renews them -- yet Meta can still retire a key, and
+ * the only signal is the API rejecting it (401/404). The Muse fetch layer
+ * calls this when that happens; for Muse the backend refresh is a remint
+ * against the stored device credential. Returns null when there is nothing
+ * to renew with or the renewal itself failed.
+ */
+export async function forceRefreshOAuthAccess(
+  provider: ProviderId,
+): Promise<OAuthAccess | null> {
+  const t = await readOAuthTokens(provider);
+  if (!t?.refresh_token) return null;
+  const refreshed = await refreshOAuthTokens(provider, t);
+  if (!refreshed) return null;
+  return {
+    accessToken: refreshed.access_token,
+    accountId: refreshed.account_id ?? null,
+  };
+}
+
 const AUTH_CHANGED_EVENT = "termigo-oauth-auth-changed";
 
 function notifyChanged() {

@@ -130,6 +130,11 @@ export function stopCopy(
         text: `Paused after ${budget} steps - the cap for one reply.`,
         action: `Continue (+${budget} steps)`,
       };
+    case "output-truncated":
+      return {
+        text: "Paused: the reply hit the model's output limit mid-answer.",
+        action: "Continue",
+      };
     case "tool-repetition":
       return {
         text: "Stopped: the same tool ran three times with identical input.",

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chatToResponsesBody } from "./museTextTools";
+import { chatToResponsesBody, responsesStreamToChatSse } from "./museTextTools";
 
 const baseBody = {
   model: "muse-spark-1.3",
@@ -48,5 +48,58 @@ describe("chatToResponsesBody tool_choice", () => {
       tool_choice: { type: "none" },
     });
     expect(out?.instructions).toContain("Tool use is disabled for this reply");
+  });
+});
+
+describe("responsesStreamToChatSse incomplete handling", () => {
+  const sse = (events: unknown[]) =>
+    events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("");
+  const delta = { type: "response.output_text.delta", delta: "partial ans" };
+  const usage = { input_tokens: 3, output_tokens: 2, total_tokens: 5 };
+
+  it("ends a completed reply as stop", () => {
+    const out = responsesStreamToChatSse(
+      sse([delta, { type: "response.completed", response: { usage } }]),
+      "muse-spark-1.3",
+    );
+    expect(out).toContain('"finish_reason":"stop"');
+    expect(out).toContain("partial ans");
+  });
+
+  it("ends a reply cut at the output limit as length, not stop", () => {
+    const out = responsesStreamToChatSse(
+      sse([
+        delta,
+        {
+          type: "response.incomplete",
+          response: {
+            usage,
+            incomplete_details: { reason: "max_output_tokens" },
+          },
+        },
+      ]),
+      "muse-spark-1.3",
+    );
+    expect(out).toContain('"finish_reason":"length"');
+    expect(out).not.toContain('"finish_reason":"stop"');
+    expect(out).toContain("partial ans");
+  });
+
+  it("surfaces a non-limit incomplete as an error naming the reason", () => {
+    const out = responsesStreamToChatSse(
+      sse([
+        delta,
+        {
+          type: "response.incomplete",
+          response: {
+            usage,
+            incomplete_details: { reason: "content_filter" },
+          },
+        },
+      ]),
+      "muse-spark-1.3",
+    );
+    expect(out).toContain("muse_response_incomplete");
+    expect(out).toContain("content_filter");
   });
 });

@@ -563,7 +563,9 @@ export async function buildLanguageModel(
       const { createOpenAICompatible } = await import(
         "@ai-sdk/openai-compatible"
       );
-      const { getOAuthAccess } = await import("./oauthAuth");
+      const { getOAuthAccess, forceRefreshOAuthAccess } = await import(
+        "./oauthAuth"
+      );
       const auth = await getOAuthAccess("muse");
       if (!auth) {
         throw new Error(
@@ -580,7 +582,13 @@ export async function buildLanguageModel(
         headers: {
           "User-Agent": "muse-code/1.0.2",
         },
-        fetch: createMuseFetch(apiFetch),
+        fetch: createMuseFetch(apiFetch, {
+          // Muse keys carry no expiry, so nothing renews them until the
+          // API itself rejects one; the fetch layer calls this remint on a
+          // stale-key rejection and retries with the fresh key.
+          remint: async () =>
+            (await forceRefreshOAuthAccess("muse"))?.accessToken ?? null,
+        }),
       })(resolvedModelId);
     }
     default: {
@@ -1168,6 +1176,7 @@ export function noErrorProgress<T extends ToolSet>(
  */
 export type AgentStopReason =
   | "step-cap"
+  | "output-truncated"
   | "tool-repetition"
   | "text-repetition"
   | "no-progress"
@@ -2546,8 +2555,17 @@ export async function runAgentStream(opts: RunAgentOptions) {
       // The predicates fire before the final step is counted in some SDK
       // paths, so fall back to the step count rather than reporting no reason
       // for a run that plainly ran out of budget.
+      // A "length" finish is the backend cutting the answer at its output
+      // limit, not the model deciding to stop: name it, so the run is not
+      // filed as a clean finish and the runtime can auto-continue it the
+      // way termixgo continues a step the backend truncated.
       const settledStop =
-        stopReason ?? (!isOAuth && stepsSeen >= stepBudget ? "step-cap" : null);
+        stopReason ??
+        (finishReason === "length"
+          ? "output-truncated"
+          : !isOAuth && stepsSeen >= stepBudget
+            ? "step-cap"
+            : null);
       // A run is a CLEAN finish only when nothing else ended it. A guard that
       // named a stop reason and an abort (watchdog stall, or a user stop) both
       // mean somebody else stopped the run. Reading a null stopReason as a
