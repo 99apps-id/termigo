@@ -44,6 +44,7 @@ import {
   isConnectivityError,
   isQuotaError,
   isRateLimitError,
+  isServerTransientError,
 } from "../lib/errors";
 import { fireHooksForEvent, makeRunId } from "../lib/hooksRunner";
 import { sweepSessionMemory } from "../lib/memorySweep";
@@ -546,19 +547,22 @@ function scheduleTransientRetry(sessionId: string): boolean {
     error: null,
     stopReason: null,
   });
-  setTimeout(() => {
-    if (!canResumeDeferred(sessionId)) {
-      releaseFabricatedBusy(sessionId);
-      return;
-    }
-    void resumeRun().catch(() => {
-      useChatStore.getState().patchAgentMeta({
-        status: "error",
-        error: "The automatic retry could not start. Try again.",
+  setTimeout(
+    () => {
+      if (!canResumeDeferred(sessionId)) {
+        releaseFabricatedBusy(sessionId);
+        return;
+      }
+      void resumeRun().catch(() => {
+        useChatStore.getState().patchAgentMeta({
+          status: "error",
+          error: "The automatic retry could not start. Try again.",
+        });
+        useChatStore.getState().syncRunMeta();
       });
-      useChatStore.getState().syncRunMeta();
-    });
-  }, TRANSIENT_RETRY_DELAY_MS);
+    },
+    TRANSIENT_RETRY_DELAY_MS * (attempts + 1),
+  );
   return true;
 }
 
@@ -1085,6 +1089,22 @@ function makeChat(sessionId: string): Chat<UIMessage> {
           }, 0);
           return;
         }
+      }
+      if (isServerTransientError(raw) && !isQuotaError(raw)) {
+        const provider = providerForModel(
+          useChatStore.getState().selectedModelId,
+        );
+        recordProviderError(provider, raw);
+        // Overload clears in seconds, so retry with a growing wait, then leave
+        // the run resumable rather than ending it on a raw provider message.
+        if (scheduleTransientRetry(sessionId)) return;
+        useChatStore.getState().patchAgentMeta({
+          status: "error",
+          error:
+            "The provider is overloaded or returned a server error. Your run is preserved - wait a moment and click Try again.",
+        });
+        useChatStore.getState().syncRunMeta();
+        return;
       }
       // A connectivity loss is recoverable once the network is back. Mark the
       // run as resumable and let the `online` listener (or "Try again") pick it

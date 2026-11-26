@@ -114,6 +114,34 @@ export function isConnectivityError(message: string): boolean {
   );
 }
 
+/** The provider answered, but with a transient server-side failure: Anthropic's
+ *  529 `overloaded_error`, a 5xx `api_error`, a gateway timeout, or a response
+ *  stream the server dropped mid-turn. The same request usually succeeds a few
+ *  seconds later, so the runtime retries it instead of ending the run on a red
+ *  card. Only the message text survives to this point, so it matches wording. */
+export function isServerTransientError(message: string): boolean {
+  const m = String(message ?? "").toLowerCase();
+  return (
+    /overloaded/.test(m) ||
+    /\b(?:internal server error|service unavailable|bad gateway|gateway time-?out)\b/.test(
+      m,
+    ) ||
+    /\b(?:server_error|api_error)\b/.test(m) ||
+    /server had an error|temporarily unavailable|at capacity|over capacity/.test(
+      m,
+    ) ||
+    /\b(?:status(?: code)?|http|error)[\s:=]{0,3}(?:500|502|503|504|529)\b/.test(
+      m,
+    ) ||
+    // undici reports a response body the peer closed early as a bare
+    // "terminated"; the Responses API says the stream disconnected.
+    /typeerror: terminated|^terminated$|other side closed/.test(m) ||
+    /stream (?:disconnected|ended|closed) (?:before|unexpectedly|prematurely)/.test(
+      m,
+    )
+  );
+}
+
 /** The provider throttled the request (rate limit / 429). Recoverable after a
  *  short wait. */
 export function isRateLimitError(message: string): boolean {

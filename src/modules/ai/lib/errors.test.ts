@@ -7,7 +7,41 @@ import {
   isContentFilterError,
   isQuotaError,
   isRateLimitError,
+  isServerTransientError,
 } from "./errors";
+
+describe("isServerTransientError", () => {
+  it("recognises overload and 5xx wording from Anthropic, OpenAI and gateways", () => {
+    for (const msg of [
+      "Overloaded",
+      '{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}',
+      "Failed after 3 attempts. Last error: Internal server error",
+      "api_error: Internal server error",
+      "The server had an error while processing your request.",
+      "503 Service Unavailable",
+      "502 Bad Gateway",
+      "Gateway Timeout",
+      "HTTP 529",
+      "status: 504",
+      "TypeError: terminated",
+      "stream disconnected before completion",
+    ]) {
+      expect(isServerTransientError(msg), msg).toBe(true);
+    }
+  });
+
+  it("leaves auth, validation and unrelated numbers alone", () => {
+    for (const msg of [
+      "Invalid API key.",
+      "invalid_request_error: messages.0.content: Input should be a valid list",
+      "The model is in limited preview.",
+      "Read 5029 bytes from file",
+      "rate_limit_exceeded: Please retry after 10s",
+    ]) {
+      expect(isServerTransientError(msg), msg).toBe(false);
+    }
+  });
+});
 
 describe("formatAiError", () => {
   it("surfaces nested provider model errors", () => {
