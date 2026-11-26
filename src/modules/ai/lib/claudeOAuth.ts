@@ -1,9 +1,12 @@
+import { CLAUDE_CLI_VERSION } from "../config";
 import { getOAuthAccess } from "./oauthAuth";
 
 export const CLAUDE_CODE_IDENTITY =
   "You are Claude Code, Anthropic's official CLI for Claude.";
 
-export const CLAUDE_OAUTH_DEFAULT_CLI_VERSION = "2.1.325";
+// One pin for the whole TS side (config.ts owns it); the Rust and Go clients
+// carry their own copies that must move with it.
+export const CLAUDE_OAUTH_DEFAULT_CLI_VERSION = CLAUDE_CLI_VERSION;
 
 export const CLAUDE_OAUTH_BETA =
   "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,advanced-tool-use-2025-11-20,effort-2025-11-24,extended-cache-ttl-2025-04-11";
@@ -43,10 +46,14 @@ export type AnthropicSystemBlock = {
 };
 
 /**
- * Guarantees block 0 is the exact Claude Code identity without cache_control,
- * and removes duplicate copies of it from subsequent blocks (matching odon-ai
- * and termixgo). Anthropic rejects OAuth subscription requests when another
- * block precedes it.
+ * Guarantees the identity leads the caller's system blocks, without
+ * cache_control, and removes duplicate copies of it from subsequent blocks
+ * (matching odon-ai and termixgo). The endpoint refuses a request whose first
+ * block is neither the billing header nor this identity: measured on
+ * 2026-11-27, `[custom]` and `[custom, identity]` answer 429 rate_limit_error,
+ * while `[identity, custom]`, `[billing, custom]` and
+ * `[billing, identity, custom]` are served. The billing block the fetch wrapper
+ * prepends (see `claudeBillingHeader`) is the one block allowed in front.
  */
 export function withClaudeCodeIdentity(
   system: unknown,
@@ -82,6 +89,48 @@ export function withClaudeCodeIdentity(
     }
   }
   return [identityBlock, ...rest];
+}
+
+/**
+ * Whether a 400 is about extended thinking: an invalid or foreign `signature`
+ * on a thinking block, a thinking block in the wrong place, or a thinking
+ * type the model refuses ("thinking.type.disabled is not supported ...").
+ */
+export function isThinkingRejection(body: string): boolean {
+  return /thinking/i.test(body) && /invalid_request_error/i.test(body);
+}
+
+/**
+ * Removes every thinking block from the history and drops the `thinking` and
+ * `context_management` parameters, leaving a short placeholder where a turn
+ * would otherwise be empty (an empty content array is refused with 400). Role
+ * alternation is kept. Returns whether anything changed.
+ */
+export function stripThinking(body: Record<string, unknown>): boolean {
+  let changed = false;
+  if ("thinking" in body) {
+    delete body.thinking;
+    changed = true;
+  }
+  if ("context_management" in body) {
+    delete body.context_management;
+    changed = true;
+  }
+  if (!Array.isArray(body.messages)) return changed;
+  for (const message of body.messages) {
+    if (!message || typeof message !== "object") continue;
+    const record = message as { content?: unknown };
+    if (!Array.isArray(record.content)) continue;
+    const kept = record.content.filter((block) => {
+      const type = (block as { type?: unknown } | null)?.type;
+      return type !== "thinking" && type !== "redacted_thinking";
+    });
+    if (kept.length === record.content.length) continue;
+    changed = true;
+    record.content =
+      kept.length > 0 ? kept : [{ type: "text", text: "(thinking omitted)" }];
+  }
+  return changed;
 }
 
 export function hasPdfDocumentInMessages(messages: unknown): boolean {
@@ -137,29 +186,6 @@ export function rewriteClaudeOAuthUrl(input: string): string {
 
 export const CLAUDE_TOOL_SUFFIX = "_ide";
 
-const CLAUDE_DECOY_TOOL_NAMES = [
-  "Task",
-  "TaskOutput",
-  "TaskStop",
-  "TaskCreate",
-  "TaskGet",
-  "TaskUpdate",
-  "TaskList",
-  "Bash",
-  "Glob",
-  "Grep",
-  "Read",
-  "Edit",
-  "Write",
-  "NotebookEdit",
-  "WebFetch",
-  "WebSearch",
-  "AskUserQuestion",
-  "Skill",
-  "EnterPlanMode",
-  "ExitPlanMode",
-];
-
 async function sha256Hex(text: string): Promise<string> {
   const digest = await crypto.subtle.digest(
     "SHA-256",
@@ -168,6 +194,77 @@ async function sha256Hex(text: string): Promise<string> {
   return [...new Uint8Array(digest)]
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
+}
+
+/**
+ * The constants the Claude Code client mixes into the build fingerprint it
+ * advertises in its billing header. Recovered by matching the client's own
+ * header for a known prompt: version 2.1.325 and the text "say hi" give `382`
+ * (the same recovery, and the same constants, as termixgo's provider).
+ */
+const CLAUDE_FINGERPRINT_SALT = "59cf53e54c78";
+const CLAUDE_FINGERPRINT_INDEXES = [4, 7, 20] as const;
+
+/** Three hex characters: SHA-256 over the salt, the characters of the first
+ *  user prompt at three fixed positions ("0" past the end) and the version. */
+export async function claudeFingerprint(
+  text: string,
+  version: string,
+): Promise<string> {
+  const chars = [...text];
+  const picked = CLAUDE_FINGERPRINT_INDEXES.map((i) => chars[i] ?? "0").join(
+    "",
+  );
+  const hex = await sha256Hex(`${CLAUDE_FINGERPRINT_SALT}${picked}${version}`);
+  return hex.slice(0, 3);
+}
+
+/**
+ * The text the fingerprint is taken from: the first user message that carries
+ * prose, as the client does. The harness appends an `<env>` block to a turn,
+ * but the client fingerprints only the prompt, so that tail is cut off.
+ */
+export function claudeFingerprintText(messages: unknown): string {
+  if (!Array.isArray(messages)) return "";
+  for (const message of messages) {
+    if (!message || typeof message !== "object") continue;
+    const { role, content } = message as { role?: unknown; content?: unknown };
+    if (role !== "user") continue;
+    let text = "";
+    if (typeof content === "string") {
+      text = content;
+    } else if (Array.isArray(content)) {
+      for (const b of content) {
+        const block = b as { type?: unknown; text?: unknown } | null;
+        if (
+          block &&
+          block.type === "text" &&
+          typeof block.text === "string" &&
+          block.text.trim() !== ""
+        ) {
+          text = block.text;
+          break;
+        }
+      }
+    }
+    if (!text.trim()) continue;
+    const cut = text.lastIndexOf("\n<env>");
+    if (cut >= 0 && text.slice(0, cut).trim()) return text.slice(0, cut).trim();
+    return text;
+  }
+  return "";
+}
+
+/** The first system block of every Claude Code request. */
+export async function claudeBillingHeader(
+  messages: unknown,
+  version = getClaudeCliVersion(),
+): Promise<string> {
+  const fingerprint = await claudeFingerprint(
+    claudeFingerprintText(messages),
+    version,
+  );
+  return `x-anthropic-billing-header: cc_version=${version}.${fingerprint}; cc_entrypoint=cli;`;
 }
 
 function uuidFromHex(hex: string): string {
@@ -183,9 +280,10 @@ async function uuidFromSeed(seed: string): Promise<string> {
 }
 
 /**
- * The metadata.user_id Anthropic requires on a subscription request, in the
- * JSON shape the Claude Code client sends. Without it the Messages endpoint
- * answers 400 invalid_request_error even for a healthy login. Mirrors
+ * The metadata.user_id the Claude Code client sends on a subscription request,
+ * in the JSON shape it uses. Sent for parity with the client; a request without
+ * it was served too (measured on 2026-11-27 across opus, sonnet and haiku 5.5),
+ * so this is identity, not a gate. Mirrors
  * claudeUserID in cli/internal/provider/anthropic.go.
  */
 export async function claudeOAuthUserId(
@@ -238,13 +336,17 @@ function cloakOne(
 }
 
 /**
- * Suffixes the client's tool names and appends the Claude Code decoy tools:
- * the subscription endpoint expects the CLI's tool surface, and a foreign
- * tool name is answered with 400. Names are also sanitized to the pattern
+ * Suffixes the client's tool names. Names are also sanitized to the pattern
  * Anthropic accepts, since an MCP or extension name may carry dots, slashes
  * or spaces the suffix alone would leave in place. History tool_use blocks
  * are renamed to match. Returns the cloaked-to-original aliases for the
  * response stream.
+ *
+ * No decoy tools are offered. The Claude Code CLI lists only tools it serves,
+ * and a decoy the model calls resolves to no client tool, which fails the
+ * step instead of doing the work. Verified against the subscription endpoint
+ * on 2026-11-27: a request carrying only suffixed (or plain) client tools,
+ * with no decoys, is accepted and the model calls the tool.
  */
 export function cloakClaudeToolNames(
   body: Record<string, unknown>,
@@ -265,14 +367,6 @@ export function cloakClaudeToolNames(
         continue;
       }
       cloaked.push({ ...record, name: cloakOne(name, aliases, present) });
-    }
-    for (const decoy of CLAUDE_DECOY_TOOL_NAMES) {
-      if (present.has(decoy)) continue;
-      cloaked.push({
-        name: decoy,
-        description: "This tool is currently unavailable.",
-        input_schema: { type: "object", properties: {} },
-      });
     }
     body.tools = cloaked;
   }
@@ -371,6 +465,14 @@ function applyClaudeOAuthHeaders(
   headers.set("x-stainless-package-version", "0.128.0");
   headers.set("x-stainless-timeout", "600");
   headers.set("x-stainless-lang", "js");
+  // The official client tags every request with a fresh id so a failure can be
+  // traced server-side (the string is present in the 2.1.332 binary).
+  headers.set(
+    "x-client-request-id",
+    typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `termigo-${Date.now().toString(36)}`,
+  );
   if (sessionId) headers.set("x-claude-code-session-id", sessionId);
 }
 
@@ -427,8 +529,18 @@ export function createClaudeOAuthFetch(
       let body = init?.body;
       if (parsedBody) {
         const userId = await claudeOAuthUserId(currentToken, sessionId);
+        // Built per attempt: the fingerprint carries the client version, which
+        // a `claude_code_version_too_old` answer can change between attempts.
+        const billing = {
+          type: "text",
+          text: await claudeBillingHeader(parsedBody.messages),
+        };
         body = JSON.stringify({
           ...parsedBody,
+          system: [
+            billing,
+            ...(Array.isArray(parsedBody.system) ? parsedBody.system : []),
+          ],
           metadata: {
             ...((parsedBody.metadata as Record<string, unknown>) ?? {}),
             user_id: userId,
@@ -456,6 +568,17 @@ export function createClaudeOAuthFetch(
       const minVer = extractClaudeCodeMinVersion(cloneText);
       if (minVer && minVer !== getClaudeCliVersion()) {
         learnedClaudeCliVersion = minVer;
+        res = await sendOnce();
+      } else if (
+        res.status === 400 &&
+        parsedBody &&
+        isThinkingRejection(cloneText)
+      ) {
+        // A history the thinking rules refuse (a block signed by another model
+        // or altered by compaction, or a parameter this model will not take)
+        // costs the whole turn. Repeat it once without thinking: dropping the
+        // blocks was measured to be accepted on every current model.
+        stripThinking(parsedBody);
         res = await sendOnce();
       }
     }

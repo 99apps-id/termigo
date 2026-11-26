@@ -2,13 +2,20 @@ import { describe, expect, it, vi } from "vitest";
 import {
   CLAUDE_CODE_IDENTITY,
   CLAUDE_OAUTH_BETA,
+  CLAUDE_OAUTH_DEFAULT_CLI_VERSION,
   CLAUDE_PDF_BETA,
   buildClaudeOAuthBetaHeader,
+  claudeBillingHeader,
   claudeCliUserAgent,
+  claudeFingerprint,
+  claudeFingerprintText,
+  cloakClaudeToolNames,
   createClaudeOAuthFetch,
   extractClaudeCodeMinVersion,
+  isThinkingRejection,
   rewriteClaudeOAuthUrl,
   setClaudeCliVersionForTests,
+  stripThinking,
   withClaudeCodeIdentity,
 } from "./claudeOAuth";
 
@@ -124,7 +131,7 @@ describe("claudeOAuth", () => {
       (t) => t.name,
     );
     expect(toolNames).toContain("read_file_ide");
-    expect(toolNames).toContain("Bash");
+    expect(toolNames).not.toContain("Bash");
     expect(toolNames).not.toContain("read_file");
     const messages = body.messages as Array<{
       content: Array<{ name?: string }>;
@@ -254,7 +261,11 @@ describe("claudeOAuth", () => {
     expect(seenHeaders[0].get("authorization")).toBe("Bearer tok-old");
     expect(seenHeaders[0].has("x-api-key")).toBe(false);
     expect(seenHeaders[0].get("user-agent")).toBe(
-      claudeCliUserAgent("2.1.325"),
+      claudeCliUserAgent(CLAUDE_OAUTH_DEFAULT_CLI_VERSION),
+    );
+    expect(seenHeaders[0].get("x-client-request-id")).toMatch(/^[\w-]{8,}$/);
+    expect(seenHeaders[1].get("x-client-request-id")).not.toBe(
+      seenHeaders[0].get("x-client-request-id"),
     );
     expect(seenHeaders[0].get("x-app")).toBe("cli");
     expect(seenHeaders[0].get("x-stainless-runtime")).toBe("node");
@@ -262,9 +273,166 @@ describe("claudeOAuth", () => {
     expect(seenHeaders[2].get("user-agent")).toBe(
       claudeCliUserAgent("2.1.400"),
     );
-    expect((seenBodies[0].system as Array<{ text: string }>)[0].text).toBe(
-      CLAUDE_CODE_IDENTITY,
+    // The billing block leads, then the exact identity, as the CLI sends them.
+    const sentSystem = seenBodies[0].system as Array<{ text: string }>;
+    expect(sentSystem[0].text).toMatch(
+      /^x-anthropic-billing-header: cc_version=\d+\.\d+\.\d+\.[0-9a-f]{3}; cc_entrypoint=cli;$/,
+    );
+    expect(sentSystem[1].text).toBe(CLAUDE_CODE_IDENTITY);
+    // The retry runs under the learned version, so the header must follow it.
+    expect((seenBodies[2].system as Array<{ text: string }>)[0].text).toContain(
+      "cc_version=2.1.400.",
     );
     setClaudeCliVersionForTests(null);
+  });
+
+  it("retries once without thinking when the endpoint refuses a thinking block", async () => {
+    setClaudeCliVersionForTests(null);
+    const seen: Array<Record<string, unknown>> = [];
+    let call = 0;
+    const baseFetch = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
+        call += 1;
+        seen.push(JSON.parse(String(init?.body)));
+        if (call === 1) {
+          return new Response(
+            '{"type":"error","error":{"type":"invalid_request_error","message":"messages.1.content.0: Invalid `signature` in `thinking` block"}}',
+            { status: 400 },
+          );
+        }
+        return new Response('{"id":"msg_1"}', { status: 200 });
+      },
+    );
+    const wrapped = createClaudeOAuthFetch(
+      baseFetch as unknown as typeof fetch,
+      "tok",
+      async () => null,
+    );
+    const res = await wrapped("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      body: JSON.stringify({
+        model: "claude-sonnet-5-5",
+        thinking: { type: "adaptive", display: "summarized" },
+        messages: [
+          { role: "user", content: "go" },
+          {
+            role: "assistant",
+            content: [
+              { type: "thinking", thinking: "x", signature: "bad" },
+              { type: "tool_use", id: "t1", name: "get_time", input: {} },
+            ],
+          },
+        ],
+      }),
+    });
+    expect(res.status).toBe(200);
+    expect(baseFetch).toHaveBeenCalledTimes(2);
+    expect(seen[0].thinking).toBeDefined();
+    expect(seen[1].thinking).toBeUndefined();
+    const retried = seen[1].messages as Array<{ content: unknown }>;
+    expect(JSON.stringify(retried[1].content)).not.toContain("thinking");
+    expect(JSON.stringify(retried[1].content)).toContain("tool_use");
+  });
+
+  it("does not retry a 400 that is not about thinking", async () => {
+    const baseFetch = vi.fn(
+      async () =>
+        new Response(
+          '{"type":"error","error":{"type":"invalid_request_error","message":"messages: Input should be a valid list"}}',
+          { status: 400 },
+        ),
+    );
+    const wrapped = createClaudeOAuthFetch(
+      baseFetch as unknown as typeof fetch,
+      "tok",
+      async () => null,
+    );
+    const res = await wrapped("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      body: JSON.stringify({ model: "claude-sonnet-5-5", messages: [] }),
+    });
+    expect(res.status).toBe(400);
+    expect(baseFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("strips thinking blocks and keeps a turn from going empty", () => {
+    const body: Record<string, unknown> = {
+      thinking: { type: "adaptive" },
+      context_management: { edits: [] },
+      messages: [
+        { role: "assistant", content: [{ type: "thinking", signature: "s" }] },
+        {
+          role: "assistant",
+          content: [
+            { type: "redacted_thinking", data: "d" },
+            { type: "text", text: "kept" },
+          ],
+        },
+        { role: "user", content: "plain string is left alone" },
+      ],
+    };
+    expect(stripThinking(body)).toBe(true);
+    expect(body.thinking).toBeUndefined();
+    expect(body.context_management).toBeUndefined();
+    const messages = body.messages as Array<{ content: unknown }>;
+    expect(messages[0].content).toEqual([
+      { type: "text", text: "(thinking omitted)" },
+    ]);
+    expect(messages[1].content).toEqual([{ type: "text", text: "kept" }]);
+    expect(messages[2].content).toBe("plain string is left alone");
+    expect(stripThinking({ messages: [] })).toBe(false);
+  });
+
+  it("recognises a thinking rejection by wording, not by status alone", () => {
+    expect(
+      isThinkingRejection(
+        '{"error":{"type":"invalid_request_error","message":"Invalid `signature` in `thinking` block"}}',
+      ),
+    ).toBe(true);
+    expect(
+      isThinkingRejection(
+        '{"error":{"type":"invalid_request_error","message":"max_tokens: 128001 > 128000"}}',
+      ),
+    ).toBe(false);
+    expect(isThinkingRejection("thinking")).toBe(false);
+  });
+
+  it("computes the fingerprint the Claude Code client advertises", async () => {
+    // Recorded from the client's own header: 2.1.325 + "say hi" -> 382.
+    expect(await claudeFingerprint("say hi", "2.1.325")).toBe("382");
+    expect(
+      await claudeBillingHeader(
+        [{ role: "user", content: "say hi" }],
+        "2.1.325",
+      ),
+    ).toBe(
+      "x-anthropic-billing-header: cc_version=2.1.325.382; cc_entrypoint=cli;",
+    );
+  });
+
+  it("fingerprints the prompt, not the harness env block", () => {
+    expect(
+      claudeFingerprintText([
+        { role: "assistant", content: "x" },
+        { role: "user", content: [{ type: "text", text: "  " }] },
+        {
+          role: "user",
+          content: [{ type: "text", text: "say hi\n<env>\ncwd: /x\n</env>" }],
+        },
+      ]),
+    ).toBe("say hi");
+    expect(claudeFingerprintText("nope")).toBe("");
+  });
+
+  it("offers only the client's own tools, never decoys", () => {
+    const body: Record<string, unknown> = {
+      tools: [{ name: "read_file", input_schema: { type: "object" } }],
+      messages: [],
+    };
+    const aliases = cloakClaudeToolNames(body);
+    expect((body.tools as Array<{ name: string }>).map((t) => t.name)).toEqual([
+      "read_file_ide",
+    ]);
+    expect(aliases.get("read_file_ide")).toBe("read_file");
   });
 });

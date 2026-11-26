@@ -21,6 +21,7 @@ import {
 } from "ai";
 import { buildAgentTools } from "../agents/agentFactory";
 import {
+  anthropicModelTraits,
   CHATGPT_BASE_URL,
   CHATGPT_HEADERS,
   type CustomEndpoint,
@@ -259,6 +260,51 @@ export function withCodexBackendDefaults(model: LanguageModel): LanguageModel {
   });
 }
 
+/**
+ * Apply a Claude model's real output ceiling and adaptive thinking.
+ *
+ * Without this the AI SDK sends `max_tokens: 4096` for any Claude id it was not
+ * built with (claude-opus-5-5 and claude-haiku-5-5 among them), so a long step
+ * or a tool call is cut off mid-JSON and the run stops half way. The ceiling
+ * comes from the endpoint's own catalog (see `anthropicModelTraits`).
+ *
+ * `display: "summarized"` is what makes the model's reasoning come back as
+ * text: without it the thinking block arrives with an empty body (measured:
+ * 0 characters against 212-517 on the same prompts). The model thinks either
+ * way, so this only makes it visible. A caller's own `maxOutputTokens` or
+ * Anthropic options win over these defaults.
+ */
+export function withClaudeDefaults(
+  model: LanguageModel,
+  apiModelId: string,
+): LanguageModel {
+  const traits = anthropicModelTraits(apiModelId);
+  if (
+    !traits ||
+    typeof model === "string" ||
+    model.specificationVersion !== "v3"
+  ) {
+    return model;
+  }
+  return aiSdk.wrapLanguageModel({
+    model,
+    middleware: aiSdk.defaultSettingsMiddleware({
+      settings: {
+        maxOutputTokens: traits.maxOutputTokens,
+        ...(traits.adaptiveThinking
+          ? {
+              providerOptions: {
+                anthropic: {
+                  thinking: { type: "adaptive", display: "summarized" },
+                },
+              },
+            }
+          : {}),
+      },
+    }),
+  });
+}
+
 export async function buildLanguageModel(
   provider: ProviderId,
   keys: ProviderKeys,
@@ -293,7 +339,8 @@ export async function buildLanguageModel(
     }
     case "anthropic": {
       const { createAnthropic } = await import("@ai-sdk/anthropic");
-      built = createAnthropic({ fetch: apiFetch, apiKey: key })(
+      built = withClaudeDefaults(
+        createAnthropic({ fetch: apiFetch, apiKey: key })(resolvedModelId),
         resolvedModelId,
       );
       break;
@@ -500,20 +547,23 @@ export async function buildLanguageModel(
           "Not signed in to Claude (OAuth). Open Settings \u2192 Models and sign in.",
         );
       }
-      return createAnthropic({
-        baseURL: "https://api.anthropic.com",
-        authToken: auth.accessToken,
-        headers: {
-          "anthropic-beta": CLAUDE_OAUTH_BETA,
-          "anthropic-dangerous-direct-browser-access": "true",
-          "x-app": "cli",
-          "User-Agent": claudeCliUserAgent(),
-          "X-Claude-Code-Session-Id": CLAUDE_SESSION_ID,
-        },
-        // The subscription is only served when the Claude Code identity is
-        // the first system block on its own; see claudeOAuth.ts.
-        fetch: createClaudeOAuthFetch(apiFetch, auth.accessToken),
-      })(resolvedModelId);
+      return withClaudeDefaults(
+        createAnthropic({
+          baseURL: "https://api.anthropic.com",
+          authToken: auth.accessToken,
+          headers: {
+            "anthropic-beta": CLAUDE_OAUTH_BETA,
+            "anthropic-dangerous-direct-browser-access": "true",
+            "x-app": "cli",
+            "User-Agent": claudeCliUserAgent(),
+            "X-Claude-Code-Session-Id": CLAUDE_SESSION_ID,
+          },
+          // Claude Code identity headers, billing block, tool-name suffixing and
+          // the token refresh live in the wrapped fetch; see claudeOAuth.ts.
+          fetch: createClaudeOAuthFetch(apiFetch, auth.accessToken),
+        })(resolvedModelId),
+        resolvedModelId,
+      );
     }
     case "xai-oauth": {
       const { createOpenAICompatible } = await import(

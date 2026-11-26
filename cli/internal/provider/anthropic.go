@@ -16,7 +16,7 @@ import (
 // matches what the current CLI sends; the first entry is what unlocks an
 // OAuth bearer at all.
 const (
-	claudeCLIVersion   = "2.1.325"
+	claudeCLIVersion   = "2.1.332"
 	claudeCLIUserAgent = "claude-cli/" + claudeCLIVersion + " (external, cli)"
 	claudeOAuthBeta    = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,advanced-tool-use-2025-11-20,effort-2025-11-24,extended-cache-ttl-2025-04-11"
 )
@@ -47,9 +47,17 @@ func stainlessArch() string {
 type anthropicClient struct{ *httpClient }
 
 func (c *anthropicClient) Stream(ctx context.Context, req ChatRequest, emit func(StreamEvent) error) error {
+	traits, known := anthropicModelTraits(req.Model)
 	maxTokens := req.MaxTokens
-	if maxTokens <= 0 {
+	switch {
+	case maxTokens <= 0 && known:
+		// A thinking step spends its tokens out of this ceiling, and a tool
+		// call cut off at 8192 mid-JSON stops the run half way.
+		maxTokens = traits.maxOutput
+	case maxTokens <= 0:
 		maxTokens = 8192
+	case known && maxTokens > traits.maxOutput:
+		maxTokens = traits.maxOutput
 	}
 	messages := encodeAnthropicMessages(req.Messages)
 	payload := map[string]any{
@@ -80,8 +88,15 @@ func (c *anthropicClient) Stream(ctx context.Context, req ChatRequest, emit func
 	if req.Temperature != nil {
 		payload["temperature"] = *req.Temperature
 	}
-
-	applyPromptCacheToMessages(messages)
+	// Adaptive thinking lets the model decide when to think. display
+	// "summarized" is what returns the reasoning as text: without it the block
+	// arrives empty (measured: 0 characters against 212-517 on the same
+	// prompts). A thinking request takes the default sampling only, and the
+	// newest models refuse a temperature outright.
+	if known && traits.adaptive {
+		payload["thinking"] = map[string]any{"type": "adaptive", "display": "summarized"}
+		delete(payload, "temperature")
+	}
 
 	headers := map[string]string{"anthropic-version": "2023-06-01"}
 	url := c.baseURL + "/v1/messages"
@@ -105,8 +120,11 @@ func (c *anthropicClient) Stream(ctx context.Context, req ChatRequest, emit func
 		headers["X-Stainless-Arch"] = stainlessArch()
 		headers["X-Stainless-Os"] = stainlessOS()
 		headers["X-Stainless-Timeout"] = "600"
-		// The endpoint expects the Claude Code tool names, so client tools are
-		// suffixed and the CLI's own tools are offered as unavailable decoys.
+		headers["x-client-request-id"] = randomUUID()
+		// Client tools are suffixed. No unavailable decoys are sent: the real
+		// client offers only tools it serves, and a decoy name the model calls
+		// resolves to no client tool, which fails the step instead of doing the
+		// work.
 		if len(req.Tools) > 0 {
 			tools := encodeAnthropicTools(req.Tools)
 			if len(tools) > 0 {
@@ -117,7 +135,7 @@ func (c *anthropicClient) Stream(ctx context.Context, req ChatRequest, emit func
 			aliases = names
 			cloakClaudeMessages(messages, aliases)
 		}
-		payload["system"] = withClaudeBillingHeader(payload["system"], payload)
+		payload["system"] = withClaudeBillingHeader(payload["system"], req.Messages)
 		payload["metadata"] = map[string]any{
 			"user_id": claudeUserID(key, c.SessionID()),
 		}
@@ -133,7 +151,71 @@ func (c *anthropicClient) Stream(ctx context.Context, req ChatRequest, emit func
 			payload["tools"] = tools
 		}
 	}
-	return c.streamWithURL(ctx, url, headers, payload, emit, aliases)
+	err := c.streamWithURL(ctx, url, headers, payload, emit, aliases)
+	if err != nil && isThinkingRejection(err) {
+		// A request the thinking rules refuse (a block signed by another model,
+		// a type this model will not take) costs the whole turn, so it is
+		// repeated once as a plain one. Dropping thinking was measured to be
+		// accepted on every current model. This client does not replay thinking
+		// blocks, so the history needs no change.
+		if _, had := payload["thinking"]; had {
+			delete(payload, "thinking")
+			return c.streamWithURL(ctx, url, headers, payload, emit, aliases)
+		}
+	}
+	return err
+}
+
+// isThinkingRejection reports a 400 that is about extended thinking.
+func isThinkingRejection(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, " returned 400") && strings.Contains(text, "thinking")
+}
+
+// anthropicTraits is what the subscription endpoint's catalog reports for a
+// model: the most output tokens one response may carry, and whether adaptive
+// thinking is accepted.
+type anthropicTraits struct {
+	maxOutput int
+	adaptive  bool
+}
+
+// anthropicModelTraits returns the traits of a model it has data for. The
+// values come from GET /v1/models (max_tokens, capabilities.thinking) read on
+// 2026-11-27, and the ceiling was confirmed by a request: 128000 is accepted
+// and 128001 is refused. Keep it in step with anthropicModelTraits in
+// src/modules/ai/config.ts.
+func anthropicModelTraits(model string) (anthropicTraits, bool) {
+	id := strings.ToLower(model)
+	if rest, ok := strings.CutPrefix(id, "claude-oauth-"); ok {
+		id = "claude-" + rest
+	}
+	if !strings.HasPrefix(id, "claude-") {
+		return anthropicTraits{}, false
+	}
+	rest := strings.TrimPrefix(id, "claude-")
+	family, version, _ := strings.Cut(rest, "-")
+	// version is "5-5", "5", "4-6", "4-5-20251101", ...
+	major, _, _ := strings.Cut(version, "-")
+	switch {
+	case major == "5" && (family == "opus" || family == "sonnet" || family == "haiku" || family == "fable"):
+		return anthropicTraits{maxOutput: 128000, adaptive: true}, true
+	case (family == "opus" && (hasVersionPrefix(version, "4-6") || hasVersionPrefix(version, "4-7") || hasVersionPrefix(version, "4-8"))) ||
+		(family == "sonnet" && hasVersionPrefix(version, "4-6")):
+		return anthropicTraits{maxOutput: 128000, adaptive: true}, true
+	case (family == "opus" || family == "sonnet" || family == "haiku") && hasVersionPrefix(version, "4-5"):
+		return anthropicTraits{maxOutput: 64000, adaptive: false}, true
+	}
+	return anthropicTraits{}, false
+}
+
+// hasVersionPrefix matches a version segment such as "4-6" or "4-6-20260101"
+// but not "4-60".
+func hasVersionPrefix(version, prefix string) bool {
+	return version == prefix || strings.HasPrefix(version, prefix+"-")
 }
 
 func (c *anthropicClient) streamWithURL(ctx context.Context, url string, headers map[string]string, payload map[string]any, emit func(StreamEvent) error, aliases map[string]string) error {
@@ -430,8 +512,10 @@ func deriveUUIDFromSeed(seed string) string {
 }
 
 // claudeToolSuffix is the suffix every client tool gets before an OAuth
-// request. The endpoint expects the Claude Code tool names, so a client tool
-// named read_file is sent as read_file_ide and renamed back on the stream.
+// request, mirroring the Claude Code naming: a client tool named read_file is
+// sent as read_file_ide and renamed back on the stream. It also keeps a client
+// name from colliding with the CLI's own. Plain names were accepted too when
+// measured on 2026-11-27, so this is not what gets a request served.
 const claudeToolSuffix = "_ide"
 
 // sanitizeClaudeToolName reduces a name to the only shape Anthropic accepts,
@@ -477,13 +561,13 @@ func cloakClaudeName(name string, aliases map[string]string, present map[string]
 	return cloaked
 }
 
-// cloakClaudeTools suffixes and sanitizes the client tools and appends the
-// Claude Code decoy tools, which are advertised as unavailable. It returns
+// cloakClaudeTools suffixes and sanitizes the client tools; it adds no decoy
+// tools. It returns
 // the aliases mapping a cloaked name back to the original.
 func cloakClaudeTools(tools []map[string]any) ([]map[string]any, map[string]string) {
 	aliases := make(map[string]string, len(tools))
 	present := make(map[string]bool, len(tools))
-	cloaked := make([]map[string]any, 0, len(tools)+len(claudeDecoyTools))
+	cloaked := make([]map[string]any, 0, len(tools))
 	for _, tool := range tools {
 		name, _ := tool["name"].(string)
 		copied := make(map[string]any, len(tool))
@@ -493,7 +577,7 @@ func cloakClaudeTools(tools []map[string]any) ([]map[string]any, map[string]stri
 		copied["name"] = cloakClaudeName(name, aliases, present)
 		cloaked = append(cloaked, copied)
 	}
-	return append(cloaked, claudeDecoyTools...), aliases
+	return cloaked, aliases
 }
 
 // cloakClaudeMessages renames the tool_use blocks in the history to the
@@ -536,13 +620,58 @@ func cloakClaudeMessages(messages []map[string]any, aliases map[string]string) {
 	}
 }
 
-// withClaudeBillingHeader prepends the billing line the current Claude Code
-// client sends. The hash is taken over the body before the header is added.
-func withClaudeBillingHeader(system any, payload map[string]any) any {
-	encoded, _ := json.Marshal(payload)
-	sum := sha256.Sum256(encoded)
-	text := fmt.Sprintf("x-anthropic-billing-header: cc_version=%s.%s; cc_entrypoint=sdk-cli; cch=%s;",
-		claudeCLIVersion, randomHex(2)[:3], hex.EncodeToString(sum[:])[:5])
+// claudeFingerprintSalt and claudeFingerprintIndexes are the constants the
+// Claude Code client mixes into the build fingerprint it advertises in the
+// billing header. They were recovered by matching the client's own header for
+// a known prompt: version 2.1.325 and the text "say hi" produce 382.
+const claudeFingerprintSalt = "59cf53e54c78"
+
+var claudeFingerprintIndexes = [...]int{4, 7, 20}
+
+// claudeFingerprint is the three-hex build fingerprint: a SHA-256 over the
+// salt, the characters of the first user prompt at three fixed positions
+// ("0" past the end) and the client version.
+func claudeFingerprint(text, version string) string {
+	runes := []rune(text)
+	picked := make([]rune, 0, len(claudeFingerprintIndexes))
+	for _, index := range claudeFingerprintIndexes {
+		if index < len(runes) {
+			picked = append(picked, runes[index])
+		} else {
+			picked = append(picked, '0')
+		}
+	}
+	sum := sha256.Sum256([]byte(claudeFingerprintSalt + string(picked) + version))
+	return hex.EncodeToString(sum[:])[:3]
+}
+
+// claudeFingerprintText is the text the fingerprint is taken from: the bare
+// prompt of the first user message with prose. The harness may append an env
+// block to a turn, but the client fingerprints only the prompt.
+func claudeFingerprintText(messages []Message) string {
+	for _, message := range messages {
+		if message.Role != RoleUser || strings.TrimSpace(message.Content) == "" {
+			continue
+		}
+		text := message.Content
+		if idx := strings.LastIndex(text, "\n<env>"); idx >= 0 {
+			if head := strings.TrimSpace(text[:idx]); head != "" {
+				return head
+			}
+		}
+		return text
+	}
+	return ""
+}
+
+// withClaudeBillingHeader prepends the billing line the Claude Code client
+// sends as its first system block: the client version with its fingerprint and
+// the entrypoint it runs as. The endpoint refuses a request whose first block
+// is neither this line nor the Claude Code identity (429 rate_limit_error,
+// measured on 2026-11-27), so it always leads.
+func withClaudeBillingHeader(system any, messages []Message) any {
+	text := fmt.Sprintf("x-anthropic-billing-header: cc_version=%s.%s; cc_entrypoint=cli;",
+		claudeCLIVersion, claudeFingerprint(claudeFingerprintText(messages), claudeCLIVersion))
 	billing := map[string]any{"type": "text", "text": text}
 	switch value := system.(type) {
 	case []map[string]any:
@@ -560,30 +689,4 @@ func withClaudeBillingHeader(system any, payload map[string]any) any {
 	default:
 		return []map[string]any{billing}
 	}
-}
-
-// claudeDecoyTools are the Claude Code native tools, offered so the request
-// looks like the CLI. A decoy that gets called resolves to no client tool and
-// surfaces as unavailable, which is the intent.
-var claudeDecoyTools = []map[string]any{
-	{"name": "Task", "description": "This tool is currently unavailable.", "input_schema": map[string]any{"type": "object", "properties": map[string]any{}}},
-	{"name": "TaskOutput", "description": "This tool is currently unavailable.", "input_schema": map[string]any{"type": "object", "properties": map[string]any{}}},
-	{"name": "TaskStop", "description": "This tool is currently unavailable.", "input_schema": map[string]any{"type": "object", "properties": map[string]any{}}},
-	{"name": "TaskCreate", "description": "This tool is currently unavailable.", "input_schema": map[string]any{"type": "object", "properties": map[string]any{}}},
-	{"name": "TaskGet", "description": "This tool is currently unavailable.", "input_schema": map[string]any{"type": "object", "properties": map[string]any{}}},
-	{"name": "TaskUpdate", "description": "This tool is currently unavailable.", "input_schema": map[string]any{"type": "object", "properties": map[string]any{}}},
-	{"name": "TaskList", "description": "This tool is currently unavailable.", "input_schema": map[string]any{"type": "object", "properties": map[string]any{}}},
-	{"name": "Bash", "description": "This tool is currently unavailable.", "input_schema": map[string]any{"type": "object", "properties": map[string]any{}}},
-	{"name": "Glob", "description": "This tool is currently unavailable.", "input_schema": map[string]any{"type": "object", "properties": map[string]any{}}},
-	{"name": "Grep", "description": "This tool is currently unavailable.", "input_schema": map[string]any{"type": "object", "properties": map[string]any{}}},
-	{"name": "Read", "description": "This tool is currently unavailable.", "input_schema": map[string]any{"type": "object", "properties": map[string]any{}}},
-	{"name": "Edit", "description": "This tool is currently unavailable.", "input_schema": map[string]any{"type": "object", "properties": map[string]any{}}},
-	{"name": "Write", "description": "This tool is currently unavailable.", "input_schema": map[string]any{"type": "object", "properties": map[string]any{}}},
-	{"name": "NotebookEdit", "description": "This tool is currently unavailable.", "input_schema": map[string]any{"type": "object", "properties": map[string]any{}}},
-	{"name": "WebFetch", "description": "This tool is currently unavailable.", "input_schema": map[string]any{"type": "object", "properties": map[string]any{}}},
-	{"name": "WebSearch", "description": "This tool is currently unavailable.", "input_schema": map[string]any{"type": "object", "properties": map[string]any{}}},
-	{"name": "AskUserQuestion", "description": "This tool is currently unavailable.", "input_schema": map[string]any{"type": "object", "properties": map[string]any{}}},
-	{"name": "Skill", "description": "This tool is currently unavailable.", "input_schema": map[string]any{"type": "object", "properties": map[string]any{}}},
-	{"name": "EnterPlanMode", "description": "This tool is currently unavailable.", "input_schema": map[string]any{"type": "object", "properties": map[string]any{}}},
-	{"name": "ExitPlanMode", "description": "This tool is currently unavailable.", "input_schema": map[string]any{"type": "object", "properties": map[string]any{}}},
 }

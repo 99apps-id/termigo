@@ -197,7 +197,8 @@ func TestAnthropicOAuthUsesTheClaudeCodeIdentity(t *testing.T) {
 }
 
 // TestAnthropicDefaultsMaxTokens guards the value that keeps a thinking model
-// from truncating its own answer when the caller did not set a limit.
+// from truncating its own answer when the caller did not set a limit: the
+// model's own ceiling where the catalog has one, 8192 for an unlisted id.
 func TestAnthropicDefaultsMaxTokens(t *testing.T) {
 	recorder, server := newPayloadRecorder(t)
 	defer server.Close()
@@ -206,8 +207,8 @@ func TestAnthropicDefaultsMaxTokens(t *testing.T) {
 	collect(t, client, ChatRequest{Model: "claude-sonnet-4-5", Messages: []Message{{Role: RoleUser, Content: "hi"}}})
 
 	body := recorder.payload(t)
-	if number(t, body, "max_tokens") != 8192 {
-		t.Errorf("max_tokens = %v, want the 8192 default", body["max_tokens"])
+	if number(t, body, "max_tokens") != 64000 {
+		t.Errorf("max_tokens = %v, want the model's 64000 ceiling", body["max_tokens"])
 	}
 	if _, present := body["tools"]; present {
 		t.Errorf("tools must be omitted when none were offered")
@@ -617,20 +618,167 @@ func TestClaudeOAuthCloaksToolsAndDecloaksTheStream(t *testing.T) {
 		t.Errorf("decloaked tool name = %q, want read_file", name)
 	}
 
-	foundClient, foundDecoy := false, false
+	foundClient := false
 	for _, entry := range gotTools {
 		object, _ := entry.(map[string]any)
-		switch object["name"] {
-		case "read_file_ide":
+		if object["name"] == "read_file_ide" {
 			foundClient = true
-		case "Bash":
-			foundDecoy = true
 		}
 	}
 	if !foundClient {
 		t.Errorf("the client tool should be sent suffixed: %#v", gotTools)
 	}
-	if !foundDecoy {
-		t.Errorf("the decoy tools should be present: %#v", gotTools)
+	if len(gotTools) != 1 {
+		t.Errorf("only the client's own tools should be offered, no decoys: %#v", gotTools)
+	}
+}
+
+// The fingerprint is recorded from the Claude Code client's own billing header:
+// version 2.1.325 and the prompt "say hi" produce 382.
+func TestClaudeFingerprintMatchesTheClientsOwnHeader(t *testing.T) {
+	if got := claudeFingerprint("say hi", "2.1.325"); got != "382" {
+		t.Fatalf("fingerprint = %q, want 382", got)
+	}
+}
+
+func TestClaudeBillingHeaderLeadsTheSystemBlocks(t *testing.T) {
+	messages := []Message{
+		{Role: RoleAssistant, Content: "earlier"},
+		{Role: RoleUser, Content: "say hi\n<env>\ncwd: /x\n</env>"},
+	}
+	system := withClaudeBillingHeader([]map[string]any{{"type": "text", "text": "identity"}}, messages)
+	blocks, ok := system.([]map[string]any)
+	if !ok || len(blocks) != 2 {
+		t.Fatalf("system = %#v", system)
+	}
+	want := "x-anthropic-billing-header: cc_version=" + claudeCLIVersion + "." + claudeFingerprint("say hi", claudeCLIVersion) + "; cc_entrypoint=cli;"
+	if blocks[0]["text"] != want {
+		t.Errorf("billing block = %q, want %q", blocks[0]["text"], want)
+	}
+	if blocks[1]["text"] != "identity" {
+		t.Errorf("the identity must follow the billing block: %#v", blocks[1])
+	}
+}
+
+func TestAnthropicModelTraitsMatchTheEndpointCatalog(t *testing.T) {
+	// Values read from GET /v1/models on the subscription endpoint.
+	for _, id := range []string{"claude-fable-5-2", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-opus-5", "claude-oauth-opus-5-5"} {
+		traits, ok := anthropicModelTraits(id)
+		if !ok || traits.maxOutput != 128000 || !traits.adaptive {
+			t.Errorf("%s: traits = %+v ok=%v, want 128000 adaptive", id, traits, ok)
+		}
+	}
+	if traits, ok := anthropicModelTraits("claude-opus-4-8"); !ok || traits.maxOutput != 128000 || !traits.adaptive {
+		t.Errorf("claude-opus-4-8: %+v %v", traits, ok)
+	}
+	if traits, ok := anthropicModelTraits("claude-haiku-4-5-20251001"); !ok || traits.maxOutput != 64000 || traits.adaptive {
+		t.Errorf("claude-haiku-4-5: %+v %v", traits, ok)
+	}
+	for _, id := range []string{"claude-3-haiku-20240307", "gpt-6-sol", "claude-opus-50", "claude-opus-4-60"} {
+		if _, ok := anthropicModelTraits(id); ok {
+			t.Errorf("%s should have no traits", id)
+		}
+	}
+}
+
+func anthropicProbeServer(t *testing.T, onBody func(map[string]any) (int, string)) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		raw, _ := io.ReadAll(request.Body)
+		var body map[string]any
+		_ = json.Unmarshal(raw, &body)
+		status, reply := onBody(body)
+		if status != http.StatusOK {
+			writer.WriteHeader(status)
+			fmt.Fprint(writer, reply)
+			return
+		}
+		writer.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(writer, "data: {\"type\":\"message_stop\"}\n\n")
+	}))
+}
+
+func TestClaudeRequestUsesTheModelsOutputCeilingAndAdaptiveThinking(t *testing.T) {
+	var got map[string]any
+	server := anthropicProbeServer(t, func(body map[string]any) (int, string) { got = body; return http.StatusOK, "" })
+	defer server.Close()
+	client, err := newHTTPClient(Provider{ID: "claude-oauth", Label: "Claude (OAuth)", Kind: KindAnthropic, OAuth: true}, server.URL, "tok")
+	if err != nil {
+		t.Fatalf("newHTTPClient: %v", err)
+	}
+	temperature := 0.7
+	if err := client.Stream(context.Background(), ChatRequest{Model: "claude-opus-5-5", Temperature: &temperature, Messages: []Message{{Role: RoleUser, Content: "hi"}}}, func(StreamEvent) error { return nil }); err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	if got["max_tokens"] != float64(128000) {
+		t.Errorf("max_tokens = %v, want 128000", got["max_tokens"])
+	}
+	thinking, _ := got["thinking"].(map[string]any)
+	if thinking["type"] != "adaptive" || thinking["display"] != "summarized" {
+		t.Errorf("thinking = %#v", got["thinking"])
+	}
+	if _, has := got["temperature"]; has {
+		t.Errorf("a thinking request must not carry temperature: %#v", got["temperature"])
+	}
+
+	// An unlisted model keeps the old default, and a request above the
+	// ceiling is clamped rather than refused.
+	if err := client.Stream(context.Background(), ChatRequest{Model: "claude-3-haiku-20240307", Messages: []Message{{Role: RoleUser, Content: "hi"}}}, func(StreamEvent) error { return nil }); err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	if got["max_tokens"] != float64(8192) || got["thinking"] != nil {
+		t.Errorf("unlisted model: max_tokens=%v thinking=%v", got["max_tokens"], got["thinking"])
+	}
+	if err := client.Stream(context.Background(), ChatRequest{Model: "claude-haiku-5-5", MaxTokens: 500000, Messages: []Message{{Role: RoleUser, Content: "hi"}}}, func(StreamEvent) error { return nil }); err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	if got["max_tokens"] != float64(128000) {
+		t.Errorf("clamped max_tokens = %v, want 128000", got["max_tokens"])
+	}
+}
+
+func TestClaudeRequestRetriesOnceWithoutThinkingWhenRefused(t *testing.T) {
+	calls := 0
+	var second map[string]any
+	server := anthropicProbeServer(t, func(body map[string]any) (int, string) {
+		calls++
+		if calls == 1 {
+			return http.StatusBadRequest, `{"type":"error","error":{"type":"invalid_request_error","message":"messages.1.content.0: Invalid ` + "`signature`" + ` in ` + "`thinking`" + ` block"}}`
+		}
+		second = body
+		return http.StatusOK, ""
+	})
+	defer server.Close()
+	client, err := newHTTPClient(Provider{ID: "claude-oauth", Label: "Claude (OAuth)", Kind: KindAnthropic, OAuth: true}, server.URL, "tok")
+	if err != nil {
+		t.Fatalf("newHTTPClient: %v", err)
+	}
+	if err := client.Stream(context.Background(), ChatRequest{Model: "claude-sonnet-5-5", Messages: []Message{{Role: RoleUser, Content: "hi"}}}, func(StreamEvent) error { return nil }); err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("calls = %d, want 2 (one refusal, one plain retry)", calls)
+	}
+	if _, has := second["thinking"]; has {
+		t.Errorf("the retry must drop thinking: %#v", second["thinking"])
+	}
+}
+
+func TestClaudeRequestDoesNotRetryAnUnrelated400(t *testing.T) {
+	calls := 0
+	server := anthropicProbeServer(t, func(map[string]any) (int, string) {
+		calls++
+		return http.StatusBadRequest, `{"type":"error","error":{"type":"invalid_request_error","message":"max_tokens: 128001 > 128000"}}`
+	})
+	defer server.Close()
+	client, err := newHTTPClient(Provider{ID: "claude-oauth", Label: "Claude (OAuth)", Kind: KindAnthropic, OAuth: true}, server.URL, "tok")
+	if err != nil {
+		t.Fatalf("newHTTPClient: %v", err)
+	}
+	if err := client.Stream(context.Background(), ChatRequest{Model: "claude-sonnet-5-5", Messages: []Message{{Role: RoleUser, Content: "hi"}}}, func(StreamEvent) error { return nil }); err == nil {
+		t.Fatalf("expected the 400 to surface")
+	}
+	if calls != 1 {
+		t.Errorf("calls = %d, want 1", calls)
 	}
 }
