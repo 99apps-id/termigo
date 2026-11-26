@@ -2,8 +2,9 @@
 //
 // The bot displays a two-level inline menu: providers first, then a model per
 // provider. Only providers the user can actually reach appear (a key is set,
-// it is a local no-key provider, or it hosts the currently-selected model), and
-// user-defined OpenAI-compatible endpoints (e.g. StepFun) are their own group.
+// an OAuth sign-in is active, it is a local no-key provider, or it hosts the
+// currently-selected model), and user-defined OpenAI-compatible endpoints
+// (e.g. StepFun) are their own group.
 // Kept pure so it is tested without the AI stack / Tauri stores.
 
 export type ModelChoice = {
@@ -41,6 +42,11 @@ export type ModelGroupsInput = {
   providerLabel: (id: string) => string;
   current: string;
   apiKeys: Record<string, string | undefined>;
+  /** Providers with an active OAuth sign-in. OAuth providers carry no API
+   *  key, so without this they only ever appeared when one of their models
+   *  was already selected -- a signed-in ChatGPT/Claude/Muse login was
+   *  unreachable from the picker. */
+  signedInProviders?: ReadonlySet<string>;
   customEndpointKeys: Record<string, string | null | undefined>;
   customEndpoints: readonly EndpointLike[];
   isCompatModelId: (id: string) => boolean;
@@ -59,6 +65,7 @@ export function buildModelGroups(input: ModelGroupsInput): ProviderGroup[] {
     providerLabel,
     current,
     apiKeys,
+    signedInProviders,
     customEndpointKeys,
     customEndpoints,
     isCompatModelId,
@@ -78,6 +85,7 @@ export function buildModelGroups(input: ModelGroupsInput): ProviderGroup[] {
   const isActive = (provider: string): boolean => {
     if (provider === currentProvider) return true;
     if (LOCAL_PROVIDERS.has(provider)) return true;
+    if (signedInProviders?.has(provider)) return true;
     return !!apiKeys[provider];
   };
 

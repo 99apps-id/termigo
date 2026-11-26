@@ -182,11 +182,35 @@ export async function buildProviderGroups(): Promise<ProviderGroup[]> {
 
     const prefs = usePreferencesStore.getState();
 
+    // OAuth providers authenticate with a sign-in, not an API key, so the
+    // key map alone can never mark them reachable: probe the sign-ins.
+    // A provider whose token read fails is simply left out; the picker
+    // must still open for everyone else.
+    const signedInProviders = new Set<string>();
+    try {
+      const { OAUTH_PROVIDERS } = await import("../ai/config");
+      const { getOAuthAccount } = await import("../ai/lib/oauthAuth");
+      await Promise.all(
+        OAUTH_PROVIDERS.map(async (provider) => {
+          try {
+            if (await getOAuthAccount(provider)) {
+              signedInProviders.add(provider);
+            }
+          } catch {
+            // Left out of the picker, same as a signed-out provider.
+          }
+        }),
+      );
+    } catch {
+      // OAuth subsystem unavailable: fall back to key-based reachability.
+    }
+
     return buildModelGroups({
       models: MODELS,
       providerLabel,
       current: state.selectedModelId,
       apiKeys: state.apiKeys as Record<string, string | undefined>,
+      signedInProviders,
       customEndpointKeys: state.customEndpointKeys,
       customEndpoints: prefs.customEndpoints,
       isCompatModelId,

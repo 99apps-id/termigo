@@ -158,3 +158,37 @@ describe("buildModelGroups", () => {
     ]);
   });
 });
+
+describe("buildModelGroups OAuth providers", () => {
+  const oauthInput = (over: Partial<ModelGroupsInput> = {}): ModelGroupsInput =>
+    input({
+      models: [
+        { id: "gpt-5.6", provider: "openai", label: "GPT-5.6 Sol" },
+        { id: "gpt-5.3-codex", provider: "chatgpt", label: "GPT-5.3 Codex" },
+        { id: "muse-spark-1.3", provider: "muse", label: "Muse Spark 1.3" },
+      ],
+      current: "gpt-5.6",
+      apiKeys: { openai: "sk-..." },
+      ...over,
+    });
+
+  it("shows a signed-in OAuth provider models without an API key", () => {
+    const groups = buildModelGroups(
+      oauthInput({ signedInProviders: new Set(["chatgpt"]) }),
+    );
+    expect(groups.map((g) => g.key)).toContain("chatgpt");
+    expect(groups.find((g) => g.key === "chatgpt")?.models).toEqual([
+      {
+        id: "gpt-5.3-codex",
+        label: "GPT-5.3 Codex",
+        displayId: "gpt-5.3-codex",
+      },
+    ]);
+  });
+
+  it("hides OAuth providers with no sign-in", () => {
+    const groups = buildModelGroups(oauthInput());
+    expect(groups.map((g) => g.key)).not.toContain("chatgpt");
+    expect(groups.map((g) => g.key)).not.toContain("muse");
+  });
+});
